@@ -12,9 +12,11 @@
 //      in module order, then in the order written in the module's table.
 //   4. Ids live in zero-initialized slots that engine_init fills and engine_shutdown
 //      clears. Id 0 is invalid, so use before init or after shutdown asserts.
-//   5. Module state is engine-owned: startup stores it in the ModuleInstance, and each
+//   5. Module state is engine-owned: it lives in the module's arena, which engine_init
+//      creates from ModuleDesc::memory and hands to startup in the ModuleInstance. Each
 //      system receives its own module's state. Static tables never hold runtime pointers.
 #pragma once
+#include "korvid/core/arena.h"
 #include "korvid/core/phase.h"
 
 namespace kv {
@@ -36,11 +38,19 @@ struct ResourceDesc {
     const char* name;
 };
 
+// What a module needs from the memory system. Declared, not requested at runtime.
+// Which heap it lands in is the root's budgeting decision, not the module's (pending).
+struct ModuleMemoryDesc {
+    usize reserve = 0; // address space for the module's arena; pages commit as it is used
+};
+
 // The engine's record of a started module. Passed to startup/shutdown and reachable
 // from TickContext::state (for the system's own module).
 struct ModuleInstance {
     const ModuleDesc* desc    = nullptr;
-    void*             state   = nullptr; // whatever startup put here; shutdown frees it
+    void*             state   = nullptr; // startup puts it in `arena`; the arena's release frees it
+    Arena             arena;             // the module's persistent memory, if it declared any
+    Allocator         general;           // the general allocator, attributed to this module
     u32               index   = 0;       // position in the module list
     bool              started = false;
 };
@@ -52,6 +62,7 @@ struct ModuleDesc {
     Span<const SystemDesc>    systems;
     bool (*startup)(Engine& engine, ModuleInstance& self);  // may be null
     void (*shutdown)(Engine& engine, ModuleInstance& self); // may be null
+    ModuleMemoryDesc          memory = {};
 };
 
 } // namespace kv

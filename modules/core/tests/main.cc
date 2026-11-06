@@ -4,9 +4,11 @@ void test_handle(kv::TestCtx&);
 void test_event(kv::TestCtx&);
 void test_tick(kv::TestCtx&);
 void test_module(kv::TestCtx&);
+void test_memory(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
+    test_memory(c);
     test_handle(c);
     test_event(c);
     test_tick(c);

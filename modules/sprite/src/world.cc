@@ -2,6 +2,11 @@
 
 namespace kv {
 
+bool SpriteWorld::init(Allocator* columns, u32 max_entities, MemTag pool_tag) {
+    transforms.alloc = prev_transforms.alloc = sprites.alloc = columns;
+    return entities.init(max_entities, pool_tag);
+}
+
 Handle SpriteWorld::create(const Transform2& t, const Sprite& s) {
     Handle h = entities.create(0);
     // The pool grows the slot arrays in step: a fresh slot is always at the end.

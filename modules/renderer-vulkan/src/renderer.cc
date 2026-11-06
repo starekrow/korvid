@@ -7,6 +7,7 @@
 #include "korvid/render/material.h"
 #include "korvid/renderer-vulkan/module.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/arena.h"
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
@@ -61,6 +62,12 @@ struct Texture {
     u32            slot   = 0;
 };
 
+// Something to destroy once the frame that last used it has passed its fence.
+struct Garbage {
+    enum Kind : u8 { BufferKind, ImageKind, ImageViewKind, MemoryKind } kind;
+    u64 handle; // the Vulkan handle, widened
+};
+
 struct FrameInFlight {
     VkCommandPool   pool    = VK_NULL_HANDLE;
     VkCommandBuffer cmd     = VK_NULL_HANDLE;
@@ -69,6 +76,7 @@ struct FrameInFlight {
     VkDescriptorSet set     = VK_NULL_HANDLE; // binding 0 is this frame's instance buffer
     Buffer          instances;
     u32             instance_cap = 0;
+    Array<Garbage>  garbage;                  // destroyed after this frame's fence
 };
 
 struct Swapchain {
@@ -91,6 +99,7 @@ struct SortKey {
 
 struct Renderer {
     Renderer**  owner_slot = nullptr; // the module state's pointer to this; nulled on destroy
+    Allocator*  general    = nullptr; // the owning module's attributed general allocator
     SDL_Window* window     = nullptr;
     bool        validation = false;
     bool        vsync      = true;
@@ -122,9 +131,9 @@ struct Renderer {
     u32           frame_index = 0;
     u64           frame_count = 0;
 
-    // CPU-side scratch, reused every frame.
-    Array<SortKey>     keys;
-    Array<GpuInstance> staging;
+    // Per-frame CPU data, in the calling thread's scratch (frame lifetime).
+    Span<SortKey>     keys;
+    Span<GpuInstance> staging;
 
     u32 validation_errors   = 0;
     u32 validation_warnings = 0;
@@ -415,6 +424,31 @@ void destroy_buffer(Renderer* r, Buffer& b) {
     if (b.buffer) vkDestroyBuffer(r->device, b.buffer, nullptr);
     if (b.memory) vkFreeMemory(r->device, b.memory, nullptr);
     b = Buffer{};
+}
+
+// Deferred destruction: queued on the frame being recorded, run after its fence passes,
+// so nothing the GPU may still read is freed early. The PRD's rule, as a queue.
+void defer_destroy(Renderer* r, Garbage::Kind kind, u64 handle) {
+    if (handle) r->frames[r->frame_index].garbage.push(Garbage{kind, handle});
+}
+
+void defer_destroy_buffer(Renderer* r, Buffer& b) {
+    if (b.mapped) vkUnmapMemory(r->device, b.memory);
+    defer_destroy(r, Garbage::BufferKind, (u64)b.buffer);
+    defer_destroy(r, Garbage::MemoryKind, (u64)b.memory);
+    b = Buffer{};
+}
+
+void run_garbage(Renderer* r, FrameInFlight& f) {
+    for (const Garbage& g : f.garbage) {
+        switch (g.kind) {
+        case Garbage::BufferKind:    vkDestroyBuffer(r->device, (VkBuffer)g.handle, nullptr); break;
+        case Garbage::ImageKind:     vkDestroyImage(r->device, (VkImage)g.handle, nullptr); break;
+        case Garbage::ImageViewKind: vkDestroyImageView(r->device, (VkImageView)g.handle, nullptr); break;
+        case Garbage::MemoryKind:    vkFreeMemory(r->device, (VkDeviceMemory)g.handle, nullptr); break;
+        }
+    }
+    f.garbage.clear();
 }
 
 // Host-visible, coherent, persistently mapped.
@@ -727,17 +761,17 @@ bool load_shader(Renderer* r, const char* name) {
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (len <= 0 || (len % 4) != 0) { fclose(f); KV_ERROR("vulkan", "bad SPIR-V size in '%s'", path); return false; }
-    u32* words = (u32*)mem_alloc((usize)len);
-    bool ok = fread(words, 1, (usize)len, f) == (usize)len;
+    MemScope scope; // the words are needed only until the module is created
+    u32* words = arena_push_n<u32>(*scope.arena, (u32)(len / 4));
+    bool ok = words && fread(words, 1, (usize)len, f) == (usize)len;
     fclose(f);
-    if (!ok) { mem_free(words); KV_ERROR("vulkan", "short read on '%s'", path); return false; }
+    if (!ok) { KV_ERROR("vulkan", "short read on '%s'", path); return false; }
 
     VkShaderModuleCreateInfo ci{};
     ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     ci.codeSize = (usize)len;
     ci.pCode    = words;
     VkResult res = vkCreateShaderModule(r->device, &ci, nullptr, &r->shader);
-    mem_free(words);
     if (res != VK_SUCCESS) { KV_ERROR("vulkan", "vkCreateShaderModule: %s", vk_result_name(res)); return false; }
     KV_INFO("vulkan", "shader '%s' loaded (%ld bytes)", name, len);
     return true;
@@ -1013,6 +1047,8 @@ bool create_frames(Renderer* r) {
 void destroy_frames(Renderer* r) {
     for (u32 i = 0; i < kFramesInFlight; ++i) {
         FrameInFlight& f = r->frames[i];
+        run_garbage(r, f); // the device is idle here
+        f.garbage.free();
         destroy_buffer(r, f.instances);
         if (f.acquire) vkDestroySemaphore(r->device, f.acquire, nullptr);
         if (f.fence)   vkDestroyFence(r->device, f.fence, nullptr);
@@ -1021,12 +1057,14 @@ void destroy_frames(Renderer* r) {
     }
 }
 
-// Grows a frame's instance buffer. Safe once the frame's fence has been waited on.
+// Grows a frame's instance buffer. The old one is queued for destruction after this
+// frame's fence rather than freed now, so the growth does not depend on where in the
+// frame it happens.
 bool ensure_instance_capacity(Renderer* r, FrameInFlight& f, u32 needed) {
     if (needed <= f.instance_cap) return true;
     u32 cap = f.instance_cap ? f.instance_cap : kInitialInstances;
     while (cap < needed) cap *= 2;
-    destroy_buffer(r, f.instances);
+    defer_destroy_buffer(r, f.instances);
     if (!create_host_buffer(r, sizeof(GpuInstance) * cap, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, f.instances))
         return false;
     f.instance_cap = cap;
@@ -1049,15 +1087,19 @@ int compare_keys(const void* a, const void* b) {
 }
 
 // Sorts by layer then blend mode, interpolates by alpha and writes GPU instances in order.
+// Keys and staging are scratch: they live until the next frame's engine_frame.
 void build_instances(Renderer* r, const RenderFrame& frame) {
-    r->keys.clear();
-    r->staging.clear();
-    for (u32 i = 0; i < frame.packets.len; ++i) {
+    Arena& scratch = *mem_scratch_arena();
+    u32 n = frame.packets.len;
+    r->keys    = Span<SortKey>(arena_push_n<SortKey>(scratch, n), n);
+    r->staging = Span<GpuInstance>(arena_push_n<GpuInstance>(scratch, n), n);
+    for (u32 i = 0; i < n; ++i) {
         const RenderPacket& p = frame.packets[i];
-        r->keys.push(SortKey{p.layer, (u32)packet_blend(p), i});
+        r->keys[i] = SortKey{p.layer, (u32)packet_blend(p), i};
     }
-    if (r->keys.len > 1) qsort(r->keys.data, r->keys.len, sizeof(SortKey), compare_keys);
+    if (n > 1) qsort(r->keys.data, n, sizeof(SortKey), compare_keys);
 
+    u32 out = 0;
     for (const SortKey& k : r->keys) {
         const RenderPacket& p = frame.packets[k.packet];
         Placement2 at = lerp(p.prev, p.cur, frame.alpha);
@@ -1070,7 +1112,7 @@ void build_instances(Renderer* r, const RenderFrame& frame) {
         g.tint[0] = p.tint.r; g.tint[1] = p.tint.g; g.tint[2] = p.tint.b; g.tint[3] = p.tint.a;
         g.tex[0] = packet_texture(p);
         g.tex[1] = g.tex[2] = g.tex[3] = 0;
-        r->staging.push(g);
+        r->staging[out++] = g;
     }
 }
 
@@ -1188,10 +1230,13 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
         KV_ERROR("vulkan", "a renderer already exists");
         return nullptr;
     }
-    Renderer* r = (Renderer*)mem_alloc(sizeof(Renderer));
+    Allocator* ga = owner->general;
+    Renderer* r = (Renderer*)ga->alloc(ga, sizeof(Renderer), alignof(Renderer));
     *r = Renderer{}; // plain data: default member values, no constructor to run
-    r->owner_slot  = &owner->renderer;
+    r->general      = ga;
+    r->owner_slot   = &owner->renderer;
     owner->renderer = r;
+    for (FrameInFlight& f : r->frames) f.garbage.alloc = ga;
     r->window      = (SDL_Window*)desc.native_window;
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;
@@ -1236,12 +1281,11 @@ void renderer_destroy(Renderer* r) {
     if (r->surface)   SDL_Vulkan_DestroySurface(r->instance, r->surface, nullptr);
     if (r->messenger) vkDestroyDebugUtilsMessengerEXT(r->instance, r->messenger, nullptr);
     if (r->instance)  vkDestroyInstance(r->instance, nullptr);
-    r->keys.free();
-    r->staging.free();
     KV_INFO("vulkan", "renderer down after %llu frames; %u validation errors, %u warnings",
             (unsigned long long)r->frame_count, r->validation_errors, r->validation_warnings);
     if (r->owner_slot) *r->owner_slot = nullptr;
-    mem_free(r);
+    Allocator* ga = r->general;
+    ga->free(ga, r, sizeof(Renderer));
 }
 
 void renderer_resize(Renderer* r, u32 width, u32 height) {
@@ -1255,8 +1299,10 @@ bool renderer_render(Renderer* r, const RenderFrame& frame) {
     if (!r) return false;
     FrameInFlight& f = r->frames[r->frame_index];
 
-    // Wait for this slot's previous frame; its buffers are free to reuse after this.
+    // Wait for this slot's previous frame; its buffers are free to reuse after this,
+    // and whatever that frame queued for destruction can go.
     VK_CHECK(vkWaitForFences(r->device, 1, &f.fence, VK_TRUE, UINT64_MAX));
+    run_garbage(r, f);
 
     if (r->swapchain_dirty && !recreate_swapchain(r)) return false;
     if (!r->swapchain.handle) return false; // zero-size window

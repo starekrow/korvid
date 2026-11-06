@@ -5,9 +5,9 @@
 // exits through the state machine; --run-seconds N exits by itself (smoke test). The
 // game calls the render interface only, never a graphics API.
 #include "korvid/hello/module.h"
+#include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
-#include "korvid/core/memory.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/events.h"
 #include "korvid/platform/host_window.h"
@@ -52,7 +52,7 @@ struct App {
     Input*              input    = nullptr; // the platform module's
     SpriteWorld*        world    = nullptr; // the sprite module's
     Renderer*           renderer = nullptr; // the renderer-vulkan module's
-    Array<RenderPacket> packets;
+    u32                 packets_last_frame = 0;
     u32                 presented_w = 0, presented_h = 0; // size the renderer was last told
 
     // game
@@ -188,9 +188,9 @@ void hello_sim(TickContext& ctx) {
 // ---- module startup and shutdown ----------------------------------------------
 
 bool hello_startup(Engine& engine, ModuleInstance& self) {
-    App* app = (App*)mem_alloc(sizeof(App));
-    *app = App{};
-    self.state = app; // shutdown frees it even if the rest of this fails
+    App* app = arena_push<App>(self.arena);
+    if (!app) return false;
+    self.state = app;
 
     app->input = platform_input(engine);
     app->world = sprite_world(engine);
@@ -219,14 +219,12 @@ bool hello_startup(Engine& engine, ModuleInstance& self) {
     return app->renderer != nullptr;
 }
 
-// Only hello's own state. The window and renderer end with their modules, later in
-// the shutdown order because they come earlier in the module list.
+// Nothing of hello's own to free: its state lives in the module arena. The window and
+// renderer end with their modules, later in the shutdown order because they come
+// earlier in the module list.
 void hello_shutdown(Engine&, ModuleInstance& self) {
     App* app = (App*)self.state;
-    if (!app) return;
-    KV_INFO("hello", "%llu key edges seen", (unsigned long long)app->key_edges);
-    app->packets.free();
-    mem_free(app);
+    if (app) KV_INFO("hello", "%llu key edges seen", (unsigned long long)app->key_edges);
 }
 
 constinit const char* const k_sim_reads[]  = {"input.state"};
@@ -250,10 +248,13 @@ void render_frame(Engine& engine, App& app) {
         app.presented_h = h;
     }
 
-    extract_sprites(*app.world, app.packets);
+    // Packets live for this frame only: scratch, reset at the top of the next engine_frame.
+    Array<RenderPacket> packets = array_in<RenderPacket>(mem_scratch());
+    extract_sprites(*app.world, packets);
+    app.packets_last_frame = packets.len;
 
     RenderFrame frame;
-    frame.packets = app.packets.span();
+    frame.packets = packets.span();
     frame.alpha   = engine.clock.alpha();
     f32 vw = (f32)w, vh = (f32)h;
     frame.view    = rect2{-vw * 0.5f, -vh * 0.5f, vw, vh}; // one world unit per pixel, origin centered
@@ -287,7 +288,7 @@ void run_frame_loop(Engine& engine, App& app, const Options& opt) {
         if (now >= next_report) {
             KV_INFO("hello", "%u fps, tick %llu, alpha %.2f, %u packets, state %s, %ux%u, %s",
                     frames_in_window, (unsigned long long)engine.clock.tick_count,
-                    engine.clock.alpha(), app.packets.len, state_name(app.state),
+                    engine.clock.alpha(), app.packets_last_frame, state_name(app.state),
                     app.window->width(), app.window->height(),
                     app.window->focused() ? "focused" : "unfocused");
             frames_in_window = 0;
@@ -304,6 +305,7 @@ void run_frame_loop(Engine& engine, App& app, const Options& opt) {
 
 KV_MODULE_DEFINE(hello_module) = {
     "hello", {}, {}, k_systems, hello_startup, hello_shutdown,
+    {.reserve = 64 * 1024},
 };
 
 } // namespace kv
@@ -314,11 +316,12 @@ int main(int argc, char** argv) {
 
     Engine engine;
     if (!engine_init(engine, kv_module_list())) {
-        engine_shutdown(engine);
+        mem_shutdown();
         return 1;
     }
     App* app = (App*)engine_module_state(engine, "hello");
     run_frame_loop(engine, *app, g_options);
     engine_shutdown(engine);
+    mem_shutdown();
     return 0;
 }

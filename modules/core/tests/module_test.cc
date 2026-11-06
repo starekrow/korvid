@@ -2,6 +2,7 @@
 // ids in list-then-declaration order, schedule in phase/module/declaration order,
 // startup in list order and shutdown in reverse, rollback on failure, and the four
 // rejections (duplicate module, event, system, resource; unknown resource reference).
+#include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/module.h"
 #include "korvid/core/test.h"
@@ -23,23 +24,27 @@ void sys_first_input(TickContext&)  { trace("1i "); }
 void sys_first_sim(TickContext&)    { trace("1s "); }
 void sys_second_input(TickContext&) { trace("2i "); }
 void sys_second_sim_a(TickContext&) { trace("2sa "); }
+struct SecondState { u32 ticks; u16 owner_seen; void* scratch_block; };
+
 void sys_second_sim_b(TickContext& ctx) {
     trace("2sb ");
-    *(u32*)ctx.state += 1; // the system gets its own module's state
+    SecondState* s = (SecondState*)ctx.state; // the system gets its own module's state
+    s->ticks += 1;
+    s->owner_seen = mem_owner();              // attribution follows the schedule
+    s->scratch_block = mem_alloc(64);         // tagged to module 2, freed in shutdown
 }
-
-struct SecondState { u32 ticks; };
 
 bool first_startup(Engine&, ModuleInstance&)  { trace("up1 "); return true; }
 void first_shutdown(Engine&, ModuleInstance&) { trace("down1 "); }
 bool second_startup(Engine&, ModuleInstance& self) {
     trace("up2 ");
-    SecondState* s = (SecondState*)mem_alloc(sizeof(SecondState));
-    s->ticks = 0;
-    self.state = s;
-    return true;
+    self.state = arena_push<SecondState>(self.arena); // declared memory: the arena exists
+    return self.state != nullptr;
 }
-void second_shutdown(Engine&, ModuleInstance& self) { trace("down2 "); mem_free(self.state); }
+void second_shutdown(Engine&, ModuleInstance& self) {
+    trace("down2 ");
+    mem_free(((SecondState*)self.state)->scratch_block);
+}
 bool failing_startup(Engine&, ModuleInstance&) { trace("upfail "); return false; }
 
 constinit const EventTypeDesc k_first_events[]  = {KV_EVENT(EvA), KV_EVENT(EvB)};
@@ -60,7 +65,8 @@ constinit const SystemDesc k_second_systems[] = {
 };
 
 KV_MODULE_DEFINE(k_first)  = {"first",  k_first_events,  k_first_res,  k_first_systems,  first_startup,  first_shutdown};
-KV_MODULE_DEFINE(k_second) = {"second", k_second_events, k_second_res, k_second_systems, second_startup, second_shutdown};
+KV_MODULE_DEFINE(k_second) = {"second", k_second_events, k_second_res, k_second_systems, second_startup, second_shutdown,
+                              {.reserve = 1u << 20}};
 KV_MODULE_DEFINE(k_failing) = {"failing", {}, {}, {}, failing_startup, nullptr};
 KV_MODULE_DEFINE(k_first_again) = {"first", {}, {}, {}, nullptr, nullptr};
 
@@ -76,6 +82,9 @@ KV_MODULE_DEFINE(k_dup_resource) = {"dupresource", {}, k_dup_res, {}, nullptr, n
 constinit const char* const k_bad_reads[] = {"nowhere.store"};
 constinit const SystemDesc k_bad_ref_systems[] = {{"bad.sim", Phase::Sim, sys_first_sim, k_bad_reads}};
 KV_MODULE_DEFINE(k_bad_ref) = {"badref", {}, {}, k_bad_ref_systems, nullptr, nullptr};
+
+// More modules than memory accounting can attribute: rejected before anything starts.
+constinit const ModuleDesc k_many[65] = {{"m0", {}, {}, {}, nullptr, nullptr}, {"m1", {}, {}, {}, nullptr, nullptr}, {"m2", {}, {}, {}, nullptr, nullptr}, {"m3", {}, {}, {}, nullptr, nullptr}, {"m4", {}, {}, {}, nullptr, nullptr}, {"m5", {}, {}, {}, nullptr, nullptr}, {"m6", {}, {}, {}, nullptr, nullptr}, {"m7", {}, {}, {}, nullptr, nullptr}, {"m8", {}, {}, {}, nullptr, nullptr}, {"m9", {}, {}, {}, nullptr, nullptr}, {"m10", {}, {}, {}, nullptr, nullptr}, {"m11", {}, {}, {}, nullptr, nullptr}, {"m12", {}, {}, {}, nullptr, nullptr}, {"m13", {}, {}, {}, nullptr, nullptr}, {"m14", {}, {}, {}, nullptr, nullptr}, {"m15", {}, {}, {}, nullptr, nullptr}, {"m16", {}, {}, {}, nullptr, nullptr}, {"m17", {}, {}, {}, nullptr, nullptr}, {"m18", {}, {}, {}, nullptr, nullptr}, {"m19", {}, {}, {}, nullptr, nullptr}, {"m20", {}, {}, {}, nullptr, nullptr}, {"m21", {}, {}, {}, nullptr, nullptr}, {"m22", {}, {}, {}, nullptr, nullptr}, {"m23", {}, {}, {}, nullptr, nullptr}, {"m24", {}, {}, {}, nullptr, nullptr}, {"m25", {}, {}, {}, nullptr, nullptr}, {"m26", {}, {}, {}, nullptr, nullptr}, {"m27", {}, {}, {}, nullptr, nullptr}, {"m28", {}, {}, {}, nullptr, nullptr}, {"m29", {}, {}, {}, nullptr, nullptr}, {"m30", {}, {}, {}, nullptr, nullptr}, {"m31", {}, {}, {}, nullptr, nullptr}, {"m32", {}, {}, {}, nullptr, nullptr}, {"m33", {}, {}, {}, nullptr, nullptr}, {"m34", {}, {}, {}, nullptr, nullptr}, {"m35", {}, {}, {}, nullptr, nullptr}, {"m36", {}, {}, {}, nullptr, nullptr}, {"m37", {}, {}, {}, nullptr, nullptr}, {"m38", {}, {}, {}, nullptr, nullptr}, {"m39", {}, {}, {}, nullptr, nullptr}, {"m40", {}, {}, {}, nullptr, nullptr}, {"m41", {}, {}, {}, nullptr, nullptr}, {"m42", {}, {}, {}, nullptr, nullptr}, {"m43", {}, {}, {}, nullptr, nullptr}, {"m44", {}, {}, {}, nullptr, nullptr}, {"m45", {}, {}, {}, nullptr, nullptr}, {"m46", {}, {}, {}, nullptr, nullptr}, {"m47", {}, {}, {}, nullptr, nullptr}, {"m48", {}, {}, {}, nullptr, nullptr}, {"m49", {}, {}, {}, nullptr, nullptr}, {"m50", {}, {}, {}, nullptr, nullptr}, {"m51", {}, {}, {}, nullptr, nullptr}, {"m52", {}, {}, {}, nullptr, nullptr}, {"m53", {}, {}, {}, nullptr, nullptr}, {"m54", {}, {}, {}, nullptr, nullptr}, {"m55", {}, {}, {}, nullptr, nullptr}, {"m56", {}, {}, {}, nullptr, nullptr}, {"m57", {}, {}, {}, nullptr, nullptr}, {"m58", {}, {}, {}, nullptr, nullptr}, {"m59", {}, {}, {}, nullptr, nullptr}, {"m60", {}, {}, {}, nullptr, nullptr}, {"m61", {}, {}, {}, nullptr, nullptr}, {"m62", {}, {}, {}, nullptr, nullptr}, {"m63", {}, {}, {}, nullptr, nullptr}, {"m64", {}, {}, {}, nullptr, nullptr}};
 
 bool init_fails(TestCtx& c, Span<const ModuleDesc* const> list) {
     Engine e;
@@ -119,7 +128,19 @@ void test_module(kv::TestCtx& c) {
     g_trace[0] = 0;
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 0);
     KV_CHECK(c, strcmp(g_trace, "1i 2i 1s 2sa 2sb ") == 0);
-    KV_CHECK(c, ((SecondState*)engine_module_state(e, "second"))->ticks == 1);
+    SecondState* second = (SecondState*)engine_module_state(e, "second");
+    KV_CHECK(c, second->ticks == 1);
+
+    // Memory: the module without a memory table has no arena; the one with it has its
+    // state inside the arena, and what its system allocated is attributed to it.
+    KV_CHECK(c, engine_module(e, "first")->arena.base == nullptr);
+    Arena& arena = engine_module(e, "second")->arena;
+    KV_CHECK(c, arena.base && (u8*)second >= arena.base && (u8*)second < arena.base + arena.used);
+    KV_CHECK(c, arena.a.tag.module == 2 && arena.a.tag.category == 0 && arena.a.tag.heap == 0);
+    KV_CHECK(c, mem_stats_module(2).committed_bytes == arena.committed);
+    KV_CHECK(c, second->owner_seen == 2);
+    KV_CHECK(c, mem_stats_module(2).live_allocs == 1 && mem_stats_module(2).live_bytes == 64);
+    KV_CHECK(c, mem_owner() == 0); // reset after the tick
 
     // Events registered through the list work on the engine's bus.
     e.events.emit(EvC{7});
@@ -133,6 +154,8 @@ void test_module(kv::TestCtx& c) {
     KV_CHECK(c, strcmp(g_trace, "down2 down1 ") == 0);
     KV_CHECK(c, EventType<EvA>::id == 0 && EventType<EvC>::id == 0);
     KV_CHECK(c, e.modules.len == 0 && e.phases.system_count() == 0);
+    KV_CHECK(c, mem_stats_module(2).live_allocs == 0);
+    KV_CHECK(c, mem_stats_module(2).committed_bytes == 0); // the arena went with the module
 
     // The same list initializes again with the same ids: deterministic.
     KV_CHECK(c, engine_init(e, list));
@@ -156,4 +179,9 @@ void test_module(kv::TestCtx& c) {
     KV_CHECK(c, init_fails(c, dup_system));
     KV_CHECK(c, init_fails(c, dup_resource));
     KV_CHECK(c, init_fails(c, bad_ref));
+
+    const ModuleDesc* many[65];
+    for (u32 i = 0; i < 65; ++i) many[i] = &k_many[i];
+    KV_CHECK(c, init_fails(c, Span<const ModuleDesc* const>(many, 65)));
+    KV_CHECK(c, !init_fails(c, Span<const ModuleDesc* const>(many, 64)));
 }

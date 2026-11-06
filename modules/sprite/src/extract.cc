@@ -5,6 +5,7 @@ namespace kv {
 
 void extract_sprites(const SpriteWorld& world, Array<RenderPacket>& out) {
     out.clear();
+    out.reserve(world.live());
     u32 n = world.entities.capacity();
     for (u32 i = 0; i < n; ++i) {
         if (!world.entities.alive[i]) continue;

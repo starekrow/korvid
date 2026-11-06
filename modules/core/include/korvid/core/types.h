@@ -4,6 +4,29 @@
 #include <stdint.h>
 #include <stddef.h>
 
+// Three configs. KV_DEBUG: everything checked. KV_DEV: the build people run all day;
+// cheap invariants (ownership, alignment, canaries, poison) stay on. Ship: neither.
+#ifndef KV_DEBUG
+#define KV_DEBUG 0
+#endif
+#ifndef KV_DEV
+#define KV_DEV KV_DEBUG
+#endif
+
+// KV_ASSERT: debug only. KV_VERIFY: debug and dev; only ship drops it.
+namespace kv { [[noreturn]] void assert_fail(const char* expr, const char* file, int line); }
+
+#if KV_DEBUG
+#define KV_ASSERT(x) do { if (!(x)) ::kv::assert_fail(#x, __FILE__, __LINE__); } while (0)
+#else
+#define KV_ASSERT(x) ((void)0)
+#endif
+#if KV_DEV
+#define KV_VERIFY(x) do { if (!(x)) ::kv::assert_fail(#x, __FILE__, __LINE__); } while (0)
+#else
+#define KV_VERIFY(x) ((void)0)
+#endif
+
 namespace kv {
 
 typedef uint8_t  u8;
@@ -32,8 +55,8 @@ struct Span {
     template <class U, class = decltype((T*)(U*)nullptr)>
     constexpr Span(Span<U> o) : data(o.data), len(o.len) {}
 
-    T&       operator[](u32 i)       { return data[i]; }
-    const T& operator[](u32 i) const { return data[i]; }
+    T&       operator[](u32 i)       { KV_VERIFY(i < len); return data[i]; }
+    const T& operator[](u32 i) const { KV_VERIFY(i < len); return data[i]; }
     T*       begin()       { return data; }
     T*       end()         { return data + len; }
     const T* begin() const { return data; }
@@ -41,19 +64,7 @@ struct Span {
     bool     empty() const { return len == 0; }
 };
 
-[[noreturn]] void assert_fail(const char* expr, const char* file, int line);
-
 } // namespace kv
-
-#ifndef KV_DEBUG
-#define KV_DEBUG 0
-#endif
-
-#if KV_DEBUG
-#define KV_ASSERT(x) do { if (!(x)) ::kv::assert_fail(#x, __FILE__, __LINE__); } while (0)
-#else
-#define KV_ASSERT(x) ((void)0)
-#endif
 
 #define KV_COUNTOF(a) ((::kv::u32)(sizeof(a) / sizeof((a)[0])))
 #define KV_UNUSED(x) ((void)(x))

@@ -1,6 +1,7 @@
 // The registry. Reads the module list once, in order, and turns the declarations into
 // ids, a schedule and started instances. Every check here names what clashed.
 #include "korvid/core/engine.h"
+#include "korvid/core/arena.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include <stdio.h>
@@ -13,6 +14,10 @@ namespace {
 bool names_equal(const char* a, const char* b) { return strcmp(a, b) == 0; }
 
 bool check_module_names(Span<const ModuleDesc* const> modules) {
+    if (modules.len > KV_MEM_MAX_MODULES) {
+        KV_ERROR("engine", "%u modules; memory accounting supports %u", modules.len, KV_MEM_MAX_MODULES);
+        return false;
+    }
     for (u32 i = 0; i < modules.len; ++i) {
         const ModuleDesc* m = modules[i];
         if (!m || !m->name || !m->name[0]) {
@@ -153,6 +158,16 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
         log_schedule(e);
         for (ModuleInstance& inst : e.modules) {
             const ModuleDesc& m = *inst.desc;
+            // Allocations made from here on are the module's: its arena, and anything it
+            // takes from the general allocator during startup.
+            mem_set_owner((u16)(inst.index + 1));
+            MemTag tag;
+            tag.module = (u16)(inst.index + 1);
+            mem_general_tagged(inst.general, tag, m.name);
+            if (m.memory.reserve && !arena_create(inst.arena, m.memory.reserve, m.name, tag)) {
+                ok = false;
+                break;
+            }
             if (m.startup && !m.startup(e, inst)) {
                 KV_ERROR("engine", "module '%s' failed to start", m.name);
                 ok = false;
@@ -161,6 +176,7 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
             inst.started = true;
             KV_INFO("engine", "module '%s' up", m.name);
         }
+        mem_set_owner(0);
     }
     if (!ok) engine_shutdown(e);
     return ok;
@@ -169,24 +185,36 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
 void engine_shutdown(Engine& e) {
     for (u32 i = e.modules.len; i-- > 0;) {
         ModuleInstance& inst = e.modules[i];
-        if (!inst.started) continue;
-        if (inst.desc->shutdown) inst.desc->shutdown(e, inst);
+        mem_set_owner((u16)(inst.index + 1));
+        if (inst.started && inst.desc->shutdown) inst.desc->shutdown(e, inst);
+        if (inst.started) KV_INFO("engine", "module '%s' down", inst.desc->name);
+        if (inst.arena.base)
+            KV_INFO("engine", "module '%s' arena: %llu bytes used, %llu peak, %llu committed of %llu",
+                    inst.desc->name, (unsigned long long)inst.arena.used, (unsigned long long)inst.arena.peak,
+                    (unsigned long long)inst.arena.committed, (unsigned long long)inst.arena.reserved);
         inst.started = false;
         inst.state   = nullptr;
-        KV_INFO("engine", "module '%s' down", inst.desc->name);
+        arena_destroy(inst.arena); // the module's state goes with it
+        mem_set_owner(0);
     }
     for (const ModuleInstance& inst : e.modules) event_types_unregister(inst.desc->events);
     e.phases.free();
     e.events.free();
     e.resources.free();
+    // The leak report wants module names; take them before the list goes.
+    const char* names[KV_MEM_MAX_MODULES];
+    u32 count = e.modules.len < KV_MEM_MAX_MODULES ? e.modules.len : KV_MEM_MAX_MODULES;
+    for (u32 i = 0; i < count; ++i) names[i] = e.modules[i].desc->name;
     e.modules.free();
     e.event_type_count = 0;
     KV_INFO("engine", "shutdown after %llu frames, %llu ticks, %llu live allocations",
             (unsigned long long)e.frame_count, (unsigned long long)e.clock.tick_count,
             (unsigned long long)mem_live_allocations());
+    if (mem_live_allocations()) mem_report(names, count);
 }
 
 u32 engine_frame(Engine& e, f64 frame_dt) {
+    mem_scratch_reset(); // frame lifetime: everything the last frame put in scratch is gone
     ++e.frame_count;
     u64 first_tick = e.clock.tick_count;
     u32 ticks = e.clock.advance(frame_dt);

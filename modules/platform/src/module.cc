@@ -2,7 +2,6 @@
 #include "korvid/platform/events.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
-#include "korvid/core/memory.h"
 #include <SDL3/SDL.h>
 
 namespace kv {
@@ -19,16 +18,13 @@ bool platform_startup(Engine&, ModuleInstance& self) {
     KV_INFO("platform", "SDL %d.%d.%d, video driver '%s'",
             SDL_VERSIONNUM_MAJOR(ver), SDL_VERSIONNUM_MINOR(ver), SDL_VERSIONNUM_MICRO(ver),
             SDL_GetCurrentVideoDriver());
-    PlatformState* s = (PlatformState*)mem_alloc(sizeof(PlatformState));
-    *s = PlatformState{};
-    self.state = s;
-    return true;
+    self.state = arena_push<PlatformState>(self.arena);
+    return self.state != nullptr;
 }
 
 void platform_shutdown(Engine&, ModuleInstance& self) {
     PlatformState* s = (PlatformState*)self.state;
     if (s) s->window.close(); // the service ends with the module, whoever opened it
-    mem_free(s);
     SDL_Quit();
 }
 
@@ -54,6 +50,7 @@ constinit const SystemDesc   k_systems[] = {
 
 KV_MODULE_DEFINE(platform_module) = {
     "platform", k_events, k_resources, k_systems, platform_startup, platform_shutdown,
+    {.reserve = 64 * 1024},
 };
 
 static PlatformState* state(Engine& e) {

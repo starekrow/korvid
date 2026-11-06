@@ -1,6 +1,7 @@
 // Korvid sprite: the sprite world. Entities are generational slots; each component is
 // its own array indexed by slot (SoA per component type). A stale handle gets null.
 #pragma once
+#include "korvid/core/array.h"
 #include "korvid/core/pool.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
@@ -12,6 +13,10 @@ struct SpriteWorld {
     Array<Transform2> transforms;      // current tick, by slot
     Array<Transform2> prev_transforms; // previous tick, by slot
     Array<Sprite>     sprites;         // by slot
+
+    // Optional: who the storage is attributed to, and how many slots to reserve.
+    // Without it, the first create() uses the general allocator and the default size.
+    bool init(Allocator* columns, u32 max_entities, MemTag pool_tag);
 
     Handle create(const Transform2& t, const Sprite& s);
     bool   destroy(Handle h);

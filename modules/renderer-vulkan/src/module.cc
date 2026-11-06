@@ -4,7 +4,6 @@
 #include "korvid/renderer-vulkan/module.h"
 #include "korvid/render/renderer.h"
 #include "korvid/core/log.h"
-#include "korvid/core/memory.h"
 #include "vk_funcs.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -32,8 +31,9 @@ bool renderer_vulkan_startup(Engine&, ModuleInstance& self) {
         SDL_Vulkan_UnloadLibrary();
         return false;
     }
-    RendererVulkanState* s = (RendererVulkanState*)mem_alloc(sizeof(RendererVulkanState));
-    *s = RendererVulkanState{};
+    RendererVulkanState* s = arena_push<RendererVulkanState>(self.arena);
+    if (!s) return false;
+    s->general = &self.general;
     self.state = s;
     return true;
 }
@@ -41,7 +41,6 @@ bool renderer_vulkan_startup(Engine&, ModuleInstance& self) {
 void renderer_vulkan_shutdown(Engine&, ModuleInstance& self) {
     RendererVulkanState* s = (RendererVulkanState*)self.state;
     if (s && s->renderer) renderer_destroy(s->renderer); // clears s->renderer
-    mem_free(s);
     vk_unload();
     SDL_Vulkan_UnloadLibrary();
 }
@@ -50,6 +49,7 @@ void renderer_vulkan_shutdown(Engine&, ModuleInstance& self) {
 
 KV_MODULE_DEFINE(renderer_vulkan_module) = {
     "renderer-vulkan", {}, {}, {}, renderer_vulkan_startup, renderer_vulkan_shutdown,
+    {.reserve = 64 * 1024},
 };
 
 } // namespace kv

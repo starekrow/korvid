@@ -9,6 +9,8 @@ ar = ar
 slangc = slangc
 builddir = build
 
+# Configs (kormake.lua): debug = -DKV_DEBUG=1 (which implies KV_DEV), dev = -DKV_DEV=1
+# with optimization, ship = neither. Only debug is wired here until kormake exists.
 cxxflags = -std=c++20 -g -O0 -DKV_DEBUG=1 -fno-exceptions -fno-rtti $
            -fno-strict-aliasing -Wall -Wextra -Werror
 sdl_libs = -lSDL3
@@ -64,10 +66,17 @@ build $builddir/obj/core/engine.o: cxx modules/core/src/engine.cc
   includes = $inc_core
 build $builddir/obj/core/posix/time.o: cxx modules/core/src/posix/time.cc
   includes = $inc_core
+build $builddir/obj/core/posix/os_memory.o: cxx modules/core/src/posix/os_memory.cc
+  includes = $inc_core
+build $builddir/obj/core/arena.o: cxx modules/core/src/arena.cc
+  includes = $inc_core
+build $builddir/obj/core/thread.o: cxx modules/core/src/thread.cc
+  includes = $inc_core
 
 build $builddir/lib/libkv_core.a: ar $builddir/obj/core/memory.o $
     $builddir/obj/core/log.o $builddir/obj/core/event.o $builddir/obj/core/tick.o $
-    $builddir/obj/core/phase.o $builddir/obj/core/engine.o $builddir/obj/core/posix/time.o
+    $builddir/obj/core/phase.o $builddir/obj/core/engine.o $builddir/obj/core/posix/time.o $
+    $builddir/obj/core/posix/os_memory.o $builddir/obj/core/arena.o $builddir/obj/core/thread.o
 
 build $builddir/obj/core/tests/main.o: cxx modules/core/tests/main.cc
   includes = $inc_core
@@ -79,11 +88,13 @@ build $builddir/obj/core/tests/tick_test.o: cxx modules/core/tests/tick_test.cc
   includes = $inc_core
 build $builddir/obj/core/tests/module_test.o: cxx modules/core/tests/module_test.cc
   includes = $inc_core
+build $builddir/obj/core/tests/memory_test.o: cxx modules/core/tests/memory_test.cc
+  includes = $inc_core
 
 build $builddir/bin/core_tests: link $builddir/obj/core/tests/main.o $
     $builddir/obj/core/tests/handle_test.o $builddir/obj/core/tests/event_test.o $
     $builddir/obj/core/tests/tick_test.o $builddir/obj/core/tests/module_test.o $
-    $builddir/lib/libkv_core.a
+    $builddir/obj/core/tests/memory_test.o $builddir/lib/libkv_core.a
 
 # ---- platform --------------------------------------------------------------
 build $builddir/obj/platform/module.o: cxx modules/platform/src/module.cc

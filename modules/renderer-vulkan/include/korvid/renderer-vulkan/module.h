@@ -11,7 +11,8 @@ struct Renderer;
 KV_MODULE_DECLARE(renderer_vulkan_module);
 
 struct RendererVulkanState {
-    Renderer* renderer = nullptr; // one per process: the entry point tables are global
+    Renderer*  renderer = nullptr; // one per process: the entry point tables are global
+    Allocator* general  = nullptr; // the module's attributed general allocator
 };
 
 } // namespace kv

@@ -1,23 +1,21 @@
 #include "korvid/sprite/module.h"
 #include "korvid/sprite/world.h"
 #include "korvid/core/engine.h"
-#include "korvid/core/memory.h"
 
 namespace kv {
 
 namespace {
 
 bool sprite_startup(Engine&, ModuleInstance& self) {
-    SpriteWorld* w = (SpriteWorld*)mem_alloc(sizeof(SpriteWorld));
-    *w = SpriteWorld{};
+    SpriteWorld* w = arena_push<SpriteWorld>(self.arena);
+    if (!w) return false;
+    if (!w->init(&self.general, KV_POOL_DEFAULT_MAX, self.general.tag)) return false;
     self.state = w;
     return true;
 }
 
 void sprite_shutdown(Engine&, ModuleInstance& self) {
-    SpriteWorld* w = (SpriteWorld*)self.state;
-    w->free();
-    mem_free(w);
+    if (self.state) ((SpriteWorld*)self.state)->free();
 }
 
 // Phase PreSim: the current transforms become the previous ones, before anything moves.
@@ -35,6 +33,7 @@ constinit const SystemDesc   k_systems[]   = {
 
 KV_MODULE_DEFINE(sprite_module) = {
     "sprite", {}, k_resources, k_systems, sprite_startup, sprite_shutdown,
+    {.reserve = 64 * 1024},
 };
 
 SpriteWorld* sprite_world(Engine& e) {

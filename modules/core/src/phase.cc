@@ -1,4 +1,5 @@
 #include "korvid/core/phase.h"
+#include "korvid/core/memory.h"
 #include "korvid/core/module.h"
 
 namespace kv {
@@ -29,9 +30,11 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
         events.deliver(); // phase boundary: pending events become visible
         for (ScheduledSystem& s : phase) {
             ctx.state = s.module->state;
+            mem_set_owner((u16)(s.module->index + 1)); // attribution follows the schedule
             s.desc->fn(ctx);
         }
     }
+    mem_set_owner(0);
     events.end_tick();
 }
 
