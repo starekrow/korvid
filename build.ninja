@@ -1,0 +1,109 @@
+# Hand-written stand-in for the Ninja file kormake will emit. Mirrors the module
+# layout: one object dir and one static library per module, include isolation
+# (each module sees only its declared dependencies' include/), tests per module.
+ninja_required_version = 1.10
+
+cxx = g++
+ar = ar
+builddir = build
+
+cxxflags = -std=c++20 -g -O0 -DKV_DEBUG=1 -fno-exceptions -fno-rtti $
+           -fno-strict-aliasing -Wall -Wextra -Werror
+sdl_libs = -lSDL3
+
+inc_core     = -Imodules/core/include
+inc_platform = $inc_core -Imodules/platform/include
+inc_hello    = $inc_platform
+
+rule cxx
+  command = $cxx $cxxflags $includes -MMD -MF $out.d -c $in -o $out
+  depfile = $out.d
+  deps = gcc
+  description = CXX $out
+
+rule ar
+  command = rm -f $out && $ar crs $out $in
+  description = AR $out
+
+rule link
+  command = $cxx $in -o $out $libs
+  description = LINK $out
+
+rule run_test
+  command = ./$in && touch $out
+  description = TEST $in
+
+# ---- core ------------------------------------------------------------------
+build $builddir/obj/core/memory.o: cxx modules/core/src/memory.cc
+  includes = $inc_core
+build $builddir/obj/core/log.o: cxx modules/core/src/log.cc
+  includes = $inc_core
+build $builddir/obj/core/event.o: cxx modules/core/src/event.cc
+  includes = $inc_core
+build $builddir/obj/core/tick.o: cxx modules/core/src/tick.cc
+  includes = $inc_core
+build $builddir/obj/core/phase.o: cxx modules/core/src/phase.cc
+  includes = $inc_core
+build $builddir/obj/core/engine.o: cxx modules/core/src/engine.cc
+  includes = $inc_core
+build $builddir/obj/core/posix/time.o: cxx modules/core/src/posix/time.cc
+  includes = $inc_core
+
+build $builddir/lib/libkv_core.a: ar $builddir/obj/core/memory.o $
+    $builddir/obj/core/log.o $builddir/obj/core/event.o $builddir/obj/core/tick.o $
+    $builddir/obj/core/phase.o $builddir/obj/core/engine.o $builddir/obj/core/posix/time.o
+
+build $builddir/obj/core/tests/main.o: cxx modules/core/tests/main.cc
+  includes = $inc_core
+build $builddir/obj/core/tests/handle_test.o: cxx modules/core/tests/handle_test.cc
+  includes = $inc_core
+build $builddir/obj/core/tests/event_test.o: cxx modules/core/tests/event_test.cc
+  includes = $inc_core
+build $builddir/obj/core/tests/tick_test.o: cxx modules/core/tests/tick_test.cc
+  includes = $inc_core
+
+build $builddir/bin/core_tests: link $builddir/obj/core/tests/main.o $
+    $builddir/obj/core/tests/handle_test.o $builddir/obj/core/tests/event_test.o $
+    $builddir/obj/core/tests/tick_test.o $builddir/lib/libkv_core.a
+
+# ---- platform --------------------------------------------------------------
+build $builddir/obj/platform/module.o: cxx modules/platform/src/module.cc
+  includes = $inc_platform
+build $builddir/obj/platform/input.o: cxx modules/platform/src/input.cc
+  includes = $inc_platform
+build $builddir/obj/platform/input_sdl3.o: cxx modules/platform/src/input_sdl3.cc
+  includes = $inc_platform
+build $builddir/obj/platform/host_window_sdl3.o: cxx modules/platform/src/host_window_sdl3.cc
+  includes = $inc_platform
+
+build $builddir/lib/libkv_platform.a: ar $builddir/obj/platform/module.o $
+    $builddir/obj/platform/input.o $builddir/obj/platform/input_sdl3.o $
+    $builddir/obj/platform/host_window_sdl3.o
+
+build $builddir/obj/platform/tests/main.o: cxx modules/platform/tests/main.cc
+  includes = $inc_platform
+build $builddir/obj/platform/tests/keymap_test.o: cxx modules/platform/tests/keymap_test.cc
+  includes = $inc_platform
+
+build $builddir/bin/platform_tests: link $builddir/obj/platform/tests/main.o $
+    $builddir/obj/platform/tests/keymap_test.o $builddir/lib/libkv_platform.a $
+    $builddir/lib/libkv_core.a
+  libs = $sdl_libs
+
+# ---- hello -----------------------------------------------------------------
+build $builddir/obj/hello/main.o: cxx modules/hello/src/main.cc
+  includes = $inc_hello
+build $builddir/obj/hello/modules.gen.o: cxx modules/hello/src/modules.gen.cc
+  includes = $inc_hello
+
+build $builddir/bin/hello: link $builddir/obj/hello/main.o $builddir/obj/hello/modules.gen.o $
+    $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a
+  libs = $sdl_libs
+
+# ---- aggregates ------------------------------------------------------------
+build $builddir/test/core_tests.ok: run_test $builddir/bin/core_tests
+build $builddir/test/platform_tests.ok: run_test $builddir/bin/platform_tests
+
+build all: phony $builddir/bin/hello $builddir/bin/core_tests $builddir/bin/platform_tests
+build check: phony $builddir/test/core_tests.ok $builddir/test/platform_tests.ok
+default all
