@@ -84,23 +84,39 @@ const char* mem_heap_name(u8 id);
 usize       mem_heap_budget(u8 id);
 
 // ---- accounting ----------------------------------------------------------------------
+// No atomics on the allocation path: every thread counts into its own block, and a
+// query rolls the blocks up. Per-heap and total counts exist in every build; the
+// module-by-category matrix exists in dev builds only (shared relaxed atomics there,
+// zeros in ship). Peaks are sampled, not tracked: see mem_sample below.
 struct MemStats {
     u64 live_allocs     = 0; // general allocator blocks
     u64 live_bytes      = 0; // general allocator bytes
-    u64 peak_bytes      = 0; // general allocator high-water mark; see below
     u64 total_allocs    = 0;
     u64 committed_bytes = 0; // pages committed by arenas and pools
 };
 
-// peak_bytes is exact for mem_stats() and mem_stats_heap(); for a module or a category it
-// is the sum of per-cell peaks, an upper bound.
-u64      mem_live_allocations();           // general allocator, everything
-MemStats mem_stats();                      // everything
-MemStats mem_stats_module(u16 module);
-MemStats mem_stats_category(u8 category);
-MemStats mem_stats_heap(u8 heap);
-// Logs what is live per module and category; a leak report when called at shutdown.
+u64      mem_live_allocations();           // rollup
+MemStats mem_stats();                      // rollup, everything
+MemStats mem_stats_heap(u8 heap);          // rollup
+MemStats mem_stats_module(u16 module);     // dev builds only
+MemStats mem_stats_category(u8 category);  // dev builds only
+// Logs what is live per module and category (dev); a leak report when called at shutdown.
 void     mem_report(const char* const* module_names, u32 module_count);
+
+// Once per frame, engine_frame rolls everything up, checks heap budgets and records the
+// result. Anyone wanting a fast read of memory pressure uses the last sample: plain
+// loads, no rollup. peak_live_bytes is the highest sampled total this run.
+struct MemSample {
+    u64 frame           = 0;
+    u64 live_allocs     = 0;
+    u64 live_bytes      = 0;
+    u64 committed_bytes = 0;
+    u64 peak_live_bytes = 0;
+    u64 heap_bytes[KV_MEM_MAX_HEAPS]     = {}; // general + committed, per heap
+    u64 heap_committed[KV_MEM_MAX_HEAPS] = {};
+};
+void             mem_sample(u64 frame);
+const MemSample& mem_last_sample();
 
 // Accounting hooks for the other allocator kinds (arena, pool): pages committed.
 void mem_account_commit(MemTag tag, usize bytes);

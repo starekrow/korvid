@@ -215,6 +215,7 @@ void engine_shutdown(Engine& e) {
 
 u32 engine_frame(Engine& e, f64 frame_dt) {
     mem_scratch_reset(); // frame lifetime: everything the last frame put in scratch is gone
+    mem_sample(e.frame_count); // last frame's memory, for budgets and anyone reading pressure
     ++e.frame_count;
     u64 first_tick = e.clock.tick_count;
     u32 ticks = e.clock.advance(frame_dt);

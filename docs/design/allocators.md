@@ -23,6 +23,11 @@ event bus follows.
   `mem_alloc` is attributed to the right module with no change at the call site.
 - **Budgets are data.** Heap sizes and per-module memory needs are tables, declared the
   way systems and events are.
+- **Accounting costs nothing on the allocation path.** Every thread counts into its own
+  block; a query rolls the blocks up; `engine_frame` takes one sample per frame that
+  cheap readers consult for last frame's totals, per-heap use, budget warnings and the
+  sampled peak. The module-by-category matrix exists in dev builds only. When the
+  size-class allocator lands, accounting moves to page granularity.
 - **The allocator knows no names.** Categories ("textures", "pathfinding") and heaps
   ("sim", "render") are registered by name at startup by whoever wants to see them apart
   in a report. A tag of zeros means nothing and costs nothing; core's own allocators stay

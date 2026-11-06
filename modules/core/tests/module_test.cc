@@ -137,9 +137,11 @@ void test_module(kv::TestCtx& c) {
     Arena& arena = engine_module(e, "second")->arena;
     KV_CHECK(c, arena.base && (u8*)second >= arena.base && (u8*)second < arena.base + arena.used);
     KV_CHECK(c, arena.a.tag.module == 2 && arena.a.tag.category == 0 && arena.a.tag.heap == 0);
-    KV_CHECK(c, mem_stats_module(2).committed_bytes == arena.committed);
     KV_CHECK(c, second->owner_seen == 2);
+#if KV_DEV
+    KV_CHECK(c, mem_stats_module(2).committed_bytes == arena.committed);
     KV_CHECK(c, mem_stats_module(2).live_allocs == 1 && mem_stats_module(2).live_bytes == 64);
+#endif
     KV_CHECK(c, mem_owner() == 0); // reset after the tick
 
     // Events registered through the list work on the engine's bus.
@@ -154,8 +156,10 @@ void test_module(kv::TestCtx& c) {
     KV_CHECK(c, strcmp(g_trace, "down2 down1 ") == 0);
     KV_CHECK(c, EventType<EvA>::id == 0 && EventType<EvC>::id == 0);
     KV_CHECK(c, e.modules.len == 0 && e.phases.system_count() == 0);
+#if KV_DEV
     KV_CHECK(c, mem_stats_module(2).live_allocs == 0);
     KV_CHECK(c, mem_stats_module(2).committed_bytes == 0); // the arena went with the module
+#endif
 
     // The same list initializes again with the same ids: deterministic.
     KV_CHECK(c, engine_init(e, list));

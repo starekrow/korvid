@@ -59,7 +59,7 @@ bool SpriteWorld::destroy(Handle h) { return entities.destroy(h); }
 void SpriteWorld::begin_tick() {
     u32 n = entities.capacity();
     for (u32 i = 0; i < n; ++i)
-        if (entities.alive[i]) prev_transforms[i] = transforms[i];
+        if (entities.is_alive(i)) prev_transforms[i] = transforms[i];
 }
 
 void SpriteWorld::free() {

@@ -37,10 +37,16 @@ void test_memory(kv::TestCtx& c) {
     mem_general_tagged(view, tagged, "view");
     mem_set_owner(3);
     void* v = view.alloc(&view, 24, 16);
+#if KV_DEV
     KV_CHECK(c, mem_stats_category(cat_b).live_bytes == 24 && mem_stats_module(5).live_allocs == 1);
-    KV_CHECK(c, mem_stats_heap(heap).live_bytes == 24 && mem_stats_module(3).live_allocs == 0);
+    KV_CHECK(c, mem_stats_module(3).live_allocs == 0);
+#endif
+    KV_CHECK(c, mem_stats_heap(heap).live_bytes == 24 && mem_stats_heap(heap).live_allocs == 1);
     view.free(&view, v, 24);
-    KV_CHECK(c, mem_stats_category(cat_b).live_allocs == 0 && mem_stats_heap(heap).live_bytes == 0);
+#if KV_DEV
+    KV_CHECK(c, mem_stats_category(cat_b).live_allocs == 0);
+#endif
+    KV_CHECK(c, mem_stats_heap(heap).live_bytes == 0);
 
     // General: default 16-byte alignment, explicit larger alignments, accounting per owner.
     void* a = mem_alloc(40);
@@ -50,9 +56,12 @@ void test_memory(kv::TestCtx& c) {
     KV_CHECK(c, b && ((usize)b & 63) == 0);
     KV_CHECK(c, d && ((usize)d & 4095) == 0);
     memset(a, 1, 40); memset(b, 2, 100); memset(d, 3, 8);
+#if KV_DEV
     MemStats m3 = mem_stats_module(3);
     KV_CHECK(c, m3.live_allocs == 3 && m3.live_bytes == 148);
+#endif
     KV_CHECK(c, mem_stats().live_allocs == before.live_allocs + 3);
+    KV_CHECK(c, mem_stats().live_bytes == before.live_bytes + 148);
 
     // realloc keeps contents, the original tag and the original alignment.
     mem_set_owner(0);
@@ -60,17 +69,26 @@ void test_memory(kv::TestCtx& c) {
     KV_CHECK(c, a && ((u8*)a)[39] == 1);
     b = mem_realloc(b, 5000);
     KV_CHECK(c, b && ((usize)b & 63) == 0 && ((u8*)b)[99] == 2);
-    KV_CHECK(c, mem_stats_module(3).live_allocs == 3);
-    KV_CHECK(c, mem_stats_module(3).live_bytes == 148 - 40 + 4000 - 100 + 5000);
-    KV_CHECK(c, mem_stats_module(3).peak_bytes >= 148 - 40 + 4000);
+    KV_CHECK(c, mem_stats().live_allocs == before.live_allocs + 3);
+    KV_CHECK(c, mem_stats().live_bytes == before.live_bytes + 148 - 40 + 4000 - 100 + 5000);
+
+    // The frame sample is the cheap read: last frame's totals and the sampled peak.
+    mem_sample(7);
+    const MemSample& smp = mem_last_sample();
+    KV_CHECK(c, smp.frame == 7 && smp.live_bytes == mem_stats().live_bytes);
+    KV_CHECK(c, smp.peak_live_bytes >= smp.live_bytes);
 
     // A size that would wrap the header arithmetic is refused, not shrunk.
     KV_CHECK(c, mem_alloc(SIZE_MAX - 8) == nullptr);
     KV_CHECK(c, mem_alloc_aligned(SIZE_MAX - 100, 4096) == nullptr);
 
     mem_free(a); mem_free(b); mem_free(d);
+#if KV_DEV
     KV_CHECK(c, mem_stats_module(3).live_allocs == 0 && mem_stats_module(3).live_bytes == 0);
+#endif
     KV_CHECK(c, mem_stats().live_allocs == before.live_allocs);
+    mem_sample(8);
+    KV_CHECK(c, mem_last_sample().peak_live_bytes >= before.live_bytes + 148 - 40 + 4000 - 100 + 5000);
     mem_free(nullptr); // harmless
 
     // Page layer: reserve, commit, use, release.
@@ -97,7 +115,9 @@ void test_memory(kv::TestCtx& c) {
     big[300 * 1024 - 1] = 9;
     KV_CHECK(c, ar.committed >= 300 * 1024 && ar.committed <= ar.reserved);
     KV_CHECK(c, mem_stats_heap(heap).committed_bytes == heap_before + ar.committed);
+#if KV_DEV
     KV_CHECK(c, mem_stats_category(cat_a).committed_bytes == ar.committed);
+#endif
     arena_release(ar, mark);
     KV_CHECK(c, ar.used == mark && ar.peak >= 300 * 1024);
 #if KV_DEV
@@ -111,10 +131,13 @@ void test_memory(kv::TestCtx& c) {
     arena_destroy(ar);
     KV_CHECK(c, mem_stats_heap(heap).committed_bytes == heap_before);
 
-    // Soft budget: committing past it warns once and still succeeds.
+    // Soft budget: the frame sample notices a heap past its budget, warns once, and
+    // nothing fails.
     Arena fat;
     KV_CHECK(c, arena_create(fat, 4u << 20, "fat", tag));
-    KV_CHECK(c, arena_alloc(fat, 2u << 20) != nullptr); // over the 1 MB budget: a warning, not a failure
+    KV_CHECK(c, arena_alloc(fat, 2u << 20) != nullptr);
+    mem_sample(9);
+    KV_CHECK(c, mem_last_sample().heap_bytes[heap] >= 2u << 20);
     arena_destroy(fat);
 
     // Arena over a caller's buffer never commits and fails when full.

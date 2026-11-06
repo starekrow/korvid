@@ -12,8 +12,9 @@
 //
 // Storage is one reserved range committed as slots are used, so slot addresses are
 // stable for the pool's lifetime and the whole pool is relocatable: a snapshot is a copy
-// of the used prefix of each section. Sections, each page aligned: items, generations,
-// alive flags, free-list links. Single owner.
+// of the used prefix of each section. Sections, each page aligned: items, generation
+// words (generation in the low 20 bits, alive in bit 31, so validation reads one line),
+// free-list links. Single owner.
 #pragma once
 #include "korvid/core/handle.h"
 #include "korvid/core/log.h"
@@ -36,9 +37,10 @@ template <class T>
 struct Pool {
     static_assert(__is_trivially_copyable(T), "Pool holds plain data only");
 
+    static constexpr u32 ALIVE_BIT = 0x80000000u;
+
     T*    items     = nullptr; // by slot
-    u32*  gens      = nullptr; // by slot; live generations start at 1 and skip 0 on wrap
-    u8*   alive     = nullptr; // by slot
+    u32*  gens      = nullptr; // by slot: generation | ALIVE_BIT; generations start at 1, skip 0 on wrap
     u32*  next_free = nullptr; // by slot: intrusive free list
     u32   len       = 0;       // slots in use, dead or alive
     u32   live      = 0;
@@ -49,7 +51,7 @@ struct Pool {
     u32   committed = 0;       // slots whose pages are committed
     u8*   base      = nullptr;
     usize reserved  = 0;
-    usize off_gens = 0, off_alive = 0, off_next = 0;
+    usize off_gens = 0, off_next = 0;
     MemTag tag;
     u32    owner = 0;
 
@@ -61,11 +63,9 @@ struct Pool {
         owner     = thread_id();
         usize items_bytes = os_page_align((usize)max * sizeof(T));
         usize gens_bytes  = os_page_align((usize)max * sizeof(u32));
-        usize alive_bytes = os_page_align((usize)max);
         usize next_bytes  = os_page_align((usize)max * sizeof(u32));
         off_gens  = items_bytes;
-        off_alive = off_gens + gens_bytes;
-        off_next  = off_alive + alive_bytes;
+        off_next  = off_gens + gens_bytes;
         reserved  = off_next + next_bytes;
         base = (u8*)os_reserve(reserved);
         if (!base) {
@@ -74,7 +74,6 @@ struct Pool {
         }
         items     = (T*)base;
         gens      = (u32*)(base + off_gens);
-        alive     = base + off_alive;
         next_free = (u32*)(base + off_next);
         return true;
     }
@@ -94,7 +93,7 @@ struct Pool {
             gens[idx] = 1;
         }
         items[idx] = v;
-        alive[idx] = 1;
+        gens[idx] |= ALIVE_BIT;
         next_free[idx] = KV_POOL_NONE;
         ++live;
         return handle_at(idx);
@@ -114,12 +113,13 @@ struct Pool {
         return snprintf(out, cap, "%s (%u live of %u slots)", state, p.live, p.len);
     }
 
-    // The handle for a slot, whatever its state. For iteration over alive[].
-    Handle handle_at(u32 i) const { return Handle::make(kind, gens[i], i); }
+    // The handle for a slot, whatever its state. For iteration with is_alive().
+    Handle handle_at(u32 i) const { return Handle::make(kind, gens[i] & ~ALIVE_BIT, i); }
+    bool   is_alive(u32 i) const { return i < len && (gens[i] & ALIVE_BIT); }
 
     bool valid(Handle h) const {
         u32 i = h.index();
-        return h.kind() == kind && h.gen() != 0 && i < len && alive[i] && gens[i] == h.gen();
+        return h.kind() == kind && h.gen() != 0 && i < len && gens[i] == (h.gen() | ALIVE_BIT);
     }
 
     T*       get(Handle h)       { return valid(h) ? &items[h.index()] : nullptr; }
@@ -129,13 +129,12 @@ struct Pool {
         if (!valid(h)) return false;
         KV_VERIFY(owner == thread_id());
         u32 i = h.index();
-        alive[i] = 0;
 #if KV_DEV
         memset(&items[i], 0xDD, sizeof(T)); // a stale pointer sees poison, not old data
 #endif
-        u32 g = gens[i] + 1;
+        u32 g = (gens[i] & ~ALIVE_BIT) + 1;
         if (g > KV_HANDLE_MAX_GEN) g = 1; // skip 0 on wrap
-        gens[i] = g;
+        gens[i] = g; // dead: no alive bit
         // Append: the slot comes back only after every other free slot has been reused.
         next_free[i] = KV_POOL_NONE;
         if (free_tail == KV_POOL_NONE) free_head = i;
@@ -145,7 +144,7 @@ struct Pool {
         return true;
     }
 
-    // Slot count including dead slots; iterate with alive[] to skip them.
+    // Slot count including dead slots; iterate with is_alive() to skip them.
     u32 capacity() const { return len; }
 
     void free() {
@@ -158,7 +157,7 @@ struct Pool {
 
     // ---- snapshot: the used prefix of every section, relocatable ----
     usize snapshot_size() const {
-        return sizeof(PoolSnapshotHeader) + (usize)len * (sizeof(T) + sizeof(u32) + 1 + sizeof(u32));
+        return sizeof(PoolSnapshotHeader) + (usize)len * (sizeof(T) + sizeof(u32) + sizeof(u32));
     }
     // Writes snapshot_size() bytes; the caller sized `out`.
     void snapshot(void* out) const {
@@ -167,7 +166,6 @@ struct Pool {
         memcpy(p, &h, sizeof h);              p += sizeof h;
         memcpy(p, items, (usize)len * sizeof(T));      p += (usize)len * sizeof(T);
         memcpy(p, gens, (usize)len * sizeof(u32));     p += (usize)len * sizeof(u32);
-        memcpy(p, alive, len);                         p += len;
         memcpy(p, next_free, (usize)len * sizeof(u32));
     }
     // Restores into this pool (initialized or not). Slot addresses stay where they are,
@@ -181,7 +179,6 @@ struct Pool {
         while (committed < h.len) if (!commit_more()) return false;
         memcpy(items, p, (usize)h.len * sizeof(T));    p += (usize)h.len * sizeof(T);
         memcpy(gens, p, (usize)h.len * sizeof(u32));   p += (usize)h.len * sizeof(u32);
-        memcpy(alive, p, h.len);                       p += h.len;
         memcpy(next_free, p, (usize)h.len * sizeof(u32));
         len = h.len; live = h.live; free_head = h.free_head; free_tail = h.free_tail;
         return true;
@@ -189,8 +186,7 @@ struct Pool {
 
 private:
     usize committed_bytes() const {
-        return os_page_align((usize)committed * sizeof(T)) + os_page_align((usize)committed * sizeof(u32)) * 2 +
-               os_page_align((usize)committed);
+        return os_page_align((usize)committed * sizeof(T)) + os_page_align((usize)committed * sizeof(u32)) * 2;
     }
     // Commits the next run of slots in every section.
     bool commit_more() {
@@ -199,10 +195,9 @@ private:
         if (grow == 0) return false;
         usize before = committed_bytes();
         u32 to = committed + grow;
-        bool ok = commit_section(0,         sizeof(T), to) &&
-                  commit_section(off_gens,  sizeof(u32), to) &&
-                  commit_section(off_alive, 1, to) &&
-                  commit_section(off_next,  sizeof(u32), to);
+        bool ok = commit_section(0,        sizeof(T), to) &&
+                  commit_section(off_gens, sizeof(u32), to) &&
+                  commit_section(off_next, sizeof(u32), to);
         if (!ok) { KV_ERROR("mem", "pool: commit failed"); return false; }
         committed = to;
         mem_account_commit(tag, committed_bytes() - before);

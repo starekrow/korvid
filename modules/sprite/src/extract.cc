@@ -8,7 +8,7 @@ void extract_sprites(const SpriteWorld& world, Array<RenderPacket>& out) {
     out.reserve(world.live());
     u32 n = world.entities.capacity();
     for (u32 i = 0; i < n; ++i) {
-        if (!world.entities.alive[i]) continue;
+        if (!world.entities.is_alive(i)) continue;
         const Sprite& s = world.sprites[i];
         RenderPacket p;
         p.entity   = world.entities.handle_at(i);
