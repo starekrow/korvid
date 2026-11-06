@@ -6,12 +6,30 @@
 
 namespace kv {
 
-struct WindowDesc {
-    const char* title  = "korvid";
-    u32         width  = 1280;
-    u32         height = 720;
-    bool        vsync  = true; // a preference the renderer reads; SDL does not apply it
+// What the window's surface is prepared for. SDL must know at creation time.
+enum class WindowSurface : u8 {
+    Software, // SDL's framebuffer; present_blank() works, nothing else draws
+    Vulkan,   // a renderer creates a Vulkan surface from native_handle()
 };
+
+struct WindowDesc {
+    const char*   title   = "korvid";
+    u32           width   = 1280;
+    u32           height  = 720;
+    bool          vsync   = true; // a preference the renderer reads; SDL does not apply it
+    WindowSurface surface = WindowSurface::Software;
+    bool          borderless = false; // no title bar or frame; still resizable by the desktop
+};
+
+// TODO(wayland): mouse resizing stalls on GNOME Wayland. GNOME has no server-side
+// decorations, so SDL3 uses libdecor, which repaints the frame synchronously inside every
+// xdg configure; Mutter sends one configure per pointer motion, so the event pump never
+// drains while the mouse moves. Cost scales with output size (2.5-4.3 ms per configure at
+// display scale 2 on a 4K panel, enough to stall completely; ~10 fps on a laptop panel).
+// Keyboard resizes and borderless windows are unaffected. Remedy when it matters: open
+// borderless on Wayland and provide edge resizing through SDL_SetWindowHitTest, so the
+// engine owns the frame and each configure costs only a few protocol calls. Diagnose with
+// `hello --hitch-ms 50` plus WAYLAND_DEBUG=1; the hitch lines use libwayland's timestamps.
 
 struct HostWindow {
     bool open(const WindowDesc& desc);
@@ -26,16 +44,17 @@ struct HostWindow {
     // Translates OS events into bus events and updates input.raw. Call once per frame.
     void pump(EventBus& bus, Input& input);
 
-    // Stand-in until a renderer presents frames. Wayland maps a window only after a
-    // buffer is attached to its surface, so a window nobody draws to never appears.
-    // Uses SDL's software framebuffer; a Vulkan swapchain replaces it and this goes away.
+    // For WindowSurface::Software only: fills the window with a flat color. Wayland maps a
+    // window only after a buffer is attached to its surface, so a window nobody draws to
+    // never appears. A no-op on a Vulkan window, where the renderer presents.
     void present_blank();
 
     // The SDL_Window* as an opaque pointer. The renderer module turns it into a
     // surface on its side; no graphics API headers are included here.
     void* native_handle() const { return sdl_window_; }
 
-    void* sdl_window_ = nullptr;
+    void*         sdl_window_ = nullptr;
+    WindowSurface surface_    = WindowSurface::Software;
     u32   width_      = 0;
     u32   height_     = 0;
     bool  vsync_      = true;

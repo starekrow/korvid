@@ -1,13 +1,39 @@
 # Korvid
 
-Step 1: HostWindow and a minimally bootstrapped Core. No renderer yet.
+Step 2: a Vulkan 1.3 sprite renderer behind a render interface, sprite entities with
+an extract, and an example game with a three-state machine (INIT, RUN, EXIT) that
+bounces one checkerboard sprite. Materials are stubbed: a null material renders with
+the built-in red/white checkerboard.
 
 Modules follow the kormake directory convention (`module.lua`, `include/korvid/<name>/`,
-`src/`, `tests/`). `build.ninja` is a hand-written stand-in until kormake exists.
+`src/`, `shaders/`, `tests/`). `build.ninja` is a hand-written stand-in until kormake exists.
 
-    ninja          # builds build/bin/hello and the module test executables
-    ninja check    # runs the tests
-    build/bin/hello                 # opens a window; Esc or close quits
-    build/bin/hello --run-seconds 2 # exits by itself (smoke test)
+    core             memory, handles, pools, events, phases, tick clock, log
+    platform         SDL3 window and keyboard input (events on the bus)
+    math             header-only: vec2, point2, rect2, color, affine2, ortho2d
+    render           header-only interface: RenderPacket, renderer API, Material stub
+    sprite           Transform2 + Sprite components, SpriteWorld, extract_sprites
+    renderer-vulkan  provides "render": dynamic rendering, sync2, bindless textures,
+                     Slang shader compiled to SPIR-V by the build; the only Vulkan user
+    hello            the example game
 
-Needs g++ (or clang++), ninja and libsdl3-dev.
+    ninja            # builds build/bin/hello, build/bin/shaders/sprite.spv and the tests
+    ninja check      # runs the tests
+    build/bin/hello                   # opens a window; Esc or close exits via ST_EXIT
+    build/bin/hello --run-seconds 2   # exits by itself (smoke test)
+    build/bin/hello --no-validation   # debug builds enable the validation layers by default
+    build/bin/hello --no-vsync        # mailbox/immediate present instead of fifo
+    build/bin/hello --borderless      # no libdecor frame (see note below)
+    build/bin/hello --hitch-ms 50     # log where any frame over 50 ms spent its time
+
+Needs g++ (or clang++), ninja, libsdl3-dev, libvulkan-dev, slang-compiler, and for
+debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached
+through SDL and every entry point is loaded at runtime (renderer-vulkan/src/vk_funcs.h).
+
+Known platform issue: on GNOME Wayland, SDL3 falls back to libdecor for the window frame
+(GNOME has no server-side decorations). libdecor repaints the frame synchronously inside
+every xdg configure, and Mutter sends one configure per pointer motion during a mouse
+resize, so the event pump stalls for the length of the drag. Measured here: 2.5 ms per
+configure with the cairo plugin, 4.3 ms with the GTK plugin, at hundreds of configures
+per second. Keyboard resizes and borderless windows are unaffected. Nothing in the
+engine runs during the stall; `--hitch-ms` shows it as time spent in the pump.

@@ -28,4 +28,5 @@ inline int test_report(const TestCtx& c, const char* exe) {
 
 } // namespace kv
 
-#define KV_CHECK(ctx, expr) (ctx).check((expr), #expr, __FILE__, __LINE__)
+// Variadic so a braced initializer with commas works inside the expression.
+#define KV_CHECK(ctx, ...) (ctx).check((__VA_ARGS__), #__VA_ARGS__, __FILE__, __LINE__)

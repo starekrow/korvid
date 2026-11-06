@@ -1,19 +1,27 @@
 # Hand-written stand-in for the Ninja file kormake will emit. Mirrors the module
 # layout: one object dir and one static library per module, include isolation
 # (each module sees only its declared dependencies' include/), tests per module.
+# Header-only modules (math, render) have no library, only tests.
 ninja_required_version = 1.10
 
 cxx = g++
 ar = ar
+slangc = slangc
 builddir = build
 
 cxxflags = -std=c++20 -g -O0 -DKV_DEBUG=1 -fno-exceptions -fno-rtti $
            -fno-strict-aliasing -Wall -Wextra -Werror
 sdl_libs = -lSDL3
+# The Vulkan loader is reached through SDL_Vulkan_GetVkGetInstanceProcAddr; nothing links it.
 
 inc_core     = -Imodules/core/include
 inc_platform = $inc_core -Imodules/platform/include
-inc_hello    = $inc_platform
+inc_math     = $inc_core -Imodules/math/include
+inc_render   = $inc_math -Imodules/render/include
+inc_sprite   = $inc_render -Imodules/sprite/include
+inc_rvk      = $inc_render -Imodules/platform/include -Imodules/renderer-vulkan/include
+inc_hello    = $inc_platform -Imodules/math/include -Imodules/render/include $
+               -Imodules/sprite/include -Imodules/renderer-vulkan/include
 
 rule cxx
   command = $cxx $cxxflags $includes -MMD -MF $out.d -c $in -o $out
@@ -32,6 +40,14 @@ rule link
 rule run_test
   command = ./$in && touch $out
   description = TEST $in
+
+# Slang -> SPIR-V. One module holds every entry point; the pipeline names them.
+rule slang
+  command = $slangc $in -target spirv -fvk-use-entrypoint-name $
+            -depfile $out.d -o $out
+  depfile = $out.d
+  deps = gcc
+  description = SLANG $out
 
 # ---- core ------------------------------------------------------------------
 build $builddir/obj/core/memory.o: cxx modules/core/src/memory.cc
@@ -90,6 +106,53 @@ build $builddir/bin/platform_tests: link $builddir/obj/platform/tests/main.o $
     $builddir/lib/libkv_core.a
   libs = $sdl_libs
 
+# ---- math (header-only) ----------------------------------------------------
+build $builddir/obj/math/tests/main.o: cxx modules/math/tests/main.cc
+  includes = $inc_math
+build $builddir/obj/math/tests/vec2_test.o: cxx modules/math/tests/vec2_test.cc
+  includes = $inc_math
+build $builddir/obj/math/tests/affine2_test.o: cxx modules/math/tests/affine2_test.cc
+  includes = $inc_math
+
+build $builddir/bin/math_tests: link $builddir/obj/math/tests/main.o $
+    $builddir/obj/math/tests/vec2_test.o $builddir/obj/math/tests/affine2_test.o $
+    $builddir/lib/libkv_core.a
+
+# ---- render (header-only interface; no tests of its own) -------------------
+
+# ---- sprite ----------------------------------------------------------------
+build $builddir/obj/sprite/world.o: cxx modules/sprite/src/world.cc
+  includes = $inc_sprite
+build $builddir/obj/sprite/extract.o: cxx modules/sprite/src/extract.cc
+  includes = $inc_sprite
+
+build $builddir/lib/libkv_sprite.a: ar $builddir/obj/sprite/world.o $builddir/obj/sprite/extract.o
+
+build $builddir/obj/sprite/tests/main.o: cxx modules/sprite/tests/main.cc
+  includes = $inc_sprite
+build $builddir/obj/sprite/tests/world_test.o: cxx modules/sprite/tests/world_test.cc
+  includes = $inc_sprite
+build $builddir/obj/sprite/tests/extract_test.o: cxx modules/sprite/tests/extract_test.cc
+  includes = $inc_sprite
+
+build $builddir/bin/sprite_tests: link $builddir/obj/sprite/tests/main.o $
+    $builddir/obj/sprite/tests/world_test.o $builddir/obj/sprite/tests/extract_test.o $
+    $builddir/lib/libkv_sprite.a $builddir/lib/libkv_core.a
+
+# ---- renderer-vulkan -------------------------------------------------------
+build $builddir/obj/renderer-vulkan/module.o: cxx modules/renderer-vulkan/src/module.cc
+  includes = $inc_rvk
+build $builddir/obj/renderer-vulkan/vk_funcs.o: cxx modules/renderer-vulkan/src/vk_funcs.cc
+  includes = $inc_rvk
+build $builddir/obj/renderer-vulkan/renderer.o: cxx modules/renderer-vulkan/src/renderer.cc
+  includes = $inc_rvk
+
+build $builddir/lib/libkv_renderer_vulkan.a: ar $builddir/obj/renderer-vulkan/module.o $
+    $builddir/obj/renderer-vulkan/vk_funcs.o $builddir/obj/renderer-vulkan/renderer.o
+
+# Shaders land next to the executables; the renderer finds them via the exe directory.
+build $builddir/bin/shaders/sprite.spv: slang modules/renderer-vulkan/shaders/sprite.slang
+
 # ---- hello -----------------------------------------------------------------
 build $builddir/obj/hello/main.o: cxx modules/hello/src/main.cc
   includes = $inc_hello
@@ -97,13 +160,19 @@ build $builddir/obj/hello/modules.gen.o: cxx modules/hello/src/modules.gen.cc
   includes = $inc_hello
 
 build $builddir/bin/hello: link $builddir/obj/hello/main.o $builddir/obj/hello/modules.gen.o $
-    $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a
+    $builddir/lib/libkv_sprite.a $builddir/lib/libkv_renderer_vulkan.a $
+    $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a | $builddir/bin/shaders/sprite.spv
   libs = $sdl_libs
 
 # ---- aggregates ------------------------------------------------------------
 build $builddir/test/core_tests.ok: run_test $builddir/bin/core_tests
 build $builddir/test/platform_tests.ok: run_test $builddir/bin/platform_tests
+build $builddir/test/math_tests.ok: run_test $builddir/bin/math_tests
+build $builddir/test/sprite_tests.ok: run_test $builddir/bin/sprite_tests
 
-build all: phony $builddir/bin/hello $builddir/bin/core_tests $builddir/bin/platform_tests
-build check: phony $builddir/test/core_tests.ok $builddir/test/platform_tests.ok
+build tests: phony $builddir/bin/core_tests $builddir/bin/platform_tests $
+    $builddir/bin/math_tests $builddir/bin/sprite_tests
+build all: phony $builddir/bin/hello tests
+build check: phony $builddir/test/core_tests.ok $builddir/test/platform_tests.ok $
+    $builddir/test/math_tests.ok $builddir/test/sprite_tests.ok
 default all

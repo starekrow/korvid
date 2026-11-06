@@ -2,11 +2,13 @@
 // kormake writes this file into the build directory; until then it lives here.
 #include "korvid/core/module.h"
 #include "korvid/platform/module.h"
+#include "korvid/renderer-vulkan/module.h"
 
 kv::Span<const kv::ModuleDesc> kv_module_list() {
     // Built on first call, not by a static initializer. Order is startup order.
     static const kv::ModuleDesc modules[] = {
         kv::platform_module(),
+        kv::renderer_vulkan_module(),
     };
     return kv::Span<const kv::ModuleDesc>(modules, KV_COUNTOF(modules));
 }

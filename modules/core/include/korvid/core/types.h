@@ -28,6 +28,9 @@ struct Span {
     Span(T* d, u32 n) : data(d), len(n) {}
     template <u32 N>
     Span(T (&arr)[N]) : data(arr), len(N) {}
+    // Span<T> -> Span<const T>, and nothing else.
+    template <class U, class = decltype((T*)(U*)nullptr)>
+    Span(Span<U> o) : data(o.data), len(o.len) {}
 
     T&       operator[](u32 i)       { return data[i]; }
     const T& operator[](u32 i) const { return data[i]; }

@@ -8,12 +8,15 @@ namespace kv {
 bool HostWindow::open(const WindowDesc& desc) {
     KV_ASSERT(!sdl_window_);
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE;
+    if (desc.surface == WindowSurface::Vulkan) flags |= SDL_WINDOW_VULKAN; // also loads the Vulkan loader
+    if (desc.borderless) flags |= SDL_WINDOW_BORDERLESS;
     SDL_Window* w = SDL_CreateWindow(desc.title, (int)desc.width, (int)desc.height, flags);
     if (!w) {
         KV_ERROR("window", "SDL_CreateWindow failed: %s", SDL_GetError());
         return false;
     }
     sdl_window_ = w;
+    surface_    = desc.surface;
     vsync_      = desc.vsync;
     int pw = 0, ph = 0;
     SDL_GetWindowSizeInPixels(w, &pw, &ph);
@@ -35,7 +38,7 @@ void HostWindow::close() {
 
 void HostWindow::present_blank() {
     SDL_Window* w = (SDL_Window*)sdl_window_;
-    if (!w) return;
+    if (!w || surface_ != WindowSurface::Software) return;
     SDL_Surface* s = SDL_GetWindowSurface(w);
     if (!s) {
         KV_WARN("window", "SDL_GetWindowSurface failed: %s", SDL_GetError());
