@@ -21,7 +21,7 @@ inc_render   = $inc_math -Imodules/render/include
 inc_sprite   = $inc_render -Imodules/sprite/include
 inc_rvk      = $inc_render -Imodules/platform/include -Imodules/renderer-vulkan/include
 inc_hello    = $inc_platform -Imodules/math/include -Imodules/render/include $
-               -Imodules/sprite/include -Imodules/renderer-vulkan/include
+               -Imodules/sprite/include -Imodules/renderer-vulkan/include -Imodules/hello/include
 
 rule cxx
   command = $cxx $cxxflags $includes -MMD -MF $out.d -c $in -o $out
@@ -77,10 +77,13 @@ build $builddir/obj/core/tests/event_test.o: cxx modules/core/tests/event_test.c
   includes = $inc_core
 build $builddir/obj/core/tests/tick_test.o: cxx modules/core/tests/tick_test.cc
   includes = $inc_core
+build $builddir/obj/core/tests/module_test.o: cxx modules/core/tests/module_test.cc
+  includes = $inc_core
 
 build $builddir/bin/core_tests: link $builddir/obj/core/tests/main.o $
     $builddir/obj/core/tests/handle_test.o $builddir/obj/core/tests/event_test.o $
-    $builddir/obj/core/tests/tick_test.o $builddir/lib/libkv_core.a
+    $builddir/obj/core/tests/tick_test.o $builddir/obj/core/tests/module_test.o $
+    $builddir/lib/libkv_core.a
 
 # ---- platform --------------------------------------------------------------
 build $builddir/obj/platform/module.o: cxx modules/platform/src/module.cc
@@ -125,8 +128,11 @@ build $builddir/obj/sprite/world.o: cxx modules/sprite/src/world.cc
   includes = $inc_sprite
 build $builddir/obj/sprite/extract.o: cxx modules/sprite/src/extract.cc
   includes = $inc_sprite
+build $builddir/obj/sprite/module.o: cxx modules/sprite/src/module.cc
+  includes = $inc_sprite
 
-build $builddir/lib/libkv_sprite.a: ar $builddir/obj/sprite/world.o $builddir/obj/sprite/extract.o
+build $builddir/lib/libkv_sprite.a: ar $builddir/obj/sprite/world.o $builddir/obj/sprite/extract.o $
+    $builddir/obj/sprite/module.o
 
 build $builddir/obj/sprite/tests/main.o: cxx modules/sprite/tests/main.cc
   includes = $inc_sprite

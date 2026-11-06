@@ -1,5 +1,4 @@
 #include "korvid/sprite/world.h"
-#include "korvid/core/phase.h"
 
 namespace kv {
 
@@ -32,10 +31,6 @@ void SpriteWorld::free() {
     transforms.free();
     prev_transforms.free();
     sprites.free();
-}
-
-void sprite_world_begin_tick(TickContext& ctx) {
-    ((SpriteWorld*)ctx.user)->begin_tick();
 }
 
 } // namespace kv

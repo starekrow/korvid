@@ -3,25 +3,29 @@
 // deliver() merges every writer into the delivered buffers in writer order, so
 // the merge is deterministic. Consumers read whole batches. end_tick() clears.
 // Slice 1 is single-threaded; one writer per thread comes later without API change.
+//
+// Event types are registered by modules (see module.h): EventType<E>::id is 0 until
+// engine_init assigns it in module-list order, and 0 again after shutdown.
 #pragma once
 #include "korvid/core/array.h"
 
 namespace kv {
 
-namespace detail {
-u32 register_event_type(usize elem_size);
-}
+struct EventTypeDesc;
 
-// Assigned on first use, in use order. Module registration will hand these out
-// as data later; the call site stays the same.
+// Per-type id slot. Zero-initialized (constant initialization), never set by user code;
+// module.h's KV_EVENT points a module's table entry at it.
 template <class E>
-u32 event_type_id() {
+struct EventType {
     static_assert(__is_trivially_copyable(E), "events are plain data");
-    static const u32 id = detail::register_event_type(sizeof(E));
-    return id;
-}
+    static inline u32 id = 0;
+};
 
-u32 event_type_count();
+// Assigns ids first_id, first_id + 1, ... to the table in order. Returns the next free
+// id. Fails (returns 0) on a duplicate name or a type registered twice. engine_init
+// calls this; tests and tools may call it directly.
+u32  event_types_register(Span<const EventTypeDesc> types, u32 first_id);
+void event_types_unregister(Span<const EventTypeDesc> types);
 
 struct EventBuffer {
     u32       elem_size = 0;
@@ -33,11 +37,14 @@ struct EventBuffer {
 };
 
 struct EventWriter {
-    Array<EventBuffer> by_type;
+    Array<EventBuffer> by_type; // indexed by event id; slot 0 is never used
 
     template <class E>
     void emit(const E& e) {
-        EventBuffer& b = buffer(event_type_id<E>(), sizeof(E));
+        u32 id = EventType<E>::id;
+        KV_ASSERT(id != 0); // not registered: the module list does not declare this type
+        if (id == 0) return;
+        EventBuffer& b = buffer(id, sizeof(E));
         u8* dst = b.bytes.push_n(sizeof(E));
         __builtin_memcpy(dst, &e, sizeof(E));
     }
@@ -68,8 +75,9 @@ struct EventBus {
 
     template <class E>
     Span<const E> read() const {
-        u32 id = event_type_id<E>();
-        if (id >= delivered.len) return Span<const E>();
+        u32 id = EventType<E>::id;
+        KV_ASSERT(id != 0);
+        if (id == 0 || id >= delivered.len) return Span<const E>();
         const EventBuffer& b = delivered[id];
         return Span<const E>((const E*)b.bytes.data, b.count());
     }

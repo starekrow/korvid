@@ -1,12 +1,22 @@
 #include "korvid/core/event.h"
+#include "korvid/core/module.h"
 #include "korvid/core/test.h"
 
 struct Ping { kv::u32 n; };
 struct Pong { kv::f32 x, y; };
 
+static constinit const kv::EventTypeDesc k_events[] = {KV_EVENT(Ping), KV_EVENT(Pong)};
+
 void test_event(kv::TestCtx& c) {
     using namespace kv;
     c.begin("event");
+
+    // Ids are 0 until registered, then assigned in table order from first_id.
+    KV_CHECK(c, EventType<Ping>::id == 0 && EventType<Pong>::id == 0);
+    KV_CHECK(c, event_types_register(k_events, 1) == 3);
+    KV_CHECK(c, EventType<Ping>::id == 1 && EventType<Pong>::id == 2);
+    KV_CHECK(c, event_types_register(k_events, 1) == 0); // twice is an error, ids untouched
+    KV_CHECK(c, EventType<Ping>::id == 1);
 
     EventBus bus;
     bus.init(2);
@@ -36,14 +46,13 @@ void test_event(kv::TestCtx& c) {
     KV_CHECK(c, bus.read<Ping>().len == 4);
     KV_CHECK(c, bus.read<Ping>()[3].n == 4);
 
-    // End of tick drops the batch; a type never emitted reads as empty.
+    // End of tick drops the batch.
     bus.end_tick();
     KV_CHECK(c, bus.read<Ping>().len == 0);
     KV_CHECK(c, bus.read<Pong>().len == 0);
     KV_CHECK(c, bus.delivered_total == 5);
 
-    struct Never { kv::u8 b; };
-    KV_CHECK(c, bus.read<Never>().len == 0);
-
     bus.free();
+    event_types_unregister(k_events);
+    KV_CHECK(c, EventType<Ping>::id == 0 && EventType<Pong>::id == 0);
 }

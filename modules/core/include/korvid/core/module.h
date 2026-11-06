@@ -1,19 +1,70 @@
-// Korvid core: module registration record. Modules are data, not static initializers.
-// The build generates the module list (hello/src/modules.gen.cc stands in by hand).
+// Korvid core: module registration. A module declares everything it contributes as data:
+// one constinit ModuleDesc with tables of event types, resources and systems, plus
+// startup/shutdown for OS resources and module state. Nothing registers itself.
+//
+// Rules, stated once:
+//   1. Nothing runs before main. Every ModuleDesc and every table it points at is
+//      constinit; the compiler rejects anything that would need a dynamic initializer.
+//   2. The build generates the module list (hello/src/modules.gen.cc stands in by hand),
+//      in dependency order. engine_init is the only thing that reads it.
+//   3. Order is list order, then declaration order. Modules start in list order and stop
+//      in reverse. Event ids are assigned in that order. Within a tick phase, systems run
+//      in module order, then in the order written in the module's table.
+//   4. Ids live in zero-initialized slots that engine_init fills and engine_shutdown
+//      clears. Id 0 is invalid, so use before init or after shutdown asserts.
+//   5. Module state is engine-owned: startup stores it in the ModuleInstance, and each
+//      system receives its own module's state. Static tables never hold runtime pointers.
 #pragma once
-#include "korvid/core/types.h"
+#include "korvid/core/phase.h"
 
 namespace kv {
 
 struct Engine;
+struct ModuleDesc;
+
+// A plain-data event type. The id slot is EventType<E>::id, filled at init.
+struct EventTypeDesc {
+    const char* name;
+    u32         size;
+    u32         align;
+    u32*        id;
+};
+
+// Something systems read or write: a component store, an input state, a world.
+// Declared by the module that owns it; referenced by name in system read/write sets.
+struct ResourceDesc {
+    const char* name;
+};
+
+// The engine's record of a started module. Passed to startup/shutdown and reachable
+// from TickContext::state (for the system's own module).
+struct ModuleInstance {
+    const ModuleDesc* desc    = nullptr;
+    void*             state   = nullptr; // whatever startup put here; shutdown frees it
+    u32               index   = 0;       // position in the module list
+    bool              started = false;
+};
 
 struct ModuleDesc {
-    const char* name;
-    bool (*startup)(Engine& engine);
-    void (*shutdown)(Engine& engine);
+    const char*               name;
+    Span<const EventTypeDesc> events;
+    Span<const ResourceDesc>  resources;
+    Span<const SystemDesc>    systems;
+    bool (*startup)(Engine& engine, ModuleInstance& self);  // may be null
+    void (*shutdown)(Engine& engine, ModuleInstance& self); // may be null
 };
 
 } // namespace kv
 
+// Table entry for an event type: KV_EVENT(WindowResized).
+#define KV_EVENT(E) ::kv::EventTypeDesc{#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id}
+
+// Declares a module's symbol in its header, and defines it in one source file:
+//   KV_MODULE_DECLARE(platform_module);                     // header, inside namespace kv
+//   KV_MODULE_DEFINE(platform_module) = {"platform", ...};  // source, inside namespace kv
+// constinit is the guarantee behind rule 1.
+#define KV_MODULE_DECLARE(sym) extern const ::kv::ModuleDesc sym
+#define KV_MODULE_DEFINE(sym)  constinit const ::kv::ModuleDesc sym
+
 // Defined by the generated module list of the executable being built, in startup order.
-kv::Span<const kv::ModuleDesc> kv_module_list();
+kv::Span<const kv::ModuleDesc* const> kv_module_list();

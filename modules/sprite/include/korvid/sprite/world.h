@@ -28,9 +28,4 @@ struct SpriteWorld {
     void free();
 };
 
-// Phase system: calls begin_tick on the SpriteWorld in ctx.user. Register it ahead of
-// every system that moves sprites.
-struct TickContext;
-void sprite_world_begin_tick(TickContext& ctx);
-
 } // namespace kv

@@ -5,6 +5,8 @@
 // are render packets; nothing here knows about entities, components or the window pump.
 #include "korvid/render/renderer.h"
 #include "korvid/render/material.h"
+#include "korvid/renderer-vulkan/module.h"
+#include "korvid/core/engine.h"
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
@@ -88,6 +90,7 @@ struct SortKey {
 } // namespace
 
 struct Renderer {
+    Renderer**  owner_slot = nullptr; // the module state's pointer to this; nulled on destroy
     SDL_Window* window     = nullptr;
     bool        validation = false;
     bool        vsync      = true;
@@ -1175,13 +1178,20 @@ bool recreate_swapchain(Renderer* r) {
 
 // ---- public API ---------------------------------------------------------------
 
-Renderer* renderer_create(const RendererDesc& desc) {
-    if (!vkGetInstanceProcAddr) {
+Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
+    RendererVulkanState* owner = (RendererVulkanState*)engine_module_state(engine, "renderer-vulkan");
+    if (!owner || !vkGetInstanceProcAddr) {
         KV_ERROR("vulkan", "renderer-vulkan module is not started");
+        return nullptr;
+    }
+    if (owner->renderer) {
+        KV_ERROR("vulkan", "a renderer already exists");
         return nullptr;
     }
     Renderer* r = (Renderer*)mem_alloc(sizeof(Renderer));
     *r = Renderer{}; // plain data: default member values, no constructor to run
+    r->owner_slot  = &owner->renderer;
+    owner->renderer = r;
     r->window      = (SDL_Window*)desc.native_window;
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;
@@ -1230,6 +1240,7 @@ void renderer_destroy(Renderer* r) {
     r->staging.free();
     KV_INFO("vulkan", "renderer down after %llu frames; %u validation errors, %u warnings",
             (unsigned long long)r->frame_count, r->validation_errors, r->validation_warnings);
+    if (r->owner_slot) *r->owner_slot = nullptr;
     mem_free(r);
 }
 

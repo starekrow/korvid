@@ -1,11 +1,33 @@
 #include "korvid/core/event.h"
+#include "korvid/core/log.h"
+#include "korvid/core/module.h"
+#include <string.h>
 
 namespace kv {
 
-static u32 g_event_type_count = 0;
+u32 event_types_register(Span<const EventTypeDesc> types, u32 first_id) {
+    KV_ASSERT(first_id != 0);
+    u32 next = first_id;
+    for (u32 i = 0; i < types.len; ++i) {
+        const EventTypeDesc& t = types[i];
+        if (*t.id != 0) {
+            KV_ERROR("event", "event type '%s' registered twice", t.name);
+            return 0;
+        }
+        for (u32 j = 0; j < i; ++j) {
+            if (strcmp(types[j].name, t.name) == 0) {
+                KV_ERROR("event", "duplicate event type name '%s'", t.name);
+                return 0;
+            }
+        }
+        *t.id = next++;
+    }
+    return next;
+}
 
-u32 detail::register_event_type(usize) { return g_event_type_count++; }
-u32 event_type_count() { return g_event_type_count; }
+void event_types_unregister(Span<const EventTypeDesc> types) {
+    for (const EventTypeDesc& t : types) *t.id = 0;
+}
 
 static void ensure_buffers(Array<EventBuffer>& arr, u32 type_id) {
     if (type_id < arr.len) return;

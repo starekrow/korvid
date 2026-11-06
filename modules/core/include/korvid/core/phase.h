@@ -1,6 +1,7 @@
-// Korvid core: the update schedule. Slice 1 is a hard-coded ordered list of phases,
-// each holding systems in registration order. Systems declare read/write sets;
-// enforcement is stubbed (recorded, duplicates warned, nothing rejected).
+// Korvid core: the update schedule. Slice 1 is a fixed, ordered list of tick phases;
+// modules place systems in them. Within a phase the order is module-list order, then
+// declaration order. Systems declare read/write sets by resource name; enforcement is
+// stubbed (recorded, conflicts warned, nothing rejected). The DAG scheduler comes later.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/event.h"
@@ -8,35 +9,46 @@
 namespace kv {
 
 struct Engine;
+struct ModuleInstance;
+
+// Fixed order. Add phases here, never at runtime.
+enum class Phase : u8 {
+    Input,   // sample devices into per-tick input state
+    PreSim,  // snapshot previous state, advance timers
+    Sim,     // gameplay
+    PostSim, // reactions to this tick's results
+    Count
+};
+const char* phase_name(Phase p);
 
 struct TickContext {
     Engine*   engine;
     EventBus* events;
     f64       dt;
     u64       tick;
-    void*     user; // the system's own pointer from SystemDesc
+    void*     state; // the running system's module state (ModuleInstance::state)
 };
 
 typedef void (*SystemFn)(TickContext& ctx);
 
+// One entry in a module's system table. Plain data; constinit-able.
 struct SystemDesc {
-    const char*     name;
-    SystemFn        fn;
-    void*           user   = nullptr;
-    Span<const u32> reads  = {};
-    Span<const u32> writes = {};
+    const char*             name;
+    Phase                   phase;
+    SystemFn                fn;
+    Span<const char* const> reads  = {};
+    Span<const char* const> writes = {};
 };
 
-struct Phase {
-    const char*       name;
-    Array<SystemDesc> systems;
+// A system placed in the schedule, with the module it came from.
+struct ScheduledSystem {
+    const SystemDesc* desc;
+    ModuleInstance*   module;
 };
 
 struct PhaseList {
-    Array<Phase> phases;
+    Array<ScheduledSystem> systems[(u32)Phase::Count];
 
-    u32  add_phase(const char* name);
-    bool add_system(u32 phase, const SystemDesc& desc);
     u32  system_count() const;
 
     // Runs one tick: for each phase, deliver pending events, then run its systems.

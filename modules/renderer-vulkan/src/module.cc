@@ -1,14 +1,19 @@
 // Module record. Startup finds the Vulkan loader through SDL and loads the global entry
 // points; the renderer itself is created by renderer_create() once a window exists.
+// No events, resources or systems: the renderer runs at frame rate from the frame loop.
 #include "korvid/renderer-vulkan/module.h"
+#include "korvid/render/renderer.h"
 #include "korvid/core/log.h"
+#include "korvid/core/memory.h"
 #include "vk_funcs.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
 namespace kv {
 
-static bool renderer_vulkan_startup(Engine&) {
+namespace {
+
+bool renderer_vulkan_startup(Engine&, ModuleInstance& self) {
     if (!SDL_Vulkan_LoadLibrary(nullptr)) {
         KV_ERROR("vulkan", "no Vulkan loader: %s", SDL_GetError());
         return false;
@@ -27,20 +32,24 @@ static bool renderer_vulkan_startup(Engine&) {
         SDL_Vulkan_UnloadLibrary();
         return false;
     }
+    RendererVulkanState* s = (RendererVulkanState*)mem_alloc(sizeof(RendererVulkanState));
+    *s = RendererVulkanState{};
+    self.state = s;
     return true;
 }
 
-static void renderer_vulkan_shutdown(Engine&) {
+void renderer_vulkan_shutdown(Engine&, ModuleInstance& self) {
+    RendererVulkanState* s = (RendererVulkanState*)self.state;
+    if (s && s->renderer) renderer_destroy(s->renderer); // clears s->renderer
+    mem_free(s);
     vk_unload();
     SDL_Vulkan_UnloadLibrary();
 }
 
-ModuleDesc renderer_vulkan_module() {
-    ModuleDesc m;
-    m.name     = "renderer-vulkan";
-    m.startup  = renderer_vulkan_startup;
-    m.shutdown = renderer_vulkan_shutdown;
-    return m;
-}
+} // namespace
+
+KV_MODULE_DEFINE(renderer_vulkan_module) = {
+    "renderer-vulkan", {}, {}, {}, renderer_vulkan_startup, renderer_vulkan_shutdown,
+};
 
 } // namespace kv

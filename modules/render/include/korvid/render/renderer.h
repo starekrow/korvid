@@ -5,7 +5,8 @@
 
 namespace kv {
 
-struct Renderer; // opaque; owned by the backend
+struct Engine;
+struct Renderer; // opaque; owned by the backend module, which destroys it at its shutdown
 
 struct RendererDesc {
     void* native_window = nullptr; // HostWindow::native_handle()
@@ -22,7 +23,9 @@ struct RenderFrame {
     color clear_color{0.09f, 0.09f, 0.11f, 1.0f};
 };
 
-Renderer* renderer_create(const RendererDesc& desc);
+// One renderer per process in slice 1. Null if one exists already or creation failed.
+Renderer* renderer_create(Engine& engine, const RendererDesc& desc);
+// Early teardown only; the backend module's shutdown destroys whatever is still alive.
 void      renderer_destroy(Renderer* r);
 
 // The window's framebuffer size changed; the backend recreates what depends on it.

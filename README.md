@@ -5,6 +5,15 @@ an extract, and an example game with a three-state machine (INIT, RUN, EXIT) tha
 bounces one checkerboard sprite. Materials are stubbed: a null material renders with
 the built-in red/white checkerboard.
 
+Module registration is declarative (`core/module.h`): a module is one `constinit`
+`ModuleDesc` with tables of event types, resources and systems, plus startup/shutdown for
+OS resources and module state. Nothing registers itself and nothing runs before main;
+the build-generated list (`hello/src/modules.gen.cc` for now) is the only input. Order is
+list order, then declaration order: modules start in list order and stop in reverse,
+event ids are assigned in that order, and within each tick phase (input, presim, sim,
+postsim) systems run in module order then declaration order. `engine_init` rejects
+duplicate names and unknown resource references and logs the schedule it built.
+
 Modules follow the kormake directory convention (`module.lua`, `include/korvid/<name>/`,
 `src/`, `shaders/`, `tests/`). `build.ninja` is a hand-written stand-in until kormake exists.
 
