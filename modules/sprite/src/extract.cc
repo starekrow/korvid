@@ -11,7 +11,7 @@ void extract_sprites(const SpriteWorld& world, Array<RenderPacket>& out) {
         if (!world.entities.alive[i]) continue;
         const Sprite& s = world.sprites[i];
         RenderPacket p;
-        p.entity   = Handle{i, world.entities.gens[i]};
+        p.entity   = world.entities.handle_at(i);
         p.prev     = world.prev_transforms[i];
         p.cur      = world.transforms[i];
         p.material = s.material;

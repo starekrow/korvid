@@ -18,7 +18,8 @@ Modules follow the kormake directory convention (`module.lua`, `include/korvid/<
 `src/`, `shaders/`, `tests/`). `build.ninja` is a hand-written stand-in until kormake exists.
 
     core             memory (general, arenas, scratch, pools on reserved pages; see
-                     docs/design/allocators.md), handles, events, phases, tick clock, log
+                     docs/design/allocators.md), handles with a kind registry and C API
+                     (docs/design/handles.md), events, phases, tick clock, log
     platform         SDL3 window and keyboard input (events on the bus)
     math             header-only: vec2, point2, rect2, color, affine2, ortho2d
     render           header-only interface: RenderPacket, renderer API, Material stub

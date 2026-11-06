@@ -1,5 +1,14 @@
 // Korvid core: a generational slot pool. Backs entity pools and component storage.
-// A stale handle returns null, never another slot's data.
+// A stale handle returns null, never another slot's data; a handle from another pool
+// fails the kind check for the same cost.
+//
+// The pool is handle-compatible, not a handle issuer: it stamps whatever kind its owner
+// hands it (use_kind) and otherwise issues local handles with kind 0, which the registry
+// treats as nothing. The owner registers the kind (kv_handle.h) and decides what a
+// resolved pointer means; resolve_fn and describe_fn are offered for owners whose answer
+// is "the item". A pool is plain data and may be moved by value; an owner that
+// registered it as ctx updates the ctx. Freed slots are reused FIFO, so generations
+// wrap only after the whole pool has cycled.
 //
 // Storage is one reserved range committed as slots are used, so slot addresses are
 // stable for the pool's lifetime and the whole pool is relocatable: a snapshot is a copy
@@ -11,6 +20,7 @@
 #include "korvid/core/memory.h"
 #include "korvid/core/os_memory.h"
 #include "korvid/core/thread.h"
+#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -19,7 +29,7 @@ constexpr u32 KV_POOL_DEFAULT_MAX = 1u << 20; // slots of address space, not mem
 constexpr u32 KV_POOL_NONE        = 0xFFFFFFFFu;
 
 struct PoolSnapshotHeader {
-    u32 len, live, free_head, item_size;
+    u32 len, live, free_head, free_tail, item_size;
 };
 
 template <class T>
@@ -32,7 +42,9 @@ struct Pool {
     u32*  next_free = nullptr; // by slot: intrusive free list
     u32   len       = 0;       // slots in use, dead or alive
     u32   live      = 0;
-    u32   free_head = KV_POOL_NONE;
+    u32   free_head = KV_POOL_NONE; // FIFO: pop here
+    u32   free_tail = KV_POOL_NONE; //       push here
+    u16   kind      = 0;            // stamped into issued handles; 0 means local
     u32   max_items = 0;
     u32   committed = 0;       // slots whose pages are committed
     u8*   base      = nullptr;
@@ -74,6 +86,7 @@ struct Pool {
         if (free_head != KV_POOL_NONE) {
             idx       = free_head;
             free_head = next_free[idx];
+            if (free_head == KV_POOL_NONE) free_tail = KV_POOL_NONE;
         } else {
             if (len >= max_items) { KV_ERROR("mem", "pool is full: %u slots", max_items); return Handle{}; }
             if (len >= committed && !commit_more()) return Handle{};
@@ -84,28 +97,50 @@ struct Pool {
         alive[idx] = 1;
         next_free[idx] = KV_POOL_NONE;
         ++live;
-        return Handle{idx, gens[idx]};
+        return handle_at(idx);
     }
+
+    // The owner registered a kind; from now on issued handles carry it and valid()
+    // rejects handles that do not. Set before the first create.
+    void use_kind(u16 k) { KV_ASSERT(len == 0); kind = k; }
+
+    // For an owner that registers the pool itself as ctx: resolve is the item, describe
+    // is the slot's state. An owner with its own meaning writes its own.
+    static void* resolve_fn(kv_handle h, void* ctx) { return ((Pool*)ctx)->get(Handle{h}); }
+    static int   describe_fn(kv_handle h, void* ctx, char* out, size_t cap) {
+        const Pool& p = *(const Pool*)ctx;
+        Handle hh{h};
+        const char* state = p.valid(hh) ? "alive" : hh.index() < p.len ? "stale" : "out of range";
+        return snprintf(out, cap, "%s (%u live of %u slots)", state, p.live, p.len);
+    }
+
+    // The handle for a slot, whatever its state. For iteration over alive[].
+    Handle handle_at(u32 i) const { return Handle::make(kind, gens[i], i); }
 
     bool valid(Handle h) const {
-        return h.gen != 0 && h.index < len && alive[h.index] && gens[h.index] == h.gen;
+        u32 i = h.index();
+        return h.kind() == kind && h.gen() != 0 && i < len && alive[i] && gens[i] == h.gen();
     }
 
-    T*       get(Handle h)       { return valid(h) ? &items[h.index] : nullptr; }
-    const T* get(Handle h) const { return valid(h) ? &items[h.index] : nullptr; }
+    T*       get(Handle h)       { return valid(h) ? &items[h.index()] : nullptr; }
+    const T* get(Handle h) const { return valid(h) ? &items[h.index()] : nullptr; }
 
     bool destroy(Handle h) {
         if (!valid(h)) return false;
         KV_VERIFY(owner == thread_id());
-        alive[h.index] = 0;
+        u32 i = h.index();
+        alive[i] = 0;
 #if KV_DEV
-        memset(&items[h.index], 0xDD, sizeof(T)); // a stale pointer sees poison, not old data
+        memset(&items[i], 0xDD, sizeof(T)); // a stale pointer sees poison, not old data
 #endif
-        u32 g = gens[h.index] + 1;
-        if (g == 0) g = 1;
-        gens[h.index]      = g;
-        next_free[h.index] = free_head;
-        free_head          = h.index;
+        u32 g = gens[i] + 1;
+        if (g > KV_HANDLE_MAX_GEN) g = 1; // skip 0 on wrap
+        gens[i] = g;
+        // Append: the slot comes back only after every other free slot has been reused.
+        next_free[i] = KV_POOL_NONE;
+        if (free_tail == KV_POOL_NONE) free_head = i;
+        else next_free[free_tail] = i;
+        free_tail = i;
         --live;
         return true;
     }
@@ -128,14 +163,15 @@ struct Pool {
     // Writes snapshot_size() bytes; the caller sized `out`.
     void snapshot(void* out) const {
         u8* p = (u8*)out;
-        PoolSnapshotHeader h{len, live, free_head, (u32)sizeof(T)};
+        PoolSnapshotHeader h{len, live, free_head, free_tail, (u32)sizeof(T)};
         memcpy(p, &h, sizeof h);              p += sizeof h;
         memcpy(p, items, (usize)len * sizeof(T));      p += (usize)len * sizeof(T);
         memcpy(p, gens, (usize)len * sizeof(u32));     p += (usize)len * sizeof(u32);
         memcpy(p, alive, len);                         p += len;
         memcpy(p, next_free, (usize)len * sizeof(u32));
     }
-    // Restores into this pool (initialized or not). Slot addresses stay where they are.
+    // Restores into this pool (initialized or not). Slot addresses stay where they are,
+    // and so does this pool's kind: handles issued by another pool stay foreign.
     bool restore(const void* in) {
         if (!base && !init()) return false;
         const u8* p = (const u8*)in;
@@ -147,7 +183,7 @@ struct Pool {
         memcpy(gens, p, (usize)h.len * sizeof(u32));   p += (usize)h.len * sizeof(u32);
         memcpy(alive, p, h.len);                       p += h.len;
         memcpy(next_free, p, (usize)h.len * sizeof(u32));
-        len = h.len; live = h.live; free_head = h.free_head;
+        len = h.len; live = h.live; free_head = h.free_head; free_tail = h.free_tail;
         return true;
     }
 

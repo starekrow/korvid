@@ -112,7 +112,9 @@ void game_update(App& app, TickContext& ctx) {
         s.layer = 0;
         // s.material stays null: materials are stubbed, the renderer uses its default texture.
         app.ball = world.create(transform2_at(point2{0.0f, 0.0f}), s);
-        KV_INFO("game", "ball is entity %u:%u", app.ball.index, app.ball.gen);
+        char text[96];
+        kv_handle_describe(app.ball.bits, text, sizeof text);
+        KV_INFO("game", "ball is %s", text);
         set_state(app, ST_RUN);
         break;
     }

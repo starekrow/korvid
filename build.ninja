@@ -72,11 +72,14 @@ build $builddir/obj/core/arena.o: cxx modules/core/src/arena.cc
   includes = $inc_core
 build $builddir/obj/core/thread.o: cxx modules/core/src/thread.cc
   includes = $inc_core
+build $builddir/obj/core/handle.o: cxx modules/core/src/handle.cc
+  includes = $inc_core
 
 build $builddir/lib/libkv_core.a: ar $builddir/obj/core/memory.o $
     $builddir/obj/core/log.o $builddir/obj/core/event.o $builddir/obj/core/tick.o $
     $builddir/obj/core/phase.o $builddir/obj/core/engine.o $builddir/obj/core/posix/time.o $
-    $builddir/obj/core/posix/os_memory.o $builddir/obj/core/arena.o $builddir/obj/core/thread.o
+    $builddir/obj/core/posix/os_memory.o $builddir/obj/core/arena.o $builddir/obj/core/thread.o $
+    $builddir/obj/core/handle.o
 
 build $builddir/obj/core/tests/main.o: cxx modules/core/tests/main.cc
   includes = $inc_core
