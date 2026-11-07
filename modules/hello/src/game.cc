@@ -1,6 +1,8 @@
-// hello: the game. Startup loads the ball texture and builds two materials; one system
-// runs a three-state machine (INIT -> RUN -> EXIT) in phase Sim that bounces the ball
-// over a tiled background. ExitRequested from the frame loop sends it through EXIT,
+// hello: the game. Startup loads the ball texture and builds the materials; one system
+// runs a three-state machine (INIT -> RUN -> EXIT) in phase Sim that bounces four balls
+// over a tiled background: one horizontally, one vertically, one in random directions,
+// and one that blinks in and out of existence. Each has its own material, so all three
+// blend modes are on screen. ExitRequested from the frame loop sends it through EXIT,
 // which cleans up and asks the engine to quit. No window, renderer, loop or options
 // here: those are the frameloop module's.
 #include "korvid/hello/module.h"
@@ -8,6 +10,7 @@
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
+#include "korvid/core/random.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/platform/events.h"
 #include "korvid/platform/module.h"
@@ -30,21 +33,57 @@ const char* state_name(GameState s) {
     return "?";
 }
 
+enum BallKind : u8 { BALL_HORIZONTAL, BALL_VERTICAL, BALL_RANDOM, BALL_BLINK, BALL_COUNT };
+
+struct Ball {
+    Handle entity;
+    vec2   velocity;       // world units (pixels) per second
+    f32    size;
+    i32    layer;
+    Handle material;
+    u32    blink_ticks;    // BALL_BLINK: ticks until it toggles
+    u32    bounces;
+};
+
 // The hello module's state: handles the game keeps, and the state machine.
 struct Game {
-    Handle    ball_asset;      // asset.texture
-    Handle    ball_material;   // render.material, alpha, ball.png
-    Handle    bg_material;     // render.material, opaque, the default checkerboard tinted dark
+    Handle    ball_asset;                 // asset.texture
+    Handle    materials[BALL_COUNT];      // render.material, one per ball
+    Handle    bg_material;                // render.material, opaque, the default checkerboard tinted dark
 
     GameState state          = ST_INIT;
     bool      exit_requested = false;
     Handle    background;
-    Handle    ball;
-    f32       ball_speed     = 420.0f; // world units (pixels) per second
-    f32       ball_dir       = 1.0f;
-    u32       bounces        = 0;
+    Ball      balls[BALL_COUNT];
+    Rng       rng;
     u64       key_edges      = 0;
 };
+
+// Keeps the whole sprite inside the window; reverses the velocity on the edge it hit.
+bool bounce(Transform2& t, vec2& v, f32 half_size, f32 half_w, f32 half_h, f32 dt) {
+    bool hit = false;
+    t.position += v * dt;
+    f32 lx = half_w - half_size, ly = half_h - half_size;
+    if (t.position.x > lx)       { t.position.x = lx;  v.x = -v.x; hit = true; }
+    else if (t.position.x < -lx) { t.position.x = -lx; v.x = -v.x; hit = true; }
+    if (t.position.y > ly)       { t.position.y = ly;  v.y = -v.y; hit = true; }
+    else if (t.position.y < -ly) { t.position.y = -ly; v.y = -v.y; hit = true; }
+    return hit;
+}
+
+vec2 random_direction(Rng& rng, f32 speed) {
+    f32 a = rng.range(0.0f, 2.0f * KV_PI);
+    return vec2{cosf(a) * speed, sinf(a) * speed};
+}
+
+void spawn_ball(Game& g, SpriteWorld& world, Ball& b, point2 at) {
+    Sprite s;
+    s.material = b.material;
+    s.size     = vec2{b.size, b.size};
+    s.layer    = b.layer;
+    b.entity   = world.create(transform2_at(at), s);
+    (void)g;
+}
 
 void set_state(Game& g, GameState next) {
     KV_INFO("game", "%s -> %s", state_name(g.state), state_name(next));
@@ -67,14 +106,21 @@ void game_update(Game& g, TickContext& ctx) {
         bg.layer    = -1;
         g.background = world.create(transform2_at(point2{0.0f, 0.0f}), bg);
 
-        Sprite s;
-        s.material = g.ball_material; // placeholder until the PNG lands, then the ball
-        s.size     = vec2{96.0f, 96.0f};
-        s.layer    = 0;
-        g.ball = world.create(transform2_at(point2{0.0f, 0.0f}), s);
-        char text[96];
-        kv_handle_describe(g.ball.bits, text, sizeof text);
-        KV_INFO("game", "ball is %s", text);
+        g.rng = Rng::seeded(0x5eed, 1);
+        Ball* b = g.balls;
+        b[BALL_HORIZONTAL] = Ball{{}, vec2{420.0f, 0.0f}, 96.0f, 2, g.materials[BALL_HORIZONTAL], 0, 0};
+        b[BALL_VERTICAL]   = Ball{{}, vec2{0.0f, 300.0f}, 72.0f, 1, g.materials[BALL_VERTICAL], 0, 0};
+        b[BALL_RANDOM]     = Ball{{}, random_direction(g.rng, 360.0f), 56.0f, 3, g.materials[BALL_RANDOM], 0, 0};
+        b[BALL_BLINK]      = Ball{{}, vec2{}, 120.0f, 0, g.materials[BALL_BLINK], 45, 0};
+        spawn_ball(g, world, b[BALL_HORIZONTAL], point2{0.0f, 0.0f});
+        spawn_ball(g, world, b[BALL_VERTICAL], point2{-200.0f, 0.0f});
+        spawn_ball(g, world, b[BALL_RANDOM], point2{200.0f, 100.0f});
+        spawn_ball(g, world, b[BALL_BLINK], point2{0.0f, -120.0f});
+        for (u32 i = 0; i < BALL_COUNT; ++i) {
+            char text[96];
+            kv_handle_describe(b[i].entity.bits, text, sizeof text);
+            KV_INFO("game", "ball %u is %s", i, text);
+        }
         set_state(g, ST_RUN);
         break;
     }
@@ -84,33 +130,37 @@ void game_update(Game& g, TickContext& ctx) {
             set_state(g, ST_EXIT);
             break;
         }
-        Transform2* t = world.transform(g.ball);
-        const Sprite* s = world.sprite(g.ball);
-        if (!t || !s) {
-            KV_ERROR("game", "ball handle went stale");
-            set_state(g, ST_EXIT);
-            break;
-        }
-        // World units are pixels with the origin at the window center; keep the whole
-        // sprite on screen and reverse at the edges.
-        f32 limit = (f32)window->width() * 0.5f - s->size.x * t->scale.x * 0.5f;
-        t->position.x += g.ball_dir * g.ball_speed * (f32)ctx.dt;
-        if (t->position.x >= limit && g.ball_dir > 0.0f) {
-            t->position.x = limit;
-            g.ball_dir    = -1.0f;
-            ++g.bounces;
-        } else if (t->position.x <= -limit && g.ball_dir < 0.0f) {
-            t->position.x = -limit;
-            g.ball_dir    = 1.0f;
-            ++g.bounces;
+        // World units are pixels with the origin at the window center.
+        f32 half_w = (f32)window->width() * 0.5f, half_h = (f32)window->height() * 0.5f;
+        f32 dt = (f32)ctx.dt;
+        for (u32 i = 0; i < BALL_COUNT; ++i) {
+            Ball& b = g.balls[i];
+            if (i == BALL_BLINK) {
+                // Exists for a while, vanishes for a while: creates and removes, every time.
+                if (--b.blink_ticks == 0) {
+                    if (world.valid(b.entity)) { world.destroy(b.entity); b.entity = Handle{}; b.blink_ticks = 30; }
+                    else { spawn_ball(g, world, b, point2{g.rng.range(-half_w * 0.5f, half_w * 0.5f), -120.0f}); b.blink_ticks = 45; }
+                }
+                continue;
+            }
+            Transform2* t = world.transform(b.entity);
+            if (!t) { KV_ERROR("game", "ball %u went stale", i); set_state(g, ST_EXIT); break; }
+            if (bounce(*t, b.velocity, b.size * 0.5f, half_w, half_h, dt)) {
+                ++b.bounces;
+                if (i == BALL_RANDOM) b.velocity = random_direction(g.rng, g.rng.range(240.0f, 520.0f));
+            }
         }
         break;
     }
 
     case ST_EXIT: {
-        if (world.destroy(g.ball)) KV_INFO("game", "ball destroyed after %u bounces", g.bounces);
+        for (u32 i = 0; i < BALL_COUNT; ++i) {
+            Ball& b = g.balls[i];
+            if (world.destroy(b.entity)) KV_INFO("game", "ball %u destroyed after %u bounces", i, b.bounces);
+            b.entity = Handle{};
+        }
         world.destroy(g.background);
-        g.ball = g.background = Handle{};
+        g.background = Handle{};
         KV_ASSERT(world.live() == 0);
         engine_request_quit(engine);
         break;
@@ -164,16 +214,30 @@ bool hello_startup(Engine& engine, ModuleInstance& self) {
     g->ball_asset = asset_load_texture(engine, "hello/ball.png");
     const TextureAsset* ball = asset_texture(engine, g->ball_asset);
     if (!ball) return false;
-    MaterialDesc ball_md;
-    ball_md.texture = ball->texture;
-    ball_md.blend   = BlendMode::Alpha;
-    g->ball_material = renderer_material_create(r, ball_md);
+    // One material per ball: the ball texture through alpha and additive blending with
+    // different tints. The background is the opaque one.
+    MaterialDesc md[BALL_COUNT];
+    md[BALL_HORIZONTAL].texture = ball->texture;
+    md[BALL_HORIZONTAL].blend   = BlendMode::Alpha;
+    md[BALL_VERTICAL].texture   = ball->texture;
+    md[BALL_VERTICAL].blend     = BlendMode::Additive;
+    md[BALL_VERTICAL].tint      = color_rgba(0.3f, 0.8f, 1.0f);
+    md[BALL_RANDOM].texture     = ball->texture;
+    md[BALL_RANDOM].blend       = BlendMode::Alpha;
+    md[BALL_RANDOM].tint        = color_rgba(0.5f, 1.0f, 0.5f);
+    md[BALL_BLINK].texture      = ball->texture;
+    md[BALL_BLINK].blend        = BlendMode::Alpha;
+    md[BALL_BLINK].tint         = color_rgba(1.0f, 0.4f, 1.0f);
+    for (u32 i = 0; i < BALL_COUNT; ++i) {
+        g->materials[i] = renderer_material_create(r, md[i]);
+        if (g->materials[i].is_null()) return false;
+    }
     MaterialDesc bg_md;
     bg_md.texture = Handle{}; // the default checkerboard
     bg_md.blend   = BlendMode::Opaque;
     bg_md.tint    = color_rgba(0.22f, 0.22f, 0.26f);
     g->bg_material = renderer_material_create(r, bg_md);
-    return !g->ball_material.is_null() && !g->bg_material.is_null();
+    return !g->bg_material.is_null();
 }
 
 void hello_shutdown(Engine&, ModuleInstance& self) {

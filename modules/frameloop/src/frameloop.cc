@@ -8,9 +8,7 @@
 #include "korvid/platform/events.h"
 #include "korvid/platform/module.h"
 #include "korvid/render/renderer.h"
-#include "korvid/sprite/extract.h"
 #include "korvid/sprite/module.h"
-#include "korvid/sprite/world.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -28,7 +26,7 @@ struct FrameLoopState {
     HostWindow*     window   = nullptr; // platform's
     Renderer*       renderer = nullptr; // renderer-vulkan's
     u32             presented_w = 0, presented_h = 0;
-    u32             packets_last_frame = 0;
+    u32             deltas_last_frame = 0;
     bool            timer_fired = false; // the loop raises it; the system emits it once
     bool            timer_sent  = false;
 };
@@ -107,7 +105,8 @@ constinit const SystemDesc    k_systems[] = {
     {"frameloop.exit", Phase::PreSim, frameloop_exit, k_exit_reads},
 };
 
-// Extract after the frame's last tick, then draw at the clock's interpolation point.
+// Hand the renderer what the frame's ticks changed, then draw at the clock's
+// interpolation point.
 void render_frame(Engine& engine, FrameLoopState& s) {
     // The size reaches the renderer at render rate, not tick rate: a frame presented at a
     // stale size during a live resize makes the compositor withhold the next frame.
@@ -118,18 +117,19 @@ void render_frame(Engine& engine, FrameLoopState& s) {
         s.presented_h = h;
     }
 
-    // Packets live for this frame only: scratch, reset at the top of the next engine_frame.
-    Array<RenderPacket> packets = array_in<RenderPacket>(mem_scratch());
-    extract_sprites(*sprite_world(engine), packets);
-    s.packets_last_frame = packets.len;
+    Array<SpriteDelta>* deltas = sprite_deltas(engine);
+    if (deltas) {
+        renderer_apply(s.renderer, deltas->span());
+        s.deltas_last_frame = deltas->len;
+        deltas->clear();
+    }
 
-    RenderFrame frame;
-    frame.packets     = packets.span();
-    frame.alpha       = engine.clock.alpha();
-    frame.clear_color = s.config.clear_color;
+    RenderView view;
+    view.alpha       = engine.clock.alpha();
+    view.clear_color = s.config.clear_color;
     f32 vw = (f32)w, vh = (f32)h;
-    frame.view = rect2{-vw * 0.5f, -vh * 0.5f, vw, vh}; // one world unit per pixel, origin centered
-    renderer_render(s.renderer, frame);
+    view.view = rect2{-vw * 0.5f, -vh * 0.5f, vw, vh}; // one world unit per pixel, origin centered
+    renderer_render(s.renderer, view);
 }
 
 void run(Engine& engine, FrameLoopState& s) {
@@ -158,9 +158,9 @@ void run(Engine& engine, FrameLoopState& s) {
         }
         if (s.config.report_every_seconds && now >= next_report) {
             const MemSample& mem = mem_last_sample();
-            KV_INFO("frameloop", "%u fps, tick %llu, alpha %.2f, %u packets, %ux%u, %s, %llu KB live",
+            KV_INFO("frameloop", "%u fps, tick %llu, alpha %.2f, %u sprites, %u deltas/frame, %ux%u, %s, %llu KB live",
                     frames_in_window, (unsigned long long)engine.clock.tick_count, engine.clock.alpha(),
-                    s.packets_last_frame, s.window->width(), s.window->height(),
+                    renderer_sprite_count(s.renderer), s.deltas_last_frame, s.window->width(), s.window->height(),
                     s.window->focused() ? "focused" : "unfocused",
                     (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024));
             frames_in_window = 0;

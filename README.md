@@ -1,8 +1,10 @@
 # Korvid
 
 Step 2: a Vulkan 1.3 sprite renderer behind a render interface, sprite entities with
-an extract, and an example game with a three-state machine (INIT, RUN, EXIT) that
-bounces a textured ball over a tiled background. Textures and materials are
+a per-tick delta extract into the renderer's persistent world, and an example game with
+a three-state machine (INIT, RUN, EXIT) that bounces four balls over a tiled background:
+horizontal, vertical, random, and one that blinks in and out of existence, each with its
+own material so all three blend modes are on screen. Textures and materials are
 renderer-issued handles whose index is the GPU slot or row; a null or stale material
 renders with the built-in red/white checkerboard.
 
@@ -23,18 +25,22 @@ hand-written stand-in until kormake exists.
     core             memory (general, arenas, scratch, pools on reserved pages; see
                      docs/design/allocators.md), handles with a kind registry and C API
                      (docs/design/handles.md), Map<K, V> (dense entries, index past 16),
-                     Name interning, events, phases, tick clock, log
+                     Name interning, Rng (PCG32), events, phases, tick clock, log
     platform         SDL3 window and keyboard input (events on the bus); the I/O queue
                      (io_uring-shaped: submit, pump, reap; mocked with fread for now)
     math             header-only: vec2, point2, rect2, color, affine2, ortho2d
-    render           header-only interface: RenderPacket, renderer API (textures,
-                     materials, caps), MaterialDesc
+    render           header-only interface: the SpriteDelta stream, renderer API
+                     (textures, materials, caps, apply, render), MaterialDesc
     asset            load_texture returns a handle at once; the read rides the I/O queue,
                      decode (PNG on zlib) and upload happen in asset.pump, completion is
                      AssetReady/AssetFailed on the bus
-    sprite           Transform2 + Sprite components, SpriteWorld, extract_sprites
-    renderer-vulkan  provides "render": dynamic rendering, sync2, bindless textures,
-                     Slang shader compiled to SPIR-V by the build; the only Vulkan user
+    sprite           Transform2 + Sprite components, SpriteWorld, and the extract: each
+                     tick emits a Tick marker plus a Set for every entity that is new or
+                     changed and a Remove for every one destroyed (sprite.extract, PostSim)
+    renderer-vulkan  provides "render": a persistent sprite world keyed by entity handle
+                     with previous and current state per sprite, dynamic rendering, sync2,
+                     bindless textures, Slang shader compiled to SPIR-V by the build; the
+                     only Vulkan user
     frameloop        what every game needs and no game decides: options, window and
                      renderer from a FrameLoopConfig, the loop (pump, ticks, extract,
                      render), resize, reporting, ExitRequested on the bus

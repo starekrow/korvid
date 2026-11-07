@@ -12,6 +12,7 @@
 #include "korvid/core/arena.h"
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
+#include "korvid/core/map.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/pool.h"
 #include "vk_funcs.h"
@@ -28,6 +29,7 @@ namespace {
 constexpr u32 kFramesInFlight   = 2;
 constexpr u32 kMaxTextures      = 1024; // bindless array size; slot 0 is the default texture
 constexpr u32 kMaxMaterials     = 4096;
+constexpr u32 kMaxSprites       = 1u << 20;
 constexpr u32 kDefaultTexSize   = 16;   // checkerboard texels per side
 constexpr u32 kDefaultTexCell   = 2;    // texels per checker cell
 constexpr u32 kInitialInstances = 256;
@@ -79,6 +81,13 @@ struct MaterialRecord {
     color     tint;
 };
 
+// A sprite in the render world: what the sim last said, and where it was the tick before.
+struct RenderSprite {
+    Handle            entity;
+    Placement2        prev;
+    RenderSpriteState cur;
+};
+
 // Something to destroy once the frame that last used it has passed its fence.
 struct Garbage {
     enum Kind : u8 { BufferKind, ImageKind, ImageViewKind, MemoryKind } kind;
@@ -110,7 +119,7 @@ struct Swapchain {
 struct SortKey {
     i32 layer;
     u32 blend;
-    u32 packet;
+    u32 sprite; // render sprite slot
 };
 
 } // namespace
@@ -147,6 +156,11 @@ struct Renderer {
     Pool<MaterialRecord> materials; // row = index
     Handle               default_material;
     u16                  texture_kind = 0, material_kind = 0;
+
+    // The persistent render world: the outer engine's entity handle maps to a slot here.
+    Pool<RenderSprite>   sprites;
+    Map<Handle, u32>     sprite_of_entity;
+    u64                  deltas_applied = 0;
 
     FrameInFlight frames[kFramesInFlight];
     // Uploads run on their own command buffer and fence, so they never collide with a
@@ -734,7 +748,9 @@ bool create_resource_pools(Renderer* r) {
     if (!r->texture_kind || !r->material_kind) return false;
     r->textures.use_kind(r->texture_kind);
     r->materials.use_kind(r->material_kind);
-    return r->textures.init(kMaxTextures, r->general->tag) && r->materials.init(kMaxMaterials, r->general->tag);
+    r->sprite_of_entity.init(r->general);
+    return r->textures.init(kMaxTextures, r->general->tag) && r->materials.init(kMaxMaterials, r->general->tag) &&
+           r->sprites.init(kMaxSprites, r->general->tag);
 }
 
 // ---- descriptors, pipeline -----------------------------------------------------
@@ -1200,9 +1216,9 @@ bool ensure_instance_capacity(Renderer* r, FrameInFlight& f, u32 needed) {
 
 // ---- packets to instances -------------------------------------------------------
 
-// A packet's material row, or the default's when the handle is null or stale.
-const MaterialRecord& packet_material(Renderer* r, const RenderPacket& p) {
-    const MaterialRecord* m = r->materials.get(p.material);
+// A sprite's material row, or the default's when the handle is null or stale.
+const MaterialRecord& sprite_material(Renderer* r, const RenderSpriteState& s) {
+    const MaterialRecord* m = r->materials.get(s.material);
     return m ? *m : *r->materials.get(r->default_material);
 }
 
@@ -1211,27 +1227,31 @@ int compare_keys(const void* a, const void* b) {
     const SortKey& y = *(const SortKey*)b;
     if (x.layer != y.layer) return x.layer < y.layer ? -1 : 1;
     if (x.blend != y.blend) return x.blend < y.blend ? -1 : 1;
-    return x.packet < y.packet ? -1 : (x.packet > y.packet ? 1 : 0);
+    return x.sprite < y.sprite ? -1 : (x.sprite > y.sprite ? 1 : 0);
 }
 
-// Sorts by layer then blend mode, interpolates by alpha and writes GPU instances in order.
-// Keys and staging are scratch: they live until the next frame's engine_frame.
-void build_instances(Renderer* r, const RenderFrame& frame) {
+// Walks the render world, sorts by layer then blend mode, interpolates by alpha and
+// writes GPU instances in order. Keys and staging are scratch: they live until the next
+// frame's engine_frame.
+void build_instances(Renderer* r, const RenderView& view) {
     Arena& scratch = *mem_scratch_arena();
-    u32 n = frame.packets.len;
+    u32 n = r->sprites.live;
     r->keys    = Span<SortKey>(arena_push_n<SortKey>(scratch, n), n);
     r->staging = Span<GpuInstance>(arena_push_n<GpuInstance>(scratch, n), n);
-    for (u32 i = 0; i < n; ++i) {
-        const RenderPacket& p = frame.packets[i];
-        r->keys[i] = SortKey{p.layer, (u32)packet_material(r, p).blend, i};
+    u32 kn = 0;
+    for (u32 i = 0; i < r->sprites.len && kn < n; ++i) {
+        if (!r->sprites.is_alive(i)) continue;
+        const RenderSprite& s = r->sprites.items[i];
+        r->keys[kn++] = SortKey{s.cur.layer, (u32)sprite_material(r, s.cur).blend, i};
     }
     if (n > 1) qsort(r->keys.data, n, sizeof(SortKey), compare_keys);
 
     u32 out = 0;
     for (const SortKey& k : r->keys) {
-        const RenderPacket& p = frame.packets[k.packet];
-        const MaterialRecord& m = packet_material(r, p);
-        Placement2 at = lerp(p.prev, p.cur, frame.alpha);
+        const RenderSprite& s = r->sprites.items[k.sprite];
+        const RenderSpriteState& p = s.cur;
+        const MaterialRecord& m = sprite_material(r, p);
+        Placement2 at = lerp(s.prev, p.placement, view.alpha);
         affine2 model = affine2_trs(at.position, at.rotation, at.scale * p.size);
         color tint = p.tint * m.tint;
         GpuInstance g;
@@ -1248,7 +1268,7 @@ void build_instances(Renderer* r, const RenderFrame& frame) {
 
 // ---- the frame -----------------------------------------------------------------
 
-bool record_frame(Renderer* r, FrameInFlight& f, u32 image_index, const RenderFrame& frame) {
+bool record_frame(Renderer* r, FrameInFlight& f, u32 image_index, const RenderView& view) {
     Swapchain& s = r->swapchain;
     VkCommandBuffer cmd = f.cmd;
 
@@ -1284,7 +1304,7 @@ bool record_frame(Renderer* r, FrameInFlight& f, u32 image_index, const RenderFr
     color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     color.loadOp      = VK_ATTACHMENT_LOAD_OP_CLEAR;
     color.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
-    color.clearValue.color = {{frame.clear_color.r, frame.clear_color.g, frame.clear_color.b, frame.clear_color.a}};
+    color.clearValue.color = {{view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a}};
     VkRenderingInfo ri{};
     ri.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
     ri.renderArea           = {{0, 0}, s.extent};
@@ -1299,10 +1319,10 @@ bool record_frame(Renderer* r, FrameInFlight& f, u32 image_index, const RenderFr
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->pipe_layout, 0, 1, &f.set, 0, nullptr);
 
-    affine2 view = ortho2d(frame.view);
+    affine2 proj = ortho2d(view.view);
     PushData push{};
-    push.view[0] = view.a; push.view[1] = view.b; push.view[2] = view.c; push.view[3] = view.d;
-    push.view_trans[0] = view.tx; push.view_trans[1] = view.ty;
+    push.view[0] = proj.a; push.view[1] = proj.b; push.view[2] = proj.c; push.view[3] = proj.d;
+    push.view_trans[0] = proj.tx; push.view_trans[1] = proj.ty;
 
     // One instanced draw per run of equal blend mode (the sort put layers in order already).
     u32 start = 0;
@@ -1419,6 +1439,8 @@ void renderer_destroy(Renderer* r) {
     if (r->material_kind) kv_handle_kind_unregister(r->material_kind);
     r->textures.free();
     r->materials.free();
+    r->sprites.free();
+    r->sprite_of_entity.free();
     if (r->owner_slot) *r->owner_slot = nullptr;
     Allocator* ga = r->general;
     ga->free(ga, r, sizeof(Renderer));
@@ -1513,7 +1535,44 @@ void renderer_resize(Renderer* r, u32 width, u32 height) {
     r->swapchain_dirty = true;
 }
 
-bool renderer_render(Renderer* r, const RenderFrame& frame) {
+void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
+    if (!r) return;
+    for (const SpriteDelta& d : deltas) {
+        ++r->deltas_applied;
+        switch (d.kind) {
+        case SpriteDeltaKind::Tick:
+            // A new tick: where everything is now is where it was.
+            for (u32 i = 0; i < r->sprites.len; ++i)
+                if (r->sprites.is_alive(i)) r->sprites.items[i].prev = r->sprites.items[i].cur.placement;
+            break;
+        case SpriteDeltaKind::Set: {
+            if (u32* slot = r->sprite_of_entity.find(d.entity)) {
+                r->sprites.items[*slot].cur = d.state;
+            } else {
+                RenderSprite s{};
+                s.entity = d.entity;
+                s.prev   = d.state.placement; // born here: no history, no interpolation jump
+                s.cur    = d.state;
+                Handle h = r->sprites.create(s);
+                if (h.is_null()) { KV_ERROR("vulkan", "render world is full (%u sprites)", kMaxSprites); break; }
+                r->sprite_of_entity.set(d.entity, h.index());
+            }
+            break;
+        }
+        case SpriteDeltaKind::Remove: {
+            if (u32* slot = r->sprite_of_entity.find(d.entity)) {
+                r->sprites.destroy(r->sprites.handle_at(*slot));
+                r->sprite_of_entity.remove(d.entity);
+            }
+            break;
+        }
+        }
+    }
+}
+
+u32 renderer_sprite_count(const Renderer* r) { return r ? r->sprites.live : 0; }
+
+bool renderer_render(Renderer* r, const RenderView& view) {
     if (!r) return false;
     FrameInFlight& f = r->frames[r->frame_index];
 
@@ -1540,11 +1599,11 @@ bool renderer_render(Renderer* r, const RenderFrame& frame) {
     }
     if (acq == VK_SUBOPTIMAL_KHR) r->swapchain_dirty = true; // rebuild next frame; draw this one
 
-    build_instances(r, frame);
+    build_instances(r, view);
     if (!ensure_instance_capacity(r, f, r->staging.len ? r->staging.len : 1)) return false;
     if (r->staging.len) memcpy(f.instances.mapped, r->staging.data, sizeof(GpuInstance) * r->staging.len);
 
-    if (!record_frame(r, f, image_index, frame)) return false;
+    if (!record_frame(r, f, image_index, view)) return false;
     VK_CHECK(vkResetFences(r->device, 1, &f.fence)); // only once the submit is certain
 
     VkSemaphoreSubmitInfo wait{};

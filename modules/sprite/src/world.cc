@@ -23,6 +23,7 @@ int sprite_describe(kv_handle h, void* ctx, char* out, size_t cap) {
 
 bool SpriteWorld::init(Allocator* columns, u32 max_entities, MemTag pool_tag) {
     transforms.alloc = prev_transforms.alloc = sprites.alloc = columns;
+    sent.alloc = sent_sprites.alloc = removed.alloc = columns;
     kv_handle_kind_desc desc{};
     desc.name     = "sprite.entity";
     desc.type_key = type_key<Transform2>();
@@ -46,15 +47,23 @@ Handle SpriteWorld::create(const Transform2& t, const Sprite& s) {
         transforms.push(t);
         prev_transforms.push(t);
         sprites.push(s);
+        sent.push(0);
+        sent_sprites.push(s);
     } else {
         transforms[i]      = t;
         prev_transforms[i] = t; // a new entity has no history: no interpolation jump
         sprites[i]         = s;
+        sent[i]            = 0;
     }
     return h;
 }
 
-bool SpriteWorld::destroy(Handle h) { return entities.destroy(h); }
+bool SpriteWorld::destroy(Handle h) {
+    if (!entities.valid(h)) return false;
+    if (sent[h.index()]) removed.push(h); // the renderer knows it; tell it next extract
+    sent[h.index()] = 0;
+    return entities.destroy(h);
+}
 
 void SpriteWorld::begin_tick() {
     u32 n = entities.capacity();
@@ -69,6 +78,9 @@ void SpriteWorld::free() {
     transforms.free();
     prev_transforms.free();
     sprites.free();
+    sent.free();
+    sent_sprites.free();
+    removed.free();
 }
 
 } // namespace kv

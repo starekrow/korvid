@@ -7,7 +7,7 @@
 // differs between backends is negotiated once through RenderCaps.
 #pragma once
 #include "korvid/render/material.h"
-#include "korvid/render/packet.h"
+#include "korvid/render/sprite.h"
 
 namespace kv {
 
@@ -41,9 +41,8 @@ struct RenderCaps {
     bool        texture_formats[(u32)TextureFormat::Count] = {};
 };
 
-struct RenderFrame {
-    Span<const RenderPacket> packets;
-    f32   alpha = 0.0f; // interpolation point between prev and cur, [0, 1)
+struct RenderView {
+    f32   alpha = 0.0f; // interpolation point between previous and current tick, [0, 1)
     rect2 view;         // the world rect that fills the window, +y up
     color clear_color{0.09f, 0.09f, 0.11f, 1.0f};
 };
@@ -59,9 +58,15 @@ RenderCaps renderer_caps(const Renderer* r);
 // The window's framebuffer size changed; the backend recreates what depends on it.
 void       renderer_resize(Renderer* r, u32 width, u32 height);
 
-// Draws and presents one frame. Returns false when nothing was presented
-// (zero-size window, swapchain being rebuilt); that is not an error.
-bool       renderer_render(Renderer* r, const RenderFrame& frame);
+// ---- the render world -------------------------------------------------------------
+// Applies a tick's worth (or a frame's worth) of sprite deltas to the persistent world.
+void       renderer_apply(Renderer* r, Span<const SpriteDelta> deltas);
+u32        renderer_sprite_count(const Renderer* r);
+
+// Draws the world as of the last deltas, interpolated by view.alpha, and presents.
+// Returns false when nothing was presented (zero-size window, swapchain being
+// rebuilt); that is not an error.
+bool       renderer_render(Renderer* r, const RenderView& view);
 
 // ---- textures ---------------------------------------------------------------------
 // A new texture's slot shows the default texture until the first upload lands, so a

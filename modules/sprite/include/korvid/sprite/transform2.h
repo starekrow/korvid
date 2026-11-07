@@ -1,7 +1,7 @@
 // Korvid sprite: the Transform2 component. Flat, no hierarchy. The world keeps a
 // previous-tick copy of every transform for render interpolation.
 #pragma once
-#include "korvid/render/packet.h"
+#include "korvid/render/sprite.h"
 
 namespace kv {
 

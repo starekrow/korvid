@@ -17,12 +17,17 @@ struct SpriteWorld {
     Array<Sprite>     sprites;         // by slot
     u16               kind = 0;        // the registered handle kind; 0 until init
 
+    // Extract bookkeeping: what the renderer has been told, so a tick sends only changes.
+    Array<u8>         sent;            // by slot: the renderer knows this entity
+    Array<Sprite>     sent_sprites;    // by slot: the Sprite the renderer has
+    Array<Handle>     removed;         // destroyed since the last extract, still to be removed
+
     // Registers the handle kind, says who the storage is attributed to and how many
     // slots to reserve. Without it, handles are local (kind 0) and storage is default.
     bool init(Allocator* columns, u32 max_entities, MemTag pool_tag);
 
     Handle create(const Transform2& t, const Sprite& s);
-    bool   destroy(Handle h);
+    bool   destroy(Handle h); // queues a Remove for the next extract
     bool   valid(Handle h) const { return entities.valid(h); }
     u32    live() const { return entities.live; }
 
