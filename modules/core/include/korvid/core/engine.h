@@ -10,6 +10,24 @@
 
 namespace kv {
 
+// What the root decides and no module does: the heaps and which module lives in which.
+// A heap's soft limit warns once per run at the frame sample; its hard limit fails the
+// allocation that would pass it, with the heap, module and category named. Modules not
+// assigned live in the default heap, which has no limits.
+struct HeapDesc {
+    const char* name;
+    usize       soft = 0;
+    usize       hard = 0;
+};
+struct ModuleHeapDesc {
+    const char* module;
+    const char* heap;
+};
+struct EngineConfig {
+    Span<const HeapDesc>       heaps        = {};
+    Span<const ModuleHeapDesc> module_heaps = {};
+};
+
 struct ResourceEntry {
     const char* name;
     u32         module;         // owning module's index
@@ -80,7 +98,7 @@ struct Engine {
 
 // Registers and starts every module. On any failure, everything already started is
 // shut down in reverse and false is returned; the engine is then safe to shut down again.
-bool engine_init(Engine& e, Span<const ModuleDesc* const> modules);
+bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineConfig& config = EngineConfig{});
 void engine_shutdown(Engine& e);
 
 // Advances the clock by frame_dt and runs the resulting ticks. Returns the tick count.

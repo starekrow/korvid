@@ -69,11 +69,15 @@ struct Allocator {
   typed. Storage is one reserved range committed on demand: slots are contiguous,
   addresses stable, a snapshot is one copy. The pool is the allocator for T; it computes
   stride and alignment from T.
-- **Size-class small allocator**: segregated freelists for 16 bytes to about 2 KB,
-  pages owned by the allocating thread, a per-thread cache refilled in batches, a remote
-  free list per page for alloc-on-A free-on-B. Replaces malloc on consoles; on desktop
-  the general allocator may sit on malloc behind the same interface until this earns
-  its keep.
+- **Size-class small allocator**: 24 classes from 16 bytes to 2 KB, 64 KB pages of one
+  class each owned by the allocating thread, a per-thread partial and full list per
+  class, a lock-free remote free list per page for alloc-on-A free-on-B; the first remote
+  free into a full page pushes the page onto the owner's notify stack, so the owner finds
+  pages with room without scanning its full ones (a scan over every full page was a cache
+  miss per page and ruined the allocator with millions of blocks live); pages left by an
+  exiting thread are adopted by the next thread that needs one, empty pages return to a
+  shared stack. Blocks above 2 KB sit
+  on malloc for now; the page path above is for consoles.
 - **Large allocator**: blocks above about 64 KB go straight to pages. Guard pages in
   debug for free.
 - **Frame ring**: N-deep multi-buffered arena reset when the frame fence passes, for
@@ -137,6 +141,7 @@ builds. No allocator template parameters on containers.
 | 2. Arena, per-thread scratch with `MemScope`, module arenas from `ModuleDesc::memory` | done |
 | 3. `Pool<T>` on reserved ranges with stable addresses, snapshot and restore | done |
 | 4. Deferred destruction in the renderer keyed by the frame fence; per-frame CPU data in scratch | done (swapchain recreation still waits idle: presentation completion is not fence-tracked) |
-| 5. Size-class small allocator with thread caches and remote frees | pending |
-| 6. Heap hard limits and root-assigned module heaps, guard pages and call-site capture, page layers for consoles, frame ring type, real-time allocator | pending |
+| 5. Size-class small allocator: 64 KB pages per class owned by the allocating thread, lock-free remote frees drained by the owner, orphaned pages adopted, empty pages reused | done |
+| 6a. Heap hard limits (counted as it happens, admitted before every commit) and root-assigned module heaps (`EngineConfig`), guard pages for 64 KB and up and call-site capture in dev, kind storage attributed under "kinds" | done |
+| 6b. Page layers for consoles, frame ring type, real-time allocator | pending |
 | Dev checks (`KV_VERIFY`, on in debug and dev): owner thread on arenas and pools, alignment, canary on general blocks, fill 0xCD on alloc, poison 0xDD on free, release, reset and pool destroy | done |

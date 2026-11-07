@@ -195,6 +195,8 @@ private:
         if (grow == 0) return false;
         usize before = committed_bytes();
         u32 to = committed + grow;
+        usize after = os_page_align((usize)to * sizeof(T)) + os_page_align((usize)to * sizeof(u32)) * 2;
+        if (!mem_heap_admit(tag, after - before)) return false; // the hard limit said so, with the message
         bool ok = commit_section(0,        sizeof(T), to) &&
                   commit_section(off_gens, sizeof(u32), to) &&
                   commit_section(off_next, sizeof(u32), to);

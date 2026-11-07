@@ -10,7 +10,7 @@
 // delivered event with its emitter; dev builds), --threads N (main thread included; 1 is
 // serial; the default is every core).
 #pragma once
-#include "korvid/core/types.h"
+#include "korvid/core/engine.h"
 #include "korvid/math/color.h"
 
 namespace kv {
@@ -30,6 +30,7 @@ struct FrameLoopConfig {
     color       clear_color{0.09f, 0.09f, 0.11f, 1.0f};
     u32         report_every_seconds = 1; // fps line; 0 is silent
     Span<const char* const> flags = {};   // boolean flags the game accepts ("--demo"); frameloop_flag says which were given
+    EngineConfig engine = {};             // heaps and which module lives in which
 };
 
 enum class ExitReason : u8 { WindowClosed, Escape, Timer };

@@ -41,14 +41,14 @@ void run_unit(TickContext ctx, EventBus& events, ScheduledSystem& s, const void*
 }
 
 struct LevelJob {
-    TickContext*     ctx;
-    EventBus*        events;
-    ScheduledSystem* first;
+    TickContext*      ctx;
+    EventBus*         events;
+    ScheduledSystem** list;
 };
 
 void level_job(u32 chunk, u32, u32, void* user) {
     LevelJob& lj = *(LevelJob*)user;
-    run_unit(*lj.ctx, *lj.events, lj.first[chunk], nullptr, 0);
+    run_unit(*lj.ctx, *lj.events, *lj.list[chunk], nullptr, 0);
 }
 
 // A phase boundary: at the tick's first one the timers fire; then pending events are
@@ -104,8 +104,15 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
                                 (unsigned long long)engine_hash_state(engine));
                 }
             } else {
-                LevelJob lj{&ctx, &events, &phase[i]};
-                jobs_run(n, 1, level_job, &lj);
+                // Systems pinned to this thread run here first; the rest go to the pool at once.
+                MemScope scope;
+                Array<ScheduledSystem*> pooled = array_in<ScheduledSystem*>(mem_scratch());
+                for (u32 k = i; k < j; ++k) {
+                    if (phase[k].desc->main_thread) run_unit(ctx, events, phase[k], nullptr, 0);
+                    else pooled.push(&phase[k]);
+                }
+                if (pooled.len == 1) run_unit(ctx, events, *pooled[0], nullptr, 0);
+                else if (pooled.len) { LevelJob lj{&ctx, &events, pooled.data}; jobs_run(pooled.len, 1, level_job, &lj); }
             }
             i = j;
         }

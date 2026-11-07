@@ -45,6 +45,7 @@ bool commit_to(Arena& ar, usize needed) {
     while (ar.committed + grow < needed) grow *= 2;
     if (ar.committed + grow > ar.reserved) grow = ar.reserved - ar.committed;
     grow = os_page_align(grow);
+    if (!mem_heap_admit(ar.a.tag, grow)) return false; // the hard limit said so, with the message
     if (!os_commit(ar.base + ar.committed, grow)) {
         KV_ERROR("mem", "arena '%s': commit of %llu bytes failed", ar.a.name, (unsigned long long)grow);
         return false;

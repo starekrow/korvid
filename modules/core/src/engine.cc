@@ -154,7 +154,9 @@ bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules) {
             }
             mem_set_owner((u16)(i + 1));
             MemTag tag;
-            tag.module = (u16)(i + 1);
+            tag.module   = (u16)(i + 1);
+            tag.heap     = mem_module_heap((u16)(i + 1));
+            tag.category = mem_category_register("kinds");
             Table& t = e.tables.push(Table{});
             bool ok = t.init(k, Span<const ComponentDesc* const>(comps, k.components.len), e.tables.len - 1, i, tag);
             mem_set_owner(0);
@@ -616,9 +618,37 @@ void log_kinds(const Engine& e) {
 
 } // namespace
 
-bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
+// Heaps from the config, modules into them; every allocator a module gets carries its heap.
+bool assign_heaps(Engine& e, Span<const ModuleDesc* const> modules, const EngineConfig& config) {
+    for (const HeapDesc& h : config.heaps) {
+        if (!h.name || !h.name[0]) { KV_ERROR("engine", "a heap in the config has no name"); return false; }
+        if (h.soft && h.hard && h.soft > h.hard) { KV_ERROR("engine", "heap '%s': soft limit above the hard limit", h.name); return false; }
+        if (!mem_heap_register(h.name, h.soft, h.hard)) { KV_ERROR("engine", "heap '%s' could not be registered (%u heaps at most)", h.name, KV_MEM_MAX_HEAPS - 1); return false; }
+    }
+    for (const ModuleHeapDesc& a : config.module_heaps) {
+        ModuleInstance* inst = nullptr;
+        for (ModuleInstance& m : e.modules) if (names_equal(m.desc->name, a.module)) inst = &m;
+        if (!inst) { KV_ERROR("engine", "config assigns unknown module '%s' to heap '%s'", a.module, a.heap); return false; }
+        u8 heap = 0;
+        bool known = false;
+        for (const HeapDesc& h : config.heaps) if (names_equal(h.name, a.heap)) { heap = mem_heap_register(h.name, 0, 0); known = true; }
+        if (!known) { KV_ERROR("engine", "config assigns module '%s' to unknown heap '%s'", a.module, a.heap); return false; }
+        mem_set_module_heap((u16)(inst->index + 1), heap);
+        KV_INFO("engine", "module '%s' lives in heap '%s'", a.module, a.heap);
+    }
+    KV_UNUSED(modules);
+    return true;
+}
+
+bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineConfig& config) {
     KV_ASSERT(e.modules.len == 0);
     if (!check_module_names(modules)) return false;
+    // Names for the memory messages, from the start.
+    {
+        const char* names[KV_MEM_MAX_MODULES];
+        for (u32 i = 0; i < modules.len; ++i) names[i] = modules[i]->name;
+        mem_set_module_names(names, modules.len);
+    }
 
     for (u32 i = 0; i < modules.len; ++i) {
         ModuleInstance inst;
@@ -633,6 +663,8 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
         e.resources.push(ResourceEntry{inst.state_name, inst.index, nullptr, nullptr, true});
         inst.state_resource = e.resources.len;
     }
+    for (ModuleInstance& inst : e.modules) mem_set_module_heap((u16)(inst.index + 1), 0);
+    if (!assign_heaps(e, modules, config)) { engine_shutdown(e); return false; }
 
     bool ok = register_events(e, modules) && register_components(e, modules) && register_kinds(e, modules) &&
               register_resources(e, modules) && build_schedule(e, modules) && build_handlers(e, modules) &&
@@ -668,6 +700,7 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
             mem_set_owner((u16)(inst.index + 1));
             MemTag tag;
             tag.module = (u16)(inst.index + 1);
+            tag.heap   = mem_module_heap((u16)(inst.index + 1));
             mem_general_tagged(inst.general, tag, m.name);
             if (m.memory.reserve && !arena_create(inst.arena, m.memory.reserve, m.name, tag)) {
                 ok = false;

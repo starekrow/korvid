@@ -4,11 +4,16 @@
 
 namespace {
 constinit const char* const k_flags[] = {"--demo"}; // a scripted ship, for reproducible runs
+// The game lives in its own heap: a warning past 16 MB, a refusal past 64 MB, both
+// naming the module and category that asked.
+constinit const kv::HeapDesc       k_heaps[]        = {{"game", 16u << 20, 64u << 20}};
+constinit const kv::ModuleHeapDesc k_module_heaps[] = {{"example_rocks", "game"}};
 constinit const kv::FrameLoopConfig k_config = {
     .title  = "korvid rocks",
     .width  = 1280,
     .height = 720,
     .flags  = k_flags,
+    .engine = {.heaps = k_heaps, .module_heaps = k_module_heaps},
 };
 }
 

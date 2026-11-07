@@ -113,7 +113,7 @@ constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(As
 constinit const ResourceDesc  k_resources[] = {{"asset.textures"}};
 constinit const char* const   k_pump_writes[] = {"asset.textures"};
 constinit const SystemDesc    k_systems[]   = {
-    {.name = "asset.pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = k_pump_writes},
+    {.name = "asset.pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = k_pump_writes, .main_thread = true},
 };
 
 } // namespace

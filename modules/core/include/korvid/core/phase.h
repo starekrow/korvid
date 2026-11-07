@@ -355,6 +355,7 @@ struct SystemDesc {
     Span<const char* const> after  = {}; // system names; needed between two writers, optional otherwise
     Span<const char* const> before = {};
     StateUse                state  = StateUse::Write; // what it does with its module's state
+    bool                    main_thread = false;      // runs on the thread driving the engine: for code that talks to the OS, the GPU, or a module's own pools
 };
 
 // A system or handler placed in the schedule, with the module it came from and its sets

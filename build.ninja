@@ -148,6 +148,8 @@ build $builddir/obj/core/tests/job_test.o: cxx modules/core/tests/job_test.cc
   includes = $inc_core
 build $builddir/obj/core/tests/parallel_test.o: cxx modules/core/tests/parallel_test.cc
   includes = $inc_core
+build $builddir/obj/core/tests/heap_test.o: cxx modules/core/tests/heap_test.cc
+  includes = $inc_core
 
 build $builddir/bin/core_tests: link $builddir/obj/core/tests/main.o $
     $builddir/obj/core/tests/handle_test.o $builddir/obj/core/tests/event_test.o $
@@ -157,7 +159,8 @@ build $builddir/bin/core_tests: link $builddir/obj/core/tests/main.o $
     $builddir/obj/core/tests/component_test.o $builddir/obj/core/tests/kind_test.o $
     $builddir/obj/core/tests/context_test.o $builddir/obj/core/tests/schedule_test.o $
     $builddir/obj/core/tests/handler_test.o $builddir/obj/core/tests/trigger_test.o $
-    $builddir/obj/core/tests/job_test.o $builddir/obj/core/tests/parallel_test.o $builddir/lib/libkv_core.a
+    $builddir/obj/core/tests/job_test.o $builddir/obj/core/tests/parallel_test.o $
+    $builddir/obj/core/tests/heap_test.o $builddir/lib/libkv_core.a
 
 # ---- platform --------------------------------------------------------------
 build $builddir/obj/platform/module.o: cxx modules/platform/src/module.cc

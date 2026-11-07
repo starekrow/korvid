@@ -1,28 +1,40 @@
 #include "korvid/core/memory.h"
 #include "korvid/core/log.h"
+#include "korvid/core/os_memory.h"
 #include "korvid/core/thread.h"
 #include <stdlib.h>
 #include <string.h>
+#if defined(__linux__)
+#include <dlfcn.h>
+#endif
 
 namespace kv {
 
 namespace {
 
-// Every general block starts 32 bytes before the pointer handed out. For alignments
-// above 16 the block is over-allocated and `offset` says how far back malloc's pointer is.
-// The canary is a function of the user pointer, so a header copied or a pointer that was
-// never handed out fails the check; a freed block's canary is scrambled to catch the
-// second free.
+// Every general block starts a header before the pointer handed out. `cls` says where
+// the block lives: a size class, the guard-page path, or malloc; for malloc blocks with
+// alignments above 16 the block is over-allocated and `offset` says how far back malloc's
+// pointer is. The canary is a function of the user pointer, so a header copied or a
+// pointer that was never handed out fails the check; a freed block's canary is scrambled
+// to catch the second free. Dev builds keep the call site.
 struct Header {
     usize  size;   // bytes requested
-    u32    offset; // from the header back to malloc's pointer
+    u32    offset; // malloc: from the header back to malloc's pointer; guard: from the mapping's base
     u32    align;  // as requested, so realloc can honor it
     MemTag tag;
     u32    canary;
-    u64    reserved; // call site, when dev builds capture one
+    u8     cls;    // 0..kClasses-1, kClsGuard or kClsMalloc
+    u8     pad[7];
+#if KV_DEV
+    void*  site;   // the caller of mem_alloc
+    u64    pad2;
+#endif
 };
-static_assert(sizeof(Header) == 32, "header keeps 16-byte alignment");
+static_assert(sizeof(Header) % 16 == 0, "header keeps 16-byte alignment");
 static_assert(sizeof(MemTag) == 4, "tag fits the header");
+constexpr u8 kClsGuard  = 0xFE;
+constexpr u8 kClsMalloc = 0xFF;
 
 constexpr u32 kCanary = 0x5EEDBA5Eu;
 constexpr u8  kFillAlloc = 0xCD;
@@ -56,6 +68,10 @@ struct Registry {
 Registry g_categories = {{"none"}, {}, 1};
 Registry g_heaps_reg  = {{"default"}, {}, 1};
 u32      g_heap_warned[KV_MEM_MAX_HEAPS]; // atomic flags
+usize    g_heap_hard[KV_MEM_MAX_HEAPS];
+u64      g_heap_used[KV_MEM_MAX_HEAPS];   // atomic; bytes against the hard limit, where one exists
+u32      g_heap_failed[KV_MEM_MAX_HEAPS]; // atomic flags: the message went out once
+u8       g_module_heap[KV_MEM_MAX_MODULES + 1];
 
 u8 registry_add(Registry& r, u32 max, const char* name) {
     if (!name || !name[0]) return 0;
@@ -226,33 +242,330 @@ MemTag clamp(MemTag t) {
     return t;
 }
 
-void* general_alloc_tagged(usize size, u32 align, MemTag tag) {
+const char* module_name_of(u16 module);
+
+// ---- heap hard limits ------------------------------------------------------------------
+bool heap_admit(MemTag tag, usize bytes) {
+    u8 h = tag.heap;
+    if (!h || !g_heap_hard[h]) return true;
+    u64 now = __atomic_add_fetch(&g_heap_used[h], (u64)bytes, __ATOMIC_RELAXED);
+    if (now <= g_heap_hard[h]) return true;
+    __atomic_sub_fetch(&g_heap_used[h], (u64)bytes, __ATOMIC_RELAXED);
+    if (__atomic_exchange_n(&g_heap_failed[h], 1u, __ATOMIC_RELAXED) == 0)
+        KV_ERROR("mem", "heap '%s' hard limit %llu bytes: module '%s' category '%s' asked for %llu more with %llu in use",
+                 g_heaps_reg.names[h], (unsigned long long)g_heap_hard[h], module_name_of(tag.module),
+                 g_categories.names[tag.category], (unsigned long long)bytes, (unsigned long long)(now - bytes));
+    return false;
+}
+
+void heap_release(MemTag tag, usize bytes) {
+    u8 h = tag.heap;
+    if (h && g_heap_hard[h]) __atomic_sub_fetch(&g_heap_used[h], (u64)bytes, __ATOMIC_RELAXED);
+}
+
+// ---- the size-class allocator ------------------------------------------------------------
+// Pages of 64 KB, 64 KB aligned, carved from one reserved region, each holding blocks of
+// one class. A page belongs to the thread that carved (or adopted) it: only the owner
+// pops blocks and pushes its own frees; everyone else pushes onto the page's remote
+// list with a CAS, and the owner drains that list when its own runs dry.
+constexpr u32   kPageShift = 16;
+constexpr usize kPageSize  = (usize)1 << kPageShift;
+constexpr usize kRegion    = (usize)4 << 30; // address space, not memory
+constexpr u32   kClasses   = 24;
+constexpr u16   kClassSize[kClasses] = {16, 32, 48, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512,
+                                        640, 768, 896, 1024, 1280, 1536, 1792, 2048};
+constexpr usize kSmallMax  = 2048;
+constexpr u32   kPageHeader = 128;
+constexpr u32   kPageMagic  = 0x70616765u; // "page"
+
+struct Notify;
+struct Page {
+    u32     magic;
+    u32     owner;       // thread id; 0 while free or orphaned
+    u32     stride;      // header plus class size, a multiple of 16
+    u32     capacity;
+    u32     fresh;       // blocks never handed out yet start here
+    u32     used;        // atomic: live blocks
+    u8      cls;
+    u8      in_full;     // on the owner's full list rather than its partial list
+    u8      pad[6];
+    void*   local_free;  // owner only
+    void*   remote_free; // atomic stack, pushed by other threads
+    Page*   next;        // owner's list, or the free or orphan stack
+    Page*   prev;        // owner's list
+    Notify* notify;      // the owner's notify stacks; null while orphaned
+    Page*   notify_next; // link in a notify stack
+};
+static_assert(sizeof(Page) <= kPageHeader, "the page header fits before the first block");
+
+// Where other threads tell an owner that a full page of its has blocks again: the first
+// remote free into an empty remote list pushes the page here. One per thread, kept for
+// the life of the process so a push racing a thread's exit lands somewhere harmless.
+struct Notify {
+    Page*   head[kClasses]; // atomic stacks
+    Notify* all;            // every Notify ever made, for shutdown
+};
+Notify* g_notifies = nullptr; // under g_page_lock
+
+u8*   g_region       = nullptr;
+u32   g_next_page    = 0;      // atomic bump
+u64   g_pages_carved = 0;      // atomic, for reports
+Page* g_free_pages   = nullptr; // under g_page_lock
+Page* g_orphans[kClasses];      // under g_page_lock: pages whose owner thread exited
+u32   g_page_lock    = 0;
+
+void lock_pages()   { while (__atomic_exchange_n(&g_page_lock, 1u, __ATOMIC_ACQUIRE)) {} }
+void unlock_pages() { __atomic_store_n(&g_page_lock, 0u, __ATOMIC_RELEASE); }
+
+u8 class_of(usize size) {
+    for (u8 c = 0; c < kClasses; ++c) if (size <= kClassSize[c]) return c;
+    return kClsMalloc;
+}
+
+u8*   block_at(Page* p, u32 i) { return (u8*)p + kPageHeader + (usize)i * p->stride; }
+Page* page_of(const void* user) { return (Page*)((usize)user & ~(kPageSize - 1)); }
+
+// Per thread: a partial list (pages with room, the head is where allocation starts) and
+// a full list, per class. Pages are given up when the thread exits.
+struct Cache {
+    Page*   partial[kClasses];
+    Page*   full[kClasses];
+    Notify* notify;
+};
+thread_local Cache t_cache;
+
+void list_push(Page*& head, Page* p) { p->prev = nullptr; p->next = head; if (head) head->prev = p; head = p; }
+void list_remove(Page*& head, Page* p) {
+    if (p->prev) p->prev->next = p->next; else head = p->next;
+    if (p->next) p->next->prev = p->prev;
+    p->next = p->prev = nullptr;
+}
+
+Notify* my_notify() {
+    Cache& c = t_cache;
+    if (!c.notify) {
+        Notify* n = (Notify*)calloc(1, sizeof(Notify));
+        lock_pages();
+        n->all = g_notifies;
+        g_notifies = n;
+        unlock_pages();
+        c.notify = n;
+    }
+    return c.notify;
+}
+
+void page_init(Page* p, u8 cls) {
+    u32 stride = (u32)((sizeof(Header) + kClassSize[cls] + 15) & ~15u);
+    p->magic = kPageMagic; p->owner = thread_id(); p->stride = stride;
+    p->capacity = (u32)((kPageSize - kPageHeader) / stride);
+    p->fresh = 0; p->used = 0; p->cls = cls; p->in_full = 0;
+    p->local_free = p->remote_free = nullptr;
+    p->next = p->prev = nullptr;
+    p->notify = my_notify();
+    p->notify_next = nullptr;
+}
+
+struct CacheGuard {
+    ~CacheGuard() {
+        // Whatever the thread still owns waits for another thread to adopt it.
+        lock_pages();
+        for (u32 c = 0; c < kClasses; ++c) {
+            Page* lists[2] = {t_cache.partial[c], t_cache.full[c]};
+            for (Page* p : lists)
+                while (p) { Page* n = p->next; p->owner = 0; p->notify = nullptr; p->prev = nullptr; p->next = g_orphans[c]; g_orphans[c] = p; p = n; }
+            t_cache.partial[c] = t_cache.full[c] = nullptr;
+        }
+        unlock_pages();
+    }
+};
+thread_local CacheGuard t_cache_guard;
+
+// A page for class `cls`, owned by this thread: an orphan, a freed page, or a fresh one.
+Page* page_new(u8 cls) {
+    (void)t_cache_guard; // odr-use: the guard exists for this thread
+    lock_pages();
+    Page* p = g_orphans[cls];
+    if (p) {
+        g_orphans[cls] = p->next;
+        p->owner = thread_id(); p->next = p->prev = nullptr; p->in_full = 0;
+        unlock_pages();
+        p->notify = my_notify();
+        return p;
+    }
+    p = g_free_pages;
+    if (p) g_free_pages = p->next;
+    unlock_pages();
+    if (!p) {
+        if (!g_region) {
+            lock_pages();
+            if (!g_region) {
+                u8* raw = (u8*)os_reserve(kRegion + kPageSize);
+                if (raw) g_region = (u8*)(((usize)raw + kPageSize - 1) & ~(kPageSize - 1));
+            }
+            unlock_pages();
+            if (!g_region) return nullptr;
+        }
+        u32 i = __atomic_fetch_add(&g_next_page, 1u, __ATOMIC_RELAXED);
+        if ((usize)i * kPageSize >= kRegion) { KV_ERROR("mem", "the small allocator's region is exhausted"); return nullptr; }
+        p = (Page*)(g_region + (usize)i * kPageSize);
+        if (!os_commit(p, kPageSize)) { KV_ERROR("mem", "small allocator: commit failed"); return nullptr; }
+        __atomic_add_fetch(&g_pages_carved, 1, __ATOMIC_RELAXED);
+    }
+    page_init(p, cls);
+    return p;
+}
+
+// Takes the remote list in one exchange and makes it the owner's.
+void drain_remote(Page* p) {
+    void* r = __atomic_exchange_n(&p->remote_free, (void*)nullptr, __ATOMIC_ACQ_REL);
+    if (!r) return;
+    if (!p->local_free) { p->local_free = r; return; }
+    void* tail = r;
+    while (*(void**)tail) tail = *(void**)tail;
+    *(void**)tail = p->local_free;
+    p->local_free = r;
+}
+
+// A block from this page, or null when it has none left anywhere.
+u8* page_take(Page* p) {
+    if (!p->local_free) {
+        if (p->fresh < p->capacity) return block_at(p, p->fresh++);
+        drain_remote(p);
+        if (!p->local_free) return nullptr;
+    }
+    u8* b = (u8*)p->local_free;
+    p->local_free = *(void**)b;
+    return b;
+}
+
+// Full pages that other threads have freed into since the owner last looked: the notify
+// stack, taken whole. Only pages this thread still owns and still has as full count.
+bool collect_notified(Cache& c, u8 cls) {
+    Notify* n = c.notify;
+    if (!n || !__atomic_load_n(&n->head[cls], __ATOMIC_ACQUIRE)) return false;
+    Page* p = __atomic_exchange_n(&n->head[cls], (Page*)nullptr, __ATOMIC_ACQ_REL);
+    bool found = false;
+    while (p) {
+        Page* next = p->notify_next;
+        p->notify_next = nullptr;
+        if (p->owner == thread_id() && p->in_full) {
+            drain_remote(p);
+            if (p->local_free) { list_remove(c.full[cls], p); list_push(c.partial[cls], p); p->in_full = 0; found = true; }
+        }
+        p = next;
+    }
+    return found;
+}
+
+u8* small_take(u8 cls) {
+    Cache& c = t_cache;
+    for (;;) {
+        Page* p = c.partial[cls];
+        while (p) {
+            if (u8* b = page_take(p)) return b;
+            Page* n = p->next;
+            list_remove(c.partial[cls], p); // no room: to the full list until a free shows
+            list_push(c.full[cls], p);
+            p->in_full = 1;
+            p = n;
+        }
+        if (collect_notified(c, cls)) continue;
+        Page* np = page_new(cls);
+        if (!np) return nullptr;
+        list_push(c.partial[cls], np);
+    }
+}
+
+void small_free(void* user) {
+    Page* p = page_of(user);
+    u8* b = (u8*)user - sizeof(Header);
+    if (p->owner == thread_id()) {
+        *(void**)b = p->local_free;
+        p->local_free = b;
+        u32 left = __atomic_sub_fetch(&p->used, 1u, __ATOMIC_ACQ_REL);
+        Cache& c = t_cache;
+        // An empty page that is not where allocation starts goes back to the pool; a full
+        // page with a block again is partial again.
+        if (left == 0 && c.partial[p->cls] != p) {
+            if (p->in_full) list_remove(c.full[p->cls], p); else list_remove(c.partial[p->cls], p);
+            lock_pages();
+            p->owner = 0; p->notify = nullptr; p->next = g_free_pages; g_free_pages = p;
+            unlock_pages();
+        } else if (p->in_full) {
+            list_remove(c.full[p->cls], p);
+            list_push(c.partial[p->cls], p);
+            p->in_full = 0;
+        }
+        return;
+    }
+    void* head = __atomic_load_n(&p->remote_free, __ATOMIC_ACQUIRE);
+    do { *(void**)b = head; } while (!__atomic_compare_exchange_n(&p->remote_free, &head, (void*)b, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+    __atomic_sub_fetch(&p->used, 1u, __ATOMIC_ACQ_REL);
+    if (head == nullptr) {
+        // First into an empty remote list: tell the owner, if the page still has one.
+        Notify* n = __atomic_load_n(&p->notify, __ATOMIC_ACQUIRE);
+        if (!n) return;
+        Page* top = __atomic_load_n(&n->head[p->cls], __ATOMIC_ACQUIRE);
+        do { p->notify_next = top; } while (!__atomic_compare_exchange_n(&n->head[p->cls], &top, p, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+    }
+}
+
+// ---- the general entry points ------------------------------------------------------------
+void fill_header(Header* h, usize size, u32 align, MemTag tag, u8 cls, u32 offset, void* site) {
+    void* user = (u8*)h + sizeof(Header);
+    h->size = size; h->offset = offset; h->align = align; h->tag = tag; h->canary = canary_for(user); h->cls = cls;
+#if KV_DEV
+    h->site = site;
+    memset(user, kFillAlloc, size);
+#else
+    (void)site;
+#endif
+}
+
+void* general_alloc_tagged(usize size, u32 align, MemTag tag, void* site) {
     KV_VERIFY(!thread_is_realtime());
     KV_VERIFY(align >= 1 && align <= KV_MEM_MAX_ALIGN && (align & (align - 1)) == 0);
     if (align < KV_MEM_DEFAULT_ALIGN) align = KV_MEM_DEFAULT_ALIGN;
     if (align > KV_MEM_MAX_ALIGN) align = KV_MEM_MAX_ALIGN;
-    // Room for the header, then enough slack to align the user pointer. Refuse a size
-    // that would wrap instead of handing back a block smaller than asked.
+    tag = clamp(tag);
     usize slack = align > KV_MEM_DEFAULT_ALIGN ? align : 0;
-    if (size > SIZE_MAX - sizeof(Header) - slack) {
+    if (size > SIZE_MAX - sizeof(Header) - slack - kPageSize) {
         KV_ERROR("mem", "allocation size overflows: %llu bytes", (unsigned long long)size);
         return nullptr;
     }
+    if (!heap_admit(tag, size)) return nullptr;
+
+    if (align == KV_MEM_DEFAULT_ALIGN && size <= kSmallMax) {
+        u8 cls = class_of(size);
+        u8* b = small_take(cls);
+        if (!b) { heap_release(tag, size); KV_ERROR("mem", "out of memory: %llu bytes", (unsigned long long)size); return nullptr; }
+        Page* p = page_of(b);
+        __atomic_add_fetch(&p->used, 1u, __ATOMIC_RELAXED);
+        Header* h = (Header*)b;
+        fill_header(h, size, align, tag, cls, 0, site);
+        account_alloc(tag, (i64)size);
+        return b + sizeof(Header);
+    }
+#if KV_DEV
+    if (size >= kPageSize && align <= os_page_size()) {
+        // Its own pages, the block flush against a guard page: one byte past the end faults.
+        usize ps = os_page_size();
+        usize data = (size + sizeof(Header) + ps - 1) & ~(ps - 1);
+        u8* base = (u8*)os_reserve(data + ps);
+        if (!base || !os_commit(base, data)) { heap_release(tag, size); KV_ERROR("mem", "out of memory: %llu bytes", (unsigned long long)size); return nullptr; }
+        usize user = ((usize)base + data - size) & ~((usize)align - 1);
+        Header* h = (Header*)(user - sizeof(Header));
+        fill_header(h, size, align, tag, kClsGuard, (u32)((u8*)h - base), site);
+        account_alloc(tag, (i64)size);
+        return (void*)user;
+    }
+#endif
     usize total = sizeof(Header) + size + slack;
     u8* raw = (u8*)malloc(total);
-    if (!raw) { KV_ERROR("mem", "out of memory: %llu bytes", (unsigned long long)size); return nullptr; }
+    if (!raw) { heap_release(tag, size); KV_ERROR("mem", "out of memory: %llu bytes", (unsigned long long)size); return nullptr; }
     usize user = ((usize)raw + sizeof(Header) + (align - 1)) & ~((usize)align - 1);
     Header* h = (Header*)(user - sizeof(Header));
-    tag        = clamp(tag);
-    h->size    = size;
-    h->offset  = (u32)((u8*)h - raw);
-    h->align   = align;
-    h->tag     = tag;
-    h->canary  = canary_for((void*)user);
-    h->reserved = 0;
-#if KV_DEV
-    memset((void*)user, kFillAlloc, size);
-#endif
+    fill_header(h, size, align, tag, kClsMalloc, (u32)((u8*)h - raw), site);
     account_alloc(tag, (i64)size);
     return (void*)user;
 }
@@ -272,6 +585,7 @@ Header* header_of(void* p) {
 MemTag owner_tag() {
     MemTag t;
     t.module = t_owner;
+    t.heap   = g_module_heap[t_owner];
     return t;
 }
 
@@ -281,8 +595,8 @@ extern Allocator g_general;
 // tag as written, module 0 included (that is how engine-owned shared tables are tagged).
 void* general_alloc(Allocator* a, usize size, u32 align) {
     MemTag tag = a->tag;
-    if (a == &g_general) tag.module = t_owner;
-    return general_alloc_tagged(size, align, tag);
+    if (a == &g_general) tag = owner_tag();
+    return general_alloc_tagged(size, align, tag, __builtin_return_address(0));
 }
 void general_free(Allocator*, void* p, usize) { mem_free(p); }
 
@@ -290,14 +604,24 @@ Allocator g_general = {general_alloc, general_free, MemTag{}, 0, MemMode::Shared
 
 } // namespace
 
-void* mem_alloc(usize size) { return general_alloc_tagged(size, KV_MEM_DEFAULT_ALIGN, owner_tag()); }
-void* mem_alloc_aligned(usize size, u32 align) { return general_alloc_tagged(size, align, owner_tag()); }
+void* mem_alloc(usize size) { return general_alloc_tagged(size, KV_MEM_DEFAULT_ALIGN, owner_tag(), __builtin_return_address(0)); }
+void* mem_alloc_aligned(usize size, u32 align) { return general_alloc_tagged(size, align, owner_tag(), __builtin_return_address(0)); }
 
 void* mem_realloc(void* p, usize size) {
     if (!p) return mem_alloc(size);
     Header* h = header_of(p);
     if (!h) return nullptr;
-    void* q = general_alloc_tagged(size, h->align, h->tag); // same alignment, same tag
+    if (h->cls < kClasses && size <= kClassSize[h->cls] && size > (h->cls ? kClassSize[h->cls - 1] : 0)) {
+        // Same class: the block stays where it is.
+        MemTag tag = clamp(h->tag);
+        if (size > h->size && !heap_admit(tag, size - h->size)) return nullptr;
+        if (size < h->size) heap_release(tag, h->size - size);
+        account_free(tag, (i64)h->size);
+        account_alloc(tag, (i64)size);
+        h->size = size;
+        return p;
+    }
+    void* q = general_alloc_tagged(size, h->align, h->tag, __builtin_return_address(0)); // same alignment, same tag
     if (!q) return nullptr;
     memcpy(q, p, h->size < size ? h->size : size);
     mem_free(p);
@@ -310,10 +634,19 @@ void mem_free(void* p) {
     if (!h) return; // never free what we did not allocate
     MemTag tag = clamp(h->tag);
     account_free(tag, (i64)h->size);
+    heap_release(tag, h->size);
     h->canary = ~h->canary; // a second free fails the canary
 #if KV_DEV
     memset(p, kFillFree, h->size);
 #endif
+    if (h->cls < kClasses) { small_free(p); return; }
+    if (h->cls == kClsGuard) {
+        usize ps = os_page_size();
+        u8* base = (u8*)h - h->offset;
+        usize data = (h->size + sizeof(Header) + ps - 1) & ~(ps - 1);
+        os_release(base, data + ps);
+        return;
+    }
     free((u8*)h - h->offset);
 }
 
@@ -325,19 +658,27 @@ void mem_general_tagged(Allocator& out, MemTag tag, const char* name) {
     out.name = name;
 }
 
+u64 mem_small_pages() { return __atomic_load_n(&g_pages_carved, __ATOMIC_RELAXED); }
+
 void mem_set_owner(u16 module) { t_owner = module; }
 u16  mem_owner() { return t_owner; }
+void mem_set_module_heap(u16 module, u8 heap) { if (module <= KV_MEM_MAX_MODULES && heap < KV_MEM_MAX_HEAPS) g_module_heap[module] = heap; }
+u8   mem_module_heap(u16 module) { return module <= KV_MEM_MAX_MODULES ? g_module_heap[module] : 0; }
 
 u8          mem_category_register(const char* name) { return registry_add(g_categories, KV_MEM_MAX_CATEGORIES, name); }
 const char* mem_category_name(u8 id) { return id < g_categories.count ? g_categories.names[id] : "?"; }
 
-u8 mem_heap_register(const char* name, usize budget) {
+u8 mem_heap_register(const char* name, usize soft, usize hard) {
     u8 id = registry_add(g_heaps_reg, KV_MEM_MAX_HEAPS, name);
-    if (id && budget) g_heaps_reg.budgets[id] = budget;
+    if (id && soft) g_heaps_reg.budgets[id] = soft;
+    if (id && hard) g_heap_hard[id] = hard;
     return id;
 }
 const char* mem_heap_name(u8 id) { return id < g_heaps_reg.count ? g_heaps_reg.names[id] : "?"; }
 usize       mem_heap_budget(u8 id) { return id < KV_MEM_MAX_HEAPS ? g_heaps_reg.budgets[id] : 0; }
+usize       mem_heap_hard(u8 id) { return id < KV_MEM_MAX_HEAPS ? g_heap_hard[id] : 0; }
+u64         mem_heap_used(u8 id) { return id < KV_MEM_MAX_HEAPS ? __atomic_load_n(&g_heap_used[id], __ATOMIC_RELAXED) : 0; }
+bool        mem_heap_admit(MemTag tag, usize bytes) { return heap_admit(clamp(tag), bytes); }
 
 u64 mem_live_allocations() { return nonneg(rollup().live_allocs); }
 
@@ -395,6 +736,7 @@ void mem_account_commit(MemTag tag, usize bytes) {
 
 void mem_account_decommit(MemTag tag, usize bytes) {
     tag = clamp(tag);
+    heap_release(tag, bytes);
     ThreadBlock& b = block();
     bump(b.committed, -(i64)bytes);
     bump(b.heap_committed[tag.heap], -(i64)bytes);
@@ -426,6 +768,13 @@ const MemSample& mem_last_sample() { return g_sample; }
 static const char* g_module_names[KV_MEM_MAX_MODULES];
 static u32         g_module_name_count = 0;
 
+namespace {
+const char* module_name_of(u16 module) {
+    if (module == 0) return "engine";
+    return (u32)(module - 1) < g_module_name_count && g_module_names[module - 1] ? g_module_names[module - 1] : "?";
+}
+} // namespace
+
 void mem_set_module_names(const char* const* module_names, u32 module_count) {
     if (module_count > KV_MEM_MAX_MODULES) module_count = KV_MEM_MAX_MODULES;
     for (u32 i = 0; i < module_count; ++i) g_module_names[i] = module_names[i];
@@ -451,9 +800,34 @@ void mem_report(const char* const* module_names, u32 module_count) {
                     (unsigned long long)s.live_bytes, (unsigned long long)s.committed_bytes);
         }
     }
+    // The first few live small blocks, with where they came from: the pages can be walked.
+    u32 listed = 0;
+    u32 pages = __atomic_load_n(&g_next_page, __ATOMIC_RELAXED);
+    for (u32 i = 0; i < pages && listed < 8 && g_region; ++i) {
+        Page* p = (Page*)(g_region + (usize)i * kPageSize);
+        if (p->magic != kPageMagic || __atomic_load_n(&p->used, __ATOMIC_RELAXED) == 0) continue;
+        for (u32 k = 0; k < p->fresh && listed < 8; ++k) {
+            Header* h = (Header*)block_at(p, k);
+            void* user = (u8*)h + sizeof(Header);
+            if (h->canary != canary_for(user)) continue;
+            const char* who = h->tag.module == 0 ? "engine" : ((u32)(h->tag.module - 1) < module_count ? module_names[h->tag.module - 1] : "?");
+            // The site as an offset into its binary, which is what addr2line wants from a
+            // position-independent executable.
+            void* base = nullptr;
+            const char* image = "<exe>";
+#if defined(__linux__)
+            Dl_info info;
+            if (h->site && dladdr(h->site, &info)) { base = info.dli_fbase; image = info.dli_fname; }
+#endif
+            KV_WARN("mem", "  %llu bytes by %s/%s from %p (addr2line -e %s 0x%llx)", (unsigned long long)h->size, who,
+                    g_categories.names[h->tag.category], h->site, image, (unsigned long long)((usize)h->site - (usize)base));
+            ++listed;
+        }
+    }
 #else
     (void)module_names; (void)module_count;
 #endif
+    KV_INFO("mem", "small allocator: %llu pages of %llu KB carved", (unsigned long long)mem_small_pages(), (unsigned long long)(kPageSize / 1024));
 }
 
 } // namespace kv

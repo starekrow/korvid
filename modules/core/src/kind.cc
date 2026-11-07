@@ -83,7 +83,13 @@ bool Table::ensure_rows(u32 n) {
         if (committed_rows + grow > desc->capacity) grow = desc->capacity - committed_rows;
         if (grow == 0) return false;
         u32 to = committed_rows + grow;
-        usize total = 0;
+        usize total = 0, want = 0;
+        for (Column& c : columns) {
+            usize have = os_page_align((usize)committed_rows * c.stride);
+            usize need = os_page_align((usize)to * c.stride);
+            if (need > have) want += (need - have) * (c.prev ? 2 : 1);
+        }
+        if (!mem_heap_admit(tag, want)) return false; // the hard limit said so, with the message
         for (Column& c : columns) {
             usize have = os_page_align((usize)committed_rows * c.stride);
             usize need = os_page_align((usize)to * c.stride);
@@ -103,14 +109,19 @@ bool Table::ensure_rows(u32 n) {
 
 Handle Table::spawn() {
     slots.owner = thread_id(); // the schedule made this thread the writer for now
+    slots.tag   = tag;
     if (slots.live >= desc->capacity) {
         KV_ERROR("kind", "'%s' is full (%u entities)", desc->name, desc->capacity);
         return Handle{};
     }
+    // The rows for the slot about to be handed out must exist first: a slot taken and
+    // given back on a failed commit would sit at the head of the free list, rows still
+    // uncommitted, and fail every spawn after it.
+    u32 next = slots.free_head != KV_POOL_NONE ? slots.free_head : slots.len;
+    if (next >= committed_rows && !ensure_rows(next + 1)) return Handle{};
     Handle h = slots.create(0);
     if (h.is_null()) return h;
     u32 i = h.index();
-    if (i >= committed_rows && !ensure_rows(i + 1)) { slots.destroy(h); return Handle{}; }
     for (Column& c : columns) {
         memset(row(c, i), 0, c.stride);
         if (c.prev) memset(c.prev + (usize)i * c.stride, 0, c.stride);

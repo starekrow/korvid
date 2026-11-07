@@ -48,10 +48,14 @@ template <class T>
 void free_items(Allocator* a, T* p, u32 count = 1) { if (p) a->free(a, p, sizeof(T) * count); }
 
 // ---- the general allocator -----------------------------------------------------------
-// Thread-safe. Blocks carry a 32-byte header (size, alignment, tag, canary) so mem_free
-// needs no size, realloc keeps the alignment, and a bad or double free is caught at the
-// canary. Today it sits on malloc; the size-class allocator replaces it behind the same
-// calls (allocators.md, step 5). Dev builds fill new blocks with 0xCD and freed ones
+// Thread-safe. Blocks carry a header (size, alignment, tag, canary; the call site in dev)
+// so mem_free needs no size, realloc keeps the alignment, and a bad or double free is
+// caught at the canary. Blocks up to 2 KB come from size-class pages of 64 KB owned by
+// the allocating thread: a free on the owner is a push on the page's list, a free from
+// anywhere else is a lock-free push on the page's remote list that the owner drains when
+// it needs a block; a thread that exits leaves its pages for others to adopt. Larger
+// blocks sit on malloc; in dev builds, blocks of 64 KB and up sit on their own pages
+// with a guard page after them. Dev builds fill new blocks with 0xCD and freed ones
 // with 0xDD.
 void*      mem_alloc(usize size);
 void*      mem_alloc_aligned(usize size, u32 align);
@@ -65,9 +69,12 @@ void       mem_general_tagged(Allocator& out, MemTag tag, const char* name);
 
 // ---- attribution ---------------------------------------------------------------------
 // The scheduler sets the current owner (module index + 1) around a module's startup,
-// shutdown and each system run; allocations made meanwhile are tagged with it.
+// shutdown and each system run; allocations made meanwhile are tagged with it, and with
+// the heap the engine assigned to that module.
 void mem_set_owner(u16 module);
 u16  mem_owner();
+void mem_set_module_heap(u16 module, u8 heap);
+u8   mem_module_heap(u16 module);
 
 // Categories and heaps are registered by name, at startup, by whoever cares to see them
 // apart in reports. Registering a name twice returns the same id. The name is copied
@@ -79,10 +86,18 @@ constexpr u32 KV_MEM_MAX_HEAPS      = 16;  // ids 1..15; 0 is the default heap
 
 u8          mem_category_register(const char* name);
 const char* mem_category_name(u8 id);
-// budget 0: unlimited. A heap past its budget warns once (soft limit; hard limits later).
-u8          mem_heap_register(const char* name, usize budget);
+// A heap past its soft limit warns once, at the frame sample. A heap with a hard limit
+// counts every general block and committed page as it happens, and an allocation that
+// would pass it fails, with the heap, module and category named, once per heap. 0: none.
+u8          mem_heap_register(const char* name, usize soft, usize hard = 0);
 const char* mem_heap_name(u8 id);
-usize       mem_heap_budget(u8 id);
+usize       mem_heap_budget(u8 id); // the soft limit
+usize       mem_heap_hard(u8 id);
+u64         mem_heap_used(u8 id);   // bytes counted against the hard limit; 0 for heaps without one
+// The precheck for a commit: true, and counted, if the heap admits `bytes` more; false,
+// with the message, if that would pass the hard limit. Arenas, pools and tables ask
+// before committing; mem_account_decommit gives the bytes back.
+bool        mem_heap_admit(MemTag tag, usize bytes);
 
 // ---- accounting ----------------------------------------------------------------------
 // No atomics on the allocation path: every thread counts into its own block, and a
@@ -124,9 +139,12 @@ struct MemSample {
 void             mem_sample(u64 frame);
 const MemSample& mem_last_sample();
 
-// Accounting hooks for the other allocator kinds (arena, pool): pages committed.
+// Accounting hooks for the other allocator kinds (arena, pool): pages committed, after
+// mem_heap_admit said yes; decommit also releases the heap's count.
 void mem_account_commit(MemTag tag, usize bytes);
 void mem_account_decommit(MemTag tag, usize bytes);
+// The size-class allocator's pages: how many 64 KB pages it has carved, for reports.
+u64  mem_small_pages();
 
 // Frees the calling thread's scratch, then reports anything still live: the last call
 // of the process, after every table that outlives the engine is gone.

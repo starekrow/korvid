@@ -228,7 +228,7 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
     engine.trace.print  = g_trace_events;
     engine.threads      = g_threads;
     if (g_trace_events && !KV_DEV) KV_WARN("frameloop", "--trace-events: the event trace exists in dev builds only");
-    if (!engine_init(engine, kv_module_list())) {
+    if (!engine_init(engine, kv_module_list(), g_config.engine)) {
         names_shutdown();
         mem_shutdown();
         return 1;

@@ -40,7 +40,8 @@ is delivered to the next, up to a cap of four, and what remains waits for the ne
 boundary. Handlers have read/write sets and are ordered like systems. A type flagged
 `EvNextTick` is held until the next tick's first boundary. Systems with no path between them share a level and run at once on the job pool
 (`--threads N`; a module's own state is an implicit resource its systems write unless they
-declare `.state = StateUse::None`); `parallel_for(ctx, rows, grain, fn)` splits one system's
+declare `.state = StateUse::None`; a system that talks to the OS, the GPU or a module's own
+pools declares `.main_thread = true` and runs on the driving thread); `parallel_for(ctx, rows, grain, fn)` splits one system's
 rows over the pool, each chunk emitting and spawning into buffers merged in chunk order, so
 hashes agree across thread counts. `ctx.schedule(event, tick)`
 files an event in the timer wheel for the first boundary of that tick. Triggers declare
@@ -52,8 +53,9 @@ Modules follow the kormake directory convention (`module.lua`, `include/korvid/<
 `build/bin/assets/<module>/` and loaded by that relative path. `build.ninja` is a
 hand-written stand-in until kormake exists.
 
-    core             memory (general, arenas, scratch, pools on reserved pages; see
-                     docs/design/allocators.md), handles with a kind registry and C API
+    core             memory (a size-class general allocator with per-thread pages and
+                     remote frees, arenas, scratch, pools on reserved pages, heaps with soft
+                     and hard limits from the root's EngineConfig; see docs/design/allocators.md), handles with a kind registry and C API
                      (docs/design/handles.md), component schemas (field tables that hash,
                      compare and print rows), entity kinds (engine-owned tables),
                      Map<K, V> (dense entries, index past 16),
