@@ -18,11 +18,13 @@ struct Engine;
 
 KV_MODULE_DECLARE(platform_module);
 
+// The module's state: for code outside the schedule (the frame loop, a tool). Systems
+// reach the input and the window as resources.
 struct PlatformState {
-    Input       input;
-    HostWindow  window; // one window in slice 1
-    IoQueue     io;
-    const char* base_path = nullptr;
+    Input       input;     // raw at frame rate, sampled per tick
+    HostWindow  window;    // one window per process; closed at module shutdown
+    IoQueue     io;        // the process's read queue, pumped by platform_pump
+    const char* base_path = nullptr; // the executable's directory, trailing separator; SDL's
 };
 
 // Opens the window. Null if one is already open or SDL refused. Owned by the module.

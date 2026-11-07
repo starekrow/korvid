@@ -1,0 +1,347 @@
+# core
+
+The engine's floor: memory, handles, the module registry, the tick and its phases, the
+scheduler, events, entity kinds, the job pool, timers, the profiler, and the small
+libraries everything else is written with. Core knows nothing about windows, files,
+graphics or games; it holds state in pools it owns and runs systems that modules declare
+as data. A game never calls most of it directly: it declares components, kinds, systems
+and handlers in a `ModuleDesc`, and core stores, schedules, delivers and accounts.
+
+Rules core enforces, stated once: no exceptions, no RTTI, no STL in the runtime; nothing
+runs before `main`; every id is assigned at `engine_init` and cleared at shutdown; every
+allocation has an owner; the same world produces the same state hash on any thread count.
+
+## How it works
+
+**Memory** (`memory.h`, `arena.h`, `pool.h`, `os_memory.h`). Allocation is ownership. The
+general allocator is thread-safe and attributed: whichever module's code runs is charged
+for what it allocates, so `mem_report` says where the bytes went. Arenas are linear and
+reset at once; the calling thread's scratch arena is reset every frame (`MemScope` for
+anything shorter). Pools hand out generational handles over slots on reserved pages, so
+addresses are stable and a stale handle is caught. Heaps are budgets with soft and hard
+limits that the root assigns to modules. `docs/design/allocators.md` has the design.
+
+**Handles** (`handle.h`, `kv_handle.h`). One 64-bit value: kind, generation, index. A
+kind is an issuer registered with a resolve function, so anyone can turn a handle into a
+pointer without knowing who made it, and tools can describe it. `docs/design/handles.md`.
+
+**Modules** (`module.h`). A module is one `constinit ModuleDesc`: tables of components,
+kinds, events, resources, systems, handlers, triggers and CLI commands, plus startup and
+shutdown for OS resources and module state. The build generates the executable's module
+list in dependency order; `engine_init` reads it once, assigns every id, builds the
+schedule, and starts the modules in order. Module state lives in a module arena the
+engine owns.
+
+**The tick** (`tick.h`, `phase.h`, `engine.h`). `engine_frame(e, dt)` advances a fixed-step
+clock and runs the ticks it owes, capped per frame. A tick runs the phases in order
+(Input, PreSim, Sim, PostSim); at each phase boundary the engine delivers events, runs
+handlers in waves, and applies commands. Within a phase, systems form a DAG derived from
+their declared reads and writes (a reader runs after every writer of what it reads;
+`after` and `before` add edges; two unordered writers or a cycle is an init error with
+the names in the message), and systems with no path between them run concurrently on the
+job pool. Each system's module state is an implicit resource it writes unless it says
+`StateUse::Read` or `None`.
+
+**Data** (`component.h`, `kind.h`). A component is a plain struct with a field table, which
+is the reflection everything reads: layout, hashing, comparison, describe, which fields
+are handles. A kind is a fixed set of components plus a capacity; the engine makes it a
+table of SoA columns on reserved pages, one handle kind, and resources `kind` and
+`kind.Component` that systems name in their sets (`*.Component` means every kind's).
+Systems reach rows through the `TickContext`: `write_kind`, `read<T>`, `write<T>`,
+`view<A, const B>()`; in dev builds an access outside the declared sets asserts with the
+system and resource named. Spawn directly when you hold the kind's write; otherwise
+`spawn_later` and `destroy` are commands applied at the phase boundary.
+
+**Events** (`event.h`, `timer.h`). Typed per-tick buffers; emitting is an append into the
+running unit's writer, delivery at phase boundaries merges writers in a fixed order.
+Handlers subscribe to one type and run in capped waves; a type may ask for next-tick
+delivery. An event with a schema whose handle no longer resolves is dropped at delivery
+and counted. Scheduled events wait in a timer wheel keyed by tick; state triggers watch a
+component field across ticks and emit `StateEdge`.
+
+**Jobs** (`job.h`, `phase.h`). One pool of workers fed from one FIFO of chunks. `jobs_run`
+cuts a range into chunks and the caller works the queue too, so nested batches progress.
+`parallel_for` and `parallel_reduce` give each chunk its own event writer and command
+buffer, merged in chunk order, so results never depend on which thread ran what.
+
+**Idle time** (`engine.h`). The frame loop hands its slack to `engine_idle_run`, which
+serves registered tasks round-robin within the budget. `docs/design/idle.md`.
+
+**Tools in core.** The profiler (`profile.h`): zones, waits, marks and counters into
+per-thread rings, read between frames into summaries, a frame tree, and a Chrome trace.
+Names (`name.h`): interned strings compared as integers. Hashing (`hash.h`): one fixed
+64-bit hash, never seeded. A JSON reader (`json.h`), the CLI registry (`cli.h`), a
+seeded PCG32 (`random.h`), a test harness (`test.h`), a leveled log (`log.h`).
+
+## Using it
+
+**A module** is a header declaring the record and a source defining it:
+
+```cpp
+// include/korvid/mygame/module.h
+KV_MODULE_DECLARE(mygame_module);
+
+// src/game.cc
+struct Velocity { vec2 v; };
+constinit const FieldDesc     k_velocity_fields[] = {KV_FIELDS(Velocity, v)};
+constinit const ComponentDesc k_components[]      = {KV_COMPONENT(Velocity, k_velocity_fields)};
+
+constinit u32 g_ship_kind = 0;
+constinit const char* const k_ship_components[] = {"Transform2", "Sprite", "Velocity"};
+constinit const KindDesc    k_kinds[] = {{.name = "mygame.ship", .components = k_ship_components, .capacity = 64, .id = &g_ship_kind}};
+
+void move(TickContext& ctx) {
+    for (KindRows k : ctx.view<Transform2, const Velocity>()) {
+        Span<Transform2>     t = k.col<Transform2>();
+        Span<const Velocity> v = k.col<const Velocity>();
+        for (u32 i = 0; i < k.rows(); ++i) if (k.alive(i)) t[i].position += v[i].v * (f32)ctx.dt;
+    }
+}
+constinit const char* const k_move_reads[]  = {"*.Velocity"};
+constinit const char* const k_move_writes[] = {"*.Transform2"};
+constinit const SystemDesc  k_systems[] = {
+    {.name = "mygame.move", .phase = Phase::Sim, .fn = move, .reads = k_move_reads, .writes = k_move_writes},
+};
+
+struct Game { Rng rng; };
+bool mygame_startup(Engine&, ModuleInstance& self) { self.set_state(arena_push<Game>(self.arena)); return true; }
+
+KV_MODULE_DEFINE(mygame_module) = {
+    .name = "mygame", .components = k_components, .kinds = k_kinds, .systems = k_systems,
+    .startup = mygame_startup, .memory = {.reserve = 64 * 1024},
+};
+```
+
+`module.lua` lists the deps; kormake generates the module list. Everything else (the
+window, the renderer, the loop) is the frameloop module's.
+
+**A handler** reacts to a batch of events at a phase boundary:
+
+```cpp
+void on_hit(TickContext& ctx, Span<const RockHit> hits) {
+    static const u32 k_hp = ctx.column_id("mygame.rock.Health"); // looked up once
+    Span<Health> hp = ctx.write<Health>(k_hp);
+    for (const RockHit& h : hits) if (--hp[h.rock.index()].hp <= 0) ctx.destroy(h.rock); // delivered handles are live
+}
+constinit const char* const k_hit_writes[] = {"mygame.rock.Health"};
+constinit const HandlerDesc k_handlers[] = {{.name = "mygame.on_hit", KV_ON(RockHit, on_hit), .writes = k_hit_writes}};
+```
+
+**Scheduling and timers**: `ctx.schedule_in(Expire{bullet}, 72)` returns a ticket;
+`ctx.cancel(ticket)` withdraws it. A trigger on `"mygame.ship.Health.hp"` crossing below 1
+emits `StateEdge` without anyone polling.
+
+**Parallel work**: inside a system, `parallel_for(ctx, rows, 2048, [&](ChunkContext& cc, u32 b, u32 e) { ... cc.emit(...); cc.spawn_later(kind, ...); })`.
+
+**Memory in a game**: the module arena for what lives as long as the module
+(`arena_push<T>(self.arena)`), `self.general` for anything growable (`Array`, `Map`
+with `alloc` set), `mem_scratch()` with a `MemScope` for temporaries inside a call, and
+kind tables for entities, which the game never allocates.
+
+**Driving the engine yourself** (a tool, a test): `engine_init(e, modules, config)`,
+`engine_frame(e, dt)` per frame, `engine_shutdown(e)`, then `names_shutdown()` and
+`mem_shutdown()` last. `e.hash_ticks` logs the state hash after every tick;
+`engine_hash_state(e)` returns it.
+
+## Quick reference
+
+Header `korvid/core/types.h`: `u8`..`u64`, `i8`..`i64`, `f32`, `f64`, `usize`; `Span<T>`
+(a view: `data`, `len`, iteration, `const` conversion); `KV_ASSERT` (debug), `KV_VERIFY`
+(debug and dev), `KV_COUNTOF`, `KV_UNUSED`; `KV_DEBUG`, `KV_DEV` configuration macros.
+
+Header `korvid/core/memory.h`:
+
+| name | kind | what |
+|---|---|---|
+| `Allocator` | record | `alloc(a, size, align)`, `free(a, p, size)`, `tag`, `owner`, `mode`, `name`: the one interface containers take |
+| `MemTag` | record | `module`, `category`, `heap`: attribution; zero means nothing |
+| `alloc_in`, `free_in`, `alloc_items<T>`, `free_items<T>` | functions | calling an `Allocator*` without spelling it twice |
+| `mem_alloc`, `mem_alloc_aligned`, `mem_realloc`, `mem_free`, `mem_general()` | functions | the general allocator: thread-safe, headers with canaries, size classes to 2 KB |
+| `mem_general_tagged(out, tag, name)` | function | a view of the general allocator with a fixed tag, for a module's containers |
+| `mem_scratch()`, `mem_scratch_arena()`, `mem_scratch_reset()` | functions | the calling thread's scratch arena (frame lifetime on main) |
+| `mem_category_register`, `mem_heap_register(name, soft, hard)`, `mem_heap_admit` | functions | names for reports; budgets with limits |
+| `mem_stats()`, `mem_stats_heap`, `mem_stats_module`, `mem_stats_category`, `mem_report` | functions | accounting rollups; the leak report at exit |
+| `mem_sample(frame)`, `mem_last_sample()` | functions | the per-frame sample; a fast read of memory pressure |
+| `mem_set_owner`, `mem_owner`, `mem_set_module_heap` | functions | attribution the scheduler sets around module code |
+| `mem_thread_exit()`, `mem_shutdown()` | functions | a worker gives its scratch back; the last call of the process |
+
+Header `korvid/core/arena.h`:
+
+| name | kind | what |
+|---|---|---|
+| `Arena` | record | linear allocation out of a reserved range; `a` is its `Allocator` |
+| `arena_create(ar, reserve, name, tag)`, `arena_from_buffer`, `arena_destroy` | functions | over reserved pages, or over memory someone else owns |
+| `arena_alloc`, `arena_push<T>`, `arena_push_n<T>`, `arena_mark`, `arena_release`, `arena_reset` | functions | allocate, value-initialize, scope |
+| `MemScope` | record | mark on construction, release on destruction, over the scratch arena by default |
+
+Header `korvid/core/pool.h`:
+
+| name | kind | what |
+|---|---|---|
+| `Pool<T>` | record | generational slots on reserved pages: `init(max, tag)`, `create(v)`, `get(h)`, `valid(h)`, `destroy(h)`, `handle_at(i)`, `is_alive(i)`, `len`, `live`, `free()` |
+| `Pool::use_kind(k)` | method | stamps issued handles with a registered kind |
+| `Pool::snapshot`, `Pool::restore`, `Pool::snapshot_size` | methods | relocatable copies of the used prefix |
+| `KV_POOL_DEFAULT_MAX`, `KV_POOL_NONE` | constants | 1 M slots of address space; no slot |
+
+Header `korvid/core/array.h`, `map.h`, `hash.h`, `name.h`:
+
+| name | kind | what |
+|---|---|---|
+| `Array<T>` | record | growable plain data: `push`, `push_n`, `pop`, `resize_fill`, `reserve`, `clear`, `free`, `span()`, `alloc` (null: general) |
+| `array_in<T>(alloc)` | function | an array that lives in an arena or scratch |
+| `Map<K, V>` | record | dense entries plus an index past 16: `init(alloc)`, `find`, `has`, `set`, `get_or_insert`, `remove`, `clear`, `free`, `len()` |
+| `hash_mix`, `hash_bytes`, `hash_str`, `hash_key(k)` | functions | one fixed 64-bit hash; overload `hash_key` for your key type |
+| `Name` | record | an interned string's 64-bit hash; `is_null`, `==` |
+| `name_intern(s)`, `name_lookup(s)`, `name_str(n)`, `names_shutdown()` | functions | the process table; `NameTable` for one of your own |
+
+Header `korvid/core/handle.h` and `kv_handle.h`:
+
+| name | kind | what |
+|---|---|---|
+| `Handle` | record | `bits`; `kind()`, `gen()`, `index()`, `is_null()`, `make(kind, gen, index)`; `<` groups by kind |
+| `TypedHandle<T>` | record | the same bits with the pointee type in the signature; `get()` resolves checked |
+| `type_key<T>()`, `TypeKey<T>` | function, record | a unique address per type, for checked resolution |
+| `handle_kind_register(desc)`, `kv_handle_kind_unregister(kind)` | functions | an issuer registers its resolve and describe functions |
+| `resolve(h)`, `resolve<T>(h)` | functions | pointer or null; the typed one checks the issuer's type key |
+| `kv_handle_describe(h, out, cap)`, `kind_name(h)` | functions | `"name#index:gen"` plus the issuer's text |
+| `kv_handle_kind_set_ctx`, `kv_handle_kind_desc_get`, `kv_handle_kind_count` | functions | an issuer that moved; the registry for tools |
+
+Header `korvid/core/module.h`:
+
+| name | kind | what |
+|---|---|---|
+| `ModuleDesc` | record | `name`, `events`, `components`, `kinds`, `resources`, `systems`, `handlers`, `triggers`, `commands`, `startup`, `shutdown`, `memory` |
+| `ModuleInstance` | record | the engine's record of a started module: `arena`, `general`, `state`, `set_state<T>`, `state_as<T>()`, `index` |
+| `ResourceDesc{name}` | record | something systems read or write that is not a column |
+| `ModuleMemoryDesc{reserve}` | record | the module arena's address space |
+| `KV_MODULE_DECLARE(sym)`, `KV_MODULE_DEFINE(sym)` | macros | the record in a header and its constinit definition |
+| `kv_module_list()` | function | the executable's list, generated by kormake |
+
+Header `korvid/core/engine.h`:
+
+| name | kind | what |
+|---|---|---|
+| `Engine` | record | `events`, `phases`, `clock`, `modules`, `resources`, `components`, `tables`, `handlers`, `triggers`, `commands`, `timers`, `trace`, `idle`, `threads`, `hash_ticks`, `quit_requested` |
+| `EngineConfig`, `HeapDesc`, `ModuleHeapDesc` | records | the heap table and which module lives in which |
+| `engine_init(e, modules, config)`, `engine_shutdown(e)` | functions | register and start everything in order; undo it in reverse |
+| `engine_frame(e, dt)` | function | advance the clock, run the ticks it owes; returns how many |
+| `engine_request_quit(e)` | function | the loop ends |
+| `engine_module(e, name)`, `engine_module_state_as<T>(e, name)` | functions | a started module and its state, for code outside the schedule |
+| `engine_publish(e, self, name, ptr)` | function | the object behind a declared resource, for `ctx.resource<T>` |
+| `engine_resource_id`, `engine_component_id`, `engine_kind_id`, `engine_trigger_id`, `engine_system_phase` | functions | names to ids |
+| `engine_table(e, name or id)`, `engine_component(e, id)` | functions | a kind's table; a schema |
+| `engine_hash_state(e)` | function | the hash of every sim column of every live entity |
+| `engine_describe_event(e, type, event, out, cap)` | function | an event through its schema |
+| `engine_idle_add(e, name, fn, user)`, `engine_idle_remove(e, id)`, `engine_idle_run(e, seconds)` | functions | idle tasks: More, Nothing or Done, served round-robin in the budget |
+| `EventTrace`, `TraceRecord` | records | the dev ring of delivered events with their emitters (`--trace-events`) |
+
+Header `korvid/core/phase.h`:
+
+| name | kind | what |
+|---|---|---|
+| `Phase` | enum | `Input`, `PreSim`, `Sim`, `PostSim`; `phase_name` |
+| `SystemDesc` | record | `name`, `phase`, `fn`, `reads`, `writes`, `after`, `before`, `state` (`StateUse`), `main_thread` |
+| `HandlerDesc`, `KV_ON(E, fn)` | record, macro | a handler on one event type with its sets |
+| `TriggerDesc`, `TriggerEdge` | record, enum | `kind.Component.field` with `Changed`, `CrossedBelow(value)`, `CrossedAbove(value)` |
+| `Spawned{ticket, kind, entity}`, `StateEdge{entity, trigger, value}` | events | the engine's own, delivered to anyone |
+| `TickContext` | record | `engine`, `events`, `dt`, `tick`; `state_as<T>()`, `emit`, `write_kind`, `read_kind`, `read<T>`, `write<T>`, `view<C...>()`, `resource<T>`, `resource_id`, `column_id`, `kind_id`, `spawn_later`, `destroy`, `destroy_all`, `schedule`, `schedule_in`, `cancel` |
+| `KindRows`, `KindRange<C...>` | records | one kind's rows in a view: `rows()`, `alive(i)`, `handle_at(i)`, `col<T>()`, `prev<T>()` |
+| `ChunkContext` | record | what a parallel chunk may do: `emit`, `spawn_later` (no ticket), `destroy` |
+| `parallel_for(ctx, count, grain, fn)`, `parallel_reduce(ctx, count, grain, init, fn, combine)` | functions | chunks on the pool, buffers merged in chunk order |
+| `CommandBuffer`, `command_spawn_begin`, `command_spawn_component`, `command_destroy`, `command_destroy_all` | record, functions | the deferred spawn and destroy stream |
+| `ScheduledSystem`, `PhaseList` | records | the schedule as built: sets as ids, level, rank; `run_tick` |
+
+Header `korvid/core/component.h`, `kind.h`:
+
+| name | kind | what |
+|---|---|---|
+| `FieldDesc`, `FieldType` | record, enum | one field: scalar type, count, offset |
+| `ComponentDesc`, `ComponentFlags` | record, enum | name, size, align, fields, `CompSim`, `CompCosmetic`, `CompPrev`, the id slot |
+| `KV_FIELD(T, m)`, `KV_FIELDS(T, ...)`, `KV_COMPONENT(T, fields, flags...)`, `KV_FIELD_TRAITS(M, T, N)` | macros | the tables, from member names; traits for your own aggregates |
+| `ComponentType<T>::id` | record | the id slot, filled at init |
+| `schema_check`, `schema_field`, `schema_hash`, `schema_equal`, `schema_describe`, `schema_each_handle`, `schema_field_as_f64` | functions | every operation on a field table; `component_*` wrappers |
+| `KindDesc` | record | `name`, `components`, `capacity`, `id` slot |
+| `Table`, `Column` | records | a kind's storage: `spawn(...)`, `destroy`, `destroy_all`, `valid`, `live()`, `rows()`, `is_alive(i)`, `handle_at(i)`, `get<T>(h)`, `prev<T>(h)`, `rows_of<T>()`, `prev_rows_of<T>()`, `column`, `has`, `describe`, `hash` |
+
+Header `korvid/core/event.h`, `timer.h`:
+
+| name | kind | what |
+|---|---|---|
+| `EventTypeDesc`, `EventFlags`, `KV_EVENT(E)`, `KV_EVENT_EX(E, fields, flags)` | record, enum, macros | an event type with an optional schema; `EvNextTick` |
+| `EventType<E>::id` | record | the id slot |
+| `EventBus` | record | `emit`, `read<E>()`, `read_new<E>()`, `deliver`, `end_tick`, `dropped_stale`, `pending_count` |
+| `EventWriter`, `EventBuffer` | records | one unit's pending events; a type's batch |
+| `TimerWheel` | record | `schedule`, `cancel`, `fire`; 1024-slot ring plus a far list |
+
+Header `korvid/core/job.h`, `thread.h`, `time.h`:
+
+| name | kind | what |
+|---|---|---|
+| `jobs_init(workers)`, `jobs_shutdown()`, `jobs_worker_count()` | functions | the pool |
+| `jobs_run(count, grain, fn, user, name)`, `jobs_chunks` | functions | a batch; the caller works too |
+| `jobs_stats()`, `jobs_stats_reset()`, `JobStats` | functions, record | batches, tasks, waits |
+| `thread_id()`, `os_cpu_count()`, `thread_set_realtime`, `thread_is_realtime` | functions | identity; a real-time thread never allocates |
+| `time_now()`, `time_sleep(s)`, `os_ticks()`, `os_ticks_per_second()`, `os_thread_cpu_ticks()` | functions | monotonic seconds; the raw clock the profiler records |
+
+Header `korvid/core/profile.h`:
+
+| name | kind | what |
+|---|---|---|
+| `KV_ZONE(name)`, `KV_ZONE_WAIT(name)`, `KV_MARK(name)`, `KV_MARK_V(name, v)`, `KV_COUNTER(name, v)` | macros | the hot path; nothing in ship builds |
+| `prof_enable`, `prof_thread_name`, `prof_cpu_time` | functions | on, named threads, CPU time at zone edges |
+| `prof_collect()`, `prof_frame_stats()`, `prof_thread_stats()`, `prof_log_summary(top)`, `prof_keep_frame`, `prof_log_frame` | functions | the collector, between frames on main |
+| `prof_trace_open(path)`, `prof_trace_close()`, `prof_shutdown()` | functions | a Chrome JSON trace |
+
+Header `korvid/core/json.h`, `cli.h`, `random.h`, `log.h`, `test.h`:
+
+| name | kind | what |
+|---|---|---|
+| `json_parse(text, len, alloc, doc)`, `JsonDoc`, `JsonValue`, `JsonType` | function, records | a flat tree in the allocator given; errors with byte offsets |
+| `json_get`, `json_at`, `json_first`, `json_next`, `json_number`, `json_bool`, `json_string`, `json_numbers` | functions | walking and typed reads with defaults |
+| `CliCommandDesc`, `CliContext`, `cli_arg_f32`, `cli_arg_u32` | records, functions | a command as module data; `print`, `fail`; argument parsing |
+| `Rng` | record | PCG32: `seeded(seed, stream)`, `next`, `unit`, `range`, `below`, `chance` |
+| `KV_TRACE`..`KV_ERROR`, `log_set_level`, `log_level`, `log_write` | macros, functions | leveled log to stdout |
+| `TestCtx`, `KV_CHECK(ctx, expr)`, `test_report(ctx, exe)` | record, macro, function | one test executable per module, no registration |
+
+Header `korvid/core/os_memory.h`: `os_page_size`, `os_reserve`, `os_commit`, `os_decommit`,
+`os_release`, `os_page_align`: the page layer, the only ported part of the memory system.
+
+What core registers with the engine on its own: the events `Spawned` and `StateEdge`,
+the implicit resource `<module>.state` for every module, and the handle kinds of every
+kind table. Core has no `ModuleDesc` of its own; the engine is the host.
+
+## Behaviour worth knowing
+
+- **Ids are per engine.** `ComponentType<T>::id`, `EventType<E>::id`, kind ids and
+  resource ids are filled at `engine_init` and cleared at shutdown. Cache them in a
+  `static const u32` looked up through the context, never across engines.
+- **List order is the tie-break.** Modules start in list order and stop in reverse;
+  systems with no edge between them keep module order then declaration order. Changing
+  the list changes nothing a correct game depends on, and the schedule log says why
+  each edge exists.
+- **Access is checked in dev.** `ctx.write<T>` on a column the system did not declare
+  asserts with the system and the resource named. A `cosmetic` component read by a sim
+  system is rejected at init. Ship builds check nothing and trust the sets.
+- **Determinism is by construction.** Chunks merge in chunk order, tables iterate in slot
+  order, events deliver in writer order, timers fire in ticket order. `--threads 1` and
+  `--threads 16` hash the same. The hash covers sim columns only.
+- **Scratch is frame lifetime on main, job lifetime on workers.** A pointer into scratch
+  kept across a frame is a bug the poison fill finds in dev.
+- **Pools and arenas have one owner thread**, asserted in debug. The general allocator
+  is the only shared one; a worker's bare `mem_alloc` is attributed to the module whose
+  system is running.
+- **Handles in events are checked at delivery**, not at emit: an event naming an entity
+  destroyed at the same boundary is dropped and `dropped_stale` counts it.
+- **Waves are capped** (`Engine::wave_cap`, 4): a cascade deeper than that rolls into the
+  next boundary, and `waves_capped` counts it.
+- **Heaps fail, never kill.** An allocation past a hard limit returns null with the heap,
+  module and category logged once; a table spawn past its capacity returns a null handle.
+- **The profiler is on when something reads it** and compiles to nothing in ship.
+
+## Not in this module
+
+Windows, input, files and sockets (platform); rendering (render, renderer-vulkan);
+anything that knows what an entity looks like (sprite, collision); the frame loop and
+options (frameloop); the CLI's transports (cli). Rewind and replay, the C ABI, runtime
+module loading, compound and script triggers, and simulation LOD tiers are designed for
+and not built.

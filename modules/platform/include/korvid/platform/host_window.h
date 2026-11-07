@@ -32,14 +32,17 @@ struct WindowDesc {
 // `example_testbed --hitch-ms 50` plus WAYLAND_DEBUG=1; the hitch lines use libwayland's timestamps.
 
 struct HostWindow {
+    // Creates the window; false (with the reason logged) if SDL refuses. Asserts if open.
     bool open(const WindowDesc& desc);
     void close();
     bool is_open() const { return sdl_window_ != nullptr; }
 
+    // The framebuffer in pixels (not window units: a scaled desktop differs), as of the
+    // last pump. The renderer is told at render rate when it changes.
     u32  width()  const { return width_; }
     u32  height() const { return height_; }
-    bool vsync()  const { return vsync_; }
-    bool focused() const { return focused_; }
+    bool vsync()  const { return vsync_; }  // the preference from the desc; the renderer applies it
+    bool focused() const { return focused_; } // input focus, as of the last pump
 
     // Translates OS events into bus events and updates input.raw. Call once per frame.
     void pump(EventBus& bus, Input& input);
@@ -53,6 +56,7 @@ struct HostWindow {
     // surface on its side; no graphics API headers are included here.
     void* native_handle() const { return sdl_window_; }
 
+    // The fields are the module's; read them through the accessors.
     void*         sdl_window_ = nullptr;
     WindowSurface surface_    = WindowSurface::Software;
     u32   width_      = 0;
