@@ -5,7 +5,7 @@
 // Rules, stated once:
 //   1. Nothing runs before main. Every ModuleDesc and every table it points at is
 //      constinit; the compiler rejects anything that would need a dynamic initializer.
-//   2. The build generates the module list (hello/src/modules.gen.cc stands in by hand),
+//   2. The build generates the module list (example_testbed/src/modules.gen.cc stands in by hand),
 //      in dependency order. engine_init is the only thing that reads it.
 //   3. Order is list order, then declaration order. Modules start in list order and stop
 //      in reverse. Event, component and kind ids are assigned in that order. Within a tick phase, systems run

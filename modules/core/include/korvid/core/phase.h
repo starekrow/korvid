@@ -201,7 +201,7 @@ struct TickContext {
     }
 
     // Names to ids, for code that would rather not look a name up every call:
-    //   static const u32 k_bounces = ctx.column_id("hello.ball.Bounces");
+    //   static const u32 k_bounces = ctx.column_id("example_testbed.ball.Bounces");
     // Ids are stable for the life of the engine; a program that initializes several
     // engines in a row must not keep them across.
     u32 resource_id(const char* name) { return ctx_resource_id(*this, name, false); }

@@ -20,7 +20,7 @@ for the table a system holds the write on, `read<T>`/`write<T>` for one column b
 (the window, the input state), and `spawn_later`/`destroy` commands applied at the phase
 boundary. Names resolve to ids once with `resource_id`, `column_id` and `kind_id`. In dev
 builds an access the system did not declare asserts with the system and resource named. Nothing registers itself and nothing runs before main;
-the build-generated list (`hello/src/modules.gen.cc` for now) is the only input. Modules
+the build-generated list (`example_testbed/src/modules.gen.cc` for now) is the only input. Modules
 start in list order and stop in reverse, and event, component and kind ids are assigned in
 list then declaration order. Within each tick phase (input, presim, sim, postsim) the
 order is derived from the systems' read/write sets: a reader runs after every writer of
@@ -75,18 +75,18 @@ hand-written stand-in until kormake exists.
     frameloop        what every game needs and no game decides: options, window and
                      renderer from a FrameLoopConfig, the loop (pump, ticks, extract,
                      render), resize, reporting, ExitRequested on the bus
-    hello            the example game: a config, asset and material setup, one system
+    example_testbed            the example game: a config, asset and material setup, one system
 
-    ninja            # builds build/bin/hello, build/bin/shaders/sprite.spv and the tests
+    ninja            # builds build/bin/example_testbed, build/bin/shaders/sprite.spv and the tests
     ninja check      # runs the tests
-    build/bin/hello                   # opens a window; Esc or close exits via ST_EXIT
-    build/bin/hello --run-seconds 2   # exits by itself (smoke test)
-    build/bin/hello --no-validation   # debug builds enable the validation layers by default
-    build/bin/hello --no-vsync        # mailbox/immediate present instead of fifo
-    build/bin/hello --borderless      # no libdecor frame (see note below)
-    build/bin/hello --hitch-ms 50     # log where any frame over 50 ms spent its time
-    build/bin/hello --hash            # log the sim state hash per tick (--hash-systems: per system)
-    build/bin/hello --trace-events    # print every delivered event with its emitter (dev builds)
+    build/bin/example_testbed                   # opens a window; Esc or close exits via ST_EXIT
+    build/bin/example_testbed --run-seconds 2   # exits by itself (smoke test)
+    build/bin/example_testbed --no-validation   # debug builds enable the validation layers by default
+    build/bin/example_testbed --no-vsync        # mailbox/immediate present instead of fifo
+    build/bin/example_testbed --borderless      # no libdecor frame (see note below)
+    build/bin/example_testbed --hitch-ms 50     # log where any frame over 50 ms spent its time
+    build/bin/example_testbed --hash            # log the sim state hash per tick (--hash-systems: per system)
+    build/bin/example_testbed --trace-events    # print every delivered event with its emitter (dev builds)
 
 Needs g++ (or clang++), ninja, libsdl3-dev, libvulkan-dev, zlib1g-dev, slang-compiler,
 and for debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached

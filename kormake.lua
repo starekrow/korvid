@@ -13,5 +13,5 @@ configs   { "debug", "dev", "ship" }
 -- platform modules will supply this default; until then it is spelled out
 bind "render" { linux = { "renderer-vulkan" } }
 
-root "hello" {}
+root "example_testbed" {}
 root "tests" { modules = "*" }

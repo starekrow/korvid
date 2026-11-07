@@ -29,7 +29,7 @@ struct WindowDesc {
 // Keyboard resizes and borderless windows are unaffected. Remedy when it matters: open
 // borderless on Wayland and provide edge resizing through SDL_SetWindowHitTest, so the
 // engine owns the frame and each configure costs only a few protocol calls. Diagnose with
-// `hello --hitch-ms 50` plus WAYLAND_DEBUG=1; the hitch lines use libwayland's timestamps.
+// `example_testbed --hitch-ms 50` plus WAYLAND_DEBUG=1; the hitch lines use libwayland's timestamps.
 
 struct HostWindow {
     bool open(const WindowDesc& desc);

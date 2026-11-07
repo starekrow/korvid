@@ -26,9 +26,9 @@ inc_rvk      = $inc_render -Imodules/platform/include -Imodules/renderer-vulkan/
 inc_asset    = $inc_render -Imodules/platform/include -Imodules/asset/include
 inc_frameloop = $inc_platform -Imodules/math/include -Imodules/render/include $
                 -Imodules/sprite/include -Imodules/frameloop/include
-inc_hello    = $inc_platform -Imodules/math/include -Imodules/render/include $
+inc_example_testbed    = $inc_platform -Imodules/math/include -Imodules/render/include $
                -Imodules/sprite/include -Imodules/asset/include -Imodules/renderer-vulkan/include $
-               -Imodules/frameloop/include -Imodules/hello/include
+               -Imodules/frameloop/include -Imodules/example_testbed/include
 
 rule cxx
   command = $cxx $cxxflags $includes -MMD -MF $out.d -c $in -o $out
@@ -240,22 +240,22 @@ build $builddir/obj/frameloop/frameloop.o: cxx modules/frameloop/src/frameloop.c
 
 build $builddir/lib/libkv_frameloop.a: ar $builddir/obj/frameloop/frameloop.o
 
-# ---- hello -----------------------------------------------------------------
-build $builddir/obj/hello/main.o: cxx modules/hello/src/main.cc
-  includes = $inc_hello
-build $builddir/obj/hello/game.o: cxx modules/hello/src/game.cc
-  includes = $inc_hello
-build $builddir/obj/hello/modules.gen.o: cxx modules/hello/src/modules.gen.cc
-  includes = $inc_hello
+# ---- example_testbed -----------------------------------------------------------------
+build $builddir/obj/example_testbed/main.o: cxx modules/example_testbed/src/main.cc
+  includes = $inc_example_testbed
+build $builddir/obj/example_testbed/game.o: cxx modules/example_testbed/src/game.cc
+  includes = $inc_example_testbed
+build $builddir/obj/example_testbed/modules.gen.o: cxx modules/example_testbed/src/modules.gen.cc
+  includes = $inc_example_testbed
 
-# hello's assets
-build $builddir/bin/assets/hello/ball.png: copy modules/hello/assets/ball.png
+# example_testbed's assets
+build $builddir/bin/assets/example_testbed/ball.png: copy modules/example_testbed/assets/ball.png
 
-build $builddir/bin/hello: link $builddir/obj/hello/main.o $builddir/obj/hello/game.o $
-    $builddir/obj/hello/modules.gen.o $builddir/lib/libkv_frameloop.a $
+build $builddir/bin/example_testbed: link $builddir/obj/example_testbed/main.o $builddir/obj/example_testbed/game.o $
+    $builddir/obj/example_testbed/modules.gen.o $builddir/lib/libkv_frameloop.a $
     $builddir/lib/libkv_sprite.a $builddir/lib/libkv_asset.a $builddir/lib/libkv_renderer_vulkan.a $
     $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a | $builddir/bin/shaders/sprite.spv $
-    $builddir/bin/assets/hello/ball.png
+    $builddir/bin/assets/example_testbed/ball.png
   libs = $sdl_libs $zlib_libs
 
 # ---- aggregates ------------------------------------------------------------
@@ -267,7 +267,7 @@ build $builddir/test/asset_tests.ok: run_test $builddir/bin/asset_tests
 
 build tests: phony $builddir/bin/core_tests $builddir/bin/platform_tests $
     $builddir/bin/math_tests $builddir/bin/sprite_tests $builddir/bin/asset_tests
-build all: phony $builddir/bin/hello tests
+build all: phony $builddir/bin/example_testbed tests
 build check: phony $builddir/test/core_tests.ok $builddir/test/platform_tests.ok $
     $builddir/test/math_tests.ok $builddir/test/sprite_tests.ok $builddir/test/asset_tests.ok
 default all

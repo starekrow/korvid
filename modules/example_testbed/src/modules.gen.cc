@@ -7,7 +7,7 @@
 #include "korvid/asset/module.h"
 #include "korvid/sprite/module.h"
 #include "korvid/frameloop/module.h"
-#include "korvid/hello/module.h"
+#include "korvid/example_testbed/module.h"
 
 namespace {
 constinit const kv::ModuleDesc* const k_modules[] = {
@@ -16,7 +16,7 @@ constinit const kv::ModuleDesc* const k_modules[] = {
     &kv::asset_module,
     &kv::sprite_module,
     &kv::frameloop_module,
-    &kv::hello_module,
+    &kv::example_testbed_module,
 };
 }
 
