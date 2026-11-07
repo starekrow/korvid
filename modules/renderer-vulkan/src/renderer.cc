@@ -3,6 +3,8 @@
 // framebuffers. One bindless texture array, one instance buffer per frame in flight, one
 // instanced draw per blend-mode batch, two frames in flight with fences. The only inputs
 // are render packets; nothing here knows about entities, components or the window pump.
+// Textures and materials are pools whose index is the GPU index: a texture's pool slot is
+// its bindless slot, a material's is its row. The outer engine holds the handles.
 #include "korvid/render/renderer.h"
 #include "korvid/render/material.h"
 #include "korvid/renderer-vulkan/module.h"
@@ -11,6 +13,7 @@
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
+#include "korvid/core/pool.h"
 #include "vk_funcs.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -24,6 +27,7 @@ namespace {
 
 constexpr u32 kFramesInFlight   = 2;
 constexpr u32 kMaxTextures      = 1024; // bindless array size; slot 0 is the default texture
+constexpr u32 kMaxMaterials     = 4096;
 constexpr u32 kDefaultTexSize   = 16;   // checkerboard texels per side
 constexpr u32 kDefaultTexCell   = 2;    // texels per checker cell
 constexpr u32 kInitialInstances = 256;
@@ -55,11 +59,24 @@ struct Buffer {
     void*          mapped = nullptr;
 };
 
+// A bindless slot. Its pool index is the slot number. No image yet means the slot
+// shows the default texture.
 struct Texture {
     VkImage        image  = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     VkImageView    view   = VK_NULL_HANDLE;
-    u32            slot   = 0;
+    u32            width  = 0, height = 0;
+    TextureFormat  format = TextureFormat::RGBA8_SRGB;
+    bool           resident = false;
+    char           name[32];
+};
+
+// A material row. The texture's slot is read through the texture pool each frame so a
+// destroyed texture falls back to the default rather than to whatever reused the slot.
+struct MaterialRecord {
+    Handle    texture;
+    BlendMode blend;
+    color     tint;
 };
 
 // Something to destroy once the frame that last used it has passed its fence.
@@ -77,6 +94,7 @@ struct FrameInFlight {
     Buffer          instances;
     u32             instance_cap = 0;
     Array<Garbage>  garbage;                  // destroyed after this frame's fence
+    Array<u32>      dirty_slots;              // texture slots to rewrite in this frame's set
 };
 
 struct Swapchain {
@@ -125,9 +143,17 @@ struct Renderer {
     VkShaderModule        shader      = VK_NULL_HANDLE;
     VkPipeline            pipelines[kBlendCount] = {};
 
-    Texture default_texture;
+    Pool<Texture>        textures;  // slot = index; 0 is the default checkerboard
+    Pool<MaterialRecord> materials; // row = index
+    Handle               default_material;
+    u16                  texture_kind = 0, material_kind = 0;
 
     FrameInFlight frames[kFramesInFlight];
+    // Uploads run on their own command buffer and fence, so they never collide with a
+    // frame in flight. One at a time, waited on: slice 1 has no transfer queue.
+    VkCommandPool   upload_pool  = VK_NULL_HANDLE;
+    VkCommandBuffer upload_cmd   = VK_NULL_HANDLE;
+    VkFence         upload_fence = VK_NULL_HANDLE;
     u32           frame_index = 0;
     u64           frame_count = 0;
 
@@ -439,6 +465,20 @@ void defer_destroy_buffer(Renderer* r, Buffer& b) {
     b = Buffer{};
 }
 
+void defer_destroy_texture(Renderer* r, Texture& t) {
+    defer_destroy(r, Garbage::ImageViewKind, (u64)t.view);
+    defer_destroy(r, Garbage::ImageKind, (u64)t.image);
+    defer_destroy(r, Garbage::MemoryKind, (u64)t.memory);
+    t.view = VK_NULL_HANDLE; t.image = VK_NULL_HANDLE; t.memory = VK_NULL_HANDLE;
+    t.resident = false;
+}
+
+// A slot's contents changed. Each frame's set is rewritten once that frame's fence has
+// passed, so no pending command buffer sees a descriptor change under it.
+void mark_slot_dirty(Renderer* r, u32 slot) {
+    for (FrameInFlight& f : r->frames) f.dirty_slots.push(slot);
+}
+
 void run_garbage(Renderer* r, FrameInFlight& f) {
     for (const Garbage& g : f.garbage) {
         switch (g.kind) {
@@ -475,34 +515,37 @@ bool create_host_buffer(Renderer* r, VkDeviceSize size, VkBufferUsageFlags usage
     return true;
 }
 
-void destroy_texture(Renderer* r, Texture& t) {
+void destroy_texture_now(Renderer* r, Texture& t) {
     if (t.view)   vkDestroyImageView(r->device, t.view, nullptr);
     if (t.image)  vkDestroyImage(r->device, t.image, nullptr);
     if (t.memory) vkFreeMemory(r->device, t.memory, nullptr);
-    t = Texture{};
+    t.view = VK_NULL_HANDLE; t.image = VK_NULL_HANDLE; t.memory = VK_NULL_HANDLE;
+    t.resident = false;
 }
 
-// Runs recorded commands on frame 0's pool and waits. Used for uploads before the first
-// frame; textures are resident before anything references them.
+// Runs recorded commands on the upload command buffer and waits for its fence. Textures
+// are resident before the next frame that references them. Frames in flight are not
+// disturbed: the upload has its own buffer and the queue serializes the work.
 bool submit_once(Renderer* r, bool (*record)(Renderer*, VkCommandBuffer, void*), void* user) {
-    FrameInFlight& f = r->frames[0];
-    VK_CHECK(vkResetCommandPool(r->device, f.pool, 0));
+    VK_CHECK(vkWaitForFences(r->device, 1, &r->upload_fence, VK_TRUE, UINT64_MAX)); // the previous upload
+    VK_CHECK(vkResetFences(r->device, 1, &r->upload_fence));
+    VK_CHECK(vkResetCommandPool(r->device, r->upload_pool, 0));
     VkCommandBufferBeginInfo bi{};
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(f.cmd, &bi));
-    if (!record(r, f.cmd, user)) return false;
-    VK_CHECK(vkEndCommandBuffer(f.cmd));
+    VK_CHECK(vkBeginCommandBuffer(r->upload_cmd, &bi));
+    if (!record(r, r->upload_cmd, user)) return false;
+    VK_CHECK(vkEndCommandBuffer(r->upload_cmd));
 
     VkCommandBufferSubmitInfo cbi{};
     cbi.sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cbi.commandBuffer = f.cmd;
+    cbi.commandBuffer = r->upload_cmd;
     VkSubmitInfo2 si{};
     si.sType                  = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
     si.commandBufferInfoCount = 1;
     si.pCommandBufferInfos    = &cbi;
-    VK_CHECK(vkQueueSubmit2(r->queue, 1, &si, VK_NULL_HANDLE));
-    VK_CHECK(vkQueueWaitIdle(r->queue));
+    VK_CHECK(vkQueueSubmit2(r->queue, 1, &si, r->upload_fence));
+    VK_CHECK(vkWaitForFences(r->device, 1, &r->upload_fence, VK_TRUE, UINT64_MAX));
     return true;
 }
 
@@ -551,14 +594,42 @@ bool record_texture_upload(Renderer*, VkCommandBuffer cmd, void* user) {
     return true;
 }
 
-// Creates an sRGB RGBA8 texture from pixels, uploads it through a staging buffer and
-// writes it into bindless slot `slot`.
-bool create_texture_rgba8(Renderer* r, const u8* pixels, u32 width, u32 height, u32 slot, Texture& out) {
+VkFormat vk_format(TextureFormat f) {
+    return f == TextureFormat::RGBA8_UNORM ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_SRGB;
+}
+
+// The view a slot should show right now: its own image, or the default texture's.
+VkImageView slot_view(Renderer* r, u32 slot) {
+    const Texture* t = slot < r->textures.len && r->textures.is_alive(slot) ? &r->textures.items[slot] : nullptr;
+    if (t && t->view) return t->view;
+    return r->textures.items[0].view;
+}
+
+void write_texture_slot(Renderer* r, VkDescriptorSet set, u32 slot) {
+    VkDescriptorImageInfo info{};
+    info.imageView   = slot_view(r, slot);
+    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkWriteDescriptorSet write{};
+    write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet          = set;
+    write.dstBinding      = 2;
+    write.dstArrayElement = slot;
+    write.descriptorCount = 1;
+    write.descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    write.pImageInfo      = &info;
+    vkUpdateDescriptorSets(r->device, 1, &write, 0, nullptr);
+}
+
+// Creates the GPU image for a texture record and uploads tightly packed pixels through a
+// staging buffer. Any previous image is destroyed after the frames in flight.
+bool upload_texture(Renderer* r, Texture& t, const u8* pixels) {
+    if (t.image) defer_destroy_texture(r, t);
+
     VkImageCreateInfo ici{};
     ici.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ici.imageType     = VK_IMAGE_TYPE_2D;
-    ici.format        = VK_FORMAT_R8G8B8A8_SRGB;
-    ici.extent        = {width, height, 1};
+    ici.format        = vk_format(t.format);
+    ici.extent        = {t.width, t.height, 1};
     ici.mipLevels     = 1;
     ici.arrayLayers   = 1;
     ici.samples       = VK_SAMPLE_COUNT_1_BIT;
@@ -566,57 +637,48 @@ bool create_texture_rgba8(Renderer* r, const u8* pixels, u32 width, u32 height, 
     ici.usage         = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     ici.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
     ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VK_CHECK(vkCreateImage(r->device, &ici, nullptr, &out.image));
+    VK_CHECK(vkCreateImage(r->device, &ici, nullptr, &t.image));
 
     VkMemoryRequirements req;
-    vkGetImageMemoryRequirements(r->device, out.image, &req);
+    vkGetImageMemoryRequirements(r->device, t.image, &req);
     VkMemoryAllocateInfo ai{};
     ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     ai.allocationSize  = req.size;
     ai.memoryTypeIndex = find_memory_type(r, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (ai.memoryTypeIndex == UINT32_MAX) { KV_ERROR("vulkan", "no device-local memory type"); return false; }
-    VK_CHECK(vkAllocateMemory(r->device, &ai, nullptr, &out.memory));
-    VK_CHECK(vkBindImageMemory(r->device, out.image, out.memory, 0));
+    VK_CHECK(vkAllocateMemory(r->device, &ai, nullptr, &t.memory));
+    VK_CHECK(vkBindImageMemory(r->device, t.image, t.memory, 0));
 
     VkImageViewCreateInfo vci{};
     vci.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vci.image            = out.image;
+    vci.image            = t.image;
     vci.viewType         = VK_IMAGE_VIEW_TYPE_2D;
     vci.format           = ici.format;
     vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VK_CHECK(vkCreateImageView(r->device, &vci, nullptr, &out.view));
+    VK_CHECK(vkCreateImageView(r->device, &vci, nullptr, &t.view));
 
     Buffer staging;
-    VkDeviceSize bytes = (VkDeviceSize)width * height * 4;
+    VkDeviceSize bytes = (VkDeviceSize)t.width * t.height * 4;
     if (!create_host_buffer(r, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, staging)) return false;
     memcpy(staging.mapped, pixels, (usize)bytes);
-    UploadJob job{&out, &staging, width, height};
-    bool ok = submit_once(r, record_texture_upload, &job);
+    UploadJob job{&t, &staging, t.width, t.height};
+    bool ok = submit_once(r, record_texture_upload, &job); // waits: resident before the next frame
     destroy_buffer(r, staging);
     if (!ok) return false;
-
-    // Every frame's set sees every texture. The binding is update-after-bind, so a slot no
-    // pending frame uses can be written while frames are in flight.
-    out.slot = slot;
-    VkDescriptorImageInfo info{};
-    info.imageView   = out.view;
-    info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkWriteDescriptorSet writes[kFramesInFlight]{};
-    for (u32 i = 0; i < kFramesInFlight; ++i) {
-        writes[i].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[i].dstSet          = r->frames[i].set;
-        writes[i].dstBinding      = 2;
-        writes[i].dstArrayElement = slot;
-        writes[i].descriptorCount = 1;
-        writes[i].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        writes[i].pImageInfo      = &info;
-    }
-    vkUpdateDescriptorSets(r->device, kFramesInFlight, writes, 0, nullptr);
+    t.resident = true;
     return true;
 }
 
-// The hardcoded default: a red and white checkerboard. Slot 0; what a null material gets.
+// The hardcoded default: a red and white checkerboard at slot 0; what a stale or null
+// texture reference shows, and what a pending texture shows until its upload.
 bool create_default_texture(Renderer* r) {
+    Texture t{};
+    t.width = t.height = kDefaultTexSize;
+    t.format = TextureFormat::RGBA8_SRGB;
+    strncpy(t.name, "default", sizeof t.name - 1);
+    Handle h = r->textures.create(t);
+    if (h.index() != 0) { KV_ERROR("vulkan", "default texture is not slot 0"); return false; }
+
     u8 pixels[kDefaultTexSize * kDefaultTexSize * 4];
     for (u32 y = 0; y < kDefaultTexSize; ++y) {
         for (u32 x = 0; x < kDefaultTexSize; ++x) {
@@ -628,7 +690,51 @@ bool create_default_texture(Renderer* r) {
             p[3] = 255;
         }
     }
-    return create_texture_rgba8(r, pixels, kDefaultTexSize, kDefaultTexSize, 0, r->default_texture);
+    if (!upload_texture(r, r->textures.items[0], pixels)) return false;
+    // Nothing is pending yet: every slot of every set can point at the default now.
+    for (FrameInFlight& f : r->frames)
+        for (u32 slot = 0; slot < kMaxTextures; ++slot) write_texture_slot(r, f.set, slot);
+
+    MaterialRecord m{};
+    m.texture = h;
+    m.blend   = BlendMode::Alpha;
+    m.tint    = color_white();
+    r->default_material = r->materials.create(m);
+    return !r->default_material.is_null();
+}
+
+// ---- handle kinds -------------------------------------------------------------------
+
+void* texture_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->textures.get(Handle{h}); }
+int texture_describe(kv_handle h, void* ctx, char* out, size_t cap) {
+    Renderer* r = (Renderer*)ctx;
+    Texture* t = r->textures.get(Handle{h});
+    if (!t) return snprintf(out, cap, "stale");
+    return snprintf(out, cap, "'%s' %ux%u slot %u %s", t->name, t->width, t->height, Handle{h}.index(),
+                    t->resident ? "resident" : "placeholder");
+}
+void* material_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->materials.get(Handle{h}); }
+int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
+    Renderer* r = (Renderer*)ctx;
+    MaterialRecord* m = r->materials.get(Handle{h});
+    if (!m) return snprintf(out, cap, "stale");
+    const char* blend = m->blend == BlendMode::Opaque ? "opaque" : m->blend == BlendMode::Additive ? "additive" : "alpha";
+    return snprintf(out, cap, "%s texture slot %u", blend, renderer_texture_slot(r, m->texture));
+}
+
+bool create_resource_pools(Renderer* r) {
+    kv_handle_kind_desc td{};
+    td.name = "render.texture"; td.type_key = type_key<Texture>(); td.ctx = r;
+    td.resolve = texture_resolve; td.describe = texture_describe; td.flags = KV_HANDLE_GENERATIONAL;
+    r->texture_kind = handle_kind_register(td);
+    kv_handle_kind_desc md{};
+    md.name = "render.material"; md.type_key = type_key<MaterialRecord>(); md.ctx = r;
+    md.resolve = material_resolve; md.describe = material_describe; md.flags = KV_HANDLE_GENERATIONAL;
+    r->material_kind = handle_kind_register(md);
+    if (!r->texture_kind || !r->material_kind) return false;
+    r->textures.use_kind(r->texture_kind);
+    r->materials.use_kind(r->material_kind);
+    return r->textures.init(kMaxTextures, r->general->tag) && r->materials.init(kMaxMaterials, r->general->tag);
 }
 
 // ---- descriptors, pipeline -----------------------------------------------------
@@ -719,9 +825,9 @@ bool create_descriptors(Renderer* r) {
     sci.magFilter    = VK_FILTER_NEAREST;
     sci.minFilter    = VK_FILTER_NEAREST;
     sci.mipmapMode   = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT; // uv outside [0, 1] tiles
+    sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     sci.maxLod       = 1.0f;
     VK_CHECK(vkCreateSampler(r->device, &sci, nullptr, &r->sampler));
 
@@ -1041,14 +1147,34 @@ bool create_frames(Renderer* r) {
                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, f.instances)) return false;
         f.instance_cap = kInitialInstances;
     }
+
+    VkCommandPoolCreateInfo pci{};
+    pci.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pci.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pci.queueFamilyIndex = r->queue_family;
+    VK_CHECK(vkCreateCommandPool(r->device, &pci, nullptr, &r->upload_pool));
+    VkCommandBufferAllocateInfo cai{};
+    cai.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cai.commandPool        = r->upload_pool;
+    cai.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cai.commandBufferCount = 1;
+    VK_CHECK(vkAllocateCommandBuffers(r->device, &cai, &r->upload_cmd));
+    VkFenceCreateInfo fci{};
+    fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    VK_CHECK(vkCreateFence(r->device, &fci, nullptr, &r->upload_fence));
     return true;
 }
 
 void destroy_frames(Renderer* r) {
+    if (r->upload_fence) vkDestroyFence(r->device, r->upload_fence, nullptr);
+    if (r->upload_pool)  vkDestroyCommandPool(r->device, r->upload_pool, nullptr);
+    r->upload_fence = VK_NULL_HANDLE; r->upload_pool = VK_NULL_HANDLE; r->upload_cmd = VK_NULL_HANDLE;
     for (u32 i = 0; i < kFramesInFlight; ++i) {
         FrameInFlight& f = r->frames[i];
         run_garbage(r, f); // the device is idle here
         f.garbage.free();
+        f.dirty_slots.free();
         destroy_buffer(r, f.instances);
         if (f.acquire) vkDestroySemaphore(r->device, f.acquire, nullptr);
         if (f.fence)   vkDestroyFence(r->device, f.fence, nullptr);
@@ -1074,9 +1200,11 @@ bool ensure_instance_capacity(Renderer* r, FrameInFlight& f, u32 needed) {
 
 // ---- packets to instances -------------------------------------------------------
 
-// Materials are stubbed: a null material means the default texture with alpha blending.
-BlendMode packet_blend(const RenderPacket&) { return BlendMode::Alpha; }
-u32       packet_texture(const RenderPacket&) { return 0; }
+// A packet's material row, or the default's when the handle is null or stale.
+const MaterialRecord& packet_material(Renderer* r, const RenderPacket& p) {
+    const MaterialRecord* m = r->materials.get(p.material);
+    return m ? *m : *r->materials.get(r->default_material);
+}
 
 int compare_keys(const void* a, const void* b) {
     const SortKey& x = *(const SortKey*)a;
@@ -1095,22 +1223,24 @@ void build_instances(Renderer* r, const RenderFrame& frame) {
     r->staging = Span<GpuInstance>(arena_push_n<GpuInstance>(scratch, n), n);
     for (u32 i = 0; i < n; ++i) {
         const RenderPacket& p = frame.packets[i];
-        r->keys[i] = SortKey{p.layer, (u32)packet_blend(p), i};
+        r->keys[i] = SortKey{p.layer, (u32)packet_material(r, p).blend, i};
     }
     if (n > 1) qsort(r->keys.data, n, sizeof(SortKey), compare_keys);
 
     u32 out = 0;
     for (const SortKey& k : r->keys) {
         const RenderPacket& p = frame.packets[k.packet];
+        const MaterialRecord& m = packet_material(r, p);
         Placement2 at = lerp(p.prev, p.cur, frame.alpha);
         affine2 model = affine2_trs(at.position, at.rotation, at.scale * p.size);
+        color tint = p.tint * m.tint;
         GpuInstance g;
         g.model[0] = model.a; g.model[1] = model.b; g.model[2] = model.c; g.model[3] = model.d;
         g.trans[0] = model.tx; g.trans[1] = model.ty;
         g.pad0[0] = g.pad0[1] = 0.0f;
         g.uv[0] = p.uv.x; g.uv[1] = p.uv.y; g.uv[2] = p.uv.w; g.uv[3] = p.uv.h;
-        g.tint[0] = p.tint.r; g.tint[1] = p.tint.g; g.tint[2] = p.tint.b; g.tint[3] = p.tint.a;
-        g.tex[0] = packet_texture(p);
+        g.tint[0] = tint.r; g.tint[1] = tint.g; g.tint[2] = tint.b; g.tint[3] = tint.a;
+        g.tex[0] = renderer_texture_slot(r, m.texture);
         g.tex[1] = g.tex[2] = g.tex[3] = 0;
         r->staging[out++] = g;
     }
@@ -1236,7 +1366,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->general      = ga;
     r->owner_slot   = &owner->renderer;
     owner->renderer = r;
-    for (FrameInFlight& f : r->frames) f.garbage.alloc = ga;
+    for (FrameInFlight& f : r->frames) { f.garbage.alloc = ga; f.dirty_slots.alloc = ga; }
     r->window      = (SDL_Window*)desc.native_window;
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;
@@ -1252,6 +1382,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     ok = ok && create_frames(r);
     ok = ok && create_descriptors(r);
     ok = ok && load_shader(r, "sprite.spv");
+    ok = ok && create_resource_pools(r);
     ok = ok && create_default_texture(r);
     ok = ok && recreate_swapchain(r); // also builds the pipelines, which need the format
     if (!ok) {
@@ -1269,7 +1400,8 @@ void renderer_destroy(Renderer* r) {
         vkDeviceWaitIdle(r->device);
         destroy_pipelines(r);
         destroy_swapchain(r);
-        destroy_texture(r, r->default_texture);
+        for (u32 i = 0; i < r->textures.len; ++i)
+            if (r->textures.is_alive(i)) destroy_texture_now(r, r->textures.items[i]);
         if (r->shader)      vkDestroyShaderModule(r->device, r->shader, nullptr);
         if (r->pipe_layout) vkDestroyPipelineLayout(r->device, r->pipe_layout, nullptr);
         if (r->sampler)     vkDestroySampler(r->device, r->sampler, nullptr);
@@ -1283,10 +1415,96 @@ void renderer_destroy(Renderer* r) {
     if (r->instance)  vkDestroyInstance(r->instance, nullptr);
     KV_INFO("vulkan", "renderer down after %llu frames; %u validation errors, %u warnings",
             (unsigned long long)r->frame_count, r->validation_errors, r->validation_warnings);
+    if (r->texture_kind)  kv_handle_kind_unregister(r->texture_kind);
+    if (r->material_kind) kv_handle_kind_unregister(r->material_kind);
+    r->textures.free();
+    r->materials.free();
     if (r->owner_slot) *r->owner_slot = nullptr;
     Allocator* ga = r->general;
     ga->free(ga, r, sizeof(Renderer));
 }
+
+Renderer* renderer_get(Engine& engine) {
+    RendererVulkanState* s = (RendererVulkanState*)engine_module_state(engine, "renderer-vulkan");
+    return s ? s->renderer : nullptr;
+}
+
+RenderCaps renderer_caps(const Renderer*) {
+    RenderCaps c;
+    c.backend          = "vulkan";
+    c.max_textures     = kMaxTextures;
+    c.max_materials    = kMaxMaterials;
+    c.frames_in_flight = kFramesInFlight;
+    c.srgb_output      = true;
+    c.texture_formats[(u32)TextureFormat::RGBA8_SRGB]  = true;
+    c.texture_formats[(u32)TextureFormat::RGBA8_UNORM] = true;
+    return c;
+}
+
+Handle renderer_texture_create(Renderer* r, const TextureDesc& desc) {
+    if (!r || (u32)desc.format >= (u32)TextureFormat::Count) return Handle{};
+    Texture t{};
+    t.format = desc.format;
+    strncpy(t.name, desc.name ? desc.name : "", sizeof t.name - 1);
+    Handle h = r->textures.create(t);
+    if (h.is_null()) { KV_ERROR("vulkan", "out of texture slots (%u)", kMaxTextures); return h; }
+    mark_slot_dirty(r, h.index()); // shows the default until the upload lands
+    return h;
+}
+
+bool renderer_texture_upload(Renderer* r, Handle texture, u32 width, u32 height, const void* pixels, usize bytes) {
+    Texture* t = r ? r->textures.get(texture) : nullptr;
+    if (!t || texture.index() == 0 || !pixels) return false;
+    if (width == 0 || height == 0 || width > 16384 || height > 16384 || bytes != (usize)width * height * 4) {
+        KV_ERROR("vulkan", "texture '%s': %ux%u with %llu bytes is not a tightly packed RGBA8 image",
+                 t->name, width, height, (unsigned long long)bytes);
+        return false;
+    }
+    t->width  = width;
+    t->height = height;
+    if (!upload_texture(r, *t, (const u8*)pixels)) return false;
+    mark_slot_dirty(r, texture.index());
+    return true;
+}
+
+void renderer_texture_destroy(Renderer* r, Handle texture) {
+    Texture* t = r ? r->textures.get(texture) : nullptr;
+    if (!t || texture.index() == 0) return; // the default stays
+    defer_destroy_texture(r, *t);
+    u32 slot = texture.index();
+    r->textures.destroy(texture);
+    mark_slot_dirty(r, slot); // back to the default, in each set once its frame has passed
+}
+
+u32 renderer_texture_slot(const Renderer* r, Handle texture) {
+    return r && r->textures.valid(texture) ? texture.index() : 0;
+}
+
+Handle renderer_material_create(Renderer* r, const MaterialDesc& desc) {
+    if (!r) return Handle{};
+    MaterialRecord m{};
+    m.texture = desc.texture;
+    m.blend   = (u32)desc.blend < (u32)BlendMode::Count ? desc.blend : BlendMode::Alpha;
+    m.tint    = desc.tint;
+    Handle h = r->materials.create(m);
+    if (h.is_null()) KV_ERROR("vulkan", "out of materials (%u)", kMaxMaterials);
+    return h;
+}
+
+bool renderer_material_set(Renderer* r, Handle material, const MaterialDesc& desc) {
+    MaterialRecord* m = r ? r->materials.get(material) : nullptr;
+    if (!m) return false;
+    m->texture = desc.texture;
+    m->blend   = (u32)desc.blend < (u32)BlendMode::Count ? desc.blend : BlendMode::Alpha;
+    m->tint    = desc.tint;
+    return true;
+}
+
+void renderer_material_destroy(Renderer* r, Handle material) {
+    if (r && material != r->default_material) r->materials.destroy(material);
+}
+
+Handle renderer_default_material(const Renderer* r) { return r ? r->default_material : Handle{}; }
 
 void renderer_resize(Renderer* r, u32 width, u32 height) {
     if (!r) return;
@@ -1303,6 +1521,8 @@ bool renderer_render(Renderer* r, const RenderFrame& frame) {
     // and whatever that frame queued for destruction can go.
     VK_CHECK(vkWaitForFences(r->device, 1, &f.fence, VK_TRUE, UINT64_MAX));
     run_garbage(r, f);
+    for (u32 slot : f.dirty_slots) write_texture_slot(r, f.set, slot);
+    f.dirty_slots.clear();
 
     if (r->swapchain_dirty && !recreate_swapchain(r)) return false;
     if (!r->swapchain.handle) return false; // zero-size window

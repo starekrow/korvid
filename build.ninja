@@ -14,6 +14,7 @@ builddir = build
 cxxflags = -std=c++20 -g -O0 -DKV_DEBUG=1 -fno-exceptions -fno-rtti $
            -fno-strict-aliasing -Wall -Wextra -Werror
 sdl_libs = -lSDL3
+zlib_libs = -lz
 # The Vulkan loader is reached through SDL_Vulkan_GetVkGetInstanceProcAddr; nothing links it.
 
 inc_core     = -Imodules/core/include
@@ -22,8 +23,10 @@ inc_math     = $inc_core -Imodules/math/include
 inc_render   = $inc_math -Imodules/render/include
 inc_sprite   = $inc_render -Imodules/sprite/include
 inc_rvk      = $inc_render -Imodules/platform/include -Imodules/renderer-vulkan/include
+inc_asset    = $inc_render -Imodules/platform/include -Imodules/asset/include
 inc_hello    = $inc_platform -Imodules/math/include -Imodules/render/include $
-               -Imodules/sprite/include -Imodules/renderer-vulkan/include -Imodules/hello/include
+               -Imodules/sprite/include -Imodules/asset/include -Imodules/renderer-vulkan/include $
+               -Imodules/hello/include
 
 rule cxx
   command = $cxx $cxxflags $includes -MMD -MF $out.d -c $in -o $out
@@ -42,6 +45,11 @@ rule link
 rule run_test
   command = ./$in && touch $out
   description = TEST $in
+
+# Module assets land under bin/assets/<module>/; the runtime resolves paths beneath it.
+rule copy
+  command = cp $in $out
+  description = COPY $out
 
 # Slang -> SPIR-V. One module holds every entry point; the pipeline names them.
 rule slang
@@ -108,19 +116,23 @@ build $builddir/obj/platform/input_sdl3.o: cxx modules/platform/src/input_sdl3.c
   includes = $inc_platform
 build $builddir/obj/platform/host_window_sdl3.o: cxx modules/platform/src/host_window_sdl3.cc
   includes = $inc_platform
+build $builddir/obj/platform/io.o: cxx modules/platform/src/io.cc
+  includes = $inc_platform
 
 build $builddir/lib/libkv_platform.a: ar $builddir/obj/platform/module.o $
     $builddir/obj/platform/input.o $builddir/obj/platform/input_sdl3.o $
-    $builddir/obj/platform/host_window_sdl3.o
+    $builddir/obj/platform/host_window_sdl3.o $builddir/obj/platform/io.o
 
 build $builddir/obj/platform/tests/main.o: cxx modules/platform/tests/main.cc
   includes = $inc_platform
 build $builddir/obj/platform/tests/keymap_test.o: cxx modules/platform/tests/keymap_test.cc
   includes = $inc_platform
+build $builddir/obj/platform/tests/io_test.o: cxx modules/platform/tests/io_test.cc
+  includes = $inc_platform
 
 build $builddir/bin/platform_tests: link $builddir/obj/platform/tests/main.o $
-    $builddir/obj/platform/tests/keymap_test.o $builddir/lib/libkv_platform.a $
-    $builddir/lib/libkv_core.a
+    $builddir/obj/platform/tests/keymap_test.o $builddir/obj/platform/tests/io_test.o $
+    $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a
   libs = $sdl_libs
 
 # ---- math (header-only) ----------------------------------------------------
@@ -159,6 +171,23 @@ build $builddir/bin/sprite_tests: link $builddir/obj/sprite/tests/main.o $
     $builddir/obj/sprite/tests/world_test.o $builddir/obj/sprite/tests/extract_test.o $
     $builddir/lib/libkv_sprite.a $builddir/lib/libkv_core.a
 
+# ---- asset -----------------------------------------------------------------
+build $builddir/obj/asset/module.o: cxx modules/asset/src/texture.cc
+  includes = $inc_asset
+build $builddir/obj/asset/png.o: cxx modules/asset/src/png.cc
+  includes = $inc_asset
+
+build $builddir/lib/libkv_asset.a: ar $builddir/obj/asset/module.o $builddir/obj/asset/png.o
+
+build $builddir/obj/asset/tests/main.o: cxx modules/asset/tests/main.cc
+  includes = $inc_asset
+build $builddir/obj/asset/tests/png_test.o: cxx modules/asset/tests/png_test.cc
+  includes = $inc_asset -Imodules/asset/tests
+
+build $builddir/bin/asset_tests: link $builddir/obj/asset/tests/main.o $
+    $builddir/obj/asset/tests/png_test.o $builddir/lib/libkv_asset.a $builddir/lib/libkv_core.a
+  libs = $zlib_libs
+
 # ---- renderer-vulkan -------------------------------------------------------
 build $builddir/obj/renderer-vulkan/module.o: cxx modules/renderer-vulkan/src/module.cc
   includes = $inc_rvk
@@ -179,20 +208,25 @@ build $builddir/obj/hello/main.o: cxx modules/hello/src/main.cc
 build $builddir/obj/hello/modules.gen.o: cxx modules/hello/src/modules.gen.cc
   includes = $inc_hello
 
+# hello's assets
+build $builddir/bin/assets/hello/ball.png: copy modules/hello/assets/ball.png
+
 build $builddir/bin/hello: link $builddir/obj/hello/main.o $builddir/obj/hello/modules.gen.o $
-    $builddir/lib/libkv_sprite.a $builddir/lib/libkv_renderer_vulkan.a $
-    $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a | $builddir/bin/shaders/sprite.spv
-  libs = $sdl_libs
+    $builddir/lib/libkv_sprite.a $builddir/lib/libkv_asset.a $builddir/lib/libkv_renderer_vulkan.a $
+    $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a | $builddir/bin/shaders/sprite.spv $
+    $builddir/bin/assets/hello/ball.png
+  libs = $sdl_libs $zlib_libs
 
 # ---- aggregates ------------------------------------------------------------
 build $builddir/test/core_tests.ok: run_test $builddir/bin/core_tests
 build $builddir/test/platform_tests.ok: run_test $builddir/bin/platform_tests
 build $builddir/test/math_tests.ok: run_test $builddir/bin/math_tests
 build $builddir/test/sprite_tests.ok: run_test $builddir/bin/sprite_tests
+build $builddir/test/asset_tests.ok: run_test $builddir/bin/asset_tests
 
 build tests: phony $builddir/bin/core_tests $builddir/bin/platform_tests $
-    $builddir/bin/math_tests $builddir/bin/sprite_tests
+    $builddir/bin/math_tests $builddir/bin/sprite_tests $builddir/bin/asset_tests
 build all: phony $builddir/bin/hello tests
 build check: phony $builddir/test/core_tests.ok $builddir/test/platform_tests.ok $
-    $builddir/test/math_tests.ok $builddir/test/sprite_tests.ok
+    $builddir/test/math_tests.ok $builddir/test/sprite_tests.ok $builddir/test/asset_tests.ok
 default all

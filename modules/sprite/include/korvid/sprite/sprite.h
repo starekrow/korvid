@@ -6,8 +6,8 @@
 namespace kv {
 
 struct Sprite {
-    Handle material;                 // null for now: materials are stubbed (render/material.h)
-    rect2  uv   = rect2_unit();      // sub-rect of the texture
+    Handle material;                 // a renderer material handle; null: the default material
+    rect2  uv   = rect2_unit();      // texture rect; outside [0, 1] repeats
     vec2   size{64.0f, 64.0f};       // world units
     color  tint = color_white();
     i32    layer = 0;                // ascending draw order

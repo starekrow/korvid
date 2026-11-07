@@ -37,15 +37,15 @@ struct Allocator {
 constexpr u32 KV_MEM_DEFAULT_ALIGN = 16;    // SIMD-safe without thinking
 constexpr u32 KV_MEM_MAX_ALIGN     = 65536; // anything larger is a design error, not a request
 
-// Calling an Allocator without spelling it twice.
+// Calling an Allocator without spelling it twice: bytes, or typed items.
 inline void* alloc_in(Allocator* a, usize size, u32 align = KV_MEM_DEFAULT_ALIGN) { return a->alloc(a, size, align); }
 inline void  free_in(Allocator* a, void* p, usize size) { if (p) a->free(a, p, size); }
 template <class T>
-T* alloc_in(Allocator* a, u32 count = 1) {
+T* alloc_items(Allocator* a, u32 count = 1) {
     return (T*)a->alloc(a, sizeof(T) * count, alignof(T) > KV_MEM_DEFAULT_ALIGN ? alignof(T) : KV_MEM_DEFAULT_ALIGN);
 }
 template <class T>
-void free_in(Allocator* a, T* p, u32 count = 1) { if (p) a->free(a, p, sizeof(T) * count); }
+void free_items(Allocator* a, T* p, u32 count = 1) { if (p) a->free(a, p, sizeof(T) * count); }
 
 // ---- the general allocator -----------------------------------------------------------
 // Thread-safe. Blocks carry a 32-byte header (size, alignment, tag, canary) so mem_free

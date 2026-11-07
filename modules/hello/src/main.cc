@@ -5,6 +5,7 @@
 // exits through the state machine; --run-seconds N exits by itself (smoke test). The
 // game calls the render interface only, never a graphics API.
 #include "korvid/hello/module.h"
+#include "korvid/asset/texture.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -55,9 +56,15 @@ struct App {
     u32                 packets_last_frame = 0;
     u32                 presented_w = 0, presented_h = 0; // size the renderer was last told
 
+    // assets and materials: renderer-issued handles the game keeps
+    Handle    ball_asset;      // asset.texture
+    Handle    ball_material;   // render.material, alpha, ball.png
+    Handle    bg_material;     // render.material, opaque, the default checkerboard tinted dark
+
     // game
     GameState state          = ST_INIT;
     bool      exit_requested = false; // raised by input, the window or the timer; RUN acts on it
+    Handle    background;
     Handle    ball;
     f32       ball_speed     = 420.0f; // world units (pixels) per second
     f32       ball_dir       = 1.0f;
@@ -106,11 +113,20 @@ void game_update(App& app, TickContext& ctx) {
     SpriteWorld& world = *app.world;
     switch (app.state) {
     case ST_INIT: {
+        // A background covering the window, tiling the checkerboard at 16-pixel cells.
+        f32 w = (f32)app.window->width(), h = (f32)app.window->height();
+        Sprite bg;
+        bg.material = app.bg_material;
+        bg.size     = vec2{w, h};
+        bg.uv       = rect2{0.0f, 0.0f, w / 128.0f, h / 128.0f};
+        bg.layer    = -1;
+        app.background = world.create(transform2_at(point2{0.0f, 0.0f}), bg);
+
         Sprite s;
-        s.size  = vec2{96.0f, 96.0f};
-        s.tint  = color_white();
-        s.layer = 0;
-        // s.material stays null: materials are stubbed, the renderer uses its default texture.
+        s.material = app.ball_material; // placeholder until the PNG lands, then the ball
+        s.size     = vec2{96.0f, 96.0f};
+        s.tint     = color_white();
+        s.layer    = 0;
         app.ball = world.create(transform2_at(point2{0.0f, 0.0f}), s);
         char text[96];
         kv_handle_describe(app.ball.bits, text, sizeof text);
@@ -149,7 +165,8 @@ void game_update(App& app, TickContext& ctx) {
 
     case ST_EXIT: {
         if (world.destroy(app.ball)) KV_INFO("game", "ball destroyed after %u bounces", app.bounces);
-        app.ball = Handle{};
+        world.destroy(app.background);
+        app.ball = app.background = Handle{};
         KV_ASSERT(world.live() == 0);
         engine_request_quit(*ctx.engine);
         break;
@@ -174,6 +191,16 @@ void hello_sim(TickContext& ctx) {
     for (const KeyUp& e : bus.read<KeyUp>()) {
         ++app.key_edges;
         KV_INFO("hello", "tick %llu: key up   %s", (unsigned long long)ctx.tick, key_name(e.key));
+    }
+    for (const AssetReady& e : bus.read<AssetReady>()) {
+        char text[160];
+        kv_handle_describe(e.asset.bits, text, sizeof text);
+        KV_INFO("hello", "asset ready: %s", text);
+    }
+    for (const AssetFailed& e : bus.read<AssetFailed>()) {
+        char text[160];
+        kv_handle_describe(e.asset.bits, text, sizeof text);
+        KV_WARN("hello", "asset failed (%s): %s", asset_error_name(e.error), text);
     }
     if (bus.read<CloseRequested>().len && !app.exit_requested) {
         KV_INFO("hello", "close requested");
@@ -218,7 +245,23 @@ bool hello_startup(Engine& engine, ModuleInstance& self) {
     rd.vsync         = app->window->vsync();
     rd.validation    = g_options.validation;
     app->renderer = renderer_create(engine, rd);
-    return app->renderer != nullptr;
+    if (!app->renderer) return false;
+
+    // Assets are requested once and the handles kept. The texture slot exists now and
+    // shows the placeholder; AssetReady arrives on the bus when the PNG is resident.
+    app->ball_asset = asset_load_texture(engine, "hello/ball.png");
+    const TextureAsset* ball = asset_texture(engine, app->ball_asset);
+    if (!ball) return false;
+    MaterialDesc ball_md;
+    ball_md.texture = ball->texture;
+    ball_md.blend   = BlendMode::Alpha;
+    app->ball_material = renderer_material_create(app->renderer, ball_md);
+    MaterialDesc bg_md;
+    bg_md.texture = Handle{}; // the default checkerboard
+    bg_md.blend   = BlendMode::Opaque;
+    bg_md.tint    = color_rgba(0.22f, 0.22f, 0.26f);
+    app->bg_material = renderer_material_create(app->renderer, bg_md);
+    return !app->ball_material.is_null() && !app->bg_material.is_null();
 }
 
 // Nothing of hello's own to free: its state lives in the module arena. The window and
@@ -229,7 +272,7 @@ void hello_shutdown(Engine&, ModuleInstance& self) {
     if (app) KV_INFO("hello", "%llu key edges seen", (unsigned long long)app->key_edges);
 }
 
-constinit const char* const k_sim_reads[]  = {"input.state"};
+constinit const char* const k_sim_reads[]  = {"input.state", "asset.textures"};
 constinit const char* const k_sim_writes[] = {"sprite.world"};
 constinit const SystemDesc  k_systems[]    = {
     {"hello.sim", Phase::Sim, hello_sim, k_sim_reads, k_sim_writes},

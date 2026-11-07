@@ -25,10 +25,10 @@ struct RenderPacket {
     Handle     entity;
     Placement2 prev;      // previous tick
     Placement2 cur;       // current tick
-    Handle     material;  // null -> default texture, alpha blend
-    rect2      uv;        // texture sub-rect, in [0, 1]
+    Handle     material;  // renderer-issued; null or stale -> the default material
+    rect2      uv;        // texture rect; outside [0, 1] repeats
     vec2       size;      // quad size in world units, before the placement's scale
-    color      tint;
+    color      tint;      // multiplies the material's tint
     i32        layer;     // drawn in ascending order
 };
 

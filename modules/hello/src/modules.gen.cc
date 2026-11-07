@@ -4,6 +4,7 @@
 #include "korvid/core/module.h"
 #include "korvid/platform/module.h"
 #include "korvid/renderer-vulkan/module.h"
+#include "korvid/asset/module.h"
 #include "korvid/sprite/module.h"
 #include "korvid/hello/module.h"
 
@@ -11,6 +12,7 @@ namespace {
 constinit const kv::ModuleDesc* const k_modules[] = {
     &kv::platform_module,
     &kv::renderer_vulkan_module,
+    &kv::asset_module,
     &kv::sprite_module,
     &kv::hello_module,
 };

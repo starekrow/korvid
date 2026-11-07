@@ -18,13 +18,19 @@ bool platform_startup(Engine&, ModuleInstance& self) {
     KV_INFO("platform", "SDL %d.%d.%d, video driver '%s'",
             SDL_VERSIONNUM_MAJOR(ver), SDL_VERSIONNUM_MINOR(ver), SDL_VERSIONNUM_MICRO(ver),
             SDL_GetCurrentVideoDriver());
-    self.state = arena_push<PlatformState>(self.arena);
-    return self.state != nullptr;
+    PlatformState* s = arena_push<PlatformState>(self.arena);
+    if (!s) return false;
+    self.state = s;
+    s->base_path = SDL_GetBasePath();
+    return s->io.init(&self.general, 4096);
 }
 
 void platform_shutdown(Engine&, ModuleInstance& self) {
     PlatformState* s = (PlatformState*)self.state;
-    if (s) s->window.close(); // the service ends with the module, whoever opened it
+    if (s) {
+        s->window.close(); // the service ends with the module, whoever opened it
+        s->io.free();
+    }
     SDL_Quit();
 }
 
@@ -76,7 +82,19 @@ Input* platform_input(Engine& e) {
 
 void platform_pump(Engine& e) {
     PlatformState* s = state(e);
-    if (s && s->window.is_open()) s->window.pump(e.events, s->input);
+    if (!s) return;
+    if (s->window.is_open()) s->window.pump(e.events, s->input);
+    s->io.pump();
+}
+
+IoQueue* platform_io(Engine& e) {
+    PlatformState* s = state(e);
+    return s ? &s->io : nullptr;
+}
+
+const char* platform_base_path(Engine& e) {
+    PlatformState* s = state(e);
+    return s && s->base_path ? s->base_path : "";
 }
 
 } // namespace kv

@@ -2,8 +2,9 @@
 
 Step 2: a Vulkan 1.3 sprite renderer behind a render interface, sprite entities with
 an extract, and an example game with a three-state machine (INIT, RUN, EXIT) that
-bounces one checkerboard sprite. Materials are stubbed: a null material renders with
-the built-in red/white checkerboard.
+bounces a textured ball over a tiled background. Textures and materials are
+renderer-issued handles whose index is the GPU slot or row; a null or stale material
+renders with the built-in red/white checkerboard.
 
 Module registration is declarative (`core/module.h`): a module is one `constinit`
 `ModuleDesc` with tables of event types, resources and systems, plus startup/shutdown for
@@ -15,14 +16,21 @@ postsim) systems run in module order then declaration order. `engine_init` rejec
 duplicate names and unknown resource references and logs the schedule it built.
 
 Modules follow the kormake directory convention (`module.lua`, `include/korvid/<name>/`,
-`src/`, `shaders/`, `tests/`). `build.ninja` is a hand-written stand-in until kormake exists.
+`src/`, `shaders/`, `assets/`, `tests/`). A module's `assets/` are copied to
+`build/bin/assets/<module>/` and loaded by that relative path. `build.ninja` is a
+hand-written stand-in until kormake exists.
 
     core             memory (general, arenas, scratch, pools on reserved pages; see
                      docs/design/allocators.md), handles with a kind registry and C API
                      (docs/design/handles.md), events, phases, tick clock, log
-    platform         SDL3 window and keyboard input (events on the bus)
+    platform         SDL3 window and keyboard input (events on the bus); the I/O queue
+                     (io_uring-shaped: submit, pump, reap; mocked with fread for now)
     math             header-only: vec2, point2, rect2, color, affine2, ortho2d
-    render           header-only interface: RenderPacket, renderer API, Material stub
+    render           header-only interface: RenderPacket, renderer API (textures,
+                     materials, caps), MaterialDesc
+    asset            load_texture returns a handle at once; the read rides the I/O queue,
+                     decode (PNG on zlib) and upload happen in asset.pump, completion is
+                     AssetReady/AssetFailed on the bus
     sprite           Transform2 + Sprite components, SpriteWorld, extract_sprites
     renderer-vulkan  provides "render": dynamic rendering, sync2, bindless textures,
                      Slang shader compiled to SPIR-V by the build; the only Vulkan user
@@ -37,8 +45,8 @@ Modules follow the kormake directory convention (`module.lua`, `include/korvid/<
     build/bin/hello --borderless      # no libdecor frame (see note below)
     build/bin/hello --hitch-ms 50     # log where any frame over 50 ms spent its time
 
-Needs g++ (or clang++), ninja, libsdl3-dev, libvulkan-dev, slang-compiler, and for
-debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached
+Needs g++ (or clang++), ninja, libsdl3-dev, libvulkan-dev, zlib1g-dev, slang-compiler,
+and for debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached
 through SDL and every entry point is loaded at runtime (renderer-vulkan/src/vk_funcs.h).
 
 Known platform issue: on GNOME Wayland, SDL3 falls back to libdecor for the window frame

@@ -130,7 +130,7 @@ struct Pool {
         KV_VERIFY(owner == thread_id());
         u32 i = h.index();
 #if KV_DEV
-        memset(&items[i], 0xDD, sizeof(T)); // a stale pointer sees poison, not old data
+        memset((void*)&items[i], 0xDD, sizeof(T)); // a stale pointer sees poison, not old data
 #endif
         u32 g = (gens[i] & ~ALIVE_BIT) + 1;
         if (g > KV_HANDLE_MAX_GEN) g = 1; // skip 0 on wrap

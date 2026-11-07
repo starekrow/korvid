@@ -6,6 +6,7 @@
 #include "korvid/core/module.h"
 #include "korvid/platform/host_window.h"
 #include "korvid/platform/input.h"
+#include "korvid/platform/io.h"
 
 namespace kv {
 
@@ -14,8 +15,10 @@ struct Engine;
 KV_MODULE_DECLARE(platform_module);
 
 struct PlatformState {
-    Input      input;
-    HostWindow window; // one window in slice 1
+    Input       input;
+    HostWindow  window; // one window in slice 1
+    IoQueue     io;
+    const char* base_path = nullptr;
 };
 
 // Opens the window. Null if one is already open or SDL refused. Owned by the module.
@@ -24,7 +27,8 @@ HostWindow* platform_open_window(Engine& e, const WindowDesc& desc);
 HostWindow* platform_window(Engine& e);
 // The module's input, or null if the module is not started.
 Input*      platform_input(Engine& e);
-// Once per frame: OS events become bus events and raw input state.
+// Once per frame: OS events become bus events and raw input state; the I/O queue reaps
+// its completions.
 void        platform_pump(Engine& e);
 
 } // namespace kv
