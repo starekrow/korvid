@@ -97,6 +97,7 @@ Nov 4, 2026 · @starekrow
   - vendored, pinned, and built from source in our build;
   - no frameworks, no transitive dependency trees, no small unvetted libraries;
   - tool dependencies never leak into the runtime.
+- **Every module documents itself.** A `README.md` at the module's root carries the overview (what it is for, in a paragraph), the design and operation notes (how it works, how to use it, behaviour worth knowing, what is not in it), and a quick reference of its public names and of what it registers with the engine. The public headers carry the detailed type and function docs: every struct, field and function says what it is, when it is valid and who owns it. The README is what a game programmer reads first; the headers are what they read while typing. `modules/collision` is the model.
 
 ## Debugging and tooling
 

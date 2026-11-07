@@ -8,49 +8,62 @@
 // an alpha-blended, untinted, zero-parameter material. asset_load_material returns a
 // handle at once; the renderer row it names exists from then on (showing the placeholder
 // look) so sprites can use it immediately. The file read goes through the I/O queue, the
-// parse happens in "asset.pump_materials" (phase PreSim, after "asset.pump"), the texture
-// it names is loaded through asset_load_texture, and AssetReady arrives once that texture
-// is resident (or at once if the file names none). Loading a path twice returns the same
-// handle. Tools reach the records by slot and patch them; a patch reaches the renderer
-// before the next frame.
+// parse happens in "asset.pump_materials" (phase PreSim, main thread, after "asset.pump"),
+// the texture it names is loaded through asset_load_texture, and AssetReady arrives once
+// that texture is resident (or at once if the file names none). Loading a path twice
+// returns the same handle. Tools reach the records by slot and patch them; a patch
+// reaches the renderer before the next frame.
 #pragma once
 #include "korvid/asset/texture.h"
 #include "korvid/render/material.h"
 
 namespace kv {
 
-constexpr u32 KV_ASSET_PATH_MAX = 128;
+constexpr u32 KV_ASSET_PATH_MAX = 128; // bytes, NUL included, for asset and texture paths
 
+// A material asset's record, read through asset_material or asset_material_at. Owned by
+// the module; the pointer is valid until the next load or shutdown.
 struct MaterialAsset {
-    char         path[KV_ASSET_PATH_MAX];
-    AssetState   state = AssetState::Pending;
-    AssetError   error = AssetError::None;
-    Handle       material;      // the renderer's row handle: valid from load on
-    Handle       texture_asset; // the asset.texture the file named, once parsed; null for none
-    Handle       io;            // the pending read, while reading
-    MaterialDesc desc;          // what the renderer row holds now
-    char         texture_path[KV_ASSET_PATH_MAX];
+    char         path[KV_ASSET_PATH_MAX];    // as given to asset_load_material
+    AssetState   state = AssetState::Pending; // Ready once the file is parsed and its texture resident
+    AssetError   error = AssetError::None;    // Parse for a bad file; a texture's error is passed through
+    Handle       material;      // the renderer's row handle: valid from load on; put it in a Sprite
+    Handle       texture_asset; // the asset.texture the file named, once parsed; null for none or before
+    Handle       io;            // the pending read's request handle while reading; null otherwise
+    MaterialDesc desc;          // what the renderer row holds now (texture is the renderer's handle)
+    char         texture_path[KV_ASSET_PATH_MAX]; // the file's "texture", or empty for the default
 };
 
+// Starts loading <exe dir>/assets/<path> as a material file. Returns the asset handle at
+// once, or null under the same conditions as asset_load_texture. The same path returns
+// the same handle.
 Handle               asset_load_material(Engine& e, const char* path);
-const MaterialAsset* asset_material(Engine& e, Handle asset); // null if stale
-Handle               asset_material_find(Engine& e, const char* path); // null if never loaded
+// The record for a handle, or null if the handle is stale or not a material asset.
+const MaterialAsset* asset_material(Engine& e, Handle asset);
+// The handle a path was loaded as, or null if it never was.
+Handle               asset_material_find(Engine& e, const char* path);
 
-// For tools: records by slot, [0, asset_material_count); empty slots are null.
+// For tools: records by slot, [0, asset_material_count); empty slots are null. Slots are
+// stable for a record's life and reused after shutdown only.
 u32                  asset_material_count(Engine& e);
 const MaterialAsset* asset_material_at(Engine& e, u32 slot);
 Handle               asset_material_handle_at(Engine& e, u32 slot);
 
-// Edits: the record and the renderer row change together. The texture is a path (empty
-// for the default); it loads like any other and the row follows when it is resident.
+// Edits: the record and the renderer row change together, from any main-thread code
+// (the CLI's patch, a tool, a game's own tweak). `desc.texture` is ignored: the texture
+// follows the record's texture path. Set that with asset_material_set_texture, which
+// loads the path like any texture (empty for the default) and points the row at it;
+// the row shows the placeholder until the texture is resident. False for a stale handle.
 bool asset_material_patch(Engine& e, Handle asset, const MaterialDesc& desc);
 bool asset_material_set_texture(Engine& e, Handle asset, const char* texture_path);
 
-// The file format, on its own for tools and tests: fills the fields the text has, leaves
-// the rest as `desc` came in. False with the reason and byte offset on a bad file.
+// The file format on its own, for tools and tests. material_parse fills the fields the
+// text has and leaves the rest as `desc` came in; `texture_path` (cap bytes) receives the
+// "texture" field. False with the reason and byte offset on a bad file: not an object, an
+// unknown field, a wrong type, a bad blend name. material_format writes the record as a
+// file's text into `out`; returns what snprintf would.
 bool material_parse(const char* text, usize len, MaterialDesc& desc, char* texture_path, usize cap,
                     const char** error, u32* error_at);
-// Writes the record as a file's text; what snprintf would return.
 int  material_format(const MaterialDesc& desc, const char* texture_path, char* out, usize cap);
 
 } // namespace kv
