@@ -327,6 +327,24 @@ build $builddir/bin/example_stones: link $builddir/obj/example_stones/main.o $bu
     $builddir/bin/assets/example_stones/stone.png
   libs = $sdl_libs $zlib_libs
 
+# ---- example_cpukiller (headless by default, --window brings up the stack) ----
+inc_cpukiller = $inc_platform -Imodules/math/include -Imodules/render/include -Imodules/sprite/include $
+                -Imodules/asset/include -Imodules/renderer-vulkan/include -Imodules/frameloop/include $
+                -Imodules/example_cpukiller/include
+build $builddir/obj/example_cpukiller/main.o: cxx modules/example_cpukiller/src/main.cc
+  includes = $inc_cpukiller
+build $builddir/obj/example_cpukiller/stress.o: cxx modules/example_cpukiller/src/stress.cc
+  includes = $inc_cpukiller
+build $builddir/obj/example_cpukiller/modules.gen.o: cxx modules/example_cpukiller/src/modules.gen.cc
+  includes = $inc_cpukiller
+
+build $builddir/bin/example_cpukiller: link $builddir/obj/example_cpukiller/main.o $
+    $builddir/obj/example_cpukiller/stress.o $builddir/obj/example_cpukiller/modules.gen.o $
+    $builddir/lib/libkv_frameloop.a $builddir/lib/libkv_sprite.a $builddir/lib/libkv_asset.a $
+    $builddir/lib/libkv_renderer_vulkan.a $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a | $
+    $builddir/bin/shaders/sprite.spv
+  libs = $sdl_libs $zlib_libs
+
 # ---- aggregates ------------------------------------------------------------
 build $builddir/test/core_tests.ok: run_test $builddir/bin/core_tests
 build $builddir/test/platform_tests.ok: run_test $builddir/bin/platform_tests
@@ -338,7 +356,8 @@ build $builddir/test/collision_tests.ok: run_test $builddir/bin/collision_tests
 build tests: phony $builddir/bin/core_tests $builddir/bin/platform_tests $
     $builddir/bin/math_tests $builddir/bin/sprite_tests $builddir/bin/asset_tests $
     $builddir/bin/collision_tests
-build all: phony $builddir/bin/example_testbed $builddir/bin/example_rocks $builddir/bin/example_stones tests
+build all: phony $builddir/bin/example_testbed $builddir/bin/example_rocks $builddir/bin/example_stones $
+    $builddir/bin/example_cpukiller tests
 build check: phony $builddir/test/core_tests.ok $builddir/test/platform_tests.ok $
     $builddir/test/math_tests.ok $builddir/test/sprite_tests.ok $builddir/test/asset_tests.ok $
     $builddir/test/collision_tests.ok

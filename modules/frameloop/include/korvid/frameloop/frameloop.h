@@ -43,4 +43,9 @@ const FrameLoopConfig& frameloop_config(Engine& e);
 // Whether one of the game's declared flags was on the command line.
 bool frameloop_flag(Engine& e, const char* flag);
 
+// For a tool that drives the loop itself: the config the module will use, set before
+// engine_init, and one frame: pump the window, advance the engine by dt, render once.
+void frameloop_set_config(const FrameLoopConfig& config);
+void frameloop_step(Engine& e, f64 dt);
+
 } // namespace kv

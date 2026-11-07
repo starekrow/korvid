@@ -93,12 +93,18 @@ hand-written stand-in until kormake exists.
                      tick that does input, motion, n-squared collision and sprite syncing
                      in order; the engine supplies the window, the keys, the sprites and
                      reflection for the log, and nothing else is asked of it
+    example_cpukiller a stress tool, no window: the job pool's dispatch overhead and
+                     contention, nested batches, the memory system under cross-thread
+                     load, and the engine's tick rate on one thread against many with the
+                     state hash as the referee; prints a table
 
     ninja            # builds build/bin/example_testbed, build/bin/shaders/sprite.spv and the tests
     ninja check      # runs the tests
     build/bin/example_testbed         # opens a window; Esc or close exits via ST_EXIT
     build/bin/example_rocks --demo    # the asteroids-like, flying itself; without --demo, you fly
     build/bin/example_stones          # stones in a box, written immediate-mode style
+    build/bin/example_cpukiller       # the stress table (--threads N, --bodies N, --ticks N, --quick)
+    build/bin/example_cpukiller --window  # the same with the window, renderer and swapchain alive
     build/bin/example_testbed --run-seconds 2   # exits by itself (smoke test)
     build/bin/example_testbed --no-validation   # debug builds enable the validation layers by default
     build/bin/example_testbed --no-vsync        # mailbox/immediate present instead of fifo

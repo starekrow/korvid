@@ -34,5 +34,16 @@ void jobs_run(u32 count, u32 grain, JobFn fn, void* user);
 // How many chunks jobs_run would make.
 inline u32 jobs_chunks(u32 count, u32 grain) { return grain ? (count + grain - 1) / grain : 0; }
 
+// What the pool has been doing, for profiling. Counters are process-wide and relaxed.
+struct JobStats {
+    u64 batches;       // jobs_run calls that went to the queue (not the inline path)
+    u64 inline_batches;// ran entirely on the caller: no workers, or one chunk
+    u64 tasks;         // chunks run from the queue
+    u64 tasks_by_caller; // of those, run by the thread that was waiting for them
+    u64 helper_waits;  // a waiting caller found the queue empty and slept
+    u64 worker_waits;  // a worker found the queue empty and slept
+};
+JobStats jobs_stats();
+void     jobs_stats_reset();
 
 } // namespace kv

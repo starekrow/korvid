@@ -205,6 +205,14 @@ const FrameLoopConfig& frameloop_config(Engine& e) {
     return s ? s->config : g_config;
 }
 
+void frameloop_set_config(const FrameLoopConfig& config) { g_config = config; }
+
+void frameloop_step(Engine& e, f64 dt) {
+    platform_pump(e);
+    engine_frame(e, dt);
+    if (FrameLoopState* s = engine_module_state_as<FrameLoopState>(e, "frameloop")) render_frame(e, *s);
+}
+
 bool frameloop_flag(Engine& e, const char* flag) {
     u32 f = game_flag(frameloop_config(e), flag);
     return f && (g_flags_given >> (f - 1)) & 1;

@@ -329,14 +329,19 @@ void report_cycle(const Array<Pending>& pend, const Array<Edge>& edges, const Ar
         if (!stepped) break;
     }
 found:
+    // The walk went backwards along edges from `start` and stopped at a repeat, `at`; the
+    // loop forward is `at`, then the path from its end back to where `at` sits in it.
+    u32 from = 0;
+    for (u32 i = 0; i < path.len; ++i) if (path[i] == at) from = i;
     char line[1024];
     u32 n = 0;
-    for (u32 i = path.len; i-- > 0;) {
-        int k = snprintf(line + n, sizeof line - n, "%s%s", n ? " -> " : "", pend[path[i]].sys.name());
+    int k0 = snprintf(line, sizeof line, "%s", pend[at].sys.name());
+    if (k0 > 0) n = (u32)k0;
+    for (u32 i = path.len; i-- > from;) {
+        int k = snprintf(line + n, sizeof line - n, " -> %s", pend[path[i]].sys.name());
         if (k < 0 || n + (u32)k >= sizeof line) break;
         n += (u32)k;
     }
-    snprintf(line + n, sizeof line - n, " -> %s", pend[at].sys.name());
     KV_ERROR("engine", "a cycle among %s: %s", pend[start].sys.desc ? "systems in one phase" : "handlers", line);
     path.free();
 }

@@ -27,7 +27,10 @@ struct Pool {
 };
 
 Pool g_pool;
+JobStats g_stats;
 thread_local u32 t_depth = 0; // batches this thread is waiting on, nested
+
+void bump(u64* counter) { __atomic_add_fetch(counter, 1, __ATOMIC_RELAXED); }
 
 void run_task(const Task& t) {
     JobBatch& b = *t.batch;
@@ -55,10 +58,11 @@ void* worker_main(void*) {
     for (;;) {
         Task t;
         pthread_mutex_lock(&p.mu);
-        while (!p.quit && !pop(&t)) pthread_cond_wait(&p.cv, &p.mu);
+        while (!p.quit && !pop(&t)) { bump(&g_stats.worker_waits); pthread_cond_wait(&p.cv, &p.mu); }
         if (p.quit) { pthread_mutex_unlock(&p.mu); break; }
         pthread_mutex_unlock(&p.mu);
         if (t_depth == 0) mem_scratch_reset(); // job lifetime
+        bump(&g_stats.tasks);
         run_task(t);
         pthread_mutex_lock(&p.mu);
         pthread_cond_broadcast(&p.cv); // someone may be waiting on this batch
@@ -115,6 +119,18 @@ void jobs_shutdown() {
 
 u32 jobs_worker_count() { return g_pool.up ? g_pool.workers : 0; }
 
+JobStats jobs_stats() {
+    JobStats s;
+    s.batches        = __atomic_load_n(&g_stats.batches, __ATOMIC_RELAXED);
+    s.inline_batches = __atomic_load_n(&g_stats.inline_batches, __ATOMIC_RELAXED);
+    s.tasks          = __atomic_load_n(&g_stats.tasks, __ATOMIC_RELAXED);
+    s.tasks_by_caller = __atomic_load_n(&g_stats.tasks_by_caller, __ATOMIC_RELAXED);
+    s.helper_waits   = __atomic_load_n(&g_stats.helper_waits, __ATOMIC_RELAXED);
+    s.worker_waits   = __atomic_load_n(&g_stats.worker_waits, __ATOMIC_RELAXED);
+    return s;
+}
+
+void jobs_stats_reset() { g_stats = JobStats{}; }
 
 void jobs_run(u32 count, u32 grain, JobFn fn, void* user) {
     u32 chunks = jobs_chunks(count, grain);
@@ -122,9 +138,11 @@ void jobs_run(u32 count, u32 grain, JobFn fn, void* user) {
     JobBatch b{fn, user, count, grain, chunks, mem_owner(), 0};
     Pool& p = g_pool;
     if (!p.up || p.workers == 0 || chunks == 1) {
+        bump(&g_stats.inline_batches);
         for (u32 i = 0; i < chunks; ++i) run_task(Task{&b, i});
         return;
     }
+    bump(&g_stats.batches);
     pthread_mutex_lock(&p.mu);
     for (u32 i = 0; i < chunks; ++i) p.queue.push(Task{&b, i});
     pthread_cond_broadcast(&p.cv);
@@ -138,11 +156,14 @@ void jobs_run(u32 count, u32 grain, JobFn fn, void* user) {
         bool got = pop(&t);
         if (!got) {
             if (__atomic_load_n(&b.done, __ATOMIC_ACQUIRE) == chunks) { pthread_mutex_unlock(&p.mu); break; }
+            bump(&g_stats.helper_waits);
             pthread_cond_wait(&p.cv, &p.mu);
             pthread_mutex_unlock(&p.mu);
             continue;
         }
         pthread_mutex_unlock(&p.mu);
+        bump(&g_stats.tasks);
+        bump(&g_stats.tasks_by_caller);
         run_task(t);
         pthread_mutex_lock(&p.mu);
         pthread_cond_broadcast(&p.cv);
