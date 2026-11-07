@@ -27,6 +27,9 @@ inc_asset    = $inc_render -Imodules/platform/include -Imodules/asset/include
 inc_collision = $inc_sprite -Imodules/collision/include
 inc_frameloop = $inc_platform -Imodules/math/include -Imodules/render/include $
                 -Imodules/sprite/include -Imodules/frameloop/include
+inc_example_stones = $inc_platform -Imodules/math/include -Imodules/render/include $
+               -Imodules/sprite/include -Imodules/asset/include -Imodules/renderer-vulkan/include $
+               -Imodules/frameloop/include -Imodules/example_stones/include
 inc_example_rocks = $inc_platform -Imodules/math/include -Imodules/render/include $
                -Imodules/sprite/include -Imodules/collision/include -Imodules/asset/include $
                -Imodules/renderer-vulkan/include -Imodules/frameloop/include -Imodules/example_rocks/include
@@ -297,6 +300,23 @@ build $builddir/bin/example_rocks: link $builddir/obj/example_rocks/main.o $buil
     $builddir/bin/assets/example_rocks/dot.png
   libs = $sdl_libs $zlib_libs
 
+# ---- example_stones --------------------------------------------------------
+build $builddir/obj/example_stones/main.o: cxx modules/example_stones/src/main.cc
+  includes = $inc_example_stones
+build $builddir/obj/example_stones/game.o: cxx modules/example_stones/src/game.cc
+  includes = $inc_example_stones
+build $builddir/obj/example_stones/modules.gen.o: cxx modules/example_stones/src/modules.gen.cc
+  includes = $inc_example_stones
+
+build $builddir/bin/assets/example_stones/stone.png: copy modules/example_stones/assets/stone.png
+
+build $builddir/bin/example_stones: link $builddir/obj/example_stones/main.o $builddir/obj/example_stones/game.o $
+    $builddir/obj/example_stones/modules.gen.o $builddir/lib/libkv_frameloop.a $
+    $builddir/lib/libkv_sprite.a $builddir/lib/libkv_asset.a $builddir/lib/libkv_renderer_vulkan.a $
+    $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a | $builddir/bin/shaders/sprite.spv $
+    $builddir/bin/assets/example_stones/stone.png
+  libs = $sdl_libs $zlib_libs
+
 # ---- aggregates ------------------------------------------------------------
 build $builddir/test/core_tests.ok: run_test $builddir/bin/core_tests
 build $builddir/test/platform_tests.ok: run_test $builddir/bin/platform_tests
@@ -308,7 +328,7 @@ build $builddir/test/collision_tests.ok: run_test $builddir/bin/collision_tests
 build tests: phony $builddir/bin/core_tests $builddir/bin/platform_tests $
     $builddir/bin/math_tests $builddir/bin/sprite_tests $builddir/bin/asset_tests $
     $builddir/bin/collision_tests
-build all: phony $builddir/bin/example_testbed $builddir/bin/example_rocks tests
+build all: phony $builddir/bin/example_testbed $builddir/bin/example_rocks $builddir/bin/example_stones tests
 build check: phony $builddir/test/core_tests.ok $builddir/test/platform_tests.ok $
     $builddir/test/math_tests.ok $builddir/test/sprite_tests.ok $builddir/test/asset_tests.ok $
     $builddir/test/collision_tests.ok

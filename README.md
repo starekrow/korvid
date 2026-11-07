@@ -85,11 +85,16 @@ hand-written stand-in until kormake exists.
                      split, bullets expire by timer, waves arrive by timer, the ship's death
                      is a trigger on its Health column, a restart follows; --demo scripts
                      the ship so runs reproduce
+    example_stones   the same engine used the other way: plain structs in an Array, one
+                     tick that does input, motion, n-squared collision and sprite syncing
+                     in order; the engine supplies the window, the keys, the sprites and
+                     reflection for the log, and nothing else is asked of it
 
     ninja            # builds build/bin/example_testbed, build/bin/shaders/sprite.spv and the tests
     ninja check      # runs the tests
     build/bin/example_testbed         # opens a window; Esc or close exits via ST_EXIT
     build/bin/example_rocks --demo    # the asteroids-like, flying itself; without --demo, you fly
+    build/bin/example_stones          # stones in a box, written immediate-mode style
     build/bin/example_testbed --run-seconds 2   # exits by itself (smoke test)
     build/bin/example_testbed --no-validation   # debug builds enable the validation layers by default
     build/bin/example_testbed --no-vsync        # mailbox/immediate present instead of fifo
