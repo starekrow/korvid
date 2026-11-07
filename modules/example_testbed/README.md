@@ -7,7 +7,25 @@ them blinks out of existence and back on a schedule; a log line marks a ball's t
 bounce. It is the smoke test and the place to try a feature before a real game needs
 it. `--swarm` turns it into a renderer stress.
 
-Run it: `build/linux-debug/bin/example_testbed [--run-seconds 3] [--swarm] [--screenshot out.ppm]`.
+## Building and running
+
+From the repository root, once, to build the build tool:
+
+```bash
+tools/kormake/bootstrap.sh
+```
+
+Then build the configuration you want and run the executable from its bin directory,
+where the shaders and this module's `assets/` have been copied next to it:
+
+```bash
+tools/kormake/bin/linux/kormake build linux-debug
+build/linux-debug/bin/example_testbed --run-seconds 3
+```
+
+`kormake build linux-debug` is everything checked with the validation layers on;
+`linux-dev` is the build to measure with; `linux-ship` has neither. `kormake build`
+builds every module and example; `kormake test linux-debug` runs the test suites.
 
 ## What it shows
 

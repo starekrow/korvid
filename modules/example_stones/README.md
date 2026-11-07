@@ -27,6 +27,26 @@ What you give up, quietly: the engine cannot see your velocities or bump counts,
 are not hashed, traced, snapshotted or visible to a tool; the scheduler sees one system
 and can never run anything in parallel; collision is yours to keep right.
 
+## Building and running
+
+From the repository root, once, to build the build tool:
+
+```bash
+tools/kormake/bootstrap.sh
+```
+
+Then build the configuration you want and run the executable from its bin directory,
+where the shaders and this module's `assets/` have been copied next to it:
+
+```bash
+tools/kormake/bin/linux/kormake build linux-debug
+build/linux-debug/bin/example_stones
+```
+
+`kormake build linux-debug` is everything checked with the validation layers on;
+`linux-dev` is the build to measure with; `linux-ship` has neither. `kormake build`
+builds every module and example; `kormake test linux-debug` runs the test suites.
+
 ## Small changes that pay off
 
 None of these is a rewrite. Each is a few lines, and each can be taken on its own.

@@ -7,8 +7,26 @@ load, and how many ticks per second a few hundred thousand entities get on one t
 against many, with the state hash as the referee. Numbers go to stdout as a table;
 every scenario checks that the memory accounting comes back to where it started.
 
-Run it: `build/linux-dev/bin/example_cpukiller [--threads N] [--bodies N] [--ticks N] [--quick] [--window] [--profile FILE]`.
-Use the dev build; the debug build measures the checks, not the work.
+## Building and running
+
+From the repository root, once, to build the build tool:
+
+```bash
+tools/kormake/bootstrap.sh
+```
+
+Then build the configuration you want and run the executable from its bin directory
+(no window, no assets: the tool runs anywhere):
+
+```bash
+tools/kormake/bin/linux/kormake build linux-dev
+build/linux-dev/bin/example_cpukiller --quick
+```
+
+`kormake build linux-debug` is everything checked with the validation layers on;
+`linux-dev` is the build to measure with; `linux-ship` has neither. `kormake build`
+builds every module and example; `kormake test linux-debug` runs the test suites.
+The debug build runs too, but it measures its own checks: use dev for numbers.
 
 ## The scenarios
 

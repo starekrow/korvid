@@ -8,9 +8,25 @@ from a script with `--demo` so a run is reproducible: two runs of
 `example_rocks --demo --run-seconds 30 --hash` print identical hashes, at `--threads 1`
 and `--threads 8`.
 
-Run it: `build/linux-debug/bin/example_rocks [--demo] [--run-seconds 30] [--hash] [--threads N]`.
-Arrows turn and thrust, space fires, Escape quits; on a pad the left stick turns, South
-thrusts, West fires.
+## Building and running
+
+From the repository root, once, to build the build tool:
+
+```bash
+tools/kormake/bootstrap.sh
+```
+
+Then build the configuration you want and run the executable from its bin directory,
+where the shaders and this module's `assets/` have been copied next to it:
+
+```bash
+tools/kormake/bin/linux/kormake build linux-debug
+build/linux-debug/bin/example_rocks --demo
+```
+
+`kormake build linux-debug` is everything checked with the validation layers on;
+`linux-dev` is the build to measure with; `linux-ship` has neither. `kormake build`
+builds every module and example; `kormake test linux-debug` runs the test suites.
 
 ## How the game is built
 

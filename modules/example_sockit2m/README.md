@@ -10,9 +10,26 @@ back is checked against the pattern that went out. The numbers are throughput, r
 latency, message rate and round trip, and how long a frame takes at worst and at the
 99th percentile, which is the number that says whether a sim would have hitched.
 
-Run it: `build/linux-dev/bin/example_sockit2m [--quick] [--compare] [--direct] [--budget KB] [--tick-hz N] ...`.
-The working set goes next to the executable (not `/tmp`, which is often a tmpfs) and is
-removed afterwards unless `--keep`.
+## Building and running
+
+From the repository root, once, to build the build tool:
+
+```bash
+tools/kormake/bootstrap.sh
+```
+
+Then build the configuration you want and run the executable from its bin directory
+(no window, no assets: the tool runs anywhere):
+
+```bash
+tools/kormake/bin/linux/kormake build linux-dev
+build/linux-dev/bin/example_sockit2m --quick
+```
+
+`kormake build linux-debug` is everything checked with the validation layers on;
+`linux-dev` is the build to measure with; `linux-ship` has neither. `kormake build`
+builds every module and example; `kormake test linux-debug` runs the test suites.
+The debug build runs too, but it measures its own checks: use dev for numbers.
 
 ## Two modes
 
