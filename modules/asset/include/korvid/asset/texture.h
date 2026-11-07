@@ -12,7 +12,7 @@ namespace kv {
 struct Engine;
 
 enum class AssetState : u8 { Pending, Ready, Failed };
-enum class AssetError : u8 { None, NotFound, Read, Decode, Upload, Count };
+enum class AssetError : u8 { None, NotFound, Read, Decode, Upload, Parse, Count };
 
 struct TextureAsset {
     char       path[128];
@@ -23,7 +23,8 @@ struct TextureAsset {
     u32        width = 0, height = 0;
 };
 
-// Events, declared by the asset module.
+// Events, declared by the asset module. The handle's kind says what kind of asset:
+// asset.texture or asset.material.
 struct AssetReady  { Handle asset; };
 struct AssetFailed { Handle asset; AssetError error; };
 

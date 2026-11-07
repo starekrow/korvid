@@ -7,7 +7,7 @@
 // (INIT -> RUN -> EXIT) spawns and destroys by command, so it holds no handles and no
 // writes. No window, renderer, loop or options here: those are the frameloop module's.
 #include "korvid/example_testbed/module.h"
-#include "korvid/asset/texture.h"
+#include "korvid/asset/material.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -74,9 +74,10 @@ const char* state_name(GameState s) {
 }
 
 struct Game {
-    Handle    ball_asset;           // asset.texture
-    Handle    materials[LOOK_COUNT]; // render.material
-    Handle    bg_material;          // render.material: the default checkerboard, tinted dark
+    Handle    looks[LOOK_COUNT];     // asset.material, one file per look
+    Handle    bg_look;               // asset.material: the default checkerboard, tinted dark
+    Handle    materials[LOOK_COUNT]; // render.material: the rows those files fill
+    Handle    bg_material;           // render.material
     GameState state          = ST_INIT;
     bool      exit_requested = false;
     u32       blink_ticket   = 0;   // the blinker's pending spawn, until Spawned answers
@@ -290,35 +291,25 @@ bool example_testbed_startup(Engine& engine, ModuleInstance& self) {
     if (!g) return false;
     self.set_state(g);
 
-    Renderer* r = renderer_get(engine);
-    if (!r) return false;
+    if (!renderer_get(engine)) return false;
 
-    // Assets are requested once and the handles kept. The texture slot exists now and
-    // shows the placeholder; AssetReady arrives on the bus when the PNG is resident.
-    g->ball_asset = asset_load_texture(engine, "example_testbed/ball.png");
-    const TextureAsset* ball = asset_texture(engine, g->ball_asset);
-    if (!ball) return false;
-    // One material per look: the ball texture through alpha and additive blending with
-    // different tints. The background is the opaque one.
-    MaterialDesc md[LOOK_COUNT];
-    for (MaterialDesc& m : md) m.texture = ball->texture;
-    md[LOOK_WHITE].blend      = BlendMode::Alpha;
-    md[LOOK_BLUE_ADD].blend   = BlendMode::Additive;
-    md[LOOK_BLUE_ADD].tint    = color_rgba(0.3f, 0.8f, 1.0f);
-    md[LOOK_GREEN].blend      = BlendMode::Alpha;
-    md[LOOK_GREEN].tint       = color_rgba(0.5f, 1.0f, 0.5f);
-    md[LOOK_MAGENTA].blend    = BlendMode::Alpha;
-    md[LOOK_MAGENTA].tint     = color_rgba(1.0f, 0.4f, 1.0f);
+    // Assets are requested once and the handles kept. One material file per look (the
+    // ball texture through alpha and additive blending with different tints; the
+    // background is the default checkerboard, opaque and dark). The rows exist now and
+    // show the placeholder; AssetReady arrives on the bus as each file and texture lands.
+    const char* looks[LOOK_COUNT] = {"example_testbed/white.material.json", "example_testbed/blue_add.material.json",
+                                     "example_testbed/green.material.json", "example_testbed/magenta.material.json"};
     for (u32 i = 0; i < LOOK_COUNT; ++i) {
-        g->materials[i] = renderer_material_create(r, md[i]);
-        if (g->materials[i].is_null()) return false;
+        g->looks[i] = asset_load_material(engine, looks[i]);
+        const MaterialAsset* m = asset_material(engine, g->looks[i]);
+        if (!m) return false;
+        g->materials[i] = m->material;
     }
-    MaterialDesc bg_md;
-    bg_md.texture = Handle{}; // the default checkerboard
-    bg_md.blend   = BlendMode::Opaque;
-    bg_md.tint    = color_rgba(0.22f, 0.22f, 0.26f);
-    g->bg_material = renderer_material_create(r, bg_md);
-    return !g->bg_material.is_null();
+    g->bg_look = asset_load_material(engine, "example_testbed/background.material.json");
+    const MaterialAsset* bg = asset_material(engine, g->bg_look);
+    if (!bg) return false;
+    g->bg_material = bg->material;
+    return true;
 }
 
 void example_testbed_shutdown(Engine&, ModuleInstance& self) {

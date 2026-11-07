@@ -4,7 +4,7 @@
 // restart follows two seconds later. Everything the game knows is in kinds and one
 // published Score; no handle is kept anywhere except on the events that carry them.
 #include "korvid/example_rocks/module.h"
-#include "korvid/asset/texture.h"
+#include "korvid/asset/material.h"
 #include "korvid/collision/module.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
@@ -95,8 +95,8 @@ enum Look : u8 { LOOK_SHIP, LOOK_ROCK, LOOK_BULLET, LOOK_DEBRIS, LOOK_COUNT };
 
 struct Game {
     Score  score;
-    Handle textures[3];          // asset.texture: ship, rock, dot
-    Handle materials[LOOK_COUNT]; // render.material
+    Handle looks[LOOK_COUNT];     // asset.material, one file per look
+    Handle materials[LOOK_COUNT]; // render.material: the rows those files fill
     u16    ship_hk, bullet_hk, rock_hk; // handle kinds, to tell what an overlap is between
     bool   started = false;
     bool   demo    = false;
@@ -405,24 +405,16 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     self.set_state(g);
     if (!engine_publish(engine, self, "example_rocks.score", &g->score)) return false;
 
-    Renderer* r = renderer_get(engine);
-    if (!r) return false;
-    const char* paths[3] = {"example_rocks/ship.png", "example_rocks/rock.png", "example_rocks/dot.png"};
-    Handle tex[3];
-    for (u32 i = 0; i < 3; ++i) {
-        g->textures[i] = asset_load_texture(engine, paths[i]);
-        const TextureAsset* t = asset_texture(engine, g->textures[i]);
-        if (!t) return false;
-        tex[i] = t->texture;
-    }
-    MaterialDesc md[LOOK_COUNT];
-    md[LOOK_SHIP].texture   = tex[0]; md[LOOK_SHIP].blend   = BlendMode::Alpha;
-    md[LOOK_ROCK].texture   = tex[1]; md[LOOK_ROCK].blend   = BlendMode::Alpha;
-    md[LOOK_BULLET].texture = tex[2]; md[LOOK_BULLET].blend = BlendMode::Additive;
-    md[LOOK_DEBRIS].texture = tex[2]; md[LOOK_DEBRIS].blend = BlendMode::Additive;
+    if (!renderer_get(engine)) return false;
+    // Each look is a material file; the file names its texture. The handles are usable
+    // now and show the placeholder until the files and textures arrive.
+    const char* looks[LOOK_COUNT] = {"example_rocks/ship.material.json", "example_rocks/rock.material.json",
+                                     "example_rocks/bullet.material.json", "example_rocks/debris.material.json"};
     for (u32 i = 0; i < LOOK_COUNT; ++i) {
-        g->materials[i] = renderer_material_create(r, md[i]);
-        if (g->materials[i].is_null()) return false;
+        g->looks[i] = asset_load_material(engine, looks[i]);
+        const MaterialAsset* m = asset_material(engine, g->looks[i]);
+        if (!m) return false;
+        g->materials[i] = m->material;
     }
     // Handle kinds, so a handler can tell what an overlap is between without a lookup.
     g->ship_hk   = engine_table(engine, g_ship_kind)->kind;

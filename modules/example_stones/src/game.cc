@@ -6,7 +6,7 @@
 // The engine gives me a window, the keys, sprites to draw with, and a way to print my
 // structs. That's all I asked it for.
 #include "korvid/example_stones/module.h"
-#include "korvid/asset/texture.h"
+#include "korvid/asset/material.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -45,7 +45,7 @@ struct Game {
     Array<Stone> stones;     // stones[0] is the player
     Handle       material;
     Handle       player_material;
-    Handle       stone_asset;
+    Handle       stone_look, player_look; // asset.material
     Rng          rng;
     u32          ticks   = 0;
     u32          log_in  = 60;
@@ -170,16 +170,15 @@ bool stones_startup(Engine& engine, ModuleInstance& self) {
 
     Renderer* r = renderer_get(engine);
     if (!r) return false;
-    g->stone_asset = asset_load_texture(engine, "example_stones/stone.png");
-    const TextureAsset* t = asset_texture(engine, g->stone_asset);
-    if (!t) return false;
-    MaterialDesc md;
-    md.texture = t->texture;
-    md.blend   = BlendMode::Alpha;
-    g->material = renderer_material_create(r, md);
-    md.tint = color_rgba(1.0f, 0.75f, 0.45f);
-    g->player_material = renderer_material_create(r, md);
-    return !g->material.is_null() && !g->player_material.is_null();
+    KV_UNUSED(r);
+    g->stone_look  = asset_load_material(engine, "example_stones/stone.material.json");
+    g->player_look = asset_load_material(engine, "example_stones/player.material.json");
+    const MaterialAsset* stone  = asset_material(engine, g->stone_look);
+    const MaterialAsset* player = asset_material(engine, g->player_look);
+    if (!stone || !player) return false;
+    g->material        = stone->material;
+    g->player_material = player->material;
+    return true;
 }
 
 void stones_shutdown(Engine&, ModuleInstance& self) {

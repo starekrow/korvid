@@ -12,7 +12,9 @@
 // and counter), --prof-report (the top zones with every fps line); --hitch-ms also dumps
 // the hitching frame's zone tree. --screenshot FILE writes one presented frame as a binary
 // PPM, frame 90 unless --screenshot-frame N says otherwise; --check-sort reads the GPU
-// sort back every 30th frame and verifies it.
+// sort back every 30th frame and verifies it. --cli-port N listens for CLI sessions on
+// loopback; --cli-stdin reads commands from stdin even when it is a terminal (it always
+// does when stdin is not one).
 #pragma once
 #include "korvid/core/engine.h"
 #include "korvid/math/color.h"

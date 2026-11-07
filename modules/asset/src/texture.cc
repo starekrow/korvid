@@ -3,26 +3,17 @@
 #include "korvid/asset/png.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
-#include "korvid/core/name.h"
-#include "korvid/core/pool.h"
 #include "korvid/platform/io.h"
 #include "korvid/render/renderer.h"
+#include "asset_internal.h"
 #include <stdio.h>
 #include <string.h>
 
 namespace kv {
 
-struct AssetState_ {
-    Pool<TextureAsset> textures;
-    Map<Name, Handle>  by_path;  // interned path -> asset
-    Allocator*         general = nullptr;
-    u16                kind    = 0;
-    u32                loaded = 0, failed = 0;
-};
+AssetState_* asset_state(Engine& e) { return engine_module_state_as<AssetState_>(e, "asset"); }
 
 namespace {
-
-AssetState_* state(Engine& e) { return engine_module_state_as<AssetState_>(e, "asset"); }
 
 void* asset_resolve(kv_handle h, void* ctx) { return ((AssetState_*)ctx)->textures.get(Handle{h}); }
 int asset_describe(kv_handle h, void* ctx, char* out, size_t cap) {
@@ -32,7 +23,7 @@ int asset_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     return snprintf(out, cap, "'%s' %s %ux%u", t->path, st, t->width, t->height);
 }
 
-const char* k_error_names[(u32)AssetError::Count] = {"none", "not found", "read error", "decode error", "upload error"};
+const char* k_error_names[(u32)AssetError::Count] = {"none", "not found", "read error", "decode error", "upload error", "parse error"};
 
 void fail_asset(Engine& e, AssetState_& s, Handle h, TextureAsset& t, AssetError err, const char* detail) {
     t.state = AssetState::Failed;
@@ -54,6 +45,7 @@ void asset_pump(TickContext& ctx) {
     // only advances past entries that stay.
     for (u32 i = 0; i < io->completions().len;) {
         IoCompletion c = io->completions()[i];
+        if (!asset_is_kind(s, c.user, s.kind)) { ++i; continue; }
         Handle h{c.user};
         TextureAsset* t = s.textures.get(h);
         if (!t || t->io != c.request) { ++i; continue; } // not ours, or no longer awaited
@@ -80,7 +72,7 @@ void asset_pump(TickContext& ctx) {
     }
 }
 
-bool asset_startup(Engine&, ModuleInstance& self) {
+bool asset_startup(Engine& e, ModuleInstance& self) {
     AssetState_* s = arena_push<AssetState_>(self.arena);
     if (!s) return false;
     s->general = &self.general;
@@ -92,6 +84,7 @@ bool asset_startup(Engine&, ModuleInstance& self) {
     if (!s->kind) return false;
     s->textures.use_kind(s->kind);
     if (!s->textures.init(4096, self.general.tag)) return false;
+    if (!asset_materials_init(e, *s, self)) return false;
     self.set_state(s);
     return true;
 }
@@ -99,6 +92,7 @@ bool asset_startup(Engine&, ModuleInstance& self) {
 void asset_shutdown(Engine& e, ModuleInstance& self) {
     AssetState_* s = self.state_as<AssetState_>();
     if (!s) return;
+    asset_materials_shutdown(e, *s);
     // Renderer textures belong to the renderer and go with it; cancel reads still in flight.
     IoQueue* io = platform_io(e);
     for (u32 i = 0; i < s->textures.len; ++i)
@@ -110,26 +104,34 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
 }
 
 constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(AssetFailed)};
-constinit const ResourceDesc  k_resources[] = {{"asset.textures"}};
+constinit const ResourceDesc  k_resources[] = {{"asset.textures"}, {"asset.materials"}};
 constinit const char* const   k_pump_writes[] = {"asset.textures"};
+constinit const char* const   k_materials_reads[]  = {"asset.textures"};
+constinit const char* const   k_materials_writes[] = {"asset.materials"};
+constinit const char* const   k_materials_after[]  = {"asset.pump"};
 constinit const SystemDesc    k_systems[]   = {
     {.name = "asset.pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = k_pump_writes, .main_thread = true},
+    {.name = "asset.pump_materials", .phase = Phase::PreSim, .fn = asset_materials_pump, .reads = k_materials_reads,
+     .writes = k_materials_writes, .after = k_materials_after, .main_thread = true},
 };
 
 } // namespace
+
+extern const CliCommandDesc k_asset_commands[3]; // material.cc
 
 KV_MODULE_DEFINE(asset_module) = {
     .name      = "asset",
     .events    = k_events,
     .resources = k_resources,
     .systems   = k_systems,
+    .commands  = Span<const CliCommandDesc>(k_asset_commands, 3),
     .startup   = asset_startup,
     .shutdown  = asset_shutdown,
     .memory    = {.reserve = 64 * 1024},
 };
 
 Handle asset_load_texture(Engine& e, const char* path) {
-    AssetState_* s = state(e);
+    AssetState_* s = asset_state(e);
     Renderer* r = renderer_get(e);
     IoQueue* io = platform_io(e);
     if (!s || !r || !io || !path) { KV_ERROR("asset", "cannot load '%s': asset, renderer and platform must be up", path ? path : "?"); return Handle{}; }
@@ -168,7 +170,7 @@ Handle asset_load_texture(Engine& e, const char* path) {
 }
 
 const TextureAsset* asset_texture(Engine& e, Handle asset) {
-    AssetState_* s = state(e);
+    AssetState_* s = asset_state(e);
     return s ? s->textures.get(asset) : nullptr;
 }
 

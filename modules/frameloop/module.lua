@@ -2,6 +2,6 @@
 -- frame loop (pump, ticks, extract, render), resize, reporting, and ExitRequested on
 -- the bus. A game module declares a FrameLoopConfig and provides the logic.
 module "frameloop" {
-  deps          = { "core", "platform", "math", "render", "sprite" },
+  deps          = { "core", "platform", "math", "render", "sprite", "cli" },
   engine_module = true,
 }

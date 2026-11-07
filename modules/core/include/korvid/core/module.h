@@ -17,6 +17,7 @@
 //      system receives its own module's state. Static tables never hold runtime pointers.
 #pragma once
 #include "korvid/core/arena.h"
+#include "korvid/core/cli.h"
 #include "korvid/core/component.h"
 #include "korvid/core/kind.h"
 #include "korvid/core/phase.h"
@@ -68,6 +69,7 @@ struct ModuleDesc {
     Span<const SystemDesc>    systems    = {};
     Span<const HandlerDesc>   handlers   = {}; // run at phase boundaries, on the events they subscribe to
     Span<const TriggerDesc>   triggers   = {}; // state edges on component fields, as StateEdge events
+    Span<const CliCommandDesc> commands  = {}; // what the CLI can be told; the cli module collects them
     bool (*startup)(Engine& engine, ModuleInstance& self)  = nullptr;
     void (*shutdown)(Engine& engine, ModuleInstance& self) = nullptr;
     ModuleMemoryDesc          memory     = {};

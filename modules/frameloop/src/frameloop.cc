@@ -1,5 +1,6 @@
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/frameloop/module.h"
+#include "korvid/cli/module.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -31,6 +32,7 @@ bool            g_prof_report  = false;   // --prof-report: the top zones with t
 const char*     g_shot_path    = nullptr; // --screenshot FILE: one frame as a PPM
 u64             g_shot_frame   = 90;      // --screenshot-frame N: which one
 bool            g_check_sort   = false;   // --check-sort: verify the GPU sort every 30th frame
+CliConfig       g_cli;                    // --cli-port N, --cli-stdin
 
 struct FrameLoopState {
     FrameLoopConfig config;
@@ -76,11 +78,13 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) g_shot_path = argv[++i];
         else if (strcmp(argv[i], "--screenshot-frame") == 0 && i + 1 < argc) g_shot_frame = (u64)atoll(argv[++i]);
         else if (strcmp(argv[i], "--check-sort") == 0) g_check_sort = true;
+        else if (strcmp(argv[i], "--cli-port") == 0 && i + 1 < argc) g_cli.port = (u16)atoi(argv[++i]);
+        else if (strcmp(argv[i], "--cli-stdin") == 0) g_cli.stdin_ = true;
         else if (u32 f = game_flag(cfg, argv[i])) g_flags_given |= (u64)1 << (f - 1);
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin]", argv[0]);
             return false;
         }
     }
@@ -255,6 +259,7 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
         if (g_hitch_ms > 0.0) prof_keep_frame(true);
         if (g_trace_path) prof_trace_open(g_trace_path);
     }
+    cli_configure(g_cli);
     Engine engine;
     engine.hash_ticks   = g_hash_ticks;
     engine.hash_systems = g_hash_systems;
