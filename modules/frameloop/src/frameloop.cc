@@ -3,6 +3,7 @@
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
+#include "korvid/core/name.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/events.h"
 #include "korvid/platform/module.h"
@@ -190,12 +191,14 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
 
     Engine engine;
     if (!engine_init(engine, kv_module_list())) {
+        names_shutdown();
         mem_shutdown();
         return 1;
     }
     FrameLoopState* s = (FrameLoopState*)engine_module_state(engine, "frameloop");
     if (s) run(engine, *s);
     engine_shutdown(engine);
+    names_shutdown();
     mem_shutdown();
     return 0;
 }

@@ -22,7 +22,8 @@ hand-written stand-in until kormake exists.
 
     core             memory (general, arenas, scratch, pools on reserved pages; see
                      docs/design/allocators.md), handles with a kind registry and C API
-                     (docs/design/handles.md), events, phases, tick clock, log
+                     (docs/design/handles.md), Map<K, V> (dense entries, index past 16),
+                     Name interning, events, phases, tick clock, log
     platform         SDL3 window and keyboard input (events on the bus); the I/O queue
                      (io_uring-shaped: submit, pump, reap; mocked with fread for now)
     math             header-only: vec2, point2, rect2, color, affine2, ortho2d

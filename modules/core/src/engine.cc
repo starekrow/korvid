@@ -201,16 +201,16 @@ void engine_shutdown(Engine& e) {
     e.phases.free();
     e.events.free();
     e.resources.free();
-    // The leak report wants module names; take them before the list goes.
+    // The leak report runs in mem_shutdown, after tables that outlive the engine are
+    // gone; it wants module names, which are constinit and stay valid.
     const char* names[KV_MEM_MAX_MODULES];
     u32 count = e.modules.len < KV_MEM_MAX_MODULES ? e.modules.len : KV_MEM_MAX_MODULES;
     for (u32 i = 0; i < count; ++i) names[i] = e.modules[i].desc->name;
+    mem_set_module_names(names, count);
     e.modules.free();
     e.event_type_count = 0;
-    KV_INFO("engine", "shutdown after %llu frames, %llu ticks, %llu live allocations",
-            (unsigned long long)e.frame_count, (unsigned long long)e.clock.tick_count,
-            (unsigned long long)mem_live_allocations());
-    if (mem_live_allocations()) mem_report(names, count);
+    KV_INFO("engine", "shutdown after %llu frames, %llu ticks",
+            (unsigned long long)e.frame_count, (unsigned long long)e.clock.tick_count);
 }
 
 u32 engine_frame(Engine& e, f64 frame_dt) {

@@ -3,6 +3,7 @@
 #include "korvid/asset/png.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
+#include "korvid/core/name.h"
 #include "korvid/core/pool.h"
 #include "korvid/platform/io.h"
 #include "korvid/render/renderer.h"
@@ -13,6 +14,7 @@ namespace kv {
 
 struct AssetState_ {
     Pool<TextureAsset> textures;
+    Map<Name, Handle>  by_path;  // interned path -> asset
     Allocator*         general = nullptr;
     u16                kind    = 0;
     u32                loaded = 0, failed = 0;
@@ -82,6 +84,7 @@ bool asset_startup(Engine&, ModuleInstance& self) {
     AssetState_* s = arena_push<AssetState_>(self.arena);
     if (!s) return false;
     s->general = &self.general;
+    s->by_path.init(&self.general);
     kv_handle_kind_desc desc{};
     desc.name = "asset.texture"; desc.type_key = type_key<TextureAsset>(); desc.ctx = s;
     desc.resolve = asset_resolve; desc.describe = asset_describe; desc.flags = KV_HANDLE_GENERATIONAL;
@@ -102,6 +105,7 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
         if (s->textures.is_alive(i) && io && !s->textures.items[i].io.is_null()) io->cancel(s->textures.items[i].io);
     KV_INFO("asset", "%u textures loaded, %u failed", s->loaded, s->failed);
     kv_handle_kind_unregister(s->kind);
+    s->by_path.free();
     s->textures.free();
 }
 
@@ -126,9 +130,9 @@ Handle asset_load_texture(Engine& e, const char* path) {
     if (!s || !r || !io || !path) { KV_ERROR("asset", "cannot load '%s': asset, renderer and platform must be up", path ? path : "?"); return Handle{}; }
     if (strlen(path) >= sizeof(TextureAsset::path)) { KV_ERROR("asset", "path too long: '%s'", path); return Handle{}; }
 
-    // The same path is the same asset. Linear for now; a hash map comes with more assets.
-    for (u32 i = 0; i < s->textures.len; ++i)
-        if (s->textures.is_alive(i) && strcmp(s->textures.items[i].path, path) == 0) return s->textures.handle_at(i);
+    // The same path is the same asset.
+    Name name = name_intern(path);
+    if (const Handle* existing = s->by_path.find(name)) return *existing;
 
     TextureAsset t{};
     strncpy(t.path, path, sizeof t.path - 1);
@@ -140,6 +144,7 @@ Handle asset_load_texture(Engine& e, const char* path) {
     if (t.texture.is_null()) return Handle{};
     Handle h = s->textures.create(t);
     if (h.is_null()) { renderer_texture_destroy(r, t.texture); return Handle{}; }
+    s->by_path.set(name, h);
 
     char full[512];
     snprintf(full, sizeof full, "%sassets/%s", platform_base_path(e), path);

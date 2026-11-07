@@ -59,7 +59,8 @@ void*      mem_realloc(void* p, usize size);
 void       mem_free(void* p);
 Allocator* mem_general();
 // A view of the general allocator with a fixed tag, for containers a module owns:
-// their growth is then attributed to the owner, whichever system triggers it.
+// their growth is then attributed to the owner, whichever system triggers it. The tag
+// is used as written; module 0 in a view means the engine itself.
 void       mem_general_tagged(Allocator& out, MemTag tag, const char* name);
 
 // ---- attribution ---------------------------------------------------------------------
@@ -102,6 +103,11 @@ MemStats mem_stats_module(u16 module);     // dev builds only
 MemStats mem_stats_category(u8 category);  // dev builds only
 // Logs what is live per module and category (dev); a leak report when called at shutdown.
 void     mem_report(const char* const* module_names, u32 module_count);
+// Names for the report, by module index; the engine sets them, the pointers must stay
+// valid (module descriptors are constinit, so theirs do).
+void     mem_set_module_names(const char* const* module_names, u32 module_count);
+const char* const* mem_module_names();
+u32                mem_module_name_count();
 
 // Once per frame, engine_frame rolls everything up, checks heap budgets and records the
 // result. Anyone wanting a fast read of memory pressure uses the last sample: plain
@@ -122,7 +128,8 @@ const MemSample& mem_last_sample();
 void mem_account_commit(MemTag tag, usize bytes);
 void mem_account_decommit(MemTag tag, usize bytes);
 
-// Frees the calling thread's scratch and anything else the memory system created lazily.
+// Frees the calling thread's scratch, then reports anything still live: the last call
+// of the process, after every table that outlives the engine is gone.
 void mem_shutdown();
 
 } // namespace kv

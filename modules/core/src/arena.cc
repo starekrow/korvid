@@ -149,6 +149,8 @@ void mem_shutdown() {
         arena_destroy(t_scratch);
         t_scratch_ready = false;
     }
+    MemStats s = mem_stats();
+    if (s.live_allocs || s.committed_bytes) mem_report(mem_module_names(), mem_module_name_count());
 }
 
 } // namespace kv

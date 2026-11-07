@@ -275,10 +275,13 @@ MemTag owner_tag() {
     return t;
 }
 
-// The default instance attributes to the current owner; a tagged view attributes to its tag.
+extern Allocator g_general;
+
+// The default instance attributes to the current owner; a tagged view attributes to its
+// tag as written, module 0 included (that is how engine-owned shared tables are tagged).
 void* general_alloc(Allocator* a, usize size, u32 align) {
     MemTag tag = a->tag;
-    if (tag.module == 0) tag.module = t_owner;
+    if (a == &g_general) tag.module = t_owner;
     return general_alloc_tagged(size, align, tag);
 }
 void general_free(Allocator*, void* p, usize) { mem_free(p); }
@@ -419,6 +422,18 @@ void mem_sample(u64 frame) {
 }
 
 const MemSample& mem_last_sample() { return g_sample; }
+
+static const char* g_module_names[KV_MEM_MAX_MODULES];
+static u32         g_module_name_count = 0;
+
+void mem_set_module_names(const char* const* module_names, u32 module_count) {
+    if (module_count > KV_MEM_MAX_MODULES) module_count = KV_MEM_MAX_MODULES;
+    for (u32 i = 0; i < module_count; ++i) g_module_names[i] = module_names[i];
+    g_module_name_count = module_count;
+}
+
+const char* const* mem_module_names() { return g_module_names; }
+u32                mem_module_name_count() { return g_module_name_count; }
 
 void mem_report(const char* const* module_names, u32 module_count) {
     MemStats total = mem_stats();
