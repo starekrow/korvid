@@ -1,17 +1,8 @@
 #include "korvid/sprite/extract.h"
+#include "korvid/sprite/components.h"
 #include "korvid/sprite/world.h"
-#include <string.h>
 
 namespace kv {
-
-namespace {
-
-bool sprite_differs(const Sprite& a, const Sprite& b) {
-    return a.material != b.material || a.uv.x != b.uv.x || a.uv.y != b.uv.y || a.uv.w != b.uv.w ||
-           a.uv.h != b.uv.h || a.size != b.size || a.tint != b.tint || a.layer != b.layer;
-}
-
-} // namespace
 
 void extract_sprites(SpriteWorld& world, Array<SpriteDelta>& out) {
     SpriteDelta tick{};
@@ -32,7 +23,8 @@ void extract_sprites(SpriteWorld& world, Array<SpriteDelta>& out) {
         const Sprite& s = world.sprites[i];
         bool is_new  = !world.sent[i];
         bool moved   = world.transforms[i] != world.prev_transforms[i];
-        bool changed = is_new || sprite_differs(s, world.sent_sprites[i]);
+        // The schema compares field by field, so a new Sprite field is covered the day it is declared.
+        bool changed = is_new || !component_equal(sprite_schema(), &s, &world.sent_sprites[i]);
         if (!is_new && !moved && !changed) continue;
 
         SpriteDelta d{};

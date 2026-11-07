@@ -14,12 +14,18 @@ struct ResourceEntry {
     u32         module; // owning module's index
 };
 
+struct ComponentEntry {
+    const ComponentDesc* desc;
+    u32                  module; // declaring module's index
+};
+
 struct Engine {
     EventBus              events;
     PhaseList             phases;
     TickClock             clock;
     Array<ModuleInstance> modules;   // module-list order
     Array<ResourceEntry>  resources; // id = index + 1; 0 is invalid
+    Array<ComponentEntry> components; // id = index + 1 = ComponentType<T>::id; 0 is invalid
     u32                   event_type_count = 0;
     u64                   frame_count      = 0;
     bool                  quit_requested   = false;
@@ -45,5 +51,11 @@ T* engine_module_state_as(Engine& e, const char* name) {
 
 // Resource id by name; 0 if unknown.
 u32 engine_resource_id(const Engine& e, const char* name);
+
+// Component schemas, by name or id. Null for unknown.
+u32                  engine_component_id(const Engine& e, const char* name);
+const ComponentDesc* engine_component(const Engine& e, u32 id);
+template <class T>
+const ComponentDesc* engine_component(const Engine& e) { return engine_component(e, ComponentType<T>::id); }
 
 } // namespace kv

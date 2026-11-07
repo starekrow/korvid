@@ -1,0 +1,111 @@
+// Korvid core: component schemas. A component is a plain struct a module declares as
+// data: name, size, alignment, a field table and flags. The schema is the reflection
+// everything else reads: the engine lays out columns from it, hashes and compares rows
+// by field (padding never counts), prints any row for a tool, and knows which fields are
+// handles. Declaring is one table per type and one row per field:
+//
+//   constinit const FieldDesc k_velocity_fields[] = {KV_FIELD(Velocity, linear), KV_FIELD(Velocity, angular)};
+//   constinit const ComponentDesc k_components[]  = {KV_COMPONENT(Velocity, k_velocity_fields)};
+//
+// A field's scalar type and count come from FieldTraits<M>: core covers the scalars,
+// Handle and fixed arrays; math/fields.h covers vec2, point2, rect2 and color. A struct
+// with an unknown field type fails to compile, never to describe.
+#pragma once
+#include "korvid/core/handle.h"
+
+namespace kv {
+
+enum class FieldType : u8 { Bool, U8, U16, U32, U64, I8, I16, I32, I64, F32, F64, Handle, Count };
+
+u32         field_type_size(FieldType t);
+const char* field_type_name(FieldType t);
+
+// One field: `count` scalars of `type`, contiguous at `offset`. vec2 is two F32.
+struct FieldDesc {
+    const char* name;
+    FieldType   type;
+    u16         count;
+    u16         offset;
+};
+
+// Flags OR together. A component is sim state unless it says otherwise.
+enum ComponentFlags : u8 {
+    CompSim      = 0, // authoritative: hashed, snapshotted, visible to triggers
+    CompCosmetic = 1, // presentation only: never hashed, never read by a sim system
+    CompPrev     = 2, // the engine keeps a previous-tick copy
+};
+
+// The id slot is ComponentType<T>::id, filled at init like events.
+struct ComponentDesc {
+    const char*           name;
+    u32                   size;
+    u32                   align;
+    Span<const FieldDesc> fields;
+    u8                    flags;
+    u32*                  id;
+    const void*           type; // TypeKey<T>, so a typed access can be checked against the schema
+
+    bool is_sim()   const { return (flags & CompCosmetic) == 0; }
+    bool has_prev() const { return (flags & CompPrev) != 0; }
+};
+
+template <class T>
+struct ComponentType {
+    static_assert(__is_trivially_copyable(T), "components are plain data");
+    static_assert(__is_standard_layout(T), "components are standard layout, so offsets are well defined");
+    static inline u32 id = 0;
+};
+
+// Scalar type and count of a member type. Specialize for your own plain aggregates.
+template <class M> struct FieldTraits;
+#define KV_FIELD_TRAITS(M, T, N) \
+    template <> struct FieldTraits<M> { static constexpr FieldType type = FieldType::T; static constexpr u16 count = N; }
+KV_FIELD_TRAITS(bool, Bool, 1);
+KV_FIELD_TRAITS(u8,  U8,  1);
+KV_FIELD_TRAITS(u16, U16, 1);
+KV_FIELD_TRAITS(u32, U32, 1);
+KV_FIELD_TRAITS(u64, U64, 1);
+KV_FIELD_TRAITS(i8,  I8,  1);
+KV_FIELD_TRAITS(i16, I16, 1);
+KV_FIELD_TRAITS(i32, I32, 1);
+KV_FIELD_TRAITS(i64, I64, 1);
+KV_FIELD_TRAITS(f32, F32, 1);
+KV_FIELD_TRAITS(f64, F64, 1);
+KV_FIELD_TRAITS(Handle, Handle, 1);
+template <class M, usize N>
+struct FieldTraits<M[N]> {
+    static constexpr FieldType type  = FieldTraits<M>::type;
+    static constexpr u16       count = (u16)(FieldTraits<M>::count * N);
+};
+// An enum field is its underlying integer.
+template <class E> requires __is_enum(E)
+struct FieldTraits<E> : FieldTraits<__underlying_type(E)> {};
+
+// ---- schema operations: every one reads only the table ----------------------------
+
+// Null if the descriptor is consistent; otherwise a static string naming what is wrong,
+// with the offending field's name in `field` if there is one.
+const char* component_check(const ComponentDesc& c, const char** field);
+const FieldDesc* component_field(const ComponentDesc& c, const char* name);
+
+// Field by field, so padding never matters. The hash is the fixed engine hash over the
+// scalars' bit patterns in declaration order: identical across runs and platforms.
+u64  component_hash(const ComponentDesc& c, const void* row);
+bool component_equal(const ComponentDesc& c, const void* a, const void* b);
+
+// "Name{field=value, vec=(a, b), h=kind#index}". Returns what snprintf would.
+int  component_describe(const ComponentDesc& c, const void* row, char* out, usize cap);
+// Calls fn(handle&) for every handle scalar in the row; stops early if fn returns false.
+// Delivery uses it to drop events and rows that refer to the dead.
+bool component_each_handle(const ComponentDesc& c, void* row, bool (*fn)(Handle&, void*), void* user);
+
+} // namespace kv
+
+#define KV_FIELD(T, m) \
+    ::kv::FieldDesc{#m, ::kv::FieldTraits<decltype(T::m)>::type, ::kv::FieldTraits<decltype(T::m)>::count, (::kv::u16)offsetof(T, m)}
+
+// KV_COMPONENT(Velocity, k_velocity_fields) or KV_COMPONENT(Transform2, k_fields, CompPrev).
+#define KV_COMPONENT(T, fields, ...)                                                               \
+    ::kv::ComponentDesc{#T, (::kv::u32)sizeof(T), (::kv::u32)alignof(T), fields,                   \
+                        (::kv::u8)(0 __VA_OPT__(| (__VA_ARGS__))), &::kv::ComponentType<T>::id, \
+                        &::kv::TypeKey<T>::key}

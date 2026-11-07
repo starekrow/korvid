@@ -1,7 +1,9 @@
 #include "korvid/sprite/module.h"
+#include "korvid/sprite/components.h"
 #include "korvid/sprite/extract.h"
 #include "korvid/sprite/world.h"
 #include "korvid/core/engine.h"
+#include "korvid/math/fields.h"
 
 namespace kv {
 
@@ -39,6 +41,18 @@ void sprite_extract(TickContext& ctx) {
     extract_sprites(s.world, s.deltas);
 }
 
+// The schemas. Transform2 keeps a previous-tick copy for interpolation; Sprite does not.
+constinit const FieldDesc k_transform2_fields[] = {
+    KV_FIELD(Transform2, position), KV_FIELD(Transform2, rotation), KV_FIELD(Transform2, scale),
+};
+constinit const FieldDesc k_sprite_fields[] = {
+    KV_FIELD(Sprite, material), KV_FIELD(Sprite, uv), KV_FIELD(Sprite, size), KV_FIELD(Sprite, tint), KV_FIELD(Sprite, layer),
+};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Transform2, k_transform2_fields, CompPrev),
+    KV_COMPONENT(Sprite, k_sprite_fields),
+};
+
 constinit const ResourceDesc k_resources[] = {{"sprite.world"}, {"sprite.deltas"}};
 constinit const char* const  k_world[]     = {"sprite.world"};
 constinit const char* const  k_deltas[]    = {"sprite.deltas"};
@@ -50,13 +64,17 @@ constinit const SystemDesc   k_systems[]   = {
 } // namespace
 
 KV_MODULE_DEFINE(sprite_module) = {
-    .name      = "sprite",
-    .resources = k_resources,
-    .systems   = k_systems,
-    .startup   = sprite_startup,
-    .shutdown  = sprite_shutdown,
-    .memory    = {.reserve = 64 * 1024},
+    .name       = "sprite",
+    .components = k_components,
+    .resources  = k_resources,
+    .systems    = k_systems,
+    .startup    = sprite_startup,
+    .shutdown   = sprite_shutdown,
+    .memory     = {.reserve = 64 * 1024},
 };
+
+const ComponentDesc& transform2_schema() { return k_components[0]; }
+const ComponentDesc& sprite_schema()     { return k_components[1]; }
 
 SpriteWorld* sprite_world(Engine& e) {
     SpriteState* s = engine_module_state_as<SpriteState>(e, "sprite");

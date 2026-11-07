@@ -54,7 +54,7 @@ void test_sprite_world(kv::TestCtx& c) {
     KV_CHECK(c, resolve<Transform2>(e) == world.transform(e) && resolve<Sprite>(e) == nullptr);
     char text[128];
     kv_handle_describe(e.bits, text, sizeof text);
-    KV_CHECK(c, strcmp(text, "sprite.entity#0:1 at (3.0, 4.0) layer 4 (1 live)") == 0);
+    KV_CHECK(c, strcmp(text, "sprite.entity#0:1 Transform2{position=(3, 4), rotation=0, scale=(1, 1)} layer 4 (1 live)") == 0);
     world.destroy(e);
     kv_handle_describe(e.bits, text, sizeof text);
     KV_CHECK(c, strstr(text, "stale") != nullptr && resolve(e) == nullptr);

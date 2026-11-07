@@ -1,4 +1,5 @@
 #include "korvid/sprite/world.h"
+#include "korvid/sprite/components.h"
 #include <stdio.h>
 
 namespace kv {
@@ -16,7 +17,9 @@ int sprite_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     const Transform2* t = w.transform(hh);
     const Sprite* s = w.sprite(hh);
     if (!t || !s) return snprintf(out, cap, "%s (%u live)", hh.index() < w.entities.len ? "stale" : "out of range", w.live());
-    return snprintf(out, cap, "at (%.1f, %.1f) layer %d (%u live)", (double)t->position.x, (double)t->position.y, s->layer, w.live());
+    int n = component_describe(transform2_schema(), t, out, cap);
+    if (n < 0 || (size_t)n >= cap) return n;
+    return n + snprintf(out + n, cap - (size_t)n, " layer %d (%u live)", s->layer, w.live());
 }
 
 } // namespace

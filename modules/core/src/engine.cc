@@ -62,6 +62,40 @@ bool register_events(Engine& e, Span<const ModuleDesc* const> modules) {
     return true;
 }
 
+// Component ids: module order, then declaration order, starting at 1. Every schema is
+// checked for consistency here, so nothing downstream has to.
+bool register_components(Engine& e, Span<const ModuleDesc* const> modules) {
+    for (u32 i = 0; i < modules.len; ++i) {
+        const ModuleDesc& m = *modules[i];
+        for (const ComponentDesc& c : m.components) {
+            const char* field = nullptr;
+            if (const char* problem = component_check(c, &field)) {
+                if (field) KV_ERROR("engine", "component '%s' in module '%s': field '%s' %s", c.name, m.name, field, problem);
+                else       KV_ERROR("engine", "component '%s' in module '%s' %s", c.name ? c.name : "?", m.name, problem);
+                return false;
+            }
+            if (u32 id = engine_component_id(e, c.name)) {
+                KV_ERROR("engine", "component '%s' declared by both '%s' and '%s'", c.name,
+                         modules[e.components[id - 1].module]->name, m.name);
+                return false;
+            }
+            if (*c.id != 0) {
+                KV_ERROR("engine", "component '%s' in module '%s' is the type already registered as '%s' by '%s'",
+                         c.name, m.name, e.components[*c.id - 1].desc->name, modules[e.components[*c.id - 1].module]->name);
+                return false;
+            }
+            e.components.push(ComponentEntry{&c, i});
+            *c.id = e.components.len;
+        }
+    }
+    return true;
+}
+
+void unregister_components(Engine& e) {
+    for (const ComponentEntry& c : e.components) *c.desc->id = 0;
+    e.components.free();
+}
+
 bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
     for (u32 i = 0; i < modules.len; ++i) {
         for (const ResourceDesc& r : modules[i]->resources) {
@@ -126,6 +160,14 @@ bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
     return true;
 }
 
+void log_components(const Engine& e) {
+    for (u32 i = 0; i < e.components.len; ++i) {
+        const ComponentDesc& c = *e.components[i].desc;
+        KV_INFO("engine", "component %-2u %-16s %3u bytes, %u fields%s%s", i + 1, c.name, c.size, c.fields.len,
+                c.is_sim() ? "" : ", cosmetic", c.has_prev() ? ", prev" : "");
+    }
+}
+
 void log_schedule(const Engine& e) {
     for (u32 p = 0; p < (u32)Phase::Count; ++p) {
         char line[512];
@@ -152,9 +194,11 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
         e.modules.push(inst);
     }
 
-    bool ok = register_events(e, modules) && register_resources(e, modules) && build_schedule(e, modules);
+    bool ok = register_events(e, modules) && register_components(e, modules) && register_resources(e, modules) &&
+              build_schedule(e, modules);
     if (ok) {
         e.events.init(1);
+        log_components(e);
         log_schedule(e);
         for (ModuleInstance& inst : e.modules) {
             const ModuleDesc& m = *inst.desc;
@@ -199,6 +243,7 @@ void engine_shutdown(Engine& e) {
         mem_set_owner(0);
     }
     for (const ModuleInstance& inst : e.modules) event_types_unregister(inst.desc->events);
+    unregister_components(e);
     e.phases.free();
     e.events.free();
     e.resources.free();
@@ -242,6 +287,16 @@ u32 engine_resource_id(const Engine& e, const char* name) {
     for (u32 i = 0; i < e.resources.len; ++i)
         if (names_equal(e.resources[i].name, name)) return i + 1;
     return 0;
+}
+
+u32 engine_component_id(const Engine& e, const char* name) {
+    for (u32 i = 0; i < e.components.len; ++i)
+        if (names_equal(e.components[i].desc->name, name)) return i + 1;
+    return 0;
+}
+
+const ComponentDesc* engine_component(const Engine& e, u32 id) {
+    return id && id <= e.components.len ? e.components[id - 1].desc : nullptr;
 }
 
 } // namespace kv

@@ -9,6 +9,7 @@ void test_memory(kv::TestCtx&);
 void test_map(kv::TestCtx&);
 void test_name(kv::TestCtx&);
 void test_random(kv::TestCtx&);
+void test_component(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
@@ -20,6 +21,7 @@ int main() {
     test_map(c);
     test_name(c);
     test_random(c);
+    test_component(c);
     kv::names_shutdown();
     kv::mem_shutdown(); // the leak report, if anything is left
     return kv::test_report(c, "core_tests");

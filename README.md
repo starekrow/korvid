@@ -9,8 +9,8 @@ renderer-issued handles whose index is the GPU slot or row; a null or stale mate
 renders with the built-in red/white checkerboard.
 
 Module registration is declarative (`core/module.h`): a module is one `constinit`
-`ModuleDesc` with tables of event types, resources and systems, plus startup/shutdown for
-OS resources and module state. Nothing registers itself and nothing runs before main;
+`ModuleDesc` with tables of event types, component schemas, resources and systems, plus
+startup/shutdown for OS resources and module state. Nothing registers itself and nothing runs before main;
 the build-generated list (`hello/src/modules.gen.cc` for now) is the only input. Order is
 list order, then declaration order: modules start in list order and stop in reverse,
 event ids are assigned in that order, and within each tick phase (input, presim, sim,
@@ -24,17 +24,19 @@ hand-written stand-in until kormake exists.
 
     core             memory (general, arenas, scratch, pools on reserved pages; see
                      docs/design/allocators.md), handles with a kind registry and C API
-                     (docs/design/handles.md), Map<K, V> (dense entries, index past 16),
+                     (docs/design/handles.md), component schemas (field tables that hash,
+                     compare and print rows), Map<K, V> (dense entries, index past 16),
                      Name interning, Rng (PCG32), events, phases, tick clock, log
     platform         SDL3 window and keyboard input (events on the bus); the I/O queue
                      (io_uring-shaped: submit, pump, reap; mocked with fread for now)
-    math             header-only: vec2, point2, rect2, color, affine2, ortho2d
+    math             header-only: vec2, point2, rect2, color, affine2, ortho2d, and their
+                     schema field traits (fields.h)
     render           header-only interface: the SpriteDelta stream, renderer API
                      (textures, materials, caps, apply, render), MaterialDesc
     asset            load_texture returns a handle at once; the read rides the I/O queue,
                      decode (PNG on zlib) and upload happen in asset.pump, completion is
                      AssetReady/AssetFailed on the bus
-    sprite           Transform2 + Sprite components, SpriteWorld, and the extract: each
+    sprite           Transform2 + Sprite components (declared schemas), SpriteWorld, and the extract: each
                      tick emits a Tick marker plus a Set for every entity that is new or
                      changed and a Remove for every one destroyed (sprite.extract, PostSim)
     renderer-vulkan  provides "render": a persistent sprite world keyed by entity handle
