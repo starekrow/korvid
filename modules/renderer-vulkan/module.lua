@@ -5,5 +5,7 @@ module "renderer-vulkan" {
   platforms = { "linux" },
   deps      = { "core", "math", "render", "platform" },
   external  = { vulkan = ">=1.3", sdl3 = ">=3.2" },
-  tools     = { "slang" },
+  tools     = { ["shader-compile"] = { install = "shaders" } }, -- the rule's outputs land in bin/shaders/
+  engine_module = true,
+  unity     = false, -- renderer.cc's private types are fields of the public Renderer; one TU until the refactor
 }

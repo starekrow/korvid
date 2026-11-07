@@ -20,7 +20,7 @@ for the table a system holds the write on, `read<T>`/`write<T>` for one column b
 (the window, the input state), and `spawn_later`/`destroy` commands applied at the phase
 boundary. Names resolve to ids once with `resource_id`, `column_id` and `kind_id`. In dev
 builds an access the system did not declare asserts with the system and resource named. Nothing registers itself and nothing runs before main;
-the build-generated list (`example_testbed/src/modules.gen.cc` for now) is the only input. Modules
+the build-generated list (`build/<target>/gen/<exe>/modules.gen.cc`) is the only input. Modules
 start in list order and stop in reverse, and event, component and kind ids are assigned in
 list then declaration order. Within each tick phase (input, presim, sim, postsim) the
 order is derived from the systems' read/write sets: a reader runs after every writer of
@@ -52,9 +52,13 @@ an edge on one field of a `prev` component (`Changed`, `CrossedBelow`, `CrossedA
 the engine evaluates them at the end of every tick and emits `StateEdge` for the next.
 
 Modules follow the kormake directory convention (`module.lua`, `include/korvid/<name>/`,
-`src/`, `shaders/`, `assets/`, `tests/`). A module's `assets/` are copied to
-`build/bin/assets/<module>/` and loaded by that relative path. `build.ninja` is a
-hand-written stand-in until kormake exists.
+`src/`, `src/<platform>/`, `shaders/`, `assets/`, `tests/`). kormake (`tools/kormake`, its
+own README there) reads `kormake.lua` and every `module.lua`, resolves the instance graph
+for a platform and config, and writes `build/<platform>-<config>/build.ninja` plus
+`compile_commands.json`. It generates each executable's module list in dependency order,
+one unity file per module, copies a module's `assets/` to `bin/assets/<module>/`, and
+runs the bound shader compiler over `shaders/`. The toolchain and the shader compiler are
+modules too (`toolchain-linux`, `slang`).
 
     core             memory (a size-class general allocator with per-thread pages and
                      remote frees, arenas, scratch, pools on reserved pages, heaps with soft
@@ -84,6 +88,10 @@ hand-written stand-in until kormake exists.
     collision        Collider2 (circle or box, layer and mask) and the broadphase: a uniform
                      grid over every kind with Transform2 and Collider2, overlap pairs diffed
                      tick to tick into OverlapBegin and OverlapEnd (collision.broadphase, Sim)
+    toolchain-linux  the Linux platform as a module: compiler, flags per config, what each
+                     external means here, and the default bindings (render, shader-compile)
+    slang            the shader compiler as a module: provides shader-compile and the rule
+                     that turns .slang into SPIR-V; a system lookup until a binary is vendored
     frameloop        what every game needs and no game decides: options, window and
                      renderer from a FrameLoopConfig, the loop (pump, ticks, extract,
                      render), resize, reporting, ExitRequested on the bus
@@ -103,27 +111,28 @@ hand-written stand-in until kormake exists.
                      load, and the engine's tick rate on one thread against many with the
                      state hash as the referee; prints a table
 
-    ninja            # builds build/bin/example_testbed, build/bin/shaders/sprite.spv and the tests
-    ninja check      # runs the tests
-    build/bin/example_testbed         # opens a window; Esc or close exits via ST_EXIT
-    build/bin/example_rocks --demo    # the asteroids-like, flying itself; without --demo, you fly
-    build/bin/example_stones          # stones in a box, written immediate-mode style
-    build/bin/example_cpukiller       # the stress table (--threads N, --bodies N, --ticks N, --quick)
-    build/bin/example_cpukiller --window  # the same with the window, renderer and swapchain alive
-    build/bin/example_cpukiller --profile t.json  # plus a trace of the whole run
-    build/bin/example_testbed --run-seconds 2   # exits by itself (smoke test)
-    build/bin/example_testbed --no-validation   # debug builds enable the validation layers by default
-    build/bin/example_testbed --no-vsync        # mailbox/immediate present instead of fifo
-    build/bin/example_testbed --borderless      # no libdecor frame (see note below)
-    build/bin/example_testbed --hitch-ms 50     # log where any frame over 50 ms spent its time
-    build/bin/example_testbed --hash            # log the sim state hash per tick (--hash-systems: per system)
-    build/bin/example_testbed --trace-events    # print every delivered event with its emitter (dev builds)
-    build/bin/example_testbed --threads 1       # serial; the default uses every core
-    build/bin/example_testbed --prof-report      # the top zones per frame with every fps line
-    build/bin/example_testbed --profile t.json   # a trace for Perfetto (ui.perfetto.dev) or chrome://tracing
+    tools/kormake/bootstrap.sh                   # once: builds the build tool with the host C compiler
+    tools/kormake/bin/linux/kormake build linux-debug   # everything: libraries, examples, shaders, assets, tests
+    tools/kormake/bin/linux/kormake test linux-debug    # runs the tests (linux-dev and linux-ship likewise)
+    build/linux-debug/bin/example_testbed         # opens a window; Esc or close exits via ST_EXIT
+    build/linux-debug/bin/example_rocks --demo    # the asteroids-like, flying itself; without --demo, you fly
+    build/linux-debug/bin/example_stones          # stones in a box, written immediate-mode style
+    build/linux-debug/bin/example_cpukiller       # the stress table (--threads N, --bodies N, --ticks N, --quick)
+    build/linux-debug/bin/example_cpukiller --window  # the same with the window, renderer and swapchain alive
+    build/linux-debug/bin/example_cpukiller --profile t.json  # plus a trace of the whole run
+    build/linux-debug/bin/example_testbed --run-seconds 2   # exits by itself (smoke test)
+    build/linux-debug/bin/example_testbed --no-validation   # debug builds enable the validation layers by default
+    build/linux-debug/bin/example_testbed --no-vsync        # mailbox/immediate present instead of fifo
+    build/linux-debug/bin/example_testbed --borderless      # no libdecor frame (see note below)
+    build/linux-debug/bin/example_testbed --hitch-ms 50     # log where any frame over 50 ms spent its time
+    build/linux-debug/bin/example_testbed --hash            # log the sim state hash per tick (--hash-systems: per system)
+    build/linux-debug/bin/example_testbed --trace-events    # print every delivered event with its emitter (dev builds)
+    build/linux-debug/bin/example_testbed --threads 1       # serial; the default uses every core
+    build/linux-debug/bin/example_testbed --prof-report      # the top zones per frame with every fps line
+    build/linux-debug/bin/example_testbed --profile t.json   # a trace for Perfetto (ui.perfetto.dev) or chrome://tracing
 
-Needs g++ (or clang++), ninja, libsdl3-dev, libvulkan-dev, zlib1g-dev, slang-compiler,
-and for debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached
+Needs a C compiler for the bootstrap, g++ (or clang++ via `--cxx`), ninja, libsdl3-dev,
+libvulkan-dev, zlib1g-dev, slang-compiler, and for debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached
 through SDL and every entry point is loaded at runtime (renderer-vulkan/src/vk_funcs.h).
 
 Known platform issue: on GNOME Wayland, SDL3 falls back to libdecor for the window frame

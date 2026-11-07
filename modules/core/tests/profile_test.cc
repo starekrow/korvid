@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#if KV_PROFILE
 namespace {
 
 using namespace kv;
@@ -26,6 +27,7 @@ const ProfStat* find(Span<const ProfStat> stats, const char* name) {
 }
 
 } // namespace
+#endif
 
 void test_profile(kv::TestCtx& c) {
     using namespace kv;

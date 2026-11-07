@@ -17,7 +17,7 @@ struct Task {
     u32       chunk;
 };
 
-struct Pool {
+struct JobPool {
     pthread_mutex_t mu;
     pthread_cond_t  cv;        // broadcast when tasks arrive, when one finishes, and on quit
     Array<Task>     queue;     // FIFO from head
@@ -28,7 +28,7 @@ struct Pool {
     bool            up      = false;
 };
 
-Pool g_pool;
+JobPool g_pool;
 JobStats g_stats;
 thread_local u32 t_depth = 0; // batches this thread is waiting on, nested
 
@@ -50,7 +50,7 @@ void run_task(const Task& t) {
 
 // Under the lock: a task if there is one.
 bool pop(Task* out) {
-    Pool& p = g_pool;
+    JobPool& p = g_pool;
     if (p.head >= p.queue.len) return false;
     *out = p.queue[p.head++];
     if (p.head == p.queue.len) { p.queue.clear(); p.head = 0; }
@@ -58,7 +58,7 @@ bool pop(Task* out) {
 }
 
 void* worker_main(void* arg) {
-    Pool& p = g_pool;
+    JobPool& p = g_pool;
     thread_id();
 #if KV_PROFILE
     char name[32];
@@ -91,7 +91,7 @@ void* worker_main(void* arg) {
 } // namespace
 
 bool jobs_init(u32 workers) {
-    Pool& p = g_pool;
+    JobPool& p = g_pool;
     if (p.up && p.workers == workers) return true;
     if (p.up) jobs_shutdown();
     pthread_mutex_init(&p.mu, nullptr);
@@ -116,7 +116,7 @@ bool jobs_init(u32 workers) {
 }
 
 void jobs_shutdown() {
-    Pool& p = g_pool;
+    JobPool& p = g_pool;
     if (!p.up) return;
     pthread_mutex_lock(&p.mu);
     p.quit = true;
@@ -152,7 +152,7 @@ void jobs_run(u32 count, u32 grain, JobFn fn, void* user, const char* name) {
     u32 chunks = jobs_chunks(count, grain);
     if (chunks == 0) return;
     JobBatch b{fn, user, count, grain, chunks, mem_owner(), 0, name};
-    Pool& p = g_pool;
+    JobPool& p = g_pool;
     if (!p.up || p.workers == 0 || chunks == 1) {
         bump(&g_stats.inline_batches);
         for (u32 i = 0; i < chunks; ++i) run_task(Task{&b, i});

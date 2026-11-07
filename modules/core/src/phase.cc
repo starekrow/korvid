@@ -162,7 +162,7 @@ void PhaseList::free() {
 
 namespace {
 
-bool contains(const Array<u32>& ids, u32 id) {
+[[maybe_unused]] bool has_id(const Array<u32>& ids, u32 id) { // only the dev checks use it
     for (u32 x : ids) if (x == id) return true;
     return false;
 }
@@ -175,8 +175,8 @@ bool allowed(const TickContext& ctx, u32 resource, u32 kind_resource, bool write
 #if KV_DEV
     if (!ctx.system) return true;
     const ScheduledSystem& s = *ctx.system;
-    if (contains(s.writes, resource) || (kind_resource && contains(s.writes, kind_resource))) return true;
-    if (!write && (contains(s.reads, resource) || (kind_resource && contains(s.reads, kind_resource)))) return true;
+    if (has_id(s.writes, resource) || (kind_resource && has_id(s.writes, kind_resource))) return true;
+    if (!write && (has_id(s.reads, resource) || (kind_resource && has_id(s.reads, kind_resource)))) return true;
     return false;
 #else
     KV_UNUSED(ctx); KV_UNUSED(resource); KV_UNUSED(kind_resource); KV_UNUSED(write);

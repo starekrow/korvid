@@ -1,0 +1,92 @@
+-- kormake: small helpers shared by the scripts.
+local M = {}
+
+function M.fail(fmt, ...)
+  error(string.format(fmt, ...), 0)
+end
+
+function M.basename(path)
+  return (path:gsub("^.*/", ""))
+end
+
+function M.dirname(path)
+  local d = path:match("^(.*)/[^/]*$")
+  return d or "."
+end
+
+function M.stem(path)
+  local b = M.basename(path)
+  return (b:gsub("%.[^%.]*$", ""))
+end
+
+function M.ext(path)
+  return path:match("%.([^%./]*)$") or ""
+end
+
+function M.join(a, b)
+  if a == "" or a == "." then return b end
+  if a:sub(-1) == "/" then return a .. b end
+  return a .. "/" .. b
+end
+
+function M.expand_home(path)
+  if path:sub(1, 1) == "~" then
+    local home = kfs.getenv("HOME") or ""
+    return home .. path:sub(2)
+  end
+  return path
+end
+
+-- A glob with * and ? in the last component only, matched against a directory listing.
+function M.glob_to_pattern(glob)
+  return "^" .. glob:gsub("[%^%$%(%)%%%.%[%]%+%-]", "%%%0"):gsub("%*", ".*"):gsub("%?", ".") .. "$"
+end
+
+function M.matches(name, glob)
+  return name:match(M.glob_to_pattern(glob)) ~= nil
+end
+
+function M.sorted_files(dir, ext)
+  local out = {}
+  for _, n in ipairs(kfs.listdir(dir)) do
+    if ext == nil or M.ext(n) == ext then
+      if kfs.isfile(M.join(dir, n)) then out[#out + 1] = n end
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+function M.sorted_keys(t)
+  local ks = {}
+  for k in pairs(t) do ks[#ks + 1] = k end
+  table.sort(ks, function(a, b) return tostring(a) < tostring(b) end)
+  return ks
+end
+
+function M.contains(list, v)
+  for _, x in ipairs(list) do if x == v then return true end end
+  return false
+end
+
+function M.as_list(v)
+  if v == nil then return {} end
+  if type(v) == "table" then return v end
+  return { v }
+end
+
+-- Ninja escaping for paths and values.
+function M.ninja_escape(s)
+  return (s:gsub("([ :$])", "$%1"))
+end
+
+function M.json_string(s)
+  return '"' .. s:gsub('[\\"]', '\\%0'):gsub("\n", "\\n") .. '"'
+end
+
+-- A symbol from a module name: dashes and dots become underscores.
+function M.symbol(name)
+  return (name:gsub("[%-%.]", "_"))
+end
+
+return M

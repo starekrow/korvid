@@ -4,4 +4,5 @@
 module "asset" {
   deps     = { "core", "platform", "math", "render" },
   external = { zlib = ">=1.2" },
+  engine_module = true,
 }
