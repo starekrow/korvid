@@ -4,7 +4,11 @@
 // referee. Numbers go to stdout as a table; every scenario also checks that the memory
 // accounting comes back to where it started.
 //
-//   example_cpukiller [--threads N] [--bodies N] [--ticks N] [--quick] [--window]
+//   example_cpukiller [--threads N] [--bodies N] [--ticks N] [--quick] [--window] [--profile FILE]
+//
+// Every scenario is a zone and every case a mark, so --profile FILE gives a trace of the
+// whole run; the engine scenario's breakdown (what the ticks spent where, and how much of
+// the workers' time was waiting) comes from the profiler's collector, not from stopwatches.
 //
 // With --window the usual stack comes up first (platform, renderer, frame loop), the
 // pool and memory scenarios run while the window and swapchain are alive, and the engine
@@ -19,6 +23,7 @@
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/name.h"
+#include "korvid/core/profile.h"
 #include "korvid/core/thread.h"
 #include "korvid/core/time.h"
 #include <stdio.h>
@@ -34,6 +39,7 @@ u32  g_bodies  = 200000;
 u32  g_ticks   = 300;
 bool g_quick   = false;
 bool g_window  = false;
+const char* g_trace = nullptr;
 constexpr u32 kTicksPerFrame = 16; // ticks between renders in window mode, and per engine_frame in both
 
 struct Row { char name[48]; char detail[64]; f64 serial_ms; f64 parallel_ms; char note[160]; };
@@ -68,8 +74,10 @@ f64 ms_since(f64 t0) { return (time_now() - t0) * 1e3; }
 void nothing(u32, u32, u32, void*) {}
 
 void scenario_overhead() {
+    KV_ZONE("dispatch");
     const u32 counts[] = {2, 16, 256, 4096, 65536};
     for (u32 chunks : counts) {
+        KV_MARK_V("dispatch case", chunks);
         u32 reps = g_quick ? 20 : 200;
         jobs_init(g_threads - 1);
         jobs_stats_reset();
@@ -101,9 +109,11 @@ void spin(u32, u32 begin, u32 end, void* user) {
 }
 
 void scenario_contention() {
+    KV_ZONE("contention");
     const u32 total_items = g_quick ? 1u << 16 : 1u << 18; // items of 200 hash rounds each
     const u32 grains[] = {1, 8, 64, 512, 4096};
     for (u32 grain : grains) {
+        KV_MARK_V("contention case", grain);
         u64 sink = 0;
         Spin sp{200, &sink};
         jobs_init(0);
@@ -135,6 +145,7 @@ void nested(u32, u32 begin, u32 end, void* user) {
 }
 
 void scenario_nested() {
+    KV_ZONE("nested");
     u64 sink = 0;
     Nest n{64, 200, &sink};
     u32 outer = g_quick ? 16 : 64;
@@ -219,14 +230,15 @@ void pool_ready(u32 workers) {
 }
 
 void run_memory_case(const char* name, u32 count, u32 grain, JobFn fn, void* user, const char* unit, u64 ops) {
+    KV_MARK(name);
     pool_ready(0);
     f64 t0 = time_now();
-    jobs_run(count, grain, fn, user);
+    jobs_run(count, grain, fn, user, name);
     f64 ser = ms_since(t0);
     bool ok1 = mem_settled(name);
     pool_ready(g_threads - 1);
     t0 = time_now();
-    jobs_run(count, grain, fn, user);
+    jobs_run(count, grain, fn, user, name);
     f64 par = ms_since(t0);
     bool ok2 = mem_settled(name);
     char detail[64], note[160];
@@ -236,6 +248,7 @@ void run_memory_case(const char* name, u32 count, u32 grain, JobFn fn, void* use
 }
 
 void scenario_memory() {
+    KV_ZONE("memory");
     u32 chunks = g_quick ? 64 : 256;
     Churn c{g_quick ? 500u : 2000u};
     run_memory_case("mem same-thread", chunks, 1, churn_same, &c, "allocs", (u64)chunks * c.per_chunk);
@@ -268,7 +281,25 @@ void scenario_memory() {
 }
 
 // ---- 5. the engine: ticks per second, one thread against many, hashes equal ----------
-struct EngineRun { f64 ms; u64 hash; u32 live; };
+constexpr u32 kTop = 8;
+struct EngineRun { f64 ms; u64 hash; u32 live; f64 top_ms[kTop]; const char* top[kTop]; f64 busy_ms, wait_ms; };
+
+// What the collector saw of the run: the top zones (work, not waits or containers) and
+// the workers' busy and waiting time.
+void breakdown(EngineRun& r) {
+    prof_collect();
+    Span<const ProfStat> st = prof_frame_stats();
+    u32 n = 0;
+    for (const ProfStat& s : st) {
+        if (n >= kTop) break;
+        if (s.wait || strcmp(s.name, "ticks") == 0 || strcmp(s.name, "tick") == 0 || strcmp(s.name, "level") == 0) continue;
+        r.top[n] = s.name; r.top_ms[n] = prof_ms(s.wall); ++n;
+    }
+    for (const ProfThreadStat& t : prof_thread_stats()) {
+        if (!t.name || strncmp(t.name, "worker", 6) != 0) continue;
+        r.busy_ms += prof_ms(t.busy); r.wait_ms += prof_ms(t.waiting);
+    }
+}
 
 void pool_and_memory_scenarios() {
     scenario_overhead();
@@ -297,12 +328,15 @@ EngineRun run_engine(u32 threads, u32 ticks, bool scenarios_inside) {
         if (g_window) frameloop_step(e, 0.0);
     }
     f64 dt = kTicksPerFrame / 60.0;
+    prof_collect(); // everything before the ticks is out of the way
+    KV_MARK_V("engine run", threads);
     f64 t0 = time_now();
     for (u32 t = 0; t < ticks; t += kTicksPerFrame) {
         if (g_window) frameloop_step(e, dt);
         else engine_frame(e, dt);
     }
     r.ms = ms_since(t0);
+    breakdown(r);
     r.hash = engine_hash_state(e);
     r.live = engine_table(e, "cpukiller.body")->live();
     engine_shutdown(e);
@@ -321,6 +355,17 @@ void scenario_engine() {
     report("engine", detail, one.ms, many.ms, note);
     if (one.hash != many.hash) KV_ERROR("cpukiller", "state hash differs between 1 and %u threads: %016llx vs %016llx",
                                         g_threads, (unsigned long long)one.hash, (unsigned long long)many.hash);
+    // Where the ticks went, from the profiler: the top zones of each run, and the workers'
+    // time split into busy and waiting.
+    printf("\nengine breakdown (%u ticks):\n", ticks);
+    printf("  %-32s %10s %10s\n", "zone", "1 thread", "all");
+    for (u32 i = 0; i < 5 && i < kTop && one.top[i]; ++i) {
+        f64 m = 0;
+        for (u32 k = 0; k < kTop; ++k) if (many.top[k] && strcmp(many.top[k], one.top[i]) == 0) m = many.top_ms[k];
+        printf("  %-32s %10.1f %10.1f  ms, summed over threads\n", one.top[i], one.top_ms[i], m);
+    }
+    printf("  %-32s %10s %10.1f  ms busy, %.1f ms waiting (%.0f%% of worker time)\n", "workers", "", many.busy_ms, many.wait_ms,
+           many.busy_ms + many.wait_ms > 0 ? 100.0 * many.wait_ms / (many.busy_ms + many.wait_ms) : 0.0);
 }
 
 } // namespace
@@ -333,9 +378,14 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--ticks") == 0 && i + 1 < argc) g_ticks = (u32)atoi(argv[++i]);
         else if (strcmp(argv[i], "--quick") == 0) g_quick = true;
         else if (strcmp(argv[i], "--window") == 0) g_window = true;
-        else { fprintf(stderr, "usage: %s [--threads N] [--bodies N] [--ticks N] [--quick] [--window]\n", argv[0]); return 2; }
+        else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) g_trace = argv[++i];
+        else { fprintf(stderr, "usage: %s [--threads N] [--bodies N] [--ticks N] [--quick] [--window] [--profile FILE]\n", argv[0]); return 2; }
     }
     if (g_threads < 1) g_threads = 1;
+    // The profiler is always on here: the breakdown reads it. A trace is written on request.
+    prof_enable(true);
+    prof_thread_name("main");
+    if (g_trace) prof_trace_open(g_trace);
     printf("cpukiller: %u threads (%u cpus)%s%s\n", g_threads, os_cpu_count(), g_quick ? ", quick" : "", g_window ? ", window" : "");
 
     if (g_window) {
@@ -357,6 +407,8 @@ int main(int argc, char** argv) {
         const Row& r = g_rows[i];
         printf("%-16s %-40s %10.2f %10.2f  %s\n", r.name, r.detail, r.serial_ms, r.parallel_ms, r.note);
     }
+    prof_collect();
+    prof_shutdown();
     MemStats s = mem_stats();
     printf("\nmemory at exit: %llu live allocations, %llu bytes, %llu KB committed\n",
            (unsigned long long)s.live_allocs, (unsigned long long)s.live_bytes, (unsigned long long)s.committed_bytes / 1024);

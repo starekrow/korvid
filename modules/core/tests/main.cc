@@ -18,6 +18,7 @@ void test_trigger(kv::TestCtx&);
 void test_job(kv::TestCtx&);
 void test_parallel(kv::TestCtx&);
 void test_heap(kv::TestCtx&);
+void test_profile(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
@@ -38,6 +39,7 @@ int main() {
     test_job(c);
     test_parallel(c);
     test_heap(c);
+    test_profile(c);
     kv::names_shutdown();
     kv::mem_shutdown(); // the leak report, if anything is left
     return kv::test_report(c, "core_tests");

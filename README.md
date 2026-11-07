@@ -43,7 +43,10 @@ boundary. Handlers have read/write sets and are ordered like systems. A type fla
 declare `.state = StateUse::None`; a system that talks to the OS, the GPU or a module's own
 pools declares `.main_thread = true` and runs on the driving thread); `parallel_for(ctx, rows, grain, fn)` splits one system's
 rows over the pool, each chunk emitting and spawning into buffers merged in chunk order, so
-hashes agree across thread counts. `ctx.schedule(event, tick)`
+hashes agree across thread counts. The profiler (`core/profile.h`, docs/design/profiler.md)
+records zones, waits, marks and counters into a ring per thread; every system, handler,
+boundary, chunk and frame is zoned for free, `--prof-report` logs the top zones with the fps
+line, `--profile FILE` writes a Chrome trace, and `--hitch-ms` dumps the hitching frame's tree. `ctx.schedule(event, tick)`
 files an event in the timer wheel for the first boundary of that tick. Triggers declare
 an edge on one field of a `prev` component (`Changed`, `CrossedBelow`, `CrossedAbove`);
 the engine evaluates them at the end of every tick and emits `StateEdge` for the next.
@@ -107,6 +110,7 @@ hand-written stand-in until kormake exists.
     build/bin/example_stones          # stones in a box, written immediate-mode style
     build/bin/example_cpukiller       # the stress table (--threads N, --bodies N, --ticks N, --quick)
     build/bin/example_cpukiller --window  # the same with the window, renderer and swapchain alive
+    build/bin/example_cpukiller --profile t.json  # plus a trace of the whole run
     build/bin/example_testbed --run-seconds 2   # exits by itself (smoke test)
     build/bin/example_testbed --no-validation   # debug builds enable the validation layers by default
     build/bin/example_testbed --no-vsync        # mailbox/immediate present instead of fifo
@@ -115,6 +119,8 @@ hand-written stand-in until kormake exists.
     build/bin/example_testbed --hash            # log the sim state hash per tick (--hash-systems: per system)
     build/bin/example_testbed --trace-events    # print every delivered event with its emitter (dev builds)
     build/bin/example_testbed --threads 1       # serial; the default uses every core
+    build/bin/example_testbed --prof-report      # the top zones per frame with every fps line
+    build/bin/example_testbed --profile t.json   # a trace for Perfetto (ui.perfetto.dev) or chrome://tracing
 
 Needs g++ (or clang++), ninja, libsdl3-dev, libvulkan-dev, zlib1g-dev, slang-compiler,
 and for debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached

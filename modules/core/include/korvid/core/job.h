@@ -15,11 +15,12 @@ namespace kv {
 typedef void (*JobFn)(u32 chunk, u32 begin, u32 end, void* user);
 
 struct JobBatch {
-    JobFn fn;
-    void* user;
-    u32   count, grain, chunks;
-    u16   owner;      // mem owner (module index + 1) for attribution inside the chunks
-    u32   done;       // atomic: chunks finished
+    JobFn       fn;
+    void*       user;
+    u32         count, grain, chunks;
+    u16         owner;      // mem owner (module index + 1) for attribution inside the chunks
+    u32         done;       // atomic: chunks finished
+    const char* name;       // the profiler's name for the chunks
 };
 
 // Starts `workers` threads (0 is fine: every batch then runs on the caller). Idempotent
@@ -30,7 +31,7 @@ u32  jobs_worker_count();
 
 // Runs fn over [0, count) in chunks of grain and returns when every chunk has run. The
 // caller takes chunks too. Chunk i covers [i * grain, min(count, (i + 1) * grain)).
-void jobs_run(u32 count, u32 grain, JobFn fn, void* user);
+void jobs_run(u32 count, u32 grain, JobFn fn, void* user, const char* name = "job");
 // How many chunks jobs_run would make.
 inline u32 jobs_chunks(u32 count, u32 grain) { return grain ? (count + grain - 1) / grain : 0; }
 

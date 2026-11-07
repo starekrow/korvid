@@ -3,6 +3,7 @@
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/module.h"
+#include "korvid/core/profile.h"
 #include <string.h>
 
 namespace kv {
@@ -35,8 +36,11 @@ void run_unit(TickContext ctx, EventBus& events, ScheduledSystem& s, const void*
     ctx.commands   = &s.commands;
     u16 was = mem_owner();
     mem_set_owner((u16)(s.module->index + 1));
-    if (s.desc) s.desc->fn(ctx);
-    else s.handler->fn(ctx, events_data, event_count);
+    {
+        KV_ZONE(s.name());
+        if (s.desc) s.desc->fn(ctx);
+        else s.handler->fn(ctx, events_data, event_count);
+    }
     mem_set_owner(was);
 }
 
@@ -55,8 +59,14 @@ void level_job(u32 chunk, u32, u32, void* user) {
 // delivered and the handlers with new events run, in waves, each wave delivering what
 // the last emitted, up to the cap. Leftovers wait for the next boundary.
 void boundary(Engine& engine, EventBus& events, TickContext& ctx, u64 tick, bool tick_start) {
-    if (tick_start) engine.timers.fire(tick, events);
+    KV_ZONE("boundary");
+    if (tick_start) {
+        u32 fired = engine.timers.fired;
+        engine.timers.fire(tick, events);
+        if (engine.timers.fired != fired) KV_MARK_V("timers fired", engine.timers.fired - fired);
+    }
     events.deliver(tick_start);
+    if (events.dropped_last) KV_MARK_V("stale events dropped", events.dropped_last);
     engine_trace_delivery(engine, tick, 0);
     for (u32 wave = 0;; ++wave) {
         ctx.wave = wave;
@@ -66,10 +76,14 @@ void boundary(Engine& engine, EventBus& events, TickContext& ctx, u64 tick, bool
             if (!n) continue;
             run_unit(ctx, events, h, events.new_data(type), n);
         }
-        engine_apply_commands(engine);
+        {
+            KV_ZONE("apply commands");
+            engine_apply_commands(engine);
+        }
         if (events.pending_now() == 0) break;
-        if (wave + 1 >= engine.wave_cap) { ++engine.waves_capped; break; }
+        if (wave + 1 >= engine.wave_cap) { ++engine.waves_capped; KV_MARK_V("wave capped", events.pending_now()); break; }
         events.deliver(false);
+        if (events.dropped_last) KV_MARK_V("stale events dropped", events.dropped_last);
         engine_trace_delivery(engine, tick, wave + 1);
     }
     ctx.wave = 0;
@@ -85,10 +99,14 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
     ctx.tick   = tick;
     ctx.state  = nullptr;
     ctx.state_type = nullptr;
+    if (g_prof_on) prof_tick(tick);
+    KV_ZONE("tick");
     for (u32 p = 0; p < (u32)Phase::Count; ++p) {
         boundary(engine, events, ctx, tick, p == 0);
-        if ((Phase)p == Phase::PreSim)
+        if ((Phase)p == Phase::PreSim) {
+            KV_ZONE("prev copy");
             for (Table& t : engine.tables) t.begin_tick(); // current becomes previous, before anything moves
+        }
         // Level by level: the systems of a level have no path between them and run at
         // once on the pool; each level waits for the last.
         Array<ScheduledSystem>& phase = systems[p];
@@ -112,15 +130,22 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
                     else pooled.push(&phase[k]);
                 }
                 if (pooled.len == 1) run_unit(ctx, events, *pooled[0], nullptr, 0);
-                else if (pooled.len) { LevelJob lj{&ctx, &events, pooled.data}; jobs_run(pooled.len, 1, level_job, &lj); }
+                else if (pooled.len) { LevelJob lj{&ctx, &events, pooled.data}; jobs_run(pooled.len, 1, level_job, &lj, "level"); }
             }
             i = j;
         }
-        engine_apply_commands(engine); // spawns and destroys issued this phase take effect
+        {
+            KV_ZONE("apply commands");
+            engine_apply_commands(engine); // spawns and destroys issued this phase take effect
+        }
     }
-    engine_fire_triggers(engine, tick); // edges this tick, as pending StateEdge events for the next
+    {
+        KV_ZONE("triggers");
+        engine_fire_triggers(engine, tick); // edges this tick, as pending StateEdge events for the next
+    }
     events.end_tick();
     if (engine.hash_ticks || engine.hash_systems) {
+        KV_ZONE("hash");
         engine.last_hash = engine_hash_state(engine);
         KV_INFO("hash", "tick %llu %016llx", (unsigned long long)tick, (unsigned long long)engine.last_hash);
     }
@@ -297,6 +322,8 @@ u32 ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64
     u32 ticket = ctx.system ? unit_ticket(ctx, &((ScheduledSystem*)ctx.system)->timer_tickets) : 0;
     return ctx.engine->timers.schedule(tick, type_id, size, event, system_name(ctx), ticket);
 }
+
+const char* ctx_unit_name(TickContext& ctx) { return ctx.system ? ctx.system->name() : "parallel_for"; }
 
 ParallelBuffers ctx_parallel_begin(TickContext& ctx, u32 chunks) {
     ParallelBuffers pb;

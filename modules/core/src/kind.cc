@@ -1,5 +1,6 @@
 #include "korvid/core/kind.h"
 #include "korvid/core/hash.h"
+#include "korvid/core/profile.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -111,6 +112,7 @@ Handle Table::spawn() {
     slots.owner = thread_id(); // the schedule made this thread the writer for now
     slots.tag   = tag;
     if (slots.live >= desc->capacity) {
+        KV_MARK("kind full");
         KV_ERROR("kind", "'%s' is full (%u entities)", desc->name, desc->capacity);
         return Handle{};
     }

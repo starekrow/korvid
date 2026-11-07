@@ -4,6 +4,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/name.h"
+#include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/events.h"
 #include "korvid/platform/module.h"
@@ -25,6 +26,8 @@ bool            g_hash_systems = false;
 bool            g_trace_events = false;
 u64             g_flags_given  = 0; // bit i: config.flags[i] was on the command line
 u32             g_threads      = 0; // 0: every core
+const char*     g_trace_path   = nullptr; // --profile FILE
+bool            g_prof_report  = false;   // --prof-report: the top zones with the fps line
 
 struct FrameLoopState {
     FrameLoopConfig config;
@@ -65,10 +68,13 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--hash-systems") == 0) g_hash_systems = true;
         else if (strcmp(argv[i], "--trace-events") == 0) g_trace_events = true;
         else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) g_threads = (u32)atoi(argv[++i]);
+        else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) g_trace_path = argv[++i];
+        else if (strcmp(argv[i], "--prof-report") == 0) g_prof_report = true;
         else if (u32 f = game_flag(cfg, argv[i])) g_flags_given |= (u64)1 << (f - 1);
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
-                                  "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N]", argv[0]);
+                                  "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
+                                  "[--profile FILE] [--prof-report]", argv[0]);
             return false;
         }
     }
@@ -154,24 +160,34 @@ void run(Engine& engine, FrameLoopState& s) {
     f64 prev  = start;
     f64 next_report = start + (f64)s.config.report_every_seconds;
     u32 frames_in_window = 0;
+    bool collecting = prof_enabled();
 
     while (!engine.quit_requested) {
         f64 now = time_now();
         f64 dt  = now - prev;
         prev = now;
 
-        platform_pump(engine);
+        if (collecting) prof_frame(engine.frame_count);
+        {
+            KV_ZONE("pump");
+            platform_pump(engine);
+        }
         f64 t_pumped = time_now();
         engine_frame(engine, dt);
         f64 t_ticked = time_now();
-        render_frame(engine, s);
+        {
+            KV_ZONE("render");
+            render_frame(engine, s);
+        }
         f64 t_rendered = time_now();
         ++frames_in_window;
+        if (collecting) prof_collect(); // the frame's records: summary, trace, and the kept frame
 
         if (g_hitch_ms > 0.0 && (t_rendered - now) * 1e3 >= g_hitch_ms) {
             KV_WARN("frameloop", "[%11.3f] hitch ended: pump %.1f ms, ticks %.1f ms, render %.1f ms",
                     wayland_debug_stamp(), (t_pumped - now) * 1e3, (t_ticked - t_pumped) * 1e3,
                     (t_rendered - t_ticked) * 1e3);
+            if (collecting) prof_log_frame(prof_ticks_from_ms(0.1)); // the whole frame's tree
         }
         if (s.config.report_every_seconds && now >= next_report) {
             const MemSample& mem = mem_last_sample();
@@ -180,6 +196,7 @@ void run(Engine& engine, FrameLoopState& s) {
                     renderer_sprite_count(s.renderer), s.deltas_last_frame, s.window->width(), s.window->height(),
                     s.window->focused() ? "focused" : "unfocused",
                     (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024));
+            if (g_prof_report) prof_log_summary(10);
             frames_in_window = 0;
             next_report += (f64)s.config.report_every_seconds;
         }
@@ -222,6 +239,14 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
     g_config = config;
     if (!parse_options(argc, argv, g_config)) return 2;
 
+    // The profiler records when something will read it: a trace, the report, or a hitch dump.
+    if (g_trace_path || g_prof_report || g_hitch_ms > 0.0) {
+        if (!KV_PROFILE) KV_WARN("frameloop", "the profiler exists in dev builds only");
+        prof_enable(true);
+        prof_thread_name("main");
+        if (g_hitch_ms > 0.0) prof_keep_frame(true);
+        if (g_trace_path) prof_trace_open(g_trace_path);
+    }
     Engine engine;
     engine.hash_ticks   = g_hash_ticks;
     engine.hash_systems = g_hash_systems;
@@ -236,6 +261,8 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
     FrameLoopState* s = engine_module_state_as<FrameLoopState>(engine, "frameloop");
     if (s) run(engine, *s);
     engine_shutdown(engine);
+    if (prof_enabled()) { prof_collect(); if (g_prof_report) prof_log_summary(10); }
+    prof_shutdown();
     names_shutdown();
     mem_shutdown();
     return 0;

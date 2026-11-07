@@ -8,7 +8,9 @@
 // --no-validation, --no-vsync, --borderless, --hitch-ms N, --hash (log the state hash
 // after every tick), --hash-systems (and after every system), --trace-events (print every
 // delivered event with its emitter; dev builds), --threads N (main thread included; 1 is
-// serial; the default is every core).
+// serial; the default is every core), --profile FILE (a Chrome trace of every zone, mark
+// and counter), --prof-report (the top zones with every fps line); --hitch-ms also dumps
+// the hitching frame's zone tree.
 #pragma once
 #include "korvid/core/engine.h"
 #include "korvid/math/color.h"

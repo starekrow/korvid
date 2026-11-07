@@ -3,8 +3,10 @@
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
+#include "korvid/core/profile.h"
 #include "korvid/core/thread.h"
 #include <pthread.h>
+#include <stdio.h>
 
 namespace kv {
 
@@ -38,7 +40,10 @@ void run_task(const Task& t) {
     u32 end   = begin + b.grain < b.count ? begin + b.grain : b.count;
     u16 was = mem_owner();
     mem_set_owner(b.owner);
-    b.fn(t.chunk, begin, end, b.user);
+    {
+        KV_ZONE(b.name);
+        b.fn(t.chunk, begin, end, b.user);
+    }
     mem_set_owner(was);
     __atomic_add_fetch(&b.done, 1, __ATOMIC_ACQ_REL);
 }
@@ -52,13 +57,24 @@ bool pop(Task* out) {
     return true;
 }
 
-void* worker_main(void*) {
+void* worker_main(void* arg) {
     Pool& p = g_pool;
     thread_id();
+#if KV_PROFILE
+    char name[32];
+    snprintf(name, sizeof name, "worker %u", (u32)(usize)arg);
+    prof_thread_name(name);
+#else
+    (void)arg;
+#endif
     for (;;) {
         Task t;
         pthread_mutex_lock(&p.mu);
-        while (!p.quit && !pop(&t)) { bump(&g_stats.worker_waits); pthread_cond_wait(&p.cv, &p.mu); }
+        while (!p.quit && !pop(&t)) {
+            bump(&g_stats.worker_waits);
+            KV_ZONE_WAIT("idle");
+            pthread_cond_wait(&p.cv, &p.mu);
+        }
         if (p.quit) { pthread_mutex_unlock(&p.mu); break; }
         pthread_mutex_unlock(&p.mu);
         if (t_depth == 0) mem_scratch_reset(); // job lifetime
@@ -87,7 +103,7 @@ bool jobs_init(u32 workers) {
     if (workers) {
         p.threads = alloc_items<pthread_t>(mem_general(), workers);
         for (u32 i = 0; i < workers; ++i) {
-            if (pthread_create(&p.threads[i], nullptr, worker_main, nullptr) != 0) {
+            if (pthread_create(&p.threads[i], nullptr, worker_main, (void*)(usize)(i + 1)) != 0) {
                 KV_ERROR("jobs", "could not start worker %u of %u", i + 1, workers);
                 jobs_shutdown();
                 return false;
@@ -132,10 +148,10 @@ JobStats jobs_stats() {
 
 void jobs_stats_reset() { g_stats = JobStats{}; }
 
-void jobs_run(u32 count, u32 grain, JobFn fn, void* user) {
+void jobs_run(u32 count, u32 grain, JobFn fn, void* user, const char* name) {
     u32 chunks = jobs_chunks(count, grain);
     if (chunks == 0) return;
-    JobBatch b{fn, user, count, grain, chunks, mem_owner(), 0};
+    JobBatch b{fn, user, count, grain, chunks, mem_owner(), 0, name};
     Pool& p = g_pool;
     if (!p.up || p.workers == 0 || chunks == 1) {
         bump(&g_stats.inline_batches);
@@ -157,7 +173,10 @@ void jobs_run(u32 count, u32 grain, JobFn fn, void* user) {
         if (!got) {
             if (__atomic_load_n(&b.done, __ATOMIC_ACQUIRE) == chunks) { pthread_mutex_unlock(&p.mu); break; }
             bump(&g_stats.helper_waits);
-            pthread_cond_wait(&p.cv, &p.mu);
+            {
+                KV_ZONE_WAIT("batch wait");
+                pthread_cond_wait(&p.cv, &p.mu);
+            }
             pthread_mutex_unlock(&p.mu);
             continue;
         }

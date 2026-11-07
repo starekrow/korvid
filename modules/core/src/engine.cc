@@ -4,6 +4,7 @@
 #include "korvid/core/arena.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/job.h"
+#include "korvid/core/profile.h"
 #include "korvid/core/thread.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
@@ -712,6 +713,7 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineC
                 break;
             }
             inst.started = true;
+            KV_MARK(m.name);
             KV_INFO("engine", "module '%s' up", m.name);
         }
         mem_set_owner(0);
@@ -769,8 +771,14 @@ void engine_shutdown(Engine& e) {
 }
 
 u32 engine_frame(Engine& e, f64 frame_dt) {
+    KV_ZONE("ticks");
     mem_scratch_reset(); // frame lifetime: everything the last frame put in scratch is gone
     mem_sample(e.frame_count); // last frame's memory, for budgets and anyone reading pressure
+    if (g_prof_on) {
+        const MemSample& m = mem_last_sample();
+        prof_counter("mem live KB", m.live_bytes / 1024);
+        prof_counter("mem committed KB", m.committed_bytes / 1024);
+    }
     ++e.frame_count;
     u64 first_tick = e.clock.tick_count;
     u32 ticks = e.clock.advance(frame_dt);

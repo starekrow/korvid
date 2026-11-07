@@ -1,6 +1,7 @@
 #include "korvid/core/memory.h"
 #include "korvid/core/log.h"
 #include "korvid/core/os_memory.h"
+#include "korvid/core/profile.h"
 #include "korvid/core/thread.h"
 #include <stdlib.h>
 #include <string.h>
@@ -251,6 +252,7 @@ bool heap_admit(MemTag tag, usize bytes) {
     u64 now = __atomic_add_fetch(&g_heap_used[h], (u64)bytes, __ATOMIC_RELAXED);
     if (now <= g_heap_hard[h]) return true;
     __atomic_sub_fetch(&g_heap_used[h], (u64)bytes, __ATOMIC_RELAXED);
+    KV_MARK_V("heap refused", bytes);
     if (__atomic_exchange_n(&g_heap_failed[h], 1u, __ATOMIC_RELAXED) == 0)
         KV_ERROR("mem", "heap '%s' hard limit %llu bytes: module '%s' category '%s' asked for %llu more with %llu in use",
                  g_heaps_reg.names[h], (unsigned long long)g_heap_hard[h], module_name_of(tag.module),

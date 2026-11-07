@@ -135,6 +135,7 @@ struct ParallelBuffers {
     u32            chunks;
 };
 ParallelBuffers ctx_parallel_begin(TickContext& ctx, u32 chunks);
+const char*     ctx_unit_name(TickContext& ctx); // the running unit's name, for the profiler
 void            ctx_parallel_end(TickContext& ctx, ParallelBuffers& pb);
 
 // One kind's rows for a view: the live mask and every column the view named.
@@ -317,7 +318,7 @@ void parallel_for(TickContext& ctx, u32 count, u32 grain, F fn) {
         Closure& c = *(Closure*)user;
         ChunkContext cc{c.ctx, &c.pb->writers[chunk], &c.pb->commands[chunk], chunk};
         (*c.fn)(cc, begin, end);
-    }, &cl);
+    }, &cl, ctx_unit_name(ctx));
     ctx_parallel_end(ctx, pb);
 }
 
@@ -336,7 +337,7 @@ T parallel_reduce(TickContext& ctx, u32 count, u32 grain, T init, F fn, R combin
         Closure& c = *(Closure*)user;
         ChunkContext cc{c.ctx, &c.pb->writers[chunk], &c.pb->commands[chunk], chunk};
         c.results[chunk] = (*c.fn)(cc, begin, end);
-    }, &cl);
+    }, &cl, ctx_unit_name(ctx));
     ctx_parallel_end(ctx, pb);
     T acc = init;
     for (u32 i = 0; i < chunks; ++i) acc = combine(acc, results[i]);
