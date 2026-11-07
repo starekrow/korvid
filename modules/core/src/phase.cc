@@ -40,11 +40,18 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
             ctx.system     = &s;
             mem_set_owner((u16)(s.module->index + 1)); // attribution follows the schedule
             s.desc->fn(ctx);
+            if (engine.hash_systems)
+                KV_INFO("hash", "tick %llu after %-24s %016llx", (unsigned long long)tick, s.desc->name,
+                        (unsigned long long)engine_hash_state(engine));
         }
         mem_set_owner(0);
         engine_apply_commands(engine); // spawns and destroys issued this phase take effect
     }
     events.end_tick();
+    if (engine.hash_ticks || engine.hash_systems) {
+        engine.last_hash = engine_hash_state(engine);
+        KV_INFO("hash", "tick %llu %016llx", (unsigned long long)tick, (unsigned long long)engine.last_hash);
+    }
 }
 
 void PhaseList::free() {

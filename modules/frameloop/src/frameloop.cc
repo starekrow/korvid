@@ -19,7 +19,9 @@ namespace {
 
 // Set by frameloop_main before engine_init; read by startup. Plain static storage.
 FrameLoopConfig g_config;
-f64             g_hitch_ms = 0.0;
+f64             g_hitch_ms     = 0.0;
+bool            g_hash_ticks   = false;
+bool            g_hash_systems = false;
 
 struct FrameLoopState {
     FrameLoopConfig config;
@@ -49,9 +51,11 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--no-vsync") == 0) cfg.vsync = false;
         else if (strcmp(argv[i], "--borderless") == 0) cfg.borderless = true;
         else if (strcmp(argv[i], "--hitch-ms") == 0 && i + 1 < argc) g_hitch_ms = atof(argv[++i]);
+        else if (strcmp(argv[i], "--hash") == 0) g_hash_ticks = true;
+        else if (strcmp(argv[i], "--hash-systems") == 0) g_hash_systems = true;
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
-                                  "[--no-vsync] [--borderless] [--hitch-ms N]", argv[0]);
+                                  "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems]", argv[0]);
             return false;
         }
     }
@@ -193,6 +197,8 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
     if (!parse_options(argc, argv, g_config)) return 2;
 
     Engine engine;
+    engine.hash_ticks   = g_hash_ticks;
+    engine.hash_systems = g_hash_systems;
     if (!engine_init(engine, kv_module_list())) {
         names_shutdown();
         mem_shutdown();

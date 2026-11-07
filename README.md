@@ -18,11 +18,16 @@ for the table a system holds the write on, `read<T>`/`write<T>` for one column b
 `view<A, const B>()` for every kind with those components (constness is the access mode),
 and `spawn_later`/`destroy` commands applied at the phase boundary. In dev builds an
 access the system did not declare asserts with the system and resource named. Nothing registers itself and nothing runs before main;
-the build-generated list (`hello/src/modules.gen.cc` for now) is the only input. Order is
-list order, then declaration order: modules start in list order and stop in reverse,
-event ids are assigned in that order, and within each tick phase (input, presim, sim,
-postsim) systems run in module order then declaration order. `engine_init` rejects
-duplicate names and unknown resource references and logs the schedule it built.
+the build-generated list (`hello/src/modules.gen.cc` for now) is the only input. Modules
+start in list order and stop in reverse, and event, component and kind ids are assigned in
+list then declaration order. Within each tick phase (input, presim, sim, postsim) the
+order is derived from the systems' read/write sets: a reader runs after every writer of
+what it reads, `after`/`before` add edges by hand, two writers of one resource with no
+path between them or a cycle is a registration error naming the systems, and ties break
+by module then declaration order. A system that reads a cosmetic column may not write a
+sim one. `engine_init` logs the order and the reason for every edge. `--hash` logs a hash
+of every sim column of every live entity after each tick, `--hash-systems` after each
+system, to locate where two runs diverge.
 
 Modules follow the kormake directory convention (`module.lua`, `include/korvid/<name>/`,
 `src/`, `shaders/`, `assets/`, `tests/`). A module's `assets/` are copied to
@@ -66,6 +71,7 @@ hand-written stand-in until kormake exists.
     build/bin/hello --no-vsync        # mailbox/immediate present instead of fifo
     build/bin/hello --borderless      # no libdecor frame (see note below)
     build/bin/hello --hitch-ms 50     # log where any frame over 50 ms spent its time
+    build/bin/hello --hash            # log the sim state hash per tick (--hash-systems: per system)
 
 Needs g++ (or clang++), ninja, libsdl3-dev, libvulkan-dev, zlib1g-dev, slang-compiler,
 and for debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached

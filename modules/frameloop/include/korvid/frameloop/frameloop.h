@@ -5,7 +5,8 @@
 // calls engine_request_quit.
 //
 // Command line, overriding the config: --run-seconds N, --quiet, --validation,
-// --no-validation, --no-vsync, --borderless, --hitch-ms N.
+// --no-validation, --no-vsync, --borderless, --hitch-ms N, --hash (log the state hash
+// after every tick), --hash-systems (and after every system).
 #pragma once
 #include "korvid/core/types.h"
 #include "korvid/math/color.h"

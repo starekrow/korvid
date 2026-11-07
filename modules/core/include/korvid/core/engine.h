@@ -42,6 +42,9 @@ struct Engine {
     u32                   event_type_count = 0;
     u64                   frame_count      = 0;
     bool                  quit_requested   = false;
+    bool                  hash_ticks       = false; // log the state hash after every tick
+    bool                  hash_systems     = false; // and after every system, to locate drift
+    u64                   last_hash        = 0;     // the state hash after the last tick, when hashing
 };
 
 // Registers and starts every module. On any failure, everything already started is
@@ -72,6 +75,11 @@ u32                  engine_component_id(const Engine& e, const char* name);
 const ComponentDesc* engine_component(const Engine& e, u32 id);
 template <class T>
 const ComponentDesc* engine_component(const Engine& e) { return engine_component(e, ComponentType<T>::id); }
+
+// The phase a system was declared in; Phase::Count for an unknown name.
+Phase engine_system_phase(const Engine& e, const char* name);
+// The hash of every sim column of every live entity, fixed across runs and platforms.
+u64   engine_hash_state(const Engine& e);
 
 // Entity kinds, by name or id. Null for unknown.
 u32    engine_kind_id(const Engine& e, const char* name);

@@ -110,6 +110,9 @@ struct Table {
     // "Transform2{...} Sprite{...}" for a live entity; the slot's state otherwise.
     int describe(Handle h, char* out, usize cap) const;
 
+    // Every sim column of every live row in slot order, each row with its handle.
+    u64 hash() const;
+
 private:
     template <class T>
     void set_row(Handle h, const T& v) {
@@ -122,5 +125,7 @@ private:
     bool ensure_rows(u32 n);
     u8*  row(const Column& c, u32 i) const { return c.data + (usize)i * c.stride; }
 };
+
+inline u64 table_hash(const Table& t) { return t.hash(); }
 
 } // namespace kv

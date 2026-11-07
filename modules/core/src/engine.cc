@@ -2,6 +2,7 @@
 // ids, a schedule and started instances. Every check here names what clashed.
 #include "korvid/core/engine.h"
 #include "korvid/core/arena.h"
+#include "korvid/core/hash.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include <stdio.h>
@@ -209,49 +210,240 @@ bool resolve_resource_refs(const Engine& e, const ModuleDesc& m, const SystemDes
     return true;
 }
 
-bool overlaps(Span<const char* const> a, Span<const char* const> b) {
-    for (const char* x : a)
-        for (const char* y : b)
-            if (names_equal(x, y)) return true;
+// ---- the schedule -----------------------------------------------------------------
+// Within a phase the systems form a DAG: a reader runs after every writer of what it
+// reads, `after` and `before` add edges by hand, and two writers of one resource with no
+// path between them is an error, as is a cycle. Ties break by module order then
+// declaration order, so the order is deterministic and the log shows why.
+
+struct Edge {
+    u32 from, to;
+    u32 resource; // 0: declared with after/before
+};
+
+struct Pending {
+    ScheduledSystem sys;
+    Array<u32>      reads_eff;  // reads plus, for a kind, every column of it
+    Array<u32>      writes_eff;
+    u32             rank;       // module order then declaration order
+};
+
+const char* resource_name(const Engine& e, u32 id) { return id && id <= e.resources.len ? e.resources[id - 1].name : "?"; }
+
+bool contains(const Array<u32>& ids, u32 id) {
+    for (u32 x : ids) if (x == id) return true;
     return false;
 }
 
-// Schedule: for each phase, module order, then declaration order.
+// A kind resource stands for the kind and all of its columns.
+void expand(const Engine& e, const Array<u32>& ids, Array<u32>& out) {
+    for (u32 id : ids) {
+        if (!contains(out, id)) out.push(id);
+        for (const Table& t : e.tables)
+            if (t.resource == id)
+                for (const Column& c : t.columns)
+                    if (!contains(out, c.resource)) out.push(c.resource);
+    }
+}
+
+u32 first_common(const Array<u32>& a, const Array<u32>& b) {
+    for (u32 x : a) if (contains(b, x)) return x;
+    return 0;
+}
+
+const Column* column_of(const Engine& e, u32 resource) {
+    for (const Table& t : e.tables)
+        for (const Column& c : t.columns)
+            if (c.resource == resource) return &c;
+    return nullptr;
+}
+
+// Sim state flows to presentation, never back: a system that reads a cosmetic column may
+// not write a sim one.
+bool check_flow(const Engine& e, const Pending& p) {
+    for (u32 r : p.reads_eff) {
+        const Column* rc = column_of(e, r);
+        if (!rc || rc->desc->is_sim()) continue;
+        for (u32 w : p.writes_eff) {
+            const Column* wc = column_of(e, w);
+            if (wc && wc->desc->is_sim()) {
+                KV_ERROR("engine", "system '%s' reads cosmetic '%s' and writes sim '%s': data flows from sim to presentation, never back",
+                         p.sys.desc->name, rc->resource_name, wc->resource_name);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool reaches(const Array<Edge>& edges, u32 from, u32 to, Array<u8>& seen) {
+    if (from == to) return true;
+    if (seen[from]) return false;
+    seen[from] = 1;
+    for (const Edge& ed : edges)
+        if (ed.from == from && reaches(edges, ed.to, to, seen)) return true;
+    return false;
+}
+
+bool reaches(const Array<Edge>& edges, u32 n, u32 from, u32 to) {
+    Array<u8> seen = array_in<u8>(mem_scratch());
+    seen.resize_fill(n, 0);
+    bool r = reaches(edges, from, to, seen);
+    seen.free();
+    return r;
+}
+
+u32 find_pending(const Array<Pending>& pend, const char* name) {
+    for (u32 i = 0; i < pend.len; ++i)
+        if (names_equal(pend[i].sys.desc->name, name)) return i + 1;
+    return 0;
+}
+
+// Walks edges from `start` among the unplaced systems until a system repeats, and prints
+// the loop so the message names the path.
+void report_cycle(const Array<Pending>& pend, const Array<Edge>& edges, const Array<u8>& placed, u32 start) {
+    Array<u32> path = array_in<u32>(mem_scratch());
+    u32 at = start;
+    for (;;) {
+        for (u32 x : path) if (x == at) goto found;
+        path.push(at);
+        bool stepped = false;
+        for (const Edge& ed : edges)
+            if (ed.to == at && !placed[ed.from]) { at = ed.from; stepped = true; break; }
+        if (!stepped) break;
+    }
+found:
+    char line[1024];
+    u32 n = 0;
+    for (u32 i = path.len; i-- > 0;) {
+        int k = snprintf(line + n, sizeof line - n, "%s%s", n ? " -> " : "", pend[path[i]].sys.desc->name);
+        if (k < 0 || n + (u32)k >= sizeof line) break;
+        n += (u32)k;
+    }
+    snprintf(line + n, sizeof line - n, " -> %s", pend[at].sys.desc->name);
+    KV_ERROR("engine", "systems form a cycle in phase '%s': %s", phase_name(pend[start].sys.desc->phase), line);
+    path.free();
+}
+
+void free_pending(Array<Pending>& pend) {
+    for (Pending& p : pend) { p.sys.reads.free(); p.sys.writes.free(); p.reads_eff.free(); p.writes_eff.free(); }
+    pend.free();
+}
+
+// Orders one phase's systems into e.phases. Takes ownership of the pending systems' arrays.
+bool order_phase(Engine& e, Array<Pending>& pend, Phase phase) {
+    Array<Edge> edges = array_in<Edge>(mem_scratch());
+    u32 n = pend.len;
+
+    // Readers after writers; a pair writing the same thing is remembered for the check below.
+    for (u32 i = 0; i < n; ++i)
+        for (u32 j = 0; j < n; ++j) {
+            if (i == j) continue;
+            if (u32 r = first_common(pend[i].writes_eff, pend[j].reads_eff)) edges.push(Edge{i, j, r});
+        }
+    // Declared order.
+    for (u32 i = 0; i < n; ++i) {
+        const SystemDesc& s = *pend[i].sys.desc;
+        for (const char* other : s.after) {
+            u32 j = find_pending(pend, other);
+            if (!j) {
+                if (engine_system_phase(e, other) == Phase::Count) { KV_ERROR("engine", "system '%s' is after unknown system '%s'", s.name, other); edges.free(); return false; }
+                if ((u32)engine_system_phase(e, other) > (u32)phase) { KV_ERROR("engine", "system '%s' (phase %s) cannot run after '%s', which is in a later phase", s.name, phase_name(phase), other); edges.free(); return false; }
+                continue; // an earlier phase: already true
+            }
+            edges.push(Edge{j - 1, i, 0});
+        }
+        for (const char* other : s.before) {
+            u32 j = find_pending(pend, other);
+            if (!j) {
+                if (engine_system_phase(e, other) == Phase::Count) { KV_ERROR("engine", "system '%s' is before unknown system '%s'", s.name, other); edges.free(); return false; }
+                if ((u32)engine_system_phase(e, other) < (u32)phase) { KV_ERROR("engine", "system '%s' (phase %s) cannot run before '%s', which is in an earlier phase", s.name, phase_name(phase), other); edges.free(); return false; }
+                continue;
+            }
+            edges.push(Edge{i, j - 1, 0});
+        }
+    }
+    // Two writers of one resource need a path between them, either way round.
+    for (u32 i = 0; i < n; ++i)
+        for (u32 j = i + 1; j < n; ++j) {
+            u32 r = first_common(pend[i].writes_eff, pend[j].writes_eff);
+            if (!r) continue;
+            if (reaches(edges, n, i, j) || reaches(edges, n, j, i)) continue;
+            KV_ERROR("engine", "systems '%s' and '%s' both write '%s' in phase '%s' with no order between them: add `after` or `before`",
+                     pend[i].sys.desc->name, pend[j].sys.desc->name, resource_name(e, r), phase_name(phase));
+            edges.free();
+            return false;
+        }
+
+    // Topological order, lowest rank first among the ready.
+    Array<u8> placed = array_in<u8>(mem_scratch());
+    placed.resize_fill(n, 0);
+    Array<ScheduledSystem>& out = e.phases.systems[(u32)phase];
+    for (u32 done = 0; done < n; ++done) {
+        u32 pick = n;
+        for (u32 i = 0; i < n; ++i) {
+            if (placed[i]) continue;
+            bool ready = true;
+            for (const Edge& ed : edges) if (ed.to == i && !placed[ed.from]) { ready = false; break; }
+            if (ready && (pick == n || pend[i].rank < pend[pick].rank)) pick = i;
+        }
+        if (pick == n) {
+            for (u32 i = 0; i < n; ++i) if (!placed[i]) { report_cycle(pend, edges, placed, i); break; }
+            placed.free(); edges.free();
+            return false;
+        }
+        placed[pick] = 1;
+        out.push(pend[pick].sys);
+        pend[pick].sys.reads = pend[pick].sys.writes = Array<u32>{}; // now owned by the schedule
+        // Log why it sits where it does.
+        for (const Edge& ed : edges)
+            if (ed.to == pick)
+                KV_INFO("engine", "  %s after %s: %s", pend[pick].sys.desc->name, pend[ed.from].sys.desc->name,
+                        ed.resource ? resource_name(e, ed.resource) : "declared");
+    }
+    placed.free();
+    edges.free();
+    return true;
+}
+
+// Collects every system with its sets as ids, checks the flow rule, and orders each phase.
 bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
-    for (u32 i = 0; i < modules.len; ++i) {
+    Array<Pending> pend[(u32)Phase::Count];
+    bool ok = true;
+    u32 rank = 0;
+    for (u32 i = 0; ok && i < modules.len; ++i) {
         const ModuleDesc& m = *modules[i];
         for (const SystemDesc& s : m.systems) {
             if (!s.name || !s.fn || (u32)s.phase >= (u32)Phase::Count) {
                 KV_ERROR("engine", "module '%s' has a system with no name, no function or a bad phase", m.name);
-                return false;
+                ok = false;
+                break;
             }
-            ScheduledSystem sched{&s, &e.modules[i], {}, {}};
-            if (!resolve_resource_refs(e, m, s, s.reads, "reads", sched.reads) ||
-                !resolve_resource_refs(e, m, s, s.writes, "writes", sched.writes)) {
-                sched.reads.free();
-                sched.writes.free();
-                return false;
-            }
-
-            Array<ScheduledSystem>& phase = e.phases.systems[(u32)s.phase];
-            for (const ScheduledSystem& other : phase) {
-                if (names_equal(other.desc->name, s.name)) {
-                    KV_ERROR("engine", "system '%s' declared by both '%s' and '%s' in phase '%s'",
-                             s.name, other.module->desc->name, m.name, phase_name(s.phase));
-                    sched.reads.free();
-                    sched.writes.free();
-                    return false;
+            for (u32 p = 0; p < (u32)Phase::Count; ++p)
+                if (u32 j = find_pending(pend[p], s.name)) {
+                    KV_ERROR("engine", "system '%s' declared by both '%s' and '%s'", s.name, pend[p][j - 1].sys.module->desc->name, m.name);
+                    ok = false;
                 }
-                // Enforcement is stubbed in slice 1: conflicts are reported, not rejected.
-                const SystemDesc& o = *other.desc;
-                if (overlaps(o.writes, s.writes) || overlaps(o.writes, s.reads) || overlaps(o.reads, s.writes))
-                    KV_WARN("engine", "systems '%s' and '%s' conflict in phase '%s' (not enforced yet)",
-                            o.name, s.name, phase_name(s.phase));
+            if (!ok) break;
+            Pending p{ScheduledSystem{&s, &e.modules[i], {}, {}}, {}, {}, rank++};
+            if (!resolve_resource_refs(e, m, s, s.reads, "reads", p.sys.reads) ||
+                !resolve_resource_refs(e, m, s, s.writes, "writes", p.sys.writes)) {
+                p.sys.reads.free(); p.sys.writes.free();
+                ok = false;
+                break;
             }
-            phase.push(sched);
+            expand(e, p.sys.reads, p.reads_eff);
+            expand(e, p.sys.writes, p.writes_eff);
+            pend[(u32)s.phase].push(p);
+            if (!check_flow(e, pend[(u32)s.phase].last())) { ok = false; break; }
         }
     }
-    return true;
+    for (u32 p = 0; ok && p < (u32)Phase::Count; ++p) {
+        KV_INFO("engine", "phase %s:", phase_name((Phase)p));
+        ok = order_phase(e, pend[p], (Phase)p);
+    }
+    for (u32 p = 0; p < (u32)Phase::Count; ++p) free_pending(pend[p]);
+    return ok;
 }
 
 void log_components(const Engine& e) {
@@ -259,6 +451,19 @@ void log_components(const Engine& e) {
         const ComponentDesc& c = *e.components[i].desc;
         KV_INFO("engine", "component %-2u %-16s %3u bytes, %u fields%s%s", i + 1, c.name, c.size, c.fields.len,
                 c.is_sim() ? "" : ", cosmetic", c.has_prev() ? ", prev" : "");
+    }
+}
+
+void log_order(const Engine& e) {
+    for (u32 p = 0; p < (u32)Phase::Count; ++p) {
+        char line[512];
+        u32 at = 0;
+        for (const ScheduledSystem& s : e.phases.systems[p]) {
+            int n = snprintf(line + at, sizeof line - at, "%s%s", at ? ", " : "", s.desc->name);
+            if (n < 0 || at + (u32)n >= sizeof line) break;
+            at += (u32)n;
+        }
+        KV_INFO("engine", "order %-7s %s", phase_name((Phase)p), at ? line : "(empty)");
     }
 }
 
@@ -272,19 +477,6 @@ void log_kinds(const Engine& e) {
             at += (u32)n;
         }
         KV_INFO("engine", "kind %-2u %-16s %u slots: %s", t.index + 1, t.desc->name, t.desc->capacity, at ? line : "(no components)");
-    }
-}
-
-void log_schedule(const Engine& e) {
-    for (u32 p = 0; p < (u32)Phase::Count; ++p) {
-        char line[512];
-        u32 at = 0;
-        for (const ScheduledSystem& s : e.phases.systems[p]) {
-            int n = snprintf(line + at, sizeof line - at, "%s%s", at ? ", " : "", s.desc->name);
-            if (n < 0 || at + (u32)n >= sizeof line) break;
-            at += (u32)n;
-        }
-        KV_INFO("engine", "phase %-7s %s", phase_name((Phase)p), at ? line : "(empty)");
     }
 }
 
@@ -307,7 +499,7 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
         e.events.init(1);
         log_components(e);
         log_kinds(e);
-        log_schedule(e);
+        log_order(e);
         for (ModuleInstance& inst : e.modules) {
             const ModuleDesc& m = *inst.desc;
             // Allocations made from here on are the module's: its arena, and anything it
@@ -465,6 +657,14 @@ void engine_apply_commands(Engine& e) {
 
 void engine_request_quit(Engine& e) { e.quit_requested = true; }
 
+// Every sim column of every live row, in kind order then slot order, with the entity's
+// handle so identity counts too. Field by field, so padding never matters.
+u64 engine_hash_state(const Engine& e) {
+    u64 h = 0x6b6f72766964ull; // "korvid"
+    for (const Table& t : e.tables) h = hash_mix(h ^ table_hash(t));
+    return h;
+}
+
 ModuleInstance* engine_module(Engine& e, const char* name) {
     for (ModuleInstance& inst : e.modules)
         if (inst.started && names_equal(inst.desc->name, name)) return &inst;
@@ -490,6 +690,13 @@ u32 engine_component_id(const Engine& e, const char* name) {
 
 const ComponentDesc* engine_component(const Engine& e, u32 id) {
     return id && id <= e.components.len ? e.components[id - 1].desc : nullptr;
+}
+
+Phase engine_system_phase(const Engine& e, const char* name) {
+    for (const ModuleInstance& inst : e.modules)
+        for (const SystemDesc& s : inst.desc->systems)
+            if (names_equal(s.name, name)) return s.phase;
+    return Phase::Count;
 }
 
 u32 engine_kind_id(const Engine& e, const char* name) {

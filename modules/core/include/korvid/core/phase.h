@@ -1,9 +1,10 @@
-// Korvid core: the update schedule. Slice 1 is a fixed, ordered list of tick phases;
-// modules place systems in them. Within a phase the order is module-list order, then
-// declaration order. Systems declare read/write sets by resource name; at init the names
-// become ids (a "*.Component" wildcard becomes that column in every kind), and in dev
-// builds every access through the TickContext is checked against them. The DAG scheduler
-// that orders by those sets comes next.
+// Korvid core: the update schedule. A fixed, ordered list of tick phases; modules place
+// systems in them. Systems declare read/write sets by resource name; at init the names
+// become ids (a "*.Component" wildcard becomes that column in every kind). Within a
+// phase the order is derived: a reader runs after every writer of what it reads, `after`
+// and `before` add edges by hand, two writers with no path between them or a cycle is a
+// registration error, and ties break by module order then declaration order. In dev
+// builds every access through the TickContext is checked against the declared sets.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/event.h"
@@ -158,6 +159,8 @@ struct SystemDesc {
     SystemFn                fn     = nullptr;
     Span<const char* const> reads  = {};
     Span<const char* const> writes = {};
+    Span<const char* const> after  = {}; // system names; needed between two writers, optional otherwise
+    Span<const char* const> before = {};
 };
 
 // A system placed in the schedule, with the module it came from and its sets as ids.

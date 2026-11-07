@@ -1,4 +1,5 @@
 #include "korvid/core/kind.h"
+#include "korvid/core/hash.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -131,6 +132,18 @@ void Table::begin_tick() {
     u32 n = rows();
     for (Column& c : columns)
         if (c.prev) memcpy(c.prev, c.data, (usize)n * c.stride);
+}
+
+u64 Table::hash() const {
+    u64 h = hash_str(desc->name);
+    u32 n = rows();
+    for (u32 i = 0; i < n; ++i) {
+        if (!is_alive(i)) continue;
+        h = hash_mix(h ^ handle_at(i).bits);
+        for (const Column& c : columns)
+            if (c.desc->is_sim()) h = hash_mix(h ^ component_hash(*c.desc, row(c, i)));
+    }
+    return h;
 }
 
 int Table::describe(Handle h, char* out, usize cap) const {
