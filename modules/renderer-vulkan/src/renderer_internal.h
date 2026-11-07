@@ -262,6 +262,8 @@ struct Renderer {
     u32    check_rows = 0;
     u32    checks_passed = 0, checks_failed = 0;
 
+    f64 last_wait = 0.0; // seconds blocked in the last renderer_render
+
     u32 validation_errors   = 0;
     u32 validation_warnings = 0;
 };

@@ -123,3 +123,52 @@ void test_io(kv::TestCtx& c) {
 
     unlink(f.a); unlink(f.b); rmdir(f.dir);
 }
+
+// The budget: a pump admits reads by bytes, idle reads wait for idle time.
+void test_io_budget(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("io budget");
+    char dir[] = "/tmp/korvid-iob-XXXXXX";
+    KV_CHECK(c, mkdtemp(dir) != nullptr);
+    char paths[6][256];
+    const u32 size = 1024 * 1024;
+    u8* buf = (u8*)mem_alloc(size);
+    memset(buf, 0x5A, size);
+    for (u32 i = 0; i < 6; ++i) {
+        snprintf(paths[i], sizeof paths[i], "%s/f%u.bin", dir, i);
+        FILE* fp = fopen(paths[i], "wb"); fwrite(buf, 1, size, fp); fclose(fp);
+    }
+    mem_free(buf);
+
+    for (u32 pass = 0; pass < 2; ++pass) {
+        IoBackend backend = pass == 0 ? IoBackend::Sync : IoBackend::Auto;
+        IoQueue q;
+        KV_CHECK(c, q.init(nullptr, 64, backend));
+        q.budget.bytes_per_pump = 2 * size; // two files per pump
+        Handle h[6];
+        for (u32 i = 0; i < 6; ++i) {
+            IoRequest r; r.path = paths[i]; r.user = i;
+            r.priority = i >= 4 ? IoPriority::Idle : IoPriority::Normal; // the last two wait for idle time
+            h[i] = q.read_file(r);
+        }
+        q.pump();
+        if (!q.ring) KV_CHECK(c, q.completions().len == 2 && q.queued.len == 4);         // sync: two done, the budget stopped it
+        else         KV_CHECK(c, q.in_flight + q.completions().len == 2 && q.queued.len == 4); // ring: two admitted
+        KV_CHECK(c, q.pumps_capped == 1 || !q.ring);
+        for (u32 i = 0; i < 2000 && q.completions().len < 4; ++i) { q.pump(); time_sleep(0.001); }
+        KV_CHECK(c, q.completions().len == 4 && q.queued.len == 2 && q.pending() == 2); // the idle two never go in a pump
+        for (u32 i = 0; i < 20; ++i) q.pump();
+        KV_CHECK(c, q.completions().len == 4);
+        // Idle time serves them, one file's worth per call here.
+        KV_CHECK(c, q.pump_idle(size) == size && q.queued.len == 1);
+        KV_CHECK(c, q.pump_idle(size) == size && q.queued.len == 0);
+        KV_CHECK(c, q.pump_idle(size) == 0);
+        for (u32 i = 0; i < 2000 && q.completions().len < 6; ++i) { q.pump(); time_sleep(0.001); }
+        KV_CHECK(c, q.completions().len == 6 && q.bytes_submitted == 6 * size && q.idle_bytes == 2 * size);
+        for (const IoCompletion& k : q.completions()) { KV_CHECK(c, k.status == IoStatus::Done && k.size == size); mem_free(k.data); }
+        for (u32 i = 0; i < 6; ++i) q.reap(h[i]);
+        q.free();
+    }
+    for (u32 i = 0; i < 6; ++i) unlink(paths[i]);
+    rmdir(dir);
+}

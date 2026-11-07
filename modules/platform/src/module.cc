@@ -8,6 +8,12 @@ namespace kv {
 
 namespace {
 
+// Idle time: the queue admits what the frame's pumps held back, idle reads included.
+IdleResult io_idle(Engine&, f64 seconds, void* user) {
+    IoQueue& q = *(IoQueue*)user;
+    return q.pump_idle(q.idle_bytes_for(seconds)) ? IdleResult::More : IdleResult::Nothing;
+}
+
 bool platform_startup(Engine& engine, ModuleInstance& self) {
     SDL_SetHint(SDL_HINT_APP_NAME, "korvid");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
@@ -26,7 +32,9 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
     // outside the schedule (the frame loop, startup).
     if (!engine_publish(engine, self, "input.state", &s->input) ||
         !engine_publish(engine, self, "platform.window", &s->window)) return false;
-    return s->io.init(&self.general, 4096);
+    if (!s->io.init(&self.general, 4096)) return false;
+    engine_idle_add(engine, "platform.io", io_idle, &s->io);
+    return true;
 }
 
 void platform_shutdown(Engine&, ModuleInstance& self) {

@@ -98,14 +98,16 @@ void remove_working_set() {
 
 // ---- files -----------------------------------------------------------------------------------------
 
-bool FsJob::begin(IoQueue* queue, IoBackend backend, Allocator* data_alloc, u32 inflight) {
+bool FsJob::begin(IoQueue* queue, IoBackend backend, Allocator* data_alloc, u32 inflight, IoPriority prio) {
     if (queue) { q = queue; owns = false; }
     else {
         if (!own.init(nullptr, g_opt.files + 16, backend)) return false;
         q = &own; owns = true;
     }
+    if (g_opt.budget_kb >= 0) q->budget.bytes_per_pump = (usize)g_opt.budget_kb * 1024;
     alloc = data_alloc;
     inflight_max = inflight;
+    priority = prio;
     submitted_at.resize_fill(q->entries.max_items, 0.0);
     t0 = time_now();
     return true;
@@ -115,7 +117,7 @@ void FsJob::submit() {
     while (next < g_opt.files && in_flight < inflight_max) {
         char path[600];
         file_path(path, sizeof path, next);
-        IoRequest r; r.path = path; r.user = next; r.alloc = alloc;
+        IoRequest r; r.path = path; r.user = next; r.alloc = alloc; r.priority = priority;
         Handle h = q->read_file(r);
         if (h.is_null()) { failed = true; ++g_errors; return; }
         submitted_at[h.index()] = time_now();

@@ -4,6 +4,8 @@
 // "input.sample" (phase Input) samples the keys into "input.state" once per tick. Both are
 // published resources: a system declares "input.state" or "platform.window" in its sets
 // and reaches them with ctx.resource<const Input>() and ctx.resource<const HostWindow>().
+// The module registers one idle task, "platform.io", which serves the I/O queue's idle
+// reads and whatever the frame's pumps held back under their byte budget.
 #pragma once
 #include "korvid/core/module.h"
 #include "korvid/platform/host_window.h"

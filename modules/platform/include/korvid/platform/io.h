@@ -8,6 +8,13 @@
 // when the ring cannot be set up, the pump performs the reads itself with fopen/fread in
 // priority order. Callers see the same queue either way; a test that wants the ordering
 // of the synchronous path asks for it.
+//
+// The pump is bounded by bytes, not requests: handing a read to the kernel costs time in
+// proportion to its size (page cache allocation, and on a hot cache the whole read runs
+// inside the submit), so a pump admits reads until bytes_per_pump would be passed, and
+// never more than bytes_in_flight at once. The rest wait for the next pump. Requests at
+// IoPriority::Idle are never admitted by the pump at all: they wait for pump_idle, which
+// the platform module calls from the engine's idle time with a budget of its own.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/handle.h"
@@ -18,9 +25,15 @@ namespace kv {
 struct Engine;
 struct IoRing;
 
-enum class IoPriority : u8 { Low, Normal, High };
+enum class IoPriority : u8 { Idle, Low, Normal, High }; // Idle: served only from idle time
 enum class IoStatus : u8 { Pending, Done, Failed, Cancelled };
 enum class IoBackend : u8 { Auto, Sync, Uring };
+
+struct IoBudget {
+    usize bytes_per_pump      = 8u << 20;  // admitted per pump; 0: unlimited. At least one read always goes.
+    usize bytes_in_flight     = 64u << 20; // outstanding at once; 0: unlimited
+    usize idle_bytes_per_call = 4u << 20;  // the most one idle call may admit; idle_bytes_for sizes it to the time
+};
 
 struct IoRequest {
     const char* path     = nullptr;             // copied
@@ -58,9 +71,14 @@ struct IoQueue {
     Array<Handle>       queued;    // submitted, not yet performed or handed to the ring
     Array<IoCompletion> completed; // finished, not yet reaped
     IoRing*             ring = nullptr; // the io_uring backend when in use
+    IoBudget            budget;
     u64                 next_sequence = 0;
     u16                 kind = 0;
     u32                 reads_done = 0, reads_failed = 0, in_flight = 0;
+    usize               bytes_in_flight = 0;
+    u64                 pumps = 0, pumps_capped = 0; // pumps that left admissible reads waiting on the budget
+    u64                 bytes_submitted = 0, idle_calls = 0, idle_bytes = 0;
+    f64                 idle_seconds_per_byte = 0.0; // measured over pump_idle calls, smoothed; 0 until the first
 
     bool init(Allocator* storage, u32 max_in_flight, IoBackend backend = IoBackend::Auto);
     void free();
@@ -70,8 +88,15 @@ struct IoQueue {
     Handle read_file(const IoRequest& req);
     // Cancels a request that has not completed yet; it completes as Cancelled.
     bool   cancel(Handle request);
-    // Once per frame: hand queued reads to the backend and collect what has finished.
+    // Once per frame: hand queued reads to the backend within the budget and collect what
+    // has finished.
     void   pump();
+    // From idle time: admits up to `bytes` more, idle-priority reads included, and collects
+    // what has finished. Returns the bytes admitted; 0 means nothing could go now.
+    usize  pump_idle(usize bytes);
+    // How many bytes an idle call may admit in `seconds`, from what earlier calls cost:
+    // never more than idle_bytes_per_call, never less than a few pages.
+    usize  idle_bytes_for(f64 seconds) const;
     // Unreaped completions, oldest first. Consumers scan for theirs and reap them.
     Span<const IoCompletion> completions() const { return completed.span(); }
     // Takes a completion off the list; the data is the caller's to free from now on.

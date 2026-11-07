@@ -1,5 +1,6 @@
 #include "korvid/platform/io.h"
 #include "korvid/core/log.h"
+#include "korvid/core/time.h"
 #include "io_ring.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -76,9 +77,10 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
 
 // ---- the ring backend --------------------------------------------------------------------------
 
-// Opens and sizes the file and queues the first read. False (with a completion pushed)
-// when the file cannot be opened; true when the read is in flight.
-bool ring_submit(IoQueue& q, Handle h, IoEntry& e) {
+// Stage one: opens and sizes the file, so the budget can decide. False (with a completion
+// pushed) when the file cannot be opened.
+bool ring_open(IoQueue& q, Handle h, IoEntry& e) {
+    if (e.fd >= 0) return true;
     int fd = open(e.path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) { IoCompletion c{}; complete_failed(q, h, e, c, errno); q.completed.push(c); return false; }
     struct stat st;
@@ -86,13 +88,20 @@ bool ring_submit(IoQueue& q, Handle h, IoEntry& e) {
     e.fd   = fd;
     e.size = (usize)st.st_size;
     e.done = 0;
-    e.buf  = (u8*)alloc_in(entry_alloc(e), e.size ? e.size : 1);
-    if (!e.buf) { close(fd); IoCompletion c{}; complete_failed(q, h, e, c, ENOMEM); q.completed.push(c); return false; }
+    return true;
+}
+
+// Stage two: the buffer and the first read.
+bool ring_start(IoQueue& q, Handle h, IoEntry& e) {
+    e.buf = (u8*)alloc_in(entry_alloc(e), e.size ? e.size : 1);
+    if (!e.buf) { close(e.fd); e.fd = -1; IoCompletion c{}; complete_failed(q, h, e, c, ENOMEM); q.completed.push(c); return false; }
     e.in_flight = true;
     ++q.in_flight;
+    q.bytes_in_flight += e.size;
+    q.bytes_submitted += e.size;
     // An empty file: nothing to read; the ring still answers with 0 bytes, which is Done.
     u32 len = e.size > 0x7FFFFFFFu ? 0x7FFFFFFFu : (u32)e.size;
-    io_ring_push_read(q.ring, fd, e.buf, len, 0, h.bits);
+    io_ring_push_read(q.ring, e.fd, e.buf, len, 0, h.bits);
     return true;
 }
 
@@ -102,6 +111,7 @@ void ring_finish(IoQueue& q, Handle h, IoEntry& e, IoStatus status, i32 err, usi
     if (status == IoStatus::Done) { c.data = e.buf; c.size = size; ++q.reads_done; }
     else { free_in(entry_alloc(e), e.buf, e.size ? e.size : 1); if (status == IoStatus::Failed) ++q.reads_failed; }
     if (e.fd >= 0) close(e.fd);
+    q.bytes_in_flight -= e.size;
     e.fd = -1; e.buf = nullptr; e.in_flight = false; e.status = status;
     --q.in_flight;
     q.completed.push(c);
@@ -122,6 +132,53 @@ void ring_reap(IoQueue& q) {
         usize left = e->size - e->done;
         io_ring_push_read(q.ring, e->fd, e->buf + e->done, left > 0x7FFFFFFFu ? 0x7FFFFFFFu : (u32)left, e->done, h.bits);
     }
+}
+
+// One pump's admissions: queued reads in priority order, cancelled ones completed, the
+// rest handed over while `budget` (bytes; 0 unlimited) and the in-flight cap allow. Idle
+// reads are taken only when `idle` says so. Returns the bytes admitted; sets *capped when
+// an admissible read was left waiting on the budget.
+usize admit(IoQueue& q, usize budget, bool idle, bool* capped) {
+    if (q.queued.len > 1) qsort_r(q.queued.data, q.queued.len, sizeof(Handle), compare_queued, &q);
+    usize submitted = 0;
+    u32 taken = 0;
+    *capped = false;
+    for (; taken < q.queued.len; ++taken) {
+        Handle h = q.queued[taken];
+        IoEntry* e = q.entries.get(h);
+        if (e->status == IoStatus::Cancelled) {
+            IoCompletion c{};
+            c.request = h; c.user = e->user; c.status = IoStatus::Cancelled;
+            q.completed.push(c);
+            continue;
+        }
+        if (e->priority == IoPriority::Idle && !idle) break; // sorted last: nothing admissible follows
+        if (!q.ring) {
+            // The synchronous path learns the size by reading; it stops once the budget is passed.
+            IoCompletion c{};
+            perform_sync(q, h, c);
+            q.completed.push(c);
+            submitted += c.size;
+            q.bytes_submitted += c.size;
+            if (budget && submitted >= budget) { ++taken; break; }
+            continue;
+        }
+        if (!io_ring_can_push(q.ring)) break;
+        if (!ring_open(q, h, *e)) continue;
+        if (budget && submitted && submitted + e->size > budget) { *capped = true; break; }
+        if (q.budget.bytes_in_flight && q.in_flight && q.bytes_in_flight + e->size > q.budget.bytes_in_flight) { *capped = true; break; }
+        if (ring_start(q, h, *e)) submitted += e->size;
+    }
+    if (taken) {
+        for (u32 i = taken; i < q.queued.len; ++i) q.queued[i - taken] = q.queued[i];
+        q.queued.len -= taken;
+    }
+    if (q.ring) {
+        io_ring_enter(q.ring, 0);
+        ring_reap(q);
+        io_ring_enter(q.ring, 0); // continuations of short reads
+    }
+    return submitted;
 }
 
 } // namespace
@@ -164,6 +221,8 @@ void IoQueue::free() {
             free_in(e && e->alloc ? e->alloc : mem_general(), c.data, c.size ? c.size : 1);
         }
     }
+    for (u32 i = 0; i < entries.len; ++i)
+        if (entries.is_alive(i) && entries.items[i].fd >= 0 && !entries.items[i].in_flight) close(entries.items[i].fd);
     io_ring_destroy(ring);
     ring = nullptr;
     entries.free();
@@ -195,6 +254,7 @@ bool IoQueue::cancel(Handle request) {
     IoEntry* e = entries.get(request);
     if (!e || e->status != IoStatus::Pending) return false;
     e->status = IoStatus::Cancelled; // queued: completes as Cancelled at the pump; in flight: when the ring answers
+    if (!e->in_flight && e->fd >= 0) { close(e->fd); e->fd = -1; } // opened for sizing, never started
     return true;
 }
 
@@ -210,37 +270,33 @@ bool IoQueue::reap(Handle request) {
 }
 
 void IoQueue::pump() {
-    if (queued.len > 1) qsort_r(queued.data, queued.len, sizeof(Handle), compare_queued, this);
-    if (!ring) {
-        for (Handle h : queued) {
-            IoCompletion c{};
-            perform_sync(*this, h, c);
-            completed.push(c);
-        }
-        queued.clear();
-        return;
+    ++pumps;
+    bool capped = false;
+    admit(*this, budget.bytes_per_pump, false, &capped);
+    if (capped) ++pumps_capped;
+}
+
+usize IoQueue::pump_idle(usize bytes) {
+    ++idle_calls;
+    bool capped = false;
+    f64 t0 = time_now();
+    usize n = admit(*this, bytes ? bytes : 1, true, &capped);
+    f64 dt = time_now() - t0;
+    idle_bytes += n;
+    if (n >= 4096) { // what admission cost per byte, smoothed; small calls say nothing useful
+        f64 per_byte = dt / (f64)n;
+        idle_seconds_per_byte = idle_seconds_per_byte == 0.0 ? per_byte : idle_seconds_per_byte * 0.7 + per_byte * 0.3;
     }
-    // Hand over what fits, in priority order; the rest waits for the next pump.
-    u32 taken = 0;
-    for (; taken < queued.len; ++taken) {
-        Handle h = queued[taken];
-        IoEntry* e = entries.get(h);
-        if (e->status == IoStatus::Cancelled) {
-            IoCompletion c{};
-            c.request = h; c.user = e->user; c.status = IoStatus::Cancelled;
-            completed.push(c);
-            continue;
-        }
-        if (!io_ring_can_push(ring)) break;
-        ring_submit(*this, h, *e);
-    }
-    if (taken) {
-        for (u32 i = taken; i < queued.len; ++i) queued[i - taken] = queued[i];
-        queued.len -= taken;
-    }
-    io_ring_enter(ring, 0);
-    ring_reap(*this);
-    io_ring_enter(ring, 0); // continuations of short reads
+    return n;
+}
+
+usize IoQueue::idle_bytes_for(f64 seconds) const {
+    usize most = budget.idle_bytes_per_call ? budget.idle_bytes_per_call : 1u << 20;
+    if (seconds <= 0.0) return 0;
+    if (idle_seconds_per_byte <= 0.0) return most > (1u << 20) ? 1u << 20 : most; // the first call: a modest guess
+    f64 fit = seconds / idle_seconds_per_byte;
+    usize bytes = fit >= (f64)most ? most : (usize)fit;
+    return bytes < 16384 ? 16384 : bytes;
 }
 
 } // namespace kv

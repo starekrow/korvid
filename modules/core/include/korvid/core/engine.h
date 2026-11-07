@@ -69,6 +69,32 @@ struct EventTrace {
 };
 
 
+// ---- idle tasks ------------------------------------------------------------------------
+// Work that runs when the frame has time to spare: the frame loop measures its slack and
+// hands it to engine_idle_run, which calls the registered tasks round-robin until the
+// budget is used or nobody has anything to do. A task slices its own work: it is called
+// with the time left and answers More (call me again if there is time), Nothing (nothing
+// now, keep me) or Done (remove me). Main thread; a task that wants workers uses the pool.
+enum class IdleResult : u8 { Nothing, More, Done };
+typedef IdleResult (*IdleFn)(Engine& e, f64 budget_seconds, void* user);
+
+struct IdleTask {
+    const char* name;
+    IdleFn      fn;
+    void*       user;
+    u32         id;
+    u16         owner;   // memory owner (module index + 1) at registration; set around each call
+    u64         calls;
+    f64         seconds;
+};
+
+struct IdleStats {
+    u64 runs    = 0;   // engine_idle_run calls that found a task
+    u64 calls   = 0;   // task calls
+    f64 seconds = 0.0; // time spent, ever
+    f64 last    = 0.0; // the last run
+};
+
 struct Engine {
     EventBus              events;
     PhaseList             phases;
@@ -83,6 +109,10 @@ struct Engine {
     CommandBuffer         commands;
     TimerWheel            timers;
     EventTrace            trace;
+    Array<IdleTask>       idle;        // in registration order; served round-robin from idle_cursor
+    u32                   idle_cursor  = 0;
+    u32                   idle_next_id = 1;
+    IdleStats             idle_stats;
     u32                   wave_cap     = 4; // handler waves per boundary; leftovers wait for the next
     u32                   threads      = 0; // threads the schedule may use, main included; 0: every core
     u32                   units        = 0; // systems plus handlers
@@ -114,6 +144,12 @@ void engine_trace_delivery(Engine& e, u64 tick, u32 wave);
 // Describes one event through its schema: "Type{...}", or just the name without one.
 int  engine_describe_event(const Engine& e, u32 type_id, const void* event, char* out, usize cap);
 void engine_request_quit(Engine& e);
+
+// Idle tasks. Registration is startup-ish work from any module; the id removes it.
+u32  engine_idle_add(Engine& e, const char* name, IdleFn fn, void* user);
+bool engine_idle_remove(Engine& e, u32 id);
+// Runs the tasks within the budget and returns the seconds used. The frame loop's call.
+f64  engine_idle_run(Engine& e, f64 budget_seconds);
 
 // The started instance of a module, by name; null if absent or not started.
 ModuleInstance* engine_module(Engine& e, const char* name);

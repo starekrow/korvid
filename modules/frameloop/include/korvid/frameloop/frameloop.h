@@ -14,7 +14,8 @@
 // PPM, frame 90 unless --screenshot-frame N says otherwise; --check-sort reads the GPU
 // sort back every 30th frame and verifies it. --cli-port N listens for CLI sessions on
 // loopback; --cli-stdin reads commands from stdin even when it is a terminal (it always
-// does when stdin is not one).
+// does when stdin is not one). Idle work (engine_idle_run) gets the time the renderer
+// blocked for last frame less --idle-margin-ms (1.5 by default); --no-idle turns it off.
 #pragma once
 #include "korvid/core/engine.h"
 #include "korvid/math/color.h"

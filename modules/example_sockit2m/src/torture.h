@@ -18,6 +18,8 @@ struct Options {
     u32  chunk_kb = 64;
     f64  seconds  = 3.0;
     f64  tick_hz  = 60.0;
+    i64  budget_kb = -1;     // the queue's bytes per pump; -1: the queue's default, 0: unlimited
+    f64  frame_ms = 0.0;     // pacing for the idle scenario; 0: one tick's worth
     bool quick    = false;
     bool keep     = false;
     bool direct   = false;  // the tight loop instead of the engine
@@ -55,6 +57,7 @@ struct FsJob {
     Allocator* alloc = nullptr; // where the file data lands
     Array<f64> submitted_at;    // by entry slot
     u32  inflight_max = 64;
+    IoPriority priority = IoPriority::Normal;
     u32  next = 0, completed = 0, in_flight = 0;
     u64  bytes = 0;
     f64  lat_sum = 0.0, lat_max = 0.0;
@@ -63,7 +66,7 @@ struct FsJob {
     bool failed = false;
 
     // A null queue makes one of its own on `backend`; otherwise `backend` is ignored.
-    bool begin(IoQueue* queue, IoBackend backend, Allocator* data_alloc, u32 inflight);
+    bool begin(IoQueue* queue, IoBackend backend, Allocator* data_alloc, u32 inflight, IoPriority prio = IoPriority::Normal);
     bool done() const { return completed == g_opt.files; }
     void submit();            // reads up to the depth
     void reap();              // what the queue has finished

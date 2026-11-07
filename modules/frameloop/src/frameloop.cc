@@ -33,6 +33,8 @@ const char*     g_shot_path    = nullptr; // --screenshot FILE: one frame as a P
 u64             g_shot_frame   = 90;      // --screenshot-frame N: which one
 bool            g_check_sort   = false;   // --check-sort: verify the GPU sort every 30th frame
 CliConfig       g_cli;                    // --cli-port N, --cli-stdin
+f64             g_idle_margin  = 0.0015;  // --idle-margin-ms N: slack kept back from idle work
+bool            g_idle         = true;    // --no-idle
 
 struct FrameLoopState {
     FrameLoopConfig config;
@@ -40,6 +42,9 @@ struct FrameLoopState {
     Renderer*       renderer = nullptr; // renderer-vulkan's
     u32             presented_w = 0, presented_h = 0;
     u32             deltas_last_frame = 0;
+    f64             wait_ema   = 0.0;    // the renderer's blocked time per frame, smoothed
+    f64             idle_total = 0.0;    // seconds of idle work in the report window
+    u64             idle_frames = 0;     // frames that ran idle work in the window
     bool            timer_fired = false; // the loop raises it; the system emits it once
     bool            timer_sent  = false;
 };
@@ -80,11 +85,13 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--check-sort") == 0) g_check_sort = true;
         else if (strcmp(argv[i], "--cli-port") == 0 && i + 1 < argc) g_cli.port = (u16)atoi(argv[++i]);
         else if (strcmp(argv[i], "--cli-stdin") == 0) g_cli.stdin_ = true;
+        else if (strcmp(argv[i], "--idle-margin-ms") == 0 && i + 1 < argc) g_idle_margin = atof(argv[++i]) * 1e-3;
+        else if (strcmp(argv[i], "--no-idle") == 0) g_idle = false;
         else if (u32 f = game_flag(cfg, argv[i])) g_flags_given |= (u64)1 << (f - 1);
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin] [--idle-margin-ms N] [--no-idle]", argv[0]);
             return false;
         }
     }
@@ -138,6 +145,17 @@ constinit const SystemDesc    k_systems[] = {
     {.name = "frameloop.exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = k_exit_reads},
 };
 
+// The frame's slack: what the renderer blocked for last frame (fences, acquire, present)
+// is time this frame may spend on idle work before rendering, less a margin. Smoothed,
+// and never more than the last measurement, so one long frame does not buy the next a
+// budget it does not have. No vsync, no blocking, no slack.
+f64 idle_slack(FrameLoopState& s) {
+    f64 wait = renderer_last_wait(s.renderer);
+    s.wait_ema = s.wait_ema == 0.0 ? wait : s.wait_ema * 0.8 + wait * 0.2;
+    f64 budget = (wait < s.wait_ema ? wait : s.wait_ema) - g_idle_margin;
+    return g_idle && budget > 0.0002 ? budget : 0.0;
+}
+
 // Hand the renderer what the frame's ticks changed, then draw at the clock's
 // interpolation point.
 void render_frame(Engine& engine, FrameLoopState& s) {
@@ -185,6 +203,10 @@ void run(Engine& engine, FrameLoopState& s) {
         f64 t_pumped = time_now();
         engine_frame(engine, dt);
         f64 t_ticked = time_now();
+        if (f64 slack = idle_slack(s)) {
+            f64 used = engine_idle_run(engine, slack);
+            if (used > 0.0) { s.idle_total += used; ++s.idle_frames; }
+        }
         {
             KV_ZONE("render");
             if (g_shot_path && engine.frame_count == g_shot_frame) renderer_screenshot(s.renderer, g_shot_path);
@@ -203,11 +225,14 @@ void run(Engine& engine, FrameLoopState& s) {
         }
         if (s.config.report_every_seconds && now >= next_report) {
             const MemSample& mem = mem_last_sample();
-            KV_INFO("frameloop", "%u fps, tick %llu, alpha %.2f, %u sprites, %u deltas/frame, %ux%u, %s, %llu KB live",
+            KV_INFO("frameloop", "%u fps, tick %llu, alpha %.2f, %u sprites, %u deltas/frame, %ux%u, %s, %llu KB live, idle %.1f ms/frame on %llu",
                     frames_in_window, (unsigned long long)engine.clock.tick_count, engine.clock.alpha(),
                     renderer_sprite_count(s.renderer), s.deltas_last_frame, s.window->width(), s.window->height(),
                     s.window->focused() ? "focused" : "unfocused",
-                    (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024));
+                    (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
+                    s.idle_frames ? s.idle_total / (f64)s.idle_frames * 1e3 : 0.0, (unsigned long long)s.idle_frames);
+            s.idle_total = 0.0;
+            s.idle_frames = 0;
             if (g_prof_report) prof_log_summary(10);
             frames_in_window = 0;
             next_report += (f64)s.config.report_every_seconds;

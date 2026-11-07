@@ -69,6 +69,11 @@ u32        renderer_sprite_count(const Renderer* r);
 // rebuilt); that is not an error.
 bool       renderer_render(Renderer* r, const RenderView& view);
 
+// Seconds the last renderer_render spent blocked on the GPU or the display (fences,
+// acquire, present). The frame loop reads it as its slack: time it may spend on idle
+// work before the next render without delaying a frame.
+f64        renderer_last_wait(const Renderer* r);
+
 // Asks for the next presented frame as a binary PPM at `path`. A dev facility: the frame
 // loop's --screenshot. The frame that carries it waits for its own fence.
 bool       renderer_screenshot(Renderer* r, const char* path);

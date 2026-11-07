@@ -11,6 +11,7 @@
 #include "korvid/renderer-vulkan/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/profile.h"
+#include "korvid/core/time.h"
 #include <string.h>
 
 namespace kv {
@@ -246,6 +247,8 @@ void renderer_material_destroy(Renderer* r, Handle material) {
 
 Handle renderer_default_material(const Renderer* r) { return r ? r->default_material : Handle{}; }
 
+f64 renderer_last_wait(const Renderer* r) { return r ? r->last_wait : 0.0; }
+
 bool renderer_check_sort(Renderer* r) {
     if (!r) return false;
     r->check_pending = true;
@@ -346,10 +349,14 @@ bool renderer_render(Renderer* r, const RenderView& view) {
 
     // Wait for this slot's previous frame; what it queued for destruction can go, its span
     // of the ring is free, and its descriptor sets may be rewritten.
+    f64 waited = 0.0;
     {
         KV_ZONE_WAIT("frame fence");
+        f64 t = time_now();
         VK_CHECK(vkWaitForFences(r->device, 1, &f.fence, VK_TRUE, UINT64_MAX));
+        waited += time_now() - t;
     }
+    r->last_wait = 0.0;
     rv_ring_release(r, f);
     rv_run_garbage(r, f);
     if (r->sprites.len > r->tables.capacity && !rv_create_tables(r, r->sprites.len)) return false;
@@ -363,8 +370,10 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     u32  image_index = 0;
     if (have_image) {
         KV_ZONE_WAIT("acquire");
+        f64 t = time_now();
         VkResult acq = vkAcquireNextImageKHR(r->device, r->swapchain.handle, UINT64_MAX, f.acquire,
                                              VK_NULL_HANDLE, &image_index);
+        waited += time_now() - t;
         if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
             r->swapchain_dirty = true; // the semaphore was not signaled; the frame still runs its uploads
             have_image = false;
@@ -411,7 +420,9 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         pi.swapchainCount     = 1;
         pi.pSwapchains        = &r->swapchain.handle;
         pi.pImageIndices      = &image_index;
+        f64 t = time_now();
         VkResult pres = vkQueuePresentKHR(r->queue, &pi);
+        waited += time_now() - t;
         if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) r->swapchain_dirty = true;
         else if (pres != VK_SUCCESS) KV_ERROR("vulkan", "vkQueuePresentKHR: %s", vk_result_name(pres));
     }
@@ -422,6 +433,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         if (r->check_recorded) rv_verify_sort(r);
     }
 
+    r->last_wait = waited;
     r->frame_index = (r->frame_index + 1) % kFramesInFlight;
     ++r->frame_count;
     return have_image;
