@@ -111,7 +111,7 @@ void test_module(kv::TestCtx& c) {
 
     // Event ids: module order, then declaration order, from 1.
     KV_CHECK(c, EventType<EvA>::id == 1 && EventType<EvB>::id == 2 && EventType<EvC>::id == 3);
-    KV_CHECK(c, e.event_type_count == 3);
+    KV_CHECK(c, e.event_type_count == 4); // plus the engine's own Spawned, registered last
 
     // Resources likewise.
     KV_CHECK(c, engine_resource_id(e, "first.store") == 1);

@@ -15,8 +15,8 @@
 #include "korvid/platform/events.h"
 #include "korvid/platform/module.h"
 #include "korvid/render/renderer.h"
-#include "korvid/sprite/module.h"
-#include "korvid/sprite/world.h"
+#include "korvid/sprite/sprite.h"
+#include "korvid/sprite/transform2.h"
 
 namespace kv {
 
@@ -76,13 +76,13 @@ vec2 random_direction(Rng& rng, f32 speed) {
     return vec2{cosf(a) * speed, sinf(a) * speed};
 }
 
-void spawn_ball(Game& g, SpriteWorld& world, Ball& b, point2 at) {
+// The game holds the write on "sprite.entity", so it spawns directly and has the handle at once.
+void spawn_ball(Table& world, Ball& b, point2 at) {
     Sprite s;
     s.material = b.material;
     s.size     = vec2{b.size, b.size};
     s.layer    = b.layer;
-    b.entity   = world.create(transform2_at(at), s);
-    (void)g;
+    b.entity   = world.spawn(transform2_at(at), s);
 }
 
 void set_state(Game& g, GameState next) {
@@ -93,7 +93,7 @@ void set_state(Game& g, GameState next) {
 // Runs once per tick. Each state does its work and names its successor.
 void game_update(Game& g, TickContext& ctx) {
     Engine& engine = *ctx.engine;
-    SpriteWorld& world = *sprite_world(engine);
+    Table& world = *ctx.write_kind("sprite.entity"); // the engine's table for the sprite kind
     HostWindow* window = platform_window(engine);
     switch (g.state) {
     case ST_INIT: {
@@ -104,7 +104,7 @@ void game_update(Game& g, TickContext& ctx) {
         bg.size     = vec2{w, h};
         bg.uv       = rect2{0.0f, 0.0f, w / 128.0f, h / 128.0f};
         bg.layer    = -1;
-        g.background = world.create(transform2_at(point2{0.0f, 0.0f}), bg);
+        g.background = world.spawn(transform2_at(point2{0.0f, 0.0f}), bg);
 
         g.rng = Rng::seeded(0x5eed, 1);
         Ball* b = g.balls;
@@ -112,10 +112,10 @@ void game_update(Game& g, TickContext& ctx) {
         b[BALL_VERTICAL]   = Ball{{}, vec2{0.0f, 300.0f}, 72.0f, 1, g.materials[BALL_VERTICAL], 0, 0};
         b[BALL_RANDOM]     = Ball{{}, random_direction(g.rng, 360.0f), 56.0f, 3, g.materials[BALL_RANDOM], 0, 0};
         b[BALL_BLINK]      = Ball{{}, vec2{}, 120.0f, 0, g.materials[BALL_BLINK], 45, 0};
-        spawn_ball(g, world, b[BALL_HORIZONTAL], point2{0.0f, 0.0f});
-        spawn_ball(g, world, b[BALL_VERTICAL], point2{-200.0f, 0.0f});
-        spawn_ball(g, world, b[BALL_RANDOM], point2{200.0f, 100.0f});
-        spawn_ball(g, world, b[BALL_BLINK], point2{0.0f, -120.0f});
+        spawn_ball(world, b[BALL_HORIZONTAL], point2{0.0f, 0.0f});
+        spawn_ball(world, b[BALL_VERTICAL], point2{-200.0f, 0.0f});
+        spawn_ball(world, b[BALL_RANDOM], point2{200.0f, 100.0f});
+        spawn_ball(world, b[BALL_BLINK], point2{0.0f, -120.0f});
         for (u32 i = 0; i < BALL_COUNT; ++i) {
             char text[256];
             kv_handle_describe(b[i].entity.bits, text, sizeof text);
@@ -137,13 +137,14 @@ void game_update(Game& g, TickContext& ctx) {
             Ball& b = g.balls[i];
             if (i == BALL_BLINK) {
                 // Exists for a while, vanishes for a while: creates and removes, every time.
+                // The removal is a command, so it takes effect at the end of this phase.
                 if (--b.blink_ticks == 0) {
-                    if (world.valid(b.entity)) { world.destroy(b.entity); b.entity = Handle{}; b.blink_ticks = 30; }
-                    else { spawn_ball(g, world, b, point2{g.rng.range(-half_w * 0.5f, half_w * 0.5f), -120.0f}); b.blink_ticks = 45; }
+                    if (world.valid(b.entity)) { ctx.destroy(b.entity); b.entity = Handle{}; b.blink_ticks = 30; }
+                    else { spawn_ball(world, b, point2{g.rng.range(-half_w * 0.5f, half_w * 0.5f), -120.0f}); b.blink_ticks = 45; }
                 }
                 continue;
             }
-            Transform2* t = world.transform(b.entity);
+            Transform2* t = world.get<Transform2>(b.entity);
             if (!t) { KV_ERROR("game", "ball %u went stale", i); set_state(g, ST_EXIT); break; }
             if (bounce(*t, b.velocity, b.size * 0.5f, half_w, half_h, dt)) {
                 ++b.bounces;

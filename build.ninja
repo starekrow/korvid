@@ -122,13 +122,16 @@ build $builddir/obj/core/tests/component_test.o: cxx modules/core/tests/componen
   includes = $inc_core
 build $builddir/obj/core/tests/kind_test.o: cxx modules/core/tests/kind_test.cc
   includes = $inc_core
+build $builddir/obj/core/tests/context_test.o: cxx modules/core/tests/context_test.cc
+  includes = $inc_core
 
 build $builddir/bin/core_tests: link $builddir/obj/core/tests/main.o $
     $builddir/obj/core/tests/handle_test.o $builddir/obj/core/tests/event_test.o $
     $builddir/obj/core/tests/tick_test.o $builddir/obj/core/tests/module_test.o $
     $builddir/obj/core/tests/memory_test.o $builddir/obj/core/tests/map_test.o $
     $builddir/obj/core/tests/name_test.o $builddir/obj/core/tests/random_test.o $
-    $builddir/obj/core/tests/component_test.o $builddir/obj/core/tests/kind_test.o $builddir/lib/libkv_core.a
+    $builddir/obj/core/tests/component_test.o $builddir/obj/core/tests/kind_test.o $
+    $builddir/obj/core/tests/context_test.o $builddir/lib/libkv_core.a
 
 # ---- platform --------------------------------------------------------------
 build $builddir/obj/platform/module.o: cxx modules/platform/src/module.cc

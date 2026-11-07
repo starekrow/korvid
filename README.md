@@ -13,7 +13,11 @@ Module registration is declarative (`core/module.h`): a module is one `constinit
 systems, plus startup/shutdown for OS resources and module state. A kind is a fixed set
 of components with a capacity; the engine builds a table per kind (one SoA column per
 component on reserved pages, a handle kind, a resource per column) and copies the `prev`
-columns at the top of PreSim. Nothing registers itself and nothing runs before main;
+columns at the top of PreSim. Systems reach data through the `TickContext`: `write_kind`
+for the table a system holds the write on, `read<T>`/`write<T>` for one column by name,
+`view<A, const B>()` for every kind with those components (constness is the access mode),
+and `spawn_later`/`destroy` commands applied at the phase boundary. In dev builds an
+access the system did not declare asserts with the system and resource named. Nothing registers itself and nothing runs before main;
 the build-generated list (`hello/src/modules.gen.cc` for now) is the only input. Order is
 list order, then declaration order: modules start in list order and stop in reverse,
 event ids are assigned in that order, and within each tick phase (input, presim, sim,

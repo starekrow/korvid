@@ -13,6 +13,10 @@ namespace {
 
 bool names_equal(const char* a, const char* b) { return strcmp(a, b) == 0; }
 
+// The engine's own event types, registered after every module's so module ids are
+// unaffected by what the core adds.
+constinit const EventTypeDesc k_core_events[] = {KV_EVENT(Spawned)};
+
 bool check_module_names(Span<const ModuleDesc* const> modules) {
     if (modules.len > KV_MEM_MAX_MODULES) {
         KV_ERROR("engine", "%u modules; memory accounting supports %u", modules.len, KV_MEM_MAX_MODULES);
@@ -58,7 +62,16 @@ bool register_events(Engine& e, Span<const ModuleDesc* const> modules) {
         }
         if (n) next = n;
     }
-    e.event_type_count = next - 1;
+    for (const EventTypeDesc& t : k_core_events)
+        for (const ModuleDesc* m : modules)
+            for (const EventTypeDesc& o : m->events)
+                if (names_equal(o.name, t.name)) {
+                    KV_ERROR("engine", "event type '%s' in module '%s' is the engine's", t.name, m->name);
+                    return false;
+                }
+    u32 n = event_types_register(k_core_events, next);
+    if (n == 0) { KV_ERROR("engine", "core event registration failed"); return false; }
+    e.event_type_count = n - 1;
     return true;
 }
 
@@ -169,14 +182,15 @@ bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
     return true;
 }
 
-bool check_resource_refs(const Engine& e, const ModuleDesc& m, const SystemDesc& s,
-                         Span<const char* const> refs, const char* kind) {
+// Names to ids. "*.Component" is that column in every kind, and must exist somewhere.
+bool resolve_resource_refs(const Engine& e, const ModuleDesc& m, const SystemDesc& s,
+                           Span<const char* const> refs, const char* kind, Array<u32>& out) {
     for (const char* name : refs) {
         if (name[0] == '*' && name[1] == '.') {
-            // "*.Component": that column in every kind. It must exist somewhere.
             u32 cid = engine_component_id(e, name + 2);
             bool any = false;
-            for (const Table& t : e.tables) any = any || t.has(cid);
+            for (const Table& t : e.tables)
+                if (const Column* c = t.column(cid)) { out.push(c->resource); any = true; }
             if (!any) {
                 KV_ERROR("engine", "system '%s' in module '%s' %s '%s' but no kind has component '%s'",
                          s.name, m.name, kind, name, name + 2);
@@ -184,11 +198,13 @@ bool check_resource_refs(const Engine& e, const ModuleDesc& m, const SystemDesc&
             }
             continue;
         }
-        if (!engine_resource_id(e, name)) {
+        u32 id = engine_resource_id(e, name);
+        if (!id) {
             KV_ERROR("engine", "system '%s' in module '%s' %s unknown resource '%s'",
                      s.name, m.name, kind, name);
             return false;
         }
+        out.push(id);
     }
     return true;
 }
@@ -209,14 +225,21 @@ bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
                 KV_ERROR("engine", "module '%s' has a system with no name, no function or a bad phase", m.name);
                 return false;
             }
-            if (!check_resource_refs(e, m, s, s.reads, "reads") ||
-                !check_resource_refs(e, m, s, s.writes, "writes")) return false;
+            ScheduledSystem sched{&s, &e.modules[i], {}, {}};
+            if (!resolve_resource_refs(e, m, s, s.reads, "reads", sched.reads) ||
+                !resolve_resource_refs(e, m, s, s.writes, "writes", sched.writes)) {
+                sched.reads.free();
+                sched.writes.free();
+                return false;
+            }
 
             Array<ScheduledSystem>& phase = e.phases.systems[(u32)s.phase];
             for (const ScheduledSystem& other : phase) {
                 if (names_equal(other.desc->name, s.name)) {
                     KV_ERROR("engine", "system '%s' declared by both '%s' and '%s' in phase '%s'",
                              s.name, other.module->desc->name, m.name, phase_name(s.phase));
+                    sched.reads.free();
+                    sched.writes.free();
                     return false;
                 }
                 // Enforcement is stubbed in slice 1: conflicts are reported, not rejected.
@@ -225,7 +248,7 @@ bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
                     KV_WARN("engine", "systems '%s' and '%s' conflict in phase '%s' (not enforced yet)",
                             o.name, s.name, phase_name(s.phase));
             }
-            phase.push(ScheduledSystem{&s, &e.modules[i]});
+            phase.push(sched);
         }
     }
     return true;
@@ -327,8 +350,11 @@ void engine_shutdown(Engine& e) {
         arena_destroy(inst.arena); // the module's state goes with it
         mem_set_owner(0);
     }
+    e.commands.bytes.free();
+    e.commands.count = 0;
     free_tables(e); // after every module is down: nothing holds an entity any more
     for (const ModuleInstance& inst : e.modules) event_types_unregister(inst.desc->events);
+    event_types_unregister(k_core_events);
     unregister_components(e);
     e.phases.free();
     e.events.free();
@@ -354,6 +380,87 @@ u32 engine_frame(Engine& e, f64 frame_dt) {
     for (u32 i = 0; i < ticks; ++i)
         e.phases.run_tick(e, e.events, e.clock.tick_dt, first_tick + i);
     return ticks;
+}
+
+// ---- commands ------------------------------------------------------------------------
+// Records in a byte stream: a header, then for a spawn one entry per component.
+namespace {
+
+enum CommandOp : u8 { CMD_SPAWN, CMD_DESTROY };
+
+struct CommandHeader {
+    u8     op;
+    u32    kind;       // kind id (spawn)
+    u32    ticket;     // spawn
+    u32    components; // spawn: entries that follow
+    Handle entity;     // destroy
+};
+
+struct ComponentEntryHeader {
+    u32 component; // component id
+    u32 size;      // bytes that follow, padded to 8
+};
+
+template <class T>
+void put(Array<u8>& bytes, const T& v) { memcpy(bytes.push_n(sizeof(T)), &v, sizeof(T)); }
+template <class T>
+const T* take(const u8*& p) { const T* v = (const T*)p; p += sizeof(T); return v; }
+
+} // namespace
+
+u32 command_spawn_begin(CommandBuffer& cb, u32 kind_id, u32 component_count) {
+    CommandHeader h{CMD_SPAWN, kind_id, cb.next_ticket++, component_count, Handle{}};
+    put(cb.bytes, h);
+    ++cb.count;
+    return h.ticket;
+}
+
+void command_spawn_component(CommandBuffer& cb, u32 component_id, const void* data, u32 size) {
+    ComponentEntryHeader h{component_id, size};
+    put(cb.bytes, h);
+    u32 padded = (size + 7) & ~7u;
+    u8* dst = cb.bytes.push_n(padded);
+    memcpy(dst, data, size);
+    if (padded > size) memset(dst + size, 0, padded - size);
+}
+
+void command_destroy(CommandBuffer& cb, Handle h) {
+    put(cb.bytes, CommandHeader{CMD_DESTROY, 0, 0, 0, h});
+    ++cb.count;
+}
+
+void engine_apply_commands(Engine& e) {
+    CommandBuffer& cb = e.commands;
+    if (cb.count == 0) return;
+    const u8* p   = cb.bytes.data;
+    const u8* end = p + cb.bytes.len;
+    while (p < end) {
+        const CommandHeader* h = take<CommandHeader>(p);
+        if (h->op == CMD_SPAWN) {
+            Table* t = engine_table(e, h->kind);
+            Handle entity = t ? t->spawn() : Handle{};
+            for (u32 i = 0; i < h->components; ++i) {
+                const ComponentEntryHeader* ch = take<ComponentEntryHeader>(p);
+                const u8* data = p;
+                p += (ch->size + 7) & ~7u;
+                if (entity.is_null()) continue;
+                Column* c = t->column(ch->component);
+                if (!c || c->desc->size != ch->size) {
+                    KV_ERROR("engine", "spawn_later of '%s': component '%s' is not one of its", t->desc->name,
+                             engine_component(e, ch->component) ? engine_component(e, ch->component)->name : "?");
+                    continue;
+                }
+                memcpy(c->data + (usize)entity.index() * c->stride, data, ch->size);
+                if (c->prev) memcpy(c->prev + (usize)entity.index() * c->stride, data, ch->size);
+            }
+            e.events.emit(Spawned{h->ticket, entity, h->kind}); // null entity: the kind was full or unknown
+        } else {
+            for (Table& t : e.tables)
+                if (t.kind == h->entity.kind()) { t.destroy(h->entity); break; } // stale: silently nothing
+        }
+    }
+    cb.bytes.clear();
+    cb.count = 0;
 }
 
 void engine_request_quit(Engine& e) { e.quit_requested = true; }

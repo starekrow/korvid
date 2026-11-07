@@ -1,0 +1,152 @@
+// Data access through the TickContext: resolved sets with wildcards expanded, columns by
+// name, views over every kind with a component set (constness as access mode), the kind
+// table for the writer, and commands that take effect at the phase boundary with a
+// Spawned event carrying the ticket.
+#include "korvid/core/engine.h"
+#include "korvid/core/module.h"
+#include "korvid/core/test.h"
+#include <string.h>
+
+namespace {
+
+using namespace kv;
+
+struct Pos { f32 x, y; };
+struct Vel { f32 dx, dy; };
+struct Hp  { i32 hp; };
+
+constinit const FieldDesc k_pos_fields[] = {KV_FIELD(Pos, x), KV_FIELD(Pos, y)};
+constinit const FieldDesc k_vel_fields[] = {KV_FIELD(Vel, dx), KV_FIELD(Vel, dy)};
+constinit const FieldDesc k_hp_fields[]  = {KV_FIELD(Hp, hp)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Pos, k_pos_fields, CompPrev), KV_COMPONENT(Vel, k_vel_fields), KV_COMPONENT(Hp, k_hp_fields),
+};
+constinit const char* const k_ship_components[]  = {"Pos", "Vel", "Hp"};
+constinit const char* const k_rock_components[]  = {"Pos", "Vel"};
+constinit const char* const k_decal_components[] = {"Pos"};
+constinit const KindDesc k_kinds[] = {
+    {.name = "g.ship",  .components = k_ship_components,  .capacity = 16},
+    {.name = "g.rock",  .components = k_rock_components,  .capacity = 16},
+    {.name = "g.decal", .components = k_decal_components, .capacity = 16},
+};
+
+struct Trace {
+    u32    kinds_seen;      // tables the move view visited
+    u32    rows_moved;
+    bool   destroyed_still_valid; // right after ctx.destroy, within the phase
+    bool   gone_next_phase;
+    u32    spawn_ticket;
+    Handle spawned;         // from the Spawned event
+    u32    spawned_kind;
+    u32    hp_sum;
+    Handle victim;
+    Handle fresh;           // direct spawn by the writer
+};
+constinit Trace g_trace = {};
+
+// Sim: moves every kind with Pos and Vel through a view, spawns a rock directly as the
+// writer of g.rock, schedules a ship by command and destroys the victim by command.
+void sys_move(TickContext& ctx) {
+    for (KindRows k : ctx.view<Pos, const Vel>()) {
+        ++g_trace.kinds_seen;
+        Span<Pos>       pos = k.col<Pos>();
+        Span<const Vel> vel = k.col<const Vel>();
+        for (u32 i = 0; i < k.rows(); ++i) {
+            if (!k.alive(i)) continue;
+            pos[i].x += vel[i].dx;
+            pos[i].y += vel[i].dy;
+            ++g_trace.rows_moved;
+        }
+    }
+    Table* rocks = ctx.write_kind("g.rock");
+    g_trace.fresh = rocks->spawn(Pos{100, 100}, Vel{1, 0});
+    g_trace.spawn_ticket = ctx.spawn_later("g.ship", Pos{7, 7}, Hp{3});
+    ctx.destroy(g_trace.victim);
+    g_trace.destroyed_still_valid = rocks->valid(g_trace.victim);
+}
+
+// PostSim: reads Hp by column name and the Spawned event; the victim is gone by now.
+void sys_tally(TickContext& ctx) {
+    const Table* rocks = ctx.read_kind("g.rock");
+    g_trace.gone_next_phase = !rocks->valid(g_trace.victim);
+    Span<const Hp> hp = ctx.read<Hp>("g.ship.Hp");
+    const Table* ships = ctx.read_kind("g.ship");
+    g_trace.hp_sum = 0;
+    for (u32 i = 0; i < hp.len; ++i) if (ships->is_alive(i)) g_trace.hp_sum += (u32)hp[i].hp;
+    for (const Spawned& s : ctx.events->read<Spawned>()) {
+        if (s.ticket != g_trace.spawn_ticket) continue;
+        g_trace.spawned      = s.entity;
+        g_trace.spawned_kind = s.kind;
+    }
+}
+
+constinit const char* const k_move_reads[]   = {"*.Vel"};
+constinit const char* const k_move_writes[]  = {"*.Pos", "g.rock"};
+constinit const char* const k_tally_reads[]  = {"g.ship.Hp", "g.ship", "g.rock"};
+constinit const SystemDesc k_systems[] = {
+    {.name = "g.move",  .phase = Phase::Sim,     .fn = sys_move,  .reads = k_move_reads,  .writes = k_move_writes},
+    {.name = "g.tally", .phase = Phase::PostSim, .fn = sys_tally, .reads = k_tally_reads},
+};
+KV_MODULE_DEFINE(k_g) = {.name = "g", .components = k_components, .kinds = k_kinds, .systems = k_systems};
+
+} // namespace
+
+void test_context(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("context");
+
+    const ModuleDesc* const list[] = {&k_g};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+
+    // Resolved sets: the wildcard became one id per kind that has the component.
+    const ScheduledSystem& move = e.phases.systems[(u32)Phase::Sim][0];
+    KV_CHECK(c, move.reads.len == 2 && move.writes.len == 4); // Vel in ship and rock; Pos in three kinds, plus g.rock
+    KV_CHECK(c, move.reads[0] == engine_resource_id(e, "g.ship.Vel") && move.reads[1] == engine_resource_id(e, "g.rock.Vel"));
+    KV_CHECK(c, move.writes[2] == engine_resource_id(e, "g.decal.Pos") && move.writes[3] == engine_resource_id(e, "g.rock"));
+    KV_CHECK(c, EventType<Spawned>::id == e.event_type_count); // the core's events come last
+
+    Table* ship  = engine_table(e, "g.ship");
+    Table* rock  = engine_table(e, "g.rock");
+    Table* decal = engine_table(e, "g.decal");
+    Handle s0 = ship->spawn(Pos{0, 0}, Vel{1, 1}, Hp{5});
+    Handle r0 = rock->spawn(Pos{10, 0}, Vel{0, 2});
+    Handle r1 = rock->spawn(Pos{20, 0}, Vel{0, 0});
+    Handle d0 = decal->spawn(Pos{1, 1});
+    g_trace = Trace{};
+    g_trace.victim = r1;
+
+    e.phases.run_tick(e, e.events, 1.0 / 60.0, 0);
+
+    // The view visited ship and rock (decal has no Vel) and moved the three live rows.
+    KV_CHECK(c, g_trace.kinds_seen == 2 && g_trace.rows_moved == 3);
+    KV_CHECK(c, ship->get<Pos>(s0)->x == 1 && rock->get<Pos>(r0)->y == 2 && decal->get<Pos>(d0)->x == 1);
+    KV_CHECK(c, ship->prev<Pos>(s0)->x == 0); // PreSim copied before the move
+    // Direct spawn by the writer: there at once.
+    KV_CHECK(c, rock->valid(g_trace.fresh) && rock->get<Pos>(g_trace.fresh)->x == 100);
+    // Command destroy: visible within the phase, gone at the boundary.
+    KV_CHECK(c, g_trace.destroyed_still_valid && g_trace.gone_next_phase && !rock->valid(r1));
+    // Command spawn: applied at the boundary, Spawned delivered to the next phase, unnamed component zero.
+    KV_CHECK(c, g_trace.spawn_ticket != 0 && !g_trace.spawned.is_null() && g_trace.spawned_kind == engine_kind_id(e, "g.ship"));
+    KV_CHECK(c, ship->valid(g_trace.spawned) && ship->get<Pos>(g_trace.spawned)->x == 7 && ship->get<Hp>(g_trace.spawned)->hp == 3);
+    KV_CHECK(c, ship->get<Vel>(g_trace.spawned)->dx == 0 && ship->prev<Pos>(g_trace.spawned)->x == 7);
+    KV_CHECK(c, g_trace.hp_sum == 8 && ship->live() == 2);
+    KV_CHECK(c, e.commands.count == 0 && e.commands.bytes.len == 0);
+
+    // A tick later the Spawned event is gone and nothing is pending.
+    g_trace.victim = Handle{}; // destroying null is silently nothing
+    e.phases.run_tick(e, e.events, 1.0 / 60.0, 1);
+    KV_CHECK(c, ship->live() == 3 && rock->live() == 3);
+
+    // Outside the schedule (no system) the context allows everything, for tests and tools.
+    TickContext ctx{};
+    ctx.engine = &e;
+    ctx.events = &e.events;
+    KV_CHECK(c, ctx.write<Hp>("g.ship.Hp").len == ship->rows() && ctx.read_kind("g.decal") == decal);
+    u32 n = 0;
+    for (KindRows k : ctx.view<const Pos>()) n += k.rows() > 0;
+    KV_CHECK(c, n == 3);
+
+    engine_shutdown(e);
+    KV_CHECK(c, EventType<Spawned>::id == 0);
+}
