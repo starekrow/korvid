@@ -1,15 +1,50 @@
 # Modules, and how code flows through a tick
 
-The long version of two paragraphs in the README: what a module is, how to write one,
-and what the engine does with each thing it declares when a tick runs. Read it once
-before writing a module; keep the README's quick reference open while typing.
+The long version of two paragraphs in the README: what a module is and why the engine is
+built out of them, how to write one, and what the engine does with each thing a module
+declares when a tick runs. Read it once before writing a module; keep the README's quick
+reference open while typing.
 
-## A module is data
+## What a module is
 
-A module is one `constinit ModuleDesc` and the functions it points at. Nothing runs
-before `main`, nothing registers itself: the build generates the executable's module
-list in dependency order (`modules.gen.cc`, from `module.lua` deps), `engine_init`
-reads the list once and does everything in order, `engine_shutdown` undoes it in reverse.
+Modules are the top-level structure of the code. Everything above core is one: the
+window and the input, the renderer, sprites, collision, assets, the frame loop, the CLI,
+and the game itself. An executable is a list of modules in dependency order; a minimal
+game links only the modules it names in `module.lua`, and the build generates the list.
+Core is the host that runs what the list declares. When you ask where some behaviour
+lives, the answer is a module; when you add behaviour, you add a module or extend one.
+
+A module **owns the types the engine can see**. Component schemas, entity kinds and event
+types are declared once, by the module they belong to, and from then on the engine knows
+them by name: how to lay them out, hash them, compare them, print them, which of their
+fields are handles. Other modules refer to them by that name and nothing else. The
+sprite module declares `Transform2` and `Sprite`; a game kind that lists both is drawn;
+the collision module declares `Collider2`; a kind that lists it is tested. No module
+includes another's internals to make that happen, and the types are reflected, so tools,
+the hash, the trace and the CLI read any module's data without that module's help.
+
+A module **defines the coarse-grained flow of the tick**. The tick's phases are fixed
+(Input, PreSim, Sim, PostSim); modules place systems in them and say what each reads and
+writes. That is all the ordering a module ever states: the engine derives the fine order
+within a phase from those sets, runs what is independent concurrently, delivers events
+and applies spawns and destroys at the phase boundaries, and runs handlers there on the
+batches that arrived. A module's view of time is therefore: my systems, in these phases,
+over this data; my handlers, when these events come; my timers and triggers, when these
+conditions hold. The rest is the engine's.
+
+A module **owns its state and its memory**. Startup builds the module's state in an arena
+the engine made for it; every system and handler of the module gets that state back;
+anything the module allocates under its name, on any thread, is charged to it. Budgets,
+leak reports and profiles are per module because the module is the unit of ownership.
+
+A module is also the unit of **dependency** (`module.lua` deps, which also order startup),
+of **documentation** (a README and documented headers, by the requirements), and of
+**distribution** (modules are source; the ecosystem shares them as such).
+
+What all of that comes down to in code is one `constinit ModuleDesc` and the functions
+it points at. Nothing runs before `main`, nothing registers itself: `engine_init` reads
+the generated list once and does everything in order, `engine_shutdown` undoes it in
+reverse.
 
 ```cpp
 struct ModuleDesc {
