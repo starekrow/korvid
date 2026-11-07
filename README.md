@@ -34,7 +34,10 @@ hand-written stand-in until kormake exists.
     sprite           Transform2 + Sprite components, SpriteWorld, extract_sprites
     renderer-vulkan  provides "render": dynamic rendering, sync2, bindless textures,
                      Slang shader compiled to SPIR-V by the build; the only Vulkan user
-    hello            the example game
+    frameloop        what every game needs and no game decides: options, window and
+                     renderer from a FrameLoopConfig, the loop (pump, ticks, extract,
+                     render), resize, reporting, ExitRequested on the bus
+    hello            the example game: a config, asset and material setup, one system
 
     ninja            # builds build/bin/hello, build/bin/shaders/sprite.spv and the tests
     ninja check      # runs the tests

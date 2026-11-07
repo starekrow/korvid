@@ -1,4 +1,4 @@
 module "hello" {
   output = "exe",
-  deps   = { "core", "platform", "math", "render", "asset", "sprite" },
+  deps   = { "core", "platform", "math", "render", "asset", "sprite", "frameloop" },
 }

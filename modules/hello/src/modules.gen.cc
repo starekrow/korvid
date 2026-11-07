@@ -6,6 +6,7 @@
 #include "korvid/renderer-vulkan/module.h"
 #include "korvid/asset/module.h"
 #include "korvid/sprite/module.h"
+#include "korvid/frameloop/module.h"
 #include "korvid/hello/module.h"
 
 namespace {
@@ -14,6 +15,7 @@ constinit const kv::ModuleDesc* const k_modules[] = {
     &kv::renderer_vulkan_module,
     &kv::asset_module,
     &kv::sprite_module,
+    &kv::frameloop_module,
     &kv::hello_module,
 };
 }

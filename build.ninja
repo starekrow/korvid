@@ -24,9 +24,11 @@ inc_render   = $inc_math -Imodules/render/include
 inc_sprite   = $inc_render -Imodules/sprite/include
 inc_rvk      = $inc_render -Imodules/platform/include -Imodules/renderer-vulkan/include
 inc_asset    = $inc_render -Imodules/platform/include -Imodules/asset/include
+inc_frameloop = $inc_platform -Imodules/math/include -Imodules/render/include $
+                -Imodules/sprite/include -Imodules/frameloop/include
 inc_hello    = $inc_platform -Imodules/math/include -Imodules/render/include $
                -Imodules/sprite/include -Imodules/asset/include -Imodules/renderer-vulkan/include $
-               -Imodules/hello/include
+               -Imodules/frameloop/include -Imodules/hello/include
 
 rule cxx
   command = $cxx $cxxflags $includes -MMD -MF $out.d -c $in -o $out
@@ -202,8 +204,16 @@ build $builddir/lib/libkv_renderer_vulkan.a: ar $builddir/obj/renderer-vulkan/mo
 # Shaders land next to the executables; the renderer finds them via the exe directory.
 build $builddir/bin/shaders/sprite.spv: slang modules/renderer-vulkan/shaders/sprite.slang
 
+# ---- frameloop -------------------------------------------------------------
+build $builddir/obj/frameloop/frameloop.o: cxx modules/frameloop/src/frameloop.cc
+  includes = $inc_frameloop
+
+build $builddir/lib/libkv_frameloop.a: ar $builddir/obj/frameloop/frameloop.o
+
 # ---- hello -----------------------------------------------------------------
 build $builddir/obj/hello/main.o: cxx modules/hello/src/main.cc
+  includes = $inc_hello
+build $builddir/obj/hello/game.o: cxx modules/hello/src/game.cc
   includes = $inc_hello
 build $builddir/obj/hello/modules.gen.o: cxx modules/hello/src/modules.gen.cc
   includes = $inc_hello
@@ -211,7 +221,8 @@ build $builddir/obj/hello/modules.gen.o: cxx modules/hello/src/modules.gen.cc
 # hello's assets
 build $builddir/bin/assets/hello/ball.png: copy modules/hello/assets/ball.png
 
-build $builddir/bin/hello: link $builddir/obj/hello/main.o $builddir/obj/hello/modules.gen.o $
+build $builddir/bin/hello: link $builddir/obj/hello/main.o $builddir/obj/hello/game.o $
+    $builddir/obj/hello/modules.gen.o $builddir/lib/libkv_frameloop.a $
     $builddir/lib/libkv_sprite.a $builddir/lib/libkv_asset.a $builddir/lib/libkv_renderer_vulkan.a $
     $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a | $builddir/bin/shaders/sprite.spv $
     $builddir/bin/assets/hello/ball.png
