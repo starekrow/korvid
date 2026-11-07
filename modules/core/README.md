@@ -25,22 +25,18 @@ limits that the root assigns to modules. `docs/design/allocators.md` has the des
 kind is an issuer registered with a resolve function, so anyone can turn a handle into a
 pointer without knowing who made it, and tools can describe it. `docs/design/handles.md`.
 
-**Modules** (`module.h`). A module is one `constinit ModuleDesc`: tables of components,
-kinds, events, resources, systems, handlers, triggers and CLI commands, plus startup and
-shutdown for OS resources and module state. The build generates the executable's module
-list in dependency order; `engine_init` reads it once, assigns every id, builds the
-schedule, and starts the modules in order. Module state lives in a module arena the
-engine owns.
+**Modules** (`module.h`). A module is one `constinit ModuleDesc`: tables of what it
+declares (components, kinds, events, resources, systems, handlers, triggers, CLI
+commands) plus startup and shutdown. The build generates the executable's module list in
+dependency order; `engine_init` reads it once, assigns every id, builds the schedule and
+starts the modules. `MODULES.md` is the long version: how to write one, and how code
+flows through a tick.
 
 **The tick** (`tick.h`, `phase.h`, `engine.h`). `engine_frame(e, dt)` advances a fixed-step
-clock and runs the ticks it owes, capped per frame. A tick runs the phases in order
-(Input, PreSim, Sim, PostSim); at each phase boundary the engine delivers events, runs
-handlers in waves, and applies commands. Within a phase, systems form a DAG derived from
-their declared reads and writes (a reader runs after every writer of what it reads;
-`after` and `before` add edges; two unordered writers or a cycle is an init error with
-the names in the message), and systems with no path between them run concurrently on the
-job pool. Each system's module state is an implicit resource it writes unless it says
-`StateUse::Read` or `None`.
+clock and runs the ticks it owes. A tick is four phases (Input, PreSim, Sim, PostSim);
+between phases the engine delivers events, runs handlers and applies commands; within a
+phase, systems run in an order derived from their declared reads and writes, and the
+independent ones run concurrently on the job pool. `MODULES.md` walks through it.
 
 **Data** (`component.h`, `kind.h`). A component is a plain struct with a field table, which
 is the reflection everything reads: layout, hashing, comparison, describe, which fields
@@ -75,63 +71,10 @@ seeded PCG32 (`random.h`), a test harness (`test.h`), a leveled log (`log.h`).
 
 ## Using it
 
-**A module** is a header declaring the record and a source defining it:
-
-```cpp
-// include/korvid/mygame/module.h
-KV_MODULE_DECLARE(mygame_module);
-
-// src/game.cc
-struct Velocity { vec2 v; };
-constinit const FieldDesc     k_velocity_fields[] = {KV_FIELDS(Velocity, v)};
-constinit const ComponentDesc k_components[]      = {KV_COMPONENT(Velocity, k_velocity_fields)};
-
-constinit u32 g_ship_kind = 0;
-constinit const char* const k_ship_components[] = {"Transform2", "Sprite", "Velocity"};
-constinit const KindDesc    k_kinds[] = {{.name = "mygame.ship", .components = k_ship_components, .capacity = 64, .id = &g_ship_kind}};
-
-void move(TickContext& ctx) {
-    for (KindRows k : ctx.view<Transform2, const Velocity>()) {
-        Span<Transform2>     t = k.col<Transform2>();
-        Span<const Velocity> v = k.col<const Velocity>();
-        for (u32 i = 0; i < k.rows(); ++i) if (k.alive(i)) t[i].position += v[i].v * (f32)ctx.dt;
-    }
-}
-constinit const char* const k_move_reads[]  = {"*.Velocity"};
-constinit const char* const k_move_writes[] = {"*.Transform2"};
-constinit const SystemDesc  k_systems[] = {
-    {.name = "mygame.move", .phase = Phase::Sim, .fn = move, .reads = k_move_reads, .writes = k_move_writes},
-};
-
-struct Game { Rng rng; };
-bool mygame_startup(Engine&, ModuleInstance& self) { self.set_state(arena_push<Game>(self.arena)); return true; }
-
-KV_MODULE_DEFINE(mygame_module) = {
-    .name = "mygame", .components = k_components, .kinds = k_kinds, .systems = k_systems,
-    .startup = mygame_startup, .memory = {.reserve = 64 * 1024},
-};
-```
-
-`module.lua` lists the deps; kormake generates the module list. Everything else (the
-window, the renderer, the loop) is the frameloop module's.
-
-**A handler** reacts to a batch of events at a phase boundary:
-
-```cpp
-void on_hit(TickContext& ctx, Span<const RockHit> hits) {
-    static const u32 k_hp = ctx.column_id("mygame.rock.Health"); // looked up once
-    Span<Health> hp = ctx.write<Health>(k_hp);
-    for (const RockHit& h : hits) if (--hp[h.rock.index()].hp <= 0) ctx.destroy(h.rock); // delivered handles are live
-}
-constinit const char* const k_hit_writes[] = {"mygame.rock.Health"};
-constinit const HandlerDesc k_handlers[] = {{.name = "mygame.on_hit", KV_ON(RockHit, on_hit), .writes = k_hit_writes}};
-```
-
-**Scheduling and timers**: `ctx.schedule_in(Expire{bullet}, 72)` returns a ticket;
-`ctx.cancel(ticket)` withdraws it. A trigger on `"mygame.ship.Health.hp"` crossing below 1
-emits `StateEdge` without anyone polling.
-
-**Parallel work**: inside a system, `parallel_for(ctx, rows, 2048, [&](ChunkContext& cc, u32 b, u32 e) { ... cc.emit(...); cc.spawn_later(kind, ...); })`.
+**Write a module.** A header declaring the record, a source defining it with its tables,
+a `module.lua` naming the deps. `MODULES.md` has the whole shape with a component, a
+kind, a system, a handler, timers, triggers and parallel work, and what happens to each
+when the tick runs.
 
 **Memory in a game**: the module arena for what lives as long as the module
 (`arena_push<T>(self.arena)`), `self.general` for anything growable (`Array`, `Map`
