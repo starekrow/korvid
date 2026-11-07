@@ -26,6 +26,7 @@ struct Engine {
     Array<ModuleInstance> modules;   // module-list order
     Array<ResourceEntry>  resources; // id = index + 1; 0 is invalid
     Array<ComponentEntry> components; // id = index + 1 = ComponentType<T>::id; 0 is invalid
+    Array<Table>          tables;     // kind id = index + 1; addresses stable after init
     u32                   event_type_count = 0;
     u64                   frame_count      = 0;
     bool                  quit_requested   = false;
@@ -57,5 +58,10 @@ u32                  engine_component_id(const Engine& e, const char* name);
 const ComponentDesc* engine_component(const Engine& e, u32 id);
 template <class T>
 const ComponentDesc* engine_component(const Engine& e) { return engine_component(e, ComponentType<T>::id); }
+
+// Entity kinds, by name or id. Null for unknown.
+u32    engine_kind_id(const Engine& e, const char* name);
+Table* engine_table(Engine& e, u32 kind_id);
+Table* engine_table(Engine& e, const char* name);
 
 } // namespace kv

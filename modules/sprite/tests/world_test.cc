@@ -1,4 +1,9 @@
+// The sprite world is the engine's "sprite.entity" table: create and typed lookups,
+// previous transforms kept by the engine, stale handles, slot reuse, and the entity as a
+// handle the registry can resolve and describe.
 #include "korvid/sprite/world.h"
+#include "korvid/sprite/module.h"
+#include "korvid/core/engine.h"
 #include "korvid/core/test.h"
 #include <string.h>
 
@@ -6,23 +11,30 @@ void test_sprite_world(kv::TestCtx& c) {
     using namespace kv;
     c.begin("sprite_world");
 
-    SpriteWorld w;
+    const ModuleDesc* const list[] = {&sprite_module};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    SpriteWorld& w = *sprite_world(e);
+    KV_CHECK(c, w.table && w.kind() != 0 && engine_table(e, "sprite.entity") == w.table);
+    KV_CHECK(c, engine_resource_id(e, "sprite.entity") && engine_resource_id(e, "sprite.entity.Transform2") &&
+                engine_resource_id(e, "sprite.entity.Sprite"));
+
     Sprite s;
     s.layer = 3;
     Handle a = w.create(transform2_at(point2{1, 2}), s);
     Handle b = w.create(transform2_at(point2{3, 4}), s);
-    KV_CHECK(c, w.live() == 2);
+    KV_CHECK(c, w.live() == 2 && a.kind() == w.kind());
     KV_CHECK(c, w.transform(a) && w.transform(a)->position == point2{1, 2});
     KV_CHECK(c, w.sprite(b) && w.sprite(b)->layer == 3);
 
     // A new entity starts with prev == cur.
-    KV_CHECK(c, w.prev_transforms[a.index()].position == point2{1, 2});
+    KV_CHECK(c, w.prev_transform(a)->position == point2{1, 2});
 
-    // begin_tick copies cur into prev; moving afterwards leaves prev behind.
+    // The engine copies cur into prev at the top of PreSim; moving afterwards leaves prev behind.
     w.transform(a)->position = point2{10, 2};
-    w.begin_tick();
+    e.phases.run_tick(e, e.events, 1.0 / 60.0, 0);
     w.transform(a)->position = point2{20, 2};
-    KV_CHECK(c, w.prev_transforms[a.index()].position == point2{10, 2});
+    KV_CHECK(c, w.prev_transform(a)->position == point2{10, 2});
     KV_CHECK(c, w.transform(a)->position == point2{20, 2});
 
     // Destroy, then use the stale handle: null, never another entity's data.
@@ -37,28 +49,23 @@ void test_sprite_world(kv::TestCtx& c) {
     KV_CHECK(c, d.index() == a.index() && d.gen() != a.gen());
     KV_CHECK(c, w.transform(a) == nullptr);
     KV_CHECK(c, w.transform(d)->position == point2{7, 7});
-    KV_CHECK(c, w.prev_transforms[d.index()].position == point2{7, 7});
+    KV_CHECK(c, w.prev_transform(d)->position == point2{7, 7});
 
-    w.free();
-    KV_CHECK(c, w.live() == 0);
-    KV_CHECK(c, w.transforms.len == 0);
-
-    // With init, the world is a handle issuer: a blind resolve of an entity is its
-    // transform, the type key says so, and the description is readable.
-    SpriteWorld world;
-    KV_CHECK(c, world.init(nullptr, 1024, MemTag{}) && world.kind != 0);
+    // A blind resolve of an entity is its transform (the kind's first component), the
+    // type key says so, and the description is every component through its schema.
     Sprite sp; sp.layer = 4;
-    Handle e = world.create(transform2_at(point2{3, 4}), sp);
-    KV_CHECK(c, e.kind() == world.kind);
-    KV_CHECK(c, resolve(e) == world.transform(e));
-    KV_CHECK(c, resolve<Transform2>(e) == world.transform(e) && resolve<Sprite>(e) == nullptr);
-    char text[128];
-    kv_handle_describe(e.bits, text, sizeof text);
-    KV_CHECK(c, strcmp(text, "sprite.entity#0:1 Transform2{position=(3, 4), rotation=0, scale=(1, 1)} layer 4 (1 live)") == 0);
-    world.destroy(e);
-    kv_handle_describe(e.bits, text, sizeof text);
-    KV_CHECK(c, strstr(text, "stale") != nullptr && resolve(e) == nullptr);
-    u16 kind = world.kind;
-    world.free();
+    Handle f = w.create(transform2_at(point2{3, 4}), sp);
+    KV_CHECK(c, resolve(f) == w.transform(f));
+    KV_CHECK(c, resolve<Transform2>(f) == w.transform(f) && resolve<Sprite>(f) == nullptr);
+    char text[256];
+    kv_handle_describe(f.bits, text, sizeof text);
+    KV_CHECK(c, strcmp(text, "sprite.entity#2:1 Transform2{position=(3, 4), rotation=0, scale=(1, 1)} "
+                             "Sprite{material=null, uv=(0, 0, 1, 1), size=(64, 64), tint=(1, 1, 1, 1), layer=4}") == 0);
+    w.destroy(f);
+    kv_handle_describe(f.bits, text, sizeof text);
+    KV_CHECK(c, strstr(text, "stale") != nullptr && resolve(f) == nullptr);
+
+    u16 kind = w.kind();
+    engine_shutdown(e);
     KV_CHECK(c, !kv_handle_kind_is_live(kind));
 }

@@ -8,7 +8,7 @@
 //   2. The build generates the module list (hello/src/modules.gen.cc stands in by hand),
 //      in dependency order. engine_init is the only thing that reads it.
 //   3. Order is list order, then declaration order. Modules start in list order and stop
-//      in reverse. Event and component ids are assigned in that order. Within a tick phase, systems run
+//      in reverse. Event, component and kind ids are assigned in that order. Within a tick phase, systems run
 //      in module order, then in the order written in the module's table.
 //   4. Ids live in zero-initialized slots that engine_init fills and engine_shutdown
 //      clears. Id 0 is invalid, so use before init or after shutdown asserts.
@@ -18,6 +18,7 @@
 #pragma once
 #include "korvid/core/arena.h"
 #include "korvid/core/component.h"
+#include "korvid/core/kind.h"
 #include "korvid/core/phase.h"
 
 namespace kv {
@@ -68,6 +69,7 @@ struct ModuleDesc {
     const char*               name      = nullptr;
     Span<const EventTypeDesc> events     = {};
     Span<const ComponentDesc> components = {}; // schemas; the engine lays out storage from them
+    Span<const KindDesc>      kinds      = {}; // entity tables the engine creates from those schemas
     Span<const ResourceDesc>  resources  = {};
     Span<const SystemDesc>    systems    = {};
     bool (*startup)(Engine& engine, ModuleInstance& self)  = nullptr;

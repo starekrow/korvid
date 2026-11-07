@@ -9,8 +9,11 @@ renderer-issued handles whose index is the GPU slot or row; a null or stale mate
 renders with the built-in red/white checkerboard.
 
 Module registration is declarative (`core/module.h`): a module is one `constinit`
-`ModuleDesc` with tables of event types, component schemas, resources and systems, plus
-startup/shutdown for OS resources and module state. Nothing registers itself and nothing runs before main;
+`ModuleDesc` with tables of event types, component schemas, entity kinds, resources and
+systems, plus startup/shutdown for OS resources and module state. A kind is a fixed set
+of components with a capacity; the engine builds a table per kind (one SoA column per
+component on reserved pages, a handle kind, a resource per column) and copies the `prev`
+columns at the top of PreSim. Nothing registers itself and nothing runs before main;
 the build-generated list (`hello/src/modules.gen.cc` for now) is the only input. Order is
 list order, then declaration order: modules start in list order and stop in reverse,
 event ids are assigned in that order, and within each tick phase (input, presim, sim,
@@ -25,7 +28,8 @@ hand-written stand-in until kormake exists.
     core             memory (general, arenas, scratch, pools on reserved pages; see
                      docs/design/allocators.md), handles with a kind registry and C API
                      (docs/design/handles.md), component schemas (field tables that hash,
-                     compare and print rows), Map<K, V> (dense entries, index past 16),
+                     compare and print rows), entity kinds (engine-owned tables),
+                     Map<K, V> (dense entries, index past 16),
                      Name interning, Rng (PCG32), events, phases, tick clock, log
     platform         SDL3 window and keyboard input (events on the bus); the I/O queue
                      (io_uring-shaped: submit, pump, reap; mocked with fread for now)
@@ -36,9 +40,11 @@ hand-written stand-in until kormake exists.
     asset            load_texture returns a handle at once; the read rides the I/O queue,
                      decode (PNG on zlib) and upload happen in asset.pump, completion is
                      AssetReady/AssetFailed on the bus
-    sprite           Transform2 + Sprite components (declared schemas), SpriteWorld, and the extract: each
-                     tick emits a Tick marker plus a Set for every entity that is new or
-                     changed and a Remove for every one destroyed (sprite.extract, PostSim)
+    sprite           Transform2 + Sprite schemas, the kind "sprite.entity" with the
+                     SpriteWorld convenience surface over its table, and the extract: each
+                     tick, for every kind with both components, a Tick marker plus a Set
+                     for every entity that is new or changed and a Remove for every one
+                     destroyed (sprite.extract, PostSim)
     renderer-vulkan  provides "render": a persistent sprite world keyed by entity handle
                      with previous and current state per sprite, dynamic rendering, sync2,
                      bindless textures, Slang shader compiled to SPIR-V by the build; the

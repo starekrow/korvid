@@ -11,14 +11,16 @@ namespace {
 
 struct SpriteState {
     SpriteWorld        world;
+    ExtractState       extract;
     Array<SpriteDelta> deltas;
 };
 
-bool sprite_startup(Engine&, ModuleInstance& self) {
+bool sprite_startup(Engine& engine, ModuleInstance& self) {
     SpriteState* s = arena_push<SpriteState>(self.arena);
     if (!s) return false;
-    s->deltas.alloc = &self.general;
-    if (!s->world.init(&self.general, KV_POOL_DEFAULT_MAX, self.general.tag)) return false;
+    s->deltas.alloc = s->extract.tables.alloc = &self.general;
+    s->world.table = engine_table(engine, "sprite.entity"); // the engine built it from the kind table
+    if (!s->world.table) return false;
     self.set_state(s);
     return true;
 }
@@ -26,19 +28,15 @@ bool sprite_startup(Engine&, ModuleInstance& self) {
 void sprite_shutdown(Engine&, ModuleInstance& self) {
     SpriteState* s = self.state_as<SpriteState>();
     if (!s) return;
-    s->world.free();
+    s->extract.free();
     s->deltas.free();
 }
 
-// Phase PreSim: the current transforms become the previous ones, before anything moves.
-void sprite_begin_tick(TickContext& ctx) {
-    ctx.state_as<SpriteState>().world.begin_tick();
-}
-
-// Phase PostSim: what this tick changed, appended for the renderer.
+// Phase PostSim: what this tick changed, in every kind with Transform2 and Sprite,
+// appended for the renderer. The engine copied current into previous at PreSim.
 void sprite_extract(TickContext& ctx) {
     SpriteState& s = ctx.state_as<SpriteState>();
-    extract_sprites(s.world, s.deltas);
+    extract_sprites(*ctx.engine, s.extract, s.deltas);
 }
 
 // The schemas. Transform2 keeps a previous-tick copy for interpolation; Sprite does not.
@@ -53,12 +51,17 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Sprite, k_sprite_fields),
 };
 
-constinit const ResourceDesc k_resources[] = {{"sprite.world"}, {"sprite.deltas"}};
-constinit const char* const  k_world[]     = {"sprite.world"};
-constinit const char* const  k_deltas[]    = {"sprite.deltas"};
+// The kind. Any kind with these two components is a sprite to the extract.
+constinit const char* const k_entity_components[] = {"Transform2", "Sprite"};
+constinit const KindDesc    k_kinds[] = {
+    {.name = "sprite.entity", .components = k_entity_components, .capacity = KV_POOL_DEFAULT_MAX},
+};
+
+constinit const ResourceDesc k_resources[] = {{"sprite.deltas"}};
+constinit const char* const  k_extract_reads[]  = {"*.Transform2", "*.Sprite"};
+constinit const char* const  k_extract_writes[] = {"sprite.deltas"};
 constinit const SystemDesc   k_systems[]   = {
-    {.name = "sprite.begin_tick", .phase = Phase::PreSim,  .fn = sprite_begin_tick, .writes = k_world},
-    {.name = "sprite.extract",    .phase = Phase::PostSim, .fn = sprite_extract, .reads = k_world, .writes = k_deltas},
+    {.name = "sprite.extract", .phase = Phase::PostSim, .fn = sprite_extract, .reads = k_extract_reads, .writes = k_extract_writes},
 };
 
 } // namespace
@@ -66,6 +69,7 @@ constinit const SystemDesc   k_systems[]   = {
 KV_MODULE_DEFINE(sprite_module) = {
     .name       = "sprite",
     .components = k_components,
+    .kinds      = k_kinds,
     .resources  = k_resources,
     .systems    = k_systems,
     .startup    = sprite_startup,

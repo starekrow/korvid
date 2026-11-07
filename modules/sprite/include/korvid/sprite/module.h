@@ -1,8 +1,8 @@
-// Korvid sprite: module record. The module owns the SpriteWorld (resource
-// "sprite.world"), snapshots its transforms at the start of every tick
-// (system "sprite.begin_tick", phase PreSim) and extracts what changed at the end of
-// every tick (system "sprite.extract", phase PostSim) into a delta stream the frame
-// loop hands to the renderer.
+// Korvid sprite: module record. The module declares the Transform2 and Sprite schemas
+// and the kind "sprite.entity" (resources "sprite.entity", "sprite.entity.Transform2",
+// "sprite.entity.Sprite"), and extracts what changed in every kind with those two
+// components at the end of every tick (system "sprite.extract", phase PostSim) into a
+// delta stream the frame loop hands to the renderer.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/module.h"

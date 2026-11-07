@@ -96,6 +96,65 @@ void unregister_components(Engine& e) {
     e.components.free();
 }
 
+// Kinds: one table each, in module then declaration order, created here so their
+// resources exist before any system references them. Table addresses never move after
+// this: the handle registry holds them as contexts.
+bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules) {
+    u32 count = 0;
+    for (const ModuleDesc* m : modules) count += m->kinds.len;
+    e.tables.reserve(count);
+    for (u32 i = 0; i < modules.len; ++i) {
+        const ModuleDesc& m = *modules[i];
+        for (const KindDesc& k : m.kinds) {
+            if (!k.name || !k.name[0] || strlen(k.name) >= KV_KIND_NAME_MAX) {
+                KV_ERROR("engine", "module '%s' has a kind with no name or a name over %u characters", m.name, KV_KIND_NAME_MAX - 1);
+                return false;
+            }
+            if (k.capacity == 0) { KV_ERROR("engine", "kind '%s' in module '%s' has zero capacity", k.name, m.name); return false; }
+            if (u32 id = engine_kind_id(e, k.name)) {
+                KV_ERROR("engine", "kind '%s' declared by both '%s' and '%s'", k.name, modules[e.tables[id - 1].module]->name, m.name);
+                return false;
+            }
+            if (engine_resource_id(e, k.name)) { KV_ERROR("engine", "kind '%s' in module '%s' collides with a resource of that name", k.name, m.name); return false; }
+            const ComponentDesc* comps[32];
+            if (k.components.len > KV_COUNTOF(comps)) { KV_ERROR("engine", "kind '%s' has more than %u components", k.name, KV_COUNTOF(comps)); return false; }
+            for (u32 c = 0; c < k.components.len; ++c) {
+                u32 cid = engine_component_id(e, k.components[c]);
+                if (!cid) { KV_ERROR("engine", "kind '%s' in module '%s' uses unknown component '%s'", k.name, m.name, k.components[c]); return false; }
+                if (strlen(k.components[c]) >= KV_KIND_NAME_MAX) { KV_ERROR("engine", "component '%s' name is too long for a kind resource", k.components[c]); return false; }
+                for (u32 d = 0; d < c; ++d)
+                    if (comps[d] == e.components[cid - 1].desc) { KV_ERROR("engine", "kind '%s' lists component '%s' twice", k.name, k.components[c]); return false; }
+                comps[c] = e.components[cid - 1].desc;
+            }
+            mem_set_owner((u16)(i + 1));
+            MemTag tag;
+            tag.module = (u16)(i + 1);
+            Table& t = e.tables.push(Table{});
+            bool ok = t.init(k, Span<const ComponentDesc* const>(comps, k.components.len), e.tables.len - 1, i, tag);
+            mem_set_owner(0);
+            if (!ok) { KV_ERROR("engine", "kind '%s' in module '%s': table creation failed", k.name, m.name); return false; }
+            e.resources.push(ResourceEntry{k.name, i});
+            t.resource = e.resources.len;
+            for (Column& c : t.columns) {
+                e.resources.push(ResourceEntry{c.resource_name, i});
+                c.resource = e.resources.len;
+            }
+            if (k.id) *k.id = e.tables.len;
+        }
+    }
+    return true;
+}
+
+void free_tables(Engine& e) {
+    for (Table& t : e.tables) {
+        if (t.desc && t.desc->id) *t.desc->id = 0;
+        mem_set_owner((u16)(t.module + 1));
+        t.free();
+        mem_set_owner(0);
+    }
+    e.tables.free();
+}
+
 bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
     for (u32 i = 0; i < modules.len; ++i) {
         for (const ResourceDesc& r : modules[i]->resources) {
@@ -113,6 +172,18 @@ bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
 bool check_resource_refs(const Engine& e, const ModuleDesc& m, const SystemDesc& s,
                          Span<const char* const> refs, const char* kind) {
     for (const char* name : refs) {
+        if (name[0] == '*' && name[1] == '.') {
+            // "*.Component": that column in every kind. It must exist somewhere.
+            u32 cid = engine_component_id(e, name + 2);
+            bool any = false;
+            for (const Table& t : e.tables) any = any || t.has(cid);
+            if (!any) {
+                KV_ERROR("engine", "system '%s' in module '%s' %s '%s' but no kind has component '%s'",
+                         s.name, m.name, kind, name, name + 2);
+                return false;
+            }
+            continue;
+        }
         if (!engine_resource_id(e, name)) {
             KV_ERROR("engine", "system '%s' in module '%s' %s unknown resource '%s'",
                      s.name, m.name, kind, name);
@@ -168,6 +239,19 @@ void log_components(const Engine& e) {
     }
 }
 
+void log_kinds(const Engine& e) {
+    for (const Table& t : e.tables) {
+        char line[512];
+        u32 at = 0;
+        for (const Column& c : t.columns) {
+            int n = snprintf(line + at, sizeof line - at, "%s%s", at ? ", " : "", c.desc->name);
+            if (n < 0 || at + (u32)n >= sizeof line) break;
+            at += (u32)n;
+        }
+        KV_INFO("engine", "kind %-2u %-16s %u slots: %s", t.index + 1, t.desc->name, t.desc->capacity, at ? line : "(no components)");
+    }
+}
+
 void log_schedule(const Engine& e) {
     for (u32 p = 0; p < (u32)Phase::Count; ++p) {
         char line[512];
@@ -194,11 +278,12 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
         e.modules.push(inst);
     }
 
-    bool ok = register_events(e, modules) && register_components(e, modules) && register_resources(e, modules) &&
-              build_schedule(e, modules);
+    bool ok = register_events(e, modules) && register_components(e, modules) && register_kinds(e, modules) &&
+              register_resources(e, modules) && build_schedule(e, modules);
     if (ok) {
         e.events.init(1);
         log_components(e);
+        log_kinds(e);
         log_schedule(e);
         for (ModuleInstance& inst : e.modules) {
             const ModuleDesc& m = *inst.desc;
@@ -242,6 +327,7 @@ void engine_shutdown(Engine& e) {
         arena_destroy(inst.arena); // the module's state goes with it
         mem_set_owner(0);
     }
+    free_tables(e); // after every module is down: nothing holds an entity any more
     for (const ModuleInstance& inst : e.modules) event_types_unregister(inst.desc->events);
     unregister_components(e);
     e.phases.free();
@@ -298,5 +384,17 @@ u32 engine_component_id(const Engine& e, const char* name) {
 const ComponentDesc* engine_component(const Engine& e, u32 id) {
     return id && id <= e.components.len ? e.components[id - 1].desc : nullptr;
 }
+
+u32 engine_kind_id(const Engine& e, const char* name) {
+    for (u32 i = 0; i < e.tables.len; ++i)
+        if (names_equal(e.tables[i].desc->name, name)) return i + 1;
+    return 0;
+}
+
+Table* engine_table(Engine& e, u32 kind_id) {
+    return kind_id && kind_id <= e.tables.len ? &e.tables[kind_id - 1] : nullptr;
+}
+
+Table* engine_table(Engine& e, const char* name) { return engine_table(e, engine_kind_id(e, name)); }
 
 } // namespace kv

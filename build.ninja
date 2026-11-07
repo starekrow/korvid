@@ -90,13 +90,15 @@ build $builddir/obj/core/name.o: cxx modules/core/src/name.cc
   includes = $inc_core
 build $builddir/obj/core/component.o: cxx modules/core/src/component.cc
   includes = $inc_core
+build $builddir/obj/core/kind.o: cxx modules/core/src/kind.cc
+  includes = $inc_core
 
 build $builddir/lib/libkv_core.a: ar $builddir/obj/core/memory.o $
     $builddir/obj/core/log.o $builddir/obj/core/event.o $builddir/obj/core/tick.o $
     $builddir/obj/core/phase.o $builddir/obj/core/engine.o $builddir/obj/core/posix/time.o $
     $builddir/obj/core/posix/os_memory.o $builddir/obj/core/arena.o $builddir/obj/core/thread.o $
     $builddir/obj/core/handle.o $builddir/obj/core/hash.o $builddir/obj/core/name.o $
-    $builddir/obj/core/component.o
+    $builddir/obj/core/component.o $builddir/obj/core/kind.o
 
 build $builddir/obj/core/tests/main.o: cxx modules/core/tests/main.cc
   includes = $inc_core
@@ -118,13 +120,15 @@ build $builddir/obj/core/tests/random_test.o: cxx modules/core/tests/random_test
   includes = $inc_core
 build $builddir/obj/core/tests/component_test.o: cxx modules/core/tests/component_test.cc
   includes = $inc_core
+build $builddir/obj/core/tests/kind_test.o: cxx modules/core/tests/kind_test.cc
+  includes = $inc_core
 
 build $builddir/bin/core_tests: link $builddir/obj/core/tests/main.o $
     $builddir/obj/core/tests/handle_test.o $builddir/obj/core/tests/event_test.o $
     $builddir/obj/core/tests/tick_test.o $builddir/obj/core/tests/module_test.o $
     $builddir/obj/core/tests/memory_test.o $builddir/obj/core/tests/map_test.o $
     $builddir/obj/core/tests/name_test.o $builddir/obj/core/tests/random_test.o $
-    $builddir/obj/core/tests/component_test.o $builddir/lib/libkv_core.a
+    $builddir/obj/core/tests/component_test.o $builddir/obj/core/tests/kind_test.o $builddir/lib/libkv_core.a
 
 # ---- platform --------------------------------------------------------------
 build $builddir/obj/platform/module.o: cxx modules/platform/src/module.cc
@@ -169,15 +173,12 @@ build $builddir/bin/math_tests: link $builddir/obj/math/tests/main.o $
 # ---- render (header-only interface; no tests of its own) -------------------
 
 # ---- sprite ----------------------------------------------------------------
-build $builddir/obj/sprite/world.o: cxx modules/sprite/src/world.cc
-  includes = $inc_sprite
 build $builddir/obj/sprite/extract.o: cxx modules/sprite/src/extract.cc
   includes = $inc_sprite
 build $builddir/obj/sprite/module.o: cxx modules/sprite/src/module.cc
   includes = $inc_sprite
 
-build $builddir/lib/libkv_sprite.a: ar $builddir/obj/sprite/world.o $builddir/obj/sprite/extract.o $
-    $builddir/obj/sprite/module.o
+build $builddir/lib/libkv_sprite.a: ar $builddir/obj/sprite/extract.o $builddir/obj/sprite/module.o
 
 build $builddir/obj/sprite/tests/main.o: cxx modules/sprite/tests/main.cc
   includes = $inc_sprite

@@ -117,7 +117,7 @@ void game_update(Game& g, TickContext& ctx) {
         spawn_ball(g, world, b[BALL_RANDOM], point2{200.0f, 100.0f});
         spawn_ball(g, world, b[BALL_BLINK], point2{0.0f, -120.0f});
         for (u32 i = 0; i < BALL_COUNT; ++i) {
-            char text[96];
+            char text[256];
             kv_handle_describe(b[i].entity.bits, text, sizeof text);
             KV_INFO("game", "ball %u is %s", i, text);
         }
@@ -246,7 +246,7 @@ void hello_shutdown(Engine&, ModuleInstance& self) {
 }
 
 constinit const char* const k_sim_reads[]  = {"input.state", "asset.textures"};
-constinit const char* const k_sim_writes[] = {"sprite.world"};
+constinit const char* const k_sim_writes[] = {"sprite.entity"}; // spawn and destroy, and every column
 constinit const SystemDesc  k_systems[]    = {
     {.name = "hello.sim", .phase = Phase::Sim, .fn = hello_sim, .reads = k_sim_reads, .writes = k_sim_writes},
 };

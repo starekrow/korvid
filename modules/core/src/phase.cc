@@ -1,4 +1,5 @@
 #include "korvid/core/phase.h"
+#include "korvid/core/engine.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/module.h"
 
@@ -26,8 +27,11 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
     ctx.events = &events;
     ctx.dt     = dt;
     ctx.tick   = tick;
-    for (Array<ScheduledSystem>& phase : systems) {
+    for (u32 p = 0; p < (u32)Phase::Count; ++p) {
+        Array<ScheduledSystem>& phase = systems[p];
         events.deliver(); // phase boundary: pending events become visible
+        if ((Phase)p == Phase::PreSim)
+            for (Table& t : engine.tables) t.begin_tick(); // current becomes previous, before anything moves
         for (ScheduledSystem& s : phase) {
             ctx.state      = s.module->state;
             ctx.state_type = s.module->state_type;
