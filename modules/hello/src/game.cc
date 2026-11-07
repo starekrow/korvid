@@ -1,10 +1,11 @@
-// hello: the game. Startup loads the ball texture and builds the materials; one system
-// runs a three-state machine (INIT -> RUN -> EXIT) in phase Sim that bounces four balls
-// over a tiled background: one horizontally, one vertically, one in random directions,
-// and one that blinks in and out of existence. Each has its own material, so all three
-// blend modes are on screen. ExitRequested from the frame loop sends it through EXIT,
-// which cleans up and asks the engine to quit. No window, renderer, loop or options
-// here: those are the frameloop module's.
+// hello: the example game, written the way a game is meant to be written here. Balls are
+// a kind (Transform2, Sprite, Motion, Bounces). One system moves every ball and emits
+// Bounced at the edges; a handler counts bounces and re-aims the random ball. The blinker
+// lives by scheduled events: BlinkOff destroys it and schedules BlinkOn, BlinkOn spawns
+// a new one by command, and the Spawned event's ticket says which ball to schedule
+// BlinkOff for. A trigger fires when a ball's bounce count passes two. The state machine
+// (INIT -> RUN -> EXIT) spawns and destroys by command, so it holds no handles and no
+// writes. No window, renderer, loop or options here: those are the frameloop module's.
 #include "korvid/hello/module.h"
 #include "korvid/asset/texture.h"
 #include "korvid/core/arena.h"
@@ -12,8 +13,9 @@
 #include "korvid/core/log.h"
 #include "korvid/core/random.h"
 #include "korvid/frameloop/frameloop.h"
+#include "korvid/math/fields.h"
 #include "korvid/platform/events.h"
-#include "korvid/platform/module.h"
+#include "korvid/platform/host_window.h"
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
@@ -22,7 +24,45 @@ namespace kv {
 
 namespace {
 
+// ---- what a ball is ------------------------------------------------------------------
+struct Motion  { vec2 velocity; u8 random; }; // pixels per second; random: re-aim on every bounce
+struct Bounces { u32 count; };
+
+constinit const FieldDesc k_motion_fields[]  = {KV_FIELDS(Motion, velocity, random)};
+constinit const FieldDesc k_bounces_fields[] = {KV_FIELDS(Bounces, count)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Motion, k_motion_fields),
+    KV_COMPONENT(Bounces, k_bounces_fields, CompPrev), // prev: the trigger below watches it
+};
+
+constinit u32 g_ball_kind = 0;
+constinit const char* const k_ball_components[] = {"Transform2", "Sprite", "Motion", "Bounces"};
+constinit const KindDesc k_kinds[] = {
+    {.name = "hello.ball", .components = k_ball_components, .capacity = 64, .id = &g_ball_kind},
+};
+
+// ---- what happens --------------------------------------------------------------------
+struct Bounced  { Handle ball; };
+struct BlinkOn  { u32 nothing; }; // a timer with no payload
+struct BlinkOff { Handle ball; };
+
+constinit const FieldDesc k_bounced_fields[]   = {KV_FIELDS(Bounced, ball)};
+constinit const FieldDesc k_blink_on_fields[]  = {KV_FIELDS(BlinkOn, nothing)};
+constinit const FieldDesc k_blink_off_fields[] = {KV_FIELDS(BlinkOff, ball)};
+constinit const EventTypeDesc k_events[] = {
+    KV_EVENT_EX(Bounced, k_bounced_fields, 0),
+    KV_EVENT_EX(BlinkOn, k_blink_on_fields, 0),
+    KV_EVENT_EX(BlinkOff, k_blink_off_fields, 0),
+};
+
+constinit u32 g_third_bounce = 0;
+constinit const TriggerDesc k_triggers[] = {
+    {.name = "hello.third_bounce", .field = "hello.ball.Bounces.count", .edge = TriggerEdge::CrossedAbove, .value = 2.0, .id = &g_third_bounce},
+};
+
+// ---- the module's state --------------------------------------------------------------
 enum GameState { ST_INIT, ST_RUN, ST_EXIT };
+enum Look : u8 { LOOK_WHITE, LOOK_BLUE_ADD, LOOK_GREEN, LOOK_MAGENTA, LOOK_COUNT };
 
 const char* state_name(GameState s) {
     switch (s) {
@@ -33,31 +73,38 @@ const char* state_name(GameState s) {
     return "?";
 }
 
-enum BallKind : u8 { BALL_HORIZONTAL, BALL_VERTICAL, BALL_RANDOM, BALL_BLINK, BALL_COUNT };
-
-struct Ball {
-    Handle entity;
-    vec2   velocity;       // world units (pixels) per second
-    f32    size;
-    i32    layer;
-    Handle material;
-    u32    blink_ticks;    // BALL_BLINK: ticks until it toggles
-    u32    bounces;
-};
-
-// The hello module's state: handles the game keeps, and the state machine.
 struct Game {
-    Handle    ball_asset;                 // asset.texture
-    Handle    materials[BALL_COUNT];      // render.material, one per ball
-    Handle    bg_material;                // render.material, opaque, the default checkerboard tinted dark
-
+    Handle    ball_asset;           // asset.texture
+    Handle    materials[LOOK_COUNT]; // render.material
+    Handle    bg_material;          // render.material: the default checkerboard, tinted dark
     GameState state          = ST_INIT;
     bool      exit_requested = false;
-    Handle    background;
-    Ball      balls[BALL_COUNT];
+    u32       blink_ticket   = 0;   // the blinker's pending spawn, until Spawned answers
     Rng       rng;
     u64       key_edges      = 0;
 };
+
+constexpr u32 kBlinkOnTicks  = 45;
+constexpr u32 kBlinkOffTicks = 30;
+
+void set_state(Game& g, GameState next) {
+    KV_INFO("game", "%s -> %s", state_name(g.state), state_name(next));
+    g.state = next;
+}
+
+vec2 random_direction(Rng& rng, f32 speed) {
+    f32 a = rng.range(0.0f, 2.0f * KV_PI);
+    return vec2{cosf(a) * speed, sinf(a) * speed};
+}
+
+// Spawns by command: the ball exists after this phase, and Spawned carries the ticket.
+u32 spawn_ball(TickContext& ctx, const Game& g, point2 at, vec2 velocity, bool random, f32 size, i32 layer, Look look) {
+    Sprite s;
+    s.material = g.materials[look];
+    s.size     = vec2{size, size};
+    s.layer    = layer;
+    return ctx.spawn_later(g_ball_kind, transform2_at(at), s, Motion{velocity, (u8)random}, Bounces{0});
+}
 
 // Keeps the whole sprite inside the window; reverses the velocity on the edge it hit.
 bool bounce(Transform2& t, vec2& v, f32 half_size, f32 half_w, f32 half_h, f32 dt) {
@@ -71,105 +118,26 @@ bool bounce(Transform2& t, vec2& v, f32 half_size, f32 half_w, f32 half_h, f32 d
     return hit;
 }
 
-vec2 random_direction(Rng& rng, f32 speed) {
-    f32 a = rng.range(0.0f, 2.0f * KV_PI);
-    return vec2{cosf(a) * speed, sinf(a) * speed};
-}
+// ---- systems -------------------------------------------------------------------------
 
-// The game holds the write on "sprite.entity", so it spawns directly and has the handle at once.
-void spawn_ball(Table& world, Ball& b, point2 at) {
-    Sprite s;
-    s.material = b.material;
-    s.size     = vec2{b.size, b.size};
-    s.layer    = b.layer;
-    b.entity   = world.spawn(transform2_at(at), s);
-}
-
-void set_state(Game& g, GameState next) {
-    KV_INFO("game", "%s -> %s", state_name(g.state), state_name(next));
-    g.state = next;
-}
-
-// Runs once per tick. Each state does its work and names its successor.
-void game_update(Game& g, TickContext& ctx) {
-    Engine& engine = *ctx.engine;
-    Table& world = *ctx.write_kind("sprite.entity"); // the engine's table for the sprite kind
-    HostWindow* window = platform_window(engine);
-    switch (g.state) {
-    case ST_INIT: {
-        // A background covering the window, tiling the checkerboard at 16-pixel cells.
-        f32 w = (f32)window->width(), h = (f32)window->height();
-        Sprite bg;
-        bg.material = g.bg_material;
-        bg.size     = vec2{w, h};
-        bg.uv       = rect2{0.0f, 0.0f, w / 128.0f, h / 128.0f};
-        bg.layer    = -1;
-        g.background = world.spawn(transform2_at(point2{0.0f, 0.0f}), bg);
-
-        g.rng = Rng::seeded(0x5eed, 1);
-        Ball* b = g.balls;
-        b[BALL_HORIZONTAL] = Ball{{}, vec2{420.0f, 0.0f}, 96.0f, 2, g.materials[BALL_HORIZONTAL], 0, 0};
-        b[BALL_VERTICAL]   = Ball{{}, vec2{0.0f, 300.0f}, 72.0f, 1, g.materials[BALL_VERTICAL], 0, 0};
-        b[BALL_RANDOM]     = Ball{{}, random_direction(g.rng, 360.0f), 56.0f, 3, g.materials[BALL_RANDOM], 0, 0};
-        b[BALL_BLINK]      = Ball{{}, vec2{}, 120.0f, 0, g.materials[BALL_BLINK], 45, 0};
-        spawn_ball(world, b[BALL_HORIZONTAL], point2{0.0f, 0.0f});
-        spawn_ball(world, b[BALL_VERTICAL], point2{-200.0f, 0.0f});
-        spawn_ball(world, b[BALL_RANDOM], point2{200.0f, 100.0f});
-        spawn_ball(world, b[BALL_BLINK], point2{0.0f, -120.0f});
-        for (u32 i = 0; i < BALL_COUNT; ++i) {
-            char text[256];
-            kv_handle_describe(b[i].entity.bits, text, sizeof text);
-            KV_INFO("game", "ball %u is %s", i, text);
+// Phase Sim: every ball moves and bounces. World units are pixels, origin at the center.
+void hello_move(TickContext& ctx) {
+    static const u32 k_window = ctx.resource_id("platform.window"); // looked up once
+    const HostWindow* window = ctx.resource<const HostWindow>(k_window);
+    f32 half_w = (f32)window->width() * 0.5f, half_h = (f32)window->height() * 0.5f;
+    f32 dt = (f32)ctx.dt;
+    for (KindRows k : ctx.view<Transform2, Motion, const Sprite>()) {
+        Span<Transform2>   t = k.col<Transform2>();
+        Span<Motion>       m = k.col<Motion>();
+        Span<const Sprite> s = k.col<const Sprite>();
+        for (u32 i = 0; i < k.rows(); ++i) {
+            if (!k.alive(i)) continue;
+            if (bounce(t[i], m[i].velocity, s[i].size.x * 0.5f, half_w, half_h, dt)) ctx.events->emit(Bounced{k.handle_at(i)});
         }
-        set_state(g, ST_RUN);
-        break;
-    }
-
-    case ST_RUN: {
-        if (g.exit_requested) {
-            set_state(g, ST_EXIT);
-            break;
-        }
-        // World units are pixels with the origin at the window center.
-        f32 half_w = (f32)window->width() * 0.5f, half_h = (f32)window->height() * 0.5f;
-        f32 dt = (f32)ctx.dt;
-        for (u32 i = 0; i < BALL_COUNT; ++i) {
-            Ball& b = g.balls[i];
-            if (i == BALL_BLINK) {
-                // Exists for a while, vanishes for a while: creates and removes, every time.
-                // The removal is a command, so it takes effect at the end of this phase.
-                if (--b.blink_ticks == 0) {
-                    if (world.valid(b.entity)) { ctx.destroy(b.entity); b.entity = Handle{}; b.blink_ticks = 30; }
-                    else { spawn_ball(world, b, point2{g.rng.range(-half_w * 0.5f, half_w * 0.5f), -120.0f}); b.blink_ticks = 45; }
-                }
-                continue;
-            }
-            Transform2* t = world.get<Transform2>(b.entity);
-            if (!t) { KV_ERROR("game", "ball %u went stale", i); set_state(g, ST_EXIT); break; }
-            if (bounce(*t, b.velocity, b.size * 0.5f, half_w, half_h, dt)) {
-                ++b.bounces;
-                if (i == BALL_RANDOM) b.velocity = random_direction(g.rng, g.rng.range(240.0f, 520.0f));
-            }
-        }
-        break;
-    }
-
-    case ST_EXIT: {
-        for (u32 i = 0; i < BALL_COUNT; ++i) {
-            Ball& b = g.balls[i];
-            if (world.destroy(b.entity)) KV_INFO("game", "ball %u destroyed after %u bounces", i, b.bounces);
-            b.entity = Handle{};
-        }
-        world.destroy(g.background);
-        g.background = Handle{};
-        KV_ASSERT(world.live() == 0);
-        engine_request_quit(engine);
-        break;
-    }
     }
 }
 
-// Phase Sim: what happened, then the game.
+// Phase Sim: what happened this tick, then the state machine.
 void hello_sim(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     EventBus& bus = *ctx.events;
@@ -199,8 +167,106 @@ void hello_sim(TickContext& ctx) {
         g.exit_requested = true;
     }
 
-    game_update(g, ctx);
+    switch (g.state) {
+    case ST_INIT: {
+        const HostWindow* window = ctx.resource<const HostWindow>("platform.window");
+        f32 w = (f32)window->width(), h = (f32)window->height();
+        // A background covering the window, tiling the checkerboard at 16-pixel cells.
+        Sprite bg;
+        bg.material = g.bg_material;
+        bg.size     = vec2{w, h};
+        bg.uv       = rect2{0.0f, 0.0f, w / 128.0f, h / 128.0f};
+        bg.layer    = -1;
+        ctx.spawn_later("sprite.entity", transform2_at(point2{0.0f, 0.0f}), bg);
+
+        g.rng = Rng::seeded(0x5eed, 1);
+        spawn_ball(ctx, g, point2{0.0f, 0.0f},      vec2{420.0f, 0.0f},                 false, 96.0f, 2, LOOK_WHITE);
+        spawn_ball(ctx, g, point2{-200.0f, 0.0f},   vec2{0.0f, 300.0f},                 false, 72.0f, 1, LOOK_BLUE_ADD);
+        spawn_ball(ctx, g, point2{200.0f, 100.0f},  random_direction(g.rng, 360.0f),    true,  56.0f, 3, LOOK_GREEN);
+        g.blink_ticket = spawn_ball(ctx, g, point2{0.0f, -120.0f}, vec2{}, false, 120.0f, 0, LOOK_MAGENTA);
+        set_state(g, ST_RUN);
+        break;
+    }
+
+    case ST_RUN:
+        if (g.exit_requested) set_state(g, ST_EXIT);
+        break;
+
+    case ST_EXIT: {
+        // Say goodbye to every ball, then take everything down by command and quit.
+        static const u32 k_bounces = ctx.column_id("hello.ball.Bounces");
+        const Table* balls = ctx.read_kind(g_ball_kind);
+        Span<const Bounces> bounces = ctx.read<Bounces>(k_bounces);
+        for (u32 i = 0; i < balls->rows(); ++i) {
+            if (!balls->is_alive(i)) continue;
+            KV_INFO("game", "ball %u destroyed after %u bounces", i, bounces[i].count);
+            ctx.destroy(balls->handle_at(i));
+        }
+        const Table* sprites = ctx.read_kind("sprite.entity");
+        for (u32 i = 0; i < sprites->rows(); ++i)
+            if (sprites->is_alive(i)) ctx.destroy(sprites->handle_at(i));
+        engine_request_quit(*ctx.engine);
+        break;
+    }
+    }
 }
+
+// ---- handlers: at phase boundaries, on what the tick emitted ---------------------------
+
+// A delivered handle is live, so its index is a valid row for the rest of the wave.
+void on_bounced(TickContext& ctx, Span<const Bounced> hits) {
+    static const u32 k_bounces = ctx.column_id("hello.ball.Bounces");
+    static const u32 k_motion  = ctx.column_id("hello.ball.Motion");
+    Game& g = ctx.state_as<Game>();
+    Span<Bounces> bounces = ctx.write<Bounces>(k_bounces);
+    Span<Motion>  motion  = ctx.write<Motion>(k_motion);
+    for (const Bounced& hit : hits) {
+        u32 i = hit.ball.index();
+        ++bounces[i].count;
+        if (motion[i].random) motion[i].velocity = random_direction(g.rng, g.rng.range(240.0f, 520.0f));
+    }
+}
+
+// The blinker's spawn came through: now it has a handle to switch off later.
+void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
+    Game& g = ctx.state_as<Game>();
+    for (const Spawned& s : spawns) {
+        if (s.ticket != g.blink_ticket) continue;
+        g.blink_ticket = 0;
+        if (s.entity.is_null()) { KV_WARN("game", "the blinker did not spawn: kind full"); continue; }
+        char text[256];
+        kv_handle_describe(s.entity.bits, text, sizeof text);
+        KV_INFO("game", "blinker is %s", text);
+        ctx.schedule_in(BlinkOff{s.entity}, kBlinkOnTicks);
+    }
+}
+
+void on_blink_off(TickContext& ctx, Span<const BlinkOff> offs) {
+    for (const BlinkOff& b : offs) {
+        ctx.destroy(b.ball);
+        ctx.schedule_in(BlinkOn{}, kBlinkOffTicks);
+    }
+}
+
+void on_blink_on(TickContext& ctx, Span<const BlinkOn> ons) {
+    Game& g = ctx.state_as<Game>();
+    if (g.state != ST_RUN) return;
+    const HostWindow* window = ctx.resource<const HostWindow>("platform.window");
+    f32 quarter_w = (f32)window->width() * 0.25f;
+    for (u32 i = 0; i < ons.len; ++i)
+        g.blink_ticket = spawn_ball(ctx, g, point2{g.rng.range(-quarter_w, quarter_w), -120.0f}, vec2{}, false, 120.0f, 0, LOOK_MAGENTA);
+}
+
+void on_state_edge(TickContext&, Span<const StateEdge> edges) {
+    for (const StateEdge& e : edges) {
+        if (e.trigger != g_third_bounce) continue;
+        char text[256];
+        kv_handle_describe(e.entity.bits, text, sizeof text);
+        KV_INFO("game", "third bounce: %s", text);
+    }
+}
+
+// ---- startup, shutdown, the tables -----------------------------------------------------
 
 bool hello_startup(Engine& engine, ModuleInstance& self) {
     Game* g = arena_push<Game>(self.arena);
@@ -215,21 +281,18 @@ bool hello_startup(Engine& engine, ModuleInstance& self) {
     g->ball_asset = asset_load_texture(engine, "hello/ball.png");
     const TextureAsset* ball = asset_texture(engine, g->ball_asset);
     if (!ball) return false;
-    // One material per ball: the ball texture through alpha and additive blending with
+    // One material per look: the ball texture through alpha and additive blending with
     // different tints. The background is the opaque one.
-    MaterialDesc md[BALL_COUNT];
-    md[BALL_HORIZONTAL].texture = ball->texture;
-    md[BALL_HORIZONTAL].blend   = BlendMode::Alpha;
-    md[BALL_VERTICAL].texture   = ball->texture;
-    md[BALL_VERTICAL].blend     = BlendMode::Additive;
-    md[BALL_VERTICAL].tint      = color_rgba(0.3f, 0.8f, 1.0f);
-    md[BALL_RANDOM].texture     = ball->texture;
-    md[BALL_RANDOM].blend       = BlendMode::Alpha;
-    md[BALL_RANDOM].tint        = color_rgba(0.5f, 1.0f, 0.5f);
-    md[BALL_BLINK].texture      = ball->texture;
-    md[BALL_BLINK].blend        = BlendMode::Alpha;
-    md[BALL_BLINK].tint         = color_rgba(1.0f, 0.4f, 1.0f);
-    for (u32 i = 0; i < BALL_COUNT; ++i) {
+    MaterialDesc md[LOOK_COUNT];
+    for (MaterialDesc& m : md) m.texture = ball->texture;
+    md[LOOK_WHITE].blend      = BlendMode::Alpha;
+    md[LOOK_BLUE_ADD].blend   = BlendMode::Additive;
+    md[LOOK_BLUE_ADD].tint    = color_rgba(0.3f, 0.8f, 1.0f);
+    md[LOOK_GREEN].blend      = BlendMode::Alpha;
+    md[LOOK_GREEN].tint       = color_rgba(0.5f, 1.0f, 0.5f);
+    md[LOOK_MAGENTA].blend    = BlendMode::Alpha;
+    md[LOOK_MAGENTA].tint     = color_rgba(1.0f, 0.4f, 1.0f);
+    for (u32 i = 0; i < LOOK_COUNT; ++i) {
         g->materials[i] = renderer_material_create(r, md[i]);
         if (g->materials[i].is_null()) return false;
     }
@@ -246,20 +309,36 @@ void hello_shutdown(Engine&, ModuleInstance& self) {
     if (g) KV_INFO("hello", "%llu key edges seen", (unsigned long long)g->key_edges);
 }
 
-constinit const char* const k_sim_reads[]  = {"input.state", "asset.textures"};
-constinit const char* const k_sim_writes[] = {"sprite.entity"}; // spawn and destroy, and every column
-constinit const SystemDesc  k_systems[]    = {
-    {.name = "hello.sim", .phase = Phase::Sim, .fn = hello_sim, .reads = k_sim_reads, .writes = k_sim_writes},
+constinit const char* const k_move_reads[]    = {"hello.ball.Sprite", "platform.window"};
+constinit const char* const k_move_writes[]   = {"hello.ball.Transform2", "hello.ball.Motion"};
+constinit const char* const k_sim_reads[]     = {"platform.window", "hello.ball", "sprite.entity"};
+constinit const char* const k_bounced_writes[] = {"hello.ball.Bounces", "hello.ball.Motion"};
+constinit const char* const k_window_reads[]  = {"platform.window"};
+constinit const SystemDesc k_systems[] = {
+    {.name = "hello.move", .phase = Phase::Sim, .fn = hello_move, .reads = k_move_reads, .writes = k_move_writes},
+    {.name = "hello.sim",  .phase = Phase::Sim, .fn = hello_sim,  .reads = k_sim_reads}, // after move: it reads what move writes
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = "hello.on_bounced",   KV_ON(Bounced, on_bounced), .writes = k_bounced_writes},
+    {.name = "hello.on_spawned",   KV_ON(Spawned, on_spawned)},
+    {.name = "hello.on_blink_off", KV_ON(BlinkOff, on_blink_off)},
+    {.name = "hello.on_blink_on",  KV_ON(BlinkOn, on_blink_on), .reads = k_window_reads},
+    {.name = "hello.on_edge",      KV_ON(StateEdge, on_state_edge)},
 };
 
 } // namespace
 
 KV_MODULE_DEFINE(hello_module) = {
-    .name     = "hello",
-    .systems  = k_systems,
-    .startup  = hello_startup,
-    .shutdown = hello_shutdown,
-    .memory   = {.reserve = 64 * 1024},
+    .name       = "hello",
+    .events     = k_events,
+    .components = k_components,
+    .kinds      = k_kinds,
+    .systems    = k_systems,
+    .handlers   = k_handlers,
+    .triggers   = k_triggers,
+    .startup    = hello_startup,
+    .shutdown   = hello_shutdown,
+    .memory     = {.reserve = 64 * 1024},
 };
 
 } // namespace kv

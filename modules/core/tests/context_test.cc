@@ -2,6 +2,7 @@
 // name, views over every kind with a component set (constness as access mode), the kind
 // table for the writer, and commands that take effect at the phase boundary with a
 // Spawned event carrying the ticket.
+#include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/module.h"
 #include "korvid/core/test.h"
@@ -80,14 +81,45 @@ void sys_tally(TickContext& ctx) {
     }
 }
 
+// A published resource: the module owns a counter, publishes it at startup, one system
+// bumps it through a write and another reads it. "g.quiet" is declared but never published.
+struct Counter { u32 n; };
+struct GState { Counter counter; };
+constinit u32 g_counter_seen = 0;
+bool g_startup(Engine& e, ModuleInstance& self) {
+    GState* st = arena_push<GState>(self.arena);
+    self.set_state(st);
+    return engine_publish(e, self, "g.counter", &st->counter);
+}
+void sys_bump(TickContext& ctx) {
+    static const u32 k_counter = ctx.resource_id("g.counter"); // looked up once
+    ctx.resource<Counter>(k_counter)->n += 10;
+}
+void sys_peek(TickContext& ctx) {
+    g_counter_seen = ctx.resource<const Counter>("g.counter")->n;
+    KV_ASSERT(ctx.resource<const Counter>("g.quiet") == nullptr); // declared, unpublished: null and a log line
+    KV_ASSERT(ctx.column_id("g.ship.Hp") == engine_resource_id(*ctx.engine, "g.ship.Hp"));
+    KV_ASSERT(ctx.kind_id("g.rock") == engine_kind_id(*ctx.engine, "g.rock"));
+}
+
+constinit const ResourceDesc k_resources[]   = {{"g.counter"}, {"g.quiet"}};
 constinit const char* const k_move_reads[]   = {"*.Vel"};
 constinit const char* const k_move_writes[]  = {"*.Pos", "g.rock"};
 constinit const char* const k_tally_reads[]  = {"g.ship.Hp", "g.ship", "g.rock"};
+constinit const char* const k_bump_writes[]  = {"g.counter"};
+constinit const char* const k_peek_reads[]   = {"g.counter", "g.quiet"};
 constinit const SystemDesc k_systems[] = {
     {.name = "g.move",  .phase = Phase::Sim,     .fn = sys_move,  .reads = k_move_reads,  .writes = k_move_writes},
     {.name = "g.tally", .phase = Phase::PostSim, .fn = sys_tally, .reads = k_tally_reads},
+    {.name = "g.peek",  .phase = Phase::PostSim, .fn = sys_peek,  .reads = k_peek_reads},  // after bump: it reads what bump writes
+    {.name = "g.bump",  .phase = Phase::PostSim, .fn = sys_bump,  .writes = k_bump_writes},
 };
-KV_MODULE_DEFINE(k_g) = {.name = "g", .components = k_components, .kinds = k_kinds, .systems = k_systems};
+KV_MODULE_DEFINE(k_g) = {.name = "g", .components = k_components, .kinds = k_kinds, .resources = k_resources,
+                         .systems = k_systems, .startup = g_startup, .memory = {.reserve = 4096}};
+
+constinit const ResourceDesc k_thief_resources[] = {{"thief.own"}};
+bool thief_startup(Engine& e, ModuleInstance& self) { static Counter c; return engine_publish(e, self, "g.counter", &c); }
+KV_MODULE_DEFINE(k_thief) = {.name = "thief", .resources = k_thief_resources, .startup = thief_startup};
 
 } // namespace
 
@@ -132,6 +164,9 @@ void test_context(kv::TestCtx& c) {
     KV_CHECK(c, ship->get<Vel>(g_trace.spawned)->dx == 0 && ship->prev<Pos>(g_trace.spawned)->x == 7);
     KV_CHECK(c, g_trace.hp_sum == 8 && ship->live() == 2);
     KV_CHECK(c, e.commands.count == 0 && e.commands.bytes.len == 0);
+    // The published counter: bump ran before peek (derived from the sets) and peek saw the write.
+    KV_CHECK(c, g_counter_seen == 10);
+    KV_CHECK(c, e.resources[engine_resource_id(e, "g.counter") - 1].type == type_key<Counter>());
 
     // A tick later the Spawned event is gone and nothing is pending.
     g_trace.victim = Handle{}; // destroying null is silently nothing
@@ -149,4 +184,9 @@ void test_context(kv::TestCtx& c) {
 
     engine_shutdown(e);
     KV_CHECK(c, EventType<Spawned>::id == 0);
+
+    // Publishing a resource another module declared fails that module's startup.
+    const ModuleDesc* const thief[] = {&k_g, &k_thief};
+    Engine f;
+    KV_CHECK(c, !engine_init(f, thief));
 }

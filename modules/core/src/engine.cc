@@ -861,6 +861,19 @@ u32 engine_resource_id(const Engine& e, const char* name) {
     return 0;
 }
 
+bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, void* ptr, const void* type) {
+    u32 id = engine_resource_id(e, name);
+    if (!id) { KV_ERROR("engine", "module '%s' publishes unknown resource '%s'", self.desc->name, name); return false; }
+    ResourceEntry& r = e.resources[id - 1];
+    if (r.module != self.index) {
+        KV_ERROR("engine", "module '%s' publishes resource '%s', which belongs to '%s'", self.desc->name, name, e.modules[r.module].desc->name);
+        return false;
+    }
+    r.ptr  = ptr;
+    r.type = type;
+    return true;
+}
+
 u32 engine_component_id(const Engine& e, const char* name) {
     for (u32 i = 0; i < e.components.len; ++i)
         if (names_equal(e.components[i].desc->name, name)) return i + 1;

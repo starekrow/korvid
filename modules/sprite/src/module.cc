@@ -40,12 +40,8 @@ void sprite_extract(TickContext& ctx) {
 }
 
 // The schemas. Transform2 keeps a previous-tick copy for interpolation; Sprite does not.
-constinit const FieldDesc k_transform2_fields[] = {
-    KV_FIELD(Transform2, position), KV_FIELD(Transform2, rotation), KV_FIELD(Transform2, scale),
-};
-constinit const FieldDesc k_sprite_fields[] = {
-    KV_FIELD(Sprite, material), KV_FIELD(Sprite, uv), KV_FIELD(Sprite, size), KV_FIELD(Sprite, tint), KV_FIELD(Sprite, layer),
-};
+constinit const FieldDesc k_transform2_fields[] = {KV_FIELDS(Transform2, position, rotation, scale)};
+constinit const FieldDesc k_sprite_fields[]     = {KV_FIELDS(Sprite, material, uv, size, tint, layer)};
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Transform2, k_transform2_fields, CompPrev),
     KV_COMPONENT(Sprite, k_sprite_fields),

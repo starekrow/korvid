@@ -16,8 +16,10 @@ component on reserved pages, a handle kind, a resource per column) and copies th
 columns at the top of PreSim. Systems reach data through the `TickContext`: `write_kind`
 for the table a system holds the write on, `read<T>`/`write<T>` for one column by name,
 `view<A, const B>()` for every kind with those components (constness is the access mode),
-and `spawn_later`/`destroy` commands applied at the phase boundary. In dev builds an
-access the system did not declare asserts with the system and resource named. Nothing registers itself and nothing runs before main;
+`resource<const T>(name)` for what a module published under one of its declared resources
+(the window, the input state), and `spawn_later`/`destroy` commands applied at the phase
+boundary. Names resolve to ids once with `resource_id`, `column_id` and `kind_id`. In dev
+builds an access the system did not declare asserts with the system and resource named. Nothing registers itself and nothing runs before main;
 the build-generated list (`hello/src/modules.gen.cc` for now) is the only input. Modules
 start in list order and stop in reverse, and event, component and kind ids are assigned in
 list then declaration order. Within each tick phase (input, presim, sim, postsim) the

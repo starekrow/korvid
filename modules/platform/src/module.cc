@@ -8,7 +8,7 @@ namespace kv {
 
 namespace {
 
-bool platform_startup(Engine&, ModuleInstance& self) {
+bool platform_startup(Engine& engine, ModuleInstance& self) {
     SDL_SetHint(SDL_HINT_APP_NAME, "korvid");
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         KV_ERROR("platform", "SDL_Init failed: %s", SDL_GetError());
@@ -22,6 +22,10 @@ bool platform_startup(Engine&, ModuleInstance& self) {
     if (!s) return false;
     self.set_state(s);
     s->base_path = SDL_GetBasePath();
+    // Systems reach these under their declared access; the accessors below are for code
+    // outside the schedule (the frame loop, startup).
+    if (!engine_publish(engine, self, "input.state", &s->input) ||
+        !engine_publish(engine, self, "platform.window", &s->window)) return false;
     return s->io.init(&self.general, 4096);
 }
 
@@ -46,7 +50,7 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT(KeyDown),
     KV_EVENT(KeyUp),
 };
-constinit const ResourceDesc k_resources[] = {{"input.state"}};
+constinit const ResourceDesc k_resources[] = {{"input.state"}, {"platform.window"}};
 constinit const char* const  k_input_writes[] = {"input.state"};
 constinit const SystemDesc   k_systems[] = {
     {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = k_input_writes},

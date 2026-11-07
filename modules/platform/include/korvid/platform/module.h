@@ -1,7 +1,9 @@
 // Korvid platform: module record, state and services. Startup initializes SDL's video
 // and event subsystems. The module owns the window and the input state: the window is a
 // platform service opened on request and closed at module shutdown, never by the caller;
-// "input.sample" (phase Input) samples the keys into "input.state" once per tick.
+// "input.sample" (phase Input) samples the keys into "input.state" once per tick. Both are
+// published resources: a system declares "input.state" or "platform.window" in its sets
+// and reaches them with ctx.resource<const Input>() and ctx.resource<const HostWindow>().
 #pragma once
 #include "korvid/core/module.h"
 #include "korvid/platform/host_window.h"
@@ -23,9 +25,9 @@ struct PlatformState {
 
 // Opens the window. Null if one is already open or SDL refused. Owned by the module.
 HostWindow* platform_open_window(Engine& e, const WindowDesc& desc);
-// The open window, or null.
+// The open window, or null. For code outside the schedule; systems use the resource.
 HostWindow* platform_window(Engine& e);
-// The module's input, or null if the module is not started.
+// The module's input, or null if the module is not started. Likewise.
 Input*      platform_input(Engine& e);
 // Once per frame: OS events become bus events and raw input state; the I/O queue reaps
 // its completions.

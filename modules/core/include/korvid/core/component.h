@@ -4,7 +4,7 @@
 // by field (padding never counts), prints any row for a tool, and knows which fields are
 // handles. Declaring is one table per type and one row per field:
 //
-//   constinit const FieldDesc k_velocity_fields[] = {KV_FIELD(Velocity, linear), KV_FIELD(Velocity, angular)};
+//   constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, linear, angular)};
 //   constinit const ComponentDesc k_components[]  = {KV_COMPONENT(Velocity, k_velocity_fields)};
 //
 // A field's scalar type and count come from FieldTraits<M>: core covers the scalars,
@@ -119,6 +119,29 @@ inline bool component_each_handle(const ComponentDesc& c, void* row, bool (*fn)(
 
 #define KV_FIELD(T, m) \
     ::kv::FieldDesc{#m, ::kv::FieldTraits<decltype(T::m)>::type, ::kv::FieldTraits<decltype(T::m)>::count, (::kv::u16)offsetof(T, m)}
+
+// The whole table from the member names, up to sixteen:
+//   constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, linear, angular)};
+#define KV_FIELDS(T, ...) KV_CAT_(KV_FIELDS_, KV_NARGS_(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))(T, __VA_ARGS__)
+#define KV_NARGS_(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, N, ...) N
+#define KV_CAT_(a, b) KV_CAT__(a, b)
+#define KV_CAT__(a, b) a##b
+#define KV_FIELDS_1(T, a)       KV_FIELD(T, a)
+#define KV_FIELDS_2(T, a, ...)  KV_FIELD(T, a), KV_FIELDS_1(T, __VA_ARGS__)
+#define KV_FIELDS_3(T, a, ...)  KV_FIELD(T, a), KV_FIELDS_2(T, __VA_ARGS__)
+#define KV_FIELDS_4(T, a, ...)  KV_FIELD(T, a), KV_FIELDS_3(T, __VA_ARGS__)
+#define KV_FIELDS_5(T, a, ...)  KV_FIELD(T, a), KV_FIELDS_4(T, __VA_ARGS__)
+#define KV_FIELDS_6(T, a, ...)  KV_FIELD(T, a), KV_FIELDS_5(T, __VA_ARGS__)
+#define KV_FIELDS_7(T, a, ...)  KV_FIELD(T, a), KV_FIELDS_6(T, __VA_ARGS__)
+#define KV_FIELDS_8(T, a, ...)  KV_FIELD(T, a), KV_FIELDS_7(T, __VA_ARGS__)
+#define KV_FIELDS_9(T, a, ...)  KV_FIELD(T, a), KV_FIELDS_8(T, __VA_ARGS__)
+#define KV_FIELDS_10(T, a, ...) KV_FIELD(T, a), KV_FIELDS_9(T, __VA_ARGS__)
+#define KV_FIELDS_11(T, a, ...) KV_FIELD(T, a), KV_FIELDS_10(T, __VA_ARGS__)
+#define KV_FIELDS_12(T, a, ...) KV_FIELD(T, a), KV_FIELDS_11(T, __VA_ARGS__)
+#define KV_FIELDS_13(T, a, ...) KV_FIELD(T, a), KV_FIELDS_12(T, __VA_ARGS__)
+#define KV_FIELDS_14(T, a, ...) KV_FIELD(T, a), KV_FIELDS_13(T, __VA_ARGS__)
+#define KV_FIELDS_15(T, a, ...) KV_FIELD(T, a), KV_FIELDS_14(T, __VA_ARGS__)
+#define KV_FIELDS_16(T, a, ...) KV_FIELD(T, a), KV_FIELDS_15(T, __VA_ARGS__)
 
 // KV_COMPONENT(Velocity, k_velocity_fields) or KV_COMPONENT(Transform2, k_fields, CompPrev).
 #define KV_COMPONENT(T, fields, ...)                                                               \

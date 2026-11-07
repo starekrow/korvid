@@ -68,7 +68,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
 void frameloop_exit(TickContext& ctx) {
     FrameLoopState& s = ctx.state_as<FrameLoopState>();
     EventBus& bus = *ctx.events;
-    Input* input = platform_input(*ctx.engine);
+    const Input* input = ctx.resource<const Input>("input.state");
     if (s.config.exit_on_close && bus.read<CloseRequested>().len)
         bus.emit(ExitRequested{ExitReason::WindowClosed});
     if (s.config.exit_on_escape && input && input->sampled.down(Key::Escape))

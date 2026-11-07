@@ -86,11 +86,16 @@ template <class T> struct RemoveConst<const T> { typedef T type; static constexp
 // Each returns null (or false) after logging and, in dev builds, asserting, when the
 // system did not declare the access or the type does not match the schema.
 Table*  ctx_kind(TickContext& ctx, const char* kind, bool write);
+Table*  ctx_kind(TickContext& ctx, u32 kind_id, bool write);
 Column* ctx_column(TickContext& ctx, const char* column, const void* type, bool write, u32* rows);
+Column* ctx_column(TickContext& ctx, u32 resource_id, const void* type, bool write, u32* rows);
 Column* ctx_column_in(TickContext& ctx, Table& table, u32 component_id, const void* type, bool write);
+void*   ctx_resource(TickContext& ctx, u32 resource_id, const void* type, bool write);
+u32     ctx_resource_id(TickContext& ctx, const char* name, bool column);
 u32     ctx_table_count(TickContext& ctx);
 Table*  ctx_table_at(TickContext& ctx, u32 i);
 u32     ctx_spawn_begin(TickContext& ctx, const char* kind, u32 component_count); // ticket; 0 if unknown kind
+u32     ctx_spawn_begin(TickContext& ctx, u32 kind_id, u32 component_count);
 void    ctx_spawn_component(TickContext& ctx, u32 component_id, const void* data, u32 size);
 void    ctx_destroy(TickContext& ctx, Handle h);
 u32     ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick);
@@ -161,20 +166,24 @@ struct TickContext {
     }
 
     // ---- data access ---------------------------------------------------------------
-    // A kind by name. Write access (declared write on "kind") is the table itself: spawn,
-    // destroy and every column. Read access is the const view.
+    // A kind by name, or by the id its KindDesc::id slot received. Write access (declared
+    // write on "kind") is the table itself: spawn, destroy and every column. Read access
+    // is the const view.
     Table*       write_kind(const char* kind) { return ctx_kind(*this, kind, true); }
+    Table*       write_kind(u32 kind_id) { return ctx_kind(*this, kind_id, true); }
     const Table* read_kind(const char* kind) { return ctx_kind(*this, kind, false); }
+    const Table* read_kind(u32 kind_id) { return ctx_kind(*this, kind_id, false); }
 
-    // One column by resource name, "kind.Component", over [0, rows()) by slot.
-    template <class T>
-    Span<const T> read(const char* column) {
+    // One column by resource name, "kind.Component" (or its resource id), over
+    // [0, rows()) by slot. A handle from a delivered event is live, so its index is valid.
+    template <class T, class K>
+    Span<const T> read(K column) {
         u32 n = 0;
         Column* c = ctx_column(*this, column, &TypeKey<T>::key, false, &n);
         return c ? Span<const T>((const T*)c->data, n) : Span<const T>();
     }
-    template <class T>
-    Span<T> write(const char* column) {
+    template <class T, class K>
+    Span<T> write(K column) {
         u32 n = 0;
         Column* c = ctx_column(*this, column, &TypeKey<T>::key, true, &n);
         return c ? Span<T>((T*)c->data, n) : Span<T>();
@@ -183,11 +192,27 @@ struct TickContext {
     template <class... C>
     KindRange<C...> view() { return KindRange<C...>{this}; }
 
+    // A published resource (engine_publish), by name or id; T const is a read, T a write.
+    // Null, with a log line, if nothing is published under that name yet.
+    template <class T, class K>
+    T* resource(K name) {
+        typedef typename RemoveConst<T>::type U;
+        return (T*)ctx_resource(*this, id_of(name), &TypeKey<U>::key, !RemoveConst<T>::is_const);
+    }
+
+    // Names to ids, for code that would rather not look a name up every call:
+    //   static const u32 k_bounces = ctx.column_id("hello.ball.Bounces");
+    // Ids are stable for the life of the engine; a program that initializes several
+    // engines in a row must not keep them across.
+    u32 resource_id(const char* name) { return ctx_resource_id(*this, name, false); }
+    u32 column_id(const char* name) { return ctx_resource_id(*this, name, true); } // asserts if not a column
+    u32 kind_id(const char* name);
+
     // ---- commands: applied at the phase boundary, in issue order ---------------------
     // Spawn without holding the write: the entity exists after this phase, and a Spawned
     // event with this ticket carries its handle. Components not given stay zero.
-    template <class... C>
-    u32 spawn_later(const char* kind, const C&... c) {
+    template <class K, class... C>
+    u32 spawn_later(K kind, const C&... c) {
         u32 ticket = ctx_spawn_begin(*this, kind, sizeof...(C));
         if (ticket) (ctx_spawn_component(*this, ComponentType<C>::id, &c, (u32)sizeof(C)), ...);
         return ticket;
@@ -201,6 +226,10 @@ struct TickContext {
     u32 schedule(const E& e, u64 at_tick) { return ctx_schedule(*this, EventType<E>::id, (u32)sizeof(E), &e, at_tick); }
     template <class E>
     u32 schedule_in(const E& e, u64 ticks) { return schedule(e, tick + ticks); }
+
+private:
+    u32 id_of(u32 id) { return id; }
+    u32 id_of(const char* name) { return ctx_resource_id(*this, name, false); }
 };
 
 typedef void (*SystemFn)(TickContext& ctx);

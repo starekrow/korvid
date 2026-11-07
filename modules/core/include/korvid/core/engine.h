@@ -12,7 +12,9 @@ namespace kv {
 
 struct ResourceEntry {
     const char* name;
-    u32         module; // owning module's index
+    u32         module;         // owning module's index
+    void*       ptr  = nullptr; // what the owner published for systems to reach through the context
+    const void* type = nullptr; // its type key
 };
 
 struct ComponentEntry {
@@ -112,6 +114,15 @@ T* engine_module_state_as(Engine& e, const char* name) {
 
 // Resource id by name; 0 if unknown.
 u32 engine_resource_id(const Engine& e, const char* name);
+
+// A module hands the engine the object behind one of its declared resources, at startup,
+// so systems reach it through ctx.resource<T>() under their declared access instead of
+// through an accessor the scheduler cannot see. The resource must be the module's own.
+bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, void* ptr, const void* type);
+template <class T>
+bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, T* ptr) {
+    return engine_publish(e, self, name, (void*)ptr, type_key<T>());
+}
 
 // Component schemas, by name or id. Null for unknown.
 u32                  engine_component_id(const Engine& e, const char* name);

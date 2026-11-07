@@ -154,23 +154,62 @@ Table* ctx_kind(TickContext& ctx, const char* kind, bool write) {
     return t;
 }
 
-Column* ctx_column(TickContext& ctx, const char* column, const void* type, bool write, u32* rows) {
-    u32 id = engine_resource_id(*ctx.engine, column);
+Table* ctx_kind(TickContext& ctx, u32 kind_id, bool write) {
+    Table* t = engine_table(*ctx.engine, kind_id);
+    if (!t) { KV_ERROR("engine", "system '%s': unknown kind id %u", system_name(ctx), kind_id); KV_VERIFY(!"unknown kind"); return nullptr; }
+    if (!allowed(ctx, t->resource, 0, write)) { deny(ctx, "kind", t->desc->name, write); return nullptr; }
+    return t;
+}
+
+Column* ctx_column(TickContext& ctx, u32 resource_id, const void* type, bool write, u32* rows) {
     for (Table& t : ctx.engine->tables)
         for (Column& c : t.columns)
-            if (c.resource == id) {
+            if (c.resource == resource_id) {
                 *rows = t.rows();
                 return checked_column(ctx, t, &c, type, write);
             }
-    KV_ERROR("engine", "system '%s': unknown column '%s'", system_name(ctx), column);
+    KV_ERROR("engine", "system '%s': resource %u is not a column", system_name(ctx), resource_id);
     KV_VERIFY(!"unknown column");
     return nullptr;
+}
+
+Column* ctx_column(TickContext& ctx, const char* column, const void* type, bool write, u32* rows) {
+    u32 id = engine_resource_id(*ctx.engine, column);
+    if (!id) { KV_ERROR("engine", "system '%s': unknown column '%s'", system_name(ctx), column); KV_VERIFY(!"unknown column"); return nullptr; }
+    return ctx_column(ctx, id, type, write, rows);
 }
 
 Column* ctx_column_in(TickContext& ctx, Table& table, u32 component_id, const void* type, bool write) {
     Column* c = table.column(component_id);
     if (!c) return nullptr; // the view said the kind has it; a stray call just gets nothing
     return checked_column(ctx, table, c, type, write);
+}
+
+void* ctx_resource(TickContext& ctx, u32 resource_id, const void* type, bool write) {
+    if (!resource_id || resource_id > ctx.engine->resources.len) { KV_ERROR("engine", "system '%s': unknown resource id %u", system_name(ctx), resource_id); KV_VERIFY(!"unknown resource"); return nullptr; }
+    ResourceEntry& r = ctx.engine->resources[resource_id - 1];
+    if (!allowed(ctx, resource_id, 0, write)) { deny(ctx, "resource", r.name, write); return nullptr; }
+    if (!r.ptr) { KV_ERROR("engine", "system '%s': resource '%s' is declared but nothing is published under it", system_name(ctx), r.name); return nullptr; }
+    if (r.type != type) { KV_ERROR("engine", "system '%s' reaches resource '%s' as another type", system_name(ctx), r.name); KV_VERIFY(!"resource type mismatch: see the log"); return nullptr; }
+    return r.ptr;
+}
+
+u32 ctx_resource_id(TickContext& ctx, const char* name, bool column) {
+    u32 id = engine_resource_id(*ctx.engine, name);
+    if (!id) { KV_ERROR("engine", "system '%s': unknown resource '%s'", system_name(ctx), name); KV_VERIFY(!"unknown resource"); return 0; }
+    if (column) {
+        bool is_column = false;
+        for (const Table& t : ctx.engine->tables)
+            for (const Column& c : t.columns) is_column = is_column || c.resource == id;
+        if (!is_column) { KV_ERROR("engine", "system '%s': resource '%s' is not a column", system_name(ctx), name); KV_VERIFY(!"not a column"); return 0; }
+    }
+    return id;
+}
+
+u32 TickContext::kind_id(const char* name) {
+    u32 id = engine_kind_id(*engine, name);
+    if (!id) { KV_ERROR("engine", "system '%s': unknown kind '%s'", system_name(*this), name); KV_VERIFY(!"unknown kind"); }
+    return id;
 }
 
 u32    ctx_table_count(TickContext& ctx) { return ctx.engine->tables.len; }
@@ -180,6 +219,11 @@ u32 ctx_spawn_begin(TickContext& ctx, const char* kind, u32 component_count) {
     u32 id = engine_kind_id(*ctx.engine, kind);
     if (!id) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind '%s'", system_name(ctx), kind); return 0; }
     return command_spawn_begin(ctx.engine->commands, id, component_count);
+}
+
+u32 ctx_spawn_begin(TickContext& ctx, u32 kind_id, u32 component_count) {
+    if (!engine_table(*ctx.engine, kind_id)) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind id %u", system_name(ctx), kind_id); return 0; }
+    return command_spawn_begin(ctx.engine->commands, kind_id, component_count);
 }
 
 void ctx_spawn_component(TickContext& ctx, u32 component_id, const void* data, u32 size) {
