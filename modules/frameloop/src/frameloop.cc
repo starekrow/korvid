@@ -22,6 +22,7 @@ FrameLoopConfig g_config;
 f64             g_hitch_ms     = 0.0;
 bool            g_hash_ticks   = false;
 bool            g_hash_systems = false;
+bool            g_trace_events = false;
 
 struct FrameLoopState {
     FrameLoopConfig config;
@@ -53,9 +54,10 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--hitch-ms") == 0 && i + 1 < argc) g_hitch_ms = atof(argv[++i]);
         else if (strcmp(argv[i], "--hash") == 0) g_hash_ticks = true;
         else if (strcmp(argv[i], "--hash-systems") == 0) g_hash_systems = true;
+        else if (strcmp(argv[i], "--trace-events") == 0) g_trace_events = true;
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
-                                  "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems]", argv[0]);
+                                  "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events]", argv[0]);
             return false;
         }
     }
@@ -199,6 +201,8 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
     Engine engine;
     engine.hash_ticks   = g_hash_ticks;
     engine.hash_systems = g_hash_systems;
+    engine.trace.print  = g_trace_events;
+    if (g_trace_events && !KV_DEV) KV_WARN("frameloop", "--trace-events: the event trace exists in dev builds only");
     if (!engine_init(engine, kv_module_list())) {
         names_shutdown();
         mem_shutdown();

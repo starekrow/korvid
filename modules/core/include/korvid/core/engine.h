@@ -6,6 +6,7 @@
 #include "korvid/core/module.h"
 #include "korvid/core/phase.h"
 #include "korvid/core/tick.h"
+#include "korvid/core/timer.h"
 
 namespace kv {
 
@@ -17,6 +18,33 @@ struct ResourceEntry {
 struct ComponentEntry {
     const ComponentDesc* desc;
     u32                  module; // declaring module's index
+};
+
+// A state trigger resolved to its column and field.
+struct Trigger {
+    const TriggerDesc* desc;
+    Table*             table;
+    const Column*      column;
+    const FieldDesc*   field;
+    u32                module;
+};
+
+// The dev trace: the last events delivered, with who emitted them. Printed as it fills
+// when `print` is set (--trace-events); the later CLI and replay read the ring.
+struct TraceRecord {
+    u64         tick;
+    const char* emitter;
+    u32         type;
+    u16         wave;
+    u8          size;      // bytes kept, at most sizeof(data)
+    u8          pad;
+    u8          data[40];
+};
+struct EventTrace {
+    Array<TraceRecord> ring;      // capacity fixed at init; oldest overwritten
+    u32                head  = 0; // next slot to write
+    u64                total = 0; // records ever written
+    bool               print = false;
 };
 
 // Spawns and destroys issued through the TickContext, applied at phase boundaries in
@@ -38,7 +66,15 @@ struct Engine {
     Array<ResourceEntry>  resources; // id = index + 1; 0 is invalid
     Array<ComponentEntry> components; // id = index + 1 = ComponentType<T>::id; 0 is invalid
     Array<Table>          tables;     // kind id = index + 1; addresses stable after init
+    Array<const EventTypeDesc*> event_types; // by id; slot 0 unused
+    Array<ScheduledSystem> handlers;  // in wave order
+    Array<Trigger>        triggers;   // trigger id = index + 1
     CommandBuffer         commands;
+    TimerWheel            timers;
+    EventTrace            trace;
+    u32                   wave_cap     = 4; // handler waves per boundary; leftovers wait for the next
+    u64                   waves_capped = 0; // boundaries that hit the cap
+    u64                   edges_fired  = 0;
     u32                   event_type_count = 0;
     u64                   frame_count      = 0;
     bool                  quit_requested   = false;
@@ -56,6 +92,13 @@ void engine_shutdown(Engine& e);
 u32  engine_frame(Engine& e, f64 frame_dt);
 // Applies and clears the command buffer: the tick runner calls it at every phase boundary.
 void engine_apply_commands(Engine& e);
+// Evaluates every state trigger over this tick's previous and current rows and emits
+// StateEdge events, pending. The tick runner calls it at the end of the tick.
+void engine_fire_triggers(Engine& e, u64 tick);
+// Records (and prints, if asked) what the last deliver() added. Dev builds only.
+void engine_trace_delivery(Engine& e, u64 tick, u32 wave);
+// Describes one event through its schema: "Type{...}", or just the name without one.
+int  engine_describe_event(const Engine& e, u32 type_id, const void* event, char* out, usize cap);
 void engine_request_quit(Engine& e);
 
 // The started instance of a module, by name; null if absent or not started.
@@ -76,6 +119,8 @@ const ComponentDesc* engine_component(const Engine& e, u32 id);
 template <class T>
 const ComponentDesc* engine_component(const Engine& e) { return engine_component(e, ComponentType<T>::id); }
 
+// Trigger id by name; 0 if unknown.
+u32   engine_trigger_id(const Engine& e, const char* name);
 // The phase a system was declared in; Phase::Count for an unknown name.
 Phase engine_system_phase(const Engine& e, const char* name);
 // The hash of every sim column of every live entity, fixed across runs and platforms.

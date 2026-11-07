@@ -26,14 +26,6 @@ namespace kv {
 struct Engine;
 struct ModuleDesc;
 
-// A plain-data event type. The id slot is EventType<E>::id, filled at init.
-struct EventTypeDesc {
-    const char* name;
-    u32         size;
-    u32         align;
-    u32*        id;
-};
-
 // Something systems read or write: a component store, an input state, a world.
 // Declared by the module that owns it; referenced by name in system read/write sets.
 struct ResourceDesc {
@@ -72,15 +64,14 @@ struct ModuleDesc {
     Span<const KindDesc>      kinds      = {}; // entity tables the engine creates from those schemas
     Span<const ResourceDesc>  resources  = {};
     Span<const SystemDesc>    systems    = {};
+    Span<const HandlerDesc>   handlers   = {}; // run at phase boundaries, on the events they subscribe to
+    Span<const TriggerDesc>   triggers   = {}; // state edges on component fields, as StateEdge events
     bool (*startup)(Engine& engine, ModuleInstance& self)  = nullptr;
     void (*shutdown)(Engine& engine, ModuleInstance& self) = nullptr;
     ModuleMemoryDesc          memory     = {};
 };
 
 } // namespace kv
-
-// Table entry for an event type: KV_EVENT(WindowResized).
-#define KV_EVENT(E) ::kv::EventTypeDesc{#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id}
 
 // Declares a module's symbol in its header, and defines it in one source file, with
 // designated initializers so every table is named:

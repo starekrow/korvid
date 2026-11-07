@@ -81,23 +81,39 @@ struct FieldTraits<M[N]> {
 template <class E> requires __is_enum(E)
 struct FieldTraits<E> : FieldTraits<__underlying_type(E)> {};
 
-// ---- schema operations: every one reads only the table ----------------------------
+// ---- schema operations: every one reads only the field table ----------------------
+// A field table describes any plain struct: components and events share these.
 
-// Null if the descriptor is consistent; otherwise a static string naming what is wrong,
-// with the offending field's name in `field` if there is one.
-const char* component_check(const ComponentDesc& c, const char** field);
-const FieldDesc* component_field(const ComponentDesc& c, const char* name);
-
+// Null if the table is consistent for a struct of `size` bytes; otherwise a static string
+// naming what is wrong, with the offending field's name in `field` if there is one.
+const char*      schema_check(u32 size, Span<const FieldDesc> fields, const char** field);
+const FieldDesc* schema_field(Span<const FieldDesc> fields, const char* name);
+bool             schema_has_handles(Span<const FieldDesc> fields);
 // Field by field, so padding never matters. The hash is the fixed engine hash over the
 // scalars' bit patterns in declaration order: identical across runs and platforms.
-u64  component_hash(const ComponentDesc& c, const void* row);
-bool component_equal(const ComponentDesc& c, const void* a, const void* b);
-
+u64  schema_hash(Span<const FieldDesc> fields, const void* row);
+bool schema_equal(Span<const FieldDesc> fields, const void* a, const void* b);
 // "Name{field=value, vec=(a, b), h=kind#index}". Returns what snprintf would.
-int  component_describe(const ComponentDesc& c, const void* row, char* out, usize cap);
+int  schema_describe(const char* name, Span<const FieldDesc> fields, const void* row, char* out, usize cap);
 // Calls fn(handle&) for every handle scalar in the row; stops early if fn returns false.
-// Delivery uses it to drop events and rows that refer to the dead.
-bool component_each_handle(const ComponentDesc& c, void* row, bool (*fn)(Handle&, void*), void* user);
+// Delivery uses it to drop events that refer to the dead.
+bool schema_each_handle(Span<const FieldDesc> fields, void* row, bool (*fn)(Handle&, void*), void* user);
+// One scalar field as a double (integers widened, floats converted); false for handles.
+bool schema_field_as_f64(const FieldDesc& f, const void* row, f64* out);
+
+inline const char*      component_check(const ComponentDesc& c, const char** field) {
+    *field = nullptr;
+    if (!c.name || !c.name[0]) return "has no name";
+    if (c.size == 0) return "has zero size";
+    if (c.align == 0 || (c.align & (c.align - 1))) return "alignment is not a power of two";
+    if (!c.id || !c.type) return "was not declared with KV_COMPONENT";
+    return schema_check(c.size, c.fields, field);
+}
+inline const FieldDesc* component_field(const ComponentDesc& c, const char* name) { return schema_field(c.fields, name); }
+inline u64  component_hash(const ComponentDesc& c, const void* row) { return schema_hash(c.fields, row); }
+inline bool component_equal(const ComponentDesc& c, const void* a, const void* b) { return schema_equal(c.fields, a, b); }
+inline int  component_describe(const ComponentDesc& c, const void* row, char* out, usize cap) { return schema_describe(c.name, c.fields, row, out, cap); }
+inline bool component_each_handle(const ComponentDesc& c, void* row, bool (*fn)(Handle&, void*), void* user) { return schema_each_handle(c.fields, row, fn, user); }
 
 } // namespace kv
 

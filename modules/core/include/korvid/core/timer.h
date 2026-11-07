@@ -1,0 +1,31 @@
+// Korvid core: the timer wheel. Scheduled events carry a target tick and wait here;
+// at the first boundary of that tick they are emitted, pending, and delivered with
+// everything else. A ring of slots indexed by tick covers the next 1024 ticks; anything
+// further sits in an overflow list and is filed into the ring each time the ring wraps.
+// Cost per tick is the slot's records plus, once per lap, a pass over the far list.
+#pragma once
+#include "korvid/core/array.h"
+
+namespace kv {
+
+struct EventBus;
+
+struct TimerWheel {
+    static constexpr u32 SLOTS = 1024;
+
+    Array<u8> slots[SLOTS]; // records: TimerRecord header, then the event's bytes padded to 8
+    Array<u8> far;          // records for ticks at or beyond the ring's horizon
+    u64       next_tick  = 0; // the first tick fire() has not run for
+    u32       pending    = 0;
+    u32       fired      = 0;
+    u32       next_ticket = 1;
+
+    // Files an event for `tick`; a tick at or before the current one means the next tick.
+    // Returns a ticket (cancel comes later).
+    u32  schedule(u64 tick, u32 type_id, u32 size, const void* data, const char* emitter);
+    // Emits every record due at `tick` into the bus, pending. Call once per tick, first.
+    void fire(u64 tick, EventBus& bus);
+    void free();
+};
+
+} // namespace kv

@@ -92,13 +92,15 @@ build $builddir/obj/core/component.o: cxx modules/core/src/component.cc
   includes = $inc_core
 build $builddir/obj/core/kind.o: cxx modules/core/src/kind.cc
   includes = $inc_core
+build $builddir/obj/core/timer.o: cxx modules/core/src/timer.cc
+  includes = $inc_core
 
 build $builddir/lib/libkv_core.a: ar $builddir/obj/core/memory.o $
     $builddir/obj/core/log.o $builddir/obj/core/event.o $builddir/obj/core/tick.o $
     $builddir/obj/core/phase.o $builddir/obj/core/engine.o $builddir/obj/core/posix/time.o $
     $builddir/obj/core/posix/os_memory.o $builddir/obj/core/arena.o $builddir/obj/core/thread.o $
     $builddir/obj/core/handle.o $builddir/obj/core/hash.o $builddir/obj/core/name.o $
-    $builddir/obj/core/component.o $builddir/obj/core/kind.o
+    $builddir/obj/core/component.o $builddir/obj/core/kind.o $builddir/obj/core/timer.o
 
 build $builddir/obj/core/tests/main.o: cxx modules/core/tests/main.cc
   includes = $inc_core
@@ -126,6 +128,10 @@ build $builddir/obj/core/tests/context_test.o: cxx modules/core/tests/context_te
   includes = $inc_core
 build $builddir/obj/core/tests/schedule_test.o: cxx modules/core/tests/schedule_test.cc
   includes = $inc_core
+build $builddir/obj/core/tests/handler_test.o: cxx modules/core/tests/handler_test.cc
+  includes = $inc_core
+build $builddir/obj/core/tests/trigger_test.o: cxx modules/core/tests/trigger_test.cc
+  includes = $inc_core
 
 build $builddir/bin/core_tests: link $builddir/obj/core/tests/main.o $
     $builddir/obj/core/tests/handle_test.o $builddir/obj/core/tests/event_test.o $
@@ -133,7 +139,8 @@ build $builddir/bin/core_tests: link $builddir/obj/core/tests/main.o $
     $builddir/obj/core/tests/memory_test.o $builddir/obj/core/tests/map_test.o $
     $builddir/obj/core/tests/name_test.o $builddir/obj/core/tests/random_test.o $
     $builddir/obj/core/tests/component_test.o $builddir/obj/core/tests/kind_test.o $
-    $builddir/obj/core/tests/context_test.o $builddir/obj/core/tests/schedule_test.o $builddir/lib/libkv_core.a
+    $builddir/obj/core/tests/context_test.o $builddir/obj/core/tests/schedule_test.o $
+    $builddir/obj/core/tests/handler_test.o $builddir/obj/core/tests/trigger_test.o $builddir/lib/libkv_core.a
 
 # ---- platform --------------------------------------------------------------
 build $builddir/obj/platform/module.o: cxx modules/platform/src/module.cc

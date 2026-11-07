@@ -23,30 +23,72 @@ u32 PhaseList::system_count() const {
     return n;
 }
 
+namespace {
+
+void enter(TickContext& ctx, EventBus& events, ScheduledSystem& s) {
+    ctx.state      = s.module->state;
+    ctx.state_type = s.module->state_type;
+    ctx.system     = &s;
+    events.set_emitter(s.name());
+    mem_set_owner((u16)(s.module->index + 1)); // attribution follows the schedule
+}
+
+void leave(EventBus& events) {
+    events.set_emitter("");
+    mem_set_owner(0);
+}
+
+// A phase boundary: at the tick's first one the timers fire; then pending events are
+// delivered and the handlers with new events run, in waves, each wave delivering what
+// the last emitted, up to the cap. Leftovers wait for the next boundary.
+void boundary(Engine& engine, EventBus& events, TickContext& ctx, u64 tick, bool tick_start) {
+    if (tick_start) engine.timers.fire(tick, events);
+    events.deliver(tick_start);
+    engine_trace_delivery(engine, tick, 0);
+    for (u32 wave = 0;; ++wave) {
+        ctx.wave = wave;
+        for (ScheduledSystem& h : engine.handlers) {
+            u32 type = *h.handler->event;
+            u32 n = events.new_count(type);
+            if (!n) continue;
+            enter(ctx, events, h);
+            h.handler->fn(ctx, events.new_data(type), n);
+            leave(events);
+        }
+        engine_apply_commands(engine);
+        if (events.pending_now() == 0) break;
+        if (wave + 1 >= engine.wave_cap) { ++engine.waves_capped; break; }
+        events.deliver(false);
+        engine_trace_delivery(engine, tick, wave + 1);
+    }
+    ctx.wave = 0;
+}
+
+} // namespace
+
 void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
     TickContext ctx;
     ctx.engine = &engine;
     ctx.events = &events;
     ctx.dt     = dt;
     ctx.tick   = tick;
+    ctx.state  = nullptr;
+    ctx.state_type = nullptr;
     for (u32 p = 0; p < (u32)Phase::Count; ++p) {
-        Array<ScheduledSystem>& phase = systems[p];
-        events.deliver(); // phase boundary: pending events become visible
+        boundary(engine, events, ctx, tick, p == 0);
         if ((Phase)p == Phase::PreSim)
             for (Table& t : engine.tables) t.begin_tick(); // current becomes previous, before anything moves
-        for (ScheduledSystem& s : phase) {
-            ctx.state      = s.module->state;
-            ctx.state_type = s.module->state_type;
-            ctx.system     = &s;
-            mem_set_owner((u16)(s.module->index + 1)); // attribution follows the schedule
+        for (ScheduledSystem& s : systems[p]) {
+            enter(ctx, events, s);
             s.desc->fn(ctx);
+            leave(events);
             if (engine.hash_systems)
                 KV_INFO("hash", "tick %llu after %-24s %016llx", (unsigned long long)tick, s.desc->name,
                         (unsigned long long)engine_hash_state(engine));
         }
-        mem_set_owner(0);
         engine_apply_commands(engine); // spawns and destroys issued this phase take effect
     }
+    engine_fire_triggers(engine, tick); // edges this tick, as pending StateEdge events for the next
     events.end_tick();
     if (engine.hash_ticks || engine.hash_systems) {
         engine.last_hash = engine_hash_state(engine);
@@ -70,7 +112,7 @@ bool contains(const Array<u32>& ids, u32 id) {
     return false;
 }
 
-const char* system_name(const TickContext& ctx) { return ctx.system ? ctx.system->desc->name : "(no system)"; }
+const char* system_name(const TickContext& ctx) { return ctx.system ? ctx.system->name() : "(no system)"; }
 
 // Declared access to a resource, or to the kind that owns it (write on a kind covers its
 // columns). Outside the schedule (no system) everything is allowed. Ship builds skip this.
@@ -145,5 +187,10 @@ void ctx_spawn_component(TickContext& ctx, u32 component_id, const void* data, u
 }
 
 void ctx_destroy(TickContext& ctx, Handle h) { command_destroy(ctx.engine->commands, h); }
+
+u32 ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick) {
+    if (type_id == 0) { KV_ERROR("engine", "system '%s' schedules an unregistered event type", system_name(ctx)); KV_VERIFY(!"unregistered event"); return 0; }
+    return ctx.engine->timers.schedule(tick, type_id, size, event, system_name(ctx));
+}
 
 } // namespace kv

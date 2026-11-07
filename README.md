@@ -29,6 +29,18 @@ sim one. `engine_init` logs the order and the reason for every edge. `--hash` lo
 of every sim column of every live entity after each tick, `--hash-systems` after each
 system, to locate where two runs diverge.
 
+Events are plain data in typed per-tick buffers, delivered at phase boundaries. An event
+type may carry a field schema (`KV_EVENT_EX`); then an event whose handle no longer
+resolves is dropped at delivery and counted, and the dev trace (`--trace-events`) prints
+every delivered event with who emitted it. Modules declare handlers (`KV_ON(Event, fn)`)
+that run at every boundary on the new batch of their event, in waves: what a wave emits
+is delivered to the next, up to a cap of four, and what remains waits for the next
+boundary. Handlers have read/write sets and are ordered like systems. A type flagged
+`EvNextTick` is held until the next tick's first boundary. `ctx.schedule(event, tick)`
+files an event in the timer wheel for the first boundary of that tick. Triggers declare
+an edge on one field of a `prev` component (`Changed`, `CrossedBelow`, `CrossedAbove`);
+the engine evaluates them at the end of every tick and emits `StateEdge` for the next.
+
 Modules follow the kormake directory convention (`module.lua`, `include/korvid/<name>/`,
 `src/`, `shaders/`, `assets/`, `tests/`). A module's `assets/` are copied to
 `build/bin/assets/<module>/` and loaded by that relative path. `build.ninja` is a
@@ -72,6 +84,7 @@ hand-written stand-in until kormake exists.
     build/bin/hello --borderless      # no libdecor frame (see note below)
     build/bin/hello --hitch-ms 50     # log where any frame over 50 ms spent its time
     build/bin/hello --hash            # log the sim state hash per tick (--hash-systems: per system)
+    build/bin/hello --trace-events    # print every delivered event with its emitter (dev builds)
 
 Needs g++ (or clang++), ninja, libsdl3-dev, libvulkan-dev, zlib1g-dev, slang-compiler,
 and for debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached

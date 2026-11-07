@@ -16,7 +16,12 @@ bool names_equal(const char* a, const char* b) { return strcmp(a, b) == 0; }
 
 // The engine's own event types, registered after every module's so module ids are
 // unaffected by what the core adds.
-constinit const EventTypeDesc k_core_events[] = {KV_EVENT(Spawned)};
+constinit const FieldDesc k_spawned_fields[]    = {KV_FIELD(Spawned, ticket), KV_FIELD(Spawned, kind), KV_FIELD(Spawned, entity)};
+constinit const FieldDesc k_state_edge_fields[] = {KV_FIELD(StateEdge, entity), KV_FIELD(StateEdge, trigger), KV_FIELD(StateEdge, value)};
+constinit const EventTypeDesc k_core_events[] = {
+    KV_EVENT_EX(Spawned, k_spawned_fields, 0),
+    KV_EVENT_EX(StateEdge, k_state_edge_fields, 0),
+};
 
 bool check_module_names(Span<const ModuleDesc* const> modules) {
     if (modules.len > KV_MEM_MAX_MODULES) {
@@ -73,6 +78,11 @@ bool register_events(Engine& e, Span<const ModuleDesc* const> modules) {
     u32 n = event_types_register(k_core_events, next);
     if (n == 0) { KV_ERROR("engine", "core event registration failed"); return false; }
     e.event_type_count = n - 1;
+    // By id, for the bus (stale drop, next-tick) and the trace.
+    e.event_types.resize_fill(e.event_type_count + 1, nullptr);
+    for (const ModuleDesc* m : modules)
+        for (const EventTypeDesc& t : m->events) e.event_types[*t.id] = &t;
+    for (const EventTypeDesc& t : k_core_events) e.event_types[*t.id] = &t;
     return true;
 }
 
@@ -228,6 +238,9 @@ struct Pending {
     u32             rank;       // module order then declaration order
 };
 
+Span<const char* const> after_of(const Pending& p)  { return p.sys.desc ? p.sys.desc->after : p.sys.handler->after; }
+Span<const char* const> before_of(const Pending& p) { return p.sys.desc ? p.sys.desc->before : p.sys.handler->before; }
+
 const char* resource_name(const Engine& e, u32 id) { return id && id <= e.resources.len ? e.resources[id - 1].name : "?"; }
 
 bool contains(const Array<u32>& ids, u32 id) {
@@ -267,8 +280,8 @@ bool check_flow(const Engine& e, const Pending& p) {
         for (u32 w : p.writes_eff) {
             const Column* wc = column_of(e, w);
             if (wc && wc->desc->is_sim()) {
-                KV_ERROR("engine", "system '%s' reads cosmetic '%s' and writes sim '%s': data flows from sim to presentation, never back",
-                         p.sys.desc->name, rc->resource_name, wc->resource_name);
+                KV_ERROR("engine", "'%s' reads cosmetic '%s' and writes sim '%s': data flows from sim to presentation, never back",
+                         p.sys.name(), rc->resource_name, wc->resource_name);
                 return false;
             }
         }
@@ -295,7 +308,7 @@ bool reaches(const Array<Edge>& edges, u32 n, u32 from, u32 to) {
 
 u32 find_pending(const Array<Pending>& pend, const char* name) {
     for (u32 i = 0; i < pend.len; ++i)
-        if (names_equal(pend[i].sys.desc->name, name)) return i + 1;
+        if (names_equal(pend[i].sys.name(), name)) return i + 1;
     return 0;
 }
 
@@ -316,12 +329,12 @@ found:
     char line[1024];
     u32 n = 0;
     for (u32 i = path.len; i-- > 0;) {
-        int k = snprintf(line + n, sizeof line - n, "%s%s", n ? " -> " : "", pend[path[i]].sys.desc->name);
+        int k = snprintf(line + n, sizeof line - n, "%s%s", n ? " -> " : "", pend[path[i]].sys.name());
         if (k < 0 || n + (u32)k >= sizeof line) break;
         n += (u32)k;
     }
-    snprintf(line + n, sizeof line - n, " -> %s", pend[at].sys.desc->name);
-    KV_ERROR("engine", "systems form a cycle in phase '%s': %s", phase_name(pend[start].sys.desc->phase), line);
+    snprintf(line + n, sizeof line - n, " -> %s", pend[at].sys.name());
+    KV_ERROR("engine", "a cycle among %s: %s", pend[start].sys.desc ? "systems in one phase" : "handlers", line);
     path.free();
 }
 
@@ -330,10 +343,12 @@ void free_pending(Array<Pending>& pend) {
     pend.free();
 }
 
-// Orders one phase's systems into e.phases. Takes ownership of the pending systems' arrays.
-bool order_phase(Engine& e, Array<Pending>& pend, Phase phase) {
+// Orders one phase's systems (or, with phase == Count, the handlers) into `out`. Takes
+// ownership of the pending units' arrays.
+bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSystem>& out) {
     Array<Edge> edges = array_in<Edge>(mem_scratch());
     u32 n = pend.len;
+    const char* what = phase == Phase::Count ? "handlers" : phase_name(phase);
 
     // Readers after writers; a pair writing the same thing is remembered for the check below.
     for (u32 i = 0; i < n; ++i)
@@ -341,23 +356,26 @@ bool order_phase(Engine& e, Array<Pending>& pend, Phase phase) {
             if (i == j) continue;
             if (u32 r = first_common(pend[i].writes_eff, pend[j].reads_eff)) edges.push(Edge{i, j, r});
         }
-    // Declared order.
+    // Declared order. For systems, a name in another phase is checked for direction; for
+    // handlers, only other handlers may be named.
     for (u32 i = 0; i < n; ++i) {
-        const SystemDesc& s = *pend[i].sys.desc;
-        for (const char* other : s.after) {
+        const char* me = pend[i].sys.name();
+        for (const char* other : after_of(pend[i])) {
             u32 j = find_pending(pend, other);
             if (!j) {
-                if (engine_system_phase(e, other) == Phase::Count) { KV_ERROR("engine", "system '%s' is after unknown system '%s'", s.name, other); edges.free(); return false; }
-                if ((u32)engine_system_phase(e, other) > (u32)phase) { KV_ERROR("engine", "system '%s' (phase %s) cannot run after '%s', which is in a later phase", s.name, phase_name(phase), other); edges.free(); return false; }
+                Phase op = phase == Phase::Count ? Phase::Count : engine_system_phase(e, other);
+                if (op == Phase::Count) { KV_ERROR("engine", "'%s' is after unknown %s '%s'", me, phase == Phase::Count ? "handler" : "system", other); edges.free(); return false; }
+                if ((u32)op > (u32)phase) { KV_ERROR("engine", "system '%s' (phase %s) cannot run after '%s', which is in a later phase", me, what, other); edges.free(); return false; }
                 continue; // an earlier phase: already true
             }
             edges.push(Edge{j - 1, i, 0});
         }
-        for (const char* other : s.before) {
+        for (const char* other : before_of(pend[i])) {
             u32 j = find_pending(pend, other);
             if (!j) {
-                if (engine_system_phase(e, other) == Phase::Count) { KV_ERROR("engine", "system '%s' is before unknown system '%s'", s.name, other); edges.free(); return false; }
-                if ((u32)engine_system_phase(e, other) < (u32)phase) { KV_ERROR("engine", "system '%s' (phase %s) cannot run before '%s', which is in an earlier phase", s.name, phase_name(phase), other); edges.free(); return false; }
+                Phase op = phase == Phase::Count ? Phase::Count : engine_system_phase(e, other);
+                if (op == Phase::Count) { KV_ERROR("engine", "'%s' is before unknown %s '%s'", me, phase == Phase::Count ? "handler" : "system", other); edges.free(); return false; }
+                if ((u32)op < (u32)phase) { KV_ERROR("engine", "system '%s' (phase %s) cannot run before '%s', which is in an earlier phase", me, what, other); edges.free(); return false; }
                 continue;
             }
             edges.push(Edge{i, j - 1, 0});
@@ -369,8 +387,8 @@ bool order_phase(Engine& e, Array<Pending>& pend, Phase phase) {
             u32 r = first_common(pend[i].writes_eff, pend[j].writes_eff);
             if (!r) continue;
             if (reaches(edges, n, i, j) || reaches(edges, n, j, i)) continue;
-            KV_ERROR("engine", "systems '%s' and '%s' both write '%s' in phase '%s' with no order between them: add `after` or `before`",
-                     pend[i].sys.desc->name, pend[j].sys.desc->name, resource_name(e, r), phase_name(phase));
+            KV_ERROR("engine", "'%s' and '%s' both write '%s' (%s) with no order between them: add `after` or `before`",
+                     pend[i].sys.name(), pend[j].sys.name(), resource_name(e, r), what);
             edges.free();
             return false;
         }
@@ -378,7 +396,6 @@ bool order_phase(Engine& e, Array<Pending>& pend, Phase phase) {
     // Topological order, lowest rank first among the ready.
     Array<u8> placed = array_in<u8>(mem_scratch());
     placed.resize_fill(n, 0);
-    Array<ScheduledSystem>& out = e.phases.systems[(u32)phase];
     for (u32 done = 0; done < n; ++done) {
         u32 pick = n;
         for (u32 i = 0; i < n; ++i) {
@@ -398,7 +415,7 @@ bool order_phase(Engine& e, Array<Pending>& pend, Phase phase) {
         // Log why it sits where it does.
         for (const Edge& ed : edges)
             if (ed.to == pick)
-                KV_INFO("engine", "  %s after %s: %s", pend[pick].sys.desc->name, pend[ed.from].sys.desc->name,
+                KV_INFO("engine", "  %s after %s: %s", pend[pick].sys.name(), pend[ed.from].sys.name(),
                         ed.resource ? resource_name(e, ed.resource) : "declared");
     }
     placed.free();
@@ -440,10 +457,78 @@ bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
     }
     for (u32 p = 0; ok && p < (u32)Phase::Count; ++p) {
         KV_INFO("engine", "phase %s:", phase_name((Phase)p));
-        ok = order_phase(e, pend[p], (Phase)p);
+        ok = order_units(e, pend[p], (Phase)p, e.phases.systems[p]);
     }
     for (u32 p = 0; p < (u32)Phase::Count; ++p) free_pending(pend[p]);
     return ok;
+}
+
+// Handlers: one ordered list for every boundary, built like a phase. A handler's event
+// must be a declared type.
+bool build_handlers(Engine& e, Span<const ModuleDesc* const> modules) {
+    Array<Pending> pend;
+    bool ok = true;
+    u32 rank = 0;
+    for (u32 i = 0; ok && i < modules.len; ++i) {
+        const ModuleDesc& m = *modules[i];
+        for (const HandlerDesc& h : m.handlers) {
+            if (!h.name || !h.fn || !h.event) { KV_ERROR("engine", "module '%s' has a handler with no name, no function or no event", m.name); ok = false; break; }
+            if (*h.event == 0) { KV_ERROR("engine", "handler '%s' in module '%s' is on event type '%s', which no module declares", h.name, m.name, h.event_name ? h.event_name : "?"); ok = false; break; }
+            if (find_pending(pend, h.name)) { KV_ERROR("engine", "handler '%s' declared twice", h.name); ok = false; break; }
+            Pending p{ScheduledSystem{nullptr, &e.modules[i], {}, {}, &h}, {}, {}, rank++};
+            SystemDesc fake{.name = h.name, .phase = Phase::Count}; // for the resolver's messages only
+            if (!resolve_resource_refs(e, m, fake, h.reads, "reads", p.sys.reads) ||
+                !resolve_resource_refs(e, m, fake, h.writes, "writes", p.sys.writes)) {
+                p.sys.reads.free(); p.sys.writes.free();
+                ok = false;
+                break;
+            }
+            expand(e, p.sys.reads, p.reads_eff);
+            expand(e, p.sys.writes, p.writes_eff);
+            pend.push(p);
+            if (!check_flow(e, pend.last())) { ok = false; break; }
+        }
+    }
+    if (ok && pend.len) {
+        KV_INFO("engine", "handlers:");
+        ok = order_units(e, pend, Phase::Count, e.handlers);
+    }
+    free_pending(pend);
+    return ok;
+}
+
+// Triggers: "kind.Component.field" resolved to a column that keeps a previous copy and a
+// scalar field, so the edge is a compare of two rows.
+bool build_triggers(Engine& e, Span<const ModuleDesc* const> modules) {
+    for (u32 i = 0; i < modules.len; ++i) {
+        const ModuleDesc& m = *modules[i];
+        for (const TriggerDesc& t : m.triggers) {
+            if (!t.name || !t.field) { KV_ERROR("engine", "module '%s' has a trigger with no name or field", m.name); return false; }
+            if (engine_trigger_id(e, t.name)) { KV_ERROR("engine", "trigger '%s' declared twice", t.name); return false; }
+            const char* dot = strrchr(t.field, '.');
+            if (!dot || dot == t.field || !dot[1]) { KV_ERROR("engine", "trigger '%s': field '%s' is not kind.Component.field", t.name, t.field); return false; }
+            char column_name[2 * KV_KIND_NAME_MAX + 2];
+            usize len = (usize)(dot - t.field);
+            if (len >= sizeof column_name) { KV_ERROR("engine", "trigger '%s': column name too long", t.name); return false; }
+            memcpy(column_name, t.field, len);
+            column_name[len] = 0;
+            u32 rid = engine_resource_id(e, column_name);
+            Trigger tr{&t, nullptr, nullptr, nullptr, i};
+            for (Table& tab : e.tables)
+                for (const Column& c : tab.columns)
+                    if (c.resource == rid) { tr.table = &tab; tr.column = &c; }
+            if (!tr.column) { KV_ERROR("engine", "trigger '%s': unknown column '%s'", t.name, column_name); return false; }
+            if (!tr.column->prev) { KV_ERROR("engine", "trigger '%s': component '%s' keeps no previous copy (declare it with CompPrev)", t.name, tr.column->desc->name); return false; }
+            tr.field = schema_field(tr.column->desc->fields, dot + 1);
+            if (!tr.field) { KV_ERROR("engine", "trigger '%s': component '%s' has no field '%s'", t.name, tr.column->desc->name, dot + 1); return false; }
+            if (tr.field->count != 1) { KV_ERROR("engine", "trigger '%s': field '%s' is not a scalar", t.name, dot + 1); return false; }
+            if (t.edge != TriggerEdge::Changed && tr.field->type == FieldType::Handle) { KV_ERROR("engine", "trigger '%s': a handle field can only be watched for Changed", t.name); return false; }
+            e.triggers.push(tr);
+            if (t.id) *t.id = e.triggers.len;
+            KV_INFO("engine", "trigger %-2u %s on %s", e.triggers.len, t.name, t.field);
+        }
+    }
+    return true;
 }
 
 void log_components(const Engine& e) {
@@ -494,9 +579,14 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
     }
 
     bool ok = register_events(e, modules) && register_components(e, modules) && register_kinds(e, modules) &&
-              register_resources(e, modules) && build_schedule(e, modules);
+              register_resources(e, modules) && build_schedule(e, modules) && build_handlers(e, modules) &&
+              build_triggers(e, modules);
     if (ok) {
         e.events.init(1);
+        e.events.types = Span<const EventTypeDesc* const>(e.event_types.data, e.event_types.len);
+#if KV_DEV
+        e.trace.ring.resize_fill(1024, TraceRecord{});
+#endif
         log_components(e);
         log_kinds(e);
         log_order(e);
@@ -544,9 +634,18 @@ void engine_shutdown(Engine& e) {
     }
     e.commands.bytes.free();
     e.commands.count = 0;
+    e.timers.free();
+    e.trace.ring.free();
+    e.trace.head = 0;
+    for (ScheduledSystem& h : e.handlers) { h.reads.free(); h.writes.free(); }
+    e.handlers.free();
+    for (const Trigger& t : e.triggers) if (t.desc->id) *t.desc->id = 0;
+    e.triggers.free();
     free_tables(e); // after every module is down: nothing holds an entity any more
+    e.events.types = {};
     for (const ModuleInstance& inst : e.modules) event_types_unregister(inst.desc->events);
     event_types_unregister(k_core_events);
+    e.event_types.free();
     unregister_components(e);
     e.phases.free();
     e.events.free();
@@ -645,7 +744,7 @@ void engine_apply_commands(Engine& e) {
                 memcpy(c->data + (usize)entity.index() * c->stride, data, ch->size);
                 if (c->prev) memcpy(c->prev + (usize)entity.index() * c->stride, data, ch->size);
             }
-            e.events.emit(Spawned{h->ticket, entity, h->kind}); // null entity: the kind was full or unknown
+            e.events.emit(Spawned{h->ticket, h->kind, entity}); // null entity: the kind was full or unknown
         } else {
             for (Table& t : e.tables)
                 if (t.kind == h->entity.kind()) { t.destroy(h->entity); break; } // stale: silently nothing
@@ -653,6 +752,86 @@ void engine_apply_commands(Engine& e) {
     }
     cb.bytes.clear();
     cb.count = 0;
+}
+
+void engine_fire_triggers(Engine& e, u64 tick) {
+    KV_UNUSED(tick);
+    for (u32 ti = 0; ti < e.triggers.len; ++ti) {
+        const Trigger& t = e.triggers[ti];
+        const Table& tab = *t.table;
+        u32 n = tab.rows();
+        e.events.set_emitter(t.desc->name);
+        for (u32 i = 0; i < n; ++i) {
+            if (!tab.is_alive(i)) continue;
+            const u8* cur  = t.column->data + (usize)i * t.column->stride;
+            const u8* prev = t.column->prev + (usize)i * t.column->stride;
+            bool fired = false;
+            f64 value = 0.0;
+            if (t.desc->edge == TriggerEdge::Changed) {
+                usize bytes = field_type_size(t.field->type);
+                fired = memcmp(cur + t.field->offset, prev + t.field->offset, bytes) != 0;
+                if (fired) schema_field_as_f64(*t.field, cur, &value);
+            } else {
+                f64 before = 0.0;
+                schema_field_as_f64(*t.field, cur, &value);
+                schema_field_as_f64(*t.field, prev, &before);
+                f64 v = t.desc->value;
+                fired = t.desc->edge == TriggerEdge::CrossedBelow ? (before >= v && value < v) : (before <= v && value > v);
+            }
+            if (!fired) continue;
+            e.events.emit(StateEdge{tab.handle_at(i), ti + 1, 0, value});
+            ++e.edges_fired;
+        }
+    }
+    e.events.set_emitter("");
+}
+
+int engine_describe_event(const Engine& e, u32 type_id, const void* event, char* out, usize cap) {
+    const EventTypeDesc* d = type_id < e.event_types.len ? e.event_types[type_id] : nullptr;
+    if (!d) return snprintf(out, cap, "event#%u", type_id);
+    if (d->fields.len == 0) return snprintf(out, cap, "%s{..}", d->name);
+    return schema_describe(d->name, d->fields, event, out, cap);
+}
+
+void engine_trace_delivery(Engine& e, u64 tick, u32 wave) {
+#if KV_DEV
+    if (e.trace.ring.len == 0) return;
+    EventBus& bus = e.events;
+    if (bus.dropped_last && e.trace.print)
+        KV_INFO("trace", "tick %llu wave %u: %u event%s dropped for stale handles", (unsigned long long)tick, wave,
+                bus.dropped_last, bus.dropped_last == 1 ? "" : "s");
+    for (u32 t = 1; t < bus.delivered.len; ++t) {
+        u32 n = bus.new_count(t);
+        if (!n) continue;
+        const EventBuffer& b = bus.delivered[t];
+        u32 start = b.count() - n;
+        for (u32 i = 0; i < n; ++i) {
+            const u8* ev = b.bytes.data + (usize)(start + i) * b.elem_size;
+            TraceRecord& r = e.trace.ring[e.trace.head];
+            r.tick    = tick;
+            r.emitter = b.emitters[start + i];
+            r.type    = t;
+            r.wave    = (u16)wave;
+            r.size    = (u8)(b.elem_size < sizeof r.data ? b.elem_size : sizeof r.data);
+            memcpy(r.data, ev, r.size);
+            e.trace.head = (e.trace.head + 1) % e.trace.ring.len;
+            ++e.trace.total;
+            if (e.trace.print) {
+                char text[256];
+                engine_describe_event(e, t, ev, text, sizeof text);
+                KV_INFO("trace", "tick %llu wave %u: %s <- %s", (unsigned long long)tick, wave, text, r.emitter[0] ? r.emitter : "(outside the schedule)");
+            }
+        }
+    }
+#else
+    KV_UNUSED(e); KV_UNUSED(tick); KV_UNUSED(wave);
+#endif
+}
+
+u32 engine_trigger_id(const Engine& e, const char* name) {
+    for (u32 i = 0; i < e.triggers.len; ++i)
+        if (names_equal(e.triggers[i].desc->name, name)) return i + 1;
+    return 0;
 }
 
 void engine_request_quit(Engine& e) { e.quit_requested = true; }

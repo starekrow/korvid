@@ -99,6 +99,11 @@ struct Table {
         return c ? Span<T>((T*)c->data, rows()) : Span<T>();
     }
     template <class T>
+    Span<const T> rows_of() const {
+        const Column* c = column<T>();
+        return c ? Span<const T>((const T*)c->data, rows()) : Span<const T>();
+    }
+    template <class T>
     Span<const T> prev_rows_of() const {
         const Column* c = column<T>();
         return c && c->prev ? Span<const T>((const T*)c->prev, rows()) : Span<const T>();

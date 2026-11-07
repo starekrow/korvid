@@ -31,8 +31,52 @@ const char* phase_name(Phase p);
 // Emitted by the engine when a command spawn is applied, so the issuer learns the handle.
 struct Spawned {
     u32    ticket; // what spawn_later returned
-    Handle entity;
     u32    kind;   // kind id
+    Handle entity; // null if the kind was full
+};
+
+// Emitted by the engine at the end of a tick for every state trigger that fired,
+// delivered at the start of the next.
+struct StateEdge {
+    Handle entity;
+    u32    trigger; // trigger id
+    u32    pad;
+    f64    value;   // the field's value after the edge
+};
+
+// A handler: subscribed to one event type, run at phase boundaries on each new batch of
+// it, in waves, under the same read/write rules as a system. Referenced by its id in the
+// table, never by function pointer in sim state.
+//   void on_hit(TickContext& ctx, Span<const RockHit> hits);
+//   {.name = "rocks.on_hit", KV_ON(RockHit, on_hit), .reads = ..., .writes = ...}
+typedef void (*HandlerFn)(TickContext& ctx, const void* events, u32 count);
+template <class E, void (*F)(TickContext&, Span<const E>)>
+void handler_thunk(TickContext& ctx, const void* events, u32 count) { F(ctx, Span<const E>((const E*)events, count)); }
+
+struct HandlerDesc {
+    const char*             name       = nullptr;
+    u32*                    event      = nullptr; // &EventType<E>::id
+    const char*             event_name = nullptr;
+    HandlerFn               fn         = nullptr;
+    Span<const char* const> reads      = {};
+    Span<const char* const> writes     = {};
+    Span<const char* const> after      = {}; // handler names
+    Span<const char* const> before     = {};
+};
+
+// A state trigger: an edge on one scalar field of a component that keeps a previous
+// copy, evaluated at the end of every tick over every live row, emitting StateEdge.
+enum class TriggerEdge : u8 {
+    Changed,      // the field differs from the previous tick
+    CrossedBelow, // previous >= value, current < value
+    CrossedAbove, // previous <= value, current > value
+};
+struct TriggerDesc {
+    const char* name  = nullptr;
+    const char* field = nullptr; // "kind.Component.field"
+    TriggerEdge edge  = TriggerEdge::Changed;
+    f64         value = 0.0;
+    u32*        id    = nullptr; // optional: filled with the trigger id at init
 };
 
 template <class T> struct RemoveConst          { typedef T type; static constexpr bool is_const = false; };
@@ -49,6 +93,7 @@ Table*  ctx_table_at(TickContext& ctx, u32 i);
 u32     ctx_spawn_begin(TickContext& ctx, const char* kind, u32 component_count); // ticket; 0 if unknown kind
 void    ctx_spawn_component(TickContext& ctx, u32 component_id, const void* data, u32 size);
 void    ctx_destroy(TickContext& ctx, Handle h);
+u32     ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick);
 
 // One kind's rows for a view: the live mask and every column the view named.
 struct KindRows {
@@ -105,7 +150,8 @@ struct TickContext {
     u64                    tick;
     void*                  state;      // the running system's module state (ModuleInstance::state)
     const void*            state_type; // its type key, recorded when startup stored it
-    const ScheduledSystem* system = nullptr; // whose declared sets gate the accessors; null: anything goes
+    const ScheduledSystem* system = nullptr; // the running system or handler, whose sets gate the accessors; null: anything goes
+    u32                    wave   = 0;       // for a handler: which wave of the boundary this is
 
     // The module state as the type startup stored. Verified by a pointer compare.
     template <class T>
@@ -148,6 +194,13 @@ struct TickContext {
     }
     // Destroy at the phase boundary: readers in this phase still see the entity.
     void destroy(Handle h) { ctx_destroy(*this, h); }
+
+    // ---- scheduled events: delivered at the first boundary of `tick` -------------------
+    // A tick at or before the current one means the next tick. Returns a ticket.
+    template <class E>
+    u32 schedule(const E& e, u64 at_tick) { return ctx_schedule(*this, EventType<E>::id, (u32)sizeof(E), &e, at_tick); }
+    template <class E>
+    u32 schedule_in(const E& e, u64 ticks) { return schedule(e, tick + ticks); }
 };
 
 typedef void (*SystemFn)(TickContext& ctx);
@@ -163,12 +216,16 @@ struct SystemDesc {
     Span<const char* const> before = {};
 };
 
-// A system placed in the schedule, with the module it came from and its sets as ids.
+// A system or handler placed in the schedule, with the module it came from and its sets
+// as ids. Exactly one of desc and handler is set.
 struct ScheduledSystem {
-    const SystemDesc* desc;
-    ModuleInstance*   module;
-    Array<u32>        reads;  // resource ids; wildcards expanded
-    Array<u32>        writes;
+    const SystemDesc*  desc;
+    ModuleInstance*    module;
+    Array<u32>         reads;  // resource ids; wildcards expanded
+    Array<u32>         writes;
+    const HandlerDesc* handler = nullptr;
+
+    const char* name() const { return desc ? desc->name : handler->name; }
 };
 
 struct PhaseList {
@@ -176,9 +233,15 @@ struct PhaseList {
 
     u32  system_count() const;
 
-    // Runs one tick: for each phase, deliver pending events, run its systems, apply commands.
+    // Runs one tick: for each phase, the boundary (fire timers at the first, deliver, run
+    // handlers in waves, apply commands), then its systems and their commands. At the end,
+    // triggers, the hash and end_tick.
     void run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick);
     void free();
 };
 
 } // namespace kv
+
+// The event and function of a handler, inside its designated initializer:
+//   {.name = "rocks.on_hit", KV_ON(RockHit, on_hit), .reads = ...}
+#define KV_ON(E, FN) .event = &::kv::EventType<E>::id, .event_name = #E, .fn = &::kv::handler_thunk<E, FN>

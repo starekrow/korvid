@@ -21,24 +21,20 @@ const char* field_type_name(FieldType t) {
     return (u32)t < KV_COUNTOF(names) ? names[(u32)t] : "?";
 }
 
-const char* component_check(const ComponentDesc& c, const char** field) {
+const char* schema_check(u32 total, Span<const FieldDesc> fields, const char** field) {
     *field = nullptr;
-    if (!c.name || !c.name[0]) return "has no name";
-    if (c.size == 0) return "has zero size";
-    if (c.align == 0 || (c.align & (c.align - 1))) return "alignment is not a power of two";
-    if (!c.id || !c.type) return "was not declared with KV_COMPONENT";
-    for (u32 i = 0; i < c.fields.len; ++i) {
-        const FieldDesc& f = c.fields[i];
+    for (u32 i = 0; i < fields.len; ++i) {
+        const FieldDesc& f = fields[i];
         *field = f.name;
         if (!f.name || !f.name[0]) { *field = nullptr; return "has an unnamed field"; }
         u32 size = field_type_size(f.type);
         if (size == 0) return "has an unknown type";
         if (f.count == 0) return "has zero count";
-        if ((usize)f.offset + (usize)size * f.count > c.size) return "extends past the end of the component";
+        if ((usize)f.offset + (usize)size * f.count > total) return "extends past the end of the struct";
         if (f.offset % size) return "is misaligned for its type";
         for (u32 j = 0; j < i; ++j) {
-            if (strcmp(c.fields[j].name, f.name) == 0) return "is named twice";
-            u32 lo = c.fields[j].offset, hi = lo + field_type_size(c.fields[j].type) * c.fields[j].count;
+            if (strcmp(fields[j].name, f.name) == 0) return "is named twice";
+            u32 lo = fields[j].offset, hi = lo + field_type_size(fields[j].type) * fields[j].count;
             if (f.offset < hi && lo < f.offset + size * f.count) return "overlaps an earlier field";
         }
     }
@@ -46,10 +42,33 @@ const char* component_check(const ComponentDesc& c, const char** field) {
     return nullptr;
 }
 
-const FieldDesc* component_field(const ComponentDesc& c, const char* name) {
-    for (const FieldDesc& f : c.fields)
+const FieldDesc* schema_field(Span<const FieldDesc> fields, const char* name) {
+    for (const FieldDesc& f : fields)
         if (strcmp(f.name, name) == 0) return &f;
     return nullptr;
+}
+
+bool schema_has_handles(Span<const FieldDesc> fields) {
+    for (const FieldDesc& f : fields) if (f.type == FieldType::Handle) return true;
+    return false;
+}
+
+bool schema_field_as_f64(const FieldDesc& f, const void* row, f64* out) {
+    const u8* p = (const u8*)row + f.offset;
+    switch (f.type) {
+    case FieldType::Bool: case FieldType::U8: *out = *p; return true;
+    case FieldType::I8:  *out = *(const i8*)p; return true;
+    case FieldType::U16: { u16 v; memcpy(&v, p, 2); *out = v; return true; }
+    case FieldType::I16: { i16 v; memcpy(&v, p, 2); *out = v; return true; }
+    case FieldType::U32: { u32 v; memcpy(&v, p, 4); *out = v; return true; }
+    case FieldType::I32: { i32 v; memcpy(&v, p, 4); *out = v; return true; }
+    case FieldType::F32: { f32 v; memcpy(&v, p, 4); *out = v; return true; }
+    case FieldType::U64: { u64 v; memcpy(&v, p, 8); *out = (f64)v; return true; }
+    case FieldType::I64: { i64 v; memcpy(&v, p, 8); *out = (f64)v; return true; }
+    case FieldType::F64: { f64 v; memcpy(&v, p, 8); *out = v; return true; }
+    case FieldType::Handle: case FieldType::Count: break;
+    }
+    return false;
 }
 
 namespace {
@@ -99,10 +118,10 @@ struct Out {
 
 } // namespace
 
-u64 component_hash(const ComponentDesc& c, const void* row) {
+u64 schema_hash(Span<const FieldDesc> fields, const void* row) {
     const u8* base = (const u8*)row;
-    u64 h = 0x9e3779b97f4a7c15ull ^ c.fields.len;
-    for (const FieldDesc& f : c.fields) {
+    u64 h = 0x9e3779b97f4a7c15ull ^ fields.len;
+    for (const FieldDesc& f : fields) {
         u32 size = field_type_size(f.type);
         for (u32 i = 0; i < f.count; ++i)
             h = hash_mix(h ^ scalar_bits(f.type, base + f.offset + i * size));
@@ -110,22 +129,22 @@ u64 component_hash(const ComponentDesc& c, const void* row) {
     return hash_mix(h);
 }
 
-bool component_equal(const ComponentDesc& c, const void* a, const void* b) {
-    for (const FieldDesc& f : c.fields) {
+bool schema_equal(Span<const FieldDesc> fields, const void* a, const void* b) {
+    for (const FieldDesc& f : fields) {
         usize bytes = (usize)field_type_size(f.type) * f.count;
         if (memcmp((const u8*)a + f.offset, (const u8*)b + f.offset, bytes) != 0) return false;
     }
     return true;
 }
 
-int component_describe(const ComponentDesc& c, const void* row, char* out, usize cap) {
+int schema_describe(const char* name, Span<const FieldDesc> fields, const void* row, char* out, usize cap) {
     if (cap) out[0] = 0;
     Out o{out, cap};
-    o.put(c.name);
+    o.put(name);
     o.put("{");
     const u8* base = (const u8*)row;
-    for (u32 i = 0; i < c.fields.len; ++i) {
-        const FieldDesc& f = c.fields[i];
+    for (u32 i = 0; i < fields.len; ++i) {
+        const FieldDesc& f = fields[i];
         if (i) o.put(", ");
         o.put(f.name);
         o.put("=");
@@ -141,10 +160,10 @@ int component_describe(const ComponentDesc& c, const void* row, char* out, usize
     return (int)o.at;
 }
 
-bool component_each_handle(const ComponentDesc& c, void* row, bool (*fn)(Handle&, void*), void* user) {
-    for (const FieldDesc& f : c.fields) {
+bool schema_each_handle(Span<const FieldDesc> fields, void* row, bool (*fn)(Handle&, void*), void* user) {
+    for (const FieldDesc& f : fields) {
         if (f.type != FieldType::Handle) continue;
-        Handle* h = (Handle*)((u8*)row + f.offset); // offset is 8-aligned: component_check said so
+        Handle* h = (Handle*)((u8*)row + f.offset); // offset is 8-aligned: schema_check said so
         for (u32 i = 0; i < f.count; ++i)
             if (!fn(h[i], user)) return false;
     }

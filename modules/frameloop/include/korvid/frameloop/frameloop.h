@@ -6,7 +6,8 @@
 //
 // Command line, overriding the config: --run-seconds N, --quiet, --validation,
 // --no-validation, --no-vsync, --borderless, --hitch-ms N, --hash (log the state hash
-// after every tick), --hash-systems (and after every system).
+// after every tick), --hash-systems (and after every system), --trace-events (print every
+// delivered event with its emitter; dev builds).
 #pragma once
 #include "korvid/core/types.h"
 #include "korvid/math/color.h"
