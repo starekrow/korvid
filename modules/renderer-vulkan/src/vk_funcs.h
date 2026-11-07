@@ -19,6 +19,7 @@
     X(vkEnumeratePhysicalDevices)                  \
     X(vkGetPhysicalDeviceProperties)               \
     X(vkGetPhysicalDeviceProperties2)              \
+    X(vkGetPhysicalDeviceFeatures)                 \
     X(vkGetPhysicalDeviceFeatures2)                \
     X(vkGetPhysicalDeviceQueueFamilyProperties)    \
     X(vkGetPhysicalDeviceMemoryProperties)         \
@@ -74,6 +75,7 @@
     X(vkCreateShaderModule)                        \
     X(vkDestroyShaderModule)                       \
     X(vkCreateGraphicsPipelines)                   \
+    X(vkCreateComputePipelines)                    \
     X(vkDestroyPipeline)                           \
     X(vkCreateCommandPool)                         \
     X(vkDestroyCommandPool)                        \
@@ -97,7 +99,11 @@
     X(vkCmdSetViewport)                            \
     X(vkCmdSetScissor)                             \
     X(vkCmdDraw)                                   \
-    X(vkCmdCopyBufferToImage)
+    X(vkCmdDrawIndirect)                           \
+    X(vkCmdDispatch)                               \
+    X(vkCmdCopyBuffer)                             \
+    X(vkCmdCopyBufferToImage)                      \
+    X(vkCmdCopyImageToBuffer)
 
 #define KV_VK_DECLARE(name) extern PFN_##name name;
 KV_VK_GLOBAL_FUNCS(KV_VK_DECLARE)

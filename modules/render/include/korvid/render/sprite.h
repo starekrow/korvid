@@ -36,7 +36,7 @@ struct RenderSpriteState {
     rect2      uv;        // texture rect; outside [0, 1] repeats
     vec2       size;      // quad size in world units, before the placement's scale
     color      tint;      // multiplies the material's tint
-    i32        layer;     // drawn in ascending order
+    i32        layer;     // drawn in ascending order; the renderer clamps to [-128, 127]
 };
 
 enum class SpriteDeltaKind : u8 {

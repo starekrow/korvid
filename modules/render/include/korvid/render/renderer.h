@@ -64,9 +64,18 @@ void       renderer_apply(Renderer* r, Span<const SpriteDelta> deltas);
 u32        renderer_sprite_count(const Renderer* r);
 
 // Draws the world as of the last deltas, interpolated by view.alpha, and presents.
+// Uploads (textures, changed rows) are submitted even when nothing is presented.
 // Returns false when nothing was presented (zero-size window, swapchain being
 // rebuilt); that is not an error.
 bool       renderer_render(Renderer* r, const RenderView& view);
+
+// Asks for the next presented frame as a binary PPM at `path`. A dev facility: the frame
+// loop's --screenshot. The frame that carries it waits for its own fence.
+bool       renderer_screenshot(Renderer* r, const char* path);
+// Reads the next frame's GPU sort back and verifies it against the rows: every bucket in
+// order, rows ascending within a bucket, nothing missing or doubled. The frame loop's
+// --check-sort. Logs the result; the renderer counts passes and failures.
+bool       renderer_check_sort(Renderer* r);
 
 // ---- textures ---------------------------------------------------------------------
 // A new texture's slot shows the default texture until the first upload lands, so a
@@ -79,9 +88,12 @@ void   renderer_texture_destroy(Renderer* r, Handle texture); // deferred past t
 u32    renderer_texture_slot(const Renderer* r, Handle texture); // the GPU index; 0 if stale
 
 // ---- materials --------------------------------------------------------------------
+// A material is a row of a GPU table; the handle's index is the row. Sprites refer to the
+// row, so an edit reaches every sprite that uses it at the next frame.
 Handle renderer_material_create(Renderer* r, const MaterialDesc& desc);
 bool   renderer_material_set(Renderer* r, Handle material, const MaterialDesc& desc);
-void   renderer_material_destroy(Renderer* r, Handle material);
+bool   renderer_material_get(const Renderer* r, Handle material, MaterialDesc* out); // false if stale
+void   renderer_material_destroy(Renderer* r, Handle material); // its sprites fall back to the default
 Handle renderer_default_material(const Renderer* r); // default texture, alpha blend, white
 
 } // namespace kv

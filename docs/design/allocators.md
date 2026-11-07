@@ -140,8 +140,9 @@ builds. No allocator template parameters on containers.
 | 1. `Allocator` interface, `MemTag`, schedule-driven attribution, general allocator on malloc with headers (alignment, canary) and per-tag accounting, containers take `Allocator*`, leak report by tag | done |
 | 2. Arena, per-thread scratch with `MemScope`, module arenas from `ModuleDesc::memory` | done |
 | 3. `Pool<T>` on reserved ranges with stable addresses, snapshot and restore | done |
-| 4. Deferred destruction in the renderer keyed by the frame fence; per-frame CPU data in scratch | done (swapchain recreation still waits idle: presentation completion is not fence-tracked) |
+| 4. Deferred destruction in the renderer keyed by the frame fence; per-frame CPU data in scratch | done (swapchain recreation retires the old chain through the same queue; no wait-idle outside `renderer_destroy`) |
 | 5. Size-class small allocator: 64 KB pages per class owned by the allocating thread, lock-free remote frees drained by the owner, orphaned pages adopted, empty pages reused | done |
 | 6a. Heap hard limits (counted as it happens, admitted before every commit) and root-assigned module heaps (`EngineConfig`), guard pages for 64 KB and up and call-site capture in dev, kind storage attributed under "kinds" | done |
-| 6b. Page layers for consoles, frame ring type, real-time allocator | pending |
+| 6b. Frame ring for per-frame GPU-visible data, released by the frame fence (`FrameRing` in renderer-vulkan; see docs/design/renderer.md) | done |
+| 6c. Page layers for consoles, real-time allocator | pending |
 | Dev checks (`KV_VERIFY`, on in debug and dev): owner thread on arenas and pools, alignment, canary on general blocks, fill 0xCD on alloc, poison 0xDD on free, release, reset and pool destroy | done |

@@ -3,10 +3,12 @@
 #include "korvid/frameloop/frameloop.h"
 
 namespace {
+constinit const char* const k_flags[] = {"--swarm"}; // tens of thousands of balls: a renderer stress
 constinit const kv::FrameLoopConfig k_config = {
     .title  = "korvid testbed",
     .width  = 960,
     .height = 540,
+    .flags  = k_flags,
 };
 }
 

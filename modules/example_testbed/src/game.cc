@@ -38,7 +38,7 @@ constinit const ComponentDesc k_components[] = {
 constinit u32 g_ball_kind = 0;
 constinit const char* const k_ball_components[] = {"Transform2", "Sprite", "Motion", "Bounces"};
 constinit const KindDesc k_kinds[] = {
-    {.name = "example_testbed.ball", .components = k_ball_components, .capacity = 64, .id = &g_ball_kind},
+    {.name = "example_testbed.ball", .components = k_ball_components, .capacity = 1 << 16, .id = &g_ball_kind}, // room for --swarm
 };
 
 // ---- what happens --------------------------------------------------------------------
@@ -86,6 +86,8 @@ struct Game {
 
 constexpr u32 kBlinkOnTicks  = 45;
 constexpr u32 kBlinkOffTicks = 30;
+constexpr u32 kSwarmBalls    = 40000; // --swarm: a renderer stress across layers and blends
+constexpr u32 kSwarmOffscreen = 2000; // plus sprites that sit outside the view, never moving
 
 void set_state(Game& g, GameState next) {
     KV_INFO("game", "%s -> %s", state_name(g.state), state_name(next));
@@ -184,6 +186,21 @@ void example_testbed_sim(TickContext& ctx) {
         spawn_ball(ctx, g, point2{-200.0f, 0.0f},   vec2{0.0f, 300.0f},                 false, 72.0f, 1, LOOK_BLUE_ADD);
         spawn_ball(ctx, g, point2{200.0f, 100.0f},  random_direction(g.rng, 360.0f),    true,  56.0f, 3, LOOK_GREEN);
         g.blink_ticket = spawn_ball(ctx, g, point2{0.0f, -120.0f}, vec2{}, false, 120.0f, 0, LOOK_MAGENTA);
+        if (frameloop_flag(*ctx.engine, "--swarm")) {
+            // Many small balls on random layers (beyond the renderer's clamp on purpose), every
+            // look, and a crowd of sprites parked far outside the view that the cull must drop.
+            for (u32 i = 0; i < kSwarmBalls; ++i) {
+                point2 at{g.rng.range(-w * 0.5f, w * 0.5f), g.rng.range(-h * 0.5f, h * 0.5f)};
+                i32 layer = (i32)g.rng.range(-300.0f, 300.0f);
+                spawn_ball(ctx, g, at, random_direction(g.rng, g.rng.range(40.0f, 200.0f)), false, 12.0f, layer, (Look)(i % LOOK_COUNT));
+            }
+            Sprite far_away;
+            far_away.material = g.materials[LOOK_GREEN];
+            far_away.size     = vec2{32.0f, 32.0f};
+            for (u32 i = 0; i < kSwarmOffscreen; ++i)
+                ctx.spawn_later("sprite.entity", transform2_at(point2{w + 1000.0f + (f32)i, 0.0f}), far_away);
+            KV_INFO("example_testbed", "swarm: %u balls, %u off-screen sprites", kSwarmBalls, kSwarmOffscreen);
+        }
         set_state(g, ST_RUN);
         break;
     }

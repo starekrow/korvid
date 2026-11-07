@@ -1,0 +1,64 @@
+// Korvid renderer-vulkan: what the sprite shaders share. Layouts mirror renderer_internal.h
+// exactly (std430 rows, the push block); binding numbers match vk_resources.cc.
+//
+// Set 0, the tables: sprite rows, material rows, the sort's scratch and its outputs.
+// Set 1, the textures: the sampler and the bindless array (variable count: last binding).
+#pragma once
+
+static const uint kBucketCount = 768;  // 256 layers x 3 blend modes
+static const uint kLayerMin    = 128;  // added to the clamped layer
+static const uint kBlockRows   = 1024; // sprite rows per compute block
+static const uint kGroup       = 256;  // threads per workgroup; kBucketCount == 3 * kGroup
+static const uint kCulled      = 0xFFFFFFFFu;
+static const uint kSpriteAlive = 1;
+
+struct GpuSprite {
+    float4 prev;    // position x, y, rotation, scale x, at the start of the stamped tick
+    float4 cur;     // the same, now
+    float2 scale_y; // prev scale y, cur scale y
+    float2 size;    // quad size in world units before the placement's scale
+    float4 uv;      // x, y, w, h in texture space
+    float4 tint;    // linear RGBA, multiplies the material's tint and the texel
+    uint   material;
+    uint   stamp;   // the tick of the last Set
+    int    layer;
+    uint   flags;   // bit 0: alive
+};
+
+struct GpuMaterial {
+    float4 tint;
+    float4 params0; // xy: uv offset
+    float4 params1;
+    uint   texture; // bindless slot
+    uint   blend;   // 0 opaque, 1 alpha, 2 additive
+    uint2  pad;
+};
+
+struct PushData {
+    float4 view;       // ortho affine2 a, b, c, d
+    float2 view_trans; // ortho tx, ty
+    float  alpha;      // interpolation point for rows stamped with `tick`
+    uint   tick;
+    float4 cull;       // the view rect in world units: x, y, w, h
+    uint   row_count;  // sprite rows the compute passes look at
+    uint   pad0, pad1, pad2;
+};
+
+[[vk::push_constant]] ConstantBuffer<PushData> gPush;
+
+// The interpolation point of a row: rows set this tick move from prev to cur; the rest
+// did not move and sit at cur.
+float row_t(GpuSprite s) { return s.stamp == gPush.tick ? gPush.alpha : 1.0; }
+
+// Position, rotation and scale of a row at its interpolation point.
+void row_placement(GpuSprite s, out float2 pos, out float rot, out float2 scale) {
+    float t = row_t(s);
+    pos   = lerp(s.prev.xy, s.cur.xy, t);
+    rot   = lerp(s.prev.z, s.cur.z, t);
+    scale = lerp(float2(s.prev.w, s.scale_y.x), float2(s.cur.w, s.scale_y.y), t);
+}
+
+float2 apply_affine(float4 m, float2 t, float2 p) {
+    return float2(m.x * p.x + m.z * p.y + t.x,
+                  m.y * p.x + m.w * p.y + t.y);
+}

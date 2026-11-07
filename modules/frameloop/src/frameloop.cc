@@ -28,6 +28,9 @@ u64             g_flags_given  = 0; // bit i: config.flags[i] was on the command
 u32             g_threads      = 0; // 0: every core
 const char*     g_trace_path   = nullptr; // --profile FILE
 bool            g_prof_report  = false;   // --prof-report: the top zones with the fps line
+const char*     g_shot_path    = nullptr; // --screenshot FILE: one frame as a PPM
+u64             g_shot_frame   = 90;      // --screenshot-frame N: which one
+bool            g_check_sort   = false;   // --check-sort: verify the GPU sort every 30th frame
 
 struct FrameLoopState {
     FrameLoopConfig config;
@@ -70,11 +73,14 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) g_threads = (u32)atoi(argv[++i]);
         else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) g_trace_path = argv[++i];
         else if (strcmp(argv[i], "--prof-report") == 0) g_prof_report = true;
+        else if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) g_shot_path = argv[++i];
+        else if (strcmp(argv[i], "--screenshot-frame") == 0 && i + 1 < argc) g_shot_frame = (u64)atoll(argv[++i]);
+        else if (strcmp(argv[i], "--check-sort") == 0) g_check_sort = true;
         else if (u32 f = game_flag(cfg, argv[i])) g_flags_given |= (u64)1 << (f - 1);
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort]", argv[0]);
             return false;
         }
     }
@@ -177,6 +183,8 @@ void run(Engine& engine, FrameLoopState& s) {
         f64 t_ticked = time_now();
         {
             KV_ZONE("render");
+            if (g_shot_path && engine.frame_count == g_shot_frame) renderer_screenshot(s.renderer, g_shot_path);
+            if (g_check_sort && engine.frame_count % 30 == 10) renderer_check_sort(s.renderer);
             render_frame(engine, s);
         }
         f64 t_rendered = time_now();
