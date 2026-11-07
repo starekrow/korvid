@@ -23,6 +23,7 @@ f64             g_hitch_ms     = 0.0;
 bool            g_hash_ticks   = false;
 bool            g_hash_systems = false;
 bool            g_trace_events = false;
+u64             g_flags_given  = 0; // bit i: config.flags[i] was on the command line
 
 struct FrameLoopState {
     FrameLoopConfig config;
@@ -43,6 +44,13 @@ f64 wayland_debug_stamp() {
     return (f64)us / 1000.0;
 }
 
+// Index + 1 of a game flag, or 0.
+u32 game_flag(const FrameLoopConfig& cfg, const char* arg) {
+    for (u32 i = 0; i < cfg.flags.len && i < 64; ++i)
+        if (strcmp(cfg.flags[i], arg) == 0) return i + 1;
+    return 0;
+}
+
 bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--run-seconds") == 0 && i + 1 < argc) cfg.run_seconds = atof(argv[++i]);
@@ -55,6 +63,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--hash") == 0) g_hash_ticks = true;
         else if (strcmp(argv[i], "--hash-systems") == 0) g_hash_systems = true;
         else if (strcmp(argv[i], "--trace-events") == 0) g_trace_events = true;
+        else if (u32 f = game_flag(cfg, argv[i])) g_flags_given |= (u64)1 << (f - 1);
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events]", argv[0]);
@@ -192,6 +201,11 @@ KV_MODULE_DEFINE(frameloop_module) = {
 const FrameLoopConfig& frameloop_config(Engine& e) {
     FrameLoopState* s = engine_module_state_as<FrameLoopState>(e, "frameloop");
     return s ? s->config : g_config;
+}
+
+bool frameloop_flag(Engine& e, const char* flag) {
+    u32 f = game_flag(frameloop_config(e), flag);
+    return f && (g_flags_given >> (f - 1)) & 1;
 }
 
 int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {

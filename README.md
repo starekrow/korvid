@@ -72,14 +72,24 @@ hand-written stand-in until kormake exists.
                      with previous and current state per sprite, dynamic rendering, sync2,
                      bindless textures, Slang shader compiled to SPIR-V by the build; the
                      only Vulkan user
+    collision        Collider2 (circle or box, layer and mask) and the broadphase: a uniform
+                     grid over every kind with Transform2 and Collider2, overlap pairs diffed
+                     tick to tick into OverlapBegin and OverlapEnd (collision.broadphase, Sim)
     frameloop        what every game needs and no game decides: options, window and
                      renderer from a FrameLoopConfig, the loop (pump, ticks, extract,
                      render), resize, reporting, ExitRequested on the bus
-    example_testbed            the example game: a config, asset and material setup, one system
+    example_testbed  the testbed: balls as a kind, one move system over a view, a bounce
+                     handler, a blinker on scheduled events, a trigger at the third bounce
+    example_rocks    an asteroids-like: ship, bullets, rocks and debris as kinds; control,
+                     move, wrap and fade systems; overlaps become hits in handlers, rocks
+                     split, bullets expire by timer, waves arrive by timer, the ship's death
+                     is a trigger on its Health column, a restart follows; --demo scripts
+                     the ship so runs reproduce
 
     ninja            # builds build/bin/example_testbed, build/bin/shaders/sprite.spv and the tests
     ninja check      # runs the tests
-    build/bin/example_testbed                   # opens a window; Esc or close exits via ST_EXIT
+    build/bin/example_testbed         # opens a window; Esc or close exits via ST_EXIT
+    build/bin/example_rocks --demo    # the asteroids-like, flying itself; without --demo, you fly
     build/bin/example_testbed --run-seconds 2   # exits by itself (smoke test)
     build/bin/example_testbed --no-validation   # debug builds enable the validation layers by default
     build/bin/example_testbed --no-vsync        # mailbox/immediate present instead of fifo

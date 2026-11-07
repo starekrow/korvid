@@ -24,8 +24,12 @@ inc_render   = $inc_math -Imodules/render/include
 inc_sprite   = $inc_render -Imodules/sprite/include
 inc_rvk      = $inc_render -Imodules/platform/include -Imodules/renderer-vulkan/include
 inc_asset    = $inc_render -Imodules/platform/include -Imodules/asset/include
+inc_collision = $inc_sprite -Imodules/collision/include
 inc_frameloop = $inc_platform -Imodules/math/include -Imodules/render/include $
                 -Imodules/sprite/include -Imodules/frameloop/include
+inc_example_rocks = $inc_platform -Imodules/math/include -Imodules/render/include $
+               -Imodules/sprite/include -Imodules/collision/include -Imodules/asset/include $
+               -Imodules/renderer-vulkan/include -Imodules/frameloop/include -Imodules/example_rocks/include
 inc_example_testbed    = $inc_platform -Imodules/math/include -Imodules/render/include $
                -Imodules/sprite/include -Imodules/asset/include -Imodules/renderer-vulkan/include $
                -Imodules/frameloop/include -Imodules/example_testbed/include
@@ -203,6 +207,21 @@ build $builddir/bin/sprite_tests: link $builddir/obj/sprite/tests/main.o $
     $builddir/obj/sprite/tests/world_test.o $builddir/obj/sprite/tests/extract_test.o $
     $builddir/lib/libkv_sprite.a $builddir/lib/libkv_core.a
 
+# ---- collision -------------------------------------------------------------
+build $builddir/obj/collision/module.o: cxx modules/collision/src/module.cc
+  includes = $inc_collision
+
+build $builddir/lib/libkv_collision.a: ar $builddir/obj/collision/module.o
+
+build $builddir/obj/collision/tests/main.o: cxx modules/collision/tests/main.cc
+  includes = $inc_collision
+build $builddir/obj/collision/tests/broadphase_test.o: cxx modules/collision/tests/broadphase_test.cc
+  includes = $inc_collision
+
+build $builddir/bin/collision_tests: link $builddir/obj/collision/tests/main.o $
+    $builddir/obj/collision/tests/broadphase_test.o $builddir/lib/libkv_collision.a $
+    $builddir/lib/libkv_sprite.a $builddir/lib/libkv_core.a
+
 # ---- asset -----------------------------------------------------------------
 build $builddir/obj/asset/module.o: cxx modules/asset/src/texture.cc
   includes = $inc_asset
@@ -258,16 +277,39 @@ build $builddir/bin/example_testbed: link $builddir/obj/example_testbed/main.o $
     $builddir/bin/assets/example_testbed/ball.png
   libs = $sdl_libs $zlib_libs
 
+# ---- example_rocks ---------------------------------------------------------
+build $builddir/obj/example_rocks/main.o: cxx modules/example_rocks/src/main.cc
+  includes = $inc_example_rocks
+build $builddir/obj/example_rocks/game.o: cxx modules/example_rocks/src/game.cc
+  includes = $inc_example_rocks
+build $builddir/obj/example_rocks/modules.gen.o: cxx modules/example_rocks/src/modules.gen.cc
+  includes = $inc_example_rocks
+
+build $builddir/bin/assets/example_rocks/ship.png: copy modules/example_rocks/assets/ship.png
+build $builddir/bin/assets/example_rocks/rock.png: copy modules/example_rocks/assets/rock.png
+build $builddir/bin/assets/example_rocks/dot.png: copy modules/example_rocks/assets/dot.png
+
+build $builddir/bin/example_rocks: link $builddir/obj/example_rocks/main.o $builddir/obj/example_rocks/game.o $
+    $builddir/obj/example_rocks/modules.gen.o $builddir/lib/libkv_frameloop.a $builddir/lib/libkv_collision.a $
+    $builddir/lib/libkv_sprite.a $builddir/lib/libkv_asset.a $builddir/lib/libkv_renderer_vulkan.a $
+    $builddir/lib/libkv_platform.a $builddir/lib/libkv_core.a | $builddir/bin/shaders/sprite.spv $
+    $builddir/bin/assets/example_rocks/ship.png $builddir/bin/assets/example_rocks/rock.png $
+    $builddir/bin/assets/example_rocks/dot.png
+  libs = $sdl_libs $zlib_libs
+
 # ---- aggregates ------------------------------------------------------------
 build $builddir/test/core_tests.ok: run_test $builddir/bin/core_tests
 build $builddir/test/platform_tests.ok: run_test $builddir/bin/platform_tests
 build $builddir/test/math_tests.ok: run_test $builddir/bin/math_tests
 build $builddir/test/sprite_tests.ok: run_test $builddir/bin/sprite_tests
 build $builddir/test/asset_tests.ok: run_test $builddir/bin/asset_tests
+build $builddir/test/collision_tests.ok: run_test $builddir/bin/collision_tests
 
 build tests: phony $builddir/bin/core_tests $builddir/bin/platform_tests $
-    $builddir/bin/math_tests $builddir/bin/sprite_tests $builddir/bin/asset_tests
-build all: phony $builddir/bin/example_testbed tests
+    $builddir/bin/math_tests $builddir/bin/sprite_tests $builddir/bin/asset_tests $
+    $builddir/bin/collision_tests
+build all: phony $builddir/bin/example_testbed $builddir/bin/example_rocks tests
 build check: phony $builddir/test/core_tests.ok $builddir/test/platform_tests.ok $
-    $builddir/test/math_tests.ok $builddir/test/sprite_tests.ok $builddir/test/asset_tests.ok
+    $builddir/test/math_tests.ok $builddir/test/sprite_tests.ok $builddir/test/asset_tests.ok $
+    $builddir/test/collision_tests.ok
 default all

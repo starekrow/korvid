@@ -28,6 +28,7 @@ struct FrameLoopConfig {
     f64         run_seconds    = -1.0;  // >= 0: ExitRequested after this long (smoke tests)
     color       clear_color{0.09f, 0.09f, 0.11f, 1.0f};
     u32         report_every_seconds = 1; // fps line; 0 is silent
+    Span<const char* const> flags = {};   // boolean flags the game accepts ("--demo"); frameloop_flag says which were given
 };
 
 enum class ExitReason : u8 { WindowClosed, Escape, Timer };
@@ -38,5 +39,7 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config);
 
 // The configuration in effect (config plus command line), once the module is up.
 const FrameLoopConfig& frameloop_config(Engine& e);
+// Whether one of the game's declared flags was on the command line.
+bool frameloop_flag(Engine& e, const char* flag);
 
 } // namespace kv
