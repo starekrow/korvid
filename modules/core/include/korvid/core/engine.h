@@ -37,6 +37,11 @@ void engine_request_quit(Engine& e);
 // The started instance of a module, by name; null if absent or not started.
 ModuleInstance* engine_module(Engine& e, const char* name);
 void*           engine_module_state(Engine& e, const char* name);
+template <class T>
+T* engine_module_state_as(Engine& e, const char* name) {
+    ModuleInstance* inst = engine_module(e, name);
+    return inst ? inst->state_as<T>() : nullptr;
+}
 
 // Resource id by name; 0 if unknown.
 u32 engine_resource_id(const Engine& e, const char* name);

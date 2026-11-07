@@ -1371,7 +1371,7 @@ bool recreate_swapchain(Renderer* r) {
 // ---- public API ---------------------------------------------------------------
 
 Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
-    RendererVulkanState* owner = (RendererVulkanState*)engine_module_state(engine, "renderer-vulkan");
+    RendererVulkanState* owner = engine_module_state_as<RendererVulkanState>(engine, "renderer-vulkan");
     if (!owner || !vkGetInstanceProcAddr) {
         KV_ERROR("vulkan", "renderer-vulkan module is not started");
         return nullptr;
@@ -1447,7 +1447,7 @@ void renderer_destroy(Renderer* r) {
 }
 
 Renderer* renderer_get(Engine& engine) {
-    RendererVulkanState* s = (RendererVulkanState*)engine_module_state(engine, "renderer-vulkan");
+    RendererVulkanState* s = engine_module_state_as<RendererVulkanState>(engine, "renderer-vulkan");
     return s ? s->renderer : nullptr;
 }
 

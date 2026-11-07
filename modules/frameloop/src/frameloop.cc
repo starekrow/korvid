@@ -60,7 +60,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
 
 // Phase PreSim, with the tick's input sampled: the reasons to leave become one event each.
 void frameloop_exit(TickContext& ctx) {
-    FrameLoopState& s = *(FrameLoopState*)ctx.state;
+    FrameLoopState& s = ctx.state_as<FrameLoopState>();
     EventBus& bus = *ctx.events;
     Input* input = platform_input(*ctx.engine);
     if (s.config.exit_on_close && bus.read<CloseRequested>().len)
@@ -76,7 +76,7 @@ void frameloop_exit(TickContext& ctx) {
 bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     FrameLoopState* s = arena_push<FrameLoopState>(self.arena);
     if (!s) return false;
-    self.state = s;
+    self.set_state(s);
     s->config = g_config;
 
     WindowDesc desc;
@@ -102,7 +102,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
 constinit const EventTypeDesc k_events[]  = {KV_EVENT(ExitRequested)};
 constinit const char* const   k_exit_reads[] = {"input.state"};
 constinit const SystemDesc    k_systems[] = {
-    {"frameloop.exit", Phase::PreSim, frameloop_exit, k_exit_reads},
+    {.name = "frameloop.exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = k_exit_reads},
 };
 
 // Hand the renderer what the frame's ticks changed, then draw at the clock's
@@ -176,12 +176,15 @@ void run(Engine& engine, FrameLoopState& s) {
 } // namespace
 
 KV_MODULE_DEFINE(frameloop_module) = {
-    "frameloop", k_events, {}, k_systems, frameloop_startup, nullptr,
-    {.reserve = 64 * 1024},
+    .name    = "frameloop",
+    .events  = k_events,
+    .systems = k_systems,
+    .startup = frameloop_startup,
+    .memory  = {.reserve = 64 * 1024},
 };
 
 const FrameLoopConfig& frameloop_config(Engine& e) {
-    FrameLoopState* s = (FrameLoopState*)engine_module_state(e, "frameloop");
+    FrameLoopState* s = engine_module_state_as<FrameLoopState>(e, "frameloop");
     return s ? s->config : g_config;
 }
 
@@ -195,7 +198,7 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
         mem_shutdown();
         return 1;
     }
-    FrameLoopState* s = (FrameLoopState*)engine_module_state(engine, "frameloop");
+    FrameLoopState* s = engine_module_state_as<FrameLoopState>(engine, "frameloop");
     if (s) run(engine, *s);
     engine_shutdown(engine);
     names_shutdown();

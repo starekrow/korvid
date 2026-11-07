@@ -170,7 +170,7 @@ void game_update(Game& g, TickContext& ctx) {
 
 // Phase Sim: what happened, then the game.
 void hello_sim(TickContext& ctx) {
-    Game& g = *(Game*)ctx.state;
+    Game& g = ctx.state_as<Game>();
     EventBus& bus = *ctx.events;
 
     for (const KeyDown& e : bus.read<KeyDown>()) {
@@ -204,7 +204,7 @@ void hello_sim(TickContext& ctx) {
 bool hello_startup(Engine& engine, ModuleInstance& self) {
     Game* g = arena_push<Game>(self.arena);
     if (!g) return false;
-    self.state = g;
+    self.set_state(g);
 
     Renderer* r = renderer_get(engine);
     if (!r) return false;
@@ -241,21 +241,24 @@ bool hello_startup(Engine& engine, ModuleInstance& self) {
 }
 
 void hello_shutdown(Engine&, ModuleInstance& self) {
-    Game* g = (Game*)self.state;
+    Game* g = self.state_as<Game>();
     if (g) KV_INFO("hello", "%llu key edges seen", (unsigned long long)g->key_edges);
 }
 
 constinit const char* const k_sim_reads[]  = {"input.state", "asset.textures"};
 constinit const char* const k_sim_writes[] = {"sprite.world"};
 constinit const SystemDesc  k_systems[]    = {
-    {"hello.sim", Phase::Sim, hello_sim, k_sim_reads, k_sim_writes},
+    {.name = "hello.sim", .phase = Phase::Sim, .fn = hello_sim, .reads = k_sim_reads, .writes = k_sim_writes},
 };
 
 } // namespace
 
 KV_MODULE_DEFINE(hello_module) = {
-    "hello", {}, {}, k_systems, hello_startup, hello_shutdown,
-    {.reserve = 64 * 1024},
+    .name     = "hello",
+    .systems  = k_systems,
+    .startup  = hello_startup,
+    .shutdown = hello_shutdown,
+    .memory   = {.reserve = 64 * 1024},
 };
 
 } // namespace kv

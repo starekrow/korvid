@@ -192,8 +192,9 @@ void engine_shutdown(Engine& e) {
             KV_INFO("engine", "module '%s' arena: %llu bytes used, %llu peak, %llu committed of %llu",
                     inst.desc->name, (unsigned long long)inst.arena.used, (unsigned long long)inst.arena.peak,
                     (unsigned long long)inst.arena.committed, (unsigned long long)inst.arena.reserved);
-        inst.started = false;
-        inst.state   = nullptr;
+        inst.started    = false;
+        inst.state      = nullptr;
+        inst.state_type = nullptr;
         arena_destroy(inst.arena); // the module's state goes with it
         mem_set_owner(0);
     }

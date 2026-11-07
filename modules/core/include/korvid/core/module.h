@@ -47,22 +47,30 @@ struct ModuleMemoryDesc {
 // The engine's record of a started module. Passed to startup/shutdown and reachable
 // from TickContext::state (for the system's own module).
 struct ModuleInstance {
-    const ModuleDesc* desc    = nullptr;
-    void*             state   = nullptr; // startup puts it in `arena`; the arena's release frees it
-    Arena             arena;             // the module's persistent memory, if it declared any
-    Allocator         general;           // the general allocator, attributed to this module
-    u32               index   = 0;       // position in the module list
-    bool              started = false;
+    const ModuleDesc* desc       = nullptr;
+    void*             state      = nullptr; // startup sets it with set_state; the arena's release frees it
+    const void*       state_type = nullptr; // type key of what set_state stored
+    Arena             arena;                // the module's persistent memory, if it declared any
+    Allocator         general;              // the general allocator, attributed to this module
+    u32               index      = 0;       // position in the module list
+    bool              started    = false;
+
+    // Records the state and its type, so systems and shutdown get it back checked.
+    template <class T>
+    T* set_state(T* p) { state = p; state_type = type_key<T>(); return p; }
+    template <class T>
+    T* state_as() const { KV_VERIFY(!state || state_type == type_key<T>()); return (T*)state; }
 };
 
+// Every member has a default so a descriptor names only what it has.
 struct ModuleDesc {
-    const char*               name;
-    Span<const EventTypeDesc> events;
-    Span<const ResourceDesc>  resources;
-    Span<const SystemDesc>    systems;
-    bool (*startup)(Engine& engine, ModuleInstance& self);  // may be null
-    void (*shutdown)(Engine& engine, ModuleInstance& self); // may be null
-    ModuleMemoryDesc          memory = {};
+    const char*               name      = nullptr;
+    Span<const EventTypeDesc> events    = {};
+    Span<const ResourceDesc>  resources = {};
+    Span<const SystemDesc>    systems   = {};
+    bool (*startup)(Engine& engine, ModuleInstance& self)  = nullptr;
+    void (*shutdown)(Engine& engine, ModuleInstance& self) = nullptr;
+    ModuleMemoryDesc          memory    = {};
 };
 
 } // namespace kv
@@ -70,9 +78,10 @@ struct ModuleDesc {
 // Table entry for an event type: KV_EVENT(WindowResized).
 #define KV_EVENT(E) ::kv::EventTypeDesc{#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id}
 
-// Declares a module's symbol in its header, and defines it in one source file:
-//   KV_MODULE_DECLARE(platform_module);                     // header, inside namespace kv
-//   KV_MODULE_DEFINE(platform_module) = {"platform", ...};  // source, inside namespace kv
+// Declares a module's symbol in its header, and defines it in one source file, with
+// designated initializers so every table is named:
+//   KV_MODULE_DECLARE(platform_module);                          // header, inside namespace kv
+//   KV_MODULE_DEFINE(platform_module) = {.name = "platform", .events = k_events, ...};
 // constinit is the guarantee behind rule 1.
 #define KV_MODULE_DECLARE(sym) extern const ::kv::ModuleDesc sym
 #define KV_MODULE_DEFINE(sym)  constinit const ::kv::ModuleDesc sym

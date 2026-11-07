@@ -28,7 +28,7 @@ struct SecondState { u32 ticks; u16 owner_seen; void* scratch_block; };
 
 void sys_second_sim_b(TickContext& ctx) {
     trace("2sb ");
-    SecondState* s = (SecondState*)ctx.state; // the system gets its own module's state
+    SecondState* s = &ctx.state_as<SecondState>(); // the system gets its own module's state, checked
     s->ticks += 1;
     s->owner_seen = mem_owner();              // attribution follows the schedule
     s->scratch_block = mem_alloc(64);         // tagged to module 2, freed in shutdown
@@ -38,12 +38,12 @@ bool first_startup(Engine&, ModuleInstance&)  { trace("up1 "); return true; }
 void first_shutdown(Engine&, ModuleInstance&) { trace("down1 "); }
 bool second_startup(Engine&, ModuleInstance& self) {
     trace("up2 ");
-    self.state = arena_push<SecondState>(self.arena); // declared memory: the arena exists
+    self.set_state(arena_push<SecondState>(self.arena)); // declared memory: the arena exists
     return self.state != nullptr;
 }
 void second_shutdown(Engine&, ModuleInstance& self) {
     trace("down2 ");
-    mem_free(((SecondState*)self.state)->scratch_block);
+    mem_free(self.state_as<SecondState>()->scratch_block);
 }
 bool failing_startup(Engine&, ModuleInstance&) { trace("upfail "); return false; }
 
@@ -55,36 +55,38 @@ constinit const char* const   k_second_reads[]  = {"first.store"};
 constinit const char* const   k_second_writes[] = {"second.store"};
 
 constinit const SystemDesc k_first_systems[] = {
-    {"first.sim",   Phase::Sim,   sys_first_sim},   // declared before the Input one on purpose
-    {"first.input", Phase::Input, sys_first_input},
+    {.name = "first.sim",   .phase = Phase::Sim,   .fn = sys_first_sim},   // declared before the Input one on purpose
+    {.name = "first.input", .phase = Phase::Input, .fn = sys_first_input},
 };
 constinit const SystemDesc k_second_systems[] = {
-    {"second.sim_a", Phase::Sim,   sys_second_sim_a},
-    {"second.input", Phase::Input, sys_second_input},
-    {"second.sim_b", Phase::Sim,   sys_second_sim_b, k_second_reads, k_second_writes},
+    {.name = "second.sim_a", .phase = Phase::Sim,   .fn = sys_second_sim_a},
+    {.name = "second.input", .phase = Phase::Input, .fn = sys_second_input},
+    {.name = "second.sim_b", .phase = Phase::Sim,   .fn = sys_second_sim_b, .reads = k_second_reads, .writes = k_second_writes},
 };
 
-KV_MODULE_DEFINE(k_first)  = {"first",  k_first_events,  k_first_res,  k_first_systems,  first_startup,  first_shutdown};
-KV_MODULE_DEFINE(k_second) = {"second", k_second_events, k_second_res, k_second_systems, second_startup, second_shutdown,
-                              {.reserve = 1u << 20}};
-KV_MODULE_DEFINE(k_failing) = {"failing", {}, {}, {}, failing_startup, nullptr};
-KV_MODULE_DEFINE(k_first_again) = {"first", {}, {}, {}, nullptr, nullptr};
+KV_MODULE_DEFINE(k_first)  = {.name = "first", .events = k_first_events, .resources = k_first_res,
+                              .systems = k_first_systems, .startup = first_startup, .shutdown = first_shutdown};
+KV_MODULE_DEFINE(k_second) = {.name = "second", .events = k_second_events, .resources = k_second_res,
+                              .systems = k_second_systems, .startup = second_startup, .shutdown = second_shutdown,
+                              .memory = {.reserve = 1u << 20}};
+KV_MODULE_DEFINE(k_failing) = {.name = "failing", .startup = failing_startup};
+KV_MODULE_DEFINE(k_first_again) = {.name = "first"};
 
 constinit const EventTypeDesc k_dup_events[] = {KV_EVENT(EvA)};
-KV_MODULE_DEFINE(k_dup_event) = {"dupevent", k_dup_events, {}, {}, nullptr, nullptr};
+KV_MODULE_DEFINE(k_dup_event) = {.name = "dupevent", .events = k_dup_events};
 
-constinit const SystemDesc k_dup_systems[] = {{"first.sim", Phase::Sim, sys_first_sim}};
-KV_MODULE_DEFINE(k_dup_system) = {"dupsystem", {}, {}, k_dup_systems, nullptr, nullptr};
+constinit const SystemDesc k_dup_systems[] = {{.name = "first.sim", .phase = Phase::Sim, .fn = sys_first_sim}};
+KV_MODULE_DEFINE(k_dup_system) = {.name = "dupsystem", .systems = k_dup_systems};
 
 constinit const ResourceDesc k_dup_res[] = {{"first.store"}};
-KV_MODULE_DEFINE(k_dup_resource) = {"dupresource", {}, k_dup_res, {}, nullptr, nullptr};
+KV_MODULE_DEFINE(k_dup_resource) = {.name = "dupresource", .resources = k_dup_res};
 
 constinit const char* const k_bad_reads[] = {"nowhere.store"};
-constinit const SystemDesc k_bad_ref_systems[] = {{"bad.sim", Phase::Sim, sys_first_sim, k_bad_reads}};
-KV_MODULE_DEFINE(k_bad_ref) = {"badref", {}, {}, k_bad_ref_systems, nullptr, nullptr};
+constinit const SystemDesc k_bad_ref_systems[] = {{.name = "bad.sim", .phase = Phase::Sim, .fn = sys_first_sim, .reads = k_bad_reads}};
+KV_MODULE_DEFINE(k_bad_ref) = {.name = "badref", .systems = k_bad_ref_systems};
 
 // More modules than memory accounting can attribute: rejected before anything starts.
-constinit const ModuleDesc k_many[65] = {{"m0", {}, {}, {}, nullptr, nullptr}, {"m1", {}, {}, {}, nullptr, nullptr}, {"m2", {}, {}, {}, nullptr, nullptr}, {"m3", {}, {}, {}, nullptr, nullptr}, {"m4", {}, {}, {}, nullptr, nullptr}, {"m5", {}, {}, {}, nullptr, nullptr}, {"m6", {}, {}, {}, nullptr, nullptr}, {"m7", {}, {}, {}, nullptr, nullptr}, {"m8", {}, {}, {}, nullptr, nullptr}, {"m9", {}, {}, {}, nullptr, nullptr}, {"m10", {}, {}, {}, nullptr, nullptr}, {"m11", {}, {}, {}, nullptr, nullptr}, {"m12", {}, {}, {}, nullptr, nullptr}, {"m13", {}, {}, {}, nullptr, nullptr}, {"m14", {}, {}, {}, nullptr, nullptr}, {"m15", {}, {}, {}, nullptr, nullptr}, {"m16", {}, {}, {}, nullptr, nullptr}, {"m17", {}, {}, {}, nullptr, nullptr}, {"m18", {}, {}, {}, nullptr, nullptr}, {"m19", {}, {}, {}, nullptr, nullptr}, {"m20", {}, {}, {}, nullptr, nullptr}, {"m21", {}, {}, {}, nullptr, nullptr}, {"m22", {}, {}, {}, nullptr, nullptr}, {"m23", {}, {}, {}, nullptr, nullptr}, {"m24", {}, {}, {}, nullptr, nullptr}, {"m25", {}, {}, {}, nullptr, nullptr}, {"m26", {}, {}, {}, nullptr, nullptr}, {"m27", {}, {}, {}, nullptr, nullptr}, {"m28", {}, {}, {}, nullptr, nullptr}, {"m29", {}, {}, {}, nullptr, nullptr}, {"m30", {}, {}, {}, nullptr, nullptr}, {"m31", {}, {}, {}, nullptr, nullptr}, {"m32", {}, {}, {}, nullptr, nullptr}, {"m33", {}, {}, {}, nullptr, nullptr}, {"m34", {}, {}, {}, nullptr, nullptr}, {"m35", {}, {}, {}, nullptr, nullptr}, {"m36", {}, {}, {}, nullptr, nullptr}, {"m37", {}, {}, {}, nullptr, nullptr}, {"m38", {}, {}, {}, nullptr, nullptr}, {"m39", {}, {}, {}, nullptr, nullptr}, {"m40", {}, {}, {}, nullptr, nullptr}, {"m41", {}, {}, {}, nullptr, nullptr}, {"m42", {}, {}, {}, nullptr, nullptr}, {"m43", {}, {}, {}, nullptr, nullptr}, {"m44", {}, {}, {}, nullptr, nullptr}, {"m45", {}, {}, {}, nullptr, nullptr}, {"m46", {}, {}, {}, nullptr, nullptr}, {"m47", {}, {}, {}, nullptr, nullptr}, {"m48", {}, {}, {}, nullptr, nullptr}, {"m49", {}, {}, {}, nullptr, nullptr}, {"m50", {}, {}, {}, nullptr, nullptr}, {"m51", {}, {}, {}, nullptr, nullptr}, {"m52", {}, {}, {}, nullptr, nullptr}, {"m53", {}, {}, {}, nullptr, nullptr}, {"m54", {}, {}, {}, nullptr, nullptr}, {"m55", {}, {}, {}, nullptr, nullptr}, {"m56", {}, {}, {}, nullptr, nullptr}, {"m57", {}, {}, {}, nullptr, nullptr}, {"m58", {}, {}, {}, nullptr, nullptr}, {"m59", {}, {}, {}, nullptr, nullptr}, {"m60", {}, {}, {}, nullptr, nullptr}, {"m61", {}, {}, {}, nullptr, nullptr}, {"m62", {}, {}, {}, nullptr, nullptr}, {"m63", {}, {}, {}, nullptr, nullptr}, {"m64", {}, {}, {}, nullptr, nullptr}};
+constinit const ModuleDesc k_many[65] = {{.name = "m0"}, {.name = "m1"}, {.name = "m2"}, {.name = "m3"}, {.name = "m4"}, {.name = "m5"}, {.name = "m6"}, {.name = "m7"}, {.name = "m8"}, {.name = "m9"}, {.name = "m10"}, {.name = "m11"}, {.name = "m12"}, {.name = "m13"}, {.name = "m14"}, {.name = "m15"}, {.name = "m16"}, {.name = "m17"}, {.name = "m18"}, {.name = "m19"}, {.name = "m20"}, {.name = "m21"}, {.name = "m22"}, {.name = "m23"}, {.name = "m24"}, {.name = "m25"}, {.name = "m26"}, {.name = "m27"}, {.name = "m28"}, {.name = "m29"}, {.name = "m30"}, {.name = "m31"}, {.name = "m32"}, {.name = "m33"}, {.name = "m34"}, {.name = "m35"}, {.name = "m36"}, {.name = "m37"}, {.name = "m38"}, {.name = "m39"}, {.name = "m40"}, {.name = "m41"}, {.name = "m42"}, {.name = "m43"}, {.name = "m44"}, {.name = "m45"}, {.name = "m46"}, {.name = "m47"}, {.name = "m48"}, {.name = "m49"}, {.name = "m50"}, {.name = "m51"}, {.name = "m52"}, {.name = "m53"}, {.name = "m54"}, {.name = "m55"}, {.name = "m56"}, {.name = "m57"}, {.name = "m58"}, {.name = "m59"}, {.name = "m60"}, {.name = "m61"}, {.name = "m62"}, {.name = "m63"}, {.name = "m64"}};
 
 bool init_fails(TestCtx& c, Span<const ModuleDesc* const> list) {
     Engine e;
@@ -128,7 +130,7 @@ void test_module(kv::TestCtx& c) {
     g_trace[0] = 0;
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 0);
     KV_CHECK(c, strcmp(g_trace, "1i 2i 1s 2sa 2sb ") == 0);
-    SecondState* second = (SecondState*)engine_module_state(e, "second");
+    SecondState* second = engine_module_state_as<SecondState>(e, "second");
     KV_CHECK(c, second->ticks == 1);
 
     // Memory: the module without a memory table has no arena; the one with it has its

@@ -29,7 +29,8 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
     for (Array<ScheduledSystem>& phase : systems) {
         events.deliver(); // phase boundary: pending events become visible
         for (ScheduledSystem& s : phase) {
-            ctx.state = s.module->state;
+            ctx.state      = s.module->state;
+            ctx.state_type = s.module->state_type;
             mem_set_owner((u16)(s.module->index + 1)); // attribution follows the schedule
             s.desc->fn(ctx);
         }

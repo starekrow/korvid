@@ -20,13 +20,13 @@ bool platform_startup(Engine&, ModuleInstance& self) {
             SDL_GetCurrentVideoDriver());
     PlatformState* s = arena_push<PlatformState>(self.arena);
     if (!s) return false;
-    self.state = s;
+    self.set_state(s);
     s->base_path = SDL_GetBasePath();
     return s->io.init(&self.general, 4096);
 }
 
 void platform_shutdown(Engine&, ModuleInstance& self) {
-    PlatformState* s = (PlatformState*)self.state;
+    PlatformState* s = self.state_as<PlatformState>();
     if (s) {
         s->window.close(); // the service ends with the module, whoever opened it
         s->io.free();
@@ -36,7 +36,7 @@ void platform_shutdown(Engine&, ModuleInstance& self) {
 
 // Phase Input: sample the raw key state once per tick for the simulation.
 void input_sample(TickContext& ctx) {
-    ((PlatformState*)ctx.state)->input.sample();
+    ctx.state_as<PlatformState>().input.sample();
 }
 
 constinit const EventTypeDesc k_events[] = {
@@ -49,18 +49,23 @@ constinit const EventTypeDesc k_events[] = {
 constinit const ResourceDesc k_resources[] = {{"input.state"}};
 constinit const char* const  k_input_writes[] = {"input.state"};
 constinit const SystemDesc   k_systems[] = {
-    {"input.sample", Phase::Input, input_sample, {}, k_input_writes},
+    {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = k_input_writes},
 };
 
 } // namespace
 
 KV_MODULE_DEFINE(platform_module) = {
-    "platform", k_events, k_resources, k_systems, platform_startup, platform_shutdown,
-    {.reserve = 64 * 1024},
+    .name      = "platform",
+    .events    = k_events,
+    .resources = k_resources,
+    .systems   = k_systems,
+    .startup   = platform_startup,
+    .shutdown  = platform_shutdown,
+    .memory    = {.reserve = 64 * 1024},
 };
 
 static PlatformState* state(Engine& e) {
-    return (PlatformState*)engine_module_state(e, "platform");
+    return engine_module_state_as<PlatformState>(e, "platform");
 }
 
 HostWindow* platform_open_window(Engine& e, const WindowDesc& desc) {

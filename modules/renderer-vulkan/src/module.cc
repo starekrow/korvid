@@ -34,12 +34,12 @@ bool renderer_vulkan_startup(Engine&, ModuleInstance& self) {
     RendererVulkanState* s = arena_push<RendererVulkanState>(self.arena);
     if (!s) return false;
     s->general = &self.general;
-    self.state = s;
+    self.set_state(s);
     return true;
 }
 
 void renderer_vulkan_shutdown(Engine&, ModuleInstance& self) {
-    RendererVulkanState* s = (RendererVulkanState*)self.state;
+    RendererVulkanState* s = self.state_as<RendererVulkanState>();
     if (s && s->renderer) renderer_destroy(s->renderer); // clears s->renderer
     vk_unload();
     SDL_Vulkan_UnloadLibrary();
@@ -48,8 +48,10 @@ void renderer_vulkan_shutdown(Engine&, ModuleInstance& self) {
 } // namespace
 
 KV_MODULE_DEFINE(renderer_vulkan_module) = {
-    "renderer-vulkan", {}, {}, {}, renderer_vulkan_startup, renderer_vulkan_shutdown,
-    {.reserve = 64 * 1024},
+    .name     = "renderer-vulkan",
+    .startup  = renderer_vulkan_startup,
+    .shutdown = renderer_vulkan_shutdown,
+    .memory   = {.reserve = 64 * 1024},
 };
 
 } // namespace kv

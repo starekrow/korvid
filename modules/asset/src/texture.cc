@@ -22,7 +22,7 @@ struct AssetState_ {
 
 namespace {
 
-AssetState_* state(Engine& e) { return (AssetState_*)engine_module_state(e, "asset"); }
+AssetState_* state(Engine& e) { return engine_module_state_as<AssetState_>(e, "asset"); }
 
 void* asset_resolve(kv_handle h, void* ctx) { return ((AssetState_*)ctx)->textures.get(Handle{h}); }
 int asset_describe(kv_handle h, void* ctx, char* out, size_t cap) {
@@ -45,7 +45,7 @@ void fail_asset(Engine& e, AssetState_& s, Handle h, TextureAsset& t, AssetError
 
 // Phase PreSim: completions reaped by the last platform pump become textures and events.
 void asset_pump(TickContext& ctx) {
-    AssetState_& s = *(AssetState_*)ctx.state;
+    AssetState_& s = ctx.state_as<AssetState_>();
     Engine& e = *ctx.engine;
     IoQueue* io = platform_io(e);
     Renderer* r = renderer_get(e);
@@ -92,12 +92,12 @@ bool asset_startup(Engine&, ModuleInstance& self) {
     if (!s->kind) return false;
     s->textures.use_kind(s->kind);
     if (!s->textures.init(4096, self.general.tag)) return false;
-    self.state = s;
+    self.set_state(s);
     return true;
 }
 
 void asset_shutdown(Engine& e, ModuleInstance& self) {
-    AssetState_* s = (AssetState_*)self.state;
+    AssetState_* s = self.state_as<AssetState_>();
     if (!s) return;
     // Renderer textures belong to the renderer and go with it; cancel reads still in flight.
     IoQueue* io = platform_io(e);
@@ -113,14 +113,19 @@ constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(As
 constinit const ResourceDesc  k_resources[] = {{"asset.textures"}};
 constinit const char* const   k_pump_writes[] = {"asset.textures"};
 constinit const SystemDesc    k_systems[]   = {
-    {"asset.pump", Phase::PreSim, asset_pump, {}, k_pump_writes},
+    {.name = "asset.pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = k_pump_writes},
 };
 
 } // namespace
 
 KV_MODULE_DEFINE(asset_module) = {
-    "asset", k_events, k_resources, k_systems, asset_startup, asset_shutdown,
-    {.reserve = 64 * 1024},
+    .name      = "asset",
+    .events    = k_events,
+    .resources = k_resources,
+    .systems   = k_systems,
+    .startup   = asset_startup,
+    .shutdown  = asset_shutdown,
+    .memory    = {.reserve = 64 * 1024},
 };
 
 Handle asset_load_texture(Engine& e, const char* path) {
