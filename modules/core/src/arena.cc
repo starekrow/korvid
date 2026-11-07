@@ -144,11 +144,15 @@ void mem_scratch_reset() {
     if (t_scratch_ready) arena_reset(t_scratch);
 }
 
-void mem_shutdown() {
+void mem_thread_exit() {
     if (t_scratch_ready) {
         arena_destroy(t_scratch);
         t_scratch_ready = false;
     }
+}
+
+void mem_shutdown() {
+    mem_thread_exit();
     MemStats s = mem_stats();
     if (s.live_allocs || s.committed_bytes) mem_report(mem_module_names(), mem_module_name_count());
 }

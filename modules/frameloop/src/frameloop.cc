@@ -24,6 +24,7 @@ bool            g_hash_ticks   = false;
 bool            g_hash_systems = false;
 bool            g_trace_events = false;
 u64             g_flags_given  = 0; // bit i: config.flags[i] was on the command line
+u32             g_threads      = 0; // 0: every core
 
 struct FrameLoopState {
     FrameLoopConfig config;
@@ -63,10 +64,11 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--hash") == 0) g_hash_ticks = true;
         else if (strcmp(argv[i], "--hash-systems") == 0) g_hash_systems = true;
         else if (strcmp(argv[i], "--trace-events") == 0) g_trace_events = true;
+        else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) g_threads = (u32)atoi(argv[++i]);
         else if (u32 f = game_flag(cfg, argv[i])) g_flags_given |= (u64)1 << (f - 1);
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
-                                  "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events]", argv[0]);
+                                  "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N]", argv[0]);
             return false;
         }
     }
@@ -216,6 +218,7 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
     engine.hash_ticks   = g_hash_ticks;
     engine.hash_systems = g_hash_systems;
     engine.trace.print  = g_trace_events;
+    engine.threads      = g_threads;
     if (g_trace_events && !KV_DEV) KV_WARN("frameloop", "--trace-events: the event trace exists in dev builds only");
     if (!engine_init(engine, kv_module_list())) {
         names_shutdown();

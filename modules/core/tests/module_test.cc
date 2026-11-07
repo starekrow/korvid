@@ -106,6 +106,7 @@ void test_module(kv::TestCtx& c) {
 
     const ModuleDesc* const list[] = {&k_first, &k_second};
     Engine e;
+    e.threads = 1; // the trace below is a global string: one thread, so the order is the schedule's
     g_trace[0] = 0;
     KV_CHECK(c, engine_init(e, list));
 
@@ -113,9 +114,10 @@ void test_module(kv::TestCtx& c) {
     KV_CHECK(c, EventType<EvA>::id == 1 && EventType<EvB>::id == 2 && EventType<EvC>::id == 3);
     KV_CHECK(c, e.event_type_count == 5); // plus the engine's own Spawned and StateEdge, registered last
 
-    // Resources likewise.
-    KV_CHECK(c, engine_resource_id(e, "first.store") == 1);
-    KV_CHECK(c, engine_resource_id(e, "second.store") == 2);
+    // Resources likewise, after the two modules' implicit state resources.
+    KV_CHECK(c, engine_resource_id(e, "first.state") == 1 && engine_resource_id(e, "second.state") == 2);
+    KV_CHECK(c, engine_resource_id(e, "first.store") == 3);
+    KV_CHECK(c, engine_resource_id(e, "second.store") == 4);
     KV_CHECK(c, engine_resource_id(e, "nope") == 0);
 
     // Startup in list order; state is where the module put it.
@@ -164,6 +166,7 @@ void test_module(kv::TestCtx& c) {
 #endif
 
     // The same list initializes again with the same ids: deterministic.
+    e.threads = 1;
     KV_CHECK(c, engine_init(e, list));
     KV_CHECK(c, EventType<EvC>::id == 3);
     engine_shutdown(e);

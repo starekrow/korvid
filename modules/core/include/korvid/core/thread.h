@@ -6,6 +6,8 @@
 namespace kv {
 
 u32  thread_id();
+// Logical processors online. Per platform.
+u32  os_cpu_count();
 // A real-time thread (audio) must never touch the general allocator; it asserts.
 void thread_set_realtime(bool rt);
 bool thread_is_realtime();

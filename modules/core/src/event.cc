@@ -70,6 +70,18 @@ void EventWriter::emit_bytes(u32 type_id, u32 elem_size, const void* e) {
 #endif
 }
 
+void EventWriter::append(const EventWriter& src) {
+    for (u32 t = 0; t < src.by_type.len; ++t) {
+        const EventBuffer& s = src.by_type[t];
+        if (s.bytes.len == 0) continue;
+        EventBuffer& d = buffer(t, s.elem_size);
+        memcpy(d.bytes.push_n(s.bytes.len), s.bytes.data, s.bytes.len);
+#if KV_DEV
+        for (u32 i = 0; i < s.count(); ++i) d.emitters.push(s.emitters[i]);
+#endif
+    }
+}
+
 u32 EventWriter::pending_count() const {
     u32 n = 0;
     for (const EventBuffer& b : by_type) n += b.count();

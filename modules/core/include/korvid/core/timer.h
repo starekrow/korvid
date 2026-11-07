@@ -6,6 +6,7 @@
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/map.h"
+#include <pthread.h>
 
 namespace kv {
 
@@ -22,10 +23,14 @@ struct TimerWheel {
     u32       fired      = 0;
     u32       cancelled  = 0;
     u32       next_ticket = 1;
+    pthread_mutex_t mu;      // systems on several threads schedule and cancel at once
+    bool      ready = false;
 
+    void init();
     // Files an event for `tick`; a tick at or before the current one means the next tick.
-    // Returns a ticket, never 0.
-    u32  schedule(u64 tick, u32 type_id, u32 size, const void* data, const char* emitter);
+    // `ticket` is the caller's unique id for it, or 0 for one of the wheel's own. Returns
+    // the ticket, never 0. Due records fire in ticket order, whatever order they arrived.
+    u32  schedule(u64 tick, u32 type_id, u32 size, const void* data, const char* emitter, u32 ticket = 0);
     // Withdraws a scheduled event. False if it already fired, was cancelled, or never was.
     bool cancel(u32 ticket);
     // Emits every record due at `tick` into the bus, pending. Call once per tick, first.

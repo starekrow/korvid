@@ -3,6 +3,8 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/hash.h"
+#include "korvid/core/job.h"
+#include "korvid/core/thread.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include <stdio.h>
@@ -259,8 +261,9 @@ void expand(const Engine& e, const Array<u32>& ids, Array<u32>& out) {
     }
 }
 
-u32 first_common(const Array<u32>& a, const Array<u32>& b) {
-    for (u32 x : a) if (contains(b, x)) return x;
+// The first resource both touch that is a real one, not a module's implicit state.
+u32 first_conflict(const Engine& e, const Array<u32>& a, const Array<u32>& b) {
+    for (u32 x : a) if (contains(b, x) && !e.resources[x - 1].implicit) return x;
     return 0;
 }
 
@@ -351,11 +354,13 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
     const char* what = phase == Phase::Count ? "handlers" : phase_name(phase);
 
     // Readers after writers; a pair writing the same thing is remembered for the check below.
+    // A module's state is not a conflict: its systems keep declaration order among themselves.
     for (u32 i = 0; i < n; ++i)
         for (u32 j = 0; j < n; ++j) {
             if (i == j) continue;
-            if (u32 r = first_common(pend[i].writes_eff, pend[j].reads_eff)) edges.push(Edge{i, j, r});
+            if (u32 r = first_conflict(e, pend[i].writes_eff, pend[j].reads_eff)) edges.push(Edge{i, j, r});
         }
+
     // Declared order. For systems, a name in another phase is checked for direction; for
     // handlers, only other handlers may be named.
     for (u32 i = 0; i < n; ++i) {
@@ -381,10 +386,23 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
             edges.push(Edge{i, j - 1, 0});
         }
     }
+    // Two systems of one module that both touch its state, one of them writing, and have
+    // no path between them yet keep declaration order. Handlers run one at a time: no need.
+    if (phase != Phase::Count)
+        for (u32 i = 0; i < n; ++i)
+            for (u32 j = i + 1; j < n; ++j) {
+                if (pend[i].sys.module != pend[j].sys.module) continue;
+                u32 st = pend[i].sys.module->state_resource;
+                bool wi = contains(pend[i].writes_eff, st), wj = contains(pend[j].writes_eff, st);
+                bool ti = wi || contains(pend[i].reads_eff, st), tj = wj || contains(pend[j].reads_eff, st);
+                if (!(ti && tj && (wi || wj))) continue;
+                if (reaches(edges, n, i, j) || reaches(edges, n, j, i)) continue;
+                edges.push(Edge{i, j, st});
+            }
     // Two writers of one resource need a path between them, either way round.
     for (u32 i = 0; i < n; ++i)
         for (u32 j = i + 1; j < n; ++j) {
-            u32 r = first_common(pend[i].writes_eff, pend[j].writes_eff);
+            u32 r = first_conflict(e, pend[i].writes_eff, pend[j].writes_eff);
             if (!r) continue;
             if (reaches(edges, n, i, j) || reaches(edges, n, j, i)) continue;
             KV_ERROR("engine", "'%s' and '%s' both write '%s' (%s) with no order between them: add `after` or `before`",
@@ -393,9 +411,14 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
             return false;
         }
 
-    // Topological order, lowest rank first among the ready.
+    // Topological order, lowest rank first among the ready. A unit's level is one past
+    // its deepest predecessor; the output is then sorted by level, rank, which is still a
+    // topological order since every edge climbs a level.
     Array<u8> placed = array_in<u8>(mem_scratch());
     placed.resize_fill(n, 0);
+    Array<u32> level = array_in<u32>(mem_scratch());
+    level.resize_fill(n, 0);
+    u32 first_out = out.len;
     for (u32 done = 0; done < n; ++done) {
         u32 pick = n;
         for (u32 i = 0; i < n; ++i) {
@@ -410,6 +433,12 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
             return false;
         }
         placed[pick] = 1;
+        u32 lv = 1;
+        for (const Edge& ed : edges)
+            if (ed.to == pick && level[ed.from] + 1 > lv) lv = level[ed.from] + 1;
+        level[pick] = lv;
+        pend[pick].sys.level = lv;
+        pend[pick].sys.rank  = pend[pick].rank;
         out.push(pend[pick].sys);
         pend[pick].sys.reads = pend[pick].sys.writes = Array<u32>{}; // now owned by the schedule
         // Log why it sits where it does.
@@ -418,6 +447,14 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
                 KV_INFO("engine", "  %s after %s: %s", pend[pick].sys.name(), pend[ed.from].sys.name(),
                         ed.resource ? resource_name(e, ed.resource) : "declared");
     }
+    // Sort the new entries by (level, rank): insertion sort, n is small.
+    for (u32 i = first_out + 1; i < out.len; ++i) {
+        ScheduledSystem s = out[i];
+        u32 j = i;
+        while (j > first_out && (out[j - 1].level > s.level || (out[j - 1].level == s.level && out[j - 1].rank > s.rank))) { out[j] = out[j - 1]; --j; }
+        out[j] = s;
+    }
+    level.free();
     placed.free();
     edges.free();
     return true;
@@ -442,7 +479,8 @@ bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
                     ok = false;
                 }
             if (!ok) break;
-            Pending p{ScheduledSystem{&s, &e.modules[i], {}, {}}, {}, {}, rank++};
+            Pending p{};
+            p.sys.desc = &s; p.sys.module = &e.modules[i]; p.rank = rank++;
             if (!resolve_resource_refs(e, m, s, s.reads, "reads", p.sys.reads) ||
                 !resolve_resource_refs(e, m, s, s.writes, "writes", p.sys.writes)) {
                 p.sys.reads.free(); p.sys.writes.free();
@@ -451,6 +489,8 @@ bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
             }
             expand(e, p.sys.reads, p.reads_eff);
             expand(e, p.sys.writes, p.writes_eff);
+            if (s.state == StateUse::Write) p.writes_eff.push(e.modules[i].state_resource);
+            else if (s.state == StateUse::Read) p.reads_eff.push(e.modules[i].state_resource);
             pend[(u32)s.phase].push(p);
             if (!check_flow(e, pend[(u32)s.phase].last())) { ok = false; break; }
         }
@@ -475,7 +515,8 @@ bool build_handlers(Engine& e, Span<const ModuleDesc* const> modules) {
             if (!h.name || !h.fn || !h.event) { KV_ERROR("engine", "module '%s' has a handler with no name, no function or no event", m.name); ok = false; break; }
             if (*h.event == 0) { KV_ERROR("engine", "handler '%s' in module '%s' is on event type '%s', which no module declares", h.name, m.name, h.event_name ? h.event_name : "?"); ok = false; break; }
             if (find_pending(pend, h.name)) { KV_ERROR("engine", "handler '%s' declared twice", h.name); ok = false; break; }
-            Pending p{ScheduledSystem{nullptr, &e.modules[i], {}, {}, &h}, {}, {}, rank++};
+            Pending p{};
+            p.sys.module = &e.modules[i]; p.sys.handler = &h; p.rank = rank++;
             SystemDesc fake{.name = h.name, .phase = Phase::Count}; // for the resolver's messages only
             if (!resolve_resource_refs(e, m, fake, h.reads, "reads", p.sys.reads) ||
                 !resolve_resource_refs(e, m, fake, h.writes, "writes", p.sys.writes)) {
@@ -543,12 +584,15 @@ void log_order(const Engine& e) {
     for (u32 p = 0; p < (u32)Phase::Count; ++p) {
         char line[512];
         u32 at = 0;
+        u32 last_level = 0;
         for (const ScheduledSystem& s : e.phases.systems[p]) {
-            int n = snprintf(line + at, sizeof line - at, "%s%s", at ? ", " : "", s.desc->name);
+            const char* sep = at == 0 ? "" : s.level != last_level ? " | " : ", ";
+            int n = snprintf(line + at, sizeof line - at, "%s%s", sep, s.desc->name);
             if (n < 0 || at + (u32)n >= sizeof line) break;
             at += (u32)n;
+            last_level = s.level;
         }
-        KV_INFO("engine", "order %-7s %s", phase_name((Phase)p), at ? line : "(empty)");
+        KV_INFO("engine", "order %-7s %s", phase_name((Phase)p), at ? line : "(empty)"); // '|' separates levels
     }
 }
 
@@ -575,15 +619,37 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules) {
         ModuleInstance inst;
         inst.desc  = modules[i];
         inst.index = i;
+        snprintf(inst.state_name, sizeof inst.state_name, "%s.state", modules[i]->name);
         e.modules.push(inst);
+    }
+    // Every module's state is a resource its systems share; registered first so kinds
+    // and declared resources cannot shadow it.
+    for (ModuleInstance& inst : e.modules) {
+        e.resources.push(ResourceEntry{inst.state_name, inst.index, nullptr, nullptr, true});
+        inst.state_resource = e.resources.len;
     }
 
     bool ok = register_events(e, modules) && register_components(e, modules) && register_kinds(e, modules) &&
               register_resources(e, modules) && build_schedule(e, modules) && build_handlers(e, modules) &&
               build_triggers(e, modules);
     if (ok) {
-        e.events.init(1);
+        // Units: systems in phase order, then handlers. Each owns an event writer.
+        u32 unit = 0;
+        for (u32 p = 0; p < (u32)Phase::Count; ++p)
+            for (ScheduledSystem& s : e.phases.systems[p]) s.unit = ++unit;
+        for (ScheduledSystem& h : e.handlers) h.unit = ++unit;
+        e.units = unit;
+        e.events.init(1 + unit);
+        for (u32 p = 0; p < (u32)Phase::Count; ++p)
+            for (ScheduledSystem& s : e.phases.systems[p]) e.events.writer(s.unit).emitter = s.name();
+        for (ScheduledSystem& h : e.handlers) e.events.writer(h.unit).emitter = h.name();
         e.events.types = Span<const EventTypeDesc* const>(e.event_types.data, e.event_types.len);
+        e.timers.init();
+        // Threads: the main thread plus workers. Per-system hashing needs one at a time.
+        u32 threads = e.threads ? e.threads : os_cpu_count();
+        if (e.hash_systems && threads != 1) { KV_INFO("engine", "--hash-systems: running on one thread"); threads = 1; }
+        if (threads > 64) threads = 64;
+        if (!jobs_init(threads - 1)) ok = false;
 #if KV_DEV
         e.trace.ring.resize_fill(1024, TraceRecord{});
 #endif
@@ -632,13 +698,15 @@ void engine_shutdown(Engine& e) {
         arena_destroy(inst.arena); // the module's state goes with it
         mem_set_owner(0);
     }
+    jobs_shutdown();
     e.commands.bytes.free();
     e.commands.count = 0;
     e.timers.free();
     e.trace.ring.free();
     e.trace.head = 0;
-    for (ScheduledSystem& h : e.handlers) { h.reads.free(); h.writes.free(); }
+    for (ScheduledSystem& h : e.handlers) h.free_buffers();
     e.handlers.free();
+    e.units = 0;
     for (const Trigger& t : e.triggers) if (t.desc->id) *t.desc->id = 0;
     e.triggers.free();
     free_tables(e); // after every module is down: nothing holds an entity any more
@@ -699,8 +767,9 @@ const T* take(const u8*& p) { const T* v = (const T*)p; p += sizeof(T); return v
 
 } // namespace
 
-u32 command_spawn_begin(CommandBuffer& cb, u32 kind_id, u32 component_count) {
-    CommandHeader h{CMD_SPAWN, kind_id, cb.next_ticket++, component_count, Handle{}};
+u32 command_spawn_begin(CommandBuffer& cb, u32 kind_id, u32 component_count, u32 ticket) {
+    if (ticket == 0 && cb.next_ticket) ticket = cb.next_ticket++;
+    CommandHeader h{CMD_SPAWN, kind_id, ticket, component_count, Handle{}};
     put(cb.bytes, h);
     ++cb.count;
     return h.ticket;
@@ -725,8 +794,9 @@ void command_destroy_all(CommandBuffer& cb, u32 kind_id) {
     ++cb.count;
 }
 
-void engine_apply_commands(Engine& e) {
-    CommandBuffer& cb = e.commands;
+namespace {
+
+void apply_buffer(Engine& e, CommandBuffer& cb) {
     if (cb.count == 0) return;
     const u8* p   = cb.bytes.data;
     const u8* end = p + cb.bytes.len;
@@ -759,6 +829,15 @@ void engine_apply_commands(Engine& e) {
     }
     cb.bytes.clear();
     cb.count = 0;
+}
+
+} // namespace
+
+void engine_apply_commands(Engine& e) {
+    apply_buffer(e, e.commands);
+    for (u32 p = 0; p < (u32)Phase::Count; ++p)
+        for (ScheduledSystem& s : e.phases.systems[p]) apply_buffer(e, s.commands);
+    for (ScheduledSystem& h : e.handlers) apply_buffer(e, h.commands);
 }
 
 void engine_fire_triggers(Engine& e, u64 tick) {

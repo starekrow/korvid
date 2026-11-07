@@ -193,17 +193,20 @@ void control(TickContext& ctx) {
     }
 }
 
-// Everything with a velocity moves.
+// Everything with a velocity moves. In parallel: the rows are independent, so chunks of
+// them go to the pool and the result is the same whatever ran where.
 void move(TickContext& ctx) {
     f32 dt = (f32)ctx.dt;
     for (KindRows k : ctx.view<Transform2, const Velocity>()) {
         Span<Transform2>     t = k.col<Transform2>();
         Span<const Velocity> v = k.col<const Velocity>();
-        for (u32 i = 0; i < k.rows(); ++i) {
-            if (!k.alive(i)) continue;
-            t[i].position += v[i].v * dt;
-            t[i].rotation += v[i].spin * dt;
-        }
+        parallel_for(ctx, k.rows(), 512, [&](ChunkContext&, u32 begin, u32 end) {
+            for (u32 i = begin; i < end; ++i) {
+                if (!k.alive(i)) continue;
+                t[i].position += v[i].v * dt;
+                t[i].rotation += v[i].spin * dt;
+            }
+        });
     }
 }
 
@@ -246,7 +249,7 @@ void game(TickContext& ctx) {
         g.demo    = frameloop_flag(*ctx.engine, "--demo");
         g.rng     = Rng::seeded(0x70c45, 7);
         KV_INFO("rocks", "%s. Arrows turn and thrust, space fires, Esc quits.", g.demo ? "Demo: the ship flies itself" : "Your ship");
-        ctx.events->emit(Restart{});
+        ctx.emit(Restart{});
     }
     for (const AssetFailed& e : ctx.events->read<AssetFailed>()) {
         char text[160];
@@ -267,10 +270,10 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
     Game& g = ctx.state_as<Game>();
     for (const OverlapBegin& o : overlaps) {
         u16 ka = o.a.kind(), kb = o.b.kind();
-        if (ka == g.bullet_hk && kb == g.rock_hk) ctx.events->emit(RockHit{o.b, o.a});
-        else if (ka == g.rock_hk && kb == g.bullet_hk) ctx.events->emit(RockHit{o.a, o.b});
-        else if (ka == g.ship_hk && kb == g.rock_hk) ctx.events->emit(ShipHit{o.a, o.b});
-        else if (ka == g.rock_hk && kb == g.ship_hk) ctx.events->emit(ShipHit{o.b, o.a});
+        if (ka == g.bullet_hk && kb == g.rock_hk) ctx.emit(RockHit{o.b, o.a});
+        else if (ka == g.rock_hk && kb == g.bullet_hk) ctx.emit(RockHit{o.a, o.b});
+        else if (ka == g.ship_hk && kb == g.rock_hk) ctx.emit(ShipHit{o.a, o.b});
+        else if (ka == g.rock_hk && kb == g.ship_hk) ctx.emit(ShipHit{o.b, o.a});
     }
 }
 
@@ -302,7 +305,7 @@ void on_rock_hit(TickContext& ctx, Span<const RockHit> hits) {
         spawn_debris(ctx, g, at, 6, color_rgba(1.0f, 0.7f, 0.3f));
         score->total += kRockPoints[size];
         score->rocks_shot += 1;
-        ctx.events->emit(ScoreChanged{kRockPoints[size], score->total});
+        ctx.emit(ScoreChanged{kRockPoints[size], score->total});
     }
 }
 
@@ -363,7 +366,7 @@ void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
         if (e.trigger != g_death) continue;
         ctx.destroy(e.entity);
         ctx.cancel(g.next_wave); // the field stays as it is until the restart
-        ctx.events->emit(GameOver{score->total});
+        ctx.emit(GameOver{score->total});
         ctx.schedule_in(Restart{}, kRestartTicks);
         KV_INFO("rocks", "game over: %d points", score->total);
     }
@@ -434,9 +437,10 @@ constinit const char* const k_fade_writes[]    = {"example_rocks.debris.Lifetime
 constinit const char* const k_game_reads[]     = {"example_rocks.score"};
 constinit const SystemDesc k_systems[] = {
     {.name = "example_rocks.control", .phase = Phase::Sim, .fn = control, .reads = k_control_reads, .writes = k_control_writes, .before = k_before_move},
-    {.name = "example_rocks.move",    .phase = Phase::Sim, .fn = move,    .reads = k_move_reads,    .writes = k_move_writes},
-    {.name = "example_rocks.wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = k_wrap_reads,    .writes = k_move_writes, .after = k_after_move},
-    {.name = "example_rocks.fade",    .phase = Phase::Sim, .fn = debris_fade, .writes = k_fade_writes},
+    // move, wrap and fade touch no module state: fade shares a level with move.
+    {.name = "example_rocks.move",    .phase = Phase::Sim, .fn = move,    .reads = k_move_reads,    .writes = k_move_writes, .state = StateUse::None},
+    {.name = "example_rocks.wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = k_wrap_reads,    .writes = k_move_writes, .after = k_after_move, .state = StateUse::None},
+    {.name = "example_rocks.fade",    .phase = Phase::Sim, .fn = debris_fade, .writes = k_fade_writes, .state = StateUse::None},
     {.name = "example_rocks.game",    .phase = Phase::Sim, .fn = game,    .reads = k_game_reads},
 };
 

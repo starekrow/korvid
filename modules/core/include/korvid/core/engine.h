@@ -15,6 +15,7 @@ struct ResourceEntry {
     u32         module;         // owning module's index
     void*       ptr  = nullptr; // what the owner published for systems to reach through the context
     const void* type = nullptr; // its type key
+    bool        implicit = false; // a module's state: ordered by rank among its systems, never a conflict
 };
 
 struct ComponentEntry {
@@ -49,17 +50,6 @@ struct EventTrace {
     bool               print = false;
 };
 
-// Spawns and destroys issued through the TickContext, applied at phase boundaries in
-// issue order. One buffer today; per job chunk once there are jobs.
-struct CommandBuffer {
-    Array<u8> bytes;
-    u32       count       = 0;
-    u32       next_ticket = 1;
-};
-u32  command_spawn_begin(CommandBuffer& cb, u32 kind_id, u32 component_count); // returns the ticket
-void command_spawn_component(CommandBuffer& cb, u32 component_id, const void* data, u32 size);
-void command_destroy(CommandBuffer& cb, Handle h);
-void command_destroy_all(CommandBuffer& cb, u32 kind_id);
 
 struct Engine {
     EventBus              events;
@@ -76,6 +66,8 @@ struct Engine {
     TimerWheel            timers;
     EventTrace            trace;
     u32                   wave_cap     = 4; // handler waves per boundary; leftovers wait for the next
+    u32                   threads      = 0; // threads the schedule may use, main included; 0: every core
+    u32                   units        = 0; // systems plus handlers
     u64                   waves_capped = 0; // boundaries that hit the cap
     u64                   edges_fired  = 0;
     u32                   event_type_count = 0;
@@ -93,7 +85,8 @@ void engine_shutdown(Engine& e);
 
 // Advances the clock by frame_dt and runs the resulting ticks. Returns the tick count.
 u32  engine_frame(Engine& e, f64 frame_dt);
-// Applies and clears the command buffer: the tick runner calls it at every phase boundary.
+// Applies and clears every command buffer, the engine's own first and then each unit's
+// in unit order: the tick runner calls it after every phase and every handler wave.
 void engine_apply_commands(Engine& e);
 // Evaluates every state trigger over this tick's previous and current rows and emits
 // StateEdge events, pending. The tick runner calls it at the end of the tick.

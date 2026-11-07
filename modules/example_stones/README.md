@@ -67,7 +67,7 @@ when the tick rate changes.
 **Emit an event when stones bump.** One line in `bounce`:
 
 ```cpp
-ctx.events->emit(Bump{a.sprite, b.sprite});
+ctx.emit(Bump{a.sprite, b.sprite});
 ```
 
 With a schema on `Bump`, `--trace-events` prints every collision with who emitted it, a

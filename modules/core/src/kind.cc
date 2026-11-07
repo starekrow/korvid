@@ -102,6 +102,7 @@ bool Table::ensure_rows(u32 n) {
 }
 
 Handle Table::spawn() {
+    slots.owner = thread_id(); // the schedule made this thread the writer for now
     if (slots.live >= desc->capacity) {
         KV_ERROR("kind", "'%s' is full (%u entities)", desc->name, desc->capacity);
         return Handle{};
@@ -118,6 +119,7 @@ Handle Table::spawn() {
 }
 
 bool Table::destroy(Handle h) {
+    slots.owner = thread_id();
     if (!slots.destroy(h)) return false;
 #if KV_DEV
     for (Column& c : columns) {
@@ -146,7 +148,9 @@ u64 Table::hash() const {
     u32 n = rows();
     for (u32 i = 0; i < n; ++i) {
         if (!is_alive(i)) continue;
-        h = hash_mix(h ^ handle_at(i).bits);
+        // Generation and index only: the handle kind is a process-wide number that depends
+        // on what else registered, and the table's name already stands for the kind.
+        h = hash_mix(h ^ (handle_at(i).bits & 0x000FFFFFFFFFFFFFull));
         for (const Column& c : columns)
             if (c.desc->is_sim()) h = hash_mix(h ^ component_hash(*c.desc, row(c, i)));
     }

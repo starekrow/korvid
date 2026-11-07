@@ -25,17 +25,30 @@ u32 PhaseList::system_count() const {
 
 namespace {
 
-void enter(TickContext& ctx, EventBus& events, ScheduledSystem& s) {
+// A unit runs with its own writer and command buffer; attribution follows it onto
+// whatever thread it is on.
+void run_unit(TickContext ctx, EventBus& events, ScheduledSystem& s, const void* events_data, u32 event_count) {
     ctx.state      = s.module->state;
     ctx.state_type = s.module->state_type;
     ctx.system     = &s;
-    events.set_emitter(s.name());
-    mem_set_owner((u16)(s.module->index + 1)); // attribution follows the schedule
+    ctx.writer     = &events.writer(s.unit);
+    ctx.commands   = &s.commands;
+    u16 was = mem_owner();
+    mem_set_owner((u16)(s.module->index + 1));
+    if (s.desc) s.desc->fn(ctx);
+    else s.handler->fn(ctx, events_data, event_count);
+    mem_set_owner(was);
 }
 
-void leave(EventBus& events) {
-    events.set_emitter("");
-    mem_set_owner(0);
+struct LevelJob {
+    TickContext*     ctx;
+    EventBus*        events;
+    ScheduledSystem* first;
+};
+
+void level_job(u32 chunk, u32, u32, void* user) {
+    LevelJob& lj = *(LevelJob*)user;
+    run_unit(*lj.ctx, *lj.events, lj.first[chunk], nullptr, 0);
 }
 
 // A phase boundary: at the tick's first one the timers fire; then pending events are
@@ -51,9 +64,7 @@ void boundary(Engine& engine, EventBus& events, TickContext& ctx, u64 tick, bool
             u32 type = *h.handler->event;
             u32 n = events.new_count(type);
             if (!n) continue;
-            enter(ctx, events, h);
-            h.handler->fn(ctx, events.new_data(type), n);
-            leave(events);
+            run_unit(ctx, events, h, events.new_data(type), n);
         }
         engine_apply_commands(engine);
         if (events.pending_now() == 0) break;
@@ -78,13 +89,25 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
         boundary(engine, events, ctx, tick, p == 0);
         if ((Phase)p == Phase::PreSim)
             for (Table& t : engine.tables) t.begin_tick(); // current becomes previous, before anything moves
-        for (ScheduledSystem& s : systems[p]) {
-            enter(ctx, events, s);
-            s.desc->fn(ctx);
-            leave(events);
-            if (engine.hash_systems)
-                KV_INFO("hash", "tick %llu after %-24s %016llx", (unsigned long long)tick, s.desc->name,
-                        (unsigned long long)engine_hash_state(engine));
+        // Level by level: the systems of a level have no path between them and run at
+        // once on the pool; each level waits for the last.
+        Array<ScheduledSystem>& phase = systems[p];
+        for (u32 i = 0; i < phase.len;) {
+            u32 j = i + 1;
+            while (j < phase.len && phase[j].level == phase[i].level) ++j;
+            u32 n = j - i;
+            if (n == 1 || jobs_worker_count() == 0 || engine.hash_systems) {
+                for (u32 k = i; k < j; ++k) {
+                    run_unit(ctx, events, phase[k], nullptr, 0);
+                    if (engine.hash_systems)
+                        KV_INFO("hash", "tick %llu after %-24s %016llx", (unsigned long long)tick, phase[k].name(),
+                                (unsigned long long)engine_hash_state(engine));
+                }
+            } else {
+                LevelJob lj{&ctx, &events, &phase[i]};
+                jobs_run(n, 1, level_job, &lj);
+            }
+            i = j;
         }
         engine_apply_commands(engine); // spawns and destroys issued this phase take effect
     }
@@ -98,7 +121,7 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
 
 void PhaseList::free() {
     for (Array<ScheduledSystem>& p : systems) {
-        for (ScheduledSystem& s : p) { s.reads.free(); s.writes.free(); }
+        for (ScheduledSystem& s : p) s.free_buffers();
         p.free();
     }
 }
@@ -215,33 +238,88 @@ u32 TickContext::kind_id(const char* name) {
 u32    ctx_table_count(TickContext& ctx) { return ctx.engine->tables.len; }
 Table* ctx_table_at(TickContext& ctx, u32 i) { return &ctx.engine->tables[i]; }
 
-u32 ctx_spawn_begin(TickContext& ctx, const char* kind, u32 component_count) {
+// Tickets: a unit's are (unit << 20) | its own counter, unique and the same run to run
+// whatever thread the unit was on; the engine's buffer and wheel number their own.
+// Twenty bits is a million per unit; past that a warning, and uniqueness is best effort.
+namespace {
+
+u32 unit_ticket(TickContext& ctx, u32* counter) {
+    if (!ctx.system) return 0; // the engine's buffer or the wheel assigns
+    ScheduledSystem& s = *(ScheduledSystem*)ctx.system;
+    u32 local = ++*counter;
+    if (local == (1u << 20)) KV_WARN("engine", "unit '%s' issued a million tickets; they may repeat now", s.name());
+    return (s.unit << 20) | (local & 0xFFFFFu);
+}
+
+CommandBuffer& buffer_of(TickContext& ctx, CommandBuffer* cb) { return cb ? *cb : ctx.engine->commands; }
+
+} // namespace
+
+u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, const char* kind, u32 component_count, bool ticketed) {
     u32 id = engine_kind_id(*ctx.engine, kind);
     if (!id) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind '%s'", system_name(ctx), kind); return 0; }
-    return command_spawn_begin(ctx.engine->commands, id, component_count);
+    return ctx_spawn_begin(ctx, cb, id, component_count, ticketed);
 }
 
-u32 ctx_spawn_begin(TickContext& ctx, u32 kind_id, u32 component_count) {
+u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, u32 kind_id, u32 component_count, bool ticketed) {
     if (!engine_table(*ctx.engine, kind_id)) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind id %u", system_name(ctx), kind_id); return 0; }
-    return command_spawn_begin(ctx.engine->commands, kind_id, component_count);
+    CommandBuffer& b = buffer_of(ctx, cb);
+    u32 ticket = 0;
+    if (ticketed) ticket = ctx.system ? unit_ticket(ctx, &((ScheduledSystem*)ctx.system)->spawn_tickets) : 0;
+    else b.next_ticket = 0; // a chunk buffer: never numbers its own
+    u32 got = command_spawn_begin(b, kind_id, component_count, ticket);
+    return ticketed ? got : 1; // the chunk path only needs "written"
 }
 
-void ctx_spawn_component(TickContext& ctx, u32 component_id, const void* data, u32 size) {
-    command_spawn_component(ctx.engine->commands, component_id, data, size);
+void ctx_spawn_component(CommandBuffer* cb, u32 component_id, const void* data, u32 size) {
+    KV_ASSERT(cb);
+    command_spawn_component(*cb, component_id, data, size);
 }
 
-void ctx_destroy(TickContext& ctx, Handle h) { command_destroy(ctx.engine->commands, h); }
+void ctx_destroy(TickContext& ctx, CommandBuffer* cb, Handle h) { command_destroy(buffer_of(ctx, cb), h); }
 
 bool ctx_cancel(TickContext& ctx, u32 ticket) { return ctx.engine->timers.cancel(ticket); }
 
-void ctx_destroy_all(TickContext& ctx, u32 kind_id) {
+void ctx_destroy_all(TickContext& ctx, CommandBuffer* cb, u32 kind_id) {
     if (!engine_table(*ctx.engine, kind_id)) { KV_ERROR("engine", "system '%s': destroy_all of unknown kind id %u", system_name(ctx), kind_id); return; }
-    command_destroy_all(ctx.engine->commands, kind_id);
+    command_destroy_all(buffer_of(ctx, cb), kind_id);
 }
 
 u32 ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick) {
     if (type_id == 0) { KV_ERROR("engine", "system '%s' schedules an unregistered event type", system_name(ctx)); KV_VERIFY(!"unregistered event"); return 0; }
-    return ctx.engine->timers.schedule(tick, type_id, size, event, system_name(ctx));
+    u32 ticket = ctx.system ? unit_ticket(ctx, &((ScheduledSystem*)ctx.system)->timer_tickets) : 0;
+    return ctx.engine->timers.schedule(tick, type_id, size, event, system_name(ctx), ticket);
+}
+
+ParallelBuffers ctx_parallel_begin(TickContext& ctx, u32 chunks) {
+    ParallelBuffers pb;
+    pb.chunks   = chunks;
+    pb.writers  = alloc_items<EventWriter>(mem_scratch(), chunks);
+    pb.commands = alloc_items<CommandBuffer>(mem_scratch(), chunks);
+    const char* emitter = ctx.writer ? ctx.writer->emitter : "";
+    for (u32 i = 0; i < chunks; ++i) {
+        pb.writers[i]  = EventWriter{};  // inner arrays on the general allocator: chunks run on any thread
+        pb.writers[i].emitter = emitter;
+        pb.commands[i] = CommandBuffer{};
+        pb.commands[i].next_ticket = 0;
+    }
+    return pb;
+}
+
+// Chunk order, whatever ran where. The inner arrays go back to the general allocator.
+void ctx_parallel_end(TickContext& ctx, ParallelBuffers& pb) {
+    EventWriter& w = ctx.writer ? *ctx.writer : ctx.events->writer(0);
+    CommandBuffer& c = buffer_of(ctx, ctx.commands);
+    for (u32 i = 0; i < pb.chunks; ++i) {
+        w.append(pb.writers[i]);
+        pb.writers[i].free();
+        CommandBuffer& cc = pb.commands[i];
+        if (cc.count) {
+            memcpy(c.bytes.push_n(cc.bytes.len), cc.bytes.data, cc.bytes.len);
+            c.count += cc.count;
+        }
+        cc.bytes.free();
+    }
 }
 
 } // namespace kv

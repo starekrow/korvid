@@ -48,6 +48,8 @@ struct ModuleInstance {
     Allocator         general;              // the general allocator, attributed to this module
     u32               index      = 0;       // position in the module list
     bool              started    = false;
+    u32               state_resource = 0;   // id of "<module>.state", the implicit resource its systems share
+    char              state_name[64];        // that resource's name
 
     // Records the state and its type, so systems and shutdown get it back checked.
     template <class T>

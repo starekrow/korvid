@@ -123,8 +123,8 @@ void broadphase(TickContext& ctx) {
     while (i < st.prev.len || j < st.now.len) {
         int c = i == st.prev.len ? 1 : j == st.now.len ? -1 : compare_pairs(&st.prev[i], &st.now[j]);
         if (c == 0) { ++i; ++j; }
-        else if (c < 0) { ctx.events->emit(OverlapEnd{Handle{st.prev[i].a}, Handle{st.prev[i].b}}); ++i; }
-        else { ctx.events->emit(OverlapBegin{Handle{st.now[j].a}, Handle{st.now[j].b}}); ++j; }
+        else if (c < 0) { ctx.emit(OverlapEnd{Handle{st.prev[i].a}, Handle{st.prev[i].b}}); ++i; }
+        else { ctx.emit(OverlapBegin{Handle{st.now[j].a}, Handle{st.now[j].b}}); ++j; }
     }
     Array<Pair> t = st.prev; st.prev = st.now; st.now = t;
 }

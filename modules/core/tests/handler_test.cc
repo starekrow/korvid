@@ -48,15 +48,15 @@ void on_hit(TickContext& ctx, Span<const Hit> hits) {
     for (const Hit& h : hits) {
         ++g.hits;
         if (Hp* hp = rocks->get<Hp>(h.rock)) hp->hp -= h.damage;
-        ctx.events->emit(Split{h.rock, 2});
+        ctx.emit(Split{h.rock, 2});
     }
     if (ctx.wave > g.max_wave) g.max_wave = ctx.wave;
 }
 void on_split(TickContext& ctx, Span<const Split> splits) {
     for (const Split& s : splits) {
         ++g.splits;
-        ctx.events->emit(Score{10});
-        if (s.depth > 0) ctx.events->emit(Split{s.rock, s.depth - 1});
+        ctx.emit(Score{10});
+        if (s.depth > 0) ctx.emit(Split{s.rock, s.depth - 1});
     }
     if (ctx.wave > g.max_wave) g.max_wave = ctx.wave;
 }
@@ -70,7 +70,7 @@ void on_score(TickContext&, Span<const Score> s) { g.scores += s.len; }
 // Re-emits itself: an endless cascade the cap must stop.
 void on_chatter(TickContext& ctx, Span<const Chatter> cs) {
     ++g.chatter_waves_seen;
-    for (const Chatter& c : cs) { ++g.chatter_handled; if (c.n < g.chatter_limit) ctx.events->emit(Chatter{c.n + 1}); }
+    for (const Chatter& c : cs) { ++g.chatter_handled; if (c.n < g.chatter_limit) ctx.emit(Chatter{c.n + 1}); }
 }
 
 void sys_sim(TickContext& ctx)     { g.scores_in_sim += ctx.events->read<Score>().len; }
@@ -107,7 +107,12 @@ void test_handler(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&k_h};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    KV_CHECK(c, e.handlers.len == 5 && strcmp(e.handlers[0].name(), "h.damage") == 0 && strcmp(e.handlers[1].name(), "h.audit") == 0);
+    u32 at_damage = 0, at_audit = 0;
+    for (u32 i = 0; i < e.handlers.len; ++i) {
+        if (strcmp(e.handlers[i].name(), "h.damage") == 0) at_damage = i + 1;
+        if (strcmp(e.handlers[i].name(), "h.audit") == 0) at_audit = i + 1;
+    }
+    KV_CHECK(c, e.handlers.len == 5 && at_damage && at_audit && at_damage < at_audit); // audit after damage, from the sets
     KV_CHECK(c, e.event_types.len == e.event_type_count + 1 && e.event_types[EventType<Hit>::id] == &k_events[0]);
 
     Table* rocks = engine_table(e, "h.rock");

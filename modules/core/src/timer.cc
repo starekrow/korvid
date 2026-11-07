@@ -1,6 +1,8 @@
 #include "korvid/core/timer.h"
 #include "korvid/core/event.h"
+#include "korvid/core/arena.h"
 #include "korvid/core/log.h"
+#include <stdlib.h>
 #include <string.h>
 
 namespace kv {
@@ -28,14 +30,26 @@ void append(Array<u8>& dst, const TimerRecord& r, const void* data) {
 
 } // namespace
 
-u32 TimerWheel::schedule(u64 tick, u32 type_id, u32 size, const void* data, const char* emitter) {
+void TimerWheel::init() {
+    if (ready) return;
+    pthread_mutex_init(&mu, nullptr);
+    ready = true;
+}
+
+u32 TimerWheel::schedule(u64 tick, u32 type_id, u32 size, const void* data, const char* emitter, u32 ticket) {
+    if (!ready) init();
+    pthread_mutex_lock(&mu);
     if (tick < next_tick) tick = next_tick; // the past, or now: the next boundary
-    if (next_ticket == 0) next_ticket = 1;  // never hand out 0
-    TimerRecord r{tick, type_id, size, next_ticket++, 0, emitter};
+    if (ticket == 0) {
+        if (next_ticket == 0) next_ticket = 1; // never hand out 0
+        ticket = next_ticket++;
+    }
+    TimerRecord r{tick, type_id, size, ticket, 0, emitter};
     if (tick < next_tick + SLOTS) append(slots[tick % SLOTS], r, data);
     else append(far, r, data);
     ticks.set(r.ticket, tick);
     ++pending;
+    pthread_mutex_unlock(&mu);
     return r.ticket;
 }
 
@@ -61,16 +75,28 @@ bool erase(Array<u8>& list, u32 ticket) {
 } // namespace
 
 bool TimerWheel::cancel(u32 ticket) {
+    if (!ready) init();
+    pthread_mutex_lock(&mu);
     const u64* tick = ticks.find(ticket);
-    if (!tick) return false;
+    if (!tick) { pthread_mutex_unlock(&mu); return false; }
     // In its slot if it is within the horizon, else still in the far list.
     bool gone = erase(slots[*tick % SLOTS], ticket) || erase(far, ticket);
     KV_ASSERT(gone);
     ticks.remove(ticket);
     --pending;
     ++cancelled;
+    pthread_mutex_unlock(&mu);
     return gone;
 }
+
+namespace {
+
+int compare_tickets(const void* a, const void* b) {
+    u32 x = ((const TimerRecord*)*(const u8* const*)a)->ticket, y = ((const TimerRecord*)*(const u8* const*)b)->ticket;
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+
+} // namespace
 
 void TimerWheel::fire(u64 tick, EventBus& bus) {
     // The ring wrapped: file what has come within the horizon.
@@ -90,27 +116,34 @@ void TimerWheel::fire(u64 tick, EventBus& bus) {
     }
     Array<u8>& slot = slots[tick % SLOTS];
     if (slot.len) {
-        // Due records are emitted in schedule order; records for a later lap stay.
+        // Due records fire in ticket order, so the arrival order (threads) never shows;
+        // records for a later lap stay.
+        MemScope scope;
+        Array<const u8*> due = array_in<const u8*>(mem_scratch());
         u32 kept = 0;
         const u8* p = slot.data;
         const u8* end = p + slot.len;
         while (p < end) {
             const TimerRecord* r = (const TimerRecord*)p;
             usize n = record_bytes(r->size);
-            if (r->tick == tick) {
-                EventWriter& w = bus.writer(0);
-                const char* was = w.emitter;
-                w.emitter = r->emitter;
-                w.emit_bytes(r->type, r->size, p + sizeof *r);
-                w.emitter = was;
-                ticks.remove(r->ticket);
-                ++fired;
-                --pending;
-            } else {
+            if (r->tick == tick) due.push(p);
+            else {
                 if (slot.data + kept != p) memmove(slot.data + kept, p, n);
                 kept += (u32)n;
             }
             p += n;
+        }
+        if (due.len > 1) qsort(due.data, due.len, sizeof(const u8*), compare_tickets);
+        for (const u8* d : due) {
+            const TimerRecord* r = (const TimerRecord*)d;
+            EventWriter& w = bus.writer(0);
+            const char* was = w.emitter;
+            w.emitter = r->emitter;
+            w.emit_bytes(r->type, r->size, d + sizeof *r);
+            w.emitter = was;
+            ticks.remove(r->ticket);
+            ++fired;
+            --pending;
         }
         slot.len = kept;
     }
@@ -123,6 +156,8 @@ void TimerWheel::free() {
     ticks.free();
     pending = fired = cancelled = 0;
     next_tick = 0;
+    if (ready) pthread_mutex_destroy(&mu);
+    ready = false;
 }
 
 } // namespace kv

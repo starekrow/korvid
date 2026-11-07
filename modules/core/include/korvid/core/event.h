@@ -70,6 +70,8 @@ struct EventWriter {
         emit_bytes(id, sizeof(E), &e);
     }
     void emit_bytes(u32 type_id, u32 elem_size, const void* e);
+    // Everything pending in `src`, after what is pending here. The chunk merge.
+    void append(const EventWriter& src);
 
     EventBuffer& buffer(u32 type_id, u32 elem_size);
     u32  pending_count() const;

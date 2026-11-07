@@ -117,7 +117,8 @@ struct Table {
     // "Transform2{...} Sprite{...}" for a live entity; the slot's state otherwise.
     int describe(Handle h, char* out, usize cap) const;
 
-    // Every sim column of every live row in slot order, each row with its handle.
+    // Every sim column of every live row in slot order, each row with its generation and
+    // index. The same world hashes the same in any process or build.
     u64 hash() const;
 
 private:

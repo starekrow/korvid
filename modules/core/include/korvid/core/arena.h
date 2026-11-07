@@ -44,6 +44,8 @@ T* arena_push_n(Arena& ar, u32 n) {
 Arena*     mem_scratch_arena();
 Allocator* mem_scratch();
 void       mem_scratch_reset();
+// A thread that is about to end gives its scratch back. Workers call it; main uses mem_shutdown.
+void       mem_thread_exit();
 
 // Mark on construction, release on destruction. For temporaries inside a call.
 struct MemScope {

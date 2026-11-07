@@ -132,7 +132,7 @@ void example_testbed_move(TickContext& ctx) {
         Span<const Sprite> s = k.col<const Sprite>();
         for (u32 i = 0; i < k.rows(); ++i) {
             if (!k.alive(i)) continue;
-            if (bounce(t[i], m[i].velocity, s[i].size.x * 0.5f, half_w, half_h, dt)) ctx.events->emit(Bounced{k.handle_at(i)});
+            if (bounce(t[i], m[i].velocity, s[i].size.x * 0.5f, half_w, half_h, dt)) ctx.emit(Bounced{k.handle_at(i)});
         }
     }
 }

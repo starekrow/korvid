@@ -113,6 +113,7 @@ void test_schedule(kv::TestCtx& c) {
     // Derived order: writers before readers, the declared edge honored, the kind writer first.
     const ModuleDesc* const list[] = {&k_a, &k_b};
     Engine e;
+    e.threads = 1; // the trace is a global string
     KV_CHECK(c, engine_init(e, list));
     KV_CHECK(c, strcmp(order(e, Phase::Sim, buf, sizeof buf), "s.spawn s.steer s.move s.wrap s.glow ") == 0);
     g_trace[0] = 0;
@@ -146,6 +147,7 @@ void test_schedule(kv::TestCtx& c) {
 
     // The same declarations in another module order give the same schedule.
     const ModuleDesc* const swapped[] = {&k_b, &k_a};
+    e.threads = 1;
     KV_CHECK(c, engine_init(e, swapped));
     KV_CHECK(c, strcmp(order(e, Phase::Sim, buf, sizeof buf), "s.spawn s.steer s.move s.wrap s.glow ") == 0);
     engine_shutdown(e);
