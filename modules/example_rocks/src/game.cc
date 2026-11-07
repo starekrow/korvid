@@ -167,6 +167,15 @@ void control(TickContext& ctx) {
     } else {
         left = input->sampled.down(Key::Left);   right = input->sampled.down(Key::Right);
         thrust = input->sampled.down(Key::Up);   fire  = input->sampled.down(Key::Space);
+        // The first pad, beside the keys: left stick or d-pad turns, South or the right
+        // trigger thrusts, West or the right shoulder fires.
+        if (const GamepadState* pad = input->sampled.pad()) {
+            f32 x = pad->axis(PadAxis::LeftX);
+            left   |= x < -0.5f || pad->down(PadButton::DpadLeft);
+            right  |= x >  0.5f || pad->down(PadButton::DpadRight);
+            thrust |= pad->down(PadButton::South) || pad->axis(PadAxis::RightTrigger) > 0.5f || pad->down(PadButton::DpadUp);
+            fire   |= pad->down(PadButton::West) || pad->down(PadButton::RShoulder);
+        }
     }
     for (KindRows k : ctx.view<Transform2, Velocity, Ship>()) {
         Span<Transform2> t = k.col<Transform2>();
@@ -248,7 +257,7 @@ void game(TickContext& ctx) {
         g.started = true;
         g.demo    = frameloop_flag(*ctx.engine, "--demo");
         g.rng     = Rng::seeded(0x70c45, 7);
-        KV_INFO("rocks", "%s. Arrows turn and thrust, space fires, Esc quits.", g.demo ? "Demo: the ship flies itself" : "Your ship");
+        KV_INFO("rocks", "%s. Arrows turn and thrust, space fires, Esc quits; on a pad the left stick turns, South thrusts, West fires.", g.demo ? "Demo: the ship flies itself" : "Your ship");
         ctx.emit(Restart{});
     }
     for (const AssetFailed& e : ctx.events->read<AssetFailed>()) {

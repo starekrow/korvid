@@ -95,6 +95,7 @@ void HostWindow::pump(EventBus& bus, Input& input) {
         }
 
         default:
+            input_gamepad_event(&e, bus, input); // pads arrive on the same queue
             break;
         }
     }

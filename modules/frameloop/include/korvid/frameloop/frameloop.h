@@ -10,7 +10,9 @@
 // delivered event with its emitter; dev builds), --threads N (main thread included; 1 is
 // serial; the default is every core), --profile FILE (a Chrome trace of every zone, mark
 // and counter), --prof-report (the top zones with every fps line); --hitch-ms also dumps
-// the hitching frame's zone tree.
+// the hitching frame's zone tree. --screenshot FILE writes one presented frame as a binary
+// PPM, frame 90 unless --screenshot-frame N says otherwise; --check-sort reads the GPU
+// sort back every 30th frame and verifies it.
 #pragma once
 #include "korvid/core/engine.h"
 #include "korvid/math/color.h"

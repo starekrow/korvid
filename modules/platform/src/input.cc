@@ -19,3 +19,18 @@ const char* key_name(Key k) {
 }
 
 } // namespace kv
+
+namespace kv {
+
+static const char* const g_pad_button_names[(u32)PadButton::Count] = {
+    "South", "East", "West", "North", "Back", "Guide", "Start",
+    "LStick", "RStick", "LShoulder", "RShoulder", "DpadUp", "DpadDown", "DpadLeft", "DpadRight",
+};
+static const char* const g_pad_axis_names[(u32)PadAxis::Count] = {
+    "LeftX", "LeftY", "RightX", "RightY", "LeftTrigger", "RightTrigger",
+};
+
+const char* pad_button_name(PadButton b) { return (u32)b < (u32)PadButton::Count ? g_pad_button_names[(u32)b] : "Invalid"; }
+const char* pad_axis_name(PadAxis a) { return (u32)a < (u32)PadAxis::Count ? g_pad_axis_names[(u32)a] : "Invalid"; }
+
+} // namespace kv

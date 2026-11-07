@@ -1,5 +1,5 @@
-// Korvid platform: module record, state and services. Startup initializes SDL's video
-// and event subsystems. The module owns the window and the input state: the window is a
+// Korvid platform: module record, state and services. Startup initializes SDL's video,
+// event and gamepad subsystems. The module owns the window and the input state: the window is a
 // platform service opened on request and closed at module shutdown, never by the caller;
 // "input.sample" (phase Input) samples the keys into "input.state" once per tick. Both are
 // published resources: a system declares "input.state" or "platform.window" in its sets

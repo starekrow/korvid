@@ -10,7 +10,7 @@ namespace {
 
 bool platform_startup(Engine& engine, ModuleInstance& self) {
     SDL_SetHint(SDL_HINT_APP_NAME, "korvid");
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         KV_ERROR("platform", "SDL_Init failed: %s", SDL_GetError());
         return false;
     }
@@ -33,6 +33,7 @@ void platform_shutdown(Engine&, ModuleInstance& self) {
     PlatformState* s = self.state_as<PlatformState>();
     if (s) {
         s->window.close(); // the service ends with the module, whoever opened it
+        input_gamepads_close(s->input);
         s->io.free();
     }
     SDL_Quit();
@@ -49,6 +50,10 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT(CloseRequested),
     KV_EVENT(KeyDown),
     KV_EVENT(KeyUp),
+    KV_EVENT(GamepadConnected),
+    KV_EVENT(GamepadDisconnected),
+    KV_EVENT(PadButtonDown),
+    KV_EVENT(PadButtonUp),
 };
 constinit const ResourceDesc k_resources[] = {{"input.state"}, {"platform.window"}};
 constinit const char* const  k_input_writes[] = {"input.state"};

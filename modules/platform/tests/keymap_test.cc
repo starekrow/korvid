@@ -36,4 +36,16 @@ void test_keymap(kv::TestCtx& c) {
     in.sample();
     in.raw.set(Key::Left, false);
     KV_CHECK(c, in.sampled.down(Key::Left) && !in.raw.down(Key::Left));
+
+    // Pads ride along: buttons as bits, axes as floats, the first connected one is pad().
+    KV_CHECK(c, in.raw.pad() == nullptr);
+    in.raw.pads[1].connected = true;
+    in.raw.pads[1].set(PadButton::South, true);
+    in.raw.pads[1].axes[(u32)PadAxis::LeftX] = -0.75f;
+    in.sample();
+    KV_CHECK(c, in.sampled.pad() == &in.sampled.pads[1] && in.sampled.pad()->down(PadButton::South) && !in.sampled.pad()->down(PadButton::East));
+    KV_CHECK(c, in.sampled.pad()->axis(PadAxis::LeftX) == -0.75f);
+    in.raw.clear();
+    KV_CHECK(c, in.raw.pads[1].connected && !in.raw.pads[1].down(PadButton::South) && in.raw.pads[1].axis(PadAxis::LeftX) == 0.0f);
+    KV_CHECK(c, strcmp(pad_button_name(PadButton::DpadRight), "DpadRight") == 0 && strcmp(pad_axis_name(PadAxis::Count), "Invalid") == 0);
 }

@@ -3,10 +3,11 @@
 // onto the completion list once per frame; completions stay there until a consumer reaps
 // them, taking ownership of the data. Nothing completes inline.
 //
-// Slice 1 mocks the asynchrony: the pump performs queued reads synchronously with
-// fopen/fread, in priority order. The frame loop and every consumer see the real shape,
-// so the backend can become io_uring, DirectStorage or dispatch I/O without any caller
-// changing.
+// Two backends behind one shape. On Linux the pump hands reads to an io_uring (raw
+// syscalls, no library) and reaps what has finished without waiting; everywhere else, and
+// when the ring cannot be set up, the pump performs the reads itself with fopen/fread in
+// priority order. Callers see the same queue either way; a test that wants the ordering
+// of the synchronous path asks for it.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/handle.h"
@@ -15,9 +16,11 @@
 namespace kv {
 
 struct Engine;
+struct IoRing;
 
 enum class IoPriority : u8 { Low, Normal, High };
 enum class IoStatus : u8 { Pending, Done, Failed, Cancelled };
+enum class IoBackend : u8 { Auto, Sync, Uring };
 
 struct IoRequest {
     const char* path     = nullptr;             // copied
@@ -41,32 +44,41 @@ struct IoEntry {
     IoPriority priority;
     IoStatus   status;
     u64        user;
-    u64        sequence; // submission order, for stable priority ordering
+    u64        sequence;  // submission order, for stable priority ordering
+    // The ring's bookkeeping while a read is in flight.
+    int        fd;
+    u8*        buf;
+    usize      size;      // the file's size at open
+    usize      done;      // bytes read so far
+    bool       in_flight;
 };
 
 struct IoQueue {
     Pool<IoEntry>       entries;
-    Array<Handle>       queued;    // submitted, not yet performed
+    Array<Handle>       queued;    // submitted, not yet performed or handed to the ring
     Array<IoCompletion> completed; // finished, not yet reaped
+    IoRing*             ring = nullptr; // the io_uring backend when in use
     u64                 next_sequence = 0;
     u16                 kind = 0;
-    u32                 reads_done = 0, reads_failed = 0;
+    u32                 reads_done = 0, reads_failed = 0, in_flight = 0;
 
-    bool init(Allocator* storage, u32 max_in_flight);
+    bool init(Allocator* storage, u32 max_in_flight, IoBackend backend = IoBackend::Auto);
     void free();
+    const char* backend_name() const { return ring ? "io_uring" : "sync"; }
 
     // Submits a whole-file read. Null handle if the path is too long or the queue is full.
     Handle read_file(const IoRequest& req);
-    // Cancels a request that has not been performed yet; it completes as Cancelled.
+    // Cancels a request that has not completed yet; it completes as Cancelled.
     bool   cancel(Handle request);
-    // Once per frame: perform what is queued and move it to `completed`.
+    // Once per frame: hand queued reads to the backend and collect what has finished.
     void   pump();
     // Unreaped completions, oldest first. Consumers scan for theirs and reap them.
     Span<const IoCompletion> completions() const { return completed.span(); }
     // Takes a completion off the list; the data is the caller's to free from now on.
     // Returns false if it was not there (already reaped).
     bool   reap(Handle request);
-    u32    pending() const { return queued.len; }
+    // Requests neither completed nor reaped: queued plus in flight.
+    u32    pending() const { return queued.len + in_flight; }
 };
 
 // The platform module's queue, or null if the module is not started.
