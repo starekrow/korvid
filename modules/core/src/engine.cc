@@ -677,7 +677,7 @@ u32 engine_frame(Engine& e, f64 frame_dt) {
 // Records in a byte stream: a header, then for a spawn one entry per component.
 namespace {
 
-enum CommandOp : u8 { CMD_SPAWN, CMD_DESTROY };
+enum CommandOp : u8 { CMD_SPAWN, CMD_DESTROY, CMD_DESTROY_ALL };
 
 struct CommandHeader {
     u8     op;
@@ -720,6 +720,11 @@ void command_destroy(CommandBuffer& cb, Handle h) {
     ++cb.count;
 }
 
+void command_destroy_all(CommandBuffer& cb, u32 kind_id) {
+    put(cb.bytes, CommandHeader{CMD_DESTROY_ALL, kind_id, 0, 0, Handle{}});
+    ++cb.count;
+}
+
 void engine_apply_commands(Engine& e) {
     CommandBuffer& cb = e.commands;
     if (cb.count == 0) return;
@@ -745,6 +750,8 @@ void engine_apply_commands(Engine& e) {
                 if (c->prev) memcpy(c->prev + (usize)entity.index() * c->stride, data, ch->size);
             }
             e.events.emit(Spawned{h->ticket, h->kind, entity}); // null entity: the kind was full or unknown
+        } else if (h->op == CMD_DESTROY_ALL) {
+            if (Table* t = engine_table(e, h->kind)) t->destroy_all();
         } else {
             for (Table& t : e.tables)
                 if (t.kind == h->entity.kind()) { t.destroy(h->entity); break; } // stale: silently nothing

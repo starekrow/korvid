@@ -98,6 +98,7 @@ u32     ctx_spawn_begin(TickContext& ctx, const char* kind, u32 component_count)
 u32     ctx_spawn_begin(TickContext& ctx, u32 kind_id, u32 component_count);
 void    ctx_spawn_component(TickContext& ctx, u32 component_id, const void* data, u32 size);
 void    ctx_destroy(TickContext& ctx, Handle h);
+void    ctx_destroy_all(TickContext& ctx, u32 kind_id);
 u32     ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick);
 bool    ctx_cancel(TickContext& ctx, u32 ticket);
 
@@ -220,6 +221,9 @@ struct TickContext {
     }
     // Destroy at the phase boundary: readers in this phase still see the entity.
     void destroy(Handle h) { ctx_destroy(*this, h); }
+    // Every entity of a kind, at the phase boundary. Takes a name or a kind id.
+    template <class K>
+    void destroy_all(K kind) { ctx_destroy_all(*this, kind_of(kind)); }
 
     // ---- scheduled events: delivered at the first boundary of `tick` -------------------
     // A tick at or before the current one means the next tick. Returns a ticket.
@@ -233,6 +237,8 @@ struct TickContext {
 private:
     u32 id_of(u32 id) { return id; }
     u32 id_of(const char* name) { return ctx_resource_id(*this, name, false); }
+    u32 kind_of(u32 id) { return id; }
+    u32 kind_of(const char* name) { return kind_id(name); }
 };
 
 typedef void (*SystemFn)(TickContext& ctx);

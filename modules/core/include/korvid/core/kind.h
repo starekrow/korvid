@@ -61,6 +61,8 @@ struct Table {
         return h;
     }
     bool destroy(Handle h);
+    // Every live entity, at once. Returns how many went.
+    u32  destroy_all();
 
     bool   valid(Handle h) const { return slots.valid(h); }
     u32    live() const { return slots.live; }

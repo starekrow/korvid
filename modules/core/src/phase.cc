@@ -234,6 +234,11 @@ void ctx_destroy(TickContext& ctx, Handle h) { command_destroy(ctx.engine->comma
 
 bool ctx_cancel(TickContext& ctx, u32 ticket) { return ctx.engine->timers.cancel(ticket); }
 
+void ctx_destroy_all(TickContext& ctx, u32 kind_id) {
+    if (!engine_table(*ctx.engine, kind_id)) { KV_ERROR("engine", "system '%s': destroy_all of unknown kind id %u", system_name(ctx), kind_id); return; }
+    command_destroy_all(ctx.engine->commands, kind_id);
+}
+
 u32 ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick) {
     if (type_id == 0) { KV_ERROR("engine", "system '%s' schedules an unregistered event type", system_name(ctx)); KV_VERIFY(!"unregistered event"); return 0; }
     return ctx.engine->timers.schedule(tick, type_id, size, event, system_name(ctx));

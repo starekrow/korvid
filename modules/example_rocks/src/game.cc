@@ -375,10 +375,7 @@ void on_restart(TickContext& ctx, Span<const Restart>) {
     Game& g = ctx.state_as<Game>();
     Score* score = ctx.resource<Score>(k_score);
     const u32 kinds[] = {g_rock_kind, g_bullet_kind, g_debris_kind, g_ship_kind};
-    for (u32 kid : kinds) {
-        const Table* t = ctx.read_kind(kid);
-        for (u32 i = 0; i < t->rows(); ++i) if (t->is_alive(i)) ctx.destroy(t->handle_at(i));
-    }
+    for (u32 kid : kinds) ctx.destroy_all(kid);
     score->games += 1;
     score->total = 0;
     score->rocks_shot = 0;
@@ -449,7 +446,6 @@ constinit const char* const k_ship_hit_writes[] = {"example_rocks.ship.Health"};
 constinit const char* const k_wave_reads[]      = {"platform.window"};
 constinit const char* const k_wave_writes[]     = {"example_rocks.score"};
 constinit const char* const k_score_reads[]     = {"example_rocks.score"};
-constinit const char* const k_restart_reads[]   = {"example_rocks.rock", "example_rocks.bullet", "example_rocks.debris", "example_rocks.ship"};
 constinit const char* const k_after_rock_hit[]  = {"example_rocks.on_rock_hit"};
 constinit const char* const k_after_wave[]      = {"example_rocks.on_wave"};
 constinit const HandlerDesc k_handlers[] = {
@@ -460,7 +456,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = "example_rocks.on_expire",   KV_ON(Expire, on_expire)},
     {.name = "example_rocks.on_wave",     KV_ON(SpawnWave, on_wave), .reads = k_wave_reads, .writes = k_wave_writes, .after = k_after_rock_hit},
     {.name = "example_rocks.on_edge",     KV_ON(StateEdge, on_edge), .reads = k_score_reads},
-    {.name = "example_rocks.on_restart",  KV_ON(Restart, on_restart), .reads = k_restart_reads, .writes = k_wave_writes, .after = k_after_wave},
+    {.name = "example_rocks.on_restart",  KV_ON(Restart, on_restart), .writes = k_wave_writes, .after = k_after_wave},
 };
 
 } // namespace

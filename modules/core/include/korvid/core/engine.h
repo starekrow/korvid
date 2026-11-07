@@ -59,6 +59,7 @@ struct CommandBuffer {
 u32  command_spawn_begin(CommandBuffer& cb, u32 kind_id, u32 component_count); // returns the ticket
 void command_spawn_component(CommandBuffer& cb, u32 component_id, const void* data, u32 size);
 void command_destroy(CommandBuffer& cb, Handle h);
+void command_destroy_all(CommandBuffer& cb, u32 kind_id);
 
 struct Engine {
     EventBus              events;

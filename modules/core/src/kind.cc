@@ -128,6 +128,13 @@ bool Table::destroy(Handle h) {
     return true;
 }
 
+u32 Table::destroy_all() {
+    u32 n = rows(), gone = 0;
+    for (u32 i = 0; i < n; ++i)
+        if (is_alive(i) && destroy(handle_at(i))) ++gone;
+    return gone;
+}
+
 void Table::begin_tick() {
     u32 n = rows();
     for (Column& c : columns)

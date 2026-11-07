@@ -177,6 +177,12 @@ void test_context(kv::TestCtx& c) {
     TickContext ctx{};
     ctx.engine = &e;
     ctx.events = &e.events;
+    // destroy_all: a command that empties a kind at the boundary; direct on the table at once.
+    ctx.destroy_all("g.rock");
+    KV_CHECK(c, rock->live() == 3);
+    engine_apply_commands(e);
+    KV_CHECK(c, rock->live() == 0 && !rock->valid(r0));
+    KV_CHECK(c, ship->destroy_all() == 3 && ship->live() == 0 && ship->destroy_all() == 0);
     KV_CHECK(c, ctx.write<Hp>("g.ship.Hp").len == ship->rows() && ctx.read_kind("g.decal") == decal);
     u32 n = 0;
     for (KindRows k : ctx.view<const Pos>()) n += k.rows() > 0;
