@@ -62,7 +62,7 @@ struct RockHit      { Handle rock, bullet; };
 struct ShipHit      { Handle ship, rock; };
 struct ScoreChanged { i32 points, total; }; // next tick: nobody acts on it within the tick
 struct Expire       { Handle bullet; };
-struct SpawnWave    { u32 count; u32 game; }; // game: which game scheduled it; a finished game's waves are ignored
+struct SpawnWave    { u32 count; };
 struct GameOver     { i32 score; };
 struct Restart      { u32 nothing; };
 
@@ -70,7 +70,7 @@ constinit const FieldDesc k_rock_hit_fields[] = {KV_FIELDS(RockHit, rock, bullet
 constinit const FieldDesc k_ship_hit_fields[] = {KV_FIELDS(ShipHit, ship, rock)};
 constinit const FieldDesc k_score_fields[]    = {KV_FIELDS(ScoreChanged, points, total)};
 constinit const FieldDesc k_expire_fields[]   = {KV_FIELDS(Expire, bullet)};
-constinit const FieldDesc k_wave_fields[]     = {KV_FIELDS(SpawnWave, count, game)};
+constinit const FieldDesc k_wave_fields[]     = {KV_FIELDS(SpawnWave, count)};
 constinit const FieldDesc k_over_fields[]     = {KV_FIELDS(GameOver, score)};
 constinit const FieldDesc k_restart_fields[]  = {KV_FIELDS(Restart, nothing)};
 constinit const EventTypeDesc k_events[] = {
@@ -100,6 +100,7 @@ struct Game {
     u16    ship_hk, bullet_hk, rock_hk; // handle kinds, to tell what an overlap is between
     bool   started = false;
     bool   demo    = false;
+    u32    next_wave = 0;        // the pending wave's ticket, cancelled at game over
     Rng    rng;
 };
 
@@ -338,7 +339,6 @@ void on_wave(TickContext& ctx, Span<const SpawnWave> waves) {
     Score* score = ctx.resource<Score>(k_score);
     f32 hw = (f32)w->width() * 0.5f, hh = (f32)w->height() * 0.5f;
     for (const SpawnWave& wave : waves) {
-        if (wave.game != score->games) continue; // scheduled by a game that is over (cancel is P1)
         score->wave += 1;
         for (u32 i = 0; i < wave.count; ++i) {
             // A point on the frame, aimed roughly at the middle.
@@ -350,17 +350,19 @@ void on_wave(TickContext& ctx, Span<const SpawnWave> waves) {
                             Velocity{toward, g.rng.range(-1.0f, 1.0f)}, collider_circle(kRockRadius[0], L_ROCK, L_SHIP | L_BULLET), RockSize{0});
         }
         KV_INFO("rocks", "wave %u: %u rocks", score->wave, wave.count);
-        ctx.schedule_in(SpawnWave{wave.count + 1, wave.game}, kWaveTicks);
+        g.next_wave = ctx.schedule_in(SpawnWave{wave.count + 1}, kWaveTicks);
     }
 }
 
 // The death trigger: the ship goes, the game is over, a restart is scheduled.
 void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
     static const u32 k_score = ctx.resource_id("example_rocks.score");
+    Game& g = ctx.state_as<Game>();
     const Score* score = ctx.resource<const Score>(k_score);
     for (const StateEdge& e : edges) {
         if (e.trigger != g_death) continue;
         ctx.destroy(e.entity);
+        ctx.cancel(g.next_wave); // the field stays as it is until the restart
         ctx.events->emit(GameOver{score->total});
         ctx.schedule_in(Restart{}, kRestartTicks);
         KV_INFO("rocks", "game over: %d points", score->total);
@@ -382,7 +384,7 @@ void on_restart(TickContext& ctx, Span<const Restart>) {
     score->rocks_shot = 0;
     score->wave = 0;
     spawn_ship(ctx, g);
-    ctx.schedule_in(SpawnWave{4, score->games}, 60);
+    g.next_wave = ctx.schedule_in(SpawnWave{4}, 60);
     KV_INFO("rocks", "game %u", score->games);
 }
 

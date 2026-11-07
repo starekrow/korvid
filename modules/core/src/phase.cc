@@ -232,6 +232,8 @@ void ctx_spawn_component(TickContext& ctx, u32 component_id, const void* data, u
 
 void ctx_destroy(TickContext& ctx, Handle h) { command_destroy(ctx.engine->commands, h); }
 
+bool ctx_cancel(TickContext& ctx, u32 ticket) { return ctx.engine->timers.cancel(ticket); }
+
 u32 ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick) {
     if (type_id == 0) { KV_ERROR("engine", "system '%s' schedules an unregistered event type", system_name(ctx)); KV_VERIFY(!"unregistered event"); return 0; }
     return ctx.engine->timers.schedule(tick, type_id, size, event, system_name(ctx));

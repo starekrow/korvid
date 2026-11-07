@@ -1,5 +1,6 @@
 #include "korvid/core/timer.h"
 #include "korvid/core/event.h"
+#include "korvid/core/log.h"
 #include <string.h>
 
 namespace kv {
@@ -29,11 +30,46 @@ void append(Array<u8>& dst, const TimerRecord& r, const void* data) {
 
 u32 TimerWheel::schedule(u64 tick, u32 type_id, u32 size, const void* data, const char* emitter) {
     if (tick < next_tick) tick = next_tick; // the past, or now: the next boundary
+    if (next_ticket == 0) next_ticket = 1;  // never hand out 0
     TimerRecord r{tick, type_id, size, next_ticket++, 0, emitter};
     if (tick < next_tick + SLOTS) append(slots[tick % SLOTS], r, data);
     else append(far, r, data);
+    ticks.set(r.ticket, tick);
     ++pending;
     return r.ticket;
+}
+
+namespace {
+
+// Removes the record with `ticket` from a list, if it is there.
+bool erase(Array<u8>& list, u32 ticket) {
+    u8* p = list.data;
+    u8* end = p + list.len;
+    while (p < end) {
+        const TimerRecord* r = (const TimerRecord*)p;
+        usize n = record_bytes(r->size);
+        if (r->ticket == ticket) {
+            memmove(p, p + n, (usize)(end - p) - n);
+            list.len -= (u32)n;
+            return true;
+        }
+        p += n;
+    }
+    return false;
+}
+
+} // namespace
+
+bool TimerWheel::cancel(u32 ticket) {
+    const u64* tick = ticks.find(ticket);
+    if (!tick) return false;
+    // In its slot if it is within the horizon, else still in the far list.
+    bool gone = erase(slots[*tick % SLOTS], ticket) || erase(far, ticket);
+    KV_ASSERT(gone);
+    ticks.remove(ticket);
+    --pending;
+    ++cancelled;
+    return gone;
 }
 
 void TimerWheel::fire(u64 tick, EventBus& bus) {
@@ -67,6 +103,7 @@ void TimerWheel::fire(u64 tick, EventBus& bus) {
                 w.emitter = r->emitter;
                 w.emit_bytes(r->type, r->size, p + sizeof *r);
                 w.emitter = was;
+                ticks.remove(r->ticket);
                 ++fired;
                 --pending;
             } else {
@@ -83,7 +120,8 @@ void TimerWheel::fire(u64 tick, EventBus& bus) {
 void TimerWheel::free() {
     for (Array<u8>& s : slots) s.free();
     far.free();
-    pending = fired = 0;
+    ticks.free();
+    pending = fired = cancelled = 0;
     next_tick = 0;
 }
 

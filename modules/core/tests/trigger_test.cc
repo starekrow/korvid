@@ -81,12 +81,23 @@ void test_trigger(kv::TestCtx& c) {
     KV_CHECK(c, g.alarms_in_input == 2);
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 5000);
     KV_CHECK(c, g.alarms_in_input == 3 && g.alarm_n == 3 && e.timers.pending == 0 && e.timers.fired == 3);
+    // Cancel: a near one, a far one, one that already fired, and one that never was.
+    u32 near = ctx.schedule(Alarm{4}, 5003);
+    u32 keep = ctx.schedule(Alarm{5}, 5003);
+    u32 far  = ctx.schedule(Alarm{6}, 9000);
+    KV_CHECK(c, e.timers.pending == 3 && ctx.cancel(near) && ctx.cancel(far) && e.timers.pending == 1);
+    KV_CHECK(c, !ctx.cancel(near) && !ctx.cancel(t1) && !ctx.cancel(0));
+    e.phases.run_tick(e, e.events, 1.0 / 60.0, 5001);
+    e.phases.run_tick(e, e.events, 1.0 / 60.0, 5002);
+    e.phases.run_tick(e, e.events, 1.0 / 60.0, 5003);
+    KV_CHECK(c, g.alarms_in_input == 4 && g.alarm_n == 5 && e.timers.pending == 0 && e.timers.cancelled == 2);
+    KV_CHECK(c, !ctx.cancel(keep));
 
     // Triggers. Spawning is not an edge. Then hp 3 -> 2 is a change; 2 -> 0 is a change and a death.
     Table* ships = engine_table(e, "t.ship");
     g = Trace{};
     Handle s0 = ships->spawn(Hp{3}, Pos{});
-    u64 tick = 5001;
+    u64 tick = 5004;
     e.phases.run_tick(e, e.events, 1.0 / 60.0, tick++);
     e.phases.run_tick(e, e.events, 1.0 / 60.0, tick++); // delivers edges from the previous tick, if any
     KV_CHECK(c, g.dead_edges == 0 && g.changed_edges == 0 && e.edges_fired == 0);

@@ -99,6 +99,7 @@ u32     ctx_spawn_begin(TickContext& ctx, u32 kind_id, u32 component_count);
 void    ctx_spawn_component(TickContext& ctx, u32 component_id, const void* data, u32 size);
 void    ctx_destroy(TickContext& ctx, Handle h);
 u32     ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick);
+bool    ctx_cancel(TickContext& ctx, u32 ticket);
 
 // One kind's rows for a view: the live mask and every column the view named.
 struct KindRows {
@@ -226,6 +227,8 @@ struct TickContext {
     u32 schedule(const E& e, u64 at_tick) { return ctx_schedule(*this, EventType<E>::id, (u32)sizeof(E), &e, at_tick); }
     template <class E>
     u32 schedule_in(const E& e, u64 ticks) { return schedule(e, tick + ticks); }
+    // Withdraws a scheduled event by its ticket. False if it already fired, or never was.
+    bool cancel(u32 ticket) { return ctx_cancel(*this, ticket); }
 
 private:
     u32 id_of(u32 id) { return id; }

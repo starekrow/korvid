@@ -5,6 +5,7 @@
 // Cost per tick is the slot's records plus, once per lap, a pass over the far list.
 #pragma once
 #include "korvid/core/array.h"
+#include "korvid/core/map.h"
 
 namespace kv {
 
@@ -15,14 +16,18 @@ struct TimerWheel {
 
     Array<u8> slots[SLOTS]; // records: TimerRecord header, then the event's bytes padded to 8
     Array<u8> far;          // records for ticks at or beyond the ring's horizon
+    Map<u32, u64> ticks;    // ticket -> target tick, for cancel; entries leave as records fire
     u64       next_tick  = 0; // the first tick fire() has not run for
     u32       pending    = 0;
     u32       fired      = 0;
+    u32       cancelled  = 0;
     u32       next_ticket = 1;
 
     // Files an event for `tick`; a tick at or before the current one means the next tick.
-    // Returns a ticket (cancel comes later).
+    // Returns a ticket, never 0.
     u32  schedule(u64 tick, u32 type_id, u32 size, const void* data, const char* emitter);
+    // Withdraws a scheduled event. False if it already fired, was cancelled, or never was.
+    bool cancel(u32 ticket);
     // Emits every record due at `tick` into the bus, pending. Call once per tick, first.
     void fire(u64 tick, EventBus& bus);
     void free();
