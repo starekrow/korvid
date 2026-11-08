@@ -30,8 +30,7 @@ void free_neighbor(u32 chunk, u32, u32, void* user) {
 struct Blob { u8 bytes[48]; };
 constinit const FieldDesc k_blob_fields[] = {KV_FIELDS(Blob, bytes)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Blob, k_blob_fields)};
-constinit const char* const k_blob_components[] = {"Blob"};
-constinit const KindDesc k_kinds[] = {{.name = "lim.blob", .components = k_blob_components, .capacity = 1u << 20}};
+constinit const KindDesc k_kinds[] = {{.name = ".blob", .components = "Blob", .capacity = 1u << 20}};
 struct LimState { void* block; };
 bool lim_startup(Engine&, ModuleInstance& self) {
     LimState* s = arena_push<LimState>(self.arena);

@@ -14,8 +14,7 @@ using namespace kv;
 struct Hp { i32 hp; };
 constinit const FieldDesc k_hp_fields[] = {KV_FIELD(Hp, hp)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Hp, k_hp_fields)};
-constinit const char* const k_rock_components[] = {"Hp"};
-constinit const KindDesc k_kinds[] = {{.name = "h.rock", .components = k_rock_components, .capacity = 64}};
+constinit const KindDesc k_kinds[] = {{.name = "h.rock", .components = "Hp", .capacity = 64}};
 
 struct Hit     { Handle rock; i32 damage; };
 struct Split   { Handle rock; u32 depth; };
@@ -76,11 +75,9 @@ void on_chatter(TickContext& ctx, Span<const Chatter> cs) {
 void sys_sim(TickContext& ctx)     { g.scores_in_sim += ctx.events->read<Score>().len; }
 void sys_postsim(TickContext& ctx) { g.postsim_scores += ctx.events->read<Score>().len; }
 
-constinit const char* const k_rock_w[] = {"h.rock"};
-constinit const char* const k_rock_r[] = {"h.rock"};
 constinit const HandlerDesc k_handlers[] = {
-    {.name = "h.audit",   KV_ON(Hit, on_hit_audit), .reads = k_rock_r}, // declared first; ordered after h.damage by the sets
-    {.name = "h.damage",  KV_ON(Hit, on_hit),       .writes = k_rock_w},
+    {.name = "h.audit",   KV_ON(Hit, on_hit_audit), .reads = "h.rock"}, // declared first; ordered after h.damage by the sets
+    {.name = "h.damage",  KV_ON(Hit, on_hit),       .writes = "h.rock"},
     {.name = "h.split",   KV_ON(Split, on_split)},
     {.name = "h.score",   KV_ON(Score, on_score)},
     {.name = "h.chatter", KV_ON(Chatter, on_chatter)},

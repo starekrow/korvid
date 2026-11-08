@@ -51,8 +51,6 @@ constinit const EventTypeDesc k_first_events[]  = {KV_EVENT(EvA), KV_EVENT(EvB)}
 constinit const EventTypeDesc k_second_events[] = {KV_EVENT(EvC)};
 constinit const ResourceDesc  k_first_res[]     = {{"first.store"}};
 constinit const ResourceDesc  k_second_res[]    = {{"second.store"}};
-constinit const char* const   k_second_reads[]  = {"first.store"};
-constinit const char* const   k_second_writes[] = {"second.store"};
 
 constinit const SystemDesc k_first_systems[] = {
     {.name = "first.sim",   .phase = Phase::Sim,   .fn = sys_first_sim},   // declared before the Input one on purpose
@@ -61,7 +59,7 @@ constinit const SystemDesc k_first_systems[] = {
 constinit const SystemDesc k_second_systems[] = {
     {.name = "second.sim_a", .phase = Phase::Sim,   .fn = sys_second_sim_a},
     {.name = "second.input", .phase = Phase::Input, .fn = sys_second_input},
-    {.name = "second.sim_b", .phase = Phase::Sim,   .fn = sys_second_sim_b, .reads = k_second_reads, .writes = k_second_writes},
+    {.name = "second.sim_b", .phase = Phase::Sim,   .fn = sys_second_sim_b, .reads = "first.store", .writes = "second.store"},
 };
 
 KV_MODULE_DEFINE(k_first)  = {.name = "first", .events = k_first_events, .resources = k_first_res,
@@ -81,8 +79,7 @@ KV_MODULE_DEFINE(k_dup_system) = {.name = "dupsystem", .systems = k_dup_systems}
 constinit const ResourceDesc k_dup_res[] = {{"first.store"}};
 KV_MODULE_DEFINE(k_dup_resource) = {.name = "dupresource", .resources = k_dup_res};
 
-constinit const char* const k_bad_reads[] = {"nowhere.store"};
-constinit const SystemDesc k_bad_ref_systems[] = {{.name = "bad.sim", .phase = Phase::Sim, .fn = sys_first_sim, .reads = k_bad_reads}};
+constinit const SystemDesc k_bad_ref_systems[] = {{.name = "bad.sim", .phase = Phase::Sim, .fn = sys_first_sim, .reads = "nowhere.store"}};
 KV_MODULE_DEFINE(k_bad_ref) = {.name = "badref", .systems = k_bad_ref_systems};
 
 // More modules than memory accounting can attribute: rejected before anything starts.

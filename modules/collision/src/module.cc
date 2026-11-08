@@ -142,9 +142,8 @@ void collision_shutdown(Engine&, ModuleInstance& self) {
     if (s) { s->prev.free(); s->now.free(); }
 }
 
-constinit const char* const k_reads[] = {"*.Transform2", "*.Collider2"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "collision.broadphase", .phase = Phase::Sim, .fn = broadphase, .reads = k_reads},
+    {.name = ".broadphase", .phase = Phase::Sim, .fn = broadphase, .reads = "*.Transform2, *.Collider2"},
 };
 
 } // namespace

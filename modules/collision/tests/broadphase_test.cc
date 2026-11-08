@@ -11,8 +11,7 @@ namespace {
 
 using namespace kv;
 
-constinit const char* const k_thing_components[] = {"Transform2", "Collider2"};
-constinit const KindDesc k_kinds[] = {{.name = "c.thing", .components = k_thing_components, .capacity = 4096}};
+constinit const KindDesc k_kinds[] = {{.name = ".thing", .components = "Transform2, Collider2", .capacity = 4096}};
 
 struct Seen { u32 begins, ends; Handle last_a, last_b; };
 constinit Seen g = {};
@@ -20,7 +19,7 @@ void sys_watch(TickContext& ctx) {
     for (const OverlapBegin& o : ctx.events->read<OverlapBegin>()) { ++g.begins; g.last_a = o.a; g.last_b = o.b; }
     g.ends += ctx.events->read<OverlapEnd>().len;
 }
-constinit const SystemDesc k_systems[] = {{.name = "c.watch", .phase = Phase::PostSim, .fn = sys_watch}};
+constinit const SystemDesc k_systems[] = {{.name = ".watch", .phase = Phase::PostSim, .fn = sys_watch}};
 KV_MODULE_DEFINE(k_c) = {.name = "c", .kinds = k_kinds, .systems = k_systems};
 
 } // namespace

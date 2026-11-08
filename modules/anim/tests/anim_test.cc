@@ -21,11 +21,9 @@ namespace {
 
 using namespace kv;
 
-constinit const char* const k_thing_components[] = {"Transform2", "Sprite", "AnimPlayer"};
-constinit const char* const k_child_components[] = {"Transform2", "Sprite", "Local2", "Parent", "AnimPlayer"};
 constinit const KindDesc k_kinds[] = {
-    {.name = "a.thing", .components = k_thing_components, .capacity = 64},
-    {.name = "a.child", .components = k_child_components, .capacity = 64},
+    {.name = ".thing", .components = "Transform2, Sprite, AnimPlayer", .capacity = 64},
+    {.name = ".child", .components = "Transform2, Sprite, Local2, Parent, AnimPlayer", .capacity = 64},
 };
 
 struct Seen { u32 events, finished; u64 last_name; Handle last_entity; };
@@ -33,8 +31,8 @@ constinit Seen g = {};
 void on_event(TickContext&, Span<const AnimEvent> evs) { for (const AnimEvent& e : evs) { ++g.events; g.last_name = e.name; g.last_entity = e.entity; } }
 void on_finished(TickContext&, Span<const AnimFinished> fs) { g.finished += fs.len; }
 constinit const HandlerDesc k_handlers[] = {
-    {.name = "a.on_event", KV_ON(AnimEvent, on_event)},
-    {.name = "a.on_finished", KV_ON(AnimFinished, on_finished)},
+    {.name = ".on_event", KV_ON(AnimEvent, on_event)},
+    {.name = ".on_finished", KV_ON(AnimFinished, on_finished)},
 };
 KV_MODULE_DEFINE(k_a) = {.name = "a", .kinds = k_kinds, .handlers = k_handlers};
 

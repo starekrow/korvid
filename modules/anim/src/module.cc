@@ -244,16 +244,11 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT_EX(AnimEvent, k_event_fields, 0),
     KV_EVENT_EX(AnimFinished, k_finished_fields, 0),
 };
-constinit const ResourceDesc k_resources[]  = {{"anim.clips"}};
-constinit const char* const  k_pump_writes[] = {"anim.clips"};
-constinit const char* const  k_play_reads[]  = {"anim.clips"};
-constinit const char* const  k_play_writes[] = {"*.AnimPlayer", "*.Sprite", "*.Local2", "*.Transform2"};
-constinit const char* const  k_play_after[]  = {"?text.layout"};
-constinit const char* const  k_play_before[] = {"?scene.compose"};
+constinit const ResourceDesc k_resources[]  = {{".clips"}};
 constinit const SystemDesc k_systems[] = {
-    {.name = "anim.pump", .phase = Phase::PreSim, .fn = anim_pump, .writes = k_pump_writes, .main_thread = true, .runs = RunWhen::Always},
-    {.name = "anim.play", .phase = Phase::PostSim, .fn = anim_play_system, .reads = k_play_reads, .writes = k_play_writes,
-     .after = k_play_after, .before = k_play_before, .runs = RunWhen::Always},
+    {.name = ".pump", .phase = Phase::PreSim, .fn = anim_pump, .writes = ".clips", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".play", .phase = Phase::PostSim, .fn = anim_play_system, .reads = ".clips", .writes = "*.AnimPlayer, *.Sprite, *.Local2, *.Transform2",
+     .after = "?text.layout", .before = "?scene.compose", .runs = RunWhen::Always},
 };
 
 } // namespace

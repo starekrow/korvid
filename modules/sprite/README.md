@@ -49,8 +49,7 @@ sending a `Set` whenever the transform moved, which the `CompPrev` copy detects.
 **A kind that is drawn:**
 
 ```cpp
-constinit const char* const k_rock_components[] = {"Transform2", "Sprite", "Velocity"};
-constinit const KindDesc k_kinds[] = {{.name = "mygame.rock", .components = k_rock_components, .capacity = 1024}};
+constinit const KindDesc k_kinds[] = {{.name = ".rock", .components = "Transform2, Sprite, Velocity", .capacity = 1024}};
 
 Sprite s;
 s.material = g.rock_material;      // from a material asset

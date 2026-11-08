@@ -182,7 +182,7 @@ bool audio_startup(Engine& e, ModuleInstance& self) {
     desc.resolve = voice_resolve; desc.describe = voice_describe; desc.flags = KV_HANDLE_GENERATIONAL;
     s->kind = handle_kind_register(desc);
     if (!s->kind) return false;
-    if (!engine_publish(e, self, "audio.commands", &s->cmds)) return false;
+    if (!engine_publish(e, self, ".commands", &s->cmds)) return false;
     self.set_state(s);
 
     AudioDeviceDesc dd;
@@ -207,10 +207,9 @@ void audio_shutdown(Engine& e, ModuleInstance& self) {
 }
 
 constinit const EventTypeDesc k_events[]    = {KV_EVENT(VoiceFinished)};
-constinit const ResourceDesc  k_resources[] = {{"audio.commands", true}};
-constinit const char* const   k_extract_writes[] = {"audio.commands"};
+constinit const ResourceDesc  k_resources[] = {{".commands", true}};
 constinit const SystemDesc    k_systems[] = {
-    {.name = "audio.extract", .phase = Phase::PostSim, .fn = audio_extract, .writes = k_extract_writes,
+    {.name = ".extract", .phase = Phase::PostSim, .fn = audio_extract, .writes = ".commands",
      .main_thread = true, .runs = RunWhen::Always},
 };
 
@@ -230,7 +229,7 @@ KV_MODULE_DEFINE(audio_module) = {
 
 namespace {
 AudioState* checked(TickContext& ctx) {
-    static const u32 k_cmds = ctx.resource_id("audio.commands");
+    static const u32 k_cmds = ctx.resource_id("audio.commands"); // full: callers are other modules' systems
     if (!ctx.resource<AudioCommands>(k_cmds)) return nullptr; // undeclared: the context has said so
     return state(*ctx.engine);
 }

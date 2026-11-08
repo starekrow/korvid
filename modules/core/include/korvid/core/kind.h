@@ -6,8 +6,9 @@
 // "kind" for spawn and destroy, "kind.Component" for each column, "*.Component" in a
 // system's sets for that column in every kind.
 //
-//   constinit const char* const k_bullet_components[] = {"Transform2", "Sprite", "Velocity"};
-//   constinit const KindDesc    k_kinds[] = {{.name = "rocks.bullet", .components = k_bullet_components, .capacity = 4096}};
+//   constinit const KindDesc k_kinds[] = {{.name = ".bullet", .components = "Transform2, Sprite, Velocity", .capacity = 4096}};
+//
+// A kind's name may start with '.' for "<module>."; the component list is one string.
 //
 // Rows are zero when spawned unless spawn() is handed the components to write. Iteration
 // is by slot in [0, rows()), skipping dead slots, so it is fixed run to run. Destroy is
@@ -21,8 +22,8 @@
 namespace kv {
 
 struct KindDesc {
-    const char*             name       = nullptr; // also the handle kind and the resource name
-    Span<const char* const> components = {};      // component names, resolved at init
+    const char*             name       = nullptr; // also the handle kind and the resource name; '.' prefix: the module's
+    const char*             components = nullptr; // component names, comma-separated, resolved at init
     u32                     capacity   = 0;       // slots of address space; pages commit as used
     u32*                    id         = nullptr; // optional: filled with the kind id at init, 0 after shutdown
     bool                    cosmetic   = false;   // presentation only: never part of the state hash (glyphs, an overlay)
@@ -41,6 +42,7 @@ struct Column {
 
 struct Table {
     const KindDesc* desc     = nullptr;
+    const char*     name     = nullptr; // the kind's full name: desc->name with the module prefix expanded
     u32             index    = 0; // position in the engine's table list; kind id = index + 1
     u32             module   = 0; // declaring module's index
     u16             kind     = 0; // handle kind
@@ -50,8 +52,9 @@ struct Table {
     u32             committed_rows = 0;
     MemTag          tag;
 
-    // Reserves the columns and registers the handle kind. `comps` is in declared order.
-    bool init(const KindDesc& d, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t);
+    // Reserves the columns and registers the handle kind. `comps` is in declared order;
+    // `full_name` is the kind's name with its module prefix expanded (interned, stable).
+    bool init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t);
     void free();
 
     Handle spawn(); // every component zero, prev included; null if the kind is full

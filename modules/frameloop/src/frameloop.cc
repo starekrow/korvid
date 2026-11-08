@@ -179,13 +179,11 @@ void overlay_set(Engine& engine, FrameLoopState& s, u32 line, const char* text) 
 }
 
 constinit const EventTypeDesc k_events[]  = {KV_EVENT(ExitRequested)};
-constinit const char* const   k_overlay_components[] = {"Transform2", "Text"};
 constinit const KindDesc      k_kinds[] = {
-    {.name = "frameloop.overlay", .components = k_overlay_components, .capacity = kOverlayLines, .id = &g_overlay_kind, .cosmetic = true},
+    {.name = ".overlay", .components = "Transform2, Text", .capacity = kOverlayLines, .id = &g_overlay_kind, .cosmetic = true},
 };
-constinit const char* const   k_exit_reads[] = {"input.state"};
 constinit const SystemDesc    k_systems[] = {
-    {.name = "frameloop.exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = k_exit_reads, .runs = RunWhen::Always},
+    {.name = ".exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = "input.state", .runs = RunWhen::Always},
 };
 
 // The frame's slack: what the renderer blocked for last frame (fences, acquire, present)

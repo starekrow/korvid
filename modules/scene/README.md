@@ -42,8 +42,7 @@ the renderer interpolates a child of a moving parent exactly as it does the pare
 A child kind, and a child spawned with its parent's handle:
 
 ```cpp
-constinit const char* const k_flame_components[] = {"Transform2", "Sprite", "Local2", "Parent"};
-constinit const KindDesc k_kinds[] = {{.name = "mygame.flame", .components = k_flame_components, .capacity = 4}};
+constinit const KindDesc k_kinds[] = {{.name = ".flame", .components = "Transform2, Sprite, Local2, Parent", .capacity = 4}};
 
 // In a handler that holds the write on mygame.flame:
 Table* flames = ctx.write_kind(g_flame_kind);

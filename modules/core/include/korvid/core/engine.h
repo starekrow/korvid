@@ -49,6 +49,8 @@ struct Trigger {
     const Column*      column;
     const FieldDesc*   field;
     u32                module;
+    const char*        name       = nullptr; // the declared name with the module prefix expanded
+    const char*        field_name = nullptr; // likewise for the field
 };
 
 // The dev trace: the last events delivered, with who emitted them. Printed as it fills
@@ -126,6 +128,14 @@ struct Engine {
     bool                  hash_systems     = false; // and after every system, to locate drift
     u64                   last_hash        = 0;     // the state hash after the last tick, when hashing
 };
+
+// The name language of the registration tables. A name starting with '.' means
+// "<module>." plus the rest ("?." keeps the '?' in front); anything else is itself. The
+// result is interned, so it is stable for the process. Lists are comma-separated:
+// name_list_next takes the next trimmed name out of `cursor` into `out` (false when
+// there is none). Empty names and a null list are nothing.
+const char* engine_qualify(const char* module, const char* name);
+bool        name_list_next(const char*& cursor, char* out, usize cap);
 
 // Registers and starts every module. On any failure, everything already started is
 // shut down in reverse and false is returned; the engine is then safe to shut down again.

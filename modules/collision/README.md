@@ -48,7 +48,6 @@ kormake adds the collision module to your executable's module list from that.
 component list, and the spawn passes one:
 
 ```cpp
-constinit const char* const k_rock_components[] = {"Transform2", "Sprite", "Velocity", "Collider2"};
 
 // layers are bits you choose
 constexpr u32 L_SHIP = 1, L_BULLET = 2, L_ROCK = 4;
@@ -73,7 +72,7 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
 }
 
 constinit const HandlerDesc k_handlers[] = {
-    {.name = "mygame.on_overlap", KV_ON(OverlapBegin, on_overlap)},
+    {.name = ".on_overlap", KV_ON(OverlapBegin, on_overlap)},
 };
 ```
 

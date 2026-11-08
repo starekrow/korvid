@@ -15,10 +15,9 @@ namespace {
 using namespace kv;
 
 // Grandchildren first on purpose: table order must not be composition order.
-constinit const char* const k_child_components[] = {"Transform2", "Sprite", "Local2", "Parent"};
 constinit const KindDesc k_kinds[] = {
-    {.name = "s.grandchild", .components = k_child_components, .capacity = 64},
-    {.name = "s.child",      .components = k_child_components, .capacity = 64},
+    {.name = ".grandchild", .components = "Transform2, Sprite, Local2, Parent", .capacity = 64},
+    {.name = ".child",      .components = "Transform2, Sprite, Local2, Parent", .capacity = 64},
 };
 KV_MODULE_DEFINE(k_s) = {.name = "s", .kinds = k_kinds};
 

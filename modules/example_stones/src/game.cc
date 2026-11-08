@@ -203,10 +203,8 @@ void stones_shutdown(Engine&, ModuleInstance& self) {
 
 // The engine wanted to know what I touch. Sprites: all of them, since I make and move
 // them. The keys and the window: I look at them.
-constinit const char* const k_reads[]  = {"input.state", "platform.window"};
-constinit const char* const k_writes[] = {"sprite.entity"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "example_stones.tick", .phase = Phase::Sim, .fn = stones_tick, .reads = k_reads, .writes = k_writes},
+    {.name = ".tick", .phase = Phase::Sim, .fn = stones_tick, .reads = "input.state, platform.window", .writes = "sprite.entity"},
 };
 
 } // namespace

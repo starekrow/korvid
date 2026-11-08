@@ -16,8 +16,7 @@ struct Pos { f32 x, y; };
 constinit const FieldDesc k_hp_fields[]  = {KV_FIELD(Hp, hp)};
 constinit const FieldDesc k_pos_fields[] = {KV_FIELD(Pos, x), KV_FIELD(Pos, y)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Hp, k_hp_fields, CompPrev), KV_COMPONENT(Pos, k_pos_fields)};
-constinit const char* const k_ship_components[] = {"Hp", "Pos"};
-constinit const KindDesc k_kinds[] = {{.name = "t.ship", .components = k_ship_components, .capacity = 8}};
+constinit const KindDesc k_kinds[] = {{.name = "t.ship", .components = "Hp, Pos", .capacity = 8}};
 
 struct Alarm { u32 n; };
 constinit const FieldDesc k_alarm_fields[] = {KV_FIELD(Alarm, n)};

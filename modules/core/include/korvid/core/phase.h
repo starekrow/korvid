@@ -72,15 +72,20 @@ typedef void (*HandlerFn)(TickContext& ctx, const void* events, u32 count);
 template <class E, void (*F)(TickContext&, Span<const E>)>
 void handler_thunk(TickContext& ctx, const void* events, u32 count) { F(ctx, Span<const E>((const E*)events, count)); }
 
+// Names in these tables are strings in the engine's name language: a name may start with
+// '.' for "<module>." (".on_hit" in module "rocks" is "rocks.on_hit"; "?.foo" is an
+// optional order on "<module>.foo"), and a set is one string of comma-separated names
+// (".ship, .bullet.Transform2, *.Velocity, input.state"). The engine expands them at
+// init; an unknown name fails it with a message, as before.
 struct HandlerDesc {
-    const char*             name       = nullptr;
-    u32*                    event      = nullptr; // &EventType<E>::id
-    const char*             event_name = nullptr;
-    HandlerFn               fn         = nullptr;
-    Span<const char* const> reads      = {};
-    Span<const char* const> writes     = {};
-    Span<const char* const> after      = {}; // handler names
-    Span<const char* const> before     = {};
+    const char* name       = nullptr;
+    u32*        event      = nullptr; // &EventType<E>::id
+    const char* event_name = nullptr;
+    HandlerFn   fn         = nullptr;
+    const char* reads      = nullptr; // resource names, comma-separated
+    const char* writes     = nullptr;
+    const char* after      = nullptr; // handler names
+    const char* before     = nullptr;
 };
 
 // A state trigger: an edge on one scalar field of a component that keeps a previous
@@ -357,13 +362,13 @@ typedef void (*SystemFn)(TickContext& ctx);
 
 // One entry in a module's system table. Plain data; constinit-able; named fields.
 struct SystemDesc {
-    const char*             name   = nullptr;
-    Phase                   phase  = Phase::Count;
-    SystemFn                fn     = nullptr;
-    Span<const char* const> reads  = {};
-    Span<const char* const> writes = {};
-    Span<const char* const> after  = {}; // system names; needed between two writers, optional otherwise; "?name" only if that system exists
-    Span<const char* const> before = {};
+    const char* name   = nullptr;
+    Phase       phase  = Phase::Count;
+    SystemFn    fn     = nullptr;
+    const char* reads  = nullptr; // resource names, comma-separated; see HandlerDesc
+    const char* writes = nullptr;
+    const char* after  = nullptr; // system names; needed between two writers, optional otherwise; "?name" only if that system exists
+    const char* before = nullptr;
     StateUse                state  = StateUse::Write; // what it does with its module's state
     bool                    main_thread = false;      // runs on the thread driving the engine: for code that talks to the OS, the GPU, or a module's own pools
     RunWhen                 runs   = RunWhen::Unpaused; // whether a paused tick runs it
@@ -377,6 +382,7 @@ struct ScheduledSystem {
     Array<u32>         reads;  // resource ids; wildcards expanded
     Array<u32>         writes;
     const HandlerDesc* handler = nullptr;
+    const char*        full_name = nullptr; // the declared name with its module prefix expanded
     u32                unit    = 0; // 1-based position among all units: systems in phase order, then handlers
     u32                level   = 0; // 1 + the longest chain of edges before it; equal levels run concurrently
     u32                rank    = 0; // module order then declaration order
@@ -384,7 +390,7 @@ struct ScheduledSystem {
     u32                spawn_tickets = 0; // the unit's own ticket counters (see phase.cc)
     u32                timer_tickets = 0;
 
-    const char* name() const { return desc ? desc->name : handler->name; }
+    const char* name() const { return full_name ? full_name : desc ? desc->name : handler->name; }
     void        free_buffers() { reads.free(); writes.free(); commands.bytes.free(); }
 };
 

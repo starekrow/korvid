@@ -22,9 +22,10 @@ int table_describe(kv_handle h, void* ctx, char* out, size_t cap) {
 
 } // namespace
 
-bool Table::init(const KindDesc& d, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t) {
+bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t) {
     KV_ASSERT(!desc);
     desc   = &d;
+    name   = full_name;
     index  = table_index;
     module = module_index;
     tag    = t;
@@ -36,16 +37,16 @@ bool Table::init(const KindDesc& d, Span<const ComponentDesc* const> comps, u32 
         c.stride = (cd->size + cd->align - 1) / cd->align * cd->align;
         usize bytes = os_page_align((usize)d.capacity * c.stride);
         c.data = (u8*)os_reserve(bytes);
-        if (!c.data) { KV_ERROR("kind", "'%s': cannot reserve %llu bytes for %s", d.name, (unsigned long long)bytes, cd->name); return false; }
+        if (!c.data) { KV_ERROR("kind", "'%s': cannot reserve %llu bytes for %s", name, (unsigned long long)bytes, cd->name); return false; }
         if (cd->has_prev()) {
             c.prev = (u8*)os_reserve(bytes);
-            if (!c.prev) { KV_ERROR("kind", "'%s': cannot reserve %llu bytes for %s (prev)", d.name, (unsigned long long)bytes, cd->name); return false; }
+            if (!c.prev) { KV_ERROR("kind", "'%s': cannot reserve %llu bytes for %s (prev)", name, (unsigned long long)bytes, cd->name); return false; }
         }
-        snprintf(c.resource_name, sizeof c.resource_name, "%s.%s", d.name, cd->name);
+        snprintf(c.resource_name, sizeof c.resource_name, "%s.%s", name, cd->name);
         columns.push(c);
     }
     kv_handle_kind_desc kd{};
-    kd.name     = d.name;
+    kd.name     = name;
     kd.type_key = comps.len ? comps[0]->type : nullptr; // a blind resolve is the first component's row
     kd.ctx      = this;
     kd.resolve  = table_resolve;
@@ -95,10 +96,10 @@ bool Table::ensure_rows(u32 n) {
             usize have = os_page_align((usize)committed_rows * c.stride);
             usize need = os_page_align((usize)to * c.stride);
             if (need <= have) continue;
-            if (!os_commit(c.data + have, need - have)) { KV_ERROR("kind", "'%s': commit failed", desc->name); return false; }
+            if (!os_commit(c.data + have, need - have)) { KV_ERROR("kind", "'%s': commit failed", name); return false; }
             total += need - have;
             if (c.prev) {
-                if (!os_commit(c.prev + have, need - have)) { KV_ERROR("kind", "'%s': commit failed", desc->name); return false; }
+                if (!os_commit(c.prev + have, need - have)) { KV_ERROR("kind", "'%s': commit failed", name); return false; }
                 total += need - have;
             }
         }
@@ -113,7 +114,7 @@ Handle Table::spawn() {
     slots.tag   = tag;
     if (slots.live >= desc->capacity) {
         KV_MARK("kind full");
-        KV_ERROR("kind", "'%s' is full (%u entities)", desc->name, desc->capacity);
+        KV_ERROR("kind", "'%s' is full (%u entities)", name, desc->capacity);
         return Handle{};
     }
     // The rows for the slot about to be handed out must exist first: a slot taken and
@@ -157,7 +158,7 @@ void Table::begin_tick() {
 }
 
 u64 Table::hash() const {
-    u64 h = hash_str(desc->name);
+    u64 h = hash_str(name);
     u32 n = rows();
     for (u32 i = 0; i < n; ++i) {
         if (!is_alive(i)) continue;

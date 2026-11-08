@@ -22,13 +22,10 @@ constinit const FieldDesc k_hp_fields[]  = {KV_FIELD(Hp, hp)};
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Pos, k_pos_fields, CompPrev), KV_COMPONENT(Vel, k_vel_fields), KV_COMPONENT(Hp, k_hp_fields),
 };
-constinit const char* const k_ship_components[]  = {"Pos", "Vel", "Hp"};
-constinit const char* const k_rock_components[]  = {"Pos", "Vel"};
-constinit const char* const k_decal_components[] = {"Pos"};
 constinit const KindDesc k_kinds[] = {
-    {.name = "g.ship",  .components = k_ship_components,  .capacity = 16},
-    {.name = "g.rock",  .components = k_rock_components,  .capacity = 16},
-    {.name = "g.decal", .components = k_decal_components, .capacity = 16},
+    {.name = "g.ship",  .components = "Pos, Vel, Hp",  .capacity = 16},
+    {.name = "g.rock",  .components = "Pos, Vel",  .capacity = 16},
+    {.name = "g.decal", .components = "Pos", .capacity = 16},
 };
 
 struct Trace {
@@ -103,16 +100,11 @@ void sys_peek(TickContext& ctx) {
 }
 
 constinit const ResourceDesc k_resources[]   = {{"g.counter"}, {"g.quiet"}};
-constinit const char* const k_move_reads[]   = {"*.Vel"};
-constinit const char* const k_move_writes[]  = {"*.Pos", "g.rock"};
-constinit const char* const k_tally_reads[]  = {"g.ship.Hp", "g.ship", "g.rock"};
-constinit const char* const k_bump_writes[]  = {"g.counter"};
-constinit const char* const k_peek_reads[]   = {"g.counter", "g.quiet"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "g.move",  .phase = Phase::Sim,     .fn = sys_move,  .reads = k_move_reads,  .writes = k_move_writes},
-    {.name = "g.tally", .phase = Phase::PostSim, .fn = sys_tally, .reads = k_tally_reads},
-    {.name = "g.peek",  .phase = Phase::PostSim, .fn = sys_peek,  .reads = k_peek_reads},  // after bump: it reads what bump writes
-    {.name = "g.bump",  .phase = Phase::PostSim, .fn = sys_bump,  .writes = k_bump_writes},
+    {.name = "g.move",  .phase = Phase::Sim,     .fn = sys_move,  .reads = "*.Vel",  .writes = "*.Pos, g.rock"},
+    {.name = "g.tally", .phase = Phase::PostSim, .fn = sys_tally, .reads = "g.ship.Hp, g.ship, g.rock"},
+    {.name = "g.peek",  .phase = Phase::PostSim, .fn = sys_peek,  .reads = "g.counter, g.quiet"},  // after bump: it reads what bump writes
+    {.name = "g.bump",  .phase = Phase::PostSim, .fn = sys_bump,  .writes = "g.counter"},
 };
 KV_MODULE_DEFINE(k_g) = {.name = "g", .components = k_components, .kinds = k_kinds, .resources = k_resources,
                          .systems = k_systems, .startup = g_startup, .memory = {.reserve = 4096}};

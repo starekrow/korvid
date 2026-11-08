@@ -8,6 +8,7 @@
 #include "korvid/core/time.h"
 #include "korvid/core/thread.h"
 #include "korvid/core/log.h"
+#include "korvid/core/name.h"
 #include "korvid/core/memory.h"
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +18,7 @@ namespace kv {
 namespace {
 
 bool names_equal(const char* a, const char* b) { return strcmp(a, b) == 0; }
+
 
 // The engine's own event types, registered after every module's so module ids are
 // unaffected by what the core adds.
@@ -134,25 +136,27 @@ bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules) {
     for (u32 i = 0; i < modules.len; ++i) {
         const ModuleDesc& m = *modules[i];
         for (const KindDesc& k : m.kinds) {
-            if (!k.name || !k.name[0] || strlen(k.name) >= KV_KIND_NAME_MAX) {
+            const char* name = k.name ? engine_qualify(m.name, k.name) : nullptr;
+            if (!name || !name[0] || name[0] == '.' || strlen(name) >= KV_KIND_NAME_MAX) {
                 KV_ERROR("engine", "module '%s' has a kind with no name or a name over %u characters", m.name, KV_KIND_NAME_MAX - 1);
                 return false;
             }
-            if (k.capacity == 0) { KV_ERROR("engine", "kind '%s' in module '%s' has zero capacity", k.name, m.name); return false; }
-            if (u32 id = engine_kind_id(e, k.name)) {
-                KV_ERROR("engine", "kind '%s' declared by both '%s' and '%s'", k.name, modules[e.tables[id - 1].module]->name, m.name);
+            if (k.capacity == 0) { KV_ERROR("engine", "kind '%s' in module '%s' has zero capacity", name, m.name); return false; }
+            if (u32 id = engine_kind_id(e, name)) {
+                KV_ERROR("engine", "kind '%s' declared by both '%s' and '%s'", name, modules[e.tables[id - 1].module]->name, m.name);
                 return false;
             }
-            if (engine_resource_id(e, k.name)) { KV_ERROR("engine", "kind '%s' in module '%s' collides with a resource of that name", k.name, m.name); return false; }
+            if (engine_resource_id(e, name)) { KV_ERROR("engine", "kind '%s' in module '%s' collides with a resource of that name", name, m.name); return false; }
             const ComponentDesc* comps[32];
-            if (k.components.len > KV_COUNTOF(comps)) { KV_ERROR("engine", "kind '%s' has more than %u components", k.name, KV_COUNTOF(comps)); return false; }
-            for (u32 c = 0; c < k.components.len; ++c) {
-                u32 cid = engine_component_id(e, k.components[c]);
-                if (!cid) { KV_ERROR("engine", "kind '%s' in module '%s' uses unknown component '%s'", k.name, m.name, k.components[c]); return false; }
-                if (strlen(k.components[c]) >= KV_KIND_NAME_MAX) { KV_ERROR("engine", "component '%s' name is too long for a kind resource", k.components[c]); return false; }
-                for (u32 d = 0; d < c; ++d)
-                    if (comps[d] == e.components[cid - 1].desc) { KV_ERROR("engine", "kind '%s' lists component '%s' twice", k.name, k.components[c]); return false; }
-                comps[c] = e.components[cid - 1].desc;
+            u32 ncomps = 0;
+            char cname[KV_KIND_NAME_MAX];
+            for (const char* cursor = k.components; name_list_next(cursor, cname, sizeof cname);) {
+                if (ncomps >= KV_COUNTOF(comps)) { KV_ERROR("engine", "kind '%s' has more than %u components", name, KV_COUNTOF(comps)); return false; }
+                u32 cid = engine_component_id(e, cname);
+                if (!cid) { KV_ERROR("engine", "kind '%s' in module '%s' uses unknown component '%s'", name, m.name, cname); return false; }
+                for (u32 d = 0; d < ncomps; ++d)
+                    if (comps[d] == e.components[cid - 1].desc) { KV_ERROR("engine", "kind '%s' lists component '%s' twice", name, cname); return false; }
+                comps[ncomps++] = e.components[cid - 1].desc;
             }
             mem_set_owner((u16)(i + 1));
             MemTag tag;
@@ -160,10 +164,10 @@ bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules) {
             tag.heap     = mem_module_heap((u16)(i + 1));
             tag.category = mem_category_register("kinds");
             Table& t = e.tables.push(Table{});
-            bool ok = t.init(k, Span<const ComponentDesc* const>(comps, k.components.len), e.tables.len - 1, i, tag);
+            bool ok = t.init(k, name, Span<const ComponentDesc* const>(comps, ncomps), e.tables.len - 1, i, tag);
             mem_set_owner(0);
-            if (!ok) { KV_ERROR("engine", "kind '%s' in module '%s': table creation failed", k.name, m.name); return false; }
-            e.resources.push(ResourceEntry{k.name, i});
+            if (!ok) { KV_ERROR("engine", "kind '%s' in module '%s': table creation failed", name, m.name); return false; }
+            e.resources.push(ResourceEntry{name, i});
             t.resource = e.resources.len;
             for (Column& c : t.columns) {
                 e.resources.push(ResourceEntry{c.resource_name, i});
@@ -188,12 +192,13 @@ void free_tables(Engine& e) {
 bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
     for (u32 i = 0; i < modules.len; ++i) {
         for (const ResourceDesc& r : modules[i]->resources) {
-            if (u32 id = engine_resource_id(e, r.name)) {
-                KV_ERROR("engine", "resource '%s' declared by both '%s' and '%s'", r.name,
+            const char* name = engine_qualify(modules[i]->name, r.name);
+            if (u32 id = engine_resource_id(e, name)) {
+                KV_ERROR("engine", "resource '%s' declared by both '%s' and '%s'", name,
                          modules[e.resources[id - 1].module]->name, modules[i]->name);
                 return false;
             }
-            ResourceEntry entry{r.name, i};
+            ResourceEntry entry{name, i};
             entry.sink = r.sink;
             e.resources.push(entry);
         }
@@ -201,26 +206,29 @@ bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
     return true;
 }
 
-// Names to ids. "*.Component" is that column in every kind, and must exist somewhere.
-bool resolve_resource_refs(const Engine& e, const ModuleDesc& m, const SystemDesc& s,
-                           Span<const char* const> refs, const char* kind, Array<u32>& out) {
-    for (const char* name : refs) {
-        if (name[0] == '*' && name[1] == '.') {
-            u32 cid = engine_component_id(e, name + 2);
+// Names to ids. "*.Component" is that column in every kind, and must exist somewhere;
+// ".x" is "<module>.x"; the list is comma-separated.
+bool resolve_resource_refs(const Engine& e, const ModuleDesc& m, const char* unit_name,
+                           const char* refs, const char* kind, Array<u32>& out) {
+    char raw[2 * KV_KIND_NAME_MAX + 2];
+    for (const char* cursor = refs; name_list_next(cursor, raw, sizeof raw);) {
+        if (raw[0] == '*' && raw[1] == '.') {
+            u32 cid = engine_component_id(e, raw + 2);
             bool any = false;
             for (const Table& t : e.tables)
                 if (const Column* c = t.column(cid)) { out.push(c->resource); any = true; }
             if (!any) {
-                KV_ERROR("engine", "system '%s' in module '%s' %s '%s' but no kind has component '%s'",
-                         s.name, m.name, kind, name, name + 2);
+                KV_ERROR("engine", "'%s' in module '%s' %s '%s' but no kind has component '%s'",
+                         unit_name, m.name, kind, raw, raw + 2);
                 return false;
             }
             continue;
         }
+        const char* name = engine_qualify(m.name, raw);
         u32 id = engine_resource_id(e, name);
         if (!id) {
-            KV_ERROR("engine", "system '%s' in module '%s' %s unknown resource '%s'",
-                     s.name, m.name, kind, name);
+            KV_ERROR("engine", "'%s' in module '%s' %s unknown resource '%s'",
+                     unit_name, m.name, kind, name);
             return false;
         }
         out.push(id);
@@ -246,8 +254,8 @@ struct Pending {
     u32             rank;       // module order then declaration order
 };
 
-Span<const char* const> after_of(const Pending& p)  { return p.sys.desc ? p.sys.desc->after : p.sys.handler->after; }
-Span<const char* const> before_of(const Pending& p) { return p.sys.desc ? p.sys.desc->before : p.sys.handler->before; }
+const char* after_of(const Pending& p)  { return p.sys.desc ? p.sys.desc->after : p.sys.handler->after; }
+const char* before_of(const Pending& p) { return p.sys.desc ? p.sys.desc->before : p.sys.handler->before; }
 
 const char* resource_name(const Engine& e, u32 id) { return id && id <= e.resources.len ? e.resources[id - 1].name : "?"; }
 
@@ -376,9 +384,12 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
     // handlers, only other handlers may be named. A name starting with '?' is an order
     // that holds if the system exists: for a module ordering itself against one it does
     // not depend on.
+    char raw[2 * KV_KIND_NAME_MAX + 2];
     for (u32 i = 0; i < n; ++i) {
         const char* me = pend[i].sys.name();
-        for (const char* other : after_of(pend[i])) {
+        const char* module_name = pend[i].sys.module->desc->name;
+        for (const char* cursor = after_of(pend[i]); name_list_next(cursor, raw, sizeof raw);) {
+            const char* other = engine_qualify(module_name, raw);
             bool optional = other[0] == '?';
             if (optional) ++other;
             u32 j = find_pending(pend, other);
@@ -393,7 +404,8 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
             }
             edges.push(Edge{j - 1, i, 0});
         }
-        for (const char* other : before_of(pend[i])) {
+        for (const char* cursor = before_of(pend[i]); name_list_next(cursor, raw, sizeof raw);) {
+            const char* other = engine_qualify(module_name, raw);
             bool optional = other[0] == '?';
             if (optional) ++other;
             u32 j = find_pending(pend, other);
@@ -504,16 +516,17 @@ bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
                 ok = false;
                 break;
             }
+            const char* name = engine_qualify(m.name, s.name);
             for (u32 p = 0; p < (u32)Phase::Count; ++p)
-                if (u32 j = find_pending(pend[p], s.name)) {
-                    KV_ERROR("engine", "system '%s' declared by both '%s' and '%s'", s.name, pend[p][j - 1].sys.module->desc->name, m.name);
+                if (u32 j = find_pending(pend[p], name)) {
+                    KV_ERROR("engine", "system '%s' declared by both '%s' and '%s'", name, pend[p][j - 1].sys.module->desc->name, m.name);
                     ok = false;
                 }
             if (!ok) break;
             Pending p{};
-            p.sys.desc = &s; p.sys.module = &e.modules[i]; p.rank = rank++;
-            if (!resolve_resource_refs(e, m, s, s.reads, "reads", p.sys.reads) ||
-                !resolve_resource_refs(e, m, s, s.writes, "writes", p.sys.writes)) {
+            p.sys.desc = &s; p.sys.module = &e.modules[i]; p.sys.full_name = name; p.rank = rank++;
+            if (!resolve_resource_refs(e, m, name, s.reads, "reads", p.sys.reads) ||
+                !resolve_resource_refs(e, m, name, s.writes, "writes", p.sys.writes)) {
                 p.sys.reads.free(); p.sys.writes.free();
                 ok = false;
                 break;
@@ -544,13 +557,13 @@ bool build_handlers(Engine& e, Span<const ModuleDesc* const> modules) {
         const ModuleDesc& m = *modules[i];
         for (const HandlerDesc& h : m.handlers) {
             if (!h.name || !h.fn || !h.event) { KV_ERROR("engine", "module '%s' has a handler with no name, no function or no event", m.name); ok = false; break; }
-            if (*h.event == 0) { KV_ERROR("engine", "handler '%s' in module '%s' is on event type '%s', which no module declares", h.name, m.name, h.event_name ? h.event_name : "?"); ok = false; break; }
-            if (find_pending(pend, h.name)) { KV_ERROR("engine", "handler '%s' declared twice", h.name); ok = false; break; }
+            const char* name = engine_qualify(m.name, h.name);
+            if (*h.event == 0) { KV_ERROR("engine", "handler '%s' in module '%s' is on event type '%s', which no module declares", name, m.name, h.event_name ? h.event_name : "?"); ok = false; break; }
+            if (find_pending(pend, name)) { KV_ERROR("engine", "handler '%s' declared twice", name); ok = false; break; }
             Pending p{};
-            p.sys.module = &e.modules[i]; p.sys.handler = &h; p.rank = rank++;
-            SystemDesc fake{.name = h.name, .phase = Phase::Count}; // for the resolver's messages only
-            if (!resolve_resource_refs(e, m, fake, h.reads, "reads", p.sys.reads) ||
-                !resolve_resource_refs(e, m, fake, h.writes, "writes", p.sys.writes)) {
+            p.sys.module = &e.modules[i]; p.sys.handler = &h; p.sys.full_name = name; p.rank = rank++;
+            if (!resolve_resource_refs(e, m, name, h.reads, "reads", p.sys.reads) ||
+                !resolve_resource_refs(e, m, name, h.writes, "writes", p.sys.writes)) {
                 p.sys.reads.free(); p.sys.writes.free();
                 ok = false;
                 break;
@@ -576,28 +589,32 @@ bool build_triggers(Engine& e, Span<const ModuleDesc* const> modules) {
         const ModuleDesc& m = *modules[i];
         for (const TriggerDesc& t : m.triggers) {
             if (!t.name || !t.field) { KV_ERROR("engine", "module '%s' has a trigger with no name or field", m.name); return false; }
-            if (engine_trigger_id(e, t.name)) { KV_ERROR("engine", "trigger '%s' declared twice", t.name); return false; }
-            const char* dot = strrchr(t.field, '.');
-            if (!dot || dot == t.field || !dot[1]) { KV_ERROR("engine", "trigger '%s': field '%s' is not kind.Component.field", t.name, t.field); return false; }
+            const char* name  = engine_qualify(m.name, t.name);
+            const char* field = engine_qualify(m.name, t.field);
+            if (engine_trigger_id(e, name)) { KV_ERROR("engine", "trigger '%s' declared twice", name); return false; }
+            const char* dot = strrchr(field, '.');
+            if (!dot || dot == field || !dot[1]) { KV_ERROR("engine", "trigger '%s': field '%s' is not kind.Component.field", name, field); return false; }
             char column_name[2 * KV_KIND_NAME_MAX + 2];
-            usize len = (usize)(dot - t.field);
-            if (len >= sizeof column_name) { KV_ERROR("engine", "trigger '%s': column name too long", t.name); return false; }
-            memcpy(column_name, t.field, len);
+            usize len = (usize)(dot - field);
+            if (len >= sizeof column_name) { KV_ERROR("engine", "trigger '%s': column name too long", name); return false; }
+            memcpy(column_name, field, len);
             column_name[len] = 0;
             u32 rid = engine_resource_id(e, column_name);
             Trigger tr{&t, nullptr, nullptr, nullptr, i};
+            tr.name = name;
+            tr.field_name = field;
             for (Table& tab : e.tables)
                 for (const Column& c : tab.columns)
                     if (c.resource == rid) { tr.table = &tab; tr.column = &c; }
-            if (!tr.column) { KV_ERROR("engine", "trigger '%s': unknown column '%s'", t.name, column_name); return false; }
-            if (!tr.column->prev) { KV_ERROR("engine", "trigger '%s': component '%s' keeps no previous copy (declare it with CompPrev)", t.name, tr.column->desc->name); return false; }
+            if (!tr.column) { KV_ERROR("engine", "trigger '%s': unknown column '%s'", name, column_name); return false; }
+            if (!tr.column->prev) { KV_ERROR("engine", "trigger '%s': component '%s' keeps no previous copy (declare it with CompPrev)", name, tr.column->desc->name); return false; }
             tr.field = schema_field(tr.column->desc->fields, dot + 1);
-            if (!tr.field) { KV_ERROR("engine", "trigger '%s': component '%s' has no field '%s'", t.name, tr.column->desc->name, dot + 1); return false; }
-            if (tr.field->count != 1) { KV_ERROR("engine", "trigger '%s': field '%s' is not a scalar", t.name, dot + 1); return false; }
-            if (t.edge != TriggerEdge::Changed && tr.field->type == FieldType::Handle) { KV_ERROR("engine", "trigger '%s': a handle field can only be watched for Changed", t.name); return false; }
+            if (!tr.field) { KV_ERROR("engine", "trigger '%s': component '%s' has no field '%s'", name, tr.column->desc->name, dot + 1); return false; }
+            if (tr.field->count != 1) { KV_ERROR("engine", "trigger '%s': field '%s' is not a scalar", name, dot + 1); return false; }
+            if (t.edge != TriggerEdge::Changed && tr.field->type == FieldType::Handle) { KV_ERROR("engine", "trigger '%s': a handle field can only be watched for Changed", name); return false; }
             e.triggers.push(tr);
             if (t.id) *t.id = e.triggers.len;
-            KV_INFO("engine", "trigger %-2u %s on %s", e.triggers.len, t.name, t.field);
+            KV_INFO("engine", "trigger %-2u %s on %s", e.triggers.len, name, field);
         }
     }
     return true;
@@ -618,7 +635,7 @@ void log_order(const Engine& e) {
         u32 last_level = 0;
         for (const ScheduledSystem& s : e.phases.systems[p]) {
             const char* sep = at == 0 ? "" : s.level != last_level ? " | " : ", ";
-            int n = snprintf(line + at, sizeof line - at, "%s%s", sep, s.desc->name);
+            int n = snprintf(line + at, sizeof line - at, "%s%s", sep, s.name());
             if (n < 0 || at + (u32)n >= sizeof line) break;
             at += (u32)n;
             last_level = s.level;
@@ -636,7 +653,7 @@ void log_kinds(const Engine& e) {
             if (n < 0 || at + (u32)n >= sizeof line) break;
             at += (u32)n;
         }
-        KV_INFO("engine", "kind %-2u %-16s %u slots: %s", t.index + 1, t.desc->name, t.desc->capacity, at ? line : "(no components)");
+        KV_INFO("engine", "kind %-2u %-16s %u slots: %s", t.index + 1, t.name, t.desc->capacity, at ? line : "(no components)");
     }
 }
 
@@ -957,7 +974,7 @@ void apply_buffer(Engine& e, CommandBuffer& cb) {
                 if (entity.is_null()) continue;
                 Column* c = t->column(ch->component);
                 if (!c || c->desc->size != ch->size) {
-                    KV_ERROR("engine", "spawn_later of '%s': component '%s' is not one of its", t->desc->name,
+                    KV_ERROR("engine", "spawn_later of '%s': component '%s' is not one of its", t->name,
                              engine_component(e, ch->component) ? engine_component(e, ch->component)->name : "?");
                     continue;
                 }
@@ -991,7 +1008,7 @@ void engine_fire_triggers(Engine& e, u64 tick) {
         const Trigger& t = e.triggers[ti];
         const Table& tab = *t.table;
         u32 n = tab.rows();
-        e.events.set_emitter(t.desc->name);
+        e.events.set_emitter(t.name);
         for (u32 i = 0; i < n; ++i) {
             if (!tab.is_alive(i)) continue;
             const u8* cur  = t.column->data + (usize)i * t.column->stride;
@@ -1061,7 +1078,7 @@ void engine_trace_delivery(Engine& e, u64 tick, u32 wave) {
 
 u32 engine_trigger_id(const Engine& e, const char* name) {
     for (u32 i = 0; i < e.triggers.len; ++i)
-        if (names_equal(e.triggers[i].desc->name, name)) return i + 1;
+        if (names_equal(e.triggers[i].name, name)) return i + 1;
     return 0;
 }
 
@@ -1103,6 +1120,7 @@ u32 engine_resource_id(const Engine& e, const char* name) {
 }
 
 bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, void* ptr, const void* type) {
+    name = engine_qualify(self.desc->name, name);
     u32 id = engine_resource_id(e, name);
     if (!id) { KV_ERROR("engine", "module '%s' publishes unknown resource '%s'", self.desc->name, name); return false; }
     ResourceEntry& r = e.resources[id - 1];
@@ -1128,13 +1146,13 @@ const ComponentDesc* engine_component(const Engine& e, u32 id) {
 Phase engine_system_phase(const Engine& e, const char* name) {
     for (const ModuleInstance& inst : e.modules)
         for (const SystemDesc& s : inst.desc->systems)
-            if (names_equal(s.name, name)) return s.phase;
+            if (names_equal(engine_qualify(inst.desc->name, s.name), name)) return s.phase;
     return Phase::Count;
 }
 
 u32 engine_kind_id(const Engine& e, const char* name) {
     for (u32 i = 0; i < e.tables.len; ++i)
-        if (names_equal(e.tables[i].desc->name, name)) return i + 1;
+        if (names_equal(e.tables[i].name, name)) return i + 1;
     return 0;
 }
 
@@ -1143,5 +1161,34 @@ Table* engine_table(Engine& e, u32 kind_id) {
 }
 
 Table* engine_table(Engine& e, const char* name) { return engine_table(e, engine_kind_id(e, name)); }
+
+const char* engine_qualify(const char* module, const char* name) {
+    if (!name) return "";
+    bool optional = name[0] == '?';
+    const char* body = optional ? name + 1 : name;
+    if (body[0] != '.' || !module) return name;
+    char full[2 * KV_KIND_NAME_MAX + 64];
+    int n = snprintf(full, sizeof full, "%s%s%s", optional ? "?" : "", module, body);
+    if (n <= 0 || (usize)n >= sizeof full) { KV_ERROR("engine", "name '%s' in module '%s' is too long", name, module); return name; }
+    return name_str(name_intern(full));
+}
+
+bool name_list_next(const char*& cursor, char* out, usize cap) {
+    if (!cursor) return false;
+    for (;;) {
+        while (*cursor == ' ' || *cursor == ',' || *cursor == '\t' || *cursor == '\n') ++cursor;
+        if (!*cursor) return false;
+        const char* start = cursor;
+        while (*cursor && *cursor != ',') ++cursor;
+        const char* end = cursor;
+        while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\n')) --end;
+        usize len = (usize)(end - start);
+        if (len == 0) continue;
+        if (len >= cap) len = cap - 1;
+        memcpy(out, start, len);
+        out[len] = 0;
+        return true;
+    }
+}
 
 } // namespace kv

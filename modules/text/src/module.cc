@@ -149,18 +149,14 @@ void text_shutdown(Engine&, ModuleInstance& self) {
 constinit const FieldDesc k_text_fields[] = {KV_FIELDS(Text, font, str, scale, tint, layer, space, align)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Text, k_text_fields)};
 
-constinit const char* const k_label_components[] = {"Transform2", "Text"};
-constinit const char* const k_glyph_components[] = {"Transform2", "Sprite", "Local2", "Parent"};
 constinit const KindDesc k_kinds[] = {
-    {.name = "text.label", .components = k_label_components, .capacity = 4096},
-    {.name = "text.glyph", .components = k_glyph_components, .capacity = 65536, .cosmetic = true},
+    {.name = ".label", .components = "Transform2, Text", .capacity = 4096},
+    {.name = ".glyph", .components = "Transform2, Sprite, Local2, Parent", .capacity = 65536, .cosmetic = true},
 };
 
-constinit const char* const k_layout_reads[]  = {"*.Text"};
-constinit const char* const k_layout_writes[] = {"text.glyph"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "text.layout", .phase = Phase::PostSim, .fn = text_layout_system, .reads = k_layout_reads,
-     .writes = k_layout_writes, .runs = RunWhen::Always},
+    {.name = ".layout", .phase = Phase::PostSim, .fn = text_layout_system, .reads = "*.Text",
+     .writes = ".glyph", .runs = RunWhen::Always},
 };
 
 } // namespace

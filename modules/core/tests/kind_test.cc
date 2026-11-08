@@ -24,35 +24,28 @@ constinit const ComponentDesc k_components[] = {
 };
 
 constinit u32 g_mover_id = 0;
-constinit const char* const k_mover_components[] = {"Pos", "Vel"};
-constinit const char* const k_marker_components[] = {"Pos", "Tag"};
 constinit const KindDesc k_kinds[] = {
-    {.name = "t.mover",  .components = k_mover_components,  .capacity = 3000, .id = &g_mover_id},
-    {.name = "t.marker", .components = k_marker_components, .capacity = 2},
+    {.name = "t.mover",  .components = "Pos, Vel",  .capacity = 3000, .id = &g_mover_id},
+    {.name = "t.marker", .components = "Pos, Tag", .capacity = 2},
 };
 
-constinit const char* const k_move_reads[]  = {"*.Vel"};
-constinit const char* const k_move_writes[] = {"*.Pos", "t.mover"};
 void sys_move(TickContext&) {}
 constinit const SystemDesc k_systems[] = {
-    {.name = "t.move", .phase = Phase::Sim, .fn = sys_move, .reads = k_move_reads, .writes = k_move_writes},
+    {.name = "t.move", .phase = Phase::Sim, .fn = sys_move, .reads = "*.Vel", .writes = "*.Pos, t.mover"},
 };
 KV_MODULE_DEFINE(k_t) = {.name = "t", .components = k_components, .kinds = k_kinds, .systems = k_systems};
 
 // Rejections.
-constinit const char* const k_unknown_components[] = {"Pos", "Nope"};
-constinit const KindDesc k_unknown_kinds[] = {{.name = "u.k", .components = k_unknown_components, .capacity = 8}};
+constinit const KindDesc k_unknown_kinds[] = {{.name = "u.k", .components = "Pos, Nope", .capacity = 8}};
 KV_MODULE_DEFINE(k_unknown) = {.name = "u", .kinds = k_unknown_kinds};
 
-constinit const KindDesc k_dup_kinds[] = {{.name = "t.mover", .components = k_mover_components, .capacity = 8}};
+constinit const KindDesc k_dup_kinds[] = {{.name = "t.mover", .components = "Pos, Vel", .capacity = 8}};
 KV_MODULE_DEFINE(k_dup) = {.name = "d", .kinds = k_dup_kinds};
 
-constinit const char* const k_twice_components[] = {"Pos", "Pos"};
-constinit const KindDesc k_twice_kinds[] = {{.name = "w.k", .components = k_twice_components, .capacity = 8}};
+constinit const KindDesc k_twice_kinds[] = {{.name = "w.k", .components = "Pos, Pos", .capacity = 8}};
 KV_MODULE_DEFINE(k_twice) = {.name = "w", .kinds = k_twice_kinds};
 
-constinit const char* const k_nowhere_reads[] = {"*.Tag", "*.Nope"};
-constinit const SystemDesc k_nowhere_systems[] = {{.name = "n.sys", .phase = Phase::Sim, .fn = sys_move, .reads = k_nowhere_reads}};
+constinit const SystemDesc k_nowhere_systems[] = {{.name = "n.sys", .phase = Phase::Sim, .fn = sys_move, .reads = "*.Tag, *.Nope"}};
 KV_MODULE_DEFINE(k_nowhere) = {.name = "n", .systems = k_nowhere_systems};
 
 } // namespace

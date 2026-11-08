@@ -118,11 +118,9 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Local2, k_local2_fields),
 };
 
-constinit const char* const k_compose_reads[]  = {"*.Local2"};
-constinit const char* const k_compose_writes[] = {"*.Transform2", "*.Parent"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "scene.compose", .phase = Phase::PostSim, .fn = scene_compose, .reads = k_compose_reads,
-     .writes = k_compose_writes, .runs = RunWhen::Always},
+    {.name = ".compose", .phase = Phase::PostSim, .fn = scene_compose, .reads = "*.Local2",
+     .writes = "*.Transform2, *.Parent", .runs = RunWhen::Always},
 };
 
 } // namespace

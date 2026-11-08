@@ -70,7 +70,7 @@ g->flame_clip = anim_load(engine, "mygame/flame.anim.json");
 static const AnimKey k_fade_keys[] = {{.time = 0.0f, .v = {1.0f}}, {.time = 1.0f, .v = {0.0f}}};
 static const AnimTrackDesc k_fade_tracks[] = {{.channel = AnimChannel::Alpha, .interp = AnimInterp::Linear, .keys = k_fade_keys}};
 AnimClipDesc fade;
-fade.name = "mygame.fade"; fade.loop = AnimLoop::Once; fade.tracks = k_fade_tracks;
+fade.name = ".fade"; fade.loop = AnimLoop::Once; fade.tracks = k_fade_tracks;
 g->fade_clip = anim_create(engine, fade);
 
 // A kind with an AnimPlayer; spawn with the player, at a rate that fits the moment.

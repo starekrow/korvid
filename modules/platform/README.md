@@ -58,7 +58,6 @@ void control(TickContext& ctx) {
         left |= pad->axis(PadAxis::LeftX) < -0.5f || pad->down(PadButton::DpadLeft);
     }
 }
-constinit const char* const k_control_reads[] = {"input.state"};
 ```
 
 Key edges arrive as events too: `for (const KeyDown& k : ctx.events->read<KeyDown>())`.

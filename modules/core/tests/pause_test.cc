@@ -13,8 +13,7 @@ using namespace kv;
 struct Counter { i32 n; };
 constinit const FieldDesc k_counter_fields[] = {KV_FIELDS(Counter, n)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Counter, k_counter_fields, CompPrev)};
-constinit const char* const k_thing_components[] = {"Counter"};
-constinit const KindDesc k_kinds[] = {{.name = "p.thing", .components = k_thing_components, .capacity = 64}};
+constinit const KindDesc k_kinds[] = {{.name = ".thing", .components = "Counter", .capacity = 64}};
 
 struct Ping { u32 n; };
 constinit const EventTypeDesc k_events[] = {KV_EVENT(Ping)};
@@ -36,17 +35,16 @@ void sys_always(TickContext& ctx) {
 void on_ping(TickContext&, Span<const Ping> pings) { g.pings += pings.len; }
 void on_edge(TickContext&, Span<const StateEdge> edges) { g.edges += edges.len; }
 
-constinit const char* const k_sim_writes[] = {"p.thing.Counter"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "p.sim",    .phase = Phase::Sim, .fn = sys_sim, .writes = k_sim_writes},
-    {.name = "p.always", .phase = Phase::Sim, .fn = sys_always, .runs = RunWhen::Always},
+    {.name = ".sim",    .phase = Phase::Sim, .fn = sys_sim, .writes = ".thing.Counter"},
+    {.name = ".always", .phase = Phase::Sim, .fn = sys_always, .runs = RunWhen::Always},
 };
 constinit const HandlerDesc k_handlers[] = {
-    {.name = "p.on_ping", KV_ON(Ping, on_ping)},
-    {.name = "p.on_edge", KV_ON(StateEdge, on_edge)},
+    {.name = ".on_ping", KV_ON(Ping, on_ping)},
+    {.name = ".on_edge", KV_ON(StateEdge, on_edge)},
 };
 constinit const TriggerDesc k_triggers[] = {
-    {.name = "p.three", .field = "p.thing.Counter.n", .edge = TriggerEdge::CrossedAbove, .value = 2.5},
+    {.name = ".three", .field = ".thing.Counter.n", .edge = TriggerEdge::CrossedAbove, .value = 2.5},
 };
 KV_MODULE_DEFINE(k_p) = {.name = "p", .events = k_events, .components = k_components, .kinds = k_kinds,
                          .systems = k_systems, .handlers = k_handlers, .triggers = k_triggers};

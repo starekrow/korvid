@@ -36,9 +36,8 @@ constinit const ComponentDesc k_components[] = {
 };
 
 constinit u32 g_ball_kind = 0;
-constinit const char* const k_ball_components[] = {"Transform2", "Sprite", "Motion", "Bounces"};
 constinit const KindDesc k_kinds[] = {
-    {.name = "example_testbed.ball", .components = k_ball_components, .capacity = 1 << 16, .id = &g_ball_kind}, // room for --swarm
+    {.name = ".ball", .components = "Transform2, Sprite, Motion, Bounces", .capacity = 1 << 16, .id = &g_ball_kind}, // room for --swarm
 };
 
 // ---- what happens --------------------------------------------------------------------
@@ -57,7 +56,7 @@ constinit const EventTypeDesc k_events[] = {
 
 constinit u32 g_third_bounce = 0;
 constinit const TriggerDesc k_triggers[] = {
-    {.name = "example_testbed.third_bounce", .field = "example_testbed.ball.Bounces.count", .edge = TriggerEdge::CrossedAbove, .value = 2.0, .id = &g_third_bounce},
+    {.name = ".third_bounce", .field = ".ball.Bounces.count", .edge = TriggerEdge::CrossedAbove, .value = 2.0, .id = &g_third_bounce},
 };
 
 // ---- the module's state --------------------------------------------------------------
@@ -212,7 +211,7 @@ void example_testbed_sim(TickContext& ctx) {
 
     case ST_EXIT: {
         // Say goodbye to every ball, then take everything down by command and quit.
-        static const u32 k_bounces = ctx.column_id("example_testbed.ball.Bounces");
+        static const u32 k_bounces = ctx.column_id(".ball.Bounces");
         const Table* balls = ctx.read_kind(g_ball_kind);
         Span<const Bounces> bounces = ctx.read<Bounces>(k_bounces);
         for (u32 i = 0; i < balls->rows(); ++i) {
@@ -233,8 +232,8 @@ void example_testbed_sim(TickContext& ctx) {
 
 // A delivered handle is live, so its index is a valid row for the rest of the wave.
 void on_bounced(TickContext& ctx, Span<const Bounced> hits) {
-    static const u32 k_bounces = ctx.column_id("example_testbed.ball.Bounces");
-    static const u32 k_motion  = ctx.column_id("example_testbed.ball.Motion");
+    static const u32 k_bounces = ctx.column_id(".ball.Bounces");
+    static const u32 k_motion  = ctx.column_id(".ball.Motion");
     Game& g = ctx.state_as<Game>();
     Span<Bounces> bounces = ctx.write<Bounces>(k_bounces);
     Span<Motion>  motion  = ctx.write<Motion>(k_motion);
@@ -317,21 +316,16 @@ void example_testbed_shutdown(Engine&, ModuleInstance& self) {
     if (g) KV_INFO("example_testbed", "%llu key edges seen", (unsigned long long)g->key_edges);
 }
 
-constinit const char* const k_move_reads[]    = {"example_testbed.ball.Sprite", "platform.window"};
-constinit const char* const k_move_writes[]   = {"example_testbed.ball.Transform2", "example_testbed.ball.Motion"};
-constinit const char* const k_sim_reads[]     = {"platform.window", "example_testbed.ball", "sprite.entity"};
-constinit const char* const k_bounced_writes[] = {"example_testbed.ball.Bounces", "example_testbed.ball.Motion"};
-constinit const char* const k_window_reads[]  = {"platform.window"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "example_testbed.move", .phase = Phase::Sim, .fn = example_testbed_move, .reads = k_move_reads, .writes = k_move_writes},
-    {.name = "example_testbed.sim",  .phase = Phase::Sim, .fn = example_testbed_sim,  .reads = k_sim_reads}, // after move: it reads what move writes
+    {.name = ".move", .phase = Phase::Sim, .fn = example_testbed_move, .reads = ".ball.Sprite, platform.window", .writes = ".ball.Transform2, .ball.Motion"},
+    {.name = ".sim",  .phase = Phase::Sim, .fn = example_testbed_sim,  .reads = "platform.window, .ball, sprite.entity"}, // after move: it reads what move writes
 };
 constinit const HandlerDesc k_handlers[] = {
-    {.name = "example_testbed.on_bounced",   KV_ON(Bounced, on_bounced), .writes = k_bounced_writes},
-    {.name = "example_testbed.on_spawned",   KV_ON(Spawned, on_spawned)},
-    {.name = "example_testbed.on_blink_off", KV_ON(BlinkOff, on_blink_off)},
-    {.name = "example_testbed.on_blink_on",  KV_ON(BlinkOn, on_blink_on), .reads = k_window_reads},
-    {.name = "example_testbed.on_edge",      KV_ON(StateEdge, on_state_edge)},
+    {.name = ".on_bounced",   KV_ON(Bounced, on_bounced), .writes = ".ball.Bounces, .ball.Motion"},
+    {.name = ".on_spawned",   KV_ON(Spawned, on_spawned)},
+    {.name = ".on_blink_off", KV_ON(BlinkOff, on_blink_off)},
+    {.name = ".on_blink_on",  KV_ON(BlinkOn, on_blink_on), .reads = "platform.window"},
+    {.name = ".on_edge",      KV_ON(StateEdge, on_state_edge)},
 };
 
 } // namespace

@@ -173,7 +173,8 @@ Header `korvid/core/engine.h`:
 | `engine_module(e, name)`, `engine_module_state_as<T>(e, name)` | functions | a started module and its state, for code outside the schedule |
 | `engine_publish(e, self, name, ptr)` | function | the object behind a declared resource, for `ctx.resource<T>` |
 | `engine_resource_id`, `engine_component_id`, `engine_kind_id`, `engine_trigger_id`, `engine_system_phase` | functions | names to ids |
-| `engine_table(e, name or id)`, `engine_table_of(e, handle)`, `engine_component(e, id)` | functions | a kind's table, by name, id or an entity handle; a schema |
+| `engine_table(e, name or id)`, `engine_table_of(e, handle)`, `engine_component(e, id)` | functions | a kind's table, by full name, id or an entity handle; a schema |
+| `engine_qualify(module, name)`, `name_list_next(cursor, out, cap)` | functions | the name language: `.x` to `module.x`, interned; the next name out of a comma list |
 | `engine_hash_state(e)` | function | the hash of every sim column of every live entity |
 | `engine_describe_event(e, type, event, out, cap)` | function | an event through its schema |
 | `engine_idle_add(e, name, fn, user)`, `engine_idle_remove(e, id)`, `engine_idle_run(e, seconds)` | functions | idle tasks: More, Nothing or Done, served round-robin in the budget |
@@ -184,8 +185,8 @@ Header `korvid/core/phase.h`:
 | name | kind | what |
 |---|---|---|
 | `Phase` | enum | `Input`, `PreSim`, `Sim`, `PostSim`; `phase_name` |
-| `SystemDesc` | record | `name`, `phase`, `fn`, `reads`, `writes`, `after`, `before`, `state` (`StateUse`), `main_thread`, `runs` (`RunWhen`: `Unpaused` or `Always`) |
-| `HandlerDesc`, `KV_ON(E, fn)` | record, macro | a handler on one event type with its sets |
+| `SystemDesc` | record | `name`, `phase`, `fn`, `reads`, `writes`, `after`, `before` (strings in the name language: `.x` is the module's own, lists are comma-separated), `state` (`StateUse`), `main_thread`, `runs` (`RunWhen`: `Unpaused` or `Always`) |
+| `HandlerDesc`, `KV_ON(E, fn)` | record, macro | a handler on one event type with its sets, in the same name language |
 | `TriggerDesc`, `TriggerEdge` | record, enum | `kind.Component.field` with `Changed`, `CrossedBelow(value)`, `CrossedAbove(value)` |
 | `Spawned{ticket, kind, entity}`, `StateEdge{entity, trigger, value}` | events | the engine's own, delivered to anyone |
 | `TickContext` | record | `engine`, `events`, `dt`, `tick`, `paused`; `state_as<T>()`, `emit`, `write_kind`, `read_kind`, `read<T>`, `write<T>`, `view<C...>()`, `resource<T>`, `resource_id`, `column_id`, `kind_id`, `spawn_later`, `destroy`, `destroy_all`, `schedule`, `schedule_in`, `cancel` |
@@ -204,7 +205,7 @@ Header `korvid/core/component.h`, `kind.h`:
 | `KV_FIELD(T, m)`, `KV_FIELDS(T, ...)`, `KV_COMPONENT(T, fields, flags...)`, `KV_FIELD_TRAITS(M, T, N)` | macros | the tables, from member names; traits for your own aggregates |
 | `ComponentType<T>::id` | record | the id slot, filled at init |
 | `schema_check`, `schema_field`, `schema_hash`, `schema_equal`, `schema_describe`, `schema_each_handle`, `schema_field_as_f64` | functions | every operation on a field table; `component_*` wrappers |
-| `KindDesc` | record | `name`, `components`, `capacity`, `id` slot, `cosmetic` (never hashed) |
+| `KindDesc` | record | `name` (`.x` for the module's own), `components` (one comma-separated string), `capacity`, `id` slot, `cosmetic` (never hashed) |
 | `Table`, `Column` | records | a kind's storage: `spawn(...)`, `destroy`, `destroy_all`, `valid`, `live()`, `rows()`, `is_alive(i)`, `handle_at(i)`, `get<T>(h)`, `prev<T>(h)`, `rows_of<T>()`, `prev_rows_of<T>()`, `column`, `has`, `describe`, `hash` |
 
 Header `korvid/core/event.h`, `timer.h`:

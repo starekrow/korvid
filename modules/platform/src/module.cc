@@ -32,7 +32,7 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
     // Systems reach these under their declared access; the accessors below are for code
     // outside the schedule (the frame loop, startup).
     if (!engine_publish(engine, self, "input.state", &s->input) ||
-        !engine_publish(engine, self, "platform.window", &s->window)) return false;
+        !engine_publish(engine, self, ".window", &s->window)) return false;
     if (!s->io.init(&self.general, 4096)) return false;
     engine_idle_add(engine, "platform.io", io_idle, &s->io);
     return true;
@@ -70,10 +70,9 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT(PadButtonDown),
     KV_EVENT(PadButtonUp),
 };
-constinit const ResourceDesc k_resources[] = {{"input.state"}, {"platform.window"}};
-constinit const char* const  k_input_writes[] = {"input.state"};
+constinit const ResourceDesc k_resources[] = {{"input.state"}, {".window"}};
 constinit const SystemDesc   k_systems[] = {
-    {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = k_input_writes, .runs = RunWhen::Always},
+    {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = "input.state", .runs = RunWhen::Always},
 };
 
 } // namespace

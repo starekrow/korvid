@@ -56,9 +56,8 @@ needs. Add the kind, and spawn into it instead of pushing into the array:
 
 ```cpp
 constinit u32 g_stone_kind = 0;
-constinit const char* const k_stone_components[] = {"Stone", "Transform2", "Sprite"};
 constinit const KindDesc k_kinds[] = {
-    {.name = "example_stones.stone", .components = k_stone_components, .capacity = 256, .id = &g_stone_kind},
+    {.name = ".stone", .components = "Stone, Transform2, Sprite", .capacity = 256, .id = &g_stone_kind},
 };
 // in the module table:  .kinds = k_kinds
 // in the tick:          Table& stones = *ctx.write_kind(g_stone_kind);
@@ -78,7 +77,7 @@ scheduled event and a four-line handler:
 ```cpp
 struct DropStone { u32 nothing; };
 void on_drop(TickContext& ctx, Span<const DropStone>) { /* add_stone(...); */ ctx.schedule_in(DropStone{}, 10); }
-// in the module table:  .events = {KV_EVENT(DropStone)}, .handlers = {{.name = "example_stones.drop", KV_ON(DropStone, on_drop)}}
+// in the module table:  .events = {KV_EVENT(DropStone)}, .handlers = {{.name = ".drop", KV_ON(DropStone, on_drop)}}
 ```
 
 A timer survives a pause, can be cancelled, is visible in the trace, and does not drift
@@ -110,7 +109,7 @@ nothing.
 an event on the edge:
 
 ```cpp
-{.name = "example_stones.tenth_bump", .field = "example_stones.stone.Stone.bumps", .edge = TriggerEdge::CrossedAbove, .value = 9}
+{.name = ".tenth_bump", .field = "example_stones.stone.Stone.bumps", .edge = TriggerEdge::CrossedAbove, .value = 9}
 ```
 
 **Publish the stones for someone else.** Another module (a scoreboard, a replay recorder,

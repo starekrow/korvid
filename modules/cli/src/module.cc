@@ -298,7 +298,7 @@ void cli_pump(TickContext& ctx) {
 }
 
 constinit const SystemDesc k_systems[] = {
-    {.name = "cli.pump", .phase = Phase::Input, .fn = cli_pump, .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".pump", .phase = Phase::Input, .fn = cli_pump, .main_thread = true, .runs = RunWhen::Always},
 };
 
 } // namespace

@@ -59,24 +59,17 @@ constinit const ComponentDesc k_components[] = {
 
 // ---- kinds -----------------------------------------------------------------------------
 constinit u32 g_ship_kind = 0, g_bullet_kind = 0, g_rock_kind = 0, g_debris_kind = 0, g_overlay_kind = 0, g_flame_kind = 0, g_label_kind = 0;
-constinit const char* const k_ship_components[]    = {"Transform2", "Sprite", "Velocity", "Health", "Collider2", "Ship"};
-constinit const char* const k_bullet_components[]  = {"Transform2", "Sprite", "Velocity", "Collider2"};
-constinit const char* const k_rock_components[]    = {"Transform2", "Sprite", "Velocity", "Collider2", "RockSize"};
-constinit const char* const k_debris_components[]  = {"Transform2", "Sprite", "Velocity", "AnimPlayer"}; // fades by clip
-constinit const char* const k_overlay_components[] = {"Transform2", "Sprite"}; // screen-space, over everything
-constinit const char* const k_flame_components[]   = {"Transform2", "Sprite", "Local2", "Parent", "AnimPlayer"}; // a child of the ship
-constinit const char* const k_label_components[]   = {"Transform2", "Text", "Label"};               // the HUD and the banners
 constinit const KindDesc k_kinds[] = {
-    {.name = "example_rocks.ship",    .components = k_ship_components,    .capacity = 1,    .id = &g_ship_kind},
-    {.name = "example_rocks.bullet",  .components = k_bullet_components,  .capacity = 4096, .id = &g_bullet_kind},
-    {.name = "example_rocks.rock",    .components = k_rock_components,    .capacity = 1024, .id = &g_rock_kind},
-    {.name = "example_rocks.debris",  .components = k_debris_components,  .capacity = 8192, .id = &g_debris_kind},
-    {.name = "example_rocks.overlay", .components = k_overlay_components, .capacity = 8,    .id = &g_overlay_kind},
+    {.name = ".ship",    .components = "Transform2, Sprite, Velocity, Health, Collider2, Ship",    .capacity = 1,    .id = &g_ship_kind},
+    {.name = ".bullet",  .components = "Transform2, Sprite, Velocity, Collider2",  .capacity = 4096, .id = &g_bullet_kind},
+    {.name = ".rock",    .components = "Transform2, Sprite, Velocity, Collider2, RockSize",    .capacity = 1024, .id = &g_rock_kind},
+    {.name = ".debris",  .components = "Transform2, Sprite, Velocity, AnimPlayer",  .capacity = 8192, .id = &g_debris_kind},
+    {.name = ".overlay", .components = "Transform2, Sprite", .capacity = 8,    .id = &g_overlay_kind},
     // The flame is cosmetic: its flipbook comes from a file and starts when the file
     // arrives, which is not a tick the sim may depend on.
-    {.name = "example_rocks.flame",   .components = k_flame_components,   .capacity = 4,    .id = &g_flame_kind, .cosmetic = true},
+    {.name = ".flame",   .components = "Transform2, Sprite, Local2, Parent, AnimPlayer",   .capacity = 4,    .id = &g_flame_kind, .cosmetic = true},
     // Labels are cosmetic too: the HUD shows the high score, which comes from a file.
-    {.name = "example_rocks.label",   .components = k_label_components,   .capacity = 8,    .id = &g_label_kind, .cosmetic = true},
+    {.name = ".label",   .components = "Transform2, Text, Label",   .capacity = 8,    .id = &g_label_kind, .cosmetic = true},
 };
 
 // ---- events ----------------------------------------------------------------------------
@@ -107,7 +100,7 @@ constinit const EventTypeDesc k_events[] = {
 
 constinit u32 g_death = 0;
 constinit const TriggerDesc k_triggers[] = {
-    {.name = "example_rocks.death", .field = "example_rocks.ship.Health.hp", .edge = TriggerEdge::CrossedBelow, .value = 1.0, .id = &g_death},
+    {.name = ".death", .field = ".ship.Health.hp", .edge = TriggerEdge::CrossedBelow, .value = 1.0, .id = &g_death},
 };
 
 // ---- the published score and the module's state --------------------------------------
@@ -260,7 +253,7 @@ void pause(TickContext& ctx) {
 // Phase PostSim, every tick: the HUD label says what the score says. One write per tick;
 // the text module relays out only when the string changes.
 void hud(TickContext& ctx) {
-    static const u32 k_score = ctx.resource_id("example_rocks.score");
+    static const u32 k_score = ctx.resource_id(".score");
     const Score* score = ctx.resource<const Score>(k_score);
     for (KindRows k : ctx.view<Text, const Label>()) {
         Span<Text>        texts = k.col<Text>();
@@ -274,7 +267,7 @@ void hud(TickContext& ctx) {
 // submitted at startup; the completion is ours by request handle. A missing file is a
 // high score of zero.
 void files(TickContext& ctx) {
-    static const u32 k_score = ctx.resource_id("example_rocks.score");
+    static const u32 k_score = ctx.resource_id(".score");
     Game& g = ctx.state_as<Game>();
     if (g.high_read.is_null()) return;
     IoQueue* io = platform_io(*ctx.engine);
@@ -467,7 +460,7 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
 // flies by command, the score moves. A bullet that hit two rocks is destroyed once; the
 // second RockHit still splits its rock, since the rock handle is live.
 void on_rock_hit(TickContext& ctx, Span<const RockHit> hits) {
-    static const u32 k_score = ctx.resource_id("example_rocks.score");
+    static const u32 k_score = ctx.resource_id(".score");
     Game& g = ctx.state_as<Game>();
     Table* rocks = ctx.write_kind(g_rock_kind);
     Score* score = ctx.resource<Score>(k_score);
@@ -503,8 +496,8 @@ void on_rock_hit(TickContext& ctx, Span<const RockHit> hits) {
 
 // The ship takes a hit: the rock goes, health drops by a row write; the trigger notices.
 void on_ship_hit(TickContext& ctx, Span<const ShipHit> hits) {
-    static const u32 k_hp = ctx.column_id("example_rocks.ship.Health");
-    static const u32 k_pos = ctx.column_id("example_rocks.ship.Transform2");
+    static const u32 k_hp = ctx.column_id(".ship.Health");
+    static const u32 k_pos = ctx.column_id(".ship.Transform2");
     Game& g = ctx.state_as<Game>();
     Span<Health> hp = ctx.write<Health>(k_hp);
     Span<const Transform2> pos = ctx.read<Transform2>(k_pos);
@@ -554,7 +547,7 @@ void on_expire(TickContext& ctx, Span<const Expire> expiries) {
 // A wave: rocks arrive from the edges, drifting inward. By command, so no write and no order.
 void on_wave(TickContext& ctx, Span<const SpawnWave> waves) {
     static const u32 k_window = ctx.resource_id("platform.window");
-    static const u32 k_score  = ctx.resource_id("example_rocks.score");
+    static const u32 k_score  = ctx.resource_id(".score");
     Game& g = ctx.state_as<Game>();
     const HostWindow* w = ctx.resource<const HostWindow>(k_window);
     Score* score = ctx.resource<Score>(k_score);
@@ -577,7 +570,7 @@ void on_wave(TickContext& ctx, Span<const SpawnWave> waves) {
 
 // The death trigger: the ship goes, the game is over, a restart is scheduled.
 void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
-    static const u32 k_score = ctx.resource_id("example_rocks.score");
+    static const u32 k_score = ctx.resource_id(".score");
     Game& g = ctx.state_as<Game>();
     const Score* score = ctx.resource<const Score>(k_score);
     Table* labels = ctx.write_kind(g_label_kind);
@@ -612,7 +605,7 @@ void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
 
 // Clear the field, new ship, first wave in a second. Also how the game starts.
 void on_restart(TickContext& ctx, Span<const Restart>) {
-    static const u32 k_score  = ctx.resource_id("example_rocks.score");
+    static const u32 k_score  = ctx.resource_id(".score");
     static const u32 k_window = ctx.resource_id("platform.window");
     Game& g = ctx.state_as<Game>();
     Score* score = ctx.resource<Score>(k_score);
@@ -640,7 +633,7 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     Game* g = arena_push<Game>(self.arena);
     if (!g) return false;
     self.set_state(g);
-    if (!engine_publish(engine, self, "example_rocks.score", &g->score)) return false;
+    if (!engine_publish(engine, self, ".score", &g->score)) return false;
 
     if (!renderer_get(engine)) return false;
     g->font = asset_load_font(engine, "text/DejaVuSans.ttf", 28.0f);
@@ -689,62 +682,35 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
 
 // ---- tables ----------------------------------------------------------------------------
 
-constinit const ResourceDesc k_resources[] = {{"example_rocks.score"}};
+constinit const ResourceDesc k_resources[] = {{".score"}};
 
-constinit const char* const k_control_reads[]  = {"input.state"};
-constinit const char* const k_control_writes[] = {"example_rocks.ship.Transform2", "example_rocks.ship.Velocity", "example_rocks.ship.Ship", "example_rocks.bullet", "example_rocks.flame", "audio.commands"};
-constinit const char* const k_before_move[]    = {"example_rocks.move"};
-constinit const char* const k_move_reads[]     = {"*.Velocity"};
-constinit const char* const k_move_writes[]    = {"*.Transform2"};
-constinit const char* const k_wrap_reads[]     = {"*.Velocity", "platform.window"};
-constinit const char* const k_after_move[]     = {"example_rocks.move"};
 
-constinit const char* const k_game_reads[]     = {"example_rocks.score"};
-constinit const char* const k_pause_reads[]    = {"platform.window"};
-constinit const char* const k_pause_writes[]   = {"example_rocks.overlay", "example_rocks.label", "audio.commands"};
-constinit const char* const k_hud_reads[]      = {"example_rocks.score", "example_rocks.label.Label"};
-constinit const char* const k_files_writes[]   = {"example_rocks.score"};
-constinit const char* const k_hud_writes[]     = {"example_rocks.label.Text"};
-constinit const char* const k_camera_writes[]  = {"sprite.camera"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "example_rocks.pause",   .phase = Phase::PreSim, .fn = pause, .reads = k_pause_reads, .writes = k_pause_writes, .runs = RunWhen::Always},
-    {.name = "example_rocks.files",   .phase = Phase::PreSim, .fn = files, .writes = k_files_writes, .main_thread = true, .runs = RunWhen::Always},
-    {.name = "example_rocks.control", .phase = Phase::Sim, .fn = control, .reads = k_control_reads, .writes = k_control_writes, .before = k_before_move},
+    {.name = ".pause",   .phase = Phase::PreSim, .fn = pause, .reads = "platform.window", .writes = ".overlay, .label, audio.commands", .runs = RunWhen::Always},
+    {.name = ".files",   .phase = Phase::PreSim, .fn = files, .writes = ".score", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "input.state", .writes = ".ship.Transform2, .ship.Velocity, .ship.Ship, .bullet, .flame, audio.commands", .before = ".move"},
     // move and wrap touch no module state: they share levels with whatever else is free.
-    {.name = "example_rocks.move",    .phase = Phase::Sim, .fn = move,    .reads = k_move_reads,    .writes = k_move_writes, .state = StateUse::None},
-    {.name = "example_rocks.wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = k_wrap_reads,    .writes = k_move_writes, .after = k_after_move, .state = StateUse::None},
-    {.name = "example_rocks.game",    .phase = Phase::Sim, .fn = game,    .reads = k_game_reads},
-    {.name = "example_rocks.camera",  .phase = Phase::PostSim, .fn = camera, .writes = k_camera_writes},
-    {.name = "example_rocks.hud",     .phase = Phase::PostSim, .fn = hud, .reads = k_hud_reads, .writes = k_hud_writes, .runs = RunWhen::Always},
+    {.name = ".move",    .phase = Phase::Sim, .fn = move,    .reads = "*.Velocity",    .writes = "*.Transform2", .state = StateUse::None},
+    {.name = ".wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = "*.Velocity, platform.window",    .writes = "*.Transform2", .after = ".move", .state = StateUse::None},
+    {.name = ".game",    .phase = Phase::Sim, .fn = game,    .reads = ".score"},
+    {.name = ".camera",  .phase = Phase::PostSim, .fn = camera, .writes = "sprite.camera"},
+    {.name = ".hud",     .phase = Phase::PostSim, .fn = hud, .reads = ".score, .label.Label", .writes = ".label.Text", .runs = RunWhen::Always},
 };
 
-constinit const char* const k_rock_hit_writes[] = {"example_rocks.rock", "example_rocks.score", "audio.commands"};
-constinit const char* const k_ship_hit_reads[]  = {"example_rocks.ship.Transform2"};
-constinit const char* const k_ship_hit_writes[] = {"example_rocks.ship.Health"};
-constinit const char* const k_wave_reads[]      = {"platform.window"};
-constinit const char* const k_wave_writes[]     = {"example_rocks.score"};
-constinit const char* const k_score_reads[]     = {"example_rocks.score"};
-constinit const char* const k_edge_writes[]     = {"example_rocks.label", "audio.commands", "example_rocks.score"};
-constinit const char* const k_restart_reads[]   = {"platform.window"};
-constinit const char* const k_restart_writes[]  = {"example_rocks.score", "example_rocks.label"};
-constinit const char* const k_after_rock_hit[]  = {"example_rocks.on_rock_hit"};
-constinit const char* const k_after_wave[]      = {"example_rocks.on_wave"};
-constinit const char* const k_after_edge[]      = {"example_rocks.on_edge"};
-constinit const char* const k_spawned_writes[]  = {"example_rocks.flame", "audio.commands"};
 constinit const HandlerDesc k_handlers[] = {
-    {.name = "example_rocks.on_exit",     KV_ON(ExitRequested, on_exit)},
-    {.name = "example_rocks.on_asset_failed", KV_ON(AssetFailed, on_asset_failed)},
-    {.name = "example_rocks.on_overlap",  KV_ON(OverlapBegin, on_overlap)},
-    {.name = "example_rocks.on_spawned",  KV_ON(Spawned, on_spawned), .writes = k_spawned_writes},
-    {.name = "example_rocks.on_anim_finished", KV_ON(AnimFinished, on_anim_finished)},
-    {.name = "example_rocks.on_rock_hit", KV_ON(RockHit, on_rock_hit), .writes = k_rock_hit_writes},
-    {.name = "example_rocks.on_ship_hit", KV_ON(ShipHit, on_ship_hit), .reads = k_ship_hit_reads, .writes = k_ship_hit_writes},
-    {.name = "example_rocks.on_score",    KV_ON(ScoreChanged, on_score)},
-    {.name = "example_rocks.on_expire",   KV_ON(Expire, on_expire)},
-    {.name = "example_rocks.on_wave",     KV_ON(SpawnWave, on_wave), .reads = k_wave_reads, .writes = k_wave_writes, .after = k_after_rock_hit},
+    {.name = ".on_exit",     KV_ON(ExitRequested, on_exit)},
+    {.name = ".on_asset_failed", KV_ON(AssetFailed, on_asset_failed)},
+    {.name = ".on_overlap",  KV_ON(OverlapBegin, on_overlap)},
+    {.name = ".on_spawned",  KV_ON(Spawned, on_spawned), .writes = ".flame, audio.commands"},
+    {.name = ".on_anim_finished", KV_ON(AnimFinished, on_anim_finished)},
+    {.name = ".on_rock_hit", KV_ON(RockHit, on_rock_hit), .writes = ".rock, .score, audio.commands"},
+    {.name = ".on_ship_hit", KV_ON(ShipHit, on_ship_hit), .reads = ".ship.Transform2", .writes = ".ship.Health"},
+    {.name = ".on_score",    KV_ON(ScoreChanged, on_score)},
+    {.name = ".on_expire",   KV_ON(Expire, on_expire)},
+    {.name = ".on_wave",     KV_ON(SpawnWave, on_wave), .reads = "platform.window", .writes = ".score", .after = ".on_rock_hit"},
     // The score's writers in a chain: rock_hit, wave, edge, restart.
-    {.name = "example_rocks.on_edge",     KV_ON(StateEdge, on_edge), .writes = k_edge_writes, .after = k_after_wave},
-    {.name = "example_rocks.on_restart",  KV_ON(Restart, on_restart), .reads = k_restart_reads, .writes = k_restart_writes, .after = k_after_edge},
+    {.name = ".on_edge",     KV_ON(StateEdge, on_edge), .writes = ".label, audio.commands, .score", .after = ".on_wave"},
+    {.name = ".on_restart",  KV_ON(Restart, on_restart), .reads = "platform.window", .writes = ".score, .label", .after = ".on_edge"},
 };
 
 } // namespace

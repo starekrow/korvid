@@ -21,8 +21,7 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Pos, k_pos_fields, CompPrev), KV_COMPONENT(Vel, k_vel_fields), KV_COMPONENT(Age, k_age_fields),
 };
 constinit u32 g_body_kind = 0;
-constinit const char* const k_body_components[] = {"Pos", "Vel", "Age"};
-constinit const KindDesc k_kinds[] = {{.name = "cpukiller.body", .components = k_body_components, .capacity = 1u << 20, .id = &g_body_kind}};
+constinit const KindDesc k_kinds[] = {{.name = ".body", .components = "Pos, Vel, Age", .capacity = 1u << 20, .id = &g_body_kind}};
 
 struct Bounced { Handle who; };
 constinit const FieldDesc k_bounced_fields[] = {KV_FIELDS(Bounced, who)};
@@ -115,19 +114,13 @@ bool stress_startup(Engine& engine, ModuleInstance& self) {
     return true;
 }
 
-constinit const char* const k_integrate_reads[]  = {"cpukiller.body.Vel"};
-constinit const char* const k_integrate_writes[] = {"cpukiller.body.Pos"};
-constinit const char* const k_bounce_writes[]    = {"cpukiller.body.Pos", "cpukiller.body.Vel"};
-constinit const char* const k_churn_reads[]      = {"cpukiller.body.Pos"};
-constinit const char* const k_churn_writes[]     = {"cpukiller.body.Age"};
-constinit const char* const k_energy_reads[]     = {"cpukiller.body.Vel"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "cpukiller.integrate", .phase = Phase::Sim, .fn = integrate, .reads = k_integrate_reads, .writes = k_integrate_writes, .state = StateUse::None},
-    {.name = "cpukiller.bounce",    .phase = Phase::Sim, .fn = bounce,    .writes = k_bounce_writes, .state = StateUse::None},
-    {.name = "cpukiller.churn",     .phase = Phase::Sim, .fn = churn,     .reads = k_churn_reads, .writes = k_churn_writes, .state = StateUse::None},
-    {.name = "cpukiller.energy",    .phase = Phase::PostSim, .fn = energy, .reads = k_energy_reads},
+    {.name = ".integrate", .phase = Phase::Sim, .fn = integrate, .reads = ".body.Vel", .writes = ".body.Pos", .state = StateUse::None},
+    {.name = ".bounce",    .phase = Phase::Sim, .fn = bounce,    .writes = ".body.Pos, .body.Vel", .state = StateUse::None},
+    {.name = ".churn",     .phase = Phase::Sim, .fn = churn,     .reads = ".body.Pos", .writes = ".body.Age", .state = StateUse::None},
+    {.name = ".energy",    .phase = Phase::PostSim, .fn = energy, .reads = ".body.Vel"},
 };
-constinit const HandlerDesc k_handlers[] = {{.name = "cpukiller.on_bounced", KV_ON(Bounced, on_bounced)}};
+constinit const HandlerDesc k_handlers[] = {{.name = ".on_bounced", KV_ON(Bounced, on_bounced)}};
 
 } // namespace
 

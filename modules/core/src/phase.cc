@@ -208,7 +208,10 @@ Column* checked_column(TickContext& ctx, Table& t, Column* c, const void* type, 
 
 } // namespace
 
+const char* ctx_qualify(TickContext& ctx, const char* name);
+
 Table* ctx_kind(TickContext& ctx, const char* kind, bool write) {
+    kind = ctx_qualify(ctx, kind);
     Table* t = engine_table(*ctx.engine, kind);
     if (!t) { KV_ERROR("engine", "system '%s': unknown kind '%s'", system_name(ctx), kind); KV_VERIFY(!"unknown kind"); return nullptr; }
     if (!allowed(ctx, t->resource, 0, write)) { deny(ctx, "kind", kind, write); return nullptr; }
@@ -218,7 +221,7 @@ Table* ctx_kind(TickContext& ctx, const char* kind, bool write) {
 Table* ctx_kind(TickContext& ctx, u32 kind_id, bool write) {
     Table* t = engine_table(*ctx.engine, kind_id);
     if (!t) { KV_ERROR("engine", "system '%s': unknown kind id %u", system_name(ctx), kind_id); KV_VERIFY(!"unknown kind"); return nullptr; }
-    if (!allowed(ctx, t->resource, 0, write)) { deny(ctx, "kind", t->desc->name, write); return nullptr; }
+    if (!allowed(ctx, t->resource, 0, write)) { deny(ctx, "kind", t->name, write); return nullptr; }
     return t;
 }
 
@@ -255,7 +258,14 @@ void* ctx_resource(TickContext& ctx, u32 resource_id, const void* type, bool wri
     return r.ptr;
 }
 
+// A name starting with '.' is relative to the running unit's module, as in the tables.
+const char* ctx_qualify(TickContext& ctx, const char* name) {
+    if (name && name[0] == '.' && ctx.system && ctx.system->module) return engine_qualify(ctx.system->module->desc->name, name);
+    return name;
+}
+
 u32 ctx_resource_id(TickContext& ctx, const char* name, bool column) {
+    name = ctx_qualify(ctx, name);
     u32 id = engine_resource_id(*ctx.engine, name);
     if (!id) { KV_ERROR("engine", "system '%s': unknown resource '%s'", system_name(ctx), name); KV_VERIFY(!"unknown resource"); return 0; }
     if (column) {
@@ -268,6 +278,7 @@ u32 ctx_resource_id(TickContext& ctx, const char* name, bool column) {
 }
 
 u32 TickContext::kind_id(const char* name) {
+    name = ctx_qualify(*this, name);
     u32 id = engine_kind_id(*engine, name);
     if (!id) { KV_ERROR("engine", "system '%s': unknown kind '%s'", system_name(*this), name); KV_VERIFY(!"unknown kind"); }
     return id;

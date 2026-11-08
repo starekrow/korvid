@@ -16,7 +16,7 @@ using namespace kv;
 struct Seen { u32 finished; Handle last; };
 constinit Seen g = {};
 void on_finished(TickContext&, Span<const VoiceFinished> fs) { for (const VoiceFinished& f : fs) { ++g.finished; g.last = f.voice; } }
-constinit const HandlerDesc k_handlers[] = {{.name = "t.on_finished", KV_ON(VoiceFinished, on_finished)}};
+constinit const HandlerDesc k_handlers[] = {{.name = ".on_finished", KV_ON(VoiceFinished, on_finished)}};
 
 constinit Handle g_voice = {};
 constinit bool   g_live_after = false;
@@ -29,8 +29,7 @@ void sys_play(TickContext& ctx) {
     g_voice = audio_play(ctx, p);
     g_live_after = audio_voice_live(ctx, g_voice);
 }
-constinit const char* const k_play_writes[] = {"audio.commands"};
-constinit const SystemDesc k_systems[] = {{.name = "t.play", .phase = Phase::Sim, .fn = sys_play, .writes = k_play_writes}};
+constinit const SystemDesc k_systems[] = {{.name = ".play", .phase = Phase::Sim, .fn = sys_play, .writes = "audio.commands"}};
 KV_MODULE_DEFINE(k_t) = {.name = "t", .systems = k_systems, .handlers = k_handlers};
 
 } // namespace

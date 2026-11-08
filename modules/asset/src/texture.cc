@@ -108,20 +108,14 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
 }
 
 constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(AssetFailed)};
-constinit const ResourceDesc  k_resources[] = {{"asset.textures"}, {"asset.materials"}, {"asset.fonts"}, {"asset.sounds"}};
-constinit const char* const   k_fonts_writes[] = {"asset.fonts"};
-constinit const char* const   k_sounds_writes[] = {"asset.sounds"};
-constinit const char* const   k_pump_writes[] = {"asset.textures"};
-constinit const char* const   k_materials_reads[]  = {"asset.textures"};
-constinit const char* const   k_materials_writes[] = {"asset.materials"};
-constinit const char* const   k_materials_after[]  = {"asset.pump"};
+constinit const ResourceDesc  k_resources[] = {{".textures"}, {".materials"}, {".fonts"}, {".sounds"}};
 constinit const SystemDesc    k_systems[]   = {
-    {.name = "asset.pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = k_pump_writes, .main_thread = true, .runs = RunWhen::Always},
-    {.name = "asset.pump_materials", .phase = Phase::PreSim, .fn = asset_materials_pump, .reads = k_materials_reads,
-     .writes = k_materials_writes, .after = k_materials_after, .main_thread = true, .runs = RunWhen::Always},
-    {.name = "asset.pump_fonts", .phase = Phase::PreSim, .fn = asset_fonts_pump, .writes = k_fonts_writes,
-     .after = k_materials_after, .main_thread = true, .runs = RunWhen::Always},
-    {.name = "asset.pump_sounds", .phase = Phase::PreSim, .fn = asset_sounds_pump, .writes = k_sounds_writes,
+    {.name = ".pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = ".textures", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".pump_materials", .phase = Phase::PreSim, .fn = asset_materials_pump, .reads = ".textures",
+     .writes = ".materials", .after = ".pump", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".pump_fonts", .phase = Phase::PreSim, .fn = asset_fonts_pump, .writes = ".fonts",
+     .after = ".pump", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".pump_sounds", .phase = Phase::PreSim, .fn = asset_sounds_pump, .writes = ".sounds",
      .main_thread = true, .runs = RunWhen::Always},
 };
 

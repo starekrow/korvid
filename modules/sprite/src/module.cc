@@ -23,7 +23,7 @@ bool sprite_startup(Engine& engine, ModuleInstance& self) {
     s->deltas.alloc = s->extract.tables.alloc = &self.general;
     s->world.table = engine_table(engine, "sprite.entity"); // the engine built it from the kind table
     if (!s->world.table) return false;
-    if (!engine_publish(engine, self, "sprite.camera", &s->camera)) return false;
+    if (!engine_publish(engine, self, ".camera", &s->camera)) return false;
     self.set_state(s);
     return true;
 }
@@ -51,16 +51,13 @@ constinit const ComponentDesc k_components[] = {
 };
 
 // The kind. Any kind with these two components is a sprite to the extract.
-constinit const char* const k_entity_components[] = {"Transform2", "Sprite"};
 constinit const KindDesc    k_kinds[] = {
-    {.name = "sprite.entity", .components = k_entity_components, .capacity = KV_POOL_DEFAULT_MAX},
+    {.name = ".entity", .components = "Transform2, Sprite", .capacity = KV_POOL_DEFAULT_MAX},
 };
 
-constinit const ResourceDesc k_resources[] = {{"sprite.deltas"}, {"sprite.camera"}};
-constinit const char* const  k_extract_reads[]  = {"*.Transform2", "*.Sprite"};
-constinit const char* const  k_extract_writes[] = {"sprite.deltas"};
+constinit const ResourceDesc k_resources[] = {{".deltas"}, {".camera"}};
 constinit const SystemDesc   k_systems[]   = {
-    {.name = "sprite.extract", .phase = Phase::PostSim, .fn = sprite_extract, .reads = k_extract_reads, .writes = k_extract_writes, .runs = RunWhen::Always},
+    {.name = ".extract", .phase = Phase::PostSim, .fn = sprite_extract, .reads = "*.Transform2, *.Sprite", .writes = ".deltas", .runs = RunWhen::Always},
 };
 
 } // namespace

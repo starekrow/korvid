@@ -18,13 +18,10 @@ struct Seq { u32 n; };
 constinit const FieldDesc k_pos_fields[] = {KV_FIELDS(Pos, x, y)};
 constinit const FieldDesc k_seq_fields[] = {KV_FIELDS(Seq, n)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Pos, k_pos_fields, CompPrev), KV_COMPONENT(Seq, k_seq_fields)};
-constinit const char* const k_a_components[] = {"Pos", "Seq"};
-constinit const char* const k_b_components[] = {"Pos"};
-constinit const char* const k_c_components[] = {"Seq"};
 constinit const KindDesc k_kinds[] = {
-    {.name = "p.a", .components = k_a_components, .capacity = 8192},
-    {.name = "p.b", .components = k_b_components, .capacity = 8192},
-    {.name = "p.c", .components = k_c_components, .capacity = 65536},
+    {.name = ".a", .components = "Pos, Seq", .capacity = 8192},
+    {.name = ".b", .components = "Pos", .capacity = 8192},
+    {.name = ".c", .components = "Seq", .capacity = 65536},
 };
 
 struct Moved { Handle who; u32 by; };
@@ -47,7 +44,7 @@ void sys_move_a(TickContext& ctx) {
     }
 }
 void sys_move_b(TickContext& ctx) {
-    const Table* b = ctx.read_kind("p.b");
+    const Table* b = ctx.read_kind(".b");
     Span<Pos> pos = ctx.write<Pos>("p.b.Pos");
     f32 total = parallel_reduce(ctx, b->rows(), 50, 0.0f, [&](ChunkContext& cc, u32 lo, u32 hi) {
         f32 t = 0;
@@ -67,15 +64,11 @@ void sys_s1(TickContext& ctx) { PState& s = ctx.state_as<PState>(); s.order[s.n+
 void sys_s2(TickContext& ctx) { PState& s = ctx.state_as<PState>(); s.order[s.n++ % 8] = 2; }
 bool p_startup(Engine&, ModuleInstance& self) { self.set_state(arena_push<PState>(self.arena)); return true; }
 
-constinit const char* const k_a_reads[]  = {"p.a.Seq"};
-constinit const char* const k_a_writes[] = {"p.a.Pos"};
-constinit const char* const k_b_reads[]  = {"p.b"};
-constinit const char* const k_b_writes[] = {"p.b.Pos"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "p.s1",     .phase = Phase::Sim, .fn = sys_s1},
-    {.name = "p.move_a", .phase = Phase::Sim, .fn = sys_move_a, .reads = k_a_reads, .writes = k_a_writes, .state = StateUse::None},
-    {.name = "p.s2",     .phase = Phase::Sim, .fn = sys_s2},
-    {.name = "p.move_b", .phase = Phase::Sim, .fn = sys_move_b, .reads = k_b_reads, .writes = k_b_writes, .state = StateUse::None},
+    {.name = ".s1",     .phase = Phase::Sim, .fn = sys_s1},
+    {.name = ".move_a", .phase = Phase::Sim, .fn = sys_move_a, .reads = ".a.Seq", .writes = ".a.Pos", .state = StateUse::None},
+    {.name = ".s2",     .phase = Phase::Sim, .fn = sys_s2},
+    {.name = ".move_b", .phase = Phase::Sim, .fn = sys_move_b, .reads = ".b", .writes = ".b.Pos", .state = StateUse::None},
 };
 KV_MODULE_DEFINE(k_p) = {.name = "p", .events = k_events, .components = k_components, .kinds = k_kinds,
                          .systems = k_systems, .startup = p_startup, .memory = {.reserve = 4096}};

@@ -21,8 +21,7 @@ constinit const FieldDesc k_glow_fields[] = {KV_FIELD(Glow, a)};
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Pos, k_pos_fields, CompPrev), KV_COMPONENT(Vel, k_vel_fields), KV_COMPONENT(Glow, k_glow_fields, CompCosmetic),
 };
-constinit const char* const k_body_components[] = {"Pos", "Vel", "Glow"};
-constinit const KindDesc k_kinds[] = {{.name = "s.body", .components = k_body_components, .capacity = 64}};
+constinit const KindDesc k_kinds[] = {{.name = "s.body", .components = "Pos, Vel, Glow", .capacity = 64}};
 
 char g_trace[256];
 void trace(const char* s) { strncat(g_trace, s, sizeof g_trace - strlen(g_trace) - 1); }
@@ -33,59 +32,46 @@ void sys_glow(TickContext&)   { trace("glow "); }
 void sys_spawn(TickContext&)  { trace("spawn "); }
 void sys_other(TickContext&)  { trace("other "); }
 
-constinit const char* const k_pos_w[]   = {"*.Pos"};
-constinit const char* const k_pos_r[]   = {"*.Pos"};
-constinit const char* const k_vel_r[]   = {"*.Vel"};
-constinit const char* const k_vel_w[]   = {"s.body.Vel"};
-constinit const char* const k_glow_w[]  = {"*.Glow"};
-constinit const char* const k_glow_r[]  = {"*.Glow"};
-constinit const char* const k_body_w[]  = {"s.body"};
-constinit const char* const k_after_move[] = {"s.move"};
 
 // Declared backwards on purpose: wrap (reads Pos) before move (writes Pos, reads Vel)
 // before steer (writes Vel). The schedule must come out steer, move, wrap. glow is a
 // cosmetic system reading Pos: after move, and free to sit anywhere else.
 constinit const SystemDesc k_a_systems[] = {
-    {.name = "s.wrap",  .phase = Phase::Sim, .fn = sys_wrap,  .reads = k_pos_r, .writes = k_pos_w, .after = k_after_move},
-    {.name = "s.move",  .phase = Phase::Sim, .fn = sys_move,  .reads = k_vel_r, .writes = k_pos_w},
-    {.name = "s.steer", .phase = Phase::Sim, .fn = sys_steer, .writes = k_vel_w},
-    {.name = "s.glow",  .phase = Phase::Sim, .fn = sys_glow,  .reads = k_pos_r, .writes = k_glow_w},
+    {.name = "s.wrap",  .phase = Phase::Sim, .fn = sys_wrap,  .reads = "*.Pos", .writes = "*.Pos", .after = "s.move"},
+    {.name = "s.move",  .phase = Phase::Sim, .fn = sys_move,  .reads = "*.Vel", .writes = "*.Pos"},
+    {.name = "s.steer", .phase = Phase::Sim, .fn = sys_steer, .writes = "s.body.Vel"},
+    {.name = "s.glow",  .phase = Phase::Sim, .fn = sys_glow,  .reads = "*.Pos", .writes = "*.Glow"},
 };
 KV_MODULE_DEFINE(k_a) = {.name = "a", .components = k_components, .kinds = k_kinds, .systems = k_a_systems};
 
 // A kind writer covers every column, so spawn (writes s.body) is a second writer of Vel
 // and Glow and must be ordered against steer and glow by hand; move and wrap follow from
 // the reads. Before move it goes by the path through steer.
-constinit const char* const k_spawn_before[] = {"s.steer", "s.glow"};
 constinit const SystemDesc k_b_systems[] = {
-    {.name = "s.spawn", .phase = Phase::Sim, .fn = sys_spawn, .writes = k_body_w, .before = k_spawn_before},
+    {.name = "s.spawn", .phase = Phase::Sim, .fn = sys_spawn, .writes = "s.body", .before = "s.steer, s.glow"},
 };
 KV_MODULE_DEFINE(k_b) = {.name = "b", .systems = k_b_systems};
 
 // Rejections.
-constinit const SystemDesc k_double_systems[] = {{.name = "s.other", .phase = Phase::Sim, .fn = sys_other, .writes = k_pos_w}};
+constinit const SystemDesc k_double_systems[] = {{.name = "s.other", .phase = Phase::Sim, .fn = sys_other, .writes = "*.Pos"}};
 KV_MODULE_DEFINE(k_double) = {.name = "double", .systems = k_double_systems};
 
-constinit const char* const k_cyc_a_r[] = {"*.Vel"}; constinit const char* const k_cyc_a_w[] = {"*.Glow"};
-constinit const char* const k_cyc_b_r[] = {"*.Glow"}; constinit const char* const k_cyc_b_w[] = {"s.body.Vel"};
 constinit const SystemDesc k_cycle_systems[] = {
-    {.name = "c.a", .phase = Phase::PostSim, .fn = sys_other, .reads = k_cyc_a_r, .writes = k_cyc_a_w},
-    {.name = "c.b", .phase = Phase::PostSim, .fn = sys_other, .reads = k_cyc_b_r, .writes = k_cyc_b_w},
+    {.name = "c.a", .phase = Phase::PostSim, .fn = sys_other, .reads = "*.Vel", .writes = "*.Glow"},
+    {.name = "c.b", .phase = Phase::PostSim, .fn = sys_other, .reads = "*.Glow", .writes = "s.body.Vel"},
 };
 KV_MODULE_DEFINE(k_cycle) = {.name = "cycle", .components = k_components, .kinds = k_kinds, .systems = k_cycle_systems};
 
 // Reads cosmetic Glow and writes sim Vel: the flow rule.
-constinit const SystemDesc k_flow_systems[] = {{.name = "f.back", .phase = Phase::Sim, .fn = sys_other, .reads = k_glow_r, .writes = k_vel_w}};
+constinit const SystemDesc k_flow_systems[] = {{.name = "f.back", .phase = Phase::Sim, .fn = sys_other, .reads = "*.Glow", .writes = "s.body.Vel"}};
 KV_MODULE_DEFINE(k_flow) = {.name = "flow", .components = k_components, .kinds = k_kinds, .systems = k_flow_systems};
 
-constinit const char* const k_after_nowhere[] = {"s.nowhere"};
-constinit const SystemDesc k_unknown_systems[] = {{.name = "u.sys", .phase = Phase::Sim, .fn = sys_other, .after = k_after_nowhere}};
+constinit const SystemDesc k_unknown_systems[] = {{.name = "u.sys", .phase = Phase::Sim, .fn = sys_other, .after = "s.nowhere"}};
 KV_MODULE_DEFINE(k_unknown) = {.name = "unknown", .systems = k_unknown_systems};
 
-constinit const char* const k_after_later[] = {"s.late"};
 constinit const SystemDesc k_later_systems[] = {
     {.name = "s.late",  .phase = Phase::PostSim, .fn = sys_other},
-    {.name = "s.early", .phase = Phase::Sim,     .fn = sys_other, .after = k_after_later},
+    {.name = "s.early", .phase = Phase::Sim,     .fn = sys_other, .after = "s.late"},
 };
 KV_MODULE_DEFINE(k_later) = {.name = "later", .systems = k_later_systems};
 

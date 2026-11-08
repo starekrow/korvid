@@ -135,9 +135,8 @@ it, and resources `kind` (spawn and destroy) and `kind.Component` (each column).
 
 ```cpp
 constinit u32 g_rock_kind = 0;
-constinit const char* const k_rock_components[] = {"Transform2", "Sprite", "Velocity", "Collider2", "Health"};
 constinit const KindDesc k_kinds[] = {
-    {.name = "mygame.rock", .components = k_rock_components, .capacity = 1024, .id = &g_rock_kind},
+    {.name = ".rock", .components = "Transform2, Sprite, Velocity, Collider2, Health", .capacity = 1024, .id = &g_rock_kind},
 };
 ```
 
@@ -186,21 +185,30 @@ void move(TickContext& ctx) {
     }
 }
 
-constinit const char* const k_move_reads[]  = {"*.Velocity"};
-constinit const char* const k_move_writes[] = {"*.Transform2"};
-constinit const char* const k_wrap_after[]  = {"mygame.move"};
 constinit const SystemDesc k_systems[] = {
-    {.name = "mygame.move", .phase = Phase::Sim, .fn = move, .reads = k_move_reads, .writes = k_move_writes},
-    {.name = "mygame.wrap", .phase = Phase::Sim, .fn = wrap, .writes = k_move_writes, .after = k_wrap_after},
+    {.name = ".move", .phase = Phase::Sim, .fn = move, .reads = "*.Velocity", .writes = "*.Transform2"},
+    {.name = ".wrap", .phase = Phase::Sim, .fn = wrap, .writes = "*.Transform2", .after = ".move"},
 };
 ```
 
-Naming resources: `mygame.rock` is the kind (a write on it covers spawn, destroy and
-every column); `mygame.rock.Velocity` is one column; `*.Velocity` is that column in
-every kind that has one; `input.state` and `platform.window` are published resources
-reached with `ctx.resource<const Input>(...)`. `move` and `wrap` both write
-`*.Transform2`, so one of them must say `after` the other or init fails with both names;
-`move` reads what nobody in Sim writes, so it needs no edge of its own.
+**The name language.** Every name in a registration table is a string the engine reads
+at init. A name that starts with `.` is the module's own: in module `mygame`, `.rock` is
+`mygame.rock`, `.move` is `mygame.move`, `.rock.Velocity` is that kind's column. A set
+(`reads`, `writes`, `after`, `before`, a kind's `components`) is one string of
+comma-separated names; spaces around the commas are ignored. `?.layout` is an order that
+holds only if that system exists (`?` then the name). The same shorthand works at
+runtime where the engine knows the module: `ctx.resource_id(".score")`,
+`ctx.write_kind(".rock")`, `engine_publish(engine, self, ".score", ...)`. Names of other
+modules' things are written in full (`input.state`, `scene.compose`), as are names the
+engine does not expand: an event type, a component, a handle kind, a clip's label.
+
+Naming resources: `.rock` is the kind (a write on it covers spawn, destroy and every
+column); `.rock.Velocity` is one column; `*.Velocity` is that column in every kind that
+has one; `input.state` and `platform.window` are published resources reached with
+`ctx.resource<const Input>(...)`. `move` and `wrap` both write `*.Transform2`, so one of
+them must say `after` the other or init fails with both names; `move` reads what nobody
+in Sim writes, so it needs no edge of its own. An unknown name fails init with the
+system, the module and the name, as before.
 
 `.main_thread = true` pins a system to the thread driving the engine, for code that talks
 to the OS, the GPU or a module's own pools (the asset pumps, the CLI). `.state = StateUse::None`
@@ -242,7 +250,7 @@ holds the write on a column may index it directly.
 
 ```cpp
 void on_hit(TickContext& ctx, Span<const RockHit> hits) {
-    static const u32 k_hp = ctx.column_id("mygame.rock.Health");
+    static const u32 k_hp = ctx.column_id(".rock.Health");
     Game& g = ctx.state_as<Game>();
     Span<Health> hp = ctx.write<Health>(k_hp);
     for (const RockHit& h : hits) {
@@ -254,9 +262,8 @@ void on_hit(TickContext& ctx, Span<const RockHit> hits) {
     }
 }
 
-constinit const char* const k_hit_writes[] = {"mygame.rock.Health"};
 constinit const HandlerDesc k_handlers[] = {
-    {.name = "mygame.on_hit", KV_ON(RockHit, on_hit), .writes = k_hit_writes},
+    {.name = ".on_hit", KV_ON(RockHit, on_hit), .writes = ".rock.Health"},
 };
 ```
 
@@ -268,7 +275,7 @@ ctx.cancel(ticket);                                 // false if it already fired
 
 constinit u32 g_death = 0;
 constinit const TriggerDesc k_triggers[] = {
-    {.name = "mygame.death", .field = "mygame.ship.Health.hp", .edge = TriggerEdge::CrossedBelow, .value = 1.0, .id = &g_death},
+    {.name = ".death", .field = ".ship.Health.hp", .edge = TriggerEdge::CrossedBelow, .value = 1.0, .id = &g_death},
 };
 // A handler on StateEdge checks e.trigger == g_death. Requires CompPrev on Health.
 ```
@@ -282,7 +289,7 @@ bool mygame_startup(Engine& engine, ModuleInstance& self) {
     Game* g = arena_push<Game>(self.arena);
     if (!g) return false;
     self.set_state(g);
-    if (!engine_publish(engine, self, "mygame.score", &g->score)) return false; // others read it as a resource
+    if (!engine_publish(engine, self, ".score", &g->score)) return false; // others read it as a resource
     g->rock_look = asset_load_material(engine, "mygame/rock.material.json");
     g->rng = Rng::seeded(0x5eed);
     return true;
@@ -293,7 +300,7 @@ void mygame_shutdown(Engine&, ModuleInstance& self) {
     KV_INFO("mygame", "final score %d", g->score.total);   // arrays in self.general: free them here
 }
 
-constinit const ResourceDesc k_resources[] = {{"mygame.score"}};
+constinit const ResourceDesc k_resources[] = {{".score"}};
 
 KV_MODULE_DEFINE(mygame_module) = {
     .name       = "mygame",
