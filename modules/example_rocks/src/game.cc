@@ -396,18 +396,23 @@ void move(TickContext& ctx) {
     }
 }
 
-// Everything that left the window comes back on the other side. After move, by declaration.
+// Everything that left the window comes back on the other side. After move, by
+// declaration. A wrap is a teleport: the previous copy is written too, so the renderer
+// shows the sprite on the far side at once instead of interpolating it across the screen.
 void wrap(TickContext& ctx) {
     static const u32 k_window = ctx.resource_id("platform.window");
     const HostWindow* w = ctx.resource<const HostWindow>(k_window);
     f32 hw = (f32)w->width() * 0.5f + 32.0f, hh = (f32)w->height() * 0.5f + 32.0f;
     for (KindRows k : ctx.view<Transform2, const Velocity>()) {
-        Span<Transform2> t = k.col<Transform2>();
+        Span<Transform2> t    = k.col<Transform2>();
+        Span<Transform2> prev = k.prev<Transform2>();
         for (u32 i = 0; i < k.rows(); ++i) {
             if (!k.alive(i)) continue;
             point2& p = t[i].position;
+            point2 was = p;
             if (p.x > hw) p.x -= 2 * hw; else if (p.x < -hw) p.x += 2 * hw;
             if (p.y > hh) p.y -= 2 * hh; else if (p.y < -hh) p.y += 2 * hh;
+            if (p.x != was.x || p.y != was.y) prev[i] = t[i]; // teleported: no interpolation to here
         }
     }
 }

@@ -189,7 +189,7 @@ Header `korvid/core/phase.h`:
 | `TriggerDesc`, `TriggerEdge` | record, enum | `kind.Component.field` with `Changed`, `CrossedBelow(value)`, `CrossedAbove(value)` |
 | `Spawned{ticket, kind, entity}`, `StateEdge{entity, trigger, value}` | events | the engine's own, delivered to anyone |
 | `TickContext` | record | `engine`, `events`, `dt`, `tick`, `paused`; `state_as<T>()`, `emit`, `write_kind`, `read_kind`, `read<T>`, `write<T>`, `view<C...>()`, `resource<T>`, `resource_id`, `column_id`, `kind_id`, `spawn_later`, `destroy`, `destroy_all`, `schedule`, `schedule_in`, `cancel` |
-| `KindRows`, `KindRange<C...>` | records | one kind's rows in a view: `rows()`, `alive(i)`, `handle_at(i)`, `col<T>()`, `prev<T>()` |
+| `KindRows`, `KindRange<C...>` | records | one kind's rows in a view: `rows()`, `alive(i)`, `handle_at(i)`, `col<T>()`, `prev<T>()` (T const reads, T writes; writing the previous copy marks a teleport the renderer will not interpolate) |
 | `ChunkContext` | record | what a parallel chunk may do: `emit`, `spawn_later` (no ticket), `destroy` |
 | `parallel_for(ctx, count, grain, fn)`, `parallel_reduce(ctx, count, grain, init, fn, combine)` | functions | chunks on the pool, buffers merged in chunk order |
 | `CommandBuffer`, `command_spawn_begin`, `command_spawn_component`, `command_destroy`, `command_destroy_all` | record, functions | the deferred spawn and destroy stream |

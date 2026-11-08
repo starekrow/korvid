@@ -161,12 +161,14 @@ struct KindRows {
         Column* c = ctx_column_in(*ctx, *table, ComponentType<U>::id, &TypeKey<U>::key, !RemoveConst<T>::is_const);
         return c ? Span<T>((T*)c->data, table->rows()) : Span<T>();
     }
-    // The previous-tick rows, for components that keep them. Always a read.
+    // The previous-tick rows, for components that keep them. T const is a read; T is a
+    // write (checked against the write set): a system writes the previous copy to say an
+    // entity teleported, so nothing interpolates to where it is now.
     template <class T>
-    Span<const T> prev() const {
+    Span<T> prev() const {
         typedef typename RemoveConst<T>::type U;
-        Column* c = ctx_column_in(*ctx, *table, ComponentType<U>::id, &TypeKey<U>::key, false);
-        return c && c->prev ? Span<const T>((const T*)c->prev, table->rows()) : Span<const T>();
+        Column* c = ctx_column_in(*ctx, *table, ComponentType<U>::id, &TypeKey<U>::key, !RemoveConst<T>::is_const);
+        return c && c->prev ? Span<T>((T*)c->prev, table->rows()) : Span<T>();
     }
 };
 

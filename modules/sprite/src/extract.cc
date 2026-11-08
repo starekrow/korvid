@@ -6,7 +6,7 @@
 namespace kv {
 
 void ExtractState::free() {
-    for (ExtractTable& t : tables) { t.sent.free(); t.sent_sprites.free(); }
+    for (ExtractTable& t : tables) { t.sent.free(); t.sent_sprites.free(); t.sent_placements.free(); }
     tables.free();
 }
 
@@ -18,7 +18,7 @@ void extract_sprites(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
     Allocator* alloc = st.tables.alloc;
     while (st.tables.len < e.tables.len) {
         ExtractTable et;
-        et.sent.alloc = et.sent_sprites.alloc = alloc;
+        et.sent.alloc = et.sent_sprites.alloc = et.sent_placements.alloc = alloc;
         st.tables.push(et);
     }
 
@@ -28,6 +28,7 @@ void extract_sprites(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
         u32 n = table.rows();
         et.sent.resize_fill(n, Handle{});
         et.sent_sprites.resize_fill(n, Sprite{});
+        et.sent_placements.resize_fill(n, Transform2{});
         Span<const Transform2> cur  = table.rows_of<Transform2>();
         Span<const Transform2> prev = table.prev_rows_of<Transform2>();
         Span<const Sprite>     spr  = table.rows_of<Sprite>();
@@ -43,13 +44,16 @@ void extract_sprites(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
             out.push(d);
             et.sent[i] = Handle{};
         }
-        // Then Sets: new entities, and known ones that moved or changed.
+        // Then Sets: new entities, and known ones that moved or changed. A move whose
+        // previous copy already equals the new transform is a teleport: the system wrote
+        // both, and the renderer must not interpolate across the gap.
         for (u32 i = 0; i < n; ++i) {
             if (!table.is_alive(i)) continue;
             bool is_new  = et.sent[i].is_null();
-            bool moved   = !component_equal(transform2_schema(), &cur[i], &prev[i]);
+            bool moved   = !component_equal(transform2_schema(), &cur[i], &et.sent_placements[i]);
             bool changed = is_new || !component_equal(sprite_schema(), &spr[i], &et.sent_sprites[i]);
             if (!is_new && !moved && !changed) continue;
+            bool snap = moved && !is_new && component_equal(transform2_schema(), &cur[i], &prev[i]);
 
             SpriteDelta d{};
             d.kind            = SpriteDeltaKind::Set;
@@ -61,9 +65,11 @@ void extract_sprites(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
             d.state.tint      = spr[i].tint;
             d.state.layer     = spr[i].layer;
             d.state.space     = spr[i].space;
+            d.state.snap      = snap;
             out.push(d);
-            et.sent[i]         = d.entity;
-            et.sent_sprites[i] = spr[i];
+            et.sent[i]            = d.entity;
+            et.sent_sprites[i]    = spr[i];
+            et.sent_placements[i] = cur[i];
         }
     }
 }

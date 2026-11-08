@@ -297,6 +297,7 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
                     s->gpu.scale_y[0] = s->gpu.scale_y[1];
                     s->gpu.stamp = r->tick;
                 }
+                if (st.snap) write_placement(s->gpu.prev, &s->gpu.scale_y[0], st.placement); // a teleport: no history
                 if (bucket != s->bucket) {
                     --r->bucket_counts[s->bucket];
                     ++r->bucket_counts[bucket];

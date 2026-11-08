@@ -28,9 +28,11 @@ keeps the handle it last sent for each slot and the `Sprite` it last described. 
 
 1. A slot whose handle changed or died since the last extract becomes a `Remove` for the
    handle the renderer knows there. No table needs a destroy hook.
-2. A live slot the renderer has not seen, or whose `Transform2` differs from its previous
-   copy, or whose `Sprite` differs from what was last sent, becomes a `Set` with the
-   whole `RenderSpriteState`.
+2. A live slot the renderer has not seen, or whose `Transform2` or `Sprite` differs from
+   what was last sent, becomes a `Set` with the whole `RenderSpriteState`. A transform
+   that differs from what was sent but equals the engine's previous copy is a teleport:
+   the `Set` carries `snap`, and the renderer shows the sprite there at once instead of
+   interpolating across the gap.
 3. The tick's deltas start with a `Tick` marker, so the renderer knows where "previous"
    ends whatever the tick-to-frame ratio.
 
@@ -139,9 +141,11 @@ What the module registers with the engine:
   everything when anything changed. Changing a tint every tick costs the same as moving.
 - **The previous copy is the engine's, taken at the top of PreSim.** A transform written
   twice in one tick (moved, then wrapped) is one delta with the final value, and the
-  renderer interpolates from where the tick began to where it ended; a wrap across the
-  screen therefore sweeps across it for one frame. Teleports that must not interpolate
-  are a renderer feature not built yet.
+  renderer interpolates from where the tick began to where it ended: a wrap across the
+  screen would sweep across it for one frame. **To teleport, write the previous copy
+  too** (`k.prev<Transform2>()[i] = t[i]` in a system holding the write): the extract
+  sees a transform that moved without a tick's worth of travel behind it and sends the
+  `Set` with `snap`. The rocks `wrap` does this.
 - **Rotation interpolates as a scalar.** Keep angles continuous.
 - **Layer is draw order, not depth.** Equal layers draw in slot order, stable frame to
   frame; the renderer clamps to [-128, 127]. Screen-space and world sprites share the

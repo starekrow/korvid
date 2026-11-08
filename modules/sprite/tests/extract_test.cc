@@ -77,6 +77,26 @@ void test_extract(kv::TestCtx& c) {
     KV_CHECK(c, out.len == 3 && out[1].kind == SpriteDeltaKind::Remove && out[1].entity == f);
     KV_CHECK(c, out[2].kind == SpriteDeltaKind::Set && out[2].entity == g);
 
+    // A move is a Set without snap; a teleport (the previous copy written too, so it
+    // equals the new transform) is a Set with snap; a transform the renderer already has
+    // is nothing, whatever the previous copy says.
+    out.clear();
+    t.begin_tick();
+    w.transform(g)->position = point2{40, 4};
+    extract_sprites(e, st, out);
+    KV_CHECK(c, out.len == 2 && out[1].entity == g && !out[1].state.snap);
+    out.clear();
+    t.begin_tick();
+    w.transform(g)->position = point2{-40, 4};
+    *t.prev<Transform2>(g) = *w.transform(g);
+    extract_sprites(e, st, out);
+    KV_CHECK(c, out.len == 2 && out[1].entity == g && out[1].state.snap && out[1].state.placement.position == point2{-40, 4});
+    out.clear();
+    t.begin_tick();
+    *t.prev<Transform2>(g) = transform2_at(point2{7, 7}); // a stale previous copy alone changes nothing
+    extract_sprites(e, st, out);
+    KV_CHECK(c, out.len == 1);
+
     // Deltas accumulate across ticks until the caller clears: two ticks, two markers.
     out.clear();
     t.begin_tick(); w.transform(g)->position = point2{2, 2}; extract_sprites(e, st, out);

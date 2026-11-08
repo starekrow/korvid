@@ -43,6 +43,7 @@ struct RenderSpriteState {
     color       tint;      // multiplies the material's tint
     i32         layer;     // drawn in ascending order; the renderer clamps to [-128, 127]
     SpriteSpace space;
+    bool        snap;      // a teleport: the renderer forgets where the sprite was and does not interpolate to here
 };
 
 enum class SpriteDeltaKind : u8 {
