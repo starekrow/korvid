@@ -34,6 +34,7 @@ struct ResourceEntry {
     void*       ptr  = nullptr; // what the owner published for systems to reach through the context
     const void* type = nullptr; // its type key
     bool        implicit = false; // a module's state: ordered by rank among its systems, never a conflict
+    bool        sink     = false; // ResourceDesc::sink: two writers never conflict
 };
 
 struct ComponentEntry {

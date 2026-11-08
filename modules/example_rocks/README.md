@@ -80,6 +80,7 @@ debris are additive dots.
 | `src/game.cc` | components, kinds, events, the trigger, the score, systems, handlers, startup, the tables |
 | `assets/ship.png`, `rock.png`, `dot.png`, `white.png`, `flame.png`, `*.material.json` | the art (generated) and the looks |
 | `assets/flame.anim.json` | the flame's clip: a two-frame flipbook and a scale wobble |
+| `assets/*.wav` | the sounds (generated: a saw sweep, two noise bursts, a loop with its ends cross-faded) |
 
 ## Behaviour worth knowing
 
@@ -102,6 +103,13 @@ debris are additive dots.
 - **Exit is a handler.** `on_exit` quits on `ExitRequested` whether or not the game is
   paused; a Sim system would not run while paused and a `--run-seconds` that lands
   inside the demo's pause would be lost.
+- **Sounds.** Four generated WAVs at 22 kHz (`shot`, `break`, `boom`, `thrust`), loaded
+  at startup. `control` plays a shot per bullet with a random pitch and a pan from the
+  ship's x; `on_rock_hit` plays a break pitched up by the rock's size; `on_edge` plays the
+  boom and stops the thruster; `on_spawned` starts the thruster as a silent loop that
+  `control` turns up while thrusting; `pause` plays a click on the Ui bus that does not
+  pause with the sim, so the resume is heard too. Every caller declares a write on
+  `audio.commands`, a sink resource: writers need no order between them.
 - **The flame is a child with a flipbook.** The `flame` kind has `Local2`, `Parent` and
   an `AnimPlayer`; `on_spawned` gives each new ship one, 30 units behind it, playing
   `flame.anim.json` (two frames of a sheet at 12 fps and a scale wobble on its `Local2`),

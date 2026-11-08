@@ -207,6 +207,13 @@ to the OS, the GPU or a module's own pools (the asset pumps, the CLI). `.state =
 lets a system run beside its module's others. `.runs = RunWhen::Always` makes a system run
 on paused ticks too (see below); the default, `Unpaused`, is right for gameplay.
 
+### Sink resources
+
+`ResourceDesc{"audio.commands", true}` declares a sink: a command queue that any number of
+units append to. Two writers of a sink need no order between them (the appends land in
+unit order, which is fixed), while a plain resource with two unordered writers is a
+registration error. Readers of a sink still run after its writers.
+
 ### Cosmetic kinds
 
 `KindDesc::cosmetic = true` keeps a kind out of the state hash altogether: glyphs, an

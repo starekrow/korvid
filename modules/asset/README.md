@@ -1,6 +1,7 @@
 # asset
 
-Files that become engine resources: PNG textures, JSON materials and TrueType fonts. You ask for a path
+Files that become engine resources: PNG textures, JSON materials, TrueType fonts and WAV
+or Ogg sounds. You ask for a path
 and get a handle back at once; what the handle names already works (a texture slot that
 shows the placeholder checkerboard, a material row with the default look), the file
 loads in the background through the platform's I/O queue, and an event tells you when
@@ -116,6 +117,11 @@ uploads the atlas as white with coverage in alpha, and fills the glyph and kerni
 tables. `font_glyph`, `font_kern` and `font_measure` read them; the text module turns
 them into sprites. The same path at the same size is the same handle.
 
+**Sounds.** `asset_load_sound(engine, "mygame/shot.wav")`: the file decodes in
+`asset.pump_sounds` (WAV by our own reader, Ogg Vorbis by stb_vorbis) into interleaved
+f32 at its own rate, kept until shutdown so the audio module's mixer thread may read it
+without a lock. Nothing resamples at load.
+
 ## Quick reference
 
 Header `korvid/asset/texture.h`:
@@ -156,6 +162,14 @@ Header `korvid/asset/font.h`:
 | `font_glyph(font, cp)`, `font_kern(font, a, b)`, `font_measure(font, str, scale)` | functions | lookups over a Ready font; nothing before |
 | `KV_FONT_FIRST`, `KV_FONT_COUNT` | constants | 32, 224: printable ASCII and Latin-1 |
 
+Header `korvid/asset/sound.h`:
+
+| name | kind | what |
+|---|---|---|
+| `SoundAsset` | record | `path`, `state`, `error`, `rate`, `channels`, `frames`, `samples` (interleaved f32); `seconds()` |
+| `asset_load_sound(e, path)`, `asset_sound(e, h)` | functions | handle at once; the record or null |
+| `sound_decode(bytes, size, alloc, out, &error)`, `sound_decode_wav`, `sound_decode_ogg` | functions | the decoders on their own |
+
 Header `korvid/asset/png.h`:
 
 | name | kind | what |
@@ -169,12 +183,13 @@ What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
-| `asset.texture`, `asset.material`, `asset.font` | handle kinds | `kv_handle_describe` prints path, state and size, blend or atlas |
+| `asset.texture`, `asset.material`, `asset.font`, `asset.sound` | handle kinds | `kv_handle_describe` prints path, state and size, blend, atlas or length |
 | `AssetReady`, `AssetFailed` | event types | no schema: the handle is an asset's, not an entity's, so it is never dropped as stale |
-| `asset.textures`, `asset.materials`, `asset.fonts` | resources | the tables; the pumps write them |
+| `asset.textures`, `asset.materials`, `asset.fonts`, `asset.sounds` | resources | the tables; the pumps write them |
 | `asset.pump` | system, phase PreSim, main thread | writes `asset.textures` |
 | `asset.pump_materials` | system, phase PreSim, main thread, after `asset.pump` | reads `asset.textures`, writes `asset.materials` |
 | `asset.pump_fonts` | system, phase PreSim, main thread, after `asset.pump_materials` | writes `asset.fonts` |
+| `asset.pump_sounds` | system, phase PreSim, main thread | writes `asset.sounds` |
 | `ls materials`, `dump material`, `patch material` | CLI commands | the material tools |
 
 Resources a system of yours might name: none. Reach the records through the functions;

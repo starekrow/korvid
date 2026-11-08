@@ -2,13 +2,16 @@
 // with --demo), bullets expire by scheduled event, rocks split when hit and spawn debris,
 // waves arrive on a timer, the ship's death is a trigger on its Health column, and a
 // restart follows two seconds later. Escape (or Start on a pad) pauses: the sim holds, a
-// screen-space dimmer covers the field, Q quits. A hit shakes the camera. Everything the
-// game knows is in kinds and one published Score; no handle is kept anywhere except on
-// the events that carry them.
+// screen-space dimmer covers the field, Q quits. A hit shakes the camera. Shots, breaks
+// and the ship's end make sounds, with a looping thruster whose volume follows the
+// thrust. Everything the game knows is in kinds and one published Score; the only handles
+// kept are the thruster voice and the assets.
 #include "korvid/example_rocks/module.h"
 #include "korvid/anim/module.h"
 #include "korvid/asset/font.h"
 #include "korvid/asset/material.h"
+#include "korvid/asset/sound.h"
+#include "korvid/audio/module.h"
 #include "korvid/collision/module.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
@@ -109,6 +112,7 @@ constinit const TriggerDesc k_triggers[] = {
 struct Score { i32 total; u32 rocks_shot; u32 wave; u32 games; };
 
 enum Look : u8 { LOOK_SHIP, LOOK_ROCK, LOOK_BULLET, LOOK_DEBRIS, LOOK_WHITE, LOOK_FLAME, LOOK_COUNT };
+enum Snd : u8 { SND_SHOT, SND_BREAK, SND_BOOM, SND_THRUST, SND_COUNT };
 
 struct Game {
     Score  score;
@@ -117,6 +121,8 @@ struct Game {
     Handle font;                  // asset.font: DejaVu Sans at 28 px
     Handle flame_clip;            // anim.clip from a file: the flame's flipbook
     Handle fade_clip;             // anim.clip built here: one second of alpha to zero
+    Handle sounds[SND_COUNT];     // asset.sound
+    Handle thrust_voice;          // audio.voice: the looping thruster, alive with the ship
     u16    ship_hk, bullet_hk, rock_hk, debris_hk; // handle kinds, to tell what an event is about
     bool   started = false;
     bool   demo    = false;
@@ -237,6 +243,14 @@ void pause(TickContext& ctx) {
         destroy_labels(*labels, ROLE_PAUSED);
         engine_pause(e, false);
     }
+    // A click on the Ui bus that does not pause with the sim, so the resume click plays.
+    SoundPlay click;
+    click.sound  = g.sounds[SND_SHOT];
+    click.volume = 0.3f;
+    click.pitch  = e.clock.paused ? 0.5f : 0.7f; // the clock just flipped: low going in, higher coming out
+    click.bus    = AudioBus::Ui;
+    click.pause_with_sim = false;
+    audio_play(ctx, click);
 }
 
 // Phase PostSim, every tick: the HUD label says what the score says. One write per tick;
@@ -312,6 +326,8 @@ void control(TickContext& ctx) {
             Span<Sprite> fs = flames->rows_of<Sprite>();
             for (u32 f = 0; f < flames->rows(); ++f)
                 if (flames->is_alive(f)) fs[f].tint.a = thrust ? 1.0f : 0.0f;
+            // The thruster loop plays all along; its volume follows the thrust.
+            if (!g.thrust_voice.is_null()) audio_set(ctx, g.thrust_voice, thrust ? 0.35f : 0.0f, 1.0f, 0.0f);
             s[i].cooldown -= dt;
             if (fire && s[i].cooldown <= 0.0f) {
                 s[i].cooldown = kFireCooldown;
@@ -321,6 +337,12 @@ void control(TickContext& ctx) {
                 Handle b = bullets->spawn(transform2_at(at), sprite_of(g, LOOK_BULLET, 12.0f, 3, color_rgba(1.0f, 0.95f, 0.5f)),
                                           Velocity{v[i].v + dir * kBulletSpeed, 0.0f}, collider_circle(4.0f, L_BULLET, L_ROCK));
                 if (!b.is_null()) ctx.schedule_in(Expire{b}, kBulletLife);
+                SoundPlay shot;
+                shot.sound  = g.sounds[SND_SHOT];
+                shot.volume = 0.45f;
+                shot.pitch  = g.rng.range(0.9f, 1.15f);
+                shot.pan    = at.x / 900.0f;
+                audio_play(ctx, shot);
             }
         }
     }
@@ -431,6 +453,12 @@ void on_rock_hit(TickContext& ctx, Span<const RockHit> hits) {
             spawn_rock(*rocks, g, at, (u8)(size + 1), d2 * 1.4f);
         }
         spawn_debris(ctx, g, at, 6, color_rgba(1.0f, 0.7f, 0.3f));
+        SoundPlay crack;
+        crack.sound  = g.sounds[SND_BREAK];
+        crack.volume = 0.7f - 0.15f * (f32)size;
+        crack.pitch  = 1.0f + 0.35f * (f32)size; // smaller rocks, higher cracks
+        crack.pan    = at.x / 900.0f;
+        audio_play(ctx, crack);
         score->total += kRockPoints[size];
         score->rocks_shot += 1;
         ctx.emit(ScoreChanged{kRockPoints[size], score->total});
@@ -463,6 +491,12 @@ void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
         Sprite flame = sprite_of(g, LOOK_FLAME, 32.0f, 1, color_rgba(1.0f, 1.0f, 1.0f, 0.0f));
         flame.uv = rect2{0.0f, 0.0f, 0.5f, 1.0f}; // frame 0 of the two-frame sheet, until the clip says otherwise
         flames->spawn(Transform2{}, flame, local2_at(point2{-30.0f, 0.0f}), Parent{s.entity}, anim_player(g.flame_clip));
+        // The thruster: a silent loop until control turns it up.
+        SoundPlay thrust;
+        thrust.sound  = g.sounds[SND_THRUST];
+        thrust.volume = 0.0f;
+        thrust.loop   = true;
+        g.thrust_voice = audio_play(ctx, thrust);
     }
 }
 
@@ -515,6 +549,10 @@ void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
         if (e.trigger != g_death) continue;
         ctx.destroy(e.entity);
         ctx.cancel(g.next_wave); // the field stays as it is until the restart
+        if (!g.thrust_voice.is_null()) { audio_stop(ctx, g.thrust_voice); g.thrust_voice = Handle{}; }
+        SoundPlay boom;
+        boom.sound = g.sounds[SND_BOOM];
+        audio_play(ctx, boom);
         ctx.emit(GameOver{score->total});
         ctx.schedule_in(Restart{}, kRestartTicks);
         char line[48];
@@ -568,6 +606,11 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     fade.name = "example_rocks.fade"; fade.loop = AnimLoop::Once; fade.tracks = k_fade_tracks;
     g->fade_clip = anim_create(engine, fade);
     if (g->flame_clip.is_null() || g->fade_clip.is_null()) return false;
+    const char* sounds[SND_COUNT] = {"example_rocks/shot.wav", "example_rocks/break.wav", "example_rocks/boom.wav", "example_rocks/thrust.wav"};
+    for (u32 i = 0; i < SND_COUNT; ++i) {
+        g->sounds[i] = asset_load_sound(engine, sounds[i]);
+        if (g->sounds[i].is_null()) return false;
+    }
     // Each look is a material file; the file names its texture. The handles are usable
     // now and show the placeholder until the files and textures arrive.
     const char* looks[LOOK_COUNT] = {"example_rocks/ship.material.json", "example_rocks/rock.material.json",
@@ -592,7 +635,7 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
 constinit const ResourceDesc k_resources[] = {{"example_rocks.score"}};
 
 constinit const char* const k_control_reads[]  = {"input.state"};
-constinit const char* const k_control_writes[] = {"example_rocks.ship.Transform2", "example_rocks.ship.Velocity", "example_rocks.ship.Ship", "example_rocks.bullet", "example_rocks.flame"};
+constinit const char* const k_control_writes[] = {"example_rocks.ship.Transform2", "example_rocks.ship.Velocity", "example_rocks.ship.Ship", "example_rocks.bullet", "example_rocks.flame", "audio.commands"};
 constinit const char* const k_before_move[]    = {"example_rocks.move"};
 constinit const char* const k_move_reads[]     = {"*.Velocity"};
 constinit const char* const k_move_writes[]    = {"*.Transform2"};
@@ -601,7 +644,7 @@ constinit const char* const k_after_move[]     = {"example_rocks.move"};
 
 constinit const char* const k_game_reads[]     = {"example_rocks.score"};
 constinit const char* const k_pause_reads[]    = {"platform.window"};
-constinit const char* const k_pause_writes[]   = {"example_rocks.overlay", "example_rocks.label"};
+constinit const char* const k_pause_writes[]   = {"example_rocks.overlay", "example_rocks.label", "audio.commands"};
 constinit const char* const k_hud_reads[]      = {"example_rocks.score", "example_rocks.label.Label"};
 constinit const char* const k_hud_writes[]     = {"example_rocks.label.Text"};
 constinit const char* const k_camera_writes[]  = {"sprite.camera"};
@@ -616,18 +659,18 @@ constinit const SystemDesc k_systems[] = {
     {.name = "example_rocks.hud",     .phase = Phase::PostSim, .fn = hud, .reads = k_hud_reads, .writes = k_hud_writes, .runs = RunWhen::Always},
 };
 
-constinit const char* const k_rock_hit_writes[] = {"example_rocks.rock", "example_rocks.score"};
+constinit const char* const k_rock_hit_writes[] = {"example_rocks.rock", "example_rocks.score", "audio.commands"};
 constinit const char* const k_ship_hit_reads[]  = {"example_rocks.ship.Transform2"};
 constinit const char* const k_ship_hit_writes[] = {"example_rocks.ship.Health"};
 constinit const char* const k_wave_reads[]      = {"platform.window"};
 constinit const char* const k_wave_writes[]     = {"example_rocks.score"};
 constinit const char* const k_score_reads[]     = {"example_rocks.score"};
-constinit const char* const k_edge_writes[]     = {"example_rocks.label"};
+constinit const char* const k_edge_writes[]     = {"example_rocks.label", "audio.commands"};
 constinit const char* const k_restart_reads[]   = {"platform.window"};
 constinit const char* const k_restart_writes[]  = {"example_rocks.score", "example_rocks.label"};
 constinit const char* const k_after_rock_hit[]  = {"example_rocks.on_rock_hit"};
 constinit const char* const k_after_wave[]      = {"example_rocks.on_wave"};
-constinit const char* const k_spawned_writes[]  = {"example_rocks.flame"};
+constinit const char* const k_spawned_writes[]  = {"example_rocks.flame", "audio.commands"};
 constinit const HandlerDesc k_handlers[] = {
     {.name = "example_rocks.on_exit",     KV_ON(ExitRequested, on_exit)},
     {.name = "example_rocks.on_asset_failed", KV_ON(AssetFailed, on_asset_failed)},

@@ -1,4 +1,5 @@
 #include "korvid/platform/module.h"
+#include "korvid/platform/audio.h"
 #include "korvid/platform/events.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -37,8 +38,9 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
     return true;
 }
 
-void platform_shutdown(Engine&, ModuleInstance& self) {
+void platform_shutdown(Engine& e, ModuleInstance& self) {
     PlatformState* s = self.state_as<PlatformState>();
+    platform_audio_close(e); // whoever opened it, it ends with the module
     if (s) {
         s->window.close(); // the service ends with the module, whoever opened it
         input_gamepads_close(s->input);

@@ -193,7 +193,9 @@ bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
                          modules[e.resources[id - 1].module]->name, modules[i]->name);
                 return false;
             }
-            e.resources.push(ResourceEntry{r.name, i});
+            ResourceEntry entry{r.name, i};
+            entry.sink = r.sink;
+            e.resources.push(entry);
         }
     }
     return true;
@@ -420,10 +422,18 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
                 if (reaches(edges, n, i, j) || reaches(edges, n, j, i)) continue;
                 edges.push(Edge{i, j, st});
             }
-    // Two writers of one resource need a path between them, either way round.
+    // Two writers of one resource need a path between them, either way round. A sink (a
+    // command queue) is the exception: appends from anywhere land in unit order.
     for (u32 i = 0; i < n; ++i)
         for (u32 j = i + 1; j < n; ++j) {
             u32 r = first_conflict(e, pend[i].writes_eff, pend[j].writes_eff);
+            while (r && e.resources[r - 1].sink) {
+                // Skip sinks and look for a real conflict beyond them.
+                u32 next = 0;
+                for (u32 x : pend[i].writes_eff)
+                    if (x > r && contains(pend[j].writes_eff, x) && !e.resources[x - 1].implicit && !e.resources[x - 1].sink) { next = x; break; }
+                r = next;
+            }
             if (!r) continue;
             if (reaches(edges, n, i, j) || reaches(edges, n, j, i)) continue;
             KV_ERROR("engine", "'%s' and '%s' both write '%s' (%s) with no order between them: add `after` or `before`",

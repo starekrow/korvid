@@ -31,6 +31,7 @@ struct ModuleDesc;
 // Declared by the module that owns it; referenced by name in system read/write sets.
 struct ResourceDesc {
     const char* name;
+    bool        sink = false; // a command queue many units append to: writers need no order between them; appends land in unit order
 };
 
 // What a module needs from the memory system. Declared, not requested at runtime.

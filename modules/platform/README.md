@@ -131,6 +131,14 @@ Header `korvid/platform/events.h`: `WindowResized{width, height}`, `FocusChanged
 `MouseWheel{dx, dy}`, `GamepadConnected{pad}`, `GamepadDisconnected{pad}`,
 `PadButtonDown{button, pad}`, `PadButtonUp{button, pad}`.
 
+Header `korvid/platform/audio.h`:
+
+| name | kind | what |
+|---|---|---|
+| `AudioDeviceDesc` | record | `rate` (48000), `channels` (2), `frames` (512), `callback(user, out, frames)`, `user` |
+| `AudioDeviceInfo` | record | `rate`, `channels`, `frames`, `open` |
+| `platform_audio_open(e, desc)`, `platform_audio_close(e)`, `platform_audio(e)` | functions | the default playback device as a stream; the callback runs on SDL's thread, marked realtime, and fills interleaved f32 |
+
 Header `korvid/platform/io.h`:
 
 | name | kind | what |
