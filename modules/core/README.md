@@ -66,7 +66,9 @@ serves registered tasks round-robin within the budget. `docs/design/idle.md`.
 **Tools in core.** The profiler (`profile.h`): zones, waits, marks and counters into
 per-thread rings, read between frames into summaries, a frame tree, and a Chrome trace.
 Names (`name.h`): interned strings compared as integers. Hashing (`hash.h`): one fixed
-64-bit hash, never seeded. A JSON reader (`json.h`), the CLI registry (`cli.h`), a
+64-bit hash, never seeded. UTF-8 (`utf8.h`), the engine's one text encoding: total
+decoding (malformed bytes are U+FFFD, one at a time), encoding, validation and copies
+that truncate at a character boundary. A JSON reader (`json.h`), the CLI registry (`cli.h`), a
 seeded PCG32 (`random.h`), a test harness (`test.h`), a leveled log (`log.h`).
 
 ## Using it
@@ -211,7 +213,8 @@ Header `korvid/core/component.h`, `kind.h`:
 
 | name | kind | what |
 |---|---|---|
-| `FieldDesc`, `FieldType` | record, enum | one field: scalar type, count, offset |
+| `FieldDesc`, `FieldType` | record, enum | one field: scalar type, count, offset; `Char` is a byte of UTF-8, so a `char[N]` field is a string |
+| `schema_field_string`, `schema_field_set_string` | functions | a `char[N]` field as a quoted string, and set from one with truncation at a character boundary |
 | `ComponentDesc`, `ComponentFlags` | record, enum | name, size, align, fields, `CompSim`, `CompCosmetic`, `CompPrev`, the id slot |
 | `KV_FIELD(T, m)`, `KV_FIELDS(T, ...)`, `KV_COMPONENT(T, fields, flags...)`, `KV_FIELD_TRAITS(M, T, N)` | macros | the tables, from member names; traits for your own aggregates |
 | `ComponentType<T>::id` | record | the id slot, filled at init |
@@ -248,11 +251,12 @@ Header `korvid/core/profile.h`:
 | `prof_collect()`, `prof_frame_stats()`, `prof_thread_stats()`, `prof_log_summary(top)`, `prof_top(out, &frames)`, `prof_keep_frame`, `prof_log_frame` | functions | the collector, between frames on main |
 | `prof_trace_open(path)`, `prof_trace_close()`, `prof_shutdown()` | functions | a Chrome JSON trace |
 
-Header `korvid/core/json.h`, `cli.h`, `random.h`, `log.h`, `test.h`:
+Header `korvid/core/utf8.h`, `json.h`, `cli.h`, `random.h`, `log.h`, `test.h`:
 
 | name | kind | what |
 |---|---|---|
-| `json_parse(text, len, alloc, doc)`, `JsonDoc`, `JsonValue`, `JsonType` | function, records | a flat tree in the allocator given; errors with byte offsets |
+| `utf8_decode`, `utf8_next`, `utf8_encode`, `utf8_valid`, `utf8_count`, `utf8_prefix`, `utf8_copy`, `utf8_trim` | functions | UTF-8 without allocation; `utf8_copy` zeroes the rest of a fixed field |
+| `json_parse(text, len, alloc, doc)`, `JsonDoc`, `JsonValue`, `JsonType` | function, records | a flat tree in the allocator given; strings are UTF-8 (`\u` escapes and surrogate pairs decoded, lone surrogates rejected); errors with byte offsets |
 | `json_get`, `json_at`, `json_first`, `json_next`, `json_number`, `json_bool`, `json_string`, `json_numbers` | functions | walking and typed reads with defaults |
 | `CliCommandDesc`, `CliContext`, `cli_arg_f32`, `cli_arg_u32` | records, functions | a command as module data; `print`, `fail`; argument parsing |
 | `Rng` | record | PCG32: `seeded(seed, stream)`, `next`, `unit`, `range`, `below`, `chance` |

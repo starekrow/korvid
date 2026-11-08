@@ -7,6 +7,7 @@
 #include "korvid/core/memory.h"
 #include "korvid/core/name.h"
 #include "korvid/core/profile.h"
+#include "korvid/core/utf8.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -107,7 +108,9 @@ void kinds_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         for (const FieldDesc& f : c.desc->fields) {
             char summary[128];
             usize at = 0;
-            for (u32 l = 0; l < f.count && at < sizeof summary; ++l) {
+            summary[0] = 0;
+            if (f.type == FieldType::Char) schema_field_string(f, row, summary, sizeof summary);
+            else for (u32 l = 0; l < f.count && at < sizeof summary; ++l) {
                 f64 v = 0.0;
                 if (schema_field_lane(f, row, l, &v)) at += (usize)snprintf(summary + at, sizeof summary - at, "%s%g", l ? " " : "", v);
                 else { Handle h; memcpy(&h, row + f.offset, sizeof h); at += (usize)snprintf(summary + at, sizeof summary - at, "%s", h.is_null() ? "null" : kind_name(h)); break; }
@@ -173,6 +176,7 @@ bool kinds_describe(CliContext& ctx, const char* rel) {
     }
     char line[256];
     usize at = 0;
+    if (f->type == FieldType::Char) { schema_field_string(*f, row, line, sizeof line); ctx.print("%s", line); return true; }
     for (u32 l = 0; l < f->count; ++l) {
         f64 v = 0.0;
         if (schema_field_lane(*f, row, l, &v)) at += (usize)snprintf(line + at, sizeof line - at, "%s%g", l ? " " : "", v);
@@ -188,6 +192,18 @@ bool kinds_patch(CliContext& ctx, const char* rel, Span<const char* const> value
     if (!rel[0] || !kind_node(e, rel, &t, &slot, &col, &f)) { ctx.fail("no such path under /kinds: %s", rel); return false; }
     if (!f) { ctx.fail("patch a field: /kinds/<module>/<kind>/<slot>/<Component>/<field> value..."); return false; }
     if (f->type == FieldType::Handle) { ctx.fail("a handle field cannot be patched"); return false; }
+    if (f->type == FieldType::Char) {
+        // A string: the values joined by single spaces (quote it to keep runs of spaces).
+        char str[512];
+        usize at = 0;
+        str[0] = 0;
+        for (u32 i = 0; i < values.len && at < sizeof str; ++i)
+            at += (usize)snprintf(str + at, sizeof str - at, "%s%s", i ? " " : "", values[i]);
+        utf8_trim(str);
+        u8* srow = const_cast<Column*>(col)->data + (usize)slot * col->stride;
+        schema_field_set_string(*f, srow, str);
+        return kinds_describe(ctx, rel);
+    }
     if (values.len != f->count) { ctx.fail("field '%s' takes %u value%s", f->name, f->count, f->count == 1 ? "" : "s"); return false; }
     u8* row = const_cast<Column*>(col)->data + (usize)slot * col->stride;
     for (u32 l = 0; l < f->count; ++l) {

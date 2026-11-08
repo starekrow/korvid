@@ -1,6 +1,7 @@
 #include "cli_internal.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
+#include "korvid/core/utf8.h"
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -14,6 +15,58 @@ namespace {
 CliConfig g_config;
 
 } // namespace
+
+usize cli_ascii_escape(const char* in, char* out, usize cap) {
+    usize at = 0;
+    auto put = [&](const char* s, usize n) {
+        if (at + n < cap) memcpy(out + at, s, n);
+        else if (at < cap) cap = at + 1; // the first escape that does not fit ends the output
+        at += n;
+    };
+    const char* p = in;
+    while (*p) {
+        const char* start = p;
+        u32 cp = utf8_next(p);
+        if (cp == '\\') put("\\\\", 2);
+        else if (cp < 0x80) put(start, 1);
+        else { char e[16]; int n = snprintf(e, sizeof e, "\\u{%X}", cp); put(e, (usize)n); }
+    }
+    if (cap) out[at < cap ? at : cap - 1] = 0;
+    return at;
+}
+
+usize cli_ascii_unescape(const char* in, char* out, usize cap) {
+    usize at = 0;
+    auto put = [&](const char* s, usize n) {
+        if (at + n < cap) memcpy(out + at, s, n);
+        else if (at < cap) cap = at + 1;
+        at += n;
+    };
+    for (const char* p = in; *p;) {
+        if (p[0] == '\\' && p[1] == '\\') { put("\\", 1); p += 2; continue; }
+        if (p[0] == '\\' && p[1] == 'u' && p[2] == '{') {
+            u32 cp = 0, digits = 0;
+            const char* q = p + 3;
+            for (; digits < 7; ++q, ++digits) {
+                char c = *q;
+                u32 d = c >= '0' && c <= '9' ? (u32)(c - '0') : c >= 'a' && c <= 'f' ? (u32)(c - 'a' + 10) : c >= 'A' && c <= 'F' ? (u32)(c - 'A' + 10) : 16;
+                if (d == 16) break;
+                cp = cp * 16 + d;
+            }
+            if (digits > 0 && digits <= 6 && *q == '}') {
+                char e[4];
+                put(e, utf8_encode(cp, e));
+                p = q + 1;
+                continue;
+            }
+        }
+        put(p, 1);
+        ++p;
+    }
+    if (cap) out[at < cap ? at : cap - 1] = 0;
+    if (at >= cap && cap) utf8_trim(out); // raw UTF-8 passes through and may have been cut
+    return at;
+}
 
 CliState* cli_state(Engine& e) { return engine_module_state_as<CliState>(e, "cli"); }
 
@@ -37,9 +90,12 @@ void respond(Request& rq, const char* line) {
     char out[kLineMax + 48];
     int n = rq.id[0] ? snprintf(out, sizeof out, "%s %s\n", rq.id, line) : snprintf(out, sizeof out, "%s\n", line);
     if (n < 0) return;
-    if (s.is_stdin) { fputs(out, stdout); fflush(stdout); return; }
+    const char* send = out;
+    char esc[kLineMax * 4];
+    if (s.ascii) { cli_ascii_escape(out, esc, sizeof esc); send = esc; n = (int)strlen(esc); }
+    if (s.is_stdin) { fputs(send, stdout); fflush(stdout); return; }
     if (s.dropped && s.sock.out.len == 0) { s.sock.write_str("!dropped\n"); s.dropped = false; }
-    if (!s.sock.write(out, (u32)n)) { s.dropped = true; ++rq.cli->dropped; }
+    if (!s.sock.write(send, (u32)n)) { s.dropped = true; ++rq.cli->dropped; }
 }
 
 void request_sink(void* user, const char* line) { respond(*(Request*)user, line); }
@@ -89,8 +145,8 @@ const CliCommandDesc* match(CliState& cli, const char** words, u32 count, u32* c
 // Runs one request: parse, dispatch, frame the answer.
 bool run_request(Engine& e, CliState& cli, Request& rq, const char* text) {
     char line[kLineMax];
-    strncpy(line, text, sizeof line - 1);
-    line[sizeof line - 1] = 0;
+    if (rq.session && rq.session->ascii) cli_ascii_unescape(text, line, sizeof line);
+    else utf8_copy(line, sizeof line, text);
     const char* words[kMaxArgs];
     u32 n = split(line, words);
     rq.id[0] = 0;
@@ -225,12 +281,13 @@ bool cli_startup(Engine& e, ModuleInstance& self) {
     if (use_stdin) {
         Session& sess = s->sessions[s->session_count++];
         sess.is_stdin = true;
+        sess.ascii    = s->config.ascii;
     }
     if (s->config.port) {
         if (!s->listener.open(s->config.port, s->config.local_only)) return false;
         KV_INFO("cli", "listening on %s:%u", s->config.local_only ? "127.0.0.1" : "0.0.0.0", s->listener.port);
     }
-    KV_INFO("cli", "%u commands, %u mounts; stdin %s", s->commands.len, s->mounts.len, use_stdin ? "on" : "off");
+    KV_INFO("cli", "%u commands, %u mounts; stdin %s%s", s->commands.len, s->mounts.len, use_stdin ? "on" : "off", s->config.ascii ? "; ASCII transports" : "");
     return true;
 }
 
@@ -255,6 +312,7 @@ void cli_pump(TickContext& ctx) {
         s = Session{};
         s.sock.out.alloc = cli.commands.alloc;
         s.sock.adopt(fd);
+        s.ascii = cli.config.ascii;
         KV_INFO("cli", "session %u connected", cli.session_count - 1);
     }
     char buf[4096];

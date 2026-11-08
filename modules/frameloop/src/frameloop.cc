@@ -36,7 +36,7 @@ bool            g_prof_report  = false;   // --prof-report: the top zones with t
 const char*     g_shot_path    = nullptr; // --screenshot FILE: one frame as a PPM
 u64             g_shot_frame   = 90;      // --screenshot-frame N: which one
 bool            g_check_sort   = false;   // --check-sort: verify the GPU sort every 30th frame
-CliConfig       g_cli;                    // --cli-port N, --cli-stdin
+CliConfig       g_cli;                    // --cli-port N, --cli-stdin, --cli-ascii
 f64             g_idle_margin  = 0.0015;  // --idle-margin-ms N: slack kept back from idle work
 bool            g_idle         = true;    // --no-idle
 bool            g_overlay      = false;   // --overlay: the report on screen
@@ -96,6 +96,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--check-sort") == 0) g_check_sort = true;
         else if (strcmp(argv[i], "--cli-port") == 0 && i + 1 < argc) g_cli.port = (u16)atoi(argv[++i]);
         else if (strcmp(argv[i], "--cli-stdin") == 0) g_cli.stdin_ = true;
+        else if (strcmp(argv[i], "--cli-ascii") == 0) g_cli.ascii = true;
         else if (strcmp(argv[i], "--idle-margin-ms") == 0 && i + 1 < argc) g_idle_margin = atof(argv[++i]) * 1e-3;
         else if (strcmp(argv[i], "--no-idle") == 0) g_idle = false;
         else if (strcmp(argv[i], "--overlay") == 0) g_overlay = true;
@@ -103,7 +104,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin] [--idle-margin-ms N] [--no-idle] [--overlay]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--idle-margin-ms N] [--no-idle] [--overlay]", argv[0]);
             return false;
         }
     }

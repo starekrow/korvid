@@ -1,4 +1,5 @@
 #include "korvid/core/json.h"
+#include "korvid/core/utf8.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -42,12 +43,7 @@ struct Parser {
         return count++;
     }
 
-    static void put_utf8(char* out, u32& n, u32 cp) {
-        if (cp < 0x80) out[n++] = (char)cp;
-        else if (cp < 0x800) { out[n++] = (char)(0xC0 | (cp >> 6)); out[n++] = (char)(0x80 | (cp & 0x3F)); }
-        else if (cp < 0x10000) { out[n++] = (char)(0xE0 | (cp >> 12)); out[n++] = (char)(0x80 | ((cp >> 6) & 0x3F)); out[n++] = (char)(0x80 | (cp & 0x3F)); }
-        else { out[n++] = (char)(0xF0 | (cp >> 18)); out[n++] = (char)(0x80 | ((cp >> 12) & 0x3F)); out[n++] = (char)(0x80 | ((cp >> 6) & 0x3F)); out[n++] = (char)(0x80 | (cp & 0x3F)); }
-    }
+    static void put_utf8(char* out, u32& n, u32 cp) { n += utf8_encode(cp, out + n); }
 
     bool hex4(u32& out) {
         if (at + 4 > len) return fail("truncated \\u escape");
@@ -102,7 +98,7 @@ struct Parser {
                         if (lo < 0xDC00 || lo > 0xDFFF) return fail("bad low surrogate");
                         cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
                     } else return fail("lone high surrogate");
-                }
+                } else if (cp >= 0xDC00 && cp <= 0xDFFF) return fail("lone low surrogate");
                 i = at; at = save;
                 put_utf8(s, n, cp);
                 break;

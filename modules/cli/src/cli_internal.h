@@ -15,6 +15,7 @@ constexpr u32 kMaxSessions = 16;
 struct Session {
     NetSocket sock;          // closed for the stdin session
     bool      is_stdin = false;
+    bool      ascii    = false; // escape on the way out, unescape on the way in
     bool      stdin_eof = false;
     char      line[kLineMax];
     u32       line_len = 0;

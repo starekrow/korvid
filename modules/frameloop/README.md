@@ -81,7 +81,7 @@ renders once.
 | `--profile FILE`, `--prof-report` | a Chrome trace; the top zones with every fps line |
 | `--screenshot FILE`, `--screenshot-frame N` | one presented frame as a binary PPM (frame 90 unless said) |
 | `--check-sort` | read the GPU sort back every 30th frame and verify it |
-| `--cli-port N`, `--cli-stdin` | the CLI's transports |
+| `--cli-port N`, `--cli-stdin`, `--cli-ascii` | the CLI's transports; ASCII-only escapes non-ASCII as `\u{XXXX}` both ways |
 | `--idle-margin-ms N`, `--no-idle` | slack kept back from idle work (1.5); none at all |
 
 ## Quick reference

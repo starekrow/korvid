@@ -15,7 +15,9 @@
 
 namespace kv {
 
-enum class FieldType : u8 { Bool, U8, U16, U32, U64, I8, I16, I32, I64, F32, F64, Handle, Count };
+// Char is a byte of UTF-8 text: a char[N] field is a NUL-terminated string of at most N - 1
+// bytes, hashed and compared as bytes, printed and patched as a string.
+enum class FieldType : u8 { Bool, U8, U16, U32, U64, I8, I16, I32, I64, F32, F64, Handle, Char, Count };
 
 u32         field_type_size(FieldType t);
 const char* field_type_name(FieldType t);
@@ -61,7 +63,7 @@ template <class M> struct FieldTraits;
 #define KV_FIELD_TRAITS(M, T, N) \
     template <> struct FieldTraits<M> { static constexpr FieldType type = FieldType::T; static constexpr u16 count = N; }
 KV_FIELD_TRAITS(bool, Bool, 1);
-KV_FIELD_TRAITS(char, U8,  1); // a char[N] field is N bytes: hashed and compared as such, printed as numbers
+KV_FIELD_TRAITS(char, Char, 1); // a char[N] field is a UTF-8 string in N bytes
 KV_FIELD_TRAITS(u8,  U8,  1);
 KV_FIELD_TRAITS(u16, U16, 1);
 KV_FIELD_TRAITS(u32, U32, 1);
@@ -99,13 +101,20 @@ int  schema_describe(const char* name, Span<const FieldDesc> fields, const void*
 // Calls fn(handle&) for every handle scalar in the row; stops early if fn returns false.
 // Delivery uses it to drop events that refer to the dead.
 bool schema_each_handle(Span<const FieldDesc> fields, void* row, bool (*fn)(Handle&, void*), void* user);
-// One scalar field as a double (integers widened, floats converted); false for handles.
+// One scalar field as a double (integers widened, floats converted); false for handles
+// and strings.
 bool schema_field_as_f64(const FieldDesc& f, const void* row, f64* out);
 // Lane `lane` of a field (0 for a scalar, 0..count-1 for a vector) as a double, and the
 // reverse: a double stored into it with the field's type (rounded for integers, clamped
-// to a bool). False for a handle, or a lane past the count. The CLI's print and patch.
+// to a bool). False for a handle, a string, or a lane past the count. The CLI's print and patch.
 bool schema_field_lane(const FieldDesc& f, const void* row, u32 lane, f64* out);
 bool schema_field_set(const FieldDesc& f, void* row, u32 lane, f64 value);
+// A Char field as a quoted string: UTF-8 passed through, `"` and `\` escaped, control
+// bytes as \xNN, up to the first NUL or the field's end. snprintf's return convention.
+int  schema_field_string(const FieldDesc& f, const void* row, char* out, usize cap);
+// Stores a UTF-8 string into a Char field, truncated at a code point boundary to fit
+// with its NUL, the rest zeroed. False for a field that is not Char.
+bool schema_field_set_string(const FieldDesc& f, void* row, const char* str);
 
 inline const char*      component_check(const ComponentDesc& c, const char** field) {
     *field = nullptr;

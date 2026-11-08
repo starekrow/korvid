@@ -145,11 +145,12 @@ Header `korvid/asset/font.h`:
 | name | kind | what |
 |---|---|---|
 | `Glyph` | record | `uv` (atlas), `size` (pixels), `offset` (quad center from the pen, +y up), `advance` |
-| `FontAsset` | record | `path`, `state`, `error`, `texture`, `material` (alpha, white), `px`, `ascent`, `descent`, `line_height`, `atlas_width/height`, `glyphs`, `kern` |
-| `asset_load_font(e, path, px)` | function | handle at once; px in [4, 256] |
+| `FontAsset` | record | `path`, `state`, `error`, `texture`, `material` (alpha, white), `px`, `ascent`, `descent`, `line_height`, `atlas_width/height`, `codepoints`/`glyphs` (sorted), `ascii` index, `replacement`, `kern_pairs`/`kern_values` (sorted), `ranges`, `misses` |
+| `FontDesc`, `FontRange`, `font_default_ranges()` | records | `px` and the character set as inclusive code point ranges; the default: ASCII, Latin-1, Latin Extended-A, common punctuation, euro, trade mark, U+FFFD |
+| `asset_load_font(e, path, px)`, `asset_load_font(e, path, desc)` | functions | handle at once; px in [4, 256]; at most `KV_FONT_MAX_GLYPHS` (8192) code points |
 | `asset_font(e, h)` | function | the record, or null if stale |
-| `font_glyph(font, cp)`, `font_kern(font, a, b)`, `font_measure(font, str, scale)` | functions | lookups over a Ready font; nothing before |
-| `KV_FONT_FIRST`, `KV_FONT_COUNT` | constants | 32, 224: printable ASCII and Latin-1 |
+| `font_glyph(font, cp)`, `font_glyph_or_replacement(font, cp)`, `font_kern(font, a, b)`, `font_measure(font, utf8, scale)` | functions | lookups over a Ready font (ASCII direct, the rest by binary search); nothing before |
+| `font_index(font)` | function | fills the ASCII index and U+FFFD from `codepoints`, for a table built by hand |
 
 Header `korvid/asset/sound.h`:
 

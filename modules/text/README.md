@@ -11,15 +11,18 @@ font. Changing the string is one write; the layout notices and redoes the glyphs
 **Fonts are assets** (`korvid/asset/font.h`, in the asset module). `asset_load_font(e,
 "text/DejaVuSans.ttf", 28)` returns a handle at once; the record owns a renderer texture
 (the atlas) and a material for it (alpha blend, white, so the tint is the color). The
-file reads through the I/O queue and `asset.pump_fonts` rasterizes printable ASCII and
-Latin-1 with stb_truetype into the smallest atlas of a fixed ladder that fits (about 20 ms
-for 28 px), uploads it, and fills the glyph table (uv, size, offset from the pen,
-advance) and the pair-kerning table. `AssetReady` follows. Before that, `font_glyph`
+file reads through the I/O queue and `asset.pump_fonts` rasterizes the font's character
+set (by default ASCII, the Latin-1 and Latin Extended-A blocks, common punctuation and
+U+FFFD: about 360 glyphs) with stb_truetype into the smallest atlas of a fixed ladder that
+fits (under 10 ms for 28 px), uploads it, and fills the glyph table (uv, size, offset from
+the pen, advance) and the kerning pairs. `asset_load_font(e, path, FontDesc{px, ranges})`
+takes another set. `AssetReady` follows. Before that, `font_glyph`
 answers null for everything and text lays out as nothing.
 
 **The component.** `Text { font, str[64], scale, tint, layer, space, align }`. The
 label's `Transform2` is the pen's start on the baseline; `Left` puts the first glyph
-there, `Center` and `Right` shift the line. Strings are Latin-1 bytes, one line.
+there, `Center` and `Right` shift the line. Strings are UTF-8, one line, 64 bytes with
+the NUL; `text_set` truncates at a character boundary.
 
 **The system.** `text.layout` runs in PostSim on every tick, paused or not, reading
 `*.Text` and writing `text.glyph`. Per label slot it keeps the entity and a hash of
@@ -99,8 +102,13 @@ Depends on: core, math, render, platform, asset, sprite, scene.
   is the upgrade if a game needs thousands of changing characters.
 - **Text appears when the font does.** A label spawned before `AssetReady` lays out as
   nothing and then appears, a frame or two later; the layout notices the font's state.
-- **One line, Latin-1, no shaping.** No wrapping, no UTF-8, no right-to-left, no
-  ligatures. Kerning pairs from the font are applied.
+- **One line of UTF-8, no shaping.** Each code point is one glyph: no wrapping, no
+  right-to-left, no ligatures, no combining marks drawn as such. Kerning pairs from the
+  font are applied.
+- **What the font lacks is U+FFFD.** A code point outside the font's table (outside its
+  set, or missing from the file) and a malformed byte both draw the replacement glyph,
+  or nothing if the font has none; the first miss per font is logged, and `print
+  /fonts/...` counts them.
 - **A label's world transform is its pen.** Rotating or scaling the label rotates and
   scales the line, since glyphs are children.
 - **Screen-space labels are in pixels at the font's size** times `scale`; world-space

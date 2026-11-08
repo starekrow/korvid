@@ -15,11 +15,13 @@ using namespace kv;
 
 struct Health { i32 hp; };
 struct Pos { f32 x, y; f32 size[2]; };
+struct Tag { char name[12]; };
 constinit const FieldDesc k_health_fields[] = {KV_FIELDS(Health, hp)};
 constinit const FieldDesc k_pos_fields[]    = {KV_FIELDS(Pos, x, y, size)};
-constinit const ComponentDesc k_components[] = {KV_COMPONENT(Health, k_health_fields, CompPrev), KV_COMPONENT(Pos, k_pos_fields)};
+constinit const FieldDesc k_tag_fields[]    = {KV_FIELDS(Tag, name)};
+constinit const ComponentDesc k_components[] = {KV_COMPONENT(Health, k_health_fields, CompPrev), KV_COMPONENT(Pos, k_pos_fields), KV_COMPONENT(Tag, k_tag_fields)};
 constinit const KindDesc k_kinds[] = {
-    {.name = ".ship", .components = "Health, Pos", .capacity = 8},
+    {.name = ".ship", .components = "Health, Pos, Tag", .capacity = 8},
     {.name = ".rock", .components = "Pos", .capacity = 64},
 };
 constinit const ResourceDesc k_resources[] = {{".score"}};
@@ -73,6 +75,11 @@ void test_cli_fs(kv::TestCtx& c) {
     KV_CHECK(c, run("patch /kinds/game/ship/0/Pos/size 3 4") && ships->get<Pos>(ship)->size[0] == 3.0f && ships->get<Pos>(ship)->size[1] == 4.0f);
     KV_CHECK(c, !run("patch /kinds/game/ship/0/Pos/size 1") && o.has("takes 2 values"));
     KV_CHECK(c, !run("patch /kinds/game/ship/0/Pos/x 1 2") && o.has("takes 1 value"));
+    // A string field: UTF-8 in and out, words joined, truncated at a character boundary.
+    KV_CHECK(c, run("patch /kinds/game/ship/0/Tag/name \"Ga\xc3\xaf" "a\" one") && strcmp(ships->get<Tag>(ship)->name, "Ga\xc3\xaf" "a one") == 0);
+    KV_CHECK(c, run("print /kinds/game/ship/0/Tag/name") && o.n == 1 && strcmp(o.lines[0], "\"Ga\xc3\xaf" "a one\"") == 0);
+    KV_CHECK(c, run("ls /kinds/game/ship/0/Tag") && o.has("\"Ga\xc3\xaf" "a one\""));
+    KV_CHECK(c, run("patch /kinds/game/ship/0/Tag/name \xe2\x80\x94\xe2\x80\x94\xe2\x80\x94\xe2\x80\x94") && strcmp(ships->get<Tag>(ship)->name, "\xe2\x80\x94\xe2\x80\x94\xe2\x80\x94") == 0);
     KV_CHECK(c, !run("print /kinds/game/ship/3") && o.has("no such path"));
     KV_CHECK(c, !run("ls /nowhere") && o.has("no such path: /nowhere"));
 

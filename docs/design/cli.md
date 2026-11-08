@@ -61,6 +61,13 @@ costs a `ls` only what it shows.
 
 - **stdin**, when it is not a terminal (a pipe, a file, `/dev/null`) or with
   `--cli-stdin`. Polled with a zero timeout; end of stream ends the session.
+
+Requests and answers are UTF-8. A transport that must stay ASCII (a UART, a devkit TTY;
+`--cli-ascii` makes every transport so for now) escapes each non-ASCII code point of an
+answer as `\u{XXXX}` and a backslash as `\\`, and unescapes requests the same way, so a
+string field can be printed and patched from a terminal that only speaks ASCII.
+`char[N]` fields print as quoted strings and patch from the rest of the line, truncated
+at a character boundary.
 - **TCP** on loopback with `--cli-port N`. Non-blocking listener and sockets from the
   platform module; up to 16 sessions, each with its own line buffer. `nc 127.0.0.1 N`
   is a client.

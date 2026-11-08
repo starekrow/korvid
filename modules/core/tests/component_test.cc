@@ -117,6 +117,28 @@ void test_component(kv::TestCtx& c) {
     u32 handles = 0;
     KV_CHECK(c, component_each_handle(probe, a, count_handles, &handles) && handles == 1);
 
+    // Strings: a char[N] field is one Char field, printed quoted, patched with truncation
+    // at a code point boundary, the tail zeroed so the hash does not see old bytes.
+    struct Label { char name[8]; u32 n; };
+    const FieldDesc label_fields[] = {KV_FIELDS(Label, name, n)};
+    KV_CHECK(c, label_fields[0].type == FieldType::Char && label_fields[0].count == 8);
+    Label la{}, lb{};
+    memset(la.name, 'Z', sizeof la.name);
+    KV_CHECK(c, schema_field_set_string(label_fields[0], &la, "caf\xc3\xa9 \xe2\x80\x94"));  // 6 bytes, then 3 that do not fit
+    KV_CHECK(c, strcmp(la.name, "caf\xc3\xa9 ") == 0 && la.name[7] == 0);
+    KV_CHECK(c, schema_field_set_string(label_fields[0], &lb, "caf\xc3\xa9 "));
+    KV_CHECK(c, schema_equal(Span<const FieldDesc>(label_fields, 2), &la, &lb));
+    KV_CHECK(c, schema_hash(Span<const FieldDesc>(label_fields, 2), &la) == schema_hash(Span<const FieldDesc>(label_fields, 2), &lb));
+    KV_CHECK(c, !schema_field_set_string(label_fields[1], &la, "x"));
+    schema_field_set_string(label_fields[0], &la, "a\"b\\\n");
+    KV_CHECK(c, schema_describe("Label", Span<const FieldDesc>(label_fields, 2), &la, text, sizeof text) > 0);
+    KV_CHECK(c, strcmp(text, "Label{name=\"a\\\"b\\\\\\x0a\", n=0}") == 0);
+    f64 dummy;
+    KV_CHECK(c, !schema_field_as_f64(label_fields[0], &la, &dummy) && !schema_field_set(label_fields[0], &la, 0, 1.0));
+    schema_field_set_string(label_fields[0], &la, "\xc3\xa9\xc3\xa9\xc3\xa9");
+    char cut[6]; // room for the quote and two characters: the third is not cut in half
+    KV_CHECK(c, schema_field_string(label_fields[0], &la, cut, sizeof cut) == 8 && strcmp(cut, "\"\xc3\xa9\xc3\xa9") == 0);
+
     // Registry: ids in module order then declaration order; lookups; cleared at shutdown.
     const ModuleDesc* const list[] = {&k_a, &k_b};
     Engine e;

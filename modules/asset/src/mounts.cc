@@ -125,9 +125,9 @@ bool fonts_describe(CliContext& ctx, const char* rel) {
         char name[KV_ASSET_PATH_MAX + 16];
         snprintf(name, sizeof name, "%s@%g", f.path, f.px);
         if (strcmp(name, rel) != 0) continue;
-        ctx.print("%s at %g px: %s, atlas %ux%u (slot %u, material row %u), ascent %.1f, descent %.1f, line %.1f, %s kerning, built in %.1f ms",
-                  f.path, f.px, state_name(f.state), f.atlas_width, f.atlas_height, f.texture.index(), f.material.index(),
-                  f.ascent, f.descent, f.line_height, f.kern ? "with" : "no", f.build_seconds * 1e3);
+        ctx.print("%s at %g px: %s, %u glyphs in %u ranges, atlas %ux%u (slot %u, material row %u), ascent %.1f, descent %.1f, line %.1f, %u kerning pairs, %u misses, built in %.1f ms",
+                  f.path, f.px, state_name(f.state), f.glyph_count, f.range_count, f.atlas_width, f.atlas_height, f.texture.index(),
+                  f.material.index(), f.ascent, f.descent, f.line_height, f.kern_count, f.misses, f.build_seconds * 1e3);
         return true;
     }
     return false;

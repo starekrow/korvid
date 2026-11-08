@@ -4,6 +4,7 @@
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/profile.h"
+#include "korvid/core/utf8.h"
 #include "korvid/math/fields.h"
 #include "korvid/scene/parent.h"
 #include "korvid/sprite/sprite.h"
@@ -19,6 +20,7 @@ int text_set(Text& t, const char* fmt, ...) {
     va_start(args, fmt);
     int n = vsnprintf(t.str, sizeof t.str, fmt, args);
     va_end(args);
+    if (n >= (int)sizeof t.str) utf8_trim(t.str); // never end on half a character
     return n;
 }
 
@@ -27,8 +29,12 @@ u32 text_layout(const FontAsset& font, const Text& text, Span<GlyphPlacement> ou
     f32 advance = font_measure(font, text.str, 1.0f);
     f32 x = text.align == TextAlign::Center ? -advance * 0.5f : text.align == TextAlign::Right ? -advance : 0.0f;
     u32 n = 0;
-    for (const u8* p = (const u8*)text.str; *p; ++p) {
-        const Glyph* g = font_glyph(font, *p);
+    const char* p = text.str;
+    u32 prev = 0;
+    while (u32 cp = utf8_next(p)) {
+        if (prev) x += font_kern(font, prev, cp);
+        prev = cp;
+        const Glyph* g = font_glyph_or_replacement(font, cp);
         if (!g) continue;
         if (g->size.x > 0.0f && g->size.y > 0.0f) {
             if (n < out.len) {
@@ -40,7 +46,6 @@ u32 text_layout(const FontAsset& font, const Text& text, Span<GlyphPlacement> ou
             ++n;
         }
         x += g->advance;
-        if (p[1]) x += font_kern(font, *p, p[1]);
     }
     if (width) *width = advance * text.scale;
     return n;
