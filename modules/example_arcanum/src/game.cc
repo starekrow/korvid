@@ -18,8 +18,8 @@
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/level/level.h"
 #include "korvid/math/fields.h"
-#include "korvid/platform/actions.h"
-#include "korvid/platform/host_window.h"
+#include "korvid/platform_hid/actions.h"
+#include "korvid/platform_hid/host_window.h"
 #include "korvid/render/renderer.h"
 #include "korvid/scene/parent.h"
 #include "korvid/sprite/camera.h"
@@ -382,7 +382,7 @@ void villagers(TickContext& ctx) {
 // Phase PostSim, every tick: the camera follows the player inside the map, at an integer zoom.
 void camera(TickContext& ctx) {
     static const u32 k_camera = ctx.resource_id("sprite.camera");
-    static const u32 k_window = ctx.resource_id("platform.window");
+    static const u32 k_window = ctx.resource_id("platform_hid.window");
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     Camera2* cam = ctx.resource<Camera2>(k_camera);
@@ -553,7 +553,7 @@ constinit const SystemDesc k_systems[] = {
      .after = "level.run", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions, .npc", .writes = ".player", .main_thread = true},
     {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .writes = ".npc"},
-    {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform.window", .writes = "sprite.camera", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".demo", .phase = Phase::PostSim, .fn = demo, .main_thread = true, .runs = RunWhen::Always},
 };
 

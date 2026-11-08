@@ -5,7 +5,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/profile.h"
-#include "korvid/platform/audio.h"
+#include "korvid/platform_audio/audio.h"
 #include <pthread.h>
 #include <string.h>
 

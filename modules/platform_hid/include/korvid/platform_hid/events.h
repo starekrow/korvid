@@ -1,7 +1,7 @@
 // Korvid platform: platform changes, key edges and gamepad edges as plain-data events.
 // They count as input and are recorded with it.
 #pragma once
-#include "korvid/platform/input.h"
+#include "korvid/platform_hid/input.h"
 
 namespace kv {
 

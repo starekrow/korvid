@@ -5,6 +5,7 @@
 #include "korvid/render/renderer.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/module.h"
+#include "korvid/platform_hid/module.h"
 #include "vk_funcs.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>

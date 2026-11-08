@@ -19,9 +19,9 @@
 #include "korvid/core/random.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/math/fields.h"
-#include "korvid/platform/events.h"
-#include "korvid/platform/host_window.h"
-#include "korvid/platform/input.h"
+#include "korvid/platform_hid/events.h"
+#include "korvid/platform_hid/host_window.h"
+#include "korvid/platform_hid/input.h"
 #include "korvid/platform/io.h"
 #include "korvid/render/renderer.h"
 #include "korvid/scene/module.h"
@@ -206,7 +206,7 @@ void spawn_ship(TickContext& ctx, Game& g) {
 // resuming removes it. Writes the clock through the engine API, which applies from the
 // next tick, so this tick is still whatever kind it started as.
 void pause(TickContext& ctx) {
-    static const u32 k_window = ctx.resource_id("platform.window");
+    static const u32 k_window = ctx.resource_id("platform_hid.window");
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     bool toggle = false;
@@ -393,7 +393,7 @@ void move(TickContext& ctx) {
 // declaration. A wrap is a teleport: the previous copy is written too, so the renderer
 // shows the sprite on the far side at once instead of interpolating it across the screen.
 void wrap(TickContext& ctx) {
-    static const u32 k_window = ctx.resource_id("platform.window");
+    static const u32 k_window = ctx.resource_id("platform_hid.window");
     const HostWindow* w = ctx.resource<const HostWindow>(k_window);
     f32 hw = (f32)w->width() * 0.5f + 32.0f, hh = (f32)w->height() * 0.5f + 32.0f;
     for (KindRows k : ctx.view<Transform2, const Velocity>()) {
@@ -546,7 +546,7 @@ void on_expire(TickContext& ctx, Span<const Expire> expiries) {
 
 // A wave: rocks arrive from the edges, drifting inward. By command, so no write and no order.
 void on_wave(TickContext& ctx, Span<const SpawnWave> waves) {
-    static const u32 k_window = ctx.resource_id("platform.window");
+    static const u32 k_window = ctx.resource_id("platform_hid.window");
     static const u32 k_score  = ctx.resource_id(".score");
     Game& g = ctx.state_as<Game>();
     const HostWindow* w = ctx.resource<const HostWindow>(k_window);
@@ -606,7 +606,7 @@ void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
 // Clear the field, new ship, first wave in a second. Also how the game starts.
 void on_restart(TickContext& ctx, Span<const Restart>) {
     static const u32 k_score  = ctx.resource_id(".score");
-    static const u32 k_window = ctx.resource_id("platform.window");
+    static const u32 k_window = ctx.resource_id("platform_hid.window");
     Game& g = ctx.state_as<Game>();
     Score* score = ctx.resource<Score>(k_score);
     const HostWindow* w = ctx.resource<const HostWindow>(k_window);
@@ -686,12 +686,12 @@ constinit const ResourceDesc k_resources[] = {{".score"}};
 
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".pause",   .phase = Phase::PreSim, .fn = pause, .reads = "platform.window", .writes = ".overlay, .label, audio.commands", .runs = RunWhen::Always},
+    {.name = ".pause",   .phase = Phase::PreSim, .fn = pause, .reads = "platform_hid.window", .writes = ".overlay, .label, audio.commands", .runs = RunWhen::Always},
     {.name = ".files",   .phase = Phase::PreSim, .fn = files, .writes = ".score", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "input.state", .writes = ".ship.Transform2, .ship.Velocity, .ship.Ship, .bullet, .flame, audio.commands", .before = ".move"},
     // move and wrap touch no module state: they share levels with whatever else is free.
     {.name = ".move",    .phase = Phase::Sim, .fn = move,    .reads = "*.Velocity",    .writes = "*.Transform2", .state = StateUse::None},
-    {.name = ".wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = "*.Velocity, platform.window",    .writes = "*.Transform2", .after = ".move", .state = StateUse::None},
+    {.name = ".wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = "*.Velocity, platform_hid.window",    .writes = "*.Transform2", .after = ".move", .state = StateUse::None},
     {.name = ".game",    .phase = Phase::Sim, .fn = game,    .reads = ".score"},
     {.name = ".camera",  .phase = Phase::PostSim, .fn = camera, .writes = "sprite.camera"},
     {.name = ".hud",     .phase = Phase::PostSim, .fn = hud, .reads = ".score, .label.Label", .writes = ".label.Text", .runs = RunWhen::Always},
@@ -707,10 +707,10 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_ship_hit", KV_ON(ShipHit, on_ship_hit), .reads = ".ship.Transform2", .writes = ".ship.Health"},
     {.name = ".on_score",    KV_ON(ScoreChanged, on_score)},
     {.name = ".on_expire",   KV_ON(Expire, on_expire)},
-    {.name = ".on_wave",     KV_ON(SpawnWave, on_wave), .reads = "platform.window", .writes = ".score", .after = ".on_rock_hit"},
+    {.name = ".on_wave",     KV_ON(SpawnWave, on_wave), .reads = "platform_hid.window", .writes = ".score", .after = ".on_rock_hit"},
     // The score's writers in a chain: rock_hit, wave, edge, restart.
     {.name = ".on_edge",     KV_ON(StateEdge, on_edge), .writes = ".label, audio.commands, .score", .after = ".on_wave"},
-    {.name = ".on_restart",  KV_ON(Restart, on_restart), .reads = "platform.window", .writes = ".score, .label", .after = ".on_edge"},
+    {.name = ".on_restart",  KV_ON(Restart, on_restart), .reads = "platform_hid.window", .writes = ".score, .label", .after = ".on_edge"},
 };
 
 } // namespace

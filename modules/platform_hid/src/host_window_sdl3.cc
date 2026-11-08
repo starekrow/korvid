@@ -1,5 +1,5 @@
-#include "korvid/platform/host_window.h"
-#include "korvid/platform/events.h"
+#include "korvid/platform_hid/host_window.h"
+#include "korvid/platform_hid/events.h"
 #include "korvid/core/log.h"
 #include "sdl_internal.h"
 #include <SDL3/SDL.h>
@@ -9,17 +9,22 @@ namespace kv {
 bool platform_sdl_video_up() {
     if (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) return true;
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
-        KV_ERROR("platform", "SDL video unavailable: %s", SDL_GetError());
+        KV_ERROR("hid", "SDL video unavailable: %s", SDL_GetError());
         return false;
     }
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) KV_WARN("input", "SDL gamepads unavailable: %s", SDL_GetError());
-    KV_INFO("platform", "video driver '%s'", SDL_GetCurrentVideoDriver());
+    KV_INFO("hid", "video driver '%s'", SDL_GetCurrentVideoDriver());
     return true;
+}
+
+void platform_sdl_video_down() {
+    if (SDL_WasInit(SDL_INIT_GAMEPAD) & SDL_INIT_GAMEPAD) SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    if (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
 bool HostWindow::open(const WindowDesc& desc) {
     KV_ASSERT(!sdl_window_);
-    if (!platform_sdl_video_up()) return false; // the platform starts headless
+    if (!platform_sdl_video_up()) return false; // the module starts headless
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE;
     if (desc.surface == WindowSurface::Vulkan) flags |= SDL_WINDOW_VULKAN; // also loads the Vulkan loader
     if (desc.borderless) flags |= SDL_WINDOW_BORDERLESS;

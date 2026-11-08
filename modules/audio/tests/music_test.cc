@@ -13,6 +13,7 @@
 #include "korvid/core/test.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
+#include "korvid/platform_audio/module.h"
 #include <math.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -105,9 +106,8 @@ void test_fades(kv::TestCtx& c) {
 void test_music(kv::TestCtx& c) {
     using namespace kv;
     c.begin("music");
-    setenv("SDL_VIDEODRIVER", "dummy", 0);
     setenv("SDL_AUDIO_DRIVER", "dummy", 0);
-    const ModuleDesc* const list[] = {&platform_module, &asset_module, &audio_module};
+    const ModuleDesc* const list[] = {&platform_module, &platform_audio_module, &asset_module, &audio_module};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     auto frames = [&](u32 n) { for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); usleep(2000); } };

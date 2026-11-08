@@ -54,7 +54,6 @@ int run(Span<const char* const> words) {
 void test_tool(kv::TestCtx& c) {
     using namespace kv;
     c.begin("tool");
-    setenv("SDL_VIDEODRIVER", "dummy", 0);
     const char* const now[] = {"t", "now", "5"};
     KV_CHECK(c, run(now) == 5);
     const char* const count[] = {"t", "--threads", "2", "count", "30"};

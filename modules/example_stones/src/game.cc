@@ -14,8 +14,8 @@
 #include "korvid/core/random.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/math/fields.h"
-#include "korvid/platform/host_window.h"
-#include "korvid/platform/input.h"
+#include "korvid/platform_hid/host_window.h"
+#include "korvid/platform_hid/input.h"
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
@@ -97,7 +97,7 @@ void stones_tick(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     f32 dt = (f32)ctx.dt;
     const Input*      input  = ctx.resource<const Input>("input.state");
-    const HostWindow* window = ctx.resource<const HostWindow>("platform.window");
+    const HostWindow* window = ctx.resource<const HostWindow>("platform_hid.window");
     Table& sprites = *ctx.write_kind("sprite.entity");
     g.w = (f32)window->width();
     g.h = (f32)window->height();
@@ -207,7 +207,7 @@ constinit const SystemDesc k_systems[] = {
     {   .name = ".tick",
         .phase = Phase::Sim,
         .fn = stones_tick,
-        .reads = "input.state, platform.window",
+        .reads = "input.state, platform_hid.window",
         .writes = "sprite.entity"
     },
 };

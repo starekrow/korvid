@@ -1,5 +1,4 @@
-#include "korvid/platform/audio.h"
-#include "korvid/platform/module.h"
+#include "korvid/platform_audio/audio.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/thread.h"

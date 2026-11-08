@@ -125,7 +125,7 @@ Header `korvid/audio/mixer.h`: `Mixer`, `MixCmd`, `MixOp` (with `Fade`, `Retire`
 Header `korvid/asset/sound.h` (asset module): `SoundAsset`, `asset_load_sound`, `asset_sound`,
 `sound_decode`, `sound_decode_wav`, `sound_decode_ogg`.
 
-Header `korvid/platform/audio.h` (platform module): `AudioDeviceDesc`, `AudioDeviceInfo`,
+Header `korvid/platform_audio/audio.h` (the platform_audio module): `AudioDeviceDesc`, `AudioDeviceInfo`,
 `platform_audio_open`, `platform_audio_close`, `platform_audio`.
 
 What the module registers with the engine:

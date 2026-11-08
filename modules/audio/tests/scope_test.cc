@@ -11,6 +11,7 @@
 #include "korvid/core/test.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
+#include "korvid/platform_audio/module.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,9 +49,8 @@ bool write_wav(const char* path, u32 frames) {
 void test_asset_scopes(kv::TestCtx& c) {
     using namespace kv;
     c.begin("asset_scopes");
-    setenv("SDL_VIDEODRIVER", "dummy", 0);
     setenv("SDL_AUDIO_DRIVER", "dummy", 0);
-    const ModuleDesc* const list[] = {&platform_module, &asset_module, &audio_module, &k_scope_t};
+    const ModuleDesc* const list[] = {&platform_module, &platform_audio_module, &asset_module, &audio_module, &k_scope_t};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     u64 tick = 0;

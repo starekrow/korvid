@@ -54,7 +54,6 @@ bool put(const char* path, const char* text) {
 void test_tilemap_load(kv::TestCtx& c) {
     using namespace kv;
     c.begin("tilemap load");
-    setenv("SDL_VIDEODRIVER", "dummy", 0);
     const ModuleDesc* const list[] = {&platform_module, &asset_module, &sprite_module, &tilemap_module, &k_tt};
     Engine e;
     KV_CHECK(c, engine_init(e, list));

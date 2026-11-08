@@ -169,8 +169,8 @@ IoQueue* platform_io(Engine& e);
 // Directory of the running executable, with a trailing separator. Assets live beneath it.
 const char* platform_base_path(Engine& e);
 // The per-user directory for saves and settings, created if need be, with a trailing
-// separator: SDL's preference path for `org` and `app` (~/.local/share/<org>/<app>/ on
-// Linux). The first call fixes the names for the process; "" if the OS has none.
+// separator: $XDG_DATA_HOME/<org>/<app>/, or ~/.local/share/<org>/<app>/, on
+// Linux (where SDL put it). The first call fixes the names for the process; "" if the OS has none.
 const char* platform_pref_path(Engine& e, const char* org, const char* app);
 
 } // namespace kv

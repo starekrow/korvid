@@ -14,8 +14,8 @@
 #include "korvid/core/random.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/math/fields.h"
-#include "korvid/platform/events.h"
-#include "korvid/platform/host_window.h"
+#include "korvid/platform_hid/events.h"
+#include "korvid/platform_hid/host_window.h"
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
@@ -124,7 +124,7 @@ bool bounce(Transform2& t, vec2& v, f32 half_size, f32 half_w, f32 half_h, f32 d
 
 // Phase Sim: every ball moves and bounces. World units are pixels, origin at the center.
 void example_testbed_move(TickContext& ctx) {
-    static const u32 k_window = ctx.resource_id("platform.window"); // looked up once
+    static const u32 k_window = ctx.resource_id("platform_hid.window"); // looked up once
     const HostWindow* window = ctx.resource<const HostWindow>(k_window);
     f32 half_w = (f32)window->width() * 0.5f, half_h = (f32)window->height() * 0.5f;
     f32 dt = (f32)ctx.dt;
@@ -171,7 +171,7 @@ void example_testbed_sim(TickContext& ctx) {
 
     switch (g.state) {
     case ST_INIT: {
-        const HostWindow* window = ctx.resource<const HostWindow>("platform.window");
+        const HostWindow* window = ctx.resource<const HostWindow>("platform_hid.window");
         f32 w = (f32)window->width(), h = (f32)window->height();
         // A background covering the window, tiling the checkerboard at 16-pixel cells.
         Sprite bg;
@@ -268,7 +268,7 @@ void on_blink_off(TickContext& ctx, Span<const BlinkOff> offs) {
 void on_blink_on(TickContext& ctx, Span<const BlinkOn> ons) {
     Game& g = ctx.state_as<Game>();
     if (g.state != ST_RUN) return;
-    const HostWindow* window = ctx.resource<const HostWindow>("platform.window");
+    const HostWindow* window = ctx.resource<const HostWindow>("platform_hid.window");
     f32 quarter_w = (f32)window->width() * 0.25f;
     for (u32 i = 0; i < ons.len; ++i)
         g.blink_ticket = spawn_ball(ctx, g, point2{g.rng.range(-quarter_w, quarter_w), -120.0f}, vec2{}, false, 120.0f, 0, LOOK_MAGENTA);
@@ -317,14 +317,14 @@ void example_testbed_shutdown(Engine&, ModuleInstance& self) {
 }
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".move", .phase = Phase::Sim, .fn = example_testbed_move, .reads = ".ball.Sprite, platform.window", .writes = ".ball.Transform2, .ball.Motion"},
-    {.name = ".sim",  .phase = Phase::Sim, .fn = example_testbed_sim,  .reads = "platform.window, .ball, sprite.entity"}, // after move: it reads what move writes
+    {.name = ".move", .phase = Phase::Sim, .fn = example_testbed_move, .reads = ".ball.Sprite, platform_hid.window", .writes = ".ball.Transform2, .ball.Motion"},
+    {.name = ".sim",  .phase = Phase::Sim, .fn = example_testbed_sim,  .reads = "platform_hid.window, .ball, sprite.entity"}, // after move: it reads what move writes
 };
 constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_bounced",   KV_ON(Bounced, on_bounced), .writes = ".ball.Bounces, .ball.Motion"},
     {.name = ".on_spawned",   KV_ON(Spawned, on_spawned)},
     {.name = ".on_blink_off", KV_ON(BlinkOff, on_blink_off)},
-    {.name = ".on_blink_on",  KV_ON(BlinkOn, on_blink_on), .reads = "platform.window"},
+    {.name = ".on_blink_on",  KV_ON(BlinkOn, on_blink_on), .reads = "platform_hid.window"},
     {.name = ".on_edge",      KV_ON(StateEdge, on_state_edge)},
 };
 

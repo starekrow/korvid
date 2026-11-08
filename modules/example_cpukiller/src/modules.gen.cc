@@ -1,6 +1,7 @@
 // Two lists: with the window (the usual stack) and without (the core alone).
 #include "korvid/core/module.h"
 #include "korvid/platform/module.h"
+#include "korvid/platform_hid/module.h"
 #include "korvid/renderer-vulkan/module.h"
 #include "korvid/asset/module.h"
 #include "korvid/sprite/module.h"
@@ -10,6 +11,7 @@
 namespace {
 constinit const kv::ModuleDesc* const k_window_modules[] = {
     &kv::platform_module,
+    &kv::platform_hid_module,
     &kv::renderer_vulkan_module,
     &kv::asset_module,
     &kv::sprite_module,

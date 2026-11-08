@@ -1,28 +1,14 @@
 # platform
 
-The operating system, as the engine sees it: a window, the keyboard and gamepads, a file
-read queue, and TCP sockets. SDL3 is behind the window and the input and nowhere else;
-the I/O queue is io_uring on Linux with a synchronous fallback; the sockets are POSIX.
-Nothing here blocks the thread that calls it, and nothing here runs a thread of its own:
-everything is pumped once per frame by the frame loop, and the state it produces is
-published as resources that systems declare and read.
+The operating system as an engine sees it with no display and no devices: a file read
+queue with its mounts, the executable's and the user's directories, and TCP sockets. It
+links no external library, so a tool built on the engine (`tool_kpack`) needs nothing
+installed on the build machine beyond the compiler. The window, the keyboard and gamepads
+are `platform_hid`'s; the audio device is `platform_audio`'s. Nothing here blocks the
+thread that calls it, and nothing here runs a thread of its own: everything is pumped once
+per frame, by the frame loop in a game and by the `tool` module in a tool.
 
 ## How it works
-
-**The window** (`host_window.h`). One per process, opened on request by the frameloop
-module and closed at platform shutdown, never by the caller. It is a service, not an
-entity. `platform_pump` turns OS events into bus events (`WindowResized`,
-`FocusChanged`, `CloseRequested`, key, mouse and gamepad edges) and updates the raw input
-state. A Vulkan window hands its native handle to the renderer; a software window can
-only `present_blank`.
-
-**Input** (`input.h`, `events.h`). Two copies of the state: `raw`, updated by the pump at
-frame rate, and `sampled`, copied once per tick by the system `input.sample` (phase
-Input) so the simulation sees one consistent picture per tick. Keys are engine codes
-mapped from SDL scancodes; pads follow SDL's standard layout (South is A or Cross), with
-a dead zone on the sticks and triggers in [0, 1]. Pads open when they arrive and close
-when they leave; up to four. Losing focus releases every key and button so nothing stays
-pressed.
 
 **Files** (`io.h`). A batched asynchronous read queue shaped like io_uring: submit any
 time with a priority, the pump hands reads to the backend and collects completions, and
@@ -41,27 +27,19 @@ arrived and queues what is to be sent, draining the queue when flushed. A queue 
 grows past its limit drops writes and counts them rather than stall the frame. Loopback
 by default. This is the CLI's transport and may be a game's.
 
+**Directories.** `platform_base_path` is the executable's directory, read from
+`/proc/self/exe` at startup; `platform_pref_path(e, org, app)` is the per-user directory
+for saves and settings, `$XDG_DATA_HOME/<org>/<app>/` (or `~/.local/share/<org>/<app>/`),
+created on first use. Both end in a separator. Each OS has its own source under `src/<os>/`.
+
+**The pump.** `platform_pump(e)` runs the pump hooks other modules added
+(`platform_pump_add`: `platform_hid` turns window events into bus events there), then the
+I/O queue's own pump. One call per frame covers every platform module linked.
+
 ## Using it
 
 **Declare the dependency**: `deps = { "core", "platform", ... }` in `module.lua`. The
 frameloop module depends on it already, so a game gets it for free.
-
-**Read input in a system.** Name the resource in the system's sets and reach it through
-the context:
-
-```cpp
-void control(TickContext& ctx) {
-    static const u32 k_input = ctx.resource_id("input.state");
-    const Input* in = ctx.resource<const Input>(k_input);
-    bool left = in->sampled.down(Key::Left);
-    if (const GamepadState* pad = in->sampled.pad()) {        // the first connected pad, or null
-        left |= pad->axis(PadAxis::LeftX) < -0.5f || pad->down(PadButton::DpadLeft);
-    }
-}
-```
-
-Key edges arrive as events too: `for (const KeyDown& k : ctx.events->read<KeyDown>())`.
-The window is `ctx.resource<const HostWindow>("platform.window")` for its size.
 
 **Read a file.** Submit with the asset's handle as the user word, reap in a main-thread
 system, free the data with the allocator you named:
@@ -98,44 +76,12 @@ for (Session& s : sessions) {
 Throughput through a tick system is what the kernel buffers hold times the tick rate;
 `example_sockit2m` prints the numbers.
 
-**Options the frame loop exposes**: `--borderless`, `--no-vsync`, `--cli-port N`,
-`--cli-stdin`, `--idle-margin-ms N`, `--no-idle`.
-
-## Quick reference
-
-Header `korvid/platform/host_window.h`:
-
-| name | kind | what |
-|---|---|---|
-| `WindowDesc` | record | `title`, `width`, `height`, `vsync` (a preference the renderer reads), `surface` (`Software`, `Vulkan`), `borderless` |
-| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `width()`, `height()`, `vsync()`, `focused()`, `pump(bus, input)`, `present_blank()`, `native_handle()` |
-
-Header `korvid/platform/input.h`:
-
-| name | kind | what |
-|---|---|---|
-| `Key` | enum | letters, digits, F keys, `Escape`, `Space`, `Enter`, `Tab`, `Backspace`, arrows, modifiers; `key_name` |
-| `PadButton`, `PadAxis` | enums | the standard layout; `pad_button_name`, `pad_axis_name` |
-| `GamepadState` | record | `buttons` (bits), `axes`, `connected`, `id`; `down(b)`, `axis(a)` |
-| `MouseButton`, `MouseState` | enum, record | `x`, `y` in framebuffer pixels (origin top-left), `wheel` (the scroll since the last sample), `buttons`; `down(b)`; `mouse_button_name` |
-| `mouse_screen(x, y, w, h, &sx, &sy)` | function | window pixels to screen space: center origin, +y up, what screen-space sprites use |
-| `InputState` | record | `down(key)`, `set(key, on)`, `clear()`, `pads[KV_MAX_GAMEPADS]`, `pad()` (the first connected), `mouse` |
-| `Input` | record | `raw`, `sampled`, `sample()` |
-| `key_from_scancode`, `scancode_from_key` | functions | the SDL mapping, both ways |
-| `KV_MAX_GAMEPADS`, `KV_PAD_DEAD_ZONE` | constants | 4; 0.15 |
-
-Header `korvid/platform/events.h`: `WindowResized{width, height}`, `FocusChanged{focused}`,
-`CloseRequested`, `KeyDown{key, device, repeat}`, `KeyUp{key, device}`,
-`MouseMoved{x, y, dx, dy}`, `MouseButtonDown{button, x, y}`, `MouseButtonUp{button, x, y}`,
-`MouseWheel{dx, dy}`, `GamepadConnected{pad}`, `GamepadDisconnected{pad}`,
-`PadButtonDown{button, pad}`, `PadButtonUp{button, pad}`.
-
 **Writes** go through the same queue: `write_file(IoWriteRequest{path, data, size})` copies
 the bytes at submission (the caller's buffer is free to go), creates or truncates the file
 at the pump under the same priorities and budget as reads (`IORING_OP_WRITE` on the ring,
 `fopen` on the fallback), and completes with the bytes written and no data. A save or a
-settings file is a write to `platform_pref_path(e, org, app)`, SDL's per-user directory
-for the names given (created on first use).
+settings file is a write to `platform_pref_path(e, org, app)`, the per-user directory
+for the names given ($XDG_DATA_HOME, or ~/.local/share, then `<org>/<app>/`) (created on first use).
 
 **Assets go through mounts.** `read_asset(IoRequest{path = "example_rocks/rock.png"})`
 takes a logical path, normalizes it (`a//b`, `./a` and backslashes are `a/b`; `..` and
@@ -154,24 +100,7 @@ pack. A tool mounts nothing.
 `io_list_files(dir, fn, user)` walks a directory (sorted, hidden entries skipped) and
 `io_make_dirs(path)` is `mkdir -p`; both are synchronous, for tools and startup.
 
-**Actions.** Games bind what the player can do to devices as data and ask about actions,
-never keys (`korvid/platform/actions.h`): `input_actions(e, {{"move", ActionKind::Axis2,
-"keys W S A D, stick left, dpad"}, {"confirm", ActionKind::Button, "key Enter, pad South"}})`
-at startup; a system that reads the resource `input.actions` asks `action_pressed`,
-`action_down`, `action_released`, `action_axis` (+y up, clamped to the unit circle, a stick
-rescaled past its 0.2 dead zone, the strongest binding winning) and `action_repeat(a, id,
-delay, interval)` in ticks for menus. They are computed in `input.sample` from the sampled
-input on every tick, paused or not, so they are as deterministic as the input. A demo
-drives them with `input_action_override(e, name, down, axis)`, which replaces the devices
-for one sample.
-
-Header `korvid/platform/audio.h`:
-
-| name | kind | what |
-|---|---|---|
-| `AudioDeviceDesc` | record | `rate` (48000), `channels` (2), `frames` (512), `callback(user, out, frames)`, `user` |
-| `AudioDeviceInfo` | record | `rate`, `channels`, `frames`, `open` |
-| `platform_audio_open(e, desc)`, `platform_audio_close(e)`, `platform_audio(e)` | functions | the default playback device as a stream; the callback runs on SDL's thread, marked realtime, and fills interleaved f32 |
+## Quick reference
 
 Header `korvid/platform/io.h`:
 
@@ -201,22 +130,15 @@ Header `korvid/platform/module.h`:
 | name | kind | what |
 |---|---|---|
 | `platform_module` | `ModuleDesc` | the record; kormake puts it in the list |
-| `PlatformState` | record | `input`, `window`, `io`, `base_path`: the module's state, for code outside the schedule |
-| `platform_open_window(engine, desc)`, `platform_window(engine)` | functions | the one window; null if open already or refused |
-| `platform_video_up(engine)` | function | SDL video and gamepads, once; false without a video driver |
-| `InputActionDesc`, `ActionKind`, `InputActions`, `input_actions(e, descs)`, `input_actions_get(e)`, `input_action_override` | records, functions | the action map (`actions.h`) |
-| `action_down`, `action_pressed`, `action_released`, `action_axis`, `action_repeat` | functions | queries by id (`InputActions::find(name)`) |
-| `platform_input(engine)` | function | the input, for code outside the schedule |
-| `platform_pump(engine)` | function | once per frame: OS events to the bus, raw input, the I/O queue's pump |
+| `PlatformState` | record | `io`, `base_path`, `pref_path`, the pump hooks: the module's state, for code outside the schedule |
+| `PlatformMounts`, `platform_configure_mounts(mounts)` | record, function | what startup mounts: `exe_name`, `packs`, `assets_dir`, `none`, `io_backend` |
+| `platform_pump(engine)` | function | once per frame: the pump hooks, then the I/O queue's pump |
+| `platform_pump_add(engine, fn, user)`, `platform_pump_remove` | functions | a device module's per-frame work, run by `platform_pump`; up to `KV_PLATFORM_PUMP_MAX` (8) |
 
 What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
-| `WindowResized`, `FocusChanged`, `CloseRequested`, `KeyDown`, `KeyUp`, `MouseMoved`, `MouseButtonDown`, `MouseButtonUp`, `MouseWheel`, `GamepadConnected`, `GamepadDisconnected`, `PadButtonDown`, `PadButtonUp` | event types | no schemas; none carries an entity |
-| `input.state`, `platform.window` | resources, published | `Input` and `HostWindow`; read them through `ctx.resource<const T>` |
-| `input.sample` | system, phase Input, `Always` | writes `input.state` and `input.actions`: raw becomes sampled and the actions follow, on paused ticks too |
-| `input.actions` | resource | the action map and its state this tick |
 | `platform.io` | handle kind | an I/O request; `kv_handle_describe` prints its state and path |
 | `platform.io` | idle task | serves idle reads and what the pumps held back |
 
@@ -224,13 +146,7 @@ What the module registers with the engine:
 
 - **The pump is the heartbeat.** Window events, input and the I/O queue advance only in
   `platform_pump`, which the frame loop calls once per frame before the ticks. A tool
-  that drives the engine itself must call it too, or nothing arrives.
-- **Sampled input is per tick, raw is per frame.** A system sees `sampled`; render-rate
-  code may read `raw`. A key pressed and released between two ticks is seen only as its
-  `KeyDown` and `KeyUp` events.
-- **Mouse resizing on GNOME Wayland stalls the pump** for the whole drag: SDL's libdecor
-  repaints the frame inside every configure. Keyboard resizes and borderless windows are
-  fine; `host_window.h` has the diagnosis and the remedy.
+  that drives the engine itself must call it too, or nothing arrives (`tool_main` does).
 - **Reads complete in the disk's order** within a priority, and in priority order only on
   the synchronous backend. Consumers find theirs by the user word.
 - **The byte budget shapes the frame.** A pump's cost is proportional to the bytes it
@@ -241,16 +157,14 @@ What the module registers with the engine:
 - **Sockets never block and never stall.** A queue past `out_limit` drops and counts;
   `closed` says the peer went away. Served from a tick system, a connection's throughput
   is bounded by what the kernel buffers hold per tick.
-- **The module starts headless.** Startup brings up SDL's event subsystem only; video
-  and gamepads come up with the first window, or with `platform_video_up(e)` for code
-  that needs a video driver before one (the Vulkan renderer loads its loader through
-  it). A tool, a test or a server that opens no window needs no display at all.
-  `SDL_VIDEODRIVER=dummy` still gives a window-opening test a driver without a display.
+- **No external libraries.** Keep it that way: a module that needs SDL, a GPU or a sound
+  card is a module of its own (`platform_hid`, `platform_audio`, a renderer), so a tool
+  that does not need one never links it.
 
 ## Not in this module
 
-Mouse and touch, text input, more than one window, audio, controller rumble, inflating on
-the job pool (a deflated pack entry is inflated on the main thread at the pump), unmounting,
-io_uring for sockets, IPv6 and non-loopback
-listeners by default, Windows and macOS. Residency streaming sits above the queue, in
-the asset module and whatever comes after it.
+The window and input (`platform_hid`), the audio device (`platform_audio`), inflating on
+the job pool (a deflated pack entry is inflated on the main thread at the pump),
+unmounting, io_uring for sockets, IPv6 and non-loopback listeners by default, Windows and
+macOS. Residency streaming sits above the queue, in the asset module and whatever comes
+after it.

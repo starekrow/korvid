@@ -3,7 +3,7 @@
 module "renderer-vulkan" {
   provides  = "render",
   platforms = { "linux" },
-  deps      = { "core", "math", "render", "platform" },
+  deps      = { "core", "math", "render", "platform", "platform_hid" },
   external  = { vulkan = ">=1.3", sdl3 = ">=3.2" },
   tools     = { ["shader-compile"] = { install = "shaders" } }, -- the rule's outputs land in bin/shaders/
   engine_module = true,

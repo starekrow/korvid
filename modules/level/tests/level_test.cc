@@ -86,7 +86,6 @@ void collect(void* user, const char* line) { Lines& l = *(Lines*)user; if (l.n <
 void test_level(kv::TestCtx& c) {
     using namespace kv;
     c.begin("level");
-    setenv("SDL_VIDEODRIVER", "dummy", 0);
     const ModuleDesc* const list[] = {&platform_module, &asset_module, &sprite_module, &scene_module, &cli_module, &level_module, &k_lt};
     Engine e;
     KV_CHECK(c, engine_init(e, list));

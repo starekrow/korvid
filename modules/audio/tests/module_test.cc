@@ -7,6 +7,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
 #include "korvid/platform/module.h"
+#include "korvid/platform_audio/module.h"
 #include <stdlib.h>
 
 namespace {
@@ -38,12 +39,11 @@ void test_audio_module(kv::TestCtx& c) {
     using namespace kv;
     c.begin("audio_module");
 
-    // The platform module is up (SDL video on a dummy driver) so the audio module can try
+    // The audio device module is up (SDL audio on a dummy driver) so the audio module can try
     // the device; on a machine without one it runs silent, which is what this test wants
     // either way: voices on a null sound finish at the next extract.
-    setenv("SDL_VIDEODRIVER", "dummy", 0);
     setenv("SDL_AUDIO_DRIVER", "dummy", 0);
-    const ModuleDesc* const list[] = {&platform_module, &asset_module, &audio_module, &k_t};
+    const ModuleDesc* const list[] = {&platform_module, &platform_audio_module, &asset_module, &audio_module, &k_t};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     u64 tick = 0;

@@ -2,6 +2,6 @@
 -- with volume, pitch, pan and loop over sound assets; buses; voices that pause with the
 -- sim. A machine without a device runs silent.
 module "audio" {
-  deps          = { "core", "math", "platform", "asset" },
+  deps          = { "core", "math", "platform", "platform_audio", "asset" },
   engine_module = true,
 }

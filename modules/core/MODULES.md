@@ -204,7 +204,7 @@ engine does not expand: an event type, a component, a handle kind, a clip's labe
 
 Naming resources: `.rock` is the kind (a write on it covers spawn, destroy and every
 column); `.rock.Velocity` is one column; `*.Velocity` is that column in every kind that
-has one; `input.state` and `platform.window` are published resources reached with
+has one; `input.state` and `platform_hid.window` are published resources reached with
 `ctx.resource<const Input>(...)`. `move` and `wrap` both write `*.Transform2`, so one of
 them must say `after` the other or init fails with both names; `move` reads what nobody
 in Sim writes, so it needs no edge of its own. An unknown name fails init with the

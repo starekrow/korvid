@@ -1,5 +1,5 @@
 // The only place SDL scancodes are known. Both directions, table-driven.
-#include "korvid/platform/input.h"
+#include "korvid/platform_hid/input.h"
 #include <SDL3/SDL_scancode.h>
 
 namespace kv {
@@ -57,7 +57,7 @@ u32 scancode_from_key(Key k) {
 } // namespace kv
 
 // ---- gamepads -------------------------------------------------------------------------------
-#include "korvid/platform/events.h"
+#include "korvid/platform_hid/events.h"
 #include "korvid/core/log.h"
 #include <SDL3/SDL.h>
 

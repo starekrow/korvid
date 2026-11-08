@@ -1,6 +1,6 @@
-#include "korvid/platform/actions.h"
-#include "korvid/platform/input.h"
-#include "korvid/platform/module.h"
+#include "korvid/platform_hid/actions.h"
+#include "korvid/platform_hid/input.h"
+#include "korvid/platform_hid/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/utf8.h"
@@ -57,7 +57,7 @@ bool parse_binding(const char* text, ActionKind kind, ActionBinding& b, const ch
     return false;
 }
 
-PlatformState* pstate(Engine& e) { return engine_module_state_as<PlatformState>(e, "platform"); }
+HidState* pstate(Engine& e) { return engine_module_state_as<HidState>(e, "platform_hid"); }
 
 vec2 clamp_unit(vec2 v) {
     f32 l = sqrtf(v.x * v.x + v.y * v.y);
@@ -72,7 +72,7 @@ u32 InputActions::find(const char* name) const {
 }
 
 bool input_actions(Engine& e, Span<const InputActionDesc> descs) {
-    PlatformState* s = pstate(e);
+    HidState* s = pstate(e);
     if (!s) return false;
     if (descs.len > KV_ACTIONS) { KV_ERROR("input", "%u actions, more than %u", (u32)descs.len, KV_ACTIONS); return false; }
     InputActions next;
@@ -103,12 +103,12 @@ bool input_actions(Engine& e, Span<const InputActionDesc> descs) {
 }
 
 const InputActions* input_actions_get(Engine& e) {
-    PlatformState* s = pstate(e);
+    HidState* s = pstate(e);
     return s ? &s->actions : nullptr;
 }
 
 void input_action_override(Engine& e, const char* name, bool down, vec2 axis) {
-    PlatformState* s = pstate(e);
+    HidState* s = pstate(e);
     if (!s) return;
     u32 id = s->actions.find(name);
     if (id == KV_ACTION_NONE) return;

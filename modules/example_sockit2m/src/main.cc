@@ -267,7 +267,6 @@ void run_all(Driver& d) {
 
 bool run_engine_mode() {
     g_mode = "engine";
-    setenv("SDL_VIDEO_DRIVER", "dummy", 0); // the platform module wants a video driver; no window is opened
     Engine e;
     e.clock.tick_dt = 1.0 / g_opt.tick_hz;
     LogLevel was = log_level();

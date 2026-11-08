@@ -1,16 +1,12 @@
-// Korvid platform: module record, state and services. Startup initializes SDL's video,
-// event and gamepad subsystems. The module owns the window and the input state: the window is a
-// platform service opened on request and closed at module shutdown, never by the caller;
-// "input.sample" (phase Input) samples the keys into "input.state" once per tick. Both are
-// published resources: a system declares "input.state" or "platform.window" in its sets
-// and reaches them with ctx.resource<const Input>() and ctx.resource<const HostWindow>().
+// Korvid platform: module record, state and services. The operating system as a tool or a
+// game sees it with no display and no devices: the file read queue and its mounts, the
+// executable's and the user's directories, and sockets (net.h). No SDL and no external
+// library; the window, input and gamepads are platform_hid's, the audio device
+// platform_audio's, so a tool links this and nothing heavy.
 // The module registers one idle task, "platform.io", which serves the I/O queue's idle
 // reads and whatever the frame's pumps held back under their byte budget.
 #pragma once
-#include "korvid/platform/actions.h"
 #include "korvid/core/module.h"
-#include "korvid/platform/host_window.h"
-#include "korvid/platform/input.h"
 #include "korvid/platform/io.h"
 
 namespace kv {
@@ -19,15 +15,20 @@ struct Engine;
 
 KV_MODULE_DECLARE(platform_module);
 
-// The module's state: for code outside the schedule (the frame loop, a tool). Systems
-// reach the input and the window as resources.
+constexpr u32 KV_PLATFORM_PATH_MAX  = 512;
+constexpr u32 KV_PLATFORM_PUMP_MAX  = 8;
+
+// Called from platform_pump before the I/O queue's own pump: a device module (the window)
+// turns its OS events into bus events there.
+typedef void (*PlatformPumpFn)(Engine& e, void* user);
+
+// The module's state: for code outside the schedule (the frame loop, a tool).
 struct PlatformState {
-    Input       input;     // raw at frame rate, sampled per tick
-    HostWindow  window;    // one window per process; closed at module shutdown
-    IoQueue     io;        // the process's read queue, pumped by platform_pump
-    InputActions actions;  // what the game named, from the sampled input each tick
-    const char* base_path = nullptr; // the executable's directory, trailing separator; SDL's
-    char*       pref_path = nullptr; // the per-user directory once asked for; SDL's, freed at shutdown
+    IoQueue io;                               // the process's read queue, pumped by platform_pump
+    char    base_path[KV_PLATFORM_PATH_MAX];  // the executable's directory, trailing separator
+    char    pref_path[KV_PLATFORM_PATH_MAX];  // the per-user directory once asked for
+    struct  Pump { PlatformPumpFn fn; void* user; } pumps[KV_PLATFORM_PUMP_MAX];
+    u32     pump_count = 0;
 };
 
 // Where read_asset looks, set before engine_init (the frame loop's --pack and --assets).
@@ -43,19 +44,11 @@ struct PlatformMounts {
 };
 void platform_configure_mounts(const PlatformMounts& mounts);
 
-// Opens the window. Null if one is already open or SDL refused. Owned by the module.
-HostWindow* platform_open_window(Engine& e, const WindowDesc& desc);
-// The platform starts headless. This brings up video and gamepads (once; they stay up
-// until the platform shuts down) for whatever needs a display before a window exists,
-// such as a renderer loading the Vulkan loader. Opening a window calls it. False with a
-// log line when there is no video driver.
-bool        platform_video_up(Engine& e);
-// The open window, or null. For code outside the schedule; systems use the resource.
-HostWindow* platform_window(Engine& e);
-// The module's input, or null if the module is not started. Likewise.
-Input*      platform_input(Engine& e);
-// Once per frame: OS events become bus events and raw input state; the I/O queue reaps
-// its completions.
-void        platform_pump(Engine& e);
+// Once per frame: the pump hooks run (the window's events become bus events and raw
+// input), then the I/O queue reaps its completions.
+void platform_pump(Engine& e);
+// Adds or removes a pump hook. A module adds one at startup and removes it at shutdown.
+bool platform_pump_add(Engine& e, PlatformPumpFn fn, void* user);
+void platform_pump_remove(Engine& e, PlatformPumpFn fn, void* user);
 
 } // namespace kv

@@ -2,7 +2,7 @@
 // outer engine. It is not an entity. Platform changes arrive as events on the bus.
 #pragma once
 #include "korvid/core/event.h"
-#include "korvid/platform/input.h"
+#include "korvid/platform_hid/input.h"
 
 namespace kv {
 

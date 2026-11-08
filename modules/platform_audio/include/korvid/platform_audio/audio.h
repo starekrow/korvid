@@ -1,5 +1,5 @@
-// Korvid platform: the audio device. One per process, opened on request by whoever
-// mixes (the audio module) and closed at platform shutdown. The device pulls: SDL calls
+// Korvid platform_audio: the audio device. One per process, opened on request by whoever
+// mixes (the audio module) and closed at module shutdown. The device pulls: SDL calls
 // the callback on its own thread whenever it wants more frames, and the callback fills
 // interleaved f32 frames at the device's rate and channel count. That thread is a
 // realtime thread: the callback must not allocate, lock, log or block; it reads what the

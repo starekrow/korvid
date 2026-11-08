@@ -70,7 +70,7 @@ time at level barriers and in the serial residue, which is the number to beat.
 
 The module keeps two module lists of its own (`module_list = false` in `module.lua`): the
 generated one with the window for `--window`, and `cpukiller_core_modules()` with only
-itself for the headless run, since the platform module wants a video driver.
+itself for the headless run, which measures the core alone.
 
 ## Behaviour worth knowing
 

@@ -35,7 +35,7 @@ builds every module and example; `kormake test linux-debug` runs the test suites
 
 **A view system.** `example_testbed.move` (Sim) iterates every kind with `Transform2`,
 `Motion` and `Sprite` through `ctx.view`, moves each ball, keeps it inside the window
-(read from the `platform.window` resource), and emits `Bounced{ball}` at an edge. It
+(read from the `platform_hid.window` resource), and emits `Bounced{ball}` at an edge. It
 declares exactly what it touches; the scheduler puts `example_testbed.sim` after it because `sim`
 reads the kind `move` writes.
 

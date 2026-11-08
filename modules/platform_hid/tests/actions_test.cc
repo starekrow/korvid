@@ -1,9 +1,10 @@
 // Actions: bindings parse (and bad ones are refused with the set unchanged); a button's
 // edges across ticks; an Axis2 from keys, a stick past its dead zone and the d-pad, the
 // strongest winning, clamped to the unit circle; repeat for menus; overrides.
-#include "korvid/platform/actions.h"
-#include "korvid/platform/input.h"
+#include "korvid/platform_hid/actions.h"
+#include "korvid/platform_hid/input.h"
 #include "korvid/platform/module.h"
+#include "korvid/platform_hid/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
 #include <math.h>
@@ -18,7 +19,7 @@ void test_actions(kv::TestCtx& c) {
     using namespace kv;
     c.begin("actions");
     setenv("SDL_VIDEODRIVER", "dummy", 0);
-    const ModuleDesc* const list[] = {&platform_module};
+    const ModuleDesc* const list[] = {&platform_module, &platform_hid_module};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     const InputActionDesc acts[] = {

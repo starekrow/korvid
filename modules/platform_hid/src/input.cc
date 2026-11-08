@@ -1,4 +1,4 @@
-#include "korvid/platform/input.h"
+#include "korvid/platform_hid/input.h"
 
 namespace kv {
 

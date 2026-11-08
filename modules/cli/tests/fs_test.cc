@@ -47,7 +47,6 @@ void sink(void* user, const char* line) {
 void test_cli_fs(kv::TestCtx& c) {
     using namespace kv;
     c.begin("cli_fs");
-    setenv("SDL_VIDEODRIVER", "dummy", 0);
     const ModuleDesc* const list[] = {&platform_module, &cli_module, &k_g};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
