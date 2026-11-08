@@ -1,0 +1,117 @@
+{
+ "type": "tileset",
+ "version": "1.10",
+ "tiledversion": "1.10.2",
+ "name": "nature32",
+ "image": "../tiles/TilesetNature.png",
+ "imagewidth": 384,
+ "imageheight": 336,
+ "tilewidth": 32,
+ "tileheight": 32,
+ "columns": 12,
+ "tilecount": 120,
+ "margin": 0,
+ "spacing": 0,
+ "tiles": [
+  {
+   "id": 0,
+   "objectgroup": {
+    "draworder": "index",
+    "name": "",
+    "opacity": 1,
+    "type": "objectgroup",
+    "visible": true,
+    "x": 0,
+    "y": 0,
+    "objects": [
+     {
+      "id": 1,
+      "name": "",
+      "type": "",
+      "rotation": 0,
+      "visible": true,
+      "x": 10,
+      "y": 22,
+      "width": 12,
+      "height": 9
+     }
+    ]
+   }
+  },
+  {
+   "id": 1,
+   "objectgroup": {
+    "draworder": "index",
+    "name": "",
+    "opacity": 1,
+    "type": "objectgroup",
+    "visible": true,
+    "x": 0,
+    "y": 0,
+    "objects": [
+     {
+      "id": 1,
+      "name": "",
+      "type": "",
+      "rotation": 0,
+      "visible": true,
+      "x": 10,
+      "y": 22,
+      "width": 12,
+      "height": 9
+     }
+    ]
+   }
+  },
+  {
+   "id": 3,
+   "objectgroup": {
+    "draworder": "index",
+    "name": "",
+    "opacity": 1,
+    "type": "objectgroup",
+    "visible": true,
+    "x": 0,
+    "y": 0,
+    "objects": [
+     {
+      "id": 1,
+      "name": "",
+      "type": "",
+      "rotation": 0,
+      "visible": true,
+      "x": 10,
+      "y": 22,
+      "width": 12,
+      "height": 9
+     }
+    ]
+   }
+  },
+  {
+   "id": 8,
+   "objectgroup": {
+    "draworder": "index",
+    "name": "",
+    "opacity": 1,
+    "type": "objectgroup",
+    "visible": true,
+    "x": 0,
+    "y": 0,
+    "objects": [
+     {
+      "id": 1,
+      "name": "",
+      "type": "",
+      "rotation": 0,
+      "visible": true,
+      "x": 4,
+      "y": 18,
+      "width": 24,
+      "height": 12
+     }
+    ]
+   }
+  }
+ ]
+}

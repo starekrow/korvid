@@ -1,0 +1,16 @@
+{
+ "type": "tileset",
+ "version": "1.10",
+ "tiledversion": "1.10.2",
+ "name": "floor",
+ "image": "../tiles/TilesetFloor.png",
+ "imagewidth": 352,
+ "imageheight": 417,
+ "tilewidth": 16,
+ "tileheight": 16,
+ "columns": 22,
+ "tilecount": 572,
+ "margin": 0,
+ "spacing": 0,
+ "tiles": []
+}

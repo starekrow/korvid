@@ -1,0 +1,10 @@
+{
+  "title": "Arcanum",
+  "sections": [
+    { "heading": "Programming and Design", "lines": ["starekrow"] },
+    { "heading": "Art", "lines": ["Pixel-boy and AAA", "Ninja Adventure Asset Pack (CC0)"] },
+    { "heading": "Music and Sound", "lines": ["Pixel-boy and AAA", "Ninja Adventure Asset Pack (CC0)"] },
+    { "heading": "Coding Assistance", "lines": ["Claude Code"] },
+    { "heading": "Software", "lines": ["Built with Korvid Engine", "SDL 3 (zlib license)", "stb_truetype and stb_vorbis (public domain)", "miniz tinfl (MIT)", "DejaVu Sans (Bitstream Vera license)"] }
+  ]
+}
