@@ -144,6 +144,22 @@ bool Table::destroy(Handle h) {
     return true;
 }
 
+bool Table::restore_slots(Span<const u32> gen_words, Span<const u32> free_order) {
+    slots.owner = thread_id();
+    slots.tag   = tag;
+    destroy_all();
+    if (gen_words.len > desc->capacity || !ensure_rows(gen_words.len)) {
+        KV_ERROR("kind", "'%s': cannot restore %u slots (capacity %u)", name, gen_words.len, desc->capacity);
+        slots.restore_slots(Span<const u32>(), Span<const u32>());
+        return false;
+    }
+    for (Column& c : columns) {
+        memset(c.data, 0, (usize)gen_words.len * c.stride);
+        if (c.prev) memset(c.prev, 0, (usize)gen_words.len * c.stride);
+    }
+    return slots.restore_slots(gen_words, free_order);
+}
+
 u32 Table::destroy_all() {
     u32 n = rows(), gone = 0;
     for (u32 i = 0; i < n; ++i)

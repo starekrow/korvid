@@ -115,6 +115,12 @@ struct Table {
         return c && c->prev ? Span<const T>((const T*)c->prev, rows()) : Span<const T>();
     }
 
+    // A load: every entity goes and the slots become exactly these (Pool::restore_slots):
+    // the live ones zeroed, prev included, for the caller to fill. Spawns after it hand out
+    // the handles the saved table would have. False, and the table empty, if the slots do
+    // not fit the capacity or disagree with themselves.
+    bool restore_slots(Span<const u32> gen_words, Span<const u32> free_order);
+
     // Top of PreSim: the current rows become the previous ones, for every prev column.
     void begin_tick();
 

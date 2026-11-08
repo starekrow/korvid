@@ -24,6 +24,8 @@ struct JsonValue {
     const char* str    = nullptr; // String: the unescaped text
     u32         len    = 0;       // its length in bytes
     f64         number = 0.0;     // Number, and Bool as 0 or 1
+    u64         bits   = 0;       // an integer literal's exact value (two's complement when negative)
+    bool        integer = false;  // the Number was written without fraction or exponent and fits 64 bits
 
     bool is_null()   const { return type == JsonType::Null; }
     bool is_bool()   const { return type == JsonType::Bool; }
@@ -56,6 +58,10 @@ const JsonValue* json_next(const JsonDoc& doc, const JsonValue& v);
 
 // Typed reads with defaults: the value's number, or `dflt` when it is absent or not a number.
 f64         json_number(const JsonValue* v, f64 dflt);
+// Exact integers: an integer literal in range as written (a double would round past 2^53),
+// any other number truncated and clamped; `dflt` for what is not a number.
+u64         json_u64(const JsonValue* v, u64 dflt);
+i64         json_i64(const JsonValue* v, i64 dflt);
 bool        json_bool(const JsonValue* v, bool dflt);
 const char* json_string(const JsonValue* v, const char* dflt);
 // Up to `cap` numbers from an array into `out`; returns how many were there (not stored

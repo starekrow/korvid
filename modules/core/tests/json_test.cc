@@ -66,4 +66,16 @@ void test_json(kv::TestCtx& c) {
     KV_CHECK(c, !json_parse(deep, strlen(deep), mem_scratch(), doc) && strcmp(doc.error, "nesting too deep") == 0);
     deep[1] = ']'; deep[2] = 0; // "[]"
     KV_CHECK(c, json_parse(deep, 2, mem_scratch(), doc) && doc.root().is_array() && doc.root().count == 0);
+
+    // Integers keep their exact value past 2^53; fractions and exponents are not integers.
+    const char* ints = "[18446744073709551615, -9223372036854775808, 9007199254740993, 3.5, 1e3, 18446744073709551616, -2]";
+    KV_CHECK(c, json_parse(ints, strlen(ints), mem_scratch(), doc));
+    const JsonValue* iv[7];
+    for (u32 i = 0; i < 7; ++i) iv[i] = json_at(doc, doc.root(), i);
+    KV_CHECK(c, iv[0]->integer && json_u64(iv[0], 0) == ~0ull);
+    KV_CHECK(c, iv[1]->integer && json_i64(iv[1], 0) == (i64)0x8000000000000000ull && json_u64(iv[1], 7) == 0);
+    KV_CHECK(c, json_u64(iv[2], 0) == 9007199254740993ull && (u64)iv[2]->number != 9007199254740993ull);
+    KV_CHECK(c, !iv[3]->integer && json_i64(iv[3], 0) == 3 && !iv[4]->integer && json_u64(iv[4], 0) == 1000);
+    KV_CHECK(c, !iv[5]->integer && json_u64(iv[5], 0) == ~0ull); // past u64: the double, clamped
+    KV_CHECK(c, json_i64(iv[6], 0) == -2 && json_u64(iv[6], 9) == 0 && json_i64(nullptr, 4) == 4);
 }

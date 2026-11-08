@@ -144,6 +144,56 @@ struct Pool {
         return true;
     }
 
+    // A load: the pool becomes gen_words.len slots with these words (the generation, with
+    // ALIVE_BIT for a live slot), every item zero, the dead slots free in the order
+    // `free_order` gives and any it leaves out after them in slot order. A pool so restored
+    // hands out the same handles, in the same order, as the one that was saved. False, and
+    // the pool empty, for more slots than max, a generation of 0 or past the limit, or a
+    // free list naming a live, repeated or missing slot.
+    bool restore_slots(Span<const u32> gen_words, Span<const u32> free_order) {
+        if (!base && !init()) return false;
+        u32 n = gen_words.len;
+        auto fail = [&](const char* why) {
+            KV_ERROR("mem", "pool restore: %s", why);
+            len = live = 0;
+            free_head = free_tail = KV_POOL_NONE;
+            return false;
+        };
+        if (n > max_items) return fail("more slots than the pool has");
+        while (committed < n) if (!commit_more()) return fail("commit failed");
+        constexpr u32 kDeadUnlisted = KV_POOL_NONE - 1;
+        live = 0;
+        for (u32 i = 0; i < n; ++i) {
+            u32 g = gen_words[i] & ~ALIVE_BIT;
+            if (g == 0 || g > KV_HANDLE_MAX_GEN) return fail("a generation out of range");
+            gens[i] = gen_words[i];
+            if (gens[i] & ALIVE_BIT) ++live;
+            next_free[i] = gens[i] & ALIVE_BIT ? KV_POOL_NONE : kDeadUnlisted;
+        }
+        len = n;
+        memset((void*)items, 0, (usize)n * sizeof(T));
+        free_head = free_tail = KV_POOL_NONE;
+        auto append = [&](u32 i) {
+            next_free[i] = KV_POOL_NONE;
+            if (free_tail == KV_POOL_NONE) free_head = i;
+            else next_free[free_tail] = i;
+            free_tail = i;
+        };
+        for (u32 i : free_order) {
+            if (i >= n || next_free[i] != kDeadUnlisted) return fail("the free list names a live, repeated or missing slot");
+            append(i);
+        }
+        for (u32 i = 0; i < n; ++i)
+            if (next_free[i] == kDeadUnlisted) append(i);
+        return true;
+    }
+
+    // The dead slots in the order create() will reuse them.
+    template <class F>
+    void each_free(F&& fn) const {
+        for (u32 i = free_head; i != KV_POOL_NONE; i = next_free[i]) fn(i);
+    }
+
     // Slot count including dead slots; iterate with is_alive() to skip them.
     u32 capacity() const { return len; }
 

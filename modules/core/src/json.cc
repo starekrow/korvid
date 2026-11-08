@@ -112,9 +112,11 @@ struct Parser {
         return true;
     }
 
-    bool number(f64* out) {
+    bool number(JsonValue& v) {
+        f64* out = &v.number;
         usize start = at;
-        if (peek() == '-') ++at;
+        bool negative = peek() == '-';
+        if (negative) ++at;
         if (!(peek() >= '0' && peek() <= '9')) return fail("bad number");
         if (peek() == '0') ++at;
         else while (peek() >= '0' && peek() <= '9') ++at;
@@ -131,6 +133,20 @@ struct Parser {
         memcpy(buf, text + start, n);
         buf[n] = 0;
         *out = strtod(buf, nullptr);
+        // An integer literal keeps its exact value when it fits: u64, or i64 when negative.
+        bool plain = true;
+        for (usize i = negative ? 1 : 0; i < n; ++i) if (buf[i] < '0' || buf[i] > '9') { plain = false; break; }
+        if (plain) {
+            u64 mag = 0;
+            bool fits = true;
+            for (usize i = negative ? 1 : 0; i < n && fits; ++i) {
+                u64 d = (u64)(buf[i] - '0');
+                if (mag > (~0ull - d) / 10) fits = false;
+                else mag = mag * 10 + d;
+            }
+            if (fits && negative && mag > 0x8000000000000000ull) fits = false;
+            if (fits) { v.integer = true; v.bits = negative ? (u64)0 - mag : mag; }
+        }
         return true;
     }
 
@@ -180,7 +196,7 @@ struct Parser {
             return true;
         }
         if (c == '"') { nodes[idx].type = JsonType::String; return string(&nodes[idx].str, &nodes[idx].len); }
-        if (c == '-' || (c >= '0' && c <= '9')) { nodes[idx].type = JsonType::Number; return number(&nodes[idx].number); }
+        if (c == '-' || (c >= '0' && c <= '9')) { nodes[idx].type = JsonType::Number; return number(nodes[idx]); }
         if (c == 't') { nodes[idx].type = JsonType::Bool; nodes[idx].number = 1.0; return literal("true", 4); }
         if (c == 'f') { nodes[idx].type = JsonType::Bool; nodes[idx].number = 0.0; return literal("false", 5); }
         if (c == 'n') { nodes[idx].type = JsonType::Null; return literal("null", 4); }
@@ -232,6 +248,25 @@ const JsonValue* json_at(const JsonDoc& doc, const JsonValue& array, u32 index) 
 }
 
 f64 json_number(const JsonValue* v, f64 dflt) { return v && v->is_number() ? v->number : dflt; }
+u64 json_u64(const JsonValue* v, u64 dflt) {
+    if (!v || !v->is_number()) return dflt;
+    if (v->integer) return v->number < 0.0 ? 0 : v->bits;
+    if (!(v->number > 0.0)) return 0;
+    return v->number >= 18446744073709551616.0 ? ~0ull : (u64)v->number;
+}
+
+i64 json_i64(const JsonValue* v, i64 dflt) {
+    if (!v || !v->is_number()) return dflt;
+    if (v->integer) {
+        if (v->number >= 0.0 && v->bits > 0x7FFFFFFFFFFFFFFFull) return 0x7FFFFFFFFFFFFFFFll;
+        return (i64)v->bits;
+    }
+    if (v->number != v->number) return 0;
+    if (v->number >= 9223372036854775807.0) return 0x7FFFFFFFFFFFFFFFll;
+    if (v->number <= -9223372036854775808.0) return (i64)0x8000000000000000ull;
+    return (i64)v->number;
+}
+
 bool json_bool(const JsonValue* v, bool dflt) { return v && v->is_bool() ? v->number != 0.0 : dflt; }
 const char* json_string(const JsonValue* v, const char* dflt) { return v && v->is_string() ? v->str : dflt; }
 
