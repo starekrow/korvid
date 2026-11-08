@@ -225,13 +225,14 @@ void cli_quit(CliContext& ctx, Span<const char* const>) {
 // Sim control. The change applies from the next tick; the commands run inside a tick.
 void cli_pause(CliContext& ctx, Span<const char* const>) {
     engine_pause(*ctx.engine, true);
-    ctx.print("paused at tick %llu", (unsigned long long)ctx.engine->clock.tick_count);
+    ctx.print("paused at tick %llu (holds %#x)", (unsigned long long)ctx.engine->clock.tick_count, ctx.engine->clock.holds);
 }
 
 void cli_resume(CliContext& ctx, Span<const char* const>) {
     engine_pause(*ctx.engine, false);
     ctx.engine->clock.step_ticks = 0;
-    ctx.print("running from tick %llu", (unsigned long long)ctx.engine->clock.tick_count);
+    if (ctx.engine->clock.holds) ctx.print("still held at tick %llu (holds %#x): resume ends only the user hold", (unsigned long long)ctx.engine->clock.tick_count, ctx.engine->clock.holds);
+    else ctx.print("running from tick %llu", (unsigned long long)ctx.engine->clock.tick_count);
 }
 
 void cli_step(CliContext& ctx, Span<const char* const> args) {

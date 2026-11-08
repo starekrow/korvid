@@ -84,8 +84,17 @@ void test_pause(kv::TestCtx& c) {
     engine_frame(e, 1.0 / 60.0);
     KV_CHECK(c, g.sim_runs == 3 && g.edges == 1);
 
-    // Resume: sim ticks run again from 3.
+    // Two holders: a loading hold outlives the user's resume; the sim runs only once both
+    // have let go.
+    engine_hold(e, HoldLoading, true);
     engine_pause(e, false);
+    KV_CHECK(c, e.clock.paused && engine_holds(e) == HoldLoading);
+    engine_frame(e, 1.0 / 60.0);
+    KV_CHECK(c, g.sim_runs == 3 && e.clock.tick_count == 3);
+    engine_hold(e, HoldLoading, false);
+    KV_CHECK(c, !e.clock.paused && engine_holds(e) == 0);
+
+    // Resume: sim ticks run again from 3.
     engine_frame(e, 1.0 / 60.0);
     KV_CHECK(c, g.sim_runs == 4 && g.last_tick == 3 && e.clock.tick_count == 4);
     u64 hash_a = engine_hash_state(e);

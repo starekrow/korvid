@@ -886,11 +886,19 @@ u32 engine_frame(Engine& e, f64 frame_dt) {
     return ticks;
 }
 
-void engine_pause(Engine& e, bool paused) {
-    if (e.clock.paused == paused) return;
-    e.clock.paused = paused;
-    KV_INFO("engine", "%s at tick %llu", paused ? "paused" : "resumed", (unsigned long long)e.clock.tick_count);
+void engine_hold(Engine& e, u32 reason, bool on) {
+    u32 before = e.clock.holds;
+    e.clock.holds = on ? before | reason : before & ~reason;
+    if (e.clock.holds == before) return;
+    bool was = e.clock.paused;
+    e.clock.paused = e.clock.holds != 0;
+    if (was != e.clock.paused)
+        KV_INFO("engine", "%s at tick %llu (holds %#x)", e.clock.paused ? "paused" : "resumed", (unsigned long long)e.clock.tick_count, e.clock.holds);
 }
+
+u32 engine_holds(const Engine& e) { return e.clock.holds; }
+
+void engine_pause(Engine& e, bool paused) { engine_hold(e, HoldUser, paused); }
 
 void engine_step(Engine& e, u32 n) {
     if (!e.clock.paused) engine_pause(e, true);

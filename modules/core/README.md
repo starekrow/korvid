@@ -171,6 +171,7 @@ Header `korvid/core/engine.h`:
 | `engine_init(e, modules, config)`, `engine_shutdown(e)` | functions | register and start everything in order; undo it in reverse |
 | `engine_frame(e, dt)` | function | advance the clock, run the ticks it owes; returns how many |
 | `engine_pause(e, on)`, `engine_step(e, n)`, `engine_rate(e, x)` | functions | sim control: hold the sim (paused ticks run `RunWhen::Always` systems and handlers only), let `n` sim ticks through, scale time |
+| `engine_hold(e, reason, on)`, `engine_holds(e)`, `HoldReason` | functions, enum | the sim is paused while any hold is set: `HoldUser` (what `engine_pause` sets), `HoldLoading`, `HoldFocus`, `HoldGame` and up for a game; each owner clears only its own |
 | `engine_request_quit(e)` | function | the loop ends |
 | `engine_module(e, name)`, `engine_module_state_as<T>(e, name)` | functions | a started module and its state, for code outside the schedule |
 | `engine_publish(e, self, name, ptr)` | function | the object behind a declared resource, for `ctx.resource<T>` |

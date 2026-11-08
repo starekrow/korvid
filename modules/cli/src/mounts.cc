@@ -382,7 +382,7 @@ bool triggers_describe(CliContext& ctx, const char* rel) {
 
 struct ClockLeaf { const char* name; const char* what; };
 const ClockLeaf k_clock_leaves[] = {
-    {"tick", "the sim tick"}, {"tick_total", "every tick, paused ones included"}, {"paused", "1 while the sim holds; patchable"},
+    {"tick", "the sim tick"}, {"tick_total", "every tick, paused ones included"}, {"paused", "1 while the sim holds (any reason); patchable (the user hold)"}, {"holds", "who holds it: user, loading, focus, game bits"},
     {"rate", "time scale while unpaused; patchable"}, {"step", "sim ticks still to let through a pause; patchable"},
     {"dt", "seconds per tick"}, {"alpha", "the render interpolation point"}, {"dropped", "ticks' worth of time dropped at the cap"},
     {"frame", "frames so far"},
@@ -393,6 +393,8 @@ int clock_value(Engine& e, const char* name, char* out, usize cap) {
     if (!strcmp(name, "tick"))       return snprintf(out, cap, "%llu", (unsigned long long)c.tick_count);
     if (!strcmp(name, "tick_total")) return snprintf(out, cap, "%llu", (unsigned long long)c.tick_total);
     if (!strcmp(name, "paused"))     return snprintf(out, cap, "%d", c.paused ? 1 : 0);
+    if (!strcmp(name, "holds"))      return snprintf(out, cap, "%#x%s%s%s", c.holds, c.holds & HoldUser ? " user" : "",
+                                                     c.holds & HoldLoading ? " loading" : "", c.holds & HoldFocus ? " focus" : "");
     if (!strcmp(name, "rate"))       return snprintf(out, cap, "%g", c.rate);
     if (!strcmp(name, "step"))       return snprintf(out, cap, "%u", c.step_ticks);
     if (!strcmp(name, "dt"))         return snprintf(out, cap, "%g", c.tick_dt);

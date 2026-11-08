@@ -20,6 +20,7 @@ AssetState read_state(AssetState_& s, Handle h, bool* alive) {
     else if (k == s.material_kind) { if (MaterialAsset* m = s.materials.get(h)) return m->state; }
     else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))      return f->state; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))    return d->state; }
+    else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))      return b->state; }
     *alive = false;
     return AssetState::Failed;
 }
@@ -32,6 +33,7 @@ u64 bytes_of(AssetState_& s, Handle h) {
             return (u64)f->atlas_width * f->atlas_height * 4 + (u64)f->glyph_count * (sizeof(Glyph) + sizeof(u32)) +
                    (u64)f->kern_count * (sizeof(u64) + sizeof(f32));
     } else if (k == s.sound_kind) { if (SoundAsset* d = s.sounds.get(h)) return (u64)d->frames * d->channels * sizeof(f32); }
+    else if (k == s.blob_kind) { if (BlobAsset* b = s.blobs.get(h)) return b->size; }
     return 0;
 }
 
@@ -41,6 +43,7 @@ const char* path_of(AssetState_& s, Handle h) {
     else if (k == s.material_kind) { if (MaterialAsset* m = s.materials.get(h)) return m->path; }
     else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))         return f->path; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))       return d->path; }
+    else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))         return b->path; }
     return "?";
 }
 
@@ -73,6 +76,7 @@ void retire(Engine& e, AssetState_& s, Handle h) {
     else if (k == s.material_kind) material_retire(e, s, h);
     else if (k == s.font_kind) font_retire(e, s, h);
     else if (k == s.sound_kind) sound_retire(e, s, h);
+    else if (k == s.blob_kind) blob_retire(e, s, h);
     else return;
     ++s.retired;
 }
@@ -119,6 +123,7 @@ u32* asset_refs_of(AssetState_& s, Handle h) {
     else if (k == s.material_kind) { if (MaterialAsset* m = s.materials.get(h)) return &m->refs; }
     else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))         return &f->refs; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))       return &d->refs; }
+    else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))         return &b->refs; }
     return nullptr;
 }
 

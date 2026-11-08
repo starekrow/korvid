@@ -88,6 +88,7 @@ bool asset_startup(Engine& e, ModuleInstance& self) {
     if (!asset_materials_init(e, *s, self)) return false;
     if (!asset_fonts_init(e, *s, self)) return false;
     if (!asset_sounds_init(e, *s, self)) return false;
+    if (!asset_blobs_init(e, *s, self)) return false;
     if (!asset_scopes_init(e, *s, self)) return false;
     self.set_state(s);
     return true;
@@ -97,6 +98,7 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
     AssetState_* s = self.state_as<AssetState_>();
     if (!s) return;
     asset_scopes_shutdown(e, *s);
+    asset_blobs_shutdown(e, *s);
     asset_sounds_shutdown(e, *s);
     asset_fonts_shutdown(e, *s);
     asset_materials_shutdown(e, *s);
@@ -111,10 +113,10 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
 }
 
 constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(AssetFailed), KV_EVENT(AssetScopeReady)};
-constinit const ResourceDesc  k_resources[] = {{".textures"}, {".materials"}, {".fonts"}, {".sounds"}};
+constinit const ResourceDesc  k_resources[] = {{".textures"}, {".materials"}, {".fonts"}, {".sounds"}, {".blobs"}};
 constinit const SystemDesc    k_systems[]   = {
     // Retiring first: it writes every table, and the other pumps then see this tick's state.
-    {.name = ".pump_scopes", .phase = Phase::PreSim, .fn = asset_scopes_pump, .writes = ".textures, .materials, .fonts, .sounds",
+    {.name = ".pump_scopes", .phase = Phase::PreSim, .fn = asset_scopes_pump, .writes = ".textures, .materials, .fonts, .sounds, .blobs",
      .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = ".textures", .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump_materials", .phase = Phase::PreSim, .fn = asset_materials_pump, .reads = ".textures",
@@ -122,6 +124,8 @@ constinit const SystemDesc    k_systems[]   = {
     {.name = ".pump_fonts", .phase = Phase::PreSim, .fn = asset_fonts_pump, .writes = ".fonts",
      .after = ".pump", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump_sounds", .phase = Phase::PreSim, .fn = asset_sounds_pump, .writes = ".sounds",
+     .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".pump_blobs", .phase = Phase::PreSim, .fn = asset_blobs_pump, .writes = ".blobs",
      .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
 };
 
