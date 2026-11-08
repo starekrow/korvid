@@ -9,7 +9,7 @@ The point is to show the floor. Everything the engine asks of this program fits 
 short list:
 
 - three strings in the system's declaration, naming what it touches: the sprite kind, the
-  keys, the window;
+  keys and the mouse, the window;
 - `ctx.write_kind("sprite.entity")` for the sprite table, a `spawn` per stone and a
   `get<Transform2>` per stone per tick to move its sprite;
 - two lines of reflection for `Stone` (`KV_FIELDS`, `KV_COMPONENT`), used only to print it;

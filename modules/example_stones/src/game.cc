@@ -1,7 +1,8 @@
 // example_stones, written the way you'd write it if you didn't want to learn the engine.
 //
 // There's a player stone and a bunch of loose stones in a box. Arrows push the player,
-// space drops another stone in, stones bounce off the walls and each other. All of that
+// the player chases the mouse while the left button is down, space drops another stone
+// in, stones bounce off the walls and each other. All of that
 // is my own structs in my own arrays, updated in one function, top to bottom, every tick.
 // The engine gives me a window, the keys, sprites to draw with, and a way to print my
 // structs. That's all I asked it for.
@@ -108,7 +109,7 @@ void stones_tick(TickContext& ctx) {
         for (u32 i = 0; i < 12; ++i)
             add_stone(g, sprites, point2{g.rng.range(-g.w * 0.4f, g.w * 0.4f), g.rng.range(-g.h * 0.4f, g.h * 0.4f)},
                       vec2{g.rng.range(-150, 150), g.rng.range(-150, 150)}, kStoneRadius, g.material, 1);
-        KV_INFO("stones", "arrows push, space drops a stone, esc quits");
+        KV_INFO("stones", "arrows push, hold the left mouse button to chase the cursor, space drops a stone, esc quits");
     }
     ++g.ticks;
 
@@ -118,6 +119,16 @@ void stones_tick(TickContext& ctx) {
     if (input->sampled.down(Key::Right)) player.vel.x += kPush * dt;
     if (input->sampled.down(Key::Up))    player.vel.y += kPush * dt;
     if (input->sampled.down(Key::Down))  player.vel.y -= kPush * dt;
+    // The mouse: while the left button is down, push toward the cursor. The pointer comes
+    // in window pixels from the top-left; the box is centered with y up, so convert.
+    const MouseState& mouse = input->sampled.mouse;
+    if (mouse.down(MouseButton::Left)) {
+        f32 mx, my;
+        mouse_screen(mouse.x, mouse.y, window->width(), window->height(), &mx, &my);
+        vec2 to{mx - player.pos.x, my - player.pos.y};
+        f32 dist = sqrtf(to.x * to.x + to.y * to.y);
+        if (dist > kPlayerRadius * 0.5f) player.vel += to * (kPush * dt / dist);
+    }
     if (input->sampled.down(Key::Space) && g.ticks % 10 == 0 && g.stones.len < 200) {
         f32 side = g.rng.chance(0.5f) ? 1.0f : -1.0f;
         add_stone(g, sprites, point2{side * (g.w * 0.5f - kStoneRadius), g.rng.range(-g.h * 0.4f, g.h * 0.4f)},
