@@ -1,5 +1,6 @@
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/frameloop/module.h"
+#include "korvid/asset/font.h"
 #include "korvid/cli/module.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
@@ -12,6 +13,8 @@
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/camera.h"
 #include "korvid/sprite/module.h"
+#include "korvid/sprite/transform2.h"
+#include "korvid/text/text.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -36,6 +39,11 @@ bool            g_check_sort   = false;   // --check-sort: verify the GPU sort e
 CliConfig       g_cli;                    // --cli-port N, --cli-stdin
 f64             g_idle_margin  = 0.0015;  // --idle-margin-ms N: slack kept back from idle work
 bool            g_idle         = true;    // --no-idle
+bool            g_overlay      = false;   // --overlay: the report on screen
+
+constexpr u32 kOverlayLines = 8;
+constexpr f32 kOverlayPx    = 16.0f;
+constinit u32 g_overlay_kind = 0;
 
 struct FrameLoopState {
     FrameLoopConfig config;
@@ -48,6 +56,8 @@ struct FrameLoopState {
     u64             idle_frames = 0;     // frames that ran idle work in the window
     bool            timer_fired = false; // the loop raises it; the system emits it once
     bool            timer_sent  = false;
+    Handle          overlay_font;              // asset.font, when --overlay
+    Handle          overlay_lines[kOverlayLines]; // frameloop.overlay labels, top to bottom
 };
 
 // Wall clock in the exact format libwayland's WAYLAND_DEBUG uses (realtime microseconds
@@ -88,11 +98,12 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--cli-stdin") == 0) g_cli.stdin_ = true;
         else if (strcmp(argv[i], "--idle-margin-ms") == 0 && i + 1 < argc) g_idle_margin = atof(argv[++i]) * 1e-3;
         else if (strcmp(argv[i], "--no-idle") == 0) g_idle = false;
+        else if (strcmp(argv[i], "--overlay") == 0) g_overlay = true;
         else if (u32 f = game_flag(cfg, argv[i])) g_flags_given |= (u64)1 << (f - 1);
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin] [--idle-margin-ms N] [--no-idle]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin] [--idle-margin-ms N] [--no-idle] [--overlay]", argv[0]);
             return false;
         }
     }
@@ -137,10 +148,41 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     rd.vsync         = s->window->vsync();
     rd.validation    = s->config.validation;
     s->renderer = renderer_create(engine, rd);
-    return s->renderer != nullptr;
+    if (!s->renderer) return false;
+
+    if (g_overlay) {
+        s->overlay_font = asset_load_font(engine, "text/DejaVuSans.ttf", kOverlayPx);
+        Table* labels = engine_table(engine, g_overlay_kind);
+        for (u32 i = 0; i < kOverlayLines; ++i) {
+            Text t;
+            t.font  = s->overlay_font;
+            t.space = SpriteSpace::Screen;
+            t.layer = 127;
+            t.tint  = color_rgba(1.0f, 1.0f, 1.0f, 0.9f);
+            s->overlay_lines[i] = labels->spawn(Transform2{}, t);
+        }
+    }
+    return true;
+}
+
+// The overlay's labels: placed down the top-left corner for the window's current size,
+// line i given `text`. Called at every report, so a resize is right within a second.
+void overlay_set(Engine& engine, FrameLoopState& s, u32 line, const char* text) {
+    if (!g_overlay || line >= kOverlayLines) return;
+    Table* labels = engine_table(engine, g_overlay_kind);
+    Text* t = labels->get<Text>(s.overlay_lines[line]);
+    Transform2* at = labels->get<Transform2>(s.overlay_lines[line]);
+    if (!t || !at) return;
+    f32 w = (f32)s.window->width(), h = (f32)s.window->height();
+    at->position = point2{-w * 0.5f + 12.0f, h * 0.5f - 12.0f - kOverlayPx * (1.0f + 1.2f * (f32)line)};
+    text_set(*t, "%s", text);
 }
 
 constinit const EventTypeDesc k_events[]  = {KV_EVENT(ExitRequested)};
+constinit const char* const   k_overlay_components[] = {"Transform2", "Text"};
+constinit const KindDesc      k_kinds[] = {
+    {.name = "frameloop.overlay", .components = k_overlay_components, .capacity = kOverlayLines, .id = &g_overlay_kind, .cosmetic = true},
+};
 constinit const char* const   k_exit_reads[] = {"input.state"};
 constinit const SystemDesc    k_systems[] = {
     {.name = "frameloop.exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = k_exit_reads, .runs = RunWhen::Always},
@@ -236,6 +278,26 @@ void run(Engine& engine, FrameLoopState& s) {
                     s.window->focused() ? "focused" : "unfocused",
                     (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
                     s.idle_frames ? s.idle_total / (f64)s.idle_frames * 1e3 : 0.0, (unsigned long long)s.idle_frames);
+            if (g_overlay) {
+                char line[96];
+                snprintf(line, sizeof line, "%u fps  tick %llu  %u sprites  %u deltas", frames_in_window,
+                         (unsigned long long)engine.clock.tick_count, renderer_sprite_count(s.renderer), s.deltas_last_frame);
+                overlay_set(engine, s, 0, line);
+                snprintf(line, sizeof line, "%llu KB live  idle %.1f ms%s", (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
+                         s.idle_frames ? s.idle_total / (f64)s.idle_frames * 1e3 : 0.0, engine.clock.paused ? "  PAUSED" : "");
+                overlay_set(engine, s, 1, line);
+                u32 shown = 0;
+                if (g_prof_report) {
+                    ProfStat top[kOverlayLines - 2];
+                    u32 frames = 1;
+                    u32 n = prof_top(top, &frames);
+                    for (; shown < n; ++shown) {
+                        snprintf(line, sizeof line, "%-28.28s %6.3f ms", top[shown].name, prof_ms(top[shown].wall) / frames);
+                        overlay_set(engine, s, 2 + shown, line);
+                    }
+                }
+                for (u32 i = 2 + shown; i < kOverlayLines; ++i) overlay_set(engine, s, i, "");
+            }
             s.idle_total = 0.0;
             s.idle_frames = 0;
             if (g_prof_report) prof_log_summary(10);
@@ -254,6 +316,7 @@ void run(Engine& engine, FrameLoopState& s) {
 KV_MODULE_DEFINE(frameloop_module) = {
     .name    = "frameloop",
     .events  = k_events,
+    .kinds   = k_kinds,
     .systems = k_systems,
     .startup = frameloop_startup,
     .memory  = {.reserve = 64 * 1024},

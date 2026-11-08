@@ -17,6 +17,8 @@ struct Engine;
 // for good.
 enum class AssetState : u8 { Pending, Ready, Failed };
 
+constexpr u32 KV_ASSET_PATH_MAX = 128; // bytes, NUL included, for asset and texture paths
+
 // Why a load failed. NotFound and Read come from the I/O queue (ENOENT, anything else);
 // Decode is the PNG decoder; Upload the renderer; Parse a material file's text. A failed
 // asset keeps its handle and its placeholder look, so nothing downstream has to care.

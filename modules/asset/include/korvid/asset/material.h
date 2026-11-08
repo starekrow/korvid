@@ -19,7 +19,6 @@
 
 namespace kv {
 
-constexpr u32 KV_ASSET_PATH_MAX = 128; // bytes, NUL included, for asset and texture paths
 
 // A material asset's record, read through asset_material or asset_material_at. Owned by
 // the module; the pointer is valid until the next load or shutdown.

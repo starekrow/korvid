@@ -293,6 +293,15 @@ void prof_log_summary(u32 top) {
     g_c.frames_since_log = 0;
 }
 
+u32 prof_top(Span<ProfStat> out, u32* frames) {
+    collector_init();
+    if (frames) *frames = g_c.frames_since_log ? g_c.frames_since_log : 1;
+    if (g_c.totals.len > 1) qsort(g_c.totals.data, g_c.totals.len, sizeof(ProfStat), by_wall_desc);
+    u32 n = 0;
+    for (; n < g_c.totals.len && n < out.len; ++n) out[n] = g_c.totals[n];
+    return n;
+}
+
 void prof_keep_frame(bool on) {
     collector_init();
     g_c.keep = on;

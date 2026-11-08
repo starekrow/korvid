@@ -1,7 +1,7 @@
 # example_rocks
 
-An asteroids-like, written the way the engine would like a game written: six kinds, seven
-systems with declared sets, nine handlers, scheduled events for bullet expiry and waves,
+An asteroids-like, written the way the engine would like a game written: seven kinds, eight
+systems with declared sets, eleven handlers, scheduled events for bullet expiry and waves,
 a trigger for the ship's death, a published score, and no handle kept anywhere except on
 the events that carry them. The ship flies from the keyboard or the first gamepad, or
 from a script with `--demo` so a run is reproducible: two runs of
@@ -90,6 +90,15 @@ debris are additive dots.
   screen-space dimmer in the `overlay` kind and calls `engine_pause`. Nothing else in the
   game knows about pausing: the sim systems simply do not run, the timers hold, and the
   extract keeps drawing.
+- **Text is a kind of its own.** `label` rows carry a `Text` and a `Label` role: the HUD
+  (rewritten every tick by `hud`, an `Always` system, from the published score; the text
+  module relays out only when the string changes), the pause banner (spawned and
+  destroyed by `pause`) and the game-over banner (spawned by `on_edge`, cleared by
+  `on_restart` with everything else). The font is DejaVu Sans at 28 px from the text
+  module's assets.
+- **Exit is a handler.** `on_exit` quits on `ExitRequested` whether or not the game is
+  paused; a Sim system would not run while paused and a `--run-seconds` that lands
+  inside the demo's pause would be lost.
 - **The flame is a child.** The `flame` kind has `Local2` and `Parent`; `on_spawned`
   gives each new ship one, 26 units behind it, and the scene module keeps it there and
   destroys it with the ship. `control` only sets its alpha from the thrust.

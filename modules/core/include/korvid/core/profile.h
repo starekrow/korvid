@@ -80,6 +80,10 @@ Span<const ProfThreadStat> prof_thread_stats();
 // Logs the top zones by average per frame since the last call, with the worst frame of
 // each, then resets the running totals.
 void prof_log_summary(u32 top);
+// The same list as data, for an overlay: the zones since the last prof_log_summary, by
+// wall time descending, copied into `out`. Returns how many were written; `*frames` gets
+// the frame count they are summed over. Leaves the running totals alone.
+u32  prof_top(Span<ProfStat> out, u32* frames);
 // Keeps each collected frame's records so prof_log_frame can print the tree.
 void prof_keep_frame(bool on);
 // Logs the last collected frame as a tree, per thread, zones at or above `min_ticks`.

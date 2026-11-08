@@ -85,6 +85,7 @@ bool asset_startup(Engine& e, ModuleInstance& self) {
     s->textures.use_kind(s->kind);
     if (!s->textures.init(4096, self.general.tag)) return false;
     if (!asset_materials_init(e, *s, self)) return false;
+    if (!asset_fonts_init(e, *s, self)) return false;
     self.set_state(s);
     return true;
 }
@@ -92,6 +93,7 @@ bool asset_startup(Engine& e, ModuleInstance& self) {
 void asset_shutdown(Engine& e, ModuleInstance& self) {
     AssetState_* s = self.state_as<AssetState_>();
     if (!s) return;
+    asset_fonts_shutdown(e, *s);
     asset_materials_shutdown(e, *s);
     // Renderer textures belong to the renderer and go with it; cancel reads still in flight.
     IoQueue* io = platform_io(e);
@@ -104,7 +106,8 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
 }
 
 constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(AssetFailed)};
-constinit const ResourceDesc  k_resources[] = {{"asset.textures"}, {"asset.materials"}};
+constinit const ResourceDesc  k_resources[] = {{"asset.textures"}, {"asset.materials"}, {"asset.fonts"}};
+constinit const char* const   k_fonts_writes[] = {"asset.fonts"};
 constinit const char* const   k_pump_writes[] = {"asset.textures"};
 constinit const char* const   k_materials_reads[]  = {"asset.textures"};
 constinit const char* const   k_materials_writes[] = {"asset.materials"};
@@ -113,6 +116,8 @@ constinit const SystemDesc    k_systems[]   = {
     {.name = "asset.pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = k_pump_writes, .main_thread = true, .runs = RunWhen::Always},
     {.name = "asset.pump_materials", .phase = Phase::PreSim, .fn = asset_materials_pump, .reads = k_materials_reads,
      .writes = k_materials_writes, .after = k_materials_after, .main_thread = true, .runs = RunWhen::Always},
+    {.name = "asset.pump_fonts", .phase = Phase::PreSim, .fn = asset_fonts_pump, .writes = k_fonts_writes,
+     .after = k_materials_after, .main_thread = true, .runs = RunWhen::Always},
 };
 
 } // namespace

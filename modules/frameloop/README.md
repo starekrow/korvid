@@ -105,8 +105,9 @@ What the module registers with the engine:
 |---|---|---|
 | `ExitRequested` | event type | no schema |
 | `frameloop.exit` | system, phase PreSim, `Always` | reads `input.state`; one event per reason per tick, paused or not |
+| `frameloop.overlay` | kind, cosmetic | `Transform2`, `Text`: the `--overlay` lines; never hashed |
 
-Depends on: core, platform, math, render, sprite, cli. A game that depends on frameloop
+Depends on: core, platform, math, render, asset, sprite, scene, text, cli. A game that depends on frameloop
 has all of them.
 
 ## Behaviour worth knowing
@@ -126,7 +127,12 @@ has all of them.
   The default camera is one world unit per pixel with the origin at the window's center,
   +y up. Screen-space sprites ignore it.
 - **Pause is the engine's.** `engine_pause` (or the CLI's `pause`) holds the sim; the
-  loop keeps running paused ticks, so input, the extract and the CLI stay alive.
+  loop keeps running paused ticks, so input, the extract and the CLI stay alive. Handle
+  `ExitRequested` in a handler (or an `Always` system), never in a Sim system: a quit
+  asked for during a pause would otherwise wait for the resume.
+- **`--overlay` puts the report on screen**: the fps line and the memory line at the
+  top-left in the module's own cosmetic kind, and with `--prof-report` the top zones
+  under them, refreshed with every report. It loads `text/DejaVuSans.ttf` at 16 px.
 - **`--run-seconds` is cooperative.** It emits `ExitRequested{Timer}` once; a game that
   ignores it runs on.
 - **Everything mechanical is logged once**: the schedule at init, the device and the

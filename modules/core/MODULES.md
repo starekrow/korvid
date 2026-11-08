@@ -207,6 +207,14 @@ to the OS, the GPU or a module's own pools (the asset pumps, the CLI). `.state =
 lets a system run beside its module's others. `.runs = RunWhen::Always` makes a system run
 on paused ticks too (see below); the default, `Unpaused`, is right for gameplay.
 
+### Cosmetic kinds
+
+`KindDesc::cosmetic = true` keeps a kind out of the state hash altogether: glyphs, an
+overlay, anything that exists only to be drawn and whose rows may differ between two
+runs that are otherwise the same. The flow rule still applies per component, so a sim
+system that reads such a kind's sim columns while writing sim state is a leak the
+scheduler will not catch; do not do that.
+
 ### Pause
 
 `engine_pause(e, true)` holds the simulation. The clock keeps producing ticks at its rate,

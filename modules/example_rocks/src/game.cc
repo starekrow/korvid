@@ -6,6 +6,7 @@
 // game knows is in kinds and one published Score; no handle is kept anywhere except on
 // the events that carry them.
 #include "korvid/example_rocks/module.h"
+#include "korvid/asset/font.h"
 #include "korvid/asset/material.h"
 #include "korvid/collision/module.h"
 #include "korvid/core/arena.h"
@@ -22,6 +23,7 @@
 #include "korvid/sprite/camera.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
+#include "korvid/text/text.h"
 #include <math.h>
 
 namespace kv {
@@ -34,28 +36,33 @@ struct Health   { i32 hp; };
 struct Lifetime { f32 left; f32 total; }; // seconds
 struct RockSize { u8 size; };             // 0 big, 1 medium, 2 small
 struct Ship     { f32 cooldown; u8 thrusting; };
+struct Label    { u8 role; };             // what a text label shows: see Role
+enum Role : u8 { ROLE_HUD, ROLE_PAUSED, ROLE_OVER };
 
 constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, v, spin)};
 constinit const FieldDesc k_health_fields[]   = {KV_FIELDS(Health, hp)};
 constinit const FieldDesc k_lifetime_fields[] = {KV_FIELDS(Lifetime, left, total)};
 constinit const FieldDesc k_rocksize_fields[] = {KV_FIELDS(RockSize, size)};
 constinit const FieldDesc k_ship_fields[]     = {KV_FIELDS(Ship, cooldown, thrusting)};
+constinit const FieldDesc k_label_fields[]    = {KV_FIELDS(Label, role)};
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Velocity, k_velocity_fields),
     KV_COMPONENT(Health, k_health_fields, CompPrev), // the death trigger watches it
     KV_COMPONENT(Lifetime, k_lifetime_fields),
     KV_COMPONENT(RockSize, k_rocksize_fields),
     KV_COMPONENT(Ship, k_ship_fields),
+    KV_COMPONENT(Label, k_label_fields),
 };
 
 // ---- kinds -----------------------------------------------------------------------------
-constinit u32 g_ship_kind = 0, g_bullet_kind = 0, g_rock_kind = 0, g_debris_kind = 0, g_overlay_kind = 0, g_flame_kind = 0;
+constinit u32 g_ship_kind = 0, g_bullet_kind = 0, g_rock_kind = 0, g_debris_kind = 0, g_overlay_kind = 0, g_flame_kind = 0, g_label_kind = 0;
 constinit const char* const k_ship_components[]    = {"Transform2", "Sprite", "Velocity", "Health", "Collider2", "Ship"};
 constinit const char* const k_bullet_components[]  = {"Transform2", "Sprite", "Velocity", "Collider2"};
 constinit const char* const k_rock_components[]    = {"Transform2", "Sprite", "Velocity", "Collider2", "RockSize"};
 constinit const char* const k_debris_components[]  = {"Transform2", "Sprite", "Velocity", "Lifetime"};
 constinit const char* const k_overlay_components[] = {"Transform2", "Sprite"}; // screen-space, over everything
 constinit const char* const k_flame_components[]   = {"Transform2", "Sprite", "Local2", "Parent"}; // a child of the ship
+constinit const char* const k_label_components[]   = {"Transform2", "Text", "Label"};               // the HUD and the banners
 constinit const KindDesc k_kinds[] = {
     {.name = "example_rocks.ship",    .components = k_ship_components,    .capacity = 1,    .id = &g_ship_kind},
     {.name = "example_rocks.bullet",  .components = k_bullet_components,  .capacity = 4096, .id = &g_bullet_kind},
@@ -63,6 +70,7 @@ constinit const KindDesc k_kinds[] = {
     {.name = "example_rocks.debris",  .components = k_debris_components,  .capacity = 8192, .id = &g_debris_kind},
     {.name = "example_rocks.overlay", .components = k_overlay_components, .capacity = 8,    .id = &g_overlay_kind},
     {.name = "example_rocks.flame",   .components = k_flame_components,   .capacity = 4,    .id = &g_flame_kind},
+    {.name = "example_rocks.label",   .components = k_label_components,   .capacity = 8,    .id = &g_label_kind},
 };
 
 // ---- events ----------------------------------------------------------------------------
@@ -105,6 +113,7 @@ struct Game {
     Score  score;
     Handle looks[LOOK_COUNT];     // asset.material, one file per look
     Handle materials[LOOK_COUNT]; // render.material: the rows those files fill
+    Handle font;                  // asset.font: DejaVu Sans at 28 px
     u16    ship_hk, bullet_hk, rock_hk; // handle kinds, to tell what an overlap is between
     bool   started = false;
     bool   demo    = false;
@@ -139,6 +148,26 @@ Sprite sprite_of(const Game& g, Look look, f32 size, i32 layer, color tint = col
 }
 
 vec2 heading(f32 rotation) { return vec2{cosf(rotation), sinf(rotation)}; }
+
+// A label in screen space; the HUD sits top-left, banners in the middle, over the dimmer.
+void spawn_label(Table& labels, const Game& g, Role role, const char* str, point2 at, TextAlign align, f32 scale, i32 layer, color tint) {
+    Text t;
+    t.font  = g.font;
+    t.scale = scale;
+    t.tint  = tint;
+    t.layer = layer;
+    t.space = SpriteSpace::Screen;
+    t.align = align;
+    text_set(t, "%s", str);
+    labels.spawn(transform2_at(at), t, Label{role});
+}
+
+// Every label of one role goes.
+void destroy_labels(Table& labels, Role role) {
+    Span<const Label> roles = labels.rows_of<Label>();
+    for (u32 i = 0; i < labels.rows(); ++i)
+        if (labels.is_alive(i) && roles[i].role == role) labels.destroy(labels.handle_at(i));
+}
 
 // A rock of `size` at `at`, drifting in a random direction. Direct: the caller holds the write.
 void spawn_rock(Table& rocks, Game& g, point2 at, u8 size, vec2 drift) {
@@ -185,17 +214,35 @@ void pause(TickContext& ctx) {
     }
     if (!toggle) return;
     Table* overlay = ctx.write_kind(g_overlay_kind);
+    Table* labels  = ctx.write_kind(g_label_kind);
     if (!e.clock.paused) {
         const HostWindow* w = ctx.resource<const HostWindow>(k_window);
         Sprite dim = sprite_of(g, LOOK_WHITE, 1.0f, 100, color_rgba(0.0f, 0.0f, 0.02f, 0.55f));
         dim.size  = vec2{(f32)w->width(), (f32)w->height()};
         dim.space = SpriteSpace::Screen;
         overlay->spawn(transform2_at(point2{0, 0}), dim);
+        spawn_label(*labels, g, ROLE_PAUSED, "PAUSED", point2{0, 10}, TextAlign::Center, 2.0f, 101, color_white());
+        spawn_label(*labels, g, ROLE_PAUSED, "Escape or Start resumes, Q quits", point2{0, -40}, TextAlign::Center, 0.75f, 101,
+                    color_rgba(1.0f, 1.0f, 1.0f, 0.7f));
         engine_pause(e, true);
         KV_INFO("rocks", "paused: Escape or Start resumes, Q quits");
     } else {
         overlay->destroy_all();
+        destroy_labels(*labels, ROLE_PAUSED);
         engine_pause(e, false);
+    }
+}
+
+// Phase PostSim, every tick: the HUD label says what the score says. One write per tick;
+// the text module relays out only when the string changes.
+void hud(TickContext& ctx) {
+    static const u32 k_score = ctx.resource_id("example_rocks.score");
+    const Score* score = ctx.resource<const Score>(k_score);
+    for (KindRows k : ctx.view<Text, const Label>()) {
+        Span<Text>        texts = k.col<Text>();
+        Span<const Label> roles = k.col<const Label>();
+        for (u32 i = 0; i < k.rows(); ++i)
+            if (k.alive(i) && roles[i].role == ROLE_HUD) text_set(texts[i], "SCORE %d   WAVE %u", score->total, score->wave);
     }
 }
 
@@ -321,7 +368,7 @@ void debris_fade(TickContext& ctx) {
     }
 }
 
-// Boot, logging and the way out.
+// Boot: the first tick starts the first game.
 void game(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     if (!g.started) {
@@ -331,19 +378,28 @@ void game(TickContext& ctx) {
         KV_INFO("rocks", "%s. Arrows turn and thrust, space fires, Escape pauses, Q quits; on a pad the left stick turns, South thrusts, West fires, Start pauses.", g.demo ? "Demo: the ship flies itself" : "Your ship");
         ctx.emit(Restart{});
     }
-    for (const AssetFailed& e : ctx.events->read<AssetFailed>()) {
-        char text[160];
-        kv_handle_describe(e.asset.bits, text, sizeof text);
-        KV_WARN("rocks", "asset failed (%s): %s", asset_error_name(e.error), text);
-    }
-    for (const ExitRequested& e : ctx.events->read<ExitRequested>()) {
+}
+
+// ---- handlers --------------------------------------------------------------------------
+
+// The way out. A handler, not a Sim system: handlers run on paused ticks, so a quit asked
+// for while the game is paused (the window closing, --run-seconds) still happens.
+void on_exit(TickContext& ctx, Span<const ExitRequested> exits) {
+    Game& g = ctx.state_as<Game>();
+    for (const ExitRequested& e : exits) {
         KV_INFO("rocks", "exit (%s): score %d, %u rocks, wave %u, %u games", e.reason == ExitReason::Timer ? "timer" : "player",
                 g.score.total, g.score.rocks_shot, g.score.wave, g.score.games);
         engine_request_quit(*ctx.engine);
     }
 }
 
-// ---- handlers --------------------------------------------------------------------------
+void on_asset_failed(TickContext&, Span<const AssetFailed> failures) {
+    for (const AssetFailed& e : failures) {
+        char text[160];
+        kv_handle_describe(e.asset.bits, text, sizeof text);
+        KV_WARN("rocks", "asset failed (%s): %s", asset_error_name(e.error), text);
+    }
+}
 
 // An overlap is a hit when the kinds say so. Handle kinds were noted at startup.
 void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
@@ -454,27 +510,39 @@ void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
     static const u32 k_score = ctx.resource_id("example_rocks.score");
     Game& g = ctx.state_as<Game>();
     const Score* score = ctx.resource<const Score>(k_score);
+    Table* labels = ctx.write_kind(g_label_kind);
     for (const StateEdge& e : edges) {
         if (e.trigger != g_death) continue;
         ctx.destroy(e.entity);
         ctx.cancel(g.next_wave); // the field stays as it is until the restart
         ctx.emit(GameOver{score->total});
         ctx.schedule_in(Restart{}, kRestartTicks);
+        char line[48];
+        snprintf(line, sizeof line, "GAME OVER   %d", score->total);
+        spawn_label(*labels, g, ROLE_OVER, line, point2{0, 0}, TextAlign::Center, 1.5f, 50, color_rgba(1.0f, 0.5f, 0.4f));
         KV_INFO("rocks", "game over: %d points", score->total);
     }
 }
 
 // Clear the field, new ship, first wave in a second. Also how the game starts.
 void on_restart(TickContext& ctx, Span<const Restart>) {
-    static const u32 k_score = ctx.resource_id("example_rocks.score");
+    static const u32 k_score  = ctx.resource_id("example_rocks.score");
+    static const u32 k_window = ctx.resource_id("platform.window");
     Game& g = ctx.state_as<Game>();
     Score* score = ctx.resource<Score>(k_score);
+    const HostWindow* w = ctx.resource<const HostWindow>(k_window);
     const u32 kinds[] = {g_rock_kind, g_bullet_kind, g_debris_kind, g_ship_kind};
     for (u32 kid : kinds) ctx.destroy_all(kid);
     score->games += 1;
     score->total = 0;
     score->rocks_shot = 0;
     score->wave = 0;
+    // The labels are rewritten directly: the banner goes, the HUD comes back at the
+    // top-right (the top-left is the frame loop's overlay).
+    Table* labels = ctx.write_kind(g_label_kind);
+    labels->destroy_all();
+    spawn_label(*labels, g, ROLE_HUD, "", point2{(f32)w->width() * 0.5f - 16.0f, (f32)w->height() * 0.5f - 16.0f - 28.0f},
+                TextAlign::Right, 1.0f, 50, color_rgba(1.0f, 1.0f, 1.0f, 0.85f));
     spawn_ship(ctx, g);
     g.next_wave = ctx.schedule_in(SpawnWave{4}, 60);
     KV_INFO("rocks", "game %u", score->games);
@@ -489,6 +557,8 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     if (!engine_publish(engine, self, "example_rocks.score", &g->score)) return false;
 
     if (!renderer_get(engine)) return false;
+    g->font = asset_load_font(engine, "text/DejaVuSans.ttf", 28.0f);
+    if (g->font.is_null()) return false;
     // Each look is a material file; the file names its texture. The handles are usable
     // now and show the placeholder until the files and textures arrive.
     const char* looks[LOOK_COUNT] = {"example_rocks/ship.material.json", "example_rocks/rock.material.json",
@@ -521,7 +591,9 @@ constinit const char* const k_after_move[]     = {"example_rocks.move"};
 constinit const char* const k_fade_writes[]    = {"example_rocks.debris.Lifetime", "example_rocks.debris.Sprite"};
 constinit const char* const k_game_reads[]     = {"example_rocks.score"};
 constinit const char* const k_pause_reads[]    = {"platform.window"};
-constinit const char* const k_pause_writes[]   = {"example_rocks.overlay"};
+constinit const char* const k_pause_writes[]   = {"example_rocks.overlay", "example_rocks.label"};
+constinit const char* const k_hud_reads[]      = {"example_rocks.score", "example_rocks.label.Label"};
+constinit const char* const k_hud_writes[]     = {"example_rocks.label.Text"};
 constinit const char* const k_camera_writes[]  = {"sprite.camera"};
 constinit const SystemDesc k_systems[] = {
     {.name = "example_rocks.pause",   .phase = Phase::PreSim, .fn = pause, .reads = k_pause_reads, .writes = k_pause_writes, .runs = RunWhen::Always},
@@ -532,6 +604,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = "example_rocks.fade",    .phase = Phase::Sim, .fn = debris_fade, .writes = k_fade_writes, .state = StateUse::None},
     {.name = "example_rocks.game",    .phase = Phase::Sim, .fn = game,    .reads = k_game_reads},
     {.name = "example_rocks.camera",  .phase = Phase::PostSim, .fn = camera, .writes = k_camera_writes},
+    {.name = "example_rocks.hud",     .phase = Phase::PostSim, .fn = hud, .reads = k_hud_reads, .writes = k_hud_writes, .runs = RunWhen::Always},
 };
 
 constinit const char* const k_rock_hit_writes[] = {"example_rocks.rock", "example_rocks.score"};
@@ -540,10 +613,15 @@ constinit const char* const k_ship_hit_writes[] = {"example_rocks.ship.Health"};
 constinit const char* const k_wave_reads[]      = {"platform.window"};
 constinit const char* const k_wave_writes[]     = {"example_rocks.score"};
 constinit const char* const k_score_reads[]     = {"example_rocks.score"};
+constinit const char* const k_edge_writes[]     = {"example_rocks.label"};
+constinit const char* const k_restart_reads[]   = {"platform.window"};
+constinit const char* const k_restart_writes[]  = {"example_rocks.score", "example_rocks.label"};
 constinit const char* const k_after_rock_hit[]  = {"example_rocks.on_rock_hit"};
 constinit const char* const k_after_wave[]      = {"example_rocks.on_wave"};
 constinit const char* const k_spawned_writes[]  = {"example_rocks.flame"};
 constinit const HandlerDesc k_handlers[] = {
+    {.name = "example_rocks.on_exit",     KV_ON(ExitRequested, on_exit)},
+    {.name = "example_rocks.on_asset_failed", KV_ON(AssetFailed, on_asset_failed)},
     {.name = "example_rocks.on_overlap",  KV_ON(OverlapBegin, on_overlap)},
     {.name = "example_rocks.on_spawned",  KV_ON(Spawned, on_spawned), .writes = k_spawned_writes},
     {.name = "example_rocks.on_rock_hit", KV_ON(RockHit, on_rock_hit), .writes = k_rock_hit_writes},
@@ -551,8 +629,8 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = "example_rocks.on_score",    KV_ON(ScoreChanged, on_score)},
     {.name = "example_rocks.on_expire",   KV_ON(Expire, on_expire)},
     {.name = "example_rocks.on_wave",     KV_ON(SpawnWave, on_wave), .reads = k_wave_reads, .writes = k_wave_writes, .after = k_after_rock_hit},
-    {.name = "example_rocks.on_edge",     KV_ON(StateEdge, on_edge), .reads = k_score_reads},
-    {.name = "example_rocks.on_restart",  KV_ON(Restart, on_restart), .writes = k_wave_writes, .after = k_after_wave},
+    {.name = "example_rocks.on_edge",     KV_ON(StateEdge, on_edge), .reads = k_score_reads, .writes = k_edge_writes},
+    {.name = "example_rocks.on_restart",  KV_ON(Restart, on_restart), .reads = k_restart_reads, .writes = k_restart_writes, .after = k_after_wave},
 };
 
 } // namespace

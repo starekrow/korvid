@@ -1,5 +1,6 @@
 // Korvid asset: the module's state, shared by texture.cc and material.cc.
 #pragma once
+#include "korvid/asset/font.h"
 #include "korvid/asset/material.h"
 #include "korvid/asset/texture.h"
 #include "korvid/core/map.h"
@@ -18,10 +19,13 @@ struct AssetState_ {
     Map<Name, Handle>   by_path;          // interned path -> texture asset
     Pool<MaterialAsset> materials;
     Map<Name, Handle>   material_by_path; // interned path -> material asset
+    Pool<FontAsset>     fonts;
+    Map<Name, Handle>   font_by_key;      // interned "path@px" -> font asset
     Allocator*          general = nullptr;
-    u16                 kind = 0, material_kind = 0;
+    u16                 kind = 0, material_kind = 0, font_kind = 0;
     u32                 loaded = 0, failed = 0;
     u32                 materials_loaded = 0, materials_failed = 0;
+    u32                 fonts_loaded = 0, fonts_failed = 0;
 };
 
 AssetState_* asset_state(Engine& e);
@@ -32,5 +36,9 @@ inline bool asset_is_kind(const AssetState_&, u64 user, u16 kind) { return Handl
 bool asset_materials_init(Engine& e, AssetState_& s, ModuleInstance& self);
 void asset_materials_shutdown(Engine& e, AssetState_& s);
 void asset_materials_pump(TickContext& ctx); // the "asset.pump_materials" system
+
+bool asset_fonts_init(Engine& e, AssetState_& s, ModuleInstance& self);
+void asset_fonts_shutdown(Engine& e, AssetState_& s);
+void asset_fonts_pump(TickContext& ctx);     // the "asset.pump_fonts" system
 
 } // namespace kv

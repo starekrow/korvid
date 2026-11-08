@@ -204,7 +204,7 @@ Header `korvid/core/component.h`, `kind.h`:
 | `KV_FIELD(T, m)`, `KV_FIELDS(T, ...)`, `KV_COMPONENT(T, fields, flags...)`, `KV_FIELD_TRAITS(M, T, N)` | macros | the tables, from member names; traits for your own aggregates |
 | `ComponentType<T>::id` | record | the id slot, filled at init |
 | `schema_check`, `schema_field`, `schema_hash`, `schema_equal`, `schema_describe`, `schema_each_handle`, `schema_field_as_f64` | functions | every operation on a field table; `component_*` wrappers |
-| `KindDesc` | record | `name`, `components`, `capacity`, `id` slot |
+| `KindDesc` | record | `name`, `components`, `capacity`, `id` slot, `cosmetic` (never hashed) |
 | `Table`, `Column` | records | a kind's storage: `spawn(...)`, `destroy`, `destroy_all`, `valid`, `live()`, `rows()`, `is_alive(i)`, `handle_at(i)`, `get<T>(h)`, `prev<T>(h)`, `rows_of<T>()`, `prev_rows_of<T>()`, `column`, `has`, `describe`, `hash` |
 
 Header `korvid/core/event.h`, `timer.h`:
@@ -233,7 +233,7 @@ Header `korvid/core/profile.h`:
 |---|---|---|
 | `KV_ZONE(name)`, `KV_ZONE_WAIT(name)`, `KV_MARK(name)`, `KV_MARK_V(name, v)`, `KV_COUNTER(name, v)` | macros | the hot path; nothing in ship builds |
 | `prof_enable`, `prof_thread_name`, `prof_cpu_time` | functions | on, named threads, CPU time at zone edges |
-| `prof_collect()`, `prof_frame_stats()`, `prof_thread_stats()`, `prof_log_summary(top)`, `prof_keep_frame`, `prof_log_frame` | functions | the collector, between frames on main |
+| `prof_collect()`, `prof_frame_stats()`, `prof_thread_stats()`, `prof_log_summary(top)`, `prof_top(out, &frames)`, `prof_keep_frame`, `prof_log_frame` | functions | the collector, between frames on main |
 | `prof_trace_open(path)`, `prof_trace_close()`, `prof_shutdown()` | functions | a Chrome JSON trace |
 
 Header `korvid/core/json.h`, `cli.h`, `random.h`, `log.h`, `test.h`:

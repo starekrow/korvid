@@ -1058,7 +1058,8 @@ Table* engine_table_of(Engine& e, Handle h) {
 // handle so identity counts too. Field by field, so padding never matters.
 u64 engine_hash_state(const Engine& e) {
     u64 h = 0x6b6f72766964ull; // "korvid"
-    for (const Table& t : e.tables) h = hash_mix(h ^ table_hash(t));
+    for (const Table& t : e.tables)
+        if (!t.desc->cosmetic) h = hash_mix(h ^ table_hash(t));
     return h;
 }
 

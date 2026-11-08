@@ -1,6 +1,6 @@
 # asset
 
-Files that become engine resources: PNG textures and JSON materials. You ask for a path
+Files that become engine resources: PNG textures, JSON materials and TrueType fonts. You ask for a path
 and get a handle back at once; what the handle names already works (a texture slot that
 shows the placeholder checkerboard, a material row with the default look), the file
 loads in the background through the platform's I/O queue, and an event tells you when
@@ -108,6 +108,14 @@ patch material mygame/rock.material.json texture mygame/rock2.png
 
 A patch changes the renderer row before the next frame and nothing on disk.
 
+**Fonts.** `asset_load_font(engine, "text/DejaVuSans.ttf", 28)` follows the same shape:
+the handle comes back at once with a renderer texture (the glyph atlas) and a material
+for it, the file reads in the background, and `asset.pump_fonts` rasterizes printable
+ASCII and Latin-1 at that pixel size with stb_truetype (vendored under `src/vendor/`),
+uploads the atlas as white with coverage in alpha, and fills the glyph and kerning
+tables. `font_glyph`, `font_kern` and `font_measure` read them; the text module turns
+them into sprites. The same path at the same size is the same handle.
+
 ## Quick reference
 
 Header `korvid/asset/texture.h`:
@@ -137,6 +145,17 @@ Header `korvid/asset/material.h`:
 | `material_parse(text, len, desc, texture_path, cap, &error, &at)` | function | the file format |
 | `material_format(desc, texture_path, out, cap)` | function | the record as a file's text |
 
+Header `korvid/asset/font.h`:
+
+| name | kind | what |
+|---|---|---|
+| `Glyph` | record | `uv` (atlas), `size` (pixels), `offset` (quad center from the pen, +y up), `advance` |
+| `FontAsset` | record | `path`, `state`, `error`, `texture`, `material` (alpha, white), `px`, `ascent`, `descent`, `line_height`, `atlas_width/height`, `glyphs`, `kern` |
+| `asset_load_font(e, path, px)` | function | handle at once; px in [4, 256] |
+| `asset_font(e, h)` | function | the record, or null if stale |
+| `font_glyph(font, cp)`, `font_kern(font, a, b)`, `font_measure(font, str, scale)` | functions | lookups over a Ready font; nothing before |
+| `KV_FONT_FIRST`, `KV_FONT_COUNT` | constants | 32, 224: printable ASCII and Latin-1 |
+
 Header `korvid/asset/png.h`:
 
 | name | kind | what |
@@ -150,11 +169,12 @@ What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
-| `asset.texture`, `asset.material` | handle kinds | `kv_handle_describe` prints path, state and size or blend |
+| `asset.texture`, `asset.material`, `asset.font` | handle kinds | `kv_handle_describe` prints path, state and size, blend or atlas |
 | `AssetReady`, `AssetFailed` | event types | no schema: the handle is an asset's, not an entity's, so it is never dropped as stale |
-| `asset.textures`, `asset.materials` | resources | the tables; the pumps write them |
+| `asset.textures`, `asset.materials`, `asset.fonts` | resources | the tables; the pumps write them |
 | `asset.pump` | system, phase PreSim, main thread | writes `asset.textures` |
 | `asset.pump_materials` | system, phase PreSim, main thread, after `asset.pump` | reads `asset.textures`, writes `asset.materials` |
+| `asset.pump_fonts` | system, phase PreSim, main thread, after `asset.pump_materials` | writes `asset.fonts` |
 | `ls materials`, `dump material`, `patch material` | CLI commands | the material tools |
 
 Resources a system of yours might name: none. Reach the records through the functions;

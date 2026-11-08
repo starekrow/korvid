@@ -61,6 +61,7 @@ template <class M> struct FieldTraits;
 #define KV_FIELD_TRAITS(M, T, N) \
     template <> struct FieldTraits<M> { static constexpr FieldType type = FieldType::T; static constexpr u16 count = N; }
 KV_FIELD_TRAITS(bool, Bool, 1);
+KV_FIELD_TRAITS(char, U8,  1); // a char[N] field is N bytes: hashed and compared as such, printed as numbers
 KV_FIELD_TRAITS(u8,  U8,  1);
 KV_FIELD_TRAITS(u16, U16, 1);
 KV_FIELD_TRAITS(u32, U32, 1);

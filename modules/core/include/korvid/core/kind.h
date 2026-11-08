@@ -25,6 +25,7 @@ struct KindDesc {
     Span<const char* const> components = {};      // component names, resolved at init
     u32                     capacity   = 0;       // slots of address space; pages commit as used
     u32*                    id         = nullptr; // optional: filled with the kind id at init, 0 after shutdown
+    bool                    cosmetic   = false;   // presentation only: never part of the state hash (glyphs, an overlay)
 };
 
 constexpr u32 KV_KIND_NAME_MAX = 48;
