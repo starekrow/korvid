@@ -54,12 +54,16 @@ struct GpuSprite {
     u32 material;   // material row
     u32 stamp;      // the tick of the last Set; rows stamped with the frame's tick interpolate
     i32 layer;
-    u32 flags;      // bit 0: alive
+    u32 flags;      // bit 0: alive; bit 1: screen space; bits 2-3: SpriteSort
+    f32 order;      // the sort key or the feet's offset
+    u32 pad[3];
 };
-static_assert(sizeof(GpuSprite) == 96, "GpuSprite must match sprite_common.slangh");
+static_assert(sizeof(GpuSprite) == 112, "GpuSprite must match sprite_common.slangh");
 
 constexpr u32 kSpriteAlive  = 1;
 constexpr u32 kSpriteScreen = 2; // placed in window pixels through the screen view, not the camera
+constexpr u32 kSpriteSortShift = 2;   // SpriteSort in bits 2-3
+constexpr u32 kKeySortMax = 2048;     // visible rows of one keyed bucket the key sort orders (the rest keep row order)
 
 // One material row.
 struct GpuMaterial {
@@ -82,7 +86,7 @@ struct PushData {
     f32 screen[4];       // screen pixels (center origin, +y up) to clip
     f32 screen_trans[2];
     u32 row_count;       // sprite rows the compute passes look at
-    u32 pad0;
+    u32 key_bucket;      // cs_key_sort: the bucket this dispatch sorts
     f32 screen_cull[4];  // screen rows: the window rect in pixels, x, y, w, h
 };
 static_assert(sizeof(PushData) == 96, "PushData must match sprite_common.slangh");
@@ -122,6 +126,7 @@ struct RenderSprite {
     GpuSprite gpu;
     Handle    entity;
     u32       bucket; // the CPU's copy of the sort bucket, for the per-bucket counts
+    bool      keyed;  // its sort is not Row: counted in keyed_counts[bucket]
 };
 
 // Something to destroy once the frame that last used it has passed its fence.
@@ -223,7 +228,7 @@ struct Renderer {
     VkShaderModule        sort_shader     = VK_NULL_HANDLE;
     VkPipeline            pipelines[kBlendCount] = {};
     VkPipeline            cs_count = VK_NULL_HANDLE, cs_scan = VK_NULL_HANDLE,
-                          cs_bucket_scan = VK_NULL_HANDLE, cs_scatter = VK_NULL_HANDLE;
+                          cs_bucket_scan = VK_NULL_HANDLE, cs_scatter = VK_NULL_HANDLE, cs_key_sort = VK_NULL_HANDLE;
 
     Pool<Texture>        textures;  // slot = index; 0 is the default checkerboard
     Pool<MaterialRecord> materials; // row = index; 0 is the default material
@@ -238,6 +243,8 @@ struct Renderer {
     Array<u64>           sprite_dirty;   // bit per slot: row to upload
     Array<u64>           material_dirty; // bit per row
     u32                  bucket_counts[kBucketCount] = {};
+    u32                  keyed_counts[kBucketCount] = {};  // rows whose sort is not Row: their buckets get the key sort
+    f32*                 check_keys = nullptr;             // --check-sort: each row's key as the checked frame computed it
     u32                  tick = 0;       // Tick deltas seen; the stamp of the newest rows
     u64                  deltas_applied = 0;
     u64                  rows_uploaded  = 0;

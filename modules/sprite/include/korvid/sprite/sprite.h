@@ -14,6 +14,8 @@ struct Sprite {
     color       tint = color_white();
     i32         layer = 0;                // ascending draw order, screen and world sprites together
     SpriteSpace space = SpriteSpace::World; // Screen: window pixels, center origin, +y up, no camera
+    SpriteSort  sort  = SpriteSort::Row;    // within the layer: row order, by `order`, or by the feet (render/sprite.h)
+    f32         order = 0.0f;               // Key: the key; Feet: added to the position's y to find the feet
 };
 
 } // namespace kv

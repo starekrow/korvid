@@ -305,7 +305,7 @@ namespace {
 
 // One row: a tile of a tileset at map pixels (left, bottom) of its image's bottom-left,
 // with Tiled's flips.
-Handle spawn_tile(Table& tiles, const TilemapAsset& m, u32 gid, f32 left, f32 bottom, f32 w, f32 h, point2 origin, i32 layer, color tint) {
+Handle spawn_tile(Table& tiles, const TilemapAsset& m, u32 gid, f32 left, f32 bottom, f32 w, f32 h, point2 origin, i32 layer, color tint, bool ysort) {
     u32 local = 0;
     const MapTileset* ts = tilemap_tileset_of(m, gid, &local);
     if (!ts || local >= (ts->count ? ts->count : 0xFFFFFFFFu)) return Handle{};
@@ -324,6 +324,12 @@ Handle spawn_tile(Table& tiles, const TilemapAsset& m, u32 gid, f32 left, f32 bo
     sp.size  = D ? vec2{h, w} : vec2{w, h};
     sp.tint  = tint;
     sp.layer = layer;
+    if (ysort) {
+        // Sorted by the feet: the tile's bottom edge, raised by its `foot` property (pixels).
+        const MapProperty* foot = tilemap_tile_property(m, gid, "foot");
+        sp.sort  = SpriteSort::Feet;
+        sp.order = -h * 0.5f + (foot ? (f32)foot->num : 0.0f);
+    }
     point2 c = tilemap_to_world(origin, left + w * 0.5f, bottom - h * 0.5f);
     return tiles.spawn(transform2_at(c, D ? 1.57079633f : 0.0f), sp);
 }
@@ -344,6 +350,8 @@ Handle tilemap_spawn(TickContext& ctx, Handle map, const TilemapPlace& place) {
         if (!l.visible) continue;
         color tint = color_rgba(l.tint.r, l.tint.g, l.tint.b, l.tint.a * l.opacity);
         i32 layer = place.base_layer + (i32)li;
+        const MapProperty* ys = tilemap_property(*m, l.props, "ysort");
+        bool ysort = ys && ys->type == MapPropType::Bool && ys->num != 0;
         if (l.kind == MapLayerKind::Tiles) {
             for (u32 y = 0; y < l.height; ++y)
                 for (u32 x = 0; x < l.width; ++x) {
@@ -352,14 +360,14 @@ Handle tilemap_spawn(TickContext& ctx, Handle map, const TilemapPlace& place) {
                     const MapTileset* ts = tilemap_tileset_of(*m, gid, nullptr);
                     if (!ts) continue;
                     f32 left = (f32)(x * m->tile_w) + l.offset.x, bottom = (f32)((y + 1) * m->tile_h) + l.offset.y;
-                    Handle r = spawn_tile(*tiles, *m, gid, left, bottom, (f32)ts->tile_w, (f32)ts->tile_h, place.origin, layer, tint);
+                    Handle r = spawn_tile(*tiles, *m, gid, left, bottom, (f32)ts->tile_w, (f32)ts->tile_h, place.origin, layer, tint, ysort);
                     if (!r.is_null()) rows.push(r);
                 }
         } else if (l.kind == MapLayerKind::Objects) {
             for (u32 k = 0; k < l.objects.count; ++k) {
                 const MapObject& o = m->objects[l.objects.first + k];
                 if (!(o.gid & KV_TILE_GID_MASK)) continue;
-                Handle r = spawn_tile(*tiles, *m, o.gid, o.x + l.offset.x, o.y + l.offset.y, o.width, o.height, place.origin, layer, tint);
+                Handle r = spawn_tile(*tiles, *m, o.gid, o.x + l.offset.x, o.y + l.offset.y, o.width, o.height, place.origin, layer, tint, ysort);
                 if (!r.is_null()) rows.push(r);
             }
         }

@@ -34,6 +34,13 @@ inline bool operator!=(const Placement2& a, const Placement2& b) { return !(a ==
 // camera does. Both sort together by layer and blend.
 enum class SpriteSpace : u8 { World, Screen };
 
+// How a sprite sorts within its layer. Row: in row order, as sprites always have. Key: by
+// ascending `order`. Feet: by descending y of its feet, the interpolated position plus
+// `order` (for a sprite centered on its position, order = -size.y / 2), so what stands
+// lower on screen draws in front. Ties keep row order. A layer with no keyed sprites
+// costs nothing extra; in one that has some, Row sprites sort at key 0.
+enum class SpriteSort : u8 { Row, Key, Feet };
+
 // Everything the renderer keeps per sprite.
 struct RenderSpriteState {
     Placement2  placement;
@@ -43,6 +50,8 @@ struct RenderSpriteState {
     color       tint;      // multiplies the material's tint
     i32         layer;     // drawn in ascending order; the renderer clamps to [-128, 127]
     SpriteSpace space;
+    SpriteSort  sort;
+    f32         order;     // the key (Key), or the feet's offset below the position (Feet)
     bool        snap;      // a teleport: the renderer forgets where the sprite was and does not interpolate to here
 };
 

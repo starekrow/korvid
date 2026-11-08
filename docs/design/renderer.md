@@ -65,7 +65,15 @@ Four compute passes over blocks of 1024 rows (256 threads, 4 rows each):
    `bucket start + block offset + rank`.
 
 Order within a bucket is row order, every frame, so overlapping sprites on one layer
-never swap. `--check-sort` reads the outputs back every 30th frame and verifies them.
+never swap, unless the bucket holds keyed sprites (slice 5). The CPU counts keyed rows per
+bucket next to the plain counts; after the scatter, a fifth pass, **cs_key_sort**, runs one
+group per bucket with keyed rows (the bucket in the push block's `key_bucket`): it loads
+the bucket's range of `sorted[]` (up to 2,048 rows, 16 KB of shared memory), computes each
+row's key (`Key`: its `order`; `Feet`: minus the interpolated y plus `order`; `Row`: 0) as
+an order-preserving uint, bitonic-sorts (key, row) pairs and writes the rows back. Ties are
+broken by row, so the result is as stable as the scatter's. A bucket past 2,048 visible
+rows sorts its first 2,048. `--check-sort` snapshots every row's key on the CPU when it
+records the check and verifies (key, row) order, allowing near ties either way. `--check-sort` reads the outputs back every 30th frame and verifies them.
 
 ## The draws
 

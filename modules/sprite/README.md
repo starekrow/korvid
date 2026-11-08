@@ -86,13 +86,14 @@ Header `korvid/sprite/transform2.h`, `sprite.h`, `components.h`:
 |---|---|---|
 | `Transform2` | component | a `Placement2`: `position` (point2), `rotation` (f32 radians), `scale` (vec2); `CompPrev` |
 | `transform2_at(position, rotation = 0, scale = {1, 1})` | function | a constructor |
-| `Sprite` | component | `material` (Handle, null: the default), `uv` (rect2, unit by default), `size` (vec2, 64x64), `tint` (color, white), `layer` (i32, 0), `space` (`SpriteSpace::World` or `Screen`) |
+| `Sprite` | component | `material` (Handle, null: the default), `uv` (rect2, unit by default), `size` (vec2, 64x64), `tint` (color, white), `layer` (i32, 0), `space` (`SpriteSpace::World` or `Screen`), `sort` (`SpriteSort`, `Row`), `order` (f32, 0) |
 | `transform2_schema()`, `sprite_schema()` | functions | the two `ComponentDesc`s, for comparing or printing rows |
 
 Header `korvid/sprite/camera.h`:
 
 | name | kind | what |
 |---|---|---|
+| `SpriteSort` | enum | `Row` (slot order), `Key` (by `order`), `Feet` (by the feet's y: position + `order`), within a layer |
 | `Camera2` | record | `center` (point2), `zoom` (f32, 1: a world unit per pixel), `rotation` (f32 radians), `follow` (an entity), `offset`, `bounds` (rect2; a zero size: no clamp), `pixel_snap`; published as the resource `sprite.camera`, written by whichever system declares it |
 | `camera_resolve(e, cam, width, height, alpha)` | function | the camera a frame draws with: follow at the interpolation point, clamp, snap; the frame loop calls it |
 | `camera_view(cam, width, height)` | function | the world rect the camera shows in a window that size, before rotation |
@@ -127,7 +128,7 @@ What the module registers with the engine:
 | name | kind | notes |
 |---|---|---|
 | `Transform2` | component | 20 bytes, 3 fields, `CompPrev`, sim |
-| `Sprite` | component | 56 bytes, 5 fields, sim |
+| `Sprite` | component | 64 bytes, 8 fields, sim |
 | `sprite.entity` | kind | `Transform2`, `Sprite`; 1 M slots of address space |
 | `sprite.deltas` | resource | the delta array; the extract writes it |
 | `sprite.extract` | system, phase PostSim | reads `*.Transform2`, `*.Sprite`; writes `sprite.deltas` |
@@ -147,9 +148,15 @@ What the module registers with the engine:
   sees a transform that moved without a tick's worth of travel behind it and sends the
   `Set` with `snap`. The rocks `wrap` does this.
 - **Rotation interpolates as a scalar.** Keep angles continuous.
-- **Layer is draw order, not depth.** Equal layers draw in slot order, stable frame to
-  frame; the renderer clamps to [-128, 127]. Screen-space and world sprites share the
-  order: a HUD is a high layer.
+- **Layer is draw order; `sort` orders within it.** Equal layers draw in slot order,
+  stable frame to frame, unless a sprite asks otherwise: `SpriteSort::Key` sorts by
+  `order`, `SpriteSort::Feet` by the feet's height (the interpolated position's y plus
+  `order`), lower on screen in front, computed on the GPU at the same interpolation point
+  the sprite is drawn at, so two characters swap the frame they cross. Ties keep slot
+  order. Only buckets (layer and blend) holding keyed sprites pay for the extra pass, and
+  it orders up to 2,048 visible sprites per bucket. A layer that mixes blend modes sorts
+  within each mode: keep a sorted layer to one blend. The renderer clamps layers to
+  [-128, 127]; screen-space and world sprites share the order, so a HUD is a high layer.
 - **Screen space is window pixels**, origin at the window's center, +y up, whatever the
   camera does; `size` is then in pixels. The platform's `mouse_screen` puts the pointer
   in the same space.

@@ -358,6 +358,7 @@ void rv_rebind_material(Renderer* r, u32 row) {
         if (bucket != s.bucket) {
             --r->bucket_counts[s.bucket];
             ++r->bucket_counts[bucket];
+            if (s.keyed) { --r->keyed_counts[s.bucket]; ++r->keyed_counts[bucket]; }
             s.bucket = bucket;
         }
         r->sprite_dirty[i >> 6] |= (u64)1 << (i & 63);

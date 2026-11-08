@@ -8,6 +8,7 @@
 #include "korvid/core/arena.h"
 #include "korvid/core/profile.h"
 #include <stdio.h>
+#include <math.h>
 #include <string.h>
 
 namespace kv {
@@ -222,6 +223,20 @@ void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
     buffer_barrier(cmd, cs, rw, cs, rw);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_scatter);
     vkCmdDispatch(cmd, blocks, 1, 1);
+    // Buckets with keyed rows: one group each sorts its range by key. The rest stay in row
+    // order and cost nothing here.
+    bool keyed = false;
+    for (u32 b = 0; b < kBucketCount; ++b) {
+        if (!r->keyed_counts[b] || !r->bucket_counts[b]) continue;
+        if (!keyed) {
+            buffer_barrier(cmd, cs, rw, cs, rw);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_key_sort);
+            keyed = true;
+        }
+        vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+                           offsetof(PushData, key_bucket), sizeof(u32), &b);
+        vkCmdDispatch(cmd, 1, 1, 1);
+    }
     buffer_barrier(cmd, cs, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                    VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                    VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
@@ -230,6 +245,21 @@ void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
 // ---- the sort check -------------------------------------------------------------------------------
 
 // Copies sorted[], bucket_of[] and the sort meta into a host buffer, after the sort.
+// Each row's key as this frame computes it (cs_key_sort's formula on the CPU's copy of the
+// rows), kept for the check: the rows may change before the frame's fence passes.
+void snapshot_keys(Renderer* r, f32 alpha) {
+    u32 rows = r->sprites.len;
+    free_in(mem_general(), r->check_keys, sizeof(f32) * (r->check_rows ? r->check_rows : 1));
+    r->check_keys = (f32*)alloc_in(mem_general(), sizeof(f32) * (rows ? rows : 1));
+    for (u32 i = 0; i < rows; ++i) {
+        const GpuSprite& g = r->sprites.items[i].gpu;
+        u32 mode = (g.flags >> kSpriteSortShift) & 3;
+        f32 t = g.stamp == r->tick ? alpha : 1.0f;
+        f32 y = g.prev[1] + (g.cur[1] - g.prev[1]) * t;
+        r->check_keys[i] = !r->sprites.is_alive(i) ? 0.0f : mode == 1 ? g.order : mode == 2 ? -(y + g.order) : 0.0f;
+    }
+}
+
 void record_sort_check(Renderer* r, VkCommandBuffer cmd) {
     u32 rows = r->sprites.len;
     VkDeviceSize meta_bytes = sizeof(u32) * (2 * kBucketCount + 4);
@@ -340,7 +370,8 @@ bool rv_load_shaders(Renderer* r) {
 
 bool rv_create_compute_pipelines(Renderer* r) {
     return create_compute(r, "cs_count", &r->cs_count) && create_compute(r, "cs_scan", &r->cs_scan) &&
-           create_compute(r, "cs_bucket_scan", &r->cs_bucket_scan) && create_compute(r, "cs_scatter", &r->cs_scatter);
+           create_compute(r, "cs_bucket_scan", &r->cs_bucket_scan) && create_compute(r, "cs_scatter", &r->cs_scatter) &&
+           create_compute(r, "cs_key_sort", &r->cs_key_sort);
 }
 
 // One graphics pipeline per blend mode; everything else is shared. Needs the swapchain format.
@@ -427,7 +458,7 @@ void rv_destroy_pipelines_now(Renderer* r) {
         if (r->pipelines[i]) vkDestroyPipeline(r->device, r->pipelines[i], nullptr);
         r->pipelines[i] = VK_NULL_HANDLE;
     }
-    VkPipeline* cs[] = {&r->cs_count, &r->cs_scan, &r->cs_bucket_scan, &r->cs_scatter};
+    VkPipeline* cs[] = {&r->cs_count, &r->cs_scan, &r->cs_bucket_scan, &r->cs_scatter, &r->cs_key_sort};
     for (VkPipeline* p : cs) { if (*p) vkDestroyPipeline(r->device, *p, nullptr); *p = VK_NULL_HANDLE; }
     if (r->sprite_shader) vkDestroyShaderModule(r->device, r->sprite_shader, nullptr);
     if (r->sort_shader)   vkDestroyShaderModule(r->device, r->sort_shader, nullptr);
@@ -455,11 +486,20 @@ bool rv_verify_sort(Renderer* r) {
         if (starts[b] != expect_start) { ++bad; KV_ERROR("vulkan", "sort check: bucket %u starts at %u, expected %u", b, starts[b], expect_start); }
         expect_start += totals[b];
         if (totals[b] > r->bucket_counts[b]) { ++bad; KV_ERROR("vulkan", "sort check: bucket %u has %u rows on the GPU, %u on the CPU", b, totals[b], r->bucket_counts[b]); }
+        // In (key, row) order: a bucket with no keyed rows has every key 0, so that is row
+        // order. Keys within a hair of each other may come in either order (the GPU and the
+        // CPU interpolate with different roundings); past kKeySortMax rows, row order resumes.
         u32 prev = 0;
         for (u32 k = 0; k < totals[b]; ++k) {
             u32 row = sorted[starts[b] + k];
             if (row >= rows || bucket_of[row] != b) { if (bad++ < 8) KV_ERROR("vulkan", "sort check: bucket %u entry %u is row %u (bucket %u)", b, k, row, row < rows ? bucket_of[row] : ~0u); continue; }
-            if (k && row <= prev) { if (bad++ < 8) KV_ERROR("vulkan", "sort check: bucket %u entry %u row %u after row %u", b, k, row, prev); }
+            f32 ka = r->check_keys && k ? r->check_keys[prev] : 0.0f, kb = r->check_keys ? r->check_keys[row] : 0.0f;
+            bool ordered = true;
+            if (!k || k == kKeySortMax) ordered = true;                          // the first, or the first unsorted
+            else if (k > kKeySortMax || !r->check_keys || ka == kb) ordered = row > prev;
+            else if (fabsf(ka - kb) <= 1e-3f * (1.0f + fabsf(ka))) ordered = true; // a near tie: either order
+            else ordered = ka < kb;
+            if (!ordered) { if (bad++ < 8) KV_ERROR("vulkan", "sort check: bucket %u entry %u row %u (key %g) after row %u (key %g)", b, k, row, kb, prev, ka); }
             if (seen[row]++) { if (bad++ < 8) KV_ERROR("vulkan", "sort check: row %u listed twice", row); }
             prev = row;
             ++seen_total;
@@ -554,7 +594,7 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
 
     if (draw) {
         record_sort(r, f, cmd);
-        if (r->check_pending) record_sort_check(r, cmd);
+        if (r->check_pending) { snapshot_keys(r, view.alpha); record_sort_check(r, cmd); }
     }
 
     if (have_image) {

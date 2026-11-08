@@ -31,7 +31,10 @@ tile layer and every tile object, in Tiled's layer order: layer `i` draws at spr
 `base_layer + i`, so the index of an object layer is where a game puts its characters to
 draw between the layers below and above. A tile larger than the grid sits on its cell's
 bottom-left, as Tiled draws it; a tile object's `(x, y)` is its bottom-left. Flips are uv
-flips plus, for the diagonal flag, a quarter turn. Opacity and tint (through groups) go
+flips plus, for the diagonal flag, a quarter turn. A layer with the bool property `ysort`
+sorts its rows by their feet (`SpriteSort::Feet`): a tile's bottom edge, raised by the
+tile's `foot` property in pixels, so a character drawn in the same sprite layer passes in
+front of and behind trees, fences and houses as it walks. Opacity and tint (through groups) go
 into the sprite's tint. Tiles never move, so after their first frame they cost the
 extract nothing but a scan. An instance goes when its owner entity dies (a level's root)
 or its map retires, at the next pump, before anything is drawn.

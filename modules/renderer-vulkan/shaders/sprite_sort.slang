@@ -151,3 +151,63 @@ void cs_scatter(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID) {
         gSorted[dst] = block * kBlockRows + local;
     }
 }
+
+// ---- the key sort: within a bucket, by each row's key, then by row ------------------------------
+
+groupshared uint sKeyK[kKeySortMax];
+groupshared uint sKeyR[kKeySortMax];
+
+// A float as a uint that sorts the same way.
+uint orderable(float f) {
+    uint u = asuint(f);
+    return (u & 0x80000000u) != 0 ? ~u : (u | 0x80000000u);
+}
+
+// Row: key 0. Key: `order`. Feet: lower on screen draws later, so the key is minus the
+// feet's y at the row's interpolation point (the same one the vertex shader draws).
+uint key_of_row(uint row) {
+    GpuSprite s = gSprites[row];
+    uint mode = (s.flags >> kSortShift) & 3;
+    float k = 0.0;
+    if (mode == 1) k = s.order;
+    else if (mode == 2) {
+        float2 pos; float rot; float2 scale;
+        row_placement(s, pos, rot, scale);
+        k = -(pos.y + s.order);
+    }
+    return orderable(k);
+}
+
+// One group per keyed bucket (gPush.key_bucket): the bucket's range of gSorted, already in
+// row order from the scatter, sorted by (key, row). A bucket with more than kKeySortMax
+// visible rows sorts its first kKeySortMax and leaves the rest in row order.
+[shader("compute")]
+[numthreads(kGroup, 1, 1)]
+void cs_key_sort(uint3 tid : SV_GroupThreadID) {
+    uint t = tid.x;
+    uint b = gPush.key_bucket;
+    uint start = gSortMeta[kStarts + b];
+    uint n = min(gSortMeta[b], kKeySortMax);
+    uint p2 = 1;
+    while (p2 < n) p2 <<= 1;
+    for (uint i = t; i < p2; i += kGroup) {
+        if (i < n) { uint row = gSorted[start + i]; sKeyR[i] = row; sKeyK[i] = key_of_row(row); }
+        else { sKeyR[i] = 0xFFFFFFFFu; sKeyK[i] = 0xFFFFFFFFu; } // padding sorts last
+    }
+    GroupMemoryBarrierWithGroupSync();
+    for (uint k = 2; k <= p2; k <<= 1) {
+        for (uint j = k >> 1; j > 0; j >>= 1) {
+            for (uint e = t; e < p2; e += kGroup) {
+                uint partner = e ^ j;
+                if (partner > e) {
+                    uint ka = sKeyK[e], kb = sKeyK[partner], ra = sKeyR[e], rb = sKeyR[partner];
+                    bool greater = ka > kb || (ka == kb && ra > rb);
+                    bool ascending = (e & k) == 0;
+                    if (greater == ascending) { sKeyK[e] = kb; sKeyK[partner] = ka; sKeyR[e] = rb; sKeyR[partner] = ra; }
+                }
+            }
+            GroupMemoryBarrierWithGroupSync();
+        }
+    }
+    for (uint i = t; i < n; i += kGroup) gSorted[start + i] = sKeyR[i];
+}

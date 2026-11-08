@@ -113,6 +113,8 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
 
 void renderer_destroy(Renderer* r) {
     if (!r) return;
+    free_in(mem_general(), r->check_keys, sizeof(f32) * (r->check_rows ? r->check_rows : 1));
+    r->check_keys = nullptr;
     if (r->device) {
         vkDeviceWaitIdle(r->device); // the one wait-idle: nothing is in flight after this
         rv_destroy_pipelines_now(r);
@@ -301,6 +303,7 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
                 if (bucket != s->bucket) {
                     --r->bucket_counts[s->bucket];
                     ++r->bucket_counts[bucket];
+                    if (s->keyed) { --r->keyed_counts[s->bucket]; ++r->keyed_counts[bucket]; }
                     s->bucket = bucket;
                 }
             } else {
@@ -322,7 +325,10 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
             s->gpu.tint[0] = st.tint.r; s->gpu.tint[1] = st.tint.g; s->gpu.tint[2] = st.tint.b; s->gpu.tint[3] = st.tint.a;
             s->gpu.material = material;
             s->gpu.layer    = st.layer;
-            s->gpu.flags    = kSpriteAlive | (st.space == SpriteSpace::Screen ? kSpriteScreen : 0);
+            s->gpu.flags    = kSpriteAlive | (st.space == SpriteSpace::Screen ? kSpriteScreen : 0) | ((u32)st.sort << kSpriteSortShift);
+            s->gpu.order    = st.order;
+            bool keyed = st.sort != SpriteSort::Row;
+            if (keyed != s->keyed) { if (keyed) ++r->keyed_counts[bucket]; else --r->keyed_counts[bucket]; s->keyed = keyed; }
             mark_sprite_dirty(r, slot);
             break;
         }
@@ -330,6 +336,7 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
             if (u32* found = r->sprite_of_entity.find(d.entity)) {
                 u32 slot = *found;
                 --r->bucket_counts[r->sprites.items[slot].bucket];
+                if (r->sprites.items[slot].keyed) --r->keyed_counts[r->sprites.items[slot].bucket];
                 r->sprites.destroy(r->sprites.handle_at(slot));
                 r->sprite_of_entity.remove(d.entity);
                 mark_sprite_dirty(r, slot); // the row is rewritten dead

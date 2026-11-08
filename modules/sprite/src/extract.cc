@@ -65,6 +65,8 @@ void extract_sprites(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
             d.state.tint      = spr[i].tint;
             d.state.layer     = spr[i].layer;
             d.state.space     = spr[i].space;
+            d.state.sort      = spr[i].sort;
+            d.state.order     = spr[i].order;
             d.state.snap      = snap;
             out.push(d);
             et.sent[i]            = d.entity;
