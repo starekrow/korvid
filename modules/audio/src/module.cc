@@ -206,6 +206,86 @@ void audio_shutdown(Engine& e, ModuleInstance& self) {
     pthread_mutex_destroy(&s->cmds.mu);
 }
 
+// /voices: the slots in use, from the game's side; /buses: the gains.
+void voices_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
+    if (dir[0]) return;
+    AudioState* s = state(*ctx.engine);
+    if (!s) return;
+    Lock lock(s->cmds.mu);
+    for (u32 i = 0; i < KV_AUDIO_VOICES; ++i) {
+        const VoiceRec& v = s->cmds.voices[i];
+        if (!v.used) continue;
+        char name[16], summary[256], sound[KV_ASSET_PATH_MAX] = "?";
+        snprintf(name, sizeof name, "%u", i);
+        if (const SoundAsset* snd = asset_sound(*ctx.engine, v.play.sound)) snprintf(sound, sizeof sound, "%s", snd->path);
+        snprintf(summary, sizeof summary, "%s %s, vol %.2f, pitch %.2f, pan %.2f%s%s", v.started ? "playing" : "waiting", sound, v.play.volume, v.play.pitch, v.play.pan,
+                 v.play.loop ? ", loop" : "", v.play.pause_with_sim ? "" : ", plays through pause");
+        if (!emit(user, name, summary)) return;
+    }
+}
+
+bool voices_describe(CliContext& ctx, const char* rel) {
+    AudioState* s = state(*ctx.engine);
+    if (!s) return false;
+    if (!rel[0]) {
+        AudioStats st = audio_stats(*ctx.engine);
+        ctx.print("%s; %u live voices, %u dropped commands; mixer: %llu frames in %llu callbacks, %u active, peak %u, %u clipped",
+                  st.device ? "device open" : "no device (silent)", st.live_voices, st.dropped, (unsigned long long)st.mixer.frames_rendered,
+                  (unsigned long long)st.mixer.callbacks, st.mixer.active, st.mixer.peak_active, st.mixer.clipped);
+        return true;
+    }
+    char* end = nullptr;
+    unsigned long slot = strtoul(rel, &end, 10);
+    if (end == rel || *end || slot >= KV_AUDIO_VOICES) return false;
+    Lock lock(s->cmds.mu);
+    const VoiceRec& v = s->cmds.voices[slot];
+    if (!v.used) return false;
+    char text[200];
+    kv_handle_describe(Handle::make(s->kind, v.gen, (u32)slot).bits, text, sizeof text);
+    ctx.print("voice %lu: %s, bus %u, loop %s, pauses with sim %s", slot, text, (u32)v.play.bus, v.play.loop ? "yes" : "no", v.play.pause_with_sim ? "yes" : "no");
+    return true;
+}
+
+const char* bus_name(u32 b) { static const char* k[] = {"master", "sfx", "music", "ui"}; return b < 4 ? k[b] : "?"; }
+
+void buses_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
+    if (dir[0]) return;
+    AudioState* s = state(*ctx.engine);
+    if (!s) return;
+    for (u32 b = 0; b < (u32)AudioBus::Count; ++b) {
+        char summary[32];
+        snprintf(summary, sizeof summary, "%.2f", s->mixer.bus_gain[b]); // a snapshot: the device thread owns it
+        if (!emit(user, bus_name(b), summary)) return;
+    }
+}
+
+bool buses_describe(CliContext& ctx, const char* rel) {
+    AudioState* s = state(*ctx.engine);
+    if (!s) return false;
+    for (u32 b = 0; b < (u32)AudioBus::Count; ++b)
+        if (!rel[0] || strcmp(bus_name(b), rel) == 0) ctx.print("%s %.2f", bus_name(b), s->mixer.bus_gain[b]);
+    if (rel[0]) { for (u32 b = 0; b < (u32)AudioBus::Count; ++b) if (strcmp(bus_name(b), rel) == 0) return true; return false; }
+    return true;
+}
+
+bool buses_patch(CliContext& ctx, const char* rel, Span<const char* const> values) {
+    for (u32 b = 0; b < (u32)AudioBus::Count; ++b) {
+        if (strcmp(bus_name(b), rel) != 0) continue;
+        f32 v;
+        if (values.len != 1 || !cli_arg_f32(ctx, values[0], "volume", &v)) { if (!ctx.failed) ctx.fail("one volume"); return false; }
+        audio_bus_volume(*ctx.engine, (AudioBus)b, v);
+        ctx.print("%s -> %.2f at the next tick", bus_name(b), v);
+        return true;
+    }
+    ctx.fail("no bus '%s'", rel);
+    return false;
+}
+
+constinit const CliMountDesc k_mounts[] = {
+    {.path = "/voices", .list = voices_list, .describe = voices_describe},
+    {.path = "/buses",  .list = buses_list,  .describe = buses_describe, .patch = buses_patch},
+};
+
 constinit const EventTypeDesc k_events[]    = {KV_EVENT(VoiceFinished)};
 constinit const ResourceDesc  k_resources[] = {{".commands", true}};
 constinit const SystemDesc    k_systems[] = {
@@ -220,6 +300,7 @@ KV_MODULE_DEFINE(audio_module) = {
     .events    = k_events,
     .resources = k_resources,
     .systems   = k_systems,
+    .mounts    = k_mounts,
     .startup   = audio_startup,
     .shutdown  = audio_shutdown,
     .memory    = {.reserve = 256 * 1024},

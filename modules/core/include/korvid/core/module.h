@@ -71,6 +71,7 @@ struct ModuleDesc {
     Span<const HandlerDesc>   handlers   = {}; // run at phase boundaries, on the events they subscribe to
     Span<const TriggerDesc>   triggers   = {}; // state edges on component fields, as StateEdge events
     Span<const CliCommandDesc> commands  = {}; // what the CLI can be told; the cli module collects them
+    Span<const CliMountDesc>   mounts    = {}; // the module's pieces of the CLI's filesystem
     bool (*startup)(Engine& engine, ModuleInstance& self)  = nullptr;
     void (*shutdown)(Engine& engine, ModuleInstance& self) = nullptr;
     ModuleMemoryDesc          memory     = {};

@@ -101,6 +101,11 @@ int  schema_describe(const char* name, Span<const FieldDesc> fields, const void*
 bool schema_each_handle(Span<const FieldDesc> fields, void* row, bool (*fn)(Handle&, void*), void* user);
 // One scalar field as a double (integers widened, floats converted); false for handles.
 bool schema_field_as_f64(const FieldDesc& f, const void* row, f64* out);
+// Lane `lane` of a field (0 for a scalar, 0..count-1 for a vector) as a double, and the
+// reverse: a double stored into it with the field's type (rounded for integers, clamped
+// to a bool). False for a handle, or a lane past the count. The CLI's print and patch.
+bool schema_field_lane(const FieldDesc& f, const void* row, u32 lane, f64* out);
+bool schema_field_set(const FieldDesc& f, void* row, u32 lane, f64 value);
 
 inline const char*      component_check(const ComponentDesc& c, const char** field) {
     *field = nullptr;

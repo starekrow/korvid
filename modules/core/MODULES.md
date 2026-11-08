@@ -215,6 +215,15 @@ to the OS, the GPU or a module's own pools (the asset pumps, the CLI). `.state =
 lets a system run beside its module's others. `.runs = RunWhen::Always` makes a system run
 on paused ticks too (see below); the default, `Unpaused`, is right for gameplay.
 
+### Mounts
+
+A module that has things worth looking at mounts them in the CLI's filesystem: a
+`CliMountDesc` in `ModuleDesc::mounts` with a `path` and three functions, `list` (the
+children of one directory), `describe` (one node) and `patch` (optional: set one). The
+asset module mounts `/materials`, `/textures`, `/fonts` and `/sounds`; the engine's own
+`/kinds`, `/systems`, `/clock` and the rest come with the cli module. See
+`docs/design/cli.md`. A command is for an action; a mount is for state.
+
 ### Sink resources
 
 `ResourceDesc{"audio.commands", true}` declares a sink: a command queue that any number of

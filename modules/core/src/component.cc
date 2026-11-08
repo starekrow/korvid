@@ -71,6 +71,35 @@ bool schema_field_as_f64(const FieldDesc& f, const void* row, f64* out) {
     return false;
 }
 
+bool schema_field_lane(const FieldDesc& f, const void* row, u32 lane, f64* out) {
+    if (lane >= f.count || f.type == FieldType::Handle) return false;
+    FieldDesc one = f;
+    one.count  = 1;
+    one.offset = (u16)(f.offset + lane * field_type_size(f.type));
+    return schema_field_as_f64(one, row, out);
+}
+
+bool schema_field_set(const FieldDesc& f, void* row, u32 lane, f64 value) {
+    if (lane >= f.count || f.type == FieldType::Handle) return false;
+    u8* p = (u8*)row + f.offset + lane * field_type_size(f.type);
+    i64 i = value >= 0 ? (i64)(value + 0.5) : -(i64)(-value + 0.5);
+    switch (f.type) {
+    case FieldType::Bool: *p = value != 0.0; return true;
+    case FieldType::U8:   *p = (u8)i; return true;
+    case FieldType::I8:   *(i8*)p = (i8)i; return true;
+    case FieldType::U16: { u16 v = (u16)i; memcpy(p, &v, 2); return true; }
+    case FieldType::I16: { i16 v = (i16)i; memcpy(p, &v, 2); return true; }
+    case FieldType::U32: { u32 v = (u32)i; memcpy(p, &v, 4); return true; }
+    case FieldType::I32: { i32 v = (i32)i; memcpy(p, &v, 4); return true; }
+    case FieldType::F32: { f32 v = (f32)value; memcpy(p, &v, 4); return true; }
+    case FieldType::U64: { u64 v = (u64)i; memcpy(p, &v, 8); return true; }
+    case FieldType::I64: { i64 v = i; memcpy(p, &v, 8); return true; }
+    case FieldType::F64: memcpy(p, &value, 8); return true;
+    case FieldType::Handle: case FieldType::Count: break;
+    }
+    return false;
+}
+
 namespace {
 
 // Every scalar as 64 bits: integers widened, floats as their bit pattern.

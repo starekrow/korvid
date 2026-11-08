@@ -175,6 +175,17 @@ Header `korvid/core/engine.h`:
 | `engine_resource_id`, `engine_component_id`, `engine_kind_id`, `engine_trigger_id`, `engine_system_phase` | functions | names to ids |
 | `engine_table(e, name or id)`, `engine_table_of(e, handle)`, `engine_component(e, id)` | functions | a kind's table, by full name, id or an entity handle; a schema |
 | `engine_qualify(module, name)`, `name_list_next(cursor, out, cap)` | functions | the name language: `.x` to `module.x`, interned; the next name out of a comma list |
+
+Header `korvid/core/cli.h`, the filesystem side:
+
+| name | kind | what |
+|---|---|---|
+| `CliMountDesc` | record | a module's piece of the CLI's tree: `path` ("/materials"), `list(ctx, dir, emit, user)`, `describe(ctx, rel)`, `patch(ctx, rel, values)` |
+| `CliEmitFn` | function type | `list` calls it per child; a name ending in `/` is a directory; returning false stops the listing |
+| `CliTree` | record | turns flat names with slashes into one directory's children, directories once: `add(full_name, container, summary)` |
+| `cli_resolve(ctx, arg, out, cap)` | function | a path against the session's working directory, normalized |
+| `cli_dots_to_slashes`, `cli_slashes_to_dots` | functions | engine names in the tree |
+| `schema_field_lane(f, row, lane, &v)`, `schema_field_set(f, row, lane, v)` | functions | (component.h) a field's lane as a double, and back |
 | `engine_hash_state(e)` | function | the hash of every sim column of every live entity |
 | `engine_describe_event(e, type, event, out, cap)` | function | an event through its schema |
 | `engine_idle_add(e, name, fn, user)`, `engine_idle_remove(e, id)`, `engine_idle_run(e, seconds)` | functions | idle tasks: More, Nothing or Done, served round-robin in the budget |

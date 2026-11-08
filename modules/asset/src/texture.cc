@@ -121,14 +121,14 @@ constinit const SystemDesc    k_systems[]   = {
 
 } // namespace
 
-extern const CliCommandDesc k_asset_commands[3]; // material.cc
+extern const CliMountDesc k_asset_mounts[4]; // mounts.cc
 
 KV_MODULE_DEFINE(asset_module) = {
     .name      = "asset",
     .events    = k_events,
     .resources = k_resources,
     .systems   = k_systems,
-    .commands  = Span<const CliCommandDesc>(k_asset_commands, 3),
+    .mounts    = k_asset_mounts,
     .startup   = asset_startup,
     .shutdown  = asset_shutdown,
     .memory    = {.reserve = 64 * 1024},

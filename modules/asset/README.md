@@ -97,30 +97,19 @@ void on_ready(TickContext& ctx, Span<const AssetReady> ready) {
 or in a system, `for (const AssetFailed& f : ctx.events->read<AssetFailed>())`, with
 `asset_error_name(f.error)` for the log.
 
-**Poke it from the CLI** while the game runs (`--cli-stdin` or `--cli-port N`):
+**Poke it from the CLI** while the game runs (`--cli-stdin` or `--cli-port N`). The
+assets are mounted in the CLI's filesystem:
 
 ```
-ls materials
-dump material mygame/rock.material.json
-patch material mygame/rock.material.json tint 1 0.5 0.5
-patch material mygame/rock.material.json blend additive
-patch material mygame/rock.material.json texture mygame/rock2.png
+ls /materials/mygame
+print /materials/mygame/rock.material.json
+patch /materials/mygame/rock.material.json tint 1 0.5 0.5
+patch /materials/mygame/rock.material.json blend additive
+patch /materials/mygame/rock.material.json texture mygame/rock2.png
+ls /textures /fonts /sounds
 ```
 
 A patch changes the renderer row before the next frame and nothing on disk.
-
-**Fonts.** `asset_load_font(engine, "text/DejaVuSans.ttf", 28)` follows the same shape:
-the handle comes back at once with a renderer texture (the glyph atlas) and a material
-for it, the file reads in the background, and `asset.pump_fonts` rasterizes printable
-ASCII and Latin-1 at that pixel size with stb_truetype (vendored under `src/vendor/`),
-uploads the atlas as white with coverage in alpha, and fills the glyph and kerning
-tables. `font_glyph`, `font_kern` and `font_measure` read them; the text module turns
-them into sprites. The same path at the same size is the same handle.
-
-**Sounds.** `asset_load_sound(engine, "mygame/shot.wav")`: the file decodes in
-`asset.pump_sounds` (WAV by our own reader, Ogg Vorbis by stb_vorbis) into interleaved
-f32 at its own rate, kept until shutdown so the audio module's mixer thread may read it
-without a lock. Nothing resamples at load.
 
 ## Quick reference
 
@@ -190,7 +179,7 @@ What the module registers with the engine:
 | `asset.pump_materials` | system, phase PreSim, main thread, after `asset.pump` | reads `asset.textures`, writes `asset.materials` |
 | `asset.pump_fonts` | system, phase PreSim, main thread, after `asset.pump_materials` | writes `asset.fonts` |
 | `asset.pump_sounds` | system, phase PreSim, main thread | writes `asset.sounds` |
-| `ls materials`, `dump material`, `patch material` | CLI commands | the material tools |
+| `/materials` (patchable), `/textures`, `/fonts`, `/sounds` | CLI mounts | the records by path |
 
 Resources a system of yours might name: none. Reach the records through the functions;
 they read the module's tables, which only the pumps write.

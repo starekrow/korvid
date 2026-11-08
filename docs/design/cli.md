@@ -9,14 +9,53 @@ A module declares what it can be told in its `ModuleDesc::commands`: a name of o
 more words, a help line, and a function taking a `CliContext` and the arguments. The
 `cli` module collects every table at startup in module order. A request is matched to the
 command whose name has the most words in common with the request's first words
-(`patch material` beats `patch`), and the rest are the arguments. Whoever reads a format
-owns its commands: `ls materials`, `dump material` and `patch material` live in the asset
-module; `help`, `quit` and the sim controls `pause`, `resume`, `step [N]` and `rate [X]`
-in `cli`. The CLI's own system runs on paused ticks, so a paused game still answers.
+(`ls materials` would beat `ls`), and the rest are the arguments. Whoever reads a format
+owns its commands and its mounts: the asset module mounts `/materials` and friends;
+`help`, `quit`, the sim controls `pause`, `resume`, `step [N]` and `rate [X]`, and the
+filesystem verbs live in `cli`. The CLI's own system runs on paused ticks, so a paused
+game still answers.
 
 A command answers through `ctx.print`, one line at a time, and `ctx.fail` marks the
 request failed with a message; the first failure stands. Commands never block and never
 allocate outside the scratch arena.
+
+## The filesystem
+
+Everything the game has shows up as a path, the way a Unix system puts the kernel in
+`/proc`. `ls /` names the top level; a session has a working directory; `cd`, `pwd`,
+`print` and `patch` take absolute or relative paths with `.` and `..`. The tree is
+virtual: a module mounts a piece of it by declaring a `CliMountDesc` in its
+`ModuleDesc::mounts` (`path`, `list`, `describe`, `patch`), and the cli module owns the
+working directory, the path rules and the verbs. Engine names map their dots to slashes
+on the way in, so a module is a directory wherever its things appear.
+
+    > ls /
+    buses/  clips/  clock/  events/  fonts/  handlers/  kinds/  materials/  mem/
+    modules/  perf/  resources/  sounds/  systems/  textures/  triggers/  voices/
+    > cd /kinds/example_rocks
+    > ls
+    bullet/   14 live of 4096
+    rock/     9 live of 1024
+    ...
+    > print rock/3/Velocity
+    Velocity{v=(30, -12), spin=0.4}
+    > patch rock/3/Velocity/spin 2
+    > cd /materials/example_rocks
+    > patch rock.material.json tint 1 0.5 0.5
+    > patch /clock/rate 0.25
+
+Mounts today: `/kinds` (a kind, its live rows, a row's components, a component's fields;
+fields patch through the schema), `/systems` and `/handlers` (the schedule with sets and
+levels), `/resources`, `/events`, `/triggers`, `/clock` (patch `paused`, `rate`, `step`),
+`/modules`, `/mem`, `/perf` (the profiler's zones when it is on), and from the modules
+that own the formats `/materials` (patch `texture`, `blend`, `tint`, `params`),
+`/textures`, `/fonts`, `/sounds`, `/clips`, `/voices`, `/buses` (patch a gain).
+
+`ls` lists 200 entries and says how many more; `ls -n N` for more. A `print` on a
+directory lists it; an `ls` on a leaf prints it. Writes are direct, as material patches
+always were: a `patch` lands before the next tick and is not part of the input log.
+`list` walks one directory at a time and may stop early, so a kind with a million slots
+costs a `ls` only what it shows.
 
 ## Transports
 
@@ -35,13 +74,13 @@ once it can again; the sim never waits for a reader.
 
 One request per line. Responses are lines.
 
-    ls materials
-    example_rocks/rock.material.json   ready   alpha   row 2   texture 'example_rocks/rock.png'
-    1 materials
+    ls /materials/example_rocks
+    rock.material.json  ready, alpha, row 2, texture 'example_rocks/rock.png'
     ok
 
-    #7 patch material example_rocks/rock.material.json tint 1 0.5 0.5
+    #7 patch /materials/example_rocks/rock.material.json tint 1 0.5 0.5
     #7 { "texture": "example_rocks/rock.png", "blend": "alpha", "tint": [1, 0.5, 0.5, 1], "params": [0, 0, 0, 0, 0, 0, 0, 0] }
+    #7 state ready, row 2, texture slot 3
     #7 ok
 
     bogus

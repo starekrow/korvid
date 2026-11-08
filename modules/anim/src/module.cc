@@ -236,6 +236,44 @@ void anim_shutdown(Engine& e, ModuleInstance& self) {
     s->clips.free();
 }
 
+// /clips: every clip by path (or descriptor name), with its tracks.
+const char* clip_state_name(AssetState st) { return st == AssetState::Ready ? "ready" : st == AssetState::Failed ? "failed" : "pending"; }
+
+void clips_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
+    AnimState_* s = state(*ctx.engine);
+    CliTree tree{dir, emit, user};
+    for (u32 i = 0; s && i < s->clips.len; ++i) {
+        if (!s->clips.is_alive(i)) continue;
+        const AnimClip& c = s->clips.items[i];
+        char summary[96];
+        snprintf(summary, sizeof summary, "%s, %.3f s %s, %u tracks, %u players", clip_state_name(c.state), c.duration, anim_loop_name(c.loop), c.tracks.len, c.players);
+        if (!tree.add(c.path, false, summary)) return;
+    }
+}
+
+bool clips_describe(CliContext& ctx, const char* rel) {
+    AnimState_* s = state(*ctx.engine);
+    for (u32 i = 0; s && i < s->clips.len; ++i) {
+        if (!s->clips.is_alive(i) || strcmp(s->clips.items[i].path, rel) != 0) continue;
+        const AnimClip& c = s->clips.items[i];
+        ctx.print("%s: %s, %.3f s, %s, %u tracks, %u keys, %u players", c.path, clip_state_name(c.state), c.duration, anim_loop_name(c.loop), c.tracks.len, c.keys.len, c.players);
+        for (const AnimTrack& t : c.tracks) {
+            char line[512];
+            usize at = (usize)snprintf(line, sizeof line, "  %-8s %-6s", anim_channel_name(t.channel), t.interp == AnimInterp::Linear ? "linear" : "step");
+            for (u32 k = 0; k < t.count && at < sizeof line - 40; ++k) {
+                const AnimKey& key = c.keys[t.first + k];
+                if (t.channel == AnimChannel::Event) at += (usize)snprintf(line + at, sizeof line - at, " [%g %s]", key.time, name_str(key.event));
+                else at += (usize)snprintf(line + at, sizeof line - at, " [%g: %g %g %g %g]", key.time, key.v[0], key.v[1], key.v[2], key.v[3]);
+            }
+            ctx.print("%s%s", line, t.count && at >= sizeof line - 40 ? " ..." : "");
+        }
+        return true;
+    }
+    return false;
+}
+
+constinit const CliMountDesc k_mounts[] = {{.path = "/clips", .list = clips_list, .describe = clips_describe}};
+
 constinit const FieldDesc k_player_fields[]   = {KV_FIELDS(AnimPlayer, clip, time, rate, clock, state, fresh, pad, loops)};
 constinit const ComponentDesc k_components[]  = {KV_COMPONENT(AnimPlayer, k_player_fields)};
 constinit const FieldDesc k_event_fields[]    = {KV_FIELDS(AnimEvent, entity, clip, name)};
@@ -259,6 +297,7 @@ KV_MODULE_DEFINE(anim_module) = {
     .components = k_components,
     .resources  = k_resources,
     .systems    = k_systems,
+    .mounts     = k_mounts,
     .startup    = anim_startup,
     .shutdown   = anim_shutdown,
     .memory     = {.reserve = 64 * 1024},

@@ -1,7 +1,6 @@
-#include "korvid/cli/module.h"
+#include "cli_internal.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
-#include "korvid/platform/net.h"
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -14,31 +13,13 @@ namespace {
 
 CliConfig g_config;
 
-constexpr u32 kLineMax   = 1024;
-constexpr u32 kMaxArgs   = 32;
-constexpr u32 kMaxSessions = 16;
+} // namespace
 
-// One connection, or stdin.
-struct Session {
-    NetSocket sock;          // closed for the stdin session
-    bool      is_stdin = false;
-    bool      stdin_eof = false;
-    char      line[kLineMax];
-    u32       line_len = 0;
-    bool      overflow = false; // the current line passed kLineMax: dropped at its end
-    bool      dropped  = false; // output was dropped: say so once it drains
-};
+CliState* cli_state(Engine& e) { return engine_module_state_as<CliState>(e, "cli"); }
 
-struct CliState {
-    CliConfig   config;
-    NetListener listener;
-    Session     sessions[kMaxSessions];
-    u32         session_count = 0;
-    Array<const CliCommandDesc*> commands; // every module's, in module order
-    u64         requests = 0, failed = 0, dropped = 0;
-};
+namespace {
 
-CliState* state(Engine& e) { return engine_module_state_as<CliState>(e, "cli"); }
+CliState* state(Engine& e) { return cli_state(e); }
 
 // ---- the protocol -------------------------------------------------------------------------------
 
@@ -121,6 +102,7 @@ bool run_request(Engine& e, CliState& cli, Request& rq, const char* text) {
     ctx.engine = &e;
     ctx.sink   = request_sink;
     ctx.user   = &rq;
+    ctx.cwd    = rq.session ? rq.session->cwd : nullptr;
     if (first >= n) {
         ctx.fail("empty request");
     } else {
@@ -173,6 +155,10 @@ void feed(Engine& e, CliState& cli, Session& s, const char* data, u32 len) {
 void cli_help(CliContext& ctx, Span<const char* const>) {
     CliState* cli = state(*ctx.engine);
     for (const CliCommandDesc* c : cli->commands) ctx.print("%-16s %s", c->name, c->help ? c->help : "");
+    char line[512];
+    usize at = 0;
+    for (const CliMountDesc* m : cli->mounts) at += (usize)snprintf(line + at, sizeof line - at, "%s%s", at ? " " : "", m->path);
+    ctx.print("the filesystem: ls, cd, pwd, print, patch over %s", line);
 }
 
 void cli_quit(CliContext& ctx, Span<const char* const>) {
@@ -214,6 +200,11 @@ constinit const CliCommandDesc k_commands[] = {
     {.name = "resume", .help = "let the sim run again", .fn = cli_resume},
     {.name = "step",   .help = "[N] let N sim ticks (1) through the pause", .fn = cli_step},
     {.name = "rate",   .help = "[X] show or set the time scale while unpaused", .fn = cli_rate},
+    {.name = "ls",     .help = "[-n N] [path]: what is under a directory of the filesystem (N entries at most, 200 by default)", .fn = cli_fs_ls},
+    {.name = "cd",     .help = "[path]: change the session's working directory (/ by default)", .fn = cli_fs_cd},
+    {.name = "pwd",    .help = "the working directory", .fn = cli_fs_pwd},
+    {.name = "print",  .help = "<path>...: describe a node", .fn = cli_fs_print},
+    {.name = "patch",  .help = "<path> <value>...: set a node", .fn = cli_fs_patch},
 };
 
 // ---- the module ------------------------------------------------------------------------------------
@@ -223,9 +214,11 @@ bool cli_startup(Engine& e, ModuleInstance& self) {
     if (!s) return false;
     self.set_state(s);
     s->config = g_config;
-    s->commands.alloc = &self.general;
-    for (const ModuleInstance& m : e.modules)
+    s->commands.alloc = s->mounts.alloc = &self.general;
+    for (const ModuleInstance& m : e.modules) {
         for (const CliCommandDesc& c : m.desc->commands) s->commands.push(&c);
+        for (const CliMountDesc& mt : m.desc->mounts) s->mounts.push(&mt);
+    }
     for (Session& sess : s->sessions) sess.sock.out.alloc = &self.general;
 
     bool use_stdin = s->config.stdin_ || !isatty(STDIN_FILENO);
@@ -237,7 +230,7 @@ bool cli_startup(Engine& e, ModuleInstance& self) {
         if (!s->listener.open(s->config.port, s->config.local_only)) return false;
         KV_INFO("cli", "listening on %s:%u", s->config.local_only ? "127.0.0.1" : "0.0.0.0", s->listener.port);
     }
-    KV_INFO("cli", "%u commands; stdin %s", s->commands.len, use_stdin ? "on" : "off");
+    KV_INFO("cli", "%u commands, %u mounts; stdin %s", s->commands.len, s->mounts.len, use_stdin ? "on" : "off");
     return true;
 }
 
@@ -249,6 +242,7 @@ void cli_shutdown(Engine&, ModuleInstance& self) {
     KV_INFO("cli", "%llu requests, %llu failed, %llu lines dropped", (unsigned long long)s->requests,
             (unsigned long long)s->failed, (unsigned long long)s->dropped);
     s->commands.free();
+    s->mounts.free();
 }
 
 // Phase Input, main thread: accept, read, run, flush.
@@ -307,6 +301,7 @@ KV_MODULE_DEFINE(cli_module) = {
     .name     = "cli",
     .systems  = k_systems,
     .commands = k_commands,
+    .mounts   = k_engine_mounts,
     .startup  = cli_startup,
     .shutdown = cli_shutdown,
     .memory   = {.reserve = 256 * 1024},

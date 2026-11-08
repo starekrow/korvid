@@ -7,7 +7,7 @@
 //   resources     asset.textures, asset.materials   the tables, written by the pumps
 //   systems       asset.pump            phase PreSim, main thread: completed reads become textures
 //                 asset.pump_materials  phase PreSim, main thread, after asset.pump: files become rows
-//   commands      ls materials, dump material <path>, patch material <path> ...   for the CLI
+//   mounts        /materials (patchable), /textures, /fonts, /sounds       the CLI's filesystem
 //
 // Both pumps run on the main thread because they call the renderer (texture uploads,
 // material rows) and reap the platform's I/O queue, which is pumped once per frame
