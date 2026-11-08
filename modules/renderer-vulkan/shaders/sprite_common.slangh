@@ -36,7 +36,8 @@ struct GpuMaterial {
     float4 params1;
     uint   texture; // bindless slot
     uint   blend;   // 0 opaque, 1 alpha, 2 additive
-    uint2  pad;
+    uint   filter;  // 0 nearest, 1 linear: the sampler
+    uint   pad;
 };
 
 struct PushData {

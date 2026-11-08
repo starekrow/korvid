@@ -203,6 +203,7 @@ namespace {
 void fill_material(MaterialRecord& m, const MaterialDesc& desc) {
     m.texture = desc.texture;
     m.blend   = (u32)desc.blend < (u32)BlendMode::Count ? desc.blend : BlendMode::Alpha;
+    m.filter  = (u32)desc.filter < (u32)TextureFilter::Count ? desc.filter : TextureFilter::Nearest;
     m.tint    = desc.tint;
     for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) m.params[i] = desc.params[i];
 }

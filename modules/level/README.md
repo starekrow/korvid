@@ -14,7 +14,7 @@ leave memory; a reload reads every file again.
 |---|---|---|
 | Leaving | the sim is held (`HoldLoading`); the fade quad comes up over `fade_out` seconds | `LevelLeaving{level}` as it starts |
 | Loading | a new asset scope, the map loaded into it by the catalog's loader; then wait until nothing in the scope is pending | `LevelLoading{level, scope}` |
-| Building | the old root is destroyed (the scene module takes its children with it), the old scope released, a new root spawned | `LevelBuild{level, root, map, scope, entry}` |
+| Building | first tick: the old root is destroyed (the scene module takes its children with it, the tilemap its tiles) and the old scope released; second tick: a new root, so no tick shows both levels | `LevelBuild{level, root, map, scope, entry}` on the second |
 | Entering | the hold clears on the next tick; the quad fades over `fade_in` | `LevelEntered{level}` at the end |
 | Active | the level is live; a waiting request starts the next transition | |
 

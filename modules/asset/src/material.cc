@@ -34,6 +34,11 @@ bool material_parse(const char* text, usize len, MaterialDesc& desc, char* textu
             u32 n = json_numbers(doc, m, t, 4);
             if (!m->is_array() || n < 3 || n > 4) { *error = "tint must be [r, g, b] or [r, g, b, a]"; *error_at = 0; return false; }
             desc.tint = color_rgba(t[0], t[1], t[2], n == 4 ? t[3] : 1.0f);
+        } else if (strcmp(m->key, "filter") == 0) {
+            const char* f = json_string(m, "");
+            if (!strcmp(f, "nearest")) desc.filter = TextureFilter::Nearest;
+            else if (!strcmp(f, "linear")) desc.filter = TextureFilter::Linear;
+            else { *error = "filter must be nearest or linear"; *error_at = 0; return false; }
         } else if (strcmp(m->key, "params") == 0) {
             u32 n = json_numbers(doc, m, desc.params, KV_MATERIAL_PARAMS);
             if (!m->is_array() || n > KV_MATERIAL_PARAMS) { *error = "params must be an array of up to 8 numbers"; *error_at = 0; return false; }
@@ -45,8 +50,8 @@ bool material_parse(const char* text, usize len, MaterialDesc& desc, char* textu
 }
 
 int material_format(const MaterialDesc& desc, const char* texture_path, char* out, usize cap) {
-    return snprintf(out, cap, "{ \"texture\": \"%s\", \"blend\": \"%s\", \"tint\": [%g, %g, %g, %g], \"params\": [%g, %g, %g, %g, %g, %g, %g, %g] }",
-                    texture_path ? texture_path : "", blend_mode_name(desc.blend),
+    return snprintf(out, cap, "{ \"texture\": \"%s\", \"blend\": \"%s\", \"filter\": \"%s\", \"tint\": [%g, %g, %g, %g], \"params\": [%g, %g, %g, %g, %g, %g, %g, %g] }",
+                    texture_path ? texture_path : "", blend_mode_name(desc.blend), desc.filter == TextureFilter::Linear ? "linear" : "nearest",
                     desc.tint.r, desc.tint.g, desc.tint.b, desc.tint.a,
                     desc.params[0], desc.params[1], desc.params[2], desc.params[3],
                     desc.params[4], desc.params[5], desc.params[6], desc.params[7]);

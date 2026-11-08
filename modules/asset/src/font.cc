@@ -343,6 +343,7 @@ Handle font_load(Engine& e, AssetState_& st, const char* path, const FontDesc& d
     MaterialDesc md;
     md.texture = f.texture;
     md.blend   = BlendMode::Alpha;
+    md.filter  = TextureFilter::Linear; // glyphs are drawn at any scale
     f.material = renderer_material_create(r, md);
     if (f.material.is_null()) { renderer_texture_destroy(r, f.texture); return Handle{}; }
     f.ranges = (FontRange*)alloc_in(s->general, sizeof(FontRange) * m);

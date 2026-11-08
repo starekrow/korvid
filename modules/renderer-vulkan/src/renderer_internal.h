@@ -71,7 +71,8 @@ struct GpuMaterial {
     f32 params[8];
     u32 texture; // bindless slot, resolved through the texture pool when the row is written
     u32 blend;
-    u32 pad[2];
+    u32 filter;  // TextureFilter: which sampler
+    u32 pad;
 };
 static_assert(sizeof(GpuMaterial) == 64, "GpuMaterial must match sprite_common.slangh");
 
@@ -117,6 +118,7 @@ struct Texture {
 struct MaterialRecord {
     Handle    texture;
     BlendMode blend;
+    TextureFilter filter;
     color     tint;
     f32       params[KV_MATERIAL_PARAMS];
 };
@@ -222,7 +224,8 @@ struct Renderer {
     VkDescriptorSetLayout tables_layout   = VK_NULL_HANDLE; // set 0
     VkDescriptorSetLayout textures_layout = VK_NULL_HANDLE; // set 1
     VkDescriptorPool      desc_pool       = VK_NULL_HANDLE;
-    VkSampler             sampler         = VK_NULL_HANDLE;
+    VkSampler             sampler         = VK_NULL_HANDLE; // nearest
+    VkSampler             sampler_linear  = VK_NULL_HANDLE;
     VkPipelineLayout      pipe_layout     = VK_NULL_HANDLE; // sets 0 and 1, the push block; graphics and compute
     VkShaderModule        sprite_shader   = VK_NULL_HANDLE;
     VkShaderModule        sort_shader     = VK_NULL_HANDLE;

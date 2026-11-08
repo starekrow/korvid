@@ -7,7 +7,7 @@
 [[vk::binding(0, 0)]] StructuredBuffer<GpuSprite>   gSprites;
 [[vk::binding(1, 0)]] StructuredBuffer<GpuMaterial> gMaterials;
 [[vk::binding(2, 0)]] StructuredBuffer<uint>        gSorted;
-[[vk::binding(0, 1)]] SamplerState                  gSampler;
+[[vk::binding(0, 1)]] SamplerState                  gSamplers[2]; // nearest, linear
 [[vk::binding(1, 1)]] Texture2D                     gTextures[]; // variable count: last binding
 
 struct VSOut {
@@ -15,6 +15,7 @@ struct VSOut {
     float2 uv   : UV;
     float4 tint : TINT;
     nointerpolation uint tex : TEX;
+    nointerpolation uint filter : FILTER;
 };
 
 // Two triangles over the unit quad centered at the origin, +y up in world space.
@@ -45,10 +46,11 @@ VSOut vs_main(uint vid : SV_VertexID, uint iid : SV_InstanceID, uint base : SV_S
                     s.uv.y + (0.5 - corner.y) * s.uv.w) + m.params0.xy;
     o.tint = s.tint * m.tint;
     o.tex  = m.texture;
+    o.filter = min(m.filter, 1u);
     return o;
 }
 
 [shader("fragment")]
 float4 fs_main(VSOut i) : SV_Target {
-    return gTextures[NonUniformResourceIndex(i.tex)].Sample(gSampler, i.uv) * i.tint;
+    return gTextures[NonUniformResourceIndex(i.tex)].Sample(gSamplers[i.filter], i.uv) * i.tint;
 }

@@ -72,7 +72,8 @@ u64 label_hash(const Text& t, const FontAsset* f) {
     memcpy(&bits[0], &t.scale, 4);
     memcpy(&bits[1], &t.tint, 16);
     bits[5] = (u32)t.layer; bits[6] = (u32)t.space; bits[7] = (u32)t.align; bits[8] = 0;
-    return hash_mix(h ^ hash_bytes(bits, sizeof bits));
+    h = hash_mix(h ^ hash_bytes(bits, sizeof bits));
+    return hash_mix(h ^ hash_bytes(&t.shadow, sizeof t.shadow) ^ hash_bytes(&t.shadow_offset, sizeof t.shadow_offset) * 31);
 }
 
 // Phase PostSim, every tick, before scene.compose: labels whose text or look changed (or
@@ -115,19 +116,25 @@ void text_layout_system(TickContext& ctx) {
 
             places.resize_fill(KV_TEXT_MAX, GlyphPlacement{});
             u32 n = text_layout(*font, t, places.span());
-            for (u32 g = 0; g < n; ++g) {
-                const GlyphPlacement& p = places[g];
-                Sprite spr;
-                spr.material = font->material;
-                spr.uv       = p.uv;
-                spr.size     = p.size;
-                spr.tint     = t.tint;
-                spr.layer    = t.layer;
-                spr.space    = t.space;
-                Handle gh = glyphs->spawn(Transform2{}, spr, local2_at(point2{p.center.x, p.center.y}), Parent{label});
-                if (gh.is_null()) { KV_WARN("text", "glyph kind is full (%u rows)", glyphs->rows()); break; }
-                ++s.glyphs;
-            }
+            // With a shadow, every glyph twice: the shadow keyed under the glyph in the same
+            // layer, so all of a layer's shadows draw before its glyphs.
+            bool shadowed = t.shadow.a > 0.0f;
+            for (u32 pass = shadowed ? 0 : 1; pass < 2; ++pass)
+                for (u32 g = 0; g < n; ++g) {
+                    const GlyphPlacement& p = places[g];
+                    Sprite spr;
+                    spr.material = font->material;
+                    spr.uv       = p.uv;
+                    spr.size     = p.size;
+                    spr.tint     = pass ? t.tint : t.shadow;
+                    spr.layer    = t.layer;
+                    spr.space    = t.space;
+                    if (shadowed) { spr.sort = SpriteSort::Key; spr.order = (f32)pass; }
+                    point2 at{p.center.x + (pass ? 0.0f : t.shadow_offset.x), p.center.y + (pass ? 0.0f : t.shadow_offset.y)};
+                    Handle gh = glyphs->spawn(Transform2{}, spr, local2_at(at), Parent{label});
+                    if (gh.is_null()) { KV_WARN("text", "glyph kind is full (%u rows)", glyphs->rows()); break; }
+                    ++s.glyphs;
+                }
         }
     }
     st.stats = s;
@@ -151,7 +158,7 @@ void text_shutdown(Engine&, ModuleInstance& self) {
     s->tables.free();
 }
 
-constinit const FieldDesc k_text_fields[] = {KV_FIELDS(Text, font, str, scale, tint, layer, space, align)};
+constinit const FieldDesc k_text_fields[] = {KV_FIELDS(Text, font, str, scale, tint, layer, space, align, shadow, shadow_offset)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Text, k_text_fields)};
 
 constinit const KindDesc k_kinds[] = {

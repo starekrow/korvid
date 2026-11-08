@@ -110,7 +110,8 @@ kormake copies it to `bin/assets/<module>/`:
 { "texture": "mygame/rock.png", "blend": "alpha", "tint": [1, 1, 1, 1] }
 ```
 
-`blend` is `opaque`, `alpha` or `additive`; `tint` is `[r, g, b]` or `[r, g, b, a]`,
+`blend` is `opaque`, `alpha` or `additive`; `filter` is `nearest` (the default: pixel art) or
+`linear`; `tint` is `[r, g, b]` or `[r, g, b, a]`,
 linear; `params` is up to eight numbers (the sprite shader uses the first two as a UV
 offset). Leave out what you do not need.
 

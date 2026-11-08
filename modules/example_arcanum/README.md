@@ -44,8 +44,8 @@ the sim, so the disk's speed never reaches the state.
   loaded with `tilemap_load`. On `LevelBuild` the game spawns the map's tiles (owned by
   the level's root), places the player at the entry it came in by (the `spawns` layer) or
   at `player_start`, spawns the villagers the `objects` layer names as children of the
-  root, and loads the map's `music` property into the level's scope. On `LevelEntered` it
-  calls `music_play`.
+  root, and loads the map's `music` property into the level's scope and calls
+  `music_play`: a half-second true crossfade, running with the screen's fade-in.
 - **The player** is one entity in `.player` (outside the level, so it persists). `walk`
   (Sim) reads the `move` action, sweeps its feet box (10 by 5 px) through the map with
   `tilemap_move`, then checks the villagers' feet boxes in the same tick, trying the move

@@ -31,6 +31,8 @@ struct Text {
     i32         layer = 0;
     SpriteSpace space = SpriteSpace::World;
     TextAlign   align = TextAlign::Left;
+    color       shadow = color{0, 0, 0, 0};   // a drop shadow's color; alpha 0: none
+    vec2        shadow_offset{2.0f, -2.0f};   // where it falls, in the label's units (pixels for screen text), +y up
 };
 
 // Formats into `str`, truncating to fit at a code point boundary; returns what snprintf

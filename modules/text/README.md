@@ -19,7 +19,7 @@ the pen, advance) and the kerning pairs. `asset_load_font(e, path, FontDesc{px, 
 takes another set. `AssetReady` follows. Before that, `font_glyph`
 answers null for everything and text lays out as nothing.
 
-**The component.** `Text { font, str[64], scale, tint, layer, space, align }`. The
+**The component.** `Text { font, str[64], scale, tint, layer, space, align, shadow, shadow_offset }`. The
 label's `Transform2` is the pen's start on the baseline; `Left` puts the first glyph
 there, `Center` and `Right` shift the line. Strings are UTF-8, one line, 64 bytes with
 the NUL; `text_set` truncates at a character boundary.
@@ -105,6 +105,12 @@ Depends on: core, math, render, platform, asset, sprite, scene.
 - **One line of UTF-8, no shaping.** Each code point is one glyph: no wrapping, no
   right-to-left, no ligatures, no combining marks drawn as such. Kerning pairs from the
   font are applied.
+- **Glyphs are sampled linearly** (the font's material asks for `TextureFilter::Linear`),
+  so text at a scale of its own stays smooth while pixel art beside it stays sharp.
+- **A drop shadow is one field.** `Text::shadow` (a color; alpha 0 is none) and
+  `shadow_offset` (label units, pixels on screen, +y up) draw every glyph a second time
+  under itself: the shadows are keyed under the glyphs in the same layer
+  (`SpriteSort::Key`), so a label's shadow never covers another label's glyphs.
 - **What the font lacks is U+FFFD.** A code point outside the font's table (outside its
   set, or missing from the file) and a malformed byte both draw the replacement glyph,
   or nothing if the font has none; the first miss per font is logged, and `print

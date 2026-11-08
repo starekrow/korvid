@@ -13,9 +13,10 @@
 //      (HoldLoading) from the start of it, or, with `freeze` false, from its end.
 //   2. Loading: a new scope, the map loaded into it by the catalog's loader, LevelLoading.
 //      The module waits until nothing in the scope is pending.
-//   3. Building: the old root entity is destroyed (its children with it), then the old
-//      scope released, after the new one holds its references, so assets the two levels
-//      share never leave memory. A new root, then LevelBuild.
+//   3. Building, over two ticks: on the first, the old root entity is destroyed (its
+//      children and tile maps with it) and then the old scope released, after the new one
+//      holds its references, so assets the two levels share never leave memory; on the
+//      second, a new root and LevelBuild. No tick shows both levels' entities.
 //   4. Entering: the hold clears, the quad fades out over `fade_in`, LevelEntered.
 //
 // A request during a transition waits for it to finish (the latest one wins). A request

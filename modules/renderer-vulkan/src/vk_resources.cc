@@ -341,6 +341,7 @@ void rv_material_row(Renderer* r, u32 row, GpuMaterial& out) {
     for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) out.params[i] = m->params[i];
     out.texture = renderer_texture_slot(r, m->texture);
     out.blend   = (u32)m->blend;
+    out.filter  = (u32)m->filter;
 }
 
 void rv_mark_material_dirty(Renderer* r, u32 row) {
@@ -491,9 +492,9 @@ bool rv_create_descriptors(Renderer* r) {
 
     // Set 1.
     VkDescriptorSetLayoutBinding xb[2]{};
-    xb[0].binding         = 0; // sampler
+    xb[0].binding         = 0; // samplers: nearest, linear
     xb[0].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER;
-    xb[0].descriptorCount = 1;
+    xb[0].descriptorCount = 2;
     xb[0].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
     xb[1].binding         = 1; // bindless textures
     xb[1].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
@@ -518,7 +519,7 @@ bool rv_create_descriptors(Renderer* r) {
 
     VkDescriptorPoolSize sizes[3] = {
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 7 * kFramesInFlight},
-        {VK_DESCRIPTOR_TYPE_SAMPLER, kFramesInFlight},
+        {VK_DESCRIPTOR_TYPE_SAMPLER, 2 * kFramesInFlight},
         {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kMaxTextures * kFramesInFlight},
     };
     VkDescriptorPoolCreateInfo pci{};
@@ -562,17 +563,21 @@ bool rv_create_descriptors(Renderer* r) {
     sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     sci.maxLod       = 1.0f;
     VK_CHECK(vkCreateSampler(r->device, &sci, nullptr, &r->sampler));
+    sci.magFilter = VK_FILTER_LINEAR;
+    sci.minFilter = VK_FILTER_LINEAR;
+    VK_CHECK(vkCreateSampler(r->device, &sci, nullptr, &r->sampler_linear));
 
-    VkDescriptorImageInfo sinfo{};
-    sinfo.sampler = r->sampler;
+    VkDescriptorImageInfo sinfo[2]{};
+    sinfo[0].sampler = r->sampler;
+    sinfo[1].sampler = r->sampler_linear;
     VkWriteDescriptorSet writes[kFramesInFlight]{};
     for (u32 i = 0; i < kFramesInFlight; ++i) {
         writes[i].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet          = r->frames[i].textures;
         writes[i].dstBinding      = 0;
-        writes[i].descriptorCount = 1;
+        writes[i].descriptorCount = 2;
         writes[i].descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER;
-        writes[i].pImageInfo      = &sinfo;
+        writes[i].pImageInfo      = sinfo;
     }
     vkUpdateDescriptorSets(r->device, kFramesInFlight, writes, 0, nullptr);
     for (u32 i = 0; i < kFramesInFlight; ++i) rv_write_tables_set(r, r->frames[i]);
@@ -606,10 +611,11 @@ void rv_destroy_resources(Renderer* r) {
     rv_destroy_buffer(r, r->check_buffer);
     if (r->pipe_layout)     vkDestroyPipelineLayout(r->device, r->pipe_layout, nullptr);
     if (r->sampler)         vkDestroySampler(r->device, r->sampler, nullptr);
+    if (r->sampler_linear)  vkDestroySampler(r->device, r->sampler_linear, nullptr);
     if (r->desc_pool)       vkDestroyDescriptorPool(r->device, r->desc_pool, nullptr); // frees the sets
     if (r->tables_layout)   vkDestroyDescriptorSetLayout(r->device, r->tables_layout, nullptr);
     if (r->textures_layout) vkDestroyDescriptorSetLayout(r->device, r->textures_layout, nullptr);
-    r->pipe_layout = VK_NULL_HANDLE; r->sampler = VK_NULL_HANDLE; r->desc_pool = VK_NULL_HANDLE;
+    r->pipe_layout = VK_NULL_HANDLE; r->sampler = VK_NULL_HANDLE; r->sampler_linear = VK_NULL_HANDLE; r->desc_pool = VK_NULL_HANDLE;
     r->tables_layout = VK_NULL_HANDLE; r->textures_layout = VK_NULL_HANDLE;
     if (r->texture_kind)  kv_handle_kind_unregister(r->texture_kind);
     if (r->material_kind) kv_handle_kind_unregister(r->material_kind);

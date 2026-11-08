@@ -117,3 +117,10 @@ the new chain with `oldSwapchain` set and retires the old one the same way. The 
 `--check-sort` verifies the sort. Both wait on their frame's fence. The Mesa screenshot
 layer crashes on the first acquire after a fenced recreation (it does not expect the old
 swapchain to outlive the new one's creation); the built-in path replaces it.
+
+## Samplers
+
+Set 1 holds two samplers, nearest and linear (slice 5), and the material row's `filter`
+picks one per draw: the vertex shader passes it flat to the fragment shader, which samples
+`gSamplers[filter]`. Pixel art stays on nearest; font atlases and anything drawn at a scale
+of its own use linear.

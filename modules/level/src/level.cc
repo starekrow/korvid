@@ -153,8 +153,16 @@ void level_run(TickContext& ctx) {
         [[fallthrough]];
     case LevelState::Building: {
         Table* roots = ctx.write_kind(s.root_kind);
-        if (roots && !s.root.is_null()) roots->destroy(s.root); // its children go with it (scene)
-        if (!s.scope.is_null()) asset_scope_release(e, s.scope); // after the new scope holds what both use
+        // Two ticks. The first takes the old level down: its root (the scene module takes
+        // the children at the end of this tick, the tilemap its tiles at its next pump) and
+        // its scope (after the new scope holds what both use). The second builds the new
+        // one. No tick ever shows a new level's entities beside an old level's.
+        if (!s.root.is_null() || !s.scope.is_null()) {
+            if (roots && !s.root.is_null()) roots->destroy(s.root);
+            if (!s.scope.is_null()) asset_scope_release(e, s.scope);
+            s.root = s.scope = s.map = Handle{};
+            break;
+        }
         s.scope = s.new_scope; s.map = s.new_map;
         s.new_scope = s.new_map = Handle{};
         s.root = roots ? roots->spawn(transform2_at(point2{0.0f, 0.0f})) : Handle{};

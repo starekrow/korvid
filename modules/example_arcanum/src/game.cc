@@ -181,6 +181,8 @@ void label(Table& ui, const Game& g, const char* text, f32 x, f32 y, f32 scale, 
     t.layer = 110;
     t.space = SpriteSpace::Screen;
     t.align = TextAlign::Center;
+    t.shadow = color_rgba(0.0f, 0.0f, 0.0f, 0.85f);
+    t.shadow_offset = vec2{2.0f, -2.0f};
     ui.spawn(transform2_at(point2{x, y}), t);
 }
 
@@ -243,6 +245,9 @@ void build_menu(TickContext& ctx, Game& g) {
 
 void open_menu(TickContext& ctx, Game& g, Menu m) {
     if (g.menu == Menu::Closed) engine_pause(*ctx.engine, true);
+    static const char* const names[] = {"closed", "main", "levels", "credits"};
+    // Where a screen opens, for --screenshot-frame and the like.
+    KV_INFO("arcanum", "menu: %s at frame %llu, tick %llu", names[(u32)m], (unsigned long long)ctx.engine->frame_count, (unsigned long long)ctx.engine->clock.tick_total);
     g.menu = m;
     g.cursor = 0;
     g.credits_scroll = 0;
@@ -443,17 +448,14 @@ void on_build(TickContext& ctx, Span<const LevelBuild> builds) {
             p.parent = b.root;
             npcs->spawn(transform2_at(a.home), local2_at(a.home), p, actor_sprite(g, which, (i32)objects_layer), a);
         }
-        // The map's music joins the level's scope; it plays when the level is entered.
+        // The map's music joins the level's scope and crossfades in with the picture: the
+        // old track goes down while the new one comes up, over the screen's fade-in.
         g.music = Handle{};
         if (const MapProperty* music = tilemap_map_property(*m, "music")) g.music = asset_load_stream(e, music->str, b.scope);
+        MusicPlay p;
+        p.fade_out = 0.5f; p.fade_in = 0.5f; p.overlap = 0.5f; p.volume = 0.7f;
+        if (!g.music.is_null()) music_play(ctx, g.music, p);
     }
-}
-
-void on_entered(TickContext& ctx, Span<const LevelEntered>) {
-    Game& g = ctx.state_as<Game>();
-    MusicPlay p;
-    p.fade_out = 1.5f; p.fade_in = 1.5f; p.overlap = 1.0f; p.volume = 0.7f;
-    if (!g.music.is_null()) music_play(ctx, g.music, p);
 }
 
 void on_exit(TickContext& ctx, Span<const ExitRequested>) { engine_request_quit(*ctx.engine); }
@@ -543,8 +545,7 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
 }
 
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_build",   KV_ON(LevelBuild, on_build), .writes = ".player, .npc, tilemap.tile"},
-    {.name = ".on_entered", KV_ON(LevelEntered, on_entered), .writes = "audio.commands"},
+    {.name = ".on_build",   KV_ON(LevelBuild, on_build), .writes = ".player, .npc, tilemap.tile, audio.commands"},
     {.name = ".on_exit",    KV_ON(ExitRequested, on_exit)},
 };
 constinit const SystemDesc k_systems[] = {
