@@ -1,0 +1,10 @@
+Built with Korvid Engine
+
+Korvid is licensed under the Apache License, Version 2.0 (LICENSE). A work that
+redistributes Korvid or software built with it must carry the attribution above.
+
+Korvid includes third-party software, each under its own license, kept with it:
+  modules/inflate/src/vendor   miniz 3.1.2 (tinfl), MIT
+  modules/asset/src/vendor     stb_truetype and stb_vorbis, public domain or MIT
+  modules/text/assets          DejaVu Sans, the Bitstream Vera and DejaVu license
+  tools/kormake/vendor/lua     Lua 5.5, MIT
