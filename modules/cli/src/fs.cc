@@ -4,6 +4,7 @@
 #include "cli_internal.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/memory.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -136,8 +137,7 @@ void cli_fs_cd(CliContext& ctx, Span<const char* const> args) {
     Node n = classify(ctx, cli, path);
     if (n == Node::None) { ctx.fail("no such path: %s", path); return; }
     if (n == Node::Leaf) { ctx.fail("not a directory: %s", path); return; }
-    strncpy(ctx.cwd, path, KV_CLI_PATH_MAX - 1);
-    ctx.cwd[KV_CLI_PATH_MAX - 1] = 0;
+    snprintf(ctx.cwd, KV_CLI_PATH_MAX, "%s", path); // resolved into a buffer of the same size: it fits
     ctx.print("%s", ctx.cwd);
 }
 

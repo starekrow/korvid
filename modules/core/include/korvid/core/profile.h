@@ -123,6 +123,6 @@ struct ProfScope {
 #define KV_ZONE(name)           ((void)0)
 #define KV_ZONE_WAIT(name)      ((void)0)
 #define KV_MARK(name)           ((void)0)
-#define KV_MARK_V(name, value)  ((void)0)
-#define KV_COUNTER(name, value) ((void)0)
+#define KV_MARK_V(name, value)  ((void)(value))
+#define KV_COUNTER(name, value) ((void)(value))
 #endif
