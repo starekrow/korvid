@@ -6,6 +6,7 @@
 // game knows is in kinds and one published Score; no handle is kept anywhere except on
 // the events that carry them.
 #include "korvid/example_rocks/module.h"
+#include "korvid/anim/module.h"
 #include "korvid/asset/font.h"
 #include "korvid/asset/material.h"
 #include "korvid/collision/module.h"
@@ -33,7 +34,6 @@ namespace {
 // ---- components ------------------------------------------------------------------------
 struct Velocity { vec2 v; f32 spin; };   // pixels per second, radians per second
 struct Health   { i32 hp; };
-struct Lifetime { f32 left; f32 total; }; // seconds
 struct RockSize { u8 size; };             // 0 big, 1 medium, 2 small
 struct Ship     { f32 cooldown; u8 thrusting; };
 struct Label    { u8 role; };             // what a text label shows: see Role
@@ -41,14 +41,13 @@ enum Role : u8 { ROLE_HUD, ROLE_PAUSED, ROLE_OVER };
 
 constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, v, spin)};
 constinit const FieldDesc k_health_fields[]   = {KV_FIELDS(Health, hp)};
-constinit const FieldDesc k_lifetime_fields[] = {KV_FIELDS(Lifetime, left, total)};
+
 constinit const FieldDesc k_rocksize_fields[] = {KV_FIELDS(RockSize, size)};
 constinit const FieldDesc k_ship_fields[]     = {KV_FIELDS(Ship, cooldown, thrusting)};
 constinit const FieldDesc k_label_fields[]    = {KV_FIELDS(Label, role)};
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Velocity, k_velocity_fields),
     KV_COMPONENT(Health, k_health_fields, CompPrev), // the death trigger watches it
-    KV_COMPONENT(Lifetime, k_lifetime_fields),
     KV_COMPONENT(RockSize, k_rocksize_fields),
     KV_COMPONENT(Ship, k_ship_fields),
     KV_COMPONENT(Label, k_label_fields),
@@ -59,9 +58,9 @@ constinit u32 g_ship_kind = 0, g_bullet_kind = 0, g_rock_kind = 0, g_debris_kind
 constinit const char* const k_ship_components[]    = {"Transform2", "Sprite", "Velocity", "Health", "Collider2", "Ship"};
 constinit const char* const k_bullet_components[]  = {"Transform2", "Sprite", "Velocity", "Collider2"};
 constinit const char* const k_rock_components[]    = {"Transform2", "Sprite", "Velocity", "Collider2", "RockSize"};
-constinit const char* const k_debris_components[]  = {"Transform2", "Sprite", "Velocity", "Lifetime"};
+constinit const char* const k_debris_components[]  = {"Transform2", "Sprite", "Velocity", "AnimPlayer"}; // fades by clip
 constinit const char* const k_overlay_components[] = {"Transform2", "Sprite"}; // screen-space, over everything
-constinit const char* const k_flame_components[]   = {"Transform2", "Sprite", "Local2", "Parent"}; // a child of the ship
+constinit const char* const k_flame_components[]   = {"Transform2", "Sprite", "Local2", "Parent", "AnimPlayer"}; // a child of the ship
 constinit const char* const k_label_components[]   = {"Transform2", "Text", "Label"};               // the HUD and the banners
 constinit const KindDesc k_kinds[] = {
     {.name = "example_rocks.ship",    .components = k_ship_components,    .capacity = 1,    .id = &g_ship_kind},
@@ -69,7 +68,9 @@ constinit const KindDesc k_kinds[] = {
     {.name = "example_rocks.rock",    .components = k_rock_components,    .capacity = 1024, .id = &g_rock_kind},
     {.name = "example_rocks.debris",  .components = k_debris_components,  .capacity = 8192, .id = &g_debris_kind},
     {.name = "example_rocks.overlay", .components = k_overlay_components, .capacity = 8,    .id = &g_overlay_kind},
-    {.name = "example_rocks.flame",   .components = k_flame_components,   .capacity = 4,    .id = &g_flame_kind},
+    // The flame is cosmetic: its flipbook comes from a file and starts when the file
+    // arrives, which is not a tick the sim may depend on.
+    {.name = "example_rocks.flame",   .components = k_flame_components,   .capacity = 4,    .id = &g_flame_kind, .cosmetic = true},
     {.name = "example_rocks.label",   .components = k_label_components,   .capacity = 8,    .id = &g_label_kind},
 };
 
@@ -107,14 +108,16 @@ constinit const TriggerDesc k_triggers[] = {
 // ---- the published score and the module's state --------------------------------------
 struct Score { i32 total; u32 rocks_shot; u32 wave; u32 games; };
 
-enum Look : u8 { LOOK_SHIP, LOOK_ROCK, LOOK_BULLET, LOOK_DEBRIS, LOOK_WHITE, LOOK_COUNT };
+enum Look : u8 { LOOK_SHIP, LOOK_ROCK, LOOK_BULLET, LOOK_DEBRIS, LOOK_WHITE, LOOK_FLAME, LOOK_COUNT };
 
 struct Game {
     Score  score;
     Handle looks[LOOK_COUNT];     // asset.material, one file per look
     Handle materials[LOOK_COUNT]; // render.material: the rows those files fill
     Handle font;                  // asset.font: DejaVu Sans at 28 px
-    u16    ship_hk, bullet_hk, rock_hk; // handle kinds, to tell what an overlap is between
+    Handle flame_clip;            // anim.clip from a file: the flame's flipbook
+    Handle fade_clip;             // anim.clip built here: one second of alpha to zero
+    u16    ship_hk, bullet_hk, rock_hk, debris_hk; // handle kinds, to tell what an event is about
     bool   started = false;
     bool   demo    = false;
     u32    next_wave = 0;        // the pending wave's ticket, cancelled at game over
@@ -176,11 +179,14 @@ void spawn_rock(Table& rocks, Game& g, point2 at, u8 size, vec2 drift) {
                 v, collider_circle(kRockRadius[size], L_ROCK, L_SHIP | L_BULLET), RockSize{size});
 }
 
+// Debris fades through the one-second fade clip played at 1 / lifetime, so each piece
+// lasts its own time; AnimFinished destroys it.
 void spawn_debris(TickContext& ctx, Game& g, point2 at, u32 count, color tint) {
     for (u32 i = 0; i < count; ++i) {
         vec2 v = heading(g.rng.range(0.0f, 2.0f * KV_PI)) * g.rng.range(60.0f, 220.0f);
         f32 life = g.rng.range(0.3f, 0.8f);
-        ctx.spawn_later(g_debris_kind, transform2_at(at), sprite_of(g, LOOK_DEBRIS, 6.0f, 0, tint), Velocity{v, 0.0f}, Lifetime{life, life});
+        ctx.spawn_later(g_debris_kind, transform2_at(at), sprite_of(g, LOOK_DEBRIS, 6.0f, 0, tint), Velocity{v, 0.0f},
+                        anim_player(g.fade_clip, 1.0f / life));
     }
 }
 
@@ -353,20 +359,6 @@ void wrap(TickContext& ctx) {
     }
 }
 
-// Debris fades and goes.
-void debris_fade(TickContext& ctx) {
-    f32 dt = (f32)ctx.dt;
-    for (KindRows k : ctx.view<Lifetime, Sprite>()) {
-        Span<Lifetime> life = k.col<Lifetime>();
-        Span<Sprite>   spr  = k.col<Sprite>();
-        for (u32 i = 0; i < k.rows(); ++i) {
-            if (!k.alive(i)) continue;
-            life[i].left -= dt;
-            if (life[i].left <= 0.0f) { ctx.destroy(k.handle_at(i)); continue; }
-            spr[i].tint.a = life[i].left / life[i].total;
-        }
-    }
-}
 
 // Boot: the first tick starts the first game.
 void game(TickContext& ctx) {
@@ -468,9 +460,17 @@ void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
     for (const Spawned& s : spawns) {
         if (s.kind != g_ship_kind || s.entity.is_null()) continue;
         Table* flames = ctx.write_kind(g_flame_kind);
-        flames->spawn(Transform2{}, sprite_of(g, LOOK_DEBRIS, 30.0f, 1, color_rgba(1.0f, 0.6f, 0.2f, 0.0f)),
-                      local2_at(point2{-26.0f, 0.0f}), Parent{s.entity});
+        Sprite flame = sprite_of(g, LOOK_FLAME, 32.0f, 1, color_rgba(1.0f, 1.0f, 1.0f, 0.0f));
+        flame.uv = rect2{0.0f, 0.0f, 0.5f, 1.0f}; // frame 0 of the two-frame sheet, until the clip says otherwise
+        flames->spawn(Transform2{}, flame, local2_at(point2{-30.0f, 0.0f}), Parent{s.entity}, anim_player(g.flame_clip));
     }
+}
+
+// A fade ran out: the debris goes.
+void on_anim_finished(TickContext& ctx, Span<const AnimFinished> done) {
+    Game& g = ctx.state_as<Game>();
+    for (const AnimFinished& f : done)
+        if (f.entity.kind() == g.debris_hk) ctx.destroy(f.entity);
 }
 
 void on_score(TickContext&, Span<const ScoreChanged> changes) {
@@ -559,11 +559,20 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     if (!renderer_get(engine)) return false;
     g->font = asset_load_font(engine, "text/DejaVuSans.ttf", 28.0f);
     if (g->font.is_null()) return false;
+    // Two clips, two ways: the flame's flipbook is a file; the fade is built here, one
+    // second of alpha from one to zero, played at 1 / lifetime by each piece of debris.
+    g->flame_clip = anim_load(engine, "example_rocks/flame.anim.json");
+    static const AnimKey k_fade_keys[] = {{.time = 0.0f, .v = {1.0f}}, {.time = 1.0f, .v = {0.0f}}};
+    static const AnimTrackDesc k_fade_tracks[] = {{.channel = AnimChannel::Alpha, .interp = AnimInterp::Linear, .keys = k_fade_keys}};
+    AnimClipDesc fade;
+    fade.name = "example_rocks.fade"; fade.loop = AnimLoop::Once; fade.tracks = k_fade_tracks;
+    g->fade_clip = anim_create(engine, fade);
+    if (g->flame_clip.is_null() || g->fade_clip.is_null()) return false;
     // Each look is a material file; the file names its texture. The handles are usable
     // now and show the placeholder until the files and textures arrive.
     const char* looks[LOOK_COUNT] = {"example_rocks/ship.material.json", "example_rocks/rock.material.json",
                                      "example_rocks/bullet.material.json", "example_rocks/debris.material.json",
-                                     "example_rocks/white.material.json"};
+                                     "example_rocks/white.material.json", "example_rocks/flame.material.json"};
     for (u32 i = 0; i < LOOK_COUNT; ++i) {
         g->looks[i] = asset_load_material(engine, looks[i]);
         const MaterialAsset* m = asset_material(engine, g->looks[i]);
@@ -574,6 +583,7 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     g->ship_hk   = engine_table(engine, g_ship_kind)->kind;
     g->bullet_hk = engine_table(engine, g_bullet_kind)->kind;
     g->rock_hk   = engine_table(engine, g_rock_kind)->kind;
+    g->debris_hk = engine_table(engine, g_debris_kind)->kind;
     return true;
 }
 
@@ -588,7 +598,7 @@ constinit const char* const k_move_reads[]     = {"*.Velocity"};
 constinit const char* const k_move_writes[]    = {"*.Transform2"};
 constinit const char* const k_wrap_reads[]     = {"*.Velocity", "platform.window"};
 constinit const char* const k_after_move[]     = {"example_rocks.move"};
-constinit const char* const k_fade_writes[]    = {"example_rocks.debris.Lifetime", "example_rocks.debris.Sprite"};
+
 constinit const char* const k_game_reads[]     = {"example_rocks.score"};
 constinit const char* const k_pause_reads[]    = {"platform.window"};
 constinit const char* const k_pause_writes[]   = {"example_rocks.overlay", "example_rocks.label"};
@@ -598,10 +608,9 @@ constinit const char* const k_camera_writes[]  = {"sprite.camera"};
 constinit const SystemDesc k_systems[] = {
     {.name = "example_rocks.pause",   .phase = Phase::PreSim, .fn = pause, .reads = k_pause_reads, .writes = k_pause_writes, .runs = RunWhen::Always},
     {.name = "example_rocks.control", .phase = Phase::Sim, .fn = control, .reads = k_control_reads, .writes = k_control_writes, .before = k_before_move},
-    // move, wrap and fade touch no module state: fade shares a level with move.
+    // move and wrap touch no module state: they share levels with whatever else is free.
     {.name = "example_rocks.move",    .phase = Phase::Sim, .fn = move,    .reads = k_move_reads,    .writes = k_move_writes, .state = StateUse::None},
     {.name = "example_rocks.wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = k_wrap_reads,    .writes = k_move_writes, .after = k_after_move, .state = StateUse::None},
-    {.name = "example_rocks.fade",    .phase = Phase::Sim, .fn = debris_fade, .writes = k_fade_writes, .state = StateUse::None},
     {.name = "example_rocks.game",    .phase = Phase::Sim, .fn = game,    .reads = k_game_reads},
     {.name = "example_rocks.camera",  .phase = Phase::PostSim, .fn = camera, .writes = k_camera_writes},
     {.name = "example_rocks.hud",     .phase = Phase::PostSim, .fn = hud, .reads = k_hud_reads, .writes = k_hud_writes, .runs = RunWhen::Always},
@@ -624,6 +633,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = "example_rocks.on_asset_failed", KV_ON(AssetFailed, on_asset_failed)},
     {.name = "example_rocks.on_overlap",  KV_ON(OverlapBegin, on_overlap)},
     {.name = "example_rocks.on_spawned",  KV_ON(Spawned, on_spawned), .writes = k_spawned_writes},
+    {.name = "example_rocks.on_anim_finished", KV_ON(AnimFinished, on_anim_finished)},
     {.name = "example_rocks.on_rock_hit", KV_ON(RockHit, on_rock_hit), .writes = k_rock_hit_writes},
     {.name = "example_rocks.on_ship_hit", KV_ON(ShipHit, on_ship_hit), .reads = k_ship_hit_reads, .writes = k_ship_hit_writes},
     {.name = "example_rocks.on_score",    KV_ON(ScoreChanged, on_score)},

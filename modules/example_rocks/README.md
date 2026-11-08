@@ -1,7 +1,7 @@
 # example_rocks
 
-An asteroids-like, written the way the engine would like a game written: seven kinds, eight
-systems with declared sets, eleven handlers, scheduled events for bullet expiry and waves,
+An asteroids-like, written the way the engine would like a game written: seven kinds, seven
+systems with declared sets, twelve handlers, scheduled events for bullet expiry and waves,
 a trigger for the ship's death, a published score, and no handle kept anywhere except on
 the events that carry them. The ship flies from the keyboard or the first gamepad, or
 from a script with `--demo` so a run is reproducible: two runs of
@@ -32,19 +32,21 @@ builds every module and example; `kormake test linux-debug` runs the test suites
 ## How the game is built
 
 **Kinds.** `ship` (1: `Transform2`, `Sprite`, `Velocity`, `Health`, `Collider2`, `Ship`),
-`bullet` (4096), `rock` (1024, three sizes by `RockSize`), `debris` (8192, with a
-`Lifetime` that fades it). Every kind has `Transform2` and `Sprite`, so the sprite module
-draws them; the first three have `Collider2`, so the collision module tests them, on
-layers `ship`, `bullet` and `rock` with masks that give ship-rock and bullet-rock pairs and
-nothing else.
+`bullet` (4096), `rock` (1024, three sizes by `RockSize`), `debris` (8192, with an
+`AnimPlayer` that fades it), `flame` (a child of the ship, cosmetic), `overlay` (the
+pause dimmer) and `label` (the HUD and the banners). Every kind but `label` has
+`Transform2` and `Sprite`, so the sprite module draws them; the first three have
+`Collider2`, so the collision module tests them, on layers `ship`, `bullet` and `rock`
+with masks that give ship-rock and bullet-rock pairs and nothing else.
 
-**Systems, all in Sim.** `control` reads `input.state` and writes the ship and the bullet
-kind (it fires by direct spawn, holding the write, and schedules each bullet's `Expire`
-72 ticks out); it says `before = move`. `move` integrates every kind with `Velocity` in a
-`parallel_for`; `wrap` keeps everything on screen, `after = move`, since both write
-`*.Transform2`; `fade` ages debris and dims its sprite; `game` watches the score and the
-exit request. `move`, `wrap` and `fade` declare `StateUse::None`, so they share levels
-instead of serializing on the module's state; the schedule log shows `fade` beside `move`.
+**Systems.** In Sim: `control` reads `input.state` and writes the ship, the flame and the
+bullet kind (it fires by direct spawn, holding the write, and schedules each bullet's
+`Expire` 72 ticks out); it says `before = move`. `move` integrates every kind with
+`Velocity` in a `parallel_for`; `wrap` keeps everything on screen, `after = move`, since
+both write `*.Transform2`; `game` starts the first game. `move` and `wrap` declare
+`StateUse::None`, so they share levels instead of serializing on the module's state.
+Around it: `pause` (PreSim, `Always`) toggles the pause, `camera` (PostSim) shakes the
+camera, `hud` (PostSim, `Always`) rewrites the HUD label.
 
 **The cascade.** `OverlapBegin` from the collision module arrives at a boundary;
 `on_overlap` sorts the pair by kind into `RockHit` or `ShipHit`. `on_rock_hit` (writes the
@@ -76,7 +78,8 @@ debris are additive dots.
 |---|---|
 | `src/main.cc` | the `FrameLoopConfig` (1280x720, the `--demo` flag, a `game` heap of 16/64 MB) |
 | `src/game.cc` | components, kinds, events, the trigger, the score, systems, handlers, startup, the tables |
-| `assets/ship.png`, `rock.png`, `dot.png`, `white.png`, `*.material.json` | the art (generated) and the looks |
+| `assets/ship.png`, `rock.png`, `dot.png`, `white.png`, `flame.png`, `*.material.json` | the art (generated) and the looks |
+| `assets/flame.anim.json` | the flame's clip: a two-frame flipbook and a scale wobble |
 
 ## Behaviour worth knowing
 
@@ -99,16 +102,24 @@ debris are additive dots.
 - **Exit is a handler.** `on_exit` quits on `ExitRequested` whether or not the game is
   paused; a Sim system would not run while paused and a `--run-seconds` that lands
   inside the demo's pause would be lost.
-- **The flame is a child.** The `flame` kind has `Local2` and `Parent`; `on_spawned`
-  gives each new ship one, 26 units behind it, and the scene module keeps it there and
-  destroys it with the ship. `control` only sets its alpha from the thrust.
+- **The flame is a child with a flipbook.** The `flame` kind has `Local2`, `Parent` and
+  an `AnimPlayer`; `on_spawned` gives each new ship one, 30 units behind it, playing
+  `flame.anim.json` (two frames of a sheet at 12 fps and a scale wobble on its `Local2`),
+  and the scene module keeps it there and destroys it with the ship. `control` only sets
+  its alpha from the thrust. The kind is cosmetic: the clip comes from a file and starts
+  when the file arrives, which is not a tick the hash may depend on.
+- **Debris fades by clip.** There is no `Lifetime` and no fade system any more: each
+  piece plays `example_rocks.fade`, a one-second alpha ramp built at startup with
+  `anim_create`, at `1 / lifetime`, and `on_anim_finished` destroys it when
+  `AnimFinished` arrives.
 - **The camera shake** is `example_rocks.camera` in PostSim writing `sprite.camera`; the
   offset is a function of the tick, so a run is still reproducible, and the camera is not
   hashed in any case.
 - **The game heap.** `main.cc` declares a `game` heap with a soft limit of 16 MB and a
   hard limit of 64 MB and puts the module in it; a hard-limit failure logs the heap,
   module and category and the game keeps running.
-- **Debris is sim state here**, so its fading is hashed. A game that wanted it out of
-  the hash would mark `Lifetime` cosmetic and keep it out of sim systems' sets.
+- **Debris is sim state here**, so its fading is hashed: the `AnimPlayer` time advances
+  on the tick and the clip is built at startup, so two runs agree. The flame, whose clip
+  arrives from a file, is a cosmetic kind for exactly that reason.
 - **Rendering artifacts seen in slice 2** (sprites of the same layer swapping order)
   were the old CPU sort; the slice 3 renderer draws equal layers in slot order.

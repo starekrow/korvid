@@ -371,24 +371,36 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
         }
 
     // Declared order. For systems, a name in another phase is checked for direction; for
-    // handlers, only other handlers may be named.
+    // handlers, only other handlers may be named. A name starting with '?' is an order
+    // that holds if the system exists: for a module ordering itself against one it does
+    // not depend on.
     for (u32 i = 0; i < n; ++i) {
         const char* me = pend[i].sys.name();
         for (const char* other : after_of(pend[i])) {
+            bool optional = other[0] == '?';
+            if (optional) ++other;
             u32 j = find_pending(pend, other);
             if (!j) {
                 Phase op = phase == Phase::Count ? Phase::Count : engine_system_phase(e, other);
-                if (op == Phase::Count) { KV_ERROR("engine", "'%s' is after unknown %s '%s'", me, phase == Phase::Count ? "handler" : "system", other); edges.free(); return false; }
+                if (op == Phase::Count) {
+                    if (optional) continue;
+                    KV_ERROR("engine", "'%s' is after unknown %s '%s'", me, phase == Phase::Count ? "handler" : "system", other); edges.free(); return false;
+                }
                 if ((u32)op > (u32)phase) { KV_ERROR("engine", "system '%s' (phase %s) cannot run after '%s', which is in a later phase", me, what, other); edges.free(); return false; }
                 continue; // an earlier phase: already true
             }
             edges.push(Edge{j - 1, i, 0});
         }
         for (const char* other : before_of(pend[i])) {
+            bool optional = other[0] == '?';
+            if (optional) ++other;
             u32 j = find_pending(pend, other);
             if (!j) {
                 Phase op = phase == Phase::Count ? Phase::Count : engine_system_phase(e, other);
-                if (op == Phase::Count) { KV_ERROR("engine", "'%s' is before unknown %s '%s'", me, phase == Phase::Count ? "handler" : "system", other); edges.free(); return false; }
+                if (op == Phase::Count) {
+                    if (optional) continue;
+                    KV_ERROR("engine", "'%s' is before unknown %s '%s'", me, phase == Phase::Count ? "handler" : "system", other); edges.free(); return false;
+                }
                 if ((u32)op < (u32)phase) { KV_ERROR("engine", "system '%s' (phase %s) cannot run before '%s', which is in an earlier phase", me, what, other); edges.free(); return false; }
                 continue;
             }

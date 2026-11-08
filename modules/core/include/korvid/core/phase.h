@@ -360,7 +360,7 @@ struct SystemDesc {
     SystemFn                fn     = nullptr;
     Span<const char* const> reads  = {};
     Span<const char* const> writes = {};
-    Span<const char* const> after  = {}; // system names; needed between two writers, optional otherwise
+    Span<const char* const> after  = {}; // system names; needed between two writers, optional otherwise; "?name" only if that system exists
     Span<const char* const> before = {};
     StateUse                state  = StateUse::Write; // what it does with its module's state
     bool                    main_thread = false;      // runs on the thread driving the engine: for code that talks to the OS, the GPU, or a module's own pools
