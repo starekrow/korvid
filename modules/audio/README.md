@@ -123,6 +123,12 @@ Depends on: core, math, platform, asset.
   hardware's format. Sounds at other rates are read at the ratio.
 - **Without a device** every voice finishes on the tick after it starts, so logic that
   waits for `VoiceFinished` still runs.
+- **A sound can retire while it plays.** When the asset module retires a sound (its last
+  scope let go), the handle goes stale at once and the module hands the samples here:
+  `audio.extract` sends the mixer a `Retire`, the mixer stops every voice on those
+  samples (each reports `VoiceFinished`) and answers on the done ring, and only then are
+  the samples freed. A voice still waiting for a sound that retired finishes without
+  playing. Without a device the samples go at once.
 
 ## Not in this module
 

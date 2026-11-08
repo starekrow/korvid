@@ -65,13 +65,16 @@ struct FontAsset {
     FontRange* ranges      = nullptr;        // the set asked for, merged and sorted
     u32        range_count = 0;
     mutable u32 misses     = 0;              // code points asked for that the table lacks (logged once)
+    u32        refs        = 0;              // scopes and assets holding it
     f64        build_seconds = 0.0;          // what the rasterization cost, for the log
 };
 
 // Starts loading <exe dir>/assets/<path> as a TrueType font. Null under the same
-// conditions as asset_load_texture, for px outside [4, 256], or for an empty set.
+// conditions as asset_load_texture, for px outside [4, 256], or for an empty set. The
+// scope takes a reference; without one, the global scope does.
+Handle           asset_load_font(Engine& e, const char* path, const FontDesc& desc, Handle scope);
 Handle           asset_load_font(Engine& e, const char* path, const FontDesc& desc);
-// The default character set at `px`.
+// The default character set at `px`, in the global scope.
 Handle           asset_load_font(Engine& e, const char* path, f32 px);
 // The record for a handle, or null if the handle is stale or not a font asset.
 const FontAsset* asset_font(Engine& e, Handle asset);

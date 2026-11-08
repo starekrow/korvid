@@ -41,6 +41,7 @@ void asset_pump(TickContext& ctx) {
     IoQueue* io = platform_io(e);
     Renderer* r = renderer_get(e);
     if (!io) return;
+    asset_reap_orphans(e, s, s.kind);
     // Scan what has finished, take what is ours. Reaping removes the entry, so the index
     // only advances past entries that stay.
     for (u32 i = 0; i < io->completions().len;) {
@@ -48,7 +49,7 @@ void asset_pump(TickContext& ctx) {
         if (!asset_is_kind(s, c.user, s.kind)) { ++i; continue; }
         Handle h{c.user};
         TextureAsset* t = s.textures.get(h);
-        if (!t || t->io != c.request) { ++i; continue; } // not ours, or no longer awaited
+        if (!t || t->io != c.request) { ++i; continue; } // retired (reaped below), or no longer awaited
         io->reap(c.request);
         if (c.status != IoStatus::Done) {
             fail_asset(e, s, h, *t, c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read, nullptr);
@@ -87,6 +88,7 @@ bool asset_startup(Engine& e, ModuleInstance& self) {
     if (!asset_materials_init(e, *s, self)) return false;
     if (!asset_fonts_init(e, *s, self)) return false;
     if (!asset_sounds_init(e, *s, self)) return false;
+    if (!asset_scopes_init(e, *s, self)) return false;
     self.set_state(s);
     return true;
 }
@@ -94,6 +96,7 @@ bool asset_startup(Engine& e, ModuleInstance& self) {
 void asset_shutdown(Engine& e, ModuleInstance& self) {
     AssetState_* s = self.state_as<AssetState_>();
     if (!s) return;
+    asset_scopes_shutdown(e, *s);
     asset_sounds_shutdown(e, *s);
     asset_fonts_shutdown(e, *s);
     asset_materials_shutdown(e, *s);
@@ -107,38 +110,60 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
     s->textures.free();
 }
 
-constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(AssetFailed)};
+constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(AssetFailed), KV_EVENT(AssetScopeReady)};
 constinit const ResourceDesc  k_resources[] = {{".textures"}, {".materials"}, {".fonts"}, {".sounds"}};
 constinit const SystemDesc    k_systems[]   = {
-    {.name = ".pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = ".textures", .main_thread = true, .runs = RunWhen::Always},
+    // Retiring first: it writes every table, and the other pumps then see this tick's state.
+    {.name = ".pump_scopes", .phase = Phase::PreSim, .fn = asset_scopes_pump, .writes = ".textures, .materials, .fonts, .sounds",
+     .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = ".textures", .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump_materials", .phase = Phase::PreSim, .fn = asset_materials_pump, .reads = ".textures",
      .writes = ".materials", .after = ".pump", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump_fonts", .phase = Phase::PreSim, .fn = asset_fonts_pump, .writes = ".fonts",
      .after = ".pump", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump_sounds", .phase = Phase::PreSim, .fn = asset_sounds_pump, .writes = ".sounds",
-     .main_thread = true, .runs = RunWhen::Always},
+     .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
 };
 
 } // namespace
 
-extern const CliMountDesc k_asset_mounts[4]; // mounts.cc
 
 KV_MODULE_DEFINE(asset_module) = {
     .name      = "asset",
     .events    = k_events,
     .resources = k_resources,
     .systems   = k_systems,
+    .commands  = k_asset_commands,
     .mounts    = k_asset_mounts,
     .startup   = asset_startup,
     .shutdown  = asset_shutdown,
     .memory    = {.reserve = 64 * 1024},
 };
 
-Handle asset_load_texture(Engine& e, const char* path) {
+Handle asset_load_texture(Engine& e, const char* path, Handle scope) {
     AssetState_* s = asset_state(e);
+    if (!s) { KV_ERROR("asset", "cannot load '%s': the asset module is not up", path ? path : "?"); return Handle{}; }
+    return asset_hold(*s, scope, texture_load(e, *s, path));
+}
+
+Handle asset_load_texture(Engine& e, const char* path) { return asset_load_texture(e, path, asset_scope_global(e)); }
+
+void texture_retire(Engine& e, AssetState_& s, Handle h) {
+    TextureAsset* t = s.textures.get(h);
+    if (!t) return;
+    IoQueue* io = platform_io(e);
+    if (io && !t->io.is_null()) io->cancel(t->io); // its completion is reaped as an orphan
+    if (Renderer* r = renderer_get(e)) renderer_texture_destroy(r, t->texture);
+    s.by_path.remove(name_intern(t->path));
+    KV_INFO("asset", "'%s' retired", t->path);
+    s.textures.destroy(h);
+}
+
+Handle texture_load(Engine& e, AssetState_& st, const char* path) {
+    AssetState_* s = &st;
     Renderer* r = renderer_get(e);
     IoQueue* io = platform_io(e);
-    if (!s || !r || !io || !path) { KV_ERROR("asset", "cannot load '%s': asset, renderer and platform must be up", path ? path : "?"); return Handle{}; }
+    if (!r || !io || !path) { KV_ERROR("asset", "cannot load '%s': asset, renderer and platform must be up", path ? path : "?"); return Handle{}; }
     if (strlen(path) >= sizeof(TextureAsset::path)) { KV_ERROR("asset", "path too long: '%s'", path); return Handle{}; }
 
     // The same path is the same asset.

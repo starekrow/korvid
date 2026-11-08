@@ -138,6 +138,33 @@ void test_mixer(kv::TestCtx& c) {
     m.in.push(play_cmd(KV_AUDIO_VOICES, 1, ramp, 48000, 48000, 1));
     mixer_render(m, out, 16);
 
+    // Retire: every voice on the samples stops and reports, then the acknowledgement comes,
+    // last, with the ticket; voices on other samples play on.
+    mixer_init(m, 48000, 2);
+    drain_done(m);
+    m.in.push(play_cmd(0, 3, ramp, 48000, 48000, 1, 1.0f, true));
+    m.in.push(play_cmd(1, 4, ramp, 48000, 48000, 1, 1.0f, true));
+    m.in.push(play_cmd(2, 5, stereo, 100, 48000, 2, 1.0f, true));
+    mixer_render(m, out, 64);
+    MixCmd rc{};
+    rc.op = MixOp::Retire; rc.samples = ramp; rc.gen = 77; rc.slot = 0xFFFFFFFFu;
+    m.in.push(rc);
+    mixer_render(m, out, 64);
+    u64 d[4]; u32 nd = 0;
+    while (nd < 4 && m.done.pop(d[nd])) ++nd;
+    KV_CHECK(c, nd == 3 && d[0] == (0 | (3ull << 32)) && d[1] == (1 | (4ull << 32)) && d[2] == (KV_MIX_RETIRED | (77ull << 32)));
+    KV_CHECK(c, m.stats.active == 1 && !m.voices[0].active && m.voices[2].active);
+    // A full done ring keeps the acknowledgement and delivers it once there is room.
+    u32 filled = 0;
+    while (m.done.push(1)) ++filled;
+    rc.gen = 78;
+    m.in.push(rc);
+    mixer_render(m, out, 16);
+    KV_CHECK(c, m.ack_count == 1);
+    drain_done(m);
+    mixer_render(m, out, 16);
+    KV_CHECK(c, m.ack_count == 0 && m.done.pop(d[0]) && d[0] == (KV_MIX_RETIRED | (78ull << 32)) && filled > 0);
+
     // The ring under a producer thread: every value arrives, in order, none twice.
     SpscRing<u64, 64> ring;
     Hammer h{&ring, 200000};

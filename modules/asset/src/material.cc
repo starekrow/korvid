@@ -4,6 +4,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/json.h"
 #include "korvid/core/log.h"
+#include "korvid/core/utf8.h"
 #include "korvid/platform/io.h"
 #include "korvid/render/renderer.h"
 #include "asset_internal.h"
@@ -72,16 +73,20 @@ void fail_material(Engine& e, AssetState_& s, Handle h, MaterialAsset& m, AssetE
     e.events.emit(AssetFailed{h, err});
 }
 
-// Points the record's texture at the asset for `path` (loading it) and the row at that
-// asset's renderer texture. Empty path: the default texture.
-void bind_texture(Engine& e, MaterialAsset& m, const char* path) {
-    strncpy(m.texture_path, path ? path : "", sizeof m.texture_path - 1);
+// Points the record's texture at the asset for `path` (loading it, and holding a
+// reference on it in place of the one on the texture before) and the row at that asset's
+// renderer texture. Empty path: the default texture.
+void bind_texture(Engine& e, AssetState_& s, MaterialAsset& m, const char* path) {
+    Handle old = m.texture_asset;
+    utf8_copy(m.texture_path, sizeof m.texture_path, path ? path : "");
     m.texture_asset = Handle{};
     m.desc.texture  = Handle{};
     if (m.texture_path[0]) {
-        m.texture_asset = asset_load_texture(e, m.texture_path);
+        m.texture_asset = texture_load(e, s, m.texture_path);
+        asset_ref(s, m.texture_asset);
         if (const TextureAsset* t = asset_texture(e, m.texture_asset)) m.desc.texture = t->texture;
     }
+    asset_unref(s, old); // after the new one is held: the same path keeps its texture
     renderer_material_set(renderer_get(e), m.material, m.desc);
 }
 
@@ -115,6 +120,7 @@ void asset_materials_pump(TickContext& ctx) {
     Engine& e = *ctx.engine;
     IoQueue* io = platform_io(e);
     if (!io) return;
+    asset_reap_orphans(e, s, s.material_kind);
     for (u32 i = 0; i < io->completions().len;) {
         IoCompletion c = io->completions()[i];
         if (!asset_is_kind(s, c.user, s.material_kind)) { ++i; continue; }
@@ -140,7 +146,7 @@ void asset_materials_pump(TickContext& ctx) {
             continue;
         }
         m->desc = desc;
-        bind_texture(e, *m, texture_path); // sets the row; Ready follows the texture below
+        bind_texture(e, s, *m, texture_path); // sets the row; Ready follows the texture below
     }
     // Parsed and waiting: Ready when the texture is, or at once without one.
     for (u32 i = 0; i < s.materials.len; ++i) {
@@ -158,11 +164,31 @@ void asset_materials_pump(TickContext& ctx) {
     }
 }
 
-Handle asset_load_material(Engine& e, const char* path) {
+Handle asset_load_material(Engine& e, const char* path, Handle scope) {
     AssetState_* s = asset_state(e);
+    if (!s) { KV_ERROR("asset", "cannot load material '%s': the asset module is not up", path ? path : "?"); return Handle{}; }
+    return asset_hold(*s, scope, material_load(e, *s, path));
+}
+
+Handle asset_load_material(Engine& e, const char* path) { return asset_load_material(e, path, asset_scope_global(e)); }
+
+void material_retire(Engine& e, AssetState_& s, Handle h) {
+    MaterialAsset* m = s.materials.get(h);
+    if (!m) return;
+    IoQueue* io = platform_io(e);
+    if (io && !m->io.is_null()) io->cancel(m->io);
+    if (Renderer* r = renderer_get(e)) renderer_material_destroy(r, m->material);
+    asset_unref(s, m->texture_asset);
+    s.material_by_path.remove(name_intern(m->path));
+    KV_INFO("asset", "material '%s' retired", m->path);
+    s.materials.destroy(h);
+}
+
+Handle material_load(Engine& e, AssetState_& st, const char* path) {
+    AssetState_* s = &st;
     Renderer* r = renderer_get(e);
     IoQueue* io = platform_io(e);
-    if (!s || !r || !io || !path) { KV_ERROR("asset", "cannot load material '%s': asset, renderer and platform must be up", path ? path : "?"); return Handle{}; }
+    if (!r || !io || !path) { KV_ERROR("asset", "cannot load material '%s': asset, renderer and platform must be up", path ? path : "?"); return Handle{}; }
     if (strlen(path) >= KV_ASSET_PATH_MAX) { KV_ERROR("asset", "path too long: '%s'", path); return Handle{}; }
 
     Name name = name_intern(path);
@@ -233,7 +259,7 @@ bool asset_material_set_texture(Engine& e, Handle asset, const char* texture_pat
     AssetState_* s = asset_state(e);
     MaterialAsset* m = s ? s->materials.get(asset) : nullptr;
     if (!m || (texture_path && strlen(texture_path) >= KV_ASSET_PATH_MAX)) return false;
-    bind_texture(e, *m, texture_path);
+    bind_texture(e, *s, *m, texture_path);
     return true;
 }
 

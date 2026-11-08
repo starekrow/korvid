@@ -159,11 +159,12 @@ bool sounds_describe(CliContext& ctx, const char* rel) {
 
 } // namespace
 
-const CliMountDesc k_asset_mounts[4] = {
+const CliMountDesc k_asset_mounts[5] = {
     {.path = "/materials", .list = materials_list, .describe = materials_describe, .patch = materials_patch},
     {.path = "/textures",  .list = textures_list,  .describe = textures_describe},
     {.path = "/fonts",     .list = fonts_list,     .describe = fonts_describe},
     {.path = "/sounds",    .list = sounds_list,    .describe = sounds_describe},
+    {.path = "/scopes",    .list = asset_scopes_list, .describe = asset_scopes_describe},
 };
 
 } // namespace kv

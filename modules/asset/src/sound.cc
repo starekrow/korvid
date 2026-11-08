@@ -170,6 +170,7 @@ void asset_sounds_pump(TickContext& ctx) {
     Engine& e = *ctx.engine;
     IoQueue* io = platform_io(e);
     if (!io) return;
+    asset_reap_orphans(e, s, s.sound_kind);
     for (u32 i = 0; i < io->completions().len;) {
         IoCompletion c = io->completions()[i];
         if (!asset_is_kind(s, c.user, s.sound_kind)) { ++i; continue; }
@@ -193,10 +194,29 @@ void asset_sounds_pump(TickContext& ctx) {
     }
 }
 
-Handle asset_load_sound(Engine& e, const char* path) {
+Handle asset_load_sound(Engine& e, const char* path, Handle scope) {
     AssetState_* s = asset_state(e);
+    if (!s) { KV_ERROR("asset", "cannot load sound '%s': the asset module is not up", path ? path : "?"); return Handle{}; }
+    return asset_hold(*s, scope, sound_load(e, *s, path));
+}
+
+Handle asset_load_sound(Engine& e, const char* path) { return asset_load_sound(e, path, asset_scope_global(e)); }
+
+void sound_retire(Engine& e, AssetState_& s, Handle h) {
+    SoundAsset* snd = s.sounds.get(h);
+    if (!snd) return;
     IoQueue* io = platform_io(e);
-    if (!s || !io || !path) { KV_ERROR("asset", "cannot load sound '%s': asset and platform must be up", path ? path : "?"); return Handle{}; }
+    if (io && !snd->io.is_null()) io->cancel(snd->io);
+    asset_bury_samples(s, snd->samples, (usize)snd->frames * snd->channels * sizeof(f32));
+    s.sound_by_path.remove(name_intern(snd->path));
+    KV_INFO("asset", "sound '%s' retired", snd->path);
+    s.sounds.destroy(h); // stale from here; the samples go when the mixer says
+}
+
+Handle sound_load(Engine& e, AssetState_& st, const char* path) {
+    AssetState_* s = &st;
+    IoQueue* io = platform_io(e);
+    if (!io || !path) { KV_ERROR("asset", "cannot load sound '%s': asset and platform must be up", path ? path : "?"); return Handle{}; }
     if (strlen(path) >= KV_ASSET_PATH_MAX) { KV_ERROR("asset", "path too long: '%s'", path); return Handle{}; }
     Name name = name_intern(path);
     if (const Handle* existing = s->sound_by_path.find(name)) return *existing;

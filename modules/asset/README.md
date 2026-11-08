@@ -37,6 +37,38 @@ Priorities: loads go in at `IoPriority::Normal`. The queue admits reads within a
 budget per pump (8 MB by default) so a burst of loads cannot stall a frame; what does
 not fit waits for the next pump or for idle time (see `docs/design/idle.md`).
 
+## Lifetimes
+
+An asset lives while something holds it. The holders are **scopes**
+(`korvid/asset/scope.h`): named sets of references a game creates per level, per menu,
+per whatever it loads and unloads together. Every load takes a scope; the loads without
+one put the asset in the global scope, which is never released, so code that never
+thinks about lifetimes keeps everything for the run, as before.
+
+```cpp
+Handle town = asset_scope_create(e, "town");
+g.grass = asset_load_material(e, "mygame/grass.material.json", town);
+g.theme = asset_load_sound(e, "mygame/town.ogg", town);
+// ... on AssetScopeReady{town}: everything it holds is Ready or Failed
+asset_scope_release(e, town);   // what nobody else holds goes at the next pump
+```
+
+The same path loaded by two scopes is one asset with two references. Assets hold their
+own dependencies: a material holds its texture, so a texture never goes while a material
+draws with it. A count that reaches zero does not retire at once but at the next pump
+(`asset.pump_scopes`, the first thing in PreSim): load the next level's scope **before**
+releasing the last one, and what the two share never leaves memory.
+
+Retiring destroys the renderer's texture and material past the frames in flight, cancels
+a read still in the queue (its completion is reaped and dropped), forgets the path (the
+next load reads the file again) and makes the handle stale: every accessor answers null.
+A sound's samples are the exception to "at once": the audio module may still be mixing
+them on the device thread, so they are handed to it and freed when the mixer says every
+voice on them has stopped.
+
+From the CLI: `ls /scopes`, `print /scopes/<n>-<name>` (members, state, references),
+`scope create <name>`, `scope load <scope> <path>` and `scope release <name>`.
+
 ## Using it
 
 **Declare the dependency.** In your `module.lua`:
@@ -122,7 +154,7 @@ Header `korvid/asset/texture.h`:
 | `TextureAsset` | record | `path`, `state`, `error`, `texture` (render.texture), `io`, `width`, `height` |
 | `AssetReady{asset}` | event | the asset turned Ready; `asset.kind()` says texture or material |
 | `AssetFailed{asset, error}` | event | the asset failed; it keeps its placeholder |
-| `asset_load_texture(e, path)` | function | handle at once; null if the stack is not up or the path is too long |
+| `asset_load_texture(e, path[, scope])` | function | handle at once; null if the stack is not up or the path is too long |
 | `asset_texture(e, h)` | function | the record, or null if stale |
 | `asset_error_name(err)` | function | `"not found"`, `"decode error"`, ... |
 
@@ -131,7 +163,7 @@ Header `korvid/asset/material.h`:
 | name | kind | what |
 |---|---|---|
 | `MaterialAsset` | record | `path`, `state`, `error`, `material` (render.material), `texture_asset`, `io`, `desc`, `texture_path` |
-| `asset_load_material(e, path)` | function | handle at once, row alive |
+| `asset_load_material(e, path[, scope])` | function | handle at once, row alive; holds its texture |
 | `asset_material(e, h)` | function | the record, or null if stale |
 | `asset_material_find(e, path)` | function | the handle a path was loaded as, or null |
 | `asset_material_count(e)`, `asset_material_at(e, slot)`, `asset_material_handle_at(e, slot)` | functions | records by slot, for tools |
@@ -147,7 +179,7 @@ Header `korvid/asset/font.h`:
 | `Glyph` | record | `uv` (atlas), `size` (pixels), `offset` (quad center from the pen, +y up), `advance` |
 | `FontAsset` | record | `path`, `state`, `error`, `texture`, `material` (alpha, white), `px`, `ascent`, `descent`, `line_height`, `atlas_width/height`, `codepoints`/`glyphs` (sorted), `ascii` index, `replacement`, `kern_pairs`/`kern_values` (sorted), `ranges`, `misses` |
 | `FontDesc`, `FontRange`, `font_default_ranges()` | records | `px` and the character set as inclusive code point ranges; the default: ASCII, Latin-1, Latin Extended-A, common punctuation, euro, trade mark, U+FFFD |
-| `asset_load_font(e, path, px)`, `asset_load_font(e, path, desc)` | functions | handle at once; px in [4, 256]; at most `KV_FONT_MAX_GLYPHS` (8192) code points |
+| `asset_load_font(e, path, px)`, `asset_load_font(e, path, desc[, scope])` | functions | handle at once; px in [4, 256]; at most `KV_FONT_MAX_GLYPHS` (8192) code points |
 | `asset_font(e, h)` | function | the record, or null if stale |
 | `font_glyph(font, cp)`, `font_glyph_or_replacement(font, cp)`, `font_kern(font, a, b)`, `font_measure(font, utf8, scale)` | functions | lookups over a Ready font (ASCII direct, the rest by binary search); nothing before |
 | `font_index(font)` | function | fills the ASCII index and U+FFFD from `codepoints`, for a table built by hand |
@@ -157,8 +189,24 @@ Header `korvid/asset/sound.h`:
 | name | kind | what |
 |---|---|---|
 | `SoundAsset` | record | `path`, `state`, `error`, `rate`, `channels`, `frames`, `samples` (interleaved f32); `seconds()` |
-| `asset_load_sound(e, path)`, `asset_sound(e, h)` | functions | handle at once; the record or null |
+| `asset_load_sound(e, path[, scope])`, `asset_sound(e, h)` | functions | handle at once; the record or null |
 | `sound_decode(bytes, size, alloc, out, &error)`, `sound_decode_wav`, `sound_decode_ogg` | functions | the decoders on their own |
+
+Header `korvid/asset/scope.h`:
+
+| name | kind | what |
+|---|---|---|
+| `asset_scope_create(e, name)`, `asset_scope_release(e, scope)`, `asset_scope_global(e)` | functions | an `asset.scope` handle; release drops each member's reference; the global scope is never released |
+| `asset_scope_add(e, scope, asset)` | function | a reference from the scope to an asset already loaded |
+| `asset_scope_progress(e, scope)` -> `AssetScopeProgress` | function, record | `members`, `pending`, `ready`, `failed`, `bytes` |
+| `AssetScopeReady{scope, failed}` | event | every member settled |
+| `asset_scope_name`, `asset_refs(e, asset)`, `asset_lifetime_stats(e)` | functions | for tools: names, counts, `retired`, `samples_out`, `samples_deferred`, `dying`, `scopes` |
+| `asset_samples_retire_hook(e, fn, user)`, `asset_retire_done(e, ticket)` | functions | the audio module's half of retiring a sound |
+| `KV_ASSET_SCOPES`, `KV_ASSET_SCOPE_NAME_MAX` | constants | 256 live scopes, 32-byte names |
+
+Every load function takes a scope as its last argument (`asset_load_texture(e, path, scope)`,
+`asset_load_material`, `asset_load_font(e, path, desc, scope)`, `asset_load_sound`); the
+forms without one use the global scope. Each record has `refs`.
 
 Header `korvid/asset/png.h`:
 
@@ -173,23 +221,29 @@ What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
-| `asset.texture`, `asset.material`, `asset.font`, `asset.sound` | handle kinds | `kv_handle_describe` prints path, state and size, blend, atlas or length |
-| `AssetReady`, `AssetFailed` | event types | no schema: the handle is an asset's, not an entity's, so it is never dropped as stale |
+| `asset.texture`, `asset.material`, `asset.font`, `asset.sound`, `asset.scope` | handle kinds | `kv_handle_describe` prints path, state and size, blend, atlas or length; a scope's name and counts |
+| `AssetReady`, `AssetFailed`, `AssetScopeReady` | event types | no schema: the handle is an asset's, not an entity's, so it is never dropped as stale |
 | `asset.textures`, `asset.materials`, `asset.fonts`, `asset.sounds` | resources | the tables; the pumps write them |
-| `asset.pump` | system, phase PreSim, main thread | writes `asset.textures` |
+| `asset.pump_scopes` | system, phase PreSim, main thread, first | retires what nobody holds, then sends `AssetScopeReady`; writes every table |
+| `asset.pump` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.textures` |
 | `asset.pump_materials` | system, phase PreSim, main thread, after `asset.pump` | reads `asset.textures`, writes `asset.materials` |
 | `asset.pump_fonts` | system, phase PreSim, main thread, after `asset.pump_materials` | writes `asset.fonts` |
-| `asset.pump_sounds` | system, phase PreSim, main thread | writes `asset.sounds` |
-| `/materials` (patchable), `/textures`, `/fonts`, `/sounds` | CLI mounts | the records by path |
+| `asset.pump_sounds` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.sounds` |
+| `/materials` (patchable), `/textures`, `/fonts`, `/sounds`, `/scopes` | CLI mounts | the records by path; scopes by `<slot>-<name>` |
+| `scope create`, `scope load`, `scope release` | CLI commands | lifetimes by hand |
 
 Resources a system of yours might name: none. Reach the records through the functions;
 they read the module's tables, which only the pumps write.
 
 ## Behaviour worth knowing
 
-- **Handles are forever.** Records are never destroyed before shutdown; a path loaded
-  once stays loaded. The renderer's texture and material go with the renderer. Unloading
-  is not here yet; a game with levels will want it (see below).
+- **A released asset's handle goes stale at the next pump.** Keep handles per scope and
+  drop them with it. A sprite still naming a retired material draws with the default
+  look, and the dev build's renderer says so once per material.
+- **Readiness is a tick late.** `AssetScopeReady` comes from the first pump after the
+  last member settled, so a level that waits for it starts one tick after its last file.
+- **A scope still alive at shutdown is logged** by name with its member count, as the
+  leak report does for memory.
 - **The placeholder is visible.** A texture that is not resident draws as the red and
   white checkerboard, tinted by the material. That is on purpose: a missing file shows
   itself. A game that wants a black frame instead waits for its `AssetReady` events.
@@ -208,7 +262,8 @@ they read the module's tables, which only the pumps write.
 
 ## Not in this module
 
-Unloading and reference counting, cooked texture formats and pack files, mipmaps, texture
+Eviction under a memory budget (a scope is released by the game, never by the module),
+cooked texture formats and pack files, mipmaps, texture
 atlases, hot reload of files that changed on disk, formats other than PNG and the
 material JSON, and any asset that is not a texture or a material (meshes, sounds,
 levels). The I/O queue and its budgets are the platform module's; the pixels' home on

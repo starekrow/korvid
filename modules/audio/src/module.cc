@@ -1,4 +1,5 @@
 #include "korvid/audio/module.h"
+#include "korvid/asset/scope.h"
 #include "korvid/asset/sound.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -28,9 +29,14 @@ struct Queued {
     u8     bus;
 };
 
+// Samples the asset module is retiring: sent to the mixer by the extract, freed when it
+// acknowledges.
+struct Retiring { u64 ticket; const f32* samples; bool sent; };
+
 struct AudioCommands {
     VoiceRec        voices[KV_AUDIO_VOICES];
     Array<Queued>   queued;
+    Array<Retiring> retiring;
     pthread_mutex_t mu;
     u32             dropped = 0;
 };
@@ -117,10 +123,27 @@ void audio_extract(TickContext& ctx) {
     u64 done;
     while (s.mixer.done.pop(done)) {
         u32 slot = (u32)(done & 0xFFFFFFFFu), gen = (u32)(done >> 32);
+        if ((done & 0xFFFFFFFFull) == KV_MIX_RETIRED) {
+            for (u32 i = 0; i < s.cmds.retiring.len; ++i) {
+                if ((u32)s.cmds.retiring[i].ticket != gen) continue;
+                asset_retire_done(e, s.cmds.retiring[i].ticket);
+                s.cmds.retiring[i] = s.cmds.retiring[s.cmds.retiring.len - 1];
+                --s.cmds.retiring.len;
+                break;
+            }
+            continue;
+        }
         VoiceRec& v = s.cmds.voices[slot];
         if (!v.used || v.gen != gen) continue;
         ctx.emit(VoiceFinished{Handle::make(s.kind, gen, slot)});
         free_voice(s, slot);
+    }
+
+    for (Retiring& r : s.cmds.retiring) {
+        if (r.sent) continue;
+        MixCmd c{};
+        c.op = MixOp::Retire; c.samples = r.samples; c.gen = (u32)r.ticket; c.slot = 0xFFFFFFFFu;
+        if (s.mixer.in.push(c)) r.sent = true; // else tried again next tick
     }
 
     if (ctx.paused != s.last_paused) {
@@ -172,11 +195,22 @@ void audio_extract(TickContext& ctx) {
     }
 }
 
+// The asset module is about to free a sound's samples: keep them until the mixer has
+// stopped every voice on them. Called on the main thread, from the asset pump.
+bool retire_samples(void* user, u64 ticket, const f32* samples) {
+    AudioState& s = *(AudioState*)user;
+    if (!s.device) return false; // nothing reads samples without a device thread: free now
+    Lock lock(s.cmds.mu);
+    s.cmds.retiring.push(Retiring{ticket, samples, false});
+    return true;
+}
+
 bool audio_startup(Engine& e, ModuleInstance& self) {
     AudioState* s = arena_push<AudioState>(self.arena);
     if (!s) return false;
     pthread_mutex_init(&s->cmds.mu, nullptr);
     s->cmds.queued.alloc = &self.general;
+    s->cmds.retiring.alloc = &self.general;
     kv_handle_kind_desc desc{};
     desc.name = "audio.voice"; desc.type_key = type_key<VoiceRec>(); desc.ctx = &s->cmds;
     desc.resolve = voice_resolve; desc.describe = voice_describe; desc.flags = KV_HANDLE_GENERATIONAL;
@@ -191,6 +225,7 @@ bool audio_startup(Engine& e, ModuleInstance& self) {
     mixer_init(s->mixer, dd.rate, dd.channels);
     s->device = platform_audio_open(e, dd);
     if (!s->device) KV_WARN("audio", "no device: running silent, voices finish at once");
+    asset_samples_retire_hook(e, retire_samples, s);
     return true;
 }
 
@@ -198,6 +233,9 @@ void audio_shutdown(Engine& e, ModuleInstance& self) {
     AudioState* s = self.state_as<AudioState>();
     if (!s) return;
     platform_audio_close(e); // the callbacks have stopped when this returns
+    asset_samples_retire_hook(e, nullptr, nullptr);
+    for (const Retiring& r : s->cmds.retiring) asset_retire_done(e, r.ticket); // nothing reads them now
+    s->cmds.retiring.free();
     KV_INFO("audio", "%llu frames rendered in %llu callbacks, peak %u voices, %u clipped samples, %u commands dropped",
             (unsigned long long)s->mixer.stats.frames_rendered, (unsigned long long)s->mixer.stats.callbacks,
             s->mixer.stats.peak_active, s->mixer.stats.clipped, s->cmds.dropped);

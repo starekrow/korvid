@@ -5,7 +5,8 @@
 // decode and upload happen in "asset.pump" (phase PreSim, main thread), and completion is
 // an AssetReady or AssetFailed event at the next phase boundary. Paths are relative to
 // <exe dir>/assets/ (kormake copies a module's assets/ there under the module's name).
-// Loading a path twice returns the same handle; the record lives until module shutdown.
+// Loading a path twice returns the same handle; the record lives while a scope or another
+// asset holds it (korvid/asset/scope.h), and the scope-less load holds it for the run.
 #pragma once
 #include "korvid/core/handle.h"
 
@@ -33,6 +34,7 @@ struct TextureAsset {
     Handle     texture;            // the renderer's texture handle: valid from load on, the placeholder until Ready
     Handle     io;                 // the pending read's request handle while Pending; null otherwise
     u32        width = 0, height = 0; // the image's size once Ready; 0 before
+    u32        refs = 0;           // scopes and assets holding it; at 0 it is retired at the next pump
 };
 
 // Events, declared by the asset module and emitted by the pumps. `asset` is the handle
@@ -45,7 +47,9 @@ struct AssetFailed { Handle asset; AssetError error; };
 // Starts loading <exe dir>/assets/<path> as a PNG (8-bit samples, any color type, no
 // interlace). Returns the asset handle at once, or null if the renderer, the platform or
 // the module is not up, the path is too long (127 characters), or the tables are full.
-// The same path returns the same handle; a second call never starts a second read.
+// The same path returns the same handle; a second call never starts a second read. The
+// scope (asset.scope) takes a reference; without one, the global scope does.
+Handle              asset_load_texture(Engine& e, const char* path, Handle scope);
 Handle              asset_load_texture(Engine& e, const char* path);
 // The record for a handle, or null if the handle is stale or not a texture asset.
 const TextureAsset* asset_texture(Engine& e, Handle asset);

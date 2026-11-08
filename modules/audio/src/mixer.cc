@@ -48,6 +48,17 @@ void apply(Mixer& m, const MixCmd& c) {
     case MixOp::Bus:
         if (c.bus < (u32)AudioBus::Count) m.bus_gain[c.bus] = c.volume;
         break;
+    case MixOp::Retire: {
+        for (u32 i = 0; i < KV_AUDIO_VOICES; ++i) {
+            MixVoice& v = m.voices[i];
+            if (!v.active || v.samples != c.samples) continue;
+            v.active = false;
+            m.done.push((u64)i | ((u64)v.gen << 32));
+        }
+        u64 ack = KV_MIX_RETIRED | ((u64)c.gen << 32);
+        if (!m.done.push(ack) && m.ack_count < KV_COUNTOF(m.acks)) m.acks[m.ack_count++] = ack;
+        break;
+    }
     }
 }
 
@@ -90,6 +101,10 @@ void mix_voice(Mixer& m, MixVoice& v, f32* out, u32 frames) {
 } // namespace
 
 void mixer_render(Mixer& m, f32* out, u32 frames) {
+    while (m.ack_count && m.done.push(m.acks[0])) { // oldest first; the ring has room again
+        for (u32 i = 1; i < m.ack_count; ++i) m.acks[i - 1] = m.acks[i];
+        --m.ack_count;
+    }
     MixCmd c;
     while (m.in.pop(c)) apply(m, c);
     memset(out, 0, (usize)frames * m.out_channels * sizeof(f32));

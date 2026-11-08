@@ -31,11 +31,14 @@ struct MaterialAsset {
     Handle       io;            // the pending read's request handle while reading; null otherwise
     MaterialDesc desc;          // what the renderer row holds now (texture is the renderer's handle)
     char         texture_path[KV_ASSET_PATH_MAX]; // the file's "texture", or empty for the default
+    u32          refs = 0;      // scopes and assets holding it; it holds its texture_asset
 };
 
 // Starts loading <exe dir>/assets/<path> as a material file. Returns the asset handle at
 // once, or null under the same conditions as asset_load_texture. The same path returns
-// the same handle.
+// the same handle. The scope takes a reference (the global scope without one); the
+// material takes one on its texture, which therefore lives at least as long.
+Handle               asset_load_material(Engine& e, const char* path, Handle scope);
 Handle               asset_load_material(Engine& e, const char* path);
 // The record for a handle, or null if the handle is stale or not a material asset.
 const MaterialAsset* asset_material(Engine& e, Handle asset);

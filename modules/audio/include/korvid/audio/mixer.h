@@ -39,7 +39,11 @@ struct SpscRing {
     }
 };
 
-enum class MixOp : u8 { Play, Set, Stop, PauseSim, ResumeSim, Bus };
+// Retire: stop every voice reading `samples`, then acknowledge with KV_MIX_RETIRED | ticket
+// on the done ring, after which nothing on the device thread reads them.
+enum class MixOp : u8 { Play, Set, Stop, PauseSim, ResumeSim, Bus, Retire };
+
+constexpr u64 KV_MIX_RETIRED = 0xFFFFFFFFull; // a done entry's slot half meaning "retired", the ticket in gen
 
 // What crosses to the device thread. A voice is a slot and a generation, so a command
 // for a voice that already finished and whose slot was reused is ignored.
@@ -48,7 +52,7 @@ struct MixCmd {
     u8         bus;
     u32        slot;
     u32        gen;
-    const f32* samples;  // Play: the sound's frames, owned by the asset module until shutdown
+    const f32* samples;  // Play: the sound's frames; Retire: the frames to let go of (gen is the ticket)
     u32        frames, rate, channels;
     f32        volume, pitch, pan;
     bool       loop, pause_with_sim;
@@ -79,7 +83,9 @@ struct Mixer {
     u32        out_rate = 48000, out_channels = 2;
     MixerStats stats;        // written by the device thread; read as a snapshot
     SpscRing<MixCmd, KV_AUDIO_CMD_RING> in;   // game -> device
-    SpscRing<u64, KV_AUDIO_VOICES * 4>  done; // device -> game: slot | gen << 32
+    SpscRing<u64, KV_AUDIO_VOICES * 4>  done; // device -> game: slot | gen << 32, or KV_MIX_RETIRED | ticket << 32
+    u64        acks[16];     // retire acknowledgements the done ring had no room for, retried each render
+    u32        ack_count = 0;
 };
 
 void mixer_init(Mixer& m, u32 out_rate, u32 out_channels);

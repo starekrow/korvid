@@ -2,9 +2,10 @@
 // at once; the file reads through the I/O queue and "asset.pump_sounds" (phase PreSim,
 // main thread) decodes it, WAV (PCM 8, 16, 24 and 32-bit integer and 32-bit float, any
 // channel count) with our own reader or Ogg Vorbis with stb_vorbis, into interleaved f32
-// samples at the file's own rate; AssetReady follows. The samples live until shutdown,
-// so the mixer's thread may read them without a lock once the record is Ready; a voice
-// started before that waits for it. Nothing resamples at load: the mixer reads at the
+// samples at the file's own rate; AssetReady follows. The samples outlive the record:
+// when the last scope lets go, the handle goes stale at once but the samples are freed
+// only after the audio module says the mixer has stopped every voice reading them, so
+// the mixer's thread reads them without a lock. A voice started before Ready waits. Nothing resamples at load: the mixer reads at the
 // ratio of the file's rate to the device's.
 #pragma once
 #include "korvid/asset/texture.h"
@@ -21,9 +22,12 @@ struct SoundAsset {
     u32        channels = 0;                 // 1 or 2 are what the mixer pans; more are summed
     u32        frames   = 0;
     f32*       samples  = nullptr;           // frames * channels, interleaved, [-1, 1]
+    u32        refs     = 0;                 // scopes holding it
     f64        seconds() const { return rate ? (f64)frames / (f64)rate : 0.0; }
 };
 
+// The scope takes a reference; without one, the global scope does.
+Handle            asset_load_sound(Engine& e, const char* path, Handle scope);
 Handle            asset_load_sound(Engine& e, const char* path);
 const SoundAsset* asset_sound(Engine& e, Handle asset);
 

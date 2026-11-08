@@ -237,6 +237,7 @@ void asset_fonts_pump(TickContext& ctx) {
     Engine& e = *ctx.engine;
     IoQueue* io = platform_io(e);
     if (!io) return;
+    asset_reap_orphans(e, s, s.font_kind);
     for (u32 i = 0; i < io->completions().len;) {
         IoCompletion c = io->completions()[i];
         if (!asset_is_kind(s, c.user, s.font_kind)) { ++i; continue; }
@@ -269,12 +270,34 @@ Handle asset_load_font(Engine& e, const char* path, f32 px) {
     return asset_load_font(e, path, d);
 }
 
-Handle asset_load_font(Engine& e, const char* path, const FontDesc& desc) {
+Handle asset_load_font(Engine& e, const char* path, const FontDesc& desc) { return asset_load_font(e, path, desc, asset_scope_global(e)); }
+
+Handle asset_load_font(Engine& e, const char* path, const FontDesc& desc, Handle scope) {
     AssetState_* s = asset_state(e);
+    if (!s) { KV_ERROR("asset", "cannot load font '%s': the asset module is not up", path ? path : "?"); return Handle{}; }
+    return asset_hold(*s, scope, font_load(e, *s, path, desc));
+}
+
+void font_retire(Engine& e, AssetState_& s, Handle h) {
+    FontAsset* f = s.fonts.get(h);
+    if (!f) return;
+    IoQueue* io = platform_io(e);
+    if (io && !f->io.is_null()) io->cancel(f->io);
+    if (Renderer* r = renderer_get(e)) { renderer_material_destroy(r, f->material); renderer_texture_destroy(r, f->texture); }
+    free_tables(s, *f);
+    free_in(s.general, f->ranges, sizeof(FontRange) * f->range_count);
+    for (u32 i = 0; i < s.font_by_key.len(); ++i)
+        if (s.font_by_key.values[i] == h) { s.font_by_key.remove(s.font_by_key.keys[i]); break; }
+    KV_INFO("asset", "font '%s' %gpx retired", f->path, f->px);
+    s.fonts.destroy(h);
+}
+
+Handle font_load(Engine& e, AssetState_& st, const char* path, const FontDesc& desc) {
+    AssetState_* s = &st;
     Renderer* r = renderer_get(e);
     IoQueue* io = platform_io(e);
     f32 px = desc.px;
-    if (!s || !r || !io || !path) { KV_ERROR("asset", "cannot load font '%s': asset, renderer and platform must be up", path ? path : "?"); return Handle{}; }
+    if (!r || !io || !path) { KV_ERROR("asset", "cannot load font '%s': asset, renderer and platform must be up", path ? path : "?"); return Handle{}; }
     if (strlen(path) >= KV_ASSET_PATH_MAX) { KV_ERROR("asset", "path too long: '%s'", path); return Handle{}; }
     if (!(px >= 4.0f && px <= 256.0f)) { KV_ERROR("asset", "font '%s': size %g is outside [4, 256]", path, px); return Handle{}; }
 
