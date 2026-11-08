@@ -38,6 +38,7 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
     // Systems reach these under their declared access; the accessors below are for code
     // outside the schedule (the frame loop, startup).
     if (!engine_publish(engine, self, "input.state", &s->input) ||
+        !engine_publish(engine, self, "input.actions", &s->actions) ||
         !engine_publish(engine, self, ".window", &s->window)) return false;
     if (!s->io.init(&self.general, 4096)) return false;
     // The executable's assets/ directory is the first mount, when there is one; the frame
@@ -72,7 +73,9 @@ void platform_shutdown(Engine& e, ModuleInstance& self) {
 
 // Phase Input: sample the raw key state once per tick for the simulation.
 void input_sample(TickContext& ctx) {
-    ctx.state_as<PlatformState>().input.sample();
+    PlatformState& s = ctx.state_as<PlatformState>();
+    s.input.sample();
+    input_actions_sample(s.actions, s.input.sampled);
 }
 
 constinit const EventTypeDesc k_events[] = {
@@ -90,9 +93,9 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT(PadButtonDown),
     KV_EVENT(PadButtonUp),
 };
-constinit const ResourceDesc k_resources[] = {{"input.state"}, {".window"}};
+constinit const ResourceDesc k_resources[] = {{"input.state"}, {"input.actions"}, {".window"}};
 constinit const SystemDesc   k_systems[] = {
-    {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = "input.state", .runs = RunWhen::Always},
+    {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = "input.state, input.actions", .runs = RunWhen::Always},
 };
 
 } // namespace

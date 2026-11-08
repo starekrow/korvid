@@ -7,6 +7,7 @@
 // The module registers one idle task, "platform.io", which serves the I/O queue's idle
 // reads and whatever the frame's pumps held back under their byte budget.
 #pragma once
+#include "korvid/platform/actions.h"
 #include "korvid/core/module.h"
 #include "korvid/platform/host_window.h"
 #include "korvid/platform/input.h"
@@ -24,6 +25,7 @@ struct PlatformState {
     Input       input;     // raw at frame rate, sampled per tick
     HostWindow  window;    // one window per process; closed at module shutdown
     IoQueue     io;        // the process's read queue, pumped by platform_pump
+    InputActions actions;  // what the game named, from the sampled input each tick
     const char* base_path = nullptr; // the executable's directory, trailing separator; SDL's
     char*       pref_path = nullptr; // the per-user directory once asked for; SDL's, freed at shutdown
 };

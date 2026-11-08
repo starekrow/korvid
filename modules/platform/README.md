@@ -154,6 +154,17 @@ pack. A tool mounts nothing.
 `io_list_files(dir, fn, user)` walks a directory (sorted, hidden entries skipped) and
 `io_make_dirs(path)` is `mkdir -p`; both are synchronous, for tools and startup.
 
+**Actions.** Games bind what the player can do to devices as data and ask about actions,
+never keys (`korvid/platform/actions.h`): `input_actions(e, {{"move", ActionKind::Axis2,
+"keys W S A D, stick left, dpad"}, {"confirm", ActionKind::Button, "key Enter, pad South"}})`
+at startup; a system that reads the resource `input.actions` asks `action_pressed`,
+`action_down`, `action_released`, `action_axis` (+y up, clamped to the unit circle, a stick
+rescaled past its 0.2 dead zone, the strongest binding winning) and `action_repeat(a, id,
+delay, interval)` in ticks for menus. They are computed in `input.sample` from the sampled
+input on every tick, paused or not, so they are as deterministic as the input. A demo
+drives them with `input_action_override(e, name, down, axis)`, which replaces the devices
+for one sample.
+
 Header `korvid/platform/audio.h`:
 
 | name | kind | what |
@@ -193,6 +204,8 @@ Header `korvid/platform/module.h`:
 | `PlatformState` | record | `input`, `window`, `io`, `base_path`: the module's state, for code outside the schedule |
 | `platform_open_window(engine, desc)`, `platform_window(engine)` | functions | the one window; null if open already or refused |
 | `platform_video_up(engine)` | function | SDL video and gamepads, once; false without a video driver |
+| `InputActionDesc`, `ActionKind`, `InputActions`, `input_actions(e, descs)`, `input_actions_get(e)`, `input_action_override` | records, functions | the action map (`actions.h`) |
+| `action_down`, `action_pressed`, `action_released`, `action_axis`, `action_repeat` | functions | queries by id (`InputActions::find(name)`) |
 | `platform_input(engine)` | function | the input, for code outside the schedule |
 | `platform_pump(engine)` | function | once per frame: OS events to the bus, raw input, the I/O queue's pump |
 
@@ -202,7 +215,8 @@ What the module registers with the engine:
 |---|---|---|
 | `WindowResized`, `FocusChanged`, `CloseRequested`, `KeyDown`, `KeyUp`, `MouseMoved`, `MouseButtonDown`, `MouseButtonUp`, `MouseWheel`, `GamepadConnected`, `GamepadDisconnected`, `PadButtonDown`, `PadButtonUp` | event types | no schemas; none carries an entity |
 | `input.state`, `platform.window` | resources, published | `Input` and `HostWindow`; read them through `ctx.resource<const T>` |
-| `input.sample` | system, phase Input, `Always` | writes `input.state`: raw becomes sampled, on paused ticks too |
+| `input.sample` | system, phase Input, `Always` | writes `input.state` and `input.actions`: raw becomes sampled and the actions follow, on paused ticks too |
+| `input.actions` | resource | the action map and its state this tick |
 | `platform.io` | handle kind | an I/O request; `kv_handle_describe` prints its state and path |
 | `platform.io` | idle task | serves idle reads and what the pumps held back |
 
