@@ -60,7 +60,7 @@ void test_sprite_world(kv::TestCtx& c) {
     char text[256];
     kv_handle_describe(f.bits, text, sizeof text);
     KV_CHECK(c, strcmp(text, "sprite.entity#2:1 Transform2{position=(3, 4), rotation=0, scale=(1, 1)} "
-                             "Sprite{material=null, uv=(0, 0, 1, 1), size=(64, 64), tint=(1, 1, 1, 1), layer=4}") == 0);
+                             "Sprite{material=null, uv=(0, 0, 1, 1), size=(64, 64), tint=(1, 1, 1, 1), layer=4, space=0}") == 0);
     w.destroy(f);
     kv_handle_describe(f.bits, text, sizeof text);
     KV_CHECK(c, strstr(text, "stale") != nullptr && resolve(f) == nullptr);

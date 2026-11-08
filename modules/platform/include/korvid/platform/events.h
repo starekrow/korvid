@@ -12,6 +12,11 @@ struct CloseRequested { u8 unused; };
 struct KeyDown { Key key; u8 device; bool repeat; };
 struct KeyUp   { Key key; u8 device; };
 
+struct MouseMoved      { f32 x, y, dx, dy; };     // framebuffer pixels, origin top-left
+struct MouseButtonDown { MouseButton button; f32 x, y; };
+struct MouseButtonUp   { MouseButton button; f32 x, y; };
+struct MouseWheel      { f32 dx, dy; };           // dy positive away from the user
+
 struct GamepadConnected    { u8 pad; };           // index into InputState::pads
 struct GamepadDisconnected { u8 pad; };
 struct PadButtonDown { PadButton button; u8 pad; };

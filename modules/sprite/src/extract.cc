@@ -60,6 +60,7 @@ void extract_sprites(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
             d.state.size      = spr[i].size;
             d.state.tint      = spr[i].tint;
             d.state.layer     = spr[i].layer;
+            d.state.space     = spr[i].space;
             out.push(d);
             et.sent[i]         = d.entity;
             et.sent_sprites[i] = spr[i];

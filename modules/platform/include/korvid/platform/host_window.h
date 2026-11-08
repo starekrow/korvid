@@ -46,6 +46,8 @@ struct HostWindow {
 
     // Translates OS events into bus events and updates input.raw. Call once per frame.
     void pump(EventBus& bus, Input& input);
+    // Framebuffer pixels per window unit: what pointer coordinates are scaled by.
+    f32  pixel_scale() const;
 
     // For WindowSurface::Software only: fills the window with a flat color. Wayland maps a
     // window only after a buffer is attached to its surface, so a window nobody draws to

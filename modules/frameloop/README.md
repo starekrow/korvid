@@ -104,7 +104,7 @@ What the module registers with the engine:
 | name | kind | notes |
 |---|---|---|
 | `ExitRequested` | event type | no schema |
-| `frameloop.exit` | system, phase PreSim | reads `input.state`; one event per reason per tick |
+| `frameloop.exit` | system, phase PreSim, `Always` | reads `input.state`; one event per reason per tick, paused or not |
 
 Depends on: core, platform, math, render, sprite, cli. A game that depends on frameloop
 has all of them.
@@ -121,9 +121,12 @@ has all of them.
 - **Mouse resizing stalls on GNOME Wayland** for the whole drag (libdecor repaints the
   frame per configure). Keyboard resizes and `--borderless` are fine. `host_window.h` has
   the diagnosis.
-- **The view is pixels.** World unit = pixel, origin at the window's center, +y up. A
-  game that wants a camera scales and offsets its transforms, until the render view
-  becomes a published resource.
+- **The view is the camera's.** The loop reads `sprite.camera` at render rate and builds
+  the world view from it: the window's pixel size over the zoom, centered and rotated.
+  The default camera is one world unit per pixel with the origin at the window's center,
+  +y up. Screen-space sprites ignore it.
+- **Pause is the engine's.** `engine_pause` (or the CLI's `pause`) holds the sim; the
+  loop keeps running paused ticks, so input, the extract and the CLI stay alive.
 - **`--run-seconds` is cooperative.** It emits `ExitRequested{Timer}` once; a game that
   ignores it runs on.
 - **Everything mechanical is logged once**: the schedule at init, the device and the
@@ -132,6 +135,5 @@ has all of them.
 
 ## Not in this module
 
-A camera or a view the game controls, pause and time scale, fixed-size render targets
-and letterboxing, more than one window, a main menu, save and load, and any input
-mapping. The game owns those on top of what the loop provides.
+Fixed-size render targets and letterboxing, more than one window, a main menu, save and
+load, and any input mapping. The game owns those on top of what the loop provides.

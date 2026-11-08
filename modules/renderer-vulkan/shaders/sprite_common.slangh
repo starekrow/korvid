@@ -9,8 +9,9 @@ static const uint kBucketCount = 768;  // 256 layers x 3 blend modes
 static const uint kLayerMin    = 128;  // added to the clamped layer
 static const uint kBlockRows   = 1024; // sprite rows per compute block
 static const uint kGroup       = 256;  // threads per workgroup; kBucketCount == 3 * kGroup
-static const uint kCulled      = 0xFFFFFFFFu;
-static const uint kSpriteAlive = 1;
+static const uint kCulled       = 0xFFFFFFFFu;
+static const uint kSpriteAlive  = 1;
+static const uint kSpriteScreen = 2; // placed through the screen view, not the camera
 
 struct GpuSprite {
     float4 prev;    // position x, y, rotation, scale x, at the start of the stamped tick
@@ -35,13 +36,16 @@ struct GpuMaterial {
 };
 
 struct PushData {
-    float4 view;       // ortho affine2 a, b, c, d
-    float2 view_trans; // ortho tx, ty
-    float  alpha;      // interpolation point for rows stamped with `tick`
+    float4 view;         // world to clip: affine2 a, b, c, d
+    float2 view_trans;   // tx, ty
+    float  alpha;        // interpolation point for rows stamped with `tick`
     uint   tick;
-    float4 cull;       // the view rect in world units: x, y, w, h
-    uint   row_count;  // sprite rows the compute passes look at
-    uint   pad0, pad1, pad2;
+    float4 cull;         // world rows: the view's bounding rect in world units, x, y, w, h
+    float4 screen;       // screen pixels (center origin, +y up) to clip
+    float2 screen_trans;
+    uint   row_count;    // sprite rows the compute passes look at
+    uint   pad0;
+    float4 screen_cull;  // screen rows: the window rect in pixels
 };
 
 [[vk::push_constant]] ConstantBuffer<PushData> gPush;
@@ -62,3 +66,11 @@ float2 apply_affine(float4 m, float2 t, float2 p) {
     return float2(m.x * p.x + m.z * p.y + t.x,
                   m.y * p.x + m.w * p.y + t.y);
 }
+
+// A row's point to clip space, through the view its space says.
+float2 row_to_clip(GpuSprite s, float2 p) {
+    return (s.flags & kSpriteScreen) != 0 ? apply_affine(gPush.screen, gPush.screen_trans, p)
+                                          : apply_affine(gPush.view, gPush.view_trans, p);
+}
+// The rect a row is culled against.
+float4 row_cull(GpuSprite s) { return (s.flags & kSpriteScreen) != 0 ? gPush.screen_cull : gPush.cull; }

@@ -30,6 +30,9 @@ static const char* const g_pad_axis_names[(u32)PadAxis::Count] = {
     "LeftX", "LeftY", "RightX", "RightY", "LeftTrigger", "RightTrigger",
 };
 
+static const char* const g_mouse_button_names[(u32)MouseButton::Count] = {"Left", "Middle", "Right", "X1", "X2"};
+const char* mouse_button_name(MouseButton b) { return (u32)b < (u32)MouseButton::Count ? g_mouse_button_names[(u32)b] : "Invalid"; }
+
 const char* pad_button_name(PadButton b) { return (u32)b < (u32)PadButton::Count ? g_pad_button_names[(u32)b] : "Invalid"; }
 const char* pad_axis_name(PadAxis a) { return (u32)a < (u32)PadAxis::Count ? g_pad_axis_names[(u32)a] : "Invalid"; }
 

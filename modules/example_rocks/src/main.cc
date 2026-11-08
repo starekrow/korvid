@@ -12,6 +12,7 @@ constinit const kv::FrameLoopConfig k_config = {
     .title  = "korvid rocks",
     .width  = 1280,
     .height = 720,
+    .exit_on_escape = false, // Escape pauses; Q quits
     .flags  = k_flags,
     .engine = {.heaps = k_heaps, .module_heaps = k_module_heaps},
 };

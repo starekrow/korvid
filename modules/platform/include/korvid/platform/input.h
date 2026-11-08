@@ -36,8 +36,28 @@ enum class PadAxis : u8 { LeftX, LeftY, RightX, RightY, LeftTrigger, RightTrigge
 const char* pad_button_name(PadButton b);
 const char* pad_axis_name(PadAxis a);
 
+// Mouse buttons, as bits of MouseState::buttons.
+enum class MouseButton : u8 { Left, Middle, Right, X1, X2, Count };
+const char* mouse_button_name(MouseButton b);
+
 constexpr u32 KV_MAX_GAMEPADS   = 4;
 constexpr f32 KV_PAD_DEAD_ZONE  = 0.15f; // stick axes inside it read 0
+
+// The pointer, in framebuffer pixels with the origin at the window's top-left (what the OS
+// reports). Screen-space sprites use the window's center with +y up; mouse_screen converts.
+// `wheel` accumulates the scroll since the last sample (positive away from the user).
+struct MouseState {
+    f32 x = 0.0f, y = 0.0f;
+    f32 wheel = 0.0f;
+    u8  buttons = 0;
+    bool down(MouseButton b) const { return (buttons >> (u32)b) & 1u; }
+    void set(MouseButton b, bool on) { u8 m = (u8)(1u << (u32)b); if (on) buttons |= m; else buttons &= (u8)~m; }
+};
+// Window pixels (origin top-left, +y down) to screen space (origin at the center, +y up).
+inline void mouse_screen(f32 x, f32 y, u32 width, u32 height, f32* sx, f32* sy) {
+    *sx = x - (f32)width * 0.5f;
+    *sy = (f32)height * 0.5f - y;
+}
 
 // One pad. Sticks are in [-1, 1] with +y down as SDL reports it, triggers in [0, 1].
 struct GamepadState {
@@ -56,6 +76,7 @@ struct GamepadState {
 struct InputState {
     u64          bits[((u32)Key::Count + 63) / 64] = {};
     GamepadState pads[KV_MAX_GAMEPADS];
+    MouseState   mouse;
 
     bool down(Key k) const {
         u32 i = (u32)k;
@@ -66,10 +87,13 @@ struct InputState {
         u64 m = (u64)1 << (i & 63);
         if (on) bits[i >> 6] |= m; else bits[i >> 6] &= ~m;
     }
-    // Releases every key and pad button, zeroes the axes; pads stay connected.
+    // Releases every key, pad and mouse button, zeroes the axes; pads stay connected and
+    // the pointer stays where it was.
     void clear() {
         for (u64& b : bits) b = 0;
         for (GamepadState& p : pads) { p.buttons = 0; for (f32& a : p.axes) a = 0.0f; }
+        mouse.buttons = 0;
+        mouse.wheel   = 0.0f;
     }
     // The first connected pad, or null.
     const GamepadState* pad() const {
@@ -84,7 +108,8 @@ struct Input {
     InputState raw;
     InputState sampled;
 
-    void sample() { sampled = raw; }
+    // The wheel is a delta: the tick that samples it takes it.
+    void sample() { sampled = raw; raw.mouse.wheel = 0.0f; }
 };
 
 // Scancode mapping lives in the SDL3 source file; both directions, for tests and tooling.

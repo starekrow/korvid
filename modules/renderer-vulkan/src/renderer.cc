@@ -321,7 +321,7 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
             s->gpu.tint[0] = st.tint.r; s->gpu.tint[1] = st.tint.g; s->gpu.tint[2] = st.tint.b; s->gpu.tint[3] = st.tint.a;
             s->gpu.material = material;
             s->gpu.layer    = st.layer;
-            s->gpu.flags    = kSpriteAlive;
+            s->gpu.flags    = kSpriteAlive | (st.space == SpriteSpace::Screen ? kSpriteScreen : 0);
             mark_sprite_dirty(r, slot);
             break;
         }

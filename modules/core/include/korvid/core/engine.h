@@ -131,8 +131,16 @@ struct Engine {
 bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineConfig& config = EngineConfig{});
 void engine_shutdown(Engine& e);
 
-// Advances the clock by frame_dt and runs the resulting ticks. Returns the tick count.
+// Advances the clock by frame_dt and runs the resulting ticks, paused or not as the clock
+// says. Returns the tick count, paused ticks included.
 u32  engine_frame(Engine& e, f64 frame_dt);
+// Sim control, from anywhere on the main thread (a system, a CLI command, the loop); a
+// change applies from the next tick. Pause holds the sim: paused ticks run only the
+// RunWhen::Always systems and the handlers. Step lets n sim ticks through a pause (and
+// pauses first if the clock was running). Rate scales time while unpaused; <= 0 is refused.
+void engine_pause(Engine& e, bool paused);
+void engine_step(Engine& e, u32 n);
+bool engine_rate(Engine& e, f64 rate);
 // Applies and clears every command buffer, the engine's own first and then each unit's
 // in unit order: the tick runner calls it after every phase and every handler wave.
 void engine_apply_commands(Engine& e);

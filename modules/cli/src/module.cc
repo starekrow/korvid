@@ -180,9 +180,40 @@ void cli_quit(CliContext& ctx, Span<const char* const>) {
     engine_request_quit(*ctx.engine);
 }
 
+// Sim control. The change applies from the next tick; the commands run inside a tick.
+void cli_pause(CliContext& ctx, Span<const char* const>) {
+    engine_pause(*ctx.engine, true);
+    ctx.print("paused at tick %llu", (unsigned long long)ctx.engine->clock.tick_count);
+}
+
+void cli_resume(CliContext& ctx, Span<const char* const>) {
+    engine_pause(*ctx.engine, false);
+    ctx.engine->clock.step_ticks = 0;
+    ctx.print("running from tick %llu", (unsigned long long)ctx.engine->clock.tick_count);
+}
+
+void cli_step(CliContext& ctx, Span<const char* const> args) {
+    u32 n = 1;
+    if (args.len && !cli_arg_u32(ctx, args[0], "ticks", &n)) return;
+    engine_step(*ctx.engine, n);
+    ctx.print("stepping %u tick%s from %llu", n, n == 1 ? "" : "s", (unsigned long long)ctx.engine->clock.tick_count);
+}
+
+void cli_rate(CliContext& ctx, Span<const char* const> args) {
+    if (!args.len) { ctx.print("rate %.3f%s", ctx.engine->clock.rate, ctx.engine->clock.paused ? " (paused)" : ""); return; }
+    f32 r = 0.0f;
+    if (!cli_arg_f32(ctx, args[0], "rate", &r)) return;
+    if (!engine_rate(*ctx.engine, (f64)r)) { ctx.fail("rate must be positive; use pause"); return; }
+    ctx.print("rate %.3f", (f64)r);
+}
+
 constinit const CliCommandDesc k_commands[] = {
-    {.name = "help", .help = "list the commands", .fn = cli_help},
-    {.name = "quit", .help = "ask the engine to quit", .fn = cli_quit},
+    {.name = "help",   .help = "list the commands", .fn = cli_help},
+    {.name = "quit",   .help = "ask the engine to quit", .fn = cli_quit},
+    {.name = "pause",  .help = "hold the sim; menus, input and the extract keep running", .fn = cli_pause},
+    {.name = "resume", .help = "let the sim run again", .fn = cli_resume},
+    {.name = "step",   .help = "[N] let N sim ticks (1) through the pause", .fn = cli_step},
+    {.name = "rate",   .help = "[X] show or set the time scale while unpaused", .fn = cli_rate},
 };
 
 // ---- the module ------------------------------------------------------------------------------------
@@ -267,7 +298,7 @@ void cli_pump(TickContext& ctx) {
 }
 
 constinit const SystemDesc k_systems[] = {
-    {.name = "cli.pump", .phase = Phase::Input, .fn = cli_pump, .main_thread = true},
+    {.name = "cli.pump", .phase = Phase::Input, .fn = cli_pump, .main_thread = true, .runs = RunWhen::Always},
 };
 
 } // namespace

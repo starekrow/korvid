@@ -204,7 +204,20 @@ reached with `ctx.resource<const Input>(...)`. `move` and `wrap` both write
 
 `.main_thread = true` pins a system to the thread driving the engine, for code that talks
 to the OS, the GPU or a module's own pools (the asset pumps, the CLI). `.state = StateUse::None`
-lets a system run beside its module's others.
+lets a system run beside its module's others. `.runs = RunWhen::Always` makes a system run
+on paused ticks too (see below); the default, `Unpaused`, is right for gameplay.
+
+### Pause
+
+`engine_pause(e, true)` holds the simulation. The clock keeps producing ticks at its rate,
+but they are *paused ticks*: the sim tick (`ctx.tick`, `Engine::clock.tick_count`) does
+not advance, the timer wheel does not fire, triggers are not evaluated, and only systems
+declared `RunWhen::Always` run. Handlers always run, since events can only come from
+systems that ran. `ctx.paused` says which kind of tick a system is in. `engine_step(e, n)`
+lets `n` sim ticks through a pause; `engine_rate(e, x)` scales time while unpaused. The
+CLI has `pause`, `resume`, `step [N]` and `rate [X]`. The engine's own systems (input
+sampling, the asset pumps, the sprite extract, the frame loop's exit, the CLI) are
+`Always`, so a paused game still takes input, loads, draws and answers.
 
 ### Handlers
 

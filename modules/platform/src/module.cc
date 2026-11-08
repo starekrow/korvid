@@ -58,6 +58,10 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT(CloseRequested),
     KV_EVENT(KeyDown),
     KV_EVENT(KeyUp),
+    KV_EVENT(MouseMoved),
+    KV_EVENT(MouseButtonDown),
+    KV_EVENT(MouseButtonUp),
+    KV_EVENT(MouseWheel),
     KV_EVENT(GamepadConnected),
     KV_EVENT(GamepadDisconnected),
     KV_EVENT(PadButtonDown),
@@ -66,7 +70,7 @@ constinit const EventTypeDesc k_events[] = {
 constinit const ResourceDesc k_resources[] = {{"input.state"}, {"platform.window"}};
 constinit const char* const  k_input_writes[] = {"input.state"};
 constinit const SystemDesc   k_systems[] = {
-    {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = k_input_writes},
+    {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = k_input_writes, .runs = RunWhen::Always},
 };
 
 } // namespace

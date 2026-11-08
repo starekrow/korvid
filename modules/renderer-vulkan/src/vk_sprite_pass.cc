@@ -530,14 +530,26 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
 
     bool draw = have_image && r->sprites.len > 0;
-    affine2 proj = ortho2d(view.view);
+    // World: move the view's center to the origin, undo the camera's rotation, then the
+    // ortho of a rect that size about the origin. The cull rect is the rotated view's
+    // bounding box. Screen: the window in pixels about its center, no camera.
+    point2 center = rect_center(view.view);
+    affine2 proj  = ortho2d(rect2_from_center(point2{0, 0}, rect_size(view.view))) * affine2_rotate(-view.rotation) *
+                    affine2_translate(vec2{-center.x, -center.y});
+    f32 cs = fabsf(cosf(view.rotation)), sn = fabsf(sinf(view.rotation));
+    f32 hx = 0.5f * (view.view.w * cs + view.view.h * sn), hy = 0.5f * (view.view.w * sn + view.view.h * cs);
+    f32 sw = (f32)s.extent.width, sh = (f32)s.extent.height;
+    affine2 screen = ortho2d(rect2{-sw * 0.5f, -sh * 0.5f, sw, sh});
     PushData push{};
     push.view[0] = proj.a; push.view[1] = proj.b; push.view[2] = proj.c; push.view[3] = proj.d;
     push.view_trans[0] = proj.tx; push.view_trans[1] = proj.ty;
     push.alpha     = view.alpha;
     push.tick      = r->tick;
-    push.cull[0] = view.view.x; push.cull[1] = view.view.y; push.cull[2] = view.view.w; push.cull[3] = view.view.h;
+    push.cull[0] = center.x - hx; push.cull[1] = center.y - hy; push.cull[2] = 2.0f * hx; push.cull[3] = 2.0f * hy;
+    push.screen[0] = screen.a; push.screen[1] = screen.b; push.screen[2] = screen.c; push.screen[3] = screen.d;
+    push.screen_trans[0] = screen.tx; push.screen_trans[1] = screen.ty;
     push.row_count = r->sprites.len;
+    push.screen_cull[0] = -sw * 0.5f; push.screen_cull[1] = -sh * 0.5f; push.screen_cull[2] = sw; push.screen_cull[3] = sh;
     vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, &push);
 
     if (draw) {

@@ -110,9 +110,9 @@ constinit const char* const   k_materials_reads[]  = {"asset.textures"};
 constinit const char* const   k_materials_writes[] = {"asset.materials"};
 constinit const char* const   k_materials_after[]  = {"asset.pump"};
 constinit const SystemDesc    k_systems[]   = {
-    {.name = "asset.pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = k_pump_writes, .main_thread = true},
+    {.name = "asset.pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = k_pump_writes, .main_thread = true, .runs = RunWhen::Always},
     {.name = "asset.pump_materials", .phase = Phase::PreSim, .fn = asset_materials_pump, .reads = k_materials_reads,
-     .writes = k_materials_writes, .after = k_materials_after, .main_thread = true},
+     .writes = k_materials_writes, .after = k_materials_after, .main_thread = true, .runs = RunWhen::Always},
 };
 
 } // namespace

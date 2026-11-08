@@ -60,7 +60,7 @@ void level_job(u32 chunk, u32, u32, void* user) {
 // the last emitted, up to the cap. Leftovers wait for the next boundary.
 void boundary(Engine& engine, EventBus& events, TickContext& ctx, u64 tick, bool tick_start) {
     KV_ZONE("boundary");
-    if (tick_start) {
+    if (tick_start && !ctx.paused) {
         u32 fired = engine.timers.fired;
         engine.timers.fire(tick, events);
         if (engine.timers.fired != fired) KV_MARK_V("timers fired", engine.timers.fired - fired);
@@ -91,21 +91,26 @@ void boundary(Engine& engine, EventBus& events, TickContext& ctx, u64 tick, bool
 
 } // namespace
 
-void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
+void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, bool paused) {
     TickContext ctx;
     ctx.engine = &engine;
     ctx.events = &events;
     ctx.dt     = dt;
     ctx.tick   = tick;
+    ctx.paused = paused;
     ctx.state  = nullptr;
     ctx.state_type = nullptr;
     if (g_prof_on) prof_tick(tick);
     KV_ZONE("tick");
+    auto runs = [&](const ScheduledSystem& s) { return !paused || s.desc->runs == RunWhen::Always; };
     for (u32 p = 0; p < (u32)Phase::Count; ++p) {
         boundary(engine, events, ctx, tick, p == 0);
         if ((Phase)p == Phase::PreSim) {
+            // Current becomes previous, before anything moves. On a paused tick too: what
+            // the Always systems write is then detected as motion by the extract, and the
+            // sim columns do not change, so no edge is lost.
             KV_ZONE("prev copy");
-            for (Table& t : engine.tables) t.begin_tick(); // current becomes previous, before anything moves
+            for (Table& t : engine.tables) t.begin_tick();
         }
         // Level by level: the systems of a level have no path between them and run at
         // once on the pool; each level waits for the last.
@@ -114,10 +119,11 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
             u32 j = i + 1;
             while (j < phase.len && phase[j].level == phase[i].level) ++j;
             u32 n = j - i;
-            if (n == 1 || jobs_worker_count() == 0 || engine.hash_systems) {
+            if (n == 1 || jobs_worker_count() == 0 || engine.hash_systems || paused) {
                 for (u32 k = i; k < j; ++k) {
+                    if (!runs(phase[k])) continue;
                     run_unit(ctx, events, phase[k], nullptr, 0);
-                    if (engine.hash_systems)
+                    if (engine.hash_systems && !paused)
                         KV_INFO("hash", "tick %llu after %-24s %016llx", (unsigned long long)tick, phase[k].name(),
                                 (unsigned long long)engine_hash_state(engine));
                 }
@@ -139,12 +145,12 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick) {
             engine_apply_commands(engine); // spawns and destroys issued this phase take effect
         }
     }
-    {
+    if (!paused) {
         KV_ZONE("triggers");
         engine_fire_triggers(engine, tick); // edges this tick, as pending StateEdge events for the next
     }
     events.end_tick();
-    if (engine.hash_ticks || engine.hash_systems) {
+    if ((engine.hash_ticks || engine.hash_systems) && !paused) {
         KV_ZONE("hash");
         engine.last_hash = engine_hash_state(engine);
         KV_INFO("hash", "tick %llu %016llx", (unsigned long long)tick, (unsigned long long)engine.last_hash);

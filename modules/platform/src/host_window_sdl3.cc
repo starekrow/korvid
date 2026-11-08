@@ -48,6 +48,13 @@ void HostWindow::present_blank() {
     SDL_UpdateWindowSurface(w);
 }
 
+// Framebuffer pixels per window unit (2 on a scaled desktop); 1 when SDL has no answer.
+f32 HostWindow::pixel_scale() const {
+    int ww = 0, wh = 0;
+    if (!sdl_window_ || !SDL_GetWindowSize((SDL_Window*)sdl_window_, &ww, &wh) || ww <= 0) return 1.0f;
+    return (f32)width_ / (f32)ww;
+}
+
 void HostWindow::pump(EventBus& bus, Input& input) {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
@@ -91,6 +98,44 @@ void HostWindow::pump(EventBus& bus, Input& input) {
             if (k == Key::Unknown) break;
             input.raw.set(k, false);
             bus.emit(KeyUp{k, 0});
+            break;
+        }
+
+        // SDL reports the pointer in window units; the engine works in framebuffer pixels.
+        case SDL_EVENT_MOUSE_MOTION: {
+            f32 s = pixel_scale();
+            MouseState& m = input.raw.mouse;
+            f32 nx = e.motion.x * s, ny = e.motion.y * s;
+            bus.emit(MouseMoved{nx, ny, e.motion.xrel * s, e.motion.yrel * s});
+            m.x = nx; m.y = ny;
+            break;
+        }
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP: {
+            MouseButton b;
+            switch (e.button.button) {
+            case SDL_BUTTON_LEFT:   b = MouseButton::Left; break;
+            case SDL_BUTTON_MIDDLE: b = MouseButton::Middle; break;
+            case SDL_BUTTON_RIGHT:  b = MouseButton::Right; break;
+            case SDL_BUTTON_X1:     b = MouseButton::X1; break;
+            case SDL_BUTTON_X2:     b = MouseButton::X2; break;
+            default: goto done;
+            }
+            {
+                f32 s = pixel_scale();
+                MouseState& m = input.raw.mouse;
+                m.x = e.button.x * s; m.y = e.button.y * s;
+                bool down = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+                m.set(b, down);
+                if (down) bus.emit(MouseButtonDown{b, m.x, m.y});
+                else      bus.emit(MouseButtonUp{b, m.x, m.y});
+            }
+        done:
+            break;
+        }
+        case SDL_EVENT_MOUSE_WHEEL: {
+            input.raw.mouse.wheel += e.wheel.y;
+            bus.emit(MouseWheel{e.wheel.x, e.wheel.y});
             break;
         }
 

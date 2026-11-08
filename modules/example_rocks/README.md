@@ -1,12 +1,13 @@
 # example_rocks
 
-An asteroids-like, written the way the engine would like a game written: four kinds, five
+An asteroids-like, written the way the engine would like a game written: five kinds, seven
 systems with declared sets, eight handlers, scheduled events for bullet expiry and waves,
 a trigger for the ship's death, a published score, and no handle kept anywhere except on
 the events that carry them. The ship flies from the keyboard or the first gamepad, or
 from a script with `--demo` so a run is reproducible: two runs of
 `example_rocks --demo --run-seconds 30 --hash` print identical hashes, at `--threads 1`
-and `--threads 8`.
+and `--threads 8`, and the demo pauses itself for 90 ticks along the way without
+changing a hash. Escape or Start pauses, Q quits, a hit shakes the camera.
 
 ## Building and running
 
@@ -75,13 +76,23 @@ debris are additive dots.
 |---|---|
 | `src/main.cc` | the `FrameLoopConfig` (1280x720, the `--demo` flag, a `game` heap of 16/64 MB) |
 | `src/game.cc` | components, kinds, events, the trigger, the score, systems, handlers, startup, the tables |
-| `assets/ship.png`, `rock.png`, `dot.png`, `*.material.json` | the art (generated) and the looks |
+| `assets/ship.png`, `rock.png`, `dot.png`, `white.png`, `*.material.json` | the art (generated) and the looks |
 
 ## Behaviour worth knowing
 
 - **`--demo` is the acceptance test.** The scripted ship turns, thrusts and fires on a
   fixed schedule from the tick counter, so the whole run is a function of the seed. The
-  slice 2 PRD's checklist runs against it.
+  slice 2 PRD's checklist runs against it. The demo also pauses at tick 400 for 90
+  paused ticks; the hash lines are per sim tick, so a paused run and an unpaused one
+  print the same sequence.
+- **Pause is a system, not a flag.** `example_rocks.pause` runs on every tick
+  (`RunWhen::Always`, phase PreSim): it watches `KeyDown` and `PadButtonDown`, spawns a
+  screen-space dimmer in the `overlay` kind and calls `engine_pause`. Nothing else in the
+  game knows about pausing: the sim systems simply do not run, the timers hold, and the
+  extract keeps drawing.
+- **The camera shake** is `example_rocks.camera` in PostSim writing `sprite.camera`; the
+  offset is a function of the tick, so a run is still reproducible, and the camera is not
+  hashed in any case.
 - **The game heap.** `main.cc` declares a `game` heap with a soft limit of 16 MB and a
   hard limit of 64 MB and puts the module in it; a hard-limit failure logs the heap,
   module and category and the game keeps running.

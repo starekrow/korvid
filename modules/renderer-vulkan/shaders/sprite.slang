@@ -36,7 +36,7 @@ VSOut vs_main(uint vid : SV_VertexID, uint iid : SV_InstanceID, uint base : SV_S
     float4 model  = float4(cs * scale.x, sn * scale.x, -sn * scale.y, cs * scale.y);
     float2 corner = kCorners[vid];
     float2 world  = apply_affine(model, pos, corner);
-    float2 clip   = apply_affine(gPush.view, gPush.view_trans, world);
+    float2 clip   = row_to_clip(s, world);
 
     VSOut o;
     o.pos  = float4(clip, 0.0, 1.0);

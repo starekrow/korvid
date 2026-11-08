@@ -11,7 +11,8 @@ more words, a help line, and a function taking a `CliContext` and the arguments.
 command whose name has the most words in common with the request's first words
 (`patch material` beats `patch`), and the rest are the arguments. Whoever reads a format
 owns its commands: `ls materials`, `dump material` and `patch material` live in the asset
-module; `help` and `quit` in `cli`.
+module; `help`, `quit` and the sim controls `pause`, `resume`, `step [N]` and `rate [X]`
+in `cli`. The CLI's own system runs on paused ticks, so a paused game still answers.
 
 A command answers through `ctx.print`, one line at a time, and `ctx.fail` marks the
 request failed with a message; the first failure stands. Commands never block and never

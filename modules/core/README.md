@@ -168,6 +168,7 @@ Header `korvid/core/engine.h`:
 | `EngineConfig`, `HeapDesc`, `ModuleHeapDesc` | records | the heap table and which module lives in which |
 | `engine_init(e, modules, config)`, `engine_shutdown(e)` | functions | register and start everything in order; undo it in reverse |
 | `engine_frame(e, dt)` | function | advance the clock, run the ticks it owes; returns how many |
+| `engine_pause(e, on)`, `engine_step(e, n)`, `engine_rate(e, x)` | functions | sim control: hold the sim (paused ticks run `RunWhen::Always` systems and handlers only), let `n` sim ticks through, scale time |
 | `engine_request_quit(e)` | function | the loop ends |
 | `engine_module(e, name)`, `engine_module_state_as<T>(e, name)` | functions | a started module and its state, for code outside the schedule |
 | `engine_publish(e, self, name, ptr)` | function | the object behind a declared resource, for `ctx.resource<T>` |
@@ -183,11 +184,11 @@ Header `korvid/core/phase.h`:
 | name | kind | what |
 |---|---|---|
 | `Phase` | enum | `Input`, `PreSim`, `Sim`, `PostSim`; `phase_name` |
-| `SystemDesc` | record | `name`, `phase`, `fn`, `reads`, `writes`, `after`, `before`, `state` (`StateUse`), `main_thread` |
+| `SystemDesc` | record | `name`, `phase`, `fn`, `reads`, `writes`, `after`, `before`, `state` (`StateUse`), `main_thread`, `runs` (`RunWhen`: `Unpaused` or `Always`) |
 | `HandlerDesc`, `KV_ON(E, fn)` | record, macro | a handler on one event type with its sets |
 | `TriggerDesc`, `TriggerEdge` | record, enum | `kind.Component.field` with `Changed`, `CrossedBelow(value)`, `CrossedAbove(value)` |
 | `Spawned{ticket, kind, entity}`, `StateEdge{entity, trigger, value}` | events | the engine's own, delivered to anyone |
-| `TickContext` | record | `engine`, `events`, `dt`, `tick`; `state_as<T>()`, `emit`, `write_kind`, `read_kind`, `read<T>`, `write<T>`, `view<C...>()`, `resource<T>`, `resource_id`, `column_id`, `kind_id`, `spawn_later`, `destroy`, `destroy_all`, `schedule`, `schedule_in`, `cancel` |
+| `TickContext` | record | `engine`, `events`, `dt`, `tick`, `paused`; `state_as<T>()`, `emit`, `write_kind`, `read_kind`, `read<T>`, `write<T>`, `view<C...>()`, `resource<T>`, `resource_id`, `column_id`, `kind_id`, `spawn_later`, `destroy`, `destroy_all`, `schedule`, `schedule_in`, `cancel` |
 | `KindRows`, `KindRange<C...>` | records | one kind's rows in a view: `rows()`, `alive(i)`, `handle_at(i)`, `col<T>()`, `prev<T>()` |
 | `ChunkContext` | record | what a parallel chunk may do: `emit`, `spawn_later` (no ticket), `destroy` |
 | `parallel_for(ctx, count, grain, fn)`, `parallel_reduce(ctx, count, grain, init, fn, combine)` | functions | chunks on the pool, buffers merged in chunk order |

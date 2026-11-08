@@ -29,14 +29,20 @@ inline bool operator==(const Placement2& a, const Placement2& b) {
 }
 inline bool operator!=(const Placement2& a, const Placement2& b) { return !(a == b); }
 
+// Where a sprite's placement lives. World sprites go through the camera; Screen sprites
+// are in window pixels with the origin at the window's center and +y up, whatever the
+// camera does. Both sort together by layer and blend.
+enum class SpriteSpace : u8 { World, Screen };
+
 // Everything the renderer keeps per sprite.
 struct RenderSpriteState {
-    Placement2 placement;
-    Handle     material;  // renderer-issued; null or stale -> the default material
-    rect2      uv;        // texture rect; outside [0, 1] repeats
-    vec2       size;      // quad size in world units, before the placement's scale
-    color      tint;      // multiplies the material's tint
-    i32        layer;     // drawn in ascending order; the renderer clamps to [-128, 127]
+    Placement2  placement;
+    Handle      material;  // renderer-issued; null or stale -> the default material
+    rect2       uv;        // texture rect; outside [0, 1] repeats
+    vec2        size;      // quad size in world units, before the placement's scale
+    color       tint;      // multiplies the material's tint
+    i32         layer;     // drawn in ascending order; the renderer clamps to [-128, 127]
+    SpriteSpace space;
 };
 
 enum class SpriteDeltaKind : u8 {

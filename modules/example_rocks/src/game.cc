@@ -1,8 +1,10 @@
 // example_rocks: an asteroids-like. The ship is steered from the keyboard (or by a script
 // with --demo), bullets expire by scheduled event, rocks split when hit and spawn debris,
 // waves arrive on a timer, the ship's death is a trigger on its Health column, and a
-// restart follows two seconds later. Everything the game knows is in kinds and one
-// published Score; no handle is kept anywhere except on the events that carry them.
+// restart follows two seconds later. Escape (or Start on a pad) pauses: the sim holds, a
+// screen-space dimmer covers the field, Q quits. A hit shakes the camera. Everything the
+// game knows is in kinds and one published Score; no handle is kept anywhere except on
+// the events that carry them.
 #include "korvid/example_rocks/module.h"
 #include "korvid/asset/material.h"
 #include "korvid/collision/module.h"
@@ -16,6 +18,7 @@
 #include "korvid/platform/host_window.h"
 #include "korvid/platform/input.h"
 #include "korvid/render/renderer.h"
+#include "korvid/sprite/camera.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 #include <math.h>
@@ -45,16 +48,18 @@ constinit const ComponentDesc k_components[] = {
 };
 
 // ---- kinds -----------------------------------------------------------------------------
-constinit u32 g_ship_kind = 0, g_bullet_kind = 0, g_rock_kind = 0, g_debris_kind = 0;
-constinit const char* const k_ship_components[]   = {"Transform2", "Sprite", "Velocity", "Health", "Collider2", "Ship"};
-constinit const char* const k_bullet_components[] = {"Transform2", "Sprite", "Velocity", "Collider2"};
-constinit const char* const k_rock_components[]   = {"Transform2", "Sprite", "Velocity", "Collider2", "RockSize"};
-constinit const char* const k_debris_components[] = {"Transform2", "Sprite", "Velocity", "Lifetime"};
+constinit u32 g_ship_kind = 0, g_bullet_kind = 0, g_rock_kind = 0, g_debris_kind = 0, g_overlay_kind = 0;
+constinit const char* const k_ship_components[]    = {"Transform2", "Sprite", "Velocity", "Health", "Collider2", "Ship"};
+constinit const char* const k_bullet_components[]  = {"Transform2", "Sprite", "Velocity", "Collider2"};
+constinit const char* const k_rock_components[]    = {"Transform2", "Sprite", "Velocity", "Collider2", "RockSize"};
+constinit const char* const k_debris_components[]  = {"Transform2", "Sprite", "Velocity", "Lifetime"};
+constinit const char* const k_overlay_components[] = {"Transform2", "Sprite"}; // screen-space, over everything
 constinit const KindDesc k_kinds[] = {
-    {.name = "example_rocks.ship",   .components = k_ship_components,   .capacity = 1,    .id = &g_ship_kind},
-    {.name = "example_rocks.bullet", .components = k_bullet_components, .capacity = 4096, .id = &g_bullet_kind},
-    {.name = "example_rocks.rock",   .components = k_rock_components,   .capacity = 1024, .id = &g_rock_kind},
-    {.name = "example_rocks.debris", .components = k_debris_components, .capacity = 8192, .id = &g_debris_kind},
+    {.name = "example_rocks.ship",    .components = k_ship_components,    .capacity = 1,    .id = &g_ship_kind},
+    {.name = "example_rocks.bullet",  .components = k_bullet_components,  .capacity = 4096, .id = &g_bullet_kind},
+    {.name = "example_rocks.rock",    .components = k_rock_components,    .capacity = 1024, .id = &g_rock_kind},
+    {.name = "example_rocks.debris",  .components = k_debris_components,  .capacity = 8192, .id = &g_debris_kind},
+    {.name = "example_rocks.overlay", .components = k_overlay_components, .capacity = 8,    .id = &g_overlay_kind},
 };
 
 // ---- events ----------------------------------------------------------------------------
@@ -91,7 +96,7 @@ constinit const TriggerDesc k_triggers[] = {
 // ---- the published score and the module's state --------------------------------------
 struct Score { i32 total; u32 rocks_shot; u32 wave; u32 games; };
 
-enum Look : u8 { LOOK_SHIP, LOOK_ROCK, LOOK_BULLET, LOOK_DEBRIS, LOOK_COUNT };
+enum Look : u8 { LOOK_SHIP, LOOK_ROCK, LOOK_BULLET, LOOK_DEBRIS, LOOK_WHITE, LOOK_COUNT };
 
 struct Game {
     Score  score;
@@ -102,6 +107,9 @@ struct Game {
     bool   demo    = false;
     u32    next_wave = 0;        // the pending wave's ticket, cancelled at game over
     Rng    rng;
+    f32    shake = 0.0f;         // camera shake amplitude in pixels, decaying
+    u32    paused_ticks = 0;     // the demo's pause: how long it has held
+    bool   demo_paused_once = false;
 };
 
 // Collider layers.
@@ -149,7 +157,62 @@ void spawn_ship(TickContext& ctx, Game& g) {
                     Velocity{}, Health{3}, collider_circle(kShipRadius, L_SHIP, L_ROCK), Ship{0.0f, 0});
 }
 
-// ---- systems (phase Sim) ---------------------------------------------------------------
+// ---- systems -----------------------------------------------------------------------------
+
+// Phase PreSim, on every tick, paused or not: Escape or Start toggles the pause, Q quits;
+// the demo pauses itself once, at tick 400, for 90 ticks. Pausing drops a dimmer over the
+// field: one screen-space sprite the size of the window at a layer above everything;
+// resuming removes it. Writes the clock through the engine API, which applies from the
+// next tick, so this tick is still whatever kind it started as.
+void pause(TickContext& ctx) {
+    static const u32 k_window = ctx.resource_id("platform.window");
+    Game& g = ctx.state_as<Game>();
+    Engine& e = *ctx.engine;
+    bool toggle = false;
+    if (g.demo) {
+        if (!ctx.paused && ctx.tick == 400 && !g.demo_paused_once) { toggle = true; g.demo_paused_once = true; g.paused_ticks = 0; }
+        if (ctx.paused && ++g.paused_ticks == 90) toggle = true;
+    } else {
+        for (const KeyDown& k : ctx.events->read<KeyDown>()) {
+            if (k.key == Key::Escape && !k.repeat) toggle = true;
+            if (k.key == Key::Q) engine_request_quit(e);
+        }
+        for (const PadButtonDown& b : ctx.events->read<PadButtonDown>())
+            if (b.button == PadButton::Start) toggle = true;
+    }
+    if (!toggle) return;
+    Table* overlay = ctx.write_kind(g_overlay_kind);
+    if (!e.clock.paused) {
+        const HostWindow* w = ctx.resource<const HostWindow>(k_window);
+        Sprite dim = sprite_of(g, LOOK_WHITE, 1.0f, 100, color_rgba(0.0f, 0.0f, 0.02f, 0.55f));
+        dim.size  = vec2{(f32)w->width(), (f32)w->height()};
+        dim.space = SpriteSpace::Screen;
+        overlay->spawn(transform2_at(point2{0, 0}), dim);
+        engine_pause(e, true);
+        KV_INFO("rocks", "paused: Escape or Start resumes, Q quits");
+    } else {
+        overlay->destroy_all();
+        engine_pause(e, false);
+    }
+}
+
+// Phase PostSim: the camera shakes when the ship is hit and settles. The offset is a
+// function of the tick, so it is the same every run; the camera is not sim state anyway.
+void camera(TickContext& ctx) {
+    static const u32 k_camera = ctx.resource_id("sprite.camera");
+    Game& g = ctx.state_as<Game>();
+    if (ctx.events->read<ShipHit>().len) g.shake = 12.0f;
+    if (ctx.events->read<GameOver>().len) g.shake = 28.0f;
+    Camera2* cam = ctx.resource<Camera2>(k_camera);
+    if (g.shake > 0.05f) {
+        f32 t = (f32)ctx.tick;
+        cam->center = point2{sinf(t * 1.7f) * g.shake, cosf(t * 2.3f) * g.shake};
+        g.shake *= 0.86f;
+    } else {
+        g.shake = 0.0f;
+        cam->center = point2{0, 0};
+    }
+}
 
 // The ship answers the keys, or the script: turn, thrust, fire. Fires by direct spawn,
 // since it holds the bullet write, and schedules each bullet's expiry.
@@ -257,7 +320,7 @@ void game(TickContext& ctx) {
         g.started = true;
         g.demo    = frameloop_flag(*ctx.engine, "--demo");
         g.rng     = Rng::seeded(0x70c45, 7);
-        KV_INFO("rocks", "%s. Arrows turn and thrust, space fires, Esc quits; on a pad the left stick turns, South thrusts, West fires.", g.demo ? "Demo: the ship flies itself" : "Your ship");
+        KV_INFO("rocks", "%s. Arrows turn and thrust, space fires, Escape pauses, Q quits; on a pad the left stick turns, South thrusts, West fires, Start pauses.", g.demo ? "Demo: the ship flies itself" : "Your ship");
         ctx.emit(Restart{});
     }
     for (const AssetFailed& e : ctx.events->read<AssetFailed>()) {
@@ -409,7 +472,8 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     // Each look is a material file; the file names its texture. The handles are usable
     // now and show the placeholder until the files and textures arrive.
     const char* looks[LOOK_COUNT] = {"example_rocks/ship.material.json", "example_rocks/rock.material.json",
-                                     "example_rocks/bullet.material.json", "example_rocks/debris.material.json"};
+                                     "example_rocks/bullet.material.json", "example_rocks/debris.material.json",
+                                     "example_rocks/white.material.json"};
     for (u32 i = 0; i < LOOK_COUNT; ++i) {
         g->looks[i] = asset_load_material(engine, looks[i]);
         const MaterialAsset* m = asset_material(engine, g->looks[i]);
@@ -436,13 +500,18 @@ constinit const char* const k_wrap_reads[]     = {"*.Velocity", "platform.window
 constinit const char* const k_after_move[]     = {"example_rocks.move"};
 constinit const char* const k_fade_writes[]    = {"example_rocks.debris.Lifetime", "example_rocks.debris.Sprite"};
 constinit const char* const k_game_reads[]     = {"example_rocks.score"};
+constinit const char* const k_pause_reads[]    = {"platform.window"};
+constinit const char* const k_pause_writes[]   = {"example_rocks.overlay"};
+constinit const char* const k_camera_writes[]  = {"sprite.camera"};
 constinit const SystemDesc k_systems[] = {
+    {.name = "example_rocks.pause",   .phase = Phase::PreSim, .fn = pause, .reads = k_pause_reads, .writes = k_pause_writes, .runs = RunWhen::Always},
     {.name = "example_rocks.control", .phase = Phase::Sim, .fn = control, .reads = k_control_reads, .writes = k_control_writes, .before = k_before_move},
     // move, wrap and fade touch no module state: fade shares a level with move.
     {.name = "example_rocks.move",    .phase = Phase::Sim, .fn = move,    .reads = k_move_reads,    .writes = k_move_writes, .state = StateUse::None},
     {.name = "example_rocks.wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = k_wrap_reads,    .writes = k_move_writes, .after = k_after_move, .state = StateUse::None},
     {.name = "example_rocks.fade",    .phase = Phase::Sim, .fn = debris_fade, .writes = k_fade_writes, .state = StateUse::None},
     {.name = "example_rocks.game",    .phase = Phase::Sim, .fn = game,    .reads = k_game_reads},
+    {.name = "example_rocks.camera",  .phase = Phase::PostSim, .fn = camera, .writes = k_camera_writes},
 };
 
 constinit const char* const k_rock_hit_writes[] = {"example_rocks.rock", "example_rocks.score"};

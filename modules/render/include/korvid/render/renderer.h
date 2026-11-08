@@ -42,9 +42,12 @@ struct RenderCaps {
 };
 
 struct RenderView {
-    f32   alpha = 0.0f; // interpolation point between previous and current tick, [0, 1)
-    rect2 view;         // the world rect that fills the window, +y up
+    f32   alpha = 0.0f;    // interpolation point between previous and current tick, [0, 1)
+    rect2 view;            // the world rect that fills the window, +y up, before rotation
+    f32   rotation = 0.0f; // the camera's rotation about the rect's center, radians counter-clockwise
     color clear_color{0.09f, 0.09f, 0.11f, 1.0f};
+    // Screen-space sprites are placed in window pixels, center origin, +y up; the renderer
+    // knows the window's size and needs nothing more for them.
 };
 
 // One renderer per process in slice 1. Null if one exists already or creation failed.

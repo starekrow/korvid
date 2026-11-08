@@ -32,7 +32,7 @@ uint bucket_of_row(uint i) {
     float2 pos; float rot; float2 scale;
     row_placement(s, pos, rot, scale);
     float radius = 0.5 * length(abs(scale) * s.size); // the quad's bounding circle
-    float4 c = gPush.cull;
+    float4 c = row_cull(s);
     if (pos.x + radius < c.x || pos.x - radius > c.x + c.z ||
         pos.y + radius < c.y || pos.y - radius > c.y + c.w) return kCulled;
     int  layer = clamp(s.layer, -128, 127);

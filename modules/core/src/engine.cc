@@ -838,11 +838,30 @@ u32 engine_frame(Engine& e, f64 frame_dt) {
         prof_counter("mem committed KB", m.committed_bytes / 1024);
     }
     ++e.frame_count;
-    u64 first_tick = e.clock.tick_count;
     u32 ticks = e.clock.advance(frame_dt);
-    for (u32 i = 0; i < ticks; ++i)
-        e.phases.run_tick(e, e.events, e.clock.tick_dt, first_tick + i);
+    for (u32 i = 0; i < ticks; ++i) {
+        u64  tick   = e.clock.tick_count; // the sim tick this is, or would be
+        bool paused = e.clock.begin_tick();
+        e.phases.run_tick(e, e.events, e.clock.tick_dt, tick, paused);
+    }
     return ticks;
+}
+
+void engine_pause(Engine& e, bool paused) {
+    if (e.clock.paused == paused) return;
+    e.clock.paused = paused;
+    KV_INFO("engine", "%s at tick %llu", paused ? "paused" : "resumed", (unsigned long long)e.clock.tick_count);
+}
+
+void engine_step(Engine& e, u32 n) {
+    if (!e.clock.paused) engine_pause(e, true);
+    e.clock.step_ticks += n;
+}
+
+bool engine_rate(Engine& e, f64 rate) {
+    if (!(rate > 0.0)) { KV_WARN("engine", "rate must be positive; pause instead"); return false; }
+    e.clock.rate = rate;
+    return true;
 }
 
 // ---- commands ------------------------------------------------------------------------

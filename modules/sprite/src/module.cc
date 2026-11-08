@@ -1,4 +1,5 @@
 #include "korvid/sprite/module.h"
+#include "korvid/sprite/camera.h"
 #include "korvid/sprite/components.h"
 #include "korvid/sprite/extract.h"
 #include "korvid/sprite/world.h"
@@ -13,6 +14,7 @@ struct SpriteState {
     SpriteWorld        world;
     ExtractState       extract;
     Array<SpriteDelta> deltas;
+    Camera2            camera;
 };
 
 bool sprite_startup(Engine& engine, ModuleInstance& self) {
@@ -21,6 +23,7 @@ bool sprite_startup(Engine& engine, ModuleInstance& self) {
     s->deltas.alloc = s->extract.tables.alloc = &self.general;
     s->world.table = engine_table(engine, "sprite.entity"); // the engine built it from the kind table
     if (!s->world.table) return false;
+    if (!engine_publish(engine, self, "sprite.camera", &s->camera)) return false;
     self.set_state(s);
     return true;
 }
@@ -41,7 +44,7 @@ void sprite_extract(TickContext& ctx) {
 
 // The schemas. Transform2 keeps a previous-tick copy for interpolation; Sprite does not.
 constinit const FieldDesc k_transform2_fields[] = {KV_FIELDS(Transform2, position, rotation, scale)};
-constinit const FieldDesc k_sprite_fields[]     = {KV_FIELDS(Sprite, material, uv, size, tint, layer)};
+constinit const FieldDesc k_sprite_fields[]     = {KV_FIELDS(Sprite, material, uv, size, tint, layer, space)};
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Transform2, k_transform2_fields, CompPrev),
     KV_COMPONENT(Sprite, k_sprite_fields),
@@ -53,11 +56,11 @@ constinit const KindDesc    k_kinds[] = {
     {.name = "sprite.entity", .components = k_entity_components, .capacity = KV_POOL_DEFAULT_MAX},
 };
 
-constinit const ResourceDesc k_resources[] = {{"sprite.deltas"}};
+constinit const ResourceDesc k_resources[] = {{"sprite.deltas"}, {"sprite.camera"}};
 constinit const char* const  k_extract_reads[]  = {"*.Transform2", "*.Sprite"};
 constinit const char* const  k_extract_writes[] = {"sprite.deltas"};
 constinit const SystemDesc   k_systems[]   = {
-    {.name = "sprite.extract", .phase = Phase::PostSim, .fn = sprite_extract, .reads = k_extract_reads, .writes = k_extract_writes},
+    {.name = "sprite.extract", .phase = Phase::PostSim, .fn = sprite_extract, .reads = k_extract_reads, .writes = k_extract_writes, .runs = RunWhen::Always},
 };
 
 } // namespace
@@ -84,6 +87,11 @@ SpriteWorld* sprite_world(Engine& e) {
 Array<SpriteDelta>* sprite_deltas(Engine& e) {
     SpriteState* s = engine_module_state_as<SpriteState>(e, "sprite");
     return s ? &s->deltas : nullptr;
+}
+
+Camera2* sprite_camera(Engine& e) {
+    SpriteState* s = engine_module_state_as<SpriteState>(e, "sprite");
+    return s ? &s->camera : nullptr;
 }
 
 } // namespace kv

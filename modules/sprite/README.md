@@ -85,8 +85,16 @@ Header `korvid/sprite/transform2.h`, `sprite.h`, `components.h`:
 |---|---|---|
 | `Transform2` | component | a `Placement2`: `position` (point2), `rotation` (f32 radians), `scale` (vec2); `CompPrev` |
 | `transform2_at(position, rotation = 0, scale = {1, 1})` | function | a constructor |
-| `Sprite` | component | `material` (Handle, null: the default), `uv` (rect2, unit by default), `size` (vec2, 64x64), `tint` (color, white), `layer` (i32, 0) |
+| `Sprite` | component | `material` (Handle, null: the default), `uv` (rect2, unit by default), `size` (vec2, 64x64), `tint` (color, white), `layer` (i32, 0), `space` (`SpriteSpace::World` or `Screen`) |
 | `transform2_schema()`, `sprite_schema()` | functions | the two `ComponentDesc`s, for comparing or printing rows |
+
+Header `korvid/sprite/camera.h`:
+
+| name | kind | what |
+|---|---|---|
+| `Camera2` | record | `center` (point2), `zoom` (f32, 1: a world unit per pixel), `rotation` (f32 radians); published as the resource `sprite.camera`, written by whichever system declares it |
+| `camera_view(cam, width, height)` | function | the world rect the camera shows in a window that size, before rotation |
+| `sprite_camera(engine)` | function | the camera, for code outside the schedule (the frame loop reads it at render rate) |
 
 Header `korvid/sprite/world.h`:
 
@@ -136,7 +144,16 @@ What the module registers with the engine:
   are a renderer feature not built yet.
 - **Rotation interpolates as a scalar.** Keep angles continuous.
 - **Layer is draw order, not depth.** Equal layers draw in slot order, stable frame to
-  frame; the renderer clamps to [-128, 127].
+  frame; the renderer clamps to [-128, 127]. Screen-space and world sprites share the
+  order: a HUD is a high layer.
+- **Screen space is window pixels**, origin at the window's center, +y up, whatever the
+  camera does; `size` is then in pixels. The platform's `mouse_screen` puts the pointer
+  in the same space.
+- **The camera is read at render rate**, not interpolated: a camera that follows a
+  moving entity lags it by the frame's alpha. Camera motion that must be smooth belongs
+  to a later slice (render-rate entities).
+- **The extract runs on paused ticks** (`RunWhen::Always`), so menus and overlays drawn
+  while the sim holds still reach the renderer.
 - **The extract is one thread** and linear in the rows of every drawable kind, dead
   slots included; a kind with a huge capacity and few live rows still costs its
   high-water mark.
@@ -144,5 +161,5 @@ What the module registers with the engine:
 ## Not in this module
 
 Animation (frames are a UV rect the game writes), sprite sheets and atlases, text,
-cameras and views, parenting and hierarchies, z-sorting beyond the layer, render-rate
-entities, tile maps, and anything the renderer does with the deltas (`docs/design/renderer.md`).
+parenting and hierarchies, z-sorting beyond the layer, render-rate entities, tile maps,
+and anything the renderer does with the deltas (`docs/design/renderer.md`).

@@ -41,6 +41,12 @@ const char* phase_name(Phase p);
 // serializes it against every other system of the module; None lets it run beside them.
 enum class StateUse : u8 { Write, Read, None };
 
+// When a system runs. Unpaused, the default, is gameplay: skipped on a paused tick along
+// with the timer wheel and the triggers. Always is for what keeps a paused game alive:
+// input sampling, asset pumps, the hierarchy, text, animation on the real clock, audio,
+// the extract, the CLI. Handlers always run: events come only from systems that ran.
+enum class RunWhen : u8 { Unpaused, Always };
+
 // Emitted by the engine when a command spawn is applied, so the issuer learns the handle.
 struct Spawned {
     u32    ticket; // what spawn_later returned; 0 for a spawn issued from a parallel chunk
@@ -216,6 +222,7 @@ struct TickContext {
     EventWriter*           writer   = nullptr; // the unit's; null: the bus's writer 0 (outside the schedule)
     CommandBuffer*         commands = nullptr; // the unit's; null: the engine's
     u32                    wave     = 0;       // for a handler: which wave of the boundary this is
+    bool                   paused   = false;   // a paused tick: the sim stands still, only RunWhen::Always systems run
 
     // The module state as the type startup stored. Verified by a pointer compare.
     template <class T>
@@ -357,6 +364,7 @@ struct SystemDesc {
     Span<const char* const> before = {};
     StateUse                state  = StateUse::Write; // what it does with its module's state
     bool                    main_thread = false;      // runs on the thread driving the engine: for code that talks to the OS, the GPU, or a module's own pools
+    RunWhen                 runs   = RunWhen::Unpaused; // whether a paused tick runs it
 };
 
 // A system or handler placed in the schedule, with the module it came from and its sets
@@ -386,7 +394,9 @@ struct PhaseList {
     // Runs one tick: for each phase, the boundary (fire timers at the first, deliver, run
     // handlers in waves, apply commands), then its systems level by level, the systems of
     // a level concurrently, and their commands. At the end, triggers, the hash and end_tick.
-    void run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick);
+    // A paused tick skips the Unpaused systems, the timers, the triggers and the hash line;
+    // `tick` is then the sim tick that will run next.
+    void run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, bool paused = false);
     void free();
 };
 

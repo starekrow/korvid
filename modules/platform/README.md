@@ -12,7 +12,7 @@ published as resources that systems declare and read.
 **The window** (`host_window.h`). One per process, opened on request by the frameloop
 module and closed at platform shutdown, never by the caller. It is a service, not an
 entity. `platform_pump` turns OS events into bus events (`WindowResized`,
-`FocusChanged`, `CloseRequested`, key and gamepad edges) and updates the raw input
+`FocusChanged`, `CloseRequested`, key, mouse and gamepad edges) and updates the raw input
 state. A Vulkan window hands its native handle to the renderer; a software window can
 only `present_blank`.
 
@@ -118,15 +118,18 @@ Header `korvid/platform/input.h`:
 | `Key` | enum | letters, digits, F keys, `Escape`, `Space`, `Enter`, `Tab`, `Backspace`, arrows, modifiers; `key_name` |
 | `PadButton`, `PadAxis` | enums | the standard layout; `pad_button_name`, `pad_axis_name` |
 | `GamepadState` | record | `buttons` (bits), `axes`, `connected`, `id`; `down(b)`, `axis(a)` |
-| `InputState` | record | `down(key)`, `set(key, on)`, `clear()`, `pads[KV_MAX_GAMEPADS]`, `pad()` (the first connected) |
+| `MouseButton`, `MouseState` | enum, record | `x`, `y` in framebuffer pixels (origin top-left), `wheel` (the scroll since the last sample), `buttons`; `down(b)`; `mouse_button_name` |
+| `mouse_screen(x, y, w, h, &sx, &sy)` | function | window pixels to screen space: center origin, +y up, what screen-space sprites use |
+| `InputState` | record | `down(key)`, `set(key, on)`, `clear()`, `pads[KV_MAX_GAMEPADS]`, `pad()` (the first connected), `mouse` |
 | `Input` | record | `raw`, `sampled`, `sample()` |
 | `key_from_scancode`, `scancode_from_key` | functions | the SDL mapping, both ways |
 | `KV_MAX_GAMEPADS`, `KV_PAD_DEAD_ZONE` | constants | 4; 0.15 |
 
 Header `korvid/platform/events.h`: `WindowResized{width, height}`, `FocusChanged{focused}`,
 `CloseRequested`, `KeyDown{key, device, repeat}`, `KeyUp{key, device}`,
-`GamepadConnected{pad}`, `GamepadDisconnected{pad}`, `PadButtonDown{button, pad}`,
-`PadButtonUp{button, pad}`.
+`MouseMoved{x, y, dx, dy}`, `MouseButtonDown{button, x, y}`, `MouseButtonUp{button, x, y}`,
+`MouseWheel{dx, dy}`, `GamepadConnected{pad}`, `GamepadDisconnected{pad}`,
+`PadButtonDown{button, pad}`, `PadButtonUp{button, pad}`.
 
 Header `korvid/platform/io.h`:
 
@@ -164,9 +167,9 @@ What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
-| `WindowResized`, `FocusChanged`, `CloseRequested`, `KeyDown`, `KeyUp`, `GamepadConnected`, `GamepadDisconnected`, `PadButtonDown`, `PadButtonUp` | event types | no schemas; none carries an entity |
+| `WindowResized`, `FocusChanged`, `CloseRequested`, `KeyDown`, `KeyUp`, `MouseMoved`, `MouseButtonDown`, `MouseButtonUp`, `MouseWheel`, `GamepadConnected`, `GamepadDisconnected`, `PadButtonDown`, `PadButtonUp` | event types | no schemas; none carries an entity |
 | `input.state`, `platform.window` | resources, published | `Input` and `HostWindow`; read them through `ctx.resource<const T>` |
-| `input.sample` | system, phase Input | writes `input.state`: raw becomes sampled |
+| `input.sample` | system, phase Input, `Always` | writes `input.state`: raw becomes sampled, on paused ticks too |
 | `platform.io` | handle kind | an I/O request; `kv_handle_describe` prints its state and path |
 | `platform.io` | idle task | serves idle reads and what the pumps held back |
 

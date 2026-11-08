@@ -58,7 +58,8 @@ struct GpuSprite {
 };
 static_assert(sizeof(GpuSprite) == 96, "GpuSprite must match sprite_common.slangh");
 
-constexpr u32 kSpriteAlive = 1;
+constexpr u32 kSpriteAlive  = 1;
+constexpr u32 kSpriteScreen = 2; // placed in window pixels through the screen view, not the camera
 
 // One material row.
 struct GpuMaterial {
@@ -70,17 +71,21 @@ struct GpuMaterial {
 };
 static_assert(sizeof(GpuMaterial) == 64, "GpuMaterial must match sprite_common.slangh");
 
-// Shared by every stage: the vertex shader uses the view, the compute passes the cull rect.
+// Shared by every stage: the vertex shader uses the views, the compute passes the cull
+// rects. World rows go through `view`, screen rows (kSpriteScreen) through `screen`.
 struct PushData {
-    f32 view[4];       // ortho affine2 a, b, c, d
-    f32 view_trans[2]; // ortho tx, ty
-    f32 alpha;         // interpolation point for rows stamped with `tick`
+    f32 view[4];         // world to clip: affine2 a, b, c, d
+    f32 view_trans[2];   // tx, ty
+    f32 alpha;           // interpolation point for rows stamped with `tick`
     u32 tick;
-    f32 cull[4];       // the view rect in world units: x, y, w, h
-    u32 row_count;     // sprite rows the compute passes look at
-    u32 pad[3];
+    f32 cull[4];         // world rows: the view's bounding rect in world units, x, y, w, h
+    f32 screen[4];       // screen pixels (center origin, +y up) to clip
+    f32 screen_trans[2];
+    u32 row_count;       // sprite rows the compute passes look at
+    u32 pad0;
+    f32 screen_cull[4];  // screen rows: the window rect in pixels, x, y, w, h
 };
-static_assert(sizeof(PushData) == 64, "PushData must match sprite_common.slangh");
+static_assert(sizeof(PushData) == 96, "PushData must match sprite_common.slangh");
 
 // ---- CPU-side records ---------------------------------------------------------------------
 

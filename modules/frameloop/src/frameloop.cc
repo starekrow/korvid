@@ -10,6 +10,7 @@
 #include "korvid/platform/events.h"
 #include "korvid/platform/module.h"
 #include "korvid/render/renderer.h"
+#include "korvid/sprite/camera.h"
 #include "korvid/sprite/module.h"
 #include <stdlib.h>
 #include <string.h>
@@ -142,7 +143,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
 constinit const EventTypeDesc k_events[]  = {KV_EVENT(ExitRequested)};
 constinit const char* const   k_exit_reads[] = {"input.state"};
 constinit const SystemDesc    k_systems[] = {
-    {.name = "frameloop.exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = k_exit_reads},
+    {.name = "frameloop.exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = k_exit_reads, .runs = RunWhen::Always},
 };
 
 // The frame's slack: what the renderer blocked for last frame (fences, acquire, present)
@@ -175,11 +176,15 @@ void render_frame(Engine& engine, FrameLoopState& s) {
         deltas->clear();
     }
 
+    // The camera as the last tick left it, at render rate: the view is the window's size
+    // over the zoom, centered on the camera, rotated by it. Zoom 1 is one world unit per pixel.
     RenderView view;
     view.alpha       = engine.clock.alpha();
     view.clear_color = s.config.clear_color;
-    f32 vw = (f32)w, vh = (f32)h;
-    view.view = rect2{-vw * 0.5f, -vh * 0.5f, vw, vh}; // one world unit per pixel, origin centered
+    Camera2 cam;
+    if (const Camera2* c = sprite_camera(engine)) cam = *c;
+    view.view     = camera_view(cam, w, h);
+    view.rotation = cam.rotation;
     renderer_render(s.renderer, view);
 }
 
