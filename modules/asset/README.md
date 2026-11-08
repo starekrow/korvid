@@ -215,6 +215,15 @@ Header `korvid/asset/blob.h`:
 | `BlobAsset` | record | `path`, `state`, `error`, `data` (with a NUL after it), `size`, `refs` |
 | `asset_load_blob(e, path[, scope])`, `asset_blob(e, h)` | functions | a file's bytes as an asset, for modules that parse a format of their own |
 
+Header `korvid/asset/stream.h`:
+
+| name | kind | what |
+|---|---|---|
+| `StreamAsset` | record | `path`, `state`, `bytes`/`size` (the compressed file), `rate`, `channels`, `frames`, `loop_start`, `loop_end`, `loop_tagged`, `refs` |
+| `asset_load_stream(e, path[, scope])`, `asset_stream(e, h)` | functions | an Ogg Vorbis file kept compressed, for the audio module to decode as it plays |
+| `StreamDecoder`, `stream_decoder_open/read/seek/close`, `KV_STREAM_DECODER_MEMORY` | record, functions | decoding into the caller's memory, stereo out |
+| `stream_loop_from_comments` | function | LOOPSTART with LOOPLENGTH or LOOPEND, in frames |
+
 Header `korvid/asset/png.h`:
 
 | name | kind | what |
@@ -228,7 +237,7 @@ What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
-| `asset.texture`, `asset.material`, `asset.font`, `asset.sound`, `asset.blob`, `asset.scope` | handle kinds | `kv_handle_describe` prints path, state and size, blend, atlas or length; a scope's name and counts |
+| `asset.texture`, `asset.material`, `asset.font`, `asset.sound`, `asset.blob`, `asset.stream`, `asset.scope` | handle kinds | `kv_handle_describe` prints path, state and size, blend, atlas or length; a scope's name and counts |
 | `AssetReady`, `AssetFailed`, `AssetScopeReady` | event types | no schema: the handle is an asset's, not an entity's, so it is never dropped as stale |
 | `asset.textures`, `asset.materials`, `asset.fonts`, `asset.sounds` | resources | the tables; the pumps write them |
 | `asset.pump_scopes` | system, phase PreSim, main thread, first | retires what nobody holds, then sends `AssetScopeReady`; writes every table |
@@ -237,6 +246,7 @@ What the module registers with the engine:
 | `asset.pump_fonts` | system, phase PreSim, main thread, after `asset.pump_materials` | writes `asset.fonts` |
 | `asset.pump_sounds` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.sounds` |
 | `asset.pump_blobs` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.blobs` |
+| `asset.pump_streams` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.streams`: checks each file opens, reads its length and loop points |
 | `/materials` (patchable), `/textures`, `/fonts`, `/sounds`, `/scopes` | CLI mounts | the records by path; scopes by `<slot>-<name>` |
 | `scope create`, `scope load`, `scope release` | CLI commands | lifetimes by hand |
 

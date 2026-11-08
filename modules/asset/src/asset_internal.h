@@ -5,6 +5,7 @@
 #include "korvid/asset/material.h"
 #include "korvid/asset/scope.h"
 #include "korvid/asset/sound.h"
+#include "korvid/asset/stream.h"
 #include "korvid/asset/texture.h"
 #include "korvid/core/array.h"
 #include "korvid/core/cli.h"
@@ -39,6 +40,8 @@ struct AssetState_ {
     Map<Name, Handle>   font_by_key;      // interned "path@px" -> font asset
     Pool<SoundAsset>    sounds;
     Map<Name, Handle>   sound_by_path;
+    Pool<StreamAsset>   streams;
+    Map<Name, Handle>   stream_by_path;
     Pool<BlobAsset>     blobs;
     Map<Name, Handle>   blob_by_path;
     Pool<AssetScope_>   scopes;
@@ -51,7 +54,7 @@ struct AssetState_ {
     AssetSamplesRetireFn samples_hook = nullptr;
     void*               samples_hook_user = nullptr;
     Allocator*          general = nullptr;
-    u16                 kind = 0, material_kind = 0, font_kind = 0, sound_kind = 0, blob_kind = 0, scope_kind = 0;
+    u16                 kind = 0, material_kind = 0, font_kind = 0, sound_kind = 0, blob_kind = 0, stream_kind = 0, scope_kind = 0;
     u32                 retired = 0, deferred = 0;
     u32                 loaded = 0, failed = 0;
     u32                 materials_loaded = 0, materials_failed = 0;
@@ -94,11 +97,13 @@ Handle material_load(Engine& e, AssetState_& s, const char* path);
 Handle font_load(Engine& e, AssetState_& s, const char* path, const FontDesc& desc);
 Handle sound_load(Engine& e, AssetState_& s, const char* path);
 Handle blob_load(Engine& e, AssetState_& s, const char* path);
+Handle stream_load(Engine& e, AssetState_& s, const char* path);
 void   texture_retire(Engine& e, AssetState_& s, Handle h);
 void   material_retire(Engine& e, AssetState_& s, Handle h);
 void   font_retire(Engine& e, AssetState_& s, Handle h);
 void   sound_retire(Engine& e, AssetState_& s, Handle h);
 void   blob_retire(Engine& e, AssetState_& s, Handle h);
+void   stream_retire(Engine& e, AssetState_& s, Handle h);
 
 bool asset_materials_init(Engine& e, AssetState_& s, ModuleInstance& self);
 void asset_materials_shutdown(Engine& e, AssetState_& s);
@@ -115,5 +120,9 @@ void asset_sounds_pump(TickContext& ctx);    // the "asset.pump_sounds" system
 bool asset_blobs_init(Engine& e, AssetState_& s, ModuleInstance& self);
 void asset_blobs_shutdown(Engine& e, AssetState_& s);
 void asset_blobs_pump(TickContext& ctx);     // the "asset.pump_blobs" system
+
+bool asset_streams_init(Engine& e, AssetState_& s, ModuleInstance& self);
+void asset_streams_shutdown(Engine& e, AssetState_& s);
+void asset_streams_pump(TickContext& ctx);   // the "asset.pump_streams" system
 
 } // namespace kv

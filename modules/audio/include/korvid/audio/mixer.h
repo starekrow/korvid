@@ -40,8 +40,24 @@ struct SpscRing {
 };
 
 // Retire: stop every voice reading `samples`, then acknowledge with KV_MIX_RETIRED | ticket
-// on the done ring, after which nothing on the device thread reads them.
-enum class MixOp : u8 { Play, Set, Stop, PauseSim, ResumeSim, Bus, Retire };
+// on the done ring, after which nothing on the device thread reads them. Fade: ramp a
+// voice's volume to `volume` over `fade_seconds` (curve, and stop at the end if asked).
+enum class MixOp : u8 { Play, Set, Stop, PauseSim, ResumeSim, Bus, Retire, Fade };
+
+enum class FadeCurve : u8 { Linear, EqualPower };
+
+// Decoded frames of a stream on their way to the mixer: the main thread decodes ahead and
+// writes, the device thread reads. Stereo, interleaved; capacity a power of two in frames.
+// `write` and `read` only grow; acquire/release on each is the protocol, as for SpscRing.
+struct StreamRing {
+    f32* frames   = nullptr;
+    u32  capacity = 0;
+    u64  write    = 0;      // the producer's: frames written ever
+    u64  read     = 0;      // the consumer's: frames consumed ever
+    bool ended    = false;  // the producer has written its last frame (a stream that does not loop)
+    u32  underruns = 0;     // buffers the mixer found it empty before the end (device thread)
+    u32  available() const { return (u32)(__atomic_load_n(&write, __ATOMIC_ACQUIRE) - __atomic_load_n(&read, __ATOMIC_ACQUIRE)); }
+};
 
 constexpr u64 KV_MIX_RETIRED = 0xFFFFFFFFull; // a done entry's slot half meaning "retired", the ticket in gen
 
@@ -56,10 +72,19 @@ struct MixCmd {
     u32        frames, rate, channels;
     f32        volume, pitch, pan;
     bool       loop, pause_with_sim;
+    StreamRing* ring;    // Play: a stream voice reads from here instead of `samples` (stereo at `rate`)
+    f32        fade_seconds; // Fade
+    FadeCurve  curve;
+    bool       stop_at_end;
 };
 
 struct MixVoice {
     const f32* samples = nullptr;
+    StreamRing* ring   = nullptr;
+    f32        fade_from = 0.0f, fade_to = 0.0f;
+    u32        fade_len = 0, fade_pos = 0; // output frames; fading while fade_pos < fade_len
+    FadeCurve  curve = FadeCurve::Linear;
+    bool       fade_stop = false;
     u32        frames = 0, rate = 0, channels = 0;
     f64        pos = 0.0; // in source frames
     f32        volume = 1.0f, pitch = 1.0f, pan = 0.0f;

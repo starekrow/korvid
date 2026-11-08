@@ -1,6 +1,7 @@
 #include "korvid/audio/module.h"
 #include "korvid/asset/scope.h"
 #include "korvid/asset/sound.h"
+#include "korvid/asset/stream.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/profile.h"
@@ -19,14 +20,39 @@ struct VoiceRec {
     bool      used    = false;
     bool      started = false; // the Play command went to the mixer
     bool      stopped = false; // a stop was asked before the start: finish without playing
+    // A stream voice: the decoder (in dec_mem) runs ahead of the mixer into `ring`.
+    bool           stream = false;
+    StreamRing     ring;
+    void*          dec_mem = nullptr;
+    StreamDecoder* dec = nullptr;
+    u64            dec_pos = 0;      // the stream frame the decoder gives next
+    // A fade asked for before the voice started: sent right after the start.
+    bool      fade_pending = false;
+    f32       fade_to = 0.0f, fade_seconds = 0.0f;
+    FadeCurve fade_curve = FadeCurve::EqualPower;
+    bool      fade_stop = false;
 };
+
+constexpr u32 kStreamRingFrames = 1u << 16; // about 1.4 s at 44.1 kHz, 512 KB stereo
 
 // A command the game queued this tick, applied in order by the extract.
 struct Queued {
-    MixOp  op;
-    Handle voice;
-    f32    volume, pitch, pan;
-    u8     bus;
+    MixOp     op;
+    Handle    voice;
+    f32       volume, pitch, pan;
+    u8        bus;
+    f32       seconds = 0.0f;   // Fade
+    FadeCurve curve = FadeCurve::EqualPower;
+    bool      stop = false;
+};
+
+// The music: the track playing (or fading in), and one waiting for its turn in a crossfade.
+struct Music {
+    Handle    stream, voice;
+    Handle    next;            // starts when `delay` runs out
+    f32       delay = 0.0f;
+    MusicPlay next_play;
+    bool      waiting = false;
 };
 
 // Samples the asset module is retiring: sent to the mixer by the extract, freed when it
@@ -42,6 +68,9 @@ struct AudioCommands {
 };
 
 struct AudioState {
+    Engine*       engine = nullptr;
+    Music         music;
+    Allocator*    general = nullptr;
     Mixer         mixer;
     AudioCommands cmds;
     u16           kind = 0;
@@ -74,32 +103,124 @@ int voice_describe(kv_handle h, void* ctx, char* out, size_t cap) {
 // The device thread.
 void device_callback(void* user, f32* out, u32 frames) { mixer_render(*(Mixer*)user, out, frames); }
 
-Handle play_in(AudioState& s, const SoundPlay& play) {
-    Lock lock(s.cmds.mu);
+// The lock held: a voice from the pool. A stream (asset.stream) makes a stream voice,
+// which holds a reference on it until it is done.
+Handle play_locked(AudioState& s, const SoundPlay& play) {
     for (u32 i = 0; i < KV_AUDIO_VOICES; ++i) {
         VoiceRec& v = s.cmds.voices[i];
         if (v.used) continue;
         v.used = true;
         v.started = v.stopped = false;
         v.play = play;
+        v.stream = s.engine && asset_stream(*s.engine, play.sound) != nullptr;
+        if (v.stream) asset_ref(*s.engine, play.sound);
         if (v.gen == 0 || v.gen == 0xFFFFF) v.gen = 1; else ++v.gen;
         return Handle::make(s.kind, v.gen, i);
     }
     ++s.cmds.dropped;
     return Handle{};
 }
-
+Handle play_in(AudioState& s, const SoundPlay& play) {
+    Lock lock(s.cmds.mu);
+    return play_locked(s, play);
+}
+bool queue_locked(AudioState& s, const Queued& q) {
+    if (q.op != MixOp::Bus && !voice_resolve(q.voice.bits, &s.cmds)) return false;
+    s.cmds.queued.push(q);
+    return true;
+}
 bool queue_in(AudioState& s, MixOp op, Handle voice, f32 volume, f32 pitch, f32 pan, u8 bus) {
     Lock lock(s.cmds.mu);
-    if (op != MixOp::Bus && !voice_resolve(voice.bits, &s.cmds)) return false;
-    s.cmds.queued.push(Queued{op, voice, volume, pitch, pan, bus});
+    return queue_locked(s, Queued{op, voice, volume, pitch, pan, bus});
+}
+bool fade_locked(AudioState& s, Handle voice, f32 to, f32 seconds, FadeCurve curve, bool stop) {
+    Queued q{MixOp::Fade, voice, to, 0, 0, 0};
+    q.seconds = seconds; q.curve = curve; q.stop = stop;
+    return queue_locked(s, q);
+}
+
+// The lock held: crossfade to `stream` (null: to silence). See music_play.
+bool music_locked(AudioState& s, Handle stream, const MusicPlay& p) {
+    Music& m = s.music;
+    bool current_live = !m.voice.is_null() && voice_resolve(m.voice.bits, &s.cmds);
+    if (!stream.is_null() && m.stream == stream && (current_live || m.waiting)) return true; // already playing it
+    f32 delay = 0.0f;
+    if (current_live) {
+        fade_locked(s, m.voice, 0.0f, p.fade_out, FadeCurve::EqualPower, true);
+        delay = p.fade_out - p.overlap;
+        if (delay < 0.0f) delay = 0.0f;
+    }
+    m.voice = Handle{};
+    m.stream = stream;
+    m.next = stream;
+    m.next_play = p;
+    m.delay = delay;
+    m.waiting = !stream.is_null();
     return true;
 }
 
+// A voice's slot back to the pool; a stream voice's decoder, ring and reference go with it
+// (the mixer has said it is done, so nothing on the device thread reads the ring).
 void free_voice(AudioState& s, u32 slot) {
     VoiceRec& v = s.cmds.voices[slot];
+    if (v.stream) {
+        if (v.dec) stream_decoder_close(v.dec);
+        free_in(s.general, v.dec_mem, KV_STREAM_DECODER_MEMORY);
+        free_in(s.general, v.ring.frames, sizeof(f32) * 2 * kStreamRingFrames);
+        if (s.engine) asset_unref(*s.engine, v.play.sound);
+        v.dec = nullptr; v.dec_mem = nullptr; v.ring = StreamRing{}; v.stream = false;
+    }
     v.used = false;
     v.started = false;
+    v.fade_pending = false;
+}
+
+// Decodes ahead until the ring is full, looping at the stream's loop points; at the end of
+// a stream that does not loop, marks the ring ended.
+void fill_stream(const StreamAsset& st, VoiceRec& v) {
+    StreamRing& r = v.ring;
+    static f32 block[2 * 2048];
+    for (;;) {
+        u32 room = r.capacity - r.available();
+        if (room < 256 || r.ended) return;
+        u32 want = room < 2048 ? room : 2048;
+        u64 limit = v.play.loop ? st.loop_end : st.frames;
+        if (v.dec_pos + want > limit) want = (u32)(limit - v.dec_pos);
+        u32 got = want ? stream_decoder_read(v.dec, block, want) : 0;
+        if (got == 0) {
+            if (v.play.loop && stream_decoder_seek(v.dec, st.loop_start)) { v.dec_pos = st.loop_start; continue; }
+            __atomic_store_n(&r.ended, true, __ATOMIC_RELEASE);
+            return;
+        }
+        u64 w = r.write;
+        u32 mask = r.capacity - 1;
+        for (u32 k = 0; k < got; ++k) {
+            f32* dst = r.frames + ((w + k) & mask) * 2;
+            dst[0] = block[k * 2]; dst[1] = block[k * 2 + 1];
+        }
+        __atomic_store_n(&r.write, w + got, __ATOMIC_RELEASE);
+        v.dec_pos += got;
+    }
+}
+
+// The Play command of a stream voice, its decoder opened and its ring primed. False if the
+// stream will not decode.
+bool start_stream(AudioState& s, VoiceRec& v, u32 slot, const StreamAsset& st, MixCmd* out) {
+    v.dec_mem = alloc_in(s.general, KV_STREAM_DECODER_MEMORY);
+    v.ring = StreamRing{};
+    v.ring.frames = (f32*)alloc_in(s.general, sizeof(f32) * 2 * kStreamRingFrames);
+    v.ring.capacity = kStreamRingFrames;
+    v.dec = v.dec_mem ? stream_decoder_open(st, v.dec_mem, KV_STREAM_DECODER_MEMORY) : nullptr;
+    if (!v.dec || !v.ring.frames) return false;
+    v.dec_pos = 0;
+    fill_stream(st, v);
+    MixCmd c{};
+    c.op = MixOp::Play; c.slot = slot; c.gen = v.gen; c.bus = (u8)v.play.bus;
+    c.ring = &v.ring; c.rate = st.rate; c.channels = 2;
+    c.volume = v.play.volume; c.pitch = v.play.pitch; c.pan = v.play.pan;
+    c.loop = v.play.loop; c.pause_with_sim = v.play.pause_with_sim;
+    *out = c;
+    return true;
 }
 
 MixCmd cmd_for(const VoiceRec& v, u32 slot, const SoundAsset* snd) {
@@ -153,19 +274,49 @@ void audio_extract(TickContext& ctx) {
         if (!s.mixer.in.push(c)) ++s.cmds.dropped;
     }
 
+    // The music's next track, when its turn in a crossfade comes.
+    if (s.music.waiting) {
+        s.music.delay -= (f32)ctx.dt;
+        if (s.music.delay <= 0.0f) {
+            SoundPlay p;
+            p.sound = s.music.next; p.volume = 0.0f; p.loop = true; p.pause_with_sim = false; p.bus = AudioBus::Music;
+            s.music.voice = play_locked(s, p);
+            if (!s.music.voice.is_null()) fade_locked(s, s.music.voice, s.music.next_play.volume, s.music.next_play.fade_in, FadeCurve::EqualPower, false);
+            s.music.waiting = false;
+        }
+    }
+
     for (u32 i = 0; i < KV_AUDIO_VOICES; ++i) {
         VoiceRec& v = s.cmds.voices[i];
         if (!v.used || v.started) continue;
-        const SoundAsset* snd = asset_sound(e, v.play.sound);
-        bool finish = v.stopped || !snd || snd->state == AssetState::Failed || !s.device;
-        if (!finish && snd->state != AssetState::Ready) continue; // waits for the file
+        MixCmd start{};
+        bool finish, ready;
+        if (v.stream) {
+            const StreamAsset* st = asset_stream(e, v.play.sound);
+            finish = v.stopped || !st || st->state == AssetState::Failed || !s.device;
+            ready  = !finish && st->state == AssetState::Ready;
+            if (ready && !start_stream(s, v, i, *st, &start)) { KV_WARN("audio", "stream '%s' will not decode", st->path); finish = true; ready = false; }
+        } else {
+            const SoundAsset* snd = asset_sound(e, v.play.sound);
+            finish = v.stopped || !snd || snd->state == AssetState::Failed || !s.device;
+            ready  = !finish && snd->state == AssetState::Ready;
+            if (ready) start = cmd_for(v, i, snd);
+        }
         if (finish) {
             ctx.emit(VoiceFinished{Handle::make(s.kind, v.gen, i)});
             free_voice(s, i);
             continue;
         }
-        if (s.mixer.in.push(cmd_for(v, i, snd))) v.started = true;
-        else ++s.cmds.dropped;
+        if (!ready) continue; // waits for the file
+        if (!s.mixer.in.push(start)) { ++s.cmds.dropped; continue; }
+        v.started = true;
+        if (v.fade_pending) {
+            MixCmd f{};
+            f.op = MixOp::Fade; f.slot = i; f.gen = v.gen; f.volume = v.fade_to;
+            f.fade_seconds = v.fade_seconds; f.curve = v.fade_curve; f.stop_at_end = v.fade_stop;
+            if (!s.mixer.in.push(f)) ++s.cmds.dropped;
+            v.fade_pending = false;
+        }
     }
 
     for (const Queued& q : s.cmds.queued) {
@@ -181,10 +332,16 @@ void audio_extract(TickContext& ctx) {
         if (q.op == MixOp::Set) {
             v->play.volume = q.volume; v->play.pitch = q.pitch; v->play.pan = q.pan;
             if (!v->started) continue; // the start will carry them
+        } else if (q.op == MixOp::Fade) {
+            if (!v->started) { // sent right after the start
+                v->fade_pending = true; v->fade_to = q.volume; v->fade_seconds = q.seconds; v->fade_curve = q.curve; v->fade_stop = q.stop;
+                continue;
+            }
         } else if (!v->started) { v->stopped = true; continue; } // finishes next tick, never plays
         MixCmd c{};
         c.op = q.op; c.slot = slot; c.gen = v->gen;
         c.volume = q.volume; c.pitch = q.pitch; c.pan = q.pan;
+        c.fade_seconds = q.seconds; c.curve = q.curve; c.stop_at_end = q.stop;
         if (!s.mixer.in.push(c)) ++s.cmds.dropped;
     }
     s.cmds.queued.clear();
@@ -211,6 +368,8 @@ bool audio_startup(Engine& e, ModuleInstance& self) {
     pthread_mutex_init(&s->cmds.mu, nullptr);
     s->cmds.queued.alloc = &self.general;
     s->cmds.retiring.alloc = &self.general;
+    s->engine  = &e;
+    s->general = &self.general;
     kv_handle_kind_desc desc{};
     desc.name = "audio.voice"; desc.type_key = type_key<VoiceRec>(); desc.ctx = &s->cmds;
     desc.resolve = voice_resolve; desc.describe = voice_describe; desc.flags = KV_HANDLE_GENERATIONAL;
@@ -235,6 +394,7 @@ void audio_shutdown(Engine& e, ModuleInstance& self) {
     platform_audio_close(e); // the callbacks have stopped when this returns
     asset_samples_retire_hook(e, nullptr, nullptr);
     for (const Retiring& r : s->cmds.retiring) asset_retire_done(e, r.ticket); // nothing reads them now
+    for (u32 i = 0; i < KV_AUDIO_VOICES; ++i) if (s->cmds.voices[i].used) free_voice(*s, i); // stream decoders and rings
     s->cmds.retiring.free();
     KV_INFO("audio", "%llu frames rendered in %llu callbacks, peak %u voices, %u clipped samples, %u commands dropped",
             (unsigned long long)s->mixer.stats.frames_rendered, (unsigned long long)s->mixer.stats.callbacks,
@@ -326,9 +486,23 @@ constinit const CliMountDesc k_mounts[] = {
 
 constinit const EventTypeDesc k_events[]    = {KV_EVENT(VoiceFinished)};
 constinit const ResourceDesc  k_resources[] = {{".commands", true}};
+// Phase PostSim, main thread, every tick, after the extract: each stream voice's ring is
+// topped up from its decoder, so the mixer always has a second or so ahead of it.
+void audio_stream_fill(TickContext& ctx) {
+    KV_ZONE("audio.stream_fill");
+    AudioState& s = ctx.state_as<AudioState>();
+    Lock lock(s.cmds.mu);
+    for (VoiceRec& v : s.cmds.voices) {
+        if (!v.used || !v.started || !v.stream || !v.dec) continue;
+        if (const StreamAsset* st = asset_stream(*ctx.engine, v.play.sound)) fill_stream(*st, v);
+    }
+}
+
 constinit const SystemDesc    k_systems[] = {
     {.name = ".extract", .phase = Phase::PostSim, .fn = audio_extract, .writes = ".commands",
      .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".stream_fill", .phase = Phase::PostSim, .fn = audio_stream_fill, .writes = ".commands",
+     .after = ".extract", .main_thread = true, .runs = RunWhen::Always},
 };
 
 } // namespace
@@ -370,6 +544,44 @@ bool   audio_set(Engine& e, Handle voice, f32 volume, f32 pitch, f32 pan) { Audi
 bool   audio_stop(Engine& e, Handle voice) { AudioState* s = state(e); return s && queue_in(*s, MixOp::Stop, voice, 0, 0, 0, 0); }
 void   audio_bus_volume(Engine& e, AudioBus bus, f32 volume) { if (AudioState* s = state(e)) queue_in(*s, MixOp::Bus, Handle{}, volume, 0, 0, (u8)bus); }
 
+bool audio_fade(TickContext& ctx, Handle voice, f32 target, f32 seconds, FadeCurve curve, bool stop_at_end) {
+    AudioState* s = checked(ctx);
+    if (!s) return false;
+    Lock lock(s->cmds.mu);
+    return fade_locked(*s, voice, target, seconds, curve, stop_at_end);
+}
+bool audio_fade(Engine& e, Handle voice, f32 target, f32 seconds, FadeCurve curve, bool stop_at_end) {
+    AudioState* s = state(e);
+    if (!s) return false;
+    Lock lock(s->cmds.mu);
+    return fade_locked(*s, voice, target, seconds, curve, stop_at_end);
+}
+bool music_play(TickContext& ctx, Handle stream, const MusicPlay& p) {
+    AudioState* s = checked(ctx);
+    if (!s) return false;
+    Lock lock(s->cmds.mu);
+    return music_locked(*s, stream, p);
+}
+bool music_play(Engine& e, Handle stream, const MusicPlay& p) {
+    AudioState* s = state(e);
+    if (!s) return false;
+    Lock lock(s->cmds.mu);
+    return music_locked(*s, stream, p);
+}
+void music_stop(Engine& e, f32 fade) {
+    AudioState* s = state(e);
+    if (!s) return;
+    Lock lock(s->cmds.mu);
+    MusicPlay p;
+    p.fade_out = fade;
+    music_locked(*s, Handle{}, p);
+}
+void music_stop(TickContext& ctx, f32 fade) { if (checked(ctx)) music_stop(*ctx.engine, fade); }
+Handle music_current(Engine& e) {
+    AudioState* s = state(e);
+    return s ? s->music.stream : Handle{};
+}
+
 AudioStats audio_stats(Engine& e) {
     AudioStats st;
     AudioState* s = state(e);
@@ -378,7 +590,10 @@ AudioStats audio_stats(Engine& e) {
     st.device  = s->device;
     st.dropped = s->cmds.dropped;
     st.mixer   = s->mixer.stats;
-    for (const VoiceRec& v : s->cmds.voices) if (v.used) ++st.live_voices;
+    for (const VoiceRec& v : s->cmds.voices) {
+        if (v.used) ++st.live_voices;
+        if (v.used && v.stream) { ++st.stream_voices; st.underruns += v.ring.underruns; }
+    }
     return st;
 }
 

@@ -21,10 +21,12 @@ void apply(Mixer& m, const MixCmd& c) {
         if (c.slot >= KV_AUDIO_VOICES) return;
         MixVoice& v = m.voices[c.slot];
         v.samples = c.samples; v.frames = c.frames; v.rate = c.rate; v.channels = c.channels;
+        v.ring = c.ring;
         v.pos = 0.0; v.volume = c.volume; v.pitch = c.pitch; v.pan = c.pan;
         v.bus = c.bus; v.loop = c.loop; v.pause_with_sim = c.pause_with_sim;
         v.gen = c.gen;
-        v.active = c.samples && c.frames && c.rate && c.channels;
+        v.fade_len = v.fade_pos = 0;
+        v.active = c.ring ? c.rate != 0 : c.samples && c.frames && c.rate && c.channels;
         if (!v.active) m.done.push((u64)c.slot | ((u64)c.gen << 32));
         break;
     }
@@ -48,6 +50,22 @@ void apply(Mixer& m, const MixCmd& c) {
     case MixOp::Bus:
         if (c.bus < (u32)AudioBus::Count) m.bus_gain[c.bus] = c.volume;
         break;
+    case MixOp::Fade: {
+        if (c.slot >= KV_AUDIO_VOICES) return;
+        MixVoice& v = m.voices[c.slot];
+        if (!v.active || v.gen != c.gen) return;
+        v.fade_from = v.volume;
+        v.fade_to   = c.volume;
+        v.fade_len  = (u32)(c.fade_seconds * (f32)m.out_rate + 0.5f);
+        v.fade_pos  = 0;
+        v.curve     = c.curve;
+        v.fade_stop = c.stop_at_end;
+        if (v.fade_len == 0) { // at once
+            v.volume = c.volume;
+            if (c.stop_at_end) { v.active = false; m.done.push((u64)c.slot | ((u64)c.gen << 32)); }
+        }
+        break;
+    }
     case MixOp::Retire: {
         for (u32 i = 0; i < KV_AUDIO_VOICES; ++i) {
             MixVoice& v = m.voices[i];
@@ -64,14 +82,64 @@ void apply(Mixer& m, const MixCmd& c) {
 
 // One voice into the output: linear interpolation at the rate ratio times the pitch,
 // equal-power pan, the voice's volume times its bus and the master.
+// The voice's volume for the next output frame: a fade advances one frame.
+inline void fade_step(Mixer& m, MixVoice& v) {
+    if (v.fade_pos >= v.fade_len) return;
+    ++v.fade_pos;
+    f32 p = (f32)v.fade_pos / (f32)v.fade_len;
+    if (v.curve == FadeCurve::Linear) v.volume = v.fade_from + (v.fade_to - v.fade_from) * p;
+    else v.volume = v.fade_from * cosf(p * 1.57079633f) + v.fade_to * sinf(p * 1.57079633f);
+    if (v.fade_pos == v.fade_len) {
+        v.volume = v.fade_to;
+        if (v.fade_stop) { v.active = false; m.done.push((u64)(&v - m.voices) | ((u64)v.gen << 32)); }
+    }
+}
+
+// A stream voice: frames from its ring at the rate ratio times the pitch. The ring's
+// oldest frame is position 0; whole frames passed are given back at the end. An empty
+// ring before the end is an underrun: silence for the rest of the buffer, counted.
+void mix_stream(Mixer& m, MixVoice& v, f32* out, u32 frames) {
+    StreamRing& r = *v.ring;
+    f64 step = (f64)v.rate / (f64)m.out_rate * (f64)(v.pitch > 0.0f ? v.pitch : 0.0f);
+    if (step <= 0.0) return;
+    f32 bus = m.bus_gain[v.bus] * m.bus_gain[(u32)AudioBus::Master];
+    f32 theta = (v.pan + 1.0f) * 0.25f * 3.14159265f;
+    f32 pl = cosf(theta), pr = sinf(theta);
+    u32 oc = m.out_channels;
+    u32 avail = r.available();
+    u64 base = r.read;
+    u32 mask = r.capacity - 1;
+    for (u32 i = 0; i < frames && v.active; ++i) {
+        u32 i0 = (u32)v.pos;
+        if (i0 + 1 >= avail) {
+            if (__atomic_load_n(&r.ended, __ATOMIC_ACQUIRE) && i0 + 1 >= r.available()) { v.active = false; m.done.push((u64)(&v - m.voices) | ((u64)v.gen << 32)); }
+            else ++r.underruns;
+            break;
+        }
+        f32 frac = (f32)(v.pos - (f64)i0);
+        const f32* a = r.frames + ((base + i0) & mask) * 2;
+        const f32* b = r.frames + ((base + i0 + 1) & mask) * 2;
+        f32 l = a[0] + (b[0] - a[0]) * frac, rr = a[1] + (b[1] - a[1]) * frac;
+        f32 g = v.volume * bus;
+        if (oc == 1) out[i] += (l + rr) * 0.5f * g;
+        else { out[i * oc] += l * g * pl; out[i * oc + 1] += rr * g * pr; }
+        v.pos += step;
+        fade_step(m, v);
+    }
+    u32 whole = (u32)v.pos;
+    if (whole) { v.pos -= (f64)whole; __atomic_store_n(&r.read, base + whole, __ATOMIC_RELEASE); }
+}
+
 void mix_voice(Mixer& m, MixVoice& v, f32* out, u32 frames) {
+    if (v.ring) { mix_stream(m, v, out, frames); return; }
     f64 step = (f64)v.rate / (f64)m.out_rate * (f64)(v.pitch > 0.0f ? v.pitch : 0.0f);
     if (step <= 0.0) return; // pitch 0: held
-    f32 gain = v.volume * m.bus_gain[v.bus] * m.bus_gain[(u32)AudioBus::Master];
+    f32 bus = m.bus_gain[v.bus] * m.bus_gain[(u32)AudioBus::Master];
     f32 theta = (v.pan + 1.0f) * 0.25f * 3.14159265f;
-    f32 gl = gain * cosf(theta), gr = gain * sinf(theta);
+    f32 pl = cosf(theta), pr = sinf(theta);
     u32 oc = m.out_channels, sc = v.channels;
-    for (u32 i = 0; i < frames; ++i) {
+    for (u32 i = 0; i < frames && v.active; ++i) {
+        f32 gain = v.volume * bus, gl = gain * pl, gr = gain * pr;
         u32 i0 = (u32)v.pos;
         if (i0 >= v.frames) break;
         f32 frac = (f32)(v.pos - (f64)i0);
@@ -91,7 +159,8 @@ void mix_voice(Mixer& m, MixVoice& v, f32* out, u32 frames) {
         if (oc == 1) out[i] += (l + r) * 0.5f * gain;
         else { out[i * oc] += l * gl; out[i * oc + 1] += r * gr; }
         v.pos += step;
-        if (v.pos >= (f64)v.frames) {
+        fade_step(m, v);
+        if (v.active && v.pos >= (f64)v.frames) {
             if (v.loop) v.pos = fmod(v.pos, (f64)v.frames);
             else { v.active = false; m.done.push((u64)(&v - m.voices) | ((u64)v.gen << 32)); break; }
         }

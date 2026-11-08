@@ -26,6 +26,7 @@ AssetState read_state(AssetState_& s, Handle h, bool* alive) {
     else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))      return f->state; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))    return d->state; }
     else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))      return b->state; }
+    else if (k == s.stream_kind)   { if (StreamAsset* t = s.streams.get(h))  return t->state; }
     else if (const AssetKindDesc* x = external_kind(s, k)) { if (x->refs(x->user, h)) return x->state(x->user, h); }
     *alive = false;
     return AssetState::Failed;
@@ -40,6 +41,7 @@ u64 bytes_of(AssetState_& s, Handle h) {
                    (u64)f->kern_count * (sizeof(u64) + sizeof(f32));
     } else if (k == s.sound_kind) { if (SoundAsset* d = s.sounds.get(h)) return (u64)d->frames * d->channels * sizeof(f32); }
     else if (k == s.blob_kind) { if (BlobAsset* b = s.blobs.get(h)) return b->size; }
+    else if (k == s.stream_kind) { if (StreamAsset* t = s.streams.get(h)) return t->size; }
     else if (const AssetKindDesc* x = external_kind(s, k)) { if (x->bytes && x->refs(x->user, h)) return x->bytes(x->user, h); }
     return 0;
 }
@@ -51,6 +53,7 @@ const char* path_of(AssetState_& s, Handle h) {
     else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))         return f->path; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))       return d->path; }
     else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))         return b->path; }
+    else if (k == s.stream_kind)   { if (StreamAsset* t = s.streams.get(h))     return t->path; }
     else if (const AssetKindDesc* x = external_kind(s, k)) { if (x->path && x->refs(x->user, h)) return x->path(x->user, h); }
     return "?";
 }
@@ -85,6 +88,7 @@ void retire(Engine& e, AssetState_& s, Handle h) {
     else if (k == s.font_kind) font_retire(e, s, h);
     else if (k == s.sound_kind) sound_retire(e, s, h);
     else if (k == s.blob_kind) blob_retire(e, s, h);
+    else if (k == s.stream_kind) stream_retire(e, s, h);
     else if (const AssetKindDesc* x = external_kind(s, k)) x->retire(e, x->user, h);
     else return;
     ++s.retired;
@@ -133,6 +137,7 @@ u32* asset_refs_of(AssetState_& s, Handle h) {
     else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))         return &f->refs; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))       return &d->refs; }
     else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))         return &b->refs; }
+    else if (k == s.stream_kind)   { if (StreamAsset* t = s.streams.get(h))     return &t->refs; }
     else if (const AssetKindDesc* x = external_kind(s, k)) return x->refs(x->user, h);
     return nullptr;
 }

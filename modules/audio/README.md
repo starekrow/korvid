@@ -44,6 +44,33 @@ SDL's thread, marked realtime) calls it in slices of at most 1024 frames.
 The rings are single-producer, single-consumer with acquire/release on the indices; the
 tests push from a second thread to check them.
 
+## Streams, fades and music
+
+**Streams.** A long sound (music, ambience) is an `asset.stream` (`korvid/asset/stream.h`):
+the Ogg file stays compressed in memory, a few megabytes for minutes of music, and is
+decoded as it plays. `audio_play` with a stream makes a stream voice: when the stream is
+Ready, the module opens a decoder over it (512 KB of working memory, never allocating) and
+a ring of 65,536 stereo frames (about 1.4 s at 44.1 kHz); `audio.stream_fill` (PostSim,
+main thread, after the extract) tops the ring up every tick, seeking back to the loop
+start at the loop end, so the join is exact to the frame; the mixer reads the ring as it
+reads a sound, at the rate ratio and the pitch, and never decodes. An empty ring before
+the end is an underrun: silence, counted in `AudioStats::underruns`. The voice holds a
+reference on its stream, so releasing the stream's scope never pulls it out from under
+the music; the reference, the decoder and the ring go when the voice is done.
+
+**Fades.** `audio_fade(ctx, voice, target, seconds, curve, stop_at_end)` ramps a voice's
+volume frame by frame in the mixer, linear or equal-power, from wherever it is; with
+`stop_at_end` the voice finishes there. A fade asked for before the voice started rides
+with the start.
+
+**Music.** `music_play(ctx, stream, MusicPlay{fade_out, fade_in, overlap, volume})` plays
+one looping track on the Music bus, through pauses. The track already playing is left
+alone, so a level change between two maps with the same music never interrupts it.
+Otherwise the current track fades out (equal power, then stops) and the new one starts
+`overlap` seconds before that fade ends and fades in: `overlap == fade_out` is a true
+crossfade, 0 plays them back to back. A request mid-crossfade fades out what was fading
+in. `music_stop(ctx, fade)` and `music_current(e)` complete it.
+
 ## Using it
 
 ```cpp
@@ -87,7 +114,12 @@ Header `korvid/audio/audio.h`:
 
 The same calls take an `Engine&` from outside the schedule.
 
-Header `korvid/audio/mixer.h`: `Mixer`, `MixCmd`, `MixOp`, `SpscRing<T, N>`, `mixer_init`,
+More in `korvid/audio/audio.h`: `audio_fade(ctx, voice, target, seconds, curve, stop_at_end)`;
+`MusicPlay`, `music_play(ctx|e, stream, play)`, `music_stop(ctx|e, fade)`, `music_current(e)`;
+`AudioStats::stream_voices` and `underruns`. The system `audio.stream_fill` (PostSim, main
+thread, after `audio.extract`, `Always`) fills the stream rings.
+
+Header `korvid/audio/mixer.h`: `Mixer`, `MixCmd`, `MixOp` (with `Fade`, `Retire`), `FadeCurve`, `StreamRing`, `SpscRing<T, N>`, `mixer_init`,
 `mixer_render`, `KV_AUDIO_VOICES` (64), `KV_AUDIO_CMD_RING` (1024).
 
 Header `korvid/asset/sound.h` (asset module): `SoundAsset`, `asset_load_sound`, `asset_sound`,
@@ -132,6 +164,7 @@ Depends on: core, math, platform, asset.
 
 ## Not in this module
 
-Streaming from disk, effects and filters, 3D or distance attenuation, more than one
-device, capture, music cross-fades, sample-accurate starts (the tick stamp is not yet
-used by the mixer), and a mixer graph.
+Streaming from disk in chunks (a stream is read whole, compressed), streams other than
+Ogg Vorbis, beat-synced transitions, ducking, effects and filters, 3D or distance
+attenuation, more than one device, capture, sample-accurate starts (the tick stamp is not
+yet used by the mixer), and a mixer graph.
