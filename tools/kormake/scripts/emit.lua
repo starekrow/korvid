@@ -11,6 +11,9 @@ end
 
 local function flag_list(t) return table.concat(t or {}, " ") end
 
+-- The executable's file name: the module's, unless it sets exe.
+local function exe_name(inst) return inst.module.fields.exe or inst.module.name end
+
 local function tool_path(inst)
   local f = inst.module.fields
   if f.system then return f.system, false end
@@ -19,7 +22,7 @@ local function tool_path(inst)
     if not p then util.fail("tool '%s' has no prebuilt binary for %s", inst.module.name, inst.platform) end
     return util.join(inst.module.dir, p), true
   end
-  if f.output == "exe" then return "bin/" .. inst.module.name, true end -- built in this graph (resolve keeps it native)
+  if f.output == "exe" then return inst.prefix .. "bin/" .. exe_name(inst), true end -- the host instance, built in this graph
   util.fail("tool '%s' is neither built from source, prebuilt nor a system lookup", inst.module.name)
 end
 
@@ -29,12 +32,43 @@ function M.run(c, g, opts)
   local target = g.platform .. "-" .. g.config
   local build = util.join(root, "build/" .. target)
   kfs.mkdirp(build)
-  local cxx = opts.cxx or tc.cxx or "c++"
+  -- What an instance compiles and links with: its platform's toolchain in its config. The
+  -- target's are the file's variables; a host instance that differs overrides them.
+  local function flags_of(tcf, conf, cross)
+    local cf = (tcf.configs or {})[conf]
+    return {
+      cxx = (not cross and opts.cxx) or tcf.cxx or "c++",
+      cxxflags = flag_list(tcf.cxxflags) .. " " .. flag_list(cf and cf.cxxflags),
+      ldflags = flag_list(cf and cf.ldflags) .. " " .. flag_list(tcf.ldflags),
+      srcdirs = tcf.srcdirs or {},
+      externals = tcf.externals or {},
+    }
+  end
+  local target_flags = flags_of(tc, g.config, false)
+  local cxx = target_flags.cxx
   local ar = tc.ar or "ar"
-  local cxxflags = flag_list(tc.cxxflags) .. " " .. flag_list((tc.configs or {})[g.config] and tc.configs[g.config].cxxflags)
-  local ldflags = flag_list((tc.configs or {})[g.config] and tc.configs[g.config].ldflags) .. " " .. flag_list(tc.ldflags)
-  local srcdirs = tc.srcdirs or {}
-  local externals = tc.externals or {}
+  local cxxflags = target_flags.cxxflags
+  local ldflags = target_flags.ldflags
+  local function flags(inst)
+    if inst.prefix == "" then return target_flags end
+    inst.flags = inst.flags or flags_of(inst.toolchain.fields, inst.config, inst.platform ~= g.platform)
+    return inst.flags
+  end
+  -- Build-statement overrides of the file's variables, for a host instance.
+  local function overrides(inst, link)
+    if inst.prefix == "" then return "" end
+    local fl = flags(inst)
+    return "\n  cxx = " .. fl.cxx .. (link and ("\n  ldflags = " .. fl.ldflags) or ("\n  cxxflags = " .. fl.cxxflags))
+  end
+  local function extlibs_of(inst, list, mods)
+    local externals = flags(inst).externals
+    for _, mod in ipairs(mods) do
+      for ext in pairs(mod.fields.external or {}) do
+        for _, l in ipairs(externals[ext].libs or {}) do if not util.contains(list, "-l" .. l) then list[#list + 1] = "-l" .. l end end
+      end
+    end
+    return list
+  end
 
   local out = {}
   local function w(s) out[#out + 1] = s end
@@ -100,7 +134,7 @@ function M.run(c, g, opts)
     end
     if not inst.module.src_dir then return list end
     for _, n in ipairs(util.sorted_files(inst.module.src_dir, "cc")) do list[#list + 1] = util.join(inst.module.src_dir, n) end
-    for _, sd in ipairs(srcdirs) do
+    for _, sd in ipairs(flags(inst).srcdirs) do
       local d = util.join(inst.module.src_dir, sd)
       if kfs.isdir(d) then for _, n in ipairs(util.sorted_files(d, "cc")) do list[#list + 1] = util.join(d, n) end end
     end
@@ -108,10 +142,12 @@ function M.run(c, g, opts)
   end
 
   local function compile(inst, src, obj, includes, defines)
-    w(string.format("build %s: cxx %s\n  includes = %s\n  defines = %s", util.ninja_escape(obj), util.ninja_escape(src), includes, defines))
+    w(string.format("build %s: cxx %s\n  includes = %s\n  defines = %s%s", util.ninja_escape(obj), util.ninja_escape(src), includes, defines, overrides(inst, false)))
+    local fl = flags(inst)
+    -- clangd takes the first entry for a file: the target's, since the host's come later.
     cc[#cc + 1] = string.format("{\"directory\": %s, \"file\": %s, \"output\": %s, \"command\": %s}",
       util.json_string(build), util.json_string(src), util.json_string(obj),
-      util.json_string(string.format("%s %s %s %s -c %s -o %s", cxx, cxxflags, defines, includes, src, obj)))
+      util.json_string(string.format("%s %s %s %s -c %s -o %s", fl.cxx, fl.cxxflags, defines, includes, src, obj)))
   end
 
   -- The generated module list for an executable: every engine module in its closure,
@@ -146,7 +182,8 @@ function M.run(c, g, opts)
     if output == "headers" or f.provides == "toolchain" or f.system or f.prebuilt then goto continue end
     do
       local srcs = sources_of(inst)
-      local gen = "gen/" .. sym
+      local pre = inst.prefix
+      local gen = pre .. "gen/" .. sym
       kfs.mkdirp(util.join(build, gen))
       local includes = include_flags(inst, { util.join(build, gen) })
       local defines = define_flags(inst)
@@ -163,14 +200,14 @@ function M.run(c, g, opts)
         for _, s in ipairs(srcs) do lines[#lines + 1] = '#include "' .. s .. '"' end
         local path = util.join(build, gen .. "/unity.cc")
         kfs.write(path, table.concat(lines, "\n") .. "\n")
-        local obj = "obj/" .. sym .. "/unity.o"
+        local obj = pre .. "obj/" .. sym .. "/unity.o"
         compile(inst, path, obj, includes, defines)
         objs[#objs + 1] = obj
       else
         for _, s in ipairs(srcs) do
           local rel = s:sub(#m.dir + 2):gsub("^src/", "")
           if s:sub(1, #build) == build then rel = "gen_" .. util.basename(s) end
-          local obj = "obj/" .. sym .. "/" .. rel:gsub("%.cc$", ".o")
+          local obj = pre .. "obj/" .. sym .. "/" .. rel:gsub("%.cc$", ".o")
           compile(inst, s, obj, includes, defines)
           objs[#objs + 1] = obj
         end
@@ -188,7 +225,7 @@ function M.run(c, g, opts)
               if util.matches(n, pat_glob) then
                 local stem = util.stem(n)
                 local outname = r.outputs:gsub("%%{stem}", stem)
-                local outpath = t.spec.install and ("bin/" .. t.spec.install .. "/" .. outname) or (gen .. "/" .. outname)
+                local outpath = t.spec.install and (pre .. "bin/" .. t.spec.install .. "/" .. outname) or (gen .. "/" .. outname)
                 local tr = tool_rules[rname]
                 w(string.format("build %s: %s %s%s", util.ninja_escape(outpath), rname, util.ninja_escape(util.join(dir, n)),
                   tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""))
@@ -202,7 +239,7 @@ function M.run(c, g, opts)
       -- Assets: bin/assets/<module>/<path>, subdirectories kept.
       if m.assets_dir then
         for _, n in ipairs(util.sorted_files_recursive(m.assets_dir)) do
-          local outpath = "bin/assets/" .. m.name .. "/" .. n
+          local outpath = pre .. "bin/assets/" .. m.name .. "/" .. n
           w(string.format("build %s: copy %s", util.ninja_escape(outpath), util.ninja_escape(util.join(m.assets_dir, n))))
           runtime[#runtime + 1] = outpath
         end
@@ -211,24 +248,26 @@ function M.run(c, g, opts)
 
       if output == "lib" then
         if #objs > 0 then
-          local lib = "lib/libkv_" .. sym .. ".a"
+          local lib = pre .. "lib/libkv_" .. sym .. ".a"
           w(string.format("build %s: ar %s", lib, table.concat(objs, " ")))
           libs_by_key[inst.key] = lib
           all[#all + 1] = lib
         end
       elseif output == "exe" then
-        local libs, extlibs, rt = {}, {}, {}
+        local libs, mods, rt = {}, {}, {}
         for i = #inst.closure, 1, -1 do
           local d = inst.closure[i]
           if libs_by_key[d.key] then libs[#libs + 1] = libs_by_key[d.key] end
-          for ext in pairs(d.module.fields.external or {}) do for _, l in ipairs(externals[ext].libs or {}) do if not util.contains(extlibs, "-l" .. l) then extlibs[#extlibs + 1] = "-l" .. l end end end
+          mods[#mods + 1] = d.module
           for _, r in ipairs(runtime_by_key[d.key] or {}) do rt[#rt + 1] = r end
         end
-        for ext in pairs(f.external or {}) do for _, l in ipairs(externals[ext].libs or {}) do if not util.contains(extlibs, "-l" .. l) then extlibs[#extlibs + 1] = "-l" .. l end end end
+        mods[#mods + 1] = m
+        local extlibs = extlibs_of(inst, {}, mods)
+        inst.extlibs = extlibs
         for _, r in ipairs(runtime) do rt[#rt + 1] = r end
-        local exe = "bin/" .. m.name
-        w(string.format("build %s: link %s %s%s\n  libs = %s", exe, table.concat(objs, " "), table.concat(libs, " "),
-          #rt > 0 and (" || " .. table.concat(rt, " ")) or "", table.concat(extlibs, " ")))
+        local exe = pre .. "bin/" .. exe_name(inst)
+        w(string.format("build %s: link %s %s%s\n  libs = %s%s", exe, table.concat(objs, " "), table.concat(libs, " "),
+          #rt > 0 and (" || " .. table.concat(rt, " ")) or "", table.concat(extlibs, " "), overrides(inst, true)))
         all[#all + 1] = exe
         -- Rules that run once per executable over its staged assets (a pack): part of the
         -- default build in ship, buildable by name in the other configs.
@@ -239,9 +278,10 @@ function M.run(c, g, opts)
               local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name
               local tr = tool_rules[rname]
               local ins = {}
-              for _, p in ipairs(rt) do if p:sub(1, 11) == "bin/assets/" then ins[#ins + 1] = util.ninja_escape(p) end end
+              local staged = pre .. "bin/assets/"
+              for _, p in ipairs(rt) do if p:sub(1, #staged) == staged then ins[#ins + 1] = util.ninja_escape(p) end end
               if r.inputs ~= "assets" then util.fail("rule '%s' of '%s': per-exe rules take inputs = \"assets\"", r.name, t.instance.module.name) end
-              local outp = "bin/" .. r.outputs:gsub("%%{exe}", m.name)
+              local outp = pre .. "bin/" .. r.outputs:gsub("%%{exe}", exe_name(inst))
               local implicit = tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""
               w(string.format("build %s: %s %s%s", util.ninja_escape(outp), rname, table.concat(ins, " "), implicit))
               if g.config == "ship" then all[#all + 1] = outp end
@@ -260,29 +300,31 @@ function M.run(c, g, opts)
     do
       local m = inst.module
       local sym = util.symbol(m.name)
+      local pre = inst.prefix
       local srcs = {}
       for _, n in ipairs(util.sorted_files(m.tests_dir, "cc")) do srcs[#srcs + 1] = util.join(m.tests_dir, n) end
       if #srcs == 0 then goto skip end
       local includes = include_flags(inst, { m.tests_dir })
       local objs = {}
       for _, s in ipairs(srcs) do
-        local obj = "obj/" .. sym .. "/tests/" .. util.basename(s):gsub("%.cc$", ".o")
+        local obj = pre .. "obj/" .. sym .. "/tests/" .. util.basename(s):gsub("%.cc$", ".o")
         compile(inst, s, obj, includes, define_flags(inst))
         objs[#objs + 1] = obj
       end
-      local libs, extlibs = {}, {}
+      local libs, mods = {}, {}
       if libs_by_key[inst.key] then libs[#libs + 1] = libs_by_key[inst.key] end
       for i = #inst.closure, 1, -1 do
         local d = inst.closure[i]
         if libs_by_key[d.key] then libs[#libs + 1] = libs_by_key[d.key] end
-        for ext in pairs(d.module.fields.external or {}) do for _, l in ipairs(externals[ext].libs or {}) do if not util.contains(extlibs, "-l" .. l) then extlibs[#extlibs + 1] = "-l" .. l end end end
+        mods[#mods + 1] = d.module
       end
-      for ext in pairs(m.fields.external or {}) do for _, l in ipairs(externals[ext].libs or {}) do if not util.contains(extlibs, "-l" .. l) then extlibs[#extlibs + 1] = "-l" .. l end end end
-      local exe = "bin/" .. sym .. "_tests"
-      w(string.format("build %s: link %s %s\n  libs = %s", exe, table.concat(objs, " "), table.concat(libs, " "), table.concat(extlibs, " ")))
-      w(string.format("build test/%s.ok: run_test %s", sym, exe))
+      mods[#mods + 1] = m
+      local extlibs = extlibs_of(inst, {}, mods)
+      local exe = pre .. "bin/" .. sym .. "_tests"
+      w(string.format("build %s: link %s %s\n  libs = %s%s", exe, table.concat(objs, " "), table.concat(libs, " "), table.concat(extlibs, " "), overrides(inst, true)))
+      w(string.format("build %stest/%s.ok: run_test %s", pre, sym, exe))
       tests[#tests + 1] = exe
-      checks[#checks + 1] = "test/" .. sym .. ".ok"
+      checks[#checks + 1] = pre .. "test/" .. sym .. ".ok"
     end
     ::skip::
   end
@@ -300,6 +342,7 @@ function M.run(c, g, opts)
   w("build build.ninja: regen | " .. table.concat(esc, " "))
 
   kfs.mkdirp(util.join(build, "test"))
+  kfs.mkdirp(util.join(build, "host/test"))
   kfs.write(util.join(build, "build.ninja"), table.concat(out, "\n") .. "\n", true)
   kfs.write(util.join(build, "compile_commands.json"), "[\n" .. table.concat(cc, ",\n") .. "\n]\n")
   -- Where clangd looks.

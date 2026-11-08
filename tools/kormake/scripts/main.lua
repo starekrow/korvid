@@ -18,6 +18,9 @@ local emit = kormake.load("emit")
 
 local function usage()
   io.stderr:write([[
+A target is <platform>-<config>; "host" is the machine kormake runs on, alone (its host
+config, from the master file's host_config) or with a config (host-debug).
+
 usage: kormake build <platform>-<config> [--no-unity] [--cxx PATH]
        kormake gen   <platform>-<config> [--no-unity] [--cxx PATH]
        kormake test  <platform>-<config> [MODULE]
@@ -51,7 +54,7 @@ local function parse(args)
     elseif a == "--why" then opts.why = args[i + 1]; i = i + 1
     elseif a == "--cxx" then opts.cxx = args[i + 1]; i = i + 1
     elseif a:match("^%-%-") then util.fail("unknown option '%s'", a)
-    elseif not target and a:match("^[%w_]+%-[%w_]+$") then target = a
+    elseif not target and (a:match("^[%w_]+%-[%w_]+$") or a == "host") then target = a
     else rest[#rest + 1] = a end
     i = i + 1
   end
@@ -64,7 +67,9 @@ local function split_target(target, c)
     local cf = c.master.configs[1] or "debug"
     return p, cf
   end
+  if target == "host" then return KORMAKE_HOST, c.master.host_config or "dev" end
   local p, cf = target:match("^([%w_]+)%-([%w_]+)$")
+  if p == "host" then p = KORMAKE_HOST end
   return p, cf
 end
 
@@ -74,6 +79,7 @@ local function run(cmd, target, opts, rest)
   local root = find_root()
   local c = collect.run(root)
   local platform, config = split_target(target, c)
+  if target then target = platform .. "-" .. config end
   if cmd == "clean" then
     local dir = target and util.join(root, "build/" .. target) or util.join(root, "build")
     kfs.rmtree(dir)
@@ -124,6 +130,22 @@ local function run(cmd, target, opts, rest)
   end
   local build = emit.run(c, g, opts)
   print(string.format("kormake: %s/build.ninja (%d instances)", build, #g.instances))
+  -- The tools this build runs, as built for the host, and what they link from the system:
+  -- a tool that pulls in a window or a sound card says so here.
+  local host_tools = {}
+  for _, inst in ipairs(g.instances) do
+    if inst.host and inst.module.fields.output == "exe" and inst.extlibs then
+      local used = false
+      for _, i in ipairs(g.instances) do for _, t in ipairs(i.tools) do if t.instance == inst then used = true end end end
+      if used or util.contains(inst.module.fields.platforms or {}, "host") then
+        host_tools[#host_tools + 1] = string.format("%s (%s)", inst.module.fields.exe or inst.module.name,
+          #inst.extlibs > 0 and table.concat(inst.extlibs, " ") or "no system libraries")
+      end
+    end
+  end
+  if #host_tools > 0 then
+    print(string.format("kormake: host tools for %s-%s: %s", g.host, g.host_config, table.concat(host_tools, ", ")))
+  end
   if cmd == "gen" then return 0 end
   if cmd == "build" then
     local rc = kfs.exec(string.format("ninja -C %s %s", build, table.concat(rest, " ")))
@@ -135,21 +157,22 @@ local function run(cmd, target, opts, rest)
     local exe = rest[1] or util.fail("usage: kormake package <platform>-<config> <exe>")
     local inst
     for _, i in ipairs(g.instances) do
-      if i.module.name == exe and i.module.fields.output == "exe" and i.config == g.config and i.platform == g.platform then inst = i end
+      if (i.module.name == exe or i.module.fields.exe == exe) and i.module.fields.output == "exe" and i.prefix == "" then inst = i end
     end
     if not inst then util.fail("'%s' is not an executable in %s", exe, target) end
+    local exe_file = inst.module.fields.exe or inst.module.name
     local pack
     for _, t in ipairs(inst.tools) do
       for _, r in ipairs(t.instance.module.fields.exports or {}) do
-        if r.per == "exe" then pack = "bin/" .. r.outputs:gsub("%%{exe}", exe) end
+        if r.per == "exe" then pack = "bin/" .. r.outputs:gsub("%%{exe}", exe_file) end
       end
     end
-    local rc = kfs.exec(string.format("ninja -C '%s' 'bin/%s'%s", build, exe, pack and (" '" .. pack .. "'") or ""))
+    local rc = kfs.exec(string.format("ninja -C '%s' 'bin/%s'%s", build, exe_file, pack and (" '" .. pack .. "'") or ""))
     if rc ~= 0 then return rc end
     local dist = util.join(root, "dist/" .. exe)
     local function sh(fmt, ...) local r = kfs.exec(string.format(fmt, ...)); if r ~= 0 then util.fail("package: a copy failed") end end
     sh("rm -rf '%s' && mkdir -p '%s/licenses'", dist, dist)
-    sh("cp '%s/bin/%s' '%s/'", build, exe, dist)
+    sh("cp '%s/bin/%s' '%s/'", build, exe_file, dist)
     if pack then sh("cp '%s/%s' '%s/'", build, pack, dist) end
     if kfs.isdir(util.join(build, "bin/shaders")) then sh("cp -r '%s/bin/shaders' '%s/'", build, dist) end
     local copied = 0
@@ -171,7 +194,13 @@ local function run(cmd, target, opts, rest)
   end
   if cmd == "test" then
     local targets = {}
-    if #rest == 0 then targets[1] = "check" else for _, m in ipairs(rest) do targets[#targets + 1] = "test/" .. util.symbol(m) .. ".ok" end end
+    if #rest == 0 then targets[1] = "check" else
+      for _, m in ipairs(rest) do
+        local pre = ""
+        for _, i in ipairs(g.instances) do if i.module.name == m and i.tests then pre = i.prefix end end
+        targets[#targets + 1] = pre .. "test/" .. util.symbol(m) .. ".ok"
+      end
+    end
     return kfs.exec(string.format("ninja -C %s %s", build, table.concat(targets, " ")))
   end
   usage()

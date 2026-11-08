@@ -15,16 +15,17 @@ the `main` such a tool needs and the rule for when it is done.
 2. Joins the rest into one CLI request prefixed by the tool's name, quoting words with
    spaces: `kpack list build/game.kpak` becomes the request `kpack list build/game.kpak`.
    `kpack help` is the CLI's own `help`, which lists every command the tool knows.
-3. Starts the engine headless with the module list (the platform brings up no video
-   until a window opens, and a tool opens none). The CLI never reads stdin in a tool: a
-   build's pipes are not a session.
+3. Starts the engine headless with the module list. `platform` has no window and links
+   no external library; a tool that wants a window or sound adds `platform_hid` or
+   `platform_audio` to its deps, and kormake's host tool line says what it then links.
+   The CLI never reads stdin in a tool: a build's pipes are not a session.
 4. Runs the request. Its lines go to stdout; a failure goes to stderr and the exit status
    is 2.
 5. Ticks the engine as fast as the work allows (a tick waiting only on the disk sleeps
    100 microseconds) until a system calls `tool_finish(e, code)`, or until `--max-ticks`.
 6. Shuts the engine down. In debug and dev builds, memory still live after shutdown makes
-   the exit status 3. kormake builds tools for the host in the ship config, so a tool in a
-   build skips the check; run the debug build of the tool to see it.
+   the exit status 3. kormake builds tools for the host in the host config (dev by
+   default), so a tool a build runs makes the check too.
 
 ## Using it
 

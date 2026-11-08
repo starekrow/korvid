@@ -1,10 +1,11 @@
-# kpack
+# tool_kpack
 
-The packer. It builds a `.kpak` from a directory or a list of files, and lists, verifies,
+The packer, `bin/kpack`. It builds a `.kpak` from a directory or a list of files, and lists, verifies,
 extracts and repacks any zip. It is an engine like a game, built the way every Korvid
 tool is (see `modules/tool`): its verbs are CLI commands, its work is a system reading
 through the I/O queue, its memory is the engine's, and it runs on a machine with no
-display.
+display. It is built for the host (`platforms = { "host" }`) and links no system library:
+its closure is `core`, `platform`, `cli`, `tool`, `pack` and `inflate`.
 
 ## Using it
 
@@ -22,7 +23,7 @@ Engine flags go first: `kpack --verbose --threads 4 pack ...`. The exit status i
 success, 1 when the job failed (a file that would not read, a bad CRC, a write that
 failed), 2 for a command line the CLI refused.
 
-**In a build.** A game opts in with `tools = { "kpack" }` in its `module.lua`. kpack's
+**In a build.** A game opts in with `tools = { "tool_kpack" }` in its `module.lua`. kpack's
 `pack` rule runs once per such executable over exactly the assets its module closure
 stages under `bin/assets/` (kormake knows the list; Ninja passes it in a response file),
 writing `bin/<exe>.kpak`. The ship config builds it by default; the other configs build
@@ -34,7 +35,7 @@ linux-ship <exe>` puts the executable, the pack, the shaders and the licenses in
 
 ## How it works
 
-A command checks its arguments and starts a job; `kpack.pump` (PreSim, main thread,
+A command checks its arguments and starts a job; `tool_kpack.pump` (PreSim, main thread,
 every tick) runs it in stages:
 
 1. For `pack`: list the directory (`io_list_files`) or read the response file through
@@ -52,7 +53,7 @@ every tick) runs it in stages:
 | name | kind | what |
 |---|---|---|
 | `kpack pack`, `kpack list`, `kpack verify`, `kpack extract`, `kpack repack` | CLI commands | above |
-| `kpack.pump` | system, phase PreSim, main thread, `Always` | the job |
+| `tool_kpack.pump` | system, phase PreSim, main thread, `Always` | the job |
 | `pack` | exported rule | `per = "exe"`, `inputs = "assets"`, `outputs = "%{exe}.kpak"` |
 
 ## Behaviour worth knowing
@@ -63,8 +64,9 @@ every tick) runs it in stages:
   is a change here, not in the format.
 - **Repack is deterministic.** Packing a directory and repacking a zip of the same files
   give the same bytes.
-- **kormake builds kpack in the target's own config** on a native build; a cross build
-  that needs a host kpack is not supported yet.
+- **kpack is always the host's.** On `linux-dev` it is `bin/kpack`; in any other build
+  (`linux-ship`, `linux-debug`, a cross build) kormake builds a host copy at
+  `host/bin/kpack`, in the host config, and the pack rule runs that one.
 
 ## Not in this module
 

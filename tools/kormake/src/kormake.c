@@ -18,6 +18,17 @@
 
 #define KORMAKE_VERSION "1.0"
 
+/* The platform this kormake runs on: what "host" means in a target or a module's platforms. */
+#if defined(__linux__)
+#define KORMAKE_HOST "linux"
+#elif defined(__APPLE__)
+#define KORMAKE_HOST "macos"
+#elif defined(_WIN32)
+#define KORMAKE_HOST "windows"
+#else
+#error "kormake: unknown host platform"
+#endif
+
 static int kfs_listdir(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
     DIR* d = opendir(path);
@@ -201,6 +212,8 @@ int main(int argc, char** argv) {
     lua_setglobal(L, "kormake_script");
     lua_pushstring(L, KORMAKE_VERSION);
     lua_setglobal(L, "KORMAKE_VERSION");
+    lua_pushstring(L, KORMAKE_HOST);
+    lua_setglobal(L, "KORMAKE_HOST");
     lua_newtable(L);
     for (int i = 1; i < argc; ++i) { lua_pushstring(L, argv[i]); lua_rawseti(L, -2, i); }
     lua_setglobal(L, "arg");

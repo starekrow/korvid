@@ -1,7 +1,7 @@
 // kpack: commands start a job, the system runs it. A job is a list of items (files to
 // read, or a pack's entries to read back), read through the I/O queue within its
 // budgets, then packed, written, checked or extracted.
-#include "korvid/kpack/module.h"
+#include "korvid/tool_kpack/module.h"
 #include "korvid/core/array.h"
 #include "korvid/core/cli.h"
 #include "korvid/core/engine.h"
@@ -45,7 +45,7 @@ struct KpackState {
     u64         bytes = 0;
 };
 
-KpackState* state(Engine& e) { return engine_module_state_as<KpackState>(e, "kpack"); }
+KpackState* state(Engine& e) { return engine_module_state_as<KpackState>(e, "tool_kpack"); }
 
 void say(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 void say(const char* fmt, ...) {
@@ -365,8 +365,8 @@ constinit const SystemDesc k_systems[] = {
 
 } // namespace
 
-KV_MODULE_DEFINE(kpack_module) = {
-    .name     = "kpack",
+KV_MODULE_DEFINE(tool_kpack_module) = {
+    .name     = "tool_kpack",
     .systems  = k_systems,
     .commands = k_commands,
     .startup  = kpack_startup,

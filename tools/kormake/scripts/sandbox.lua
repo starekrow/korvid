@@ -35,7 +35,7 @@ end
 local module_fields = {
   output = true, deps = true, provides = true, platforms = true, external = true, tools = true,
   exports = true, sources = true, defines = true, prebuilt = true, system = true, bindings = true,
-  platform = true, unity = true, engine_module = true, module_list = true, licenses = true,
+  platform = true, unity = true, engine_module = true, module_list = true, licenses = true, exe = true,
   tag = true, srcdirs = true, cxx = true, cxxflags = true, ldflags = true, configs = true, ar = true, externals = true,
 }
 
@@ -72,7 +72,7 @@ function M.eval_module(path, text)
   return result
 end
 
--- The master file: project, requires_kormake, modulepath, platforms, configs, bind, root, override.
+-- The master file: project, requires_kormake, modulepath, platforms, configs, host_config, bind, root, override.
 function M.eval_master(path, text)
   local env = base_env()
   local m = { modulepaths = {}, platforms = {}, configs = {}, binds = {}, roots = {}, overrides = {} }
@@ -81,6 +81,7 @@ function M.eval_master(path, text)
   env.modulepath = function(t) for _, p in ipairs(util.as_list(t)) do m.modulepaths[#m.modulepaths + 1] = p end end
   env.platforms = function(t) m.platforms = copy_data(util.as_list(t)) end
   env.configs = function(t) m.configs = copy_data(util.as_list(t)) end
+  env.host_config = function(c) if type(c) ~= "string" then util.fail("%s: host_config takes a config name", path) end m.host_config = c end
   env.bind = function(iface) return function(t) m.binds[iface] = copy_data(t) end end
   env.root = function(name) return function(t) m.roots[#m.roots + 1] = { name = name, fields = copy_data(t or {}) } end end
   env.override = function(name) return function(t) m.overrides[name] = copy_data(t) end end

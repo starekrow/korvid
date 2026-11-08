@@ -8,9 +8,12 @@ for a later one.
 
 - **kormake staged only the top level of `assets/`.** A game with `maps/`, `tiles/` and
   `music/` found nothing. Staging is now recursive.
-- **kormake could not build a tool from source.** The pack rule needed `kpack`. Native
-  builds now use the target config's own tool binary; cross builds still need host
-  instances (PRD open question).
+- **kormake could not build a tool from source.** The pack rule needed `kpack`. Tools
+  are now host instances: `host` is a target and a module platform, a host module
+  (`tool_kpack`) is built for the build machine in the host config whatever the target, and
+  a cross build carries the host's instances under `host/` in the same graph. The
+  platform module split (`platform`, `platform_hid`, `platform_audio`) keeps the packer
+  off SDL.
 - **A Tiled tile object could only be wholly solid.** Trees and houses need collision
   only at the trunk or the walls. Tile objects now collide by their tile's collision
   shapes, scaled to the object.
