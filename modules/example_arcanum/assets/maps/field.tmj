@@ -3366,6 +3366,42 @@
      "visible": true,
      "type": "",
      "id": 74
+    },
+    {
+     "name": "rock",
+     "point": true,
+     "x": 152,
+     "y": 196,
+     "width": 0,
+     "height": 0,
+     "rotation": 0,
+     "visible": true,
+     "type": "",
+     "id": 75
+    },
+    {
+     "name": "rock",
+     "point": true,
+     "x": 264,
+     "y": 300,
+     "width": 0,
+     "height": 0,
+     "rotation": 0,
+     "visible": true,
+     "type": "",
+     "id": 76
+    },
+    {
+     "name": "rock",
+     "point": true,
+     "x": 424,
+     "y": 248,
+     "width": 0,
+     "height": 0,
+     "rotation": 0,
+     "visible": true,
+     "type": "",
+     "id": 77
     }
    ],
    "properties": [

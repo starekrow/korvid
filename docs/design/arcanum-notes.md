@@ -79,3 +79,35 @@ for a later one.
 - **Per-level asset lists.** The character sheets are loaded globally because the game
   makes renderer materials from them by hand. A material that follows a texture asset
   (`asset_material_for_texture`) would let them live in level scopes like the tilesets.
+
+## Save and load (after the slice)
+
+Nov 8, 2026. Boulders to push and hearts to lose gave a save something to hold; the
+`save` module and the core pieces under it came from what that needed.
+
+- **A kind could not be put back as it was.** Spawning rows again gives new handles, so
+  every handle into the kind breaks and the next spawn differs from the saved run's.
+  `Table::restore_slots` (over `Pool::restore_slots`) sets the slots, generations and free
+  list exactly; `load_kind` fills the rows. A run continued from a save hashes as the
+  saving run did.
+- **The JSON reader lost integers past 2^53.** Numbers were doubles only. Integer
+  literals now keep their exact value (`JsonValue::integer`, `json_u64`, `json_i64`).
+- **Nothing found a handle kind by name.** `kv_handle_kind_find` does, for loading.
+- **A handle into a level does not outlive the level.** The villagers' and boulders'
+  `Parent` names the level's root, which is a new entity after the load's rebuild. The
+  game passes a `SaveRemap` for `level.root`. Candidate: the level module could offer
+  the remap itself (`level_save_remap(e)`), since every game that saves children of a
+  level needs it.
+- **Materials come back by the order they were made in.** `Sprite::material` is saved as
+  `render.material#1:1` and read back with today's id for that name, which is right only
+  while the game makes its materials in the same order at startup. Candidate: named
+  materials (or `asset_material_for_texture`, above) so a save can name what it means.
+- **The save's read had to hold the sim.** Without it, the tick the file arrived on
+  decided when the menu closed, and the demo's hashes followed the disk. The game holds
+  with `HoldLoading` and lets the level transition carry the hold. Candidate: a load
+  helper in the level module that takes the bytes and does the hold, the request and the
+  restore in one.
+- **Enums are saved as numbers.** `Sprite::space` is `0`. A field trait for an enum's
+  names would make saves readable and survive reordering an enum.
+- **No CBOR yet.** The writer's calls are the data model, so CBOR is a second encoder and
+  a decoder into the same tree (see `modules/save/README.md`).

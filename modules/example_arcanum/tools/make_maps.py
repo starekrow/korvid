@@ -81,7 +81,7 @@ class Objects:
     def area(self, name, cls, x, y, w, h, props):
         return self.add(name=name, type=cls, x=x, y=y, width=w, height=h, properties=props)
 
-def make_map(name, title, music, seed, paths, pond, trees, houses, spawns, exits, npcs):
+def make_map(name, title, music, seed, paths, pond, trees, houses, spawns, exits, npcs, rocks):
     rng = Rng(seed)
     ground = []
     for y in range(H):
@@ -96,6 +96,7 @@ def make_map(name, title, music, seed, paths, pond, trees, houses, spawns, exits
     for (who, x, y, route) in npcs:
         objs.point(who, x, y, [{"name": "sheet", "type": "string", "value": "example_arcanum/actors/" + who + ".png"},
                                {"name": "route", "type": "string", "value": route}])
+    for (x, y) in rocks: objs.point("rock", x, y)  # a pushable boulder from the nature sheet, the point its center
     sp = Objects()
     for (n, x, y) in spawns: sp.point(n, x, y)
     ex = Objects()
@@ -136,7 +137,8 @@ def main():
     make_map("village.tmj", "Village", "example_arcanum/music/village.ogg", 7, v_paths, set(), v_trees, v_houses,
              [("player_start", 312, 248), ("east", W * 16 - 40, (road_y + 1) * 16 + 8)],
              [(W * 16 - 8, road_y * 16, 8, 48, "field", "west")],
-             [("OldMan", 248, 120, ""), ("ManGreen", 260, 300, "0,0 96,0")])
+             [("OldMan", 248, 120, ""), ("ManGreen", 260, 300, "0,0 96,0")],
+             [(312, 196), (232, 176), (440, 344), (168, 344)])
     # The field: the road comes in from the west and meanders east; a pond; more trees.
     f_paths = rect(0, road_y, 22, road_y + 3) | rect(19, 8, 22, road_y) | rect(19, 8, 34, 11)
     f_pond = rect(26, 18, 34, 24)
@@ -147,7 +149,8 @@ def main():
     make_map("field.tmj", "Field", "example_arcanum/music/road.ogg", 11, f_paths, f_pond, f_trees, [],
              [("player_start", 48, (road_y + 1) * 16 + 8), ("west", 40, (road_y + 1) * 16 + 8)],
              [(0, road_y * 16, 8, 48, "village", "east")],
-             [])
+             [],
+             [(152, 196), (264, 300), (424, 248)])
 
 if __name__ == "__main__":
     main()

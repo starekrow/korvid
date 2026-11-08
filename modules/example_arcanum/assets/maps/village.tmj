@@ -3414,6 +3414,54 @@
        "value": "0,0 96,0"
       }
      ]
+    },
+    {
+     "name": "rock",
+     "point": true,
+     "x": 312,
+     "y": 196,
+     "width": 0,
+     "height": 0,
+     "rotation": 0,
+     "visible": true,
+     "type": "",
+     "id": 77
+    },
+    {
+     "name": "rock",
+     "point": true,
+     "x": 232,
+     "y": 176,
+     "width": 0,
+     "height": 0,
+     "rotation": 0,
+     "visible": true,
+     "type": "",
+     "id": 78
+    },
+    {
+     "name": "rock",
+     "point": true,
+     "x": 440,
+     "y": 344,
+     "width": 0,
+     "height": 0,
+     "rotation": 0,
+     "visible": true,
+     "type": "",
+     "id": 79
+    },
+    {
+     "name": "rock",
+     "point": true,
+     "x": 168,
+     "y": 344,
+     "width": 0,
+     "height": 0,
+     "rotation": 0,
+     "visible": true,
+     "type": "",
+     "id": 80
     }
    ],
    "properties": [
