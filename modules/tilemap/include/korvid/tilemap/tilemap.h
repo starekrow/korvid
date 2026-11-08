@@ -146,6 +146,23 @@ point2             tilemap_to_world(point2 origin, f32 map_x, f32 map_y);
 // whose bool `collision` is true). Outside the map is solid.
 bool               tilemap_solid(const TilemapAsset& m, i32 x, i32 y);
 
+// Moving a box through the solids. `box` is world units (min corner, +y up) for a map
+// placed at `origin`; `delta` the move this tick. x first, then y, each axis swept against
+// the solid cells, the solid rectangles and the map's edges in the box's path, so a box
+// slides along a wall it meets at an angle and nothing tunnels at any speed. Boxes are
+// half-open: touching a wall is not overlapping it. A stopped box ends exactly on the
+// wall's edge (the wall's coordinate minus the box's size, nothing added), so set your
+// position from `box`, not by adding `moved`. A box that starts overlapping a solid is
+// not pushed out: it may move along or away from it, not deeper, and `started_inside`
+// says so.
+struct TileMove {
+    rect2 box;              // where the box ended, world units
+    vec2  moved;            // box - the box given, for information
+    bool  hit_x = false, hit_y = false;
+    bool  started_inside = false;
+};
+TileMove tilemap_move(const TilemapAsset& m, point2 origin, rect2 box, vec2 delta);
+
 // The parser on its own, for tools and tests: a map's JSON into `out` (allocating from
 // `alloc`, which must outlive it); external tilesets named, not read (`tilesets[i].image`
 // is null and `name` holds the resolved .tsj path until tilemap_parse_tileset fills it).

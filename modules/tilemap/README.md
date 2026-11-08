@@ -43,6 +43,16 @@ uses the tile, flips applied; objects with `solid` add their rectangles. Outside
 is solid. `tilemap_solid(m, x, y)` answers for whole cells; the rectangles are in
 `solid_rects` (map pixels, y down).
 
+**Moving a box.** `tilemap_move(m, origin, box, delta)` sweeps an axis-aligned box (world
+units, min corner) through the solids, x first, then y, so a box sliding along a wall it
+meets at an angle keeps going, and nothing tunnels at any speed. Boxes are half-open:
+touching a wall is not overlapping it, and a box may rest against one forever. A stopped
+box ends exactly on the wall's edge (the wall's coordinate minus the box's size), so the
+caller sets its position from the returned box; pushing into a wall for a thousand ticks
+drifts nothing. Moving along a wall made of many tiles never catches on their seams. A box
+that starts overlapping a solid (spawned in a wall) is not pushed out: it may move along or
+away, not deeper, and `started_inside` says so. Each of these is a test.
+
 **Coordinates.** A Tiled pixel `(x, y)` (y down from the map's top-left) is the world
 point `origin + (x, -y)`: one world unit per pixel, +y up as everywhere in the engine.
 
@@ -83,6 +93,7 @@ Header `korvid/tilemap/tilemap.h`:
 | `tilemap_layer_find`, `tilemap_object_find`, `tilemap_gid_at`, `tilemap_tileset_of`, `tilemap_tile_info` | functions | lookups |
 | `tilemap_property`, `tilemap_map_property`, `tilemap_tile_property` | functions | properties by name |
 | `tilemap_cell_of`, `tilemap_cell_center`, `tilemap_to_world`, `tilemap_solid` | functions | cells and the world |
+| `TileMove`, `tilemap_move(m, origin, box, delta)` | record, function | a box swept through the solids: `box`, `moved`, `hit_x`, `hit_y`, `started_inside` |
 | `tilemap_parse_map`, `tilemap_parse_tileset`, `tilemap_resolve` | functions | the parser and its path rule, for tools and tests |
 
 What the module registers with the engine:
@@ -110,4 +121,4 @@ What the module registers with the engine:
 
 TMX (XML), infinite maps, isometric and hexagonal maps, image-collection tilesets,
 templates, Wang sets, parallax and image layers drawn, zstd layers, polygon collision,
-and collision response (that is `tilemap_move`, the next pass).
+and collision response beyond `tilemap_move` (pushing, sliding off corners, slopes).
