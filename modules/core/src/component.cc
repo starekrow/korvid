@@ -154,8 +154,14 @@ u64 schema_hash(Span<const FieldDesc> fields, const void* row) {
     u64 h = 0x9e3779b97f4a7c15ull ^ fields.len;
     for (const FieldDesc& f : fields) {
         u32 size = field_type_size(f.type);
-        for (u32 i = 0; i < f.count; ++i)
-            h = hash_mix(h ^ scalar_bits(f.type, base + f.offset + i * size));
+        for (u32 i = 0; i < f.count; ++i) {
+            u64 bits = scalar_bits(f.type, base + f.offset + i * size);
+            // A handle's kind is a number that depends on what registered first; its name
+            // is what the kind is. Generation and index count as they are.
+            if (f.type == FieldType::Handle && bits)
+                bits = (bits & 0x000FFFFFFFFFFFFFull) ^ kv_handle_kind_name_hash(Handle{bits}.kind());
+            h = hash_mix(h ^ bits);
+        }
     }
     return hash_mix(h);
 }

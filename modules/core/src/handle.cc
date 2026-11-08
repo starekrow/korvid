@@ -1,5 +1,6 @@
 #include "korvid/core/handle.h"
 #include "korvid/core/atomic.h"
+#include "korvid/core/hash.h"
 #include "korvid/core/log.h"
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +14,7 @@ constexpr uint32_t kNameLen  = 32;
 struct Kind {
     kv_handle_kind_desc desc;
     char                name[kNameLen];
+    uint64_t            name_hash; // of the stored name: what a kind is across runs
     uint32_t            live;
 };
 
@@ -53,6 +55,7 @@ uint16_t kv_handle_kind_register(const kv_handle_kind_desc* desc) {
     strncpy(k.name, desc->name ? desc->name : "", kNameLen - 1);
     k.name[kNameLen - 1] = 0;
     k.desc.name = k.name;
+    k.name_hash = kv::hash_str(k.name);
     kv::atomic_store(&k.live, 1u, kv::MO_RELEASE);
     if (id32 > (kMaxKinds * 3) / 4 && kv::atomic_exchange(&g_warned, 1u, kv::MO_RELAXED) == 0)
         KV_WARN("handle", "%u of %u kind ids used", id32, kMaxKinds - 1);
@@ -89,6 +92,17 @@ void* kv_handle_resolve_as(kv_handle h, const void* type_key) {
 
 const char* kv_handle_kind_name(uint16_t kind) {
     return kind != 0 && kind < count() ? g_kinds[kind].name : "";
+}
+
+uint64_t kv_handle_kind_name_hash(uint16_t kind) {
+    return kind != 0 && kind < count() ? g_kinds[kind].name_hash : 0;
+}
+
+uint16_t kv_handle_kind_find(const char* name) {
+    if (!name || !name[0]) return 0;
+    for (uint32_t k = count(); k-- > 1;) // the latest first: ids are never reused
+        if (kv::atomic_load(&g_kinds[k].live, kv::MO_ACQUIRE) && strncmp(g_kinds[k].name, name, kNameLen - 1) == 0) return (uint16_t)k;
+    return 0;
 }
 
 const void* kv_handle_type_key(kv_handle h) {

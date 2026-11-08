@@ -64,6 +64,12 @@ void*       kv_handle_resolve(kv_handle h);
 /* Also NULL when the kind's type key is not this one: manual RTTI. */
 void*       kv_handle_resolve_as(kv_handle h, const void* type_key);
 const char* kv_handle_kind_name(uint16_t kind); /* "" for unknown */
+/* The hash of the kind's stored name, 0 for unknown: what a kind is across runs and
+ * builds, where its id is only the order of registration. The state hash uses it. */
+uint64_t    kv_handle_kind_name_hash(uint16_t kind);
+/* The live kind registered under `name` (compared as stored, 31 bytes), the latest if
+ * several are; 0 for none. Not fast: for loading a save, not for a tick. */
+uint16_t    kv_handle_kind_find(const char* name);
 const void* kv_handle_type_key(kv_handle h);    /* NULL for unknown */
 int         kv_handle_kind_is_live(uint16_t kind);
 uint32_t    kv_handle_kind_count(void);         /* highest id ever assigned + 1 */

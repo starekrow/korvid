@@ -1101,13 +1101,17 @@ Table* engine_table_of(Engine& e, Handle h) {
     return t;
 }
 
-// Every sim column of every live row, in kind order then slot order, with the entity's
-// handle so identity counts too. Field by field, so padding never matters.
+// Every sim column of every live row, in slot order, with the entity's handle so identity
+// counts too. Field by field, so padding never matters. Each table's hash starts from its
+// name and the tables are summed, so the order kinds registered in (which moves when a
+// module is added) changes nothing; handles in fields hash their kind by name for the same
+// reason. An empty table is no state: a module that adds a kind changes no hash until
+// something is in it.
 u64 engine_hash_state(const Engine& e) {
     u64 h = 0x6b6f72766964ull; // "korvid"
     for (const Table& t : e.tables)
-        if (!t.desc->cosmetic) h = hash_mix(h ^ table_hash(t));
-    return h;
+        if (!t.desc->cosmetic && t.live()) h += hash_mix(table_hash(t));
+    return hash_mix(h);
 }
 
 ModuleInstance* engine_module(Engine& e, const char* name) {

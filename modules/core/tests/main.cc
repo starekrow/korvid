@@ -24,6 +24,7 @@ void test_idle(kv::TestCtx&);
 void test_pause(kv::TestCtx&);
 void test_qualify(kv::TestCtx&);
 void test_utf8(kv::TestCtx&);
+void test_hash(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
@@ -37,6 +38,7 @@ int main() {
     test_random(c);
     test_component(c);
     test_kind(c);
+    test_hash(c);
     test_context(c);
     test_schedule(c);
     test_handler(c);

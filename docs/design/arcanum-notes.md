@@ -32,6 +32,12 @@ for a later one.
 - **The player kept walking into the fade.** The sim held only once the screen was
   covered. Transitions now freeze the sim from the request on (`LevelTransition::freeze`).
 
+- **The hash included handle kind numbers.** Adding a module that registered a handle
+  kind changed every hash of every game, though no state did. Handles in fields now hash
+  their kind by name (`kv_handle_kind_name_hash`), tables are summed rather than chained
+  in registration order, and an empty table counts for nothing (fixed after the slice,
+  with save and load).
+
 ## Latency the game saw
 
 - **Villagers block in the same tick, by the game's own check.** The collision module
@@ -73,6 +79,3 @@ for a later one.
 - **Per-level asset lists.** The character sheets are loaded globally because the game
   makes renderer materials from them by hand. A material that follows a texture asset
   (`asset_material_for_texture`) would let them live in level scopes like the tilesets.
-- **The hash includes handle kind numbers.** Adding a module that registers a handle
-  kind changes every hash of every game, though no state did. Hashing a handle's kind by
-  its name (or leaving the kind out) would make hashes comparable across engine changes.

@@ -204,7 +204,8 @@ const ComponentDesc* engine_component(const Engine& e) { return engine_component
 u32   engine_trigger_id(const Engine& e, const char* name);
 // The phase a system was declared in; Phase::Count for an unknown name.
 Phase engine_system_phase(const Engine& e, const char* name);
-// The hash of every sim column of every live entity, fixed across runs and platforms.
+// The hash of every sim column of every live entity, fixed across runs and platforms and
+// whatever order the kinds registered in (tables by name, handles in fields by kind name).
 u64   engine_hash_state(const Engine& e);
 
 // Entity kinds, by name or id. Null for unknown.
