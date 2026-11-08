@@ -229,7 +229,7 @@ void render_frame(Engine& engine, FrameLoopState& s) {
     view.alpha       = engine.clock.alpha();
     view.clear_color = s.config.clear_color;
     Camera2 cam;
-    if (const Camera2* c = sprite_camera(engine)) cam = *c;
+    if (const Camera2* c = sprite_camera(engine)) cam = camera_resolve(engine, *c, w, h, view.alpha);
     view.view     = camera_view(cam, w, h);
     view.rotation = cam.rotation;
     renderer_render(s.renderer, view);

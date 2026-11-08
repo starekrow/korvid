@@ -13,6 +13,11 @@ namespace kv {
 
 namespace {
 
+const AssetKindDesc* external_kind(AssetState_& s, u16 kind) {
+    for (u32 i = 0; i < s.external_count; ++i) if (s.external[i].kind == kind) return &s.external[i];
+    return nullptr;
+}
+
 AssetState read_state(AssetState_& s, Handle h, bool* alive) {
     *alive = true;
     u16 k = h.kind();
@@ -21,6 +26,7 @@ AssetState read_state(AssetState_& s, Handle h, bool* alive) {
     else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))      return f->state; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))    return d->state; }
     else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))      return b->state; }
+    else if (const AssetKindDesc* x = external_kind(s, k)) { if (x->refs(x->user, h)) return x->state(x->user, h); }
     *alive = false;
     return AssetState::Failed;
 }
@@ -34,6 +40,7 @@ u64 bytes_of(AssetState_& s, Handle h) {
                    (u64)f->kern_count * (sizeof(u64) + sizeof(f32));
     } else if (k == s.sound_kind) { if (SoundAsset* d = s.sounds.get(h)) return (u64)d->frames * d->channels * sizeof(f32); }
     else if (k == s.blob_kind) { if (BlobAsset* b = s.blobs.get(h)) return b->size; }
+    else if (const AssetKindDesc* x = external_kind(s, k)) { if (x->bytes && x->refs(x->user, h)) return x->bytes(x->user, h); }
     return 0;
 }
 
@@ -44,6 +51,7 @@ const char* path_of(AssetState_& s, Handle h) {
     else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))         return f->path; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))       return d->path; }
     else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))         return b->path; }
+    else if (const AssetKindDesc* x = external_kind(s, k)) { if (x->path && x->refs(x->user, h)) return x->path(x->user, h); }
     return "?";
 }
 
@@ -77,6 +85,7 @@ void retire(Engine& e, AssetState_& s, Handle h) {
     else if (k == s.font_kind) font_retire(e, s, h);
     else if (k == s.sound_kind) sound_retire(e, s, h);
     else if (k == s.blob_kind) blob_retire(e, s, h);
+    else if (const AssetKindDesc* x = external_kind(s, k)) x->retire(e, x->user, h);
     else return;
     ++s.retired;
 }
@@ -124,6 +133,7 @@ u32* asset_refs_of(AssetState_& s, Handle h) {
     else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))         return &f->refs; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))       return &d->refs; }
     else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))         return &b->refs; }
+    else if (const AssetKindDesc* x = external_kind(s, k)) return x->refs(x->user, h);
     return nullptr;
 }
 
@@ -139,6 +149,10 @@ void asset_unref(AssetState_& s, Handle h) {
 
 Handle asset_hold(AssetState_& s, Handle scope, Handle asset) {
     if (asset.is_null()) return asset;
+    if (scope.is_null()) { // no scope: the caller holds it with asset_ref, or it goes at the next pump
+        if (u32* r = asset_refs_of(s, asset); r && *r == 0) s.dying.push(asset);
+        return asset;
+    }
     AssetScope_* sc = s.scopes.get(scope);
     if (!sc) { KV_ERROR("asset", "load into a stale scope (%s)", path_of(s, asset)); return Handle{}; }
     for (Handle m : sc->members)
@@ -246,6 +260,30 @@ u32 asset_refs(Engine& e, Handle asset) {
     AssetState_* s = asset_state(e);
     u32* r = s ? asset_refs_of(*s, asset) : nullptr;
     return r ? *r : 0;
+}
+
+bool asset_kind_register(Engine& e, const AssetKindDesc& desc) {
+    AssetState_* s = asset_state(e);
+    if (!s || !desc.kind || !desc.refs || !desc.state || !desc.retire) return false;
+    if (external_kind(*s, desc.kind)) return false;
+    if (s->external_count >= KV_ASSET_EXTERNAL_KINDS) { KV_ERROR("asset", "%u external asset kinds already", KV_ASSET_EXTERNAL_KINDS); return false; }
+    s->external[s->external_count++] = desc;
+    return true;
+}
+
+void asset_kind_unregister(Engine& e, u16 kind) {
+    AssetState_* s = asset_state(e);
+    if (!s) return;
+    for (u32 i = 0; i < s->external_count; ++i)
+        if (s->external[i].kind == kind) { s->external[i] = s->external[--s->external_count]; return; }
+}
+
+void asset_ref(Engine& e, Handle asset) {
+    if (AssetState_* s = asset_state(e)) asset_ref(*s, asset);
+}
+
+void asset_unref(Engine& e, Handle asset) {
+    if (AssetState_* s = asset_state(e)) asset_unref(*s, asset);
 }
 
 AssetLifetimeStats asset_lifetime_stats(Engine& e) {

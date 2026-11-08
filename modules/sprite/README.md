@@ -93,7 +93,8 @@ Header `korvid/sprite/camera.h`:
 
 | name | kind | what |
 |---|---|---|
-| `Camera2` | record | `center` (point2), `zoom` (f32, 1: a world unit per pixel), `rotation` (f32 radians); published as the resource `sprite.camera`, written by whichever system declares it |
+| `Camera2` | record | `center` (point2), `zoom` (f32, 1: a world unit per pixel), `rotation` (f32 radians), `follow` (an entity), `offset`, `bounds` (rect2; a zero size: no clamp), `pixel_snap`; published as the resource `sprite.camera`, written by whichever system declares it |
+| `camera_resolve(e, cam, width, height, alpha)` | function | the camera a frame draws with: follow at the interpolation point, clamp, snap; the frame loop calls it |
 | `camera_view(cam, width, height)` | function | the world rect the camera shows in a window that size, before rotation |
 | `sprite_camera(engine)` | function | the camera, for code outside the schedule (the frame loop reads it at render rate) |
 
@@ -152,9 +153,11 @@ What the module registers with the engine:
 - **Screen space is window pixels**, origin at the window's center, +y up, whatever the
   camera does; `size` is then in pixels. The platform's `mouse_screen` puts the pointer
   in the same space.
-- **The camera is read at render rate**, not interpolated: a camera that follows a
-  moving entity lags it by the frame's alpha. Camera motion that must be smooth belongs
-  to a later slice (render-rate entities).
+- **The camera is read at render rate.** A camera a system moves to follow an entity
+  lags it by the frame's alpha and the followed sprite jitters; set `follow` instead and
+  the frame loop centers on the entity's interpolated position at the alpha the sprites
+  use, so it stands still on screen. Then `bounds` clamps and `pixel_snap` puts the view's
+  corner on a world pixel, which keeps pixel art from shimmering at an integer zoom.
 - **The extract runs on paused ticks** (`RunWhen::Always`), so menus and overlays drawn
   while the sim holds still reach the renderer.
 - **The extract is one thread** and linear in the rows of every drawable kind, dead

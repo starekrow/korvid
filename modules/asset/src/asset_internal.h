@@ -46,6 +46,8 @@ struct AssetState_ {
     Array<Handle>       dying;            // reached zero references; retired at the next pump if still there
     Array<AssetGrave>   graves;
     u64                 next_ticket = 1;
+    AssetKindDesc       external[KV_ASSET_EXTERNAL_KINDS];
+    u32                 external_count = 0;
     AssetSamplesRetireFn samples_hook = nullptr;
     void*               samples_hook_user = nullptr;
     Allocator*          general = nullptr;

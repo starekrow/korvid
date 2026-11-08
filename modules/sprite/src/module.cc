@@ -91,4 +91,43 @@ Camera2* sprite_camera(Engine& e) {
     return s ? &s->camera : nullptr;
 }
 
+namespace {
+
+// One axis of the clamp: the view's half-extent inside [lo, lo + len], or the middle.
+f32 clamp_axis(f32 c, f32 half, f32 lo, f32 len) {
+    if (len <= 0.0f) return c;
+    if (half * 2.0f >= len) return lo + len * 0.5f;
+    if (c - half < lo) return lo + half;
+    if (c + half > lo + len) return lo + len - half;
+    return c;
+}
+
+} // namespace
+
+Camera2 camera_resolve(Engine& e, const Camera2& cam, u32 width, u32 height, f32 alpha) {
+    Camera2 out = cam;
+    if (!cam.follow.is_null()) {
+        Table* t = engine_table_of(e, cam.follow);
+        const Transform2* now = t && t->valid(cam.follow) ? t->get<Transform2>(cam.follow) : nullptr;
+        if (now) {
+            const Transform2* was = t->prev<Transform2>(cam.follow);
+            point2 p = now->position;
+            if (was) p = point2{was->position.x + (now->position.x - was->position.x) * alpha,
+                                was->position.y + (now->position.y - was->position.y) * alpha};
+            out.center = point2{p.x + cam.offset.x, p.y + cam.offset.y};
+        }
+    }
+    f32 z = cam.zoom > 1e-6f ? cam.zoom : 1e-6f;
+    f32 hw = (f32)width / z * 0.5f, hh = (f32)height / z * 0.5f;
+    out.center.x = clamp_axis(out.center.x, hw, cam.bounds.x, cam.bounds.w);
+    out.center.y = clamp_axis(out.center.y, hh, cam.bounds.y, cam.bounds.h);
+    if (cam.pixel_snap) {
+        // The view's corner on a world pixel: the screen's pixels then each cover whole
+        // texels (at an integer zoom), whatever the window's parity.
+        f32 left = floorf((out.center.x - hw) * z + 0.5f) / z, bottom = floorf((out.center.y - hh) * z + 0.5f) / z;
+        out.center = point2{left + hw, bottom + hh};
+    }
+    return out;
+}
+
 } // namespace kv

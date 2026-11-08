@@ -21,6 +21,7 @@
 // load reads the file again, and makes the handle stale. A sound's samples are freed only
 // once the audio module says the mixer has let go of them.
 #pragma once
+#include "korvid/asset/texture.h"
 #include "korvid/core/handle.h"
 
 namespace kv {
@@ -58,6 +59,30 @@ AssetScopeProgress asset_scope_progress(Engine& e, Handle scope);
 const char*        asset_scope_name(Engine& e, Handle scope);
 // References on an asset (scopes and dependents); 0 for a stale handle.
 u32                asset_refs(Engine& e, Handle asset);
+
+// Asset kinds of other modules. A module that keeps records of its own (tile maps, clips)
+// registers their handle kind here, and from then on scopes hold them, counts reach them,
+// readiness waits for them and retirement calls back, exactly as for the asset module's
+// own kinds. The callbacks run on the main thread; retire runs at the asset pump once a
+// record's count is zero, and must destroy the record (its handle then goes stale).
+struct AssetKindDesc {
+    u16         kind = 0;                                    // the handle kind the records use
+    u32*        (*refs)(void* user, Handle h)   = nullptr;   // the record's count, null if stale
+    AssetState  (*state)(void* user, Handle h)  = nullptr;   // Pending, Ready or Failed
+    u64         (*bytes)(void* user, Handle h)  = nullptr;   // optional: for progress
+    const char* (*path)(void* user, Handle h)   = nullptr;   // optional: for logs and the CLI
+    void        (*retire)(Engine& e, void* user, Handle h) = nullptr;
+    void*       user = nullptr;
+};
+constexpr u32 KV_ASSET_EXTERNAL_KINDS = 16;
+bool asset_kind_register(Engine& e, const AssetKindDesc& desc);
+void asset_kind_unregister(Engine& e, u16 kind);
+// References for dependencies between assets: a record that needs another (a map its
+// tilesets' textures) loads it with a null scope, which takes no reference, then holds one
+// with asset_ref and drops it with asset_unref when it no longer needs it (at its
+// retirement). An asset loaded with a null scope that nobody refs retires at the next pump.
+void asset_ref(Engine& e, Handle asset);
+void asset_unref(Engine& e, Handle asset);
 
 // Counts for tools and tests: assets retired so far, retired sample buffers still waiting
 // for the mixer's word and how many were ever handed to it, records still queued to

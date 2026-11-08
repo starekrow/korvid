@@ -1,0 +1,113 @@
+# tilemap
+
+Tiled maps as assets, drawn as sprites. A game loads a `.tmj` into an asset scope like any
+asset, spawns an instance of it when it is Ready, and asks it questions: which tile is at
+a cell, what a layer, an object or a tile says in its properties, where the player
+starts, which cells are solid.
+
+## How it works
+
+**Loading.** `tilemap_load(e, path, scope)` returns a `tilemap.map` handle at once and
+registers nothing new with the asset module but a kind: tile maps live in the asset
+module's scopes (`asset_kind_register`), so a level's scope holds its map, readiness
+waits for it, and releasing the scope retires it. `tilemap.pump` (PreSim, main thread,
+after the asset pumps) moves each pending map through its stages:
+
+1. the map file arrives as a blob and is parsed (`tilemap_parse_map`) into the record's
+   own arena: layers, cells, objects, tilesets, properties;
+2. each external tileset (`.tsj`) arrives as a blob and is parsed into the same record;
+3. each tileset's image loads as a texture; when they have all settled, a material per
+   tileset (alpha blend) is made and the solids are built;
+4. the blobs are let go (their bytes are no longer needed) and the record turns Ready
+   with `AssetReady`.
+
+The map holds references on its textures (the asset module's dependency counts), so two
+maps sharing a tileset image share one texture. Retiring a map destroys its materials,
+drops its textures, frees its arena, and despawns its instances.
+
+**Instances.** `tilemap_spawn(ctx, map, TilemapPlace{origin, base_layer, owner})` makes a
+sprite row in the cosmetic kind `tilemap.tile` for every non-empty cell of every visible
+tile layer and every tile object, in Tiled's layer order: layer `i` draws at sprite layer
+`base_layer + i`, so the index of an object layer is where a game puts its characters to
+draw between the layers below and above. A tile larger than the grid sits on its cell's
+bottom-left, as Tiled draws it; a tile object's `(x, y)` is its bottom-left. Flips are uv
+flips plus, for the diagonal flag, a quarter turn. Opacity and tint (through groups) go
+into the sprite's tint. Tiles never move, so after their first frame they cost the
+extract nothing but a scan. An instance goes when its owner entity dies (a level's root)
+or its map retires, at the next pump, before anything is drawn.
+
+**Solids.** Built once per map: a cell is solid if any tile in it has the bool property
+`solid`, or it is non-empty in a layer whose bool property `collision` is true; the
+collision rectangles drawn in Tiled's tile collision editor are placed in every cell that
+uses the tile, flips applied; objects with `solid` add their rectangles. Outside the map
+is solid. `tilemap_solid(m, x, y)` answers for whole cells; the rectangles are in
+`solid_rects` (map pixels, y down).
+
+**Coordinates.** A Tiled pixel `(x, y)` (y down from the map's top-left) is the world
+point `origin + (x, -y)`: one world unit per pixel, +y up as everywhere in the engine.
+
+## Using it
+
+```cpp
+void on_loading(TickContext& ctx, Span<const LevelLoading> ls) { ... }       // the level module loads the map
+
+void on_build(TickContext& ctx, Span<const LevelBuild> bs) {                  // declare writes "tilemap.tile"
+    const TilemapAsset* m = tilemap_get(*ctx.engine, bs[0].map);
+    TilemapPlace place;
+    place.base_layer = 0;
+    place.owner      = bs[0].root;                                            // goes with the level
+    tilemap_spawn(ctx, bs[0].map, place);
+    const MapObject* start = tilemap_object_find(*m, "player_start");
+    point2 p = tilemap_to_world(place.origin, start->x, start->y);
+    const MapProperty* music = tilemap_map_property(*m, "music");
+}
+```
+
+Save maps from Tiled as JSON (`.tmj`) with external tilesets as `.tsj`, or embedded. Tile
+layer format: CSV, Base64 (uncompressed), Base64 (zlib) or Base64 (gzip); not zstd.
+
+## Quick reference
+
+Header `korvid/tilemap/tilemap.h`:
+
+| name | kind | what |
+|---|---|---|
+| `TilemapAsset` | record | size, tile size; `layers`, `objects`, `tilesets`, `tiles`, `props`, `rects`, `frames` (flat arrays, `MapRange` into them); `map_props`; `solid`, `solid_rects`; `error_text` |
+| `MapLayer`, `MapLayerKind` | record, enum | `Tiles` (`width`, `height`, `gids` with flip bits), `Objects` (`objects`), `Image`; `visible`, `opacity`, `tint`, `offset` after groups; `props` |
+| `MapObject` | record | `id`, `name`, `cls`, `x`, `y`, `width`, `height`, `rotation`, `gid`, `point`, `ellipse`, `layer`, `props` |
+| `MapTileset`, `MapTile`, `MapFrame` | records | tileset geometry, image path, `texture`, `material`; per-tile properties, collision rects, animation frames |
+| `MapProperty`, `MapPropType` | record, enum | `String`, `Int`, `Float`, `Bool`, `Color` (linear), `File`, `Object` |
+| `KV_TILE_FLIP_H`, `_V`, `_D`, `KV_TILE_GID_MASK` | constants | Tiled's flag bits |
+| `tilemap_load(e, path, scope)`, `tilemap_get(e, h)` | functions | the asset |
+| `TilemapPlace`, `tilemap_spawn(ctx, map, place)`, `tilemap_despawn`, `tilemap_instance_rows` | record, functions | instances |
+| `tilemap_layer_find`, `tilemap_object_find`, `tilemap_gid_at`, `tilemap_tileset_of`, `tilemap_tile_info` | functions | lookups |
+| `tilemap_property`, `tilemap_map_property`, `tilemap_tile_property` | functions | properties by name |
+| `tilemap_cell_of`, `tilemap_cell_center`, `tilemap_to_world`, `tilemap_solid` | functions | cells and the world |
+| `tilemap_parse_map`, `tilemap_parse_tileset`, `tilemap_resolve` | functions | the parser and its path rule, for tools and tests |
+
+What the module registers with the engine:
+
+| name | kind | notes |
+|---|---|---|
+| `tilemap.map`, `tilemap.instance` | handle kinds | the map is also an asset kind of the asset module's |
+| `tilemap.tile` | kind, cosmetic | `Transform2`, `Sprite`; 262,144 rows of address space |
+| `tilemap.pump` | system, PreSim, main thread, `Always`, after the asset pumps | writes `tilemap.tile` |
+
+## Behaviour worth knowing
+
+- **Paths resolve against the file that names them.** A map's tileset `"../tiles/a.tsj"`
+  and a tileset's image `"a.png"` become asset paths; one that climbs out of the asset
+  root fails the map.
+- **A tileset image that fails** leaves its tiles showing the placeholder; the map is
+  still Ready, with a warning.
+- **Tile animations are parsed, not played.** The frames are in the record; a game (or a
+  later version of this module) drives them with clips.
+- **Object rotation is not applied** to tile objects' sprites or solid rectangles.
+- **Row per tile.** A 128x128 map with three full layers is 49,152 rows. Fine for the
+  maps a JRPG has; a GPU tile layer is the upgrade for larger ones.
+
+## Not in this module
+
+TMX (XML), infinite maps, isometric and hexagonal maps, image-collection tilesets,
+templates, Wang sets, parallax and image layers drawn, zstd layers, polygon collision,
+and collision response (that is `tilemap_move`, the next pass).
