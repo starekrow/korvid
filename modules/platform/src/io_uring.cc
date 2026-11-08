@@ -96,6 +96,22 @@ bool io_ring_can_push(const IoRing* r) {
     return *r->sq_tail - head < r->entries;
 }
 
+void io_ring_push_write(IoRing* r, int fd, const void* buf, u32 len, u64 offset, u64 user) {
+    u32 tail = *r->sq_tail;
+    u32 idx  = tail & *r->sq_mask;
+    io_uring_sqe& s = r->sqes[idx];
+    memset(&s, 0, sizeof s);
+    s.opcode    = IORING_OP_WRITE;
+    s.fd        = fd;
+    s.addr      = (u64)(usize)buf;
+    s.len       = len;
+    s.off       = offset;
+    s.user_data = user;
+    r->sq_array[idx] = idx;
+    __atomic_store_n(r->sq_tail, tail + 1, __ATOMIC_RELEASE);
+    ++r->pushed;
+}
+
 void io_ring_push_read(IoRing* r, int fd, void* buf, u32 len, u64 offset, u64 user) {
     u32 tail = *r->sq_tail;
     u32 idx  = tail & *r->sq_mask;
@@ -151,6 +167,7 @@ IoRing* io_ring_create(u32) { return nullptr; }
 void    io_ring_destroy(IoRing*) {}
 bool    io_ring_can_push(const IoRing*) { return false; }
 void    io_ring_push_read(IoRing*, int, void*, u32, u64, u64) {}
+void    io_ring_push_write(IoRing*, int, const void*, u32, u64, u64) {}
 bool    io_ring_enter(IoRing*, u32) { return false; }
 bool    io_ring_pop(IoRing*, u64*, i32*) { return false; }
 u32     io_ring_in_flight(const IoRing*) { return 0; }

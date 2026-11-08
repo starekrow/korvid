@@ -45,6 +45,7 @@ void platform_shutdown(Engine& e, ModuleInstance& self) {
         s->window.close(); // the service ends with the module, whoever opened it
         input_gamepads_close(s->input);
         s->io.free();
+        if (s->pref_path) SDL_free(s->pref_path);
     }
     SDL_Quit();
 }
@@ -118,6 +119,17 @@ void platform_pump(Engine& e) {
 IoQueue* platform_io(Engine& e) {
     PlatformState* s = state(e);
     return s ? &s->io : nullptr;
+}
+
+const char* platform_pref_path(Engine& e, const char* org, const char* app) {
+    PlatformState* s = state(e);
+    if (!s) return "";
+    if (!s->pref_path) {
+        s->pref_path = SDL_GetPrefPath(org ? org : "korvid", app ? app : "korvid");
+        if (!s->pref_path) { KV_WARN("platform", "no preference path: %s", SDL_GetError()); return ""; }
+        KV_INFO("platform", "preference path %s", s->pref_path);
+    }
+    return s->pref_path;
 }
 
 const char* platform_base_path(Engine& e) {

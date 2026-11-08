@@ -131,6 +131,13 @@ Header `korvid/platform/events.h`: `WindowResized{width, height}`, `FocusChanged
 `MouseWheel{dx, dy}`, `GamepadConnected{pad}`, `GamepadDisconnected{pad}`,
 `PadButtonDown{button, pad}`, `PadButtonUp{button, pad}`.
 
+**Writes** go through the same queue: `write_file(IoWriteRequest{path, data, size})` copies
+the bytes at submission (the caller's buffer is free to go), creates or truncates the file
+at the pump under the same priorities and budget as reads (`IORING_OP_WRITE` on the ring,
+`fopen` on the fallback), and completes with the bytes written and no data. A save or a
+settings file is a write to `platform_pref_path(e, org, app)`, SDL's per-user directory
+for the names given (created on first use).
+
 Header `korvid/platform/audio.h`:
 
 | name | kind | what |
@@ -149,8 +156,9 @@ Header `korvid/platform/io.h`:
 | `IoBudget` | record | `bytes_per_pump` (8 MB), `bytes_in_flight` (64 MB), `idle_bytes_per_call` (4 MB); 0 is unlimited |
 | `IoRequest` | record | `path` (copied), `alloc` (the data's home; null: general), `priority`, `user` |
 | `IoCompletion` | record | `request`, `status`, `data`, `size`, `user`, `error` (errno) |
-| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`; counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes` |
+| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`; counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes` |
 | `platform_io(engine)` | function | the module's queue |
+| `platform_pref_path(engine, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none |
 | `platform_base_path(engine)` | function | the executable's directory with a trailing separator; assets live beneath it |
 
 Header `korvid/platform/net.h`:

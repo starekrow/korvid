@@ -1,6 +1,7 @@
 #include "korvid/platform/io.h"
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -171,4 +172,59 @@ void test_io_budget(kv::TestCtx& c) {
     }
     for (u32 i = 0; i < 6; ++i) unlink(paths[i]);
     rmdir(dir);
+}
+
+// Writes: the bytes are copied at submission, the file appears at the pump, a read of it
+// gives them back, an empty write makes an empty file, a write into a missing directory
+// fails with an errno, and a cancelled write never happens. Both backends.
+void test_io_write(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("io_write");
+    char dir[] = "/tmp/korvid-iow-XXXXXX";
+    KV_CHECK(c, mkdtemp(dir) != nullptr);
+    char path[300], empty[300], bad[300], gone[300];
+    snprintf(path, sizeof path, "%s/save.txt", dir);
+    snprintf(empty, sizeof empty, "%s/empty.txt", dir);
+    snprintf(bad, sizeof bad, "%s/no-such-dir/x.txt", dir);
+    snprintf(gone, sizeof gone, "%s/never.txt", dir);
+    for (u32 pass = 0; pass < 2; ++pass) {
+        IoQueue q;
+        KV_CHECK(c, q.init(nullptr, 16, pass == 0 ? IoBackend::Sync : IoBackend::Auto));
+        char payload[64];
+        snprintf(payload, sizeof payload, "score %u\n", 1200 + pass);
+        IoWriteRequest w; w.path = path; w.data = payload; w.size = strlen(payload); w.user = 10;
+        IoWriteRequest we; we.path = empty; we.user = 11;
+        IoWriteRequest wb; wb.path = bad; wb.data = "x"; wb.size = 1; wb.user = 12;
+        IoWriteRequest wg; wg.path = gone; wg.data = "x"; wg.size = 1; wg.user = 13;
+        Handle hw = q.write_file(w), he = q.write_file(we), hb = q.write_file(wb), hg = q.write_file(wg);
+        memset(payload, 0, sizeof payload); // the queue has its own copy
+        KV_CHECK(c, !hw.is_null() && !he.is_null() && !hb.is_null() && !hg.is_null() && q.pending() == 4);
+        KV_CHECK(c, q.cancel(hg));
+        KV_CHECK(c, wait_for(q, 4) == 4);
+        const IoCompletion* cw = by_user(q, 10);
+        const IoCompletion* ce = by_user(q, 11);
+        const IoCompletion* cb = by_user(q, 12);
+        const IoCompletion* cg = by_user(q, 13);
+        KV_CHECK(c, cw && cw->status == IoStatus::Done && cw->size == 11 && cw->data == nullptr);
+        KV_CHECK(c, ce && ce->status == IoStatus::Done && ce->size == 0);
+        KV_CHECK(c, cb && cb->status == IoStatus::Failed && cb->error == ENOENT);
+        KV_CHECK(c, cg && cg->status == IoStatus::Cancelled);
+        KV_CHECK(c, q.writes_done == 2 && q.writes_failed == 1);
+        q.reap(hw); q.reap(he); q.reap(hb); q.reap(hg);
+        // Read it back through the same queue.
+        IoRequest r; r.path = path; r.user = 20;
+        Handle hr = q.read_file(r);
+        KV_CHECK(c, wait_for(q, 1) == 1);
+        const IoCompletion* cr = by_user(q, 20);
+        char expect[32];
+        snprintf(expect, sizeof expect, "score %u\n", 1200 + pass);
+        KV_CHECK(c, cr && cr->status == IoStatus::Done && cr->size == 11 && memcmp(cr->data, expect, 11) == 0);
+        mem_free(cr->data);
+        q.reap(hr);
+        FILE* fp = fopen(gone, "rb");
+        KV_CHECK(c, fp == nullptr); // the cancelled write never happened
+        if (fp) fclose(fp);
+        q.free();
+    }
+    unlink(path); unlink(empty); rmdir(dir);
 }

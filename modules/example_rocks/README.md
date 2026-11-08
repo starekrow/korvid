@@ -103,6 +103,12 @@ debris are additive dots.
 - **Exit is a handler.** `on_exit` quits on `ExitRequested` whether or not the game is
   paused; a Sim system would not run while paused and a `--run-seconds` that lands
   inside the demo's pause would be lost.
+- **The high score is a file.** `rocks_startup` asks the platform for the per-user
+  directory (`platform_pref_path(engine, "korvid", "rocks")`) and queues a read of
+  `highscore.txt` there (`highscore-demo.txt` under `--demo`, so a scripted run never
+  touches a player's record); `files` (PreSim, main thread, `Always`) reaps it when it
+  arrives, and `on_edge` queues a write when a game ends above it. The `label` kind is
+  cosmetic, so the HIGH figure on the HUD cannot move the hash.
 - **Sounds.** Four generated WAVs at 22 kHz (`shot`, `break`, `boom`, `thrust`), loaded
   at startup. `control` plays a shot per bullet with a random pitch and a pan from the
   ship's x; `on_rock_hit` plays a break pitched up by the rock's size; `on_edge` plays the

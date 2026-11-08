@@ -14,6 +14,8 @@ void    io_ring_destroy(IoRing* ring);
 bool    io_ring_can_push(const IoRing* ring);
 // Queues a read of `len` bytes at `offset` into `buf`; `user` comes back on the completion.
 void    io_ring_push_read(IoRing* ring, int fd, void* buf, u32 len, u64 offset, u64 user);
+// Queues a write of `len` bytes from `buf` at `offset`.
+void    io_ring_push_write(IoRing* ring, int fd, const void* buf, u32 len, u64 offset, u64 user);
 // Submits what was pushed; waits for `min_complete` completions (0: none). False on error.
 bool    io_ring_enter(IoRing* ring, u32 min_complete);
 // Takes one completion: `res` is bytes read or a negative errno. False when none is ready.

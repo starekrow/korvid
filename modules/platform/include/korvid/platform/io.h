@@ -42,11 +42,22 @@ struct IoRequest {
     u64         user     = 0;                   // handed back untouched
 };
 
+// A whole-file write: the bytes are copied at submission, so the caller's buffer is free
+// to go at once. The file is created or truncated. The completion carries no data.
+struct IoWriteRequest {
+    const char* path     = nullptr;
+    const void* data     = nullptr;
+    usize       size     = 0;
+    Allocator*  alloc    = nullptr;             // the copy lives here until the write is done; null: general
+    IoPriority  priority = IoPriority::Normal;
+    u64         user     = 0;
+};
+
 struct IoCompletion {
     Handle   request;
     IoStatus status = IoStatus::Pending;
-    void*    data   = nullptr; // file contents; the consumer frees it with request.alloc
-    usize    size   = 0;
+    void*    data   = nullptr; // a read's file contents; the consumer frees it with request.alloc. Null for a write
+    usize    size   = 0;       // bytes read, or written
     u64      user   = 0;
     i32      error  = 0;       // errno on failure
 };
@@ -58,11 +69,12 @@ struct IoEntry {
     IoStatus   status;
     u64        user;
     u64        sequence;  // submission order, for stable priority ordering
-    // The ring's bookkeeping while a read is in flight.
+    bool       write;     // a write: `buf` holds the copy to write, `size` its length
+    // The ring's bookkeeping while a request is in flight.
     int        fd;
     u8*        buf;
-    usize      size;      // the file's size at open
-    usize      done;      // bytes read so far
+    usize      size;      // the file's size at open, or the bytes to write
+    usize      done;      // bytes read or written so far
     bool       in_flight;
 };
 
@@ -75,6 +87,7 @@ struct IoQueue {
     u64                 next_sequence = 0;
     u16                 kind = 0;
     u32                 reads_done = 0, reads_failed = 0, in_flight = 0;
+    u32                 writes_done = 0, writes_failed = 0;
     usize               bytes_in_flight = 0;
     u64                 pumps = 0, pumps_capped = 0; // pumps that left admissible reads waiting on the budget
     u64                 bytes_submitted = 0, idle_calls = 0, idle_bytes = 0;
@@ -86,6 +99,9 @@ struct IoQueue {
 
     // Submits a whole-file read. Null handle if the path is too long or the queue is full.
     Handle read_file(const IoRequest& req);
+    // Submits a whole-file write (create or truncate); the bytes are copied now. Same
+    // pump, priorities, budget and completions as a read. Null handle as above.
+    Handle write_file(const IoWriteRequest& req);
     // Cancels a request that has not completed yet; it completes as Cancelled.
     bool   cancel(Handle request);
     // Once per frame: hand queued reads to the backend within the budget and collect what
@@ -110,5 +126,9 @@ struct IoQueue {
 IoQueue* platform_io(Engine& e);
 // Directory of the running executable, with a trailing separator. Assets live beneath it.
 const char* platform_base_path(Engine& e);
+// The per-user directory for saves and settings, created if need be, with a trailing
+// separator: SDL's preference path for `org` and `app` (~/.local/share/<org>/<app>/ on
+// Linux). The first call fixes the names for the process; "" if the OS has none.
+const char* platform_pref_path(Engine& e, const char* org, const char* app);
 
 } // namespace kv

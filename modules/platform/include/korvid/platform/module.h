@@ -25,6 +25,7 @@ struct PlatformState {
     HostWindow  window;    // one window per process; closed at module shutdown
     IoQueue     io;        // the process's read queue, pumped by platform_pump
     const char* base_path = nullptr; // the executable's directory, trailing separator; SDL's
+    char*       pref_path = nullptr; // the per-user directory once asked for; SDL's, freed at shutdown
 };
 
 // Opens the window. Null if one is already open or SDL refused. Owned by the module.

@@ -22,6 +22,7 @@
 #include "korvid/platform/events.h"
 #include "korvid/platform/host_window.h"
 #include "korvid/platform/input.h"
+#include "korvid/platform/io.h"
 #include "korvid/render/renderer.h"
 #include "korvid/scene/module.h"
 #include "korvid/sprite/camera.h"
@@ -74,7 +75,8 @@ constinit const KindDesc k_kinds[] = {
     // The flame is cosmetic: its flipbook comes from a file and starts when the file
     // arrives, which is not a tick the sim may depend on.
     {.name = "example_rocks.flame",   .components = k_flame_components,   .capacity = 4,    .id = &g_flame_kind, .cosmetic = true},
-    {.name = "example_rocks.label",   .components = k_label_components,   .capacity = 8,    .id = &g_label_kind},
+    // Labels are cosmetic too: the HUD shows the high score, which comes from a file.
+    {.name = "example_rocks.label",   .components = k_label_components,   .capacity = 8,    .id = &g_label_kind, .cosmetic = true},
 };
 
 // ---- events ----------------------------------------------------------------------------
@@ -109,7 +111,7 @@ constinit const TriggerDesc k_triggers[] = {
 };
 
 // ---- the published score and the module's state --------------------------------------
-struct Score { i32 total; u32 rocks_shot; u32 wave; u32 games; };
+struct Score { i32 total; u32 rocks_shot; u32 wave; u32 games; i32 high; };
 
 enum Look : u8 { LOOK_SHIP, LOOK_ROCK, LOOK_BULLET, LOOK_DEBRIS, LOOK_WHITE, LOOK_FLAME, LOOK_COUNT };
 enum Snd : u8 { SND_SHOT, SND_BREAK, SND_BOOM, SND_THRUST, SND_COUNT };
@@ -123,6 +125,8 @@ struct Game {
     Handle fade_clip;             // anim.clip built here: one second of alpha to zero
     Handle sounds[SND_COUNT];     // asset.sound
     Handle thrust_voice;          // audio.voice: the looping thruster, alive with the ship
+    Handle high_read;             // platform.io: the high score file on its way in
+    char   high_path[512];        // <pref path>/highscore.txt
     u16    ship_hk, bullet_hk, rock_hk, debris_hk; // handle kinds, to tell what an event is about
     bool   started = false;
     bool   demo    = false;
@@ -262,7 +266,34 @@ void hud(TickContext& ctx) {
         Span<Text>        texts = k.col<Text>();
         Span<const Label> roles = k.col<const Label>();
         for (u32 i = 0; i < k.rows(); ++i)
-            if (k.alive(i) && roles[i].role == ROLE_HUD) text_set(texts[i], "SCORE %d   WAVE %u", score->total, score->wave);
+            if (k.alive(i) && roles[i].role == ROLE_HUD) text_set(texts[i], "SCORE %d   WAVE %u   HIGH %d", score->total, score->wave, score->high);
+    }
+}
+
+// Phase PreSim, main thread, every tick: the high score file, when it arrives. Its read was
+// submitted at startup; the completion is ours by request handle. A missing file is a
+// high score of zero.
+void files(TickContext& ctx) {
+    static const u32 k_score = ctx.resource_id("example_rocks.score");
+    Game& g = ctx.state_as<Game>();
+    if (g.high_read.is_null()) return;
+    IoQueue* io = platform_io(*ctx.engine);
+    for (const IoCompletion& c : io->completions()) {
+        if (c.request != g.high_read) continue;
+        IoCompletion done = c;
+        io->reap(c.request);
+        g.high_read = Handle{};
+        if (done.status == IoStatus::Done) {
+            char text[32] = {};
+            memcpy(text, done.data, done.size < sizeof text - 1 ? done.size : sizeof text - 1);
+            Score* score = ctx.resource<Score>(k_score);
+            score->high = atoi(text);
+            KV_INFO("rocks", "high score %d from %s", score->high, g.high_path);
+        } else if (done.status == IoStatus::Failed && done.error != 2) {
+            KV_WARN("rocks", "high score file: errno %d", done.error);
+        }
+        if (done.data) free_in(mem_general(), done.data, done.size ? done.size : 1);
+        break;
     }
 }
 
@@ -553,6 +584,18 @@ void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
         SoundPlay boom;
         boom.sound = g.sounds[SND_BOOM];
         audio_play(ctx, boom);
+        // A new high score goes to the per-user directory, through the queue: the bytes
+        // are copied at submission, nothing waits for the disk.
+        if (score->total > score->high && g.high_path[0]) {
+            Score* s = ctx.resource<Score>(k_score);
+            s->high = score->total;
+            char text[32];
+            int n = snprintf(text, sizeof text, "%d\n", score->total);
+            IoWriteRequest w;
+            w.path = g.high_path; w.data = text; w.size = (usize)n;
+            if (platform_io(*ctx.engine)->write_file(w).is_null()) KV_WARN("rocks", "could not queue the high score write");
+            else KV_INFO("rocks", "new high score %d -> %s", score->total, g.high_path);
+        }
         ctx.emit(GameOver{score->total});
         ctx.schedule_in(Restart{}, kRestartTicks);
         char line[48];
@@ -623,6 +666,15 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
         g->materials[i] = m->material;
     }
     // Handle kinds, so a handler can tell what an overlap is between without a lookup.
+    // The high score: read from the per-user directory, written there at a game over. The
+    // demo keeps its own file so a scripted run never changes a player's record.
+    const char* pref = platform_pref_path(engine, "korvid", "rocks");
+    if (pref[0]) {
+        snprintf(g->high_path, sizeof g->high_path, "%shighscore%s.txt", pref, frameloop_flag(engine, "--demo") ? "-demo" : "");
+        IoRequest req;
+        req.path = g->high_path;
+        g->high_read = platform_io(engine)->read_file(req);
+    }
     g->ship_hk   = engine_table(engine, g_ship_kind)->kind;
     g->bullet_hk = engine_table(engine, g_bullet_kind)->kind;
     g->rock_hk   = engine_table(engine, g_rock_kind)->kind;
@@ -646,10 +698,12 @@ constinit const char* const k_game_reads[]     = {"example_rocks.score"};
 constinit const char* const k_pause_reads[]    = {"platform.window"};
 constinit const char* const k_pause_writes[]   = {"example_rocks.overlay", "example_rocks.label", "audio.commands"};
 constinit const char* const k_hud_reads[]      = {"example_rocks.score", "example_rocks.label.Label"};
+constinit const char* const k_files_writes[]   = {"example_rocks.score"};
 constinit const char* const k_hud_writes[]     = {"example_rocks.label.Text"};
 constinit const char* const k_camera_writes[]  = {"sprite.camera"};
 constinit const SystemDesc k_systems[] = {
     {.name = "example_rocks.pause",   .phase = Phase::PreSim, .fn = pause, .reads = k_pause_reads, .writes = k_pause_writes, .runs = RunWhen::Always},
+    {.name = "example_rocks.files",   .phase = Phase::PreSim, .fn = files, .writes = k_files_writes, .main_thread = true, .runs = RunWhen::Always},
     {.name = "example_rocks.control", .phase = Phase::Sim, .fn = control, .reads = k_control_reads, .writes = k_control_writes, .before = k_before_move},
     // move and wrap touch no module state: they share levels with whatever else is free.
     {.name = "example_rocks.move",    .phase = Phase::Sim, .fn = move,    .reads = k_move_reads,    .writes = k_move_writes, .state = StateUse::None},
@@ -665,11 +719,12 @@ constinit const char* const k_ship_hit_writes[] = {"example_rocks.ship.Health"};
 constinit const char* const k_wave_reads[]      = {"platform.window"};
 constinit const char* const k_wave_writes[]     = {"example_rocks.score"};
 constinit const char* const k_score_reads[]     = {"example_rocks.score"};
-constinit const char* const k_edge_writes[]     = {"example_rocks.label", "audio.commands"};
+constinit const char* const k_edge_writes[]     = {"example_rocks.label", "audio.commands", "example_rocks.score"};
 constinit const char* const k_restart_reads[]   = {"platform.window"};
 constinit const char* const k_restart_writes[]  = {"example_rocks.score", "example_rocks.label"};
 constinit const char* const k_after_rock_hit[]  = {"example_rocks.on_rock_hit"};
 constinit const char* const k_after_wave[]      = {"example_rocks.on_wave"};
+constinit const char* const k_after_edge[]      = {"example_rocks.on_edge"};
 constinit const char* const k_spawned_writes[]  = {"example_rocks.flame", "audio.commands"};
 constinit const HandlerDesc k_handlers[] = {
     {.name = "example_rocks.on_exit",     KV_ON(ExitRequested, on_exit)},
@@ -682,8 +737,9 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = "example_rocks.on_score",    KV_ON(ScoreChanged, on_score)},
     {.name = "example_rocks.on_expire",   KV_ON(Expire, on_expire)},
     {.name = "example_rocks.on_wave",     KV_ON(SpawnWave, on_wave), .reads = k_wave_reads, .writes = k_wave_writes, .after = k_after_rock_hit},
-    {.name = "example_rocks.on_edge",     KV_ON(StateEdge, on_edge), .reads = k_score_reads, .writes = k_edge_writes},
-    {.name = "example_rocks.on_restart",  KV_ON(Restart, on_restart), .reads = k_restart_reads, .writes = k_restart_writes, .after = k_after_wave},
+    // The score's writers in a chain: rock_hit, wave, edge, restart.
+    {.name = "example_rocks.on_edge",     KV_ON(StateEdge, on_edge), .writes = k_edge_writes, .after = k_after_wave},
+    {.name = "example_rocks.on_restart",  KV_ON(Restart, on_restart), .reads = k_restart_reads, .writes = k_restart_writes, .after = k_after_edge},
 };
 
 } // namespace
