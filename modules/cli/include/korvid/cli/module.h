@@ -21,6 +21,7 @@ KV_MODULE_DECLARE(cli_module);
 struct CliConfig {
     u16  port  = 0;     // 0: no listener
     bool stdin_ = false; // read commands from stdin even when it is a terminal
+    bool no_stdin = false; // never read stdin, even when it is a pipe (a tool in a build)
     bool local_only = true;
     bool ascii = false;  // the transports are ASCII-only (a UART, a devkit TTY): non-ASCII is escaped
 };

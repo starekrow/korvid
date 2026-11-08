@@ -175,6 +175,7 @@ Header `korvid/platform/module.h`:
 | `platform_module` | `ModuleDesc` | the record; kormake puts it in the list |
 | `PlatformState` | record | `input`, `window`, `io`, `base_path`: the module's state, for code outside the schedule |
 | `platform_open_window(engine, desc)`, `platform_window(engine)` | functions | the one window; null if open already or refused |
+| `platform_video_up(engine)` | function | SDL video and gamepads, once; false without a video driver |
 | `platform_input(engine)` | function | the input, for code outside the schedule |
 | `platform_pump(engine)` | function | once per frame: OS events to the bus, raw input, the I/O queue's pump |
 
@@ -209,8 +210,11 @@ What the module registers with the engine:
 - **Sockets never block and never stall.** A queue past `out_limit` drops and counts;
   `closed` says the peer went away. Served from a tick system, a connection's throughput
   is bounded by what the kernel buffers hold per tick.
-- **`SDL_VIDEO_DRIVER=dummy`** lets the module start without a display, for tools and
-  tests; `example_sockit2m` sets it.
+- **The module starts headless.** Startup brings up SDL's event subsystem only; video
+  and gamepads come up with the first window, or with `platform_video_up(e)` for code
+  that needs a video driver before one (the Vulkan renderer loads its loader through
+  it). A tool, a test or a server that opens no window needs no display at all.
+  `SDL_VIDEODRIVER=dummy` still gives a window-opening test a driver without a display.
 
 ## Not in this module
 

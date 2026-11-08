@@ -4,6 +4,7 @@
 #include "korvid/renderer-vulkan/module.h"
 #include "korvid/render/renderer.h"
 #include "korvid/core/log.h"
+#include "korvid/platform/module.h"
 #include "vk_funcs.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -12,7 +13,8 @@ namespace kv {
 
 namespace {
 
-bool renderer_vulkan_startup(Engine&, ModuleInstance& self) {
+bool renderer_vulkan_startup(Engine& e, ModuleInstance& self) {
+    if (!platform_video_up(e)) return false; // SDL finds the loader through its video driver
     if (!SDL_Vulkan_LoadLibrary(nullptr)) {
         KV_ERROR("vulkan", "no Vulkan loader: %s", SDL_GetError());
         return false;

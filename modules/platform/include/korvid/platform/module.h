@@ -30,6 +30,11 @@ struct PlatformState {
 
 // Opens the window. Null if one is already open or SDL refused. Owned by the module.
 HostWindow* platform_open_window(Engine& e, const WindowDesc& desc);
+// The platform starts headless. This brings up video and gamepads (once; they stay up
+// until the platform shuts down) for whatever needs a display before a window exists,
+// such as a renderer loading the Vulkan loader. Opening a window calls it. False with a
+// log line when there is no video driver.
+bool        platform_video_up(Engine& e);
 // The open window, or null. For code outside the schedule; systems use the resource.
 HostWindow* platform_window(Engine& e);
 // The module's input, or null if the module is not started. Likewise.

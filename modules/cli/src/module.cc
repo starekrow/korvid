@@ -277,7 +277,7 @@ bool cli_startup(Engine& e, ModuleInstance& self) {
     }
     for (Session& sess : s->sessions) sess.sock.out.alloc = &self.general;
 
-    bool use_stdin = s->config.stdin_ || !isatty(STDIN_FILENO);
+    bool use_stdin = !s->config.no_stdin && (s->config.stdin_ || !isatty(STDIN_FILENO));
     if (use_stdin) {
         Session& sess = s->sessions[s->session_count++];
         sess.is_stdin = true;

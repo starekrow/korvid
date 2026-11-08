@@ -3,6 +3,7 @@
 #include "korvid/platform/events.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
+#include "sdl_internal.h"
 #include <SDL3/SDL.h>
 
 namespace kv {
@@ -17,14 +18,15 @@ IdleResult io_idle(Engine&, f64 seconds, void* user) {
 
 bool platform_startup(Engine& engine, ModuleInstance& self) {
     SDL_SetHint(SDL_HINT_APP_NAME, "korvid");
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+    // Headless until a window opens: video and gamepads come up with the first window
+    // (HostWindow::open), so tools, tests and servers run where there is no display.
+    if (!SDL_Init(SDL_INIT_EVENTS)) {
         KV_ERROR("platform", "SDL_Init failed: %s", SDL_GetError());
         return false;
     }
     int ver = SDL_GetVersion();
-    KV_INFO("platform", "SDL %d.%d.%d, video driver '%s'",
-            SDL_VERSIONNUM_MAJOR(ver), SDL_VERSIONNUM_MINOR(ver), SDL_VERSIONNUM_MICRO(ver),
-            SDL_GetCurrentVideoDriver());
+    KV_INFO("platform", "SDL %d.%d.%d, headless until a window opens",
+            SDL_VERSIONNUM_MAJOR(ver), SDL_VERSIONNUM_MINOR(ver), SDL_VERSIONNUM_MICRO(ver));
     PlatformState* s = arena_push<PlatformState>(self.arena);
     if (!s) return false;
     self.set_state(s);
@@ -97,6 +99,8 @@ HostWindow* platform_open_window(Engine& e, const WindowDesc& desc) {
     if (s->window.is_open()) { KV_ERROR("platform", "a window is already open"); return nullptr; }
     return s->window.open(desc) ? &s->window : nullptr;
 }
+
+bool platform_video_up(Engine&) { return platform_sdl_video_up(); }
 
 HostWindow* platform_window(Engine& e) {
     PlatformState* s = state(e);

@@ -2,7 +2,6 @@
 -- through the platform I/O queue, the decode and upload happen in "asset.pump" (phase
 -- PreSim), and completion arrives as AssetReady or AssetFailed on the bus, never inline.
 module "asset" {
-  deps     = { "core", "platform", "math", "render" },
-  external = { zlib = ">=1.2" },
+  deps     = { "core", "platform", "math", "render", "inflate" },
   engine_module = true,
 }

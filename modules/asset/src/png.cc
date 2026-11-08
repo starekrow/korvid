@@ -1,7 +1,7 @@
 #include "korvid/asset/png.h"
 #include "korvid/core/arena.h"
+#include "korvid/inflate/inflate.h"
 #include <string.h>
-#include <zlib.h>
 
 namespace kv {
 
@@ -75,9 +75,8 @@ bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, 
     usize raw_len = (stride + 1) * h;
     u8* raw = arena_push_n<u8>(scratch, (u32)raw_len);
     if (!raw) return fail(error, "out of scratch");
-    uLongf got = (uLongf)raw_len;
-    int z = uncompress(raw, &got, idat, (uLong)idat_total);
-    if (z != Z_OK || got != raw_len) return fail(error, "corrupt image data");
+    InflateOut z = inflate_zlib(idat, idat_total, raw, raw_len);
+    if (z.result != InflateResult::Ok || z.produced != raw_len) return fail(error, "corrupt image data");
 
     // Unfilter in place, one row at a time, against the previous unfiltered row.
     u32 bpp = channels;
