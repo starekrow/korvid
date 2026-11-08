@@ -80,7 +80,7 @@ Out of scope, as slice 4 had it: shaping, bidirectional text, combining marks dr
 
 **The level module (R11).** The game hands the module its catalog at startup: `level_catalog(e, LevelDesc[] { name, map, user })`, where `map` is a path the level is built from (a `.tmj` for arcanum; the module itself only cares that it is an asset). `level_request(e, name, LevelTransition { fade_out, fade_in, color, entry })` starts a transition (`entry` is a name the game reads back, the exit the player came through), which runs as a state machine in `level.run` (PreSim, `Always`, main thread):
 
-1. **Leaving.** `LevelLeaving { level }` goes out; the module fades a screen-space full-window sprite in over `fade_out` seconds on the always clock. At the end it sets the `Loading` hold.
+1. **Leaving.** `LevelLeaving { level }` goes out and the `Loading` hold is set, so the world freezes at the decision (`LevelTransition::freeze`, true by default; false holds only once the screen is covered); the module fades a screen-space full-window sprite in over `fade_out` seconds on the always clock.
 2. **Loading.** A new scope is created and the map loaded into it; anything the game loads in its `LevelLoading { level, scope }` handler goes in too. The module waits for `AssetScopeReady`.
 3. **Building.** The old level's root entity is destroyed, its tilemap instance with it, and **then** its scope is released, after the new scope holds its references, so shared assets never reach zero. `LevelBuild { level, root, map, entry }` goes out; the game spawns into it in its handler.
 4. **Entering.** The hold clears, the fade goes out over `fade_in`, `LevelEntered { level }` goes out.

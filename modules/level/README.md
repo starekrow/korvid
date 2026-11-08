@@ -12,7 +12,7 @@ leave memory; a reload reads every file again.
 
 | state | what happens | event |
 |---|---|---|
-| Leaving | the fade quad comes up over `fade_out` seconds; at full, the sim is held (`HoldLoading`) | `LevelLeaving{level}` as it starts |
+| Leaving | the sim is held (`HoldLoading`); the fade quad comes up over `fade_out` seconds | `LevelLeaving{level}` as it starts |
 | Loading | a new asset scope, the map loaded into it by the catalog's loader; then wait until nothing in the scope is pending | `LevelLoading{level, scope}` |
 | Building | the old root is destroyed (the scene module takes its children with it), the old scope released, a new root spawned | `LevelBuild{level, root, map, scope, entry}` |
 | Entering | the hold clears on the next tick; the quad fades over `fade_in` | `LevelEntered{level}` at the end |
@@ -71,7 +71,7 @@ Header `korvid/level/level.h`:
 | name | kind | what |
 |---|---|---|
 | `LevelDesc`, `LevelConfig`, `LevelMapLoader` | records, function type | the catalog: `{name, map, user}`, the levels and the map loader |
-| `LevelTransition` | record | `fade_out`, `fade_in` (seconds), `tint`, `entry` (copied) |
+| `LevelTransition` | record | `fade_out`, `fade_in` (seconds), `tint`, `entry` (copied), `freeze` (true: hold the sim from the request) |
 | `LevelState` | enum | `None`, `Leaving`, `Loading`, `Building`, `Entering`, `Active` |
 | `LevelLeaving`, `LevelLoading`, `LevelBuild`, `LevelEntered` | events | above; `level` is the catalog index |
 | `level_catalog(e, config)` | function | copies the catalog |
@@ -95,8 +95,12 @@ What the module registers with the engine:
 - **Build handlers run on a held tick.** Spawning sim entities there is fine and is what
   keeps the start deterministic; a handler that reads input or the clock as if the sim
   were running is not.
-- **The sim runs during the fade out**, so a player keeps moving until the screen is
-  black. A game that wants it frozen holds the sim itself (`HoldGame` bits) when it asks.
+- **The sim stops when the transition starts.** From the request on the sim is held, so
+  the player freezes as the screen goes dark and the level's first sim tick follows the
+  last one of the level before. `LevelTransition::freeze = false` lets the sim run until
+  the screen is covered.
+- **The fade's material is made on first use**, since the frame loop creates the renderer
+  after the modules have started.
 - **A user pause during a fade** stretches the fade in sim ticks, since the fade counts
   every tick. The demo scripts never pause mid-fade.
 - **Without a renderer** there is no quad; every step and every hold is the same.

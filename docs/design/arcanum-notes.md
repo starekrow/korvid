@@ -22,6 +22,13 @@ for a later one.
   pumps that writes a table the pumps read is a cycle to the scheduler. Main-thread asset
   calls are now treated like any game code's: not declared.
 
+- **The level fade never drew.** The level module made its quad's material at startup,
+  before the frame loop had created the renderer, and silently had none. It is made on
+  first use now. Found by playing, not by a test: nothing checks that a transition is
+  visible.
+- **The player kept walking into the fade.** The sim held only once the screen was
+  covered. Transitions now freeze the sim from the request on (`LevelTransition::freeze`).
+
 ## Latency the game saw
 
 - **Villagers block in the same tick, by the game's own check.** The collision module

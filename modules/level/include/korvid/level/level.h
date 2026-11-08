@@ -9,8 +9,8 @@
 //
 // The steps, in "level.run" (PreSim, main thread, every tick):
 //
-//   1. Leaving: a screen-space quad fades in over `fade_out` seconds. Then the sim is
-//      held (HoldLoading).
+//   1. Leaving: a screen-space quad fades in over `fade_out` seconds. The sim is held
+//      (HoldLoading) from the start of it, or, with `freeze` false, from its end.
 //   2. Loading: a new scope, the map loaded into it by the catalog's loader, LevelLoading.
 //      The module waits until nothing in the scope is pending.
 //   3. Building: the old root entity is destroyed (its children with it), then the old
@@ -58,6 +58,7 @@ struct LevelTransition {
     f32         fade_in  = 0.25f;
     color       tint     = color_rgba(0.0f, 0.0f, 0.0f, 1.0f); // the quad's color at full fade
     const char* entry    = nullptr; // copied: which way the player came in, for the game
+    bool        freeze   = true;    // hold the sim from the request on; false: it runs until the screen is covered
 };
 
 enum class LevelState : u8 { None, Leaving, Loading, Building, Entering, Active };

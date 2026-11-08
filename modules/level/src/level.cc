@@ -53,8 +53,26 @@ const char* state_name(LevelState st) {
     return names[(u32)st];
 }
 
+// The quad's white material, made the first time a renderer is there: the frame loop
+// creates the renderer after the modules start, this one included.
+void ensure_white(Engine& e, LevelState_& s) {
+    if (!s.white_material.is_null()) return;
+    Renderer* r = renderer_get(e);
+    if (!r) return;
+    TextureDesc td;
+    td.name = "level.white";
+    s.white_texture = renderer_texture_create(r, td);
+    const u8 white[4] = {255, 255, 255, 255};
+    renderer_texture_upload(r, s.white_texture, 1, 1, white, sizeof white);
+    MaterialDesc md;
+    md.texture = s.white_texture;
+    md.blend   = BlendMode::Alpha;
+    s.white_material = renderer_material_create(r, md);
+}
+
 // The fade quad: one screen-space sprite at the top layer, far larger than any window.
 void set_fade(TickContext& ctx, LevelState_& s) {
+    ensure_white(*ctx.engine, s);
     Table* t = ctx.write_kind(s.fade_kind);
     if (!t) return;
     if (s.fade_entity.is_null() && s.fade > 0.0f && !s.white_material.is_null()) {
@@ -85,6 +103,12 @@ void begin(LevelState_& s) {
     enter_state(s, LevelState::Leaving);
 }
 
+// The sim stands still from the moment the transition starts (the default), or from when
+// the screen is covered.
+void hold_from_start(Engine& e, const LevelState_& s) {
+    if (s.now.t.freeze) engine_hold(e, HoldLoading, true);
+}
+
 // Phase PreSim, main thread, every tick: one step of the transition.
 void level_run(TickContext& ctx) {
     LevelState_& s = ctx.state_as<LevelState_>();
@@ -95,6 +119,7 @@ void level_run(TickContext& ctx) {
     case LevelState::Active:
         if (s.next.pending) {
             begin(s);
+            hold_from_start(e, s);
             ctx.emit(LevelLeaving{s.leaving});
             if (s.leaving == KV_LEVELS) s.fade = 1.0f; // the first level comes out of black
         }
@@ -181,17 +206,6 @@ bool level_startup(Engine& e, ModuleInstance& self) {
     if (!s) return false;
     s->root_kind = engine_kind_id(e, "level.root");
     s->fade_kind = engine_kind_id(e, "level.fade");
-    if (Renderer* r = renderer_get(e)) {
-        TextureDesc td;
-        td.name = "level.white";
-        s->white_texture = renderer_texture_create(r, td);
-        const u8 white[4] = {255, 255, 255, 255};
-        renderer_texture_upload(r, s->white_texture, 1, 1, white, sizeof white);
-        MaterialDesc md;
-        md.texture = s->white_texture;
-        md.blend   = BlendMode::Alpha;
-        s->white_material = renderer_material_create(r, md);
-    }
     self.set_state(s);
     return true;
 }
