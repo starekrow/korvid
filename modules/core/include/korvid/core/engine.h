@@ -197,5 +197,8 @@ u64   engine_hash_state(const Engine& e);
 u32    engine_kind_id(const Engine& e, const char* name);
 Table* engine_table(Engine& e, u32 kind_id);
 Table* engine_table(Engine& e, const char* name);
+// The table an entity handle was issued by, or null if the handle's kind is not one of
+// this engine's tables. Says nothing about whether the handle is still live: ask the table.
+Table* engine_table_of(Engine& e, Handle h);
 
 } // namespace kv

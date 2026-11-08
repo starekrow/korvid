@@ -18,6 +18,7 @@
 #include "korvid/platform/host_window.h"
 #include "korvid/platform/input.h"
 #include "korvid/render/renderer.h"
+#include "korvid/scene/module.h"
 #include "korvid/sprite/camera.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
@@ -48,18 +49,20 @@ constinit const ComponentDesc k_components[] = {
 };
 
 // ---- kinds -----------------------------------------------------------------------------
-constinit u32 g_ship_kind = 0, g_bullet_kind = 0, g_rock_kind = 0, g_debris_kind = 0, g_overlay_kind = 0;
+constinit u32 g_ship_kind = 0, g_bullet_kind = 0, g_rock_kind = 0, g_debris_kind = 0, g_overlay_kind = 0, g_flame_kind = 0;
 constinit const char* const k_ship_components[]    = {"Transform2", "Sprite", "Velocity", "Health", "Collider2", "Ship"};
 constinit const char* const k_bullet_components[]  = {"Transform2", "Sprite", "Velocity", "Collider2"};
 constinit const char* const k_rock_components[]    = {"Transform2", "Sprite", "Velocity", "Collider2", "RockSize"};
 constinit const char* const k_debris_components[]  = {"Transform2", "Sprite", "Velocity", "Lifetime"};
 constinit const char* const k_overlay_components[] = {"Transform2", "Sprite"}; // screen-space, over everything
+constinit const char* const k_flame_components[]   = {"Transform2", "Sprite", "Local2", "Parent"}; // a child of the ship
 constinit const KindDesc k_kinds[] = {
     {.name = "example_rocks.ship",    .components = k_ship_components,    .capacity = 1,    .id = &g_ship_kind},
     {.name = "example_rocks.bullet",  .components = k_bullet_components,  .capacity = 4096, .id = &g_bullet_kind},
     {.name = "example_rocks.rock",    .components = k_rock_components,    .capacity = 1024, .id = &g_rock_kind},
     {.name = "example_rocks.debris",  .components = k_debris_components,  .capacity = 8192, .id = &g_debris_kind},
     {.name = "example_rocks.overlay", .components = k_overlay_components, .capacity = 8,    .id = &g_overlay_kind},
+    {.name = "example_rocks.flame",   .components = k_flame_components,   .capacity = 4,    .id = &g_flame_kind},
 };
 
 // ---- events ----------------------------------------------------------------------------
@@ -251,6 +254,11 @@ void control(TickContext& ctx) {
             if (thrust) v[i].v += heading(t[i].rotation) * (420.0f * dt);
             v[i].v *= 1.0f - 1.2f * dt; // drag
             s[i].thrusting = thrust;
+            // The flame is the ship's child: it follows by itself, the game only lights it.
+            Table* flames = ctx.write_kind(g_flame_kind);
+            Span<Sprite> fs = flames->rows_of<Sprite>();
+            for (u32 f = 0; f < flames->rows(); ++f)
+                if (flames->is_alive(f)) fs[f].tint.a = thrust ? 1.0f : 0.0f;
             s[i].cooldown -= dt;
             if (fire && s[i].cooldown <= 0.0f) {
                 s[i].cooldown = kFireCooldown;
@@ -397,6 +405,18 @@ void on_ship_hit(TickContext& ctx, Span<const ShipHit> hits) {
     }
 }
 
+// The ship arrived (spawned by command at the restart): give it a flame, a child in its
+// own kind that follows through Parent and Local2 and dies with the ship.
+void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
+    Game& g = ctx.state_as<Game>();
+    for (const Spawned& s : spawns) {
+        if (s.kind != g_ship_kind || s.entity.is_null()) continue;
+        Table* flames = ctx.write_kind(g_flame_kind);
+        flames->spawn(Transform2{}, sprite_of(g, LOOK_DEBRIS, 30.0f, 1, color_rgba(1.0f, 0.6f, 0.2f, 0.0f)),
+                      local2_at(point2{-26.0f, 0.0f}), Parent{s.entity});
+    }
+}
+
 void on_score(TickContext&, Span<const ScoreChanged> changes) {
     for (const ScoreChanged& s : changes) KV_INFO("rocks", "+%d -> %d", s.points, s.total);
 }
@@ -492,7 +512,7 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
 constinit const ResourceDesc k_resources[] = {{"example_rocks.score"}};
 
 constinit const char* const k_control_reads[]  = {"input.state"};
-constinit const char* const k_control_writes[] = {"example_rocks.ship.Transform2", "example_rocks.ship.Velocity", "example_rocks.ship.Ship", "example_rocks.bullet"};
+constinit const char* const k_control_writes[] = {"example_rocks.ship.Transform2", "example_rocks.ship.Velocity", "example_rocks.ship.Ship", "example_rocks.bullet", "example_rocks.flame"};
 constinit const char* const k_before_move[]    = {"example_rocks.move"};
 constinit const char* const k_move_reads[]     = {"*.Velocity"};
 constinit const char* const k_move_writes[]    = {"*.Transform2"};
@@ -522,8 +542,10 @@ constinit const char* const k_wave_writes[]     = {"example_rocks.score"};
 constinit const char* const k_score_reads[]     = {"example_rocks.score"};
 constinit const char* const k_after_rock_hit[]  = {"example_rocks.on_rock_hit"};
 constinit const char* const k_after_wave[]      = {"example_rocks.on_wave"};
+constinit const char* const k_spawned_writes[]  = {"example_rocks.flame"};
 constinit const HandlerDesc k_handlers[] = {
     {.name = "example_rocks.on_overlap",  KV_ON(OverlapBegin, on_overlap)},
+    {.name = "example_rocks.on_spawned",  KV_ON(Spawned, on_spawned), .writes = k_spawned_writes},
     {.name = "example_rocks.on_rock_hit", KV_ON(RockHit, on_rock_hit), .writes = k_rock_hit_writes},
     {.name = "example_rocks.on_ship_hit", KV_ON(ShipHit, on_ship_hit), .reads = k_ship_hit_reads, .writes = k_ship_hit_writes},
     {.name = "example_rocks.on_score",    KV_ON(ScoreChanged, on_score)},

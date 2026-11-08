@@ -173,7 +173,7 @@ Header `korvid/core/engine.h`:
 | `engine_module(e, name)`, `engine_module_state_as<T>(e, name)` | functions | a started module and its state, for code outside the schedule |
 | `engine_publish(e, self, name, ptr)` | function | the object behind a declared resource, for `ctx.resource<T>` |
 | `engine_resource_id`, `engine_component_id`, `engine_kind_id`, `engine_trigger_id`, `engine_system_phase` | functions | names to ids |
-| `engine_table(e, name or id)`, `engine_component(e, id)` | functions | a kind's table; a schema |
+| `engine_table(e, name or id)`, `engine_table_of(e, handle)`, `engine_component(e, id)` | functions | a kind's table, by name, id or an entity handle; a schema |
 | `engine_hash_state(e)` | function | the hash of every sim column of every live entity |
 | `engine_describe_event(e, type, event, out, cap)` | function | an event through its schema |
 | `engine_idle_add(e, name, fn, user)`, `engine_idle_remove(e, id)`, `engine_idle_run(e, seconds)` | functions | idle tasks: More, Nothing or Done, served round-robin in the budget |

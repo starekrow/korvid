@@ -1045,6 +1045,15 @@ u32 engine_trigger_id(const Engine& e, const char* name) {
 
 void engine_request_quit(Engine& e) { e.quit_requested = true; }
 
+Table* engine_table_of(Engine& e, Handle h) {
+    if (h.is_null()) return nullptr;
+    const kv_handle_kind_desc* d = kv_handle_kind_desc_get(h.kind());
+    if (!d || !d->ctx) return nullptr;
+    Table* t = (Table*)d->ctx;
+    if (t < e.tables.data || t >= e.tables.data + e.tables.len || t->kind != h.kind()) return nullptr;
+    return t;
+}
+
 // Every sim column of every live row, in kind order then slot order, with the entity's
 // handle so identity counts too. Field by field, so padding never matters.
 u64 engine_hash_state(const Engine& e) {

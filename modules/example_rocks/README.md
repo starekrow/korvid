@@ -1,7 +1,7 @@
 # example_rocks
 
-An asteroids-like, written the way the engine would like a game written: five kinds, seven
-systems with declared sets, eight handlers, scheduled events for bullet expiry and waves,
+An asteroids-like, written the way the engine would like a game written: six kinds, seven
+systems with declared sets, nine handlers, scheduled events for bullet expiry and waves,
 a trigger for the ship's death, a published score, and no handle kept anywhere except on
 the events that carry them. The ship flies from the keyboard or the first gamepad, or
 from a script with `--demo` so a run is reproducible: two runs of
@@ -90,6 +90,9 @@ debris are additive dots.
   screen-space dimmer in the `overlay` kind and calls `engine_pause`. Nothing else in the
   game knows about pausing: the sim systems simply do not run, the timers hold, and the
   extract keeps drawing.
+- **The flame is a child.** The `flame` kind has `Local2` and `Parent`; `on_spawned`
+  gives each new ship one, 26 units behind it, and the scene module keeps it there and
+  destroys it with the ship. `control` only sets its alpha from the thrust.
 - **The camera shake** is `example_rocks.camera` in PostSim writing `sprite.camera`; the
   offset is a function of the tick, so a run is still reproducible, and the camera is not
   hashed in any case.
