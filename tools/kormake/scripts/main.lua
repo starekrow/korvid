@@ -21,6 +21,7 @@ local function usage()
 usage: kormake build <platform>-<config> [--no-unity] [--cxx PATH]
        kormake gen   <platform>-<config> [--no-unity] [--cxx PATH]
        kormake test  <platform>-<config> [MODULE]
+       kormake package <platform>-<config> <exe>   (dist/<exe>/: the exe, its pack, shaders, licenses)
        kormake check [<platform>-<config>]
        kormake graph [<platform>-<config>] [--dot] [--why MODULE]
        kormake clean [<platform>-<config>]
@@ -127,6 +128,46 @@ local function run(cmd, target, opts, rest)
   if cmd == "build" then
     local rc = kfs.exec(string.format("ninja -C %s %s", build, table.concat(rest, " ")))
     return rc
+  end
+  if cmd == "package" then
+    -- A self-contained directory: the executable, its pack, its shaders, the licenses of
+    -- everything it links. dist/<exe>/ under the root, replaced each time.
+    local exe = rest[1] or util.fail("usage: kormake package <platform>-<config> <exe>")
+    local inst
+    for _, i in ipairs(g.instances) do
+      if i.module.name == exe and i.module.fields.output == "exe" and i.config == g.config and i.platform == g.platform then inst = i end
+    end
+    if not inst then util.fail("'%s' is not an executable in %s", exe, target) end
+    local pack
+    for _, t in ipairs(inst.tools) do
+      for _, r in ipairs(t.instance.module.fields.exports or {}) do
+        if r.per == "exe" then pack = "bin/" .. r.outputs:gsub("%%{exe}", exe) end
+      end
+    end
+    local rc = kfs.exec(string.format("ninja -C '%s' 'bin/%s'%s", build, exe, pack and (" '" .. pack .. "'") or ""))
+    if rc ~= 0 then return rc end
+    local dist = util.join(root, "dist/" .. exe)
+    local function sh(fmt, ...) local r = kfs.exec(string.format(fmt, ...)); if r ~= 0 then util.fail("package: a copy failed") end end
+    sh("rm -rf '%s' && mkdir -p '%s/licenses'", dist, dist)
+    sh("cp '%s/bin/%s' '%s/'", build, exe, dist)
+    if pack then sh("cp '%s/%s' '%s/'", build, pack, dist) end
+    if kfs.isdir(util.join(build, "bin/shaders")) then sh("cp -r '%s/bin/shaders' '%s/'", build, dist) end
+    local copied = 0
+    for _, f in ipairs({ "LICENSE", "NOTICE" }) do
+      if kfs.isfile(util.join(root, f)) then sh("cp '%s' '%s/'", util.join(root, f), dist); copied = copied + 1 end
+    end
+    local mods = {}
+    for _, d in ipairs(inst.closure) do mods[#mods + 1] = d end
+    mods[#mods + 1] = inst
+    for _, d in ipairs(mods) do
+      for _, f in ipairs(util.as_list(d.module.fields.licenses or {})) do
+        sh("cp '%s' '%s/licenses/%s-%s'", util.join(d.module.dir, f), dist, d.module.name, util.basename(f))
+        copied = copied + 1
+      end
+    end
+    print(string.format("kormake: %s: %s%s, %d license files%s", dist, exe, pack and (", " .. util.basename(pack)) or ", no pack", copied,
+      kfs.isfile(util.join(root, "LICENSE")) and "" or " (the repository has no LICENSE at its root)"))
+    return 0
   end
   if cmd == "test" then
     local targets = {}

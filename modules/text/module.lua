@@ -4,4 +4,5 @@
 module "text" {
   deps          = { "core", "math", "render", "platform", "asset", "sprite", "scene" },
   engine_module = true,
+  licenses = { "assets/DejaVuSans-LICENSE.txt" },
 }

@@ -12,6 +12,7 @@ module, including backends, build-time tools and platform toolchains.
     kormake check                              # resolve only: cycles, bindings, duplicates
     kormake graph [--dot] [--why MODULE]       # the instance graph; --why shows what pulled a module in
     kormake test linux-debug [MODULE]          # build and run the tests
+    kormake package linux-ship EXE             # dist/EXE/: the executable, its pack, shaders, licenses
     kormake clean [linux-debug]                # remove the build directory
     kormake --version
 
@@ -28,5 +29,16 @@ file, OS or `require` access; their output is plain data. The fields a module ma
 `output` (lib, exe, headers), `deps`, `provides`, `platforms`, `external`, `tools`,
 `exports` (rules), `sources`, `defines`, `prebuilt`, `system`, `bindings`, `unity`,
 `engine_module` (the module registers a `ModuleDesc`; the build then generates the
-executable's module list in dependency order) and `module_list = false` (the executable
-writes its own list).
+executable's module list in dependency order), `module_list = false` (the executable
+writes its own list) and `licenses` (files under the module that `kormake package` copies
+into `dist/<exe>/licenses/`).
+
+**Tool rules.** A tool module exports `rule "name" { inputs, outputs, command, deps }`; a
+module naming the tool in `tools` gets an edge per file of its own that matches `inputs`
+(the shader rule: `shaders/*.slang` to `%{stem}.spv`). A rule with `per = "exe"` and
+`inputs = "assets"` runs once per executable instead, over every asset file the
+executable's closure stages under `bin/assets/`, passed through a Ninja response file
+(`%{rsp}`), with `%{exe}` in `outputs` (kpack's pack rule: `bin/<exe>.kpak`). Per-exe
+outputs are in the default build in the ship config and buildable by name in the others.
+A tool built from source is the target config's own instance on a native build (the
+command runs `bin/<tool>`); cross builds of source tools are not supported yet.

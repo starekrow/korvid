@@ -318,13 +318,11 @@ Handle anim_load(Engine& e, const char* path) {
     if (h.is_null()) return Handle{};
     s->by_path.set(name, h);
 
-    char full[512];
-    snprintf(full, sizeof full, "%sassets/%s", platform_base_path(e), path);
     IoRequest req;
-    req.path  = full;
+    req.path  = path;
     req.alloc = s->general;
     req.user  = h.bits;
-    Handle iq = io->read_file(req);
+    Handle iq = io->read_asset(req);
     AnimClip* rec = s->clips.get(h);
     if (iq.is_null()) { fail_clip(e, *s, h, *rec, AssetError::Read, "could not submit"); return h; }
     rec->io = iq;

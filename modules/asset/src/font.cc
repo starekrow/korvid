@@ -356,13 +356,11 @@ Handle font_load(Engine& e, AssetState_& st, const char* path, const FontDesc& d
     }
     s->font_by_key.set(name, h);
 
-    char full[512];
-    snprintf(full, sizeof full, "%sassets/%s", platform_base_path(e), path);
     IoRequest req;
-    req.path  = full;
+    req.path  = path;
     req.alloc = s->general;
     req.user  = h.bits;
-    Handle iq = io->read_file(req);
+    Handle iq = io->read_asset(req);
     FontAsset* rec = s->fonts.get(h);
     if (iq.is_null()) { fail_font(e, *s, h, *rec, AssetError::Read, "could not submit"); return h; }
     rec->io = iq;

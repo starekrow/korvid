@@ -3,4 +3,5 @@
 -- allocation of its own; no zlib on the system.
 module "inflate" {
   deps = { "core" },
+  licenses = { "src/vendor/LICENSE" },
 }

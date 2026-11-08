@@ -5,10 +5,14 @@
 #include "korvid/core/log.h"
 #include "sdl_internal.h"
 #include <SDL3/SDL.h>
+#include <stdio.h>
+#include <sys/stat.h>
 
 namespace kv {
 
 namespace {
+
+PlatformMounts g_mounts; // what platform_configure_mounts said, for the next startup
 
 // Idle time: the queue admits what the frame's pumps held back, idle reads included.
 IdleResult io_idle(Engine&, f64 seconds, void* user) {
@@ -36,6 +40,20 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
     if (!engine_publish(engine, self, "input.state", &s->input) ||
         !engine_publish(engine, self, ".window", &s->window)) return false;
     if (!s->io.init(&self.general, 4096)) return false;
+    // The executable's assets/ directory is the first mount, when there is one; the frame
+    // loop mounts packs over it.
+    char path[512];
+    struct stat st;
+    const char* base = s->base_path ? s->base_path : "";
+    snprintf(path, sizeof path, "%sassets", base);
+    if (!g_mounts.none && stat(path, &st) == 0 && S_ISDIR(st.st_mode)) s->io.mount_dir(path);
+    if (g_mounts.exe_name) {
+        snprintf(path, sizeof path, "%s%s.kpak", base, g_mounts.exe_name);
+        if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) s->io.mount_pack(path);
+    }
+    for (u32 i = 0; i < g_mounts.pack_count; ++i)
+        if (!s->io.mount_pack(g_mounts.packs[i])) return false; // asked for by name: not having it is an error
+    if (g_mounts.assets_dir && !s->io.mount_dir(g_mounts.assets_dir)) return false;
     engine_idle_add(engine, "platform.io", io_idle, &s->io);
     return true;
 }
@@ -101,6 +119,8 @@ HostWindow* platform_open_window(Engine& e, const WindowDesc& desc) {
 }
 
 bool platform_video_up(Engine&) { return platform_sdl_video_up(); }
+
+void platform_configure_mounts(const PlatformMounts& mounts) { g_mounts = mounts; }
 
 HostWindow* platform_window(Engine& e) {
     PlatformState* s = state(e);

@@ -19,6 +19,7 @@ local function tool_path(inst)
     if not p then util.fail("tool '%s' has no prebuilt binary for %s", inst.module.name, inst.platform) end
     return util.join(inst.module.dir, p), true
   end
+  if f.output == "exe" then return "bin/" .. inst.module.name, true end -- built in this graph (resolve keeps it native)
   util.fail("tool '%s' is neither built from source, prebuilt nor a system lookup", inst.module.name)
 end
 
@@ -66,8 +67,9 @@ function M.run(c, g, opts)
         if not tool_rules[rname] then
           local tool, implicit = tool_path(t.instance)
           local cmd = r.command or util.fail("rule '%s' of '%s' has no command", r.name, t.instance.module.name)
-          cmd = cmd:gsub("%%{tool}", tool):gsub("%%{in}", "$in"):gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d")
-          w("rule " .. rname .. "\n  command = " .. cmd .. (r.deps == "depfile" and "\n  depfile = $out.d\n  deps = gcc" or "") .. "\n  description = " .. r.name:upper() .. " $out")
+          cmd = cmd:gsub("%%{tool}", tool):gsub("%%{in}", "$in"):gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp")
+          local rsp = r.per == "exe" and "\n  rspfile = $out.rsp\n  rspfile_content = $in" or ""
+          w("rule " .. rname .. "\n  command = " .. cmd .. (r.deps == "depfile" and "\n  depfile = $out.d\n  deps = gcc" or "") .. rsp .. "\n  description = " .. r.name:upper() .. " $out")
           tool_rules[rname] = { rule = r, tool = tool, implicit = implicit }
         end
       end
@@ -177,6 +179,7 @@ function M.run(c, g, opts)
       local runtime = {}
       for _, t in ipairs(inst.tools) do
         for _, r in ipairs(t.instance.module.fields.exports or {}) do
+          if r.per == "exe" then goto next_rule end -- runs once per executable, below
           local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name
           local pat_dir, pat_glob = util.dirname(r.inputs), util.basename(r.inputs)
           local dir = util.join(m.dir, pat_dir)
@@ -193,6 +196,7 @@ function M.run(c, g, opts)
               end
             end
           end
+          ::next_rule::
         end
       end
       -- Assets: bin/assets/<module>/<file>.
@@ -226,6 +230,25 @@ function M.run(c, g, opts)
         w(string.format("build %s: link %s %s%s\n  libs = %s", exe, table.concat(objs, " "), table.concat(libs, " "),
           #rt > 0 and (" || " .. table.concat(rt, " ")) or "", table.concat(extlibs, " ")))
         all[#all + 1] = exe
+        -- Rules that run once per executable over its staged assets (a pack): part of the
+        -- default build in ship, buildable by name in the other configs.
+        for _, t in ipairs(inst.tools) do
+          for _, r in ipairs(t.instance.module.fields.exports or {}) do
+            if r.per ~= "exe" then goto skip_rule end
+            do
+              local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name
+              local tr = tool_rules[rname]
+              local ins = {}
+              for _, p in ipairs(rt) do if p:sub(1, 11) == "bin/assets/" then ins[#ins + 1] = util.ninja_escape(p) end end
+              if r.inputs ~= "assets" then util.fail("rule '%s' of '%s': per-exe rules take inputs = \"assets\"", r.name, t.instance.module.name) end
+              local outp = "bin/" .. r.outputs:gsub("%%{exe}", m.name)
+              local implicit = tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""
+              w(string.format("build %s: %s %s%s", util.ninja_escape(outp), rname, table.concat(ins, " "), implicit))
+              if g.config == "ship" then all[#all + 1] = outp end
+            end
+            ::skip_rule::
+          end
+        end
       end
     end
     ::continue::
@@ -277,7 +300,7 @@ function M.run(c, g, opts)
   w("build build.ninja: regen | " .. table.concat(esc, " "))
 
   kfs.mkdirp(util.join(build, "test"))
-  kfs.write(util.join(build, "build.ninja"), table.concat(out, "\n") .. "\n")
+  kfs.write(util.join(build, "build.ninja"), table.concat(out, "\n") .. "\n", true)
   kfs.write(util.join(build, "compile_commands.json"), "[\n" .. table.concat(cc, ",\n") .. "\n]\n")
   -- Where clangd looks.
   kfs.write(util.join(root, "build/compile_commands.json"), "[\n" .. table.concat(cc, ",\n") .. "\n]\n")

@@ -28,6 +28,18 @@ struct PlatformState {
     char*       pref_path = nullptr; // the per-user directory once asked for; SDL's, freed at shutdown
 };
 
+// Where read_asset looks, set before engine_init (the frame loop's --pack and --assets).
+// At startup the platform mounts, in this order, so later ones win: <exe dir>/assets/ if
+// it exists; <exe dir>/<exe name>.kpak if it exists; each of `packs`; `assets_dir`.
+struct PlatformMounts {
+    const char* exe_name = nullptr;     // for the default pack's name; null: none looked for
+    const char* packs[8] = {};
+    u32         pack_count = 0;
+    const char* assets_dir = nullptr;
+    bool        none = false;           // mount nothing, not even <exe dir>/assets/ (a tool)
+};
+void platform_configure_mounts(const PlatformMounts& mounts);
+
 // Opens the window. Null if one is already open or SDL refused. Owned by the module.
 HostWindow* platform_open_window(Engine& e, const WindowDesc& desc);
 // The platform starts headless. This brings up video and gamepads (once; they stay up

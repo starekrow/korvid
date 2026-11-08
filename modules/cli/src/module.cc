@@ -164,7 +164,7 @@ bool run_request(Engine& e, CliState& cli, Request& rq, const char* text) {
     } else {
         u32 consumed = 0;
         const CliCommandDesc* cmd = match(cli, words + first, n - first, &consumed);
-        if (!cmd) ctx.fail("unknown command '%s'; try help", words[first]);
+        if (!cmd) ctx.fail("unknown command '%s%s%s'; try help", words[first], n - first > 1 ? " " : "", n - first > 1 ? words[first + 1] : "");
         else cmd->fn(ctx, Span<const char* const>(words + first + consumed, n - first - consumed));
     }
     if (ctx.failed) ++cli.failed;

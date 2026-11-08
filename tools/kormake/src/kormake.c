@@ -2,6 +2,7 @@
  * scripts need from the operating system: the file system, the environment, running a
  * command. Module files and the master file are evaluated by the scripts in a sandbox
  * that sees none of this. */
+#include <utime.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -65,11 +66,15 @@ static int kfs_read(lua_State* L) {
     return 1;
 }
 
-/* Writes only if the content changed, so Ninja does not see a touched file. */
+/* Writes only if the content changed, so Ninja does not see a touched file. With a true
+ * third argument an unchanged file is touched instead: build.ninja must be newer than the
+ * inputs of its regenerate rule even when an edit to one of them changed nothing, or Ninja
+ * regenerates it forever. */
 static int kfs_write(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
     size_t len;
     const char* text = luaL_checklstring(L, 2, &len);
+    int touch = lua_toboolean(L, 3);
     FILE* f = fopen(path, "rb");
     if (f) {
         fseek(f, 0, SEEK_END);
@@ -82,7 +87,11 @@ static int kfs_write(lua_State* L) {
             free(buf);
         }
         fclose(f);
-        if (same) { lua_pushboolean(L, 0); return 1; }
+        if (same) {
+            if (touch) utime(path, NULL);
+            lua_pushboolean(L, 0);
+            return 1;
+        }
     }
     f = fopen(path, "wb");
     if (!f) return luaL_error(L, "cannot write '%s': %s", path, strerror(errno));

@@ -103,7 +103,15 @@ function M.run(c, platform, config, opts)
         if not bound then util.fail("'%s' needs tool interface '%s' but no backend is bound for %s", name, tname, plat) end
         tmod = bound[1]
       end
-      local ti = instance_of(tmod, g.host, "ship", name .. " (tool)")
+      -- A tool built from source on a native build is the target build's own instance
+      -- (the same platform; its config): building a second, host-ship copy of it in this
+      -- graph would collide with the first. Cross builds will need host instances of
+      -- their own; prebuilt and system tools have no instance to build either way.
+      local trec = by_name[tmod]
+      local from_source = trec and not trec.fields.system and not trec.fields.prebuilt
+      local tconf = (from_source and g.host == plat) and conf or "ship"
+      if from_source and g.host ~= plat then util.fail("tool '%s' is built from source, and cross builds of source tools are not supported yet", tmod) end
+      local ti = instance_of(tmod, g.host, tconf, name .. " (tool)")
       inst.tools[#inst.tools + 1] = { instance = ti, spec = spec, name = tname }
     end
 

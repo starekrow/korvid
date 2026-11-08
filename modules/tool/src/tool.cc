@@ -95,6 +95,9 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
     CliConfig cli;
     cli.no_stdin = true; // a tool's stdin is the build's, not a CLI session
     cli_configure(cli);
+    PlatformMounts mounts;
+    mounts.none = true; // a tool mounts what its commands name, never the assets beside it
+    platform_configure_mounts(mounts);
     Engine e;
     e.threads = threads;
     int code;

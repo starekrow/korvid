@@ -182,13 +182,11 @@ Handle texture_load(Engine& e, AssetState_& st, const char* path) {
     if (h.is_null()) { renderer_texture_destroy(r, t.texture); return Handle{}; }
     s->by_path.set(name, h);
 
-    char full[512];
-    snprintf(full, sizeof full, "%sassets/%s", platform_base_path(e), path);
     IoRequest req;
-    req.path  = full;
+    req.path  = path;
     req.alloc = s->general;
     req.user  = h.bits;
-    Handle iq = io->read_file(req);
+    Handle iq = io->read_asset(req);
     if (iq.is_null()) {
         TextureAsset* rec = s->textures.get(h);
         fail_asset(e, *s, h, *rec, AssetError::Read, "could not submit");

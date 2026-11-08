@@ -137,6 +137,23 @@ at the pump under the same priorities and budget as reads (`IORING_OP_WRITE` on 
 settings file is a write to `platform_pref_path(e, org, app)`, SDL's per-user directory
 for the names given (created on first use).
 
+**Assets go through mounts.** `read_asset(IoRequest{path = "example_rocks/rock.png"})`
+takes a logical path, normalizes it (`a//b`, `./a` and backslashes are `a/b`; `..` and
+absolute paths fail with `EINVAL`) and looks it up in the queue's mounts, the last mounted
+first: a directory (`mount_dir`) is a whole-file read of the file under it, a pack
+(`mount_pack`, any zip: see `modules/pack`) is a ranged read on the pack's own descriptor,
+inflated on delivery for a deflated entry and checked against its CRC-32 in debug and dev
+builds. A path no mount has completes `Failed` with `ENOENT`; the completion looks the
+same whichever answered. Mounting a pack reads its tail, central directory and index
+synchronously and logs one line: entries, whether the index was used, how many entries
+are deflated or unaligned. At startup the module mounts, in order, `<exe dir>/assets/`,
+`<exe dir>/<exe>.kpak`, then what `platform_configure_mounts` named (the frame loop's
+`--pack FILE` and `--assets DIR`), so a pack overrides loose files and a mod overrides the
+pack. A tool mounts nothing.
+
+`io_list_files(dir, fn, user)` walks a directory (sorted, hidden entries skipped) and
+`io_make_dirs(path)` is `mkdir -p`; both are synchronous, for tools and startup.
+
 Header `korvid/platform/audio.h`:
 
 | name | kind | what |
@@ -155,7 +172,7 @@ Header `korvid/platform/io.h`:
 | `IoBudget` | record | `bytes_per_pump` (8 MB), `bytes_in_flight` (64 MB), `idle_bytes_per_call` (4 MB); 0 is unlimited |
 | `IoRequest` | record | `path` (copied), `alloc` (the data's home; null: general), `priority`, `user` |
 | `IoCompletion` | record | `request`, `status`, `data`, `size`, `user`, `error` (errno) |
-| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`; counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes` |
+| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`; counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes` |
 | `platform_io(engine)` | function | the module's queue |
 | `platform_pref_path(engine, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none |
 | `platform_base_path(engine)` | function | the executable's directory with a trailing separator; assets live beneath it |
@@ -218,7 +235,8 @@ What the module registers with the engine:
 
 ## Not in this module
 
-Mouse and touch, text input, more than one window, audio, controller rumble, file
-writes, directory listing, pack files, io_uring for sockets, IPv6 and non-loopback
+Mouse and touch, text input, more than one window, audio, controller rumble, inflating on
+the job pool (a deflated pack entry is inflated on the main thread at the pump), unmounting,
+io_uring for sockets, IPv6 and non-loopback
 listeners by default, Windows and macOS. Residency streaming sits above the queue, in
 the asset module and whatever comes after it.

@@ -35,7 +35,7 @@ end
 local module_fields = {
   output = true, deps = true, provides = true, platforms = true, external = true, tools = true,
   exports = true, sources = true, defines = true, prebuilt = true, system = true, bindings = true,
-  platform = true, unity = true, engine_module = true, module_list = true,
+  platform = true, unity = true, engine_module = true, module_list = true, licenses = true,
   tag = true, srcdirs = true, cxx = true, cxxflags = true, ldflags = true, configs = true, ar = true, externals = true,
 }
 

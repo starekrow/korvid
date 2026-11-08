@@ -37,6 +37,7 @@ const char*     g_shot_path    = nullptr; // --screenshot FILE: one frame as a P
 u64             g_shot_frame   = 90;      // --screenshot-frame N: which one
 bool            g_check_sort   = false;   // --check-sort: verify the GPU sort every 30th frame
 CliConfig       g_cli;                    // --cli-port N, --cli-stdin, --cli-ascii
+PlatformMounts  g_mounts;                 // --pack FILE (repeatable), --assets DIR
 f64             g_idle_margin  = 0.0015;  // --idle-margin-ms N: slack kept back from idle work
 bool            g_idle         = true;    // --no-idle
 bool            g_overlay      = false;   // --overlay: the report on screen
@@ -97,6 +98,11 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--cli-port") == 0 && i + 1 < argc) g_cli.port = (u16)atoi(argv[++i]);
         else if (strcmp(argv[i], "--cli-stdin") == 0) g_cli.stdin_ = true;
         else if (strcmp(argv[i], "--cli-ascii") == 0) g_cli.ascii = true;
+        else if (strcmp(argv[i], "--pack") == 0 && i + 1 < argc) {
+            if (g_mounts.pack_count >= KV_COUNTOF(g_mounts.packs)) { KV_ERROR("frameloop", "at most %u --pack", (u32)KV_COUNTOF(g_mounts.packs)); return false; }
+            g_mounts.packs[g_mounts.pack_count++] = argv[++i];
+        }
+        else if (strcmp(argv[i], "--assets") == 0 && i + 1 < argc) g_mounts.assets_dir = argv[++i];
         else if (strcmp(argv[i], "--idle-margin-ms") == 0 && i + 1 < argc) g_idle_margin = atof(argv[++i]) * 1e-3;
         else if (strcmp(argv[i], "--no-idle") == 0) g_idle = false;
         else if (strcmp(argv[i], "--overlay") == 0) g_overlay = true;
@@ -104,7 +110,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--idle-margin-ms N] [--no-idle] [--overlay]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--idle-margin-ms N] [--no-idle] [--overlay]", argv[0]);
             return false;
         }
     }
@@ -352,6 +358,9 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
         if (g_trace_path) prof_trace_open(g_trace_path);
     }
     cli_configure(g_cli);
+    const char* slash = strrchr(argv[0], '/');
+    g_mounts.exe_name = slash ? slash + 1 : argv[0];
+    platform_configure_mounts(g_mounts);
     Engine engine;
     engine.hash_ticks   = g_hash_ticks;
     engine.hash_systems = g_hash_systems;
