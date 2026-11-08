@@ -191,6 +191,11 @@ bool collect(void* user, const void* p, usize n) {
 }
 
 // The items are all read: make the archive and submit its write.
+// TODO(kpack): build the pack on disk, not in memory. Today every file's bytes and the
+// whole archive are held at once, so a game whose assets do not fit in RAM cannot be
+// packed. kpak_write already writes through a callback: stream each entry to the output
+// as its read completes (headers and padding first, the index and central directory at
+// the end, the index entry's slot reserved up front), holding one file at a time.
 void write_archive(Engine& e, KpackState& s) {
     IoQueue& io = *platform_io(e);
     Array<PackWriteFile> files;
@@ -279,6 +284,12 @@ void kpack_pump(TickContext& ctx) {
     }
     if (s.stage == Stage::Read) {
         if (s.submitted == 0) {
+            // TODO(kpack): submit in a window, not all at once. Every read goes in on the
+            // first tick, so more items than the queue's request slots (4,096) make the
+            // rest return null, and they are counted as failures: a 4,100-file directory
+            // fails to pack, even with one-byte files. Keep a cursor, submit while the
+            // queue takes requests, and submit more as completions are reaped. Do it with
+            // the on-disk pack above, which reorganizes this loop anyway.
             for (Item& it : s.items) {
                 IoRequest r;
                 r.path = it.path; r.alloc = s.general; r.user = 4;

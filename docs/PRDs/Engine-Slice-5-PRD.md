@@ -258,6 +258,7 @@ The collision module finds overlaps between entities and reports them as events,
 - **Determinism across loads.** Anything a game does between `LevelLeaving` and `LevelEntered` that writes sim state on paused ticks breaks the hash. The handlers run on paused ticks by design; the arcanum demo checks it and the level README says it plainly.
 - **Underruns.** The decode-ahead ring is a second long; a main-thread stall longer than that is silence in the music. The counter makes it visible, and a long stall already drops frames.
 - **Third-party content.** A CC0 pack can change between versions or carry a file under different terms. The version and URL are pinned in `CREDITS.md`, the license is read from the download, and only files the game uses are vendored.
+- **kpack at content scale.** Two known gaps, both TODOs in `tool_kpack`. The pack is built in memory, so assets that do not fit in RAM cannot be packed: the fix is an on-disk pack, streaming each entry as its read completes. And every read is submitted at once, so more than the queue's 4,096 request slots fails, counted as failed files (reproduced with 4,100 one-byte files): the fix is a submission window topped up as completions arrive, done with the on-disk pack since both rework the same loop. Neither blocks arcanum (23 entries).
 - **Tiled versions.** Tiled's JSON has changed field names across versions (`type` became `class`). The parser accepts both and the test maps cover 1.8 and later.
 
 **Milestones**

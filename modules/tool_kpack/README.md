@@ -59,9 +59,15 @@ every tick) runs it in stages:
 ## Behaviour worth knowing
 
 - **One job at a time.** A second command while one runs is refused.
-- **The archive is built in memory** (the files and the pack). Fine for a game's
-  assets today; `kpak_write` already writes through a callback, so a streaming write
-  is a change here, not in the format.
+- **The archive is built in memory** (the files and the pack), so a game whose assets
+  do not fit in RAM cannot be packed. TODO: build the pack on disk, streaming each entry
+  to the output as its read completes; `kpak_write` already writes through a callback, so
+  this is a change here, not in the format.
+- **More than 4,096 files fail.** Every read is submitted on the first tick, the queue
+  has 4,096 request slots, and a submission it refuses is counted as a failed file, so a
+  4,100-file directory fails to pack even when every file is one byte. TODO: submit in a
+  window and top it up as completions arrive. It waits for the on-disk pack, which
+  reworks the same loop.
 - **Repack is deterministic.** Packing a directory and repacking a zip of the same files
   give the same bytes.
 - **kpack is always the host's.** On `linux-dev` it is `bin/kpack`; in any other build
