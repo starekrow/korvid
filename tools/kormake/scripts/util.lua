@@ -57,6 +57,24 @@ function M.sorted_files(dir, ext)
   return out
 end
 
+-- Every file under dir, recursively, as paths relative to it ("maps/town.tmj"), sorted;
+-- hidden entries (a leading '.') skipped.
+function M.sorted_files_recursive(dir)
+  local out = {}
+  local function walk(rel)
+    local here = rel == "" and dir or M.join(dir, rel)
+    for _, n in ipairs(kfs.listdir(here)) do
+      if n:sub(1, 1) ~= "." then
+        local r = rel == "" and n or (rel .. "/" .. n)
+        if kfs.isdir(M.join(dir, r)) then walk(r) elseif kfs.isfile(M.join(dir, r)) then out[#out + 1] = r end
+      end
+    end
+  end
+  walk("")
+  table.sort(out)
+  return out
+end
+
 function M.sorted_keys(t)
   local ks = {}
   for k in pairs(t) do ks[#ks + 1] = k end

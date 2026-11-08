@@ -33,6 +33,9 @@ executable's module list in dependency order), `module_list = false` (the execut
 writes its own list) and `licenses` (files under the module that `kormake package` copies
 into `dist/<exe>/licenses/`).
 
+**Assets.** Everything under a module's `assets/`, subdirectories included, is copied to
+`bin/assets/<module>/` with the same layout (hidden files skipped).
+
 **Tool rules.** A tool module exports `rule "name" { inputs, outputs, command, deps }`; a
 module naming the tool in `tools` gets an edge per file of its own that matches `inputs`
 (the shader rule: `shaders/*.slang` to `%{stem}.spv`). A rule with `per = "exe"` and

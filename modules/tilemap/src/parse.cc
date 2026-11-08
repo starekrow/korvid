@@ -480,8 +480,23 @@ void tilemap_build_solids(TilemapAsset& m, Allocator* a) {
         if (l.kind == MapLayerKind::Objects) {
             for (u32 k = 0; k < l.objects.count; ++k) {
                 const MapObject& o = m.objects[l.objects.first + k];
-                if (!prop_bool(m, o.props, "solid") || o.point) continue;
-                // A tile object's (x, y) is its bottom-left; a shape's is its top-left.
+                if (o.point) continue;
+                // A tile object collides by its tile's shapes (scaled to the object's size), or
+                // whole with the bool property `solid`. Its (x, y) is its bottom-left; a
+                // shape's is its top-left.
+                const MapTile* t = o.gid ? tilemap_tile_info(m, o.gid) : nullptr;
+                const MapTileset* ts = o.gid ? tilemap_tileset_of(m, o.gid, nullptr) : nullptr;
+                if (t && ts && t->rects.count && !prop_bool(m, o.props, "solid")) {
+                    f32 sx = o.width / (f32)ts->tile_w, sy = o.height / (f32)ts->tile_h, top = o.y - o.height;
+                    for (u32 q = 0; q < t->rects.count; ++q) {
+                        rect2 r = m.rects[t->rects.first + q];
+                        if (o.gid & KV_TILE_FLIP_H) r.x = (f32)ts->tile_w - r.x - r.w;
+                        if (o.gid & KV_TILE_FLIP_V) r.y = (f32)ts->tile_h - r.y - r.h;
+                        append(a, m.solid_rects, m.solid_rect_count) = rect2{o.x + r.x * sx, top + r.y * sy, r.w * sx, r.h * sy};
+                    }
+                    continue;
+                }
+                if (!prop_bool(m, o.props, "solid")) continue;
                 rect2 r = o.gid ? rect2{o.x, o.y - o.height, o.width, o.height} : rect2{o.x, o.y, o.width, o.height};
                 append(a, m.solid_rects, m.solid_rect_count) = r;
             }

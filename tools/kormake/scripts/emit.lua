@@ -199,9 +199,9 @@ function M.run(c, g, opts)
           ::next_rule::
         end
       end
-      -- Assets: bin/assets/<module>/<file>.
+      -- Assets: bin/assets/<module>/<path>, subdirectories kept.
       if m.assets_dir then
-        for _, n in ipairs(util.sorted_files(m.assets_dir)) do
+        for _, n in ipairs(util.sorted_files_recursive(m.assets_dir)) do
           local outpath = "bin/assets/" .. m.name .. "/" .. n
           w(string.format("build %s: copy %s", util.ninja_escape(outpath), util.ninja_escape(util.join(m.assets_dir, n))))
           runtime[#runtime + 1] = outpath

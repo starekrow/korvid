@@ -103,6 +103,12 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
             g_mounts.packs[g_mounts.pack_count++] = argv[++i];
         }
         else if (strcmp(argv[i], "--assets") == 0 && i + 1 < argc) g_mounts.assets_dir = argv[++i];
+        else if (strcmp(argv[i], "--io") == 0 && i + 1 < argc) {
+            const char* b = argv[++i];
+            if (!strcmp(b, "sync")) g_mounts.io_backend = IoBackend::Sync;
+            else if (!strcmp(b, "uring")) g_mounts.io_backend = IoBackend::Uring;
+            else { KV_ERROR("frameloop", "--io sync or --io uring"); return false; }
+        }
         else if (strcmp(argv[i], "--idle-margin-ms") == 0 && i + 1 < argc) g_idle_margin = atof(argv[++i]) * 1e-3;
         else if (strcmp(argv[i], "--no-idle") == 0) g_idle = false;
         else if (strcmp(argv[i], "--overlay") == 0) g_overlay = true;
@@ -110,7 +116,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--idle-margin-ms N] [--no-idle] [--overlay]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay]", argv[0]);
             return false;
         }
     }

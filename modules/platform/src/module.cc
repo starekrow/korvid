@@ -40,7 +40,7 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
     if (!engine_publish(engine, self, "input.state", &s->input) ||
         !engine_publish(engine, self, "input.actions", &s->actions) ||
         !engine_publish(engine, self, ".window", &s->window)) return false;
-    if (!s->io.init(&self.general, 4096)) return false;
+    if (!s->io.init(&self.general, 4096, g_mounts.io_backend)) return false;
     // The executable's assets/ directory is the first mount, when there is one; the frame
     // loop mounts packs over it.
     char path[512];
