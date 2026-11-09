@@ -248,13 +248,22 @@ void cli_rate(CliContext& ctx, Span<const char* const> args) {
     ctx.print("rate %.3f", (f64)r);
 }
 
+void cli_time_scale(CliContext& ctx, Span<const char* const> args) {
+    if (!args.len) { ctx.print("time scale %.3f (rate %.3f)", ctx.engine->clock.scale, ctx.engine->clock.rate); return; }
+    f32 s = 0.0f;
+    if (!cli_arg_f32(ctx, args[0], "scale", &s)) return;
+    if (!engine_time_scale(*ctx.engine, s)) { ctx.fail("time scale must be zero or more"); return; }
+    ctx.print("time scale %.3f", (f64)s);
+}
+
 constinit const CliCommandDesc k_commands[] = {
     {.name = "help",   .help = "list the commands", .fn = cli_help},
     {.name = "quit",   .help = "ask the engine to quit", .fn = cli_quit},
     {.name = "pause",  .help = "hold the sim; menus, input and the extract keep running", .fn = cli_pause},
     {.name = "resume", .help = "let the sim run again", .fn = cli_resume},
     {.name = "step",   .help = "[N] let N sim ticks (1) through the pause", .fn = cli_step},
-    {.name = "rate",   .help = "[X] show or set the time scale while unpaused", .fn = cli_rate},
+    {.name = "rate",   .help = "[X] show or set the developer's rate while unpaused", .fn = cli_rate},
+    {.name = "time scale", .help = "[X] show or set the game's time scale (times the rate; 0 runs no sim ticks)", .fn = cli_time_scale},
     {.name = "ls",     .help = "[-n N] [path]: what is under a directory of the filesystem (N entries at most, 200 by default)", .fn = cli_fs_ls},
     {.name = "cd",     .help = "[path]: change the session's working directory (/ by default)", .fn = cli_fs_cd},
     {.name = "pwd",    .help = "the working directory", .fn = cli_fs_pwd},

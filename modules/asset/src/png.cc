@@ -46,7 +46,10 @@ bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, 
     }
     if (!seen_ihdr || !seen_iend) return fail(error, "missing IHDR or IEND");
     if (w == 0 || h == 0 || w > 16384 || h > 16384) return fail(error, "unsupported size");
-    if (depth != 8) return fail(error, "only 8-bit samples are supported");
+    // 8-bit samples, or 1, 2 and 4 bits for gray and palette images (packed many to a
+    // byte, most significant first): what pixel-art packs save as.
+    bool packed = depth == 1 || depth == 2 || depth == 4;
+    if (depth != 8 && !(packed && (ctype == 0 || ctype == 3))) return fail(error, "only 8-bit samples (or 1, 2 and 4 bits of gray or palette) are supported");
     if (interlace) return fail(error, "interlaced PNGs are not supported");
     u32 channels;
     switch (ctype) {
@@ -71,15 +74,16 @@ bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, 
         at += 12 + (usize)len;
     }
 
-    usize stride = (usize)w * channels;
+    usize stride = packed ? ((usize)w * depth + 7) / 8 : (usize)w * channels;
     usize raw_len = (stride + 1) * h;
     u8* raw = arena_push_n<u8>(scratch, (u32)raw_len);
     if (!raw) return fail(error, "out of scratch");
     InflateOut z = inflate_zlib(idat, idat_total, raw, raw_len);
     if (z.result != InflateResult::Ok || z.produced != raw_len) return fail(error, "corrupt image data");
 
-    // Unfilter in place, one row at a time, against the previous unfiltered row.
-    u32 bpp = channels;
+    // Unfilter in place, one row at a time, against the previous unfiltered row. Packed
+    // samples filter by the byte.
+    u32 bpp = packed ? 1 : channels;
     for (u32 y = 0; y < h; ++y) {
         u8* row = raw + y * (stride + 1);
         u8 filter = row[0];
@@ -107,6 +111,17 @@ bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, 
     for (u32 y = 0; y < h; ++y) {
         const u8* src = raw + y * (stride + 1) + 1;
         u8* dst = rgba + (usize)y * w * 4;
+        if (packed) {
+            u32 per = 8 / depth, mask = (1u << depth) - 1;
+            for (u32 x = 0; x < w; ++x, dst += 4) {
+                u32 v = (src[x / per] >> (8 - depth * (x % per + 1))) & mask;
+                if (ctype == 0) { dst[0] = dst[1] = dst[2] = (u8)(v * 255 / mask); dst[3] = 255; continue; }
+                if (v >= plte_n) { free_in(pa, rgba, out_len); return fail(error, "palette index out of range"); }
+                dst[0] = plte[v * 3]; dst[1] = plte[v * 3 + 1]; dst[2] = plte[v * 3 + 2];
+                dst[3] = v < trns_n ? trns[v] : 255;
+            }
+            continue;
+        }
         for (u32 x = 0; x < w; ++x, dst += 4, src += channels) {
             switch (ctype) {
             case 0: dst[0] = dst[1] = dst[2] = src[0]; dst[3] = 255; break;

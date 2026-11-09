@@ -37,6 +37,7 @@ struct FrameLoopConfig {
     color       clear_color{0.09f, 0.09f, 0.11f, 1.0f};
     u32         report_every_seconds = 1; // fps line; 0 is silent
     Span<const char* const> flags = {};   // boolean flags the game accepts ("--demo"); frameloop_flag says which were given
+    Span<const char* const> options = {}; // flags the game accepts that take a value ("--dial"), each as often as it likes; frameloop_option
     EngineConfig engine = {};             // heaps and which module lives in which
 };
 
@@ -50,6 +51,9 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config);
 const FrameLoopConfig& frameloop_config(Engine& e);
 // Whether one of the game's declared flags was on the command line.
 bool frameloop_flag(Engine& e, const char* flag);
+// The value given after the `index`th occurrence of one of the game's declared options
+// ("--dial bullets=2" twice is index 0 and 1), or null when there are not that many.
+const char* frameloop_option(Engine& e, const char* option, u32 index = 0);
 
 // For a tool that drives the loop itself: the config the module will use, set before
 // engine_init, and one frame: pump the window, advance the engine by dt, render once.

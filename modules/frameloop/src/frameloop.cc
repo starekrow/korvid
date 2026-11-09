@@ -32,6 +32,9 @@ bool            g_hash_ticks   = false;
 bool            g_hash_systems = false;
 bool            g_trace_events = false;
 u64             g_flags_given  = 0; // bit i: config.flags[i] was on the command line
+struct GivenOption { u32 option; const char* value; }; // config.options[option], and what followed it
+GivenOption     g_options[32];
+u32             g_option_count = 0;
 u32             g_threads      = 0; // 0: every core
 const char*     g_trace_path   = nullptr; // --profile FILE
 bool            g_prof_report  = false;   // --prof-report: the top zones with the fps line
@@ -82,6 +85,13 @@ u32 game_flag(const FrameLoopConfig& cfg, const char* arg) {
     return 0;
 }
 
+// Index + 1 of a game option (a flag with a value), or 0.
+u32 game_option(const FrameLoopConfig& cfg, const char* arg) {
+    for (u32 i = 0; i < cfg.options.len; ++i)
+        if (strcmp(cfg.options[i], arg) == 0) return i + 1;
+    return 0;
+}
+
 bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--run-seconds") == 0 && i + 1 < argc) cfg.run_seconds = atof(argv[++i]);
@@ -119,6 +129,10 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--no-idle") == 0) g_idle = false;
         else if (strcmp(argv[i], "--overlay") == 0) g_overlay = true;
         else if (u32 f = game_flag(cfg, argv[i])) g_flags_given |= (u64)1 << (f - 1);
+        else if (u32 o = game_option(cfg, argv[i]); o && i + 1 < argc) {
+            if (g_option_count >= KV_COUNTOF(g_options)) { KV_ERROR("frameloop", "at most %u game options", (u32)KV_COUNTOF(g_options)); return false; }
+            g_options[g_option_count++] = GivenOption{o - 1, argv[++i]};
+        }
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
@@ -291,8 +305,10 @@ void run(Engine& engine, FrameLoopState& s) {
         }
         if (s.config.report_every_seconds && now >= next_report) {
             const MemSample& mem = mem_last_sample();
-            KV_INFO("frameloop", "%u fps, tick %llu, alpha %.2f, %u sprites, %u deltas/frame, %ux%u, %s, %llu KB live, idle %.1f ms/frame on %llu",
-                    frames_in_window, (unsigned long long)engine.clock.tick_count, engine.clock.alpha(),
+            char scaled[32] = "";
+            if (engine.clock.scale != 1.0) snprintf(scaled, sizeof scaled, " (time scale %.2f)", engine.clock.scale);
+            KV_INFO("frameloop", "%u fps, tick %llu%s, alpha %.2f, %u sprites, %u deltas/frame, %ux%u, %s, %llu KB live, idle %.1f ms/frame on %llu",
+                    frames_in_window, (unsigned long long)engine.clock.tick_count, scaled, engine.clock.alpha(),
                     renderer_sprite_count(s.renderer), s.deltas_last_frame, s.window->width(), s.window->height(),
                     s.window->focused() ? "focused" : "unfocused",
                     (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
@@ -357,6 +373,14 @@ void frameloop_step(Engine& e, f64 dt) {
 bool frameloop_flag(Engine& e, const char* flag) {
     u32 f = game_flag(frameloop_config(e), flag);
     return f && (g_flags_given >> (f - 1)) & 1;
+}
+
+const char* frameloop_option(Engine& e, const char* option, u32 index) {
+    u32 o = game_option(frameloop_config(e), option);
+    if (!o) return nullptr;
+    for (u32 i = 0; i < g_option_count; ++i)
+        if (g_options[i].option == o - 1 && index-- == 0) return g_options[i].value;
+    return nullptr;
 }
 
 int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {

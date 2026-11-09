@@ -15,6 +15,19 @@ void test_png(kv::TestCtx& c) {
     KV_CHECK(c, img.rgba && memcmp(img.rgba, k_png_filters_rgba, sizeof k_png_filters_rgba) == 0);
     mem_free(img.rgba);
 
+    // Samples of fewer than 8 bits, packed many to a byte, rows not a whole byte long: a
+    // palette (with a transparent entry) and gray.
+    PngImage pal;
+    KV_CHECK(c, png_decode(k_png_pal4, sizeof k_png_pal4, nullptr, pal, &why));
+    KV_CHECK(c, pal.width == k_png_pal4_w && pal.height == k_png_pal4_h);
+    KV_CHECK(c, pal.rgba && memcmp(pal.rgba, k_png_pal4_rgba, sizeof k_png_pal4_rgba) == 0);
+    mem_free(pal.rgba);
+    PngImage gray;
+    KV_CHECK(c, png_decode(k_png_gray2, sizeof k_png_gray2, nullptr, gray, &why));
+    KV_CHECK(c, gray.width == k_png_gray2_w && gray.height == k_png_gray2_h);
+    KV_CHECK(c, gray.rgba && memcmp(gray.rgba, k_png_gray2_rgba, sizeof k_png_gray2_rgba) == 0);
+    mem_free(gray.rgba);
+
     // Rejections name their reason and allocate nothing.
     MemStats before = mem_stats();
     PngImage bad;

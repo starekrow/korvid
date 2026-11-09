@@ -5,7 +5,8 @@ namespace kv {
 u32 TickClock::advance(f64 frame_dt) {
     if (frame_dt < 0.0) frame_dt = 0.0;
     bool stepping = paused && step_ticks > 0;
-    accumulator += paused && !stepping ? frame_dt : frame_dt * (rate > 0.0 ? rate : 0.0);
+    f64 speed = (rate > 0.0 ? rate : 0.0) * (scale > 0.0 ? scale : 0.0);
+    accumulator += paused && !stepping ? frame_dt : frame_dt * speed;
 
     f64 cap = (f64)max_ticks_per_frame * tick_dt;
     if (accumulator > cap) {

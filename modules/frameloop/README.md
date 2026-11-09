@@ -59,7 +59,10 @@ int main(int argc, char** argv) { return kv::frameloop_main(argc, argv, k_config
 after whatever the game wants to do first.
 
 **Flags:** `frameloop_flag(engine, "--demo")` is true if the flag was on the command line;
-`frameloop_config(engine)` is the config in effect.
+`frameloop_config(engine)` is the config in effect. **Options** are flags with a value
+(`options = {"--dial"}` in the config): `frameloop_option(engine, "--dial", i)` is the
+value after the `i`th occurrence, or null; an option may be given as often as the game
+likes.
 
 **A tool that drives frames itself** (cpukiller's window mode): `frameloop_set_config(cfg)`
 before `engine_init`, then `frameloop_step(engine, dt)` per frame, which pumps, ticks and
@@ -92,11 +95,12 @@ Header `korvid/frameloop/frameloop.h`:
 
 | name | kind | what |
 |---|---|---|
-| `FrameLoopConfig` | record | `title`, `width`, `height`, `vsync`, `borderless`, `validation`, `exit_on_close`, `exit_on_escape`, `run_seconds`, `clear_color`, `report_every_seconds`, `flags`, `engine` (an `EngineConfig`) |
+| `FrameLoopConfig` | record | `title`, `width`, `height`, `vsync`, `borderless`, `validation`, `exit_on_close`, `exit_on_escape`, `run_seconds`, `clear_color`, `report_every_seconds`, `flags`, `options`, `engine` (an `EngineConfig`) |
 | `ExitReason`, `ExitRequested{reason}` | enum, event | `WindowClosed`, `Escape`, `Timer` |
 | `frameloop_main(argc, argv, config)` | function | the whole run; returns the process exit code (2 for a bad option, 1 for a failed init) |
 | `frameloop_config(engine)` | function | the config in effect: the declaration plus the command line |
 | `frameloop_flag(engine, flag)` | function | whether one of the declared flags was given |
+| `frameloop_option(engine, option, i)` | function | the value after the `i`th occurrence of a declared option, or null |
 | `frameloop_set_config(config)`, `frameloop_step(engine, dt)` | functions | for a tool that drives the loop itself |
 
 Header `korvid/frameloop/module.h`: `frameloop_module`, the record.

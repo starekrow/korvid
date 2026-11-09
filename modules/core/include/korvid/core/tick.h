@@ -8,7 +8,11 @@
 // paused ticks: tick_count, the sim tick that TickContext::tick and the timer wheel use,
 // does not advance; tick_total counts every tick run. `step_ticks` lets that many sim
 // ticks through a pause. `rate` scales time while unpaused (0.5 is half speed); a paused
-// clock ignores it so the paused ticks keep real-time cadence.
+// clock ignores it so the paused ticks keep real-time cadence. `scale` is a second factor
+// on the same time, the game's own (engine_time_scale: a death in slow motion), so a game
+// that ramps it never fights the rate a developer set from the CLI; 0 runs no sim ticks at
+// all without pausing. Either way a tick is still tick_dt long: a scaled sim runs fewer
+// ticks a second, never shorter ones, so a script counted in ticks is the same run.
 #pragma once
 #include "korvid/core/types.h"
 
@@ -32,11 +36,12 @@ struct TickClock {
     u64 tick_total          = 0;   // every tick run, paused ones included
     u64 dropped_time_ticks  = 0;   // ticks' worth of time discarded at the cap
     f64 rate                = 1.0; // time scale while unpaused; <= 0 means no ticks at all
+    f64 scale               = 1.0; // the game's time scale, times rate while unpaused; 0: no ticks, not a pause
     u32 step_ticks          = 0;   // sim ticks still to let through a pause
     bool paused             = false; // any hold: what advance and begin_tick read
     u32  holds              = 0;     // HoldReason bits: who is holding the sim
 
-    // Adds frame_dt (scaled by rate unless paused) and returns how many ticks to run this
+    // Adds frame_dt (scaled by rate and scale unless paused) and returns how many ticks to run this
     // frame. Callers run exactly that many, deciding per tick with begin_tick.
     u32 advance(f64 frame_dt);
 

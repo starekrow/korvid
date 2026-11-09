@@ -35,12 +35,17 @@ KV_MODULE_DECLARE(collision_module);
 // game that wants the pairs themselves listens to the events.
 u32 collision_pair_count(Engine& e);
 
-// The last resolve, for reports and tests.
+// The last resolve and broadphase, for reports and tests.
 struct CollisionStats {
     u32 bodies  = 0; // solid and kinematic bodies
     u32 moves   = 0; // intents that were not zero
     u32 blocked = 0; // axis moves that stopped short
     u32 pushes  = 0; // bodies pushed
+    // The broadphase: every collider, the candidate pairs it looked at (neighbouring
+    // cells, each unordered pair once, before layers and masks), and its cell size.
+    u32 colliders = 0;
+    u32 tested    = 0;
+    f32 cell      = 0.0f;
 };
 const CollisionStats* collision_stats(Engine& e);
 

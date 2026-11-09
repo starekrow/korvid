@@ -148,7 +148,7 @@ Header `korvid/collision/module.h`:
 |---|---|---|
 | `collision_module` | `ModuleDesc` | the module record; kormake puts it in the list for you |
 | `collision_pair_count(Engine&)` | function | pairs overlapping after the last broadphase |
-| `collision_stats(Engine&)` | function | the last resolve: bodies, moves, blocked axis moves, pushes |
+| `collision_stats(Engine&)` | function | the last resolve (bodies, moves, blocked axis moves, pushes) and broadphase (colliders, candidate pairs tested before layers and masks, the cell size) |
 | `collision_static(e, fn, user)` | function | the static world's sweep; `tilemap_collide` sets it |
 | `collision_query(ctx, rect, layers, out)`, `collision_cast(ctx, box, delta, layers, ignore)` | functions | colliders in a rectangle; the first a moving box enters |
 

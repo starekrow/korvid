@@ -152,12 +152,17 @@ u32  engine_frame(Engine& e, f64 frame_dt);
 // change applies from the next tick. Pause holds the sim: paused ticks run only the
 // RunWhen::Always systems and the handlers. Step lets n sim ticks through a pause (and
 // pauses first if the clock was running). Rate scales time while unpaused; <= 0 is refused.
+// Time scale is the game's factor on top of the rate (slow motion that the game ramps
+// tick by tick); 0 runs no sim ticks without being a pause, negative is refused. Neither
+// changes a tick's length, only how many run a second.
 void engine_pause(Engine& e, bool paused); // the HoldUser hold
 // Sets or clears one reason for holding the sim (HoldReason bits); paused while any is set.
 void engine_hold(Engine& e, u32 reason, bool on);
 u32  engine_holds(const Engine& e);
 void engine_step(Engine& e, u32 n);
 bool engine_rate(Engine& e, f64 rate);
+bool engine_time_scale(Engine& e, f32 scale);
+f32  engine_time_scale_get(const Engine& e);
 // Applies and clears every command buffer, the engine's own first and then each unit's
 // in unit order: the tick runner calls it after every phase and every handler wave.
 void engine_apply_commands(Engine& e);

@@ -383,7 +383,7 @@ bool triggers_describe(CliContext& ctx, const char* rel) {
 struct ClockLeaf { const char* name; const char* what; };
 const ClockLeaf k_clock_leaves[] = {
     {"tick", "the sim tick"}, {"tick_total", "every tick, paused ones included"}, {"paused", "1 while the sim holds (any reason); patchable (the user hold)"}, {"holds", "who holds it: user, loading, focus, game bits"},
-    {"rate", "time scale while unpaused; patchable"}, {"step", "sim ticks still to let through a pause; patchable"},
+    {"rate", "the developer's rate while unpaused; patchable"}, {"scale", "the game's time scale, times the rate; patchable"}, {"step", "sim ticks still to let through a pause; patchable"},
     {"dt", "seconds per tick"}, {"alpha", "the render interpolation point"}, {"dropped", "ticks' worth of time dropped at the cap"},
     {"frame", "frames so far"},
 };
@@ -396,6 +396,7 @@ int clock_value(Engine& e, const char* name, char* out, usize cap) {
     if (!strcmp(name, "holds"))      return snprintf(out, cap, "%#x%s%s%s", c.holds, c.holds & HoldUser ? " user" : "",
                                                      c.holds & HoldLoading ? " loading" : "", c.holds & HoldFocus ? " focus" : "");
     if (!strcmp(name, "rate"))       return snprintf(out, cap, "%g", c.rate);
+    if (!strcmp(name, "scale"))      return snprintf(out, cap, "%g", c.scale);
     if (!strcmp(name, "step"))       return snprintf(out, cap, "%u", c.step_ticks);
     if (!strcmp(name, "dt"))         return snprintf(out, cap, "%g", c.tick_dt);
     if (!strcmp(name, "alpha"))      return snprintf(out, cap, "%.3f", (f64)c.alpha());
@@ -429,6 +430,7 @@ bool clock_patch(CliContext& ctx, const char* rel, Span<const char* const> value
     if (!cli_arg_f32(ctx, values[0], rel, &v)) return false;
     if (!strcmp(rel, "paused")) { engine_pause(e, v != 0.0f); if (v == 0.0f) e.clock.step_ticks = 0; }
     else if (!strcmp(rel, "rate")) { if (!engine_rate(e, (f64)v)) { ctx.fail("rate must be positive; patch paused 1 instead"); return false; } }
+    else if (!strcmp(rel, "scale")) { if (!engine_time_scale(e, v)) { ctx.fail("time scale must be zero or more"); return false; } }
     else if (!strcmp(rel, "step")) { engine_step(e, (u32)v); }
     else { ctx.fail("%s is read-only", rel[0] ? rel : "/clock"); return false; }
     return clock_describe(ctx, rel);

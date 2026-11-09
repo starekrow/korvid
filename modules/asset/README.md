@@ -242,7 +242,7 @@ Header `korvid/asset/png.h`:
 | name | kind | what |
 |---|---|---|
 | `PngImage` | record | `width`, `height`, `rgba` (caller frees) |
-| `png_decode(data, size, alloc, out, &error)` | function | tightly packed RGBA8 or false with a reason |
+| `png_decode(data, size, alloc, out, &error)` | function | tightly packed RGBA8 or false with a reason. Reads 8-bit gray, gray-alpha, RGB, RGBA and palette images, and 1, 2 and 4-bit gray and palette ones (what pixel-art packs save); not 16-bit samples or interlacing |
 
 Header `korvid/asset/module.h`: `asset_module`, the record; kormake puts it in the list.
 

@@ -70,4 +70,22 @@ void test_tick(kv::TestCtx& c) {
     twice.rate = 2.0;
     twice.max_ticks_per_frame = 8;
     KV_CHECK(c, twice.advance(2.0 / 60.0) == 4);
+
+    // Time scale: the game's factor, times the rate. Ten seconds at a quarter run 150
+    // ticks of the same length; paused, it is ignored like the rate; 0 runs none.
+    TickClock slow_mo;
+    slow_mo.scale = 0.25;
+    u32 slow_ticks = 0;
+    for (u32 i = 0; i < 600; ++i) slow_ticks += slow_mo.advance(1.0 / 60.0);
+    KV_CHECK(c, slow_ticks == 150 || slow_ticks == 149);
+    KV_CHECK(c, slow_mo.tick_dt == 1.0 / 60.0);
+    TickClock both;
+    both.rate = 2.0;
+    both.scale = 0.25;
+    KV_CHECK(c, both.advance(4.0 / 60.0) == 2);
+    both.paused = true;
+    KV_CHECK(c, both.advance(2.0 / 60.0) == 2);
+    TickClock frozen;
+    frozen.scale = 0.0;
+    KV_CHECK(c, frozen.advance(1.0) == 0 && frozen.accumulator == 0.0);
 }

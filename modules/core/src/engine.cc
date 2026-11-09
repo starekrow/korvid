@@ -995,6 +995,14 @@ bool engine_rate(Engine& e, f64 rate) {
     return true;
 }
 
+bool engine_time_scale(Engine& e, f32 scale) {
+    if (!(scale >= 0.0f)) { KV_WARN("engine", "time scale must be zero or more"); return false; }
+    e.clock.scale = (f64)scale;
+    return true;
+}
+
+f32 engine_time_scale_get(const Engine& e) { return (f32)e.clock.scale; }
+
 // ---- commands ------------------------------------------------------------------------
 // Records in a byte stream: a header, then for a spawn one entry per component.
 namespace {

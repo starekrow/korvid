@@ -209,7 +209,8 @@ Header `korvid/core/engine.h`:
 | `EngineConfig`, `HeapDesc`, `ModuleHeapDesc` | records | the heap table and which module lives in which |
 | `engine_init(e, modules, config)`, `engine_shutdown(e)` | functions | register and start everything in order; undo it in reverse |
 | `engine_frame(e, dt)` | function | advance the clock, run the ticks it owes; returns how many |
-| `engine_pause(e, on)`, `engine_step(e, n)`, `engine_rate(e, x)` | functions | sim control: hold the sim (paused ticks run `RunWhen::Always` systems and handlers only), let `n` sim ticks through, scale time |
+| `engine_pause(e, on)`, `engine_step(e, n)`, `engine_rate(e, x)` | functions | sim control: hold the sim (paused ticks run `RunWhen::Always` systems and handlers only), let `n` sim ticks through, scale time (the developer's rate: the CLI's `rate`) |
+| `engine_time_scale(e, s)`, `engine_time_scale_get(e)` | functions | the game's time scale, times the rate while unpaused (slow motion ramped by the game; 0 runs no sim ticks without pausing). Neither changes a tick's length, only how many run a second, so a script counted in ticks is the same run. The CLI's `time scale` |
 | `engine_hold(e, reason, on)`, `engine_holds(e)`, `HoldReason` | functions, enum | the sim is paused while any hold is set: `HoldUser` (what `engine_pause` sets), `HoldLoading`, `HoldFocus`, `HoldGame` and up for a game; each owner clears only its own |
 | `engine_request_quit(e)` | function | the loop ends |
 | `engine_module(e, name)`, `engine_module_state_as<T>(e, name)` | functions | a started module and its state, for code outside the schedule |

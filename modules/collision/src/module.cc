@@ -122,6 +122,7 @@ void broadphase(TickContext& ctx) {
     }
 
     st.now.clear();
+    u32 tested = 0;
     for (u32 i = 0; i < items.len; ++i) {
         const Item& a = items[i];
         i32 cx = (i32)floorf(a.p.x / cell), cy = (i32)floorf(a.p.y / cell);
@@ -132,6 +133,7 @@ void broadphase(TickContext& ctx) {
                 for (u32 j = *head; j != 0xFFFFFFFFu; j = next[j]) {
                     if (j <= i) continue; // each unordered pair once
                     const Item& b = items[j];
+                    ++tested;
                     if (!meets(a.layer, a.mask, b.layer, b.mask)) continue;
                     if (!overlaps(a, b)) continue;
                     Pair p{a.h.bits, b.h.bits};
@@ -141,6 +143,9 @@ void broadphase(TickContext& ctx) {
             }
     }
     if (st.now.len > 1) kv::sort(st.now.data, st.now.len, sizeof(Pair), compare_pairs);
+    st.stats.colliders = items.len;
+    st.stats.tested = tested;
+    st.stats.cell = cell;
 
     // Diff two sorted lists: new pairs begin, missing pairs end. An End whose entity is
     // gone is dropped at delivery, by the bus's stale-handle rule.
@@ -325,8 +330,9 @@ void resolve(TickContext& ctx) {
     grid.cell = largest;
     for (u32 i = 0; i < bs.len; ++i) grid.insert(bs, i);
 
-    CollisionStats stats;
+    CollisionStats stats = st.stats; // the broadphase's counts stay as the last one left them
     stats.bodies = bs.len;
+    stats.moves = stats.blocked = stats.pushes = 0;
     for (u32 m = 0; m < movers.len; ++m) {
         u32 i = movers[m];
         vec2 want = intents[m];
