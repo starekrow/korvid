@@ -73,7 +73,7 @@ void test_json(kv::TestCtx& c) {
     const JsonValue* iv[7];
     for (u32 i = 0; i < 7; ++i) iv[i] = json_at(doc, doc.root(), i);
     KV_CHECK(c, iv[0]->integer && json_u64(iv[0], 0) == ~0ull);
-    KV_CHECK(c, iv[1]->integer && json_i64(iv[1], 0) == (i64)0x8000000000000000ull && json_u64(iv[1], 7) == 0);
+    KV_CHECK(c, iv[1]->integer && json_i64(iv[1], 0) == (-0x7FFFFFFFFFFFFFFFll - 1) && json_u64(iv[1], 7) == 0);
     KV_CHECK(c, json_u64(iv[2], 0) == 9007199254740993ull && (u64)iv[2]->number != 9007199254740993ull);
     KV_CHECK(c, !iv[3]->integer && json_i64(iv[3], 0) == 3 && !iv[4]->integer && json_u64(iv[4], 0) == 1000);
     KV_CHECK(c, !iv[5]->integer && json_u64(iv[5], 0) == ~0ull); // past u64: the double, clamped

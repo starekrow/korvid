@@ -263,7 +263,7 @@ i64 json_i64(const JsonValue* v, i64 dflt) {
     }
     if (v->number != v->number) return 0;
     if (v->number >= 9223372036854775807.0) return 0x7FFFFFFFFFFFFFFFll;
-    if (v->number <= -9223372036854775808.0) return (i64)0x8000000000000000ull;
+    if (v->number <= -9223372036854775808.0) return (-0x7FFFFFFFFFFFFFFFll - 1);
     return (i64)v->number;
 }
 

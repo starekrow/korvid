@@ -1,6 +1,7 @@
 #include "korvid/save/save.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -33,9 +34,9 @@ void scalar_out(SaveWriter& w, FieldType t, const u8* p) {
 bool float_of(const JsonValue& v, f64* out) {
     if (v.is_number()) { *out = v.number; return true; }
     if (!v.is_string()) return false;
-    if (!strcmp(v.str, "nan"))  { *out = __builtin_nan(""); return true; }
-    if (!strcmp(v.str, "inf"))  { *out = __builtin_inf(); return true; }
-    if (!strcmp(v.str, "-inf")) { *out = -__builtin_inf(); return true; }
+    if (!strcmp(v.str, "nan"))  { *out = (f64)NAN; return true; }
+    if (!strcmp(v.str, "inf"))  { *out = (f64)INFINITY; return true; }
+    if (!strcmp(v.str, "-inf")) { *out = -(f64)INFINITY; return true; }
     return false;
 }
 

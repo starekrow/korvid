@@ -66,7 +66,7 @@ void test_fields(kv::TestCtx& c) {
 
     Every a{};
     a.b = true; a.u8v = 250; a.u16v = 65000; a.u32v = 4000000000u; a.u64v = 18446744073709551615ull;
-    a.i8v = -128; a.i16v = -32000; a.i32v = -2000000000; a.i64v = (i64)0x8000000000000000ull;
+    a.i8v = -128; a.i16v = -32000; a.i32v = -2000000000; a.i64v = (-0x7FFFFFFFFFFFFFFFll - 1);
     a.f32v[0] = 0.1f; a.f32v[1] = NAN; a.f32v[2] = -INFINITY; a.f64v = 1.0 / 3.0; a.h = node;
     strcpy(a.name, "caf\xc3\xa9 \"x\"");
     SaveWriter w;
