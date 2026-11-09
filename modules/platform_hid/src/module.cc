@@ -4,6 +4,8 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "hid_backend.h"
+#include "korvid/core/utf8.h"
+#include <string.h>
 
 namespace kv {
 
@@ -41,6 +43,11 @@ void hid_shutdown(Engine& e, ModuleInstance& self) {
 // Phase Input: sample the raw key state once per tick for the simulation.
 void input_sample(TickContext& ctx) {
     HidState& s = ctx.state_as<HidState>();
+    if (s.text_override_len || s.text_override_backspaces) {
+        s.input.raw.type(s.text_override);
+        s.input.raw.backspaces += s.text_override_backspaces;
+        s.text_override[0] = 0; s.text_override_len = 0; s.text_override_backspaces = 0;
+    }
     s.input.sample();
     input_actions_sample(s.actions, s.input.sampled);
 }
@@ -93,6 +100,38 @@ bool platform_video_up(Engine&) { return hid_video_up(); }
 HostWindow* platform_window(Engine& e) {
     HidState* s = state(e);
     return s && s->window.is_open() ? &s->window : nullptr;
+}
+
+void platform_text_input(Engine& e, bool on) {
+    HidState* s = state(e);
+    if (!s) return;
+    u32 before = s->text_requests;
+    if (on) ++s->text_requests; else if (s->text_requests) --s->text_requests;
+    if ((before == 0) != (s->text_requests == 0) && s->window.is_open()) s->window.text_input(s->text_requests != 0);
+}
+
+void input_text_override(Engine& e, const char* text, u32 backspaces) {
+    HidState* s = state(e);
+    if (!s) return;
+    u32 n = text ? (u32)strlen(text) : 0;
+    if (s->text_override_len + n >= sizeof s->text_override) n = (u32)sizeof s->text_override - 1 - s->text_override_len;
+    memcpy(s->text_override + s->text_override_len, text, n);
+    s->text_override_len += n;
+    s->text_override[s->text_override_len] = 0;
+    s->text_override_backspaces += backspaces;
+}
+
+void InputState::type(const char* utf8) {
+    const char* p = utf8 ? utf8 : "";
+    while (*p) {
+        const char* start = p;
+        if (!utf8_next(p)) break;
+        u32 n = (u32)(p - start);
+        if (text_len + n >= KV_INPUT_TEXT_MAX) break;
+        memcpy(text + text_len, start, n);
+        text_len += n;
+    }
+    text[text_len] = 0;
 }
 
 Input* platform_input(Engine& e) {

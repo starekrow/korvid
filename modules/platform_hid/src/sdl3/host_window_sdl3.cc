@@ -87,6 +87,12 @@ void HostWindow::present_blank() {
     SDL_UpdateWindowSurface(w);
 }
 
+void HostWindow::text_input(bool on) {
+    if (!native_) return;
+    if (on) SDL_StartTextInput((SDL_Window*)native_);
+    else SDL_StopTextInput((SDL_Window*)native_);
+}
+
 // Framebuffer pixels per window unit (2 on a scaled desktop); 1 when SDL has no answer.
 f32 HostWindow::pixel_scale() const {
     int ww = 0, wh = 0;
@@ -124,8 +130,13 @@ void HostWindow::pump(EventBus& bus, Input& input) {
             bus.emit(FocusChanged{false});
             break;
 
+        case SDL_EVENT_TEXT_INPUT:
+            input.raw.type(e.text.text);
+            break;
+
         case SDL_EVENT_KEY_DOWN: {
             Key k = key_from_scancode((u32)e.key.scancode);
+            if (k == Key::Backspace) ++input.raw.backspaces; // repeats too: holding it erases
             if (k == Key::Unknown) break;
             input.raw.set(k, true);
             bus.emit(KeyDown{k, 0, e.key.repeat});

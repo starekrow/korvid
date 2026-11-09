@@ -15,7 +15,10 @@
       "dim": "#a0a0b0",
       "ink": "#3a2a2a",
       "red": "#e04040",
-      "shade": "#000008a6"
+      "shade": "#000008a6",
+      "night": "#10121ef0",
+      "well": "#00000080",
+      "brown": "#8a4a2a"
     },
     "frames": {
       "panel": { "texture": "example_arcanum/ui/panel_dark.png", "insets": [4, 4, 4, 4] },
@@ -69,6 +72,44 @@
             { "type": "scroll", "name": "view", "size": ["fill", "fill"], "input": true,
               "children": [
                 { "type": "label", "name": "text", "anchor": "top", "size": ["fill", "fit"], "wrap": true, "align": "center" } ] } ] } ] },
+    "title": {
+      "type": "box", "name": "title", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "night", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 18, "align": "center",
+          "children": [
+            { "type": "label", "name": "logo", "text": "{wave}Arcanum{/wave}", "color": "gold", "font_scale": 4 },
+            { "type": "label", "name": "tag", "text": "a small tale of {c=red}hammers{/c} and boulders", "color": "dim" },
+            { "type": "list", "name": "items", "gap": 4, "items": [
+              { "type": "label", "name": "new", "text": "New game" },
+              { "type": "label", "name": "continue", "text": "Continue" },
+              { "type": "label", "name": "credits", "text": "Credits" },
+              { "type": "label", "name": "quit", "text": "Quit" } ] },
+            { "type": "label", "name": "note", "text": "{=note}", "color": "dim" } ] },
+        { "type": "label", "name": "footer", "anchor": "bottom", "offset": [0, -8], "text": "Built with Korvid Engine", "color": "dim" } ] },
+    "name": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "box", "frame": "panel", "anchor": "center", "padding": [16, 12, 16, 12],
+          "children": [
+            { "type": "stack", "name": "column", "gap": 10, "align": "center",
+              "children": [
+                { "type": "label", "name": "ask", "text": "What is your name?", "color": "gold" },
+                { "type": "panel", "name": "well", "fill": "well", "size": [120, "fit"], "padding": [5, 4, 5, 4],
+                  "children": [ { "type": "field", "name": "entry", "anchor": "left", "max_length": 12 } ] },
+                { "type": "label", "name": "hint", "text": "Enter to begin", "color": "dim" } ] } ] } ] },
+    "dialogue": {
+      "type": "panel", "name": "box", "frame": "dialog", "anchor": "bottom", "offset": [0, -10], "size": [420, 64], "padding": [8, 8, 10, 8],
+      "children": [
+        { "type": "stack", "name": "row", "dir": "row", "gap": 8, "size": ["fill", "fill"],
+          "children": [
+            { "type": "panel", "name": "frame", "frame": "face", "size": [48, 48],
+              "children": [ { "type": "image", "name": "face", "anchor": "center" } ] },
+            { "type": "stack", "name": "words", "gap": 3, "size": [342, "fill"],
+              "children": [
+                { "type": "label", "name": "who", "text": "", "color": "brown" },
+                { "type": "label", "name": "text", "text": "", "color": "ink", "shadow": "#00000000", "wrap": true, "size": ["fill", "fit"], "reveal": 30 } ] } ] },
+        { "type": "label", "name": "more", "anchor": "bottomright", "offset": [0, 2], "text": "{wave}...{/wave}", "color": "brown", "shadow": "#00000000" } ] },
     "hud": {
       "type": "panel", "name": "bar", "fill": "shade", "anchor": "topleft", "offset": [6, 6], "padding": [5, 3, 5, 3],
       "children": [

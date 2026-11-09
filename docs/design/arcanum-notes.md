@@ -141,3 +141,16 @@ around. (Written as each milestone landed.)
   man carries a `Quest` (rocks wanted, done), an attachment, since one villager of many
   has it. Hostility (milestone 7) is a column of every villager instead: every villager
   can be hammered. The save carries both without a line of game code.
+- **UI.** The pause menu, the level select, the credits and the HUD are one document; the
+  120 lines of label building, cursor handling and the dimmer are an event handler of
+  thirty. The title, the name entry (typed text, not actions: the name may hold a `w` or a
+  space) and the dialogue box (a face from the pack, a name and lines from the villager's
+  bag, typed out with a blip, colored and waving words, paged on confirm) are screens of
+  the same document. Starting a game is an iris cover: the title closes in the `UiCovered`
+  handler, where nobody sees it. The pack's pixel font has a space a few pixels wide; the
+  style's `space` fixes it, an engine answer to a content problem. Opening a screen builds
+  it at once when its document is loaded, which the credits needed (they set their text in
+  the next line).
+- **Screenshots by tick.** `--screenshot-frame` landed on different moments run to run
+  (frames follow the disk during level loads); `--screenshot-tick` counts the ticks a
+  script counts.

@@ -15,7 +15,7 @@
 #include "korvid/asset/material.h"
 #include "korvid/asset/texture.h"
 #include "korvid/audio/audio.h"
-#include "korvid/collision/collider.h"
+#include "korvid/collision/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/json.h"
@@ -27,6 +27,7 @@
 #include "korvid/platform/io.h"
 #include "korvid/platform_hid/actions.h"
 #include "korvid/platform_hid/host_window.h"
+#include "korvid/platform_hid/module.h"
 #include "korvid/render/renderer.h"
 #include "korvid/save/save.h"
 #include "korvid/scene/parent.h"
@@ -113,6 +114,9 @@ constinit const InputActionDesc k_actions[] = {
 };
 
 enum class Menu : u8 { Closed, Main, Levels, Credits };
+// Where the game is: the title (and naming the hero), or playing.
+enum class Mode : u8 { Title, Play };
+constexpr u64 COVER_START = 1;             // the iris from the name to the village
 enum Snd : u8 { SND_MOVE, SND_ACCEPT, SND_CANCEL, SND_COUNT };
 constexpr color kHurtTint = color{1.0f, 0.35f, 0.35f, 1.0f};
 
@@ -134,6 +138,12 @@ struct Game {
     bool   leaving = false;      // an exit has been taken; the level is on its way
     bool   fainting = false;     // the last heart went: walk takes the player to the start
     Menu   menu = Menu::Closed;
+    Mode   mode = Mode::Title;
+    Handle title, naming;        // ui.screen: the title, the name entry
+    Handle dialogue;             // ui.screen: a villager talking, if one is
+    char   pages[512] = {};      // the villager's lines, pages split by '|'
+    u32    page = 0, page_count = 0;
+    char   hero[32] = "Rowan";
     // Saving and loading. The save is one JSON file in the per-user directory.
     char   save_path[512] = {};
     Handle save_write;           // platform.io: the write on its way out
@@ -301,7 +311,7 @@ void open_menu(Engine& e, Game& g, Menu m, const char* focus = nullptr) {
     KV_INFO("arcanum", "menu: %s at frame %llu, tick %llu", k_menu_names[(u32)m], (unsigned long long)e.frame_count, (unsigned long long)e.clock.tick_total);
     if (m == Menu::Closed) return;
     UiOpen o;
-    o.layer = 100;
+    o.layer = g.mode == Mode::Title ? 125 : 100; // over the title, when it is up
     o.hold = true;
     static const char* const k_screens[] = {"", "pause", "levels", "credits"};
     g.screen = ui_open(e, g.ui, k_screens[(u32)m], o);
@@ -310,6 +320,89 @@ void open_menu(Engine& e, Game& g, Menu m, const char* focus = nullptr) {
 }
 
 void close_menu(Engine& e, Game& g) { open_menu(e, g, Menu::Closed); }
+
+void save_game(TickContext& ctx, Game& g);
+void load_game(TickContext& ctx, Game& g);
+
+// ---- the title ------------------------------------------------------------------------------------
+
+void title_choice(TickContext& ctx, Game& g, const char* item) {
+    Engine& e = *ctx.engine;
+    if (!strcmp(item, "new")) {
+        UiOpen o;
+        o.layer = 120;
+        o.hold = true;
+        o.enter.fx = UiFx::Slide;
+        o.enter.from = UiPoint::Bottom;
+        g.naming = ui_open(e, g.ui, "name", o);
+    } else if (!strcmp(item, "continue")) {
+        note(e, "");
+        load_game(ctx, g); // the title goes when the level it names is built
+    } else if (!strcmp(item, "credits")) open_menu(e, g, Menu::Credits);
+    else if (!strcmp(item, "quit")) engine_request_quit(e);
+}
+
+// The name is given: an iris closes on it, and opens on the village.
+void begin_play(Engine& e, Game& g) {
+    const char* typed = ui_field_text(e, g.naming, "entry");
+    utf8_copy(g.hero, sizeof g.hero, typed[0] ? typed : "Rowan");
+    ui_model_set_str(e, "hero", g.hero);
+    UiCover c;
+    c.fx = UiFx::Iris;
+    c.seconds = 0.6f;
+    c.user = COVER_START;
+    ui_cover(e, c);
+}
+
+// ---- dialogue -------------------------------------------------------------------------------------
+
+// The current page of the lines into the box, typed out.
+void show_page(Engine& e, Game& g) {
+    const char* p = g.pages;
+    for (u32 i = 0; i < g.page && p; ++i) { p = strchr(p, '|'); if (p) ++p; }
+    char page[256];
+    const char* end = p ? strchr(p, '|') : nullptr;
+    usize n = p ? (end ? (usize)(end - p) : strlen(p)) : 0;
+    if (n >= sizeof page) n = sizeof page - 1;
+    if (p) memcpy(page, p, n);
+    page[n] = 0;
+    ui_set_text(e, g.dialogue, "text", page);
+    ui_set_visible(e, g.dialogue, "more", g.page + 1 < g.page_count);
+}
+
+void next_page(Engine& e, Game& g) {
+    if (++g.page < g.page_count) { show_page(e, g); return; }
+    UiMotion out;
+    out.fx = UiFx::Slide;
+    out.seconds = 0.15f;
+    ui_close_with(e, g.dialogue, out);
+    g.dialogue = Handle{};
+}
+
+// A villager speaks: its face, its name to show and its lines, from its bag.
+void talk(TickContext& ctx, Game& g, Handle npc) {
+    Engine& e = *ctx.engine;
+    const Table* npcs = ctx.read_kind("example_arcanum.npc");
+    const Actor* a = npcs->get<Actor>(npc);
+    const Quest* q = ctx.attached<const Quest>(npc);
+    const char* lines = ctx.prop_str(npc, q && q->done ? "dialogue_done" : "dialogue", "...");
+    utf8_copy(g.pages, sizeof g.pages, lines);
+    g.page_count = 1;
+    for (const char* c = g.pages; *c; ++c) g.page_count += *c == '|';
+    g.page = 0;
+    UiOpen o;
+    o.layer = 105;
+    o.hold = true;
+    o.enter.fx = UiFx::Slide;
+    o.enter.seconds = 0.15f;
+    g.dialogue = ui_open(e, g.ui, "dialogue", o);
+    char face[96];
+    snprintf(face, sizeof face, "example_arcanum/faces/%s.png", k_sheet_names[a ? a->sheet % kSheets : 0]);
+    ui_set_texture(e, g.dialogue, "face", face, rect2{0, 0, 38, 38});
+    ui_set_text(e, g.dialogue, "who", ctx.prop_str(npc, "display", "Villager"));
+    show_page(e, g);
+    KV_INFO("arcanum", "talk: %s, %u pages", ctx.prop_str(npc, "display", "?"), g.page_count);
+}
 
 // ---- saving and loading --------------------------------------------------------------------------
 
@@ -328,6 +421,7 @@ void save_game(TickContext& ctx, Game& g) {
     w.key("level");      w.string_value(level_name(e, level_current(e)));
     w.key("player");     save_handle(w, g.player);
     w.key("exit_armed"); w.bool_value(g.exit_armed);
+    w.key("hero");       w.string_value(g.hero);
     w.key("kinds");      save_kinds(w, e, k_saved_kinds);
     w.end_object();
     if (w.finish()) {
@@ -415,7 +509,7 @@ void menu(TickContext& ctx) {
     Engine& e = *ctx.engine;
     const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
     bool held_by_load = (engine_holds(e) & HoldLoading) != 0;
-    if (!action_pressed(a, g.act_menu)) return;
+    if (!action_pressed(a, g.act_menu) || g.mode == Mode::Title || !g.dialogue.is_null()) return;
     if (g.menu == Menu::Closed) { if (!held_by_load) { open_menu(e, g, Menu::Main); play_sound(ctx, g, SND_ACCEPT); } }
     else { close_menu(e, g); play_sound(ctx, g, SND_CANCEL); }
 }
@@ -445,8 +539,33 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
                 level_request(e, item, t);
             } else open_menu(e, g, Menu::Main, "level"); // back, cancel
         } else if (g.menu == Menu::Credits && (ev.event == k_cancel || ev.event == k_confirm)) {
-            open_menu(e, g, Menu::Main, "credits");
+            if (g.mode == Mode::Title) close_menu(e, g); // back to the title under it
+            else open_menu(e, g, Menu::Main, "credits");
         }
+    }
+    for (const UiEvent& ev : events) {
+        const char* item = name_str(Name{ev.node});
+        if (ev.screen == g.title && g.menu == Menu::Closed && g.naming.is_null() && ev.event == k_select) title_choice(ctx, g, item);
+        else if (ev.screen == g.naming) {
+            static const u64 k_submit = name_intern("submit").hash;
+            if (ev.event == k_submit) begin_play(e, g);
+            else if (ev.event == k_cancel) { ui_close(e, g.naming); g.naming = Handle{}; }
+        } else if (ev.screen == g.dialogue && ev.event == k_confirm) next_page(e, g);
+    }
+}
+
+// The iris has closed on the name screen: the title goes, the village shows as it opens.
+void on_covered(TickContext& ctx, Span<const UiCovered> covers) {
+    Game& g = ctx.state_as<Game>();
+    Engine& e = *ctx.engine;
+    for (const UiCovered& c : covers) {
+        if (c.user != COVER_START) continue;
+        if (!g.naming.is_null()) ui_close(e, g.naming);
+        if (!g.title.is_null()) ui_close(e, g.title);
+        g.naming = g.title = Handle{};
+        g.mode = Mode::Play;
+        ui_set_visible(e, g.hud, "", true);
+        KV_INFO("arcanum", "play: %s sets out", g.hero);
     }
 }
 
@@ -482,6 +601,20 @@ void walk(TickContext& ctx) {
         const TilemapAsset* m = tilemap_get(e, g.map);
         Table* players = engine_table(e, k_players); // its Transform2, declared below
         if (m && m->state == AssetState::Ready) faint(g, ctx.write<Transform2>("example_arcanum.player.Transform2"), Span<Transform2>(players->prev<Transform2>(g.player) - i, move.len), *m);
+    }
+    // Confirm facing a villager within a step: it talks. The query sees the bodies where
+    // the last tick left them (the reads are early: this system writes the intent).
+    if (action_pressed(a, g.act_confirm) && g.mode == Mode::Play && g.dialogue.is_null()) {
+        static const u32 k_xf = ctx.column_id(".player.Transform2");
+        point2 at = ctx.read<Transform2>(k_xf)[i].position;
+        static const vec2 k_ahead[4] = {{0, -10}, {0, 10}, {-10, 0}, {10, 0}};
+        vec2 ahead = k_ahead[actor[i].facing & 3];
+        MemScope scope;
+        Array<Handle> near = array_in<Handle>(mem_scratch());
+        collision_query(ctx, rect2{at.x + ahead.x - 6.0f, at.y - 8.0f + ahead.y, 12.0f, 8.0f}, L_ACTOR, near);
+        static const u32 k_npc = ctx.kind_id(".npc");
+        u16 npc_hk = engine_table(e, k_npc)->kind;
+        for (Handle h : near) if (h.kind() == npc_hk) { talk(ctx, g, h); break; }
     }
     vec2 dir = action_axis(a, g.act_move);
     f32 dt = (f32)ctx.dt;
@@ -617,6 +750,14 @@ void restore(TickContext& ctx, Game& g, const LevelBuild& b) {
     Handle player = load_handle(json_get(doc, doc.root(), "player"));
     if (!player.is_null()) g.player = player;
     g.exit_armed = json_bool(json_get(doc, doc.root(), "exit_armed"), true);
+    utf8_copy(g.hero, sizeof g.hero, json_string(json_get(doc, doc.root(), "hero"), g.hero));
+    ui_model_set_str(e, "hero", g.hero);
+    if (g.mode == Mode::Title) { // continued from the title: it goes
+        if (!g.title.is_null()) ui_close(e, g.title);
+        g.title = Handle{};
+        g.mode = Mode::Play;
+        ui_set_visible(e, g.hud, "", true);
+    }
     KV_INFO("arcanum", "load: %u kinds, state %016llx, saved at tick %llu", n, (unsigned long long)saved_state_hash(e),
             (unsigned long long)json_u64(json_get(doc, doc.root(), "tick"), 0));
 }
@@ -722,6 +863,12 @@ void on_exit(TickContext& ctx, Span<const ExitRequested>) { engine_request_quit(
 // The script, by its own clock (every tick but those a level load holds): the steps say
 // what the actions read on the ticks they cover.
 struct Step { u64 from, to; const char* action; f32 x, y; };
+// The title: New game (the list starts on it), the name typed and entered, the iris.
+constexpr u64 kTitle = 130;     // where the walk below starts, after the opening
+constexpr u64 kTypeAt = 50;     // the name, with the newline that submits it
+constinit const Step k_opening[] = {
+    {20, 21, "confirm", 0, 0},
+};
 constinit const Step k_script[] = {
     {30, 340, "move", 1, 0},       // east along the village road, out through the exit
     {340, 420, "move", 1, 0},      // on into the field
@@ -763,6 +910,11 @@ void demo(TickContext& ctx) {
     if (!g.demo) return;
     if (engine_holds(e) & HoldLoading) return;
     u64 t = g.demo_t++;
+    for (const Step& s : k_opening)
+        if (t >= s.from && t < s.to) input_action_override(e, s.action, true, vec2{s.x, s.y});
+    if (t == kTypeAt) input_text_override(e, "Rowan\n");
+    if (t < kTitle) return;
+    t -= kTitle;
     for (const Step& s : k_script)
         if (t >= s.from && t < s.to) input_action_override(e, s.action, true, vec2{s.x, s.y});
     if (t == kReloadAt) level_reload(e);
@@ -799,6 +951,12 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     hud_open.layer = 90;
     hud_open.input = false;
     g->hud = ui_open(e, g->ui, "hud", hud_open);
+    ui_set_visible(e, g->hud, "", false); // until the hero sets out
+    ui_model_set_str(e, "hero", g->hero);
+    UiOpen title_open;
+    title_open.layer = 110;
+    title_open.hold = true;
+    g->title = ui_open(e, g->ui, "title", title_open);
     g->sounds[SND_MOVE]   = asset_load_sound(e, "example_arcanum/sounds/move.wav");
     g->sounds[SND_ACCEPT] = asset_load_sound(e, "example_arcanum/sounds/accept.wav");
     g->sounds[SND_CANCEL] = asset_load_sound(e, "example_arcanum/sounds/cancel.wav");
@@ -830,12 +988,14 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_exit",    KV_ON(ExitRequested, on_exit)},
     {.name = ".on_loading", KV_ON(LevelLoading, on_loading)},
     {.name = ".on_ui",      KV_ON(UiEvent, on_ui), .writes = "audio.commands"},
+    {.name = ".on_covered", KV_ON(UiCovered, on_covered)},
 };
 constinit const SystemDesc k_systems[] = {
     {.name = ".files", .phase = Phase::PreSim, .fn = files, .after = "level.run", .before = ".menu", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".menu", .phase = Phase::PreSim, .fn = menu, .reads = "input.actions", .writes = "audio.commands",
      .after = "level.run", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions", .writes = ".player.Move2, .player.Actor, .player.Transform2", .main_thread = true},
+    {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions, ^*[Collider2].Transform2, *[Collider2].Collider2, .npc, .npc.@props, .npc.@Quest",
+     .writes = ".player.Move2, .player.Actor, .player.Transform2", .main_thread = true},
     {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .reads = "^.npc.Local2", .writes = ".npc.Move2, .npc.Actor, .npc.AnimPlayer", .main_thread = true},
     {.name = ".react", .phase = Phase::Sim, .fn = react, .reads = ".player, .npc.MoveResult2",
      .writes = ".player.Vitals, .player.Sprite, .player.AnimPlayer, audio.commands", .main_thread = true},

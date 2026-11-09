@@ -73,11 +73,21 @@ struct GamepadState {
     f32  axis(PadAxis a) const { return axes[(u32)a]; }
 };
 
-// Keys held and pads as they are.
+constexpr u32 KV_INPUT_TEXT_MAX = 64; // bytes of typed text one tick carries, the NUL included
+
+// Keys held and pads as they are, and what was typed: UTF-8 text from the OS's text input
+// (layouts, dead keys and input methods applied) while a text field asks for it
+// (platform_text_input), and the Backspaces among it, auto-repeat included.
 struct InputState {
     u64          bits[((u32)Key::Count + 63) / 64] = {};
     GamepadState pads[KV_MAX_GAMEPADS];
     MouseState   mouse;
+    char         text[KV_INPUT_TEXT_MAX] = {};
+    u32          text_len   = 0;
+    u32          backspaces = 0;
+
+    // Appends typed text, whole code points only, as far as it fits.
+    void type(const char* utf8);
 
     bool down(Key k) const {
         u32 i = (u32)k;
@@ -95,6 +105,7 @@ struct InputState {
         for (GamepadState& p : pads) { p.buttons = 0; for (f32& a : p.axes) a = 0.0f; }
         mouse.buttons = 0;
         mouse.wheel   = 0.0f;
+        text[0] = 0; text_len = 0; backspaces = 0;
     }
     // The first connected pad, or null.
     const GamepadState* pad() const {
@@ -109,8 +120,8 @@ struct Input {
     InputState raw;
     InputState sampled;
 
-    // The wheel is a delta: the tick that samples it takes it.
-    void sample() { sampled = raw; raw.mouse.wheel = 0.0f; }
+    // The wheel and the typing are deltas: the tick that samples them takes them.
+    void sample() { sampled = raw; raw.mouse.wheel = 0.0f; raw.text[0] = 0; raw.text_len = 0; raw.backspaces = 0; }
 };
 
 // The backend's scancodes (SDL's, or Windows' set-1 codes with 0x100 for the E0-prefixed

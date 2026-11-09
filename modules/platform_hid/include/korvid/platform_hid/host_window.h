@@ -55,6 +55,8 @@ struct HostWindow {
     // window only after a buffer is attached to its surface, so a window nobody draws to
     // never appears. A no-op on a Vulkan window, where the renderer presents.
     void present_blank();
+    // Text input from the OS on or off (an input method's window, a phone's keyboard).
+    void text_input(bool on);
 
     // The window as an opaque pointer: an SDL_Window* where SDL is the backend, an HWND on
     // Windows. The renderer turns it into a surface on its side; no graphics API headers

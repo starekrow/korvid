@@ -13,7 +13,10 @@
 //   list    a column of items with a focus: move, confirm and cancel from the action
 //           map, a cursor, sounds, and UiEvents by the item's name
 //   scroll  one child taller than itself, clipped to its rect, scrolled by input or code
-//   field   a line of typed text with a caret
+//   field   a line of typed text with a caret: the topmost screen's first visible field
+//           takes the keyboard's text (not the actions, so typing a letter moves nothing),
+//           Backspace erases, Enter or a typed newline submits (UiEvent submit), Escape
+//           cancels; "changed" as it is edited
 //   meter   a value out of a maximum: a row of icons (pips) or a bar
 //
 // Layout. Each node has an anchor and a pivot (the nine points of a rect), an offset, and
@@ -119,10 +122,19 @@ bool   ui_ready(Engine& e, Handle doc);
 u32    ui_reload(Engine& e);
 
 // ---- screens -----------------------------------------------------------------------------
+// How a screen comes and goes: at once, fading, or sliding in from an edge.
+enum class UiFx : u8 { Cut, Fade, Slide, Iris };
+struct UiMotion {
+    UiFx    fx      = UiFx::Cut;
+    f32     seconds = 0.25f;
+    UiPoint from    = UiPoint::Bottom; // Slide: the edge it comes from (and goes back to)
+};
+
 struct UiOpen {
-    i32  layer = 100;  // the sprite layer it draws in; its children above it in tree order
-    bool input = true; // takes the action map while it is the topmost that does
-    bool hold  = false;// holds the sim (HoldUi) while open
+    i32      layer = 100;  // the sprite layer it draws in; its children above it in tree order
+    bool     input = true; // takes the action map while it is the topmost that does
+    bool     hold  = false;// holds the sim (HoldUi) while open
+    UiMotion enter;        // how it arrives
 };
 // Opens a document's screen. The handle (ui.screen) is good at once; a document still
 // loading opens the screen when it is Ready. Null for a screen the document lacks.
@@ -132,6 +144,33 @@ Handle ui_open(Engine& e, Handle doc, const char* screen, const UiOpen& open = U
 Handle ui_open_empty(Engine& e, Handle doc, const char* name, const UiOpen& open = UiOpen{});
 u32    ui_add(Engine& e, Handle screen, u32 parent, const UiNodeDesc& desc);
 bool   ui_close(Engine& e, Handle screen);
+// Closes after a motion out (fade, slide); input leaves it at once.
+bool   ui_close_with(Engine& e, Handle screen, const UiMotion& leave);
+
+// ---- covers: switching between modes ----------------------------------------------------
+// A cover closes over the whole window (a fade to a color, or an iris shrinking onto a
+// point), says UiCovered when nothing of what was there shows, waits while the game holds
+// it (ui_cover_wait), and opens again on whatever is there now, saying UiUncovered. The
+// sim is held while it is up unless it says otherwise. This is where a game switches from
+// the world to a minigame, from the title to the village, to a game-over screen: open and
+// close screens, move the camera, load, in the UiCovered handler.
+struct UiCover {
+    UiFx  fx       = UiFx::Fade; // Fade or Iris
+    f32   seconds  = 0.4f;       // each way
+    color tint     = color{0, 0, 0, 1};
+    vec2  focus{0.5f, 0.5f};     // Iris: where it closes, a fraction of the window from the top-left
+    bool  hold     = true;
+    u64   user     = 0;          // handed back in the events
+};
+struct UiCovered   { u32 cover; u32 pad; u64 user; };
+struct UiUncovered { u32 cover; u32 pad; u64 user; };
+u32  ui_cover(Engine& e, const UiCover& cover);
+// While waiting, a cover stays closed after UiCovered (a level loading behind it).
+void ui_cover_wait(Engine& e, u32 cover, bool wait);
+bool ui_covering(Engine& e);
+
+// A field's text, as typed so far ("" for none).
+const char* ui_field_text(Engine& e, Handle screen, const char* path);
 bool   ui_is_open(Engine& e, Handle screen);
 // The topmost open screen that takes input, or null.
 Handle ui_top(Engine& e);

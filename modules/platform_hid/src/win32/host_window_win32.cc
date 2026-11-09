@@ -8,6 +8,7 @@
 // F10 do not open the window menu (another modal loop); Alt+F4 still asks to close.
 // Gamepads come from SDL3 alone (src/sdl3_pads/): its gamepad subsystem, polled here.
 #include "korvid/platform_hid/host_window.h"
+#include "korvid/core/utf8.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/core/array.h"
 #include "korvid/core/atomic.h"
@@ -27,7 +28,7 @@ namespace kv {
 
 namespace {
 
-enum class WinMsgType : u8 { Close, Size, Focus, Key, Move, Button, Wheel };
+enum class WinMsgType : u8 { Close, Size, Focus, Key, Move, Button, Wheel, Char };
 
 // What the window thread saw, in the order it saw it.
 struct WinMsg {
@@ -35,7 +36,7 @@ struct WinMsg {
     bool       on;      // Focus: focused; Key, Button: down
     bool       repeat;  // Key: auto-repeat
     u8         button;  // Button: a MouseButton
-    u32        a, b;    // Size: width, height in pixels; Key: scancode
+    u32        a, b;    // Size: width, height in pixels; Key: scancode; Char: a code point
     f32        x, y;    // Move, Button: position in pixels; Wheel: dx, dy in notches
 };
 
@@ -136,6 +137,19 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         m.a = scancode_of(wp, lp);
         post(m);
         return 0; // handled: Alt and F10 open no menu
+    }
+    case WM_CHAR: {
+        // UTF-16, a surrogate pair in two messages; control characters are keys, not text.
+        static u32 high = 0;
+        u32 u = (u32)wp;
+        if (u >= 0xD800 && u < 0xDC00) { high = u; return 0; }
+        if (u >= 0xDC00 && u < 0xE000) { u = high ? 0x10000 + ((high - 0xD800) << 10) + (u - 0xDC00) : 0xFFFD; high = 0; }
+        if (u < 0x20 || u == 0x7F) return 0;
+        WinMsg m{};
+        m.type = WinMsgType::Char;
+        m.a = u;
+        post(m);
+        return 0;
     }
     case WM_SYSCOMMAND:
         if ((wp & 0xFFF0) == SC_KEYMENU) return 0;
@@ -311,6 +325,9 @@ bool HostWindow::open(const WindowDesc& desc) {
     return true;
 }
 
+// Windows sends WM_CHAR whenever the window has the keyboard; nothing to switch.
+void HostWindow::text_input(bool) {}
+
 void HostWindow::close() {
     if (!native_) return;
     Win32Window& w = g_win;
@@ -363,8 +380,15 @@ void HostWindow::pump(EventBus& bus, Input& input) {
             if (!m.on) input.raw.clear(); // keys released while unfocused never report an up edge
             bus.emit(FocusChanged{m.on});
             break;
+        case WinMsgType::Char: {
+            char utf8[5] = {};
+            utf8_encode(m.a, utf8);
+            input.raw.type(utf8);
+            break;
+        }
         case WinMsgType::Key: {
             Key k = key_from_scancode(m.a);
+            if (k == Key::Backspace && m.on) ++input.raw.backspaces; // repeats too
             if (k == Key::Unknown) break;
             input.raw.set(k, m.on);
             if (m.on) bus.emit(KeyDown{k, 0, m.repeat});

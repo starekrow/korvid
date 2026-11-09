@@ -156,7 +156,11 @@ f32 line_px(Ctx& c, const UiNode& n, const FontAsset& f) {
 bool text_block(Ctx& c, const UiNode& n, f32 wrap_units, Array<RChar>& rich, Block& b) {
     const FontAsset* f = font_for(c, n.font_scale);
     if (!f) return false;
-    parse_rich(c.s, c.doc, n.text, node_color(c, n.color, c.doc ? node_color(c, name_lookup("text"), color_white()) : color_white()), rich);
+    color base = node_color(c, n.color, c.doc ? node_color(c, name_lookup("text"), color_white()) : color_white());
+    if (n.type == UiType::Field) { // typed text is itself: no tags
+        const char* p = n.text ? n.text : "";
+        while (u32 cp = utf8_next(p)) rich.push(RChar{cp, base, 0, 0.0f});
+    } else parse_rich(c.s, c.doc, n.text, base, rich);
     f32 space = c.doc && c.doc->space > 0.0f ? c.doc->space * n.font_scale * c.k : 0.0f;
     lay_text(*f, rich.span(), n.wrap && wrap_units > 0.0f ? wrap_units * c.k : 0.0f, line_px(c, n, *f), space, b);
     return true;

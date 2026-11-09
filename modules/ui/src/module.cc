@@ -11,6 +11,8 @@
 #include "korvid/math/fields.h"
 #include "korvid/platform_hid/actions.h"
 #include "korvid/platform_hid/host_window.h"
+#include "korvid/platform_hid/input.h"
+#include "korvid/platform_hid/module.h"
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
@@ -124,6 +126,35 @@ void ui_update(TickContext& ctx) {
     Engine& e = *ctx.engine;
     ui_docs_pump(e, s);
     f32 dt = (f32)ctx.dt;
+    // Screens on their way in or out; the ones out are closed.
+    for (u32 i = 0; i < s.screens.len; ++i) {
+        if (!s.screens.is_alive(i)) continue;
+        UiScreen& sc = s.screens.items[i];
+        if (sc.motion_t < 1.0f) sc.motion_t = sc.motion.fx == UiFx::Cut || sc.motion.seconds <= 0.0f ? 1.0f : sc.motion_t + dt / sc.motion.seconds;
+        if (sc.motion_t > 1.0f) sc.motion_t = 1.0f;
+        if (sc.leaving && sc.motion_t >= 1.0f) ui_close(e, s.screens.handle_at(i));
+    }
+    // Covers: closing, waiting, opening, in that order, each saying so once.
+    bool cover_hold = false;
+    for (u32 i = 0; i < s.covers.len;) {
+        UiCoverState& c = s.covers[i];
+        f32 step = c.desc.seconds > 0.0f ? dt / c.desc.seconds : 1.0f;
+        if (c.phase == 0) { c.amount += step; if (c.amount >= 1.0f) { c.amount = 1.0f; c.phase = 1; } }
+        else if (c.phase == 1) {
+            if (!c.said) { ctx.emit(UiCovered{c.id, 0, c.desc.user}); c.said = true; }
+            else if (!c.wait) c.phase = 2;
+        } else {
+            c.amount -= step;
+            if (c.amount <= 0.0f) {
+                ctx.emit(UiUncovered{c.id, 0, c.desc.user});
+                s.covers[i] = s.covers.last();
+                --s.covers.len;
+                continue;
+            }
+        }
+        cover_hold |= c.desc.hold;
+        ++i;
+    }
     Handle top;
     u32 top_order = 0;
     i32 top_layer = -0x7FFFFFFF;
@@ -133,7 +164,7 @@ void ui_update(TickContext& ctx) {
         UiScreen& sc = s.screens.items[i];
         sc.time += dt;
         hold |= sc.open.hold;
-        if (sc.open.input && sc.built && (sc.open.layer > top_layer || (sc.open.layer == top_layer && sc.order > top_order))) {
+        if (sc.open.input && sc.built && !sc.leaving && (sc.open.layer > top_layer || (sc.open.layer == top_layer && sc.order > top_order))) {
             top = s.screens.handle_at(i); top_layer = sc.open.layer; top_order = sc.order;
         }
         // Reveals: characters appear at the label's rate; a tick sound every few; done once.
@@ -151,11 +182,65 @@ void ui_update(TickContext& ctx) {
             }
         }
     }
+    hold |= cover_hold;
     if (hold != s.holding) { engine_hold(e, HoldUi, hold); s.holding = hold; }
 
     UiScreen* sc = s.screens.get(top);
+    // A field on the topmost screen takes the keyboard's text, and the platform's text
+    // input is on while it does.
+    u32 field = KV_UI_NONE;
+    for (u32 k = 0; sc && k < sc->nodes.len && field == KV_UI_NONE; ++k) {
+        if (sc->nodes[k].type != UiType::Field) continue;
+        bool shown = true;
+        for (u32 p = k; p != KV_UI_NONE; p = sc->nodes[p].parent) if (!sc->nodes[p].visible) { shown = false; break; }
+        if (shown) field = k;
+    }
+    if ((field != KV_UI_NONE) != s.text_on) { s.text_on = field != KV_UI_NONE; platform_text_input(e, s.text_on); }
+    if (field != KV_UI_NONE && !s.covers.len) {
+        static const u32 k_state = ctx.resource_id("input.state");
+        const Input* in = ctx.resource<const Input>(k_state);
+        if (!in) return;
+        const InputState& is = in->sampled;
+        UiNode& f = sc->nodes[field];
+        char buf[256];
+        utf8_copy(buf, sizeof buf, f.text ? f.text : "");
+        bool changed = false, submit = false;
+        for (u32 b = 0; b < is.backspaces; ++b) {
+            usize n = strlen(buf);
+            if (!n) break;
+            while (n > 0 && ((u8)buf[n - 1] & 0xC0) == 0x80) --n; // back over continuation bytes
+            buf[n ? n - 1 : 0] = 0;
+            changed = true;
+        }
+        const char* p = is.text;
+        while (*p) {
+            const char* at = p;
+            u32 cp = utf8_next(p);
+            if (!cp) break;
+            if (cp == '\n' || cp == '\r') { submit = true; break; }
+            if (cp < 0x20 || cp == 0x7F) continue;
+            if (utf8_count(buf) >= f.max_length) continue;
+            usize n = strlen(buf), w = (usize)(p - at);
+            if (n + w + 1 > sizeof buf) continue;
+            memcpy(buf + n, at, w);
+            buf[n + w] = 0;
+            changed = true;
+        }
+        bool enter = is.down(Key::Enter), escape = is.down(Key::Escape);
+        bool pad_ok = false;
+        if (const GamepadState* pad = is.pad()) pad_ok = pad->down(PadButton::South) && !(s.keys_prev[1] & 1);
+        if (enter && !(s.keys_prev[0] & 1)) submit = true;
+        if (pad_ok) submit = true;
+        s.keys_prev[0] = enter ? 1 : 0;
+        s.keys_prev[1] = is.pad() && is.pad()->down(PadButton::South) ? 1 : 0;
+        if (changed) { ui_node_set_text(s, f, buf); emit(ctx, top, f.name, "changed", (i32)utf8_count(buf)); }
+        if (submit) { play(ctx, s, *sc, "select"); emit(ctx, top, f.name, "submit", (i32)utf8_count(buf)); }
+        if (escape && !(s.keys_prev[0] & 2)) { play(ctx, s, *sc, "cancel"); emit(ctx, top, f.name, "cancel", 0); }
+        s.keys_prev[0] |= escape ? 2 : 0;
+        return; // a field takes the keyboard: no actions for this screen
+    }
     const InputActions* a = ctx.resource<const InputActions>(k_actions);
-    if (!sc || !a) return;
+    if (!sc || !a || s.covers.len) return; // nothing takes input under a cover
     UiDoc* d = s.docs.get(sc->doc);
     u32 act_move = a->find(d ? d->actions[0] : "move"), act_confirm = a->find(d ? d->actions[1] : "confirm"), act_cancel = a->find(d ? d->actions[2] : "cancel");
     bool confirm = action_pressed(*a, act_confirm), cancel = action_pressed(*a, act_cancel);
@@ -216,6 +301,28 @@ void ensure_white(Engine& e, UiState_& s) {
     md.name = "ui.white";
     md.texture = s.white_texture;
     s.white_material = renderer_material_create(r, md);
+    // The iris: clear inside a circle, opaque outside, a pixel of edge, 256 square.
+    constexpr u32 kIris = 256;
+    MemScope scope;
+    u8* px = (u8*)alloc_in(mem_scratch(), kIris * kIris * 4);
+    for (u32 y = 0; y < kIris; ++y)
+        for (u32 x = 0; x < kIris; ++x) {
+            f32 dx = ((f32)x + 0.5f) / (f32)kIris - 0.5f, dy = ((f32)y + 0.5f) / (f32)kIris - 0.5f;
+            f32 edge = (sqrtf(dx * dx + dy * dy) - 0.5f) * (f32)kIris + 0.5f;
+            f32 alpha = edge < 0.0f ? 0.0f : edge > 1.0f ? 1.0f : edge;
+            u8* p = px + ((usize)y * kIris + x) * 4;
+            p[0] = p[1] = p[2] = 255;
+            p[3] = (u8)(alpha * 255.0f + 0.5f);
+        }
+    TextureDesc it;
+    it.name = "ui.iris";
+    s.iris_texture = renderer_texture_create(r, it);
+    renderer_texture_upload(r, s.iris_texture, kIris, kIris, px, (usize)kIris * kIris * 4);
+    MaterialDesc im;
+    im.name = "ui.iris";
+    im.texture = s.iris_texture;
+    im.filter = TextureFilter::Linear;
+    s.iris_material = renderer_material_create(r, im);
 }
 
 // Phase PostSim, main thread, every tick: screens built as their documents arrive, laid
@@ -271,7 +378,53 @@ void ui_draw(TickContext& ctx) {
         ++st.screens;
         st.nodes += sc->nodes.len;
         ui_layout(e, s, *sc);
+        u32 first = s.quads.len;
         ui_emit(e, s, *sc);
+        // Its motion: in as t goes 0 to 1, out as it goes 0 to 1 while leaving.
+        f32 t = sc->motion_t < 1.0f ? sc->motion_t : 1.0f;
+        f32 shown = sc->leaving ? 1.0f - t : t;
+        shown = shown * shown * (3.0f - 2.0f * shown); // smooth at both ends
+        if (sc->motion.fx == UiFx::Fade) for (u32 q = first; q < s.quads.len; ++q) s.quads[q].tint.a *= shown;
+        if (sc->motion.fx == UiFx::Slide) {
+            f32 ax, ay;
+            static const i8 k_x[] = {0, -1, 0, 1, -1, 1, -1, 0, 1}, k_y[] = {0, -1, -1, -1, 0, 0, 1, 1, 1};
+            ax = (f32)k_x[(u32)sc->motion.from % 9]; ay = (f32)k_y[(u32)sc->motion.from % 9];
+            f32 dx = ax * s.win_w * (1.0f - shown), dy = ay * s.win_h * (1.0f - shown);
+            for (u32 q = first; q < s.quads.len; ++q) { s.quads[q].x += floorf(dx); s.quads[q].y += floorf(dy); }
+        }
+    }
+    // Covers, over everything.
+    for (const UiCoverState& c : s.covers) {
+        f32 a = c.amount * c.amount * (3.0f - 2.0f * c.amount);
+        UiQuad q{};
+        q.material = s.white_material;
+        q.uv = rect2_unit();
+        q.layer = 127;
+        q.tint = c.desc.tint;
+        if (q.material.is_null()) continue;
+        if (c.desc.fx != UiFx::Iris) {
+            q.x = 0; q.y = 0; q.w = s.win_w; q.h = s.win_h;
+            q.tint.a *= a;
+            s.quads.push(q);
+            continue;
+        }
+        // The iris: a disc of clear over the focus, shrinking to nothing, and black around it.
+        f32 cx = c.desc.focus.x * s.win_w, cy = c.desc.focus.y * s.win_h;
+        f32 far = sqrtf(s.win_w * s.win_w + s.win_h * s.win_h);
+        f32 r = far * (1.0f - a);
+        f32 x0 = floorf(cx - r), y0 = floorf(cy - r), d = ceilf(2.0f * r);
+        if (d >= 1.0f && !s.iris_material.is_null()) {
+            UiQuad disc = q;
+            disc.material = s.iris_material;
+            disc.x = x0; disc.y = y0; disc.w = d; disc.h = d;
+            s.quads.push(disc);
+        }
+        auto rect = [&](f32 x, f32 y, f32 w, f32 h) { if (w <= 0.0f || h <= 0.0f) return; UiQuad b = q; b.x = x; b.y = y; b.w = w; b.h = h; s.quads.push(b); };
+        if (d < 1.0f) { x0 = cx; y0 = cy; d = 0.0f; }
+        rect(0, 0, s.win_w, y0);                         // above
+        rect(0, y0 + d, s.win_w, s.win_h - y0 - d);      // below
+        rect(0, y0, x0, d);                              // left
+        rect(x0 + d, y0, s.win_w - x0 - d, d);           // right
     }
 
     Table* rows = ctx.write_kind(s.sprite_kind);
@@ -309,6 +462,7 @@ bool ui_startup(Engine& e, ModuleInstance& self) {
     if (!s) return false;
     s->general = &self.general;
     s->quads.alloc = s->rows.alloc = &self.general;
+    s->covers.alloc = &self.general;
     s->model.init(&self.general);
     kv_handle_kind_desc desc{};
     desc.name = "ui.screen"; desc.type_key = type_key<UiScreen>(); desc.ctx = s;
@@ -336,6 +490,8 @@ void ui_shutdown(Engine& e, ModuleInstance& self) {
     s->model.free();
     s->quads.free();
     s->rows.free();
+    s->covers.free();
+    if (s->text_on) platform_text_input(e, false);
 }
 
 // /ui: the open screens and their nodes.
@@ -376,10 +532,14 @@ constinit const CliMountDesc k_mounts[] = {{.path = "/ui", .list = ui_list, .des
 constinit const CliCommandDesc k_commands[] = {{.name = "ui reload", .help = "read every UI document again and rebuild its open screens", .fn = cmd_reload}};
 
 constinit const FieldDesc k_event_fields[] = {KV_FIELDS(UiEvent, screen, node, event, value, pad)};
-constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(UiEvent, k_event_fields, 0)};
+constinit const FieldDesc k_covered_fields[] = {KV_FIELDS(UiCovered, cover, pad, user)};
+constinit const FieldDesc k_uncovered_fields[] = {KV_FIELDS(UiUncovered, cover, pad, user)};
+constinit const EventTypeDesc k_events[] = {
+    KV_EVENT_EX(UiEvent, k_event_fields, 0), KV_EVENT_EX(UiCovered, k_covered_fields, 0), KV_EVENT_EX(UiUncovered, k_uncovered_fields, 0),
+};
 constinit const KindDesc k_kinds[] = {{.name = ".sprite", .components = "Transform2, Sprite", .capacity = 16384, .cosmetic = true}};
 constinit const SystemDesc k_systems[] = {
-    {.name = ".update", .phase = Phase::PreSim, .fn = ui_update, .reads = "input.actions", .writes = "audio.commands",
+    {.name = ".update", .phase = Phase::PreSim, .fn = ui_update, .reads = "input.actions, input.state", .writes = "audio.commands",
      .after = "?asset.pump_scopes, ?asset.pump, ?asset.pump_blobs, ?asset.pump_sounds", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".draw", .phase = Phase::PostSim, .fn = ui_draw, .writes = ".sprite", .after = "?anim.play", .before = "?scene.compose", .main_thread = true, .runs = RunWhen::Always},
 };
@@ -413,6 +573,8 @@ Handle open_screen(Engine& e, Handle doc, const char* name, const UiOpen& open, 
     sc.built = code;
     sc.order = s->next_order++;
     sc.nodes.alloc = s->general;
+    sc.motion = open.enter;
+    sc.motion_t = open.enter.fx == UiFx::Cut ? 1.0f : 0.0f;
     Handle h = s->screens.create(sc);
     if (!h.is_null() && !doc.is_null()) asset_ref(e, doc); // the screen holds its document
     // A document that is here builds the screen now, so the caller can set its nodes at
@@ -444,6 +606,43 @@ bool ui_close(Engine& e, Handle screen) {
     asset_unref(e, sc->doc);
     s->screens.destroy(screen);
     return true;
+}
+
+bool ui_close_with(Engine& e, Handle screen, const UiMotion& leave) {
+    UiState_* s = ui_state(e);
+    UiScreen* sc = s ? s->screens.get(screen) : nullptr;
+    if (!sc) return false;
+    if (leave.fx == UiFx::Cut || leave.seconds <= 0.0f) return ui_close(e, screen);
+    sc->motion = leave;
+    sc->motion_t = 0.0f;
+    sc->leaving = true;
+    sc->open.hold = false; // the sim goes on while it leaves
+    return true;
+}
+
+u32 ui_cover(Engine& e, const UiCover& cover) {
+    UiState_* s = ui_state(e);
+    if (!s) return 0;
+    UiCoverState c;
+    c.id = s->next_cover++;
+    c.desc = cover;
+    s->covers.push(c);
+    return c.id;
+}
+
+void ui_cover_wait(Engine& e, u32 cover, bool wait) {
+    UiState_* s = ui_state(e);
+    for (u32 i = 0; s && i < s->covers.len; ++i) if (s->covers[i].id == cover) s->covers[i].wait = wait;
+}
+
+bool ui_covering(Engine& e) {
+    UiState_* s = ui_state(e);
+    return s && s->covers.len;
+}
+
+const char* ui_field_text(Engine& e, Handle screen, const char* path) {
+    UiNode* n = node_of(e, screen, path);
+    return n && n->text ? n->text : "";
 }
 
 bool ui_is_open(Engine& e, Handle screen) {

@@ -26,6 +26,9 @@ struct HidState {
     Input        input;    // raw at frame rate, sampled per tick
     HostWindow   window;   // one window per process; closed at module shutdown
     InputActions actions;  // what the game named, from the sampled input each tick
+    u32          text_requests = 0; // platform_text_input's count
+    char         text_override[KV_INPUT_TEXT_MAX] = {}; // input_text_override's, for the next sample
+    u32          text_override_len = 0, text_override_backspaces = 0;
 };
 
 // Opens the window. Null if one is already open or SDL refused. Owned by the module.
@@ -37,6 +40,12 @@ HostWindow* platform_open_window(Engine& e, const WindowDesc& desc);
 bool        platform_video_up(Engine& e);
 // The open window, or null. For code outside the schedule; systems use the resource.
 HostWindow* platform_window(Engine& e);
+// Asks the OS for typed text (InputState::text) while on; a text field turns it on while it
+// has the focus. Counted: on twice needs off twice.
+void platform_text_input(Engine& e, bool on);
+// Types text (and Backspaces) as if from the keyboard, into the next sample: for demo
+// scripts and tests.
+void input_text_override(Engine& e, const char* text, u32 backspaces = 0);
 // The module's input, or null if the module is not started. Likewise.
 Input*      platform_input(Engine& e);
 

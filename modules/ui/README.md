@@ -48,6 +48,22 @@ repeat; confirm emits `UiEvent{screen, item, select}` (or the item's `event`), c
 dialogue pages. Events reach handlers before that tick's Sim. A screen opened with `hold`
 holds the sim (`HoldUi`) while it is open.
 
+**Text entry.** The topmost screen's first visible `field` takes the keyboard's typed
+text (the platform's text input, which it switches on while it has a field: layouts, dead
+keys and input methods apply) instead of the action map, so typing a `w` or a space moves
+and confirms nothing. Backspace erases (with the OS's repeat), Enter or a typed newline
+submits (`submit`, the length as the value), Escape cancels, and every edit says `changed`.
+A demo types with `input_text_override(e, "Rowan\n")`.
+
+**Motions and covers.** A screen opens with `UiOpen::enter` (`Fade` or `Slide` from an edge)
+and leaves with `ui_close_with(e, screen, motion)`, taking no input on the way out. A cover
+(`ui_cover(e, UiCover{Fade or Iris, seconds, tint, focus})`) closes over the whole window,
+says `UiCovered` when nothing shows, stays while `ui_cover_wait` holds it, and opens again
+saying `UiUncovered`; it holds the sim meanwhile unless told not to. Switching from one mode
+to another (the title to the village, the world to a minigame) happens in the `UiCovered`
+handler, where nobody sees it. The iris is a disc of clear in a generated texture, ringed by
+black quads.
+
 **The model.** `ui_model_set_int(e, "hp", 3)` and the float and string forms; labels say
 `{=hp}`, meters `"value": "=hp", "max": "=hp_max"`. A HUD is a document and two calls a tick.
 
@@ -61,12 +77,23 @@ reused in order, so a still menu sends the renderer nothing.
 
 ```cpp
 // startup
-g.ui  = ui_load(e, "mygame/ui/game.ui.json", asset_scope_global(e));
-g.hud = ui_open(e, g.ui, "hud", UiOpen{.layer = 90, .input = false});
+g.ui = ui_load(e, "mygame/ui/game.ui.json", asset_scope_global(e));
+UiOpen hud;
+hud.layer = 90;
+hud.input = false;
+g.hud = ui_open(e, g.ui, "hud", hud);
 
-// open a menu that holds the sim, focused on an item
-g.menu = ui_open(e, g.ui, "pause", UiOpen{.layer = 100, .hold = true});
+// open a menu that holds the sim, sliding up, focused on an item
+UiOpen menu;
+menu.hold = true;
+menu.enter.fx = UiFx::Slide;
+g.menu = ui_open(e, g.ui, "pause", menu);
 ui_focus(e, g.menu, "items", "save");
+
+// into a minigame, behind an iris
+UiCover c;
+c.fx = UiFx::Iris;
+ui_cover(e, c); // ... and in the UiCovered handler: close the world's screens, open the game's
 
 // what it says
 void on_ui(TickContext& ctx, Span<const UiEvent> evs) {
@@ -109,11 +136,14 @@ Header `korvid/ui/ui.h`:
 | `ui_open(e, doc, screen, UiOpen{layer, input, hold})`, `ui_open_empty`, `ui_add`, `ui_close`, `ui_is_open`, `ui_top` | screens |
 | `ui_find`, `ui_set_text`, `ui_set_visible`, `ui_set_offset`, `ui_set_color`, `ui_set_image`, `ui_set_texture`, `ui_set_value`, `ui_focus`, `ui_focused`, `ui_scroll`, `ui_revealing`, `ui_reveal_all`, `ui_rect` | nodes, by path |
 | `ui_model_set_int`, `ui_model_set_float`, `ui_model_set_str` | the model |
+| `UiOpen::enter`, `ui_close_with`, `UiMotion{fx, seconds, from}` | screens coming and going |
+| `ui_cover`, `ui_cover_wait`, `ui_covering`, `UiCover`, `UiCovered`, `UiUncovered` | switching modes |
+| `ui_field_text` | a field's text |
 | `UiEvent{screen, node, event, value}` | event; `node` and `event` are `Name` hashes |
 | `ui_stats(e)` | screens, nodes, sprites, scale |
 
 What the module registers: the handle kinds `ui.doc` (an asset kind) and `ui.screen`; the
-kind `ui.sprite` (cosmetic); the event `UiEvent`; the systems `ui.update` (PreSim, main
+kind `ui.sprite` (cosmetic); the events `UiEvent`, `UiCovered`, `UiUncovered`; the systems `ui.update` (PreSim, main
 thread, every tick; writes `audio.commands`) and `ui.draw` (PostSim, main thread, every
 tick, after `anim.play`); the command `ui reload`; the mount `/ui` (`print /ui/pause` lists
 a screen's nodes with their rects).
@@ -134,6 +164,7 @@ a screen's nodes with their rects).
 
 ## Not in this module
 
-Mouse and touch, drag and drop, text selection, bidirectional text and shaping, grids and
-flexible wrapping layouts, nested scrolls, rich-text images inline, localization tables, and
-a visual editor. `field` takes one line of UTF-8.
+Mouse and touch, drag and drop, text selection and a caret that moves, bidirectional text and
+shaping, grids and flexible wrapping layouts, nested scrolls, rich-text images inline,
+localization tables, and a visual editor. `field` takes one line of UTF-8, appended and
+erased at its end.

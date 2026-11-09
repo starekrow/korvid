@@ -67,6 +67,16 @@ The window is `ctx.resource<const HostWindow>("platform_hid.window")` for its si
 
 **Options the frame loop exposes**: `--borderless`, `--no-vsync`.
 
+## Typed text
+
+Keys are positions; text is what a person meant to type. `InputState::text` carries the
+UTF-8 the OS produced since the last sample (SDL3's text input events on Linux, with
+layouts, dead keys and input methods applied; `WM_CHAR` on Windows, surrogate pairs joined),
+and `backspaces` the Backspaces among it, auto-repeat included. A text field asks for it with
+`platform_text_input(e, true)` (counted, so two fields need two offs); SDL then shows an
+input method's window where there is one. `input_text_override(e, "Rowan\n")` types into the
+next sample, for demos and tests.
+
 ## Quick reference
 
 Header `korvid/platform_hid/host_window.h`:

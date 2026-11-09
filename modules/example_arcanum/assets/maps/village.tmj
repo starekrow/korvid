@@ -3397,7 +3397,7 @@
       {
        "name": "dialogue",
        "type": "string",
-       "value": "Ah, {c=gold}{name}{/c}! These boulders block every road.|If you could {wave}break{/wave} one for me, I'd be grateful."
+       "value": "Ah, {c=gold}{=hero}{/c}! These boulders block every road.|If you could {wave}break{/wave} one for me, I'd be grateful."
       },
       {
        "name": "dialogue_done",

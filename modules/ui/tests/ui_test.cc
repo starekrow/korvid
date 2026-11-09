@@ -23,12 +23,18 @@ namespace {
 
 using namespace kv;
 
-struct Seen { u32 events; u64 last_node, last_event; i32 last_value; };
+struct Seen { u32 events; u64 last_node, last_event; i32 last_value; u32 covered, uncovered; u64 user; };
 Seen g;
 void on_ui(TickContext&, Span<const UiEvent> evs) {
     for (const UiEvent& ev : evs) { ++g.events; g.last_node = ev.node; g.last_event = ev.event; g.last_value = ev.value; }
 }
-constinit const HandlerDesc k_handlers[] = {{.name = ".on_ui", KV_ON(UiEvent, on_ui)}};
+void on_covered(TickContext&, Span<const UiCovered> cs) { for (const UiCovered& c : cs) { ++g.covered; g.user = c.user; } }
+void on_uncovered(TickContext&, Span<const UiUncovered> cs) { g.uncovered += cs.len; }
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_ui", KV_ON(UiEvent, on_ui)},
+    {.name = ".on_covered", KV_ON(UiCovered, on_covered)},
+    {.name = ".on_uncovered", KV_ON(UiUncovered, on_uncovered)},
+};
 KV_MODULE_DEFINE(k_t) = {.name = "ut", .handlers = k_handlers};
 
 constinit const InputActionDesc k_actions[] = {
@@ -52,8 +58,15 @@ const char* const k_doc = R"({
     "roll": { "type": "scroll", "name": "view", "size": [50, 20],
       "children": [ { "type": "box", "name": "tall", "size": [40, 100] } ] },
     "hold": { "type": "box", "name": "x", "size": [1, 1] },
+    "name": { "type": "field", "name": "entry", "max_length": 6 },
     "dim": { "type": "box", "name": "shade", "size": ["fill", "fill"],
       "children": [ { "type": "panel", "name": "fill", "fill": "gold", "size": ["fill", "fill"] }, { "type": "box", "name": "mid", "size": [10, 10] } ] } } })";
+
+UiOpen uo(i32 layer, bool input = true, bool hold = false) {
+    UiOpen o;
+    o.layer = layer; o.input = input; o.hold = hold;
+    return o;
+}
 
 bool put(const char* path, const char* text) {
     FILE* f = fopen(path, "wb");
@@ -88,7 +101,7 @@ void test_ui(kv::TestCtx& c) {
     frames(1);
     KV_CHECK(c, ui_find(e, menu, "") == 0 && ui_find(e, menu, "items/save") != KV_UI_NONE && ui_find(e, menu, "quit") != KV_UI_NONE);
     KV_CHECK(c, ui_find(e, menu, "items/nope") == KV_UI_NONE);
-    Handle built = ui_open_empty(e, doc, "menu-code", UiOpen{.layer = 50, .input = false});
+    Handle built = ui_open_empty(e, doc, "menu-code", uo(50, false));
     UiNodeDesc box;
     box.type = UiType::Panel; box.name = "box"; box.w_mode = UiSize::Fixed; box.size = vec2{100, 0};
     box.padding[0] = 4; box.padding[1] = 6; box.padding[2] = 4; box.padding[3] = 6; box.fill = "gold";
@@ -116,7 +129,7 @@ void test_ui(kv::TestCtx& c) {
     KV_CHECK(c, r.w == 100.0f && fabsf(r.x - (W - 100.0f) * 0.5f) < 0.01f && fabsf(r.y + r.h * 0.5f - H * 0.5f) < 0.01f);
     rect2 cr = ui_rect(e, menu, "corner");
     KV_CHECK(c, cr.x + cr.w == r.x + r.w - 4.0f - 1.0f && cr.y + cr.h == r.y + r.h - 6.0f - 2.0f); // bottom-right of the inside, offset
-    Handle hud = ui_open(e, doc, "hud", UiOpen{.layer = 90, .input = false});
+    Handle hud = ui_open(e, doc, "hud", uo(90, false));
     ui_model_set_int(e, "hp", 3);
     ui_model_set_int(e, "hp_max", 5);
     frames(1);
@@ -149,7 +162,7 @@ void test_ui(kv::TestCtx& c) {
     ui_close(e, built);
 
     // ---- a reveal: its rate, its pause, a confirm finishes it, then says so ---------------
-    Handle talk = ui_open(e, doc, "talk", UiOpen{.layer = 200});
+    Handle talk = ui_open(e, doc, "talk", uo(200));
     frames(1);
     KV_CHECK(c, ui_top(e) == talk && ui_revealing(e, talk, "line"));
     frames(12); // 0.2 s: "ab" (0.1, 0.2), then the half-second pause
@@ -172,7 +185,7 @@ void test_ui(kv::TestCtx& c) {
     ui_close(e, talk);
 
     // ---- a scroll clamps; a holding screen holds ----------------------------------------
-    Handle roll = ui_open(e, doc, "roll", UiOpen{.layer = 10, .input = false});
+    Handle roll = ui_open(e, doc, "roll", uo(10, false));
     frames(1);
     ui_scroll(e, roll, "view", 500.0f);
     frames(1);
@@ -182,18 +195,59 @@ void test_ui(kv::TestCtx& c) {
     frames(1);
     KV_CHECK(c, ui_rect(e, roll, "tall").y == view.y);
     ui_close(e, roll);
-    Handle dim = ui_open(e, doc, "dim", UiOpen{.layer = 5, .input = false});
+    Handle dim = ui_open(e, doc, "dim", uo(5, false));
     frames(1);
     rect2 shade = ui_rect(e, dim, ""), fill = ui_rect(e, dim, "fill");
     KV_CHECK(c, shade.w == W && shade.h == H && fill.x == 0 && fill.y == 0 && fill.w == W && fill.h == H);
     ui_close(e, dim);
-    Handle holder = ui_open(e, doc, "hold", UiOpen{.hold = true});
+    Handle holder = ui_open(e, doc, "hold", uo(100, true, true));
     frames(1);
     KV_CHECK(c, (engine_holds(e) & HoldUi) != 0);
     ui_close(e, holder);
     frames(1);
     KV_CHECK(c, (engine_holds(e) & HoldUi) == 0);
     ui_close(e, menu);
+
+    // ---- a field: typed text, erased, capped, submitted ---------------------------------------
+    Handle name = ui_open(e, doc, "name", uo(300));
+    frames(1);
+    g = Seen{};
+    input_text_override(e, "h\xc3\xa9llo");
+    frames(2);
+    KV_CHECK(c, !strcmp(ui_field_text(e, name, "entry"), "h\xc3\xa9llo") && g.last_event == name_lookup("changed").hash && g.last_value == 5);
+    input_text_override(e, "", 2);
+    frames(2);
+    KV_CHECK(c, !strcmp(ui_field_text(e, name, "entry"), "h\xc3\xa9l"));
+    input_action_override(e, "move", true, vec2{0, -1}); // the move action is not the field's
+    input_text_override(e, "abcdef");
+    frames(2);
+    KV_CHECK(c, !strcmp(ui_field_text(e, name, "entry"), "h\xc3\xa9labc")); // six characters at most
+    input_text_override(e, "\n");
+    frames(2);
+    KV_CHECK(c, g.last_event == name_lookup("submit").hash && g.last_value == 6);
+
+    // ---- a motion out: still there until it has gone ------------------------------------------
+    UiMotion out;
+    out.fx = UiFx::Fade; out.seconds = 0.1f;
+    KV_CHECK(c, ui_close_with(e, name, out) && ui_is_open(e, name));
+    frames(8);
+    KV_CHECK(c, !ui_is_open(e, name));
+
+    // ---- a cover: closes, says so, waits while asked, opens, says so; holds meanwhile --------
+    UiCover cov;
+    cov.fx = UiFx::Iris; cov.seconds = 0.1f; cov.user = 77;
+    g = Seen{};
+    u32 id = ui_cover(e, cov);
+    ui_cover_wait(e, id, true);
+    frames(4);
+    KV_CHECK(c, ui_covering(e) && (engine_holds(e) & HoldUi) && g.covered == 0);
+    frames(6);
+    KV_CHECK(c, g.covered == 1 && g.user == 77 && g.uncovered == 0);
+    frames(10);
+    KV_CHECK(c, ui_covering(e) && g.uncovered == 0); // waiting
+    ui_cover_wait(e, id, false);
+    frames(12);
+    KV_CHECK(c, !ui_covering(e) && g.uncovered == 1 && (engine_holds(e) & HoldUi) == 0);
 
     asset_unref(e, doc);
     frames(2);

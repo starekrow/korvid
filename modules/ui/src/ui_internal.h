@@ -93,6 +93,19 @@ struct UiScreen {
     bool         code  = false;
     u32          order = 0;          // opening order, for the topmost
     f32          time  = 0.0f;       // seconds open, every tick (effects)
+    // Coming and going: t runs 0 to 1 over the motion's seconds; leaving closes at 1.
+    UiMotion     motion;
+    f32          motion_t = 1.0f;
+    bool         leaving  = false;
+};
+
+struct UiCoverState {
+    u32     id = 0;
+    UiCover desc;
+    f32     amount = 0.0f;           // 0 open, 1 covered
+    u8      phase  = 0;              // 0 closing, 1 covered (waiting), 2 opening
+    bool    wait   = false;
+    bool    said   = false;          // UiCovered went out
 };
 
 struct UiModelValue { u8 type; i64 i; f64 f; Name s; }; // 0 int, 1 float, 2 string
@@ -121,6 +134,11 @@ struct UiState_ {
     f32                 scale = 1.0f;// pixels per unit, this tick
     f32                 win_w = 1280.0f, win_h = 720.0f;
     bool                holding = false;
+    Array<UiCoverState> covers;      // at most a few
+    u32                 next_cover = 1;
+    Handle              iris_texture, iris_material; // a disc of clear in black, for the iris
+    bool                text_on = false; // a field holds the platform's text input
+    u64                 keys_prev[2] = {};// last tick's Enter and Escape, for edges
     UiStats             stats;
 };
 
