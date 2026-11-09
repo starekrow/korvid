@@ -16,6 +16,7 @@
 #include "korvid/sprite/module.h"
 #include "korvid/sprite/transform2.h"
 #include "korvid/text/text.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -66,7 +67,7 @@ struct FrameLoopState {
 // truncated to 32 bits, printed as ms), so hitch lines line up with a protocol trace.
 f64 wayland_debug_stamp() {
     struct timespec tp;
-    clock_gettime(CLOCK_REALTIME, &tp);
+    timespec_get(&tp, TIME_UTC); // C11: the realtime clock, on every platform
     u32 us = (u32)((u64)tp.tv_sec * 1000000u + (u64)tp.tv_nsec / 1000u);
     return (f64)us / 1000.0;
 }
@@ -169,26 +170,24 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
         Table* labels = engine_table(engine, g_overlay_kind);
         for (u32 i = 0; i < kOverlayLines; ++i) {
             Text t;
-            t.font  = s->overlay_font;
-            t.space = SpriteSpace::Screen;
-            t.layer = 127;
-            t.tint  = color_rgba(1.0f, 1.0f, 1.0f, 0.9f);
-            s->overlay_lines[i] = labels->spawn(Transform2{}, t);
+            t.font   = s->overlay_font;
+            t.space  = SpriteSpace::Screen;
+            t.anchor = ScreenAnchor::TopLeft;
+            t.layer  = 127;
+            t.tint   = color_rgba(1.0f, 1.0f, 1.0f, 0.9f);
+            // Down from the window's top-left corner, whatever its size: the anchor does that.
+            s->overlay_lines[i] = labels->spawn(transform2_at(point2{12.0f, -12.0f - kOverlayPx * (1.0f + 1.2f * (f32)i)}), t);
         }
     }
     return true;
 }
 
-// The overlay's labels: placed down the top-left corner for the window's current size,
-// line i given `text`. Called at every report, so a resize is right within a second.
+// The overlay's line i, given `text`. Called at every report.
 void overlay_set(Engine& engine, FrameLoopState& s, u32 line, const char* text) {
     if (!g_overlay || line >= kOverlayLines) return;
     Table* labels = engine_table(engine, g_overlay_kind);
     Text* t = labels->get<Text>(s.overlay_lines[line]);
-    Transform2* at = labels->get<Transform2>(s.overlay_lines[line]);
-    if (!t || !at) return;
-    f32 w = (f32)s.window->width(), h = (f32)s.window->height();
-    at->position = point2{-w * 0.5f + 12.0f, h * 0.5f - 12.0f - kOverlayPx * (1.0f + 1.2f * (f32)line)};
+    if (!t) return;
     text_set(*t, "%s", text);
 }
 
@@ -365,8 +364,17 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
         if (g_trace_path) prof_trace_open(g_trace_path);
     }
     cli_configure(g_cli);
-    const char* slash = strrchr(argv[0], '/');
-    g_mounts.exe_name = slash ? slash + 1 : argv[0];
+    // The executable's name, for <exe>.kpak: argv[0] after its last separator ('\' too,
+    // on Windows), less a ".exe" (Windows names executables that way; the pack does not).
+    static char exe_name[128];
+    const char* name = argv[0];
+    for (const char* p = argv[0]; *p; ++p) if (*p == '/' || *p == '\\') name = p + 1;
+    snprintf(exe_name, sizeof exe_name, "%s", name);
+    usize len = strlen(exe_name);
+    if (len > 4 && (exe_name[len - 4] == '.') && (exe_name[len - 3] | 0x20) == 'e' && (exe_name[len - 2] | 0x20) == 'x' &&
+        (exe_name[len - 1] | 0x20) == 'e')
+        exe_name[len - 4] = 0;
+    g_mounts.exe_name = exe_name;
     platform_configure_mounts(g_mounts);
     Engine engine;
     engine.hash_ticks   = g_hash_ticks;

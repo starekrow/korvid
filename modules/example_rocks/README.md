@@ -42,9 +42,17 @@ with masks that give ship-rock and bullet-rock pairs and nothing else.
 **Systems.** In Sim: `control` reads `input.state` and writes the ship, the flame and the
 bullet kind (it fires by direct spawn, holding the write, and schedules each bullet's
 `Expire` 72 ticks out); it says `before = move`. `move` integrates every kind with
-`Velocity` in a `parallel_for`; `wrap` keeps everything on screen, `after = move`, since
+`Velocity` in a `parallel_for`; `wrap` keeps everything on the field, `after = move`, since
 both write `*.Transform2`; `game` starts the first game. `move` and `wrap` declare
 `StateUse::None`, so they share levels instead of serializing on the module's state.
+
+The field is a fixed 1280 x 720 world units around the origin: waves arrive at its edges,
+and `wrap` wraps at them. The HUD is screen-space text anchored to the window's top-right
+corner (`ScreenAnchor::TopRight`), so the renderer puts it there on any window. Only
+`camera` reads the window, to set the zoom that fits the field to it (a window of another
+shape shows a margin on two sides), so nothing in the simulation depends on the window's
+size or the display's scale, and `--demo --hash` gives the same run on any screen.
+
 Around it: `pause` (PreSim, `Always`) toggles the pause, `camera` (PostSim) shakes the
 camera, `hud` (PostSim, `Always`) rewrites the HUD label.
 

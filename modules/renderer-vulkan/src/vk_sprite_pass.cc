@@ -17,9 +17,8 @@ namespace {
 
 // Reads <exe dir>/shaders/<name>. SPIR-V is precompiled by the build; nothing compiles here.
 bool load_shader(Renderer* r, const char* name, VkShaderModule* out) {
-    const char* base = SDL_GetBasePath();
     char path[1024];
-    snprintf(path, sizeof path, "%sshaders/%s", base ? base : "", name);
+    snprintf(path, sizeof path, "%sshaders/%s", r->base_path, name);
     FILE* f = fopen(path, "rb");
     if (!f) { KV_ERROR("vulkan", "cannot open shader '%s'", path); return false; }
     fseek(f, 0, SEEK_END);
@@ -161,7 +160,7 @@ u32 for_dirty_runs(Array<u64>& bits, u32 rows, u32 join, F copy_run) {
         if (!word) continue;
         bits[w] = 0;
         while (word) {
-            u32 bit = (u32)__builtin_ctzll(word);
+            u32 bit = KV_CTZ64(word);
             word &= word - 1;
             u32 i = w * 64 + bit;
             if (i >= rows) break;

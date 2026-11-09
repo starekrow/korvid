@@ -25,7 +25,7 @@ struct Parse {
     usize       cap;
     const char* base;
     const JsonDoc* doc;
-    bool fail(const char* fmt, ...) __attribute__((format(printf, 2, 3))) {
+    bool fail(const char* fmt, ...) KV_PRINTF(2, 3) {
         va_list args;
         va_start(args, fmt);
         if (cap) vsnprintf(error, cap, fmt, args);
@@ -329,8 +329,10 @@ bool tilemap_resolve(const char* base, const char* rel, char* out, usize cap) {
     // Resolve "..": segments onto a stack.
     char segs[64][128];
     u32 depth = 0;
-    char* save = nullptr;
-    for (char* tok = strtok_r(joined, "/\\", &save); tok; tok = strtok_r(nullptr, "/\\", &save)) {
+    for (char* p = joined; *(p += strspn(p, "/\\"));) {
+        char* tok = p;           // a segment, ended in place at its separator
+        p += strcspn(p, "/\\");
+        if (*p) *p++ = 0;
         if (!strcmp(tok, ".")) continue;
         if (!strcmp(tok, "..")) { if (!depth) return false; --depth; continue; }
         if (depth >= 64 || strlen(tok) >= sizeof segs[0]) return false;

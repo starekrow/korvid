@@ -113,4 +113,6 @@ const char* platform_base_path(Engine& e) {
     return s ? s->base_path : "";
 }
 
+bool platform_exe_dir(char* out, u32 cap) { return os_base_path(out, cap); }
+
 } // namespace kv

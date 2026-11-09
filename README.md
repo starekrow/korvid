@@ -159,6 +159,12 @@ what builds there so far. It uses MSVC and the SDL project's prebuilt SDL3 packa
    The version is pinned in `modules/toolchain-windows/module.lua`; moving to another one
    changes it there and here. A build without the package stops at `gen` with these
    instructions; executables that use SDL get `SDL3.dll` copied beside them.
+3. **The Vulkan SDK** (LunarG): `winget install KhronosGroup.VulkanSDK`, or the installer
+   from <https://vulkan.lunarg.com/sdk/home>. It brings the Vulkan headers, `slangc` (the
+   shader compiler) and the validation layers that debug builds turn on. Its installer
+   sets `VULKAN_SDK` and puts its `Bin` on `PATH`; open a new prompt afterwards so both
+   are seen. `KORMAKE_VULKAN_DIR` overrides where kormake looks. Running a build needs
+   only the GPU driver: `vulkan-1.dll`, the loader, comes with it.
 
 Then, from any prompt:
 

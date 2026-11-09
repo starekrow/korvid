@@ -99,18 +99,28 @@ function M.run(c, g, opts)
   local out = {}
   local function w(s) out[#out + 1] = s end
 
-  -- An external the toolchain keeps in a directory (a prebuilt package) is found at its
-  -- `dir` under the project root, or wherever KORMAKE_<NAME>_DIR says. A package that is
-  -- not there stops the generation, with the toolchain's instructions for getting it.
+  -- An external the toolchain keeps in a directory (a prebuilt package or an installed SDK)
+  -- is found wherever KORMAKE_<NAME>_DIR says, else where the variable its `env` names
+  -- says (an SDK's installer sets one), else at its `dir` under the project root. A
+  -- package that is not there stops the generation, with the toolchain's instructions.
   local external_dirs = {}
   local function external_dir(fl, ext)
     local e = fl.externals[ext]
-    if not e.dir then return nil end
+    if not e.dir and not e.env then return nil end
     local key = fl.tc.rec.name .. ":" .. ext
     if external_dirs[key] then return external_dirs[key] end
     local var = "KORMAKE_" .. ext:upper():gsub("[^%w]", "_") .. "_DIR"
     local env = kfs.getenv(var)
     if env == "" then env = nil end
+    if not env and e.env then
+      env = kfs.getenv(e.env)
+      if env == "" then env = nil end
+      if env then var = e.env end
+    end
+    if not env and not e.dir then
+      util.fail("external '%s' (toolchain %s): neither %s nor %s is set.\n%s", ext, fl.tc.rec.name, var, e.env,
+        e.fetch or ("Set " .. var .. " to the directory that holds it."))
+    end
     local dir = env and (env:gsub("\\", "/"):gsub("/$", "")) or (util.is_abs(e.dir) and e.dir or util.join(root, e.dir))
     local check = util.join(dir, e.check or (e.include and e.include[1]) or ".")
     if not (kfs.isdir(check) or kfs.isfile(check)) then
@@ -444,16 +454,20 @@ function M.run(c, g, opts)
         compile(inst, s, obj, includes, define_flags(inst))
         objs[#objs + 1] = obj
       end
-      local libs, mods = {}, {}
+      -- Order-only inputs, as an executable's: the staged assets and shaders of the module
+      -- and its closure (a test reads them beside itself), and a package's runtime files.
+      local libs, mods, rt = {}, {}, {}
       if libs_by_key[inst.key] then libs[#libs + 1] = libs_by_key[inst.key] end
       for i = #inst.closure, 1, -1 do
         local d = inst.closure[i]
         if libs_by_key[d.key] then libs[#libs + 1] = libs_by_key[d.key] end
         mods[#mods + 1] = d.module
+        for _, r in ipairs(runtime_by_key[d.key] or {}) do rt[#rt + 1] = r end
       end
       mods[#mods + 1] = m
+      for _, r in ipairs(runtime_by_key[inst.key] or {}) do rt[#rt + 1] = r end
       local extlibs, extdirs = extlibs_of(inst, mods)
-      local rt = runtime_of(inst, mods)
+      for _, r in ipairs(runtime_of(inst, mods)) do rt[#rt + 1] = r end
       local exe = pre .. "bin/" .. sym .. "_tests" .. flags(inst).tc.fields.exe_suffix
       w(string.format("build %s: %s %s %s%s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
         #rt > 0 and (" || " .. table.concat(rt, " ")) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))

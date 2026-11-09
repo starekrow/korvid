@@ -35,5 +35,8 @@ bool                   platform_audio_open(Engine& e, const AudioDeviceDesc& des
 void                   platform_audio_close(Engine& e);
 // The open device's format, or a record with open == false.
 const AudioDeviceInfo& platform_audio(Engine& e);
+// Before the device opens: true makes it a null device that plays nothing (SDL's dummy
+// driver), for tests and headless runs. SDL_AUDIO_DRIVER in the environment still wins.
+void                   platform_audio_null_device(bool on);
 
 } // namespace kv

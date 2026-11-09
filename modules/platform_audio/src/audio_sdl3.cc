@@ -16,6 +16,7 @@ struct AudioDevice {
 };
 
 AudioDevice g_audio; // one per process, like the SDL audio subsystem itself
+bool        g_null_device = false;
 
 // SDL's thread: `additional` bytes are wanted now. Mixed in slices of at most 1024
 // frames from a stack buffer; no allocation, no logging.
@@ -35,10 +36,14 @@ void SDLCALL audio_pull(void* user, SDL_AudioStream* stream, int additional, int
 
 } // namespace
 
+void platform_audio_null_device(bool on) { g_null_device = on; }
+
 bool platform_audio_open(Engine& e, const AudioDeviceDesc& desc) {
     KV_UNUSED(e);
     if (g_audio.stream) { KV_ERROR("audio", "a device is already open"); return false; }
     if (!desc.callback || desc.channels == 0 || desc.channels > 8 || desc.rate == 0) { KV_ERROR("audio", "bad device description"); return false; }
+    // A hint at normal priority: SDL_AUDIO_DRIVER in the environment overrides it.
+    if (g_null_device) SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) { KV_WARN("audio", "SDL audio unavailable: %s", SDL_GetError()); return false; }
     char frames_hint[16];
     SDL_snprintf(frames_hint, sizeof frames_hint, "%u", desc.frames);

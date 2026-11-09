@@ -4,6 +4,7 @@
 // the pump keeps it; a read still out when its asset retires is reaped, not left on the
 // queue; a retired sound a voice is playing waits for the mixer before its samples go.
 #include "korvid/asset/module.h"
+#include "korvid/core/time.h"
 #include "korvid/asset/scope.h"
 #include "korvid/asset/sound.h"
 #include "korvid/audio/module.h"
@@ -15,8 +16,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 namespace {
 
@@ -49,7 +48,7 @@ bool write_wav(const char* path, u32 frames) {
 void test_asset_scopes(kv::TestCtx& c) {
     using namespace kv;
     c.begin("asset_scopes");
-    setenv("SDL_AUDIO_DRIVER", "dummy", 0);
+    platform_audio_null_device(true);
     const ModuleDesc* const list[] = {&platform_module, &platform_audio_module, &asset_module, &audio_module, &k_scope_t};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
@@ -58,7 +57,7 @@ void test_asset_scopes(kv::TestCtx& c) {
 
     char dir[512];
     snprintf(dir, sizeof dir, "%sassets/audio_scope_test", platform_base_path(e));
-    mkdir(dir, 0755);
+    io_make_dirs(dir);
     char path[600];
     const char* const names[] = {"a", "b", "c"};
     for (const char* name : names) {
@@ -126,7 +125,7 @@ void test_asset_scopes(kv::TestCtx& c) {
     KV_CHECK(c, asset_sound(e, snd) == nullptr);
     KV_CHECK(c, asset_lifetime_stats(e).samples_deferred == deferred_before + (audio_stats(e).device ? 1u : 0u)); // handed to the mixer, not freed
     // The device thread runs in real time: give it up to two seconds.
-    for (u32 i = 0; i < 400 && (asset_lifetime_stats(e).samples_out || audio_stats(e).live_voices); ++i) { run(); usleep(5000); }
+    for (u32 i = 0; i < 400 && (asset_lifetime_stats(e).samples_out || audio_stats(e).live_voices); ++i) { run(); time_sleep(0.005); }
     KV_CHECK(c, asset_lifetime_stats(e).samples_out == 0 && audio_stats(e).live_voices == 0 && !voice.is_null());
 
     asset_scope_release(e, again);
@@ -135,5 +134,5 @@ void test_asset_scopes(kv::TestCtx& c) {
     KV_CHECK(c, asset_lifetime_stats(e).scopes == 1 && asset_lifetime_stats(e).dying == 0);
     engine_shutdown(e);
     for (const char* name : names) { snprintf(path, sizeof path, "%s/%s.wav", dir, name); remove(path); }
-    rmdir(dir);
+    io_remove(dir);
 }

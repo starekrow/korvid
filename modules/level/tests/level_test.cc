@@ -19,8 +19,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 namespace {
 
@@ -91,7 +89,7 @@ void test_level(kv::TestCtx& c) {
     KV_CHECK(c, engine_init(e, list));
     char dir[512];
     snprintf(dir, sizeof dir, "%sassets/level_test", platform_base_path(e));
-    mkdir(dir, 0755);
+    io_make_dirs(dir);
     KV_CHECK(c, write(dir, "town.map", "town v1") && write(dir, "field.map", "field v1") && write(dir, "shared.bin", "shared"));
     // The default mount was made at startup; it is the directory these went into.
 
@@ -160,6 +158,6 @@ void test_level(kv::TestCtx& c) {
     engine_shutdown(e);
     char path[600];
     const char* const names[] = {"town.map", "field.map", "shared.bin"};
-    for (const char* n : names) { snprintf(path, sizeof path, "%s/%s", dir, n); unlink(path); }
-    rmdir(dir);
+    for (const char* n : names) { snprintf(path, sizeof path, "%s/%s", dir, n); io_remove(path); }
+    io_remove(dir);
 }

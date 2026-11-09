@@ -69,15 +69,12 @@ bool has_instance_extension(const char* name) {
 } // namespace
 
 bool rv_create_instance(Renderer* r) {
-    u32 sdl_ext_count = 0;
-    const char* const* sdl_exts = SDL_Vulkan_GetInstanceExtensions(&sdl_ext_count);
-    if (!sdl_exts) {
-        KV_ERROR("vulkan", "SDL_Vulkan_GetInstanceExtensions: %s", SDL_GetError());
-        return false;
-    }
+    u32 surface_ext_count = 0;
+    const char* const* surface_exts = vk_platform_instance_extensions(&surface_ext_count);
+    if (!surface_exts) return false;
 
     Array<const char*> exts;
-    for (u32 i = 0; i < sdl_ext_count; ++i) exts.push(sdl_exts[i]);
+    for (u32 i = 0; i < surface_ext_count; ++i) exts.push(surface_exts[i]);
     Array<const char*> layers;
 
     bool debug_utils = false;

@@ -1,6 +1,12 @@
 // The stb_vorbis implementation, once. Decoding goes through stb_vorbis_open_memory with
 // a caller-supplied work buffer, so the decoder never calls malloc; the output buffer is
 // the engine's.
+#include "korvid/core/types.h"
+// Vendored, not ours: its warnings are silenced for its own lines only.
+#if KV_COMPILER_MSVC
+#pragma warning(push, 0)
+#pragma warning(disable: 4701 4703) // the optimizer's: push, 0 sets a level, which these ignore
+#else
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -15,8 +21,13 @@
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #pragma GCC diagnostic ignored "-Wtype-limits"
+#endif
 #define STB_VORBIS_NO_STDIO
 #define STB_VORBIS_NO_PUSHDATA_API
 #define STB_VORBIS_NO_INTEGER_CONVERSION
 #include "vendor/stb_vorbis.c"
+#if KV_COMPILER_MSVC
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
+#endif

@@ -45,11 +45,12 @@ is sim state like any other kind, so a game's labels are hashed with the rest.
 // A kind of your own with a Text, or the module's text.label:
 Text t;
 t.font  = g.font;                       // asset_load_font(engine, "text/DejaVuSans.ttf", 28) at startup
-t.space = SpriteSpace::Screen;          // window pixels, center origin, +y up
-t.align = TextAlign::Center;
-t.layer = 50;
+t.space  = SpriteSpace::Screen;         // window pixels, +y up, from the anchor
+t.anchor = ScreenAnchor::Top;           // the top edge's middle, on any window
+t.align  = TextAlign::Center;
+t.layer  = 50;
 text_set(t, "SCORE %d", score);
-labels->spawn(transform2_at(point2{0, 300}), t);
+labels->spawn(transform2_at(point2{0, -60}), t); // 60 px below the top edge
 
 // Later, from a system that holds the write on the column:
 text_set(texts[i], "SCORE %d", score); // the layout relays out only if the string changed
@@ -68,7 +69,7 @@ Header `korvid/text/text.h`:
 
 | name | kind | what |
 |---|---|---|
-| `Text` | component | `font` (asset.font), `str[KV_TEXT_MAX]`, `scale` (1), `tint` (white), `layer` (0), `space` (World), `align` (Left) |
+| `Text` | component | `font` (asset.font), `str[KV_TEXT_MAX]`, `scale` (1), `tint` (white), `layer` (0), `space` (World), `anchor` (Center: where screen text is measured from), `align` (Left) |
 | `TextAlign` | enum | `Left`, `Center`, `Right` |
 | `text_set(text, fmt, ...)` | function | printf into `str`, truncating; returns what snprintf would |
 | `KV_TEXT_MAX` | constant | 64 bytes, NUL included |

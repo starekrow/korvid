@@ -42,7 +42,7 @@ void test_audio_module(kv::TestCtx& c) {
     // The audio device module is up (SDL audio on a dummy driver) so the audio module can try
     // the device; on a machine without one it runs silent, which is what this test wants
     // either way: voices on a null sound finish at the next extract.
-    setenv("SDL_AUDIO_DRIVER", "dummy", 0);
+    platform_audio_null_device(true);
     const ModuleDesc* const list[] = {&platform_module, &platform_audio_module, &asset_module, &audio_module, &k_t};
     Engine e;
     KV_CHECK(c, engine_init(e, list));

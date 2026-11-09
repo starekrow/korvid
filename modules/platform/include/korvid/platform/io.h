@@ -178,6 +178,9 @@ bool io_make_temp_dir(const char* prefix, char* out, u32 cap);
 IoQueue* platform_io(Engine& e);
 // Directory of the running executable, with a trailing separator. Assets live beneath it.
 const char* platform_base_path(Engine& e);
+// The same, asked of the OS directly, for code with no engine (a test). False if the OS
+// will not say.
+bool        platform_exe_dir(char* out, u32 cap);
 // The per-user directory for saves and settings, created if need be, with a trailing
 // separator: $XDG_DATA_HOME/<org>/<app>/, or ~/.local/share/<org>/<app>/, on
 // Linux (where SDL put it). The first call fixes the names for the process; "" if the OS has none.

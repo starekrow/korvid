@@ -71,7 +71,7 @@ u64 label_hash(const Text& t, const FontAsset* f) {
     u32 bits[9];
     memcpy(&bits[0], &t.scale, 4);
     memcpy(&bits[1], &t.tint, 16);
-    bits[5] = (u32)t.layer; bits[6] = (u32)t.space; bits[7] = (u32)t.align; bits[8] = 0;
+    bits[5] = (u32)t.layer; bits[6] = (u32)t.space; bits[7] = (u32)t.align; bits[8] = (u32)t.anchor;
     h = hash_mix(h ^ hash_bytes(bits, sizeof bits));
     return hash_mix(h ^ hash_bytes(&t.shadow, sizeof t.shadow) ^ hash_bytes(&t.shadow_offset, sizeof t.shadow_offset) * 31);
 }
@@ -129,6 +129,7 @@ void text_layout_system(TickContext& ctx) {
                     spr.tint     = pass ? t.tint : t.shadow;
                     spr.layer    = t.layer;
                     spr.space    = t.space;
+                    spr.anchor   = t.anchor;
                     if (shadowed) { spr.sort = SpriteSort::Key; spr.order = (f32)pass; }
                     point2 at{p.center.x + (pass ? 0.0f : t.shadow_offset.x), p.center.y + (pass ? 0.0f : t.shadow_offset.y)};
                     Handle gh = glyphs->spawn(Transform2{}, spr, local2_at(at), Parent{label});
@@ -158,7 +159,7 @@ void text_shutdown(Engine&, ModuleInstance& self) {
     s->tables.free();
 }
 
-constinit const FieldDesc k_text_fields[] = {KV_FIELDS(Text, font, str, scale, tint, layer, space, align, shadow, shadow_offset)};
+constinit const FieldDesc k_text_fields[] = {KV_FIELDS(Text, font, str, scale, tint, layer, space, anchor, align, shadow, shadow_offset)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Text, k_text_fields)};
 
 constinit const KindDesc k_kinds[] = {

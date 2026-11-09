@@ -5,7 +5,9 @@
 // screen-space dimmer covers the field, Q quits. A hit shakes the camera. Shots, breaks
 // and the ship's end make sounds, with a looping thruster whose volume follows the
 // thrust. Everything the game knows is in kinds and one published Score; the only handles
-// kept are the thruster voice and the assets.
+// kept are the thruster voice and the assets. The field is a fixed 1280 x 720 world
+// units; the camera fits it to the window, and the HUD is anchored to the window's corner,
+// so the run is the same on any window or display.
 #include "korvid/example_rocks/module.h"
 #include "korvid/anim/module.h"
 #include "korvid/asset/font.h"
@@ -30,6 +32,7 @@
 #include "korvid/sprite/transform2.h"
 #include "korvid/text/text.h"
 #include <math.h>
+#include <stdlib.h>
 
 namespace kv {
 
@@ -140,6 +143,10 @@ constexpr f32 kFireCooldown   = 0.15f; // seconds
 constexpr u32 kWaveTicks      = 600;
 constexpr u32 kRestartTicks   = 120;
 constexpr f32 kRockRadius[3]  = {44.0f, 26.0f, 14.0f};
+// The playfield, in world units, centered on the origin. The game plays on it whatever the
+// window: the camera fits it to the window (.camera), so nothing the sim knows depends
+// on the window's size or the display's scale, and --demo --hash matches on any screen.
+constexpr f32 kFieldW = 1280.0f, kFieldH = 720.0f;
 constexpr f32 kRockSprite[3]  = {96.0f, 56.0f, 30.0f};
 constexpr i32 kRockPoints[3]  = {20, 50, 100};
 
@@ -155,15 +162,19 @@ Sprite sprite_of(const Game& g, Look look, f32 size, i32 layer, color tint = col
 
 vec2 heading(f32 rotation) { return vec2{cosf(rotation), sinf(rotation)}; }
 
-// A label in screen space; the HUD sits top-left, banners in the middle, over the dimmer.
-void spawn_label(Table& labels, const Game& g, Role role, const char* str, point2 at, TextAlign align, f32 scale, i32 layer, color tint) {
+// A label in screen space, at `at` from its anchor: banners from the middle, over the
+// dimmer; the HUD from the window's top-right corner. The anchor puts it there on any
+// window, so its position, which is sim state, never depends on the window's size.
+void spawn_label(Table& labels, const Game& g, Role role, const char* str, point2 at, TextAlign align, f32 scale, i32 layer, color tint,
+                 ScreenAnchor anchor = ScreenAnchor::Center) {
     Text t;
     t.font  = g.font;
     t.scale = scale;
     t.tint  = tint;
     t.layer = layer;
-    t.space = SpriteSpace::Screen;
-    t.align = align;
+    t.space  = SpriteSpace::Screen;
+    t.anchor = anchor;
+    t.align  = align;
     text_set(t, "%s", str);
     labels.spawn(transform2_at(at), t, Label{role});
 }
@@ -202,11 +213,10 @@ void spawn_ship(TickContext& ctx, Game& g) {
 
 // Phase PreSim, on every tick, paused or not: Escape or Start toggles the pause, Q quits;
 // the demo pauses itself once, at tick 400, for 90 ticks. Pausing drops a dimmer over the
-// field: one screen-space sprite the size of the window at a layer above everything;
+// field: one screen-space sprite larger than any window at a layer above everything;
 // resuming removes it. Writes the clock through the engine API, which applies from the
 // next tick, so this tick is still whatever kind it started as.
 void pause(TickContext& ctx) {
-    static const u32 k_window = ctx.resource_id("platform_hid.window");
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     bool toggle = false;
@@ -225,9 +235,8 @@ void pause(TickContext& ctx) {
     Table* overlay = ctx.write_kind(g_overlay_kind);
     Table* labels  = ctx.write_kind(g_label_kind);
     if (!e.clock.paused) {
-        const HostWindow* w = ctx.resource<const HostWindow>(k_window);
         Sprite dim = sprite_of(g, LOOK_WHITE, 1.0f, 100, color_rgba(0.0f, 0.0f, 0.02f, 0.55f));
-        dim.size  = vec2{(f32)w->width(), (f32)w->height()};
+        dim.size  = vec2{16384.0f, 16384.0f}; // past any window: its size is sim state, the window's is not
         dim.space = SpriteSpace::Screen;
         overlay->spawn(transform2_at(point2{0, 0}), dim);
         spawn_label(*labels, g, ROLE_PAUSED, "PAUSED", point2{0, 10}, TextAlign::Center, 2.0f, 101, color_white());
@@ -290,14 +299,22 @@ void files(TickContext& ctx) {
     }
 }
 
-// Phase PostSim: the camera shakes when the ship is hit and settles. The offset is a
-// function of the tick, so it is the same every run; the camera is not sim state anyway.
+// Phase PostSim: the camera fits the field to the window, whole and centered (a window of
+// another shape shows a margin on two sides), and shakes when the ship is hit, then
+// settles. The offset is a function of the tick, so it is the same every run; the camera
+// is not sim state anyway, and this is the only place the game reads the window.
 void camera(TickContext& ctx) {
     static const u32 k_camera = ctx.resource_id("sprite.camera");
+    static const u32 k_window = ctx.resource_id("platform_hid.window");
     Game& g = ctx.state_as<Game>();
     if (ctx.events->read<ShipHit>().len) g.shake = 12.0f;
     if (ctx.events->read<GameOver>().len) g.shake = 28.0f;
     Camera2* cam = ctx.resource<Camera2>(k_camera);
+    const HostWindow* w = ctx.resource<const HostWindow>(k_window);
+    if (w->width() && w->height()) {
+        f32 zx = (f32)w->width() / kFieldW, zy = (f32)w->height() / kFieldH;
+        cam->zoom = zx < zy ? zx : zy;
+    }
     if (g.shake > 0.05f) {
         f32 t = (f32)ctx.tick;
         cam->center = point2{sinf(t * 1.7f) * g.shake, cosf(t * 2.3f) * g.shake};
@@ -389,13 +406,11 @@ void move(TickContext& ctx) {
     }
 }
 
-// Everything that left the window comes back on the other side. After move, by
+// Everything that left the field comes back on the other side. After move, by
 // declaration. A wrap is a teleport: the previous copy is written too, so the renderer
 // shows the sprite on the far side at once instead of interpolating it across the screen.
 void wrap(TickContext& ctx) {
-    static const u32 k_window = ctx.resource_id("platform_hid.window");
-    const HostWindow* w = ctx.resource<const HostWindow>(k_window);
-    f32 hw = (f32)w->width() * 0.5f + 32.0f, hh = (f32)w->height() * 0.5f + 32.0f;
+    const f32 hw = kFieldW * 0.5f + 32.0f, hh = kFieldH * 0.5f + 32.0f;
     for (KindRows k : ctx.view<Transform2, const Velocity>()) {
         Span<Transform2> t    = k.col<Transform2>();
         Span<Transform2> prev = k.prev<Transform2>();
@@ -546,12 +561,10 @@ void on_expire(TickContext& ctx, Span<const Expire> expiries) {
 
 // A wave: rocks arrive from the edges, drifting inward. By command, so no write and no order.
 void on_wave(TickContext& ctx, Span<const SpawnWave> waves) {
-    static const u32 k_window = ctx.resource_id("platform_hid.window");
     static const u32 k_score  = ctx.resource_id(".score");
     Game& g = ctx.state_as<Game>();
-    const HostWindow* w = ctx.resource<const HostWindow>(k_window);
     Score* score = ctx.resource<Score>(k_score);
-    f32 hw = (f32)w->width() * 0.5f, hh = (f32)w->height() * 0.5f;
+    const f32 hw = kFieldW * 0.5f, hh = kFieldH * 0.5f;
     for (const SpawnWave& wave : waves) {
         score->wave += 1;
         for (u32 i = 0; i < wave.count; ++i) {
@@ -606,10 +619,8 @@ void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
 // Clear the field, new ship, first wave in a second. Also how the game starts.
 void on_restart(TickContext& ctx, Span<const Restart>) {
     static const u32 k_score  = ctx.resource_id(".score");
-    static const u32 k_window = ctx.resource_id("platform_hid.window");
     Game& g = ctx.state_as<Game>();
     Score* score = ctx.resource<Score>(k_score);
-    const HostWindow* w = ctx.resource<const HostWindow>(k_window);
     const u32 kinds[] = {g_rock_kind, g_bullet_kind, g_debris_kind, g_ship_kind};
     for (u32 kid : kinds) ctx.destroy_all(kid);
     score->games += 1;
@@ -617,11 +628,11 @@ void on_restart(TickContext& ctx, Span<const Restart>) {
     score->rocks_shot = 0;
     score->wave = 0;
     // The labels are rewritten directly: the banner goes, the HUD comes back at the
-    // top-right (the top-left is the frame loop's overlay).
+    // window's top-right (the top-left is the frame loop's overlay).
     Table* labels = ctx.write_kind(g_label_kind);
     labels->destroy_all();
-    spawn_label(*labels, g, ROLE_HUD, "", point2{(f32)w->width() * 0.5f - 16.0f, (f32)w->height() * 0.5f - 16.0f - 28.0f},
-                TextAlign::Right, 1.0f, 50, color_rgba(1.0f, 1.0f, 1.0f, 0.85f));
+    spawn_label(*labels, g, ROLE_HUD, "", point2{-16.0f, -16.0f - 28.0f}, TextAlign::Right, 1.0f, 50,
+                color_rgba(1.0f, 1.0f, 1.0f, 0.85f), ScreenAnchor::TopRight);
     spawn_ship(ctx, g);
     g.next_wave = ctx.schedule_in(SpawnWave{4}, 60);
     KV_INFO("rocks", "game %u", score->games);
@@ -686,14 +697,14 @@ constinit const ResourceDesc k_resources[] = {{".score"}};
 
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".pause",   .phase = Phase::PreSim, .fn = pause, .reads = "platform_hid.window", .writes = ".overlay, .label, audio.commands", .runs = RunWhen::Always},
+    {.name = ".pause",   .phase = Phase::PreSim, .fn = pause, .writes = ".overlay, .label, audio.commands", .runs = RunWhen::Always},
     {.name = ".files",   .phase = Phase::PreSim, .fn = files, .writes = ".score", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "input.state", .writes = ".ship.Transform2, .ship.Velocity, .ship.Ship, .bullet, .flame, audio.commands", .before = ".move"},
     // move and wrap touch no module state: they share levels with whatever else is free.
     {.name = ".move",    .phase = Phase::Sim, .fn = move,    .reads = "*.Velocity",    .writes = "*.Transform2", .state = StateUse::None},
-    {.name = ".wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = "*.Velocity, platform_hid.window",    .writes = "*.Transform2", .after = ".move", .state = StateUse::None},
+    {.name = ".wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = "*.Velocity",    .writes = "*.Transform2", .after = ".move", .state = StateUse::None},
     {.name = ".game",    .phase = Phase::Sim, .fn = game,    .reads = ".score"},
-    {.name = ".camera",  .phase = Phase::PostSim, .fn = camera, .writes = "sprite.camera"},
+    {.name = ".camera",  .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera"},
     {.name = ".hud",     .phase = Phase::PostSim, .fn = hud, .reads = ".score, .label.Label", .writes = ".label.Text", .runs = RunWhen::Always},
 };
 
@@ -707,10 +718,10 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_ship_hit", KV_ON(ShipHit, on_ship_hit), .reads = ".ship.Transform2", .writes = ".ship.Health"},
     {.name = ".on_score",    KV_ON(ScoreChanged, on_score)},
     {.name = ".on_expire",   KV_ON(Expire, on_expire)},
-    {.name = ".on_wave",     KV_ON(SpawnWave, on_wave), .reads = "platform_hid.window", .writes = ".score", .after = ".on_rock_hit"},
+    {.name = ".on_wave",     KV_ON(SpawnWave, on_wave), .writes = ".score", .after = ".on_rock_hit"},
     // The score's writers in a chain: rock_hit, wave, edge, restart.
     {.name = ".on_edge",     KV_ON(StateEdge, on_edge), .writes = ".label, audio.commands, .score", .after = ".on_wave"},
-    {.name = ".on_restart",  KV_ON(Restart, on_restart), .reads = "platform_hid.window", .writes = ".score, .label", .after = ".on_edge"},
+    {.name = ".on_restart",  KV_ON(Restart, on_restart), .writes = ".score, .label", .after = ".on_edge"},
 };
 
 } // namespace

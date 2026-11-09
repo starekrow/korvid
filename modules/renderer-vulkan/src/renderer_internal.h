@@ -16,8 +16,7 @@
 #include "korvid/core/map.h"
 #include "korvid/core/pool.h"
 #include "vk_funcs.h"
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
+#include "vk_platform.h"
 
 namespace kv {
 
@@ -63,6 +62,7 @@ static_assert(sizeof(GpuSprite) == 112, "GpuSprite must match sprite_common.slan
 constexpr u32 kSpriteAlive  = 1;
 constexpr u32 kSpriteScreen = 2; // placed in window pixels through the screen view, not the camera
 constexpr u32 kSpriteSortShift = 2;   // SpriteSort in bits 2-3
+constexpr u32 kSpriteAnchorShift = 4; // a screen row's anchor: bits 4-5 x, 6-7 y; 0 center, 1 low (left, bottom), 2 high
 constexpr u32 kKeySortMax = 2048;     // visible rows of one keyed bucket the key sort orders (the rest keep row order)
 
 // One material row.
@@ -202,7 +202,8 @@ struct SpriteTables {
 struct Renderer {
     Renderer**  owner_slot = nullptr; // the module state's pointer to this; nulled on destroy
     Allocator*  general    = nullptr; // the owning module's attributed general allocator
-    SDL_Window* window     = nullptr;
+    void*       window     = nullptr; // HostWindow::native_handle()
+    char        base_path[512] = {}; // the executable's directory, where shaders/ is
     bool        validation = false;
     bool        vsync      = true;
 

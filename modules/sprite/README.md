@@ -86,7 +86,7 @@ Header `korvid/sprite/transform2.h`, `sprite.h`, `components.h`:
 |---|---|---|
 | `Transform2` | component | a `Placement2`: `position` (point2), `rotation` (f32 radians), `scale` (vec2); `CompPrev` |
 | `transform2_at(position, rotation = 0, scale = {1, 1})` | function | a constructor |
-| `Sprite` | component | `material` (Handle, null: the default), `uv` (rect2, unit by default), `size` (vec2, 64x64), `tint` (color, white), `layer` (i32, 0), `space` (`SpriteSpace::World` or `Screen`), `sort` (`SpriteSort`, `Row`), `order` (f32, 0) |
+| `Sprite` | component | `material` (Handle, null: the default), `uv` (rect2, unit by default), `size` (vec2, 64x64), `tint` (color, white), `layer` (i32, 0), `space` (`SpriteSpace::World` or `Screen`), `anchor` (`ScreenAnchor`, `Center`: where a screen sprite's position is measured from), `sort` (`SpriteSort`, `Row`), `order` (f32, 0) |
 | `transform2_schema()`, `sprite_schema()` | functions | the two `ComponentDesc`s, for comparing or printing rows |
 
 Header `korvid/sprite/camera.h`:
@@ -157,9 +157,12 @@ What the module registers with the engine:
   it orders up to 2,048 visible sprites per bucket. A layer that mixes blend modes sorts
   within each mode: keep a sorted layer to one blend. The renderer clamps layers to
   [-128, 127]; screen-space and world sprites share the order, so a HUD is a high layer.
-- **Screen space is window pixels**, origin at the window's center, +y up, whatever the
-  camera does; `size` is then in pixels. The platform's `mouse_screen` puts the pointer
-  in the same space.
+- **Screen space is window pixels**, +y up, whatever the camera does, measured from the
+  sprite's `anchor`: the window's center by default, or a corner or an edge
+  (`ScreenAnchor::TopRight` and so on), which the renderer resolves against the window's
+  size as it draws. A HUD anchored to a corner stays there on any window, and its
+  position, which is sim state, never holds the window's size. `size` is in pixels. The
+  platform's `mouse_screen` puts the pointer in the center-anchored space.
 - **The camera is read at render rate.** A camera a system moves to follow an entity
   lags it by the frame's alpha and the followed sprite jitters; set `follow` instead and
   the frame loop centers on the entity's interpolated position at the alpha the sprites

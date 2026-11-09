@@ -5,13 +5,14 @@
 #include "korvid/audio/mixer.h"
 #include "korvid/core/test.h"
 #include <math.h>
-#include <pthread.h>
+#include "korvid/core/os_thread.h"
 
 namespace {
 
 using namespace kv;
 
 bool near(f32 a, f32 b, f32 eps = 1e-3f) { return fabsf(a - b) < eps; }
+bool near(f64 a, f64 b, f64 eps = 1e-3) { return fabs(a - b) < eps; } // a voice position is f64
 
 MixCmd play_cmd(u32 slot, u32 gen, const f32* samples, u32 frames, u32 rate, u32 channels, f32 pitch = 1.0f, bool loop = false) {
     MixCmd c{};
@@ -24,10 +25,9 @@ MixCmd play_cmd(u32 slot, u32 gen, const f32* samples, u32 frames, u32 rate, u32
 u32 drain_done(Mixer& m) { u64 d; u32 n = 0; while (m.done.pop(d)) ++n; return n; }
 
 struct Hammer { SpscRing<u64, 64>* ring; u64 count; };
-void* hammer(void* user) {
+void hammer(void* user) {
     Hammer& h = *(Hammer*)user;
     for (u64 i = 1; i <= h.count;) if (h.ring->push(i)) ++i;
-    return nullptr;
 }
 
 } // namespace
@@ -168,10 +168,10 @@ void test_mixer(kv::TestCtx& c) {
     // The ring under a producer thread: every value arrives, in order, none twice.
     SpscRing<u64, 64> ring;
     Hammer h{&ring, 200000};
-    pthread_t t;
-    pthread_create(&t, nullptr, hammer, &h);
+    OsThread t;
+    KV_CHECK(c, os_thread_start(&t, hammer, &h));
     u64 expect = 1, v, bad = 0;
     while (expect <= h.count) { if (ring.pop(v)) { if (v != expect) ++bad; ++expect; } }
-    pthread_join(t, nullptr);
+    os_thread_join(&t);
     KV_CHECK(c, bad == 0 && !ring.pop(v));
 }

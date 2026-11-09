@@ -16,8 +16,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 namespace {
 
@@ -125,10 +123,10 @@ void test_tilemap_load(kv::TestCtx& c) {
     KV_CHECK(c, tilemap_get(e, bad) == nullptr);
 
     engine_shutdown(e);
-    snprintf(path, sizeof path, "%s/maps/town.tmj", root); unlink(path);
-    snprintf(path, sizeof path, "%s/maps/bad.tmj", root); unlink(path);
-    snprintf(path, sizeof path, "%s/tiles/town.tsj", root); unlink(path);
-    snprintf(path, sizeof path, "%s/maps", root); rmdir(path);
-    snprintf(path, sizeof path, "%s/tiles", root); rmdir(path);
-    rmdir(root);
+    snprintf(path, sizeof path, "%s/maps/town.tmj", root); io_remove(path);
+    snprintf(path, sizeof path, "%s/maps/bad.tmj", root); io_remove(path);
+    snprintf(path, sizeof path, "%s/tiles/town.tsj", root); io_remove(path);
+    snprintf(path, sizeof path, "%s/maps", root); io_remove(path);
+    snprintf(path, sizeof path, "%s/tiles", root); io_remove(path);
+    io_remove(root);
 }

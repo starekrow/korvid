@@ -5,6 +5,7 @@
 // build has staged it: a stream decodes, music_play starts it, the same track again is a
 // no-op, another track crossfades, and every decoder and ring is gone at the end.
 #include "korvid/audio/audio.h"
+#include "korvid/core/time.h"
 #include "korvid/core/atomic.h"
 #include "korvid/audio/module.h"
 #include "korvid/asset/module.h"
@@ -17,7 +18,6 @@
 #include "korvid/platform_audio/module.h"
 #include <math.h>
 #include <stdlib.h>
-#include <unistd.h>
 
 namespace {
 
@@ -107,11 +107,11 @@ void test_fades(kv::TestCtx& c) {
 void test_music(kv::TestCtx& c) {
     using namespace kv;
     c.begin("music");
-    setenv("SDL_AUDIO_DRIVER", "dummy", 0);
+    platform_audio_null_device(true);
     const ModuleDesc* const list[] = {&platform_module, &platform_audio_module, &asset_module, &audio_module};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    auto frames = [&](u32 n) { for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); usleep(2000); } };
+    auto frames = [&](u32 n) { for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); time_sleep(0.002); } };
     Handle scope = asset_scope_create(e, "music");
     Handle village = asset_load_stream(e, "example_arcanum/music/village.ogg", scope);
     Handle road = asset_load_stream(e, "example_arcanum/music/road.ogg", scope);

@@ -20,7 +20,10 @@ root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
 -- module that joins the list here leaves it when the roots above cover Windows too.
 root "windows" {
   modules   = { "core", "math", "inflate", "pack", "platform", "platform_hid", "cli", "tool", "tool_kpack",
-                "example_window" },
+                "render", "asset", "sprite", "scene", "text", "anim", "collision", "tilemap", "level",
+                "platform_audio", "audio", "renderer-vulkan", "frameloop",
+                "example_window", "example_testbed", "example_stones", "example_rocks", "example_arcanum",
+                "example_cpukiller" },
   tests     = true,
   platforms = { "windows" },
 }

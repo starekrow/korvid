@@ -101,7 +101,7 @@ void test_text(kv::TestCtx& c) {
     // Truncation keeps whole characters: 31 two-byte characters fill 62 of the 63 bytes,
     // and the 32nd would be cut, so it goes.
     char many[80] = {};
-    for (u32 i = 0; i < 32; ++i) { many[i * 2] = (char)0xC3; many[i * 2 + 1] = (char)0xA9; }
+    for (u32 i = 0; i < 32; ++i) { many[i * 2] = '\xC3'; many[i * 2 + 1] = '\xA9'; } // é
     text_set(t, "%s", many);
     KV_CHECK(c, strlen(t.str) == 62 && utf8_valid(t.str, strlen(t.str)));
 

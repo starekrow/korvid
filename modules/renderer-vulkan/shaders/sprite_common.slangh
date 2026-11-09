@@ -13,6 +13,7 @@ static const uint kCulled       = 0xFFFFFFFFu;
 static const uint kSpriteAlive  = 1;
 static const uint kSpriteScreen = 2; // placed through the screen view, not the camera
 static const uint kSortShift    = 2; // sort mode in bits 2-3
+static const uint kAnchorShift  = 4; // a screen row's anchor: bits 4-5 x, 6-7 y; 0 center, 1 low, 2 high
 static const uint kKeySortMax   = 2048; // rows of one keyed bucket the key sort orders
 
 struct GpuSprite {
@@ -25,7 +26,7 @@ struct GpuSprite {
     uint   material;
     uint   stamp;   // the tick of the last Set
     int    layer;
-    uint   flags;   // bit 0: alive; bit 1: screen; bits 2-3: sort mode (0 row, 1 key, 2 feet)
+    uint   flags;   // bit 0: alive; bit 1: screen; bits 2-3: sort mode (0 row, 1 key, 2 feet); bits 4-7: anchor
     float  order;   // the key, or the feet's offset below the position
     uint   pad0, pad1, pad2; // scalars: a uint3 would be 16-aligned in std430
 };
@@ -59,10 +60,19 @@ struct PushData {
 // did not move and sit at cur.
 float row_t(GpuSprite s) { return s.stamp == gPush.tick ? gPush.alpha : 1.0; }
 
-// Position, rotation and scale of a row at its interpolation point.
+// A screen row's anchor as a direction from the window's center: -1, 0 or +1 per axis.
+float2 row_anchor(GpuSprite s) {
+    uint x = (s.flags >> kAnchorShift) & 3u, y = (s.flags >> (kAnchorShift + 2u)) & 3u;
+    return float2(x == 1u ? -1.0 : x == 2u ? 1.0 : 0.0, y == 1u ? -1.0 : y == 2u ? 1.0 : 0.0);
+}
+
+// Position, rotation and scale of a row at its interpolation point. A screen row's position
+// is measured from its anchor: half the window (screen_cull.zw) toward it from the center.
+// Every pass places rows through here, so drawing, culling and sorting agree.
 void row_placement(GpuSprite s, out float2 pos, out float rot, out float2 scale) {
     float t = row_t(s);
     pos   = lerp(s.prev.xy, s.cur.xy, t);
+    if ((s.flags & kSpriteScreen) != 0) pos += row_anchor(s) * gPush.screen_cull.zw * 0.5;
     rot   = lerp(s.prev.z, s.cur.z, t);
     scale = lerp(float2(s.prev.w, s.scale_y.x), float2(s.cur.w, s.scale_y.y), t);
 }

@@ -74,14 +74,19 @@ struct Span {
 // a member function's this counts). gcc and clang check every call; MSVC has nothing
 // equivalent outside /analyze, so there it says nothing. KV_RETURN_ADDRESS(): where the
 // current function returns to, for attributing an allocation to its caller.
+// KV_CTZ64(x): the index of the lowest set bit of a nonzero u64.
 #if defined(_MSC_VER) && !defined(__clang__)
 #define KV_COMPILER_MSVC 1
 #define KV_PRINTF(f, a)
 extern "C" void* _ReturnAddress(void);
-#pragma intrinsic(_ReturnAddress)
+extern "C" unsigned char _BitScanForward64(unsigned long* index, unsigned __int64 mask);
+#pragma intrinsic(_ReturnAddress, _BitScanForward64)
 #define KV_RETURN_ADDRESS() _ReturnAddress()
+namespace kv { inline u32 ctz64(u64 x) { unsigned long i; _BitScanForward64(&i, x); return (u32)i; } }
+#define KV_CTZ64(x) ::kv::ctz64(x)
 #else
 #define KV_COMPILER_MSVC 0
 #define KV_PRINTF(f, a) __attribute__((format(printf, f, a)))
 #define KV_RETURN_ADDRESS() __builtin_return_address(0)
+#define KV_CTZ64(x) ((::kv::u32)__builtin_ctzll(x))
 #endif

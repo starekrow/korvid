@@ -12,6 +12,8 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
+#include "korvid/platform/module.h"
+#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -80,17 +82,16 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->owner_slot   = &owner->renderer;
     owner->renderer = r;
     for (FrameInFlight& f : r->frames) { f.garbage.alloc = ga; f.dirty_slots.alloc = ga; }
-    r->window      = (SDL_Window*)desc.native_window;
+    r->window      = desc.native_window;
+    if (const PlatformState* ps = engine_module_state_as<PlatformState>(engine, "platform"))
+        snprintf(r->base_path, sizeof r->base_path, "%s", ps->base_path);
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;
     r->want_width  = desc.width;
     r->want_height = desc.height;
 
     bool ok = rv_create_instance(r);
-    if (ok && !SDL_Vulkan_CreateSurface(r->window, r->instance, nullptr, &r->surface)) {
-        KV_ERROR("vulkan", "SDL_Vulkan_CreateSurface: %s", SDL_GetError());
-        ok = false;
-    }
+    if (ok && !vk_platform_create_surface(r->window, r->instance, &r->surface)) ok = false;
     ok = ok && rv_create_device(r);
     ok = ok && rv_create_frames(r);
     ok = ok && rv_create_resource_pools(r);
@@ -125,7 +126,7 @@ void renderer_destroy(Renderer* r) {
     } else {
         rv_destroy_resources(r); // pools and arrays only
     }
-    if (r->surface)   SDL_Vulkan_DestroySurface(r->instance, r->surface, nullptr);
+    if (r->surface)   vkDestroySurfaceKHR(r->instance, r->surface, nullptr);
     if (r->messenger) vkDestroyDebugUtilsMessengerEXT(r->instance, r->messenger, nullptr);
     if (r->instance)  vkDestroyInstance(r->instance, nullptr);
     KV_INFO("vulkan", "renderer down after %llu frames, %llu deltas, %llu rows uploaded, ring peak %llu KB (%u grows); %u validation errors, %u warnings",
@@ -326,7 +327,11 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
             s->gpu.tint[0] = st.tint.r; s->gpu.tint[1] = st.tint.g; s->gpu.tint[2] = st.tint.b; s->gpu.tint[3] = st.tint.a;
             s->gpu.material = material;
             s->gpu.layer    = st.layer;
-            s->gpu.flags    = kSpriteAlive | (st.space == SpriteSpace::Screen ? kSpriteScreen : 0) | ((u32)st.sort << kSpriteSortShift);
+            i32 ax = 0, ay = 0;
+            screen_anchor_dir(st.anchor, &ax, &ay);
+            u32 anchor = (u32)(ax < 0 ? 1 : ax > 0 ? 2 : 0) | (u32)(ay < 0 ? 1 : ay > 0 ? 2 : 0) << 2;
+            s->gpu.flags    = kSpriteAlive | (st.space == SpriteSpace::Screen ? kSpriteScreen : 0) | ((u32)st.sort << kSpriteSortShift) |
+                              (anchor << kSpriteAnchorShift);
             s->gpu.order    = st.order;
             bool keyed = st.sort != SpriteSort::Row;
             if (keyed != s->keyed) { if (keyed) ++r->keyed_counts[bucket]; else --r->keyed_counts[bucket]; s->keyed = keyed; }

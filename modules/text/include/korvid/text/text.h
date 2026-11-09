@@ -30,6 +30,7 @@ struct Text {
     color       tint  = color_white();
     i32         layer = 0;
     SpriteSpace space = SpriteSpace::World;
+    ScreenAnchor anchor = ScreenAnchor::Center; // Screen: the window point the position is measured from
     TextAlign   align = TextAlign::Left;
     color       shadow = color{0, 0, 0, 0};   // a drop shadow's color; alpha 0: none
     vec2        shadow_offset{2.0f, -2.0f};   // where it falls, in the label's units (pixels for screen text), +y up
@@ -37,6 +38,6 @@ struct Text {
 
 // Formats into `str`, truncating to fit at a code point boundary; returns what snprintf
 // would.
-int text_set(Text& t, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+int text_set(Text& t, const char* fmt, ...) KV_PRINTF(2, 3);
 
 } // namespace kv

@@ -60,9 +60,20 @@ module "toolchain.windows" {
                 "from https://github.com/libsdl-org/SDL/releases/tag/release-3.4.20 and unpack it into vendor/,\n" ..
                 "so that vendor/SDL3-3.4.20/include/SDL3/SDL.h exists. README.md, \"Building on Windows\", has the steps.",
     },
-    vulkan = { },                      -- the loader is found at run time; nothing to link
+    -- Vulkan: the headers from the LunarG Vulkan SDK, whose installer sets VULKAN_SDK (and
+    -- puts slangc, the shader compiler, on PATH). Nothing to link: the loader,
+    -- vulkan-1.dll, comes with the GPU driver and is opened at run time.
+    vulkan = {
+      env     = "VULKAN_SDK",
+      include = { "Include" },
+      check   = "Include/vulkan/vulkan.h",
+      fetch   = "Install the Vulkan SDK (winget install KhronosGroup.VulkanSDK, or\n" ..
+                "https://vulkan.lunarg.com/sdk/home), then open a new prompt so VULKAN_SDK and PATH are set.\n" ..
+                "README.md, \"Building on Windows\", has the steps.",
+    },
   },
   bindings  = {
+    render             = "renderer-vulkan",
     ["shader-compile"] = "slang",
   },
 }

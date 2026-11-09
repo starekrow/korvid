@@ -1,25 +1,20 @@
 // The credits screen shows everyone CREDITS.md names: every **name** on a "By" line of
 // CREDITS.md is in credits.json, and so are the lines the project requires.
 #include "korvid/core/memory.h"
+#include "korvid/platform/io.h"
 #include "korvid/core/test.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 namespace {
 
 // A staged asset of this module, beside the test executable: <exe dir>/assets/example_arcanum/<name>.
 char* slurp(const char* name) {
     char exe[512];
-    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
-    if (n <= 0) return nullptr;
-    exe[n] = 0;
-    char* slash = strrchr(exe, '/');
-    if (!slash) return nullptr;
-    *slash = 0;
+    if (!kv::platform_exe_dir(exe, sizeof exe)) return nullptr; // ends in a separator
     char path[700];
-    snprintf(path, sizeof path, "%s/assets/example_arcanum/%s", exe, name);
+    snprintf(path, sizeof path, "%sassets/example_arcanum/%s", exe, name);
     FILE* f = fopen(path, "rb");
     if (!f) return nullptr;
     fseek(f, 0, SEEK_END);

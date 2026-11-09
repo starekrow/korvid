@@ -7,7 +7,8 @@
 #include "korvid/core/log.h"
 #include "korvid/core/profile.h"
 #include "korvid/platform_audio/audio.h"
-#include <pthread.h>
+#include "korvid/core/os_thread.h"
+#include <stdlib.h>
 #include <string.h>
 
 namespace kv {
@@ -64,7 +65,7 @@ struct AudioCommands {
     VoiceRec        voices[KV_AUDIO_VOICES];
     Array<Queued>   queued;
     Array<Retiring> retiring;
-    pthread_mutex_t mu;
+    OsMutex mu;
     u32             dropped = 0;
 };
 
@@ -83,9 +84,9 @@ struct AudioState {
 AudioState* state(Engine& e) { return engine_module_state_as<AudioState>(e, "audio"); }
 
 struct Lock {
-    pthread_mutex_t& mu;
-    explicit Lock(pthread_mutex_t& m) : mu(m) { pthread_mutex_lock(&mu); }
-    ~Lock() { pthread_mutex_unlock(&mu); }
+    OsMutex& mu;
+    explicit Lock(OsMutex& m) : mu(m) { os_mutex_lock(&mu); }
+    ~Lock() { os_mutex_unlock(&mu); }
 };
 
 void* voice_resolve(kv_handle h, void* ctx) {
@@ -366,7 +367,7 @@ bool retire_samples(void* user, u64 ticket, const f32* samples) {
 bool audio_startup(Engine& e, ModuleInstance& self) {
     AudioState* s = arena_push<AudioState>(self.arena);
     if (!s) return false;
-    pthread_mutex_init(&s->cmds.mu, nullptr);
+    os_mutex_init(&s->cmds.mu);
     s->cmds.queued.alloc = &self.general;
     s->cmds.retiring.alloc = &self.general;
     s->engine  = &e;
@@ -402,7 +403,7 @@ void audio_shutdown(Engine& e, ModuleInstance& self) {
             s->mixer.stats.peak_active, s->mixer.stats.clipped, s->cmds.dropped);
     kv_handle_kind_unregister(s->kind);
     s->cmds.queued.free();
-    pthread_mutex_destroy(&s->cmds.mu);
+    os_mutex_destroy(&s->cmds.mu);
 }
 
 // /voices: the slots in use, from the game's side; /buses: the gains.

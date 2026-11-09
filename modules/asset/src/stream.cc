@@ -23,14 +23,24 @@ struct StreamDecoder {
     f32         scratch[4096]; // a decoded block before it is made stereo
 };
 
+// Vorbis comment field names are ASCII, compared without case.
+static bool field_is(const char* comment, const char* name) {
+    for (; *name; ++comment, ++name) {
+        char a = *comment, b = *name;
+        if (a >= 'a' && a <= 'z') a = (char)(a - 32);
+        if (a != b) return false;
+    }
+    return true;
+}
+
 bool stream_loop_from_comments(const char* const* comments, u32 count, u64 frames, u64* start, u64* end) {
     bool have_start = false, have_len = false, have_end = false;
     u64 s = 0, len = 0, e = 0;
     for (u32 i = 0; i < count; ++i) {
         const char* c = comments[i];
-        if (!strncasecmp(c, "LOOPSTART=", 10)) { s = strtoull(c + 10, nullptr, 10); have_start = true; }
-        else if (!strncasecmp(c, "LOOPLENGTH=", 11)) { len = strtoull(c + 11, nullptr, 10); have_len = true; }
-        else if (!strncasecmp(c, "LOOPEND=", 8)) { e = strtoull(c + 8, nullptr, 10); have_end = true; }
+        if (field_is(c, "LOOPSTART=")) { s = strtoull(c + 10, nullptr, 10); have_start = true; }
+        else if (field_is(c, "LOOPLENGTH=")) { len = strtoull(c + 11, nullptr, 10); have_len = true; }
+        else if (field_is(c, "LOOPEND=")) { e = strtoull(c + 8, nullptr, 10); have_end = true; }
     }
     *start = 0;
     *end = frames;

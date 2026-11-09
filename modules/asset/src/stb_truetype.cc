@@ -23,6 +23,10 @@ void stb_free(void* p) {
 #define STBTT_malloc(x, u) ((void)(u), stb_alloc(x))
 #define STBTT_free(x, u)   ((void)(u), stb_free(x))
 #define STB_TRUETYPE_IMPLEMENTATION
+// Vendored, not ours: its warnings are silenced for its own lines only.
+#if KV_COMPILER_MSVC
+#pragma warning(push, 0)
+#else
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -32,5 +36,10 @@ void stb_free(void* p) {
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
 #include "vendor/stb_truetype.h"
+#if KV_COMPILER_MSVC
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
+#endif

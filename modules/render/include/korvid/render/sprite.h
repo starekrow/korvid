@@ -30,9 +30,24 @@ inline bool operator==(const Placement2& a, const Placement2& b) {
 inline bool operator!=(const Placement2& a, const Placement2& b) { return !(a == b); }
 
 // Where a sprite's placement lives. World sprites go through the camera; Screen sprites
-// are in window pixels with the origin at the window's center and +y up, whatever the
-// camera does. Both sort together by layer and blend.
+// are in window pixels, +y up, whatever the camera does, measured from their anchor. Both
+// sort together by layer and blend.
 enum class SpriteSpace : u8 { World, Screen };
+
+// What a screen sprite's position is measured from: a point of the window, the center by
+// default. The renderer resolves it against the window's size when it draws, so a HUD can
+// sit in a corner of any window while its position, which is sim state, stays the same
+// numbers. World sprites ignore it.
+enum class ScreenAnchor : u8 { Center, TopLeft, Top, TopRight, Left, Right, BottomLeft, Bottom, BottomRight };
+
+// The anchor as a direction from the center: x -1 left, +1 right; y -1 bottom, +1 top.
+inline void screen_anchor_dir(ScreenAnchor a, i32* x, i32* y) {
+    static const i8 k_x[] = {0, -1, 0, 1, -1, 1, -1, 0, 1};
+    static const i8 k_y[] = {0, 1, 1, 1, 0, 0, -1, -1, -1};
+    u32 i = (u32)a < 9 ? (u32)a : 0;
+    *x = k_x[i];
+    *y = k_y[i];
+}
 
 // How a sprite sorts within its layer. Row: in row order, as sprites always have. Key: by
 // ascending `order`. Feet: by descending y of its feet, the interpolated position plus
@@ -50,6 +65,7 @@ struct RenderSpriteState {
     color       tint;      // multiplies the material's tint
     i32         layer;     // drawn in ascending order; the renderer clamps to [-128, 127]
     SpriteSpace space;
+    ScreenAnchor anchor;   // Screen: the window point the position is measured from
     SpriteSort  sort;
     f32         order;     // the key (Key), or the feet's offset below the position (Feet)
     bool        snap;      // a teleport: the renderer forgets where the sprite was and does not interpolate to here

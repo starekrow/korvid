@@ -1,5 +1,5 @@
 // Korvid renderer-vulkan: Vulkan entry points loaded at runtime through the loader that
-// SDL found, so nothing links libvulkan. VK_NO_PROTOTYPES turns the header into types
+// vk_platform_load found, so nothing links the loader. VK_NO_PROTOTYPES turns the header into types
 // only; the function names below are our own globals with the usual names.
 // This header and the sources next to it are the only place a Vulkan header is included.
 #pragma once
