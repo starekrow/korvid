@@ -13,8 +13,8 @@ int main(int argc, char** argv) {
     for (int i = 2; i < argc; ++i) {
         FILE* in = fopen(argv[i], "rb");
         if (!in) { perror(argv[i]); return 1; }
-        const char* base = strrchr(argv[i], '/');
-        base = base ? base + 1 : argv[i];
+        const char* base = argv[i];
+        for (const char* p = argv[i]; *p; ++p) if (*p == '/' || *p == '\\') base = p + 1;
         char name[128];
         snprintf(name, sizeof name, "%s", base);
         char* dot = strrchr(name, '.');

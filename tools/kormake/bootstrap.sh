@@ -16,5 +16,5 @@ luasrc=""
 for f in "$here"/vendor/lua/*.c; do
   case "$f" in */lua.c|*/luac.c) ;; *) luasrc="$luasrc $f";; esac
 done
-"$cc" -O2 -std=gnu99 -DLUA_USE_POSIX -I"$here/vendor/lua" -I"$tmp" -o "$out/kormake" "$here/src/kormake.c" $luasrc -lm
+"$cc" -O2 -std=gnu99 -DLUA_USE_POSIX -I"$here/vendor/lua" -I"$tmp" -o "$out/kormake" "$here/src/kormake.c" "$here/src/os_posix.c" $luasrc -lm
 echo "kormake: $out/kormake"

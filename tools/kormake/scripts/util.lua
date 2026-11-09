@@ -29,12 +29,36 @@ function M.join(a, b)
   return a .. "/" .. b
 end
 
+-- Absolute: "/x" on POSIX; on Windows also a drive ("C:/x", "C:\x") or a share ("//host/x").
+function M.is_abs(path)
+  local c = path:sub(1, 1)
+  return c == "/" or c == "\\" or path:match("^%a:[/\\]") ~= nil
+end
+
 function M.expand_home(path)
   if path:sub(1, 1) == "~" then
-    local home = kfs.getenv("HOME") or ""
-    return home .. path:sub(2)
+    local home = kfs.getenv("HOME") or kfs.getenv("USERPROFILE") or ""
+    return (home:gsub("\\", "/")) .. path:sub(2)
   end
   return path
+end
+
+-- One argument for the host's command shell (kfs.exec): sh on POSIX, cmd on Windows,
+-- where a path cannot hold a double quote.
+function M.shell_quote(s)
+  if KORMAKE_HOST == "windows" then return '"' .. s .. '"' end
+  return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+-- Copies the directory from into to, recursively, making directories as needed; hidden
+-- entries are skipped, as sorted_files_recursive skips them.
+function M.copy_tree(from, to)
+  kfs.mkdirp(to)
+  for _, rel in ipairs(M.sorted_files_recursive(from)) do
+    local dest = M.join(to, rel)
+    kfs.mkdirp(M.dirname(dest))
+    kfs.copy(M.join(from, rel), dest)
+  end
 end
 
 -- A glob with * and ? in the last component only, matched against a directory listing.

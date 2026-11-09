@@ -27,11 +27,13 @@ function M.run(root_dir)
   local paths = {}
   for _, p in ipairs(master.modulepaths) do paths[#paths + 1] = util.expand_home(p) end
   local envpath = kfs.getenv("KORMAKE_MODULE_PATH")
-  if envpath then for p in envpath:gmatch("[^:]+") do paths[#paths + 1] = util.expand_home(p) end end
+  -- Entries are separated as in PATH: ':' on POSIX, ';' on Windows (where ':' is a drive's).
+  local sep = KORMAKE_HOST == "windows" and ";" or ":"
+  if envpath then for p in envpath:gmatch("[^" .. sep .. "]+") do paths[#paths + 1] = util.expand_home(p) end end
 
   local modules, by_name = {}, {}
   for _, path in ipairs(paths) do
-    local full = path:sub(1, 1) == "/" and path or util.join(root_dir, path)
+    local full = util.is_abs(path) and path or util.join(root_dir, path)
     if not kfs.isdir(full) then util.fail("module path '%s' is not a directory", path) end
     local names = kfs.listdir(full)
     table.sort(names)
@@ -45,7 +47,7 @@ function M.run(root_dir)
         local override = master.overrides[decl.name]
         if override and override.path then
           -- An override names the directory that wins; other copies are ignored.
-          local want = override.path:sub(1, 1) == "/" and override.path or util.join(root_dir, override.path)
+          local want = util.is_abs(override.path) and override.path or util.join(root_dir, override.path)
           if kfs.realpath(want) ~= kfs.realpath(dir) then rec = nil end
         end
         if rec then

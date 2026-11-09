@@ -1,0 +1,4 @@
+# Files are stored and checked out byte for byte: no line-ending conversion on any host,
+# whatever core.autocrlf says. Files that need CRLF (Windows batch files) are committed
+# with CRLF.
+* -text

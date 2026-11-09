@@ -5,7 +5,7 @@ local util = kormake.load("util")
 local M = {}
 
 local function abs(root, p)
-  if p:sub(1, 1) == "/" then return p end
+  if util.is_abs(p) then return p end
   return util.join(root, p)
 end
 

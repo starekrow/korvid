@@ -1,19 +1,15 @@
 /* kormake: the host. A Lua 5.5 state, the embedded scripts, and the few things the
  * scripts need from the operating system: the file system, the environment, running a
- * command. Module files and the master file are evaluated by the scripts in a sandbox
- * that sees none of this. */
-#include <utime.h>
-#include <dirent.h>
-#include <errno.h>
+ * command. The operating system itself is behind os.h (os_posix.c, os_win32.c). Module
+ * files and the master file are evaluated by the scripts in a sandbox that sees none of
+ * this. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
+#include "os.h"
 #include "scripts.inc"
 
 #define KORMAKE_VERSION "1.0"
@@ -29,44 +25,47 @@
 #error "kormake: unknown host platform"
 #endif
 
+#define KORMAKE_PATH_MAX 4096
+
+typedef struct { lua_State* L; int n; } ListState;
+
+static void list_one(void* user, const char* name) {
+    ListState* s = (ListState*)user;
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return;
+    lua_pushstring(s->L, name);
+    lua_rawseti(s->L, -2, ++s->n);
+}
+
 static int kfs_listdir(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
-    DIR* d = opendir(path);
+    ListState s = { L, 0 };
     lua_newtable(L);
-    if (!d) return 1;
-    struct dirent* e;
-    int n = 0;
-    while ((e = readdir(d)) != 0) {
-        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
-        lua_pushstring(L, e->d_name);
-        lua_rawseti(L, -2, ++n);
-    }
-    closedir(d);
+    kos_listdir(path, list_one, &s);
     return 1;
 }
 
 static int kfs_isdir(lua_State* L) {
-    struct stat st;
-    lua_pushboolean(L, stat(luaL_checkstring(L, 1), &st) == 0 && S_ISDIR(st.st_mode));
+    KosStat st;
+    lua_pushboolean(L, kos_stat(luaL_checkstring(L, 1), &st) == 0 && st.is_dir);
     return 1;
 }
 
 static int kfs_isfile(lua_State* L) {
-    struct stat st;
-    lua_pushboolean(L, stat(luaL_checkstring(L, 1), &st) == 0 && S_ISREG(st.st_mode));
+    KosStat st;
+    lua_pushboolean(L, kos_stat(luaL_checkstring(L, 1), &st) == 0 && st.is_file);
     return 1;
 }
 
 static int kfs_mtime(lua_State* L) {
-    struct stat st;
-    if (stat(luaL_checkstring(L, 1), &st) != 0) { lua_pushnil(L); return 1; }
-    lua_pushinteger(L, (lua_Integer)st.st_mtime);
+    KosStat st;
+    if (kos_stat(luaL_checkstring(L, 1), &st) != 0) { lua_pushnil(L); return 1; }
+    lua_pushinteger(L, (lua_Integer)st.mtime);
     return 1;
 }
 
 static int kfs_read(lua_State* L) {
-    FILE* f = fopen(luaL_checkstring(L, 1), "rb");
-    if (!f) { lua_pushnil(L); lua_pushstring(L, strerror(errno)); return 2; }
+    FILE* f = kos_fopen(luaL_checkstring(L, 1), "rb");
+    if (!f) { lua_pushnil(L); lua_pushstring(L, kos_error()); return 2; }
     luaL_Buffer b;
     luaL_buffinit(L, &b);
     char chunk[4096];
@@ -86,7 +85,7 @@ static int kfs_write(lua_State* L) {
     size_t len;
     const char* text = luaL_checklstring(L, 2, &len);
     int touch = lua_toboolean(L, 3);
-    FILE* f = fopen(path, "rb");
+    FILE* f = kos_fopen(path, "rb");
     if (f) {
         fseek(f, 0, SEEK_END);
         long have = ftell(f);
@@ -99,13 +98,13 @@ static int kfs_write(lua_State* L) {
         }
         fclose(f);
         if (same) {
-            if (touch) utime(path, NULL);
+            if (touch) kos_touch(path);
             lua_pushboolean(L, 0);
             return 1;
         }
     }
-    f = fopen(path, "wb");
-    if (!f) return luaL_error(L, "cannot write '%s': %s", path, strerror(errno));
+    f = kos_fopen(path, "wb");
+    if (!f) return luaL_error(L, "cannot write '%s': %s", path, kos_error());
     fwrite(text, 1, len, f);
     fclose(f);
     lua_pushboolean(L, 1);
@@ -114,75 +113,61 @@ static int kfs_write(lua_State* L) {
 
 static int kfs_mkdirp(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
-    char buf[4096];
+    char buf[KORMAKE_PATH_MAX];
     snprintf(buf, sizeof buf, "%s", path);
     for (char* p = buf + 1; *p; ++p) {
-        if (*p != '/') continue;
+        if (!KOS_IS_SEP(*p)) continue;
+        char sep = *p;
         *p = 0;
-        if (mkdir(buf, 0775) != 0 && errno != EEXIST) return luaL_error(L, "cannot create '%s': %s", buf, strerror(errno));
-        *p = '/';
+        if (kos_mkdir(buf) != 0) return luaL_error(L, "cannot create '%s': %s", buf, kos_error());
+        *p = sep;
     }
-    if (mkdir(buf, 0775) != 0 && errno != EEXIST) return luaL_error(L, "cannot create '%s': %s", buf, strerror(errno));
+    if (kos_mkdir(buf) != 0) return luaL_error(L, "cannot create '%s': %s", buf, kos_error());
     return 0;
 }
 
-static int rmtree(const char* path) {
-    struct stat st;
-    if (lstat(path, &st) != 0) return 0;
-    if (S_ISDIR(st.st_mode)) {
-        DIR* d = opendir(path);
-        if (d) {
-            struct dirent* e;
-            while ((e = readdir(d)) != 0) {
-                if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
-                char child[4096];
-                snprintf(child, sizeof child, "%s/%s", path, e->d_name);
-                rmtree(child);
-            }
-            closedir(d);
-        }
-        return rmdir(path);
-    }
-    return unlink(path);
-}
-
 static int kfs_rmtree(lua_State* L) {
-    lua_pushboolean(L, rmtree(luaL_checkstring(L, 1)) == 0);
+    lua_pushboolean(L, kos_rmtree(luaL_checkstring(L, 1)) == 0);
     return 1;
 }
 
+/* copy(from, to): replaces to; an executable stays executable. */
+static int kfs_copy(lua_State* L) {
+    const char* from = luaL_checkstring(L, 1);
+    const char* to = luaL_checkstring(L, 2);
+    if (kos_copy(from, to) != 0) return luaL_error(L, "cannot copy '%s' to '%s': %s", from, to, kos_error());
+    return 0;
+}
+
 static int kfs_cwd(lua_State* L) {
-    char buf[4096];
-    if (!getcwd(buf, sizeof buf)) return luaL_error(L, "getcwd failed");
+    char buf[KORMAKE_PATH_MAX];
+    if (kos_cwd(buf, sizeof buf) != 0) return luaL_error(L, "cannot read the current directory: %s", kos_error());
     lua_pushstring(L, buf);
     return 1;
 }
 
 static int kfs_realpath(lua_State* L) {
-    char buf[4096];
-    if (!realpath(luaL_checkstring(L, 1), buf)) { lua_pushnil(L); return 1; }
+    char buf[KORMAKE_PATH_MAX];
+    if (kos_realpath(luaL_checkstring(L, 1), buf, sizeof buf) != 0) { lua_pushnil(L); return 1; }
     lua_pushstring(L, buf);
     return 1;
 }
 
 static int kfs_getenv(lua_State* L) {
-    const char* v = getenv(luaL_checkstring(L, 1));
-    if (v) lua_pushstring(L, v); else lua_pushnil(L);
+    char buf[32768];
+    if (kos_getenv(luaL_checkstring(L, 1), buf, sizeof buf)) lua_pushstring(L, buf); else lua_pushnil(L);
     return 1;
 }
 
 static int kfs_exec(lua_State* L) {
-    int rc = system(luaL_checkstring(L, 1));
-    lua_pushinteger(L, rc == -1 ? -1 : (rc >> 8) & 0xFF);
+    lua_pushinteger(L, kos_exec(luaL_checkstring(L, 1)));
     return 1;
 }
 
 /* The executable's own path, for the regenerate rule. */
 static int kfs_self(lua_State* L) {
-    char buf[4096];
-    ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
-    if (n < 0) { lua_pushnil(L); return 1; }
-    buf[n] = 0;
+    char buf[KORMAKE_PATH_MAX];
+    if (kos_self(buf, sizeof buf) != 0) { lua_pushnil(L); return 1; }
     lua_pushstring(L, buf);
     return 1;
 }
@@ -190,8 +175,8 @@ static int kfs_self(lua_State* L) {
 static const luaL_Reg kfs[] = {
     {"listdir", kfs_listdir}, {"isdir", kfs_isdir}, {"isfile", kfs_isfile}, {"mtime", kfs_mtime},
     {"read", kfs_read}, {"write", kfs_write}, {"mkdirp", kfs_mkdirp}, {"rmtree", kfs_rmtree},
-    {"cwd", kfs_cwd}, {"realpath", kfs_realpath}, {"getenv", kfs_getenv}, {"exec", kfs_exec},
-    {"self", kfs_self}, {0, 0}
+    {"copy", kfs_copy}, {"cwd", kfs_cwd}, {"realpath", kfs_realpath}, {"getenv", kfs_getenv},
+    {"exec", kfs_exec}, {"self", kfs_self}, {0, 0}
 };
 
 /* kormake_script(name): the embedded script's source, for the loader in main.lua. */
@@ -203,7 +188,7 @@ static int script_source(lua_State* L) {
     return 1;
 }
 
-int main(int argc, char** argv) {
+int kormake_main(int argc, char** argv) {
     lua_State* L = luaL_newstate();
     luaL_openlibs(L);
     luaL_newlib(L, kfs);

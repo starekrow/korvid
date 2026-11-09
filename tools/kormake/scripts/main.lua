@@ -37,7 +37,9 @@ local function find_root()
   while true do
     if kfs.isfile(util.join(dir, "kormake.lua")) then return dir end
     local parent = util.dirname(dir)
-    if parent == dir or parent == "" or dir == "/" then util.fail("no kormake.lua in %s or any parent", kfs.cwd()) end
+    if parent == dir or parent == "" or parent == "." or dir == "/" or dir:match("^%a:/?$") then
+      util.fail("no kormake.lua in %s or any parent", kfs.cwd())
+    end
     dir = parent
   end
 end
@@ -148,7 +150,7 @@ local function run(cmd, target, opts, rest)
   end
   if cmd == "gen" then return 0 end
   if cmd == "build" then
-    local rc = kfs.exec(string.format("ninja -C %s %s", build, table.concat(rest, " ")))
+    local rc = kfs.exec(string.format("ninja -C %s %s", util.shell_quote(build), table.concat(rest, " ")))
     return rc
   end
   if cmd == "package" then
@@ -167,24 +169,26 @@ local function run(cmd, target, opts, rest)
         if r.per == "exe" then pack = "bin/" .. r.outputs:gsub("%%{exe}", exe_file) end
       end
     end
-    local rc = kfs.exec(string.format("ninja -C '%s' 'bin/%s'%s", build, exe_file, pack and (" '" .. pack .. "'") or ""))
+    local q = util.shell_quote
+    local rc = kfs.exec(string.format("ninja -C %s %s%s", q(build), q("bin/" .. exe_file), pack and (" " .. q(pack)) or ""))
     if rc ~= 0 then return rc end
     local dist = util.join(root, "dist/" .. exe)
-    local function sh(fmt, ...) local r = kfs.exec(string.format(fmt, ...)); if r ~= 0 then util.fail("package: a copy failed") end end
-    sh("rm -rf '%s' && mkdir -p '%s/licenses'", dist, dist)
-    sh("cp '%s/bin/%s' '%s/'", build, exe_file, dist)
-    if pack then sh("cp '%s/%s' '%s/'", build, pack, dist) end
-    if kfs.isdir(util.join(build, "bin/shaders")) then sh("cp -r '%s/bin/shaders' '%s/'", build, dist) end
+    if not kfs.rmtree(dist) and kfs.isdir(dist) then util.fail("package: cannot remove %s", dist) end
+    kfs.mkdirp(util.join(dist, "licenses"))
+    local function copy_in(from, name) kfs.copy(from, util.join(dist, name or util.basename(from))) end
+    copy_in(util.join(build, "bin/" .. exe_file))
+    if pack then copy_in(util.join(build, pack)) end
+    if kfs.isdir(util.join(build, "bin/shaders")) then util.copy_tree(util.join(build, "bin/shaders"), util.join(dist, "shaders")) end
     local copied = 0
     for _, f in ipairs({ "LICENSE", "NOTICE" }) do
-      if kfs.isfile(util.join(root, f)) then sh("cp '%s' '%s/'", util.join(root, f), dist); copied = copied + 1 end
+      if kfs.isfile(util.join(root, f)) then copy_in(util.join(root, f)); copied = copied + 1 end
     end
     local mods = {}
     for _, d in ipairs(inst.closure) do mods[#mods + 1] = d end
     mods[#mods + 1] = inst
     for _, d in ipairs(mods) do
       for _, f in ipairs(util.as_list(d.module.fields.licenses or {})) do
-        sh("cp '%s' '%s/licenses/%s-%s'", util.join(d.module.dir, f), dist, d.module.name, util.basename(f))
+        copy_in(util.join(d.module.dir, f), "licenses/" .. d.module.name .. "-" .. util.basename(f))
         copied = copied + 1
       end
     end
@@ -201,7 +205,7 @@ local function run(cmd, target, opts, rest)
         targets[#targets + 1] = pre .. "test/" .. util.symbol(m) .. ".ok"
       end
     end
-    return kfs.exec(string.format("ninja -C %s %s", build, table.concat(targets, " ")))
+    return kfs.exec(string.format("ninja -C %s %s", util.shell_quote(build), table.concat(targets, " ")))
   end
   usage()
   return 2
