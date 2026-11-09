@@ -1,4 +1,5 @@
 #include "korvid/core/phase.h"
+#include "korvid/core/name.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
@@ -326,6 +327,10 @@ void ctx_spawn_component(CommandBuffer* cb, u32 component_id, const void* data, 
 }
 
 void ctx_destroy(TickContext& ctx, CommandBuffer* cb, Handle h) { command_destroy(buffer_of(ctx, cb), h); }
+
+void ctx_name(TickContext& ctx, CommandBuffer* cb, Handle h, const char* name) {
+    command_name(buffer_of(ctx, cb), h, name && name[0] ? name_intern(name).hash : 0);
+}
 
 bool ctx_cancel(TickContext& ctx, u32 ticket) { return ctx.engine->timers.cancel(ticket); }
 

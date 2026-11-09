@@ -36,6 +36,10 @@ const void* type_key() { return &TypeKey<T>::key; }
 // The C call takes a pointer; this one takes the struct you just filled in. Copied either way.
 inline u16 handle_kind_register(const kv_handle_kind_desc& desc) { return kv_handle_kind_register(&desc); }
 inline const char* kind_name(Handle h) { return kv_handle_kind_name(h.kind()); }
+// What the issuer calls a live handle (null for none), and the live handle of a kind it
+// calls `name` (null for none). See kv_handle.h.
+inline const char* handle_name(Handle h) { return kv_handle_name(h.bits); }
+inline Handle      handle_find(u16 kind, const char* name) { return Handle{kv_handle_find(kind, name)}; }
 
 // Blind: whoever issued it answers.
 inline void* resolve(Handle h) { return kv_handle_resolve(h.bits); }

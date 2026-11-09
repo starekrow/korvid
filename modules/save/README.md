@@ -75,23 +75,31 @@ builds again from its map (tiles), and not presentation (menus, labels).
 
 ## Handles
 
-A handle is written as `"kind#index:generation"`, by the kind's name. The id a kind has
-is only the order kinds registered in, which moves when a module is added; the name
-does not. On load the kind is found by name and the handle remade with today's id.
+A handle is written by its kind's name, never its id (the id is only the order kinds
+registered in, which moves when a module is added), and then:
 
-That default is right for the kinds the save restores (their slots come back exactly)
-and for anything the game makes in a fixed order at startup (materials, textures loaded
-up front). It is wrong for anything made since: a level's root entity, an asset loaded
-into a level's scope. For those the game passes a `SaveRemap`:
+- **by its name**, when the issuer names it: `"render.material@example_arcanum/actors/OldMan.png:alpha"`,
+  `"level.root@level.root"`, `"example_arcanum.npc@OldMan"`. On load the issuer finds the
+  name, so the handle means the same thing in a run that made its materials in another
+  order or built its level root afresh. A name nothing answers to now reads as null, with
+  a warning.
+- **by slot**, otherwise: `"example_arcanum.npc#3:1"`, remade with today's kind id. That
+  is right for kinds the save restores, whose slots come back exactly.
+
+Every renderer texture and material, asset record and named entity has a name (see the
+core and asset READMEs), so a game rarely needs more. For what it does, it passes a
+`SaveRemap`; it is called for every non-null handle with the default answer:
 
 ```cpp
 Handle remap(const SavedHandle& saved, Handle remade, void* user) {
-    if (!strcmp(saved.kind, "level.root")) return *(Handle*)user; // the root built for the load
+    if (saved.name && !strcmp(saved.name, "boss")) return *(Handle*)user; // the boss is someone else now
     return remade;
 }
 ```
 
-`remade` is null when no kind has the saved name now.
+Entity names travel with their rows (`"name": "old_man"`), and `load_kinds` restores every
+kind's slots and names before it reads any row, so a handle saved by name into one kind
+finds an entity of another restored by the same load.
 
 ## CBOR, later
 

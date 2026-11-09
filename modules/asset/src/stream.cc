@@ -94,6 +94,11 @@ void stream_decoder_close(StreamDecoder* d) {
 namespace {
 
 void* stream_resolve(kv_handle h, void* ctx) { return ((AssetState_*)ctx)->streams.get(Handle{h}); }
+const char* stream_name_of(kv_handle h, void* ctx) { auto* a = ((AssetState_*)ctx)->streams.get(Handle{h}); return a ? a->path : nullptr; }
+kv_handle stream_find_name(const char* name, void* ctx) {
+    const Handle* h = ((AssetState_*)ctx)->stream_by_path.find(name_lookup(name));
+    return h ? h->bits : 0;
+}
 int stream_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     StreamAsset* s = ((AssetState_*)ctx)->streams.get(Handle{h});
     if (!s) return snprintf(out, cap, "stale");
@@ -136,7 +141,7 @@ bool asset_streams_init(Engine&, AssetState_& s, ModuleInstance& self) {
     s.stream_by_path.init(&self.general);
     kv_handle_kind_desc desc{};
     desc.name = "asset.stream"; desc.type_key = type_key<StreamAsset>(); desc.ctx = &s;
-    desc.resolve = stream_resolve; desc.describe = stream_describe; desc.flags = KV_HANDLE_GENERATIONAL;
+    desc.resolve = stream_resolve; desc.name_of = stream_name_of; desc.find_name = stream_find_name; desc.describe = stream_describe; desc.flags = KV_HANDLE_GENERATIONAL;
     s.stream_kind = handle_kind_register(desc);
     if (!s.stream_kind) return false;
     s.streams.use_kind(s.stream_kind);

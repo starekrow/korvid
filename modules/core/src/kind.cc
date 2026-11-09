@@ -20,7 +20,58 @@ int table_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     return ((const Table*)ctx)->describe(Handle{h}, out, cap);
 }
 
+const char* table_name_of(kv_handle h, void* ctx) {
+    Name n = ((const Table*)ctx)->name_of(Handle{h});
+    return n.is_null() ? nullptr : name_str(n);
+}
+
+kv_handle table_find_name(const char* name, void* ctx) {
+    const Table& t = *(const Table*)ctx;
+    Name n = name_lookup(name);
+    if (n.is_null()) return 0;
+    for (u32 i = 0; i < t.names.count(); ++i)
+        if (t.sparse_live(t.names, i) && ((const Name*)t.names.at(i))->hash == n.hash) return t.handle_at(t.names.slots[i]).bits;
+    return 0;
+}
+
 } // namespace
+
+u32 SparseRows::find(u32 slot) const {
+    u32 lo = 0, hi = slots.len;
+    while (lo < hi) {
+        u32 mid = (lo + hi) / 2;
+        if (slots.data[mid] < slot) lo = mid + 1; else hi = mid;
+    }
+    return lo < slots.len && slots.data[lo] == slot ? lo : KV_POOL_NONE;
+}
+
+u8* SparseRows::insert(u32 slot, u32 gen) {
+    u32 lo = 0, hi = slots.len;
+    while (lo < hi) {
+        u32 mid = (lo + hi) / 2;
+        if (slots.data[mid] < slot) lo = mid + 1; else hi = mid;
+    }
+    if (lo == slots.len || slots.data[lo] != slot) {
+        slots.push(0); gens.push(0); data.push_n(stride);
+        u32 tail = slots.len - 1 - lo;
+        memmove(slots.data + lo + 1, slots.data + lo, (usize)tail * sizeof(u32));
+        memmove(gens.data + lo + 1, gens.data + lo, (usize)tail * sizeof(u32));
+        memmove(data.data + (usize)(lo + 1) * stride, data.data + (usize)lo * stride, (usize)tail * stride);
+        slots.data[lo] = slot;
+    }
+    gens.data[lo] = gen;
+    memset(at(lo), 0, stride);
+    return at(lo);
+}
+
+void SparseRows::erase(u32 i) {
+    KV_VERIFY(i < slots.len);
+    u32 tail = slots.len - 1 - i;
+    memmove(slots.data + i, slots.data + i + 1, (usize)tail * sizeof(u32));
+    memmove(gens.data + i, gens.data + i + 1, (usize)tail * sizeof(u32));
+    memmove(data.data + (usize)i * stride, data.data + (usize)(i + 1) * stride, (usize)tail * stride);
+    --slots.len; --gens.len; data.len -= stride;
+}
 
 bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t) {
     KV_ASSERT(!desc);
@@ -30,6 +81,7 @@ bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentD
     module = module_index;
     tag    = t;
     columns.alloc = mem_general();
+    names.stride  = sizeof(Name);
     columns.reserve(comps.len); // never grows again: resource names are pointed at
     for (const ComponentDesc* cd : comps) {
         Column c;
@@ -51,6 +103,8 @@ bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentD
     kd.ctx      = this;
     kd.resolve  = table_resolve;
     kd.describe = table_describe;
+    kd.name_of  = table_name_of;
+    kd.find_name = table_find_name;
     kd.flags    = KV_HANDLE_GENERATIONAL;
     kind = handle_kind_register(kd);
     if (!kind) return false;
@@ -67,6 +121,7 @@ void Table::free() {
         if (c.prev) { mem_account_decommit(tag, committed); os_release(c.prev, bytes); }
     }
     columns.free();
+    names.free();
     slots.free();
     *this = Table{};
 }
@@ -135,6 +190,7 @@ Handle Table::spawn() {
 bool Table::destroy(Handle h) {
     slots.owner = thread_id();
     if (!slots.destroy(h)) return false;
+    if (names.count()) sparse_dirty = true;
 #if KV_DEV
     for (Column& c : columns) {
         memset(row(c, h.index()), 0xDD, c.stride); // a stale pointer sees poison
@@ -157,6 +213,7 @@ bool Table::restore_slots(Span<const u32> gen_words, Span<const u32> free_order)
         memset(c.data, 0, (usize)gen_words.len * c.stride);
         if (c.prev) memset(c.prev, 0, (usize)gen_words.len * c.stride);
     }
+    names.clear(); // the old names go: the engine's map finds them no longer held
     return slots.restore_slots(gen_words, free_order);
 }
 
@@ -184,7 +241,25 @@ u64 Table::hash() const {
         for (const Column& c : columns)
             if (c.desc->is_sim()) h = hash_mix(h ^ component_hash(*c.desc, row(c, i)));
     }
+    // Names are the entity's: a kind with none hashes as it always did.
+    for (u32 i = 0; i < names.count(); ++i)
+        if (sparse_live(names, i)) h = hash_mix(h ^ ((u64)names.slots[i] * 0x9E3779B97F4A7C15ull) ^ ((const Name*)names.at(i))->hash);
     return h;
+}
+
+Name Table::name_of(Handle h) const {
+    if (!valid(h)) return Name{};
+    u32 i = names.find(h.index());
+    return i != KV_POOL_NONE && names.gens[i] == h.gen() ? *(const Name*)names.at(i) : Name{};
+}
+
+void Table::sweep_sparse(Array<Name>* gone) {
+    sparse_dirty = false;
+    for (u32 i = names.count(); i-- > 0;) {
+        if (sparse_live(names, i)) continue;
+        if (gone) gone->push(*(const Name*)names.at(i));
+        names.erase(i);
+    }
 }
 
 int Table::describe(Handle h, char* out, usize cap) const {

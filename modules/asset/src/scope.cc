@@ -73,6 +73,13 @@ AssetScopeProgress progress_of(AssetState_& s, const AssetScope_& sc) {
 }
 
 void* scope_resolve(kv_handle h, void* ctx) { return ((AssetState_*)ctx)->scopes.get(Handle{h}); }
+const char* scope_name_of(kv_handle h, void* ctx) { AssetScope_* sc = ((AssetState_*)ctx)->scopes.get(Handle{h}); return sc ? sc->name : nullptr; }
+kv_handle scope_find_name(const char* name, void* ctx) {
+    AssetState_& s = *(AssetState_*)ctx;
+    for (u32 i = 0; i < s.scopes.len; ++i)
+        if (s.scopes.is_alive(i) && strcmp(s.scopes.items[i].name, name) == 0) return s.scopes.handle_at(i).bits;
+    return 0;
+}
 int scope_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     AssetState_& s = *(AssetState_*)ctx;
     AssetScope_* sc = s.scopes.get(Handle{h});
@@ -101,7 +108,7 @@ bool asset_scopes_init(Engine&, AssetState_& s, ModuleInstance& self) {
     s.graves.alloc = &self.general;
     kv_handle_kind_desc desc{};
     desc.name = "asset.scope"; desc.type_key = type_key<AssetScope_>(); desc.ctx = &s;
-    desc.resolve = scope_resolve; desc.describe = scope_describe; desc.flags = KV_HANDLE_GENERATIONAL;
+    desc.resolve = scope_resolve; desc.name_of = scope_name_of; desc.find_name = scope_find_name; desc.describe = scope_describe; desc.flags = KV_HANDLE_GENERATIONAL;
     s.scope_kind = handle_kind_register(desc);
     if (!s.scope_kind) return false;
     s.scopes.use_kind(s.scope_kind);

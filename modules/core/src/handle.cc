@@ -110,6 +110,24 @@ const void* kv_handle_type_key(kv_handle h) {
     return k ? k->desc.type_key : nullptr;
 }
 
+const char* kv_handle_name(kv_handle h) {
+    const Kind* k = kind_of(h);
+    if (!k || !k->desc.name_of) return nullptr;
+    if ((k->desc.flags & KV_HANDLE_GENERATIONAL) && kv_handle_gen(h) == 0) return nullptr;
+    return k->desc.name_of(h, kv::atomic_load(&k->desc.ctx, kv::MO_ACQUIRE));
+}
+
+kv_handle kv_handle_find(uint16_t kind, const char* name) {
+    if (!name || !name[0] || kind == 0 || kind >= count()) return 0;
+    const Kind& k = g_kinds[kind];
+    if (!kv::atomic_load(&k.live, kv::MO_ACQUIRE) || !k.desc.find_name) return 0;
+    return k.desc.find_name(name, kv::atomic_load(&k.desc.ctx, kv::MO_ACQUIRE));
+}
+
+int kv_handle_kind_names(uint16_t kind) {
+    return kind != 0 && kind < count() && kv::atomic_load(&g_kinds[kind].live, kv::MO_ACQUIRE) && g_kinds[kind].desc.name_of != nullptr;
+}
+
 int kv_handle_kind_is_live(uint16_t kind) {
     return kind != 0 && kind < count() && kv::atomic_load(&g_kinds[kind].live, kv::MO_ACQUIRE);
 }

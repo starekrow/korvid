@@ -121,6 +121,11 @@ bool sound_decode(const void* bytes, usize size, Allocator* alloc, SoundAsset& o
 namespace {
 
 void* sound_resolve(kv_handle h, void* ctx) { return ((AssetState_*)ctx)->sounds.get(Handle{h}); }
+const char* sound_name_of(kv_handle h, void* ctx) { auto* a = ((AssetState_*)ctx)->sounds.get(Handle{h}); return a ? a->path : nullptr; }
+kv_handle sound_find_name(const char* name, void* ctx) {
+    const Handle* h = ((AssetState_*)ctx)->sound_by_path.find(name_lookup(name));
+    return h ? h->bits : 0;
+}
 int sound_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     SoundAsset* s = ((AssetState_*)ctx)->sounds.get(Handle{h});
     if (!s) return snprintf(out, cap, "stale");
@@ -143,7 +148,7 @@ bool asset_sounds_init(Engine&, AssetState_& s, ModuleInstance& self) {
     s.sound_by_path.init(&self.general);
     kv_handle_kind_desc desc{};
     desc.name = "asset.sound"; desc.type_key = type_key<SoundAsset>(); desc.ctx = &s;
-    desc.resolve = sound_resolve; desc.describe = sound_describe; desc.flags = KV_HANDLE_GENERATIONAL;
+    desc.resolve = sound_resolve; desc.name_of = sound_name_of; desc.find_name = sound_find_name; desc.describe = sound_describe; desc.flags = KV_HANDLE_GENERATIONAL;
     s.sound_kind = handle_kind_register(desc);
     if (!s.sound_kind) return false;
     s.sounds.use_kind(s.sound_kind);

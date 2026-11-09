@@ -176,4 +176,42 @@ void test_kinds(kv::TestCtx& c) {
     KV_CHECK(c, g1.index() == 1 && g1.gen() == 4 && g0.index() == 0 && g0.gen() == 1);
     w.free();
     engine_shutdown(f);
+
+    // Names: an anchor saved by name, found by name in a run where it sits elsewhere, and
+    // the nodes' own names back with them.
+    Engine g;
+    KV_CHECK(c, engine_init(g, list));
+    nodes = engine_table(g, "sv.node");
+    anchors = engine_table(g, "sv.anchor");
+    anchors->spawn(SPos{0, 0});
+    Handle home = anchors->spawn(SPos{5, 5}); // slot 1
+    KV_CHECK(c, engine_entity_name_set(g, home, "home"));
+    Handle a = nodes->spawn(SPos{1, 1}, SLink{home, 1});
+    Handle b = nodes->spawn(SPos{2, 2}, SLink{a, 2});
+    KV_CHECK(c, engine_entity_name_set(g, a, "first"));
+    SaveWriter w2;
+    w2.init(mem_general());
+    const char* const just_nodes[] = {"sv.node"};
+    save_kinds(w2, g, just_nodes);
+    KV_CHECK(c, w2.finish());
+    KV_CHECK(c, strstr((const char*)w2.out.data, "\"sv.anchor@home\"") && strstr((const char*)w2.out.data, "\"sv.node@first\""));
+    KV_CHECK(c, strstr((const char*)w2.out.data, "\"name\": \"first\"") != nullptr);
+    // Elsewhere now: the anchor is in slot 0 of a fresh table; the nodes come back by load.
+    anchors->destroy_all();
+    nodes->destroy_all();
+    engine_apply_commands(g);
+    Handle home2 = anchors->spawn(SPos{5, 5});
+    KV_CHECK(c, home2.index() != home.index() || home2.gen() != home.gen());
+    KV_CHECK(c, engine_entity_name_set(g, home2, "home"));
+    KV_CHECK(c, save_parse(SaveFormat::Json, w2.out.data, w2.out.len, mem_scratch(), doc));
+    KV_CHECK(c, load_kinds(doc, doc.root(), g) == 1);
+    Handle a2 = engine_entity_find(g, "first");
+    KV_CHECK(c, a2 == a && nodes->get<SLink>(a2)->to == home2);
+    KV_CHECK(c, nodes->get<SLink>(b)->to == a2); // by name within the kind too
+    SavedHandle sh;
+    char kind[48];
+    KV_CHECK(c, parse_handle("render.material@game/hero.png:alpha", &sh, kind, sizeof kind) && !strcmp(sh.kind, "render.material") && !strcmp(sh.name, "game/hero.png:alpha"));
+    KV_CHECK(c, !parse_handle("@x", &sh, kind, sizeof kind) && !parse_handle("k@", &sh, kind, sizeof kind));
+    w2.free();
+    engine_shutdown(g);
 }

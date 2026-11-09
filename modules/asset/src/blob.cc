@@ -11,6 +11,11 @@ namespace kv {
 namespace {
 
 void* blob_resolve(kv_handle h, void* ctx) { return ((AssetState_*)ctx)->blobs.get(Handle{h}); }
+const char* blob_name_of(kv_handle h, void* ctx) { auto* a = ((AssetState_*)ctx)->blobs.get(Handle{h}); return a ? a->path : nullptr; }
+kv_handle blob_find_name(const char* name, void* ctx) {
+    const Handle* h = ((AssetState_*)ctx)->blob_by_path.find(name_lookup(name));
+    return h ? h->bits : 0;
+}
 int blob_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     BlobAsset* b = ((AssetState_*)ctx)->blobs.get(Handle{h});
     if (!b) return snprintf(out, cap, "stale");
@@ -33,7 +38,7 @@ bool asset_blobs_init(Engine&, AssetState_& s, ModuleInstance& self) {
     s.blob_by_path.init(&self.general);
     kv_handle_kind_desc desc{};
     desc.name = "asset.blob"; desc.type_key = type_key<BlobAsset>(); desc.ctx = &s;
-    desc.resolve = blob_resolve; desc.describe = blob_describe; desc.flags = KV_HANDLE_GENERATIONAL;
+    desc.resolve = blob_resolve; desc.name_of = blob_name_of; desc.find_name = blob_find_name; desc.describe = blob_describe; desc.flags = KV_HANDLE_GENERATIONAL;
     s.blob_kind = handle_kind_register(desc);
     if (!s.blob_kind) return false;
     s.blobs.use_kind(s.blob_kind);

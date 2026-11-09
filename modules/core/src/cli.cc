@@ -1,4 +1,5 @@
 #include "korvid/core/cli.h"
+#include "korvid/core/engine.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +53,25 @@ namespace kv {
 
 bool cli_resolve(CliContext& ctx, const char* arg, char* out, usize cap) {
     if (cap < 2) return false;
+    // "@name[/rest]": the named entity's row under /kinds.
+    char named[KV_CLI_PATH_MAX];
+    if (arg && arg[0] == '@') {
+        const char* slash = strchr(arg, '/');
+        char name[KV_CLI_PATH_MAX];
+        usize nl = slash ? (usize)(slash - arg - 1) : strlen(arg + 1);
+        if (nl >= sizeof name) { ctx.fail("name too long"); return false; }
+        memcpy(name, arg + 1, nl);
+        name[nl] = 0;
+        Handle h = engine_entity_find(*ctx.engine, name);
+        Table* t = h.is_null() ? nullptr : engine_table_of(*ctx.engine, h);
+        if (!t) { ctx.fail("nothing is called '%s'", name); return false; }
+        char kind[KV_KIND_NAME_MAX];
+        usize i = 0;
+        for (; t->name[i] && i + 1 < sizeof kind; ++i) kind[i] = t->name[i] == '.' ? '/' : t->name[i];
+        kind[i] = 0;
+        snprintf(named, sizeof named, "/kinds/%s/%u%s", kind, h.index(), slash ? slash : "");
+        arg = named;
+    }
     const char* base = arg && arg[0] == '/' ? "" : (ctx.cwd ? ctx.cwd : "/");
     char joined[2 * KV_CLI_PATH_MAX];
     int n = snprintf(joined, sizeof joined, "%s/%s", base, arg ? arg : "");

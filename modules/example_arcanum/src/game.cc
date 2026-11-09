@@ -10,6 +10,7 @@
 #include "korvid/asset/sound.h"
 #include "korvid/asset/stream.h"
 #include "korvid/asset/font.h"
+#include "korvid/asset/material.h"
 #include "korvid/asset/texture.h"
 #include "korvid/audio/audio.h"
 #include "korvid/core/engine.h"
@@ -694,8 +695,9 @@ void hud(TickContext& ctx) {
 
 // ---- levels -------------------------------------------------------------------------------------
 
-// The saved kinds back, in place of the map's villagers and rocks. Parent links to the
-// level's old root go to the new one; everything else comes back by kind name.
+// The saved kinds back, in place of the map's villagers and rocks. Parent links name the
+// level's root ("level.root@level.root"), so they find the new one; materials name their
+// textures; the rest comes back by kind name and slot.
 void restore(TickContext& ctx, Game& g, const LevelBuild& b) {
     Engine& e = *ctx.engine;
     MemScope scope;
@@ -704,12 +706,9 @@ void restore(TickContext& ctx, Game& g, const LevelBuild& b) {
         KV_ERROR("arcanum", "load: %s at byte %u", doc.error, doc.error_at); // it parsed when it arrived
         return;
     }
-    Handle root = b.root;
-    SaveRemap remap;
-    remap.fn = [](const SavedHandle& saved, Handle remade, void* user) { return strcmp(saved.kind, "level.root") == 0 ? *(Handle*)user : remade; };
-    remap.user = &root;
+    (void)b;
     const JsonValue* kinds = json_get(doc, doc.root(), "kinds");
-    u32 n = kinds ? load_kinds(doc, *kinds, e, remap) : 0;
+    u32 n = kinds ? load_kinds(doc, *kinds, e) : 0;
     Handle player = load_handle(json_get(doc, doc.root(), "player"));
     if (!player.is_null()) g.player = player;
     g.exit_armed = json_bool(json_get(doc, doc.root(), "exit_armed"), true);
@@ -745,9 +744,11 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
         const MapObject& o = m.objects[objs->objects.first + i];
         Parent p;
         p.parent = b.root;
+        char name[64];
+        tilemap_object_name(m, o, name, sizeof name);
         if (o.point && !strcmp(o.name, "rock")) {
             point2 at_rock = tilemap_to_world(point2{0, 0}, o.x, o.y);
-            rocks->spawn(transform2_at(at_rock), local2_at(at_rock), p, rock_sprite(g, (i32)objects_layer));
+            engine_entity_name_set(*ctx.engine, rocks->spawn(transform2_at(at_rock), local2_at(at_rock), p, rock_sprite(g, (i32)objects_layer)), name);
             continue;
         }
         const MapProperty* sheet = tilemap_property(m, o.props, "sheet");
@@ -761,7 +762,7 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
             f32 x0, y0, x1, y1;
             if (sscanf(route->str, "%f,%f %f,%f", &x0, &y0, &x1, &y1) == 4) a.route = vec2{x1 - x0, -(y1 - y0)};
         }
-        npcs->spawn(transform2_at(a.home), local2_at(a.home), p, actor_sprite(g, which, (i32)objects_layer), a);
+        engine_entity_name_set(*ctx.engine, npcs->spawn(transform2_at(a.home), local2_at(a.home), p, actor_sprite(g, which, (i32)objects_layer), a), name);
     }
 }
 
@@ -858,29 +859,28 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     g->act_move = a->find("move"); g->act_confirm = a->find("confirm"); g->act_cancel = a->find("cancel"); g->act_menu = a->find("menu");
     g->demo = frameloop_flag(e, "--demo");
     Renderer* r = renderer_get(e);
+    // Materials named for their textures ("<path>:alpha"), so a save names the look it
+    // means whatever order they were made in.
+    auto material_of = [&](Handle texture) {
+        const MaterialAsset* m = asset_material(e, asset_material_for_texture(e, texture, BlendMode::Alpha, TextureFilter::Nearest, asset_scope_global(e)));
+        return m ? m->material : Handle{};
+    };
     for (u32 i = 0; i < kSheets; ++i) {
         g->sheet_texture[i] = asset_load_texture(e, k_sheet_paths[i]);
-        MaterialDesc md;
-        if (const TextureAsset* t = asset_texture(e, g->sheet_texture[i])) md.texture = t->texture;
-        md.blend = BlendMode::Alpha;
-        g->sheet_material[i] = r ? renderer_material_create(r, md) : Handle{};
+        g->sheet_material[i] = material_of(g->sheet_texture[i]);
     }
     // The rocks' sheet: the map loads it too, into the level's scope; this reference keeps
     // it for the material, which lives as long as the game.
     g->nature_texture = asset_load_texture(e, "example_arcanum/tiles/TilesetNature.png");
-    if (r) {
-        MaterialDesc md;
-        if (const TextureAsset* t = asset_texture(e, g->nature_texture)) md.texture = t->texture;
-        md.blend = BlendMode::Alpha;
-        g->rock_material = renderer_material_create(r, md);
-    }
+    g->rock_material = material_of(g->nature_texture);
     if (r) {
         TextureDesc td;
-        td.name = "arcanum.white";
+        td.name = "example_arcanum.white";
         g->white_texture = renderer_texture_create(r, td);
         const u8 white[4] = {255, 255, 255, 255};
         renderer_texture_upload(r, g->white_texture, 1, 1, white, sizeof white);
         MaterialDesc md;
+        md.name = "example_arcanum.white";
         md.texture = g->white_texture;
         g->white_material = renderer_material_create(r, md);
     }
@@ -896,6 +896,7 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     Table* players = engine_table(e, "example_arcanum.player");
     Actor pa{};
     g->player = players->spawn(transform2_at(point2{0, 0}), actor_sprite(*g, 0, 2), pa, Vitals{kHpMax, kHpMax, 0.0f});
+    engine_entity_name_set(e, g->player, "player");
     LevelConfig cfg;
     cfg.levels = k_levels;
     cfg.load = [](Engine& en, const char* map, Handle scope) { return tilemap_load(en, map, scope); };

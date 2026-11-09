@@ -2,6 +2,7 @@
 // ids, a schedule and started instances. Every check here names what clashed.
 #include "korvid/core/engine.h"
 #include "korvid/core/arena.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/job.h"
 #include "korvid/core/profile.h"
@@ -791,6 +792,7 @@ void engine_shutdown(Engine& e) {
     for (const Trigger& t : e.triggers) if (t.desc->id) *t.desc->id = 0;
     e.triggers.free();
     free_tables(e); // after every module is down: nothing holds an entity any more
+    e.entity_names.free();
     e.events.types = {};
     for (const ModuleInstance& inst : e.modules) event_types_unregister(inst.desc->events);
     event_types_unregister(k_core_events);
@@ -915,7 +917,12 @@ bool engine_rate(Engine& e, f64 rate) {
 // Records in a byte stream: a header, then for a spawn one entry per component.
 namespace {
 
-enum CommandOp : u8 { CMD_SPAWN, CMD_DESTROY, CMD_DESTROY_ALL };
+// The entity name map's lock: names are set from boundaries and from code outside the
+// schedule, looked up from anywhere.
+void names_lock(Engine& e)   { while (atomic_exchange(&e.entity_names_lock, 1u, MO_ACQUIRE)) {} }
+void names_unlock(Engine& e) { atomic_store(&e.entity_names_lock, 0u, MO_RELEASE); }
+
+enum CommandOp : u8 { CMD_SPAWN, CMD_DESTROY, CMD_DESTROY_ALL, CMD_NAME };
 
 struct CommandHeader {
     u8     op;
@@ -964,17 +971,31 @@ void command_destroy_all(CommandBuffer& cb, u32 kind_id) {
     ++cb.count;
 }
 
+void command_name(CommandBuffer& cb, Handle h, u64 name_hash) {
+    put(cb.bytes, CommandHeader{CMD_NAME, 0, 0, 0, h});
+    put(cb.bytes, name_hash);
+    ++cb.count;
+}
+
 namespace {
 
 void apply_buffer(Engine& e, CommandBuffer& cb) {
     if (cb.count == 0) return;
     const u8* p   = cb.bytes.data;
     const u8* end = p + cb.bytes.len;
+    Handle last; // the buffer's last spawn, for a name that follows it
     while (p < end) {
         const CommandHeader* h = take<CommandHeader>(p);
+        if (h->op == CMD_NAME) {
+            u64 name = *take<u64>(p);
+            Handle target = h->entity.is_null() ? last : h->entity;
+            if (!target.is_null()) engine_entity_name_set(e, target, name ? name_str(Name{name}) : nullptr);
+            continue;
+        }
         if (h->op == CMD_SPAWN) {
             Table* t = engine_table(e, h->kind);
             Handle entity = t ? t->spawn() : Handle{};
+            last = entity;
             for (u32 i = 0; i < h->components; ++i) {
                 const ComponentEntryHeader* ch = take<ComponentEntryHeader>(p);
                 const u8* data = p;
@@ -1008,6 +1029,103 @@ void engine_apply_commands(Engine& e) {
     for (u32 p = 0; p < (u32)Phase::Count; ++p)
         for (ScheduledSystem& s : e.phases.systems[p]) apply_buffer(e, s.commands);
     for (ScheduledSystem& h : e.handlers) apply_buffer(e, h.commands);
+    // Names of the dead leave the reverse map, which nothing else reads while this runs.
+    for (Table& t : e.tables) {
+        if (!t.sparse_dirty) continue;
+        MemScope scope;
+        Array<Name> gone = array_in<Name>(mem_scratch());
+        names_lock(e);
+        t.sweep_sparse(&gone);
+        for (Name n : gone) {
+            Handle* at = e.entity_names.find(n.hash);
+            if (at && engine_table_of(e, *at) == &t && t.name_of(*at) != n) e.entity_names.remove(n.hash);
+        }
+        names_unlock(e);
+    }
+}
+
+// ---- entity names ---------------------------------------------------------------------------
+
+namespace {
+
+// Whether `h` is alive and has the name `n` now.
+bool name_holds(Engine& e, Handle h, Name n) {
+    Table* t = engine_table_of(e, h);
+    return t && t->name_of(h) == n;
+}
+
+} // namespace
+
+bool engine_entity_name_set(Engine& e, Handle entity, const char* name) {
+    Table* t = engine_table_of(e, entity);
+    if (!t || !t->valid(entity)) { KV_WARN("engine", "naming a stale entity '%s'", name ? name : ""); return false; }
+    Name n = name && name[0] ? name_intern(name) : Name{};
+    names_lock(e);
+    Name old = t->name_of(entity);
+    if (!n.is_null()) {
+        Handle* at = e.entity_names.find(n.hash);
+        if (at && *at != entity && name_holds(e, *at, n)) {
+            Handle other = *at;
+            names_unlock(e);
+            char who[96];
+            kv_handle_describe(other.bits, who, sizeof who);
+            KV_WARN("engine", "name '%s' is taken by %.40s", name, who);
+            return false;
+        }
+    }
+    if (old == n) { names_unlock(e); return true; }
+    if (!old.is_null()) {
+        Handle* at = e.entity_names.find(old.hash);
+        if (at && *at == entity) e.entity_names.remove(old.hash);
+    }
+    if (n.is_null()) {
+        u32 i = t->names.find(entity.index());
+        if (i != KV_POOL_NONE) t->names.erase(i);
+    } else {
+        *(Name*)t->names.insert(entity.index(), entity.gen()) = n;
+        e.entity_names.set(n.hash, entity);
+    }
+    names_unlock(e);
+    return true;
+}
+
+Handle engine_entity_find(Engine& e, Name name) {
+    if (name.is_null()) return Handle{};
+    names_lock(e);
+    Handle* at = e.entity_names.find(name.hash);
+    Handle h = at && name_holds(e, *at, name) ? *at : Handle{};
+    names_unlock(e);
+    return h;
+}
+
+Handle engine_entity_find(Engine& e, const char* name) {
+    if (!name || !name[0]) return Handle{};
+    return engine_entity_find(e, name_lookup(name));
+}
+
+const char* engine_entity_name(Engine& e, Handle entity) {
+    Table* t = engine_table_of(e, entity);
+    if (!t) return nullptr;
+    names_lock(e);
+    Name n = t->name_of(entity);
+    names_unlock(e);
+    return n.is_null() ? nullptr : name_str(n);
+}
+
+void engine_entity_names_each(Engine& e, bool (*fn)(Handle entity, Name name, void* user), void* user) {
+    // Copied out first, so the callback may name and look up.
+    MemScope scope;
+    Array<Handle> hs = array_in<Handle>(mem_scratch());
+    Array<Name> ns = array_in<Name>(mem_scratch());
+    names_lock(e);
+    for (u32 i = 0; i < e.entity_names.len(); ++i) {
+        Handle h = e.entity_names.values[i];
+        Name n{e.entity_names.keys[i]};
+        if (name_holds(e, h, n)) { hs.push(h); ns.push(n); }
+    }
+    names_unlock(e);
+    for (u32 i = 0; i < hs.len; ++i)
+        if (!fn(hs[i], ns[i], user)) return;
 }
 
 void engine_fire_triggers(Engine& e, u64 tick) {

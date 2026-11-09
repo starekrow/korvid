@@ -300,7 +300,7 @@ bool rv_create_default_texture(Renderer* r) {
     Texture t{};
     t.width = t.height = kDefaultTexSize;
     t.format = TextureFormat::RGBA8_SRGB;
-    strncpy(t.name, "default", sizeof t.name - 1);
+    t.name = name_intern("default");
     Handle h = r->textures.create(t);
     if (h.index() != 0) { KV_ERROR("vulkan", "default texture is not slot 0"); return false; }
     Texture& slot0 = r->textures.items[0];
@@ -325,7 +325,10 @@ bool rv_create_default_texture(Renderer* r) {
     m.texture = h;
     m.blend   = BlendMode::Alpha;
     m.tint    = color_white();
+    m.name    = name_intern("default");
     r->default_material = r->materials.create(m);
+    r->texture_by_name.set(t.name.hash, h);
+    r->material_by_name.set(m.name.hash, r->default_material);
     if (r->default_material.index() != 0) { KV_ERROR("vulkan", "default material is not row 0"); return false; }
     rv_mark_material_dirty(r, 0);
     return true;
@@ -375,7 +378,7 @@ int texture_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     Renderer* r = (Renderer*)ctx;
     Texture* t = r->textures.get(Handle{h});
     if (!t) return snprintf(out, cap, "stale");
-    return snprintf(out, cap, "'%s' %ux%u slot %u %s", t->name, t->width, t->height, Handle{h}.index(),
+    return snprintf(out, cap, "'%s' %ux%u slot %u %s", name_str(t->name), t->width, t->height, Handle{h}.index(),
                     t->resident ? "resident" : "placeholder");
 }
 void* material_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->materials.get(Handle{h}); }
@@ -383,7 +386,26 @@ int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     Renderer* r = (Renderer*)ctx;
     MaterialRecord* m = r->materials.get(Handle{h});
     if (!m) return snprintf(out, cap, "stale");
-    return snprintf(out, cap, "%s texture slot %u row %u", blend_mode_name(m->blend), renderer_texture_slot(r, m->texture), Handle{h}.index());
+    return snprintf(out, cap, "'%s' %s texture slot %u row %u", name_str(m->name), blend_mode_name(m->blend), renderer_texture_slot(r, m->texture), Handle{h}.index());
+}
+
+const char* texture_name_of(kv_handle h, void* ctx) {
+    Texture* t = ((Renderer*)ctx)->textures.get(Handle{h});
+    return t ? name_str(t->name) : nullptr;
+}
+kv_handle texture_find_name(const char* name, void* ctx) {
+    Renderer* r = (Renderer*)ctx;
+    Handle* h = r->texture_by_name.find(name_lookup(name).hash);
+    return h && r->textures.valid(*h) ? h->bits : 0;
+}
+const char* material_name_of(kv_handle h, void* ctx) {
+    MaterialRecord* m = ((Renderer*)ctx)->materials.get(Handle{h});
+    return m ? name_str(m->name) : nullptr;
+}
+kv_handle material_find_name(const char* name, void* ctx) {
+    Renderer* r = (Renderer*)ctx;
+    Handle* h = r->material_by_name.find(name_lookup(name).hash);
+    return h && r->materials.valid(*h) ? h->bits : 0;
 }
 
 } // namespace
@@ -391,16 +413,20 @@ int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
 bool rv_create_resource_pools(Renderer* r) {
     kv_handle_kind_desc td{};
     td.name = "render.texture"; td.type_key = type_key<Texture>(); td.ctx = r;
-    td.resolve = texture_resolve; td.describe = texture_describe; td.flags = KV_HANDLE_GENERATIONAL;
+    td.resolve = texture_resolve; td.describe = texture_describe;
+    td.name_of = texture_name_of; td.find_name = texture_find_name; td.flags = KV_HANDLE_GENERATIONAL;
     r->texture_kind = handle_kind_register(td);
     kv_handle_kind_desc md{};
     md.name = "render.material"; md.type_key = type_key<MaterialRecord>(); md.ctx = r;
-    md.resolve = material_resolve; md.describe = material_describe; md.flags = KV_HANDLE_GENERATIONAL;
+    md.resolve = material_resolve; md.describe = material_describe;
+    md.name_of = material_name_of; md.find_name = material_find_name; md.flags = KV_HANDLE_GENERATIONAL;
     r->material_kind = handle_kind_register(md);
     if (!r->texture_kind || !r->material_kind) return false;
     r->textures.use_kind(r->texture_kind);
     r->materials.use_kind(r->material_kind);
     r->sprite_of_entity.init(r->general);
+    r->texture_by_name.init(r->general);
+    r->material_by_name.init(r->general);
     r->sprite_dirty.alloc = r->material_dirty.alloc = r->uploads.alloc = r->general;
     r->material_dirty.resize_fill((kMaxMaterials + 63) / 64, 0);
     return r->textures.init(kMaxTextures, r->general->tag) && r->materials.init(kMaxMaterials, r->general->tag) &&
@@ -622,6 +648,8 @@ void rv_destroy_resources(Renderer* r) {
     r->texture_kind = r->material_kind = 0;
     r->textures.free();
     r->materials.free();
+    r->texture_by_name.free();
+    r->material_by_name.free();
     r->sprites.free();
     r->sprite_of_entity.free();
     r->sprite_dirty.free();

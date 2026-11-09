@@ -166,6 +166,9 @@ void level_run(TickContext& ctx) {
         s.scope = s.new_scope; s.map = s.new_map;
         s.new_scope = s.new_map = Handle{};
         s.root = roots ? roots->spawn(transform2_at(point2{0.0f, 0.0f})) : Handle{};
+        // Named, so a handle to it saved by one run means the root of another (the old one
+        // is gone by now, two ticks back).
+        if (!s.root.is_null()) engine_entity_name_set(*ctx.engine, s.root, "level.root");
         s.current = s.now.level;
         LevelBuild b{s.now.level, s.root, s.map, s.scope, {}};
         utf8_copy(b.entry, sizeof b.entry, s.now.entry);

@@ -20,6 +20,8 @@ enum class TextureFilter : u8 { Nearest, Linear, Count };
 constexpr u32 KV_MATERIAL_PARAMS = 8;
 
 struct MaterialDesc {
+    const char* name = nullptr;         // what saves and tools call it; null: derived from the content
+                                        // ("material:<hash>"), the same for the same content in any run
     Handle    texture;                  // renderer texture handle; null: the default texture
     BlendMode blend = BlendMode::Alpha;
     color     tint  = color_white();

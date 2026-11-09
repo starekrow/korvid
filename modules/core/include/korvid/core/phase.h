@@ -115,6 +115,8 @@ u32  command_spawn_begin(CommandBuffer& cb, u32 kind_id, u32 component_count, u3
 void command_spawn_component(CommandBuffer& cb, u32 component_id, const void* data, u32 size);
 void command_destroy(CommandBuffer& cb, Handle h);
 void command_destroy_all(CommandBuffer& cb, u32 kind_id);
+// Names an entity at the boundary; a null entity names the last one this buffer spawned.
+void command_name(CommandBuffer& cb, Handle h, u64 name_hash);
 
 template <class T> struct RemoveConst          { typedef T type; static constexpr bool is_const = false; };
 template <class T> struct RemoveConst<const T> { typedef T type; static constexpr bool is_const = true; };
@@ -136,6 +138,7 @@ u32     ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, u32 kind_id, u32 co
 void    ctx_spawn_component(CommandBuffer* cb, u32 component_id, const void* data, u32 size);
 void    ctx_destroy(TickContext& ctx, CommandBuffer* cb, Handle h);
 void    ctx_destroy_all(TickContext& ctx, CommandBuffer* cb, u32 kind_id);
+void    ctx_name(TickContext& ctx, CommandBuffer* cb, Handle h, const char* name);
 u32     ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick);
 bool    ctx_cancel(TickContext& ctx, u32 ticket);
 
@@ -295,6 +298,15 @@ struct TickContext {
         if (ticket) (ctx_spawn_component(commands, ComponentType<C>::id, &c, (u32)sizeof(C)), ...);
         return ticket;
     }
+    // Spawn and name: the name lands with the entity (see engine_entity_name_set).
+    template <class K, class... C>
+    u32 spawn_named_later(K kind, const char* name, const C&... c) {
+        u32 ticket = spawn_later(kind, c...);
+        if (ticket) ctx_name(*this, commands, Handle{}, name);
+        return ticket;
+    }
+    // Names an entity at the phase boundary, in unit order; empty takes its name away.
+    void name_later(Handle h, const char* name) { if (!h.is_null()) ctx_name(*this, commands, h, name); }
     // Destroy at the phase boundary: readers in this phase still see the entity.
     void destroy(Handle h) { ctx_destroy(*this, commands, h); }
     // Every entity of a kind, at the phase boundary. Takes a name or a kind id.

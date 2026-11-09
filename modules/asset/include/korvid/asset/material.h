@@ -40,6 +40,13 @@ struct MaterialAsset {
 // material takes one on its texture, which therefore lives at least as long.
 Handle               asset_load_material(Engine& e, const char* path, Handle scope);
 Handle               asset_load_material(Engine& e, const char* path);
+// The material for a texture asset, with no file of its own: named "<texture path>:<blend>"
+// (":linear" added for that filter), so the renderer row has the same name in every run.
+// The same texture, blend and filter is the same record. The scope takes a reference
+// (null: the caller holds it with asset_ref); the material holds the texture. Ready when
+// the texture is.
+Handle               asset_material_for_texture(Engine& e, Handle texture_asset, BlendMode blend = BlendMode::Alpha,
+                                                TextureFilter filter = TextureFilter::Nearest, Handle scope = Handle{});
 // The record for a handle, or null if the handle is stale or not a material asset.
 const MaterialAsset* asset_material(Engine& e, Handle asset);
 // The handle a path was loaded as, or null if it never was.

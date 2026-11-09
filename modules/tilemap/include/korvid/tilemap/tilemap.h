@@ -139,6 +139,11 @@ const MapTile*     tilemap_tile_info(const TilemapAsset& m, u32 gid);
 const MapProperty* tilemap_property(const TilemapAsset& m, MapRange props, const char* name);
 const MapProperty* tilemap_map_property(const TilemapAsset& m, const char* name);
 const MapProperty* tilemap_tile_property(const TilemapAsset& m, u32 gid, const char* name);
+// A name for what a game spawns from an object: its Tiled name when no other object of the
+// map has that name, otherwise "<map stem>#<object id>" ("village#12"), which Tiled keeps
+// for the object's life. Stable across runs and edits that leave the object alone.
+// Returns what snprintf would.
+int                tilemap_object_name(const TilemapAsset& m, const MapObject& o, char* out, usize cap);
 bool               tilemap_cell_of(const TilemapAsset& m, point2 origin, point2 world, i32* x, i32* y);
 point2             tilemap_cell_center(const TilemapAsset& m, point2 origin, i32 x, i32 y);
 point2             tilemap_to_world(point2 origin, f32 map_x, f32 map_y);

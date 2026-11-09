@@ -107,6 +107,14 @@ What the module registers with the engine:
 | `tilemap.tile` | kind, cosmetic | `Transform2`, `Sprite`; 262,144 rows of address space |
 | `tilemap.pump` | system, PreSim, main thread, `Always`, after the asset pumps | writes `tilemap.tile` |
 
+## Naming what you spawn
+
+`tilemap_object_name(map, object, out, cap)` gives an object a name for the entity a game
+spawns from it: its Tiled name when it is the only object with that name, otherwise
+`<map stem>#<object id>` (`village#12`), which Tiled keeps for the object's life. Pass it
+to `engine_entity_name_set` and saves, the CLI (`print @village#12`) and per-level state
+can find the entity again.
+
 ## Behaviour worth knowing
 
 - **Paths resolve against the file that names them.** A map's tileset `"../tiles/a.tsj"`

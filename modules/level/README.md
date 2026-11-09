@@ -61,6 +61,9 @@ Load anything else the level needs into its scope in a `LevelLoading` handler
 (`asset_load_texture(e, path, l.scope)`): the module waits for those too. Entities that
 outlive levels (the player, the HUD) are not children of the root.
 
+The root is named `level.root`, so a save that holds a `Parent` pointing at it writes
+`"level.root@level.root"` and a load finds whatever root the rebuild made; no remap.
+
 From the CLI: `level list`, `level load <name>`, `level reload`. Edit a map, save it,
 `level reload`: the map and everything in its scope come from disk again.
 

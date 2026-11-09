@@ -62,6 +62,11 @@ int material_format(const MaterialDesc& desc, const char* texture_path, char* ou
 namespace {
 
 void* material_resolve(kv_handle h, void* ctx) { return ((AssetState_*)ctx)->materials.get(Handle{h}); }
+const char* material_name_of(kv_handle h, void* ctx) { auto* a = ((AssetState_*)ctx)->materials.get(Handle{h}); return a ? a->path : nullptr; }
+kv_handle material_find_name(const char* name, void* ctx) {
+    const Handle* h = ((AssetState_*)ctx)->material_by_path.find(name_lookup(name));
+    return h ? h->bits : 0;
+}
 int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     MaterialAsset* m = ((AssetState_*)ctx)->materials.get(Handle{h});
     if (!m) return snprintf(out, cap, "stale");
@@ -101,7 +106,7 @@ bool asset_materials_init(Engine&, AssetState_& s, ModuleInstance& self) {
     s.material_by_path.init(&self.general);
     kv_handle_kind_desc desc{};
     desc.name = "asset.material"; desc.type_key = type_key<MaterialAsset>(); desc.ctx = &s;
-    desc.resolve = material_resolve; desc.describe = material_describe; desc.flags = KV_HANDLE_GENERATIONAL;
+    desc.resolve = material_resolve; desc.name_of = material_name_of; desc.find_name = material_find_name; desc.describe = material_describe; desc.flags = KV_HANDLE_GENERATIONAL;
     s.material_kind = handle_kind_register(desc);
     if (!s.material_kind) return false;
     s.materials.use_kind(s.material_kind);
@@ -202,7 +207,9 @@ Handle material_load(Engine& e, AssetState_& st, const char* path) {
     MaterialAsset m{};
     strncpy(m.path, path, sizeof m.path - 1);
     m.state    = AssetState::Pending;
-    m.material = renderer_material_create(r, m.desc); // the placeholder look, until the file says otherwise
+    MaterialDesc first = m.desc;
+    first.name = path; // the renderer's row is called what the file is
+    m.material = renderer_material_create(r, first); // the placeholder look, until the file says otherwise
     if (m.material.is_null()) return Handle{};
     Handle h = s->materials.create(m);
     if (h.is_null()) { renderer_material_destroy(r, m.material); return Handle{}; }
@@ -217,6 +224,32 @@ Handle material_load(Engine& e, AssetState_& st, const char* path) {
     if (iq.is_null()) { fail_material(e, *s, h, *rec, AssetError::Read, "could not submit"); return h; }
     rec->io = iq;
     return h;
+}
+
+Handle asset_material_for_texture(Engine& e, Handle texture_asset, BlendMode blend, TextureFilter filter, Handle scope) {
+    AssetState_* s = asset_state(e);
+    Renderer* r = renderer_get(e);
+    const TextureAsset* t = s ? asset_texture(e, texture_asset) : nullptr;
+    if (!t || !r) { KV_ERROR("asset", "asset_material_for_texture: %s", !t ? "not a texture asset" : "no renderer"); return Handle{}; }
+    char path[KV_ASSET_PATH_MAX];
+    int n = snprintf(path, sizeof path, "%s:%s%s", t->path, blend_mode_name(blend), filter == TextureFilter::Linear ? ":linear" : "");
+    if (n < 0 || (usize)n >= sizeof path) { KV_ERROR("asset", "material name too long for '%s'", t->path); return Handle{}; }
+    Name name = name_intern(path);
+    if (const Handle* existing = s->material_by_path.find(name)) return asset_hold(*s, scope, *existing);
+    MaterialAsset m{};
+    utf8_copy(m.path, sizeof m.path, path);
+    m.state = AssetState::Pending; // Ready with its texture, in the pump
+    m.desc.blend  = blend;
+    m.desc.filter = filter;
+    MaterialDesc first = m.desc;
+    first.name = path;
+    m.material = renderer_material_create(r, first);
+    if (m.material.is_null()) return Handle{};
+    Handle h = s->materials.create(m);
+    if (h.is_null()) { renderer_material_destroy(r, m.material); return Handle{}; }
+    s->material_by_path.set(name, h);
+    bind_texture(e, *s, *s->materials.get(h), t->path); // holds the texture, points the row at it
+    return asset_hold(*s, scope, h);
 }
 
 const MaterialAsset* asset_material(Engine& e, Handle asset) {

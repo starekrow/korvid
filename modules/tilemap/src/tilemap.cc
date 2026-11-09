@@ -403,4 +403,18 @@ u32 tilemap_instance_rows(Engine& e, Handle instance) {
     return in ? in->row_count : 0;
 }
 
+int tilemap_object_name(const TilemapAsset& m, const MapObject& o, char* out, usize cap) {
+    if (o.name && o.name[0]) {
+        u32 same = 0;
+        for (u32 i = 0; i < m.object_count; ++i)
+            if (m.objects[i].name && !strcmp(m.objects[i].name, o.name)) ++same;
+        if (same == 1) return snprintf(out, cap, "%s", o.name);
+    }
+    const char* stem = strrchr(m.path, '/');
+    stem = stem ? stem + 1 : m.path;
+    const char* dot = strrchr(stem, '.');
+    int len = dot ? (int)(dot - stem) : (int)strlen(stem);
+    return snprintf(out, cap, "%.*s#%u", len, stem, o.id);
+}
+
 } // namespace kv

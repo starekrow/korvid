@@ -25,6 +25,7 @@ void test_pause(kv::TestCtx&);
 void test_qualify(kv::TestCtx&);
 void test_utf8(kv::TestCtx&);
 void test_hash(kv::TestCtx&);
+void test_entity_name(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
@@ -40,6 +41,7 @@ int main() {
     test_kind(c);
     test_hash(c);
     test_context(c);
+    test_entity_name(c);
     test_schedule(c);
     test_handler(c);
     test_trigger(c);

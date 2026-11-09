@@ -101,13 +101,29 @@ void save_handle(SaveWriter& w, Handle h) {
         w.null_value();
         return;
     }
-    char text[64];
-    int n = snprintf(text, sizeof text, "%s#%u:%u", kind, h.index(), h.gen());
-    w.string_value(text, (u32)(n < (int)sizeof text ? n : (int)sizeof text - 1));
+    // A handle its issuer names is written by the name, which means the same thing in a
+    // run that made things in another order; the rest by slot and generation.
+    char text[KV_SAVE_HANDLE_MAX];
+    const char* name = kv_handle_name(h.bits);
+    int n = name ? snprintf(text, sizeof text, "%s@%s", kind, name) : snprintf(text, sizeof text, "%s#%u:%u", kind, h.index(), h.gen());
+    if (n >= (int)sizeof text) {
+        KV_WARN("save", "handle name '%s' is too long to save; written by slot", name ? name : "");
+        n = snprintf(text, sizeof text, "%s#%u:%u", kind, h.index(), h.gen());
+    }
+    w.string_value(text, (u32)n);
 }
 
 bool parse_handle(const char* text, SavedHandle* out, char* kind, u32 cap) {
     if (!text || !cap) return false;
+    // "kind@name": the kind ends at the first '@' (kind names have none; names may).
+    if (const char* at = strchr(text, '@')) {
+        if (at == text || !at[1] || (u32)(at - text) >= cap) return false;
+        memcpy(kind, text, (usize)(at - text));
+        kind[at - text] = 0;
+        out->kind = kind; out->name = at + 1; out->index = 0; out->gen = 0;
+        return true;
+    }
+    out->name = nullptr;
     const char* hash = strrchr(text, '#');
     if (!hash || hash == text || (u32)(hash - text) >= cap) return false;
     u64 index = 0, gen = 0;
@@ -134,9 +150,12 @@ Handle load_handle(const JsonValue* v, const SaveRemap& remap) {
         return Handle{};
     }
     u16 id = kv_handle_kind_find(kind);
-    Handle remade = id ? Handle::make(id, saved.gen, saved.index) : Handle{};
+    Handle remade;
+    if (saved.name) remade = id ? handle_find(id, saved.name) : Handle{};
+    else remade = id ? Handle::make(id, saved.gen, saved.index) : Handle{};
     if (remap.fn) return remap.fn(saved, remade, remap.user);
     if (!id) KV_WARN("save", "no kind '%s' now; '%s' read as null", kind, v->str);
+    else if (remade.is_null()) KV_WARN("save", "nothing is called '%s' now; read as null", v->str);
     return remade;
 }
 
@@ -211,6 +230,8 @@ void save_kind(SaveWriter& w, const Table& t) {
         w.begin_object();
         w.key("slot"); w.uint_value(i);
         w.key("gen");  w.uint_value(t.handle_at(i).gen());
+        Name name = t.name_of(t.handle_at(i));
+        if (!name.is_null()) { w.key("name"); w.string_value(name_str(name)); }
         for (const Column& c : t.columns) {
             w.key(c.desc->name);
             save_fields(w, c.desc->fields, c.data + (usize)i * c.stride);
@@ -221,7 +242,12 @@ void save_kind(SaveWriter& w, const Table& t) {
     w.end_object();
 }
 
-bool load_kind(const JsonDoc& doc, const JsonValue& v, Table& t, const SaveRemap& remap) {
+namespace {
+
+// A load's first half: the slots exactly as saved, and their names (with an engine to name
+// them in). Every kind of a load gets this before any row is read, so a handle written by
+// name into one kind's row finds an entity of another.
+bool restore_kind_slots(const JsonDoc& doc, const JsonValue& v, Table& t, Engine* e) {
     auto fail = [&](const char* why) {
         KV_ERROR("save", "kind '%s': %s", t.name, why);
         t.restore_slots(Span<const u32>(), Span<const u32>());
@@ -265,8 +291,21 @@ bool load_kind(const JsonDoc& doc, const JsonValue& v, Table& t, const SaveRemap
     gens.free();
     order.free();
     if (!ok) return fail("a slot is named twice or has a bad generation");
+    if (e) {
+        for (const JsonValue* r = rows ? json_first(doc, *rows) : nullptr; r; r = json_next(doc, *r)) {
+            const char* name = json_string(json_get(doc, *r, "name"), "");
+            if (!name[0]) continue;
+            u32 s = (u32)slot_of(json_get(doc, *r, "slot"));
+            engine_entity_name_set(*e, t.handle_at(s), name);
+        }
+    }
+    return true;
+}
 
-    // Then the rows, component by component; a component the file lacks stays zero.
+// The second half: the rows, component by component; a component the file lacks stays zero.
+void fill_kind_rows(const JsonDoc& doc, const JsonValue& v, Table& t, const SaveRemap& remap) {
+    const JsonValue* rows = json_get(doc, v, "rows");
+    auto slot_of = [](const JsonValue* s) { return s && s->is_number() && s->number >= 0.0 ? json_u64(s, 0) : ~0ull; };
     for (const JsonValue* r = rows ? json_first(doc, *rows) : nullptr; r; r = json_next(doc, *r)) {
         u32 s = (u32)slot_of(json_get(doc, *r, "slot"));
         for (Column& c : t.columns) {
@@ -278,6 +317,13 @@ bool load_kind(const JsonDoc& doc, const JsonValue& v, Table& t, const SaveRemap
             if (c.prev) memcpy(c.prev + (usize)s * c.stride, row, c.stride);
         }
     }
+}
+
+} // namespace
+
+bool load_kind(const JsonDoc& doc, const JsonValue& v, Table& t, const SaveRemap& remap, Engine* e) {
+    if (!restore_kind_slots(doc, v, t, e)) return false;
+    fill_kind_rows(doc, v, t, remap);
     return true;
 }
 
@@ -295,11 +341,15 @@ void save_kinds(SaveWriter& w, Engine& e, Span<const char* const> kinds) {
 u32 load_kinds(const JsonDoc& doc, const JsonValue& obj, Engine& e, const SaveRemap& remap) {
     if (!obj.is_object()) return 0;
     u32 loaded = 0;
+    MemScope scope;
+    Array<Table*> ok = array_in<Table*>(mem_scratch());
+    Array<const JsonValue*> vals = array_in<const JsonValue*>(mem_scratch());
     for (const JsonValue* k = json_first(doc, obj); k; k = json_next(doc, *k)) {
         Table* t = engine_table(e, k->key);
         if (!t) { KV_WARN("save", "the save has a kind '%s' this build does not; skipped", k->key); continue; }
-        if (load_kind(doc, *k, *t, remap)) ++loaded;
+        if (restore_kind_slots(doc, *k, *t, &e)) { ok.push(t); vals.push(k); }
     }
+    for (u32 i = 0; i < ok.len; ++i) { fill_kind_rows(doc, *vals[i], *ok[i], remap); ++loaded; }
     return loaded;
 }
 

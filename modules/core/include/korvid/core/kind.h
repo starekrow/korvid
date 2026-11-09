@@ -17,6 +17,7 @@
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/component.h"
+#include "korvid/core/name.h"
 #include "korvid/core/pool.h"
 
 namespace kv {
@@ -40,6 +41,29 @@ struct Column {
     char                 resource_name[2 * KV_KIND_NAME_MAX + 2];
 };
 
+// What some entities of a kind have and the rest do not: their names, their attachments,
+// their property bags. Entries by slot, ascending, each with the generation of the entity
+// it was made for, so an entry can outlive its entity only as a stale one: readers skip it
+// (Table::sparse_live) and the engine sweeps it at the next phase boundary. Lookups are a
+// binary search; inserts and erases move the tail, which is fine for data that only some
+// entities carry and that changes a few times a tick.
+struct SparseRows {
+    Array<u32> slots;  // ascending
+    Array<u32> gens;
+    Array<u8>  data;   // stride bytes per entry
+    u32        stride = 0;
+
+    u32       count() const { return slots.len; }
+    u32       find(u32 slot) const;                // the entry's index, or KV_POOL_NONE
+    u8*       at(u32 i) { return data.data + (usize)i * stride; }
+    const u8* at(u32 i) const { return data.data + (usize)i * stride; }
+    // The entry for `slot`, zeroed and stamped with `gen`: made, or reset if one is there.
+    u8*       insert(u32 slot, u32 gen);
+    void      erase(u32 i);
+    void      clear() { slots.clear(); gens.clear(); data.clear(); }
+    void      free() { slots.free(); gens.free(); data.free(); }
+};
+
 struct Table {
     const KindDesc* desc     = nullptr;
     const char*     name     = nullptr; // the kind's full name: desc->name with the module prefix expanded
@@ -51,6 +75,8 @@ struct Table {
     Array<Column>   columns;      // in the kind's declared order
     u32             committed_rows = 0;
     MemTag          tag;
+    SparseRows      names;        // entity names (Name), by slot; the engine keeps the reverse map
+    bool            sparse_dirty = false; // an entity with sparse rows died: the engine sweeps at the boundary
 
     // Reserves the columns and registers the handle kind. `comps` is in declared order;
     // `full_name` is the kind's name with its module prefix expanded (interned, stable).
@@ -69,6 +95,13 @@ struct Table {
     u32  destroy_all();
 
     bool   valid(Handle h) const { return slots.valid(h); }
+    // Whether entry i of `s` belongs to the entity living in its slot now.
+    bool   sparse_live(const SparseRows& s, u32 i) const { return is_alive(s.slots[i]) && handle_at(s.slots[i]).gen() == s.gens[i]; }
+    // The entity's name; null for none or a stale handle.
+    Name   name_of(Handle h) const;
+    // Drops every entry of the sparse rows whose entity has died. Returns the names dropped
+    // into `gone` (for the engine's reverse map), if given.
+    void   sweep_sparse(Array<Name>* gone);
     u32    live() const { return slots.live; }
     u32    rows() const { return slots.capacity(); } // high-water slot count; iterate with is_alive
     bool   is_alive(u32 i) const { return slots.is_alive(i); }

@@ -165,6 +165,8 @@ void test_heap(kv::TestCtx& c) {
     KV_CHECK(c, blobs->live() == 0 && !blobs->spawn(Blob{}).is_null()); // room again: the pages stay committed
     engine_shutdown(e);
     KV_CHECK(c, mem_heap_used(small) == 0);
+    // What is live now includes the process's name table, which the engine's names grew.
+    u32 live_after_engine = mem_stats().live_allocs;
 #if KV_DEV
     KV_CHECK(c, mem_stats_category(blobs->tag.category).committed_bytes == 0);
 #endif
@@ -175,5 +177,5 @@ void test_heap(kv::TestCtx& c) {
     Engine f;
     KV_CHECK(c, !engine_init(f, list, bad1));
     KV_CHECK(c, !engine_init(f, list, bad2));
-    KV_CHECK(c, mem_stats().live_allocs == base.live_allocs);
+    KV_CHECK(c, mem_stats().live_allocs == live_after_engine);
 }

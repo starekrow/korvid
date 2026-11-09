@@ -8,6 +8,7 @@
 // engine holds the handles; the only inputs are deltas, uploads and material edits.
 // See renderer_internal.h for how the source is split.
 #include "renderer_internal.h"
+#include "korvid/core/hash.h"
 #include "korvid/renderer-vulkan/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/profile.h"
@@ -155,15 +156,36 @@ RenderCaps renderer_caps(const Renderer*) {
     return c;
 }
 
+namespace {
+
+// A name whose holder died goes to the next live record with the same name, if any.
+template <class T>
+void rename_after_destroy(Pool<T>& pool, Map<u64, Handle>& by_name, Name name, Handle gone) {
+    Handle* at = by_name.find(name.hash);
+    if (!at || *at != gone) return;
+    for (u32 i = 0; i < pool.len; ++i)
+        if (pool.is_alive(i) && pool.items[i].name == name) { *at = pool.handle_at(i); return; }
+    by_name.remove(name.hash);
+}
+
+} // namespace
+
 // ---- textures -------------------------------------------------------------------------------
 
 Handle renderer_texture_create(Renderer* r, const TextureDesc& desc) {
     if (!r || (u32)desc.format >= (u32)TextureFormat::Count) return Handle{};
     Texture t{};
     t.format = desc.format;
-    strncpy(t.name, desc.name ? desc.name : "", sizeof t.name - 1);
+    ++r->textures_made;
+    if (desc.name && desc.name[0]) t.name = name_intern(desc.name);
+    else {
+        char derived[32];
+        snprintf(derived, sizeof derived, "texture:%u", r->textures_made);
+        t.name = name_intern(derived);
+    }
     Handle h = r->textures.create(t);
     if (h.is_null()) { KV_ERROR("vulkan", "out of texture slots (%u)", kMaxTextures); return h; }
+    r->texture_by_name.get_or_insert(t.name.hash, h); // the first live one keeps the name
     rv_mark_slot_dirty(r, h.index()); // shows the default until the upload lands
     return h;
 }
@@ -173,7 +195,7 @@ bool renderer_texture_upload(Renderer* r, Handle texture, u32 width, u32 height,
     if (!t || texture.index() == 0 || !pixels) return false;
     if (width == 0 || height == 0 || width > 16384 || height > 16384 || bytes != (usize)width * height * 4) {
         KV_ERROR("vulkan", "texture '%s': %ux%u with %llu bytes is not a tightly packed RGBA8 image",
-                 t->name, width, height, (unsigned long long)bytes);
+                 name_str(t->name), width, height, (unsigned long long)bytes);
         return false;
     }
     t->width  = width;
@@ -189,7 +211,9 @@ void renderer_texture_destroy(Renderer* r, Handle texture) {
     if (!t || texture.index() == 0) return; // the default stays
     rv_defer_destroy_texture(r, *t);
     u32 slot = texture.index();
+    Name name = t->name;
     r->textures.destroy(texture);
+    rename_after_destroy(r->textures, r->texture_by_name, name, texture);
     rv_mark_slot_dirty(r, slot); // back to the default, in each set once its frame has passed
 }
 
@@ -200,6 +224,19 @@ u32 renderer_texture_slot(const Renderer* r, Handle texture) {
 // ---- materials ------------------------------------------------------------------------------
 
 namespace {
+
+// What an unnamed material is: its texture's name and everything it draws with, hashed.
+// The same content made in any order gets the same name.
+Name derived_material_name(const Renderer* r, const MaterialRecord& m) {
+    const Texture* t = r->textures.get(m.texture);
+    u64 h = hash_mix(0x6d6174657269616cull ^ (t ? t->name.hash : 0));
+    h = hash_mix(h ^ (u64)m.blend ^ ((u64)m.filter << 8));
+    h = hash_mix(h ^ hash_bytes(&m.tint, sizeof m.tint));
+    h = hash_mix(h ^ hash_bytes(m.params, sizeof m.params));
+    char text[32];
+    snprintf(text, sizeof text, "material:%016llx", (unsigned long long)h);
+    return name_intern(text);
+}
 
 void fill_material(MaterialRecord& m, const MaterialDesc& desc) {
     m.texture = desc.texture;
@@ -215,8 +252,18 @@ Handle renderer_material_create(Renderer* r, const MaterialDesc& desc) {
     if (!r) return Handle{};
     MaterialRecord m{};
     fill_material(m, desc);
+    if (desc.name && desc.name[0]) m.name = name_intern(desc.name);
+    else {
+        m.name = derived_material_name(r, m);
+#if KV_DEV
+        bool inserted = false;
+        r->material_by_name.get_or_insert(m.name.hash, Handle{}, &inserted);
+        if (inserted) { r->material_by_name.remove(m.name.hash); KV_INFO("vulkan", "material named %s by its content", name_str(m.name)); }
+#endif
+    }
     Handle h = r->materials.create(m);
     if (h.is_null()) { KV_ERROR("vulkan", "out of materials (%u)", kMaxMaterials); return h; }
+    r->material_by_name.get_or_insert(m.name.hash, h);
     rv_mark_material_dirty(r, h.index());
     return h;
 }
@@ -236,7 +283,9 @@ bool renderer_material_get(const Renderer* r, Handle material, MaterialDesc* out
     if (!m || !out) return false;
     out->texture = m->texture;
     out->blend   = m->blend;
+    out->filter  = m->filter;
     out->tint    = m->tint;
+    out->name    = name_str(m->name);
     for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) out->params[i] = m->params[i];
     return true;
 }
@@ -244,7 +293,9 @@ bool renderer_material_get(const Renderer* r, Handle material, MaterialDesc* out
 void renderer_material_destroy(Renderer* r, Handle material) {
     if (!r || material == r->default_material || !r->materials.valid(material)) return;
     u32 row = material.index();
+    Name name = r->materials.get(material)->name;
     r->materials.destroy(material);
+    rename_after_destroy(r->materials, r->material_by_name, name, material);
     rv_rebind_material(r, row);      // its sprites fall back to the default
     rv_mark_material_dirty(r, row);  // the row is rewritten as a copy of the default
 }

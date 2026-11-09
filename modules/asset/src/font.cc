@@ -21,6 +21,17 @@ namespace kv {
 namespace {
 
 void* font_resolve(kv_handle h, void* ctx) { return ((AssetState_*)ctx)->fonts.get(Handle{h}); }
+// A font's name is its key, "path@px" (and the set's hash when it is not the default).
+const char* font_name_of(kv_handle h, void* ctx) {
+    AssetState_& s = *(AssetState_*)ctx;
+    for (u32 i = 0; i < s.font_by_key.len(); ++i)
+        if (s.font_by_key.values[i].bits == h) return name_str(s.font_by_key.keys[i]);
+    return nullptr;
+}
+kv_handle font_find_name(const char* name, void* ctx) {
+    const Handle* h = ((AssetState_*)ctx)->font_by_key.find(name_lookup(name));
+    return h ? h->bits : 0;
+}
 int font_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     FontAsset* f = ((AssetState_*)ctx)->fonts.get(Handle{h});
     if (!f) return snprintf(out, cap, "stale");
@@ -210,7 +221,7 @@ bool asset_fonts_init(Engine&, AssetState_& s, ModuleInstance& self) {
     s.font_by_key.init(&self.general);
     kv_handle_kind_desc desc{};
     desc.name = "asset.font"; desc.type_key = type_key<FontAsset>(); desc.ctx = &s;
-    desc.resolve = font_resolve; desc.describe = font_describe; desc.flags = KV_HANDLE_GENERATIONAL;
+    desc.resolve = font_resolve; desc.name_of = font_name_of; desc.find_name = font_find_name; desc.describe = font_describe; desc.flags = KV_HANDLE_GENERATIONAL;
     s.font_kind = handle_kind_register(desc);
     if (!s.font_kind) return false;
     s.fonts.use_kind(s.font_kind);
@@ -345,6 +356,9 @@ Handle font_load(Engine& e, AssetState_& st, const char* path, const FontDesc& d
     md.texture = f.texture;
     md.blend   = BlendMode::Alpha;
     md.filter  = TextureFilter::Linear; // glyphs are drawn at any scale
+    char material_name[KV_ASSET_PATH_MAX + 48];
+    snprintf(material_name, sizeof material_name, "font:%s", key);
+    md.name    = material_name;
     f.material = renderer_material_create(r, md);
     if (f.material.is_null()) { renderer_texture_destroy(r, f.texture); return Handle{}; }
     f.ranges = (FontRange*)alloc_in(s->general, sizeof(FontRange) * m);

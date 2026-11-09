@@ -14,6 +14,7 @@
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"
+#include "korvid/core/name.h"
 #include "korvid/core/pool.h"
 #include "vk_funcs.h"
 #include "vk_platform.h"
@@ -110,7 +111,7 @@ struct Texture {
     u32            width  = 0, height = 0;
     TextureFormat  format = TextureFormat::RGBA8_SRGB;
     bool           resident = false;
-    char           name[32];
+    Name           name;   // TextureDesc::name, or "texture:<n>"
 };
 
 // A material: what the API was told, kept so a row can be rewritten when the texture it
@@ -121,6 +122,7 @@ struct MaterialRecord {
     TextureFilter filter;
     color     tint;
     f32       params[KV_MATERIAL_PARAMS];
+    Name      name;   // MaterialDesc::name, or derived from the content at creation
 };
 
 // A sprite in the render world. The GPU row, plus what the GPU does not need.
@@ -244,6 +246,9 @@ struct Renderer {
     // and the slot is the GPU row.
     Pool<RenderSprite>   sprites;
     Map<Handle, u32>     sprite_of_entity;
+    Map<u64, Handle>     texture_by_name;  // Name::hash -> the first live texture with the name
+    Map<u64, Handle>     material_by_name;
+    u32                  textures_made = 0;
     Array<u64>           sprite_dirty;   // bit per slot: row to upload
     Array<u64>           material_dirty; // bit per row
     u32                  bucket_counts[kBucketCount] = {};

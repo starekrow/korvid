@@ -66,6 +66,18 @@ A sound's samples are the exception to "at once": the audio module may still be 
 them on the device thread, so they are handed to it and freed when the mixer says every
 voice on them has stopped.
 
+## Names
+
+Every record is named, so a save or a tool can say what it means: a file's record by its
+path, a font by `path@px`, a scope by its name. The renderer objects the module makes
+carry the same names: a texture asset's renderer texture is called its path, a material
+file's row its path, a font's atlas material `font:<path>@<px>`.
+`asset_material_for_texture(e, texture, blend, filter, scope)` makes the material a sprite
+needs for a texture asset without a file, named `<path>:<blend>` (`:linear` added for that
+filter), held by the scope and holding the texture; the same texture and look is the
+same record. A renderer material made by hand with no `MaterialDesc::name` is named by its
+content (`material:<hash>`), the same for the same content in any order.
+
 From the CLI: `ls /scopes`, `print /scopes/<n>-<name>` (members, state, references),
 `scope create <name>`, `scope load <scope> <path>` and `scope release <name>`.
 

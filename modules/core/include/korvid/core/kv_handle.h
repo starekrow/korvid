@@ -41,6 +41,11 @@ typedef struct kv_handle_kind_desc {
     void* (*resolve)(kv_handle h, void* ctx);                             /* NULL: stale, dead, foreign */
     int   (*describe)(kv_handle h, void* ctx, char* out, size_t cap);     /* optional; returns chars written */
     uint32_t flags;
+    /* Optional: what the issuer calls a live handle (NULL: no name, or not live), and the
+     * live handle it calls `name` (0: none). Names are stable across runs where ids are not:
+     * a save writes a named handle by its name. Lookups are for loading and tools. */
+    const char* (*name_of)(kv_handle h, void* ctx);
+    kv_handle   (*find_name)(const char* name, void* ctx);
 } kv_handle_kind_desc;
 
 static inline kv_handle kv_handle_make(uint16_t kind, uint32_t gen, uint32_t index) {
@@ -71,6 +76,12 @@ uint64_t    kv_handle_kind_name_hash(uint16_t kind);
  * several are; 0 for none. Not fast: for loading a save, not for a tick. */
 uint16_t    kv_handle_kind_find(const char* name);
 const void* kv_handle_type_key(kv_handle h);    /* NULL for unknown */
+/* The issuer's name for a live handle; NULL when it has none or does not name handles. */
+const char* kv_handle_name(kv_handle h);
+/* The live handle of `kind` its issuer calls `name`; 0 for none. */
+kv_handle   kv_handle_find(uint16_t kind, const char* name);
+/* Whether the kind's issuer names its handles. */
+int         kv_handle_kind_names(uint16_t kind);
 int         kv_handle_kind_is_live(uint16_t kind);
 uint32_t    kv_handle_kind_count(void);         /* highest id ever assigned + 1 */
 /* "name#index:gen" plus the issuer's text; returns chars written, 0 if cap is 0. */

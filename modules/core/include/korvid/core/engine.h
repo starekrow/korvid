@@ -3,6 +3,7 @@
 // builds the schedule, and starts the modules in order; engine_shutdown undoes it all.
 #pragma once
 #include "korvid/core/event.h"
+#include "korvid/core/map.h"
 #include "korvid/core/module.h"
 #include "korvid/core/phase.h"
 #include "korvid/core/tick.h"
@@ -127,6 +128,8 @@ struct Engine {
     bool                  hash_ticks       = false; // log the state hash after every tick
     bool                  hash_systems     = false; // and after every system, to locate drift
     u64                   last_hash        = 0;     // the state hash after the last tick, when hashing
+    Map<u64, Handle>      entity_names;              // Name::hash -> the entity that has it (or had: checked against the table)
+    u32                   entity_names_lock = 0;     // a spin lock: names change outside the schedule and at boundaries
 };
 
 // The name language of the registration tables. A name starting with '.' means
@@ -207,6 +210,23 @@ Phase engine_system_phase(const Engine& e, const char* name);
 // The hash of every sim column of every live entity, fixed across runs and platforms and
 // whatever order the kinds registered in (tables by name, handles in fields by kind name).
 u64   engine_hash_state(const Engine& e);
+
+// Entity names. A name is unique among living entities across every kind, and belongs to
+// its entity: hashed with its kind, saved and restored with it, gone when it dies. Names
+// are for scripts, tools and saves, a few lookups a tick: the map is behind a lock.
+//   engine_entity_name_set   names an entity now. For code outside the schedule (startup,
+//                            the CLI, a load) or a main-thread unit; a system names with
+//                            ctx.name_later, which lands at the boundary in unit order.
+//                            False, logged, for a stale handle or a name a living entity
+//                            has; an empty or null name takes the entity's name away.
+//   engine_entity_find       the living entity with the name, or null; any thread, any time.
+//   engine_entity_name       the entity's name, or null.
+bool        engine_entity_name_set(Engine& e, Handle entity, const char* name);
+Handle      engine_entity_find(Engine& e, const char* name);
+Handle      engine_entity_find(Engine& e, Name name);
+const char* engine_entity_name(Engine& e, Handle entity);
+// Every living named entity, in no particular order; fn returns false to stop.
+void        engine_entity_names_each(Engine& e, bool (*fn)(Handle entity, Name name, void* user), void* user);
 
 // Entity kinds, by name or id. Null for unknown.
 u32    engine_kind_id(const Engine& e, const char* name);

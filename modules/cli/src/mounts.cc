@@ -514,9 +514,41 @@ bool perf_describe(CliContext& ctx, const char* rel) {
     return false;
 }
 
+// ---- /names --------------------------------------------------------------------------------
+// /names/<name>   a named entity: where it is under /kinds, and its describe.
+
+struct NameList { CliEmitFn emit; void* user; Engine* e; bool more; };
+
+void names_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
+    if (dir[0]) return;
+    NameList nl{emit, user, ctx.engine, true};
+    engine_entity_names_each(*ctx.engine, [](Handle h, Name n, void* u) {
+        NameList& l = *(NameList*)u;
+        Table* t = engine_table_of(*l.e, h);
+        char summary[96];
+        snprintf(summary, sizeof summary, "%s/%u", t ? t->name : "?", h.index());
+        l.more = l.emit(l.user, name_str(n), summary);
+        return l.more;
+    }, &nl);
+}
+
+bool names_describe(CliContext& ctx, const char* rel) {
+    if (!rel[0]) return false;
+    Handle h = engine_entity_find(*ctx.engine, rel);
+    Table* t = h.is_null() ? nullptr : engine_table_of(*ctx.engine, h);
+    if (!t) return false;
+    char text[512];
+    t->describe(h, text, sizeof text);
+    char kind[KV_KIND_NAME_MAX];
+    cli_dots_to_slashes(t->name, kind, sizeof kind);
+    ctx.print("@%s: /kinds/%s/%u %s", rel, kind, h.index(), text);
+    return true;
+}
+
 } // namespace
 
-const CliMountDesc k_engine_mounts[10] = {
+const CliMountDesc k_engine_mounts[11] = {
+    {.path = "/names",     .list = names_list,     .describe = names_describe},
     {.path = "/kinds",     .list = kinds_list,     .describe = kinds_describe, .patch = kinds_patch},
     {.path = "/systems",   .list = systems_list,   .describe = systems_describe},
     {.path = "/handlers",  .list = handlers_list,  .describe = handlers_describe},

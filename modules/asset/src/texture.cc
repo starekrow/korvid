@@ -16,6 +16,11 @@ AssetState_* asset_state(Engine& e) { return engine_module_state_as<AssetState_>
 namespace {
 
 void* asset_resolve(kv_handle h, void* ctx) { return ((AssetState_*)ctx)->textures.get(Handle{h}); }
+const char* asset_name_of(kv_handle h, void* ctx) { auto* a = ((AssetState_*)ctx)->textures.get(Handle{h}); return a ? a->path : nullptr; }
+kv_handle asset_find_name(const char* name, void* ctx) {
+    const Handle* h = ((AssetState_*)ctx)->by_path.find(name_lookup(name));
+    return h ? h->bits : 0;
+}
 int asset_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     TextureAsset* t = ((AssetState_*)ctx)->textures.get(Handle{h});
     if (!t) return snprintf(out, cap, "stale");
@@ -80,7 +85,7 @@ bool asset_startup(Engine& e, ModuleInstance& self) {
     s->by_path.init(&self.general);
     kv_handle_kind_desc desc{};
     desc.name = "asset.texture"; desc.type_key = type_key<TextureAsset>(); desc.ctx = s;
-    desc.resolve = asset_resolve; desc.describe = asset_describe; desc.flags = KV_HANDLE_GENERATIONAL;
+    desc.resolve = asset_resolve; desc.name_of = asset_name_of; desc.find_name = asset_find_name; desc.describe = asset_describe; desc.flags = KV_HANDLE_GENERATIONAL;
     s->kind = handle_kind_register(desc);
     if (!s->kind) return false;
     s->textures.use_kind(s->kind);
