@@ -1,0 +1,74 @@
+{
+  "design": [1280, 720],
+  "pixel": false,
+  "actions": { "move": "move", "confirm": "confirm", "cancel": "cancel" },
+  "style": {
+    "font": "example_arcfire/font/PublicPixel.ttf",
+    "size": 16,
+    "line": 24,
+    "space": 16,
+    "shadow": "#00000090",
+    "colors": {
+      "text": "#e8ecff",
+      "gold": "#ffd060",
+      "dim": "#8890b8",
+      "cyan": "#80e0ff",
+      "panel": "#0a0c18ff",
+      "edge": "#262c58ff",
+      "shade": "#00000aa0",
+      "black": "#000000ff"
+    },
+    "images": {
+      "egg": { "texture": "example_arcfire/made/eggs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 }
+    }
+  },
+  "screens": {
+    "hud": {
+      "type": "box", "name": "root", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "left", "fill": "panel", "anchor": "center", "pivot": "right", "offset": [-270, 0], "size": [1400, "fill"],
+          "children": [
+            { "type": "panel", "name": "edge", "fill": "edge", "anchor": "right", "size": [3, "fill"] },
+            { "type": "stack", "name": "info", "anchor": "topright", "offset": [-32, 48], "gap": 12, "align": "end",
+              "children": [
+                { "type": "label", "name": "score_title", "text": "SCORE", "color": "dim" },
+                { "type": "label", "name": "score", "text": "{=score}", "color": "gold", "font_scale": 2 },
+                { "type": "box", "name": "gap1", "size": [8, 16] },
+                { "type": "label", "name": "eggs_title", "text": "EGGS", "color": "dim" },
+                { "type": "meter", "name": "eggs", "image": "egg", "value": "=eggs", "max": "=eggs_max", "gap": 6 },
+                { "type": "box", "name": "gap2", "size": [8, 16] },
+                { "type": "label", "name": "restarts", "text": "RESTARTS {=restarts}", "color": "dim" },
+                { "type": "label", "name": "grazes", "text": "GRAZE {=grazes}", "color": "cyan" } ] } ] },
+        { "type": "panel", "name": "right", "fill": "panel", "anchor": "center", "pivot": "left", "offset": [270, 0], "size": [1400, "fill"],
+          "children": [
+            { "type": "panel", "name": "edge", "fill": "edge", "anchor": "left", "size": [3, "fill"] },
+            { "type": "stack", "name": "info", "anchor": "topleft", "offset": [32, 48], "gap": 12,
+              "children": [
+                { "type": "label", "name": "stage", "text": "{=stage}", "color": "gold" },
+                { "type": "label", "name": "distance", "text": "{=distance}", "color": "dim" } ] },
+            { "type": "stack", "name": "dev", "anchor": "bottomleft", "offset": [32, -40], "gap": 8, "visible": false,
+              "children": [
+                { "type": "label", "name": "sprites", "text": "SPRITES {=sprites}", "color": "dim" },
+                { "type": "label", "name": "bullets", "text": "BULLETS {=bullets}", "color": "dim" },
+                { "type": "label", "name": "deltas", "text": "DELTAS {=deltas}", "color": "dim" },
+                { "type": "label", "name": "pairs", "text": "PAIRS {=pairs}", "color": "dim" } ] } ] } ] },
+    "pause": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 24, "align": "center",
+          "children": [
+            { "type": "label", "name": "title", "text": "PAUSED", "color": "gold", "font_scale": 3 },
+            { "type": "label", "name": "hint", "text": "Escape or Start resumes, Q quits", "color": "dim" } ] } ] },
+    "cover": {
+      "type": "box", "name": "cover", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "black", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 20, "align": "center",
+          "children": [
+            { "type": "label", "name": "title", "text": "OUT OF EGGS", "color": "gold", "font_scale": 2 },
+            { "type": "label", "name": "hint", "text": "The stage begins again", "color": "dim" } ] } ] },
+    "clear": {
+      "type": "label", "name": "clear", "anchor": "center", "offset": [0, -80], "text": "{wave}STAGE CLEAR{/wave}", "color": "gold", "font_scale": 3 }
+  }
+}
