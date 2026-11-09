@@ -10,6 +10,8 @@
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
 #include "korvid/sprite/module.h"
+#include "korvid/anim/module.h"
+#include "korvid/scene/module.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 #include "fixtures.h"
@@ -36,8 +38,11 @@ void sys_spawn(TickContext& ctx) {
     if (g_want.despawn) { tilemap_despawn(ctx, g_want.instance); g_want.despawn = false; }
 }
 
-constinit const KindDesc k_kinds[] = {{.name = ".owner", .components = "Transform2", .capacity = 4}};
-constinit const SystemDesc k_systems[] = {{.name = ".spawn", .phase = Phase::Sim, .fn = sys_spawn, .writes = "tilemap.tile", .main_thread = true}};
+constinit const KindDesc k_kinds[] = {
+    {.name = ".owner", .components = "Transform2", .capacity = 4},
+    {.name = ".child", .components = "Transform2, Local2, Parent", .capacity = 1}, // what the scene and anim modules need to see
+};
+constinit const SystemDesc k_systems[] = {{.name = ".spawn", .phase = Phase::Sim, .fn = sys_spawn, .writes = "tilemap.tile, tilemap.animtile", .main_thread = true}};
 KV_MODULE_DEFINE(k_tt) = {.name = "tt", .kinds = k_kinds, .systems = k_systems};
 
 bool put(const char* path, const char* text) {
@@ -52,7 +57,7 @@ bool put(const char* path, const char* text) {
 void test_tilemap_load(kv::TestCtx& c) {
     using namespace kv;
     c.begin("tilemap load");
-    const ModuleDesc* const list[] = {&platform_module, &asset_module, &sprite_module, &tilemap_module, &k_tt};
+    const ModuleDesc* const list[] = {&platform_module, &asset_module, &sprite_module, &scene_module, &anim_module, &tilemap_module, &k_tt};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     char root[512], path[600];
@@ -85,7 +90,18 @@ void test_tilemap_load(kv::TestCtx& c) {
     frames(1);
     KV_CHECK(c, !g_want.instance.is_null() && tilemap_instance_rows(e, g_want.instance) == 18);
     Table* tiles = engine_table(e, "tilemap.tile");
-    KV_CHECK(c, tiles && tiles->live() == 18);
+    Table* anims = engine_table(e, "tilemap.animtile");
+    u32 animated = anims->live();
+    KV_CHECK(c, tiles && animated > 0 && tiles->live() + animated == 18);
+    // The animated tile (local 10, frames 10 and 11 at 250 ms) plays its map's clip.
+    u32 tile_gid = m->tilesets[0].first_gid + 10;
+    char want[64];
+    snprintf(want, sizeof want, "tilemap_test/maps/town.tmj#tile%u", tile_gid);
+    Handle clip = anim_find(e, want);
+    const AnimClip* ac = anim_clip(e, clip);
+    KV_CHECK(c, ac && ac->state == AssetState::Ready && ac->duration == 0.5f && ac->keys.len == 2 && ac->loop == AnimLoop::Loop);
+    for (u32 i = 0; i < anims->rows(); ++i)
+        if (anims->is_alive(i)) KV_CHECK(c, anims->rows_of<AnimPlayer>()[i].clip == clip);
     // Layer order and placement: the ground's first cell at layer 10, its center 8 px in.
     bool found = false;
     for (u32 i = 0; i < tiles->rows(); ++i) {
@@ -99,16 +115,17 @@ void test_tilemap_load(kv::TestCtx& c) {
     // The owner dies: the rows go with it at the next pump.
     owners->destroy(g_want.owner);
     frames(1);
-    KV_CHECK(c, tiles->live() == 0 && tilemap_instance_rows(e, g_want.instance) == 0);
+    KV_CHECK(c, tiles->live() == 0 && anims->live() == 0 && tilemap_instance_rows(e, g_want.instance) == 0);
 
     // A second instance, then the scope goes: the map retires, its instance with it.
     g_want.owner = Handle{};
     g_want.spawn = true;
     frames(1);
-    KV_CHECK(c, tiles->live() == 18);
+    KV_CHECK(c, tiles->live() + anims->live() == 18);
     asset_scope_release(e, scope);
     frames(2);
-    KV_CHECK(c, tilemap_get(e, map) == nullptr && tiles->live() == 0);
+    KV_CHECK(c, tilemap_get(e, map) == nullptr && tiles->live() == 0 && anims->live() == 0);
+    KV_CHECK(c, anim_clip(e, clip) == nullptr); // the map held its tiles' clips
     KV_CHECK(c, asset_lifetime_stats(e).dying == 0);
 
     // A map that does not parse fails with its reason.

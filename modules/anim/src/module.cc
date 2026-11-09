@@ -1,4 +1,6 @@
-#include "korvid/anim/module.h"
+#include "anim_internal.h"
+#include "korvid/asset/scope.h"
+#include "korvid/core/hash.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"
@@ -15,22 +17,49 @@
 
 namespace kv {
 
-u32 anim_channel_lanes(AnimChannel c); // clip.cc
+AnimState_* anim_state(Engine& e) { return engine_module_state_as<AnimState_>(e, "anim"); }
 
 namespace {
 
-struct AnimState_ {
-    Pool<AnimClip>    clips;
-    Map<Name, Handle> by_path;
-    Allocator*        general = nullptr;
-    u16               kind = 0;
-    u32               loaded = 0, failed = 0, created = 0;
-    AnimStats         stats;
-};
-
-AnimState_* state(Engine& e) { return engine_module_state_as<AnimState_>(e, "anim"); }
+AnimState_* state(Engine& e) { return anim_state(e); }
 
 void* clip_resolve(kv_handle h, void* ctx) { return ((AnimState_*)ctx)->clips.get(Handle{h}); }
+const char* clip_name_of(kv_handle h, void* ctx) { AnimClip* c = ((AnimState_*)ctx)->clips.get(Handle{h}); return c ? c->path : nullptr; }
+kv_handle clip_find_name(const char* name, void* ctx) {
+    const Handle* h = ((AnimState_*)ctx)->by_path.find(name_lookup(name));
+    return h ? h->bits : 0;
+}
+
+// What a clip with no name is called: its content, hashed, so the same clip made in any
+// order has the same name.
+void derive_name(AnimClip& c) {
+    u64 h = hash_mix(0x636c6970ull ^ (u64)c.loop ^ ((u64)c.tracks.len << 8));
+    h = hash_mix(h ^ hash_bytes(&c.duration, sizeof c.duration));
+    for (const AnimTrack& t : c.tracks) h = hash_mix(h ^ (u64)t.channel ^ ((u64)t.interp << 8) ^ ((u64)t.count << 16));
+    for (const AnimKey& k : c.keys) h = hash_mix(h ^ hash_bytes(&k.time, sizeof k.time) ^ hash_bytes(k.v, sizeof k.v) * 31 ^ k.event.hash);
+    snprintf(c.path, sizeof c.path, "clip:%016llx", (unsigned long long)h);
+}
+
+// The asset module's view of a clip: its count, state, size and name; retirement frees it.
+u32* clip_refs(void* user, Handle h) { AnimClip* c = ((AnimState_*)user)->clips.get(h); return c ? &c->refs : nullptr; }
+AssetState clip_state(void* user, Handle h) { AnimClip* c = ((AnimState_*)user)->clips.get(h); return c ? c->state : AssetState::Failed; }
+u64 clip_bytes(void* user, Handle h) {
+    AnimClip* c = ((AnimState_*)user)->clips.get(h);
+    return c ? (u64)c->keys.cap * sizeof(AnimKey) + (u64)c->tracks.cap * sizeof(AnimTrack) : 0;
+}
+const char* clip_path(void* user, Handle h) { AnimClip* c = ((AnimState_*)user)->clips.get(h); return c ? c->path : ""; }
+void clip_retire(Engine& e, void* user, Handle h) {
+    AnimState_& s = *(AnimState_*)user;
+    AnimClip* c = s.clips.get(h);
+    if (!c) return;
+    IoQueue* io = platform_io(e);
+    if (io && !c->io.is_null()) io->cancel(c->io);
+    Name n = name_lookup(c->path);
+    if (const Handle* at = s.by_path.find(n); at && *at == h) s.by_path.remove(n);
+    c->tracks.free();
+    c->keys.free();
+    s.clips.destroy(h);
+}
 int clip_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     AnimClip* c = ((AnimState_*)ctx)->clips.get(Handle{h});
     if (!c) return snprintf(out, cap, "stale");
@@ -47,10 +76,12 @@ void fail_clip(Engine& e, AnimState_& s, Handle h, AnimClip& c, AssetError err, 
     e.events.emit(AssetFailed{h, err});
 }
 
-// Phase PreSim, main thread: clip files that arrived are parsed.
+// Phase PreSim, main thread: clip files that arrived are parsed, sheets whose texture
+// arrived are built.
 void anim_pump(TickContext& ctx) {
     AnimState_& s = ctx.state_as<AnimState_>();
     Engine& e = *ctx.engine;
+    anim_sheets_pump(e, s);
     IoQueue* io = platform_io(e);
     if (!io) return;
     for (u32 i = 0; i < io->completions().len;) {
@@ -78,8 +109,10 @@ void anim_pump(TickContext& ctx) {
         }
         char path[KV_ASSET_PATH_MAX];
         memcpy(path, clip->path, sizeof path);
+        u32 refs = clip->refs;
         *clip = parsed;
         memcpy(clip->path, path, sizeof path);
+        clip->refs = refs;
         ++s.loaded;
         KV_INFO("anim", "clip '%s' ready: %.3fs %s, %u tracks, %u keys", clip->path, clip->duration, anim_loop_name(clip->loop), clip->tracks.len, clip->keys.len);
         e.events.emit(AssetReady{h});
@@ -203,7 +236,7 @@ void anim_play_system(TickContext& ctx) {
     st.stats = s;
 }
 
-bool anim_startup(Engine&, ModuleInstance& self) {
+bool anim_startup(Engine& e, ModuleInstance& self) {
     AnimState_* s = arena_push<AnimState_>(self.arena);
     if (!s) return false;
     s->general = &self.general;
@@ -211,10 +244,15 @@ bool anim_startup(Engine&, ModuleInstance& self) {
     kv_handle_kind_desc desc{};
     desc.name = "anim.clip"; desc.type_key = type_key<AnimClip>(); desc.ctx = s;
     desc.resolve = clip_resolve; desc.describe = clip_describe; desc.flags = KV_HANDLE_GENERATIONAL;
+    desc.name_of = clip_name_of; desc.find_name = clip_find_name;
     s->kind = handle_kind_register(desc);
     if (!s->kind) return false;
     s->clips.use_kind(s->kind);
     if (!s->clips.init(4096, self.general.tag)) return false;
+    AssetKindDesc k;
+    k.kind = s->kind; k.refs = clip_refs; k.state = clip_state; k.bytes = clip_bytes; k.path = clip_path; k.retire = clip_retire; k.user = s;
+    if (!asset_kind_register(e, k)) return false;
+    if (!anim_sheets_init(e, *s, &self.general, self.general.tag)) return false;
     self.set_state(s);
     return true;
 }
@@ -222,6 +260,8 @@ bool anim_startup(Engine&, ModuleInstance& self) {
 void anim_shutdown(Engine& e, ModuleInstance& self) {
     AnimState_* s = self.state_as<AnimState_>();
     if (!s) return;
+    anim_sheets_shutdown(e, *s);
+    asset_kind_unregister(e, s->kind);
     IoQueue* io = platform_io(e);
     for (u32 i = 0; i < s->clips.len; ++i) {
         if (!s->clips.is_alive(i)) continue;
@@ -303,13 +343,32 @@ KV_MODULE_DEFINE(anim_module) = {
     .memory     = {.reserve = 64 * 1024},
 };
 
-Handle anim_load(Engine& e, const char* path) {
+Handle anim_load(Engine& e, const char* path) { return anim_load(e, path, asset_scope_global(e)); }
+Handle anim_create(Engine& e, const AnimClipDesc& desc) { return anim_create(e, desc, asset_scope_global(e)); }
+
+Handle anim_find(Engine& e, const char* name) {
+    AnimState_* s = state(e);
+    const Handle* h = s && name ? s->by_path.find(name_lookup(name)) : nullptr;
+    return h && s->clips.valid(*h) ? *h : Handle{};
+}
+
+namespace {
+
+// The scope's reference, as every load takes one; a null scope leaves it to the caller.
+Handle held(Engine& e, Handle scope, Handle h) {
+    if (!h.is_null() && !scope.is_null() && !asset_scope_add(e, scope, h)) KV_WARN("anim", "clip '%s': the scope is stale", anim_clip(e, h)->path);
+    return h;
+}
+
+} // namespace
+
+Handle anim_load(Engine& e, const char* path, Handle scope) {
     AnimState_* s = state(e);
     IoQueue* io = platform_io(e);
     if (!s || !io || !path) { KV_ERROR("anim", "cannot load '%s': anim and platform must be up", path ? path : "?"); return Handle{}; }
     if (strlen(path) >= KV_ASSET_PATH_MAX) { KV_ERROR("anim", "path too long: '%s'", path); return Handle{}; }
     Name name = name_intern(path);
-    if (const Handle* existing = s->by_path.find(name)) return *existing;
+    if (const Handle* existing = s->by_path.find(name)) return held(e, scope, *existing);
 
     AnimClip c{};
     strncpy(c.path, path, sizeof c.path - 1);
@@ -324,21 +383,23 @@ Handle anim_load(Engine& e, const char* path) {
     req.user  = h.bits;
     Handle iq = io->read_asset(req);
     AnimClip* rec = s->clips.get(h);
-    if (iq.is_null()) { fail_clip(e, *s, h, *rec, AssetError::Read, "could not submit"); return h; }
+    if (iq.is_null()) { fail_clip(e, *s, h, *rec, AssetError::Read, "could not submit"); return held(e, scope, h); }
     rec->io = iq;
-    return h;
+    return held(e, scope, h);
 }
 
-Handle anim_create(Engine& e, const AnimClipDesc& desc) {
+Handle anim_create(Engine& e, const AnimClipDesc& desc, Handle scope) {
     AnimState_* s = state(e);
     if (!s) { KV_ERROR("anim", "cannot create '%s': anim is not up", desc.name); return Handle{}; }
     AnimClip c;
     const char* why = nullptr;
     if (!anim_build(desc, s->general, c, &why)) { KV_ERROR("anim", "clip '%s': %s", desc.name, why); c.tracks.free(); c.keys.free(); return Handle{}; }
+    if (!c.path[0]) derive_name(c);
     Handle h = s->clips.create(c);
     if (h.is_null()) { c.tracks.free(); c.keys.free(); return Handle{}; }
+    s->by_path.get_or_insert(name_intern(c.path), h); // the first live one keeps the name
     ++s->created;
-    return h;
+    return held(e, scope, h);
 }
 
 const AnimClip* anim_clip(Engine& e, Handle clip) {

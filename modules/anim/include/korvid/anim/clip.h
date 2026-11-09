@@ -37,6 +37,7 @@
 namespace kv {
 
 struct Engine;
+struct SaveWriter;
 
 enum class AnimChannel : u8 { Uv, Tint, Alpha, Position, Rotation, Scale, Event, Count };
 enum class AnimInterp  : u8 { Step, Linear };
@@ -61,7 +62,8 @@ struct AnimTrackDesc {
 };
 
 struct AnimClipDesc {
-    const char*               name     = "";    // for the log and describe; copied
+    const char*               name     = "";    // what saves and tools call it; copied. Empty: derived
+                                                // from the content ("clip:<hash>")
     f32                       duration = 0.0f;  // 0: the last key's time across tracks
     AnimLoop                  loop     = AnimLoop::Once;
     Span<const AnimTrackDesc> tracks   = {};
@@ -75,7 +77,7 @@ struct AnimTrack {
 };
 
 struct AnimClip {
-    char            path[KV_ASSET_PATH_MAX]; // the file, or the descriptor's name
+    char            path[KV_ASSET_PATH_MAX]; // the file, or the descriptor's name: what the clip is called
     AssetState      state = AssetState::Pending;
     AssetError      error = AssetError::None;
     Handle          io;                       // the pending read while loading
@@ -84,22 +86,37 @@ struct AnimClip {
     Array<AnimTrack> tracks;
     Array<AnimKey>   keys;
     u32             players  = 0;             // for the log: how many are on it now
+    u32             refs     = 0;             // scopes and assets holding it (a sheet its clips, a map its tiles')
 };
 
+// Clips are assets of the asset module's scopes (anim.clip is registered with
+// asset_kind_register): a scope holds a clip, a clip that nothing holds retires at the
+// next asset pump. The forms without a scope use the global scope; a null scope means the
+// caller holds the clip with asset_ref (a sheet its clips, a map its tiles').
+//
 // Starts loading <exe dir>/assets/<path>; the handle comes back at once and the clip is
 // Pending until anim.pump parses it. The same path is the same handle.
+Handle          anim_load(Engine& e, const char* path, Handle scope);
 Handle          anim_load(Engine& e, const char* path);
 // Builds a clip now. Null, with the reason logged, for a malformed descriptor (keys out
 // of order, a value past the duration, an event on a non-event channel).
+Handle          anim_create(Engine& e, const AnimClipDesc& desc, Handle scope);
 Handle          anim_create(Engine& e, const AnimClipDesc& desc);
 // The clip, or null if the handle is stale or not a clip.
 const AnimClip* anim_clip(Engine& e, Handle clip);
+// The live clip with that name (its path, its descriptor's name, or the derived one), or null.
+Handle          anim_find(Engine& e, const char* name);
 
 // The file format on its own. Fills `out` (its arrays allocate from `alloc`) from the
 // text; false with the reason and byte offset on a bad file.
 bool anim_parse(const char* text, usize len, Allocator* alloc, AnimClip& out, const char** error, u32* error_at);
 // A descriptor into a clip record; false with the reason on a bad one.
 bool anim_build(const AnimClipDesc& desc, Allocator* alloc, AnimClip& out, const char** error);
+
+// Writes a clip as the file format: duration, loop, and every track as keys (a flipbook as
+// uv keys, not as a grid). anim_parse of the text builds a clip equal to this one, key
+// for key.
+bool anim_write(const AnimClip& clip, SaveWriter& w);
 
 // Samples a value track at `time` (clamped to the keys' span) into `out`: step holds the
 // last key at or before the time, linear blends with the next. False for an event track

@@ -5,6 +5,8 @@
 // the other map; a pause menu with save and load, a level select and the credits; music
 // that crossfades between the maps.
 #include "korvid/example_arcanum/module.h"
+#include "korvid/anim/player.h"
+#include "korvid/anim/sheet.h"
 #include "korvid/asset/blob.h"
 #include "korvid/asset/scope.h"
 #include "korvid/asset/sound.h"
@@ -43,14 +45,13 @@ namespace {
 
 // ---- data --------------------------------------------------------------------------------------
 
-// A character: which way it faces, whether it is walking, its walk cycle, and for a
-// villager a route between two points (relative to where it stands).
+// A character: which way it faces, whether it is walking, and for a villager a route
+// between two points (relative to where it stands). Its sheet's clips animate it.
 struct Actor {
     u8     facing;   // 0 down, 1 up, 2 left, 3 right: the sheet's columns
     u8     moving;
     u8     sheet;    // index into Game::sheets
     u8     route_dir;
-    f32    walk;     // seconds into the walk cycle
     point2 home;     // a villager's spawn point
     vec2   route;    // a villager's second point, from home; zero stands still
     f32    route_t;  // 0 at home, 1 at home + route
@@ -62,13 +63,13 @@ struct Vitals {
     i32 hp_max;
     f32 hurt;
 };
-constinit const FieldDesc k_actor_fields[] = {KV_FIELDS(Actor, facing, moving, sheet, route_dir, walk, home, route, route_t)};
+constinit const FieldDesc k_actor_fields[] = {KV_FIELDS(Actor, facing, moving, sheet, route_dir, home, route, route_t)};
 constinit const FieldDesc k_vitals_fields[] = {KV_FIELDS(Vitals, hp, hp_max, hurt)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Actor, k_actor_fields), KV_COMPONENT(Vitals, k_vitals_fields)};
 
 constinit const KindDesc k_kinds[] = {
-    {.name = ".player", .components = "Transform2, Sprite, Actor, Vitals", .capacity = 1},
-    {.name = ".npc",    .components = "Transform2, Local2, Parent, Sprite, Actor", .capacity = 32},
+    {.name = ".player", .components = "Transform2, Sprite, Actor, Vitals, AnimPlayer", .capacity = 1},
+    {.name = ".npc",    .components = "Transform2, Local2, Parent, Sprite, Actor, AnimPlayer", .capacity = 32},
     // Rocks the player pushes: the level's children, placed by the map's "rock" points.
     {.name = ".rock",   .components = "Transform2, Local2, Parent, Sprite", .capacity = 32},
     // The menu, the credits and the hearts: presentation, never hashed.
@@ -82,7 +83,6 @@ constinit const char* const k_saved_kinds[] = {"example_arcanum.player", "exampl
 
 constexpr f32 kWalkSpeed   = 64.0f;   // px per second
 constexpr f32 kNpcSpeed    = 24.0f;
-constexpr f32 kFrameTime   = 0.15f;   // seconds per walk frame
 constexpr f32 kFeetW = 10.0f, kFeetH = 5.0f;
 constexpr f32 kRockW = 26.0f, kRockH = 12.0f; // a boulder's base, from its bottom edge
 constexpr f32 kPushPace = 0.5f;              // a pushed rock moves at half the walk
@@ -91,6 +91,8 @@ constexpr f32 kHurtTime = 1.0f;              // seconds of blinking, untouchable
 constexpr u32 kSheets = 3;
 const char* const k_sheet_paths[kSheets] = {"example_arcanum/actors/NinjaBlue.png", "example_arcanum/actors/OldMan.png", "example_arcanum/actors/ManGreen.png"};
 const char* const k_sheet_names[kSheets] = {"NinjaBlue", "OldMan", "ManGreen"};
+const char* const k_sheet_files[kSheets] = {"example_arcanum/actors/NinjaBlue.sheet.json", "example_arcanum/actors/OldMan.sheet.json", "example_arcanum/actors/ManGreen.sheet.json"};
+const char* const k_facings[4] = {"down", "up", "left", "right"};
 
 constinit const LevelDesc k_levels[] = {
     {"village", "example_arcanum/maps/village.tmj"},
@@ -112,6 +114,8 @@ constexpr color kHurtTint = color{1.0f, 0.35f, 0.35f, 1.0f};
 struct Game {
     u32    act_move = 0, act_confirm = 0, act_cancel = 0, act_menu = 0;
     Handle sheet_texture[kSheets], sheet_material[kSheets];
+    Handle sheets[kSheets];      // anim.sheet: the walk and idle clips, loaded into each level's scope
+    Handle walk_clip[kSheets][4], idle_clip[kSheets][4]; // by facing, once the sheet is Ready
     Handle white_texture, white_material;
     Handle nature_texture, rock_material; // a rock is a 32 px cell of the nature sheet
     Handle font;
@@ -140,13 +144,10 @@ struct Game {
 
 // ---- sprites ---------------------------------------------------------------------------------------
 
-// The sheet's cell for a facing and a frame: 4 columns of facings, rows of walk frames.
-rect2 sheet_uv(u8 facing, u32 row) { return rect2{(f32)facing / 4.0f, (f32)row / 7.0f, 0.25f, 1.0f / 7.0f}; }
-
 Sprite actor_sprite(const Game& g, u8 sheet, i32 layer) {
     Sprite s;
     s.material = g.sheet_material[sheet];
-    s.uv    = sheet_uv(0, 0);
+    s.uv    = rect2{0.0f, 0.0f, 0.25f, 1.0f / 7.0f}; // facing down, standing, until the idle clip plays
     s.size  = vec2{16, 16};
     s.layer = layer;
     s.sort  = SpriteSort::Feet;
@@ -182,11 +183,13 @@ u8 facing_of(vec2 d, u8 was) {
     return d.y < 0 ? 0 : 1;
 }
 
-// The walk cycle into the sprite: rows 0..3 while walking, row 0 standing.
-void animate(Actor& a, Sprite& s, f32 dt) {
-    if (a.moving) a.walk += dt; else a.walk = 0.0f;
-    u32 row = a.moving ? (u32)(a.walk / kFrameTime) % 4 : 0;
-    s.uv = sheet_uv(a.facing, row);
+// The sheet's walk or idle clip for how the actor moves and faces, started when it
+// changes; anim.play does the frames.
+void animate(Engine& e, Game& g, const Actor& a, AnimPlayer& p) {
+    Handle (&set)[kSheets][4] = a.moving ? g.walk_clip : g.idle_clip;
+    Handle& clip = set[a.sheet % kSheets][a.facing & 3];
+    if (clip.is_null()) clip = anim_sheet_variant(e, g.sheets[a.sheet % kSheets], a.moving ? "walk" : "idle", k_facings[a.facing & 3]);
+    if (p.clip != clip) anim_play(p, clip);
 }
 
 // A map's exits that contain a feet box, in world units (the map's origin at 0, 0).
@@ -220,7 +223,24 @@ void play_hurt(TickContext& ctx, Game& g) {
 }
 
 // The saved kinds' state, less their Parent links (a load parents them to the level's new
-// root): logged at a save and after a load, so a run shows the load gave back what was saved.
+// root): logged at a save and after a load, so a run shows the load gave back what was
+// saved. A handle counts by its name where it has one (a clip of a sheet the load made
+// again is a new handle with the old name).
+u64 row_hash(const ComponentDesc& c, const u8* row) {
+    u64 h = 0;
+    for (const FieldDesc& f : c.fields) {
+        const u8* p = row + f.offset;
+        for (u32 i = 0; i < f.count; ++i) {
+            if (f.type != FieldType::Handle) { h = hash_mix(h ^ hash_bytes(p, (usize)f.count * field_type_size(f.type))); break; }
+            Handle hd;
+            memcpy(&hd, p + i * sizeof(Handle), sizeof hd);
+            const char* name = handle_name(hd);
+            h = hash_mix(h ^ (name ? hash_str(name) : hd.bits));
+        }
+    }
+    return h;
+}
+
 u64 saved_state_hash(Engine& e) {
     u64 h = 0;
     for (const char* name : k_saved_kinds) {
@@ -229,7 +249,7 @@ u64 saved_state_hash(Engine& e) {
             if (!t->is_alive(i)) continue;
             h = hash_mix(h ^ (t->handle_at(i).bits & 0x000FFFFFFFFFFFFFull));
             for (const Column& c : t->columns)
-                if (*c.desc->id != ComponentType<Parent>::id) h = hash_mix(h ^ component_hash(*c.desc, c.data + (usize)i * c.stride));
+                if (*c.desc->id != ComponentType<Parent>::id) h = hash_mix(h ^ row_hash(*c.desc, c.data + (usize)i * c.stride));
         }
     }
     return h;
@@ -590,7 +610,7 @@ void walk(TickContext& ctx) {
         play_hurt(ctx, g);
         if (v->hp == 0) faint(g, *players, *m);
     }
-    animate(*act, *s, dt);
+    animate(e, g, *act, *players->get<AnimPlayer>(g.player));
     s->tint = v->hurt > 0.0f && (u32)(v->hurt * 10.0f) % 2 ? kHurtTint : color_white();
 
     // Exits: armed once the player has stood clear of them since arriving.
@@ -608,13 +628,13 @@ void walk(TickContext& ctx) {
 
 // Phase Sim: villagers pace their routes and turn to face where they go.
 void villagers(TickContext& ctx) {
+    Game& g = ctx.state_as<Game>();
     Table* npcs = ctx.write_kind("example_arcanum.npc");
     f32 dt = (f32)ctx.dt;
     for (u32 i = 0; i < npcs->rows(); ++i) {
         if (!npcs->is_alive(i)) continue;
         Actor& a = npcs->rows_of<Actor>()[i];
         Local2& l = npcs->rows_of<Local2>()[i];
-        Sprite& s = npcs->rows_of<Sprite>()[i];
         f32 len = sqrtf(a.route.x * a.route.x + a.route.y * a.route.y);
         if (len > 0.0f) {
             f32 dir = a.route_dir ? -1.0f : 1.0f;
@@ -625,7 +645,7 @@ void villagers(TickContext& ctx) {
             a.moving = 1;
             a.facing = facing_of(vec2{a.route.x * dir, a.route.y * dir}, a.facing);
         }
-        animate(a, s, dt);
+        animate(*ctx.engine, g, a, npcs->rows_of<AnimPlayer>()[i]);
     }
 }
 
@@ -794,6 +814,18 @@ void on_build(TickContext& ctx, Span<const LevelBuild> builds) {
     }
 }
 
+// A level's scope holds the characters' sheets too, so the level is built (and the sim
+// runs) only once their clips are made: a clip that turned up on an I/O-dependent tick
+// would start the walk cycles on one, and the hash would follow the disk.
+void on_loading(TickContext& ctx, Span<const LevelLoading> loads) {
+    Game& g = ctx.state_as<Game>();
+    for (const LevelLoading& l : loads)
+        for (u32 i = 0; i < kSheets; ++i) g.sheets[i] = anim_sheet_load(*ctx.engine, k_sheet_files[i], l.scope);
+    // A reload makes the sheets again: their clips are new handles.
+    memset(g.walk_clip, 0, sizeof g.walk_clip);
+    memset(g.idle_clip, 0, sizeof g.idle_clip);
+}
+
 void on_exit(TickContext& ctx, Span<const ExitRequested>) { engine_request_quit(*ctx.engine); }
 
 // ---- the demo -----------------------------------------------------------------------------------
@@ -895,7 +927,7 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     if (pref[0]) snprintf(g->save_path, sizeof g->save_path, "%ssave%s.json", pref, g->demo ? "-demo" : "");
     Table* players = engine_table(e, "example_arcanum.player");
     Actor pa{};
-    g->player = players->spawn(transform2_at(point2{0, 0}), actor_sprite(*g, 0, 2), pa, Vitals{kHpMax, kHpMax, 0.0f});
+    g->player = players->spawn(transform2_at(point2{0, 0}), actor_sprite(*g, 0, 2), pa, Vitals{kHpMax, kHpMax, 0.0f}, AnimPlayer{});
     engine_entity_name_set(e, g->player, "player");
     LevelConfig cfg;
     cfg.levels = k_levels;
@@ -912,15 +944,16 @@ void arcanum_shutdown(Engine&, ModuleInstance& self) {
 }
 
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_build",   KV_ON(LevelBuild, on_build), .writes = ".player, .npc, .rock, tilemap.tile, audio.commands"},
+    {.name = ".on_build",   KV_ON(LevelBuild, on_build), .writes = ".player, .npc, .rock, tilemap.tile, tilemap.animtile, audio.commands"},
     {.name = ".on_exit",    KV_ON(ExitRequested, on_exit)},
+    {.name = ".on_loading", KV_ON(LevelLoading, on_loading)},
 };
 constinit const SystemDesc k_systems[] = {
     {.name = ".files", .phase = Phase::PreSim, .fn = files, .after = "level.run", .before = ".menu", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".menu", .phase = Phase::PreSim, .fn = menu, .reads = "input.actions, .player, .npc, .rock", .writes = ".ui, .dim, audio.commands",
      .after = "level.run", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions, .npc", .writes = ".player, .rock, audio.commands", .main_thread = true},
-    {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .writes = ".npc"},
+    {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .writes = ".npc", .main_thread = true},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".player.Vitals, platform_hid.window", .writes = ".hud, .hudtext",
      .before = "text.layout, scene.compose", .main_thread = true, .runs = RunWhen::Always},

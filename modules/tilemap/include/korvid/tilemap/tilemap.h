@@ -71,6 +71,7 @@ struct MapTile {           // a tileset's tile that has something (properties, s
     MapRange props;
     MapRange rects;          // collision rectangles, tile pixels, y down from the tile's top-left
     MapRange frames;         // its animation
+    Handle   clip;           // anim.clip of the animation ("<map>#tile<gid>"), made when the map is Ready
 };
 
 struct MapFrame { u32 local; f32 seconds; };
@@ -124,8 +125,12 @@ struct TilemapPlace {
     Handle owner;
 };
 
-// Spawns the tile and tile-object rows of a Ready map into "tilemap.tile" (declare it in
-// your writes). Returns the instance (tilemap.instance), or null if the map is not Ready.
+// Spawns the tile and tile-object rows of a Ready map into "tilemap.tile", and those whose
+// tile has a Tiled animation into "tilemap.animtile" (Transform2, Sprite, AnimPlayer)
+// playing its clip, so the many still tiles carry no player. Declare "tilemap.tile" in
+// your writes, and "tilemap.animtile" for a map with animated tiles. A flipped animated
+// tile plays its frames unflipped. Returns the instance (tilemap.instance), or null if the
+// map is not Ready.
 Handle tilemap_spawn(TickContext& ctx, Handle map, const TilemapPlace& place);
 bool   tilemap_despawn(TickContext& ctx, Handle instance);
 u32    tilemap_instance_rows(Engine& e, Handle instance);

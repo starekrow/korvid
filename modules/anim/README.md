@@ -62,6 +62,30 @@ every value track at the new time and writes the channel. The rules:
   (menus). `AnimState::Paused` holds a player on either clock.
 - A player whose clip is stale or not yet Ready does nothing and keeps its time.
 
+**Scopes and names.** Clips are assets in the asset module's scopes (`anim.clip` is an
+external asset kind): `anim_load(e, path, scope)` and `anim_create(e, desc, scope)` take
+one, the old forms use the global scope, and a null scope means the caller holds the clip
+with `asset_ref`. A clip is named by its path, its descriptor's `name`, or, without one,
+its content (`clip:<hash>`); `anim_find(e, name)` finds it, and an `AnimPlayer` saves its
+clip by that name, so a run continued from a save hashes as the saving run did even when
+the load made the clip again.
+
+**Sheets** (`sheet.h`). A `.sheet.json` names a texture, a cell size (or a grid), and clips
+by column and rows, row and columns, or a list of cells, with an fps, a duration, a loop
+mode and events; `sets` name families of clips by variant (a walk by facing).
+`anim_sheet_load(e, path, scope)` reads it as a blob, loads the texture and its material
+(`asset_material_for_texture`, alpha, nearest), builds every clip as `<path>#<clip>` once
+the texture's size is known, and turns `Ready`. `anim_sheet_clip(e, sheet, "walk.down")`,
+`anim_sheet_variant(e, sheet, "walk", "down")`, and `anim_sheet(e, sheet)->material` and
+`->cell_size` are what a game uses. The sheet holds its clips, texture and material; when
+its last scope lets go they go with it. Load a sheet into a level's scope and the level is
+built only once its clips exist, which keeps a walk cycle's start off an I/O-dependent tick
+(arcanum does this).
+
+**Writing clips.** `anim_write(clip, w)` writes the file format through a `SaveWriter`, every
+track as keys; `anim_parse` of the result is the same clip, key for key, which the tests
+check over every channel and loop mode.
+
 ## Using it
 
 ```cpp
@@ -142,6 +166,9 @@ Depends on: core, math, render, platform, asset, sprite, scene.
   plays backward from `start`.
 - **Events arrive a boundary later**, like any event emitted from a system; a key at the
   very end of a `Once` clip and `AnimFinished` arrive together.
+- **A sheet's clips are made when the texture has its size**, not at load: look them up
+  after `AssetReady` for the sheet (or lazily, as arcanum does), and expect new handles
+  with the same names after a level reload makes the sheet again.
 - **Whole-tint tracks replace the color.** Use `alpha` to fade something that keeps a tint
   of its own.
 

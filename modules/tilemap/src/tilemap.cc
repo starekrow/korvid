@@ -2,6 +2,8 @@
 // tileset blobs, textures, materials), and instances as rows of cosmetic sprites.
 #include "korvid/tilemap/module.h"
 #include "korvid/tilemap/tilemap.h"
+#include "korvid/anim/clip.h"
+#include "korvid/anim/player.h"
 #include "korvid/asset/blob.h"
 #include "korvid/asset/scope.h"
 #include "korvid/core/arena.h"
@@ -38,7 +40,7 @@ struct TilemapState {
     Map<Name, Handle>  by_path;
     Pool<Instance>     instances;
     u16                map_kind = 0, instance_kind = 0;
-    u32                tile_kind = 0;
+    u32                tile_kind = 0, animtile_kind = 0;
     u32                loaded = 0, failed = 0;
 };
 
@@ -69,6 +71,7 @@ void drop_contents(Engine& e, TilemapState& s, TilemapAsset& m) {
         asset_unref(e, t.texture);
         t.material = t.texture = Handle{};
     }
+    for (u32 i = 0; i < m.tile_count; ++i) { asset_unref(e, m.tiles[i].clip); m.tiles[i].clip = Handle{}; }
     if (Deps* d = deps_of(m)) for (Handle& b : d->tileset_blob) { asset_unref(e, b); b = Handle{}; }
     asset_unref(e, m.blob);
     m.blob = Handle{};
@@ -109,7 +112,53 @@ int instance_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     return in ? snprintf(out, cap, "%u rows", in->row_count) : snprintf(out, cap, "stale");
 }
 
+// Destroys a row of either tile kind.
+void destroy_row(Engine& e, Handle row) {
+    if (Table* t = engine_table_of(e, row)) t->destroy(row);
+}
+
 // ---- loading -----------------------------------------------------------------------------------
+
+// A tile's uv in its tileset, unflipped.
+rect2 tile_uv(const MapTileset& ts, u32 local) {
+    u32 col = local % ts.columns, row = local / ts.columns;
+    f32 px = (f32)(ts.margin + col * (ts.tile_w + ts.spacing)), py = (f32)(ts.margin + row * (ts.tile_h + ts.spacing));
+    return rect2{px / (f32)ts.image_w, py / (f32)ts.image_h, (f32)ts.tile_w / (f32)ts.image_w, (f32)ts.tile_h / (f32)ts.image_h};
+}
+
+// Tiled's per-tile animations as clips, one per animated tile, held by the map.
+void make_tile_clips(Engine& e, TilemapAsset& m) {
+    for (u32 t = 0; t < m.tileset_count; ++t) {
+        const MapTileset& ts = m.tilesets[t];
+        for (u32 i = 0; i < ts.tiles.count; ++i) {
+            MapTile& tile = m.tiles[ts.tiles.first + i];
+            if (!tile.frames.count || !ts.columns) continue;
+            MemScope scope;
+            AnimKey* keys = alloc_items<AnimKey>(mem_scratch(), tile.frames.count);
+            f32 at = 0.0f;
+            for (u32 f = 0; f < tile.frames.count; ++f) {
+                const MapFrame& fr = m.frames[tile.frames.first + f];
+                rect2 uv = tile_uv(ts, fr.local);
+                keys[f] = AnimKey{};
+                keys[f].time = at;
+                keys[f].v[0] = uv.x; keys[f].v[1] = uv.y; keys[f].v[2] = uv.w; keys[f].v[3] = uv.h;
+                at += fr.seconds;
+            }
+            AnimTrackDesc track;
+            track.channel = AnimChannel::Uv;
+            track.keys = Span<const AnimKey>(keys, tile.frames.count);
+            char name[KV_ASSET_PATH_MAX + 24];
+            snprintf(name, sizeof name, "%s#tile%u", m.path, ts.first_gid + tile.local);
+            AnimClipDesc d;
+            d.name = name;
+            d.duration = at;
+            d.loop = AnimLoop::Loop;
+            d.tracks = Span<const AnimTrackDesc>(&track, 1);
+            tile.clip = anim_create(e, d, Handle{}); // held by the map
+            asset_ref(e, tile.clip);
+        }
+    }
+}
 
 // One step of each pending map: parse once the file is in, read the tilesets it names,
 // load their images, make their materials, build the solids, turn Ready.
@@ -170,6 +219,7 @@ void advance(Engine& e, TilemapState& s, Handle h, TilemapAsset& m) {
             }
         }
         tilemap_build_solids(m, &arena->a);
+        make_tile_clips(e, m);
         // The files are parsed: their bytes can go.
         Deps* d = deps_of(m);
         for (Handle& b : d->tileset_blob) { asset_unref(e, b); b = Handle{}; }
@@ -201,7 +251,7 @@ void tilemap_pump(TickContext& ctx) {
         Table* ot = in.owner.is_null() ? nullptr : engine_table_of(e, in.owner);
         bool owner_gone = !in.owner.is_null() && (!ot || !ot->valid(in.owner));
         if (!owner_gone && s.maps.get(in.map)) continue;
-        if (tiles) for (u32 k = 0; k < in.row_count; ++k) tiles->destroy(in.rows[k]);
+        if (tiles) for (u32 k = 0; k < in.row_count; ++k) destroy_row(e, in.rows[k]);
         free_in(s.general, in.rows, sizeof(Handle) * (in.row_count ? in.row_count : 1));
         s.instances.destroy(s.instances.handle_at(i));
     }
@@ -224,6 +274,7 @@ bool tilemap_startup(Engine& e, ModuleInstance& self) {
     s->instances.use_kind(s->instance_kind);
     if (!s->maps.init(1024, self.general.tag) || !s->instances.init(1024, self.general.tag)) return false;
     s->tile_kind = engine_kind_id(e, "tilemap.tile");
+    s->animtile_kind = engine_kind_id(e, "tilemap.animtile");
     AssetKindDesc k;
     k.kind = s->map_kind; k.refs = kind_refs; k.state = kind_state; k.bytes = kind_bytes; k.path = kind_path; k.retire = kind_retire; k.user = s;
     if (!asset_kind_register(e, k)) return false;
@@ -250,9 +301,11 @@ void tilemap_shutdown(Engine& e, ModuleInstance& self) {
 constinit const KindDesc k_kinds[] = {
     // Tiles are presentation: never hashed. What collides is the map's solids, not these.
     {.name = ".tile", .components = "Transform2, Sprite", .capacity = 1u << 18, .cosmetic = true},
+    // Tiles with a Tiled animation: few, so the player rides only on them.
+    {.name = ".animtile", .components = "Transform2, Sprite, AnimPlayer", .capacity = 1u << 14, .cosmetic = true},
 };
 constinit const SystemDesc k_systems[] = {
-    {.name = ".pump", .phase = Phase::PreSim, .fn = tilemap_pump, .writes = ".tile",
+    {.name = ".pump", .phase = Phase::PreSim, .fn = tilemap_pump, .writes = ".tile, .animtile",
      .after = "asset.pump_scopes, asset.pump, asset.pump_blobs", .main_thread = true, .runs = RunWhen::Always},
 };
 
@@ -305,13 +358,11 @@ namespace {
 
 // One row: a tile of a tileset at map pixels (left, bottom) of its image's bottom-left,
 // with Tiled's flips.
-Handle spawn_tile(Table& tiles, const TilemapAsset& m, u32 gid, f32 left, f32 bottom, f32 w, f32 h, point2 origin, i32 layer, color tint, bool ysort) {
+Handle spawn_tile(Table& tiles, Table* animtiles, const TilemapAsset& m, u32 gid, f32 left, f32 bottom, f32 w, f32 h, point2 origin, i32 layer, color tint, bool ysort) {
     u32 local = 0;
     const MapTileset* ts = tilemap_tileset_of(m, gid, &local);
     if (!ts || local >= (ts->count ? ts->count : 0xFFFFFFFFu)) return Handle{};
-    u32 col = local % ts->columns, row = local / ts->columns;
-    f32 px = (f32)(ts->margin + col * (ts->tile_w + ts->spacing)), py = (f32)(ts->margin + row * (ts->tile_h + ts->spacing));
-    rect2 uv{px / (f32)ts->image_w, py / (f32)ts->image_h, (f32)ts->tile_w / (f32)ts->image_w, (f32)ts->tile_h / (f32)ts->image_h};
+    rect2 uv = tile_uv(*ts, local);
     // Tiled's flips as uv flips and a quarter turn: diagonal is a quarter turn
     // counter-clockwise with u flipped unless vertical and v flipped if horizontal.
     bool H = gid & KV_TILE_FLIP_H, V = gid & KV_TILE_FLIP_V, D = gid & KV_TILE_FLIP_D;
@@ -331,8 +382,19 @@ Handle spawn_tile(Table& tiles, const TilemapAsset& m, u32 gid, f32 left, f32 bo
         sp.order = -h * 0.5f + (foot ? (f32)foot->num : 0.0f);
     }
     point2 c = tilemap_to_world(origin, left + w * 0.5f, bottom - h * 0.5f);
+    const MapTile* info = tilemap_tile_info(m, gid);
+    if (info && !info->clip.is_null()) {
+        if (!animtiles) { KV_WARN("tilemap", "'%s' has animated tiles: declare tilemap.animtile in the writes", m.path); return Handle{}; }
+        return animtiles->spawn(transform2_at(c, D ? 1.57079633f : 0.0f), sp, anim_player(info->clip));
+    }
     return tiles.spawn(transform2_at(c, D ? 1.57079633f : 0.0f), sp);
 }
+
+bool has_animated_tiles(const TilemapAsset& m) {
+    for (u32 i = 0; i < m.tile_count; ++i) if (!m.tiles[i].clip.is_null()) return true;
+    return false;
+}
+
 
 } // namespace
 
@@ -343,6 +405,7 @@ Handle tilemap_spawn(TickContext& ctx, Handle map, const TilemapPlace& place) {
     if (!m || m->state != AssetState::Ready) return Handle{};
     Table* tiles = ctx.write_kind(s->tile_kind);
     if (!tiles) return Handle{};
+    Table* animtiles = has_animated_tiles(*m) ? ctx.write_kind(s->animtile_kind) : nullptr;
     Array<Handle> rows;
     rows.alloc = s->general;
     for (u32 li = 0; li < m->layer_count; ++li) {
@@ -360,14 +423,14 @@ Handle tilemap_spawn(TickContext& ctx, Handle map, const TilemapPlace& place) {
                     const MapTileset* ts = tilemap_tileset_of(*m, gid, nullptr);
                     if (!ts) continue;
                     f32 left = (f32)(x * m->tile_w) + l.offset.x, bottom = (f32)((y + 1) * m->tile_h) + l.offset.y;
-                    Handle r = spawn_tile(*tiles, *m, gid, left, bottom, (f32)ts->tile_w, (f32)ts->tile_h, place.origin, layer, tint, ysort);
+                    Handle r = spawn_tile(*tiles, animtiles, *m, gid, left, bottom, (f32)ts->tile_w, (f32)ts->tile_h, place.origin, layer, tint, ysort);
                     if (!r.is_null()) rows.push(r);
                 }
         } else if (l.kind == MapLayerKind::Objects) {
             for (u32 k = 0; k < l.objects.count; ++k) {
                 const MapObject& o = m->objects[l.objects.first + k];
                 if (!(o.gid & KV_TILE_GID_MASK)) continue;
-                Handle r = spawn_tile(*tiles, *m, o.gid, o.x + l.offset.x, o.y + l.offset.y, o.width, o.height, place.origin, layer, tint, ysort);
+                Handle r = spawn_tile(*tiles, animtiles, *m, o.gid, o.x + l.offset.x, o.y + l.offset.y, o.width, o.height, place.origin, layer, tint, ysort);
                 if (!r.is_null()) rows.push(r);
             }
         }
@@ -381,7 +444,7 @@ Handle tilemap_spawn(TickContext& ctx, Handle map, const TilemapPlace& place) {
     rows.free();
     Handle h = s->instances.create(in);
     if (h.is_null()) {
-        for (u32 k = 0; k < in.row_count; ++k) tiles->destroy(in.rows[k]);
+        for (u32 k = 0; k < in.row_count; ++k) destroy_row(e, in.rows[k]);
         free_in(s->general, in.rows, sizeof(Handle) * (in.row_count ? in.row_count : 1));
     }
     return h;
@@ -391,7 +454,7 @@ bool tilemap_despawn(TickContext& ctx, Handle instance) {
     TilemapState* s = state(*ctx.engine);
     Instance* in = s ? s->instances.get(instance) : nullptr;
     if (!in) return false;
-    if (Table* tiles = ctx.write_kind(s->tile_kind)) for (u32 k = 0; k < in->row_count; ++k) tiles->destroy(in->rows[k]);
+    if (ctx.write_kind(s->tile_kind)) for (u32 k = 0; k < in->row_count; ++k) destroy_row(*ctx.engine, in->rows[k]);
     free_in(s->general, in->rows, sizeof(Handle) * (in->row_count ? in->row_count : 1));
     s->instances.destroy(instance);
     return true;

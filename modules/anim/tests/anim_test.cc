@@ -6,6 +6,9 @@
 // file format parses grids, keys and events and rejects what it should; a position
 // track drives a child's Local2 and the scene module composes it after.
 #include "korvid/anim/module.h"
+#include "korvid/anim/sheet.h"
+#include "korvid/asset/scope.h"
+#include "korvid/save/writer.h"
 #include "korvid/asset/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
@@ -199,6 +202,110 @@ void test_anim(kv::TestCtx& c) {
     Handle kid = kids->spawn(Transform2{}, Sprite{}, local2_at(point2{0, 0}), Parent{root}, anim_player(slide));
     run(0.5);
     KV_CHECK(c, near(kids->get<Local2>(kid)->position.x, 5.0f) && near(kids->get<Transform2>(kid)->position.x, 105.0f));
+
+    // ---- names: the descriptor's, or the content's ------------------------------------
+    KV_CHECK(c, anim_find(e, "slide") == slide && strcmp(handle_name(slide), "slide") == 0);
+    AnimClipDesc anon = slide_d;
+    anon.name = "";
+    Handle a1 = anim_create(e, anon), a2 = anim_create(e, anon);
+    KV_CHECK(c, a1 != a2 && !strcmp(anim_clip(e, a1)->path, anim_clip(e, a2)->path) && !strncmp(anim_clip(e, a1)->path, "clip:", 5));
+    KV_CHECK(c, anim_find(e, anim_clip(e, a1)->path) == a1); // the first keeps the name
+
+    // ---- write, then parse: the same clip, key for key ---------------------------------
+    {
+        static const AnimKey tint[] = {{.time = 0.0f, .v = {1, 0.5f, 0.25f, 1}}, {.time = 0.3f, .v = {0, 0, 0, 0.125f}}};
+        static const AnimKey al[] = {{.time = 0.1f, .v = {0.75f}}};
+        static const AnimKey sc[] = {{.time = 0.0f, .v = {1, 1}}, {.time = 0.7f, .v = {2.5f, 0.5f}}};
+        AnimKey evk[1];
+        evk[0].time = 0.2f; evk[0].event = name_intern("ping");
+        const AnimTrackDesc all[] = {
+            {.channel = AnimChannel::Tint, .interp = AnimInterp::Linear, .keys = tint},
+            {.channel = AnimChannel::Alpha, .keys = al},
+            {.channel = AnimChannel::Scale, .interp = AnimInterp::Linear, .keys = sc},
+            {.channel = AnimChannel::Event, .keys = evk},
+        };
+        for (u32 lm = 0; lm < 3; ++lm) {
+            AnimClipDesc d;
+            d.name = "every"; d.duration = 0.8f; d.loop = (AnimLoop)lm; d.tracks = all;
+            Handle h = anim_create(e, d, Handle{});
+            asset_ref(e, h);
+            const AnimClip* orig = anim_clip(e, h);
+            const AnimClip* flip = anim_clip(e, loop);
+            const AnimClip* both[] = {orig, flip};
+            for (const AnimClip* src : both) {
+                SaveWriter w;
+                w.init(mem_general());
+                KV_CHECK(c, anim_write(*src, w) && w.finish());
+                AnimClip back;
+                const char* werr = nullptr;
+                u32 wat = 0;
+                bool parsed = anim_parse((const char*)w.out.data, w.out.len, mem_general(), back, &werr, &wat);
+                KV_CHECK(c, parsed);
+                bool same = parsed && back.duration == src->duration && back.loop == src->loop && back.tracks.len == src->tracks.len && back.keys.len == src->keys.len;
+                for (u32 t = 0; same && t < back.tracks.len; ++t)
+                    same = back.tracks[t].channel == src->tracks[t].channel && back.tracks[t].interp == src->tracks[t].interp && back.tracks[t].count == src->tracks[t].count;
+                for (u32 k = 0; same && k < back.keys.len; ++k)
+                    same = back.keys[k].time == src->keys[k].time && !memcmp(back.keys[k].v, src->keys[k].v, sizeof back.keys[k].v) && back.keys[k].event == src->keys[k].event;
+                KV_CHECK(c, same);
+                back.tracks.free(); back.keys.free();
+                w.free();
+            }
+            asset_unref(e, h);
+        }
+    }
+
+    // ---- scopes: a clip lives while a scope holds it -----------------------------------
+    {
+        Handle scope = asset_scope_create(e, "clips");
+        AnimClipDesc d = slide_d;
+        d.name = "scoped";
+        Handle h = anim_create(e, d, scope);
+        KV_CHECK(c, anim_clip(e, h) && asset_refs(e, h) == 1);
+        asset_scope_release(e, scope);
+        run(0.0);
+        KV_CHECK(c, anim_clip(e, h) == nullptr && anim_find(e, "scoped").is_null());
+    }
+
+    // ---- sheets: the format ------------------------------------------------------------
+    {
+        const char* sheet = R"({ "texture": "t/hero.png", "cell": [16, 16], "fps": 4,
+            "clips": { "walk.down": { "column": 1, "rows": [0, 1, 2, 3] },
+                       "idle": { "cells": [[0, 0]] },
+                       "spin": { "row": 2, "columns": [3, 2], "fps": 2, "loop": "pingpong" },
+                       "hit":  { "cells": [[0, 4]], "duration": 0.3, "loop": "once", "events": [[0.1, "hit"]] } },
+            "sets": { "walk": { "down": "walk.down" } } })";
+        AnimSheetParsed p;
+        const char* why = nullptr;
+        MemScope scope;
+        KV_CHECK(c, anim_sheet_parse(sheet, strlen(sheet), 64, 112, mem_scratch(), p, &why));
+        KV_CHECK(c, !strcmp(p.texture, "t/hero.png") && p.cols == 4 && p.rows == 7 && p.cell_size.x == 16 && p.clips.len == 4 && p.sets.len == 1);
+        const AnimClipDesc& wd = p.clips[0];
+        KV_CHECK(c, !strcmp(wd.name, "walk.down") && wd.loop == AnimLoop::Loop && near(wd.duration, 1.0f) && wd.tracks.len == 1 && wd.tracks[0].keys.len == 4);
+        KV_CHECK(c, near(wd.tracks[0].keys[2].time, 0.5f) && near(wd.tracks[0].keys[2].v[0], 0.25f) && near(wd.tracks[0].keys[2].v[1], 2.0f / 7.0f) && near(wd.tracks[0].keys[2].v[2], 0.25f));
+        const AnimClipDesc& sp = p.clips[2];
+        KV_CHECK(c, sp.loop == AnimLoop::PingPong && near(sp.duration, 1.0f) && near(sp.tracks[0].keys[0].v[0], 0.75f));
+        const AnimClipDesc& hit = p.clips[3];
+        KV_CHECK(c, hit.loop == AnimLoop::Once && near(hit.duration, 0.3f) && hit.tracks.len == 2 && hit.tracks[1].keys[0].event == name_intern("hit"));
+        KV_CHECK(c, p.sets[0].set == name_intern("walk") && p.sets[0].clip.bits == 0);
+        // Each built as a clip.
+        for (const AnimClipDesc& d : p.clips) {
+            AnimClip built;
+            KV_CHECK(c, anim_build(d, mem_general(), built, &why));
+            built.tracks.free(); built.keys.free();
+        }
+        const char* bad_sheets[] = {
+            R"({ "cell": [16, 16], "clips": {} })",
+            R"({ "texture": "x.png", "clips": {} })",
+            R"({ "texture": "x.png", "cell": [16, 16], "clips": { "a": { "cells": [[9, 0]] } } })",
+            R"({ "texture": "x.png", "cell": [16, 16], "clips": { "a": { "column": 0 } } })",
+            R"({ "texture": "x.png", "cell": [16, 16], "clips": { "a": { "cells": [[0, 0]] } }, "sets": { "s": { "v": "nope" } } })",
+        };
+        for (const char* b : bad_sheets) {
+            AnimSheetParsed q;
+            why = nullptr;
+            KV_CHECK(c, !anim_sheet_parse(b, strlen(b), 64, 112, mem_scratch(), q, &why) && why);
+        }
+    }
 
     engine_shutdown(e);
 }

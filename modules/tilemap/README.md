@@ -107,6 +107,14 @@ What the module registers with the engine:
 | `tilemap.tile` | kind, cosmetic | `Transform2`, `Sprite`; 262,144 rows of address space |
 | `tilemap.pump` | system, PreSim, main thread, `Always`, after the asset pumps | writes `tilemap.tile` |
 
+## Animated tiles
+
+A tile with a Tiled animation gets a clip when the map turns Ready (`<map>#tile<gid>`, its
+frames as uv keys, looping), held by the map. `tilemap_spawn` puts its cells in a kind of
+their own, `tilemap.animtile` (`Transform2, Sprite, AnimPlayer`), so the many still tiles
+carry no player; declare `tilemap.animtile` in the writes of whatever spawns a map that has
+animated tiles. A flipped animated tile plays its frames unflipped.
+
 ## Naming what you spawn
 
 `tilemap_object_name(map, object, out, cap)` gives an object a name for the entity a game

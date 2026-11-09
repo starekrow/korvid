@@ -1,0 +1,21 @@
+{ "texture": "example_arcanum/actors/OldMan.png", "cell": [16, 16], "fps": 6.67,
+  "clips": {
+    "walk.down": {"column": 0, "rows": [0, 1, 2, 3]},
+    "idle.down": {"cells": [[0, 0]]},
+    "attack.down": {"cells": [[0, 4]], "duration": 0.3, "loop": "once"},
+    "walk.up": {"column": 1, "rows": [0, 1, 2, 3]},
+    "idle.up": {"cells": [[1, 0]]},
+    "attack.up": {"cells": [[1, 4]], "duration": 0.3, "loop": "once"},
+    "walk.left": {"column": 2, "rows": [0, 1, 2, 3]},
+    "idle.left": {"cells": [[2, 0]]},
+    "attack.left": {"cells": [[2, 4]], "duration": 0.3, "loop": "once"},
+    "walk.right": {"column": 3, "rows": [0, 1, 2, 3]},
+    "idle.right": {"cells": [[3, 0]]},
+    "attack.right": {"cells": [[3, 4]], "duration": 0.3, "loop": "once"}
+  },
+  "sets": {
+    "walk": {"down": "walk.down", "up": "walk.up", "left": "walk.left", "right": "walk.right"},
+    "idle": {"down": "idle.down", "up": "idle.up", "left": "idle.left", "right": "idle.right"},
+    "attack": {"down": "attack.down", "up": "attack.up", "left": "attack.left", "right": "attack.right"}
+  }
+}

@@ -2,6 +2,7 @@
 #include "korvid/core/json.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
+#include "korvid/save/writer.h"
 #include <math.h>
 #include <string.h>
 
@@ -154,6 +155,40 @@ bool anim_parse(const char* text, usize len, Allocator* alloc, AnimClip& out, co
         desc.duration = last;
     }
     return anim_build(desc, alloc, out, error);
+}
+
+bool anim_write(const AnimClip& clip, SaveWriter& w) {
+    w.begin_object();
+    w.key("duration"); w.f32_value(clip.duration);
+    w.key("loop");     w.string_value(anim_loop_name(clip.loop));
+    w.key("tracks");
+    w.begin_array();
+    for (const AnimTrack& t : clip.tracks) {
+        w.begin_object();
+        w.key("channel"); w.string_value(anim_channel_name(t.channel));
+        w.key("interp");  w.string_value(t.interp == AnimInterp::Linear ? "linear" : "step");
+        w.key("keys");
+        w.begin_array();
+        u32 lanes = anim_channel_lanes(t.channel);
+        for (u32 i = 0; i < t.count; ++i) {
+            const AnimKey& k = clip.keys[t.first + i];
+            w.begin_array(true);
+            w.f32_value(k.time);
+            if (t.channel == AnimChannel::Event) w.string_value(name_str(k.event));
+            else if (lanes == 1) w.f32_value(k.v[0]);
+            else {
+                w.begin_array(true);
+                for (u32 l = 0; l < lanes; ++l) w.f32_value(k.v[l]);
+                w.end_array();
+            }
+            w.end_array();
+        }
+        w.end_array();
+        w.end_object();
+    }
+    w.end_array();
+    w.end_object();
+    return !w.failed;
 }
 
 bool anim_sample(const AnimClip& clip, const AnimTrack& track, f32 time, f32 out[4]) {

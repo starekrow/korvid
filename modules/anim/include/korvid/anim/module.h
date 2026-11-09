@@ -1,10 +1,11 @@
 // Korvid anim: module record.
 //
-//   handle kind  anim.clip
+//   handle kinds anim.clip, anim.sheet (both asset kinds in the asset module's scopes)
 //   components   AnimPlayer
 //   events       AnimEvent{entity, clip, name}, AnimFinished{entity, clip}
 //   resources    anim.clips
-//   systems      anim.pump   PreSim, main thread, Always: clip files that arrived are parsed
+//   systems      anim.pump   PreSim, main thread, Always: clip files that arrived are parsed,
+//                            sheets whose texture arrived get their clips
 //                anim.play   PostSim, Always, after text.layout and before scene.compose when
 //                            present: reads *.AnimPlayer; writes *.AnimPlayer, *.Sprite,
 //                            *.Local2, *.Transform2
