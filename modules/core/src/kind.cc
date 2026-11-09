@@ -73,7 +73,13 @@ void SparseRows::erase(u32 i) {
     --slots.len; --gens.len; data.len -= stride;
 }
 
-bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t) {
+const char* prop_type_name(PropType t) {
+    static const char* const k_names[] = {"none", "int", "float", "bool", "string", "handle"};
+    return (u32)t < KV_COUNTOF(k_names) ? k_names[(u32)t] : "?";
+}
+
+bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t,
+                 Span<const ComponentDesc* const> attachable) {
     KV_ASSERT(!desc);
     desc   = &d;
     name   = full_name;
@@ -82,6 +88,15 @@ bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentD
     tag    = t;
     columns.alloc = mem_general();
     names.stride  = sizeof(Name);
+    attachments.alloc = mem_general();
+    attachments.reserve(attachable.len ? attachable.len : 1); // never grows again: resource names are pointed at
+    for (const ComponentDesc* cd : attachable) {
+        Attachment& a = attachments.push(Attachment{});
+        a.desc = cd;
+        a.rows.stride = (cd->size + cd->align - 1) / cd->align * cd->align;
+        snprintf(a.resource_name, sizeof a.resource_name, "%s.@%s", full_name, cd->name);
+    }
+    if (d.props) snprintf(props_resource_name, sizeof props_resource_name, "%s.@props", full_name);
     columns.reserve(comps.len); // never grows again: resource names are pointed at
     for (const ComponentDesc* cd : comps) {
         Column c;
@@ -122,6 +137,9 @@ void Table::free() {
     }
     columns.free();
     names.free();
+    for (Attachment& a : attachments) a.rows.free();
+    attachments.free();
+    props.free();
     slots.free();
     *this = Table{};
 }
@@ -190,7 +208,8 @@ Handle Table::spawn() {
 bool Table::destroy(Handle h) {
     slots.owner = thread_id();
     if (!slots.destroy(h)) return false;
-    if (names.count()) sparse_dirty = true;
+    if (names.count() || props.len) sparse_dirty = true;
+    for (const Attachment& a : attachments) if (a.rows.count()) sparse_dirty = true;
 #if KV_DEV
     for (Column& c : columns) {
         memset(row(c, h.index()), 0xDD, c.stride); // a stale pointer sees poison
@@ -214,6 +233,8 @@ bool Table::restore_slots(Span<const u32> gen_words, Span<const u32> free_order)
         if (c.prev) memset(c.prev, 0, (usize)gen_words.len * c.stride);
     }
     names.clear(); // the old names go: the engine's map finds them no longer held
+    for (Attachment& a : attachments) a.rows.clear();
+    props.clear();
     return slots.restore_slots(gen_words, free_order);
 }
 
@@ -241,9 +262,20 @@ u64 Table::hash() const {
         for (const Column& c : columns)
             if (c.desc->is_sim()) h = hash_mix(h ^ component_hash(*c.desc, row(c, i)));
     }
-    // Names are the entity's: a kind with none hashes as it always did.
+    // Names, attachments and bags are the entity's: a kind with none hashes as it always did.
     for (u32 i = 0; i < names.count(); ++i)
         if (sparse_live(names, i)) h = hash_mix(h ^ ((u64)names.slots[i] * 0x9E3779B97F4A7C15ull) ^ ((const Name*)names.at(i))->hash);
+    for (const Attachment& a : attachments) {
+        if (!a.desc->is_sim()) continue;
+        u64 ah = hash_str(a.desc->name);
+        for (u32 i = 0; i < a.rows.count(); ++i)
+            if (sparse_live(a.rows, i)) h = hash_mix(h ^ ah ^ ((u64)a.rows.slots[i] << 20) ^ component_hash(*a.desc, a.rows.at(i)));
+    }
+    for (const PropEntry& p : props) {
+        if (!is_alive(p.slot) || handle_at(p.slot).gen() != p.gen) continue;
+        u64 v = hash_mix(p.key.hash ^ (u64)p.value.type ^ (u64)p.value.i * 31 ^ p.value.bits * 131);
+        h = hash_mix(h ^ ((u64)p.slot << 24) ^ v ^ hash_bytes(&p.value.f, sizeof p.value.f));
+    }
     return h;
 }
 
@@ -260,6 +292,109 @@ void Table::sweep_sparse(Array<Name>* gone) {
         if (gone) gone->push(*(const Name*)names.at(i));
         names.erase(i);
     }
+    for (Attachment& a : attachments)
+        for (u32 i = a.rows.count(); i-- > 0;)
+            if (!sparse_live(a.rows, i)) a.rows.erase(i);
+    u32 kept = 0;
+    for (u32 i = 0; i < props.len; ++i)
+        if (is_alive(props[i].slot) && handle_at(props[i].slot).gen() == props[i].gen) props[kept++] = props[i];
+    props.len = kept;
+}
+
+// ---- attachments ------------------------------------------------------------------------------
+
+Attachment* Table::attachment(u32 component_id) {
+    for (Attachment& a : attachments)
+        if (*a.desc->id == component_id) return &a;
+    return nullptr;
+}
+
+void* Table::attached(Handle h, u32 component_id) {
+    Attachment* a = attachment(component_id);
+    if (!a || !valid(h)) return nullptr;
+    u32 i = a->rows.find(h.index());
+    return i != KV_POOL_NONE && a->rows.gens[i] == h.gen() ? a->rows.at(i) : nullptr;
+}
+
+void* Table::attach(Handle h, u32 component_id, const void* data) {
+    Attachment* a = attachment(component_id);
+    if (!a || !valid(h)) return nullptr;
+    u8* row = a->rows.insert(h.index(), h.gen());
+    memcpy(row, data, a->desc->size);
+    return row;
+}
+
+bool Table::detach(Handle h, u32 component_id) {
+    Attachment* a = attachment(component_id);
+    if (!a || !valid(h)) return false;
+    u32 i = a->rows.find(h.index());
+    if (i == KV_POOL_NONE || a->rows.gens[i] != h.gen()) return false;
+    a->rows.erase(i);
+    return true;
+}
+
+// ---- property bags ----------------------------------------------------------------------------
+
+namespace {
+
+// Where (slot, key) is or would go in the sorted entries.
+u32 prop_lower(const Array<PropEntry>& ps, u32 slot, u64 key) {
+    u32 lo = 0, hi = ps.len;
+    while (lo < hi) {
+        u32 mid = (lo + hi) / 2;
+        const PropEntry& p = ps.data[mid];
+        if (p.slot < slot || (p.slot == slot && p.key.hash < key)) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+}
+
+} // namespace
+
+const PropValue* Table::prop(Handle h, Name key) const {
+    if (!desc->props || !valid(h)) return nullptr;
+    u32 i = prop_lower(props, h.index(), key.hash);
+    if (i < props.len && props[i].slot == h.index() && props[i].key == key && props[i].gen == h.gen()) return &props[i].value;
+    return nullptr;
+}
+
+bool Table::prop_set(Handle h, Name key, const PropValue& v) {
+    if (!desc->props || !valid(h) || key.is_null()) return false;
+    // A stale bag left in the slot by a dead entity goes first.
+    u32 at = prop_lower(props, h.index(), 0), kept = at;
+    u32 end = at;
+    while (end < props.len && props[end].slot == h.index()) ++end;
+    for (u32 k = at; k < end; ++k) if (props[k].gen == h.gen()) props[kept++] = props[k];
+    if (kept != end) {
+        memmove(props.data + kept, props.data + end, (usize)(props.len - end) * sizeof(PropEntry));
+        props.len -= end - kept;
+    }
+    u32 i = prop_lower(props, h.index(), key.hash);
+    if (i < props.len && props[i].slot == h.index() && props[i].key == key) {
+        props[i].gen = h.gen();
+        props[i].value = v;
+        return true;
+    }
+    props.push(PropEntry{});
+    memmove(props.data + i + 1, props.data + i, (usize)(props.len - 1 - i) * sizeof(PropEntry));
+    props[i] = PropEntry{h.index(), h.gen(), key, v};
+    return true;
+}
+
+bool Table::prop_remove(Handle h, Name key) {
+    if (!desc->props || !valid(h)) return false;
+    u32 i = prop_lower(props, h.index(), key.hash);
+    if (i >= props.len || props[i].slot != h.index() || props[i].key != key || props[i].gen != h.gen()) return false;
+    memmove(props.data + i, props.data + i + 1, (usize)(props.len - 1 - i) * sizeof(PropEntry));
+    --props.len;
+    return true;
+}
+
+u32 Table::props_of(Handle h, u32* first) const {
+    u32 i = prop_lower(props, h.index(), 0), n = 0;
+    *first = i;
+    while (i + n < props.len && props[i + n].slot == h.index()) ++n;
+    if (n && props[i].gen != h.gen()) return 0; // a dead entity's, until the sweep (a slot's entries share one generation)
+    return n;
 }
 
 int Table::describe(Handle h, char* out, usize cap) const {
@@ -271,6 +406,32 @@ int Table::describe(Handle h, char* out, usize cap) const {
         if (k && at < cap) { out[at] = ' '; ++at; if (at < cap) out[at] = 0; }
         int n = component_describe(*c.desc, row(c, h.index()), out + (at < cap ? at : cap), at < cap ? cap - at : 0);
         if (n > 0) at += (usize)n;
+    }
+    for (const Attachment& a : attachments) {
+        const void* r = attached(h, *a.desc->id);
+        if (!r) continue;
+        if (at < cap) { out[at] = ' '; ++at; if (at < cap) out[at] = 0; }
+        if (at < cap) { out[at] = '@'; ++at; if (at < cap) out[at] = 0; }
+        int n = component_describe(*a.desc, r, out + (at < cap ? at : cap), at < cap ? cap - at : 0);
+        if (n > 0) at += (usize)n;
+    }
+    u32 first = 0, np = desc->props ? props_of(h, &first) : 0;
+    for (u32 k = 0; k < np; ++k) {
+        const PropEntry& p = props[first + k];
+        int n = 0;
+        char* dst = out + (at < cap ? at : cap);
+        usize room = at < cap ? cap - at : 0;
+        const char* sep = k ? ", " : " @props{";
+        switch (p.value.type) {
+        case PropType::Int:    n = snprintf(dst, room, "%s%s=%lld", sep, name_str(p.key), (long long)p.value.i); break;
+        case PropType::Float:  n = snprintf(dst, room, "%s%s=%g", sep, name_str(p.key), p.value.f); break;
+        case PropType::Bool:   n = snprintf(dst, room, "%s%s=%s", sep, name_str(p.key), p.value.i ? "true" : "false"); break;
+        case PropType::String: n = snprintf(dst, room, "%s%s=\"%s\"", sep, name_str(p.key), name_str(Name{p.value.bits})); break;
+        case PropType::Handle: n = snprintf(dst, room, "%s%s=%s", sep, name_str(p.key), kind_name(Handle{p.value.bits})); break;
+        case PropType::None:   break;
+        }
+        if (n > 0) at += (usize)n;
+        if (k + 1 == np && at + 1 < cap) { out[at++] = '}'; out[at] = 0; }
     }
     return (int)at;
 }

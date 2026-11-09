@@ -239,6 +239,7 @@ Column* ctx_column(TickContext& ctx, u32 resource_id, const void* type, bool wri
 }
 
 Column* ctx_column(TickContext& ctx, const char* column, const void* type, bool write, u32* rows) {
+    column = ctx_qualify(ctx, column);
     u32 id = engine_resource_id(*ctx.engine, column);
     if (!id) { KV_ERROR("engine", "system '%s': unknown column '%s'", system_name(ctx), column); KV_VERIFY(!"unknown column"); return nullptr; }
     return ctx_column(ctx, id, type, write, rows);
@@ -327,6 +328,105 @@ void ctx_spawn_component(CommandBuffer* cb, u32 component_id, const void* data, 
 }
 
 void ctx_destroy(TickContext& ctx, CommandBuffer* cb, Handle h) { command_destroy(buffer_of(ctx, cb), h); }
+
+// ---- attachments and bags -----------------------------------------------------------------------
+
+namespace {
+
+Attachment* checked_store(TickContext& ctx, Table* t, u32 component_id, bool write) {
+    Attachment* a = t ? t->attachment(component_id) : nullptr;
+    if (!a) {
+        const ComponentDesc* cd = engine_component(*ctx.engine, component_id);
+        KV_ERROR("engine", "system '%s': kind '%s' does not attach '%s'", system_name(ctx), t ? t->name : "?", cd ? cd->name : "?");
+        return nullptr;
+    }
+    if (!allowed(ctx, a->resource, t->resource, write)) { deny(ctx, "attachments", a->resource_name, write); return nullptr; }
+    return a;
+}
+
+} // namespace
+
+void* ctx_attached(TickContext& ctx, Handle h, u32 component_id, const void* type, bool write) {
+    Table* t = engine_table_of(*ctx.engine, h);
+    if (!t || !t->valid(h)) return nullptr;
+    Attachment* a = checked_store(ctx, t, component_id, write);
+    if (!a || a->desc->type != type) return nullptr;
+    return t->attached(h, component_id);
+}
+
+void* ctx_attach(TickContext& ctx, Handle h, u32 component_id, const void* type, const void* data) {
+    Table* t = engine_table_of(*ctx.engine, h);
+    if (!t || !t->valid(h)) return nullptr;
+    Attachment* a = checked_store(ctx, t, component_id, true);
+    if (!a || a->desc->type != type) return nullptr;
+    return t->attach(h, component_id, data);
+}
+
+bool ctx_detach(TickContext& ctx, Handle h, u32 component_id) {
+    Table* t = engine_table_of(*ctx.engine, h);
+    if (!t || !t->valid(h)) return false;
+    return checked_store(ctx, t, component_id, true) && t->detach(h, component_id);
+}
+
+Table* ctx_attachments(TickContext& ctx, u32 kind_id, u32 component_id, bool write) {
+    Table* t = engine_table(*ctx.engine, kind_id);
+    return checked_store(ctx, t, component_id, write) ? t : nullptr;
+}
+
+Table* ctx_props(TickContext& ctx, Handle h, bool write) {
+    Table* t = engine_table_of(*ctx.engine, h);
+    if (!t || !t->valid(h)) return nullptr;
+    if (!t->props_resource) { KV_ERROR("engine", "system '%s': kind '%s' has no property bags", system_name(ctx), t->name); return nullptr; }
+    if (!allowed(ctx, t->props_resource, t->resource, write)) { deny(ctx, "bags", t->props_resource_name, write); return nullptr; }
+    return t;
+}
+
+namespace {
+
+bool set_prop(TickContext& ctx, Handle h, const char* key, const PropValue& v) {
+    Table* t = ctx_props(ctx, h, true);
+    return t && key && key[0] && t->prop_set(h, name_intern(key), v);
+}
+
+const PropValue* get_prop(TickContext& ctx, Handle h, const char* key) {
+    Table* t = ctx_props(ctx, h, false);
+    Name n = key ? name_lookup(key) : Name{};
+    return t && !n.is_null() ? t->prop(h, n) : nullptr;
+}
+
+} // namespace
+
+bool TickContext::prop_set_int(Handle h, const char* key, i64 v) { PropValue p; p.type = PropType::Int; p.i = v; return set_prop(*this, h, key, p); }
+bool TickContext::prop_set_float(Handle h, const char* key, f64 v) { PropValue p; p.type = PropType::Float; p.f = v; return set_prop(*this, h, key, p); }
+bool TickContext::prop_set_bool(Handle h, const char* key, bool v) { PropValue p; p.type = PropType::Bool; p.i = v ? 1 : 0; return set_prop(*this, h, key, p); }
+bool TickContext::prop_set_str(Handle h, const char* key, const char* v) { PropValue p; p.type = PropType::String; p.bits = name_intern(v ? v : "").hash; return set_prop(*this, h, key, p); }
+bool TickContext::prop_set_handle(Handle h, const char* key, Handle v) { PropValue p; p.type = PropType::Handle; p.bits = v.bits; return set_prop(*this, h, key, p); }
+bool TickContext::prop_remove(Handle h, const char* key) {
+    Table* t = ctx_props(*this, h, true);
+    Name n = key ? name_lookup(key) : Name{};
+    return t && !n.is_null() && t->prop_remove(h, n);
+}
+bool TickContext::prop_has(Handle h, const char* key) { return get_prop(*this, h, key) != nullptr; }
+i64 TickContext::prop_int(Handle h, const char* key, i64 dflt) {
+    const PropValue* p = get_prop(*this, h, key);
+    return !p ? dflt : p->type == PropType::Int || p->type == PropType::Bool ? p->i : p->type == PropType::Float ? (i64)p->f : dflt;
+}
+f64 TickContext::prop_float(Handle h, const char* key, f64 dflt) {
+    const PropValue* p = get_prop(*this, h, key);
+    return !p ? dflt : p->type == PropType::Float ? p->f : p->type == PropType::Int ? (f64)p->i : dflt;
+}
+bool TickContext::prop_bool(Handle h, const char* key, bool dflt) {
+    const PropValue* p = get_prop(*this, h, key);
+    return p && (p->type == PropType::Bool || p->type == PropType::Int) ? p->i != 0 : dflt;
+}
+const char* TickContext::prop_str(Handle h, const char* key, const char* dflt) {
+    const PropValue* p = get_prop(*this, h, key);
+    return p && p->type == PropType::String ? name_str(Name{p->bits}) : dflt;
+}
+Handle TickContext::prop_handle(Handle h, const char* key) {
+    const PropValue* p = get_prop(*this, h, key);
+    return p && p->type == PropType::Handle ? Handle{p->bits} : Handle{};
+}
 
 void ctx_name(TickContext& ctx, CommandBuffer* cb, Handle h, const char* name) {
     command_name(buffer_of(ctx, cb), h, name && name[0] ? name_intern(name).hash : 0);

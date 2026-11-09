@@ -41,6 +41,8 @@ constinit const KindDesc k_kinds[] = {
     {.name = "sv.anchor", .components = "SPos", .capacity = 4},
 };
 constinit const KindDesc k_extra_kinds[] = {{.name = "sx.first", .components = "SPos", .capacity = 4}};
+constinit const KindDesc k_bag_kinds[] = {{.name = "sb.npc", .components = "SPos", .capacity = 8, .attachable = "SLink", .props = true}};
+KV_MODULE_DEFINE(k_sb) = {.name = "sb", .kinds = k_bag_kinds};
 KV_MODULE_DEFINE(k_sv) = {.name = "sv", .components = k_components, .kinds = k_kinds};
 KV_MODULE_DEFINE(k_sx) = {.name = "sx", .kinds = k_extra_kinds};
 
@@ -214,4 +216,31 @@ void test_kinds(kv::TestCtx& c) {
     KV_CHECK(c, !parse_handle("@x", &sh, kind, sizeof kind) && !parse_handle("k@", &sh, kind, sizeof kind));
     w2.free();
     engine_shutdown(g);
+
+    // Attachments and bags travel with their rows, typed.
+    const ModuleDesc* const bags[] = {&k_sv, &k_sb};
+    Engine eb;
+    KV_CHECK(c, engine_init(eb, bags));
+    Table* npcs = engine_table(eb, "sb.npc");
+    Handle n0 = npcs->spawn(SPos{1, 1}), n1 = npcs->spawn(SPos{2, 2});
+    npcs->attach(n1, SLink{n0, 9});
+    TickContext ctx{};
+    ctx.engine = &eb; ctx.events = &eb.events;
+    ctx.prop_set_int(n0, "gold", 12); ctx.prop_set_float(n0, "speed", 2.0); ctx.prop_set_str(n0, "line", "hello");
+    ctx.prop_set_bool(n0, "met", true); ctx.prop_set_handle(n0, "friend", n1);
+    u64 bag_hash = npcs->hash();
+    SaveWriter w3;
+    w3.init(mem_general());
+    const char* const bag_kinds[] = {"sb.npc"};
+    save_kinds(w3, eb, bag_kinds);
+    KV_CHECK(c, w3.finish());
+    npcs->destroy_all();
+    engine_apply_commands(eb);
+    KV_CHECK(c, save_parse(SaveFormat::Json, w3.out.data, w3.out.len, mem_scratch(), doc) && load_kinds(doc, doc.root(), eb) == 1);
+    KV_CHECK(c, npcs->hash() == bag_hash);
+    KV_CHECK(c, npcs->attached<SLink>(n1) && npcs->attached<SLink>(n1)->to == n0 && npcs->attached<SLink>(n1)->n == 9 && !npcs->attached<SLink>(n0));
+    KV_CHECK(c, ctx.prop_int(n0, "gold") == 12 && ctx.prop_float(n0, "speed") == 2.0 && !strcmp(ctx.prop_str(n0, "line"), "hello"));
+    KV_CHECK(c, ctx.prop_bool(n0, "met") && ctx.prop_handle(n0, "friend") == n1);
+    w3.free();
+    engine_shutdown(eb);
 }

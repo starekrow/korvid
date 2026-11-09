@@ -3388,6 +3388,26 @@
        "name": "route",
        "type": "string",
        "value": ""
+      },
+      {
+       "name": "display",
+       "type": "string",
+       "value": "Old Tobin"
+      },
+      {
+       "name": "dialogue",
+       "type": "string",
+       "value": "Ah, {c=gold}{name}{/c}! These boulders block every road.|If you could {wave}break{/wave} one for me, I'd be grateful."
+      },
+      {
+       "name": "dialogue_done",
+       "type": "string",
+       "value": "You broke it! The road is {wave}free{/wave} again.|Mind the farmers, they're touchy about their {c=red}hammers{/c}."
+      },
+      {
+       "name": "quest_rocks",
+       "type": "int",
+       "value": 1
       }
      ]
     },
@@ -3412,6 +3432,16 @@
        "name": "route",
        "type": "string",
        "value": "0,0 96,0"
+      },
+      {
+       "name": "display",
+       "type": "string",
+       "value": "Farmer Hal"
+      },
+      {
+       "name": "dialogue",
+       "type": "string",
+       "value": "Fine day for walking.|{shake}Keep that hammer away from me.{/shake}"
       }
      ]
     },

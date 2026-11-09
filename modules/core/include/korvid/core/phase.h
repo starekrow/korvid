@@ -140,6 +140,11 @@ void    ctx_destroy(TickContext& ctx, CommandBuffer* cb, Handle h);
 void    ctx_destroy_all(TickContext& ctx, CommandBuffer* cb, u32 kind_id);
 void    ctx_name(TickContext& ctx, CommandBuffer* cb, Handle h, const char* name);
 u32     ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick);
+void*   ctx_attached(TickContext& ctx, Handle h, u32 component_id, const void* type, bool write);
+void*   ctx_attach(TickContext& ctx, Handle h, u32 component_id, const void* type, const void* data);
+bool    ctx_detach(TickContext& ctx, Handle h, u32 component_id);
+Table*  ctx_attachments(TickContext& ctx, u32 kind_id, u32 component_id, bool write); // the table, its store's access checked
+Table*  ctx_props(TickContext& ctx, Handle h, bool write);                          // the entity's table, its bags' access checked
 bool    ctx_cancel(TickContext& ctx, u32 ticket);
 
 // Per-chunk buffers for a parallel_for, in the caller's scratch: made before, merged after.
@@ -221,6 +226,25 @@ struct ChunkContext {
     void destroy(Handle h) { ctx_destroy(*ctx, commands, h); }
 };
 
+// One kind's attachments of a component, live ones only, in slot order:
+//   for (Attached<Talk> a : ctx.attached_all<Talk>(".npc")) use(a.entity, *a.value);
+template <class T>
+struct Attached { Handle entity; T* value; };
+template <class T>
+struct AttachedRange {
+    Table*       table = nullptr;
+    Attachment*  store = nullptr;
+    struct Iter {
+        Table* t; Attachment* a; u32 i;
+        void settle() { while (a && i < a->rows.count() && !t->sparse_live(a->rows, i)) ++i; }
+        Attached<T> operator*() const { return Attached<T>{t->handle_at(a->rows.slots[i]), (T*)a->rows.at(i)}; }
+        Iter& operator++() { ++i; settle(); return *this; }
+        bool  operator!=(const Iter& o) const { return i != o.i; }
+    };
+    Iter begin() const { Iter it{table, store, 0}; it.settle(); return it; }
+    Iter end() const { return Iter{table, store, store ? store->rows.count() : 0}; }
+};
+
 struct TickContext {
     Engine*                engine;
     EventBus*              events;
@@ -288,6 +312,42 @@ struct TickContext {
     u32 resource_id(const char* name) { return ctx_resource_id(*this, name, false); }
     u32 column_id(const char* name) { return ctx_resource_id(*this, name, true); } // asserts if not a column
     u32 kind_id(const char* name);
+
+    // ---- per entity: attachments and property bags -------------------------------------
+    // Under "kind.@Component" and "kind.@props" (or "*.@Component", "*.@props") in the sets;
+    // a write on the whole kind covers them. Immediate, like a direct spawn: the writer owns
+    // them for the phase. A kind attaches only what its KindDesc::attachable lists.
+    template <class T>
+    T* attached(Handle h) {
+        typedef typename RemoveConst<T>::type U;
+        return (T*)ctx_attached(*this, h, ComponentType<U>::id, &TypeKey<U>::key, !RemoveConst<T>::is_const);
+    }
+    template <class T>
+    T* attach(Handle h, const T& v) { return (T*)ctx_attach(*this, h, ComponentType<T>::id, &TypeKey<T>::key, &v); }
+    template <class T>
+    bool detach(Handle h) { return ctx_detach(*this, h, ComponentType<T>::id); }
+    template <class T, class K>
+    AttachedRange<T> attached_all(K kind) {
+        typedef typename RemoveConst<T>::type U;
+        AttachedRange<T> r;
+        r.table = ctx_attachments(*this, kind_of(kind), ComponentType<U>::id, !RemoveConst<T>::is_const);
+        r.store = r.table ? r.table->attachment(ComponentType<U>::id) : nullptr;
+        return r;
+    }
+    // The bag. Getters convert between int and float and answer `dflt` for a missing key or
+    // another type; prop_str answers "" for none.
+    bool        prop_set_int(Handle h, const char* key, i64 v);
+    bool        prop_set_float(Handle h, const char* key, f64 v);
+    bool        prop_set_bool(Handle h, const char* key, bool v);
+    bool        prop_set_str(Handle h, const char* key, const char* v); // interned: for words and ids, not prose that changes every tick
+    bool        prop_set_handle(Handle h, const char* key, Handle v);
+    bool        prop_remove(Handle h, const char* key);
+    bool        prop_has(Handle h, const char* key);
+    i64         prop_int(Handle h, const char* key, i64 dflt = 0);
+    f64         prop_float(Handle h, const char* key, f64 dflt = 0.0);
+    bool        prop_bool(Handle h, const char* key, bool dflt = false);
+    const char* prop_str(Handle h, const char* key, const char* dflt = "");
+    Handle      prop_handle(Handle h, const char* key);
 
     // ---- commands: applied at the phase boundary, in issue order ---------------------
     // Spawn without holding the write: the entity exists after this phase, and a Spawned

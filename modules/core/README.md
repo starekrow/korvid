@@ -66,6 +66,27 @@ for scripts, tools, saves and designers, a few lookups a tick behind a lock, not
 per-entity hot path. They are kept per table as sparse rows (`SparseRows`: by slot, each
 with its entity's generation), which is also where attachments and property bags live.
 
+**Attachments and property bags** (`kind.h`, `phase.h`). A kind is a fixed set of
+components, and that is what makes iteration a walk over columns. Data that belongs to
+one entity of many goes beside the columns, per entity:
+
+- A kind may list `attachable = "Talk, Quest"`. An entity of it may then carry one of each,
+  stored sparsely by slot (`SparseRows`), reached as `ctx.attached<const Talk>(h)`,
+  `ctx.attach(h, Talk{...})`, `ctx.detach<Talk>(h)` and
+  `for (Attached<Talk> a : ctx.attached_all<Talk>(".npc"))` under the resource
+  `kind.@Talk` (or `*.@Talk`) in a system's sets.
+- A kind may declare `props = true`: each entity then has a bag of named ints, floats,
+  bools, strings (interned) and handles, `ctx.prop_set_int(h, "gold", 3)`,
+  `ctx.prop_str(h, "dialogue")` and the rest, under `kind.@props`.
+
+Both are the entity's: hashed with its kind, saved and restored with its row (`save`),
+described in the CLI, gone when it dies (stale at once, swept at the boundary). **Engine
+systems never see them**: views are built from columns, so a `Sprite` attached to a label
+is data and draws nothing. A kind may not attach what it has as a column. Attachments
+are slower to walk than a column and bags slower again: use them for what one entity of
+many has (a quest, a chest's loot, what a designer typed on a map object), and kinds for
+what every entity has.
+
 **Events** (`event.h`, `timer.h`). Typed per-tick buffers; emitting is an append into the
 running unit's writer, delivery at phase boundaries merges writers in a fixed order.
 Handlers subscribe to one type and run in capped waves; a type may ask for next-tick

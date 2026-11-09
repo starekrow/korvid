@@ -64,13 +64,21 @@ struct Vitals {
     f32 hurt;
 };
 constinit const FieldDesc k_actor_fields[] = {KV_FIELDS(Actor, facing, moving, sheet, route_dir, home, route)};
+// What one villager wants of the player: the old man's errand. An attachment, since one
+// villager of many has it; what every villager has (its lines) is in its bag, from the map.
+struct Quest {
+    u32 rocks_wanted; // broken rocks that would please him
+    u32 done;         // 1 once the player has done it
+};
 constinit const FieldDesc k_vitals_fields[] = {KV_FIELDS(Vitals, hp, hp_max, hurt)};
-constinit const ComponentDesc k_components[] = {KV_COMPONENT(Actor, k_actor_fields), KV_COMPONENT(Vitals, k_vitals_fields)};
+constinit const FieldDesc k_quest_fields[] = {KV_FIELDS(Quest, rocks_wanted, done)};
+constinit const ComponentDesc k_components[] = {KV_COMPONENT(Actor, k_actor_fields), KV_COMPONENT(Vitals, k_vitals_fields), KV_COMPONENT(Quest, k_quest_fields)};
 
 constinit const KindDesc k_kinds[] = {
     // Bodies: the player and the villagers walk by intent (Move2), the rocks are pushed.
     {.name = ".player", .components = "Transform2, Sprite, Actor, Vitals, AnimPlayer, Collider2, Move2, MoveResult2", .capacity = 1},
-    {.name = ".npc",    .components = "Transform2, Local2, Parent, Sprite, Actor, AnimPlayer, Collider2, Move2, MoveResult2", .capacity = 32},
+    {.name = ".npc",    .components = "Transform2, Local2, Parent, Sprite, Actor, AnimPlayer, Collider2, Move2, MoveResult2", .capacity = 32,
+     .attachable = "Quest", .props = true},
     // Rocks the player pushes: the level's children, placed by the map's "rock" points.
     {.name = ".rock",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Move2", .capacity = 32},
     // The menu, the credits and the hearts: presentation, never hashed.
@@ -764,7 +772,10 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
             f32 x0, y0, x1, y1;
             if (sscanf(route->str, "%f,%f %f,%f", &x0, &y0, &x1, &y1) == 4) a.route = vec2{x1 - x0, -(y1 - y0)};
         }
-        engine_entity_name_set(*ctx.engine, npcs->spawn(transform2_at(a.home), local2_at(a.home), p, actor_sprite(g, which, (i32)objects_layer), a, AnimPlayer{}, feet_body(0), Move2{}, MoveResult2{}), name);
+        Handle npc = npcs->spawn(transform2_at(a.home), local2_at(a.home), p, actor_sprite(g, which, (i32)objects_layer), a, AnimPlayer{}, feet_body(0), Move2{}, MoveResult2{});
+        engine_entity_name_set(*ctx.engine, npc, name);
+        tilemap_spawn_props(ctx, npc, m, o); // the map's words for it: its lines, its name to show
+        if (const MapProperty* q = tilemap_property(m, o.props, "quest_rocks")) npcs->attach(npc, Quest{(u32)q->num, 0});
     }
 }
 

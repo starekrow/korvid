@@ -230,11 +230,39 @@ void save_kind(SaveWriter& w, const Table& t) {
         w.begin_object();
         w.key("slot"); w.uint_value(i);
         w.key("gen");  w.uint_value(t.handle_at(i).gen());
-        Name name = t.name_of(t.handle_at(i));
+        Handle h = t.handle_at(i);
+        Name name = t.name_of(h);
         if (!name.is_null()) { w.key("name"); w.string_value(name_str(name)); }
         for (const Column& c : t.columns) {
             w.key(c.desc->name);
             save_fields(w, c.desc->fields, c.data + (usize)i * c.stride);
+        }
+        // What this entity carries on its own: "@Talk": {...}, and its bag.
+        char key[KV_KIND_NAME_MAX + 2];
+        for (const Attachment& a : t.attachments) {
+            const void* row = t.attached(h, *a.desc->id);
+            if (!row) continue;
+            snprintf(key, sizeof key, "@%s", a.desc->name);
+            w.key(key);
+            save_fields(w, a.desc->fields, row);
+        }
+        u32 first = 0, np = t.desc->props ? t.props_of(h, &first) : 0;
+        if (np) {
+            w.key("@props");
+            w.begin_object();
+            for (u32 k = 0; k < np; ++k) {
+                const PropEntry& p = t.props[first + k];
+                w.key(name_str(p.key));
+                switch (p.value.type) {
+                case PropType::Int:    w.int_value(p.value.i); break;
+                case PropType::Bool:   w.bool_value(p.value.i != 0); break;
+                case PropType::String: w.string_value(name_str(Name{p.value.bits})); break;
+                case PropType::Float:  w.begin_object(true); w.key("f"); w.f64_value(p.value.f); w.end_object(); break;
+                case PropType::Handle: w.begin_object(true); w.key("h"); save_handle(w, Handle{p.value.bits}); w.end_object(); break;
+                case PropType::None:   w.null_value(); break;
+                }
+            }
+            w.end_object();
         }
         w.end_object();
     }
@@ -315,6 +343,29 @@ void fill_kind_rows(const JsonDoc& doc, const JsonValue& v, Table& t, const Save
                 else KV_WARN("save", "kind '%s': %s is a %s, not an object; left zero", t.name, c.desc->name, json_type_name(obj->type));
             }
             if (c.prev) memcpy(c.prev + (usize)s * c.stride, row, c.stride);
+        }
+        Handle h = t.handle_at(s);
+        for (const Attachment& a : t.attachments) {
+            char key[KV_KIND_NAME_MAX + 2];
+            snprintf(key, sizeof key, "@%s", a.desc->name);
+            const JsonValue* obj = json_get(doc, *r, key);
+            if (!obj || !obj->is_object()) continue;
+            MemScope scope;
+            u8* row = (u8*)alloc_in(mem_scratch(), a.rows.stride ? a.rows.stride : 1);
+            memset(row, 0, a.rows.stride);
+            load_fields(doc, *obj, a.desc->fields, row, remap);
+            t.attach(h, *a.desc->id, row);
+        }
+        const JsonValue* bag = t.desc->props ? json_get(doc, *r, "@props") : nullptr;
+        for (const JsonValue* pv = bag && bag->is_object() ? json_first(doc, *bag) : nullptr; pv; pv = json_next(doc, *pv)) {
+            PropValue v;
+            if (pv->is_bool()) { v.type = PropType::Bool; v.i = json_bool(pv, false) ? 1 : 0; }
+            else if (pv->is_number()) { v.type = PropType::Int; v.i = json_i64(pv, 0); }
+            else if (pv->is_string()) { v.type = PropType::String; v.bits = name_intern(pv->str).hash; }
+            else if (const JsonValue* f = pv->is_object() ? json_get(doc, *pv, "f") : nullptr) { v.type = PropType::Float; float_of(*f, &v.f); }
+            else if (const JsonValue* hv = pv->is_object() ? json_get(doc, *pv, "h") : nullptr) { v.type = PropType::Handle; v.bits = load_handle(hv, remap).bits; }
+            else { KV_WARN("save", "kind '%s': bag value '%s' is a %s; skipped", t.name, pv->key, json_type_name(pv->type)); continue; }
+            t.prop_set(h, name_intern(pv->key), v);
         }
     }
 }

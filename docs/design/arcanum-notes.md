@@ -136,3 +136,8 @@ around. (Written as each milestone landed.)
 - **The demo script is no longer the old walk.** Bodies resolve a little differently from
   the old hand loop (villagers now stop for the player and the bushes), so the demo bumps
   the villager twice where it used to five times. The demo is rewritten with the hammer.
+- **Attachments and bags.** Every villager's lines, its name to show and anything else a
+  designer types on its map object land in its bag (`tilemap_spawn_props`); only the old
+  man carries a `Quest` (rocks wanted, done), an attachment, since one villager of many
+  has it. Hostility (milestone 7) is a column of every villager instead: every villager
+  can be hammered. The save carries both without a line of game code.

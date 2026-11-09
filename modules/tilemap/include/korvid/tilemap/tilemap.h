@@ -144,6 +144,12 @@ const MapTile*     tilemap_tile_info(const TilemapAsset& m, u32 gid);
 const MapProperty* tilemap_property(const TilemapAsset& m, MapRange props, const char* name);
 const MapProperty* tilemap_map_property(const TilemapAsset& m, const char* name);
 const MapProperty* tilemap_tile_property(const TilemapAsset& m, u32 gid, const char* name);
+// Copies an object's custom properties into an entity's property bag (its kind declares
+// `props`; the calling system declares "kind.@props" in its writes): strings, files and
+// colors (as "#rrggbbaa") as strings, ints and object references (the id) as ints, floats
+// and bools as themselves. Returns how many it copied.
+u32 tilemap_spawn_props(TickContext& ctx, Handle entity, const TilemapAsset& m, const MapObject& o);
+
 // A name for what a game spawns from an object: its Tiled name when no other object of the
 // map has that name, otherwise "<map stem>#<object id>" ("village#12"), which Tiled keeps
 // for the object's life. Stable across runs and edits that leave the object alone.

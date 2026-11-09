@@ -28,6 +28,12 @@ struct KindDesc {
     u32                     capacity   = 0;       // slots of address space; pages commit as used
     u32*                    id         = nullptr; // optional: filled with the kind id at init, 0 after shutdown
     bool                    cosmetic   = false;   // presentation only: never part of the state hash (glyphs, an overlay)
+    // Per entity, not per kind. Components an entity of this kind may carry one of on its
+    // own ("Talk, Quest"), stored sparsely as resources "kind.@Talk"; and a property bag of
+    // named values per entity ("kind.@props"). Engine systems never see either: views are
+    // built from columns. See ctx.attach and ctx.prop_set.
+    const char*             attachable = nullptr;
+    bool                    props      = false;
 };
 
 constexpr u32 KV_KIND_NAME_MAX = 48;
@@ -64,6 +70,31 @@ struct SparseRows {
     void      free() { slots.free(); gens.free(); data.free(); }
 };
 
+// An attachable component's store in one kind: its schema, its entries by slot, and the
+// resource "kind.@Component" systems name to reach it.
+struct Attachment {
+    const ComponentDesc* desc     = nullptr;
+    SparseRows           rows;
+    u32                  resource = 0;
+    char                 resource_name[2 * KV_KIND_NAME_MAX + 3];
+};
+
+// A property bag's values: named, typed, few. Strings are interned names; handles are
+// written by name in saves like any other.
+enum class PropType : u8 { None, Int, Float, Bool, String, Handle };
+const char* prop_type_name(PropType t);
+struct PropValue {
+    PropType type = PropType::None;
+    i64      i    = 0;  // Int, Bool
+    f64      f    = 0;  // Float
+    u64      bits = 0;  // String (the Name's hash), Handle
+};
+struct PropEntry {
+    u32       slot, gen;
+    Name      key;
+    PropValue value;
+};
+
 struct Table {
     const KindDesc* desc     = nullptr;
     const char*     name     = nullptr; // the kind's full name: desc->name with the module prefix expanded
@@ -76,11 +107,16 @@ struct Table {
     u32             committed_rows = 0;
     MemTag          tag;
     SparseRows      names;        // entity names (Name), by slot; the engine keeps the reverse map
+    Array<Attachment> attachments; // one per attachable component, in the kind's declared order
+    Array<PropEntry> props;       // by slot, then key hash; the bag of every entity that has one
+    u32             props_resource = 0; // "kind.@props", when the kind has bags
+    char            props_resource_name[2 * KV_KIND_NAME_MAX + 3] = {};
     bool            sparse_dirty = false; // an entity with sparse rows died: the engine sweeps at the boundary
 
     // Reserves the columns and registers the handle kind. `comps` is in declared order;
     // `full_name` is the kind's name with its module prefix expanded (interned, stable).
-    bool init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t);
+    bool init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t,
+              Span<const ComponentDesc* const> attachable = {});
     void free();
 
     Handle spawn(); // every component zero, prev included; null if the kind is full
@@ -102,6 +138,26 @@ struct Table {
     // Drops every entry of the sparse rows whose entity has died. Returns the names dropped
     // into `gone` (for the engine's reverse map), if given.
     void   sweep_sparse(Array<Name>* gone);
+
+    // Attachments, directly (the context's forms check the declared access). The store for
+    // a component, or null when it is not attachable here; an entity's entry, or null; a
+    // new or replaced entry, copied from `data` (null for a stale handle or a component the
+    // kind cannot attach); false when there was none to detach.
+    Attachment*       attachment(u32 component_id);
+    const Attachment* attachment(u32 component_id) const { return ((Table*)this)->attachment(component_id); }
+    void*  attached(Handle h, u32 component_id);
+    const void* attached(Handle h, u32 component_id) const { return ((Table*)this)->attached(h, component_id); }
+    void*  attach(Handle h, u32 component_id, const void* data);
+    bool   detach(Handle h, u32 component_id);
+    template <class T> T*   attached(Handle h) { return (T*)attached(h, ComponentType<T>::id); }
+    template <class T> T*   attach(Handle h, const T& v) { return (T*)attach(h, ComponentType<T>::id, &v); }
+
+    // The property bag, directly. A value, or null; set (false for a stale handle or a kind
+    // without bags); remove; the entity's entries as a run of `props` (count 0 for none).
+    const PropValue* prop(Handle h, Name key) const;
+    bool   prop_set(Handle h, Name key, const PropValue& v);
+    bool   prop_remove(Handle h, Name key);
+    u32    props_of(Handle h, u32* first) const;
     u32    live() const { return slots.live; }
     u32    rows() const { return slots.capacity(); } // high-water slot count; iterate with is_alive
     bool   is_alive(u32 i) const { return slots.is_alive(i); }

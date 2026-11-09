@@ -159,13 +159,28 @@ bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules) {
                     if (comps[d] == e.components[cid - 1].desc) { KV_ERROR("engine", "kind '%s' lists component '%s' twice", name, cname); return false; }
                 comps[ncomps++] = e.components[cid - 1].desc;
             }
+            // What an entity may carry on its own: never a column of the kind too.
+            const ComponentDesc* attach[16];
+            u32 nattach = 0;
+            for (const char* cursor = k.attachable; name_list_next(cursor, cname, sizeof cname);) {
+                if (nattach >= KV_COUNTOF(attach)) { KV_ERROR("engine", "kind '%s' has more than %u attachable components", name, KV_COUNTOF(attach)); return false; }
+                u32 cid = engine_component_id(e, cname);
+                if (!cid) { KV_ERROR("engine", "kind '%s' in module '%s' may attach unknown component '%s'", name, m.name, cname); return false; }
+                const ComponentDesc* cd = e.components[cid - 1].desc;
+                for (u32 d = 0; d < ncomps; ++d)
+                    if (comps[d] == cd) { KV_ERROR("engine", "kind '%s' has '%s' as a column and as an attachment", name, cname); return false; }
+                for (u32 d = 0; d < nattach; ++d)
+                    if (attach[d] == cd) { KV_ERROR("engine", "kind '%s' lists attachable '%s' twice", name, cname); return false; }
+                attach[nattach++] = cd;
+            }
             mem_set_owner((u16)(i + 1));
             MemTag tag;
             tag.module   = (u16)(i + 1);
             tag.heap     = mem_module_heap((u16)(i + 1));
             tag.category = mem_category_register("kinds");
             Table& t = e.tables.push(Table{});
-            bool ok = t.init(k, name, Span<const ComponentDesc* const>(comps, ncomps), e.tables.len - 1, i, tag);
+            bool ok = t.init(k, name, Span<const ComponentDesc* const>(comps, ncomps), e.tables.len - 1, i, tag,
+                             Span<const ComponentDesc* const>(attach, nattach));
             mem_set_owner(0);
             if (!ok) { KV_ERROR("engine", "kind '%s' in module '%s': table creation failed", name, m.name); return false; }
             e.resources.push(ResourceEntry{name, i});
@@ -173,6 +188,14 @@ bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules) {
             for (Column& c : t.columns) {
                 e.resources.push(ResourceEntry{c.resource_name, i});
                 c.resource = e.resources.len;
+            }
+            for (Attachment& a : t.attachments) {
+                e.resources.push(ResourceEntry{a.resource_name, i});
+                a.resource = e.resources.len;
+            }
+            if (k.props) {
+                e.resources.push(ResourceEntry{t.props_resource_name, i});
+                t.props_resource = e.resources.len;
             }
             if (k.id) *k.id = e.tables.len;
         }
@@ -241,6 +264,22 @@ bool resolve_resource_refs(const Engine& e, const ModuleDesc& m, const char* uni
             for (const Table& t : e.tables)
                 if (t.has(filter))
                     if (const Column* c = t.column(cid)) out.push(c->resource);
+            mark();
+            continue;
+        }
+        if (raw[0] == '*' && raw[1] == '.' && raw[2] == '@') {
+            // Every kind's attachments of a component, or every kind's bags.
+            bool bags = strcmp(raw + 3, "props") == 0;
+            u32 cid = bags ? 0 : engine_component_id(e, raw + 3);
+            bool any = false;
+            for (const Table& t : e.tables) {
+                if (bags && t.props_resource) { out.push(t.props_resource); any = true; }
+                if (const Attachment* a = cid ? t.attachment(cid) : nullptr) { out.push(a->resource); any = true; }
+            }
+            if (!any) {
+                KV_ERROR("engine", "'%s' in module '%s' %s '%s' but no kind has %s", unit_name, m.name, kind, raw, bags ? "bags" : "it attachable");
+                return false;
+            }
             mark();
             continue;
         }

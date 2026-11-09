@@ -9,6 +9,7 @@
 #include "korvid/asset/scope.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/phase.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"
 #include "korvid/core/name.h"
@@ -468,6 +469,29 @@ u32 tilemap_instance_rows(Engine& e, Handle instance) {
     TilemapState* s = state(e);
     Instance* in = s ? s->instances.get(instance) : nullptr;
     return in ? in->row_count : 0;
+}
+
+u32 tilemap_spawn_props(TickContext& ctx, Handle entity, const TilemapAsset& m, const MapObject& o) {
+    u32 n = 0;
+    for (u32 i = 0; i < o.props.count; ++i) {
+        const MapProperty& p = m.props[o.props.first + i];
+        bool ok = false;
+        switch (p.type) {
+        case MapPropType::String: case MapPropType::File: ok = ctx.prop_set_str(entity, p.name, p.str); break;
+        case MapPropType::Int: case MapPropType::Object:  ok = ctx.prop_set_int(entity, p.name, (i64)p.num); break;
+        case MapPropType::Float:                          ok = ctx.prop_set_float(entity, p.name, p.num); break;
+        case MapPropType::Bool:                           ok = ctx.prop_set_bool(entity, p.name, p.num != 0); break;
+        case MapPropType::Color: {
+            char hex[16];
+            auto byte = [](f32 v) { return (unsigned)(v <= 0.0f ? 0 : v >= 1.0f ? 255 : (u32)(v * 255.0f + 0.5f)); };
+            snprintf(hex, sizeof hex, "#%02x%02x%02x%02x", byte(p.col.r), byte(p.col.g), byte(p.col.b), byte(p.col.a));
+            ok = ctx.prop_set_str(entity, p.name, hex);
+            break;
+        }
+        }
+        n += ok;
+    }
+    return n;
 }
 
 int tilemap_object_name(const TilemapAsset& m, const MapObject& o, char* out, usize cap) {

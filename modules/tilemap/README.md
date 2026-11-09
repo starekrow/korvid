@@ -115,6 +115,13 @@ their own, `tilemap.animtile` (`Transform2, Sprite, AnimPlayer`), so the many st
 carry no player; declare `tilemap.animtile` in the writes of whatever spawns a map that has
 animated tiles. A flipped animated tile plays its frames unflipped.
 
+## What a designer typed
+
+`tilemap_spawn_props(ctx, entity, map, object)` copies the object's custom properties into
+the entity's property bag (core's per-entity bags; its kind declares `props`), so a
+designer's `dialogue` or `gold` on a map object is `ctx.prop_str(h, "dialogue")` at run
+time.
+
 ## Naming what you spawn
 
 `tilemap_object_name(map, object, out, cap)` gives an object a name for the entity a game
