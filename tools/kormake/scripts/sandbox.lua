@@ -40,7 +40,7 @@ local module_fields = {
   -- A toolchain's own: the linker, its compile/archive/link rules, how it names outputs,
   -- how it spells flags, and a probe that finds the tools on the host.
   link = true, rules = true, obj_suffix = true, exe_suffix = true, lib_file = true,
-  flag_include = true, flag_define = true, flag_lib = true, probe = true,
+  flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, probe = true,
 }
 
 -- module "name" { fields } or module "name" (defaults). One per file.

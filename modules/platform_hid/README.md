@@ -1,10 +1,18 @@
 # platform_hid
 
 What a person at the machine touches and looks at: the window, the keyboard, the mouse,
-gamepads, and the input action map over them. SDL3 is the backend, and nothing outside
-this module and `platform_audio` sees it, so a port replaces the sources under `src/`, not
-the API. The module starts headless: SDL's event subsystem at startup, video and gamepads
-with the first window.
+gamepads, and the input action map over them. The window and keyboard backend is per
+platform, picked by the toolchain's source directories: SDL3 on Linux (`src/sdl3/`),
+native Win32 on Windows (`src/win32/`), behind `src/hid_backend.h`. Gamepads come from
+SDL3 on every platform (`src/sdl3_pads/`). Nothing outside this module and
+`platform_audio` sees either, so a port adds a backend, not an API. The module starts
+headless: the display and gamepads come up with the first window.
+
+On Windows the window has a thread of its own, so the system's modal move and size loops
+block that thread and never the frame loop; it is per-monitor DPI aware (`WindowDesc`
+sizes are logical, the framebuffer and the pointer physical); Alt and F10 open no menu;
+Alt+F4 asks to close. Gamepads use SDL's gamepad subsystem alone, polled by the window's pump.
+`example_window` shows the frame loop's gaps while the window is dragged, on any backend.
 
 ## How it works
 

@@ -96,21 +96,80 @@ function M.run(c, g, opts)
     return "\n  cxx = " .. program(fl.cxx) .. "\n  ar = " .. program(fl.ar) .. "\n  link = " .. program(fl.link) ..
       "\n  cxxflags = " .. fl.cxxflags .. "\n  ldflags = " .. fl.ldflags
   end
-  local function extlibs_of(inst, list, mods)
-    local fl = flags(inst)
+  local out = {}
+  local function w(s) out[#out + 1] = s end
+
+  -- An external the toolchain keeps in a directory (a prebuilt package) is found at its
+  -- `dir` under the project root, or wherever KORMAKE_<NAME>_DIR says. A package that is
+  -- not there stops the generation, with the toolchain's instructions for getting it.
+  local external_dirs = {}
+  local function external_dir(fl, ext)
+    local e = fl.externals[ext]
+    if not e.dir then return nil end
+    local key = fl.tc.rec.name .. ":" .. ext
+    if external_dirs[key] then return external_dirs[key] end
+    local var = "KORMAKE_" .. ext:upper():gsub("[^%w]", "_") .. "_DIR"
+    local env = kfs.getenv(var)
+    if env == "" then env = nil end
+    local dir = env and (env:gsub("\\", "/"):gsub("/$", "")) or (util.is_abs(e.dir) and e.dir or util.join(root, e.dir))
+    local check = util.join(dir, e.check or (e.include and e.include[1]) or ".")
+    if not (kfs.isdir(check) or kfs.isfile(check)) then
+      util.fail("external '%s' (toolchain %s) is not at %s%s.\n%s", ext, fl.tc.rec.name, dir,
+        env and (", where " .. var .. " points") or "", e.fetch or ("Set " .. var .. " to the directory that holds it."))
+    end
+    external_dirs[key] = dir
+    return dir
+  end
+  -- The externals of these modules that apply on the instance's platform, in name order.
+  local function externals_used(inst, mods)
+    local seen, list = {}, {}
     for _, mod in ipairs(mods) do
-      for ext in pairs(mod.fields.external or {}) do
-        for _, l in ipairs(fl.externals[ext].libs or {}) do
-          local flag = fl.tc.fields.flag_lib:format(l)
-          if not util.contains(list, flag) then list[#list + 1] = flag end
-        end
+      local ext_fields = mod.fields.external or {}
+      for _, ext in ipairs(util.sorted_keys(ext_fields)) do
+        if not seen[ext] and util.external_on(ext_fields[ext], inst.platform) then seen[ext] = true; list[#list + 1] = ext end
       end
     end
     return list
   end
+  -- Link inputs from externals: the libraries (flag_lib) and, for a package, its library
+  -- directories (flag_libdir), as two lists.
+  local function extlibs_of(inst, mods)
+    local fl = flags(inst)
+    local libs, dirs = {}, {}
+    for _, ext in ipairs(externals_used(inst, mods)) do
+      local e = fl.externals[ext]
+      for _, l in ipairs(e.libs or {}) do
+        local flag = fl.tc.fields.flag_lib:format(l)
+        if not util.contains(libs, flag) then libs[#libs + 1] = flag end
+      end
+      local d = external_dir(fl, ext)
+      for _, ld in ipairs(d and e.libdirs or {}) do
+        local spell = fl.tc.fields.flag_libdir or util.fail("toolchain '%s' does not set flag_libdir, which external '%s' needs", fl.tc.rec.name, ext)
+        dirs[#dirs + 1] = spell:format(q(util.join(d, ld)))
+      end
+    end
+    return libs, dirs
+  end
+  -- Files a package's executables need beside them (a DLL): each copied to bin/ once, and
+  -- an order-only input of every executable that links the package.
+  local runtime_copied = {}
+  local function runtime_of(inst, mods)
+    local fl = flags(inst)
+    local outs = {}
+    for _, ext in ipairs(externals_used(inst, mods)) do
+      local d = external_dir(fl, ext)
+      for _, f in ipairs(d and fl.externals[ext].runtime or {}) do
+        local outpath = inst.prefix .. "bin/" .. util.basename(f)
+        if not runtime_copied[outpath] then
+          runtime_copied[outpath] = true
+          w(string.format("build %s: copy %s", util.ninja_escape(outpath), util.ninja_escape(util.join(d, f))))
+        end
+        outs[#outs + 1] = outpath
+      end
+    end
+    return outs
+  end
 
-  local out = {}
-  local function w(s) out[#out + 1] = s end
   local cc = {} -- compile_commands.json entries
   local all, tests, checks = {}, {}, {}
   local module_files = {}
@@ -174,6 +233,16 @@ function M.run(c, g, opts)
     for _, d in ipairs(inst.closure) do if d.module.include then dirs[#dirs + 1] = flag(d.module.include) end end
     if inst.module.include then dirs[#dirs + 1] = flag(inst.module.include) end
     for _, e in ipairs(extra or {}) do dirs[#dirs + 1] = flag(e) end
+    -- A package's headers, for the module that names it (not its dependents: the package
+    -- stays behind the module's API).
+    -- They are system headers (flag_include_system) where the toolchain spells one: their
+    -- warnings are not ours.
+    local fl = flags(inst)
+    local sys = fl.tc.fields.flag_include_system or spell
+    for _, ext in ipairs(externals_used(inst, { inst.module })) do
+      local d = external_dir(fl, ext)
+      for _, i in ipairs(d and fl.externals[ext].include or {}) do dirs[#dirs + 1] = sys:format(q(util.join(d, i))) end
+    end
     return table.concat(dirs, " ")
   end
 
@@ -325,12 +394,13 @@ function M.run(c, g, opts)
           for _, r in ipairs(runtime_by_key[d.key] or {}) do rt[#rt + 1] = r end
         end
         mods[#mods + 1] = m
-        local extlibs = extlibs_of(inst, {}, mods)
+        local extlibs, extdirs = extlibs_of(inst, mods)
         inst.extlibs = extlibs
         for _, r in ipairs(runtime) do rt[#rt + 1] = r end
+        for _, r in ipairs(runtime_of(inst, mods)) do rt[#rt + 1] = r end
         local exe = pre .. "bin/" .. exe_name(inst) .. naming.exe_suffix
         w(string.format("build %s: %s %s %s%s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
-          #rt > 0 and (" || " .. table.concat(rt, " ")) or "", table.concat(extlibs, " "), overrides(inst)))
+          #rt > 0 and (" || " .. table.concat(rt, " ")) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
         all[#all + 1] = exe
         -- Rules that run once per executable over its staged assets (a pack): part of the
         -- default build in ship, buildable by name in the other configs.
@@ -382,10 +452,11 @@ function M.run(c, g, opts)
         mods[#mods + 1] = d.module
       end
       mods[#mods + 1] = m
-      local extlibs = extlibs_of(inst, {}, mods)
+      local extlibs, extdirs = extlibs_of(inst, mods)
+      local rt = runtime_of(inst, mods)
       local exe = pre .. "bin/" .. sym .. "_tests" .. flags(inst).tc.fields.exe_suffix
-      w(string.format("build %s: %s %s %s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
-        table.concat(extlibs, " "), overrides(inst)))
+      w(string.format("build %s: %s %s %s%s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
+        #rt > 0 and (" || " .. table.concat(rt, " ")) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
       w(string.format("build %stest/%s.ok: run_test %s", pre, sym, exe))
       tests[#tests + 1] = exe
       checks[#checks + 1] = pre .. "test/" .. sym .. ".ok"

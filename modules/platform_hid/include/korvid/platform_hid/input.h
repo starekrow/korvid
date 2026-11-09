@@ -1,7 +1,8 @@
 // Korvid platform: the input layer. Keyboard and gamepads; a further device type adds its
 // own event structs and state block without changing this API. Key codes are
-// engine-defined and mapped from SDL scancodes in the SDL3 source file; gamepad buttons
-// and axes follow SDL3's standard layout (a Playstation or Xbox pad looks the same here).
+// engine-defined and mapped from the backend's scancodes (src/sdl3/, src/win32/); gamepad
+// buttons and axes follow SDL3's standard layout (a Playstation or Xbox pad looks the same
+// here).
 #pragma once
 #include "korvid/core/types.h"
 
@@ -112,14 +113,11 @@ struct Input {
     void sample() { sampled = raw; raw.mouse.wheel = 0.0f; }
 };
 
-// Scancode mapping lives in the SDL3 source file; both directions, for tests and tooling.
-Key key_from_scancode(u32 sdl_scancode);
+// The backend's scancodes (SDL's, or Windows' set-1 codes with 0x100 for the E0-prefixed
+// keys) to keys and back. Both directions, for tests and tooling; 0 is no key.
+Key key_from_scancode(u32 scancode);
 u32 scancode_from_key(Key k);
 
-// Gamepad events from the SDL queue. The window pump hands over what it does not handle;
-// returns false if the event was not a gamepad's. Opens and closes pads on arrival and
-// removal, updates raw, and emits the gamepad events on the bus.
-bool input_gamepad_event(const void* sdl_event, EventBus& bus, Input& input);
 // Closes every open pad. Module shutdown.
 void input_gamepads_close(Input& input);
 

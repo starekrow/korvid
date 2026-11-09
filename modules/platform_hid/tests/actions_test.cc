@@ -18,7 +18,6 @@ bool near(f32 a, f32 b) { return fabsf(a - b) < 1e-4f; }
 void test_actions(kv::TestCtx& c) {
     using namespace kv;
     c.begin("actions");
-    setenv("SDL_VIDEODRIVER", "dummy", 0);
     const ModuleDesc* const list[] = {&platform_module, &platform_hid_module};
     Engine e;
     KV_CHECK(c, engine_init(e, list));

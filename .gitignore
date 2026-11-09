@@ -2,3 +2,4 @@ build/
 tools/kormake/bin/
 dist/
 .vs/
+/vendor/

@@ -1,12 +1,13 @@
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/core/log.h"
-#include "sdl_internal.h"
+#include "../hid_backend.h"
+#include "../sdl3_pads/sdl_pads.h"
 #include <SDL3/SDL.h>
 
 namespace kv {
 
-bool platform_sdl_video_up() {
+bool hid_video_up() {
     if (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) return true;
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         KV_ERROR("hid", "SDL video unavailable: %s", SDL_GetError());
@@ -17,14 +18,34 @@ bool platform_sdl_video_up() {
     return true;
 }
 
-void platform_sdl_video_down() {
+void hid_video_down() {
     if (SDL_WasInit(SDL_INIT_GAMEPAD) & SDL_INIT_GAMEPAD) SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
     if (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
+bool hid_backend_startup() {
+    SDL_SetHint(SDL_HINT_APP_NAME, "korvid");
+    // Headless until a window opens: video and gamepads come up with the first window
+    // (HostWindow::open), so tests run where there is no display.
+    if (!SDL_InitSubSystem(SDL_INIT_EVENTS)) {
+        KV_ERROR("hid", "SDL events unavailable: %s", SDL_GetError());
+        return false;
+    }
+    int ver = SDL_GetVersion();
+    KV_INFO("hid", "SDL %d.%d.%d, headless until a window opens",
+            SDL_VERSIONNUM_MAJOR(ver), SDL_VERSIONNUM_MINOR(ver), SDL_VERSIONNUM_MICRO(ver));
+    return true;
+}
+
+void hid_backend_shutdown() {
+    hid_video_down();
+    SDL_QuitSubSystem(SDL_INIT_EVENTS);
+    if (SDL_WasInit(0) == 0) SDL_Quit(); // the last SDL user out (platform_audio may still hold audio)
+}
+
 bool HostWindow::open(const WindowDesc& desc) {
-    KV_ASSERT(!sdl_window_);
-    if (!platform_sdl_video_up()) return false; // the module starts headless
+    KV_ASSERT(!native_);
+    if (!hid_video_up()) return false; // the module starts headless
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE;
     if (desc.surface == WindowSurface::Vulkan) flags |= SDL_WINDOW_VULKAN; // also loads the Vulkan loader
     if (desc.borderless) flags |= SDL_WINDOW_BORDERLESS;
@@ -33,7 +54,7 @@ bool HostWindow::open(const WindowDesc& desc) {
         KV_ERROR("window", "SDL_CreateWindow failed: %s", SDL_GetError());
         return false;
     }
-    sdl_window_ = w;
+    native_ = w;
     surface_    = desc.surface;
     vsync_      = desc.vsync;
     int pw = 0, ph = 0;
@@ -46,16 +67,16 @@ bool HostWindow::open(const WindowDesc& desc) {
 }
 
 void HostWindow::close() {
-    if (!sdl_window_) return;
-    SDL_DestroyWindow((SDL_Window*)sdl_window_);
-    sdl_window_ = nullptr;
+    if (!native_) return;
+    SDL_DestroyWindow((SDL_Window*)native_);
+    native_ = nullptr;
     width_ = height_ = 0;
     focused_ = false;
     KV_INFO("window", "closed");
 }
 
 void HostWindow::present_blank() {
-    SDL_Window* w = (SDL_Window*)sdl_window_;
+    SDL_Window* w = (SDL_Window*)native_;
     if (!w || surface_ != WindowSurface::Software) return;
     SDL_Surface* s = SDL_GetWindowSurface(w);
     if (!s) {
@@ -69,7 +90,7 @@ void HostWindow::present_blank() {
 // Framebuffer pixels per window unit (2 on a scaled desktop); 1 when SDL has no answer.
 f32 HostWindow::pixel_scale() const {
     int ww = 0, wh = 0;
-    if (!sdl_window_ || !SDL_GetWindowSize((SDL_Window*)sdl_window_, &ww, &wh) || ww <= 0) return 1.0f;
+    if (!native_ || !SDL_GetWindowSize((SDL_Window*)native_, &ww, &wh) || ww <= 0) return 1.0f;
     return (f32)width_ / (f32)ww;
 }
 

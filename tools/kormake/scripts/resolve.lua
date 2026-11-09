@@ -126,8 +126,8 @@ function M.run(c, platform, config, opts)
         end
       end
     end
-    for ext in pairs(rec.fields.external or {}) do
-      if not (pp.toolchain.fields.externals or {})[ext] then util.fail("'%s' needs external '%s', which toolchain '%s' does not know", name, ext, pp.toolchain.name) end
+    for ext, spec in pairs(rec.fields.external or {}) do
+      if util.external_on(spec, plat) and not (pp.toolchain.fields.externals or {})[ext] then util.fail("'%s' needs external '%s', which toolchain '%s' does not know", name, ext, pp.toolchain.name) end
     end
     -- Tools: an interface or a tool module, instanced for the host. On a native build in
     -- the host config that is the target's own instance.

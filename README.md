@@ -135,6 +135,38 @@ Needs a C compiler for the bootstrap, g++ (or clang++ via `--cxx`), ninja, libsd
 libvulkan-dev, zlib1g-dev, slang-compiler, and for debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached
 through SDL and every entry point is loaded at runtime (renderer-vulkan/src/vk_funcs.h).
 
+## Building on Windows
+
+Windows is being brought up a module at a time; the `windows` root in `kormake.lua` lists
+what builds there so far. It uses MSVC and the SDL project's prebuilt SDL3 package.
+
+1. **Visual Studio 2022 or later, or the Build Tools**, with the "Desktop development
+   with C++" workload. Nothing else is needed from it: kormake finds `cl`, the Windows SDK
+   and Visual Studio's Ninja itself (through `vswhere`), so any prompt works, not only a
+   Developer prompt.
+2. **SDL 3.4.20, the Visual C++ package**, unpacked into `vendor/` at the repository root
+   (git ignores it):
+   - Download `SDL3-devel-3.4.20-VC.zip` (16.1 MB) from
+     <https://github.com/libsdl-org/SDL/releases/tag/release-3.4.20>.
+   - Check it: `certutil -hashfile SDL3-devel-3.4.20-VC.zip SHA256` must print
+     `1ec3009655ee37b1f73e52b3b120acc5afd8abaf9532f3303b1bf1dfe91b5969`.
+   - Unpack it into `vendor/` so that this file exists:
+     `vendor/SDL3-3.4.20/include/SDL3/SDL.h`. (The archive holds one folder,
+     `SDL3-3.4.20`; unpack it as it is, not its contents.)
+   - Kept somewhere else? Set `KORMAKE_SDL3_DIR` to the folder that holds `include\` and
+     `lib\` instead.
+
+   The version is pinned in `modules/toolchain-windows/module.lua`; moving to another one
+   changes it there and here. A build without the package stops at `gen` with these
+   instructions; executables that use SDL get `SDL3.dll` copied beside them.
+
+Then, from any prompt:
+
+    tools\kormake\bootstrap.bat                                   # once: builds kormake.exe with cl
+    tools\kormake\bin\windows\kormake.exe build windows-dev       # what the windows root lists, with tests
+    tools\kormake\bin\windows\kormake.exe test windows-dev        # runs them
+    build\windows-dev\bin\example_window.exe                      # a window, its events, and the frame loop's gaps
+
 Known platform issue: on GNOME Wayland, SDL3 falls back to libdecor for the window frame
 (GNOME has no server-side decorations). libdecor repaints the frame synchronously inside
 every xdg configure, and Mutter sends one configure per pointer motion during a mouse

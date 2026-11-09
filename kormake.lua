@@ -19,7 +19,8 @@ root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
 -- Windows is being brought up a module at a time: these build, with their tests. Each
 -- module that joins the list here leaves it when the roots above cover Windows too.
 root "windows" {
-  modules   = { "core", "inflate", "pack", "platform", "cli", "tool", "tool_kpack" },
+  modules   = { "core", "math", "inflate", "pack", "platform", "platform_hid", "cli", "tool", "tool_kpack",
+                "example_window" },
   tests     = true,
   platforms = { "windows" },
 }

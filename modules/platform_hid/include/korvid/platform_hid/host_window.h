@@ -1,14 +1,15 @@
-// Korvid platform: the host window. A platform service over SDL3, owned below the
-// outer engine. It is not an entity. Platform changes arrive as events on the bus.
+// Korvid platform: the host window. A platform service, owned below the outer engine:
+// over SDL3 on Linux, native Win32 on Windows. It is not an entity. Platform changes
+// arrive as events on the bus.
 #pragma once
 #include "korvid/core/event.h"
 #include "korvid/platform_hid/input.h"
 
 namespace kv {
 
-// What the window's surface is prepared for. SDL must know at creation time.
+// What the window's surface is prepared for, decided at creation time.
 enum class WindowSurface : u8 {
-    Software, // SDL's framebuffer; present_blank() works, nothing else draws
+    Software, // the system draws it; present_blank() works, nothing else draws
     Vulkan,   // a renderer creates a Vulkan surface from native_handle()
 };
 
@@ -16,7 +17,7 @@ struct WindowDesc {
     const char*   title   = "korvid";
     u32           width   = 1280;
     u32           height  = 720;
-    bool          vsync   = true; // a preference the renderer reads; SDL does not apply it
+    bool          vsync   = true; // a preference the renderer reads; the window does not apply it
     WindowSurface surface = WindowSurface::Software;
     bool          borderless = false; // no title bar or frame; still resizable by the desktop
 };
@@ -32,10 +33,11 @@ struct WindowDesc {
 // `example_testbed --hitch-ms 50` plus WAYLAND_DEBUG=1; the hitch lines use libwayland's timestamps.
 
 struct HostWindow {
-    // Creates the window; false (with the reason logged) if SDL refuses. Asserts if open.
+    // Creates the window; false (with the reason logged) if the system refuses. Asserts if
+    // open. width and height are logical: scaled by the display's DPI on Windows.
     bool open(const WindowDesc& desc);
     void close();
-    bool is_open() const { return sdl_window_ != nullptr; }
+    bool is_open() const { return native_ != nullptr; }
 
     // The framebuffer in pixels (not window units: a scaled desktop differs), as of the
     // last pump. The renderer is told at render rate when it changes.
@@ -54,12 +56,13 @@ struct HostWindow {
     // never appears. A no-op on a Vulkan window, where the renderer presents.
     void present_blank();
 
-    // The SDL_Window* as an opaque pointer. The renderer module turns it into a
-    // surface on its side; no graphics API headers are included here.
-    void* native_handle() const { return sdl_window_; }
+    // The window as an opaque pointer: an SDL_Window* where SDL is the backend, an HWND on
+    // Windows. The renderer turns it into a surface on its side; no graphics API headers
+    // are included here.
+    void* native_handle() const { return native_; }
 
     // The fields are the module's; read them through the accessors.
-    void*         sdl_window_ = nullptr;
+    void*         native_     = nullptr;
     WindowSurface surface_    = WindowSurface::Software;
     u32   width_      = 0;
     u32   height_     = 0;

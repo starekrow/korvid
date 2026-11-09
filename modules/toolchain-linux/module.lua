@@ -6,7 +6,7 @@ module "toolchain.linux" {
   provides  = "toolchain",
   platforms = { "linux" },
   tag       = "linux",
-  srcdirs   = { "posix", "linux" },   -- src/<dir>/ picked up on this platform, in this order
+  srcdirs   = { "posix", "linux", "sdl3", "sdl3_pads" }, -- src/<dir>/ picked up on this platform, in this order
   cxx       = "g++",
   ar        = "ar",
   cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-Wall", "-Wextra", "-Werror" },
@@ -27,6 +27,8 @@ module "toolchain.linux" {
   flag_include = "-I%s",
   flag_define  = "-D%s",
   flag_lib     = "-l%s",
+  flag_libdir  = "-L%s",
+  flag_include_system = "-isystem%s",
   externals = {
     sdl3   = { libs = { "SDL3" } },
     zlib   = { libs = { "z" } },

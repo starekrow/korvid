@@ -137,6 +137,13 @@ function M.json_string(s)
   return '"' .. s:gsub('[\\"]', '\\%0'):gsub("\n", "\\n") .. '"'
 end
 
+-- Whether a module's external applies on a platform: a version (sdl3 = ">=3.2") applies
+-- everywhere; a table may name its platforms (sdl3 = { ">=3.2", platforms = { "linux" } }).
+function M.external_on(spec, platform)
+  if type(spec) ~= "table" or not spec.platforms then return true end
+  return M.contains(M.as_list(spec.platforms), platform)
+end
+
 -- A symbol from a module name: dashes and dots become underscores.
 function M.symbol(name)
   return (name:gsub("[%-%.]", "_"))

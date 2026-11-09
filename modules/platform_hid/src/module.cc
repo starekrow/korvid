@@ -3,8 +3,7 @@
 #include "korvid/platform/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
-#include "sdl_internal.h"
-#include <SDL3/SDL.h>
+#include "hid_backend.h"
 
 namespace kv {
 
@@ -17,16 +16,7 @@ void hid_pump(Engine& e, void* user) {
 }
 
 bool hid_startup(Engine& engine, ModuleInstance& self) {
-    SDL_SetHint(SDL_HINT_APP_NAME, "korvid");
-    // Headless until a window opens: video and gamepads come up with the first window
-    // (HostWindow::open), so tests run where there is no display.
-    if (!SDL_InitSubSystem(SDL_INIT_EVENTS)) {
-        KV_ERROR("hid", "SDL events unavailable: %s", SDL_GetError());
-        return false;
-    }
-    int ver = SDL_GetVersion();
-    KV_INFO("hid", "SDL %d.%d.%d, headless until a window opens",
-            SDL_VERSIONNUM_MAJOR(ver), SDL_VERSIONNUM_MINOR(ver), SDL_VERSIONNUM_MICRO(ver));
+    if (!hid_backend_startup()) return false;
     HidState* s = arena_push<HidState>(self.arena);
     if (!s) return false;
     self.set_state(s);
@@ -45,9 +35,7 @@ void hid_shutdown(Engine& e, ModuleInstance& self) {
         s->window.close(); // the service ends with the module, whoever opened it
         input_gamepads_close(s->input);
     }
-    platform_sdl_video_down();
-    SDL_QuitSubSystem(SDL_INIT_EVENTS);
-    if (SDL_WasInit(0) == 0) SDL_Quit(); // the last SDL user out (platform_audio may still hold audio)
+    hid_backend_shutdown();
 }
 
 // Phase Input: sample the raw key state once per tick for the simulation.
@@ -100,7 +88,7 @@ HostWindow* platform_open_window(Engine& e, const WindowDesc& desc) {
     return s->window.open(desc) ? &s->window : nullptr;
 }
 
-bool platform_video_up(Engine&) { return platform_sdl_video_up(); }
+bool platform_video_up(Engine&) { return hid_video_up(); }
 
 HostWindow* platform_window(Engine& e) {
     HidState* s = state(e);
