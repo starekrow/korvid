@@ -68,6 +68,15 @@ inline u32  load_component(const JsonDoc& doc, const JsonValue& obj, const Compo
 // A whole kind:
 //   {"free": [[slot, gen], ...],                    the dead slots, in reuse order
 //    "rows": [{"slot": 0, "gen": 1, "Transform2": {...}, ...}, ...]}
+// One entity's row: every column, its attachments ("@Talk") and its bag ("@props"), as an
+// object. load_row fills a live entity from one, as load_kind does a row; what the object
+// lacks keeps its value. Per-level state (the level module) is rows by name.
+void save_row(SaveWriter& w, const Table& t, Handle h);
+bool load_row(const JsonDoc& doc, const JsonValue& obj, Table& t, Handle h, const SaveRemap& remap = SaveRemap{});
+
+// Any part of a parsed document written again: a record kept as a tree carried into a save.
+void save_json(SaveWriter& w, const JsonDoc& doc, const JsonValue& v);
+
 // Every component is written, cosmetic ones too: a kind is saved because it is wanted back.
 // A named entity's row has "name".
 void save_kind(SaveWriter& w, const Table& t);

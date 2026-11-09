@@ -19,6 +19,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/json.h"
+#include "korvid/core/random.h"
 #include "korvid/core/log.h"
 #include "korvid/core/utf8.h"
 #include "korvid/frameloop/frameloop.h"
@@ -55,8 +56,13 @@ struct Actor {
     u8     moving;
     u8     sheet;    // index into Game::sheets
     u8     route_dir;
+    u8     hostile;  // a villager the hammer has offended: it chases until the level is left
+    u8     pad[3];
     point2 home;     // a villager's spawn point
     vec2   route;    // a villager's second point, from home; zero stands still
+    f32    swing;    // seconds left of a hammer swing (the attack pose)
+    point2 goal;     // a hostile villager's next waypoint
+    f32    repath;   // seconds until it asks the map for a path again
 };
 // The player's health: hearts, and the seconds left of the blink after a hurt, during
 // which nothing hurts again.
@@ -64,15 +70,17 @@ struct Vitals {
     i32 hp;
     i32 hp_max;
     f32 hurt;
+    u32 pad;
+    u64 luck;  // the hammer's dice: a PCG32 state, sim state like the rest
 };
-constinit const FieldDesc k_actor_fields[] = {KV_FIELDS(Actor, facing, moving, sheet, route_dir, home, route)};
+constinit const FieldDesc k_actor_fields[] = {KV_FIELDS(Actor, facing, moving, sheet, route_dir, hostile, pad, home, route, swing, goal, repath)};
 // What one villager wants of the player: the old man's errand. An attachment, since one
 // villager of many has it; what every villager has (its lines) is in its bag, from the map.
 struct Quest {
     u32 rocks_wanted; // broken rocks that would please him
     u32 done;         // 1 once the player has done it
 };
-constinit const FieldDesc k_vitals_fields[] = {KV_FIELDS(Vitals, hp, hp_max, hurt)};
+constinit const FieldDesc k_vitals_fields[] = {KV_FIELDS(Vitals, hp, hp_max, hurt, pad, luck)};
 constinit const FieldDesc k_quest_fields[] = {KV_FIELDS(Quest, rocks_wanted, done)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Actor, k_actor_fields), KV_COMPONENT(Vitals, k_vitals_fields), KV_COMPONENT(Quest, k_quest_fields)};
 
@@ -111,17 +119,24 @@ constinit const InputActionDesc k_actions[] = {
     {"confirm", ActionKind::Button, "key Enter, key Space, pad South"},
     {"cancel",  ActionKind::Button, "key Backspace, pad East"},
     {"menu",    ActionKind::Button, "key Escape, pad Start"},
+    {"hammer",  ActionKind::Button, "key H, key X, pad West"},
 };
 
 enum class Menu : u8 { Closed, Main, Levels, Credits };
 // Where the game is: the title (and naming the hero), or playing.
-enum class Mode : u8 { Title, Play };
+enum class Mode : u8 { Title, Play, Aim, Dead };
+// What a cover is for, in its user word.
 constexpr u64 COVER_START = 1;             // the iris from the name to the village
-enum Snd : u8 { SND_MOVE, SND_ACCEPT, SND_CANCEL, SND_COUNT };
+constexpr u64 COVER_AIM_IN = 2, COVER_AIM_OUT = 3; // into the hammer's minigame and out
+constexpr u64 COVER_DEAD = 4;              // the last heart: to the game-over screen
+constexpr u64 COVER_RESTART = 5;           // back to the village from the game-over screen
+constexpr f32 kChaseSpeed = 128.0f;        // a hostile villager: twice the walk
+constexpr f32 kAimSpeed = 3.2f;            // the needle, radians a second
+enum Snd : u8 { SND_MOVE, SND_ACCEPT, SND_CANCEL, SND_BREAK, SND_HIT, SND_ALERT, SND_COUNT };
 constexpr color kHurtTint = color{1.0f, 0.35f, 0.35f, 1.0f};
 
 struct Game {
-    u32    act_move = 0, act_confirm = 0, act_cancel = 0, act_menu = 0;
+    u32    act_move = 0, act_confirm = 0, act_cancel = 0, act_menu = 0, act_hammer = 0;
     Handle sheet_texture[kSheets], sheet_material[kSheets];
     Handle sheets[kSheets];      // anim.sheet: the walk and idle clips, loaded into each level's scope
     Handle walk_clip[kSheets][4], idle_clip[kSheets][4]; // by facing, once the sheet is Ready
@@ -136,7 +151,6 @@ struct Game {
     Handle music;                // the current level's track (asset.stream)
     bool   exit_armed = false;   // the player has stood outside every exit since arriving
     bool   leaving = false;      // an exit has been taken; the level is on its way
-    bool   fainting = false;     // the last heart went: walk takes the player to the start
     Menu   menu = Menu::Closed;
     Mode   mode = Mode::Title;
     Handle title, naming;        // ui.screen: the title, the name entry
@@ -144,6 +158,17 @@ struct Game {
     char   pages[512] = {};      // the villager's lines, pages split by '|'
     u32    page = 0, page_count = 0;
     char   hero[32] = "Rowan";
+    // The hammer: the rock it is aimed at, the minigame's clock and how it went.
+    Handle aim, aim_rock;
+    f32    aim_t = 0.0f, aim_done = 0.0f; // seconds swinging; seconds the result has shown
+    bool   aim_struck = false, aim_broke = false;
+    u32    rocks_broken = 0;
+    Handle provoked;             // a villager just hammered: the villagers system turns it
+    Handle shout;                // ui.screen: its cry, for a moment
+    f32    shout_t = 0.0f;
+    Handle gameover;             // ui.screen
+    bool   chased = false;       // a villager has turned on the player (the demo stops swinging)
+    u32    demo_wait = 0;        // the demo's ticks on the game-over screen, then after the load
     // Saving and loading. The save is one JSON file in the per-user directory.
     char   save_path[512] = {};
     Handle save_write;           // platform.io: the write on its way out
@@ -203,6 +228,11 @@ u8 facing_of(vec2 d, u8 was) {
 // The sheet's walk or idle clip for how the actor moves and faces, started when it
 // changes; anim.play does the frames.
 void animate(Engine& e, Game& g, const Actor& a, AnimPlayer& p) {
+    if (a.swing > 0.0f) { // the hammer's pose, held while it lasts
+        Handle swing = anim_sheet_variant(e, g.sheets[a.sheet % kSheets], "attack", k_facings[a.facing & 3]);
+        if (p.clip != swing) anim_play(p, swing);
+        return;
+    }
     Handle (&set)[kSheets][4] = a.moving ? g.walk_clip : g.idle_clip;
     Handle& clip = set[a.sheet % kSheets][a.facing & 3];
     if (clip.is_null()) clip = anim_sheet_variant(e, g.sheets[a.sheet % kSheets], a.moving ? "walk" : "idle", k_facings[a.facing & 3]);
@@ -326,6 +356,11 @@ void load_game(TickContext& ctx, Game& g);
 
 // ---- the title ------------------------------------------------------------------------------------
 
+void restart(Engine& e, Game& g, bool to_title);
+void strike(TickContext& ctx, Game& g);
+void start_aim(Engine& e, Game& g, Handle rock);
+void shout(TickContext& ctx, Game& g, const char* text);
+
 void title_choice(TickContext& ctx, Game& g, const char* item) {
     Engine& e = *ctx.engine;
     if (!strcmp(item, "new")) {
@@ -384,7 +419,8 @@ void talk(TickContext& ctx, Game& g, Handle npc) {
     Engine& e = *ctx.engine;
     const Table* npcs = ctx.read_kind("example_arcanum.npc");
     const Actor* a = npcs->get<Actor>(npc);
-    const Quest* q = ctx.attached<const Quest>(npc);
+    Quest* q = ctx.attached<Quest>(npc);
+    if (q && !q->done && g.rocks_broken >= q->rocks_wanted) { q->done = 1; KV_INFO("arcanum", "quest: done"); }
     const char* lines = ctx.prop_str(npc, q && q->done ? "dialogue_done" : "dialogue", "...");
     utf8_copy(g.pages, sizeof g.pages, lines);
     g.page_count = 1;
@@ -422,6 +458,8 @@ void save_game(TickContext& ctx, Game& g) {
     w.key("player");     save_handle(w, g.player);
     w.key("exit_armed"); w.bool_value(g.exit_armed);
     w.key("hero");       w.string_value(g.hero);
+    w.key("broken");     w.uint_value(g.rocks_broken);
+    w.key("levels");     level_save(w, e); // what each level remembers: the rocks
     w.key("kinds");      save_kinds(w, e, k_saved_kinds);
     w.end_object();
     if (w.finish()) {
@@ -484,6 +522,8 @@ void files(TickContext& ctx) {
             if (!save_parse(SaveFormat::Json, g.load_data, g.load_size, mem_scratch(), doc)) KV_WARN("arcanum", "load: %s at byte %u", doc.error, doc.error_at);
             else if (strcmp(json_string(json_get(doc, doc.root(), "game"), ""), "example_arcanum") != 0) KV_WARN("arcanum", "load: not an arcanum save");
             else level = json_string(json_get(doc, doc.root(), "level"), "");
+            if (level && level[0]) if (const JsonValue* lv = json_get(doc, doc.root(), "levels")) level_load(e, doc, *lv);
+            g.rocks_broken = (u32)json_u64(json_get(doc, doc.root(), "broken"), 0);
             LevelTransition t;
             t.fade_out = 0.3f; t.fade_in = 0.3f; t.entry = "load";
             if (!level || !level_request(e, level, t)) why = "The save does not load";
@@ -551,7 +591,36 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
             if (ev.event == k_submit) begin_play(e, g);
             else if (ev.event == k_cancel) { ui_close(e, g.naming); g.naming = Handle{}; }
         } else if (ev.screen == g.dialogue && ev.event == k_confirm) next_page(e, g);
+        else if (ev.screen == g.aim && ev.event == k_confirm && !g.aim_struck) strike(ctx, g);
+        else if (ev.screen == g.gameover && ev.event == k_select) {
+            ui_close(e, g.gameover);
+            g.gameover = Handle{};
+            if (!strcmp(item, "continue")) { load_game(ctx, g); if (g.load_read.is_null()) restart(e, g, false); }
+            else restart(e, g, true);
+        }
     }
+}
+
+// Back to the village as the map has it, the hero whole: from the game-over screen when
+// there is no save, or to the title.
+void restart(Engine& e, Game& g, bool to_title) {
+    Table* players = engine_table(e, "example_arcanum.player");
+    Vitals* v = players->get<Vitals>(g.player);
+    v->hp = v->hp_max;
+    v->hurt = 0.0f;
+    for (u32 i = 0; i < KV_COUNTOF(k_levels); ++i) level_forget(e, k_levels[i].name);
+    g.rocks_broken = 0;
+    LevelTransition t;
+    t.fade_out = 0.0f; t.fade_in = 0.4f;
+    level_request(e, "village", t);
+    g.mode = to_title ? Mode::Title : Mode::Play;
+    if (to_title) {
+        UiOpen o;
+        o.layer = 110;
+        o.hold = true;
+        g.title = ui_open(e, g.ui, "title", o);
+        ui_set_visible(e, g.hud, "", false);
+    } else ui_set_visible(e, g.hud, "", true);
 }
 
 // The iris has closed on the name screen: the title goes, the village shows as it opens.
@@ -559,6 +628,35 @@ void on_covered(TickContext& ctx, Span<const UiCovered> covers) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     for (const UiCovered& c : covers) {
+        if (c.user == COVER_AIM_IN) { // the minigame, where the world was
+            UiOpen o;
+            o.layer = 106;
+            o.hold = true;
+            g.aim = ui_open(e, g.ui, "aim", o);
+            ui_set_visible(e, g.hud, "", false);
+            continue;
+        }
+        if (c.user == COVER_AIM_OUT) { // the world again; the rock gone if it broke
+            ui_close(e, g.aim);
+            g.aim = Handle{};
+            ui_set_visible(e, g.hud, "", true);
+            if (g.aim_broke) {
+                if (Table* rocks = ctx.write_kind("example_arcanum.rock")) rocks->destroy(g.aim_rock);
+                ++g.rocks_broken;
+                KV_INFO("arcanum", "broken: %u rocks", g.rocks_broken);
+            }
+            g.aim_rock = Handle{};
+            g.mode = Mode::Play;
+            continue;
+        }
+        if (c.user == COVER_DEAD) { // the game-over screen
+            UiOpen o;
+            o.layer = 130;
+            o.hold = true;
+            g.gameover = ui_open(e, g.ui, "gameover", o);
+            ui_set_visible(e, g.hud, "", false);
+            continue;
+        }
         if (c.user != COVER_START) continue;
         if (!g.naming.is_null()) ui_close(e, g.naming);
         if (!g.title.is_null()) ui_close(e, g.title);
@@ -573,17 +671,78 @@ void on_covered(TickContext& ctx, Span<const UiCovered> covers) {
 // Intent, resolve, react: walk and villagers write Move2, collision.resolve moves everyone
 // against the map and each other (the player pushing rocks), react reads the results.
 
-// The player at the map's start, whole again. Called by walk, before the resolve, the tick
-// after the heart was lost: a teleport writes the position the resolve reads.
-void faint(Game& g, Span<Transform2> xf, Span<Transform2> prev, const TilemapAsset& m) {
-    u32 i = g.player.index();
-    if (const MapObject* start = tilemap_object_find(m, "player_start")) {
-        xf[i] = transform2_at(tilemap_to_world(point2{0, 0}, start->x, start->y));
-        prev[i] = xf[i];
+// ---- the hammer -----------------------------------------------------------------------------------
+
+// A rock in reach of the hammer: an iris closes on the player, and the minigame opens.
+void start_aim(Engine& e, Game& g, Handle rock) {
+    g.aim_rock = rock;
+    g.aim_t = 0.0f;
+    g.aim_done = 0.0f;
+    g.aim_struck = g.aim_broke = false;
+    g.mode = Mode::Aim;
+    UiCover c;
+    c.fx = UiFx::Iris;
+    c.seconds = 0.4f;
+    c.user = COVER_AIM_IN;
+    ui_cover(e, c);
+    KV_INFO("arcanum", "aim: at %s", engine_entity_name(e, rock));
+}
+
+// A villager's cry, on top of everything for a second and a half.
+void shout(TickContext& ctx, Game& g, const char* text) {
+    Engine& e = *ctx.engine;
+    if (g.shout.is_null()) {
+        UiOpen o;
+        o.layer = 108;
+        o.input = false;
+        g.shout = ui_open(e, g.ui, "shout", o);
     }
-    g.exit_armed = exit_at(m, feet_of(xf[i].position)) == nullptr;
-    g.fainting = false;
-    KV_INFO("arcanum", "fainted; back at the start");
+    ui_set_text(e, g.shout, "", text);
+    g.shout_t = 1.5f;
+    play_sound(ctx, g, SND_ALERT);
+}
+
+// Phase PreSim, every tick: the needle sweeps; a struck result shows a moment, then the
+// iris takes the minigame away; the cry fades.
+void modes(TickContext& ctx) {
+    Game& g = ctx.state_as<Game>();
+    Engine& e = *ctx.engine;
+    f32 dt = (f32)ctx.dt;
+    if (!g.shout.is_null() && (g.shout_t -= dt) <= 0.0f) { ui_close(e, g.shout); g.shout = Handle{}; }
+    if (g.aim.is_null() || ui_covering(e)) return;
+    if (!g.aim_struck) {
+        g.aim_t += dt;
+        f32 x = 0.5f - 0.5f * cosf(g.aim_t * kAimSpeed); // 0 to 1 and back, from the left
+        ui_set_offset(e, g.aim, "needle", vec2{(x - 0.5f) * 200.0f, 0.0f});
+        return;
+    }
+    if ((g.aim_done += dt) < 0.9f || ui_covering(e)) return;
+    UiCover c;
+    c.fx = UiFx::Iris;
+    c.seconds = 0.4f;
+    c.user = COVER_AIM_OUT;
+    ui_cover(e, c);
+    g.aim_done = -1e6f; // once
+}
+
+// The swing: on the gold mark (a tenth of the bar) the rock breaks; off it, the nearer the
+// middle, the likelier. The dice are the
+// player's, sim state, so a demo breaks the same rock in every run.
+void strike(TickContext& ctx, Game& g) {
+    Engine& e = *ctx.engine;
+    Table* players = engine_table(e, "example_arcanum.player");
+    Vitals* v = players->get<Vitals>(g.player);
+    f32 x = 0.5f - 0.5f * cosf(g.aim_t * kAimSpeed);
+    f32 close = 1.0f - fabsf(x - 0.5f) * 2.0f;
+    Rng r;
+    r.state = v->luck;
+    f32 roll = r.unit();
+    v->luck = r.state;
+    g.aim_struck = true;
+    g.aim_broke = close >= 0.9f || roll < close * close; // the gold mark always breaks it
+    ui_set_text(e, g.aim, "result", g.aim_broke ? "{c=gold}{wave}Crack!{/wave}{/c} The boulder splits." : "{shake}Clang!{/shake} It holds.");
+    play_sound(ctx, g, g.aim_broke ? SND_BREAK : SND_HIT);
+    KV_INFO("arcanum", "strike: needle %.3f, near %.3f, roll %.3f: %s", x, close, roll, g.aim_broke ? "breaks" : "holds");
 }
 
 // Phase Sim: the player's intent, from the move action.
@@ -596,25 +755,30 @@ void walk(TickContext& ctx) {
     Span<Actor> actor = ctx.write<Actor>("example_arcanum.player.Actor");
     u32 i = g.player.index();
     if (i >= move.len || level_state(e) == LevelState::Loading) return;
-    if (g.fainting) {
-        static const u32 k_players = ctx.kind_id(".player");
-        const TilemapAsset* m = tilemap_get(e, g.map);
-        Table* players = engine_table(e, k_players); // its Transform2, declared below
-        if (m && m->state == AssetState::Ready) faint(g, ctx.write<Transform2>("example_arcanum.player.Transform2"), Span<Transform2>(players->prev<Transform2>(g.player) - i, move.len), *m);
-    }
-    // Confirm facing a villager within a step: it talks. The query sees the bodies where
-    // the last tick left them (the reads are early: this system writes the intent).
-    if (action_pressed(a, g.act_confirm) && g.mode == Mode::Play && g.dialogue.is_null()) {
+    actor[i].swing = actor[i].swing > (f32)ctx.dt ? actor[i].swing - (f32)ctx.dt : 0.0f;
+    // Confirm facing a villager within a step: it talks. The hammer, facing a rock: the
+    // minigame; facing a villager: trouble. The query sees the bodies where the last tick
+    // left them (the reads are early: this system writes the intent).
+    bool talking = action_pressed(a, g.act_confirm), hammering = action_pressed(a, g.act_hammer);
+    if ((talking || hammering) && g.mode == Mode::Play && g.dialogue.is_null() && g.aim.is_null()) {
         static const u32 k_xf = ctx.column_id(".player.Transform2");
         point2 at = ctx.read<Transform2>(k_xf)[i].position;
-        static const vec2 k_ahead[4] = {{0, -10}, {0, 10}, {-10, 0}, {10, 0}};
+        static const vec2 k_ahead[4] = {{0, -12}, {0, 12}, {-12, 0}, {12, 0}};
         vec2 ahead = k_ahead[actor[i].facing & 3];
         MemScope scope;
-        Array<Handle> near = array_in<Handle>(mem_scratch());
-        collision_query(ctx, rect2{at.x + ahead.x - 6.0f, at.y - 8.0f + ahead.y, 12.0f, 8.0f}, L_ACTOR, near);
+        Array<Handle> nearby = array_in<Handle>(mem_scratch());
+        collision_query(ctx, rect2{at.x + ahead.x - 8.0f, at.y - 9.0f + ahead.y, 16.0f, 10.0f}, L_ACTOR, nearby);
         static const u32 k_npc = ctx.kind_id(".npc");
-        u16 npc_hk = engine_table(e, k_npc)->kind;
-        for (Handle h : near) if (h.kind() == npc_hk) { talk(ctx, g, h); break; }
+        static const u32 k_rock = ctx.kind_id(".rock");
+        u16 npc_hk = engine_table(e, k_npc)->kind, rock_hk = engine_table(e, k_rock)->kind;
+        if (hammering) {
+            actor[i].swing = 0.3f;
+            play_sound(ctx, g, SND_HIT);
+            for (Handle h : nearby) {
+                if (h.kind() == rock_hk) { start_aim(e, g, h); break; }
+                if (h.kind() == npc_hk) { g.provoked = h; break; }
+            }
+        } else for (Handle h : nearby) if (h.kind() == npc_hk) { talk(ctx, g, h); break; }
     }
     vec2 dir = action_axis(a, g.act_move);
     f32 dt = (f32)ctx.dt;
@@ -645,14 +809,23 @@ void react(TickContext& ctx) {
     Vitals* v = players->get<Vitals>(g.player);
     f32 dt = (f32)ctx.dt;
     v->hurt = v->hurt > dt ? v->hurt - dt : 0.0f;
-    // Walking into a villager costs a heart, then a second of blinking that nothing
-    // hurts through. The last heart faints the player back to the map's start.
+    // Walking into a villager costs a heart, then a second of blinking that nothing hurts
+    // through. The last heart is the end.
     if (bumped && v->hurt == 0.0f && v->hp > 0) {
         --v->hp;
         v->hurt = kHurtTime;
         play_hurt(ctx, g);
         KV_INFO("arcanum", "hurt: %d of %d hearts at tick %llu", v->hp, v->hp_max, (unsigned long long)ctx.tick);
-        if (v->hp == 0) { v->hp = v->hp_max; g.fainting = true; } // walk takes the player back next tick
+        if (v->hp == 0 && g.mode == Mode::Play) { // the last heart: the game-over screen, behind a red fade
+            g.mode = Mode::Dead;
+            UiCover c;
+            c.fx = UiFx::Fade;
+            c.seconds = 0.8f;
+            c.tint = color_rgba(0.12f, 0.0f, 0.01f, 1.0f);
+            c.user = COVER_DEAD;
+            ui_cover(e, c);
+            KV_INFO("arcanum", "dead: at tick %llu", (unsigned long long)ctx.tick);
+        }
     }
     animate(e, g, *players->get<Actor>(g.player), *players->get<AnimPlayer>(g.player));
     Sprite* s = players->get<Sprite>(g.player);
@@ -679,6 +852,13 @@ void villagers(TickContext& ctx) {
     Span<Move2> move = ctx.write<Move2>("example_arcanum.npc.Move2");
     Span<Actor> actor = ctx.write<Actor>("example_arcanum.npc.Actor");
     Span<AnimPlayer> player = ctx.write<AnimPlayer>("example_arcanum.npc.AnimPlayer");
+    Span<Sprite> sprite = ctx.write<Sprite>("example_arcanum.npc.Sprite");
+    Span<const MoveResult2> last = ctx.read<MoveResult2>("example_arcanum.npc.MoveResult2"); // last tick's: an early read
+    static const u32 k_player_xf = ctx.column_id(".player.Transform2");
+    Span<const Transform2> pxf = ctx.read<Transform2>(k_player_xf);
+    const point2* player_at = g.player.index() < pxf.len ? &pxf[g.player.index()].position : nullptr;
+    const TilemapAsset* map = tilemap_get(*ctx.engine, g.map);
+    if (map && map->state != AssetState::Ready) map = nullptr;
     static const u32 k_npc = ctx.kind_id(".npc");
     const Table* table = engine_table(*ctx.engine, k_npc);
     f32 step = kNpcSpeed * (f32)ctx.dt;
@@ -690,7 +870,40 @@ void villagers(TickContext& ctx) {
         f32 len = sqrtf(a.route.x * a.route.x + a.route.y * a.route.y);
         mv.delta = vec2{0, 0};
         a.moving = 0;
-        if (len > 0.0f) {
+        if (!g.provoked.is_null() && table->handle_at(i) == g.provoked && !a.hostile) {
+            // Hammered: it turns on the player, says so, and its color goes.
+            a.hostile = 1;
+            a.repath = 0.0f;
+            g.chased = true;
+            g.provoked = Handle{};
+            sprite[i].tint = color_rgba(1.0f, 0.55f, 0.55f, 1.0f);
+            shout(ctx, g, "{shake}How DARE you!{/shake}");
+            KV_INFO("arcanum", "hostile: %s at tick %llu", engine_entity_name(*ctx.engine, table->handle_at(i)), (unsigned long long)ctx.tick);
+        }
+        if (a.hostile && player_at && map) {
+            // The chase: the map's path toward the player, a waypoint at a time, at twice the
+            // player's pace. The path is asked for again every few tenths of a second.
+            a.repath -= (f32)ctx.dt;
+            vec2 to_goal{a.goal.x - at.x, a.goal.y - at.y};
+            if (a.repath <= 0.0f || to_goal.x * to_goal.x + to_goal.y * to_goal.y < 4.0f) {
+                MemScope scope;
+                Array<point2> path = array_in<point2>(mem_scratch());
+                PathQuery q;
+                q.box = vec2{kFeetW, kFeetH};
+                point2 from{at.x, at.y - 5.5f}, to{player_at->x, player_at->y - 5.5f};
+                a.goal = tilemap_path(*map, point2{0, 0}, from, to, q, path) ? point2{path[0].x, path[0].y + 5.5f} : *player_at;
+                if (path.len == 1) a.goal = *player_at; // the same cell: straight at it
+                a.repath = 0.3f;
+            }
+            vec2 d{a.goal.x - at.x, a.goal.y - at.y};
+            f32 dist = sqrtf(d.x * d.x + d.y * d.y);
+            f32 chase = kChaseSpeed * (f32)ctx.dt;
+            if (dist > 0.01f) mv.delta = dist <= chase ? d : vec2{d.x / dist * chase, d.y / dist * chase};
+            a.moving = dist > 0.01f;
+            a.facing = facing_of(mv.delta, a.facing);
+        } else if (len > 0.0f) {
+            // Stopped by something on the way (a bush, the player): turn back.
+            if ((last[i].hit_x || last[i].hit_y) && last[i].blocker != g.player) a.route_dir ^= 1;
             point2 goal = a.route_dir ? a.home : point2{a.home.x + a.route.x, a.home.y + a.route.y};
             vec2 to{goal.x - at.x, goal.y - at.y};
             f32 dist = sqrtf(to.x * to.x + to.y * to.y);
@@ -752,6 +965,7 @@ void restore(TickContext& ctx, Game& g, const LevelBuild& b) {
     g.exit_armed = json_bool(json_get(doc, doc.root(), "exit_armed"), true);
     utf8_copy(g.hero, sizeof g.hero, json_string(json_get(doc, doc.root(), "hero"), g.hero));
     ui_model_set_str(e, "hero", g.hero);
+    if (g.mode == Mode::Dead) { g.mode = Mode::Play; ui_set_visible(e, g.hud, "", true); }
     if (g.mode == Mode::Title) { // continued from the title: it goes
         if (!g.title.is_null()) ui_close(e, g.title);
         g.title = Handle{};
@@ -870,38 +1084,35 @@ constinit const Step k_opening[] = {
     {20, 21, "confirm", 0, 0},
 };
 constinit const Step k_script[] = {
-    {30, 340, "move", 1, 0},       // east along the village road, out through the exit
-    {340, 420, "move", 1, 0},      // on into the field
-    {420, 470, "move", 0.7f, 0.7f},
-    {520, 521, "menu", 0, 0},      // the menu
-    {540, 541, "move", 0, -1},     // down to Level
-    {550, 551, "move", 0, -1},
-    {560, 561, "move", 0, -1},
-    {580, 581, "confirm", 0, 0},   // the level list: the cursor starts on the field, where we are
-    {600, 601, "move", 0, 1},      // up to the village
-    {620, 621, "confirm", 0, 0},
-    {780, 880, "move", 0, 1},      // up the lane from the start, pushing its rock
-    {880, 1010, "move", 0, -1},    // back down across the road
-    {1010, 1160, "move", -1, 0},   // west into the villager pacing there: hearts lost
-    {1180, 1181, "menu", 0, 0},    // save
-    {1200, 1201, "move", 0, -1},
+    {0, 90, "move", 0, 1},         // up the lane, pushing its boulder
+    {90, 150, "move", 0, -1},      // back down to the road
+    {150, 480, "move", 1, 0},      // east along the road, out to the field
+    {480, 560, "move", -1, 0},     // and straight back: the boulder is where it was left
+    {560, 857, "move", -1, 0},     // west along the road
+    {857, 971, "move", 0, 1},      // north, beside the old man
+    {980, 981, "move", -1, 0},     // facing him
+    {990, 991, "confirm", 0, 0},   // he talks: the boulders
+    {1090, 1091, "confirm", 0, 0},
     {1220, 1221, "confirm", 0, 0},
-    {1240, 1241, "menu", 0, 0},
-    {1250, 1254, "move", 0, 1},    // onto the villager's line
-    {1260, 1440, "move", 1, 0},    // east after the villager, into it again and again
-    {1460, 1461, "menu", 0, 0},    // load: back to where the save was
-    {1480, 1481, "move", 0, -1},
-    {1490, 1491, "move", 0, -1},
-    {1500, 1501, "confirm", 0, 0},
-    {1560, 1561, "menu", 0, 0},    // the credits
-    {1580, 1581, "move", 0, 1},    // up past Resume to Quit, Credits
-    {1590, 1591, "move", 0, 1},
-    {1610, 1611, "confirm", 0, 0},
-    {1630, 1631, "move", 0, -1},   // scroll
-    {1670, 1671, "cancel", 0, 0},  // back to the menu
-    {1690, 1691, "cancel", 0, 0},  // closed
+    {1230, 1279, "move", 0, -1},   // south, beside a boulder
+    {1285, 1286, "move", -1, 0},   // facing it
+    {1295, 1296, "hammer", 0, 0},  // the minigame
+    {1373, 1374, "confirm", 0, 0}, // swing, on the mark: it breaks
+    {1490, 1539, "move", 0, 1},    // back up to the old man
+    {1545, 1546, "move", -1, 0},
+    {1555, 1556, "confirm", 0, 0}, // the errand is done
+    {1680, 1681, "confirm", 0, 0},
+    {1810, 1811, "confirm", 0, 0},
+    {1830, 1831, "menu", 0, 0},    // save
+    {1840, 1841, "move", 0, -1},
+    {1850, 1851, "confirm", 0, 0},
+    {1870, 1871, "menu", 0, 0},
+    {1880, 1910, "move", 1, 0},    // east of the bush the farmer paces by, west of the lane boulder
+    {1915, 2063, "move", 0, -1},   // south, a row above his walk
 };
-constexpr u64 kReloadAt = 1750, kQuitAt = 1950;
+// The hammer, every third of a second, for as long as the farmer takes to pace by.
+constexpr u64 kHammerFrom = 2075, kHammerTo = 2700;
+constexpr u64 kReloadAt = 100000, kQuitAt = 4000; // the quit, should the ending not come
 
 // Phase PostSim, every tick: the next tick's actions, and the reload and the end.
 void demo(TickContext& ctx) {
@@ -917,6 +1128,11 @@ void demo(TickContext& ctx) {
     t -= kTitle;
     for (const Step& s : k_script)
         if (t >= s.from && t < s.to) input_action_override(e, s.action, true, vec2{s.x, s.y});
+    if (t >= kHammerFrom && t < kHammerTo && (t - kHammerFrom) % 20 == 0 && g.mode == Mode::Play && !g.chased) input_action_override(e, "hammer", true);
+    // The end: a second and a half on the game-over screen, Continue (the save: the rock
+    // still broken, the farmer calm), four seconds of the village, quit.
+    if (!g.gameover.is_null() && ++g.demo_wait == 90) input_action_override(e, "confirm", true);
+    if (g.demo_wait >= 90 && g.mode == Mode::Play && ++g.demo_wait == 330) engine_request_quit(e);
     if (t == kReloadAt) level_reload(e);
     if (t == kQuitAt) engine_request_quit(e);
 }
@@ -930,6 +1146,7 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     if (!input_actions(e, k_actions)) return false;
     const InputActions* a = input_actions_get(e);
     g->act_move = a->find("move"); g->act_confirm = a->find("confirm"); g->act_cancel = a->find("cancel"); g->act_menu = a->find("menu");
+    g->act_hammer = a->find("hammer");
     g->demo = frameloop_flag(e, "--demo");
     // Materials named for their textures ("<path>:alpha"), so a save names the look it
     // means whatever order they were made in.
@@ -960,6 +1177,9 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     g->sounds[SND_MOVE]   = asset_load_sound(e, "example_arcanum/sounds/move.wav");
     g->sounds[SND_ACCEPT] = asset_load_sound(e, "example_arcanum/sounds/accept.wav");
     g->sounds[SND_CANCEL] = asset_load_sound(e, "example_arcanum/sounds/cancel.wav");
+    g->sounds[SND_BREAK]  = asset_load_sound(e, "example_arcanum/sounds/break.wav");
+    g->sounds[SND_HIT]    = asset_load_sound(e, "example_arcanum/sounds/hit.wav");
+    g->sounds[SND_ALERT]  = asset_load_sound(e, "example_arcanum/sounds/alert.wav");
     g->credits = asset_load_blob(e, "example_arcanum/credits.json");
     // The save, in the per-user directory; the demo keeps its own so a scripted run never
     // overwrites a player's game.
@@ -967,12 +1187,14 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     if (pref[0]) snprintf(g->save_path, sizeof g->save_path, "%ssave%s.json", pref, g->demo ? "-demo" : "");
     Table* players = engine_table(e, "example_arcanum.player");
     Actor pa{};
-    g->player = players->spawn(transform2_at(point2{0, 0}), actor_sprite(*g, 0, 2), pa, Vitals{kHpMax, kHpMax, 0.0f}, AnimPlayer{}, feet_body(ColliderPusher), Move2{}, MoveResult2{});
+    g->player = players->spawn(transform2_at(point2{0, 0}), actor_sprite(*g, 0, 2), pa, Vitals{kHpMax, kHpMax, 0.0f, 0, Rng::seeded(0x4152434e).state}, AnimPlayer{}, feet_body(ColliderPusher), Move2{}, MoveResult2{});
     engine_entity_name_set(e, g->player, "player");
     LevelConfig cfg;
     cfg.levels = k_levels;
     cfg.load = [](Engine& en, const char* map, Handle scope) { return tilemap_load(en, map, scope); };
     if (!level_catalog(e, cfg)) return false;
+    const char* const remembered[] = {"example_arcanum.rock"}; // a level keeps its rocks as they were left
+    if (!level_persist(e, remembered)) return false;
     level_request(e, "village");
     KV_INFO("arcanum", "Arrows or WASD (or a pad's stick) walk, Escape or Start opens the menu, Enter or South chooses, Backspace or East goes back.");
     return true;
@@ -987,16 +1209,17 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_build",   KV_ON(LevelBuild, on_build), .writes = ".player, .npc, .rock, tilemap.tile, tilemap.animtile, audio.commands"},
     {.name = ".on_exit",    KV_ON(ExitRequested, on_exit)},
     {.name = ".on_loading", KV_ON(LevelLoading, on_loading)},
-    {.name = ".on_ui",      KV_ON(UiEvent, on_ui), .writes = "audio.commands"},
-    {.name = ".on_covered", KV_ON(UiCovered, on_covered)},
+    {.name = ".on_ui",      KV_ON(UiEvent, on_ui), .writes = "audio.commands, .player.Vitals", .after = ".on_build"},
+    {.name = ".on_covered", KV_ON(UiCovered, on_covered), .writes = ".rock", .after = ".on_build"},
 };
 constinit const SystemDesc k_systems[] = {
     {.name = ".files", .phase = Phase::PreSim, .fn = files, .after = "level.run", .before = ".menu", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".menu", .phase = Phase::PreSim, .fn = menu, .reads = "input.actions", .writes = "audio.commands",
      .after = "level.run", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions, ^*[Collider2].Transform2, *[Collider2].Collider2, .npc, .npc.@props, .npc.@Quest",
-     .writes = ".player.Move2, .player.Actor, .player.Transform2", .main_thread = true},
-    {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .reads = "^.npc.Local2", .writes = ".npc.Move2, .npc.Actor, .npc.AnimPlayer", .main_thread = true},
+    {.name = ".modes", .phase = Phase::PreSim, .fn = modes, .writes = "audio.commands", .after = ".menu", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions, ^*[Collider2].Transform2, *[Collider2].Collider2, .npc, .npc.@props",
+     .writes = ".player.Move2, .player.Actor, .npc.@Quest, audio.commands", .main_thread = true},
+    {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .reads = "^.npc.Local2, ^.player.Transform2, ^.npc.MoveResult2", .writes = ".npc.Move2, .npc.Actor, .npc.AnimPlayer, .npc.Sprite, audio.commands", .main_thread = true},
     {.name = ".react", .phase = Phase::Sim, .fn = react, .reads = ".player, .npc.MoveResult2",
      .writes = ".player.Vitals, .player.Sprite, .player.AnimPlayer, audio.commands", .main_thread = true},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true, .runs = RunWhen::Always},

@@ -16,9 +16,10 @@
       "ink": "#3a2a2a",
       "red": "#e04040",
       "shade": "#000008a6",
-      "night": "#10121ef0",
+      "night": "#10121eff",
       "well": "#00000080",
-      "brown": "#8a4a2a"
+      "brown": "#8a4a2a",
+      "blood": "#200408f0"
     },
     "frames": {
       "panel": { "texture": "example_arcanum/ui/panel_dark.png", "insets": [4, 4, 4, 4] },
@@ -110,6 +111,32 @@
                 { "type": "label", "name": "who", "text": "", "color": "brown" },
                 { "type": "label", "name": "text", "text": "", "color": "ink", "shadow": "#00000000", "wrap": true, "size": ["fill", "fit"], "reveal": 30 } ] } ] },
         { "type": "label", "name": "more", "anchor": "bottomright", "offset": [0, 2], "text": "{wave}...{/wave}", "color": "brown", "shadow": "#00000000" } ] },
+    "aim": {
+      "type": "box", "name": "aim", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "night", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 16, "align": "center",
+          "children": [
+            { "type": "label", "name": "title", "text": "{wave}Strike true!{/wave}", "color": "gold", "font_scale": 2 },
+            { "type": "box", "name": "track", "size": [200, 24],
+              "children": [
+                { "type": "panel", "name": "bar", "fill": "well", "anchor": "center", "size": [200, 6] },
+                { "type": "panel", "name": "sweet", "fill": "gold", "anchor": "center", "size": [20, 6] },
+                { "type": "image", "name": "needle", "image": "hammer", "anchor": "center" } ] },
+            { "type": "label", "name": "result", "text": "Confirm to swing", "color": "dim" } ] } ] },
+    "shout": {
+      "type": "label", "name": "line", "anchor": "top", "offset": [0, 34], "font_scale": 2, "color": "red", "text": "" },
+    "gameover": {
+      "type": "box", "name": "gameover", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "blood", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 14, "align": "center",
+          "children": [
+            { "type": "label", "name": "title", "text": "{shake}You have fallen{/shake}", "color": "red", "font_scale": 3 },
+            { "type": "label", "name": "epitaph", "text": "{=hero} lies still in the grass.", "color": "dim" },
+            { "type": "list", "name": "items", "gap": 4, "items": [
+              { "type": "label", "name": "continue", "text": "Continue from the save" },
+              { "type": "label", "name": "title", "text": "Back to the title" } ] } ] } ] },
     "hud": {
       "type": "panel", "name": "bar", "fill": "shade", "anchor": "topleft", "offset": [6, 6], "padding": [5, 3, 5, 3],
       "children": [

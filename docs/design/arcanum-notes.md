@@ -154,3 +154,21 @@ around. (Written as each milestone landed.)
 - **Screenshots by tick.** `--screenshot-frame` landed on different moments run to run
   (frames follow the disk during level loads); `--screenshot-tick` counts the ticks a
   script counts.
+- **The hammer.** Hammering a boulder is a mode change (an iris, the `aim` screen, an iris
+  back); the needle's place picks the outcome, and off the gold mark the dice are the
+  player's own `Vitals::luck`, sim state, so a demo breaks the same boulder in every run.
+  A hammered villager chases along `tilemap_path` at twice the walk, re-asking every 0.3 s;
+  its hostility is a column every villager has, and the villagers are not remembered by
+  the level, so leaving the map ends it (the classic choice, as asked).
+- **Persistence.** The village remembers its boulders by name (`village#77`): pushed ones
+  where they were left, broken ones gone, across a visit to the field and through a save.
+  `level_load` on a save marks the live level so the reload does not record over what the
+  save says.
+- **Latency left.** The faint became a game-over screen, so the one-tick teleport is gone.
+  A villager reads last tick's `MoveResult2` to turn back (early read): one tick, invisible.
+  The hostility a hammer starts lands on the next `villagers` run, the same tick (walk runs
+  first). Nothing else in the game waits a tick for the engine.
+- **Still worked around.** Tile animations play in the engine (tested) but arcanum's
+  tilesets have none yet; the pack's `Water Ripples` strip is vendored for it. Enum names in
+  saves (R5) were not done: `Sprite::space` is still `0` in a save. A villager stopped by
+  the player turns back at once, which reads as skittish; a wait would be kinder.

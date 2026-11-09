@@ -130,6 +130,15 @@ spawns from it: its Tiled name when it is the only object with that name, otherw
 to `engine_entity_name_set` and saves, the CLI (`print @village#12`) and per-level state
 can find the entity again.
 
+## Paths
+
+`tilemap_path(map, origin, from, to, PathQuery{box, diagonal, max_nodes}, out)` is A* over the
+map's cells for a box that must fit where it stands (whole solid cells and solid rectangles
+count), 8-connected without cutting corners (or 4), octile costs, ties broken by cell order
+so the same question gets the same path in every run. It appends cell centres in world
+units, the goal's last. Arcanum's pursuer asks for one every 0.3 s and walks to its first
+waypoint.
+
 ## Behaviour worth knowing
 
 - **Paths resolve against the file that names them.** A map's tileset `"../tiles/a.tsj"`

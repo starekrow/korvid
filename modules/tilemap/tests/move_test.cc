@@ -143,3 +143,52 @@ void test_tilemap_move(kv::TestCtx& c) {
     r = tilemap_move(pending, kOrigin, box(0, 0), vec2{1, 1});
     KV_CHECK(c, r.box.x == 1 && r.box.y == 1);
 }
+
+void test_tilemap_path(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("tilemap path");
+    TestMap tm;
+    const TilemapAsset& m = tm.m;
+    auto center = [&](i32 x, i32 y) { return tilemap_cell_center(m, kOrigin, x, y); };
+    auto cell = [&](point2 p, i32* x, i32* y) { return tilemap_cell_of(m, kOrigin, p, x, y); };
+    PathQuery q;
+    q.box = vec2{8, 8};
+    Array<point2> path;
+    // Along the open top row: nine steps east, every one a cell of row 0.
+    KV_CHECK(c, tilemap_path(m, kOrigin, center(0, 0), center(9, 0), q, path) == 9);
+    bool row0 = true;
+    for (point2 p : path) { i32 x, y; row0 &= cell(p, &x, &y) && y == 0; }
+    KV_CHECK(c, row0 && path.last() == center(9, 0));
+    // Around the wall column (7, 4..5) from its west side to its east: over the top, never
+    // through a solid, never across a corner.
+    path.clear();
+    u32 n = tilemap_path(m, kOrigin, center(6, 5), center(8, 5), q, path);
+    KV_CHECK(c, n >= 5 && path.last() == center(8, 5));
+    i32 px = 6, py = 5;
+    bool clean = true;
+    for (point2 p : path) {
+        i32 x, y;
+        clean &= cell(p, &x, &y) && !tilemap_solid(m, x, y) && abs(x - px) <= 1 && abs(y - py) <= 1;
+        if (x != px && y != py) clean &= !tilemap_solid(m, x, py) && !tilemap_solid(m, px, y);
+        px = x; py = y;
+    }
+    KV_CHECK(c, clean);
+    // The same question, the same answer.
+    Array<point2> again;
+    tilemap_path(m, kOrigin, center(6, 5), center(8, 5), q, again);
+    KV_CHECK(c, again.len == path.len && !memcmp(again.data, path.data, sizeof(point2) * path.len));
+    // Below the floor: no way through. Into a wall: no box fits. Four-connected: longer.
+    path.clear();
+    KV_CHECK(c, tilemap_path(m, kOrigin, center(0, 0), center(3, 7), q, path) == 0);
+    KV_CHECK(c, tilemap_path(m, kOrigin, center(0, 0), center(4, 2), q, path) == 0);
+    // The post in cell (2, 2) (map px 32..36, 32..40): an 8 px box centred there only
+    // touches it (fits); a 10 px one overlaps it (does not).
+    KV_CHECK(c, tilemap_path(m, kOrigin, center(0, 2), center(2, 2), q, path) == 2);
+    q.box = vec2{10, 8};
+    KV_CHECK(c, tilemap_path(m, kOrigin, center(0, 2), center(2, 2), q, path) == 0);
+    q.box = vec2{8, 8};
+    q.diagonal = false;
+    path.clear();
+    KV_CHECK(c, tilemap_path(m, kOrigin, center(0, 0), center(3, 3), q, path) == 6);
+    path.free(); again.free();
+}

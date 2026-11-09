@@ -410,8 +410,8 @@ void ui_draw(TickContext& ctx) {
         }
         // The iris: a disc of clear over the focus, shrinking to nothing, and black around it.
         f32 cx = c.desc.focus.x * s.win_w, cy = c.desc.focus.y * s.win_h;
-        f32 far = sqrtf(s.win_w * s.win_w + s.win_h * s.win_h);
-        f32 r = far * (1.0f - a);
+        f32 reach = sqrtf(s.win_w * s.win_w + s.win_h * s.win_h);
+        f32 r = reach * (1.0f - a);
         f32 x0 = floorf(cx - r), y0 = floorf(cy - r), d = ceilf(2.0f * r);
         if (d >= 1.0f && !s.iris_material.is_null()) {
             UiQuad disc = q;

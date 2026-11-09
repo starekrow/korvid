@@ -108,6 +108,18 @@ What the module registers with the engine:
   every tick. The demo scripts never pause mid-fade.
 - **Without a renderer** there is no quad; every step and every hold is the same.
 
+## Remembering
+
+`level_persist(e, {"game.rock"})` names the kinds whose named entities a level remembers.
+Leaving a level writes each of them to the level's record by name (`save_row`: columns,
+attachments, bag) and notes the names its build made that are gone; building it again, the
+module waits for the game's `LevelBuild` handlers to spawn it from the map, then destroys the
+gone and gives the rest their rows back, on a held tick before the first sim tick. A
+boulder pushed and left, or broken, is where it was left. `level_save(w, e)` and
+`level_load(e, doc, v)` carry every level's record in a save (the live level's as it stands);
+`level_forget` drops one. Unnamed entities are not remembered, and a kind that is not
+listed is rebuilt from the map every time (arcanum's villagers, so a chase is level-local).
+
 ## Not in this module
 
 Streaming levels in while one is played, several live levels, save games, level

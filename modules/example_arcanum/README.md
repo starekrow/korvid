@@ -1,13 +1,16 @@
 # example_arcanum
 
-A JRPG skeleton, written to find out what a game larger than one screen asks of the
-engine. Two Tiled maps, a village and a field, built from the CC0 Ninja Adventure pack
-by Pixel-boy and AAA (`assets/CREDITS.md`). A player walks them under keyboard or
-gamepad control, collides with walls, water, trees, houses and villagers, pushes
-boulders, loses a heart for each walk into a villager, passes in front of and behind
-things by where its feet are, and walks through the road at a map's edge to the other
-map. Escape or Start opens a pause menu: save, load, a level select and the credits.
-Each map has its own music, and the change between them is a crossfade.
+A small JRPG, written to find out what a game larger than one screen asks of the engine.
+Two Tiled maps, a village and a field, built from the CC0 Ninja Adventure pack by
+Pixel-boy and AAA (`assets/CREDITS.md`). It starts on a title over the village; the hero
+is named in a text field and an iris opens on the game. The hero walks the maps under
+keyboard or gamepad control, collides with walls, water, trees, houses and villagers,
+pushes boulders, talks to villagers (a dialogue box with their faces, typed out), and
+carries a hammer: at a boulder it opens an aiming minigame that can break it, and at a
+villager it starts a chase at twice the hero's speed that ends at the game-over screen.
+The levels remember their boulders, pushed or broken. Escape or Start opens a pause
+menu: save, load, a level select and the credits. Each map has its own music, and the
+change between them is a crossfade.
 
 ## Building and running
 
@@ -28,19 +31,22 @@ The ship build packs the game's assets into `bin/example_arcanum.kpak`, and
 `kormake package linux-ship example_arcanum` makes `dist/example_arcanum/`, which runs
 on its own.
 
-Controls: arrows or WASD (or the left stick or the d-pad) walk; Escape or Start opens and
-closes the menu; Enter, Space or South chooses; Backspace or East goes back.
+Controls: arrows or WASD (or the left stick or the d-pad) walk; Enter, Space or South talks
+and chooses; H, X or West swings the hammer; Escape or Start opens and closes the menu;
+Backspace or East goes back. On the name screen the keyboard types.
 
-`--demo` plays a script and quits. It walks east out of the village into the field, goes
-back to the village through the menu's level select, pushes the boulder up the lane,
-walks into the pacing villager (a heart), saves, walks into the villager again (three
-more), loads (the hearts and everything else come back), opens the credits and scrolls
-them, reloads the level, and quits. The log's `save:` and `load:` lines carry a hash of
-the saved kinds, which match. `--demo --hash` prints the state hash every sim tick. The
-hashes match across runs, thread counts (`--threads N`), I/O backends (`--io sync`,
-`--io uring`) and asset sources (loose files, `--pack` with the kpak, or `--pack` with
-any zip of `bin/assets`). That covers the level loads and the save's read, which hold
-the sim, so the disk's speed never reaches the state.
+`--demo` plays a script and quits. It chooses New game and types a name, pushes the
+boulder up the lane, walks out to the field and back (the boulder is where it was left),
+talks to the old man, hammers a boulder and breaks it on the gold mark, hears the old man
+thank it, saves, hammers the pacing farmer, is chased down and killed, continues from the
+save (the boulder still broken) and quits. The log says each step (`talk:`, `strike:`,
+`broken:`, `quest:`, `hostile:`, `hurt:`, `dead:`, `save:`, `load:`, and the level module's
+`remembers:`). `--demo --hash` prints the state hash every sim tick. The hashes match
+across runs, thread counts (`--threads N`), I/O backends (`--io sync`, `--io uring`) and
+asset sources (loose files, `--pack` with the kpak, or `--pack` with any zip of
+`bin/assets`). That covers the level loads and the save's read, which hold the sim, so
+the disk's speed never reaches the state. `--screenshot FILE --screenshot-tick N` catches
+a moment of it.
 
 The save is `~/.local/share/korvid/arcanum/save.json` (the demo's is `save-demo.json`,
 so a scripted run never overwrites a game).
@@ -48,47 +54,48 @@ so a scripted run never overwrites a game).
 ## How it is built
 
 - **Levels** come from the level module's catalog (`village`, `field`), each a Tiled map
-  loaded with `tilemap_load`. On `LevelBuild` the game spawns the map's tiles (owned by
-  the level's root), places the player at the entry it came in by (the `spawns` layer) or
-  at `player_start`, spawns the villagers the `objects` layer names as children of the
-  root, and loads the map's `music` property into the level's scope and calls
-  `music_play`: a half-second true crossfade, running with the screen's fade-in.
-- **The player** is one entity in `.player` (outside the level, so it persists). `walk`
-  (Sim) reads the `move` action and moves its feet box (10 by 5 px) an axis at a time, so
-  a blocked diagonal slides: swept through the map with `tilemap_move`, then against the
-  boulders, then against the villagers' feet boxes in the same tick. Exits are the `exits`
-  layer's rectangles. One is armed only once the player has stood outside every exit
-  since arriving, so arriving on the far side's exit does not send the player straight
-  back.
-- **Boulders** are `.rock`, children of the level's root, placed by the map's `rock`
-  points. A boulder in the player's way slows the player to half pace and is pushed clear
-  of where the player would be, if the map (swept with `tilemap_move`), the other
-  boulders and the villagers leave it room; otherwise the player stops against it. A
-  boulder the player already stands inside (a map edit) is walked out of, not dragged.
-  They go back where the map has them when the level is entered again.
-- **Hearts**: the player's `Vitals` (five hearts, sim state, so hashed and saved). A move
-  a villager blocks costs one, then a second of red blinking that nothing hurts through.
-  The last one faints the player back to `player_start`, whole. The bar top left (`hud`,
-  PostSim) is screen-space sprites and a label in cosmetic kinds.
-- **Save and load** (the `save` module). Saving writes one JSON object: the level's
-  name, the player's handle, and the `.player`, `.npc` and `.rock` kinds slot for slot
-  (`save_kinds`); the tiles are not saved, the map builds them. Loading closes the menu
-  and holds the sim (`HoldLoading`) while the file is read, then asks the level module
-  for the saved level (a reload when it is this one), whose transition keeps the hold. On
-  `LevelBuild` the game restores the kinds (`load_kinds`) instead of spawning the map's
-  villagers and boulders, with a remap that points their `Parent` at the new root. A
-  missing or unreadable save puts the menu back with a note.
+  loaded with `tilemap_load`, its solids the collision module's static world
+  (`tilemap_collide`). On `LevelBuild` the game spawns the map's tiles, places the player at
+  the entry it came by (the `spawns` layer) or `player_start`, and spawns the villagers and
+  boulders the `objects` layer names as children of the level's root, each named for its map
+  object (`tilemap_object_name`) and with the object's properties in its bag (a villager's
+  `display` name, `dialogue`, the old man's `quest_rocks`). The level module remembers
+  `.rock` (`level_persist`): left and come back to, the boulders are where they were left.
+  The characters' sheets load into each level's scope, so the level is built once their
+  clips exist.
+- **Bodies.** The player, the villagers and the boulders have `Collider2` bodies and move
+  by intent (`Move2`): `walk` and `villagers` write intents, `collision.resolve` moves
+  everything against the map and each other in the same tick, the player pushing boulders
+  at their pace, and `react` reads the `MoveResult2`s: a villager that stopped the player or
+  ran into it costs a heart. `villagers` reads where they stand with an early read (`^`),
+  since the resolve writes it. A villager stopped on its route turns back.
+- **Talking** (confirm) and **the hammer** (H) query the bodies a step ahead
+  (`collision_query`). A villager talks: the `dialogue` screen with its face, its name and
+  its lines from its bag, paged by `|`, typed out; the old man's `Quest` attachment picks
+  his thanks once a boulder is broken. A boulder: an iris, the `aim` screen (the needle
+  sweeps; on the gold mark the boulder breaks, off it the player's dice decide), an iris
+  back, the boulder gone. A villager: it shouts, turns red, and chases along `tilemap_path`
+  at twice the walk, a heart a touch.
+- **Hearts**: the player's `Vitals` (five hearts, a second of blinking after each, and the
+  hammer's dice, all sim state). The last heart fades to red and the `gameover` screen:
+  continue from the save, or back to the title.
+- **Screens** are one UI document, `assets/ui/arcanum.ui.json`: title, name, pause, level
+  select, credits, dialogue, aim, shout, game over and the HUD's hearts (model values). The
+  game opens and closes them and answers their `UiEvent`s by node name; modes change behind
+  covers (`ui_cover`).
+- **Save and load** (the `save` module). Saving writes the level's name, the hero's name,
+  the boulders broken, the `.player`, `.npc` and `.rock` kinds slot for slot, and every
+  level's record (`level_save`). Loading holds the sim while the file is read, gives the
+  levels their records back, then asks for the saved level, and on `LevelBuild` restores
+  the kinds instead of spawning the map's. Handles go by name: materials by their
+  textures, clips by their sheets, the `Parent` links by `level.root`.
 - **Drawing order**: the `objects` layer has `ysort`, so its trees and houses sort by their
   feet. The player and the villagers draw in that layer's sprite layer with
-  `SpriteSort::Feet` (the feet 8 px below the center).
+  `SpriteSort::Feet`.
 - **The camera** follows the player at render rate, clamped to the map, at the largest
   integer zoom that shows 240 rows, with pixel snap.
-- **The menu** (`menu`, PreSim, every tick) pauses with `engine_pause` and draws text
-  labels and a dimmer in cosmetic kinds. It navigates with `action_repeat`. Its sounds
-  play on the Ui bus through the pause. A note under it says what saving or loading did;
-  `files` (PreSim) reaps the save's write and read.
-- **The credits** are `assets/credits.json`, read as a blob. A test checks that every
-  author `CREDITS.md` names appears in them.
+- **The credits** are `assets/credits.json`, read as a blob and shown as one rich-text label
+  in a scroll. A test checks that every author `CREDITS.md` names appears in them.
 - **The maps** were first written by `tools/make_maps.py` (stdlib Python). They are plain
   Tiled JSON: open `assets/maps/*.tmj` in Tiled, edit, save, then type `level reload` into
   the CLI (`--cli-stdin`) to see the change without restarting.
@@ -97,7 +104,9 @@ so a scripted run never overwrites a game).
 
 | file | what |
 |---|---|
-| `src/game.cc` | the module: kinds, the menu, saving and loading, walking and pushing, villagers, the hearts, the camera, the level handlers, the demo |
+| `src/game.cc` | the module: kinds, the menus and screens, saving and loading, walking, talking and the hammer, villagers and the chase, the hearts, the camera, the level handlers, the demo |
+| `assets/ui/arcanum.ui.json` | every screen and the HUD |
+| `assets/actors/*.sheet.json` | the characters' walk, idle and attack clips |
 | `src/main.cc` | the frame loop's config |
 | `assets/maps/` | `village.tmj`, `field.tmj` and the four tilesets (`.tsj`) |
 | `assets/credits.json`, `assets/CREDITS.md`, `assets/LICENSE-NinjaAdventure.txt` | who made what |

@@ -12,6 +12,7 @@
 #include "korvid/core/test.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
+#include "korvid/save/save.h"
 #include "korvid/scene/module.h"
 #include "korvid/scene/parent.h"
 #include "korvid/sprite/module.h"
@@ -52,6 +53,10 @@ void on_build(TickContext& ctx, Span<const LevelBuild> es) {
         Table* things = ctx.write_kind("lt.thing");
         Parent p; p.parent = b.root;
         g.child = things->spawn(transform2_at(point2{0, 0}), local2_at(point2{1, 2}), p);
+        if (b.level == 0) { // the town's two named stones, as a map would make them
+            engine_entity_name_set(*ctx.engine, things->spawn(transform2_at(point2{0, 0}), local2_at(point2{10, 0}), p), "town#a");
+            engine_entity_name_set(*ctx.engine, things->spawn(transform2_at(point2{0, 0}), local2_at(point2{20, 0}), p), "town#b");
+        }
     }
 }
 void on_entered(TickContext&, Span<const LevelEntered> es) { g.entered += es.len; }
@@ -154,6 +159,42 @@ void test_level(kv::TestCtx& c) {
     until_active();
     KV_CHECK(c, level_current(e) == 1 && level_user(e, 1) == 2);
     KV_CHECK(c, !cli_run(e, "level load nowhere", collect, &out));
+
+    // Per-level state: the town's stones remembered by name, across a visit to the field,
+    // and through a save.
+    const char* const kept[] = {"lt.thing"};
+    KV_CHECK(c, level_persist(e, kept));
+    KV_CHECK(c, level_request(e, "town", quick));
+    until_active();
+    Table* things = engine_table(e, "lt.thing");
+    Handle a = engine_entity_find(e, "town#a"), b = engine_entity_find(e, "town#b");
+    KV_CHECK(c, !a.is_null() && !b.is_null() && things->get<Local2>(a)->position.x == 10);
+    things->get<Local2>(a)->position.x = 55;   // pushed
+    things->destroy(b);                        // broken
+    KV_CHECK(c, level_request(e, "field", quick));
+    until_active();
+    KV_CHECK(c, engine_entity_find(e, "town#a").is_null());
+    KV_CHECK(c, level_request(e, "town", quick));
+    until_active();
+    a = engine_entity_find(e, "town#a");
+    KV_CHECK(c, !a.is_null() && things->get<Local2>(a)->position.x == 55 && engine_entity_find(e, "town#b").is_null());
+    KV_CHECK(c, things->get<Parent>(a)->parent == level_root(e)); // the root by name: the new one
+    // A save: the records go in; forgotten, the town is its map again; loaded, it remembers.
+    things->get<Local2>(a)->position.x = 70;
+    SaveWriter w;
+    w.init(mem_general());
+    level_save(w, e);
+    KV_CHECK(c, w.finish() && strstr((const char*)w.out.data, "town#a") && strstr((const char*)w.out.data, "\"gone\""));
+    level_forget(e, "town");
+    KV_CHECK(c, level_reload(e, quick));
+    until_active();
+    KV_CHECK(c, things->get<Local2>(engine_entity_find(e, "town#a"))->position.x == 10 && !engine_entity_find(e, "town#b").is_null());
+    JsonDoc doc;
+    KV_CHECK(c, save_parse(SaveFormat::Json, w.out.data, w.out.len, mem_scratch(), doc) && level_load(e, doc, doc.root()) == 2); // the town and the field
+    KV_CHECK(c, level_reload(e, quick));
+    until_active();
+    KV_CHECK(c, things->get<Local2>(engine_entity_find(e, "town#a"))->position.x == 70 && engine_entity_find(e, "town#b").is_null());
+    w.free();
 
     engine_shutdown(e);
     char path[600];

@@ -7,6 +7,7 @@
 #include "korvid/core/log.h"
 #include "korvid/core/utf8.h"
 #include "korvid/render/renderer.h"
+#include "korvid/save/save.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 #include <stdio.h>
@@ -42,6 +43,14 @@ struct LevelState_ {
     u32            root_kind = 0, fade_kind = 0;
     Handle         fade_entity;
     Handle         white_texture, white_material;
+    // Per-level state: the kinds whose named entities a level remembers, and per level what
+    // it remembers ({"rows": {name: row}, "gone": [name]}, JSON) and the names its build made.
+    char           persist[8][KV_KIND_NAME_MAX] = {};
+    u32            persist_count = 0;
+    Array<char>    record[KV_LEVELS];
+    Array<u64>     built[KV_LEVELS];
+    bool           forgotten[KV_LEVELS] = {}; // level_forget: the next leave records nothing
+    Allocator*     general = nullptr;
 };
 
 LevelState_* state(Engine& e) { return engine_module_state_as<LevelState_>(e, "level"); }
@@ -92,9 +101,92 @@ void set_fade(TickContext& ctx, LevelState_& s) {
 }
 
 // Seconds to a fraction per tick; 0 seconds is all at once.
+// ---- per-level state -------------------------------------------------------------------------------
+
+bool persisted(const LevelState_& s, const Table& t) {
+    for (u32 i = 0; i < s.persist_count; ++i) if (!strcmp(s.persist[i], t.name)) return true;
+    return false;
+}
+
+// What the level is now, into its record: every named entity of the persisted kinds, and the
+// names it once had and has no longer (its build's, and those the record already said).
+void snapshot(Engine& e, LevelState_& s, u32 level) {
+    if (level >= s.count || !s.persist_count) return;
+    if (s.forgotten[level]) { s.forgotten[level] = false; return; }
+    MemScope scope;
+    Array<u64> gone = array_in<u64>(mem_scratch());
+    for (u64 n : s.built[level]) if (engine_entity_find(e, Name{n}).is_null()) gone.push(n);
+    if (s.record[level].len) {
+        JsonDoc doc;
+        if (json_parse(s.record[level].data, s.record[level].len, mem_scratch(), doc)) {
+            const JsonValue* old = json_get(doc, doc.root(), "gone");
+            for (const JsonValue* g = old ? json_first(doc, *old) : nullptr; g; g = json_next(doc, *g)) {
+                Name n = name_intern(json_string(g, ""));
+                bool have = false;
+                for (u64 x : gone) have |= x == n.hash;
+                if (!have && engine_entity_find(e, n).is_null()) gone.push(n.hash);
+            }
+        }
+    }
+    SaveWriter w;
+    w.init(mem_scratch(), SaveFormat::Json, false);
+    w.begin_object();
+    w.key("rows");
+    w.begin_object();
+    for (Table& t : e.tables) {
+        if (!persisted(s, t)) continue;
+        for (u32 i = 0; i < t.names.count(); ++i) {
+            if (!t.sparse_live(t.names, i)) continue;
+            Handle h = t.handle_at(t.names.slots[i]);
+            w.key(name_str(*(const Name*)t.names.at(i)));
+            save_row(w, t, h);
+        }
+    }
+    w.end_object();
+    w.key("gone");
+    w.begin_array(true);
+    for (u64 n : gone) w.string_value(name_str(Name{n}));
+    w.end_array();
+    w.end_object();
+    if (!w.finish()) return;
+    s.record[level].clear();
+    memcpy(s.record[level].push_n(w.out.len), w.out.data, w.out.len);
+}
+
+// After the build's handlers have spawned the level from its map: the names it made, then
+// what the record says: the gone destroyed, the rest given their rows back.
+void apply(Engine& e, LevelState_& s, u32 level) {
+    if (level >= s.count || !s.persist_count) return;
+    s.built[level].clear();
+    for (Table& t : e.tables) {
+        if (!persisted(s, t)) continue;
+        for (u32 i = 0; i < t.names.count(); ++i)
+            if (t.sparse_live(t.names, i)) s.built[level].push(((const Name*)t.names.at(i))->hash);
+    }
+    if (!s.record[level].len) return;
+    MemScope scope;
+    JsonDoc doc;
+    if (!json_parse(s.record[level].data, s.record[level].len, mem_scratch(), doc)) return;
+    u32 destroyed = 0, restored = 0;
+    const JsonValue* gone = json_get(doc, doc.root(), "gone");
+    for (const JsonValue* g = gone ? json_first(doc, *gone) : nullptr; g; g = json_next(doc, *g)) {
+        Handle h = engine_entity_find(e, json_string(g, ""));
+        Table* t = h.is_null() ? nullptr : engine_table_of(e, h);
+        if (t && persisted(s, *t) && t->destroy(h)) ++destroyed;
+    }
+    const JsonValue* rows = json_get(doc, doc.root(), "rows");
+    for (const JsonValue* r = rows ? json_first(doc, *rows) : nullptr; r; r = json_next(doc, *r)) {
+        Handle h = engine_entity_find(e, r->key);
+        Table* t = h.is_null() ? nullptr : engine_table_of(e, h);
+        if (t && persisted(s, *t) && load_row(doc, *r, *t, h)) ++restored;
+    }
+    KV_INFO("level", "'%s' remembers: %u restored, %u gone", s.levels[level].name, restored, destroyed);
+}
+
 f32 fade_step(f64 dt, f32 seconds) { return seconds > 0.0f ? (f32)(dt / seconds) : 1.0f; }
 
-void begin(LevelState_& s) {
+void begin(Engine& e, LevelState_& s) {
+    snapshot(e, s, s.current); // the level being left, as it is
     s.now = s.next;
     s.next.pending = false;
     s.reload  = s.now.level == s.current && s.current != KV_LEVELS;
@@ -118,7 +210,7 @@ void level_run(TickContext& ctx) {
     case LevelState::None:
     case LevelState::Active:
         if (s.next.pending) {
-            begin(s);
+            begin(e, s);
             hold_from_start(e, s);
             ctx.emit(LevelLeaving{s.leaving});
             if (s.leaving == KV_LEVELS) s.fade = 1.0f; // the first level comes out of black
@@ -180,7 +272,11 @@ void level_run(TickContext& ctx) {
         break;
     }
     case LevelState::Entering:
-        if (s.ticks_in_state == 1) { engine_hold(e, HoldLoading, false); break; } // the build's handlers ran on a held tick
+        if (s.ticks_in_state == 1) { // the build's handlers ran on a held tick
+            apply(e, s, s.current);
+            engine_hold(e, HoldLoading, false);
+            break;
+        }
         s.fade -= fade_step(ctx.dt, s.now.t.fade_in);
         if (s.fade > 0.0f) break;
         s.fade = 0.0f;
@@ -216,6 +312,8 @@ bool level_startup(Engine& e, ModuleInstance& self) {
     LevelState_* s = arena_push<LevelState_>(self.arena);
     if (!s) return false;
     s->root_kind = engine_kind_id(e, "level.root");
+    s->general = &self.general;
+    for (u32 i = 0; i < KV_LEVELS; ++i) { s->record[i].alloc = s->built[i].alloc = &self.general; }
     s->fade_kind = engine_kind_id(e, "level.fade");
     self.set_state(s);
     return true;
@@ -224,6 +322,7 @@ bool level_startup(Engine& e, ModuleInstance& self) {
 void level_shutdown(Engine& e, ModuleInstance& self) {
     LevelState_* s = self.state_as<LevelState_>();
     if (!s) return;
+    for (u32 i = 0; i < KV_LEVELS; ++i) { s->record[i].free(); s->built[i].free(); }
     if (!s->new_scope.is_null()) asset_scope_release(e, s->new_scope);
     if (!s->scope.is_null()) asset_scope_release(e, s->scope);
 }
@@ -298,6 +397,60 @@ bool level_reload(Engine& e, const LevelTransition& t) {
     LevelState_* s = state(e);
     if (!s || s->current == KV_LEVELS) return false;
     return level_request(e, s->levels[s->current].name, t);
+}
+
+bool level_persist(Engine& e, Span<const char* const> kinds) {
+    LevelState_* s = state(e);
+    if (!s || kinds.len > KV_COUNTOF(s->persist)) return false;
+    s->persist_count = 0;
+    for (const char* k : kinds) {
+        if (!engine_table(e, k)) { KV_ERROR("level", "no kind '%s' to remember", k); return false; }
+        utf8_copy(s->persist[s->persist_count++], KV_KIND_NAME_MAX, k);
+    }
+    return true;
+}
+
+void level_save(SaveWriter& w, Engine& e) {
+    LevelState_* s = state(e);
+    w.begin_object();
+    if (s) {
+        if (s->state == LevelState::Active) snapshot(e, *s, s->current); // the live level, as it is now
+        for (u32 i = 0; i < s->count; ++i) {
+            if (!s->record[i].len) continue;
+            MemScope scope;
+            JsonDoc doc;
+            if (!json_parse(s->record[i].data, s->record[i].len, mem_scratch(), doc)) continue;
+            w.key(s->levels[i].name);
+            save_json(w, doc, doc.root());
+        }
+    }
+    w.end_object();
+}
+
+u32 level_load(Engine& e, const JsonDoc& doc, const JsonValue& v) {
+    LevelState_* s = state(e);
+    if (!s || !v.is_object()) return 0;
+    u32 n = 0;
+    for (u32 i = 0; i < s->count; ++i) s->record[i].clear();
+    if (s->current < KV_LEVELS) s->forgotten[s->current] = true; // what the save says, not what is here
+    for (const JsonValue* lv = json_first(doc, v); lv; lv = json_next(doc, *lv)) {
+        u32 i = level_find(e, lv->key);
+        if (i == KV_LEVELS) { KV_WARN("level", "the save remembers a level '%s' this game lacks", lv->key); continue; }
+        MemScope scope;
+        SaveWriter w;
+        w.init(mem_scratch(), SaveFormat::Json, false);
+        save_json(w, doc, *lv);
+        if (!w.finish()) continue;
+        memcpy(s->record[i].push_n(w.out.len), w.out.data, w.out.len);
+        ++n;
+    }
+    return n;
+}
+
+void level_forget(Engine& e, const char* name) {
+    LevelState_* s = state(e);
+    u32 i = level_find(e, name);
+    if (s && i < KV_LEVELS) { s->record[i].clear(); s->built[i].clear(); s->forgotten[i] = i == s->current; }
 }
 
 u32         level_current(Engine& e) { LevelState_* s = state(e); return s ? s->current : KV_LEVELS; }

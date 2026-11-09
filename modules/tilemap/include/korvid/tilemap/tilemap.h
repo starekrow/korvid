@@ -17,6 +17,7 @@
 #pragma once
 #include "korvid/asset/texture.h"
 #include "korvid/math/color.h"
+#include "korvid/core/array.h"
 #include "korvid/core/memory.h"
 #include "korvid/math/rect2.h"
 
@@ -178,6 +179,19 @@ struct TileMove {
     bool  started_inside = false;
 };
 TileMove tilemap_move(const TilemapAsset& m, point2 origin, rect2 box, vec2 delta);
+
+// The shortest way between two points for a box of `box` (map pixels) that must fit where it
+// stands: A* over the cells, a cell walkable when the box centred in it touches no solid
+// (whole cells and solid rectangles), 8-connected with no corner cut (or 4), octile costs,
+// ties broken by cell order so the path is the same in every run. Appends the cell
+// centres (world units) from the one after the start's to the goal's, and returns how
+// many; 0 for no path within `max_nodes` cells or a goal no box fits.
+struct PathQuery {
+    vec2 box{8.0f, 8.0f};
+    bool diagonal = true;
+    u32  max_nodes = 4096;
+};
+u32 tilemap_path(const TilemapAsset& m, point2 origin, point2 from, point2 to, const PathQuery& q, Array<point2>& out);
 
 // Makes a map placed at `origin` the collision module's static world: every body the
 // resolve moves is swept through its solids with tilemap_move's rules. One map at a time;
