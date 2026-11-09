@@ -20,6 +20,7 @@ enum HoldReason : u32 {
     HoldUser    = 1u << 0, // engine_pause: a pause menu, the CLI's pause
     HoldLoading = 1u << 1, // a level loading behind a fade
     HoldFocus   = 1u << 2, // the window lost focus, for a game that asks
+    HoldUi      = 1u << 3, // a UI screen that holds the sim (a menu, a mode of its own)
     HoldGame    = 1u << 8, // the first bit a game may use for its own reasons
 };
 

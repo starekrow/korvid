@@ -1,0 +1,80 @@
+{
+  "design": [480, 270],
+  "pixel": true,
+  "actions": { "move": "move", "confirm": "confirm", "cancel": "cancel" },
+  "style": {
+    "font": "example_arcanum/ui/NormalFont.ttf",
+    "size": 8,
+    "line": 11,
+    "space": 3,
+    "shadow": "#000000b0",
+    "colors": {
+      "text": "#ffffff",
+      "gold": "#ffc840",
+      "focus": "#ffc840",
+      "dim": "#a0a0b0",
+      "ink": "#3a2a2a",
+      "red": "#e04040",
+      "shade": "#000008a6"
+    },
+    "frames": {
+      "panel": { "texture": "example_arcanum/ui/panel_dark.png", "insets": [4, 4, 4, 4] },
+      "light": { "texture": "example_arcanum/ui/panel.png", "insets": [6, 6, 5, 5] },
+      "dialog": { "texture": "example_arcanum/ui/dialog.png", "insets": [8, 8, 8, 8] },
+      "face": { "texture": "example_arcanum/ui/faceset_box.png", "insets": [5, 5, 5, 5] }
+    },
+    "images": {
+      "cursor": { "texture": "example_arcanum/ui/arrow.png", "rect": [4, 1, 8, 14], "scale": 0.5 },
+      "heart": { "texture": "example_arcanum/ui/heart.png", "rect": [0, 0, 16, 16], "frames": 5 },
+      "hammer": { "texture": "example_arcanum/items/hammer.png", "rect": [0, 0, 9, 16] }
+    },
+    "sounds": {
+      "move": "example_arcanum/sounds/move.wav",
+      "select": "example_arcanum/sounds/accept.wav",
+      "cancel": "example_arcanum/sounds/cancel.wav",
+      "tick": "example_arcanum/sounds/voice.wav"
+    }
+  },
+  "screens": {
+    "pause": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
+        { "type": "panel", "name": "box", "frame": "panel", "anchor": "center", "padding": [14, 10, 14, 10],
+          "children": [
+            { "type": "stack", "name": "column", "gap": 8, "align": "center",
+              "children": [
+                { "type": "label", "name": "title", "text": "Paused", "color": "gold", "font_scale": 2 },
+                { "type": "list", "name": "items", "gap": 3, "items": ["Resume", "Save", "Load", "Level", "Credits", "Quit"] },
+                { "type": "label", "name": "note", "text": "{=note}", "color": "dim" } ] } ] } ] },
+    "levels": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
+        { "type": "panel", "name": "box", "frame": "panel", "anchor": "center", "padding": [14, 10, 14, 10],
+          "children": [
+            { "type": "stack", "name": "column", "gap": 8, "align": "center",
+              "children": [
+                { "type": "label", "name": "title", "text": "Go to", "color": "gold", "font_scale": 2 },
+                { "type": "list", "name": "items", "gap": 3, "items": [
+                  { "type": "label", "name": "village", "text": "The village" },
+                  { "type": "label", "name": "field", "text": "The field" },
+                  { "type": "label", "name": "back", "text": "Back", "event": "back" } ] } ] } ] } ] },
+    "credits": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
+        { "type": "panel", "name": "box", "frame": "panel", "anchor": "center", "size": [300, 220], "padding": [12, 10, 12, 10],
+          "children": [
+            { "type": "scroll", "name": "view", "size": ["fill", "fill"], "input": true,
+              "children": [
+                { "type": "label", "name": "text", "anchor": "top", "size": ["fill", "fit"], "wrap": true, "align": "center" } ] } ] } ] },
+    "hud": {
+      "type": "panel", "name": "bar", "fill": "shade", "anchor": "topleft", "offset": [6, 6], "padding": [5, 3, 5, 3],
+      "children": [
+        { "type": "stack", "name": "row", "dir": "row", "gap": 6, "align": "center",
+          "children": [
+            { "type": "label", "name": "label", "text": "HP", "color": "gold" },
+            { "type": "meter", "name": "hearts", "image": "heart", "value": "=hp", "max": "=hp_max", "gap": 1 } ] } ] }
+  }
+}

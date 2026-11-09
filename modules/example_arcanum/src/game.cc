@@ -35,6 +35,7 @@
 #include "korvid/sprite/transform2.h"
 #include "korvid/text/text.h"
 #include "korvid/tilemap/tilemap.h"
+#include "korvid/ui/ui.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,11 +82,6 @@ constinit const KindDesc k_kinds[] = {
      .attachable = "Quest", .props = true},
     // Rocks the player pushes: the level's children, placed by the map's "rock" points.
     {.name = ".rock",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Move2", .capacity = 32},
-    // The menu, the credits and the hearts: presentation, never hashed.
-    {.name = ".ui",     .components = "Transform2, Text", .capacity = 128, .cosmetic = true},
-    {.name = ".dim",    .components = "Transform2, Sprite", .capacity = 2, .cosmetic = true},
-    {.name = ".hud",    .components = "Transform2, Sprite", .capacity = 16, .cosmetic = true},
-    {.name = ".hudtext", .components = "Transform2, Text", .capacity = 2, .cosmetic = true},
 };
 // What a save holds: the player, and what lives in the level and can change.
 constinit const char* const k_saved_kinds[] = {"example_arcanum.player", "example_arcanum.npc", "example_arcanum.rock"};
@@ -117,7 +113,6 @@ constinit const InputActionDesc k_actions[] = {
 };
 
 enum class Menu : u8 { Closed, Main, Levels, Credits };
-enum MainItem : u32 { ITEM_RESUME, ITEM_SAVE, ITEM_LOAD, ITEM_LEVEL, ITEM_CREDITS, ITEM_QUIT, ITEM_COUNT };
 enum Snd : u8 { SND_MOVE, SND_ACCEPT, SND_CANCEL, SND_COUNT };
 constexpr color kHurtTint = color{1.0f, 0.35f, 0.35f, 1.0f};
 
@@ -126,9 +121,10 @@ struct Game {
     Handle sheet_texture[kSheets], sheet_material[kSheets];
     Handle sheets[kSheets];      // anim.sheet: the walk and idle clips, loaded into each level's scope
     Handle walk_clip[kSheets][4], idle_clip[kSheets][4]; // by facing, once the sheet is Ready
-    Handle white_texture, white_material;
     Handle nature_texture, rock_material; // a rock is a 32 px cell of the nature sheet
-    Handle font;
+    Handle ui;                   // ui.doc: arcanum.ui.json, every screen the game shows
+    Handle hud;                  // ui.screen: the hearts, always up
+    Handle screen;               // ui.screen: the menu screen up now, if any
     Handle sounds[SND_COUNT];
     Handle credits;              // the credits.json blob
     Handle player;
@@ -138,17 +134,12 @@ struct Game {
     bool   leaving = false;      // an exit has been taken; the level is on its way
     bool   fainting = false;     // the last heart went: walk takes the player to the start
     Menu   menu = Menu::Closed;
-    u32    cursor = 0;
-    i32    credits_scroll = 0;
-    bool   menu_dirty = false;
-    char   note[48] = {};        // under the menu: what saving or loading did
     // Saving and loading. The save is one JSON file in the per-user directory.
     char   save_path[512] = {};
     Handle save_write;           // platform.io: the write on its way out
     Handle load_read;            // platform.io: the file on its way in, the sim held meanwhile
     u8*    load_data = nullptr;  // the file, read, kept until the level it names is built
     usize  load_size = 0;
-    Handle hud_back, hud_pips[kHpMax], hud_label;
     bool   demo = false;
     u64    demo_t = 0;           // ticks of the script, not counting the ones a level load holds
 };
@@ -272,104 +263,53 @@ u64 saved_state_hash(Engine& e) {
 }
 
 // ---- the menu ------------------------------------------------------------------------------------
+// Screens of the UI document; what they do comes back as UiEvents (on_ui).
 
-u32 item_count(Engine& e, const Game& g) {
-    switch (g.menu) {
-    case Menu::Main:   return ITEM_COUNT;
-    case Menu::Levels: return KV_COUNTOF(k_levels) + 1; // the levels, Back
-    default:           return 0;
-    }
-    (void)e;
-}
+// Under the menu: what saving or loading did.
+void note(Engine& e, const char* text) { ui_model_set_str(e, "note", text); }
 
-void label(Table& ui, const Game& g, const char* text, f32 x, f32 y, f32 scale, color tint) {
-    Text t;
-    t.font  = g.font;
-    utf8_copy(t.str, sizeof t.str, text);
-    t.scale = scale;
-    t.tint  = tint;
-    t.layer = 110;
-    t.space = SpriteSpace::Screen;
-    t.align = TextAlign::Center;
-    t.shadow = color_rgba(0.0f, 0.0f, 0.0f, 0.85f);
-    t.shadow_offset = vec2{2.0f, -2.0f};
-    ui.spawn(transform2_at(point2{x, y}), t);
-}
+const char* k_menu_names[] = {"closed", "main", "levels", "credits"};
 
-// The menu's labels, made again whenever what it shows changes.
-void build_menu(TickContext& ctx, Game& g) {
-    Engine& e = *ctx.engine;
-    Table* ui = ctx.write_kind("example_arcanum.ui");
-    Table* dim = ctx.write_kind("example_arcanum.dim");
-    ui->destroy_all();
-    dim->destroy_all();
-    if (g.menu == Menu::Closed) return;
-    Sprite shade;
-    shade.material = g.white_material;
-    shade.size  = vec2{100000.0f, 100000.0f};
-    shade.tint  = color_rgba(0.0f, 0.0f, 0.04f, 0.65f);
-    shade.layer = 100;
-    shade.space = SpriteSpace::Screen;
-    dim->spawn(transform2_at(point2{0, 0}), shade);
-    const color white = color_white(), gold = color_rgba(1.0f, 0.78f, 0.25f, 1.0f), grey = color_rgba(0.6f, 0.6f, 0.65f, 1.0f);
-    char line[64];
-    if (g.menu == Menu::Main || g.menu == Menu::Levels) {
-        const char* const main_items[ITEM_COUNT] = {"Resume", "Save", "Load", "Level", "Credits", "Quit"};
-        label(*ui, g, g.menu == Menu::Main ? "Paused" : "Go to", 0, 150, 1.4f, gold);
-        u32 n = item_count(e, g);
-        for (u32 i = 0; i < n; ++i) {
-            const char* name;
-            char tmp[48];
-            if (g.menu == Menu::Main) name = main_items[i];
-            else if (i < KV_COUNTOF(k_levels)) {
-                bool here = level_current(e) == i;
-                snprintf(tmp, sizeof tmp, "%s%s", k_levels[i].name, here ? "  (here)" : "");
-                name = tmp;
-            } else name = "Back";
-            snprintf(line, sizeof line, "%s%s", i == g.cursor ? "\xe2\x80\xba " : "", name); // U+203A
-            label(*ui, g, line, 0, 70.0f - 44.0f * (f32)i, 1.0f, i == g.cursor ? gold : white);
-        }
-        if (g.note[0]) label(*ui, g, g.note, 0, 70.0f - 44.0f * (f32)n - 16.0f, 0.75f, grey);
-        return;
-    }
-    // Credits: headings and lines from credits.json, scrolled.
+// The credits as one rich text: the headings gold, a blank line between sections.
+void fill_credits(Engine& e, Game& g) {
     const BlobAsset* b = asset_blob(e, g.credits);
-    if (!b || b->state != AssetState::Ready) { label(*ui, g, "...", 0, 0, 1.0f, grey); return; }
+    if (!b || b->state != AssetState::Ready) return;
     MemScope scope;
     JsonDoc doc;
-    if (!json_parse((const char*)b->data, b->size, mem_scratch(), doc)) { label(*ui, g, "credits.json does not parse", 0, 0, 0.8f, grey); return; }
-    f32 y = 240.0f + 34.0f * (f32)g.credits_scroll;
-    label(*ui, g, json_string(json_get(doc, doc.root(), "title"), "Credits"), 0, y, 1.5f, gold);
-    y -= 60.0f;
+    if (!json_parse((const char*)b->data, b->size, mem_scratch(), doc)) return;
+    Array<char> text = array_in<char>(mem_scratch());
+    auto add = [&](const char* s) { u32 n = (u32)strlen(s); memcpy(text.push_n(n), s, n); };
+    add("{c=gold}"); add(json_string(json_get(doc, doc.root(), "title"), "Credits")); add("{/c}\n\n");
     const JsonValue* sections = json_get(doc, doc.root(), "sections");
     for (const JsonValue* sec = sections ? json_first(doc, *sections) : nullptr; sec; sec = json_next(doc, *sec)) {
-        label(*ui, g, json_string(json_get(doc, *sec, "heading"), ""), 0, y, 0.9f, gold);
-        y -= 32.0f;
+        add("{c=gold}"); add(json_string(json_get(doc, *sec, "heading"), "")); add("{/c}\n");
         const JsonValue* lines = json_get(doc, *sec, "lines");
-        for (const JsonValue* l = lines ? json_first(doc, *lines) : nullptr; l; l = json_next(doc, *l)) {
-            label(*ui, g, json_string(l, ""), 0, y, 0.8f, white);
-            y -= 28.0f;
-        }
-        y -= 16.0f;
+        for (const JsonValue* l = lines ? json_first(doc, *lines) : nullptr; l; l = json_next(doc, *l)) { add(json_string(l, "")); add("\n"); }
+        add("\n");
     }
+    text.push(0);
+    ui_set_text(e, g.screen, "text", text.data);
 }
 
-void open_menu(TickContext& ctx, Game& g, Menu m) {
-    if (g.menu == Menu::Closed) { engine_pause(*ctx.engine, true); g.note[0] = 0; }
-    static const char* const names[] = {"closed", "main", "levels", "credits"};
-    // Where a screen opens, for --screenshot-frame and the like.
-    KV_INFO("arcanum", "menu: %s at frame %llu, tick %llu", names[(u32)m], (unsigned long long)ctx.engine->frame_count, (unsigned long long)ctx.engine->clock.tick_total);
+// Shows a menu screen (or none), replacing the one up; the first holds the sim.
+void open_menu(Engine& e, Game& g, Menu m, const char* focus = nullptr) {
+    if (!g.screen.is_null()) ui_close(e, g.screen);
+    g.screen = Handle{};
+    if (g.menu == Menu::Closed && m != Menu::Closed) note(e, "");
     g.menu = m;
-    g.cursor = 0;
-    g.credits_scroll = 0;
-    g.menu_dirty = true;
+    // Where a screen opens, for --screenshot-frame and the like.
+    KV_INFO("arcanum", "menu: %s at frame %llu, tick %llu", k_menu_names[(u32)m], (unsigned long long)e.frame_count, (unsigned long long)e.clock.tick_total);
+    if (m == Menu::Closed) return;
+    UiOpen o;
+    o.layer = 100;
+    o.hold = true;
+    static const char* const k_screens[] = {"", "pause", "levels", "credits"};
+    g.screen = ui_open(e, g.ui, k_screens[(u32)m], o);
+    if (m == Menu::Credits) fill_credits(e, g);
+    if (focus) ui_focus(e, g.screen, "items", focus);
 }
 
-void close_menu(TickContext& ctx, Game& g) {
-    g.menu = Menu::Closed;
-    g.menu_dirty = true;
-    engine_pause(*ctx.engine, false);
-}
+void close_menu(Engine& e, Game& g) { open_menu(e, g, Menu::Closed); }
 
 // ---- saving and loading --------------------------------------------------------------------------
 
@@ -377,8 +317,8 @@ void close_menu(TickContext& ctx, Game& g) {
 // are copied into the write at submission; the menu says "Saved" when the disk has them.
 void save_game(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
-    if (!g.save_path[0]) { utf8_copy(g.note, sizeof g.note, "There is nowhere to save"); return; }
-    if (level_state(e) != LevelState::Active || !g.save_write.is_null()) { utf8_copy(g.note, sizeof g.note, "Not now"); return; }
+    if (!g.save_path[0]) { note(e, "There is nowhere to save"); return; }
+    if (level_state(e) != LevelState::Active || !g.save_write.is_null()) { note(e, "Not now"); return; }
     SaveWriter w;
     w.init(mem_general());
     w.begin_object();
@@ -395,7 +335,7 @@ void save_game(TickContext& ctx, Game& g) {
         req.path = g.save_path; req.data = w.out.data; req.size = w.out.len;
         g.save_write = platform_io(e)->write_file(req);
     }
-    utf8_copy(g.note, sizeof g.note, g.save_write.is_null() ? "The save could not be written" : "Saving...");
+    note(e, g.save_write.is_null() ? "The save could not be written" : "Saving...");
     KV_INFO("arcanum", "save: %s, %u bytes, state %016llx at tick %llu", g.save_path, w.out.len,
             (unsigned long long)saved_state_hash(e), (unsigned long long)e.clock.tick_total);
     w.free();
@@ -406,12 +346,12 @@ void save_game(TickContext& ctx, Game& g) {
 // this one) and on_build restores the kinds instead of spawning the map's.
 void load_game(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
-    if (!g.save_path[0] || !g.load_read.is_null() || g.load_data || level_state(e) != LevelState::Active) { utf8_copy(g.note, sizeof g.note, "Not now"); return; }
+    if (!g.save_path[0] || !g.load_read.is_null() || g.load_data || level_state(e) != LevelState::Active) { note(e, "Not now"); return; }
     IoRequest req;
     req.path = g.save_path;
     g.load_read = platform_io(e)->read_file(req);
-    if (g.load_read.is_null()) { utf8_copy(g.note, sizeof g.note, "The save could not be read"); return; }
-    close_menu(ctx, g);
+    if (g.load_read.is_null()) { note(e, "The save could not be read"); return; }
+    close_menu(e, g);
     engine_hold(e, HoldLoading, true);
 }
 
@@ -434,9 +374,8 @@ void files(TickContext& ctx) {
         --i;
         if (c.request == g.save_write) {
             g.save_write = Handle{};
-            if (c.status == IoStatus::Done) utf8_copy(g.note, sizeof g.note, "Saved");
-            else { utf8_copy(g.note, sizeof g.note, "The save could not be written"); KV_WARN("arcanum", "save: errno %d writing %s", c.error, g.save_path); }
-            g.menu_dirty = true;
+            if (c.status == IoStatus::Done) note(e, "Saved");
+            else { note(e, "The save could not be written"); KV_WARN("arcanum", "save: errno %d writing %s", c.error, g.save_path); }
             continue;
         }
         g.load_read = Handle{};
@@ -460,63 +399,55 @@ void files(TickContext& ctx) {
             // Back to the menu, which says why; the sim was held for nothing.
             free_load(g);
             engine_hold(e, HoldLoading, false);
-            open_menu(ctx, g, Menu::Main);
-            g.cursor = ITEM_LOAD;
-            utf8_copy(g.note, sizeof g.note, why);
+            open_menu(e, g, Menu::Main, "load");
+            note(e, why);
         }
         // Otherwise the level's transition holds the sim from here and clears the hold when
         // it is done.
     }
 }
 
-// Phase PreSim, every tick (paused ones are when it matters): the menu.
+// Phase PreSim, every tick (paused ones are when it matters): the menu action opens the
+// pause menu, or closes whatever menu is up. Everything else is the UI's, and on_ui's.
 void menu(TickContext& ctx) {
     static const u32 k_actions_id = ctx.resource_id("input.actions");
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
     bool held_by_load = (engine_holds(e) & HoldLoading) != 0;
-    if (g.menu == Menu::Closed) {
-        if (action_pressed(a, g.act_menu) && !held_by_load) { open_menu(ctx, g, Menu::Main); play_sound(ctx, g, SND_ACCEPT); }
-    } else {
-        vec2 mv = action_axis(a, g.act_move);
-        bool step = action_repeat(a, g.act_move, 18, 6);
-        if (g.menu == Menu::Credits) {
-            if (step && mv.y != 0.0f) { g.credits_scroll += mv.y > 0 ? -1 : 1; if (g.credits_scroll < 0) g.credits_scroll = 0; g.menu_dirty = true; }
-            if (action_pressed(a, g.act_confirm) || action_pressed(a, g.act_cancel)) { open_menu(ctx, g, Menu::Main); g.cursor = ITEM_CREDITS; play_sound(ctx, g, SND_CANCEL); }
-        } else {
-            u32 n = item_count(e, g);
-            if (step && fabsf(mv.y) > 0.5f) {
-                g.cursor = mv.y < 0 ? (g.cursor + 1) % n : (g.cursor + n - 1) % n;
-                g.menu_dirty = true;
-                play_sound(ctx, g, SND_MOVE);
-            }
-            if (action_pressed(a, g.act_menu)) { close_menu(ctx, g); play_sound(ctx, g, SND_CANCEL); }
-            else if (action_pressed(a, g.act_cancel)) {
-                if (g.menu == Menu::Levels) { open_menu(ctx, g, Menu::Main); g.cursor = ITEM_LEVEL; }
-                else close_menu(ctx, g);
-                play_sound(ctx, g, SND_CANCEL);
-            } else if (action_pressed(a, g.act_confirm)) {
-                play_sound(ctx, g, SND_ACCEPT);
-                if (g.menu == Menu::Main) {
-                    switch (g.cursor) {
-                    case ITEM_RESUME:  close_menu(ctx, g); break;
-                    case ITEM_SAVE:    save_game(ctx, g); g.menu_dirty = true; break;
-                    case ITEM_LOAD:    load_game(ctx, g); g.menu_dirty = true; break;
-                    case ITEM_LEVEL:   open_menu(ctx, g, Menu::Levels); g.cursor = level_current(e) < KV_COUNTOF(k_levels) ? level_current(e) : 0; break;
-                    case ITEM_CREDITS: open_menu(ctx, g, Menu::Credits); break;
-                    case ITEM_QUIT:    engine_request_quit(e); break;
-                    }
-                } else if (g.cursor < KV_COUNTOF(k_levels)) {
-                    close_menu(ctx, g);
-                    LevelTransition t;
-                    t.fade_out = 0.4f; t.fade_in = 0.4f;
-                    level_request(e, k_levels[g.cursor].name, t);
-                } else { open_menu(ctx, g, Menu::Main); g.cursor = ITEM_LEVEL; }
-            }
+    if (!action_pressed(a, g.act_menu)) return;
+    if (g.menu == Menu::Closed) { if (!held_by_load) { open_menu(e, g, Menu::Main); play_sound(ctx, g, SND_ACCEPT); } }
+    else { close_menu(e, g); play_sound(ctx, g, SND_CANCEL); }
+}
+
+// What the menu screens say: an item chosen, a cancel.
+void on_ui(TickContext& ctx, Span<const UiEvent> events) {
+    Game& g = ctx.state_as<Game>();
+    Engine& e = *ctx.engine;
+    static const u64 k_select = name_intern("select").hash, k_cancel = name_intern("cancel").hash, k_confirm = name_intern("confirm").hash;
+    for (const UiEvent& ev : events) {
+        if (ev.screen != g.screen) continue;
+        const char* item = name_str(Name{ev.node});
+        if (g.menu == Menu::Main) {
+            if (ev.event == k_cancel) { close_menu(e, g); continue; }
+            if (ev.event != k_select) continue;
+            if (!strcmp(item, "resume")) close_menu(e, g);
+            else if (!strcmp(item, "save")) save_game(ctx, g);
+            else if (!strcmp(item, "load")) load_game(ctx, g);
+            else if (!strcmp(item, "level")) open_menu(e, g, Menu::Levels, level_current(e) < KV_COUNTOF(k_levels) ? k_levels[level_current(e)].name : nullptr);
+            else if (!strcmp(item, "credits")) open_menu(e, g, Menu::Credits);
+            else if (!strcmp(item, "quit")) engine_request_quit(e);
+        } else if (g.menu == Menu::Levels) {
+            if (ev.event == k_select && level_find(e, item) < KV_LEVELS) {
+                close_menu(e, g);
+                LevelTransition t;
+                t.fade_out = 0.4f; t.fade_in = 0.4f;
+                level_request(e, item, t);
+            } else open_menu(e, g, Menu::Main, "level"); // back, cancel
+        } else if (g.menu == Menu::Credits && (ev.event == k_cancel || ev.event == k_confirm)) {
+            open_menu(e, g, Menu::Main, "credits");
         }
     }
-    if (g.menu_dirty) { build_menu(ctx, g); g.menu_dirty = false; }
 }
 
 // ---- walking -------------------------------------------------------------------------------------
@@ -655,52 +586,16 @@ void camera(TickContext& ctx) {
     if (m && m->state == AssetState::Ready) cam->bounds = rect2{0.0f, -(f32)(m->height * m->tile_h), (f32)(m->width * m->tile_w), (f32)(m->height * m->tile_h)};
 }
 
-// Phase PostSim, every tick: the hearts, top left, from the player's Vitals. Made once,
-// placed every tick (the window may have changed size).
+// Phase PostSim, every tick: the hearts, from the player's Vitals, as model values the HUD
+// screen shows.
 void hud(TickContext& ctx) {
-    static const u32 k_window = ctx.resource_id("platform_hid.window");
     static const u32 k_vitals = ctx.column_id(".player.Vitals");
     Game& g = ctx.state_as<Game>();
-    Table* hud = ctx.write_kind("example_arcanum.hud");
-    Table* text = ctx.write_kind("example_arcanum.hudtext");
     Span<const Vitals> vitals = ctx.read<Vitals>(k_vitals);
     const Vitals* v = g.player.index() < vitals.len ? &vitals[g.player.index()] : nullptr;
-    const HostWindow* w = ctx.resource<const HostWindow>(k_window);
-    if (!v || !w || g.white_material.is_null()) return;
-    constexpr f32 kPipW = 18.0f, kPipH = 12.0f, kPipStep = 24.0f, kLabelW = 40.0f, kPad = 8.0f;
-    if (g.hud_back.is_null()) {
-        Sprite sp;
-        sp.material = g.white_material;
-        sp.space = SpriteSpace::Screen;
-        sp.layer = 90;
-        sp.tint = color_rgba(0.0f, 0.0f, 0.04f, 0.5f);
-        sp.size = vec2{kPad * 2.0f + kLabelW + kPipStep * (f32)kHpMax - (kPipStep - kPipW), 30.0f};
-        g.hud_back = hud->spawn(transform2_at(point2{0, 0}), sp);
-        sp.layer = 91;
-        sp.size = vec2{kPipW, kPipH};
-        for (Handle& h : g.hud_pips) h = hud->spawn(transform2_at(point2{0, 0}), sp);
-        Text t;
-        t.font  = g.font;
-        utf8_copy(t.str, sizeof t.str, "HP");
-        t.scale = 0.7f;
-        t.tint  = color_rgba(1.0f, 0.78f, 0.25f, 1.0f);
-        t.layer = 91;
-        t.space = SpriteSpace::Screen;
-        t.align = TextAlign::Left;
-        t.shadow = color_rgba(0.0f, 0.0f, 0.0f, 0.85f);
-        t.shadow_offset = vec2{1.0f, -1.0f};
-        g.hud_label = text->spawn(transform2_at(point2{0, 0}), t);
-    }
-    // The bar's middle, 20 px in from the window's top-left corner.
-    f32 left = -(f32)w->width() * 0.5f + 20.0f, mid = (f32)w->height() * 0.5f - 20.0f - 15.0f;
-    const Sprite* back = hud->get<Sprite>(g.hud_back);
-    hud->get<Transform2>(g.hud_back)->position = point2{left + back->size.x * 0.5f, mid};
-    text->get<Transform2>(g.hud_label)->position = point2{left + kPad, mid - 5.0f}; // its baseline, so the capitals sit centered
-    for (i32 i = 0; i < kHpMax; ++i) {
-        hud->get<Transform2>(g.hud_pips[i])->position = point2{left + kPad + kLabelW + kPipStep * (f32)i + kPipW * 0.5f, mid};
-        bool full = i < v->hp && i < v->hp_max;
-        hud->get<Sprite>(g.hud_pips[i])->tint = full ? color_rgba(0.86f, 0.18f, 0.22f, 1.0f) : color_rgba(0.3f, 0.3f, 0.35f, 0.8f);
-    }
+    if (!v) return;
+    ui_model_set_int(*ctx.engine, "hp", v->hp);
+    ui_model_set_int(*ctx.engine, "hp_max", v->hp_max);
 }
 
 // ---- levels -------------------------------------------------------------------------------------
@@ -884,7 +779,6 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     const InputActions* a = input_actions_get(e);
     g->act_move = a->find("move"); g->act_confirm = a->find("confirm"); g->act_cancel = a->find("cancel"); g->act_menu = a->find("menu");
     g->demo = frameloop_flag(e, "--demo");
-    Renderer* r = renderer_get(e);
     // Materials named for their textures ("<path>:alpha"), so a save names the look it
     // means whatever order they were made in.
     auto material_of = [&](Handle texture) {
@@ -899,18 +793,12 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     // it for the material, which lives as long as the game.
     g->nature_texture = asset_load_texture(e, "example_arcanum/tiles/TilesetNature.png");
     g->rock_material = material_of(g->nature_texture);
-    if (r) {
-        TextureDesc td;
-        td.name = "example_arcanum.white";
-        g->white_texture = renderer_texture_create(r, td);
-        const u8 white[4] = {255, 255, 255, 255};
-        renderer_texture_upload(r, g->white_texture, 1, 1, white, sizeof white);
-        MaterialDesc md;
-        md.name = "example_arcanum.white";
-        md.texture = g->white_texture;
-        g->white_material = renderer_material_create(r, md);
-    }
-    g->font = asset_load_font(e, "text/DejaVuSans.ttf", 26.0f);
+
+    g->ui = ui_load(e, "example_arcanum/ui/arcanum.ui.json", asset_scope_global(e));
+    UiOpen hud_open;
+    hud_open.layer = 90;
+    hud_open.input = false;
+    g->hud = ui_open(e, g->ui, "hud", hud_open);
     g->sounds[SND_MOVE]   = asset_load_sound(e, "example_arcanum/sounds/move.wav");
     g->sounds[SND_ACCEPT] = asset_load_sound(e, "example_arcanum/sounds/accept.wav");
     g->sounds[SND_CANCEL] = asset_load_sound(e, "example_arcanum/sounds/cancel.wav");
@@ -941,18 +829,18 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_build",   KV_ON(LevelBuild, on_build), .writes = ".player, .npc, .rock, tilemap.tile, tilemap.animtile, audio.commands"},
     {.name = ".on_exit",    KV_ON(ExitRequested, on_exit)},
     {.name = ".on_loading", KV_ON(LevelLoading, on_loading)},
+    {.name = ".on_ui",      KV_ON(UiEvent, on_ui), .writes = "audio.commands"},
 };
 constinit const SystemDesc k_systems[] = {
     {.name = ".files", .phase = Phase::PreSim, .fn = files, .after = "level.run", .before = ".menu", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".menu", .phase = Phase::PreSim, .fn = menu, .reads = "input.actions, .player, .npc, .rock", .writes = ".ui, .dim, audio.commands",
+    {.name = ".menu", .phase = Phase::PreSim, .fn = menu, .reads = "input.actions", .writes = "audio.commands",
      .after = "level.run", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions", .writes = ".player.Move2, .player.Actor, .player.Transform2", .main_thread = true},
     {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .reads = "^.npc.Local2", .writes = ".npc.Move2, .npc.Actor, .npc.AnimPlayer", .main_thread = true},
     {.name = ".react", .phase = Phase::Sim, .fn = react, .reads = ".player, .npc.MoveResult2",
      .writes = ".player.Vitals, .player.Sprite, .player.AnimPlayer, audio.commands", .main_thread = true},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".player.Vitals, platform_hid.window", .writes = ".hud, .hudtext",
-     .before = "text.layout, scene.compose", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".player.Vitals", .before = "ui.draw", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".demo", .phase = Phase::PostSim, .fn = demo, .main_thread = true, .runs = RunWhen::Always},
 };
 

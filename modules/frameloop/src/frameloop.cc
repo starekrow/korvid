@@ -37,6 +37,9 @@ const char*     g_trace_path   = nullptr; // --profile FILE
 bool            g_prof_report  = false;   // --prof-report: the top zones with the fps line
 const char*     g_shot_path    = nullptr; // --screenshot FILE: one frame as a PPM
 u64             g_shot_frame   = 90;      // --screenshot-frame N: which one
+u64             g_shot_tick    = 0;       // --screenshot-tick N: the first frame at or past tick N, counting every tick but those a load held
+bool            g_shot_taken   = false;
+u64             g_shot_ticks   = 0;       // ticks run outside a level load's hold
 bool            g_check_sort   = false;   // --check-sort: verify the GPU sort every 30th frame
 CliConfig       g_cli;                    // --cli-port N, --cli-stdin, --cli-ascii
 PlatformMounts  g_mounts;                 // --pack FILE (repeatable), --assets DIR
@@ -96,6 +99,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--prof-report") == 0) g_prof_report = true;
         else if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) g_shot_path = argv[++i];
         else if (strcmp(argv[i], "--screenshot-frame") == 0 && i + 1 < argc) g_shot_frame = (u64)atoll(argv[++i]);
+        else if (strcmp(argv[i], "--screenshot-tick") == 0 && i + 1 < argc) g_shot_tick = (u64)atoll(argv[++i]);
         else if (strcmp(argv[i], "--check-sort") == 0) g_check_sort = true;
         else if (strcmp(argv[i], "--cli-port") == 0 && i + 1 < argc) g_cli.port = (u16)atoi(argv[++i]);
         else if (strcmp(argv[i], "--cli-stdin") == 0) g_cli.stdin_ = true;
@@ -118,7 +122,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay]", argv[0]);
             return false;
         }
     }
@@ -259,7 +263,9 @@ void run(Engine& engine, FrameLoopState& s) {
             platform_pump(engine);
         }
         f64 t_pumped = time_now();
-        engine_frame(engine, dt);
+        bool loading = (engine_holds(engine) & HoldLoading) != 0;
+        u32 ran = engine_frame(engine, dt);
+        if (!loading) g_shot_ticks += ran; // the ticks a script counts: not the ones a load held, which follow the disk
         f64 t_ticked = time_now();
         if (f64 slack = idle_slack(s)) {
             f64 used = engine_idle_run(engine, slack);
@@ -267,7 +273,9 @@ void run(Engine& engine, FrameLoopState& s) {
         }
         {
             KV_ZONE("render");
-            if (g_shot_path && engine.frame_count == g_shot_frame) renderer_screenshot(s.renderer, g_shot_path);
+            // A tick is the same moment in every run, where a frame is not.
+            bool shot = g_shot_tick ? !g_shot_taken && g_shot_ticks >= g_shot_tick : engine.frame_count == g_shot_frame;
+            if (g_shot_path && shot) { renderer_screenshot(s.renderer, g_shot_path); g_shot_taken = true; }
             if (g_check_sort && engine.frame_count % 30 == 10) renderer_check_sort(s.renderer);
             render_frame(engine, s);
         }
