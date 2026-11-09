@@ -5,6 +5,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
 #include "korvid/sprite/module.h"
+#include "korvid/scene/module.h"
 #include "korvid/sprite/transform2.h"
 
 namespace {
@@ -28,7 +29,7 @@ void test_broadphase(kv::TestCtx& c) {
     using namespace kv;
     c.begin("broadphase");
 
-    const ModuleDesc* const list[] = {&sprite_module, &collision_module, &k_c};
+    const ModuleDesc* const list[] = {&sprite_module, &scene_module, &collision_module, &k_c};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     Table* things = engine_table(e, "c.thing");

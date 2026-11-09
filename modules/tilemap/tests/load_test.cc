@@ -11,6 +11,7 @@
 #include "korvid/platform/module.h"
 #include "korvid/sprite/module.h"
 #include "korvid/anim/module.h"
+#include "korvid/collision/module.h"
 #include "korvid/scene/module.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
@@ -41,6 +42,7 @@ void sys_spawn(TickContext& ctx) {
 constinit const KindDesc k_kinds[] = {
     {.name = ".owner", .components = "Transform2", .capacity = 4},
     {.name = ".child", .components = "Transform2, Local2, Parent", .capacity = 1}, // what the scene and anim modules need to see
+    {.name = ".body", .components = "Transform2, Collider2, Move2", .capacity = 1},
 };
 constinit const SystemDesc k_systems[] = {{.name = ".spawn", .phase = Phase::Sim, .fn = sys_spawn, .writes = "tilemap.tile, tilemap.animtile", .main_thread = true}};
 KV_MODULE_DEFINE(k_tt) = {.name = "tt", .kinds = k_kinds, .systems = k_systems};
@@ -57,7 +59,7 @@ bool put(const char* path, const char* text) {
 void test_tilemap_load(kv::TestCtx& c) {
     using namespace kv;
     c.begin("tilemap load");
-    const ModuleDesc* const list[] = {&platform_module, &asset_module, &sprite_module, &scene_module, &anim_module, &tilemap_module, &k_tt};
+    const ModuleDesc* const list[] = {&platform_module, &asset_module, &sprite_module, &scene_module, &collision_module, &anim_module, &tilemap_module, &k_tt};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     char root[512], path[600];
@@ -80,6 +82,19 @@ void test_tilemap_load(kv::TestCtx& c) {
     KV_CHECK(c, m->tilesets[0].tiles.count == 3 && m->solid_rect_count == 3 && tilemap_solid(*m, 0, 1));
     frames(1);
     KV_CHECK(c, asset_scope_progress(e, scope).pending == 0 && asset_scope_progress(e, scope).ready == 1);
+
+    // The map as the collision module's static world: a body walking west into the solid
+    // cell (0, 1), world x [0, 16), y [-32, -16), stops on its edge.
+    tilemap_collide(e, map, point2{0, 0});
+    Table* bodies = engine_table(e, "tt.body");
+    Handle body = bodies->spawn(transform2_at(point2{40, -24}), collider_body(BodyKind::Kinematic, vec2{4, 4}, vec2{0, 0}, 1, 1), Move2{vec2{-60, 0}});
+    frames(1);
+    KV_CHECK(c, bodies->get<Transform2>(body)->position.x == 20.0f);
+    tilemap_collide(e, Handle{}, point2{0, 0});
+    bodies->get<Move2>(body)->delta = vec2{-60, 0};
+    frames(1);
+    KV_CHECK(c, bodies->get<Transform2>(body)->position.x == -40.0f);
+    bodies->destroy(body);
 
     // An instance: one row per non-empty cell of the visible tile layers (ground 12, detail
     // 2, walls 3; gz is hidden) and one per tile object (the tree).

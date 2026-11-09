@@ -1,36 +1,50 @@
 # collision
 
-Overlap detection between entities, delivered as events. Give a kind a `Collider2`
-next to its `Transform2` and the module tells you, every tick, which pairs of entities
-started or stopped overlapping. What an overlap means is the game's business: a bullet
-hits a rock, a player enters a trigger volume, two stones bump. The module finds the
-pairs; your handlers do the rest.
+Bodies that move and stop in the same tick, and overlaps delivered as events. Give a kind
+a `Collider2` next to its `Transform2` and it takes part, as one of three bodies:
+
+- a **sensor** (the default) reports when it starts and stops overlapping things, and
+  blocks nothing: bullets and rocks, exits, trigger zones;
+- a **solid** blocks moving bodies and never moves on its own, unless it is pushable and
+  something that pushes walks into it: walls, villagers standing still, boulders;
+- a **kinematic** body moves by its intent, is stopped by solids, other kinematic bodies and
+  the static world (a tile map), and stops other kinematic bodies: the player, a villager.
+
+What a stop or an overlap means is the game's business; the module moves, stops, pushes
+and reports.
 
 ## How it works
 
-Once per tick, in phase `Sim`, the system `collision.broadphase` runs after every
-system that moves or spawns things (the scheduler derives that from its read set: every
-`Transform2` and `Collider2` column). It:
+Every tick, in phase `Sim`:
 
-1. Gathers every live entity of every kind that has both components.
-2. Drops them into a uniform grid whose cell is the diameter of the largest collider, so
-   any two overlapping colliders sit in the same or neighbouring cells.
-3. Tests each candidate pair once: layers against masks first, then the shapes.
-4. Sorts the pairs it found into a canonical list and diffs it against last tick's list.
-   A pair that is new becomes an `OverlapBegin` event; a pair that is gone becomes an
-   `OverlapEnd` event. A pair that is still there produces nothing.
+1. **Intents.** The game writes `Move2::delta` on its kinematic bodies: how far each wants
+   to go this tick. A body that may move (kinematic, or a pushable solid) has `Move2` in its
+   kind; a kind that wants to know what happened has `MoveResult2` too.
+2. **`collision.resolve`** runs after every system that writes a `Move2`, `Transform2` or
+   `Collider2` (the scheduler derives that from its sets). It takes the intents in a fixed
+   order, kinds by name and then slots, and moves each one along x and then y, swept
+   against the static world and against every solid and kinematic body *as it stands at
+   that moment*: the second mover sees where the first ended this tick, so two bodies never
+   end up in one place. A pusher that meets a pushable solid moves it, at the solid's
+   `pace`, as far as the pusher goes past it, against everything but the pusher, one deep.
+   Then it writes `Transform2` (a child kind's `Local2` by the same delta) and
+   `MoveResult2`: what was asked, what moved, which axes stopped, what stopped it, what it
+   pushed, who pushed it. `collision.moved` lists the bodies something else moved.
+3. **The game reacts** in a Sim system that reads `MoveResult2` or `collision.moved`: the
+   scheduler puts it after the resolve. Intent, resolve, react: one tick.
+4. **`collision.broadphase`** finds every pair of colliders that overlap where everything
+   ended, and diffs the list against last tick's: a new pair is an `OverlapBegin`, a pair
+   that is gone an `OverlapEnd`. Handlers run at the next boundary, the same tick.
 
-The events are emitted during `Sim`, so handlers subscribed to them run at the next
-phase boundary of the same tick, and any `PostSim` system can read them as a batch.
+`collision.clear` zeroes the intents in PostSim, so an intent lasts one tick.
 
-Pairs are canonical, the handle with the lower bits first. The events carry handle
-fields with schemas, so the bus drops an event whose entity has since been destroyed:
-destroy a rock in one handler and the `OverlapEnd` that would have named it never
-arrives. Entities that spawn and overlap in the same tick are reported that tick.
+The **static world** is one sweep function the resolve calls before the bodies
+(`collision_static`); the tilemap module installs a map's solids with
+`tilemap_collide(e, map, origin)`. The module itself knows nothing about tile maps.
 
-There is no response. Nothing is pushed apart, no normal or depth is computed. If you
-want bouncing, do it in the handler with the two transforms, or keep a plain loop like
-`example_stones` does.
+**Queries.** `collision_query(ctx, rect, layers, out)` lists the colliders overlapping a
+rectangle, `collision_cast(ctx, box, delta, layers)` the first one a moving box would enter
+and when, both over the colliders as they stand when called. The hammer's reach is a query.
 
 ## Using it
 
@@ -86,6 +100,24 @@ g->bullet_kind = engine_table(engine, g_bullet_kind)->kind;
 Because the handles in a delivered event are live, a handler that holds a write on a
 column may index it directly: `ctx.write<Health>(k_hp)[o.a.index()]`.
 
+**Make it a body.** A kind that moves by intent has `Collider2, Move2, MoveResult2`; a
+system writes the intent, another reads the result:
+
+```cpp
+{.name = ".hero", .components = "Transform2, Sprite, Collider2, Move2, MoveResult2", .capacity = 1},
+
+// spawn: a feet box, kinematic, pushing boulders
+heroes.spawn(transform2_at(at), sprite, collider_body(BodyKind::Kinematic, vec2{5, 2.5f}, vec2{0, -5.5f}, L_ACTOR, L_ACTOR, ColliderPusher), Move2{}, MoveResult2{});
+
+// Sim, writes .hero.Move2: the intent
+move[i].delta = dir * speed * (f32)ctx.dt;
+// Sim, reads .hero.MoveResult2 (after the resolve, this tick): the reaction
+if (res[i].blocker.kind() == g.villager_hk) lose_heart();
+```
+
+A pushable boulder is `collider_body(BodyKind::Solid, ..., ColliderPushable)` with `pace`
+set and `Move2` in its kind (the resolve writes its position).
+
 **Pick layers deliberately.** A collider's `layer` is the set it is on; its `mask` is the
 set it will meet. Both directions must agree, so a bullet with `mask = L_ROCK` never
 meets a ship even if the ship accepts bullets. Bullets on layer `L_BULLET` with mask
@@ -101,10 +133,12 @@ Header `korvid/collision/collider.h`:
 
 | name | kind | what |
 |---|---|---|
-| `Collider2` | component | `radius` (circle), `half` (box, vec2), `layer` (u32 bits), `mask` (u32 bits), `shape` (u8) |
-| `ColliderShape` | enum | `Circle`, `Box` |
-| `collider_circle(radius, layer, mask)` | function | a circle collider |
-| `collider_box(half, layer, mask)` | function | an axis-aligned box collider |
+| `Collider2` | component | `radius` (circle), `half` (box), `offset`, `layer`, `mask`, `pace` (a pushable's), `shape`, `body`, `flags` |
+| `ColliderShape`, `BodyKind`, `ColliderFlags` | enums | `Circle`, `Box`; `Sensor`, `Solid`, `Kinematic`; `ColliderPushable`, `ColliderPusher` |
+| `collider_circle(radius, layer, mask)`, `collider_box(half, layer, mask)` | functions | sensors |
+| `collider_body(body, half, offset, layer, mask, flags)` | function | a box body |
+| `Move2` | component | `delta`: the intent, this tick |
+| `MoveResult2` | component | `asked`, `moved`, `blocker`, `pushed`, `pushed_by`, `hit_x`, `hit_y`, `displaced` |
 | `OverlapBegin{a, b}` | event | the pair started overlapping this tick; `a` has the lower handle bits |
 | `OverlapEnd{a, b}` | event | the pair stopped overlapping this tick, or one of them moved out |
 
@@ -114,17 +148,23 @@ Header `korvid/collision/module.h`:
 |---|---|---|
 | `collision_module` | `ModuleDesc` | the module record; kormake puts it in the list for you |
 | `collision_pair_count(Engine&)` | function | pairs overlapping after the last broadphase |
+| `collision_stats(Engine&)` | function | the last resolve: bodies, moves, blocked axis moves, pushes |
+| `collision_static(e, fn, user)` | function | the static world's sweep; `tilemap_collide` sets it |
+| `collision_query(ctx, rect, layers, out)`, `collision_cast(ctx, box, delta, layers, ignore)` | functions | colliders in a rectangle; the first a moving box enters |
 
 What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
-| `Collider2` | component | 24 bytes, 5 fields, sim state (hashed, described) |
+| `Collider2`, `Move2`, `MoveResult2` | components | sim state (hashed, saved) |
 | `OverlapBegin`, `OverlapEnd` | event types | schemas on both; stale handles drop the event |
-| `collision.broadphase` | system, phase Sim | reads `*.Transform2`, `*.Collider2`; writes nothing |
+| `collision.moved` | resource | `Array<Handle>`: the bodies something else moved this tick |
+| `collision.resolve` | system, phase Sim | reads `*[Collider2].Transform2`, `*[Collider2].Collider2`, `*[Move2].Move2`; writes `*[Move2].Transform2`, `*[Move2].Local2`, `*[MoveResult2].MoveResult2`, `collision.moved` |
+| `collision.broadphase` | system, phase Sim | after the resolve; reads the same columns |
+| `collision.clear` | system, phase PostSim | writes `*[Move2].Move2` |
 
-Resources a system of yours might name: none. The broadphase reads columns; to read a
-collider yourself, name `kind.Collider2` in your sets like any other column.
+Kinds without `Move2` are only read, so a game that moves its own sensors (rocks) keeps
+doing so and the broadphase reports them after its movers.
 
 ## Behaviour worth knowing
 
@@ -145,9 +185,25 @@ collider yourself, name `kind.Collider2` in your sets like any other column.
   fraction of a millisecond; the test suite runs 400 circles on a lattice and checks it
   finds exactly their 760 touching pairs.
 
+- **Order decides.** Two bodies walking into each other resolve by order: the first takes
+  the gap, the second stops at it. The order is the same in every run (kinds by name,
+  slots), not symmetric. A game that wants fairness alternates or slows both.
+- **Read your position early.** A system that reads where a body is to decide its intent
+  reads a column the resolve writes. Mark the read `^` (`.reads = "^.npc.Local2"`): it is
+  this phase's earlier value, and the scheduler runs that system before the resolve
+  instead of after it.
+- **Teleport before the resolve.** A system that writes a body's `Transform2` after the
+  resolve (in a reaction) is a cycle: the resolve reads it. Teleport in the system that
+  writes the intent, before.
+- **Blocking is boxes.** A circle blocks and is blocked as its bounding box; overlaps still
+  test circles exactly.
+- **Inside another body**, a box may move away from the other's middle, not toward it.
+- **Children** move their `Local2` by the world delta, right for a child of an unrotated,
+  unscaled parent (a level's root) and documented as the limit.
+
 ## Not in this module
 
-Collision response, contacts, raycasts, swept shapes, polygons, rotated boxes, spatial
-queries you call yourself ("what is near this point"), and a narrowphase beyond circle
-and box. The grid stays inside the system; a query API over it would be the natural next
-addition if a game needs one.
+Physics (velocities, mass, restitution), chains of pushes, rotated boxes, polygons, round
+blocking, contact points and depths, continuous rotation, and a grid kept across ticks
+(the resolve builds its own each tick, which is cheap for the hundreds of bodies a game
+like arcanum has).

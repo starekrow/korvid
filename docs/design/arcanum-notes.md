@@ -111,3 +111,28 @@ Nov 8, 2026. Boulders to push and hearts to lose gave a save something to hold; 
   names would make saves readable and survive reordering an enum.
 - **No CBOR yet.** The writer's calls are the data model, so CBOR is a second encoder and
   a decoder into the same tree (see `modules/save/README.md`).
+
+## Slice 6
+
+Nov 8, 2026. What the game asked of the slice, as it was built, and what it still works
+around. (Written as each milestone landed.)
+
+- **Names.** The save writes materials by their textures' names, clips by their sheets'
+  and villagers, rocks and the level root by their own; the `level.root` remap is gone.
+  The saved-state check counts handles by name, since a reload makes the sheets (and
+  their clips) again as new handles with the old names.
+- **Sheets.** The walk cycles come from `.sheet.json` files, and the sheets load into each
+  level's scope: a clip that turned up on an I/O-dependent tick would start the walk
+  cycles on one, and the hash would follow the disk. The level is built once they exist.
+- **Collision.** The player, the villagers and the rocks are bodies; the 50-line blocking
+  and pushing loop is gone. A villager that walks into the player, or the player into a
+  villager, costs a heart in the same tick (`MoveResult2::blocker`), on both sides now.
+  Two things the scheduler said, both now engine features or rules in the README:
+  - a villager reads where it stands to decide where to go, and the resolve writes that:
+    a cycle. Reads marked `^` are of the phase's earlier value (`^.npc.Local2`).
+  - fainting teleported the player in the reaction, after the resolve, which reads the
+    position: a cycle. The teleport moved into `walk`, before the resolve: **one tick** from
+    the last heart to the start, invisible behind the hurt sound.
+- **The demo script is no longer the old walk.** Bodies resolve a little differently from
+  the old hand loop (villagers now stop for the player and the bushes), so the demo bumps
+  the villager twice where it used to five times. The demo is rewritten with the hammer.

@@ -208,11 +208,42 @@ bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
 }
 
 // Names to ids. "*.Component" is that column in every kind, and must exist somewhere;
-// ".x" is "<module>.x"; the list is comma-separated.
+// "*[Other].Component" is that column in every kind that also has Other, and may match
+// none (a module's system that moves only what opted in); ".x" is "<module>.x"; the list
+// is comma-separated.
 bool resolve_resource_refs(const Engine& e, const ModuleDesc& m, const char* unit_name,
-                           const char* refs, const char* kind, Array<u32>& out) {
-    char raw[2 * KV_KIND_NAME_MAX + 2];
-    for (const char* cursor = refs; name_list_next(cursor, raw, sizeof raw);) {
+                           const char* refs, const char* kind, Array<u32>& out, Array<u32>* early = nullptr) {
+    char raw_buf[2 * KV_KIND_NAME_MAX + 2];
+    for (const char* cursor = refs; name_list_next(cursor, raw_buf, sizeof raw_buf);) {
+        // "^name": a read of the phase's earlier value (see SystemDesc::reads).
+        char* raw = raw_buf;
+        u32 first = out.len;
+        if (raw[0] == '^') {
+            if (!early) { KV_ERROR("engine", "'%s' in module '%s' %s '%s': '^' marks reads only", unit_name, m.name, kind, raw); return false; }
+            ++raw;
+        }
+        bool is_early = raw != raw_buf;
+        auto mark = [&]() { if (is_early) for (u32 k = first; k < out.len; ++k) early->push(out[k]); };
+        if (raw[0] == '*' && raw[1] == '[') {
+            char* close = strchr(raw, ']');
+            if (!close || close[1] != '.') {
+                KV_ERROR("engine", "'%s' in module '%s' %s '%s': write *[Component].Column", unit_name, m.name, kind, raw);
+                return false;
+            }
+            *close = 0;
+            u32 filter = engine_component_id(e, raw + 2);
+            u32 cid = engine_component_id(e, close + 2);
+            if (!filter || !cid) {
+                KV_ERROR("engine", "'%s' in module '%s' %s '*[%s].%s': unknown component '%s'", unit_name, m.name, kind,
+                         raw + 2, close + 2, !filter ? raw + 2 : close + 2);
+                return false;
+            }
+            for (const Table& t : e.tables)
+                if (t.has(filter))
+                    if (const Column* c = t.column(cid)) out.push(c->resource);
+            mark();
+            continue;
+        }
         if (raw[0] == '*' && raw[1] == '.') {
             u32 cid = engine_component_id(e, raw + 2);
             bool any = false;
@@ -223,6 +254,7 @@ bool resolve_resource_refs(const Engine& e, const ModuleDesc& m, const char* uni
                          unit_name, m.name, kind, raw, raw + 2);
                 return false;
             }
+            mark();
             continue;
         }
         const char* name = engine_qualify(m.name, raw);
@@ -233,6 +265,7 @@ bool resolve_resource_refs(const Engine& e, const ModuleDesc& m, const char* uni
             return false;
         }
         out.push(id);
+        mark();
     }
     return true;
 }
@@ -252,6 +285,7 @@ struct Pending {
     ScheduledSystem sys;
     Array<u32>      reads_eff;  // reads plus, for a kind, every column of it
     Array<u32>      writes_eff;
+    Array<u32>      early_eff;  // the reads marked '^': before this phase's writers, not after
     u32             rank;       // module order then declaration order
 };
 
@@ -362,7 +396,7 @@ found:
 }
 
 void free_pending(Array<Pending>& pend) {
-    for (Pending& p : pend) { p.sys.reads.free(); p.sys.writes.free(); p.reads_eff.free(); p.writes_eff.free(); }
+    for (Pending& p : pend) { p.sys.reads.free(); p.sys.writes.free(); p.reads_eff.free(); p.writes_eff.free(); p.early_eff.free(); }
     pend.free();
 }
 
@@ -375,10 +409,16 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
 
     // Readers after writers; a pair writing the same thing is remembered for the check below.
     // A module's state is not a conflict: its systems keep declaration order among themselves.
+    // A read marked '^' turns its edge around: that reader goes before the writers.
     for (u32 i = 0; i < n; ++i)
         for (u32 j = 0; j < n; ++j) {
             if (i == j) continue;
-            if (u32 r = first_conflict(e, pend[i].writes_eff, pend[j].reads_eff)) edges.push(Edge{i, j, r});
+            for (u32 x : pend[i].writes_eff) {
+                if (!contains(pend[j].reads_eff, x) || e.resources[x - 1].implicit) continue;
+                if (contains(pend[j].early_eff, x)) edges.push(Edge{j, i, x});
+                else edges.push(Edge{i, j, x});
+                break;
+            }
         }
 
     // Declared order. For systems, a name in another phase is checked for direction; for
@@ -526,14 +566,17 @@ bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
             if (!ok) break;
             Pending p{};
             p.sys.desc = &s; p.sys.module = &e.modules[i]; p.sys.full_name = name; p.rank = rank++;
-            if (!resolve_resource_refs(e, m, name, s.reads, "reads", p.sys.reads) ||
+            Array<u32> early;
+            if (!resolve_resource_refs(e, m, name, s.reads, "reads", p.sys.reads, &early) ||
                 !resolve_resource_refs(e, m, name, s.writes, "writes", p.sys.writes)) {
-                p.sys.reads.free(); p.sys.writes.free();
+                p.sys.reads.free(); p.sys.writes.free(); early.free();
                 ok = false;
                 break;
             }
             expand(e, p.sys.reads, p.reads_eff);
             expand(e, p.sys.writes, p.writes_eff);
+            expand(e, early, p.early_eff);
+            early.free();
             if (s.state == StateUse::Write) p.writes_eff.push(e.modules[i].state_resource);
             else if (s.state == StateUse::Read) p.reads_eff.push(e.modules[i].state_resource);
             pend[(u32)s.phase].push(p);

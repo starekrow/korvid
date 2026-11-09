@@ -5,6 +5,7 @@
 #include "korvid/anim/clip.h"
 #include "korvid/anim/player.h"
 #include "korvid/asset/blob.h"
+#include "korvid/collision/module.h"
 #include "korvid/asset/scope.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
@@ -41,6 +42,8 @@ struct TilemapState {
     Pool<Instance>     instances;
     u16                map_kind = 0, instance_kind = 0;
     u32                tile_kind = 0, animtile_kind = 0;
+    Handle             collide_map;     // the collision module's static world, if one
+    point2             collide_origin;
     u32                loaded = 0, failed = 0;
 };
 
@@ -285,6 +288,7 @@ bool tilemap_startup(Engine& e, ModuleInstance& self) {
 void tilemap_shutdown(Engine& e, ModuleInstance& self) {
     TilemapState* s = self.state_as<TilemapState>();
     if (!s) return;
+    if (!s->collide_map.is_null()) collision_static(e, nullptr, nullptr);
     asset_kind_unregister(e, s->map_kind);
     for (u32 i = 0; i < s->instances.len; ++i)
         if (s->instances.is_alive(i)) free_in(s->general, s->instances.items[i].rows, sizeof(Handle) * (s->instances.items[i].row_count ? s->instances.items[i].row_count : 1));
@@ -478,6 +482,28 @@ int tilemap_object_name(const TilemapAsset& m, const MapObject& o, char* out, us
     const char* dot = strrchr(stem, '.');
     int len = dot ? (int)(dot - stem) : (int)strlen(stem);
     return snprintf(out, cap, "%.*s#%u", len, stem, o.id);
+}
+
+namespace {
+
+rect2 collide_sweep(void* user, rect2 box, vec2 delta, bool* hit, bool* inside) {
+    TilemapState& s = *(TilemapState*)user;
+    const TilemapAsset* m = s.maps.get(s.collide_map);
+    if (!m || m->state != AssetState::Ready) { box.x += delta.x; box.y += delta.y; return box; }
+    TileMove mv = tilemap_move(*m, s.collide_origin, box, delta);
+    *hit = mv.hit_x || mv.hit_y;
+    *inside = mv.started_inside;
+    return mv.box;
+}
+
+} // namespace
+
+void tilemap_collide(Engine& e, Handle map, point2 origin) {
+    TilemapState* s = state(e);
+    if (!s) return;
+    s->collide_map = map;
+    s->collide_origin = origin;
+    collision_static(e, map.is_null() ? nullptr : collide_sweep, s);
 }
 
 } // namespace kv

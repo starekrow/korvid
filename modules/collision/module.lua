@@ -1,6 +1,7 @@
--- Outer engine: the Collider2 component and the broadphase that turns overlaps between
--- entities of any kind into OverlapBegin and OverlapEnd events.
+-- Outer engine: colliders, bodies that move by intent and are resolved in the same tick
+-- against each other and a static world, and overlaps between entities of any kind as
+-- OverlapBegin and OverlapEnd events.
 module "collision" {
-  deps          = { "core", "math", "render", "sprite" },
+  deps          = { "core", "math", "render", "sprite", "scene" },
   engine_module = true,
 }

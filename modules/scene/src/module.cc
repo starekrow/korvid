@@ -119,8 +119,8 @@ constinit const ComponentDesc k_components[] = {
 };
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".compose", .phase = Phase::PostSim, .fn = scene_compose, .reads = "*.Local2",
-     .writes = "*.Transform2, *.Parent", .runs = RunWhen::Always},
+    {.name = ".compose", .phase = Phase::PostSim, .fn = scene_compose, .reads = "*[Local2].Local2",
+     .writes = "*.Transform2, *[Parent].Parent", .runs = RunWhen::Always},
 };
 
 } // namespace

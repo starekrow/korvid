@@ -15,6 +15,7 @@
 #include "korvid/asset/material.h"
 #include "korvid/asset/texture.h"
 #include "korvid/audio/audio.h"
+#include "korvid/collision/collider.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/json.h"
@@ -54,7 +55,6 @@ struct Actor {
     u8     route_dir;
     point2 home;     // a villager's spawn point
     vec2   route;    // a villager's second point, from home; zero stands still
-    f32    route_t;  // 0 at home, 1 at home + route
 };
 // The player's health: hearts, and the seconds left of the blink after a hurt, during
 // which nothing hurts again.
@@ -63,15 +63,16 @@ struct Vitals {
     i32 hp_max;
     f32 hurt;
 };
-constinit const FieldDesc k_actor_fields[] = {KV_FIELDS(Actor, facing, moving, sheet, route_dir, home, route, route_t)};
+constinit const FieldDesc k_actor_fields[] = {KV_FIELDS(Actor, facing, moving, sheet, route_dir, home, route)};
 constinit const FieldDesc k_vitals_fields[] = {KV_FIELDS(Vitals, hp, hp_max, hurt)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Actor, k_actor_fields), KV_COMPONENT(Vitals, k_vitals_fields)};
 
 constinit const KindDesc k_kinds[] = {
-    {.name = ".player", .components = "Transform2, Sprite, Actor, Vitals, AnimPlayer", .capacity = 1},
-    {.name = ".npc",    .components = "Transform2, Local2, Parent, Sprite, Actor, AnimPlayer", .capacity = 32},
+    // Bodies: the player and the villagers walk by intent (Move2), the rocks are pushed.
+    {.name = ".player", .components = "Transform2, Sprite, Actor, Vitals, AnimPlayer, Collider2, Move2, MoveResult2", .capacity = 1},
+    {.name = ".npc",    .components = "Transform2, Local2, Parent, Sprite, Actor, AnimPlayer, Collider2, Move2, MoveResult2", .capacity = 32},
     // Rocks the player pushes: the level's children, placed by the map's "rock" points.
-    {.name = ".rock",   .components = "Transform2, Local2, Parent, Sprite", .capacity = 32},
+    {.name = ".rock",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Move2", .capacity = 32},
     // The menu, the credits and the hearts: presentation, never hashed.
     {.name = ".ui",     .components = "Transform2, Text", .capacity = 128, .cosmetic = true},
     {.name = ".dim",    .components = "Transform2, Sprite", .capacity = 2, .cosmetic = true},
@@ -86,6 +87,7 @@ constexpr f32 kNpcSpeed    = 24.0f;
 constexpr f32 kFeetW = 10.0f, kFeetH = 5.0f;
 constexpr f32 kRockW = 26.0f, kRockH = 12.0f; // a boulder's base, from its bottom edge
 constexpr f32 kPushPace = 0.5f;              // a pushed rock moves at half the walk
+constexpr u32 L_ACTOR = 1;                   // everything solid here is on one layer
 constexpr i32 kHpMax = 5;
 constexpr f32 kHurtTime = 1.0f;              // seconds of blinking, untouchable
 constexpr u32 kSheets = 3;
@@ -126,6 +128,7 @@ struct Game {
     Handle music;                // the current level's track (asset.stream)
     bool   exit_armed = false;   // the player has stood outside every exit since arriving
     bool   leaving = false;      // an exit has been taken; the level is on its way
+    bool   fainting = false;     // the last heart went: walk takes the player to the start
     Menu   menu = Menu::Closed;
     u32    cursor = 0;
     i32    credits_scroll = 0;
@@ -157,13 +160,18 @@ Sprite actor_sprite(const Game& g, u8 sheet, i32 layer) {
 
 // The feet box (world units, min corner) of a sprite centered at `p`.
 rect2 feet_of(point2 p) { return rect2{p.x - kFeetW * 0.5f, p.y - 8.0f, kFeetW, kFeetH}; }
-point2 center_of_feet(const rect2& b) { return point2{b.x + kFeetW * 0.5f, b.y + 8.0f}; }
 
 bool overlaps(const rect2& a, const rect2& b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h; }
 
-// A rock's base (world units, min corner) for a rock centered at `p`, and back.
-rect2 rock_box(point2 p) { return rect2{p.x - kRockW * 0.5f, p.y - 16.0f, kRockW, kRockH}; }
-point2 center_of_rock(const rect2& b) { return point2{b.x + kRockW * 0.5f, b.y + 16.0f}; }
+// The bodies: a character by its feet, a rock by its base. The player pushes rocks.
+Collider2 feet_body(u8 flags) {
+    return collider_body(BodyKind::Kinematic, vec2{kFeetW * 0.5f, kFeetH * 0.5f}, vec2{0.0f, -8.0f + kFeetH * 0.5f}, L_ACTOR, L_ACTOR, flags);
+}
+Collider2 rock_body() {
+    Collider2 c = collider_body(BodyKind::Solid, vec2{kRockW * 0.5f, kRockH * 0.5f}, vec2{0.0f, -16.0f + kRockH * 0.5f}, L_ACTOR, L_ACTOR, ColliderPushable);
+    c.pace = kPushPace;
+    return c;
+}
 
 Sprite rock_sprite(const Game& g, i32 layer) {
     Sprite s;
@@ -504,117 +512,82 @@ void menu(TickContext& ctx) {
 }
 
 // ---- walking -------------------------------------------------------------------------------------
+// Intent, resolve, react: walk and villagers write Move2, collision.resolve moves everyone
+// against the map and each other (the player pushing rocks), react reads the results.
 
-// A min-corner box at least `eps` deep into another on both axes: touching, or a hair of
-// rounding, does not count.
-bool sunk(const rect2& a, const rect2& b, f32 eps) {
-    return a.x + eps < b.x + b.w && b.x + eps < a.x + a.w && a.y + eps < b.y + b.h && b.y + eps < a.y + a.h;
-}
-
-vec2 along(u32 axis, f32 v) { return axis ? vec2{0.0f, v} : vec2{v, 0.0f}; }
-
-// The player at the map's start, whole again.
-void faint(Game& g, Table& players, const TilemapAsset& m) {
-    Vitals* v = players.get<Vitals>(g.player);
-    Transform2* t = players.get<Transform2>(g.player);
-    v->hp = v->hp_max;
+// The player at the map's start, whole again. Called by walk, before the resolve, the tick
+// after the heart was lost: a teleport writes the position the resolve reads.
+void faint(Game& g, Span<Transform2> xf, Span<Transform2> prev, const TilemapAsset& m) {
+    u32 i = g.player.index();
     if (const MapObject* start = tilemap_object_find(m, "player_start")) {
-        *t = transform2_at(tilemap_to_world(point2{0, 0}, start->x, start->y));
-        *players.prev<Transform2>(g.player) = *t;
+        xf[i] = transform2_at(tilemap_to_world(point2{0, 0}, start->x, start->y));
+        prev[i] = xf[i];
     }
-    g.exit_armed = exit_at(m, feet_of(t->position)) == nullptr;
+    g.exit_armed = exit_at(m, feet_of(xf[i].position)) == nullptr;
+    g.fainting = false;
     KV_INFO("arcanum", "fainted; back at the start");
 }
 
-// Phase Sim: the player walks, collides, pushes rocks, is hurt by villagers, and takes exits.
+// Phase Sim: the player's intent, from the move action.
 void walk(TickContext& ctx) {
     static const u32 k_actions_id = ctx.resource_id("input.actions");
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
-    Table* players = ctx.write_kind("example_arcanum.player");
-    Table* rocks = ctx.write_kind("example_arcanum.rock");
-    const Table* npcs = ctx.read_kind("example_arcanum.npc");
-    Transform2* t = players->get<Transform2>(g.player);
-    Sprite* s = players->get<Sprite>(g.player);
-    Actor* act = players->get<Actor>(g.player);
-    Vitals* v = players->get<Vitals>(g.player);
-    const TilemapAsset* m = tilemap_get(e, g.map);
-    if (!t || !m || m->state != AssetState::Ready || level_state(e) == LevelState::Loading) return;
+    Span<Move2> move = ctx.write<Move2>("example_arcanum.player.Move2");
+    Span<Actor> actor = ctx.write<Actor>("example_arcanum.player.Actor");
+    u32 i = g.player.index();
+    if (i >= move.len || level_state(e) == LevelState::Loading) return;
+    if (g.fainting) {
+        static const u32 k_players = ctx.kind_id(".player");
+        const TilemapAsset* m = tilemap_get(e, g.map);
+        Table* players = engine_table(e, k_players); // its Transform2, declared below
+        if (m && m->state == AssetState::Ready) faint(g, ctx.write<Transform2>("example_arcanum.player.Transform2"), Span<Transform2>(players->prev<Transform2>(g.player) - i, move.len), *m);
+    }
     vec2 dir = action_axis(a, g.act_move);
     f32 dt = (f32)ctx.dt;
-    vec2 d{dir.x * kWalkSpeed * dt, dir.y * kWalkSpeed * dt};
-    act->moving = (dir.x != 0.0f || dir.y != 0.0f) && !g.leaving;
-    act->facing = facing_of(dir, act->facing);
+    bool going = (dir.x != 0.0f || dir.y != 0.0f) && !g.leaving;
+    move[i].delta = going ? vec2{dir.x * kWalkSpeed * dt, dir.y * kWalkSpeed * dt} : vec2{0, 0};
+    actor[i].moving = going;
+    actor[i].facing = facing_of(dir, actor[i].facing);
+}
+
+// Phase Sim, after the resolve: what the move did. A villager that stopped the player, or
+// walked into it, costs a heart; then the walk cycle, the blink, and the exits.
+void react(TickContext& ctx) {
+    Game& g = ctx.state_as<Game>();
+    Engine& e = *ctx.engine;
+    // The player's columns this system writes, through its table (they are declared one by
+    // one: the whole kind would include the intent the resolve reads, a cycle).
+    Table* players = (Table*)ctx.read_kind("example_arcanum.player");
+    ctx.write<Vitals>("example_arcanum.player.Vitals"); ctx.write<Sprite>("example_arcanum.player.Sprite"); ctx.write<AnimPlayer>("example_arcanum.player.AnimPlayer");
+    Span<const MoveResult2> npc_moves = ctx.read<MoveResult2>("example_arcanum.npc.MoveResult2");
+    const TilemapAsset* m = tilemap_get(e, g.map);
+    Transform2* t = players->get<Transform2>(g.player);
+    if (!t || !m || m->state != AssetState::Ready || level_state(e) == LevelState::Loading) return;
+    static const u32 k_npc_kind = ctx.kind_id(".npc");
+    const u16 npc_handles = engine_table(e, k_npc_kind)->kind;
+    const MoveResult2& mine = *players->get<MoveResult2>(g.player);
+    bool bumped = !mine.blocker.is_null() && mine.blocker.kind() == npc_handles;
+    for (u32 i = 0; i < npc_moves.len && !bumped; ++i) bumped = npc_moves[i].blocker == g.player;
+    Vitals* v = players->get<Vitals>(g.player);
+    f32 dt = (f32)ctx.dt;
     v->hurt = v->hurt > dt ? v->hurt - dt : 0.0f;
-
-    // The villagers block as of their last placement; the rocks as they are now.
-    auto npc_in = [&](const rect2& box) {
-        for (u32 i = 0; i < npcs->rows(); ++i)
-            if (npcs->is_alive(i) && overlaps(box, feet_of(npcs->rows_of<Transform2>()[i].position))) return true;
-        return false;
-    };
-    Span<Local2> rock_at = rocks->rows_of<Local2>();
-    // The first rock `box` runs into, skipping `skip` and any rock `from` is already inside
-    // (one placed on the player by a map edit walks free rather than dragged along).
-    auto rock_in = [&](const rect2& box, const rect2* from, u32 skip) -> u32 {
-        for (u32 i = 0; i < rocks->rows(); ++i) {
-            if (i == skip || !rocks->is_alive(i)) continue;
-            rect2 rb = rock_box(rock_at[i].position);
-            if (overlaps(box, rb) && !(from && sunk(*from, rb, 0.5f))) return i;
-        }
-        return KV_POOL_NONE;
-    };
-
-    // An axis at a time, so a blocked diagonal slides along what blocks it.
-    rect2 box = feet_of(t->position);
-    bool bumped = false;
-    for (u32 axis = 0; axis < 2; ++axis) {
-        f32 step = axis ? d.y : d.x;
-        if (step == 0.0f) continue;
-        rect2 want = tilemap_move(*m, point2{0, 0}, box, along(axis, step)).box;
-        // Against a rock the player slows to the rock's pace, and each rock in the way is
-        // pushed clear of where the player would be if the map, the other rocks and the
-        // villagers leave it room. The player stops at whatever did not give.
-        if (rock_in(want, &box, KV_POOL_NONE) != KV_POOL_NONE) {
-            step *= kPushPace;
-            want = tilemap_move(*m, point2{0, 0}, box, along(axis, step)).box;
-        }
-        for (u32 tries = 0; tries < 4; ++tries) {
-            u32 r = rock_in(want, &box, KV_POOL_NONE);
-            if (r == KV_POOL_NONE) break;
-            rect2 rb = rock_box(rock_at[r].position);
-            f32 lo = axis ? want.y : want.x, hi = axis ? want.y + want.h : want.x + want.w;
-            f32 rlo = axis ? rb.y : rb.x, rhi = axis ? rb.y + rb.h : rb.x + rb.w;
-            f32 need = step > 0.0f ? hi - rlo : lo - rhi;
-            rect2 moved = tilemap_move(*m, point2{0, 0}, rb, along(axis, need)).box;
-            if (rock_in(moved, nullptr, r) != KV_POOL_NONE || npc_in(moved)) moved = rb;
-            if (moved.x != rb.x || moved.y != rb.y) {
-                rock_at[r].position = center_of_rock(moved);
-                rocks->rows_of<Transform2>()[r].position = rock_at[r].position; // the root is at the origin
-            }
-            if (!overlaps(want, moved)) continue;
-            if (axis == 0) want.x = step > 0.0f ? fmaxf(box.x, moved.x - want.w) : fminf(box.x, moved.x + moved.w);
-            else           want.y = step > 0.0f ? fmaxf(box.y, moved.y - want.h) : fminf(box.y, moved.y + moved.h);
-        }
-        if (npc_in(want)) { bumped = true; continue; }
-        box = want;
-    }
-    t->position = center_of_feet(box);
-
     // Walking into a villager costs a heart, then a second of blinking that nothing
     // hurts through. The last heart faints the player back to the map's start.
     if (bumped && v->hurt == 0.0f && v->hp > 0) {
         --v->hp;
         v->hurt = kHurtTime;
         play_hurt(ctx, g);
-        if (v->hp == 0) faint(g, *players, *m);
+        KV_INFO("arcanum", "hurt: %d of %d hearts at tick %llu", v->hp, v->hp_max, (unsigned long long)ctx.tick);
+        if (v->hp == 0) { v->hp = v->hp_max; g.fainting = true; } // walk takes the player back next tick
     }
-    animate(e, g, *act, *players->get<AnimPlayer>(g.player));
+    animate(e, g, *players->get<Actor>(g.player), *players->get<AnimPlayer>(g.player));
+    Sprite* s = players->get<Sprite>(g.player);
     s->tint = v->hurt > 0.0f && (u32)(v->hurt * 10.0f) % 2 ? kHurtTint : color_white();
 
     // Exits: armed once the player has stood clear of them since arriving.
-    const MapObject* ex = exit_at(*m, box);
+    const MapObject* ex = exit_at(*m, feet_of(t->position));
     if (!ex) g.exit_armed = true;
     else if (g.exit_armed && !g.leaving) {
         const MapProperty* target = tilemap_property(*m, ex->props, "target");
@@ -626,26 +599,35 @@ void walk(TickContext& ctx) {
     }
 }
 
-// Phase Sim: villagers pace their routes and turn to face where they go.
+// Phase Sim: villagers walk toward the end of their route they are headed for, turning at
+// each end, by intent: one that the player stands in the way of waits.
 void villagers(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
-    Table* npcs = ctx.write_kind("example_arcanum.npc");
-    f32 dt = (f32)ctx.dt;
-    for (u32 i = 0; i < npcs->rows(); ++i) {
-        if (!npcs->is_alive(i)) continue;
-        Actor& a = npcs->rows_of<Actor>()[i];
-        Local2& l = npcs->rows_of<Local2>()[i];
+    Span<const Local2> local = ctx.read<Local2>("example_arcanum.npc.Local2");
+    Span<Move2> move = ctx.write<Move2>("example_arcanum.npc.Move2");
+    Span<Actor> actor = ctx.write<Actor>("example_arcanum.npc.Actor");
+    Span<AnimPlayer> player = ctx.write<AnimPlayer>("example_arcanum.npc.AnimPlayer");
+    static const u32 k_npc = ctx.kind_id(".npc");
+    const Table* table = engine_table(*ctx.engine, k_npc);
+    f32 step = kNpcSpeed * (f32)ctx.dt;
+    for (u32 i = 0; i < move.len; ++i) {
+        if (!table->is_alive(i)) continue;
+        Actor& a = actor[i];
+        Move2& mv = move[i];
+        point2 at = local[i].position; // the level's root is at the origin
         f32 len = sqrtf(a.route.x * a.route.x + a.route.y * a.route.y);
+        mv.delta = vec2{0, 0};
+        a.moving = 0;
         if (len > 0.0f) {
-            f32 dir = a.route_dir ? -1.0f : 1.0f;
-            a.route_t += dir * kNpcSpeed * dt / len;
-            if (a.route_t >= 1.0f) { a.route_t = 1.0f; a.route_dir = 1; }
-            if (a.route_t <= 0.0f) { a.route_t = 0.0f; a.route_dir = 0; }
-            l.position = point2{a.home.x + a.route.x * a.route_t, a.home.y + a.route.y * a.route_t};
+            point2 goal = a.route_dir ? a.home : point2{a.home.x + a.route.x, a.home.y + a.route.y};
+            vec2 to{goal.x - at.x, goal.y - at.y};
+            f32 dist = sqrtf(to.x * to.x + to.y * to.y);
+            if (dist <= step) { mv.delta = to; a.route_dir ^= 1; }
+            else mv.delta = vec2{to.x / dist * step, to.y / dist * step};
             a.moving = 1;
-            a.facing = facing_of(vec2{a.route.x * dir, a.route.y * dir}, a.facing);
+            a.facing = facing_of(mv.delta, a.facing);
         }
-        animate(*ctx.engine, g, a, npcs->rows_of<AnimPlayer>()[i]);
+        animate(*ctx.engine, g, a, player[i]);
     }
 }
 
@@ -768,7 +750,7 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
         tilemap_object_name(m, o, name, sizeof name);
         if (o.point && !strcmp(o.name, "rock")) {
             point2 at_rock = tilemap_to_world(point2{0, 0}, o.x, o.y);
-            engine_entity_name_set(*ctx.engine, rocks->spawn(transform2_at(at_rock), local2_at(at_rock), p, rock_sprite(g, (i32)objects_layer)), name);
+            engine_entity_name_set(*ctx.engine, rocks->spawn(transform2_at(at_rock), local2_at(at_rock), p, rock_sprite(g, (i32)objects_layer), rock_body(), Move2{}), name);
             continue;
         }
         const MapProperty* sheet = tilemap_property(m, o.props, "sheet");
@@ -782,7 +764,7 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
             f32 x0, y0, x1, y1;
             if (sscanf(route->str, "%f,%f %f,%f", &x0, &y0, &x1, &y1) == 4) a.route = vec2{x1 - x0, -(y1 - y0)};
         }
-        engine_entity_name_set(*ctx.engine, npcs->spawn(transform2_at(a.home), local2_at(a.home), p, actor_sprite(g, which, (i32)objects_layer), a), name);
+        engine_entity_name_set(*ctx.engine, npcs->spawn(transform2_at(a.home), local2_at(a.home), p, actor_sprite(g, which, (i32)objects_layer), a, AnimPlayer{}, feet_body(0), Move2{}, MoveResult2{}), name);
     }
 }
 
@@ -794,6 +776,7 @@ void on_build(TickContext& ctx, Span<const LevelBuild> builds) {
         const TilemapAsset* m = tilemap_get(e, b.map);
         if (!m || m->state != AssetState::Ready) { KV_ERROR("arcanum", "level %s has no map", level_name(e, b.level)); continue; }
         g.map = b.map;
+        tilemap_collide(e, b.map, point2{0, 0}); // the map's solids stop every body
         u32 objects_layer = 0;
         tilemap_layer_find(*m, "objects", &objects_layer);
         TilemapPlace place;
@@ -927,7 +910,7 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     if (pref[0]) snprintf(g->save_path, sizeof g->save_path, "%ssave%s.json", pref, g->demo ? "-demo" : "");
     Table* players = engine_table(e, "example_arcanum.player");
     Actor pa{};
-    g->player = players->spawn(transform2_at(point2{0, 0}), actor_sprite(*g, 0, 2), pa, Vitals{kHpMax, kHpMax, 0.0f}, AnimPlayer{});
+    g->player = players->spawn(transform2_at(point2{0, 0}), actor_sprite(*g, 0, 2), pa, Vitals{kHpMax, kHpMax, 0.0f}, AnimPlayer{}, feet_body(ColliderPusher), Move2{}, MoveResult2{});
     engine_entity_name_set(e, g->player, "player");
     LevelConfig cfg;
     cfg.levels = k_levels;
@@ -952,8 +935,10 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".files", .phase = Phase::PreSim, .fn = files, .after = "level.run", .before = ".menu", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".menu", .phase = Phase::PreSim, .fn = menu, .reads = "input.actions, .player, .npc, .rock", .writes = ".ui, .dim, audio.commands",
      .after = "level.run", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions, .npc", .writes = ".player, .rock, audio.commands", .main_thread = true},
-    {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .writes = ".npc", .main_thread = true},
+    {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions", .writes = ".player.Move2, .player.Actor, .player.Transform2", .main_thread = true},
+    {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .reads = "^.npc.Local2", .writes = ".npc.Move2, .npc.Actor, .npc.AnimPlayer", .main_thread = true},
+    {.name = ".react", .phase = Phase::Sim, .fn = react, .reads = ".player, .npc.MoveResult2",
+     .writes = ".player.Vitals, .player.Sprite, .player.AnimPlayer, audio.commands", .main_thread = true},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".player.Vitals, platform_hid.window", .writes = ".hud, .hudtext",
      .before = "text.layout, scene.compose", .main_thread = true, .runs = RunWhen::Always},

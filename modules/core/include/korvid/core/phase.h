@@ -377,7 +377,11 @@ struct SystemDesc {
     const char* name   = nullptr;
     Phase       phase  = Phase::Count;
     SystemFn    fn     = nullptr;
-    const char* reads  = nullptr; // resource names, comma-separated; see HandlerDesc
+    // Resource names, comma-separated; see HandlerDesc. A reader runs after every writer of
+    // what it reads in the phase. A read marked '^' ("^.npc.Local2") is of the phase's
+    // earlier value: that reader runs before the writers instead. An AI that reads where
+    // it stands to write the intent a later system moves it by reads its position that way.
+    const char* reads  = nullptr;
     const char* writes = nullptr;
     const char* after  = nullptr; // system names; needed between two writers, optional otherwise; "?name" only if that system exists
     const char* before = nullptr;

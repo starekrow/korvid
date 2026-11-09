@@ -173,6 +173,11 @@ struct TileMove {
 };
 TileMove tilemap_move(const TilemapAsset& m, point2 origin, rect2 box, vec2 delta);
 
+// Makes a map placed at `origin` the collision module's static world: every body the
+// resolve moves is swept through its solids with tilemap_move's rules. One map at a time;
+// a null map removes it. A map that is not Ready (or has retired) blocks nothing.
+void tilemap_collide(Engine& e, Handle map, point2 origin);
+
 // The parser on its own, for tools and tests: a map's JSON into `out` (allocating from
 // `alloc`, which must outlive it); external tilesets named, not read (`tilesets[i].image`
 // is null and `name` holds the resolved .tsj path until tilemap_parse_tileset fills it).

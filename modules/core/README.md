@@ -46,7 +46,11 @@ is the reflection everything reads: layout, hashing, comparison, describe, which
 are handles. A kind is a fixed set of components plus a capacity; the engine makes it a
 table of SoA columns on reserved pages, one handle kind, and resources `kind` and
 `kind.Component` that systems name in their sets (`*.Component` means every kind's).
-Systems reach rows through the `TickContext`: `write_kind`, `read<T>`, `write<T>`,
+Two forms narrow a wildcard or turn an edge around:
+`*[Move2].Transform2` is that column in every kind that also has `Move2` (and may match
+none), and a read marked `^` (`^.npc.Local2`) is of the phase's earlier value, so that
+reader runs before the phase's writers of it instead of after: an AI reading where it
+stands to write the intent a later system moves it by. Systems reach rows through the `TickContext`: `write_kind`, `read<T>`, `write<T>`,
 `view<A, const B>()`; in dev builds an access outside the declared sets asserts with the
 system and resource named. Spawn directly when you hold the kind's write; otherwise
 `spawn_later` and `destroy` are commands applied at the phase boundary.

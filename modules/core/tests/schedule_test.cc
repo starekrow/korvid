@@ -75,6 +75,21 @@ constinit const SystemDesc k_later_systems[] = {
 };
 KV_MODULE_DEFINE(k_later) = {.name = "later", .systems = k_later_systems};
 
+// An early read: think reads where the bodies are (^) and writes their Vel; move reads Vel
+// and writes Pos. Without the '^' it is a cycle; with it, think runs first.
+constinit const SystemDesc k_early_systems[] = {
+    {.name = "e.move",  .phase = Phase::Sim, .fn = sys_move,  .reads = "*.Vel", .writes = "*.Pos"},
+    {.name = "e.think", .phase = Phase::Sim, .fn = sys_steer, .reads = "^*.Pos", .writes = "*.Vel"},
+};
+KV_MODULE_DEFINE(k_early) = {.name = "early", .components = k_components, .kinds = k_kinds, .systems = k_early_systems};
+constinit const SystemDesc k_late_read_systems[] = {
+    {.name = "l.move",  .phase = Phase::Sim, .fn = sys_move,  .reads = "*.Vel", .writes = "*.Pos"},
+    {.name = "l.think", .phase = Phase::Sim, .fn = sys_steer, .reads = "*.Pos", .writes = "*.Vel"},
+};
+KV_MODULE_DEFINE(k_late_read) = {.name = "lateread", .components = k_components, .kinds = k_kinds, .systems = k_late_read_systems};
+constinit const SystemDesc k_early_write_systems[] = {{.name = "w.bad", .phase = Phase::Sim, .fn = sys_other, .writes = "^*.Pos"}};
+KV_MODULE_DEFINE(k_early_write) = {.name = "earlywrite", .components = k_components, .kinds = k_kinds, .systems = k_early_write_systems};
+
 const char* order(const Engine& e, Phase p, char* buf, usize cap) {
     buf[0] = 0;
     for (const ScheduledSystem& s : e.phases.systems[(u32)p]) { strncat(buf, s.desc->name, cap - strlen(buf) - 1); strncat(buf, " ", cap - strlen(buf) - 1); }
@@ -95,6 +110,19 @@ void test_schedule(kv::TestCtx& c) {
     using namespace kv;
     c.begin("schedule");
     char buf[256];
+
+    // Early reads turn the edge around.
+    {
+        const ModuleDesc* const early[] = {&k_early};
+        Engine x;
+        KV_CHECK(c, engine_init(x, early));
+        KV_CHECK(c, strcmp(order(x, Phase::Sim, buf, sizeof buf), "e.think e.move ") == 0);
+        engine_shutdown(x);
+        const ModuleDesc* const late[] = {&k_late_read};
+        KV_CHECK(c, init_fails(c, late));
+        const ModuleDesc* const bad[] = {&k_early_write};
+        KV_CHECK(c, init_fails(c, bad));
+    }
 
     // Derived order: writers before readers, the declared edge honored, the kind writer first.
     const ModuleDesc* const list[] = {&k_a, &k_b};
