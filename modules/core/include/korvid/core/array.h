@@ -3,6 +3,7 @@
 // makes one that lives in an arena or a scratch, where free() costs nothing.
 #pragma once
 #include "korvid/core/memory.h"
+#include <string.h>
 
 namespace kv {
 
@@ -25,7 +26,7 @@ struct Array {
         u32 align = alignof(T) > KV_MEM_DEFAULT_ALIGN ? alignof(T) : KV_MEM_DEFAULT_ALIGN;
         T* nd = (T*)a->alloc(a, (usize)c * sizeof(T), align);
         KV_ASSERT(nd);
-        if (len) __builtin_memcpy(nd, data, (usize)len * sizeof(T));
+        if (len) memcpy(nd, data, (usize)len * sizeof(T));
         if (data) a->free(a, data, (usize)cap * sizeof(T));
         data = nd;
         cap  = c;

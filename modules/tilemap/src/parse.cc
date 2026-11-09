@@ -2,6 +2,7 @@
 // allocator the caller gives (the map's arena): strings, layers, cells, objects,
 // tilesets, tiles, properties, rectangles, frames.
 #include "korvid/tilemap/tilemap.h"
+#include "korvid/core/sort.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/array.h"
 #include "korvid/core/json.h"
@@ -293,7 +294,7 @@ bool parse_tileset_body(Parse& p, TilemapAsset& m, u32 index, const JsonValue& t
         }
         m.tiles[at].frames = frames;
     }
-    if (m.tile_count - tiles_first > 1) qsort(m.tiles + tiles_first, m.tile_count - tiles_first, sizeof(MapTile), compare_tiles);
+    if (m.tile_count - tiles_first > 1) kv::sort(m.tiles + tiles_first, m.tile_count - tiles_first, sizeof(MapTile), compare_tiles);
     MapTileset& t = m.tilesets[index];
     if (!t.name || !t.name[0] || t.image == nullptr) t.name = dup(p.a, json_string(json_get(*p.doc, ts, "name"), ""));
     t.image    = dup(p.a, resolved);

@@ -22,49 +22,88 @@ local function tool_path(inst)
     if not p then util.fail("tool '%s' has no prebuilt binary for %s", inst.module.name, inst.platform) end
     return util.join(inst.module.dir, p), true
   end
-  if f.output == "exe" then return inst.prefix .. "bin/" .. exe_name(inst), true end -- the host instance, built in this graph
+  -- The host instance, built in this graph.
+  if f.output == "exe" then return inst.prefix .. "bin/" .. exe_name(inst) .. inst.toolchain.fields.exe_suffix, true end
   util.fail("tool '%s' is neither built from source, prebuilt nor a system lookup", inst.module.name)
+end
+
+-- What a toolchain module must say: its rules and how it names and spells things. Nothing
+-- is assumed about the compiler family.
+local required_fields = { "obj_suffix", "exe_suffix", "lib_file", "flag_include", "flag_define", "flag_lib" }
+local required_rules = { "cxx", "ar", "link" }
+
+local function check_toolchain(tc)
+  local f = tc.fields
+  for _, k in ipairs(required_fields) do
+    if type(f[k]) ~= "string" then util.fail("toolchain '%s' does not set %s", tc.name, k) end
+  end
+  for _, r in ipairs(required_rules) do
+    if not (f.rules and f.rules[r] and f.rules[r].command) then util.fail("toolchain '%s' has no %s rule", tc.name, r) end
+  end
 end
 
 function M.run(c, g, opts)
   local root = c.root_dir
-  local tc = g.toolchain.fields
   local target = g.platform .. "-" .. g.config
   local build = util.join(root, "build/" .. target)
+  local q = util.shell_quote
   kfs.mkdirp(build)
-  -- What an instance compiles and links with: its platform's toolchain in its config. The
-  -- target's are the file's variables; a host instance that differs overrides them.
-  local function flags_of(tcf, conf, cross)
+
+  -- Per toolchain: its rule names (suffixed with its tag) and what its probe found.
+  local toolchains = {}
+  local function toolchain(tc)
+    if toolchains[tc.name] then return toolchains[tc.name] end
+    check_toolchain(tc)
+    local probed = {}
+    if tc.fields.probe then probed = kormake.load("probe_" .. tc.fields.probe).run(build, tc) end
+    local t = { rec = tc, fields = tc.fields, tag = util.symbol(tc.fields.tag or tc.name), probed = probed }
+    toolchains[tc.name] = t
+    toolchains[#toolchains + 1] = t
+    return t
+  end
+  -- What an instance compiles and links with: its platform's toolchain in its config, plus
+  -- what the toolchain's probe found. The target's are the file's variables; a host
+  -- instance overrides them on each build statement.
+  local function flags_of(tc, conf, cross)
+    local t = toolchain(tc)
+    local tcf, pr = t.fields, t.probed
     local cf = (tcf.configs or {})[conf]
     return {
-      cxx = (not cross and opts.cxx) or tcf.cxx or "c++",
-      cxxflags = flag_list(tcf.cxxflags) .. " " .. flag_list(cf and cf.cxxflags),
-      ldflags = flag_list(cf and cf.ldflags) .. " " .. flag_list(tcf.ldflags),
+      tc = t,
+      cxx = (not cross and opts.cxx) or pr.cxx or tcf.cxx or util.fail("toolchain '%s' names no compiler", tc.name),
+      ar = pr.ar or tcf.ar or "",
+      link = pr.link or tcf.link or "",
+      cxxflags = util.trim(flag_list(tcf.cxxflags) .. " " .. flag_list(cf and cf.cxxflags) .. " " .. flag_list(pr.cxxflags)),
+      ldflags = util.trim(flag_list(cf and cf.ldflags) .. " " .. flag_list(tcf.ldflags) .. " " .. flag_list(pr.ldflags)),
       srcdirs = tcf.srcdirs or {},
       externals = tcf.externals or {},
     }
   end
-  local target_flags = flags_of(tc, g.config, false)
-  local cxx = target_flags.cxx
-  local ar = tc.ar or "ar"
-  local cxxflags = target_flags.cxxflags
-  local ldflags = target_flags.ldflags
+  local target_flags = flags_of(g.toolchain, g.config, false)
+  g.ninja = target_flags.tc.probed.ninja
   local function flags(inst)
     if inst.prefix == "" then return target_flags end
-    inst.flags = inst.flags or flags_of(inst.toolchain.fields, inst.config, inst.platform ~= g.platform)
+    inst.flags = inst.flags or flags_of(inst.toolchain, inst.config, inst.platform ~= g.platform)
     return inst.flags
   end
+  local function rule(inst, name) return name .. "_" .. flags(inst).tc.tag end
+  -- A program as a command's first word: quoted for the host when it is a path.
+  local function program(p) return p:find("[/\\ ]") and q(p) or p end
   -- Build-statement overrides of the file's variables, for a host instance.
-  local function overrides(inst, link)
+  local function overrides(inst)
     if inst.prefix == "" then return "" end
     local fl = flags(inst)
-    return "\n  cxx = " .. fl.cxx .. (link and ("\n  ldflags = " .. fl.ldflags) or ("\n  cxxflags = " .. fl.cxxflags))
+    return "\n  cxx = " .. program(fl.cxx) .. "\n  ar = " .. program(fl.ar) .. "\n  link = " .. program(fl.link) ..
+      "\n  cxxflags = " .. fl.cxxflags .. "\n  ldflags = " .. fl.ldflags
   end
   local function extlibs_of(inst, list, mods)
-    local externals = flags(inst).externals
+    local fl = flags(inst)
     for _, mod in ipairs(mods) do
       for ext in pairs(mod.fields.external or {}) do
-        for _, l in ipairs(externals[ext].libs or {}) do if not util.contains(list, "-l" .. l) then list[#list + 1] = "-l" .. l end end
+        for _, l in ipairs(fl.externals[ext].libs or {}) do
+          local flag = fl.tc.fields.flag_lib:format(l)
+          if not util.contains(list, flag) then list[#list + 1] = flag end
+        end
       end
     end
     return list
@@ -78,17 +117,32 @@ function M.run(c, g, opts)
 
   w("# generated by kormake " .. KORMAKE_VERSION .. " for " .. target .. "; edit kormake.lua and the module.lua files, not this")
   w("ninja_required_version = 1.10")
-  w("cxx = " .. cxx)
-  w("ar = " .. ar)
-  w("cxxflags = " .. cxxflags)
-  w("ldflags = " .. ldflags)
+  w("cxx = " .. program(target_flags.cxx))
+  w("ar = " .. program(target_flags.ar))
+  w("link = " .. program(target_flags.link))
+  w("cxxflags = " .. target_flags.cxxflags)
+  w("ldflags = " .. target_flags.ldflags)
   w("")
-  w("rule cxx\n  command = $cxx $cxxflags $defines $includes -MMD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n  description = CXX $out")
-  w("rule ar\n  command = rm -f $out && $ar crs $out $in\n  description = AR $out")
-  w("rule link\n  command = $cxx $in -o $out $libs $ldflags\n  description = LINK $out")
-  w("rule copy\n  command = cp $in $out\n  description = COPY $out")
-  w("rule run_test\n  command = ./$in && touch $out\n  description = TEST $in")
-  w("rule regen\n  command = cd " .. util.ninja_escape(root) .. " && " .. util.ninja_escape(kfs.self() or "kormake") .. " gen " .. target .. (opts.no_unity and " --no-unity" or "") .. (opts.cxx and (" --cxx " .. opts.cxx) or "") .. "\n  generator = 1\n  description = KORMAKE gen " .. target)
+  -- Compile, archive and link: each toolchain's own rules, named with its tag, for the
+  -- target's toolchain and the host's when it differs.
+  for _, inst in ipairs(g.instances) do flags(inst) end
+  for _, t in ipairs(toolchains) do
+    for _, name in ipairs(required_rules) do
+      local r = t.fields.rules[name]
+      local extra = ""
+      for _, k in ipairs({ "depfile", "deps", "msvc_deps_prefix" }) do
+        if r[k] then extra = extra .. "\n  " .. k .. " = " .. r[k] end
+      end
+      w("rule " .. name .. "_" .. t.tag .. "\n  command = " .. r.command .. extra .. "\n  description = " .. name:upper() .. " $out")
+    end
+  end
+  -- Copying, running a test and regenerating are the host's, whatever compiles: kormake
+  -- does them itself, so no rule needs a shell.
+  local self = util.ninja_escape(program(kfs.self() or "kormake"))
+  w("rule copy\n  command = " .. self .. ' _copy $in $out\n  description = COPY $out')
+  w("rule run_test\n  command = " .. self .. ' _test $in $out\n  description = TEST $in')
+  w("rule regen\n  command = " .. self .. " gen " .. target .. (opts.no_unity and " --no-unity" or "") ..
+    (opts.cxx and (" --cxx " .. util.ninja_escape(q(opts.cxx))) or "") .. "\n  generator = 1\n  description = KORMAKE gen " .. target)
   w("")
 
   -- Tool rules, one Ninja rule per (tool, rule).
@@ -101,7 +155,9 @@ function M.run(c, g, opts)
         if not tool_rules[rname] then
           local tool, implicit = tool_path(t.instance)
           local cmd = r.command or util.fail("rule '%s' of '%s' has no command", r.name, t.instance.module.name)
-          cmd = cmd:gsub("%%{tool}", tool):gsub("%%{in}", "$in"):gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp")
+          -- Ninja quotes $in and $out itself when a path needs it.
+          cmd = cmd:gsub("%%{tool}", (util.ninja_escape(program(tool)):gsub("%%", "%%%%"))):gsub("%%{in}", "$in")
+            :gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp")
           local rsp = r.per == "exe" and "\n  rspfile = $out.rsp\n  rspfile_content = $in" or ""
           w("rule " .. rname .. "\n  command = " .. cmd .. (r.deps == "depfile" and "\n  depfile = $out.d\n  deps = gcc" or "") .. rsp .. "\n  description = " .. r.name:upper() .. " $out")
           tool_rules[rname] = { rule = r, tool = tool, implicit = implicit }
@@ -112,16 +168,19 @@ function M.run(c, g, opts)
   w("")
 
   local function include_flags(inst, extra)
+    local spell = flags(inst).tc.fields.flag_include
+    local function flag(dir) return spell:format(q(dir)) end
     local dirs = {}
-    for _, d in ipairs(inst.closure) do if d.module.include then dirs[#dirs + 1] = "-I" .. d.module.include end end
-    if inst.module.include then dirs[#dirs + 1] = "-I" .. inst.module.include end
-    for _, e in ipairs(extra or {}) do dirs[#dirs + 1] = "-I" .. e end
+    for _, d in ipairs(inst.closure) do if d.module.include then dirs[#dirs + 1] = flag(d.module.include) end end
+    if inst.module.include then dirs[#dirs + 1] = flag(inst.module.include) end
+    for _, e in ipairs(extra or {}) do dirs[#dirs + 1] = flag(e) end
     return table.concat(dirs, " ")
   end
 
   local function define_flags(inst)
+    local spell = flags(inst).tc.fields.flag_define
     local ds = {}
-    for _, d in ipairs(inst.module.fields.defines or {}) do ds[#ds + 1] = "-D" .. d end
+    for _, d in ipairs(inst.module.fields.defines or {}) do ds[#ds + 1] = spell:format(d) end
     return table.concat(ds, " ")
   end
 
@@ -142,12 +201,15 @@ function M.run(c, g, opts)
   end
 
   local function compile(inst, src, obj, includes, defines)
-    w(string.format("build %s: cxx %s\n  includes = %s\n  defines = %s%s", util.ninja_escape(obj), util.ninja_escape(src), includes, defines, overrides(inst, false)))
+    w(string.format("build %s: %s %s\n  includes = %s\n  defines = %s%s", util.ninja_escape(obj), rule(inst, "cxx"), util.ninja_escape(src),
+      includes, defines, overrides(inst)))
+    -- The command the toolchain's cxx rule runs, with this file's values in it. clangd takes
+    -- the first entry for a file: the target's, since the host's come later.
     local fl = flags(inst)
-    -- clangd takes the first entry for a file: the target's, since the host's come later.
+    local vars = { cxx = program(fl.cxx), cxxflags = fl.cxxflags, defines = defines, includes = includes, ["in"] = program(src), out = program(obj) }
+    local command = fl.tc.fields.rules.cxx.command:gsub("%$(%w+)", function(v) return vars[v] or "" end)
     cc[#cc + 1] = string.format("{\"directory\": %s, \"file\": %s, \"output\": %s, \"command\": %s}",
-      util.json_string(build), util.json_string(src), util.json_string(obj),
-      util.json_string(string.format("%s %s %s %s -c %s -o %s", fl.cxx, fl.cxxflags, defines, includes, src, obj)))
+      util.json_string(build), util.json_string(src), util.json_string(obj), util.json_string(command))
   end
 
   -- The generated module list for an executable: every engine module in its closure,
@@ -183,6 +245,7 @@ function M.run(c, g, opts)
     do
       local srcs = sources_of(inst)
       local pre = inst.prefix
+      local naming = flags(inst).tc.fields
       local gen = pre .. "gen/" .. sym
       kfs.mkdirp(util.join(build, gen))
       local includes = include_flags(inst, { util.join(build, gen) })
@@ -200,14 +263,14 @@ function M.run(c, g, opts)
         for _, s in ipairs(srcs) do lines[#lines + 1] = '#include "' .. s .. '"' end
         local path = util.join(build, gen .. "/unity.cc")
         kfs.write(path, table.concat(lines, "\n") .. "\n")
-        local obj = pre .. "obj/" .. sym .. "/unity.o"
+        local obj = pre .. "obj/" .. sym .. "/unity" .. naming.obj_suffix
         compile(inst, path, obj, includes, defines)
         objs[#objs + 1] = obj
       else
         for _, s in ipairs(srcs) do
           local rel = s:sub(#m.dir + 2):gsub("^src/", "")
           if s:sub(1, #build) == build then rel = "gen_" .. util.basename(s) end
-          local obj = pre .. "obj/" .. sym .. "/" .. rel:gsub("%.cc$", ".o")
+          local obj = pre .. "obj/" .. sym .. "/" .. rel:gsub("%.cc$", "") .. naming.obj_suffix
           compile(inst, s, obj, includes, defines)
           objs[#objs + 1] = obj
         end
@@ -248,8 +311,8 @@ function M.run(c, g, opts)
 
       if output == "lib" then
         if #objs > 0 then
-          local lib = pre .. "lib/libkv_" .. sym .. ".a"
-          w(string.format("build %s: ar %s", lib, table.concat(objs, " ")))
+          local lib = pre .. "lib/" .. naming.lib_file:format("kv_" .. sym)
+          w(string.format("build %s: %s %s%s", lib, rule(inst, "ar"), table.concat(objs, " "), overrides(inst)))
           libs_by_key[inst.key] = lib
           all[#all + 1] = lib
         end
@@ -265,9 +328,9 @@ function M.run(c, g, opts)
         local extlibs = extlibs_of(inst, {}, mods)
         inst.extlibs = extlibs
         for _, r in ipairs(runtime) do rt[#rt + 1] = r end
-        local exe = pre .. "bin/" .. exe_name(inst)
-        w(string.format("build %s: link %s %s%s\n  libs = %s%s", exe, table.concat(objs, " "), table.concat(libs, " "),
-          #rt > 0 and (" || " .. table.concat(rt, " ")) or "", table.concat(extlibs, " "), overrides(inst, true)))
+        local exe = pre .. "bin/" .. exe_name(inst) .. naming.exe_suffix
+        w(string.format("build %s: %s %s %s%s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
+          #rt > 0 and (" || " .. table.concat(rt, " ")) or "", table.concat(extlibs, " "), overrides(inst)))
         all[#all + 1] = exe
         -- Rules that run once per executable over its staged assets (a pack): part of the
         -- default build in ship, buildable by name in the other configs.
@@ -307,7 +370,7 @@ function M.run(c, g, opts)
       local includes = include_flags(inst, { m.tests_dir })
       local objs = {}
       for _, s in ipairs(srcs) do
-        local obj = pre .. "obj/" .. sym .. "/tests/" .. util.basename(s):gsub("%.cc$", ".o")
+        local obj = pre .. "obj/" .. sym .. "/tests/" .. util.basename(s):gsub("%.cc$", "") .. flags(inst).tc.fields.obj_suffix
         compile(inst, s, obj, includes, define_flags(inst))
         objs[#objs + 1] = obj
       end
@@ -320,8 +383,9 @@ function M.run(c, g, opts)
       end
       mods[#mods + 1] = m
       local extlibs = extlibs_of(inst, {}, mods)
-      local exe = pre .. "bin/" .. sym .. "_tests"
-      w(string.format("build %s: link %s %s\n  libs = %s%s", exe, table.concat(objs, " "), table.concat(libs, " "), table.concat(extlibs, " "), overrides(inst, true)))
+      local exe = pre .. "bin/" .. sym .. "_tests" .. flags(inst).tc.fields.exe_suffix
+      w(string.format("build %s: %s %s %s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
+        table.concat(extlibs, " "), overrides(inst)))
       w(string.format("build %stest/%s.ok: run_test %s", pre, sym, exe))
       tests[#tests + 1] = exe
       checks[#checks + 1] = pre .. "test/" .. sym .. ".ok"

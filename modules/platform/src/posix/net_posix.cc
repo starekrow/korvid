@@ -42,14 +42,14 @@ bool NetListener::open(u16 want_port, bool local_only) {
 }
 
 void NetListener::close() {
-    if (fd >= 0) ::close(fd);
+    if (fd >= 0) ::close((int)fd);
     fd = -1;
     port = 0;
 }
 
-int NetListener::accept() {
+NetFd NetListener::accept() {
     if (fd < 0) return -1;
-    int c = ::accept4(fd, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
+    int c = ::accept4((int)fd, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
     if (c < 0) {
         if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) KV_WARN("net", "accept: %s", strerror(errno));
         return -1;
@@ -57,20 +57,20 @@ int NetListener::accept() {
     return c;
 }
 
-void NetSocket::adopt(int new_fd) {
+void NetSocket::adopt(NetFd new_fd) {
     close();
     fd = new_fd;
     closed = false;
     if (fd >= 0) {
-        set_nonblocking(fd);
+        set_nonblocking((int)fd);
         int one = 1;
-        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); // lines, not bulk
+        setsockopt((int)fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); // lines, not bulk
     }
 }
 
 i32 NetSocket::read(void* buf, u32 cap) {
     if (fd < 0 || closed || cap == 0) return closed ? -1 : 0;
-    ssize_t n = ::recv(fd, buf, cap, 0);
+    ssize_t n = ::recv((int)fd, buf, cap, 0);
     if (n > 0) { bytes_in += (u64)n; return (i32)n; }
     if (n == 0) { closed = true; return -1; }
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return 0;
@@ -91,7 +91,7 @@ void NetSocket::flush() {
     if (fd < 0 || closed || out.len == 0) return;
     u32 sent = 0;
     while (sent < out.len) {
-        ssize_t n = ::send(fd, out.data + sent, out.len - sent, MSG_NOSIGNAL);
+        ssize_t n = ::send((int)fd, out.data + sent, out.len - sent, MSG_NOSIGNAL);
         if (n > 0) { sent += (u32)n; continue; }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) break;
         if (n < 0 && (errno == ENOTCONN || errno == EINPROGRESS)) break; // still connecting
@@ -106,7 +106,7 @@ void NetSocket::flush() {
 }
 
 void NetSocket::close() {
-    if (fd >= 0) ::close(fd);
+    if (fd >= 0) ::close((int)fd);
     fd = -1;
     out.clear();
     closed = false;
@@ -128,5 +128,7 @@ bool net_connect_local(u16 port, NetSocket& out) {
     out.adopt(s);
     return true;
 }
+
+void net_close(NetFd fd) { if (fd >= 0) ::close((int)fd); }
 
 } // namespace kv

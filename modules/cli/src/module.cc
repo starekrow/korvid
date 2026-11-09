@@ -2,11 +2,9 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/utf8.h"
-#include <errno.h>
-#include <poll.h>
+#include "os_stdin.h"
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 namespace kv {
 
@@ -278,7 +276,7 @@ bool cli_startup(Engine& e, ModuleInstance& self) {
     }
     for (Session& sess : s->sessions) sess.sock.out.alloc = &self.general;
 
-    bool use_stdin = !s->config.no_stdin && (s->config.stdin_ || !isatty(STDIN_FILENO));
+    bool use_stdin = !s->config.no_stdin && (s->config.stdin_ || !os_stdin_is_terminal());
     if (use_stdin) {
         Session& sess = s->sessions[s->session_count++];
         sess.is_stdin = true;
@@ -307,8 +305,8 @@ void cli_shutdown(Engine&, ModuleInstance& self) {
 void cli_pump(TickContext& ctx) {
     CliState& cli = ctx.state_as<CliState>();
     Engine& e = *ctx.engine;
-    for (int fd; (fd = cli.listener.accept()) >= 0;) {
-        if (cli.session_count >= kMaxSessions) { close(fd); KV_WARN("cli", "connection refused: %u sessions", kMaxSessions); continue; }
+    for (NetFd fd; (fd = cli.listener.accept()) >= 0;) {
+        if (cli.session_count >= kMaxSessions) { net_close(fd); KV_WARN("cli", "connection refused: %u sessions", kMaxSessions); continue; }
         Session& s = cli.sessions[cli.session_count++];
         s = Session{};
         s.sock.out.alloc = cli.commands.alloc;
@@ -321,12 +319,10 @@ void cli_pump(TickContext& ctx) {
         Session& s = cli.sessions[i];
         if (s.is_stdin) {
             if (s.stdin_eof) continue;
-            pollfd p{STDIN_FILENO, POLLIN, 0};
-            while (poll(&p, 1, 0) > 0 && (p.revents & (POLLIN | POLLHUP))) {
-                ssize_t n = read(STDIN_FILENO, buf, sizeof buf);
+            for (;;) {
+                i32 n = os_stdin_read(buf, sizeof buf);
                 if (n > 0) { feed(e, cli, s, buf, (u32)n); continue; }
-                if (n < 0 && errno == EINTR) continue;
-                s.stdin_eof = true; // end of stream, or an error: stdin is done
+                if (n < 0) s.stdin_eof = true; // end of stream, or an error: stdin is done
                 break;
             }
             continue;

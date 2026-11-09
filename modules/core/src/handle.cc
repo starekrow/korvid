@@ -1,4 +1,5 @@
 #include "korvid/core/handle.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/log.h"
 #include <stdio.h>
 #include <string.h>
@@ -22,13 +23,13 @@ Kind     g_kinds[kMaxKinds];
 uint32_t g_count = 1; // 0 is reserved; atomic
 uint32_t g_warned = 0;
 
-uint32_t count() { return __atomic_load_n(&g_count, __ATOMIC_ACQUIRE); }
+uint32_t count() { return kv::atomic_load(&g_count, kv::MO_ACQUIRE); }
 
 const Kind* kind_of(kv_handle h) {
     uint16_t k = kv_handle_kind(h);
     if (k == 0 || k >= count()) return nullptr;
     const Kind& kind = g_kinds[k];
-    return __atomic_load_n(&kind.live, __ATOMIC_ACQUIRE) ? &kind : nullptr;
+    return kv::atomic_load(&kind.live, kv::MO_ACQUIRE) ? &kind : nullptr;
 }
 
 } // namespace
@@ -40,9 +41,9 @@ uint16_t kv_handle_kind_register(const kv_handle_kind_desc* desc) {
         KV_ERROR("handle", "kind registration needs a resolve function");
         return 0;
     }
-    uint32_t id32 = __atomic_fetch_add(&g_count, 1u, __ATOMIC_ACQ_REL);
+    uint32_t id32 = kv::atomic_fetch_add(&g_count, 1u, kv::MO_ACQ_REL);
     if (id32 >= kMaxKinds) {
-        __atomic_fetch_sub(&g_count, 1u, __ATOMIC_ACQ_REL);
+        kv::atomic_fetch_sub(&g_count, 1u, kv::MO_ACQ_REL);
         KV_ERROR("handle", "no kind ids left (%u used); ids are never reused within a run", kMaxKinds - 1);
         return 0;
     }
@@ -52,15 +53,15 @@ uint16_t kv_handle_kind_register(const kv_handle_kind_desc* desc) {
     strncpy(k.name, desc->name ? desc->name : "", kNameLen - 1);
     k.name[kNameLen - 1] = 0;
     k.desc.name = k.name;
-    __atomic_store_n(&k.live, 1u, __ATOMIC_RELEASE);
-    if (id32 > (kMaxKinds * 3) / 4 && __atomic_exchange_n(&g_warned, 1u, __ATOMIC_RELAXED) == 0)
+    kv::atomic_store(&k.live, 1u, kv::MO_RELEASE);
+    if (id32 > (kMaxKinds * 3) / 4 && kv::atomic_exchange(&g_warned, 1u, kv::MO_RELAXED) == 0)
         KV_WARN("handle", "%u of %u kind ids used", id32, kMaxKinds - 1);
     return id;
 }
 
 void kv_handle_kind_unregister(uint16_t kind) {
     if (kind == 0 || kind >= count()) return;
-    __atomic_store_n(&g_kinds[kind].live, 0u, __ATOMIC_RELEASE);
+    kv::atomic_store(&g_kinds[kind].live, 0u, kv::MO_RELEASE);
 }
 
 const kv_handle_kind_desc* kv_handle_kind_desc_get(uint16_t kind) {
@@ -69,21 +70,21 @@ const kv_handle_kind_desc* kv_handle_kind_desc_get(uint16_t kind) {
 
 void kv_handle_kind_set_ctx(uint16_t kind, void* ctx) {
     if (kind == 0 || kind >= count()) return;
-    __atomic_store_n(&g_kinds[kind].desc.ctx, ctx, __ATOMIC_RELEASE);
+    kv::atomic_store(&g_kinds[kind].desc.ctx, ctx, kv::MO_RELEASE);
 }
 
 void* kv_handle_resolve(kv_handle h) {
     const Kind* k = kind_of(h);
     if (!k) return nullptr;
     if ((k->desc.flags & KV_HANDLE_GENERATIONAL) && kv_handle_gen(h) == 0) return nullptr;
-    return k->desc.resolve(h, __atomic_load_n(&k->desc.ctx, __ATOMIC_ACQUIRE));
+    return k->desc.resolve(h, kv::atomic_load(&k->desc.ctx, kv::MO_ACQUIRE));
 }
 
 void* kv_handle_resolve_as(kv_handle h, const void* type_key) {
     const Kind* k = kind_of(h);
     if (!k || k->desc.type_key != type_key) return nullptr;
     if ((k->desc.flags & KV_HANDLE_GENERATIONAL) && kv_handle_gen(h) == 0) return nullptr;
-    return k->desc.resolve(h, __atomic_load_n(&k->desc.ctx, __ATOMIC_ACQUIRE));
+    return k->desc.resolve(h, kv::atomic_load(&k->desc.ctx, kv::MO_ACQUIRE));
 }
 
 const char* kv_handle_kind_name(uint16_t kind) {
@@ -96,7 +97,7 @@ const void* kv_handle_type_key(kv_handle h) {
 }
 
 int kv_handle_kind_is_live(uint16_t kind) {
-    return kind != 0 && kind < count() && __atomic_load_n(&g_kinds[kind].live, __ATOMIC_ACQUIRE);
+    return kind != 0 && kind < count() && kv::atomic_load(&g_kinds[kind].live, kv::MO_ACQUIRE);
 }
 
 uint32_t kv_handle_kind_count(void) { return count(); }
@@ -113,7 +114,7 @@ int kv_handle_describe(kv_handle h, char* out, size_t cap) {
     if (k && k->desc.describe) {
         out[n++] = ' ';
         if ((size_t)n >= cap) { out[cap - 1] = 0; return (int)cap - 1; }
-        int m = k->desc.describe(h, __atomic_load_n(&k->desc.ctx, __ATOMIC_ACQUIRE), out + n, cap - (size_t)n);
+        int m = k->desc.describe(h, kv::atomic_load(&k->desc.ctx, kv::MO_ACQUIRE), out + n, cap - (size_t)n);
         if (m > 0) n += m;
         else out[--n] = 0;
     }

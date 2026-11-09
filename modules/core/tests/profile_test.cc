@@ -1,10 +1,12 @@
 // The profiler: zones nest and sum, waits are told apart, marks and counters land, records
 // from worker threads arrive with the thread's name, a frame can be kept and dumped, the
 // trace file holds every record, and the ring survives overflow with a count.
+#include "korvid/core/atomic.h"
 #include "korvid/core/job.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/profile.h"
 #include "korvid/core/test.h"
+#include "korvid/core/thread.h"
 #include "korvid/core/time.h"
 #include <stdio.h>
 #include <string.h>
@@ -14,10 +16,18 @@ namespace {
 
 using namespace kv;
 
+u32 g_caller = 0;        // the thread that runs the batch
+u32 g_worker_chunks = 0; // chunks a worker ran
+
 void spin(u32, u32 begin, u32 end, void*) {
     KV_ZONE("spin chunk");
     volatile u64 x = 0;
     for (u32 i = begin; i < end; ++i) for (u32 k = 0; k < 2000; ++k) x += k;
+    // A worker must take part whatever the scheduler does: the batch is short enough for the
+    // caller to finish it before a just-started worker wakes, so the caller holds its chunk
+    // (a second at most) until a worker has run one. The rest of the batch is still queued.
+    if (thread_id() != g_caller) kv::atomic_add_fetch(&g_worker_chunks, 1u, kv::MO_RELEASE);
+    else for (f64 until = time_now() + 1.0; kv::atomic_load(&g_worker_chunks, kv::MO_ACQUIRE) == 0 && time_now() < until;) {}
     KV_MARK("chunk done");
 }
 
@@ -33,7 +43,7 @@ void test_profile(kv::TestCtx& c) {
     using namespace kv;
     c.begin("profile");
 #if KV_PROFILE
-    const char* path = "/tmp/prof_test.json";
+    const char* path = "prof_test.json"; // in the build directory, where tests run; removed below
     prof_enable(true);
     prof_thread_name("main");
     prof_keep_frame(true);
@@ -66,6 +76,7 @@ void test_profile(kv::TestCtx& c) {
 
     // Workers: their chunks show up under their own names, and the batch name is the zone.
     jobs_init(3);
+    g_caller = thread_id();
     prof_frame(2);
     jobs_run(64, 1, spin, nullptr, "spin batch");
     prof_collect();

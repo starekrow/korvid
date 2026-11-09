@@ -1,4 +1,5 @@
 #include "korvid/collision/module.h"
+#include "korvid/core/sort.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/map.h"
@@ -115,7 +116,7 @@ void broadphase(TickContext& ctx) {
                 }
             }
     }
-    if (st.now.len > 1) qsort(st.now.data, st.now.len, sizeof(Pair), compare_pairs);
+    if (st.now.len > 1) kv::sort(st.now.data, st.now.len, sizeof(Pair), compare_pairs);
 
     // Diff two sorted lists: new pairs begin, missing pairs end. An End whose entity is
     // gone is dropped at delivery, by the bus's stale-handle rule.

@@ -1,4 +1,5 @@
 #include "korvid/audio/module.h"
+#include "korvid/core/atomic.h"
 #include "korvid/asset/scope.h"
 #include "korvid/asset/sound.h"
 #include "korvid/asset/stream.h"
@@ -189,7 +190,7 @@ void fill_stream(const StreamAsset& st, VoiceRec& v) {
         u32 got = want ? stream_decoder_read(v.dec, block, want) : 0;
         if (got == 0) {
             if (v.play.loop && stream_decoder_seek(v.dec, st.loop_start)) { v.dec_pos = st.loop_start; continue; }
-            __atomic_store_n(&r.ended, true, __ATOMIC_RELEASE);
+            kv::atomic_store(&r.ended, true, kv::MO_RELEASE);
             return;
         }
         u64 w = r.write;
@@ -198,7 +199,7 @@ void fill_stream(const StreamAsset& st, VoiceRec& v) {
             f32* dst = r.frames + ((w + k) & mask) * 2;
             dst[0] = block[k * 2]; dst[1] = block[k * 2 + 1];
         }
-        __atomic_store_n(&r.write, w + got, __ATOMIC_RELEASE);
+        kv::atomic_store(&r.write, w + got, kv::MO_RELEASE);
         v.dec_pos += got;
     }
 }

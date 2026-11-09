@@ -1,4 +1,5 @@
 #include "korvid/core/name.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/log.h"
 #include <string.h>
 
@@ -60,8 +61,8 @@ Allocator g_names_alloc; // the engine's, whoever interns first
 bool      g_names_ready = false;
 u32       g_names_lock  = 0;
 
-void lock()   { while (__atomic_exchange_n(&g_names_lock, 1u, __ATOMIC_ACQUIRE)) {} }
-void unlock() { __atomic_store_n(&g_names_lock, 0u, __ATOMIC_RELEASE); }
+void lock()   { while (kv::atomic_exchange(&g_names_lock, 1u, kv::MO_ACQUIRE)) {} }
+void unlock() { kv::atomic_store(&g_names_lock, 0u, kv::MO_RELEASE); }
 
 NameTable& table() {
     if (!g_names_ready) {

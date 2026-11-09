@@ -1,4 +1,5 @@
 #include "korvid/asset/font.h"
+#include "korvid/core/sort.h"
 #include "korvid/asset/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -144,7 +145,7 @@ bool build_font(Engine& e, AssetState_& s, FontAsset& f, const u8* data, usize s
         len = stbtt_GetKerningTable(&info, table, len);
         GlyphAt* by_glyph = (GlyphAt*)alloc_in(mem_scratch(), sizeof(GlyphAt) * n);
         for (u32 i = 0; i < n; ++i) by_glyph[i] = GlyphAt{gis[i], i};
-        qsort(by_glyph, n, sizeof(GlyphAt), compare_glyph_at);
+        kv::sort(by_glyph, n, sizeof(GlyphAt), compare_glyph_at);
         for (int k = 0; k < len; ++k) {
             if (table[k].advance == 0) continue;
             f32 v = (f32)table[k].advance * scale;
@@ -160,7 +161,7 @@ bool build_font(Engine& e, AssetState_& s, FontAsset& f, const u8* data, usize s
                     pairs.push(KernPair{(u64)cps[a] << 32 | (u32)cps[b], (f32)k * scale});
     }
     if (pairs.len) {
-        qsort(pairs.data, pairs.len, sizeof(KernPair), compare_kern);
+        kv::sort(pairs.data, pairs.len, sizeof(KernPair), compare_kern);
         f.kern_pairs  = (u64*)alloc_in(s.general, sizeof(u64) * pairs.len);
         f.kern_values = (f32*)alloc_in(s.general, sizeof(f32) * pairs.len);
         u32 m = 0;
@@ -307,7 +308,7 @@ Handle font_load(Engine& e, AssetState_& st, const char* path, const FontDesc& d
     u32 nr = 0;
     for (const FontRange& rg : desc.ranges)
         if (rg.first <= rg.last && rg.last <= 0x10FFFF) merged[nr++] = rg;
-    qsort(merged, nr, sizeof(FontRange), compare_range);
+    kv::sort(merged, nr, sizeof(FontRange), compare_range);
     u32 m = 0;
     u64 total = 0;
     for (u32 i = 0; i < nr; ++i) {

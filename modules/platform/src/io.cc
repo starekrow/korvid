@@ -1,17 +1,15 @@
 #include "korvid/platform/io.h"
+#include "korvid/core/sort.h"
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"
 #include "korvid/core/utf8.h"
 #include "korvid/inflate/inflate.h"
 #include "io_ring.h"
+#include "os_file.h"
 #include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 namespace kv {
 
@@ -96,11 +94,17 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
     if (e->status == IoStatus::Cancelled) { out.status = IoStatus::Cancelled; drop_write_copy(*e); return; }
 
     if (e->write) {
-        FILE* f = fopen(e->path, "wb");
-        if (!f) { complete_failed(q, h, *e, out, errno); drop_write_copy(*e); return; }
-        bool ok = e->size == 0 || fwrite(e->buf, 1, e->size, f) == e->size;
-        ok = (fclose(f) == 0) && ok;
-        if (!ok) { complete_failed(q, h, *e, out, EIO); drop_write_copy(*e); return; }
+        i32 err = 0;
+        OsFile f = os_file_open(e->path, true, &err);
+        if (f < 0) { complete_failed(q, h, *e, out, err); drop_write_copy(*e); return; }
+        usize put = 0;
+        while (put < e->size) {
+            i64 n = os_file_write(f, e->buf + put, e->size - put, &err);
+            if (n <= 0) break;
+            put += (usize)n;
+        }
+        os_file_close(f);
+        if (put != e->size) { complete_failed(q, h, *e, out, err ? err : EIO); drop_write_copy(*e); return; }
         out.status = IoStatus::Done;
         out.size   = e->size;
         e->status  = IoStatus::Done;
@@ -111,19 +115,18 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
 
     if (e->fail_errno) { complete_failed(q, h, *e, out, e->fail_errno); return; }
     if (e->ranged) {
-        int fd = e->fd_borrowed ? e->fd : open(e->path, O_RDONLY | O_CLOEXEC);
-        if (fd < 0) { complete_failed(q, h, *e, out, errno); return; }
+        i32 err = 0;
+        OsFile fd = e->fd_borrowed ? e->fd : os_file_open(e->path, false, &err);
+        if (fd < 0) { complete_failed(q, h, *e, out, err); return; }
         Allocator* a = entry_alloc(*e);
         u8* data = (u8*)alloc_in(a, e->length ? e->length : 1);
         usize got = 0;
         while (data && got < e->length) {
-            ssize_t n = pread(fd, data + got, e->length - got, (off_t)(e->offset + got));
-            if (n < 0 && errno == EINTR) continue;
+            i64 n = os_file_read_at(fd, data + got, e->length - got, e->offset + got, &err);
             if (n <= 0) break;
             got += (usize)n;
         }
-        int err = errno;
-        if (!e->fd_borrowed) close(fd);
+        if (!e->fd_borrowed) os_file_close(fd);
         if (!data || got != e->length) { free_in(a, data, e->length ? e->length : 1); complete_failed(q, h, *e, out, data ? (err ? err : EIO) : ENOMEM); return; }
         out.status = IoStatus::Done; out.data = data; out.size = got;
         e->status = IoStatus::Done;
@@ -132,25 +135,30 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
         return;
     }
 
-    FILE* f = fopen(e->path, "rb");
-    if (!f) { complete_failed(q, h, *e, out, errno); return; }
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (len < 0) { int err = errno; fclose(f); complete_failed(q, h, *e, out, err); return; }
+    i32 err = 0;
+    OsFile f = os_file_open(e->path, false, &err);
+    if (f < 0) { complete_failed(q, h, *e, out, err); return; }
+    u64 size = 0;
+    if (!os_file_size(f, &size, &err)) { os_file_close(f); complete_failed(q, h, *e, out, err); return; }
+    usize len = (usize)size;
 
     Allocator* a = entry_alloc(*e);
-    void* data = alloc_in(a, (usize)len ? (usize)len : 1);
-    bool ok = data && (len == 0 || fread(data, 1, (usize)len, f) == (usize)len);
-    fclose(f);
-    if (!ok) {
-        free_in(a, data, (usize)len ? (usize)len : 1);
+    u8* data = (u8*)alloc_in(a, len ? len : 1);
+    usize got = 0;
+    while (data && got < len) {
+        i64 n = os_file_read_at(f, data + got, len - got, got, &err);
+        if (n <= 0) break;
+        got += (usize)n;
+    }
+    os_file_close(f);
+    if (!data || got != len) {
+        free_in(a, data, len ? len : 1);
         complete_failed(q, h, *e, out, EIO);
         return;
     }
     out.status = IoStatus::Done;
     out.data   = data;
-    out.size   = (usize)len;
+    out.size   = len;
     e->status  = IoStatus::Done;
     ++q.reads_done;
 }
@@ -162,20 +170,21 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
 bool ring_open(IoQueue& q, Handle h, IoEntry& e) {
     if (e.fail_errno) { IoCompletion c{}; complete_failed(q, h, e, c, e.fail_errno); q.completed.push(c); return false; }
     if (e.fd >= 0) return true; // opened for sizing earlier, or a pack's borrowed descriptor
+    i32 err = 0;
     if (e.write) {
-        int fd = open(e.path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-        if (fd < 0) { IoCompletion c{}; complete_failed(q, h, e, c, errno); drop_write_copy(e); q.completed.push(c); return false; }
+        OsFile fd = os_file_open(e.path, true, &err);
+        if (fd < 0) { IoCompletion c{}; complete_failed(q, h, e, c, err); drop_write_copy(e); q.completed.push(c); return false; }
         e.fd = fd;
         e.done = 0;
         return true;
     }
-    int fd = open(e.path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) { IoCompletion c{}; complete_failed(q, h, e, c, errno); q.completed.push(c); return false; }
+    OsFile fd = os_file_open(e.path, false, &err);
+    if (fd < 0) { IoCompletion c{}; complete_failed(q, h, e, c, err); q.completed.push(c); return false; }
     if (e.ranged) { e.fd = fd; e.size = e.length; e.done = 0; return true; }
-    struct stat st;
-    if (fstat(fd, &st) != 0) { int err = errno; close(fd); IoCompletion c{}; complete_failed(q, h, e, c, err); q.completed.push(c); return false; }
+    u64 size = 0;
+    if (!os_file_size(fd, &size, &err)) { os_file_close(fd); IoCompletion c{}; complete_failed(q, h, e, c, err); q.completed.push(c); return false; }
     e.fd   = fd;
-    e.size = (usize)st.st_size;
+    e.size = (usize)size;
     e.done = 0;
     return true;
 }
@@ -184,7 +193,7 @@ bool ring_open(IoQueue& q, Handle h, IoEntry& e) {
 bool ring_start(IoQueue& q, Handle h, IoEntry& e) {
     if (!e.write) {
         e.buf = (u8*)alloc_in(entry_alloc(e), e.size ? e.size : 1);
-        if (!e.buf) { close(e.fd); e.fd = -1; IoCompletion c{}; complete_failed(q, h, e, c, ENOMEM); q.completed.push(c); return false; }
+        if (!e.buf) { os_file_close(e.fd); e.fd = -1; IoCompletion c{}; complete_failed(q, h, e, c, ENOMEM); q.completed.push(c); return false; }
     }
     e.in_flight = true;
     ++q.in_flight;
@@ -207,7 +216,7 @@ void ring_finish(IoQueue& q, Handle h, IoEntry& e, IoStatus status, i32 err, usi
     }
     else if (status == IoStatus::Done) { c.data = e.buf; c.size = size; ++q.reads_done; e.status = status; deliver(q, e, c); status = e.status; }
     else { free_in(entry_alloc(e), e.buf, e.size ? e.size : 1); if (status == IoStatus::Failed) ++q.reads_failed; }
-    if (e.fd >= 0 && !e.fd_borrowed) close(e.fd);
+    if (e.fd >= 0 && !e.fd_borrowed) os_file_close(e.fd);
     q.bytes_in_flight -= e.size;
     e.fd = -1; e.buf = nullptr; e.in_flight = false; e.status = status;
     --q.in_flight;
@@ -239,7 +248,7 @@ void ring_reap(IoQueue& q) {
 // reads are taken only when `idle` says so. Returns the bytes admitted; sets *capped when
 // an admissible read was left waiting on the budget.
 usize admit(IoQueue& q, usize budget, bool idle, bool* capped) {
-    if (q.queued.len > 1) qsort_r(q.queued.data, q.queued.len, sizeof(Handle), compare_queued, &q);
+    if (q.queued.len > 1) kv::sort(q.queued.data, q.queued.len, sizeof(Handle), compare_queued, &q);
     usize submitted = 0;
     u32 taken = 0;
     *capped = false;
@@ -325,11 +334,11 @@ void IoQueue::free() {
     for (u32 i = 0; i < entries.len; ++i) {
         if (!entries.is_alive(i)) continue;
         IoEntry& e = entries.items[i];
-        if (e.fd >= 0 && !e.in_flight && !e.fd_borrowed) close(e.fd);
+        if (e.fd >= 0 && !e.in_flight && !e.fd_borrowed) os_file_close(e.fd);
         if (!e.in_flight) drop_write_copy(e); // a write never performed
     }
     for (IoMount& m : mounts) {
-        if (m.fd >= 0) close(m.fd);
+        if (m.fd >= 0) os_file_close(m.fd);
         pack_table_free(m.table, mounts.allocator());
     }
     mounts.free();
@@ -389,11 +398,11 @@ Handle IoQueue::write_file(const IoWriteRequest& req) {
 
 namespace {
 
-bool pread_all(int fd, void* buf, usize n, u64 at) {
+bool pread_all(OsFile fd, void* buf, usize n, u64 at) {
     usize got = 0;
+    i32 err = 0;
     while (got < n) {
-        ssize_t r = pread(fd, (u8*)buf + got, n - got, (off_t)(at + got));
-        if (r < 0 && errno == EINTR) continue;
+        i64 r = os_file_read_at(fd, (u8*)buf + got, n - got, at + got, &err);
         if (r <= 0) return false;
         got += (usize)r;
     }
@@ -415,8 +424,7 @@ IoEntry entry_for(IoQueue& q, const IoRequest& req) {
 } // namespace
 
 bool IoQueue::mount_dir(const char* dir) {
-    struct stat st;
-    if (!dir || stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) { KV_WARN("io", "mount: '%s' is not a directory", dir ? dir : "?"); return false; }
+    if (!dir || os_path_kind(dir) != OsPathKind::Dir) { KV_WARN("io", "mount: '%s' is not a directory", dir ? dir : "?"); return false; }
     IoMount m{};
     usize n = strlen(dir);
     if (n + 2 > sizeof m.path) { KV_ERROR("io", "mount: path too long: '%s'", dir); return false; }
@@ -431,9 +439,9 @@ bool IoQueue::mount_dir(const char* dir) {
 bool IoQueue::mount_pack(const char* path) {
     IoMount m{};
     if (!path || strlen(path) >= sizeof m.path) { KV_ERROR("io", "mount: bad pack path"); return false; }
-    int fd = open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) { KV_WARN("io", "mount: cannot open '%s': %s", path, strerror(errno)); return false; }
-    struct stat st;
+    i32 err = 0;
+    OsFile fd = os_file_open(path, false, &err);
+    if (fd < 0) { KV_WARN("io", "mount: cannot open '%s': %s", path, strerror(err)); return false; }
     Allocator* a = mounts.allocator();
     const char* why = nullptr;
     ZipTail tail;
@@ -443,11 +451,11 @@ bool IoQueue::mount_pack(const char* path) {
         KV_WARN("io", "mount: '%s' is not a usable zip: %s", path, reason);
         free_in(a, buf, buf_len ? buf_len : 1);
         pack_table_free(m.table, a);
-        close(fd);
+        os_file_close(fd);
         return false;
     };
-    if (fstat(fd, &st) != 0) return give_up(strerror(errno));
-    u64 size = (u64)st.st_size;
+    u64 size = 0;
+    if (!os_file_size(fd, &size, &err)) return give_up(strerror(err));
     // The tail, then the Zip64 end record if the tail points at one.
     buf_len = size < KV_ZIP_TAIL_MAX ? (usize)size : KV_ZIP_TAIL_MAX;
     buf = (u8*)alloc_in(a, buf_len ? buf_len : 1);
@@ -520,7 +528,7 @@ Handle IoQueue::read_asset(const IoRequest& req) {
             if (!m.is_pack) {
                 char full[512];
                 int n = snprintf(full, sizeof full, "%s%s", m.path, norm);
-                if (n < 0 || (usize)n >= sizeof e.path || access(full, R_OK) != 0) continue;
+                if (n < 0 || (usize)n >= sizeof e.path || os_path_kind(full) != OsPathKind::File) continue;
                 memcpy(e.path, full, (usize)n + 1);
                 e.fail_errno = 0;
                 break;
@@ -566,30 +574,27 @@ namespace {
 int compare_names(const void* a, const void* b) { return strcmp(*(const char* const*)a, *(const char* const*)b); }
 
 // One directory level: names sorted, then files reported and directories walked.
+void collect_name(void* user, const char* name) {
+    if (name[0] == '.') return;
+    usize n = strlen(name);
+    char* copy = (char*)alloc_in(mem_general(), n + 1);
+    memcpy(copy, name, n + 1);
+    ((Array<char*>*)user)->push(copy);
+}
+
 i32 walk(char* full, usize root_len, usize len, usize cap, bool (*fn)(void*, const char*), void* user, bool* stop) {
-    DIR* d = opendir(full);
-    if (!d) return -1;
     Array<char*> names;
-    while (dirent* de = readdir(d)) {
-        if (de->d_name[0] == '.') continue;
-        usize n = strlen(de->d_name);
-        char* copy = (char*)alloc_in(mem_general(), n + 1);
-        memcpy(copy, de->d_name, n + 1);
-        names.push(copy);
-    }
-    closedir(d);
-    if (names.len > 1) qsort(names.data, names.len, sizeof(char*), compare_names);
+    if (!os_dir_each(full, collect_name, &names)) { names.free(); return -1; }
+    if (names.len > 1) kv::sort(names.data, names.len, sizeof(char*), compare_names);
     i32 count = 0;
     for (char* name : names) {
         usize n = strlen(name);
         if (!*stop && len + 1 + n < cap) {
             full[len] = '/';
             memcpy(full + len + 1, name, n + 1);
-            struct stat st;
-            if (stat(full, &st) == 0) {
-                if (S_ISDIR(st.st_mode)) { i32 sub = walk(full, root_len, len + 1 + n, cap, fn, user, stop); if (sub > 0) count += sub; }
-                else if (S_ISREG(st.st_mode)) { ++count; if (!fn(user, full + root_len + 1)) *stop = true; }
-            }
+            OsPathKind kind = os_path_kind(full);
+            if (kind == OsPathKind::Dir) { i32 sub = walk(full, root_len, len + 1 + n, cap, fn, user, stop); if (sub > 0) count += sub; }
+            else if (kind == OsPathKind::File) { ++count; if (!fn(user, full + root_len + 1)) *stop = true; }
             full[len] = 0;
         }
         free_in(mem_general(), name, n + 1);
@@ -619,18 +624,26 @@ bool io_make_dirs(const char* path) {
         if (p[i] != '/' && p[i] != 0) continue;
         char c = p[i];
         p[i] = 0;
-        if (mkdir(p, 0755) != 0 && errno != EEXIST) return false;
+        if (!os_make_dir(p)) return false;
         p[i] = c;
     }
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+    return os_path_kind(path) == OsPathKind::Dir;
+}
+
+bool io_remove(const char* path) {
+    if (!path || !path[0]) return false;
+    return os_remove(path) || os_path_kind(path) == OsPathKind::None;
+}
+
+bool io_make_temp_dir(const char* prefix, char* out, u32 cap) {
+    return prefix && out && cap && os_make_temp_dir(prefix, out, cap);
 }
 
 bool IoQueue::cancel(Handle request) {
     IoEntry* e = entries.get(request);
     if (!e || e->status != IoStatus::Pending) return false;
     e->status = IoStatus::Cancelled; // queued: completes as Cancelled at the pump; in flight: when the ring answers
-    if (!e->in_flight && e->fd >= 0 && !e->fd_borrowed) { close(e->fd); e->fd = -1; } // opened for sizing, never started
+    if (!e->in_flight && e->fd >= 0 && !e->fd_borrowed) { os_file_close(e->fd); e->fd = -1; } // opened for sizing, never started
     return true;
 }
 

@@ -1,4 +1,5 @@
 #include "korvid/core/memory.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/log.h"
 #include "korvid/core/os_memory.h"
 #include "korvid/core/profile.h"
@@ -113,11 +114,11 @@ u32         g_retired_lock; // spin, taken once per thread lifetime
 u32         g_block_count;  // atomic bump
 thread_local ThreadBlock* t_block = nullptr;
 
-inline void bump(i64& v, i64 d) { __atomic_store_n(&v, __atomic_load_n(&v, __ATOMIC_RELAXED) + d, __ATOMIC_RELAXED); }
-inline i64  peek(const i64& v) { return __atomic_load_n(&v, __ATOMIC_RELAXED); }
+inline void bump(i64& v, i64 d) { kv::atomic_store(&v, kv::atomic_load(&v, kv::MO_RELAXED) + d, kv::MO_RELAXED); }
+inline i64  peek(const i64& v) { return kv::atomic_load(&v, kv::MO_RELAXED); }
 
-void lock_retired()   { while (__atomic_exchange_n(&g_retired_lock, 1u, __ATOMIC_ACQUIRE)) {} }
-void unlock_retired() { __atomic_store_n(&g_retired_lock, 0u, __ATOMIC_RELEASE); }
+void lock_retired()   { while (kv::atomic_exchange(&g_retired_lock, 1u, kv::MO_ACQUIRE)) {} }
+void unlock_retired() { kv::atomic_store(&g_retired_lock, 0u, kv::MO_RELEASE); }
 
 void fold_into_retired(ThreadBlock& b) {
     lock_retired();
@@ -139,7 +140,7 @@ struct ThreadBlockGuard {
         if (!t_block) return;
         fold_into_retired(*t_block);
         *t_block = ThreadBlock{};
-        __atomic_store_n(&t_block->in_use, 0u, __ATOMIC_RELEASE);
+        kv::atomic_store(&t_block->in_use, 0u, kv::MO_RELEASE);
         t_block = nullptr;
     }
 };
@@ -147,9 +148,9 @@ thread_local ThreadBlockGuard t_guard;
 
 ThreadBlock& block() {
     if (!t_block) {
-        u32 i = __atomic_fetch_add(&g_block_count, 1u, __ATOMIC_ACQ_REL);
+        u32 i = kv::atomic_fetch_add(&g_block_count, 1u, kv::MO_ACQ_REL);
         if (i >= kMaxThreads) {
-            __atomic_fetch_sub(&g_block_count, 1u, __ATOMIC_ACQ_REL);
+            kv::atomic_fetch_sub(&g_block_count, 1u, kv::MO_ACQ_REL);
             // Past the table: this thread counts into a private block that rollups do
             // not see until the thread exits and the guard folds it. Rare; 256 threads.
             static thread_local ThreadBlock overflow;
@@ -157,7 +158,7 @@ ThreadBlock& block() {
             return overflow;
         }
         t_block = &g_blocks[i];
-        __atomic_store_n(&t_block->in_use, 1u, __ATOMIC_RELEASE);
+        kv::atomic_store(&t_block->in_use, 1u, kv::MO_RELEASE);
         (void)t_guard; // odr-use: the guard exists for this thread
     }
     return *t_block;
@@ -172,8 +173,8 @@ void account_alloc(MemTag tag, i64 bytes) {
     bump(b.heap_bytes[tag.heap], bytes);
 #if KV_DEV
     Counter& c = g_cells[tag.module][tag.category];
-    __atomic_add_fetch(&c.live_allocs, 1, __ATOMIC_RELAXED);
-    __atomic_add_fetch(&c.live_bytes, (u64)bytes, __ATOMIC_RELAXED);
+    kv::atomic_add_fetch(&c.live_allocs, 1, kv::MO_RELAXED);
+    kv::atomic_add_fetch(&c.live_bytes, (u64)bytes, kv::MO_RELAXED);
 #endif
 }
 
@@ -185,8 +186,8 @@ void account_free(MemTag tag, i64 bytes) {
     bump(b.heap_bytes[tag.heap], -bytes);
 #if KV_DEV
     Counter& c = g_cells[tag.module][tag.category];
-    __atomic_sub_fetch(&c.live_allocs, 1, __ATOMIC_RELAXED);
-    __atomic_sub_fetch(&c.live_bytes, (u64)bytes, __ATOMIC_RELAXED);
+    kv::atomic_sub_fetch(&c.live_allocs, 1, kv::MO_RELAXED);
+    kv::atomic_sub_fetch(&c.live_bytes, (u64)bytes, kv::MO_RELAXED);
 #endif
 }
 
@@ -196,11 +197,11 @@ ThreadBlock rollup() {
     lock_retired();
     sum = g_retired;
     unlock_retired();
-    u32 n = __atomic_load_n(&g_block_count, __ATOMIC_ACQUIRE);
+    u32 n = kv::atomic_load(&g_block_count, kv::MO_ACQUIRE);
     if (n > kMaxThreads) n = kMaxThreads;
     for (u32 i = 0; i < n; ++i) {
         const ThreadBlock& b = g_blocks[i];
-        if (!__atomic_load_n(&b.in_use, __ATOMIC_ACQUIRE)) continue;
+        if (!kv::atomic_load(&b.in_use, kv::MO_ACQUIRE)) continue;
         sum.live_allocs  += peek(b.live_allocs);
         sum.live_bytes   += peek(b.live_bytes);
         sum.total_allocs += peek(b.total_allocs);
@@ -222,9 +223,9 @@ MemSample g_sample;
 #if KV_DEV
 MemStats stats_of(const Counter& c) {
     MemStats s;
-    s.live_allocs     = __atomic_load_n(&c.live_allocs, __ATOMIC_RELAXED);
-    s.live_bytes      = __atomic_load_n(&c.live_bytes, __ATOMIC_RELAXED);
-    s.committed_bytes = __atomic_load_n(&c.committed, __ATOMIC_RELAXED);
+    s.live_allocs     = kv::atomic_load(&c.live_allocs, kv::MO_RELAXED);
+    s.live_bytes      = kv::atomic_load(&c.live_bytes, kv::MO_RELAXED);
+    s.committed_bytes = kv::atomic_load(&c.committed, kv::MO_RELAXED);
     return s;
 }
 void accumulate(MemStats& s, const Counter& c) {
@@ -249,11 +250,11 @@ const char* module_name_of(u16 module);
 bool heap_admit(MemTag tag, usize bytes) {
     u8 h = tag.heap;
     if (!h || !g_heap_hard[h]) return true;
-    u64 now = __atomic_add_fetch(&g_heap_used[h], (u64)bytes, __ATOMIC_RELAXED);
+    u64 now = kv::atomic_add_fetch(&g_heap_used[h], (u64)bytes, kv::MO_RELAXED);
     if (now <= g_heap_hard[h]) return true;
-    __atomic_sub_fetch(&g_heap_used[h], (u64)bytes, __ATOMIC_RELAXED);
+    kv::atomic_sub_fetch(&g_heap_used[h], (u64)bytes, kv::MO_RELAXED);
     KV_MARK_V("heap refused", bytes);
-    if (__atomic_exchange_n(&g_heap_failed[h], 1u, __ATOMIC_RELAXED) == 0)
+    if (kv::atomic_exchange(&g_heap_failed[h], 1u, kv::MO_RELAXED) == 0)
         KV_ERROR("mem", "heap '%s' hard limit %llu bytes: module '%s' category '%s' asked for %llu more with %llu in use",
                  g_heaps_reg.names[h], (unsigned long long)g_heap_hard[h], module_name_of(tag.module),
                  g_categories.names[tag.category], (unsigned long long)bytes, (unsigned long long)(now - bytes));
@@ -262,7 +263,7 @@ bool heap_admit(MemTag tag, usize bytes) {
 
 void heap_release(MemTag tag, usize bytes) {
     u8 h = tag.heap;
-    if (h && g_heap_hard[h]) __atomic_sub_fetch(&g_heap_used[h], (u64)bytes, __ATOMIC_RELAXED);
+    if (h && g_heap_hard[h]) kv::atomic_sub_fetch(&g_heap_used[h], (u64)bytes, kv::MO_RELAXED);
 }
 
 // ---- the size-class allocator ------------------------------------------------------------
@@ -316,8 +317,8 @@ Page* g_free_pages   = nullptr; // under g_page_lock
 Page* g_orphans[kClasses];      // under g_page_lock: pages whose owner thread exited
 u32   g_page_lock    = 0;
 
-void lock_pages()   { while (__atomic_exchange_n(&g_page_lock, 1u, __ATOMIC_ACQUIRE)) {} }
-void unlock_pages() { __atomic_store_n(&g_page_lock, 0u, __ATOMIC_RELEASE); }
+void lock_pages()   { while (kv::atomic_exchange(&g_page_lock, 1u, kv::MO_ACQUIRE)) {} }
+void unlock_pages() { kv::atomic_store(&g_page_lock, 0u, kv::MO_RELEASE); }
 
 u8 class_of(usize size) {
     for (u8 c = 0; c < kClasses; ++c) if (size <= kClassSize[c]) return c;
@@ -407,11 +408,11 @@ Page* page_new(u8 cls) {
             unlock_pages();
             if (!g_region) return nullptr;
         }
-        u32 i = __atomic_fetch_add(&g_next_page, 1u, __ATOMIC_RELAXED);
+        u32 i = kv::atomic_fetch_add(&g_next_page, 1u, kv::MO_RELAXED);
         if ((usize)i * kPageSize >= kRegion) { KV_ERROR("mem", "the small allocator's region is exhausted"); return nullptr; }
         p = (Page*)(g_region + (usize)i * kPageSize);
         if (!os_commit(p, kPageSize)) { KV_ERROR("mem", "small allocator: commit failed"); return nullptr; }
-        __atomic_add_fetch(&g_pages_carved, 1, __ATOMIC_RELAXED);
+        kv::atomic_add_fetch(&g_pages_carved, 1, kv::MO_RELAXED);
     }
     page_init(p, cls);
     return p;
@@ -419,7 +420,7 @@ Page* page_new(u8 cls) {
 
 // Takes the remote list in one exchange and makes it the owner's.
 void drain_remote(Page* p) {
-    void* r = __atomic_exchange_n(&p->remote_free, (void*)nullptr, __ATOMIC_ACQ_REL);
+    void* r = kv::atomic_exchange(&p->remote_free, (void*)nullptr, kv::MO_ACQ_REL);
     if (!r) return;
     if (!p->local_free) { p->local_free = r; return; }
     void* tail = r;
@@ -444,8 +445,8 @@ u8* page_take(Page* p) {
 // stack, taken whole. Only pages this thread still owns and still has as full count.
 bool collect_notified(Cache& c, u8 cls) {
     Notify* n = c.notify;
-    if (!n || !__atomic_load_n(&n->head[cls], __ATOMIC_ACQUIRE)) return false;
-    Page* p = __atomic_exchange_n(&n->head[cls], (Page*)nullptr, __ATOMIC_ACQ_REL);
+    if (!n || !kv::atomic_load(&n->head[cls], kv::MO_ACQUIRE)) return false;
+    Page* p = kv::atomic_exchange(&n->head[cls], (Page*)nullptr, kv::MO_ACQ_REL);
     bool found = false;
     while (p) {
         Page* next = p->notify_next;
@@ -484,7 +485,7 @@ void small_free(void* user) {
     if (p->owner == thread_id()) {
         *(void**)b = p->local_free;
         p->local_free = b;
-        u32 left = __atomic_sub_fetch(&p->used, 1u, __ATOMIC_ACQ_REL);
+        u32 left = kv::atomic_sub_fetch(&p->used, 1u, kv::MO_ACQ_REL);
         Cache& c = t_cache;
         // An empty page that is not where allocation starts goes back to the pool; a full
         // page with a block again is partial again.
@@ -500,15 +501,15 @@ void small_free(void* user) {
         }
         return;
     }
-    void* head = __atomic_load_n(&p->remote_free, __ATOMIC_ACQUIRE);
-    do { *(void**)b = head; } while (!__atomic_compare_exchange_n(&p->remote_free, &head, (void*)b, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
-    __atomic_sub_fetch(&p->used, 1u, __ATOMIC_ACQ_REL);
+    void* head = kv::atomic_load(&p->remote_free, kv::MO_ACQUIRE);
+    do { *(void**)b = head; } while (!kv::atomic_compare_exchange(&p->remote_free, &head, (void*)b, true, kv::MO_ACQ_REL, kv::MO_ACQUIRE));
+    kv::atomic_sub_fetch(&p->used, 1u, kv::MO_ACQ_REL);
     if (head == nullptr) {
         // First into an empty remote list: tell the owner, if the page still has one.
-        Notify* n = __atomic_load_n(&p->notify, __ATOMIC_ACQUIRE);
+        Notify* n = kv::atomic_load(&p->notify, kv::MO_ACQUIRE);
         if (!n) return;
-        Page* top = __atomic_load_n(&n->head[p->cls], __ATOMIC_ACQUIRE);
-        do { p->notify_next = top; } while (!__atomic_compare_exchange_n(&n->head[p->cls], &top, p, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+        Page* top = kv::atomic_load(&n->head[p->cls], kv::MO_ACQUIRE);
+        do { p->notify_next = top; } while (!kv::atomic_compare_exchange(&n->head[p->cls], &top, p, true, kv::MO_ACQ_REL, kv::MO_ACQUIRE));
     }
 }
 
@@ -542,7 +543,7 @@ void* general_alloc_tagged(usize size, u32 align, MemTag tag, void* site) {
         u8* b = small_take(cls);
         if (!b) { heap_release(tag, size); KV_ERROR("mem", "out of memory: %llu bytes", (unsigned long long)size); return nullptr; }
         Page* p = page_of(b);
-        __atomic_add_fetch(&p->used, 1u, __ATOMIC_RELAXED);
+        kv::atomic_add_fetch(&p->used, 1u, kv::MO_RELAXED);
         Header* h = (Header*)b;
         fill_header(h, size, align, tag, cls, 0, site);
         account_alloc(tag, (i64)size);
@@ -598,7 +599,7 @@ extern Allocator g_general;
 void* general_alloc(Allocator* a, usize size, u32 align) {
     MemTag tag = a->tag;
     if (a == &g_general) tag = owner_tag();
-    return general_alloc_tagged(size, align, tag, __builtin_return_address(0));
+    return general_alloc_tagged(size, align, tag, KV_RETURN_ADDRESS());
 }
 void general_free(Allocator*, void* p, usize) { mem_free(p); }
 
@@ -606,8 +607,8 @@ Allocator g_general = {general_alloc, general_free, MemTag{}, 0, MemMode::Shared
 
 } // namespace
 
-void* mem_alloc(usize size) { return general_alloc_tagged(size, KV_MEM_DEFAULT_ALIGN, owner_tag(), __builtin_return_address(0)); }
-void* mem_alloc_aligned(usize size, u32 align) { return general_alloc_tagged(size, align, owner_tag(), __builtin_return_address(0)); }
+void* mem_alloc(usize size) { return general_alloc_tagged(size, KV_MEM_DEFAULT_ALIGN, owner_tag(), KV_RETURN_ADDRESS()); }
+void* mem_alloc_aligned(usize size, u32 align) { return general_alloc_tagged(size, align, owner_tag(), KV_RETURN_ADDRESS()); }
 
 void* mem_realloc(void* p, usize size) {
     if (!p) return mem_alloc(size);
@@ -623,7 +624,7 @@ void* mem_realloc(void* p, usize size) {
         h->size = size;
         return p;
     }
-    void* q = general_alloc_tagged(size, h->align, h->tag, __builtin_return_address(0)); // same alignment, same tag
+    void* q = general_alloc_tagged(size, h->align, h->tag, KV_RETURN_ADDRESS()); // same alignment, same tag
     if (!q) return nullptr;
     memcpy(q, p, h->size < size ? h->size : size);
     mem_free(p);
@@ -660,7 +661,7 @@ void mem_general_tagged(Allocator& out, MemTag tag, const char* name) {
     out.name = name;
 }
 
-u64 mem_small_pages() { return __atomic_load_n(&g_pages_carved, __ATOMIC_RELAXED); }
+u64 mem_small_pages() { return kv::atomic_load(&g_pages_carved, kv::MO_RELAXED); }
 
 void mem_set_owner(u16 module) { t_owner = module; }
 u16  mem_owner() { return t_owner; }
@@ -679,7 +680,7 @@ u8 mem_heap_register(const char* name, usize soft, usize hard) {
 const char* mem_heap_name(u8 id) { return id < g_heaps_reg.count ? g_heaps_reg.names[id] : "?"; }
 usize       mem_heap_budget(u8 id) { return id < KV_MEM_MAX_HEAPS ? g_heaps_reg.budgets[id] : 0; }
 usize       mem_heap_hard(u8 id) { return id < KV_MEM_MAX_HEAPS ? g_heap_hard[id] : 0; }
-u64         mem_heap_used(u8 id) { return id < KV_MEM_MAX_HEAPS ? __atomic_load_n(&g_heap_used[id], __ATOMIC_RELAXED) : 0; }
+u64         mem_heap_used(u8 id) { return id < KV_MEM_MAX_HEAPS ? kv::atomic_load(&g_heap_used[id], kv::MO_RELAXED) : 0; }
 bool        mem_heap_admit(MemTag tag, usize bytes) { return heap_admit(clamp(tag), bytes); }
 
 u64 mem_live_allocations() { return nonneg(rollup().live_allocs); }
@@ -732,7 +733,7 @@ void mem_account_commit(MemTag tag, usize bytes) {
     bump(b.committed, (i64)bytes);
     bump(b.heap_committed[tag.heap], (i64)bytes);
 #if KV_DEV
-    __atomic_add_fetch(&g_cells[tag.module][tag.category].committed, bytes, __ATOMIC_RELAXED);
+    kv::atomic_add_fetch(&g_cells[tag.module][tag.category].committed, bytes, kv::MO_RELAXED);
 #endif
 }
 
@@ -743,7 +744,7 @@ void mem_account_decommit(MemTag tag, usize bytes) {
     bump(b.committed, -(i64)bytes);
     bump(b.heap_committed[tag.heap], -(i64)bytes);
 #if KV_DEV
-    __atomic_sub_fetch(&g_cells[tag.module][tag.category].committed, bytes, __ATOMIC_RELAXED);
+    kv::atomic_sub_fetch(&g_cells[tag.module][tag.category].committed, bytes, kv::MO_RELAXED);
 #endif
 }
 
@@ -759,7 +760,7 @@ void mem_sample(u64 frame) {
         s.heap_committed[h] = nonneg(t.heap_committed[h]);
         s.heap_bytes[h]     = nonneg(t.heap_bytes[h]) + s.heap_committed[h];
         usize budget = g_heaps_reg.budgets[h];
-        if (budget && s.heap_bytes[h] > budget && __atomic_exchange_n(&g_heap_warned[h], 1u, __ATOMIC_RELAXED) == 0)
+        if (budget && s.heap_bytes[h] > budget && kv::atomic_exchange(&g_heap_warned[h], 1u, kv::MO_RELAXED) == 0)
             KV_WARN("mem", "heap '%s' over budget: %llu of %llu bytes", g_heaps_reg.names[h],
                     (unsigned long long)s.heap_bytes[h], (unsigned long long)budget);
     }
@@ -804,10 +805,10 @@ void mem_report(const char* const* module_names, u32 module_count) {
     }
     // The first few live small blocks, with where they came from: the pages can be walked.
     u32 listed = 0;
-    u32 pages = __atomic_load_n(&g_next_page, __ATOMIC_RELAXED);
+    u32 pages = kv::atomic_load(&g_next_page, kv::MO_RELAXED);
     for (u32 i = 0; i < pages && listed < 8 && g_region; ++i) {
         Page* p = (Page*)(g_region + (usize)i * kPageSize);
-        if (p->magic != kPageMagic || __atomic_load_n(&p->used, __ATOMIC_RELAXED) == 0) continue;
+        if (p->magic != kPageMagic || kv::atomic_load(&p->used, kv::MO_RELAXED) == 0) continue;
         for (u32 k = 0; k < p->fresh && listed < 8; ++k) {
             Header* h = (Header*)block_at(p, k);
             void* user = (u8*)h + sizeof(Header);

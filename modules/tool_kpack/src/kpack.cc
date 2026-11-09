@@ -47,7 +47,7 @@ struct KpackState {
 
 KpackState* state(Engine& e) { return engine_module_state_as<KpackState>(e, "tool_kpack"); }
 
-void say(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void say(const char* fmt, ...) KV_PRINTF(1, 2);
 void say(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);

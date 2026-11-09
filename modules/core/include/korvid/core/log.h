@@ -16,7 +16,7 @@ void     log_set_level(LogLevel level); // the threshold; lines below it are dro
 LogLevel log_level();
 // One line: `tag` is the module or subsystem ("vulkan", "asset"), printf-style text after.
 void     log_write(LogLevel level, const char* tag, const char* fmt, ...)
-    __attribute__((format(printf, 3, 4)));
+    KV_PRINTF(3, 4);
 
 } // namespace kv
 

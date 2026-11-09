@@ -23,6 +23,10 @@
 
 namespace kv {
 
+// A file the OS opened: a descriptor on POSIX, a HANDLE on Windows. Never negative when
+// open; -1 is none on both.
+typedef i64 OsFile;
+
 struct Engine;
 struct IoRing;
 
@@ -72,7 +76,7 @@ struct IoEntry {
     u64        sequence;  // submission order, for stable priority ordering
     bool       write;     // a write: `buf` holds the copy to write, `size` its length
     // The ring's bookkeeping while a request is in flight.
-    int        fd;
+    OsFile     fd;
     u8*        buf;
     usize      size;      // the file's size at open, or the bytes to write
     usize      done;      // bytes read or written so far
@@ -95,7 +99,7 @@ struct IoEntry {
 struct IoMount {
     char      path[256];   // the directory (with a trailing '/') or the pack file
     bool      is_pack;
-    int       fd = -1;     // the pack's descriptor, open for the queue's life
+    OsFile    fd = -1;     // the pack's file, open for the queue's life
     PackTable table;
 };
 
@@ -163,6 +167,12 @@ struct IoQueue {
 i32  io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user);
 // Creates a directory and its parents (mkdir -p). Synchronous; true if it exists after.
 bool io_make_dirs(const char* path);
+// Removes a file, or a directory that is empty. Synchronous; true if it is gone after.
+bool io_remove(const char* path);
+// Makes a new, empty directory under the OS's temporary directory, its name starting with
+// `prefix`, for a tool's or a test's scratch work; its path (no trailing '/') in out.
+// Synchronous. False if none could be made.
+bool io_make_temp_dir(const char* prefix, char* out, u32 cap);
 
 // The platform module's queue, or null if the module is not started.
 IoQueue* platform_io(Engine& e);

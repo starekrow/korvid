@@ -1,4 +1,5 @@
 #include "korvid/pack/zip.h"
+#include "korvid/core/sort.h"
 #include "korvid/core/array.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/utf8.h"
@@ -40,7 +41,7 @@ int compare_entry(const void* a, const void* b, void* ctx) {
 
 // Sorts by hash and name and keeps the last of each name (a zip updated in place appends).
 void sort_and_dedupe(PackTable& t) {
-    if (t.count > 1) qsort_r(t.entries, t.count, sizeof(PackEntry), compare_entry, t.names);
+    if (t.count > 1) kv::sort(t.entries, t.count, sizeof(PackEntry), compare_entry, t.names);
     u32 m = 0;
     for (u32 i = 0; i < t.count; ++i) {
         if (m && t.entries[m - 1].hash == t.entries[i].hash &&
@@ -361,13 +362,13 @@ bool kpak_write(Span<const PackWriteFile> files, bool (*write)(void*, const void
         p.crc  = crc32(0, files[i].data, files[i].size);
         p.zip64 = files[i].size >= 0xFFFFFFFFu;
     }
-    qsort(plan + 1, n, sizeof(Planned), compare_planned);
+    kv::sort(plan + 1, n, sizeof(Planned), compare_planned);
     for (u32 i = 1; i < n; ++i)
         if (strcmp(plan[i].name, plan[i + 1].name) == 0) return fail(error, "a name given twice");
     // Hash collisions: sort hashes, look for neighbours.
     u64* hashes = (u64*)alloc_in(scratch, sizeof(u64) * (n ? n : 1));
     for (u32 i = 0; i < n; ++i) hashes[i] = plan[i + 1].hash;
-    qsort(hashes, n, sizeof(u64), [](const void* a, const void* b) { u64 x = *(const u64*)a, y = *(const u64*)b; return x < y ? -1 : x > y ? 1 : 0; });
+    kv::sort(hashes, n, sizeof(u64), [](const void* a, const void* b) { u64 x = *(const u64*)a, y = *(const u64*)b; return x < y ? -1 : x > y ? 1 : 0; });
     for (u32 i = 1; i < n; ++i) if (hashes[i] == hashes[i - 1]) return fail(error, "two names share a path hash; rename one");
 
     // The index: header, entries by hash, names in name order. Its size is known before
@@ -402,7 +403,7 @@ bool kpak_write(Span<const PackWriteFile> files, bool (*write)(void*, const void
     struct ByHash { u64 hash; u32 i; };
     ByHash* order = (ByHash*)alloc_in(scratch, sizeof(ByHash) * (n ? n : 1));
     for (u32 i = 0; i < n; ++i) order[i] = ByHash{plan[i + 1].hash, i + 1};
-    qsort(order, n, sizeof(ByHash), [](const void* a, const void* b) { u64 x = ((const ByHash*)a)->hash, y = ((const ByHash*)b)->hash; return x < y ? -1 : x > y ? 1 : 0; });
+    kv::sort(order, n, sizeof(ByHash), [](const void* a, const void* b) { u64 x = ((const ByHash*)a)->hash, y = ((const ByHash*)b)->hash; return x < y ? -1 : x > y ? 1 : 0; });
     auto put16 = [](u8* p, u16 v) { p[0] = (u8)v; p[1] = (u8)(v >> 8); };
     auto put32 = [](u8* p, u32 v) { for (u32 k = 0; k < 4; ++k) p[k] = (u8)(v >> (8 * k)); };
     auto put64 = [&](u8* p, u64 v) { put32(p, (u32)v); put32(p + 4, (u32)(v >> 32)); };

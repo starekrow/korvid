@@ -14,8 +14,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 namespace {
 
@@ -56,7 +54,7 @@ void with_backend(TestCtx& c, IoBackend backend, const char* dir, const char* pa
 
     KV_CHECK(c, q.mount_pack(zip) && q.mount_pack(pack));
     KV_CHECK(c, read_one(q, "x/a.txt", got, &err) == IoStatus::Done && got.len == 9 && memcmp(got.data, "from pack", 9) == 0);
-    KV_CHECK(c, read_one(q, "x//./big.bin", got, &err) == IoStatus::Done && got.len == 20000 && got[19999] == (u8)(19999 * 3));
+    KV_CHECK(c, read_one(q, "x//./big.bin", got, &err) == IoStatus::Done && got.len == 20000 && got[19999] == (u8)((19999u * 3u) & 0xFFu));
     KV_CHECK(c, read_one(q, "x/empty", got, &err) == IoStatus::Done && got.len == 0);
     // From the plain zip, under the pack: a deflated map, the second of a duplicated name.
     KV_CHECK(c, read_one(q, "maps/town.tmj", got, &err) == IoStatus::Done && got.len == 600 && memcmp(got.data, "{\"width\": 4}", 12) == 0);
@@ -87,16 +85,16 @@ void with_backend(TestCtx& c, IoBackend backend, const char* dir, const char* pa
 void test_io_mounts(kv::TestCtx& c) {
     using namespace kv;
     c.begin("io mounts");
-    char dir[64] = "/tmp/korvid-mount-XXXXXX";
-    KV_CHECK(c, mkdtemp(dir) != nullptr);
-    char loose[128], pack[128], zip[128], bad[128], path[160];
+    char dir[256];
+    KV_CHECK(c, io_make_temp_dir("korvid-mount", dir, sizeof dir));
+    char loose[320], pack[320], zip[320], bad[320], path[352];
     snprintf(loose, sizeof loose, "%s/loose", dir);
     snprintf(pack, sizeof pack, "%s/game.kpak", dir);
     snprintf(zip, sizeof zip, "%s/plain.zip", dir);
     snprintf(bad, sizeof bad, "%s/bad.kpak", dir);
-    mkdir(loose, 0755);
+    io_make_dirs(loose);
     snprintf(path, sizeof path, "%s/x", loose);
-    mkdir(path, 0755);
+    io_make_dirs(path);
     snprintf(path, sizeof path, "%s/x/a.txt", loose);
     FILE* f = fopen(path, "wb"); fwrite("from loose", 1, 10, f); fclose(f);
 
@@ -126,6 +124,6 @@ void test_io_mounts(kv::TestCtx& c) {
     with_backend(c, IoBackend::Sync, loose, pack, zip, bad);
     with_backend(c, IoBackend::Auto, loose, pack, zip, bad);
 
-    unlink(path); snprintf(path, sizeof path, "%s/x", loose); rmdir(path); rmdir(loose);
-    unlink(pack); unlink(zip); unlink(bad); rmdir(dir);
+    io_remove(path); snprintf(path, sizeof path, "%s/x", loose); io_remove(path); io_remove(loose);
+    io_remove(pack); io_remove(zip); io_remove(bad); io_remove(dir);
 }

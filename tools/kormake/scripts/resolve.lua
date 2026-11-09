@@ -157,7 +157,9 @@ function M.run(c, platform, config, opts)
   local wanted = {}
   for _, root in ipairs(roots) do
     local patterns = root.fields.modules and util.as_list(root.fields.modules) or { root.name }
-    for _, rec in ipairs(c.modules) do
+    -- A root may name the platforms it applies to; on any other it is left out.
+    local applies = not root.fields.platforms or util.contains(util.as_list(root.fields.platforms), platform)
+    for _, rec in ipairs(applies and c.modules or {}) do
       for _, pat in ipairs(patterns) do
         -- Toolchains and tools that are not built from source are never roots of a target
         -- build. A host module is a root of every build its host supports.

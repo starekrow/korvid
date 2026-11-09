@@ -37,6 +37,10 @@ local module_fields = {
   exports = true, sources = true, defines = true, prebuilt = true, system = true, bindings = true,
   platform = true, unity = true, engine_module = true, module_list = true, licenses = true, exe = true,
   tag = true, srcdirs = true, cxx = true, cxxflags = true, ldflags = true, configs = true, ar = true, externals = true,
+  -- A toolchain's own: the linker, its compile/archive/link rules, how it names outputs,
+  -- how it spells flags, and a probe that finds the tools on the host.
+  link = true, rules = true, obj_suffix = true, exe_suffix = true, lib_file = true,
+  flag_include = true, flag_define = true, flag_lib = true, probe = true,
 }
 
 -- module "name" { fields } or module "name" (defaults). One per file.

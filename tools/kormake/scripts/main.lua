@@ -131,6 +131,8 @@ local function run(cmd, target, opts, rest)
     return 0
   end
   local build = emit.run(c, g, opts)
+  -- Ninja: the toolchain probe's when it found one (Visual Studio ships one), else PATH's.
+  local ninja = g.ninja and util.shell_quote(util.native(g.ninja)) or "ninja"
   print(string.format("kormake: %s/build.ninja (%d instances)", build, #g.instances))
   -- The tools this build runs, as built for the host, and what they link from the system:
   -- a tool that pulls in a window or a sound card says so here.
@@ -150,7 +152,7 @@ local function run(cmd, target, opts, rest)
   end
   if cmd == "gen" then return 0 end
   if cmd == "build" then
-    local rc = kfs.exec(string.format("ninja -C %s %s", util.shell_quote(build), table.concat(rest, " ")))
+    local rc = kfs.exec(string.format("%s -C %s %s", ninja, util.shell_quote(build), table.concat(rest, " ")))
     return rc
   end
   if cmd == "package" then
@@ -163,6 +165,7 @@ local function run(cmd, target, opts, rest)
     end
     if not inst then util.fail("'%s' is not an executable in %s", exe, target) end
     local exe_file = inst.module.fields.exe or inst.module.name
+    local exe_bin = exe_file .. inst.toolchain.fields.exe_suffix
     local pack
     for _, t in ipairs(inst.tools) do
       for _, r in ipairs(t.instance.module.fields.exports or {}) do
@@ -170,13 +173,13 @@ local function run(cmd, target, opts, rest)
       end
     end
     local q = util.shell_quote
-    local rc = kfs.exec(string.format("ninja -C %s %s%s", q(build), q("bin/" .. exe_file), pack and (" " .. q(pack)) or ""))
+    local rc = kfs.exec(string.format("%s -C %s %s%s", ninja, q(build), q("bin/" .. exe_bin), pack and (" " .. q(pack)) or ""))
     if rc ~= 0 then return rc end
     local dist = util.join(root, "dist/" .. exe)
     if not kfs.rmtree(dist) and kfs.isdir(dist) then util.fail("package: cannot remove %s", dist) end
     kfs.mkdirp(util.join(dist, "licenses"))
     local function copy_in(from, name) kfs.copy(from, util.join(dist, name or util.basename(from))) end
-    copy_in(util.join(build, "bin/" .. exe_file))
+    copy_in(util.join(build, "bin/" .. exe_bin))
     if pack then copy_in(util.join(build, pack)) end
     if kfs.isdir(util.join(build, "bin/shaders")) then util.copy_tree(util.join(build, "bin/shaders"), util.join(dist, "shaders")) end
     local copied = 0
@@ -205,13 +208,35 @@ local function run(cmd, target, opts, rest)
         targets[#targets + 1] = pre .. "test/" .. util.symbol(m) .. ".ok"
       end
     end
-    return kfs.exec(string.format("ninja -C %s %s", util.shell_quote(build), table.concat(targets, " ")))
+    return kfs.exec(string.format("%s -C %s %s", ninja, util.shell_quote(build), table.concat(targets, " ")))
   end
   usage()
   return 2
 end
 
+-- What the Ninja file runs for the host's own steps, so no rule needs a shell: _copy IN OUT
+-- copies a file; _test EXE STAMP runs a test executable in the build directory and, if it
+-- passes, writes the stamp. Neither reads the master file.
+local function internal(args)
+  if args[1] == "_copy" and #args == 3 then
+    kfs.copy(args[2], args[3])
+    return 0
+  end
+  if args[1] == "_test" and #args == 3 then
+    local exe = util.native(args[2])
+    if KORMAKE_HOST ~= "windows" and not util.is_abs(exe) and not exe:find("/") then exe = "./" .. exe end
+    local rc = kfs.exec(util.shell_quote(exe))
+    if rc ~= 0 then return rc ~= -1 and rc or 1 end
+    kfs.write(args[3], "", true)
+    return 0
+  end
+end
+
 local ok, result = pcall(function()
+  if arg[1] and arg[1]:sub(1, 1) == "_" then
+    local rc = internal(arg)
+    if rc then return rc end
+  end
   local cmd, target, opts, rest = parse(arg)
   return run(cmd, target, opts, rest)
 end)

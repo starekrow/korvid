@@ -3,7 +3,7 @@
 #include "korvid/core/log.h"
 #include "os_paths.h"
 #include <stdio.h>
-#include <sys/stat.h>
+#include "os_file.h"
 
 namespace kv {
 
@@ -29,12 +29,11 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
     // The executable's assets/ directory is the first mount, when there is one; the frame
     // loop mounts packs over it.
     char path[KV_PLATFORM_PATH_MAX + 64];
-    struct stat st;
     snprintf(path, sizeof path, "%sassets", s->base_path);
-    if (!g_mounts.none && stat(path, &st) == 0 && S_ISDIR(st.st_mode)) s->io.mount_dir(path);
+    if (!g_mounts.none && os_path_kind(path) == OsPathKind::Dir) s->io.mount_dir(path);
     if (g_mounts.exe_name) {
         snprintf(path, sizeof path, "%s%s.kpak", s->base_path, g_mounts.exe_name);
-        if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) s->io.mount_pack(path);
+        if (os_path_kind(path) == OsPathKind::File) s->io.mount_pack(path);
     }
     for (u32 i = 0; i < g_mounts.pack_count; ++i)
         if (!s->io.mount_pack(g_mounts.packs[i])) return false; // asked for by name: not having it is an error

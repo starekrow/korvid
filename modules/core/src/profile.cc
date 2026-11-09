@@ -1,4 +1,6 @@
 #include "korvid/core/profile.h"
+#include "korvid/core/sort.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
@@ -43,11 +45,11 @@ u32  g_ring_lock = 0;
 bool g_cpu_time  = false;
 thread_local Ring* t_ring = nullptr;
 
-void lock_rings()   { while (__atomic_exchange_n(&g_ring_lock, 1u, __ATOMIC_ACQUIRE)) {} }
-void unlock_rings() { __atomic_store_n(&g_ring_lock, 0u, __ATOMIC_RELEASE); }
+void lock_rings()   { while (kv::atomic_exchange(&g_ring_lock, 1u, kv::MO_ACQUIRE)) {} }
+void unlock_rings() { kv::atomic_store(&g_ring_lock, 0u, kv::MO_RELEASE); }
 
 struct RingGuard {
-    ~RingGuard() { if (t_ring) { __atomic_store_n(&t_ring->dead, 1u, __ATOMIC_RELEASE); t_ring = nullptr; } }
+    ~RingGuard() { if (t_ring) { kv::atomic_store(&t_ring->dead, 1u, kv::MO_RELEASE); t_ring = nullptr; } }
 };
 thread_local RingGuard t_ring_guard;
 
@@ -57,7 +59,7 @@ Ring* ring() {
     lock_rings();
     Ring* r = nullptr;
     for (u32 i = 0; i < KV_PROF_MAX_RINGS; ++i) {
-        if (__atomic_load_n(&g_rings[i].in_use, __ATOMIC_ACQUIRE)) continue;
+        if (kv::atomic_load(&g_rings[i].in_use, kv::MO_ACQUIRE)) continue;
         r = &g_rings[i];
         if (!r->data) {
             r->data = (ProfRecord*)os_reserve(kRingCap * sizeof(ProfRecord));
@@ -68,7 +70,7 @@ Ring* ring() {
         r->dead = 0;
         r->tid = thread_id();
         snprintf(r->name, sizeof r->name, "thread %u", r->tid);
-        __atomic_store_n(&r->in_use, 1u, __ATOMIC_RELEASE);
+        kv::atomic_store(&r->in_use, 1u, kv::MO_RELEASE);
         break;
     }
     unlock_rings();
@@ -83,7 +85,7 @@ inline void put(ProfKind kind, const char* name, u64 value) {
     rec.ticks = (os_ticks() & kTickMask) | ((u64)kind << kKindShift);
     rec.name  = name;
     rec.value = value;
-    __atomic_store_n(&r->write, r->write + 1, __ATOMIC_RELEASE);
+    kv::atomic_store(&r->write, r->write + 1, kv::MO_RELEASE);
 }
 
 // ---- the collector ------------------------------------------------------------------------
@@ -147,7 +149,7 @@ void trace_record(u32 ri, const Ring& r, const ProfRecord& rec, const Open* open
 }
 
 void collect_ring(u32 ri, Ring& r) {
-    u64 w = __atomic_load_n(&r.write, __ATOMIC_ACQUIRE);
+    u64 w = kv::atomic_load(&r.write, kv::MO_ACQUIRE);
     if (w - r.read > kRingCap) { r.dropped += w - r.read - kRingCap; r.read = w - kRingCap; }
     u64 from = r.read;
     Array<Open>& stack = g_c.stacks[ri];
@@ -157,7 +159,7 @@ void collect_ring(u32 ri, Ring& r) {
     for (u64 i = from; i < w; ++i) {
         ProfRecord rec = r.data[i % kRingCap];
         // A record the writer has lapped since we started: the rest of this batch is suspect.
-        if (__atomic_load_n(&r.write, __ATOMIC_ACQUIRE) - i > kRingCap) { r.dropped += w - i; break; }
+        if (kv::atomic_load(&r.write, kv::MO_ACQUIRE) - i > kRingCap) { r.dropped += w - i; break; }
         ProfKind k = kind_of(rec);
         const Open* ending = nullptr;
         Open ended{};
@@ -253,12 +255,12 @@ void prof_collect() {
     if (g_c.keep) { g_c.kept_next.clear(); g_c.kept_next_ring.clear(); }
     for (u32 i = 0; i < KV_PROF_MAX_RINGS; ++i) {
         Ring& r = g_rings[i];
-        if (!__atomic_load_n(&r.in_use, __ATOMIC_ACQUIRE)) continue;
+        if (!kv::atomic_load(&r.in_use, kv::MO_ACQUIRE)) continue;
         collect_ring(i, r);
-        if (__atomic_load_n(&r.dead, __ATOMIC_ACQUIRE)) {
+        if (kv::atomic_load(&r.dead, kv::MO_ACQUIRE)) {
             g_c.stacks[i].clear();
             lock_rings();
-            __atomic_store_n(&r.in_use, 0u, __ATOMIC_RELEASE); // the slot, and its pages, serve the next thread
+            kv::atomic_store(&r.in_use, 0u, kv::MO_RELEASE); // the slot, and its pages, serve the next thread
             unlock_rings();
         }
     }
@@ -266,7 +268,7 @@ void prof_collect() {
         Array<ProfRecord> t = g_c.kept; g_c.kept = g_c.kept_next; g_c.kept_next = t;
         Array<u8> tr = g_c.kept_ring; g_c.kept_ring = g_c.kept_next_ring; g_c.kept_next_ring = tr;
     }
-    if (g_c.frame.len > 1) qsort(g_c.frame.data, g_c.frame.len, sizeof(ProfStat), by_wall_desc);
+    if (g_c.frame.len > 1) kv::sort(g_c.frame.data, g_c.frame.len, sizeof(ProfStat), by_wall_desc);
     ++g_c.frames_since_log;
     if (g_c.trace) fflush(g_c.trace);
 }
@@ -277,7 +279,7 @@ Span<const ProfThreadStat> prof_thread_stats() { return g_c.threads.span(); }
 void prof_log_summary(u32 top) {
     collector_init();
     u32 frames = g_c.frames_since_log ? g_c.frames_since_log : 1;
-    if (g_c.totals.len > 1) qsort(g_c.totals.data, g_c.totals.len, sizeof(ProfStat), by_wall_desc);
+    if (g_c.totals.len > 1) kv::sort(g_c.totals.data, g_c.totals.len, sizeof(ProfStat), by_wall_desc);
     KV_INFO("prof", "over %u frames, per frame, summed over threads: %-10s %8s %8s %7s", frames, "zone", "avg ms", "worst", "calls");
     for (u32 i = 0; i < g_c.totals.len && i < top; ++i) {
         const ProfStat& s = g_c.totals[i];
@@ -296,7 +298,7 @@ void prof_log_summary(u32 top) {
 u32 prof_top(Span<ProfStat> out, u32* frames) {
     collector_init();
     if (frames) *frames = g_c.frames_since_log ? g_c.frames_since_log : 1;
-    if (g_c.totals.len > 1) qsort(g_c.totals.data, g_c.totals.len, sizeof(ProfStat), by_wall_desc);
+    if (g_c.totals.len > 1) kv::sort(g_c.totals.data, g_c.totals.len, sizeof(ProfStat), by_wall_desc);
     u32 n = 0;
     for (; n < g_c.totals.len && n < out.len; ++n) out[n] = g_c.totals[n];
     return n;

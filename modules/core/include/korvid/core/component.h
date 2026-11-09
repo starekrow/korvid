@@ -132,8 +132,11 @@ inline bool component_each_handle(const ComponentDesc& c, void* row, bool (*fn)(
 
 } // namespace kv
 
+// Table entries are braced lists, not FieldDesc{...}: cl will not constant-initialize a
+// constinit object from a typed prvalue (T{...}), though the standard makes the two the
+// same. KV_COMPONENT and KV_EVENT are written the same way.
 #define KV_FIELD(T, m) \
-    ::kv::FieldDesc{#m, ::kv::FieldTraits<decltype(T::m)>::type, ::kv::FieldTraits<decltype(T::m)>::count, (::kv::u16)offsetof(T, m)}
+    {#m, ::kv::FieldTraits<decltype(T::m)>::type, ::kv::FieldTraits<decltype(T::m)>::count, (::kv::u16)offsetof(T, m)}
 
 // The whole table from the member names, up to sixteen:
 //   constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, linear, angular)};
@@ -160,6 +163,6 @@ inline bool component_each_handle(const ComponentDesc& c, void* row, bool (*fn)(
 
 // KV_COMPONENT(Velocity, k_velocity_fields) or KV_COMPONENT(Transform2, k_fields, CompPrev).
 #define KV_COMPONENT(T, fields, ...)                                                               \
-    ::kv::ComponentDesc{#T, (::kv::u32)sizeof(T), (::kv::u32)alignof(T), fields,                   \
+    {#T, (::kv::u32)sizeof(T), (::kv::u32)alignof(T), fields,                   \
                         (::kv::u8)(0 __VA_OPT__(| (__VA_ARGS__))), &::kv::ComponentType<T>::id, \
                         &::kv::TypeKey<T>::key}

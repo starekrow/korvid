@@ -4,6 +4,7 @@
 // one syscall per pump; pop reads completions behind the tail with an acquire load.
 #include "io_ring.h"
 #include "korvid/core/log.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/memory.h"
 
 #if defined(__linux__)
@@ -92,39 +93,39 @@ void io_ring_destroy(IoRing* r) {
 }
 
 bool io_ring_can_push(const IoRing* r) {
-    u32 head = __atomic_load_n(r->sq_head, __ATOMIC_ACQUIRE);
+    u32 head = kv::atomic_load(r->sq_head, kv::MO_ACQUIRE);
     return *r->sq_tail - head < r->entries;
 }
 
-void io_ring_push_write(IoRing* r, int fd, const void* buf, u32 len, u64 offset, u64 user) {
+void io_ring_push_write(IoRing* r, OsFile fd, const void* buf, u32 len, u64 offset, u64 user) {
     u32 tail = *r->sq_tail;
     u32 idx  = tail & *r->sq_mask;
     io_uring_sqe& s = r->sqes[idx];
     memset(&s, 0, sizeof s);
     s.opcode    = IORING_OP_WRITE;
-    s.fd        = fd;
+    s.fd        = (int)fd;
     s.addr      = (u64)(usize)buf;
     s.len       = len;
     s.off       = offset;
     s.user_data = user;
     r->sq_array[idx] = idx;
-    __atomic_store_n(r->sq_tail, tail + 1, __ATOMIC_RELEASE);
+    kv::atomic_store(r->sq_tail, tail + 1, kv::MO_RELEASE);
     ++r->pushed;
 }
 
-void io_ring_push_read(IoRing* r, int fd, void* buf, u32 len, u64 offset, u64 user) {
+void io_ring_push_read(IoRing* r, OsFile fd, void* buf, u32 len, u64 offset, u64 user) {
     u32 tail = *r->sq_tail;
     u32 idx  = tail & *r->sq_mask;
     io_uring_sqe& s = r->sqes[idx];
     memset(&s, 0, sizeof s);
     s.opcode    = IORING_OP_READ;
-    s.fd        = fd;
+    s.fd        = (int)fd;
     s.addr      = (u64)(usize)buf;
     s.len       = len;
     s.off       = offset;
     s.user_data = user;
     r->sq_array[idx] = idx;
-    __atomic_store_n(r->sq_tail, tail + 1, __ATOMIC_RELEASE);
+    kv::atomic_store(r->sq_tail, tail + 1, kv::MO_RELEASE);
     ++r->pushed;
 }
 
@@ -144,12 +145,12 @@ bool io_ring_enter(IoRing* r, u32 min_complete) {
 
 bool io_ring_pop(IoRing* r, u64* user, i32* res) {
     u32 head = *r->cq_head;
-    u32 tail = __atomic_load_n(r->cq_tail, __ATOMIC_ACQUIRE);
+    u32 tail = kv::atomic_load(r->cq_tail, kv::MO_ACQUIRE);
     if (head == tail) return false;
     const io_uring_cqe& c = r->cqes[head & *r->cq_mask];
     *user = c.user_data;
     *res  = c.res;
-    __atomic_store_n(r->cq_head, head + 1, __ATOMIC_RELEASE);
+    kv::atomic_store(r->cq_head, head + 1, kv::MO_RELEASE);
     --r->in_flight;
     return true;
 }
@@ -166,8 +167,8 @@ namespace kv {
 IoRing* io_ring_create(u32) { return nullptr; }
 void    io_ring_destroy(IoRing*) {}
 bool    io_ring_can_push(const IoRing*) { return false; }
-void    io_ring_push_read(IoRing*, int, void*, u32, u64, u64) {}
-void    io_ring_push_write(IoRing*, int, const void*, u32, u64, u64) {}
+void    io_ring_push_read(IoRing*, OsFile, void*, u32, u64, u64) {}
+void    io_ring_push_write(IoRing*, OsFile, const void*, u32, u64, u64) {}
 bool    io_ring_enter(IoRing*, u32) { return false; }
 bool    io_ring_pop(IoRing*, u64*, i32*) { return false; }
 u32     io_ring_in_flight(const IoRing*) { return 0; }

@@ -1,4 +1,5 @@
 #include "korvid/core/timer.h"
+#include "korvid/core/sort.h"
 #include "korvid/core/event.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/log.h"
@@ -32,13 +33,13 @@ void append(Array<u8>& dst, const TimerRecord& r, const void* data) {
 
 void TimerWheel::init() {
     if (ready) return;
-    pthread_mutex_init(&mu, nullptr);
+    os_mutex_init(&mu);
     ready = true;
 }
 
 u32 TimerWheel::schedule(u64 tick, u32 type_id, u32 size, const void* data, const char* emitter, u32 ticket) {
     if (!ready) init();
-    pthread_mutex_lock(&mu);
+    os_mutex_lock(&mu);
     if (tick < next_tick) tick = next_tick; // the past, or now: the next boundary
     if (ticket == 0) {
         if (next_ticket == 0) next_ticket = 1; // never hand out 0
@@ -49,7 +50,7 @@ u32 TimerWheel::schedule(u64 tick, u32 type_id, u32 size, const void* data, cons
     else append(far, r, data);
     ticks.set(r.ticket, tick);
     ++pending;
-    pthread_mutex_unlock(&mu);
+    os_mutex_unlock(&mu);
     return r.ticket;
 }
 
@@ -76,16 +77,16 @@ bool erase(Array<u8>& list, u32 ticket) {
 
 bool TimerWheel::cancel(u32 ticket) {
     if (!ready) init();
-    pthread_mutex_lock(&mu);
+    os_mutex_lock(&mu);
     const u64* tick = ticks.find(ticket);
-    if (!tick) { pthread_mutex_unlock(&mu); return false; }
+    if (!tick) { os_mutex_unlock(&mu); return false; }
     // In its slot if it is within the horizon, else still in the far list.
     bool gone = erase(slots[*tick % SLOTS], ticket) || erase(far, ticket);
     KV_ASSERT(gone);
     ticks.remove(ticket);
     --pending;
     ++cancelled;
-    pthread_mutex_unlock(&mu);
+    os_mutex_unlock(&mu);
     return gone;
 }
 
@@ -133,7 +134,7 @@ void TimerWheel::fire(u64 tick, EventBus& bus) {
             }
             p += n;
         }
-        if (due.len > 1) qsort(due.data, due.len, sizeof(const u8*), compare_tickets);
+        if (due.len > 1) kv::sort(due.data, due.len, sizeof(const u8*), compare_tickets);
         for (const u8* d : due) {
             const TimerRecord* r = (const TimerRecord*)d;
             EventWriter& w = bus.writer(0);
@@ -156,7 +157,7 @@ void TimerWheel::free() {
     ticks.free();
     pending = fired = cancelled = 0;
     next_tick = 0;
-    if (ready) pthread_mutex_destroy(&mu);
+    if (ready) os_mutex_destroy(&mu);
     ready = false;
 }
 

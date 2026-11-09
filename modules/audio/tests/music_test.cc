@@ -5,6 +5,7 @@
 // build has staged it: a stream decodes, music_play starts it, the same track again is a
 // no-op, another track crossfades, and every decoder and ring is gone at the end.
 #include "korvid/audio/audio.h"
+#include "korvid/core/atomic.h"
 #include "korvid/audio/module.h"
 #include "korvid/asset/module.h"
 #include "korvid/asset/scope.h"
@@ -90,7 +91,7 @@ void test_fades(kv::TestCtx& c) {
     mixer_render(m, out, 30);
     KV_CHECK(c, ring.underruns == 1 && m.voices[3].active && ring.read == 39);
     // The producer ends the stream: the voice drains and finishes.
-    __atomic_store_n(&ring.ended, true, __ATOMIC_RELEASE);
+    kv::atomic_store(&ring.ended, true, kv::MO_RELEASE);
     mixer_render(m, out, 30);
     KV_CHECK(c, !m.voices[3].active && m.done.pop(d) && d == (3u | (7ull << 32)));
 

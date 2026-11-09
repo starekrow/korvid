@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include "korvid/core/time.h"
 
 namespace kv {
 
@@ -123,7 +123,7 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
                 engine_frame(e, dt);
                 ++ticks;
                 if (max_ticks && ticks >= max_ticks) { KV_ERROR("tool", "not finished after %llu ticks", (unsigned long long)ticks); break; }
-                if (io && io->pending() && io->completions().len == 0) usleep(100);
+                if (io && io->pending() && io->completions().len == 0) time_sleep(0.0001);
             }
             code = s->finished ? s->code : 2;
         }

@@ -7,7 +7,9 @@
 // happens between a begin and an end is not constrained at all: a present, a file read,
 // a mutex, a call into a library. Zones nest; the reader rebuilds the tree from begins
 // and ends, so the writer tracks nothing and an end that never comes is reported, not
-// fatal. Names are static strings compared by address.
+// fatal. Names are static strings compared by address, so the same literal must have one
+// address everywhere: gcc and clang pool literals always, MSVC with /GF (the toolchain
+// sets it in every config).
 //
 //   KV_ZONE("collision.broadphase");      // a span, closed at scope exit
 //   KV_ZONE_WAIT("present");              // a span that is waiting, not working

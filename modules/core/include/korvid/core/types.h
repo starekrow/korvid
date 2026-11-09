@@ -68,3 +68,20 @@ struct Span {
 
 #define KV_COUNTOF(a) ((::kv::u32)(sizeof(a) / sizeof((a)[0])))
 #define KV_UNUSED(x) ((void)(x))
+
+// Compiler specifics, in one place; code elsewhere names these, never a compiler's own.
+// KV_PRINTF(f, a): parameter f is a printf format and its arguments start at a (1-based;
+// a member function's this counts). gcc and clang check every call; MSVC has nothing
+// equivalent outside /analyze, so there it says nothing. KV_RETURN_ADDRESS(): where the
+// current function returns to, for attributing an allocation to its caller.
+#if defined(_MSC_VER) && !defined(__clang__)
+#define KV_COMPILER_MSVC 1
+#define KV_PRINTF(f, a)
+extern "C" void* _ReturnAddress(void);
+#pragma intrinsic(_ReturnAddress)
+#define KV_RETURN_ADDRESS() _ReturnAddress()
+#else
+#define KV_COMPILER_MSVC 0
+#define KV_PRINTF(f, a) __attribute__((format(printf, f, a)))
+#define KV_RETURN_ADDRESS() __builtin_return_address(0)
+#endif

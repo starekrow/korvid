@@ -1,0 +1,56 @@
+#include "korvid/core/os_thread.h"
+#include "korvid/core/thread.h"
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
+namespace kv {
+
+static_assert(sizeof(SRWLOCK) <= sizeof(OsMutex::storage), "OsMutex is too small for an SRWLOCK");
+static_assert(sizeof(CONDITION_VARIABLE) <= sizeof(OsCond::storage), "OsCond is too small for a CONDITION_VARIABLE");
+static_assert(sizeof(HANDLE) <= sizeof(u64), "a HANDLE does not fit OsThread::handle");
+
+static SRWLOCK*            native(OsMutex* m) { return reinterpret_cast<SRWLOCK*>(m->storage); }
+static CONDITION_VARIABLE* native(OsCond* c)  { return reinterpret_cast<CONDITION_VARIABLE*>(c->storage); }
+
+u32 os_cpu_count() {
+    DWORD n = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    return n > 0 ? (u32)n : 1;
+}
+
+// A slim reader/writer lock, held exclusively: no kernel object, nothing to destroy.
+void os_mutex_init(OsMutex* m)    { InitializeSRWLock(native(m)); }
+void os_mutex_destroy(OsMutex*)   {}
+void os_mutex_lock(OsMutex* m)    { AcquireSRWLockExclusive(native(m)); }
+void os_mutex_unlock(OsMutex* m)  { ReleaseSRWLockExclusive(native(m)); }
+
+void os_cond_init(OsCond* c)             { InitializeConditionVariable(native(c)); }
+void os_cond_destroy(OsCond*)            {}
+void os_cond_wait(OsCond* c, OsMutex* m) { SleepConditionVariableSRW(native(c), native(m), INFINITE, 0); }
+void os_cond_signal(OsCond* c)           { WakeConditionVariable(native(c)); }
+void os_cond_broadcast(OsCond* c)        { WakeAllConditionVariable(native(c)); }
+
+static DWORD WINAPI thread_start(LPVOID arg) {
+    OsThread* t = (OsThread*)arg;
+    t->fn(t->arg);
+    return 0;
+}
+
+bool os_thread_start(OsThread* t, OsThreadFn fn, void* arg) {
+    t->fn = fn;
+    t->arg = arg;
+    // The stack is reserved, not committed: pages are committed as the thread uses them.
+    HANDLE h = CreateThread(nullptr, 8u << 20, thread_start, t, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    if (!h) return false;
+    t->handle = (u64)(usize)h;
+    return true;
+}
+
+void os_thread_join(OsThread* t) {
+    HANDLE h = (HANDLE)(usize)t->handle;
+    WaitForSingleObject(h, INFINITE);
+    CloseHandle(h);
+    t->handle = 0;
+}
+
+} // namespace kv

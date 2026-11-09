@@ -6,7 +6,7 @@
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/map.h"
-#include <pthread.h>
+#include "korvid/core/os_thread.h"
 
 namespace kv {
 
@@ -23,7 +23,7 @@ struct TimerWheel {
     u32       fired      = 0;
     u32       cancelled  = 0;
     u32       next_ticket = 1;
-    pthread_mutex_t mu;      // systems on several threads schedule and cancel at once
+    OsMutex   mu;            // systems on several threads schedule and cancel at once
     bool      ready = false;
 
     void init();

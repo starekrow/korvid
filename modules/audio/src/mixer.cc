@@ -1,4 +1,5 @@
 #include "korvid/audio/mixer.h"
+#include "korvid/core/atomic.h"
 #include <math.h>
 #include <string.h>
 
@@ -112,7 +113,7 @@ void mix_stream(Mixer& m, MixVoice& v, f32* out, u32 frames) {
     for (u32 i = 0; i < frames && v.active; ++i) {
         u32 i0 = (u32)v.pos;
         if (i0 + 1 >= avail) {
-            if (__atomic_load_n(&r.ended, __ATOMIC_ACQUIRE) && i0 + 1 >= r.available()) { v.active = false; m.done.push((u64)(&v - m.voices) | ((u64)v.gen << 32)); }
+            if (kv::atomic_load(&r.ended, kv::MO_ACQUIRE) && i0 + 1 >= r.available()) { v.active = false; m.done.push((u64)(&v - m.voices) | ((u64)v.gen << 32)); }
             else ++r.underruns;
             break;
         }
@@ -127,7 +128,7 @@ void mix_stream(Mixer& m, MixVoice& v, f32* out, u32 frames) {
         fade_step(m, v);
     }
     u32 whole = (u32)v.pos;
-    if (whole) { v.pos -= (f64)whole; __atomic_store_n(&r.read, base + whole, __ATOMIC_RELEASE); }
+    if (whole) { v.pos -= (f64)whole; kv::atomic_store(&r.read, base + whole, kv::MO_RELEASE); }
 }
 
 void mix_voice(Mixer& m, MixVoice& v, f32* out, u32 frames) {

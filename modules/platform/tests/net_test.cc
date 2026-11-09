@@ -28,7 +28,7 @@ void test_net(kv::TestCtx& c) {
 
     NetSocket client;
     KV_CHECK(c, net_connect_local(l.port, client));
-    int fd = -1;
+    NetFd fd = -1;
     for (u32 i = 0; i < 2000 && fd < 0; ++i) { fd = l.accept(); if (fd < 0) time_sleep(0.001); }
     KV_CHECK(c, fd >= 0);
     NetSocket server;

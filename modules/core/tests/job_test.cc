@@ -2,6 +2,7 @@
 // caller; a batch started inside a chunk completes (the waiter helps); the pool restarts
 // with another count; zero workers runs everything on the caller.
 #include "korvid/core/job.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/test.h"
 #include "korvid/core/thread.h"
 #include <string.h>
@@ -14,11 +15,11 @@ struct Sum { u32* hits; u32 count; u32 thread_of[16]; }; // which thread ran eac
 
 void mark(u32 chunk, u32 begin, u32 end, void* user) {
     Sum& s = *(Sum*)user;
-    for (u32 i = begin; i < end; ++i) __atomic_add_fetch(&s.hits[i], 1, __ATOMIC_RELAXED);
+    for (u32 i = begin; i < end; ++i) kv::atomic_add_fetch(&s.hits[i], 1, kv::MO_RELAXED);
     // Enough work per chunk that a worker can wake and take one before the caller has done them all.
     volatile u64 spin = 0;
     for (u32 k = 0; k < 20000; ++k) spin += k;
-    if (chunk < 16) __atomic_store_n(&s.thread_of[chunk], thread_id(), __ATOMIC_RELAXED);
+    if (chunk < 16) kv::atomic_store(&s.thread_of[chunk], thread_id(), kv::MO_RELAXED);
 }
 
 // Distinct threads among the last batch's chunks. Thread ids are process-wide and climb

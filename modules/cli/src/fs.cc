@@ -3,6 +3,7 @@
 // the mount. The root lists the mounts.
 #include "cli_internal.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/sort.h"
 #include "korvid/core/memory.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,7 +95,7 @@ void list_dir(CliContext& ctx, CliState& cli, const char* path, u32 cap) {
         snprintf(dir, sizeof dir, "%s%s", rel, rel[0] ? "/" : "");
         m->list(ctx, dir, collect_emit, &col);
     }
-    if (entries.len > 1) qsort(entries.data, entries.len, sizeof(Entry), entry_compare);
+    if (entries.len > 1) kv::sort(entries.data, entries.len, sizeof(Entry), entry_compare);
     u32 width = 0;
     for (const Entry& e : entries) { u32 w = (u32)strlen(e.name); if (w > width) width = w; }
     if (width > 40) width = 40;

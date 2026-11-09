@@ -126,6 +126,6 @@ struct EventBus {
 
 // Table entries for event types: KV_EVENT(WindowResized), or with a schema and flags:
 // KV_EVENT_EX(RockHit, k_rock_hit_fields, 0), KV_EVENT_EX(ScoreChanged, k_fields, EvNextTick).
-#define KV_EVENT(E) ::kv::EventTypeDesc{#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id}
+#define KV_EVENT(E) {#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id}
 #define KV_EVENT_EX(E, fields, flags) \
-    ::kv::EventTypeDesc{#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id, fields, (::kv::u8)(flags)}
+    {#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id, fields, (::kv::u8)(flags)}

@@ -8,26 +8,30 @@
 
 namespace kv {
 
+// A socket from the OS: a descriptor on POSIX, a SOCKET on Windows (pointer-sized there).
+// Never negative when open; -1 is none on both.
+typedef i64 NetFd;
+
 struct NetListener {
-    int fd   = -1;
-    u16 port = 0; // the bound port; what the OS chose when asked for 0
+    NetFd fd = -1;
+    u16   port = 0; // the bound port; what the OS chose when asked for 0
 
     bool open(u16 port, bool local_only = true);
     void close();
     bool is_open() const { return fd >= 0; }
     // A connected socket's descriptor, or -1 when nobody is waiting. Non-blocking.
-    int  accept();
+    NetFd accept();
 };
 
 struct NetSocket {
-    int       fd = -1;
+    NetFd     fd = -1;
     Array<u8> out;        // queued for sending; flush() drains what the kernel takes
     u32       out_limit = 64 * 1024; // past this, writes are dropped and counted, never blocked on
     bool      closed = false;        // the peer went away (read saw end of stream, or a send failed)
     u64       bytes_in = 0, bytes_out = 0, dropped = 0;
 
     // Takes ownership of a descriptor (from accept or connect) and makes it non-blocking.
-    void adopt(int fd);
+    void adopt(NetFd fd);
     bool is_open() const { return fd >= 0 && !closed; }
     // Bytes read into buf, 0 when nothing has arrived, -1 when the peer closed.
     i32  read(void* buf, u32 cap);
@@ -42,5 +46,8 @@ struct NetSocket {
 // Non-blocking connect to 127.0.0.1:port. The socket is usable at once: writes queue,
 // and flush() sends once the connection is up. For tools and tests.
 bool net_connect_local(u16 port, NetSocket& out);
+
+// Closes a socket nobody adopted (one accept returned that is being turned away).
+void net_close(NetFd fd);
 
 } // namespace kv

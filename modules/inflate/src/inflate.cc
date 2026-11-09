@@ -4,6 +4,10 @@
 #include "korvid/inflate/inflate.h"
 #include <string.h>
 
+// miniz is vendored, not ours: its warnings are silenced for its own lines only.
+#if KV_COMPILER_MSVC
+#pragma warning(push, 0)
+#else
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -14,6 +18,7 @@
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #pragma GCC diagnostic ignored "-Wtype-limits"
 #pragma GCC diagnostic ignored "-Wclass-memaccess"
+#endif
 #define MINIZ_NO_STDIO
 #define MINIZ_NO_TIME
 #define MINIZ_NO_DEFLATE_APIS
@@ -21,7 +26,11 @@
 #define MINIZ_NO_ZLIB_APIS
 #define MINIZ_NO_MALLOC
 #include "vendor/miniz.c"
+#if KV_COMPILER_MSVC
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
+#endif
 
 namespace kv {
 

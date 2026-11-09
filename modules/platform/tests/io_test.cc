@@ -5,11 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 namespace {
 
-struct Files { char dir[64]; char a[256], b[256], missing[256]; };
+struct Files { char dir[200]; char a[256], b[256], missing[256]; };
 
 kv::u32 wait_for(kv::IoQueue& q, kv::u32 count) {
     for (kv::u32 i = 0; i < 2000 && q.completions().len < count; ++i) { q.pump(); kv::time_sleep(0.001); }
@@ -92,7 +91,7 @@ void test_backend(kv::TestCtx& c, const Files& f, kv::IoBackend backend) {
     if (cbig) mem_free(cbig->data);
     if (ccan && ccan->data) mem_free(ccan->data);
     KV_CHECK(c, q.reap(hbig) && q.reap(hcan));
-    unlink(big_path);
+    io_remove(big_path);
 
     q.free();
 }
@@ -105,8 +104,7 @@ void test_io(kv::TestCtx& c) {
 
     // Two files to read, one with a known payload.
     Files f;
-    strcpy(f.dir, "/tmp/korvid-io-XXXXXX");
-    KV_CHECK(c, mkdtemp(f.dir) != nullptr);
+    KV_CHECK(c, io_make_temp_dir("korvid-io", f.dir, sizeof f.dir));
     snprintf(f.a, sizeof f.a, "%s/a.bin", f.dir);
     snprintf(f.b, sizeof f.b, "%s/b.bin", f.dir);
     snprintf(f.missing, sizeof f.missing, "%s/nope.bin", f.dir);
@@ -122,15 +120,15 @@ void test_io(kv::TestCtx& c) {
     KV_INFO("test", "io: default backend is %s", q.backend_name());
     q.free();
 
-    unlink(f.a); unlink(f.b); rmdir(f.dir);
+    io_remove(f.a); io_remove(f.b); io_remove(f.dir);
 }
 
 // The budget: a pump admits reads by bytes, idle reads wait for idle time.
 void test_io_budget(kv::TestCtx& c) {
     using namespace kv;
     c.begin("io budget");
-    char dir[] = "/tmp/korvid-iob-XXXXXX";
-    KV_CHECK(c, mkdtemp(dir) != nullptr);
+    char dir[200];
+    KV_CHECK(c, io_make_temp_dir("korvid-iob", dir, sizeof dir));
     char paths[6][256];
     const u32 size = 1024 * 1024;
     u8* buf = (u8*)mem_alloc(size);
@@ -170,8 +168,8 @@ void test_io_budget(kv::TestCtx& c) {
         for (u32 i = 0; i < 6; ++i) q.reap(h[i]);
         q.free();
     }
-    for (u32 i = 0; i < 6; ++i) unlink(paths[i]);
-    rmdir(dir);
+    for (u32 i = 0; i < 6; ++i) io_remove(paths[i]);
+    io_remove(dir);
 }
 
 // Writes: the bytes are copied at submission, the file appears at the pump, a read of it
@@ -180,8 +178,8 @@ void test_io_budget(kv::TestCtx& c) {
 void test_io_write(kv::TestCtx& c) {
     using namespace kv;
     c.begin("io_write");
-    char dir[] = "/tmp/korvid-iow-XXXXXX";
-    KV_CHECK(c, mkdtemp(dir) != nullptr);
+    char dir[200];
+    KV_CHECK(c, io_make_temp_dir("korvid-iow", dir, sizeof dir));
     char path[300], empty[300], bad[300], gone[300];
     snprintf(path, sizeof path, "%s/save.txt", dir);
     snprintf(empty, sizeof empty, "%s/empty.txt", dir);
@@ -226,5 +224,5 @@ void test_io_write(kv::TestCtx& c) {
         if (fp) fclose(fp);
         q.free();
     }
-    unlink(path); unlink(empty); rmdir(dir);
+    io_remove(path); io_remove(empty); io_remove(dir);
 }

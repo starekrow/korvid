@@ -5,6 +5,7 @@
 // anywhere in here.
 #pragma once
 #include "korvid/core/types.h"
+#include "korvid/core/atomic.h"
 
 namespace kv {
 
@@ -23,18 +24,18 @@ struct SpscRing {
     u32 tail = 0; // next to push; the producer's
 
     bool push(const T& v) {
-        u32 t = __atomic_load_n(&tail, __ATOMIC_RELAXED);
+        u32 t = kv::atomic_load(&tail, kv::MO_RELAXED);
         u32 next = (t + 1) % N;
-        if (next == __atomic_load_n(&head, __ATOMIC_ACQUIRE)) return false; // full
+        if (next == kv::atomic_load(&head, kv::MO_ACQUIRE)) return false; // full
         items[t] = v;
-        __atomic_store_n(&tail, next, __ATOMIC_RELEASE);
+        kv::atomic_store(&tail, next, kv::MO_RELEASE);
         return true;
     }
     bool pop(T& out) {
-        u32 h = __atomic_load_n(&head, __ATOMIC_RELAXED);
-        if (h == __atomic_load_n(&tail, __ATOMIC_ACQUIRE)) return false; // empty
+        u32 h = kv::atomic_load(&head, kv::MO_RELAXED);
+        if (h == kv::atomic_load(&tail, kv::MO_ACQUIRE)) return false; // empty
         out = items[h];
-        __atomic_store_n(&head, (h + 1) % N, __ATOMIC_RELEASE);
+        kv::atomic_store(&head, (h + 1) % N, kv::MO_RELEASE);
         return true;
     }
 };
@@ -56,7 +57,7 @@ struct StreamRing {
     u64  read     = 0;      // the consumer's: frames consumed ever
     bool ended    = false;  // the producer has written its last frame (a stream that does not loop)
     u32  underruns = 0;     // buffers the mixer found it empty before the end (device thread)
-    u32  available() const { return (u32)(__atomic_load_n(&write, __ATOMIC_ACQUIRE) - __atomic_load_n(&read, __ATOMIC_ACQUIRE)); }
+    u32  available() const { return (u32)(kv::atomic_load(&write, kv::MO_ACQUIRE) - kv::atomic_load(&read, kv::MO_ACQUIRE)); }
 };
 
 constexpr u64 KV_MIX_RETIRED = 0xFFFFFFFFull; // a done entry's slot half meaning "retired", the ticket in gen

@@ -25,7 +25,7 @@ struct Rng {
         state = old * 6364136223846793005ull + inc;
         u32 xorshifted = (u32)(((old >> 18) ^ old) >> 27);
         u32 rot = (u32)(old >> 59);
-        return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
+        return (xorshifted >> rot) | (xorshifted << ((32u - rot) & 31u));
     }
 
     f32 unit() { return (f32)(next() >> 8) * (1.0f / 16777216.0f); } // [0, 1)

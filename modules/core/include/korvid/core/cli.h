@@ -28,10 +28,10 @@ struct CliContext {
     char    error[200] = {};
 
     // One response line.
-    void print(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+    void print(const char* fmt, ...) KV_PRINTF(2, 3);
     void vprint(const char* fmt, va_list args);
     // The request fails with this message; the transport reports it after the lines so far.
-    void fail(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+    void fail(const char* fmt, ...) KV_PRINTF(2, 3);
 };
 
 typedef void (*CliCommandFn)(CliContext& ctx, Span<const char* const> args);

@@ -29,6 +29,17 @@ function M.join(a, b)
   return a .. "/" .. b
 end
 
+function M.trim(s)
+  return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- A path in the host's own spelling, for a command's arguments: backslashes on Windows,
+-- where a '/' would read as a switch.
+function M.native(path)
+  if KORMAKE_HOST == "windows" then return (path:gsub("/", "\\")) end
+  return path
+end
+
 -- Absolute: "/x" on POSIX; on Windows also a drive ("C:/x", "C:\x") or a share ("//host/x").
 function M.is_abs(path)
   local c = path:sub(1, 1)

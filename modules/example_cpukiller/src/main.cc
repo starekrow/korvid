@@ -15,6 +15,7 @@
 // ticks are driven through the frame loop with a render after every batch of ticks:
 // memory can behave differently with a GPU's fingers in it.
 #include "korvid/example_cpukiller/module.h"
+#include "korvid/core/atomic.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
@@ -105,7 +106,7 @@ void spin(u32, u32 begin, u32 end, void* user) {
     u64 acc = 0;
     for (u32 i = begin; i < end; ++i)
         for (u32 k = 0; k < s.iters; ++k) acc = hash_mix(acc ^ (i + k));
-    __atomic_add_fetch(s.sink, acc, __ATOMIC_RELAXED);
+    kv::atomic_add_fetch(s.sink, acc, kv::MO_RELAXED);
 }
 
 void scenario_contention() {
