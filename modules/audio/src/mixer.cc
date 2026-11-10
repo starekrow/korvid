@@ -9,6 +9,7 @@ void mixer_init(Mixer& m, u32 out_rate, u32 out_channels) {
     for (MixVoice& v : m.voices) v = MixVoice{};
     for (f32& g : m.bus_gain) g = 1.0f;
     m.sim_paused   = false;
+    m.sim_rate     = 1.0f;
     m.out_rate     = out_rate ? out_rate : 48000;
     m.out_channels = out_channels ? out_channels : 2;
     m.stats = MixerStats{};
@@ -48,6 +49,7 @@ void apply(Mixer& m, const MixCmd& c) {
     }
     case MixOp::PauseSim:  m.sim_paused = true; break;
     case MixOp::ResumeSim: m.sim_paused = false; break;
+    case MixOp::SimRate:   m.sim_rate = c.volume > 0.0f ? c.volume : 1.0f; break;
     case MixOp::Bus:
         if (c.bus < (u32)AudioBus::Count) m.bus_gain[c.bus] = c.volume;
         break;
@@ -101,7 +103,7 @@ inline void fade_step(Mixer& m, MixVoice& v) {
 // ring before the end is an underrun: silence for the rest of the buffer, counted.
 void mix_stream(Mixer& m, MixVoice& v, f32* out, u32 frames) {
     StreamRing& r = *v.ring;
-    f64 step = (f64)v.rate / (f64)m.out_rate * (f64)(v.pitch > 0.0f ? v.pitch : 0.0f);
+    f64 step = (f64)v.rate / (f64)m.out_rate * (f64)(v.pitch > 0.0f ? v.pitch : 0.0f) * (v.pause_with_sim ? (f64)m.sim_rate : 1.0);
     if (step <= 0.0) return;
     f32 bus = m.bus_gain[v.bus] * m.bus_gain[(u32)AudioBus::Master];
     f32 theta = (v.pan + 1.0f) * 0.25f * 3.14159265f;
@@ -133,7 +135,7 @@ void mix_stream(Mixer& m, MixVoice& v, f32* out, u32 frames) {
 
 void mix_voice(Mixer& m, MixVoice& v, f32* out, u32 frames) {
     if (v.ring) { mix_stream(m, v, out, frames); return; }
-    f64 step = (f64)v.rate / (f64)m.out_rate * (f64)(v.pitch > 0.0f ? v.pitch : 0.0f);
+    f64 step = (f64)v.rate / (f64)m.out_rate * (f64)(v.pitch > 0.0f ? v.pitch : 0.0f) * (v.pause_with_sim ? (f64)m.sim_rate : 1.0);
     if (step <= 0.0) return; // pitch 0: held
     f32 bus = m.bus_gain[v.bus] * m.bus_gain[(u32)AudioBus::Master];
     f32 theta = (v.pan + 1.0f) * 0.25f * 3.14159265f;

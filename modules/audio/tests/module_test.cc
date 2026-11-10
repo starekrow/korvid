@@ -1,7 +1,8 @@
 // The module without a device (none in a test): voices are handed out and finish on the
 // next tick with VoiceFinished; a stop before the start finishes without playing; the
-// pool recycles slots with new generations; a play with an unknown sound finishes; the
-// command path checks the declared write.
+// pool recycles slots with new generations; a full pool gives up its lowest-priority,
+// oldest voice or refuses; a sound asked for twice in a tick is one start; a play with an
+// unknown sound finishes; the command path checks the declared write.
 #include "korvid/audio/module.h"
 #include "korvid/asset/module.h"
 #include "korvid/core/engine.h"
@@ -56,21 +57,43 @@ void test_audio_module(kv::TestCtx& c) {
     run();
     KV_CHECK(c, g.finished == 1 && g.last == g_voice);
 
-    // From outside the schedule: 64 voices, then none free; a stop before the start.
+    // From outside the schedule: 64 voices, then none free. The 65th, of the same priority,
+    // takes the oldest (whose handle goes stale and finishes at the extract); one of a lower
+    // priority than every voice is refused. A stop before the start.
     SoundPlay p;
     Handle first = audio_play(e, p);
     for (u32 i = 1; i < KV_AUDIO_VOICES; ++i) KV_CHECK(c, !audio_play(e, p).is_null());
-    KV_CHECK(c, audio_play(e, p).is_null() && audio_stats(e).live_voices == KV_AUDIO_VOICES);
-    KV_CHECK(c, audio_stop(e, first));
+    KV_CHECK(c, audio_stats(e).live_voices == KV_AUDIO_VOICES);
+    Handle taker = audio_play(e, p);
+    KV_CHECK(c, !taker.is_null() && taker.index() == first.index() && taker.gen() != first.gen() && audio_stats(e).steals == 1);
+    KV_CHECK(c, !audio_stop(e, first) && audio_stats(e).live_voices == KV_AUDIO_VOICES);
+    SoundPlay low = p;
+    low.priority = 0;
+    KV_CHECK(c, audio_play(e, low).is_null() && audio_stats(e).dropped == 1);
+    KV_CHECK(c, audio_stop(e, taker));
     g = Seen{};
     run(); run();
-    KV_CHECK(c, g.finished == KV_AUDIO_VOICES && audio_stats(e).live_voices == 0);
+    KV_CHECK(c, g.finished == KV_AUDIO_VOICES + 1 && audio_stats(e).live_voices == 0); // the 64, and the voice taken
     KV_CHECK(c, !audio_stop(e, first)); // stale now
     Handle again = audio_play(e, p);
     KV_CHECK(c, again.index() == first.index() && again.gen() != first.gen());
     audio_bus_volume(e, AudioBus::Music, 0.5f);
     run(); run();
-    KV_CHECK(c, audio_stats(e).live_voices == 0 && audio_stats(e).dropped == 1); // the 65th play was the drop
+    KV_CHECK(c, audio_stats(e).live_voices == 0 && audio_stats(e).dropped == 1); // the low-priority play was the drop
+
+    // One start a sound a tick: a second play of a sound before the extract is the first's
+    // voice; the next tick's is a voice of its own.
+    SoundPlay a;
+    a.sound = Handle::make(1, 1, 7); // no such asset: it finishes at the extract, which is all this needs
+    a.volume = 0.3f;
+    Handle once = audio_play(e, a);
+    a.volume = 0.8f;
+    a.priority = 0;
+    KV_CHECK(c, audio_play(e, a) == once && audio_stats(e).merged == 1 && audio_stats(e).live_voices == 1);
+    run();
+    Handle next = audio_play(e, a);
+    KV_CHECK(c, !next.is_null() && next != once && audio_stats(e).merged == 1);
+    run(); run();
 
     engine_shutdown(e);
 }

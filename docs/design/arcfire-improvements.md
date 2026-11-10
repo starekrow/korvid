@@ -23,10 +23,6 @@ that finds an engine limit adds a line here.
 - **Beams: a segment cast.** `collision_cast` sweeps a box; a beam wants the ordered list
   of bodies along a segment from the ship to the top of the field, by mask, each tick.
   Slice 4.
-- **Audio under load.** 64 voices, no priority, no stealing: a hundred shot sounds a
-  second fill the pool and the command ring, and `dropped` counts them. Wanted: a
-  priority per play, stealing the oldest or quietest of the lowest priority, and one start
-  per sound asset per tick (the second request in a tick retriggers nothing). Slice 3.
 - **Input record and replay.** The demos are scripts in code. A recorded input log
   (actions per tick) that replays through `input_action_override` would turn a tester's run
   into a hashing test; the frame loop is where it belongs. Slice 5.
@@ -73,6 +69,15 @@ that finds an engine limit adds a line here.
 
 ## Fixed
 
+- **Audio under load** (slice 3, M4). `SoundPlay::priority` (0 to 3); a full pool takes
+  the oldest voice of the lowest priority not above the play's (`AudioStats::steals`) or
+  refuses it; a sound asked for again before the tick's extract starts once, the louder
+  play winning (`AudioStats::merged`); voices that pause with the sim play at the time
+  scale as a pitch, floored at half (`MixOp::SimRate`). Tests in the module's and the
+  mixer's own. In arcfire, the merging does the work: at stress, 4,317 plays in a minute
+  were folded into a start already under way, the voices peaked at 36 of 64, and nothing was stolen or
+  dropped; at rank 56 with 50,000 bullets, 35. Stealing has not yet been needed by the
+  game, only by the test.
 - **Children lag their parent by a tick in Sim** (found in slice 1, fixed in slice 3, M2).
   `collision.compose` (Sim, after the resolve, before the broadphase) composes the children
   that have a `Collider2` with `scene_compose_with(e, component)`, so the graze ring, the

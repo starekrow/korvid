@@ -33,6 +33,8 @@ struct VoiceRec {
     f32       fade_to = 0.0f, fade_seconds = 0.0f;
     FadeCurve fade_curve = FadeCurve::EqualPower;
     bool      fade_stop = false;
+    u64       order = 0;       // when it was asked for: the oldest of a priority is stolen first
+    u32       batch = 0;       // the extract it waits for: a second play of its sound before it is one start
 };
 
 constexpr u32 kStreamRingFrames = 1u << 16; // about 1.4 s at 44.1 kHz, 512 KB stereo
@@ -67,6 +69,10 @@ struct AudioCommands {
     Array<Retiring> retiring;
     OsMutex mu;
     u32             dropped = 0;
+    u32             steals = 0, merged = 0;
+    u64             next_order = 0;
+    u32             batch = 0;     // +1 at every extract
+    Array<Handle>   stolen;        // voices taken by a play: their VoiceFinished goes out at the extract
 };
 
 struct AudioState {
@@ -78,6 +84,7 @@ struct AudioState {
     u16           kind = 0;
     bool          device = false;
     bool          last_paused = false;
+    f32           last_rate = 1.0f;
     u32           dropped_logged = 0;
 };
 
@@ -105,13 +112,53 @@ int voice_describe(kv_handle h, void* ctx, char* out, size_t cap) {
 // The device thread.
 void device_callback(void* user, f32* out, u32 frames) { mixer_render(*(Mixer*)user, out, frames); }
 
+void free_voice(AudioState& s, u32 slot);
+
 // The lock held: a voice from the pool. A stream (asset.stream) makes a stream voice,
-// which holds a reference on it until it is done.
+// which holds a reference on it until it is done. A sound already starting this tick is
+// the same start; a full pool gives up its lowest-priority, oldest voice, or refuses.
 Handle play_locked(AudioState& s, const SoundPlay& play) {
-    for (u32 i = 0; i < KV_AUDIO_VOICES; ++i) {
+    if (!play.sound.is_null()) {
+        for (u32 i = 0; i < KV_AUDIO_VOICES; ++i) {
+            VoiceRec& v = s.cmds.voices[i];
+            if (!v.used || v.started || v.stopped || v.stream || v.batch != s.cmds.batch || v.play.sound != play.sound || v.play.bus != play.bus ||
+                v.play.loop != play.loop)
+                continue;
+            u8 prio = v.play.priority > play.priority ? v.play.priority : play.priority;
+            if (play.volume > v.play.volume) v.play = play; // the louder wins
+            v.play.priority = prio;
+            ++s.cmds.merged;
+            return Handle::make(s.kind, v.gen, i);
+        }
+    }
+    u32 slot = KV_AUDIO_VOICES;
+    for (u32 i = 0; i < KV_AUDIO_VOICES && slot == KV_AUDIO_VOICES; ++i)
+        if (!s.cmds.voices[i].used) slot = i;
+    if (slot == KV_AUDIO_VOICES) {
+        // Every voice busy: the lowest priority's oldest goes, if it is not above this one.
+        for (u32 i = 0; i < KV_AUDIO_VOICES; ++i) {
+            const VoiceRec& v = s.cmds.voices[i];
+            if (v.stream) continue;
+            if (slot == KV_AUDIO_VOICES || v.play.priority < s.cmds.voices[slot].play.priority ||
+                (v.play.priority == s.cmds.voices[slot].play.priority && v.order < s.cmds.voices[slot].order))
+                slot = i;
+        }
+        if (slot == KV_AUDIO_VOICES || s.cmds.voices[slot].play.priority > play.priority) {
+            ++s.cmds.dropped;
+            return Handle{};
+        }
+        // Its start, if it had one, is overwritten in the mixer by this one's (same slot,
+        // new generation); anything still queued for it no longer resolves.
+        s.cmds.stolen.push(Handle::make(s.kind, s.cmds.voices[slot].gen, slot));
+        free_voice(s, slot);
+        ++s.cmds.steals;
+    }
+    {
+        u32 i = slot;
         VoiceRec& v = s.cmds.voices[i];
-        if (v.used) continue;
         v.used = true;
+        v.order = s.cmds.next_order++;
+        v.batch = s.cmds.batch;
         v.started = v.stopped = false;
         v.play = play;
         v.stream = s.engine && asset_stream(*s.engine, play.sound) != nullptr;
@@ -119,8 +166,6 @@ Handle play_locked(AudioState& s, const SoundPlay& play) {
         if (v.gen == 0 || v.gen == 0xFFFFF) v.gen = 1; else ++v.gen;
         return Handle::make(s.kind, v.gen, i);
     }
-    ++s.cmds.dropped;
-    return Handle{};
 }
 Handle play_in(AudioState& s, const SoundPlay& play) {
     Lock lock(s.cmds.mu);
@@ -269,11 +314,24 @@ void audio_extract(TickContext& ctx) {
         if (s.mixer.in.push(c)) r.sent = true; // else tried again next tick
     }
 
+    for (Handle h : s.cmds.stolen) ctx.emit(VoiceFinished{h});
+    s.cmds.stolen.clear();
+
     if (ctx.paused != s.last_paused) {
         s.last_paused = ctx.paused;
         MixCmd c{};
         c.op = ctx.paused ? MixOp::PauseSim : MixOp::ResumeSim;
         if (!s.mixer.in.push(c)) ++s.cmds.dropped;
+    }
+    // The time scale, as a pitch on the voices that pause with the sim, floored at half.
+    f32 rate = (f32)engine_time_scale_get(e);
+    rate = rate < 0.5f ? 0.5f : rate > 4.0f ? 4.0f : rate;
+    if (rate != s.last_rate) {
+        MixCmd c{};
+        c.op = MixOp::SimRate;
+        c.volume = rate;
+        if (s.mixer.in.push(c)) s.last_rate = rate;
+        else ++s.cmds.dropped;
     }
 
     // The music's next track, when its turn in a crossfade comes.
@@ -281,7 +339,7 @@ void audio_extract(TickContext& ctx) {
         s.music.delay -= (f32)ctx.dt;
         if (s.music.delay <= 0.0f) {
             SoundPlay p;
-            p.sound = s.music.next; p.volume = 0.0f; p.loop = true; p.pause_with_sim = false; p.bus = AudioBus::Music;
+            p.sound = s.music.next; p.volume = 0.0f; p.loop = true; p.pause_with_sim = false; p.bus = AudioBus::Music; p.priority = 3;
             s.music.voice = play_locked(s, p);
             if (!s.music.voice.is_null()) fade_locked(s, s.music.voice, s.music.next_play.volume, s.music.next_play.fade_in, FadeCurve::EqualPower, false);
             s.music.waiting = false;
@@ -349,9 +407,10 @@ void audio_extract(TickContext& ctx) {
     s.cmds.queued.clear();
 
     if (s.cmds.dropped != s.dropped_logged) {
-        KV_WARN("audio", "%u commands dropped (ring full or no free voice)", s.cmds.dropped - s.dropped_logged);
+        KV_WARN("audio", "%u commands dropped (ring full or no voice to take)", s.cmds.dropped - s.dropped_logged);
         s.dropped_logged = s.cmds.dropped;
     }
+    ++s.cmds.batch; // the next plays are the next tick's
 }
 
 // The asset module is about to free a sound's samples: keep them until the mixer has
@@ -370,6 +429,7 @@ bool audio_startup(Engine& e, ModuleInstance& self) {
     os_mutex_init(&s->cmds.mu);
     s->cmds.queued.alloc = &self.general;
     s->cmds.retiring.alloc = &self.general;
+    s->cmds.stolen.alloc = &self.general;
     s->engine  = &e;
     s->general = &self.general;
     kv_handle_kind_desc desc{};
@@ -403,6 +463,7 @@ void audio_shutdown(Engine& e, ModuleInstance& self) {
             s->mixer.stats.peak_active, s->mixer.stats.clipped, s->cmds.dropped);
     kv_handle_kind_unregister(s->kind);
     s->cmds.queued.free();
+    s->cmds.stolen.free();
     os_mutex_destroy(&s->cmds.mu);
 }
 
@@ -591,6 +652,8 @@ AudioStats audio_stats(Engine& e) {
     Lock lock(s->cmds.mu);
     st.device  = s->device;
     st.dropped = s->cmds.dropped;
+    st.steals = s->cmds.steals;
+    st.merged = s->cmds.merged;
     st.mixer   = s->mixer.stats;
     for (const VoiceRec& v : s->cmds.voices) {
         if (v.used) ++st.live_voices;

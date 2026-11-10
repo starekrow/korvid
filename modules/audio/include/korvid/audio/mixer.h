@@ -43,7 +43,9 @@ struct SpscRing {
 // Retire: stop every voice reading `samples`, then acknowledge with KV_MIX_RETIRED | ticket
 // on the done ring, after which nothing on the device thread reads them. Fade: ramp a
 // voice's volume to `volume` over `fade_seconds` (curve, and stop at the end if asked).
-enum class MixOp : u8 { Play, Set, Stop, PauseSim, ResumeSim, Bus, Retire, Fade };
+// SimRate: the rate the voices that pause with the sim play at (the time scale, floored),
+// in `volume`.
+enum class MixOp : u8 { Play, Set, Stop, PauseSim, ResumeSim, Bus, Retire, Fade, SimRate };
 
 enum class FadeCurve : u8 { Linear, EqualPower };
 
@@ -106,6 +108,7 @@ struct Mixer {
     MixVoice   voices[KV_AUDIO_VOICES];
     f32        bus_gain[(u32)AudioBus::Count] = {1.0f, 1.0f, 1.0f, 1.0f};
     bool       sim_paused = false;
+    f32        sim_rate = 1.0f; // a pitch factor on the voices that pause with the sim
     u32        out_rate = 48000, out_channels = 2;
     MixerStats stats;        // written by the device thread; read as a snapshot
     SpscRing<MixCmd, KV_AUDIO_CMD_RING> in;   // game -> device

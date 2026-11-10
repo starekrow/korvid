@@ -1,7 +1,8 @@
 // The mixer on its own: a voice at pitch 2 lasts half as long; a loop joins without a
 // discontinuity; a stop takes effect at the next render; a paused voice holds its
 // position and resumes; pan and bus gains land where they should; a stale generation
-// is ignored; 64 voices mix and the ring survives a producer thread hammering it.
+// is ignored; the sim's rate pitches the voices that pause with it; 64 voices mix and the
+// ring survives a producer thread hammering it.
 #include "korvid/audio/mixer.h"
 #include "korvid/core/test.h"
 #include <math.h>
@@ -164,6 +165,27 @@ void test_mixer(kv::TestCtx& c) {
     drain_done(m);
     mixer_render(m, out, 16);
     KV_CHECK(c, m.ack_count == 0 && m.done.pop(d[0]) && d[0] == (KV_MIX_RETIRED | (78ull << 32)) && filled > 0);
+
+    // The sim's rate: a voice that pauses with the sim plays at the time scale's pitch (the
+    // game floors it at half); one that plays through does not.
+    {
+        Mixer r;
+        mixer_init(r, 48000, 2);
+        MixCmd rate{};
+        rate.op = MixOp::SimRate;
+        rate.volume = 0.5f;
+        MixCmd through = play_cmd(1, 1, ramp, 48000, 48000, 1);
+        through.pause_with_sim = false;
+        r.in.push(rate);
+        r.in.push(play_cmd(0, 1, ramp, 48000, 48000, 1));
+        r.in.push(through);
+        mixer_render(r, out, 1024);
+        KV_CHECK(c, r.sim_rate == 0.5f && near(r.voices[0].pos, 512.0) && near(r.voices[1].pos, 1024.0));
+        rate.volume = 1.0f;
+        r.in.push(rate);
+        mixer_render(r, out, 1024);
+        KV_CHECK(c, near(r.voices[0].pos, 1536.0) && near(r.voices[1].pos, 2048.0));
+    }
 
     // The ring under a producer thread: every value arrives, in order, none twice.
     SpscRing<u64, 64> ring;

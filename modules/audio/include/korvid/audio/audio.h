@@ -7,8 +7,16 @@
 // voice ran out or was stopped; the handle is stale from then on.
 //
 // A voice started with pause_with_sim (the default) holds while the sim is paused and
-// goes on at the resume; a menu click or music says false and plays through. The
-// Master bus scales everything; Sfx, Music and Ui scale their own.
+// goes on at the resume, and follows the engine's time scale in pitch (a quarter-speed
+// sim plays them at half pitch: the factor is floored at 0.5); a menu click or music says
+// false and plays through at its own pitch. The Master bus scales everything; Sfx, Music
+// and Ui scale their own.
+//
+// Under load: a play carries a priority, 0 to 3. With every voice busy it takes the voice
+// of the lowest priority, the oldest of those, if that priority is not above its own
+// (stealing; a stream voice, the music, is never taken), and is dropped otherwise. A sound
+// asked for again before the tick's extract has started it is one start: the louder
+// request's play wins, with the higher priority of the two, and both get its handle.
 //
 // Call these from a system or handler that declares a write on "audio.commands". They
 // take a lock, briefly, so any thread of the schedule may call them; the voice pool and
@@ -30,6 +38,7 @@ struct SoundPlay {
     bool     loop   = false;
     bool     pause_with_sim = true;
     AudioBus bus    = AudioBus::Sfx;
+    u8       priority = 1;          // 0 first to go .. 3 taken only by another 3
 };
 
 struct VoiceFinished { Handle voice; }; // no schema on purpose: the handle is already stale when this arrives
@@ -75,7 +84,9 @@ Handle music_current(Engine& e);
 struct AudioStats {
     bool       device = false;   // a device is open; otherwise every voice finishes at once
     u32        live_voices = 0;  // the game's view: started or waiting
-    u32        dropped = 0;      // commands that found the ring full (lost)
+    u32        dropped = 0;      // commands that found the ring full, and plays that found no voice they could take (lost)
+    u32        steals = 0;       // plays that took a busy voice of no higher priority
+    u32        merged = 0;       // plays of a sound already starting this tick (one start)
     u32        stream_voices = 0;
     u32        underruns = 0;    // buffers a stream voice found its ring empty, over the live stream voices
     MixerStats mixer;            // a snapshot from the device thread

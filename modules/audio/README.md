@@ -36,7 +36,10 @@ declared a write on `audio.commands`.
 samples at `rate_in / rate_out * pitch` with linear interpolation (mono to both channels,
 stereo as is, more channels summed), applies equal-power pan, the voice's volume, its bus
 and the master, sums into the output, clamps and counts clipping, and reports voices
-that ran out. A voice with `pause_with_sim` is held where it is while the sim is paused.
+that ran out. A voice with `pause_with_sim` is held where it is while the sim is paused,
+and plays at the sim's rate as a pitch factor: `audio.extract` sends the engine's time
+scale, floored at 0.5 (a quarter-speed sim plays its sounds an octave down), whenever it
+changes. Music and UI sounds say `pause_with_sim = false` and keep their pitch.
 Commands name a slot and a generation, so a command for a voice that already finished
 and whose slot was reused is ignored. The platform's device callback (`platform/audio.h`,
 SDL's thread, marked realtime) calls it in slices of at most 1024 frames.
@@ -103,14 +106,14 @@ Header `korvid/audio/audio.h`:
 
 | name | kind | what |
 |---|---|---|
-| `SoundPlay` | record | `sound`, `volume` (1), `pitch` (1), `pan` (0), `loop` (false), `pause_with_sim` (true), `bus` (`Sfx`) |
+| `SoundPlay` | record | `sound`, `volume` (1), `pitch` (1), `pan` (0), `loop` (false), `pause_with_sim` (true), `bus` (`Sfx`), `priority` (1; 0..3) |
 | `AudioBus` | enum | `Master`, `Sfx`, `Music`, `Ui` |
 | `audio_play(ctx, play)` | function | a voice handle at once; null when all 64 are in use |
 | `audio_set(ctx, voice, volume, pitch, pan)`, `audio_stop(ctx, voice)` | functions | false for a stale voice |
 | `audio_bus_volume(ctx, bus, volume)` | function | a bus gain; `Master` scales everything |
 | `audio_voice_live(ctx, voice)` | function | started or waiting, not finished |
 | `VoiceFinished{voice}` | event | the voice ran out, was stopped, or could not play |
-| `audio_stats(e)` | function | `device`, `live_voices`, `dropped`, and the mixer's counters |
+| `audio_stats(e)` | function | `device`, `live_voices`, `dropped`, `steals`, `merged`, and the mixer's counters |
 
 The same calls take an `Engine&` from outside the schedule.
 
@@ -146,7 +149,16 @@ Depends on: core, math, platform, asset.
   that is up to about 11 ms plus a tick. Placement within the buffer by tick time is the
   next step if a game can hear the difference.
 - **A ring full drops the command** and logs the count once per change; 1024 commands a
-  tick is the budget. A slot table full returns a null voice.
+  tick is the budget.
+- **A full pool takes a voice, by priority.** `SoundPlay::priority` is 0 to 3 (1 by
+  default; the music's is 3). With all 64 voices busy, a play takes the oldest voice of
+  the lowest priority if that priority is not above its own (`AudioStats::steals`; the
+  taken voice's `VoiceFinished` arrives at the extract), and is refused otherwise
+  (`dropped`, a null handle). A stream voice is never taken.
+- **One start a sound a tick.** A play of a sound that a voice is already waiting to
+  start this tick (same bus, same loop) is that voice: the louder of the two plays wins,
+  with the higher priority, and both callers get its handle (`AudioStats::merged`). A
+  ring of a hundred bullets is one sound, and a game rarely needs to count its own.
 - **Pitch is a ratio**, not semitones: 2 is an octave up and half the length. The mixer
   interpolates linearly; a large pitch on a bright sound aliases.
 - **Loops join sample to sample.** Make the file's end meet its start (the rocks
