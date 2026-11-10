@@ -4,6 +4,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/json.h"
 #include "korvid/core/log.h"
+#include "korvid/core/name.h"
 #include "korvid/core/utf8.h"
 #include "korvid/platform/io.h"
 #include "korvid/render/renderer.h"
@@ -39,6 +40,9 @@ bool material_parse(const char* text, usize len, MaterialDesc& desc, char* textu
             if (!strcmp(f, "nearest")) desc.filter = TextureFilter::Nearest;
             else if (!strcmp(f, "linear")) desc.filter = TextureFilter::Linear;
             else { *error = "filter must be nearest or linear"; *error_at = 0; return false; }
+        } else if (strcmp(m->key, "shader") == 0) {
+            if (!m->is_string() || !m->len) { *error = "shader must be a game shader's name"; *error_at = 0; return false; }
+            desc.shader = name_str(name_intern(m->str)); // interned: it outlives the document
         } else if (strcmp(m->key, "params") == 0) {
             u32 n = json_numbers(doc, m, desc.params, KV_MATERIAL_PARAMS);
             if (!m->is_array() || n > KV_MATERIAL_PARAMS) { *error = "params must be an array of up to 8 numbers"; *error_at = 0; return false; }

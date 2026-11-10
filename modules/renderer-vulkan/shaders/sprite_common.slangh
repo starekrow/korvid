@@ -5,10 +5,14 @@
 // Set 1, the textures: the sampler and the bindless array (variable count: last binding).
 #pragma once
 
-static const uint kBucketCount = 768;  // 256 layers x 3 blend modes
+// A bucket is a layer and a pipeline slot: slots 0-2 the engine's blends (opaque, alpha,
+// additive), 3-7 the game shaders' (shader, blend) pairs, as the renderer assigns them.
+static const uint kSlotCount   = 8;
+static const uint kBucketCount = 2048; // 256 layers x 8 slots
 static const uint kLayerMin    = 128;  // added to the clamped layer
 static const uint kBlockRows   = 1024; // sprite rows per compute block
-static const uint kGroup       = 256;  // threads per workgroup; kBucketCount == 3 * kGroup
+static const uint kGroup       = 256;  // threads per workgroup
+static const uint kPerThread   = kBucketCount / kGroup; // buckets a thread scans
 static const uint kCulled       = 0xFFFFFFFFu;
 static const uint kSpriteAlive  = 1;
 static const uint kSpriteScreen = 2; // placed through the screen view, not the camera
@@ -38,7 +42,7 @@ struct GpuMaterial {
     uint   texture; // bindless slot
     uint   blend;   // 0 opaque, 1 alpha, 2 additive
     uint   filter;  // 0 nearest, 1 linear: the sampler
-    uint   pad;
+    uint   slot;    // its pipeline: the blend's, or a game shader's (3-7)
 };
 
 struct PushData {
@@ -52,6 +56,8 @@ struct PushData {
     uint   row_count;    // sprite rows the compute passes look at
     uint   key_bucket;   // cs_key_sort: the bucket this dispatch sorts
     float4 screen_cull;  // screen rows: the window rect in pixels
+    float  time;         // the render time in seconds: what a game shader animates by
+    uint   pad_t0, pad_t1, pad_t2;
 };
 
 [[vk::push_constant]] ConstantBuffer<PushData> gPush;

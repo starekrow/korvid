@@ -25,11 +25,11 @@ u32 rv_material_row_of(const Renderer* r, Handle material) {
     return r->materials.valid(material) ? material.index() : 0;
 }
 
-u32 rv_bucket_of(i32 layer, BlendMode blend) {
+u32 rv_bucket_of(i32 layer, u32 slot) {
     if (layer < kLayerMin) layer = kLayerMin;
     if (layer > kLayerMax) layer = kLayerMax;
-    u32 b = (u32)blend < kBlendCount ? (u32)blend : (u32)BlendMode::Alpha;
-    return (u32)(layer - kLayerMin) * kBlendCount + b;
+    u32 b = slot < kSlotCount ? slot : (u32)BlendMode::Alpha;
+    return (u32)(layer - kLayerMin) * kSlotCount + b;
 }
 
 const char* blend_mode_name(BlendMode mode) {
@@ -86,6 +86,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->window      = desc.native_window;
     if (const PlatformState* ps = engine_module_state_as<PlatformState>(engine, "platform"))
         snprintf(r->base_path, sizeof r->base_path, "%s", ps->base_path);
+    r->start_time = time_now();
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;
     r->want_width  = desc.width;
@@ -238,14 +239,17 @@ Name derived_material_name(const Renderer* r, const MaterialRecord& m) {
     h = hash_mix(h ^ (u64)m.blend ^ ((u64)m.filter << 8));
     h = hash_mix(h ^ hash_bytes(&m.tint, sizeof m.tint));
     h = hash_mix(h ^ hash_bytes(m.params, sizeof m.params));
+    h = hash_mix(h ^ m.shader.hash);
     char text[32];
     snprintf(text, sizeof text, "material:%016llx", (unsigned long long)h);
     return name_intern(text);
 }
 
-void fill_material(MaterialRecord& m, const MaterialDesc& desc) {
+void fill_material(Renderer* r, MaterialRecord& m, const MaterialDesc& desc) {
     m.texture = desc.texture;
     m.blend   = (u32)desc.blend < (u32)BlendMode::Count ? desc.blend : BlendMode::Alpha;
+    m.shader  = desc.shader && desc.shader[0] ? name_intern(desc.shader) : Name{};
+    m.slot    = rv_material_slot(r, m.shader, m.blend);
     m.filter  = (u32)desc.filter < (u32)TextureFilter::Count ? desc.filter : TextureFilter::Nearest;
     m.tint    = desc.tint;
     for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) m.params[i] = desc.params[i];
@@ -256,7 +260,7 @@ void fill_material(MaterialRecord& m, const MaterialDesc& desc) {
 Handle renderer_material_create(Renderer* r, const MaterialDesc& desc) {
     if (!r) return Handle{};
     MaterialRecord m{};
-    fill_material(m, desc);
+    fill_material(r, m, desc);
     if (desc.name && desc.name[0]) m.name = name_intern(desc.name);
     else {
         m.name = derived_material_name(r, m);
@@ -276,9 +280,9 @@ Handle renderer_material_create(Renderer* r, const MaterialDesc& desc) {
 bool renderer_material_set(Renderer* r, Handle material, const MaterialDesc& desc) {
     MaterialRecord* m = r ? r->materials.get(material) : nullptr;
     if (!m) return false;
-    BlendMode before = m->blend;
-    fill_material(*m, desc);
-    if (m->blend != before) rv_rebind_material(r, material.index()); // the sprites' buckets moved
+    u32 before = m->slot;
+    fill_material(r, *m, desc);
+    if (m->slot != before) rv_rebind_material(r, material.index()); // the sprites' buckets moved
     rv_mark_material_dirty(r, material.index());
     return true;
 }
@@ -291,6 +295,7 @@ bool renderer_material_get(const Renderer* r, Handle material, MaterialDesc* out
     out->filter  = m->filter;
     out->tint    = m->tint;
     out->name    = name_str(m->name);
+    out->shader  = m->shader.is_null() ? nullptr : name_str(m->shader);
     for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) out->params[i] = m->params[i];
     return true;
 }
@@ -355,7 +360,7 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
         case SpriteDeltaKind::Set: {
             const RenderSpriteState& st = d.state;
             u32 material = rv_material_row_of(r, st.material);
-            u32 bucket   = rv_bucket_of(st.layer, r->materials.items[material].blend);
+            u32 bucket   = rv_bucket_of(st.layer, r->materials.items[material].slot);
             RenderSprite* s;
             u32 slot;
             if (u32* found = r->sprite_of_entity.find(d.entity)) {

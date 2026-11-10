@@ -1,5 +1,5 @@
 // Korvid renderer-vulkan: the sort. A counting sort of the live, visible sprite rows into
-// buckets of (layer, blend), stable by row within a bucket, in four passes:
+// buckets of (layer, pipeline slot), stable by row within a bucket, in four passes:
 //   cs_count        per block of 1024 rows: cull, bucket, block histogram
 //   cs_scan         per bucket: running sum over blocks (block offsets), bucket totals
 //   cs_bucket_scan  one group: exclusive scan of the totals (bucket starts), indirect draws
@@ -36,14 +36,15 @@ uint bucket_of_row(uint i) {
     if (pos.x + radius < c.x || pos.x - radius > c.x + c.z ||
         pos.y + radius < c.y || pos.y - radius > c.y + c.w) return kCulled;
     int  layer = clamp(s.layer, -128, 127);
-    uint blend = min(gMaterials[s.material].blend, 2u);
-    return uint(layer + int(kLayerMin)) * 3 + blend;
+    uint slot  = min(gMaterials[s.material].slot, kSlotCount - 1);
+    return uint(layer + int(kLayerMin)) * kSlotCount + slot;
 }
 
-// Exclusive scan of sHist in place. Thread t owns entries 3t, 3t+1, 3t+2.
+// Exclusive scan of sHist in place. Thread t owns entries kPerThread * t onward.
 void scan_hist(uint t) {
-    uint a0 = sHist[3 * t], a1 = sHist[3 * t + 1], a2 = sHist[3 * t + 2];
-    uint sum = a0 + a1 + a2;
+    uint a[kPerThread];
+    uint sum = 0;
+    for (uint j = 0; j < kPerThread; ++j) { a[j] = sHist[kPerThread * t + j]; sum += a[j]; }
     sScan[t] = sum;
     GroupMemoryBarrierWithGroupSync();
     for (uint off = 1; off < kGroup; off <<= 1) {
@@ -52,10 +53,8 @@ void scan_hist(uint t) {
         sScan[t] += v;
         GroupMemoryBarrierWithGroupSync();
     }
-    uint excl = sScan[t] - sum;
-    sHist[3 * t]     = excl;
-    sHist[3 * t + 1] = excl + a0;
-    sHist[3 * t + 2] = excl + a0 + a1;
+    uint run = sScan[t] - sum;
+    for (uint j = 0; j < kPerThread; ++j) { sHist[kPerThread * t + j] = run; run += a[j]; }
     GroupMemoryBarrierWithGroupSync();
 }
 
@@ -96,18 +95,17 @@ void cs_scan(uint3 dtid : SV_DispatchThreadID) {
 [numthreads(kGroup, 1, 1)]
 void cs_bucket_scan(uint3 tid : SV_GroupThreadID) {
     uint t = tid.x;
-    for (uint j = 0; j < 3; ++j) sHist[3 * t + j] = gSortMeta[3 * t + j];
+    uint counts[kPerThread];
+    for (uint j = 0; j < kPerThread; ++j) { counts[j] = gSortMeta[kPerThread * t + j]; sHist[kPerThread * t + j] = counts[j]; }
     GroupMemoryBarrierWithGroupSync();
-    uint c0 = sHist[3 * t], c1 = sHist[3 * t + 1], c2 = sHist[3 * t + 2];
     scan_hist(t);
-    uint counts[3] = {c0, c1, c2};
-    for (uint j = 0; j < 3; ++j) {
-        uint b     = 3 * t + j;
+    for (uint j = 0; j < kPerThread; ++j) {
+        uint b     = kPerThread * t + j;
         uint start = sHist[b];
         gSortMeta[kStarts + b] = start;
         gIndirect[b] = uint4(6, counts[j], 0, start); // vertexCount, instanceCount, firstVertex, firstInstance
     }
-    if (t == kGroup - 1) gSortMeta[kVisible] = sHist[kBucketCount - 1] + c2;
+    if (t == kGroup - 1) gSortMeta[kVisible] = sHist[kBucketCount - 1] + counts[kPerThread - 1];
 }
 
 [shader("compute")]

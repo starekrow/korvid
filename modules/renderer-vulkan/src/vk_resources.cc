@@ -330,6 +330,7 @@ bool rv_create_default_texture(Renderer* r) {
     MaterialRecord m{};
     m.texture = h;
     m.blend   = BlendMode::Alpha;
+    m.slot    = (u32)BlendMode::Alpha;
     m.tint    = color_white();
     m.name    = name_intern("default");
     r->default_material = r->materials.create(m);
@@ -351,6 +352,7 @@ void rv_material_row(Renderer* r, u32 row, GpuMaterial& out) {
     out.texture = renderer_texture_slot(r, m->texture);
     out.blend   = (u32)m->blend;
     out.filter  = (u32)m->filter;
+    out.slot    = m->slot;
 }
 
 void rv_mark_material_dirty(Renderer* r, u32 row) {
@@ -358,13 +360,13 @@ void rv_mark_material_dirty(Renderer* r, u32 row) {
 }
 
 void rv_rebind_material(Renderer* r, u32 row) {
-    u32 blend = r->materials.is_alive(row) ? (u32)r->materials.items[row].blend : (u32)r->materials.items[0].blend;
+    u32 slot = r->materials.is_alive(row) ? r->materials.items[row].slot : r->materials.items[0].slot;
     for (u32 i = 0; i < r->sprites.len; ++i) {
         if (!r->sprites.is_alive(i)) continue;
         RenderSprite& s = r->sprites.items[i];
         if (s.gpu.material != row) continue;
         if (!r->materials.is_alive(row)) s.gpu.material = 0; // the material is gone: the default
-        u32 bucket = rv_bucket_of(s.gpu.layer, (BlendMode)blend);
+        u32 bucket = rv_bucket_of(s.gpu.layer, slot);
         if (bucket != s.bucket) {
             --r->bucket_counts[s.bucket];
             ++r->bucket_counts[bucket];
@@ -529,7 +531,7 @@ bool rv_create_descriptors(Renderer* r) {
         tb[i].binding         = i;
         tb[i].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         tb[i].descriptorCount = 1;
-        tb[i].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+        tb[i].stageFlags      = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT; // a game's fragment shader reads the materials
     }
     VkDescriptorSetLayoutCreateInfo tlci{};
     tlci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -630,7 +632,7 @@ bool rv_create_descriptors(Renderer* r) {
     for (u32 i = 0; i < kFramesInFlight; ++i) rv_write_tables_set(r, r->frames[i]);
 
     VkDescriptorSetLayout layouts[2] = {r->tables_layout, r->textures_layout};
-    VkPushConstantRange range{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushData)};
+    VkPushConstantRange range{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushData)};
     VkPipelineLayoutCreateInfo plci{};
     plci.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     plci.setLayoutCount         = 2;

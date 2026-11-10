@@ -46,7 +46,9 @@ library that includes its own headers by `<name>`).
 
 **Tool rules.** A tool module exports `rule "name" { inputs, outputs, command, deps }`; a
 module naming the tool in `tools` gets an edge per file of its own that matches `inputs`
-(the shader rule: `shaders/*.slang` to `%{stem}.spv`). A rule with `per = "exe"` and
+(the shader rule: `shaders/*.slang` to `%{stem}.spv`). A command may use
+`%{shader_includes}`: an `-I` for the `shaders/` directory of every module in the build, so
+a game's shader includes the renderer's `sprite_fragment.slangh` by name. A rule with `per = "exe"` and
 `inputs = "assets"` runs once per executable instead, over every asset file the
 executable's closure stages under `bin/assets/`, passed through a Ninja response file
 (`%{rsp}`), with `%{exe}` in `outputs` (kpack's pack rule: `bin/<exe>.kpak`). Per-exe

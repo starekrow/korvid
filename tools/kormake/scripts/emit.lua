@@ -214,7 +214,21 @@ function M.run(c, g, opts)
     (opts.cxx and (" --cxx " .. util.ninja_escape(q(opts.cxx))) or "") .. "\n  generator = 1\n  description = KORMAKE gen " .. target)
   w("")
 
-  -- Tool rules, one Ninja rule per (tool, rule).
+  -- Tool rules, one Ninja rule per (tool, rule). %{shader_includes} is an include flag for
+  -- every module of the build with a shaders/ directory, so a game's shader can include the
+  -- renderer's interface by name.
+  local shader_includes = {}
+  do
+    local seen = {}
+    for _, inst in ipairs(g.instances) do
+      local d = inst.module.shaders_dir
+      if d and not seen[d] then
+        seen[d] = true
+        shader_includes[#shader_includes + 1] = "-I " .. util.ninja_escape(q(d))
+      end
+    end
+    table.sort(shader_includes)
+  end
   local tool_rules = {}
   for _, inst in ipairs(g.instances) do
     for _, t in ipairs(inst.tools) do
@@ -227,6 +241,7 @@ function M.run(c, g, opts)
           -- Ninja quotes $in and $out itself when a path needs it.
           cmd = cmd:gsub("%%{tool}", (util.ninja_escape(program(tool)):gsub("%%", "%%%%"))):gsub("%%{in}", "$in")
             :gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp")
+            :gsub("%%{shader_includes}", (table.concat(shader_includes, " "):gsub("%%", "%%%%")))
           local rsp = r.per == "exe" and "\n  rspfile = $out.rsp\n  rspfile_content = $in" or ""
           w("rule " .. rname .. "\n  command = " .. cmd .. (r.deps == "depfile" and "\n  depfile = $out.d\n  deps = gcc" or "") .. rsp .. "\n  description = " .. r.name:upper() .. " $out")
           tool_rules[rname] = { rule = r, tool = tool, implicit = implicit }

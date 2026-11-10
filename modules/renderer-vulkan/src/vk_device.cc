@@ -14,6 +14,10 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverityFlagBit
                                               void* user) {
     Renderer* r = (Renderer*)user;
     const char* msg = data && data->pMessage ? data->pMessage : "(no message)";
+    // Expected, not a fault: the sprite vertex shader writes every varying a fragment shader
+    // may want (sprite_fragment.slangh), and the engine's, like most game shaders, reads only
+    // some. Unread outputs are legal; the layers warn about them anyway.
+    if (data && data->pMessageIdName && strstr(data->pMessageIdName, "Shader-OutputNotConsumed")) return VK_FALSE;
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
         ++r->validation_errors;
         KV_ERROR("vulkan", "%s", msg);

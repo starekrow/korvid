@@ -1,0 +1,37 @@
+// Korvid renderer-vulkan: what a sprite's fragment shader sees, the engine's and a game's.
+// A game shader (shaders/*.slang in the game's module, built by kormake's shader rule,
+// which puts this directory on the include path) includes this file and defines
+//
+//   [shader("fragment")] float4 fs_main(SpriteVaryings i) : SV_Target
+//
+// and nothing else: the vertex shader is the engine's, so the varyings below are the
+// whole interface. A material names the shader (MaterialDesc::shader); its blend applies
+// after it. What it may read: the varyings; its material's row (gMaterials[i.material]:
+// the tint, eight parameters, the texture); the bindless textures through sprite_texel or
+// its own sampling; the push block (gPush.time, the render time in seconds; gPush.tick).
+// Presentation only: nothing a shader computes reaches the sim.
+#pragma once
+#include "sprite_common.slangh"
+
+[[vk::binding(1, 0)]] StructuredBuffer<GpuMaterial> gMaterials;
+[[vk::binding(0, 1)]] SamplerState                  gSamplers[2]; // nearest, linear
+[[vk::binding(1, 1)]] Texture2D                     gTextures[];  // variable count: last binding
+
+struct SpriteVaryings {
+    float4 pos   : SV_Position;
+    float2 uv    : UV;      // in the texture, the material's offset applied
+    float4 tint  : TINT;    // the sprite's tint times the material's
+    float2 world : WORLD;   // where the fragment is, in world units (screen pixels for a screen row)
+    float2 local : LOCAL;   // across the quad, 0 to 1 each way, +y up
+    nointerpolation uint tex      : TEX;
+    nointerpolation uint filter   : FILTER;
+    nointerpolation uint material : MATERIAL;
+};
+
+// The sprite's texel at a uv, through its material's sampler.
+float4 sprite_texel(SpriteVaryings i, float2 uv) {
+    return gTextures[NonUniformResourceIndex(i.tex)].Sample(gSamplers[i.filter], uv);
+}
+
+// The material's parameters: params0 (xy the uv offset the engine applies), params1.
+GpuMaterial sprite_material(SpriteVaryings i) { return gMaterials[i.material]; }

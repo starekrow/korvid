@@ -30,12 +30,15 @@ constexpr u32 kDefaultTexSize = 16;   // checkerboard texels per side
 constexpr u32 kDefaultTexCell = 2;    // texels per checker cell
 constexpr u32 kBlendCount     = (u32)BlendMode::Count;
 
-// Sort buckets: layers clamped to [kLayerMin, kLayerMax], three blend modes per layer.
-// Mirrored by sprite_sort.slang.
+// Sort buckets: layers clamped to [kLayerMin, kLayerMax], eight pipeline slots per layer:
+// the three blends with the engine's fragment shader, then five game shaders' (shader,
+// blend) pairs as materials name them. Mirrored by sprite_common.slangh.
 constexpr i32 kLayerMin     = -128;
 constexpr i32 kLayerMax     = 127;
 constexpr u32 kLayerCount   = 256;
-constexpr u32 kBucketCount  = kLayerCount * kBlendCount; // 768
+constexpr u32 kSlotCount    = 8;
+constexpr u32 kGameSlots    = kSlotCount - kBlendCount; // 5
+constexpr u32 kBucketCount  = kLayerCount * kSlotCount; // 2048
 constexpr u32 kBlockRows    = 1024;                      // sprite rows per compute block
 constexpr u32 kComputeGroup = 256;                       // threads per compute workgroup
 
@@ -74,7 +77,7 @@ struct GpuMaterial {
     u32 texture; // bindless slot, resolved through the texture pool when the row is written
     u32 blend;
     u32 filter;  // TextureFilter: which sampler
-    u32 pad;
+    u32 slot;    // its pipeline slot: the blend's, or a game shader's
 };
 static_assert(sizeof(GpuMaterial) == 64, "GpuMaterial must match sprite_common.slangh");
 
@@ -91,8 +94,10 @@ struct PushData {
     u32 row_count;       // sprite rows the compute passes look at
     u32 key_bucket;      // cs_key_sort: the bucket this dispatch sorts
     f32 screen_cull[4];  // screen rows: the window rect in pixels, x, y, w, h
+    f32 time;            // the render time in seconds, for game shaders
+    u32 pad_t[3];
 };
-static_assert(sizeof(PushData) == 96, "PushData must match sprite_common.slangh");
+static_assert(sizeof(PushData) == 112, "PushData must match sprite_common.slangh");
 
 // ---- CPU-side records ---------------------------------------------------------------------
 
@@ -124,6 +129,19 @@ struct MaterialRecord {
     color     tint;
     f32       params[KV_MATERIAL_PARAMS];
     Name      name;   // MaterialDesc::name, or derived from the content at creation
+    Name      shader; // a game fragment shader's name, or none
+    u32       slot;   // its pipeline slot: the blend, or kBlendCount + its game pipe
+};
+
+// A game fragment shader with a blend: a pipeline slot of its own. Made when a material
+// first names the pair; a shader that will not load or link is `failed`, and its slot draws
+// with the engine's pipeline of its blend.
+struct GamePipe {
+    Name           shader;
+    BlendMode      blend  = BlendMode::Alpha;
+    VkShaderModule module = VK_NULL_HANDLE;
+    VkPipeline     pipeline = VK_NULL_HANDLE;
+    bool           used = false, failed = false;
 };
 
 // A sprite in the render world. The GPU row, plus what the GPU does not need.
@@ -262,6 +280,8 @@ struct Renderer {
     VkShaderModule        sprite_shader   = VK_NULL_HANDLE;
     VkShaderModule        sort_shader     = VK_NULL_HANDLE;
     VkPipeline            pipelines[kBlendCount] = {};
+    GamePipe              game_pipes[kGameSlots];
+    f64                   start_time = 0.0; // the render time's zero
     VkPipeline            cs_count = VK_NULL_HANDLE, cs_scan = VK_NULL_HANDLE,
                           cs_bucket_scan = VK_NULL_HANDLE, cs_scatter = VK_NULL_HANDLE, cs_key_sort = VK_NULL_HANDLE;
 
@@ -417,6 +437,10 @@ bool rv_verify_sort(Renderer* r);
 // ---- renderer.cc ------------------------------------------------------------------------
 // Row index for a material handle: its row, or 0 (the default) when null or stale.
 u32  rv_material_row_of(const Renderer* r, Handle material);
-u32  rv_bucket_of(i32 layer, BlendMode blend);
+u32  rv_bucket_of(i32 layer, u32 slot);
+// The pipeline slot for a material: its blend's, or a game shader's (assigned here, its
+// module loaded and its pipeline made once the swapchain's format is known).
+u32  rv_material_slot(Renderer* r, Name shader, BlendMode blend);
+bool rv_create_game_pipeline(Renderer* r, GamePipe& gp);
 
 } // namespace kv

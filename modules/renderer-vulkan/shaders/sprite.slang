@@ -1,22 +1,12 @@
 // Korvid renderer-vulkan: the sprite shader. The draw is indirect, one per bucket; the
 // instance index (base included: Slang's SV_InstanceID excludes it) selects a row through
 // the sorted index list the compute sort wrote. The quad corners come from the vertex
-// index; placement, UVs, tint and texture come from the row and its material.
-#include "sprite_common.slangh"
+// index; placement, UVs, tint and texture come from the row and its material. A game's
+// fragment shader replaces fs_main for its material's sprites (sprite_fragment.slangh).
+#include "sprite_fragment.slangh"
 
 [[vk::binding(0, 0)]] StructuredBuffer<GpuSprite>   gSprites;
-[[vk::binding(1, 0)]] StructuredBuffer<GpuMaterial> gMaterials;
 [[vk::binding(2, 0)]] StructuredBuffer<uint>        gSorted;
-[[vk::binding(0, 1)]] SamplerState                  gSamplers[2]; // nearest, linear
-[[vk::binding(1, 1)]] Texture2D                     gTextures[]; // variable count: last binding
-
-struct VSOut {
-    float4 pos  : SV_Position;
-    float2 uv   : UV;
-    float4 tint : TINT;
-    nointerpolation uint tex : TEX;
-    nointerpolation uint filter : FILTER;
-};
 
 // Two triangles over the unit quad centered at the origin, +y up in world space.
 static const float2 kCorners[6] = {
@@ -25,7 +15,7 @@ static const float2 kCorners[6] = {
 };
 
 [shader("vertex")]
-VSOut vs_main(uint vid : SV_VertexID, uint iid : SV_InstanceID, uint base : SV_StartInstanceLocation) {
+SpriteVaryings vs_main(uint vid : SV_VertexID, uint iid : SV_InstanceID, uint base : SV_StartInstanceLocation) {
     uint        row = gSorted[base + iid];
     GpuSprite   s   = gSprites[row];
     GpuMaterial m   = gMaterials[s.material];
@@ -39,18 +29,21 @@ VSOut vs_main(uint vid : SV_VertexID, uint iid : SV_InstanceID, uint base : SV_S
     float2 world  = apply_affine(model, pos, corner);
     float2 clip   = row_to_clip(s, world);
 
-    VSOut o;
+    SpriteVaryings o;
     o.pos  = float4(clip, 0.0, 1.0);
     // Texture v runs top to bottom, world y runs bottom to top.
     o.uv   = float2(s.uv.x + (corner.x + 0.5) * s.uv.z,
                     s.uv.y + (0.5 - corner.y) * s.uv.w) + m.params0.xy;
     o.tint = s.tint * m.tint;
+    o.world = world;
+    o.local = corner + 0.5;
     o.tex  = m.texture;
     o.filter = min(m.filter, 1u);
+    o.material = s.material;
     return o;
 }
 
 [shader("fragment")]
-float4 fs_main(VSOut i) : SV_Target {
-    return gTextures[NonUniformResourceIndex(i.tex)].Sample(gSamplers[i.filter], i.uv) * i.tint;
+float4 fs_main(SpriteVaryings i) : SV_Target {
+    return sprite_texel(i, i.uv) * i.tint;
 }

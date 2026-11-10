@@ -1,7 +1,7 @@
 # Renderer
 
-Nov 7, 2026. The sprite renderer after slice 3: what lives on the GPU, what a frame does,
-and the rules the pieces follow.
+Nov 7, 2026 (game shaders: Nov 10). The sprite renderer after slice 3: what lives on the
+GPU, what a frame does, and the rules the pieces follow.
 
 ## Principle
 
@@ -44,19 +44,21 @@ written as a zero row.
 
 ## The sort
 
-A sprite's bucket is `(clamp(layer, -128, 127) + 128) * 3 + blend`: 768 buckets, layer
-major, so ascending bucket order is draw order. The CPU keeps an exact count per bucket,
-updated on `Set` and `Remove` (and when a material's blend changes, by walking its
-sprites), so it knows the non-empty buckets without looking at rows.
+A sprite's bucket is `(clamp(layer, -128, 127) + 128) * 8 + slot`: 2,048 buckets, layer
+major, so ascending bucket order is draw order. The slot is the material's pipeline: 0 to 2
+the engine's blends, 3 to 7 game shaders (slice 6; before it, 768 buckets of layer and
+blend). The CPU keeps an exact count per bucket, updated on `Set` and `Remove` (and when a
+material's slot changes, by walking its sprites), so it knows the non-empty buckets without
+looking at rows.
 
 Four compute passes over blocks of 1024 rows (256 threads, 4 rows each):
 
 1. **count**: cull each live row's bounding circle against the view rect, write its
    bucket (or "culled") to `bucket_of`, build the block's histogram in shared memory and
    write it to `block_hist`.
-2. **scan**: one thread per bucket runs over the blocks, turning counts into each
+2. **scan**: a thread per bucket (eight buckets a thread) runs over the blocks, turning counts into each
    block's offset within the bucket and producing the bucket's total.
-3. **bucket scan**: one group scans the 768 totals into bucket starts and writes an
+3. **bucket scan**: one group scans the 2,048 totals into bucket starts and writes an
    indirect command per bucket: 6 vertices, the visible count, the bucket's start as
    `firstInstance`.
 4. **scatter**: per block, the local histogram and its scan give each bucket's first
@@ -78,8 +80,8 @@ records the check and verifies (key, row) order, allowing near ties either way. 
 ## The draws
 
 The CPU walks its bucket counts and records a `vkCmdDrawIndirect` per run: from a
-non-empty bucket through the last non-empty bucket of the same blend before one of
-another blend intervenes, with one pipeline bind. Buckets in between with nothing in them
+non-empty bucket through the last non-empty bucket of the same slot before one of
+another slot intervenes, with one pipeline bind. Buckets in between with nothing in them
 draw zero instances. Without `multiDrawIndirect` it is one call per non-empty bucket.
 The vertex shader reads `sorted[base + instance]`; Slang's `SV_InstanceID` excludes the
 base instance, so `SV_StartInstanceLocation` adds it back.
@@ -145,3 +147,22 @@ Set 1 holds two samplers, nearest and linear (slice 5), and the material row's `
 picks one per draw: the vertex shader passes it flat to the fragment shader, which samples
 `gSamplers[filter]`. Pixel art stays on nearest; font atlases and anything drawn at a scale
 of its own use linear.
+
+## Game shaders
+
+Slice 6. A material may name a game's fragment shader (`MaterialDesc::shader`, a material
+file's `"shader"`): a SPIR-V file in `<exe>/shaders/`, built by kormake's shader rule from
+the game module's `shaders/*.slang`, whose include path holds every module's `shaders/` so
+the game includes `sprite_fragment.slangh` by name. That header is the whole interface: the
+varyings (uv, tint, world position, the quad's local 0 to 1, the texture, sampler and
+material row), the bindings, and `sprite_texel`; the game defines `fs_main` and nothing
+else. The vertex shader, the sort and the blend states stay the engine's; the push block
+carries `time`, the render time in seconds, for what animates without the sim.
+
+Pipelines are by slot. The first material naming a (shader, blend) pair loads the module
+and builds a pipeline for it in a free game slot, five of them; a material whose pair has a
+slot reuses it, and the material row records its slot for the sort. A shader that will not
+load (missing, invalid) is logged once and its materials draw in their blend's engine slot,
+as does a sixth pair. The cost of the eight slots is the sort's larger histogram: 2,048
+buckets against 768 adds about 0.015 ms a frame to the sort under arcfire's `--bench
+ring --dial rank=56` (0.19 to 0.21 ms on a Radeon 780M), and nothing to the draws, which stay one per run.

@@ -2,10 +2,11 @@
 // module's assets/:
 //
 //   { "texture": "example_rocks/rock.png", "blend": "alpha", "tint": [1, 1, 1, 1],
-//     "params": [0, 0, 0, 0, 0, 0, 0, 0] }
+//     "params": [0, 0, 0, 0, 0, 0, 0, 0], "filter": "nearest", "shader": "arcfire_nebula" }
 //
 // Every field is optional: no texture means the renderer's default, the rest default to
-// an alpha-blended, untinted, zero-parameter material. asset_load_material returns a
+// an alpha-blended, untinted, zero-parameter, nearest-sampled material drawn by the
+// engine's fragment shader. "shader" names a game's (MaterialDesc::shader). asset_load_material returns a
 // handle at once; the renderer row it names exists from then on (showing the placeholder
 // look) so sprites can use it immediately. The file read goes through the I/O queue, the
 // parse happens in "asset.pump_materials" (phase PreSim, main thread, after "asset.pump"),

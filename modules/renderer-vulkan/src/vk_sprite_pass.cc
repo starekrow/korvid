@@ -7,6 +7,7 @@
 #include "renderer_internal.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/profile.h"
+#include "korvid/core/time.h"
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
@@ -242,7 +243,7 @@ void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_key_sort);
             keyed = true;
         }
-        vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+        vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
                            offsetof(PushData, key_bucket), sizeof(u32), &b);
         vkCmdDispatch(cmd, 1, 1, 1);
     }
@@ -339,28 +340,31 @@ void record_screenshot(Renderer* r, VkCommandBuffer cmd, VkImage image, VkExtent
 // ---- the draws ---------------------------------------------------------------------------------
 
 // One indirect draw per run of buckets: from a non-empty bucket to the last non-empty bucket
-// of the same blend before one of another blend intervenes. Buckets in between with nothing
-// in them draw zero instances. Without multi-draw, one call per non-empty bucket.
+// of the same pipeline slot before one of another slot intervenes. Buckets in between with
+// nothing in them draw zero instances. Without multi-draw, one call per non-empty bucket. A
+// game slot whose pipeline failed draws with its blend's engine pipeline.
 u32 record_draws(Renderer* r, VkCommandBuffer cmd) {
     u32 draws = 0;
     u32 b = 0;
     while (b < kBucketCount) {
         if (!r->bucket_counts[b]) { ++b; continue; }
-        u32 blend = b % kBlendCount;
+        u32 slot = b % kSlotCount;
         u32 first = b, last = b;
         for (u32 n = b + 1; n < kBucketCount; ++n) {
             if (!r->bucket_counts[n]) continue;
-            if (n % kBlendCount != blend) break;
+            if (n % kSlotCount != slot) break;
             last = n;
         }
+        const GamePipe* gp = slot >= kBlendCount ? &r->game_pipes[slot - kBlendCount] : nullptr;
+        VkPipeline pipe = gp ? (gp->pipeline ? gp->pipeline : r->pipelines[(u32)gp->blend]) : r->pipelines[slot];
         // Its label: the layers it covers and its blend, for a capture tool.
         char label[64];
         if (r->debug_utils) {
-            snprintf(label, sizeof label, "layers %d..%d %s", (i32)(first / kBlendCount) + kLayerMin, (i32)(last / kBlendCount) + kLayerMin,
-                     blend_mode_name((BlendMode)blend));
+            snprintf(label, sizeof label, "layers %d..%d %s", (i32)(first / kSlotCount) + kLayerMin, (i32)(last / kSlotCount) + kLayerMin,
+                     gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
             rv_label_begin(r, cmd, label);
         }
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->pipelines[blend]);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
         if (r->multi_draw_indirect) {
             vkCmdDrawIndirect(cmd, r->indirect.buffer, (VkDeviceSize)first * sizeof(VkDrawIndirectCommand),
                               last - first + 1, sizeof(VkDrawIndirectCommand));
@@ -392,8 +396,9 @@ bool rv_create_compute_pipelines(Renderer* r) {
            create_compute(r, "cs_key_sort", &r->cs_key_sort);
 }
 
-// One graphics pipeline per blend mode; everything else is shared. Needs the swapchain format.
-bool rv_create_pipelines(Renderer* r) {
+// A sprite pipeline: the engine's vertex shader, a fragment shader (the engine's or a
+// game's, entry point fs_main), a blend. Needs the swapchain format. Null on failure.
+VkPipeline make_sprite_pipeline(Renderer* r, VkShaderModule fragment, BlendMode mode, const char* label) {
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
@@ -401,9 +406,8 @@ bool rv_create_pipelines(Renderer* r) {
     stages[0].pName  = "vs_main";
     stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = r->sprite_shader;
+    stages[1].module = fragment;
     stages[1].pName  = "fs_main";
-
     VkPipelineVertexInputStateCreateInfo vertex_input{}; // no vertex buffers at all
     vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
@@ -438,30 +442,84 @@ bool rv_create_pipelines(Renderer* r) {
     rendering.colorAttachmentCount    = 1;
     rendering.pColorAttachmentFormats = &r->swapchain.format;
 
-    for (u32 i = 0; i < kBlendCount; ++i) {
-        VkPipelineColorBlendAttachmentState attachment = blend_state((BlendMode)i);
-        VkPipelineColorBlendStateCreateInfo blend{};
-        blend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        blend.attachmentCount = 1;
-        blend.pAttachments    = &attachment;
+    VkPipelineColorBlendAttachmentState attachment = blend_state(mode);
+    VkPipelineColorBlendStateCreateInfo blend{};
+    blend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blend.attachmentCount = 1;
+    blend.pAttachments    = &attachment;
 
-        VkGraphicsPipelineCreateInfo ci{};
-        ci.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-        ci.pNext               = &rendering;
-        ci.stageCount          = 2;
-        ci.pStages             = stages;
-        ci.pVertexInputState   = &vertex_input;
-        ci.pInputAssemblyState = &assembly;
-        ci.pViewportState      = &viewport;
-        ci.pRasterizationState = &raster;
-        ci.pMultisampleState   = &multisample;
-        ci.pColorBlendState    = &blend;
-        ci.pDynamicState       = &dynamic_state;
-        ci.layout              = r->pipe_layout;
-        VK_CHECK(vkCreateGraphicsPipelines(r->device, VK_NULL_HANDLE, 1, &ci, nullptr, &r->pipelines[i]));
-        rv_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)r->pipelines[i], blend_mode_name((BlendMode)i));
+    VkGraphicsPipelineCreateInfo ci{};
+    ci.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    ci.pNext               = &rendering;
+    ci.stageCount          = 2;
+    ci.pStages             = stages;
+    ci.pVertexInputState   = &vertex_input;
+    ci.pInputAssemblyState = &assembly;
+    ci.pViewportState      = &viewport;
+    ci.pRasterizationState = &raster;
+    ci.pMultisampleState   = &multisample;
+    ci.pColorBlendState    = &blend;
+    ci.pDynamicState       = &dynamic_state;
+    ci.layout              = r->pipe_layout;
+    VkPipeline out = VK_NULL_HANDLE;
+    VkResult res = vkCreateGraphicsPipelines(r->device, VK_NULL_HANDLE, 1, &ci, nullptr, &out);
+    if (res != VK_SUCCESS) { KV_ERROR("vulkan", "pipeline %s: %s", label, vk_result_name(res)); return VK_NULL_HANDLE; }
+    rv_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)out, label);
+    return out;
+}
+
+// One graphics pipeline per blend mode with the engine's fragment shader, and one per game
+// pipe in use; everything else is shared. Needs the swapchain format.
+bool rv_create_pipelines(Renderer* r) {
+    for (u32 i = 0; i < kBlendCount; ++i) {
+        r->pipelines[i] = make_sprite_pipeline(r, r->sprite_shader, (BlendMode)i, blend_mode_name((BlendMode)i));
+        if (!r->pipelines[i]) return false;
     }
+    for (GamePipe& gp : r->game_pipes)
+        if (gp.used && !gp.failed) rv_create_game_pipeline(r, gp);
     return true;
+}
+
+bool rv_create_game_pipeline(Renderer* r, GamePipe& gp) {
+    if (gp.failed || !gp.module) return false;
+    if (gp.pipeline || !r->swapchain.handle) return true; // made, or to be made with the format
+    char label[96];
+    snprintf(label, sizeof label, "%s %s", name_str(gp.shader), blend_mode_name(gp.blend));
+    gp.pipeline = make_sprite_pipeline(r, gp.module, gp.blend, label);
+    if (!gp.pipeline) {
+        gp.failed = true;
+        KV_ERROR("vulkan", "game shader '%s' does not link with the sprite shader: its sprites draw with the engine's", name_str(gp.shader));
+    }
+    return gp.pipeline != VK_NULL_HANDLE;
+}
+
+u32 rv_material_slot(Renderer* r, Name shader, BlendMode blend) {
+    u32 engine = (u32)blend < kBlendCount ? (u32)blend : (u32)BlendMode::Alpha;
+    if (shader.is_null()) return engine;
+    u32 free_slot = kGameSlots;
+    for (u32 i = 0; i < kGameSlots; ++i) {
+        GamePipe& gp = r->game_pipes[i];
+        if (gp.used && gp.shader == shader && gp.blend == blend) return gp.failed ? engine : kBlendCount + i;
+        if (!gp.used && free_slot == kGameSlots) free_slot = i;
+    }
+    if (free_slot == kGameSlots) {
+        KV_ERROR("vulkan", "game shader '%s': all %u game pipeline slots are taken; drawn with the engine's", name_str(shader), kGameSlots);
+        return engine;
+    }
+    GamePipe& gp = r->game_pipes[free_slot];
+    gp = GamePipe{};
+    gp.used   = true;
+    gp.shader = shader;
+    gp.blend  = blend;
+    char file[96];
+    snprintf(file, sizeof file, "%s.spv", name_str(shader));
+    if (!load_shader(r, file, &gp.module)) {
+        gp.failed = true;
+        KV_ERROR("vulkan", "game shader '%s' did not load: its sprites draw with the engine's", name_str(shader));
+        return engine;
+    }
+    rv_create_game_pipeline(r, gp);
+    return gp.failed ? engine : kBlendCount + free_slot;
 }
 
 // A format change: the pipelines in flight retire with the frame.
@@ -469,6 +527,10 @@ void rv_defer_destroy_pipelines(Renderer* r) {
     for (u32 i = 0; i < kBlendCount; ++i) {
         rv_defer_destroy(r, Garbage::PipelineKind, (u64)r->pipelines[i]);
         r->pipelines[i] = VK_NULL_HANDLE;
+    }
+    for (GamePipe& gp : r->game_pipes) {
+        if (gp.pipeline) rv_defer_destroy(r, Garbage::PipelineKind, (u64)gp.pipeline);
+        gp.pipeline = VK_NULL_HANDLE;
     }
 }
 
@@ -479,6 +541,11 @@ void rv_destroy_pipelines_now(Renderer* r) {
     }
     VkPipeline* cs[] = {&r->cs_count, &r->cs_scan, &r->cs_bucket_scan, &r->cs_scatter, &r->cs_key_sort};
     for (VkPipeline* p : cs) { if (*p) vkDestroyPipeline(r->device, *p, nullptr); *p = VK_NULL_HANDLE; }
+    for (GamePipe& gp : r->game_pipes) {
+        if (gp.pipeline) vkDestroyPipeline(r->device, gp.pipeline, nullptr);
+        if (gp.module) vkDestroyShaderModule(r->device, gp.module, nullptr);
+        gp = GamePipe{};
+    }
     if (r->sprite_shader) vkDestroyShaderModule(r->device, r->sprite_shader, nullptr);
     if (r->sort_shader)   vkDestroyShaderModule(r->device, r->sort_shader, nullptr);
     r->sprite_shader = r->sort_shader = VK_NULL_HANDLE;
@@ -615,7 +682,8 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
     push.screen_trans[0] = screen.tx; push.screen_trans[1] = screen.ty;
     push.row_count = r->sprites.len;
     push.screen_cull[0] = -sw * 0.5f; push.screen_cull[1] = -sh * 0.5f; push.screen_cull[2] = sw; push.screen_cull[3] = sh;
-    vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, &push);
+    push.time = (f32)(time_now() - r->start_time);
+    vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, &push);
 
     if (draw) {
         rv_label_begin(r, cmd, "sort");
