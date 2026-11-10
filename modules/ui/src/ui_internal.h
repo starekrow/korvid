@@ -38,6 +38,7 @@ struct UiDoc {
     f32         line = 0.0f;          // line height in units; 0: the font's
     f32         space = 0.0f;         // a space's width in units; 0: the font's (some pixel fonts have none worth the name)
     color       shadow{0, 0, 0, 0};
+    u32         shadow_offset = 1;    // units down and right (times a label's font_scale); drawn at every unit out to it, a solid drop
     char        actions[3][24];       // move, confirm, cancel
     Array<UiFrame> frames;
     Array<UiImage> images;

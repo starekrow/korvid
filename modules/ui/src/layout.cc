@@ -366,7 +366,11 @@ void text(Ctx& c, const UiNode& n, bool caret) {
     f32 t = c.sc.time;
     f32 last_x = 0.0f;
     u32 last_line = 0;
-    for (u32 pass = shadow.a > 0.0f ? 0 : 1; pass < 2; ++pass)
+    // The shadow at every unit from the offset in, then the text over it.
+    // In the font's pixels: a label drawn three times up drops three times as far.
+    u32 drop = (u32)((f32)(c.doc ? c.doc->shadow_offset : 1) * (n.font_scale > 1.0f ? n.font_scale : 1.0f) + 0.5f);
+    u32 passes = shadow.a > 0.0f ? drop + 1 : 1;
+    for (u32 p = 0; p < passes; ++p)
         for (const Laid& l : b.chars) {
             if (l.index >= shown) break;
             last_x = l.x + (l.g ? l.g->advance : 0.0f); last_line = l.line;
@@ -381,10 +385,11 @@ void text(Ctx& c, const UiNode& n, bool caret) {
                 dx = ((f32)(hsh % 3) - 1.0f) * 0.75f * c.k;
                 dy = ((f32)((hsh >> 8) % 3) - 1.0f) * 0.75f * c.k;
             }
-            f32 off = pass ? 0.0f : c.k; // the shadow, one unit down and right
+            bool text_pass = p + 1 == passes;
+            f32 off = text_pass ? 0.0f : (f32)(drop - p) * c.k; // the shadow, down and right
             f32 gx = x0 + ax + l.x + l.g->offset.x - l.g->size.x * 0.5f + dx + off;
             f32 gy = y0 + (f32)l.line * b.line_h + b.ascent - l.g->offset.y - l.g->size.y * 0.5f + dy + off;
-            color tint = pass ? rc.c : color{shadow.r, shadow.g, shadow.b, shadow.a * rc.c.a};
+            color tint = text_pass ? rc.c : color{shadow.r, shadow.g, shadow.b, shadow.a * rc.c.a};
             quad_px(c, f->material, l.g->uv, gx, gy, l.g->size.x, l.g->size.y, tint, n.clip);
         }
     if (caret && (u32)(c.sc.time * 2.0f) % 2 == 0) {

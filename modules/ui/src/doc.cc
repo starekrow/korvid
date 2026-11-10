@@ -90,6 +90,9 @@ bool parse_style(Engine& e, UiDoc& d, const JsonDoc& doc, const char** why) {
             d.colors.push(uc);
         }
     if (const char* sh = json_string(json_get(doc, *style, "shadow"), nullptr)) ui_color_parse(&d, sh, &d.shadow);
+    d.shadow_offset = (u32)json_u64(json_get(doc, *style, "shadow_offset"), 1);
+    if (d.shadow_offset < 1) d.shadow_offset = 1;
+    if (d.shadow_offset > 8) d.shadow_offset = 8;
     if (const JsonValue* frames = json_get(doc, *style, "frames"))
         for (const JsonValue* f = json_first(doc, *frames); f; f = json_next(doc, *f)) {
             UiFrame uf{};

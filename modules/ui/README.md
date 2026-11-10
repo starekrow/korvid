@@ -39,7 +39,8 @@ few hundred nodes costs nothing worth measuring.
 brace, `\n` for a line. A label with `reveal` (characters per second) types itself out,
 plays the style's `tick` sound every other character, and emits `revealed`; a confirm
 while it reveals finishes it instead of reaching the screen. The style's `shadow` color
-draws every glyph again a unit down and right.
+draws every glyph again a unit down and right; `shadow_offset` (units, 1 to 8, times a
+label's `font_scale`) carries it further, drawn at every unit out to it, a solid drop.
 
 **Input and events.** `ui.update` (PreSim, every tick) gives the action map to the topmost
 open screen that takes input (layer, then opening order). A list moves its focus with

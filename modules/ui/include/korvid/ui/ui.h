@@ -109,7 +109,7 @@ struct UiEvent { Handle screen; u64 node; u64 event; i32 value; u32 pad; };
 //     "actions": { "move": "move", "confirm": "confirm", "cancel": "cancel" },
 //     "style": { "font": "mygame/ui/font.ttf", "size": 8, "line": 10, "space": 3,
 //                "colors": { "text": "#ffffff", "gold": "#ffc840", "focus": "#ffc840" },
-//                "shadow": "#000000a0",
+//                "shadow": "#000000a0", "shadow_offset": 1,
 //                "frames": { "panel": { "texture": "mygame/ui/panel.png", "insets": [4, 4, 4, 4] } },
 //                "images": { "cursor": { "texture": "mygame/ui/arrow.png", "rect": [0, 0, 13, 13] },
 //                            "heart":  { "texture": "mygame/ui/heart.png", "rect": [0, 0, 16, 16], "frames": 5 } },
