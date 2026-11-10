@@ -1,6 +1,6 @@
 # Arcfire — Master PRD
 
-Nov 9, 2026 · @starekrow · revised after the first discussion
+Nov 9, 2026 · @starekrow · revised after the first discussion; Nov 10: Fortress cut (slice 5 PRD)
 
 ## What it is
 
@@ -12,7 +12,7 @@ shape it takes the bullet-hell staples: thousands of slow, patterned bullets, a 
 smaller than the ship, grazing for score, a bomb that clears the screen, one hit and the
 ship is gone. The visuals go deeper than the model: four to six parallax planes, an
 animated ground that enemies sit on, beams, additive glows, hit flashes, debris and sparks
-in the thousands, a screen that shakes, and a third stage whose background is a battle.
+in the thousands, a screen that shakes, and a last stage whose background is a battle.
 
 **It looks dangerous and is not.** The point of the game is to watch it work: to see the
 patterns bloom, the planes slide past each other, the bosses come apart. Difficulty is
@@ -37,7 +37,7 @@ is found; each slice fixes what it must and leaves the rest listed. The numbers 
 
 ## Goals
 
-1. **A real game.** Three stages, each with its own ground or backdrop, parallax set,
+1. **A real game.** Two stages, each with its own ground or backdrop, parallax set,
    enemy roster, mid-boss and boss; a title, a results screen, high scores with name
    entry, a pause menu, options; keyboard and pad; music and sound. Finishable in a
    sitting by someone who is watching.
@@ -166,15 +166,14 @@ restarts) persist through the save module; name entry is a UI field.
 option, bomb, egg, and the score chips cancels make; items fall to the player when the ship
 is above a line (a magnet).
 
-**Stages.** Three, each a stage script (spawns, speed changes, mid-boss and boss triggers,
-keyed to scroll distance), a parallax set and music:
+**Stages.** Two, each a stage script (spawns, speed changes, mid-boss and boss triggers,
+keyed to scroll distance), a parallax set and music. (A third, Fortress, was cut in slice
+5's PRD: a canyon and a base, bunkers, silos, walls that squeeze the field, a gunship pair
+and a gate; a fair amount of content that asks nothing new of the engine.)
 
 1. **Shoreline**: sea and islands as a Tiled ground, airfields; popcorn and turrets to learn
    on; a carrier as mid-boss, a battleship as boss. The slice-one stage and the demo's.
-2. **Fortress**: a canyon and a base; bunkers, silos, walls that squeeze the field (ground
-   sprites that also kill); a gunship pair as mid-boss, a gate as boss with destructible
-   turrets.
-3. **Orbit**: no ground. The ground plane's place is taken by a battle: a fleet engagement
+2. **Orbit**: no ground. The ground plane's place is taken by a battle: a fleet engagement
    half an orbit away, hundreds of tiny ships in two colors trading tracer fire, flashes,
    a capital ship breaking up over the course of the stage, all cosmetic rows on the
    deep planes, scrolling slowly. Under it, a procedural nebula: generated on the CPU at
@@ -186,7 +185,7 @@ keyed to scroll distance), a parallax set and music:
    stress test in costume: the battle is a few thousand sprites doing nothing but being
    drawn.
 
-**Modes.** Arcade (three stages, the egg rule), stage select (any stage, any difficulty),
+**Modes.** Arcade (the stages in order, the egg rule), stage select (any stage, any difficulty),
 and the dev modes: `--demo` (the scripted stage one), `--stress`, `--autoplay` (the bot,
 dials unchanged). All report to the log at exit.
 
@@ -202,12 +201,12 @@ where that is checked.
 **Style A, pixel.** Kenney's *Pixel Shmup* (CC0: ships, terrain tiles, UI pieces; 16 × 16,
 drawn at an integer scale) for ships, ground and HUD frames; M484's *Bullet Collection 1*
 and *2* (CC0) for enemy bullets; Screaming Brain Studios' *Seamless Space Backgrounds*
-(CC0: tiling starfields and nebulas) for the deep planes of stages one and two; GGBotNet's
+(CC0: tiling starfields and nebulas) for the deep planes of Shoreline; GGBotNet's
 *Public Pixel* font (CC0) for scores and the HUD. Licenses confirmed against each archive's
 own license file at download, every file taken recorded in `assets/CREDITS.md` with the
 archive's hash, as arcanum's credits do.
 
-**Generated art.** The pack's ships are small; carriers, bosses and the stage-three
+**Generated art.** The pack's ships are small; carriers, bosses and Orbit's
 capital ships are generated in the pack's style (image generation from the pack's sprites
 as style reference, then cleaned to the palette and the grid by hand or script). These
 live apart in `assets/generated/`, with their own section in the credits: the tool, the
@@ -229,7 +228,7 @@ nebula generator, the vignette.
 Kinds: `ship` (1), `option` (2, children), `shot` (2048), `bullet` (16,384; more in
 stress), `air` (256), `ground` (256), `part` (512, children), `boss` (1), `item` (256),
 `particle` (16,384, cosmetic), `plane` (the parallax tiles, cosmetic), `beam` (2),
-`shadow` (256, cosmetic children), `fleet` (stage three's battle, cosmetic), `egg` (1).
+`shadow` (256, cosmetic children), `fleet` (Orbit's battle, cosmetic), `egg` (1).
 Systems: `scroll`, `control`, `patterns` (a `parallel_for` over emitters), `bullets`
 (move, lifetime, bounds, `parallel_for`), `shots`, `enemies` (behaviours), `items`,
 `particles` (`parallel_for`), `fleet`, `egg`, `camera`, `score`, `hud`. Handlers over
@@ -284,9 +283,10 @@ stress work comes early so the engine findings are found in slice 2 and not slic
 5. **Presentation** — title, pause, options, results, game over, name entry and high
    scores through the UI module and the save module; explosions, particles (and the
    render-rate question), flashes, shake; the record-and-replay question.
-6. **Fortress, Orbit and the battle** — stages two and three, the fleet engagement, the
+6. **Orbit and the battle** — the second and last stage, the fleet engagement, the
    nebula generator (and the shader stretch), the remaining patterns, the notebook's
-   closing entry, a README that tells someone else how to watch it work.
+   closing entry, a README that tells someone else how to watch it work. (Fortress, once
+   stage two, is cut.)
 
 ## Decided
 
@@ -298,7 +298,7 @@ stress work comes early so the engine findings are found in slice 2 and not slic
   clear edges on what it does and does not support (yxml, MIT, 6 KiB, non-validating,
   skips the DTD, one root; hoxml, C99 header-only, the same shape) and vendors it as
   `inflate` vendors miniz; one is written here only as a last resort.
-- Stage three's background is a battle over a procedural nebula.
+- Orbit's background is a battle over a procedural nebula.
 - Measurements go in `performance-notes.md` here, as a notebook by slice and milestone;
   the improvements note holds engine findings only.
 

@@ -9,7 +9,7 @@ that finds an engine limit adds a line here.
 
 ## Identified at PRD time
 
-- **A game's fragment shader.** Stage three's procedural nebula is made on the CPU and
+- **A game's fragment shader.** Orbit's procedural nebula is made on the CPU and
   uploaded; a shader version wants a material to name a fragment shader of the game's own,
   compiled by the build like the engine's, with the material's parameter block as its
   input. The renderer has one pipeline per blend; this is a pipeline per (shader, blend)
