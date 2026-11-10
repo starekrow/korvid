@@ -62,6 +62,27 @@ void test_stage(kv::TestCtx& c) {
         free(text);
     }
 
+    // Orbit: no map, the gas under the stars, segments, two bosses on one mark, debris that
+    // never fires.
+    text = slurp("stages/orbit.stage.json", &len);
+    KV_CHECK(c, text != nullptr);
+    if (text) {
+        KV_CHECK(c, stage_parse(text, len, def, why, sizeof why));
+        KV_CHECK(c, !def.map[0] && (def.planes & kPlaneShader) && def.segment_count == 12 && def.length == 18400.0f);
+        KV_CHECK(c, def.boss_mark_count == 3 && !strcmp(def.boss_names[0], "gunship_left") && !strcmp(def.boss_names[1], "gunship_right") &&
+                    !strcmp(def.boss_names[2], "station"));
+        u32 bosses = 0, debris = 0;
+        for (u32 i = 0; i < def.mark_count; ++i)
+            if (def.marks[i].kind == MarkKind::Boss) { KV_CHECK(c, def.marks[i].value == (bosses ? 1.0f : 2.0f)); ++bosses; }
+        for (u32 i = 0; i < def.formation_count; ++i)
+            if (def.formations[i].look == Look::Debris) { ++debris; KV_CHECK(c, def.formations[i].pattern[0] == 0); }
+        KV_CHECK(c, bosses == 2 && debris > 0);
+        for (u32 i = 0; i < def.segment_count; ++i) KV_CHECK(c, def.segments[i].cell <= 1 && def.segments[i].pattern[0] != 0);
+        free(text);
+    }
+    KV_CHECK(c, !parses(R"({"marks": [{"at": 1, "segment": {"cell": 2}}, {"at": 2, "end": true}]})", def, why, sizeof why) && strstr(why, "cell"));
+    KV_CHECK(c, !parses(R"({"marks": [{"at": 1, "boss": []}, {"at": 2, "end": true}]})", def, why, sizeof why) && strstr(why, "names a boss"));
+
     // Out of order in the file; equal distances keep the file's order.
     KV_CHECK(c, parses(R"({"speed": 2, "paths": {"p": [[0, 0], [0, 10]]}, "marks": [
         {"at": 50, "end": true},
@@ -131,6 +152,23 @@ void test_boss(kv::TestCtx& c) {
         KV_CHECK(c, b.part_count == 10 && b.phase_count == 3 && b.timeout == 90 * 60 && stage.formation_count == 0);
         KV_CHECK(c, b.phases[0].ends == 0x3u && b.phases[1].ends == 0x180u && b.parts[9].core && b.parts[9].armored_until == 2);
         KV_CHECK(c, !strcmp(b.stomp, "wall_walk"));
+        free(text);
+    }
+
+    // Orbit's: the gunships (two phases, the gun their core) and the station core (three,
+    // six emitters, four weapons, the core opening last).
+    const char* const orbit[] = {"gunship_left", "gunship_right", "station"};
+    for (const char* name : orbit) {
+        char path[64];
+        snprintf(path, sizeof path, "bosses/%s.boss.json", name);
+        text = slurp(path, &len);
+        KV_CHECK(c, text != nullptr);
+        if (!text) continue;
+        stage = StageDef{};
+        KV_CHECK(c, boss_parse(text, len, name, b, stage, why, sizeof why));
+        bool station = !strcmp(name, "station");
+        KV_CHECK(c, b.part_count == (station ? 11u : 3u) && b.phase_count == (station ? 3u : 2u) && b.parts[b.part_count - 1].core);
+        KV_CHECK(c, !strcmp(b.stomp, "curtain"));
         free(text);
     }
 

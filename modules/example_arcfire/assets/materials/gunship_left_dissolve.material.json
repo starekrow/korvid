@@ -1,0 +1,2 @@
+{ "texture": "example_arcfire/generated/gunship_left.png", "blend": "alpha", "shader": "arcfire_dissolve",
+  "params": [0, 0, 7, 0.07, 1.0, 0.72, 0.3, 0] }

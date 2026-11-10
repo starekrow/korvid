@@ -108,6 +108,7 @@
             { "type": "label", "name": "heading", "text": "STAGE SELECT", "color": "gold", "font_scale": 2 },
             { "type": "list", "name": "items", "gap": 14, "items": [
               { "type": "label", "name": "shoreline", "text": "1  SHORELINE" },
+              { "type": "label", "name": "orbit", "text": "2  ORBIT" },
               { "type": "label", "name": "back", "text": "BACK", "event": "back" } ] } ] } ] },
     "difficulty": {
       "type": "box", "name": "shade", "size": ["fill", "fill"],
@@ -197,7 +198,7 @@
     "card": {
       "type": "stack", "name": "card", "anchor": "center", "offset": [0, -160], "gap": 12, "align": "center",
       "children": [
-        { "type": "label", "name": "number", "text": "STAGE 1", "color": "dim" },
+        { "type": "label", "name": "number", "text": "{=card_number}", "color": "dim" },
         { "type": "label", "name": "stage", "text": "{=card_stage}", "color": "gold", "font_scale": 2 },
         { "type": "label", "name": "round", "text": "{=card_round}", "color": "cyan" } ] },
     "confirm": {

@@ -69,6 +69,7 @@ bool patterns_ready(Engine& e, Game& g, bool& failed) {
 }
 
 void emitter_start(const Game& g, Emitter& em, Runner& r, Handle owner, u64 tick) {
+    if (em.pattern == KV_BML_NONE) { em.state = EmitDone; return; } // one that never fires (debris)
     bml_start(g.lib, r, em.pattern, seed_of(owner, tick, em.pattern));
     em.state = EmitRunning;
 }

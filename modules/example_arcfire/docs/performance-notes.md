@@ -532,3 +532,46 @@ while the hull burned away, a grey block where the carrier had been. It fades wi
 dissolve now. The `shimmer` dial is a field of the world row's Dials, so every hash
 moved: the demo hashes 866dde056d3002a4 at tick 14459 seven ways, and the recorded runs
 were made again.
+
+**M3. Orbit.** The second stage: no map, the gas under the stars, debris, twelve station
+segments with turrets on their pads, the missile boat twice, heavies from the start, the
+gunship pair at 8,800 units and the station core at the end. Five more patterns
+(`tight_ring`, `cross_spiral`, `curtain`, `aimed_walls`, `core_finale`), Juhani
+Junkala's Level 2 and Ending for the stage and its bosses, the art from
+`make_bosses.py`. Both stage files are read at startup; arcade plays Shoreline then Orbit
+and goes round a difficulty up; stage select offers both.
+
+Under the bot at Normal, Orbit's whole run: bullets 564 at peak (51 mean), sprites 2,091
+(1,118 mean: without the map's 17,000 tiles a stage is small), deltas 1,872 at peak, items
+498 at peak (the core's bullets turned to chips). Easy, Normal, Hard under the bot: no
+death; one; fourteen and three restarts, most of them in the debris and turrets before the
+gunships and at the gunships themselves. The bot that clears Shoreline at Hard untouched
+does not clear Orbit's opening at Hard: the end of the game is harder, as the master PRD
+asks, and how much is the tuning pass's. With the bot invulnerable and the arsenal
+carried in from Shoreline, the gunships go down in 8 to 22 seconds and the core in 32
+(Normal) or 80 (Hard).
+
+How it went in, and where it differs from the PRD. A segment is not a ground row: its
+picture is a plane row on the map's layer (which scrolls with the stage's distance, as the
+ground rows do, so the turrets on its pads stay on them) and its two turrets are ground
+rows; the planes take the pictures away when the distance jumps back (a restart, a loop).
+The gunships are two bosses on one mark (a boss mark may name several; the stage waits for
+all of them), sharing the bar, whose full stays the pair's when one goes down. The stage
+change is arcade's alone and is a held tick behind a cover, as a run's start is: nothing
+of its timing reaches the sim. A stage without ground has no shadows. The `Stage` row
+says which stage it is, so the hash covers it.
+
+Found on the way, from M1: the gas never showed. It drew under the star plane, whose
+texture is opaque; the purple I took for it in M1's screenshot was the old nebula texture
+plane. The shader ran (M1's 0.31 ms is its cost) and the fallback test showed the plain
+material under the same stars. Over the gas the stars are now drawn added (their black
+adds nothing), as the PRD has it: a star field over the nebula.
+
+The demo (Shoreline) hashes d28836ef3dcf2d66 at tick 14459 seven ways (new textures and
+the `Stage` row's index moved every hash); the two recorded runs were made again and
+replay matching. An arcade run at Hard under the bot, recorded across the stage change and
+three restarts in Orbit (63,585 ticks), replays matching at 1 and 16 threads, 1,060 hashes:
+the change on its held tick behind the cover leaves nothing of its timing in the sim. Not
+kept in `tests/replays/` (each platform records its own; two are the PRD's), but the way to
+make one is `--arcade --autoplay --difficulty hard --record FILE`. A debug build's Orbit
+under the invulnerable bot is validation-clean.

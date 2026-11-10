@@ -1,0 +1,20 @@
+{
+  "title": "GUNSHIPS",
+  "size": [96, 160],
+  "sheet": [2, 2],
+  "hull": { "half": [36, 72], "offset": [0, 0] },
+  "entry": { "path": [[140, 620], [140, 420], [100, 110]], "speed": 1.4 },
+  "timeout": 50,
+  "score": 12000,
+  "parts": [
+    { "name": "turret_port", "cell": [0, 0], "at": [-24, 16], "radius": 13, "health": 96, "score": 800, "pattern": ["tight_ring", "aimed_burst"], "rest": 50 },
+    { "name": "turret_stbd", "cell": [1, 0], "at": [24, 16],  "radius": 13, "health": 96, "score": 800, "pattern": ["aimed_burst", "tight_ring"], "rest": 50 },
+    { "name": "gun", "cell": [0, 1], "open": [1, 1], "drop": "power", "at": [0, -48], "radius": 16, "health": 270, "score": 3000,
+      "pattern": ["aimed_walls", "cross"], "rest": 40, "armored_until": 1, "core": true }
+  ],
+  "phases": [
+    { "name": "turrets", "ends": ["turret_port", "turret_stbd"], "sway": [-150, 0.012] },
+    { "name": "gun", "ends": ["gun"], "sway": [-150, 0.017] }
+  ],
+  "stomp": { "pattern": "curtain", "seconds": 5, "dive": 220 }
+}

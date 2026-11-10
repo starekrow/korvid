@@ -56,10 +56,13 @@ bool bunker_formation(StageDef& st, const TilemapAsset& m, const MapObject& o, u
 
 } // namespace
 
-bool ground_map_ready(TickContext& ctx, Game& g, char* why, usize why_cap) {
+bool ground_map_ready(TickContext& ctx, Game& g, StageDef& st, char* why, usize why_cap) {
     Engine& e = *ctx.engine;
-    StageDef& st = g.stage;
-    if (!st.map[0] || g.map_spawned) return true;
+    if (!st.map[0]) return true;
+    if (g.map_parsed) { // one map for the game (Shoreline's), read once
+        if (strcmp(st.map, g.stages[0].map) && strcmp(st.map, g.stages[1].map)) { snprintf(why, why_cap, "a second map"); return false; }
+        return true;
+    }
     if (g.map.is_null()) g.map = tilemap_load(e, st.map, asset_scope_global(e));
     const TilemapAsset* m = tilemap_get(e, g.map);
     if (!m || m->state == AssetState::Pending) return false;
@@ -93,14 +96,23 @@ bool ground_map_ready(TickContext& ctx, Game& g, char* why, usize why_cap) {
             st.map_grounds[i] = gd;
         }
     }
+    g.map_parsed = true;
+    KV_INFO("arcfire", "ground: %s, %u x %u tiles, %u enemies", st.map, m->width, m->height, st.map_ground_count);
+    return true;
+}
+
+void ground_map_show(TickContext& ctx, Game& g, bool show) {
+    if (show == !g.map_instance.is_null() || (show && !g.map_parsed)) return;
+    if (!show) {
+        tilemap_despawn(ctx, g.map_instance);
+        g.map_instance = Handle{};
+        return;
+    }
     TilemapPlace place;
     place.origin = g.map_origin;
     place.base_layer = Z_MAP;
     place.scale = kMapScale;
-    tilemap_spawn(ctx, g.map, place);
-    g.map_spawned = true;
-    KV_INFO("arcfire", "ground: %s, %u x %u tiles, %u enemies", st.map, m->width, m->height, st.map_ground_count);
-    return true;
+    g.map_instance = tilemap_spawn(ctx, g.map, place);
 }
 
 void ground_spawn(TickContext& ctx, const Game& g, const Dials& d, const GroundDef& gd, point2 at, bool bench) {

@@ -161,6 +161,7 @@ struct Stage {
     f32 base, held;
     u32 waiting;           // 1 while a boss mark's boss is up: the marks wait, the scroll does not
     u32 round_up;          // 1 from the end mark until the next tick begins the next round (scoring.cc)
+    u32 index;             // which stage this is (k_stage_names): arcade goes from one to the next
 };
 inline f32 stage_clock(const Stage& s) { return s.distance - s.base - s.held; }
 inline f32 map_clock(const Stage& s) { return s.distance - s.base; }
@@ -195,6 +196,7 @@ struct ShipDied   { point2 at; u32 cause; u32 pad; }; // cause 0 a bullet, 1 a r
 struct SpawnMember { u32 formation; u32 member; u32 epoch; u32 pad; Handle group; point2 offset; };
 struct StageEnd   { u32 loops; u32 pad; };
 struct RunOver    { u32 loops; u32 pad; };   // scheduled at a run's end, after the banner: the game quits
+struct StageNext  { u32 stage; u32 position; }; // scheduled at a stage's end in arcade, after the banner: the next stage
 
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
@@ -205,17 +207,26 @@ extern u32 g_part_down; // the trigger on a part's health
 inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
 
 // ---- the stage as its file says -------------------------------------------------------------
-constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 64, kMaxMarks = 128, kMaxBosses = 4;
+constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 64, kMaxMarks = 128, kMaxBosses = 8, kMaxSegments = 24;
+// The game's stages, in arcade's order (stage_data.cc): a run's Stage row says which it is in.
+constexpr u32 kStageCount = 2;
+extern const char* const k_stage_names[kStageCount];
+u32 stage_named(const char* name); // its index, or kStageCount
 // What an enemy's sprite is. Heavy: the stronger popcorn's (the pack's big yellow ship); Boat:
-// the missile boat's, a midsize airship (generated/boat.png).
-enum class Look : u32 { Fighter, Red, Green, Turret, Tank, Bunker, Heavy, Boat, Count };
-enum class MarkKind : u32 { Formation, Ground, Speed, End, Boss };
+// the missile boat's, a midsize airship (generated/boat.png); Debris: Orbit's wreckage, which
+// tumbles and never fires (generated/debris.png).
+enum class Look : u32 { Fighter, Red, Green, Turret, Tank, Bunker, Heavy, Boat, Debris, Count };
+enum class MarkKind : u32 { Formation, Ground, Speed, End, Boss, Segment };
 constexpr u32 kPatternName = 32;
 struct FormationDef { u32 path; u32 count; u32 spacing; Look look; i32 health; i32 score; f32 fire_at; f32 speed; char pattern[kPatternName]; u32 entry; u32 drop; };
 // A ground row: from a stage mark, or from the map's enemies layer (then `at` is the stage
 // distance at which it comes into view and `kind` what it is).
 struct GroundDef    { f32 x; i32 health; i32 score; char pattern[kPatternName]; u32 entry; f32 at; GroundKind kind; f32 route; u32 launch; u32 drop; };
 struct Mark         { f32 at; MarkKind kind; u32 index; f32 value, over; };
+// A station segment (Orbit's): scenery on the middle plane riding the scroll (a cosmetic
+// row), with turrets on it that are ground rows. `cell` is its picture in segments.png.
+constexpr u32 kSegmentTurrets = 4;
+struct SegmentDef   { f32 x; u32 cell; u32 turret_count; point2 turrets[kSegmentTurrets]; i32 health; i32 score; char pattern[kPatternName]; u32 entry; u32 drop; };
 struct StageDef {
     char         name[32] = "";
     f32          speed = 1.0f;  // units a tick at the start
@@ -230,8 +241,11 @@ struct StageDef {
     // `at`), and which planes the stage shows (bits by planes.cc's order; the three of
     // space by default).
     char         map[96] = "";
-    char         boss_names[kMaxBosses][24]; // the boss marks' bosses, by mark index; Game::boss_of maps them to definitions
+    char         boss_names[kMaxBosses][24]; // the boss marks' bosses, in order; a mark's are `value` of them from `index`
     u32          boss_mark_count = 0;
+    u32          boss_of[kMaxBosses];        // each boss name's definition (Game::bosses), once the bosses are parsed
+    SegmentDef   segments[kMaxSegments];
+    u32          segment_count = 0;
     GroundDef    map_grounds[kMaxGrounds];
     u32          map_ground_count = 0;
     u32          planes = 7;
@@ -297,7 +311,7 @@ enum Sfx : u32 { SFX_SHOT, SFX_HIT, SFX_PING, SFX_KILL, SFX_KILL_BIG, SFX_BOSS_D
                  SFX_EGG_BREAK, SFX_EGG_OPEN, SFX_EGG_BLOOM, SFX_WARNING, SFX_COUNT };
 
 enum Tex : u32 { TEX_SHIPS, TEX_TILES, TEX_STARS, TEX_NEBULA, TEX_CLOUD, TEX_BULLETS, TEX_DOT, TEX_RING, TEX_SOFT, TEX_SPARK, TEX_EGG,
-                 TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_BEAM, TEX_ITEMS, TEX_BOAT, TEX_COUNT };
+                 TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_BEAM, TEX_ITEMS, TEX_BOAT, TEX_DEBRIS, TEX_SEGMENTS, TEX_COUNT };
 constexpr u32 kPlaneCount = 6; // planes.cc's: stars, nebula, cloud, the low clouds' shadows, the low clouds, the high wisps
 constexpr u32 kPlaneShader = 1u << 6; // a stage's planes bit: the nebula shader's plane, under the stars
 
@@ -313,8 +327,8 @@ struct Stats {
 // The program around a run (flow.cc): the title, a run; a switch asked for; what a run
 // starts as.
 enum class Mode : u32 { Loading, Title, Run };
-enum class Next : u32 { None, Run, Title };
-struct RunPlan { bool arcade = true, stage_select = false; Position start = Position::Normal; };
+enum class Next : u32 { None, Run, Title, Stage };
+struct RunPlan { bool arcade = true, stage_select = false; Position start = Position::Normal; u32 stage = 0; };
 
 // What the game remembers between runs (records.cc): the options, and one table of ten
 // high scores per arcade starting difficulty. Presentation: none of it is sim state.
@@ -339,9 +353,16 @@ struct Game {
     Handle   textures[TEX_COUNT];
     Handle   alpha[TEX_COUNT];    // render.material: each texture, alpha blended
     Handle   additive[TEX_COUNT]; // and added (glows, the hit flash)
-    Handle   stage_blob;          // the .stage.json on its way in
+    // The stages: every one is read at startup (stage_data.cc's list); `stage` is a copy of
+    // the one being played (or shown behind the title), `stage_at` its index.
+    Handle   stage_blobs[kStageCount];
+    StageDef stages[kStageCount];
     StageDef stage;
+    u32      stage_at = 0;
     bool     stage_parsed = false, stage_ready = false;
+    // A stage change asked for at a stage's end (arcade): where to, and at which difficulty.
+    u32      next_stage = 0;
+    Position next_position = Position::Normal;
     // The patterns: patterns.json names them, each a BulletML document; compiled into
     // the library when all are in. A bullet definition's look, by its label.
     static constexpr u32 kMaxPatterns = 32;
@@ -365,15 +386,16 @@ struct Game {
     Handle   nebula_row;                       // its plane row, when the stage has one
     f32      gas_scrolled = 0.0f;              // how far its field has come down
     bool     gas_test = false;                 // --gas: the nebula shader's plane under any stage (a check)
-    u32      boss_of[kMaxBosses];          // a boss mark's definition
     bool     bosses_parsed = false;
     Handle   stomp_screen;                 // the warning's tint, while a boss stomps
+    i32      bar_total = 0;                // the boss bar's full: every boss up together, while any is
     Handle   sfx[SFX_COUNT];               // asset.sound
-    Handle   music_stage, music_boss;
+    Handle   music_stage[kStageCount], music_boss[kStageCount]; // asset.sound, by stage
     u32      voices_peak = 0;              // the audio module's live voices, at most (stats.cc)
     Handle   boom_clip;                    // anim.clip: an explosion, Kenney's burst frames
-    Handle   map;                 // the stage's ground map (tilemap), and its tiles once spawned
-    bool     map_spawned = false;
+    Handle   map;                 // the ground map (tilemap: Shoreline's), loaded once
+    bool     map_parsed = false;
+    Handle   map_instance;        // its tiles while the stage shown has the map
     point2   map_origin;          // the map's top-left in the world when the distance is 0
     // The layers' scroll (planes.cc): what each plane has moved (its offset wraps), the
     // ground's last offset (a jump back is a snap: a loop, a restart).
@@ -398,6 +420,7 @@ struct Game {
     bool     next_ready = false;
     u32      flow_cover = 0;
     RunPlan  plan;
+    u32      select_stage = 0;            // the stage chosen on stage select, while its difficulty is asked
     bool     front_door = false;          // run plainly: the title; a flag that names a run skips it
     bool     again = false, again_done = false; // --again: a run once more from a fresh sim
     u32      runs = 0;
@@ -465,10 +488,12 @@ Dials  dials_start(Engine& e, const Game& g, Position p);
 const char* position_name(u32 position);
 
 // Planes (planes.cc).
-void   planes_spawn(Engine& e, Game& g, const Dials& d);
-// The ground map, once its asset is Ready: its tiles spawned (cosmetic, still, scrolled by
-// layer) and its enemies read into the stage. False while it is loading.
-bool   ground_map_ready(TickContext& ctx, Game& g, char* why, usize why_cap);
+void   planes_spawn(Engine& e, Game& g, const Dials& d); // the stage's planes; any before go
+// The ground map, once its asset is Ready: its enemies read into the stage that names it.
+// False while it is loading. Its tiles (cosmetic, still, scrolled by layer) are spawned
+// while a stage with the map is shown.
+bool   ground_map_ready(TickContext& ctx, Game& g, StageDef& st, char* why, usize why_cap); // its map read, its enemies into `st`
+void   ground_map_show(TickContext& ctx, Game& g, bool show); // the map's tiles spawned or gone
 // A ground row at `at` (stage.cc): a mark's, the map's, the bench's.
 void   ground_spawn(TickContext& ctx, const Game& g, const Dials& d, const GroundDef& gd, point2 at, bool bench = false);
 
@@ -531,6 +556,13 @@ u64    seed_of(Handle h, u64 tick, u32 salt);
 
 // The stage (stage.cc).
 void   stage_reset(Stage& s, const StageDef& def);
+// The stage shown and played becomes `index`: g.stage, the map, the planes. Presentation
+// and the stage's definition; the Stage row is the caller's.
+void   stage_enter(TickContext& ctx, Game& g, u32 index, const Dials& d);
+// Arcade's stage change, on a held tick behind the cover (flow.cc): the field cleared, the
+// next stage (or the first at the next difficulty), the run carried.
+void   stage_change(TickContext& ctx, Game& g);
+void   segment_spawn(TickContext& ctx, const Game& g, const Dials& d, const SegmentDef& sd);
 void   bench_spawn(TickContext& ctx, Game& g, const Dials& d); // --bench: the one emitter
 
 // The records (records.cc): asked for at startup, read as they come; written when they
@@ -564,7 +596,10 @@ void   run_over(TickContext& ctx, Game& g); // g.result holds the run
 
 // The run's shape (scoring.cc; the score's rules are scoring.h's): whether a run at this
 // position goes round again after the stage, and at which; the results line.
-bool   round_next(const Game& g, const Dials& d, Position* next);
+bool   round_next(const Game& g, const Dials& d, Position* next); // a looping run's (stress, the bench)
+// Arcade's next: the next stage at this difficulty, or after the last the first a difficulty
+// up; false after Hard's last stage, or outside arcade.
+bool   arcade_next(const Game& g, const Stage& s, const Dials& d, u32* stage, Position* next);
 RunResult result_of(const Game& g, const Run& r, const Dials& d, u32 round); // the run as it ended
 void   results_log(const Game& g, const RunResult& r);
 
@@ -592,7 +627,7 @@ Collider2 item_collider();
 void   hud_open(Engine& e, Game& g);
 void   hud_cover(Engine& e, Game& g, bool on);
 void   hud_shown(Engine& e, Game& g, bool on); // the side panels' numbers, or the panels alone
-void   hud_stage_clear(Engine& e, Game& g, i64 bonus, const char* next); // next: the round's difficulty, or null: the run is over
+void   hud_stage_clear(Engine& e, Game& g, i64 bonus, const char* next); // next: what comes ("NEXT: STAGE 2"), or null: the run is over
 void   hud_flash(Engine& e);
 void   hud_boss(Engine& e, Game& g, const char* title, i32 hp, i32 total); // title null: the bar goes
 void   hud_stomp(Engine& e, Game& g, bool on);                              // the warning's tint

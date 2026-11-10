@@ -144,11 +144,13 @@ CC0 creative commons license".
 |---|---|
 | `music/stage.wav` | `Juhani Junkala [Retro Game Music Pack] Level 1.wav`, folded to mono and halved in rate (22,050 Hz) by `tools/make_sounds.py`; otherwise unchanged |
 | `music/boss.wav` | `Juhani Junkala [Retro Game Music Pack] Level 3.wav`, likewise |
+| `music/orbit.wav` | `Juhani Junkala [Retro Game Music Pack] Level 2.wav`, likewise (Orbit's stage) |
+| `music/orbit_boss.wav` | `Juhani Junkala [Retro Game Music Pack] Ending.wav`, likewise (Orbit's bosses) |
 
 ## Generated: the bosses
 
-Kitbashed by `tools/make_bosses.py` on 2026-11-09 from Kenney's Pixel Shmup (above, CC0),
-deterministically (the same files every run). Korvid's, under the repository's license
+Kitbashed by `tools/make_bosses.py` on 2026-11-09 (Orbit's on 2026-11-10) from Kenney's
+Pixel Shmup (above, CC0), deterministically (the same files every run). Korvid's, under the repository's license
 (Apache 2.0). No image generation was used. Images made another way can replace these
 files without code changes, as long as each part's cell stays where its `.boss.json` says.
 
@@ -158,18 +160,25 @@ files without code changes, as long as each part's cell stays where its `.boss.j
 | `generated/carrier_parts.png` | its parts, 24 px cells: the pack's turret tiles (`kenney/tiles.png` column 6 row 1, column 5 row 1) as they are; launch bays shut and open, and the core armored and open, drawn by the script in the pack's palette |
 | `generated/battleship.png` | the battleship's hull, 224 x 96, broadside, bow right: drawn by the script in the pack's palette and style, with the pack's vent tile twice as funnels, a bow wave and wake, and sockets where the parts sit |
 | `generated/boat.png` | the missile boat, a midsize airship: drawn by `tools/make_bosses.py` in the pack's palette and style (no pack pixels); Korvid's, under the repository's license |
+| `generated/gunship_left.png`, `generated/gunship_right.png` | Orbit's gunships, 48 x 80, bow down: drawn by the script in the pack's palette and style, the left with the orange band, the right with cyan |
+| `generated/gunship_left_parts.png`, `generated/gunship_right_parts.png` | their parts, 24 px cells: the pack's two turret tiles as they are; the bow gun shuttered and open, drawn by the script |
+| `generated/station.png`, `generated/station_parts.png` | the station core, 128 x 128, rings on spokes with sockets, and its parts (shield emitter, weapon mount armored and open, the core armored and open): drawn by the script in the pack's palette, no pack pixels |
+| `generated/segments.png` | Orbit's station segments, two 96 x 48 cells (a truss with two turret pads, a module with a window band and solar vanes): drawn by the script, with the pack's vent tile once on the module |
+| `generated/debris.png` | Orbit's wreckage, three 24 px cells: drawn by the script in the pack's palette, no pack pixels |
 | `generated/battleship_parts.png` | its parts, 24 px cells: a main gun, the pack's two turret tiles as anti-air mounts, a missile bay shut and open, a deck hatch shut and open, the bridge armored and open, the rest drawn by the script in the pack's palette |
 
 The boss files (`bosses/*.boss.json`) are written by hand for the game, as are the patterns
-`fan_storm`, `carrier_stomp`, `broadside`, `core_burst` and `wall_walk`
-(`patterns/*.xml`).
+`fan_storm`, `carrier_stomp`, `broadside`, `core_burst` and `wall_walk`, and Orbit's
+`tight_ring`, `cross_spiral`, `curtain`, `aimed_walls` and `core_finale`
+(`patterns/*.xml`). The station core's file was laid out by a few lines of Python (its parts
+on circles); it is the file that is the source.
 
 `maps/shoreline.tmj` and `maps/shoreline.tsj` are written by `tools/make_maps.py`
 (2026-11-09, Korvid's, Apache 2.0): a Tiled map whose tiles are all Kenney's
 (`kenney/tiles.png`, Pixel Shmup, above), placed by the script from a fixed seed; the
 tileset only names that image.
 
-The stage (`stages/shoreline.stage.json`), the UI document (`ui/arcfire.ui.json`) and the
+The stages (`stages/shoreline.stage.json`, `stages/orbit.stage.json`), the UI document (`ui/arcfire.ui.json`) and the
 BulletML patterns (`patterns/*.xml`) are written by hand for the game. No pattern is
 adapted from another source.
 

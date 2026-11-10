@@ -8,12 +8,17 @@
 //                                    "health": 2, "score": 100, "pattern": "aimed", "fire_at": 0.4, "speed": 3 } },
 //       { "at": 900,  "ground": { "x": -120, "health": 12, "score": 500, "pattern": "ring" } },
 //       { "at": 1500, "speed": { "value": 2.2, "over": 300 } },
+//       { "at": 2400, "segment": { "x": -60, "cell": 0, "health": 16, "score": 600, "pattern": "tight_ring" } },
+//       { "at": 3000, "boss": ["gunship_left", "gunship_right"] },
 //       { "at": 4600, "boss": "carrier" },
 //       { "at": 5400, "end": true } ] }
 //
 // Points are field units, +y up; speeds are units a tick; `fire_at` is a fraction of the
-// path, where the formation's members start their pattern. A boss mark names a boss of
-// assets/bosses/: it comes, and the marks after it wait until it has died or left.
+// path, where the formation's members start their pattern (a formation with no pattern
+// never fires: debris). A boss mark names a boss of assets/bosses/, or several that come
+// together; the marks after it wait until every one has died or left. A segment is a
+// piece of station drifting by on the ground's plane, its turrets (ground rows) on its pads.
+// A stage with no "map" has no ground but its segments and ground marks.
 // Patterns are named here and found in the library once both are loaded (stage.cc).
 // Marks are sorted by distance here, so the file may list them in any order.
 #include "arcfire.h"
@@ -23,6 +28,14 @@
 #include <string.h>
 
 namespace kv::arcfire {
+
+constinit const char* const k_stage_names[kStageCount] = {"shoreline", "orbit"};
+
+u32 stage_named(const char* name) {
+    for (u32 i = 0; i < kStageCount; ++i)
+        if (!strcmp(name, k_stage_names[i])) return i;
+    return kStageCount;
+}
 
 namespace {
 
@@ -37,6 +50,7 @@ Look look_named(const char* s) {
     if (!strcmp(s, "turret")) return Look::Turret;
     if (!strcmp(s, "heavy")) return Look::Heavy;
     if (!strcmp(s, "boat")) return Look::Boat;
+    if (!strcmp(s, "debris")) return Look::Debris;
     return Look::Fighter;
 }
 
@@ -131,7 +145,7 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             d.health = (i32)json_i64(json_get(doc, *f, "health"), 1);
             d.score = (i32)json_i64(json_get(doc, *f, "score"), 100);
             d.fire_at = (f32)json_number(json_get(doc, *f, "fire_at"), 0.5);
-            snprintf(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *f, "pattern"), "aimed"));
+            snprintf(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *f, "pattern"), d.look == Look::Debris ? "" : "aimed"));
             d.entry = KV_BML_NONE;
             d.speed = (f32)json_number(json_get(doc, *f, "speed"), 3.0);
             // An item carrier: what its last member shot down leaves.
@@ -155,18 +169,39 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             mk.kind = MarkKind::Speed;
             mk.value = (f32)json_number(json_get(doc, *sp, "value"), out.speed);
             mk.over = (f32)json_number(json_get(doc, *sp, "over"), 0.0);
+        } else if (const JsonValue* sg = json_get(doc, *m, "segment")) {
+            if (out.segment_count == kMaxSegments) return fail(why, why_cap, "too many segments");
+            SegmentDef d{};
+            d.x = (f32)json_number(json_get(doc, *sg, "x"), 0.0);
+            d.cell = (u32)json_u64(json_get(doc, *sg, "cell"), 0);
+            d.health = (i32)json_i64(json_get(doc, *sg, "health"), 14);
+            d.score = (i32)json_i64(json_get(doc, *sg, "score"), 500);
+            snprintf(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *sg, "pattern"), "ring"));
+            d.entry = KV_BML_NONE;
+            const char* drop = json_string(json_get(doc, *sg, "drop"), "");
+            if (!drop_named(drop, &d.drop)) { snprintf(why, why_cap, "no drop \"%s\"", drop); return false; }
+            if (d.cell > 1) return fail(why, why_cap, "a segment's cell is 0 (a truss) or 1 (a module)");
+            mk.kind = MarkKind::Segment;
+            mk.index = out.segment_count;
+            out.segments[out.segment_count++] = d;
         } else if (const JsonValue* boss = json_get(doc, *m, "boss")) {
-            // The boss's name; boot finds its definition.
-            if (out.boss_mark_count == kMaxBosses) return fail(why, why_cap, "too many boss marks");
+            // The boss's name, or the names of several that come together; boot finds
+            // their definitions.
             mk.kind = MarkKind::Boss;
             mk.index = out.boss_mark_count;
-            snprintf(out.boss_names[out.boss_mark_count++], sizeof out.boss_names[0], "%s", json_string(boss, ""));
+            const JsonValue* one = boss->is_array() ? json_first(doc, *boss) : boss;
+            for (; one; one = boss->is_array() ? json_next(doc, *one) : nullptr) {
+                if (out.boss_mark_count == kMaxBosses) return fail(why, why_cap, "too many bosses");
+                snprintf(out.boss_names[out.boss_mark_count++], sizeof out.boss_names[0], "%s", json_string(one, ""));
+            }
+            mk.value = (f32)(out.boss_mark_count - mk.index);
+            if (mk.value < 1.0f) return fail(why, why_cap, "a boss mark names a boss");
         } else if (json_bool(json_get(doc, *m, "end"), false)) {
             mk.kind = MarkKind::End;
             if (mk.at <= 0.0f) return fail(why, why_cap, "the end mark is past the start"); // a stage that loops must have a length
             out.length = mk.at;
             ended = true;
-        } else return fail(why, why_cap, "a mark is a formation, a ground row, a speed, a boss or the end");
+        } else return fail(why, why_cap, "a mark is a formation, a ground row, a segment, a speed, a boss or the end");
         out.marks[out.mark_count++] = mk;
     }
     if (!ended) return fail(why, why_cap, "a stage has an end mark");

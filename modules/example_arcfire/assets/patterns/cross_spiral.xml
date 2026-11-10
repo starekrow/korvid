@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<!-- cross_spiral: the station's weapon ring. Two three-armed spirals from one mount, turning
+     opposite ways at two speeds, so their arms cross in a lattice that drifts. Rank tightens
+     the turn and adds turns. -->
+<bulletml type="vertical">
+  <action label="top1">
+    <repeat><times>60 + $rank * 40</times>
+      <action>
+        <fire><direction type="sequence">9 + $rank * 3</direction><speed>2.0</speed><bullet/></fire>
+        <fire><direction type="sequence">120</direction><speed>2.0</speed><bullet/></fire>
+        <fire><direction type="sequence">120</direction><speed>2.0</speed><bullet/></fire>
+        <wait>5</wait>
+      </action>
+    </repeat>
+  </action>
+  <action label="top2">
+    <repeat><times>60 + $rank * 40</times>
+      <action>
+        <fire><direction type="sequence">-(9 + $rank * 3)</direction><speed>1.5</speed><bullet/></fire>
+        <fire><direction type="sequence">120</direction><speed>1.5</speed><bullet/></fire>
+        <fire><direction type="sequence">120</direction><speed>1.5</speed><bullet/></fire>
+        <wait>5</wait>
+      </action>
+    </repeat>
+  </action>
+</bulletml>

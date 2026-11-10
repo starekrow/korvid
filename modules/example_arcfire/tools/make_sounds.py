@@ -7,7 +7,7 @@ the two music tracks, resampled. Stdlib only. Run from anywhere:
 The argument is the directory the archives were downloaded and unpacked into (`pack/`
 under it holds one directory per archive). Writes modules/example_arcfire/assets/sound/
 (Kenney's Sci-Fi Sounds and Impact Sounds, CC0, as they are) and assets/music/ (Juhani
-Junkala's 5 Chiptunes (Action), CC0: two tracks folded to mono and halved in rate, 22,050
+Junkala's 5 Chiptunes (Action), CC0: four tracks, Shoreline's and Orbit's, folded to mono and halved in rate, 22,050
 Hz 16-bit WAV, about a quarter of the size; the engine streams only Ogg Vorbis, and
 nothing here encodes it).
 assets/CREDITS.md lists every file.
@@ -47,6 +47,8 @@ EFFECTS = [
 TRACKS = [
     ("stage.wav", "Juhani Junkala [Retro Game Music Pack] Level 1.wav"),
     ("boss.wav", "Juhani Junkala [Retro Game Music Pack] Level 3.wav"),
+    ("orbit.wav", "Juhani Junkala [Retro Game Music Pack] Level 2.wav"),
+    ("orbit_boss.wav", "Juhani Junkala [Retro Game Music Pack] Ending.wav"),
 ]
 
 

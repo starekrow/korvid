@@ -255,6 +255,9 @@ void card_close(Engine& e, Game& g) {
 void card_open(Engine& e, Game& g, u32 round, u32 position) {
     char line[48], pos[16];
     ui_model_set_str(e, "card_stage", g.stage.name);
+    char number[16];
+    snprintf(number, sizeof number, "STAGE %u", g.stage_at + 1);
+    ui_model_set_str(e, "card_number", number);
     snprintf(pos, sizeof pos, "%s", position_name(position));
     caps(pos);
     if (round > 1) snprintf(line, sizeof line, "ROUND %u  %s", round, pos);

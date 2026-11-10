@@ -34,10 +34,11 @@ held; Shift (West) focuses: half speed, the hitbox and the graze ring shown, the
 narrowed; X (East) bombs; Escape (Start) pauses; Q quits.
 
 Run plainly, the game opens on its title, over Shoreline's sky: Arcade, Stage select
-(the stage, then Easy, Normal or Hard), High scores, Options, Quit. Arcade is the stages
-in order (Shoreline alone for now), and at the end the stage-clear banner with the stage
-bonus and a round again a difficulty up, the score carried, until the round at Hard ends
-the run. A run starts behind a fade from a fresh sim, so every run from the title is the
+(Shoreline or Orbit, then Easy, Normal or Hard), High scores, Options, Quit. Arcade is the
+stages in order, Shoreline then Orbit: at a stage's end the stage-clear banner with the
+stage bonus, then behind a fade the next stage (its card says "STAGE 2"), the ship, its
+weapon and options, the score and the eggs carried; after Orbit, Shoreline again a
+difficulty up, until the round at Hard ends the run. A run starts behind a fade from a fresh sim, so every run from the title is the
 same run a new process would play, and opens with the stage's card (again at each round
 and restart). The pause menu (Escape or Start): Resume, Options, Quit to title (asked
 twice). Out of eggs, the stage starts over behind it, the score as it was when the stage
@@ -55,7 +56,7 @@ missing or will not read is the defaults. The demo keeps `scores-demo.json` and 
 touches the options.
 
 A flag that names a run goes straight into it and quits at its end: `--arcade`, `--stage
-NAME` (`assets/stages/NAME.stage.json`), and the ways it flies itself below; `--difficulty
+NAME` (`shoreline` or `orbit`: `assets/stages/NAME.stage.json`), and the ways it flies itself below; `--difficulty
 easy|normal|hard` is where arcade or the stage starts (Normal). Left alone on the title for 20 seconds (`--attract SECONDS`; 0 never), the game plays the
 demo from a fresh sim with PRESS START blinking over it, hashing tick for tick as `--demo`
 does; a key or a pad's button, or the demo's end, goes back to the title.
@@ -144,9 +145,12 @@ state.
   sim reads the window: the camera (`hud.cc`) zooms to fit the field's height (or its
   width, in a window narrower than 3:4), and the UI anchors the side panels at the field's
   edges.
-- **The stage** (`stage.cc`, `stage_data.cc`) is `assets/stages/shoreline.stage.json`:
-  a speed, named paths, and marks by distance (a formation, a ground row, a speed change,
-  the end). `scroll` adds the speed to the distance every sim tick; `stage` runs every mark
+- **The stages** (`stage.cc`, `stage_data.cc`) are `assets/stages/shoreline.stage.json`
+  and `orbit.stage.json`, both read at startup: a speed, named paths, and marks by distance
+  (a formation, a ground row, a station segment, a speed change, a boss or several, the
+  end). The world row's `Stage` says which is being played; arcade's change from one to
+  the next is a held tick behind a cover (`stage_change`): the field cleared, the next
+  stage's map, planes and music, the run carried. `scroll` adds the speed to the distance every sim tick; `stage` runs every mark
   the distance has passed. A formation mark schedules its members as events on the ticks
   their spacing gives; each member's event carries the run's epoch, so members scheduled
   before a restart never arrive. The sim holds (`HoldLoading`) until the file is in.
@@ -165,6 +169,11 @@ state.
   extract nothing a tick. The map's `enemies` layer places the ground rows: turrets, tanks
   that drive their road, bunkers that launch popcorn up a stage path. Each comes into view
   where its place on the map crosses the field's top, and rides the scroll from there.
+  Orbit has no map and no ground but its station segments: a segment mark puts a piece of
+  station (`generated/segments.png`, a truss or a module) on the map's layer, which scrolls
+  with the distance as the ground rows do, and two turrets (ground rows) on its pads. The
+  picture is cosmetic (a plane row); its turrets are the sim's. Where there is no ground,
+  nothing casts a shadow.
 - **The ship** (`ship.cc`): `control` reads the action map and moves, clamps and fires
   its weapon.
 - **Weapons** (`weapons.cc`): four types at five power levels, rows of tables: Spread (a
@@ -193,6 +202,8 @@ state.
   patterns) come just before the carrier and through the second half, and three times a
   missile boat (a midsize airship, `generated/boat.png`, a formation of one) crosses the
   upper field slowly, salvo after salvo of homing missiles (`patterns/missiles.xml`).
+  Orbit adds debris (`generated/debris.png`): slow formations of wreckage that tumble,
+  take a few shots and never fire.
 - **Bosses** (`boss.cc`, `boss_data.cc`, `assets/bosses/`): a boss mark in the stage
   spawns one, and the marks after it wait (the stage's clock holds; the scroll and the map
   go on) until it has died or left. A boss is a hull (`boss`, a body the ship must not
@@ -211,7 +222,10 @@ state.
   not touch (meant to cost an egg; a bomb is the way out); then it leaves, paying nothing.
   Shoreline has two: the carrier over the airfield (four turrets, two bays, a core) and the
   battleship in the open water at the end (two main guns, four anti-air mounts, a missile
-  bay; then two deck hatches; then the bridge). The art is made by `tools/make_bosses.py`
+  bay; then two deck hatches; then the bridge). Orbit has two more: a pair of gunships
+  that come on one mark and cross each other's paths as they sway (each two turrets, then
+  its bow gun; the stage waits for both), and the station core at the end, the game's last
+  three phases (a ring of six shield emitters, then four weapon mounts, then the core). The art is made by `tools/make_bosses.py`
   from Kenney's pieces into `assets/generated/`. The HUD shows a boss's parts' health as a
   bar.
 - **Patterns** (`patterns.cc`, `assets/patterns/`): BulletML documents, one pattern each,
@@ -293,7 +307,8 @@ state.
   lowest, deaths, the bomb, the egg and a boss's fall highest. The audio module starts a
   sound once a tick however often it is asked for, so a ring of bullets is one sound, and
   the effects follow the time scale in pitch (the egg's slow time drops an octave). The
-  music is the stage's track, crossfading to the boss's at a boss mark and back after.
+  music is the stage's track, crossfading to the boss's at a boss mark and back after;
+  each stage has its own two.
 - **Reports** (`stats.cc`): the counters as the resource `example_arcfire.stats`, the log
   lines, the summary.
 
@@ -319,10 +334,10 @@ state.
 | `src/hud.cc`, `src/fx.cc`, `src/pilot.cc`, `src/stats.cc` | the camera and the screens; particles; the demo and the bot; the reports |
 | `src/main.cc` | the frame loop's config and the game's flags |
 | `shaders/`, `assets/materials/` | the game's shaders (the nebula, the dissolve, their noise; the shimmer, a post shader); the materials that name the first two |
-| `assets/stages/shoreline.stage.json`, `assets/maps/` | the stage; its ground map and tileset |
+| `assets/stages/shoreline.stage.json`, `assets/stages/orbit.stage.json`, `assets/maps/` | the stages; Shoreline's ground map and tileset |
 | `assets/ui/arcfire.ui.json` | the HUD and every screen |
 | `assets/CREDITS.md`, `assets/LICENSE-*.txt` | who made what |
-| `tools/make_art.py`, `tools/make_maps.py`, `tools/make_bosses.py`, `tools/make_sounds.py` | copies the vendored art in and draws `assets/made/`; writes the maps; kitbashes the bosses into `assets/generated/`; copies the sounds in and resamples the music |
+| `tools/make_art.py`, `tools/make_maps.py`, `tools/make_bosses.py`, `tools/make_sounds.py` | copies the vendored art in and draws `assets/made/`; writes the maps; kitbashes the bosses (and draws Orbit's segments and debris) into `assets/generated/`; copies the sounds in and resamples the music |
 | `tests/` | paths; the stage file, the boss files and the parsers' rules |
 | `docs/` | the PRDs and the performance notebook |
 

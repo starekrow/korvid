@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- curtain: a slow wall coming down. A wide fan straight down, fired again and again with
+     its whole spread shifted a little each time, one gap in it walking across; the ship
+     finds the gap and walks with it. The gunships' and the station's stomp. Rank closes the
+     fan up. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>14</times>
+      <action>
+        <fire><direction type="absolute">110 + $rand * 8</direction><speed>1.3</speed><bullet/></fire>
+        <repeat><times>16 + $rank * 8</times>
+          <action><fire><direction type="sequence">140 / (16 + $rank * 8)</direction><speed>1.3</speed><bullet/></fire></action>
+        </repeat>
+        <wait>18</wait>
+      </action>
+    </repeat>
+  </action>
+</bulletml>

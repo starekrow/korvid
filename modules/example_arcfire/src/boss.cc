@@ -34,7 +34,8 @@ namespace {
 
 // Every boss the game has, loaded at startup in this order: their materials' handles are
 // sim state (a sprite's), so they are made at the same point every run.
-constinit const char* const k_boss_names[] = {"carrier", "battleship"};
+constinit const char* const k_boss_names[] = {"carrier", "battleship", "gunship_left", "gunship_right", "station"};
+static_assert(KV_COUNTOF(k_boss_names) <= kMaxBosses, "the bosses fit");
 
 constexpr vec2 kBossShadow{30.0f, -56.0f}; // higher than an air row's
 constexpr f32  kBossShadowAlpha = 0.33f;
@@ -112,16 +113,23 @@ bool bosses_ready(Engine& e, Game& g, char* why, usize why_cap) {
         if (!b || b->state == AssetState::Pending) return false;
         if (b->state != AssetState::Ready) { snprintf(why, why_cap, "boss %s did not load", k_boss_names[i]); return false; }
     }
+    // Each into the stage that names it (its paths and bays' formations are that stage's);
+    // one no stage names, into the first.
     for (u32 i = 0; i < g.boss_count; ++i) {
+        u32 home = 0;
+        for (u32 s = 0; s < kStageCount; ++s)
+            for (u32 m = 0; m < g.stages[s].boss_mark_count; ++m)
+                if (!strcmp(g.stages[s].boss_names[m], k_boss_names[i])) home = s;
         const BlobAsset* b = asset_blob(e, g.boss_blobs[i]);
-        if (!boss_parse((const char*)b->data, b->size, k_boss_names[i], g.bosses[i], g.stage, why, why_cap)) return false;
+        if (!boss_parse((const char*)b->data, b->size, k_boss_names[i], g.bosses[i], g.stages[home], why, why_cap)) return false;
     }
-    for (u32 m = 0; m < g.stage.boss_mark_count; ++m) {
-        g.boss_of[m] = kMaxBosses;
-        for (u32 i = 0; i < g.boss_count; ++i)
-            if (!strcmp(g.stage.boss_names[m], g.bosses[i].name)) g.boss_of[m] = i;
-        if (g.boss_of[m] == kMaxBosses) { snprintf(why, why_cap, "a boss mark names \"%s\", which the game does not have", g.stage.boss_names[m]); return false; }
-    }
+    for (StageDef& st : g.stages)
+        for (u32 m = 0; m < st.boss_mark_count; ++m) {
+            st.boss_of[m] = kMaxBosses;
+            for (u32 i = 0; i < g.boss_count; ++i)
+                if (!strcmp(st.boss_names[m], g.bosses[i].name)) st.boss_of[m] = i;
+            if (st.boss_of[m] == kMaxBosses) { snprintf(why, why_cap, "a boss mark names \"%s\", which the game does not have", st.boss_names[m]); return false; }
+        }
     g.bosses_parsed = true;
     return true;
 }
@@ -157,10 +165,12 @@ Handle boss_spawn(TickContext& ctx, Game& g, const Dials& d, u32 di) {
         Part part{h, i, 0, p.launch != kNoFormation ? p.every / 2 : 0, 0};
         made[i] = parts->spawn(transform2_at(world), local2_at(p.at), Parent{p.parent < 0 ? h : made[p.parent]}, s, c, hp, em, Runner{}, part);
     }
-    Sprite shadow = hull;
-    shadow.tint = color{0.0f, 0.0f, 0.04f, kBossShadowAlpha};
-    shadow.layer = Z_SHADOW;
-    ctx.spawn_later(g_shadow_kind, Transform2{}, local2_at(point2{kBossShadow.x, kBossShadow.y}), Parent{h}, shadow);
+    if (g.stage.map[0]) { // a shadow where there is ground to fall on
+        Sprite shadow = hull;
+        shadow.tint = color{0.0f, 0.0f, 0.04f, kBossShadowAlpha};
+        shadow.layer = Z_SHADOW;
+        ctx.spawn_later(g_shadow_kind, Transform2{}, local2_at(point2{kBossShadow.x, kBossShadow.y}), Parent{h}, shadow);
+    }
     sfx(ctx, g, SFX_WARNING);
     music(ctx, g, true);
     KV_INFO("arcfire", "boss: %s at tick %llu, %u parts, %d health, %u s", b.title, (unsigned long long)ctx.tick, b.part_count, b.total, b.timeout / 60);

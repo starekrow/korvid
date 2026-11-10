@@ -49,10 +49,12 @@ void enemies(TickContext& ctx) {
             continue;
         }
         at[i].position = path_at(m.path, m.s);
+        if (hp[i].look == (u32)Look::Debris) at[i].rotation += 0.02f + 0.015f * (f32)(i % 3); // wreckage tumbles
         // Its pattern starts where its formation said along the path, once it is on the field.
         if (em[i].state == EmitIdle && m.s >= em[i].at * m.path.length && in_field(at[i].position, -16.0f))
             emitter_start(g, em[i], run[i], air->handle_at(i), ctx.tick);
-        flash(g, hp[i], sp[i], hp[i].look == (u32)Look::Turret ? TEX_TILES : hp[i].look == (u32)Look::Boat ? TEX_BOAT : TEX_SHIPS);
+        Look look = (Look)hp[i].look;
+        flash(g, hp[i], sp[i], look == Look::Turret ? TEX_TILES : look == Look::Boat ? TEX_BOAT : look == Look::Debris ? TEX_DEBRIS : TEX_SHIPS);
     }
 
     Table* ground = ctx.write_kind(g_ground_kind);

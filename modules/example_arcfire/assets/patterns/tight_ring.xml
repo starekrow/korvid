@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!-- tight_ring: Orbit's turrets and the station's shield emitters. Four dense rings in
+     quick succession, each turned half a gap from the last, so the gaps of one are closed
+     by the next and the way through is to move with them. Rank adds bullets to a ring. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>4</times>
+      <action>
+        <actionRef label="ring"><param>20 + ($rank * 20 - ($rank * 20) % 1)</param></actionRef>
+        <wait>14</wait>
+      </action>
+    </repeat>
+  </action>
+  <action label="ring">
+    <fire><direction type="sequence">180 / $1</direction><speed>2.3</speed><bullet/></fire>
+    <repeat><times>$1 - 1</times>
+      <action><fire><direction type="sequence">360 / $1</direction><speed>2.3</speed><bullet/></fire></action>
+    </repeat>
+  </action>
+</bulletml>

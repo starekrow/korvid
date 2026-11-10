@@ -10,8 +10,15 @@
 namespace kv::arcfire {
 
 bool round_next(const Game& g, const Dials& d, Position* next) {
+    (void)g;
     if (d.loops) { *next = (Position)d.position; return true; } // the stress run's, the bench's: the same dials again
-    if (!g.arcade) return false;
+    return false;
+}
+
+bool arcade_next(const Game& g, const Stage& s, const Dials& d, u32* stage, Position* next) {
+    if (!g.arcade || d.loops) return false;
+    if (s.index + 1 < kStageCount) { *stage = s.index + 1; *next = (Position)d.position; return true; }
+    *stage = 0;
     if (d.position == (u32)Position::Easy) { *next = Position::Normal; return true; }
     if (d.position == (u32)Position::Normal) { *next = Position::Hard; return true; }
     return false;

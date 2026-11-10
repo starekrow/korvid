@@ -114,7 +114,7 @@ void flow_request(Engine& e, Game& g, Next next, bool cover) {
 // The assets are in (boot): the planes, then the title or the flags' run.
 void flow_ready(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
-    planes_spawn(e, g, dials_start(e, g, g.demo ? Position::Demo : g.stress ? Position::Stress : g.start));
+    stage_enter(ctx, g, g.front_door ? 0 : g.plan.stage, dials_start(e, g, g.demo ? Position::Demo : g.stress ? Position::Stress : g.start));
     if (g.front_door) open_title(e, g);
     else run_begin(ctx, g);
     music(ctx, g, false);
@@ -136,7 +136,10 @@ void run_begin(TickContext& ctx, Game& g) {
     for (Game::Ring& ring : g.rings) ring = Game::Ring{};
     Dials d = dials_start(e, g, g.demo ? Position::Demo : g.stress ? Position::Stress : g.start);
     dials_log(d);
+    u32 first = g.plan.arcade ? 0 : g.plan.stage; // arcade starts at the first stage
+    if (g.runs > 1 || first != g.stage_at) stage_enter(ctx, g, first, d); // the first run's was entered at boot
     Stage s{};
+    s.index = first;
     stage_reset(s, g.stage);
     Run run{};
     run.eggs = kStartEggs;
@@ -159,7 +162,7 @@ void run_begin(TickContext& ctx, Game& g) {
     g.result = RunResult{};
     if (g.front_door) { // a recording of a run the title chose says how to start it
         char note[96];
-        snprintf(note, sizeof note, "%s %s --difficulty %s", g.arcade ? "--arcade" : "--stage", g.arcade ? "" : g.stage_name, position_name((u32)g.start));
+        snprintf(note, sizeof note, "%s %s --difficulty %s", g.arcade ? "--arcade" : "--stage", g.arcade ? "" : k_stage_names[g.stage_at], position_name((u32)g.start));
         frameloop_record_note(e, note);
     }
     g.mode = Mode::Run;
@@ -181,8 +184,10 @@ void flow_step(TickContext& ctx, Game& g) {
     close_menu(e, g.options_screen);
     close_menu(e, g.gameover_screen);
     if (next == Next::Run) run_begin(ctx, g);
+    else if (next == Next::Stage) stage_change(ctx, g);
     else {
         clear_run(ctx, g);
+        if (g.stage_at != 0) stage_enter(ctx, g, 0, dials_start(e, g, g.start)); // the title shows the first stage
         open_title(e, g);
         KV_INFO("arcfire", "the title");
     }
@@ -244,7 +249,7 @@ void pause(TickContext& ctx) {
             KV_INFO("arcfire", "attract: the demo");
             g.attract = true;
             g.demo = true;
-            g.plan = RunPlan{false, false, Position::Normal};
+            g.plan = RunPlan{false, false, Position::Normal, 0};
             flow_request(e, g, Next::Run, true);
         }
         return;
@@ -276,7 +281,7 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
         if (!item) item = "";
         if (ev.screen == g.title_screen && chose) {
             if (!strcmp(item, "arcade")) {
-                g.plan = RunPlan{true, false, g.start};
+                g.plan = RunPlan{true, false, g.start, 0};
                 flow_request(e, g, Next::Run, true);
             } else if (!strcmp(item, "select")) {
                 g.select_screen = open_menu(e, g, "select", 112, "shoreline");
@@ -294,7 +299,11 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
                 close_menu(e, g.select_screen);
                 ui_set_visible(e, g.title_screen, "column", true);
             } else if (chose) {
-                ui_model_set_str(e, "select_stage", "SHORELINE");
+                u32 picked = stage_named(item);
+                g.select_stage = picked < kStageCount ? picked : 0;
+                char upper_name[32];
+                snprintf(upper_name, sizeof upper_name, "%s", g.stages[g.select_stage].name);
+                ui_model_set_str(e, "select_stage", upper_name);
                 g.difficulty_screen = open_menu(e, g, "difficulty", 114, position_name((u32)g.start));
                 ui_set_visible(e, g.select_screen, "column", false);
             }
@@ -305,7 +314,7 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
             }
             else if (chose) {
                 Position p = !strcmp(item, "easy") ? Position::Easy : !strcmp(item, "hard") ? Position::Hard : Position::Normal;
-                g.plan = RunPlan{false, true, p};
+                g.plan = RunPlan{false, true, p, g.select_stage};
                 flow_request(e, g, Next::Run, true);
             }
         } else if (ev.screen == g.pause_screen && g.confirm_screen.is_null()) {

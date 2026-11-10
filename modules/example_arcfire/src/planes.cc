@@ -49,6 +49,7 @@ f32 plane_tile(const Dials& d, u32 p) { return k_planes[p].full / (f32)plane_cut
 
 void planes_spawn(Engine& e, Game& g, const Dials& d) {
     Table* planes = engine_table(e, g_plane_kind);
+    planes->destroy_all(); // the last stage's, its segments with them
     u32 made = 0, shown = 0;
     for (u32 p = 0; p < KV_COUNTOF(k_planes); ++p) {
         if (!(g.stage.planes & (1u << p))) continue;
@@ -71,7 +72,10 @@ void planes_spawn(Engine& e, Game& g, const Dials& d) {
                 // Its cell of the texture: up the world is up the picture (uv rows run down).
                 u32 col = (u32)(((k % (i32)n) + (i32)n) % (i32)n);
                 rect2 uv{(f32)col / (f32)n, (f32)(n - 1 - r % n) / (f32)n, 1.0f / (f32)n, 1.0f / (f32)n};
-                Sprite s = sprite_of(g, pd.tex, uv, vec2{tile, tile}, pd.layer, pd.tint);
+                // Over the gas the stars are added (their black adds nothing), so the gas shows
+                // through them; elsewhere the deep plane is the back of the picture.
+                bool over_gas = p == 0 && (g.stage.planes & kPlaneShader);
+                Sprite s = sprite_of(g, pd.tex, uv, vec2{tile, tile}, pd.layer, pd.tint, over_gas);
                 if (!planes->spawn(transform2_at(at), s, Plane{k_planes[p].rate, tile, r, rows}).is_null()) ++made;
             }
     }
@@ -114,7 +118,7 @@ void planes(TickContext& ctx) {
         Span<Transform2> t = planes_table->rows_of<Transform2>();
         Span<const Plane> p = planes_table->rows_of<Plane>();
         for (u32 i = 0; i < planes_table->rows(); ++i) {
-            if (!planes_table->is_alive(i)) continue;
+            if (!planes_table->is_alive(i) || p[i].rate < 0.0f) continue; // a segment rides the ground's layer
             t[i].position.y -= st.speed * p[i].rate;
             if (t[i].position.y < kFieldBottom - p[i].tile * 0.5f) {
                 t[i].position.y += p[i].tile * (f32)p[i].rows;
@@ -142,6 +146,14 @@ void planes(TickContext& ctx) {
     bool jumped = ground > g.ground_offset; // the distance went back: a loop or a restart
     for (u32 l = 0; l < kMapLayers; ++l) layers->set(Z_MAP + (i32)l, vec2{0.0f, ground}, jumped);
     g.ground_offset = ground;
+    // A station segment (rate -1, on the ground's layer) is placed by the distance; when it
+    // goes back, the segments shown go (their turrets went with the restart), and so does
+    // one that has scrolled past the field's bottom.
+    Table* pt = ctx.write_kind(g_plane_kind);
+    Span<const Plane> pl = pt->rows_of<Plane>();
+    Span<const Transform2> px = pt->rows_of<Transform2>();
+    for (u32 i = 0; i < pt->rows(); ++i)
+        if (pt->is_alive(i) && pl[i].rate < 0.0f && (jumped || px[i].position.y + ground < kFieldBottom - 120.0f)) pt->destroy(pt->handle_at(i));
 }
 
 } // namespace kv::arcfire

@@ -109,9 +109,11 @@ void fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 
 
 // Shadows: an air row, once it exists, gets one: its sprite in black, a third opaque, down
 // and right of it on the ground's layer, a cosmetic child that dies with it. The child's
-// offset is in its parent's frame (an enemy faces down), so it is turned back first.
+// offset is in its parent's frame (an enemy faces down), so it is turned back first. Only
+// over ground: a stage without a map (Orbit) has none.
 void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
     Game& g = ctx.state_as<Game>();
+    if (!g.stage.map[0]) return; // in space (Orbit) there is no ground to fall on
     Span<const Transform2> xf = ctx.read<Transform2>("example_arcfire.air.Transform2");
     Span<const Sprite> sp = ctx.read<Sprite>("example_arcfire.air.Sprite");
     for (const Spawned& s : spawns) {

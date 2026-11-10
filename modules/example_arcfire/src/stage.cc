@@ -14,20 +14,31 @@ namespace kv::arcfire {
 
 namespace {
 
-// Every pattern the stage names, found in the library: a name it lacks is the stage's error.
-bool resolve_patterns(Game& g, char* why, usize cap) {
-    for (u32 i = 0; i < g.stage.formation_count; ++i) {
-        FormationDef& f = g.stage.formations[i];
+// Every pattern a stage names, found in the library: a name it lacks is the stage's error.
+// A formation with no pattern never fires.
+bool resolve_stage(const Game& g, StageDef& st, char* why, usize cap) {
+    for (u32 i = 0; i < st.formation_count; ++i) {
+        FormationDef& f = st.formations[i];
+        if (!f.pattern[0]) { f.entry = KV_BML_NONE; continue; }
         if ((f.entry = bml_find(g.lib, f.pattern)) == KV_BML_NONE) { snprintf(why, cap, "no pattern \"%s\"", f.pattern); return false; }
     }
-    for (u32 i = 0; i < g.stage.ground_count; ++i) {
-        GroundDef& gd = g.stage.grounds[i];
+    for (u32 i = 0; i < st.ground_count; ++i) {
+        GroundDef& gd = st.grounds[i];
         if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "no pattern \"%s\"", gd.pattern); return false; }
     }
-    for (u32 i = 0; i < g.stage.map_ground_count; ++i) {
-        GroundDef& gd = g.stage.map_grounds[i];
+    for (u32 i = 0; i < st.map_ground_count; ++i) {
+        GroundDef& gd = st.map_grounds[i];
         if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "the map's enemy: no pattern \"%s\"", gd.pattern); return false; }
     }
+    for (u32 i = 0; i < st.segment_count; ++i) {
+        SegmentDef& sd = st.segments[i];
+        if ((sd.entry = bml_find(g.lib, sd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "a segment: no pattern \"%s\"", sd.pattern); return false; }
+    }
+    return true;
+}
+
+// The bosses' patterns, and the bench's.
+bool resolve_patterns(Game& g, char* why, usize cap) {
     for (u32 b = 0; b < g.boss_count; ++b) {
         BossDef& def = g.bosses[b];
         if (def.stomp[0] && (def.stomp_entry = bml_find(g.lib, def.stomp)) == KV_BML_NONE) {
@@ -49,19 +60,45 @@ bool resolve_patterns(Game& g, char* why, usize cap) {
 
 // The bench (--bench NAME): no marks but a far end, a slow scroll for the planes, and one
 // emitter at the top of the field running NAME again and again.
-void bench_stage(Game& g) {
-    StageDef& st = g.stage;
+void bench_stage(Game& g, StageDef& st) {
     snprintf(st.name, sizeof st.name, "BENCH %.24s", g.bench);
     st.speed = 0.6f;
     st.length = 1.0e9f;
-    st.formation_count = st.ground_count = st.map_ground_count = st.boss_mark_count = 0;
+    st.formation_count = st.ground_count = st.map_ground_count = st.boss_mark_count = st.segment_count = 0;
     st.map[0] = 0;
     st.planes = 7;
     st.mark_count = 1;
     st.marks[0] = Mark{st.length, MarkKind::End, 0, 0.0f, 0.0f};
 }
 
+// Where a segment's turrets stand on it, by its cell (segments.png), in world units from
+// its middle: the truss's two pads, the module's two.
+constexpr vec2 kSegmentSize{192.0f, 96.0f};
+constinit const vec2 k_segment_pads[2][2] = {{{-40.0f, 2.0f}, {40.0f, 2.0f}}, {{-52.0f, -16.0f}, {52.0f, -16.0f}}};
+
 } // namespace
+
+// A station segment: its picture a plane row on the ground's layer (the map's, which
+// scrolls by the stage's distance, as the ground rows do), placed where the layer's offset
+// shows it just above the field; its turrets ground rows on its pads, riding the scroll
+// with it. The picture is cosmetic (planes.cc takes it away when the distance jumps back).
+void segment_spawn(TickContext& ctx, const Game& g, const Dials& d, const SegmentDef& sd) {
+    Span<const Stage> stage_row = ctx.read<Stage>(ARC_WORLD(Stage));
+    f32 shown_y = kFieldTop + 24.0f + kSegmentSize.y * 0.5f;
+    f32 clock = stage_row.len ? map_clock(stage_row[0]) : 0.0f;
+    Sprite s = sprite_of(g, TEX_SEGMENTS, rect2{0.0f, sd.cell ? 0.5f : 0.0f, 1.0f, 0.5f}, kSegmentSize, Z_MAP);
+    ctx.spawn_later(g_plane_kind, transform2_at(point2{sd.x, shown_y + clock}), s, Plane{-1.0f, 0.0f, 0, 0});
+    for (u32 i = 0; i < 2; ++i) {
+        GroundDef gd{};
+        gd.x = sd.x + k_segment_pads[sd.cell][i].x;
+        gd.health = sd.health;
+        gd.score = sd.score;
+        gd.entry = sd.entry;
+        gd.kind = GroundTurret;
+        gd.drop = i == 0 ? sd.drop : 0;
+        ground_spawn(ctx, g, d, gd, point2{gd.x, shown_y + k_segment_pads[sd.cell][i].y});
+    }
+}
 
 void bench_spawn(TickContext& ctx, Game& g, const Dials& d) {
     GroundDef gd{};
@@ -71,54 +108,112 @@ void bench_spawn(TickContext& ctx, Game& g, const Dials& d) {
 }
 
 void stage_reset(Stage& s, const StageDef& def) {
-    u32 round = s.loops; // a restart is of the round it happens in
+    u32 round = s.loops, index = s.index; // a restart is of the round and the stage it happens in
     s = Stage{};
     s.speed = def.speed;
     s.loops = round;
+    s.index = index;
 }
 
-// Phase PreSim, every tick: until the assets are in, the stage file, its map, the bosses
+void stage_enter(TickContext& ctx, Game& g, u32 index, const Dials& d) {
+    Engine& e = *ctx.engine;
+    if (index >= kStageCount) index = 0;
+    g.stage = g.stages[index];
+    g.stage_at = index;
+    ground_map_show(ctx, g, g.stage.map[0] != 0);
+    planes_spawn(e, g, d);
+    g.ground_offset = 0.0f;
+    KV_INFO("arcfire", "stage %s shown", g.stage.name);
+}
+
+// Arcade's stage change (flow_step, on a held tick behind the cover): everything the stage
+// made goes; the next stage (the first again, a difficulty up, after the last); the ship,
+// its weapon and options, the score and the eggs carried; what the old stage scheduled is
+// of an epoch that no longer spawns. A restart in the new stage goes back to its start.
+void stage_change(TickContext& ctx, Game& g) {
+    Engine& e = *ctx.engine;
+    Table* world = ctx.write_kind(g_world_kind);
+    Stage* s = world->get<Stage>(g.world);
+    Dials* d = world->get<Dials>(g.world);
+    Run* r = world->get<Run>(g.world);
+    if (!s || !d || !r) return;
+    const u32 kinds[] = {g_air_kind, g_ground_kind, g_bullet_kind, g_active_kind, g_shot_kind, g_item_kind, g_formation_kind, g_boss_kind, g_part_kind};
+    for (u32 k : kinds) ctx.destroy_all(k);
+    u32 loops = s->loops + (g.next_stage <= s->index ? 1u : 0u); // back to the first: a round up
+    if ((u32)g.next_position != d->position) {
+        *d = dials_start(e, g, g.next_position);
+        dials_log(*d);
+    }
+    stage_enter(ctx, g, g.next_stage, *d);
+    stage_reset(*s, g.stage);
+    s->loops = loops;
+    s->index = g.next_stage;
+    ++r->epoch;
+    r->stage_score = r->score;
+    engine_time_scale(e, 1.0f);
+    hud_boss(e, g, nullptr, 0, 0);
+    hud_stomp(e, g, false);
+    card_open(e, g, loops + 1, d->position);
+    KV_INFO("arcfire", "stage %u: %s, round %u at %s, tick %llu, score %lld", s->index + 1, g.stage.name, loops + 1, position_name(d->position),
+            (unsigned long long)ctx.tick, (long long)r->score);
+}
+
+// Phase PreSim, every tick: until the assets are in, the stage files, the map, the bosses
 // and the patterns; then the title or the first run (flow.cc), and the sim may go. After,
 // the switches between runs and the title, which want this system's writes.
 void boot(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     if (g.stage_ready) { flow_step(ctx, g); return; }
-    const BlobAsset* b = asset_blob(e, g.stage_blob);
     bool failed = false;
     bool patterns_in = patterns_ready(e, g, failed);
     if (failed) { engine_request_quit(e); return; }
-    if (!b || b->state == AssetState::Pending || !patterns_in || !g.records_in) return; // the records too: the title shows them
+    for (Handle h : g.stage_blobs) {
+        const BlobAsset* b = asset_blob(e, h);
+        if (!b || b->state == AssetState::Pending) return;
+    }
+    if (!patterns_in || !g.records_in) return; // the records too: the title shows them
     char why[128] = "the file did not load";
-    // The stage, once; then its map (which adds its enemies, and a bunker's formations, to
-    // the stage), then every pattern either names.
+    // The stages, once; then the map (which adds its enemies, and a bunker's formations,
+    // to the stage that names it), then every pattern any of them names.
     if (!g.stage_parsed) {
-        if (b->state != AssetState::Ready || !stage_parse((const char*)b->data, b->size, g.stage, why, sizeof why)) {
-            KV_ERROR("arcfire", "stage %s: %s", b ? b->path : "?", why);
-            engine_request_quit(e);
-            return;
+        for (u32 i = 0; i < kStageCount; ++i) {
+            const BlobAsset* b = asset_blob(e, g.stage_blobs[i]);
+            if (b->state != AssetState::Ready || !stage_parse((const char*)b->data, b->size, g.stages[i], why, sizeof why)) {
+                KV_ERROR("arcfire", "stage %s: %s", k_stage_names[i], why);
+                engine_request_quit(e);
+                return;
+            }
+            if (g.bench[0]) bench_stage(g, g.stages[i]); // the bench's own: no map, every plane
+            if (g.gas_test) g.stages[i].planes |= kPlaneShader;
         }
         g.stage_parsed = true;
-        if (g.bench[0]) bench_stage(g); // the bench's own: no map, every plane
-        if (g.gas_test) g.stage.planes |= kPlaneShader;
     }
     why[0] = 0;
     if (!bosses_ready(e, g, why, sizeof why)) {
-        if (why[0]) { KV_ERROR("arcfire", "stage %s: %s", b->path, why); engine_request_quit(e); }
+        if (why[0]) { KV_ERROR("arcfire", "the bosses: %s", why); engine_request_quit(e); }
         return;
     }
-    if (!ground_map_ready(ctx, g, why, sizeof why)) {
-        if (why[0]) { KV_ERROR("arcfire", "stage %s: %s", b->path, why); engine_request_quit(e); }
-        return;
-    }
+    for (u32 i = 0; i < kStageCount; ++i)
+        if (!ground_map_ready(ctx, g, g.stages[i], why, sizeof why)) {
+            if (why[0]) { KV_ERROR("arcfire", "stage %s: %s", k_stage_names[i], why); engine_request_quit(e); }
+            return;
+        }
+    for (u32 i = 0; i < kStageCount; ++i)
+        if (!resolve_stage(g, g.stages[i], why, sizeof why)) {
+            KV_ERROR("arcfire", "stage %s: %s", k_stage_names[i], why);
+            engine_request_quit(e);
+            return;
+        }
     if (!resolve_patterns(g, why, sizeof why)) {
-        KV_ERROR("arcfire", "stage %s: %s", b->path, why);
+        KV_ERROR("arcfire", "%s", why);
         engine_request_quit(e);
         return;
     }
     g.stage_ready = true;
-    KV_INFO("arcfire", "stage %s: %u marks, %u formations, %u ground rows, %.0f units long, speed %.2f", g.stage.name, g.stage.mark_count,
-            g.stage.formation_count, g.stage.ground_count, (f64)g.stage.length, (f64)g.stage.speed);
+    for (const StageDef& st : g.stages)
+        KV_INFO("arcfire", "stage %s: %u marks, %u formations, %u ground rows, %u segments, %.0f units long, speed %.2f", st.name, st.mark_count,
+                st.formation_count, st.ground_count + st.map_ground_count, st.segment_count, (f64)st.length, (f64)st.speed);
     flow_ready(ctx, g);
 }
 
@@ -178,15 +273,19 @@ void stage(TickContext& ctx) {
             if (m.over > 0.0f) { s.ramp_from = s.speed; s.ramp_to = m.value; s.ramp_at = s.distance; s.ramp_over = m.over; }
             else { s.speed = m.value; s.ramp_over = 0.0f; }
             break;
-        case MarkKind::Boss:
-            if (!boss_spawn(ctx, g, d, g.boss_of[m.index]).is_null()) s.waiting = 1;
+        case MarkKind::Boss: // one boss, or several together
+            for (u32 k = 0; k < (u32)m.value; ++k)
+                if (!boss_spawn(ctx, g, d, def.boss_of[m.index + k]).is_null()) s.waiting = 1;
+            break;
+        case MarkKind::Segment:
+            segment_spawn(ctx, g, d, def.segments[m.index]);
             break;
         case MarkKind::End:
             ctx.emit(StageEnd{s.loops, 0});
             {
                 Position next;
-                if (round_next(g, d, &next)) s.round_up = 1; // the next round begins at the next tick (scoring.cc)
-                else s.ended = 1;
+                if (round_next(g, d, &next)) s.round_up = 1; // a looping run: the next round begins at the next tick (scoring.cc)
+                else s.ended = 1;                            // the rest: on_stage_end says what comes
             }
             break;
         }
@@ -214,7 +313,9 @@ void on_member(TickContext& ctx, Span<const SpawnMember> members) {
         Health h{(i32)ceilf((f32)f.health * dials_row[0].enemy_health), 0, f.score, (u32)f.look};
         Emitter em{f.entry, f.fire_at, EmitIdle, 0};
         f32 radius = f.look == Look::Boat ? 34.0f : f.look == Look::Heavy ? 26.0f : 18.0f; // the boat, the big ship, the rest
-        ctx.spawn_later(g_air_kind, transform2_at(at, KV_PI), enemy_sprite(g, f.look), collider_circle(radius, L_AIR, L_SHOT | L_SHIP), h, mv, em, Runner{});
+        Sprite s = enemy_sprite(g, f.look);
+        if (f.look == Look::Debris) s.uv.x = (f32)(m.member % 3) / 3.0f; // the three pieces in turn
+        ctx.spawn_later(g_air_kind, transform2_at(at, KV_PI), s, collider_circle(radius, L_AIR, L_SHOT | L_SHIP), h, mv, em, Runner{});
     }
 }
 
@@ -225,6 +326,7 @@ void on_stage_end(TickContext& ctx, Span<const StageEnd> ends) {
     Game& g = ctx.state_as<Game>();
     Span<Run> run_row = ctx.write<Run>(ARC_WORLD(Run));
     Span<const Dials> dials_row = ctx.read<Dials>(ARC_WORLD(Dials));
+    Span<const Stage> stage_row = ctx.read<Stage>(ARC_WORLD(Stage));
     for (const StageEnd& se : ends) {
         Run& r = run_row[0];
         const Dials& d = dials_row[0];
@@ -234,17 +336,35 @@ void on_stage_end(TickContext& ctx, Span<const StageEnd> ends) {
                 se.loops + 1, position_name(d.position), (unsigned long long)ctx.tick, (long long)r.score, (long long)bonus, r.eggs, r.bombs, r.kills,
                 r.grazes, r.deaths, r.restarts);
         r.stage_score = r.score;
+        // What comes: a looping run's next round (already under way), arcade's next stage
+        // (or its first a difficulty up), or the run's end.
         Position next;
-        bool again = round_next(g, d, &next);
-        if (!again) {
+        u32 next_stage = 0;
+        bool loop = round_next(g, d, &next);
+        bool onward = !loop && stage_row.len && arcade_next(g, stage_row[0], d, &next_stage, &next);
+        if (!loop && !onward) {
             g.result = result_of(g, r, d, se.loops);
             results_log(g, g.result);
         }
         // The demo ends here (run_over quits, or with --again begins it once more, held, so
         // no sim tick passes between); every run's last hashed tick is this one.
         if (g.demo) { run_over(ctx, g); continue; }
-        hud_stage_clear(*ctx.engine, g, bonus, again ? position_name((u32)next) : nullptr);
-        if (!again) ctx.schedule(RunOver{se.loops, 0}, ctx.tick + kRunOverTicks);
+        char label[48] = "";
+        if (onward && next_stage > stage_row[0].index) snprintf(label, sizeof label, "NEXT: STAGE %u", next_stage + 1);
+        else if (onward || loop) snprintf(label, sizeof label, "NEXT ROUND: %s", position_name((u32)next));
+        hud_stage_clear(*ctx.engine, g, bonus, label[0] ? label : nullptr);
+        if (onward) ctx.schedule(StageNext{next_stage, (u32)next}, ctx.tick + kRunOverTicks);
+        else if (!loop) ctx.schedule(RunOver{se.loops, 0}, ctx.tick + kRunOverTicks);
+    }
+}
+
+// Arcade's next stage, after the banner: behind a cover, on a held tick (flow.cc).
+void on_stage_next(TickContext& ctx, Span<const StageNext> nexts) {
+    Game& g = ctx.state_as<Game>();
+    for (const StageNext& n : nexts) {
+        g.next_stage = n.stage;
+        g.next_position = (Position)n.position;
+        flow_request(*ctx.engine, g, Next::Stage, true);
     }
 }
 

@@ -45,8 +45,15 @@ void sounds_load(Engine& e, Game& g) {
         snprintf(path, sizeof path, "example_arcfire/sound/%s.ogg", k_sfx[i].file);
         g.sfx[i] = asset_load_sound(e, path, asset_scope_global(e));
     }
-    g.music_stage = asset_load_sound(e, "example_arcfire/music/stage.wav", asset_scope_global(e));
-    g.music_boss = asset_load_sound(e, "example_arcfire/music/boss.wav", asset_scope_global(e));
+    // Each stage's two tracks, by k_stage_names' order: Shoreline's, Orbit's.
+    static const char* const k_tracks[kStageCount][2] = {{"stage", "boss"}, {"orbit", "orbit_boss"}};
+    for (u32 i = 0; i < kStageCount; ++i) {
+        char path[96];
+        snprintf(path, sizeof path, "example_arcfire/music/%s.wav", k_tracks[i][0]);
+        g.music_stage[i] = asset_load_sound(e, path, asset_scope_global(e));
+        snprintf(path, sizeof path, "example_arcfire/music/%s.wav", k_tracks[i][1]);
+        g.music_boss[i] = asset_load_sound(e, path, asset_scope_global(e));
+    }
 }
 
 void sfx(TickContext& ctx, Game& g, Sfx which, f32 pitch) {
@@ -65,7 +72,7 @@ void music(TickContext& ctx, Game& g, bool boss) {
     m.fade_in = boss ? 0.5f : 2.0f;
     m.overlap = boss ? 0.5f : 1.0f;
     m.volume = kMusicVolume;
-    music_play(ctx, boss ? g.music_boss : g.music_stage, m);
+    music_play(ctx, boss ? g.music_boss[g.stage_at] : g.music_stage[g.stage_at], m);
 }
 
 } // namespace kv::arcfire

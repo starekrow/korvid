@@ -94,7 +94,7 @@ void hud_stomp(Engine& e, Game& g, bool on) {
 void hud_stage_clear(Engine& e, Game& g, i64 bonus, const char* next) {
     char text[48];
     if (next) {
-        snprintf(text, sizeof text, "NEXT ROUND: %s", next);
+        snprintf(text, sizeof text, "%s", next);
         upper(text);
     } else {
         snprintf(text, sizeof text, "THE END");
@@ -214,14 +214,21 @@ void hud(TickContext& ctx) {
     Span<const Part> parts = ctx.read<Part>("example_arcfire.part.Part");
     const Table* bt = engine_table(e, g_boss_kind);
     const Table* pt = engine_table(e, g_part_kind);
+    // Bosses that come together (Orbit's gunships) share it: every live one's parts, over
+    // the full of all that came (it keeps the full of one gone down).
     const BossDef* up = nullptr;
-    Handle up_handle;
-    for (u32 i = 0; i < bt->rows() && !up; ++i)
-        if (bt->is_alive(i)) { up = &g.bosses[boss_rows[i].def]; up_handle = bt->handle_at(i); }
-    i32 hp = 0;
-    for (u32 i = 0; up && i < pt->rows(); ++i)
-        if (pt->is_alive(i) && parts[i].boss == up_handle && part_hp[i].hp > 0) hp += part_hp[i].hp;
-    hud_boss(e, g, up ? up->title : nullptr, hp, up ? up->total : 0);
+    i32 hp = 0, total = 0;
+    for (u32 i = 0; i < bt->rows(); ++i) {
+        if (!bt->is_alive(i)) continue;
+        const BossDef& def = g.bosses[boss_rows[i].def];
+        if (!up) up = &def;
+        total += def.total;
+        Handle h = bt->handle_at(i);
+        for (u32 k = 0; k < pt->rows(); ++k)
+            if (pt->is_alive(k) && parts[k].boss == h && part_hp[k].hp > 0) hp += part_hp[k].hp;
+    }
+    g.bar_total = up ? (total > g.bar_total ? total : g.bar_total) : 0;
+    hud_boss(e, g, up ? up->title : nullptr, hp, g.bar_total);
     bool stomping = false;
     for (u32 i = 0; i < bt->rows(); ++i) stomping = stomping || (bt->is_alive(i) && boss_rows[i].state == (u32)BossState::Stomping);
     hud_stomp(e, g, stomping);

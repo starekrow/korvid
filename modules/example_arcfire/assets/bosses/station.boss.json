@@ -1,0 +1,29 @@
+{
+  "title": "STATION CORE",
+  "size": [256, 256],
+  "sheet": [4, 2],
+  "hull": { "half": [96, 96], "offset": [0, 0] },
+  "entry": { "path": [[0, 640], [0, 420], [0, 210]], "speed": 0.8 },
+  "timeout": 120,
+  "score": 60000,
+  "parts": [
+    { "name": "emitter_0", "cell": [0, 0], "at": [112, 0], "radius": 14, "health": 126, "score": 1000, "pattern": ["tight_ring"], "rest": 60 },
+    { "name": "emitter_1", "cell": [0, 0], "at": [56, -97], "radius": 14, "health": 126, "score": 1000, "pattern": ["tight_ring"], "rest": 72 },
+    { "name": "emitter_2", "cell": [0, 0], "at": [-56, -97], "radius": 14, "health": 126, "score": 1000, "pattern": ["tight_ring"], "rest": 84 },
+    { "name": "emitter_3", "cell": [0, 0], "at": [-112, 0], "radius": 14, "health": 126, "score": 1000, "pattern": ["tight_ring"], "rest": 96 },
+    { "name": "emitter_4", "cell": [0, 0], "at": [-56, 97], "radius": 14, "health": 126, "score": 1000, "pattern": ["tight_ring"], "rest": 108 },
+    { "name": "emitter_5", "cell": [0, 0], "at": [56, 97], "radius": 14, "health": 126, "score": 1000, "pattern": ["tight_ring"], "rest": 120 },
+    { "name": "weapon_0", "cell": [1, 0], "open": [2, 0], "at": [42, -42], "radius": 15, "health": 270, "score": 2500, "pattern": ["cross_spiral"], "rest": 45, "armored_until": 1 },
+    { "name": "weapon_1", "cell": [1, 0], "open": [2, 0], "drop": "option", "at": [-42, -42], "radius": 15, "health": 270, "score": 2500, "pattern": ["aimed_walls", "cross_spiral"], "rest": 45, "armored_until": 1 },
+    { "name": "weapon_2", "cell": [1, 0], "open": [2, 0], "at": [-42, 42], "radius": 15, "health": 270, "score": 2500, "pattern": ["cross_spiral"], "rest": 45, "armored_until": 1 },
+    { "name": "weapon_3", "cell": [1, 0], "open": [2, 0], "drop": "power", "at": [42, 42], "radius": 15, "health": 270, "score": 2500, "pattern": ["aimed_walls", "cross_spiral"], "rest": 45, "armored_until": 1 },
+    { "name": "core", "cell": [0, 1], "open": [1, 1], "at": [0, 0], "radius": 20, "health": 960, "score": 8000, "pattern": ["core_finale"], "rest": 30,
+      "armored_until": 2, "core": true }
+  ],
+  "phases": [
+    { "name": "shields", "ends": ["emitter_0", "emitter_1", "emitter_2", "emitter_3", "emitter_4", "emitter_5"], "sway": [30, 0.008] },
+    { "name": "weapons", "ends": ["weapon_0", "weapon_1", "weapon_2", "weapon_3"], "sway": [56, 0.010] },
+    { "name": "core", "ends": ["core"], "sway": [80, 0.014] }
+  ],
+  "stomp": { "pattern": "curtain", "seconds": 6, "dive": 200 }
+}

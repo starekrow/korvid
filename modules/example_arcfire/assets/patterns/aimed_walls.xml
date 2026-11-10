@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- aimed_walls: the gunships' guns. Walls of seven bullets side by side aimed at the ship,
+     three at once at three speeds, so each wall arrives as a slab with depth; step out of
+     its width. Rank adds walls and quickens them. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>4 + $rank * 3</times>
+      <action>
+        <actionRef label="wall"><param>2.0</param></actionRef>
+        <actionRef label="wall"><param>2.6</param></actionRef>
+        <actionRef label="wall"><param>3.2</param></actionRef>
+        <wait>36 - $rank * 12</wait>
+      </action>
+    </repeat>
+  </action>
+  <action label="wall">
+    <fire><direction type="aim">-15</direction><speed>$1</speed><bullet/></fire>
+    <repeat><times>6</times>
+      <action><fire><direction type="sequence">5</direction><speed>$1</speed><bullet/></fire></action>
+    </repeat>
+  </action>
+</bulletml>

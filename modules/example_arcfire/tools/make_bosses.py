@@ -20,6 +20,7 @@ turret tiles (tiles_packed.png column 6 row 1, column 5 row 1), which face down 
 deck machinery is its vent tile (column 4 row 1). Images made elsewhere can replace these
 files as long as the cells stay where the .boss.json says. Needs Pillow.
 """
+import math
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -327,6 +328,201 @@ def battleship_parts(sheet):
     return im
 
 
+def gunship(accent, accent_dark):
+    """48 x 80: a gunship, bow down: a narrow armored hull on two engine pods, a turret
+    either side amidships and a heavy gun in the bow (its core). The pair differ by their
+    band's colour (the left one orange, the right one cyan)."""
+    w, h = 48, 80
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for x in (6, 36):  # engine pods astern (the top), lit
+        d.rectangle((x, 0, x + 6, 10), fill=OUTLINE)
+        d.rectangle((x + 2, 1, x + 4, 5), fill=CYAN)
+    outline_fill(d, [(4, 8), (16, 8), (18, 30), (18, 50), (14, 58), (4, 50)], GREY)   # the pods' pylons
+    outline_fill(d, [(32, 8), (44, 8), (44, 50), (34, 58), (30, 50), (30, 30)], GREY)
+    outline_fill(d, [(16, 4), (32, 4), (38, 22), (38, 62), (30, 78), (18, 78), (10, 62), (10, 22)], GREY)
+    for x0, x1 in ((12, 13), (35, 36)):  # the band along the hull's flanks
+        d.rectangle((x0, 24, x1, 58), fill=accent)
+        d.line((x0, 58, x1, 58), fill=accent_dark)
+    d.line((24, 6, 24, 54), fill=LIGHT)  # a spine
+    for y in (18, 40):
+        d.line((14, y, 34, y), fill=OUTLINE)
+    d.rectangle((19, 8, 29, 16), fill=OUTLINE)  # the bridge, astern
+    d.rectangle((20, 9, 28, 15), fill=LIGHT)
+    d.line((21, 12, 27, 12), fill=CYAN_DARK)
+    for cx in (12, 36):  # turret sockets on the pylons
+        socket(d, cx, 32, 6)
+    socket(d, 24, 64, 9)  # the gun
+    return im
+
+
+def heavy_gun(open_):
+    """The gunship's bow gun: shuttered until its phase, then three barrels down."""
+    im = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    if open_:
+        for x in (6, 11, 16):
+            d.rectangle((x, 12, x + 2, 23), fill=OUTLINE)
+            d.rectangle((x + 1, 13, x + 1, 22), fill=LIGHT)
+    d.ellipse((2, 2, 21, 21), fill=OUTLINE)
+    d.ellipse((4, 4, 19, 19), fill=GREY)
+    if open_:
+        d.ellipse((7, 7, 16, 16), fill=ORANGE)
+        d.ellipse((9, 9, 14, 14), fill=YELLOW)
+    else:
+        d.line((4, 11, 19, 11), fill=OUTLINE)
+        d.line((11, 4, 11, 19), fill=OUTLINE)
+        d.point((11, 11), fill=ORANGE)
+    d.line((5, 8, 8, 5), fill=LIGHT)
+    return im
+
+
+def gunship_parts(sheet):
+    """2 x 2 cells of 24 px: (0,0) and (1,0) the pack's turrets, (0,1) the gun shuttered,
+    (1,1) the gun open."""
+    im = Image.new("RGBA", (CELL * 2, CELL * 2), (0, 0, 0, 0))
+    im.alpha_composite(turret(sheet, 6, 1), (4, 4))
+    im.alpha_composite(turret(sheet, 5, 1), (CELL + 4, 4))
+    im.alpha_composite(heavy_gun(False), (0, CELL))
+    im.alpha_composite(heavy_gun(True), (CELL, CELL))
+    return im
+
+
+def station():
+    """128 x 128: the station core, seen from above: an outer ring of six shield emitters
+    on spokes, an inner ring of four weapon mounts, the core in the middle under its
+    shutters. The ring is the pack's grey with the enemy's orange in its seams."""
+    w = h = 128
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    c = 64
+    d.ellipse((4, 4, 123, 123), fill=OUTLINE)       # the outer ring
+    d.ellipse((7, 7, 120, 120), fill=GREY)
+    d.ellipse((16, 16, 111, 111), fill=OUTLINE)
+    d.ellipse((18, 18, 109, 109), fill=(0, 0, 0, 0))
+    for k in range(6):  # spokes, between the emitters
+        a = math.pi / 6 + k * math.pi / 3
+        x0, y0 = c + math.cos(a) * 40, c + math.sin(a) * 40
+        x1, y1 = c + math.cos(a) * 58, c + math.sin(a) * 58
+        d.line((x0, y0, x1, y1), fill=OUTLINE, width=6)
+        d.line((x0, y0, x1, y1), fill=LIGHT, width=2)
+    for k in range(12):  # the outer ring's seams, orange
+        a = k * math.pi / 6
+        x0, y0 = c + math.cos(a) * 53, c + math.sin(a) * 53
+        x1, y1 = c + math.cos(a) * 59, c + math.sin(a) * 59
+        d.line((x0, y0, x1, y1), fill=ORANGE_DARK, width=2)
+    d.ellipse((22, 22, 105, 105), fill=OUTLINE)     # the inner ring
+    d.ellipse((25, 25, 102, 102), fill=GREY)
+    d.ellipse((26, 26, 101, 101), outline=LIGHT)
+    d.ellipse((46, 46, 81, 81), fill=OUTLINE)
+    for k in range(6):  # emitter sockets on the outer ring
+        a = k * math.pi / 3
+        socket(d, round(c + math.cos(a) * 56), round(c + math.sin(a) * 56), 8)
+    for k in range(4):  # weapon sockets on the inner ring
+        a = math.pi / 4 + k * math.pi / 2
+        socket(d, round(c + math.cos(a) * 30), round(c + math.sin(a) * 30), 8)
+    socket(d, c, c, 12)  # the core
+    return im
+
+
+def emitter():
+    """A shield emitter: a cyan lens in a grey housing."""
+    im = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.polygon([(12, 1), (22, 7), (22, 17), (12, 23), (2, 17), (2, 7)], fill=OUTLINE)
+    d.polygon([(12, 3), (20, 8), (20, 16), (12, 21), (4, 16), (4, 8)], fill=GREY)
+    d.ellipse((7, 7, 16, 16), fill=CYAN_DARK)
+    d.ellipse((9, 9, 14, 14), fill=CYAN)
+    d.point((10, 10), fill=WHITE)
+    return im
+
+
+def weapon_mount(open_):
+    """A weapon on the inner ring: four barrels round an orange breech, or its armor."""
+    im = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rectangle((2, 2, 21, 21), fill=OUTLINE)
+    if open_:
+        d.rectangle((4, 4, 19, 19), fill=DEEP)
+        for x, y in ((5, 5), (15, 5), (5, 15), (15, 15)):
+            d.rectangle((x, y, x + 3, y + 3), fill=LIGHT)
+        d.rectangle((9, 9, 14, 14), fill=ORANGE)
+        d.point((11, 11), fill=YELLOW)
+    else:
+        d.rectangle((4, 4, 19, 19), fill=GREY)
+        for y in (8, 12, 16):
+            d.line((4, y, 19, y), fill=OUTLINE)
+        d.line((4, 4, 19, 4), fill=LIGHT)
+    return im
+
+
+def station_parts():
+    """4 x 2 cells of 24 px: (0,0) emitter, (1,0) weapon armored, (2,0) weapon open, (0,1)
+    core armored, (1,1) core open."""
+    im = Image.new("RGBA", (CELL * 4, CELL * 2), (0, 0, 0, 0))
+    im.alpha_composite(emitter(), (0, 0))
+    im.alpha_composite(weapon_mount(False), (CELL, 0))
+    im.alpha_composite(weapon_mount(True), (CELL * 2, 0))
+    im.alpha_composite(core(False), (0, CELL))
+    im.alpha_composite(core(True), (CELL, CELL))
+    return im
+
+
+def segments(sheet):
+    """96 x 96: two station segments drifting through Orbit's middle planes, a cell of
+    96 x 48 each: (0) a truss with two turret pads, (1) a module with a pad at each end and
+    a lit window band. Turrets are the game's ground rows on the pads."""
+    im = Image.new("RGBA", (96, 96), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    # A truss: two rails, cross bracing between, a pad at each third.
+    for y in (8, 38):
+        outline_fill(d, [(2, y), (94, y), (94, y + 4), (2, y + 4)], GREY, 1)
+    for x in range(4, 92, 12):
+        d.line((x, 12, x + 12, 38), fill=OUTLINE, width=2)
+        d.line((x + 12, 12, x, 38), fill=OUTLINE, width=2)
+    for cx in (28, 68):
+        d.rectangle((cx - 11, 13, cx + 11, 37), fill=OUTLINE)
+        d.rectangle((cx - 9, 15, cx + 9, 35), fill=LIGHT)
+        socket(d, cx, 25, 7)
+    # A module: a long pressure hull with end caps and solar vanes.
+    y0 = 48
+    outline_fill(d, [(14, y0 + 8), (82, y0 + 8), (90, y0 + 16), (90, y0 + 32), (82, y0 + 40), (14, y0 + 40), (6, y0 + 32), (6, y0 + 16)], GREY)
+    d.rectangle((24, y0 + 22, 72, y0 + 26), fill=OUTLINE)
+    for x in range(26, 72, 6):
+        d.rectangle((x, y0 + 23, x + 3, y0 + 25), fill=CYAN)
+    for x0, x1 in ((0, 6), (90, 96)):
+        d.rectangle((x0, y0 + 2, x1 - 1, y0 + 45), fill=OUTLINE)
+        d.rectangle((x0 + 1, y0 + 4, x1 - 2, y0 + 43), fill=CYAN_DARK)
+    d.rectangle((20, y0 + 10, 76, y0 + 12), fill=ORANGE)
+    for cx in (22, 74):
+        socket(d, cx, y0 + 32, 6)
+    vent = tile(sheet, 4, 1)
+    im.alpha_composite(vent, (40, y0 + 28))
+    return im
+
+
+def debris():
+    """72 x 24: three pieces of wreckage, 24 px cells: a torn plate, a strut, a scrap of
+    hull with its band. They tumble as they drift."""
+    im = Image.new("RGBA", (CELL * 3, CELL), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.polygon([(3, 6), (15, 2), (21, 9), (18, 20), (8, 21), (2, 14)], fill=OUTLINE)
+    d.polygon([(5, 7), (14, 4), (19, 10), (16, 18), (9, 19), (4, 13)], fill=GREY)
+    d.line((6, 12, 16, 8), fill=LIGHT)
+    d.point((12, 15), fill=DEEP)
+    x = CELL
+    d.polygon([(x + 2, 17), (x + 17, 2), (x + 22, 7), (x + 7, 22)], fill=OUTLINE)
+    d.polygon([(x + 5, 17), (x + 17, 5), (x + 19, 7), (x + 7, 19)], fill=LIGHT)
+    for k in range(3):
+        d.point((x + 9 + 3 * k, 13 - 3 * k), fill=OUTLINE)
+    x = CELL * 2
+    d.polygon([(x + 2, 4), (x + 20, 3), (x + 22, 12), (x + 16, 21), (x + 4, 19)], fill=OUTLINE)
+    d.polygon([(x + 4, 6), (x + 18, 5), (x + 20, 12), (x + 15, 18), (x + 6, 17)], fill=GREY)
+    d.rectangle((x + 5, 10, x + 19, 12), fill=ORANGE)
+    d.line((x + 5, 12, x + 19, 12), fill=ORANGE_DARK)
+    return im
+
+
 def main():
     sheet = Image.open(ASSETS / "kenney" / "tiles.png").convert("RGBA")
     OUT.mkdir(parents=True, exist_ok=True)
@@ -335,7 +531,16 @@ def main():
     battleship(sheet).save(OUT / "battleship.png")
     battleship_parts(sheet).save(OUT / "battleship_parts.png")
     boat().save(OUT / "boat.png")
-    print("generated/: carrier.png, carrier_parts.png, battleship.png, battleship_parts.png, boat.png")
+    gunship(ORANGE, ORANGE_DARK).save(OUT / "gunship_left.png")
+    gunship(CYAN, CYAN_DARK).save(OUT / "gunship_right.png")
+    gunship_parts(sheet).save(OUT / "gunship_left_parts.png")
+    gunship_parts(sheet).save(OUT / "gunship_right_parts.png")
+    station().save(OUT / "station.png")
+    station_parts().save(OUT / "station_parts.png")
+    segments(sheet).save(OUT / "segments.png")
+    debris().save(OUT / "debris.png")
+    print("generated/: carrier, battleship (and their parts), boat, gunship_left, gunship_right (and their parts), "
+          "station (and its parts), segments, debris")
 
 
 if __name__ == "__main__":
