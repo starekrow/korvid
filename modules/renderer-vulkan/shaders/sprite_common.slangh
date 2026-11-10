@@ -56,6 +56,11 @@ struct PushData {
 
 [[vk::push_constant]] ConstantBuffer<PushData> gPush;
 
+// Each layer's scroll offset: xy at the previous tick, zw now, by layer + kLayerMin. Every
+// world row on the layer is drawn moved by it (screen rows are not), so a plane or a map of
+// sprites that never change scrolls for one value a tick.
+[[vk::binding(7, 0)]] StructuredBuffer<float4> gLayers;
+
 // The interpolation point of a row: rows set this tick move from prev to cur; the rest
 // did not move and sit at cur.
 float row_t(GpuSprite s) { return s.stamp == gPush.tick ? gPush.alpha : 1.0; }
@@ -73,6 +78,10 @@ void row_placement(GpuSprite s, out float2 pos, out float rot, out float2 scale)
     float t = row_t(s);
     pos   = lerp(s.prev.xy, s.cur.xy, t);
     if ((s.flags & kSpriteScreen) != 0) pos += row_anchor(s) * gPush.screen_cull.zw * 0.5;
+    else {
+        float4 l = gLayers[uint(clamp(s.layer, -128, 127) + int(kLayerMin))];
+        pos += lerp(l.xy, l.zw, gPush.alpha);
+    }
     rot   = lerp(s.prev.z, s.cur.z, t);
     scale = lerp(float2(s.prev.w, s.scale_y.x), float2(s.cur.w, s.scale_y.y), t);
 }

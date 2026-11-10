@@ -36,9 +36,24 @@ keeps the handle it last sent for each slot and the `Sprite` it last described. 
 3. The tick's deltas start with a `Tick` marker, so the renderer knows where "previous"
    ends whatever the tick-to-frame ratio.
 
+4. After the `Tick` marker, a `Layer` delta for each layer whose scroll offset changed
+   (the resource `sprite.layers`): see layer scroll below.
+
+A kind declared `still` (`KindDesc::still`: a map's tiles) is looked at only when it has
+spawned, lost or restored a row since the last extract, and then only for its births and
+deaths (a restore: one full compare), so a map of any size costs nothing a tick once
+sent.
+
 Nothing is copied twice: a sprite that did not move and did not change produces nothing.
 The deltas accumulate per frame (several ticks in one frame append in order) and the
 frame loop applies and clears them before the render.
+
+**Layer scroll.** `SpriteLayers` (`sprite_layers(engine)`, or the resource `sprite.layers`
+for a system that declares the write) holds an offset per layer, world units, zero by
+default. The renderer draws every world sprite on that layer moved by it, interpolated
+from the last tick's offset like a placement; `set(layer, offset, true)` snaps instead
+(a wrap, a restart). A parallax plane or a scrolling map is one value a tick however many
+rows it has; the rows themselves stay where they were spawned. Screen sprites ignore it.
 
 **Interpolation** is the renderer's, from the previous and current placement of each
 sprite it was told about, at the clock's alpha. The extract makes that possible by
@@ -110,7 +125,15 @@ Header `korvid/sprite/extract.h`:
 | name | kind | what |
 |---|---|---|
 | `ExtractState`, `ExtractTable` | records | per table: the handle and the `Sprite` last sent, by slot |
-| `extract_sprites(engine, state, out)` | function | one tick's deltas appended to `out`, starting with `Tick` |
+| `extract_sprites(engine, state, layers, out)` | function | one tick's deltas appended to `out`, starting with `Tick`; `layers` may be null |
+
+Header `korvid/sprite/layers.h`:
+
+| name | kind | what |
+|---|---|---|
+| `SpriteLayers` | record | `set(layer, offset, snap = false)`, `get(layer)`; layers outside [-128, 127] are ignored |
+| `KV_SPRITE_LAYER_MIN`, `KV_SPRITE_LAYER_MAX` | constants | -128, 127 |
+| `sprite_layers(engine)` | function | the module's layer offsets, or null |
 
 Header `korvid/sprite/module.h`:
 
@@ -121,7 +144,8 @@ Header `korvid/sprite/module.h`:
 | `sprite_deltas(engine)` | function | the deltas extracted since the last take; apply and clear |
 
 From the render interface (`korvid/render/sprite.h`): `Placement2`, `RenderSpriteState`,
-`SpriteDelta{kind, entity, state}`, `SpriteDeltaKind` (`Tick`, `Set`, `Remove`).
+`SpriteDelta{kind, entity, state}`, `SpriteDeltaKind` (`Tick`, `Set`, `Remove`, `Layer`:
+`state.layer`'s offset in `state.placement.position`, `state.snap`, a null entity).
 
 What the module registers with the engine:
 
@@ -131,7 +155,8 @@ What the module registers with the engine:
 | `Sprite` | component | 64 bytes, 8 fields, sim |
 | `sprite.entity` | kind | `Transform2`, `Sprite`; 1 M slots of address space |
 | `sprite.deltas` | resource | the delta array; the extract writes it |
-| `sprite.extract` | system, phase PostSim | reads `*.Transform2`, `*.Sprite`; writes `sprite.deltas` |
+| `sprite.layers` | resource | the layer offsets; a game's scroll writes it, the extract reads what changed |
+| `sprite.extract` | system, phase PostSim | reads `*.Transform2`, `*.Sprite`; writes `sprite.deltas`, `sprite.layers` |
 
 ## Behaviour worth knowing
 
@@ -172,7 +197,12 @@ What the module registers with the engine:
   while the sim holds still reach the renderer.
 - **The extract is one thread** and linear in the rows of every drawable kind, dead
   slots included; a kind with a huge capacity and few live rows still costs its
-  high-water mark.
+  high-water mark. A `still` kind is the exception: nothing, until it spawns or loses a row.
+- **A still kind's rows cannot move.** The extract does not look at a living row of a
+  still kind, so a write to one is never drawn (and its previous copy is not retaken).
+  Scroll it by layer; to change one tile, destroy it and spawn another.
+- **A layer's offset is per frame, not per sprite.** Everything on the layer moves
+  together, sprites spawned this tick included, and the camera applies on top.
 
 ## Not in this module
 

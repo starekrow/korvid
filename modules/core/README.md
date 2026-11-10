@@ -260,7 +260,7 @@ Header `korvid/core/component.h`, `kind.h`:
 | `KV_FIELD(T, m)`, `KV_FIELDS(T, ...)`, `KV_COMPONENT(T, fields, flags...)`, `KV_FIELD_TRAITS(M, T, N)` | macros | the tables, from member names; traits for your own aggregates |
 | `ComponentType<T>::id` | record | the id slot, filled at init |
 | `schema_check`, `schema_field`, `schema_hash`, `schema_equal`, `schema_describe`, `schema_each_handle`, `schema_field_as_f64` | functions | every operation on a field table; `component_*` wrappers |
-| `KindDesc` | record | `name` (`.x` for the module's own), `components` (one comma-separated string), `capacity`, `id` slot, `cosmetic` (never hashed) |
+| `KindDesc` | record | `name` (`.x` for the module's own), `components` (one comma-separated string), `capacity`, `id` slot, `cosmetic` (never hashed), `still` (rows never change once spawned: their previous copies are not retaken and the sprite extract looks at them only when the kind has spawned, lost or restored a row; `Table::churn` and `Table::restores` count those) |
 | `Table`, `Column` | records | a kind's storage: `spawn(...)`, `destroy`, `destroy_all`, `valid`, `live()`, `rows()`, `is_alive(i)`, `handle_at(i)`, `get<T>(h)`, `prev<T>(h)`, `rows_of<T>()`, `prev_rows_of<T>()`, `column`, `has`, `describe`, `hash` |
 
 Header `korvid/core/event.h`, `timer.h`:

@@ -28,6 +28,10 @@ struct KindDesc {
     u32                     capacity   = 0;       // slots of address space; pages commit as used
     u32*                    id         = nullptr; // optional: filled with the kind id at init, 0 after shutdown
     bool                    cosmetic   = false;   // presentation only: never part of the state hash (glyphs, an overlay)
+    // Rows that never change once spawned (a map's tiles): the engine copies their previous
+    // values and the sprite extract looks at them only when the kind has spawned or lost a
+    // row since it last did. A change to a living row of a still kind is not seen.
+    bool                    still      = false;
     // Per entity, not per kind. Components an entity of this kind may carry one of on its
     // own ("Talk, Quest"), stored sparsely as resources "kind.@Talk"; and a property bag of
     // named values per entity ("kind.@props"). Engine systems never see either: views are
@@ -113,6 +117,9 @@ struct Table {
     char            props_resource_name[2 * KV_KIND_NAME_MAX + 3] = {};
     bool            sparse_dirty = false; // an entity with sparse rows died: the engine sweeps at the boundary
     u32             capacity = 0;  // slots: the KindDesc's, unless the root overrode it (EngineConfig::capacities)
+    u64             churn    = 0;  // +1 at every spawn, destroy and restore: what a still kind's readers watch
+    u64             churn_copied = ~0ull; // the churn at the last previous-copy (begin_tick), for a still kind
+    u32             restores = 0;  // +1 at every restore_slots: a restored row may reuse a handle with new values
     u32             refused  = 0;  // spawns refused because the kind was full; the first is logged
 
     // Reserves the columns and registers the handle kind. `comps` is in declared order;

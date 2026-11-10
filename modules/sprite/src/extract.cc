@@ -10,10 +10,23 @@ void ExtractState::free() {
     tables.free();
 }
 
-void extract_sprites(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
+void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<SpriteDelta>& out) {
     SpriteDelta tick{};
     tick.kind = SpriteDeltaKind::Tick;
     out.push(tick);
+
+    // The layers that moved (or snapped) since the renderer was last told.
+    for (u32 i = 0; layers && i < 256; ++i) {
+        if (layers->offset[i] == st.sent_layers[i] && !layers->snap[i]) continue;
+        SpriteDelta d{};
+        d.kind = SpriteDeltaKind::Layer;
+        d.state.layer = (i32)i + KV_SPRITE_LAYER_MIN;
+        d.state.placement.position = point2{layers->offset[i].x, layers->offset[i].y};
+        d.state.snap = layers->snap[i] != 0;
+        out.push(d);
+        st.sent_layers[i] = layers->offset[i];
+        layers->snap[i] = 0;
+    }
 
     Allocator* alloc = st.tables.alloc;
     while (st.tables.len < e.tables.len) {
@@ -25,6 +38,11 @@ void extract_sprites(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
     for (Table& table : e.tables) {
         if (!table.has(ComponentType<Transform2>::id) || !table.has(ComponentType<Sprite>::id)) continue;
         ExtractTable& et = st.tables[table.index];
+        // A still kind (a map's tiles): nothing to look at unless rows came or went.
+        bool still = table.desc && table.desc->still;
+        if (still && table.churn == et.seen_churn) continue;
+        et.seen_churn = table.churn;
+        if (table.restores != et.seen_restores) { still = false; et.seen_restores = table.restores; } // values may have changed under known handles
         u32 n = table.rows();
         et.sent.resize_fill(n, Handle{});
         et.sent_sprites.resize_fill(n, Sprite{});
@@ -50,6 +68,7 @@ void extract_sprites(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
         for (u32 i = 0; i < n; ++i) {
             if (!table.is_alive(i)) continue;
             bool is_new  = et.sent[i].is_null();
+            if (still && !is_new) continue; // it has not changed: it cannot
             bool moved   = !component_equal(transform2_schema(), &cur[i], &et.sent_placements[i]);
             bool changed = is_new || !component_equal(sprite_schema(), &spr[i], &et.sent_sprites[i]);
             if (!is_new && !moved && !changed) continue;

@@ -469,6 +469,10 @@ bool rv_create_tables(Renderer* r, u32 rows) {
 
 bool rv_create_static_buffers(Renderer* r) {
     const VkBufferUsageFlags storage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    for (FrameInFlight& f : r->frames) {
+        if (!rv_create_host_buffer(r, sizeof(f32) * 4 * kLayerCount, storage, f.layers)) return false;
+        memset(f.layers.mapped, 0, sizeof(f32) * 4 * kLayerCount);
+    }
     return rv_create_device_buffer(r, sizeof(GpuMaterial) * kMaxMaterials, storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, r->material_table) &&
            rv_create_device_buffer(r, sizeof(u32) * (2 * kBucketCount + 4), storage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, r->sort_meta) &&
            rv_create_device_buffer(r, sizeof(VkDrawIndirectCommand) * kBucketCount, storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, r->indirect);
@@ -482,7 +486,7 @@ bool rv_create_static_buffers(Renderer* r) {
 // of its set.
 
 void rv_write_tables_set(Renderer* r, FrameInFlight& f) {
-    VkDescriptorBufferInfo infos[7] = {
+    VkDescriptorBufferInfo infos[8] = {
         {r->tables.sprites.buffer, 0, VK_WHOLE_SIZE},
         {r->material_table.buffer, 0, VK_WHOLE_SIZE},
         {r->tables.sorted.buffer, 0, VK_WHOLE_SIZE},
@@ -490,9 +494,10 @@ void rv_write_tables_set(Renderer* r, FrameInFlight& f) {
         {r->tables.block_hist.buffer, 0, VK_WHOLE_SIZE},
         {r->sort_meta.buffer, 0, VK_WHOLE_SIZE},
         {r->indirect.buffer, 0, VK_WHOLE_SIZE},
+        {f.layers.buffer, 0, VK_WHOLE_SIZE},
     };
-    VkWriteDescriptorSet writes[7]{};
-    for (u32 i = 0; i < 7; ++i) {
+    VkWriteDescriptorSet writes[8]{};
+    for (u32 i = 0; i < 8; ++i) {
         writes[i].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet          = f.tables;
         writes[i].dstBinding      = i;
@@ -500,14 +505,14 @@ void rv_write_tables_set(Renderer* r, FrameInFlight& f) {
         writes[i].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[i].pBufferInfo     = &infos[i];
     }
-    vkUpdateDescriptorSets(r->device, 7, writes, 0, nullptr);
+    vkUpdateDescriptorSets(r->device, 8, writes, 0, nullptr);
     f.tables_dirty = false;
 }
 
 bool rv_create_descriptors(Renderer* r) {
     // Set 0.
-    VkDescriptorSetLayoutBinding tb[7]{};
-    for (u32 i = 0; i < 7; ++i) {
+    VkDescriptorSetLayoutBinding tb[8]{};
+    for (u32 i = 0; i < 8; ++i) {
         tb[i].binding         = i;
         tb[i].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         tb[i].descriptorCount = 1;
@@ -515,7 +520,7 @@ bool rv_create_descriptors(Renderer* r) {
     }
     VkDescriptorSetLayoutCreateInfo tlci{};
     tlci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    tlci.bindingCount = 7;
+    tlci.bindingCount = 8;
     tlci.pBindings    = tb;
     VK_CHECK(vkCreateDescriptorSetLayout(r->device, &tlci, nullptr, &r->tables_layout));
 
@@ -547,7 +552,7 @@ bool rv_create_descriptors(Renderer* r) {
     VK_CHECK(vkCreateDescriptorSetLayout(r->device, &xlci, nullptr, &r->textures_layout));
 
     VkDescriptorPoolSize sizes[3] = {
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 7 * kFramesInFlight},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8 * kFramesInFlight},
         {VK_DESCRIPTOR_TYPE_SAMPLER, 2 * kFramesInFlight},
         {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kMaxTextures * kFramesInFlight},
     };

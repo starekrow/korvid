@@ -340,7 +340,16 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
             // previous one the first time it is set in a later tick, and a row that is not
             // set did not move. Nothing is visited.
             ++r->tick;
+            memcpy(r->layer_prev, r->layer_cur, sizeof r->layer_prev); // the layers' offsets likewise, all 256 of them
             break;
+        case SpriteDeltaKind::Layer: {
+            i32 l = d.state.layer < -128 ? -128 : d.state.layer > 127 ? 127 : d.state.layer;
+            f32* cur = r->layer_cur[l + 128];
+            cur[0] = d.state.placement.position.x;
+            cur[1] = d.state.placement.position.y;
+            if (d.state.snap) memcpy(r->layer_prev[l + 128], cur, sizeof(f32) * 2);
+            break;
+        }
         case SpriteDeltaKind::Set: {
             const RenderSpriteState& st = d.state;
             u32 material = rv_material_row_of(r, st.material);
@@ -434,6 +443,12 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         if (!rv_create_tables(r, r->sprites.len)) return false;
     }
     if (f.tables_dirty) rv_write_tables_set(r, f);
+    // The layers' offsets for this frame: previous and current, the shader interpolates.
+    f32* lo = (f32*)f.layers.mapped;
+    for (u32 i = 0; i < kLayerCount; ++i) {
+        lo[i * 4 + 0] = r->layer_prev[i][0]; lo[i * 4 + 1] = r->layer_prev[i][1];
+        lo[i * 4 + 2] = r->layer_cur[i][0];  lo[i * 4 + 3] = r->layer_cur[i][1];
+    }
     for (u32 slot : f.dirty_slots) rv_write_texture_slot(r, f.textures, slot);
     f.dirty_slots.clear();
 

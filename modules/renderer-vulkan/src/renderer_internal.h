@@ -179,6 +179,7 @@ struct FrameInFlight {
     Array<u32>      dirty_slots;                // texture slots to rewrite in this frame's set
     VkDeviceSize    ring_end   = 0;             // the ring head when this frame was submitted
     VkDeviceSize    ring_bytes = 0;             // what the frame took, released at its fence
+    Buffer          layers;                     // the layers' offsets, previous and current: float4 each, host-visible
     bool            submitted  = false;
 };
 
@@ -265,6 +266,10 @@ struct Renderer {
     FrameRing    ring;
 
     FrameInFlight frames[kFramesInFlight];
+    // The layers' scroll offsets (world units) at the last tick and the one before, by layer
+    // + 128: copied into the frame's buffer when it is recorded, interpolated by alpha.
+    f32           layer_prev[kLayerCount][2] = {};
+    f32           layer_cur[kLayerCount][2]  = {};
     u32           frame_index = 0;
     u64           frame_count = 0;
 

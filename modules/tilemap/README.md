@@ -25,8 +25,8 @@ The map holds references on its textures (the asset module's dependency counts),
 maps sharing a tileset image share one texture. Retiring a map destroys its materials,
 drops its textures, frees its arena, and despawns its instances.
 
-**Instances.** `tilemap_spawn(ctx, map, TilemapPlace{origin, base_layer, owner})` makes a
-sprite row in the cosmetic kind `tilemap.tile` for every non-empty cell of every visible
+**Instances.** `tilemap_spawn(ctx, map, TilemapPlace{origin, base_layer, owner, scale})` makes a
+sprite row in the cosmetic, still kind `tilemap.tile` for every non-empty cell of every visible
 tile layer and every tile object, in Tiled's layer order: layer `i` draws at sprite layer
 `base_layer + i`, so the index of an object layer is where a game puts its characters to
 draw between the layers below and above. A tile larger than the grid sits on its cell's
@@ -35,8 +35,11 @@ flips plus, for the diagonal flag, a quarter turn. A layer with the bool propert
 sorts its rows by their feet (`SpriteSort::Feet`): a tile's bottom edge, raised by the
 tile's `foot` property in pixels, so a character drawn in the same sprite layer passes in
 front of and behind trees, fences and houses as it walks. Opacity and tint (through groups) go
-into the sprite's tint. Tiles never move, so after their first frame they cost the
-extract nothing but a scan. An instance goes when its owner entity dies (a level's root)
+into the sprite's tint. `scale` is world units a map pixel (2 draws a 16 px tileset as
+32-unit tiles); it applies to the spawned rows only, and the collision, path and cell
+helpers stay in the map's own pixels. Tiles never move (the kind is `still`: a write to
+one is not drawn), so after their first frame they cost the extract nothing at all; a map
+that scrolls does it by layer (`sprite/layers.h`), one offset per layer a tick. An instance goes when its owner entity dies (a level's root)
 or its map retires, at the next pump, before anything is drawn.
 
 **Solids.** Built once per map: a cell is solid if any tile in it has the bool property
@@ -104,7 +107,7 @@ What the module registers with the engine:
 | name | kind | notes |
 |---|---|---|
 | `tilemap.map`, `tilemap.instance` | handle kinds | the map is also an asset kind of the asset module's |
-| `tilemap.tile` | kind, cosmetic | `Transform2`, `Sprite`; 262,144 rows of address space |
+| `tilemap.tile` | kind, cosmetic, still | `Transform2`, `Sprite`; 262,144 rows of address space |
 | `tilemap.pump` | system, PreSim, main thread, `Always`, after the asset pumps | writes `tilemap.tile` |
 
 ## Animated tiles
@@ -150,7 +153,11 @@ waypoint.
   later version of this module) drives them with clips.
 - **Object rotation is not applied** to tile objects' sprites or solid rectangles.
 - **Row per tile.** A 128x128 map with three full layers is 49,152 rows. Fine for the
-  maps a JRPG has; a GPU tile layer is the upgrade for larger ones.
+  maps a JRPG has, and since the kind is still they cost nothing a tick once drawn
+  (arcfire's Shoreline: 15,000 tiles, an extract of 0.002 ms a frame); the renderer still
+  culls and draws every row, and a GPU tile layer is the upgrade for much larger ones.
+- **Moving a map is moving its layers.** The rows cannot move; `SpriteLayers::set` on
+  `base_layer + i` scrolls layer `i`.
 
 ## Not in this module
 

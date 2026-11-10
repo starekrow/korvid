@@ -24,7 +24,7 @@ namespace {
 
 using namespace kv;
 
-struct Want { Handle map; Handle owner; Handle instance; bool spawn = false, despawn = false; };
+struct Want { Handle map; Handle owner; Handle instance; bool spawn = false, despawn = false; f32 scale = 1.0f; };
 Want g_want;
 
 void sys_spawn(TickContext& ctx) {
@@ -33,6 +33,7 @@ void sys_spawn(TickContext& ctx) {
         place.origin = point2{0, 0};
         place.base_layer = 10;
         place.owner = g_want.owner;
+        place.scale = g_want.scale;
         g_want.instance = tilemap_spawn(ctx, g_want.map, place);
         g_want.spawn = false;
     }
@@ -137,6 +138,22 @@ void test_tilemap_load(kv::TestCtx& c) {
     g_want.spawn = true;
     frames(1);
     KV_CHECK(c, tiles->live() + anims->live() == 18);
+    // At scale 2 (a 16 px tileset drawn as 32-unit tiles): the same cell, twice as far in
+    // and twice the size.
+    g_want.despawn = true;
+    frames(1);
+    g_want.scale = 2.0f;
+    g_want.spawn = true;
+    frames(1);
+    bool scaled = false;
+    for (u32 i = 0; i < tiles->rows(); ++i) {
+        if (!tiles->is_alive(i)) continue;
+        const Transform2& t = tiles->rows_of<Transform2>()[i];
+        const Sprite& s = tiles->rows_of<Sprite>()[i];
+        if (s.layer == 10 && t.position.x == 16 && t.position.y == -16) { scaled = s.size.x == 32 && s.size.y == 32; break; }
+    }
+    KV_CHECK(c, scaled && tiles->live() + anims->live() == 18);
+    g_want.scale = 1.0f;
     asset_scope_release(e, scope);
     frames(2);
     KV_CHECK(c, tilemap_get(e, map) == nullptr && tiles->live() == 0 && anims->live() == 0);

@@ -305,7 +305,7 @@ void tilemap_shutdown(Engine& e, ModuleInstance& self) {
 
 constinit const KindDesc k_kinds[] = {
     // Tiles are presentation: never hashed. What collides is the map's solids, not these.
-    {.name = ".tile", .components = "Transform2, Sprite", .capacity = 1u << 18, .cosmetic = true},
+    {.name = ".tile", .components = "Transform2, Sprite", .capacity = 1u << 18, .cosmetic = true, .still = true}, // a tile never moves: scroll it by layer
     // Tiles with a Tiled animation: few, so the player rides only on them.
     {.name = ".animtile", .components = "Transform2, Sprite, AnimPlayer", .capacity = 1u << 14, .cosmetic = true},
 };
@@ -363,7 +363,8 @@ namespace {
 
 // One row: a tile of a tileset at map pixels (left, bottom) of its image's bottom-left,
 // with Tiled's flips.
-Handle spawn_tile(Table& tiles, Table* animtiles, const TilemapAsset& m, u32 gid, f32 left, f32 bottom, f32 w, f32 h, point2 origin, i32 layer, color tint, bool ysort) {
+Handle spawn_tile(Table& tiles, Table* animtiles, const TilemapAsset& m, u32 gid, f32 left, f32 bottom, f32 w, f32 h, point2 origin, i32 layer, color tint, bool ysort,
+                  f32 scale) {
     u32 local = 0;
     const MapTileset* ts = tilemap_tileset_of(m, gid, &local);
     if (!ts || local >= (ts->count ? ts->count : 0xFFFFFFFFu)) return Handle{};
@@ -377,16 +378,16 @@ Handle spawn_tile(Table& tiles, Table* animtiles, const TilemapAsset& m, u32 gid
     Sprite sp;
     sp.material = ts->material;
     sp.uv    = uv;
-    sp.size  = D ? vec2{h, w} : vec2{w, h};
+    sp.size  = D ? vec2{h * scale, w * scale} : vec2{w * scale, h * scale};
     sp.tint  = tint;
     sp.layer = layer;
     if (ysort) {
         // Sorted by the feet: the tile's bottom edge, raised by its `foot` property (pixels).
         const MapProperty* foot = tilemap_tile_property(m, gid, "foot");
         sp.sort  = SpriteSort::Feet;
-        sp.order = -h * 0.5f + (foot ? (f32)foot->num : 0.0f);
+        sp.order = (-h * 0.5f + (foot ? (f32)foot->num : 0.0f)) * scale;
     }
-    point2 c = tilemap_to_world(origin, left + w * 0.5f, bottom - h * 0.5f);
+    point2 c = tilemap_to_world(origin, (left + w * 0.5f) * scale, (bottom - h * 0.5f) * scale);
     const MapTile* info = tilemap_tile_info(m, gid);
     if (info && !info->clip.is_null()) {
         if (!animtiles) { KV_WARN("tilemap", "'%s' has animated tiles: declare tilemap.animtile in the writes", m.path); return Handle{}; }
@@ -428,14 +429,14 @@ Handle tilemap_spawn(TickContext& ctx, Handle map, const TilemapPlace& place) {
                     const MapTileset* ts = tilemap_tileset_of(*m, gid, nullptr);
                     if (!ts) continue;
                     f32 left = (f32)(x * m->tile_w) + l.offset.x, bottom = (f32)((y + 1) * m->tile_h) + l.offset.y;
-                    Handle r = spawn_tile(*tiles, animtiles, *m, gid, left, bottom, (f32)ts->tile_w, (f32)ts->tile_h, place.origin, layer, tint, ysort);
+                    Handle r = spawn_tile(*tiles, animtiles, *m, gid, left, bottom, (f32)ts->tile_w, (f32)ts->tile_h, place.origin, layer, tint, ysort, place.scale);
                     if (!r.is_null()) rows.push(r);
                 }
         } else if (l.kind == MapLayerKind::Objects) {
             for (u32 k = 0; k < l.objects.count; ++k) {
                 const MapObject& o = m->objects[l.objects.first + k];
                 if (!(o.gid & KV_TILE_GID_MASK)) continue;
-                Handle r = spawn_tile(*tiles, animtiles, *m, o.gid, o.x + l.offset.x, o.y + l.offset.y, o.width, o.height, place.origin, layer, tint, ysort);
+                Handle r = spawn_tile(*tiles, animtiles, *m, o.gid, o.x + l.offset.x, o.y + l.offset.y, o.width, o.height, place.origin, layer, tint, ysort, place.scale);
                 if (!r.is_null()) rows.push(r);
             }
         }

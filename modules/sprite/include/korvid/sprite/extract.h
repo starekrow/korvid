@@ -14,6 +14,7 @@
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/render/sprite.h"
+#include "korvid/sprite/layers.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 
@@ -22,6 +23,8 @@ namespace kv {
 struct Engine;
 
 struct ExtractTable {
+    u64               seen_churn = ~0ull; // a still kind's churn at the last extract: unchanged, the table is skipped
+    u32               seen_restores = 0;  // its restores then: a restore since means one full compare
     Array<Handle>     sent;            // by slot: the handle the renderer knows there, or null
     Array<Sprite>     sent_sprites;    // by slot: the Sprite it was last told
     Array<Transform2> sent_placements; // by slot: the Transform2 it was last told
@@ -29,11 +32,13 @@ struct ExtractTable {
 
 struct ExtractState {
     Array<ExtractTable> tables; // by engine table index
+    vec2 sent_layers[256] = {}; // the layers' offsets the renderer was last told
     void free();
 };
 
-// Appends one tick's deltas to `out`, starting with the Tick marker, and updates the
-// record of what the renderer knows.
-void extract_sprites(Engine& e, ExtractState& st, Array<SpriteDelta>& out);
+// Appends one tick's deltas to `out`, starting with the Tick marker (then a Layer delta for
+// each layer whose offset changed, clearing its snap), and updates the record of what the
+// renderer knows. `layers` may be null.
+void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<SpriteDelta>& out);
 
 } // namespace kv

@@ -75,6 +75,8 @@ enum class SpriteDeltaKind : u8 {
     Tick,   // a sim tick begins: current becomes previous for every sprite
     Set,    // create or update the sprite for `entity`
     Remove, // the entity is gone
+    Layer,  // every world sprite on layer state.layer is drawn moved by state.placement.position from this tick
+            // (state.snap: from now, not interpolated from the last offset); the entity is null
 };
 
 struct SpriteDelta {

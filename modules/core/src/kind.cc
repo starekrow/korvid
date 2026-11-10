@@ -199,6 +199,7 @@ Handle Table::spawn() {
     if (next >= committed_rows && !ensure_rows(next + 1)) return Handle{};
     Handle h = slots.create(0);
     if (h.is_null()) return h;
+    ++churn;
     u32 i = h.index();
     for (Column& c : columns) {
         memset(row(c, i), 0, c.stride);
@@ -210,6 +211,7 @@ Handle Table::spawn() {
 bool Table::destroy(Handle h) {
     slots.owner = thread_id();
     if (!slots.destroy(h)) return false;
+    ++churn;
     if (names.count() || props.len) sparse_dirty = true;
     for (const Attachment& a : attachments) if (a.rows.count()) sparse_dirty = true;
 #if KV_DEV
@@ -237,6 +239,8 @@ bool Table::restore_slots(Span<const u32> gen_words, Span<const u32> free_order)
     names.clear(); // the old names go: the engine's map finds them no longer held
     for (Attachment& a : attachments) a.rows.clear();
     props.clear();
+    ++churn;
+    ++restores;
     return slots.restore_slots(gen_words, free_order);
 }
 
@@ -248,6 +252,11 @@ u32 Table::destroy_all() {
 }
 
 void Table::begin_tick() {
+    // A still kind's rows equal their previous copies unless it spawned since the last copy.
+    if (desc && desc->still) {
+        if (churn == churn_copied) return;
+        churn_copied = churn;
+    }
     u32 n = rows();
     for (Column& c : columns)
         if (c.prev) memcpy(c.prev, c.data, (usize)n * c.stride);

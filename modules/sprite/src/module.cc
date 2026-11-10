@@ -2,6 +2,7 @@
 #include "korvid/sprite/camera.h"
 #include "korvid/sprite/components.h"
 #include "korvid/sprite/extract.h"
+#include "korvid/sprite/layers.h"
 #include "korvid/sprite/world.h"
 #include "korvid/core/engine.h"
 #include "korvid/math/fields.h"
@@ -15,6 +16,7 @@ struct SpriteState {
     ExtractState       extract;
     Array<SpriteDelta> deltas;
     Camera2            camera;
+    SpriteLayers       layers;
 };
 
 bool sprite_startup(Engine& engine, ModuleInstance& self) {
@@ -24,6 +26,7 @@ bool sprite_startup(Engine& engine, ModuleInstance& self) {
     s->world.table = engine_table(engine, "sprite.entity"); // the engine built it from the kind table
     if (!s->world.table) return false;
     if (!engine_publish(engine, self, ".camera", &s->camera)) return false;
+    if (!engine_publish(engine, self, ".layers", &s->layers)) return false;
     self.set_state(s);
     return true;
 }
@@ -39,7 +42,7 @@ void sprite_shutdown(Engine&, ModuleInstance& self) {
 // appended for the renderer. The engine copied current into previous at PreSim.
 void sprite_extract(TickContext& ctx) {
     SpriteState& s = ctx.state_as<SpriteState>();
-    extract_sprites(*ctx.engine, s.extract, s.deltas);
+    extract_sprites(*ctx.engine, s.extract, &s.layers, s.deltas);
 }
 
 // The schemas. Transform2 keeps a previous-tick copy for interpolation; Sprite does not.
@@ -55,9 +58,9 @@ constinit const KindDesc    k_kinds[] = {
     {.name = ".entity", .components = "Transform2, Sprite", .capacity = KV_POOL_DEFAULT_MAX},
 };
 
-constinit const ResourceDesc k_resources[] = {{".deltas"}, {".camera"}};
+constinit const ResourceDesc k_resources[] = {{".deltas"}, {".camera"}, {".layers"}};
 constinit const SystemDesc   k_systems[]   = {
-    {.name = ".extract", .phase = Phase::PostSim, .fn = sprite_extract, .reads = "*.Transform2, *.Sprite", .writes = ".deltas", .runs = RunWhen::Always},
+    {.name = ".extract", .phase = Phase::PostSim, .fn = sprite_extract, .reads = "*.Transform2, *.Sprite", .writes = ".deltas, .layers", .runs = RunWhen::Always},
 };
 
 } // namespace
@@ -84,6 +87,11 @@ SpriteWorld* sprite_world(Engine& e) {
 Array<SpriteDelta>* sprite_deltas(Engine& e) {
     SpriteState* s = engine_module_state_as<SpriteState>(e, "sprite");
     return s ? &s->deltas : nullptr;
+}
+
+SpriteLayers* sprite_layers(Engine& e) {
+    SpriteState* s = engine_module_state_as<SpriteState>(e, "sprite");
+    return s ? &s->layers : nullptr;
 }
 
 Camera2* sprite_camera(Engine& e) {

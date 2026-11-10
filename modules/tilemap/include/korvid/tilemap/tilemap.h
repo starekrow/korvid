@@ -124,6 +124,8 @@ struct TilemapPlace {
     point2 origin;
     i32    base_layer = 0;
     Handle owner;
+    f32    scale = 1.0f; // world units a map pixel: 2 draws a 16 px tileset as 32-unit tiles. Spawning only:
+                         // the collision, path and cell helpers work in the map's own pixels (scale 1)
 };
 
 // Spawns the tile and tile-object rows of a Ready map into "tilemap.tile", and those whose
