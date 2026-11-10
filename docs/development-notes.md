@@ -103,12 +103,61 @@ written one other engine that was deterministic enough to show any random replay
 from starting conditions plus an input script, and even that one only worked 
 right because I kept the frame rate pinned at 60.
 
+Here's an example of the AI tracking down a seemingly minor discrepancy in a 
+control system that would have surfaced as an impossible-to-find glitch in any
+other engine I've written _or_ worked with. Note that it just did this on its
+own: With deterministic behavior as a requirement from the beginning, it made 
+sure the replays matched 100%. Each of these outputs was interspersed with the 
+AI running the game to watch how it behaved:
+
+    The replay reproduces the same results (score 438,816, two bombs), but state hashes diverge at some ticks and it stopped one tick short of the file’s end record. I’m locating the ticks where they differ.
+
+    The replay differences come and go across three stretches and always end the same, which points to tiny float differences in the stick’s direction. I suspect the sample clamps the override’s axis twice, so I’m checking whether clamp_unit gives identical bits when applied again.
+
+    My quick test used a slightly different formula; testing the real one (divide by the length):
+
+    Not the clamp either. Running both, recording and replay, with the hash after every system, to find the first one whose output differs:
+
+    The control system’s output differs at tick 1635, so the ship’s inputs on that tick differ. Decoding the file around that tick to compare against what the replay applied:
+
+    The file’s values look right; the move at 1635 is a unit-length direction. Testing whether clamp_unit changes that particular vector:
+
+    The recorded value is 1.00000012, so the sample’s clamp alters it again on replay. I’m adding an exact override to platform_hid so the pilots and the demo’s hash stay unchanged.
+
+    The replay now matches its recording tick for tick: 11,318 hashes, the file alone flying the ship. Checking that a damaged recording is caught, by changing one recorded stick value:
+
+Note that "hash after every system" bit. Because the engine's data structures
+are stable between each system that runs in a tick, you can go pull a hash 
+after each one (more on the machinery that enables this later). In a dev build, 
+no less - you don't need debug instrumentation for it.
+
 Another thing that just made everything better was the modular structure of the
 engine. I wanted that from the beginning, but it worked out even better than I 
 thought it would. It helped the AI stay focused on the task at hand, it added
 clear boundaries to differentiate public from private interfaces even within the 
 engine, and it eventually led to target games and host tools being able to very 
 naturally share modules.
+
+Another decision that had unexpected benefits: I wanted a useful CLI interface
+to the engine, which meant that anything I might want to look at through it
+would need to be reflected, which meant that most of the notable engine
+structures got a description. I didn't want to try this through C++ magic, 
+because it always turns into punctuation soup and doesn't work with other
+languages that you might want to use for game dev. So, it became just field
+descriptions over structs. 
+
+With field descriptions over structs, it becomes pretty easy to reflect just
+about anything, and it doesn't matter how it's constructed or updated. I 
+decided that the entity pools should all be reflected, and the AI suggested that
+they could all be hashed to give a complete description of engine state, useful
+for checking determinism. This also meant that the AI (and I) could go poke 
+around inside the engine on any frame without having to operate a debugger.
+It also makes logging easier - you can just call a functiand tracking down the source of any non-determinism.
+Quite often those turned out on to dump any
+reflected structure to a string. And it almost immediately led to tick phase
+dependencies being expressed with the same names. I was worried that this would
+be a (small) drag on performance throughout, but it all runs amazingly smoothly,
+with almomst all of the work happening once, at startup.
 
 The build system worked out well too. I have spent more weeks than I care to 
 recall wrestling with multi-platform build systems, and there's _still_ nothing 
