@@ -133,6 +133,7 @@ void run_begin(TickContext& ctx, Game& g) {
     g.demo_core_bomb = false;
     g.pilot_v = vec2{0, 0};
     g.shake = 0.0f;
+    for (Game::Ring& ring : g.rings) ring = Game::Ring{};
     Dials d = dials_start(e, g, g.demo ? Position::Demo : g.stress ? Position::Stress : g.start);
     dials_log(d);
     Stage s{};

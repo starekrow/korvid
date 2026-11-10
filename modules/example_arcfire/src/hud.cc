@@ -7,6 +7,7 @@
 #include "korvid/core/log.h"
 #include "korvid/platform_hid/actions.h"
 #include "korvid/platform_hid/host_window.h"
+#include "korvid/render/renderer.h"
 #include "korvid/sprite/camera.h"
 #include "korvid/ui/ui.h"
 #include <math.h>
@@ -131,6 +132,42 @@ void camera(TickContext& ctx) {
         g.shake = 0.0f;
         cam->center = point2{0, 0};
     }
+}
+
+// Phase PostSim, every tick, after the camera: the shimmer. The dial sets the renderer's
+// post pass (the world below Z_POST into a target, arcfire_shimmer over it); the rings age
+// on unpaused ticks and go to the shader as window pixels: x, y (down), the radius so far
+// and the strength left, fading as the ring spreads. Presentation only: nothing here is
+// read back.
+void shimmer(TickContext& ctx) {
+    static const u32 k_camera = ctx.resource_id("sprite.camera");
+    static const u32 k_window = ctx.resource_id("platform_hid.window");
+    Game& g = ctx.state_as<Game>();
+    Renderer* r = renderer_get(*ctx.engine);
+    if (!r) return;
+    Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
+    bool want = dials.len ? dials[0].shimmer != 0 : g.post_on; // between runs, as it was
+    if (want != g.post_on) {
+        renderer_post_layer(r, Z_POST, want ? "arcfire_shimmer" : nullptr); // a shader that will not load is logged once
+        g.post_on = want;
+    }
+    f32 params[KV_POST_PARAMS * 4];
+    u32 n = 0;
+    const Camera2* cam = ctx.resource<const Camera2>(k_camera);
+    const HostWindow* w = ctx.resource<const HostWindow>(k_window);
+    for (Game::Ring& ring : g.rings) {
+        if (!ring.life) continue;
+        if (!ctx.paused && ++ring.age >= ring.life) { ring = Game::Ring{}; continue; }
+        if (!g.post_on || !cam || !w || n == KV_POST_PARAMS) continue;
+        f32 t = (f32)ring.age / (f32)ring.life;
+        f32 spread = 1.0f - (1.0f - t) * (1.0f - t);
+        f32* p = &params[4 * n++];
+        p[0] = 0.5f * (f32)w->width() + (ring.at.x - cam->center.x) * cam->zoom;
+        p[1] = 0.5f * (f32)w->height() - (ring.at.y - cam->center.y) * cam->zoom;
+        p[2] = ring.reach * spread * cam->zoom;
+        p[3] = ring.strength * (1.0f - t);
+    }
+    if (g.post_on) renderer_post_params(r, params, n);
 }
 
 // Phase PostSim, every tick: the HUD's numbers, and the banner's time.

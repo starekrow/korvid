@@ -115,6 +115,8 @@ The ways it flies itself:
   `enemy_health`, `bot`, `invulnerable` (1, or 2: after the first death), `loops`,
   `weapon` and `power` (what the ship starts with: 0 Spread, 1 Beam, 2 Storm, 3 Lance; 1..5),
   `options` (0..2, the options it starts with), `chain_window` (ticks; 0 turns the chain off), `glows` (1, the bullets' halos; 0 under `--stress`),
+  `shimmer` (1, the air bending around big explosions; 0 draws the frame without the
+  full-frame pass),
   `scroll_rows` (1: move every plane tile
   every tick instead of scrolling the layer, for the notebook's comparison). The log prints
   the dials at the start.
@@ -280,7 +282,12 @@ state.
   drifting with the render time and scrolled by its plane. The dissolve
   (`arcfire_dissolve.slang`) cuts a sprite away where noise falls below its tint's alpha,
   with a hot edge along the cut: a boss's hull burns away as it dies, nine tenths gone as
-  it breaks. A shader that will not load leaves its sprites drawn plainly.
+  it breaks, its shadow fading with it. The shimmer (`arcfire_shimmer.slang`) is a
+  full-frame pass over the world (every layer under `Z_POST`, so not the HUD): a big
+  explosion (a part's or a ground row's, a boss's, its hull's break, the bomb) starts a
+  ring of bent air (`fx_shimmer`, up to sixteen), and `hud.cc`'s `shimmer` hands the
+  renderer each ring's place in window pixels, radius and strength every tick. A shader
+  that will not load leaves its sprites drawn plainly, or the frame drawn without the pass.
 - **Sound** (`sound.cc`, `assets/sound/`, `assets/music/`): a table of effects, each
   with its volume, its priority and how far its pitch wanders; the volley and the grazes
   lowest, deaths, the bomb, the egg and a boss's fall highest. The audio module starts a
@@ -311,7 +318,7 @@ state.
 | `src/bomb.cc`, `src/items.cc` | the bomb; chips, pickups and the magnet |
 | `src/hud.cc`, `src/fx.cc`, `src/pilot.cc`, `src/stats.cc` | the camera and the screens; particles; the demo and the bot; the reports |
 | `src/main.cc` | the frame loop's config and the game's flags |
-| `shaders/`, `assets/materials/` | the game's fragment shaders (the nebula, the dissolve, their noise); the materials that name them |
+| `shaders/`, `assets/materials/` | the game's shaders (the nebula, the dissolve, their noise; the shimmer, a post shader); the materials that name the first two |
 | `assets/stages/shoreline.stage.json`, `assets/maps/` | the stage; its ground map and tileset |
 | `assets/ui/arcfire.ui.json` | the HUD and every screen |
 | `assets/CREDITS.md`, `assets/LICENSE-*.txt` | who made what |

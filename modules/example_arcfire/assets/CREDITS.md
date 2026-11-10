@@ -173,7 +173,7 @@ The stage (`stages/shoreline.stage.json`), the UI document (`ui/arcfire.ui.json`
 BulletML patterns (`patterns/*.xml`) are written by hand for the game. No pattern is
 adapted from another source.
 
-The shaders (`shaders/*.slang`, outside `assets/`: the nebula, the dissolve and their value
-noise) and the materials that name them (`materials/*.material.json`) are written for the
+The shaders (`shaders/*.slang`, outside `assets/`: the nebula, the dissolve, their value
+noise, and the shimmer) and the materials that name them (`materials/*.material.json`) are written for the
 game (2026-11-10, Korvid's, Apache 2.0). The noise is a plain value noise summed over
 octaves, its hash the common fract-and-dot idiom; no shader is adapted from another source.

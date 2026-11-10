@@ -506,3 +506,29 @@ at tick 14459 seven ways: the dissolve writes a dying hull's Sprite, a sim colum
 hashes in the dying differ and meet again once the hull is gone; the two recorded runs
 were made again (the same 14,521 and 14,622 ticks, the same input) and replay matching at
 1 and 16 threads.
+
+**M2. The full-frame pass and the shimmer.** With a post shader set, the world (every layer
+under `Z_POST`, 70) draws into a target of the swapchain's size and format, the shimmer
+draws it to the window, and the HUD (90 on) draws over it. Its cost, `--bench ring` with
+the `shimmer` dial off and on (no rings: the target and the copy): the GPU frame 0.53 to
+0.63 ms, the draw 0.36 to 0.47, overdraw 4.2 to 5.2 (the pass is one more layer over the
+window). Under `--stress` the same tenth of a millisecond: sixteen rings at most, a few
+dozen ALU operations a pixel each, are lost in the copy's own cost. Turned off, nothing of
+the pass is made: the frame is the one before. Without its shader (`arcfire_shimmer.spv`
+moved away) the pass logs once and the frame draws straight; the debug build's demo with
+the pass on is validation-clean.
+
+The rings are the game's module state, not cosmetic rows as the PRD had them: sixteen
+fixed slots that age on unpaused ticks and go to the renderer in window pixels from the
+camera (`hud.cc`'s `shimmer`, after the camera on the main thread). A part's or a ground
+row's blast, a boss's, a hull's break and the bomb start one; the oldest gives way. At its
+widest a ring bends the world about 4 pixels across a band a fifth of its radius wide,
+which reads as heat over the islands and almost not at all over open water. A window
+resize remakes the target (the swapchain's size moved); nothing here can resize the window
+from a script, so that is left for the platform checklist.
+
+Found on the way, from M1: a boss's shadow (a cosmetic child of the hull) stayed whole
+while the hull burned away, a grey block where the carrier had been. It fades with the
+dissolve now. The `shimmer` dial is a field of the world row's Dials, so every hash
+moved: the demo hashes 866dde056d3002a4 at tick 14459 seven ways, and the recorded runs
+were made again.

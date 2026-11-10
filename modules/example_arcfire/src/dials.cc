@@ -25,7 +25,7 @@ constinit const DialField k_dial_fields[] = {
     ARC_DIAL(particles, false),     ARC_DIAL(plane_density, false), ARC_DIAL(enemy_health, true), ARC_DIAL(bot, false),
     ARC_DIAL(invulnerable, false),  ARC_DIAL(loops, false),         ARC_DIAL(scroll_rows, false),
     ARC_DIAL(weapon, false),        ARC_DIAL(power, false),          ARC_DIAL(options, false),        ARC_DIAL(chain_window, false),
-    ARC_DIAL(glows, false),
+    ARC_DIAL(glows, false),         ARC_DIAL(shimmer, false),
 };
 #undef ARC_DIAL
 
@@ -50,6 +50,7 @@ Dials dials_for(Position p) {
     d.options = 0;
     d.chain_window = 90;
     d.glows = 1;
+    d.shimmer = 1;
     switch (p) {
     case Position::Normal: break;
     case Position::Easy:

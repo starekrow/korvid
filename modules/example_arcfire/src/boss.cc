@@ -37,6 +37,7 @@ namespace {
 constinit const char* const k_boss_names[] = {"carrier", "battleship"};
 
 constexpr vec2 kBossShadow{30.0f, -56.0f}; // higher than an air row's
+constexpr f32  kBossShadowAlpha = 0.33f;
 constexpr f32  kLeaveSpeed = 2.5f;         // units a tick, up and away
 constexpr f32  kSwayFollow = 0.06f;        // how fast the hull follows its sway (a phase's change eases in)
 constexpr u32  kFirstFire = 50, kFireStagger = 17; // a part's first pattern after the hold, staggered by its index
@@ -157,7 +158,7 @@ Handle boss_spawn(TickContext& ctx, Game& g, const Dials& d, u32 di) {
         made[i] = parts->spawn(transform2_at(world), local2_at(p.at), Parent{p.parent < 0 ? h : made[p.parent]}, s, c, hp, em, Runner{}, part);
     }
     Sprite shadow = hull;
-    shadow.tint = color{0.0f, 0.0f, 0.04f, 0.33f};
+    shadow.tint = color{0.0f, 0.0f, 0.04f, kBossShadowAlpha};
     shadow.layer = Z_SHADOW;
     ctx.spawn_later(g_shadow_kind, Transform2{}, local2_at(point2{kBossShadow.x, kBossShadow.y}), Parent{h}, shadow);
     sfx(ctx, g, SFX_WARNING);
@@ -269,16 +270,24 @@ void bosses(TickContext& ctx) {
                 u32 settle = kKillIn + kKillHold + kKillOut;
                 f32 rest = (f32)(kBurstEvery * left) + (f32)(b.clock < settle ? settle - b.clock : 0u);
                 hull->tint.a = 0.9f * (f32)b.clock / ((f32)b.clock + rest + 1.0f);
+                // Its shadow (a cosmetic child) fades as it goes.
+                Table* st = ctx.write_kind(g_shadow_kind);
+                Span<const Parent> sp = st->rows_of<Parent>();
+                Span<Sprite> ss = st->rows_of<Sprite>();
+                for (u32 k = 0; k < st->rows(); ++k)
+                    if (st->is_alive(k) && sp[k].parent == me) ss[k].tint.a = kBossShadowAlpha * (1.0f - hull->tint.a / 0.9f);
             }
             if (left && b.clock % kBurstEvery == 0) {
                 fx_boom(ctx, g, px[first].position, 64.0f);
                 fx_sparks(ctx, g, px[first].position, dials_row[0].particles * 2, kSparkPart, 5.0f);
+                fx_shimmer(g, px[first].position, 110.0f, 0.7f, 32);
                 ctx.destroy(pt->handle_at(first));
                 g.shake = g.shake > 6.0f ? g.shake : 6.0f;
             } else if (!left && b.clock >= kBreakAt && b.clock >= kKillIn + kKillHold + kKillOut) {
                 hull_breaks(ctx, g, def, g.boss_alpha[b.def][0], p);
                 sfx(ctx, g, SFX_RUMBLE);
                 fx_sparks(ctx, g, p, dials_row[0].particles * 6, kSparkPart, 7.0f);
+                fx_shimmer(g, p, 340.0f, 1.0f, 56);
                 g.shake = 14.0f;
                 ctx.destroy(me);
                 if (clock_free) engine_time_scale(e, 1.0f);

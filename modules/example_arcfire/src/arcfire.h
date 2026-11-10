@@ -47,6 +47,8 @@ constexpr u32 L_ITEM   = 128; // chips and pickups: the ring collects them
 constexpr i32 Z_GAS = -31, Z_DEEP = -30, Z_HIGH = -20, Z_MAP = -16, Z_CLOUD_SHADOW = -13, Z_SHADOW = -12, Z_GROUND = -10, Z_CLOUD = 10,
               Z_LOW_CLOUD = 12, Z_BOSS = 16, Z_PART = 17, Z_AIR = 20, Z_HIGH_CLOUD = 23, Z_SHIP = 30, Z_SHOT = 25, Z_ITEM = 35,
               Z_BULLET = 40, Z_FX = 50, Z_MARK = 60;
+// The first layer over the shimmer's full-frame pass: the world is below it, the HUD (90 on) above.
+constexpr i32 Z_POST = 70;
 constexpr u32 kMapLayers = 3;    // sea, land, deco
 constexpr f32 kMapScale = 2.0f;  // world units a map pixel
 
@@ -144,6 +146,7 @@ struct Dials {
     u32 options;           // and how many options (0..2)
     u32 chain_window;      // ticks after a kill in which the next one adds to the chain (scoring.cc)
     u32 glows;             // a soft dark halo under every enemy bullet (fx.cc): a second sprite each
+    u32 shimmer;           // the air bending around big explosions (fx.cc): a full-frame pass over the world
 };
 struct Stage {
     f32 distance;          // the stage's clock: units scrolled since the stage (or this loop) began
@@ -426,6 +429,11 @@ struct Game {
     Handle   ship, ring, mark;
     Rng      fx;                  // the cosmetic stream: sparks and debris, never sim state
     f32      shake = 0.0f;        // the camera's, in world units, decaying
+    // The shimmer's rings (fx.cc), presentation only: where, how old, how long, how far, how
+    // strong. Life 0 is a free ring.
+    struct Ring { point2 at; u32 age, life; f32 reach, strength; };
+    Ring     rings[16];
+    bool     post_on = false;     // the renderer's post pass is set to the shimmer
     u32      bullets_spawned = 0; // this tick, by the runners (patterns.cc)
     u32      runners_stepped = 0;
     Stats    stats;
@@ -485,6 +493,9 @@ void   fx_boom(TickContext& ctx, Game& g, point2 at, f32 size);
 enum class Blast : u32 { Small, Medium, Large };
 void   fx_blast(TickContext& ctx, Game& g, point2 at, Blast b);
 Handle fx_boom_clip(Engine& e);
+// A ring of bent air spreading from `at` to `reach` world units over `life` ticks (the
+// shimmer, a full-frame pass); the oldest ring gives way when all sixteen are out.
+void   fx_shimmer(Game& g, point2 at, f32 reach, f32 strength, u32 life);
 
 // Weapons (weapons.cc): a volley of the weapon at its power from `at`, into the shot
 // kind; its next cooldown. The beam is fired by `beams`, not here.

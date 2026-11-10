@@ -69,6 +69,7 @@ void pause(TickContext&);        // flow.cc
 void on_ui(TickContext&, Span<const UiEvent>);
 void on_covered(TickContext&, Span<const UiCovered>);
 void camera(TickContext&);
+void shimmer(TickContext&);
 void hud(TickContext&);
 void stats_mark(TickContext&);   // stats.cc
 void stats(TickContext&);
@@ -106,7 +107,7 @@ constinit const FieldDesc k_eggbody_fields[]  = {KV_FIELDS(EggBody, vy, drift)};
 constinit const FieldDesc k_glow_fields[]     = {KV_FIELDS(Glow, bullet)};
 constinit const FieldDesc k_dials_fields[]    = {KV_FIELDS(Dials, position, rank, bullet_speed, formation_count, formation_spacing, particles,
                                                            plane_density, enemy_health, bot, invulnerable, loops, scroll_rows, weapon, power, options, chain_window),
-                                                 KV_FIELD(Dials, glows)}; // past KV_FIELDS' sixteen
+                                                 KV_FIELD(Dials, glows), KV_FIELD(Dials, shimmer)}; // past KV_FIELDS' sixteen
 constinit const FieldDesc k_stage_fields[]    = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, ground_cursor, base, held, waiting, round_up)};
 constinit const FieldDesc k_run_fields[]      = {KV_FIELDS(Run, score, stage_score, next_extend, eggs, restarts, epoch, kills, grazes, deaths, bombs, chips, chain, chain_left, chain_best,
                                                            bombs_used)};
@@ -241,7 +242,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".beams", .phase = Phase::Sim, .fn = beams, .reads = "*[Collider2].Transform2, *[Collider2].Collider2, .ship.Ship, .ship.Transform2, .beam.Parent, .option.Parent, .option.Option",
      .writes = ".beam.Local2, .beam.Sprite, .beam.Beam", .state = StateUse::None},
     {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage, .world.Run, .world.Dials", .writes = ".air, .ground, .formation", .state = StateUse::Read},
-    {.name = ".bosses", .phase = Phase::Sim, .fn = bosses, .reads = ".world.Run, .world.Dials, .world.EggState", .writes = ".boss, .part, .formation, audio.commands",
+    {.name = ".bosses", .phase = Phase::Sim, .fn = bosses, .reads = ".world.Run, .world.Dials, .world.EggState", .writes = ".boss, .part, .formation, .shadow, audio.commands",
      .after = ".stage, .enemies", .before = ".patterns", .main_thread = true},
     // The active bullets steer before they fly; the enemies' patterns run after
     // collision.compose, which places a boss's parts this tick and comes after every
@@ -261,6 +262,8 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".particles", .phase = Phase::Sim, .fn = particles, .writes = ".particle", .state = StateUse::None},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true,
      .runs = RunWhen::Always},
+    {.name = ".shimmer", .phase = Phase::PostSim, .fn = shimmer, .reads = ".world.Dials, platform_hid.window, sprite.camera", .after = ".camera",
+     .main_thread = true, .runs = RunWhen::Always},
     {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".world.Run, .world.Stage, .world.Dials, .boss.Boss, .part.Health, .part.Part, .ship.Ship, .option.Option", .before = "ui.draw", .main_thread = true,
      .runs = RunWhen::Always},
     {.name = ".stats_mark", .phase = Phase::PostSim, .fn = stats_mark, .before = "sprite.extract", .main_thread = true, .runs = RunWhen::Always},

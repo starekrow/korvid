@@ -53,6 +53,7 @@ void bomb(TickContext& ctx) {
     sfx(ctx, g, SFX_RUMBLE);
     g.shake = 14.0f;
     fx_sparks(ctx, g, xf[i].position, 24, kSparkBlast, 6.0f);
+    fx_shimmer(g, xf[i].position, 520.0f, 1.0f, 60);
     KV_INFO("arcfire", "bomb: tick %llu, %u bullets cancelled (%u past the chips' cap) in %.2f ms, %d bombs left", (unsigned long long)ctx.tick, cancelled,
             overflow, ms, run[0].bombs);
 }

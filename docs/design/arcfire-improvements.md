@@ -53,6 +53,13 @@ that finds an engine limit adds a line here.
 
 ## Fixed
 
+- **A pass over the whole frame** (slice 6, M2). `renderer_post_layer(r, layer, shader)`:
+  the layers below `layer` draw into a target of the renderer's own and a game's post
+  shader (`post_fragment.slangh`) draws it to the window before the layers above; up to 16
+  float4s from `renderer_post_params`. Off, or a shader that will not load, the frame is
+  drawn straight as before, at no cost. On: about 0.1 ms of GPU a frame at 1280 x 720.
+  Arcfire's shimmer is the first (docs/design/renderer.md, "The full-frame pass").
+
 - **A game's fragment shader** (slice 6, M1; identified at PRD time). `MaterialDesc::shader`
   (a material file's `"shader"`) names a SPIR-V file the game's module builds from its
   `shaders/*.slang` through kormake's shader rule, whose `%{shader_includes}` puts every

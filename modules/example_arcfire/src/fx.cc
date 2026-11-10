@@ -2,7 +2,8 @@
 // spin, slow and fade over their life and are never part of the state. Their randomness
 // is the module's own stream, not the sim's, so a dial that changes how many sparks fly
 // changes nothing the sim draws. Explosions are a flipbook of Kenney's burst tiles on a
-// cosmetic row that goes when its clip ends, in three sizes (fx_blast). The bullets' glows
+// cosmetic row that goes when its clip ends, in three sizes (fx_blast), the bigger two
+// with a ring of bent air (fx_shimmer, drawn by hud.cc's shimmer through a post shader). The bullets' glows
 // (dark halos, which is what reads over a pale sea) are a cosmetic kind kept slot for slot
 // with the bullets (glows, below).
 #include "arcfire.h"
@@ -70,6 +71,7 @@ void fx_blast(TickContext& ctx, Game& g, point2 at, Blast b) {
         fx_boom(ctx, g, at, 64.0f);
         fx_boom(ctx, g, at + vec2{g.fx.range(-14.0f, 14.0f), g.fx.range(6.0f, 16.0f)}, 44.0f);
         fx_sparks(ctx, g, at, sparks * 2, hot, 4.0f);
+        fx_shimmer(g, at, 90.0f, 0.6f, 30);
         g.shake = g.shake > 5.0f ? g.shake : 5.0f;
         break;
     case Blast::Large: { // a boss: the big one, a ring of sparks, the screen white for a moment
@@ -82,6 +84,7 @@ void fx_blast(TickContext& ctx, Game& g, point2 at, Blast b) {
             ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{vec2{cosf(a) * 7.0f, sinf(a) * 7.0f}}, Particle{28, 28, 0.0f, 0.95f, 1.0f, 0.0f});
         }
         hud_flash(*ctx.engine);
+        fx_shimmer(g, at, 300.0f, 1.0f, 50);
         g.shake = 14.0f;
         break;
     }
@@ -201,6 +204,15 @@ void glows(TickContext& ctx) {
             }
         });
     }
+}
+
+void fx_shimmer(Game& g, point2 at, f32 reach, f32 strength, u32 life) {
+    Game::Ring* slot = &g.rings[0];
+    for (Game::Ring& r : g.rings) {
+        if (!r.life) { slot = &r; break; }
+        if (r.life - r.age < slot->life - slot->age) slot = &r; // the nearest its end gives way
+    }
+    *slot = Game::Ring{at, 0, life ? life : 1, reach, strength};
 }
 
 } // namespace kv::arcfire
