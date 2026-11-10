@@ -523,6 +523,41 @@ def debris():
     return im
 
 
+def capital(sheet):
+    """224 x 40: the capital ship over Orbit, broadside, bow left, far off: four sections of
+    56 x 40 side by side (the game draws each as a sprite of its own and breaks them away one
+    at a time): the bow with its main battery, the bridge tower, the hangar decks, the
+    engines. The pack's grey and its slate, with the friendly cyan where the enemy has
+    orange: it is the other side's flagship, losing."""
+    w, h = 224, 40
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    outline_fill(d, [(2, 22), (18, 12), (210, 10), (220, 16), (220, 30), (210, 34), (18, 32)], GREY)
+    d.rectangle((20, 14, 208, 15), fill=LIGHT)             # the deck's edge, lit
+    d.rectangle((24, 27, 206, 28), fill=CYAN_DARK)         # a band along the hull
+    for x in range(30, 206, 6):                            # portholes
+        d.point((x, 22), fill=CYAN)
+    for x in (56, 112, 168):                               # the sections' seams
+        d.line((x, 11, x, 33), fill=OUTLINE)
+    for x in (16, 30, 44):                                 # the bow's main battery
+        d.rectangle((x - 4, 6, x + 4, 12), fill=OUTLINE)
+        d.rectangle((x - 3, 7, x + 3, 11), fill=GREY)
+        d.line((x - 10, 8, x - 4, 8), fill=OUTLINE)         # barrels toward the bow
+    outline_fill(d, [(70, 12), (74, 0), (98, 0), (102, 12)], GREY)  # the bridge tower
+    d.rectangle((78, 3, 94, 6), fill=CYAN)
+    d.line((86, 0, 86, 3), fill=LIGHT)
+    for x in (124, 146):                                   # hangar mouths
+        d.rectangle((x - 8, 18, x + 8, 26), fill=OUTLINE)
+        d.rectangle((x - 6, 20, x + 6, 25), fill=DEEP)
+        d.rectangle((x - 2, 22, x + 2, 23), fill=CYAN_DARK)
+    vent = tile(sheet, 4, 1)
+    im.alpha_composite(vent, (176, 12))
+    for y in (14, 22, 28):                                 # the engines, astern, lit
+        d.rectangle((216, y, 223, y + 4), fill=OUTLINE)
+        d.rectangle((219, y + 1, 223, y + 3), fill=CYAN)
+    return im
+
+
 def main():
     sheet = Image.open(ASSETS / "kenney" / "tiles.png").convert("RGBA")
     OUT.mkdir(parents=True, exist_ok=True)
@@ -539,8 +574,9 @@ def main():
     station_parts().save(OUT / "station_parts.png")
     segments(sheet).save(OUT / "segments.png")
     debris().save(OUT / "debris.png")
+    capital(sheet).save(OUT / "capital.png")
     print("generated/: carrier, battleship (and their parts), boat, gunship_left, gunship_right (and their parts), "
-          "station (and its parts), segments, debris")
+          "station (and its parts), segments, debris, capital")
 
 
 if __name__ == "__main__":

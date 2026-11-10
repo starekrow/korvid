@@ -1,18 +1,42 @@
 # example_arcfire
 
-A vertical bullet-hell shooter, and the engine's first stress test that is also a game
-(`docs/Arcfire-Master-PRD.md`). Built in slices (`docs/Arcfire-Slice-N-PRD.md`); this is
-slice 4, Shoreline with the arsenal: a 3:4 field between two side panels; a Tiled map of
-sea and islands scrolling under two decks of cloud, each at its own speed; a ship that
-flies in eight directions at two speeds with four weapons at five power levels (Spread,
-the Beam, Storm, Lance) and up to two options; formations of popcorn, turrets, tanks and
-bunkers on a stage script keyed to scroll distance, some of them carrying items; BulletML
-patterns; bombs, chips and grazes; the chain, extends and the stage bonus; the egg, a
-death in slow motion after which a small spherical machine builds the next ship; two
-bosses made of parts, the carrier and the battleship; Easy, Normal and Hard, arcade and
-stage select. Every count is a dial, and the game can fly itself three ways. The art is CC0, from Kenney, Screaming
-Brain Studios, Master484 and GGBotNet, and the bosses are kitbashed here from Kenney's
-pieces; the sound is Kenney's and the music Juhani Junkala's, CC0 too (`assets/CREDITS.md`).
+A vertical bullet-hell shooter, and the engine's stress test that is also a game
+(`docs/Arcfire-Master-PRD.md`), built in six slices (`docs/Arcfire-Slice-N-PRD.md`). Two
+stages on a 3:4 field between side panels:
+
+- **Shoreline**: a Tiled map of sea and islands scrolling under two decks of cloud;
+  popcorn, turrets, tanks and bunkers; heavies and a missile boat; the carrier and the
+  battleship.
+- **Orbit**: a procedural nebula drawn by a shader of the game's own under the stars; a
+  fleet battle in the background, a capital ship breaking up under the dissolve shader;
+  debris, station segments with turrets; a pair of gunships and the station core.
+
+A ship that flies in eight directions at two speeds, with four weapons at five power
+levels and up to two options; BulletML patterns; bombs, chips and grazes; the chain,
+extends and the stage bonus; the egg, a death in slow motion after which a small machine
+builds the next ship; bosses made of parts, in phases; the air bending around every big
+explosion (a full-frame post shader). Easy, Normal and Hard; arcade, stage select, high
+scores, options; a demo and a bot that fly it. Every count is a dial. The art is CC0, from
+Kenney, Screaming Brain Studios, Master484 and GGBotNet, and the bosses and Orbit's pieces
+are drawn here in Kenney's style; the sound is Kenney's and the music Juhani Junkala's,
+CC0 too (`assets/CREDITS.md`). How it performs, slice by slice, is
+`docs/performance-notes.md`.
+
+## Watching it work
+
+Built (below), from `build/linux-dev/bin`:
+
+| to see | run |
+|---|---|
+| the game as a player meets it | `./example_arcfire` (the title; left alone 20 s, it plays the demo) |
+| Shoreline flown by its demo (3.5 min) | `./example_arcfire --demo` |
+| Orbit flown by its demo (5.5 min): the gas, the battle, the dissolve, the gunships, the station core | `./example_arcfire --demo --stage orbit` |
+| both stages in arcade, the stage change, the bot flying | `./example_arcfire --arcade --autoplay` |
+| twenty thousand bullets | `./example_arcfire --stress` (Shoreline) or `--stress --stage orbit` (and 3,000 ships in the battle) |
+| one pattern, measured | `./example_arcfire --bench ring` (any name in `assets/patterns/patterns.json`) |
+| determinism | `./example_arcfire --demo --hash --threads 1` against `--threads 16`: the same hashes, tick for tick; `--again` plays it twice in one process |
+| a recorded run replayed | `./example_arcfire --replay ../../../modules/example_arcfire/tests/replays/normal.kvr` (ends `matched`) |
+| timings | add `--spike-hunt --prof-report`; to run a long mode four times faster, `--cli-stdin` and type `rate 4` |
 
 ## Building and running
 
@@ -79,7 +103,7 @@ takes the next frame, so a script can walk the menus.
 
 The ways it flies itself:
 
-- `--demo` plays the whole stage (about three and a half minutes) and quits at its end:
+- `--demo` plays the whole stage (Shoreline: about three and a half minutes) and quits at its end:
   it fires throughout, flies focused through the first formation's stream (the ring
   grazes), flies by the bot's rule (below) otherwise, bombs in the spiral at tick 1440 and
   climbs past the magnet line for the chips, and from tick 1650 stands still and holds
@@ -91,7 +115,10 @@ The ways it flies itself:
   then reads its results, signs "DEMO" into its own table (`scores-demo.json`) and quits. `--demo --hash` prints the state hash every sim tick. The hashes match
   across runs, thread counts (`--threads 1`, `--threads 8`), I/O backends (`--io sync`,
   `--io uring`) and asset sources (loose files, `--pack` with a kpak of `bin/assets`, or
-  `--pack` with a zip of it).
+  `--pack` with a zip of it). `--demo --stage orbit` is Orbit's (about five and a half
+  minutes, 19,702 ticks): no script but the rule, its own weapons by the stage's clock
+  (Spread, Storm from the segments on, Lance for the station core), a bomb when the core
+  opens; it dies early once, so the egg plays, and hashes as the other does.
 - `--autoplay` puts the bot on the stick, in arcade or a stage select: it holds fire,
   steps away from each bullet's closest pass in the next 40 ticks (against the way the ship
   is going) when it comes within 26 units, keeping some of its last step so two passes
@@ -106,7 +133,8 @@ The ways it flies itself:
   touched while they fly changes nothing.
 - `--stress` turns the dials to their stress position: rank 24, three times the
   formations at half the spacing, four times the sparks, the planes in 128-unit tiles,
-  twice the enemy health, the bot flying an invulnerable ship, the stage looping.
+  twice the enemy health, the bot flying an invulnerable ship, the stage looping, and in
+  Orbit 3,000 ships in the battle.
 - `--bench NAME` fires one pattern of the library from a fixed emitter at the top of the
   field, again and again, under an invulnerable bot: how a pattern is written and measured.
 - `--gas` lays the nebula gas (Orbit's deep plane, a game shader) over the stage's field:
@@ -117,7 +145,7 @@ The ways it flies itself:
   `weapon` and `power` (what the ship starts with: 0 Spread, 1 Beam, 2 Storm, 3 Lance; 1..5),
   `options` (0..2, the options it starts with), `chain_window` (ticks; 0 turns the chain off), `glows` (1, the bullets' halos; 0 under `--stress`),
   `shimmer` (1, the air bending around big explosions; 0 draws the frame without the
-  full-frame pass),
+  full-frame pass), `fleet` (300, Orbit's battle's ships; 3,000 under `--stress`; 0 none),
   `scroll_rows` (1: move every plane tile
   every tick instead of scrolling the layer, for the notebook's comparison). The log prints
   the dials at the start.
@@ -156,7 +184,8 @@ state.
   before a restart never arrive. The sim holds (`HoldLoading`) until the file is in.
 - **Planes** (`planes.cc`): grids of tiles of a seamless texture in a cosmetic kind, each
   on a layer of its own, which a stage names: space's three (stars, a nebula, a faint
-  cloud: the bench's) or the sky's (Shoreline's). The sky is the parallax over the map: the
+  cloud: the bench's), the sky's (Shoreline's), or Orbit's: the gas (one full-field sprite
+  drawn by the nebula shader, its uv scrolled), the stars added over it, the faint cloud. The sky is the parallax over the map: the
   low clouds at 1.35 times the ground's speed under the air, their shadows on the sea and
   islands (the same texture darkened, down and to the right, at the same rate), and high
   wisps at 2.1 times over the air and the bosses but under the ship, its shots and the
@@ -302,6 +331,16 @@ state.
   ring of bent air (`fx_shimmer`, up to sixteen), and `hud.cc`'s `shimmer` hands the
   renderer each ring's place in window pixels, radius and strength every tick. A shader
   that will not load leaves its sprites drawn plainly, or the frame drawn without the pass.
+- **The battle** (`battle.cc`): Orbit's background, all cosmetic (three kinds the hash
+  never sees, the module's own random stream). The capital ship, four sections of
+  `generated/capital.png`, drifts down the stage; its sections break away at fractions of
+  the stage's distance, each burning away under the dissolve shader with bursts and a ring
+  of bent air, so a restart puts it back whole. Attackers (orange) come at it in waves from
+  the field's edges and strafe it pass after pass, then leave; its fighters (cyan) chase
+  them, or with none near wheel after a mote round the ship; both trade tracers that end in
+  flashes and bursts. Every ship steers (a seek no tighter than its acceleration) and faces
+  where it goes. Once the last section is gone the fleet flies off the field before the
+  station core comes. The `fleet` dial is how many ships.
 - **Sound** (`sound.cc`, `assets/sound/`, `assets/music/`): a table of effects, each
   with its volume, its priority and how far its pitch wanders; the volley and the grazes
   lowest, deaths, the bomb, the egg and a boss's fall highest. The audio module starts a
@@ -331,13 +370,14 @@ state.
 | `src/patterns.cc`, `assets/patterns/` | the library and the runners; the ten patterns |
 | `src/hits.cc`, `src/egg.cc` | what happens when things meet; the death and the restart |
 | `src/bomb.cc`, `src/items.cc` | the bomb; chips, pickups and the magnet |
+| `src/battle.cc` | Orbit's battle: the fleet, the tracers, the capital ship |
 | `src/hud.cc`, `src/fx.cc`, `src/pilot.cc`, `src/stats.cc` | the camera and the screens; particles; the demo and the bot; the reports |
 | `src/main.cc` | the frame loop's config and the game's flags |
 | `shaders/`, `assets/materials/` | the game's shaders (the nebula, the dissolve, their noise; the shimmer, a post shader); the materials that name the first two |
 | `assets/stages/shoreline.stage.json`, `assets/stages/orbit.stage.json`, `assets/maps/` | the stages; Shoreline's ground map and tileset |
 | `assets/ui/arcfire.ui.json` | the HUD and every screen |
 | `assets/CREDITS.md`, `assets/LICENSE-*.txt` | who made what |
-| `tools/make_art.py`, `tools/make_maps.py`, `tools/make_bosses.py`, `tools/make_sounds.py` | copies the vendored art in and draws `assets/made/`; writes the maps; kitbashes the bosses (and draws Orbit's segments and debris) into `assets/generated/`; copies the sounds in and resamples the music |
+| `tools/make_art.py`, `tools/make_maps.py`, `tools/make_bosses.py`, `tools/make_sounds.py` | copies the vendored art in and draws `assets/made/`; writes the maps; kitbashes the bosses (and draws Orbit's segments, debris and capital ship) into `assets/generated/`; copies the sounds in and resamples the music |
 | `tests/` | paths; the stage file, the boss files and the parsers' rules |
 | `docs/` | the PRDs and the performance notebook |
 

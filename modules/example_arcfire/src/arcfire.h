@@ -49,6 +49,9 @@ constexpr i32 Z_GAS = -31, Z_DEEP = -30, Z_HIGH = -20, Z_MAP = -16, Z_CLOUD_SHAD
               Z_BULLET = 40, Z_FX = 50, Z_MARK = 60;
 // The first layer over the shimmer's full-frame pass: the world is below it, the HUD (90 on) above.
 constexpr i32 Z_POST = 70;
+// Orbit's battle, half an orbit away: the capital ship behind the fleet, the tracers over it,
+// all over the gas and the stars and under everything near.
+constexpr i32 Z_CAPITAL = -27, Z_FLEET = -26, Z_TRACER = -25;
 constexpr u32 kMapLayers = 3;    // sea, land, deco
 constexpr f32 kMapScale = 2.0f;  // world units a map pixel
 
@@ -125,6 +128,13 @@ struct Boss     { u32 def; u32 phase; u32 state; u32 clock; f32 s; u32 down; poi
 struct Part     { Handle boss; u32 index; u32 cycle; u32 timer; u32 pad; };
 struct EggBody  { f32 vy; f32 drift; };           // the egg as it falls
 struct Glow     { Handle bullet; };               // the bullet a glow row is under now (fx.cc)
+// The battle over Orbit (battle.cc), all cosmetic: a ship of the fleet (its side; what it
+// is doing; the ticks to its next tracer; its strafing passes, or the row it chases; a
+// phase for its mote; the point it is making for), a tracer (its side, its life), a
+// section of the capital ship (which).
+struct Fleet    { u32 side; u32 state; u32 cooldown; u32 passes; f32 phase; point2 aim; };
+struct Tracer   { u32 side; u32 life; };
+struct Capital  { u32 section; u32 pad; };
 
 // The world row's parts.
 // Easy, Normal and Hard are the difficulties; Stress and Demo are runs of their own.
@@ -147,6 +157,7 @@ struct Dials {
     u32 chain_window;      // ticks after a kill in which the next one adds to the chain (scoring.cc)
     u32 glows;             // a soft dark halo under every enemy bullet (fx.cc): a second sprite each
     u32 shimmer;           // the air bending around big explosions (fx.cc): a full-frame pass over the world
+    u32 fleet;             // ships in Orbit's background battle (battle.cc): cosmetic, a sprite each and their tracers
 };
 struct Stage {
     f32 distance;          // the stage's clock: units scrolled since the stage (or this loop) began
@@ -201,7 +212,7 @@ struct StageNext  { u32 stage; u32 position; }; // scheduled at a stage's end in
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
     g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind, g_shadow_kind, g_boss_kind, g_part_kind,
-    g_boom_kind, g_beam_kind, g_option_kind, g_glow_kind, g_aglow_kind;
+    g_boom_kind, g_beam_kind, g_option_kind, g_glow_kind, g_aglow_kind, g_fleet_kind, g_tracer_kind, g_capital_kind;
 extern u32 g_part_down; // the trigger on a part's health
 // The two bullet kinds: plain bullets, and bullets that run a program (needles, seeds).
 inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
@@ -249,6 +260,7 @@ struct StageDef {
     GroundDef    map_grounds[kMaxGrounds];
     u32          map_ground_count = 0;
     u32          planes = 7;
+    bool         battle = false; // the fleet engagement in the background (Orbit's)
 };
 // Reads a .stage.json. False with `why` filled for a file that does not say a stage.
 bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize why_cap);
@@ -311,7 +323,7 @@ enum Sfx : u32 { SFX_SHOT, SFX_HIT, SFX_PING, SFX_KILL, SFX_KILL_BIG, SFX_BOSS_D
                  SFX_EGG_BREAK, SFX_EGG_OPEN, SFX_EGG_BLOOM, SFX_WARNING, SFX_COUNT };
 
 enum Tex : u32 { TEX_SHIPS, TEX_TILES, TEX_STARS, TEX_NEBULA, TEX_CLOUD, TEX_BULLETS, TEX_DOT, TEX_RING, TEX_SOFT, TEX_SPARK, TEX_EGG,
-                 TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_BEAM, TEX_ITEMS, TEX_BOAT, TEX_DEBRIS, TEX_SEGMENTS, TEX_COUNT };
+                 TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_BEAM, TEX_ITEMS, TEX_BOAT, TEX_DEBRIS, TEX_SEGMENTS, TEX_CAPITAL, TEX_COUNT };
 constexpr u32 kPlaneCount = 6; // planes.cc's: stars, nebula, cloud, the low clouds' shadows, the low clouds, the high wisps
 constexpr u32 kPlaneShader = 1u << 6; // a stage's planes bit: the nebula shader's plane, under the stars
 
@@ -383,6 +395,7 @@ struct Game {
     Handle   boss_alpha[kMaxBosses][2], boss_additive[kMaxBosses][2];
     Handle   boss_dissolve[kMaxBosses];        // asset.material: the hull burning away (shaders/arcfire_dissolve.slang)
     Handle   nebula;                           // asset.material: the nebula plane's (shaders/arcfire_nebula.slang)
+    Handle   capital_dissolve;                 // asset.material: the capital ship's sections burning away
     Handle   nebula_row;                       // its plane row, when the stage has one
     f32      gas_scrolled = 0.0f;              // how far its field has come down
     bool     gas_test = false;                 // --gas: the nebula shader's plane under any stage (a check)
@@ -487,6 +500,10 @@ void   dials_log(const Dials& d);
 Dials  dials_start(Engine& e, const Game& g, Position p);
 const char* position_name(u32 position);
 
+// The battle (battle.cc): the capital ship's sections made for a stage that has the battle
+// (the fleet fills itself in); everything of it gone otherwise.
+void   battle_reset(Engine& e, Game& g);
+
 // Planes (planes.cc).
 void   planes_spawn(Engine& e, Game& g, const Dials& d); // the stage's planes; any before go
 // The ground map, once its asset is Ready: its enemies read into the stage that names it.
@@ -512,7 +529,7 @@ void   fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f3
 void   fx_piece(TickContext& ctx, Game& g, point2 at, Tex tex, rect2 uv, vec2 size, vec2 v, f32 spin, u32 life, i32 layer, f32 fall = 0.0f);
 void   fx_piece_of(TickContext& ctx, Handle material, point2 at, rect2 uv, vec2 size, vec2 v, f32 spin, u32 life, i32 layer, f32 fall = 0.0f);
 // An explosion: Kenney's burst frames as a flipbook (a cosmetic row that goes when it ends).
-void   fx_boom(TickContext& ctx, Game& g, point2 at, f32 size);
+void   fx_boom(TickContext& ctx, Game& g, point2 at, f32 size, i32 layer = Z_FX);
 // The three sizes of the game's explosions, each with its sparks and its shake: popcorn; a
 // ground row or a boss's part; a boss (its flash of the screen too, so main thread only).
 enum class Blast : u32 { Small, Medium, Large };

@@ -94,6 +94,7 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
     snprintf(out.name, sizeof out.name, "%s", json_string(json_get(doc, root, "name"), "Stage"));
     out.speed = (f32)json_number(json_get(doc, root, "speed"), 1.0);
     snprintf(out.map, sizeof out.map, "%s", json_string(json_get(doc, root, "map"), ""));
+    out.battle = json_bool(json_get(doc, root, "battle"), false);
     if (const JsonValue* planes = json_get(doc, root, "planes")) {
         out.planes = 0;
         // By name; the low clouds bring their shadows with them (planes.cc's order).

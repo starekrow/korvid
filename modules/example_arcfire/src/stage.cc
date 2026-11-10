@@ -122,6 +122,7 @@ void stage_enter(TickContext& ctx, Game& g, u32 index, const Dials& d) {
     g.stage_at = index;
     ground_map_show(ctx, g, g.stage.map[0] != 0);
     planes_spawn(e, g, d);
+    battle_reset(e, g);
     g.ground_offset = 0.0f;
     KV_INFO("arcfire", "stage %s shown", g.stage.name);
 }

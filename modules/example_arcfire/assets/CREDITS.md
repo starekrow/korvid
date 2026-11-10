@@ -164,6 +164,7 @@ files without code changes, as long as each part's cell stays where its `.boss.j
 | `generated/gunship_left_parts.png`, `generated/gunship_right_parts.png` | their parts, 24 px cells: the pack's two turret tiles as they are; the bow gun shuttered and open, drawn by the script |
 | `generated/station.png`, `generated/station_parts.png` | the station core, 128 x 128, rings on spokes with sockets, and its parts (shield emitter, weapon mount armored and open, the core armored and open): drawn by the script in the pack's palette, no pack pixels |
 | `generated/segments.png` | Orbit's station segments, two 96 x 48 cells (a truss with two turret pads, a module with a window band and solar vanes): drawn by the script, with the pack's vent tile once on the module |
+| `generated/capital.png` | the capital ship in Orbit's background battle, 224 x 40, broadside, four sections of 56 x 40: drawn by the script in the pack's palette and style, with the pack's vent tile once |
 | `generated/debris.png` | Orbit's wreckage, three 24 px cells: drawn by the script in the pack's palette, no pack pixels |
 | `generated/battleship_parts.png` | its parts, 24 px cells: a main gun, the pack's two turret tiles as anti-air mounts, a missile bay shut and open, a deck hatch shut and open, the bridge armored and open, the rest drawn by the script in the pack's palette |
 
@@ -183,6 +184,7 @@ BulletML patterns (`patterns/*.xml`) are written by hand for the game. No patter
 adapted from another source.
 
 The shaders (`shaders/*.slang`, outside `assets/`: the nebula, the dissolve, their value
-noise, and the shimmer) and the materials that name them (`materials/*.material.json`) are written for the
-game (2026-11-10, Korvid's, Apache 2.0). The noise is a plain value noise summed over
+noise, and the shimmer) and the materials that name them (`materials/*.material.json`:
+the nebula, each boss's dissolve, the capital ship's) are written for the game
+(2026-11-10, Korvid's, Apache 2.0). The noise is a plain value noise summed over
 octaves, its hash the common fract-and-dot idiom; no shader is adapted from another source.

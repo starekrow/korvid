@@ -52,8 +52,8 @@ Handle fx_boom_clip(Engine& e) {
     return anim_create(e, desc);
 }
 
-void fx_boom(TickContext& ctx, Game& g, point2 at, f32 size) {
-    Sprite s = sprite_of(g, TEX_TILES, tile_uv(6, 0), vec2{size, size}, Z_FX);
+void fx_boom(TickContext& ctx, Game& g, point2 at, f32 size, i32 layer) {
+    Sprite s = sprite_of(g, TEX_TILES, tile_uv(6, 0), vec2{size, size}, layer);
     ctx.spawn_later(g_boom_kind, transform2_at(at, g.fx.range(0.0f, 2.0f * KV_PI)), s, anim_player(g.boom_clip));
 }
 

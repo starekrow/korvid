@@ -27,7 +27,9 @@
 // carrier's core has opened; the battleship fought until it dies or leaves. Its weapons by
 // the stage's clock: Spread on the opening's power items, the Beam at the islands, Storm
 // from the airfield on, Lance for the battleship; the options where the bunkers drop them.
-// The stage's end mark quits it. The bot (--autoplay, --stress) is a Sim system; its override
+// The stage's end mark quits it. Orbit's demo (--demo --stage orbit) has no script: the
+// rule throughout, its own weapons by the stage's clock, a bomb when the station's core
+// opens. The bot (--autoplay, --stress) is a Sim system; its override
 // lands on the next tick's sample.
 #include "arcfire.h"
 #include "korvid/frameloop/frameloop.h"
@@ -69,6 +71,11 @@ constexpr u32 bit(u32 weapon) { return 1u << weapon; }
 struct Want { f32 from; u32 weapons; };
 constinit const Want k_demo_wants[] = {
     {0.0f, bit(WeaponSpread)}, {4300.0f, bit(WeaponBeam)}, {5800.0f, bit(WeaponStorm)}, {14000.0f, bit(WeaponLance)},
+};
+// Orbit's (--demo --stage orbit): Spread through the opening's popcorn and debris, Storm
+// for the segments' turrets and the gunships, Lance for the station core.
+constinit const Want k_orbit_wants[] = {
+    {0.0f, bit(WeaponSpread)}, {3000.0f, bit(WeaponStorm)}, {15000.0f, bit(WeaponLance)},
 };
 
 // What the steering decided: the stick, focus, and whether the hitbox is about to be hit
@@ -276,6 +283,25 @@ void demo(TickContext& ctx) {
     Engine& e = *ctx.engine;
     u64 t = ctx.tick;
     release_all(e);
+    if (g.stage_at != 0) { // Orbit's demo: no script, the rule throughout, a bomb when the core opens
+        input_action_override(e, "shot", true);
+        if (!g.demo_core_bomb) {
+            const Table* bt = engine_table(e, g_boss_kind);
+            Span<const Boss> bb = bt->rows_of<Boss>();
+            for (u32 i = 0; i < bt->rows(); ++i)
+                if (bt->is_alive(i) && !strcmp(g.bosses[bb[i].def].name, "station") && bb[i].phase + 1 == g.bosses[bb[i].def].phase_count &&
+                    bb[i].state == (u32)BossState::Holding) {
+                    input_action_override(e, "bomb", true);
+                    g.demo_core_bomb = true;
+                }
+        }
+        const Stage* os = engine_table(e, g_world_kind)->get<Stage>(g.world);
+        u32 want = bit(WeaponSpread);
+        for (const Want& w : k_orbit_wants)
+            if (os && stage_clock(*os) >= w.from) want = w.weapons;
+        fly(e, steer(e, g, kClear, want));
+        return;
+    }
     const Run* r = engine_table(e, g_world_kind)->get<Run>(g.world);
     bool standing = t >= kStandFrom && r && r->deaths == 0; // holding fire, so the enemies live to shoot
     if (!standing) input_action_override(e, "shot", true);

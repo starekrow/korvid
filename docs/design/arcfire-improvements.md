@@ -51,6 +51,22 @@ that finds an engine limit adds a line here.
   five-minute demo in a little over one, hashes and all; a frame loop option would make it
   a flag.
 
+## Found in slice 6
+
+- **A BulletML runner has two top actions.** `core_finale` wanted three things at once
+  (a spiral, rings, aimed fans); two of them had to share an action. A pattern of the
+  reference's with `top1`..`top3` would not load. Raising it is a field in the runner
+  (288 bytes now, every enemy carries one); one pattern asked.
+- **Reading a row after destroying it.** The battle read a fleet ship's side for its count
+  after `destroy`, and a dev build's freed-row fill made that a bus error, at once: the
+  fill doing its job. Release builds would have read stale data quietly. A `destroy` that
+  returns nothing to read is the way it is; the note is for the next system that counts
+  as it culls.
+- **Cosmetic kinds outlive a fresh sim.** `engine_sim_reset` empties the sim's kinds; the
+  planes, the map's tiles, Orbit's battle and the segments' pictures are the game's to
+  clear (arcfire does it when a stage is entered). Right for scenery a title shows across
+  runs; a `KindDesc` flag saying "cleared with the sim" would save a game the list.
+
 ## Fixed
 
 - **A pass over the whole frame** (slice 6, M2). `renderer_post_layer(r, layer, shader)`:

@@ -21,7 +21,7 @@ namespace kv::arcfire {
 
 constinit u32 g_world_kind = 0, g_plane_kind = 0, g_ship_kind = 0, g_ring_kind = 0, g_mark_kind = 0, g_shot_kind = 0, g_air_kind = 0,
               g_ground_kind = 0, g_bullet_kind = 0, g_active_kind = 0, g_particle_kind = 0, g_egg_kind = 0, g_shell_kind = 0,
-              g_item_kind = 0, g_formation_kind = 0, g_shadow_kind = 0, g_boss_kind = 0, g_part_kind = 0, g_boom_kind = 0, g_beam_kind = 0, g_option_kind = 0, g_glow_kind = 0, g_aglow_kind = 0;
+              g_item_kind = 0, g_formation_kind = 0, g_shadow_kind = 0, g_boss_kind = 0, g_part_kind = 0, g_boom_kind = 0, g_beam_kind = 0, g_option_kind = 0, g_glow_kind = 0, g_aglow_kind = 0, g_fleet_kind = 0, g_tracer_kind = 0, g_capital_kind = 0;
 constinit u32 g_part_down = 0;
 
 // The systems and handlers, each in the file of its part.
@@ -71,6 +71,7 @@ void on_ui(TickContext&, Span<const UiEvent>);
 void on_covered(TickContext&, Span<const UiCovered>);
 void camera(TickContext&);
 void shimmer(TickContext&);
+void battle(TickContext&);
 void hud(TickContext&);
 void stats_mark(TickContext&);   // stats.cc
 void stats(TickContext&);
@@ -108,7 +109,7 @@ constinit const FieldDesc k_eggbody_fields[]  = {KV_FIELDS(EggBody, vy, drift)};
 constinit const FieldDesc k_glow_fields[]     = {KV_FIELDS(Glow, bullet)};
 constinit const FieldDesc k_dials_fields[]    = {KV_FIELDS(Dials, position, rank, bullet_speed, formation_count, formation_spacing, particles,
                                                            plane_density, enemy_health, bot, invulnerable, loops, scroll_rows, weapon, power, options, chain_window),
-                                                 KV_FIELD(Dials, glows), KV_FIELD(Dials, shimmer)}; // past KV_FIELDS' sixteen
+                                                 KV_FIELD(Dials, glows), KV_FIELD(Dials, shimmer), KV_FIELD(Dials, fleet)}; // past KV_FIELDS' sixteen
 constinit const FieldDesc k_stage_fields[]    = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, ground_cursor, base, held, waiting, round_up, index)};
 constinit const FieldDesc k_run_fields[]      = {KV_FIELDS(Run, score, stage_score, next_extend, eggs, restarts, epoch, kills, grazes, deaths, bombs, chips, chain, chain_left, chain_best,
                                                            bombs_used)};
@@ -116,6 +117,9 @@ constinit const FieldDesc k_eggstate_fields[] = {KV_FIELDS(EggState, step, t, at
 constinit const FieldDesc k_chance_fields[]   = {KV_FIELDS(Chance, state, inc)};
 constinit const FieldDesc k_boss_fields[]     = {KV_FIELDS(Boss, def, phase, state, clock, s, down, hold)};
 constinit const FieldDesc k_part_fields[]     = {KV_FIELDS(Part, boss, index, cycle, timer, pad)};
+constinit const FieldDesc k_fleet_fields[]    = {KV_FIELDS(Fleet, side, state, cooldown, passes, phase, aim)};
+constinit const FieldDesc k_tracer_fields[]   = {KV_FIELDS(Tracer, side, life)};
+constinit const FieldDesc k_capital_fields[]  = {KV_FIELDS(Capital, section, pad)};
 
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Velocity, k_velocity_fields), KV_COMPONENT(Plane, k_plane_fields),   KV_COMPONENT(Ship, k_ship_fields),
@@ -127,6 +131,7 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Chance, k_chance_fields),       KV_COMPONENT(Runner, k_runner_fields), KV_COMPONENT(Formation, k_formation_fields),
     KV_COMPONENT(Item, k_item_fields),         KV_COMPONENT(Boss, k_boss_fields),     KV_COMPONENT(Part, k_part_fields),
     KV_COMPONENT(Beam, k_beam_fields),         KV_COMPONENT(Option, k_option_fields),
+    KV_COMPONENT(Fleet, k_fleet_fields),       KV_COMPONENT(Tracer, k_tracer_fields), KV_COMPONENT(Capital, k_capital_fields),
 };
 
 // ---- kinds ---------------------------------------------------------------------------------------
@@ -165,6 +170,10 @@ constinit const KindDesc k_kinds[] = {
     // The bullets' glows, slot for slot with the two bullet kinds (fx.cc).
     {.name = ".glow",     .components = "Transform2, Sprite, Glow", .capacity = 65536, .id = &g_glow_kind, .cosmetic = true},
     {.name = ".aglow",    .components = "Transform2, Sprite, Glow", .capacity = 8192, .id = &g_aglow_kind, .cosmetic = true},
+    // Orbit's battle (battle.cc): never the sim's.
+    {.name = ".fleet",    .components = "Transform2, Sprite, Velocity, Fleet", .capacity = 16384, .id = &g_fleet_kind, .cosmetic = true},
+    {.name = ".tracer",   .components = "Transform2, Sprite, Velocity, Tracer", .capacity = 16384, .id = &g_tracer_kind, .cosmetic = true},
+    {.name = ".capital",  .components = "Transform2, Sprite, Capital", .capacity = 8, .id = &g_capital_kind, .cosmetic = true},
 };
 
 // A part's death is its health crossing below one: delivered as a StateEdge the next tick.
@@ -217,7 +226,7 @@ constinit const InputActionDesc k_actions[] = {
 
 constinit const SystemDesc k_systems[] = {
     {.name = ".demo", .phase = Phase::Input, .fn = demo, .before = "input.sample", .main_thread = true},
-    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, .particle, .shadow, .boom, .air, .ground, .bullet, .active, .shot, .item, .formation, .boss, .part, tilemap.tile, tilemap.animtile, audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, .particle, .shadow, .boom, .fleet, .tracer, .capital, .air, .ground, .bullet, .active, .shot, .item, .formation, .boss, .part, tilemap.tile, tilemap.animtile, audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
     // The chain's clock, the extends, a new round's dials: before the sim moves anything.
     {.name = ".scoring", .phase = Phase::PreSim, .fn = scoring, .writes = ".world.Run, .world.Stage, .world.Dials, audio.commands", .after = ".boot",
      .main_thread = true},
@@ -261,6 +270,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".items", .phase = Phase::Sim, .fn = items, .reads = ".ship.Transform2, .ship.Ship", .writes = ".item"},
     {.name = ".glows", .phase = Phase::Sim, .fn = glows, .reads = ".world.Dials, .bullet.Transform2, .bullet.Sprite, .active.Transform2, .active.Sprite",
      .writes = ".glow, .aglow", .after = ".bullets", .state = StateUse::None},
+    {.name = ".battle", .phase = Phase::Sim, .fn = battle, .reads = ".world.Stage, .world.Dials", .writes = ".fleet, .tracer, .capital", .after = ".scroll"},
     {.name = ".particles", .phase = Phase::Sim, .fn = particles, .writes = ".particle", .state = StateUse::None},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true,
      .runs = RunWhen::Always},
@@ -316,6 +326,7 @@ constinit const char* const k_texture_paths[TEX_COUNT] = {
     "example_arcfire/made/spark.png",   "example_arcfire/made/egg.png",     "example_arcfire/made/clouds_low.png",
     "example_arcfire/made/clouds_high.png", "example_arcfire/made/beam.png",    "example_arcfire/made/items.png",
     "example_arcfire/generated/boat.png", "example_arcfire/generated/debris.png", "example_arcfire/generated/segments.png",
+    "example_arcfire/generated/capital.png",
 };
 
 Handle material_of(Engine& e, Handle texture, BlendMode blend) {
@@ -366,6 +377,7 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     }
     bosses_load(e, *g);
     g->nebula = asset_load_material(e, "example_arcfire/materials/nebula.material.json");
+    g->capital_dissolve = asset_load_material(e, "example_arcfire/materials/capital_dissolve.material.json");
     if (frameloop_flag(e, "--gas")) g->gas_test = true;
     sounds_load(e, *g);
     g->boom_clip = fx_boom_clip(e);
