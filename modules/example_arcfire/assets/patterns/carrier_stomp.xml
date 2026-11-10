@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- carrier_stomp: the carrier out of time. Closing rings: a ring of twenty, then a slower
+     ring turned into its gaps, so the two close into one; eight times, the first of each
+     pair a little off the ship. Every part still standing fires it at once. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>8</times>
+      <action>
+        <fire><direction type="aim">$rand * 18</direction><speed>2.4</speed><bullet/></fire>
+        <repeat><times>19</times>
+          <action><fire><direction type="sequence">18</direction><speed>2.4</speed><bullet/></fire></action>
+        </repeat>
+        <wait>5</wait>
+        <fire><direction type="sequence">27</direction><speed>1.9</speed><bullet/></fire>
+        <repeat><times>19</times>
+          <action><fire><direction type="sequence">18</direction><speed>1.9</speed><bullet/></fire></action>
+        </repeat>
+        <wait>14</wait>
+      </action>
+    </repeat>
+  </action>
+</bulletml>

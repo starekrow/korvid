@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<!-- core_burst: the battleship's bridge, its core. A two-armed spiral and rings at once:
+     the spiral turns steadily while a ring goes out every forty ticks. Rank tightens the
+     spiral and thickens the rings. -->
+<bulletml type="vertical">
+  <action label="top1">
+    <repeat><times>120</times>
+      <action>
+        <fire><direction type="sequence">11 - $rank * 3</direction><speed>2.0</speed><bullet/></fire>
+        <fire><direction type="sequence">180</direction><speed>2.0</speed><bullet/></fire>
+        <wait>4</wait>
+      </action>
+    </repeat>
+  </action>
+  <action label="top2">
+    <repeat><times>12</times>
+      <action>
+        <wait>40</wait>
+        <fire><direction type="aim">0</direction><speed>1.6</speed><bullet/></fire>
+        <repeat><times>15 + $rank * 8</times>
+          <action><fire><direction type="sequence">360 / (16 + $rank * 8)</direction><speed>1.6</speed><bullet/></fire></action>
+        </repeat>
+      </action>
+    </repeat>
+  </action>
+</bulletml>

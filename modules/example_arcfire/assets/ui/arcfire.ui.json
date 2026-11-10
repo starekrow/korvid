@@ -16,7 +16,9 @@
       "panel": "#0a0c18ff",
       "edge": "#262c58ff",
       "shade": "#00000aa0",
-      "black": "#000000ff"
+      "black": "#000000ff",
+      "warn": "#ff20103a",
+      "red": "#ff5040"
     },
     "images": {
       "egg": { "texture": "example_arcfire/made/eggs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 },
@@ -78,6 +80,10 @@
             { "type": "label", "name": "title", "text": "OUT OF EGGS", "color": "gold", "font_scale": 2 },
             { "type": "label", "name": "hint", "text": "The stage begins again", "color": "dim" } ] } ] },
     "clear": {
-      "type": "label", "name": "clear", "anchor": "center", "offset": [0, -80], "text": "{wave}STAGE CLEAR{/wave}", "color": "gold", "font_scale": 3 }
+      "type": "label", "name": "clear", "anchor": "center", "offset": [0, -80], "text": "{wave}STAGE CLEAR{/wave}", "color": "gold", "font_scale": 3 },
+    "stomp": {
+      "type": "panel", "name": "stomp", "fill": "warn", "anchor": "center", "size": [540, "fill"],
+      "children": [
+        { "type": "label", "name": "warning", "anchor": "center", "offset": [0, 40], "text": "{shake}WARNING{/shake}", "color": "red", "font_scale": 3 } ] }
   }
 }

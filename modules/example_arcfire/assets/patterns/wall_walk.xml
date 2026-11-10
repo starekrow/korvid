@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<!-- wall_walk: the battleship out of time. Its guns walk a wall down the field: arcs of
+     bullets two degrees apart across the whole lower half, no gap in them, one after
+     another. Only a bomb, or the shell of a new ship, gets through. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>10</times>
+      <action>
+        <fire><direction type="absolute">96 + $rand * 2</direction><speed>1.5</speed><bullet/></fire>
+        <repeat><times>84</times>
+          <action><fire><direction type="sequence">2</direction><speed>1.5</speed><bullet/></fire></action>
+        </repeat>
+        <wait>30</wait>
+      </action>
+    </repeat>
+  </action>
+</bulletml>

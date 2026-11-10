@@ -61,6 +61,22 @@ void hud_boss(Engine& e, Game& g, const char* title, i32 hp, i32 total) {
     ui_model_set_int(e, "boss_max", total > 0 ? total : 1);
 }
 
+// A boss's stomp: the field tinted red and a warning, while it lasts.
+void hud_stomp(Engine& e, Game& g, bool on) {
+    if (on && g.stomp_screen.is_null()) {
+        UiOpen o;
+        o.layer = 92;
+        o.input = false;
+        o.enter.fx = UiFx::Fade;
+        g.stomp_screen = ui_open(e, g.ui, "stomp", o);
+    } else if (!on && !g.stomp_screen.is_null()) {
+        UiMotion out;
+        out.fx = UiFx::Fade;
+        ui_close_with(e, g.stomp_screen, out);
+        g.stomp_screen = Handle{};
+    }
+}
+
 void hud_stage_clear(Engine& e, Game& g) {
     if (g.clear_label.is_null()) {
         UiOpen o;
@@ -155,6 +171,9 @@ void hud(TickContext& ctx) {
     for (u32 i = 0; up && i < pt->rows(); ++i)
         if (pt->is_alive(i) && parts[i].boss == up_handle && part_hp[i].hp > 0) hp += part_hp[i].hp;
     hud_boss(e, g, up ? up->title : nullptr, hp, up ? up->total : 0);
+    bool stomping = false;
+    for (u32 i = 0; i < bt->rows(); ++i) stomping = stomping || (bt->is_alive(i) && boss_rows[i].state == (u32)BossState::Stomping);
+    hud_stomp(e, g, stomping);
     if (g.clear_ticks && !ctx.paused && --g.clear_ticks == 0) {
         UiMotion out;
         out.fx = UiFx::Fade;

@@ -28,8 +28,13 @@ bool resolve_patterns(Game& g, char* why, usize cap) {
         GroundDef& gd = g.stage.map_grounds[i];
         if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "the map's enemy: no pattern \"%s\"", gd.pattern); return false; }
     }
-    for (u32 b = 0; b < g.boss_count; ++b)
-        for (u32 i = 0; i < g.bosses[b].part_count; ++i) {
+    for (u32 b = 0; b < g.boss_count; ++b) {
+        BossDef& def = g.bosses[b];
+        if (def.stomp[0] && (def.stomp_entry = bml_find(g.lib, def.stomp)) == KV_BML_NONE) {
+            snprintf(why, cap, "boss %s: no stomp pattern \"%s\"", def.name, def.stomp);
+            return false;
+        }
+        for (u32 i = 0; i < def.part_count; ++i) {
             PartDef& p = g.bosses[b].parts[i];
             for (u32 k = 0; k < p.pattern_count; ++k)
                 if ((p.entries[k] = bml_find(g.lib, p.patterns[k])) == KV_BML_NONE) {
@@ -37,6 +42,7 @@ bool resolve_patterns(Game& g, char* why, usize cap) {
                     return false;
                 }
         }
+    }
     if (g.bench[0] && (g.bench_entry = bml_find(g.lib, g.bench)) == KV_BML_NONE) { snprintf(why, cap, "--bench: no pattern \"%s\"", g.bench); return false; }
     return true;
 }

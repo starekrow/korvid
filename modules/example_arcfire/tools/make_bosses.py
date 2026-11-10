@@ -170,12 +170,140 @@ def carrier_parts(sheet):
     return im
 
 
+def battleship(sheet):
+    """224 x 96: a battleship broadside to the player, bow right. Two main guns on the
+    centre line, four anti-air mounts at its corners, a missile bay aft of the bridge, two
+    deck hatches between the guns and the bridge, the bridge (its core) amidships."""
+    w, h = 224, 96
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    # A bow wave and a wake on the water, the pack's white.
+    for x, y in ((218, 44), (220, 48), (218, 52), (2, 40), (0, 46), (2, 56), (4, 50)):
+        d.rectangle((x - 2, y - 1, x + 2, y + 1), fill=WHITE)
+    outline_fill(d, [(30, 12), (188, 12), (218, 48), (188, 84), (30, 84), (8, 72), (8, 24)], GREY)
+    # The waterline: an orange band along both sides, the pack's enemy colour.
+    d.rectangle((30, 14, 186, 17), fill=ORANGE)
+    d.rectangle((30, 79, 186, 82), fill=ORANGE)
+    d.line((30, 17, 186, 17), fill=ORANGE_DARK)
+    d.line((30, 82, 186, 82), fill=ORANGE_DARK)
+    # The deck: a light walkway down the middle, planks across it.
+    d.rectangle((20, 42, 200, 54), fill=LIGHT)
+    for x in range(26, 198, 8):
+        d.line((x, 42, x, 54), fill=GREY)
+    # Panel seams across the hull.
+    for x in (52, 76, 100, 124, 148, 172):
+        d.line((x, 20, x, 38), fill=OUTLINE)
+        d.line((x, 58, x, 76), fill=OUTLINE)
+    # Funnels aft: the pack's vent tile, twice.
+    vent = tile(sheet, 4, 1)
+    im.alpha_composite(vent, (14, 24))
+    im.alpha_composite(vent.transpose(Image.FLIP_TOP_BOTTOM), (14, 56))
+    # Sockets: main guns, anti-air mounts, the missile bay, the deck hatches, the bridge.
+    for cx in (64, 160):
+        socket(d, cx, 48, 10)
+    for cx, cy in ((40, 28), (184, 28), (40, 68), (184, 68)):
+        socket(d, cx, cy, 7)
+    d.rectangle((102, 62, 122, 78), fill=OUTLINE)
+    d.rectangle((104, 64, 120, 76), fill=DEEP)
+    for cx in (88, 136):
+        d.rectangle((cx - 9, 39, cx + 9, 57), fill=OUTLINE)
+        d.rectangle((cx - 7, 41, cx + 7, 55), fill=DEEP)
+    d.rectangle((99, 19, 125, 41), fill=OUTLINE)
+    d.rectangle((101, 21, 123, 39), fill=DEEP)
+    return im
+
+
+def main_gun():
+    im = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for x in (8, 13):  # two barrels, down the screen
+        d.rectangle((x, 12, x + 3, 23), fill=OUTLINE)
+        d.rectangle((x + 1, 13, x + 2, 22), fill=LIGHT)
+    d.ellipse((2, 1, 21, 18), fill=OUTLINE)
+    d.ellipse((4, 3, 19, 16), fill=GREY)
+    d.rectangle((6, 6, 17, 13), fill=ORANGE)
+    d.line((6, 13, 17, 13), fill=ORANGE_DARK)
+    d.line((5, 7, 9, 3), fill=LIGHT)
+    return im
+
+
+def missile_bay(open_):
+    im = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rectangle((3, 5, 20, 18), fill=OUTLINE)
+    if open_:
+        d.rectangle((5, 7, 18, 16), fill=DEEP)
+        for x in (7, 11, 15):  # three missiles' heads
+            d.rectangle((x, 9, x + 1, 14), fill=WHITE)
+            d.point((x, 9), fill=ORANGE)
+            d.point((x + 1, 9), fill=ORANGE)
+    else:
+        d.rectangle((5, 7, 18, 16), fill=GREY)
+        for y in (9, 12, 15):
+            d.line((5, y, 18, y), fill=OUTLINE)
+        d.line((5, 7, 18, 7), fill=LIGHT)
+    return im
+
+
+def hatch(open_):
+    im = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rectangle((3, 3, 20, 20), fill=OUTLINE)
+    if open_:
+        d.rectangle((5, 5, 18, 18), fill=DEEP)
+        d.ellipse((7, 7, 16, 16), fill=CYAN_DARK)  # a gun come up through the deck
+        d.rectangle((10, 12, 13, 20), fill=GREY)
+        d.ellipse((9, 9, 14, 14), fill=CYAN)
+    else:
+        d.rectangle((5, 5, 18, 18), fill=GREY)
+        d.line((5, 5, 18, 18), fill=OUTLINE)
+        d.line((18, 5, 5, 18), fill=OUTLINE)
+        d.line((5, 5, 18, 5), fill=LIGHT)
+    return im
+
+
+def bridge(open_):
+    im = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.rectangle((1, 2, 22, 21), fill=OUTLINE)
+    d.rectangle((3, 4, 20, 19), fill=GREY)
+    d.rectangle((3, 4, 20, 5), fill=LIGHT)
+    if open_:
+        d.rectangle((5, 8, 18, 15), fill=CYAN_DARK)  # the core behind the glass
+        d.rectangle((7, 10, 16, 13), fill=CYAN)
+        d.rectangle((10, 11, 13, 12), fill=WHITE)
+    else:
+        for y in (9, 12, 15):  # shutters down
+            d.line((5, y, 18, y), fill=OUTLINE)
+        d.point((11, 8), fill=CYAN)
+    return im
+
+
+def battleship_parts(sheet):
+    """4 x 3 cells of 24 px: (0,0) main gun, (1,0) and (2,0) the pack's turrets as
+    anti-air mounts, (3,0) missile bay shut, (0,1) missile bay open, (1,1) deck hatch
+    shut, (2,1) deck hatch open, (3,1) bridge armored, (0,2) bridge open."""
+    im = Image.new("RGBA", (CELL * 4, CELL * 3), (0, 0, 0, 0))
+    im.alpha_composite(main_gun(), (0, 0))
+    im.alpha_composite(turret(sheet, 6, 1), (CELL + 4, 4))
+    im.alpha_composite(turret(sheet, 5, 1), (CELL * 2 + 4, 4))
+    im.alpha_composite(missile_bay(False), (CELL * 3, 0))
+    im.alpha_composite(missile_bay(True), (0, CELL))
+    im.alpha_composite(hatch(False), (CELL, CELL))
+    im.alpha_composite(hatch(True), (CELL * 2, CELL))
+    im.alpha_composite(bridge(False), (CELL * 3, CELL))
+    im.alpha_composite(bridge(True), (0, CELL * 2))
+    return im
+
+
 def main():
     sheet = Image.open(ASSETS / "kenney" / "tiles.png").convert("RGBA")
     OUT.mkdir(parents=True, exist_ok=True)
     carrier(sheet).save(OUT / "carrier.png")
     carrier_parts(sheet).save(OUT / "carrier_parts.png")
-    print("generated/carrier.png, generated/carrier_parts.png")
+    battleship(sheet).save(OUT / "battleship.png")
+    battleship_parts(sheet).save(OUT / "battleship_parts.png")
+    print("generated/: carrier.png, carrier_parts.png, battleship.png, battleship_parts.png")
 
 
 if __name__ == "__main__":

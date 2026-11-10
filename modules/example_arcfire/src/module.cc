@@ -3,6 +3,7 @@
 // and its stage, and the sprite helpers every file draws with. The game itself is in the
 // files the tables below name.
 #include "arcfire.h"
+#include "korvid/anim/player.h"
 #include "korvid/asset/blob.h"
 #include "korvid/asset/material.h"
 #include "korvid/asset/scope.h"
@@ -18,7 +19,7 @@ namespace kv::arcfire {
 
 constinit u32 g_world_kind = 0, g_plane_kind = 0, g_ship_kind = 0, g_ring_kind = 0, g_mark_kind = 0, g_shot_kind = 0, g_air_kind = 0,
               g_ground_kind = 0, g_bullet_kind = 0, g_active_kind = 0, g_particle_kind = 0, g_egg_kind = 0, g_shell_kind = 0,
-              g_item_kind = 0, g_formation_kind = 0, g_shadow_kind = 0, g_boss_kind = 0, g_part_kind = 0;
+              g_item_kind = 0, g_formation_kind = 0, g_shadow_kind = 0, g_boss_kind = 0, g_part_kind = 0, g_boom_kind = 0;
 constinit u32 g_part_down = 0;
 
 // The systems and handlers, each in the file of its part.
@@ -44,6 +45,7 @@ void on_pickup(TickContext&, Span<const Pickup>);
 void bomb(TickContext&);         // bomb.cc
 void on_bomb(TickContext&, Span<const Bombed>);
 void on_spawned(TickContext&, Span<const Spawned>); // fx.cc: shadows
+void on_boom_done(TickContext&, Span<const AnimFinished>);
 void egg(TickContext&);          // egg.cc
 void on_ship_died(TickContext&, Span<const ShipDied>);
 void on_overlap(TickContext&, Span<const OverlapBegin>); // hits.cc
@@ -66,7 +68,7 @@ namespace {
 
 constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, v)};
 constinit const FieldDesc k_plane_fields[]    = {KV_FIELDS(Plane, rate, row, col, rows)};
-constinit const FieldDesc k_ship_fields[]     = {KV_FIELDS(Ship, cooldown, live, focus, shots, guard)};
+constinit const FieldDesc k_ship_fields[]     = {KV_FIELDS(Ship, cooldown, live, focus, shots, guard, died)};
 constinit const FieldDesc k_formation_fields[] = {KV_FIELDS(Formation, count, killed, gone, pad)};
 constinit const FieldDesc k_item_fields[]     = {KV_FIELDS(Item, kind, value, life, pad)};
 constinit const FieldDesc k_shot_fields[]     = {KV_FIELDS(Shot, damage, spent)};
@@ -134,6 +136,8 @@ constinit const KindDesc k_kinds[] = {
     // A boss's hull, and its parts: children of the hull or of each other (boss.cc).
     {.name = ".boss",     .components = "Transform2, Sprite, Collider2, Boss", .capacity = 2, .id = &g_boss_kind},
     {.name = ".part",     .components = "Transform2, Local2, Parent, Sprite, Collider2, Health, Emitter, Runner, Part", .capacity = 256, .id = &g_part_kind},
+    // Explosions: a flipbook each, gone when it has played (fx.cc).
+    {.name = ".boom",     .components = "Transform2, Sprite, AnimPlayer", .capacity = 512, .id = &g_boom_kind, .cosmetic = true},
 };
 
 // A part's death is its health crossing below one: delivered as a StateEdge the next tick.
@@ -194,8 +198,8 @@ constinit const SystemDesc k_systems[] = {
      .writes = ".ship.Transform2, .ship.Ship, .ship.Sprite, .shot, .ring.Sprite, .mark.Sprite"},
     {.name = ".shots", .phase = Phase::Sim, .fn = shots, .reads = ".shot.Velocity", .writes = ".shot.Transform2", .after = ".control", .state = StateUse::None},
     {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage, .world.Run, .world.Dials", .writes = ".air, .ground, .formation", .state = StateUse::Read},
-    {.name = ".bosses", .phase = Phase::Sim, .fn = bosses, .reads = ".world.Run, .world.Dials", .writes = ".boss, .part, .formation",
-     .after = ".stage, .enemies", .before = ".patterns", .state = StateUse::Read},
+    {.name = ".bosses", .phase = Phase::Sim, .fn = bosses, .reads = ".world.Run, .world.Dials, .world.EggState", .writes = ".boss, .part, .formation",
+     .after = ".stage, .enemies", .before = ".patterns", .main_thread = true},
     // The active bullets steer before they fly; the enemies' patterns run after
     // collision.compose, which places a boss's parts this tick and comes after every
     // writer of a transform (the active bullets' among them).
@@ -228,7 +232,8 @@ constinit const HandlerDesc k_handlers[] = {
      .writes = ".air.Health, .ground.Health, .shot.Shot, .part.Health"},
     {.name = ".on_bomb", KV_ON(Bombed, on_bomb), .reads = ".air.Transform2, .ground.Transform2, .air.Mover, .part.Transform2, .part.Part, .boss.Boss",
      .writes = ".air.Health, .ground.Health, .part.Health", .after = ".on_shot_hit"},
-    {.name = ".on_part_down", KV_ON(StateEdge, on_part_down), .reads = ".world.Dials, .part.Part, .part.Transform2, .boss.Transform2", .writes = ".boss.Boss"},
+    {.name = ".on_part_down", KV_ON(StateEdge, on_part_down), .reads = ".world.Dials, .part.Part, .part.Transform2, .bullet, .active", .writes = ".boss.Boss"},
+    {.name = ".on_boom_done", KV_ON(AnimFinished, on_boom_done)},
     {.name = ".on_bullet_hit", KV_ON(BulletHit, on_bullet_hit), .reads = ".world.Dials",
      .writes = ".bullet.Bullet, .active.Bullet, .world.Run, .ship.Ship"},
     {.name = ".on_rammed", KV_ON(Rammed, on_rammed), .reads = ".world.Dials", .writes = ".ship.Ship", .after = ".on_bullet_hit"},
@@ -280,6 +285,7 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
         g->additive[i] = material_of(e, g->textures[i], BlendMode::Additive);
     }
     bosses_load(e, *g);
+    g->boom_clip = fx_boom_clip(e);
     // The stage comes from its file; the sim holds until it has (stage.cc, boot), so how
     // long the disk takes never reaches the state.
     g->stage_blob = asset_load_blob(e, "example_arcfire/stages/shoreline.stage.json");

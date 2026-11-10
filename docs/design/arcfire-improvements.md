@@ -54,6 +54,23 @@ that finds an engine limit adds a line here.
   drives the ship a tick late; the demo runs in Input before the sample to avoid it. Fine
   as it is, worth a line in the platform_hid docs.
 
+## Found in slice 3
+
+- **A pass that reads `*.Transform2` orders everything around it.** `collision.compose`
+  reads every kind's transform (a child's parent may be anything) and writes the children
+  with colliders; so it comes after every Sim writer of any transform, and a system that
+  reads a composed child cannot come before any of them. Arcfire's patterns system read
+  the parts and wrote the active bullets' transforms, which made a cycle; it is split in
+  two (`actives` before, `patterns` after). A narrower read (the parents' kinds, which a
+  kind could declare) would loosen it; nothing else has asked yet.
+- **Handlers cannot read a value before a later handler writes it.** Systems mark such a
+  read `^`; handlers refuse it. A handler that needed the run as it stood before the
+  death's handler (to let the demo die once) went to a field on the ship instead. Worth
+  having when a second one asks.
+- **A faster clock for measuring.** The CLI's `rate` (`--cli-stdin` with `rate 4`) runs a
+  five-minute demo in a little over one, hashes and all; a frame loop option would make it
+  a flag.
+
 ## Fixed
 
 - **Children lag their parent by a tick in Sim** (found in slice 1, fixed in slice 3, M2).

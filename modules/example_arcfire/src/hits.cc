@@ -20,12 +20,14 @@ const color kSparkKill{1.0f, 0.6f, 0.25f, 1.0f};
 
 u16 hk(Engine& e, u32 kind_id) { return engine_table(e, kind_id)->kind; }
 
-// Whether the ship can be hurt now: not by the dials, not while the egg plays.
-bool ship_vulnerable(const Dials& d, const Ship& s) { return !d.invulnerable && s.live; }
+// Whether the ship can be hurt now: not by the dials (always, or after the first death),
+// not while the egg plays.
+bool ship_vulnerable(const Dials& d, const Ship& s) { return (d.invulnerable == 0 || (d.invulnerable == 2 && s.died == 0)) && s.live; }
 
 // The death point is the ship's position, which on_ship_died reads (it writes the ship).
 void ship_dies(TickContext& ctx, Ship& s, u32 cause) {
     s.live = 0; // the first hit of the tick; the rest find it gone
+    ++s.died;
     ctx.emit(ShipDied{point2{0, 0}, cause, 0});
 }
 

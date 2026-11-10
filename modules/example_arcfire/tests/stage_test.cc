@@ -49,15 +49,15 @@ void test_stage(kv::TestCtx& c) {
     KV_CHECK(c, text != nullptr);
     if (text) {
         KV_CHECK(c, stage_parse(text, len, def, why, sizeof why));
-        KV_CHECK(c, def.formation_count == 8 && def.ground_count == 0 && def.length > 0.0f && !strcmp(def.map, "example_arcfire/maps/shoreline.tmj") && def.planes == 4);
+        KV_CHECK(c, def.formation_count == 27 && def.ground_count == 0 && def.length > 0.0f && !strcmp(def.map, "example_arcfire/maps/shoreline.tmj") && def.planes == 4);
         for (u32 i = 0; i < def.formation_count; ++i) KV_CHECK(c, def.formations[i].pattern[0] != 0 && def.formations[i].entry == KV_BML_NONE);
         u32 speeds = 0;
         for (u32 i = 0; i < def.mark_count; ++i) {
             speeds += def.marks[i].kind == MarkKind::Speed;
             if (i) KV_CHECK(c, def.marks[i - 1].at <= def.marks[i].at);
         }
-        KV_CHECK(c, speeds == 4 && def.marks[def.mark_count - 1].kind == MarkKind::End);
-        KV_CHECK(c, def.boss_mark_count == 1 && !strcmp(def.boss_names[0], "carrier"));
+        KV_CHECK(c, speeds == 8 && def.marks[def.mark_count - 1].kind == MarkKind::End && def.length == 18400.0f);
+        KV_CHECK(c, def.boss_mark_count == 2 && !strcmp(def.boss_names[0], "carrier") && !strcmp(def.boss_names[1], "battleship"));
         for (u32 i = 0; i < def.formation_count; ++i) KV_CHECK(c, def.formations[i].path < def.path_count && def.paths[def.formations[i].path].length > 0.0f);
         free(text);
     }
@@ -109,7 +109,19 @@ void test_boss(kv::TestCtx& c) {
         KV_CHECK(c, cores == 1 && launchers == 2);
         // The first phase ends with the four turrets; the core opens in the second.
         KV_CHECK(c, b.phases[0].ends == 0xFu && b.phases[1].ends == 0x40u && b.parts[6].core && b.parts[6].armored_until == 1);
-        KV_CHECK(c, b.total == 4 * 50 + 2 * 70 + 200 && b.parts[6].pattern_count == 2 && !strcmp(b.parts[6].patterns[1], "fan_storm"));
+        KV_CHECK(c, b.total == 4 * 34 + 2 * 50 + 130 && b.parts[6].pattern_count == 2 && !strcmp(b.parts[6].patterns[1], "fan_storm"));
+        KV_CHECK(c, !strcmp(b.stomp, "carrier_stomp") && b.stomp_ticks == 300 && b.dive == 260.0f);
+        free(text);
+    }
+    // The battleship: three phases, the bridge its core, opening in the last.
+    text = slurp("bosses/battleship.boss.json", &len);
+    KV_CHECK(c, text != nullptr);
+    if (text) {
+        stage = StageDef{};
+        KV_CHECK(c, boss_parse(text, len, "battleship", b, stage, why, sizeof why));
+        KV_CHECK(c, b.part_count == 10 && b.phase_count == 3 && b.timeout == 75 * 60 && stage.formation_count == 0);
+        KV_CHECK(c, b.phases[0].ends == 0x3u && b.phases[1].ends == 0x180u && b.parts[9].core && b.parts[9].armored_until == 2);
+        KV_CHECK(c, !strcmp(b.stomp, "wall_walk"));
         free(text);
     }
 
@@ -136,4 +148,6 @@ void test_boss(kv::TestCtx& c) {
     KV_CHECK(c, fails_with(R"({"parts": []})", "an entry is a path"));
     snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true}, {"name": "a"}], "phases": [{"ends": ["a"]}]})", entry);
     KV_CHECK(c, fails_with(doc, "a name of its own"));
+    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true}], "phases": [{"ends": ["a"]}]})", entry);
+    KV_CHECK(c, fails_with(doc, "a boss has a stomp"));
 }

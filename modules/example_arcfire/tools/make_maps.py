@@ -6,15 +6,15 @@ anywhere:
     python3 modules/example_arcfire/tools/make_maps.py
 
 The map is 17 tiles wide (16 px tiles, drawn at 2x: 544 units over the 540-unit field) and
-as many rows as the stage is long plus the field's height; row 0 is the top of the map,
-the stage's end. Layers: `sea` (every cell water), `land` (islands of grass and of sand,
+as many rows as MAP_LENGTH (the stage, and what scrolls by at its bosses) plus the field's
+height; row 0 is the top of the map, past the stage's end. Layers: `sea` (every cell water), `land` (islands of grass and of sand,
 nine-sliced), `deco` (trees, houses, flags, the airfield's pads and crates, roads), and
 `enemies`, point objects named for what they are (turret, tank, bunker) with their pattern,
 health and score as properties (a tank's `route`, in units, a bunker's `path`, `count` and
 `launch` pattern). An enemy is placed by the stage distance at which it comes into view
 and its x on the field; the script puts an island under each, a road under each tank,
-and scatters the rest of the sea with islands from a fixed seed, so the map is the same
-every time it is written.
+and scatters the rest of the sea with islands from a fixed seed (but for the battleship's
+open water at the end), so the map is the same every time it is written.
 """
 import json
 import os
@@ -29,8 +29,11 @@ SCALE = 2          # world units a pixel
 FIELD_H = 720
 FIELD_TOP = 360
 SPAWN_ABOVE = 24   # an enemy comes into view this far above the field's top
-STAGE_LENGTH = 20000  # units: the full Shoreline (slice 3), with room past it
-ROWS = (STAGE_LENGTH + FIELD_H + 64) // (TILE * SCALE) + 1
+# Units of map: the stage's 18,400, and what scrolls by while its marks wait at the two
+# bosses (the stage's clock holds, the scroll does not: at most about 3,300 at the carrier
+# and 4,900 at the battleship), as open water.
+MAP_LENGTH = 26000
+ROWS = (MAP_LENGTH + FIELD_H + 64) // (TILE * SCALE) + 1
 
 # Kenney's tiles_packed.png: 12 columns of 16 px tiles; a gid is the tile's index + 1.
 def gid(col, row):
@@ -47,9 +50,11 @@ HOUSES = [gid(0, 6), gid(0, 7), gid(6, 6), gid(6, 7)]
 FLAGS = [gid(0, 8), gid(6, 8)]
 PAD, CRATE = gid(3, 9), gid(1, 9)
 
-# The ground enemies of Shoreline: (distance, x, kind, properties). Slice 3's first
-# milestone places the turrets slices 1 and 2 had as stage marks, two tanks and a bunker;
-# later milestones extend the list with the stage.
+# The ground enemies of Shoreline: (distance, x, kind, properties), by the map's distance
+# (the stage's, plus whatever scrolled by at a boss). The opening has the turrets slices 1
+# and 2 had as stage marks, two tanks and a bunker; then the islands before the carrier;
+# then the second half, past the longest carrier fight, denser; then open water for the
+# battleship.
 ENEMIES = [
     (800, -150, "turret", {"pattern": "ring", "health": 14, "score": 500}),
     (1250, -60, "tank", {"pattern": "aimed_burst", "health": 10, "score": 400, "route": 180}),
@@ -57,8 +62,35 @@ ENEMIES = [
     (2050, 60, "tank", {"pattern": "aimed", "health": 10, "score": 400, "route": 160}),
     (2400, 140, "turret", {"pattern": "spiral", "health": 16, "score": 600}),
     (3000, 0, "turret", {"pattern": "cross", "health": 20, "score": 800}),
+    # The islands.
+    (4300, -140, "tank", {"pattern": "aimed_burst", "health": 12, "score": 400, "route": 200}),
+    (4700, 120, "turret", {"pattern": "ring", "health": 16, "score": 600}),
+    (5100, -60, "bunker", {"pattern": "aimed", "health": 24, "score": 800, "path": "bunker_rise", "count": 4, "launch": "aimed"}),
+    (5500, 150, "tank", {"pattern": "aimed", "health": 12, "score": 400, "route": 160}),
+    (5900, -150, "turret", {"pattern": "spiral", "health": 18, "score": 700}),
+    (6300, 40, "bunker", {"pattern": "aimed_burst", "health": 24, "score": 800, "path": "bunker_rise", "count": 5, "launch": "aimed"}),
+    (6700, -100, "tank", {"pattern": "aimed_burst", "health": 12, "score": 400, "route": 220}),
+    (7100, 160, "turret", {"pattern": "cross", "health": 20, "score": 800}),
+    (7500, -40, "turret", {"pattern": "ring", "health": 16, "score": 600}),
+    # The second half.
+    (12400, -150, "turret", {"pattern": "spiral", "health": 20, "score": 800}),
+    (12700, 150, "turret", {"pattern": "spiral", "health": 20, "score": 800}),
+    (13100, 0, "bunker", {"pattern": "aimed_burst", "health": 30, "score": 1000, "path": "bunker_rise", "count": 6, "launch": "aimed_burst"}),
+    (13500, -120, "tank", {"pattern": "needles", "health": 14, "score": 500, "route": 220}),
+    (13900, 120, "tank", {"pattern": "aimed_burst", "health": 14, "score": 500, "route": 200}),
+    (14300, -160, "turret", {"pattern": "cross", "health": 22, "score": 900}),
+    (14600, 160, "turret", {"pattern": "cross", "health": 22, "score": 900}),
+    (15000, 0, "bunker", {"pattern": "aimed", "health": 30, "score": 1000, "path": "bunker_rise", "count": 6, "launch": "aimed"}),
+    (15400, -80, "tank", {"pattern": "aimed", "health": 14, "score": 500, "route": 240}),
+    (15800, 100, "turret", {"pattern": "rain", "health": 20, "score": 800}),
+    (16200, -140, "turret", {"pattern": "spiral", "health": 22, "score": 900}),
+    (16500, 140, "bunker", {"pattern": "aimed_burst", "health": 30, "score": 1000, "path": "bunker_rise", "count": 6, "launch": "aimed"}),
+    (17000, 0, "turret", {"pattern": "ring", "health": 24, "score": 1000}),
+    (17400, -150, "tank", {"pattern": "aimed_burst", "health": 14, "score": 500, "route": 200}),
+    (17800, 150, "tank", {"pattern": "aimed_burst", "health": 14, "score": 500, "route": 200}),
 ]
-AIRFIELD = (3600, 4400)  # stage distances: a long island of sand with pads
+AIRFIELD = (7900, 9700)  # map distances: a long island of sand with pads, under the carrier
+OPEN_WATER = (19000, MAP_LENGTH + FIELD_H)  # the battleship's: no islands
 
 
 def origin_y():
@@ -124,11 +156,15 @@ def main():
         deco[r][8] = PAD
         deco[r + 1][6] = CRATE
     # The rest of the sea: islands where there is room, a few rocks of one tile.
+    _, water_top = map_px(OPEN_WATER[1], 0)
+    _, water_bottom = map_px(OPEN_WATER[0], 0)
     for _ in range(ROWS * 3):
         w, h = rnd.randint(3, 7), rnd.randint(3, 8)
         c0, r0 = rnd.randint(0, COLS - w), rnd.randint(0, ROWS - h)
         if rnd.random() < 0.3:
             w = h = 1
+        if water_top // TILE - h <= r0 <= water_bottom // TILE:
+            continue
         if free(c0, r0, w, h):
             island(c0, r0, w, h, kind=GRASS if rnd.random() < 0.85 else SAND)
 

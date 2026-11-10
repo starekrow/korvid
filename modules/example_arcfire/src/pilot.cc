@@ -5,19 +5,24 @@
 // The rule: for every bullet, where it will pass closest in the next 40 ticks; away from
 // each pass that comes within `clear` units, the sooner and the closer the harder; away from
 // any air enemy within 90 and from a boss's hull; off the walls; and with nothing to fear,
-// under the nearest enemy or open boss part (so the shots find it) at the ship's usual height. It
+// under the nearest enemy (so the shots find it) at the ship's usual height, or, with a
+// boss up, beside the lowest of its open parts that end its phase (any open part, if none
+// can be reached) by as much as the spread opens at that height, so one of the two shots
+// goes through it. It
 // is not good, which is what the stress mode wants (the ship cannot die there), and enough
 // to live through most of a minute at Normal.
 //
 // The demo (--demo) runs first in Input, so its actions are this tick's: fire throughout,
 // a few scripted moves at the start (across the field, focused through the first
 // formation's stream so the ring grazes), the rule otherwise, and from a known tick it
-// stands still until a bullet finds it (the egg plays once). The stage's end mark quits
+// stands still until a bullet finds it (the egg plays once); a bomb once the carrier's core
+// has opened; the battleship fought until it dies or leaves. The stage's end mark quits
 // it. The bot (--autoplay, --stress) is a Sim system; its override lands on the next
 // tick's sample.
 #include "arcfire.h"
 #include "korvid/platform_hid/actions.h"
 #include <math.h>
+#include <string.h>
 
 namespace kv::arcfire {
 
@@ -35,6 +40,7 @@ constexpr u64 kScriptTo = 300;     // from here the rule flies (but for the step
 constexpr u64 kBombFrom = 1442, kBombTo = 1530; // the climb after the bomb, guarded
 constexpr u64 kStandFrom = 1650;   // the demo stops dodging until it has died once
 constexpr u32 kCrowd = 40;         // the bot bombs when this many bullets close in
+constexpr u32 kBossCrowd = 25;     // or this many, at a boss
 constexpr f32 kClear = 26.0f;      // the bot's margin: clear of the ring
 constexpr f32 kGrazeClear = 11.0f; // the demo's, focused: inside the ring, outside the hitbox
 
@@ -87,22 +93,33 @@ vec2 steer(Engine& e, const Game& g, f32 clear) {
             nearest = fabsf(gt[i].position.x - p.x);
             aim_x = gt[i].position.x;
         }
-    // A boss: its open parts are targets; its hull is to be kept off.
+    // A boss: the lowest of its open parts that end its phase is the target, ahead of
+    // anything else (the lowest open part, if none of those can be reached); its hull is to
+    // be kept off.
     const Table* boss_table = engine_table(e, g_boss_kind);
     const Table* parts = engine_table(e, g_part_kind);
     Span<const Transform2> px = parts->rows_of<Transform2>();
     Span<const Part> pp = parts->rows_of<Part>();
     Span<const Health> ph = parts->rows_of<Health>();
+    f32 lowest = 1e9f;
+    bool ends_phase = false;
     for (u32 i = 0; i < parts->rows(); ++i) {
         if (!parts->is_alive(i) || ph[i].hp <= 0) continue;
         const Boss* b = boss_table->get<Boss>(pp[i].boss);
-        if (!b || b->state != (u32)BossState::Holding) continue;
-        const PartDef& pd = g.bosses[b->def].parts[pp[i].index];
-        if (pd.armored_until > b->phase) continue;
-        if (px[i].position.y > p.y + 60.0f && fabsf(px[i].position.x - p.x) < nearest) {
-            nearest = fabsf(px[i].position.x - p.x);
-            aim_x = px[i].position.x;
-        }
+        if (!b || (b->state != (u32)BossState::Holding && b->state != (u32)BossState::Stomping)) continue;
+        const BossDef& def = g.bosses[b->def];
+        const PartDef& pd = def.parts[pp[i].index];
+        point2 at = px[i].position;
+        if (pd.armored_until > b->phase || at.y < p.y + 60.0f) continue;
+        bool ends = (def.phases[b->phase].ends >> pp[i].index) & 1u;
+        if ((ends_phase && !ends) || (ends == ends_phase && at.y >= lowest)) continue;
+        lowest = at.y;
+        ends_phase = ends;
+        // A shot leaves 8 units to the side and opens by the spread: at the part's height
+        // it is this far out, so stand that far to whichever side is nearer.
+        f32 off = kMuzzle + (at.y - p.y - kMuzzleUp) * tanf(kSpreadDeg * (KV_PI / 180.0f));
+        aim_x = fabsf(at.x - off - p.x) < fabsf(at.x + off - p.x) ? at.x - off : at.x + off;
+        nearest = 0.0f;
     }
     Span<const Transform2> bx = boss_table->rows_of<Transform2>();
     Span<const Collider2> bc = boss_table->rows_of<Collider2>();
@@ -142,6 +159,18 @@ void demo(TickContext& ctx) {
     input_action_override(e, "shot", true);
     for (const Step& s : k_script)
         if (t >= s.from && t < s.to) input_action_override(e, s.action, true, vec2{s.x, s.y});
+    if (!g.demo_core_bomb) { // the carrier's core open: a bomb, once
+        const Table* bt = engine_table(e, g_boss_kind);
+        Span<const Boss> bb = bt->rows_of<Boss>();
+        for (u32 i = 0; i < bt->rows(); ++i) {
+            if (!bt->is_alive(i)) continue;
+            const BossDef& def = g.bosses[bb[i].def];
+            if (!strcmp(def.name, "carrier") && bb[i].phase + 1 == def.phase_count && bb[i].state == (u32)BossState::Holding) {
+                input_action_override(e, "bomb", true);
+                g.demo_core_bomb = true;
+            }
+        }
+    }
     if (t < kScriptTo) {
         if (t >= 100) input_action_override(e, "move", true, steer(e, g, kGrazeClear)); // close enough to graze
         return;
@@ -167,20 +196,20 @@ void bot(TickContext& ctx) {
     const Table* ships = engine_table(e, g_ship_kind);
     const Ship* s = ships->get<Ship>(g.ship);
     const Transform2* sx = ships->get<Transform2>(g.ship);
-    if (dials[0].invulnerable || !r || r->bombs <= 0 || !s || !s->live || s->guard || !sx) return;
+    if (dials[0].invulnerable == 1 || !r || r->bombs <= 0 || !s || !s->live || s->guard || !sx) return;
     u32 close = 0;
     const u32 kinds[] = {g_bullet_kind, g_active_kind};
     for (u32 kind : kinds) {
         const Table* t = engine_table(e, kind);
         Span<const Transform2> bt = t->rows_of<Transform2>();
         Span<const Velocity> bv = t->rows_of<Velocity>();
-        for (u32 i = 0; i < t->rows() && close <= kCrowd; ++i) {
+        for (u32 i = 0; i < t->rows() && close <= kCrowd; ++i) { // past kCrowd is past either
             if (!t->is_alive(i)) continue;
             vec2 d = sx->position - bt[i].position;
             if (length_sq(d) < 80.0f * 80.0f && dot(bv[i].v, d) > 0.0f) ++close;
         }
     }
-    if (close > kCrowd) input_action_override(e, "bomb", true);
+    if (close > (engine_table(e, g_boss_kind)->live() ? kBossCrowd : kCrowd)) input_action_override(e, "bomb", true);
 }
 
 } // namespace kv::arcfire

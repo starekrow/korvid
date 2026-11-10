@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<!-- broadside: the battleship's main guns. Walls of slow bullets across the lower field,
+     five degrees apart, each with one gap where a ship fits; the gap moves from wall to
+     wall. Rank adds walls and closes the breath between them. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>4 + $rank * 3</times>
+      <action>
+        <actionRef label="wall"><param>4 + $rand * 18</param></actionRef>
+        <wait>46 - $rank * 16</wait>
+      </action>
+    </repeat>
+  </action>
+  <action label="wall">
+    <fire><direction type="absolute">100</direction><speed>1.2</speed><bullet/></fire>
+    <repeat><times>$1</times>
+      <action><fire><direction type="sequence">5</direction><speed>1.2</speed><bullet/></fire></action>
+    </repeat>
+    <fire><direction type="sequence">20</direction><speed>1.2</speed><bullet/></fire>
+    <repeat><times>26 - $1</times>
+      <action><fire><direction type="sequence">5</direction><speed>1.2</speed><bullet/></fire></action>
+    </repeat>
+  </action>
+</bulletml>

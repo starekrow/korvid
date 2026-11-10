@@ -48,8 +48,8 @@ constexpr f32 kMapScale = 2.0f;  // world units a map pixel
 struct Velocity { vec2 v; };                      // world units a tick
 struct Plane    { f32 rate; u32 row, col, rows; }; // a parallax tile: its plane's rate, its place in the grid
 // The player's ship. `live` is 0 while the egg plays (control does nothing, nothing hits);
-// `guard` counts the ticks a bomb keeps the hitbox out of play.
-struct Ship     { u32 cooldown; u32 live; u32 focus; u32 shots; u32 guard; };
+// `guard` counts the ticks a bomb keeps the hitbox out of play; `died`, its deaths.
+struct Ship     { u32 cooldown; u32 live; u32 focus; u32 shots; u32 guard; u32 died; };
 struct Shot     { i32 damage; u32 spent; };       // spent: it has hit something this tick
 // What can be shot. `flash` counts the ticks of the white flash left; `score` is paid at the kill.
 struct Health   { i32 hp; u32 flash; i32 score; u32 look; };
@@ -81,7 +81,7 @@ struct Particle { u32 life, max_life; f32 spin, drag, alpha, fall; };
 // A boss (boss.cc): which definition, its phase, what it is doing, its clock (ticks since
 // it came), how far along its entry it is, where it holds, and which parts are down (a bit
 // each, by the part's index in the definition).
-enum class BossState : u32 { Entering, Holding, Leaving };
+enum class BossState : u32 { Entering, Holding, Stomping, Leaving, Dying };
 struct Boss     { u32 def; u32 phase; u32 state; u32 clock; f32 s; u32 down; point2 hold; };
 // A part of a boss: its definition's index, its pattern's turn in the part's list, the
 // ticks to its next pattern or launch, and its boss.
@@ -100,7 +100,7 @@ struct Dials {
     u32 plane_density;     // plane tiles per side of a 1024-unit tile: 1 is a 1024 tile, 8 a 128 one
     f32 enemy_health;
     u32 bot;               // the bot flies the ship
-    u32 invulnerable;
+    u32 invulnerable;      // 1: always; 2: once the ship has died (the demo: its egg plays once)
     u32 loops;             // the stage loops at its end instead of ending
     u32 scroll_rows;       // move every plane and map tile each tick (slice 1's way), for measuring the layer scroll
 };
@@ -161,7 +161,8 @@ struct StageEnd   { u32 loops; u32 pad; };
 
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
-    g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind, g_shadow_kind, g_boss_kind, g_part_kind;
+    g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind, g_shadow_kind, g_boss_kind, g_part_kind,
+    g_boom_kind;
 extern u32 g_part_down; // the trigger on a part's health
 // The two bullet kinds: plain bullets, and bullets that run a program (needles, seeds).
 inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
@@ -237,6 +238,12 @@ struct BossDef {
     PhaseDef phases[kMaxPhases];
     u32      part_count, phase_count;
     i32      total;        // its parts' health: the bar's full
+    // Its time out: every part still standing fires `stomp` (the bays launch at once) and
+    // the hull comes `dive` units down the field and back over `stomp_ticks`; then it leaves.
+    char     stomp[kPatternName];
+    u32      stomp_entry;
+    u32      stomp_ticks;
+    f32      dive;
 };
 // Reads a .boss.json. Its paths and its bays' formations go into the stage (named
 // "<boss>.<path>"), so a launch is a formation like any other. False with `why` filled.
@@ -282,7 +289,8 @@ struct Game {
     Handle   boss_alpha[kMaxBosses][2], boss_additive[kMaxBosses][2];
     u32      boss_of[kMaxBosses];          // a boss mark's definition
     bool     bosses_parsed = false;
-    Handle   boss_bar;                     // the HUD's bar, while a boss is up
+    Handle   stomp_screen;                 // the warning's tint, while a boss stomps
+    Handle   boom_clip;                    // anim.clip: an explosion, Kenney's burst frames
     Handle   map;                 // the stage's ground map (tilemap), and its tiles once spawned
     bool     map_spawned = false;
     point2   map_origin;          // the map's top-left in the world when the distance is 0
@@ -295,6 +303,7 @@ struct Game {
     u32      clear_ticks = 0;     // the "stage clear" label's time left
     u32      act_move = 0, act_shot = 0, act_focus = 0, act_bomb = 0, act_pause = 0, act_quit = 0;
     bool     demo = false, autoplay = false, stress = false;
+    bool     demo_core_bomb = false;  // the demo's bomb in the carrier's core phase, once
     Handle   world;               // the .world row
     Handle   ship, ring, mark;
     Rng      fx;                  // the cosmetic stream: sparks and debris, never sim state
@@ -337,6 +346,10 @@ void   ground_spawn(TickContext& ctx, const Game& g, const Dials& d, const Groun
 // The ship (ship.cc).
 Handle ship_spawn(Engine& e, Game& g);
 constexpr point2 kShipStart{0.0f, -260.0f};
+// A volley: two shots from either side of the nose, each turned out by the spread (less,
+// focused). The pilots aim by it.
+constexpr f32 kMuzzle = 8.0f, kMuzzleUp = 18.0f;
+constexpr f32 kSpreadDeg = 6.0f, kFocusSpreadDeg = 2.0f;
 Collider2 ship_collider();
 Collider2 ring_collider();
 
@@ -344,6 +357,10 @@ Collider2 ring_collider();
 // that spawn by command.
 void   fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 speed = 3.0f);
 void   fx_piece(TickContext& ctx, Game& g, point2 at, Tex tex, rect2 uv, vec2 size, vec2 v, f32 spin, u32 life, i32 layer, f32 fall = 0.0f);
+void   fx_piece_of(TickContext& ctx, Handle material, point2 at, rect2 uv, vec2 size, vec2 v, f32 spin, u32 life, i32 layer, f32 fall = 0.0f);
+// An explosion: Kenney's burst frames as a flipbook (a cosmetic row that goes when it ends).
+void   fx_boom(TickContext& ctx, Game& g, point2 at, f32 size);
+Handle fx_boom_clip(Engine& e);
 
 // Bullets (bullets.cc): one fired by a runner, by command from a parallel chunk; a plain
 // bullet, or an active one with its own runner when its definition has actions.
@@ -386,6 +403,7 @@ void   hud_cover(Engine& e, Game& g, bool on);
 void   hud_stage_clear(Engine& e, Game& g);
 void   hud_flash(Engine& e);
 void   hud_boss(Engine& e, Game& g, const char* title, i32 hp, i32 total); // title null: the bar goes
+void   hud_stomp(Engine& e, Game& g, bool on);                              // the warning's tint
 
 // Reports (stats.cc).
 void   stats_summary(Game& g);

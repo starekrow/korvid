@@ -45,7 +45,10 @@ Dials dials_for(Position p) {
     d.scroll_rows = 0;
     switch (p) {
     case Position::Normal: break;
-    case Position::Demo: d.loops = 0; break; // the demo ends at the stage's end
+    case Position::Demo: // the demo ends at the stage's end, and dies once: the egg plays, then nothing hits
+        d.loops = 0;
+        d.invulnerable = 2;
+        break;
     case Position::Stress:
         d.rank = 24.0f; // the patterns' densest at 1 is a few thousand bullets; 24 holds twenty thousand through the cross
         d.formation_count = 3.0f;

@@ -1,14 +1,16 @@
 # example_arcfire
 
 A vertical bullet-hell shooter, and the engine's first stress test that is also a game
-(`docs/Arcfire-Master-PRD.md`). This is slice 1, the skeleton (`docs/Arcfire-Slice-1-PRD.md`):
-a 3:4 field between two side panels, three parallax planes scrolling under it, a ship that
-flies in eight directions at two speeds and fires Spread at its first level, formations of
-popcorn and two turrets from a stage script keyed to scroll distance, aimed bullets,
-kills, grazes, and the egg: a death in slow motion, after which a small spherical machine
-builds the next ship. Every count
-is a dial, and the game can fly itself three ways. The art is CC0, from Kenney, Screaming
-Brain Studios, Master484 and GGBotNet (`assets/CREDITS.md`).
+(`docs/Arcfire-Master-PRD.md`). Built in slices (`docs/Arcfire-Slice-N-PRD.md`); this is
+slice 3, Shoreline whole: a 3:4 field between two side panels; a Tiled map of sea and
+islands scrolling under it with a cloud plane over it; a ship that flies in eight
+directions at two speeds and fires Spread; formations of popcorn, turrets, tanks and
+bunkers on a stage script keyed to scroll distance; BulletML patterns; bombs, chips and
+grazes; the egg, a death in slow motion after which a small spherical machine builds the
+next ship; and two bosses made of parts, the carrier and the battleship. Every count is a
+dial, and the game can fly itself three ways. The art is CC0, from Kenney, Screaming
+Brain Studios, Master484 and GGBotNet, and the bosses are kitbashed here from Kenney's
+pieces (`assets/CREDITS.md`).
 
 ## Building and running
 
@@ -31,18 +33,21 @@ narrowed; X (East) bombs; Escape (Start) pauses; Q quits.
 
 The ways it flies itself:
 
-- `--demo` plays a scripted minute and quits at the stage's end: it fires throughout,
-  flies focused through the first formation's stream (the ring grazes), dodges by the bot's
-  rule, bombs in the spiral at tick 1440 and climbs past the magnet line for the chips,
-  stands in a bullet from tick 1650 until one finds it (the egg plays once), and the end
-  mark quits it. `--demo --hash` prints the state hash every sim tick. The hashes match
+- `--demo` plays the whole stage (about five minutes) and quits at its end: it fires
+  throughout, flies focused through the first formation's stream (the ring grazes), dodges
+  by the bot's rule, bombs in the spiral at tick 1440 and climbs past the magnet line for
+  the chips, stands in a bullet from tick 1650 until one finds it (the egg plays once;
+  nothing hits it after, the demo's `invulnerable` being 2), kills the carrier with a bomb
+  in its core's phase, fights the battleship until it dies or stomps and leaves, and the
+  end mark quits it at tick 18409. `--demo --hash` prints the state hash every sim tick. The hashes match
   across runs, thread counts (`--threads 1`, `--threads 8`), I/O backends (`--io sync`,
   `--io uring`) and asset sources (loose files, `--pack` with a kpak of `bin/assets`, or
   `--pack` with a zip of it).
 - `--autoplay` puts the bot on the stick at Normal: it holds fire, steps away from each
   bullet's closest pass in the next 40 ticks when it comes within 26 units, keeps off the
-  air enemies and the walls, lines up under the nearest enemy, and bombs when more than 40
-  bullets close in. The demo and the bot hold every gameplay action every tick, so a key
+  air enemies, a boss's hull and the walls, lines up under the nearest enemy (at a boss,
+  beside the lowest open part that ends its phase, by the spread at that height), and bombs
+  when more than 40 bullets close in (25 at a boss). The demo and the bot hold every gameplay action every tick, so a key
   touched while they fly changes nothing.
 - `--stress` turns the dials to their stress position: rank 24, three times the
   formations at half the spacing, four times the sparks, the planes in 128-unit tiles,
@@ -51,7 +56,8 @@ The ways it flies itself:
   field, again and again, under an invulnerable bot: how a pattern is written and measured.
 - `--dial name=value` moves one dial (repeat it for more): `rank`,
   `bullet_speed`, `formation_count`, `formation_spacing`, `particles`, `plane_density`,
-  `enemy_health`, `bot`, `invulnerable`, `loops`, `scroll_rows` (1: move every plane tile
+  `enemy_health`, `bot`, `invulnerable` (1, or 2: after the first death), `loops`,
+  `scroll_rows` (1: move every plane tile
   every tick instead of scrolling the layer, for the notebook's comparison). The log prints
   the dials at the start.
 
@@ -109,9 +115,17 @@ state.
   formation) and the phases, each ended by the deaths of the parts it names. A part is
   armored until its phase (shots spark off it). A part's death is a state trigger
   (`part_down`, health crossing below one) whose handler takes it and what rides on it,
-  pays, and moves the boss on a phase; the core's death is the boss's, paid by the time it
-  had left. Out of time, a boss leaves. The art is made by `tools/make_bosses.py` from
-  Kenney's pieces into `assets/generated/`. The HUD shows its parts' health as a bar.
+  pays, and moves the boss on a phase. The core's death is the boss's: time slows to a
+  quarter for a moment, every bullet becomes a chip, the bonus is paid by the time it had
+  left, the parts still standing burst in turn and the hull breaks in pieces. Out of time,
+  a boss stomps: every part still standing fires its stomp pattern, the bays launch at
+  once, the screen tints and the hull comes down the field and back, a body the ship must
+  not touch (meant to cost an egg; a bomb is the way out); then it leaves, paying nothing.
+  Shoreline has two: the carrier over the airfield (four turrets, two bays, a core) and the
+  battleship in the open water at the end (two main guns, four anti-air mounts, a missile
+  bay; then two deck hatches; then the bridge). The art is made by `tools/make_bosses.py`
+  from Kenney's pieces into `assets/generated/`. The HUD shows a boss's parts' health as a
+  bar.
 - **Patterns** (`patterns.cc`, `assets/patterns/`): BulletML documents, one pattern each,
   named in `patterns.json` and compiled at load by the `bulletml` module; the stage and the
   bosses name them. Every enemy carries a `Runner` (the module's plain-data runner) and an
@@ -153,7 +167,8 @@ state.
 - **Effects** (`fx.cc`): sparks and debris are particles in a cosmetic kind, drawn from
   the module's own random stream, so the particle dial changes nothing the sim draws.
   Every air row gets a shadow on the ground's layer, a cosmetic child down and to the
-  right that dies with it.
+  right that dies with it. Explosions are Kenney's burst tiles as a flipbook (an anim clip
+  made at startup) on a cosmetic row that goes when the clip ends.
 - **Reports** (`stats.cc`): the counters as the resource `example_arcfire.stats`, the log
   lines, the summary.
 

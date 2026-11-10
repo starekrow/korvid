@@ -16,7 +16,8 @@
 //         "health": 200, "score": 5000, "pattern": ["spiral", "fan_storm"], "armored_until": 1,
 //         "core": true } ],
 //     "phases": [ { "name": "turrets", "ends": ["turret_1", ...], "sway": [40, 0.012] },
-//                 { "name": "core", "ends": ["core"], "sway": [70, 0.02] } ] }
+//                 { "name": "core", "ends": ["core"], "sway": [70, 0.02] } ],
+//     "stomp": { "pattern": "carrier_stomp", "seconds": 5, "dive": 260 } }
 //
 // Points are world units on the hull (+y up, the hull's middle at 0), `size` the hull's
 // sprite, a part's sprite one cell of the sheet drawn at twice its pixels; `timeout` is in
@@ -188,6 +189,12 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
         if (p.armored_until >= out.phase_count)
             { snprintf(why, why_cap, "boss %s: part %s opens in phase %u of %u", name, p.name, p.armored_until, out.phase_count); return false; }
     }
+    const JsonValue* stomp = json_get(doc, root, "stomp");
+    if (!stomp) return boss_fail(why, why_cap, name, "a boss has a stomp");
+    snprintf(out.stomp, sizeof out.stomp, "%s", json_string(json_get(doc, *stomp, "pattern"), ""));
+    out.stomp_entry = KV_BML_NONE;
+    out.stomp_ticks = (u32)(json_number(json_get(doc, *stomp, "seconds"), 5.0) * 60.0);
+    out.dive = (f32)json_number(json_get(doc, *stomp, "dive"), 200.0);
     return true;
 }
 

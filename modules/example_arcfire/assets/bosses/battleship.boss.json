@@ -1,0 +1,28 @@
+{
+  "title": "BATTLESHIP",
+  "size": [448, 192],
+  "sheet": [4, 3],
+  "hull": { "half": [200, 72], "offset": [0, 0] },
+  "entry": { "path": [[0, 520], [0, 380], [0, 230]], "speed": 0.8 },
+  "timeout": 75,
+  "score": 40000,
+  "parts": [
+    { "name": "main_gun_aft",  "cell": [0, 0], "at": [-96, 0], "radius": 18, "health": 56, "score": 2000, "pattern": ["broadside"], "rest": 50 },
+    { "name": "main_gun_fore", "cell": [0, 0], "at": [96, 0],  "radius": 18, "health": 56, "score": 2000, "pattern": ["broadside"], "rest": 70 },
+    { "name": "aa_aft_port",   "cell": [1, 0], "at": [-144, 40],  "radius": 13, "health": 30, "score": 800, "pattern": ["aimed_burst"], "rest": 60 },
+    { "name": "aa_fore_port",  "cell": [2, 0], "at": [144, 40],   "radius": 13, "health": 30, "score": 800, "pattern": ["needles"], "rest": 80 },
+    { "name": "aa_aft_stbd",   "cell": [2, 0], "at": [-144, -40], "radius": 13, "health": 30, "score": 800, "pattern": ["needles"], "rest": 80 },
+    { "name": "aa_fore_stbd",  "cell": [1, 0], "at": [144, -40],  "radius": 13, "health": 30, "score": 800, "pattern": ["aimed_burst"], "rest": 60 },
+    { "name": "missile_bay", "cell": [3, 0], "open": [0, 1], "at": [0, -44], "radius": 15, "health": 50, "score": 1500, "pattern": ["homing"], "rest": 90 },
+    { "name": "hatch_aft",  "cell": [1, 1], "open": [2, 1], "at": [-48, 0], "radius": 15, "health": 46, "score": 2000, "pattern": ["cross"], "rest": 40, "armored_until": 1 },
+    { "name": "hatch_fore", "cell": [1, 1], "open": [2, 1], "at": [48, 0],  "radius": 15, "health": 46, "score": 2000, "pattern": ["wave"], "rest": 40, "armored_until": 1 },
+    { "name": "bridge", "cell": [3, 1], "open": [0, 2], "at": [0, 36], "radius": 20, "health": 150, "score": 6000, "pattern": ["core_burst"], "rest": 30,
+      "armored_until": 2, "core": true }
+  ],
+  "phases": [
+    { "name": "guns", "ends": ["main_gun_aft", "main_gun_fore"], "sway": [24, 0.010] },
+    { "name": "deck", "ends": ["hatch_aft", "hatch_fore"], "sway": [36, 0.012] },
+    { "name": "bridge", "ends": ["bridge"], "sway": [50, 0.016] }
+  ],
+  "stomp": { "pattern": "wall_walk", "seconds": 6, "dive": 300 }
+}

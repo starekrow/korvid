@@ -216,3 +216,17 @@ the parts' health at a fifth (`--dial enemy_health=0.2`), the demo's rule brings
 carrier down in 34 seconds: turrets, the core's phase at tick 4559, the core at 5062. Under
 `--stress` (twice the health, rank 24) the fight runs with the stage's other bullets:
 23,367 at peak over the 75 seconds, the tick's cost not yet broken out (M5's entry).
+
+**M3. The stage at full length.** Shoreline is 18,400 units of marks now, its map 26,000
+(what scrolls by while the marks wait at the bosses is open water). The demo, under the
+rule and with its one egg, meets the carrier at tick 5078, bombs as its core opens (tick
+6143), kills it 43 seconds into the fight (tick 7967: a bonus of 503, the time nearly out;
+120 bullets to chips) and watches it break up; it meets the battleship at tick 12214, takes
+its main guns by tick 16430, is still on the deck hatches when the battleship's time runs
+out (tick 17076: it stomps, then leaves), and ends at tick 18409 with 80,173 points. The
+bosses' health was cut by about a third from M2's to get there (the carrier's parts the
+rule must kill: 266; the battleship's: 354): under the rule the bot does about 7 damage a
+second against the carrier's turrets and 6 against the battleship's guns, a third of what
+a volley can do, because it spends most ticks dodging. M5 measures the bot at Normal,
+vulnerable. Measured at four times the sim's rate (the CLI's `rate 4`), which changes no
+tick: a five-minute demo takes a little over a minute.

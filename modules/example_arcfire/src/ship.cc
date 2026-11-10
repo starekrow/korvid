@@ -14,7 +14,6 @@ constexpr f32 kSpeed = 6.0f, kFocusSpeed = 3.0f; // units a tick
 constexpr f32 kHalf = 32.0f;                      // the sprite's half size: the clamp
 constexpr u32 kCadence = 6;                       // ticks between volleys
 constexpr f32 kShotSpeed = 14.0f;
-constexpr f32 kSpreadDeg = 6.0f, kFocusSpreadDeg = 2.0f;
 constexpr f32 kHitbox = 3.0f, kGrazeRing = 18.0f;
 
 } // namespace
@@ -25,7 +24,7 @@ Collider2 ring_collider() { return collider_circle(kGrazeRing, L_GRAZE, L_BULLET
 Handle ship_spawn(Engine& e, Game& g) {
     Table* ships = engine_table(e, g_ship_kind);
     Handle ship = ships->spawn(transform2_at(kShipStart), sprite_of(g, TEX_SHIPS, ship_uv(0, 0), vec2{64, 64}, Z_SHIP), ship_collider(),
-                               Ship{0, 1, 0, 0, 0});
+                               Ship{0, 1, 0, 0, 0, 0});
     // The ring and the dot show only while focused.
     Sprite ring = sprite_of(g, TEX_RING, rect2_unit(), vec2{2 * kGrazeRing, 2 * kGrazeRing}, Z_MARK, color{0.6f, 0.9f, 1.0f, 0.0f}, true);
     g.ring = engine_table(e, g_ring_kind)->spawn(transform2_at(kShipStart), Local2{}, Parent{ship}, ring, ring_collider());
@@ -69,7 +68,7 @@ void control(TickContext& ctx) {
         f32 ang = (f32)side * spread; // from straight up, clockwise for +
         vec2 v{sinf(ang) * kShotSpeed, cosf(ang) * kShotSpeed};
         Sprite sp = sprite_of(g, TEX_TILES, tile_uv(0, 0), vec2{24, 24}, Z_SHOT);
-        shots_table->spawn(transform2_at(p + vec2{(f32)side * 8.0f, 18.0f}, -ang), sp, Velocity{v}, collider_circle(6.0f, L_SHOT, L_AIR | L_GROUND),
+        shots_table->spawn(transform2_at(p + vec2{(f32)side * kMuzzle, kMuzzleUp}, -ang), sp, Velocity{v}, collider_circle(6.0f, L_SHOT, L_AIR | L_GROUND),
                            Shot{1, 0});
         ++s.shots;
     }

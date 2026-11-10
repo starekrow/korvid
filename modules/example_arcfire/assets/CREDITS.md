@@ -98,9 +98,12 @@ files without code changes, as long as each part's cell stays where its `.boss.j
 |---|---|
 | `generated/carrier.png` | the carrier's hull, 96 x 176: drawn by the script in the pack's palette and style (its outline slate, greys, white and orange accent), with two copies of the pack's vent tile (`kenney/tiles.png` column 4, row 1) as deck machinery and sockets where the parts sit |
 | `generated/carrier_parts.png` | its parts, 24 px cells: the pack's turret tiles (`kenney/tiles.png` column 6 row 1, column 5 row 1) as they are; launch bays shut and open, and the core armored and open, drawn by the script in the pack's palette |
+| `generated/battleship.png` | the battleship's hull, 224 x 96, broadside, bow right: drawn by the script in the pack's palette and style, with the pack's vent tile twice as funnels, a bow wave and wake, and sockets where the parts sit |
+| `generated/battleship_parts.png` | its parts, 24 px cells: a main gun, the pack's two turret tiles as anti-air mounts, a missile bay shut and open, a deck hatch shut and open, the bridge armored and open, the rest drawn by the script in the pack's palette |
 
-The boss files (`bosses/*.boss.json`) are written by hand for the game, as is the pattern
-`patterns/fan_storm.xml`.
+The boss files (`bosses/*.boss.json`) are written by hand for the game, as are the patterns
+`fan_storm`, `carrier_stomp`, `broadside`, `core_burst` and `wall_walk`
+(`patterns/*.xml`).
 
 `maps/shoreline.tmj` and `maps/shoreline.tsj` are written by `tools/make_maps.py`
 (2026-11-09, Korvid's, Apache 2.0): a Tiled map whose tiles are all Kenney's
