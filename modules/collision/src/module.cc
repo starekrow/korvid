@@ -442,6 +442,30 @@ u32 collision_query(TickContext& ctx, rect2 area, u32 layers, Array<Handle>& out
     return n;
 }
 
+namespace {
+
+// The slabs: where a box moving by `delta` enters the box b[x0, y0, x1, y1] and leaves it,
+// per axis. False if it never overlaps it over the move.
+bool sweep_enter(rect2 box, vec2 delta, const f32 b[4], f32* enter_out) {
+    f32 enter = 0.0f, leave = 1.0f;
+    const f32 lo[2] = {box.x, box.y}, hi[2] = {box.x + box.w, box.y + box.h}, d[2] = {delta.x, delta.y};
+    for (u32 a = 0; a < 2; ++a) {
+        if (d[a] == 0.0f) {
+            if (!(lo[a] < b[a + 2] && b[a] < hi[a])) return false;
+            continue;
+        }
+        f32 t0 = (b[a] - hi[a]) / d[a], t1 = (b[a + 2] - lo[a]) / d[a];
+        if (t0 > t1) { f32 t = t0; t0 = t1; t1 = t; }
+        if (t0 > enter) enter = t0;
+        if (t1 < leave) leave = t1;
+        if (enter >= leave) return false;
+    }
+    *enter_out = enter;
+    return true;
+}
+
+} // namespace
+
 CollisionHit collision_cast(TickContext& ctx, rect2 box, vec2 delta, u32 layers, Handle ignore) {
     CollisionHit best;
     best.t = 1.0f;
@@ -450,27 +474,37 @@ CollisionHit collision_cast(TickContext& ctx, rect2 box, vec2 delta, u32 layers,
         Span<const Collider2> co = k.col<const Collider2>();
         for (u32 i = 0; i < k.rows(); ++i) {
             if (!k.alive(i) || !(co[i].layer & layers) || k.handle_at(i) == ignore) continue;
-            f32 b[4];
+            f32 b[4], enter = 0.0f;
             box_of(co[i], xf[i].position, &b[0], &b[1], &b[2], &b[3]);
-            // The slabs: when the moving box's extent enters and leaves the other's, per axis.
-            f32 enter = 0.0f, leave = 1.0f;
-            bool miss = false;
-            const f32 lo[2] = {box.x, box.y}, hi[2] = {box.x + box.w, box.y + box.h}, d[2] = {delta.x, delta.y};
-            for (u32 a = 0; a < 2 && !miss; ++a) {
-                if (d[a] == 0.0f) { if (!(lo[a] < b[a + 2] && b[a] < hi[a])) miss = true; continue; }
-                f32 t0 = (b[a] - hi[a]) / d[a], t1 = (b[a + 2] - lo[a]) / d[a];
-                if (t0 > t1) { f32 t = t0; t0 = t1; t1 = t; }
-                if (t0 > enter) enter = t0;
-                if (t1 < leave) leave = t1;
-                if (enter >= leave) miss = true;
-            }
-            if (miss || enter >= best.t || (enter == best.t && !best.entity.is_null())) continue;
+            if (!sweep_enter(box, delta, b, &enter) || enter >= best.t || (enter == best.t && !best.entity.is_null())) continue;
             best.t = enter;
             best.entity = k.handle_at(i);
         }
     }
     if (best.entity.is_null()) best.t = 1.0f;
     return best;
+}
+
+u32 collision_cast_all(TickContext& ctx, rect2 box, vec2 delta, u32 layers, Array<CollisionHit>& out) {
+    u32 first = out.len;
+    for (KindRows k : ctx.view<const Transform2, const Collider2>()) {
+        Span<const Transform2> xf = k.col<const Transform2>();
+        Span<const Collider2> co = k.col<const Collider2>();
+        for (u32 i = 0; i < k.rows(); ++i) {
+            if (!k.alive(i) || !(co[i].layer & layers)) continue;
+            f32 b[4], enter = 0.0f;
+            box_of(co[i], xf[i].position, &b[0], &b[1], &b[2], &b[3]);
+            if (!sweep_enter(box, delta, b, &enter)) continue;
+            // Nearest first, kept stable: an equal fraction goes after those already in, so
+            // ties stay in the walk's kind and slot order.
+            CollisionHit h{k.handle_at(i), enter};
+            out.push(h);
+            u32 j = out.len - 1;
+            for (; j > first && out[j - 1].t > enter; --j) out[j] = out[j - 1];
+            out[j] = h;
+        }
+    }
+    return out.len - first;
 }
 
 } // namespace kv

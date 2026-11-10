@@ -54,7 +54,9 @@ The **static world** is one sweep function the resolve calls before the bodies
 
 **Queries.** `collision_query(ctx, rect, layers, out)` lists the colliders overlapping a
 rectangle, `collision_cast(ctx, box, delta, layers)` the first one a moving box would enter
-and when, both over the colliders as they stand when called. The hammer's reach is a query.
+and when, `collision_cast_all(ctx, box, delta, layers, out)` every one it meets, nearest
+first; all three over the colliders as they stand when called. The hammer's reach is a
+query; arcfire's beam is a cast of them all.
 
 ## Using it
 
@@ -160,7 +162,7 @@ Header `korvid/collision/module.h`:
 | `collision_pair_count(Engine&)` | function | pairs overlapping after the last broadphase |
 | `collision_stats(Engine&)` | function | the last resolve (bodies, moves, blocked axis moves, pushes) and broadphase (colliders, candidate pairs tested, (layer, mask) groups) |
 | `collision_static(e, fn, user)` | function | the static world's sweep; `tilemap_collide` sets it |
-| `collision_query(ctx, rect, layers, out)`, `collision_cast(ctx, box, delta, layers, ignore)` | functions | colliders in a rectangle; the first a moving box enters |
+| `collision_query(ctx, rect, layers, out)`, `collision_cast(ctx, box, delta, layers, ignore)`, `collision_cast_all(ctx, box, delta, layers, out)` | functions | colliders in a rectangle; the first a moving box enters; every one it meets, nearest first (a beam's) |
 
 What the module registers with the engine:
 

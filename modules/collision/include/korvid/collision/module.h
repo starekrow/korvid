@@ -66,8 +66,14 @@ void collision_static(Engine& e, CollisionStaticFn fn, void* user);
 //   collision_cast   the first collider on any of `layers` a box moving by `delta` would
 //                    enter (not `ignore`), and the fraction of the move at which it would
 //                    (1 and null when it meets none)
+//   collision_cast_all  every collider on any of `layers` the moving box meets, with the
+//                    fraction at which it enters (0 for one it starts inside), appended to
+//                    `out` nearest first, ties in kind and slot order; returns how many.
+//                    A beam's: what it passes through, in order, to cut it at the first
+//                    that stops it
 struct CollisionHit { Handle entity; f32 t = 1.0f; };
 u32          collision_query(TickContext& ctx, rect2 area, u32 layers, Array<Handle>& out);
 CollisionHit collision_cast(TickContext& ctx, rect2 box, vec2 delta, u32 layers, Handle ignore = Handle{});
+u32          collision_cast_all(TickContext& ctx, rect2 box, vec2 delta, u32 layers, Array<CollisionHit>& out);
 
 } // namespace kv
