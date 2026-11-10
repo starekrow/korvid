@@ -346,6 +346,7 @@ struct Game {
     Position start = Position::Normal;
     char     stage_name[32] = "shoreline";
     bool     demo_core_bomb = false;  // the demo's bomb in the carrier's core phase, once
+    vec2     pilot_v{0, 0};           // the ship's velocity by the pilots' last stick (pilot.cc)
     Handle   world;               // the .world row
     Handle   ship, ring, mark;
     Rng      fx;                  // the cosmetic stream: sparks and debris, never sim state
@@ -463,6 +464,7 @@ constexpr f32 kMagnetY = kFieldTop - 120.0f; // above it, every item comes to th
 u32    cancel_bullets(TickContext& ctx, Game& g, point2 at, f32 radius, u32* overflow);
 void   item_drop(TickContext& ctx, const Game& g, ItemKind kind, point2 at, vec2 v, i32 value = 0);
 void   drop_item(TickContext& ctx, const Game& g, u32 drop, point2 at); // an item carrier's Drop
+u32    weapon_shown(const Item& it); // the type a weapon item shows now (taking it takes that)
 Collider2 item_collider();
 
 // The HUD (hud.cc).

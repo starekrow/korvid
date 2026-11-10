@@ -2,13 +2,15 @@
 
 A vertical bullet-hell shooter, and the engine's first stress test that is also a game
 (`docs/Arcfire-Master-PRD.md`). Built in slices (`docs/Arcfire-Slice-N-PRD.md`); this is
-slice 3, Shoreline whole: a 3:4 field between two side panels; a Tiled map of sea and
-islands scrolling under two decks of cloud, each at its own speed; a ship that flies in eight
-directions at two speeds and fires Spread; formations of popcorn, turrets, tanks and
-bunkers on a stage script keyed to scroll distance; BulletML patterns; bombs, chips and
-grazes; the egg, a death in slow motion after which a small spherical machine builds the
-next ship; and two bosses made of parts, the carrier and the battleship. Every count is a
-dial, and the game can fly itself three ways. The art is CC0, from Kenney, Screaming
+slice 4, Shoreline with the arsenal: a 3:4 field between two side panels; a Tiled map of
+sea and islands scrolling under two decks of cloud, each at its own speed; a ship that
+flies in eight directions at two speeds with four weapons at five power levels (Spread,
+the Beam, Storm, Lance) and up to two options; formations of popcorn, turrets, tanks and
+bunkers on a stage script keyed to scroll distance, some of them carrying items; BulletML
+patterns; bombs, chips and grazes; the chain, extends and the stage bonus; the egg, a
+death in slow motion after which a small spherical machine builds the next ship; two
+bosses made of parts, the carrier and the battleship; Easy, Normal and Hard, arcade and
+stage select. Every count is a dial, and the game can fly itself three ways. The art is CC0, from Kenney, Screaming
 Brain Studios, Master484 and GGBotNet, and the bosses are kitbashed here from Kenney's
 pieces; the sound is Kenney's and the music Juhani Junkala's, CC0 too (`assets/CREDITS.md`).
 
@@ -42,21 +44,29 @@ as it was when the stage began.
 
 The ways it flies itself:
 
-- `--demo` plays the whole stage (about five minutes) and quits at its end: it fires
-  throughout, flies focused through the first formation's stream (the ring grazes), dodges
-  by the bot's rule, bombs in the spiral at tick 1440 and climbs past the magnet line for
-  the chips, stands in a bullet from tick 1650 until one finds it (the egg plays once;
-  nothing hits it after, the demo's `invulnerable` being 2), kills the carrier with a bomb
-  in its core's phase, fights the battleship until it dies or stomps and leaves, and the
-  end mark quits it at tick 18409. `--demo --hash` prints the state hash every sim tick. The hashes match
+- `--demo` plays the whole stage (about three and a half minutes) and quits at its end:
+  it fires throughout, flies focused through the first formation's stream (the ring
+  grazes), flies by the bot's rule (below) otherwise, bombs in the spiral at tick 1440 and
+  climbs past the magnet line for the chips, and from tick 1650 stands still and holds
+  fire until a bullet finds it (the egg plays once; nothing hits it after, the demo's
+  `invulnerable` being 2). It wants its weapons by the stage's clock: Spread on the
+  opening's power items (to level five), the Beam at the islands, Storm over the airfield
+  and the carrier (a bomb in its core's phase), Lance and both options for the
+  battleship; it takes an egg on the way. The end mark quits it at tick 11829. `--demo --hash` prints the state hash every sim tick. The hashes match
   across runs, thread counts (`--threads 1`, `--threads 8`), I/O backends (`--io sync`,
   `--io uring`) and asset sources (loose files, `--pack` with a kpak of `bin/assets`, or
   `--pack` with a zip of it).
-- `--autoplay` puts the bot on the stick, in arcade or a stage select: it holds fire, steps away from each
-  bullet's closest pass in the next 40 ticks when it comes within 26 units, keeps off the
-  air enemies, a boss's hull and the walls, lines up under the nearest enemy (at a boss,
-  beside the lowest open part that ends its phase, by the spread at that height), and bombs
-  when more than 40 bullets close in (25 at a boss). The demo and the bot hold every gameplay action every tick, so a key
+- `--autoplay` puts the bot on the stick, in arcade or a stage select: it holds fire,
+  steps away from each bullet's closest pass in the next 40 ticks (against the way the ship
+  is going) when it comes within 26 units, keeping some of its last step so two passes
+  alike do not make it dither; keeps off the air enemies, a boss's hull and, while
+  dodging, the walls; with nothing to fear goes for items (power, options, eggs, bombs, a
+  weapon while it shows a type wanted: Lance or Storm at a boss, Spread or Storm
+  otherwise; one showing another type it keeps clear of), else lines up under the nearest
+  enemy (at a boss, beside the lowest open part that ends its phase, by the spread at that
+  height, focused once there). It bombs to live: a bullet about to meet the hitbox, bullets
+  closing from every side, or more than 40 close in (25 at a boss); from a boss's last ten
+  seconds it keeps one bomb back for the stomp. The demo and the bot hold every gameplay action every tick, so a key
   touched while they fly changes nothing.
 - `--stress` turns the dials to their stress position: rank 24, three times the
   formations at half the spacing, four times the sparks, the planes in 128-unit tiles,
@@ -179,10 +189,12 @@ state.
   puts the count back to two; at most six.
 - **Items** (`items.cc`): a cancelled bullet becomes a score chip (at most 256 a cancel;
   the rest are paid at once); a formation shot down to its last member drops a bomb where
-  it fell (a `formation` row counts its members killed and gone). Items pop up and fall,
-  and come to the ship above the magnet line or within a short reach; the graze ring
-  picks them up. An option item past the second pays 20,000 instead, an egg item past the
-  fifth egg 50,000.
+  it fell (a `formation` row counts its members killed and gone). An item carrier (a
+  formation's, a ground row's or a boss part's `drop`) leaves its item inside the field,
+  wherever it died. Items pop up and fall (a weapon item drifts, at a third of the speed,
+  through several turns of its cycle, so a type can be waited for), and come to the ship
+  above the magnet line or within a short reach; the graze ring picks them up. An option
+  item past the second pays 20,000 instead, an egg item past the fifth egg 50,000.
 - **Scoring** (`scoring.h`, `scoring.cc`): the chain (a kill within `chain_window` ticks of
   the last adds one and pays times x1 below 10 kills, x2 to 24, x3 to 49, x4 to 99, x5 from
   100; a graze holds the window 20 ticks more; a gap, a death or a restart ends it),

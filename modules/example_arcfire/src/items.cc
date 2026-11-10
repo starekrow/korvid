@@ -1,8 +1,9 @@
 // example_arcfire: items. A cancelled bullet (a bomb, a death) becomes a score chip; the
 // last member of a formation shot down to the last one drops a bomb; an item carrier (a
 // formation the stage marks) drops what it carries: a weapon item, which shows a type and
-// cycles through the four while it falls (taking it takes the type it shows: the same as
-// the ship's powers it, another switches to it), or a power item. Items pop up, fall,
+// cycles through the four while it drifts down, slower than the rest (taking it takes the
+// type it shows: the same as the ship's powers it, another switches to it), a power item,
+// an option, an egg; inside the field, wherever its carrier died. Items pop up, fall,
 // and come to the ship when it is above the magnet line (or within a short reach of it);
 // the graze ring picks them up. A cancel makes at most kChipCap chips, so sixty thousand
 // bullets never become sixty thousand rows: the rest are paid in score at once.
@@ -16,6 +17,7 @@ namespace {
 
 constexpr u32 kItemLife = 900;      // ticks: an item nobody comes for goes
 constexpr f32 kFall = 1.6f;         // units a tick, at most
+constexpr f32 kWeaponFall = 0.5f;   // a weapon item drifts down, through several turns of its cycle
 constexpr f32 kGravity = 0.08f;
 constexpr f32 kMagnetSpeed = 9.0f;
 constexpr f32 kReach = 40.0f;       // an item this close comes whatever the line
@@ -28,7 +30,6 @@ constexpr u32 kItemCells = 6;
 rect2 items_uv(u32 cell) { return rect2{(f32)cell / (f32)kItemCells, 0.0f, 1.0f / (f32)kItemCells, 1.0f}; }
 constexpr i32 kOptionScore = 20000; // an option past two (an egg past five: egg_gain)
 
-u32 weapon_shown(const Item& it) { return ((u32)it.value + (kItemLife - it.life) / kCycle) % WeaponCount; }
 
 Sprite item_sprite(const Game& g, ItemKind kind, i32 value) {
     if (kind == ItemBomb) return sprite_of(g, TEX_TILES, tile_uv(2, 2), vec2{26, 26}, Z_ITEM);
@@ -41,6 +42,8 @@ Sprite item_sprite(const Game& g, ItemKind kind, i32 value) {
 
 } // namespace
 
+u32 weapon_shown(const Item& it) { return ((u32)it.value + (kItemLife - it.life) / kCycle) % WeaponCount; }
+
 Collider2 item_collider() { return collider_circle(8.0f, L_ITEM, L_GRAZE); }
 
 void item_drop(TickContext& ctx, const Game& g, ItemKind kind, point2 at, vec2 v, i32 value) {
@@ -49,6 +52,12 @@ void item_drop(TickContext& ctx, const Game& g, ItemKind kind, point2 at, vec2 v
 }
 
 void drop_item(TickContext& ctx, const Game& g, u32 drop, point2 at) {
+    if (drop == DropNone) return;
+    // A carrier shot down before it flew in (Storm's bolts find them off the field) leaves
+    // its item where it can be taken.
+    at = point2{clampf(at.x, kFieldLeft + 24.0f, kFieldRight - 24.0f), at.y < kFieldTop - 24.0f ? at.y : kFieldTop - 24.0f};
+    KV_INFO("arcfire", "drop: %s at tick %llu, (%.0f, %.0f)", drop >= DropWeapon && drop <= DropWeaponLast ? weapon_name(drop - DropWeapon)
+            : drop == DropPower ? "power" : drop == DropOption ? "an option" : drop == DropEgg ? "an egg" : "?", (unsigned long long)ctx.tick, (f64)at.x, (f64)at.y);
     if (drop >= DropWeapon && drop <= DropWeaponLast) item_drop(ctx, g, ItemWeapon, at, vec2{0.0f, 1.8f}, (i32)(drop - DropWeapon));
     else if (drop == DropPower) item_drop(ctx, g, ItemPower, at, vec2{0.0f, 1.8f});
     else if (drop == DropOption) item_drop(ctx, g, ItemOption, at, vec2{0.0f, 1.8f});
@@ -110,7 +119,8 @@ void items(TickContext& ctx) {
         if (live && (magnet || d < kReach) && d > 0.01f) v[i].v = to * (kMagnetSpeed / d);
         else {
             v[i].v.x *= 0.95f;
-            v[i].v.y = v[i].v.y - kGravity < -kFall ? -kFall : v[i].v.y - kGravity;
+            f32 fall = it[i].kind == ItemWeapon ? kWeaponFall : kFall;
+            v[i].v.y = v[i].v.y - kGravity < -fall ? -fall : v[i].v.y - kGravity;
         }
         p += v[i].v;
         if (--it[i].life == 0 || p.y < kFieldBottom - kCullMargin) { ctx.destroy(items_table->handle_at(i)); continue; }

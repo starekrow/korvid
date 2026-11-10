@@ -331,3 +331,50 @@ the longest chain 34. With the chain 260,585, without it (`--dial chain_window=0
 bonus (three eggs, six bombs never used) is 90,000 of either. The demo scores 198,300, just
 under the first extend. The PRD's half a million for a good Normal run wants a player who
 keeps chains going; that is the tuning pass's to check.
+
+**M4. The bot with the arsenal** (`--autoplay --stage shoreline --difficulty D`, the ship
+vulnerable). Slice 3's bot died three times an attempt in the opening islands at Normal and
+never reached a boss. This one clears Shoreline at all three difficulties without losing an
+egg:
+
+| | Easy | Normal | Hard |
+|---|---|---|---|
+| eggs lost, restarts | 0, 0 | 0, 0 | 0, 0 |
+| bombs used (ticks) | 2 (1619, 8312) | 2 (961, 8365) | 6 (896, 1570, 1803, 3090, 7743, 8473) |
+| carrier: on, down | 5078, 5459 (2 s held) | 5078, 5536 (3 s) | 5078, 5607 (4 s) |
+| battleship: on, down | 9706, 10040 (5 s) | 9783, 10178 (0 s) | 9854, 10437 (3 s) |
+| score | 449,261 | 438,816 | 445,629 |
+| longest chain | 34 | 33 | 43 |
+
+What changed: bullets' passes are judged against the way the ship is going (it was running
+into the ones it had stepped clear of, a pass that missed where it stood); a dodge keeps
+some of the last one, so two passes alike no longer make it dither in place until one
+lands; it bombs when a hit is three ticks off and the stick cannot help. The bombs at ticks
+8312 to 8473 are the second half's dense stretch, at every difficulty.
+
+Not all of that is the bot: the arsenal outguns Shoreline. The bot has Spread at level five
+by tick 1400 (five power items and a tank's before the islands), an option by 3300 and
+Storm by 3900, and Storm's bolts find enemies before they fire, as far as off the field.
+The bosses are held 0 to 5 seconds before they go down, against slice 3's 8 to 10 at Spread
+one: their phases show, briefly, and each fight can be finished, so by the PRD (R16) and the
+decision to tune at the end, their health is not touched. That is the first thing the
+tuning pass has: the power curve, Storm's reach and damage, the bosses' health. Under
+`--stress` the bot's item runs cost a little density: bullets peak 25,753 and average 3,648
+over 90 seconds, against 27,364 and 4,584 at M3.
+
+Departures from the PRD, both from the Beam's own rule (a hull stops it): the bot wants
+Lance or Storm at a boss, not Lance or the Beam, since the carrier's core and bays are
+inside its hull and a Beam ship cannot finish it (the bot that took the Beam timed out at
+the carrier every time); and the demo shows the Beam at the islands, not on a boss. Two
+rules came out of making the demo's story hold: a weapon item drifts down at a third of
+the others' speed, through several turns of its cycle (falling as fast as the rest it left
+the field after about one turn, so "take it when it shows the type you want" was luck),
+and an item carrier shot down off the field (Storm reaches there) leaves its item inside
+it.
+
+**M4. The demo** (`--demo --hash`) is 11,829 ticks (it was 18,901: the bosses go down in
+seconds) and hashes e9ff4a19c469df51 at threads 1, 8 and 16, from a kpak and a zip, with
+I/O sync and io_uring. Its weapons, picked up on the clock: Spread to five by tick 1400,
+the Beam at 3102, an option at 3262, Storm at 3948, the carrier's core bombed and down at
+5522, the second option at 7740, Lance at 8857, an egg at 9037, the battleship down at 10930
+after 13 seconds held. Score 406,910.
