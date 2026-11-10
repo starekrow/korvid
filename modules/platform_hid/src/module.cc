@@ -95,7 +95,25 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT(PadButtonUp),
 };
 constinit const ResourceDesc k_resources[] = {{"input.state"}, {"input.actions"}, {".window"}};
+// `type TEXT...`: typed text for the next sample, the words joined by spaces; `\n` ends a
+// line (a field submits).
+void cli_type(CliContext& ctx, Span<const char* const> args) {
+    char text[KV_INPUT_TEXT_MAX];
+    usize n = 0;
+    for (u32 i = 0; i < args.len && n + 1 < sizeof text; ++i) {
+        if (i) text[n++] = ' ';
+        for (const char* c = args[i]; *c && n + 1 < sizeof text; ++c) {
+            if (c[0] == '\\' && c[1] == 'n') { text[n++] = '\n'; ++c; }
+            else text[n++] = *c;
+        }
+    }
+    text[n] = 0;
+    input_text_override(*ctx.engine, text);
+    ctx.print("typed %u bytes", (u32)n);
+}
+
 constinit const CliCommandDesc k_commands[] = {
+    {.name = "type", .help = "TEXT...: typed text for the next sample (\\n ends a line)", .fn = cli_type},
     {.name = "press", .help = "ACTION [TICKS] [X Y]: hold an action for TICKS sampled ticks (6), an Axis2 toward X Y", .fn = cli_press},
 };
 constinit const SystemDesc   k_systems[] = {

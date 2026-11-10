@@ -68,8 +68,9 @@ void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<Sp
         Span<const Transform2> prev = table.prev_rows_of<Transform2>();
         Span<const Sprite>     spr  = table.rows_of<Sprite>();
 
-        // Removes first: a slot the renderer knows whose entity died or was replaced.
-        for (u32 i = 0; i < n; ++i) {
+        // Removes first: a slot the renderer knows whose entity died or was replaced, past
+        // the table's rows too (a table restored to fewer slots, a fresh sim's to none).
+        for (u32 i = 0; i < et.sent.len; ++i) {
             Handle sent = et.sent[i];
             if (sent.is_null()) continue;
             if (table.is_alive(i) && table.handle_at(i) == sent) continue;

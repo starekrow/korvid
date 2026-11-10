@@ -41,7 +41,8 @@ delay, interval)` in ticks for menus. They are computed in `input.sample` from t
 input on every tick, paused or not, so they are as deterministic as the input. A demo
 drives them with `input_action_override(e, name, down, axis)`, which replaces the devices
 for one sample. The CLI's `press ACTION [TICKS] [X Y]` holds an action for that many sampled ticks (six
-by default), so a script over `--cli-stdin` can work menus as a player would.
+by default), and `type TEXT` types (`\n` ends a line), so a script over `--cli-stdin` can
+work menus and fields as a player would.
 
 ## Using it
 

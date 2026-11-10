@@ -74,7 +74,11 @@ that finds an engine limit adds a line here.
   see the new sim tick. Tested in core (`reset_test.cc`: handles, hashes and a scheduled
   event against a fresh engine); in the game, `--demo --again --hash`. Cosmetic rows
   parented to a sim entity stay their owner's to clear. Alongside, two dev conveniences:
-  the CLI's `press ACTION [TICKS] [X Y]` (platform_hid) and `screenshot FILE` (frameloop).
+  the CLI's `press ACTION [TICKS] [X Y]` and `type TEXT` (platform_hid), and `screenshot FILE` (frameloop).
+- **The sprite extract's removes past a table's rows** (slice 5). A table restored to fewer
+  slots (a load, a fresh sim's none) left the sprites it had sent above its new row count
+  drawn: the remove pass walked the table's rows, not what it had sent. It walks every
+  slot it sent now.
 
 - **What the GPU does** (after slice 3; asked for by starekrow). Timestamps around the
   frame's passes and a pipeline-statistics query around its sort and drawing, read at the
