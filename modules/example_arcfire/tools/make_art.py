@@ -18,6 +18,8 @@ What is made here, and from what:
   made/spark.png     4 x 4 white: sparks
   made/egg.png       16 x 16 the egg: a spherical machine that builds the new ship
   made/eggs.png      32 x 16 the HUD's pips: an egg spent (dim), an egg in hand
+  made/bombs.png     32 x 16 the HUD's bomb pips: Kenney's shield tile (tiles_packed, column
+                     2, row 2), dimmed for a bomb spent, as it is for one in hand
 """
 import hashlib
 import math
@@ -160,6 +162,18 @@ def main():
     pips.paste(spent, (0, 0))
     pips.paste(egg(), (16, 0))
     pips.save(made / "eggs.png")
+    tiles = Image.open(pack / "pack/kenney_pixelshmup/Tilemap/tiles_packed.png").convert("RGBA")
+    shield = tiles.crop((32, 32, 48, 48))
+    dim = shield.copy()
+    px = dim.load()
+    for y in range(16):
+        for x in range(16):
+            r, g, b, a = px[x, y]
+            px[x, y] = (r // 3, g // 3, b // 3 + 20, a // 2)
+    bombs = Image.new("RGBA", (32, 16), (0, 0, 0, 0))
+    bombs.paste(dim, (0, 0))
+    bombs.paste(shield, (16, 0))
+    bombs.save(made / "bombs.png")
     for archive in sorted(pack.glob("*.zip")) + sorted(pack.glob("*.png")):
         print(f"{archive.name}: sha256 {hashlib.sha256(archive.read_bytes()).hexdigest()}")
 

@@ -20,12 +20,12 @@ constexpr f32 kHitbox = 3.0f, kGrazeRing = 18.0f;
 } // namespace
 
 Collider2 ship_collider() { return collider_circle(kHitbox, L_SHIP, L_BULLET | L_AIR); }
-Collider2 ring_collider() { return collider_circle(kGrazeRing, L_GRAZE, L_BULLET); }
+Collider2 ring_collider() { return collider_circle(kGrazeRing, L_GRAZE, L_BULLET | L_ITEM); }
 
 Handle ship_spawn(Engine& e, Game& g) {
     Table* ships = engine_table(e, g_ship_kind);
     Handle ship = ships->spawn(transform2_at(kShipStart), sprite_of(g, TEX_SHIPS, ship_uv(0, 0), vec2{64, 64}, Z_SHIP), ship_collider(),
-                               Ship{0, 1, 0, 0});
+                               Ship{0, 1, 0, 0, 0});
     // The ring and the dot show only while focused.
     Sprite ring = sprite_of(g, TEX_RING, rect2_unit(), vec2{2 * kGrazeRing, 2 * kGrazeRing}, Z_MARK, color{0.6f, 0.9f, 1.0f, 0.0f}, true);
     g.ring = engine_table(e, g_ring_kind)->spawn(transform2_at(kShipStart), Local2{}, Parent{ship}, ring, ring_collider());

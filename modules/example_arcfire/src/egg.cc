@@ -49,17 +49,7 @@ void break_up(TickContext& ctx, Game& g, const EggState& es, Transform2& xf, Spr
         vec2 v{sx * g.fx.range(1.0f, 2.2f), sy * g.fx.range(1.0f, 2.2f)};
         fx_piece(ctx, g, xf.position + vec2{sx * 16.0f, sy * 16.0f}, TEX_SHIPS, uv, vec2{32, 32}, v, g.fx.range(-0.2f, 0.2f), 90, Z_SHIP);
     }
-    u32 cancelled = 0;
-    const u32 kinds[] = {g_bullet_kind, g_active_kind};
-    for (u32 kind : kinds) {
-        const Table* bullets_table = ctx.read_kind(kind);
-        Span<const Transform2> bt = bullets_table->rows_of<Transform2>();
-        for (u32 i = 0; i < bullets_table->rows(); ++i) {
-            if (!bullets_table->is_alive(i) || length_sq(bt[i].position - es.at) > kCancelRadius * kCancelRadius) continue;
-            ctx.destroy(bullets_table->handle_at(i));
-            if (cancelled++ < 64) fx_sparks(ctx, g, bt[i].position, 2, color{1.0f, 0.95f, 0.6f, 1.0f}, 1.5f);
-        }
-    }
+    u32 cancelled = cancel_bullets(ctx, g, es.at, kCancelRadius, nullptr); // into chips, to collect after
     g.shake = 10.0f;
     KV_INFO("arcfire", "egg: the ship breaks at (%.0f, %.0f), tick %llu, %u bullets cancelled", (f64)es.at.x, (f64)es.at.y,
             (unsigned long long)ctx.tick, cancelled);
@@ -183,16 +173,18 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
         es = EggState{};
         es.step = (u32)EggStep::Breaking;
         es.at = died_at ? died_at->position : kShipStart;
+        r.bombs = kBaseBombs; // a death puts the bombs back to two
         KV_INFO("arcfire", "died: %s at tick %llu, %d eggs left", d.cause ? "rammed" : "shot", (unsigned long long)ctx.tick, r.eggs);
         return;
     }
     // Out of eggs: everything the stage made goes, the stage's clock goes back to its
     // start, and anything it had scheduled is of an epoch that no longer spawns.
-    const u32 kinds[] = {g_air_kind, g_ground_kind, g_bullet_kind, g_active_kind, g_shot_kind, g_egg_kind, g_shell_kind};
+    const u32 kinds[] = {g_air_kind, g_ground_kind, g_bullet_kind, g_active_kind, g_shot_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind};
     for (u32 k : kinds) ctx.destroy_all(k);
     stage_reset(stage_row[0], g.stage);
     r.score = r.stage_score;
     r.eggs = 3;
+    r.bombs = kBaseBombs;
     ++r.restarts;
     ++r.epoch;
     es = EggState{};
@@ -201,6 +193,7 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
         *xf = transform2_at(kShipStart);
         *ships->prev<Transform2>(g.ship) = *xf;
         ships->get<Ship>(g.ship)->live = 1;
+        ships->get<Ship>(g.ship)->guard = 0;
         ships->get<Sprite>(g.ship)->tint.a = 1.0f;
         *ships->get<Collider2>(g.ship) = ship_collider();
     }

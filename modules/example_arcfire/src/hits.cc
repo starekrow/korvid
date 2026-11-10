@@ -33,7 +33,8 @@ void ship_dies(TickContext& ctx, Ship& s, u32 cause) {
 void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
     Engine& e = *ctx.engine;
     const u16 ship = hk(e, g_ship_kind), ring = hk(e, g_ring_kind), shell = hk(e, g_shell_kind), shot = hk(e, g_shot_kind),
-              air = hk(e, g_air_kind), ground = hk(e, g_ground_kind), plain = hk(e, g_bullet_kind), active = hk(e, g_active_kind);
+              air = hk(e, g_air_kind), ground = hk(e, g_ground_kind), plain = hk(e, g_bullet_kind), active = hk(e, g_active_kind),
+              item = hk(e, g_item_kind);
     for (const OverlapBegin& o : overlaps) {
         for (u32 swap = 0; swap < 2; ++swap) {
             Handle a = swap ? o.b : o.a, b = swap ? o.a : o.b;
@@ -44,6 +45,7 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
             else if (ka == air && kb == ship) ctx.emit(Rammed{a});
             else if (bullet_a && kb == ring) ctx.emit(Graze{a});
             else if (bullet_a && kb == shell) ctx.emit(ShellHit{a});
+            else if (ka == item && kb == ring) ctx.emit(Pickup{a});
         }
     }
 }
@@ -58,6 +60,7 @@ void on_shot_hit(TickContext& ctx, Span<const ShotHit> hits) {
     Span<Health> ground_hp = ctx.write<Health>("example_arcfire.ground.Health");
     Span<const Transform2> air_xf = ctx.read<Transform2>("example_arcfire.air.Transform2");
     Span<const Transform2> ground_xf = ctx.read<Transform2>("example_arcfire.ground.Transform2");
+    Span<const Mover> air_mv = ctx.read<Mover>("example_arcfire.air.Mover");
     const u16 air = hk(e, g_air_kind);
     for (const ShotHit& h : hits) {
         Shot& s = shot[h.shot.index()];
@@ -73,7 +76,7 @@ void on_shot_hit(TickContext& ctx, Span<const ShotHit> hits) {
         fx_sparks(ctx, g, at, 2, kSparkHit, 2.0f);
         if (hp.hp <= 0) {
             ctx.destroy(h.target);
-            ctx.emit(Kill{at, hp.score, 0});
+            ctx.emit(Kill{at, hp.score, 0, is_air ? air_mv[h.target.index()].formation : Handle{}});
         }
     }
 }
@@ -131,14 +134,26 @@ void on_shell_hit(TickContext& ctx, Span<const ShellHit> hits) {
     }
 }
 
+// A kill pays; a formation's last member shot down drops a bomb where it fell.
 void on_kill(TickContext& ctx, Span<const Kill> kills) {
     Game& g = ctx.state_as<Game>();
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
     Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
+    Table* formations = ctx.write_kind(g_formation_kind);
     if (!run.len) return;
     for (const Kill& k : kills) {
         run[0].score += k.score;
         ++run[0].kills;
+        if (Formation* f = formations->get<Formation>(k.formation)) {
+            ++f->killed;
+            if (f->killed + f->gone >= f->count) {
+                if (f->gone == 0) {
+                    item_drop(ctx, g, ItemBomb, k.at, vec2{0.0f, 1.5f});
+                    KV_INFO("arcfire", "formation shot down at tick %llu: a bomb drops", (unsigned long long)ctx.tick);
+                }
+                formations->destroy(k.formation);
+            }
+        }
         fx_sparks(ctx, g, k.at, dials[0].particles * 2, kSparkKill, 4.0f);
         g.shake = g.shake > 3.0f ? g.shake : 3.0f;
     }

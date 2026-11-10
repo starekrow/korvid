@@ -27,20 +27,23 @@ build/linux-dev/bin/example_arcfire
 
 Controls: arrows or WASD (or the left stick or the d-pad) fly; Z or Space (South) fires,
 held; Shift (West) focuses: half speed, the hitbox and the graze ring shown, the spread
-narrowed; Escape (Start) pauses; Q quits. X (East) is the bomb, which does nothing yet.
+narrowed; X (East) bombs; Escape (Start) pauses; Q quits.
 
 The ways it flies itself:
 
 - `--demo` plays a scripted minute and quits at the stage's end: it fires throughout,
   flies focused through the first formation's stream (the ring grazes), dodges by the bot's
-  rule, stands in a bullet from tick 1500 until one finds it (the egg plays once), and the
-  end mark quits it. `--demo --hash` prints the state hash every sim tick. The hashes match
+  rule, bombs in the spiral at tick 1440 and climbs past the magnet line for the chips,
+  stands in a bullet from tick 1650 until one finds it (the egg plays once), and the end
+  mark quits it. `--demo --hash` prints the state hash every sim tick. The hashes match
   across runs, thread counts (`--threads 1`, `--threads 8`), I/O backends (`--io sync`,
   `--io uring`) and asset sources (loose files, `--pack` with a kpak of `bin/assets`, or
   `--pack` with a zip of it).
-- `--autoplay` puts the bot on the stick at Normal: it holds fire, sidesteps the bullets
-  whose lines would pass within 30 units, keeps off the air enemies and the walls, and
-  otherwise lines up under the nearest enemy.
+- `--autoplay` puts the bot on the stick at Normal: it holds fire, steps away from each
+  bullet's closest pass in the next 40 ticks when it comes within 26 units, keeps off the
+  air enemies and the walls, lines up under the nearest enemy, and bombs when more than 40
+  bullets close in. The demo and the bot hold every gameplay action every tick, so a key
+  touched while they fly changes nothing.
 - `--stress` turns the dials to their stress position: rank 24, three times the
   formations at half the spacing, four times the sparks, the planes in 128-unit tiles,
   twice the enemy health, the bot flying an invulnerable ship, the stage looping.
@@ -100,14 +103,24 @@ state.
 - **Hits** (`hits.cc`): `on_overlap` sorts the collision module's pairs by kind into
   `ShotHit`, `BulletHit`, `Rammed`, `Graze` and `ShellHit`. The handlers that change the
   run are chained so a bullet that hits the hitbox takes back its own graze first.
+- **The bomb** (`bomb.cc`): with one in hand, every bullet on the field is cancelled into
+  chips, every enemy on the field takes the blast (a handler, as a shot's hit), the screen
+  flashes and shakes, and the hitbox meets nothing for two seconds. Two an egg; a death
+  puts the count back to two; at most six.
+- **Items** (`items.cc`): a cancelled bullet becomes a score chip (at most 256 a cancel;
+  the rest are paid at once); a formation shot down to its last member drops a bomb where
+  it fell (a `formation` row counts its members killed and gone). Items pop up and fall,
+  and come to the ship above the magnet line or within a short reach; the graze ring
+  picks them up.
 - **The egg** (`egg.cc`): a death slows time to a quarter (`engine_time_scale`, set each
   tick by the sequence), breaks the ship into its four quarters, cancels the bullets near
-  it, drops the egg (a spherical machine) that rests, builds the new ship around itself as
-  time comes back and falls away in halves, and leaves a shell around it for two seconds that eats bullets. Out of eggs, the stage starts over
-  behind a cover: everything it made is gone, the distance is 0, the score is what it was
-  when the stage began, the eggs are 3 again and the restart is counted.
+  it into chips, drops the egg (a spherical machine) that rests, builds the new ship
+  around itself as time comes back and falls away in halves, and leaves a shell around it
+  for two seconds that eats bullets. Out of eggs, the stage starts over behind a cover:
+  everything it made is gone, the distance is 0, the score is what it was when the stage
+  began, the eggs are 3 again and the restart is counted.
 - **The HUD** (`hud.cc`) is `assets/ui/arcfire.ui.json`: the side panels, the score, the
-  eggs as pips, the restarts, the grazes, the stage and its distance, the dev counters,
+  eggs and the bombs as pips, the restarts, the grazes, the stage and its distance, the dev counters,
   and the pause, cover and stage-clear screens. The HUD system writes the model each tick.
 - **Pilots** (`pilot.cc`): the demo's script and the bot share one steering rule. Both
   drive the action map with `input_action_override`.
@@ -128,6 +141,7 @@ state.
 | `src/planes.cc`, `src/ship.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves |
 | `src/patterns.cc`, `assets/patterns/` | the library and the runners; the ten patterns |
 | `src/hits.cc`, `src/egg.cc` | what happens when things meet; the death and the restart |
+| `src/bomb.cc`, `src/items.cc` | the bomb; chips, pickups and the magnet |
 | `src/hud.cc`, `src/fx.cc`, `src/pilot.cc`, `src/stats.cc` | the camera and the screens; particles; the demo and the bot; the reports |
 | `src/main.cc` | the frame loop's config and the game's flags |
 | `assets/stages/shoreline.stage.json` | the stage |

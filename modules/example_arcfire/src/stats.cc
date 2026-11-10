@@ -43,6 +43,7 @@ void stats(TickContext& ctx) {
     s.bullets = engine_table(e, g_bullet_kind)->live() + s.actives;
     s.runners = ctx.paused ? 0 : g.runners_stepped;
     s.fires = s.bullets_spawned;
+    s.items = engine_table(e, g_item_kind)->live();
     s.sprites = live_sprites(e);
     s.bullets_spawned = ctx.paused ? 0 : g.bullets_spawned;
     s.bullets_destroyed = bullets_before + s.bullets_spawned > s.bullets ? bullets_before + s.bullets_spawned - s.bullets : 0;
@@ -62,6 +63,7 @@ void stats(TickContext& ctx) {
     peak_of(g.peak.bullets_spawned, s.bullets_spawned);
     peak_of(g.peak.actives, s.actives);
     peak_of(g.peak.runners, s.runners);
+    peak_of(g.peak.items, s.items);
     g.sum_bullets += s.bullets;
     g.sum_sprites += s.sprites;
     g.sum_deltas += s.deltas;
@@ -82,9 +84,9 @@ void stats(TickContext& ctx) {
 void stats_summary(Game& g) {
     f64 n = g.sampled ? (f64)g.sampled : 1.0;
     KV_INFO("arcfire", "summary over %llu ticks: bullets peak %u mean %.0f; sprites peak %u mean %.0f; deltas peak %u mean %.0f; "
-                       "pairs tested peak %u mean %.0f; colliders peak %u; bullets spawned peak %u a tick; active peak %u; runners peak %u",
+                       "pairs tested peak %u mean %.0f; colliders peak %u; bullets spawned peak %u a tick; active peak %u; runners peak %u; items peak %u; chips made %u, past the cap %u",
             (unsigned long long)g.sampled, g.peak.bullets, g.sum_bullets / n, g.peak.sprites, g.sum_sprites / n, g.peak.deltas, g.sum_deltas / n,
-            g.peak.pairs_tested, g.sum_pairs / n, g.peak.colliders, g.peak.bullets_spawned, g.peak.actives, g.peak.runners);
+            g.peak.pairs_tested, g.sum_pairs / n, g.peak.colliders, g.peak.bullets_spawned, g.peak.actives, g.peak.runners, g.peak.items, g.stats.chips_made, g.stats.chips_refused);
 }
 
 // The way out. A handler, so a quit asked for while paused still happens; the summary is

@@ -27,9 +27,13 @@ constinit const Step k_script[] = {
     {20, 70, "move", -1, 0},       // over to the left
     {70, 100, "move", 0, 1},       // and up, toward the first formation
     {180, 300, "focus", 0, 0},     // focused: the ring shows, the ship slows through the stream
+    {1440, 1441, "bomb", 0, 0},    // in the spiral: a bomb, the field to chips
+    {1442, 1530, "move", 0, 1},    // up past the magnet line: every chip comes
 };
-constexpr u64 kScriptTo = 300;     // from here the rule flies
-constexpr u64 kStandFrom = 1500;   // the demo stops dodging until it has died once
+constexpr u64 kScriptTo = 300;     // from here the rule flies (but for the steps above)
+constexpr u64 kBombFrom = 1442, kBombTo = 1530; // the climb after the bomb, guarded
+constexpr u64 kStandFrom = 1650;   // the demo stops dodging until it has died once
+constexpr u32 kCrowd = 40;         // the bot bombs when this many bullets close in
 constexpr f32 kClear = 26.0f;      // the bot's margin: clear of the ring
 constexpr f32 kGrazeClear = 11.0f; // the demo's, focused: inside the ring, outside the hitbox
 
@@ -92,6 +96,15 @@ vec2 steer(Engine& e, const Game& g, f32 clear) {
     return vec2{clampf((goal_x - p.x) / 60.0f, -1.0f, 1.0f), clampf((kShipStart.y - p.y) / 60.0f, -1.0f, 1.0f)};
 }
 
+// A pilot holds every gameplay action, every tick: what it does not press is held up, so
+// a key or a pad's stick touched while it flies changes nothing (the run stays the run).
+void release_all(Engine& e) {
+    input_action_override(e, "move", false);
+    input_action_override(e, "shot", false);
+    input_action_override(e, "focus", false);
+    input_action_override(e, "bomb", false);
+}
+
 } // namespace
 
 // Phase Input, before the sample, every sim tick.
@@ -100,6 +113,7 @@ void demo(TickContext& ctx) {
     if (!g.demo || !g.stage_ready) return;
     Engine& e = *ctx.engine;
     u64 t = ctx.tick;
+    release_all(e);
     input_action_override(e, "shot", true);
     for (const Step& s : k_script)
         if (t >= s.from && t < s.to) input_action_override(e, s.action, true, vec2{s.x, s.y});
@@ -108,6 +122,7 @@ void demo(TickContext& ctx) {
         return;
     }
     const Run* r = engine_table(e, g_world_kind)->get<Run>(g.world);
+    if (t >= kBombFrom && t < kBombTo) return;           // the climb, scripted above
     if (t >= kStandFrom && r && r->deaths == 0) return; // standing in the stream
     input_action_override(e, "move", true, steer(e, g, kClear));
 }
@@ -117,8 +132,30 @@ void bot(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
     if (!dials.len || !dials[0].bot) return;
-    input_action_override(*ctx.engine, "move", true, steer(*ctx.engine, g, kClear));
-    input_action_override(*ctx.engine, "shot", true);
+    Engine& e = *ctx.engine;
+    release_all(e);
+    input_action_override(e, "move", true, steer(e, g, kClear));
+    input_action_override(e, "shot", true);
+    // A bomb, when the bullets crowd in and there is one to spend (not under stress: the
+    // ship cannot die there, and the stress wants the bullets).
+    const Run* r = engine_table(e, g_world_kind)->get<Run>(g.world);
+    const Table* ships = engine_table(e, g_ship_kind);
+    const Ship* s = ships->get<Ship>(g.ship);
+    const Transform2* sx = ships->get<Transform2>(g.ship);
+    if (dials[0].invulnerable || !r || r->bombs <= 0 || !s || !s->live || s->guard || !sx) return;
+    u32 close = 0;
+    const u32 kinds[] = {g_bullet_kind, g_active_kind};
+    for (u32 kind : kinds) {
+        const Table* t = engine_table(e, kind);
+        Span<const Transform2> bt = t->rows_of<Transform2>();
+        Span<const Velocity> bv = t->rows_of<Velocity>();
+        for (u32 i = 0; i < t->rows() && close <= kCrowd; ++i) {
+            if (!t->is_alive(i)) continue;
+            vec2 d = sx->position - bt[i].position;
+            if (length_sq(d) < 80.0f * 80.0f && dot(bv[i].v, d) > 0.0f) ++close;
+        }
+    }
+    if (close > kCrowd) input_action_override(e, "bomb", true);
 }
 
 } // namespace kv::arcfire

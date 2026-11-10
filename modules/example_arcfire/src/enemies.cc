@@ -27,6 +27,7 @@ void enemies(TickContext& ctx) {
     point2 target = ship_xf[g.ship.index()].position;
 
     Table* air = ctx.write_kind(g_air_kind);
+    Table* formations = ctx.write_kind(g_formation_kind);
     Span<Transform2> at = air->rows_of<Transform2>();
     Span<Mover> mv = air->rows_of<Mover>();
     Span<Emitter> em = air->rows_of<Emitter>();
@@ -37,7 +38,13 @@ void enemies(TickContext& ctx) {
         if (!air->is_alive(i)) continue;
         Mover& m = mv[i];
         m.s += m.speed;
-        if (m.s >= m.path.length) { ctx.destroy(air->handle_at(i)); continue; }
+        if (m.s >= m.path.length) { // away: its formation will not be shot down whole
+            if (Formation* f = formations->get<Formation>(m.formation)) {
+                if (f->killed + ++f->gone >= f->count) formations->destroy(m.formation);
+            }
+            ctx.destroy(air->handle_at(i));
+            continue;
+        }
         at[i].position = path_at(m.path, m.s);
         // Its pattern starts where its formation said along the path, once it is on the field.
         if (em[i].state == EmitIdle && m.s >= em[i].at * m.path.length && in_field(at[i].position, -16.0f))

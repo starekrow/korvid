@@ -17,7 +17,8 @@
 namespace kv::arcfire {
 
 constinit u32 g_world_kind = 0, g_plane_kind = 0, g_ship_kind = 0, g_ring_kind = 0, g_mark_kind = 0, g_shot_kind = 0, g_air_kind = 0,
-              g_ground_kind = 0, g_bullet_kind = 0, g_active_kind = 0, g_particle_kind = 0, g_egg_kind = 0, g_shell_kind = 0;
+              g_ground_kind = 0, g_bullet_kind = 0, g_active_kind = 0, g_particle_kind = 0, g_egg_kind = 0, g_shell_kind = 0,
+              g_item_kind = 0, g_formation_kind = 0;
 
 // The systems and handlers, each in the file of its part.
 void demo(TickContext&);         // pilot.cc
@@ -34,6 +35,10 @@ void enemies(TickContext&);      // enemies.cc
 void patterns(TickContext&);     // patterns.cc
 void bullets(TickContext&);      // bullets.cc
 void particles(TickContext&);    // fx.cc
+void items(TickContext&);        // items.cc
+void on_pickup(TickContext&, Span<const Pickup>);
+void bomb(TickContext&);         // bomb.cc
+void on_bomb(TickContext&, Span<const Bombed>);
 void egg(TickContext&);          // egg.cc
 void on_ship_died(TickContext&, Span<const ShipDied>);
 void on_overlap(TickContext&, Span<const OverlapBegin>); // hits.cc
@@ -56,7 +61,9 @@ namespace {
 
 constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, v)};
 constinit const FieldDesc k_plane_fields[]    = {KV_FIELDS(Plane, rate, row, col, rows)};
-constinit const FieldDesc k_ship_fields[]     = {KV_FIELDS(Ship, cooldown, live, focus, shots)};
+constinit const FieldDesc k_ship_fields[]     = {KV_FIELDS(Ship, cooldown, live, focus, shots, guard)};
+constinit const FieldDesc k_formation_fields[] = {KV_FIELDS(Formation, count, killed, gone, pad)};
+constinit const FieldDesc k_item_fields[]     = {KV_FIELDS(Item, kind, value, life, pad)};
 constinit const FieldDesc k_shot_fields[]     = {KV_FIELDS(Shot, damage, spent)};
 constinit const FieldDesc k_health_fields[]   = {KV_FIELDS(Health, hp, flash, score, look)};
 // The path is a struct of its own (path.h), so its fields are named by hand.
@@ -67,6 +74,7 @@ constinit const FieldDesc k_mover_fields[] = {
     {"count", FieldType::U32, 1, (u16)offsetof(Mover, path.count)},
     {"speed", FieldType::F32, 1, (u16)offsetof(Mover, speed)},
     {"s", FieldType::F32, 1, (u16)offsetof(Mover, s)},
+    {"formation", FieldType::Handle, 1, (u16)offsetof(Mover, formation)},
 };
 constinit const FieldDesc k_emitter_fields[]  = {KV_FIELDS(Emitter, pattern, at, state, timer)};
 constinit const FieldDesc k_runner_fields[]   = {KV_FIELDS(BmlRunner, rng, wait, frame16, frame8, track8, params, last, term, delta, dir, speed, mx, my, flags)};
@@ -77,7 +85,7 @@ constinit const FieldDesc k_eggbody_fields[]  = {KV_FIELDS(EggBody, vy, drift)};
 constinit const FieldDesc k_dials_fields[]    = {KV_FIELDS(Dials, position, rank, bullet_speed, formation_count, formation_spacing, particles,
                                                            plane_density, enemy_health, bot, invulnerable, loops)};
 constinit const FieldDesc k_stage_fields[]    = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, pad)};
-constinit const FieldDesc k_run_fields[]      = {KV_FIELDS(Run, score, stage_score, eggs, restarts, epoch, kills, grazes, deaths)};
+constinit const FieldDesc k_run_fields[]      = {KV_FIELDS(Run, score, stage_score, eggs, restarts, epoch, kills, grazes, deaths, bombs, chips)};
 constinit const FieldDesc k_eggstate_fields[] = {KV_FIELDS(EggState, step, t, at, shell, restart)};
 constinit const FieldDesc k_chance_fields[]   = {KV_FIELDS(Chance, state, inc)};
 
@@ -87,7 +95,8 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Emitter, k_emitter_fields),   KV_COMPONENT(Ground, k_ground_fields), KV_COMPONENT(Bullet, k_bullet_fields),
     KV_COMPONENT(Particle, k_particle_fields), KV_COMPONENT(EggBody, k_eggbody_fields), KV_COMPONENT(Dials, k_dials_fields),
     KV_COMPONENT(Stage, k_stage_fields),       KV_COMPONENT(Run, k_run_fields),       KV_COMPONENT(EggState, k_eggstate_fields),
-    KV_COMPONENT(Chance, k_chance_fields),       KV_COMPONENT(Runner, k_runner_fields),
+    KV_COMPONENT(Chance, k_chance_fields),       KV_COMPONENT(Runner, k_runner_fields), KV_COMPONENT(Formation, k_formation_fields),
+    KV_COMPONENT(Item, k_item_fields),
 };
 
 // ---- kinds ---------------------------------------------------------------------------------------
@@ -109,6 +118,9 @@ constinit const KindDesc k_kinds[] = {
     {.name = ".particle", .components = "Transform2, Sprite, Velocity, Particle", .capacity = 32768, .id = &g_particle_kind, .cosmetic = true},
     {.name = ".egg",      .components = "Transform2, Sprite, EggBody", .capacity = 1, .id = &g_egg_kind},
     {.name = ".shell",    .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_shell_kind},
+    // Chips and pickups; a formation's count of its members.
+    {.name = ".item",     .components = "Transform2, Sprite, Velocity, Collider2, Item", .capacity = 4096, .id = &g_item_kind},
+    {.name = ".formation", .components = "Formation", .capacity = 64, .id = &g_formation_kind},
 };
 
 // ---- events --------------------------------------------------------------------------------------
@@ -118,14 +130,17 @@ constinit const FieldDesc k_bullet_hit_fields[] = {KV_FIELDS(BulletHit, bullet)}
 constinit const FieldDesc k_rammed_fields[]    = {KV_FIELDS(Rammed, enemy)};
 constinit const FieldDesc k_graze_fields[]     = {KV_FIELDS(Graze, bullet)};
 constinit const FieldDesc k_shell_hit_fields[] = {KV_FIELDS(ShellHit, bullet)};
-constinit const FieldDesc k_kill_fields[]      = {KV_FIELDS(Kill, at, score, pad)};
+constinit const FieldDesc k_kill_fields[]      = {KV_FIELDS(Kill, at, score, pad, formation)};
+constinit const FieldDesc k_bombed_fields[]    = {KV_FIELDS(Bombed, at, cancelled, pad)};
+constinit const FieldDesc k_pickup_fields[]    = {KV_FIELDS(Pickup, item)};
 constinit const FieldDesc k_died_fields[]      = {KV_FIELDS(ShipDied, at, cause, pad)};
-constinit const FieldDesc k_member_fields[]    = {KV_FIELDS(SpawnMember, formation, member, epoch, pad)};
+constinit const FieldDesc k_member_fields[]    = {KV_FIELDS(SpawnMember, formation, member, epoch, pad, group)};
 constinit const FieldDesc k_end_fields[]       = {KV_FIELDS(StageEnd, loops, pad)};
 constinit const EventTypeDesc k_events[] = {
     KV_EVENT_EX(ShotHit, k_shot_hit_fields, 0),   KV_EVENT_EX(BulletHit, k_bullet_hit_fields, 0), KV_EVENT_EX(Rammed, k_rammed_fields, 0),
     KV_EVENT_EX(Graze, k_graze_fields, 0),        KV_EVENT_EX(ShellHit, k_shell_hit_fields, 0),   KV_EVENT_EX(Kill, k_kill_fields, 0),
-    KV_EVENT_EX(ShipDied, k_died_fields, 0),      KV_EVENT_EX(SpawnMember, k_member_fields, 0),   KV_EVENT_EX(StageEnd, k_end_fields, 0),
+    KV_EVENT_EX(Bombed, k_bombed_fields, 0),      KV_EVENT_EX(Pickup, k_pickup_fields, 0),
+    KV_EVENT_EX(ShipDied, k_died_fields, 0),      KV_EVENT_EX(SpawnMember, k_member_fields, EvStaleOk),   KV_EVENT_EX(StageEnd, k_end_fields, 0), // SpawnMember: a restart's formations go, their members' events with them
 };
 
 constinit const ResourceDesc k_resources[] = {{".stats"}};
@@ -154,18 +169,21 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet.Transform2, ^.bullet.Velocity, ^.active.Transform2, ^.active.Velocity, ^.ship.Transform2, ^.air.Transform2, ^.ground.Transform2, .world.Dials",
      .main_thread = true},
     {.name = ".scroll", .phase = Phase::Sim, .fn = scroll, .writes = ".world.Stage"},
-    {.name = ".stage", .phase = Phase::Sim, .fn = stage, .reads = ".world.Dials, .world.Run", .writes = ".world.Stage", .after = ".scroll"},
+    {.name = ".stage", .phase = Phase::Sim, .fn = stage, .reads = ".world.Dials, .world.Run", .writes = ".world.Stage, .formation", .after = ".scroll"},
     {.name = ".planes", .phase = Phase::Sim, .fn = planes, .reads = ".world.Stage, .plane.Plane, .plane.Sprite", .writes = ".plane.Transform2", .state = StateUse::None},
     {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "input.actions, .world.Dials",
      .writes = ".ship.Transform2, .ship.Ship, .ship.Sprite, .shot, .ring.Sprite, .mark.Sprite"},
     {.name = ".shots", .phase = Phase::Sim, .fn = shots, .reads = ".shot.Velocity", .writes = ".shot.Transform2", .after = ".control", .state = StateUse::None},
-    {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage", .writes = ".air, .ground", .state = StateUse::Read},
+    {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage", .writes = ".air, .ground, .formation", .state = StateUse::Read},
     {.name = ".patterns", .phase = Phase::Sim, .fn = patterns, .reads = ".ship.Transform2, .world.Dials, .air.Transform2, .ground.Transform2",
      .writes = ".air.Emitter, .air.Runner, .ground.Emitter, .ground.Runner, .active", .after = ".enemies"},
     {.name = ".bullets", .phase = Phase::Sim, .fn = bullets, .reads = ".bullet.Velocity, .active.Velocity",
      .writes = ".bullet.Transform2, .bullet.Bullet, .active.Transform2, .active.Bullet", .after = ".patterns", .state = StateUse::None},
     {.name = ".egg", .phase = Phase::Sim, .fn = egg, .reads = "^.bullet, ^.active", .writes = ".world.EggState, .world.Chance, .ship, .ring.Collider2, .egg, .shell",
      .after = ".control", .main_thread = true},
+    {.name = ".bomb", .phase = Phase::Sim, .fn = bomb, .reads = "input.actions, ^.bullet, ^.active, .world.EggState, .ship.Transform2",
+     .writes = ".world.Run, .ship.Ship, .ship.Collider2", .after = ".egg", .main_thread = true},
+    {.name = ".items", .phase = Phase::Sim, .fn = items, .reads = ".ship.Transform2, .ship.Ship", .writes = ".item"},
     {.name = ".particles", .phase = Phase::Sim, .fn = particles, .writes = ".particle", .state = StateUse::None},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true,
      .runs = RunWhen::Always},
@@ -181,16 +199,19 @@ constinit const SystemDesc k_systems[] = {
 // death, the stage's end.
 constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_overlap", KV_ON(OverlapBegin, on_overlap)},
-    {.name = ".on_shot_hit", KV_ON(ShotHit, on_shot_hit), .reads = ".air.Transform2, .ground.Transform2", .writes = ".air.Health, .ground.Health, .shot.Shot"},
+    {.name = ".on_shot_hit", KV_ON(ShotHit, on_shot_hit), .reads = ".air.Transform2, .ground.Transform2, .air.Mover", .writes = ".air.Health, .ground.Health, .shot.Shot"},
+    {.name = ".on_bomb", KV_ON(Bombed, on_bomb), .reads = ".air.Transform2, .ground.Transform2, .air.Mover", .writes = ".air.Health, .ground.Health",
+     .after = ".on_shot_hit"},
     {.name = ".on_bullet_hit", KV_ON(BulletHit, on_bullet_hit), .reads = ".world.Dials",
      .writes = ".bullet.Bullet, .active.Bullet, .world.Run, .ship.Ship"},
     {.name = ".on_rammed", KV_ON(Rammed, on_rammed), .reads = ".world.Dials", .writes = ".ship.Ship", .after = ".on_bullet_hit"},
     {.name = ".on_graze", KV_ON(Graze, on_graze), .reads = ".bullet.Transform2, .active.Transform2", .writes = ".bullet.Bullet, .active.Bullet, .world.Run",
      .after = ".on_bullet_hit"},
     {.name = ".on_shell_hit", KV_ON(ShellHit, on_shell_hit), .reads = ".bullet.Transform2, .active.Transform2"},
-    {.name = ".on_kill", KV_ON(Kill, on_kill), .reads = ".world.Dials", .writes = ".world.Run", .after = ".on_graze"},
+    {.name = ".on_kill", KV_ON(Kill, on_kill), .reads = ".world.Dials", .writes = ".world.Run, .formation", .after = ".on_graze"},
+    {.name = ".on_pickup", KV_ON(Pickup, on_pickup), .reads = ".item.Item, .item.Transform2", .writes = ".world.Run", .after = ".on_kill"},
     {.name = ".on_ship_died", KV_ON(ShipDied, on_ship_died),
-     .writes = ".world.Run, .world.EggState, .world.Stage, .ship", .after = ".on_kill, .on_rammed"},
+     .writes = ".world.Run, .world.EggState, .world.Stage, .ship", .after = ".on_pickup, .on_rammed"},
     {.name = ".on_member", KV_ON(SpawnMember, on_member), .reads = ".world.Run, .world.Dials"},
     {.name = ".on_stage_end", KV_ON(StageEnd, on_stage_end), .writes = ".world.Run", .after = ".on_ship_died"},
     {.name = ".on_exit", KV_ON(ExitRequested, on_exit)},

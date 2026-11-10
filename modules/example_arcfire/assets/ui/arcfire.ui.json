@@ -19,7 +19,8 @@
       "black": "#000000ff"
     },
     "images": {
-      "egg": { "texture": "example_arcfire/made/eggs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 }
+      "egg": { "texture": "example_arcfire/made/eggs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 },
+      "bomb": { "texture": "example_arcfire/made/bombs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 }
     }
   },
   "screens": {
@@ -36,6 +37,9 @@
                 { "type": "box", "name": "gap1", "size": [8, 16] },
                 { "type": "label", "name": "eggs_title", "text": "EGGS", "color": "dim" },
                 { "type": "meter", "name": "eggs", "image": "egg", "value": "=eggs", "max": "=eggs_max", "gap": 6 },
+                { "type": "box", "name": "gap_bombs", "size": [8, 8] },
+                { "type": "label", "name": "bombs_title", "text": "BOMBS", "color": "dim" },
+                { "type": "meter", "name": "bombs", "image": "bomb", "value": "=bombs", "max": "=bombs_max", "gap": 6 },
                 { "type": "box", "name": "gap2", "size": [8, 16] },
                 { "type": "label", "name": "restarts", "text": "RESTARTS {=restarts}", "color": "dim" },
                 { "type": "label", "name": "grazes", "text": "GRAZE {=grazes}", "color": "cyan" } ] } ] },

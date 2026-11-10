@@ -153,3 +153,21 @@ state, and the 24,000 plain bullets carry none of it.
 **M4. Normal under the bot** (`--autoplay`, the minute). Bullets peak 161, mean 23; no
 deaths, 12 grazes, 57 kills. (The run's fps dropped to 47 after the window lost focus at
 tick 294: the compositor's throttling, not the game.)
+
+**M5. The bomb at scale** (`--bench ring --dial rank=200 --dial invulnerable=0`: one ring
+emitter at a rank that keeps 10,000 to 16,000 bullets up; the bot bombs when more than 40
+close in). Four bombs in 25 seconds, each into 13,380 to 14,431 bullets: the cancel (every
+bullet of both kinds found, destroyed by command, the first 256 made chips, the rest paid
+in score) took 1.23 ms the first time and 0.17 to 0.31 ms after. The destroys land at the
+next boundary; no frame of the run went past its vsync for it. In Shoreline's stress run
+with the ship vulnerable (`--stress --dial invulnerable=0`) the bot bombed at ticks 560
+(591 bullets) and 915 (1,479) and made 965 chips in the run, 1,614 bullets past the chips'
+cap paid at once; items peaked at 257.
+
+**M5. Normal under the bot, again** (`--autoplay`, the minute). No deaths, 12 grazes, 57
+kills, as in M4: the bot never felt crowded enough to bomb, and items peaked at 2 (the
+formations' bomb drops, which the bot does not go for). An earlier run of the same binary
+died three times; it could not be made to again, under load or not, and two runs side by
+side hash the same tick for tick. The likeliest cause is real input reaching the window:
+the bot did not hold `focus`, so a Shift (or a pad) would have halved the ship's speed. The
+pilots now hold every gameplay action every tick.

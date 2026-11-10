@@ -27,6 +27,7 @@ void hud_open(Engine& e, Game& g) {
     o.input = false;
     g.hud = ui_open(e, g.ui, "hud", o);
     ui_model_set_int(e, "eggs_max", 3);
+    ui_model_set_int(e, "bombs_max", kMaxBombs);
 }
 
 // The restart: a cut to black over the field, lifted after a moment (egg.cc counts it).
@@ -40,6 +41,16 @@ void hud_cover(Engine& e, Game& g, bool on) {
         ui_close(e, g.cover);
         g.cover = Handle{};
     }
+}
+
+// The bomb's flash: a white cover that closes in a moment and opens again, the sim not held.
+void hud_flash(Engine& e) {
+    UiCover c;
+    c.fx = UiFx::Fade;
+    c.seconds = 0.05f;
+    c.tint = color{1.0f, 1.0f, 0.96f, 0.85f};
+    c.hold = false;
+    ui_cover(e, c);
 }
 
 void hud_stage_clear(Engine& e, Game& g) {
@@ -110,6 +121,7 @@ void hud(TickContext& ctx) {
     const Run& r = run[0];
     ui_model_set_int(e, "score", r.score);
     ui_model_set_int(e, "eggs", r.eggs);
+    ui_model_set_int(e, "bombs", r.bombs);
     ui_model_set_int(e, "restarts", r.restarts);
     ui_model_set_int(e, "grazes", r.grazes);
     ui_model_set_str(e, "stage", g.stage.name);

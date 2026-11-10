@@ -87,6 +87,7 @@ void boot(TickContext& ctx) {
     stage_reset(s, g.stage);
     Run run{};
     run.eggs = 3;
+    run.bombs = kBaseBombs;
     Rng r = Rng::seeded(0xa2cf1e5eedull, 1); // the sim's stream: patterns and drift, the same every run
     Table* world = ctx.write_kind(g_world_kind);
     g.world = world->spawn(d, s, run, EggState{}, Chance{r.state, r.inc});
@@ -130,7 +131,9 @@ void stage(TickContext& ctx) {
             u32 count = (u32)lroundf((f32)f.count * d.formation_count);
             u32 spacing = (u32)lroundf((f32)f.spacing * d.formation_spacing);
             if (count == 0) count = 1;
-            for (u32 i = 0; i < count; ++i) ctx.schedule(SpawnMember{m.index, i, run_row[0].epoch, 0}, ctx.tick + (u64)i * spacing);
+            // Its row first, which counts its members down; then the members, by event.
+            Handle group = ctx.write_kind(g_formation_kind)->spawn(Formation{count, 0, 0, 0});
+            for (u32 i = 0; i < count; ++i) ctx.schedule(SpawnMember{m.index, i, run_row[0].epoch, 0, group}, ctx.tick + (u64)i * spacing);
             break;
         }
         case MarkKind::Ground: {
@@ -168,6 +171,7 @@ void on_member(TickContext& ctx, Span<const SpawnMember> members) {
         mv.path = g.stage.paths[f.path];
         mv.speed = f.speed;
         mv.s = 0.0f;
+        mv.formation = m.group;
         point2 at = path_at(mv.path, 0.0f);
         Health h{(i32)ceilf((f32)f.health * dials_row[0].enemy_health), 0, f.score, (u32)f.look};
         Emitter em{f.entry, f.fire_at, EmitIdle, 0};

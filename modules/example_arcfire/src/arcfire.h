@@ -32,23 +32,31 @@ constexpr u32 L_GROUND = 8;
 constexpr u32 L_BULLET = 16; // every enemy bullet, plain or running a program
 constexpr u32 L_GRAZE  = 32; // the ring around the hitbox
 constexpr u32 L_SHELL  = 64; // the egg's shell around a new ship
+constexpr u32 L_ITEM   = 128; // chips and pickups: the ring collects them
 
 // ---- sprite layers ----------------------------------------------------------------------
 // Back to front, the master PRD's planes. The HUD is the UI's, above all of them.
 constexpr i32 Z_DEEP = -30, Z_HIGH = -20, Z_GROUND = -10, Z_CLOUD = 10, Z_AIR = 20, Z_SHIP = 30, Z_SHOT = 25,
-              Z_BULLET = 40, Z_FX = 50, Z_MARK = 60;
+              Z_ITEM = 35, Z_BULLET = 40, Z_FX = 50, Z_MARK = 60;
 
 // ---- components -----------------------------------------------------------------------------
 
 struct Velocity { vec2 v; };                      // world units a tick
 struct Plane    { f32 rate; u32 row, col, rows; }; // a parallax tile: its plane's rate, its place in the grid
-// The player's ship. `live` is 0 while the egg plays (control does nothing, nothing hits).
-struct Ship     { u32 cooldown; u32 live; u32 focus; u32 shots; };
+// The player's ship. `live` is 0 while the egg plays (control does nothing, nothing hits);
+// `guard` counts the ticks a bomb keeps the hitbox out of play.
+struct Ship     { u32 cooldown; u32 live; u32 focus; u32 shots; u32 guard; };
 struct Shot     { i32 damage; u32 spent; };       // spent: it has hit something this tick
 // What can be shot. `flash` counts the ticks of the white flash left; `score` is paid at the kill.
 struct Health   { i32 hp; u32 flash; i32 score; u32 look; };
-// A formation member's path, measured, and how far along it is.
-struct Mover    { Path path; f32 speed; f32 s; };
+// A formation member's path, measured, how far along it is, and its formation.
+struct Mover    { Path path; f32 speed; f32 s; Handle formation; };
+// A formation in the air: its members, how many were shot down and how many got away.
+// Shot down to the last one, it drops a bomb where the last one fell.
+struct Formation { u32 count, killed, gone, pad; };
+// Something to pick up: a score chip (what a cancelled bullet becomes) or a bomb.
+enum ItemKind : u32 { ItemChip, ItemBomb };
+struct Item     { u32 kind; i32 value; u32 life; u32 pad; };
 // What an enemy fires: a pattern of the library (patterns.cc), started when an air row's
 // mover passes `at` (a fraction of its path) or while the ship is above a ground row,
 // and run by the row's Runner. `state`: EmitIdle, EmitRunning, EmitDone; `timer`: ticks
@@ -95,7 +103,10 @@ struct Run {
     u32 restarts;
     u32 epoch;             // +1 at every restart: scheduled spawns of an earlier epoch are dropped
     u32 kills, grazes, deaths;
+    i32 bombs;             // in hand: 2 at the start and after every death, at most kMaxBombs
+    u32 chips;             // picked up
 };
+constexpr i32 kBaseBombs = 2, kMaxBombs = 6;
 // The egg sequence (egg.cc): which step, its sim ticks, where the ship died.
 enum class EggStep : u32 { None, Breaking, Falling, Blooming, Shelled };
 struct EggState {
@@ -114,14 +125,18 @@ struct BulletHit  { Handle bullet; };          // a bullet on the hitbox
 struct Rammed     { Handle enemy; };           // an air enemy on the hitbox
 struct Graze      { Handle bullet; };
 struct ShellHit   { Handle bullet; };
-struct Kill       { point2 at; i32 score; u32 pad; }; // no handle: the enemy is gone by the time it is read, and the bus drops stale ones
+// The enemy's own handle is not in it (it is gone when this is read, and the bus drops
+// stale handles); its formation's is, which lives until its last member is accounted for.
+struct Kill       { point2 at; i32 score; u32 pad; Handle formation; };
+struct Bombed     { point2 at; u32 cancelled; u32 pad; };
+struct Pickup     { Handle item; };
 struct ShipDied   { point2 at; u32 cause; u32 pad; }; // cause 0 a bullet, 1 a ram; `at` is filled by the handler
-struct SpawnMember { u32 formation; u32 member; u32 epoch; u32 pad; }; // scheduled by a formation mark
+struct SpawnMember { u32 formation; u32 member; u32 epoch; u32 pad; Handle group; }; // scheduled by a formation mark; `group` its Formation row
 struct StageEnd   { u32 loops; u32 pad; };
 
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
-    g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind;
+    g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind;
 // The two bullet kinds: plain bullets, and bullets that run a program (needles, seeds).
 inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
 
@@ -156,6 +171,7 @@ struct Stats {
     u32 rows[16];          // live rows per kind, by kind id (stats.cc fills the ones it reports)
     u32 bullets, bullets_spawned, bullets_destroyed;
     u32 actives, runners, fires; // bullets that run programs; runners stepped; fires this tick
+    u32 items, chips_made, chips_refused; // items alive; chips made, and bullets cancelled past a cancel's cap, this run
     u32 sprites, deltas, pairs_tested, colliders, groups;
 };
 
@@ -244,10 +260,21 @@ u64    seed_of(Handle h, u64 tick, u32 salt);
 // The stage (stage.cc).
 void   stage_reset(Stage& s, const StageDef& def);
 
+// Items (items.cc): bullets cancelled into chips (a bomb, a death), at most kChipCap of
+// them made a cancel; the bullets past the cap are counted in `overflow` for the caller to
+// pay. `radius` <= 0 cancels every bullet on the field.
+constexpr u32 kChipCap = 256;
+constexpr i32 kChipValue = 10;
+constexpr f32 kMagnetY = kFieldTop - 120.0f; // above it, every item comes to the ship
+u32    cancel_bullets(TickContext& ctx, Game& g, point2 at, f32 radius, u32* overflow);
+void   item_drop(TickContext& ctx, const Game& g, ItemKind kind, point2 at, vec2 v);
+Collider2 item_collider();
+
 // The HUD (hud.cc).
 void   hud_open(Engine& e, Game& g);
 void   hud_cover(Engine& e, Game& g, bool on);
 void   hud_stage_clear(Engine& e, Game& g);
+void   hud_flash(Engine& e);
 
 // Reports (stats.cc).
 void   stats_summary(Game& g);
