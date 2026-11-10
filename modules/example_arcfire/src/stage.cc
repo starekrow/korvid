@@ -100,6 +100,7 @@ void boot(TickContext& ctx) {
         }
         g.stage_parsed = true;
         if (g.bench[0]) bench_stage(g); // the bench's own: no map, every plane
+        if (g.gas_test) g.stage.planes |= kPlaneShader;
     }
     why[0] = 0;
     if (!bosses_ready(e, g, why, sizeof why)) {

@@ -65,7 +65,7 @@ hash every 60 ticks (the frame loop's; its README has the file). A run started f
 title records the arguments that start it, so its replay goes straight in. Two recorded bot
 runs, Shoreline at Normal and Hard, are in `tests/replays/`; replayed from the repository
 root, `build/linux-dev/bin/example_arcfire --replay
-modules/example_arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 11318,
+modules/example_arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 14521,
 matched`. A change to the
 sim makes them diverge, and they are recorded again (`--autoplay --stage shoreline
 --difficulty normal --record ...`).
@@ -108,6 +108,8 @@ The ways it flies itself:
   twice the enemy health, the bot flying an invulnerable ship, the stage looping.
 - `--bench NAME` fires one pattern of the library from a fixed emitter at the top of the
   field, again and again, under an invulnerable bot: how a pattern is written and measured.
+- `--gas` lays the nebula gas (Orbit's deep plane, a game shader) over the stage's field:
+  how the shader is seen before Orbit is a stage.
 - `--dial name=value` moves one dial (repeat it for more): `rank`,
   `bullet_speed`, `formation_count`, `formation_spacing`, `particles`, `plane_density`,
   `enemy_health`, `bot`, `invulnerable` (1, or 2: after the first death), `loops`,
@@ -272,6 +274,13 @@ state.
   out anything that adds light), in two cosmetic kinds kept slot for slot with the bullet
   kinds: a second sprite a bullet, so the `glows` dial, off under `--stress`. A vignette
   darkens the field's edges (the HUD's first image).
+- **Shaders** (`shaders/`, `assets/materials/`): fragment shaders of the game's own, built
+  by the shader rule into `bin/shaders/` and named by a material file's `"shader"`. The
+  nebula (`arcfire_nebula.slang`) is layered noise between a dark and a bright color,
+  drifting with the render time and scrolled by its plane. The dissolve
+  (`arcfire_dissolve.slang`) cuts a sprite away where noise falls below its tint's alpha,
+  with a hot edge along the cut: a boss's hull burns away as it dies, nine tenths gone as
+  it breaks. A shader that will not load leaves its sprites drawn plainly.
 - **Sound** (`sound.cc`, `assets/sound/`, `assets/music/`): a table of effects, each
   with its volume, its priority and how far its pitch wanders; the volley and the grazes
   lowest, deaths, the bomb, the egg and a boss's fall highest. The audio module starts a
@@ -302,6 +311,7 @@ state.
 | `src/bomb.cc`, `src/items.cc` | the bomb; chips, pickups and the magnet |
 | `src/hud.cc`, `src/fx.cc`, `src/pilot.cc`, `src/stats.cc` | the camera and the screens; particles; the demo and the bot; the reports |
 | `src/main.cc` | the frame loop's config and the game's flags |
+| `shaders/`, `assets/materials/` | the game's fragment shaders (the nebula, the dissolve, their noise); the materials that name them |
 | `assets/stages/shoreline.stage.json`, `assets/maps/` | the stage; its ground map and tileset |
 | `assets/ui/arcfire.ui.json` | the HUD and every screen |
 | `assets/CREDITS.md`, `assets/LICENSE-*.txt` | who made what |

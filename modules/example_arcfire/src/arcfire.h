@@ -44,7 +44,7 @@ constexpr u32 L_ITEM   = 128; // chips and pickups: the ring collects them
 // Over the ground the sky has two decks of cloud, each a plane on a layer of its own: the
 // low clouds (their shadows on the sea and islands) under the air, and the high wisps over
 // the air and the bosses but under the ship, its shots and every bullet.
-constexpr i32 Z_DEEP = -30, Z_HIGH = -20, Z_MAP = -16, Z_CLOUD_SHADOW = -13, Z_SHADOW = -12, Z_GROUND = -10, Z_CLOUD = 10,
+constexpr i32 Z_GAS = -31, Z_DEEP = -30, Z_HIGH = -20, Z_MAP = -16, Z_CLOUD_SHADOW = -13, Z_SHADOW = -12, Z_GROUND = -10, Z_CLOUD = 10,
               Z_LOW_CLOUD = 12, Z_BOSS = 16, Z_PART = 17, Z_AIR = 20, Z_HIGH_CLOUD = 23, Z_SHIP = 30, Z_SHOT = 25, Z_ITEM = 35,
               Z_BULLET = 40, Z_FX = 50, Z_MARK = 60;
 constexpr u32 kMapLayers = 3;    // sea, land, deco
@@ -296,6 +296,7 @@ enum Sfx : u32 { SFX_SHOT, SFX_HIT, SFX_PING, SFX_KILL, SFX_KILL_BIG, SFX_BOSS_D
 enum Tex : u32 { TEX_SHIPS, TEX_TILES, TEX_STARS, TEX_NEBULA, TEX_CLOUD, TEX_BULLETS, TEX_DOT, TEX_RING, TEX_SOFT, TEX_SPARK, TEX_EGG,
                  TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_BEAM, TEX_ITEMS, TEX_BOAT, TEX_COUNT };
 constexpr u32 kPlaneCount = 6; // planes.cc's: stars, nebula, cloud, the low clouds' shadows, the low clouds, the high wisps
+constexpr u32 kPlaneShader = 1u << 6; // a stage's planes bit: the nebula shader's plane, under the stars
 
 // What the game counts for its reports (stats.cc): this tick's numbers and the run's.
 struct Stats {
@@ -356,6 +357,11 @@ struct Game {
     Handle   boss_blobs[kMaxBosses];
     Handle   boss_tex[kMaxBosses][2];      // hull, parts sheet
     Handle   boss_alpha[kMaxBosses][2], boss_additive[kMaxBosses][2];
+    Handle   boss_dissolve[kMaxBosses];        // asset.material: the hull burning away (shaders/arcfire_dissolve.slang)
+    Handle   nebula;                           // asset.material: the nebula plane's (shaders/arcfire_nebula.slang)
+    Handle   nebula_row;                       // its plane row, when the stage has one
+    f32      gas_scrolled = 0.0f;              // how far its field has come down
+    bool     gas_test = false;                 // --gas: the nebula shader's plane under any stage (a check)
     u32      boss_of[kMaxBosses];          // a boss mark's definition
     bool     bosses_parsed = false;
     Handle   stomp_screen;                 // the warning's tint, while a boss stomps

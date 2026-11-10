@@ -483,3 +483,26 @@ the slowest, as the trade wants:
 21, 29, 30; eggs lost 0, 1, 0; bombs 5, 5, 11; scores 539,362, 533,042, 536,033. The demo
 is 14,459 ticks (the fights are longer) and hashes 4c09b8ae7ce5b009 seven ways; the two
 recorded runs were made again (14,521 and 14,622 ticks) and replay matching.
+
+## Slice 6 — Orbit and the battle
+
+**M1. Game shaders.** A material names a fragment shader of the game's own; the renderer
+keeps eight pipeline slots (the three blends, then five (shader, blend) pairs made on first
+use) and sorts by layer and slot, so 2,048 buckets where there were 768. The sort's cost,
+the same build before and after under `--bench ring --dial rank=56` (a Radeon 780M): 0.175
+to 0.198 ms a frame before, 0.192 to 0.211 after, about 0.015 ms; the draws unchanged. The
+shaders are named by their file (`arcfire_nebula`), not by the module's prefix the PRD
+proposed (`example_arcfire.nebula`): the shader rule's outputs are its inputs' stems, so
+the prefix is in the file name. The interface is `sprite_fragment.slangh` rather than all
+of `sprite_common.slangh`: the varyings, the bindings and a texel helper.
+
+The nebula (four octaves of value noise warped by two more such sums, twelve noise
+lookups a pixel, between a dark and a bright color) over the whole field costs 0.31 ms of GPU a frame (`--bench ring` against
+`--bench ring --gas`: draw 0.36 to 0.67 ms), for one sprite. The dissolve on a boss's hull
+is too small to see in the numbers. Hidden from the renderer (`arcfire_nebula.spv` moved
+away), the gas logs once and draws as a plain dark wash; the game plays on. The debug
+build's runs of both shaders are validation-clean. The demo still hashes 4c09b8ae7ce5b009
+at tick 14459 seven ways: the dissolve writes a dying hull's Sprite, a sim column, so the
+hashes in the dying differ and meet again once the hull is gone; the two recorded runs
+were made again (the same 14,521 and 14,622 ticks, the same input) and replay matching at
+1 and 16 threads.

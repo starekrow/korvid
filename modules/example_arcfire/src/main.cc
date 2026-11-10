@@ -12,7 +12,7 @@ namespace {
 // invulnerable, the stage looping. --dial name=value moves one dial (repeatable). --bench
 // NAME fires one pattern from a fixed emitter, again and again, for writing and measuring
 // patterns.
-constinit const char* const k_flags[] = {"--demo", "--autoplay", "--stress", "--arcade", "--again"};
+constinit const char* const k_flags[] = {"--demo", "--autoplay", "--stress", "--arcade", "--again", "--gas"};
 constinit const char* const k_options[] = {"--dial", "--bench", "--stage", "--difficulty", "--attract"};
 // What --record keeps and --replay drives: the gameplay, not pause or quit.
 constinit const char* const k_recorded[] = {"move", "shot", "focus", "bomb"};

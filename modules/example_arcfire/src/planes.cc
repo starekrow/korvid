@@ -12,6 +12,7 @@
 // notebook's comparison: a Set delta per tile per tick. (The map's tiles are a still kind,
 // which the extract does not look at once sent: they scroll by layer either way.)
 #include "arcfire.h"
+#include "korvid/asset/material.h"
 #include "korvid/core/log.h"
 #include "korvid/sprite/layers.h"
 #include <math.h>
@@ -36,6 +37,7 @@ constinit const PlaneDesc k_planes[kPlaneCount] = {
     {TEX_CLOUDS_HIGH, 2.10f, Z_HIGH_CLOUD,   color{1.0f, 1.0f, 1.0f, 0.75f},    1024.0f, vec2{0, 0}},
 };
 constexpr f32 kGroundRate = 1.0f;  // the ground moves at the stage's speed
+constexpr f32 kGasRate = 0.1f;     // the gas, slower than the stars
 
 // The dial `plane_density` cuts each plane's picture into more tiles (n x n to a repeat of
 // its texture), for measuring what a plane of many tiles costs; the picture keeps its
@@ -72,6 +74,20 @@ void planes_spawn(Engine& e, Game& g, const Dials& d) {
                 Sprite s = sprite_of(g, pd.tex, uv, vec2{tile, tile}, pd.layer, pd.tint);
                 if (!planes->spawn(transform2_at(at), s, Plane{k_planes[p].rate, tile, r, rows}).is_null()) ++made;
             }
+    }
+    // The gas: one sprite over the whole field under the stars, drawn by the nebula shader
+    // (shaders/arcfire_nebula.slang), on a layer of its own that never scrolls: its uv does.
+    g.nebula_row = Handle{};
+    if (g.stage.planes & kPlaneShader) {
+        if (const MaterialAsset* m = asset_material(e, g.nebula)) {
+            Sprite s;
+            s.material = m->material;
+            s.uv = rect2{0.0f, 0.0f, 1.0f, kFieldH / kFieldW};
+            s.size = vec2{kFieldW + 8.0f, kFieldH + 8.0f};
+            s.layer = Z_GAS;
+            g.nebula_row = planes->spawn(transform2_at(point2{0, 0}), s, Plane{0.0f, 0.0f, 0, 0});
+            ++shown;
+        }
     }
     KV_INFO("arcfire", "planes: %u of them, %u tiles", shown, made);
 }
@@ -117,6 +133,11 @@ void planes(TickContext& ctx) {
         g.plane_scrolled[p] += speed * k_planes[p].rate;
         f32 now = fmodf(g.plane_scrolled[p], repeat);
         layers->set(k_planes[p].layer, vec2{0.0f, -now}, now < before); // wrapped: the same picture, no sweep
+    }
+    // The gas comes down with the stage at the deep plane's rate: its uv moves, the sprite does not.
+    if (Sprite* gas = ctx.write_kind(g_plane_kind)->get<Sprite>(g.nebula_row)) {
+        g.gas_scrolled += speed * kGasRate;
+        gas->uv.y = -g.gas_scrolled / kFieldW;
     }
     bool jumped = ground > g.ground_offset; // the distance went back: a loop or a restart
     for (u32 l = 0; l < kMapLayers; ++l) layers->set(Z_MAP + (i32)l, vec2{0.0f, ground}, jumped);

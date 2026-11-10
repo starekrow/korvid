@@ -84,11 +84,12 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
         out.planes = 0;
         // By name; the low clouds bring their shadows with them (planes.cc's order).
         struct Named { const char* name; u32 bits; };
-        static const Named k_named[] = {{"stars", 1u}, {"nebula", 2u}, {"cloud", 4u}, {"low_clouds", 8u | 16u}, {"high_clouds", 32u}};
+        static const Named k_named[] = {{"stars", 1u}, {"nebula", 2u}, {"cloud", 4u}, {"low_clouds", 8u | 16u}, {"high_clouds", 32u},
+                                         {"gas", kPlaneShader}}; // the nebula shader's field, under the stars
         for (const JsonValue* v = json_first(doc, *planes); v; v = json_next(doc, *v)) {
             u32 i = 0;
             while (i < KV_COUNTOF(k_named) && strcmp(json_string(v, ""), k_named[i].name)) ++i;
-            if (i == KV_COUNTOF(k_named)) return fail(why, why_cap, "a plane is stars, nebula, cloud, low_clouds or high_clouds");
+            if (i == KV_COUNTOF(k_named)) return fail(why, why_cap, "a plane is stars, nebula, cloud, low_clouds, high_clouds or gas");
             out.planes |= k_named[i].bits;
         }
     }

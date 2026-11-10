@@ -96,6 +96,9 @@ void bosses_load(Engine& e, Game& g) {
             g.boss_alpha[i][k] = boss_material(e, g.boss_tex[i][k], BlendMode::Alpha);
             g.boss_additive[i][k] = boss_material(e, g.boss_tex[i][k], BlendMode::Additive);
         }
+        // Its hull burning away, the dissolve shader's (a material file, as a game shader's are).
+        snprintf(path, sizeof path, "example_arcfire/materials/%s_dissolve.material.json", k_boss_names[i]);
+        g.boss_dissolve[i] = asset_load_material(e, path);
     }
 }
 
@@ -258,6 +261,15 @@ void bosses(TickContext& ctx) {
             u32 left = 0, first = ~0u;
             for (u32 k = 0; k < pt->rows(); ++k)
                 if (pt->is_alive(k) && pp[k].boss == me) { ++left; if (first == ~0u || pp[k].index < pp[first].index) first = k; }
+            // The hull burns away (the dissolve shader, its progress in the tint's alpha) as it
+            // dies: the time so far over that and what is left (a burst a part, the break's
+            // least), so it is nine tenths gone as it breaks, however many parts it had.
+            if (Sprite* hull = bt->get<Sprite>(me)) {
+                if (const MaterialAsset* burn = asset_material(e, g.boss_dissolve[b.def])) hull->material = burn->material;
+                u32 settle = kKillIn + kKillHold + kKillOut;
+                f32 rest = (f32)(kBurstEvery * left) + (f32)(b.clock < settle ? settle - b.clock : 0u);
+                hull->tint.a = 0.9f * (f32)b.clock / ((f32)b.clock + rest + 1.0f);
+            }
             if (left && b.clock % kBurstEvery == 0) {
                 fx_boom(ctx, g, px[first].position, 64.0f);
                 fx_sparks(ctx, g, px[first].position, dials_row[0].particles * 2, kSparkPart, 5.0f);

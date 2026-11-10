@@ -356,6 +356,8 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
         g->additive[i] = material_of(e, g->textures[i], BlendMode::Additive);
     }
     bosses_load(e, *g);
+    g->nebula = asset_load_material(e, "example_arcfire/materials/nebula.material.json");
+    if (frameloop_flag(e, "--gas")) g->gas_test = true;
     sounds_load(e, *g);
     g->boom_clip = fx_boom_clip(e);
     // The stage comes from its file; the sim holds until it has (stage.cc, boot), so how

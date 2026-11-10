@@ -9,13 +9,6 @@ that finds an engine limit adds a line here.
 
 ## Identified at PRD time
 
-- **A game's fragment shader.** Orbit's procedural nebula is made on the CPU and
-  uploaded; a shader version wants a material to name a fragment shader of the game's own,
-  compiled by the build like the engine's, with the material's parameter block as its
-  input. The renderer has one pipeline per blend; this is a pipeline per (shader, blend)
-  and a bucket dimension. A stretch, slice 6, and the first thing a game has asked of the
-  shader side.
-
 - **Render-rate cosmetic entities.** Requirements v0 names an entity class updated per
   render on real dt, presentation only. Particles are the first thing that may need it:
   ten-tick sparks interpolated from a 60 Hz sim are stepped on a 144 Hz display. Slice 5
@@ -59,6 +52,17 @@ that finds an engine limit adds a line here.
   a flag.
 
 ## Fixed
+
+- **A game's fragment shader** (slice 6, M1; identified at PRD time). `MaterialDesc::shader`
+  (a material file's `"shader"`) names a SPIR-V file the game's module builds from its
+  `shaders/*.slang` through kormake's shader rule, whose `%{shader_includes}` puts every
+  module's `shaders/` on the include path; the game includes `sprite_fragment.slangh`
+  (the varyings, the bindings, `sprite_texel`) and defines `fs_main`. The renderer keeps
+  eight pipeline slots, the three blends and five (shader, blend) pairs built on first use,
+  and buckets by layer and slot: 2,048 buckets, about 0.015 ms more sort a frame at rank
+  56. A shader that will not load draws as its blend's engine pipeline, logged once. The
+  push block's `time` animates what the sim never sees. Arcfire's nebula gas and the
+  bosses' dissolve are the first two (docs/design/renderer.md, "Game shaders").
 
 - **A pause used up a pilot's actions** (slice 5). An override set on a sim tick was taken
   by the next sample, a paused tick's when a pause began, so the first sim tick after the
