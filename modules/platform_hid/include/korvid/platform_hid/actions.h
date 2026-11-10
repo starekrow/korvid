@@ -62,6 +62,7 @@ struct ActionState {
     vec2          axis;             // Axis2: the direction; Button: (1, 0) while down
     u32           held;             // ticks down so far (1 on the tick it was pressed)
     bool          override_set;     // input_action_override's value replaces the devices next sample
+    bool          override_exact;   // as it is: not clamped to the unit circle (a replay's, already sampled once)
     bool          override_down;
     vec2          override_axis;
 };
@@ -82,6 +83,9 @@ bool input_actions(Engine& e, Span<const InputActionDesc> actions);
 const InputActions* input_actions_get(Engine& e);
 // Stands in for the devices on the next sample: down and (for an Axis2) the direction.
 void input_action_override(Engine& e, const char* name, bool down, vec2 axis = vec2{0, 0});
+// The same, the value taken as it is: what a sample made once (a replay's), which the unit
+// circle's clamp would round again.
+void input_action_override_exact(Engine& e, const char* name, bool down, vec2 axis);
 
 // Queries. An id of KV_ACTION_NONE answers false and zero.
 inline bool action_down(const InputActions& a, u32 id)     { return id < a.count && a.actions[id].down; }

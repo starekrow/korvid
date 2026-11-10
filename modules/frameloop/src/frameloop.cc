@@ -1,5 +1,6 @@
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/frameloop/module.h"
+#include "frameloop_internal.h"
 #include "korvid/asset/font.h"
 #include "korvid/cli/module.h"
 #include "korvid/core/arena.h"
@@ -101,6 +102,18 @@ u32 game_option(const FrameLoopConfig& cfg, const char* arg) {
     return 0;
 }
 
+// A replay's game argument, as the command line's would be: a flag (false), or an option
+// and its value (true: it took the value).
+bool apply_game_arg(const char* arg, const char* value) {
+    if (u32 f = game_flag(g_config, arg)) { g_flags_given |= (u64)1 << (f - 1); return false; }
+    if (u32 o = game_option(g_config, arg); o && value) {
+        if (g_option_count < KV_COUNTOF(g_options)) g_options[g_option_count++] = GivenOption{o - 1, value};
+        return true;
+    }
+    KV_WARN("frameloop", "replay: the game takes no argument '%s'", arg);
+    return false;
+}
+
 bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--run-seconds") == 0 && i + 1 < argc) cfg.run_seconds = atof(argv[++i]);
@@ -151,15 +164,18 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
             g_capacity_names[n][eq - arg] = 0;
             g_capacities[g_capacity_count++] = KindCapacity{g_capacity_names[n], (u32)strtoul(eq + 1, nullptr, 10)};
         }
-        else if (u32 f = game_flag(cfg, argv[i])) g_flags_given |= (u64)1 << (f - 1);
+        else if (replay_arg(i, argc, argv)) {}
+        else if (u32 f = game_flag(cfg, argv[i])) { g_flags_given |= (u64)1 << (f - 1); replay_keep_arg(argv[i]); }
         else if (u32 o = game_option(cfg, argv[i]); o && i + 1 < argc) {
             if (g_option_count >= KV_COUNTOF(g_options)) { KV_ERROR("frameloop", "at most %u game options", (u32)KV_COUNTOF(g_options)); return false; }
+            replay_keep_arg(argv[i]);
+            replay_keep_arg(argv[i + 1]);
             g_options[g_option_count++] = GivenOption{o - 1, argv[++i]};
         }
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE]", argv[0]);
             return false;
         }
     }
@@ -240,6 +256,13 @@ constinit const KindDesc      k_kinds[] = {
 };
 constinit const SystemDesc    k_systems[] = {
     {.name = ".exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = "input.state", .runs = RunWhen::Always},
+    // Recording and replay (replay.cc), sim ticks only: what the sample made of the named
+    // actions; the file's actions before the sample.
+    {.name = ".record", .phase = Phase::Input, .fn = replay_record, .reads = "input.actions", .after = "input.sample", .main_thread = true},
+    {.name = ".replay", .phase = Phase::Input, .fn = replay_play, .before = "input.sample", .main_thread = true},
+};
+constinit const HandlerDesc   k_handlers[] = {
+    {.name = ".on_sim_reset", KV_ON(SimReset, replay_on_sim_reset)},
 };
 
 // The frame's slack: what the renderer blocked for last frame (fences, acquire, present)
@@ -407,6 +430,7 @@ KV_MODULE_DEFINE(frameloop_module) = {
     .events  = k_events,
     .kinds   = k_kinds,
     .systems = k_systems,
+    .handlers = k_handlers,
     .commands = k_commands,
     .startup = frameloop_startup,
     .memory  = {.reserve = 64 * 1024},
@@ -462,6 +486,7 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
         (exe_name[len - 1] | 0x20) == 'e')
         exe_name[len - 4] = 0;
     g_mounts.exe_name = exe_name;
+    if (!replay_open(exe_name, apply_game_arg)) return 2;
     platform_configure_mounts(g_mounts);
     Engine engine;
     engine.hash_ticks   = g_hash_ticks;
@@ -491,6 +516,7 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
     }
     FrameLoopState* s = engine_module_state_as<FrameLoopState>(engine, "frameloop");
     if (s) run(engine, *s);
+    replay_finish(engine);
     engine_shutdown(engine);
     if (prof_enabled()) { prof_collect(); if (g_prof_report) prof_log_summary(10); }
     prof_shutdown();

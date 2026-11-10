@@ -64,6 +64,22 @@ after whatever the game wants to do first.
 value after the `i`th occurrence, or null; an option may be given as often as the game
 likes.
 
+**Recording and replay.** `--record FILE` writes a run's input: for every sim tick since
+the last fresh sim (`engine_sim_reset`; a file holds the last run), the values of the
+actions the config names in `recorded_actions` (the gameplay ones; pause and quit stay
+live), as changes, and the state hash every 60 ticks. Paused and held ticks are not sim
+time and record nothing, so menus, a pause and a disk of any speed leave the file as it
+is. The header holds the executable's name and the game's flags and options as given, plus
+what the game adds with `frameloop_record_note(e, "--arcade --difficulty hard")` for a run
+a menu chose. `--replay FILE` takes those arguments as if given, sets the named actions
+from the file before each sim tick's sample (exactly: `input_action_override_exact`, since
+the sample's clamp would round a recorded stick again), compares the hashes, logs
+`replay: diverged at tick N` at the first that differs and `replay: ended at tick N,
+matched (H hashes)` at the end. `frameloop_replaying(e)` is true meanwhile: a game's own
+pilots stand down. The file (`.kvr`) is `KVR1`, a header of `exe`, `arg` and `action`
+lines, then records of a varint tick delta and a type (an action's index, down and axis;
+a hash; the end); read and written with stdio at startup and shutdown.
+
 **A tool that drives frames itself** (cpukiller's window mode): `frameloop_set_config(cfg)`
 before `engine_init`, then `frameloop_step(engine, dt)` per frame, which pumps, ticks and
 renders once.
@@ -90,6 +106,7 @@ renders once.
 | `--idle-margin-ms N`, `--no-idle` | slack kept back from idle work (1.5); none at all |
 | `--capacity KIND=N` (repeatable) | a kind's capacity over the game's, by its full name (`example_arcfire.bullet=131072`) |
 | `--spike-hunt` | a dev build without the work that is not checking: no memory fills or poison, no guard pages, no event emitters for the trace (`dev_spike_hunt`); its timings near a ship build's, its asserts, access checks, counters and profiler kept |
+| `--record FILE`, `--replay FILE` | a run's input to a file; a file's played back, its hashes checked (above) |
 | `--sprite-rows N` | the renderer's and the extract's first sprite table size over the config's `sprite_rows` (0: none) |
 
 ## Quick reference

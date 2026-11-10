@@ -113,9 +113,17 @@ void input_action_override(Engine& e, const char* name, bool down, vec2 axis) {
     u32 id = s->actions.find(name);
     if (id == KV_ACTION_NONE) return;
     ActionState& a = s->actions.actions[id];
-    a.override_set  = true;
-    a.override_down = down;
-    a.override_axis = axis;
+    a.override_set   = true;
+    a.override_exact = false;
+    a.override_down  = down;
+    a.override_axis  = axis;
+}
+
+void input_action_override_exact(Engine& e, const char* name, bool down, vec2 axis) {
+    input_action_override(e, name, down, axis);
+    HidState* s = pstate(e);
+    u32 id = s ? s->actions.find(name) : KV_ACTION_NONE;
+    if (id != KV_ACTION_NONE) s->actions.actions[id].override_exact = true;
 }
 
 bool action_repeat(const InputActions& a, u32 id, u32 delay, u32 interval) {
@@ -164,7 +172,7 @@ void input_actions_sample(InputActions& as, const InputState& in) {
         down = best > 0.0f;
         if (a.override_set) {
             down = a.override_down;
-            axis = a.kind == ActionKind::Axis2 ? clamp_unit(a.override_axis) : (down ? vec2{1, 0} : vec2{0, 0});
+            axis = a.kind != ActionKind::Axis2 ? (down ? vec2{1, 0} : vec2{0, 0}) : a.override_exact ? a.override_axis : clamp_unit(a.override_axis);
             if (a.kind == ActionKind::Axis2) down = axis.x != 0.0f || axis.y != 0.0f;
             a.override_set = false;
         }

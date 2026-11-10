@@ -23,9 +23,6 @@ that finds an engine limit adds a line here.
 - **Beams: a segment cast.** `collision_cast` sweeps a box; a beam wants the ordered list
   of bodies along a segment from the ship to the top of the field, by mask, each tick.
   Slice 4.
-- **Input record and replay.** The demos are scripts in code. A recorded input log
-  (actions per tick) that replays through `input_action_override` would turn a tester's run
-  into a hashing test; the frame loop is where it belongs. Slice 5.
 - **Many Sets per tick.** The extract compares every row of every moving sprite kind
   against what it last sent and writes a whole state per change: about 65 ns a delta in a
   dev build, 3 ms a tick at rank 56's 50,000. Its spikes are fixed (below); the compare
@@ -62,6 +59,19 @@ that finds an engine limit adds a line here.
   a flag.
 
 ## Fixed
+
+- **Input record and replay** (slice 5; identified at PRD time). `--record FILE` and
+  `--replay FILE` in the frame loop: the game's named actions per sim tick since the last
+  fresh sim, as changes, and the state hash every 60 ticks; the header carries the game's
+  arguments (and `frameloop_record_note`'s, for a run a menu chose), so a replay starts the
+  same run; the game's pilots stand down (`frameloop_replaying`). Found on the way: the
+  action sample clamps an override's stick to the unit circle, and a recorded stick has
+  been clamped once already; a length of 1.00000012 rounds again, so the replay drifted a
+  unit's millionth at a time, visible in the hash for a stretch and gone again at a wall.
+  `input_action_override_exact` sets it as it is. Two bot runs (Shoreline at Normal and
+  Hard) replay with every hash matching at 1 and 16 threads; a recording with one stick
+  value flipped is caught at the next hash. Not done: a unit test of the frame loop's part
+  (it opens a window), and typed text is not recorded (arcfire takes none on a sim tick).
 
 - **A fresh sim** (slice 5, asked for by the title). A second run in one process began at a
   later sim tick with every table's slots and generations where the first left them, and

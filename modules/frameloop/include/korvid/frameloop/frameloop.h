@@ -41,6 +41,7 @@ struct FrameLoopConfig {
     u32         sprite_rows = 0;          // the renderer's sprite tables' first size (0: its default); a game that knows it draws many asks
     Span<const char* const> flags = {};   // boolean flags the game accepts ("--demo"); frameloop_flag says which were given
     Span<const char* const> options = {}; // flags the game accepts that take a value ("--dial"), each as often as it likes; frameloop_option
+    Span<const char* const> recorded_actions = {}; // the actions --record keeps and --replay drives: the gameplay ones, not pause or quit
     EngineConfig engine = {};             // heaps and which module lives in which
 };
 
@@ -57,6 +58,13 @@ bool frameloop_flag(Engine& e, const char* flag);
 // The value given after the `index`th occurrence of one of the game's declared options
 // ("--dial bullets=2" twice is index 0 and 1), or null when there are not that many.
 const char* frameloop_option(Engine& e, const char* option, u32 index = 0);
+
+// Recording and replay (--record FILE, --replay FILE; replay.cc has the file). Whether a
+// replay is driving the recorded actions (a game's own pilots stand down while it does);
+// the game's arguments that start the run it is about to record, when a menu chose it
+// rather than the command line ("--arcade --difficulty hard"), for the recording's header.
+bool frameloop_replaying(Engine& e);
+void frameloop_record_note(Engine& e, const char* args);
 
 // For a tool that drives the loop itself: the config the module will use, set before
 // engine_init, and one frame: pump the window, advance the engine by dt, render once.

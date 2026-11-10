@@ -54,6 +54,7 @@ void input_sample(TickContext& ctx) {
         HidPress& p = s.presses[i];
         ActionState& a = s.actions.actions[p.action];
         a.override_set = true;
+        a.override_exact = false;
         a.override_down = true;
         a.override_axis = p.axis;
         if (--p.ticks == 0) p = s.presses[--s.press_count];
