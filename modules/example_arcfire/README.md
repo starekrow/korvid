@@ -3,7 +3,7 @@
 A vertical bullet-hell shooter, and the engine's first stress test that is also a game
 (`docs/Arcfire-Master-PRD.md`). Built in slices (`docs/Arcfire-Slice-N-PRD.md`); this is
 slice 3, Shoreline whole: a 3:4 field between two side panels; a Tiled map of sea and
-islands scrolling under it with a cloud plane over it; a ship that flies in eight
+islands scrolling under two decks of cloud, each at its own speed; a ship that flies in eight
 directions at two speeds and fires Spread; formations of popcorn, turrets, tanks and
 bunkers on a stage script keyed to scroll distance; BulletML patterns; bombs, chips and
 grazes; the egg, a death in slow motion after which a small spherical machine builds the
@@ -90,9 +90,13 @@ state.
   the distance has passed. A formation mark schedules its members as events on the ticks
   their spacing gives; each member's event carries the run's epoch, so members scheduled
   before a restart never arrive. The sim holds (`HoldLoading`) until the file is in.
-- **Planes** (`planes.cc`): grids of tiles of a seamless background in a cosmetic kind,
-  on their own layers, which a stage names (Shoreline keeps only the low cloud over the
-  sea). The tiles never move: each plane's layer is scrolled by its rate times the speed
+- **Planes** (`planes.cc`): grids of tiles of a seamless texture in a cosmetic kind, each
+  on a layer of its own, which a stage names: space's three (stars, a nebula, a faint
+  cloud: the bench's) or the sky's (Shoreline's). The sky is the parallax over the map: the
+  low clouds at 1.35 times the ground's speed under the air, their shadows on the sea and
+  islands (the same texture darkened, down and to the right, at the same rate), and high
+  wisps at 2.1 times over the air and the bosses but under the ship, its shots and the
+  bullets. The tiles never move: each plane's layer is scrolled by its rate times the speed
   (`sprite/layers.h`), wrapped by a whole tile as a snap, so a plane is one value a tick.
 - **The ground** (`ground.cc`, `assets/maps/`): a stage may name a Tiled map, here
   Shoreline's sea and islands, written by `tools/make_maps.py` from Kenney's terrain tiles

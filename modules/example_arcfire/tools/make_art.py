@@ -20,6 +20,9 @@ What is made here, and from what:
   made/eggs.png      32 x 16 the HUD's pips: an egg spent (dim), an egg in hand
   made/bombs.png     32 x 16 the HUD's bomb pips: Kenney's shield tile (tiles_packed, column
                      2, row 2), dimmed for a bomb spent, as it is for one in hand
+  made/clouds_low.png  512 x 512 seamless: four clusters of cumulus in the pack's whites and
+                     greys, for the low cloud plane and (darkened by the game) its shadows
+  made/clouds_high.png 512 x 512 seamless: thin wisps, half transparent, for the high plane
 """
 import hashlib
 import math
@@ -136,6 +139,81 @@ def egg():
     return im
 
 
+# Clouds in the pack's whites and greys with a cool underside: no outline (they are
+# weather, not objects), flat tones, hard pixel edges. Seamless: every shape is drawn at
+# the nine offsets of the tile's wrap.
+CLOUD_WHITE = (255, 255, 255)
+CLOUD_LIGHT = (220, 225, 231)   # the pack's light grey
+CLOUD_SHADE = (196, 206, 226)   # STEEL's lightest: the underside
+CLOUD_RIM = (170, 184, 210)
+
+
+def wrapped(draw, box, fill, size):
+    x0, y0, x1, y1 = box
+    for dx in (-size, 0, size):
+        for dy in (-size, 0, size):
+            draw.ellipse((x0 + dx, y0 + dy, x1 + dx, y1 + dy), fill=fill)
+
+
+def clouds_low(size=512, seed=0xC10D):
+    """Cumulus: a few big clusters of overlapping round puffs, white on top, a grey band
+    and a cool rim underneath, clear sky between them."""
+    import random
+    from PIL import ImageDraw
+    rnd = random.Random(seed)
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    puffs = []
+    for cluster in range(4):
+        cx, cy = rnd.randrange(size), (cluster * size // 4 + rnd.randint(-20, 20)) % size
+        w = rnd.randint(50, 90)
+        for k in range(rnd.randint(7, 11)):
+            r = rnd.randint(12, 24)
+            x = cx + rnd.randint(-w // 2, w // 2)
+            y = cy + rnd.randint(-8, 8) - (r * abs(x - cx)) // (w * 2 + 1) - r // 4 # a dome
+            puffs.append((x, y, r))
+    for (x, y, r) in puffs:
+        wrapped(d, (x - r - 1, y - r + 5, x + r + 1, y + r + 6), CLOUD_RIM + (255,), size)
+    for (x, y, r) in puffs:
+        wrapped(d, (x - r, y - r + 3, x + r, y + r + 3), CLOUD_SHADE + (255,), size)
+    for (x, y, r) in puffs:
+        wrapped(d, (x - r, y - r, x + r, y + r - 1), CLOUD_LIGHT + (255,), size)
+    for (x, y, r) in puffs:
+        wrapped(d, (x - r + 2, y - r, x + r - 3, y + r - 5), CLOUD_WHITE + (255,), size)
+    return im
+
+
+def clouds_high(size=512, seed=0x5A1E):
+    """Cirrus: thin slanted strokes, thick in the middle and tapering at both ends, drawn
+    opaque and then made half transparent as a whole, so overlaps do not band."""
+    import math
+    import random
+    from PIL import ImageDraw
+    rnd = random.Random(seed)
+    solid = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(solid)
+    strokes = []
+    for _ in range(14):
+        x, y = rnd.randrange(size), rnd.randrange(size)
+        n = rnd.randint(14, 26)
+        sx, sy = rnd.uniform(0.8, 2.0) * rnd.choice((-1, 1)), rnd.uniform(3.0, 4.5)
+        strokes.append([(x + sx * k, y + sy * k, 1.0 + 4.0 * math.sin(math.pi * k / (n - 1))) for k in range(n)])
+    for st in strokes:
+        for (x, y, r) in st:
+            wrapped(d, (x - r - 1, y - r - 1, x + r + 1, y + r + 1), CLOUD_LIGHT + (255,), size)
+    for st in strokes:
+        for (x, y, r) in st:
+            if r > 2.0:
+                wrapped(d, (x - r + 1.5, y - r + 1.5, x + r - 1.5, y + r - 1.5), CLOUD_WHITE + (255,), size)
+    px = solid.load()
+    for yy in range(size):
+        for xx in range(size):
+            c = px[xx, yy]
+            if c[3]:
+                px[xx, yy] = c[:3] + (130,)
+    return solid
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
@@ -174,6 +252,8 @@ def main():
     bombs.paste(dim, (0, 0))
     bombs.paste(shield, (16, 0))
     bombs.save(made / "bombs.png")
+    clouds_low().save(made / "clouds_low.png")
+    clouds_high().save(made / "clouds_high.png")
     for archive in sorted(pack.glob("*.zip")) + sorted(pack.glob("*.png")):
         print(f"{archive.name}: sha256 {hashlib.sha256(archive.read_bytes()).hexdigest()}")
 

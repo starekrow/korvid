@@ -85,6 +85,8 @@ Drawn by `tools/make_art.py` on 2026-11-09, Korvid's, under the repository's lic
 | `made/spark.png` | sparks: a white square |
 | `made/egg.png` | the egg: a spherical machine (a shaded steel sphere, its seam and core), drawn by the script |
 | `made/eggs.png` | the HUD's pips: the egg, spent (dimmed) and in hand |
+| `made/clouds_low.png` | the low clouds, 512 x 512 seamless: cumulus drawn by the script in the pack's whites and greys (and, darkened by the game, their shadows) |
+| `made/clouds_high.png` | the high wisps, 512 x 512 seamless: tapered strokes in the same whites, half transparent |
 | `made/bombs.png` | the HUD's bomb pips: Kenney's shield tile (`kenney/tiles.png`, column 2, row 2), dimmed for a bomb spent and as it is for one in hand |
 
 ## Sci-Fi Sounds and Impact Sounds

@@ -287,3 +287,8 @@ battleship's guns down at 35 to 70 s, its deck rarely before its time runs out. 
 Shoreline at Normal is slice 4's; the rule's two holes are plain: it never bombs to save
 itself, and it dodges more than it shoots (a third of a volley's damage at a boss).
 Audio in the run: 24 voices at peak, 177 starts merged, nothing stolen or dropped.
+
+**After slice 3: the sky.** Shoreline's parallax: low clouds (1.35 times the ground's
+speed), their shadows (the same tiles darkened, at the same rate), high wisps (2.1 times),
+each a plane on a layer of its own, 12 still tiles in all and three layer offsets a tick.
+The demo's hash is unchanged (`e078b2f13df8fa11`): planes are cosmetic.

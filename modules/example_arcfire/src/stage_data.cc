@@ -66,12 +66,14 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
     snprintf(out.map, sizeof out.map, "%s", json_string(json_get(doc, root, "map"), ""));
     if (const JsonValue* planes = json_get(doc, root, "planes")) {
         out.planes = 0;
-        static const char* const k_names[] = {"stars", "nebula", "cloud"};
+        // By name; the low clouds bring their shadows with them (planes.cc's order).
+        struct Named { const char* name; u32 bits; };
+        static const Named k_named[] = {{"stars", 1u}, {"nebula", 2u}, {"cloud", 4u}, {"low_clouds", 8u | 16u}, {"high_clouds", 32u}};
         for (const JsonValue* v = json_first(doc, *planes); v; v = json_next(doc, *v)) {
             u32 i = 0;
-            while (i < 3 && strcmp(json_string(v, ""), k_names[i])) ++i;
-            if (i == 3) return fail(why, why_cap, "a plane is stars, nebula or cloud");
-            out.planes |= 1u << i;
+            while (i < KV_COUNTOF(k_named) && strcmp(json_string(v, ""), k_named[i].name)) ++i;
+            if (i == KV_COUNTOF(k_named)) return fail(why, why_cap, "a plane is stars, nebula, cloud, low_clouds or high_clouds");
+            out.planes |= k_named[i].bits;
         }
     }
 

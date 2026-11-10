@@ -2,7 +2,7 @@
   "name": "SHORELINE",
   "speed": 1.5,
   "map": "example_arcfire/maps/shoreline.tmj",
-  "planes": ["cloud"],
+  "planes": ["low_clouds", "high_clouds"],
   "paths": {
     "dive_left": [[-200, 440], [-180, 200], [-60, 40], [120, -80], [330, -120]],
     "dive_right": [[200, 440], [180, 200], [60, 40], [-120, -80], [-330, -120]],

@@ -67,7 +67,7 @@ namespace {
 // ---- schemas -------------------------------------------------------------------------------------
 
 constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, v)};
-constinit const FieldDesc k_plane_fields[]    = {KV_FIELDS(Plane, rate, row, col, rows)};
+constinit const FieldDesc k_plane_fields[]    = {KV_FIELDS(Plane, rate, tile, row, rows)};
 constinit const FieldDesc k_ship_fields[]     = {KV_FIELDS(Ship, cooldown, live, focus, shots, guard, died)};
 constinit const FieldDesc k_formation_fields[] = {KV_FIELDS(Formation, count, killed, gone, pad)};
 constinit const FieldDesc k_item_fields[]     = {KV_FIELDS(Item, kind, value, life, pad)};
@@ -256,7 +256,8 @@ constinit const char* const k_texture_paths[TEX_COUNT] = {
     "example_arcfire/kenney/ships.png", "example_arcfire/kenney/tiles.png", "example_arcfire/space/stars.png",
     "example_arcfire/space/nebula.png", "example_arcfire/space/cloud.png",  "example_arcfire/made/bullets.png",
     "example_arcfire/made/dot.png",     "example_arcfire/made/ring.png",    "example_arcfire/made/soft.png",
-    "example_arcfire/made/spark.png",   "example_arcfire/made/egg.png",
+    "example_arcfire/made/spark.png",   "example_arcfire/made/egg.png",     "example_arcfire/made/clouds_low.png",
+    "example_arcfire/made/clouds_high.png",
 };
 
 Handle material_of(Engine& e, Handle texture, BlendMode blend) {

@@ -38,15 +38,19 @@ constexpr u32 L_ITEM   = 128; // chips and pickups: the ring collects them
 // Back to front, the master PRD's planes. The HUD is the UI's, above all of them.
 // The ground map's three tile layers are Z_MAP and the two above it; they scroll by the
 // renderer's layer offset (planes.cc), as the planes do, and nothing else is drawn on them.
-constexpr i32 Z_DEEP = -30, Z_HIGH = -20, Z_MAP = -16, Z_SHADOW = -12, Z_GROUND = -10, Z_CLOUD = 10, Z_BOSS = 16, Z_PART = 17, Z_AIR = 20, Z_SHIP = 30,
-              Z_SHOT = 25, Z_ITEM = 35, Z_BULLET = 40, Z_FX = 50, Z_MARK = 60;
+// Over the ground the sky has two decks of cloud, each a plane on a layer of its own: the
+// low clouds (their shadows on the sea and islands) under the air, and the high wisps over
+// the air and the bosses but under the ship, its shots and every bullet.
+constexpr i32 Z_DEEP = -30, Z_HIGH = -20, Z_MAP = -16, Z_CLOUD_SHADOW = -13, Z_SHADOW = -12, Z_GROUND = -10, Z_CLOUD = 10,
+              Z_LOW_CLOUD = 12, Z_BOSS = 16, Z_PART = 17, Z_AIR = 20, Z_HIGH_CLOUD = 23, Z_SHIP = 30, Z_SHOT = 25, Z_ITEM = 35,
+              Z_BULLET = 40, Z_FX = 50, Z_MARK = 60;
 constexpr u32 kMapLayers = 3;    // sea, land, deco
 constexpr f32 kMapScale = 2.0f;  // world units a map pixel
 
 // ---- components -----------------------------------------------------------------------------
 
 struct Velocity { vec2 v; };                      // world units a tick
-struct Plane    { f32 rate; u32 row, col, rows; }; // a parallax tile: its plane's rate, its place in the grid
+struct Plane    { f32 rate; f32 tile; u32 row, rows; }; // a parallax tile: its plane's rate, its size, its row of the grid
 // The player's ship. `live` is 0 while the egg plays (control does nothing, nothing hits);
 // `guard` counts the ticks a bomb keeps the hitbox out of play; `died`, its deaths.
 struct Ship     { u32 cooldown; u32 live; u32 focus; u32 shots; u32 guard; u32 died; };
@@ -188,7 +192,8 @@ struct StageDef {
     Mark         marks[kMaxMarks];
     u32          path_count = 0, formation_count = 0, ground_count = 0, mark_count = 0;
     // The ground: a Tiled map (its path; "" for none), its enemies once loaded (sorted by
-    // `at`), and which of the three planes the stage shows (bits by plane, 7 by default).
+    // `at`), and which planes the stage shows (bits by planes.cc's order; the three of
+    // space by default).
     char         map[96] = "";
     char         boss_names[kMaxBosses][24]; // the boss marks' bosses, by mark index; Game::boss_of maps them to definitions
     u32          boss_mark_count = 0;
@@ -255,7 +260,9 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
 enum Sfx : u32 { SFX_SHOT, SFX_HIT, SFX_PING, SFX_KILL, SFX_KILL_BIG, SFX_BOSS_DOWN, SFX_RUMBLE, SFX_GRAZE, SFX_CHIP, SFX_BOMB,
                  SFX_EGG_BREAK, SFX_EGG_OPEN, SFX_EGG_BLOOM, SFX_WARNING, SFX_COUNT };
 
-enum Tex : u32 { TEX_SHIPS, TEX_TILES, TEX_STARS, TEX_NEBULA, TEX_CLOUD, TEX_BULLETS, TEX_DOT, TEX_RING, TEX_SOFT, TEX_SPARK, TEX_EGG, TEX_COUNT };
+enum Tex : u32 { TEX_SHIPS, TEX_TILES, TEX_STARS, TEX_NEBULA, TEX_CLOUD, TEX_BULLETS, TEX_DOT, TEX_RING, TEX_SOFT, TEX_SPARK, TEX_EGG,
+                 TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_COUNT };
+constexpr u32 kPlaneCount = 6; // planes.cc's: stars, nebula, cloud, the low clouds' shadows, the low clouds, the high wisps
 
 // What the game counts for its reports (stats.cc): this tick's numbers and the run's.
 struct Stats {
@@ -303,7 +310,7 @@ struct Game {
     point2   map_origin;          // the map's top-left in the world when the distance is 0
     // The layers' scroll (planes.cc): what each plane has moved (its offset wraps), the
     // ground's last offset (a jump back is a snap: a loop, a restart).
-    f32      plane_scrolled[3] = {};
+    f32      plane_scrolled[kPlaneCount] = {};
     f32      ground_offset = 0.0f;
     Handle   ui;                  // ui.doc
     Handle   hud, pause_screen, cover, clear_label;
