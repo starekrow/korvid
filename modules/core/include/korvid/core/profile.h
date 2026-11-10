@@ -55,6 +55,18 @@ void prof_counter(const char* name, u64 value);
 void prof_frame(u64 frame); // the frame loop, once per frame, before prof_collect
 void prof_tick(u64 tick);   // the tick runner, at the start of every tick
 
+// ---- tracks: spans measured on another clock ---------------------------------------------
+// A track is a ring of its own for work timed elsewhere (the GPU, by its timestamps,
+// converted to os_ticks by the caller), named like a thread and shown like one: in the
+// frame stats, the thread stats, the summary and the trace. One writer at a time; spans
+// in time order and nested by order (an outer's begin, its inner spans, its end), counters
+// at a time of their own. A track's records are as late as its clock's results: they land
+// in the frame that collects them, at the times they happened.
+u32  prof_track(const char* name); // 0 when no ring is free; claimed for the process
+void prof_track_begin(u32 track, const char* name, u64 ticks);
+void prof_track_end(u32 track, u64 ticks);
+void prof_track_counter(u32 track, const char* name, u64 value, u64 ticks);
+
 // ---- cold path: the main thread, between frames ---------------------------------------
 // Drains every ring: zones into the frame summary (and the running totals), everything
 // into the trace if one is open, the frame's records into the kept frame if asked.

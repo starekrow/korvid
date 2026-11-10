@@ -64,6 +64,10 @@ struct FrameLoopState {
     Renderer*       renderer = nullptr; // renderer-vulkan's
     u32             presented_w = 0, presented_h = 0;
     u32             deltas_last_frame = 0;
+    // The GPU's frames over the report window (renderer_gpu_stats, a frame late), when measured.
+    u32             gpu_frames = 0;
+    f64             gpu_sum = 0.0, gpu_worst = 0.0, gpu_sort = 0.0, gpu_draw = 0.0;
+    f64             gpu_overdraw = 0.0;
     f64             wait_ema   = 0.0;    // the renderer's blocked time per frame, smoothed
     f64             idle_total = 0.0;    // seconds of idle work in the report window
     u64             idle_frames = 0;     // frames that ran idle work in the window
@@ -277,6 +281,15 @@ void render_frame(Engine& engine, FrameLoopState& s) {
     view.view     = camera_view(cam, w, h);
     view.rotation = cam.rotation;
     renderer_render(s.renderer, view);
+    RendererGpuStats gs = renderer_gpu_stats(s.renderer);
+    if (gs.valid) {
+        ++s.gpu_frames;
+        s.gpu_sum += gs.frame_ms;
+        s.gpu_sort += gs.sort_ms;
+        s.gpu_draw += gs.draw_ms;
+        s.gpu_overdraw += gs.overdraw;
+        if (gs.frame_ms > s.gpu_worst) s.gpu_worst = gs.frame_ms;
+    }
 }
 
 void run(Engine& engine, FrameLoopState& s) {
@@ -333,6 +346,13 @@ void run(Engine& engine, FrameLoopState& s) {
                     s.window->focused() ? "focused" : "unfocused",
                     (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
                     s.idle_frames ? s.idle_total / (f64)s.idle_frames * 1e3 : 0.0, (unsigned long long)s.idle_frames);
+            if (s.gpu_frames) {
+                f64 n = (f64)s.gpu_frames;
+                KV_INFO("frameloop", "gpu %.3f ms/frame (worst %.3f): sort %.3f, draw %.3f; overdraw %.2f", s.gpu_sum / n, s.gpu_worst, s.gpu_sort / n,
+                        s.gpu_draw / n, s.gpu_overdraw / n);
+                s.gpu_frames = 0;
+                s.gpu_sum = s.gpu_worst = s.gpu_sort = s.gpu_draw = s.gpu_overdraw = 0.0;
+            }
             if (g_overlay) {
                 char line[96];
                 snprintf(line, sizeof line, "%u fps  tick %llu  %u sprites  %u deltas", frames_in_window,

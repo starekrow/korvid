@@ -118,6 +118,27 @@ the new chain with `oldSwapchain` set and retires the old one the same way. The 
 layer crashes on the first acquire after a fenced recreation (it does not expect the old
 swapchain to outlive the new one's creation); the built-in path replaces it.
 
+## GPU timing and captures
+
+In a profiling build, while the profiler records, each frame writes five timestamps
+(its start, after the uploads, after the sort, after the drawing, its end) and one
+pipeline-statistics query around the sort and the drawing (vertex, fragment and compute
+shader invocations), and reads them back when its fence next passes: no wait, no stall.
+They become the profiler's `gpu` track and `renderer_gpu_stats` (the frame, its passes in
+milliseconds, the invocations, and overdraw: fragments over the frame's pixels), which the
+frame loop logs beside its fps line. `VK_KHR_calibrated_timestamps` (or the EXT) aligns
+the spans with the CPU's zones in a trace. A frame remembers whether it wrote its queries,
+so the profiler can start and stop mid-run.
+
+Debug-utils names (the sprite tables, the material rows, the ring, the layer offsets,
+every texture by its name, the pipelines by blend and entry point, the swapchain images)
+and labels (upload; sort with count, scan, bucket scan, scatter and key sort; draw, with a
+label per run of buckets naming its layers and blend) are on whenever the instance has the
+extension, in every build: without a listener they cost nothing, and they make a capture
+read like the code. For depth: RenderDoc for one frame (per-draw timings, an overdraw view,
+shader stepping); on AMD under Linux, `MESA_VK_TRACE=rgp` writes Radeon GPU Profiler
+captures straight from RADV.
+
 ## Samplers
 
 Set 1 holds two samplers, nearest and linear (slice 5), and the material row's `filter`

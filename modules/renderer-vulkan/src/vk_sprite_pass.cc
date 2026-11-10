@@ -82,6 +82,7 @@ bool create_compute(Renderer* r, const char* entry, VkPipeline* out) {
     ci.stage.pName  = entry;
     ci.layout       = r->pipe_layout;
     VK_CHECK(vkCreateComputePipelines(r->device, VK_NULL_HANDLE, 1, &ci, nullptr, out));
+    rv_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)*out, entry);
     return true;
 }
 
@@ -211,17 +212,25 @@ void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
     const VkAccessFlags2 rw = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->pipe_layout, 0, 1, &f.tables, 0, nullptr);
+    rv_label_begin(r, cmd, "count");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_count);
     vkCmdDispatch(cmd, blocks, 1, 1);
+    rv_label_end(r, cmd);
     buffer_barrier(cmd, cs, rw, cs, rw);
+    rv_label_begin(r, cmd, "scan");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_scan);
     vkCmdDispatch(cmd, kBucketCount / kComputeGroup, 1, 1);
+    rv_label_end(r, cmd);
     buffer_barrier(cmd, cs, rw, cs, rw);
+    rv_label_begin(r, cmd, "bucket scan");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_bucket_scan);
     vkCmdDispatch(cmd, 1, 1, 1);
+    rv_label_end(r, cmd);
     buffer_barrier(cmd, cs, rw, cs, rw);
+    rv_label_begin(r, cmd, "scatter");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_scatter);
     vkCmdDispatch(cmd, blocks, 1, 1);
+    rv_label_end(r, cmd);
     // Buckets with keyed rows: one group each sorts its range by key. The rest stay in row
     // order and cost nothing here.
     bool keyed = false;
@@ -229,6 +238,7 @@ void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
         if (!r->keyed_counts[b] || !r->bucket_counts[b]) continue;
         if (!keyed) {
             buffer_barrier(cmd, cs, rw, cs, rw);
+            rv_label_begin(r, cmd, "key sort");
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_key_sort);
             keyed = true;
         }
@@ -236,6 +246,7 @@ void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
                            offsetof(PushData, key_bucket), sizeof(u32), &b);
         vkCmdDispatch(cmd, 1, 1, 1);
     }
+    if (keyed) rv_label_end(r, cmd);
     buffer_barrier(cmd, cs, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                    VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                    VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
@@ -342,6 +353,13 @@ u32 record_draws(Renderer* r, VkCommandBuffer cmd) {
             if (n % kBlendCount != blend) break;
             last = n;
         }
+        // Its label: the layers it covers and its blend, for a capture tool.
+        char label[64];
+        if (r->debug_utils) {
+            snprintf(label, sizeof label, "layers %d..%d %s", (i32)(first / kBlendCount) + kLayerMin, (i32)(last / kBlendCount) + kLayerMin,
+                     blend_mode_name((BlendMode)blend));
+            rv_label_begin(r, cmd, label);
+        }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->pipelines[blend]);
         if (r->multi_draw_indirect) {
             vkCmdDrawIndirect(cmd, r->indirect.buffer, (VkDeviceSize)first * sizeof(VkDrawIndirectCommand),
@@ -354,6 +372,7 @@ u32 record_draws(Renderer* r, VkCommandBuffer cmd) {
                 ++draws;
             }
         }
+        if (r->debug_utils) rv_label_end(r, cmd);
         b = last + 1;
     }
     return draws;
@@ -440,6 +459,7 @@ bool rv_create_pipelines(Renderer* r) {
         ci.pDynamicState       = &dynamic_state;
         ci.layout              = r->pipe_layout;
         VK_CHECK(vkCreateGraphicsPipelines(r->device, VK_NULL_HANDLE, 1, &ci, nullptr, &r->pipelines[i]));
+        rv_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)r->pipelines[i], blend_mode_name((BlendMode)i));
     }
     return true;
 }
@@ -553,10 +573,13 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
+    rv_gpu_frame_begin(r, f, cmd);
+    f.gpu_pixels = have_image ? (u64)s.extent.width * s.extent.height : 0;
 
     // Uploads first: textures, then the rows the ticks changed. The previous frame read
     // the tables in its compute and vertex stages and wrote them in its copies; both must
     // be done before this frame's copies land.
+    rv_label_begin(r, cmd, "upload");
     record_texture_uploads(r, cmd);
     buffer_barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
                         VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
@@ -567,6 +590,9 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
     buffer_barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+    rv_label_end(r, cmd);
+    rv_gpu_mark(r, f, cmd, kGpuUploaded);
+    rv_gpu_stats_begin(r, f, cmd); // the sort's and the drawing's shader invocations
 
     bool draw = have_image && r->sprites.len > 0;
     // World: move the view's center to the origin, undo the camera's rotation, then the
@@ -592,9 +618,12 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
     vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, &push);
 
     if (draw) {
+        rv_label_begin(r, cmd, "sort");
         record_sort(r, f, cmd);
+        rv_label_end(r, cmd);
         if (r->check_pending) { snapshot_keys(r, view.alpha); record_sort_check(r, cmd); }
     }
+    rv_gpu_mark(r, f, cmd, kGpuSorted);
 
     if (have_image) {
         // Undefined -> color attachment. Waiting on the acquire semaphore happens at
@@ -630,6 +659,7 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
         ri.layerCount           = 1;
         ri.colorAttachmentCount = 1;
         ri.pColorAttachments    = &color;
+        rv_label_begin(r, cmd, "draw");
         vkCmdBeginRendering(cmd, &ri);
 
         if (draw) {
@@ -644,6 +674,7 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
         }
 
         vkCmdEndRendering(cmd);
+        rv_label_end(r, cmd);
 
         if (r->shot_pending) record_screenshot(r, cmd, s.images[image_index], s.extent);
 
@@ -658,6 +689,9 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
         vkCmdPipelineBarrier2(cmd, &dep);
     }
 
+    rv_gpu_stats_end(r, f, cmd);
+    rv_gpu_mark(r, f, cmd, kGpuDrawn);
+    rv_gpu_mark(r, f, cmd, kGpuEnd);
     VK_CHECK(vkEndCommandBuffer(cmd));
     return true;
 }

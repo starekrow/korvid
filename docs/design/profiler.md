@@ -44,7 +44,20 @@ batch "level") and marks its waits as waits: a worker's idle and a caller's wait
 batch. The frame loop zones pump, ticks and render and marks every frame; memory counters
 come from the frame sample. The engine marks module startup, kind full, heap refused,
 wave capped, stale events dropped and timers fired. A module adds zones only for what it
-wants to see inside its own systems.
+wants to see inside its own systems. The renderer writes the GPU's spans (below).
+
+## Tracks
+
+`prof_track(name)` claims a ring that no thread owns, for work timed on another clock;
+`prof_track_begin`, `prof_track_end` and `prof_track_counter` write into it at times the
+caller gives, in `os_ticks`. The collector treats it as a thread: its zones join the frame
+stats and the summary, its busy time the thread stats, and the trace shows it as a track
+of its own. The renderer's `gpu` track holds `gpu frame` and, inside it, `gpu upload`,
+`gpu sort` and `gpu draw`, from timestamp queries read at the frame's next fence (two frames
+late, so they land in a later frame's stats at the times they happened), with the frame's
+fragment count and overdraw as counters. Calibrated timestamps put the GPU's clock on
+`CLOCK_MONOTONIC` (the performance counter on Windows), which is `os_ticks`; without them
+a frame's start is taken as its submit.
 
 ## Rules
 
@@ -58,6 +71,5 @@ wants to see inside its own systems.
 
 ## Later
 
-A `prof` command set when the CLI exists; GPU tracks from the renderer's timestamp
-queries, injected as zones on their own track once the clocks are calibrated; a Tracy
-sink as a module, dev builds only, under the vendored tooling policy.
+A `prof` command set when the CLI exists; a Tracy sink as a module, dev builds only,
+under the vendored tooling policy. (GPU tracks: done, above.)

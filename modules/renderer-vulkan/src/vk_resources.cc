@@ -97,6 +97,7 @@ void rv_run_garbage(Renderer* r, FrameInFlight& f) {
 bool rv_ring_init(Renderer* r, VkDeviceSize bytes) {
     FrameRing& g = r->ring;
     if (!rv_create_host_buffer(r, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, g.buf)) return false;
+    rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)g.buf.buffer, "upload ring");
     g.head = g.tail = g.used = g.frame_bytes = 0;
     return true;
 }
@@ -111,6 +112,7 @@ bool ring_grow(Renderer* r, VkDeviceSize need) {
     // frame's fence; the accounting restarts in the new one.
     rv_defer_destroy_buffer(r, g.buf);
     if (!rv_create_host_buffer(r, cap, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, g.buf)) return false;
+    rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)g.buf.buffer, "upload ring");
     g.head = g.tail = g.used = 0;
     // The old buffer's spans are the garbage queue's now, this frame's included: counted
     // against the new buffer they would be released from it, and `used` would wrap.
@@ -246,6 +248,7 @@ bool rv_create_texture_image(Renderer* r, Texture& t) {
     ici.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
     ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VK_CHECK(vkCreateImage(r->device, &ici, nullptr, &t.image));
+    rv_name(r, VK_OBJECT_TYPE_IMAGE, (u64)t.image, name_str(t.name));
 
     VkMemoryRequirements req;
     vkGetImageMemoryRequirements(r->device, t.image, &req);
@@ -459,6 +462,10 @@ bool rv_create_tables(Renderer* r, u32 rows) {
         !rv_create_device_buffer(r, sizeof(u32) * (VkDeviceSize)t.blocks() * kBucketCount, storage, t.block_hist) ||
         !rv_create_device_buffer(r, sizeof(u32) * cap, readable, t.sorted))
         return false;
+    rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)t.sprites.buffer, "sprite rows");
+    rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)t.bucket_of.buffer, "sprite buckets");
+    rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)t.block_hist.buffer, "sort block counts");
+    rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)t.sorted.buffer, "sorted rows");
     r->sprite_dirty.resize_fill(cap / 64, 0);
     for (u32 w = 0; w < (r->sprites.len + 63) / 64; ++w) r->sprite_dirty[w] = ~(u64)0; // the new table knows nothing
     for (FrameInFlight& f : r->frames) f.tables_dirty = true;
@@ -472,10 +479,16 @@ bool rv_create_static_buffers(Renderer* r) {
     for (FrameInFlight& f : r->frames) {
         if (!rv_create_host_buffer(r, sizeof(f32) * 4 * kLayerCount, storage, f.layers)) return false;
         memset(f.layers.mapped, 0, sizeof(f32) * 4 * kLayerCount);
+        rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)f.layers.buffer, "layer offsets");
     }
-    return rv_create_device_buffer(r, sizeof(GpuMaterial) * kMaxMaterials, storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, r->material_table) &&
-           rv_create_device_buffer(r, sizeof(u32) * (2 * kBucketCount + 4), storage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, r->sort_meta) &&
-           rv_create_device_buffer(r, sizeof(VkDrawIndirectCommand) * kBucketCount, storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, r->indirect);
+    if (!rv_create_device_buffer(r, sizeof(GpuMaterial) * kMaxMaterials, storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, r->material_table) ||
+        !rv_create_device_buffer(r, sizeof(u32) * (2 * kBucketCount + 4), storage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, r->sort_meta) ||
+        !rv_create_device_buffer(r, sizeof(VkDrawIndirectCommand) * kBucketCount, storage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, r->indirect))
+        return false;
+    rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)r->material_table.buffer, "material rows");
+    rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)r->sort_meta.buffer, "sort totals");
+    rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)r->indirect.buffer, "indirect draws");
+    return true;
 }
 
 // ---- descriptors ----------------------------------------------------------------------------------

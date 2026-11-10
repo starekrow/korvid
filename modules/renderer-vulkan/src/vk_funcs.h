@@ -35,7 +35,10 @@
 // Optional instance entry points (VK_EXT_debug_utils); null when the extension is off.
 #define KV_VK_INSTANCE_DEBUG_FUNCS(X)              \
     X(vkCreateDebugUtilsMessengerEXT)              \
-    X(vkDestroyDebugUtilsMessengerEXT)
+    X(vkDestroyDebugUtilsMessengerEXT)             \
+    X(vkCmdBeginDebugUtilsLabelEXT)                \
+    X(vkCmdEndDebugUtilsLabelEXT)                  \
+    X(vkSetDebugUtilsObjectNameEXT)
 
 // Entry points loaded from the device.
 #define KV_VK_DEVICE_FUNCS(X)                      \
@@ -103,7 +106,14 @@
     X(vkCmdDispatch)                               \
     X(vkCmdCopyBuffer)                             \
     X(vkCmdCopyBufferToImage)                      \
-    X(vkCmdCopyImageToBuffer)
+    X(vkCmdCopyImageToBuffer)                      \
+    X(vkCreateQueryPool)                           \
+    X(vkDestroyQueryPool)                          \
+    X(vkCmdResetQueryPool)                         \
+    X(vkCmdWriteTimestamp2)                        \
+    X(vkCmdBeginQuery)                             \
+    X(vkCmdEndQuery)                               \
+    X(vkGetQueryPoolResults)
 
 #define KV_VK_DECLARE(name) extern PFN_##name name;
 KV_VK_GLOBAL_FUNCS(KV_VK_DECLARE)

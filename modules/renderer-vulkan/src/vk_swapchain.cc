@@ -108,6 +108,7 @@ bool create_swapchain(Renderer* r) {
     s.images.push_n(n);
     vkGetSwapchainImagesKHR(r->device, sc, &n, s.images.data);
     for (u32 i = 0; i < n; ++i) {
+        rv_name(r, VK_OBJECT_TYPE_IMAGE, (u64)s.images[i], "swapchain image");
         VkImageViewCreateInfo vci{};
         vci.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vci.image            = s.images[i];

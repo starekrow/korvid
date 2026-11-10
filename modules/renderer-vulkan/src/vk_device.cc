@@ -77,15 +77,16 @@ bool rv_create_instance(Renderer* r) {
     for (u32 i = 0; i < surface_ext_count; ++i) exts.push(surface_exts[i]);
     Array<const char*> layers;
 
-    bool debug_utils = false;
+    // Debug utils whenever the loader has it: names and labels cost nothing without a
+    // listener and make a capture (RenderDoc, RGP) readable, in a ship build too. Its
+    // messenger only with validation.
+    bool debug_utils = has_instance_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    if (debug_utils) exts.push(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     if (r->validation) {
         if (has_layer("VK_LAYER_KHRONOS_validation")) layers.push("VK_LAYER_KHRONOS_validation");
         else KV_WARN("vulkan", "validation requested but VK_LAYER_KHRONOS_validation is not installed");
-        if (has_instance_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
-            exts.push(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-            debug_utils = true;
-        }
     }
+    bool messenger = debug_utils && r->validation;
 
     VkApplicationInfo app{};
     app.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -111,7 +112,7 @@ bool rv_create_instance(Renderer* r) {
 
     VkInstanceCreateInfo ci{};
     ci.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    ci.pNext                   = debug_utils ? (const void*)&dbg : (layers.len ? (const void*)&layer_settings : nullptr);
+    ci.pNext                   = messenger ? (const void*)&dbg : (layers.len ? (const void*)&layer_settings : nullptr);
     ci.pApplicationInfo        = &app;
     ci.enabledLayerCount       = layers.len;
     ci.ppEnabledLayerNames     = layers.data;
@@ -126,8 +127,9 @@ bool rv_create_instance(Renderer* r) {
         return false;
     }
     if (!vk_load_instance(r->instance, debug_utils)) return false;
+    r->debug_utils = debug_utils;
 
-    if (debug_utils) {
+    if (messenger) {
         VkDebugUtilsMessengerCreateInfoEXT mi = debug_messenger_info(r);
         VK_CHECK(vkCreateDebugUtilsMessengerEXT(r->instance, &mi, nullptr, &r->messenger));
     }
@@ -254,7 +256,61 @@ bool rv_create_device(Renderer* r) {
         vkGetPhysicalDeviceFeatures(r->gpu, &have);
         r->multi_draw_indirect = have.multiDrawIndirect == VK_TRUE; // one call per run of buckets, else one per bucket
         f2.features.multiDrawIndirect = have.multiDrawIndirect;
+#if KV_PROFILE
+        r->gpu_prof.statistics = have.pipelineStatisticsQuery == VK_TRUE; // the frame's shader invocations, for overdraw
+        f2.features.pipelineStatisticsQuery = have.pipelineStatisticsQuery;
+#endif
     }
+#if KV_PROFILE
+    // Timestamps, if the queue writes them; and calibrated timestamps, which put them on the
+    // CPU's clock (the profiler's: CLOCK_MONOTONIC, or the performance counter on Windows).
+    {
+        u32 nq = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(r->gpu, &nq, nullptr);
+        Array<VkQueueFamilyProperties> qp;
+        qp.push_n(nq);
+        vkGetPhysicalDeviceQueueFamilyProperties(r->gpu, &nq, qp.data);
+        u32 bits = r->queue_family < nq ? qp[r->queue_family].timestampValidBits : 0;
+        qp.free();
+        r->gpu_prof.timestamps = bits > 0 && props.limits.timestampPeriod > 0.0f;
+        r->gpu_prof.valid_mask = bits >= 64 ? ~0ull : ((1ull << bits) - 1);
+        r->gpu_prof.period_ns = props.limits.timestampPeriod;
+    }
+    const char* calibrated_ext = nullptr;
+    {
+        u32 n = 0;
+        vkEnumerateDeviceExtensionProperties(r->gpu, nullptr, &n, nullptr);
+        Array<VkExtensionProperties> dev_exts;
+        dev_exts.push_n(n);
+        vkEnumerateDeviceExtensionProperties(r->gpu, nullptr, &n, dev_exts.data);
+        for (u32 i = 0; i < n; ++i) {
+            if (!strcmp(dev_exts[i].extensionName, VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME)) calibrated_ext = VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME;
+            else if (!calibrated_ext && !strcmp(dev_exts[i].extensionName, VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME)) calibrated_ext = VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME;
+        }
+        dev_exts.free();
+    }
+    if (calibrated_ext && r->gpu_prof.timestamps) {
+        bool khr = !strcmp(calibrated_ext, VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
+        auto domains_of = (PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsKHR)vkGetInstanceProcAddr(
+            r->instance, khr ? "vkGetPhysicalDeviceCalibrateableTimeDomainsKHR" : "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT");
+        u32 nd = 0;
+        if (domains_of) domains_of(r->gpu, &nd, nullptr);
+        VkTimeDomainKHR domains[8];
+        if (nd > 8) nd = 8;
+        if (domains_of && nd) domains_of(r->gpu, &nd, domains);
+#if defined(_WIN32)
+        const VkTimeDomainKHR want = VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_KHR;
+#else
+        const VkTimeDomainKHR want = VK_TIME_DOMAIN_CLOCK_MONOTONIC_KHR;
+#endif
+        bool device_domain = false, cpu_domain = false;
+        for (u32 i = 0; i < nd; ++i) { device_domain = device_domain || domains[i] == VK_TIME_DOMAIN_DEVICE_KHR; cpu_domain = cpu_domain || domains[i] == want; }
+        if (device_domain && cpu_domain) { r->gpu_prof.calibrated = true; r->gpu_prof.cpu_domain = want; }
+        else calibrated_ext = nullptr;
+    } else {
+        calibrated_ext = nullptr;
+    }
+#endif
 
     const f32 priority = 1.0f;
     VkDeviceQueueCreateInfo qci{};
@@ -263,16 +319,30 @@ bool rv_create_device(Renderer* r) {
     qci.queueCount       = 1;
     qci.pQueuePriorities = &priority;
 
-    const char* exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    const char* exts[2] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, nullptr};
+    u32 ext_count = 1;
+#if KV_PROFILE
+    if (calibrated_ext) exts[ext_count++] = calibrated_ext;
+#endif
     VkDeviceCreateInfo ci{};
     ci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.pNext                   = &f2;
     ci.queueCreateInfoCount    = 1;
     ci.pQueueCreateInfos       = &qci;
-    ci.enabledExtensionCount   = KV_COUNTOF(exts);
+    ci.enabledExtensionCount   = ext_count;
     ci.ppEnabledExtensionNames = exts;
     VK_CHECK(vkCreateDevice(r->gpu, &ci, nullptr, &r->device));
     if (!vk_load_device(r->device)) return false;
+#if KV_PROFILE
+    if (r->gpu_prof.calibrated) {
+        bool khr = !strcmp(calibrated_ext, VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME);
+        r->gpu_prof.get_calibrated = (PFN_vkGetCalibratedTimestampsKHR)vkGetDeviceProcAddr(r->device, khr ? "vkGetCalibratedTimestampsKHR" : "vkGetCalibratedTimestampsEXT");
+        r->gpu_prof.calibrated = r->gpu_prof.get_calibrated != nullptr;
+    }
+    KV_INFO("vulkan", "GPU timing: timestamps %s (%.2f ns a tick), %s, pipeline statistics %s", r->gpu_prof.timestamps ? "on" : "off",
+            r->gpu_prof.period_ns, r->gpu_prof.calibrated ? "calibrated to the CPU's clock" : "not calibrated",
+            r->gpu_prof.statistics ? "on" : "off");
+#endif
     vkGetDeviceQueue(r->device, r->queue_family, 0, &r->queue);
     KV_INFO("vulkan", "multi-draw indirect %s", r->multi_draw_indirect ? "on" : "off");
     return true;

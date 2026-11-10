@@ -63,6 +63,22 @@ that finds an engine limit adds a line here.
 
 ## Fixed
 
+- **What the GPU does** (after slice 3; asked for by starekrow). Timestamps around the
+  frame's passes and a pipeline-statistics query around its sort and drawing, read at the
+  frame's next fence (no stall), go to the profiler's new `gpu` track (`prof_track`: spans
+  timed on another clock, calibrated to the CPU's) and to `renderer_gpu_stats`, which the
+  frame loop logs with its fps line under `--prof-report` or `--profile`; debug-utils names
+  and labels on everything, in every build, for RenderDoc and the Radeon GPU Profiler
+  (`MESA_VK_TRACE=rgp` on RADV). On this machine (a Radeon 780M, integrated) arcfire's GPU
+  frame is 0.43 ms at Normal (sort 0.19, draw 0.23, overdraw 4.3: sea, land, clouds); 0.67
+  at stress early on; at rank 56's peak (44,000 bullets, 62,000 sprites) 3.3 ms, 4.1 worst,
+  of which the draw is 2.4 at overdraw 29: fill, not vertices, and a sixth of a frame. Two
+  findings: the sort's cost follows the sprite table's high-water rows, not the live ones
+  (0.2 ms before rank 56's peak, 0.5 to 0.7 after it with 1,500 bullets left), since it
+  counts and scatters every row up to the high-water mark; a compaction, or dispatching over
+  a live count, would take that out. And overdraw is the number to watch: the bullets'
+  sprites are 24 units with most of the square transparent, so a tighter quad (or the
+  bullets as points) is the draw's lever.
 - **The extract's worst windows** (slice 3, M5). Traced tick by tick: every outlier was a
   table growing, the delta list (12.4 ms at rank 56, 7.8 at stress) or a kind's side
   tables (2 ms); without growth the extract is linear in its deltas. `sprite_rows_hint`

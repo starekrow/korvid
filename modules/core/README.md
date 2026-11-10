@@ -291,6 +291,7 @@ Header `korvid/core/profile.h`:
 | `prof_enable`, `prof_thread_name`, `prof_cpu_time` | functions | on, named threads, CPU time at zone edges |
 | `prof_collect()`, `prof_frame_stats()`, `prof_thread_stats()`, `prof_log_summary(top)`, `prof_top(out, &frames)`, `prof_keep_frame`, `prof_log_frame` | functions | the collector, between frames on main |
 | `prof_trace_open(path)`, `prof_trace_close()`, `prof_shutdown()` | functions | a Chrome JSON trace |
+| `prof_track(name)`, `prof_track_begin(track, name, ticks)`, `prof_track_end(track, ticks)`, `prof_track_counter(track, name, value, ticks)` | functions | a track: spans timed on another clock (the GPU's), shown like a thread |
 
 Header `korvid/core/utf8.h`, `json.h`, `cli.h`, `random.h`, `log.h`, `test.h`:
 

@@ -114,6 +114,27 @@ void test_profile(kv::TestCtx& c) {
     jobs_shutdown();
     prof_collect();
 
+    // A track: spans timed on another clock, at the times given, nested by order, shown
+    // like a thread (its own name, its zones in the frame's stats).
+    {
+        u32 track = prof_track("gpu test");
+        KV_CHECK(c, track != 0);
+        u64 t0 = os_ticks();
+        u64 ms = os_ticks_per_second() / 1000;
+        prof_track_begin(track, "track outer", t0);
+        prof_track_begin(track, "track inner", t0 + ms);
+        prof_track_end(track, t0 + 3 * ms);
+        prof_track_end(track, t0 + 5 * ms);
+        prof_track_counter(track, "track count", 7, t0 + 5 * ms);
+        prof_collect();
+        const ProfStat* to = find(prof_frame_stats(), "track outer");
+        const ProfStat* ti = find(prof_frame_stats(), "track inner");
+        KV_CHECK(c, to && ti && to->wall == 5 * ms && ti->wall == 2 * ms);
+        bool named = false;
+        for (const ProfThreadStat& t : prof_thread_stats()) named = named || (t.name && !strcmp(t.name, "gpu test") && t.busy == 5 * ms);
+        KV_CHECK(c, named);
+    }
+
     // The kept frame dumps without complaint; the summary too.
     prof_log_frame(0);
     prof_log_summary(5);

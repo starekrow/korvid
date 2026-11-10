@@ -78,6 +78,18 @@ bool       renderer_render(Renderer* r, const RenderView& view);
 // work before the next render without delaying a frame.
 f64        renderer_last_wait(const Renderer* r);
 
+// What the GPU did with the last frame whose results are in (the frame before the one
+// rendering now), when the backend measures it: in a dev build while the profiler records,
+// by timestamps around the frame's passes and a count of the shader invocations. `valid`
+// is false otherwise. The same spans go to the profiler's "gpu" track.
+struct RendererGpuStats {
+    bool valid = false;
+    f64  frame_ms = 0.0, upload_ms = 0.0, sort_ms = 0.0, draw_ms = 0.0;
+    u64  vertices = 0, fragments = 0, compute = 0; // shader invocations; 0 when the device cannot count them
+    f32  overdraw = 0.0f;                          // fragments over the frame's pixels
+};
+RendererGpuStats renderer_gpu_stats(const Renderer* r);
+
 // Asks for the next presented frame as a binary PPM at `path`. A dev facility: the frame
 // loop's --screenshot. The frame that carries it waits for its own fence.
 bool       renderer_screenshot(Renderer* r, const char* path);

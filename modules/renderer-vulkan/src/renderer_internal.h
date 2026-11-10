@@ -16,6 +16,7 @@
 #include "korvid/core/map.h"
 #include "korvid/core/name.h"
 #include "korvid/core/pool.h"
+#include "korvid/core/profile.h"
 #include "vk_funcs.h"
 #include "vk_platform.h"
 
@@ -181,6 +182,31 @@ struct FrameInFlight {
     VkDeviceSize    ring_bytes = 0;             // what the frame took, released at its fence
     Buffer          layers;                     // the layers' offsets, previous and current: float4 each, host-visible
     bool            submitted  = false;
+    // GPU timing (vk_gpu_profile.cc): whether this frame wrote its timestamps and its
+    // statistics, when the CPU submitted it, and how many pixels it drew.
+    bool            gpu_stamped = false, gpu_counted = false;
+    u64             submit_ticks = 0;
+    u64             gpu_pixels = 0;
+};
+
+// The frame's timestamps: its start, after the uploads, after the sort, after the drawing,
+// its end. Spans: the frame, the uploads, the sort, the draw.
+enum GpuMark : u32 { kGpuStart, kGpuUploaded, kGpuSorted, kGpuDrawn, kGpuEnd, kGpuMarks };
+
+struct GpuProfiler {
+    bool            timestamps = false;    // the queue can, and this is a profiling build
+    bool            statistics = false;    // pipelineStatisticsQuery
+    bool            calibrated = false;    // VK_KHR (or EXT) calibrated timestamps, with the CPU clock's domain
+    VkTimeDomainKHR cpu_domain = VK_TIME_DOMAIN_DEVICE_KHR;
+    PFN_vkGetCalibratedTimestampsKHR get_calibrated = nullptr;
+    f64             period_ns  = 1.0;      // a timestamp tick, in nanoseconds
+    u64             valid_mask = ~0ull;    // the queue's timestampValidBits
+    VkQueryPool     stamps = VK_NULL_HANDLE; // kGpuMarks per frame in flight
+    VkQueryPool     stats  = VK_NULL_HANDLE; // one per frame in flight
+    u64             cal_gpu = 0, cal_cpu = 0; // a GPU timestamp and the CPU's ticks at the same moment
+    u32             cal_age = 0;           // frames since the last calibration (none yet while cal_cpu is 0)
+    u32             track = 0;             // the profiler's "gpu" track
+    RendererGpuStats last;
 };
 
 struct Swapchain {
@@ -219,6 +245,8 @@ struct Renderer {
     VkQueue                  queue     = VK_NULL_HANDLE;
     VkPhysicalDeviceMemoryProperties mem_props{};
     bool                     multi_draw_indirect = false;
+    bool                     debug_utils = false; // VK_EXT_debug_utils: names and labels for capture tools
+    GpuProfiler              gpu_prof;
 
     Swapchain swapchain;
     bool      swapchain_dirty = true;
@@ -366,6 +394,21 @@ void rv_destroy_pipelines_now(Renderer* r);
 bool rv_create_compute_pipelines(Renderer* r);
 // Records one frame: uploads, table copies, the sort, and the draws when there is an image.
 bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view);
+
+// vk_gpu_profile.cc. Names and labels (VK_EXT_debug_utils, when the instance has it: a
+// no-op unless a capture tool or layer listens). Timing: query pools made after the
+// frames, a frame's queries reset and its marks and statistics written while it records
+// (while the profiler records), read once its fence has passed (never waited for).
+void rv_name(Renderer* r, VkObjectType type, u64 handle, const char* name);
+void rv_label_begin(Renderer* r, VkCommandBuffer cmd, const char* name);
+void rv_label_end(Renderer* r, VkCommandBuffer cmd);
+bool rv_gpu_profile_create(Renderer* r);
+void rv_gpu_profile_destroy(Renderer* r);
+void rv_gpu_frame_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd); // resets, then the start mark
+void rv_gpu_mark(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, GpuMark mark);
+void rv_gpu_stats_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd);
+void rv_gpu_stats_end(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd);
+void rv_gpu_collect(Renderer* r, FrameInFlight& f); // after its fence
 // Writes the screenshot buffer the frame filled; the frame's fence has passed.
 bool rv_write_screenshot(Renderer* r);
 // Verifies the sort outputs the frame read back; the frame's fence has passed.

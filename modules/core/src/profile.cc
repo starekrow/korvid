@@ -259,6 +259,49 @@ void prof_counter(const char* name, u64 value) { put(ProfKind::Counter, name, va
 void prof_frame(u64 frame) { put(ProfKind::Frame, "frame", frame); }
 void prof_tick(u64 tick)   { put(ProfKind::Tick, "tick", tick); }
 
+// ---- tracks ---------------------------------------------------------------------------------
+namespace {
+
+Ring* track_ring(u32 track) { return track && track <= KV_PROF_MAX_RINGS ? &g_rings[track - 1] : nullptr; }
+
+inline void put_at(Ring* r, ProfKind kind, const char* name, u64 value, u64 ticks) {
+    if (!r) return;
+    ProfRecord& rec = r->data[r->write % kRingCap];
+    rec.ticks = (ticks & kTickMask) | ((u64)kind << kKindShift);
+    rec.name  = name;
+    rec.value = value;
+    kv::atomic_store(&r->write, r->write + 1, kv::MO_RELEASE);
+}
+
+} // namespace
+
+u32 prof_track(const char* name) {
+    lock_rings();
+    u32 found = 0;
+    for (u32 i = 0; i < KV_PROF_MAX_RINGS && !found; ++i) {
+        Ring& r = g_rings[i];
+        if (kv::atomic_load(&r.in_use, kv::MO_ACQUIRE)) continue;
+        if (!r.data) {
+            r.data = (ProfRecord*)os_reserve(kRingCap * sizeof(ProfRecord));
+            if (r.data && !os_commit(r.data, os_page_align(kRingCap * sizeof(ProfRecord)))) { os_release(r.data, kRingCap * sizeof(ProfRecord)); r.data = nullptr; }
+            if (!r.data) break;
+        }
+        r.write = r.read = r.dropped = 0;
+        r.dead = 0;
+        ++r.claims;
+        r.tid = 0;
+        snprintf(r.name, sizeof r.name, "%s", name ? name : "track");
+        kv::atomic_store(&r.in_use, 1u, kv::MO_RELEASE); // no thread holds it, so none frees it at exit
+        found = i + 1;
+    }
+    unlock_rings();
+    return found;
+}
+
+void prof_track_begin(u32 track, const char* name, u64 ticks) { put_at(track_ring(track), ProfKind::ZoneBegin, name, 0, ticks); }
+void prof_track_end(u32 track, u64 ticks) { put_at(track_ring(track), ProfKind::ZoneEnd, nullptr, 0, ticks); }
+void prof_track_counter(u32 track, const char* name, u64 value, u64 ticks) { put_at(track_ring(track), ProfKind::Counter, name, value, ticks); }
+
 // ---- cold path ------------------------------------------------------------------------------
 void prof_collect() {
     collector_init();

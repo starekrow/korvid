@@ -95,6 +95,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     if (ok && !vk_platform_create_surface(r->window, r->instance, &r->surface)) ok = false;
     ok = ok && rv_create_device(r);
     ok = ok && rv_create_frames(r);
+    ok = ok && rv_gpu_profile_create(r);
     ok = ok && rv_create_resource_pools(r);
     ok = ok && rv_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
     ok = ok && rv_create_static_buffers(r);
@@ -126,6 +127,7 @@ void renderer_destroy(Renderer* r) {
         rv_destroy_swapchain_now(r);
         rv_destroy_frames(r); // runs every frame's garbage
         rv_destroy_resources(r);
+        rv_gpu_profile_destroy(r);
         vkDestroyDevice(r->device, nullptr);
     } else {
         rv_destroy_resources(r); // pools and arrays only
@@ -434,6 +436,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         waited += time_now() - t;
     }
     r->last_wait = 0.0;
+    rv_gpu_collect(r, f); // its timestamps and counts, now that the fence has passed
     rv_ring_release(r, f);
     rv_run_garbage(r, f);
     if (r->sprites.len > r->tables.capacity) {
@@ -495,6 +498,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     si.pCommandBufferInfos      = &cbi;
     si.signalSemaphoreInfoCount = have_image ? 1 : 0;
     si.pSignalSemaphoreInfos    = &signal;
+    f.submit_ticks = os_ticks(); // where an uncalibrated GPU timeline starts
     VK_CHECK(vkQueueSubmit2(r->queue, 1, &si, f.fence));
     f.submitted = true;
     rv_ring_submitted(r, f);
