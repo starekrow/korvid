@@ -36,8 +36,10 @@ file, OS or `require` access; their output is plain data. The fields a module ma
 `engine_module` (the module registers a `ModuleDesc`; the build then generates the
 executable's module list in dependency order), `module_list = false` (the executable
 writes its own list), `exe` (the executable's file name, when it is not the module's:
-`tool_kpack` writes `bin/kpack`) and `licenses` (files under the module that `kormake
-package` copies into `dist/<exe>/licenses/`).
+`tool_kpack` writes `bin/kpack`), `licenses` (files under the module that `kormake
+package` copies into `dist/<exe>/licenses/`) and `private_includes` (directories under the
+module on the include path of its own sources and tests, not its dependents': a vendored
+library that includes its own headers by `<name>`).
 
 **Assets.** Everything under a module's `assets/`, subdirectories included, is copied to
 `bin/assets/<module>/` with the same layout (hidden files skipped).

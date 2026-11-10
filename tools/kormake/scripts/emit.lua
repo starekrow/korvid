@@ -242,6 +242,13 @@ function M.run(c, g, opts)
     local dirs = {}
     for _, d in ipairs(inst.closure) do if d.module.include then dirs[#dirs + 1] = flag(d.module.include) end end
     if inst.module.include then dirs[#dirs + 1] = flag(inst.module.include) end
+    -- The module's private include directories (a vendored library's own headers, which
+    -- it includes by <name>): its own sources and tests only, never its dependents'.
+    for _, p in ipairs(inst.module.fields.private_includes or {}) do
+      local d = util.join(inst.module.dir, p)
+      if not kfs.isdir(d) then util.fail("module '%s': private include '%s' is not a directory", inst.module.name, p) end
+      dirs[#dirs + 1] = flag(d)
+    end
     for _, e in ipairs(extra or {}) do dirs[#dirs + 1] = flag(e) end
     -- A package's headers, for the module that names it (not its dependents: the package
     -- stays behind the module's API).

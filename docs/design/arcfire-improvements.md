@@ -9,13 +9,6 @@ that finds an engine limit adds a line here.
 
 ## Identified at PRD time
 
-- **An `xml` module.** BulletML is XML, and Tiled's native TMX is XML. A module beside
-  `json`, present only in a game that lists it, wrapping a vendored small parser the way
-  `inflate` wraps miniz: candidates yxml (MIT, ~6 KiB, byte-fed, non-validating, skips the
-  DTD, one root element, the predefined entities and character references only) and hoxml
-  (C99, header-only, the same shape); the module's README states the edges the parser
-  documents and the tests pin them. A parser is written here only if neither holds up.
-  The tilemap module could read TMX through it later. Slice 2.
 - **A game's fragment shader.** Stage three's procedural nebula is made on the CPU and
   uploaded; a shader version wants a material to name a fragment shader of the game's own,
   compiled by the build like the engine's, with the material's parameter block as its
@@ -115,5 +108,11 @@ that finds an engine limit adds a line here.
   `frameloop_option(e, name, i)`, for `--dial name=value`, repeatable.
 - **The broadphase's pair count** (slice 1). `CollisionStats::colliders`, `tested`,
   `cell`, for the HUD's counters and this note's numbers.
-
-
+- **An `xml` module** (slice 2, M1). `modules/xml`: yxml (MIT, Yoran Heling, commit
+  66507906, pinned with hashes in `src/vendor/README.md`) behind a flat tree in the JSON
+  reader's shape. Chosen over hoxml for its age, its fixed name stack and a fuzzing history;
+  hoxml read as younger, with a closing-tag compare that accepts a prefix and two unbounded
+  copies. yxml's own character-reference range check is off (surrogates through as invalid
+  UTF-8, U+E000-U+E7FE refused): the wrapper refuses the first, the README states the
+  second. Edges pinned by tests; a fuzz test of mutated documents, clean under ASan and
+  UBSan at 200,000 cases. kormake gained `private_includes` for the vendored header.
