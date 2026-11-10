@@ -98,6 +98,22 @@ void test_profile(kv::TestCtx& c) {
     for (const ProfThreadStat& t : prof_thread_stats()) if (t.name && strcmp(t.name, "main") == 0) dropped = t.dropped;
     KV_CHECK(c, dropped > 0 && dropped < 80000);
 
+    // Threads come and go without a collect between: each claims a ring when it is named
+    // and frees it at exit when nothing in it is unread, so a thread after more threads
+    // than there are rings still gets one, and its zones are seen.
+    prof_enable(false);
+    for (u32 round = 0; round < (KV_PROF_MAX_RINGS / 16) + 2; ++round) { jobs_init(16); jobs_shutdown(); }
+    prof_enable(true);
+    jobs_init(2);
+    g_caller = thread_id();
+    g_worker_chunks = 0;
+    jobs_run(8, 1, spin, nullptr, "after churn");
+    prof_collect();
+    const ProfStat* again = find(prof_frame_stats(), "spin chunk");
+    KV_CHECK(c, again && again->calls == 8 && g_worker_chunks > 0);
+    jobs_shutdown();
+    prof_collect();
+
     // The kept frame dumps without complaint; the summary too.
     prof_log_frame(0);
     prof_log_summary(5);

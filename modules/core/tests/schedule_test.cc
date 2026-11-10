@@ -90,6 +90,27 @@ KV_MODULE_DEFINE(k_late_read) = {.name = "lateread", .components = k_components,
 constinit const SystemDesc k_early_write_systems[] = {{.name = "w.bad", .phase = Phase::Sim, .fn = sys_other, .writes = "^*.Pos"}};
 KV_MODULE_DEFINE(k_early_write) = {.name = "earlywrite", .components = k_components, .kinds = k_kinds, .systems = k_early_write_systems};
 
+// A set form with a joined filter: "*[Vel+Glow].Pos" is Pos in the kinds with both, so
+// it shares nothing with a writer of a kind that has Vel only (no order needed) and
+// collides with an unordered writer of one that has both.
+constinit const KindDesc k_filter_kinds[] = {
+    {.name = "j.plain", .components = "Pos, Vel", .capacity = 8},
+    {.name = "j.glowing", .components = "Pos, Vel, Glow", .capacity = 8},
+};
+constinit const SystemDesc k_joined_systems[] = {
+    {.name = "j.both", .phase = Phase::Sim, .fn = sys_other, .writes = "*[Vel+Glow].Pos", .state = StateUse::None},
+    {.name = "j.plain_mover", .phase = Phase::Sim, .fn = sys_move, .writes = "j.plain.Pos", .state = StateUse::None},
+    {.name = "j.reader", .phase = Phase::Sim, .fn = sys_steer, .reads = "j.glowing.Pos", .state = StateUse::None},
+};
+KV_MODULE_DEFINE(k_joined) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_joined_systems};
+constinit const SystemDesc k_joined_clash_systems[] = {
+    {.name = "j.both", .phase = Phase::Sim, .fn = sys_other, .writes = "*[Vel+Glow].Pos", .state = StateUse::None},
+    {.name = "j.glow_mover", .phase = Phase::Sim, .fn = sys_move, .writes = "j.glowing.Pos", .state = StateUse::None},
+};
+KV_MODULE_DEFINE(k_joined_clash) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_joined_clash_systems};
+constinit const SystemDesc k_joined_unknown_systems[] = {{.name = "j.what", .phase = Phase::Sim, .fn = sys_other, .writes = "*[Vel+Nope].Pos"}};
+KV_MODULE_DEFINE(k_joined_unknown) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_joined_unknown_systems};
+
 const char* order(const Engine& e, Phase p, char* buf, usize cap) {
     buf[0] = 0;
     for (const ScheduledSystem& s : e.phases.systems[(u32)p]) { strncat(buf, s.desc->name, cap - strlen(buf) - 1); strncat(buf, " ", cap - strlen(buf) - 1); }
@@ -122,6 +143,20 @@ void test_schedule(kv::TestCtx& c) {
         KV_CHECK(c, init_fails(c, late));
         const ModuleDesc* const bad[] = {&k_early_write};
         KV_CHECK(c, init_fails(c, bad));
+    }
+
+    // Joined filters.
+    {
+        const ModuleDesc* const ok[] = {&k_joined};
+        Engine x;
+        KV_CHECK(c, engine_init(x, ok));
+        const char* o = order(x, Phase::Sim, buf, sizeof buf);
+        KV_CHECK(c, strstr(o, "j.both") < strstr(o, "j.reader")); // the reader of what it wrote follows it
+        engine_shutdown(x);
+        const ModuleDesc* const clash[] = {&k_joined_clash};
+        KV_CHECK(c, init_fails(c, clash));
+        const ModuleDesc* const unknown[] = {&k_joined_unknown};
+        KV_CHECK(c, init_fails(c, unknown));
     }
 
     // Derived order: writers before readers, the declared edge honored, the kind writer first.

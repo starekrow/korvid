@@ -6,6 +6,7 @@
 #include "korvid/core/map.h"
 #include "korvid/core/profile.h"
 #include "korvid/math/fields.h"
+#include "korvid/scene/module.h"
 #include "korvid/scene/parent.h"
 #include "korvid/sprite/transform2.h"
 #include <math.h>
@@ -360,6 +361,14 @@ void clear_intents(TickContext& ctx) {
     }
 }
 
+// Phase Sim, after the resolve and before the broadphase: children with colliders (a
+// boss's parts, a ship's graze ring) placed where their parents now are, so the pairs are
+// this tick's. scene.compose places them again in PostSim with everything else.
+void compose_bodies(TickContext& ctx) {
+    KV_ZONE("collision.compose");
+    scene_compose_with(*ctx.engine, ComponentType<Collider2>::id);
+}
+
 bool collision_startup(Engine& e, ModuleInstance& self) {
     CollisionState* s = arena_push<CollisionState>(self.arena);
     if (!s) return false;
@@ -376,8 +385,12 @@ void collision_shutdown(Engine&, ModuleInstance& self) {
 constinit const ResourceDesc k_resources[] = {{".moved"}};
 constinit const SystemDesc k_systems[] = {
     {.name = ".resolve", .phase = Phase::Sim, .fn = resolve,
-     .reads = "*[Collider2].Transform2, *[Collider2].Collider2, *[Move2].Move2",
+     // A child body is read where the last compose put it (^): collision.compose places it
+     // after the resolve has moved its parent.
+     .reads = "*[Collider2].Transform2, ^*[Parent+Collider2].Transform2, *[Collider2].Collider2, *[Move2].Move2",
      .writes = "*[Move2].Transform2, *[Move2].Local2, *[MoveResult2].MoveResult2, .moved"},
+    {.name = ".compose", .phase = Phase::Sim, .fn = compose_bodies, .reads = "*.Transform2, *[Parent+Collider2].Local2, *[Parent+Collider2].Parent",
+     .writes = "*[Parent+Collider2].Transform2", .after = ".resolve", .state = StateUse::None},
     {.name = ".broadphase", .phase = Phase::Sim, .fn = broadphase, .reads = "*[Collider2].Transform2, *[Collider2].Collider2", .after = ".resolve"},
     {.name = ".clear", .phase = Phase::PostSim, .fn = clear_intents, .writes = "*[Move2].Move2", .state = StateUse::None},
 };

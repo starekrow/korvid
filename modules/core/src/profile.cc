@@ -27,15 +27,18 @@ inline ProfKind kind_of(const ProfRecord& r) { return (ProfKind)(r.ticks >> kKin
 inline u64      ticks_of(const ProfRecord& r) { return r.ticks & kTickMask; }
 
 // One per thread, claimed on first use. The thread writes; the collector reads up to the
-// published write index and never stops the writer. A thread that exits leaves its ring
-// marked dead; the collector drains it and frees the slot.
+// published write index and never stops the writer. A thread that exits with nothing
+// unread frees its ring at once (most threads, when nothing is profiling: naming a thread
+// claims its ring); one with records left marks it dead, and the collector drains it and
+// frees the slot. `claims` tells the collector a slot changed hands.
 struct Ring {
     ProfRecord* data;
     u64         write;   // published with release; slots are write % cap
-    u64         read;    // the collector's position
+    u64         read;    // the collector's position (stored with release, for an exiting thread's check)
     u64         dropped; // records the collector found overwritten
     u32         in_use;  // atomic
     u32         dead;    // atomic: the thread is gone
+    u32         claims;  // times the slot was claimed; written under the lock
     u32         tid;
     char        name[32];
 };
@@ -49,7 +52,15 @@ void lock_rings()   { while (kv::atomic_exchange(&g_ring_lock, 1u, kv::MO_ACQUIR
 void unlock_rings() { kv::atomic_store(&g_ring_lock, 0u, kv::MO_RELEASE); }
 
 struct RingGuard {
-    ~RingGuard() { if (t_ring) { kv::atomic_store(&t_ring->dead, 1u, kv::MO_RELEASE); t_ring = nullptr; } }
+    ~RingGuard() {
+        Ring* r = t_ring;
+        if (!r) return;
+        t_ring = nullptr;
+        lock_rings();
+        if (kv::atomic_load(&r->read, kv::MO_ACQUIRE) == r->write) kv::atomic_store(&r->in_use, 0u, kv::MO_RELEASE);
+        else kv::atomic_store(&r->dead, 1u, kv::MO_RELEASE);
+        unlock_rings();
+    }
 };
 thread_local RingGuard t_ring_guard;
 
@@ -68,6 +79,7 @@ Ring* ring() {
         }
         r->write = r->read = r->dropped = 0;
         r->dead = 0;
+        ++r->claims;
         r->tid = thread_id();
         snprintf(r->name, sizeof r->name, "thread %u", r->tid);
         kv::atomic_store(&r->in_use, 1u, kv::MO_RELEASE);
@@ -109,6 +121,7 @@ struct Collector {
     Array<u8>         kept_next_ring;
     FILE*           trace = nullptr;
     bool            trace_named[KV_PROF_MAX_RINGS];
+    u32             seen_claims[KV_PROF_MAX_RINGS]; // a ring's claims when last collected: changed, its state is another thread's
     u64             trace_origin = 0;
 };
 Collector g_c;
@@ -154,6 +167,7 @@ void collect_ring(u32 ri, Ring& r) {
     u64 from = r.read;
     Array<Open>& stack = g_c.stacks[ri];
     if (!stack.alloc) stack.alloc = mem_general();
+    if (g_c.seen_claims[ri] != r.claims) { stack.clear(); g_c.trace_named[ri] = false; g_c.seen_claims[ri] = r.claims; }
     ProfThreadStat& ts = g_c.threads[ri];
     ts.name = r.name;
     for (u64 i = from; i < w; ++i) {
@@ -189,7 +203,7 @@ void collect_ring(u32 ri, Ring& r) {
         if (g_c.trace) trace_record(ri, r, rec, ending);
         if (g_c.keep) { g_c.kept_next.push(rec); g_c.kept_next_ring.push((u8)ri); }
     }
-    r.read = w;
+    kv::atomic_store(&r.read, w, kv::MO_RELEASE);
     ts.open = stack.len;
     ts.dropped = r.dropped;
 }
@@ -248,6 +262,7 @@ void prof_tick(u64 tick)   { put(ProfKind::Tick, "tick", tick); }
 // ---- cold path ------------------------------------------------------------------------------
 void prof_collect() {
     collector_init();
+    (void)ring(); // claimed here, never under the lock below (the lock does not nest)
     g_c.frame.clear();
     g_c.frame_index.clear();
     g_c.threads.resize_fill(KV_PROF_MAX_RINGS, ProfThreadStat{});
@@ -256,13 +271,13 @@ void prof_collect() {
     for (u32 i = 0; i < KV_PROF_MAX_RINGS; ++i) {
         Ring& r = g_rings[i];
         if (!kv::atomic_load(&r.in_use, kv::MO_ACQUIRE)) continue;
+        lock_rings(); // the claims and the death are read where an exiting or a new thread cannot change them
         collect_ring(i, r);
         if (kv::atomic_load(&r.dead, kv::MO_ACQUIRE)) {
             g_c.stacks[i].clear();
-            lock_rings();
             kv::atomic_store(&r.in_use, 0u, kv::MO_RELEASE); // the slot, and its pages, serve the next thread
-            unlock_rings();
         }
+        unlock_rings();
     }
     if (g_c.keep) {
         Array<ProfRecord> t = g_c.kept; g_c.kept = g_c.kept_next; g_c.kept_next = t;

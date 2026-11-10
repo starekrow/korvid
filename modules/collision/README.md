@@ -32,7 +32,12 @@ Every tick, in phase `Sim`:
    pushed, who pushed it. `collision.moved` lists the bodies something else moved.
 3. **The game reacts** in a Sim system that reads `MoveResult2` or `collision.moved`: the
    scheduler puts it after the resolve. Intent, resolve, react: one tick.
-4. **`collision.broadphase`** finds every pair of colliders that overlap where everything
+4. **`collision.compose`** places the children that have a collider (`Parent`, `Local2`
+   and `Collider2`: a boss's parts, a ship's graze ring) where their parents now are, by
+   `scene_compose_with`, so they are tested where they will be drawn and not where the
+   last tick's compose left them. The resolve, before it, sees child bodies where that
+   last compose put them.
+5. **`collision.broadphase`** finds every pair of colliders that overlap where everything
    ended, and diffs the list against last tick's: a new pair is an `OverlapBegin`, a pair
    that is gone an `OverlapEnd`. Handlers run at the next boundary, the same tick.
    Colliders are grouped by their (layer, mask) first: each group has a grid sized to its
@@ -164,8 +169,9 @@ What the module registers with the engine:
 | `Collider2`, `Move2`, `MoveResult2` | components | sim state (hashed, saved) |
 | `OverlapBegin`, `OverlapEnd` | event types | schemas on both; stale handles drop the event |
 | `collision.moved` | resource | `Array<Handle>`: the bodies something else moved this tick |
-| `collision.resolve` | system, phase Sim | reads `*[Collider2].Transform2`, `*[Collider2].Collider2`, `*[Move2].Move2`; writes `*[Move2].Transform2`, `*[Move2].Local2`, `*[MoveResult2].MoveResult2`, `collision.moved` |
-| `collision.broadphase` | system, phase Sim | after the resolve; reads the same columns |
+| `collision.resolve` | system, phase Sim | reads `*[Collider2].Transform2` (child bodies' early, `^`), `*[Collider2].Collider2`, `*[Move2].Move2`; writes `*[Move2].Transform2`, `*[Move2].Local2`, `*[MoveResult2].MoveResult2`, `collision.moved` |
+| `collision.compose` | system, phase Sim | after the resolve and every Sim writer of a `Transform2`; reads `*.Transform2`, `*[Parent+Collider2].Local2`, `.Parent`; writes `*[Parent+Collider2].Transform2` |
+| `collision.broadphase` | system, phase Sim | after the compose; reads the same columns as the resolve |
 | `collision.clear` | system, phase PostSim | writes `*[Move2].Move2` |
 
 Kinds without `Move2` are only read, so a game that moves its own sensors (rocks) keeps

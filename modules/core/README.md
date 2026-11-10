@@ -48,7 +48,7 @@ table of SoA columns on reserved pages, one handle kind, and resources `kind` an
 `kind.Component` that systems name in their sets (`*.Component` means every kind's).
 Two forms narrow a wildcard or turn an edge around:
 `*[Move2].Transform2` is that column in every kind that also has `Move2` (and may match
-none), and a read marked `^` (`^.npc.Local2`) is of the phase's earlier value, so that
+none; `*[Parent+Collider2].Transform2`, in the kinds that have both), and a read marked `^` (`^.npc.Local2`) is of the phase's earlier value, so that
 reader runs before the phase's writers of it instead of after: an AI reading where it
 stands to write the intent a later system moves it by. Systems reach rows through the `TickContext`: `write_kind`, `read<T>`, `write<T>`,
 `view<A, const B>()`; in dev builds an access outside the declared sets asserts with the

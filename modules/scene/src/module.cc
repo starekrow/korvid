@@ -47,6 +47,24 @@ u32 depth_of(Engine& e, Table* child_table, u32 row) {
     }
 }
 
+// Composes the rows in `by_depth`, parents first.
+u32 compose_by_depth(Engine& e, Array<ChildRef>* by_depth, u32 max_depth) {
+    u32 n = 0;
+    for (u32 d = 1; d <= max_depth; ++d) {
+        for (ChildRef r : by_depth[d]) {
+            Table& t = e.tables[r.table];
+            const Parent& p = *(const Parent*)(t.column<Parent>()->data + (usize)r.row * t.column<Parent>()->stride);
+            Table* pt = engine_table_of(e, p.parent);
+            const Transform2* pw = pt->get<Transform2>(p.parent);
+            const Local2& local  = *(const Local2*)(t.column<Local2>()->data + (usize)r.row * t.column<Local2>()->stride);
+            Transform2& w        = *(Transform2*)(t.column<Transform2>()->data + (usize)r.row * t.column<Transform2>()->stride);
+            w = placement_compose(*pw, local);
+            ++n;
+        }
+    }
+    return n;
+}
+
 // Phase PostSim, every tick. Two passes: depth and orphan handling per child row, then
 // composition by depth so a parent is final before its children read it. The scratch
 // arena holds the lists; nothing persists between ticks but the counters.
@@ -88,21 +106,38 @@ void scene_compose(TickContext& ctx) {
         }
     }
 
-    for (u32 d = 1; d <= s.max_depth; ++d) {
-        for (ChildRef r : by_depth[d]) {
-            Table& t = e.tables[r.table];
-            const Parent& p = *(const Parent*)(t.column<Parent>()->data + (usize)r.row * t.column<Parent>()->stride);
-            Table* pt = engine_table_of(e, p.parent);
-            const Transform2* pw = pt->get<Transform2>(p.parent);
-            const Local2& local  = *(const Local2*)(t.column<Local2>()->data + (usize)r.row * t.column<Local2>()->stride);
-            Transform2& w        = *(Transform2*)(t.column<Transform2>()->data + (usize)r.row * t.column<Transform2>()->stride);
-            w = placement_compose(*pw, local);
-            ++s.composed;
-        }
-    }
+    s.composed = compose_by_depth(e, by_depth, s.max_depth);
     st.stats = s;
     if (s.composed) KV_MARK_V("scene composed", s.composed);
 }
+
+} // namespace
+
+u32 scene_compose_with(Engine& e, u32 component) {
+    if (!component) return 0;
+    MemScope scope;
+    Array<ChildRef> by_depth[KV_SCENE_MAX_DEPTH + 1];
+    for (Array<ChildRef>& a : by_depth) a = array_in<ChildRef>(mem_scratch());
+    u32 max_depth = 0;
+    for (Table& t : e.tables) {
+        if (!t.has(component) || !t.has(ComponentType<Parent>::id) || !t.has(ComponentType<Local2>::id) || !t.has(ComponentType<Transform2>::id)) continue;
+        const Column* pc = t.column<Parent>();
+        for (u32 i = 0; i < t.rows(); ++i) {
+            if (!t.is_alive(i)) continue;
+            const Parent& p = *(const Parent*)(pc->data + (usize)i * pc->stride);
+            if (p.parent.is_null()) continue;
+            Table* pt = engine_table_of(e, p.parent);
+            if (!pt || !pt->valid(p.parent) || !pt->has(ComponentType<Transform2>::id)) continue; // an orphan: scene.compose's
+            u32 d = depth_of(e, &t, i);
+            if (d == 0) continue; // a cycle: likewise
+            if (d > max_depth) max_depth = d;
+            by_depth[d].push(ChildRef{t.index, i});
+        }
+    }
+    return compose_by_depth(e, by_depth, max_depth);
+}
+
+namespace {
 
 bool scene_startup(Engine&, ModuleInstance& self) {
     SceneState* s = arena_push<SceneState>(self.arena);

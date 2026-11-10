@@ -235,8 +235,8 @@ bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
 }
 
 // Names to ids. "*.Component" is that column in every kind, and must exist somewhere;
-// "*[Other].Component" is that column in every kind that also has Other, and may match
-// none (a module's system that moves only what opted in); ".x" is "<module>.x"; the list
+// "*[Other].Component" is that column in every kind that also has Other ("*[A+B].Component":
+// has both), and may match none (a module's system that moves only what opted in); ".x" is "<module>.x"; the list
 // is comma-separated.
 bool resolve_resource_refs(const Engine& e, const ModuleDesc& m, const char* unit_name,
                            const char* refs, const char* kind, Array<u32>& out, Array<u32>* early = nullptr) {
@@ -258,16 +258,31 @@ bool resolve_resource_refs(const Engine& e, const ModuleDesc& m, const char* uni
                 return false;
             }
             *close = 0;
-            u32 filter = engine_component_id(e, raw + 2);
+            // The filter: one component, or several joined by '+', all of which a kind has.
+            u32 filter[4], nf = 0;
             u32 cid = engine_component_id(e, close + 2);
-            if (!filter || !cid) {
-                KV_ERROR("engine", "'%s' in module '%s' %s '*[%s].%s': unknown component '%s'", unit_name, m.name, kind,
-                         raw + 2, close + 2, !filter ? raw + 2 : close + 2);
+            for (char* f = raw + 2; f;) {
+                char* plus = strchr(f, '+');
+                if (plus) *plus = 0;
+                u32 id = engine_component_id(e, f);
+                if (!id || nf == KV_COUNTOF(filter)) {
+                    KV_ERROR("engine", "'%s' in module '%s' %s '*[...].%s': %s '%s'", unit_name, m.name, kind, close + 2,
+                             id ? "more than four components in the filter at" : "unknown component", f);
+                    return false;
+                }
+                filter[nf++] = id;
+                f = plus ? plus + 1 : nullptr;
+            }
+            if (!cid) {
+                KV_ERROR("engine", "'%s' in module '%s' %s '*[...].%s': unknown component '%s'", unit_name, m.name, kind, close + 2, close + 2);
                 return false;
             }
-            for (const Table& t : e.tables)
-                if (t.has(filter))
+            for (const Table& t : e.tables) {
+                bool all = true;
+                for (u32 k = 0; k < nf; ++k) all = all && t.has(filter[k]);
+                if (all)
                     if (const Column* c = t.column(cid)) out.push(c->resource);
+            }
             mark();
             continue;
         }

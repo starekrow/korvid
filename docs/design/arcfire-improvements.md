@@ -50,17 +50,21 @@ that finds an engine limit adds a line here.
 
 ## Found in slice 1
 
-- **Children lag their parent by a tick in Sim.** `scene.compose` places children in
-  PostSim, so the collision broadphase (Sim) sees the graze ring and the shell where the
-  ship was a tick ago (six units, at full speed). Harmless for a ring; it would not be for
-  a child hitbox or a turret part's collider on a moving boss (slice 3). A compose before
-  the broadphase for kinds with colliders, or the resolve composing what it moves.
 - **Action overrides land on the next sample.** A bot that decides in Sim from sim state
   drives the ship a tick late; the demo runs in Input before the sample to avoid it. Fine
   as it is, worth a line in the platform_hid docs.
 
 ## Fixed
 
+- **Children lag their parent by a tick in Sim** (found in slice 1, fixed in slice 3, M2).
+  `collision.compose` (Sim, after the resolve, before the broadphase) composes the children
+  that have a `Collider2` with `scene_compose_with(e, component)`, so the graze ring, the
+  shell and a boss's parts are tested where they are drawn; a test has a turret on a part
+  on a moving boss meet a standing shot on the tick it gets there. The scheduler's set form
+  takes a joined filter for it (`*[Parent+Collider2].Transform2`). The resolve reads child
+  bodies early (`^`), where the last compose put them: it moves their parents, then the
+  compose follows. The PRD had the pass in `scene` before the resolve; it is in `collision`
+  after it, since scene does not know colliders and the resolve moves parents.
 - **Parallax: layer scroll** (slice 3, M1). `SpriteLayers` (`sprite/layers.h`, the
   resource `sprite.layers`): an offset per layer the game sets, sent as a `Layer` delta
   when it changes and read by the vertex shader from a 256-entry buffer (binding 7),

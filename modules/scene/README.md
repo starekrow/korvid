@@ -88,10 +88,12 @@ Depends on: core, math, render, sprite.
 
 ## Behaviour worth knowing
 
-- **A child's world placement is one tick old to Sim.** It is written at the end of the
-  tick, so a Sim system that reads it (collision on a child) sees where the child was at
-  the end of the last tick. A child that must collide where it is drawn is a reason to
-  compose at the end of Sim as well; nothing needs it yet.
+- **A child's world placement is one tick old to Sim**, unless the child has a collider.
+  It is written at the end of the tick, so a Sim system that reads it sees where the
+  child was at the end of the last tick. Children with a `Collider2` are composed in Sim
+  as well, by `collision.compose` (`scene_compose_with`), after the resolve and before
+  the broadphase, so they collide where they are drawn; a Sim system that reads them
+  after that pass sees them composed.
 - **A destroyed parent's child lingers one frame.** The orphan is destroyed by command at
   the end of PostSim, after the extract has sent its last placement; the next tick's
   extract removes it.
