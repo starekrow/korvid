@@ -1,5 +1,8 @@
 // example_arcfire: items. A cancelled bullet (a bomb, a death) becomes a score chip; the
-// last member of a formation shot down to the last one drops a bomb. Items pop up, fall,
+// last member of a formation shot down to the last one drops a bomb; an item carrier (a
+// formation the stage marks) drops what it carries: a weapon item, which shows a type and
+// cycles through the four while it falls (taking it takes the type it shows: the same as
+// the ship's powers it, another switches to it), or a power item. Items pop up, fall,
 // and come to the ship when it is above the magnet line (or within a short reach of it);
 // the graze ring picks them up. A cancel makes at most kChipCap chips, so sixty thousand
 // bullets never become sixty thousand rows: the rest are paid in score at once.
@@ -16,10 +19,19 @@ constexpr f32 kFall = 1.6f;         // units a tick, at most
 constexpr f32 kGravity = 0.08f;
 constexpr f32 kMagnetSpeed = 9.0f;
 constexpr f32 kReach = 40.0f;       // an item this close comes whatever the line
+constexpr u32 kCycle = 90;          // ticks a weapon item shows each type
+constexpr i32 kPowerScore = 10000;  // a power past the last level pays this
 const color kSparkChip{1.0f, 0.95f, 0.5f, 1.0f};
 
-Sprite item_sprite(const Game& g, ItemKind kind) {
+// made/items.png: 16 px cells, the four weapons' letters, then power.
+rect2 items_uv(u32 cell) { return rect2{(f32)cell * (16.0f / 80.0f), 0.0f, 16.0f / 80.0f, 1.0f}; }
+
+u32 weapon_shown(const Item& it) { return ((u32)it.value + (kItemLife - it.life) / kCycle) % WeaponCount; }
+
+Sprite item_sprite(const Game& g, ItemKind kind, i32 value) {
     if (kind == ItemBomb) return sprite_of(g, TEX_TILES, tile_uv(2, 2), vec2{26, 26}, Z_ITEM);
+    if (kind == ItemWeapon) return sprite_of(g, TEX_ITEMS, items_uv((u32)value % WeaponCount), vec2{28, 28}, Z_ITEM);
+    if (kind == ItemPower) return sprite_of(g, TEX_ITEMS, items_uv(4), vec2{28, 28}, Z_ITEM);
     return sprite_of(g, TEX_TILES, tile_uv(4, 0), vec2{14, 14}, Z_ITEM, color{1.0f, 1.0f, 1.0f, 0.95f});
 }
 
@@ -27,9 +39,14 @@ Sprite item_sprite(const Game& g, ItemKind kind) {
 
 Collider2 item_collider() { return collider_circle(8.0f, L_ITEM, L_GRAZE); }
 
-void item_drop(TickContext& ctx, const Game& g, ItemKind kind, point2 at, vec2 v) {
-    Item it{(u32)kind, kind == ItemChip ? kChipValue : 0, kItemLife, 0};
-    ctx.spawn_later(g_item_kind, transform2_at(at), item_sprite(g, kind), Velocity{v}, item_collider(), it);
+void item_drop(TickContext& ctx, const Game& g, ItemKind kind, point2 at, vec2 v, i32 value) {
+    Item it{(u32)kind, kind == ItemChip ? kChipValue : value, kItemLife, 0};
+    ctx.spawn_later(g_item_kind, transform2_at(at), item_sprite(g, kind, value), Velocity{v}, item_collider(), it);
+}
+
+void drop_item(TickContext& ctx, const Game& g, u32 drop, point2 at) {
+    if (drop >= DropWeapon && drop <= DropWeaponLast) item_drop(ctx, g, ItemWeapon, at, vec2{0.0f, 1.8f}, (i32)(drop - DropWeapon));
+    else if (drop == DropPower) item_drop(ctx, g, ItemPower, at, vec2{0.0f, 1.8f});
 }
 
 // Every bullet of both kinds within `radius` of `at` (all of them for radius <= 0) goes; the
@@ -90,7 +107,8 @@ void items(TickContext& ctx) {
             v[i].v.y = v[i].v.y - kGravity < -kFall ? -kFall : v[i].v.y - kGravity;
         }
         p += v[i].v;
-        if (--it[i].life == 0 || p.y < kFieldBottom - kCullMargin) ctx.destroy(items_table->handle_at(i));
+        if (--it[i].life == 0 || p.y < kFieldBottom - kCullMargin) { ctx.destroy(items_table->handle_at(i)); continue; }
+        if (it[i].kind == ItemWeapon) items_table->rows_of<Sprite>()[i].uv = items_uv(weapon_shown(it[i]));
     }
 }
 
@@ -100,11 +118,26 @@ void on_pickup(TickContext& ctx, Span<const Pickup> picks) {
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
     Span<const Item> its = ctx.read<Item>("example_arcfire.item.Item");
     Span<const Transform2> xf = ctx.read<Transform2>("example_arcfire.item.Transform2");
+    Span<Ship> ships = ctx.write<Ship>("example_arcfire.ship.Ship");
     if (!run.len) return;
     for (const Pickup& p : picks) {
         u32 i = p.item.index();
         if (i >= its.len) continue;
-        if (its[i].kind == ItemBomb) {
+        if (its[i].kind == ItemWeapon || its[i].kind == ItemPower) {
+            Ship* s = g.ship.index() < ships.len ? &ships[g.ship.index()] : nullptr;
+            u32 type = its[i].kind == ItemWeapon ? weapon_shown(its[i]) : (s ? s->weapon : 0);
+            if (s && s->weapon != type) {
+                s->weapon = type; // a switch keeps the level
+                KV_INFO("arcfire", "pickup: %s at level %u, tick %llu", weapon_name(type), s->power, (unsigned long long)ctx.tick);
+            } else if (s && s->power < kMaxPower) {
+                ++s->power;
+                KV_INFO("arcfire", "pickup: %s to level %u, tick %llu", weapon_name(type), s->power, (unsigned long long)ctx.tick);
+            } else {
+                run[0].score += kPowerScore;
+            }
+            sfx(ctx, g, SFX_CHIP, 0.6f);
+            fx_sparks(ctx, g, xf[i].position, 10, color{1.0f, 0.8f, 0.4f, 1.0f}, 3.0f);
+        } else if (its[i].kind == ItemBomb) {
             if (run[0].bombs < kMaxBombs) ++run[0].bombs;
             sfx(ctx, g, SFX_CHIP, 0.7f);
             fx_sparks(ctx, g, xf[i].position, 8, color{0.6f, 0.85f, 1.0f, 1.0f}, 2.5f);

@@ -23,6 +23,10 @@ What is made here, and from what:
   made/clouds_low.png  512 x 512 seamless: four clusters of cumulus in the pack's whites and
                      greys, for the low cloud plane and (darkened by the game) its shadows
   made/clouds_high.png 512 x 512 seamless: thin wisps, half transparent, for the high plane
+  made/beam.png      16 x 64: the Beam's strip, a white core in cyan with a deep blue edge
+                     and pulses along it, repeating up its length
+  made/items.png     80 x 16: the items' badges: Spread, Beam, Storm and Lance (their letters
+                     on their colors), then power
 """
 import hashlib
 import math
@@ -214,6 +218,59 @@ def clouds_high(size=512, seed=0x5A1E):
     return solid
 
 
+def beam():
+    """The beam's strip: across, a white core, cyan, a darker cyan edge fading out; along,
+    brighter pulses every 16 px, so the scroll shows."""
+    w, h = 16, 64
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    px = im.load()
+    for y in range(h):
+        pulse = 1.0 if (y % 16) < 4 else 0.88
+        for x in range(w):
+            d = abs(x - 7.5) / 8.0  # 0 at the middle, 1 at the edge
+            if d < 0.2:
+                c = (255, 255, 255)
+            elif d < 0.5:
+                c = (150, 240, 255)
+            elif d < 0.8:
+                c = (44, 160, 230)
+            else:
+                c = (30, 80, 170)  # a deep edge, so it reads over the pale sea
+            a = (1.0 if d < 0.8 else 0.6) * pulse
+            px[x, y] = tuple(int(v * pulse) for v in c) + (int(255 * a),)
+    return im
+
+
+# The items' badges: a rounded square in a weapon's color, its letter in white, a dark
+# outline; 5 x 5 pixel letters.
+LETTERS = {
+    "S": ["01111", "10000", "01110", "00001", "11110"],
+    "B": ["11110", "10001", "11110", "10001", "11110"],
+    "T": ["11111", "00100", "00100", "00100", "00100"],
+    "L": ["10000", "10000", "10000", "10000", "11111"],
+    "P": ["11110", "10001", "11110", "10000", "10000"],
+}
+BADGES = [("S", (252, 104, 59)), ("B", (44, 197, 246)), ("T", (140, 200, 60)), ("L", (255, 189, 32)), ("P", (200, 60, 90))]
+
+
+def items():
+    from PIL import ImageDraw
+    im = Image.new("RGBA", (16 * len(BADGES), 16), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for i, (letter, color) in enumerate(BADGES):
+        x0 = i * 16
+        d.rounded_rectangle((x0 + 1, 1, x0 + 14, 14), radius=3, fill=OUTLINE)
+        d.rounded_rectangle((x0 + 2, 2, x0 + 13, 13), radius=2, fill=color)
+        d.line((x0 + 3, 3, x0 + 12, 3), fill=tuple(min(255, c + 60) for c in color))
+        rows = LETTERS[letter]
+        cells = [(x, y) for y, row in enumerate(rows) for x, bit in enumerate(row) if bit == "1"]
+        for x, y in cells:  # a drop shadow, then the letter over it
+            im.putpixel((x0 + 6 + x, 6 + y), OUTLINE + (255,))
+        for x, y in cells:
+            im.putpixel((x0 + 5 + x, 5 + y), (255, 255, 255, 255))
+    return im
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
@@ -254,6 +311,8 @@ def main():
     bombs.save(made / "bombs.png")
     clouds_low().save(made / "clouds_low.png")
     clouds_high().save(made / "clouds_high.png")
+    beam().save(made / "beam.png")
+    items().save(made / "items.png")
     for archive in sorted(pack.glob("*.zip")) + sorted(pack.glob("*.png")):
         print(f"{archive.name}: sha256 {hashlib.sha256(archive.read_bytes()).hexdigest()}")
 

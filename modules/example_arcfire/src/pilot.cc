@@ -49,7 +49,8 @@ constexpr f32 kGrazeClear = 11.0f; // the demo's, focused: inside the ring, outs
 vec2 steer(Engine& e, const Game& g, f32 clear) {
     const Table* ships = engine_table(e, g_ship_kind);
     const Transform2* sx = ships->get<Transform2>(g.ship);
-    if (!sx) return vec2{0, 0};
+    const Ship* ship = ships->get<Ship>(g.ship);
+    if (!sx || !ship) return vec2{0, 0};
     point2 p = sx->position;
     // Each bullet's closest pass in the next kAhead ticks, if it comes within `clear`: away
     // from that point, the sooner and the closer the harder.
@@ -115,9 +116,15 @@ vec2 steer(Engine& e, const Game& g, f32 clear) {
         if ((ends_phase && !ends) || (ends == ends_phase && at.y >= lowest)) continue;
         lowest = at.y;
         ends_phase = ends;
-        // A shot leaves 8 units to the side and opens by the spread: at the part's height
-        // it is this far out, so stand that far to whichever side is nearer.
-        f32 off = kMuzzle + (at.y - p.y - kMuzzleUp) * tanf(kSpreadDeg * (KV_PI / 180.0f));
+        // Spread's innermost shot leaves beside the nose and opens by its angle: at the
+        // part's height it is this far out, so stand that far to whichever side is nearer.
+        // The Beam, a lance and Storm's bolts go where the ship is.
+        f32 off = 0.0f;
+        if (ship->weapon == WeaponSpread) {
+            f32 mx = 0.0f, ang = 0.0f;
+            spread_inner(ship->power, false, &mx, &ang);
+            off = mx + (at.y - p.y - kMuzzleUp) * tanf(ang);
+        }
         aim_x = fabsf(at.x - off - p.x) < fabsf(at.x + off - p.x) ? at.x - off : at.x + off;
         nearest = 0.0f;
     }

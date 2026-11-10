@@ -24,6 +24,7 @@ constinit const DialField k_dial_fields[] = {
     ARC_DIAL(rank, true), ARC_DIAL(bullet_speed, true), ARC_DIAL(formation_count, true), ARC_DIAL(formation_spacing, true),
     ARC_DIAL(particles, false),     ARC_DIAL(plane_density, false), ARC_DIAL(enemy_health, true), ARC_DIAL(bot, false),
     ARC_DIAL(invulnerable, false),  ARC_DIAL(loops, false),         ARC_DIAL(scroll_rows, false),
+    ARC_DIAL(weapon, false),        ARC_DIAL(power, false),
 };
 #undef ARC_DIAL
 
@@ -43,6 +44,8 @@ Dials dials_for(Position p) {
     d.invulnerable = 0;
     d.loops = 1;
     d.scroll_rows = 0;
+    d.weapon = WeaponSpread;
+    d.power = 1;
     switch (p) {
     case Position::Normal: break;
     case Position::Demo: // the demo ends at the stage's end, and dies once: the egg plays, then nothing hits

@@ -131,7 +131,7 @@ void boot(TickContext& ctx) {
     Table* world = ctx.write_kind(g_world_kind);
     g.world = world->spawn(d, s, run, EggState{}, Chance{r.state, r.inc});
     planes_spawn(e, g, d);
-    g.ship = ship_spawn(e, g);
+    g.ship = ship_spawn(e, g, d);
     if (g.bench[0]) bench_spawn(ctx, g, d);
     music(ctx, g, false);
     engine_hold(e, HoldLoading, false);
@@ -182,7 +182,7 @@ void stage(TickContext& ctx) {
             u32 spacing = (u32)lroundf((f32)f.spacing * d.formation_spacing);
             if (count == 0) count = 1;
             // Its row first, which counts its members down; then the members, by event.
-            Handle group = ctx.write_kind(g_formation_kind)->spawn(Formation{count, 0, 0, 0});
+            Handle group = ctx.write_kind(g_formation_kind)->spawn(Formation{count, 0, 0, f.drop});
             for (u32 i = 0; i < count; ++i) ctx.schedule(SpawnMember{m.index, i, run_row[0].epoch, 0, group, point2{0, 0}}, ctx.tick + (u64)i * spacing);
             break;
         }

@@ -28,6 +28,7 @@ void hud_open(Engine& e, Game& g) {
     g.hud = ui_open(e, g.ui, "hud", o);
     ui_model_set_int(e, "eggs_max", 3);
     ui_model_set_int(e, "bombs_max", kMaxBombs);
+    ui_model_set_int(e, "power_max", kMaxPower);
 }
 
 // The restart: a cut to black over the field, lifted after a moment (egg.cc counts it).
@@ -148,6 +149,10 @@ void hud(TickContext& ctx) {
     ui_model_set_int(e, "bombs", r.bombs);
     ui_model_set_int(e, "restarts", r.restarts);
     ui_model_set_int(e, "grazes", r.grazes);
+    if (const Ship* s = engine_table(e, g_ship_kind)->get<Ship>(g.ship)) {
+        ui_model_set_str(e, "weapon", weapon_name(s->weapon));
+        ui_model_set_int(e, "power", s->power);
+    }
     ui_model_set_str(e, "stage", g.stage.name);
     char text[48];
     snprintf(text, sizeof text, "%.0f / %.0f", (f64)stage_clock(stage_row[0]), (f64)g.stage.length);

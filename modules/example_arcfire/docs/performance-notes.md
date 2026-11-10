@@ -308,3 +308,12 @@ tiles (stress's 8 showed the clouds an eighth their size). Now a tile at density
 its 1/n cell of the texture on one grid, the picture the same at any density (12 pixels of
 388,800 differ between 1 and 8, in the shots), and the scroll wraps by the texture's period.
 Density 32 is 3,648 tiles over three planes, within the plane kind's 4,096.
+
+## Slice 4 — Arsenal
+
+**M1. The beam's cast** (`collision_cast_all`: every collider of every kind, filtered by
+layer, a walk). The beam at level 5, `--spike-hunt`, a trace: under `--bench ring --dial
+rank=200` (16,212 bullets on average, 19,817 at peak) the `beams` system costs 0.046 ms a
+tick at the median, 0.14 at p99, 0.89 at worst; at rank 56 with the beam clearing the field
+(6,039 bullets at peak) 0.012, 0.042, 0.11. About 3 ns a collider passed over: at 50,000
+bullets, 0.15 ms. Not worth the broadphase's groups yet.

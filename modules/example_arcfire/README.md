@@ -57,6 +57,7 @@ The ways it flies itself:
 - `--dial name=value` moves one dial (repeat it for more): `rank`,
   `bullet_speed`, `formation_count`, `formation_spacing`, `particles`, `plane_density`,
   `enemy_health`, `bot`, `invulnerable` (1, or 2: after the first death), `loops`,
+  `weapon` and `power` (what the ship starts with: 0 Spread, 1 Beam, 2 Storm, 3 Lance; 1..5),
   `scroll_rows` (1: move every plane tile
   every tick instead of scrolling the layer, for the notebook's comparison). The log prints
   the dials at the start.
@@ -105,8 +106,15 @@ state.
   extract nothing a tick. The map's `enemies` layer places the ground rows: turrets, tanks
   that drive their road, bunkers that launch popcorn up a stage path. Each comes into view
   where its place on the map crosses the field's top, and rides the scroll from there.
-- **The ship** (`ship.cc`): `control` reads the action map and moves, clamps and fires;
-  `shots` flies the shots in a `parallel_for`. The hitbox is the ship's own collider (radius
+- **The ship** (`ship.cc`): `control` reads the action map and moves, clamps and fires
+  its weapon.
+- **Weapons** (`weapons.cc`): four types at five power levels, rows of tables: Spread (a
+  fan, wider and denser), Beam (a child row of the ship cut each tick by
+  `collision_cast_all` at the first body it meets, which it damages every few ticks; the one
+  weapon a boss's hull stops), Storm (bolts that turn toward the nearest enemy) and Lance
+  (heavy shots that pass through what they kill). The level is the ship's, kept when the
+  type changes; weapon and power items (`items.cc`) switch and raise them. Shots and the
+  beam hurt by one path (`hurt`, hits.cc). `shots` flies the shots and steers the bolts. The hitbox is the ship's own collider (radius
   3); the graze ring (radius 18) and the hitbox's dot are child rows.
 - **Enemies** (`enemies.cc`): an air row follows a Catmull-Rom path by arc length
   (`path.cc`), so members of a formation keep their spacing, and starts its pattern where
@@ -195,7 +203,7 @@ state.
 | `src/path.cc` | Catmull-Rom paths by arc length |
 | `src/dials.cc` | the dials' positions and `--dial` |
 | `src/planes.cc`, `src/ground.cc` | the planes and the ground's scroll; the map and its enemies |
-| `src/ship.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves |
+| `src/ship.cc`, `src/weapons.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves; the weapons |
 | `src/boss.cc`, `src/boss_data.cc`, `assets/bosses/` | bosses: their life and their parts; reading a boss file; the files |
 | `src/sound.cc`, `assets/sound/`, `assets/music/` | the effects' table and the music |
 | `src/patterns.cc`, `assets/patterns/` | the library and the runners; the ten patterns |

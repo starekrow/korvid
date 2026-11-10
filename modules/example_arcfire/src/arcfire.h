@@ -51,20 +51,35 @@ constexpr f32 kMapScale = 2.0f;  // world units a map pixel
 
 struct Velocity { vec2 v; };                      // world units a tick
 struct Plane    { f32 rate; f32 tile; u32 row, rows; }; // a parallax tile: its plane's rate, its size, its row of the grid
+// The weapons (weapons.cc): a type and a power level, the ship's. Switching the type keeps
+// the level; a death keeps both.
+enum WeaponType : u32 { WeaponSpread, WeaponBeam, WeaponStorm, WeaponLance, WeaponCount };
+constexpr u32 kMaxPower = 5;
 // The player's ship. `live` is 0 while the egg plays (control does nothing, nothing hits);
-// `guard` counts the ticks a bomb keeps the hitbox out of play; `died`, its deaths.
-struct Ship     { u32 cooldown; u32 live; u32 focus; u32 shots; u32 guard; u32 died; };
-struct Shot     { i32 damage; u32 spent; };       // spent: it has hit something this tick
+// `guard` counts the ticks a bomb keeps the hitbox out of play; `died`, its deaths;
+// `firing`, the shot held this tick (the beam shows while it is).
+struct Ship     { u32 cooldown; u32 live; u32 focus; u32 shots; u32 guard; u32 died; u32 weapon; u32 power; u32 firing; u32 pad; };
+// A shot: plain (Spread), a bolt that turns toward the nearest enemy (Storm, `turn` radians
+// a tick), or a lance that passes through what it kills. `spent`: it has stopped this tick.
+enum ShotKind : u32 { ShotPlain, ShotBolt, ShotLance };
+struct Shot     { i32 damage; u32 spent; u32 kind; f32 turn; };
+// The beam: a child of what fires it, stretched up the field to the first body it meets,
+// which it damages every few ticks (`timer`). `length` as cut this tick; `scroll` the uv's.
+struct Beam     { u32 timer; f32 length; f32 scroll; u32 pad; };
 // What can be shot. `flash` counts the ticks of the white flash left; `score` is paid at the kill.
 struct Health   { i32 hp; u32 flash; i32 score; u32 look; };
 // A formation member's path, measured, how far along it is, and its formation.
 struct Mover    { Path path; f32 speed; f32 s; Handle formation; };
 // A formation in the air: its members, how many were shot down and how many got away.
 // Shot down to the last one, it drops a bomb where the last one fell.
-struct Formation { u32 count, killed, gone, pad; };
-// Something to pick up: a score chip (what a cancelled bullet becomes) or a bomb.
-enum ItemKind : u32 { ItemChip, ItemBomb };
+// `drop`: what its last member shot down leaves (a Drop; 0 none).
+struct Formation { u32 count, killed, gone, drop; };
+// Something to pick up: a score chip (what a cancelled bullet becomes), a bomb, a weapon
+// (it shows a type, which cycles while it falls: `value` the type it started at), power.
+enum ItemKind : u32 { ItemChip, ItemBomb, ItemWeapon, ItemPower };
 struct Item     { u32 kind; i32 value; u32 life; u32 pad; };
+// What an item carrier leaves: none, a weapon item starting at a type (1 + the type), power.
+enum Drop : u32 { DropNone, DropWeapon, DropWeaponLast = DropWeapon + WeaponCount - 1, DropPower };
 // What an enemy fires: a pattern of the library (patterns.cc), started when an air row's
 // mover passes `at` (a fraction of its path) or while the ship is above a ground row,
 // and run by the row's Runner. `state`: EmitIdle, EmitRunning, EmitDone; `timer`: ticks
@@ -107,6 +122,7 @@ struct Dials {
     u32 invulnerable;      // 1: always; 2: once the ship has died (the demo: its egg plays once)
     u32 loops;             // the stage loops at its end instead of ending
     u32 scroll_rows;       // move every plane and map tile each tick (slice 1's way), for measuring the layer scroll
+    u32 weapon, power;     // what the ship starts with (a WeaponType, 1..5): Spread at one but to try or measure another
 };
 struct Stage {
     f32 distance;          // the stage's clock: units scrolled since the stage (or this loop) began
@@ -148,6 +164,7 @@ struct Chance { u64 state, inc; }; // the sim's random stream, a PCG32 as Rng ke
 // ---- events ---------------------------------------------------------------------------------
 
 struct ShotHit    { Handle shot, target; };
+struct BeamHit    { Handle target; i32 damage; u32 pad; point2 at; }; // the beam's tick of damage on the first body it met
 struct BulletHit  { Handle bullet; };          // a bullet on the hitbox
 struct Rammed     { Handle enemy; };           // an air enemy on the hitbox
 struct Graze      { Handle bullet; };
@@ -166,7 +183,7 @@ struct StageEnd   { u32 loops; u32 pad; };
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
     g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind, g_shadow_kind, g_boss_kind, g_part_kind,
-    g_boom_kind;
+    g_boom_kind, g_beam_kind;
 extern u32 g_part_down; // the trigger on a part's health
 // The two bullet kinds: plain bullets, and bullets that run a program (needles, seeds).
 inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
@@ -176,7 +193,7 @@ constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 64, kMaxMarks =
 enum class Look : u32 { Fighter, Red, Green, Turret, Tank, Bunker, Count }; // what an enemy's sprite is
 enum class MarkKind : u32 { Formation, Ground, Speed, End, Boss };
 constexpr u32 kPatternName = 32;
-struct FormationDef { u32 path; u32 count; u32 spacing; Look look; i32 health; i32 score; f32 fire_at; f32 speed; char pattern[kPatternName]; u32 entry; };
+struct FormationDef { u32 path; u32 count; u32 spacing; Look look; i32 health; i32 score; f32 fire_at; f32 speed; char pattern[kPatternName]; u32 entry; u32 drop; };
 // A ground row: from a stage mark, or from the map's enemies layer (then `at` is the stage
 // distance at which it comes into view and `kind` what it is).
 struct GroundDef    { f32 x; i32 health; i32 score; char pattern[kPatternName]; u32 entry; f32 at; GroundKind kind; f32 route; u32 launch; };
@@ -261,7 +278,7 @@ enum Sfx : u32 { SFX_SHOT, SFX_HIT, SFX_PING, SFX_KILL, SFX_KILL_BIG, SFX_BOSS_D
                  SFX_EGG_BREAK, SFX_EGG_OPEN, SFX_EGG_BLOOM, SFX_WARNING, SFX_COUNT };
 
 enum Tex : u32 { TEX_SHIPS, TEX_TILES, TEX_STARS, TEX_NEBULA, TEX_CLOUD, TEX_BULLETS, TEX_DOT, TEX_RING, TEX_SOFT, TEX_SPARK, TEX_EGG,
-                 TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_COUNT };
+                 TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_BEAM, TEX_ITEMS, TEX_COUNT };
 constexpr u32 kPlaneCount = 6; // planes.cc's: stars, nebula, cloud, the low clouds' shadows, the low clouds, the high wisps
 
 // What the game counts for its reports (stats.cc): this tick's numbers and the run's.
@@ -358,12 +375,11 @@ bool   ground_map_ready(TickContext& ctx, Game& g, char* why, usize why_cap);
 void   ground_spawn(TickContext& ctx, const Game& g, const Dials& d, const GroundDef& gd, point2 at, bool bench = false);
 
 // The ship (ship.cc).
-Handle ship_spawn(Engine& e, Game& g);
+Handle ship_spawn(Engine& e, Game& g, const Dials& d);
 constexpr point2 kShipStart{0.0f, -260.0f};
-// A volley: two shots from either side of the nose, each turned out by the spread (less,
-// focused). The pilots aim by it.
+// Where a volley leaves the ship: Spread's outer shots this far to either side of the nose,
+// and this far above the ship's middle (weapons.cc; the pilots aim by them).
 constexpr f32 kMuzzle = 8.0f, kMuzzleUp = 18.0f;
-constexpr f32 kSpreadDeg = 6.0f, kFocusSpreadDeg = 2.0f;
 Collider2 ship_collider();
 Collider2 ring_collider();
 
@@ -375,6 +391,20 @@ void   fx_piece_of(TickContext& ctx, Handle material, point2 at, rect2 uv, vec2 
 // An explosion: Kenney's burst frames as a flipbook (a cosmetic row that goes when it ends).
 void   fx_boom(TickContext& ctx, Game& g, point2 at, f32 size);
 Handle fx_boom_clip(Engine& e);
+
+// Weapons (weapons.cc): a volley of the weapon at its power from `at`, into the shot
+// kind; its next cooldown. The beam is fired by `beams`, not here.
+u32    weapon_fire(Game& g, Table& shots, point2 at, u32 weapon, u32 power, bool focus);
+const char* weapon_name(u32 weapon);
+// The beam that rides on `owner` (the ship, an option).
+Handle beam_spawn(Engine& e, Game& g, Handle owner);
+// The innermost Spread shot at this power: its muzzle's x and its angle (radians,
+// clockwise from up), for the pilots' aim.
+void   spread_inner(u32 power, bool focus, f32* muzzle_x, f32* angle);
+// A hit of `damage` on an enemy (air, ground, a boss's part) at `at`: absorbed (an armored
+// part, a boss's hull: a spark, true), or dealt (a flash; an air or ground row that drops to
+// zero is destroyed and pays a Kill; a part's own trigger takes it). `killed` when it died.
+bool   hurt(TickContext& ctx, Game& g, Handle target, i32 damage, point2 at, bool* killed);
 
 // Bullets (bullets.cc): one fired by a runner, by command from a parallel chunk; a plain
 // bullet, or an active one with its own runner when its definition has actions.
@@ -408,7 +438,8 @@ constexpr u32 kChipCap = 256;
 constexpr i32 kChipValue = 10;
 constexpr f32 kMagnetY = kFieldTop - 120.0f; // above it, every item comes to the ship
 u32    cancel_bullets(TickContext& ctx, Game& g, point2 at, f32 radius, u32* overflow);
-void   item_drop(TickContext& ctx, const Game& g, ItemKind kind, point2 at, vec2 v);
+void   item_drop(TickContext& ctx, const Game& g, ItemKind kind, point2 at, vec2 v, i32 value = 0);
+void   drop_item(TickContext& ctx, const Game& g, u32 drop, point2 at); // an item carrier's Drop
 Collider2 item_collider();
 
 // The HUD (hud.cc).

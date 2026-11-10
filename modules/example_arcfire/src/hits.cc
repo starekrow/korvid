@@ -53,54 +53,66 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
     }
 }
 
-// A shot on an enemy: the shot goes, the enemy loses its damage and flashes; at zero it is
-// a kill (a boss's part: its trigger's). A shot that met two enemies in one tick hurts the
-// first only.
+bool hurt(TickContext& ctx, Game& g, Handle target, i32 damage, point2 at, bool* killed) {
+    Engine& e = *ctx.engine;
+    *killed = false;
+    const u16 k = target.kind(), air = hk(e, g_air_kind), ground = hk(e, g_ground_kind), part = hk(e, g_part_kind);
+    if (k == part) {
+        Health& hp = ctx.write<Health>("example_arcfire.part.Health")[target.index()];
+        if (hp.hp <= 0) { *killed = true; return false; } // down already (its trigger takes it): through
+        if (part_absorbs(g, ctx, target)) { boss_ping(ctx, g, at); sfx(ctx, g, SFX_PING); return true; }
+        hp.hp -= damage;
+        hp.flash = kFlashTicks;
+        *killed = hp.hp <= 0;
+        sfx(ctx, g, SFX_HIT);
+        fx_sparks(ctx, g, ctx.read<Transform2>("example_arcfire.part.Transform2")[target.index()].position, 2, kSparkHit, 2.0f);
+        return true;
+    }
+    if (k == air || k == ground) {
+        bool is_air = k == air;
+        Health& hp = ctx.write<Health>(is_air ? "example_arcfire.air.Health" : "example_arcfire.ground.Health")[target.index()];
+        point2 pos = ctx.read<Transform2>(is_air ? "example_arcfire.air.Transform2" : "example_arcfire.ground.Transform2")[target.index()].position;
+        if (hp.hp <= 0) { *killed = true; return false; } // killed already this tick: through
+        hp.hp -= damage;
+        hp.flash = kFlashTicks;
+        sfx(ctx, g, SFX_HIT);
+        fx_sparks(ctx, g, pos, 2, kSparkHit, 2.0f);
+        if (hp.hp <= 0) {
+            ctx.destroy(target);
+            ctx.emit(Kill{pos, hp.score, 0, is_air ? ctx.read<Mover>("example_arcfire.air.Mover")[target.index()].formation : Handle{}});
+            *killed = true;
+        }
+        return true;
+    }
+    boss_ping(ctx, g, at); // a boss's hull, which only the beam meets: it stops there, unhurt
+    return true;
+}
+
+// A shot on an enemy: it hurts it, and goes; a lance goes on through what it kills. A shot
+// that met two enemies in one tick hurts the first it is handed, unless that was already
+// down (it flies on to the next).
 void on_shot_hit(TickContext& ctx, Span<const ShotHit> hits) {
     Game& g = ctx.state_as<Game>();
-    Engine& e = *ctx.engine;
     Span<Shot> shot = ctx.write<Shot>("example_arcfire.shot.Shot");
     Span<const Transform2> shot_xf = ctx.read<Transform2>("example_arcfire.shot.Transform2");
-    Span<Health> part_hp = ctx.write<Health>("example_arcfire.part.Health");
-    Span<const Transform2> part_xf = ctx.read<Transform2>("example_arcfire.part.Transform2");
-    const u16 part = hk(e, g_part_kind);
     for (const ShotHit& h : hits) {
-        if (h.target.kind() != part) continue;
-        Shot& s = shot[h.shot.index()];
-        Health& hp = part_hp[h.target.index()];
-        if (s.spent || hp.hp <= 0) continue; // down already: the shot flies on
-        s.spent = 1;
-        ctx.destroy(h.shot);
-        if (part_absorbs(g, ctx, h.target)) { boss_ping(ctx, g, shot_xf[h.shot.index()].position); sfx(ctx, g, SFX_PING); continue; }
-        sfx(ctx, g, SFX_HIT);
-        hp.hp -= s.damage;
-        hp.flash = kFlashTicks;
-        fx_sparks(ctx, g, part_xf[h.target.index()].position, 2, kSparkHit, 2.0f);
-    }
-    Span<Health> air_hp = ctx.write<Health>("example_arcfire.air.Health");
-    Span<Health> ground_hp = ctx.write<Health>("example_arcfire.ground.Health");
-    Span<const Transform2> air_xf = ctx.read<Transform2>("example_arcfire.air.Transform2");
-    Span<const Transform2> ground_xf = ctx.read<Transform2>("example_arcfire.ground.Transform2");
-    Span<const Mover> air_mv = ctx.read<Mover>("example_arcfire.air.Mover");
-    const u16 air = hk(e, g_air_kind);
-    for (const ShotHit& h : hits) {
-        if (h.target.kind() == part) continue;
         Shot& s = shot[h.shot.index()];
         if (s.spent) continue;
-        bool is_air = h.target.kind() == air;
-        Health& hp = (is_air ? air_hp : ground_hp)[h.target.index()];
-        point2 at = (is_air ? air_xf : ground_xf)[h.target.index()].position;
-        if (hp.hp <= 0) continue; // killed already this tick: the shot flies on
+        bool killed = false;
+        if (!hurt(ctx, g, h.target, s.damage, shot_xf[h.shot.index()].position, &killed)) continue;
+        if (s.kind == ShotLance && killed) continue; // through
         s.spent = 1;
         ctx.destroy(h.shot);
-        hp.hp -= s.damage;
-        hp.flash = kFlashTicks;
-        sfx(ctx, g, SFX_HIT);
-        fx_sparks(ctx, g, at, 2, kSparkHit, 2.0f);
-        if (hp.hp <= 0) {
-            ctx.destroy(h.target);
-            ctx.emit(Kill{at, hp.score, 0, is_air ? air_mv[h.target.index()].formation : Handle{}});
-        }
+    }
+}
+
+// The beam's tick of damage on the first body it met (weapons.cc).
+void on_beam_hit(TickContext& ctx, Span<const BeamHit> hits) {
+    Game& g = ctx.state_as<Game>();
+    for (const BeamHit& h : hits) {
+        bool killed = false;
+        hurt(ctx, g, h.target, h.damage, h.at, &killed);
+        fx_sparks(ctx, g, h.at, 2, color{0.6f, 0.95f, 1.0f, 1.0f}, 2.5f);
     }
 }
 
@@ -172,6 +184,7 @@ void on_kill(TickContext& ctx, Span<const Kill> kills) {
         if (Formation* f = formations->get<Formation>(k.formation)) {
             ++f->killed;
             if (f->killed + f->gone >= f->count) {
+                drop_item(ctx, g, f->drop, k.at); // an item carrier's: its last member shot down leaves it
                 if (f->gone == 0) {
                     item_drop(ctx, g, ItemBomb, k.at, vec2{0.0f, 1.5f});
                     KV_INFO("arcfire", "formation shot down at tick %llu: a bomb drops", (unsigned long long)ctx.tick);
