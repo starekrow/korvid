@@ -157,6 +157,8 @@ Handle boss_spawn(TickContext& ctx, Game& g, const Dials& d, u32 di) {
     shadow.tint = color{0.0f, 0.0f, 0.04f, 0.33f};
     shadow.layer = Z_SHADOW;
     ctx.spawn_later(g_shadow_kind, Transform2{}, local2_at(point2{kBossShadow.x, kBossShadow.y}), Parent{h}, shadow);
+    sfx(ctx, g, SFX_WARNING);
+    music(ctx, g, true);
     KV_INFO("arcfire", "boss: %s at tick %llu, %u parts, %d health, %u s", b.title, (unsigned long long)ctx.tick, b.part_count, b.total, b.timeout / 60);
     return h;
 }
@@ -226,6 +228,7 @@ void bosses(TickContext& ctx) {
                     pe[k].timer = 1 + pp[k].index * 5;
                     if (def.parts[pp[k].index].launch != kNoFormation) pp[k].timer = 1;
                 }
+                sfx(ctx, g, SFX_WARNING, 0.8f);
                 KV_INFO("arcfire", "boss: %s is out of time at tick %llu: it stomps", def.title, (unsigned long long)ctx.tick);
             }
             break;
@@ -262,6 +265,7 @@ void bosses(TickContext& ctx) {
                 g.shake = g.shake > 6.0f ? g.shake : 6.0f;
             } else if (!left && b.clock >= kBreakAt && b.clock >= kKillIn + kKillHold + kKillOut) {
                 hull_breaks(ctx, g, def, g.boss_alpha[b.def][0], p);
+                sfx(ctx, g, SFX_RUMBLE);
                 fx_sparks(ctx, g, p, dials_row[0].particles * 6, kSparkPart, 7.0f);
                 g.shake = 14.0f;
                 ctx.destroy(me);
@@ -371,6 +375,7 @@ void on_part_down(TickContext& ctx, Span<const StateEdge> edges) {
             u32 cancelled = cancel_bullets(ctx, g, core_at, 0.0f, &overflow);
             ctx.emit(Kill{core_at, bonus + (i32)overflow * kChipValue, 0, Handle{}}); // the chips' cap's overflow paid at once, as a bomb's
             fx_boom(ctx, g, core_at, 96.0f);
+            sfx(ctx, g, SFX_BOSS_DOWN);
             g.shake = 12.0f;
             KV_INFO("arcfire", "boss: %s destroyed at tick %llu, %u s into the fight, bonus %d, %u bullets to chips", def.title,
                     (unsigned long long)ctx.tick, b->clock / 60, bonus, cancelled);

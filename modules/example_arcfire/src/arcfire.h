@@ -251,6 +251,10 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
 
 // ---- the module's state ---------------------------------------------------------------------
 
+// The effects (sound.cc), by what they are for.
+enum Sfx : u32 { SFX_SHOT, SFX_HIT, SFX_PING, SFX_KILL, SFX_KILL_BIG, SFX_BOSS_DOWN, SFX_RUMBLE, SFX_GRAZE, SFX_CHIP, SFX_BOMB,
+                 SFX_EGG_BREAK, SFX_EGG_OPEN, SFX_EGG_BLOOM, SFX_WARNING, SFX_COUNT };
+
 enum Tex : u32 { TEX_SHIPS, TEX_TILES, TEX_STARS, TEX_NEBULA, TEX_CLOUD, TEX_BULLETS, TEX_DOT, TEX_RING, TEX_SOFT, TEX_SPARK, TEX_EGG, TEX_COUNT };
 
 // What the game counts for its reports (stats.cc): this tick's numbers and the run's.
@@ -290,6 +294,9 @@ struct Game {
     u32      boss_of[kMaxBosses];          // a boss mark's definition
     bool     bosses_parsed = false;
     Handle   stomp_screen;                 // the warning's tint, while a boss stomps
+    Handle   sfx[SFX_COUNT];               // asset.sound
+    Handle   music_stage, music_boss;
+    u32      voices_peak = 0;              // the audio module's live voices, at most (stats.cc)
     Handle   boom_clip;                    // anim.clip: an explosion, Kenney's burst frames
     Handle   map;                 // the stage's ground map (tilemap), and its tiles once spawned
     bool     map_spawned = false;
@@ -405,7 +412,13 @@ void   hud_flash(Engine& e);
 void   hud_boss(Engine& e, Game& g, const char* title, i32 hp, i32 total); // title null: the bar goes
 void   hud_stomp(Engine& e, Game& g, bool on);                              // the warning's tint
 
+// Sound (sound.cc): an effect, its volume, priority and pitch's wander from its table; the
+// music, the stage's or a boss's. From a system or handler that writes audio.commands.
+void   sounds_load(Engine& e, Game& g);
+void   sfx(TickContext& ctx, Game& g, Sfx which, f32 pitch = 1.0f);
+void   music(TickContext& ctx, Game& g, bool boss);
+
 // Reports (stats.cc).
-void   stats_summary(Game& g);
+void   stats_summary(Engine& e, Game& g);
 
 } // namespace kv::arcfire

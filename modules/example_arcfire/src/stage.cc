@@ -133,6 +133,7 @@ void boot(TickContext& ctx) {
     planes_spawn(e, g, d);
     g.ship = ship_spawn(e, g);
     if (g.bench[0]) bench_spawn(ctx, g, d);
+    music(ctx, g, false);
     engine_hold(e, HoldLoading, false);
 }
 
@@ -167,7 +168,7 @@ void stage(TickContext& ctx) {
     }
     // A boss mark holds the marks' clock until its boss has died or left; the scroll goes on.
     if (s.waiting) {
-        if (ctx.write_kind(g_boss_kind)->live() == 0) s.waiting = 0;
+        if (ctx.write_kind(g_boss_kind)->live() == 0) { s.waiting = 0; music(ctx, g, false); }
         else s.held += s.speed;
     }
     while (!s.ended && !s.waiting && s.cursor < def.mark_count && stage_clock(s) >= def.marks[s.cursor].at) {

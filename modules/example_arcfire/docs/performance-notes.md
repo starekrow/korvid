@@ -230,3 +230,21 @@ second against the carrier's turrets and 6 against the battleship's guns, a thir
 a volley can do, because it spends most ticks dodging. M5 measures the bot at Normal,
 vulnerable. Measured at four times the sim's rate (the CLI's `rate 4`), which changes no
 tick: a five-minute demo takes a little over a minute.
+
+**M4. Sound** (a minute each, real time: sounds follow the time scale, not the CLI's rate).
+
+| run | voices peak (of 64) | steals | plays merged into a start | dropped | clipped samples |
+|---|---|---|---|---|---|
+| Normal, `--autoplay` | 26 | 0 | 25 | 0 | 0 |
+| `--stress` | 36 | 0 | 4,317 | 0 | 10 |
+| `--stress --dial rank=56 --dial particles=48` (50,858 bullets at peak) | 35 | 0 | 4,115 | 0 | 76 |
+
+Fourteen short effects, each starting at most once a tick, cap what can be live at once
+well under the pool, however many bullets there are: the merging is what holds it, and the
+stealing (tested in the module) is not reached. The clipping at stress is a few dozen
+samples a minute: the explosions summed; the buses are at one.
+
+The sounds' pitch draws from the cosmetic stream, which showed that a chip's toss came from
+it too: a chip is sim state, so the particle dial (and now every sound) changed where chips
+went. A chip's toss is now a hash of its bullet and the tick. The demo's hash is now
+`e078b2f13df8fa11` at tick 18409, matching across threads, I/O backends and asset sources.

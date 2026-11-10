@@ -87,6 +87,55 @@ Drawn by `tools/make_art.py` on 2026-11-09, Korvid's, under the repository's lic
 | `made/eggs.png` | the HUD's pips: the egg, spent (dimmed) and in hand |
 | `made/bombs.png` | the HUD's bomb pips: Kenney's shield tile (`kenney/tiles.png`, column 2, row 2), dimmed for a bomb spent and as it is for one in hand |
 
+## Sci-Fi Sounds and Impact Sounds
+
+By **Kenney** (https://www.kenney.nl). Released under **CC0 1.0 Universal**; each archive's
+license file is beside this file as `LICENSE-Kenney-SciFiSounds.txt` and
+`LICENSE-Kenney-ImpactSounds.txt`. Copied unmodified under new names by
+`tools/make_sounds.py`. Downloaded on 2026-11-09.
+
+- Sci-Fi Sounds 1.0: https://kenney.nl/assets/sci-fi-sounds, mirrored at
+  https://opengameart.org/content/sci-fi-sounds; downloaded as `sci-fi_sounds.zip` from
+  https://opengameart.org/sites/default/files/sci-fi_sounds.zip (5,875,104 bytes, sha256
+  119340f351a5098ad814f78719438c0da355a9ce8a4c8a3af6a8d48aa3d49e04)
+- Impact Sounds 1.0: https://kenney.nl/assets/impact-sounds; downloaded as
+  `kenney_impact-sounds.zip` from that page (800,850 bytes, sha256
+  029d734af1582474edf3a694d1b0cebc97c1c152f2f39fa34d4c2bafc5de77f8)
+
+| here | in the archive |
+|---|---|
+| `sound/shot.ogg` | Sci-Fi Sounds `Audio/laserSmall_000.ogg` |
+| `sound/hit.ogg` | Impact Sounds `Audio/impactPlate_light_000.ogg` |
+| `sound/ping.ogg` | Impact Sounds `Audio/impactMetal_light_001.ogg` |
+| `sound/kill.ogg` | Sci-Fi Sounds `Audio/explosionCrunch_000.ogg` |
+| `sound/kill_big.ogg` | Sci-Fi Sounds `Audio/explosionCrunch_002.ogg` |
+| `sound/boss_down.ogg` | Sci-Fi Sounds `Audio/explosionCrunch_004.ogg` |
+| `sound/rumble.ogg` | Sci-Fi Sounds `Audio/lowFrequency_explosion_000.ogg` |
+| `sound/graze.ogg` | Sci-Fi Sounds `Audio/laserRetro_000.ogg` |
+| `sound/chip.ogg` | Sci-Fi Sounds `Audio/laserRetro_002.ogg` |
+| `sound/bomb.ogg` | Sci-Fi Sounds `Audio/forceField_000.ogg` |
+| `sound/egg_break.ogg` | Sci-Fi Sounds `Audio/lowFrequency_explosion_001.ogg` |
+| `sound/egg_open.ogg` | Impact Sounds `Audio/impactMetal_heavy_000.ogg` |
+| `sound/egg_bloom.ogg` | Sci-Fi Sounds `Audio/forceField_002.ogg` |
+| `sound/warning.ogg` | Sci-Fi Sounds `Audio/computerNoise_000.ogg` |
+| `LICENSE-Kenney-SciFiSounds.txt`, `LICENSE-Kenney-ImpactSounds.txt` | each archive's `License.txt` |
+
+## 5 Chiptunes (Action)
+
+By **Juhani Junkala** (SubspaceAudio). Released under **CC0**: the page lists CC0 and the
+archive's `INFO.txt` (beside this file as `LICENSE-JuhaniJunkala.txt`) says "released under
+CC0 creative commons license".
+
+- Page: https://opengameart.org/content/5-chiptunes-action
+- Downloaded on 2026-11-09 as `5 Action Chiptunes By Juhani Junkala.zip` from
+  https://opengameart.org/sites/default/files/5%20Action%20Chiptunes%20By%20Juhani%20Junkala.zip
+  (49,639,688 bytes, sha256 ea189990c0fb9a700187ccc740eda72400341a082305a163867467d96346460d)
+
+| here | in the archive |
+|---|---|
+| `music/stage.wav` | `Juhani Junkala [Retro Game Music Pack] Level 1.wav`, folded to mono and halved in rate (22,050 Hz) by `tools/make_sounds.py`; otherwise unchanged |
+| `music/boss.wav` | `Juhani Junkala [Retro Game Music Pack] Level 3.wav`, likewise |
+
 ## Generated: the bosses
 
 Kitbashed by `tools/make_bosses.py` on 2026-11-09 from Kenney's Pixel Shmup (above, CC0),

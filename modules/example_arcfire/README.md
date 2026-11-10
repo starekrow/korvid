@@ -10,7 +10,7 @@ grazes; the egg, a death in slow motion after which a small spherical machine bu
 next ship; and two bosses made of parts, the carrier and the battleship. Every count is a
 dial, and the game can fly itself three ways. The art is CC0, from Kenney, Screaming
 Brain Studios, Master484 and GGBotNet, and the bosses are kitbashed here from Kenney's
-pieces (`assets/CREDITS.md`).
+pieces; the sound is Kenney's and the music Juhani Junkala's, CC0 too (`assets/CREDITS.md`).
 
 ## Building and running
 
@@ -169,6 +169,12 @@ state.
   Every air row gets a shadow on the ground's layer, a cosmetic child down and to the
   right that dies with it. Explosions are Kenney's burst tiles as a flipbook (an anim clip
   made at startup) on a cosmetic row that goes when the clip ends.
+- **Sound** (`sound.cc`, `assets/sound/`, `assets/music/`): a table of effects, each
+  with its volume, its priority and how far its pitch wanders; the volley and the grazes
+  lowest, deaths, the bomb, the egg and a boss's fall highest. The audio module starts a
+  sound once a tick however often it is asked for, so a ring of bullets is one sound, and
+  the effects follow the time scale in pitch (the egg's slow time drops an octave). The
+  music is the stage's track, crossfading to the boss's at a boss mark and back after.
 - **Reports** (`stats.cc`): the counters as the resource `example_arcfire.stats`, the log
   lines, the summary.
 
@@ -184,6 +190,7 @@ state.
 | `src/planes.cc`, `src/ground.cc` | the planes and the ground's scroll; the map and its enemies |
 | `src/ship.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves |
 | `src/boss.cc`, `src/boss_data.cc`, `assets/bosses/` | bosses: their life and their parts; reading a boss file; the files |
+| `src/sound.cc`, `assets/sound/`, `assets/music/` | the effects' table and the music |
 | `src/patterns.cc`, `assets/patterns/` | the library and the runners; the ten patterns |
 | `src/hits.cc`, `src/egg.cc` | what happens when things meet; the death and the restart |
 | `src/bomb.cc`, `src/items.cc` | the bomb; chips, pickups and the magnet |
@@ -192,7 +199,7 @@ state.
 | `assets/stages/shoreline.stage.json`, `assets/maps/` | the stage; its ground map and tileset |
 | `assets/ui/arcfire.ui.json` | the HUD and every screen |
 | `assets/CREDITS.md`, `assets/LICENSE-*.txt` | who made what |
-| `tools/make_art.py`, `tools/make_maps.py`, `tools/make_bosses.py` | copies the vendored art in and draws `assets/made/`; writes the maps; kitbashes the bosses into `assets/generated/` |
+| `tools/make_art.py`, `tools/make_maps.py`, `tools/make_bosses.py`, `tools/make_sounds.py` | copies the vendored art in and draws `assets/made/`; writes the maps; kitbashes the bosses into `assets/generated/`; copies the sounds in and resamples the music |
 | `tests/` | paths; the stage file, the boss files and the parsers' rules |
 | `docs/` | the PRDs and the performance notebook |
 

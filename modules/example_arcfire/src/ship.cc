@@ -62,6 +62,7 @@ void control(TickContext& ctx) {
 
     if (!action_down(a, g.act_shot) || s.cooldown) return;
     s.cooldown = kCadence;
+    sfx(ctx, g, SFX_SHOT);
     Table* shots_table = ctx.write_kind(g_shot_kind);
     f32 spread = (focus ? kFocusSpreadDeg : kSpreadDeg) * (KV_PI / 180.0f);
     for (i32 side = -1; side <= 1; side += 2) {

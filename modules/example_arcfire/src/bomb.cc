@@ -48,6 +48,8 @@ void bomb(TickContext& ctx) {
     run[0].score += (i64)overflow * kChipValue; // past the chips' cap, paid at once
     ctx.emit(Bombed{xf[i].position, cancelled, 0});
     hud_flash(e);
+    sfx(ctx, g, SFX_BOMB);
+    sfx(ctx, g, SFX_RUMBLE);
     g.shake = 14.0f;
     fx_sparks(ctx, g, xf[i].position, 24, kSparkBlast, 6.0f);
     KV_INFO("arcfire", "bomb: tick %llu, %u bullets cancelled (%u past the chips' cap) in %.2f ms, %d bombs left", (unsigned long long)ctx.tick, cancelled,

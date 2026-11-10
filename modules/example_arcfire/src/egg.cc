@@ -96,7 +96,7 @@ void egg(TickContext& ctx) {
 
     u32 t = es.t;
     engine_time_scale(e, time_scale_at(t));
-    if (t == 0) break_up(ctx, g, es, *xf, *sprite, *col, ring);
+    if (t == 0) { break_up(ctx, g, es, *xf, *sprite, *col, ring); sfx(ctx, g, SFX_EGG_BREAK); }
     if (t == kEggAt) {
         Rng r;
         r.state = chance[0].state; r.inc = chance[0].inc;
@@ -121,11 +121,13 @@ void egg(TickContext& ctx) {
         et->rotation = 0.0f;
         *xf = transform2_at(et->position);
         *ships->prev<Transform2>(g.ship) = *xf; // a teleport: no sweep from where it died
+        sfx(ctx, g, SFX_EGG_BLOOM);
     }
     if (et && t >= kRestAt && t < kSplitAt && t % 2 == 0) // building: sparks from the core
         fx_sparks(ctx, g, et->position, 2, color{0.55f, 0.95f, 1.0f, 1.0f}, 2.5f);
     if (et && t == kSplitAt) {
         // It opens along its seam and its halves fall away, turning.
+        sfx(ctx, g, SFX_EGG_OPEN);
         fx_piece(ctx, g, et->position + vec2{0, 8}, TEX_EGG, rect2{0, 0, 1, 0.5f}, vec2{32, 16}, vec2{-0.9f, 1.4f}, -0.06f, 70, Z_SHIP + 1, 0.12f);
         fx_piece(ctx, g, et->position + vec2{0, -8}, TEX_EGG, rect2{0, 0.5f, 1, 0.5f}, vec2{32, 16}, vec2{0.9f, 0.4f}, 0.07f, 70, Z_SHIP + 1, 0.12f);
         eggs->destroy_all();
@@ -200,6 +202,7 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     }
     engine_time_scale(e, 1.0f);
     hud_cover(e, g, true);
+    music(ctx, g, false);
     KV_INFO("arcfire", "restart %u at tick %llu: out of eggs, score back to %lld", r.restarts, (unsigned long long)ctx.tick, (long long)r.score);
 }
 

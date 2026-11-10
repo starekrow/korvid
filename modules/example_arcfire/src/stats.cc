@@ -4,6 +4,7 @@
 // interval it logs them beside the frame loop's fps line; at the exit, the peaks and the
 // means. The notebook (docs/performance-notes.md) is written from these lines.
 #include "arcfire.h"
+#include "korvid/audio/audio.h"
 #include "korvid/collision/module.h"
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"
@@ -44,6 +45,8 @@ void stats(TickContext& ctx) {
     s.runners = ctx.paused ? 0 : g.runners_stepped;
     s.fires = s.bullets_spawned;
     s.items = engine_table(e, g_item_kind)->live();
+    AudioStats as = audio_stats(e);
+    if (as.live_voices > g.voices_peak) g.voices_peak = as.live_voices;
     s.sprites = live_sprites(e);
     s.bullets_spawned = ctx.paused ? 0 : g.bullets_spawned;
     s.bullets_destroyed = bullets_before + s.bullets_spawned > s.bullets ? bullets_before + s.bullets_spawned - s.bullets : 0;
@@ -81,7 +84,10 @@ void stats(TickContext& ctx) {
             s.groups, engine_table(e, g_air_kind)->live(), engine_table(e, g_ground_kind)->live(), engine_table(e, g_particle_kind)->live());
 }
 
-void stats_summary(Game& g) {
+void stats_summary(Engine& e, Game& g) {
+    AudioStats as = audio_stats(e);
+    KV_INFO("arcfire", "audio: voices peak %u (the mixer's %u), %u steals, %u starts merged, %u dropped", g.voices_peak, as.mixer.peak_active, as.steals,
+            as.merged, as.dropped);
     f64 n = g.sampled ? (f64)g.sampled : 1.0;
     KV_INFO("arcfire", "summary over %llu ticks: bullets peak %u mean %.0f; sprites peak %u mean %.0f; deltas peak %u mean %.0f; "
                        "pairs tested peak %u mean %.0f; colliders peak %u; bullets spawned peak %u a tick; active peak %u; runners peak %u; items peak %u; chips made %u, past the cap %u",

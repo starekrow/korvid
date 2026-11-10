@@ -48,8 +48,12 @@ u32 cancel_bullets(TickContext& ctx, Game& g, point2 at, f32 radius, u32* overfl
             ctx.destroy(bullets_table->handle_at(i));
             ++cancelled;
             if (chips < kChipCap) {
-                f32 a = g.fx.range(-0.6f, 0.6f);
-                item_drop(ctx, g, ItemChip, p, vec2{sinf(a) * 1.2f, 1.2f + g.fx.range(0.0f, 1.2f)});
+                // Its toss from the bullet and the tick: a chip is sim state, so not from the
+                // cosmetic stream (which the sparks and the sounds draw from as they please).
+                u64 h = seed_of(bullets_table->handle_at(i), ctx.tick, 0xC41Bu);
+                f32 a = -0.6f + 1.2f * (f32)(h & 0xFFFFu) / 65535.0f;
+                f32 up = 1.2f * (f32)((h >> 16) & 0xFFFFu) / 65535.0f;
+                item_drop(ctx, g, ItemChip, p, vec2{sinf(a) * 1.2f, 1.2f + up});
                 ++chips;
             }
             if (cancelled <= 48) fx_sparks(ctx, g, p, 1, kSparkChip, 1.5f);
@@ -102,11 +106,13 @@ void on_pickup(TickContext& ctx, Span<const Pickup> picks) {
         if (i >= its.len) continue;
         if (its[i].kind == ItemBomb) {
             if (run[0].bombs < kMaxBombs) ++run[0].bombs;
+            sfx(ctx, g, SFX_CHIP, 0.7f);
             fx_sparks(ctx, g, xf[i].position, 8, color{0.6f, 0.85f, 1.0f, 1.0f}, 2.5f);
             KV_INFO("arcfire", "pickup: a bomb at tick %llu, %d in hand", (unsigned long long)ctx.tick, run[0].bombs);
         } else {
             run[0].score += its[i].value;
             ++run[0].chips;
+            sfx(ctx, g, SFX_CHIP);
         }
         ctx.destroy(p.item);
     }

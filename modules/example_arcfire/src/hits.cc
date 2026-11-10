@@ -71,7 +71,8 @@ void on_shot_hit(TickContext& ctx, Span<const ShotHit> hits) {
         if (s.spent || hp.hp <= 0) continue; // down already: the shot flies on
         s.spent = 1;
         ctx.destroy(h.shot);
-        if (part_absorbs(g, ctx, h.target)) { boss_ping(ctx, g, shot_xf[h.shot.index()].position); continue; }
+        if (part_absorbs(g, ctx, h.target)) { boss_ping(ctx, g, shot_xf[h.shot.index()].position); sfx(ctx, g, SFX_PING); continue; }
+        sfx(ctx, g, SFX_HIT);
         hp.hp -= s.damage;
         hp.flash = kFlashTicks;
         fx_sparks(ctx, g, part_xf[h.target.index()].position, 2, kSparkHit, 2.0f);
@@ -94,6 +95,7 @@ void on_shot_hit(TickContext& ctx, Span<const ShotHit> hits) {
         ctx.destroy(h.shot);
         hp.hp -= s.damage;
         hp.flash = kFlashTicks;
+        sfx(ctx, g, SFX_HIT);
         fx_sparks(ctx, g, at, 2, kSparkHit, 2.0f);
         if (hp.hp <= 0) {
             ctx.destroy(h.target);
@@ -142,6 +144,7 @@ void on_graze(TickContext& ctx, Span<const Graze> grazes) {
         b->grazed = 1;
         run[0].score += kGrazeScore;
         ++run[0].grazes;
+        sfx(ctx, g, SFX_GRAZE);
         fx_sparks(ctx, g, xf->position, 2, kSparkGraze, 1.5f);
     }
 }
@@ -165,6 +168,7 @@ void on_kill(TickContext& ctx, Span<const Kill> kills) {
     for (const Kill& k : kills) {
         run[0].score += k.score;
         ++run[0].kills;
+        sfx(ctx, g, k.score >= 400 ? SFX_KILL_BIG : SFX_KILL); // a ground row's or a boss's part's, by its worth
         if (Formation* f = formations->get<Formation>(k.formation)) {
             ++f->killed;
             if (f->killed + f->gone >= f->count) {
