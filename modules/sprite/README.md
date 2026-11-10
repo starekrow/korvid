@@ -142,6 +142,7 @@ Header `korvid/sprite/module.h`:
 | `sprite_module` | `ModuleDesc` | the record |
 | `sprite_world(engine)` | function | the module's world, or null |
 | `sprite_deltas(engine)` | function | the deltas extracted since the last take; apply and clear |
+| `sprite_rows_hint(engine, rows)` | function | the rows the game expects: the extract sizes its tables once (the frame loop calls it) |
 
 From the render interface (`korvid/render/sprite.h`): `Placement2`, `RenderSpriteState`,
 `SpriteDelta{kind, entity, state}`, `SpriteDeltaKind` (`Tick`, `Set`, `Remove`, `Layer`:
@@ -198,6 +199,14 @@ What the module registers with the engine:
 - **The extract is one thread** and linear in the rows of every drawable kind, dead
   slots included; a kind with a huge capacity and few live rows still costs its
   high-water mark. A `still` kind is the exception: nothing, until it spawns or loses a row.
+  Its cost is about 50 to 100 ns a delta in a dev build, linear.
+- **Its tables grow, unless told the size.** The side tables (by slot: the handle, the
+  `Sprite` and the `Transform2` last sent) and the delta list grow as a kind's high-water
+  mark and a frame's deltas climb; each growth copies the table, megabytes in one tick at
+  stress (12 ms in a dev build, which fills new memory). `sprite_rows_hint(e, rows)` (the
+  frame loop passes `FrameLoopConfig::sprite_rows`) sizes a kind's side tables at its first
+  growth to its capacity or `rows`, the smaller, and the delta list to twice `rows` at the
+  first extract, so they do not grow mid-run.
 - **A still kind's rows cannot move.** The extract does not look at a living row of a
   still kind, so a write to one is never drawn (and its previous copy is not retaken).
   Scroll it by layer; to change one tile, destroy it and spawn another.

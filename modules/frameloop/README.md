@@ -89,7 +89,7 @@ renders once.
 | `--cli-port N`, `--cli-stdin`, `--cli-ascii` | the CLI's transports; ASCII-only escapes non-ASCII as `\u{XXXX}` both ways |
 | `--idle-margin-ms N`, `--no-idle` | slack kept back from idle work (1.5); none at all |
 | `--capacity KIND=N` (repeatable) | a kind's capacity over the game's, by its full name (`example_arcfire.bullet=131072`) |
-| `--sprite-rows N` | the renderer's first sprite table size over the config's `sprite_rows` |
+| `--sprite-rows N` | the renderer's and the extract's first sprite table size over the config's `sprite_rows` (0: none) |
 
 ## Quick reference
 
@@ -97,7 +97,7 @@ Header `korvid/frameloop/frameloop.h`:
 
 | name | kind | what |
 |---|---|---|
-| `FrameLoopConfig` | record | `title`, `width`, `height`, `vsync`, `borderless`, `validation`, `exit_on_close`, `exit_on_escape`, `run_seconds`, `clear_color`, `report_every_seconds`, `sprite_rows` (the renderer's first sprite table size: a game that draws many asks, so the tables never grow mid-run), `flags`, `options`, `engine` (an `EngineConfig`) |
+| `FrameLoopConfig` | record | `title`, `width`, `height`, `vsync`, `borderless`, `validation`, `exit_on_close`, `exit_on_escape`, `run_seconds`, `clear_color`, `report_every_seconds`, `sprite_rows` (the renderer's first sprite table size, and the sprite extract's (`sprite_rows_hint`): a game that draws many asks, so the tables never grow mid-run), `flags`, `options`, `engine` (an `EngineConfig`) |
 | `ExitReason`, `ExitRequested{reason}` | enum, event | `WindowClosed`, `Escape`, `Timer` |
 | `frameloop_main(argc, argv, config)` | function | the whole run; returns the process exit code (2 for a bad option, 1 for a failed init) |
 | `frameloop_config(engine)` | function | the config in effect: the declaration plus the command line |

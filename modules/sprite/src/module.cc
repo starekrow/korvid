@@ -2,6 +2,7 @@
 #include "korvid/sprite/camera.h"
 #include "korvid/sprite/components.h"
 #include "korvid/sprite/extract.h"
+#include "korvid/core/profile.h"
 #include "korvid/sprite/layers.h"
 #include "korvid/sprite/world.h"
 #include "korvid/core/engine.h"
@@ -42,7 +43,9 @@ void sprite_shutdown(Engine&, ModuleInstance& self) {
 // appended for the renderer. The engine copied current into previous at PreSim.
 void sprite_extract(TickContext& ctx) {
     SpriteState& s = ctx.state_as<SpriteState>();
+    u32 before = s.deltas.len;
     extract_sprites(*ctx.engine, s.extract, &s.layers, s.deltas);
+    KV_MARK_V("extract deltas", s.deltas.len - before);
 }
 
 // The schemas. Transform2 keeps a previous-tick copy for interpolation; Sprite does not.
@@ -87,6 +90,10 @@ SpriteWorld* sprite_world(Engine& e) {
 Array<SpriteDelta>* sprite_deltas(Engine& e) {
     SpriteState* s = engine_module_state_as<SpriteState>(e, "sprite");
     return s ? &s->deltas : nullptr;
+}
+
+void sprite_rows_hint(Engine& e, u32 rows) {
+    if (SpriteState* s = engine_module_state_as<SpriteState>(e, "sprite")) s->extract.rows_hint = rows;
 }
 
 SpriteLayers* sprite_layers(Engine& e) {

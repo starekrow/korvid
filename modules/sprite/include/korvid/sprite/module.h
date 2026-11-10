@@ -20,5 +20,8 @@ SpriteWorld* sprite_world(Engine& e);
 // The deltas extracted since the last take: the ticks that ran this frame, in order.
 // Valid until the next tick; the caller applies them and clears.
 Array<SpriteDelta>* sprite_deltas(Engine& e);
+// How many sprite rows the game expects (the frame loop passes FrameLoopConfig::sprite_rows):
+// the extract sizes its tables to it once instead of growing them mid-run. See ExtractState.
+void sprite_rows_hint(Engine& e, u32 rows);
 
 } // namespace kv

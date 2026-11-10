@@ -1,4 +1,5 @@
 #include "korvid/sprite/extract.h"
+#include "korvid/core/profile.h"
 #include "korvid/sprite/components.h"
 #include "korvid/sprite/world.h"
 #include "korvid/core/engine.h"
@@ -28,6 +29,11 @@ void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<Sp
         layers->snap[i] = 0;
     }
 
+    if (st.rows_hint && out.cap < st.rows_hint * 2) { // a frame may hold two ticks' deltas
+        KV_ZONE("sprite.extract.out");
+        out.reserve(st.rows_hint * 2);
+    }
+
     Allocator* alloc = st.tables.alloc;
     while (st.tables.len < e.tables.len) {
         ExtractTable et;
@@ -44,9 +50,20 @@ void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<Sp
         et.seen_churn = table.churn;
         if (table.restores != et.seen_restores) { still = false; et.seen_restores = table.restores; } // values may have changed under known handles
         u32 n = table.rows();
-        et.sent.resize_fill(n, Handle{});
-        et.sent_sprites.resize_fill(n, Sprite{});
-        et.sent_placements.resize_fill(n, Transform2{});
+        if (n > et.sent.len) {
+            KV_ZONE("sprite.extract.grow");
+            if (st.rows_hint && et.sent.cap == 0) { // once, to the size the game said
+                u32 want = table.capacity < st.rows_hint ? table.capacity : st.rows_hint;
+                if (want > n) { et.sent.reserve(want); et.sent_sprites.reserve(want); et.sent_placements.reserve(want); }
+            }
+            et.sent.resize_fill(n, Handle{});
+            et.sent_sprites.resize_fill(n, Sprite{});
+            et.sent_placements.resize_fill(n, Transform2{});
+        }
+        if (out.len + n > out.cap) { // at most a delta a row: grown once here, not push by push
+            KV_ZONE("sprite.extract.out");
+            out.reserve(out.len + n);
+        }
         Span<const Transform2> cur  = table.rows_of<Transform2>();
         Span<const Transform2> prev = table.prev_rows_of<Transform2>();
         Span<const Sprite>     spr  = table.rows_of<Sprite>();

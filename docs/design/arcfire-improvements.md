@@ -26,19 +26,13 @@ that finds an engine limit adds a line here.
 - **Input record and replay.** The demos are scripts in code. A recorded input log
   (actions per tick) that replays through `input_action_override` would turn a tester's run
   into a hashing test; the frame loop is where it belongs. Slice 5.
-- **Many Sets per tick.** The extract compares every row of every sprite kind against
-  what it last sent; at 60,000 rows with most moving, that compare is itself a cost worth
-  knowing. *Slice 1:* 0.16 ms a frame for ~1,500 Set deltas a tick, 0.82 ms worst at
-  6,600. *Slice 2:* 0.31 ms a frame on average at stress (24,000 bullets, 4,800 deltas a
-  tick on average), a quarter of the tick; 0.53 ms at 59,000. Its worst windows are the
-  thing: 4.5 ms at 24,000 and 8.2 ms at 59,000, where the average is a tenth of that. A
-  guess to check first in slice 3: the extract's side tables (`sent`, `sent_sprites`,
-  `sent_placements`) are grown with `resize_fill` as a kind's high-water row count climbs,
-  so a burst of spawns past the high-water is a copy of all three; sizing them once from
-  the kind's capacity (address space, like the tables) would take that out. Then the
-  compare itself, which a dirty bit from the writers would replace. *Slice 3, M1:* a map of
-  15,000 still tiles cost the compare 1.05 ms a frame by itself; still kinds (Fixed) take
-  the rows that never change out of it. The moving rows' compare is what remains.
+- **Many Sets per tick.** The extract compares every row of every moving sprite kind
+  against what it last sent and writes a whole state per change: about 65 ns a delta in a
+  dev build, 3 ms a tick at rank 56's 50,000. Its spikes are fixed (below); the compare
+  itself is what is left, and a dirty bit from the writers is the design that would
+  replace it. (Earlier numbers, for the record: slice 1, 0.16 ms a frame for ~1,500 Sets a
+  tick; slice 2, 0.31 ms on average at 24,000 bullets, worst windows 4.5 ms there and 8.2
+  ms at 59,000.)
 - **Threads do not help at this size.** At 24,000 bullets the tick is a millisecond at 1,
   8 and 16 threads alike (1.00, 1.12, 1.22 ms); the pool's fan-out costs about what it
   saves. Worth a look when something per bullet costs more than a move: the grain sizes,
@@ -69,6 +63,14 @@ that finds an engine limit adds a line here.
 
 ## Fixed
 
+- **The extract's worst windows** (slice 3, M5). Traced tick by tick: every outlier was a
+  table growing, the delta list (12.4 ms at rank 56, 7.8 at stress) or a kind's side
+  tables (2 ms), the copy plus the dev build's fill of the new memory; without growth the
+  extract is linear in its deltas. `sprite_rows_hint` (passed by the frame loop from
+  `FrameLoopConfig::sprite_rows`) sizes them once: the worst extract under load went from
+  14.0 ms to 3.3 ms at rank 56 and from 8.8 to 2.0 at stress. The cost moved to the first
+  extract (10 ms, once, in a dev build) and a kind's first rows (3 to 4 ms); a ship build
+  does not fill, so there it is address space.
 - **Audio under load** (slice 3, M4). `SoundPlay::priority` (0 to 3); a full pool takes
   the oldest voice of the lowest priority not above the play's (`AudioStats::steals`) or
   refuses it; a sound asked for again before the tick's extract starts once, the louder

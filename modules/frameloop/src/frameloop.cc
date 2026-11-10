@@ -200,6 +200,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     rd.sprite_rows   = s->config.sprite_rows;
     s->renderer = renderer_create(engine, rd);
     if (!s->renderer) return false;
+    if (s->config.sprite_rows) sprite_rows_hint(engine, s->config.sprite_rows); // the extract's tables, sized once too
 
     if (g_overlay) {
         s->overlay_font = asset_load_font(engine, "text/DejaVuSans.ttf", kOverlayPx);

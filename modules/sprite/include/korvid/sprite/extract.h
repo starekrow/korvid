@@ -32,6 +32,11 @@ struct ExtractTable {
 
 struct ExtractState {
     Array<ExtractTable> tables; // by engine table index
+    // How many sprite rows the game expects (FrameLoopConfig::sprite_rows; 0: none said).
+    // A kind's side tables are sized at its first growth to that or its capacity, the
+    // smaller, and the delta list to twice it at the first extract, so neither grows (a
+    // copy of megabytes in one tick) in the middle of a run.
+    u32 rows_hint = 0;
     vec2 sent_layers[256] = {}; // the layers' offsets the renderer was last told
     void free();
 };
