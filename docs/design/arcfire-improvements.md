@@ -39,7 +39,7 @@ that finds an engine limit adds a line here.
 
 - **Action overrides land on the next sample.** A bot that decides in Sim from sim state
   drives the ship a tick late; the demo runs in Input before the sample to avoid it. Fine
-  as it is, worth a line in the platform_hid docs.
+  as it is. (A pause between used them up, which slice 5 fixed: below.)
 
 ## Found in slice 3
 
@@ -59,6 +59,13 @@ that finds an engine limit adds a line here.
   a flag.
 
 ## Fixed
+
+- **A pause used up a pilot's actions** (slice 5). An override set on a sim tick was taken
+  by the next sample, a paused tick's when a pause began, so the first sim tick after the
+  resume flew on the devices: a bot run paused once by hand was another run. An override
+  set on a sim tick now waits for the next sim tick's sample; paused ticks sample the
+  devices (a pause menu works); one set on a paused tick is for the next sample, as a
+  script on a menu wants. Left: `was_down` across a pause comes from the paused ticks.
 
 - **Input record and replay** (slice 5; identified at PRD time). `--record FILE` and
   `--replay FILE` in the frame loop: the game's named actions per sim tick since the last

@@ -55,13 +55,14 @@ void input_sample(TickContext& ctx) {
         ActionState& a = s.actions.actions[p.action];
         a.override_set = true;
         a.override_exact = false;
+        a.override_sim = false; // a person's press: whatever tick it lands on
         a.override_down = true;
         a.override_axis = p.axis;
         if (--p.ticks == 0) p = s.presses[--s.press_count];
         else ++i;
     }
     s.input.sample();
-    input_actions_sample(s.actions, s.input.sampled);
+    input_actions_sample(s.actions, s.input.sampled, ctx.paused);
 }
 
 // `press ACTION [TICKS] [X Y]`: hold a named action for TICKS sampled ticks (6), an Axis2

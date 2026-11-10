@@ -115,6 +115,7 @@ void input_action_override(Engine& e, const char* name, bool down, vec2 axis) {
     ActionState& a = s->actions.actions[id];
     a.override_set   = true;
     a.override_exact = false;
+    a.override_sim   = !e.clock.paused;
     a.override_down  = down;
     a.override_axis  = axis;
 }
@@ -134,7 +135,7 @@ bool action_repeat(const InputActions& a, u32 id, u32 delay, u32 interval) {
     return (h - 1 - delay) % interval == 0;
 }
 
-void input_actions_sample(InputActions& as, const InputState& in) {
+void input_actions_sample(InputActions& as, const InputState& in, bool paused) {
     const GamepadState* pad = in.pad();
     for (u32 i = 0; i < as.count; ++i) {
         ActionState& a = as.actions[i];
@@ -170,7 +171,7 @@ void input_actions_sample(InputActions& as, const InputState& in) {
         }
         axis = clamp_unit(axis);
         down = best > 0.0f;
-        if (a.override_set) {
+        if (a.override_set && !(paused && a.override_sim)) {
             down = a.override_down;
             axis = a.kind != ActionKind::Axis2 ? (down ? vec2{1, 0} : vec2{0, 0}) : a.override_exact ? a.override_axis : clamp_unit(a.override_axis);
             if (a.kind == ActionKind::Axis2) down = axis.x != 0.0f || axis.y != 0.0f;

@@ -63,6 +63,7 @@ struct ActionState {
     u32           held;             // ticks down so far (1 on the tick it was pressed)
     bool          override_set;     // input_action_override's value replaces the devices next sample
     bool          override_exact;   // as it is: not clamped to the unit circle (a replay's, already sampled once)
+    bool          override_sim;     // set on a sim tick: for the next sim tick's sample, kept through paused ones
     bool          override_down;
     vec2          override_axis;
 };
@@ -81,7 +82,11 @@ bool input_actions(Engine& e, Span<const InputActionDesc> actions);
 // The actions as of the last tick: for code outside the schedule. Systems read the
 // resource "input.actions".
 const InputActions* input_actions_get(Engine& e);
-// Stands in for the devices on the next sample: down and (for an Axis2) the direction.
+// Stands in for the devices on the next sample: down and (for an Axis2) the direction. Set
+// on a sim tick (a pilot deciding in Sim), it is for the next sim tick: paused ticks between
+// sample the devices (a pause menu works) and leave it waiting, so a pause and a resume
+// change nothing a pilot flies. Set on a paused tick (a script working a menu), it is for
+// the next sample, paused or not.
 void input_action_override(Engine& e, const char* name, bool down, vec2 axis = vec2{0, 0});
 // The same, the value taken as it is: what a sample made once (a replay's), which the unit
 // circle's clamp would round again.
@@ -97,6 +102,7 @@ inline vec2 action_axis(const InputActions& a, u32 id)     { return id < a.count
 bool action_repeat(const InputActions& a, u32 id, u32 delay, u32 interval);
 
 // The engine's own: the actions from the sampled input (the "input.actions" system).
-void input_actions_sample(InputActions& a, const struct InputState& in);
+// `paused`: the tick is a paused one, which leaves a sim tick's overrides waiting.
+void input_actions_sample(InputActions& a, const struct InputState& in, bool paused = false);
 
 } // namespace kv
