@@ -178,10 +178,9 @@ and a gate; a fair amount of content that asks nothing new of the engine.)
 2. **Orbit**: no ground. The ground plane's place is taken by a battle: a fleet engagement
    half an orbit away, hundreds of tiny ships in two colors trading tracer fire, flashes,
    a capital ship breaking up over the course of the stage, all cosmetic rows on the
-   deep planes, scrolling slowly. Under it, a procedural nebula: generated on the CPU at
-   load (layered noise into a texture per plane, so the stage never looks the same twice
-   but the demo's seed makes it look the same every run), uploaded once. A shader nebula
-   is the stretch, when the renderer takes a game's fragment shader. Debris fields and
+   deep planes, scrolling slowly. Under it, a procedural nebula drawn by a fragment shader of
+   the game's own (layered noise, seeded by the stage; slice 6 makes game shaders a
+   requirement, three of them, and drops the CPU generator). Debris fields and
    station segments drift through the middle planes as the stage's "ground" enemies; the
    densest patterns; a station core as boss with the game's last three phases. It is the
    stress test in costume: the battle is a few thousand sprites doing nothing but being
@@ -223,7 +222,7 @@ confirm, reported CC0) for the stage and boss music, or Kenney's *Music Loops* i
 **Made here.** The ground maps (Tiled, from the pack's tiles, with a generator script as
 arcanum has), the BulletML library, the enemy and stage tables, the UI documents, the
 hitbox and graze-ring sprites, the egg and the shell, the beam strip, the particles, the
-nebula generator, the vignette.
+game's shaders (the nebula, the dissolve, the shimmer), the vignette.
 
 ## Engine use, and what it will ask for
 
@@ -259,7 +258,8 @@ Known at PRD time, each a line in the improvements note with its slice:
 - **Beams.** A segment cast against bodies by mask. (slice 4)
 - **Particles at render rate.** Measure first. (slice 5)
 - **Input record and replay.** (slice 5)
-- **A game's fragment shader.** For the shader nebula, a stretch. (slice 6)
+- **A game's fragment shader.** The nebula, the dissolve and a full-frame shimmer; required,
+  and the ports' shader check. (slice 6)
 
 ## Slices and milestones
 
@@ -285,10 +285,10 @@ stress work comes early so the engine findings are found in slice 2 and not slic
 5. **Presentation** — title, pause, options, results, game over, name entry and high
    scores through the UI module and the save module; explosions, particles (and the
    render-rate question), flashes, shake; the record-and-replay question.
-6. **Orbit and the battle** — the second and last stage, the fleet engagement, the
-   nebula generator (and the shader stretch), the remaining patterns, the notebook's
-   closing entry, a README that tells someone else how to watch it work. (Fortress, once
-   stage two, is cut.)
+6. **Orbit and the battle** — the second and last stage, the fleet engagement, three game
+   shaders (the nebula, the dissolve, the shimmer over the whole frame), the remaining
+   patterns, the platform checklist on Linux and Windows, the notebook's closing entry, a
+   README that tells someone else how to watch it work. (Fortress, once stage two, is cut.)
 
 ## Decided
 
