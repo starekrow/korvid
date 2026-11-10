@@ -7,8 +7,8 @@
   "timeout": 75,
   "score": 40000,
   "parts": [
-    { "name": "main_gun_aft",  "cell": [0, 0], "at": [-96, 0], "radius": 18, "health": 56, "score": 2000, "pattern": ["broadside"], "rest": 50 },
-    { "name": "main_gun_fore", "cell": [0, 0], "at": [96, 0],  "radius": 18, "health": 56, "score": 2000, "pattern": ["broadside"], "rest": 70 },
+    { "name": "main_gun_aft",  "cell": [0, 0], "drop": "option", "at": [-96, 0], "radius": 18, "health": 56, "score": 2000, "pattern": ["broadside"], "rest": 50 },
+    { "name": "main_gun_fore", "cell": [0, 0], "drop": "option", "at": [96, 0],  "radius": 18, "health": 56, "score": 2000, "pattern": ["broadside"], "rest": 70 },
     { "name": "aa_aft_port",   "cell": [1, 0], "at": [-144, 40],  "radius": 13, "health": 30, "score": 800, "pattern": ["aimed_burst"], "rest": 60 },
     { "name": "aa_fore_port",  "cell": [2, 0], "at": [144, 40],   "radius": 13, "health": 30, "score": 800, "pattern": ["needles"], "rest": 80 },
     { "name": "aa_aft_stbd",   "cell": [2, 0], "at": [-144, -40], "radius": 13, "health": 30, "score": 800, "pattern": ["needles"], "rest": 80 },

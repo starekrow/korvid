@@ -45,6 +45,7 @@
                 { "type": "box", "name": "gap_weapon", "size": [8, 8] },
                 { "type": "label", "name": "weapon", "text": "{=weapon}", "color": "cyan" },
                 { "type": "meter", "name": "power", "style": "bar", "value": "=power", "max": "=power_max", "fill": "cyan", "size": [120, 8] },
+                { "type": "label", "name": "options", "text": "OPTIONS {=options}", "color": "dim" },
                 { "type": "box", "name": "gap2", "size": [8, 16] },
                 { "type": "label", "name": "restarts", "text": "RESTARTS {=restarts}", "color": "dim" },
                 { "type": "label", "name": "grazes", "text": "GRAZE {=grazes}", "color": "cyan" } ] } ] },

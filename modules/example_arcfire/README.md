@@ -58,6 +58,7 @@ The ways it flies itself:
   `bullet_speed`, `formation_count`, `formation_spacing`, `particles`, `plane_density`,
   `enemy_health`, `bot`, `invulnerable` (1, or 2: after the first death), `loops`,
   `weapon` and `power` (what the ship starts with: 0 Spread, 1 Beam, 2 Storm, 3 Lance; 1..5),
+  `options` (0..2, the options it starts with),
   `scroll_rows` (1: move every plane tile
   every tick instead of scrolling the layer, for the notebook's comparison). The log prints
   the dials at the start.
@@ -113,9 +114,15 @@ state.
   `collision_cast_all` at the first body it meets, which it damages every few ticks; the one
   weapon a boss's hull stops), Storm (bolts that turn toward the nearest enemy) and Lance
   (heavy shots that pass through what they kill). The level is the ship's, kept when the
-  type changes; weapon and power items (`items.cc`) switch and raise them. Shots and the
+  type changes; weapon and power items (`items.cc`) switch and raise them. Item carriers
+  (a formation's, a ground row's or a boss part's `drop`) leave weapon, power, option and
+  egg items. Shots and the
   beam hurt by one path (`hurt`, hits.cc). `shots` flies the shots and steers the bolts. The hitbox is the ship's own collider (radius
   3); the graze ring (radius 18) and the hitbox's dot are child rows.
+- **Options** (`options.cc`): up to two satellites, children of the ship, that orbit it
+  unfocused and hold beside it focused. Each fires the ship's weapon two levels lower (its
+  own beam when the weapon is the Beam) and eats the bullets it meets, as the shell does. A
+  death takes both.
 - **Enemies** (`enemies.cc`): an air row follows a Catmull-Rom path by arc length
   (`path.cc`), so members of a formation keep their spacing, and starts its pattern where
   its emitter says along the path; a ground row rides the scroll and runs its pattern while
@@ -165,7 +172,8 @@ state.
   the rest are paid at once); a formation shot down to its last member drops a bomb where
   it fell (a `formation` row counts its members killed and gone). Items pop up and fall,
   and come to the ship above the magnet line or within a short reach; the graze ring
-  picks them up.
+  picks them up. An option item past the second pays 20,000 instead, an egg item past the
+  fifth egg 50,000.
 - **The egg** (`egg.cc`): a death slows time to a quarter (`engine_time_scale`, set each
   tick by the sequence), breaks the ship into its four quarters, cancels the bullets near
   it into chips, drops the egg (a spherical machine) that rests, builds the new ship
@@ -203,7 +211,7 @@ state.
 | `src/path.cc` | Catmull-Rom paths by arc length |
 | `src/dials.cc` | the dials' positions and `--dial` |
 | `src/planes.cc`, `src/ground.cc` | the planes and the ground's scroll; the map and its enemies |
-| `src/ship.cc`, `src/weapons.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves; the weapons |
+| `src/ship.cc`, `src/weapons.cc`, `src/options.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves; the weapons and the options |
 | `src/boss.cc`, `src/boss_data.cc`, `assets/bosses/` | bosses: their life and their parts; reading a boss file; the files |
 | `src/sound.cc`, `assets/sound/`, `assets/music/` | the effects' table and the music |
 | `src/patterns.cc`, `assets/patterns/` | the library and the runners; the ten patterns |

@@ -153,6 +153,7 @@ void hud(TickContext& ctx) {
         ui_model_set_str(e, "weapon", weapon_name(s->weapon));
         ui_model_set_int(e, "power", s->power);
     }
+    ui_model_set_int(e, "options", engine_table(e, g_option_kind)->live());
     ui_model_set_str(e, "stage", g.stage.name);
     char text[48];
     snprintf(text, sizeof text, "%.0f / %.0f", (f64)stage_clock(stage_row[0]), (f64)g.stage.length);

@@ -23,8 +23,10 @@ constexpr u32 kCycle = 90;          // ticks a weapon item shows each type
 constexpr i32 kPowerScore = 10000;  // a power past the last level pays this
 const color kSparkChip{1.0f, 0.95f, 0.5f, 1.0f};
 
-// made/items.png: 16 px cells, the four weapons' letters, then power.
-rect2 items_uv(u32 cell) { return rect2{(f32)cell * (16.0f / 80.0f), 0.0f, 16.0f / 80.0f, 1.0f}; }
+// made/items.png: 16 px cells, the four weapons' letters, then power, then option.
+constexpr u32 kItemCells = 6;
+rect2 items_uv(u32 cell) { return rect2{(f32)cell / (f32)kItemCells, 0.0f, 1.0f / (f32)kItemCells, 1.0f}; }
+constexpr i32 kOptionScore = 20000, kEggScore = 50000; // an option past two, an egg past five
 
 u32 weapon_shown(const Item& it) { return ((u32)it.value + (kItemLife - it.life) / kCycle) % WeaponCount; }
 
@@ -32,6 +34,8 @@ Sprite item_sprite(const Game& g, ItemKind kind, i32 value) {
     if (kind == ItemBomb) return sprite_of(g, TEX_TILES, tile_uv(2, 2), vec2{26, 26}, Z_ITEM);
     if (kind == ItemWeapon) return sprite_of(g, TEX_ITEMS, items_uv((u32)value % WeaponCount), vec2{28, 28}, Z_ITEM);
     if (kind == ItemPower) return sprite_of(g, TEX_ITEMS, items_uv(4), vec2{28, 28}, Z_ITEM);
+    if (kind == ItemOption) return sprite_of(g, TEX_ITEMS, items_uv(5), vec2{28, 28}, Z_ITEM);
+    if (kind == ItemEgg) return sprite_of(g, TEX_EGG, rect2_unit(), vec2{26, 26}, Z_ITEM);
     return sprite_of(g, TEX_TILES, tile_uv(4, 0), vec2{14, 14}, Z_ITEM, color{1.0f, 1.0f, 1.0f, 0.95f});
 }
 
@@ -47,6 +51,8 @@ void item_drop(TickContext& ctx, const Game& g, ItemKind kind, point2 at, vec2 v
 void drop_item(TickContext& ctx, const Game& g, u32 drop, point2 at) {
     if (drop >= DropWeapon && drop <= DropWeaponLast) item_drop(ctx, g, ItemWeapon, at, vec2{0.0f, 1.8f}, (i32)(drop - DropWeapon));
     else if (drop == DropPower) item_drop(ctx, g, ItemPower, at, vec2{0.0f, 1.8f});
+    else if (drop == DropOption) item_drop(ctx, g, ItemOption, at, vec2{0.0f, 1.8f});
+    else if (drop == DropEgg) item_drop(ctx, g, ItemEgg, at, vec2{0.0f, 1.8f});
 }
 
 // Every bullet of both kinds within `radius` of `at` (all of them for radius <= 0) goes; the
@@ -137,6 +143,18 @@ void on_pickup(TickContext& ctx, Span<const Pickup> picks) {
             }
             sfx(ctx, g, SFX_CHIP, 0.6f);
             fx_sparks(ctx, g, xf[i].position, 10, color{1.0f, 0.8f, 0.4f, 1.0f}, 3.0f);
+        } else if (its[i].kind == ItemOption) {
+            if (option_add(ctx, g)) KV_INFO("arcfire", "pickup: an option at tick %llu", (unsigned long long)ctx.tick);
+            else run[0].score += kOptionScore;
+            sfx(ctx, g, SFX_EGG_BLOOM);
+        } else if (its[i].kind == ItemEgg) {
+            if (run[0].eggs < kMaxEggs) {
+                ++run[0].eggs;
+                KV_INFO("arcfire", "pickup: an egg at tick %llu, %d in hand", (unsigned long long)ctx.tick, run[0].eggs);
+            } else {
+                run[0].score += kEggScore;
+            }
+            sfx(ctx, g, SFX_EGG_BLOOM, 1.3f);
         } else if (its[i].kind == ItemBomb) {
             if (run[0].bombs < kMaxBombs) ++run[0].bombs;
             sfx(ctx, g, SFX_CHIP, 0.7f);

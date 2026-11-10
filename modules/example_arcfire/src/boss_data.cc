@@ -161,6 +161,7 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
             stage.formations[stage.formation_count++] = f;
             p.every = (u32)json_u64(json_get(doc, *v, "every"), 300);
         }
+        if (!drop_named(json_string(json_get(doc, *v, "drop"), ""), &p.drop)) { snprintf(why, why_cap, "boss %s: part %s drops something unknown", name, p.name); return false; }
         out.total += p.health;
         ++out.part_count;
     }

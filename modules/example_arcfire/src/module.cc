@@ -19,7 +19,7 @@ namespace kv::arcfire {
 
 constinit u32 g_world_kind = 0, g_plane_kind = 0, g_ship_kind = 0, g_ring_kind = 0, g_mark_kind = 0, g_shot_kind = 0, g_air_kind = 0,
               g_ground_kind = 0, g_bullet_kind = 0, g_active_kind = 0, g_particle_kind = 0, g_egg_kind = 0, g_shell_kind = 0,
-              g_item_kind = 0, g_formation_kind = 0, g_shadow_kind = 0, g_boss_kind = 0, g_part_kind = 0, g_boom_kind = 0, g_beam_kind = 0;
+              g_item_kind = 0, g_formation_kind = 0, g_shadow_kind = 0, g_boss_kind = 0, g_part_kind = 0, g_boom_kind = 0, g_beam_kind = 0, g_option_kind = 0;
 constinit u32 g_part_down = 0;
 
 // The systems and handlers, each in the file of its part.
@@ -34,6 +34,7 @@ void planes(TickContext&);       // planes.cc
 void control(TickContext&);      // ship.cc
 void shots(TickContext&);        // weapons.cc
 void beams(TickContext&);
+void options(TickContext&);      // options.cc
 void on_beam_hit(TickContext&, Span<const BeamHit>); // hits.cc
 void enemies(TickContext&);      // enemies.cc
 void bosses(TickContext&);       // boss.cc
@@ -75,6 +76,7 @@ constinit const FieldDesc k_formation_fields[] = {KV_FIELDS(Formation, count, ki
 constinit const FieldDesc k_item_fields[]     = {KV_FIELDS(Item, kind, value, life, pad)};
 constinit const FieldDesc k_shot_fields[]     = {KV_FIELDS(Shot, damage, spent, kind, turn)};
 constinit const FieldDesc k_beam_fields[]     = {KV_FIELDS(Beam, timer, length, scroll, pad)};
+constinit const FieldDesc k_option_fields[]   = {KV_FIELDS(Option, index, pad)};
 constinit const FieldDesc k_health_fields[]   = {KV_FIELDS(Health, hp, flash, score, look)};
 // The path is a struct of its own (path.h), so its fields are named by hand.
 constinit const FieldDesc k_mover_fields[] = {
@@ -88,12 +90,12 @@ constinit const FieldDesc k_mover_fields[] = {
 };
 constinit const FieldDesc k_emitter_fields[]  = {KV_FIELDS(Emitter, pattern, at, state, timer)};
 constinit const FieldDesc k_runner_fields[]   = {KV_FIELDS(BmlRunner, rng, wait, frame16, frame8, track8, params, last, term, delta, dir, speed, mx, my, flags)};
-constinit const FieldDesc k_ground_fields[]   = {KV_FIELDS(Ground, rate, bench, kind, launch, timer, vx, home, range)};
+constinit const FieldDesc k_ground_fields[]   = {KV_FIELDS(Ground, rate, bench, kind, launch, timer, vx, home, range, drop, pad)};
 constinit const FieldDesc k_bullet_fields[]   = {KV_FIELDS(Bullet, life, grazed, owner)};
 constinit const FieldDesc k_particle_fields[] = {KV_FIELDS(Particle, life, max_life, spin, drag, alpha, fall)};
 constinit const FieldDesc k_eggbody_fields[]  = {KV_FIELDS(EggBody, vy, drift)};
 constinit const FieldDesc k_dials_fields[]    = {KV_FIELDS(Dials, position, rank, bullet_speed, formation_count, formation_spacing, particles,
-                                                           plane_density, enemy_health, bot, invulnerable, loops, scroll_rows, weapon, power)};
+                                                           plane_density, enemy_health, bot, invulnerable, loops, scroll_rows, weapon, power, options)};
 constinit const FieldDesc k_stage_fields[]    = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, ground_cursor, base, held, waiting)};
 constinit const FieldDesc k_run_fields[]      = {KV_FIELDS(Run, score, stage_score, eggs, restarts, epoch, kills, grazes, deaths, bombs, chips)};
 constinit const FieldDesc k_eggstate_fields[] = {KV_FIELDS(EggState, step, t, at, shell, restart)};
@@ -110,7 +112,7 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Stage, k_stage_fields),       KV_COMPONENT(Run, k_run_fields),       KV_COMPONENT(EggState, k_eggstate_fields),
     KV_COMPONENT(Chance, k_chance_fields),       KV_COMPONENT(Runner, k_runner_fields), KV_COMPONENT(Formation, k_formation_fields),
     KV_COMPONENT(Item, k_item_fields),         KV_COMPONENT(Boss, k_boss_fields),     KV_COMPONENT(Part, k_part_fields),
-    KV_COMPONENT(Beam, k_beam_fields),
+    KV_COMPONENT(Beam, k_beam_fields),         KV_COMPONENT(Option, k_option_fields),
 };
 
 // ---- kinds ---------------------------------------------------------------------------------------
@@ -142,6 +144,8 @@ constinit const KindDesc k_kinds[] = {
     {.name = ".part",     .components = "Transform2, Local2, Parent, Sprite, Collider2, Health, Emitter, Runner, Part", .capacity = 256, .id = &g_part_kind},
     // Explosions: a flipbook each, gone when it has played (fx.cc).
     // The beams: one on the ship (and one on each option), cut each tick at what it meets.
+    // Options: children of the ship, bodies that eat bullets (options.cc).
+    {.name = ".option",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Option", .capacity = kMaxOptions, .id = &g_option_kind},
     {.name = ".beam",     .components = "Transform2, Local2, Parent, Sprite, Beam", .capacity = 4, .id = &g_beam_kind},
     {.name = ".boom",     .components = "Transform2, Sprite, AnimPlayer", .capacity = 512, .id = &g_boom_kind, .cosmetic = true},
 };
@@ -194,7 +198,7 @@ constinit const InputActionDesc k_actions[] = {
 
 constinit const SystemDesc k_systems[] = {
     {.name = ".demo", .phase = Phase::Input, .fn = demo, .before = "input.sample", .main_thread = true},
-    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, tilemap.tile, audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, tilemap.tile, audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pause", .phase = Phase::PreSim, .fn = pause, .reads = "input.actions", .after = ".boot", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet.Transform2, ^.bullet.Velocity, ^.active.Transform2, ^.active.Velocity, ^.ship.Transform2, ^.air.Transform2, ^.ground.Transform2, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss, .world.Dials",
      .main_thread = true},
@@ -202,7 +206,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".stage", .phase = Phase::Sim, .fn = stage, .reads = ".world.Dials, .world.Run", .writes = ".world.Stage, .formation, .boss, .part, audio.commands", .after = ".scroll"},
     {.name = ".planes", .phase = Phase::Sim, .fn = planes, .reads = ".world.Stage, .world.Dials, .plane.Plane, .plane.Sprite",
      .writes = "sprite.layers, .plane"},
-    {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "input.actions, .world.Dials",
+    {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "^.option.Transform2, input.actions, .world.Dials",
      .writes = ".ship.Transform2, .ship.Ship, .ship.Sprite, .shot, .ring.Sprite, .mark.Sprite, audio.commands"},
     // Storm's bolts steer by the enemies as the tick began (^), before anything moves them.
     {.name = ".shots", .phase = Phase::Sim, .fn = shots,
@@ -210,7 +214,10 @@ constinit const SystemDesc k_systems[] = {
      .writes = ".shot", .after = ".control", .state = StateUse::Read},
     // The beam is cut against everything where it is this tick: after every mover and the
     // collision module's compose.
-    {.name = ".beams", .phase = Phase::Sim, .fn = beams, .reads = "*[Collider2].Transform2, *[Collider2].Collider2, .ship.Ship, .ship.Transform2, .beam.Parent",
+    // Each option's place on the ship, before the collision module composes it.
+    {.name = ".options", .phase = Phase::Sim, .fn = options, .reads = ".ship.Ship, .option.Option", .writes = ".option.Local2", .after = ".control",
+     .state = StateUse::Read},
+    {.name = ".beams", .phase = Phase::Sim, .fn = beams, .reads = "*[Collider2].Transform2, *[Collider2].Collider2, .ship.Ship, .ship.Transform2, .beam.Parent, .option.Parent",
      .writes = ".beam.Local2, .beam.Sprite, .beam.Beam", .state = StateUse::None},
     {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage, .world.Run, .world.Dials", .writes = ".air, .ground, .formation", .state = StateUse::Read},
     {.name = ".bosses", .phase = Phase::Sim, .fn = bosses, .reads = ".world.Run, .world.Dials, .world.EggState", .writes = ".boss, .part, .formation, audio.commands",
@@ -231,7 +238,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".particles", .phase = Phase::Sim, .fn = particles, .writes = ".particle", .state = StateUse::None},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true,
      .runs = RunWhen::Always},
-    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".world.Run, .world.Stage, .boss.Boss, .part.Health, .part.Part, .ship.Ship", .before = "ui.draw", .main_thread = true,
+    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".world.Run, .world.Stage, .boss.Boss, .part.Health, .part.Part, .ship.Ship, .option.Option", .before = "ui.draw", .main_thread = true,
      .runs = RunWhen::Always},
     {.name = ".stats_mark", .phase = Phase::PostSim, .fn = stats_mark, .before = "sprite.extract", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".stats", .phase = Phase::PostSim, .fn = stats, .reads = "sprite.deltas", .writes = ".stats", .after = ".hud", .main_thread = true,
@@ -243,10 +250,10 @@ constinit const SystemDesc k_systems[] = {
 // death, the stage's end.
 constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_overlap", KV_ON(OverlapBegin, on_overlap)},
-    {.name = ".on_shot_hit", KV_ON(ShotHit, on_shot_hit), .reads = ".air.Transform2, .ground.Transform2, .air.Mover, .shot.Transform2, .part.Transform2, .part.Part, .boss.Boss",
+    {.name = ".on_shot_hit", KV_ON(ShotHit, on_shot_hit), .reads = ".ground.Ground, .air.Transform2, .ground.Transform2, .air.Mover, .shot.Transform2, .part.Transform2, .part.Part, .boss.Boss",
      .writes = ".air.Health, .ground.Health, .shot.Shot, .part.Health, audio.commands"},
-    {.name = ".on_bomb", KV_ON(Bombed, on_bomb), .reads = ".air.Transform2, .ground.Transform2, .air.Mover, .part.Transform2, .part.Part, .boss.Boss",
-     .writes = ".air.Health, .ground.Health, .part.Health", .after = ".on_shot_hit"},
+    {.name = ".on_bomb", KV_ON(Bombed, on_bomb), .reads = ".ground.Ground, .air.Transform2, .ground.Transform2, .air.Mover, .part.Transform2, .part.Part, .boss.Boss",
+     .writes = ".air.Health, .ground.Health, .part.Health, audio.commands", .after = ".on_shot_hit"},
     {.name = ".on_part_down", KV_ON(StateEdge, on_part_down), .reads = ".world.Dials, .part.Part, .part.Transform2, .bullet, .active", .writes = ".boss.Boss, audio.commands"},
     {.name = ".on_boom_done", KV_ON(AnimFinished, on_boom_done)},
     {.name = ".on_bullet_hit", KV_ON(BulletHit, on_bullet_hit), .reads = ".world.Dials",
@@ -256,9 +263,9 @@ constinit const HandlerDesc k_handlers[] = {
      .after = ".on_bullet_hit"},
     {.name = ".on_shell_hit", KV_ON(ShellHit, on_shell_hit), .reads = ".bullet.Transform2, .active.Transform2"},
     {.name = ".on_kill", KV_ON(Kill, on_kill), .reads = ".world.Dials", .writes = ".world.Run, .formation, audio.commands", .after = ".on_graze"},
-    {.name = ".on_beam_hit", KV_ON(BeamHit, on_beam_hit), .reads = ".air.Transform2, .ground.Transform2, .air.Mover, .part.Transform2, .part.Part, .boss.Boss",
+    {.name = ".on_beam_hit", KV_ON(BeamHit, on_beam_hit), .reads = ".ground.Ground, .air.Transform2, .ground.Transform2, .air.Mover, .part.Transform2, .part.Part, .boss.Boss",
      .writes = ".air.Health, .ground.Health, .part.Health, audio.commands", .after = ".on_bomb"},
-    {.name = ".on_pickup", KV_ON(Pickup, on_pickup), .reads = ".item.Item, .item.Transform2", .writes = ".world.Run, .ship.Ship, audio.commands",
+    {.name = ".on_pickup", KV_ON(Pickup, on_pickup), .reads = ".item.Item, .item.Transform2", .writes = ".world.Run, .ship.Ship, .option, .beam, audio.commands",
      .after = ".on_kill, .on_rammed"},
     {.name = ".on_ship_died", KV_ON(ShipDied, on_ship_died),
      .writes = ".world.Run, .world.EggState, .world.Stage, .ship, audio.commands", .after = ".on_pickup, .on_rammed"},

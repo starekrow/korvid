@@ -15,9 +15,9 @@
     { "name": "turret_fore_right", "cell": [1, 0], "at": [64, -40],  "radius": 14, "health": 34, "score": 1000, "pattern": ["ring", "aimed_burst"], "rest": 50 },
     { "name": "turret_aft_left",   "cell": [1, 0], "at": [-64, 72],  "radius": 14, "health": 34, "score": 1000, "pattern": ["ring"], "rest": 70 },
     { "name": "turret_aft_right",  "cell": [0, 0], "at": [64, 72],   "radius": 14, "health": 34, "score": 1000, "pattern": ["aimed_burst"], "rest": 70 },
-    { "name": "bay_left",  "cell": [2, 0], "open": [3, 0], "at": [-36, 16], "radius": 16, "health": 50, "score": 1500, "every": 280,
+    { "name": "bay_left",  "cell": [2, 0], "open": [3, 0], "drop": "power", "at": [-36, 16], "radius": 16, "health": 50, "score": 1500, "every": 280,
       "launch": { "path": "bay_left", "count": 4, "spacing": 12, "sprite": "red", "health": 1, "score": 60, "pattern": "aimed", "fire_at": 0.35, "speed": 2.8 } },
-    { "name": "bay_right", "cell": [2, 0], "open": [3, 0], "at": [36, 16], "radius": 16, "health": 50, "score": 1500, "every": 280,
+    { "name": "bay_right", "cell": [2, 0], "open": [3, 0], "drop": "power", "at": [36, 16], "radius": 16, "health": 50, "score": 1500, "every": 280,
       "launch": { "path": "bay_right", "count": 4, "spacing": 12, "sprite": "green", "health": 1, "score": 60, "pattern": "aimed", "fire_at": 0.35, "speed": 2.8 } },
     { "name": "core", "cell": [0, 1], "open": [1, 1], "at": [0, -104], "radius": 18, "health": 130, "score": 5000,
       "pattern": ["spiral", "fan_storm"], "rest": 45, "armored_until": 1, "core": true }

@@ -64,18 +64,14 @@ void on_bomb(TickContext& ctx, Span<const Bombed> blasts) {
         const u32 kinds[] = {g_air_kind, g_ground_kind};
         for (u32 kind : kinds) {
             bool air = kind == g_air_kind;
-            Span<Health> hp = ctx.write<Health>(air ? "example_arcfire.air.Health" : "example_arcfire.ground.Health");
+            Span<const Health> hp = ctx.read<Health>(air ? "example_arcfire.air.Health" : "example_arcfire.ground.Health");
             Span<const Transform2> xf = ctx.read<Transform2>(air ? "example_arcfire.air.Transform2" : "example_arcfire.ground.Transform2");
-            Span<const Mover> mv = ctx.read<Mover>("example_arcfire.air.Mover");
             const Table* t = engine_table(*ctx.engine, kind); // liveness and handles; the columns are declared
             for (u32 i = 0; i < t->rows(); ++i) {
                 if (!t->is_alive(i) || hp[i].hp <= 0 || !in_field(xf[i].position, 0.0f)) continue;
-                hp[i].hp -= kBlastDamage;
-                hp[i].flash = 4;
                 fx_sparks(ctx, g, xf[i].position, 3, kSparkBlast, 3.0f);
-                if (hp[i].hp > 0) continue;
-                ctx.destroy(t->handle_at(i));
-                ctx.emit(Kill{xf[i].position, hp[i].score, 0, air ? mv[i].formation : Handle{}});
+                bool killed = false;
+                hurt(ctx, g, t->handle_at(i), kBlastDamage, xf[i].position, &killed); // a kill pays and drops as a shot's does
             }
         }
         Span<Health> php = ctx.write<Health>("example_arcfire.part.Health");

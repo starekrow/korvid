@@ -37,7 +37,7 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
     Engine& e = *ctx.engine;
     const u16 ship = hk(e, g_ship_kind), ring = hk(e, g_ring_kind), shell = hk(e, g_shell_kind), shot = hk(e, g_shot_kind),
               air = hk(e, g_air_kind), ground = hk(e, g_ground_kind), plain = hk(e, g_bullet_kind), active = hk(e, g_active_kind),
-              item = hk(e, g_item_kind), boss = hk(e, g_boss_kind), part = hk(e, g_part_kind);
+              item = hk(e, g_item_kind), boss = hk(e, g_boss_kind), part = hk(e, g_part_kind), option = hk(e, g_option_kind);
     for (const OverlapBegin& o : overlaps) {
         for (u32 swap = 0; swap < 2; ++swap) {
             Handle a = swap ? o.b : o.a, b = swap ? o.a : o.b;
@@ -47,7 +47,7 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
             else if (bullet_a && kb == ship) ctx.emit(BulletHit{a});
             else if ((ka == air || ka == boss) && kb == ship) ctx.emit(Rammed{a});
             else if (bullet_a && kb == ring) ctx.emit(Graze{a});
-            else if (bullet_a && kb == shell) ctx.emit(ShellHit{a});
+            else if (bullet_a && (kb == shell || kb == option)) ctx.emit(ShellHit{a}); // an option eats bullets as the shell does
             else if (ka == item && kb == ring) ctx.emit(Pickup{a});
         }
     }
@@ -80,6 +80,7 @@ bool hurt(TickContext& ctx, Game& g, Handle target, i32 damage, point2 at, bool*
         if (hp.hp <= 0) {
             ctx.destroy(target);
             ctx.emit(Kill{pos, hp.score, 0, is_air ? ctx.read<Mover>("example_arcfire.air.Mover")[target.index()].formation : Handle{}});
+            if (!is_air) drop_item(ctx, g, ctx.read<Ground>("example_arcfire.ground.Ground")[target.index()].drop, pos); // a ground item carrier
             *killed = true;
         }
         return true;

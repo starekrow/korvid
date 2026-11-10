@@ -51,6 +51,20 @@ void sort_marks(Mark* m, u32 n) {
 
 } // namespace
 
+bool drop_named(const char* name, u32* out) {
+    static const char* const k_weapons[] = {"spread", "beam", "storm", "lance"};
+    *out = DropNone;
+    if (!name || !name[0]) return true;
+    for (u32 w = 0; w < WeaponCount; ++w)
+        if (!strcmp(name, k_weapons[w])) { *out = DropWeapon + w; return true; }
+    if (!strcmp(name, "weapon")) *out = DropWeapon;
+    else if (!strcmp(name, "power")) *out = DropPower;
+    else if (!strcmp(name, "option")) *out = DropOption;
+    else if (!strcmp(name, "egg")) *out = DropEgg;
+    else return false;
+    return true;
+}
+
 bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize why_cap) {
     MemScope scope;
     JsonDoc doc;
@@ -119,13 +133,7 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             d.speed = (f32)json_number(json_get(doc, *f, "speed"), 3.0);
             // An item carrier: what its last member shot down leaves.
             const char* drop = json_string(json_get(doc, *f, "drop"), "");
-            static const char* const k_drops[] = {"spread", "beam", "storm", "lance"};
-            d.drop = DropNone;
-            for (u32 w = 0; w < WeaponCount; ++w)
-                if (!strcmp(drop, k_drops[w])) d.drop = DropWeapon + w;
-            if (!strcmp(drop, "weapon")) d.drop = DropWeapon;
-            else if (!strcmp(drop, "power")) d.drop = DropPower;
-            else if (drop[0] && d.drop == DropNone) { snprintf(why, why_cap, "no drop \"%s\" (weapon, spread, beam, storm, lance, power)", drop); return false; }
+            if (!drop_named(drop, &d.drop)) { snprintf(why, why_cap, "no drop \"%s\" (weapon, spread, beam, storm, lance, power, option, egg)", drop); return false; }
             mk.kind = MarkKind::Formation;
             mk.index = out.formation_count;
             out.formations[out.formation_count++] = d;

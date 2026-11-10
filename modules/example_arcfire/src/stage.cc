@@ -132,6 +132,7 @@ void boot(TickContext& ctx) {
     g.world = world->spawn(d, s, run, EggState{}, Chance{r.state, r.inc});
     planes_spawn(e, g, d);
     g.ship = ship_spawn(e, g, d);
+    for (u32 i = 0; i < d.options && i < kMaxOptions; ++i) option_add(ctx, g);
     if (g.bench[0]) bench_spawn(ctx, g, d);
     music(ctx, g, false);
     engine_hold(e, HoldLoading, false);

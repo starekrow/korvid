@@ -177,20 +177,26 @@ void beams(TickContext& ctx) {
     Span<Beam> bb = ctx.write<Beam>("example_arcfire.beam.Beam");
     Span<const Parent> bp = ctx.read<Parent>("example_arcfire.beam.Parent");
     const Table* ships = engine_table(e, g_ship_kind);
+    const Table* options = engine_table(e, g_option_kind);
+    Span<const Parent> op = ctx.read<Parent>("example_arcfire.option.Parent");
+    Span<const Transform2> ox = ctx.read<Transform2>("example_arcfire.option.Transform2");
     MemScope scope;
     Array<CollisionHit> hits = array_in<CollisionHit>(mem_scratch());
     for (u32 i = 0; i < bt->rows(); ++i) {
         if (!bt->is_alive(i)) continue;
         Beam& b = bb[i];
-        const Ship* s = ships->get<Ship>(bp[i].parent);
-        const Transform2* from = ships->get<Transform2>(bp[i].parent);
+        // Its owner: the ship, or an option of the ship's (which fires two levels lower).
+        Handle owner = bp[i].parent;
+        bool on_option = options->valid(owner);
+        const Ship* s = ships->get<Ship>(on_option ? op[owner.index()].parent : owner);
+        const Transform2* from = on_option ? &ox[owner.index()] : ships->get<Transform2>(owner);
         if (!s || !from || !s->live || !s->firing || s->weapon != WeaponBeam) {
             bs[i].size = vec2{0, 0};
             b.length = 0.0f;
             b.timer = 0;
             continue;
         }
-        const BeamLevel& l = k_beam[level(s->power)];
+        const BeamLevel& l = k_beam[level(on_option ? option_power(s->power) : s->power)];
         f32 width = l.width * (s->focus ? kBeamFocusWidth : 1.0f);
         point2 o = from->position + vec2{0.0f, kMuzzleUp};
         hits.clear();

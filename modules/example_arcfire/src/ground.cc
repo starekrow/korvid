@@ -83,6 +83,7 @@ bool ground_map_ready(TickContext& ctx, Game& g, char* why, usize why_cap) {
             gd.health = (i32)prop_num(*m, o, "health", 12);
             gd.score = (i32)prop_num(*m, o, "score", 500);
             gd.route = (f32)prop_num(*m, o, "route", 0);
+            if (!drop_named(prop_str(*m, o, "drop", ""), &gd.drop)) { snprintf(why, why_cap, "the map's %s drops something unknown", o.name); return false; }
             snprintf(gd.pattern, sizeof gd.pattern, "%s", prop_str(*m, o, "pattern", "ring"));
             gd.entry = KV_BML_NONE;
             if (gd.kind == GroundBunker && !bunker_formation(st, *m, o, &gd.launch, why, why_cap)) return false;
@@ -107,7 +108,7 @@ void ground_spawn(TickContext& ctx, const Game& g, const Dials& d, const GroundD
     Health h{bench ? 1 << 30 : (i32)ceilf((f32)gd.health * d.enemy_health), 0, gd.score, (u32)look};
     Emitter em{gd.entry, 0.0f, EmitIdle, 0};
     Ground gr{bench ? 0.0f : 1.0f, bench ? 1u : 0u, (u32)gd.kind, gd.launch, gd.kind == GroundBunker ? kBunkerFirst : 0u,
-              gd.kind == GroundTank ? kTankSpeed : 0.0f, at.x, gd.route * 0.5f};
+              gd.kind == GroundTank ? kTankSpeed : 0.0f, at.x, gd.route * 0.5f, gd.drop, 0};
     Collider2 col = collider_circle(14.0f, L_GROUND, bench ? 0u : L_SHOT); // nothing hits the bench
     ctx.spawn_later(g_ground_kind, transform2_at(at), enemy_sprite(g, look), col, h, em, gr, Runner{});
 }

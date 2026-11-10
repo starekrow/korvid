@@ -25,8 +25,8 @@ What is made here, and from what:
   made/clouds_high.png 512 x 512 seamless: thin wisps, half transparent, for the high plane
   made/beam.png      16 x 64: the Beam's strip, a white core in cyan with a deep blue edge
                      and pulses along it, repeating up its length
-  made/items.png     80 x 16: the items' badges: Spread, Beam, Storm and Lance (their letters
-                     on their colors), then power
+  made/items.png     96 x 16: the items' badges: Spread, Beam, Storm and Lance (their letters
+                     on their colors), then power, then option
 """
 import hashlib
 import math
@@ -249,8 +249,10 @@ LETTERS = {
     "T": ["11111", "00100", "00100", "00100", "00100"],
     "L": ["10000", "10000", "10000", "10000", "11111"],
     "P": ["11110", "10001", "11110", "10000", "10000"],
+    "O": ["01110", "10001", "10001", "10001", "01110"],
 }
-BADGES = [("S", (252, 104, 59)), ("B", (44, 197, 246)), ("T", (140, 200, 60)), ("L", (255, 189, 32)), ("P", (200, 60, 90))]
+BADGES = [("S", (252, 104, 59)), ("B", (44, 197, 246)), ("T", (140, 200, 60)), ("L", (255, 189, 32)), ("P", (200, 60, 90)),
+          ("O", (70, 110, 230))]
 
 
 def items():

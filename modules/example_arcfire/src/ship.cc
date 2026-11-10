@@ -61,7 +61,13 @@ void control(TickContext& ctx) {
 
     s.firing = action_down(a, g.act_shot) ? 1 : 0;
     if (!s.firing || s.cooldown) return;
-    s.cooldown = weapon_fire(g, *ctx.write_kind(g_shot_kind), p, s.weapon, s.power, focus);
+    Table& shots_table = *ctx.write_kind(g_shot_kind);
+    s.cooldown = weapon_fire(g, shots_table, p, s.weapon, s.power, focus);
+    // The options fire with it, two levels lower, from where they were as the tick began.
+    const Table* options = engine_table(*ctx.engine, g_option_kind);
+    Span<const Transform2> ox = ctx.read<Transform2>("example_arcfire.option.Transform2");
+    for (u32 k = 0; k < options->rows(); ++k)
+        if (options->is_alive(k)) weapon_fire(g, shots_table, ox[k].position, s.weapon, option_power(s.power), focus);
     sfx(ctx, g, SFX_SHOT);
     ++s.shots;
 }

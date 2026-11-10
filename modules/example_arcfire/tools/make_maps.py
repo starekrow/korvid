@@ -51,13 +51,14 @@ FLAGS = [gid(0, 8), gid(6, 8)]
 PAD, CRATE = gid(3, 9), gid(1, 9)
 
 # The ground enemies of Shoreline: (distance, x, kind, properties), by the map's distance
+# (a `drop` makes one an item carrier: what it leaves when it dies)
 # (the stage's, plus whatever scrolled by at a boss). The opening has the turrets slices 1
 # and 2 had as stage marks, two tanks and a bunker; then the islands before the carrier;
 # then the second half, past the longest carrier fight, denser; then open water for the
 # battleship.
 ENEMIES = [
     (800, -150, "turret", {"pattern": "ring", "health": 14, "score": 500}),
-    (1250, -60, "tank", {"pattern": "aimed_burst", "health": 10, "score": 400, "route": 180}),
+    (1250, -60, "tank", {"drop": "power", "pattern": "aimed_burst", "health": 10, "score": 400, "route": 180}),
     (1750, -130, "bunker", {"pattern": "aimed", "health": 24, "score": 800, "path": "bunker_rise", "count": 4, "launch": "aimed"}),
     (2050, 60, "tank", {"pattern": "aimed", "health": 10, "score": 400, "route": 160}),
     (2400, 140, "turret", {"pattern": "spiral", "health": 16, "score": 600}),
@@ -65,17 +66,17 @@ ENEMIES = [
     # The islands.
     (4300, -140, "tank", {"pattern": "aimed_burst", "health": 12, "score": 400, "route": 200}),
     (4700, 120, "turret", {"pattern": "ring", "health": 16, "score": 600}),
-    (5100, -60, "bunker", {"pattern": "aimed", "health": 24, "score": 800, "path": "bunker_rise", "count": 4, "launch": "aimed"}),
+    (5100, -60, "bunker", {"drop": "option", "pattern": "aimed", "health": 24, "score": 800, "path": "bunker_rise", "count": 4, "launch": "aimed"}),
     (5500, 150, "tank", {"pattern": "aimed", "health": 12, "score": 400, "route": 160}),
     (5900, -150, "turret", {"pattern": "spiral", "health": 18, "score": 700}),
     (6300, 40, "bunker", {"pattern": "aimed_burst", "health": 24, "score": 800, "path": "bunker_rise", "count": 5, "launch": "aimed"}),
     (6700, -100, "tank", {"pattern": "aimed_burst", "health": 12, "score": 400, "route": 220}),
-    (7100, 160, "turret", {"pattern": "cross", "health": 20, "score": 800}),
+    (7100, 160, "turret", {"drop": "power", "pattern": "cross", "health": 20, "score": 800}),
     (7500, -40, "turret", {"pattern": "ring", "health": 16, "score": 600}),
     # The second half.
     (12400, -150, "turret", {"pattern": "spiral", "health": 20, "score": 800}),
     (12700, 150, "turret", {"pattern": "spiral", "health": 20, "score": 800}),
-    (13100, 0, "bunker", {"pattern": "aimed_burst", "health": 30, "score": 1000, "path": "bunker_rise", "count": 6, "launch": "aimed_burst"}),
+    (13100, 0, "bunker", {"drop": "option", "pattern": "aimed_burst", "health": 30, "score": 1000, "path": "bunker_rise", "count": 6, "launch": "aimed_burst"}),
     (13500, -120, "tank", {"pattern": "needles", "health": 14, "score": 500, "route": 220}),
     (13900, 120, "tank", {"pattern": "aimed_burst", "health": 14, "score": 500, "route": 200}),
     (14300, -160, "turret", {"pattern": "cross", "health": 22, "score": 900}),
@@ -83,7 +84,7 @@ ENEMIES = [
     (15000, 0, "bunker", {"pattern": "aimed", "health": 30, "score": 1000, "path": "bunker_rise", "count": 6, "launch": "aimed"}),
     (15400, -80, "tank", {"pattern": "aimed", "health": 14, "score": 500, "route": 240}),
     (15800, 100, "turret", {"pattern": "rain", "health": 20, "score": 800}),
-    (16200, -140, "turret", {"pattern": "spiral", "health": 22, "score": 900}),
+    (16200, -140, "turret", {"drop": "egg", "pattern": "spiral", "health": 22, "score": 900}),
     (16500, 140, "bunker", {"pattern": "aimed_burst", "health": 30, "score": 1000, "path": "bunker_rise", "count": 6, "launch": "aimed"}),
     (17000, 0, "turret", {"pattern": "ring", "health": 24, "score": 1000}),
     (17400, -150, "tank", {"pattern": "aimed_burst", "health": 14, "score": 500, "route": 200}),

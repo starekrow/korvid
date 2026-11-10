@@ -170,6 +170,7 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     Run& r = run[0];
     EggState& es = es_row[0];
     ++r.deaths;
+    ctx.destroy_all(g_option_kind); // a death costs the options (their beams go with them, children)
     if (r.eggs > 0) {
         --r.eggs;
         es = EggState{};

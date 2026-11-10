@@ -73,6 +73,14 @@ void test_stage(kv::TestCtx& c) {
                 def.marks[3].kind == MarkKind::End);
     KV_CHECK(c, def.formations[0].count == 4 && def.formations[0].look == Look::Green && def.grounds[0].x == 12.0f);
     KV_CHECK(c, !strcmp(def.formations[0].pattern, "spiral") && !strcmp(def.grounds[0].pattern, "ring")); // ring: a ground row's default
+    KV_CHECK(c, def.formations[0].drop == DropNone);
+
+    // Item carriers: a formation's drop by name; one the game does not know says so.
+    KV_CHECK(c, parses(R"({"paths": {"p": [[0, 0], [0, 10]]}, "marks": [{"at": 50, "end": true},
+        {"at": 10, "formation": {"path": "p", "drop": "lance"}}, {"at": 20, "formation": {"path": "p", "drop": "egg"}}]})", def, why, sizeof why));
+    KV_CHECK(c, def.formations[0].drop == (u32)DropWeapon + (u32)WeaponLance && def.formations[1].drop == DropEgg);
+    KV_CHECK(c, !parses(R"({"paths": {"p": [[0, 0], [0, 10]]}, "marks": [{"at": 50, "end": true},
+        {"at": 10, "formation": {"path": "p", "drop": "cake"}}]})", def, why, sizeof why) && strstr(why, "no drop \"cake\""));
 
     // What is not a stage.
     KV_CHECK(c, !parses(R"({"marks": [{"at": 1, "formation": {"path": "nowhere"}}, {"at": 2, "end": true}]})", def, why, sizeof why) &&
@@ -111,6 +119,7 @@ void test_boss(kv::TestCtx& c) {
         KV_CHECK(c, b.phases[0].ends == 0xFu && b.phases[1].ends == 0x40u && b.parts[6].core && b.parts[6].armored_until == 1);
         KV_CHECK(c, b.total == 4 * 34 + 2 * 50 + 130 && b.parts[6].pattern_count == 2 && !strcmp(b.parts[6].patterns[1], "fan_storm"));
         KV_CHECK(c, !strcmp(b.stomp, "carrier_stomp") && b.stomp_ticks == 300 && b.dive == 260.0f);
+        KV_CHECK(c, b.parts[4].drop == DropPower && b.parts[5].drop == DropPower && b.parts[6].drop == DropNone); // the bays carry power
         free(text);
     }
     // The battleship: three phases, the bridge its core, opening in the last.

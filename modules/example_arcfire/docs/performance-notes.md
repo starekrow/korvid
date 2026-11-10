@@ -317,3 +317,9 @@ rank=200` (16,212 bullets on average, 19,817 at peak) the `beams` system costs 0
 tick at the median, 0.14 at p99, 0.89 at worst; at rank 56 with the beam clearing the field
 (6,039 bullets at peak) 0.012, 0.042, 0.11. About 3 ns a collider passed over: at 50,000
 bullets, 0.15 ms. Not worth the broadphase's groups yet.
+
+**M2. Three beams** (the same bench with `--dial options=2`: the ship's beam and one from
+each option, each its own cast; 16,062 bullets on average, 19,789 at peak). `beams` costs
+0.115 ms a tick at the median, 0.34 at p99, 0.43 at worst: two and a half times the one
+beam, as three walks of the colliders should be. `options` itself, two rows eased toward
+their places, 0.004.

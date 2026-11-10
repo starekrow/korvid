@@ -66,6 +66,11 @@ struct Shot     { i32 damage; u32 spent; u32 kind; f32 turn; };
 // The beam: a child of what fires it, stretched up the field to the first body it meets,
 // which it damages every few ticks (`timer`). `length` as cut this tick; `scroll` the uv's.
 struct Beam     { u32 timer; f32 length; f32 scroll; u32 pad; };
+// An option (options.cc): a child of the ship that orbits it (holds beside it, focused),
+// fires the weapon two levels lower and eats the bullets it meets. `index` 0 or 1.
+struct Option   { u32 index; u32 pad; };
+constexpr u32 kMaxOptions = 2;
+constexpr i32 kMaxEggs = 5;
 // What can be shot. `flash` counts the ticks of the white flash left; `score` is paid at the kill.
 struct Health   { i32 hp; u32 flash; i32 score; u32 look; };
 // A formation member's path, measured, how far along it is, and its formation.
@@ -76,10 +81,14 @@ struct Mover    { Path path; f32 speed; f32 s; Handle formation; };
 struct Formation { u32 count, killed, gone, drop; };
 // Something to pick up: a score chip (what a cancelled bullet becomes), a bomb, a weapon
 // (it shows a type, which cycles while it falls: `value` the type it started at), power.
-enum ItemKind : u32 { ItemChip, ItemBomb, ItemWeapon, ItemPower };
+enum ItemKind : u32 { ItemChip, ItemBomb, ItemWeapon, ItemPower, ItemOption, ItemEgg };
 struct Item     { u32 kind; i32 value; u32 life; u32 pad; };
-// What an item carrier leaves: none, a weapon item starting at a type (1 + the type), power.
-enum Drop : u32 { DropNone, DropWeapon, DropWeaponLast = DropWeapon + WeaponCount - 1, DropPower };
+// What an item carrier leaves: none, a weapon item starting at a type (1 + the type), power,
+// an option, an egg.
+enum Drop : u32 { DropNone, DropWeapon, DropWeaponLast = DropWeapon + (u32)WeaponCount - 1, DropPower, DropOption, DropEgg };
+// A Drop by its name in a stage, a map or a boss file ("weapon", a weapon's name, "power",
+// "option", "egg"; "" none). False for a name it does not know.
+bool drop_named(const char* name, u32* out);
 // What an enemy fires: a pattern of the library (patterns.cc), started when an air row's
 // mover passes `at` (a fraction of its path) or while the ship is above a ground row,
 // and run by the row's Runner. `state`: EmitIdle, EmitRunning, EmitDone; `timer`: ticks
@@ -93,7 +102,7 @@ using Runner = BmlRunner;
 // forth along its road (`vx`, within `range` of `home`); a bunker launches its formation
 // (`launch`, a FormationDef) every so often (`timer`). The bench's fires whatever the ship does.
 enum GroundKind : u32 { GroundTurret, GroundTank, GroundBunker };
-struct Ground   { f32 rate; u32 bench; u32 kind; u32 launch; u32 timer; f32 vx; f32 home; f32 range; };
+struct Ground   { f32 rate; u32 bench; u32 kind; u32 launch; u32 timer; f32 vx; f32 home; f32 range; u32 drop; u32 pad; };
 struct Bullet   { u32 life; u32 grazed; Handle owner; };
 // A cosmetic piece of debris or a spark: it drifts, spins, slows, falls and fades over its life.
 struct Particle { u32 life, max_life; f32 spin, drag, alpha, fall; };
@@ -123,6 +132,7 @@ struct Dials {
     u32 loops;             // the stage loops at its end instead of ending
     u32 scroll_rows;       // move every plane and map tile each tick (slice 1's way), for measuring the layer scroll
     u32 weapon, power;     // what the ship starts with (a WeaponType, 1..5): Spread at one but to try or measure another
+    u32 options;           // and how many options (0..2)
 };
 struct Stage {
     f32 distance;          // the stage's clock: units scrolled since the stage (or this loop) began
@@ -183,7 +193,7 @@ struct StageEnd   { u32 loops; u32 pad; };
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
     g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind, g_shadow_kind, g_boss_kind, g_part_kind,
-    g_boom_kind, g_beam_kind;
+    g_boom_kind, g_beam_kind, g_option_kind;
 extern u32 g_part_down; // the trigger on a part's health
 // The two bullet kinds: plain bullets, and bullets that run a program (needles, seeds).
 inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
@@ -196,7 +206,7 @@ constexpr u32 kPatternName = 32;
 struct FormationDef { u32 path; u32 count; u32 spacing; Look look; i32 health; i32 score; f32 fire_at; f32 speed; char pattern[kPatternName]; u32 entry; u32 drop; };
 // A ground row: from a stage mark, or from the map's enemies layer (then `at` is the stage
 // distance at which it comes into view and `kind` what it is).
-struct GroundDef    { f32 x; i32 health; i32 score; char pattern[kPatternName]; u32 entry; f32 at; GroundKind kind; f32 route; u32 launch; };
+struct GroundDef    { f32 x; i32 health; i32 score; char pattern[kPatternName]; u32 entry; f32 at; GroundKind kind; f32 route; u32 launch; u32 drop; };
 struct Mark         { f32 at; MarkKind kind; u32 index; f32 value, over; };
 struct StageDef {
     char         name[32] = "";
@@ -244,6 +254,7 @@ struct PartDef {
     bool   core;
     u32    launch;         // a formation it launches (the stage's index), or kNoFormation
     u32    every;          // ticks between launches
+    u32    drop;           // what it leaves when it goes down (a Drop)
 };
 struct PhaseDef { char name[24]; u32 ends; f32 sway, sway_rate; }; // ends: the parts (bits) whose deaths end it
 struct BossDef {
@@ -398,6 +409,10 @@ u32    weapon_fire(Game& g, Table& shots, point2 at, u32 weapon, u32 power, bool
 const char* weapon_name(u32 weapon);
 // The beam that rides on `owner` (the ship, an option).
 Handle beam_spawn(Engine& e, Game& g, Handle owner);
+// Options (options.cc): one more, if the ship has fewer than two (false if it has two).
+bool   option_add(TickContext& ctx, Game& g);
+// An option's power: two below the ship's, at least one.
+inline u32 option_power(u32 power) { return power > 3 ? power - 2 : 1; }
 // The innermost Spread shot at this power: its muzzle's x and its angle (radians,
 // clockwise from up), for the pilots' aim.
 void   spread_inner(u32 power, bool focus, f32* muzzle_x, f32* angle);

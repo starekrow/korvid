@@ -364,6 +364,7 @@ void on_part_down(TickContext& ctx, Span<const StateEdge> edges) {
             b->down |= 1u << p.index;
             ctx.destroy(pt->handle_at(i));
             ctx.emit(Kill{at, def.parts[p.index].score, 0, Handle{}});
+            drop_item(ctx, g, def.parts[p.index].drop, at);
             fx_sparks(ctx, g, at, sparks * 2, kSparkPart, 5.0f);
             fx_boom(ctx, g, at, 56.0f);
         }
