@@ -1,8 +1,9 @@
 // example_arcfire: the egg. A death is the game's set piece, not a setback: time slows to
 // a quarter, the ship breaks into its four quarters, the bullets near it cancel into
-// sparks, an egg drops and rests where it died and blooms into the new ship as time comes
-// back, and a shell stays around the new ship for two seconds eating bullets. Eggs are
-// lives; a death with none left restarts the stage behind a cover instead.
+// sparks, and the egg drops: a small spherical machine that comes to rest where the ship
+// died, builds the new ship around itself as time comes back, and splits along its seam,
+// its halves falling away. A shell stays around the new ship for two seconds eating
+// bullets. Eggs are lives; a death with none left restarts the stage behind a cover.
 //
 // Every number below is a sim tick from the death. The egg system runs on the slowed
 // clock like everything else (slow time is not a pause), and sets the engine's time scale
@@ -17,7 +18,8 @@ namespace {
 
 constexpr u32 kSlowIn = 6;        // ticks to slow to a quarter
 constexpr u32 kEggAt = 10;        // the egg drops
-constexpr u32 kRestAt = 40;       // it rests and blooms
+constexpr u32 kRestAt = 40;       // it rests and builds
+constexpr u32 kSplitAt = 54;      // it opens and falls away
 constexpr u32 kLiveAt = 60;       // the new ship is live, in its shell
 constexpr u32 kShellTicks = 120, kShellFade = 20;
 constexpr f32 kSlow = 0.25f;
@@ -107,30 +109,38 @@ void egg(TickContext& ctx) {
         r.state = chance[0].state; r.inc = chance[0].inc;
         f32 drift = r.range(-0.3f, 0.3f); // a little, from the sim's stream
         chance[0].state = r.state;
-        Sprite s = sprite_of(g, TEX_EGG, rect2_unit(), vec2{32, 32}, Z_SHIP);
+        Sprite s = sprite_of(g, TEX_EGG, rect2_unit(), vec2{32, 32}, Z_SHIP + 1); // over the ship it builds
         eggs->spawn(transform2_at(es.at + vec2{0.0f, 12.0f}), s, EggBody{-1.0f, drift});
     }
     Handle egg_row = eggs->live() ? eggs->handle_at(0) : Handle{};
     Transform2* et = eggs->get<Transform2>(egg_row);
-    if (et && t > kEggAt && t < kRestAt) { // it falls a little and settles
+    if (Sprite* pod = eggs->get<Sprite>(egg_row)) { // its core pulses while it works
+        f32 pulse = 0.8f + 0.2f * (f32)((t / 4) % 2);
+        pod->tint = color{pulse, pulse, pulse, 1.0f};
+    }
+    if (et && t > kEggAt && t < kRestAt) { // it falls a little, rocking, and settles
         const EggBody* body = eggs->get<EggBody>(egg_row);
         et->position += vec2{body->drift, body->vy};
         et->rotation = 0.15f * (f32)((t / 6) % 2 ? 1 : -1) * (f32)(kRestAt - t) / (f32)(kRestAt - kEggAt);
     }
-    if (et && t == kRestAt) {
-        // It blooms: the shell's halves fly apart and the ship is where the egg is.
+    if (et && t == kRestAt) { // the ship is built where it rests
         es.at = et->position;
         et->rotation = 0.0f;
-        fx_piece(ctx, g, et->position + vec2{-6, 0}, TEX_EGG, rect2{0, 0, 0.5f, 1}, vec2{16, 32}, vec2{-1.6f, 0.8f}, -0.08f, 50, Z_SHIP + 1);
-        fx_piece(ctx, g, et->position + vec2{6, 0}, TEX_EGG, rect2{0.5f, 0, 0.5f, 1}, vec2{16, 32}, vec2{1.6f, 0.8f}, 0.08f, 50, Z_SHIP + 1);
         *xf = transform2_at(et->position);
         *ships->prev<Transform2>(g.ship) = *xf; // a teleport: no sweep from where it died
+    }
+    if (et && t >= kRestAt && t < kSplitAt && t % 2 == 0) // building: sparks from the core
+        fx_sparks(ctx, g, et->position, 2, color{0.55f, 0.95f, 1.0f, 1.0f}, 2.5f);
+    if (et && t == kSplitAt) {
+        // It opens along its seam and its halves fall away, turning.
+        fx_piece(ctx, g, et->position + vec2{0, 8}, TEX_EGG, rect2{0, 0, 1, 0.5f}, vec2{32, 16}, vec2{-0.9f, 1.4f}, -0.06f, 70, Z_SHIP + 1, 0.12f);
+        fx_piece(ctx, g, et->position + vec2{0, -8}, TEX_EGG, rect2{0, 0.5f, 1, 0.5f}, vec2{32, 16}, vec2{0.9f, 0.4f}, 0.07f, 70, Z_SHIP + 1, 0.12f);
+        eggs->destroy_all();
     }
     if (t >= kRestAt && t < kLiveAt) {
         f32 k = (f32)(t - kRestAt + 1) / (f32)(kLiveAt - kRestAt);
         sprite->tint.a = k;
-        xf->position.y = es.at.y + 20.0f * k;
-        if (Sprite* es_sprite = eggs->get<Sprite>(egg_row)) { es_sprite->tint.a = 1.0f - k; es_sprite->size = vec2{32.0f + 48.0f * k, 32.0f + 48.0f * k}; }
+        xf->position.y = es.at.y + 20.0f * (t < kSplitAt ? 0.0f : (f32)(t - kSplitAt + 1) / (f32)(kLiveAt - kSplitAt));
     }
     if (t == kLiveAt) {
         eggs->destroy_all();

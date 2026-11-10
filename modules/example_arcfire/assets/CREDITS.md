@@ -83,7 +83,7 @@ Drawn by `tools/make_art.py` on 2026-11-09, Korvid's, under the repository's lic
 | `made/ring.png` | the graze ring: a one-pixel white circle |
 | `made/soft.png` | the shell and glows: a white disc fading to its edge |
 | `made/spark.png` | sparks: a white square |
-| `made/egg.png` | the egg, drawn pixel by pixel in the script |
+| `made/egg.png` | the egg: a spherical machine (a shaded steel sphere, its seam and core), drawn by the script |
 | `made/eggs.png` | the HUD's pips: the egg, spent (dimmed) and in hand |
 
 The stage (`stages/shoreline.stage.json`) and the UI document (`ui/arcfire.ui.json`) are

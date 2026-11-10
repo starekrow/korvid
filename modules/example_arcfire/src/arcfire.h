@@ -53,8 +53,8 @@ struct Mover    { Path path; f32 speed; f32 s; };
 struct Emitter  { f32 at; u32 count; u32 cadence; u32 timer; u32 fired; f32 speed; };
 struct Ground   { f32 rate; u32 kind; };          // rides the scroll at `rate` times its speed
 struct Bullet   { u32 life; u32 grazed; Handle owner; };
-// A cosmetic piece of debris or a spark: it drifts, spins, slows and fades over its life.
-struct Particle { u32 life, max_life; f32 spin, drag, alpha; u32 pad; };
+// A cosmetic piece of debris or a spark: it drifts, spins, slows, falls and fades over its life.
+struct Particle { u32 life, max_life; f32 spin, drag, alpha, fall; };
 struct EggBody  { f32 vy; f32 drift; };           // the egg as it falls
 
 // The world row's parts.
@@ -203,7 +203,7 @@ Collider2 ring_collider();
 // Effects (fx.cc): a burst of sparks, debris pieces; called from handlers and systems
 // that spawn by command.
 void   fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 speed = 3.0f);
-void   fx_piece(TickContext& ctx, Game& g, point2 at, Tex tex, rect2 uv, vec2 size, vec2 v, f32 spin, u32 life, i32 layer);
+void   fx_piece(TickContext& ctx, Game& g, point2 at, Tex tex, rect2 uv, vec2 size, vec2 v, f32 spin, u32 life, i32 layer, f32 fall = 0.0f);
 
 // Bullets (bullets.cc): aimed shots from a point, `count` in a fan centered on the ship.
 u32    bullets_fire_aimed(Table& bullets, const Game& g, const Dials& d, point2 from, point2 target, u32 count, f32 speed, Handle owner);

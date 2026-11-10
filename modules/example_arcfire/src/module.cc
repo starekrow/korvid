@@ -69,7 +69,7 @@ constinit const FieldDesc k_mover_fields[] = {
 constinit const FieldDesc k_emitter_fields[]  = {KV_FIELDS(Emitter, at, count, cadence, timer, fired, speed)};
 constinit const FieldDesc k_ground_fields[]   = {KV_FIELDS(Ground, rate, kind)};
 constinit const FieldDesc k_bullet_fields[]   = {KV_FIELDS(Bullet, life, grazed, owner)};
-constinit const FieldDesc k_particle_fields[] = {KV_FIELDS(Particle, life, max_life, spin, drag, alpha, pad)};
+constinit const FieldDesc k_particle_fields[] = {KV_FIELDS(Particle, life, max_life, spin, drag, alpha, fall)};
 constinit const FieldDesc k_eggbody_fields[]  = {KV_FIELDS(EggBody, vy, drift)};
 constinit const FieldDesc k_dials_fields[]    = {KV_FIELDS(Dials, position, bullet_density, bullet_speed, formation_count, formation_spacing, particles,
                                                            plane_density, enemy_health, bot, invulnerable, loops)};

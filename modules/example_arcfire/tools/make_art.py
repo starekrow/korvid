@@ -16,7 +16,7 @@ What is made here, and from what:
   made/ring.png      48 x 48 white ring, 1 px: the graze ring
   made/soft.png      64 x 64 white disc fading to its edge: the shell, glows
   made/spark.png     4 x 4 white: sparks
-  made/egg.png       16 x 16 the egg, drawn below
+  made/egg.png       16 x 16 the egg: a spherical machine that builds the new ship
   made/eggs.png      32 x 16 the HUD's pips: an egg spent (dim), an egg in hand
 """
 import hashlib
@@ -95,34 +95,42 @@ def ring(size):
     return im
 
 
-EGG = [
-    "......aaaa......",
-    ".....abbbba.....",
-    "....abbbbbba....",
-    "...abbcbbbbba...",
-    "...abccbbbbba...",
-    "..abbcbbbbbbba..",
-    "..abbbbbbbbbba..",
-    "..abbbbbbbbbba..",
-    "..abbbbbbbbdba..",
-    "..abbbbbbbbdba..",
-    "..abbbbbbbddba..",
-    "...abbbbbddba...",
-    "...abddddddba...",
-    "....abbbbbba....",
-    ".....aaaaaa.....",
-    "................",
-]
-EGG_COLORS = {"a": (52, 60, 80, 255), "b": (250, 236, 190, 255), "c": (255, 255, 255, 255), "d": (226, 190, 120, 255)}
+# The egg is a machine, not a chicken's: a steel sphere, lit from the upper left, banded at
+# its seam (where it opens), with a cyan core in the seam that builds the ship. Drawn to
+# Kenney's palette: a dark outline, four steel tones, the core's two cyans.
+STEEL = [(46, 52, 72), (82, 92, 118), (130, 142, 170), (196, 206, 226)]
+OUTLINE = (24, 26, 38)
+SEAM = (34, 38, 54)
+CORE = [(60, 170, 220), (150, 240, 255), (235, 255, 255)]
 
 
 def egg():
     im = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
     px = im.load()
-    for y, row in enumerate(EGG):
-        for x, ch in enumerate(row):
-            if ch in EGG_COLORS:
-                px[x, y] = EGG_COLORS[ch]
+    c, r = 7.5, 7.0
+    light = (-0.5, -0.6, 0.62)
+    for y in range(16):
+        for x in range(16):
+            dx, dy = (x - c) / r, (y - c) / r
+            d2 = dx * dx + dy * dy
+            if d2 > 1.0:
+                continue
+            if d2 > 0.78:
+                px[x, y] = OUTLINE + (255,)
+                continue
+            nz = math.sqrt(1.0 - d2)
+            lit = max(0.0, dx * light[0] + dy * light[1] + nz * light[2])
+            tone = STEEL[min(3, int(lit * 4.2))]
+            if y in (7, 8) and abs(x - c) > 2.5:
+                tone = SEAM if y == 8 else STEEL[0]  # the seam: a groove under a dark lip
+            px[x, y] = tone + (255,)
+    # The core, in the seam: bright at its middle, cyan to its edge.
+    for x, y, k in [(6, 7, 1), (7, 7, 2), (8, 7, 2), (9, 7, 1), (6, 8, 0), (7, 8, 1), (8, 8, 1), (9, 8, 0)]:
+        px[x, y] = CORE[k] + (255,)
+    # Two rivets either side of the seam and a glint.
+    for x, y in [(3, 5), (12, 5), (3, 10), (12, 10)]:
+        px[x, y] = STEEL[0] + (255,)
+    px[5, 3] = (236, 242, 255, 255)
     return im
 
 

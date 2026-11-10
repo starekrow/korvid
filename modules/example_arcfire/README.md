@@ -5,7 +5,8 @@ A vertical bullet-hell shooter, and the engine's first stress test that is also 
 a 3:4 field between two side panels, three parallax planes scrolling under it, a ship that
 flies in eight directions at two speeds and fires Spread at its first level, formations of
 popcorn and two turrets from a stage script keyed to scroll distance, aimed bullets,
-kills, grazes, and the egg: a death in slow motion that hatches the next ship. Every count
+kills, grazes, and the egg: a death in slow motion, after which a small spherical machine
+builds the next ship. Every count
 is a dial, and the game can fly itself three ways. The art is CC0, from Kenney, Screaming
 Brain Studios, Master484 and GGBotNet (`assets/CREDITS.md`).
 
@@ -90,8 +91,8 @@ state.
   run are chained so a bullet that hits the hitbox takes back its own graze first.
 - **The egg** (`egg.cc`): a death slows time to a quarter (`engine_time_scale`, set each
   tick by the sequence), breaks the ship into its four quarters, cancels the bullets near
-  it, drops an egg that rests and blooms into the new ship as time comes back, and leaves
-  a shell around it for two seconds that eats bullets. Out of eggs, the stage starts over
+  it, drops the egg (a spherical machine) that rests, builds the new ship around itself as
+  time comes back and falls away in halves, and leaves a shell around it for two seconds that eats bullets. Out of eggs, the stage starts over
   behind a cover: everything it made is gone, the distance is 0, the score is what it was
   when the stage began, the eggs are 3 again and the restart is counted.
 - **The HUD** (`hud.cc`) is `assets/ui/arcfire.ui.json`: the side panels, the score, the

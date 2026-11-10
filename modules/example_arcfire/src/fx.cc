@@ -7,9 +7,9 @@
 
 namespace kv::arcfire {
 
-void fx_piece(TickContext& ctx, Game& g, point2 at, Tex tex, rect2 uv, vec2 size, vec2 v, f32 spin, u32 life, i32 layer) {
+void fx_piece(TickContext& ctx, Game& g, point2 at, Tex tex, rect2 uv, vec2 size, vec2 v, f32 spin, u32 life, i32 layer, f32 fall) {
     Sprite s = sprite_of(g, tex, uv, size, layer);
-    ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{v}, Particle{life, life, spin, 0.97f, 1.0f, 0});
+    ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{v}, Particle{life, life, spin, 0.97f, 1.0f, fall});
 }
 
 void fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 speed) {
@@ -18,7 +18,7 @@ void fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 
         f32 v = speed * g.fx.range(0.3f, 1.0f);
         u32 life = 10 + g.fx.below(14);
         Sprite s = sprite_of(g, TEX_SPARK, rect2_unit(), vec2{5, 5}, Z_FX, tint, true);
-        ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{vec2{cosf(a) * v, sinf(a) * v}}, Particle{life, life, 0.0f, 0.9f, 1.0f, 0});
+        ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{vec2{cosf(a) * v, sinf(a) * v}}, Particle{life, life, 0.0f, 0.9f, 1.0f, 0.0f});
     }
 }
 
@@ -38,6 +38,7 @@ void particles(TickContext& ctx) {
                 t[i].position += v[i].v;
                 t[i].rotation += q.spin;
                 v[i].v *= q.drag;
+                v[i].v.y -= q.fall;
                 s[i].tint.a = q.alpha * (f32)q.life / (f32)(q.max_life ? q.max_life : 1);
             }
         });
