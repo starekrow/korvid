@@ -7,7 +7,8 @@
     "size": 16,
     "line": 24,
     "space": 16,
-    "shadow": "#00000090",
+    "shadow": "#000008c8",
+    "shadow_offset": 2,
     "colors": {
       "text": "#e8ecff",
       "gold": "#ffd060",

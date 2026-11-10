@@ -395,6 +395,7 @@ struct Game {
     Handle   options_screen, gameover_screen, results_screen, name_screen, scores_screen, card_screen;
     u32      gameover_ticks = 0, card_ticks = 0, screen_ticks = 0; // the count; the card's time; the demo's wait
     i64      gameover_score = 0;      // the score at the death the game-over screen is for
+    u64      name_opened = 0;         // tick_total when name entry opened
     RunResult result;
     i32      new_row = -1;            // the row the run just took in its table, lit
     u32      table_shown = 1, lit_table = 1; // the high-score table on screen; the one with the lit row

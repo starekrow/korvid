@@ -34,6 +34,7 @@ namespace {
 constexpr u32 kGameOverTicks = 600; // the count: ten seconds
 constexpr u32 kCardTicks = 150;     // the stage card's time up
 constexpr u32 kDemoWait = 90;       // the demo reads a screen this long before it goes on
+constexpr u64 kNameSettle = 20;     // ticks name entry takes no submit after it opens
 constexpr Position k_table_positions[kScoreTables] = {Position::Easy, Position::Normal, Position::Hard};
 
 Handle open_screen(Engine& e, Game& g, const char* screen, i32 layer, bool hold = true) {
@@ -125,13 +126,13 @@ void name_open(Engine& e, Game& g, u32 table, i32 row) {
     ui_model_set_str(e, "name_rank", line);
     g.name_screen = open_screen(e, g, "name", 116);
     ui_set_text(e, g.name_screen, "entry", g.demo ? "" : g.last_name);
+    g.name_opened = e.clock.tick_total;
 }
 
 void name_submit(Engine& e, Game& g) {
     char name[kNameMax + 1];
     snprintf(name, sizeof name, "%s", ui_field_text(e, g.name_screen, "entry"));
     caps(name);
-    if (!name[0]) snprintf(name, sizeof name, "%s", "PILOT");
     close_screen(e, g.name_screen);
     u32 table = 1;
     i32 row = result_row(g, &table);
@@ -326,7 +327,10 @@ bool screens_ui(TickContext& ctx, Game& g, const UiEvent& ev) {
         return true;
     }
     if (ev.screen == g.name_screen) {
-        if (ev.event == k_submit) name_submit(e, g);
+        // Not the Enter that confirmed the results, still landing as the field opens; and
+        // not an empty name: the screen waits for one.
+        const char* typed = ui_field_text(e, g.name_screen, "entry");
+        if (ev.event == k_submit && e.clock.tick_total - g.name_opened >= kNameSettle && typed && typed[0]) name_submit(e, g);
         return true;
     }
     if (ev.screen == g.scores_screen) {
