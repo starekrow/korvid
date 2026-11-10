@@ -25,7 +25,8 @@
     "images": {
       "egg": { "texture": "example_arcfire/made/eggs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 },
       "bomb": { "texture": "example_arcfire/made/bombs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 },
-      "cursor": { "texture": "example_arcfire/made/cursor.png", "rect": [0, 0, 32, 32], "scale": 0.75 }
+      "cursor": { "texture": "example_arcfire/made/cursor.png", "rect": [0, 0, 32, 32], "scale": 0.75 },
+      "vignette": { "texture": "example_arcfire/made/vignette.png", "rect": [0, 0, 135, 180], "scale": 4 }
     },
     "sounds": {
       "move": "example_arcfire/sound/ui_move.ogg",
@@ -38,6 +39,7 @@
     "hud": {
       "type": "box", "name": "root", "size": ["fill", "fill"],
       "children": [
+        { "type": "image", "name": "vignette", "image": "vignette", "anchor": "center" },
         { "type": "panel", "name": "left", "fill": "panel", "anchor": "center", "pivot": "right", "offset": [-270, 0], "size": [1400, "fill"],
           "children": [
             { "type": "panel", "name": "edge", "fill": "edge", "anchor": "right", "size": [3, "fill"] },

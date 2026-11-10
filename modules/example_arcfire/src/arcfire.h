@@ -118,6 +118,7 @@ struct Boss     { u32 def; u32 phase; u32 state; u32 clock; f32 s; u32 down; poi
 // ticks to its next pattern or launch, and its boss.
 struct Part     { Handle boss; u32 index; u32 cycle; u32 timer; u32 pad; };
 struct EggBody  { f32 vy; f32 drift; };           // the egg as it falls
+struct Glow     { Handle bullet; };               // the bullet a glow row is under now (fx.cc)
 
 // The world row's parts.
 // Easy, Normal and Hard are the difficulties; Stress and Demo are runs of their own.
@@ -138,6 +139,7 @@ struct Dials {
     u32 weapon, power;     // what the ship starts with (a WeaponType, 1..5): Spread at one but to try or measure another
     u32 options;           // and how many options (0..2)
     u32 chain_window;      // ticks after a kill in which the next one adds to the chain (scoring.cc)
+    u32 glows;             // a soft dark halo under every enemy bullet (fx.cc): a second sprite each
 };
 struct Stage {
     f32 distance;          // the stage's clock: units scrolled since the stage (or this loop) began
@@ -190,7 +192,7 @@ struct RunOver    { u32 loops; u32 pad; };   // scheduled at a run's end, after 
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
     g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind, g_shadow_kind, g_boss_kind, g_part_kind,
-    g_boom_kind, g_beam_kind, g_option_kind;
+    g_boom_kind, g_beam_kind, g_option_kind, g_glow_kind, g_aglow_kind;
 extern u32 g_part_down; // the trigger on a part's health
 // The two bullet kinds: plain bullets, and bullets that run a program (needles, seeds).
 inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
@@ -465,6 +467,10 @@ void   fx_piece(TickContext& ctx, Game& g, point2 at, Tex tex, rect2 uv, vec2 si
 void   fx_piece_of(TickContext& ctx, Handle material, point2 at, rect2 uv, vec2 size, vec2 v, f32 spin, u32 life, i32 layer, f32 fall = 0.0f);
 // An explosion: Kenney's burst frames as a flipbook (a cosmetic row that goes when it ends).
 void   fx_boom(TickContext& ctx, Game& g, point2 at, f32 size);
+// The three sizes of the game's explosions, each with its sparks and its shake: popcorn; a
+// ground row or a boss's part; a boss (its flash of the screen too, so main thread only).
+enum class Blast : u32 { Small, Medium, Large };
+void   fx_blast(TickContext& ctx, Game& g, point2 at, Blast b);
 Handle fx_boom_clip(Engine& e);
 
 // Weapons (weapons.cc): a volley of the weapon at its power from `at`, into the shot

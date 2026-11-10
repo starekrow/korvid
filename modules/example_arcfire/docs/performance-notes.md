@@ -408,3 +408,48 @@ exactly. The attract mode's demo, from the title, hashes as `--demo` on its firs
 after each fresh sim; the first pass did not at first, because one sim tick ran on the
 title before its screen's hold landed: the title now holds the sim itself from the moment
 it opens.
+
+**M4. Glows at rank 24** (`--stress --spike-hunt --prof-report`, 40 seconds, 20,508 bullets
+at peak, 3,366 on average; the dial off, then on). A halo is a second sprite a bullet:
+
+| | off | on |
+|---|---|---|
+| deltas a frame, average (peak) | 3,470 (20,683) | 6,843 (41,190) |
+| tick, ms average | 1.57 | 1.95 |
+| extract, ms average (worst window) | 0.20 (0.55) | 0.55 (2.84) |
+| GPU frame, ms average (worst) | 0.70 (2.00) | 1.65 (7.72) |
+| overdraw at peak | 18 | 93 |
+
+The `glows` pass itself is 2 ms of CPU a frame summed over 13 chunks on the pool, about
+0.15 ms of the tick. What it costs is the GPU's: twenty thousand 60-unit halos, overdraw
+five times over. On at the difficulties, where the bullets number in the hundreds; off
+under `--stress` until the renderer draws a bullet and its halo as one.
+
+**M4. Stray halos and shadows.** Two cosmetic kinds drew a streak across the field for a
+frame, which the rank 24 run made a flicker (starekrow saw it): a glow row taking a new
+bullet was drawn moving from where its last bullet had died, and an air row's shadow,
+spawned at the origin and composed onto its owner the same tick, from the field's middle.
+A glow now jumps when it takes a bullet (its previous transform set to the new one); a
+shadow is born where it belongs.
+
+**M4. A pause changed a pilot's run.** One Normal recording came out 437,649 against the
+438,816 every other run of that build gives: a pause and a resume in a bot run, by hand.
+The bot sets its actions for the next sample; the next sample was a paused tick's, which
+used them up, and the first sim tick after the resume flew on the real devices, nothing
+pressed. The engine now keeps an override set on a sim tick for the next sim tick's
+sample (paused ticks sample the devices, so a pause menu works); one set on a paused tick
+(a script on a menu) is for the next sample as before. A run paused twice, the menu worked
+between, now ends at 438,816 too. Left: an action's `was_down` across a pause comes from
+the paused ticks, so a press held through one would read as new.
+
+**M4. Particles at render rate.** Sparks are cosmetic rows stepped at 60 Hz; the renderer
+interpolates their position and draws their alpha (and every tint) as the last tick left
+it. This panel runs at 60 Hz, where a frame is a tick and the question cannot show. On a
+144 Hz display a ten-tick spark's fade would step every 2.4 frames: ten levels over a
+sixth of a second. Decided: nothing now. If it shows, the cheapest fix is the renderer
+interpolating tint as it does position; the engine's render-rate class is not wanted for
+it.
+
+**M4. The demo** hashes 0e15cc3d537639a1 at tick 11829 (the `glows` dial is new in the
+world row), the same seven ways; the two recorded runs were made again and replay matching
+at 1 and 16 threads.

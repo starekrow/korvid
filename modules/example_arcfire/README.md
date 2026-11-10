@@ -112,7 +112,7 @@ The ways it flies itself:
   `bullet_speed`, `formation_count`, `formation_spacing`, `particles`, `plane_density`,
   `enemy_health`, `bot`, `invulnerable` (1, or 2: after the first death), `loops`,
   `weapon` and `power` (what the ship starts with: 0 Spread, 1 Beam, 2 Storm, 3 Lance; 1..5),
-  `options` (0..2, the options it starts with), `chain_window` (ticks; 0 turns the chain off),
+  `options` (0..2, the options it starts with), `chain_window` (ticks; 0 turns the chain off), `glows` (1, the bullets' halos; 0 under `--stress`),
   `scroll_rows` (1: move every plane tile
   every tick instead of scrolling the layer, for the notebook's comparison). The log prints
   the dials at the start.
@@ -256,8 +256,14 @@ state.
 - **Effects** (`fx.cc`): sparks and debris are particles in a cosmetic kind, drawn from
   the module's own random stream, so the particle dial changes nothing the sim draws.
   Every air row gets a shadow on the ground's layer, a cosmetic child down and to the
-  right that dies with it. Explosions are Kenney's burst tiles as a flipbook (an anim clip
-  made at startup) on a cosmetic row that goes when the clip ends.
+  right that dies with it, born where it belongs. Explosions are Kenney's burst tiles as a
+  flipbook (an anim clip made at startup) on a cosmetic row that goes when the clip ends,
+  in three sizes (`fx_blast`): popcorn's pop; a ground row's or a part's two bursts; a
+  boss's big one, four more around it, a ring of sparks and the screen white for a moment.
+  Each enemy bullet has a halo, a dark soft disc in its color under it (a pale sea washes
+  out anything that adds light), in two cosmetic kinds kept slot for slot with the bullet
+  kinds: a second sprite a bullet, so the `glows` dial, off under `--stress`. A vignette
+  darkens the field's edges (the HUD's first image).
 - **Sound** (`sound.cc`, `assets/sound/`, `assets/music/`): a table of effects, each
   with its volume, its priority and how far its pitch wanders; the volley and the grazes
   lowest, deaths, the bomb, the egg and a boss's fall highest. The audio module starts a

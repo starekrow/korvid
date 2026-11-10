@@ -365,8 +365,7 @@ void on_part_down(TickContext& ctx, Span<const StateEdge> edges) {
             ctx.destroy(pt->handle_at(i));
             ctx.emit(Kill{at, def.parts[p.index].score, 0, Handle{}});
             drop_item(ctx, g, def.parts[p.index].drop, at);
-            fx_sparks(ctx, g, at, sparks * 2, kSparkPart, 5.0f);
-            fx_boom(ctx, g, at, 56.0f);
+            fx_sparks(ctx, g, at, sparks * 2, kSparkPart, 5.0f); // its Kill brings the explosion (on_kill)
         }
         if (def.parts[index].core) {
             f32 left = b->state == (u32)BossState::Entering ? 1.0f
@@ -375,9 +374,8 @@ void on_part_down(TickContext& ctx, Span<const StateEdge> edges) {
             u32 overflow = 0;
             u32 cancelled = cancel_bullets(ctx, g, core_at, 0.0f, &overflow);
             ctx.emit(Kill{core_at, bonus + (i32)overflow * kChipValue, 1, Handle{}}); // the chips' cap's overflow paid at once, as a bomb's
-            fx_boom(ctx, g, core_at, 96.0f);
+            fx_blast(ctx, g, core_at, Blast::Large);
             sfx(ctx, g, SFX_BOSS_DOWN);
-            g.shake = 12.0f;
             KV_INFO("arcfire", "boss: %s destroyed at tick %llu, %u s into the fight, bonus %d, %u bullets to chips", def.title,
                     (unsigned long long)ctx.tick, b->clock / 60, bonus, cancelled);
             b->state = (u32)BossState::Dying;

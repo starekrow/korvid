@@ -21,7 +21,7 @@ namespace kv::arcfire {
 
 constinit u32 g_world_kind = 0, g_plane_kind = 0, g_ship_kind = 0, g_ring_kind = 0, g_mark_kind = 0, g_shot_kind = 0, g_air_kind = 0,
               g_ground_kind = 0, g_bullet_kind = 0, g_active_kind = 0, g_particle_kind = 0, g_egg_kind = 0, g_shell_kind = 0,
-              g_item_kind = 0, g_formation_kind = 0, g_shadow_kind = 0, g_boss_kind = 0, g_part_kind = 0, g_boom_kind = 0, g_beam_kind = 0, g_option_kind = 0;
+              g_item_kind = 0, g_formation_kind = 0, g_shadow_kind = 0, g_boss_kind = 0, g_part_kind = 0, g_boom_kind = 0, g_beam_kind = 0, g_option_kind = 0, g_glow_kind = 0, g_aglow_kind = 0;
 constinit u32 g_part_down = 0;
 
 // The systems and handlers, each in the file of its part.
@@ -46,7 +46,8 @@ void on_part_down(TickContext&, Span<const StateEdge>);
 void patterns(TickContext&);     // patterns.cc
 void actives(TickContext&);
 void bullets(TickContext&);      // bullets.cc
-void particles(TickContext&);    // fx.cc
+void particles(TickContext&);
+void glows(TickContext&);    // fx.cc
 void items(TickContext&);        // items.cc
 void on_pickup(TickContext&, Span<const Pickup>);
 void bomb(TickContext&);         // bomb.cc
@@ -102,8 +103,10 @@ constinit const FieldDesc k_ground_fields[]   = {KV_FIELDS(Ground, rate, bench, 
 constinit const FieldDesc k_bullet_fields[]   = {KV_FIELDS(Bullet, life, grazed, owner)};
 constinit const FieldDesc k_particle_fields[] = {KV_FIELDS(Particle, life, max_life, spin, drag, alpha, fall)};
 constinit const FieldDesc k_eggbody_fields[]  = {KV_FIELDS(EggBody, vy, drift)};
+constinit const FieldDesc k_glow_fields[]     = {KV_FIELDS(Glow, bullet)};
 constinit const FieldDesc k_dials_fields[]    = {KV_FIELDS(Dials, position, rank, bullet_speed, formation_count, formation_spacing, particles,
-                                                           plane_density, enemy_health, bot, invulnerable, loops, scroll_rows, weapon, power, options, chain_window)};
+                                                           plane_density, enemy_health, bot, invulnerable, loops, scroll_rows, weapon, power, options, chain_window),
+                                                 KV_FIELD(Dials, glows)}; // past KV_FIELDS' sixteen
 constinit const FieldDesc k_stage_fields[]    = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, ground_cursor, base, held, waiting, round_up)};
 constinit const FieldDesc k_run_fields[]      = {KV_FIELDS(Run, score, stage_score, next_extend, eggs, restarts, epoch, kills, grazes, deaths, bombs, chips, chain, chain_left, chain_best,
                                                            bombs_used)};
@@ -117,7 +120,7 @@ constinit const ComponentDesc k_components[] = {
     // Health keeps its previous copy for the parts' trigger (a part's death is an edge).
     KV_COMPONENT(Shot, k_shot_fields),         KV_COMPONENT(Health, k_health_fields, CompPrev), KV_COMPONENT(Mover, k_mover_fields),
     KV_COMPONENT(Emitter, k_emitter_fields),   KV_COMPONENT(Ground, k_ground_fields), KV_COMPONENT(Bullet, k_bullet_fields),
-    KV_COMPONENT(Particle, k_particle_fields), KV_COMPONENT(EggBody, k_eggbody_fields), KV_COMPONENT(Dials, k_dials_fields),
+    KV_COMPONENT(Particle, k_particle_fields), KV_COMPONENT(EggBody, k_eggbody_fields), KV_COMPONENT(Glow, k_glow_fields), KV_COMPONENT(Dials, k_dials_fields),
     KV_COMPONENT(Stage, k_stage_fields),       KV_COMPONENT(Run, k_run_fields),       KV_COMPONENT(EggState, k_eggstate_fields),
     KV_COMPONENT(Chance, k_chance_fields),       KV_COMPONENT(Runner, k_runner_fields), KV_COMPONENT(Formation, k_formation_fields),
     KV_COMPONENT(Item, k_item_fields),         KV_COMPONENT(Boss, k_boss_fields),     KV_COMPONENT(Part, k_part_fields),
@@ -157,6 +160,9 @@ constinit const KindDesc k_kinds[] = {
     {.name = ".option",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Option", .capacity = kMaxOptions, .id = &g_option_kind},
     {.name = ".beam",     .components = "Transform2, Local2, Parent, Sprite, Beam", .capacity = 4, .id = &g_beam_kind},
     {.name = ".boom",     .components = "Transform2, Sprite, AnimPlayer", .capacity = 512, .id = &g_boom_kind, .cosmetic = true},
+    // The bullets' glows, slot for slot with the two bullet kinds (fx.cc).
+    {.name = ".glow",     .components = "Transform2, Sprite, Glow", .capacity = 65536, .id = &g_glow_kind, .cosmetic = true},
+    {.name = ".aglow",    .components = "Transform2, Sprite, Glow", .capacity = 8192, .id = &g_aglow_kind, .cosmetic = true},
 };
 
 // A part's death is its health crossing below one: delivered as a StateEdge the next tick.
@@ -250,6 +256,8 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".bomb", .phase = Phase::Sim, .fn = bomb, .reads = "input.actions, ^.bullet, ^.active, .world.EggState, .ship.Transform2",
      .writes = ".world.Run, .ship.Ship, .ship.Collider2, audio.commands", .after = ".egg", .main_thread = true},
     {.name = ".items", .phase = Phase::Sim, .fn = items, .reads = ".ship.Transform2, .ship.Ship", .writes = ".item"},
+    {.name = ".glows", .phase = Phase::Sim, .fn = glows, .reads = ".world.Dials, .bullet.Transform2, .bullet.Sprite, .active.Transform2, .active.Sprite",
+     .writes = ".glow, .aglow", .after = ".bullets", .state = StateUse::None},
     {.name = ".particles", .phase = Phase::Sim, .fn = particles, .writes = ".particle", .state = StateUse::None},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true,
      .runs = RunWhen::Always},

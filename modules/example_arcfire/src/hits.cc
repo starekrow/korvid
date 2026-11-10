@@ -197,8 +197,9 @@ void on_kill(TickContext& ctx, Span<const Kill> kills) {
                 formations->destroy(k.formation);
             }
         }
-        fx_sparks(ctx, g, k.at, dials[0].particles * 2, kSparkKill, 4.0f);
-        g.shake = g.shake > 3.0f ? g.shake : 3.0f;
+        // Its explosion by its worth: popcorn's, or a ground row's or a part's. A boss's
+        // bonus has its own (on_part_down's core).
+        if (!k.flat) fx_blast(ctx, g, k.at, k.score >= 400 ? Blast::Medium : Blast::Small);
     }
 }
 

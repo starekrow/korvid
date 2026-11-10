@@ -27,6 +27,8 @@ What is made here, and from what:
                      and pulses along it, repeating up its length
   made/items.png     96 x 16: the items' badges: Spread, Beam, Storm and Lance (their letters
                      on their colors), then power, then option
+  made/vignette.png  135 x 180: the field's vignette, clear in the middle and darkening to
+                     its edges and corners (drawn 4 times up, over the field, under the HUD)
   made/cursor.png    32 x 32: the menus' cursor, Kenney's player ship (ships_packed, column
                      0, row 0) turned to point right; nothing else changed
 """
@@ -275,6 +277,18 @@ def items():
     return im
 
 
+def vignette(w=135, h=180):
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    px = im.load()
+    for y in range(h):
+        for x in range(w):
+            dx, dy = (x + 0.5) / w * 2.0 - 1.0, (y + 0.5) / h * 2.0 - 1.0
+            r = math.sqrt(dx * dx * 0.85 + dy * dy)  # an ellipse a little wider than the field
+            a = max(0.0, min(1.0, (r - 0.62) / 0.6)) ** 1.6
+            px[x, y] = (4, 6, 16, int(round(a * 150)))
+    return im
+
+
 def cursor(pack):
     ships = Image.open(pack / "pack/kenney_pixelshmup/Tilemap/ships_packed.png").convert("RGBA")
     return ships.crop((0, 0, 32, 32)).transpose(Image.Transpose.ROTATE_270)
@@ -297,6 +311,7 @@ def main():
     Image.new("RGBA", (4, 4), (255, 255, 255, 255)).save(made / "spark.png")
     egg().save(made / "egg.png")
     cursor(pack).save(made / "cursor.png")
+    vignette().save(made / "vignette.png")
     pips = Image.new("RGBA", (32, 16), (0, 0, 0, 0))
     spent = egg()
     px = spent.load()
