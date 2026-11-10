@@ -79,9 +79,10 @@ const char* prop_type_name(PropType t) {
 }
 
 bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t,
-                 Span<const ComponentDesc* const> attachable) {
+                 Span<const ComponentDesc* const> attachable, u32 capacity_override) {
     KV_ASSERT(!desc);
     desc   = &d;
+    capacity = capacity_override ? capacity_override : d.capacity;
     name   = full_name;
     index  = table_index;
     module = module_index;
@@ -102,7 +103,7 @@ bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentD
         Column c;
         c.desc   = cd;
         c.stride = (cd->size + cd->align - 1) / cd->align * cd->align;
-        usize bytes = os_page_align((usize)d.capacity * c.stride);
+        usize bytes = os_page_align((usize)capacity * c.stride);
         c.data = (u8*)os_reserve(bytes);
         if (!c.data) { KV_ERROR("kind", "'%s': cannot reserve %llu bytes for %s", name, (unsigned long long)bytes, cd->name); return false; }
         if (cd->has_prev()) {
@@ -124,13 +125,13 @@ bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentD
     kind = handle_kind_register(kd);
     if (!kind) return false;
     slots.use_kind(kind);
-    return slots.init(d.capacity, t);
+    return slots.init(capacity, t);
 }
 
 void Table::free() {
     if (kind) kv_handle_kind_unregister(kind);
     for (Column& c : columns) {
-        usize bytes = os_page_align((usize)desc->capacity * c.stride);
+        usize bytes = os_page_align((usize)capacity * c.stride);
         usize committed = os_page_align((usize)committed_rows * c.stride);
         if (c.data) { mem_account_decommit(tag, committed); os_release(c.data, bytes); }
         if (c.prev) { mem_account_decommit(tag, committed); os_release(c.prev, bytes); }
@@ -155,7 +156,7 @@ const Column* Table::column(u32 component_id) const {
 bool Table::ensure_rows(u32 n) {
     while (committed_rows < n) {
         u32 grow = committed_rows ? committed_rows : 1024;
-        if (committed_rows + grow > desc->capacity) grow = desc->capacity - committed_rows;
+        if (committed_rows + grow > capacity) grow = capacity - committed_rows;
         if (grow == 0) return false;
         u32 to = committed_rows + grow;
         usize total = 0, want = 0;
@@ -185,9 +186,10 @@ bool Table::ensure_rows(u32 n) {
 Handle Table::spawn() {
     slots.owner = thread_id(); // the schedule made this thread the writer for now
     slots.tag   = tag;
-    if (slots.live >= desc->capacity) {
+    if (slots.live >= capacity) {
+        // Logged once: a kind that fills under load would otherwise log every spawn it refuses.
         KV_MARK("kind full");
-        KV_ERROR("kind", "'%s' is full (%u entities)", name, desc->capacity);
+        if (refused++ == 0) KV_ERROR("kind", "'%s' is full (%u entities); refusals are counted from here", name, capacity);
         return Handle{};
     }
     // The rows for the slot about to be handed out must exist first: a slot taken and
@@ -223,8 +225,8 @@ bool Table::restore_slots(Span<const u32> gen_words, Span<const u32> free_order)
     slots.owner = thread_id();
     slots.tag   = tag;
     destroy_all();
-    if (gen_words.len > desc->capacity || !ensure_rows(gen_words.len)) {
-        KV_ERROR("kind", "'%s': cannot restore %u slots (capacity %u)", name, gen_words.len, desc->capacity);
+    if (gen_words.len > capacity || !ensure_rows(gen_words.len)) {
+        KV_ERROR("kind", "'%s': cannot restore %u slots (capacity %u)", name, gen_words.len, capacity);
         slots.restore_slots(Span<const u32>(), Span<const u32>());
         return false;
     }

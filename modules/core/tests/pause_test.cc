@@ -108,5 +108,9 @@ void test_pause(kv::TestCtx& c) {
     for (u32 i = 0; i < 4; ++i) engine_frame(f, 1.0 / 60.0);
     KV_CHECK(c, engine_hash_state(f) == hash_a && g.pings == 1 && g.edges == 1);
     KV_CHECK(c, !engine_rate(f, 0.0) && engine_rate(f, 2.0) && f.clock.rate == 2.0);
+    // A quit asked for: the frame runs no tick after it, however many it owes.
+    u64 total = f.clock.tick_total;
+    engine_request_quit(f);
+    KV_CHECK(c, engine_frame(f, 5.0 / 60.0) == 0 && f.clock.tick_total == total);
     engine_shutdown(f);
 }

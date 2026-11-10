@@ -35,6 +35,11 @@ Every tick, in phase `Sim`:
 4. **`collision.broadphase`** finds every pair of colliders that overlap where everything
    ended, and diffs the list against last tick's: a new pair is an `OverlapBegin`, a pair
    that is gone an `OverlapEnd`. Handlers run at the next boundary, the same tick.
+   Colliders are grouped by their (layer, mask) first: each group has a grid sized to its
+   own largest member, a group is paired with itself only if it meets itself and with
+   another only if their masks meet, and across two groups the smaller is walked over the
+   larger's grid. Bullets that never meet bullets are never paired with each other, and a
+   few bodies against tens of thousands of bullets is a few lookups (`src/pairs.cc`).
 
 `collision.clear` zeroes the intents in PostSim, so an intent lasts one tick.
 
@@ -148,7 +153,7 @@ Header `korvid/collision/module.h`:
 |---|---|---|
 | `collision_module` | `ModuleDesc` | the module record; kormake puts it in the list for you |
 | `collision_pair_count(Engine&)` | function | pairs overlapping after the last broadphase |
-| `collision_stats(Engine&)` | function | the last resolve (bodies, moves, blocked axis moves, pushes) and broadphase (colliders, candidate pairs tested before layers and masks, the cell size) |
+| `collision_stats(Engine&)` | function | the last resolve (bodies, moves, blocked axis moves, pushes) and broadphase (colliders, candidate pairs tested, (layer, mask) groups) |
 | `collision_static(e, fn, user)` | function | the static world's sweep; `tilemap_collide` sets it |
 | `collision_query(ctx, rect, layers, out)`, `collision_cast(ctx, box, delta, layers, ignore)` | functions | colliders in a rectangle; the first a moving box enters |
 
@@ -174,16 +179,17 @@ doing so and the broadphase reports them after its movers.
   not overlap; the test is `distance < ra + rb`. Boxes likewise.
 - **One event per transition.** An overlap that persists for a hundred ticks is one
   `OverlapBegin` and, when it ends, one `OverlapEnd`.
-- **Cell size follows the largest collider.** One huge collider among many small ones
-  makes the grid coarse and the candidate lists longer. Keep radii within an order of
-  magnitude of each other, or expect the broadphase to show up in `--prof-report`.
+- **Cell size follows each group's largest collider.** One huge collider coarsens only its
+  own group's grid; it costs its own lookups over the groups it meets, not everyone's.
+  Within a group that meets itself, keep radii within an order of magnitude.
 - **Mask and layer edits take effect next tick.** The broadphase reads the column once
   per tick, after the movers.
 - **Determinism.** Pairs are found in slot order and sorted, so the same world gives
   the same events on any thread count. The broadphase itself runs on one thread today.
-- **Cost.** Linear in colliders plus the candidate pairs. A few thousand colliders is a
-  fraction of a millisecond; the test suite runs 400 circles on a lattice and checks it
-  finds exactly their 760 touching pairs.
+- **Cost.** Linear in colliders plus the candidate pairs that can meet. A few thousand
+  colliders is a fraction of a millisecond; the test suite runs 400 circles on a lattice
+  and checks it finds exactly their 760 touching pairs, and holds sixty random scenes of
+  mixed sizes, shapes and masks against a test of every pair (`tests/pairs_test.cc`).
 
 - **Order decides.** Two bodies walking into each other resolve by order: the first takes
   the gap, the second stops at it. The order is the same in every run (kinds by name,

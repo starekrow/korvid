@@ -41,11 +41,12 @@ struct CollisionStats {
     u32 moves   = 0; // intents that were not zero
     u32 blocked = 0; // axis moves that stopped short
     u32 pushes  = 0; // bodies pushed
-    // The broadphase: every collider, the candidate pairs it looked at (neighbouring
-    // cells, each unordered pair once, before layers and masks), and its cell size.
+    // The broadphase: every collider, the candidate pairs it looked at (pairs whose layers
+    // and masks meet, in neighbouring cells of the larger group's grid), and how many
+    // (layer, mask) groups the colliders fell into.
     u32 colliders = 0;
     u32 tested    = 0;
-    f32 cell      = 0.0f;
+    u32 groups    = 0;
 };
 const CollisionStats* collision_stats(Engine& e);
 

@@ -36,7 +36,7 @@ with their reads and writes, and owns its state and memory. In code that is one
 `constinit ModuleDesc` that `engine_init` reads once. `MODULES.md` is the long version.
 
 **The tick** (`tick.h`, `phase.h`, `engine.h`). `engine_frame(e, dt)` advances a fixed-step
-clock and runs the ticks it owes. A tick is four phases (Input, PreSim, Sim, PostSim);
+clock and runs the ticks it owes, and none after a quit has been asked for. A tick is four phases (Input, PreSim, Sim, PostSim);
 between phases the engine delivers events, runs handlers and applies commands; within a
 phase, systems run in an order derived from their declared reads and writes, and the
 independent ones run concurrently on the job pool. `MODULES.md` walks through it.
@@ -206,7 +206,7 @@ Header `korvid/core/engine.h`:
 | name | kind | what |
 |---|---|---|
 | `Engine` | record | `events`, `phases`, `clock`, `modules`, `resources`, `components`, `tables`, `handlers`, `triggers`, `commands`, `timers`, `trace`, `idle`, `threads`, `hash_ticks`, `quit_requested` |
-| `EngineConfig`, `HeapDesc`, `ModuleHeapDesc` | records | the heap table and which module lives in which |
+| `EngineConfig`, `HeapDesc`, `ModuleHeapDesc`, `KindCapacity` | records | the heap table, which module lives in which, and kinds' capacities over their KindDesc's (`Table::capacity`; a full kind logs once and counts `Table::refused`) |
 | `engine_init(e, modules, config)`, `engine_shutdown(e)` | functions | register and start everything in order; undo it in reverse |
 | `engine_frame(e, dt)` | function | advance the clock, run the ticks it owes; returns how many |
 | `engine_pause(e, on)`, `engine_step(e, n)`, `engine_rate(e, x)` | functions | sim control: hold the sim (paused ticks run `RunWhen::Always` systems and handlers only), let `n` sim ticks through, scale time (the developer's rate: the CLI's `rate`) |
@@ -267,7 +267,7 @@ Header `korvid/core/event.h`, `timer.h`:
 
 | name | kind | what |
 |---|---|---|
-| `EventTypeDesc`, `EventFlags`, `KV_EVENT(E)`, `KV_EVENT_EX(E, fields, flags)` | record, enum, macros | an event type with an optional schema; `EvNextTick` |
+| `EventTypeDesc`, `EventFlags`, `KV_EVENT(E)`, `KV_EVENT_EX(E, fields, flags)` | record, enum, macros | an event type with an optional schema; `EvNextTick`; `EvStaleOk` (dropped for a stale handle as a matter of course: dev builds otherwise warn once a type) |
 | `EventType<E>::id` | record | the id slot |
 | `EventBus` | record | `emit`, `read<E>()`, `read_new<E>()`, `deliver`, `end_tick`, `dropped_stale`, `pending_count` |
 | `EventWriter`, `EventBuffer` | records | one unit's pending events; a type's batch |

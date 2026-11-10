@@ -130,7 +130,7 @@ void unregister_components(Engine& e) {
 // Kinds: one table each, in module then declaration order, created here so their
 // resources exist before any system references them. Table addresses never move after
 // this: the handle registry holds them as contexts.
-bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules) {
+bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules, const EngineConfig& config) {
     u32 count = 0;
     for (const ModuleDesc* m : modules) count += m->kinds.len;
     e.tables.reserve(count);
@@ -178,9 +178,13 @@ bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules) {
             tag.module   = (u16)(i + 1);
             tag.heap     = mem_module_heap((u16)(i + 1));
             tag.category = mem_category_register("kinds");
+            u32 capacity = 0;
+            for (const KindCapacity& kc : config.capacities)
+                if (kc.kind && !strcmp(kc.kind, name)) capacity = kc.capacity;
+            if (capacity) KV_INFO("engine", "kind '%s': capacity %u (the KindDesc says %u)", name, capacity, k.capacity);
             Table& t = e.tables.push(Table{});
             bool ok = t.init(k, name, Span<const ComponentDesc* const>(comps, ncomps), e.tables.len - 1, i, tag,
-                             Span<const ComponentDesc* const>(attach, nattach));
+                             Span<const ComponentDesc* const>(attach, nattach), capacity);
             mem_set_owner(0);
             if (!ok) { KV_ERROR("engine", "kind '%s' in module '%s': table creation failed", name, m.name); return false; }
             e.resources.push(ResourceEntry{name, i});
@@ -790,7 +794,7 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineC
     for (ModuleInstance& inst : e.modules) mem_set_module_heap((u16)(inst.index + 1), 0);
     if (!assign_heaps(e, modules, config)) { engine_shutdown(e); return false; }
 
-    bool ok = register_events(e, modules) && register_components(e, modules) && register_kinds(e, modules) &&
+    bool ok = register_events(e, modules) && register_components(e, modules) && register_kinds(e, modules, config) &&
               register_resources(e, modules) && build_schedule(e, modules) && build_handlers(e, modules) &&
               build_triggers(e, modules);
     if (ok) {
@@ -963,6 +967,9 @@ u32 engine_frame(Engine& e, f64 frame_dt) {
     ++e.frame_count;
     u32 ticks = e.clock.advance(frame_dt);
     for (u32 i = 0; i < ticks; ++i) {
+        // A quit asked for in a tick ends the frame's ticks there, so a run that quits on an
+        // event ends on the same tick however many ticks its last frame held.
+        if (e.quit_requested) { ticks = i; break; }
         u64  tick   = e.clock.tick_count; // the sim tick this is, or would be
         bool paused = e.clock.begin_tick();
         e.phases.run_tick(e, e.events, e.clock.tick_dt, tick, paused);

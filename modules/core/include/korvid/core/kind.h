@@ -112,11 +112,13 @@ struct Table {
     u32             props_resource = 0; // "kind.@props", when the kind has bags
     char            props_resource_name[2 * KV_KIND_NAME_MAX + 3] = {};
     bool            sparse_dirty = false; // an entity with sparse rows died: the engine sweeps at the boundary
+    u32             capacity = 0;  // slots: the KindDesc's, unless the root overrode it (EngineConfig::capacities)
+    u32             refused  = 0;  // spawns refused because the kind was full; the first is logged
 
     // Reserves the columns and registers the handle kind. `comps` is in declared order;
     // `full_name` is the kind's name with its module prefix expanded (interned, stable).
     bool init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t,
-              Span<const ComponentDesc* const> attachable = {});
+              Span<const ComponentDesc* const> attachable = {}, u32 capacity_override = 0);
     void free();
 
     Handle spawn(); // every component zero, prev included; null if the kind is full

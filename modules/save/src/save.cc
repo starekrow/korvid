@@ -327,12 +327,12 @@ bool restore_kind_slots(const JsonDoc& doc, const JsonValue& v, Table& t, Engine
     auto slot_of = [](const JsonValue* s) { return s && s->is_number() && s->number >= 0.0 ? json_u64(s, 0) : ~0ull; };
     for (const JsonValue* r = rows ? json_first(doc, *rows) : nullptr; r; r = json_next(doc, *r)) {
         u64 s = slot_of(json_get(doc, *r, "slot"));
-        if (s >= t.desc->capacity) return fail("a row's slot is missing or past the capacity");
+        if (s >= t.capacity) return fail("a row's slot is missing or past the capacity");
         if (s + 1 > n) n = (u32)s + 1;
     }
     for (const JsonValue* f = free_list ? json_first(doc, *free_list) : nullptr; f; f = json_next(doc, *f)) {
         u64 s = f->is_array() ? slot_of(json_at(doc, *f, 0)) : ~0ull;
-        if (s >= t.desc->capacity) return fail("a free slot is malformed or past the capacity");
+        if (s >= t.capacity) return fail("a free slot is malformed or past the capacity");
         if (s + 1 > n) n = (u32)s + 1;
     }
     Array<u32> gens, order;

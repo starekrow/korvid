@@ -24,9 +24,16 @@ struct ModuleHeapDesc {
     const char* module;
     const char* heap;
 };
+// A kind's capacity, set by the root over what its KindDesc says: a stress run that wants
+// more of a kind than the game ships with. Capacity is address space; rows commit as used.
+struct KindCapacity {
+    const char* kind;     // the full name, "example_arcfire.bullet"
+    u32         capacity;
+};
 struct EngineConfig {
     Span<const HeapDesc>       heaps        = {};
     Span<const ModuleHeapDesc> module_heaps = {};
+    Span<const KindCapacity>   capacities   = {};
 };
 
 struct ResourceEntry {
@@ -146,7 +153,8 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineC
 void engine_shutdown(Engine& e);
 
 // Advances the clock by frame_dt and runs the resulting ticks, paused or not as the clock
-// says. Returns the tick count, paused ticks included.
+// says, stopping before the next once engine_request_quit has been called. Returns the
+// ticks run, paused ticks included.
 u32  engine_frame(Engine& e, f64 frame_dt);
 // Sim control, from anywhere on the main thread (a system, a CLI command, the loop); a
 // change applies from the next tick. Pause holds the sim: paused ticks run only the

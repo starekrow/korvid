@@ -112,7 +112,10 @@ bool ring_grow(Renderer* r, VkDeviceSize need) {
     rv_defer_destroy_buffer(r, g.buf);
     if (!rv_create_host_buffer(r, cap, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, g.buf)) return false;
     g.head = g.tail = g.used = 0;
-    for (FrameInFlight& f : r->frames) f.ring_bytes = 0; // the old buffer's spans are the garbage queue's now
+    // The old buffer's spans are the garbage queue's now, this frame's included: counted
+    // against the new buffer they would be released from it, and `used` would wrap.
+    g.frame_bytes = 0;
+    for (FrameInFlight& f : r->frames) f.ring_bytes = 0;
     ++g.grows;
     KV_INFO("vulkan", "frame ring grown to %llu KB", (unsigned long long)(cap / 1024));
     return true;

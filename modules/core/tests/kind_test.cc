@@ -142,4 +142,19 @@ void test_kind(kv::TestCtx& c) {
         KV_CHECK(c, !engine_init(f, l));
         KV_CHECK(c, f.tables.len == 0 && g_mover_id == 0);
     }
+
+    // The root sets a capacity over the KindDesc's; past it a spawn is refused, and counted.
+    {
+        const KindCapacity caps[] = {{"t.marker", 5}, {"t.nothing", 9}};
+        EngineConfig cfg;
+        cfg.capacities = caps;
+        Engine f;
+        KV_CHECK(c, engine_init(f, list, cfg));
+        Table* m = engine_table(f, "t.marker");
+        KV_CHECK(c, m && m->capacity == 5 && engine_table(f, "t.mover")->capacity == 3000);
+        for (u32 i = 0; i < 7; ++i) m->spawn(Pos{}, Tag{});
+        KV_CHECK(c, m->live() == 5 && m->refused == 2);
+        engine_shutdown(f);
+    }
+
 }

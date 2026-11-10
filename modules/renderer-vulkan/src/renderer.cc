@@ -96,9 +96,12 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     ok = ok && rv_create_device(r);
     ok = ok && rv_create_frames(r);
     ok = ok && rv_create_resource_pools(r);
-    ok = ok && rv_create_tables(r, kInitialSpriteRows);
+    ok = ok && rv_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
     ok = ok && rv_create_static_buffers(r);
-    ok = ok && rv_ring_init(r, kInitialRingBytes);
+    // The ring holds a frame's uploads for every frame in flight: at most every row of the
+    // tables a frame (after a growth), so a hint for the tables is one for the ring too.
+    VkDeviceSize ring = (VkDeviceSize)desc.sprite_rows * sizeof(GpuSprite) * kFramesInFlight;
+    ok = ok && rv_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
     ok = ok && rv_create_descriptors(r);
     ok = ok && rv_load_shaders(r);
     ok = ok && rv_create_default_texture(r);
@@ -424,7 +427,12 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     r->last_wait = 0.0;
     rv_ring_release(r, f);
     rv_run_garbage(r, f);
-    if (r->sprites.len > r->tables.capacity && !rv_create_tables(r, r->sprites.len)) return false;
+    if (r->sprites.len > r->tables.capacity) {
+        // Growth remarks every row dirty, so the next frame uploads the table whole: logged
+        // with the frame, so a hitch can be found by it (FrameLoopConfig::sprite_rows avoids it).
+        KV_INFO("vulkan", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->sprites.len, r->tables.capacity);
+        if (!rv_create_tables(r, r->sprites.len)) return false;
+    }
     if (f.tables_dirty) rv_write_tables_set(r, f);
     for (u32 slot : f.dirty_slots) rv_write_texture_slot(r, f.textures, slot);
     f.dirty_slots.clear();

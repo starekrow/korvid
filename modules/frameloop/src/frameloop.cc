@@ -35,6 +35,10 @@ u64             g_flags_given  = 0; // bit i: config.flags[i] was on the command
 struct GivenOption { u32 option; const char* value; }; // config.options[option], and what followed it
 GivenOption     g_options[32];
 u32             g_option_count = 0;
+// --capacity kind=N, repeatable: over the game's config, which keeps its own as well.
+char            g_capacity_names[16][64];
+KindCapacity    g_capacities[32];
+u32             g_capacity_count = 0;
 u32             g_threads      = 0; // 0: every core
 const char*     g_trace_path   = nullptr; // --profile FILE
 bool            g_prof_report  = false;   // --prof-report: the top zones with the fps line
@@ -128,6 +132,19 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--idle-margin-ms") == 0 && i + 1 < argc) g_idle_margin = atof(argv[++i]) * 1e-3;
         else if (strcmp(argv[i], "--no-idle") == 0) g_idle = false;
         else if (strcmp(argv[i], "--overlay") == 0) g_overlay = true;
+        else if (strcmp(argv[i], "--sprite-rows") == 0 && i + 1 < argc) cfg.sprite_rows = (u32)strtoul(argv[++i], nullptr, 10);
+        else if (strcmp(argv[i], "--capacity") == 0 && i + 1 < argc) {
+            const char* arg = argv[++i];
+            const char* eq = strchr(arg, '=');
+            u32 n = g_capacity_count;
+            if (!eq || eq == arg || (usize)(eq - arg) >= sizeof g_capacity_names[0] || n >= KV_COUNTOF(g_capacity_names)) {
+                KV_ERROR("frameloop", "--capacity kind=N (a kind's full name, at most %u of them)", (u32)KV_COUNTOF(g_capacity_names));
+                return false;
+            }
+            memcpy(g_capacity_names[n], arg, (usize)(eq - arg));
+            g_capacity_names[n][eq - arg] = 0;
+            g_capacities[g_capacity_count++] = KindCapacity{g_capacity_names[n], (u32)strtoul(eq + 1, nullptr, 10)};
+        }
         else if (u32 f = game_flag(cfg, argv[i])) g_flags_given |= (u64)1 << (f - 1);
         else if (u32 o = game_option(cfg, argv[i]); o && i + 1 < argc) {
             if (g_option_count >= KV_COUNTOF(g_options)) { KV_ERROR("frameloop", "at most %u game options", (u32)KV_COUNTOF(g_options)); return false; }
@@ -136,7 +153,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay] [--capacity KIND=N]... [--sprite-rows N]", argv[0]);
             return false;
         }
     }
@@ -180,6 +197,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     rd.height        = s->window->height();
     rd.vsync         = s->window->vsync();
     rd.validation    = s->config.validation;
+    rd.sprite_rows   = s->config.sprite_rows;
     s->renderer = renderer_create(engine, rd);
     if (!s->renderer) return false;
 
@@ -414,7 +432,18 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
     engine.trace.print  = g_trace_events;
     engine.threads      = g_threads;
     if (g_trace_events && !KV_DEV) KV_WARN("frameloop", "--trace-events: the event trace exists in dev builds only");
-    if (!engine_init(engine, kv_module_list(), g_config.engine)) {
+    // The game's capacities, then the command line's (a later entry for a kind wins).
+    EngineConfig engine_config = g_config.engine;
+    if (g_capacity_count) {
+        for (const KindCapacity& kc : g_config.engine.capacities)
+            if (g_capacity_count < KV_COUNTOF(g_capacities)) {
+                memmove(g_capacities + 1, g_capacities, sizeof(KindCapacity) * g_capacity_count);
+                g_capacities[0] = kc;
+                ++g_capacity_count;
+            }
+        engine_config.capacities = Span<const KindCapacity>(g_capacities, g_capacity_count);
+    }
+    if (!engine_init(engine, kv_module_list(), engine_config)) {
         names_shutdown();
         mem_shutdown();
         return 1;

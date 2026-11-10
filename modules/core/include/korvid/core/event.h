@@ -18,6 +18,7 @@ namespace kv {
 
 enum EventFlags : u8 {
     EvNextTick = 1, // delivered at the first boundary of the next tick, never the same tick
+    EvStaleOk  = 2, // dropped for a stale handle as a matter of course (an overlap ending with a death): no dev warning
 };
 
 // A plain-data event type. The id slot is EventType<E>::id, filled at init.
@@ -86,6 +87,7 @@ struct EventBus {
     Span<const EventTypeDesc* const> types; // by id, set by the engine; empty means no schemas
     u64                delivered_total = 0;
     u64                dropped_stale   = 0; // events dropped for a stale handle, ever
+    Array<u8>          stale_warned;        // by type: dev builds warn the first time a type is dropped
     u32                dropped_last    = 0; // at the last deliver()
 
     void init(u32 writer_count = 1);

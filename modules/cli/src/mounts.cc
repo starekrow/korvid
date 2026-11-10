@@ -68,7 +68,7 @@ void kinds_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         for (Table& tab : e.tables) {
             char slashed[KV_KIND_NAME_MAX], summary[96];
             cli_dots_to_slashes(tab.name, slashed, sizeof slashed);
-            snprintf(summary, sizeof summary, "%u live of %u%s", tab.live(), tab.desc->capacity, tab.desc->cosmetic ? ", cosmetic" : "");
+            snprintf(summary, sizeof summary, "%u live of %u%s", tab.live(), tab.capacity, tab.desc->cosmetic ? ", cosmetic" : "");
             if (!tree.add(slashed, true, summary)) return;
         }
         return;
@@ -156,7 +156,7 @@ bool kinds_describe(CliContext& ctx, const char* rel) {
         usize at = 0;
         for (const Column& c : t->columns)
             at += (usize)snprintf(line + at, sizeof line - at, "%s%s%s%s", at ? ", " : "", c.desc->name, c.desc->has_prev() ? " (prev)" : "", c.desc->is_sim() ? "" : " (cosmetic)");
-        ctx.print("%s: %u live of %u, module %s%s", t->name, t->live(), t->desc->capacity, e.modules[t->module].desc->name, t->desc->cosmetic ? ", cosmetic kind" : "");
+        ctx.print("%s: %u live of %u, module %s%s", t->name, t->live(), t->capacity, e.modules[t->module].desc->name, t->desc->cosmetic ? ", cosmetic kind" : "");
         ctx.print("columns: %s", line);
         return true;
     }

@@ -108,6 +108,7 @@ void EventBus::free() {
     for (EventBuffer& b : delivered) b.free();
     delivered.free();
     wave_start.free();
+    stale_warned.free();
 }
 
 namespace {
@@ -140,7 +141,21 @@ void EventBus::deliver(bool tick_start) {
                 // One at a time: an event naming the dead is dropped, and counted.
                 for (u32 i = 0; i < n; ++i) {
                     u8* e = src.bytes.data + (usize)i * src.elem_size;
-                    if (!schema_each_handle(desc->fields, e, handle_is_live, nullptr)) { ++dropped_stale; ++dropped_last; continue; }
+                    if (!schema_each_handle(desc->fields, e, handle_is_live, nullptr)) {
+                        ++dropped_stale;
+                        ++dropped_last;
+#if KV_DEV
+                        // Right for an OverlapEnd whose entity died; a trap for an event about a
+                        // death that its own emitter caused. Said once a type, in dev builds.
+                        stale_warned.resize_fill(t + 1, 0);
+                        if (!stale_warned[t] && !(desc->flags & EvStaleOk)) {
+                            stale_warned[t] = 1;
+                            KV_WARN("events", "a %s was dropped at delivery: a handle in it was stale (said once for this type; EventBus::dropped_stale counts)",
+                                    desc->name);
+                        }
+#endif
+                        continue;
+                    }
                     memcpy(dst.bytes.push_n(src.elem_size), e, src.elem_size);
 #if KV_DEV
                     dst.emitters.push(src.emitters[i]);

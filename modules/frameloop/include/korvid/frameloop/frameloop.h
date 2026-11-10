@@ -16,6 +16,8 @@
 // loopback; --cli-stdin reads commands from stdin even when it is a terminal (it always
 // does when stdin is not one). Idle work (engine_idle_run) gets the time the renderer
 // blocked for last frame less --idle-margin-ms (1.5 by default); --no-idle turns it off.
+// --capacity KIND=N (repeatable) sets a kind's capacity over the game's (EngineConfig);
+// --sprite-rows N the renderer's first sprite table size over the config's.
 #pragma once
 #include "korvid/core/engine.h"
 #include "korvid/math/color.h"
@@ -36,6 +38,7 @@ struct FrameLoopConfig {
     f64         run_seconds    = -1.0;  // >= 0: ExitRequested after this long (smoke tests)
     color       clear_color{0.09f, 0.09f, 0.11f, 1.0f};
     u32         report_every_seconds = 1; // fps line; 0 is silent
+    u32         sprite_rows = 0;          // the renderer's sprite tables' first size (0: its default); a game that knows it draws many asks
     Span<const char* const> flags = {};   // boolean flags the game accepts ("--demo"); frameloop_flag says which were given
     Span<const char* const> options = {}; // flags the game accepts that take a value ("--dial"), each as often as it likes; frameloop_option
     EngineConfig engine = {};             // heaps and which module lives in which

@@ -1,4 +1,5 @@
 #include "korvid/collision/module.h"
+#include "collision_internal.h"
 #include "korvid/core/sort.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
@@ -26,10 +27,10 @@ constinit const FieldDesc k_begin_fields[] = {KV_FIELDS(OverlapBegin, a, b)};
 constinit const FieldDesc k_end_fields[]   = {KV_FIELDS(OverlapEnd, a, b)};
 constinit const EventTypeDesc k_events[] = {
     KV_EVENT_EX(OverlapBegin, k_begin_fields, 0),
-    KV_EVENT_EX(OverlapEnd, k_end_fields, 0),
+    KV_EVENT_EX(OverlapEnd, k_end_fields, EvStaleOk), // an end whose entity died is dropped as a matter of course
 };
 
-struct Pair { u64 a, b; };
+typedef CollPair Pair;
 
 struct CollisionState {
     Array<Pair>       prev; // sorted, from the last tick
@@ -49,18 +50,11 @@ void box_of(const Collider2& c, point2 p, f32* x0, f32* y0, f32* x1, f32* y1) {
     *y0 = p.y + c.offset.y - h.y; *y1 = p.y + c.offset.y + h.y;
 }
 
-bool meets(u32 la, u32 ma, u32 lb, u32 mb) { return (la & mb) && (lb & ma); }
+bool meets(u32 la, u32 ma, u32 lb, u32 mb) { return collision_meets(la, ma, lb, mb); }
 
 // ---- the overlap broadphase --------------------------------------------------------------------
 
-struct Item {
-    Handle h;
-    point2 p;
-    f32    r;     // bounding radius
-    u32    layer, mask;
-    u8     shape;
-    vec2   half;
-};
+u64 cell_key(i32 cx, i32 cy) { return ((u64)(u32)cx << 32) | (u32)cy; }
 
 int compare_pairs(const void* x, const void* y) {
     const Pair& a = *(const Pair*)x;
@@ -69,83 +63,30 @@ int compare_pairs(const void* x, const void* y) {
     return a.b < b.b ? -1 : a.b > b.b ? 1 : 0;
 }
 
-bool overlaps(const Item& a, const Item& b) {
-    vec2 d = b.p - a.p;
-    bool ca = a.shape == (u8)ColliderShape::Circle, cb = b.shape == (u8)ColliderShape::Circle;
-    if (ca && cb) { f32 r = a.r + b.r; return length_sq(d) < r * r; }
-    if (!ca && !cb) return fabsf(d.x) < a.half.x + b.half.x && fabsf(d.y) < a.half.y + b.half.y;
-    // Circle against box: the box's nearest point to the circle's center.
-    const Item& box = ca ? b : a;
-    const Item& cir = ca ? a : b;
-    vec2 off = cir.p - box.p;
-    f32 cx = off.x < -box.half.x ? -box.half.x : off.x > box.half.x ? box.half.x : off.x;
-    f32 cy = off.y < -box.half.y ? -box.half.y : off.y > box.half.y ? box.half.y : off.y;
-    vec2 gap{off.x - cx, off.y - cy};
-    return length_sq(gap) < cir.r * cir.r;
-}
-
-u64 cell_key(i32 cx, i32 cy) { return ((u64)(u32)cx << 32) | (u32)cy; }
-
-// Phase Sim, after the resolve: every collider into a uniform grid whose cell is the
-// largest collider's diameter, so overlapping pairs always sit in neighboring cells;
-// pairs in canonical order, sorted, diffed against last tick's.
+// Phase Sim, after the resolve: every collider, grouped by its layer and mask, the pairs
+// that overlap found group against group (pairs.cc), sorted, diffed against last tick's.
 void broadphase(TickContext& ctx) {
     KV_ZONE("collision.broadphase");
     CollisionState& st = ctx.state_as<CollisionState>();
     MemScope scope;
-    Array<Item> items = array_in<Item>(mem_scratch());
-    f32 max_r = 0.5f;
+    Array<CollItem> items = array_in<CollItem>(mem_scratch());
     for (KindRows k : ctx.view<const Transform2, const Collider2>()) {
         Span<const Transform2> t = k.col<const Transform2>();
         Span<const Collider2>  c = k.col<const Collider2>();
         for (u32 i = 0; i < k.rows(); ++i) {
             if (!k.alive(i)) continue;
-            Item it;
+            CollItem it;
             it.h = k.handle_at(i); it.p = t[i].position + c[i].offset;
             it.shape = c[i].shape; it.half = c[i].half; it.layer = c[i].layer; it.mask = c[i].mask;
             it.r = it.shape == (u8)ColliderShape::Circle ? c[i].radius : length(c[i].half);
-            if (it.r > max_r) max_r = it.r;
             items.push(it);
         }
     }
-
-    f32 cell = 2.0f * max_r;
-    Map<u64, u32> heads;
-    heads.init(mem_scratch());
-    Array<u32> next = array_in<u32>(mem_scratch());
-    next.resize_fill(items.len, 0xFFFFFFFFu);
-    for (u32 i = 0; i < items.len; ++i) {
-        u64 key = cell_key((i32)floorf(items[i].p.x / cell), (i32)floorf(items[i].p.y / cell));
-        u32* head = heads.get_or_insert(key, 0xFFFFFFFFu);
-        next[i] = *head;
-        *head = i;
-    }
-
-    st.now.clear();
-    u32 tested = 0;
-    for (u32 i = 0; i < items.len; ++i) {
-        const Item& a = items[i];
-        i32 cx = (i32)floorf(a.p.x / cell), cy = (i32)floorf(a.p.y / cell);
-        for (i32 dy = -1; dy <= 1; ++dy)
-            for (i32 dx = -1; dx <= 1; ++dx) {
-                u32* head = heads.find(cell_key(cx + dx, cy + dy));
-                if (!head) continue;
-                for (u32 j = *head; j != 0xFFFFFFFFu; j = next[j]) {
-                    if (j <= i) continue; // each unordered pair once
-                    const Item& b = items[j];
-                    ++tested;
-                    if (!meets(a.layer, a.mask, b.layer, b.mask)) continue;
-                    if (!overlaps(a, b)) continue;
-                    Pair p{a.h.bits, b.h.bits};
-                    if (p.a > p.b) { u64 t = p.a; p.a = p.b; p.b = t; }
-                    st.now.push(p);
-                }
-            }
-    }
-    if (st.now.len > 1) kv::sort(st.now.data, st.now.len, sizeof(Pair), compare_pairs);
+    CollPairStats ps;
+    collision_find_pairs(Span<const CollItem>(items.data, items.len), st.now, &ps);
     st.stats.colliders = items.len;
-    st.stats.tested = tested;
-    st.stats.cell = cell;
+    st.stats.tested = ps.tested;
+    st.stats.groups = ps.groups;
 
     // Diff two sorted lists: new pairs begin, missing pairs end. An End whose entity is
     // gone is dropped at delivery, by the bus's stale-handle rule.
