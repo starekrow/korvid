@@ -187,6 +187,10 @@
             { "type": "label", "name": "table", "text": "{=scores_table}", "color": "cyan" },
             { "type": "label", "name": "rows", "text": "", "size": [720, "fit"] },
             { "type": "label", "name": "hint", "text": "CONFIRM TO GO ON", "color": "dim" } ] } ] },
+    "attract": {
+      "type": "stack", "name": "attract", "anchor": "center", "gap": 14, "align": "center",
+      "children": [
+        { "type": "label", "name": "press", "text": "PRESS START", "color": "gold", "font_scale": 3 } ] },
     "card": {
       "type": "stack", "name": "card", "anchor": "center", "offset": [0, -160], "gap": 12, "align": "center",
       "children": [

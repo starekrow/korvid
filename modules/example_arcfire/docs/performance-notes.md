@@ -397,3 +397,14 @@ way, in the engine: the sprite extract's removes walked the table's rows, so a t
 fresh sim had emptied (no rows) left its last sprites drawn; they walk every slot it sent
 now. Opening a screen costs a frame or two of 40 to 50 fps in a dev build (1,300 UI deltas
 as its tree is built), nothing after.
+
+**M3. Record and replay.** A bot run at Normal records 117,958 bytes (11,318 ticks: the
+stick changes most ticks, 12 bytes a change) and at Hard 121,548. Each replays with all of
+its hashes matching (189 and 193) at 1 and 16 threads, the bot standing down and the file
+flying the ship. The first try diverged for stretches of 35 ticks and recovered: a
+recorded stick of length 1.00000012, clamped again by the sample, moved the ship a few
+millionths differently until a wall evened it out; the replay now sets the sampled value
+exactly. The attract mode's demo, from the title, hashes as `--demo` on its first pass and
+after each fresh sim; the first pass did not at first, because one sim tick ran on the
+title before its screen's hold landed: the title now holds the sim itself from the moment
+it opens.

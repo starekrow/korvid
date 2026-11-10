@@ -56,7 +56,21 @@ touches the options.
 
 A flag that names a run goes straight into it and quits at its end: `--arcade`, `--stage
 NAME` (`assets/stages/NAME.stage.json`), and the ways it flies itself below; `--difficulty
-easy|normal|hard` is where arcade or the stage starts (Normal). `--again` is a check: a run
+easy|normal|hard` is where arcade or the stage starts (Normal). Left alone on the title for 20 seconds (`--attract SECONDS`; 0 never), the game plays the
+demo from a fresh sim with PRESS START blinking over it, hashing tick for tick as `--demo`
+does; a key or a pad's button, or the demo's end, goes back to the title.
+
+`--record FILE` writes a run's input and `--replay FILE` plays it back, checking the state
+hash every 60 ticks (the frame loop's; its README has the file). A run started from the
+title records the arguments that start it, so its replay goes straight in. Two recorded bot
+runs, Shoreline at Normal and Hard, are in `tests/replays/`; replayed from the repository
+root, `build/linux-dev/bin/example_arcfire --replay
+modules/example_arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 11318,
+matched`. A change to the
+sim makes them diverge, and they are recorded again (`--autoplay --stage shoreline
+--difficulty normal --record ...`).
+
+`--again` is a check: a run
 that ends starts once more from a fresh sim instead of quitting, so `--demo --again --hash`
 prints the demo's hashes twice, and the two must match. Over `--cli-stdin`, `press ACTION
 [TICKS] [X Y]` holds an action as a player would, `type TEXT` types, and `screenshot FILE`

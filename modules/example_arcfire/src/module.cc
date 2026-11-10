@@ -14,6 +14,7 @@
 #include "korvid/ui/ui.h"
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace kv::arcfire {
@@ -213,7 +214,7 @@ constinit const SystemDesc k_systems[] = {
      .main_thread = true},
     {.name = ".records", .phase = Phase::PreSim, .fn = records, .main_thread = true, .runs = RunWhen::Always},
     {.name = ".screens", .phase = Phase::PreSim, .fn = screens, .reads = "input.actions", .after = ".pause", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".pause", .phase = Phase::PreSim, .fn = pause, .reads = "input.actions", .after = ".boot", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".pause", .phase = Phase::PreSim, .fn = pause, .reads = "input.actions, input.state", .after = ".boot", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet.Transform2, ^.bullet.Velocity, ^.active.Transform2, ^.active.Velocity, ^.ship.Transform2, ^.air.Transform2, ^.ground.Transform2, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss, ^.item.Transform2, ^.item.Item, .world.Dials",
      .main_thread = true},
     {.name = ".scroll", .phase = Phase::Sim, .fn = scroll, .writes = ".world.Stage"},
@@ -331,6 +332,7 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     }
     g->front_door = !stage_named && !g->demo && !g->stress && !g->autoplay && !g->bench[0] && !frameloop_flag(e, "--arcade");
     g->again = frameloop_flag(e, "--again");
+    if (const char* s = frameloop_option(e, "--attract")) g->attract_after = (u32)(atof(s) * 60.0);
     if (const char* diff = frameloop_option(e, "--difficulty")) {
         g->start_named = true;
         if (!strcmp(diff, "easy")) g->start = Position::Easy;

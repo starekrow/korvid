@@ -11,12 +11,18 @@
 // presentation but the run it starts, whose plan (arcade or a stage, the difficulty) is
 // hashed as the dials are.
 //
+// Attract mode: the title left alone for --attract seconds (20) plays the demo from a fresh
+// sim, as --demo plays it; a key or a pad's button goes back to the title, and so does the
+// demo's end.
+//
 // `--again`, a check: a run that ends starts once more from a fresh sim instead of quitting,
 // so its hashes can be compared with the first's, tick for tick.
 #include "arcfire.h"
 #include "korvid/core/log.h"
 #include "korvid/core/name.h"
+#include "korvid/frameloop/frameloop.h"
 #include "korvid/platform_hid/actions.h"
+#include "korvid/platform_hid/input.h"
 #include "korvid/ui/ui.h"
 #include <string.h>
 
@@ -25,6 +31,9 @@ namespace kv::arcfire {
 namespace {
 
 constexpr f32 kCoverSeconds = 0.35f;
+// The title holds the sim from the moment it opens (a screen's own hold lands a tick later,
+// and a sim tick there would make the next run start at 1) until a run begins.
+constexpr u32 kHoldTitle = (u32)HoldGame << 1;
 
 Handle open_menu(Engine& e, Game& g, const char* screen, i32 layer, const char* focus = nullptr) {
     UiOpen o;
@@ -49,6 +58,11 @@ void close_pause(Engine& e, Game& g) {
 }
 
 void open_title(Engine& e, Game& g) {
+    engine_hold(e, kHoldTitle, true);
+    close_menu(e, g.attract_screen);
+    g.attract = false;
+    g.demo = false;
+    g.idle_ticks = 0;
     char note[64];
     snprintf(note, sizeof note, "ARCADE STARTS AT %s", position_name((u32)g.start));
     g.scores_from_title = false;
@@ -112,6 +126,7 @@ void flow_ready(TickContext& ctx, Game& g) {
 void run_begin(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
     if (g.runs++) clear_run(ctx, g);
+    engine_hold(e, kHoldTitle, false);
     g.arcade = g.plan.arcade;
     g.stage_select = g.plan.stage_select;
     g.start = g.plan.start;
@@ -132,8 +147,20 @@ void run_begin(TickContext& ctx, Game& g) {
     for (u32 i = 0; i < d.options && i < kMaxOptions; ++i) option_add(ctx, g);
     if (g.bench[0]) bench_spawn(ctx, g, d);
     hud_shown(e, g, true);
-    card_open(e, g, 1, d.position);
+    if (!g.attract) card_open(e, g, 1, d.position);
+    else { // the attract's PRESS START, over the field's middle
+        UiOpen o;
+        o.layer = 96;
+        o.input = false;
+        g.attract_screen = ui_open(e, g.ui, "attract", o);
+        g.blink = 0;
+    }
     g.result = RunResult{};
+    if (g.front_door) { // a recording of a run the title chose says how to start it
+        char note[96];
+        snprintf(note, sizeof note, "%s %s --difficulty %s", g.arcade ? "--arcade" : "--stage", g.arcade ? "" : g.stage_name, position_name((u32)g.start));
+        frameloop_record_note(e, note);
+    }
     g.mode = Mode::Run;
     KV_INFO("arcfire", "run %u: %s, %s at %s", g.runs, g.arcade ? "arcade" : g.stage_select ? "stage select" : "a run", g.stage.name,
             position_name(d.position));
@@ -171,6 +198,7 @@ void run_over(TickContext& ctx, Game& g) {
     // Held at once: a screen's own hold lands a tick later, and the run's last sim tick is
     // the one that ended it. The switch that follows lets go.
     engine_hold(*ctx.engine, HoldGame, true);
+    if (g.attract) { flow_request(*ctx.engine, g, Next::Title, true); return; }
     if (g.front_door || g.demo) results_open(*ctx.engine, g, g.result);
     else run_finished(ctx, g);
 }
@@ -197,6 +225,29 @@ void pause(TickContext& ctx) {
     Engine& e = *ctx.engine;
     const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
     if (action_pressed(a, g.act_quit)) engine_request_quit(e);
+    // A person at the keys or a pad: the title stays (attract waits), or comes back.
+    const Input& in = *ctx.resource<const Input>("input.state");
+    bool touched = false;
+    for (u64 b : in.sampled.bits) touched = touched || b;
+    for (const GamepadState& p : in.sampled.pads) touched = touched || p.buttons;
+    if (g.attract) {
+        // On every tick, the demo's slow motion included: half a second on, half off.
+        if (!g.attract_screen.is_null()) ui_set_visible(e, g.attract_screen, "press", (g.blink++ / 30) % 2 == 0);
+        if (touched && g.next == Next::None) flow_request(e, g, Next::Title, true);
+        return;
+    }
+    if (g.mode == Mode::Title && g.next == Next::None) {
+        bool menus = !g.select_screen.is_null() || !g.difficulty_screen.is_null() || !g.options_screen.is_null() || !g.scores_screen.is_null();
+        g.idle_ticks = touched || menus ? 0 : g.idle_ticks + 1;
+        if (g.attract_after && g.idle_ticks >= g.attract_after) {
+            KV_INFO("arcfire", "attract: the demo");
+            g.attract = true;
+            g.demo = true;
+            g.plan = RunPlan{false, false, Position::Normal};
+            flow_request(e, g, Next::Run, true);
+        }
+        return;
+    }
     if (!action_pressed(a, g.act_pause) || g.mode != Mode::Run || g.next != Next::None) return;
     if (!g.gameover_screen.is_null() || !g.results_screen.is_null() || !g.name_screen.is_null() || !g.scores_screen.is_null()) return;
     if (!g.options_screen.is_null()) { input_action_override(e, "cancel", true); return; } // as the options' own cancel

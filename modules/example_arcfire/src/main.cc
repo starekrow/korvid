@@ -6,13 +6,16 @@ namespace {
 // Played plainly, the game opens on its title; --arcade goes straight into arcade (the
 // stages in order, round again a difficulty up, ending after Hard), --stage NAME into one
 // stage; --difficulty easy|normal|hard is where either starts. --again runs a run once more
-// from a fresh sim when it ends, to compare the two. --demo plays the scripted minute and quits at the stage's
+// from a fresh sim when it ends, to compare the two. --attract SECONDS: how long the title
+// waits before it plays the demo (20; 0 never). --demo plays the scripted minute and quits at the stage's
 // end; --autoplay puts the bot on the stick; --stress turns every dial up, the ship
 // invulnerable, the stage looping. --dial name=value moves one dial (repeatable). --bench
 // NAME fires one pattern from a fixed emitter, again and again, for writing and measuring
 // patterns.
 constinit const char* const k_flags[] = {"--demo", "--autoplay", "--stress", "--arcade", "--again"};
-constinit const char* const k_options[] = {"--dial", "--bench", "--stage", "--difficulty"};
+constinit const char* const k_options[] = {"--dial", "--bench", "--stage", "--difficulty", "--attract"};
+// What --record keeps and --replay drives: the gameplay, not pause or quit.
+constinit const char* const k_recorded[] = {"move", "shot", "focus", "bomb"};
 constinit const kv::FrameLoopConfig k_config = {
     .title  = "korvid arcfire",
     .width  = 1280,
@@ -22,6 +25,7 @@ constinit const kv::FrameLoopConfig k_config = {
     .sprite_rows = 98304, // the bullet kinds and the particles at their capacities, and the rest: no growth mid-run
     .flags   = k_flags,
     .options = k_options,
+    .recorded_actions = k_recorded,
 };
 }
 

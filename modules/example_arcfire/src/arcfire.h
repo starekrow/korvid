@@ -384,6 +384,10 @@ struct Game {
     bool     front_door = false;          // run plainly: the title; a flag that names a run skips it
     bool     again = false, again_done = false; // --again: a run once more from a fresh sim
     u32      runs = 0;
+    bool     attract = false;         // the demo, played from the title after it sat idle
+    Handle   attract_screen;          // its PRESS START, blinking
+    u32      blink = 0;
+    u32      attract_after = 20 * 60, idle_ticks = 0; // ticks; 0: never
     Handle   title_screen, select_screen, difficulty_screen, confirm_screen;
     // The screens between runs (screens.cc) and what they show.
     Handle   options_screen, gameover_screen, results_screen, name_screen, scores_screen, card_screen;

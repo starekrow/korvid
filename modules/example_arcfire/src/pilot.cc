@@ -30,6 +30,7 @@
 // The stage's end mark quits it. The bot (--autoplay, --stress) is a Sim system; its override
 // lands on the next tick's sample.
 #include "arcfire.h"
+#include "korvid/frameloop/frameloop.h"
 #include "korvid/platform_hid/actions.h"
 #include <math.h>
 #include <string.h>
@@ -271,7 +272,7 @@ void release_all(Engine& e) {
 // Phase Input, before the sample, every sim tick.
 void demo(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
-    if (!g.demo || !g.stage_ready) return;
+    if (!g.demo || !g.stage_ready || frameloop_replaying(*ctx.engine)) return; // a replay flies it
     Engine& e = *ctx.engine;
     u64 t = ctx.tick;
     release_all(e);
@@ -310,7 +311,7 @@ void demo(TickContext& ctx) {
 void bot(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
-    if (!dials.len || !dials[0].bot) return;
+    if (!dials.len || !dials[0].bot || frameloop_replaying(*ctx.engine)) return; // a replay flies it
     Engine& e = *ctx.engine;
     release_all(e);
     bool keep = false;
