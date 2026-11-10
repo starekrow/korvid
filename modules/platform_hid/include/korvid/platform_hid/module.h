@@ -22,6 +22,14 @@ KV_MODULE_DECLARE(platform_hid_module);
 
 // The module's state: for code outside the schedule (the frame loop). Systems reach the
 // input and the window as resources.
+// The CLI's `press`: an action held for a number of sampled ticks, as a person would.
+struct HidPress {
+    u32  action;
+    u32  ticks;  // left
+    vec2 axis;   // an Axis2's direction
+};
+constexpr u32 KV_HID_PRESSES = 8;
+
 struct HidState {
     Input        input;    // raw at frame rate, sampled per tick
     HostWindow   window;   // one window per process; closed at module shutdown
@@ -29,6 +37,8 @@ struct HidState {
     u32          text_requests = 0; // platform_text_input's count
     char         text_override[KV_INPUT_TEXT_MAX] = {}; // input_text_override's, for the next sample
     u32          text_override_len = 0, text_override_backspaces = 0;
+    HidPress     presses[KV_HID_PRESSES] = {}; // the CLI's, being held
+    u32          press_count = 0;
 };
 
 // Opens the window. Null if one is already open or SDL refused. Owned by the module.

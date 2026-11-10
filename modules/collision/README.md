@@ -190,6 +190,9 @@ doing so and the broadphase reports them after its movers.
 - **Cell size follows each group's largest collider.** One huge collider coarsens only its
   own group's grid; it costs its own lookups over the groups it meets, not everyone's.
   Within a group that meets itself, keep radii within an order of magnitude.
+- **A fresh sim forgets the pairs.** On `SimReset` (`engine_sim_reset`) the last tick's
+  pairs go, since the new run is issued the same handles: every overlap of the new run
+  begins.
 - **Mask and layer edits take effect next tick.** The broadphase reads the column once
   per tick, after the movers.
 - **Determinism.** Pairs are found in slot order and sorted, so the same world gives

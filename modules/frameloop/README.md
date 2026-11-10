@@ -82,7 +82,7 @@ renders once.
 | `--trace-events` | print every delivered event with its emitter (dev builds) |
 | `--threads N` | the job pool's size, main included; 1 is serial |
 | `--profile FILE`, `--prof-report` | a Chrome trace; the top zones with every fps line. Either turns on GPU timing: a `gpu` line with every fps line (the GPU's frame, its sort and draw, overdraw: `renderer_gpu_stats`) and a `gpu` track in the zones and the trace |
-| `--screenshot FILE`, `--screenshot-frame N` | one presented frame as a binary PPM (frame 90 unless said) |
+| `--screenshot FILE`, `--screenshot-frame N`, `--screenshot-tick N` | one presented frame as a binary PPM (frame 90 unless said; or the first at or past tick N, counting every tick but those a load held). The CLI's `screenshot FILE` takes the next frame drawn |
 | `--check-sort` | read the GPU sort back every 30th frame and verify it |
 | `--io sync`, `--io uring` | the I/O queue's backend (the default picks io_uring where the kernel has it) |
 | `--pack FILE` (repeatable), `--assets DIR` | mounts over `<exe dir>/assets/` and `<exe dir>/<exe>.kpak`, later ones winning |

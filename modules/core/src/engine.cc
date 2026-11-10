@@ -25,9 +25,11 @@ bool names_equal(const char* a, const char* b) { return strcmp(a, b) == 0; }
 // unaffected by what the core adds.
 constinit const FieldDesc k_spawned_fields[]    = {KV_FIELD(Spawned, ticket), KV_FIELD(Spawned, kind), KV_FIELD(Spawned, entity)};
 constinit const FieldDesc k_state_edge_fields[] = {KV_FIELD(StateEdge, entity), KV_FIELD(StateEdge, trigger), KV_FIELD(StateEdge, value)};
+constinit const FieldDesc k_sim_reset_fields[]  = {KV_FIELD(SimReset, resets), KV_FIELD(SimReset, pad)};
 constinit const EventTypeDesc k_core_events[] = {
     KV_EVENT_EX(Spawned, k_spawned_fields, 0),
     KV_EVENT_EX(StateEdge, k_state_edge_fields, 0),
+    KV_EVENT_EX(SimReset, k_sim_reset_fields, 0),
 };
 
 bool check_module_names(Span<const ModuleDesc* const> modules) {
@@ -990,6 +992,32 @@ u32 engine_frame(Engine& e, f64 frame_dt) {
         e.phases.run_tick(e, e.events, e.clock.tick_dt, tick, paused);
     }
     return ticks;
+}
+
+void engine_sim_reset(Engine& e) {
+    KV_ASSERT(e.clock.paused); // a held tick: no sim system is between its reads and its writes
+    u32 emptied = 0;
+    for (Table& t : e.tables) {
+        if (t.desc && t.desc->cosmetic) continue;
+        emptied += t.live();
+        t.restore_slots(Span<const u32>(), Span<const u32>()); // no slots: as at startup
+    }
+    u64 was = e.clock.tick_count;
+    e.clock.tick_count = 0;
+    e.timers.free(); // every scheduled event and its ticket
+    e.timers.next_ticket = 1;
+    e.timers.init();
+    for (EventWriter& w : e.events.writers) w.clear(); // emitted and not delivered: about the old run
+    auto drop_commands = [](CommandBuffer& cb) { cb.bytes.clear(); cb.count = 0; };
+    drop_commands(e.commands);
+    e.commands.next_ticket = 1;
+    for (Array<ScheduledSystem>& phase : e.phases.systems)
+        for (ScheduledSystem& s : phase) { drop_commands(s.commands); s.spawn_tickets = s.timer_tickets = 0; }
+    for (ScheduledSystem& h : e.handlers) { drop_commands(h.commands); h.spawn_tickets = h.timer_tickets = 0; }
+    e.last_hash = 0;
+    ++e.sim_resets;
+    e.events.emit(SimReset{e.sim_resets, 0});
+    KV_INFO("engine", "sim reset %u at tick %llu: %u entities gone, the sim tick back to 0", e.sim_resets, (unsigned long long)was, emptied);
 }
 
 void engine_hold(Engine& e, u32 reason, bool on) {

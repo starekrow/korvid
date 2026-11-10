@@ -63,6 +63,19 @@ that finds an engine limit adds a line here.
 
 ## Fixed
 
+- **A fresh sim** (slice 5, asked for by the title). A second run in one process began at a
+  later sim tick with every table's slots and generations where the first left them, and
+  patterns seed from `(handle, tick)`: a different run from the same input.
+  `engine_sim_reset` (core) puts every kind that is not cosmetic back to its startup slots
+  (`Table::restore_slots` with none), the sim tick to 0, and drops the timer wheel,
+  undelivered events, unapplied commands and the units' ticket counters, then emits
+  `SimReset` for module state that follows the sim (the collision module forgets its last
+  pairs, whose handles the new run is issued again). A paused tick's units after the call
+  see the new sim tick. Tested in core (`reset_test.cc`: handles, hashes and a scheduled
+  event against a fresh engine); in the game, `--demo --again --hash`. Cosmetic rows
+  parented to a sim entity stay their owner's to clear. Alongside, two dev conveniences:
+  the CLI's `press ACTION [TICKS] [X Y]` (platform_hid) and `screenshot FILE` (frameloop).
+
 - **What the GPU does** (after slice 3; asked for by starekrow). Timestamps around the
   frame's passes and a pipeline-statistics query around its sort and drawing, read at the
   frame's next fence (no stall), go to the profiler's new `gpu` track (`prof_track`: spans

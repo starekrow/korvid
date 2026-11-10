@@ -3,6 +3,7 @@
 #include "korvid/platform/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
+#include "korvid/core/cli.h"
 #include "hid_backend.h"
 #include "korvid/core/utf8.h"
 #include <string.h>
@@ -48,8 +49,34 @@ void input_sample(TickContext& ctx) {
         s.input.raw.backspaces += s.text_override_backspaces;
         s.text_override[0] = 0; s.text_override_len = 0; s.text_override_backspaces = 0;
     }
+    // The CLI's presses stand in for the devices while they last.
+    for (u32 i = 0; i < s.press_count;) {
+        HidPress& p = s.presses[i];
+        ActionState& a = s.actions.actions[p.action];
+        a.override_set = true;
+        a.override_down = true;
+        a.override_axis = p.axis;
+        if (--p.ticks == 0) p = s.presses[--s.press_count];
+        else ++i;
+    }
     s.input.sample();
     input_actions_sample(s.actions, s.input.sampled);
+}
+
+// `press ACTION [TICKS] [X Y]`: hold a named action for TICKS sampled ticks (6), an Axis2
+// toward (X, Y), so a script over the CLI can work menus and drive a game as a player does.
+void cli_press(CliContext& ctx, Span<const char* const> args) {
+    HidState* s = engine_module_state_as<HidState>(*ctx.engine, "platform_hid");
+    if (!s || args.len < 1) { ctx.fail("press ACTION [TICKS] [X Y]"); return; }
+    u32 id = s->actions.find(args[0]);
+    if (id == KV_ACTION_NONE) { ctx.fail("no action '%s'", args[0]); return; }
+    u32 ticks = 6;
+    vec2 axis{0, 0};
+    if (args.len >= 2 && !cli_arg_u32(ctx, args[1], "TICKS", &ticks)) return;
+    if (args.len >= 4 && (!cli_arg_f32(ctx, args[2], "X", &axis.x) || !cli_arg_f32(ctx, args[3], "Y", &axis.y))) return;
+    if (ticks == 0 || s->press_count >= KV_HID_PRESSES) { ctx.fail(ticks ? "too many presses held" : "TICKS must be at least 1"); return; }
+    s->presses[s->press_count++] = HidPress{id, ticks, axis};
+    ctx.print("%s held for %u ticks", args[0], ticks);
 }
 
 constinit const EventTypeDesc k_events[] = {
@@ -68,6 +95,9 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT(PadButtonUp),
 };
 constinit const ResourceDesc k_resources[] = {{"input.state"}, {"input.actions"}, {".window"}};
+constinit const CliCommandDesc k_commands[] = {
+    {.name = "press", .help = "ACTION [TICKS] [X Y]: hold an action for TICKS sampled ticks (6), an Axis2 toward X Y", .fn = cli_press},
+};
 constinit const SystemDesc   k_systems[] = {
     {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = "input.state, input.actions", .runs = RunWhen::Always},
 };
@@ -79,6 +109,7 @@ KV_MODULE_DEFINE(platform_hid_module) = {
     .events    = k_events,
     .resources = k_resources,
     .systems   = k_systems,
+    .commands  = k_commands,
     .startup   = hid_startup,
     .shutdown  = hid_shutdown,
     .memory    = {.reserve = 64 * 1024},

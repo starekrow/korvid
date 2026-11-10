@@ -109,7 +109,7 @@ void test_module(kv::TestCtx& c) {
 
     // Event ids: module order, then declaration order, from 1.
     KV_CHECK(c, EventType<EvA>::id == 1 && EventType<EvB>::id == 2 && EventType<EvC>::id == 3);
-    KV_CHECK(c, e.event_type_count == 5); // plus the engine's own Spawned and StateEdge, registered last
+    KV_CHECK(c, e.event_type_count == 6); // plus the engine's own Spawned, StateEdge and SimReset, registered last
 
     // Resources likewise, after the two modules' implicit state resources.
     KV_CHECK(c, engine_resource_id(e, "first.state") == 1 && engine_resource_id(e, "second.state") == 2);

@@ -13,6 +13,7 @@ void test_component(kv::TestCtx&);
 void test_kind(kv::TestCtx&);
 void test_context(kv::TestCtx&);
 void test_schedule(kv::TestCtx&);
+void test_reset(kv::TestCtx&);
 void test_handler(kv::TestCtx&);
 void test_trigger(kv::TestCtx&);
 void test_job(kv::TestCtx&);
@@ -45,6 +46,7 @@ int main() {
     test_entity_name(c);
     test_attach(c);
     test_schedule(c);
+    test_reset(c);
     test_handler(c);
     test_trigger(c);
     test_job(c);

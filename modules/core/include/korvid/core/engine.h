@@ -135,6 +135,7 @@ struct Engine {
     bool                  hash_ticks       = false; // log the state hash after every tick
     bool                  hash_systems     = false; // and after every system, to locate drift
     u64                   last_hash        = 0;     // the state hash after the last tick, when hashing
+    u32                   sim_resets       = 0;     // engine_sim_reset calls
     Map<u64, Handle>      entity_names;              // Name::hash -> the entity that has it (or had: checked against the table)
     u32                   entity_names_lock = 0;     // a spin lock: names change outside the schedule and at boundaries
 };
@@ -182,6 +183,19 @@ void engine_trace_delivery(Engine& e, u64 tick, u32 wave);
 // Describes one event through its schema: "Type{...}", or just the name without one.
 int  engine_describe_event(const Engine& e, u32 type_id, const void* event, char* out, usize cap);
 void engine_request_quit(Engine& e);
+
+// A fresh sim: the sim as it stood when the engine started, for a game's second run to be
+// the same run as its first in a new process. Every kind that is not cosmetic is emptied
+// with its slots and generations as at startup (the next spawn gets the handle a fresh
+// engine would give), the sim tick goes back to 0, and the timer wheel, the events not yet
+// delivered, the commands not yet applied and every unit's ticket counters are dropped.
+// Then SimReset is emitted, pending, for the modules whose own state follows the sim.
+// Cosmetic kinds, assets, module state and the clock's holds are left alone: a cosmetic
+// row parented to a sim entity is its owner's to clear, since the handle will be reused.
+// Main thread, on a held tick (a cover, a menu): the events this boundary has delivered
+// still reach their handlers, so call it from the handler that decides it, and spawn the
+// new run after.
+void engine_sim_reset(Engine& e);
 
 // Idle tasks. Registration is startup-ish work from any module; the id removes it.
 u32  engine_idle_add(Engine& e, const char* name, IdleFn fn, void* user);

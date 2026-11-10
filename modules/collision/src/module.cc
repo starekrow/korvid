@@ -397,12 +397,26 @@ constinit const SystemDesc k_systems[] = {
 
 } // namespace
 
+// A fresh sim: last tick's pairs name handles the new run will be issued again, so a pair
+// of the new run would pass for an old one and never begin.
+void on_sim_reset(TickContext& ctx, Span<const SimReset>) {
+    CollisionState& st = ctx.state_as<CollisionState>();
+    st.prev.clear();
+    st.now.clear();
+    st.moved_by_others.clear();
+}
+
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_sim_reset", KV_ON(SimReset, on_sim_reset)},
+};
+
 KV_MODULE_DEFINE(collision_module) = {
     .name       = "collision",
     .events     = k_events,
     .components = k_components,
     .resources  = k_resources,
     .systems    = k_systems,
+    .handlers   = k_handlers,
     .startup    = collision_startup,
     .shutdown   = collision_shutdown,
     .memory     = {.reserve = 64 * 1024},

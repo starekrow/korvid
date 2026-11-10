@@ -63,6 +63,13 @@ struct StateEdge {
     f64    value;   // the field's value after the edge
 };
 
+// Emitted by engine_sim_reset, for the module state that follows the sim (a broadphase's
+// last pairs, a cache keyed by handle): the handles it knew are about to be issued again.
+struct SimReset {
+    u32 resets; // how many there have been, this one included
+    u32 pad;
+};
+
 // A handler: subscribed to one event type, run at phase boundaries on each new batch of
 // it, in waves, under the same read/write rules as a system. Referenced by its id in the
 // table, never by function pointer in sim state.

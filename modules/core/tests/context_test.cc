@@ -128,7 +128,8 @@ void test_context(kv::TestCtx& c) {
     KV_CHECK(c, move.reads.len == 2 && move.writes.len == 4); // Vel in ship and rock; Pos in three kinds, plus g.rock
     KV_CHECK(c, move.reads[0] == engine_resource_id(e, "g.ship.Vel") && move.reads[1] == engine_resource_id(e, "g.rock.Vel"));
     KV_CHECK(c, move.writes[2] == engine_resource_id(e, "g.decal.Pos") && move.writes[3] == engine_resource_id(e, "g.rock"));
-    KV_CHECK(c, EventType<Spawned>::id == e.event_type_count - 1 && EventType<StateEdge>::id == e.event_type_count); // the core's events come last
+    KV_CHECK(c, EventType<Spawned>::id == e.event_type_count - 2 && EventType<StateEdge>::id == e.event_type_count - 1 &&
+                EventType<SimReset>::id == e.event_type_count); // the core's events come last
 
     Table* ship  = engine_table(e, "g.ship");
     Table* rock  = engine_table(e, "g.rock");

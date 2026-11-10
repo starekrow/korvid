@@ -213,6 +213,7 @@ Header `korvid/core/engine.h`:
 | `engine_time_scale(e, s)`, `engine_time_scale_get(e)` | functions | the game's time scale, times the rate while unpaused (slow motion ramped by the game; 0 runs no sim ticks without pausing). Neither changes a tick's length, only how many run a second, so a script counted in ticks is the same run. The CLI's `time scale` |
 | `engine_hold(e, reason, on)`, `engine_holds(e)`, `HoldReason` | functions, enum | the sim is paused while any hold is set: `HoldUser` (what `engine_pause` sets), `HoldLoading`, `HoldFocus`, `HoldGame` and up for a game; each owner clears only its own |
 | `engine_request_quit(e)` | function | the loop ends |
+| `engine_sim_reset(e)`, `SimReset` | function, event | a fresh sim, from a handler on a held tick: every kind but the cosmetic ones emptied with its slots and generations as at startup, the sim tick back to 0, the timer wheel, undelivered events, unapplied commands and the units' ticket counters dropped; then `SimReset` for the modules whose state follows the sim. A game's second run is then the same run as its first in a new process. Cosmetic rows parented to a sim entity are their owner's to clear (the handle will be issued again) |
 | `engine_module(e, name)`, `engine_module_state_as<T>(e, name)` | functions | a started module and its state, for code outside the schedule |
 | `engine_publish(e, self, name, ptr)` | function | the object behind a declared resource, for `ctx.resource<T>` |
 | `engine_resource_id`, `engine_component_id`, `engine_kind_id`, `engine_trigger_id`, `engine_system_phase` | functions | names to ids |
@@ -308,7 +309,7 @@ Header `korvid/core/utf8.h`, `json.h`, `cli.h`, `random.h`, `log.h`, `test.h`:
 Header `korvid/core/os_memory.h`: `os_page_size`, `os_reserve`, `os_commit`, `os_decommit`,
 `os_release`, `os_page_align`: the page layer, the only ported part of the memory system.
 
-What core registers with the engine on its own: the events `Spawned` and `StateEdge`,
+What core registers with the engine on its own: the events `Spawned`, `StateEdge` and `SimReset`,
 the implicit resource `<module>.state` for every module, and the handle kinds of every
 kind table. Core has no `ModuleDesc` of its own; the engine is the host.
 

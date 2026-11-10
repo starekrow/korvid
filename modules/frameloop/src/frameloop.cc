@@ -46,6 +46,7 @@ const char*     g_shot_path    = nullptr; // --screenshot FILE: one frame as a P
 u64             g_shot_frame   = 90;      // --screenshot-frame N: which one
 u64             g_shot_tick    = 0;       // --screenshot-tick N: the first frame at or past tick N, counting every tick but those a load held
 bool            g_shot_taken   = false;
+char            g_cli_shot[512] = {};     // the CLI's `screenshot FILE`: the next frame drawn
 u64             g_shot_ticks   = 0;       // ticks run outside a level load's hold
 bool            g_check_sort   = false;   // --check-sort: verify the GPU sort every 30th frame
 CliConfig       g_cli;                    // --cli-port N, --cli-stdin, --cli-ascii
@@ -323,6 +324,7 @@ void run(Engine& engine, FrameLoopState& s) {
             // A tick is the same moment in every run, where a frame is not.
             bool shot = g_shot_tick ? !g_shot_taken && g_shot_ticks >= g_shot_tick : engine.frame_count == g_shot_frame;
             if (g_shot_path && shot) { renderer_screenshot(s.renderer, g_shot_path); g_shot_taken = true; }
+            if (g_cli_shot[0]) { renderer_screenshot(s.renderer, g_cli_shot); g_cli_shot[0] = 0; }
             if (g_check_sort && engine.frame_count % 30 == 10) renderer_check_sort(s.renderer);
             render_frame(engine, s);
         }
@@ -386,6 +388,18 @@ void run(Engine& engine, FrameLoopState& s) {
     }
 }
 
+// `screenshot FILE`: the next frame drawn, as a PPM.
+void cli_screenshot(CliContext& ctx, Span<const char* const> args) {
+    if (args.len != 1 || !args[0][0]) { ctx.fail("screenshot FILE"); return; }
+    if (strlen(args[0]) >= sizeof g_cli_shot) { ctx.fail("the path is too long"); return; }
+    snprintf(g_cli_shot, sizeof g_cli_shot, "%s", args[0]);
+    ctx.print("the next frame goes to %s", args[0]);
+}
+
+constinit const CliCommandDesc k_commands[] = {
+    {.name = "screenshot", .help = "FILE: the next frame drawn, as a PPM", .fn = cli_screenshot},
+};
+
 } // namespace
 
 KV_MODULE_DEFINE(frameloop_module) = {
@@ -393,6 +407,7 @@ KV_MODULE_DEFINE(frameloop_module) = {
     .events  = k_events,
     .kinds   = k_kinds,
     .systems = k_systems,
+    .commands = k_commands,
     .startup = frameloop_startup,
     .memory  = {.reserve = 64 * 1024},
 };

@@ -106,6 +106,9 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
     auto runs = [&](const ScheduledSystem& s) { return !paused || s.desc->runs == RunWhen::Always; };
     for (u32 p = 0; p < (u32)Phase::Count; ++p) {
         boundary(engine, events, ctx, tick, p == 0);
+        // A paused tick's number is the sim tick that runs next, which a fresh sim
+        // (engine_sim_reset, from a handler) just changed: the units after it see the new one.
+        if (paused) ctx.tick = tick = engine.clock.tick_count;
         if ((Phase)p == Phase::PreSim) {
             // Current becomes previous, before anything moves. On a paused tick too: what
             // the Always systems write is then detected as motion by the extract, and the
