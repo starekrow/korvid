@@ -79,6 +79,15 @@ One of the prompts that led to the creation of the engine slice 4 PRD:
 
     Time for slice 4 of Korvid. This one is focused on completing simple game support. I think it should include text (ideally rendering ttfs loaded as assets), basic sound (replay wav or other common sound formats with pitch and volume adjustments), pause mode, and the beginnings of the node graph so sprites can be children of other sprites. Anything else make sense in there?
 
+This might make it look like I was treating the AI as a person. You, the user
+of the "AI" tool, should be very clear that it is not a person. It is, however,
+_shaped_ like a person in its training and how it understands text. The inputs
+that you give, including the human-isms, will help shape its output. If you 
+treat it like crap or like a dumb workhorse, it will respond like its training
+said people on the internet respond to being treated like crap or like 
+dumb workhorses. The way AIs are trained bakes the shape of our own reactions 
+into them. So, shape your input for the kind of output you want.
+
 I put all the docs the AI generated into the repo, both for reference and 
 because I thought that it would be interesting to see the progression of the
 development later on.
