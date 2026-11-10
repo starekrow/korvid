@@ -1,6 +1,6 @@
 # Renderer
 
-Nov 7, 2026 (game shaders: Nov 10). The sprite renderer after slice 3: what lives on the
+Nov 7, 2026 (game shaders and the full-frame pass: Nov 10). The sprite renderer after slice 3: what lives on the
 GPU, what a frame does, and the rules the pieces follow.
 
 ## Principle
@@ -166,3 +166,28 @@ load (missing, invalid) is logged once and its materials draw in their blend's e
 as does a sixth pair. The cost of the eight slots is the sort's larger histogram: 2,048
 buckets against 768 adds about 0.015 ms a frame to the sort under arcfire's `--bench
 ring --dial rank=56` (0.19 to 0.21 ms on a Radeon 780M), and nothing to the draws, which stay one per run.
+
+## The full-frame pass
+
+Slice 6. `renderer_post_layer(r, layer, shader)` splits the frame at a layer: the buckets
+below it draw into the world's target, a color image of the swapchain's size and format
+(so the sprite pipelines draw into it unchanged), which then turns readable; the window's
+rendering begins with one triangle through the game's post shader (the engine's `vs_post`
+from `post.spv`, the game's `fs_main`, no blending), and the buckets at and above the layer
+draw over it as before. The shader's interface is `post_fragment.slangh`: `post_world(uv)`
+(linear, clamped at the edges), up to 16 float4s the game sets with `renderer_post_params`,
+and a push block with the target's size, the render time, the tick and the interpolation
+point. The pass has its own pipeline layout (set 0: the image, the sampler, a host-visible
+parameter buffer per frame in flight, the set rewritten as its frame is recorded), so the
+sprites' sets and push block are bound again after it.
+
+One target serves both frames in flight: commands on one queue run in submission order, so
+the barrier that opens a frame's world (from the last frame's fragment reads, the old
+contents discarded) is all the sharing needs. The target is made on the first frame that
+needs it and again when the swapchain's size or format moves, the old one retired through
+the garbage queue. A format the device cannot both draw into and sample with a linear
+filter, a shader that will not load or link, or no shader at all: the frame draws straight
+to the window as it did before, and none of the pass's objects exist until a shader is set.
+Its cost on a Radeon 780M at 1280 x 720: about 0.1 ms of GPU a frame and one more layer of
+overdraw.
+

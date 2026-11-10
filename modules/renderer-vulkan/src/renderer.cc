@@ -125,6 +125,7 @@ void renderer_destroy(Renderer* r) {
     if (r->device) {
         vkDeviceWaitIdle(r->device); // the one wait-idle: nothing is in flight after this
         rv_destroy_pipelines_now(r);
+        rv_post_destroy_now(r);
         rv_destroy_swapchain_now(r);
         rv_destroy_frames(r); // runs every frame's garbage
         rv_destroy_resources(r);
@@ -308,6 +309,18 @@ void renderer_material_destroy(Renderer* r, Handle material) {
     rename_after_destroy(r->materials, r->material_by_name, name, material);
     rv_rebind_material(r, row);      // its sprites fall back to the default
     rv_mark_material_dirty(r, row);  // the row is rewritten as a copy of the default
+}
+
+bool renderer_post_layer(Renderer* r, i32 layer, const char* shader) {
+    if (!r) return false;
+    return rv_post_set(r, layer, shader && *shader ? name_intern(shader) : Name{});
+}
+
+void renderer_post_params(Renderer* r, const f32* params, u32 count) {
+    if (!r) return;
+    if (count > KV_POST_PARAMS) count = KV_POST_PARAMS;
+    if (count) memcpy(r->post.params, params, sizeof(f32) * 4 * count);
+    r->post.param_count = count;
 }
 
 Handle renderer_default_material(const Renderer* r) { return r ? r->default_material : Handle{}; }

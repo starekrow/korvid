@@ -14,10 +14,8 @@
 
 namespace kv {
 
-namespace {
-
 // Reads <exe dir>/shaders/<name>. SPIR-V is precompiled by the build; nothing compiles here.
-bool load_shader(Renderer* r, const char* name, VkShaderModule* out) {
+bool rv_load_shader(Renderer* r, const char* name, VkShaderModule* out) {
     char path[1024];
     snprintf(path, sizeof path, "%sshaders/%s", r->base_path, name);
     FILE* f = fopen(path, "rb");
@@ -41,6 +39,8 @@ bool load_shader(Renderer* r, const char* name, VkShaderModule* out) {
     KV_INFO("vulkan", "shader '%s' loaded (%ld bytes)", name, len);
     return true;
 }
+
+namespace {
 
 VkPipelineColorBlendAttachmentState blend_state(BlendMode mode) {
     VkPipelineColorBlendAttachmentState s{};
@@ -339,18 +339,21 @@ void record_screenshot(Renderer* r, VkCommandBuffer cmd, VkImage image, VkExtent
 
 // ---- the draws ---------------------------------------------------------------------------------
 
-// One indirect draw per run of buckets: from a non-empty bucket to the last non-empty bucket
-// of the same pipeline slot before one of another slot intervenes. Buckets in between with
-// nothing in them draw zero instances. Without multi-draw, one call per non-empty bucket. A
-// game slot whose pipeline failed draws with its blend's engine pipeline.
-u32 record_draws(Renderer* r, VkCommandBuffer cmd) {
+} // namespace
+
+// One indirect draw per run of buckets in [first_bucket, end_bucket): from a non-empty
+// bucket to the last non-empty bucket of the same pipeline slot before one of another slot
+// intervenes. Buckets in between with nothing in them draw zero instances. Without
+// multi-draw, one call per non-empty bucket. A game slot whose pipeline failed draws with
+// its blend's engine pipeline.
+u32 rv_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_bucket) {
     u32 draws = 0;
-    u32 b = 0;
-    while (b < kBucketCount) {
+    u32 b = first_bucket;
+    while (b < end_bucket) {
         if (!r->bucket_counts[b]) { ++b; continue; }
         u32 slot = b % kSlotCount;
         u32 first = b, last = b;
-        for (u32 n = b + 1; n < kBucketCount; ++n) {
+        for (u32 n = b + 1; n < end_bucket; ++n) {
             if (!r->bucket_counts[n]) continue;
             if (n % kSlotCount != slot) break;
             last = n;
@@ -382,12 +385,10 @@ u32 record_draws(Renderer* r, VkCommandBuffer cmd) {
     return draws;
 }
 
-} // namespace
-
 // ---- shaders and pipelines --------------------------------------------------------------------
 
 bool rv_load_shaders(Renderer* r) {
-    return load_shader(r, "sprite.spv", &r->sprite_shader) && load_shader(r, "sprite_sort.spv", &r->sort_shader);
+    return rv_load_shader(r, "sprite.spv", &r->sprite_shader) && rv_load_shader(r, "sprite_sort.spv", &r->sort_shader);
 }
 
 bool rv_create_compute_pipelines(Renderer* r) {
@@ -477,6 +478,7 @@ bool rv_create_pipelines(Renderer* r) {
     }
     for (GamePipe& gp : r->game_pipes)
         if (gp.used && !gp.failed) rv_create_game_pipeline(r, gp);
+    rv_post_create_pipeline(r);
     return true;
 }
 
@@ -513,7 +515,7 @@ u32 rv_material_slot(Renderer* r, Name shader, BlendMode blend) {
     gp.blend  = blend;
     char file[96];
     snprintf(file, sizeof file, "%s.spv", name_str(shader));
-    if (!load_shader(r, file, &gp.module)) {
+    if (!rv_load_shader(r, file, &gp.module)) {
         gp.failed = true;
         KV_ERROR("vulkan", "game shader '%s' did not load: its sprites draw with the engine's", name_str(shader));
         return engine;
@@ -532,6 +534,7 @@ void rv_defer_destroy_pipelines(Renderer* r) {
         if (gp.pipeline) rv_defer_destroy(r, Garbage::PipelineKind, (u64)gp.pipeline);
         gp.pipeline = VK_NULL_HANDLE;
     }
+    rv_post_defer_destroy_pipeline(r);
 }
 
 void rv_destroy_pipelines_now(Renderer* r) {
@@ -714,6 +717,27 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
         dep.pImageMemoryBarriers    = &to_color;
         vkCmdPipelineBarrier2(cmd, &dep);
 
+        // With a post shader, the world (the layers below the post layer) goes into the
+        // target first, and the window's rendering begins with the post pass.
+        bool post = rv_post_prepare(r);
+        u32 split = post ? rv_bucket_of(r->post.layer, 0) : 0;
+        VkViewport vp{0.0f, 0.0f, (f32)s.extent.width, (f32)s.extent.height, 0.0f, 1.0f};
+        VkRect2D scissor{{0, 0}, s.extent};
+        VkDescriptorSet sets[2] = {f.tables, f.textures};
+        auto bind_sprites = [&]() {
+            vkCmdSetViewport(cmd, 0, 1, &vp);
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->pipe_layout, 0, 2, sets, 0, nullptr);
+        };
+        u32 draws = 0;
+        if (post) {
+            rv_label_begin(r, cmd, "world");
+            rv_post_begin_world(r, cmd, view);
+            if (draw) { bind_sprites(); draws += rv_record_draws(r, cmd, 0, split); }
+            rv_post_end_world(r, cmd);
+            rv_label_end(r, cmd);
+        }
+
         VkRenderingAttachmentInfo color{};
         color.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         color.imageView   = s.views[image_index];
@@ -730,16 +754,18 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
         rv_label_begin(r, cmd, "draw");
         vkCmdBeginRendering(cmd, &ri);
 
-        if (draw) {
-            VkViewport vp{0.0f, 0.0f, (f32)s.extent.width, (f32)s.extent.height, 0.0f, 1.0f};
-            VkRect2D scissor{{0, 0}, s.extent};
+        if (post) {
             vkCmdSetViewport(cmd, 0, 1, &vp);
             vkCmdSetScissor(cmd, 0, 1, &scissor);
-            VkDescriptorSet sets[2] = {f.tables, f.textures};
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->pipe_layout, 0, 2, sets, 0, nullptr);
-            u32 draws = record_draws(r, cmd);
-            KV_COUNTER("indirect draws", draws);
+            rv_post_draw(r, f, cmd, view);
         }
+        if (draw) {
+            // The post pass's layout disturbed the sprites' sets and push block.
+            bind_sprites();
+            if (post) vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, &push);
+            draws += rv_record_draws(r, cmd, split, kBucketCount);
+        }
+        KV_COUNTER("indirect draws", draws);
 
         vkCmdEndRendering(cmd);
         rv_label_end(r, cmd);

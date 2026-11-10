@@ -1,0 +1,35 @@
+// Korvid renderer-vulkan: what a full-frame post shader sees. The layers below the
+// renderer's post layer are drawn into a target of the renderer's own (the swapchain's size
+// and format); the post pass then draws one triangle over the window through the game's
+// post shader, which includes this file and defines
+//
+//   [shader("fragment")] float4 fs_main(PostVaryings i) : SV_Target
+//
+// What it may read: the world's image (post_world, linear, clamped at the edges), the
+// parameters the game set for the frame (gPostParams[0 .. gPost.count), float4 each), and
+// the push block (the target's size in pixels, the render time, the sim tick, the
+// interpolation point). Its output replaces the window's pixels: no blending. The layers at
+// and above the post layer then draw over it. Presentation only, as a sprite shader is.
+#pragma once
+
+struct PostPush {
+    float2 size;  // the target in pixels
+    float  time;  // the render time in seconds
+    uint   tick;  // the last sim tick drawn
+    uint   count; // gPostParams in use
+    float  alpha; // the interpolation point between the last two ticks
+    uint   pad0, pad1;
+};
+
+[[vk::push_constant]] ConstantBuffer<PostPush> gPost;
+[[vk::binding(0, 0)]] Texture2D               gWorld;
+[[vk::binding(1, 0)]] SamplerState            gWorldSampler; // linear, clamp to edge
+[[vk::binding(2, 0)]] StructuredBuffer<float4> gPostParams;
+
+struct PostVaryings {
+    float4 pos : SV_Position;
+    float2 uv  : UV; // 0 to 1 across the window, +y down; pos.xy is the pixel
+};
+
+// The world's image at a uv.
+float4 post_world(float2 uv) { return gWorld.SampleLevel(gWorldSampler, uv, 0.0); }

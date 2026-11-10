@@ -98,6 +98,19 @@ bool       renderer_screenshot(Renderer* r, const char* path);
 // --check-sort. Logs the result; the renderer counts passes and failures.
 bool       renderer_check_sort(Renderer* r);
 
+// ---- the full-frame pass ----------------------------------------------------------
+// Layers below `layer` are drawn into a target of the renderer's own; a game's post shader
+// (a fragment shader in <exe>/shaders/, named as a material's is, its interface in
+// renderer-vulkan's post_fragment.slangh) then draws that image to the window, and the
+// layers at and above `layer` draw over it (the HUD, the UI). A null shader turns the pass
+// off: the frame is drawn straight to the window, as without one, at no cost. A shader
+// that will not load leaves the pass off, logged once; false then.
+constexpr u32 KV_POST_PARAMS = 16; // float4s
+bool       renderer_post_layer(Renderer* r, i32 layer, const char* shader);
+// The post shader's parameters for the frames from the next one on: `count` float4s (at
+// most KV_POST_PARAMS; more are dropped), copied.
+void       renderer_post_params(Renderer* r, const f32* params, u32 count);
+
 // ---- textures ---------------------------------------------------------------------
 // A new texture's slot shows the default texture until the first upload lands, so a
 // pending asset renders as a placeholder through the same slot. The slot is the stable

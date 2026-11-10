@@ -6,6 +6,7 @@
 //   vk_swapchain.cc    swapchain, frames in flight, fenced recreation
 //   vk_sprite_pass.cc  shaders, pipelines, and the frame's commands: uploads, the compute
 //                      sort, the indirect draws
+//   vk_post_pass.cc    the full-frame pass: the world's target, the post pipeline
 //   renderer.cc        the public API behind korvid/render/renderer.h
 // This header and the sources next to it are the only place a Vulkan header is included.
 #pragma once
@@ -227,6 +228,32 @@ struct GpuProfiler {
     RendererGpuStats last;
 };
 
+// The full-frame pass (renderer_post_layer): the world's color target, the swapchain's
+// size and format, and the game's post shader drawn from it to the window. Its own
+// pipeline layout: set 0 the world's image, a clamped linear sampler and the parameters
+// (a span of the frame ring, rewritten into the frame's set each frame), and a push block.
+struct PostPass {
+    Name                  shader;              // the game's post shader; null: the pass is off
+    i32                   layer = 0;           // the first layer drawn over it
+    bool                  failed = false;      // the shader would not load or link: off, logged
+    VkShaderModule        vertex = VK_NULL_HANDLE; // the engine's vs_post (post.spv), loaded on first use
+    VkShaderModule        module = VK_NULL_HANDLE; // the game's
+    VkPipeline            pipeline = VK_NULL_HANDLE;
+    VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
+    VkPipelineLayout      layout = VK_NULL_HANDLE;
+    VkDescriptorPool      pool = VK_NULL_HANDLE;
+    VkDescriptorSet       sets[kFramesInFlight] = {};
+    VkSampler             sampler = VK_NULL_HANDLE;
+    VkImage               image = VK_NULL_HANDLE;
+    VkDeviceMemory        memory = VK_NULL_HANDLE;
+    VkImageView           view = VK_NULL_HANDLE;
+    VkExtent2D            extent{0, 0};
+    VkFormat              format = VK_FORMAT_UNDEFINED;
+    Buffer                param_buffers[kFramesInFlight]; // host-visible, KV_POST_PARAMS float4s each
+    f32                   params[KV_POST_PARAMS * 4] = {};
+    u32                   param_count = 0;
+};
+
 struct Swapchain {
     VkSwapchainKHR     handle = VK_NULL_HANDLE;
     VkFormat           format = VK_FORMAT_UNDEFINED;
@@ -281,6 +308,7 @@ struct Renderer {
     VkShaderModule        sort_shader     = VK_NULL_HANDLE;
     VkPipeline            pipelines[kBlendCount] = {};
     GamePipe              game_pipes[kGameSlots];
+    PostPass              post;
     f64                   start_time = 0.0; // the render time's zero
     VkPipeline            cs_count = VK_NULL_HANDLE, cs_scan = VK_NULL_HANDLE,
                           cs_bucket_scan = VK_NULL_HANDLE, cs_scatter = VK_NULL_HANDLE, cs_key_sort = VK_NULL_HANDLE;
@@ -414,6 +442,19 @@ void rv_destroy_pipelines_now(Renderer* r);
 bool rv_create_compute_pipelines(Renderer* r);
 // Records one frame: uploads, table copies, the sort, and the draws when there is an image.
 bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view);
+bool rv_load_shader(Renderer* r, const char* name, VkShaderModule* out); // <exe>/shaders/<name>
+u32  rv_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_bucket);
+
+// ---- vk_post_pass.cc --------------------------------------------------------------------
+bool rv_post_set(Renderer* r, i32 layer, Name shader);
+bool rv_post_active(const Renderer* r);      // a post shader set and loaded, and a target to draw into
+bool rv_post_prepare(Renderer* r);           // the target for the swapchain's size and format; false: draw straight
+void rv_post_begin_world(Renderer* r, VkCommandBuffer cmd, const RenderView& view); // rendering into the target
+void rv_post_end_world(Renderer* r, VkCommandBuffer cmd); // ends it; the target becomes readable
+void rv_post_draw(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, const RenderView& view); // the target to the window, inside its rendering
+bool rv_post_create_pipeline(Renderer* r);   // needs the swapchain format
+void rv_post_defer_destroy_pipeline(Renderer* r);
+void rv_post_destroy_now(Renderer* r);
 
 // vk_gpu_profile.cc. Names and labels (VK_EXT_debug_utils, when the instance has it: a
 // no-op unless a capture tool or layer listens). Timing: query pools made after the
