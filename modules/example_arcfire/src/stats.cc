@@ -39,7 +39,10 @@ void stats(TickContext& ctx) {
     Engine& e = *ctx.engine;
     Stats& s = g.stats;
     u32 bullets_before = s.bullets;
-    s.bullets = engine_table(e, g_bullet_kind)->live();
+    s.actives = engine_table(e, g_active_kind)->live();
+    s.bullets = engine_table(e, g_bullet_kind)->live() + s.actives;
+    s.runners = ctx.paused ? 0 : g.runners_stepped;
+    s.fires = s.bullets_spawned;
     s.sprites = live_sprites(e);
     s.bullets_spawned = ctx.paused ? 0 : g.bullets_spawned;
     s.bullets_destroyed = bullets_before + s.bullets_spawned > s.bullets ? bullets_before + s.bullets_spawned - s.bullets : 0;
@@ -57,6 +60,8 @@ void stats(TickContext& ctx) {
     peak_of(g.peak.pairs_tested, s.pairs_tested);
     peak_of(g.peak.colliders, s.colliders);
     peak_of(g.peak.bullets_spawned, s.bullets_spawned);
+    peak_of(g.peak.actives, s.actives);
+    peak_of(g.peak.runners, s.runners);
     g.sum_bullets += s.bullets;
     g.sum_sprites += s.sprites;
     g.sum_deltas += s.deltas;
@@ -69,17 +74,17 @@ void stats(TickContext& ctx) {
     if (g.next_report == 0.0) g.next_report = now + every;
     if (now < g.next_report) return;
     g.next_report += every;
-    KV_INFO("arcfire", "tick %llu: %u bullets (+%u -%u), %u sprites, %u deltas, %u colliders, %u pairs tested (cell %.0f), %u air, %u ground, %u particles",
-            (unsigned long long)ctx.tick, s.bullets, s.bullets_spawned, s.bullets_destroyed, s.sprites, s.deltas, s.colliders, s.pairs_tested,
+    KV_INFO("arcfire", "tick %llu: %u bullets (%u active, +%u -%u), %u runners, %u sprites, %u deltas, %u colliders, %u pairs tested (cell %.0f), %u air, %u ground, %u particles",
+            (unsigned long long)ctx.tick, s.bullets, s.actives, s.bullets_spawned, s.bullets_destroyed, s.runners, s.sprites, s.deltas, s.colliders, s.pairs_tested,
             (f64)s.cell, engine_table(e, g_air_kind)->live(), engine_table(e, g_ground_kind)->live(), engine_table(e, g_particle_kind)->live());
 }
 
 void stats_summary(Game& g) {
     f64 n = g.sampled ? (f64)g.sampled : 1.0;
     KV_INFO("arcfire", "summary over %llu ticks: bullets peak %u mean %.0f; sprites peak %u mean %.0f; deltas peak %u mean %.0f; "
-                       "pairs tested peak %u mean %.0f; colliders peak %u; bullets spawned peak %u a tick",
+                       "pairs tested peak %u mean %.0f; colliders peak %u; bullets spawned peak %u a tick; active peak %u; runners peak %u",
             (unsigned long long)g.sampled, g.peak.bullets, g.sum_bullets / n, g.peak.sprites, g.sum_sprites / n, g.peak.deltas, g.sum_deltas / n,
-            g.peak.pairs_tested, g.sum_pairs / n, g.peak.colliders, g.peak.bullets_spawned);
+            g.peak.pairs_tested, g.sum_pairs / n, g.peak.colliders, g.peak.bullets_spawned, g.peak.actives, g.peak.runners);
 }
 
 // The way out. A handler, so a quit asked for while paused still happens; the summary is

@@ -8,8 +8,47 @@
 #include "korvid/core/log.h"
 #include "korvid/frameloop/frameloop.h"
 #include <math.h>
+#include <stdio.h>
 
 namespace kv::arcfire {
+
+namespace {
+
+// Every pattern the stage names, found in the library: a name it lacks is the stage's error.
+bool resolve_patterns(Game& g, char* why, usize cap) {
+    for (u32 i = 0; i < g.stage.formation_count; ++i) {
+        FormationDef& f = g.stage.formations[i];
+        if ((f.entry = bml_find(g.lib, f.pattern)) == KV_BML_NONE) { snprintf(why, cap, "no pattern \"%s\"", f.pattern); return false; }
+    }
+    for (u32 i = 0; i < g.stage.ground_count; ++i) {
+        GroundDef& gd = g.stage.grounds[i];
+        if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "no pattern \"%s\"", gd.pattern); return false; }
+    }
+    if (g.bench[0] && (g.bench_entry = bml_find(g.lib, g.bench)) == KV_BML_NONE) { snprintf(why, cap, "--bench: no pattern \"%s\"", g.bench); return false; }
+    return true;
+}
+
+// The bench (--bench NAME): no marks but a far end, a slow scroll for the planes, and one
+// emitter at the top of the field running NAME again and again.
+void bench_stage(Game& g) {
+    StageDef& st = g.stage;
+    snprintf(st.name, sizeof st.name, "BENCH %.24s", g.bench);
+    st.speed = 0.6f;
+    st.length = 1.0e9f;
+    st.formation_count = st.ground_count = 0;
+    st.mark_count = 1;
+    st.marks[0] = Mark{st.length, MarkKind::End, 0, 0.0f, 0.0f};
+}
+
+void bench_spawn(TickContext& ctx, Game& g) {
+    Emitter em{g.bench_entry, 0.0f, EmitIdle, 0};
+    Collider2 col = collider_circle(14.0f, L_GROUND, 0); // nothing hits it
+    ctx.write_kind(g_ground_kind)->spawn(transform2_at(point2{0.0f, 200.0f}), enemy_sprite(g, Look::Turret), col, Health{1 << 30, 0, 0, (u32)Look::Turret},
+                                          em, Ground{0.0f, 1}, Runner{});
+    KV_INFO("arcfire", "bench: %s", g.bench);
+}
+
+} // namespace
 
 void stage_reset(Stage& s, const StageDef& def) {
     s = Stage{};
@@ -17,25 +56,31 @@ void stage_reset(Stage& s, const StageDef& def) {
 }
 
 // Phase PreSim, every tick until it has done its work: the stage file, once it is in, and
-// the run's first state: the world row, the planes, the ship. Then the sim may go.
+// the patterns, and the run's first state: the world row, the planes, the ship. Then the
+// sim may go.
 void boot(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     if (g.stage_ready) return;
     const BlobAsset* b = asset_blob(e, g.stage_blob);
-    if (!b || b->state == AssetState::Pending) return;
+    bool failed = false;
+    bool patterns_in = patterns_ready(e, g, failed);
+    if (failed) { engine_request_quit(e); return; }
+    if (!b || b->state == AssetState::Pending || !patterns_in) return;
     char why[128] = "the file did not load";
-    if (b->state != AssetState::Ready || !stage_parse((const char*)b->data, b->size, g.stage, why, sizeof why)) {
+    if (b->state != AssetState::Ready || !stage_parse((const char*)b->data, b->size, g.stage, why, sizeof why) || !resolve_patterns(g, why, sizeof why)) {
         KV_ERROR("arcfire", "stage %s: %s", b ? b->path : "?", why);
         engine_request_quit(e);
         return;
     }
+    if (g.bench[0]) bench_stage(g);
     g.stage_ready = true;
     KV_INFO("arcfire", "stage %s: %u marks, %u formations, %u ground rows, %.0f units long, speed %.2f", g.stage.name, g.stage.mark_count,
             g.stage.formation_count, g.stage.ground_count, (f64)g.stage.length, (f64)g.stage.speed);
 
     Dials d = dials_for(g.demo ? Position::Demo : g.stress ? Position::Stress : Position::Normal);
-    if (g.autoplay) d.bot = 1;
+    if (g.autoplay || g.bench[0]) d.bot = 1;
+    if (g.bench[0]) { d.invulnerable = 1; d.loops = 1; }
     dials_apply_options(e, d);
     dials_log(d);
     Stage s;
@@ -47,6 +92,7 @@ void boot(TickContext& ctx) {
     g.world = world->spawn(d, s, run, EggState{}, Chance{r.state, r.inc});
     planes_spawn(e, g, d);
     g.ship = ship_spawn(e, g);
+    if (g.bench[0]) bench_spawn(ctx, g);
     engine_hold(e, HoldLoading, false);
 }
 
@@ -90,9 +136,9 @@ void stage(TickContext& ctx) {
         case MarkKind::Ground: {
             const GroundDef& gd = def.grounds[m.index];
             Health h{(i32)ceilf((f32)gd.health * d.enemy_health), 0, gd.score, (u32)Look::Turret};
-            Emitter em{0.0f, 1, gd.cadence, gd.cadence / 2, 0, gd.speed};
+            Emitter em{gd.entry, 0.0f, EmitIdle, 0};
             ctx.spawn_later(g_ground_kind, transform2_at(point2{gd.x, kFieldTop + 24.0f}), enemy_sprite(g, Look::Turret),
-                            collider_circle(14.0f, L_GROUND, L_SHOT), h, em, Ground{1.0f, 0});
+                            collider_circle(14.0f, L_GROUND, L_SHOT), h, em, Ground{1.0f, 0}, Runner{});
             break;
         }
         case MarkKind::Speed:
@@ -124,8 +170,8 @@ void on_member(TickContext& ctx, Span<const SpawnMember> members) {
         mv.s = 0.0f;
         point2 at = path_at(mv.path, 0.0f);
         Health h{(i32)ceilf((f32)f.health * dials_row[0].enemy_health), 0, f.score, (u32)f.look};
-        Emitter em{f.fire_at, f.fire_count, 0, 0, 0, 3.5f};
-        ctx.spawn_later(g_air_kind, transform2_at(at, KV_PI), enemy_sprite(g, f.look), collider_circle(18.0f, L_AIR, L_SHOT | L_SHIP), h, mv, em);
+        Emitter em{f.entry, f.fire_at, EmitIdle, 0};
+        ctx.spawn_later(g_air_kind, transform2_at(at, KV_PI), enemy_sprite(g, f.look), collider_circle(18.0f, L_AIR, L_SHOT | L_SHIP), h, mv, em, Runner{});
     }
 }
 

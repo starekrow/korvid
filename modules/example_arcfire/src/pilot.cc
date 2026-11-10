@@ -2,8 +2,8 @@
 // through input_action_override, so the ship is flown by the same code whoever holds the
 // stick, and both steer by one rule (`steer`, below) from sim state only.
 //
-// The rule: move sideways off the line of every bullet closing within 80 units whose line
-// passes within `clear` units of the ship, weighted by how close it is; away from any air enemy within 90; off the walls; and with nothing
+// The rule: for every bullet, where it will pass closest in the next 40 ticks; away from
+// each pass that comes within `clear` units, the sooner and the closer the harder; away from any air enemy within 90; off the walls; and with nothing
 // to fear, under the nearest enemy (so the shots find it) at the ship's usual height. It
 // is not good, which is what the stress mode wants (the ship cannot die there), and enough
 // to live through most of a minute at Normal.
@@ -30,7 +30,7 @@ constinit const Step k_script[] = {
 };
 constexpr u64 kScriptTo = 300;     // from here the rule flies
 constexpr u64 kStandFrom = 1500;   // the demo stops dodging until it has died once
-constexpr f32 kClear = 30.0f;      // the bot's margin: well clear of the ring
+constexpr f32 kClear = 26.0f;      // the bot's margin: clear of the ring
 constexpr f32 kGrazeClear = 11.0f; // the demo's, focused: inside the ring, outside the hitbox
 
 // The rule, from where everything stood when the last tick ended. A bullet whose line
@@ -40,22 +40,30 @@ vec2 steer(Engine& e, const Game& g, f32 clear) {
     const Transform2* sx = ships->get<Transform2>(g.ship);
     if (!sx) return vec2{0, 0};
     point2 p = sx->position;
-    constexpr f32 kSee = 80.0f;
+    // Each bullet's closest pass in the next kAhead ticks, if it comes within `clear`: away
+    // from that point, the sooner and the closer the harder.
+    constexpr f32 kAhead = 40.0f;
     vec2 push{0, 0};
-    const Table* bullets_table = engine_table(e, g_bullet_kind);
-    Span<const Transform2> bt = bullets_table->rows_of<Transform2>();
-    Span<const Velocity> bv = bullets_table->rows_of<Velocity>();
-    for (u32 i = 0; i < bullets_table->rows(); ++i) {
-        if (!bullets_table->is_alive(i)) continue;
-        vec2 d = p - bt[i].position;
-        f32 dist2 = length_sq(d);
-        if (dist2 > kSee * kSee || dot(bv[i].v, d) <= 0.0f) continue; // far, or going away
-        // Sideways to its path, away from it: running down a bullet's line never works.
-        vec2 side = perp(normalize(bv[i].v));
-        f32 miss = dot(side, d);              // how far off its line the ship is
-        if (fabsf(miss) > clear) continue;    // it will pass by
-        if (miss < 0.0f) side = -side;
-        push += side * (1.0f - sqrtf(dist2) / kSee);
+    const u32 kinds[] = {g_bullet_kind, g_active_kind};
+    for (u32 kind : kinds) {
+        const Table* bullets_table = engine_table(e, kind);
+        Span<const Transform2> bt = bullets_table->rows_of<Transform2>();
+        Span<const Velocity> bv = bullets_table->rows_of<Velocity>();
+        for (u32 i = 0; i < bullets_table->rows(); ++i) {
+            if (!bullets_table->is_alive(i)) continue;
+            vec2 rel = bt[i].position - p;
+            if (length_sq(rel) > 200.0f * 200.0f) continue;
+            vec2 v = bv[i].v;
+            f32 vv = length_sq(v);
+            f32 t = vv > 1e-6f ? -dot(rel, v) / vv : 0.0f; // ticks to its closest pass
+            if (t < 0.0f) t = 0.0f;
+            if (t > kAhead) continue;
+            vec2 closest = rel + v * t;                   // where it will be then, from the ship
+            f32 dist = length(closest);
+            if (dist > clear) continue;
+            vec2 away = dist > 0.01f ? closest * (-1.0f / dist) : perp(normalize(v));
+            push += away * ((1.0f - dist / clear) * (1.0f - t / kAhead));
+        }
     }
     const Table* air = engine_table(e, g_air_kind);
     Span<const Transform2> at = air->rows_of<Transform2>();

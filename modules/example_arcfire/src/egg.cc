@@ -49,13 +49,16 @@ void break_up(TickContext& ctx, Game& g, const EggState& es, Transform2& xf, Spr
         vec2 v{sx * g.fx.range(1.0f, 2.2f), sy * g.fx.range(1.0f, 2.2f)};
         fx_piece(ctx, g, xf.position + vec2{sx * 16.0f, sy * 16.0f}, TEX_SHIPS, uv, vec2{32, 32}, v, g.fx.range(-0.2f, 0.2f), 90, Z_SHIP);
     }
-    Span<const Transform2> bt = ctx.read<Transform2>("example_arcfire.bullet.Transform2");
-    const Table* bullets_table = ctx.read_kind(g_bullet_kind);
     u32 cancelled = 0;
-    for (u32 i = 0; i < bt.len; ++i) {
-        if (!bullets_table->is_alive(i) || length_sq(bt[i].position - es.at) > kCancelRadius * kCancelRadius) continue;
-        ctx.destroy(bullets_table->handle_at(i));
-        if (cancelled++ < 64) fx_sparks(ctx, g, bt[i].position, 2, color{1.0f, 0.95f, 0.6f, 1.0f}, 1.5f);
+    const u32 kinds[] = {g_bullet_kind, g_active_kind};
+    for (u32 kind : kinds) {
+        const Table* bullets_table = ctx.read_kind(kind);
+        Span<const Transform2> bt = bullets_table->rows_of<Transform2>();
+        for (u32 i = 0; i < bullets_table->rows(); ++i) {
+            if (!bullets_table->is_alive(i) || length_sq(bt[i].position - es.at) > kCancelRadius * kCancelRadius) continue;
+            ctx.destroy(bullets_table->handle_at(i));
+            if (cancelled++ < 64) fx_sparks(ctx, g, bt[i].position, 2, color{1.0f, 0.95f, 0.6f, 1.0f}, 1.5f);
+        }
     }
     g.shake = 10.0f;
     KV_INFO("arcfire", "egg: the ship breaks at (%.0f, %.0f), tick %llu, %u bullets cancelled", (f64)es.at.x, (f64)es.at.y,
@@ -185,7 +188,7 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     }
     // Out of eggs: everything the stage made goes, the stage's clock goes back to its
     // start, and anything it had scheduled is of an epoch that no longer spawns.
-    const u32 kinds[] = {g_air_kind, g_ground_kind, g_bullet_kind, g_shot_kind, g_egg_kind, g_shell_kind};
+    const u32 kinds[] = {g_air_kind, g_ground_kind, g_bullet_kind, g_active_kind, g_shot_kind, g_egg_kind, g_shell_kind};
     for (u32 k : kinds) ctx.destroy_all(k);
     stage_reset(stage_row[0], g.stage);
     r.score = r.stage_score;

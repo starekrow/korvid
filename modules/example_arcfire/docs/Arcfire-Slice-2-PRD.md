@@ -357,3 +357,9 @@ Each leaves the game building, running and hashing.
 
 - BulletML is an engine library module, `bulletml` (R4): compiler and runner, no kinds;
   the game owns everything that lives in the sim.
+- (M2, in the building.) A runner is 288 bytes, so it is not a column of every bullet:
+  bullets that run programs are a kind of their own, `active` (the `bullet` kind's
+  components and a `Runner`), and plain bullets stay as small as they were. The enemies
+  gain a `Runner` beside `Emitter`, which keeps its name as the binding (which pattern,
+  where it starts, its state). R7's "same components" is that much different. A runner's
+  seed is its entity and the tick, not the world's stream, so runners need nothing shared.

@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<!-- ring: three rings of bullets around the emitter, each turned a little from the last;
+     the turrets' pattern. 12 a ring at rank 0, 24 at 0.5, 36 at 1. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>3</times>
+      <action>
+        <actionRef label="ring"><param>12 + ($rank * 24 - ($rank * 24) % 1)</param></actionRef>
+        <wait>30</wait>
+      </action>
+    </repeat>
+  </action>
+  <action label="ring">
+    <fire><direction type="sequence">7</direction><speed>2</speed><bullet/></fire>
+    <repeat><times>$1 - 1</times>
+      <action><fire><direction type="sequence">360 / $1</direction><speed>2</speed><bullet/></fire></action>
+    </repeat>
+  </action>
+</bulletml>

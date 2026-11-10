@@ -21,7 +21,7 @@ const char* const k_position_names[] = {"normal", "stress", "demo"};
 struct DialField { const char* name; u32 offset; bool scale; };
 #define ARC_DIAL(m, scale) {#m, (u32)offsetof(Dials, m), scale}
 constinit const DialField k_dial_fields[] = {
-    ARC_DIAL(bullet_density, true), ARC_DIAL(bullet_speed, true), ARC_DIAL(formation_count, true), ARC_DIAL(formation_spacing, true),
+    ARC_DIAL(rank, true), ARC_DIAL(bullet_speed, true), ARC_DIAL(formation_count, true), ARC_DIAL(formation_spacing, true),
     ARC_DIAL(particles, false),     ARC_DIAL(plane_density, false), ARC_DIAL(enemy_health, true), ARC_DIAL(bot, false),
     ARC_DIAL(invulnerable, false),  ARC_DIAL(loops, false),
 };
@@ -32,7 +32,7 @@ constinit const DialField k_dial_fields[] = {
 Dials dials_for(Position p) {
     Dials d;
     d.position = (u32)p;
-    d.bullet_density = 1.0f;
+    d.rank = 0.5f;
     d.bullet_speed = 1.0f;
     d.formation_count = 1.0f;
     d.formation_spacing = 1.0f;
@@ -46,7 +46,7 @@ Dials dials_for(Position p) {
     case Position::Normal: break;
     case Position::Demo: d.loops = 0; break; // the demo ends at the stage's end
     case Position::Stress:
-        d.bullet_density = 6.0f;
+        d.rank = 1.0f;
         d.formation_count = 3.0f;
         d.formation_spacing = 0.5f;
         d.particles = 24;

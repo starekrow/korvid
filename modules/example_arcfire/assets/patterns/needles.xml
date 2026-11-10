@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- needles: a fan of slow needles that hang for a beat, then accelerate along their line;
+     the threat is the moment they start. Active bullets: each runs its own program. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>3 + $rank * 2</times>
+      <action>
+        <fire><direction type="aim">-24</direction><speed>0.5</speed><bulletRef label="needle"/></fire>
+        <repeat><times>4</times>
+          <action><fire><direction type="sequence">12</direction><speed>0.5</speed><bulletRef label="needle"/></fire></action>
+        </repeat>
+        <wait>36</wait>
+      </action>
+    </repeat>
+  </action>
+  <bullet label="needle">
+    <action>
+      <wait>30</wait>
+      <changeSpeed><speed>3.4 + $rank * 1.6</speed><term>24</term></changeSpeed>
+    </action>
+  </bullet>
+</bulletml>

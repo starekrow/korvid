@@ -33,16 +33,17 @@ void ship_dies(TickContext& ctx, Ship& s, u32 cause) {
 void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
     Engine& e = *ctx.engine;
     const u16 ship = hk(e, g_ship_kind), ring = hk(e, g_ring_kind), shell = hk(e, g_shell_kind), shot = hk(e, g_shot_kind),
-              air = hk(e, g_air_kind), ground = hk(e, g_ground_kind), bullet = hk(e, g_bullet_kind);
+              air = hk(e, g_air_kind), ground = hk(e, g_ground_kind), plain = hk(e, g_bullet_kind), active = hk(e, g_active_kind);
     for (const OverlapBegin& o : overlaps) {
         for (u32 swap = 0; swap < 2; ++swap) {
             Handle a = swap ? o.b : o.a, b = swap ? o.a : o.b;
             u16 ka = a.kind(), kb = b.kind();
+            bool bullet_a = ka == plain || ka == active;
             if (ka == shot && (kb == air || kb == ground)) ctx.emit(ShotHit{a, b});
-            else if (ka == bullet && kb == ship) ctx.emit(BulletHit{a});
+            else if (bullet_a && kb == ship) ctx.emit(BulletHit{a});
             else if (ka == air && kb == ship) ctx.emit(Rammed{a});
-            else if (ka == bullet && kb == ring) ctx.emit(Graze{a});
-            else if (ka == bullet && kb == shell) ctx.emit(ShellHit{a});
+            else if (bullet_a && kb == ring) ctx.emit(Graze{a});
+            else if (bullet_a && kb == shell) ctx.emit(ShellHit{a});
         }
     }
 }
@@ -79,7 +80,6 @@ void on_shot_hit(TickContext& ctx, Span<const ShotHit> hits) {
 
 void on_bullet_hit(TickContext& ctx, Span<const BulletHit> hits) {
     Game& g = ctx.state_as<Game>();
-    Span<Bullet> bullet = ctx.write<Bullet>("example_arcfire.bullet.Bullet");
     Span<Ship> ships = ctx.write<Ship>("example_arcfire.ship.Ship");
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
     Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
@@ -87,9 +87,10 @@ void on_bullet_hit(TickContext& ctx, Span<const BulletHit> hits) {
     Ship& s = ships[g.ship.index()];
     for (const BulletHit& h : hits) {
         if (!ship_vulnerable(dials[0], s)) continue;
-        Bullet& b = bullet[h.bullet.index()];
-        if (b.grazed == 1) { run[0].score -= kGrazeScore; --run[0].grazes; } // no points for dying
-        b.grazed = 2;
+        Bullet* b = bullet_row(ctx, h.bullet);
+        if (!b) continue;
+        if (b->grazed == 1) { run[0].score -= kGrazeScore; --run[0].grazes; } // no points for dying
+        b->grazed = 2;
         ctx.destroy(h.bullet);
         ship_dies(ctx, s, 0);
     }
@@ -108,26 +109,24 @@ void on_rammed(TickContext& ctx, Span<const Rammed> rams) {
 // Through the ring and not the box: once a bullet, ten points and a spark.
 void on_graze(TickContext& ctx, Span<const Graze> grazes) {
     Game& g = ctx.state_as<Game>();
-    Span<Bullet> bullet = ctx.write<Bullet>("example_arcfire.bullet.Bullet");
-    Span<const Transform2> xf = ctx.read<Transform2>("example_arcfire.bullet.Transform2");
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
     if (!run.len) return;
     for (const Graze& gz : grazes) {
-        Bullet& b = bullet[gz.bullet.index()];
-        if (b.grazed) continue;
-        b.grazed = 1;
+        Bullet* b = bullet_row(ctx, gz.bullet);
+        const Transform2* xf = bullet_xf(ctx, gz.bullet);
+        if (!b || !xf || b->grazed) continue;
+        b->grazed = 1;
         run[0].score += kGrazeScore;
         ++run[0].grazes;
-        fx_sparks(ctx, g, xf[gz.bullet.index()].position, 2, kSparkGraze, 1.5f);
+        fx_sparks(ctx, g, xf->position, 2, kSparkGraze, 1.5f);
     }
 }
 
 // The shell eats the bullet, in a spark where it struck.
 void on_shell_hit(TickContext& ctx, Span<const ShellHit> hits) {
     Game& g = ctx.state_as<Game>();
-    Span<const Transform2> xf = ctx.read<Transform2>("example_arcfire.bullet.Transform2");
     for (const ShellHit& h : hits) {
-        fx_sparks(ctx, g, xf[h.bullet.index()].position, 3, kSparkGraze, 2.0f);
+        if (const Transform2* xf = bullet_xf(ctx, h.bullet)) fx_sparks(ctx, g, xf->position, 3, kSparkGraze, 2.0f);
         ctx.destroy(h.bullet);
     }
 }

@@ -12,6 +12,7 @@
 #include "korvid/example_arcfire/module.h"
 #include "field.h"
 #include "path.h"
+#include "korvid/bulletml/bulletml.h"
 #include "korvid/collision/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/random.h"
@@ -28,7 +29,7 @@ constexpr u32 L_SHIP   = 1;  // the hitbox: the ship's own row
 constexpr u32 L_SHOT   = 2;  // the player's shots
 constexpr u32 L_AIR    = 4;
 constexpr u32 L_GROUND = 8;
-constexpr u32 L_BULLET = 16; // every enemy bullet
+constexpr u32 L_BULLET = 16; // every enemy bullet, plain or running a program
 constexpr u32 L_GRAZE  = 32; // the ring around the hitbox
 constexpr u32 L_SHELL  = 64; // the egg's shell around a new ship
 
@@ -48,10 +49,16 @@ struct Shot     { i32 damage; u32 spent; };       // spent: it has hit something
 struct Health   { i32 hp; u32 flash; i32 score; u32 look; };
 // A formation member's path, measured, and how far along it is.
 struct Mover    { Path path; f32 speed; f32 s; };
-// Slice 1's emitter is one rule: fire `count` aimed bullets when the mover passes `at` (a
-// fraction of its path), or for a ground row every `cadence` ticks while the ship is above.
-struct Emitter  { f32 at; u32 count; u32 cadence; u32 timer; u32 fired; f32 speed; };
-struct Ground   { f32 rate; u32 kind; };          // rides the scroll at `rate` times its speed
+// What an enemy fires: a pattern of the library (patterns.cc), started when an air row's
+// mover passes `at` (a fraction of its path) or while the ship is above a ground row,
+// and run by the row's Runner. `state`: EmitIdle, EmitRunning, EmitDone; `timer`: ticks
+// before a ground row (or the bench) starts its pattern again.
+enum EmitState : u32 { EmitIdle, EmitRunning, EmitDone };
+struct Emitter  { u32 pattern; f32 at; u32 state; u32 timer; };
+// A BulletML runner (the bulletml module's plain data) as a component: on the enemies,
+// and on the bullets that run programs of their own (the `active` kind).
+using Runner = BmlRunner;
+struct Ground   { f32 rate; u32 bench; };         // rides the scroll at `rate` times its speed; bench: fires whatever the ship does
 struct Bullet   { u32 life; u32 grazed; Handle owner; };
 // A cosmetic piece of debris or a spark: it drifts, spins, slows, falls and fades over its life.
 struct Particle { u32 life, max_life; f32 spin, drag, alpha, fall; };
@@ -61,8 +68,8 @@ struct EggBody  { f32 vy; f32 drift; };           // the egg as it falls
 enum class Position : u32 { Normal, Stress, Demo };
 struct Dials {
     u32 position;          // Position
-    f32 bullet_density;    // multiplies how many bullets a rule fires ($rank, later)
-    f32 bullet_speed;
+    f32 rank;              // BulletML's $rank: how dense the patterns are (Normal 0.5)
+    f32 bullet_speed;      // multiplies every bullet's speed
     f32 formation_count;   // multiplies a formation's members
     f32 formation_spacing; // multiplies the ticks between them
     u32 particles;         // sparks per event
@@ -114,14 +121,17 @@ struct StageEnd   { u32 loops; u32 pad; };
 
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
-    g_bullet_kind, g_particle_kind, g_egg_kind, g_shell_kind;
+    g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind;
+// The two bullet kinds: plain bullets, and bullets that run a program (needles, seeds).
+inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
 
 // ---- the stage as its file says -------------------------------------------------------------
 constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 16, kMaxMarks = 128;
 enum class Look : u32 { Fighter, Red, Green, Turret, Count }; // what an enemy's sprite is
 enum class MarkKind : u32 { Formation, Ground, Speed, End };
-struct FormationDef { u32 path; u32 count; u32 spacing; Look look; i32 health; i32 score; f32 fire_at; u32 fire_count; f32 speed; };
-struct GroundDef    { f32 x; i32 health; i32 score; u32 cadence; f32 speed; };
+constexpr u32 kPatternName = 32;
+struct FormationDef { u32 path; u32 count; u32 spacing; Look look; i32 health; i32 score; f32 fire_at; f32 speed; char pattern[kPatternName]; u32 entry; };
+struct GroundDef    { f32 x; i32 health; i32 score; char pattern[kPatternName]; u32 entry; };
 struct Mark         { f32 at; MarkKind kind; u32 index; f32 value, over; };
 struct StageDef {
     char         name[32] = "";
@@ -145,6 +155,7 @@ enum Tex : u32 { TEX_SHIPS, TEX_TILES, TEX_STARS, TEX_NEBULA, TEX_CLOUD, TEX_BUL
 struct Stats {
     u32 rows[16];          // live rows per kind, by kind id (stats.cc fills the ones it reports)
     u32 bullets, bullets_spawned, bullets_destroyed;
+    u32 actives, runners, fires; // bullets that run programs; runners stepped; fires this tick
     u32 sprites, deltas, pairs_tested, colliders;
     f32 cell;
 };
@@ -156,6 +167,17 @@ struct Game {
     Handle   stage_blob;          // the .stage.json on its way in
     StageDef stage;
     bool     stage_ready = false;
+    // The patterns: patterns.json names them, each a BulletML document; compiled into
+    // the library when all are in. A bullet definition's look, by its label.
+    static constexpr u32 kMaxPatterns = 32;
+    Handle   pattern_index;
+    Handle   pattern_blobs[kMaxPatterns];
+    char     pattern_names[kMaxPatterns][kPatternName];
+    u32      pattern_count = 0;
+    BmlLibrary lib;
+    u8       bullet_look[1024];   // 0 round, 1 needle; by bullet definition
+    char     bench[kPatternName] = ""; // --bench NAME
+    u32      bench_entry = KV_BML_NONE;
     Handle   ui;                  // ui.doc
     Handle   hud, pause_screen, cover, clear_label;
     u32      clear_ticks = 0;     // the "stage clear" label's time left
@@ -165,7 +187,8 @@ struct Game {
     Handle   ship, ring, mark;
     Rng      fx;                  // the cosmetic stream: sparks and debris, never sim state
     f32      shake = 0.0f;        // the camera's, in world units, decaying
-    u32      bullets_spawned = 0; // this tick, by the emitters (enemies.cc)
+    u32      bullets_spawned = 0; // this tick, by the runners (patterns.cc)
+    u32      runners_stepped = 0;
     Stats    stats;
     // Reporting (stats.cc): peaks and sums over the run, the wall clock of the last line.
     Stats    peak;
@@ -205,9 +228,19 @@ Collider2 ring_collider();
 void   fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 speed = 3.0f);
 void   fx_piece(TickContext& ctx, Game& g, point2 at, Tex tex, rect2 uv, vec2 size, vec2 v, f32 spin, u32 life, i32 layer, f32 fall = 0.0f);
 
-// Bullets (bullets.cc): aimed shots from a point, `count` in a fan centered on the ship.
-u32    bullets_fire_aimed(Table& bullets, const Game& g, const Dials& d, point2 from, point2 target, u32 count, f32 speed, Handle owner);
+// Bullets (bullets.cc): one fired by a runner, by command from a parallel chunk; a plain
+// bullet, or an active one with its own runner when its definition has actions.
+void   bullet_fire(ChunkContext& cc, const Game& g, const Dials& d, point2 at, const BmlFire& f, Handle owner, u64 seed);
 Collider2 bullet_collider();
+// The Bullet row of a handle of either bullet kind, through the context's declared write.
+Bullet* bullet_row(TickContext& ctx, Handle h);
+const Transform2* bullet_xf(TickContext& ctx, Handle h);
+
+// Patterns (patterns.cc): the library's loading, an enemy's start.
+bool   patterns_load(Engine& e, Game& g);          // the index and the documents, asked for
+bool   patterns_ready(Engine& e, Game& g, bool& failed); // all in and compiled
+void   emitter_start(const Game& g, Emitter& em, Runner& r, Handle owner, u64 tick);
+u64    seed_of(Handle h, u64 tick, u32 salt);
 
 // The stage (stage.cc).
 void   stage_reset(Stage& s, const StageDef& def);

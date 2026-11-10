@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!-- spiral: two arms turning together, a bullet each every few ticks; a turret's long
+     pattern for the middle of Shoreline. Rank tightens the turn's step and adds turns. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>80 + $rank * 80</times>
+      <action>
+        <fire><direction type="sequence">13 - $rank * 4</direction><speed>2.2</speed><bullet/></fire>
+        <fire><direction type="sequence">180</direction><speed>2.2</speed><bullet/></fire>
+        <wait>3</wait>
+      </action>
+    </repeat>
+  </action>
+</bulletml>

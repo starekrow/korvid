@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- cross: four streams at right angles, the cross turning a few degrees a volley; a
+     turret's pattern. Rank turns it faster and fires longer. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>20 + $rank * 30</times>
+      <action>
+        <fire><direction type="sequence">5 + $rank * 4</direction><speed>2.4</speed><bullet/></fire>
+        <repeat><times>3</times>
+          <action><fire><direction type="sequence">90</direction><speed>2.4</speed><bullet/></fire></action>
+        </repeat>
+        <wait>6</wait>
+      </action>
+    </repeat>
+  </action>
+</bulletml>

@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- aimed_burst: quick aimed shots in bursts with a pause between; it makes the ship move
+     (Shoreline's second formation). Rank adds shots to a burst and bursts. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>2 + $rank * 2</times>
+      <action>
+        <repeat><times>3 + $rank * 4</times>
+          <action>
+            <fire><direction type="aim">0</direction><speed>3.2</speed><bullet/></fire>
+            <wait>4</wait>
+          </action>
+        </repeat>
+        <wait>40</wait>
+      </action>
+    </repeat>
+  </action>
+</bulletml>

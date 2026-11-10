@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!-- rain: a slow fall of bullets spread at random over a cone below the emitter; easy to
+     read, hard to stand still in. Rank adds drops. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>20 + $rank * 40</times>
+      <action>
+        <fire><direction type="absolute">130 + $rand * 100</direction><speed>1.1 + $rand * 1.2</speed><bullet/></fire>
+        <wait>3</wait>
+      </action>
+    </repeat>
+  </action>
+</bulletml>

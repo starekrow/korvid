@@ -1,5 +1,6 @@
-// example_arcfire: enemy bullets. One kind holds every one of them: a position, a
-// velocity, a life in ticks, whether it has grazed the ship, who fired it. They fly
+// example_arcfire: enemy bullets. Two kinds: `bullet`, every plain one (a position, a
+// velocity, a life in ticks, whether it has grazed the ship, who fired it), and `active`,
+// the same and a Runner, for a bullet whose pattern gives it a program of its own. They fly
 // straight, they die at the end of their life or past the field's edge, and they meet only
 // the hitbox, the graze ring and the shell (never each other, never an enemy).
 #include "arcfire.h"
@@ -9,35 +10,49 @@ namespace kv::arcfire {
 
 namespace {
 
-constexpr u32 kBulletLife = 600;           // ticks: ten seconds, longer than any crossing
-constexpr f32 kFanDeg = 9.0f;              // between the bullets of one aimed volley
+constexpr u32 kBulletLife = 900;           // ticks: fifteen seconds, longer than any crossing (a seed waits, then bursts)
 const color kBulletTint{1.0f, 0.55f, 0.62f, 1.0f};
+const color kActiveTint{0.62f, 0.85f, 1.0f, 1.0f}; // a bullet with a program reads apart
 
 } // namespace
 
 Collider2 bullet_collider() { return collider_circle(4.0f, L_BULLET, L_SHIP | L_GRAZE | L_SHELL); }
 
-// `count` bullets (times the density dial, one at least) in a fan centered on the line to
-// the target, at `speed` times the speed dial. Leads the target by nothing: moderate.
-u32 bullets_fire_aimed(Table& bullets_table, const Game& g, const Dials& d, point2 from, point2 target, u32 count, f32 speed, Handle owner) {
-    u32 n = (u32)lroundf((f32)count * d.bullet_density);
-    if (n == 0) n = 1;
-    vec2 to = target - from;
-    f32 aim = length_sq(to) > 1e-6f ? atan2f(to.y, to.x) : -KV_PI * 0.5f;
-    f32 fan = kFanDeg * (KV_PI / 180.0f);
-    f32 v = speed * d.bullet_speed;
-    u32 made = 0;
-    for (u32 k = 0; k < n; ++k) {
-        f32 a = aim + ((f32)k - (f32)(n - 1) * 0.5f) * fan;
-        Sprite s = sprite_of(g, TEX_BULLETS, rect2{0.0f, 0.0f, 0.5f, 1.0f}, vec2{26, 26}, Z_BULLET, kBulletTint, true);
-        if (bullets_table.spawn(transform2_at(from), s, Velocity{vec2{cosf(a) * v, sinf(a) * v}}, bullet_collider(), Bullet{kBulletLife, 0, owner}).is_null())
-            break; // the kind is full: the stress dial finds this
-        ++made;
+// A runner's fire: a plain bullet, or an active one with its own runner when its definition
+// has actions. By the chunk's commands; the speed dial scales what the pattern said.
+void bullet_fire(ChunkContext& cc, const Game& g, const Dials& d, point2 at, const BmlFire& f, Handle owner, u64 seed) {
+    vec2 v = bml_velocity(f.dir, f.speed) * d.bullet_speed;
+    bool needle = f.bullet < sizeof g.bullet_look && g.bullet_look[f.bullet] == 1;
+    rect2 uv = needle ? rect2{0.5f, 0.0f, 0.5f, 1.0f} : rect2{0.0f, 0.0f, 0.5f, 1.0f};
+    Transform2 xf = transform2_at(at, needle ? -f.dir * (KV_PI / 180.0f) : 0.0f);
+    if (!bml_bullet_actions(g.lib, f.bullet)) {
+        cc.spawn_later(g_bullet_kind, xf, sprite_of(g, TEX_BULLETS, uv, vec2{26, 26}, Z_BULLET, kBulletTint, true), Velocity{v}, bullet_collider(),
+                       Bullet{kBulletLife, 0, owner});
+        return;
     }
-    return made;
+    Runner r;
+    bml_start_bullet(g.lib, r, f, seed);
+    cc.spawn_later(g_active_kind, xf, sprite_of(g, TEX_BULLETS, uv, vec2{26, 26}, Z_BULLET, kActiveTint, true), Velocity{v}, bullet_collider(),
+                   Bullet{kBulletLife, 0, owner}, r);
 }
 
-// Phase Sim, after the enemies: every bullet moves and ages, in parallel.
+Bullet* bullet_row(TickContext& ctx, Handle h) {
+    static const u32 k_plain = ctx.column_id("example_arcfire.bullet.Bullet");
+    static const u32 k_active = ctx.column_id("example_arcfire.active.Bullet");
+    bool active = h.kind() == engine_table(*ctx.engine, g_active_kind)->kind;
+    Span<Bullet> rows = ctx.write<Bullet>(active ? k_active : k_plain);
+    return h.index() < rows.len ? &rows[h.index()] : nullptr;
+}
+
+const Transform2* bullet_xf(TickContext& ctx, Handle h) {
+    static const u32 k_plain = ctx.column_id("example_arcfire.bullet.Transform2");
+    static const u32 k_active = ctx.column_id("example_arcfire.active.Transform2");
+    bool active = h.kind() == engine_table(*ctx.engine, g_active_kind)->kind;
+    Span<const Transform2> rows = ctx.read<Transform2>(active ? k_active : k_plain);
+    return h.index() < rows.len ? &rows[h.index()] : nullptr;
+}
+
+// Phase Sim, after the patterns: every bullet of both kinds moves and ages, in parallel.
 void bullets(TickContext& ctx) {
     for (KindRows k : ctx.view<Transform2, const Velocity, Bullet>()) {
         Span<Transform2> t = k.col<Transform2>();

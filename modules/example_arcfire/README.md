@@ -41,10 +41,12 @@ The ways it flies itself:
 - `--autoplay` puts the bot on the stick at Normal: it holds fire, sidesteps the bullets
   whose lines would pass within 30 units, keeps off the air enemies and the walls, and
   otherwise lines up under the nearest enemy.
-- `--stress` turns the dials to their stress position: six times the bullets, three times
-  the formations at half the spacing, four times the sparks, the planes in 128-unit tiles,
+- `--stress` turns the dials to their stress position: rank 1, three times the
+  formations at half the spacing, four times the sparks, the planes in 128-unit tiles,
   twice the enemy health, the bot flying an invulnerable ship, the stage looping.
-- `--dial name=value` moves one dial (repeat it for more): `bullet_density`,
+- `--bench NAME` fires one pattern of the library from a fixed emitter at the top of the
+  field, again and again, under an invulnerable bot: how a pattern is written and measured.
+- `--dial name=value` moves one dial (repeat it for more): `rank`,
   `bullet_speed`, `formation_count`, `formation_spacing`, `particles`, `plane_density`,
   `enemy_health`, `bot`, `invulnerable`, `loops`. The log prints the dials at the start.
 
@@ -81,11 +83,20 @@ state.
   `shots` flies the shots in a `parallel_for`. The hitbox is the ship's own collider (radius
   3); the graze ring (radius 18) and the hitbox's dot are child rows.
 - **Enemies** (`enemies.cc`): an air row follows a Catmull-Rom path by arc length
-  (`path.cc`), so members of a formation keep their spacing, and fires its aimed volley
-  where its emitter says along the path; a ground row rides the scroll and fires on its
-  cadence while the ship is above it. A hit flashes them by drawing their texture added.
-- **Bullets** (`bullets.cc`): one kind, flown and aged in a `parallel_for`; they meet the
-  hitbox, the ring and the shell, never each other.
+  (`path.cc`), so members of a formation keep their spacing, and starts its pattern where
+  its emitter says along the path; a ground row rides the scroll and runs its pattern while
+  the ship is above it. A hit flashes them by drawing their texture added.
+- **Patterns** (`patterns.cc`, `assets/patterns/`): BulletML documents, one pattern each,
+  named in `patterns.json` and compiled at load by the `bulletml` module; the stage names
+  them. Every enemy carries a `Runner` (the module's plain-data runner) and an `Emitter`
+  (which pattern, when it starts). `patterns` steps every runner in a `parallel_for`; a
+  fire spawns by the chunk's commands, and each runner's `$rand` is its own stream seeded
+  from its entity and the tick, so the result is the same on any thread count. The `rank`
+  dial is BulletML's `$rank`.
+- **Bullets** (`bullets.cc`): two kinds, `bullet` (plain) and `active` (a bullet whose
+  definition has actions: it carries a `Runner` and steers, fires and vanishes by its
+  program), flown and aged in a `parallel_for`; they meet the hitbox, the ring and the
+  shell, never each other.
 - **Hits** (`hits.cc`): `on_overlap` sorts the collision module's pairs by kind into
   `ShotHit`, `BulletHit`, `Rammed`, `Graze` and `ShellHit`. The handlers that change the
   run are chained so a bullet that hits the hitbox takes back its own graze first.
@@ -115,6 +126,7 @@ state.
 | `src/path.cc` | Catmull-Rom paths by arc length |
 | `src/dials.cc` | the dials' positions and `--dial` |
 | `src/planes.cc`, `src/ship.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves |
+| `src/patterns.cc`, `assets/patterns/` | the library and the runners; the ten patterns |
 | `src/hits.cc`, `src/egg.cc` | what happens when things meet; the death and the restart |
 | `src/hud.cc`, `src/fx.cc`, `src/pilot.cc`, `src/stats.cc` | the camera and the screens; particles; the demo and the bot; the reports |
 | `src/main.cc` | the frame loop's config and the game's flags |

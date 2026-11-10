@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<!-- homing: slow bullets that keep turning toward the ship for a few seconds, then fly
+     straight; the end of Shoreline. Active bullets. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>2 + $rank * 4</times>
+      <action>
+        <fire><direction type="aim">-60 + $rand * 120</direction><speed>1.5</speed><bulletRef label="homer"/></fire>
+        <wait>20</wait>
+      </action>
+    </repeat>
+  </action>
+  <bullet label="homer">
+    <action>
+      <repeat><times>8</times>
+        <action>
+          <changeDirection><direction type="aim">0</direction><term>24</term></changeDirection>
+          <wait>12</wait>
+        </action>
+      </repeat>
+    </action>
+  </bullet>
+</bulletml>

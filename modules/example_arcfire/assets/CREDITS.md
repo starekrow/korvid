@@ -86,5 +86,6 @@ Drawn by `tools/make_art.py` on 2026-11-09, Korvid's, under the repository's lic
 | `made/egg.png` | the egg: a spherical machine (a shaded steel sphere, its seam and core), drawn by the script |
 | `made/eggs.png` | the HUD's pips: the egg, spent (dimmed) and in hand |
 
-The stage (`stages/shoreline.stage.json`) and the UI document (`ui/arcfire.ui.json`) are
-written by hand for the game.
+The stage (`stages/shoreline.stage.json`), the UI document (`ui/arcfire.ui.json`) and the
+BulletML patterns (`patterns/*.xml`) are written by hand for the game. No pattern is
+adapted from another source.

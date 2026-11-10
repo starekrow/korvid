@@ -5,13 +5,15 @@
 //     "paths": { "dive_left": [[-200, 420], [-160, 120], [40, -60], [300, -440]] },
 //     "marks": [
 //       { "at": 200,  "formation": { "path": "dive_left", "count": 6, "spacing": 12, "sprite": "red",
-//                                    "health": 2, "score": 100, "fire_at": 0.4, "fire_count": 1, "speed": 3 } },
-//       { "at": 900,  "ground": { "x": -120, "health": 12, "score": 500, "cadence": 50 } },
+//                                    "health": 2, "score": 100, "pattern": "aimed", "fire_at": 0.4, "speed": 3 } },
+//       { "at": 900,  "ground": { "x": -120, "health": 12, "score": 500, "pattern": "ring" } },
 //       { "at": 1500, "speed": { "value": 2.2, "over": 300 } },
 //       { "at": 5400, "end": true } ] }
 //
 // Points are field units, +y up; speeds are units a tick; `fire_at` is a fraction of the
-// path. Marks are sorted by distance here, so the file may list them in any order.
+// path, where the formation's members start their pattern. Patterns are named here and
+// found in the library once both are loaded (stage.cc). Marks are sorted by distance
+// here, so the file may list them in any order.
 #include "arcfire.h"
 #include "korvid/core/json.h"
 #include "korvid/core/memory.h"
@@ -97,7 +99,8 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             d.health = (i32)json_i64(json_get(doc, *f, "health"), 1);
             d.score = (i32)json_i64(json_get(doc, *f, "score"), 100);
             d.fire_at = (f32)json_number(json_get(doc, *f, "fire_at"), 0.5);
-            d.fire_count = (u32)json_u64(json_get(doc, *f, "fire_count"), 1);
+            snprintf(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *f, "pattern"), "aimed"));
+            d.entry = KV_BML_NONE;
             d.speed = (f32)json_number(json_get(doc, *f, "speed"), 3.0);
             mk.kind = MarkKind::Formation;
             mk.index = out.formation_count;
@@ -108,8 +111,8 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             d.x = (f32)json_number(json_get(doc, *gr, "x"), 0.0);
             d.health = (i32)json_i64(json_get(doc, *gr, "health"), 10);
             d.score = (i32)json_i64(json_get(doc, *gr, "score"), 500);
-            d.cadence = (u32)json_u64(json_get(doc, *gr, "cadence"), 60);
-            d.speed = (f32)json_number(json_get(doc, *gr, "bullet_speed"), 3.0);
+            snprintf(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *gr, "pattern"), "ring"));
+            d.entry = KV_BML_NONE;
             mk.kind = MarkKind::Ground;
             mk.index = out.ground_count;
             out.grounds[out.ground_count++] = d;

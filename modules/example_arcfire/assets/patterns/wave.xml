@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!-- wave: fans fired straight down whose bullets sway left and right as they fall, so the
+     lanes between them move. Active bullets. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>4 + $rank * 4</times>
+      <action>
+        <fire><direction type="absolute">180 - 36</direction><speed>1.8</speed><bulletRef label="sway"/></fire>
+        <repeat><times>6</times>
+          <action><fire><direction type="sequence">12</direction><speed>1.8</speed><bulletRef label="sway"/></fire></action>
+        </repeat>
+        <wait>24</wait>
+      </action>
+    </repeat>
+  </action>
+  <bullet label="sway">
+    <action>
+      <repeat><times>8</times>
+        <action>
+          <changeDirection><direction type="sequence">1.6</direction><term>16</term></changeDirection>
+          <wait>16</wait>
+          <changeDirection><direction type="sequence">-1.6</direction><term>16</term></changeDirection>
+          <wait>16</wait>
+        </action>
+      </repeat>
+    </action>
+  </bullet>
+</bulletml>

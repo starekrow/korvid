@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- aimed: a small fan aimed at the ship; popcorn's shot (Shoreline's first formations).
+     Ways: 1 at rank 0, 3 at 0.5, 5 at 1, then two more for every half rank. -->
+<bulletml type="vertical">
+  <action label="top">
+    <actionRef label="fan">
+      <param>1 + 2 * ($rank * 2 - ($rank * 2) % 1)</param>
+      <param>8</param>
+    </actionRef>
+  </action>
+  <!-- $1 ways, $2 degrees apart, centred on the ship -->
+  <action label="fan">
+    <fire><direction type="aim">0 - $2 * ($1 - 1) / 2</direction><speed>2.6</speed><bullet/></fire>
+    <repeat><times>$1 - 1</times>
+      <action><fire><direction type="sequence">$2</direction><speed type="sequence">0</speed><bullet/></fire></action>
+    </repeat>
+  </action>
+</bulletml>

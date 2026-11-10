@@ -7,7 +7,7 @@ module "example_arcfire" {
   output        = "exe",
   engine_module = true,
   deps  = { "core", "platform", "platform_hid", "math", "render", "asset", "sprite", "scene", "text", "audio",
-            "collision", "ui", "cli", "frameloop" },
+            "collision", "ui", "cli", "frameloop", "xml", "bulletml" },
   tools = { "tool_kpack" }, -- the ship build packs the staged assets into bin/example_arcfire.kpak
   licenses = { "assets/LICENSE-CC0.txt", "assets/LICENSE-Kenney.txt", "assets/LICENSE-ScreamingBrainStudios.txt", "assets/CREDITS.md" },
 }

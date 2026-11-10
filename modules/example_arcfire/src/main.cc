@@ -5,9 +5,10 @@
 namespace {
 // --demo plays the scripted minute and quits at the stage's end; --autoplay puts the bot
 // on the stick at Normal; --stress turns every dial up, the ship invulnerable, the stage
-// looping. --dial name=value moves one dial (repeatable).
+// looping. --dial name=value moves one dial (repeatable). --bench NAME fires one pattern
+// from a fixed emitter, again and again, for writing and measuring patterns.
 constinit const char* const k_flags[] = {"--demo", "--autoplay", "--stress"};
-constinit const char* const k_options[] = {"--dial"};
+constinit const char* const k_options[] = {"--dial", "--bench"};
 constinit const kv::FrameLoopConfig k_config = {
     .title  = "korvid arcfire",
     .width  = 1280,

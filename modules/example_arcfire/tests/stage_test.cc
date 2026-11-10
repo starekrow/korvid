@@ -45,7 +45,8 @@ void test_stage(kv::TestCtx& c) {
     KV_CHECK(c, text != nullptr);
     if (text) {
         KV_CHECK(c, stage_parse(text, len, def, why, sizeof why));
-        KV_CHECK(c, def.formation_count == 8 && def.ground_count == 2 && def.length > 0.0f);
+        KV_CHECK(c, def.formation_count == 8 && def.ground_count == 3 && def.length > 0.0f);
+        for (u32 i = 0; i < def.formation_count; ++i) KV_CHECK(c, def.formations[i].pattern[0] != 0 && def.formations[i].entry == KV_BML_NONE);
         u32 speeds = 0;
         for (u32 i = 0; i < def.mark_count; ++i) {
             speeds += def.marks[i].kind == MarkKind::Speed;
@@ -60,12 +61,13 @@ void test_stage(kv::TestCtx& c) {
     KV_CHECK(c, parses(R"({"speed": 2, "paths": {"p": [[0, 0], [0, 10]]}, "marks": [
         {"at": 50, "end": true},
         {"at": 10, "speed": {"value": 3}},
-        {"at": 10, "formation": {"path": "p", "count": 4, "sprite": "green"}},
+        {"at": 10, "formation": {"path": "p", "count": 4, "sprite": "green", "pattern": "spiral"}},
         {"at": 5, "ground": {"x": 12}}]})", def, why, sizeof why));
     KV_CHECK(c, def.speed == 2.0f && def.length == 50.0f && def.mark_count == 4);
     KV_CHECK(c, def.marks[0].kind == MarkKind::Ground && def.marks[1].kind == MarkKind::Speed && def.marks[2].kind == MarkKind::Formation &&
                 def.marks[3].kind == MarkKind::End);
     KV_CHECK(c, def.formations[0].count == 4 && def.formations[0].look == Look::Green && def.grounds[0].x == 12.0f);
+    KV_CHECK(c, !strcmp(def.formations[0].pattern, "spiral") && !strcmp(def.grounds[0].pattern, "ring")); // ring: a ground row's default
 
     // What is not a stage.
     KV_CHECK(c, !parses(R"({"marks": [{"at": 1, "formation": {"path": "nowhere"}}, {"at": 2, "end": true}]})", def, why, sizeof why) &&
