@@ -36,6 +36,8 @@
               "children": [
                 { "type": "label", "name": "score_title", "text": "SCORE", "color": "dim" },
                 { "type": "label", "name": "score", "text": "{=score}", "color": "gold", "font_scale": 2 },
+                { "type": "label", "name": "chain", "text": "CHAIN {=chain} X{=chain_mult}", "color": "gold" },
+                { "type": "meter", "name": "chain_bar", "style": "bar", "value": "=chain_left", "max": "=chain_window", "fill": "gold", "size": [120, 6] },
                 { "type": "box", "name": "gap1", "size": [8, 16] },
                 { "type": "label", "name": "eggs_title", "text": "EGGS", "color": "dim" },
                 { "type": "meter", "name": "eggs", "image": "egg", "value": "=eggs", "max": "=eggs_max", "gap": 6 },
@@ -59,6 +61,7 @@
             { "type": "stack", "name": "info", "anchor": "topleft", "offset": [32, 48], "gap": 12,
               "children": [
                 { "type": "label", "name": "stage", "text": "{=stage}", "color": "gold" },
+                { "type": "label", "name": "difficulty", "text": "{=difficulty}", "color": "cyan" },
                 { "type": "label", "name": "distance", "text": "{=distance}", "color": "dim" } ] },
             { "type": "stack", "name": "dev", "anchor": "bottomleft", "offset": [32, -40], "gap": 8, "visible": false,
               "children": [
@@ -84,7 +87,11 @@
             { "type": "label", "name": "title", "text": "OUT OF EGGS", "color": "gold", "font_scale": 2 },
             { "type": "label", "name": "hint", "text": "The stage begins again", "color": "dim" } ] } ] },
     "clear": {
-      "type": "label", "name": "clear", "anchor": "center", "offset": [0, -80], "text": "{wave}STAGE CLEAR{/wave}", "color": "gold", "font_scale": 3 },
+      "type": "stack", "name": "clear", "anchor": "center", "offset": [0, -80], "gap": 16, "align": "center",
+      "children": [
+        { "type": "label", "name": "title", "text": "{wave}STAGE CLEAR{/wave}", "color": "gold", "font_scale": 3 },
+        { "type": "label", "name": "bonus", "text": "BONUS {=stage_bonus}", "color": "gold" },
+        { "type": "label", "name": "next", "text": "{=next_round}", "color": "cyan" } ] },
     "stomp": {
       "type": "panel", "name": "stomp", "fill": "warn", "anchor": "center", "size": [540, "fill"],
       "children": [

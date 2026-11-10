@@ -71,8 +71,10 @@ void bench_spawn(TickContext& ctx, Game& g, const Dials& d) {
 } // namespace
 
 void stage_reset(Stage& s, const StageDef& def) {
+    u32 round = s.loops; // a restart is of the round it happens in
     s = Stage{};
     s.speed = def.speed;
+    s.loops = round;
 }
 
 // Phase PreSim, every tick until it has done its work: the stage file, once it is in, and
@@ -117,15 +119,13 @@ void boot(TickContext& ctx) {
     KV_INFO("arcfire", "stage %s: %u marks, %u formations, %u ground rows, %.0f units long, speed %.2f", g.stage.name, g.stage.mark_count,
             g.stage.formation_count, g.stage.ground_count, (f64)g.stage.length, (f64)g.stage.speed);
 
-    Dials d = dials_for(g.demo ? Position::Demo : g.stress ? Position::Stress : Position::Normal);
-    if (g.autoplay || g.bench[0]) d.bot = 1;
-    if (g.bench[0]) { d.invulnerable = 1; d.loops = 1; }
-    dials_apply_options(e, d);
+    Dials d = dials_start(e, g, g.demo ? Position::Demo : g.stress ? Position::Stress : g.start);
     dials_log(d);
-    Stage s;
+    Stage s{};
     stage_reset(s, g.stage);
     Run run{};
-    run.eggs = 3;
+    run.eggs = kStartEggs;
+    run.next_extend = kFirstExtend;
     run.bombs = kBaseBombs;
     Rng r = Rng::seeded(0xa2cf1e5eedull, 1); // the sim's stream: patterns and drift, the same every run
     Table* world = ctx.write_kind(g_world_kind);
@@ -172,7 +172,7 @@ void stage(TickContext& ctx) {
         if (ctx.write_kind(g_boss_kind)->live() == 0) { s.waiting = 0; music(ctx, g, false); }
         else s.held += s.speed;
     }
-    while (!s.ended && !s.waiting && s.cursor < def.mark_count && stage_clock(s) >= def.marks[s.cursor].at) {
+    while (!s.ended && !s.round_up && !s.waiting && s.cursor < def.mark_count && stage_clock(s) >= def.marks[s.cursor].at) {
         const Mark& m = def.marks[s.cursor++];
         switch (m.kind) {
         case MarkKind::Formation: {
@@ -199,8 +199,11 @@ void stage(TickContext& ctx) {
             break;
         case MarkKind::End:
             ctx.emit(StageEnd{s.loops, 0});
-            if (d.loops) { ++s.loops; s.cursor = 0; s.ground_cursor = 0; s.base = s.distance; s.held = 0.0f; }
-            else s.ended = 1;
+            {
+                Position next;
+                if (round_next(g, d, &next)) s.round_up = 1; // the next round begins at the next tick (scoring.cc)
+                else s.ended = 1;
+            }
             break;
         }
     }
@@ -230,20 +233,30 @@ void on_member(TickContext& ctx, Span<const SpawnMember> members) {
     }
 }
 
-// The stage's end mark: the demo is done; play and stress go round again from the
-// score as it stands.
+// The stage's end mark: the stage bonus, and the run goes round again (arcade's next
+// difficulty, a stress run's loop) or is over: the results line, and the game quits after
+// the banner (the demo at once).
 void on_stage_end(TickContext& ctx, Span<const StageEnd> ends) {
     Game& g = ctx.state_as<Game>();
     Span<Run> run_row = ctx.write<Run>(ARC_WORLD(Run));
+    Span<const Dials> dials_row = ctx.read<Dials>(ARC_WORLD(Dials));
     for (const StageEnd& se : ends) {
         Run& r = run_row[0];
-        KV_INFO("arcfire", "stage end: loop %u at tick %llu, score %lld, %u kills, %u grazes, %u deaths, %u restarts", se.loops,
-                (unsigned long long)ctx.tick, (long long)r.score, r.kills, r.grazes, r.deaths, r.restarts);
+        const Dials& d = dials_row[0];
+        i64 bonus = stage_bonus(r);
+        r.score += bonus;
+        KV_INFO("arcfire", "stage end: round %u at %s, tick %llu, score %lld (bonus %lld: %d eggs, %d bombs), %u kills, %u grazes, %u deaths, %u restarts",
+                se.loops + 1, position_name(d.position), (unsigned long long)ctx.tick, (long long)r.score, (long long)bonus, r.eggs, r.bombs, r.kills,
+                r.grazes, r.deaths, r.restarts);
         r.stage_score = r.score;
+        Position next;
+        bool again = round_next(g, d, &next);
+        if (!again) results_log(g, r, d, se.loops);
         // The demo ends here; the engine runs no tick after a quit, so every run's last
         // hashed tick is this one.
-        if (g.demo) engine_request_quit(*ctx.engine);
-        else hud_stage_clear(*ctx.engine, g);
+        if (g.demo) { engine_request_quit(*ctx.engine); continue; }
+        hud_stage_clear(*ctx.engine, g, bonus, again ? position_name((u32)next) : nullptr);
+        if (!again) ctx.schedule(RunOver{se.loops, 0}, ctx.tick + kRunOverTicks);
     }
 }
 

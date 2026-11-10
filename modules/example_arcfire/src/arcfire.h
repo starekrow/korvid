@@ -12,6 +12,7 @@
 #include "korvid/example_arcfire/module.h"
 #include "field.h"
 #include "path.h"
+#include "scoring.h"
 #include "korvid/bulletml/bulletml.h"
 #include "korvid/collision/module.h"
 #include "korvid/core/engine.h"
@@ -70,7 +71,7 @@ struct Beam     { u32 timer; f32 length; f32 scroll; u32 pad; };
 // fires the weapon two levels lower and eats the bullets it meets. `index` 0 or 1.
 struct Option   { u32 index; u32 pad; };
 constexpr u32 kMaxOptions = 2;
-constexpr i32 kMaxEggs = 5;
+constexpr u64 kRunOverTicks = 240; // from a run's end to the quit: the banner's time
 // What can be shot. `flash` counts the ticks of the white flash left; `score` is paid at the kill.
 struct Health   { i32 hp; u32 flash; i32 score; u32 look; };
 // A formation member's path, measured, how far along it is, and its formation.
@@ -117,7 +118,8 @@ struct Part     { Handle boss; u32 index; u32 cycle; u32 timer; u32 pad; };
 struct EggBody  { f32 vy; f32 drift; };           // the egg as it falls
 
 // The world row's parts.
-enum class Position : u32 { Normal, Stress, Demo };
+// Easy, Normal and Hard are the difficulties; Stress and Demo are runs of their own.
+enum class Position : u32 { Normal, Stress, Demo, Easy, Hard };
 struct Dials {
     u32 position;          // Position
     f32 rank;              // BulletML's $rank: how dense the patterns are (Normal 0.5)
@@ -129,37 +131,28 @@ struct Dials {
     f32 enemy_health;
     u32 bot;               // the bot flies the ship
     u32 invulnerable;      // 1: always; 2: once the ship has died (the demo: its egg plays once)
-    u32 loops;             // the stage loops at its end instead of ending
+    u32 loops;             // the stage goes round again at its end, at the same dials, for ever (stress, the bench)
     u32 scroll_rows;       // move every plane and map tile each tick (slice 1's way), for measuring the layer scroll
     u32 weapon, power;     // what the ship starts with (a WeaponType, 1..5): Spread at one but to try or measure another
     u32 options;           // and how many options (0..2)
+    u32 chain_window;      // ticks after a kill in which the next one adds to the chain (scoring.cc)
 };
 struct Stage {
     f32 distance;          // the stage's clock: units scrolled since the stage (or this loop) began
     f32 speed;             // units a tick, now
     f32 ramp_from, ramp_to, ramp_at, ramp_over; // a speed change in progress, by distance
     u32 cursor;            // the next mark
-    u32 loops;             // times the stage has looped
+    u32 loops;             // times the stage has gone round: arcade's rounds, a stress run's loops
     u32 ended;             // the end mark passed and the stage does not loop
     u32 ground_cursor;     // the next ground row of the map to come into view
     // The marks' clock is the distance less `base` (where this loop began) and `held` (what
     // the scroll ran while the stage waited at a boss); the map's is the distance less `base`.
     f32 base, held;
     u32 waiting;           // 1 while a boss mark's boss is up: the marks wait, the scroll does not
+    u32 round_up;          // 1 from the end mark until the next tick begins the next round (scoring.cc)
 };
 inline f32 stage_clock(const Stage& s) { return s.distance - s.base - s.held; }
 inline f32 map_clock(const Stage& s) { return s.distance - s.base; }
-struct Run {
-    i64 score;
-    i64 stage_score;       // the score when this stage (or loop) began: a restart goes back to it
-    i32 eggs;
-    u32 restarts;
-    u32 epoch;             // +1 at every restart: scheduled spawns of an earlier epoch are dropped
-    u32 kills, grazes, deaths;
-    i32 bombs;             // in hand: 2 at the start and after every death, at most kMaxBombs
-    u32 chips;             // picked up
-};
-constexpr i32 kBaseBombs = 2, kMaxBombs = 6;
 // The egg sequence (egg.cc): which step, its sim ticks, where the ship died.
 enum class EggStep : u32 { None, Breaking, Falling, Blooming, Shelled };
 struct EggState {
@@ -181,7 +174,8 @@ struct Graze      { Handle bullet; };
 struct ShellHit   { Handle bullet; };
 // The enemy's own handle is not in it (it is gone when this is read, and the bus drops
 // stale handles); its formation's is, which lives until its last member is accounted for.
-struct Kill       { point2 at; i32 score; u32 pad; Handle formation; };
+// `flat`: paid as it is, outside the chain (a boss's time bonus).
+struct Kill       { point2 at; i32 score; u32 flat; Handle formation; };
 struct Bombed     { point2 at; u32 cancelled; u32 pad; };
 struct Pickup     { Handle item; };
 struct ShipDied   { point2 at; u32 cause; u32 pad; }; // cause 0 a bullet, 1 a ram; `at` is filled by the handler
@@ -189,6 +183,7 @@ struct ShipDied   { point2 at; u32 cause; u32 pad; }; // cause 0 a bullet, 1 a r
 // path starts from (a bunker's launch: the path is relative to the bunker).
 struct SpawnMember { u32 formation; u32 member; u32 epoch; u32 pad; Handle group; point2 offset; };
 struct StageEnd   { u32 loops; u32 pad; };
+struct RunOver    { u32 loops; u32 pad; };   // scheduled at a run's end, after the banner: the game quits
 
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
@@ -345,6 +340,11 @@ struct Game {
     u32      clear_ticks = 0;     // the "stage clear" label's time left
     u32      act_move = 0, act_shot = 0, act_focus = 0, act_bomb = 0, act_pause = 0, act_quit = 0;
     bool     demo = false, autoplay = false, stress = false;
+    // The run's shape (scoring.cc): arcade goes round again a difficulty up and ends after
+    // Hard; a stage select (--stage) plays its one stage. `start` is the difficulty asked for.
+    bool     arcade = false, stage_select = false;
+    Position start = Position::Normal;
+    char     stage_name[32] = "shoreline";
     bool     demo_core_bomb = false;  // the demo's bomb in the carrier's core phase, once
     Handle   world;               // the .world row
     Handle   ship, ring, mark;
@@ -376,6 +376,9 @@ Sprite enemy_sprite(const Game& g, Look look);
 Dials  dials_for(Position p);
 void   dials_apply_options(Engine& e, Dials& d); // --dial name=value, each
 void   dials_log(const Dials& d);
+// A run's dials at a position: the position's, the run's own (the bot, the bench), then --dial.
+Dials  dials_start(Engine& e, const Game& g, Position p);
+const char* position_name(u32 position);
 
 // Planes (planes.cc).
 void   planes_spawn(Engine& e, Game& g, const Dials& d);
@@ -438,6 +441,11 @@ u64    seed_of(Handle h, u64 tick, u32 salt);
 // The stage (stage.cc).
 void   stage_reset(Stage& s, const StageDef& def);
 
+// The run's shape (scoring.cc; the score's rules are scoring.h's): whether a run at this
+// position goes round again after the stage, and at which; the results line.
+bool   round_next(const Game& g, const Dials& d, Position* next);
+void   results_log(const Game& g, const Run& r, const Dials& d, u32 round);
+
 // Bosses (boss.cc): their files asked for at startup, parsed at boot; a mark's boss spawned.
 void   bosses_load(Engine& e, Game& g);
 bool   bosses_ready(Engine& e, Game& g, char* why, usize why_cap); // false while loading; `why` set for a failure
@@ -460,7 +468,7 @@ Collider2 item_collider();
 // The HUD (hud.cc).
 void   hud_open(Engine& e, Game& g);
 void   hud_cover(Engine& e, Game& g, bool on);
-void   hud_stage_clear(Engine& e, Game& g);
+void   hud_stage_clear(Engine& e, Game& g, i64 bonus, const char* next); // next: the round's difficulty, or null: the run is over
 void   hud_flash(Engine& e);
 void   hud_boss(Engine& e, Game& g, const char* title, i32 hp, i32 total); // title null: the bar goes
 void   hud_stomp(Engine& e, Game& g, bool on);                              // the warning's tint

@@ -323,3 +323,11 @@ each option, each its own cast; 16,062 bullets on average, 19,789 at peak). `bea
 0.115 ms a tick at the median, 0.34 at p99, 0.43 at worst: two and a half times the one
 beam, as three walks of the colliders should be. `options` itself, two rows eased toward
 their places, 0.004.
+
+**M3. The chain, by the bot** (`--autoplay --stage shoreline --dial invulnerable=1`, Normal:
+the bot does not chase chains, so this is what flying through the stage earns). 284 kills;
+the longest chain 34. With the chain 260,585, without it (`--dial chain_window=0`)
+234,835: the chain is worth 25,750, about 15% of what the kills and chips paid. The stage
+bonus (three eggs, six bombs never used) is 90,000 of either. The demo scores 198,300, just
+under the first extend. The PRD's half a million for a good Normal run wants a player who
+keeps chains going; that is the tuning pass's to check.

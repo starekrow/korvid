@@ -26,7 +26,7 @@ const color kSparkChip{1.0f, 0.95f, 0.5f, 1.0f};
 // made/items.png: 16 px cells, the four weapons' letters, then power, then option.
 constexpr u32 kItemCells = 6;
 rect2 items_uv(u32 cell) { return rect2{(f32)cell / (f32)kItemCells, 0.0f, 1.0f / (f32)kItemCells, 1.0f}; }
-constexpr i32 kOptionScore = 20000, kEggScore = 50000; // an option past two, an egg past five
+constexpr i32 kOptionScore = 20000; // an option past two (an egg past five: egg_gain)
 
 u32 weapon_shown(const Item& it) { return ((u32)it.value + (kItemLife - it.life) / kCycle) % WeaponCount; }
 
@@ -148,12 +148,7 @@ void on_pickup(TickContext& ctx, Span<const Pickup> picks) {
             else run[0].score += kOptionScore;
             sfx(ctx, g, SFX_EGG_BLOOM);
         } else if (its[i].kind == ItemEgg) {
-            if (run[0].eggs < kMaxEggs) {
-                ++run[0].eggs;
-                KV_INFO("arcfire", "pickup: an egg at tick %llu, %d in hand", (unsigned long long)ctx.tick, run[0].eggs);
-            } else {
-                run[0].score += kEggScore;
-            }
+            if (egg_gain(run[0])) KV_INFO("arcfire", "pickup: an egg at tick %llu, %d in hand", (unsigned long long)ctx.tick, run[0].eggs);
             sfx(ctx, g, SFX_EGG_BLOOM, 1.3f);
         } else if (its[i].kind == ItemBomb) {
             if (run[0].bombs < kMaxBombs) ++run[0].bombs;

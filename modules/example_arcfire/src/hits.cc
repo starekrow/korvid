@@ -145,10 +145,12 @@ void on_rammed(TickContext& ctx, Span<const Rammed> rams) {
         if (ship_vulnerable(dials[0], s)) ship_dies(ctx, s, 1);
 }
 
-// Through the ring and not the box: once a bullet, ten points and a spark.
+// Through the ring and not the box: once a bullet, ten points and a spark, and the
+// chain's window held open a little longer.
 void on_graze(TickContext& ctx, Span<const Graze> grazes) {
     Game& g = ctx.state_as<Game>();
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
+    Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
     if (!run.len) return;
     for (const Graze& gz : grazes) {
         Bullet* b = bullet_row(ctx, gz.bullet);
@@ -157,6 +159,7 @@ void on_graze(TickContext& ctx, Span<const Graze> grazes) {
         b->grazed = 1;
         run[0].score += kGrazeScore;
         ++run[0].grazes;
+        chain_graze(run[0], dials[0].chain_window);
         sfx(ctx, g, SFX_GRAZE);
         fx_sparks(ctx, g, xf->position, 2, kSparkGraze, 1.5f);
     }
@@ -171,7 +174,8 @@ void on_shell_hit(TickContext& ctx, Span<const ShellHit> hits) {
     }
 }
 
-// A kill pays; a formation's last member shot down drops a bomb where it fell.
+// A kill pays, through the chain (a boss's time bonus as it is); a formation's last member
+// shot down drops a bomb where it fell.
 void on_kill(TickContext& ctx, Span<const Kill> kills) {
     Game& g = ctx.state_as<Game>();
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
@@ -179,8 +183,8 @@ void on_kill(TickContext& ctx, Span<const Kill> kills) {
     Table* formations = ctx.write_kind(g_formation_kind);
     if (!run.len) return;
     for (const Kill& k : kills) {
-        run[0].score += k.score;
-        ++run[0].kills;
+        if (k.flat) run[0].score += k.score;
+        else { run[0].score += chain_pay(run[0], dials[0].chain_window, k.score); ++run[0].kills; }
         sfx(ctx, g, k.score >= 400 ? SFX_KILL_BIG : SFX_KILL); // a ground row's or a boss's part's, by its worth
         if (Formation* f = formations->get<Formation>(k.formation)) {
             ++f->killed;

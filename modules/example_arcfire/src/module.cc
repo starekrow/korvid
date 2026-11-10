@@ -14,6 +14,7 @@
 #include "korvid/ui/ui.h"
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 namespace kv::arcfire {
 
@@ -25,6 +26,8 @@ constinit u32 g_part_down = 0;
 // The systems and handlers, each in the file of its part.
 void demo(TickContext&);         // pilot.cc
 void bot(TickContext&);
+void scoring(TickContext&);      // scoring.cc
+void on_run_over(TickContext&, Span<const RunOver>);
 void boot(TickContext&);         // stage.cc
 void scroll(TickContext&);
 void stage(TickContext&);
@@ -95,9 +98,10 @@ constinit const FieldDesc k_bullet_fields[]   = {KV_FIELDS(Bullet, life, grazed,
 constinit const FieldDesc k_particle_fields[] = {KV_FIELDS(Particle, life, max_life, spin, drag, alpha, fall)};
 constinit const FieldDesc k_eggbody_fields[]  = {KV_FIELDS(EggBody, vy, drift)};
 constinit const FieldDesc k_dials_fields[]    = {KV_FIELDS(Dials, position, rank, bullet_speed, formation_count, formation_spacing, particles,
-                                                           plane_density, enemy_health, bot, invulnerable, loops, scroll_rows, weapon, power, options)};
-constinit const FieldDesc k_stage_fields[]    = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, ground_cursor, base, held, waiting)};
-constinit const FieldDesc k_run_fields[]      = {KV_FIELDS(Run, score, stage_score, eggs, restarts, epoch, kills, grazes, deaths, bombs, chips)};
+                                                           plane_density, enemy_health, bot, invulnerable, loops, scroll_rows, weapon, power, options, chain_window)};
+constinit const FieldDesc k_stage_fields[]    = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, ground_cursor, base, held, waiting, round_up)};
+constinit const FieldDesc k_run_fields[]      = {KV_FIELDS(Run, score, stage_score, next_extend, eggs, restarts, epoch, kills, grazes, deaths, bombs, chips, chain, chain_left, chain_best,
+                                                           bombs_used)};
 constinit const FieldDesc k_eggstate_fields[] = {KV_FIELDS(EggState, step, t, at, shell, restart)};
 constinit const FieldDesc k_chance_fields[]   = {KV_FIELDS(Chance, state, inc)};
 constinit const FieldDesc k_boss_fields[]     = {KV_FIELDS(Boss, def, phase, state, clock, s, down, hold)};
@@ -163,18 +167,19 @@ constinit const FieldDesc k_bullet_hit_fields[] = {KV_FIELDS(BulletHit, bullet)}
 constinit const FieldDesc k_rammed_fields[]    = {KV_FIELDS(Rammed, enemy)};
 constinit const FieldDesc k_graze_fields[]     = {KV_FIELDS(Graze, bullet)};
 constinit const FieldDesc k_shell_hit_fields[] = {KV_FIELDS(ShellHit, bullet)};
-constinit const FieldDesc k_kill_fields[]      = {KV_FIELDS(Kill, at, score, pad, formation)};
+constinit const FieldDesc k_kill_fields[]      = {KV_FIELDS(Kill, at, score, flat, formation)};
 constinit const FieldDesc k_bombed_fields[]    = {KV_FIELDS(Bombed, at, cancelled, pad)};
 constinit const FieldDesc k_pickup_fields[]    = {KV_FIELDS(Pickup, item)};
 constinit const FieldDesc k_died_fields[]      = {KV_FIELDS(ShipDied, at, cause, pad)};
 constinit const FieldDesc k_member_fields[]    = {KV_FIELDS(SpawnMember, formation, member, epoch, pad, group, offset)};
 constinit const FieldDesc k_end_fields[]       = {KV_FIELDS(StageEnd, loops, pad)};
+constinit const FieldDesc k_over_fields[]      = {KV_FIELDS(RunOver, loops, pad)};
 constinit const EventTypeDesc k_events[] = {
     KV_EVENT_EX(BeamHit, k_beam_hit_fields, EvStaleOk), // a target the beam met may be gone before it lands
     KV_EVENT_EX(ShotHit, k_shot_hit_fields, 0),   KV_EVENT_EX(BulletHit, k_bullet_hit_fields, 0), KV_EVENT_EX(Rammed, k_rammed_fields, 0),
     KV_EVENT_EX(Graze, k_graze_fields, 0),        KV_EVENT_EX(ShellHit, k_shell_hit_fields, 0),   KV_EVENT_EX(Kill, k_kill_fields, 0),
     KV_EVENT_EX(Bombed, k_bombed_fields, 0),      KV_EVENT_EX(Pickup, k_pickup_fields, 0),
-    KV_EVENT_EX(ShipDied, k_died_fields, 0),      KV_EVENT_EX(SpawnMember, k_member_fields, EvStaleOk),   KV_EVENT_EX(StageEnd, k_end_fields, 0), // SpawnMember: a restart's formations go, their members' events with them
+    KV_EVENT_EX(ShipDied, k_died_fields, 0),      KV_EVENT_EX(SpawnMember, k_member_fields, EvStaleOk),   KV_EVENT_EX(StageEnd, k_end_fields, 0), KV_EVENT_EX(RunOver, k_over_fields, 0), // SpawnMember: a restart's formations go, their members' events with them
 };
 
 constinit const ResourceDesc k_resources[] = {{".stats"}};
@@ -199,6 +204,9 @@ constinit const InputActionDesc k_actions[] = {
 constinit const SystemDesc k_systems[] = {
     {.name = ".demo", .phase = Phase::Input, .fn = demo, .before = "input.sample", .main_thread = true},
     {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, tilemap.tile, audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
+    // The chain's clock, the extends, a new round's dials: before the sim moves anything.
+    {.name = ".scoring", .phase = Phase::PreSim, .fn = scoring, .writes = ".world.Run, .world.Stage, .world.Dials, audio.commands", .after = ".boot",
+     .main_thread = true},
     {.name = ".pause", .phase = Phase::PreSim, .fn = pause, .reads = "input.actions", .after = ".boot", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet.Transform2, ^.bullet.Velocity, ^.active.Transform2, ^.active.Velocity, ^.ship.Transform2, ^.air.Transform2, ^.ground.Transform2, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss, .world.Dials",
      .main_thread = true},
@@ -238,7 +246,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".particles", .phase = Phase::Sim, .fn = particles, .writes = ".particle", .state = StateUse::None},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true,
      .runs = RunWhen::Always},
-    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".world.Run, .world.Stage, .boss.Boss, .part.Health, .part.Part, .ship.Ship, .option.Option", .before = "ui.draw", .main_thread = true,
+    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".world.Run, .world.Stage, .world.Dials, .boss.Boss, .part.Health, .part.Part, .ship.Ship, .option.Option", .before = "ui.draw", .main_thread = true,
      .runs = RunWhen::Always},
     {.name = ".stats_mark", .phase = Phase::PostSim, .fn = stats_mark, .before = "sprite.extract", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".stats", .phase = Phase::PostSim, .fn = stats, .reads = "sprite.deltas", .writes = ".stats", .after = ".hud", .main_thread = true,
@@ -259,7 +267,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_bullet_hit", KV_ON(BulletHit, on_bullet_hit), .reads = ".world.Dials",
      .writes = ".bullet.Bullet, .active.Bullet, .world.Run, .ship.Ship"},
     {.name = ".on_rammed", KV_ON(Rammed, on_rammed), .reads = ".world.Dials", .writes = ".ship.Ship", .after = ".on_bullet_hit"},
-    {.name = ".on_graze", KV_ON(Graze, on_graze), .reads = ".bullet.Transform2, .active.Transform2", .writes = ".bullet.Bullet, .active.Bullet, .world.Run, audio.commands",
+    {.name = ".on_graze", KV_ON(Graze, on_graze), .reads = ".world.Dials, .bullet.Transform2, .active.Transform2", .writes = ".bullet.Bullet, .active.Bullet, .world.Run, audio.commands",
      .after = ".on_bullet_hit"},
     {.name = ".on_shell_hit", KV_ON(ShellHit, on_shell_hit), .reads = ".bullet.Transform2, .active.Transform2"},
     {.name = ".on_kill", KV_ON(Kill, on_kill), .reads = ".world.Dials", .writes = ".world.Run, .formation, audio.commands", .after = ".on_graze"},
@@ -270,7 +278,8 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_ship_died", KV_ON(ShipDied, on_ship_died),
      .writes = ".world.Run, .world.EggState, .world.Stage, .ship, audio.commands", .after = ".on_pickup, .on_rammed"},
     {.name = ".on_member", KV_ON(SpawnMember, on_member), .reads = ".world.Run, .world.Dials"},
-    {.name = ".on_stage_end", KV_ON(StageEnd, on_stage_end), .writes = ".world.Run", .after = ".on_ship_died"},
+    {.name = ".on_stage_end", KV_ON(StageEnd, on_stage_end), .reads = ".world.Dials", .writes = ".world.Run", .after = ".on_ship_died"},
+    {.name = ".on_run_over", KV_ON(RunOver, on_run_over)},
     {.name = ".on_exit", KV_ON(ExitRequested, on_exit)},
     {.name = ".on_spawned", KV_ON(Spawned, on_spawned), .reads = ".air.Transform2, .air.Sprite"},
 };
@@ -304,6 +313,18 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     g->autoplay = frameloop_flag(e, "--autoplay");
     g->fx = Rng::seeded(0xa2cf12e, 3);
     if (const char* bench = frameloop_option(e, "--bench")) snprintf(g->bench, sizeof g->bench, "%s", bench);
+    // The run's shape: arcade unless a stage is named; the demo, a stress run and the bench
+    // are runs of their own.
+    if (const char* name = frameloop_option(e, "--stage")) {
+        snprintf(g->stage_name, sizeof g->stage_name, "%s", name);
+        g->stage_select = true;
+    }
+    g->arcade = !g->stage_select && !g->demo && !g->stress && !g->bench[0];
+    if (const char* diff = frameloop_option(e, "--difficulty")) {
+        if (!strcmp(diff, "easy")) g->start = Position::Easy;
+        else if (!strcmp(diff, "hard")) g->start = Position::Hard;
+        else if (strcmp(diff, "normal")) KV_WARN("arcfire", "--difficulty %s: easy, normal or hard; Normal it is", diff);
+    }
     if (!patterns_load(e, *g)) return false;
     for (u32 i = 0; i < TEX_COUNT; ++i) {
         g->textures[i] = asset_load_texture(e, k_texture_paths[i]);
@@ -315,7 +336,10 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     g->boom_clip = fx_boom_clip(e);
     // The stage comes from its file; the sim holds until it has (stage.cc, boot), so how
     // long the disk takes never reaches the state.
-    g->stage_blob = asset_load_blob(e, "example_arcfire/stages/shoreline.stage.json");
+    char stage_path[96];
+    snprintf(stage_path, sizeof stage_path, "example_arcfire/stages/%s.stage.json", g->stage_name);
+    g->stage_blob = asset_load_blob(e, stage_path);
+    KV_INFO("arcfire", "%s: %s at %s", g->arcade ? "arcade" : g->stage_select ? "stage select" : "run", g->stage_name, position_name((u32)g->start));
     engine_hold(e, HoldLoading, true);
     hud_open(e, *g);
     KV_INFO("arcfire", "Arrows or WASD (or a pad's stick) fly, Z or Space (South) fires, Shift (West) focuses, Escape (Start) pauses, Q quits.");

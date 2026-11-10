@@ -3,12 +3,15 @@
 #include "korvid/frameloop/frameloop.h"
 
 namespace {
-// --demo plays the scripted minute and quits at the stage's end; --autoplay puts the bot
-// on the stick at Normal; --stress turns every dial up, the ship invulnerable, the stage
-// looping. --dial name=value moves one dial (repeatable). --bench NAME fires one pattern
-// from a fixed emitter, again and again, for writing and measuring patterns.
-constinit const char* const k_flags[] = {"--demo", "--autoplay", "--stress"};
-constinit const char* const k_options[] = {"--dial", "--bench"};
+// Played plainly (or --arcade), the game is arcade: the stages in order, round again a
+// difficulty up, ending after Hard. --stage NAME plays one stage; --difficulty easy|normal|
+// hard is where either starts. --demo plays the scripted minute and quits at the stage's
+// end; --autoplay puts the bot on the stick; --stress turns every dial up, the ship
+// invulnerable, the stage looping. --dial name=value moves one dial (repeatable). --bench
+// NAME fires one pattern from a fixed emitter, again and again, for writing and measuring
+// patterns.
+constinit const char* const k_flags[] = {"--demo", "--autoplay", "--stress", "--arcade"};
+constinit const char* const k_options[] = {"--dial", "--bench", "--stage", "--difficulty"};
 constinit const kv::FrameLoopConfig k_config = {
     .title  = "korvid arcfire",
     .width  = 1280,

@@ -170,6 +170,7 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     Run& r = run[0];
     EggState& es = es_row[0];
     ++r.deaths;
+    chain_break(r);
     ctx.destroy_all(g_option_kind); // a death costs the options (their beams go with them, children)
     if (r.eggs > 0) {
         --r.eggs;
@@ -187,7 +188,7 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     for (u32 k : kinds) ctx.destroy_all(k);
     stage_reset(stage_row[0], g.stage);
     r.score = r.stage_score;
-    r.eggs = 3;
+    r.eggs = kStartEggs;
     r.bombs = kBaseBombs;
     ++r.restarts;
     ++r.epoch;

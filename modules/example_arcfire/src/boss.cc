@@ -374,7 +374,7 @@ void on_part_down(TickContext& ctx, Span<const StateEdge> edges) {
             i32 bonus = (i32)((f32)def.score * (left > 0.0f ? left : 0.0f));
             u32 overflow = 0;
             u32 cancelled = cancel_bullets(ctx, g, core_at, 0.0f, &overflow);
-            ctx.emit(Kill{core_at, bonus + (i32)overflow * kChipValue, 0, Handle{}}); // the chips' cap's overflow paid at once, as a bomb's
+            ctx.emit(Kill{core_at, bonus + (i32)overflow * kChipValue, 1, Handle{}}); // the chips' cap's overflow paid at once, as a bomb's
             fx_boom(ctx, g, core_at, 96.0f);
             sfx(ctx, g, SFX_BOSS_DOWN);
             g.shake = 12.0f;

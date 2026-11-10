@@ -39,6 +39,7 @@ void bomb(TickContext& ctx) {
     if (!action_pressed(a, g.act_bomb) || !s.live || s.guard || run[0].bombs <= 0 || !egg_idle) return;
 
     --run[0].bombs;
+    ++run[0].bombs_used;
     s.guard = kGuardTicks;
     cols[i].mask = 0;
     u32 overflow = 0;

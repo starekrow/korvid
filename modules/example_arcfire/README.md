@@ -31,6 +31,15 @@ Controls: arrows or WASD (or the left stick or the d-pad) fly; Z or Space (South
 held; Shift (West) focuses: half speed, the hitbox and the graze ring shown, the spread
 narrowed; X (East) bombs; Escape (Start) pauses; Q quits.
 
+Run plainly (or with `--arcade`), the game is arcade: the stages in order (Shoreline alone
+for now), and at the end the stage-clear banner with the stage bonus and a round again a
+difficulty up, the score carried, until the round at Hard ends the run. `--stage NAME`
+plays the one stage (`assets/stages/NAME.stage.json`) and ends with it; `--difficulty
+easy|normal|hard` is where either starts (Normal). A run's end logs its results line (the
+score, the round and difficulty reached, restarts, eggs lost, bombs used, the longest
+chain) and quits once the banner has shown. Out of eggs, the stage starts over, the score
+as it was when the stage began.
+
 The ways it flies itself:
 
 - `--demo` plays the whole stage (about five minutes) and quits at its end: it fires
@@ -43,7 +52,7 @@ The ways it flies itself:
   across runs, thread counts (`--threads 1`, `--threads 8`), I/O backends (`--io sync`,
   `--io uring`) and asset sources (loose files, `--pack` with a kpak of `bin/assets`, or
   `--pack` with a zip of it).
-- `--autoplay` puts the bot on the stick at Normal: it holds fire, steps away from each
+- `--autoplay` puts the bot on the stick, in arcade or a stage select: it holds fire, steps away from each
   bullet's closest pass in the next 40 ticks when it comes within 26 units, keeps off the
   air enemies, a boss's hull and the walls, lines up under the nearest enemy (at a boss,
   beside the lowest open part that ends its phase, by the spread at that height), and bombs
@@ -58,7 +67,7 @@ The ways it flies itself:
   `bullet_speed`, `formation_count`, `formation_spacing`, `particles`, `plane_density`,
   `enemy_health`, `bot`, `invulnerable` (1, or 2: after the first death), `loops`,
   `weapon` and `power` (what the ship starts with: 0 Spread, 1 Beam, 2 Storm, 3 Lance; 1..5),
-  `options` (0..2, the options it starts with),
+  `options` (0..2, the options it starts with), `chain_window` (ticks; 0 turns the chain off),
   `scroll_rows` (1: move every plane tile
   every tick instead of scrolling the layer, for the notebook's comparison). The log prints
   the dials at the start.
@@ -78,8 +87,8 @@ components, the events, the kinds' ids, the stage as its file says it, and the m
 state.
 
 - **The world row.** One row of the kind `.world` holds the dials, the stage's clock
-  (`Stage`: distance, speed, the cursor over the marks), the run (`Run`: score, eggs,
-  restarts), the egg sequence and the sim's random stream, so the state hash covers all of
+  (`Stage`: distance, speed, the cursor over the marks, the round), the run (`Run`: score,
+  eggs, bombs, restarts, the chain, the next extend), the egg sequence and the sim's random stream, so the state hash covers all of
   it. The module's own state holds only what is not the sim's: asset handles, the stage
   file as parsed, the UI's screens, the counters.
 - **The field** (`src/field.h`) is 540 x 720 world units around the origin. Nothing in the
@@ -174,6 +183,16 @@ state.
   and come to the ship above the magnet line or within a short reach; the graze ring
   picks them up. An option item past the second pays 20,000 instead, an egg item past the
   fifth egg 50,000.
+- **Scoring** (`scoring.h`, `scoring.cc`): the chain (a kill within `chain_window` ticks of
+  the last adds one and pays times x1 below 10 kills, x2 to 24, x3 to 49, x4 to 99, x5 from
+  100; a graze holds the window 20 ticks more; a gap, a death or a restart ends it),
+  extends (an egg at 200,000 and 600,000, then every million; past five eggs, 50,000), the
+  stage bonus (20,000 an egg in hand, 5,000 a bomb). A boss's time bonus is paid outside
+  the chain. The `scoring` system, before the sim each tick, runs the window down, pays
+  the extends and begins a round the end mark called for, with arcade's next difficulty.
+- **Difficulty** (`dials.cc`): Easy, Normal and Hard are positions of the dials: rank 0.25,
+  0.5, 0.9; bullet speed 0.85, 1, 1.15; enemy health 0.8, 1, 1.3; formations 1, 1, 1.25 times;
+  the chain's window 110, 90, 75 ticks.
 - **The egg** (`egg.cc`): a death slows time to a quarter (`engine_time_scale`, set each
   tick by the sequence), breaks the ship into its four quarters, cancels the bullets near
   it into chips, drops the egg (a spherical machine) that rests, builds the new ship
@@ -209,7 +228,8 @@ state.
 | `src/arcfire.h`, `src/field.h` | what the files share; the field's bounds |
 | `src/stage.cc`, `src/stage_data.cc` | the boot, the scroll, the marks; reading a stage file |
 | `src/path.cc` | Catmull-Rom paths by arc length |
-| `src/dials.cc` | the dials' positions and `--dial` |
+| `src/dials.cc` | the dials' positions (the difficulties among them) and `--dial` |
+| `src/scoring.h`, `src/scoring.cc` | the run's record and the score's rules; the chain's clock, extends, rounds, the results line |
 | `src/planes.cc`, `src/ground.cc` | the planes and the ground's scroll; the map and its enemies |
 | `src/ship.cc`, `src/weapons.cc`, `src/options.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves; the weapons and the options |
 | `src/boss.cc`, `src/boss_data.cc`, `assets/bosses/` | bosses: their life and their parts; reading a boss file; the files |

@@ -18,6 +18,11 @@ namespace {
 
 constexpr u32 kClearTicks = 180;
 
+// The HUD's labels are capitals.
+void upper(char* s) {
+    for (; *s; ++s) *s = (char)(*s >= 'a' && *s <= 'z' ? *s - 32 : *s);
+}
+
 } // namespace
 
 void hud_open(Engine& e, Game& g) {
@@ -26,7 +31,7 @@ void hud_open(Engine& e, Game& g) {
     o.layer = 90;
     o.input = false;
     g.hud = ui_open(e, g.ui, "hud", o);
-    ui_model_set_int(e, "eggs_max", 3);
+    ui_model_set_int(e, "eggs_max", kMaxEggs);
     ui_model_set_int(e, "bombs_max", kMaxBombs);
     ui_model_set_int(e, "power_max", kMaxPower);
 }
@@ -78,7 +83,16 @@ void hud_stomp(Engine& e, Game& g, bool on) {
     }
 }
 
-void hud_stage_clear(Engine& e, Game& g) {
+void hud_stage_clear(Engine& e, Game& g, i64 bonus, const char* next) {
+    char text[48];
+    if (next) {
+        snprintf(text, sizeof text, "NEXT ROUND: %s", next);
+        upper(text);
+    } else {
+        snprintf(text, sizeof text, "THE END");
+    }
+    ui_model_set_int(e, "stage_bonus", bonus);
+    ui_model_set_str(e, "next_round", text);
     if (g.clear_label.is_null()) {
         UiOpen o;
         o.layer = 95;
@@ -149,6 +163,16 @@ void hud(TickContext& ctx) {
     ui_model_set_int(e, "bombs", r.bombs);
     ui_model_set_int(e, "restarts", r.restarts);
     ui_model_set_int(e, "grazes", r.grazes);
+    ui_model_set_int(e, "chain", r.chain);
+    ui_model_set_int(e, "chain_mult", chain_multiplier(r.chain));
+    ui_model_set_int(e, "chain_left", r.chain_left);
+    if (Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials)); dials.len) {
+        ui_model_set_int(e, "chain_window", dials[0].chain_window);
+        char name[16];
+        snprintf(name, sizeof name, "%s", position_name(dials[0].position));
+        upper(name);
+        ui_model_set_str(e, "difficulty", name);
+    }
     if (const Ship* s = engine_table(e, g_ship_kind)->get<Ship>(g.ship)) {
         ui_model_set_str(e, "weapon", weapon_name(s->weapon));
         ui_model_set_int(e, "power", s->power);
