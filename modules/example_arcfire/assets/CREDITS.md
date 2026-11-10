@@ -87,6 +87,11 @@ Drawn by `tools/make_art.py` on 2026-11-09, Korvid's, under the repository's lic
 | `made/eggs.png` | the HUD's pips: the egg, spent (dimmed) and in hand |
 | `made/bombs.png` | the HUD's bomb pips: Kenney's shield tile (`kenney/tiles.png`, column 2, row 2), dimmed for a bomb spent and as it is for one in hand |
 
+`maps/shoreline.tmj` and `maps/shoreline.tsj` are written by `tools/make_maps.py`
+(2026-11-09, Korvid's, Apache 2.0): a Tiled map whose tiles are all Kenney's
+(`kenney/tiles.png`, Pixel Shmup, above), placed by the script from a fixed seed; the
+tileset only names that image.
+
 The stage (`stages/shoreline.stage.json`), the UI document (`ui/arcfire.ui.json`) and the
 BulletML patterns (`patterns/*.xml`) are written by hand for the game. No pattern is
 adapted from another source.

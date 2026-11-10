@@ -61,6 +61,17 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
     out = StageDef{};
     snprintf(out.name, sizeof out.name, "%s", json_string(json_get(doc, root, "name"), "Stage"));
     out.speed = (f32)json_number(json_get(doc, root, "speed"), 1.0);
+    snprintf(out.map, sizeof out.map, "%s", json_string(json_get(doc, root, "map"), ""));
+    if (const JsonValue* planes = json_get(doc, root, "planes")) {
+        out.planes = 0;
+        static const char* const k_names[] = {"stars", "nebula", "cloud"};
+        for (const JsonValue* v = json_first(doc, *planes); v; v = json_next(doc, *v)) {
+            u32 i = 0;
+            while (i < 3 && strcmp(json_string(v, ""), k_names[i])) ++i;
+            if (i == 3) return fail(why, why_cap, "a plane is stars, nebula or cloud");
+            out.planes |= 1u << i;
+        }
+    }
 
     const JsonValue* paths = json_get(doc, root, "paths");
     for (const JsonValue* p = paths ? json_first(doc, *paths) : nullptr; p; p = json_next(doc, *p)) {

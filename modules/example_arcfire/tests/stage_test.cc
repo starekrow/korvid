@@ -45,7 +45,7 @@ void test_stage(kv::TestCtx& c) {
     KV_CHECK(c, text != nullptr);
     if (text) {
         KV_CHECK(c, stage_parse(text, len, def, why, sizeof why));
-        KV_CHECK(c, def.formation_count == 8 && def.ground_count == 3 && def.length > 0.0f);
+        KV_CHECK(c, def.formation_count == 8 && def.ground_count == 0 && def.length > 0.0f && !strcmp(def.map, "example_arcfire/maps/shoreline.tmj") && def.planes == 4);
         for (u32 i = 0; i < def.formation_count; ++i) KV_CHECK(c, def.formations[i].pattern[0] != 0 && def.formations[i].entry == KV_BML_NONE);
         u32 speeds = 0;
         for (u32 i = 0; i < def.mark_count; ++i) {

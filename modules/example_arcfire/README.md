@@ -51,7 +51,9 @@ The ways it flies itself:
   field, again and again, under an invulnerable bot: how a pattern is written and measured.
 - `--dial name=value` moves one dial (repeat it for more): `rank`,
   `bullet_speed`, `formation_count`, `formation_spacing`, `particles`, `plane_density`,
-  `enemy_health`, `bot`, `invulnerable`, `loops`. The log prints the dials at the start.
+  `enemy_health`, `bot`, `invulnerable`, `loops`, `scroll_rows` (1: move every plane tile
+  every tick instead of scrolling the layer, for the notebook's comparison). The log prints
+  the dials at the start.
 
 Every mode logs the game's counters beside the frame loop's fps line (bullets, sprites,
 the extract's Set deltas this tick, the broadphase's colliders and the pairs it tested)
@@ -79,9 +81,17 @@ state.
   the distance has passed. A formation mark schedules its members as events on the ticks
   their spacing gives; each member's event carries the run's epoch, so members scheduled
   before a restart never arrive. The sim holds (`HoldLoading`) until the file is in.
-- **Planes** (`planes.cc`): three grids of tiles of a seamless background, a cosmetic
-  kind, each moved by its rate times the scroll and wrapped as a teleport. This is the
-  game-side parallax the PRD asks to measure: every tile is a Set delta every tick.
+- **Planes** (`planes.cc`): grids of tiles of a seamless background in a cosmetic kind,
+  on their own layers, which a stage names (Shoreline keeps only the low cloud over the
+  sea). The tiles never move: each plane's layer is scrolled by its rate times the speed
+  (`sprite/layers.h`), wrapped by a whole tile as a snap, so a plane is one value a tick.
+- **The ground** (`ground.cc`, `assets/maps/`): a stage may name a Tiled map, here
+  Shoreline's sea and islands, written by `tools/make_maps.py` from Kenney's terrain tiles
+  and drawn at twice their size. Its 15,000 tiles are spawned once into the tilemap
+  module's still kind and scrolled by layer with the stage's distance, so they cost the
+  extract nothing a tick. The map's `enemies` layer places the ground rows: turrets, tanks
+  that drive their road, bunkers that launch popcorn up a stage path. Each comes into view
+  where its place on the map crosses the field's top, and rides the scroll from there.
 - **The ship** (`ship.cc`): `control` reads the action map and moves, clamps and fires;
   `shots` flies the shots in a `parallel_for`. The hitbox is the ship's own collider (radius
   3); the graze ring (radius 18) and the hitbox's dot are child rows.
@@ -126,6 +136,8 @@ state.
   drive the action map with `input_action_override`.
 - **Effects** (`fx.cc`): sparks and debris are particles in a cosmetic kind, drawn from
   the module's own random stream, so the particle dial changes nothing the sim draws.
+  Every air row gets a shadow on the ground's layer, a cosmetic child down and to the
+  right that dies with it.
 - **Reports** (`stats.cc`): the counters as the resource `example_arcfire.stats`, the log
   lines, the summary.
 
@@ -138,16 +150,17 @@ state.
 | `src/stage.cc`, `src/stage_data.cc` | the boot, the scroll, the marks; reading a stage file |
 | `src/path.cc` | Catmull-Rom paths by arc length |
 | `src/dials.cc` | the dials' positions and `--dial` |
-| `src/planes.cc`, `src/ship.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves |
+| `src/planes.cc`, `src/ground.cc` | the planes and the ground's scroll; the map and its enemies |
+| `src/ship.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves |
 | `src/patterns.cc`, `assets/patterns/` | the library and the runners; the ten patterns |
 | `src/hits.cc`, `src/egg.cc` | what happens when things meet; the death and the restart |
 | `src/bomb.cc`, `src/items.cc` | the bomb; chips, pickups and the magnet |
 | `src/hud.cc`, `src/fx.cc`, `src/pilot.cc`, `src/stats.cc` | the camera and the screens; particles; the demo and the bot; the reports |
 | `src/main.cc` | the frame loop's config and the game's flags |
-| `assets/stages/shoreline.stage.json` | the stage |
+| `assets/stages/shoreline.stage.json`, `assets/maps/` | the stage; its ground map and tileset |
 | `assets/ui/arcfire.ui.json` | the HUD and every screen |
 | `assets/CREDITS.md`, `assets/LICENSE-*.txt` | who made what |
-| `tools/make_art.py` | copies the vendored art in and draws `assets/made/` |
+| `tools/make_art.py`, `tools/make_maps.py` | copies the vendored art in and draws `assets/made/`; writes the maps |
 | `tests/` | paths; the stage file and the parser's rules |
 | `docs/` | the PRDs and the performance notebook |
 

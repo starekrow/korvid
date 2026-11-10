@@ -18,7 +18,7 @@ namespace kv::arcfire {
 
 constinit u32 g_world_kind = 0, g_plane_kind = 0, g_ship_kind = 0, g_ring_kind = 0, g_mark_kind = 0, g_shot_kind = 0, g_air_kind = 0,
               g_ground_kind = 0, g_bullet_kind = 0, g_active_kind = 0, g_particle_kind = 0, g_egg_kind = 0, g_shell_kind = 0,
-              g_item_kind = 0, g_formation_kind = 0;
+              g_item_kind = 0, g_formation_kind = 0, g_shadow_kind = 0;
 
 // The systems and handlers, each in the file of its part.
 void demo(TickContext&);         // pilot.cc
@@ -39,6 +39,7 @@ void items(TickContext&);        // items.cc
 void on_pickup(TickContext&, Span<const Pickup>);
 void bomb(TickContext&);         // bomb.cc
 void on_bomb(TickContext&, Span<const Bombed>);
+void on_spawned(TickContext&, Span<const Spawned>); // fx.cc: shadows
 void egg(TickContext&);          // egg.cc
 void on_ship_died(TickContext&, Span<const ShipDied>);
 void on_overlap(TickContext&, Span<const OverlapBegin>); // hits.cc
@@ -78,13 +79,13 @@ constinit const FieldDesc k_mover_fields[] = {
 };
 constinit const FieldDesc k_emitter_fields[]  = {KV_FIELDS(Emitter, pattern, at, state, timer)};
 constinit const FieldDesc k_runner_fields[]   = {KV_FIELDS(BmlRunner, rng, wait, frame16, frame8, track8, params, last, term, delta, dir, speed, mx, my, flags)};
-constinit const FieldDesc k_ground_fields[]   = {KV_FIELDS(Ground, rate, bench)};
+constinit const FieldDesc k_ground_fields[]   = {KV_FIELDS(Ground, rate, bench, kind, launch, timer, vx, home, range)};
 constinit const FieldDesc k_bullet_fields[]   = {KV_FIELDS(Bullet, life, grazed, owner)};
 constinit const FieldDesc k_particle_fields[] = {KV_FIELDS(Particle, life, max_life, spin, drag, alpha, fall)};
 constinit const FieldDesc k_eggbody_fields[]  = {KV_FIELDS(EggBody, vy, drift)};
 constinit const FieldDesc k_dials_fields[]    = {KV_FIELDS(Dials, position, rank, bullet_speed, formation_count, formation_spacing, particles,
-                                                           plane_density, enemy_health, bot, invulnerable, loops)};
-constinit const FieldDesc k_stage_fields[]    = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, pad)};
+                                                           plane_density, enemy_health, bot, invulnerable, loops, scroll_rows)};
+constinit const FieldDesc k_stage_fields[]    = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, ground_cursor)};
 constinit const FieldDesc k_run_fields[]      = {KV_FIELDS(Run, score, stage_score, eggs, restarts, epoch, kills, grazes, deaths, bombs, chips)};
 constinit const FieldDesc k_eggstate_fields[] = {KV_FIELDS(EggState, step, t, at, shell, restart)};
 constinit const FieldDesc k_chance_fields[]   = {KV_FIELDS(Chance, state, inc)};
@@ -121,6 +122,8 @@ constinit const KindDesc k_kinds[] = {
     // Chips and pickups; a formation's count of its members.
     {.name = ".item",     .components = "Transform2, Sprite, Velocity, Collider2, Item", .capacity = 4096, .id = &g_item_kind},
     {.name = ".formation", .components = "Formation", .capacity = 64, .id = &g_formation_kind},
+    // Shadows on the ground under what flies: cosmetic children.
+    {.name = ".shadow",   .components = "Transform2, Local2, Parent, Sprite", .capacity = 512, .id = &g_shadow_kind, .cosmetic = true},
 };
 
 // ---- events --------------------------------------------------------------------------------------
@@ -134,7 +137,7 @@ constinit const FieldDesc k_kill_fields[]      = {KV_FIELDS(Kill, at, score, pad
 constinit const FieldDesc k_bombed_fields[]    = {KV_FIELDS(Bombed, at, cancelled, pad)};
 constinit const FieldDesc k_pickup_fields[]    = {KV_FIELDS(Pickup, item)};
 constinit const FieldDesc k_died_fields[]      = {KV_FIELDS(ShipDied, at, cause, pad)};
-constinit const FieldDesc k_member_fields[]    = {KV_FIELDS(SpawnMember, formation, member, epoch, pad, group)};
+constinit const FieldDesc k_member_fields[]    = {KV_FIELDS(SpawnMember, formation, member, epoch, pad, group, offset)};
 constinit const FieldDesc k_end_fields[]       = {KV_FIELDS(StageEnd, loops, pad)};
 constinit const EventTypeDesc k_events[] = {
     KV_EVENT_EX(ShotHit, k_shot_hit_fields, 0),   KV_EVENT_EX(BulletHit, k_bullet_hit_fields, 0), KV_EVENT_EX(Rammed, k_rammed_fields, 0),
@@ -164,17 +167,18 @@ constinit const InputActionDesc k_actions[] = {
 
 constinit const SystemDesc k_systems[] = {
     {.name = ".demo", .phase = Phase::Input, .fn = demo, .before = "input.sample", .main_thread = true},
-    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .ground", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, tilemap.tile", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pause", .phase = Phase::PreSim, .fn = pause, .reads = "input.actions", .after = ".boot", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet.Transform2, ^.bullet.Velocity, ^.active.Transform2, ^.active.Velocity, ^.ship.Transform2, ^.air.Transform2, ^.ground.Transform2, .world.Dials",
      .main_thread = true},
     {.name = ".scroll", .phase = Phase::Sim, .fn = scroll, .writes = ".world.Stage"},
     {.name = ".stage", .phase = Phase::Sim, .fn = stage, .reads = ".world.Dials, .world.Run", .writes = ".world.Stage, .formation", .after = ".scroll"},
-    {.name = ".planes", .phase = Phase::Sim, .fn = planes, .reads = ".world.Stage, .plane.Plane, .plane.Sprite", .writes = ".plane.Transform2", .state = StateUse::None},
+    {.name = ".planes", .phase = Phase::Sim, .fn = planes, .reads = ".world.Stage, .world.Dials, .plane.Plane, .plane.Sprite",
+     .writes = "sprite.layers, .plane"},
     {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "input.actions, .world.Dials",
      .writes = ".ship.Transform2, .ship.Ship, .ship.Sprite, .shot, .ring.Sprite, .mark.Sprite"},
     {.name = ".shots", .phase = Phase::Sim, .fn = shots, .reads = ".shot.Velocity", .writes = ".shot.Transform2", .after = ".control", .state = StateUse::None},
-    {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage", .writes = ".air, .ground, .formation", .state = StateUse::Read},
+    {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage, .world.Run, .world.Dials", .writes = ".air, .ground, .formation", .state = StateUse::Read},
     {.name = ".patterns", .phase = Phase::Sim, .fn = patterns, .reads = ".ship.Transform2, .world.Dials, .air.Transform2, .ground.Transform2",
      .writes = ".air.Emitter, .air.Runner, .ground.Emitter, .ground.Runner, .active", .after = ".enemies"},
     {.name = ".bullets", .phase = Phase::Sim, .fn = bullets, .reads = ".bullet.Velocity, .active.Velocity",
@@ -215,6 +219,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_member", KV_ON(SpawnMember, on_member), .reads = ".world.Run, .world.Dials"},
     {.name = ".on_stage_end", KV_ON(StageEnd, on_stage_end), .writes = ".world.Run", .after = ".on_ship_died"},
     {.name = ".on_exit", KV_ON(ExitRequested, on_exit)},
+    {.name = ".on_spawned", KV_ON(Spawned, on_spawned), .reads = ".air.Transform2, .air.Sprite"},
 };
 
 // ---- startup -------------------------------------------------------------------------------------
@@ -289,6 +294,8 @@ Sprite enemy_sprite(const Game& g, Look look) {
     case Look::Red:    return sprite_of(g, TEX_SHIPS, ship_uv(1, 1), vec2{64, 64}, Z_AIR);
     case Look::Green:  return sprite_of(g, TEX_SHIPS, ship_uv(2, 1), vec2{64, 64}, Z_AIR);
     case Look::Turret: return sprite_of(g, TEX_TILES, tile_uv(4, 2), vec2{32, 32}, Z_GROUND);
+    case Look::Tank:   return sprite_of(g, TEX_TILES, tile_uv(5, 2), vec2{32, 32}, Z_GROUND);
+    case Look::Bunker: return sprite_of(g, TEX_TILES, tile_uv(4, 1), vec2{40, 40}, Z_GROUND);
     default:           return sprite_of(g, TEX_SHIPS, ship_uv(1, 0), vec2{64, 64}, Z_AIR);
     }
 }

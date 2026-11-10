@@ -171,3 +171,38 @@ died three times; it could not be made to again, under load or not, and two runs
 side hash the same tick for tick. The likeliest cause is real input reaching the window:
 the bot did not hold `focus`, so a Shift (or a pad) would have halved the ship's speed. The
 pilots now hold every gameplay action every tick.
+
+## Slice 3 — Shoreline
+
+**M1. The ground map, first try** (`--autoplay`, 25 s, Normal). Shoreline's map is 17 x
+650 tiles in three layers, 15,024 rows of `tilemap.tile` (sprites peak 15,362, mean
+15,169), scrolled by layer, so the deltas stayed what the air makes (mean 60 a tick). The
+extract did not: 1.05 ms a frame on average (2.0 worst) and the tick 1.50, against about
+0.5 before the map. The extract compares every live row of every drawable kind against
+what it sent, every tick; a map that never changes paid that compare 15,000 times a tick.
+R1's exit asks for a cost per tick that does not depend on the map's size, so this is the
+engine finding of the milestone (the improvements note, "Many Sets per tick").
+
+**M1. Still kinds** (same run). `KindDesc::still` marks a kind whose rows never change
+once spawned; each table counts its spawns, destroys and restores (`Table::churn`), and
+the extract skips a still table whose count has not moved, and otherwise looks only at
+its births and deaths. `tilemap.tile` is still. Extract 0.002 ms a frame (0.19 worst, the
+tick the map spawns), tick 0.50 ms (13.8 worst, the boot's load); the hashes are those of
+before the change, at every thread count, I/O backend and asset source. Frames are
+vsync's: 51 fps in a window the compositor holds at 50-ish when it is not focused.
+
+**M1. Layer scroll against moving the tiles** (`--bench ring --dial plane_density=N`,
+15 s each: three planes at slice 1's three densities, under one ring emitter, whose
+bullets are the ~110 deltas a tick that remain).
+
+| planes | tiles | deltas a tick (mean), layer / moved | rows uploaded a frame, layer / moved | extract ms/frame, layer / moved |
+|---|---|---|---|---|
+| density 1 (1024 units) | 6 | 112 / 118 | 163 / 182 | 0.023 / 0.038 |
+| density 8 (128 units) | 105 | 112 / 215 | 172 / 271 | 0.053 / 0.057 |
+| density 32 (32 units) | 1,224 | 112 / 1,334 | 178 / 1,227 | 0.18 / 0.21 |
+
+"Moved" is `--dial scroll_rows=1`, slice 1's way, and its numbers are slice 1's (1,259
+deltas at 1,224 tiles). On the layer, the planes' deltas are gone at every density: the
+count is the bullets' alone. The extract barely moves because the plane kind is not still
+(the dial moves its rows, so it cannot be) and its compare is still done: at 1,224 rows
+that compare is most of the 0.18 ms. At the art's scale (six tiles) it is nothing.

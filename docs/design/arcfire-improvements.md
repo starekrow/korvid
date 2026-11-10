@@ -16,17 +16,6 @@ that finds an engine limit adds a line here.
   and a bucket dimension. A stretch, slice 6, and the first thing a game has asked of the
   shader side.
 
-- **Parallax.** Each plane tile is an entity moved every tick: a Set delta and an upload
-  per tile per tick for what is one offset per layer. A per-layer parallax rate (a small
-  table the vertex shader reads, indexed by the row's layer) would scroll a plane for the
-  cost of one uniform. Slice 1 ships the game-side version and measures its share of the
-  extract and the upload; slice 3 decides. The question underneath: should the camera, or
-  the renderer, know about layers at all. *Measured in slice 1:* the deltas follow the
-  tiles one for one (6 tiles: 42 deltas a tick in all; 105: 141; 1,224: 1,259) and so do
-  the uploaded rows (13, 23, 148 KB a frame); the extract went from under 0.04 ms to 0.22
-  ms a frame at 1,224 tiles. At the art's scale (six 1024-unit tiles for three planes) it
-  is nothing; a plane of hundreds of small tiles (a ground map, stage three's battle) is
-  where a per-layer offset pays.
 - **Render-rate cosmetic entities.** Requirements v0 names an entity class updated per
   render on real dt, presentation only. Particles are the first thing that may need it:
   ten-tick sparks interpolated from a 60 Hz sim are stepped on a 144 Hz display. Slice 5
@@ -51,7 +40,9 @@ that finds an engine limit adds a line here.
   `sent_placements`) are grown with `resize_fill` as a kind's high-water row count climbs,
   so a burst of spawns past the high-water is a copy of all three; sizing them once from
   the kind's capacity (address space, like the tables) would take that out. Then the
-  compare itself, which a dirty bit from the writers would replace.
+  compare itself, which a dirty bit from the writers would replace. *Slice 3, M1:* a map of
+  15,000 still tiles cost the compare 1.05 ms a frame by itself; still kinds (Fixed) take
+  the rows that never change out of it. The moving rows' compare is what remains.
 - **Threads do not help at this size.** At 24,000 bullets the tick is a millisecond at 1,
   8 and 16 threads alike (1.00, 1.12, 1.22 ms); the pool's fan-out costs about what it
   saves. Worth a look when something per bullet costs more than a move: the grain sizes,
@@ -70,6 +61,24 @@ that finds an engine limit adds a line here.
 
 ## Fixed
 
+- **Parallax: layer scroll** (slice 3, M1). `SpriteLayers` (`sprite/layers.h`, the
+  resource `sprite.layers`): an offset per layer the game sets, sent as a `Layer` delta
+  when it changes and read by the vertex shader from a 256-entry buffer (binding 7),
+  interpolated by the frame's alpha, a snap for a wrap. The camera does not know about
+  layers; the renderer knows only an offset per layer. Arcfire's planes and its ground map
+  scroll by it: 1,224 plane tiles went from 1,334 deltas a tick to 112 (the rest is the
+  bullets) and from 1,227 rows uploaded a frame to 178. `TilemapPlace::scale` draws a map
+  larger than its pixels. Slice 1's measurement, for the record: the deltas followed the
+  tiles one for one (6 tiles: 42 deltas a tick; 105: 141; 1,224: 1,259), and the extract
+  went from under 0.04 ms to 0.22 ms a frame at 1,224 tiles.
+- **Still kinds** (slice 3, M1). `KindDesc::still`: rows that never change once spawned.
+  A table counts its spawns, destroys and restores (`Table::churn`, `Table::restores`);
+  `begin_tick` does not retake a still kind's previous copies unless that count moved, and
+  the sprite extract skips a still table whose count has not moved since it last looked,
+  and otherwise sends only its births and deaths (a restore: one full compare). A write to
+  a living row of a still kind is not drawn: the contract, in the core and sprite READMEs.
+  `tilemap.tile` is still. Shoreline's 15,000-tile map: extract 1.05 ms a frame before,
+  0.002 after; hashes unchanged.
 - **Broadphase cell size and masked pairs** (slice 2, M4). `collision.broadphase` groups
   colliders by (layer, mask), gives each group a grid sized to its own largest member, and
   pairs groups only where their masks meet, the smaller walked over the larger's grid

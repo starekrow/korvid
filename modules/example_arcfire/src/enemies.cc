@@ -4,10 +4,13 @@
 // Both flash white for the ticks after a hit, by drawing their sprite added instead of
 // blended, and both leave the field without a word.
 #include "arcfire.h"
+#include <math.h>
 
 namespace kv::arcfire {
 
 namespace {
+
+constexpr u32 kBunkerEvery = 240; // ticks between a bunker's launches
 
 // The hit flash: the sprite's own texture, added, for the ticks the flash lasts.
 void flash(const Game& g, Health& h, Sprite& s, Tex tex) {
@@ -59,12 +62,28 @@ void enemies(TickContext& ctx) {
     Span<Ground> gg = ground->rows_of<Ground>();
     Span<Health> gh = ground->rows_of<Health>();
     Span<Sprite> gs = ground->rows_of<Sprite>();
+    Span<const Run> run_row = ctx.read<Run>(ARC_WORLD(Run));
+    Span<const Dials> dials_row = ctx.read<Dials>(ARC_WORLD(Dials));
     f32 speed = stage_row[0].speed;
     for (u32 i = 0; i < ground->rows(); ++i) {
         if (!ground->is_alive(i)) continue;
         point2& p = gt[i].position;
         p.y -= speed * gg[i].rate;
         if (p.y < kFieldBottom - kCullMargin) { ctx.destroy(ground->handle_at(i)); continue; }
+        Ground& gk = gg[i];
+        if (gk.kind == GroundTank && gk.range > 0.0f) { // along its road, turning at the ends
+            p.x += gk.vx;
+            if ((gk.vx > 0.0f && p.x > gk.home + gk.range) || (gk.vx < 0.0f && p.x < gk.home - gk.range)) gk.vx = -gk.vx;
+        }
+        if (gk.kind == GroundBunker && in_field(p, -16.0f) && gk.timer && --gk.timer == 0 && run_row.len) {
+            // A launch: a formation of popcorn up out of the bunker, one event a member.
+            gk.timer = kBunkerEvery;
+            const FormationDef& f = g.stage.formations[gk.launch];
+            u32 count = (u32)lroundf((f32)f.count * dials_row[0].formation_count);
+            if (count == 0) count = 1;
+            Handle group = formations->spawn(Formation{count, 0, 0, 0});
+            for (u32 m = 0; m < count; ++m) ctx.schedule(SpawnMember{gk.launch, m, run_row[0].epoch, 0, group, p}, ctx.tick + (u64)m * f.spacing);
+        }
         // A ground row fires while the ship is above it (it does not turn round), its pattern
         // again a moment after it ends; the bench's fires whatever the ship does.
         Emitter& e = ge[i];

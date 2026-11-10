@@ -36,8 +36,12 @@ constexpr u32 L_ITEM   = 128; // chips and pickups: the ring collects them
 
 // ---- sprite layers ----------------------------------------------------------------------
 // Back to front, the master PRD's planes. The HUD is the UI's, above all of them.
-constexpr i32 Z_DEEP = -30, Z_HIGH = -20, Z_GROUND = -10, Z_CLOUD = 10, Z_AIR = 20, Z_SHIP = 30, Z_SHOT = 25,
-              Z_ITEM = 35, Z_BULLET = 40, Z_FX = 50, Z_MARK = 60;
+// The ground map's three tile layers are Z_MAP and the two above it; they scroll by the
+// renderer's layer offset (planes.cc), as the planes do, and nothing else is drawn on them.
+constexpr i32 Z_DEEP = -30, Z_HIGH = -20, Z_MAP = -16, Z_SHADOW = -12, Z_GROUND = -10, Z_CLOUD = 10, Z_AIR = 20, Z_SHIP = 30,
+              Z_SHOT = 25, Z_ITEM = 35, Z_BULLET = 40, Z_FX = 50, Z_MARK = 60;
+constexpr u32 kMapLayers = 3;    // sea, land, deco
+constexpr f32 kMapScale = 2.0f;  // world units a map pixel
 
 // ---- components -----------------------------------------------------------------------------
 
@@ -66,7 +70,11 @@ struct Emitter  { u32 pattern; f32 at; u32 state; u32 timer; };
 // A BulletML runner (the bulletml module's plain data) as a component: on the enemies,
 // and on the bullets that run programs of their own (the `active` kind).
 using Runner = BmlRunner;
-struct Ground   { f32 rate; u32 bench; };         // rides the scroll at `rate` times its speed; bench: fires whatever the ship does
+// A ground row: it rides the scroll at `rate` times its speed. A tank also drives back and
+// forth along its road (`vx`, within `range` of `home`); a bunker launches its formation
+// (`launch`, a FormationDef) every so often (`timer`). The bench's fires whatever the ship does.
+enum GroundKind : u32 { GroundTurret, GroundTank, GroundBunker };
+struct Ground   { f32 rate; u32 bench; u32 kind; u32 launch; u32 timer; f32 vx; f32 home; f32 range; };
 struct Bullet   { u32 life; u32 grazed; Handle owner; };
 // A cosmetic piece of debris or a spark: it drifts, spins, slows, falls and fades over its life.
 struct Particle { u32 life, max_life; f32 spin, drag, alpha, fall; };
@@ -86,6 +94,7 @@ struct Dials {
     u32 bot;               // the bot flies the ship
     u32 invulnerable;
     u32 loops;             // the stage loops at its end instead of ending
+    u32 scroll_rows;       // move every plane and map tile each tick (slice 1's way), for measuring the layer scroll
 };
 struct Stage {
     f32 distance;          // the stage's clock: units scrolled since the stage (or this loop) began
@@ -94,7 +103,7 @@ struct Stage {
     u32 cursor;            // the next mark
     u32 loops;             // times the stage has looped
     u32 ended;             // the end mark passed and the stage does not loop
-    u32 pad;
+    u32 ground_cursor;     // the next ground row of the map to come into view
 };
 struct Run {
     i64 score;
@@ -131,22 +140,26 @@ struct Kill       { point2 at; i32 score; u32 pad; Handle formation; };
 struct Bombed     { point2 at; u32 cancelled; u32 pad; };
 struct Pickup     { Handle item; };
 struct ShipDied   { point2 at; u32 cause; u32 pad; }; // cause 0 a bullet, 1 a ram; `at` is filled by the handler
-struct SpawnMember { u32 formation; u32 member; u32 epoch; u32 pad; Handle group; }; // scheduled by a formation mark; `group` its Formation row
+// Scheduled by a formation mark (or a bunker); `group` its Formation row, `offset` where its
+// path starts from (a bunker's launch: the path is relative to the bunker).
+struct SpawnMember { u32 formation; u32 member; u32 epoch; u32 pad; Handle group; point2 offset; };
 struct StageEnd   { u32 loops; u32 pad; };
 
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
-    g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind;
+    g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind, g_shadow_kind;
 // The two bullet kinds: plain bullets, and bullets that run a program (needles, seeds).
 inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
 
 // ---- the stage as its file says -------------------------------------------------------------
-constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 16, kMaxMarks = 128;
-enum class Look : u32 { Fighter, Red, Green, Turret, Count }; // what an enemy's sprite is
+constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 64, kMaxMarks = 128;
+enum class Look : u32 { Fighter, Red, Green, Turret, Tank, Bunker, Count }; // what an enemy's sprite is
 enum class MarkKind : u32 { Formation, Ground, Speed, End };
 constexpr u32 kPatternName = 32;
 struct FormationDef { u32 path; u32 count; u32 spacing; Look look; i32 health; i32 score; f32 fire_at; f32 speed; char pattern[kPatternName]; u32 entry; };
-struct GroundDef    { f32 x; i32 health; i32 score; char pattern[kPatternName]; u32 entry; };
+// A ground row: from a stage mark, or from the map's enemies layer (then `at` is the stage
+// distance at which it comes into view and `kind` what it is).
+struct GroundDef    { f32 x; i32 health; i32 score; char pattern[kPatternName]; u32 entry; f32 at; GroundKind kind; f32 route; u32 launch; };
 struct Mark         { f32 at; MarkKind kind; u32 index; f32 value, over; };
 struct StageDef {
     char         name[32] = "";
@@ -158,6 +171,12 @@ struct StageDef {
     GroundDef    grounds[kMaxGrounds];
     Mark         marks[kMaxMarks];
     u32          path_count = 0, formation_count = 0, ground_count = 0, mark_count = 0;
+    // The ground: a Tiled map (its path; "" for none), its enemies once loaded (sorted by
+    // `at`), and which of the three planes the stage shows (bits by plane, 7 by default).
+    char         map[96] = "";
+    GroundDef    map_grounds[kMaxGrounds];
+    u32          map_ground_count = 0;
+    u32          planes = 7;
 };
 // Reads a .stage.json. False with `why` filled for a file that does not say a stage.
 bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize why_cap);
@@ -181,7 +200,7 @@ struct Game {
     Handle   additive[TEX_COUNT]; // and added (glows, the hit flash)
     Handle   stage_blob;          // the .stage.json on its way in
     StageDef stage;
-    bool     stage_ready = false;
+    bool     stage_parsed = false, stage_ready = false;
     // The patterns: patterns.json names them, each a BulletML document; compiled into
     // the library when all are in. A bullet definition's look, by its label.
     static constexpr u32 kMaxPatterns = 32;
@@ -193,6 +212,13 @@ struct Game {
     u8       bullet_look[1024];   // 0 round, 1 needle; by bullet definition
     char     bench[kPatternName] = ""; // --bench NAME
     u32      bench_entry = KV_BML_NONE;
+    Handle   map;                 // the stage's ground map (tilemap), and its tiles once spawned
+    bool     map_spawned = false;
+    point2   map_origin;          // the map's top-left in the world when the distance is 0
+    // The layers' scroll (planes.cc): what each plane has moved (its offset wraps), the
+    // ground's last offset (a jump back is a snap: a loop, a restart).
+    f32      plane_scrolled[3] = {};
+    f32      ground_offset = 0.0f;
     Handle   ui;                  // ui.doc
     Handle   hud, pause_screen, cover, clear_label;
     u32      clear_ticks = 0;     // the "stage clear" label's time left
@@ -231,6 +257,11 @@ void   dials_log(const Dials& d);
 
 // Planes (planes.cc).
 void   planes_spawn(Engine& e, Game& g, const Dials& d);
+// The ground map, once its asset is Ready: its tiles spawned (cosmetic, still, scrolled by
+// layer) and its enemies read into the stage. False while it is loading.
+bool   ground_map_ready(TickContext& ctx, Game& g, char* why, usize why_cap);
+// A ground row at `at` (stage.cc): a mark's, the map's, the bench's.
+void   ground_spawn(TickContext& ctx, const Game& g, const Dials& d, const GroundDef& gd, point2 at, bool bench = false);
 
 // The ship (ship.cc).
 Handle ship_spawn(Engine& e, Game& g);

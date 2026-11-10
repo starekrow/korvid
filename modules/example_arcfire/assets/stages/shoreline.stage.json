@@ -1,6 +1,8 @@
 {
   "name": "SHORELINE",
   "speed": 1.5,
+  "map": "example_arcfire/maps/shoreline.tmj",
+  "planes": ["cloud"],
   "paths": {
     "dive_left":   [[-200, 440], [-180, 200], [-60, 40], [120, -80], [330, -120]],
     "dive_right":  [[200, 440], [180, 200], [60, 40], [-120, -80], [-330, -120]],
@@ -8,19 +10,17 @@
     "sweep_rl":    [[340, 220], [150, 140], [0, 110], [-150, 140], [-340, 220]],
     "drop_center": [[0, 440], [0, 100], [-80, -20], [-200, 40], [-340, 200]],
     "loop_left":   [[-120, 440], [-120, 60], [0, -40], [120, 60], [60, 200], [-60, 160], [-340, 0]],
+    "bunker_rise": [[0, 0], [0, 140], [90, 260], [330, 300]],
     "zigzag":      [[-220, 440], [200, 280], [-200, 120], [200, -40], [-200, -200], [200, -440]]
   },
   "marks": [
     { "at": 100,  "formation": { "path": "dive_left",   "count": 6,  "spacing": 14, "sprite": "red",   "health": 2, "score": 100, "pattern": "aimed",       "fire_at": 0.3,  "speed": 3.0 } },
     { "at": 450,  "formation": { "path": "dive_right",  "count": 6,  "spacing": 14, "sprite": "green", "health": 2, "score": 100, "pattern": "aimed_burst", "fire_at": 0.25, "speed": 3.0 } },
-    { "at": 800,  "ground": { "x": -150, "health": 14, "score": 500, "pattern": "ring" } },
     { "at": 1000, "formation": { "path": "sweep_lr",    "count": 8,  "spacing": 10, "sprite": "red",   "health": 2, "score": 120, "pattern": "aimed",       "fire_at": 0.35, "speed": 3.5 } },
     { "at": 1400, "speed": { "value": 2.2, "over": 200 } },
     { "at": 1600, "formation": { "path": "sweep_rl",    "count": 8,  "spacing": 10, "sprite": "green", "health": 2, "score": 120, "pattern": "needles",     "fire_at": 0.3,  "speed": 3.5 } },
     { "at": 2100, "formation": { "path": "drop_center", "count": 5,  "spacing": 12, "sprite": "red",   "health": 3, "score": 150, "pattern": "wave",        "fire_at": 0.2,  "speed": 3.0 } },
-    { "at": 2400, "ground": { "x": 140, "health": 16, "score": 600, "pattern": "spiral" } },
     { "at": 2600, "formation": { "path": "loop_left",   "count": 8,  "spacing": 12, "sprite": "green", "health": 2, "score": 150, "pattern": "rain",        "fire_at": 0.3,  "speed": 3.2 } },
-    { "at": 3000, "ground": { "x": 0, "health": 20, "score": 800, "pattern": "cross" } },
     { "at": 3200, "formation": { "path": "zigzag",      "count": 10, "spacing": 10, "sprite": "red",   "health": 2, "score": 150, "pattern": "split",       "fire_at": 0.2,  "speed": 4.0 } },
     { "at": 3600, "speed": { "value": 1.5, "over": 300 } },
     { "at": 4000, "formation": { "path": "dive_left",   "count": 8,  "spacing": 12, "sprite": "green", "health": 3, "score": 200, "pattern": "homing",      "fire_at": 0.3,  "speed": 3.0 } },

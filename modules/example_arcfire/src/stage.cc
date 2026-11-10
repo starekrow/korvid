@@ -24,6 +24,10 @@ bool resolve_patterns(Game& g, char* why, usize cap) {
         GroundDef& gd = g.stage.grounds[i];
         if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "no pattern \"%s\"", gd.pattern); return false; }
     }
+    for (u32 i = 0; i < g.stage.map_ground_count; ++i) {
+        GroundDef& gd = g.stage.map_grounds[i];
+        if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "the map's enemy: no pattern \"%s\"", gd.pattern); return false; }
+    }
     if (g.bench[0] && (g.bench_entry = bml_find(g.lib, g.bench)) == KV_BML_NONE) { snprintf(why, cap, "--bench: no pattern \"%s\"", g.bench); return false; }
     return true;
 }
@@ -35,16 +39,17 @@ void bench_stage(Game& g) {
     snprintf(st.name, sizeof st.name, "BENCH %.24s", g.bench);
     st.speed = 0.6f;
     st.length = 1.0e9f;
-    st.formation_count = st.ground_count = 0;
+    st.formation_count = st.ground_count = st.map_ground_count = 0;
+    st.map[0] = 0;
+    st.planes = 7;
     st.mark_count = 1;
     st.marks[0] = Mark{st.length, MarkKind::End, 0, 0.0f, 0.0f};
 }
 
-void bench_spawn(TickContext& ctx, Game& g) {
-    Emitter em{g.bench_entry, 0.0f, EmitIdle, 0};
-    Collider2 col = collider_circle(14.0f, L_GROUND, 0); // nothing hits it
-    ctx.write_kind(g_ground_kind)->spawn(transform2_at(point2{0.0f, 200.0f}), enemy_sprite(g, Look::Turret), col, Health{1 << 30, 0, 0, (u32)Look::Turret},
-                                          em, Ground{0.0f, 1}, Runner{});
+void bench_spawn(TickContext& ctx, Game& g, const Dials& d) {
+    GroundDef gd{};
+    gd.entry = g.bench_entry;
+    ground_spawn(ctx, g, d, gd, point2{0.0f, 200.0f}, true);
     KV_INFO("arcfire", "bench: %s", g.bench);
 }
 
@@ -68,12 +73,27 @@ void boot(TickContext& ctx) {
     if (failed) { engine_request_quit(e); return; }
     if (!b || b->state == AssetState::Pending || !patterns_in) return;
     char why[128] = "the file did not load";
-    if (b->state != AssetState::Ready || !stage_parse((const char*)b->data, b->size, g.stage, why, sizeof why) || !resolve_patterns(g, why, sizeof why)) {
-        KV_ERROR("arcfire", "stage %s: %s", b ? b->path : "?", why);
+    // The stage, once; then its map (which adds its enemies, and a bunker's formations, to
+    // the stage), then every pattern either names.
+    if (!g.stage_parsed) {
+        if (b->state != AssetState::Ready || !stage_parse((const char*)b->data, b->size, g.stage, why, sizeof why)) {
+            KV_ERROR("arcfire", "stage %s: %s", b ? b->path : "?", why);
+            engine_request_quit(e);
+            return;
+        }
+        g.stage_parsed = true;
+        if (g.bench[0]) bench_stage(g); // the bench's own: no map, every plane
+    }
+    why[0] = 0;
+    if (!ground_map_ready(ctx, g, why, sizeof why)) {
+        if (why[0]) { KV_ERROR("arcfire", "stage %s: %s", b->path, why); engine_request_quit(e); }
+        return;
+    }
+    if (!resolve_patterns(g, why, sizeof why)) {
+        KV_ERROR("arcfire", "stage %s: %s", b->path, why);
         engine_request_quit(e);
         return;
     }
-    if (g.bench[0]) bench_stage(g);
     g.stage_ready = true;
     KV_INFO("arcfire", "stage %s: %u marks, %u formations, %u ground rows, %.0f units long, speed %.2f", g.stage.name, g.stage.mark_count,
             g.stage.formation_count, g.stage.ground_count, (f64)g.stage.length, (f64)g.stage.speed);
@@ -93,7 +113,7 @@ void boot(TickContext& ctx) {
     g.world = world->spawn(d, s, run, EggState{}, Chance{r.state, r.inc});
     planes_spawn(e, g, d);
     g.ship = ship_spawn(e, g);
-    if (g.bench[0]) bench_spawn(ctx, g);
+    if (g.bench[0]) bench_spawn(ctx, g, d);
     engine_hold(e, HoldLoading, false);
 }
 
@@ -120,6 +140,12 @@ void stage(TickContext& ctx) {
     Stage& s = stage_row[0];
     const Dials& d = dials_row[0];
     const StageDef& def = g.stage;
+    // The map's ground rows whose place has come into view: where the map has them now.
+    f32 along = s.distance - (f32)s.loops * def.length;
+    while (s.ground_cursor < def.map_ground_count && along >= def.map_grounds[s.ground_cursor].at) {
+        const GroundDef& gd = def.map_grounds[s.ground_cursor++];
+        ground_spawn(ctx, g, d, gd, point2{gd.x, kFieldTop + 24.0f - (along - gd.at)});
+    }
     // A loop's marks are offset by the stage's length times the loops so far.
     while (!s.ended && s.cursor < def.mark_count && s.distance >= (f32)s.loops * def.length + def.marks[s.cursor].at) {
         const Mark& m = def.marks[s.cursor++];
@@ -133,24 +159,19 @@ void stage(TickContext& ctx) {
             if (count == 0) count = 1;
             // Its row first, which counts its members down; then the members, by event.
             Handle group = ctx.write_kind(g_formation_kind)->spawn(Formation{count, 0, 0, 0});
-            for (u32 i = 0; i < count; ++i) ctx.schedule(SpawnMember{m.index, i, run_row[0].epoch, 0, group}, ctx.tick + (u64)i * spacing);
+            for (u32 i = 0; i < count; ++i) ctx.schedule(SpawnMember{m.index, i, run_row[0].epoch, 0, group, point2{0, 0}}, ctx.tick + (u64)i * spacing);
             break;
         }
-        case MarkKind::Ground: {
-            const GroundDef& gd = def.grounds[m.index];
-            Health h{(i32)ceilf((f32)gd.health * d.enemy_health), 0, gd.score, (u32)Look::Turret};
-            Emitter em{gd.entry, 0.0f, EmitIdle, 0};
-            ctx.spawn_later(g_ground_kind, transform2_at(point2{gd.x, kFieldTop + 24.0f}), enemy_sprite(g, Look::Turret),
-                            collider_circle(14.0f, L_GROUND, L_SHOT), h, em, Ground{1.0f, 0}, Runner{});
+        case MarkKind::Ground:
+            ground_spawn(ctx, g, d, def.grounds[m.index], point2{def.grounds[m.index].x, kFieldTop + 24.0f});
             break;
-        }
         case MarkKind::Speed:
             if (m.over > 0.0f) { s.ramp_from = s.speed; s.ramp_to = m.value; s.ramp_at = s.distance; s.ramp_over = m.over; }
             else { s.speed = m.value; s.ramp_over = 0.0f; }
             break;
         case MarkKind::End:
             ctx.emit(StageEnd{s.loops, 0});
-            if (d.loops) { ++s.loops; s.cursor = 0; }
+            if (d.loops) { ++s.loops; s.cursor = 0; s.ground_cursor = 0; }
             else s.ended = 1;
             break;
         }
@@ -172,6 +193,8 @@ void on_member(TickContext& ctx, Span<const SpawnMember> members) {
         mv.speed = f.speed;
         mv.s = 0.0f;
         mv.formation = m.group;
+        if (m.offset.x != 0.0f || m.offset.y != 0.0f) // a bunker's launch: the path starts where the bunker is
+            for (u32 k = 0; k < mv.path.count; ++k) mv.path.pts[k] += vec2{m.offset.x, m.offset.y};
         point2 at = path_at(mv.path, 0.0f);
         Health h{(i32)ceilf((f32)f.health * dials_row[0].enemy_health), 0, f.score, (u32)f.look};
         Emitter em{f.entry, f.fire_at, EmitIdle, 0};

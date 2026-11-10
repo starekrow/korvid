@@ -23,7 +23,7 @@ struct DialField { const char* name; u32 offset; bool scale; };
 constinit const DialField k_dial_fields[] = {
     ARC_DIAL(rank, true), ARC_DIAL(bullet_speed, true), ARC_DIAL(formation_count, true), ARC_DIAL(formation_spacing, true),
     ARC_DIAL(particles, false),     ARC_DIAL(plane_density, false), ARC_DIAL(enemy_health, true), ARC_DIAL(bot, false),
-    ARC_DIAL(invulnerable, false),  ARC_DIAL(loops, false),
+    ARC_DIAL(invulnerable, false),  ARC_DIAL(loops, false),         ARC_DIAL(scroll_rows, false),
 };
 #undef ARC_DIAL
 
@@ -42,6 +42,7 @@ Dials dials_for(Position p) {
     d.bot = 0;
     d.invulnerable = 0;
     d.loops = 1;
+    d.scroll_rows = 0;
     switch (p) {
     case Position::Normal: break;
     case Position::Demo: d.loops = 0; break; // the demo ends at the stage's end

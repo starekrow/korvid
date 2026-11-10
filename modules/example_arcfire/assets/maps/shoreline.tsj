@@ -1,0 +1,16 @@
+{
+ "type": "tileset",
+ "version": "1.10",
+ "tiledversion": "1.10.2",
+ "name": "shoreline",
+ "image": "../kenney/tiles.png",
+ "imagewidth": 192,
+ "imageheight": 160,
+ "tilewidth": 16,
+ "tileheight": 16,
+ "columns": 12,
+ "tilecount": 120,
+ "margin": 0,
+ "spacing": 0,
+ "tiles": []
+}
