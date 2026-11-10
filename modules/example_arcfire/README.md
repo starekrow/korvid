@@ -34,23 +34,33 @@ held; Shift (West) focuses: half speed, the hitbox and the graze ring shown, the
 narrowed; X (East) bombs; Escape (Start) pauses; Q quits.
 
 Run plainly, the game opens on its title, over Shoreline's sky: Arcade, Stage select
-(the stage, then Easy, Normal or Hard), Quit. Arcade is the stages in order (Shoreline
-alone for now), and at the end the stage-clear banner with the stage bonus and a round
-again a difficulty up, the score carried, until the round at Hard ends the run. A run
-starts behind a fade from a fresh sim, so every run from the title is the same run a new
-process would play; the pause menu (Escape or Start) resumes or, asked twice, quits to
-the title; a run's end logs its results line (the score, the round and difficulty
-reached, restarts, eggs lost, bombs used, the longest chain) and goes back to the title
-once the banner has shown. Out of eggs, the stage starts over, the score as it was when
-the stage began.
+(the stage, then Easy, Normal or Hard), High scores, Options, Quit. Arcade is the stages
+in order (Shoreline alone for now), and at the end the stage-clear banner with the stage
+bonus and a round again a difficulty up, the score carried, until the round at Hard ends
+the run. A run starts behind a fade from a fresh sim, so every run from the title is the
+same run a new process would play, and opens with the stage's card (again at each round
+and restart). The pause menu (Escape or Start): Resume, Options, Quit to title (asked
+twice). Out of eggs, the stage starts over behind it, the score as it was when the stage
+began, and a player gets the game-over screen: Continue, or End the run, which the
+ten-second count running out does too. A run's end (or End) logs its results line and
+shows it: the score, the stage and round, the difficulty, restarts, eggs lost, bombs used,
+the longest chain, a line at a time. An arcade score that makes its table (one per
+starting difficulty, ten rows) asks for a name; then the table, the new row lit; then the
+title.
+
+Options: the master, music and effects volumes, arcade's starting difficulty, the dev
+counters. They and the tables are saved through the save module to the per-user directory
+(`~/.local/share/korvid/arcfire/` on Linux: `options.json`, `scores.json`); a file that is
+missing or will not read is the defaults. The demo keeps `scores-demo.json` and never
+touches the options.
 
 A flag that names a run goes straight into it and quits at its end: `--arcade`, `--stage
 NAME` (`assets/stages/NAME.stage.json`), and the ways it flies itself below; `--difficulty
 easy|normal|hard` is where arcade or the stage starts (Normal). `--again` is a check: a run
 that ends starts once more from a fresh sim instead of quitting, so `--demo --again --hash`
 prints the demo's hashes twice, and the two must match. Over `--cli-stdin`, `press ACTION
-[TICKS] [X Y]` holds an action as a player would and `screenshot FILE` takes the next frame,
-so a script can walk the menus.
+[TICKS] [X Y]` holds an action as a player would, `type TEXT` types, and `screenshot FILE`
+takes the next frame, so a script can walk the menus.
 
 The ways it flies itself:
 
@@ -62,7 +72,8 @@ The ways it flies itself:
   `invulnerable` being 2). It wants its weapons by the stage's clock: Spread on the
   opening's power items (to level five), the Beam at the islands, Storm over the airfield
   and the carrier (a bomb in its core's phase), Lance and both options for the
-  battleship; it takes an egg on the way. The end mark quits it at tick 11829. `--demo --hash` prints the state hash every sim tick. The hashes match
+  battleship; it takes an egg on the way. The end mark ends it at tick 11829, the last sim tick; it
+  then reads its results, signs "DEMO" into its own table (`scores-demo.json`) and quits. `--demo --hash` prints the state hash every sim tick. The hashes match
   across runs, thread counts (`--threads 1`, `--threads 8`), I/O backends (`--io sync`,
   `--io uring`) and asset sources (loose files, `--pack` with a kpak of `bin/assets`, or
   `--pack` with a zip of it).
@@ -250,6 +261,7 @@ state.
 | `src/arcfire.h`, `src/field.h` | what the files share; the field's bounds |
 | `src/stage.cc`, `src/stage_data.cc` | the boot, the scroll, the marks; reading a stage file |
 | `src/flow.cc` | the title, stage select, the pause menu; runs begun from a fresh sim and left, behind covers |
+| `src/screens.cc`, `src/records.cc` | options, game over, results, name entry, the tables, the stage card; the files they keep |
 | `src/path.cc` | Catmull-Rom paths by arc length |
 | `src/dials.cc` | the dials' positions (the difficulties among them) and `--dial` |
 | `src/scoring.h`, `src/scoring.cc` | the run's record and the score's rules; the chain's clock, extends, rounds, the results line |

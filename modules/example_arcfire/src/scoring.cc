@@ -5,6 +5,7 @@
 // line, shows the banner and quits after it. The demo ends at once.
 #include "arcfire.h"
 #include "korvid/core/log.h"
+#include <stdio.h>
 
 namespace kv::arcfire {
 
@@ -16,10 +17,25 @@ bool round_next(const Game& g, const Dials& d, Position* next) {
     return false;
 }
 
-void results_log(const Game& g, const Run& r, const Dials& d, u32 round) {
-    KV_INFO("arcfire", "results: score %lld, %s round %u at %s, %u restarts, %u eggs lost, %u bombs used, longest chain %u, %u kills, %u grazes",
-            (long long)r.score, g.stage.name, round + 1, position_name(d.position), r.restarts, r.deaths, r.bombs_used, r.chain_best, r.kills,
-            r.grazes);
+RunResult result_of(const Game& g, const Run& r, const Dials& d, u32 round) {
+    RunResult out{};
+    out.score = r.score;
+    snprintf(out.stage, sizeof out.stage, "%s", g.stage.name);
+    out.round = round + 1;
+    out.position = d.position;
+    out.start = (u32)g.start;
+    out.restarts = r.restarts;
+    out.deaths = r.deaths;
+    out.bombs_used = r.bombs_used;
+    out.chain_best = r.chain_best;
+    out.arcade = g.arcade;
+    return out;
+}
+
+void results_log(const Game& g, const RunResult& r) {
+    (void)g;
+    KV_INFO("arcfire", "results: score %lld, %s round %u at %s, %u restarts, %u eggs lost, %u bombs used, longest chain %u", (long long)r.score,
+            r.stage, r.round, position_name(r.position), r.restarts, r.deaths, r.bombs_used, r.chain_best);
 }
 
 // Phase PreSim, before the sim moves anything: the chain's window runs down; a score past
@@ -54,6 +70,7 @@ void scoring(TickContext& ctx) {
     s.ground_cursor = 0;
     s.base = s.distance;
     s.held = 0.0f;
+    card_open(*ctx.engine, g, s.loops + 1, d.position);
     KV_INFO("arcfire", "round %u at %s, tick %llu, score %lld", s.loops + 1, position_name(d.position), (unsigned long long)ctx.tick, (long long)r.score);
 }
 

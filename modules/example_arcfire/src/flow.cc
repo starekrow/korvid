@@ -1,11 +1,13 @@
 // example_arcfire: the program around a run. Run plainly, the game opens on a title
-// (Arcade, Stage select, Quit); a flag that names a run (--demo, --autoplay, --stress,
+// (Arcade, Stage select, High scores, Options, Quit); a flag that names a run (--demo, --autoplay, --stress,
 // --bench, --stage, --arcade) goes straight into it. A run starts from a fresh sim
 // (engine_sim_reset), so a second run in the process is the same run as the first in a new
 // one, and is left for the title or the next run the same way: a switch is asked for
 // (flow_request), happens behind a cover on a held tick (`flow_step`, from the boot
 // system, which holds the writes), and the cover opens on what is there now. The pause
-// menu (Resume, Quit to title) holds the sim as the pause did. Everything here is
+// menu (Resume, Options, Quit to title) holds the sim as the pause did. A run's end goes
+// through the screens (screens.cc: results, name entry, the table) and then here again
+// (run_finished). Everything here is
 // presentation but the run it starts, whose plan (arcade or a stage, the difficulty) is
 // hashed as the dials are.
 //
@@ -49,6 +51,7 @@ void close_pause(Engine& e, Game& g) {
 void open_title(Engine& e, Game& g) {
     char note[64];
     snprintf(note, sizeof note, "ARCADE STARTS AT %s", position_name((u32)g.start));
+    g.scores_from_title = false;
     for (char* c = note; *c; ++c) *c = (char)(*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
     ui_model_set_str(e, "title_note", note);
     hud_shown(e, g, false);
@@ -68,6 +71,8 @@ void clear_run(TickContext& ctx, Game& g) {
     hud_cover(e, g, false);
     hud_stomp(e, g, false);
     hud_boss(e, g, nullptr, 0, 0);
+    card_close(e, g);
+    g.card_ticks = 0;
     if (!g.clear_label.is_null()) { ui_close(e, g.clear_label); g.clear_label = Handle{}; }
     g.clear_ticks = 0;
     engine_time_scale(e, 1.0f);
@@ -127,6 +132,8 @@ void run_begin(TickContext& ctx, Game& g) {
     for (u32 i = 0; i < d.options && i < kMaxOptions; ++i) option_add(ctx, g);
     if (g.bench[0]) bench_spawn(ctx, g, d);
     hud_shown(e, g, true);
+    card_open(e, g, 1, d.position);
+    g.result = RunResult{};
     g.mode = Mode::Run;
     KV_INFO("arcfire", "run %u: %s, %s at %s", g.runs, g.arcade ? "arcade" : g.stage_select ? "stage select" : "a run", g.stage.name,
             position_name(d.position));
@@ -143,6 +150,8 @@ void flow_step(TickContext& ctx, Game& g) {
     close_menu(e, g.title_screen);
     close_menu(e, g.select_screen);
     close_menu(e, g.difficulty_screen);
+    close_menu(e, g.options_screen);
+    close_menu(e, g.gameover_screen);
     if (next == Next::Run) run_begin(ctx, g);
     else {
         clear_run(ctx, g);
@@ -151,12 +160,23 @@ void flow_step(TickContext& ctx, Game& g) {
     }
     music(ctx, g, false);
     if (g.flow_cover) ui_cover_wait(e, g.flow_cover, false);
-    else engine_hold(e, HoldGame, false);
+    engine_hold(e, HoldGame, false); // run_over's, or the switch's own
     g.flow_cover = 0;
 }
 
-// The run is over (the demo at its end mark, the rest after the banner).
+// The run is over (the demo at its end mark, the rest after the banner, or the game-over
+// screen's End), g.result its numbers: from the title, and for the demo, the screens;
+// otherwise the next thing at once.
 void run_over(TickContext& ctx, Game& g) {
+    // Held at once: a screen's own hold lands a tick later, and the run's last sim tick is
+    // the one that ended it. The switch that follows lets go.
+    engine_hold(*ctx.engine, HoldGame, true);
+    if (g.front_door || g.demo) results_open(*ctx.engine, g, g.result);
+    else run_finished(ctx, g);
+}
+
+// The screens after a run are done: once more (--again), the title, or a quit.
+void run_finished(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
     if (g.again && !g.again_done) {
         g.again_done = true;
@@ -178,13 +198,15 @@ void pause(TickContext& ctx) {
     const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
     if (action_pressed(a, g.act_quit)) engine_request_quit(e);
     if (!action_pressed(a, g.act_pause) || g.mode != Mode::Run || g.next != Next::None) return;
+    if (!g.gameover_screen.is_null() || !g.results_screen.is_null() || !g.name_screen.is_null() || !g.scores_screen.is_null()) return;
+    if (!g.options_screen.is_null()) { input_action_override(e, "cancel", true); return; } // as the options' own cancel
     if (!g.confirm_screen.is_null()) { close_menu(e, g.confirm_screen); return; }
     if (!g.pause_screen.is_null()) { close_pause(e, g); return; }
     UiOpen o;
     o.layer = 110;
     o.enter.fx = UiFx::Fade;
     g.pause_screen = ui_open(e, g.ui, "pause", o);
-    ui_set_text(e, g.pause_screen, "items/quit", g.front_door ? "QUIT TO TITLE" : "QUIT");
+    ui_set_text(e, g.pause_screen, "quit", g.front_door ? "QUIT TO TITLE" : "QUIT");
     ui_focus(e, g.pause_screen, "items", "resume");
     engine_pause(e, true);
     KV_INFO("arcfire", "paused at tick %llu", (unsigned long long)e.clock.tick_count);
@@ -196,6 +218,7 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
     Engine& e = *ctx.engine;
     static const u64 k_select = name_intern("select").hash, k_cancel = name_intern("cancel").hash, k_back = name_intern("back").hash;
     for (const UiEvent& ev : events) {
+        if (screens_ui(ctx, g, ev)) continue;
         bool chose = ev.event == k_select, back = ev.event == k_cancel || ev.event == k_back;
         const char* item = chose ? name_str(Name{ev.node}) : "";
         if (!item) item = "";
@@ -206,6 +229,11 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
             } else if (!strcmp(item, "select")) {
                 g.select_screen = open_menu(e, g, "select", 112, "shoreline");
                 ui_set_visible(e, g.title_screen, "column", false); // one menu at a time shows
+            } else if (!strcmp(item, "scores")) {
+                g.scores_from_title = true;
+                scores_open(e, g, score_table_of(g.start), -1);
+            } else if (!strcmp(item, "options")) {
+                options_open(e, g, 112);
             } else if (!strcmp(item, "quit")) {
                 engine_request_quit(e);
             }
@@ -230,6 +258,7 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
             }
         } else if (ev.screen == g.pause_screen && g.confirm_screen.is_null()) {
             if (back || (chose && !strcmp(item, "resume"))) close_pause(e, g);
+            else if (chose && !strcmp(item, "options")) options_open(e, g, 112);
             else if (chose && !strcmp(item, "quit")) {
                 if (!g.front_door) engine_request_quit(e);
                 else {

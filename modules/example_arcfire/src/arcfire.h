@@ -22,6 +22,8 @@
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 
+namespace kv { struct UiEvent; }
+
 namespace kv::arcfire {
 
 // ---- collision layers ----------------------------------------------------------------------
@@ -302,6 +304,25 @@ enum class Mode : u32 { Loading, Title, Run };
 enum class Next : u32 { None, Run, Title };
 struct RunPlan { bool arcade = true, stage_select = false; Position start = Position::Normal; };
 
+// What the game remembers between runs (records.cc): the options, and one table of ten
+// high scores per arcade starting difficulty. Presentation: none of it is sim state.
+struct Options {
+    u32  master = 10, music = 8, effects = 10; // volumes, 0..10
+    u32  start = (u32)Position::Normal;        // arcade's starting difficulty
+    bool dev = KV_DEV != 0;                    // the dev counters on the HUD
+};
+constexpr u32 kScoreRows = 10, kScoreTables = 3, kNameMax = 8;
+struct ScoreRow { char name[kNameMax + 1]; i64 score; char stage[32]; u32 round, restarts; char date[11]; };
+struct ScoreTable { ScoreRow rows[kScoreRows]; u32 count; };
+inline u32 score_table_of(Position p) { return p == Position::Easy ? 0 : p == Position::Hard ? 2 : 1; }
+// A run as it ended, for the results screen and the tables.
+struct RunResult {
+    i64  score;
+    char stage[32];
+    u32  round, position, start, restarts, deaths, bombs_used, chain_best;
+    bool arcade;
+};
+
 struct Game {
     Handle   textures[TEX_COUNT];
     Handle   alpha[TEX_COUNT];    // render.material: each texture, alpha blended
@@ -352,6 +373,7 @@ struct Game {
     // the plan when a run begins (flow.cc).
     bool     arcade = false, stage_select = false;
     Position start = Position::Normal;
+    bool     start_named = false;     // --difficulty said it: the options' starting difficulty does not
     // The program around the runs (flow.cc): where it is, a switch asked for and its cover,
     // the next run's plan, the menus' screens.
     Mode     mode = Mode::Loading;
@@ -363,6 +385,21 @@ struct Game {
     bool     again = false, again_done = false; // --again: a run once more from a fresh sim
     u32      runs = 0;
     Handle   title_screen, select_screen, difficulty_screen, confirm_screen;
+    // The screens between runs (screens.cc) and what they show.
+    Handle   options_screen, gameover_screen, results_screen, name_screen, scores_screen, card_screen;
+    u32      gameover_ticks = 0, card_ticks = 0, screen_ticks = 0; // the count; the card's time; the demo's wait
+    i64      gameover_score = 0;      // the score at the death the game-over screen is for
+    RunResult result;
+    i32      new_row = -1;            // the row the run just took in its table, lit
+    u32      table_shown = 1, lit_table = 1; // the high-score table on screen; the one with the lit row
+    bool     scores_from_title = false; // the tables were opened from the title's menu
+    // The records (records.cc): the files, the reads and writes under way.
+    Options  options;
+    ScoreTable scores[kScoreTables];
+    char     last_name[kNameMax + 1] = "";
+    char     options_path[512] = "", scores_path[512] = "";
+    Handle   options_read, scores_read, options_write, scores_write;
+    bool     records_in = false;      // both reads done (or failed): the title may open
     char     stage_name[32] = "shoreline";
     bool     demo_core_bomb = false;  // the demo's bomb in the carrier's core phase, once
     vec2     pilot_v{0, 0};           // the ship's velocity by the pilots' last stick (pilot.cc)
@@ -462,6 +499,26 @@ u64    seed_of(Handle h, u64 tick, u32 salt);
 void   stage_reset(Stage& s, const StageDef& def);
 void   bench_spawn(TickContext& ctx, Game& g, const Dials& d); // --bench: the one emitter
 
+// The records (records.cc): asked for at startup, read as they come; written when they
+// change; the options applied to the audio and the HUD; where a score would go in its table.
+void   records_load(Engine& e, Game& g);
+void   options_save(Engine& e, Game& g);
+void   scores_save(Engine& e, Game& g);
+void   options_apply(Engine& e, const Game& g);
+i32    score_rank(const ScoreTable& t, i64 score); // the row it would take, or -1
+void   score_insert(ScoreTable& t, u32 row, const ScoreRow& r);
+
+// The screens between runs (screens.cc).
+void   options_open(Engine& e, Game& g, i32 layer);
+void   gameover_open(Engine& e, Game& g, i64 score);
+void   results_open(Engine& e, Game& g, const RunResult& r);
+void   scores_open(Engine& e, Game& g, u32 table, i32 lit);
+void   card_open(Engine& e, Game& g, u32 round, u32 position);
+void   card_close(Engine& e, Game& g);
+bool   screens_ui(TickContext& ctx, Game& g, const UiEvent& ev); // true: the event was a screen's here
+RunResult run_result(Engine& e, const Game& g, i64 score);       // the world row's run, as it stands
+void   run_finished(TickContext& ctx, Game& g);                  // the screens after a run are done: the next thing
+
 // The flow (flow.cc): the assets are in; a run begins (a fresh sim but for the first); a
 // switch to a run or the title, behind a cover or a hold of the game's; it happens; a run is
 // over.
@@ -469,12 +526,13 @@ void   flow_ready(TickContext& ctx, Game& g);
 void   run_begin(TickContext& ctx, Game& g);
 void   flow_request(Engine& e, Game& g, Next next, bool cover);
 void   flow_step(TickContext& ctx, Game& g);
-void   run_over(TickContext& ctx, Game& g);
+void   run_over(TickContext& ctx, Game& g); // g.result holds the run
 
 // The run's shape (scoring.cc; the score's rules are scoring.h's): whether a run at this
 // position goes round again after the stage, and at which; the results line.
 bool   round_next(const Game& g, const Dials& d, Position* next);
-void   results_log(const Game& g, const Run& r, const Dials& d, u32 round);
+RunResult result_of(const Game& g, const Run& r, const Dials& d, u32 round); // the run as it ended
+void   results_log(const Game& g, const RunResult& r);
 
 // Bosses (boss.cc): their files asked for at startup, parsed at boot; a mark's boss spawned.
 void   bosses_load(Engine& e, Game& g);

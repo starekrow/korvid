@@ -387,3 +387,13 @@ unapplied commands and the units' ticket counters dropped. `--demo --again --has
 the demo, resets, and plays it again in the same process: 11,830 hashes each, identical
 line for line, ending e9ff4a19c469df51 as the first run and the hash matrix do. The reset
 itself, with 26 entities live: nothing worth timing beside the cover's fade.
+
+**M2. The screens hold the sim.** Every screen around a run holds it (`HoldUi`), and a
+run's end holds it at once (`HoldGame`): a screen's own hold lands a tick later, which let
+one more sim tick through the first time, so the demo's last hashed tick stayed its end
+mark's only once `run_over` held it itself. The demo now ends through its results, name
+entry and table, and still hashes e9ff4a19c469df51 at tick 11829, seven ways. Found on the
+way, in the engine: the sprite extract's removes walked the table's rows, so a table a
+fresh sim had emptied (no rows) left its last sprites drawn; they walk every slot it sent
+now. Opening a screen costs a frame or two of 40 to 50 fps in a dev build (1,300 UI deltas
+as its tree is built), nothing after.

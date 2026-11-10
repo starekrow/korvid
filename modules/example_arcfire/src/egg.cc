@@ -163,6 +163,7 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
     Span<EggState> es_row = ctx.write<EggState>(ARC_WORLD(EggState));
     Span<Stage> stage_row = ctx.write<Stage>(ARC_WORLD(Stage));
+    Span<const Dials> dials_row = ctx.read<Dials>(ARC_WORLD(Dials));
     if (!run.len || !deaths.len) return;
     const ShipDied& d = deaths[0]; // one death a tick: the hit handlers make sure
     Table* ships = ctx.write_kind(g_ship_kind);
@@ -187,6 +188,7 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
                          g_boss_kind, g_part_kind};
     for (u32 k : kinds) ctx.destroy_all(k);
     stage_reset(stage_row[0], g.stage);
+    i64 at_death = r.score;
     r.score = r.stage_score;
     r.eggs = kStartEggs;
     r.bombs = kBaseBombs;
@@ -206,6 +208,10 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     hud_cover(e, g, true);
     music(ctx, g, false);
     KV_INFO("arcfire", "restart %u at tick %llu: out of eggs, score back to %lld", r.restarts, (unsigned long long)ctx.tick, (long long)r.score);
+    card_open(e, g, stage_row[0].loops + 1, dials_row[0].position);
+    // A player flying: the game-over screen, over the restart already made; Continue keeps
+    // it, End ends the run at the score the death had. The bot and the demo go on.
+    if (!dials_row[0].bot && !g.demo) gameover_open(e, g, at_death);
 }
 
 } // namespace kv::arcfire

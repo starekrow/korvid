@@ -16,6 +16,7 @@
       "panel": "#0a0c18ff",
       "edge": "#262c58ff",
       "shade": "#00000aa0",
+      "deep": "#04050cf0",
       "veil": "#00000a58",
       "black": "#000000ff",
       "warn": "#ff20103a",
@@ -29,7 +30,8 @@
     "sounds": {
       "move": "example_arcfire/sound/ui_move.ogg",
       "select": "example_arcfire/sound/ui_select.ogg",
-      "cancel": "example_arcfire/sound/ui_cancel.ogg"
+      "cancel": "example_arcfire/sound/ui_cancel.ogg",
+      "tick": "example_arcfire/sound/ui_move.ogg"
     }
   },
   "screens": {
@@ -89,6 +91,8 @@
             { "type": "list", "name": "items", "gap": 14, "items": [
               { "type": "label", "name": "arcade", "text": "ARCADE" },
               { "type": "label", "name": "select", "text": "STAGE SELECT" },
+              { "type": "label", "name": "scores", "text": "HIGH SCORES" },
+              { "type": "label", "name": "options", "text": "OPTIONS" },
               { "type": "label", "name": "quit", "text": "QUIT" } ] },
             { "type": "label", "name": "note", "text": "{=title_note}", "color": "cyan" } ] },
         { "type": "label", "name": "footer", "anchor": "bottom", "offset": [0, -20], "text": "Built with Korvid Engine", "color": "dim" } ] },
@@ -123,7 +127,72 @@
             { "type": "label", "name": "heading", "text": "PAUSED", "color": "gold", "font_scale": 3 },
             { "type": "list", "name": "items", "gap": 14, "items": [
               { "type": "label", "name": "resume", "text": "RESUME" },
+              { "type": "label", "name": "options", "text": "OPTIONS" },
               { "type": "label", "name": "quit", "text": "QUIT TO TITLE" } ] } ] } ] },
+    "options": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 28, "align": "center",
+          "children": [
+            { "type": "label", "name": "heading", "text": "OPTIONS", "color": "gold", "font_scale": 2 },
+            { "type": "list", "name": "items", "gap": 14, "items": [
+              { "type": "label", "name": "master", "text": "MASTER" },
+              { "type": "label", "name": "music", "text": "MUSIC" },
+              { "type": "label", "name": "effects", "text": "EFFECTS" },
+              { "type": "label", "name": "start", "text": "ARCADE STARTS" },
+              { "type": "label", "name": "dev", "text": "DEV COUNTERS" },
+              { "type": "label", "name": "back", "text": "BACK", "event": "back" } ] },
+            { "type": "label", "name": "hint", "text": "LEFT AND RIGHT CHANGE", "color": "dim" } ] } ] },
+    "gameover": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 24, "align": "center",
+          "children": [
+            { "type": "label", "name": "heading", "text": "{shake}GAME OVER{/shake}", "color": "red", "font_scale": 3 },
+            { "type": "label", "name": "score", "text": "{=gameover_score}", "color": "gold" },
+            { "type": "label", "name": "count", "text": "CONTINUE?  {=gameover_count}", "color": "cyan", "font_scale": 2 },
+            { "type": "list", "name": "items", "gap": 14, "items": [
+              { "type": "label", "name": "continue", "text": "CONTINUE" },
+              { "type": "label", "name": "end", "text": "END THE RUN" } ] },
+            { "type": "label", "name": "hint", "text": "THE STAGE BEGINS AGAIN", "color": "dim" } ] } ] },
+    "results": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "deep", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 28, "align": "center",
+          "children": [
+            { "type": "label", "name": "heading", "text": "RESULTS", "color": "gold", "font_scale": 3 },
+            { "type": "label", "name": "lines", "text": "", "reveal": 45, "size": [560, "fit"] },
+            { "type": "label", "name": "hint", "text": "CONFIRM TO GO ON", "color": "dim" } ] } ] },
+    "name": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "deep", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 24, "align": "center",
+          "children": [
+            { "type": "label", "name": "heading", "text": "{wave}A HIGH SCORE{/wave}", "color": "gold", "font_scale": 2 },
+            { "type": "label", "name": "rank", "text": "{=name_rank}", "color": "cyan" },
+            { "type": "panel", "name": "well", "fill": "edge", "size": [200, "fit"], "padding": [10, 8, 10, 8],
+              "children": [ { "type": "field", "name": "entry", "anchor": "left", "max_length": 8 } ] },
+            { "type": "label", "name": "hint", "text": "YOUR NAME, THEN ENTER", "color": "dim" } ] } ] },
+    "scores": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "deep", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 24, "align": "center",
+          "children": [
+            { "type": "label", "name": "heading", "text": "HIGH SCORES", "color": "gold", "font_scale": 2 },
+            { "type": "label", "name": "table", "text": "{=scores_table}", "color": "cyan" },
+            { "type": "label", "name": "rows", "text": "", "size": [720, "fit"] },
+            { "type": "label", "name": "hint", "text": "CONFIRM TO GO ON", "color": "dim" } ] } ] },
+    "card": {
+      "type": "stack", "name": "card", "anchor": "center", "offset": [0, -160], "gap": 12, "align": "center",
+      "children": [
+        { "type": "label", "name": "number", "text": "STAGE 1", "color": "dim" },
+        { "type": "label", "name": "stage", "text": "{=card_stage}", "color": "gold", "font_scale": 2 },
+        { "type": "label", "name": "round", "text": "{=card_round}", "color": "cyan" } ] },
     "confirm": {
       "type": "box", "name": "shade", "size": ["fill", "fill"],
       "children": [

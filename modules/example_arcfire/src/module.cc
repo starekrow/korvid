@@ -61,6 +61,8 @@ void on_rammed(TickContext&, Span<const Rammed>);
 void on_graze(TickContext&, Span<const Graze>);
 void on_shell_hit(TickContext&, Span<const ShellHit>);
 void on_kill(TickContext&, Span<const Kill>);
+void records(TickContext&);      // records.cc
+void screens(TickContext&);      // screens.cc
 void pause(TickContext&);        // flow.cc
 void on_ui(TickContext&, Span<const UiEvent>);
 void on_covered(TickContext&, Span<const UiCovered>);
@@ -209,6 +211,8 @@ constinit const SystemDesc k_systems[] = {
     // The chain's clock, the extends, a new round's dials: before the sim moves anything.
     {.name = ".scoring", .phase = Phase::PreSim, .fn = scoring, .writes = ".world.Run, .world.Stage, .world.Dials, audio.commands", .after = ".boot",
      .main_thread = true},
+    {.name = ".records", .phase = Phase::PreSim, .fn = records, .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".screens", .phase = Phase::PreSim, .fn = screens, .reads = "input.actions", .after = ".pause", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pause", .phase = Phase::PreSim, .fn = pause, .reads = "input.actions", .after = ".boot", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet.Transform2, ^.bullet.Velocity, ^.active.Transform2, ^.active.Velocity, ^.ship.Transform2, ^.air.Transform2, ^.ground.Transform2, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss, ^.item.Transform2, ^.item.Item, .world.Dials",
      .main_thread = true},
@@ -278,7 +282,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_pickup", KV_ON(Pickup, on_pickup), .reads = ".item.Item, .item.Transform2", .writes = ".world.Run, .ship.Ship, .option, .beam, audio.commands",
      .after = ".on_kill, .on_rammed"},
     {.name = ".on_ship_died", KV_ON(ShipDied, on_ship_died),
-     .writes = ".world.Run, .world.EggState, .world.Stage, .ship, audio.commands", .after = ".on_pickup, .on_rammed"},
+     .reads = ".world.Dials", .writes = ".world.Run, .world.EggState, .world.Stage, .ship, audio.commands", .after = ".on_pickup, .on_rammed"},
     {.name = ".on_member", KV_ON(SpawnMember, on_member), .reads = ".world.Run, .world.Dials"},
     {.name = ".on_stage_end", KV_ON(StageEnd, on_stage_end), .reads = ".world.Dials", .writes = ".world.Run", .after = ".on_ship_died"},
     {.name = ".on_run_over", KV_ON(RunOver, on_run_over)},
@@ -328,6 +332,7 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     g->front_door = !stage_named && !g->demo && !g->stress && !g->autoplay && !g->bench[0] && !frameloop_flag(e, "--arcade");
     g->again = frameloop_flag(e, "--again");
     if (const char* diff = frameloop_option(e, "--difficulty")) {
+        g->start_named = true;
         if (!strcmp(diff, "easy")) g->start = Position::Easy;
         else if (!strcmp(diff, "hard")) g->start = Position::Hard;
         else if (strcmp(diff, "normal")) KV_WARN("arcfire", "--difficulty %s: easy, normal or hard; Normal it is", diff);
@@ -349,6 +354,7 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     g->stage_blob = asset_load_blob(e, stage_path);
     KV_INFO("arcfire", "%s: %s at %s", g->front_door ? "the title" : g->plan.arcade ? "arcade" : g->plan.stage_select ? "stage select" : "run",
             g->stage_name, position_name((u32)g->start));
+    records_load(e, *g);
     engine_hold(e, HoldLoading, true);
     hud_open(e, *g);
     KV_INFO("arcfire", "Arrows or WASD (or a pad's stick) fly, Z or Space (South) fires, Shift (West) focuses, Escape (Start) pauses, Q quits.");

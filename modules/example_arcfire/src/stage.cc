@@ -88,7 +88,7 @@ void boot(TickContext& ctx) {
     bool failed = false;
     bool patterns_in = patterns_ready(e, g, failed);
     if (failed) { engine_request_quit(e); return; }
-    if (!b || b->state == AssetState::Pending || !patterns_in) return;
+    if (!b || b->state == AssetState::Pending || !patterns_in || !g.records_in) return; // the records too: the title shows them
     char why[128] = "the file did not load";
     // The stage, once; then its map (which adds its enemies, and a bunker's formations, to
     // the stage), then every pattern either names.
@@ -234,7 +234,10 @@ void on_stage_end(TickContext& ctx, Span<const StageEnd> ends) {
         r.stage_score = r.score;
         Position next;
         bool again = round_next(g, d, &next);
-        if (!again) results_log(g, r, d, se.loops);
+        if (!again) {
+            g.result = result_of(g, r, d, se.loops);
+            results_log(g, g.result);
+        }
         // The demo ends here (run_over quits, or with --again begins it once more, held, so
         // no sim tick passes between); every run's last hashed tick is this one.
         if (g.demo) { run_over(ctx, g); continue; }
