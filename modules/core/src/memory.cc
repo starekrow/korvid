@@ -12,6 +12,11 @@
 
 namespace kv {
 
+// ---- spike hunting (memory.h) --------------------------------------------------------------
+static bool g_spike_hunt = false; // set before the engine starts; read everywhere after
+void dev_spike_hunt(bool on) { g_spike_hunt = on; }
+bool dev_spike_hunting() { return g_spike_hunt; }
+
 namespace {
 
 // Every general block starts a header before the pointer handed out. `cls` says where
@@ -519,7 +524,7 @@ void fill_header(Header* h, usize size, u32 align, MemTag tag, u8 cls, u32 offse
     h->size = size; h->offset = offset; h->align = align; h->tag = tag; h->canary = canary_for(user); h->cls = cls;
 #if KV_DEV
     h->site = site;
-    memset(user, kFillAlloc, size);
+    if (!dev_spike_hunting()) memset(user, kFillAlloc, size);
 #else
     (void)site;
 #endif
@@ -550,7 +555,7 @@ void* general_alloc_tagged(usize size, u32 align, MemTag tag, void* site) {
         return b + sizeof(Header);
     }
 #if KV_DEV
-    if (size >= kPageSize && align <= os_page_size()) {
+    if (size >= kPageSize && align <= os_page_size() && !dev_spike_hunting()) {
         // Its own pages, the block flush against a guard page: one byte past the end faults.
         usize ps = os_page_size();
         usize data = (size + sizeof(Header) + ps - 1) & ~(ps - 1);
@@ -640,7 +645,7 @@ void mem_free(void* p) {
     heap_release(tag, h->size);
     h->canary = ~h->canary; // a second free fails the canary
 #if KV_DEV
-    memset(p, kFillFree, h->size);
+    if (!dev_spike_hunting()) memset(p, kFillFree, h->size);
 #endif
     if (h->cls < kClasses) { small_free(p); return; }
     if (h->cls == kClsGuard) {

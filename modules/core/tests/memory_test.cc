@@ -91,6 +91,29 @@ void test_memory(kv::TestCtx& c) {
     KV_CHECK(c, mem_last_sample().peak_live_bytes >= before.live_bytes + 148 - 40 + 4000 - 100 + 5000);
     mem_free(nullptr); // harmless
 
+#if KV_DEV
+    // Dev builds fill what they hand out; hunting spikes, they do not: a block written,
+    // freed and taken again keeps what was written past the free list's link, and a large
+    // one comes from the heap, not pages of its own (its size class is checked by the free).
+    {
+        u8* f = (u8*)mem_alloc(64);
+        KV_CHECK(c, f[32] == 0xCD);
+        mem_free(f);
+        dev_spike_hunt(true);
+        u8* q = (u8*)mem_alloc(64);
+        memset(q, 0x11, 64);
+        mem_free(q);
+        u8* q2 = (u8*)mem_alloc(64);
+        KV_CHECK(c, q2 == q && q2[32] == 0x11); // the same block back, unfilled both ways
+        mem_free(q2);
+        void* big = mem_alloc(1u << 20);
+        KV_CHECK(c, big != nullptr);
+        mem_free(big);
+        dev_spike_hunt(false);
+        KV_CHECK(c, !dev_spike_hunting());
+    }
+#endif
+
     // Page layer: reserve, commit, use, release.
     usize ps = os_page_size();
     KV_CHECK(c, ps >= 4096 && (ps & (ps - 1)) == 0);

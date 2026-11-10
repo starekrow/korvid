@@ -1295,7 +1295,7 @@ void engine_trace_delivery(Engine& e, u64 tick, u32 wave) {
             const u8* ev = b.bytes.data + (usize)(start + i) * b.elem_size;
             TraceRecord& r = e.trace.ring[e.trace.head];
             r.tick    = tick;
-            r.emitter = b.emitters[start + i];
+            r.emitter = start + i < b.emitters.len ? b.emitters[start + i] : "(not noted: --spike-hunt)";
             r.type    = t;
             r.wave    = (u16)wave;
             r.size    = (u8)(b.elem_size < sizeof r.data ? b.elem_size : sizeof r.data);

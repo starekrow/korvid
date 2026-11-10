@@ -89,6 +89,7 @@ renders once.
 | `--cli-port N`, `--cli-stdin`, `--cli-ascii` | the CLI's transports; ASCII-only escapes non-ASCII as `\u{XXXX}` both ways |
 | `--idle-margin-ms N`, `--no-idle` | slack kept back from idle work (1.5); none at all |
 | `--capacity KIND=N` (repeatable) | a kind's capacity over the game's, by its full name (`example_arcfire.bullet=131072`) |
+| `--spike-hunt` | a dev build without the work that is not checking: no memory fills or poison, no guard pages, no event emitters for the trace (`dev_spike_hunt`); its timings near a ship build's, its asserts, access checks, counters and profiler kept |
 | `--sprite-rows N` | the renderer's and the extract's first sprite table size over the config's `sprite_rows` (0: none) |
 
 ## Quick reference

@@ -248,3 +248,22 @@ The sounds' pitch draws from the cosmetic stream, which showed that a chip's tos
 it too: a chip is sim state, so the particle dial (and now every sound) changed where chips
 went. A chip's toss is now a hash of its bullet and the tick. The demo's hash is now
 `e078b2f13df8fa11` at tick 18409, matching across threads, I/O backends and asset sources.
+
+## Slice 3, M5 — the extract and the rest
+
+**M5. The extract's worst windows** (`--stress` and `--stress --dial rank=56`, 40 s each,
+`--profile` traces read tick by tick: each extract's time against its deltas, with zones
+around the side tables' growth and the delta list's). Before: the worst windows were all
+growth. At rank 56, 14.0 ms for 48,313 deltas of which 12.4 were the delta list growing
+(7.8 of 8.8 at stress); a kind's side tables, 2 ms at a time. Without growth the extract
+is linear: 50 to 100 ns a delta. With `sprite_rows_hint` sizing them once (from the game's
+`sprite_rows`, 98,304): 3.3 ms at rank 56 and 2.0 at stress under load, the growth moved
+to the first extract (10 ms) and the bullets' first rows (3 to 4 ms), and 37 MB more
+memory live, all of it the dev build's fill of what was reserved.
+
+**M5. Spike hunting** (`--spike-hunt`: no memory fills, poison or guard pages). The same
+runs, the delta list's growth costs 0.01 ms with or without the hint, and the worst
+extracts are the linear ones: 1.89 ms at stress either way, 2.92 ms at rank 56 without
+the hint and 2.89 with it. The growth spikes were the dev build's own fills and its
+pages-per-allocation, not the copy. The hint stays for plain dev runs; measurements of
+spikes from here on say whether they were taken hunting.

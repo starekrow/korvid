@@ -1,5 +1,6 @@
 #include "korvid/core/event.h"
 #include "korvid/core/log.h"
+#include "korvid/core/memory.h"
 #include <string.h>
 
 namespace kv {
@@ -66,7 +67,7 @@ void EventWriter::emit_bytes(u32 type_id, u32 elem_size, const void* e) {
     EventBuffer& b = buffer(type_id, elem_size);
     memcpy(b.bytes.push_n(elem_size), e, elem_size);
 #if KV_DEV
-    b.emitters.push(emitter);
+    if (!dev_spike_hunting()) b.emitters.push(emitter);
 #endif
 }
 
@@ -77,7 +78,7 @@ void EventWriter::append(const EventWriter& src) {
         EventBuffer& d = buffer(t, s.elem_size);
         memcpy(d.bytes.push_n(s.bytes.len), s.bytes.data, s.bytes.len);
 #if KV_DEV
-        for (u32 i = 0; i < s.count(); ++i) d.emitters.push(s.emitters[i]);
+        for (u32 i = 0; i < s.emitters.len; ++i) d.emitters.push(s.emitters[i]);
 #endif
     }
 }
@@ -158,14 +159,14 @@ void EventBus::deliver(bool tick_start) {
                     }
                     memcpy(dst.bytes.push_n(src.elem_size), e, src.elem_size);
 #if KV_DEV
-                    dst.emitters.push(src.emitters[i]);
+                    if (i < src.emitters.len) dst.emitters.push(src.emitters[i]);
 #endif
                     ++delivered_total;
                 }
             } else {
                 memcpy(dst.bytes.push_n(src.bytes.len), src.bytes.data, src.bytes.len);
 #if KV_DEV
-                for (u32 i = 0; i < n; ++i) dst.emitters.push(src.emitters[i]);
+                for (u32 i = 0; i < src.emitters.len; ++i) dst.emitters.push(src.emitters[i]);
 #endif
                 delivered_total += n;
             }

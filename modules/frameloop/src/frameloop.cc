@@ -132,6 +132,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--idle-margin-ms") == 0 && i + 1 < argc) g_idle_margin = atof(argv[++i]) * 1e-3;
         else if (strcmp(argv[i], "--no-idle") == 0) g_idle = false;
         else if (strcmp(argv[i], "--overlay") == 0) g_overlay = true;
+        else if (strcmp(argv[i], "--spike-hunt") == 0) dev_spike_hunt(true);
         else if (strcmp(argv[i], "--sprite-rows") == 0 && i + 1 < argc) cfg.sprite_rows = (u32)strtoul(argv[++i], nullptr, 10);
         else if (strcmp(argv[i], "--capacity") == 0 && i + 1 < argc) {
             const char* arg = argv[++i];
@@ -153,7 +154,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay] [--capacity KIND=N]... [--sprite-rows N]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt]", argv[0]);
             return false;
         }
     }
@@ -444,6 +445,8 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
             }
         engine_config.capacities = Span<const KindCapacity>(g_capacities, g_capacity_count);
     }
+    if (dev_spike_hunting() && KV_DEV)
+        KV_INFO("frameloop", "spike hunt: no memory fills or poison, no guard pages, no event emitters noted; checks, counters and the profiler as ever");
     if (!engine_init(engine, kv_module_list(), engine_config)) {
         names_shutdown();
         mem_shutdown();

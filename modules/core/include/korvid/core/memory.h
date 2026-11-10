@@ -150,4 +150,16 @@ u64  mem_small_pages();
 // of the process, after every table that outlives the engine is gone.
 void mem_shutdown();
 
+// ---- spike hunting ------------------------------------------------------------------------
+// Dev builds do work that is not checking: they fill memory as it is handed out and given
+// back, poison what is destroyed (a kind's row, a pool's item, an arena's released range),
+// give each large allocation pages of its own behind a guard page, and note every event's
+// emitter for the trace. It catches stale pointers and overruns; it also writes megabytes
+// nobody reads and maps pages per allocation, so a dev build's timings carry spikes a ship
+// build has not got. dev_spike_hunt(true) (the frame loop's --spike-hunt) stops all of it
+// and keeps the rest of a dev build: asserts, declared-access checks, the counters, the
+// profiler, the logs. Set it before the engine starts. Ship builds do none of it anyway.
+void dev_spike_hunt(bool on);
+bool dev_spike_hunting();
+
 } // namespace kv

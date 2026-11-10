@@ -1,5 +1,6 @@
 #include "korvid/core/arena.h"
 #include "korvid/core/log.h"
+#include "korvid/core/memory.h"
 #include "korvid/core/os_memory.h"
 #include "korvid/core/thread.h"
 #include <string.h>
@@ -17,7 +18,7 @@ constexpr u8    kFillReleased   = 0xDD;
 void poison(Arena& ar, usize from, usize to) {
 #if KV_DEV
     if (to > ar.committed) to = ar.committed;
-    if (to > from) memset(ar.base + from, kFillReleased, to - from);
+    if (to > from && !dev_spike_hunting()) memset(ar.base + from, kFillReleased, to - from);
 #else
     (void)ar; (void)from; (void)to;
 #endif

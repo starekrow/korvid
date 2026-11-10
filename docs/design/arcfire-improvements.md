@@ -65,12 +65,21 @@ that finds an engine limit adds a line here.
 
 - **The extract's worst windows** (slice 3, M5). Traced tick by tick: every outlier was a
   table growing, the delta list (12.4 ms at rank 56, 7.8 at stress) or a kind's side
-  tables (2 ms), the copy plus the dev build's fill of the new memory; without growth the
-  extract is linear in its deltas. `sprite_rows_hint` (passed by the frame loop from
-  `FrameLoopConfig::sprite_rows`) sizes them once: the worst extract under load went from
-  14.0 ms to 3.3 ms at rank 56 and from 8.8 to 2.0 at stress. The cost moved to the first
-  extract (10 ms, once, in a dev build) and a kind's first rows (3 to 4 ms); a ship build
-  does not fill, so there it is address space.
+  tables (2 ms); without growth the extract is linear in its deltas. `sprite_rows_hint`
+  (passed by the frame loop from `FrameLoopConfig::sprite_rows`) sizes them once: in a dev
+  build the worst extract under load went from 14.0 ms to 3.3 at rank 56 and from 8.8 to
+  2.0 at stress, the cost moved to the first extract (10 ms, once) and a kind's first rows
+  (3 to 4 ms). Then **spike hunting** (below) showed what the growth was: with the dev
+  build's fills and guard pages off, growing the delta list costs 0.01 ms with or without
+  the hint, and the worst extract is 1.9 ms at stress and 2.9 at rank 56 either way,
+  linear (55 to 85 ns a delta). The spikes were the dev build's own; the hint stays,
+  because plain dev runs are what people play all day.
+- **Spike hunting** (slice 3, M5; the user's idea). `dev_spike_hunt(true)`, the frame
+  loop's `--spike-hunt`: a dev build without the work that is not checking (memory filled
+  as it is handed out and given back, poison on destroyed rows, pool items and released
+  arena space, large allocations on pages of their own behind a guard page, every event's
+  emitter noted for the trace), keeping its asserts, access checks, counters and profiler.
+  A test in the memory test. Timings near a ship build's, from the build everyone runs.
 - **Audio under load** (slice 3, M4). `SoundPlay::priority` (0 to 3); a full pool takes
   the oldest voice of the lowest priority not above the play's (`AudioStats::steals`) or
   refuses it; a sound asked for again before the tick's extract starts once, the louder

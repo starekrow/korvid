@@ -1,5 +1,6 @@
 #include "korvid/core/kind.h"
 #include "korvid/core/hash.h"
+#include "korvid/core/memory.h"
 #include "korvid/core/profile.h"
 #include <stdio.h>
 #include <string.h>
@@ -215,9 +216,11 @@ bool Table::destroy(Handle h) {
     if (names.count() || props.len) sparse_dirty = true;
     for (const Attachment& a : attachments) if (a.rows.count()) sparse_dirty = true;
 #if KV_DEV
-    for (Column& c : columns) {
-        memset(row(c, h.index()), 0xDD, c.stride); // a stale pointer sees poison
-        if (c.prev) memset(c.prev + (usize)h.index() * c.stride, 0xDD, c.stride);
+    if (!dev_spike_hunting()) {
+        for (Column& c : columns) {
+            memset(row(c, h.index()), 0xDD, c.stride); // a stale pointer sees poison
+            if (c.prev) memset(c.prev + (usize)h.index() * c.stride, 0xDD, c.stride);
+        }
     }
 #endif
     return true;
