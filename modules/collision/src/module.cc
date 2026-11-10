@@ -26,7 +26,7 @@ constinit const ComponentDesc k_components[]  = {
 constinit const FieldDesc k_begin_fields[] = {KV_FIELDS(OverlapBegin, a, b)};
 constinit const FieldDesc k_end_fields[]   = {KV_FIELDS(OverlapEnd, a, b)};
 constinit const EventTypeDesc k_events[] = {
-    KV_EVENT_EX(OverlapBegin, k_begin_fields, 0),
+    KV_EVENT_EX(OverlapBegin, k_begin_fields, EvStaleOk), // found in Sim, so it can name a body a command of the same phase destroys
     KV_EVENT_EX(OverlapEnd, k_end_fields, EvStaleOk), // an end whose entity died is dropped as a matter of course
 };
 
