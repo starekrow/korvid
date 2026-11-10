@@ -63,7 +63,7 @@ void planes(TickContext& ctx) {
     const Dials& d = dials_row[0];
     SpriteLayers* layers = ctx.resource<SpriteLayers>(k_layers);
     f32 tile = plane_tile(d);
-    f32 ground = -(st.distance - (f32)st.loops * g.stage.length) * kGroundRate;
+    f32 ground = -map_clock(st) * kGroundRate;
 
     if (d.scroll_rows) {
         // Slice 1's way, for measuring: every tile written every tick.

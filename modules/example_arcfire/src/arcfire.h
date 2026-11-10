@@ -38,7 +38,7 @@ constexpr u32 L_ITEM   = 128; // chips and pickups: the ring collects them
 // Back to front, the master PRD's planes. The HUD is the UI's, above all of them.
 // The ground map's three tile layers are Z_MAP and the two above it; they scroll by the
 // renderer's layer offset (planes.cc), as the planes do, and nothing else is drawn on them.
-constexpr i32 Z_DEEP = -30, Z_HIGH = -20, Z_MAP = -16, Z_SHADOW = -12, Z_GROUND = -10, Z_CLOUD = 10, Z_AIR = 20, Z_SHIP = 30,
+constexpr i32 Z_DEEP = -30, Z_HIGH = -20, Z_MAP = -16, Z_SHADOW = -12, Z_GROUND = -10, Z_CLOUD = 10, Z_BOSS = 16, Z_PART = 17, Z_AIR = 20, Z_SHIP = 30,
               Z_SHOT = 25, Z_ITEM = 35, Z_BULLET = 40, Z_FX = 50, Z_MARK = 60;
 constexpr u32 kMapLayers = 3;    // sea, land, deco
 constexpr f32 kMapScale = 2.0f;  // world units a map pixel
@@ -78,6 +78,14 @@ struct Ground   { f32 rate; u32 bench; u32 kind; u32 launch; u32 timer; f32 vx; 
 struct Bullet   { u32 life; u32 grazed; Handle owner; };
 // A cosmetic piece of debris or a spark: it drifts, spins, slows, falls and fades over its life.
 struct Particle { u32 life, max_life; f32 spin, drag, alpha, fall; };
+// A boss (boss.cc): which definition, its phase, what it is doing, its clock (ticks since
+// it came), how far along its entry it is, where it holds, and which parts are down (a bit
+// each, by the part's index in the definition).
+enum class BossState : u32 { Entering, Holding, Leaving };
+struct Boss     { u32 def; u32 phase; u32 state; u32 clock; f32 s; u32 down; point2 hold; };
+// A part of a boss: its definition's index, its pattern's turn in the part's list, the
+// ticks to its next pattern or launch, and its boss.
+struct Part     { Handle boss; u32 index; u32 cycle; u32 timer; u32 pad; };
 struct EggBody  { f32 vy; f32 drift; };           // the egg as it falls
 
 // The world row's parts.
@@ -104,7 +112,13 @@ struct Stage {
     u32 loops;             // times the stage has looped
     u32 ended;             // the end mark passed and the stage does not loop
     u32 ground_cursor;     // the next ground row of the map to come into view
+    // The marks' clock is the distance less `base` (where this loop began) and `held` (what
+    // the scroll ran while the stage waited at a boss); the map's is the distance less `base`.
+    f32 base, held;
+    u32 waiting;           // 1 while a boss mark's boss is up: the marks wait, the scroll does not
 };
+inline f32 stage_clock(const Stage& s) { return s.distance - s.base - s.held; }
+inline f32 map_clock(const Stage& s) { return s.distance - s.base; }
 struct Run {
     i64 score;
     i64 stage_score;       // the score when this stage (or loop) began: a restart goes back to it
@@ -147,14 +161,15 @@ struct StageEnd   { u32 loops; u32 pad; };
 
 // ---- kinds, by id (filled at init) --------------------------------------------------------------
 extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
-    g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind, g_shadow_kind;
+    g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind, g_shadow_kind, g_boss_kind, g_part_kind;
+extern u32 g_part_down; // the trigger on a part's health
 // The two bullet kinds: plain bullets, and bullets that run a program (needles, seeds).
 inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
 
 // ---- the stage as its file says -------------------------------------------------------------
-constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 64, kMaxMarks = 128;
+constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 64, kMaxMarks = 128, kMaxBosses = 4;
 enum class Look : u32 { Fighter, Red, Green, Turret, Tank, Bunker, Count }; // what an enemy's sprite is
-enum class MarkKind : u32 { Formation, Ground, Speed, End };
+enum class MarkKind : u32 { Formation, Ground, Speed, End, Boss };
 constexpr u32 kPatternName = 32;
 struct FormationDef { u32 path; u32 count; u32 spacing; Look look; i32 health; i32 score; f32 fire_at; f32 speed; char pattern[kPatternName]; u32 entry; };
 // A ground row: from a stage mark, or from the map's enemies layer (then `at` is the stage
@@ -174,12 +189,58 @@ struct StageDef {
     // The ground: a Tiled map (its path; "" for none), its enemies once loaded (sorted by
     // `at`), and which of the three planes the stage shows (bits by plane, 7 by default).
     char         map[96] = "";
+    char         boss_names[kMaxBosses][24]; // the boss marks' bosses, by mark index; Game::boss_of maps them to definitions
+    u32          boss_mark_count = 0;
     GroundDef    map_grounds[kMaxGrounds];
     u32          map_ground_count = 0;
     u32          planes = 7;
 };
 // Reads a .stage.json. False with `why` filled for a file that does not say a stage.
 bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize why_cap);
+
+// ---- a boss as its file says (boss_data.cc) ------------------------------------------------
+// A boss is a hull and parts on it, in phases. Shots fly over the hull (a part set back from
+// its edge could not be hit otherwise); the hull is a body the ship must not touch. A part
+// is a turret, a launch bay or a core; it is armored (shots spark off it and it does not
+// fire) until its phase; when every part a phase names is down, the next phase begins; the
+// core's death is the boss's. assets/bosses/<name>.boss.json.
+constexpr u32 kMaxParts = 32, kMaxPhases = 6, kMaxPartPatterns = 4, kNoFormation = ~0u;
+struct PartDef {
+    char   name[24];
+    rect2  uv, uv_open;    // its cell of the parts sheet, armored and once its phase has come
+    vec2   size;           // world units
+    point2 at;             // on its parent (the hull, or a part), world units
+    f32    radius;         // its collider
+    i32    health, score;
+    char   patterns[kMaxPartPatterns][kPatternName]; // taken in turn, `rest` ticks apart
+    u32    entries[kMaxPartPatterns];
+    u32    pattern_count;
+    u32    rest;
+    u32    armored_until;  // the phase it opens in
+    i32    parent;         // a part's index, or -1: the hull
+    bool   core;
+    u32    launch;         // a formation it launches (the stage's index), or kNoFormation
+    u32    every;          // ticks between launches
+};
+struct PhaseDef { char name[24]; u32 ends; f32 sway, sway_rate; }; // ends: the parts (bits) whose deaths end it
+struct BossDef {
+    char     name[24];     // its file's
+    char     title[32];    // the HUD's
+    vec2     size;         // the hull's sprite, world units
+    vec2     hull_half, hull_offset; // the hull's collider
+    Path     entry;        // from above the field to where it holds
+    f32      speed;        // along the entry, units a tick
+    u32      timeout;      // ticks from its arrival
+    i32      score;        // the kill's bonus, at full time left
+    vec2     cell;         // a cell of the parts sheet, as a fraction of it
+    PartDef  parts[kMaxParts];
+    PhaseDef phases[kMaxPhases];
+    u32      part_count, phase_count;
+    i32      total;        // its parts' health: the bar's full
+};
+// Reads a .boss.json. Its paths and its bays' formations go into the stage (named
+// "<boss>.<path>"), so a launch is a formation like any other. False with `why` filled.
+bool boss_parse(const char* text, usize len, const char* name, BossDef& out, StageDef& stage, char* why, usize why_cap);
 
 // ---- the module's state ---------------------------------------------------------------------
 
@@ -212,6 +273,16 @@ struct Game {
     u8       bullet_look[1024];   // 0 round, 1 needle; by bullet definition
     char     bench[kPatternName] = ""; // --bench NAME
     u32      bench_entry = KV_BML_NONE;
+    // The bosses (boss.cc): every one the game has is loaded at startup (a fixed list, so
+    // their materials' handles are the same every run), parsed at boot.
+    BossDef  bosses[kMaxBosses];
+    u32      boss_count = 0;
+    Handle   boss_blobs[kMaxBosses];
+    Handle   boss_tex[kMaxBosses][2];      // hull, parts sheet
+    Handle   boss_alpha[kMaxBosses][2], boss_additive[kMaxBosses][2];
+    u32      boss_of[kMaxBosses];          // a boss mark's definition
+    bool     bosses_parsed = false;
+    Handle   boss_bar;                     // the HUD's bar, while a boss is up
     Handle   map;                 // the stage's ground map (tilemap), and its tiles once spawned
     bool     map_spawned = false;
     point2   map_origin;          // the map's top-left in the world when the distance is 0
@@ -291,6 +362,14 @@ u64    seed_of(Handle h, u64 tick, u32 salt);
 // The stage (stage.cc).
 void   stage_reset(Stage& s, const StageDef& def);
 
+// Bosses (boss.cc): their files asked for at startup, parsed at boot; a mark's boss spawned.
+void   bosses_load(Engine& e, Game& g);
+bool   bosses_ready(Engine& e, Game& g, char* why, usize why_cap); // false while loading; `why` set for a failure
+Handle boss_spawn(TickContext& ctx, Game& g, const Dials& d, u32 def);
+// A shot on a part (hits.cc): absorbed by its armor (true) or hurt.
+bool   part_absorbs(const Game& g, TickContext& ctx, Handle part);
+void   boss_ping(TickContext& ctx, Game& g, point2 at);
+
 // Items (items.cc): bullets cancelled into chips (a bomb, a death), at most kChipCap of
 // them made a cancel; the bullets past the cap are counted in `overflow` for the caller to
 // pay. `radius` <= 0 cancels every bullet on the field.
@@ -306,6 +385,7 @@ void   hud_open(Engine& e, Game& g);
 void   hud_cover(Engine& e, Game& g, bool on);
 void   hud_stage_clear(Engine& e, Game& g);
 void   hud_flash(Engine& e);
+void   hud_boss(Engine& e, Game& g, const char* title, i32 hp, i32 total); // title null: the bar goes
 
 // Reports (stats.cc).
 void   stats_summary(Game& g);

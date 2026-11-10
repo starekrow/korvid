@@ -3,7 +3,8 @@
 // enemy, a bullet on the hitbox, an enemy on the hitbox, a bullet through the graze ring,
 // a bullet on the shell), and a handler each does the rest. They write the run in a chain
 // (module.cc), so a bullet that hits the hitbox takes back its own graze before the
-// grazes are counted.
+// grazes are counted. A boss's armored parts take shots without harm; its open parts take
+// the damage and die by their trigger (boss.cc), not here. Shots fly over a boss's hull.
 #include "arcfire.h"
 #include "korvid/core/log.h"
 
@@ -34,15 +35,15 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
     Engine& e = *ctx.engine;
     const u16 ship = hk(e, g_ship_kind), ring = hk(e, g_ring_kind), shell = hk(e, g_shell_kind), shot = hk(e, g_shot_kind),
               air = hk(e, g_air_kind), ground = hk(e, g_ground_kind), plain = hk(e, g_bullet_kind), active = hk(e, g_active_kind),
-              item = hk(e, g_item_kind);
+              item = hk(e, g_item_kind), boss = hk(e, g_boss_kind), part = hk(e, g_part_kind);
     for (const OverlapBegin& o : overlaps) {
         for (u32 swap = 0; swap < 2; ++swap) {
             Handle a = swap ? o.b : o.a, b = swap ? o.a : o.b;
             u16 ka = a.kind(), kb = b.kind();
             bool bullet_a = ka == plain || ka == active;
-            if (ka == shot && (kb == air || kb == ground)) ctx.emit(ShotHit{a, b});
+            if (ka == shot && (kb == air || kb == ground || kb == part)) ctx.emit(ShotHit{a, b});
             else if (bullet_a && kb == ship) ctx.emit(BulletHit{a});
-            else if (ka == air && kb == ship) ctx.emit(Rammed{a});
+            else if ((ka == air || ka == boss) && kb == ship) ctx.emit(Rammed{a});
             else if (bullet_a && kb == ring) ctx.emit(Graze{a});
             else if (bullet_a && kb == shell) ctx.emit(ShellHit{a});
             else if (ka == item && kb == ring) ctx.emit(Pickup{a});
@@ -51,11 +52,28 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
 }
 
 // A shot on an enemy: the shot goes, the enemy loses its damage and flashes; at zero it is
-// a kill. A shot that met two enemies in one tick hurts the first only.
+// a kill (a boss's part: its trigger's). A shot that met two enemies in one tick hurts the
+// first only.
 void on_shot_hit(TickContext& ctx, Span<const ShotHit> hits) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     Span<Shot> shot = ctx.write<Shot>("example_arcfire.shot.Shot");
+    Span<const Transform2> shot_xf = ctx.read<Transform2>("example_arcfire.shot.Transform2");
+    Span<Health> part_hp = ctx.write<Health>("example_arcfire.part.Health");
+    Span<const Transform2> part_xf = ctx.read<Transform2>("example_arcfire.part.Transform2");
+    const u16 part = hk(e, g_part_kind);
+    for (const ShotHit& h : hits) {
+        if (h.target.kind() != part) continue;
+        Shot& s = shot[h.shot.index()];
+        Health& hp = part_hp[h.target.index()];
+        if (s.spent || hp.hp <= 0) continue; // down already: the shot flies on
+        s.spent = 1;
+        ctx.destroy(h.shot);
+        if (part_absorbs(g, ctx, h.target)) { boss_ping(ctx, g, shot_xf[h.shot.index()].position); continue; }
+        hp.hp -= s.damage;
+        hp.flash = kFlashTicks;
+        fx_sparks(ctx, g, part_xf[h.target.index()].position, 2, kSparkHit, 2.0f);
+    }
     Span<Health> air_hp = ctx.write<Health>("example_arcfire.air.Health");
     Span<Health> ground_hp = ctx.write<Health>("example_arcfire.ground.Health");
     Span<const Transform2> air_xf = ctx.read<Transform2>("example_arcfire.air.Transform2");
@@ -63,6 +81,7 @@ void on_shot_hit(TickContext& ctx, Span<const ShotHit> hits) {
     Span<const Mover> air_mv = ctx.read<Mover>("example_arcfire.air.Mover");
     const u16 air = hk(e, g_air_kind);
     for (const ShotHit& h : hits) {
+        if (h.target.kind() == part) continue;
         Shot& s = shot[h.shot.index()];
         if (s.spent) continue;
         bool is_air = h.target.kind() == air;

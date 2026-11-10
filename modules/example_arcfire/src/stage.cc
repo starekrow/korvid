@@ -28,6 +28,15 @@ bool resolve_patterns(Game& g, char* why, usize cap) {
         GroundDef& gd = g.stage.map_grounds[i];
         if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "the map's enemy: no pattern \"%s\"", gd.pattern); return false; }
     }
+    for (u32 b = 0; b < g.boss_count; ++b)
+        for (u32 i = 0; i < g.bosses[b].part_count; ++i) {
+            PartDef& p = g.bosses[b].parts[i];
+            for (u32 k = 0; k < p.pattern_count; ++k)
+                if ((p.entries[k] = bml_find(g.lib, p.patterns[k])) == KV_BML_NONE) {
+                    snprintf(why, cap, "boss %s, part %s: no pattern \"%s\"", g.bosses[b].name, p.name, p.patterns[k]);
+                    return false;
+                }
+        }
     if (g.bench[0] && (g.bench_entry = bml_find(g.lib, g.bench)) == KV_BML_NONE) { snprintf(why, cap, "--bench: no pattern \"%s\"", g.bench); return false; }
     return true;
 }
@@ -39,7 +48,7 @@ void bench_stage(Game& g) {
     snprintf(st.name, sizeof st.name, "BENCH %.24s", g.bench);
     st.speed = 0.6f;
     st.length = 1.0e9f;
-    st.formation_count = st.ground_count = st.map_ground_count = 0;
+    st.formation_count = st.ground_count = st.map_ground_count = st.boss_mark_count = 0;
     st.map[0] = 0;
     st.planes = 7;
     st.mark_count = 1;
@@ -85,6 +94,10 @@ void boot(TickContext& ctx) {
         if (g.bench[0]) bench_stage(g); // the bench's own: no map, every plane
     }
     why[0] = 0;
+    if (!bosses_ready(e, g, why, sizeof why)) {
+        if (why[0]) { KV_ERROR("arcfire", "stage %s: %s", b->path, why); engine_request_quit(e); }
+        return;
+    }
     if (!ground_map_ready(ctx, g, why, sizeof why)) {
         if (why[0]) { KV_ERROR("arcfire", "stage %s: %s", b->path, why); engine_request_quit(e); }
         return;
@@ -130,7 +143,7 @@ void scroll(TickContext& ctx) {
     s.distance += s.speed;
 }
 
-// Phase Sim, after the scroll: every mark the distance has passed, in order.
+// Phase Sim, after the scroll: every mark the stage's clock has passed, in order.
 void stage(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Span<Stage> stage_row = ctx.write<Stage>(ARC_WORLD(Stage));
@@ -141,13 +154,17 @@ void stage(TickContext& ctx) {
     const Dials& d = dials_row[0];
     const StageDef& def = g.stage;
     // The map's ground rows whose place has come into view: where the map has them now.
-    f32 along = s.distance - (f32)s.loops * def.length;
+    f32 along = map_clock(s);
     while (s.ground_cursor < def.map_ground_count && along >= def.map_grounds[s.ground_cursor].at) {
         const GroundDef& gd = def.map_grounds[s.ground_cursor++];
         ground_spawn(ctx, g, d, gd, point2{gd.x, kFieldTop + 24.0f - (along - gd.at)});
     }
-    // A loop's marks are offset by the stage's length times the loops so far.
-    while (!s.ended && s.cursor < def.mark_count && s.distance >= (f32)s.loops * def.length + def.marks[s.cursor].at) {
+    // A boss mark holds the marks' clock until its boss has died or left; the scroll goes on.
+    if (s.waiting) {
+        if (ctx.write_kind(g_boss_kind)->live() == 0) s.waiting = 0;
+        else s.held += s.speed;
+    }
+    while (!s.ended && !s.waiting && s.cursor < def.mark_count && stage_clock(s) >= def.marks[s.cursor].at) {
         const Mark& m = def.marks[s.cursor++];
         switch (m.kind) {
         case MarkKind::Formation: {
@@ -169,9 +186,12 @@ void stage(TickContext& ctx) {
             if (m.over > 0.0f) { s.ramp_from = s.speed; s.ramp_to = m.value; s.ramp_at = s.distance; s.ramp_over = m.over; }
             else { s.speed = m.value; s.ramp_over = 0.0f; }
             break;
+        case MarkKind::Boss:
+            if (!boss_spawn(ctx, g, d, g.boss_of[m.index]).is_null()) s.waiting = 1;
+            break;
         case MarkKind::End:
             ctx.emit(StageEnd{s.loops, 0});
-            if (d.loops) { ++s.loops; s.cursor = 0; s.ground_cursor = 0; }
+            if (d.loops) { ++s.loops; s.cursor = 0; s.ground_cursor = 0; s.base = s.distance; s.held = 0.0f; }
             else s.ended = 1;
             break;
         }

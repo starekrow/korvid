@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!-- fan_storm: the carrier's core. Fans aimed at the ship, a wide fast one and a narrower
+     slow one behind it, so the gap in the first is closed by the second; rank adds fans and
+     shortens the breath between them. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>6 + $rank * 4</times>
+      <action>
+        <fire><direction type="aim">-36</direction><speed>2.8</speed><bullet/></fire>
+        <repeat><times>8</times>
+          <action><fire><direction type="sequence">9</direction><speed>2.8</speed><bullet/></fire></action>
+        </repeat>
+        <wait>8</wait>
+        <fire><direction type="aim">-22</direction><speed>1.9</speed><bullet/></fire>
+        <repeat><times>4</times>
+          <action><fire><direction type="sequence">11</direction><speed>1.9</speed><bullet/></fire></action>
+        </repeat>
+        <wait>26 - $rank * 10</wait>
+      </action>
+    </repeat>
+  </action>
+</bulletml>

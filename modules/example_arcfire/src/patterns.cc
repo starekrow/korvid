@@ -94,8 +94,9 @@ void on_fire(void* user, const BmlFire& f) {
 
 } // namespace
 
-// Phase Sim, after the enemies (which start their emitters) and the egg: every runner
-// steps. Enemies' patterns fire; active bullets steer, fire, vanish.
+// Phase Sim, after the enemies and the bosses (which start their emitters) and after
+// collision.compose (a boss's parts fire from where they are this tick): every enemy's
+// runner steps, and its pattern fires.
 void patterns(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Span<const Transform2> ship_xf = ctx.read<Transform2>("example_arcfire.ship.Transform2");
@@ -127,7 +128,25 @@ void patterns(TickContext& ctx) {
             return n;
         }, add));
     }
-    // The active bullets: their programs steer them; their velocity follows.
+    g.bullets_spawned = total.fires;
+    g.runners_stepped = total.stepped;
+}
+
+// Phase Sim, before the bullets fly: the active bullets' programs steer them (their
+// velocity follows), fire and vanish. Apart from `patterns`, which comes after every
+// transform's writer (it reads the parts' composed places), as these write their own.
+void actives(TickContext& ctx) {
+    Game& g = ctx.state_as<Game>();
+    Span<const Transform2> ship_xf = ctx.read<Transform2>("example_arcfire.ship.Transform2");
+    Span<const Dials> dials_row = ctx.read<Dials>(ARC_WORLD(Dials));
+    if (!dials_row.len || g.ship.index() >= ship_xf.len || !g.lib.entries.len) return;
+    const Dials& d = dials_row[0];
+    const point2 target = ship_xf[g.ship.index()].position;
+    const Game& cg = g;
+    const u64 tick = ctx.tick;
+    struct Counts { u32 fires, stepped; };
+    auto add = [](Counts a, Counts b) { return Counts{a.fires + b.fires, a.stepped + b.stepped}; };
+    Counts total{0, 0};
     Table* actives = ctx.write_kind(g_active_kind);
     Span<Transform2> at = actives->rows_of<Transform2>();
     Span<Velocity> v = actives->rows_of<Velocity>();
@@ -147,8 +166,8 @@ void patterns(TickContext& ctx) {
         }
         return n;
     }, add));
-    g.bullets_spawned = total.fires;
-    g.runners_stepped = total.stepped;
+    g.bullets_spawned += total.fires;
+    g.runners_stepped += total.stepped;
 }
 
 } // namespace kv::arcfire

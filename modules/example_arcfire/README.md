@@ -99,10 +99,25 @@ state.
   (`path.cc`), so members of a formation keep their spacing, and starts its pattern where
   its emitter says along the path; a ground row rides the scroll and runs its pattern while
   the ship is above it. A hit flashes them by drawing their texture added.
+- **Bosses** (`boss.cc`, `boss_data.cc`, `assets/bosses/`): a boss mark in the stage
+  spawns one, and the marks after it wait (the stage's clock holds; the scroll and the map
+  go on) until it has died or left. A boss is a hull (`boss`, a body the ship must not
+  touch; shots fly over it) and parts on it (`part`: turrets, launch bays, a core), children
+  that `collision.compose` places before the broadphase, so they are hit where they are
+  drawn. Its definition gives the entry path, the timeout, the parts (a cell of the parts
+  sheet, a collider, health, patterns taken in turn, the phase each opens in, a bay's
+  formation) and the phases, each ended by the deaths of the parts it names. A part is
+  armored until its phase (shots spark off it). A part's death is a state trigger
+  (`part_down`, health crossing below one) whose handler takes it and what rides on it,
+  pays, and moves the boss on a phase; the core's death is the boss's, paid by the time it
+  had left. Out of time, a boss leaves. The art is made by `tools/make_bosses.py` from
+  Kenney's pieces into `assets/generated/`. The HUD shows its parts' health as a bar.
 - **Patterns** (`patterns.cc`, `assets/patterns/`): BulletML documents, one pattern each,
-  named in `patterns.json` and compiled at load by the `bulletml` module; the stage names
-  them. Every enemy carries a `Runner` (the module's plain-data runner) and an `Emitter`
-  (which pattern, when it starts). `patterns` steps every runner in a `parallel_for`; a
+  named in `patterns.json` and compiled at load by the `bulletml` module; the stage and the
+  bosses name them. Every enemy carries a `Runner` (the module's plain-data runner) and an
+  `Emitter` (which pattern, when it starts). `patterns` steps every enemy's runner in a
+  `parallel_for`, after `collision.compose` (a part fires from where it is this tick), and
+  `actives` the active bullets' (below), before the bullets fly; a
   fire spawns by the chunk's commands, and each runner's `$rand` is its own stream seeded
   from its entity and the tick, so the result is the same on any thread count. The `rank`
   dial is BulletML's `$rank`.
@@ -131,8 +146,9 @@ state.
   began, the eggs are 3 again and the restart is counted.
 - **The HUD** (`hud.cc`) is `assets/ui/arcfire.ui.json`: the side panels, the score, the
   eggs and the bombs as pips, the restarts, the grazes, the stage and its distance, the dev counters,
-  and the pause, cover and stage-clear screens. The HUD system writes the model each tick.
-- **Pilots** (`pilot.cc`): the demo's script and the bot share one steering rule. Both
+  a boss's name and health bar while one is up, and the pause, cover and stage-clear screens. The HUD system writes the model each tick.
+- **Pilots** (`pilot.cc`): the demo's script and the bot share one steering rule, which
+  takes a boss's open parts as targets and keeps off its hull. Both
   drive the action map with `input_action_override`.
 - **Effects** (`fx.cc`): sparks and debris are particles in a cosmetic kind, drawn from
   the module's own random stream, so the particle dial changes nothing the sim draws.
@@ -152,6 +168,7 @@ state.
 | `src/dials.cc` | the dials' positions and `--dial` |
 | `src/planes.cc`, `src/ground.cc` | the planes and the ground's scroll; the map and its enemies |
 | `src/ship.cc`, `src/enemies.cc`, `src/bullets.cc` | what moves |
+| `src/boss.cc`, `src/boss_data.cc`, `assets/bosses/` | bosses: their life and their parts; reading a boss file; the files |
 | `src/patterns.cc`, `assets/patterns/` | the library and the runners; the ten patterns |
 | `src/hits.cc`, `src/egg.cc` | what happens when things meet; the death and the restart |
 | `src/bomb.cc`, `src/items.cc` | the bomb; chips, pickups and the magnet |
@@ -160,8 +177,8 @@ state.
 | `assets/stages/shoreline.stage.json`, `assets/maps/` | the stage; its ground map and tileset |
 | `assets/ui/arcfire.ui.json` | the HUD and every screen |
 | `assets/CREDITS.md`, `assets/LICENSE-*.txt` | who made what |
-| `tools/make_art.py`, `tools/make_maps.py` | copies the vendored art in and draws `assets/made/`; writes the maps |
-| `tests/` | paths; the stage file and the parser's rules |
+| `tools/make_art.py`, `tools/make_maps.py`, `tools/make_bosses.py` | copies the vendored art in and draws `assets/made/`; writes the maps; kitbashes the bosses into `assets/generated/` |
+| `tests/` | paths; the stage file, the boss files and the parsers' rules |
 | `docs/` | the PRDs and the performance notebook |
 
 What the game asks of the engine, found as it is built, is in

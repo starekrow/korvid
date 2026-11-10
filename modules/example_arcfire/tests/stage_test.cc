@@ -1,7 +1,11 @@
 // The stage file: the shipped one parses whole; marks are sorted by distance, keeping the
-// file's order at equal distances; names resolve; what is not a stage says why.
+// file's order at equal distances; names resolve; what is not a stage says why. The boss
+// files: the carrier parses whole, its paths and bays' formations join the stage's, and
+// what is not a boss says why.
 #include "../src/stage_data.cc"
+#include "../src/boss_data.cc"
 #include "korvid/core/test.h"
+#include "korvid/core/log.h"
 #include "korvid/platform/io.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,7 +56,8 @@ void test_stage(kv::TestCtx& c) {
             speeds += def.marks[i].kind == MarkKind::Speed;
             if (i) KV_CHECK(c, def.marks[i - 1].at <= def.marks[i].at);
         }
-        KV_CHECK(c, speeds == 2 && def.marks[def.mark_count - 1].kind == MarkKind::End);
+        KV_CHECK(c, speeds == 4 && def.marks[def.mark_count - 1].kind == MarkKind::End);
+        KV_CHECK(c, def.boss_mark_count == 1 && !strcmp(def.boss_names[0], "carrier"));
         for (u32 i = 0; i < def.formation_count; ++i) KV_CHECK(c, def.formations[i].path < def.path_count && def.paths[def.formations[i].path].length > 0.0f);
         free(text);
     }
@@ -77,4 +82,58 @@ void test_stage(kv::TestCtx& c) {
     KV_CHECK(c, !parses(R"({"marks": [{"at": 1, "dance": true}]})", def, why, sizeof why));
     KV_CHECK(c, !parses(R"({"marks": [{"at": 0, "end": true}]})", def, why, sizeof why) && strstr(why, "past the start"));
     KV_CHECK(c, !parses("[1, 2", def, why, sizeof why));
+}
+
+void test_boss(kv::TestCtx& c) {
+    using namespace kv;
+    using namespace kv::arcfire;
+    c.begin("boss");
+    static StageDef stage; // large: not on the stack
+    static BossDef b;
+    char why[160] = "";
+
+    usize len = 0;
+    char* text = slurp("bosses/carrier.boss.json", &len);
+    KV_CHECK(c, text != nullptr);
+    if (text) {
+        stage = StageDef{};
+        KV_CHECK(c, boss_parse(text, len, "carrier", b, stage, why, sizeof why));
+        KV_CHECK(c, !strcmp(b.title, "CARRIER") && b.part_count == 7 && b.phase_count == 2 && b.timeout == 45 * 60);
+        // Its two bays' paths and formations are the stage's now, under its name.
+        KV_CHECK(c, stage.path_count == 2 && !strcmp(stage.path_names[0], "carrier.bay_left") && stage.formation_count == 2);
+        u32 cores = 0, launchers = 0;
+        for (u32 i = 0; i < b.part_count; ++i) {
+            cores += b.parts[i].core;
+            launchers += b.parts[i].launch != kNoFormation;
+        }
+        KV_CHECK(c, cores == 1 && launchers == 2);
+        // The first phase ends with the four turrets; the core opens in the second.
+        KV_CHECK(c, b.phases[0].ends == 0xFu && b.phases[1].ends == 0x40u && b.parts[6].core && b.parts[6].armored_until == 1);
+        KV_CHECK(c, b.total == 4 * 50 + 2 * 70 + 200 && b.parts[6].pattern_count == 2 && !strcmp(b.parts[6].patterns[1], "fan_storm"));
+        free(text);
+    }
+
+    // What is not a boss says why.
+    auto fails_with = [&](const char* json, const char* says) {
+        stage = StageDef{};
+        why[0] = 0;
+        bool ok = boss_parse(json, strlen(json), "x", b, stage, why, sizeof why);
+        if (!ok && !strstr(why, says)) KV_INFO("test", "boss says: %s", why);
+        return !ok && strstr(why, says) != nullptr;
+    };
+    const char* entry = R"("entry": {"path": [[0, 400], [0, 200]]})";
+    char doc[512];
+    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "radius": 8}], "phases": [{"ends": ["a"]}]})", entry);
+    KV_CHECK(c, fails_with(doc, "a boss has a core"));
+    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true, "parent": "b"}], "phases": [{"ends": ["a"]}]})", entry);
+    KV_CHECK(c, fails_with(doc, "rides on \"b\""));
+    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true}], "phases": [{"name": "p", "ends": ["nope"]}]})", entry);
+    KV_CHECK(c, fails_with(doc, "ends with \"nope\""));
+    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true, "armored_until": 2}], "phases": [{"ends": ["a"]}]})", entry);
+    KV_CHECK(c, fails_with(doc, "opens in phase 2 of 1"));
+    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true, "launch": {"path": "none"}}], "phases": [{"ends": ["a"]}]})", entry);
+    KV_CHECK(c, fails_with(doc, "launches on no path"));
+    KV_CHECK(c, fails_with(R"({"parts": []})", "an entry is a path"));
+    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true}, {"name": "a"}], "phases": [{"ends": ["a"]}]})", entry);
+    KV_CHECK(c, fails_with(doc, "a name of its own"));
 }

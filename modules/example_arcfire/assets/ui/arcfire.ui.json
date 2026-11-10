@@ -43,6 +43,10 @@
                 { "type": "box", "name": "gap2", "size": [8, 16] },
                 { "type": "label", "name": "restarts", "text": "RESTARTS {=restarts}", "color": "dim" },
                 { "type": "label", "name": "grazes", "text": "GRAZE {=grazes}", "color": "cyan" } ] } ] },
+        { "type": "stack", "name": "boss", "anchor": "top", "offset": [0, 14], "gap": 6, "align": "center", "visible": false,
+          "children": [
+            { "type": "label", "name": "boss_name", "text": "{=boss_name}", "color": "gold" },
+            { "type": "meter", "name": "boss_bar", "style": "bar", "value": "=boss_hp", "max": "=boss_max", "fill": "gold", "size": [440, 10] } ] },
         { "type": "panel", "name": "right", "fill": "panel", "anchor": "center", "pivot": "left", "offset": [270, 0], "size": [1400, "fill"],
           "children": [
             { "type": "panel", "name": "edge", "fill": "edge", "anchor": "left", "size": [3, "fill"] },

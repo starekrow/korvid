@@ -54,7 +54,8 @@ void bomb(TickContext& ctx) {
             overflow, ms, run[0].bombs);
 }
 
-// The blast: every enemy on the field takes it; a kill is a kill.
+// The blast: every enemy on the field takes it; a kill is a kill. A boss's open parts take
+// it too (their trigger does the rest); its hull and armor do not.
 void on_bomb(TickContext& ctx, Span<const Bombed> blasts) {
     Game& g = ctx.state_as<Game>();
     for (u32 n = 0; n < blasts.len; ++n) {
@@ -74,6 +75,15 @@ void on_bomb(TickContext& ctx, Span<const Bombed> blasts) {
                 ctx.destroy(t->handle_at(i));
                 ctx.emit(Kill{xf[i].position, hp[i].score, 0, air ? mv[i].formation : Handle{}});
             }
+        }
+        Span<Health> php = ctx.write<Health>("example_arcfire.part.Health");
+        Span<const Transform2> pxf = ctx.read<Transform2>("example_arcfire.part.Transform2");
+        const Table* parts = engine_table(*ctx.engine, g_part_kind);
+        for (u32 i = 0; i < parts->rows(); ++i) {
+            if (!parts->is_alive(i) || php[i].hp <= 0 || !in_field(pxf[i].position, 0.0f) || part_absorbs(g, ctx, parts->handle_at(i))) continue;
+            php[i].hp -= kBlastDamage;
+            php[i].flash = 4;
+            fx_sparks(ctx, g, pxf[i].position, 3, kSparkBlast, 3.0f);
         }
     }
 }

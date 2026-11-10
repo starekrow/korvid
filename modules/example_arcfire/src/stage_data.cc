@@ -8,12 +8,14 @@
 //                                    "health": 2, "score": 100, "pattern": "aimed", "fire_at": 0.4, "speed": 3 } },
 //       { "at": 900,  "ground": { "x": -120, "health": 12, "score": 500, "pattern": "ring" } },
 //       { "at": 1500, "speed": { "value": 2.2, "over": 300 } },
+//       { "at": 4600, "boss": "carrier" },
 //       { "at": 5400, "end": true } ] }
 //
 // Points are field units, +y up; speeds are units a tick; `fire_at` is a fraction of the
-// path, where the formation's members start their pattern. Patterns are named here and
-// found in the library once both are loaded (stage.cc). Marks are sorted by distance
-// here, so the file may list them in any order.
+// path, where the formation's members start their pattern. A boss mark names a boss of
+// assets/bosses/: it comes, and the marks after it wait until it has died or left.
+// Patterns are named here and found in the library once both are loaded (stage.cc).
+// Marks are sorted by distance here, so the file may list them in any order.
 #include "arcfire.h"
 #include "korvid/core/json.h"
 #include "korvid/core/memory.h"
@@ -131,12 +133,18 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             mk.kind = MarkKind::Speed;
             mk.value = (f32)json_number(json_get(doc, *sp, "value"), out.speed);
             mk.over = (f32)json_number(json_get(doc, *sp, "over"), 0.0);
+        } else if (const JsonValue* boss = json_get(doc, *m, "boss")) {
+            // The boss's name; boot finds its definition.
+            if (out.boss_mark_count == kMaxBosses) return fail(why, why_cap, "too many boss marks");
+            mk.kind = MarkKind::Boss;
+            mk.index = out.boss_mark_count;
+            snprintf(out.boss_names[out.boss_mark_count++], sizeof out.boss_names[0], "%s", json_string(boss, ""));
         } else if (json_bool(json_get(doc, *m, "end"), false)) {
             mk.kind = MarkKind::End;
             if (mk.at <= 0.0f) return fail(why, why_cap, "the end mark is past the start"); // a stage that loops must have a length
             out.length = mk.at;
             ended = true;
-        } else return fail(why, why_cap, "a mark is a formation, a ground row, a speed or the end");
+        } else return fail(why, why_cap, "a mark is a formation, a ground row, a speed, a boss or the end");
         out.marks[out.mark_count++] = mk;
     }
     if (!ended) return fail(why, why_cap, "a stage has an end mark");

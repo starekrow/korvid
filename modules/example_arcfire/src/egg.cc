@@ -179,7 +179,8 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     }
     // Out of eggs: everything the stage made goes, the stage's clock goes back to its
     // start, and anything it had scheduled is of an epoch that no longer spawns.
-    const u32 kinds[] = {g_air_kind, g_ground_kind, g_bullet_kind, g_active_kind, g_shot_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind};
+    const u32 kinds[] = {g_air_kind, g_ground_kind, g_bullet_kind, g_active_kind, g_shot_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind,
+                         g_boss_kind, g_part_kind};
     for (u32 k : kinds) ctx.destroy_all(k);
     stage_reset(stage_row[0], g.stage);
     r.score = r.stage_score;

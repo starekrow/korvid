@@ -206,3 +206,13 @@ deltas at 1,224 tiles). On the layer, the planes' deltas are gone at every densi
 count is the bullets' alone. The extract barely moves because the plane kind is not still
 (the dial moves its rows, so it cannot be) and its compare is still done: at 1,224 rows
 that compare is most of the 0.18 ms. At the art's scale (six tiles) it is nothing.
+
+**M2. The carrier.** A boss is two kinds: the hull (`boss`) and seven parts (`part`), which
+`collision.compose` places in Sim before the broadphase (a new engine pass: the graze ring
+and the shell use it too). The demo now meets the carrier at tick 2710 and ends at tick
+6437, the carrier having timed out (the demo's pilot does not yet kill it at full health),
+with hash `95d0e0efabd81879` across thread counts, I/O backends and asset sources. With
+the parts' health at a fifth (`--dial enemy_health=0.2`), the demo's rule brings the
+carrier down in 34 seconds: turrets, the core's phase at tick 4559, the core at 5062. Under
+`--stress` (twice the health, rank 24) the fight runs with the stage's other bullets:
+23,367 at peak over the 75 seconds, the tick's cost not yet broken out (M5's entry).

@@ -3,8 +3,9 @@
 // stick, and both steer by one rule (`steer`, below) from sim state only.
 //
 // The rule: for every bullet, where it will pass closest in the next 40 ticks; away from
-// each pass that comes within `clear` units, the sooner and the closer the harder; away from any air enemy within 90; off the walls; and with nothing
-// to fear, under the nearest enemy (so the shots find it) at the ship's usual height. It
+// each pass that comes within `clear` units, the sooner and the closer the harder; away from
+// any air enemy within 90 and from a boss's hull; off the walls; and with nothing to fear,
+// under the nearest enemy or open boss part (so the shots find it) at the ship's usual height. It
 // is not good, which is what the stress mode wants (the ship cannot die there), and enough
 // to live through most of a minute at Normal.
 //
@@ -86,6 +87,30 @@ vec2 steer(Engine& e, const Game& g, f32 clear) {
             nearest = fabsf(gt[i].position.x - p.x);
             aim_x = gt[i].position.x;
         }
+    // A boss: its open parts are targets; its hull is to be kept off.
+    const Table* boss_table = engine_table(e, g_boss_kind);
+    const Table* parts = engine_table(e, g_part_kind);
+    Span<const Transform2> px = parts->rows_of<Transform2>();
+    Span<const Part> pp = parts->rows_of<Part>();
+    Span<const Health> ph = parts->rows_of<Health>();
+    for (u32 i = 0; i < parts->rows(); ++i) {
+        if (!parts->is_alive(i) || ph[i].hp <= 0) continue;
+        const Boss* b = boss_table->get<Boss>(pp[i].boss);
+        if (!b || b->state != (u32)BossState::Holding) continue;
+        const PartDef& pd = g.bosses[b->def].parts[pp[i].index];
+        if (pd.armored_until > b->phase) continue;
+        if (px[i].position.y > p.y + 60.0f && fabsf(px[i].position.x - p.x) < nearest) {
+            nearest = fabsf(px[i].position.x - p.x);
+            aim_x = px[i].position.x;
+        }
+    }
+    Span<const Transform2> bx = boss_table->rows_of<Transform2>();
+    Span<const Collider2> bc = boss_table->rows_of<Collider2>();
+    for (u32 i = 0; i < boss_table->rows(); ++i) {
+        if (!boss_table->is_alive(i)) continue;
+        f32 below = (bx[i].position.y + bc[i].offset.y - bc[i].half.y) - p.y; // from the ship up to the hull's lowest edge
+        if (below < 70.0f && fabsf(bx[i].position.x - p.x) < bc[i].half.x + 40.0f) push.y -= 1.0f - (below > 0.0f ? below / 70.0f : 0.0f);
+    }
     // The walls push back, so a dodge does not end in a corner.
     if (p.x < kFieldLeft + 80.0f) push.x += 0.5f;
     if (p.x > kFieldRight - 80.0f) push.x -= 0.5f;

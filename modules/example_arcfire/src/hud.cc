@@ -53,6 +53,14 @@ void hud_flash(Engine& e) {
     ui_cover(e, c);
 }
 
+void hud_boss(Engine& e, Game& g, const char* title, i32 hp, i32 total) {
+    ui_set_visible(e, g.hud, "boss", title != nullptr);
+    if (!title) return;
+    ui_model_set_str(e, "boss_name", title);
+    ui_model_set_int(e, "boss_hp", hp);
+    ui_model_set_int(e, "boss_max", total > 0 ? total : 1);
+}
+
 void hud_stage_clear(Engine& e, Game& g) {
     if (g.clear_label.is_null()) {
         UiOpen o;
@@ -126,13 +134,27 @@ void hud(TickContext& ctx) {
     ui_model_set_int(e, "grazes", r.grazes);
     ui_model_set_str(e, "stage", g.stage.name);
     char text[48];
-    snprintf(text, sizeof text, "%.0f / %.0f", (f64)stage_row[0].distance - (f64)stage_row[0].loops * g.stage.length, (f64)g.stage.length);
+    snprintf(text, sizeof text, "%.0f / %.0f", (f64)stage_clock(stage_row[0]), (f64)g.stage.length);
     ui_model_set_str(e, "distance", text);
     ui_model_set_int(e, "sprites", g.stats.sprites);
     ui_model_set_int(e, "bullets", g.stats.bullets);
     ui_model_set_int(e, "runners", g.stats.runners);
     ui_model_set_int(e, "deltas", g.stats.deltas);
     ui_model_set_int(e, "pairs", g.stats.pairs_tested);
+    // A boss's bar: its parts' health, open and armored, over their full.
+    Span<const Boss> boss_rows = ctx.read<Boss>("example_arcfire.boss.Boss");
+    Span<const Health> part_hp = ctx.read<Health>("example_arcfire.part.Health");
+    Span<const Part> parts = ctx.read<Part>("example_arcfire.part.Part");
+    const Table* bt = engine_table(e, g_boss_kind);
+    const Table* pt = engine_table(e, g_part_kind);
+    const BossDef* up = nullptr;
+    Handle up_handle;
+    for (u32 i = 0; i < bt->rows() && !up; ++i)
+        if (bt->is_alive(i)) { up = &g.bosses[boss_rows[i].def]; up_handle = bt->handle_at(i); }
+    i32 hp = 0;
+    for (u32 i = 0; up && i < pt->rows(); ++i)
+        if (pt->is_alive(i) && parts[i].boss == up_handle && part_hp[i].hp > 0) hp += part_hp[i].hp;
+    hud_boss(e, g, up ? up->title : nullptr, hp, up ? up->total : 0);
     if (g.clear_ticks && !ctx.paused && --g.clear_ticks == 0) {
         UiMotion out;
         out.fx = UiFx::Fade;
