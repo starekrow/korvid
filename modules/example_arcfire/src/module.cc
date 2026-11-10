@@ -84,8 +84,8 @@ constinit const FieldDesc k_ship_fields[]     = {KV_FIELDS(Ship, cooldown, live,
 constinit const FieldDesc k_formation_fields[] = {KV_FIELDS(Formation, count, killed, gone, drop)};
 constinit const FieldDesc k_item_fields[]     = {KV_FIELDS(Item, kind, value, life, pad)};
 constinit const FieldDesc k_shot_fields[]     = {KV_FIELDS(Shot, damage, spent, kind, turn)};
-constinit const FieldDesc k_beam_fields[]     = {KV_FIELDS(Beam, timer, length, scroll, pad)};
-constinit const FieldDesc k_option_fields[]   = {KV_FIELDS(Option, index, pad)};
+constinit const FieldDesc k_beam_fields[]     = {KV_FIELDS(Beam, timer, length, scroll, seg)};
+constinit const FieldDesc k_option_fields[]   = {KV_FIELDS(Option, index, tilt)};
 constinit const FieldDesc k_health_fields[]   = {KV_FIELDS(Health, hp, flash, score, look)};
 // The path is a struct of its own (path.h), so its fields are named by hand.
 constinit const FieldDesc k_mover_fields[] = {
@@ -158,7 +158,7 @@ constinit const KindDesc k_kinds[] = {
     // The beams: one on the ship (and one on each option), cut each tick at what it meets.
     // Options: children of the ship, bodies that eat bullets (options.cc).
     {.name = ".option",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Option", .capacity = kMaxOptions, .id = &g_option_kind},
-    {.name = ".beam",     .components = "Transform2, Local2, Parent, Sprite, Beam", .capacity = 4, .id = &g_beam_kind},
+    {.name = ".beam",     .components = "Transform2, Local2, Parent, Sprite, Beam", .capacity = 4 * kBeamSegments, .id = &g_beam_kind},
     {.name = ".boom",     .components = "Transform2, Sprite, AnimPlayer", .capacity = 512, .id = &g_boom_kind, .cosmetic = true},
     // The bullets' glows, slot for slot with the two bullet kinds (fx.cc).
     {.name = ".glow",     .components = "Transform2, Sprite, Glow", .capacity = 65536, .id = &g_glow_kind, .cosmetic = true},
@@ -236,9 +236,9 @@ constinit const SystemDesc k_systems[] = {
     // The beam is cut against everything where it is this tick: after every mover and the
     // collision module's compose.
     // Each option's place on the ship, before the collision module composes it.
-    {.name = ".options", .phase = Phase::Sim, .fn = options, .reads = ".ship.Ship, .option.Option", .writes = ".option.Local2", .after = ".control",
+    {.name = ".options", .phase = Phase::Sim, .fn = options, .reads = ".ship.Ship, .ship.Transform2", .writes = ".option.Local2, .option.Option", .after = ".control",
      .state = StateUse::Read},
-    {.name = ".beams", .phase = Phase::Sim, .fn = beams, .reads = "*[Collider2].Transform2, *[Collider2].Collider2, .ship.Ship, .ship.Transform2, .beam.Parent, .option.Parent",
+    {.name = ".beams", .phase = Phase::Sim, .fn = beams, .reads = "*[Collider2].Transform2, *[Collider2].Collider2, .ship.Ship, .ship.Transform2, .beam.Parent, .option.Parent, .option.Option",
      .writes = ".beam.Local2, .beam.Sprite, .beam.Beam", .state = StateUse::None},
     {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage, .world.Run, .world.Dials", .writes = ".air, .ground, .formation", .state = StateUse::Read},
     {.name = ".bosses", .phase = Phase::Sim, .fn = bosses, .reads = ".world.Run, .world.Dials, .world.EggState", .writes = ".boss, .part, .formation, audio.commands",
@@ -309,6 +309,7 @@ constinit const char* const k_texture_paths[TEX_COUNT] = {
     "example_arcfire/made/dot.png",     "example_arcfire/made/ring.png",    "example_arcfire/made/soft.png",
     "example_arcfire/made/spark.png",   "example_arcfire/made/egg.png",     "example_arcfire/made/clouds_low.png",
     "example_arcfire/made/clouds_high.png", "example_arcfire/made/beam.png",    "example_arcfire/made/items.png",
+    "example_arcfire/generated/boat.png",
 };
 
 Handle material_of(Engine& e, Handle texture, BlendMode blend) {
@@ -402,6 +403,8 @@ Sprite enemy_sprite(const Game& g, Look look) {
     case Look::Turret: return sprite_of(g, TEX_TILES, tile_uv(4, 2), vec2{32, 32}, Z_GROUND);
     case Look::Tank:   return sprite_of(g, TEX_TILES, tile_uv(5, 2), vec2{32, 32}, Z_GROUND);
     case Look::Bunker: return sprite_of(g, TEX_TILES, tile_uv(4, 1), vec2{40, 40}, Z_GROUND);
+    case Look::Heavy:  return sprite_of(g, TEX_SHIPS, ship_uv(3, 0), vec2{80, 80}, Z_AIR);
+    case Look::Boat:   return sprite_of(g, TEX_BOAT, rect2_unit(), vec2{64, 144}, Z_AIR);
     default:           return sprite_of(g, TEX_SHIPS, ship_uv(1, 0), vec2{64, 64}, Z_AIR);
     }
 }

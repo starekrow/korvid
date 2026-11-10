@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!-- missiles: the missile boat's, for the whole of its slow crossing: salvo after salvo,
+     the missiles leaving its launchers out to either side, slow, then speeding up and
+     turning toward the ship for a while, then flying on straight. Active bullets; the
+     needle's look. -->
+<bulletml type="vertical">
+  <action label="top">
+    <repeat><times>12</times>
+      <action>
+        <repeat><times>2 + $rank * 2</times>
+          <action>
+            <fire><direction type="absolute">-110 + $rand * 20</direction><speed>1.2</speed><bulletRef label="needle_missile"/></fire>
+            <fire><direction type="absolute">90 + $rand * 20</direction><speed>1.2</speed><bulletRef label="needle_missile"/></fire>
+            <wait>14</wait>
+          </action>
+        </repeat>
+        <wait>110 - $rank * 30</wait>
+      </action>
+    </repeat>
+  </action>
+  <bullet label="needle_missile">
+    <action>
+      <wait>18</wait>
+      <changeSpeed><speed>3.4</speed><term>50</term></changeSpeed>
+      <repeat><times>9</times>
+        <action>
+          <changeDirection><direction type="aim">0</direction><term>16</term></changeDirection>
+          <wait>10</wait>
+        </action>
+      </repeat>
+    </action>
+  </bullet>
+</bulletml>

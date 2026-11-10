@@ -173,6 +173,7 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     ++r.deaths;
     chain_break(r);
     ctx.destroy_all(g_option_kind); // a death costs the options (their beams go with them, children)
+    if (Ship* ship = ships->get<Ship>(g.ship); ship && ship->power > 1) --ship->power; // and a level of the weapon's power
     if (r.eggs > 0) {
         --r.eggs;
         es = EggState{};

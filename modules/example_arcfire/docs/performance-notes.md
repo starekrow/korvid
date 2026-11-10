@@ -453,3 +453,33 @@ it.
 **M4. The demo** hashes 0e15cc3d537639a1 at tick 11829 (the `glows` dial is new in the
 world row), the same seven ways; the two recorded runs were made again and replay matching
 at 1 and 16 threads.
+
+## Tuning (after slice 5, starekrow's pass)
+
+**What changed.** A death drops the weapon a power level. The Beam is shaped by level
+(two beams from the ship at 2, each splitting halfway up at 3, three at 4 with the outer
+two split, all three split at 5), passes over a boss's hull, and is light on any one
+target; an option's beam is one straight beam that leans after the ship's sideways
+movement. Heavies (the big yellow ship, 36 to 44 health) come before the carrier and
+through the second half; a missile boat (an airship of 300 to 380 health) crosses three
+times. Every boss part has three times its health (the battleship's four and a half), and
+the timeouts are 60 seconds (carrier) and 90 (battleship).
+
+**The weapons at the bosses** (the bot keeping its weapon, level five, both options,
+invulnerable; held seconds before each went down). The first Beam was the fastest, its
+focus drawing the segments onto one part at a third more damage and the options' straight
+beams on the same target; at a third of a damage a tick a segment, no focus bonus, it is
+the slowest, as the trade wants:
+
+| | carrier | battleship |
+|---|---|---|
+| Spread | 14 | 30 |
+| Beam (first) | 11 | 21 |
+| Beam | 20 | 37 |
+| Storm | 13 | 24 |
+| Lance | 12 | 31 |
+
+**The bot, after.** Easy, Normal, Hard: the carrier 15, 27, 28 seconds held, the battleship
+21, 29, 30; eggs lost 0, 1, 0; bombs 5, 5, 11; scores 539,362, 533,042, 536,033. The demo
+is 14,459 ticks (the fights are longer) and hashes 4c09b8ae7ce5b009 seven ways; the two
+recorded runs were made again (14,521 and 14,622 ticks) and replay matching.

@@ -52,7 +52,7 @@ void enemies(TickContext& ctx) {
         // Its pattern starts where its formation said along the path, once it is on the field.
         if (em[i].state == EmitIdle && m.s >= em[i].at * m.path.length && in_field(at[i].position, -16.0f))
             emitter_start(g, em[i], run[i], air->handle_at(i), ctx.tick);
-        flash(g, hp[i], sp[i], hp[i].look == (u32)Look::Turret ? TEX_TILES : TEX_SHIPS);
+        flash(g, hp[i], sp[i], hp[i].look == (u32)Look::Turret ? TEX_TILES : hp[i].look == (u32)Look::Boat ? TEX_BOAT : TEX_SHIPS);
     }
 
     Table* ground = ctx.write_kind(g_ground_kind);

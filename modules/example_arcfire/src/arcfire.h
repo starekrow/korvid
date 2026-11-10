@@ -68,10 +68,14 @@ enum ShotKind : u32 { ShotPlain, ShotBolt, ShotLance };
 struct Shot     { i32 damage; u32 spent; u32 kind; f32 turn; };
 // The beam: a child of what fires it, stretched up the field to the first body it meets,
 // which it damages every few ticks (`timer`). `length` as cut this tick; `scroll` the uv's.
-struct Beam     { u32 timer; f32 length; f32 scroll; u32 pad; };
+// A segment of a beam (weapons.cc): `seg` its place in the level's shape; its damage's timer,
+// its length this tick, its texture's scroll.
+struct Beam     { u32 timer; f32 length; f32 scroll; u32 seg; };
+constexpr u32 kBeamSegments = 9; // the most a shape has: three from the ship, each split in two
 // An option (options.cc): a child of the ship that orbits it (holds beside it, focused),
 // fires the weapon two levels lower and eats the bullets it meets. `index` 0 or 1.
-struct Option   { u32 index; u32 pad; };
+// `tilt`: its beams' lean (radians, clockwise), easing after the ship's sideways movement.
+struct Option   { u32 index; f32 tilt; };
 constexpr u32 kMaxOptions = 2;
 constexpr u64 kRunOverTicks = 240; // from a run's end to the quit: the banner's time
 // What can be shot. `flash` counts the ticks of the white flash left; `score` is paid at the kill.
@@ -199,7 +203,9 @@ inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kin
 
 // ---- the stage as its file says -------------------------------------------------------------
 constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 64, kMaxMarks = 128, kMaxBosses = 4;
-enum class Look : u32 { Fighter, Red, Green, Turret, Tank, Bunker, Count }; // what an enemy's sprite is
+// What an enemy's sprite is. Heavy: the stronger popcorn's (the pack's big yellow ship); Boat:
+// the missile boat's, a midsize airship (generated/boat.png).
+enum class Look : u32 { Fighter, Red, Green, Turret, Tank, Bunker, Heavy, Boat, Count };
 enum class MarkKind : u32 { Formation, Ground, Speed, End, Boss };
 constexpr u32 kPatternName = 32;
 struct FormationDef { u32 path; u32 count; u32 spacing; Look look; i32 health; i32 score; f32 fire_at; f32 speed; char pattern[kPatternName]; u32 entry; u32 drop; };
@@ -288,7 +294,7 @@ enum Sfx : u32 { SFX_SHOT, SFX_HIT, SFX_PING, SFX_KILL, SFX_KILL_BIG, SFX_BOSS_D
                  SFX_EGG_BREAK, SFX_EGG_OPEN, SFX_EGG_BLOOM, SFX_WARNING, SFX_COUNT };
 
 enum Tex : u32 { TEX_SHIPS, TEX_TILES, TEX_STARS, TEX_NEBULA, TEX_CLOUD, TEX_BULLETS, TEX_DOT, TEX_RING, TEX_SOFT, TEX_SPARK, TEX_EGG,
-                 TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_BEAM, TEX_ITEMS, TEX_COUNT };
+                 TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_BEAM, TEX_ITEMS, TEX_BOAT, TEX_COUNT };
 constexpr u32 kPlaneCount = 6; // planes.cc's: stars, nebula, cloud, the low clouds' shadows, the low clouds, the high wisps
 
 // What the game counts for its reports (stats.cc): this tick's numbers and the run's.
@@ -478,8 +484,8 @@ Handle fx_boom_clip(Engine& e);
 // kind; its next cooldown. The beam is fired by `beams`, not here.
 u32    weapon_fire(Game& g, Table& shots, point2 at, u32 weapon, u32 power, bool focus);
 const char* weapon_name(u32 weapon);
-// The beam that rides on `owner` (the ship, an option).
-Handle beam_spawn(Engine& e, Game& g, Handle owner);
+// The beam that rides on `owner` (the ship, an option): its kBeamSegments rows.
+void   beam_spawn(Engine& e, Game& g, Handle owner);
 // Options (options.cc): one more, if the ship has fewer than two (false if it has two).
 bool   option_add(TickContext& ctx, Game& g);
 // An option's power: two below the ship's, at least one.

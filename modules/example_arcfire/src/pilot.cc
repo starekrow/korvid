@@ -11,8 +11,8 @@
 // goes through it, focused once it is there. With nothing to fear and an item worth having
 // in the field, it goes for the item first: power, options, eggs, bombs, and a weapon item
 // while it shows a type the pilot wants (one it does not want it keeps clear of, since
-// taking it would switch). The bot wants Lance or Storm at a boss (the Beam stops at a
-// hull, and a boss's inner parts are behind it) and Spread or Storm otherwise; the demo
+// taking it would switch). The bot wants Lance or Storm at a boss (the Beam covers the most
+// and hurts any one target least) and Spread or Storm otherwise; the demo
 // wants what its script says. With the arsenal it clears Shoreline at every difficulty
 // (the notebook has its record), more by the weapons than by its dodging.
 //

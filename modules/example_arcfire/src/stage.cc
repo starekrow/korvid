@@ -212,7 +212,8 @@ void on_member(TickContext& ctx, Span<const SpawnMember> members) {
         point2 at = path_at(mv.path, 0.0f);
         Health h{(i32)ceilf((f32)f.health * dials_row[0].enemy_health), 0, f.score, (u32)f.look};
         Emitter em{f.entry, f.fire_at, EmitIdle, 0};
-        ctx.spawn_later(g_air_kind, transform2_at(at, KV_PI), enemy_sprite(g, f.look), collider_circle(18.0f, L_AIR, L_SHOT | L_SHIP), h, mv, em, Runner{});
+        f32 radius = f.look == Look::Boat ? 34.0f : f.look == Look::Heavy ? 26.0f : 18.0f; // the boat, the big ship, the rest
+        ctx.spawn_later(g_air_kind, transform2_at(at, KV_PI), enemy_sprite(g, f.look), collider_circle(radius, L_AIR, L_SHOT | L_SHIP), h, mv, em, Runner{});
     }
 }
 

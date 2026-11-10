@@ -35,6 +35,8 @@ Look look_named(const char* s) {
     if (!strcmp(s, "red")) return Look::Red;
     if (!strcmp(s, "green")) return Look::Green;
     if (!strcmp(s, "turret")) return Look::Turret;
+    if (!strcmp(s, "heavy")) return Look::Heavy;
+    if (!strcmp(s, "boat")) return Look::Boat;
     return Look::Fighter;
 }
 

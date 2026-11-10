@@ -4,7 +4,8 @@ assets/generated/. Deterministic: the same files every run. Run from anywhere:
 
     python3 modules/example_arcfire/tools/make_bosses.py
 
-Each boss is two images, at the pack's pixel scale (drawn at 2x, as the pack's ships are):
+Each boss is two images, at the pack's pixel scale (drawn at 2x, as the pack's ships are),
+and the missile boat (a midsize airship, one body) is one, generated/boat.png:
 
   generated/<boss>.png        the hull, bow down (toward the player), with sockets where
                               its parts sit, so a part shot away leaves its scar
@@ -111,6 +112,36 @@ def carrier(sheet):
         d.rectangle((cx - 10, 72, cx + 10, 88), fill=OUTLINE)
         d.rectangle((cx - 8, 74, cx + 8, 86), fill=DEEP)
     socket(d, 48, 140, 11)  # the core
+    return im
+
+
+def boat():
+    """32 x 72: a missile boat, an airship, bow up as drawn (the game turns air enemies to
+    face down): a grey hull with the enemy's orange band, two launchers of three missiles
+    each, a bridge amidships, and two engines astern, lit."""
+    w, h = 32, 72
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for x in (9, 19):  # the engines
+        d.rectangle((x, 60, x + 4, 70), fill=OUTLINE)
+        d.rectangle((x + 1, 64, x + 3, 69), fill=CYAN)
+    outline_fill(d, [(16, 0), (25, 12), (27, 26), (27, 58), (22, 62), (10, 62), (5, 58), (5, 26), (7, 12)], GREY)
+    # The orange band along the gunwales.
+    for x0, x1 in ((7, 8), (24, 25)):
+        d.rectangle((x0, 24, x1, 56), fill=ORANGE)
+    d.line((16, 6, 16, 60), fill=LIGHT)
+    # Two launchers, fore and aft of the bridge: a box of three missile tips each.
+    for y0 in (14, 44):
+        d.rectangle((10, y0, 22, y0 + 10), fill=OUTLINE)
+        d.rectangle((11, y0 + 1, 21, y0 + 9), fill=DEEP)
+        for x in (12, 15, 18):  # missiles, a pixel apart
+            d.rectangle((x, y0 + 2, x + 1, y0 + 8), fill=LIGHT)
+            d.rectangle((x, y0 + 2, x + 1, y0 + 3), fill=ORANGE)
+    # The bridge, its windows lit.
+    d.rectangle((11, 28, 21, 40), fill=OUTLINE)
+    d.rectangle((12, 29, 20, 39), fill=LIGHT)
+    d.line((13, 31, 19, 31), fill=CYAN_DARK)
+    d.line((13, 34, 19, 34), fill=CYAN_DARK)
     return im
 
 
@@ -303,7 +334,8 @@ def main():
     carrier_parts(sheet).save(OUT / "carrier_parts.png")
     battleship(sheet).save(OUT / "battleship.png")
     battleship_parts(sheet).save(OUT / "battleship_parts.png")
-    print("generated/: carrier.png, carrier_parts.png, battleship.png, battleship_parts.png")
+    boat().save(OUT / "boat.png")
+    print("generated/: carrier.png, carrier_parts.png, battleship.png, battleship_parts.png, boat.png")
 
 
 if __name__ == "__main__":

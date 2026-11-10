@@ -86,7 +86,7 @@ The ways it flies itself:
   `invulnerable` being 2). It wants its weapons by the stage's clock: Spread on the
   opening's power items (to level five), the Beam at the islands, Storm over the airfield
   and the carrier (a bomb in its core's phase), Lance and both options for the
-  battleship; it takes an egg on the way. The end mark ends it at tick 11829, the last sim tick; it
+  battleship; it takes an egg on the way. The end mark ends it at tick 14459, the last sim tick; it
   then reads its results, signs "DEMO" into its own table (`scores-demo.json`) and quits. `--demo --hash` prints the state hash every sim tick. The hashes match
   across runs, thread counts (`--threads 1`, `--threads 8`), I/O backends (`--io sync`,
   `--io uring`) and asset sources (loose files, `--pack` with a kpak of `bin/assets`, or
@@ -164,11 +164,15 @@ state.
 - **The ship** (`ship.cc`): `control` reads the action map and moves, clamps and fires
   its weapon.
 - **Weapons** (`weapons.cc`): four types at five power levels, rows of tables: Spread (a
-  fan, wider and denser), Beam (a child row of the ship cut each tick by
-  `collision_cast_all` at the first body it meets, which it damages every few ticks; the one
-  weapon a boss's hull stops), Storm (bolts that turn toward the nearest enemy) and Lance
+  fan, wider and denser), Beam (shaped by level: one beam, then two from the ship, then each
+  splitting halfway up, then three with the outer two split, then all three split; each
+  segment, a child row of its owner, is cut each tick by `collision_cast_all` at the first
+  body it meets, passing over a boss's hull, and damages it every few ticks: the widest
+  coverage and the least on any one target; focused, the shape draws in; an option's is one
+  straight beam that leans after the ship's sideways movement and hardens a little with
+  its level), Storm (bolts that turn toward the nearest enemy) and Lance
   (heavy shots that pass through what they kill). The level is the ship's, kept when the
-  type changes; weapon and power items (`items.cc`) switch and raise them. Item carriers
+  type changes and one lower after a death; weapon and power items (`items.cc`) switch and raise them. Item carriers
   (a formation's, a ground row's or a boss part's `drop`) leave weapon, power, option and
   egg items. Shots and the
   beam hurt by one path (`hurt`, hits.cc). `shots` flies the shots and steers the bolts. The hitbox is the ship's own collider (radius
@@ -180,7 +184,11 @@ state.
 - **Enemies** (`enemies.cc`): an air row follows a Catmull-Rom path by arc length
   (`path.cc`), so members of a formation keep their spacing, and starts its pattern where
   its emitter says along the path; a ground row rides the scroll and runs its pattern while
-  the ship is above it. A hit flashes them by drawing their texture added.
+  the ship is above it. A hit flashes them by drawing their texture added. Besides the
+  popcorn, the heavies (the pack's big yellow ship, in threes, forty-odd health, denser
+  patterns) come just before the carrier and through the second half, and three times a
+  missile boat (a midsize airship, `generated/boat.png`, a formation of one) crosses the
+  upper field slowly, salvo after salvo of homing missiles (`patterns/missiles.xml`).
 - **Bosses** (`boss.cc`, `boss_data.cc`, `assets/bosses/`): a boss mark in the stage
   spawns one, and the marks after it wait (the stage's clock holds; the scroll and the map
   go on) until it has died or left. A boss is a hull (`boss`, a body the ship must not

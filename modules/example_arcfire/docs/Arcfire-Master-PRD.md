@@ -20,7 +20,8 @@ moderate at most. The screen is full of bullets because that is the sight; the p
 leave lanes, the aimed shots lead the player a little less than they could, and the hitbox
 is a few pixels. A player who stops paying attention dies; a player who is paying
 attention sees the whole game in a sitting. Death is a spectacle (the egg, below), not a
-setback: it costs the options and the bomb count, not the weapon's power.
+setback: it costs the options, the bomb count and a level of the weapon's power (revised
+in the tuning after slice 5: a death should hurt a little).
 
 Everything that hits is in one plane: a player shot kills a ground turret as it kills a
 fighter, an enemy bullet comes from a tank as it comes from a ship, and the ship flies over
@@ -103,7 +104,8 @@ the hitbox; a bullet that crosses the ring and not the box scores and sparks.
    full-speed time, absorbing bullets (each one a spark on the shell), then fades.
 
 Eggs are lives. The HUD shows them. A death costs the options and resets the bomb count
-to its base; the weapon and its power stay. An extend is an egg. Out of eggs returns the
+to its base and drops the weapon a power level (not below one); the weapon stays. An
+extend is an egg. Out of eggs returns the
 player to the start of the stage with the eggs refilled and the stage's score as it was at
 the stage's start; the results screen counts the restarts. Nothing is lost that cannot be
 regained in a minute, which is the difficulty the game wants.

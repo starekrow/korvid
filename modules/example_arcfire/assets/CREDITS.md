@@ -157,6 +157,7 @@ files without code changes, as long as each part's cell stays where its `.boss.j
 | `generated/carrier.png` | the carrier's hull, 96 x 176: drawn by the script in the pack's palette and style (its outline slate, greys, white and orange accent), with two copies of the pack's vent tile (`kenney/tiles.png` column 4, row 1) as deck machinery and sockets where the parts sit |
 | `generated/carrier_parts.png` | its parts, 24 px cells: the pack's turret tiles (`kenney/tiles.png` column 6 row 1, column 5 row 1) as they are; launch bays shut and open, and the core armored and open, drawn by the script in the pack's palette |
 | `generated/battleship.png` | the battleship's hull, 224 x 96, broadside, bow right: drawn by the script in the pack's palette and style, with the pack's vent tile twice as funnels, a bow wave and wake, and sockets where the parts sit |
+| `generated/boat.png` | the missile boat, a midsize airship: drawn by `tools/make_bosses.py` in the pack's palette and style (no pack pixels); Korvid's, under the repository's license |
 | `generated/battleship_parts.png` | its parts, 24 px cells: a main gun, the pack's two turret tiles as anti-air mounts, a missile bay shut and open, a deck hatch shut and open, the bridge armored and open, the rest drawn by the script in the pack's palette |
 
 The boss files (`bosses/*.boss.json`) are written by hand for the game, as are the patterns
