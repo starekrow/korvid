@@ -33,14 +33,24 @@ Controls: arrows or WASD (or the left stick or the d-pad) fly; Z or Space (South
 held; Shift (West) focuses: half speed, the hitbox and the graze ring shown, the spread
 narrowed; X (East) bombs; Escape (Start) pauses; Q quits.
 
-Run plainly (or with `--arcade`), the game is arcade: the stages in order (Shoreline alone
-for now), and at the end the stage-clear banner with the stage bonus and a round again a
-difficulty up, the score carried, until the round at Hard ends the run. `--stage NAME`
-plays the one stage (`assets/stages/NAME.stage.json`) and ends with it; `--difficulty
-easy|normal|hard` is where either starts (Normal). A run's end logs its results line (the
-score, the round and difficulty reached, restarts, eggs lost, bombs used, the longest
-chain) and quits once the banner has shown. Out of eggs, the stage starts over, the score
-as it was when the stage began.
+Run plainly, the game opens on its title, over Shoreline's sky: Arcade, Stage select
+(the stage, then Easy, Normal or Hard), Quit. Arcade is the stages in order (Shoreline
+alone for now), and at the end the stage-clear banner with the stage bonus and a round
+again a difficulty up, the score carried, until the round at Hard ends the run. A run
+starts behind a fade from a fresh sim, so every run from the title is the same run a new
+process would play; the pause menu (Escape or Start) resumes or, asked twice, quits to
+the title; a run's end logs its results line (the score, the round and difficulty
+reached, restarts, eggs lost, bombs used, the longest chain) and goes back to the title
+once the banner has shown. Out of eggs, the stage starts over, the score as it was when
+the stage began.
+
+A flag that names a run goes straight into it and quits at its end: `--arcade`, `--stage
+NAME` (`assets/stages/NAME.stage.json`), and the ways it flies itself below; `--difficulty
+easy|normal|hard` is where arcade or the stage starts (Normal). `--again` is a check: a run
+that ends starts once more from a fresh sim instead of quitting, so `--demo --again --hash`
+prints the demo's hashes twice, and the two must match. Over `--cli-stdin`, `press ACTION
+[TICKS] [X Y]` holds an action as a player would and `screenshot FILE` takes the next frame,
+so a script can walk the menus.
 
 The ways it flies itself:
 
@@ -239,6 +249,7 @@ state.
 | `src/module.cc` | the registration tables, the schedule, startup, the sprite helpers |
 | `src/arcfire.h`, `src/field.h` | what the files share; the field's bounds |
 | `src/stage.cc`, `src/stage_data.cc` | the boot, the scroll, the marks; reading a stage file |
+| `src/flow.cc` | the title, stage select, the pause menu; runs begun from a fresh sim and left, behind covers |
 | `src/path.cc` | Catmull-Rom paths by arc length |
 | `src/dials.cc` | the dials' positions (the difficulties among them) and `--dial` |
 | `src/scoring.h`, `src/scoring.cc` | the run's record and the score's rules; the chain's clock, extends, rounds, the results line |

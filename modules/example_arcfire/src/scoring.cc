@@ -58,6 +58,6 @@ void scoring(TickContext& ctx) {
 }
 
 // A run's end, after the banner.
-void on_run_over(TickContext& ctx, Span<const RunOver>) { engine_request_quit(*ctx.engine); }
+void on_run_over(TickContext& ctx, Span<const RunOver>) { run_over(ctx, ctx.state_as<Game>()); }
 
 } // namespace kv::arcfire

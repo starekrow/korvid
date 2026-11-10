@@ -61,14 +61,14 @@ void bench_stage(Game& g) {
     st.marks[0] = Mark{st.length, MarkKind::End, 0, 0.0f, 0.0f};
 }
 
+} // namespace
+
 void bench_spawn(TickContext& ctx, Game& g, const Dials& d) {
     GroundDef gd{};
     gd.entry = g.bench_entry;
     ground_spawn(ctx, g, d, gd, point2{0.0f, 200.0f}, true);
     KV_INFO("arcfire", "bench: %s", g.bench);
 }
-
-} // namespace
 
 void stage_reset(Stage& s, const StageDef& def) {
     u32 round = s.loops; // a restart is of the round it happens in
@@ -77,13 +77,13 @@ void stage_reset(Stage& s, const StageDef& def) {
     s.loops = round;
 }
 
-// Phase PreSim, every tick until it has done its work: the stage file, once it is in, and
-// the patterns, and the run's first state: the world row, the planes, the ship. Then the
-// sim may go.
+// Phase PreSim, every tick: until the assets are in, the stage file, its map, the bosses
+// and the patterns; then the title or the first run (flow.cc), and the sim may go. After,
+// the switches between runs and the title, which want this system's writes.
 void boot(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
-    if (g.stage_ready) return;
+    if (g.stage_ready) { flow_step(ctx, g); return; }
     const BlobAsset* b = asset_blob(e, g.stage_blob);
     bool failed = false;
     bool patterns_in = patterns_ready(e, g, failed);
@@ -118,24 +118,7 @@ void boot(TickContext& ctx) {
     g.stage_ready = true;
     KV_INFO("arcfire", "stage %s: %u marks, %u formations, %u ground rows, %.0f units long, speed %.2f", g.stage.name, g.stage.mark_count,
             g.stage.formation_count, g.stage.ground_count, (f64)g.stage.length, (f64)g.stage.speed);
-
-    Dials d = dials_start(e, g, g.demo ? Position::Demo : g.stress ? Position::Stress : g.start);
-    dials_log(d);
-    Stage s{};
-    stage_reset(s, g.stage);
-    Run run{};
-    run.eggs = kStartEggs;
-    run.next_extend = kFirstExtend;
-    run.bombs = kBaseBombs;
-    Rng r = Rng::seeded(0xa2cf1e5eedull, 1); // the sim's stream: patterns and drift, the same every run
-    Table* world = ctx.write_kind(g_world_kind);
-    g.world = world->spawn(d, s, run, EggState{}, Chance{r.state, r.inc});
-    planes_spawn(e, g, d);
-    g.ship = ship_spawn(e, g, d);
-    for (u32 i = 0; i < d.options && i < kMaxOptions; ++i) option_add(ctx, g);
-    if (g.bench[0]) bench_spawn(ctx, g, d);
-    music(ctx, g, false);
-    engine_hold(e, HoldLoading, false);
+    flow_ready(ctx, g);
 }
 
 // Phase Sim: the distance, at the speed, which ramps where a speed mark said.
@@ -252,9 +235,9 @@ void on_stage_end(TickContext& ctx, Span<const StageEnd> ends) {
         Position next;
         bool again = round_next(g, d, &next);
         if (!again) results_log(g, r, d, se.loops);
-        // The demo ends here; the engine runs no tick after a quit, so every run's last
-        // hashed tick is this one.
-        if (g.demo) { engine_request_quit(*ctx.engine); continue; }
+        // The demo ends here (run_over quits, or with --again begins it once more, held, so
+        // no sim tick passes between); every run's last hashed tick is this one.
+        if (g.demo) { run_over(ctx, g); continue; }
         hud_stage_clear(*ctx.engine, g, bonus, again ? position_name((u32)next) : nullptr);
         if (!again) ctx.schedule(RunOver{se.loops, 0}, ctx.tick + kRunOverTicks);
     }

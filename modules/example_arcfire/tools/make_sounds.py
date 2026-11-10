@@ -39,6 +39,9 @@ EFFECTS = [
     ("egg_open.ogg", IMPACT, "impactMetal_heavy_000.ogg"),   # the egg falls away in halves
     ("egg_bloom.ogg", SCIFI, "forceField_002.ogg"),          # the new ship, the shell
     ("warning.ogg", SCIFI, "computerNoise_000.ogg"),         # a boss comes; a boss stomps
+    ("ui_move.ogg", SCIFI, "laserRetro_001.ogg"),            # a menu's focus moves
+    ("ui_select.ogg", SCIFI, "forceField_001.ogg"),          # a menu item chosen
+    ("ui_cancel.ogg", SCIFI, "doorClose_001.ogg"),           # back out of a menu
 ]
 
 TRACKS = [

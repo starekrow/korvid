@@ -378,3 +378,12 @@ I/O sync and io_uring. Its weapons, picked up on the clock: Spread to five by ti
 the Beam at 3102, an option at 3262, Storm at 3948, the carrier's core bombed and down at
 5522, the second option at 7740, Lance at 8857, an egg at 9037, the battleship down at 10930
 after 13 seconds held. Score 406,910.
+
+## Slice 5 — Presentation
+
+**M1. A second run is the first.** `engine_sim_reset` empties every kind that is not
+cosmetic back to its startup slots, the sim tick to 0, the timers, undelivered events,
+unapplied commands and the units' ticket counters dropped. `--demo --again --hash` plays
+the demo, resets, and plays it again in the same process: 11,830 hashes each, identical
+line for line, ending e9ff4a19c469df51 as the first run and the hash matrix do. The reset
+itself, with 26 entities live: nothing worth timing beside the cover's fade.

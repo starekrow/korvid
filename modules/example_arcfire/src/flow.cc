@@ -1,0 +1,254 @@
+// example_arcfire: the program around a run. Run plainly, the game opens on a title
+// (Arcade, Stage select, Quit); a flag that names a run (--demo, --autoplay, --stress,
+// --bench, --stage, --arcade) goes straight into it. A run starts from a fresh sim
+// (engine_sim_reset), so a second run in the process is the same run as the first in a new
+// one, and is left for the title or the next run the same way: a switch is asked for
+// (flow_request), happens behind a cover on a held tick (`flow_step`, from the boot
+// system, which holds the writes), and the cover opens on what is there now. The pause
+// menu (Resume, Quit to title) holds the sim as the pause did. Everything here is
+// presentation but the run it starts, whose plan (arcade or a stage, the difficulty) is
+// hashed as the dials are.
+//
+// `--again`, a check: a run that ends starts once more from a fresh sim instead of quitting,
+// so its hashes can be compared with the first's, tick for tick.
+#include "arcfire.h"
+#include "korvid/core/log.h"
+#include "korvid/core/name.h"
+#include "korvid/platform_hid/actions.h"
+#include "korvid/ui/ui.h"
+#include <string.h>
+
+namespace kv::arcfire {
+
+namespace {
+
+constexpr f32 kCoverSeconds = 0.35f;
+
+Handle open_menu(Engine& e, Game& g, const char* screen, i32 layer, const char* focus = nullptr) {
+    UiOpen o;
+    o.layer = layer;
+    o.hold = true;
+    o.enter.fx = UiFx::Fade;
+    Handle h = ui_open(e, g.ui, screen, o);
+    if (focus) ui_focus(e, h, "items", focus);
+    return h;
+}
+
+void close_menu(Engine& e, Handle& h) {
+    if (!h.is_null()) ui_close(e, h);
+    h = Handle{};
+}
+
+void close_pause(Engine& e, Game& g) {
+    close_menu(e, g.confirm_screen);
+    if (g.pause_screen.is_null()) return;
+    close_menu(e, g.pause_screen);
+    engine_pause(e, false);
+}
+
+void open_title(Engine& e, Game& g) {
+    char note[64];
+    snprintf(note, sizeof note, "ARCADE STARTS AT %s", position_name((u32)g.start));
+    for (char* c = note; *c; ++c) *c = (char)(*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
+    ui_model_set_str(e, "title_note", note);
+    hud_shown(e, g, false);
+    g.title_screen = open_menu(e, g, "title", 110, "arcade");
+    g.mode = Mode::Title;
+}
+
+// What the old run left: every sim row, by the fresh sim; the cosmetic rows that ride on
+// them or show them (a reused handle would give a shadow a new owner); the screens and the
+// time scale it had up.
+void clear_run(TickContext& ctx, Game& g) {
+    Engine& e = *ctx.engine;
+    engine_sim_reset(e);
+    ctx.tick = e.clock.tick_count; // this tick's units after this one see the new sim tick
+    const u32 cosmetic[] = {g_particle_kind, g_shadow_kind, g_boom_kind};
+    for (u32 k : cosmetic) ctx.write_kind(k)->destroy_all();
+    hud_cover(e, g, false);
+    hud_stomp(e, g, false);
+    hud_boss(e, g, nullptr, 0, 0);
+    if (!g.clear_label.is_null()) { ui_close(e, g.clear_label); g.clear_label = Handle{}; }
+    g.clear_ticks = 0;
+    engine_time_scale(e, 1.0f);
+    g.world = g.ship = g.ring = g.mark = Handle{};
+}
+
+} // namespace
+
+void flow_request(Engine& e, Game& g, Next next, bool cover) {
+    if (g.next != Next::None) return; // one at a time
+    g.next = next;
+    if (cover) {
+        UiCover c;
+        c.seconds = kCoverSeconds;
+        g.flow_cover = ui_cover(e, c);
+        ui_cover_wait(e, g.flow_cover, true);
+        g.next_ready = false;
+    } else {
+        engine_hold(e, HoldGame, true); // no cover: the switch on the next tick, held
+        g.flow_cover = 0;
+        g.next_ready = true;
+    }
+}
+
+// The assets are in (boot): the planes, then the title or the flags' run.
+void flow_ready(TickContext& ctx, Game& g) {
+    Engine& e = *ctx.engine;
+    planes_spawn(e, g, dials_start(e, g, g.demo ? Position::Demo : g.stress ? Position::Stress : g.start));
+    if (g.front_door) open_title(e, g);
+    else run_begin(ctx, g);
+    music(ctx, g, false);
+    engine_hold(e, HoldLoading, false);
+}
+
+// A run: a fresh sim (but for the first, which has one), the plan's dials, the world row,
+// the ship and what it starts with.
+void run_begin(TickContext& ctx, Game& g) {
+    Engine& e = *ctx.engine;
+    if (g.runs++) clear_run(ctx, g);
+    g.arcade = g.plan.arcade;
+    g.stage_select = g.plan.stage_select;
+    g.start = g.plan.start;
+    g.demo_core_bomb = false;
+    g.pilot_v = vec2{0, 0};
+    g.shake = 0.0f;
+    Dials d = dials_start(e, g, g.demo ? Position::Demo : g.stress ? Position::Stress : g.start);
+    dials_log(d);
+    Stage s{};
+    stage_reset(s, g.stage);
+    Run run{};
+    run.eggs = kStartEggs;
+    run.next_extend = kFirstExtend;
+    run.bombs = kBaseBombs;
+    Rng r = Rng::seeded(0xa2cf1e5eedull, 1); // the sim's stream: patterns and drift, the same every run
+    g.world = ctx.write_kind(g_world_kind)->spawn(d, s, run, EggState{}, Chance{r.state, r.inc});
+    g.ship = ship_spawn(e, g, d);
+    for (u32 i = 0; i < d.options && i < kMaxOptions; ++i) option_add(ctx, g);
+    if (g.bench[0]) bench_spawn(ctx, g, d);
+    hud_shown(e, g, true);
+    g.mode = Mode::Run;
+    KV_INFO("arcfire", "run %u: %s, %s at %s", g.runs, g.arcade ? "arcade" : g.stage_select ? "stage select" : "a run", g.stage.name,
+            position_name(d.position));
+}
+
+// Phase PreSim (the boot system, which holds the writes), on a held tick: a switch asked
+// for, once its cover has closed.
+void flow_step(TickContext& ctx, Game& g) {
+    Engine& e = *ctx.engine;
+    if (g.next == Next::None || !g.next_ready || !ctx.paused) return;
+    Next next = g.next;
+    g.next = Next::None;
+    close_pause(e, g);
+    close_menu(e, g.title_screen);
+    close_menu(e, g.select_screen);
+    close_menu(e, g.difficulty_screen);
+    if (next == Next::Run) run_begin(ctx, g);
+    else {
+        clear_run(ctx, g);
+        open_title(e, g);
+        KV_INFO("arcfire", "the title");
+    }
+    music(ctx, g, false);
+    if (g.flow_cover) ui_cover_wait(e, g.flow_cover, false);
+    else engine_hold(e, HoldGame, false);
+    g.flow_cover = 0;
+}
+
+// The run is over (the demo at its end mark, the rest after the banner).
+void run_over(TickContext& ctx, Game& g) {
+    Engine& e = *ctx.engine;
+    if (g.again && !g.again_done) {
+        g.again_done = true;
+        KV_INFO("arcfire", "again: the run once more, from a fresh sim");
+        flow_request(e, g, Next::Run, false);
+    } else if (g.front_door) {
+        flow_request(e, g, Next::Title, true);
+    } else {
+        engine_request_quit(e);
+    }
+}
+
+// Phase PreSim, every tick (paused ones are when it matters): quit quits; pause opens the
+// pause menu over a run, or closes it.
+void pause(TickContext& ctx) {
+    static const u32 k_actions_id = ctx.resource_id("input.actions");
+    Game& g = ctx.state_as<Game>();
+    Engine& e = *ctx.engine;
+    const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
+    if (action_pressed(a, g.act_quit)) engine_request_quit(e);
+    if (!action_pressed(a, g.act_pause) || g.mode != Mode::Run || g.next != Next::None) return;
+    if (!g.confirm_screen.is_null()) { close_menu(e, g.confirm_screen); return; }
+    if (!g.pause_screen.is_null()) { close_pause(e, g); return; }
+    UiOpen o;
+    o.layer = 110;
+    o.enter.fx = UiFx::Fade;
+    g.pause_screen = ui_open(e, g.ui, "pause", o);
+    ui_set_text(e, g.pause_screen, "items/quit", g.front_door ? "QUIT TO TITLE" : "QUIT");
+    ui_focus(e, g.pause_screen, "items", "resume");
+    engine_pause(e, true);
+    KV_INFO("arcfire", "paused at tick %llu", (unsigned long long)e.clock.tick_count);
+}
+
+// What the menus say: an item chosen, a cancel.
+void on_ui(TickContext& ctx, Span<const UiEvent> events) {
+    Game& g = ctx.state_as<Game>();
+    Engine& e = *ctx.engine;
+    static const u64 k_select = name_intern("select").hash, k_cancel = name_intern("cancel").hash, k_back = name_intern("back").hash;
+    for (const UiEvent& ev : events) {
+        bool chose = ev.event == k_select, back = ev.event == k_cancel || ev.event == k_back;
+        const char* item = chose ? name_str(Name{ev.node}) : "";
+        if (!item) item = "";
+        if (ev.screen == g.title_screen && chose) {
+            if (!strcmp(item, "arcade")) {
+                g.plan = RunPlan{true, false, g.start};
+                flow_request(e, g, Next::Run, true);
+            } else if (!strcmp(item, "select")) {
+                g.select_screen = open_menu(e, g, "select", 112, "shoreline");
+                ui_set_visible(e, g.title_screen, "column", false); // one menu at a time shows
+            } else if (!strcmp(item, "quit")) {
+                engine_request_quit(e);
+            }
+        } else if (ev.screen == g.select_screen) {
+            if (back) {
+                close_menu(e, g.select_screen);
+                ui_set_visible(e, g.title_screen, "column", true);
+            } else if (chose) {
+                ui_model_set_str(e, "select_stage", "SHORELINE");
+                g.difficulty_screen = open_menu(e, g, "difficulty", 114, position_name((u32)g.start));
+                ui_set_visible(e, g.select_screen, "column", false);
+            }
+        } else if (ev.screen == g.difficulty_screen) {
+            if (back) {
+                close_menu(e, g.difficulty_screen);
+                ui_set_visible(e, g.select_screen, "column", true);
+            }
+            else if (chose) {
+                Position p = !strcmp(item, "easy") ? Position::Easy : !strcmp(item, "hard") ? Position::Hard : Position::Normal;
+                g.plan = RunPlan{false, true, p};
+                flow_request(e, g, Next::Run, true);
+            }
+        } else if (ev.screen == g.pause_screen && g.confirm_screen.is_null()) {
+            if (back || (chose && !strcmp(item, "resume"))) close_pause(e, g);
+            else if (chose && !strcmp(item, "quit")) {
+                if (!g.front_door) engine_request_quit(e);
+                else {
+                    ui_model_set_str(e, "confirm", "QUIT TO THE TITLE? THE RUN ENDS.");
+                    g.confirm_screen = open_menu(e, g, "confirm", 112, "no");
+                }
+            }
+        } else if (ev.screen == g.confirm_screen) {
+            if (chose && !strcmp(item, "yes")) flow_request(e, g, Next::Title, true);
+            else if (back || chose) close_menu(e, g.confirm_screen);
+        }
+    }
+}
+
+// A switch's cover has closed: the switch may happen (flow_step, on the next held tick).
+void on_covered(TickContext& ctx, Span<const UiCovered> covers) {
+    Game& g = ctx.state_as<Game>();
+    for (const UiCovered& c : covers)
+        if (c.cover == g.flow_cover) g.next_ready = true;
+}
+
+} // namespace kv::arcfire

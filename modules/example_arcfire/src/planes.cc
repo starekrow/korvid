@@ -76,20 +76,23 @@ void planes_spawn(Engine& e, Game& g, const Dials& d) {
     KV_INFO("arcfire", "planes: %u of them, %u tiles", shown, made);
 }
 
-// Phase Sim: the layers' offsets, from the scroll's speed (the planes) and the stage's
-// distance (the ground).
+// Phase Sim, every tick: the layers' offsets, from the scroll's speed (the planes) and the
+// stage's distance (the ground). Paused, nothing moves; but on the title, which holds the
+// sim, the sky goes by at the stage's speed over the map's first screen (cosmetic: the
+// offsets are the renderer's, never the sim's).
 void planes(TickContext& ctx) {
     static const u32 k_layers = ctx.resource_id("sprite.layers");
     Game& g = ctx.state_as<Game>();
     Span<const Stage> stage_row = ctx.read<Stage>(ARC_WORLD(Stage));
     Span<const Dials> dials_row = ctx.read<Dials>(ARC_WORLD(Dials));
-    if (!stage_row.len) return;
-    const Stage& st = stage_row[0];
-    const Dials& d = dials_row[0];
     SpriteLayers* layers = ctx.resource<SpriteLayers>(k_layers);
-    f32 ground = -map_clock(st) * kGroundRate;
+    bool title = g.mode == Mode::Title;
+    if (!title && (ctx.paused || !stage_row.len)) return;
+    f32 speed = title ? g.stage.speed : stage_row[0].speed;
+    f32 ground = title ? 0.0f : -map_clock(stage_row[0]) * kGroundRate;
 
-    if (d.scroll_rows) {
+    if (!title && dials_row[0].scroll_rows) {
+        const Stage& st = stage_row[0];
         // Slice 1's way, for measuring: every tile written every tick.
         Table* planes_table = ctx.write_kind(g_plane_kind);
         Span<Transform2> t = planes_table->rows_of<Transform2>();
@@ -111,7 +114,7 @@ void planes(TickContext& ctx) {
     for (u32 p = 0; p < KV_COUNTOF(k_planes); ++p) {
         f32 repeat = k_planes[p].full; // the texture's period, whatever the tiles' size
         f32 before = fmodf(g.plane_scrolled[p], repeat);
-        g.plane_scrolled[p] += st.speed * k_planes[p].rate;
+        g.plane_scrolled[p] += speed * k_planes[p].rate;
         f32 now = fmodf(g.plane_scrolled[p], repeat);
         layers->set(k_planes[p].layer, vec2{0.0f, -now}, now < before); // wrapped: the same picture, no sweep
     }

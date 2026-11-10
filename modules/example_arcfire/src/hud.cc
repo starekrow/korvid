@@ -1,7 +1,7 @@
 // example_arcfire: what the player sees around the field. The camera fits the field to
 // the window; the UI document (assets/ui/arcfire.ui.json) draws the side panels, the
-// score, the eggs, the pause screen, the restart's cover and the stage-clear banner. The
-// HUD is two calls a tick: model values from the world row and the counters.
+// score, the eggs, the restart's cover and the stage-clear banner; the menus are flow.cc's.
+// The HUD is two calls a tick: model values from the world row and the counters.
 #include "arcfire.h"
 #include "korvid/asset/scope.h"
 #include "korvid/core/log.h"
@@ -47,6 +47,13 @@ void hud_cover(Engine& e, Game& g, bool on) {
         ui_close(e, g.cover);
         g.cover = Handle{};
     }
+}
+
+// A run's numbers in the side panels, or (the title) the panels alone.
+void hud_shown(Engine& e, Game& g, bool on) {
+    ui_set_visible(e, g.hud, "left/info", on);
+    ui_set_visible(e, g.hud, "right/info", on);
+    g.hud_on = on;
 }
 
 // The bomb's flash: a white cover that closes in a moment and opens again, the sim not held.
@@ -103,29 +110,6 @@ void hud_stage_clear(Engine& e, Game& g, i64 bonus, const char* next) {
     g.clear_ticks = kClearTicks;
 }
 
-// Phase PreSim, every tick (paused ones are when it matters): pause toggles the pause
-// screen and the user hold; quit quits.
-void pause(TickContext& ctx) {
-    static const u32 k_actions_id = ctx.resource_id("input.actions");
-    Game& g = ctx.state_as<Game>();
-    Engine& e = *ctx.engine;
-    const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
-    if (action_pressed(a, g.act_quit)) engine_request_quit(e);
-    if (!action_pressed(a, g.act_pause) || !g.stage_ready) return;
-    if (g.pause_screen.is_null()) {
-        UiOpen o;
-        o.layer = 110;
-        o.input = false;
-        g.pause_screen = ui_open(e, g.ui, "pause", o);
-        engine_pause(e, true);
-        KV_INFO("arcfire", "paused at tick %llu", (unsigned long long)e.clock.tick_count);
-    } else {
-        ui_close(e, g.pause_screen);
-        g.pause_screen = Handle{};
-        engine_pause(e, false);
-    }
-}
-
 // Phase PostSim, every tick: the field's height fills the window (or its width, in a
 // window narrower than 3:4, so the field always shows whole); a shake, decaying. Only the
 // camera knows the window, and the camera is not sim state.
@@ -155,7 +139,7 @@ void hud(TickContext& ctx) {
     Engine& e = *ctx.engine;
     Span<const Run> run = ctx.read<Run>(ARC_WORLD(Run));
     Span<const Stage> stage_row = ctx.read<Stage>(ARC_WORLD(Stage));
-    ui_set_visible(e, g.hud, "dev", KV_DEV != 0); // the live counters the stress runs read (the screen is built once its document is in)
+    ui_set_visible(e, g.hud, "dev", KV_DEV != 0 && g.hud_on); // the live counters the stress runs read (the screen is built once its document is in)
     if (!run.len) return;
     const Run& r = run[0];
     ui_model_set_int(e, "score", r.score);

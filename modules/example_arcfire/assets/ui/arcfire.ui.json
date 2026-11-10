@@ -16,13 +16,20 @@
       "panel": "#0a0c18ff",
       "edge": "#262c58ff",
       "shade": "#00000aa0",
+      "veil": "#00000a58",
       "black": "#000000ff",
       "warn": "#ff20103a",
       "red": "#ff5040"
     },
     "images": {
       "egg": { "texture": "example_arcfire/made/eggs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 },
-      "bomb": { "texture": "example_arcfire/made/bombs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 }
+      "bomb": { "texture": "example_arcfire/made/bombs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 },
+      "cursor": { "texture": "example_arcfire/made/cursor.png", "rect": [0, 0, 32, 32], "scale": 0.75 }
+    },
+    "sounds": {
+      "move": "example_arcfire/sound/ui_move.ogg",
+      "select": "example_arcfire/sound/ui_select.ogg",
+      "cancel": "example_arcfire/sound/ui_cancel.ogg"
     }
   },
   "screens": {
@@ -70,14 +77,62 @@
                 { "type": "label", "name": "runners", "text": "RUNNERS {=runners}", "color": "dim" },
                 { "type": "label", "name": "deltas", "text": "DELTAS {=deltas}", "color": "dim" },
                 { "type": "label", "name": "pairs", "text": "PAIRS {=pairs}", "color": "dim" } ] } ] } ] },
+    "title": {
+      "type": "box", "name": "title", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "veil", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "offset": [0, -40], "gap": 28, "align": "center",
+          "children": [
+            { "type": "label", "name": "logo", "text": "{wave}ARCFIRE{/wave}", "color": "gold", "font_scale": 4 },
+            { "type": "label", "name": "tag", "text": "a bullet hell over Shoreline", "color": "dim" },
+            { "type": "box", "name": "gap", "size": [8, 24] },
+            { "type": "list", "name": "items", "gap": 14, "items": [
+              { "type": "label", "name": "arcade", "text": "ARCADE" },
+              { "type": "label", "name": "select", "text": "STAGE SELECT" },
+              { "type": "label", "name": "quit", "text": "QUIT" } ] },
+            { "type": "label", "name": "note", "text": "{=title_note}", "color": "cyan" } ] },
+        { "type": "label", "name": "footer", "anchor": "bottom", "offset": [0, -20], "text": "Built with Korvid Engine", "color": "dim" } ] },
+    "select": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 28, "align": "center",
+          "children": [
+            { "type": "label", "name": "heading", "text": "STAGE SELECT", "color": "gold", "font_scale": 2 },
+            { "type": "list", "name": "items", "gap": 14, "items": [
+              { "type": "label", "name": "shoreline", "text": "1  SHORELINE" },
+              { "type": "label", "name": "back", "text": "BACK", "event": "back" } ] } ] } ] },
+    "difficulty": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 28, "align": "center",
+          "children": [
+            { "type": "label", "name": "heading", "text": "{=select_stage}", "color": "gold", "font_scale": 2 },
+            { "type": "list", "name": "items", "gap": 14, "items": [
+              { "type": "label", "name": "easy", "text": "EASY" },
+              { "type": "label", "name": "normal", "text": "NORMAL" },
+              { "type": "label", "name": "hard", "text": "HARD" },
+              { "type": "label", "name": "back", "text": "BACK", "event": "back" } ] } ] } ] },
     "pause": {
       "type": "box", "name": "shade", "size": ["fill", "fill"],
       "children": [
         { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
-        { "type": "stack", "name": "column", "anchor": "center", "gap": 24, "align": "center",
+        { "type": "stack", "name": "column", "anchor": "center", "gap": 28, "align": "center",
           "children": [
-            { "type": "label", "name": "title", "text": "PAUSED", "color": "gold", "font_scale": 3 },
-            { "type": "label", "name": "hint", "text": "Escape or Start resumes, Q quits", "color": "dim" } ] } ] },
+            { "type": "label", "name": "heading", "text": "PAUSED", "color": "gold", "font_scale": 3 },
+            { "type": "list", "name": "items", "gap": 14, "items": [
+              { "type": "label", "name": "resume", "text": "RESUME" },
+              { "type": "label", "name": "quit", "text": "QUIT TO TITLE" } ] } ] } ] },
+    "confirm": {
+      "type": "box", "name": "shade", "size": ["fill", "fill"],
+      "children": [
+        { "type": "stack", "name": "column", "anchor": "center", "offset": [0, 160], "gap": 20, "align": "center",
+          "children": [
+            { "type": "label", "name": "question", "text": "{=confirm}", "color": "gold" },
+            { "type": "list", "name": "items", "gap": 12, "items": [
+              { "type": "label", "name": "no", "text": "NO" },
+              { "type": "label", "name": "yes", "text": "YES" } ] } ] } ] },
     "cover": {
       "type": "box", "name": "cover", "size": ["fill", "fill"],
       "children": [

@@ -61,7 +61,9 @@ void on_rammed(TickContext&, Span<const Rammed>);
 void on_graze(TickContext&, Span<const Graze>);
 void on_shell_hit(TickContext&, Span<const ShellHit>);
 void on_kill(TickContext&, Span<const Kill>);
-void pause(TickContext&);        // hud.cc
+void pause(TickContext&);        // flow.cc
+void on_ui(TickContext&, Span<const UiEvent>);
+void on_covered(TickContext&, Span<const UiCovered>);
 void camera(TickContext&);
 void hud(TickContext&);
 void stats_mark(TickContext&);   // stats.cc
@@ -203,7 +205,7 @@ constinit const InputActionDesc k_actions[] = {
 
 constinit const SystemDesc k_systems[] = {
     {.name = ".demo", .phase = Phase::Input, .fn = demo, .before = "input.sample", .main_thread = true},
-    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, tilemap.tile, audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, .particle, .shadow, .boom, tilemap.tile, audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
     // The chain's clock, the extends, a new round's dials: before the sim moves anything.
     {.name = ".scoring", .phase = Phase::PreSim, .fn = scoring, .writes = ".world.Run, .world.Stage, .world.Dials, audio.commands", .after = ".boot",
      .main_thread = true},
@@ -213,7 +215,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".scroll", .phase = Phase::Sim, .fn = scroll, .writes = ".world.Stage"},
     {.name = ".stage", .phase = Phase::Sim, .fn = stage, .reads = ".world.Dials, .world.Run", .writes = ".world.Stage, .formation, .boss, .part, audio.commands", .after = ".scroll"},
     {.name = ".planes", .phase = Phase::Sim, .fn = planes, .reads = ".world.Stage, .world.Dials, .plane.Plane, .plane.Sprite",
-     .writes = "sprite.layers, .plane"},
+     .writes = "sprite.layers, .plane", .runs = RunWhen::Always},
     {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "^.option.Transform2, input.actions, .world.Dials",
      .writes = ".ship.Transform2, .ship.Ship, .ship.Sprite, .shot, .ring.Sprite, .mark.Sprite, audio.commands"},
     // Storm's bolts steer by the enemies as the tick began (^), before anything moves them.
@@ -281,6 +283,8 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_stage_end", KV_ON(StageEnd, on_stage_end), .reads = ".world.Dials", .writes = ".world.Run", .after = ".on_ship_died"},
     {.name = ".on_run_over", KV_ON(RunOver, on_run_over)},
     {.name = ".on_exit", KV_ON(ExitRequested, on_exit)},
+    {.name = ".on_ui", KV_ON(UiEvent, on_ui)},
+    {.name = ".on_covered", KV_ON(UiCovered, on_covered)},
     {.name = ".on_spawned", KV_ON(Spawned, on_spawned), .reads = ".air.Transform2, .air.Sprite"},
 };
 
@@ -313,18 +317,22 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     g->autoplay = frameloop_flag(e, "--autoplay");
     g->fx = Rng::seeded(0xa2cf12e, 3);
     if (const char* bench = frameloop_option(e, "--bench")) snprintf(g->bench, sizeof g->bench, "%s", bench);
-    // The run's shape: arcade unless a stage is named; the demo, a stress run and the bench
-    // are runs of their own.
+    // The run's shape: run plainly, the title; a flag that names a run goes straight into
+    // it: arcade unless a stage is named, and the demo, a stress run and the bench are runs
+    // of their own. --difficulty is where arcade or the stage starts.
+    bool stage_named = false;
     if (const char* name = frameloop_option(e, "--stage")) {
         snprintf(g->stage_name, sizeof g->stage_name, "%s", name);
-        g->stage_select = true;
+        stage_named = true;
     }
-    g->arcade = !g->stage_select && !g->demo && !g->stress && !g->bench[0];
+    g->front_door = !stage_named && !g->demo && !g->stress && !g->autoplay && !g->bench[0] && !frameloop_flag(e, "--arcade");
+    g->again = frameloop_flag(e, "--again");
     if (const char* diff = frameloop_option(e, "--difficulty")) {
         if (!strcmp(diff, "easy")) g->start = Position::Easy;
         else if (!strcmp(diff, "hard")) g->start = Position::Hard;
         else if (strcmp(diff, "normal")) KV_WARN("arcfire", "--difficulty %s: easy, normal or hard; Normal it is", diff);
     }
+    g->plan = RunPlan{!stage_named && !g->demo && !g->stress && !g->bench[0], stage_named, g->start};
     if (!patterns_load(e, *g)) return false;
     for (u32 i = 0; i < TEX_COUNT; ++i) {
         g->textures[i] = asset_load_texture(e, k_texture_paths[i]);
@@ -339,7 +347,8 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     char stage_path[96];
     snprintf(stage_path, sizeof stage_path, "example_arcfire/stages/%s.stage.json", g->stage_name);
     g->stage_blob = asset_load_blob(e, stage_path);
-    KV_INFO("arcfire", "%s: %s at %s", g->arcade ? "arcade" : g->stage_select ? "stage select" : "run", g->stage_name, position_name((u32)g->start));
+    KV_INFO("arcfire", "%s: %s at %s", g->front_door ? "the title" : g->plan.arcade ? "arcade" : g->plan.stage_select ? "stage select" : "run",
+            g->stage_name, position_name((u32)g->start));
     engine_hold(e, HoldLoading, true);
     hud_open(e, *g);
     KV_INFO("arcfire", "Arrows or WASD (or a pad's stick) fly, Z or Space (South) fires, Shift (West) focuses, Escape (Start) pauses, Q quits.");

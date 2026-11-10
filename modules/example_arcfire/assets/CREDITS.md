@@ -88,6 +88,7 @@ Drawn by `tools/make_art.py` on 2026-11-09, Korvid's, under the repository's lic
 | `made/clouds_low.png` | the low clouds, 512 x 512 seamless: cumulus drawn by the script in the pack's whites and greys (and, darkened by the game, their shadows) |
 | `made/clouds_high.png` | the high wisps, 512 x 512 seamless: tapered strokes in the same whites, half transparent |
 | `made/beam.png` | the Beam's strip, 16 x 64: a white core in cyan with a deep blue edge and pulses along it |
+| `made/cursor.png` | the menus' cursor: Kenney's player ship (Pixel Shmup `Tilemap/ships_packed.png`, column 0, row 0) turned to point right |
 | `made/items.png` | the items' badges, 16 px: Spread, Beam, Storm and Lance (their letters on their colors), power and option |
 | `made/bombs.png` | the HUD's bomb pips: Kenney's shield tile (`kenney/tiles.png`, column 2, row 2), dimmed for a bomb spent and as it is for one in hand |
 
@@ -122,6 +123,9 @@ license file is beside this file as `LICENSE-Kenney-SciFiSounds.txt` and
 | `sound/egg_open.ogg` | Impact Sounds `Audio/impactMetal_heavy_000.ogg` |
 | `sound/egg_bloom.ogg` | Sci-Fi Sounds `Audio/forceField_002.ogg` |
 | `sound/warning.ogg` | Sci-Fi Sounds `Audio/computerNoise_000.ogg` |
+| `sound/ui_move.ogg` | Sci-Fi Sounds `Audio/laserRetro_001.ogg` |
+| `sound/ui_select.ogg` | Sci-Fi Sounds `Audio/forceField_001.ogg` |
+| `sound/ui_cancel.ogg` | Sci-Fi Sounds `Audio/doorClose_001.ogg` |
 | `LICENSE-Kenney-SciFiSounds.txt`, `LICENSE-Kenney-ImpactSounds.txt` | each archive's `License.txt` |
 
 ## 5 Chiptunes (Action)

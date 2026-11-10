@@ -296,6 +296,12 @@ struct Stats {
     u32 sprites, deltas, pairs_tested, colliders, groups;
 };
 
+// The program around a run (flow.cc): the title, a run; a switch asked for; what a run
+// starts as.
+enum class Mode : u32 { Loading, Title, Run };
+enum class Next : u32 { None, Run, Title };
+struct RunPlan { bool arcade = true, stage_select = false; Position start = Position::Normal; };
+
 struct Game {
     Handle   textures[TEX_COUNT];
     Handle   alpha[TEX_COUNT];    // render.material: each texture, alpha blended
@@ -338,12 +344,25 @@ struct Game {
     Handle   ui;                  // ui.doc
     Handle   hud, pause_screen, cover, clear_label;
     u32      clear_ticks = 0;     // the "stage clear" label's time left
+    bool     hud_on = true;       // the side panels' numbers shown (not on the title)
     u32      act_move = 0, act_shot = 0, act_focus = 0, act_bomb = 0, act_pause = 0, act_quit = 0;
     bool     demo = false, autoplay = false, stress = false;
     // The run's shape (scoring.cc): arcade goes round again a difficulty up and ends after
-    // Hard; a stage select (--stage) plays its one stage. `start` is the difficulty asked for.
+    // Hard; a stage select plays its one stage. `start` is the difficulty asked for. Set from
+    // the plan when a run begins (flow.cc).
     bool     arcade = false, stage_select = false;
     Position start = Position::Normal;
+    // The program around the runs (flow.cc): where it is, a switch asked for and its cover,
+    // the next run's plan, the menus' screens.
+    Mode     mode = Mode::Loading;
+    Next     next = Next::None;
+    bool     next_ready = false;
+    u32      flow_cover = 0;
+    RunPlan  plan;
+    bool     front_door = false;          // run plainly: the title; a flag that names a run skips it
+    bool     again = false, again_done = false; // --again: a run once more from a fresh sim
+    u32      runs = 0;
+    Handle   title_screen, select_screen, difficulty_screen, confirm_screen;
     char     stage_name[32] = "shoreline";
     bool     demo_core_bomb = false;  // the demo's bomb in the carrier's core phase, once
     vec2     pilot_v{0, 0};           // the ship's velocity by the pilots' last stick (pilot.cc)
@@ -441,6 +460,16 @@ u64    seed_of(Handle h, u64 tick, u32 salt);
 
 // The stage (stage.cc).
 void   stage_reset(Stage& s, const StageDef& def);
+void   bench_spawn(TickContext& ctx, Game& g, const Dials& d); // --bench: the one emitter
+
+// The flow (flow.cc): the assets are in; a run begins (a fresh sim but for the first); a
+// switch to a run or the title, behind a cover or a hold of the game's; it happens; a run is
+// over.
+void   flow_ready(TickContext& ctx, Game& g);
+void   run_begin(TickContext& ctx, Game& g);
+void   flow_request(Engine& e, Game& g, Next next, bool cover);
+void   flow_step(TickContext& ctx, Game& g);
+void   run_over(TickContext& ctx, Game& g);
 
 // The run's shape (scoring.cc; the score's rules are scoring.h's): whether a run at this
 // position goes round again after the stage, and at which; the results line.
@@ -470,6 +499,7 @@ Collider2 item_collider();
 // The HUD (hud.cc).
 void   hud_open(Engine& e, Game& g);
 void   hud_cover(Engine& e, Game& g, bool on);
+void   hud_shown(Engine& e, Game& g, bool on); // the side panels' numbers, or the panels alone
 void   hud_stage_clear(Engine& e, Game& g, i64 bonus, const char* next); // next: the round's difficulty, or null: the run is over
 void   hud_flash(Engine& e);
 void   hud_boss(Engine& e, Game& g, const char* title, i32 hp, i32 total); // title null: the bar goes
