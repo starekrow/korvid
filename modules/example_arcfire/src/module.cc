@@ -91,8 +91,8 @@ constinit const ComponentDesc k_components[] = {
 };
 
 // ---- kinds ---------------------------------------------------------------------------------------
-// Capacities are the master PRD's; the stress dial asks for more bullets than the kind
-// holds until the engine's capacity work (the improvements note).
+// Capacity is address space (rows commit as they are used), so the bullet kinds are sized
+// for the stress dial; --capacity KIND=N goes past them for a measurement.
 constinit const KindDesc k_kinds[] = {
     {.name = ".world",    .components = "Dials, Stage, Run, EggState, Chance", .capacity = 1, .id = &g_world_kind},
     {.name = ".plane",    .components = "Transform2, Sprite, Plane", .capacity = 4096, .id = &g_plane_kind, .cosmetic = true},
@@ -103,10 +103,10 @@ constinit const KindDesc k_kinds[] = {
     {.name = ".shot",     .components = "Transform2, Sprite, Velocity, Collider2, Shot", .capacity = 2048, .id = &g_shot_kind},
     {.name = ".air",      .components = "Transform2, Sprite, Collider2, Health, Mover, Emitter, Runner", .capacity = 256, .id = &g_air_kind},
     {.name = ".ground",   .components = "Transform2, Sprite, Collider2, Health, Emitter, Ground, Runner", .capacity = 256, .id = &g_ground_kind},
-    {.name = ".bullet",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet", .capacity = 16384, .id = &g_bullet_kind},
+    {.name = ".bullet",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet", .capacity = 65536, .id = &g_bullet_kind},
     // Bullets that run a program of their own (a needle that waits, a seed that bursts).
     {.name = ".active",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet, Runner", .capacity = 8192, .id = &g_active_kind},
-    {.name = ".particle", .components = "Transform2, Sprite, Velocity, Particle", .capacity = 16384, .id = &g_particle_kind, .cosmetic = true},
+    {.name = ".particle", .components = "Transform2, Sprite, Velocity, Particle", .capacity = 32768, .id = &g_particle_kind, .cosmetic = true},
     {.name = ".egg",      .components = "Transform2, Sprite, EggBody", .capacity = 1, .id = &g_egg_kind},
     {.name = ".shell",    .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_shell_kind},
 };

@@ -73,3 +73,83 @@ bullets system: 0.18 ms (all), 0.12 ms (t1). The renderer grew its sprite tables
 remarked dirty, so the next frame uploaded the table whole); no frame ring growth. 8.8M
 rows uploaded over 2706 frames (3,252 a frame, 356 KB). The broadphase is the first thing
 that will break at slice 2's density; the extract and the upload are not yet visible.
+
+## Slice 2 — Bullet hell
+
+Entries 2026-11-09, `linux-dev`, `--prof-report`, the same machine and window as slice 1.
+The stage is Shoreline on the pattern library; `--stress` is rank 24 from M4 on (see the
+first entry). Zone times are per-frame averages over the run's report windows, "worst" the
+worst window's; `render` is still almost all the wait for vsync.
+
+**M4. How much the library makes.** At rank 1 the densest moment of the stage is a few
+thousand bullets; the stage's quiet stretches keep the mean low. Peaks by rank over 45
+seconds at the stress formations (x3, half spacing): rank 1, 1,761; 2, 3,452; 4, 5,384; 8,
+8,499; 16, 17,714; 32, 36,411. At rank 32 the cross turret's stretch holds 20,000 to 36,000
+for about seven seconds (ticks 2,100 to 2,500). Twenty thousand sustained is rank 24 or so,
+so that is the stress position now (the PRD's R12 said 1).
+
+**M4. The broadphase, before and after** (`--stress --dial rank=4`, all threads; the
+same run, deterministically, both times). Before (one grid, pairs tested before masks):
+5,421 colliders at peak, **643,172 pairs tested** at peak and 82,175 on average; the
+broadphase 0.69 ms a frame on average and 4.5 ms in its worst window. After (grouped by
+layer and mask, `collision/src/pairs.cc`): the same colliders, **256 pairs tested** at peak
+and 34 on average; 0.12 ms a frame, 1.0 ms worst. At rank 2 before: 243,565 peak, 2.5 ms
+worst; at rank 1, 74,091 and 1.4 ms. What is left is linear: filing 24,000 colliders into
+grids and the diff. Slice 1's heavy run (6,470 colliders) tested 1.65M pairs; at 23,884
+colliders now the peak is 949.
+
+**M4. Stress at three thread counts** (`--stress`, rank 24, 45 s). Bullets peak 23,860,
+mean 4,558, up to 800 spawned in a tick; active bullets (with a program) peak 819; runners
+stepped peak 828; sprites peak 25,700; Set deltas peak 25,526, mean 4,785.
+
+| | tick | patterns | bullets | broadphase | extract | record |
+|---|---|---|---|---|---|---|
+| 1 thread | 1.00 (16.4 worst) | 0.053 | 0.104 | 0.26 (1.8) | 0.28 (4.5) | 0.41 |
+| 8 threads | 1.12 (14.2) | 0.057 | 0.065 | 0.28 (1.6) | 0.31 (4.5) | 0.37 |
+| 16 threads | 1.22 (14.8) | 0.059 | 0.152 | 0.28 (1.8) | 0.31 (4.7) | 0.36 |
+
+ms a frame, worst window in brackets. The whole tick is about a millisecond at 24,000
+bullets and threads do not help it: the pool's fan-out costs about what it saves at this
+size (the bullets system is fastest at 8, slowest at 16; everything else is serial or too
+small to split). The runners cost nothing worth the name (0.06 ms for ~800). The extract's
+average is a quarter of the tick, under the PRD's third, but its worst window is 4.5 ms,
+which is the next thing to look at (the improvements note). Uploads: 6,400 rows a frame on
+average (700 KB at 112 bytes).
+
+**M4. Toward sixty thousand** (`--stress --dial rank=56`). Bullets peak 58,808, mean
+9,112, up to 1,824 spawned in a tick, under the bullet kind's 65,536. Tick 1.78 ms a frame
+(14.3 worst window); extract 0.53 (8.2 worst); broadphase 0.40 (2.3); bullets 0.37;
+patterns 0.06 (2.2 worst); record 0.65. 13,200 rows uploaded a frame on average (1.5 MB).
+The frame ring, sized from the sprite-rows hint (21 MB), never grew.
+
+**M4. The renderer's growth** (`--stress --sprite-rows 4096`, against the game's hint of
+98,304). With the small hint the sprite tables grew three times as the cross filled the
+field: 4,096 to 8,192 rows at frame 1,978 (4,446 live), to 16,384 at 2,023, to 32,768 at
+2,094, each remarking every row dirty. One frame near the second growth took 31.8 ms; the
+run's other 20-plus ms frames were spread through it, so the growths are not clearly worse
+than vsync's own misses at this size. The frame ring grew from 8 to 16 MB in the same
+stretch, and that found a bug: a ring that grew mid-frame left the frame's earlier bytes
+counted against the new buffer, so its `used` wrapped below zero at release (the run's
+"ring peak" read 18,014,398,509,481,983 KB). Fixed in M4; the hint now sizes the ring too.
+
+**M4. Each pattern alone** (`--bench NAME --dial rank=1`, 12 s, one emitter looping).
+
+| pattern | bullets peak | mean | active peak |
+|---|---|---|---|
+| aimed | 21 | 17 | 0 |
+| aimed_burst | 21 | 15 | 0 |
+| ring | 167 | 125 | 0 |
+| spiral | 120 | 91 | 0 |
+| rain | 102 | 71 | 0 |
+| needles | 25 | 17 | 25 |
+| wave | 83 | 61 | 83 |
+| split | 81 | 59 | 2 |
+| cross | 113 | 83 | 0 |
+| homing | 15 | 10 | 15 |
+
+A runner is 288 bytes (`BmlRunner`); at stress's ~800 runners that is 230 KB of hashed
+state, and the 24,000 plain bullets carry none of it.
+
+**M4. Normal under the bot** (`--autoplay`, the minute). Bullets peak 161, mean 23; no
+deaths, 12 grazes, 57 kills. (The run's fps dropped to 47 after the window lost focus at
+tick 294: the compositor's throttling, not the game.)

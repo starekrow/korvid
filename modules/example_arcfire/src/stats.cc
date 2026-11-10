@@ -50,7 +50,7 @@ void stats(TickContext& ctx) {
     s.deltas = 0;
     if (Array<SpriteDelta>* d = sprite_deltas(e))
         for (u32 i = g.last_delta_len; i < d->len; ++i) s.deltas += (*d)[i].kind == SpriteDeltaKind::Set;
-    if (const CollisionStats* cs = collision_stats(e)) { s.pairs_tested = cs->tested; s.colliders = cs->colliders; s.cell = cs->cell; }
+    if (const CollisionStats* cs = collision_stats(e)) { s.pairs_tested = cs->tested; s.colliders = cs->colliders; s.groups = cs->groups; }
     for (u32 k = 0; k < KV_COUNTOF(s.rows) && k < e.tables.len; ++k) s.rows[k] = e.tables[k].live();
     if (ctx.paused || !g.stage_ready) return;
 
@@ -74,9 +74,9 @@ void stats(TickContext& ctx) {
     if (g.next_report == 0.0) g.next_report = now + every;
     if (now < g.next_report) return;
     g.next_report += every;
-    KV_INFO("arcfire", "tick %llu: %u bullets (%u active, +%u -%u), %u runners, %u sprites, %u deltas, %u colliders, %u pairs tested (cell %.0f), %u air, %u ground, %u particles",
+    KV_INFO("arcfire", "tick %llu: %u bullets (%u active, +%u -%u), %u runners, %u sprites, %u deltas, %u colliders, %u pairs tested (%u groups), %u air, %u ground, %u particles",
             (unsigned long long)ctx.tick, s.bullets, s.actives, s.bullets_spawned, s.bullets_destroyed, s.runners, s.sprites, s.deltas, s.colliders, s.pairs_tested,
-            (f64)s.cell, engine_table(e, g_air_kind)->live(), engine_table(e, g_ground_kind)->live(), engine_table(e, g_particle_kind)->live());
+            s.groups, engine_table(e, g_air_kind)->live(), engine_table(e, g_ground_kind)->live(), engine_table(e, g_particle_kind)->live());
 }
 
 void stats_summary(Game& g) {

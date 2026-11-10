@@ -50,6 +50,7 @@
               "children": [
                 { "type": "label", "name": "sprites", "text": "SPRITES {=sprites}", "color": "dim" },
                 { "type": "label", "name": "bullets", "text": "BULLETS {=bullets}", "color": "dim" },
+                { "type": "label", "name": "runners", "text": "RUNNERS {=runners}", "color": "dim" },
                 { "type": "label", "name": "deltas", "text": "DELTAS {=deltas}", "color": "dim" },
                 { "type": "label", "name": "pairs", "text": "PAIRS {=pairs}", "color": "dim" } ] } ] } ] },
     "pause": {

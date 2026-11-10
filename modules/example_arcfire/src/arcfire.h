@@ -156,8 +156,7 @@ struct Stats {
     u32 rows[16];          // live rows per kind, by kind id (stats.cc fills the ones it reports)
     u32 bullets, bullets_spawned, bullets_destroyed;
     u32 actives, runners, fires; // bullets that run programs; runners stepped; fires this tick
-    u32 sprites, deltas, pairs_tested, colliders;
-    f32 cell;
+    u32 sprites, deltas, pairs_tested, colliders, groups;
 };
 
 struct Game {

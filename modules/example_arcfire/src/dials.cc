@@ -46,7 +46,7 @@ Dials dials_for(Position p) {
     case Position::Normal: break;
     case Position::Demo: d.loops = 0; break; // the demo ends at the stage's end
     case Position::Stress:
-        d.rank = 1.0f;
+        d.rank = 24.0f; // the patterns' densest at 1 is a few thousand bullets; 24 holds twenty thousand through the cross
         d.formation_count = 3.0f;
         d.formation_spacing = 0.5f;
         d.particles = 24;

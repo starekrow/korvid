@@ -15,6 +15,7 @@ constinit const kv::FrameLoopConfig k_config = {
     .height = 720,
     .exit_on_escape = false, // Escape pauses
     .clear_color = {0.0f, 0.0f, 0.0f, 1.0f},
+    .sprite_rows = 98304, // the bullet kinds and the particles at their capacities, and the rest: no growth mid-run
     .flags   = k_flags,
     .options = k_options,
 };

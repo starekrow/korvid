@@ -118,6 +118,7 @@ void hud(TickContext& ctx) {
     ui_model_set_str(e, "distance", text);
     ui_model_set_int(e, "sprites", g.stats.sprites);
     ui_model_set_int(e, "bullets", g.stats.bullets);
+    ui_model_set_int(e, "runners", g.stats.runners);
     ui_model_set_int(e, "deltas", g.stats.deltas);
     ui_model_set_int(e, "pairs", g.stats.pairs_tested);
     if (g.clear_ticks && !ctx.paused && --g.clear_ticks == 0) {

@@ -363,3 +363,6 @@ Each leaves the game building, running and hashing.
   gain a `Runner` beside `Emitter`, which keeps its name as the binding (which pattern,
   where it starts, its state). R7's "same components" is that much different. A runner's
   seed is its entity and the tick, not the world's stream, so runners need nothing shared.
+- (M4, measured.) The library at rank 1 is a few thousand bullets at the densest; twenty
+  thousand sustained needs rank 24 (the cross turret's stretch holds 20,000 to 36,000 for
+  seven seconds at rank 32). R12's Stress position is rank 24, not 1.

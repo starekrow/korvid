@@ -185,10 +185,9 @@ void on_stage_end(TickContext& ctx, Span<const StageEnd> ends) {
         KV_INFO("arcfire", "stage end: loop %u at tick %llu, score %lld, %u kills, %u grazes, %u deaths, %u restarts", se.loops,
                 (unsigned long long)ctx.tick, (long long)r.score, r.kills, r.grazes, r.deaths, r.restarts);
         r.stage_score = r.score;
-        // The demo ends here. The quit lands at the frame's end, and a frame may hold more
-        // ticks than this one: the hold makes the rest paused ones, so every run's last
+        // The demo ends here; the engine runs no tick after a quit, so every run's last
         // hashed tick is this one.
-        if (g.demo) { engine_hold(*ctx.engine, HoldGame, true); engine_request_quit(*ctx.engine); }
+        if (g.demo) engine_request_quit(*ctx.engine);
         else hud_stage_clear(*ctx.engine, g);
     }
 }

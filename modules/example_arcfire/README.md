@@ -41,7 +41,7 @@ The ways it flies itself:
 - `--autoplay` puts the bot on the stick at Normal: it holds fire, sidesteps the bullets
   whose lines would pass within 30 units, keeps off the air enemies and the walls, and
   otherwise lines up under the nearest enemy.
-- `--stress` turns the dials to their stress position: rank 1, three times the
+- `--stress` turns the dials to their stress position: rank 24, three times the
   formations at half the spacing, four times the sparks, the planes in 128-unit tiles,
   twice the enemy health, the bot flying an invulnerable ship, the stage looping.
 - `--bench NAME` fires one pattern of the library from a fixed emitter at the top of the
