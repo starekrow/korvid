@@ -292,3 +292,19 @@ Audio in the run: 24 voices at peak, 177 starts merged, nothing stolen or droppe
 speed), their shadows (the same tiles darkened, at the same rate), high wisps (2.1 times),
 each a plane on a layer of its own, 12 still tiles in all and three layer offsets a tick.
 The demo's hash is unchanged (`e078b2f13df8fa11`): planes are cosmetic.
+
+**After slice 3: the GPU** (`--spike-hunt --prof-report`, the new `gpu` line; a Radeon 780M,
+integrated, RADV). Normal under the bot: 0.43 ms a GPU frame (0.50 worst), sort 0.19, draw
+0.23, overdraw 4.3 (the sea, the land and decoration layers, the clouds and their shadows).
+Stress, its first 30 s: 0.67 ms, draw 0.45. Rank 56 at its peak (43,987 bullets, 62,378
+sprites): 3.3 ms (4.1 worst), sort 0.69, draw 2.37, overdraw 29. After the peak the sort
+stays at 0.5 ms with 1,500 bullets left: it works over the table's high-water rows. The
+GPU is nowhere near a frame's budget; the frames that miss vsync are the CPU's or the
+compositor's. Timings were also checked in a trace: every GPU frame starts 0.1 to 0.9 ms
+after its recording began on the CPU, so the calibration lines the tracks up.
+
+**After slice 3: the plane density dial** cut the picture smaller instead of into more
+tiles (stress's 8 showed the clouds an eighth their size). Now a tile at density n shows
+its 1/n cell of the texture on one grid, the picture the same at any density (12 pixels of
+388,800 differ between 1 and 8, in the shots), and the scroll wraps by the texture's period.
+Density 32 is 3,648 tiles over three planes, within the plane kind's 4,096.

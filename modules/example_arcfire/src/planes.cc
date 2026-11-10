@@ -3,7 +3,8 @@
 // a stage showing the ones it names) and the ground map (three layers of still tiles) all
 // scroll by the renderer's layer offset (sprite/layers.h), each at its own rate: one
 // value a layer a tick, interpolated between ticks, never a Set delta. A plane's offset
-// wraps by a whole tile (the tiles repeat, so the jump is invisible and sent as a snap); the
+// wraps by its texture's period (the picture repeats, so the jump is invisible and sent as
+// a snap); the
 // ground's is the stage's distance, so the map moves exactly as the ground rows do, and it
 // snaps back when the distance does (a loop, a restart).
 //
@@ -36,7 +37,11 @@ constinit const PlaneDesc k_planes[kPlaneCount] = {
 };
 constexpr f32 kGroundRate = 1.0f;  // the ground moves at the stage's speed
 
-f32 plane_tile(const Dials& d, u32 p) { return k_planes[p].full / (f32)(d.plane_density ? d.plane_density : 1); }
+// The dial `plane_density` cuts each plane's picture into more tiles (n x n to a repeat of
+// its texture), for measuring what a plane of many tiles costs; the picture keeps its
+// scale: each tile shows its cell of the texture.
+u32 plane_cuts(const Dials& d) { return d.plane_density ? d.plane_density : 1; }
+f32 plane_tile(const Dials& d, u32 p) { return k_planes[p].full / (f32)plane_cuts(d); }
 
 } // namespace
 
@@ -46,15 +51,25 @@ void planes_spawn(Engine& e, Game& g, const Dials& d) {
     for (u32 p = 0; p < KV_COUNTOF(k_planes); ++p) {
         if (!(g.stage.planes & (1u << p))) continue;
         ++shown;
+        const PlaneDesc& pd = k_planes[p];
+        u32 n = plane_cuts(d);
         f32 tile = plane_tile(d, p);
-        // Enough to cover the field and its offset, and a row more for the scroll.
-        u32 cols = (u32)ceilf((kFieldW + 2.0f * fabsf(k_planes[p].offset.x)) / tile) + 1;
-        u32 rows = (u32)ceilf(kFieldH / tile) + 1;
+        // On one grid whatever the cut (the texture's origin at x = -full/2, the field's
+        // bottom), so the picture is the same at any density: the columns that cover the
+        // field and its offset, and up the field and a whole repeat more, which the scroll
+        // wraps by (whole repeats, so a tile moved up by all of them shows the same).
+        f32 origin = -0.5f * pd.full;
+        i32 first = (i32)floorf((-0.5f * kFieldW - fabsf(pd.offset.x) - origin) / tile);
+        i32 last = (i32)ceilf((0.5f * kFieldW + fabsf(pd.offset.x) - origin) / tile);
+        u32 rows = n * (u32)ceilf((kFieldH + pd.full) / pd.full);
         for (u32 r = 0; r < rows; ++r)
-            for (u32 c = 0; c < cols; ++c) {
-                point2 at{((f32)c - (f32)(cols - 1) * 0.5f) * tile, kFieldBottom + tile * 0.5f + (f32)r * tile};
-                at += k_planes[p].offset;
-                Sprite s = sprite_of(g, k_planes[p].tex, rect2_unit(), vec2{tile, tile}, k_planes[p].layer, k_planes[p].tint);
+            for (i32 k = first; k <= last; ++k) {
+                point2 at{origin + ((f32)k + 0.5f) * tile, kFieldBottom + ((f32)r + 0.5f) * tile};
+                at += pd.offset;
+                // Its cell of the texture: up the world is up the picture (uv rows run down).
+                u32 col = (u32)(((k % (i32)n) + (i32)n) % (i32)n);
+                rect2 uv{(f32)col / (f32)n, (f32)(n - 1 - r % n) / (f32)n, 1.0f / (f32)n, 1.0f / (f32)n};
+                Sprite s = sprite_of(g, pd.tex, uv, vec2{tile, tile}, pd.layer, pd.tint);
                 if (!planes->spawn(transform2_at(at), s, Plane{k_planes[p].rate, tile, r, rows}).is_null()) ++made;
             }
     }
@@ -94,10 +109,10 @@ void planes(TickContext& ctx) {
     }
 
     for (u32 p = 0; p < KV_COUNTOF(k_planes); ++p) {
-        f32 tile = plane_tile(d, p);
-        f32 before = fmodf(g.plane_scrolled[p], tile);
+        f32 repeat = k_planes[p].full; // the texture's period, whatever the tiles' size
+        f32 before = fmodf(g.plane_scrolled[p], repeat);
         g.plane_scrolled[p] += st.speed * k_planes[p].rate;
-        f32 now = fmodf(g.plane_scrolled[p], tile);
+        f32 now = fmodf(g.plane_scrolled[p], repeat);
         layers->set(k_planes[p].layer, vec2{0.0f, -now}, now < before); // wrapped: the same picture, no sweep
     }
     bool jumped = ground > g.ground_offset; // the distance went back: a loop or a restart
