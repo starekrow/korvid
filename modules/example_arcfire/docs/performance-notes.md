@@ -267,3 +267,23 @@ extracts are the linear ones: 1.89 ms at stress either way, 2.92 ms at rank 56 w
 the hint and 2.89 with it. The growth spikes were the dev build's own fills and its
 pages-per-allocation, not the copy. The hint stays for plain dev runs; measurements of
 spikes from here on say whether they were taken hunting.
+
+**M5. A boss fight's cost** (the demo through the carrier, `--spike-hunt`, a `--profile`
+trace read tick by tick). The tick's median is 0.30 ms before the carrier (ticks 3500 to
+5000), 0.30 in its turrets' phase and 0.28 in its core's; the p99 0.89, 0.81, 0.65. The
+boss's own system costs 0.002 ms a tick, `collision.compose` 0.004, the broadphase 0.009
+with the hull's body and seven parts in its groups, the patterns 0.002. A boss is a few
+rows among a few hundred: it is the bullets it fires that cost, and at Normal there are
+not many. The demo hashes the same with `--spike-hunt` as without it, every tick (no
+read of memory the fills would have hidden).
+
+**M5. The bot at Normal** (`--autoplay`, vulnerable, 430 s real time, 23,179 ticks). It
+does not reach the carrier. Each attempt it dies three times, from about 1,500 to 2,400
+ticks after the start (the islands' turrets and tanks over the opening's popcorn), and
+restarts: seven restarts in the run, never a bomb (at Normal 40 bullets never close in at
+once, which is when it bombs). Against the bosses it has been measured invulnerable (M3):
+the carrier's core open 31 to 38 s into the fight and the carrier dead at 43 s; the
+battleship's guns down at 35 to 70 s, its deck rarely before its time runs out. Clearing
+Shoreline at Normal is slice 4's; the rule's two holes are plain: it never bombs to save
+itself, and it dodges more than it shoots (a third of a volley's damage at a boss).
+Audio in the run: 24 voices at peak, 177 starts merged, nothing stolen or dropped.

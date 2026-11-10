@@ -445,8 +445,10 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
             }
         engine_config.capacities = Span<const KindCapacity>(g_capacities, g_capacity_count);
     }
-    if (dev_spike_hunting() && KV_DEV)
+#if KV_DEV
+    if (dev_spike_hunting())
         KV_INFO("frameloop", "spike hunt: no memory fills or poison, no guard pages, no event emitters noted; checks, counters and the profiler as ever");
+#endif
     if (!engine_init(engine, kv_module_list(), engine_config)) {
         names_shutdown();
         mem_shutdown();

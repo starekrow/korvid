@@ -64,7 +64,10 @@ The ways it flies itself:
 Every mode logs the game's counters beside the frame loop's fps line (bullets, sprites,
 the extract's Set deltas this tick, the broadphase's colliders and the pairs it tested)
 and a summary with the peaks and means at the exit. Dev builds show the same counters in
-the right panel. The measurements are in `docs/performance-notes.md`.
+the right panel. The measurements are in `docs/performance-notes.md`; for timings, add the
+frame loop's `--spike-hunt` (a dev build without its memory fills and guard pages, whose
+spikes are its own), and to run a long mode faster, `--cli-stdin` with `rate 4` typed in
+(the sim at four times wall speed, no tick changed).
 
 ## How it is built
 
