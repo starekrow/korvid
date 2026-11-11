@@ -1,18 +1,20 @@
 # inflate
 
-Deflate decompression and CRC-32 for the rest of the engine: zip entries in packs, PNG
-image data, compressed Tiled layers. It is miniz's `tinfl` (MIT, vendored and pinned in
-`src/vendor/`) behind a small Korvid API, and the reason the engine no longer links the
-system's zlib.
+Deflate decompression, compression and CRC-32 for the rest of the engine: zip entries in
+packs, PNG image data both ways, compressed Tiled layers. It is miniz's `tinfl` and
+`tdefl` (MIT, vendored and pinned in `src/vendor/`) behind a small Korvid API, and the
+reason the engine no longer links the system's zlib.
 
 ## How it works
 
 `src/inflate.cc` includes the vendored `miniz.c` once with everything but the
-decompressor and `mz_crc32` configured out (no compression, no zlib-style API, no archive
+decompressor, the compressor and `mz_crc32` configured out (no zlib-style API, no archive
 code, no stdio, no time, no malloc), then defines the API on top. Nothing of miniz is
 visible outside that file. tinfl decodes a whole stream in one call into a buffer the
 caller sized; it keeps its 11 KB of tables on the stack for the one-call forms and in
-an `InflateStream` for the streaming one, and never allocates.
+an `InflateStream` for the streaming one, and never allocates. tdefl compresses a whole
+input in one call into a buffer the caller sized (`deflate_bound` always holds it), with
+its 320 KB of state from the caller too: the image module's PNG writer is its user.
 
 Each format records its uncompressed size (a zip entry's header, a PNG's width and
 height, a gzip trailer, a Tiled layer's cell count), so the caller allocates the output
@@ -53,6 +55,8 @@ Header `korvid/inflate/inflate.h`:
 | `crc32(crc, data, len)` | function | the zip/gzip/PNG CRC-32; start at 0, feed the result back to continue |
 | `InflateStream`, `inflate_stream_init`, `inflate_stream` | record, functions | input in pieces, output in one buffer |
 | `KV_INFLATE_STATE_BYTES` | constant | room for tinfl's state, checked against it at compile time |
+| `deflate_zlib(src, src_len, dst, dst_cap, state, level)` | function | zlib-framed deflate (what `inflate_zlib` reads) into the caller's buffer; level 0 (stored) to 10 (smallest), 6 by default; the bytes written, or 0 if they did not fit |
+| `deflate_bound(src_len)`, `KV_DEFLATE_STATE_BYTES` | function, constant | an output size that always holds; room for tdefl's state (320 KB, from an allocator) |
 
 Not an engine module: no state, nothing registered. Link it by naming `inflate` in
 `deps`.
@@ -69,5 +73,5 @@ Not an engine module: no state, nothing registered. Link it by naming `inflate` 
 
 ## Not in this module
 
-Compression (tdefl is in the vendored file and configured out; a cooker that needs it
-turns it on in a module of its own), zstd, preset dictionaries, and zlib's API.
+Streaming compression (one call over the whole input only), zstd, preset dictionaries,
+and zlib's API.

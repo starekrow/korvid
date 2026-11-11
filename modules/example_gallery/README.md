@@ -15,8 +15,8 @@ pixels.
 
     build/macos-dev/bin/example_gallery --out DIR      # nine PPMs into DIR (a dev or debug build: ship cannot screenshot)
     build/macos-dev/bin/example_gallery --scene sort   # one scene
-    tools/ppm_compare.py DIR modules/example_gallery/references/metal    # against the committed references
-    tools/ppm_compare.py DIR --png OUT                 # a set of PNGs, to keep as references
+    build/macos-dev/bin/picture compare DIR modules/example_gallery/references/metal    # against the committed references
+    build/macos-dev/bin/picture png DIR OUT            # a set of PNGs, to keep as references
 
 | Scene | What it draws |
 | --- | --- |
@@ -30,7 +30,8 @@ pixels.
 
 `references/metal/` holds the pictures renderer-metal draws on an M3 Max (macOS 26.7), as
 PNGs. A Vulkan set from Linux or Windows goes beside it as `references/vulkan/`; the first
-comparison of the two fixes `tools/ppm_compare.py`'s tolerance, which is not loosened after.
+comparison of the two fixes the picture tool's tolerance (`modules/tool_picture`), which is not
+loosened after.
 
 ## Files
 

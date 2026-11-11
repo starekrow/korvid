@@ -1,6 +1,6 @@
 #include "korvid/asset/texture.h"
 #include "korvid/asset/module.h"
-#include "korvid/asset/png.h"
+#include "korvid/image/png.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"

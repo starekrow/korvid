@@ -1,6 +1,7 @@
-// tinfl, once, and the Korvid API over it. Only the decompressor and mz_crc32 are built:
-// everything that compresses, allocates, touches files or knows zip archives is
-// configured out, so nothing of miniz reaches the rest of the engine but this file.
+// tinfl and tdefl, once, and the Korvid API over them. The decompressor, the compressor
+// (for writers: PNG) and mz_crc32 are built: everything that allocates, touches files or
+// knows zip archives is configured out, so nothing of miniz reaches the rest of the engine
+// but this file.
 #include "korvid/inflate/inflate.h"
 #include <string.h>
 
@@ -23,7 +24,6 @@
 #endif
 #define MINIZ_NO_STDIO
 #define MINIZ_NO_TIME
-#define MINIZ_NO_DEFLATE_APIS
 #define MINIZ_NO_ARCHIVE_APIS
 #define MINIZ_NO_ZLIB_APIS
 #define MINIZ_NO_MALLOC
@@ -144,6 +144,47 @@ InflateOut inflate_stream(InflateStream& s, const void* src, usize src_len, bool
     r.produced = out;
     if (r.result == InflateResult::Ok) s.done = true;
     return r;
+}
+
+// ---- deflate -------------------------------------------------------------------------------
+
+static_assert(sizeof(tdefl_compressor) <= KV_DEFLATE_STATE_BYTES, "KV_DEFLATE_STATE_BYTES is too small for tdefl");
+
+namespace {
+
+struct DeflateSink {
+    u8*   dst;
+    usize cap;
+    usize len;
+    bool  overflow;
+};
+
+mz_bool deflate_put(const void* buf, int len, void* user) {
+    DeflateSink& s = *(DeflateSink*)user;
+    if (len < 0 || s.len + (usize)len > s.cap) { s.overflow = true; return MZ_FALSE; }
+    memcpy(s.dst + s.len, buf, (usize)len);
+    s.len += (usize)len;
+    return MZ_TRUE;
+}
+
+} // namespace
+
+// Stored blocks are the worst case: five bytes of header per 65,535 of data, plus the
+// zlib header and trailer; the slack covers tdefl's own block boundaries.
+usize deflate_bound(usize src_len) { return src_len + (src_len / 16383 + 1) * 5 + 64; }
+
+usize deflate_zlib(const void* src, usize src_len, void* dst, usize dst_cap, void* state, int level) {
+    if (!state || (!src && src_len)) return 0;
+    if (level < 0) level = 0;
+    if (level > 10) level = 10;
+    DeflateSink sink{(u8*)dst, dst_cap, 0, false};
+    // zlib framing (a 15-bit window, the default strategy), as inflate_zlib reads it.
+    int flags = (int)tdefl_create_comp_flags_from_zip_params(level, 15, MZ_DEFAULT_STRATEGY);
+    tdefl_compressor* d = (tdefl_compressor*)state;
+    if (tdefl_init(d, deflate_put, &sink, flags) != TDEFL_STATUS_OKAY) return 0;
+    tdefl_status st = tdefl_compress_buffer(d, src, src_len, TDEFL_FINISH);
+    if (st != TDEFL_STATUS_DONE || sink.overflow) return 0;
+    return sink.len;
 }
 
 } // namespace kv

@@ -125,7 +125,7 @@ messages; 96 to 121 fps with vsync on a 120 Hz panel, 350 to 500 without.
   profiler's gpu track get the frame, the sort and the draw; Apple GPUs have no statistics
   counters, so invocations and overdraw stay zero. Orbit at 2560x1440: 1.7 ms a frame, the
   sort 0.25, the draws and the post pass 1.45.
-- **The gallery** (`example_gallery`, `tools/ppm_compare.py`) draws nine fixed scenes at
+- **The gallery** (`example_gallery`, compared by the picture tool, `tool_picture`) draws nine fixed scenes at
   960x540 pixels on any display and compares two sets within a tolerance; the Metal set is
   committed as PNGs (`modules/example_gallery/references/metal/`). Run to run on one GPU the
   pictures are identical; the tolerance waits for the first Vulkan set.

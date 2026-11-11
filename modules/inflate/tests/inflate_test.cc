@@ -2,6 +2,7 @@
 // fail (a cut stream, a small buffer, flipped bits, a bad header, a bad checksum); the
 // streaming form fed one byte at a time and in pieces; CRC-32's check value.
 #include "korvid/inflate/inflate.h"
+#include "korvid/core/memory.h"
 #include "korvid/core/test.h"
 #include "streams.h"
 #include <string.h>
@@ -94,4 +95,28 @@ void test_inflate(kv::TestCtx& c) {
     KV_CHECK(c, crc32(0, "123456789", 9) == 0xCBF43926u);
     KV_CHECK(c, crc32(crc32(0, "1234", 4), "56789", 5) == 0xCBF43926u && crc32(0, "", 0) == 0);
     KV_CHECK(c, strcmp(inflate_result_name(InflateResult::BadChecksum), "bad checksum") == 0);
+
+    // Deflate: what it writes, inflate_zlib reads back exactly, at every level; the text
+    // runs shrink, stored blocks do not; a buffer too small says so with 0; the bound
+    // holds the worst case (incompressible bytes, stored).
+    void* state = alloc_in(mem_general(), KV_DEFLATE_STATE_BYTES, 8);
+    usize cap = deflate_bound(kPlainLen);
+    u8* packed = (u8*)alloc_in(mem_general(), cap, 8);
+    KV_CHECK(c, state && packed);
+    usize sizes[3] = {};
+    const int levels[3] = {0, 6, 10};
+    for (u32 l = 0; l < 3; ++l) {
+        usize n = deflate_zlib(g_plain, kPlainLen, packed, cap, state, levels[l]);
+        sizes[l] = n;
+        memset(g_out, 0, sizeof g_out);
+        InflateOut back = inflate_zlib(packed, n, g_out, kPlainLen);
+        KV_CHECK(c, n > 0 && back.result == InflateResult::Ok && back.produced == kPlainLen && memcmp(g_out, g_plain, kPlainLen) == 0);
+    }
+    KV_CHECK(c, sizes[0] > kPlainLen && sizes[1] < kPlainLen && sizes[2] <= sizes[1]);
+    KV_CHECK(c, deflate_zlib(g_plain, kPlainLen, packed, 100, state, 6) == 0);
+    KV_CHECK(c, deflate_zlib(g_plain + 2800, 3000, packed, deflate_bound(3000), state, 0) > 3000); // the noise, stored
+    usize empty = deflate_zlib(nullptr, 0, packed, cap, state, 6);
+    KV_CHECK(c, empty > 0 && inflate_zlib(packed, empty, g_out, 1).result == InflateResult::Ok);
+    free_in(mem_general(), packed, cap);
+    free_in(mem_general(), state, KV_DEFLATE_STATE_BYTES);
 }

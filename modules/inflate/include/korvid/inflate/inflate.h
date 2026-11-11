@@ -57,4 +57,14 @@ struct InflateStream {
 void       inflate_stream_init(InflateStream& s, bool zlib, void* dst, usize dst_cap);
 InflateOut inflate_stream(InflateStream& s, const void* src, usize src_len, bool more);
 
+// Compression, for writers (a PNG's IDAT): miniz's tdefl, zlib framing (RFC 1950: what
+// inflate_zlib reads). As above, nothing is allocated here: the caller supplies the
+// compressor's state, KV_DEFLATE_STATE_BYTES (about 320 KB: from an allocator, not the
+// stack), and the output, which deflate_bound(src_len) bytes always hold. `level` is 0
+// (stored blocks) to 10 (smallest); 6 is zlib's default. Returns the bytes written, or 0
+// when they did not fit in dst_cap.
+constexpr usize KV_DEFLATE_STATE_BYTES = 320 * 1024; // tdefl_compressor, checked at compile time
+usize deflate_bound(usize src_len);
+usize deflate_zlib(const void* src, usize src_len, void* dst, usize dst_cap, void* state, int level = 6);
+
 } // namespace kv

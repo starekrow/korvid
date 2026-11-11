@@ -1,8 +1,9 @@
 // The renderer's features in fixed scenes, each drawn and written as a screenshot
-// (gallery_<scene>.ppm), then compared with another backend's by tools/ppm_compare.py. It
-// drives the render interface directly: a window, a renderer, a stream of sprite deltas
-// built here, and RenderViews with chosen interpolation points. No sim, no frame loop, no
-// libm in any position, so two backends' pictures differ only where their GPUs do.
+// (gallery_<scene>.ppm), then compared with another backend's by the picture tool
+// (tool_picture). It drives the render interface directly: a window, a renderer, a stream
+// of sprite deltas built here, and RenderViews with chosen interpolation points. No sim,
+// no frame loop, no libm in any position, so two backends' pictures differ only where
+// their GPUs do.
 //
 // The window is opened at whatever size in window units makes the framebuffer exactly
 // 960x540 pixels on this display (a Retina Mac: 480x270; a 1x Linux desktop: 960x540), so

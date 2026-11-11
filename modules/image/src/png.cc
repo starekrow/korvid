@@ -1,4 +1,4 @@
-#include "korvid/asset/png.h"
+#include "korvid/image/png.h"
 #include "korvid/core/arena.h"
 #include "korvid/inflate/inflate.h"
 #include <string.h>
@@ -141,6 +141,93 @@ bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, 
     out.width  = w;
     out.height = h;
     out.rgba   = rgba;
+    return true;
+}
+
+// ---- encoding ------------------------------------------------------------------------------
+
+namespace {
+
+void put_be32(Array<u8>& out, u32 v) {
+    u8 b[4] = {(u8)(v >> 24), (u8)(v >> 16), (u8)(v >> 8), (u8)v};
+    for (u8 x : b) out.push(x);
+}
+
+// One chunk: length, tag, body, and the CRC-32 of tag and body.
+void put_chunk(Array<u8>& out, const char* tag, const u8* body, u32 len) {
+    put_be32(out, len);
+    for (u32 i = 0; i < 4; ++i) out.push((u8)tag[i]);
+    if (len) { u8* at = out.push_n(len); memcpy(at, body, len); }
+    put_be32(out, crc32(crc32(0, tag, 4), body, len));
+}
+
+// Row `line` filtered by `type` into `dst`; `prev` is the row above (zeros for the first).
+void filter_row(u8 type, const u8* line, const u8* prev, u32 stride, u32 bpp, u8* dst) {
+    for (u32 i = 0; i < stride; ++i) {
+        int a = i >= bpp ? line[i - bpp] : 0, b = prev[i], c = i >= bpp ? prev[i - bpp] : 0;
+        int pred = 0;
+        switch (type) {
+        case 1: pred = a; break;
+        case 2: pred = b; break;
+        case 3: pred = (a + b) >> 1; break;
+        case 4: pred = paeth(a, b, c); break;
+        default: break;
+        }
+        dst[i] = (u8)(line[i] - pred);
+    }
+}
+
+} // namespace
+
+bool png_encode(const u8* pixels, u32 width, u32 height, u32 channels, Array<u8>& out, const char** error) {
+    if (channels != 3 && channels != 4) return fail(error, "only RGB or RGBA");
+    if (width == 0 || height == 0 || width > (1u << 24) || height > (1u << 24)) return fail(error, "bad size");
+    u64 stride64 = (u64)width * channels, raw64 = (stride64 + 1) * height;
+    if (raw64 > (1ull << 31)) return fail(error, "too large");
+    u32 stride = (u32)stride64;
+    usize raw_len = (usize)raw64;
+
+    MemScope scope;
+    Arena& scratch = *scope.arena;
+    u8* raw = arena_push_n<u8>(scratch, (u32)raw_len);
+    u8* trial = arena_push_n<u8>(scratch, stride * 5);
+    u8* zeros = arena_push_n<u8>(scratch, stride);
+    void* state = arena_alloc(scratch, KV_DEFLATE_STATE_BYTES, 8);
+    usize cap = deflate_bound(raw_len);
+    u8* packed = (u8*)arena_alloc(scratch, cap, 8);
+    if (!raw || !trial || !zeros || !state || !packed) return fail(error, "out of scratch");
+    memset(zeros, 0, stride);
+
+    // Each row by whichever filter leaves the smallest sum of absolute (signed) bytes.
+    for (u32 y = 0; y < height; ++y) {
+        const u8* line = pixels + (usize)y * stride;
+        const u8* prev = y ? line - stride : zeros;
+        u32 best = 0;
+        u64 best_sum = ~0ull;
+        for (u8 t = 0; t < 5; ++t) {
+            u8* dst = trial + (usize)t * stride;
+            filter_row(t, line, prev, stride, channels, dst);
+            u64 sum = 0;
+            for (u32 i = 0; i < stride; ++i) sum += dst[i] < 128 ? dst[i] : 256 - dst[i];
+            if (sum < best_sum) { best_sum = sum; best = t; }
+        }
+        u8* row = raw + (usize)y * (stride + 1);
+        row[0] = (u8)best;
+        memcpy(row + 1, trial + (usize)best * stride, stride);
+    }
+    usize n = deflate_zlib(raw, raw_len, packed, cap, state, 10);
+    if (n == 0 || n > 0x7FFFFFFFu) return fail(error, "deflate failed");
+
+    static const u8 sig[8] = {0x89, 'P', 'N', 'G', 13, 10, 26, 10};
+    u8 ihdr[13] = {(u8)(width >> 24), (u8)(width >> 16), (u8)(width >> 8), (u8)width,
+                   (u8)(height >> 24), (u8)(height >> 16), (u8)(height >> 8), (u8)height,
+                   8, (u8)(channels == 4 ? 6 : 2), 0, 0, 0};
+    out.reserve(out.len + 8 + 25 + 12 + (u32)n + 12);
+    u8* at = out.push_n(8);
+    memcpy(at, sig, 8);
+    put_chunk(out, "IHDR", ihdr, 13);
+    put_chunk(out, "IDAT", packed, (u32)n);
+    put_chunk(out, "IEND", nullptr, 0);
     return true;
 }
 

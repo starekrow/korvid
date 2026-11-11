@@ -21,7 +21,7 @@ root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
 root "windows" {
   modules   = { "core", "math", "inflate", "pack", "platform", "platform_hid", "cli", "tool", "tool_kpack",
                 "render", "asset", "sprite", "scene", "text", "anim", "collision", "tilemap", "level",
-                "platform_audio", "audio", "renderer-vulkan", "frameloop", "save", "ui", "xml", "bulletml",
+                "platform_audio", "audio", "renderer-vulkan", "frameloop", "save", "ui", "xml", "bulletml", "image", "tool_picture",
                 "example_window", "example_testbed", "example_stones", "example_rocks", "example_arcanum",
                 "example_cpukiller", "example_arcfire", "example_gallery" },
   tests     = true,
@@ -32,7 +32,7 @@ root "windows" {
 -- renderer-metal there, and the root holds every module the windows root does, and
 -- example_sockit2m.
 root "macos" {
-  modules   = { "core", "math", "inflate", "pack", "xml", "platform", "cli", "tool", "tool_kpack", "save",
+  modules   = { "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "tool", "tool_kpack", "tool_picture", "save",
                 "bulletml", "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
                 "collision", "tilemap", "level", "audio", "ui", "frameloop", "renderer-metal",
                 "example_sockit2m", "example_window", "example_testbed", "example_stones", "example_cpukiller",
