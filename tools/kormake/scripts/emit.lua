@@ -258,7 +258,9 @@ function M.run(c, g, opts)
           local tool, implicit = tool_path(t.instance)
           local cmd = r.command or util.fail("rule '%s' of '%s' has no command", r.name, t.instance.module.name)
           -- Ninja quotes $in and $out itself when a path needs it.
-          cmd = cmd:gsub("%%{tool}", (util.ninja_escape(program(tool)):gsub("%%", "%%%%"))):gsub("%%{in}", "$in")
+          -- The program in the host's spelling: Windows' CreateProcess takes "host/bin/x.exe"
+          -- as a bare name to search for, and finds "host\bin\x.exe" where it is.
+          cmd = cmd:gsub("%%{tool}", (util.ninja_escape(program(util.native(tool))):gsub("%%", "%%%%"))):gsub("%%{in}", "$in")
             :gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp")
             :gsub("%%{shader_includes}", (table.concat(shader_includes, " "):gsub("%%", "%%%%")))
           local rsp = r.per == "exe" and "\n  rspfile = $out.rsp\n  rspfile_content = $in" or ""

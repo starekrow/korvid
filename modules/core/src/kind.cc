@@ -442,13 +442,13 @@ int Table::describe(Handle h, char* out, usize cap) const {
         int n = 0;
         char* dst = out + (at < cap ? at : cap);
         usize room = at < cap ? cap - at : 0;
-        const char* sep = k ? ", " : " @props{";
+        const char* lead = k ? ", " : " @props{";
         switch (p.value.type) {
-        case PropType::Int:    n = snprintf(dst, room, "%s%s=%lld", sep, name_str(p.key), (long long)p.value.i); break;
-        case PropType::Float:  n = snprintf(dst, room, "%s%s=%g", sep, name_str(p.key), p.value.f); break;
-        case PropType::Bool:   n = snprintf(dst, room, "%s%s=%s", sep, name_str(p.key), p.value.i ? "true" : "false"); break;
-        case PropType::String: n = snprintf(dst, room, "%s%s=\"%s\"", sep, name_str(p.key), name_str(Name{p.value.bits})); break;
-        case PropType::Handle: n = snprintf(dst, room, "%s%s=%s", sep, name_str(p.key), kind_name(Handle{p.value.bits})); break;
+        case PropType::Int:    n = snprintf(dst, room, "%s%s=%lld", lead, name_str(p.key), (long long)p.value.i); break;
+        case PropType::Float:  n = snprintf(dst, room, "%s%s=%g", lead, name_str(p.key), p.value.f); break;
+        case PropType::Bool:   n = snprintf(dst, room, "%s%s=%s", lead, name_str(p.key), p.value.i ? "true" : "false"); break;
+        case PropType::String: n = snprintf(dst, room, "%s%s=\"%s\"", lead, name_str(p.key), name_str(Name{p.value.bits})); break;
+        case PropType::Handle: n = snprintf(dst, room, "%s%s=%s", lead, name_str(p.key), kind_name(Handle{p.value.bits})); break;
         case PropType::None:   break;
         }
         if (n > 0) at += (usize)n;
