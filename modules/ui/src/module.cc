@@ -372,7 +372,7 @@ void ui_draw(TickContext& ctx) {
     if (!lead || lead->pixel) s.scale = floorf(s.scale) >= 1.0f ? floorf(s.scale) : 1.0f;
 
     s.quads.clear();
-    UiStats st;
+    UiStats st{};
     st.scale = s.scale;
     for (UiScreen* sc : order) {
         ++st.screens;

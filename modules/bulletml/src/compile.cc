@@ -34,10 +34,10 @@ struct Compiler {
 
     Compiler(BmlLibrary& l, const XmlDoc& d, char* w, usize cap) : lib(l), doc(d), why(w), why_cap(cap) {}
 
-    bool fail(const XmlNode* at, const char* fmt, ...) {
+    bool fail(const XmlNode* where, const char* fmt, ...) {
         if (!ok) return false;
         ok = false;
-        int n = snprintf(why, why_cap, "line %u, <%s>: ", at ? at->line : 0, at ? at->name : "?");
+        int n = snprintf(why, why_cap, "line %u, <%s>: ", where ? where->line : 0, where ? where->name : "?");
         va_list ap;
         va_start(ap, fmt);
         if (n >= 0 && (usize)n < why_cap) vsnprintf(why + n, why_cap - (usize)n, fmt, ap);

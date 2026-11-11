@@ -4,6 +4,7 @@
 #include "korvid/core/arena.h"
 #include "korvid/core/test.h"
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace {

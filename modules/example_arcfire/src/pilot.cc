@@ -188,11 +188,11 @@ Plan steer_rule(Engine& e, const Game& g, f32 clear, u32 want) {
         if (!b || (b->state != (u32)BossState::Holding && b->state != (u32)BossState::Stomping)) continue;
         const BossDef& def = g.bosses[b->def];
         const PartDef& pd = def.parts[pp[i].index];
-        point2 at = px[i].position;
-        if (pd.armored_until > b->phase || at.y < p.y + 60.0f) continue;
+        point2 pos = px[i].position;
+        if (pd.armored_until > b->phase || pos.y < p.y + 60.0f) continue;
         bool ends = (def.phases[b->phase].ends >> pp[i].index) & 1u;
-        if ((ends_phase && !ends) || (ends == ends_phase && at.y >= lowest)) continue;
-        lowest = at.y;
+        if ((ends_phase && !ends) || (ends == ends_phase && pos.y >= lowest)) continue;
+        lowest = pos.y;
         ends_phase = ends;
         // Spread's innermost shot leaves beside the nose and opens by its angle: at the
         // part's height it is this far out, so stand that far to whichever side is nearer
@@ -202,9 +202,9 @@ Plan steer_rule(Engine& e, const Game& g, f32 clear, u32 want) {
         if (ship->weapon == WeaponSpread) {
             f32 mx = 0.0f, ang = 0.0f;
             spread_inner(ship->power, true, &mx, &ang);
-            off = mx + (at.y - p.y - kMuzzleUp) * tanf(ang);
+            off = mx + (pos.y - p.y - kMuzzleUp) * tanf(ang);
         }
-        aim_x = fabsf(at.x - off - p.x) < fabsf(at.x + off - p.x) ? at.x - off : at.x + off;
+        aim_x = fabsf(pos.x - off - p.x) < fabsf(pos.x + off - p.x) ? pos.x - off : pos.x + off;
         nearest = 0.0f;
         at_part = true;
     }

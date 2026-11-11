@@ -21,9 +21,9 @@ root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
 root "windows" {
   modules   = { "core", "math", "inflate", "pack", "platform", "platform_hid", "cli", "tool", "tool_kpack",
                 "render", "asset", "sprite", "scene", "text", "anim", "collision", "tilemap", "level",
-                "platform_audio", "audio", "renderer-vulkan", "frameloop",
+                "platform_audio", "audio", "renderer-vulkan", "frameloop", "save", "ui", "xml", "bulletml",
                 "example_window", "example_testbed", "example_stones", "example_rocks", "example_arcanum",
-                "example_cpukiller" },
+                "example_cpukiller", "example_arcfire" },
   tests     = true,
   platforms = { "windows" },
 }

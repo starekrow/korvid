@@ -239,9 +239,9 @@ void test_anim(kv::TestCtx& c) {
                 AnimClip back;
                 const char* werr = nullptr;
                 u32 wat = 0;
-                bool parsed = anim_parse((const char*)w.out.data, w.out.len, mem_general(), back, &werr, &wat);
-                KV_CHECK(c, parsed);
-                bool same = parsed && back.duration == src->duration && back.loop == src->loop && back.tracks.len == src->tracks.len && back.keys.len == src->keys.len;
+                bool ok = anim_parse((const char*)w.out.data, w.out.len, mem_general(), back, &werr, &wat);
+                KV_CHECK(c, ok);
+                bool same = ok && back.duration == src->duration && back.loop == src->loop && back.tracks.len == src->tracks.len && back.keys.len == src->keys.len;
                 for (u32 t = 0; same && t < back.tracks.len; ++t)
                     same = back.tracks[t].channel == src->tracks[t].channel && back.tracks[t].interp == src->tracks[t].interp && back.tracks[t].count == src->tracks[t].count;
                 for (u32 k = 0; same && k < back.keys.len; ++k)
@@ -275,7 +275,7 @@ void test_anim(kv::TestCtx& c) {
                        "hit":  { "cells": [[0, 4]], "duration": 0.3, "loop": "once", "events": [[0.1, "hit"]] } },
             "sets": { "walk": { "down": "walk.down" } } })";
         AnimSheetParsed p;
-        const char* why = nullptr;
+        why = nullptr;
         MemScope scope;
         KV_CHECK(c, anim_sheet_parse(sheet, strlen(sheet), 64, 112, mem_scratch(), p, &why));
         KV_CHECK(c, !strcmp(p.texture, "t/hero.png") && p.cols == 4 && p.rows == 7 && p.cell_size.x == 16 && p.clips.len == 4 && p.sets.len == 1);

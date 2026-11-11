@@ -166,7 +166,7 @@ void test_heap(kv::TestCtx& c) {
     engine_shutdown(e);
     KV_CHECK(c, mem_heap_used(small) == 0);
     // What is live now includes the process's name table, which the engine's names grew.
-    u32 live_after_engine = mem_stats().live_allocs;
+    u64 live_after_engine = mem_stats().live_allocs;
 #if KV_DEV
     KV_CHECK(c, mem_stats_category(blobs->tag.category).committed_bytes == 0);
 #endif

@@ -173,6 +173,9 @@ Then, from any prompt:
     tools\kormake\bin\windows\kormake.exe test windows-dev        # runs them
     build\windows-dev\bin\example_window.exe                      # a window, its events, and the frame loop's gaps
 
+kormake.exe carries its scripts inside it, so run `bootstrap.bat` again after a pull that
+changes `tools\kormake\scripts\`; a stale one stops at `gen` on a field it does not know.
+
 Known platform issue: on GNOME Wayland, SDL3 falls back to libdecor for the window frame
 (GNOME has no server-side decorations). libdecor repaints the frame synchronously inside
 every xdg configure, and Mutter sends one configure per pointer motion during a mouse
