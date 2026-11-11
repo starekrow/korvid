@@ -296,23 +296,45 @@ struct Page {
     u32     used;        // atomic: live blocks
     u8      cls;
     u8      in_full;     // on the owner's full list rather than its partial list
-    u8      pad[6];
+    u8      pad[2];
+    u32     nstate;      // atomic: where the page stands with its owner's notify stack (below)
     void*   local_free;  // owner only
     void*   remote_free; // atomic stack, pushed by other threads
     Page*   next;        // owner's list, or the free or orphan stack
     Page*   prev;        // owner's list
-    Notify* notify;      // the owner's notify stacks; null while orphaned
+    Notify* notify;      // atomic: the owner's notify stacks; null while orphaned
     Page*   notify_next; // link in a notify stack
 };
 static_assert(sizeof(Page) <= kPageHeader, "the page header fits before the first block");
 
 // Where other threads tell an owner that a full page of its has blocks again: the first
 // remote free into an empty remote list pushes the page here. One per thread, kept for
-// the life of the process so a push racing a thread's exit lands somewhere harmless.
+// the life of the process so a push racing a thread's exit lands somewhere harmless; a
+// thread's stacks are read by that thread alone, and by no one once it exits.
 struct Notify {
     Page*   head[kClasses]; // atomic stacks
     Notify* all;            // every Notify ever made, for shutdown
 };
+
+// A page is on at most one notify stack, once. It has one link, so a second push while it
+// is still on the stack rewrites the link and cuts off everything below it, whose pages
+// then keep their freed blocks out of their owner's reach for good. `nstate` holds which of
+// these the page is in (low bits) and a generation (the rest), bumped by every push:
+//   idle      on no stack; the next remote free that finds the remote list empty pushes it
+//   pushing   a remote freer has claimed the push and is making it
+//   queued    on its owner's stack; the owner sets it idle as it pops it
+//   adopting  an orphan being taken by a new owner; no push starts
+// A pusher's last step moves pushing to queued only if the generation is still its own, so
+// a pop that came first leaves the page idle, and a late pusher never takes a later push's
+// state for its own.
+constexpr u32 kNotifyIdle     = 0;
+constexpr u32 kNotifyPushing  = 1;
+constexpr u32 kNotifyQueued   = 2;
+constexpr u32 kNotifyAdopting = 3;
+constexpr u32 kNotifyMask     = 3;
+constexpr u32 kNotifyGen      = 4;
+
+inline u32 nstate_with(u32 s, u32 state) { return (s & ~kNotifyMask) | state; }
 Notify* g_notifies = nullptr; // under g_page_lock
 
 u8*   g_region       = nullptr;
@@ -362,6 +384,9 @@ Notify* my_notify() {
     return c.notify;
 }
 
+// A fresh page (zeroed by the OS), or one from the free pool, which is idle and which no
+// remote freer can reach (it has no live blocks; see small_free). nstate keeps its
+// generation.
 void page_init(Page* p, u8 cls) {
     u32 stride = (u32)((sizeof(Header) + kClassSize[cls] + 15) & ~15u);
     p->magic = kPageMagic; p->owner = thread_id(); p->stride = stride;
@@ -369,21 +394,48 @@ void page_init(Page* p, u8 cls) {
     p->fresh = 0; p->used = 0; p->cls = cls; p->in_full = 0;
     p->local_free = p->remote_free = nullptr;
     p->next = p->prev = nullptr;
-    p->notify = my_notify();
     p->notify_next = nullptr;
+    kv::atomic_store(&p->notify, my_notify(), kv::MO_RELEASE);
+}
+
+// An orphan for this thread. Its notify state is still its dead owner's: queued on a stack
+// no one will read again, or being pushed there by a free that began before the owner
+// exited. Wait out such a push (a few instructions on another thread), close the page to
+// new ones, point it at this thread's stacks, and open it again. Its link on the dead stack
+// is abandoned, which is safe because no one walks that stack again.
+void page_adopt(Page* p) {
+    u32 s = kv::atomic_load(&p->nstate, kv::MO_ACQUIRE);
+    for (;;) {
+        if ((s & kNotifyMask) == kNotifyPushing) { s = kv::atomic_load(&p->nstate, kv::MO_ACQUIRE); continue; }
+        if (kv::atomic_compare_exchange(&p->nstate, &s, nstate_with(s, kNotifyAdopting), false, kv::MO_ACQ_REL, kv::MO_ACQUIRE)) break;
+    }
+    p->notify_next = nullptr;
+    kv::atomic_store(&p->notify, my_notify(), kv::MO_RELEASE);
+    kv::atomic_store(&p->nstate, nstate_with(s, kNotifyIdle), kv::MO_RELEASE);
 }
 
 struct CacheGuard {
     ~CacheGuard() {
-        // Whatever the thread still owns waits for another thread to adopt it.
+        // Whatever the thread still owns waits for another thread to adopt it. A free that
+        // reads the page's notify after this pushes nowhere; one that read it before pushes
+        // onto this thread's stacks, which page_adopt then abandons.
         lock_pages();
         for (u32 c = 0; c < kClasses; ++c) {
             Page* lists[2] = {t_cache.partial[c], t_cache.full[c]};
             for (Page* p : lists)
-                while (p) { Page* n = p->next; p->owner = 0; p->notify = nullptr; p->prev = nullptr; p->next = g_orphans[c]; g_orphans[c] = p; p = n; }
+                while (p) {
+                    Page* n = p->next;
+                    p->owner = 0;
+                    kv::atomic_store(&p->notify, (Notify*)nullptr, kv::MO_RELEASE);
+                    p->prev = nullptr; p->next = g_orphans[c]; g_orphans[c] = p;
+                    p = n;
+                }
             t_cache.partial[c] = t_cache.full[c] = nullptr;
         }
         unlock_pages();
+        // The stacks are no one's now. A destructor that allocates after this one gets new
+        // ones rather than popping pages that other threads are adopting.
+        t_cache.notify = nullptr;
     }
 };
 thread_local CacheGuard t_cache_guard;
@@ -397,7 +449,7 @@ Page* page_new(u8 cls) {
         g_orphans[cls] = p->next;
         p->owner = thread_id(); p->next = p->prev = nullptr; p->in_full = 0;
         unlock_pages();
-        p->notify = my_notify();
+        page_adopt(p); // outside the lock: it may wait on a push in flight
         return p;
     }
     p = g_free_pages;
@@ -447,7 +499,9 @@ u8* page_take(Page* p) {
 }
 
 // Full pages that other threads have freed into since the owner last looked: the notify
-// stack, taken whole. Only pages this thread still owns and still has as full count.
+// stack, taken whole. Only pages this thread still owns and still has as full count. Each
+// page's link is read before the page is marked idle: from then on a remote free may push
+// it again and rewrite the link.
 bool collect_notified(Cache& c, u8 cls) {
     Notify* n = c.notify;
     if (!n || !kv::atomic_load(&n->head[cls], kv::MO_ACQUIRE)) return false;
@@ -456,6 +510,10 @@ bool collect_notified(Cache& c, u8 cls) {
     while (p) {
         Page* next = p->notify_next;
         p->notify_next = nullptr;
+        // Queued, or still pushing if its pusher has not marked it yet (that pusher's last
+        // step then finds the page idle and leaves it so). Nothing else is possible here.
+        u32 s = kv::atomic_load(&p->nstate, kv::MO_RELAXED);
+        kv::atomic_store(&p->nstate, nstate_with(s, kNotifyIdle), kv::MO_RELEASE);
         if (p->owner == thread_id() && p->in_full) {
             drain_remote(p);
             if (p->local_free) { list_remove(c.full[cls], p); list_push(c.partial[cls], p); p->in_full = 0; found = true; }
@@ -484,6 +542,27 @@ u8* small_take(u8 cls) {
     }
 }
 
+// Pushes the page onto its owner's notify stack, unless it is on one already, is being
+// pushed, or is changing hands; the page's state says which, and only the remote free that
+// moves it from idle to pushing makes the push. The caller holds a block of the page that
+// `used` still counts, so the page is not pooled under it.
+void notify_owner(Page* p) {
+    u32 s = kv::atomic_load(&p->nstate, kv::MO_RELAXED);
+    if ((s & kNotifyMask) != kNotifyIdle) return; // queued, pushing or adopting: it will be seen
+    u32 pushing = nstate_with(s + kNotifyGen, kNotifyPushing);
+    if (!kv::atomic_compare_exchange(&p->nstate, &s, pushing, false, kv::MO_ACQUIRE, kv::MO_RELAXED)) return; // another free won
+    Notify* n = kv::atomic_load(&p->notify, kv::MO_ACQUIRE);
+    if (n) {
+        Page* top = kv::atomic_load(&n->head[p->cls], kv::MO_RELAXED);
+        do { p->notify_next = top; } while (!kv::atomic_compare_exchange(&n->head[p->cls], &top, p, true, kv::MO_RELEASE, kv::MO_RELAXED));
+    }
+    // Queued, if the owner has not popped it already (then it is idle, and stays so); with
+    // no owner (orphaned as this ran), idle again for whoever adopts it.
+    u32 expect = pushing;
+    kv::atomic_compare_exchange(&p->nstate, &expect, nstate_with(pushing, n ? kNotifyQueued : kNotifyIdle), false,
+                                kv::MO_RELEASE, kv::MO_RELAXED);
+}
+
 void small_free(void* user) {
     Page* p = page_of(user);
     u8* b = (u8*)user - sizeof(Header);
@@ -493,8 +572,12 @@ void small_free(void* user) {
         u32 left = kv::atomic_sub_fetch(&p->used, 1u, kv::MO_ACQ_REL);
         Cache& c = t_cache;
         // An empty page that is not where allocation starts goes back to the pool; a full
-        // page with a block again is partial again.
-        if (left == 0 && c.partial[p->cls] != p) {
+        // page with a block again is partial again. Not one still queued on this thread's
+        // notify stack: the pool would hand it to a thread that re-links it while it is
+        // still on the stack. It is collected in time and pooled when next empty. At zero
+        // every remote freer has finished (each drops `used` last), so the state is settled.
+        if (left == 0 && c.partial[p->cls] != p &&
+            (kv::atomic_load(&p->nstate, kv::MO_ACQUIRE) & kNotifyMask) == kNotifyIdle) {
             if (p->in_full) list_remove(c.full[p->cls], p); else list_remove(c.partial[p->cls], p);
             lock_pages();
             p->owner = 0; p->notify = nullptr; p->next = g_free_pages; g_free_pages = p;
@@ -506,16 +589,13 @@ void small_free(void* user) {
         }
         return;
     }
-    void* head = kv::atomic_load(&p->remote_free, kv::MO_ACQUIRE);
-    do { *(void**)b = head; } while (!kv::atomic_compare_exchange(&p->remote_free, &head, (void*)b, true, kv::MO_ACQ_REL, kv::MO_ACQUIRE));
+    void* head = kv::atomic_load(&p->remote_free, kv::MO_RELAXED);
+    do { *(void**)b = head; } while (!kv::atomic_compare_exchange(&p->remote_free, &head, (void*)b, true, kv::MO_ACQ_REL, kv::MO_RELAXED));
+    // First into an empty remote list: tell the owner, which may have nothing else telling
+    // it this page has blocks again. Before `used` drops: while it counts this block the
+    // page cannot be pooled and re-initialized under the push (its class, its notify).
+    if (head == nullptr) notify_owner(p);
     kv::atomic_sub_fetch(&p->used, 1u, kv::MO_ACQ_REL);
-    if (head == nullptr) {
-        // First into an empty remote list: tell the owner, if the page still has one.
-        Notify* n = kv::atomic_load(&p->notify, kv::MO_ACQUIRE);
-        if (!n) return;
-        Page* top = kv::atomic_load(&n->head[p->cls], kv::MO_ACQUIRE);
-        do { p->notify_next = top; } while (!kv::atomic_compare_exchange(&n->head[p->cls], &top, p, true, kv::MO_ACQ_REL, kv::MO_ACQUIRE));
-    }
 }
 
 // ---- the general entry points ------------------------------------------------------------

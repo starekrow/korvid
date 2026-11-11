@@ -19,6 +19,7 @@ void test_trigger(kv::TestCtx&);
 void test_job(kv::TestCtx&);
 void test_parallel(kv::TestCtx&);
 void test_heap(kv::TestCtx&);
+void test_remote_free(kv::TestCtx&);
 void test_profile(kv::TestCtx&);
 void test_json(kv::TestCtx&);
 void test_idle(kv::TestCtx&);
@@ -52,6 +53,7 @@ int main() {
     test_job(c);
     test_parallel(c);
     test_heap(c);
+    test_remote_free(c);
     test_profile(c);
     test_json(c);
     test_utf8(c);

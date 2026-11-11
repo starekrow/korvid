@@ -71,14 +71,14 @@ acquire or release could pass every test. Every lock-free structure was read aga
   compiler barrier on x64, `dmb` on arm64). The check was also one short on every platform:
   at `write == i + cap` the writer may be filling slot `i`, so that is lapped too, and an
   overrun ring is now read from one past its oldest slot.
-- **Found, not yet fixed: the allocator strands pages under concurrent remote frees.** See
-  below. Not arm64's: Linux and Windows have it.
+- **Fixed: the allocator stranded pages under concurrent remote frees.** See below. Not
+  arm64's: Linux and Windows had it too.
 - **Minor, left:** `kv_handle_kind_name`, `_name_hash` and `_desc_get` check only the kind
   count, which is bumped before the row is written, not the row's `live` flag. Only a
   reader racing registration with an id it got unsynchronized could see a half-written
   row; the engine registers at startup.
 
-### The allocator's notify stacks (open)
+### The allocator's notify stacks (fixed)
 
 A remote free into a page whose remote list is empty pushes the page onto its owner's
 notify stack, so the owner learns that a full page has blocks again. The owner also empties
@@ -95,9 +95,38 @@ Measured with four threads allocating continuously and four freeing each block o
 thread, live blocks bounded at 16,384: 3,988 pages (250 MB) carved in 10 seconds and
 climbing linearly. A scratch patch that lets a page be on a notify stack at most once (a
 flag the remote freer sets with an exchange and the owner clears as it pops) holds the
-same run at 36 pages. The full fix must also cover the hand-offs (pool return, orphan
-adoption); `core`'s heap test frees in phases, never while the owner allocates, which is
-why it has not shown.
+same run at 36 pages. `core`'s heap test frees in phases, never while the owner allocates,
+which is why it had not shown.
+
+The fix (`core/src/memory.cc`) gives each page a notify state, idle, pushing, queued or
+adopting, with a generation in the rest of the word:
+
+- Only the remote free that moves a page from idle to pushing pushes it; the owner sets it
+  idle as it pops it, after reading its link. A pusher's last step, pushing to queued, is a
+  compare-and-swap on its own generation, so a pop that came first leaves the page idle
+  and a slow pusher never mistakes a later push for its own.
+- A remote freer drops the page's live count last, after any push. While the count holds
+  its block the page cannot reach the pool and be re-initialized under the push, which
+  closes the window where a freer wrote the link and read the class of a page another
+  thread had taken.
+- An emptied page goes back to the pool only when idle; a queued one waits to be collected.
+- Adopting an orphan waits out a push in flight, then takes the page's notifications for
+  its new owner; its link on the dead owner's stack is abandoned, and no one walks a dead
+  thread's stacks (an exiting thread also drops its own, so a destructor that allocates
+  later starts fresh ones).
+
+The regression test, `core/tests/remote_free_test.cc`, needed three tries to be a test.
+Its first form freed every block at once through a small ring, which put each class on one
+page, and a stack with one page cannot lose another; it passed against the bug. Its second
+form held a fixed delay before every free, which never freed into the page the owner was
+allocating from, and the double push needs that; it passed against the bug too. The third
+frees even blocks a fixed 4,096 later (many pages a class) and odd blocks at once (traffic
+into the active page), with the producer held near both, so the blocks in flight are the
+same on any machine in any config. Against the bug it carves 10,500 to 12,100 pages in a
+round, in every config; with the fix 160 to 250 for two rounds, under a bound of 512.
+(Growth after a warm-up was the wrong measure: the peak working set creeps up to its
+ceiling over a million blocks or so, slower in debug.) With it, `core_tests` ran 100 times
+in dev and 50 in debug and in ship with no failure.
 
 ### Still to come in later milestones
 

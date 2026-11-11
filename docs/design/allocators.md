@@ -72,11 +72,18 @@ struct Allocator {
 - **Size-class small allocator**: 24 classes from 16 bytes to 2 KB, 64 KB pages of one
   class each owned by the allocating thread, a per-thread partial and full list per
   class, a lock-free remote free list per page for alloc-on-A free-on-B; the first remote
-  free into a full page pushes the page onto the owner's notify stack, so the owner finds
-  pages with room without scanning its full ones (a scan over every full page was a cache
-  miss per page and ruined the allocator with millions of blocks live); pages left by an
-  exiting thread are adopted by the next thread that needs one, empty pages return to a
-  shared stack. Blocks above 2 KB sit
+  free into an empty remote list pushes the page onto the owner's notify stack, so the
+  owner finds pages with room without scanning its full ones (a scan over every full page
+  was a cache miss per page and ruined the allocator with millions of blocks live). A page
+  is on a notify stack at most once: it has one link, and a second push rewrites it and cuts
+  off the pages below, which then keep their freed blocks from their owner for good (slice
+  7 found the owner emptying a queued page's remote list in `page_take`, and the next free
+  pushing it again: hundreds of pages a second carved under alloc-on-A free-on-B). A state
+  per page (idle, pushing, queued, adopting, with a generation) admits one push until the
+  owner pops it; a remote freer drops the page's live count last, so a page is not pooled
+  under a push; a queued page is not pooled; an orphan is adopted only between pushes. Pages
+  left by an exiting thread are adopted by the next thread that needs one, empty pages return
+  to a shared stack. `core/tests/remote_free_test.cc` holds the line. Blocks above 2 KB sit
   on malloc for now; the page path above is for consoles.
 - **Large allocator**: blocks above about 64 KB go straight to pages. Guard pages in
   debug for free.
