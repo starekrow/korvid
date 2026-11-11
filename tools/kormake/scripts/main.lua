@@ -215,7 +215,7 @@ local function run(cmd, target, opts, rest)
     end
     local bundle = ""
     if app then
-      local libs, signed = kormake.load("package_app").run(build, app, exe_bin, inst.toolchain)
+      local libs, signed = kormake.load("package_app").run(build, app, exe_bin, inst.toolchain, root)
       bundle = kind == "app" and string.format(", %d librar%s bundled, signed %s", libs, libs == 1 and "y" or "ies", signed) or (", signed " .. signed)
     end
     print(string.format("kormake: %s: %s%s, %d license files%s%s", app or dist, exe,

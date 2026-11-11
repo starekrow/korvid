@@ -85,7 +85,11 @@ void test_ui(kv::TestCtx& c) {
     KV_CHECK(c, engine_init(e, list));
     KV_CHECK(c, input_actions(e, k_actions));
     char root[512], path[600];
-    snprintf(root, sizeof root, "%sassets/ui_test", platform_base_path(e));
+    // The fixtures go in a scratch directory mounted over the defaults, not beside the
+    // executable: an iOS app's bundle is signed and read-only.
+    char scratch[400];
+    KV_CHECK(c, io_make_temp_dir("korvid-ui-test", scratch, sizeof scratch) && platform_io(e)->mount_dir(scratch));
+    snprintf(root, sizeof root, "%s/ui_test", scratch);
     io_make_dirs(root);
     snprintf(path, sizeof path, "%s/test.ui.json", root);
     KV_CHECK(c, put(path, k_doc));

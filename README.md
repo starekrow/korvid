@@ -231,7 +231,17 @@ run in a booted Simulator, and an app installs there:
     tools/kormake/bin/macos/kormake package iossim-dev example_window
     xcrun simctl install booted dist/example_window/example_window.app
     xcrun simctl launch --console-pty booted org.korvid.example-window   # its log in this terminal
-    tools/kormake/bin/macos/kormake build ios-dev          # the same for a device (nothing runs it yet)
 
 The Simulator's GPU has no indirect draws, which the renderer is built on, so a game starts
-there and stops at the renderer; drawing on iOS needs a device (A14 or later).
+there and stops at the renderer; drawing on iOS needs a device (A14 or later). On a device,
+with an Apple developer account signed into Xcode, the device connected and in Developer
+Mode, and a development profile Xcode has made (build any app to the device once):
+
+    KORMAKE_IOS_TEST_BUNDLE_ID=com.example.tests tools/kormake/bin/macos/kormake test ios-dev   # every suite on the device
+    tools/kormake/bin/macos/kormake package ios-dev example_testbed                            # signed for development
+    xcrun devicectl device install app --device "<name>" dist/example_testbed/example_testbed.app
+    xcrun devicectl device process launch --device "<name>" --console org.korvid.example-testbed
+
+The bundle identifier is one your profile covers (a wildcard profile covers any).
+`tools/ios/device_test.sh` and `tools/ios/sign_app.sh` say what else they read from the
+environment.

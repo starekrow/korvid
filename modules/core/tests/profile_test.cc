@@ -9,6 +9,7 @@
 #include "korvid/core/thread.h"
 #include "korvid/core/time.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if KV_PROFILE
@@ -43,7 +44,13 @@ void test_profile(kv::TestCtx& c) {
     using namespace kv;
     c.begin("profile");
 #if KV_PROFILE
-    const char* path = "prof_test.json"; // in the build directory, where tests run; removed below
+    // In TMPDIR when there is one (every Apple platform: on iOS the app's own tmp/, the
+    // working directory being / and read-only there), else the build directory, where tests
+    // run. Removed below.
+    char path[1024];
+    const char* tmp = getenv("TMPDIR");
+    usize tlen = tmp ? strlen(tmp) : 0;
+    snprintf(path, sizeof path, "%s%sprof_test.json", tlen ? tmp : "", tlen && tmp[tlen - 1] != '/' ? "/" : "");
     prof_enable(true);
     prof_thread_name("main");
     prof_keep_frame(true);

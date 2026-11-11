@@ -93,10 +93,14 @@ void test_level(kv::TestCtx& c) {
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     char dir[512];
-    snprintf(dir, sizeof dir, "%sassets/level_test", platform_base_path(e));
+    // The fixtures go in a scratch directory mounted over the defaults, not beside the
+    // executable: an iOS app's bundle is signed and read-only.
+    char scratch[400];
+    KV_CHECK(c, io_make_temp_dir("korvid-level-test", scratch, sizeof scratch) && platform_io(e)->mount_dir(scratch));
+    snprintf(dir, sizeof dir, "%s/level_test", scratch);
     io_make_dirs(dir);
     KV_CHECK(c, write(dir, "town.map", "town v1") && write(dir, "field.map", "field v1") && write(dir, "shared.bin", "shared"));
-    // The default mount was made at startup; it is the directory these went into.
+    // The scratch mount is the directory these went into.
 
     const LevelDesc levels[] = {{"town", "level_test/town.map", 1}, {"field", "level_test/field.map", 2}};
     LevelConfig cfg;

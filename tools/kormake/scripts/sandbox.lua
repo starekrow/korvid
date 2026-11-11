@@ -49,8 +49,10 @@ local module_fields = {
   -- fields for that platform (resolve.lua says how); triple is the target's
   -- "<vendor>-<os>[-<env>]" without the architecture ("apple-ios26.0-simulator"), family
   -- names the platforms' common rule variants ("apple"), and test_runner is a command a
-  -- test executable runs under when the host cannot run it directly.
+  -- test executable runs under when the host cannot run it directly ("%{root}" in it is
+  -- the project's root).
   per_platform = true, triple = true, family = true, test_runner = true,
+  test_jobs = true, -- at most this many tests at once, for a runner that cannot run more
 }
 
 -- module "name" { fields } or module "name" (defaults). One per file.

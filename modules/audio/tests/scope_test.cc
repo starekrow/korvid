@@ -56,7 +56,11 @@ void test_asset_scopes(kv::TestCtx& c) {
     auto run = [&](u32 n = 1) { for (u32 i = 0; i < n; ++i) { platform_io(e)->pump(); e.phases.run_tick(e, e.events, 1.0 / 60.0, tick++); } };
 
     char dir[512];
-    snprintf(dir, sizeof dir, "%sassets/audio_scope_test", platform_base_path(e));
+    // The fixtures go in a scratch directory mounted over the defaults, not beside the
+    // executable: an iOS app's bundle is signed and read-only.
+    char scratch[400];
+    KV_CHECK(c, io_make_temp_dir("korvid-audio-scope-test", scratch, sizeof scratch) && platform_io(e)->mount_dir(scratch));
+    snprintf(dir, sizeof dir, "%s/audio_scope_test", scratch);
     io_make_dirs(dir);
     char path[600];
     const char* const names[] = {"a", "b", "c"};

@@ -23,6 +23,7 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 namespace kv {
 
@@ -182,6 +183,10 @@ int platform_app_main(int argc, char** argv, int (*run)(int argc, char** argv, v
     g_app.argv = argv;
     g_app.run  = run;
     g_app.ctx  = ctx;
+    // An app starts in /, which it cannot write: a relative path the engine writes
+    // (--screenshot, --profile) lands in the app's own tmp/ instead, where devicectl can
+    // copy it from (--domain-type appDataContainer, tmp/<file>).
+    if (const char* tmp = getenv("TMPDIR")) chdir(tmp);
     @autoreleasepool {
         return UIApplicationMain(argc, argv, nil, NSStringFromClass([KVAppDelegate class]));
     }

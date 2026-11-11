@@ -86,12 +86,16 @@ module "toolchain.apple" {
         },
       },
     },
-    -- iOS on a device. Builds and links; nothing runs it yet (slice 8: signing and devices).
+    -- iOS on a device. Tests run on the one connected device, each signed with the
+    -- development profile and installed as the same app, KORMAKE_IOS_TEST_BUNDLE_ID
+    -- (tools/ios/device_test.sh has the rest).
     ios = {
       tag     = "ios",
       sdk     = "iphoneos",
       triple  = "apple-ios" .. os_min,
       srcdirs = { "ios" },
+      test_runner = { "sh", "%{root}/tools/ios/device_test.sh" },
+      test_jobs   = 1,
       externals = {
         -- The window, its view and the lifecycle; the audio unit. The SDK's, nothing to install.
         uikit     = { frameworks = { "UIKit", "QuartzCore", "Foundation" } },

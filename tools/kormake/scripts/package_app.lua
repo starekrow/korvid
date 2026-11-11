@@ -44,8 +44,10 @@ local function plist_string(s) return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gs
 -- An iOS bundle: flat, its Info.plist the iOS keys, one scene (platform_hid's delegate makes
 -- it), a launch screen (without one iOS shows the app letterboxed, in a compatibility mode),
 -- full screen. Nothing to bundle: the engine links no library that iOS does not have. Signed
--- ad-hoc, which the Simulator runs; a device wants a provisioning profile (slice 8).
-local function ios_app(build, app, exe_name, tc)
+-- ad-hoc for the Simulator; for a device with the development profile and identity
+-- (tools/ios/sign_app.sh: Xcode's profiles, or KORMAKE_IOS_PROFILE and
+-- KORMAKE_CODESIGN_IDENTITY).
+local function ios_app(build, app, exe_name, tc, root)
   local q = util.shell_quote
   local id = "org.korvid." .. exe_name:gsub("[^%w%-%.]", "-")
   local sim = tc.fields.sdk == "iphonesimulator"
@@ -81,6 +83,10 @@ local function ios_app(build, app, exe_name, tc)
     '</plist>',
   }
   kfs.write(util.join(app, "Info.plist"), table.concat(plist, "\n") .. "\n")
+  if not sim then
+    run(build, "tools/ios/sign_app.sh", "sh " .. q(util.join(root, "tools/ios/sign_app.sh")) .. " " .. q(app))
+    return 0, "for development"
+  end
   local identity = kfs.getenv("KORMAKE_CODESIGN_IDENTITY")
   if not identity or identity == "" then identity = "-" end
   run(build, "codesign", "codesign --force --sign " .. q(identity) .. " " .. q(app))
@@ -88,11 +94,11 @@ local function ios_app(build, app, exe_name, tc)
   return 0, identity == "-" and "ad-hoc" or identity
 end
 
-function M.run(build, app, exe_name, tc)
+function M.run(build, app, exe_name, tc, root)
   local q = util.shell_quote
   if tc.fields.package == "iosapp" then
     kfs.write(util.join(build, "package.log"), "")
-    return ios_app(build, app, exe_name, tc)
+    return ios_app(build, app, exe_name, tc, root)
   end
   local contents = util.join(app, "Contents")
   local exe = util.join(contents, "MacOS/" .. exe_name)

@@ -64,7 +64,11 @@ void test_tilemap_load(kv::TestCtx& c) {
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     char root[512], path[600];
-    snprintf(root, sizeof root, "%sassets/tilemap_test", platform_base_path(e));
+    // The fixtures go in a scratch directory mounted over the defaults, not beside the
+    // executable: an iOS app's bundle is signed and read-only.
+    char scratch[400];
+    KV_CHECK(c, io_make_temp_dir("korvid-tilemap-test", scratch, sizeof scratch) && platform_io(e)->mount_dir(scratch));
+    snprintf(root, sizeof root, "%s/tilemap_test", scratch);
     snprintf(path, sizeof path, "%s/maps", root); io_make_dirs(path);
     snprintf(path, sizeof path, "%s/tiles", root); io_make_dirs(path);
     snprintf(path, sizeof path, "%s/maps/town.tmj", root);

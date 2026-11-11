@@ -356,10 +356,39 @@ the milestone found around them:
   floor; drawing on iOS waits for a device run (slice 8) or a fallback path for the
   Simulator. (Shader validation cannot run there at all: it binds buffers past slot 30.)
 
+## On a device
+
+An iPhone 15 Pro Max (A17 Pro, iOS 27.2), a paid developer account, Xcode's wildcard
+development profile.
+
+- **The tests.** `KORMAKE_IOS_TEST_BUNDLE_ID=<an identifier the profile covers> kormake test
+  ios-dev` runs every suite on the connected device: `tools/ios/device_test.sh` (the `ios`
+  toolchain's `test_runner`) makes each executable an app with `assets/` and `shaders/`
+  beside it, signs it (`tools/ios/sign_app.sh`: Xcode's newest profile that covers the
+  identifier and the device, the first Apple Development identity, entitlements from the
+  profile), installs it and runs it to its end through `devicectl --console`, one at a time
+  (`test_jobs = 1`: each installs as the same app). All 21 suites pass, 11,749 checks.
+- **devicectl reported a crash as exit code 0** (a null dereference after a failed check):
+  a pass is exit code 0 and the suite's own "checks passed" line together.
+- **What the device found:** tests that wrote beside the executable or in the working
+  directory. An app's bundle is signed and read-only and it starts in `/`. The profiler
+  test writes its trace in `TMPDIR` when there is one; the audio scope, level, tilemap and
+  ui tests write their fixtures in a temporary directory they mount over the defaults. And
+  an iOS app now starts in its own `tmp/` (`platform_app_main`), so a relative path the
+  engine writes (`--screenshot`, `--profile`) lands where `devicectl device copy from
+  --domain-type appDataContainer` reaches it.
+- **The renderer on iOS.** `kormake package ios-dev example_testbed` signs for development
+  (`sign_app.sh`); installed and launched with `devicectl`, it runs on the A17 Pro (Apple9,
+  tier 2 argument buffers) at 60 fps, 1290x2796, its screenshot the same scene in the same
+  colors as macOS's. 60 and not 120: an iPhone holds a CAMetalLayer to 60 Hz unless the
+  Info.plist says `CADisableMinimumFrameDurationOnPhone`, which is slice 8's to decide.
+
 ### Still to come
 
 - One CPU side for both renderers (milestone 5, waiting on a decision).
-- Drawing on iOS: a device, or a Simulator path without indirect commands.
-- The gallery's blends and shaders scenes sample their checker at 7.5 pixels a texel, so
-  every edge is at a pixel centre and the backends round it differently; the Vulkan set
-  and its tolerance follow the fix.
+- Drawing in the Simulator (a path without indirect commands), if it is wanted; a device
+  draws.
+- The Vulkan gallery references for `blends` and `shaders`, drawn again on Linux. Those
+  scenes' background is 960x512 now (8 pixels a texel, every edge on a pixel edge; at
+  900x480 the edges fell on pixel centres, which each GPU rounds its own way); the Metal set
+  has the new pictures, and every run lays each texel over exactly 8 pixels.

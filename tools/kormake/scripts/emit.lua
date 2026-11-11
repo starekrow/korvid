@@ -215,11 +215,20 @@ function M.run(c, g, opts)
   -- does them itself, so no rule needs a shell.
   local self = util.ninja_escape(program(kfs.self() or "kormake"))
   w("rule copy\n  command = " .. self .. ' _copy $in $out\n  description = COPY $out')
-  -- A test the host cannot run itself (the iOS Simulator's) runs under the toolchain's
-  -- test_runner, its words after the stamp.
+  -- A test the host cannot run itself (the iOS Simulator's, a device's) runs under the
+  -- toolchain's test_runner, its words after the stamp (%{root}: the project's root). With
+  -- test_jobs, no more than that many run at once (a device installs each as the same app).
   local runner = g.toolchain.fields.test_runner
-  runner = runner and (" " .. table.concat(util.as_list(runner), " ")) or ""
-  w("rule run_test\n  command = " .. self .. ' _test $in $out' .. runner .. '\n  description = TEST $in')
+  if runner then
+    local words = {}
+    for _, word in ipairs(util.as_list(runner)) do words[#words + 1] = util.ninja_escape(q((word:gsub("%%{root}", (root:gsub("%%", "%%%%")))))) end
+    runner = " " .. table.concat(words, " ")
+  else
+    runner = ""
+  end
+  local jobs = g.toolchain.fields.test_jobs
+  if jobs then w("pool test_pool\n  depth = " .. math.floor(jobs)) end
+  w("rule run_test\n  command = " .. self .. ' _test $in $out' .. runner .. (jobs and "\n  pool = test_pool" or "") .. '\n  description = TEST $in')
   w("rule regen\n  command = " .. self .. " gen " .. target .. (opts.no_unity and " --no-unity" or "") ..
     (opts.cxx and (" --cxx " .. util.ninja_escape(q(opts.cxx))) or "") .. "\n  generator = 1\n  description = KORMAKE gen " .. target)
   w("")
