@@ -184,8 +184,39 @@ installed; the spike compiled MSL through the Metal framework at run time instea
 macOS release cannot emit SPIR-V (it has no `libslang-glslang`), which matters only for
 checking Vulkan shaders on a Mac.
 
+## Milestone 3: the Metal renderer
+
+`docs/design/renderer-metal.md` has how the backend maps onto Metal. What the milestone
+changed around it, and found:
+
+- **kormake** compiles `.mm` sources (their own unity file; clang takes the language from the
+  extension), links an external's `frameworks` (`flag_framework`), lets a tool rule carry
+  per-platform variants (the shader rule's Metal form: `slangc -target metallib`, which drives
+  Xcode's Metal compiler and writes a depfile naming its output, plus Slang's reflection), and
+  stages a header-only module's shaders and assets. Linux's and macOS's generated Ninja files
+  were byte-identical before and after each change, until the shaders moved.
+- **The shaders moved to the render interface** (`render/shaders/`): on macOS renderer-vulkan
+  is not in the build, so the header a game's shaders include by name was not on the include
+  path, and the Metal backend had nothing of its own to compile.
+- **The frame loop** opens the window the bound backend wants (`renderer_surface()`, a new
+  function of the render interface) and runs its frames through a live resize
+  (`platform_modal_frame`), sharing its clock with the loop.
+- **The outer engine joins the macOS root**: asset, sprite, scene, text, anim, collision,
+  tilemap, level, audio, ui and the frame loop, with their suites (21 in all, every config),
+  and `example_testbed`, `example_stones` and `example_cpukiller` run on Metal.
+- **`asset`'s vendored stb_vorbis** silenced a gcc-only warning group, and clang flags a
+  comparison inside it that gcc does not: both handled as `inflate`'s were.
+- **An engine bug, every platform: an entity's description could run past its buffer.**
+  `Table::describe` wrote the space between two components into the last byte when the one
+  before ended one byte short, leaving no terminator; the testbed's log printed a stray byte
+  after the blinker's line on macOS (`0xF9`, whatever followed on the stack). Separators now
+  go in only with room for a terminator; `kind_test` truncates a description at every length.
+- **`example_cpukiller --window` could not start, every platform.** Its hand-written module
+  list predates the frame loop's needing scene, text and the CLI; it now lists them, in the
+  order kormake gives `example_testbed`'s. Its exit line counts the name table, which the
+  window's path makes one block longer (no leak: nothing is live after `names_shutdown`).
+
 ### Still to come in later milestones
 
-- Everything that depends on `render` waits for a backend: on macOS that is the Metal
-  renderer (milestone 3). `example_cpukiller` is among them, so its tables run on macOS then.
-- The frame loop asks for a Vulkan window; it must ask for the bound renderer's surface.
+- The full-frame pass, GPU timing, and `rocks`, `arcanum` and `arcfire` (milestone 4).
+- Vsync near 100 fps on a 120 Hz panel, not 120 (milestone 4's measurements).

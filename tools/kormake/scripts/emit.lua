@@ -152,6 +152,12 @@ function M.run(c, g, opts)
         local flag = fl.tc.fields.flag_lib:format(l)
         if not util.contains(libs, flag) then libs[#libs + 1] = flag end
       end
+      -- Apple frameworks (Metal, QuartzCore): linked by name, spelled by the toolchain.
+      for _, fw in ipairs(e.frameworks or {}) do
+        local spell = fl.tc.fields.flag_framework or util.fail("toolchain '%s' does not set flag_framework, which external '%s' needs", fl.tc.rec.name, ext)
+        local flag = spell:format(fw)
+        if not util.contains(libs, flag) then libs[#libs + 1] = flag end
+      end
       local d = external_dir(fl, ext)
       for _, ld in ipairs(d and e.libdirs or {}) do
         local spell = fl.tc.fields.flag_libdir or util.fail("toolchain '%s' does not set flag_libdir, which external '%s' needs", fl.tc.rec.name, ext)
@@ -230,11 +236,24 @@ function M.run(c, g, opts)
     table.sort(shader_includes)
   end
   local tool_rules = {}
+  -- A rule as a consuming instance's platform sees it: the rule's fields with those of its
+  -- `platforms[<platform>]` variant over them (the shader rule's Metal form on the Apple
+  -- family). The Ninja rule's name carries the platform only when a variant applies, so a
+  -- rule without one is named as it always was.
+  local function rule_variant(r, platform)
+    local v = r.platforms and r.platforms[platform]
+    if not v then return r, "" end
+    local out = {}
+    for k, x in pairs(r) do if k ~= "platforms" then out[k] = x end end
+    for k, x in pairs(v) do out[k] = x end
+    return out, "_" .. util.symbol(platform)
+  end
   for _, inst in ipairs(g.instances) do
     for _, t in ipairs(inst.tools) do
       local tf = t.instance.module.fields
-      for _, r in ipairs(tf.exports or {}) do
-        local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name
+      for _, r0 in ipairs(tf.exports or {}) do
+        local r, variant = rule_variant(r0, inst.platform)
+        local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant
         if not tool_rules[rname] then
           local tool, implicit = tool_path(t.instance)
           local cmd = r.command or util.fail("rule '%s' of '%s' has no command", r.name, t.instance.module.name)
@@ -285,6 +304,11 @@ function M.run(c, g, opts)
     return table.concat(ds, " ")
   end
 
+  -- A module's sources: C++ (.cc) from src/ and then each of the platform's source
+  -- directories, then Objective-C++ (.mm) the same way. .mm files live only where an Apple
+  -- toolchain picks them up; they get a unity file of their own (a .cc and a .mm cannot
+  -- share one), and the compiler takes the language from the extension.
+  local source_exts = { "cc", "mm" }
   local function sources_of(inst)
     local f = inst.module.fields
     local list = {}
@@ -293,10 +317,12 @@ function M.run(c, g, opts)
       return list
     end
     if not inst.module.src_dir then return list end
-    for _, n in ipairs(util.sorted_files(inst.module.src_dir, "cc")) do list[#list + 1] = util.join(inst.module.src_dir, n) end
-    for _, sd in ipairs(flags(inst).srcdirs) do
-      local d = util.join(inst.module.src_dir, sd)
-      if kfs.isdir(d) then for _, n in ipairs(util.sorted_files(d, "cc")) do list[#list + 1] = util.join(d, n) end end
+    for _, ext in ipairs(source_exts) do
+      for _, n in ipairs(util.sorted_files(inst.module.src_dir, ext)) do list[#list + 1] = util.join(inst.module.src_dir, n) end
+      for _, sd in ipairs(flags(inst).srcdirs) do
+        local d = util.join(inst.module.src_dir, sd)
+        if kfs.isdir(d) then for _, n in ipairs(util.sorted_files(d, ext)) do list[#list + 1] = util.join(d, n) end end
+      end
     end
     return list
   end
@@ -335,6 +361,48 @@ function M.run(c, g, opts)
   local libs_by_key = {}
   local runtime_by_key = {} -- files an executable needs next to it
 
+  -- What a module stages beside its executables: its tool outputs (shaders and the like) and
+  -- its assets, as Ninja edges; the paths, for every executable that links it. A header-only
+  -- module stages its own too (the render interface's shaders) though it compiles nothing.
+  local function stage_runtime(inst, gen)
+    local m = inst.module
+    local pre = inst.prefix
+    -- Tool outputs: shaders and the like.
+    local runtime = {}
+    for _, t in ipairs(inst.tools) do
+      for _, r0 in ipairs(t.instance.module.fields.exports or {}) do
+        local r, variant = rule_variant(r0, inst.platform)
+        if r.per == "exe" then goto next_rule end -- runs once per executable, below
+        local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant
+        local pat_dir, pat_glob = util.dirname(r.inputs), util.basename(r.inputs)
+        local dir = util.join(m.dir, pat_dir)
+        if kfs.isdir(dir) then
+          for _, n in ipairs(kfs.listdir(dir)) do
+            if util.matches(n, pat_glob) then
+              local stem = util.stem(n)
+              local outname = r.outputs:gsub("%%{stem}", stem)
+              local outpath = t.spec.install and (pre .. "bin/" .. t.spec.install .. "/" .. outname) or (gen .. "/" .. outname)
+              local tr = tool_rules[rname]
+              w(string.format("build %s: %s %s%s", util.ninja_escape(outpath), rname, util.ninja_escape(util.join(dir, n)),
+                tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""))
+              runtime[#runtime + 1] = outpath
+            end
+          end
+        end
+        ::next_rule::
+      end
+    end
+    -- Assets: bin/assets/<module>/<path>, subdirectories kept.
+    if m.assets_dir then
+      for _, n in ipairs(util.sorted_files_recursive(m.assets_dir)) do
+        local outpath = pre .. "bin/assets/" .. m.name .. "/" .. n
+        w(string.format("build %s: copy %s", util.ninja_escape(outpath), util.ninja_escape(util.join(m.assets_dir, n))))
+        runtime[#runtime + 1] = outpath
+      end
+    end
+    return runtime
+  end
+
   -- Libraries and executables.
   for _, inst in ipairs(g.order) do
     local m = inst.module
@@ -342,7 +410,11 @@ function M.run(c, g, opts)
     local output = f.output or "lib"
     local sym = util.symbol(m.name)
     module_files[#module_files + 1] = m.file
-    if output == "headers" or f.provides == "toolchain" or f.system or f.prebuilt then goto continue end
+    if f.provides == "toolchain" or f.system or f.prebuilt then goto continue end
+    if output == "headers" then
+      runtime_by_key[inst.key] = stage_runtime(inst, inst.prefix .. "gen/" .. sym)
+      goto continue
+    end
     do
       local srcs = sources_of(inst)
       local pre = inst.prefix
@@ -359,55 +431,40 @@ function M.run(c, g, opts)
         kfs.write(path, module_list_source(inst))
         srcs[#srcs + 1] = path
       end
-      if unity and #srcs > 1 then
-        local lines = { "// generated by kormake: the unity build of " .. m.name }
-        for _, s in ipairs(srcs) do lines[#lines + 1] = '#include "' .. s .. '"' end
-        local path = util.join(build, gen .. "/unity.cc")
-        kfs.write(path, table.concat(lines, "\n") .. "\n")
-        local obj = pre .. "obj/" .. sym .. "/unity" .. naming.obj_suffix
-        compile(inst, path, obj, includes, defines)
-        objs[#objs + 1] = obj
-      else
-        for _, s in ipairs(srcs) do
+      -- One unity file per language with more than one source (unity.cc, unity.mm); a
+      -- language with one source, or a build without unity, compiles each file alone.
+      for _, ext in ipairs(source_exts) do
+        local group = {}
+        for _, s in ipairs(srcs) do if util.ext(s) == ext then group[#group + 1] = s end end
+        local tail = ext == "cc" and "" or ("_" .. ext) -- a .mm's object never meets a .cc's of the same name
+        if unity and #group > 1 then
+          local lines = { "// generated by kormake: the unity build of " .. m.name .. (ext == "cc" and "" or (" (" .. ext .. ")")) }
+          for _, s in ipairs(group) do lines[#lines + 1] = '#include "' .. s .. '"' end
+          local path = util.join(build, gen .. "/unity." .. ext)
+          kfs.write(path, table.concat(lines, "\n") .. "\n")
+          local obj = pre .. "obj/" .. sym .. "/unity" .. tail .. naming.obj_suffix
+          compile(inst, path, obj, includes, defines)
+          objs[#objs + 1] = obj
+        else
+          for _, s in ipairs(group) do
+            local rel = s:sub(#m.dir + 2):gsub("^src/", "")
+            if s:sub(1, #build) == build then rel = "gen_" .. util.basename(s) end
+            local obj = pre .. "obj/" .. sym .. "/" .. rel:gsub("%." .. ext .. "$", "") .. tail .. naming.obj_suffix
+            compile(inst, s, obj, includes, defines)
+            objs[#objs + 1] = obj
+          end
+        end
+      end
+      -- Anything else a module's `sources` names compiles alone, as it always has.
+      for _, s in ipairs(srcs) do
+        if not util.contains(source_exts, util.ext(s)) then
           local rel = s:sub(#m.dir + 2):gsub("^src/", "")
-          if s:sub(1, #build) == build then rel = "gen_" .. util.basename(s) end
-          local obj = pre .. "obj/" .. sym .. "/" .. rel:gsub("%.cc$", "") .. naming.obj_suffix
+          local obj = pre .. "obj/" .. sym .. "/" .. rel:gsub("%.[^%./]*$", "") .. naming.obj_suffix
           compile(inst, s, obj, includes, defines)
           objs[#objs + 1] = obj
         end
       end
-      -- Tool outputs: shaders and the like.
-      local runtime = {}
-      for _, t in ipairs(inst.tools) do
-        for _, r in ipairs(t.instance.module.fields.exports or {}) do
-          if r.per == "exe" then goto next_rule end -- runs once per executable, below
-          local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name
-          local pat_dir, pat_glob = util.dirname(r.inputs), util.basename(r.inputs)
-          local dir = util.join(m.dir, pat_dir)
-          if kfs.isdir(dir) then
-            for _, n in ipairs(kfs.listdir(dir)) do
-              if util.matches(n, pat_glob) then
-                local stem = util.stem(n)
-                local outname = r.outputs:gsub("%%{stem}", stem)
-                local outpath = t.spec.install and (pre .. "bin/" .. t.spec.install .. "/" .. outname) or (gen .. "/" .. outname)
-                local tr = tool_rules[rname]
-                w(string.format("build %s: %s %s%s", util.ninja_escape(outpath), rname, util.ninja_escape(util.join(dir, n)),
-                  tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""))
-                runtime[#runtime + 1] = outpath
-              end
-            end
-          end
-          ::next_rule::
-        end
-      end
-      -- Assets: bin/assets/<module>/<path>, subdirectories kept.
-      if m.assets_dir then
-        for _, n in ipairs(util.sorted_files_recursive(m.assets_dir)) do
-          local outpath = pre .. "bin/assets/" .. m.name .. "/" .. n
-          w(string.format("build %s: copy %s", util.ninja_escape(outpath), util.ninja_escape(util.join(m.assets_dir, n))))
-          runtime[#runtime + 1] = outpath
-        end
-      end
+      local runtime = stage_runtime(inst, gen)
       runtime_by_key[inst.key] = runtime
 
       if output == "lib" then
@@ -437,10 +494,11 @@ function M.run(c, g, opts)
         -- Rules that run once per executable over its staged assets (a pack): part of the
         -- default build in ship, buildable by name in the other configs.
         for _, t in ipairs(inst.tools) do
-          for _, r in ipairs(t.instance.module.fields.exports or {}) do
+          for _, r0 in ipairs(t.instance.module.fields.exports or {}) do
+            local r, variant = rule_variant(r0, inst.platform)
             if r.per ~= "exe" then goto skip_rule end
             do
-              local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name
+              local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant
               local tr = tool_rules[rname]
               local ins = {}
               local staged = pre .. "bin/assets/"

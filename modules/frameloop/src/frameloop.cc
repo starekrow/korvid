@@ -63,7 +63,10 @@ constinit u32 g_overlay_kind = 0;
 struct FrameLoopState {
     FrameLoopConfig config;
     HostWindow*     window   = nullptr; // platform's
-    Renderer*       renderer = nullptr; // renderer-vulkan's
+    Renderer*       renderer = nullptr; // the bound backend's
+    Engine*         engine   = nullptr; // for the frames run inside an OS modal loop
+    f64             prev     = 0.0;     // when the last frame began, the loop's or a modal one's
+    u64             modal_frames = 0;   // frames run inside an OS modal loop (a live resize)
     u32             presented_w = 0, presented_h = 0;
     u32             deltas_last_frame = 0;
     // The GPU's frames over the report window (renderer_gpu_stats, a frame late), when measured.
@@ -207,7 +210,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     desc.title      = s->config.title;
     desc.width      = s->config.width;
     desc.height     = s->config.height;
-    desc.surface    = WindowSurface::Vulkan;
+    desc.surface    = renderer_surface() == RendererSurface::Metal ? WindowSurface::Metal : WindowSurface::Vulkan;
     desc.vsync      = s->config.vsync;
     desc.borderless = s->config.borderless;
     s->window = platform_open_window(engine, desc);
@@ -316,17 +319,35 @@ void render_frame(Engine& engine, FrameLoopState& s) {
     }
 }
 
+// A frame from inside an OS modal loop that holds platform_pump (platform_modal_frame: a
+// live resize on macOS), with the window's queued events already on the bus: the ticks and
+// the render, without the pump that is running further up the stack. Idle work, reports and
+// the profiler's frame wait for the loop. The loop's clock is shared, so the frame after
+// the resize does not see the resize as one long frame.
+void modal_frame(void* user) {
+    FrameLoopState& s = *(FrameLoopState*)user;
+    Engine& engine = *s.engine;
+    f64 now = time_now();
+    f64 dt  = now - s.prev;
+    s.prev = now;
+    engine_frame(engine, dt);
+    render_frame(engine, s);
+    ++s.modal_frames;
+}
+
 void run(Engine& engine, FrameLoopState& s) {
     f64 start = time_now();
-    f64 prev  = start;
+    s.engine = &engine;
+    s.prev   = start;
     f64 next_report = start + (f64)s.config.report_every_seconds;
     u32 frames_in_window = 0;
     bool collecting = prof_enabled();
+    platform_modal_frame(engine, modal_frame, &s);
 
     while (!engine.quit_requested) {
         f64 now = time_now();
-        f64 dt  = now - prev;
-        prev = now;
+        f64 dt  = now - s.prev;
+        s.prev = now;
 
         if (collecting) prof_frame(engine.frame_count);
         {
@@ -409,6 +430,8 @@ void run(Engine& engine, FrameLoopState& s) {
             s.timer_fired = true;
         }
     }
+    platform_modal_frame(engine, nullptr, nullptr);
+    if (s.modal_frames) KV_INFO("frameloop", "%llu frames ran inside live resizes", (unsigned long long)s.modal_frames);
 }
 
 // `screenshot FILE`: the next frame drawn, as a PPM.

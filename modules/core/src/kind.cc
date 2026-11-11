@@ -415,17 +415,24 @@ int Table::describe(Handle h, char* out, usize cap) const {
     if (!valid(h))
         return snprintf(out, cap, "%s (%u live)", h.index() < rows() ? "stale" : "out of range", live());
     usize at = 0;
+    // A separator goes in only with room for a terminator after it, and counts either way,
+    // as snprintf's length does. (Written into the last byte, it left the text unterminated
+    // whenever the component before it ended one byte short of the buffer.)
+    auto sep = [&](char ch) {
+        if (at + 1 < cap) { out[at] = ch; out[at + 1] = 0; }
+        ++at;
+    };
     for (u32 k = 0; k < columns.len; ++k) {
         const Column& c = columns[k];
-        if (k && at < cap) { out[at] = ' '; ++at; if (at < cap) out[at] = 0; }
+        if (k) sep(' ');
         int n = component_describe(*c.desc, row(c, h.index()), out + (at < cap ? at : cap), at < cap ? cap - at : 0);
         if (n > 0) at += (usize)n;
     }
     for (const Attachment& a : attachments) {
         const void* r = attached(h, *a.desc->id);
         if (!r) continue;
-        if (at < cap) { out[at] = ' '; ++at; if (at < cap) out[at] = 0; }
-        if (at < cap) { out[at] = '@'; ++at; if (at < cap) out[at] = 0; }
+        sep(' ');
+        sep('@');
         int n = component_describe(*a.desc, r, out + (at < cap ? at : cap), at < cap ? cap - at : 0);
         if (n > 0) at += (usize)n;
     }

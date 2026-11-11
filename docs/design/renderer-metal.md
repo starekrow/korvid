@@ -57,7 +57,53 @@ pipeline, failing by name if a header has moved one.
 - Slang's macOS release has no `libslang-glslang`, so it cannot emit SPIR-V on a Mac. Nothing
   here needs SPIR-V; it only means a Mac cannot check the Vulkan shaders' build.
 
+## The backend (milestone 3)
+
+`modules/renderer-metal` is renderer-vulkan's CPU side ported as it is (the render world, the
+dirty rows and their runs, the bucket counts, the ring, the materials, the game pipes, the
+sort check), with Metal's calls where Vulkan's were:
+
+- **A frame** is a command buffer, retained and waited on when its slot comes round again,
+  where Vulkan waits on a fence; its garbage and its span of the ring go then. The drawable
+  comes from the layer (`nextDrawable`, three of them, `displaySyncEnabled` for vsync); a
+  window with no area has none, and the frame still sends its uploads.
+- **Uploads** are a blit: textures from the ring into private textures, dirty rows from the
+  ring into the private tables. Metal tracks hazards across encoders and command buffers on
+  one queue, so a frame's copies wait for the frame before it to stop reading, as Vulkan's
+  barriers made them.
+- **The sort** is one serial compute encoder: its dispatches run in order, each one's writes
+  seen by the next. Every dispatch names its threadgroup size (256): MSL has no `numthreads`.
+- **The draws** set the push block with `setVertexBytes`/`setFragmentBytes`, bind the five
+  sprite buffers as one range at the indices above, declare every live texture resident
+  (`useResources`), and draw each non-empty bucket from the indirect buffer.
+- **Clip space.** `ortho2d` maps onto Vulkan's clip space, y down; Metal's is y up. The
+  backend negates the y row of both projections it pushes (`metal_clip`), so the shaders and
+  the math library stay as they are. Checked by eye: the overlay's text is upright at the
+  window's top left, the balls' highlights where their texture has them.
+- **Ownership** is manual (no ARC): records holding Metal objects live in the engine's pools,
+  which copy bytes. Every object is made with a +1 reference and released at once or after
+  the frame that last used it, like Vulkan's handles.
+- **Validation** is the environment's: `MTL_DEBUG_LAYER=1` (and `MTL_SHADER_VALIDATION=1`)
+  before the process starts; the renderer logs whether it is on.
+- **Screenshots** came forward from milestone 4 (they are a blit from the drawable, which a
+  dev or debug build makes readable): without them nothing showed which way up the picture
+  was.
+
+The shaders moved: everything in `renderer-vulkan/shaders/` is now `render/shaders/`, since
+the interface a game's shaders include (`sprite_fragment.slangh`, `post_fragment.slangh`)
+is the render interface's and must be on the include path whichever backend is bound, and
+both backends compile the same engine shaders. kormake learned to stage a header-only
+module's shaders; the Linux build's Ninja file changed only in where they are read from.
+
+Measured on an M3 Max, `example_testbed` at 1920x1080 under API validation: 12 to 13 sort
+checks a run in debug, dev and ship, all passing (culled rows included); no validation
+messages; 96 to 121 fps with vsync on a 120 Hz panel, 350 to 500 without.
+
 ## Open, not blocking
+
+- **Vsync settles near 100 fps on a 120 Hz ProMotion panel,** not 120: the frame loop's
+  pacing against `displaySyncEnabled` and the panel's variable refresh is milestone 4's to
+  measure, with the GPU timing.
 
 - **Read-only buffers are `device`, not `const device`.** Metal warns "writable resources in
   non-void vertex function" for the sprite vertex shader, because Slang emits
@@ -66,7 +112,7 @@ pipeline, failing by name if a header has moved one.
   Metal; otherwise it is a Slang issue to file.
 - **`kMaxTextures` lives twice:** `renderer_internal.h` and the array in
   `sprite_fragment.slangh`. The reflection check above should compare the array's length too.
-- **The frame loop asks for a Vulkan window** (`frameloop.cc` sets `WindowSurface::Vulkan`);
-  it must ask for what the bound renderer needs, Metal on the Apple family.
 - **What a frame costs,** argument-buffer residency included, is milestone 4's to measure
-  against the Vulkan numbers.
+  against the Vulkan numbers, with the full-frame pass and GPU timing, which the Metal
+  renderer does not have yet (a post shader is refused with a warning; `renderer_gpu_stats`
+  is never valid).

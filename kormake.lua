@@ -28,12 +28,14 @@ root "windows" {
   platforms = { "windows" },
 }
 
--- macOS is slice 7 (docs/PRDs/Engine-Slice-7-PRD.md), brought up the same way. Milestone 1:
--- everything that does not depend on "render", which has no backend here until the Metal
--- renderer lands. The rest join as their milestones do.
+-- macOS is slice 7 (docs/PRDs/Engine-Slice-7-PRD.md), brought up the same way. Milestone 3
+-- binds "render" to renderer-metal, so the outer engine joins; rocks, arcanum and arcfire
+-- join with milestone 4's post pass and parity.
 root "macos" {
   modules   = { "core", "math", "inflate", "pack", "xml", "platform", "cli", "tool", "tool_kpack", "save",
-                "bulletml", "platform_hid", "platform_audio", "example_sockit2m", "example_window" },
+                "bulletml", "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
+                "collision", "tilemap", "level", "audio", "ui", "frameloop", "renderer-metal",
+                "example_sockit2m", "example_window", "example_testbed", "example_stones", "example_cpukiller" },
   tests     = true,
   platforms = { "macos" },
 }

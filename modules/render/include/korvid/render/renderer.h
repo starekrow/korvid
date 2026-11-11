@@ -51,6 +51,12 @@ struct RenderView {
     // knows the window's size and needs nothing more for them.
 };
 
+// What kind of window surface the bound backend draws into, for whoever opens the window
+// before a renderer exists (the frame loop maps it to platform_hid's WindowSurface). Known
+// at link time: the binding decides it.
+enum class RendererSurface : u8 { Vulkan, Metal };
+RendererSurface renderer_surface();
+
 // One renderer per process in slice 1. Null if one exists already or creation failed.
 Renderer*  renderer_create(Engine& engine, const RendererDesc& desc);
 // Early teardown only; the backend module's shutdown destroys whatever is still alive.
@@ -101,7 +107,7 @@ bool       renderer_check_sort(Renderer* r);
 // ---- the full-frame pass ----------------------------------------------------------
 // Layers below `layer` are drawn into a target of the renderer's own; a game's post shader
 // (a fragment shader in <exe>/shaders/, named as a material's is, its interface in
-// renderer-vulkan's post_fragment.slangh) then draws that image to the window, and the
+// render's shaders/post_fragment.slangh) then draws that image to the window, and the
 // layers at and above `layer` draw over it (the HUD, the UI). A null shader turns the pass
 // off: the frame is drawn straight to the window, as without one, at no cost. A shader
 // that will not load leaves the pass off, logged once; false then.

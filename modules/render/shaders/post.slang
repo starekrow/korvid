@@ -1,4 +1,4 @@
-// Korvid renderer-vulkan: the full-frame pass's vertex shader. One triangle that covers the
+// Korvid render: the full-frame pass's vertex shader. One triangle that covers the
 // window, from the vertex index alone; the fragment shader is the game's (post_fragment.slangh).
 #include "post_fragment.slangh"
 

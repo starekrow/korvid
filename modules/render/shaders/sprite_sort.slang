@@ -1,4 +1,4 @@
-// Korvid renderer-vulkan: the sort. A counting sort of the live, visible sprite rows into
+// Korvid render: the sort. A counting sort of the live, visible sprite rows into
 // buckets of (layer, pipeline slot), stable by row within a bucket, in four passes:
 //   cs_count        per block of 1024 rows: cull, bucket, block histogram
 //   cs_scan         per bucket: running sum over blocks (block offsets), bucket totals

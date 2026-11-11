@@ -66,6 +66,8 @@ void write_placement(f32 out[4], f32* scale_y, const Placement2& p) {
 
 // ---- lifetime -------------------------------------------------------------------------------
 
+RendererSurface renderer_surface() { return RendererSurface::Vulkan; }
+
 Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     RendererVulkanState* owner = engine_module_state_as<RendererVulkanState>(engine, "renderer-vulkan");
     if (!owner || !vkGetInstanceProcAddr) {

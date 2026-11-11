@@ -101,6 +101,22 @@ void test_kind(kv::TestCtx& c) {
     char text[256];
     kv_handle_describe(b.bits, text, sizeof text);
     KV_CHECK(c, strcmp(text, "t.mover#1:1 Pos{x=30, y=2} Vel{dx=3, dy=4}") == 0);
+    // Truncated at every length, the text is terminated inside the buffer and is a prefix of
+    // the whole. (The separator between two components once took the last byte, leaving no
+    // terminator: a cap of 27 here, which ends "y=2} " and ran on into whatever followed.)
+    {
+        const char* whole = "t.mover#1:1 Pos{x=30, y=2} Vel{dx=3, dy=4}";
+        usize len = strlen(whole);
+        bool ok = true;
+        for (usize cap = 1; cap <= len + 1; ++cap) {
+            char small[64];
+            memset(small, 0xF9, sizeof small);
+            kv_handle_describe(b.bits, small, cap);
+            usize n = strnlen(small, cap);
+            if (n >= cap || strncmp(small, whole, n) != 0) ok = false;
+        }
+        KV_CHECK(c, ok);
+    }
 
     // Destroy: stale handles get null; the slot is reused with a new generation.
     KV_CHECK(c, mover->destroy(a) && !mover->destroy(a) && mover->live() == 1);

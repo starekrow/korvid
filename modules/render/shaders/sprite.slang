@@ -1,4 +1,4 @@
-// Korvid renderer-vulkan: the sprite shader. The draw is indirect, one per bucket; the
+// Korvid render: the sprite shader. The draw is indirect, one per bucket; the
 // instance index (base included: Slang's SV_InstanceID excludes it) selects a row through
 // the sorted index list the compute sort wrote. The quad corners come from the vertex
 // index; placement, UVs, tint and texture come from the row and its material. A game's

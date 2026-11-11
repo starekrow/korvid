@@ -42,6 +42,7 @@ local module_fields = {
   link = true, rules = true, obj_suffix = true, exe_suffix = true, lib_file = true,
   flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, probe = true,
   sdk = true, -- the Apple SDK the xcode probe asks xcrun for ("macosx")
+  flag_framework = true, -- how a toolchain links an external's frameworks ("-framework %s")
 }
 
 -- module "name" { fields } or module "name" (defaults). One per file.

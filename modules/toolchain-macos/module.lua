@@ -41,6 +41,7 @@ module "toolchain.macos" {
   flag_lib     = "-l%s",
   flag_libdir  = "-L%s",
   flag_include_system = "-isystem%s",
+  flag_framework = "-framework %s",
   externals = {
     -- SDL3: Homebrew's package (brew install sdl3), or wherever KORMAKE_SDL3_DIR points.
     -- Pinned to the version the Windows toolchain pins. Its dylib carries an absolute
@@ -56,8 +57,11 @@ module "toolchain.macos" {
     },
     zlib   = { libs = { "z" } },
     vulkan = { },                      -- nothing builds against Vulkan on this platform
+    -- Metal and the layer it presents through: the SDK's frameworks, nothing to install.
+    metal  = { frameworks = { "Metal", "QuartzCore", "Foundation" } },
   },
   bindings  = {
+    render             = "renderer-metal",
     ["shader-compile"] = "slang",
   },
 }

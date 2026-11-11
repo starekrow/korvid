@@ -1,5 +1,6 @@
-// Korvid renderer-vulkan: what the sprite shaders share. Layouts mirror renderer_internal.h
-// exactly (std430 rows, the push block); binding numbers match vk_resources.cc.
+// Korvid render: what the sprite shaders share. Layouts mirror each backend's
+// renderer_internal.h exactly (std430 rows, the push block); Vulkan's binding numbers match
+// vk_resources.cc, and Metal's buffer indices are Slang's, checked against renderer-metal's.
 //
 // Set 0, the tables: sprite rows, material rows, the sort's scratch and its outputs.
 // Set 1, the textures: the sampler and the bindless array (variable count: last binding).

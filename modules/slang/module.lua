@@ -1,8 +1,14 @@
 -- The shader compiler as a module: it provides "shader-compile" and exports the rule
--- that turns a .slang file into SPIR-V, with every module's shaders/ directory on the
--- include path (a game's shader includes the renderer's sprite_fragment.slangh by name).
--- A system lookup for now; a vendored binary would be prebuilt = { linux =
--- "bin/linux/slangc" } in this directory.
+-- that turns a .slang file into what the platform's renderer loads, with every module's
+-- shaders/ directory on the include path (a game's shader includes the render interface's
+-- sprite_fragment.slangh by name). A system lookup for now; a vendored binary would be
+-- prebuilt = { linux = "bin/linux/slangc" } in this directory.
+--
+-- SPIR-V for Vulkan by default. On macOS a Metal library: Slang drives Xcode's Metal compiler
+-- itself (the Metal Toolchain component must be installed), defines KV_TARGET_METAL for the
+-- render interface's Metal-only declarations, and writes its reflection beside the library
+-- (<out>.json: every parameter's binding by name), which a dev build of renderer-metal checks
+-- its layouts against. docs/design/renderer-metal.md has why.
 module "slang" {
   output   = "exe",
   provides = "shader-compile",
@@ -13,6 +19,12 @@ module "slang" {
       outputs = "%{stem}.spv",
       command = "%{tool} %{in} %{shader_includes} -target spirv -fvk-use-entrypoint-name -depfile %{depfile} -o %{out}",
       deps    = "depfile",
+      platforms = {
+        macos = {
+          outputs = "%{stem}.metallib",
+          command = "%{tool} %{in} %{shader_includes} -target metallib -DKV_TARGET_METAL=1 -depfile %{depfile} -reflection-json %{out}.json -o %{out}",
+        },
+      },
     },
   },
 }

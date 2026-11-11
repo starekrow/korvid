@@ -1,4 +1,4 @@
-// Korvid renderer-vulkan: what a sprite's fragment shader sees, the engine's and a game's.
+// Korvid render: what a sprite's fragment shader sees, the engine's and a game's.
 // A game shader (shaders/*.slang in the game's module, built by kormake's shader rule,
 // which puts this directory on the include path) includes this file and defines
 //

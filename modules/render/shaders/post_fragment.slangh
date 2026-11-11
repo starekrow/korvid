@@ -1,4 +1,4 @@
-// Korvid renderer-vulkan: what a full-frame post shader sees. The layers below the
+// Korvid render: what a full-frame post shader sees. The layers below the
 // renderer's post layer are drawn into a target of the renderer's own (the swapchain's size
 // and format); the post pass then draws one triangle over the window through the game's
 // post shader, which includes this file and defines

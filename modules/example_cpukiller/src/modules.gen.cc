@@ -1,10 +1,22 @@
-// Two lists: with the window (the usual stack) and without (the core alone).
+// Two lists: with the window (the usual stack, in the order kormake gives example_testbed's,
+// the same closure) and without (the core alone).
 #include "korvid/core/module.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/module.h"
+// The render backend is the platform's binding (renderer-metal on the Apple family, the
+// toolchains' bindings); this list is written by hand, so it says so here too.
+#if defined(__APPLE__)
+#include "korvid/renderer-metal/module.h"
+#define KV_CPUKILLER_RENDERER kv::renderer_metal_module
+#else
 #include "korvid/renderer-vulkan/module.h"
+#define KV_CPUKILLER_RENDERER kv::renderer_vulkan_module
+#endif
 #include "korvid/asset/module.h"
 #include "korvid/sprite/module.h"
+#include "korvid/scene/module.h"
+#include "korvid/text/module.h"
+#include "korvid/cli/module.h"
 #include "korvid/frameloop/module.h"
 #include "korvid/example_cpukiller/module.h"
 
@@ -12,9 +24,12 @@ namespace {
 constinit const kv::ModuleDesc* const k_window_modules[] = {
     &kv::platform_module,
     &kv::platform_hid_module,
-    &kv::renderer_vulkan_module,
+    &KV_CPUKILLER_RENDERER,
     &kv::asset_module,
     &kv::sprite_module,
+    &kv::scene_module, // the frame loop's: its overlay is text, which is scene's, and it serves the CLI
+    &kv::text_module,
+    &kv::cli_module,
     &kv::frameloop_module,
     &kv::example_cpukiller_module,
 };
