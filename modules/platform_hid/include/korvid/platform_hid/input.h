@@ -17,7 +17,8 @@ enum class Key : u16 {
     F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
     Escape, Space, Enter, Tab, Backspace,
     Left, Right, Up, Down,
-    LShift, RShift, LCtrl, RCtrl, LAlt, RAlt,
+    LShift, RShift, LCtrl, RCtrl, LAlt, RAlt, // Alt is Option on a Mac
+    LGui, RGui, // Command on a Mac, the Windows key on a PC (SDL's name); appended, so the numbers above hold
     Count
 };
 

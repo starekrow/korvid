@@ -48,7 +48,16 @@ bool HostWindow::open(const WindowDesc& desc) {
     if (!hid_video_up()) return false; // the module starts headless
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE;
     if (desc.surface == WindowSurface::Vulkan) flags |= SDL_WINDOW_VULKAN; // also loads the Vulkan loader
+    if (desc.surface == WindowSurface::Metal) flags |= SDL_WINDOW_METAL;   // SDL_Metal_CreateView needs it
     if (desc.borderless) flags |= SDL_WINDOW_BORDERLESS;
+#if defined(__APPLE__)
+    // Retina: without this the backing store is in window points and the system scales it
+    // up, so a 2x display shows a quarter of the pixels. With it the framebuffer is in
+    // pixels, which is what width() and height() promise, and pointers scale by
+    // pixel_scale(). (Linux at a Wayland scale renders at window size today; the flag
+    // would change that and every measurement made there, so it is not set there yet.)
+    flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#endif
     SDL_Window* w = SDL_CreateWindow(desc.title, (int)desc.width, (int)desc.height, flags);
     if (!w) {
         KV_ERROR("window", "SDL_CreateWindow failed: %s", SDL_GetError());

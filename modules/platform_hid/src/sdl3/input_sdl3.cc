@@ -32,6 +32,7 @@ static const KeyMap g_map[] = {
     {Key::LShift, SDL_SCANCODE_LSHIFT}, {Key::RShift, SDL_SCANCODE_RSHIFT},
     {Key::LCtrl, SDL_SCANCODE_LCTRL}, {Key::RCtrl, SDL_SCANCODE_RCTRL},
     {Key::LAlt, SDL_SCANCODE_LALT}, {Key::RAlt, SDL_SCANCODE_RALT},
+    {Key::LGui, SDL_SCANCODE_LGUI}, {Key::RGui, SDL_SCANCODE_RGUI},
 };
 
 static_assert(KV_COUNTOF(g_map) == (u32)Key::Count - 1, "every Key except Unknown has a scancode");

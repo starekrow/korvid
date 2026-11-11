@@ -128,8 +128,51 @@ round, in every config; with the fix 160 to 250 for two rounds, under a bound of
 ceiling over a million blocks or so, slower in debug.) With it, `core_tests` ran 100 times
 in dev and 50 in debug and in ship with no failure.
 
+## Milestone 2: the window and the shader spike
+
+### The window
+
+- **SDL3's Cocoa backend serves as is.** `src/sdl3/` and `src/sdl3_pads/` were Linux's;
+  `example_window` opens through the `cocoa` video driver, logs its events and runs at the
+  250 Hz it paces itself to, with gaps of about 5 ms once up (one of 27 to 104 ms while the
+  window first appears). Cmd+Q already worked: SDL reports it as `SDL_EVENT_QUIT`, which the
+  pump already made a `CloseRequested`.
+- **Retina.** The window opened at 960x540 "px" on a 2x display: SDL3 on macOS gives a window
+  its backing pixels only when asked (`SDL_WINDOW_HIGH_PIXEL_DENSITY`), and without it the
+  system scales a quarter of the pixels up. Asked for on Apple; the window is now 1920x1080
+  px for a 960x540 request, which is what `width()` and `height()` promise. Not on Linux,
+  where at a Wayland scale it would change the framebuffer, and every measurement made there,
+  by the scale squared: a decision for Linux, not a side effect of this port.
+- **The Command keys.** SDL reports them (`SDL_SCANCODE_LGUI`, `RGUI`) and the engine's `Key`
+  had no member for them, so they were dropped. `Key::LGui` and `RGui` (Command on a Mac,
+  the Windows key on a PC; SDL's name) are appended, so every existing key keeps its number;
+  Win32 maps them to E0 5B and E0 5C. Option was already `LAlt` and `RAlt`. `InputState`'s
+  bit set grew from one word to two (it is sized from `Key::Count`); replays record actions
+  by name, never key bits, so no recording changes.
+- **`WindowSurface::Metal`** opens the window with `SDL_WINDOW_METAL`, which
+  `SDL_Metal_CreateView` needs.
+- **Not checked by a person yet:** dragging and resizing the window while `example_window`
+  reports its gaps (a backend whose window blocks the loop during a drag shows a gap as long
+  as the drag), Cmd+Q, the Command keys, Mission Control and full screen.
+
+### The shaders
+
+The result is `docs/design/renderer-metal.md`. In short: every shader compiles for Metal
+from the same sources; the one change is the bindless texture array, which Metal cannot
+express unbounded and cannot bind as a fixed array of 1024 to a stage, and which becomes an
+argument buffer (a `ParameterBlock`) under `KV_TARGET_METAL`. Unset, Slang's output for every
+shader is byte-identical to before. Slang compensates for Metal's `instance_id` including the
+base instance. Binding indices are Slang's own, stable but implicit, so the build will carry
+Slang's reflection and a dev build will check the backend's layouts against it.
+
+Toolchain findings: Xcode 26 ships its Metal compiler as a separate download
+(`xcodebuild -downloadComponent MetalToolchain`), so `xcrun metal` fails until it is
+installed; the spike compiled MSL through the Metal framework at run time instead. Slang's
+macOS release cannot emit SPIR-V (it has no `libslang-glslang`), which matters only for
+checking Vulkan shaders on a Mac.
+
 ### Still to come in later milestones
 
 - Everything that depends on `render` waits for a backend: on macOS that is the Metal
   renderer (milestone 3). `example_cpukiller` is among them, so its tables run on macOS then.
-- The window and input on Cocoa, and the shader spike (milestone 2).
+- The frame loop asks for a Vulkan window; it must ask for the bound renderer's surface.

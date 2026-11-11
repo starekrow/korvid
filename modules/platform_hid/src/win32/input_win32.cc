@@ -25,6 +25,7 @@ const KeyMap g_map[] = {
     {Key::Left, 0x14B}, {Key::Right, 0x14D}, {Key::Up, 0x148}, {Key::Down, 0x150},
     {Key::LShift, 0x2A}, {Key::RShift, 0x36}, {Key::LCtrl, 0x1D}, {Key::RCtrl, 0x11D},
     {Key::LAlt, 0x38}, {Key::RAlt, 0x138},
+    {Key::LGui, 0x15B}, {Key::RGui, 0x15C}, // the Windows keys: E0 5B, E0 5C
 };
 
 static_assert(KV_COUNTOF(g_map) == (u32)Key::Count - 1, "every Key except Unknown has a scancode");

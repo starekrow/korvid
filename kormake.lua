@@ -33,7 +33,7 @@ root "windows" {
 -- renderer lands. The rest join as their milestones do.
 root "macos" {
   modules   = { "core", "math", "inflate", "pack", "xml", "platform", "cli", "tool", "tool_kpack", "save",
-                "bulletml", "platform_hid", "platform_audio", "example_sockit2m" },
+                "bulletml", "platform_hid", "platform_audio", "example_sockit2m", "example_window" },
   tests     = true,
   platforms = { "macos" },
 }

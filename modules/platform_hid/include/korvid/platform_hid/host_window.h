@@ -1,6 +1,6 @@
 // Korvid platform: the host window. A platform service, owned below the outer engine:
-// over SDL3 on Linux, native Win32 on Windows. It is not an entity. Platform changes
-// arrive as events on the bus.
+// over SDL3 on Linux and macOS, native Win32 on Windows. It is not an entity. Platform
+// changes arrive as events on the bus.
 #pragma once
 #include "korvid/core/event.h"
 #include "korvid/platform_hid/input.h"
@@ -11,6 +11,7 @@ namespace kv {
 enum class WindowSurface : u8 {
     Software, // the system draws it; present_blank() works, nothing else draws
     Vulkan,   // a renderer creates a Vulkan surface from native_handle()
+    Metal,    // a renderer makes a CAMetalLayer view from native_handle() (the Apple family, through SDL)
 };
 
 struct WindowDesc {

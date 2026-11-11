@@ -14,8 +14,25 @@
 #include "sprite_common.slangh"
 
 [[vk::binding(1, 0)]] StructuredBuffer<GpuMaterial> gMaterials;
+#if defined(KV_TARGET_METAL)
+// Metal has no unbounded texture array: Slang would make gTextures[] a flexible array
+// member, which MSL refuses, and binding a fixed array of textures straight to a stage
+// runs out of slots long before 1024. A ParameterBlock is an argument buffer there (tier
+// 2: one 64-bit resource id per entry, samplers then textures), which is how Apple GPUs
+// do bindless. The size is renderer_internal.h's kMaxTextures; the names stay, so a game
+// shader that samples gTextures itself compiles for either backend. The Metal shader rule
+// defines KV_TARGET_METAL (docs/design/renderer-metal.md).
+struct BindlessSet {
+    SamplerState samplers[2];    // nearest, linear
+    Texture2D    textures[1024]; // kMaxTextures
+};
+ParameterBlock<BindlessSet> gBindless;
+#define gSamplers gBindless.samplers
+#define gTextures gBindless.textures
+#else
 [[vk::binding(0, 1)]] SamplerState                  gSamplers[2]; // nearest, linear
 [[vk::binding(1, 1)]] Texture2D                     gTextures[];  // variable count: last binding
+#endif
 
 struct SpriteVaryings {
     float4 pos   : SV_Position;

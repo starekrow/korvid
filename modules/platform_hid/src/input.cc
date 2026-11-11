@@ -11,6 +11,7 @@ static const char* const g_key_names[(u32)Key::Count] = {
     "Escape", "Space", "Enter", "Tab", "Backspace",
     "Left", "Right", "Up", "Down",
     "LShift", "RShift", "LCtrl", "RCtrl", "LAlt", "RAlt",
+    "LGui", "RGui",
 };
 
 const char* key_name(Key k) {

@@ -2,8 +2,8 @@
 
 What a person at the machine touches and looks at: the window, the keyboard, the mouse,
 gamepads, and the input action map over them. The window and keyboard backend is per
-platform, picked by the toolchain's source directories: SDL3 on Linux (`src/sdl3/`),
-native Win32 on Windows (`src/win32/`), behind `src/hid_backend.h`. Gamepads come from
+platform, picked by the toolchain's source directories: SDL3 on Linux and macOS
+(`src/sdl3/`), native Win32 on Windows (`src/win32/`), behind `src/hid_backend.h`. Gamepads come from
 SDL3 on every platform (`src/sdl3_pads/`). Nothing outside this module and
 `platform_audio` sees either, so a port adds a backend, not an API. The module starts
 headless: the display and gamepads come up with the first window.
@@ -152,4 +152,4 @@ What the module registers with the engine:
 
 ## Not in this module
 
-Touch, text input, more than one window, controller rumble, Windows and macOS backends.
+Touch, more than one window, controller rumble.
