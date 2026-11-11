@@ -21,7 +21,7 @@ root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
 root "windows" {
   modules   = { "core", "math", "inflate", "pack", "platform", "platform_hid", "cli", "tool", "tool_kpack",
                 "render", "asset", "sprite", "scene", "text", "anim", "collision", "tilemap", "level",
-                "platform_audio", "audio", "renderer-vulkan", "frameloop", "save", "ui", "xml", "bulletml", "image", "tool_picture",
+                "platform_audio", "audio", "renderer-vulkan", "touchpad", "frameloop", "save", "ui", "xml", "bulletml", "image", "tool_picture",
                 "example_window", "example_testbed", "example_stones", "example_rocks", "example_arcanum",
                 "example_cpukiller", "example_arcfire", "example_gallery" },
   tests     = true,
@@ -34,7 +34,7 @@ root "windows" {
 root "macos" {
   modules   = { "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "tool", "tool_kpack", "tool_picture", "save",
                 "bulletml", "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
-                "collision", "tilemap", "level", "audio", "ui", "frameloop", "renderer-metal",
+                "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal",
                 "example_sockit2m", "example_window", "example_testbed", "example_stones", "example_cpukiller",
                 "example_rocks", "example_arcanum", "example_arcfire", "example_gallery" },
   tests     = true,
@@ -48,7 +48,7 @@ root "macos" {
 root "ios" {
   modules   = { "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
                 "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
-                "collision", "tilemap", "level", "audio", "ui", "frameloop", "renderer-metal",
+                "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal",
                 "example_window", "example_testbed", "example_stones", "example_rocks", "example_arcanum",
                 "example_arcfire", "example_gallery" },
   tests     = true,

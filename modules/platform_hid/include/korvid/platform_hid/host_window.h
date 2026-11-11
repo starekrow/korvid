@@ -69,6 +69,12 @@ struct HostWindow {
     void on_modal(void (*fn)(void* ctx), void* ctx);
     // Framebuffer pixels per window unit: what pointer coordinates are scaled by.
     f32  pixel_scale() const;
+    // The framebuffer's edges that the system covers or rounds off (a phone's camera
+    // housing, its corners, the home indicator), in pixels: left, top, right, bottom. Zero
+    // on the desktop. Controls drawn on the screen stay inside them.
+    void safe_insets(f32 out[4]) const { for (u32 i = 0; i < 4; ++i) out[i] = insets_[i]; }
+    // Whether the screen is touched rather than pointed at: a phone's or a tablet's.
+    bool touch_screen() const;
 
     // For WindowSurface::Software only: fills the window with a flat color. Wayland maps a
     // window only after a buffer is attached to its surface, so a window nobody draws to
@@ -89,6 +95,7 @@ struct HostWindow {
     u32   height_     = 0;
     bool  vsync_      = true;
     bool  focused_    = false;
+    f32   insets_[4]  = {};
     void (*modal_fn_)(void*) = nullptr;
     void* modal_ctx_  = nullptr;
     void* modal_timer_ = nullptr; // the backend's: on macOS a CFRunLoopTimer in the event-tracking mode

@@ -1,0 +1,8 @@
+{
+  "stick": {"mode": "drag"},
+  "buttons": [
+    {"name": "Thrust", "pad": "South", "from": "bottom_right", "at": [56, 128],  "radius": 38},
+    {"name": "Fire",   "pad": "West",  "from": "bottom_right", "at": [128, 64],  "radius": 38},
+    {"name": "Pause",  "pad": "Start", "from": "top_right",    "at": [40, 40],   "radius": 20}
+  ]
+}

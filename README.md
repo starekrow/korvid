@@ -92,6 +92,10 @@ modules too (`toolchain-linux`, `slang`).
                      external means here, and the default bindings (render, shader-compile)
     slang            the shader compiler as a module: provides shader-compile and the rule
                      that turns .slang into SPIR-V; a system lookup until a binary is vendored
+    touchpad         a gamepad on a touch screen: a stick where the left thumb lands, buttons
+                     as translucent circles, laid out by JSON (touchpad/default.json); it
+                     fills a pad slot, so a game's pad bindings work on a phone unchanged.
+                     On where the screen is touched; --touchpad tries it with the mouse
     frameloop        what every game needs and no game decides: options, window and
                      renderer from a FrameLoopConfig, the loop (pump, ticks, extract,
                      render), resize, reporting, ExitRequested on the bus

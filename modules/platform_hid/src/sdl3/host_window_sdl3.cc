@@ -272,6 +272,7 @@ void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {
 }
 
 bool hid_backend_holds_unfocused() { return false; }
+bool HostWindow::touch_screen() const { return false; }
 
 int platform_app_main(int argc, char** argv, int (*run)(int argc, char** argv, void* ctx), void* ctx) {
     return run(argc, argv, ctx);

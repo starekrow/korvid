@@ -10,6 +10,7 @@ constinit const kv::FrameLoopConfig k_config = {
     .height = 720,
     .exit_on_escape = false, // Escape opens the menu
     .clear_color = {0.0f, 0.0f, 0.0f, 1.0f},
+    .touchpad_layout = "example_arcanum/touchpad.json", // A chooses, B goes back, Hammer, Menu
     .flags  = k_flags,
 };
 }

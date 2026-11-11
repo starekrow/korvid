@@ -10,7 +10,8 @@
 // view a UIView whose layer is a CAMetalLayer (native_handle() is that view). Focus is the
 // scene's activation: active is focused, and on iOS an unfocused window holds the sim
 // (hid_backend_holds_unfocused). A hardware keyboard's keys arrive as presses with their HID
-// usages (input_ios.cc). Touch, gamepads and text input are slice 8's.
+// usages (input_ios.cc). Touches go to Input's touch list, with the safe area's insets on the
+// window (the touchpad module turns them into a pad). Gamepads and text input are slice 8's.
 //
 // Objective-C without ARC, as renderer-metal: the few objects here live as long as the
 // window, made and released explicitly. UIKit calls arrive on the main thread, which is the
@@ -29,12 +30,13 @@ namespace kv {
 
 namespace {
 
-enum class IosMsgType : u8 { Size, Focus, Key, Close };
+enum class IosMsgType : u8 { Size, Focus, Key, Close, TouchBegan, TouchMoved, TouchEnded };
 
 struct IosMsg {
     IosMsgType type;
     bool       on;   // Focus: focused; Key: down
-    u32        a, b; // Size: width, height in pixels; Key: the HID usage
+    u32        a, b; // Size: width, height in pixels; Key: the HID usage; Touch*: the touch's id in a
+    f32        f[4]; // Size: the safe area's insets, pixels (left, top, right, bottom); Touch*: x, y in pixels
 };
 
 constexpr u32 kRing = 512; // a frame's worth of UIKit's events, many times over
@@ -69,7 +71,29 @@ void post_size(UIView* v) {
     m.type = IosMsgType::Size;
     m.a = (u32)(v.bounds.size.width * s + 0.5);
     m.b = (u32)(v.bounds.size.height * s + 0.5);
+    UIEdgeInsets in = v.safeAreaInsets;
+    m.f[0] = (f32)(in.left * s); m.f[1] = (f32)(in.top * s); m.f[2] = (f32)(in.right * s); m.f[3] = (f32)(in.bottom * s);
     post(m);
+}
+
+// A UITouch is the same object for the touch's whole life: its address, folded, is the id
+// (never 0).
+u32 touch_id(UITouch* t) {
+    uintptr_t p = (uintptr_t)t;
+    return (u32)((p >> 4) ^ (p >> 36)) | 0x80000000u;
+}
+
+void post_touches(UIView* v, NSSet<UITouch*>* touches, IosMsgType type) {
+    CGFloat s = v.contentScaleFactor;
+    for (UITouch* t in touches) {
+        CGPoint p = [t locationInView:v];
+        IosMsg m{};
+        m.type = type;
+        m.a = touch_id(t);
+        m.f[0] = (f32)(p.x * s);
+        m.f[1] = (f32)(p.y * s);
+        post(m);
+    }
 }
 
 void post_focus(bool on) {
@@ -95,6 +119,14 @@ void post_focus(bool on) {
     self.layer.contentsScale = self.contentScaleFactor;
     kv::post_size(self);
 }
+- (void)safeAreaInsetsDidChange {
+    [super safeAreaInsetsDidChange];
+    kv::post_size(self);
+}
+- (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event     { (void)event; kv::post_touches(self, touches, kv::IosMsgType::TouchBegan); }
+- (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event     { (void)event; kv::post_touches(self, touches, kv::IosMsgType::TouchMoved); }
+- (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event     { (void)event; kv::post_touches(self, touches, kv::IosMsgType::TouchEnded); }
+- (void)touchesCancelled:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event { (void)event; kv::post_touches(self, touches, kv::IosMsgType::TouchEnded); }
 @end
 
 // The view's controller: full screen, no status bar, and the first responder, so a hardware
@@ -242,6 +274,8 @@ bool HostWindow::open(const WindowDesc& desc) {
     vsync_   = desc.vsync;
     width_   = (u32)(v.bounds.size.width * s + 0.5);
     height_  = (u32)(v.bounds.size.height * s + 0.5);
+    UIEdgeInsets in = v.safeAreaInsets;
+    insets_[0] = (f32)(in.left * s); insets_[1] = (f32)(in.top * s); insets_[2] = (f32)(in.right * s); insets_[3] = (f32)(in.bottom * s);
     g_app.active = g_app.scene.activationState == UISceneActivationStateForegroundActive;
     focused_ = g_app.active;
     g_app.head = g_app.tail; // what came before the window is in its fields
@@ -261,12 +295,14 @@ void HostWindow::close() {
 
 void HostWindow::present_blank() {} // UIKit shows the view's background; nothing to attach
 void HostWindow::text_input(bool) {} // slice 8: the on-screen keyboard
+bool HostWindow::touch_screen() const { return true; }
 
 f32 HostWindow::pixel_scale() const {
     return native_ ? (f32)((UIView*)native_).contentScaleFactor : 1.0f;
 }
 
 void HostWindow::pump(EventBus& bus, Input& input) {
+    input.raw.touches_settle(); // the touches that ended in the last pump are gone
     @autoreleasepool {
         while (CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true) == kCFRunLoopRunHandledSource) {}
         // Off screen: nothing may be drawn and nothing is seen; wait in UIKit's loop until
@@ -287,6 +323,7 @@ void HostWindow::drain(EventBus& bus, Input& input) {
         IosMsg m = g_app.ring[g_app.head++ % kRing];
         switch (m.type) {
         case IosMsgType::Size:
+            for (u32 i = 0; i < 4; ++i) insets_[i] = m.f[i];
             if (m.a != width_ || m.b != height_) {
                 width_ = m.a;
                 height_ = m.b;
@@ -310,6 +347,15 @@ void HostWindow::drain(EventBus& bus, Input& input) {
         }
         case IosMsgType::Close:
             bus.emit(CloseRequested{0});
+            break;
+        case IosMsgType::TouchBegan:
+            input.raw.touch_begin(m.a, m.f[0], m.f[1]); // all ten taken: this one is not seen
+            break;
+        case IosMsgType::TouchMoved:
+            if (TouchPoint* t = input.raw.touch(m.a)) { t->x = m.f[0]; t->y = m.f[1]; }
+            break;
+        case IosMsgType::TouchEnded:
+            if (TouchPoint* t = input.raw.touch(m.a)) { t->x = m.f[0]; t->y = m.f[1]; t->ended = true; }
             break;
         }
     }

@@ -13,6 +13,7 @@ constinit const kv::FrameLoopConfig k_config = {
     .width  = 1280,
     .height = 720,
     .exit_on_escape = false, // Escape pauses; Q quits
+    .touchpad_layout = "example_rocks/touchpad.json", // A thrusts, B fires
     .flags  = k_flags,
     .engine = {.heaps = k_heaps, .module_heaps = k_module_heaps},
 };

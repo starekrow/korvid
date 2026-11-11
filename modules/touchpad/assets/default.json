@@ -1,0 +1,14 @@
+{
+  "stick": {
+    "region": [0.0, 0.25, 0.5, 0.75],
+    "margin": 72,
+    "radius": 56,
+    "mode": "drag"
+  },
+  "buttons": [
+    {"name": "A",     "pad": "South", "from": "bottom_right", "at": [128, 64],  "radius": 38},
+    {"name": "B",     "pad": "East",  "from": "bottom_right", "at": [56, 128],  "radius": 38},
+    {"name": "Start", "pad": "Start", "from": "top_right",    "at": [40, 40],   "radius": 20}
+  ],
+  "opacity": 0.35
+}

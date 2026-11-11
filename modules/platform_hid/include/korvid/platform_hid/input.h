@@ -74,6 +74,18 @@ struct GamepadState {
     f32  axis(PadAxis a) const { return axes[(u32)a]; }
 };
 
+// A finger on a touch screen, in framebuffer pixels with the origin at the window's
+// top-left (as MouseState). `id` is nonzero while the slot is in use and the same for the
+// touch's whole life. A touch that has ended stays one pump with `ended` set, at the place
+// it left, so a tap that began and ended between two pumps is still seen once; the next
+// pump drops it.
+constexpr u32 KV_MAX_TOUCHES = 10;
+struct TouchPoint {
+    u32  id    = 0;
+    f32  x = 0.0f, y = 0.0f;
+    bool ended = false;
+};
+
 constexpr u32 KV_INPUT_TEXT_MAX = 64; // bytes of typed text one tick carries, the NUL included
 
 // Keys held and pads as they are, and what was typed: UTF-8 text from the OS's text input
@@ -83,6 +95,7 @@ struct InputState {
     u64          bits[((u32)Key::Count + 63) / 64] = {};
     GamepadState pads[KV_MAX_GAMEPADS];
     MouseState   mouse;
+    TouchPoint   touches[KV_MAX_TOUCHES];
     char         text[KV_INPUT_TEXT_MAX] = {};
     u32          text_len   = 0;
     u32          backspaces = 0;
@@ -106,8 +119,22 @@ struct InputState {
         for (GamepadState& p : pads) { p.buttons = 0; for (f32& a : p.axes) a = 0.0f; }
         mouse.buttons = 0;
         mouse.wheel   = 0.0f;
+        for (TouchPoint& t : touches) t = TouchPoint{};
         text[0] = 0; text_len = 0; backspaces = 0;
     }
+    // Touches: the slot of `id`, or a free one for a new touch (null when all are taken).
+    TouchPoint* touch(u32 id) {
+        for (TouchPoint& t : touches) if (t.id == id) return &t;
+        return nullptr;
+    }
+    TouchPoint* touch_begin(u32 id, f32 x, f32 y) {
+        TouchPoint* t = touch(id);
+        if (!t) t = touch(0);
+        if (t) *t = TouchPoint{id, x, y, false};
+        return t;
+    }
+    // A pump's start: the touches that ended in the last one are gone.
+    void touches_settle() { for (TouchPoint& t : touches) if (t.ended) t = TouchPoint{}; }
     // The first connected pad, or null.
     const GamepadState* pad() const {
         for (const GamepadState& p : pads) if (p.connected) return &p;

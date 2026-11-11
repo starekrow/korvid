@@ -17,6 +17,7 @@
 #include "korvid/scene/module.h"
 #include "korvid/text/module.h"
 #include "korvid/cli/module.h"
+#include "korvid/touchpad/module.h"
 #include "korvid/frameloop/module.h"
 #include "korvid/example_cpukiller/module.h"
 
@@ -30,6 +31,7 @@ constinit const kv::ModuleDesc* const k_window_modules[] = {
     &kv::scene_module, // the frame loop's: its overlay is text, which is scene's, and it serves the CLI
     &kv::text_module,
     &kv::cli_module,
+    &kv::touchpad_module, // the frame loop's: the on-screen pad
     &kv::frameloop_module,
     &kv::example_cpukiller_module,
 };

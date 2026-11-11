@@ -1,0 +1,8 @@
+{
+  "buttons": [
+    {"name": "A",      "pad": "South", "from": "bottom_right", "at": [128, 56],  "radius": 38},
+    {"name": "B",      "pad": "East",  "from": "bottom_right", "at": [56, 128],  "radius": 38},
+    {"name": "Hammer", "pad": "West",  "from": "bottom_right", "at": [200, 128], "radius": 38},
+    {"name": "Menu",   "pad": "Start", "from": "top_right",    "at": [40, 40],   "radius": 20}
+  ]
+}

@@ -12,6 +12,7 @@
 #include "korvid/platform_hid/events.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/module.h"
+#include "korvid/touchpad/module.h"
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/camera.h"
 #include "korvid/sprite/module.h"
@@ -55,6 +56,7 @@ PlatformMounts  g_mounts;                 // --pack FILE (repeatable), --assets 
 f64             g_idle_margin  = 0.0015;  // --idle-margin-ms N: slack kept back from idle work
 bool            g_idle         = true;    // --no-idle
 bool            g_overlay      = false;   // --overlay: the report on screen
+bool            g_touchpad     = false;   // --touchpad: the on-screen pad, the mouse a finger
 
 constexpr u32 kOverlayLines = 8;
 constexpr f32 kOverlayPx    = 16.0f;
@@ -153,6 +155,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--idle-margin-ms") == 0 && i + 1 < argc) g_idle_margin = atof(argv[++i]) * 1e-3;
         else if (strcmp(argv[i], "--no-idle") == 0) g_idle = false;
         else if (strcmp(argv[i], "--overlay") == 0) g_overlay = true;
+        else if (strcmp(argv[i], "--touchpad") == 0) g_touchpad = true;
         else if (strcmp(argv[i], "--spike-hunt") == 0) dev_spike_hunt(true);
         else if (strcmp(argv[i], "--sprite-rows") == 0 && i + 1 < argc) cfg.sprite_rows = (u32)strtoul(argv[++i], nullptr, 10);
         else if (strcmp(argv[i], "--capacity") == 0 && i + 1 < argc) {
@@ -178,7 +181,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay] [--touchpad] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE]", argv[0]);
             return false;
         }
     }
@@ -226,6 +229,8 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     s->renderer = renderer_create(engine, rd);
     if (!s->renderer) return false;
     if (s->config.sprite_rows) sprite_rows_hint(engine, s->config.sprite_rows); // the extract's tables, sized once too
+    if (s->config.touchpad_layout) touchpad_layout(engine, s->config.touchpad_layout);
+    if (g_touchpad) touchpad_enable(engine, true); // a touch screen turns it on by itself
 
     if (g_overlay) {
         s->overlay_font = asset_load_font(engine, "text/DejaVuSans.ttf", kOverlayPx);

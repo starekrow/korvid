@@ -398,6 +398,27 @@ development profile.
   UIKit's appearance transitions: close now hides the one window and open shows it again.
   The gallery goes through `platform_app_main` as `example_window` does.
 
+## The touchpad
+
+`modules/touchpad`: a gamepad on the screen. Touches reach `Input` from the iOS view
+(`TouchPoint`s in framebuffer pixels; an ended one stays one pump, so a tap between two
+frames is seen), with the safe area's insets on the window. The module's pump hook, after
+platform_hid's, turns them into a pad in a slot of its own (the last free one): the left
+stick from the first new finger in the stick's region (not on a button), its centre where
+it landed kept `margin` points inside the region, `radius` points of travel, and past it
+the centre follows the thumb (`drag`) or stays (`clamp`); buttons held while a finger other
+than the stick's is on one (sliding between them works), a tap held `min_press` so a tick
+samples it. Every game binds `stick left` and `pad South`/`East`/`Start`, so they all work
+unchanged. The layout is JSON (`assets/default.json`, or `FrameLoopConfig::touchpad_layout`):
+the stick's region and mode, the buttons' pads, corners, offsets and radii, the opacity, in
+points inside the safe area. Drawn as screen-space sprites over the UI: a ring and a faint
+disc per button (brighter while held), the stick's ring and knob while a thumb is on it;
+textures made at startup. On where the window's screen is touched; `--touchpad` turns it on
+with the left mouse button as a finger. The logic is plain arithmetic, tested headless
+(`touchpad_tests`: the layout and its refusals, placement in the safe area, drag and clamp,
+the margins, one stick, slides, taps, the stick's finger never pressing a button). Textures
+and layout rules beyond positions are to come.
+
 ### Still to come
 
 - One CPU side for both renderers (milestone 5, waiting on a decision).
