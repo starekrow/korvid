@@ -50,6 +50,7 @@ struct IosApp {
     UIWindowScene* scene = nil;
     UIWindow*      window = nil;
     UIViewController* controller = nil;
+    UIInterfaceOrientationMask orientations = UIInterfaceOrientationMaskAll; // what the window asked for
     IosMsg ring[kRing];
     u32    head = 0, tail = 0; // UIKit pushes at tail, pump takes from head
     u32    dropped = 0;
@@ -113,6 +114,7 @@ void post_focus(bool on) {
 - (BOOL)prefersStatusBarHidden { return YES; }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 - (BOOL)canBecomeFirstResponder { return YES; }
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return kv::g_app.orientations; }
 - (void)kvPresses:(NSSet<UIPress*>*)presses down:(BOOL)down {
     for (UIPress* p in presses) {
         if (!p.key) continue;
@@ -206,15 +208,34 @@ bool HostWindow::open(const WindowDesc& desc) {
     f64 start = time_now();
     while (!g_app.scene && time_now() - start < 5.0) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
     if (!g_app.scene) { KV_ERROR("window", "no window scene connected"); return false; }
+    // The screen is the window; what the size asked for says is its shape: wider than tall
+    // is landscape (either way up), else portrait.
+    bool landscape = desc.width > desc.height;
+    g_app.orientations = landscape ? UIInterfaceOrientationMaskLandscape : UIInterfaceOrientationMaskPortrait;
     @autoreleasepool {
-        g_app.window = [[UIWindow alloc] initWithWindowScene:g_app.scene];
-        g_app.controller = [[KVViewController alloc] init];
-        g_app.window.rootViewController = g_app.controller;
+        // One window for the process: made once, hidden by close and shown again by open
+        // (tearing a window down and making another in the same moment unbalances UIKit's
+        // appearance transitions).
+        if (!g_app.window) {
+            g_app.window = [[UIWindow alloc] initWithWindowScene:g_app.scene];
+            g_app.controller = [[KVViewController alloc] init];
+            g_app.window.rootViewController = g_app.controller;
+        }
+        g_app.window.hidden = NO;
         [g_app.window makeKeyAndVisible];
         [g_app.controller becomeFirstResponder];
+        [g_app.controller setNeedsUpdateOfSupportedInterfaceOrientations];
+        UIWindowSceneGeometryPreferencesIOS* geo = [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:g_app.orientations];
+        [g_app.scene requestGeometryUpdateWithPreferences:geo errorHandler:nil];
+        [geo release];
         [g_app.controller.view layoutIfNeeded];
     }
+    // The turn, when there is one, takes a moment: wait for the view to have its shape, so
+    // the first frame is drawn at the size it will keep.
     UIView* v = g_app.controller.view;
+    start = time_now();
+    while ((v.bounds.size.width > v.bounds.size.height) != landscape && time_now() - start < 2.0)
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, true);
     CGFloat s = v.contentScaleFactor;
     native_  = v;
     surface_ = desc.surface;
@@ -224,21 +245,14 @@ bool HostWindow::open(const WindowDesc& desc) {
     g_app.active = g_app.scene.activationState == UISceneActivationStateForegroundActive;
     focused_ = g_app.active;
     g_app.head = g_app.tail; // what came before the window is in its fields
-    KV_INFO("window", "opened '%s' %ux%u px (the screen at %.0fx; asked for %ux%u, which iOS does not do)", desc.title, width_, height_,
-            (f64)s, desc.width, desc.height);
+    KV_INFO("window", "opened '%s' %ux%u px, %s (the screen at %.0fx; asked for %ux%u, which iOS takes as the shape)", desc.title,
+            width_, height_, landscape ? "landscape" : "portrait", (f64)s, desc.width, desc.height);
     return true;
 }
 
 void HostWindow::close() {
     if (!native_) return;
-    @autoreleasepool {
-        g_app.window.hidden = YES;
-        g_app.window.rootViewController = nil;
-        [g_app.controller release];
-        [g_app.window release];
-    }
-    g_app.controller = nil;
-    g_app.window = nil;
+    g_app.window.hidden = YES; // kept for the next open: see there
     native_ = nullptr;
     width_ = height_ = 0;
     focused_ = false;

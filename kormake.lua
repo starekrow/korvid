@@ -43,12 +43,14 @@ root "macos" {
 
 -- iOS and its Simulator (slice 7, milestones 7 and 8): native UIKit, Core Audio and Metal,
 -- no SDL. The modules with their tests, which run in the booted Simulator (kormake test
--- iossim-dev), and example_testbed, which `kormake package iossim-dev example_testbed`
--- makes an app of. `ios` builds the same for a device; nothing runs it yet (slice 8).
+-- iossim-dev) or on a device (kormake test ios-dev), and the games, which `kormake package
+-- ios-dev <game>` makes apps of. The Simulator cannot draw them (no indirect draws).
 root "ios" {
   modules   = { "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
                 "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
-                "collision", "tilemap", "level", "audio", "ui", "frameloop", "renderer-metal", "example_window", "example_testbed" },
+                "collision", "tilemap", "level", "audio", "ui", "frameloop", "renderer-metal",
+                "example_window", "example_testbed", "example_stones", "example_rocks", "example_arcanum",
+                "example_arcfire", "example_gallery" },
   tests     = true,
   platforms = { "ios", "iossim" },
 }

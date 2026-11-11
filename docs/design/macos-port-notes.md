@@ -383,6 +383,21 @@ development profile.
   colors as macOS's. 60 and not 120: an iPhone holds a CAMetalLayer to 60 Hz unless the
   Info.plist says `CADisableMinimumFrameDurationOnPhone`, which is slice 8's to decide.
 
+- **The games on the phone.** The `ios` root builds every game; each packaged for `ios-dev`,
+  installed and run with `devicectl` (`--demo` where there is one, 15 to 45 seconds, a
+  screenshot copied off): rocks, stones, arcanum, arcfire's Shoreline and Orbit (all six of
+  its shader libraries, the post pass, the nebula, the shimmer) and the testbed hold 60 fps
+  with no warning or error in their logs; sound through RemoteIO (rocks: 1,893 callbacks,
+  nothing clipped or dropped). The gallery writes its nine pictures at the screen's size,
+  which it says compare only with pictures of that size.
+- **What the games turned up.** Orientation: the screen is the window, and a game asked for
+  1280x720 was drawn in portrait. The window's shape now follows what was asked: wider
+  than tall is landscape either way up, else portrait (`supportedInterfaceOrientations`,
+  and a geometry request on the scene); `open` waits for the turn so the first frame is at
+  the size it keeps. And the gallery closes and reopens its window, which unbalanced
+  UIKit's appearance transitions: close now hides the one window and open shows it again.
+  The gallery goes through `platform_app_main` as `example_window` does.
+
 ### Still to come
 
 - One CPU side for both renderers (milestone 5, waiting on a decision).
