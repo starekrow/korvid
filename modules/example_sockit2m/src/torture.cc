@@ -44,10 +44,11 @@ f64 PumpClock::percentile_ms(f64 p) const {
 bool make_work_dir() {
     char base[480];
     if (g_opt.dir) snprintf(base, sizeof base, "%s", g_opt.dir);
-    else {
-        ssize_t n = readlink("/proc/self/exe", base, sizeof base - 1);
-        if (n <= 0) snprintf(base, sizeof base, ".");
-        else { base[n] = 0; char* slash = strrchr(base, '/'); if (slash) *slash = 0; }
+    else if (platform_exe_dir(base, sizeof base)) {
+        usize n = strlen(base);
+        if (n > 1 && (base[n - 1] == '/' || base[n - 1] == '\\')) base[n - 1] = 0; // joined with '/' below
+    } else {
+        snprintf(base, sizeof base, ".");
     }
     snprintf(g_work_dir, sizeof g_work_dir, "%s/sockit2m-XXXXXX", base);
     if (!mkdtemp(g_work_dir)) { KV_ERROR("sockit2m", "cannot create a working directory under '%s': %s", base, strerror(errno)); return false; }
@@ -76,8 +77,19 @@ bool write_working_set(f64* mb_per_s) {
 }
 
 // Drops the working set from the page cache (clean pages after sync; no root needed), so
-// the next read pass meets the disk rather than memory.
+// the next read pass meets the disk rather than memory. macOS has no posix_fadvise and no
+// unprivileged way to drop one file's pages (purge(8) is root's), so there the files are
+// flushed and the eviction reports failure: the run then says the cold pass may be warm.
 bool evict_working_set() {
+#if defined(__APPLE__)
+    for (u32 i = 0; i < g_opt.files; ++i) {
+        char path[600];
+        file_path(path, sizeof path, i);
+        int fd = open(path, O_RDONLY);
+        if (fd >= 0) { fsync(fd); close(fd); }
+    }
+    return false;
+#else
     bool ok = true;
     for (u32 i = 0; i < g_opt.files; ++i) {
         char path[600];
@@ -89,6 +101,7 @@ bool evict_working_set() {
         close(fd);
     }
     return ok;
+#endif
 }
 
 void remove_working_set() {

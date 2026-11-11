@@ -9,6 +9,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+// Linux sets close-on-exec and non-blocking as a socket is made (SOCK_CLOEXEC, accept4) and
+// suppresses SIGPIPE per send (MSG_NOSIGNAL). macOS has neither creation flag nor accept4,
+// so it sets the descriptor flags right after, and suppresses SIGPIPE once per socket with
+// SO_NOSIGPIPE. Nothing here forks between the two calls, so the gap is not a leak.
+#if defined(__APPLE__)
+#define KV_NET_APPLE 1
+#else
+#define KV_NET_APPLE 0
+#endif
+
 namespace kv {
 
 namespace {
@@ -18,11 +28,34 @@ bool set_nonblocking(int fd) {
     return flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
+#if KV_NET_APPLE
+// What Linux gets from SOCK_CLOEXEC and MSG_NOSIGNAL, for a descriptor made without them.
+void apple_socket_flags(int fd) {
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+}
+constexpr int kSendFlags = 0;
+#else
+constexpr int kSendFlags = MSG_NOSIGNAL;
+#endif
+
+// A TCP socket that is not inherited by child processes and never raises SIGPIPE.
+int tcp_socket() {
+#if KV_NET_APPLE
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s >= 0) apple_socket_flags(s);
+    return s;
+#else
+    return socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+#endif
+}
+
 } // namespace
 
 bool NetListener::open(u16 want_port, bool local_only) {
     close();
-    int s = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    int s = tcp_socket();
     if (s < 0) { KV_ERROR("net", "socket: %s", strerror(errno)); return false; }
     int one = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
@@ -49,7 +82,14 @@ void NetListener::close() {
 
 NetFd NetListener::accept() {
     if (fd < 0) return -1;
+#if KV_NET_APPLE
+    // A socket accepted from a non-blocking listener does not inherit O_NONBLOCK on macOS
+    // (it does not on Linux either, which is why accept4 is asked for it there).
+    int c = ::accept((int)fd, nullptr, nullptr);
+    if (c >= 0) { apple_socket_flags(c); set_nonblocking(c); }
+#else
     int c = ::accept4((int)fd, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
+#endif
     if (c < 0) {
         if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) KV_WARN("net", "accept: %s", strerror(errno));
         return -1;
@@ -91,7 +131,7 @@ void NetSocket::flush() {
     if (fd < 0 || closed || out.len == 0) return;
     u32 sent = 0;
     while (sent < out.len) {
-        ssize_t n = ::send((int)fd, out.data + sent, out.len - sent, MSG_NOSIGNAL);
+        ssize_t n = ::send((int)fd, out.data + sent, out.len - sent, kSendFlags);
         if (n > 0) { sent += (u32)n; continue; }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) break;
         if (n < 0 && (errno == ENOTCONN || errno == EINPROGRESS)) break; // still connecting
@@ -113,7 +153,7 @@ void NetSocket::close() {
 }
 
 bool net_connect_local(u16 port, NetSocket& out) {
-    int s = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    int s = tcp_socket();
     if (s < 0) return false;
     set_nonblocking(s);
     sockaddr_in addr{};

@@ -51,7 +51,7 @@ primitives can do. `--compare` prints both in one table with a mode column.
 | scenario | what it measures |
 |---|---|
 | fs write | the disk's write number: `fwrite` then `sync`, setup |
-| fs read cold | the set evicted from the page cache (`posix_fadvise`), read through io_uring with `--inflight` reads out |
+| fs read cold | the set evicted from the page cache (`posix_fadvise`), read through io_uring with `--inflight` reads out; macOS cannot evict without root, so there it is warm and the run warns |
 | fs read hot | the same with the cache warm: the kernel completes the reads inside the submit |
 | fs read sync | the synchronous backend, hot (direct mode only; the platform's queue chose its backend) |
 | sockets bulk | `--conns` connections each streaming `--chunk` KB chunks, echoed and verified byte for byte |

@@ -11,7 +11,8 @@ usize os_page_size();
 void* os_reserve(usize size);
 // Makes [p, p + size) readable and writable; p and size are page aligned.
 bool  os_commit(void* p, usize size);
-// Returns the pages' contents to the OS; the range stays reserved.
+// Returns the pages' contents to the OS; the range stays reserved, and a later os_commit of
+// it reads as zeros on every platform.
 void  os_decommit(void* p, usize size);
 // Releases a reservation made by os_reserve, in full.
 void  os_release(void* p, usize size);

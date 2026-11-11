@@ -21,8 +21,16 @@ bool os_commit(void* p, usize size) {
 }
 
 void os_decommit(void* p, usize size) {
+#if defined(__APPLE__)
+    // MADV_DONTNEED is advice on macOS: the pages may stay resident and keep their bytes.
+    // A fresh anonymous mapping over the range releases them and reads as zeros on the next
+    // commit, as Linux's MADV_DONTNEED on private anonymous memory and Windows's
+    // MEM_DECOMMIT do. The range stays reserved: MAP_FIXED replaces, never unmaps.
+    mmap(p, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+#else
     madvise(p, size, MADV_DONTNEED);
     mprotect(p, size, PROT_NONE);
+#endif
 }
 
 void os_release(void* p, usize size) {

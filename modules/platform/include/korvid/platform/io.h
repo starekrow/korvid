@@ -182,8 +182,9 @@ const char* platform_base_path(Engine& e);
 // will not say.
 bool        platform_exe_dir(char* out, u32 cap);
 // The per-user directory for saves and settings, created if need be, with a trailing
-// separator: $XDG_DATA_HOME/<org>/<app>/, or ~/.local/share/<org>/<app>/, on
-// Linux (where SDL put it). The first call fixes the names for the process; "" if the OS has none.
+// separator: $XDG_DATA_HOME/<org>/<app>/, or ~/.local/share/<org>/<app>/, on Linux;
+// ~/Library/Application Support/<org>/<app>/ on macOS (where SDL puts it on each). The first
+// call fixes the names for the process; "" if the OS has none.
 const char* platform_pref_path(Engine& e, const char* org, const char* app);
 
 } // namespace kv

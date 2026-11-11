@@ -17,7 +17,9 @@
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #pragma GCC diagnostic ignored "-Wtype-limits"
-#pragma GCC diagnostic ignored "-Wclass-memaccess"
+#if !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wclass-memaccess" // gcc's alone; clang errors on a group it does not know
+#endif
 #endif
 #define MINIZ_NO_STDIO
 #define MINIZ_NO_TIME

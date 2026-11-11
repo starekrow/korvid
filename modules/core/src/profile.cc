@@ -161,9 +161,13 @@ void trace_record(u32 ri, const Ring& r, const ProfRecord& rec, const Open* open
     }
 }
 
+// Record i is safe to have read while the writer's index is below i + kRingCap: at
+// i + kRingCap the writer may be filling slot i % kRingCap with record i + kRingCap, before
+// it publishes the index that says so. So a ring kRingCap or more behind is read from one
+// past the oldest slot, and every record is checked again after it is read.
 void collect_ring(u32 ri, Ring& r) {
     u64 w = kv::atomic_load(&r.write, kv::MO_ACQUIRE);
-    if (w - r.read > kRingCap) { r.dropped += w - r.read - kRingCap; r.read = w - kRingCap; }
+    if (w - r.read >= kRingCap) { r.dropped += w - r.read - (kRingCap - 1); r.read = w - (kRingCap - 1); }
     u64 from = r.read;
     Array<Open>& stack = g_c.stacks[ri];
     if (!stack.alloc) stack.alloc = mem_general();
@@ -172,8 +176,11 @@ void collect_ring(u32 ri, Ring& r) {
     ts.name = r.name;
     for (u64 i = from; i < w; ++i) {
         ProfRecord rec = r.data[i % kRingCap];
-        // A record the writer has lapped since we started: the rest of this batch is suspect.
-        if (kv::atomic_load(&r.write, kv::MO_ACQUIRE) - i > kRingCap) { r.dropped += w - i; break; }
+        // A record the writer has lapped, or is overwriting, since we started: the rest of
+        // this batch is suspect. The fence keeps the record's loads before the re-read of
+        // the index; an acquire load alone would let them land after it on arm64.
+        kv::atomic_fence(kv::MO_ACQUIRE);
+        if (kv::atomic_load(&r.write, kv::MO_RELAXED) - i >= kRingCap) { r.dropped += w - i; break; }
         ProfKind k = kind_of(rec);
         const Open* ending = nullptr;
         Open ended{};

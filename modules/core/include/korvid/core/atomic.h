@@ -42,6 +42,13 @@ template <class T> inline T atomic_fetch_sub(T* p, typename AtomicArg<T>::type v
 template <class T> inline T atomic_add_fetch(T* p, typename AtomicArg<T>::type v, MemOrder o) { return __atomic_add_fetch(p, v, atomic_detail::order(o)); }
 template <class T> inline T atomic_sub_fetch(T* p, typename AtomicArg<T>::type v, MemOrder o) { return __atomic_sub_fetch(p, v, atomic_detail::order(o)); }
 
+// A fence: orders this thread's memory accesses around it without an atomic of its own.
+// The case that needs one: data read with plain loads and then validated by re-reading an
+// index (a seqlock, a ring that may lap its reader). An acquire load keeps later accesses
+// after it, not earlier ones; an acquire fence between the data and the re-read keeps the
+// data's loads before it. x64 never reorders loads with loads, arm64 does.
+inline void atomic_fence(MemOrder o) { __atomic_thread_fence(atomic_detail::order(o)); }
+
 #else
 
 namespace atomic_detail {
@@ -102,6 +109,13 @@ template <class T> inline T atomic_fetch_add(T* p, typename AtomicArg<T>::type v
 template <class T> inline T atomic_fetch_sub(T* p, typename AtomicArg<T>::type v, MemOrder o) { return atomic_fetch_add(p, (T)(T(0) - v), o); }
 template <class T> inline T atomic_add_fetch(T* p, typename AtomicArg<T>::type v, MemOrder o) { return (T)(atomic_fetch_add(p, v, o) + v); }
 template <class T> inline T atomic_sub_fetch(T* p, typename AtomicArg<T>::type v, MemOrder o) { return (T)(atomic_fetch_sub(p, v, o) - v); }
+
+// x64 orders loads with loads and stores with stores, so acquire and release fences are
+// compiler barriers; only a sequentially consistent one (a store, then a load) needs mfence.
+inline void atomic_fence(MemOrder o) {
+    if (o == MO_SEQ_CST) _mm_mfence();
+    else _ReadWriteBarrier();
+}
 
 #endif
 

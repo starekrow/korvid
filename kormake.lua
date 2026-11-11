@@ -6,7 +6,7 @@ requires_kormake "1.0"
 
 modulepath { "modules" }
 
-platforms { "linux", "windows" }
+platforms { "linux", "windows", "macos" }
 configs   { "debug", "dev", "ship" }
 
 -- Platform modules supply the defaults (toolchain.linux binds render and shader-compile);
@@ -26,4 +26,14 @@ root "windows" {
                 "example_cpukiller", "example_arcfire" },
   tests     = true,
   platforms = { "windows" },
+}
+
+-- macOS is slice 7 (docs/PRDs/Engine-Slice-7-PRD.md), brought up the same way. Milestone 1:
+-- everything that does not depend on "render", which has no backend here until the Metal
+-- renderer lands. The rest join as their milestones do.
+root "macos" {
+  modules   = { "core", "math", "inflate", "pack", "xml", "platform", "cli", "tool", "tool_kpack", "save",
+                "bulletml", "platform_hid", "platform_audio", "example_sockit2m" },
+  tests     = true,
+  platforms = { "macos" },
 }

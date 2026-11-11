@@ -41,6 +41,7 @@ local module_fields = {
   -- how it spells flags, and a probe that finds the tools on the host.
   link = true, rules = true, obj_suffix = true, exe_suffix = true, lib_file = true,
   flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, probe = true,
+  sdk = true, -- the Apple SDK the xcode probe asks xcrun for ("macosx")
 }
 
 -- module "name" { fields } or module "name" (defaults). One per file.
