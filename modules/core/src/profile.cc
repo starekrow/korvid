@@ -90,9 +90,14 @@ Ring* ring() {
     return r;
 }
 
+// The writer's half of the lap check: the fence keeps this record's stores after the
+// release that published the previous index. Without it, on arm64, a record lapping the one
+// a collector is copying could land before the index that says so, and the copy would pass
+// the check half written. (On x64 it is a compiler barrier.)
 inline void put(ProfKind kind, const char* name, u64 value) {
     Ring* r = ring();
     if (!r) return;
+    kv::atomic_fence(kv::MO_RELEASE);
     ProfRecord& rec = r->data[r->write % kRingCap];
     rec.ticks = (os_ticks() & kTickMask) | ((u64)kind << kKindShift);
     rec.name  = name;
@@ -273,6 +278,7 @@ Ring* track_ring(u32 track) { return track && track <= KV_PROF_MAX_RINGS ? &g_ri
 
 inline void put_at(Ring* r, ProfKind kind, const char* name, u64 value, u64 ticks) {
     if (!r) return;
+    kv::atomic_fence(kv::MO_RELEASE); // as put's
     ProfRecord& rec = r->data[r->write % kRingCap];
     rec.ticks = (ticks & kTickMask) | ((u64)kind << kKindShift);
     rec.name  = name;

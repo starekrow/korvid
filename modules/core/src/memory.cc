@@ -580,7 +580,9 @@ void small_free(void* user) {
             (kv::atomic_load(&p->nstate, kv::MO_ACQUIRE) & kNotifyMask) == kNotifyIdle) {
             if (p->in_full) list_remove(c.full[p->cls], p); else list_remove(c.partial[p->cls], p);
             lock_pages();
-            p->owner = 0; p->notify = nullptr; p->next = g_free_pages; g_free_pages = p;
+            p->owner = 0;
+            kv::atomic_store(&p->notify, (Notify*)nullptr, kv::MO_RELAXED); // no pusher reads it at zero; atomic, as everywhere else
+            p->next = g_free_pages; g_free_pages = p;
             unlock_pages();
         } else if (p->in_full) {
             list_remove(c.full[p->cls], p);

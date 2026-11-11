@@ -71,6 +71,11 @@ acquire or release could pass every test. Every lock-free structure was read aga
   compiler barrier on x64, `dmb` on arm64). The check was also one short on every platform:
   at `write == i + cap` the writer may be filling slot `i`, so that is lapped too, and an
   overrun ring is now read from one past its oldest slot.
+  The writer needed the seqlock writer's half as well (found reviewing the branch on Linux,
+  Nov 10): it stored a record's slot after the release that published the previous index,
+  and a release orders only what comes before it, so a lapping record could become visible
+  before the index that marks the lap. A release fence at the top of `put` and `put_at`
+  keeps the slot's stores after it (again a compiler barrier on x64).
 - **Fixed: the allocator stranded pages under concurrent remote frees.** See below. Not
   arm64's: Linux and Windows had it too.
 - **Minor, left:** `kv_handle_kind_name`, `_name_hash` and `_desc_get` check only the kind
