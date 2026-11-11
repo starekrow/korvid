@@ -198,7 +198,7 @@ Linux build has builds here (the `macos` root in `kormake.lua`).
    needed. If `xcrun` finds the Command Line Tools instead of Xcode, point it at Xcode:
    `sudo xcode-select -s /Applications/Xcode.app`.
 2. **Ninja and SDL 3.4.20** from Homebrew: `brew install ninja sdl3`. The version is
-   pinned in `modules/toolchain-macos/module.lua`, as on Windows. Elsewhere than
+   pinned in `modules/toolchain-apple/module.lua`, as on Windows. Elsewhere than
    `/opt/homebrew/opt/sdl3`? Set `KORMAKE_SDL3_DIR` to the folder that holds `include/`
    and `lib/`.
 3. **slangc**, the shader compiler: the macOS release from
@@ -221,3 +221,17 @@ inside a bundle), Homebrew's SDL3 copied into `Contents/Frameworks/` and linked 
 machine that built it; set `KORMAKE_CODESIGN_IDENTITY` to a Developer ID to sign for
 others (notarizing is up to you: `xcrun notarytool`). `build/macos-ship/package.log` has
 what the packager ran.
+
+iOS is coming up the same way (`ios` and `iossim` in `kormake.lua`), native (UIKit, Core
+Audio, Metal; no SDL): the same Xcode, with its iOS platform installed. The engine's tests
+run in a booted Simulator, and an app installs there:
+
+    xcrun simctl boot "iPhone 18 Pro"                      # any simulator; or open Simulator.app
+    tools/kormake/bin/macos/kormake test iossim-dev        # builds for the Simulator, runs each test in it
+    tools/kormake/bin/macos/kormake package iossim-dev example_window
+    xcrun simctl install booted dist/example_window/example_window.app
+    xcrun simctl launch --console-pty booted org.korvid.example-window   # its log in this terminal
+    tools/kormake/bin/macos/kormake build ios-dev          # the same for a device (nothing runs it yet)
+
+The Simulator's GPU has no indirect draws, which the renderer is built on, so a game starts
+there and stops at the renderer; drawing on iOS needs a device (A14 or later).

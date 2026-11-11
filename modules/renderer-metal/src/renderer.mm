@@ -68,7 +68,9 @@ void configure_layer(Renderer* r) {
     l.device             = r->device;
     l.pixelFormat        = MTLPixelFormatBGRA8Unorm_sRGB; // the hardware encodes linear to sRGB, as the Vulkan swapchain does
     l.maximumDrawableCount = 3;
+#if TARGET_OS_OSX
     l.displaySyncEnabled = r->vsync ? YES : NO;
+#endif // iOS presents at the display's refresh, always
 #if KV_DEV || KV_DEBUG
     l.framebufferOnly    = NO;  // --screenshot blits from the drawable
 #else

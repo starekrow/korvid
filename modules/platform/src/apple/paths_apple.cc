@@ -1,8 +1,10 @@
-// The executable's directory from dyld; the preference directory under
-// ~/Library/Application Support/<org>/<app>/, the same place SDL puts it on macOS. Inside
-// an .app (kormake package) the executable is in Contents/MacOS/ and what sits beside it
+// The Apple family's directories, macOS and iOS alike: the executable's directory from dyld;
+// the preference directory under ~/Library/Application Support/<org>/<app>/, the same place
+// SDL puts it (on iOS, HOME is the app's container, so this is inside it). Inside a macOS
+// .app (kormake package) the executable is in Contents/MacOS/ and what sits beside it
 // elsewhere (the pack, shaders/, assets/) is in Contents/Resources/: the base path is that,
-// when it is there. (An iOS app is flat, its resources beside the executable.)
+// when it is there. An iOS app is flat, its resources beside the executable, which is the
+// rule everywhere else. Plain POSIX and dyld, no Foundation: nothing here needs NSBundle.
 #include "../os_paths.h"
 #include "korvid/platform/io.h"
 #include "korvid/core/log.h"

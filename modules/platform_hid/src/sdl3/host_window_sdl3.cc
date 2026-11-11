@@ -5,12 +5,19 @@
 #include "../sdl3_pads/sdl_pads.h"
 #include <SDL3/SDL.h>
 #if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+// macOS's live resize (below): AppKit's, so not on iOS, where a window is the screen.
+#if defined(__APPLE__) && TARGET_OS_OSX
+#define KV_LIVE_RESIZE_TIMER 1
 #include <CoreFoundation/CoreFoundation.h>
+#else
+#define KV_LIVE_RESIZE_TIMER 0
 #endif
 
 namespace kv {
 
-#if defined(__APPLE__)
+#if KV_LIVE_RESIZE_TIMER
 // A live resize runs AppKit's event-tracking loop on the main thread, inside SDL_PollEvent,
 // until the mouse is released: pump does not return, and no frame runs. SDL sends live-resize
 // expose events from inside it, but only while the size changes, not while the mouse holds
@@ -105,7 +112,7 @@ bool HostWindow::open(const WindowDesc& desc) {
     width_   = (u32)pw;
     height_  = (u32)ph;
     focused_ = (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS) != 0;
-#if defined(__APPLE__)
+#if KV_LIVE_RESIZE_TIMER
     modal_timer_ = modal_timer_start(this);
 #endif
     KV_INFO("window", "opened '%s' %ux%u px", desc.title, width_, height_);
@@ -114,7 +121,7 @@ bool HostWindow::open(const WindowDesc& desc) {
 
 void HostWindow::close() {
     if (!native_) return;
-#if defined(__APPLE__)
+#if KV_LIVE_RESIZE_TIMER
     modal_timer_stop(modal_timer_);
     modal_timer_ = nullptr;
 #endif
@@ -262,6 +269,12 @@ void HostWindow::drain(EventBus& bus, Input& input) {
 void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {
     modal_fn_  = fn;
     modal_ctx_ = ctx;
+}
+
+bool hid_backend_holds_unfocused() { return false; }
+
+int platform_app_main(int argc, char** argv, int (*run)(int argc, char** argv, void* ctx), void* ctx) {
+    return run(argc, argv, ctx);
 }
 
 } // namespace kv

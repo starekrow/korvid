@@ -178,11 +178,13 @@ local function run(cmd, target, opts, rest)
     local dist = util.join(root, "dist/" .. exe)
     if not kfs.rmtree(dist) and kfs.isdir(dist) then util.fail("package: cannot remove %s", dist) end
     -- Where the executable goes and where what it reads goes: one directory, or for a
-    -- toolchain that packages applications (package = "app"), <exe>.app's Contents/MacOS/
-    -- and Contents/Resources/ (package_app.lua does the rest).
-    local app = inst.toolchain.fields.package == "app" and util.join(dist, exe .. ".app") or nil
-    local exe_dir = app and util.join(app, "Contents/MacOS") or dist
-    local res = app and util.join(app, "Contents/Resources") or dist
+    -- toolchain that packages applications, <exe>.app: a macOS one's (package = "app")
+    -- Contents/MacOS/ and Contents/Resources/, an iOS one's (package = "iosapp") top, where
+    -- both go (package_app.lua does the rest).
+    local kind = inst.toolchain.fields.package
+    local app = (kind == "app" or kind == "iosapp") and util.join(dist, exe .. ".app") or nil
+    local exe_dir = kind == "app" and util.join(app, "Contents/MacOS") or app or dist
+    local res = kind == "app" and util.join(app, "Contents/Resources") or app or dist
     kfs.mkdirp(exe_dir)
     kfs.mkdirp(util.join(res, "licenses"))
     local function copy_in(from, name) kfs.copy(from, util.join(res, name or util.basename(from))) end
@@ -196,6 +198,15 @@ local function run(cmd, target, opts, rest)
     local mods = {}
     for _, d in ipairs(inst.closure) do mods[#mods + 1] = d end
     mods[#mods + 1] = inst
+    -- Without a pack (an executable that has none), what it reads is the loose assets: its
+    -- modules' folders of bin/assets/, as the build staged them, into assets/.
+    local loose = 0
+    if not pack then
+      for _, d in ipairs(mods) do
+        local from = util.join(build, "bin/assets/" .. d.module.name)
+        if kfs.isdir(from) then util.copy_tree(from, util.join(res, "assets/" .. d.module.name)); loose = loose + 1 end
+      end
+    end
     for _, d in ipairs(mods) do
       for _, f in ipairs(util.as_list(d.module.fields.licenses or {})) do
         copy_in(util.join(d.module.dir, f), "licenses/" .. d.module.name .. "-" .. util.basename(f))
@@ -205,9 +216,10 @@ local function run(cmd, target, opts, rest)
     local bundle = ""
     if app then
       local libs, signed = kormake.load("package_app").run(build, app, exe_bin, inst.toolchain)
-      bundle = string.format(", %d librar%s bundled, signed %s", libs, libs == 1 and "y" or "ies", signed)
+      bundle = kind == "app" and string.format(", %d librar%s bundled, signed %s", libs, libs == 1 and "y" or "ies", signed) or (", signed " .. signed)
     end
-    print(string.format("kormake: %s: %s%s, %d license files%s%s", app or dist, exe, pack and (", " .. util.basename(pack)) or ", no pack", copied,
+    print(string.format("kormake: %s: %s%s, %d license files%s%s", app or dist, exe,
+      pack and (", " .. util.basename(pack)) or (loose > 0 and string.format(", loose assets of %d module%s", loose, loose == 1 and "" or "s") or ", no pack"), copied,
       bundle, kfs.isfile(util.join(root, "LICENSE")) and "" or " (the repository has no LICENSE at its root)"))
     return 0
   end
@@ -234,10 +246,15 @@ local function internal(args)
     kfs.copy(args[2], args[3])
     return 0
   end
-  if args[1] == "_test" and #args == 3 then
+  if args[1] == "_test" and #args >= 3 then
     local exe = util.native(args[2])
     if KORMAKE_HOST ~= "windows" and not util.is_abs(exe) and not exe:find("/") then exe = "./" .. exe end
-    local rc = kfs.exec(util.shell_quote(exe))
+    -- Under a runner (args 4 on: the toolchain's test_runner), the executable by its
+    -- absolute path: the runner's process does not start in the build directory.
+    local runner = {}
+    for i = 4, #args do runner[#runner + 1] = util.shell_quote(args[i]) end
+    if #runner > 0 then exe = util.join(kfs.cwd(), exe) end
+    local rc = kfs.exec((#runner > 0 and (table.concat(runner, " ") .. " ") or "") .. util.shell_quote(exe))
     if rc ~= 0 then return rc ~= -1 and rc or 1 end
     kfs.write(args[3], "", true)
     return 0

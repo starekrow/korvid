@@ -7,7 +7,8 @@
 //   mt_post_pass.mm    the full-frame pass: the world's target, the game's post shader
 //   mt_gpu_profile.mm  GPU timing: timestamps around the frame's encoders
 //   renderer.mm        the public API behind korvid/render/renderer.h, and the frame
-//   sdl3/mt_platform_sdl3.mm  the CAMetalLayer, from SDL's window
+//   sdl3/mt_platform_sdl3.mm  the CAMetalLayer, from SDL's window (macOS)
+//   ios/mt_platform_ios.mm    the CAMetalLayer, the layer of platform_hid's UIView (iOS)
 // This header and the sources next to it are the only place a Metal header is included.
 //
 // The CPU side is renderer-vulkan's, ported as it is (slice 7 extracts what the two share
@@ -374,9 +375,9 @@ void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLComputePassDescriptor* d);
 void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLRenderPassDescriptor* d, bool first, bool last);
 void mt_gpu_collect(Renderer* r, FrameInFlight& f); // it has completed
 
-// ---- sdl3/mt_platform_sdl3.mm ---------------------------------------------------------------
+// ---- sdl3/mt_platform_sdl3.mm, ios/mt_platform_ios.mm -------------------------------------
 // The layer to present through, from the window's native handle; null (logged) on failure.
-// *view_out is SDL's view, destroyed with mt_platform_release.
+// *view_out is a view to destroy with mt_platform_release (SDL's), or null.
 CAMetalLayer* mt_platform_layer(void* native_window, void** view_out);
 void          mt_platform_release(void* view);
 

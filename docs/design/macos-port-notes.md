@@ -277,10 +277,89 @@ the milestone found around them:
   instead of printing 0.
 - **README**: "Building on macOS".
 
+## Milestone 7: the Apple family
+
+- **Platforms `ios` and `iossim`** in the master file, served by one toolchain module,
+  `toolchain-apple` (was `toolchain-macos`), with a section per platform. kormake lays
+  `per_platform[<platform>]` over the module's fields (lists appended, maps merged, the
+  rest replaced) and names the result for the platform (`toolchain.apple.iossim`), so a
+  build that holds a target and the host keeps them apart. A section holds what differs:
+  the SDK (`macosx`, `iphoneos`, `iphonesimulator`), the `triple`, the platform's source
+  directory, packaging, SDL3 (macOS only) and, for the Simulator, a `test_runner`.
+- **`triple`** (`apple-macos26.0`, `apple-ios26.0`, `apple-ios26.0-simulator`): the xcode
+  probe passes `-target arm64-<triple>` to compile and link in place of `-arch` and
+  `-mmacosx-version-min`, and a tool rule may say `%{triple}`. The shader rule's Metal
+  variant is keyed by the toolchain's `family` ("apple") rather than a platform, and asks
+  Metal's compiler for `air64-<triple>`: a library is built for one OS, and before this the
+  macOS ones were built for slangc's default, macOS 14. The gallery is identical to its
+  references after the change.
+- **iOS's floor is iOS 26**, with macOS's. The Metal floor (Apple7, A14) is a little higher
+  than what iOS 26 runs on (A13); the renderer refuses such a device at start.
+- **`src/apple/`** holds the family's shared code: the paths, moved from `src/macos/`
+  (`_NSGetExecutablePath` and `HOME` serve both; on iOS `HOME` is the app's container, and
+  a flat bundle's resources are beside the executable, so no `NSBundle`). The check that
+  keeps AppKit out is the iOS build: an AppKit header does not exist in the iOS SDKs.
+  `platform_hid`'s live-resize timer is AppKit's run-loop mode, so it is `TARGET_OS_OSX`
+  only.
+- **The `ios` root** is every module below the render interface (core, math, inflate,
+  image, pack, xml, platform, cli, save, bulletml) with its tests. A module that uses
+  "render" links the bound backend, renderer-metal, and through it the window: those
+  join with milestone 8. `kormake gen` and `build` are clean for `iossim-dev` and
+  `ios-dev` (`vtool` reports IOSSIMULATOR and IOS, minos 26.0), and `kormake test
+  iossim-dev` runs all ten suites inside the booted Simulator (`xcrun simctl spawn
+  booted`): 10,823 checks pass.
+- **No SDL on iOS** (decided after the milestone): the iOS sections name only `src/ios/`.
+  The window, the lifecycle, audio and gamepads there are native (UIKit, Core Audio,
+  GameController), as the window is on Windows, instead of an SDL3 built from source.
+
+## Milestone 8: native iOS
+
+- **No SDL on iOS.** `platform_hid/src/ios/` is a UIKit backend, as `src/win32/` is a Win32
+  one: one window scene, one `UIWindow`, its root controller's view a `UIView` whose layer
+  class is `CAMetalLayer` (`native_handle()`); renderer-metal's `src/ios/` takes that layer.
+  The SDL3 external is the desktop's only (`platforms = { "linux", "windows", "macos" }`).
+- **The entry.** `platform_app_main(argc, argv, run, ctx)`, new in `host_window.h`, is a
+  plain call on the desktop. On iOS it calls `UIApplicationMain`; the app delegate, once
+  launched, runs `run` from a run-loop timer (not the main queue, which a nested loop would
+  starve) and `exit`s with its result. `pump` drains UIKit's loop
+  (`CFRunLoopRunInMode(..., 0, true)` until nothing is handled), so UIKit's events and the
+  scene's lifecycle arrive between frames and `frameloop` is the same loop as everywhere:
+  `frameloop_main` goes through `platform_app_main`, and so does `example_window`. The
+  SDK (iOS 27.2) wants the scene lifecycle: the app delegate hands out a configuration
+  whose delegate is ours, and the Info.plist declares a one-scene manifest.
+- **Lifecycle.** The scene's activation is the window's focus (`FocusChanged`); on iOS a
+  window without focus holds the sim (`HoldFocus`, through `hid_backend_holds_unfocused`,
+  false on the desktop). In the background `pump` waits in UIKit's loop until the scene is
+  back: no frame, no GPU work (iOS refuses it there). Seen in the Simulator with
+  `example_window`: focus lost when another app opened, "in the background: waiting",
+  back, focus gained, 4.5 ms frame gaps either side.
+- **Keys** from a hardware keyboard: `pressesBegan`/`Ended` on the view controller, their
+  HID usages through `input_ios.cc`'s table. Touch, gamepads (GameController) and text
+  input are slice 8's.
+- **Audio.** `platform_audio` splits its backend like platform_hid's (`audio_backend.h`):
+  SDL3 in `src/sdl3_audio/` (a new source directory on Linux, Windows and macOS), the
+  RemoteIO audio unit in `src/ios/`, an Ambient audio session. `audio_tests` pass in the
+  Simulator.
+- **Packaging.** `package = "iosapp"`: a flat bundle (executable, shaders, pack or loose
+  assets, licenses at the top), an iOS Info.plist (scene manifest, launch screen, full
+  screen, MinimumOSVersion), signed ad-hoc. A package without a pack now carries its
+  modules' loose `assets/` (the testbed has no pack). `kormake package iossim-dev
+  example_testbed`, then `xcrun simctl install booted dist/example_testbed/example_testbed.app`.
+- **The tests.** The `ios` root is the whole engine but the games: 21 suites build for the
+  Simulator and the device and pass inside the Simulator (`kormake test iossim-dev`).
+- **The Simulator cannot run the renderer.** Its GPU is an Apple2 with tier 1 argument
+  buffers and no indirect draws or dispatches; the GPU sort and the draws are both
+  indirect. Let past the check, the testbed's frame loop ran (60 to 150 fps, the clear color
+  presented), but the sprites drew black, and Metal's validation names the reason:
+  "Indirect draw & dispatch arguments is not supported on this device". The check stands
+  (now logging the family and tier it found). A device (A14 and later) is the renderer's
+  floor; drawing on iOS waits for a device run (slice 8) or a fallback path for the
+  Simulator. (Shader validation cannot run there at all: it binds buffers past slot 30.)
+
 ### Still to come
 
 - One CPU side for both renderers (milestone 5, waiting on a decision).
-- iOS: the platforms in kormake (milestone 7) and a Simulator run (milestone 8).
+- Drawing on iOS: a device, or a Simulator path without indirect commands.
 - The gallery's blends and shaders scenes sample their checker at 7.5 pixels a texel, so
   every edge is at a pixel centre and the backends round it differently; the Vulkan set
   and its tolerance follow the fix.

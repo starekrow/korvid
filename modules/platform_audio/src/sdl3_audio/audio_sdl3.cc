@@ -2,6 +2,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/thread.h"
+#include "../audio_backend.h"
 #include <SDL3/SDL.h>
 
 namespace kv {
@@ -84,6 +85,15 @@ void platform_audio_close(Engine& e) {
 const AudioDeviceInfo& platform_audio(Engine& e) {
     KV_UNUSED(e);
     return g_audio.info;
+}
+
+bool audio_backend_startup() {
+    SDL_SetHint(SDL_HINT_APP_NAME, "korvid");
+    return true;
+}
+
+void audio_backend_shutdown() {
+    if (SDL_WasInit(0) == 0) SDL_Quit(); // the last SDL user out (platform_hid may still hold video)
 }
 
 } // namespace kv

@@ -215,7 +215,11 @@ function M.run(c, g, opts)
   -- does them itself, so no rule needs a shell.
   local self = util.ninja_escape(program(kfs.self() or "kormake"))
   w("rule copy\n  command = " .. self .. ' _copy $in $out\n  description = COPY $out')
-  w("rule run_test\n  command = " .. self .. ' _test $in $out\n  description = TEST $in')
+  -- A test the host cannot run itself (the iOS Simulator's) runs under the toolchain's
+  -- test_runner, its words after the stamp.
+  local runner = g.toolchain.fields.test_runner
+  runner = runner and (" " .. table.concat(util.as_list(runner), " ")) or ""
+  w("rule run_test\n  command = " .. self .. ' _test $in $out' .. runner .. '\n  description = TEST $in')
   w("rule regen\n  command = " .. self .. " gen " .. target .. (opts.no_unity and " --no-unity" or "") ..
     (opts.cxx and (" --cxx " .. util.ninja_escape(q(opts.cxx))) or "") .. "\n  generator = 1\n  description = KORMAKE gen " .. target)
   w("")
@@ -237,11 +241,12 @@ function M.run(c, g, opts)
   end
   local tool_rules = {}
   -- A rule as a consuming instance's platform sees it: the rule's fields with those of its
-  -- `platforms[<platform>]` variant over them (the shader rule's Metal form on the Apple
-  -- family). The Ninja rule's name carries the platform only when a variant applies, so a
-  -- rule without one is named as it always was.
-  local function rule_variant(r, platform)
-    local v = r.platforms and r.platforms[platform]
+  -- `platforms[<platform>]` variant over them, or else of the variant for the platform's
+  -- toolchain family (the shader rule's Metal form, `platforms = { apple = ... }`). The
+  -- Ninja rule's name carries the platform only when a variant applies, so a rule without
+  -- one is named as it always was.
+  local function rule_variant(r, platform, family)
+    local v = r.platforms and (r.platforms[platform] or (family and r.platforms[family]))
     if not v then return r, "" end
     local out = {}
     for k, x in pairs(r) do if k ~= "platforms" then out[k] = x end end
@@ -252,7 +257,7 @@ function M.run(c, g, opts)
     for _, t in ipairs(inst.tools) do
       local tf = t.instance.module.fields
       for _, r0 in ipairs(tf.exports or {}) do
-        local r, variant = rule_variant(r0, inst.platform)
+        local r, variant = rule_variant(r0, inst.platform, flags(inst).tc.fields.family)
         local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant
         if not tool_rules[rname] then
           local tool, implicit = tool_path(t.instance)
@@ -263,6 +268,13 @@ function M.run(c, g, opts)
           cmd = cmd:gsub("%%{tool}", (util.ninja_escape(program(util.native(tool))):gsub("%%", "%%%%"))):gsub("%%{in}", "$in")
             :gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp")
             :gsub("%%{shader_includes}", (table.concat(shader_includes, " "):gsub("%%", "%%%%")))
+          -- The consuming platform's target ("apple-ios26.0-simulator"), for a compiler that
+          -- writes code for it (Metal's, through slangc).
+          if cmd:find("%{triple}", 1, true) then
+            local triple = flags(inst).tc.fields.triple or util.fail("rule '%s' of '%s' wants %%{triple}; toolchain '%s' has none",
+              r.name, t.instance.module.name, flags(inst).tc.rec.name)
+            cmd = cmd:gsub("%%{triple}", (triple:gsub("%%", "%%%%")))
+          end
           local rsp = r.per == "exe" and "\n  rspfile = $out.rsp\n  rspfile_content = $in" or ""
           w("rule " .. rname .. "\n  command = " .. cmd .. (r.deps == "depfile" and "\n  depfile = $out.d\n  deps = gcc" or "") .. rsp .. "\n  description = " .. r.name:upper() .. " $out")
           tool_rules[rname] = { rule = r, tool = tool, implicit = implicit }
@@ -373,7 +385,7 @@ function M.run(c, g, opts)
     local runtime = {}
     for _, t in ipairs(inst.tools) do
       for _, r0 in ipairs(t.instance.module.fields.exports or {}) do
-        local r, variant = rule_variant(r0, inst.platform)
+        local r, variant = rule_variant(r0, inst.platform, flags(inst).tc.fields.family)
         if r.per == "exe" then goto next_rule end -- runs once per executable, below
         local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant
         local pat_dir, pat_glob = util.dirname(r.inputs), util.basename(r.inputs)
@@ -497,7 +509,7 @@ function M.run(c, g, opts)
         -- default build in ship, buildable by name in the other configs.
         for _, t in ipairs(inst.tools) do
           for _, r0 in ipairs(t.instance.module.fields.exports or {}) do
-            local r, variant = rule_variant(r0, inst.platform)
+            local r, variant = rule_variant(r0, inst.platform, flags(inst).tc.fields.family)
             if r.per ~= "exe" then goto skip_rule end
             do
               local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant

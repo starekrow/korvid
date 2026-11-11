@@ -4,7 +4,7 @@
 -- sprite_fragment.slangh by name). A system lookup for now; a vendored binary would be
 -- prebuilt = { linux = "bin/linux/slangc" } in this directory.
 --
--- SPIR-V for Vulkan by default. On macOS a Metal library: Slang drives Xcode's Metal compiler
+-- SPIR-V for Vulkan by default. On the Apple family a Metal library: Slang drives Xcode's Metal compiler
 -- itself (the Metal Toolchain component must be installed), defines KV_TARGET_METAL for the
 -- render interface's Metal-only declarations, and writes its reflection beside the library
 -- (<out>.json: every parameter's binding by name), which a dev build of renderer-metal checks
@@ -20,9 +20,13 @@ module "slang" {
       command = "%{tool} %{in} %{shader_includes} -target spirv -fvk-use-entrypoint-name -depfile %{depfile} -o %{out}",
       deps    = "depfile",
       platforms = {
-        macos = {
+        -- The Apple family (toolchain.apple's family): Metal's compiler builds for the
+        -- consuming platform's triple (air64-apple-ios26.0-simulator), since a library is
+        -- built for one OS and an iOS Metal refuses a macOS library.
+        apple = {
           outputs = "%{stem}.metallib",
-          command = "%{tool} %{in} %{shader_includes} -target metallib -DKV_TARGET_METAL=1 -depfile %{depfile} -reflection-json %{out}.json -o %{out}",
+          command = "%{tool} %{in} %{shader_includes} -target metallib -DKV_TARGET_METAL=1 -Xmetal -target -Xmetal air64-%{triple} " ..
+                    "-depfile %{depfile} -reflection-json %{out}.json -o %{out}",
         },
       },
     },

@@ -41,6 +41,40 @@ function M.run(c, platform, config, opts)
     if p and p ~= "toolchain" then interfaces[p] = interfaces[p] or {}; interfaces[p][#interfaces[p] + 1] = rec.name end
   end
 
+  -- A toolchain as one of its platforms sees it: its fields with per_platform[<plat>] laid
+  -- over them. In the section a list is appended to the toolchain's list of the same name
+  -- (flags, source directories), a map is merged key by key (externals, bindings) and
+  -- anything else replaces. The result is a toolchain of its own, named for the platform,
+  -- so a build that holds two platforms of one module (a target and the host) keeps them
+  -- apart.
+  local function is_list(t) return next(t) == nil or t[1] ~= nil end
+  local function for_platform(rec, plat)
+    local sec = rec.fields.per_platform and rec.fields.per_platform[plat]
+    if not sec then return rec end
+    local fields = {}
+    for k, v in pairs(rec.fields) do if k ~= "per_platform" then fields[k] = v end end
+    for k, v in pairs(sec) do
+      local base = fields[k]
+      if type(v) == "table" and type(base) == "table" then
+        local out = {}
+        if is_list(v) and is_list(base) then
+          for _, x in ipairs(base) do out[#out + 1] = x end
+          for _, x in ipairs(v) do out[#out + 1] = x end
+        else
+          for kk, x in pairs(base) do out[kk] = x end
+          for kk, x in pairs(v) do out[kk] = x end
+        end
+        fields[k] = out
+      else
+        fields[k] = v
+      end
+    end
+    local out = {}
+    for k, v in pairs(rec) do out[k] = v end
+    out.name, out.fields = rec.name .. "." .. plat, fields
+    return out
+  end
+
   -- Per platform (the target's, and the host's when it differs): the toolchain, and the
   -- bindings, the toolchain's defaults then the master file's overrides.
   local per_platform = {}
@@ -54,6 +88,10 @@ function M.run(c, platform, config, opts)
       end
     end
     if not tc then util.fail("no toolchain module provides platform '%s'", plat) end
+    for p in pairs(tc.fields.per_platform or {}) do
+      if not has_platform(tc, p) then util.fail("toolchain '%s' has a section for '%s', which is not in its platforms", tc.name, p) end
+    end
+    tc = for_platform(tc, plat)
     local bindings = {}
     for iface, backend in pairs(tc.fields.bindings or {}) do bindings[iface] = util.as_list(backend) end
     for iface, per in pairs(master.binds) do

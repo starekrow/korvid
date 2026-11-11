@@ -15,7 +15,9 @@ namespace {
 // From platform_pump, before the I/O queue: OS events become bus events and raw input.
 void hid_pump(Engine& e, void* user) {
     HidState& s = *(HidState*)user;
-    if (s.window.is_open()) s.window.pump(e.events, s.input);
+    if (!s.window.is_open()) return;
+    s.window.pump(e.events, s.input);
+    if (hid_backend_holds_unfocused()) engine_hold(e, HoldFocus, !s.window.focused());
 }
 
 bool hid_startup(Engine& engine, ModuleInstance& self) {

@@ -18,7 +18,7 @@ module "toolchain.windows" {
   provides  = "toolchain",
   platforms = { "windows" },
   tag       = "windows",
-  srcdirs   = { "win32", "windows", "sdl3_pads" }, -- src/<dir>/ picked up on this platform, in this order
+  srcdirs   = { "win32", "windows", "sdl3_pads", "sdl3_audio" }, -- src/<dir>/ picked up on this platform, in this order
   probe     = "msvc",
   cxx       = "cl",
   ar        = "lib",

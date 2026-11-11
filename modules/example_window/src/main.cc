@@ -142,4 +142,7 @@ KV_MODULE_DEFINE(example_window_module) = {
 
 } // namespace kv
 
-int main(int argc, char** argv) { return kv::run(argc, argv); }
+// Through platform_app_main, so it runs on iOS as well (inside the application there).
+int main(int argc, char** argv) {
+    return kv::platform_app_main(argc, argv, [](int c, char** v, void*) { return kv::run(c, v); }, nullptr);
+}

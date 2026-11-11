@@ -1,8 +1,9 @@
 -- kormake: the Xcode probe, for a toolchain with probe = "xcode". Asks xcrun, which is
 -- the one thing that knows which developer directory is active (Xcode.app, or the Command
--- Line Tools alone), for the C++ compiler and the SDK of the toolchain's `sdk` ("macosx"),
--- and returns them as the Ninja file then holds them outright: an absolute clang++, and
--- -isysroot with the SDK's path. The build then works from any shell, regenerations
+-- Line Tools alone), for the C++ compiler and the SDK of the toolchain's `sdk` ("macosx",
+-- "iphoneos", "iphonesimulator"), and returns them as the Ninja file then holds them
+-- outright: an absolute clang++, -isysroot with the SDK's path, and -target from the
+-- toolchain's `triple`. The build then works from any shell, regenerations
 -- included, whatever PATH holds. KORMAKE_SDKROOT overrides the SDK's path.
 local util = kormake.load("util")
 local M = {}
@@ -30,7 +31,12 @@ function M.run(build, tc)
               "  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer", sdk, sdk)
   end
   local ar = capture(build, "ar", "xcrun --sdk " .. sdk .. " -f ar") or "ar"
-  return { cxx = cxx, ar = ar, cxxflags = { "-isysroot", q(root) }, ldflags = { "-isysroot", q(root) } }
+  -- The target: Apple silicon, the toolchain's triple (its OS, release floor and, for a
+  -- simulator, environment), so one clang serves the whole family.
+  local target = tc.fields.triple and { "-target", "arm64-" .. tc.fields.triple } or {}
+  local cxxflags, ldflags = { "-isysroot", q(root) }, { "-isysroot", q(root) }
+  for _, f in ipairs(target) do cxxflags[#cxxflags + 1] = f; ldflags[#ldflags + 1] = f end
+  return { cxx = cxx, ar = ar, cxxflags = cxxflags, ldflags = ldflags }
 end
 
 return M

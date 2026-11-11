@@ -6,8 +6,8 @@
 -- slice 7's milestone 7.
 module "renderer-metal" {
   provides  = "render",
-  platforms = { "macos" },
+  platforms = { "macos", "ios", "iossim" },
   deps      = { "core", "math", "render", "platform", "platform_hid" },
-  external  = { metal = ">=3", sdl3 = ">=3.2" },
+  external  = { metal = ">=3", sdl3 = { ">=3.2", platforms = { "macos" } } },
   engine_module = true,
 }

@@ -6,7 +6,7 @@ module "toolchain.linux" {
   provides  = "toolchain",
   platforms = { "linux" },
   tag       = "linux",
-  srcdirs   = { "posix", "linux", "sdl3", "sdl3_pads" }, -- src/<dir>/ picked up on this platform, in this order
+  srcdirs   = { "posix", "linux", "sdl3", "sdl3_pads", "sdl3_audio" }, -- src/<dir>/ picked up on this platform, in this order
   cxx       = "g++",
   ar        = "ar",
   cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-Wall", "-Wextra", "-Werror" },

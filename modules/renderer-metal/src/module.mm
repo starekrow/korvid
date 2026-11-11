@@ -19,7 +19,14 @@ bool renderer_metal_startup(Engine& e, ModuleInstance& self) {
         id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
         if (!dev) { KV_ERROR("metal", "no Metal device"); return false; }
         bool ok = [dev supportsFamily:MTLGPUFamilyApple7] && dev.argumentBuffersSupport == MTLArgumentBuffersTier2;
-        KV_INFO("metal", "device '%s'%s", dev.name.UTF8String, ok ? "" : ": not Apple7 with tier 2 argument buffers, which the renderer needs");
+        // The iOS Simulator's GPU is an Apple2: no indirect draws or dispatches, which the GPU
+        // sort and the draws are; it is refused here, as an A13 is.
+        int apple = 0; // the highest Apple family it reports, for the log
+        for (int f = 1; f <= 10; ++f)
+            if ([dev supportsFamily:(MTLGPUFamily)((int)MTLGPUFamilyApple1 + f - 1)]) apple = f;
+        KV_INFO("metal", "device '%s': Apple%d, Metal3 %s, argument buffers tier %d%s", dev.name.UTF8String, apple,
+                [dev supportsFamily:MTLGPUFamilyMetal3] ? "yes" : "no", dev.argumentBuffersSupport == MTLArgumentBuffersTier2 ? 2 : 1,
+                ok ? "" : "; the renderer needs Apple7 with tier 2");
         [dev release];
         if (!ok) return false;
     }

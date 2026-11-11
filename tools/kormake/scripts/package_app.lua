@@ -1,7 +1,8 @@
 -- kormake: what makes a package an Apple application bundle, for a toolchain with package =
--- "app". The package command has already put the executable in Contents/MacOS/ and what it
--- reads (the pack, shaders/, the licenses) in Contents/Resources/, where the platform's base
--- path finds them. This adds the rest:
+-- "app" (macOS) or "iosapp" (iOS and its Simulator). For "app" the package command has put
+-- the executable in Contents/MacOS/ and what it reads (the pack, shaders/, the licenses) in
+-- Contents/Resources/, where the platform's base path finds them; for "iosapp" both at the
+-- bundle's top, as iOS lays a bundle out. This adds the rest. For "app":
 --   - every dynamic library the executable links that is not the system's (otool -L), copied
 --     into Contents/Frameworks/, its install name @rpath/<name>, the executable's reference to
 --     it rewritten and an rpath of @executable_path/../Frameworks added, so the bundle runs
@@ -40,8 +41,59 @@ end
 
 local function plist_string(s) return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")) end
 
+-- An iOS bundle: flat, its Info.plist the iOS keys, one scene (platform_hid's delegate makes
+-- it), a launch screen (without one iOS shows the app letterboxed, in a compatibility mode),
+-- full screen. Nothing to bundle: the engine links no library that iOS does not have. Signed
+-- ad-hoc, which the Simulator runs; a device wants a provisioning profile (slice 8).
+local function ios_app(build, app, exe_name, tc)
+  local q = util.shell_quote
+  local id = "org.korvid." .. exe_name:gsub("[^%w%-%.]", "-")
+  local sim = tc.fields.sdk == "iphonesimulator"
+  local plist = {
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    '<dict>',
+    '  <key>CFBundleDevelopmentRegion</key><string>en</string>',
+    '  <key>CFBundleExecutable</key><string>' .. plist_string(exe_name) .. '</string>',
+    '  <key>CFBundleIdentifier</key><string>' .. plist_string(id) .. '</string>',
+    '  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>',
+    '  <key>CFBundleName</key><string>' .. plist_string(exe_name) .. '</string>',
+    '  <key>CFBundlePackageType</key><string>APPL</string>',
+    '  <key>CFBundleShortVersionString</key><string>1.0</string>',
+    '  <key>CFBundleVersion</key><string>1</string>',
+    '  <key>CFBundleSupportedPlatforms</key><array><string>' .. (sim and "iPhoneSimulator" or "iPhoneOS") .. '</string></array>',
+    '  <key>LSRequiresIPhoneOS</key><true/>',
+    '  <key>MinimumOSVersion</key><string>' .. plist_string(tc.fields.os_min or "") .. '</string>',
+    '  <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>',
+    '  <key>UIRequiredDeviceCapabilities</key><array><string>arm64</string><string>metal</string></array>',
+    '  <key>UILaunchScreen</key><dict/>',
+    '  <key>UIStatusBarHidden</key><true/>',
+    '  <key>UIRequiresFullScreen</key><true/>',
+    '  <key>UIApplicationSceneManifest</key><dict>',
+    '    <key>UIApplicationSupportsMultipleScenes</key><false/>',
+    '  </dict>',
+    '  <key>UISupportedInterfaceOrientations</key><array>',
+    '    <string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string>',
+    '    <string>UIInterfaceOrientationPortrait</string>',
+    '  </array>',
+    '</dict>',
+    '</plist>',
+  }
+  kfs.write(util.join(app, "Info.plist"), table.concat(plist, "\n") .. "\n")
+  local identity = kfs.getenv("KORMAKE_CODESIGN_IDENTITY")
+  if not identity or identity == "" then identity = "-" end
+  run(build, "codesign", "codesign --force --sign " .. q(identity) .. " " .. q(app))
+  run(build, "codesign --verify", "codesign --verify --strict " .. q(app))
+  return 0, identity == "-" and "ad-hoc" or identity
+end
+
 function M.run(build, app, exe_name, tc)
   local q = util.shell_quote
+  if tc.fields.package == "iosapp" then
+    kfs.write(util.join(build, "package.log"), "")
+    return ios_app(build, app, exe_name, tc)
+  end
   local contents = util.join(app, "Contents")
   local exe = util.join(contents, "MacOS/" .. exe_name)
   local frameworks = util.join(contents, "Frameworks")

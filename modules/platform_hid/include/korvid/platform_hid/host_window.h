@@ -1,5 +1,5 @@
 // Korvid platform: the host window. A platform service, owned below the outer engine:
-// over SDL3 on Linux and macOS, native Win32 on Windows. It is not an entity. Platform
+// over SDL3 on Linux and macOS, native Win32 on Windows, native UIKit on iOS. It is not an entity. Platform
 // changes arrive as events on the bus.
 #pragma once
 #include "korvid/core/event.h"
@@ -11,7 +11,7 @@ namespace kv {
 enum class WindowSurface : u8 {
     Software, // the system draws it; present_blank() works, nothing else draws
     Vulkan,   // a renderer creates a Vulkan surface from native_handle()
-    Metal,    // a renderer makes a CAMetalLayer view from native_handle() (the Apple family, through SDL)
+    Metal,    // a renderer finds a CAMetalLayer through native_handle(): an SDL window's view on macOS, the UIView on iOS
 };
 
 struct WindowDesc {
@@ -32,6 +32,13 @@ struct WindowDesc {
 // borderless on Wayland and provide edge resizing through SDL_SetWindowHitTest, so the
 // engine owns the frame and each configure costs only a few protocol calls. Diagnose with
 // `example_testbed --hitch-ms 50` plus WAYLAND_DEBUG=1; the hitch lines use libwayland's timestamps.
+
+// The process's entry, for a frame loop's main: calls run(argc, argv, ctx) and returns what
+// it returns, as a plain call on the desktop. On iOS the OS owns the main thread's loop:
+// this starts the application (UIApplicationMain, which never returns), runs `run` once it
+// has launched, from inside the OS's loop, and ends the process with its result. A HostWindow
+// there pumps that loop itself, so `run` is the same loop on every platform.
+int platform_app_main(int argc, char** argv, int (*run)(int argc, char** argv, void* ctx), void* ctx);
 
 struct HostWindow {
     // Creates the window; false (with the reason logged) if the system refuses. Asserts if

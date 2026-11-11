@@ -45,6 +45,12 @@ local module_fields = {
   flag_framework = true, -- how a toolchain links an external's frameworks ("-framework %s")
   package = true, -- "app": kormake package writes an application bundle (package_app.lua)
   os_min = true,  -- the oldest OS release the toolchain builds for ("26.0"), for what packaging writes
+  -- A toolchain that serves several platforms: per_platform[<platform>] is laid over its
+  -- fields for that platform (resolve.lua says how); triple is the target's
+  -- "<vendor>-<os>[-<env>]" without the architecture ("apple-ios26.0-simulator"), family
+  -- names the platforms' common rule variants ("apple"), and test_runner is a command a
+  -- test executable runs under when the host cannot run it directly.
+  per_platform = true, triple = true, family = true, test_runner = true,
 }
 
 -- module "name" { fields } or module "name" (defaults). One per file.

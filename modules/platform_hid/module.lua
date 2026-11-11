@@ -5,6 +5,6 @@
 -- platform_audio sees either.
 module "platform_hid" {
   deps          = { "core", "math", "platform" },
-  external      = { sdl3 = ">=3.2" },
+  external      = { sdl3 = { ">=3.2", platforms = { "linux", "windows", "macos" } }, uikit = { ">=1", platforms = { "ios", "iossim" } } },
   engine_module = true,
 }

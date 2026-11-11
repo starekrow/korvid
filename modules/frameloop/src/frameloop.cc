@@ -489,8 +489,11 @@ const char* frameloop_option(Engine& e, const char* option, u32 index) {
     return nullptr;
 }
 
-int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
-    g_config = config;
+namespace {
+
+// The whole run: frameloop_main's, through platform_app_main (on iOS, from inside the
+// application once it has launched).
+int frameloop_run(int argc, char** argv, void*) {
     if (!parse_options(argc, argv, g_config)) return 2;
 
     // The profiler records when something will read it: a trace, the report, or a hitch dump.
@@ -550,6 +553,13 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
     names_shutdown();
     mem_shutdown();
     return 0;
+}
+
+} // namespace
+
+int frameloop_main(int argc, char** argv, const FrameLoopConfig& config) {
+    g_config = config;
+    return platform_app_main(argc, argv, frameloop_run, nullptr);
 }
 
 } // namespace kv

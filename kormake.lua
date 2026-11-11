@@ -6,7 +6,7 @@ requires_kormake "1.0"
 
 modulepath { "modules" }
 
-platforms { "linux", "windows", "macos" }
+platforms { "linux", "windows", "macos", "ios", "iossim" }
 configs   { "debug", "dev", "ship" }
 
 -- Platform modules supply the defaults (toolchain.linux binds render and shader-compile);
@@ -39,4 +39,16 @@ root "macos" {
                 "example_rocks", "example_arcanum", "example_arcfire", "example_gallery" },
   tests     = true,
   platforms = { "macos" },
+}
+
+-- iOS and its Simulator (slice 7, milestones 7 and 8): native UIKit, Core Audio and Metal,
+-- no SDL. The modules with their tests, which run in the booted Simulator (kormake test
+-- iossim-dev), and example_testbed, which `kormake package iossim-dev example_testbed`
+-- makes an app of. `ios` builds the same for a device; nothing runs it yet (slice 8).
+root "ios" {
+  modules   = { "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
+                "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
+                "collision", "tilemap", "level", "audio", "ui", "frameloop", "renderer-metal", "example_window", "example_testbed" },
+  tests     = true,
+  platforms = { "ios", "iossim" },
 }
