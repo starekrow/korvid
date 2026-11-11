@@ -195,7 +195,12 @@ struct FrameInFlight {
     VkDescriptorSet tables  = VK_NULL_HANDLE; // set 0: sprite, material and sort buffers
     VkDescriptorSet textures = VK_NULL_HANDLE; // set 1: the sampler and the bindless array
     bool            tables_dirty = true;        // the table buffers changed: rewrite set 0 once the fence passes
-    Array<Garbage>  garbage;                    // destroyed after this frame's fence
+    // Destroyed once this slot's next frame has passed its fence: what was queued up to its
+    // submit (garbage_owned) goes at the slot's next wait; what was queued after it (between
+    // frames: a staging buffer, a replaced texture) waits for the frame after, which may use
+    // it, as may the other frame still in flight.
+    Array<Garbage>  garbage;
+    u32             garbage_owned = 0;
     Array<u32>      dirty_slots;                // texture slots to rewrite in this frame's set
     VkDeviceSize    ring_end   = 0;             // the ring head when this frame was submitted
     VkDeviceSize    ring_bytes = 0;             // what the frame took, released at its fence
@@ -390,10 +395,11 @@ u32  rv_find_memory_type(Renderer* r, u32 type_bits, VkMemoryPropertyFlags flags
 bool rv_create_host_buffer(Renderer* r, VkDeviceSize size, VkBufferUsageFlags usage, Buffer& out);
 bool rv_create_device_buffer(Renderer* r, VkDeviceSize size, VkBufferUsageFlags usage, Buffer& out);
 void rv_destroy_buffer(Renderer* r, Buffer& b);
-// Deferred destruction: queued on the frame being recorded, run after its fence passes.
+// Deferred destruction: queued on the slot of the next frame to be submitted, run after
+// that frame's fence passes.
 void rv_defer_destroy(Renderer* r, Garbage::Kind kind, u64 handle);
 void rv_defer_destroy_buffer(Renderer* r, Buffer& b);
-void rv_run_garbage(Renderer* r, FrameInFlight& f);
+void rv_run_garbage(Renderer* r, FrameInFlight& f); // what the slot's last frame owned; its fence has passed
 
 // The frame ring. Allocation is for the frame being recorded; release happens at that
 // frame's fence. A span is valid until the frame is submitted; its buffer is kept alive

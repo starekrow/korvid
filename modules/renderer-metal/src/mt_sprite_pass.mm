@@ -23,16 +23,13 @@ namespace kv {
 
 // ---- shaders --------------------------------------------------------------------------------
 
-namespace {
-
 #if KV_DEV || KV_DEBUG
-struct Expected { const char* name; u32 index; };
 
 // The build writes Slang's reflection beside each library (<name>.metallib.json): every
 // parameter by name with the buffer index the MSL holds. The constants in
 // renderer_internal.h are checked against it, so a header that moved a declaration (and so
 // renumbered every buffer after it) fails here by name instead of drawing garbage.
-bool check_bindings(Renderer* r, const char* lib, const Expected* want, u32 count) {
+bool mt_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32 count) {
     char path[1024];
     snprintf(path, sizeof path, "%sshaders/%s.metallib.json", r->base_path, lib);
     FILE* f = fopen(path, "rb");
@@ -68,8 +65,6 @@ bool check_bindings(Renderer* r, const char* lib, const Expected* want, u32 coun
 }
 #endif
 
-} // namespace
-
 // Reads <exe dir>/shaders/<name>.metallib. Compiled by the build; nothing compiles here.
 bool mt_load_library(Renderer* r, const char* name, id<MTLLibrary>* out) {
     char path[1024];
@@ -92,12 +87,12 @@ bool mt_load_shaders(Renderer* r) {
     r->fs_main = [r->sprite_lib newFunctionWithName:@"fs_main"];
     if (!r->vs_main || !r->fs_main) { KV_ERROR("metal", "sprite.metallib has no vs_main or fs_main"); return false; }
 #if KV_DEV || KV_DEBUG
-    static const Expected sprite[] = {{"gPush", kBindPush}, {"gLayers", kBindLayers}, {"gMaterials", kBindMaterials},
+    static const MtExpected sprite[] = {{"gPush", kBindPush}, {"gLayers", kBindLayers}, {"gMaterials", kBindMaterials},
                                       {"gBindless", kBindBindless}, {"gSprites", kBindSprites}, {"gSorted", kBindSorted}};
-    static const Expected sort[] = {{"gPush", kSortPush}, {"gLayers", kSortLayers}, {"gSprites", kSortSprites},
+    static const MtExpected sort[] = {{"gPush", kSortPush}, {"gLayers", kSortLayers}, {"gSprites", kSortSprites},
                                     {"gMaterials", kSortMaterials}, {"gSorted", kSortSorted}, {"gBucketOf", kSortBucketOf},
                                     {"gBlockHist", kSortBlockHist}, {"gSortMeta", kSortMeta}, {"gIndirect", kSortIndirect}};
-    if (!check_bindings(r, "sprite", sprite, KV_COUNTOF(sprite)) || !check_bindings(r, "sprite_sort", sort, KV_COUNTOF(sort))) return false;
+    if (!mt_check_bindings(r, "sprite", sprite, KV_COUNTOF(sprite)) || !mt_check_bindings(r, "sprite_sort", sort, KV_COUNTOF(sort))) return false;
 #endif
     return true;
 }
@@ -320,7 +315,10 @@ void dispatch(id<MTLComputeCommandEncoder> enc, id<MTLComputePipelineState> pipe
 
 void record_sort(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, const PushData& push) {
     u32 blocks = (r->sprites.len + kBlockRows - 1) / kBlockRows;
-    id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder]; // serial: in order, each dispatch's writes seen by the next
+    MTLComputePassDescriptor* cp = [MTLComputePassDescriptor computePassDescriptor];
+    cp.dispatchType = MTLDispatchTypeSerial; // in order, each dispatch's writes seen by the next
+    mt_gpu_attach(r, f, cp);
+    id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoderWithDescriptor:cp];
     enc.label = @"sort";
     [enc setBytes:&push length:sizeof push atIndex:kSortPush];
     [enc setBuffer:f.layers offset:0 atIndex:kSortLayers];
@@ -429,7 +427,9 @@ affine2 metal_clip(affine2 m) {
 bool mt_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, const RenderView& view) {
     KV_ZONE("record");
     // Uploads first: textures, then the rows the ticks changed.
-    id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
+    MTLBlitPassDescriptor* bp = [MTLBlitPassDescriptor blitPassDescriptor];
+    mt_gpu_attach(r, f, bp);
+    id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoderWithDescriptor:bp];
     blit.label = @"upload";
     record_texture_uploads(r, blit);
     bool copied = record_table_copies(r, blit);
@@ -467,28 +467,45 @@ bool mt_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
     }
     if (!drawable) return true;
 
-    @autoreleasepool {
+    // With a post shader, the world (the layers below the post layer) goes into the target
+    // first, and the window's pass begins with the post shader; the layers at and above the
+    // post layer draw over it there.
+    bool post = mt_post_prepare(r, width, height);
+    u32 split = post ? mt_bucket_of(r->post.layer, 0) : 0;
+    u32 draws = 0;
+    auto bind_sprites = [&](id<MTLRenderCommandEncoder> enc) {
+        [enc setViewport:(MTLViewport){0.0, 0.0, (double)width, (double)height, 0.0, 1.0}];
+        [enc setVertexBytes:&push length:sizeof push atIndex:kBindPush];
+        [enc setFragmentBytes:&push length:sizeof push atIndex:kBindPush];
+        id<MTLBuffer> bound[] = {f.layers, r->material_table, f.bindless, r->tables.sprites, r->tables.sorted};
+        NSUInteger offsets[] = {0, 0, 0, 0, 0};
+        [enc setVertexBuffers:bound offsets:offsets withRange:NSMakeRange(kBindLayers, 5)];
+        [enc setFragmentBuffers:bound offsets:offsets withRange:NSMakeRange(kBindLayers, 5)];
+        static_assert(kBindMaterials == kBindLayers + 1 && kBindBindless == kBindLayers + 2 && kBindSprites == kBindLayers + 3 &&
+                      kBindSorted == kBindLayers + 4, "the sprite buffers are bound as one range");
+        mt_use_textures(r, enc);
+    };
+    auto pass_into = [&](id<MTLTexture> target, NSString* label, bool first, bool last) {
         MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];
-        rp.colorAttachments[0].texture     = drawable.texture;
+        mt_gpu_attach(r, f, rp, first, last);
+        rp.colorAttachments[0].texture     = target;
         rp.colorAttachments[0].loadAction  = MTLLoadActionClear;
         rp.colorAttachments[0].storeAction = MTLStoreActionStore;
         rp.colorAttachments[0].clearColor  = MTLClearColorMake(view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a);
         id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
-        enc.label = @"draw";
-        if (draw) {
-            [enc setViewport:(MTLViewport){0.0, 0.0, (double)width, (double)height, 0.0, 1.0}];
-            [enc setVertexBytes:&push length:sizeof push atIndex:kBindPush];
-            [enc setFragmentBytes:&push length:sizeof push atIndex:kBindPush];
-            id<MTLBuffer> bound[] = {f.layers, r->material_table, f.bindless, r->tables.sprites, r->tables.sorted};
-            NSUInteger offsets[] = {0, 0, 0, 0, 0};
-            [enc setVertexBuffers:bound offsets:offsets withRange:NSMakeRange(kBindLayers, 5)];
-            [enc setFragmentBuffers:bound offsets:offsets withRange:NSMakeRange(kBindLayers, 5)];
-            static_assert(kBindMaterials == kBindLayers + 1 && kBindBindless == kBindLayers + 2 && kBindSprites == kBindLayers + 3 &&
-                          kBindSorted == kBindLayers + 4, "the sprite buffers are bound as one range");
-            mt_use_textures(r, enc);
-            u32 draws = record_draws(r, enc, 0, kBucketCount);
-            KV_COUNTER("indirect draws", draws);
+        enc.label = label;
+        return enc;
+    };
+    @autoreleasepool {
+        if (post) {
+            id<MTLRenderCommandEncoder> world = pass_into(r->post.target, @"world", true, false);
+            if (draw) { bind_sprites(world); draws += record_draws(r, world, 0, split); }
+            [world endEncoding];
         }
+        id<MTLRenderCommandEncoder> enc = pass_into(drawable.texture, @"draw", !post, true);
+        if (post) mt_post_draw(r, f, enc, view);
+        if (draw) { bind_sprites(enc); draws += record_draws(r, enc, split, kBucketCount); }
+        KV_COUNTER("indirect draws", draws);
         [enc endEncoding];
     }
     return true;

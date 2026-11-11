@@ -58,9 +58,13 @@ void rv_destroy_buffer(Renderer* r, Buffer& b) {
 }
 
 // ---- deferred destruction -----------------------------------------------------------------
-// Queued on the frame being recorded, run after its fence passes, so nothing the GPU may
+// Queued on the slot of the next frame to be submitted (the one being recorded, or between
+// frames the one about to be), run after that frame's fence passes, so nothing the GPU may
 // still read is freed early. Fences on one queue pass in submission order, so a frame's
-// fence also covers everything earlier frames referenced.
+// fence also covers everything earlier frames referenced. What is queued between frames may
+// be what the next frame uses (a staging buffer its upload reads) or what the frame still in
+// flight reads (a texture replaced meanwhile), so it waits for the next frame's fence, not
+// the wait that opens that frame (slice 7 found the staging buffer freed before its copy).
 
 void rv_defer_destroy(Renderer* r, Garbage::Kind kind, u64 handle) {
     if (handle) r->frames[r->frame_index].garbage.push(Garbage{kind, handle});
@@ -74,7 +78,9 @@ void rv_defer_destroy_buffer(Renderer* r, Buffer& b) {
 }
 
 void rv_run_garbage(Renderer* r, FrameInFlight& f) {
-    for (const Garbage& g : f.garbage) {
+    u32 owned = f.garbage_owned <= f.garbage.len ? f.garbage_owned : f.garbage.len;
+    for (u32 i = 0; i < owned; ++i) {
+        const Garbage& g = f.garbage[i];
         switch (g.kind) {
         case Garbage::BufferKind:    vkDestroyBuffer(r->device, (VkBuffer)g.handle, nullptr); break;
         case Garbage::ImageKind:     vkDestroyImage(r->device, (VkImage)g.handle, nullptr); break;
@@ -85,7 +91,11 @@ void rv_run_garbage(Renderer* r, FrameInFlight& f) {
         case Garbage::PipelineKind:  vkDestroyPipeline(r->device, (VkPipeline)g.handle, nullptr); break;
         }
     }
-    f.garbage.clear();
+    // What was queued after the frame's submit stays, first, for the frame after.
+    u32 rest = f.garbage.len - owned;
+    if (owned && rest) memmove(f.garbage.data, f.garbage.data + owned, sizeof(Garbage) * rest);
+    f.garbage.len   = rest;
+    f.garbage_owned = 0;
 }
 
 // ---- the frame ring -----------------------------------------------------------------------

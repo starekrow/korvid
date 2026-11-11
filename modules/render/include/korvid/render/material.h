@@ -16,7 +16,7 @@ enum class BlendMode : u8 { Opaque, Alpha, Additive, Count };
 enum class TextureFilter : u8 { Nearest, Linear, Count };
 
 // Two float4s the shader may interpret. The sprite shader uses params[0], params[1] as a
-// UV offset; a game's own shaders own the rest (see renderer-vulkan's sprite_fragment.slangh).
+// UV offset; a game's own shaders own the rest (see render's shaders/sprite_fragment.slangh).
 constexpr u32 KV_MATERIAL_PARAMS = 8;
 
 struct MaterialDesc {
@@ -27,8 +27,9 @@ struct MaterialDesc {
     color     tint  = color_white();
     f32       params[KV_MATERIAL_PARAMS] = {};
     TextureFilter filter = TextureFilter::Nearest;
-    // A game's fragment shader: the name of a SPIR-V file in <exe>/shaders/ without its .spv
-    // ("arcfire_nebula"), built by kormake's shader rule from the game module's
+    // A game's fragment shader: the name of a compiled shader in <exe>/shaders/ without its
+    // extension (.spv for Vulkan, .metallib for Metal: "arcfire_nebula"), built by kormake's
+    // shader rule from the game module's
     // shaders/*.slang. Null: the engine's. One that will not load, or past the renderer's
     // five (shader, blend) pairs, draws as the engine's. The name is not copied: intern it.
     const char* shader = nullptr;

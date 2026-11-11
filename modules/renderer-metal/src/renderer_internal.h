@@ -4,6 +4,8 @@
 //                      handle kinds and pools, the tables, the argument buffers
 //   mt_sprite_pass.mm  shaders, pipelines, and the frame's commands: uploads, the compute
 //                      sort, the indirect draws, the sort check
+//   mt_post_pass.mm    the full-frame pass: the world's target, the game's post shader
+//   mt_gpu_profile.mm  GPU timing: timestamps around the frame's encoders
 //   renderer.mm        the public API behind korvid/render/renderer.h, and the frame
 //   sdl3/mt_platform_sdl3.mm  the CAMetalLayer, from SDL's window
 // This header and the sources next to it are the only place a Metal header is included.
@@ -184,10 +186,52 @@ struct FrameInFlight {
     id<MTLCommandBuffer> cb = nil;       // retained until renderer_render waits for it, as for a fence
     id<MTLBuffer>        bindless = nil; // the argument buffer: samplers and texture ids, shared storage
     id<MTLBuffer>        layers = nil;   // the layers' offsets, previous and current: float4 each, shared
-    Array<id>            garbage;        // released once this frame's command buffer has completed
+    // Released once this slot's next frame has completed: what was queued up to its submit
+    // (garbage_owned) goes at the slot's next wait; what was queued after it (between frames:
+    // a staging buffer, a replaced texture) waits for the frame after, which may use it.
+    Array<id>            garbage;
+    u32                  garbage_owned = 0;
+    bool                 gpu_stamped = false; // it carries timestamps (mt_gpu_profile.mm)
     Array<u32>           dirty_slots;    // texture slots to rewrite in this frame's argument buffer
     usize                ring_end = 0, ring_bytes = 0;
     bool                 submitted = false;
+};
+
+// The full-frame pass (renderer_post_layer), as renderer-vulkan's: the layers below the post
+// layer draw into the world's target (the drawable's size and format, so the sprite
+// pipelines draw into it unchanged); the window's pass begins with one triangle through the
+// game's post shader, and the layers above draw over it. Metal tracks the target's hazards:
+// the post pass's read waits for the world's writes, and the next frame's writes for the
+// read.
+enum PostBinding : u32 { kPostPush = 0, kPostParams = 1 }; // the world at texture 0, its sampler at sampler 0
+struct PostPass {
+    Name                       shader;          // the game's post shader; null: the pass is off
+    i32                        layer = 0;       // the first layer drawn over it
+    bool                       failed = false;  // would not load or link: off, logged
+    id<MTLLibrary>             vertex_lib = nil; // post.metallib, on first use
+    id<MTLFunction>            vertex = nil;     // vs_post
+    id<MTLLibrary>             library = nil;    // the game's
+    id<MTLFunction>            fragment = nil;   // its fs_main
+    id<MTLRenderPipelineState> pipeline = nil;
+    id<MTLSamplerState>        sampler = nil;    // linear, clamped at the edges
+    id<MTLTexture>             target = nil;     // private; render target and sampled
+    u32                        width = 0, height = 0;
+    id<MTLBuffer>              param_buffers[kFramesInFlight] = {}; // shared; the shader's gPostParams is writable, so not bytes
+    f32                        params[KV_POST_PARAMS * 4] = {};
+    u32                        param_count = 0;
+};
+
+// GPU timing (mt_gpu_profile.mm), a profiling build's (KV_PROFILE) while the profiler
+// records: timestamps at the start and end of the frame's encoders (Apple GPUs sample at
+// stage boundaries only), read once the frame has completed. The marks are renderer-vulkan's.
+enum GpuSample : u32 { kGpuUploadStart, kGpuUploadEnd, kGpuSortStart, kGpuSortEnd, kGpuDrawStart, kGpuDrawEnd, kGpuSamples };
+struct GpuProfiler {
+    id<MTLCounterSampleBuffer> samples = nil; // kGpuSamples per frame in flight
+    u32              track = 0;       // the profiler's "gpu" track
+    i64              gpu_to_os = 0;   // os_ticks minus the GPU's clock (both nanoseconds on Apple GPUs), sampled
+    u32              cal_age = 0;     // frames since that was sampled
+    bool             calibrated = false;
+    RendererGpuStats last;
 };
 
 struct SpriteTables {
@@ -251,12 +295,9 @@ struct Renderer {
     u32           frame_index = 0;
     u64           frame_count = 0;
 
-    // The full-frame pass and screenshots are milestone 4's: until then they say so once.
-    Name   post_shader;
-    i32    post_layer = 0;
-    f32    post_params[KV_POST_PARAMS * 4] = {};
-    u32    post_param_count = 0;
-    bool   post_warned = false, shot_warned = false;
+    PostPass    post;
+    GpuProfiler gpu_prof;
+    bool        shot_warned = false;
 
     bool          check_pending  = false;
     bool          check_recorded = false;
@@ -269,8 +310,9 @@ struct Renderer {
 
 // ---- mt_resources.mm ------------------------------------------------------------------------
 id<MTLBuffer> mt_buffer(Renderer* r, usize bytes, MTLResourceOptions storage, const char* label); // +1
-void mt_defer_release(Renderer* r, id obj); // after the frame being recorded completes; nil is fine
-void mt_run_garbage(Renderer* r, FrameInFlight& f);
+void mt_defer_release(Renderer* r, id obj); // after the next frame to be submitted completes; nil is fine
+void mt_run_garbage(Renderer* r, FrameInFlight& f);  // what the slot's last frame owned; it has completed
+void mt_release_all(Renderer* r, FrameInFlight& f);  // everything; nothing is in flight
 
 bool     mt_ring_init(Renderer* r, usize bytes);
 RingSpan mt_ring_alloc(Renderer* r, usize bytes, usize align);
@@ -307,6 +349,30 @@ u32  mt_material_slot(Renderer* r, Name shader, BlendMode blend);
 // texture when there is one (nil: a zero-size window; the uploads still go).
 bool mt_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, const RenderView& view);
 bool mt_verify_sort(Renderer* r);
+#if KV_DEV || KV_DEBUG
+// A library's buffer, texture and sampler indices by name, against the reflection the build
+// writes beside it (<lib>.metallib.json). False, logged by name, on any difference.
+struct MtExpected { const char* name; u32 index; };
+bool mt_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32 count);
+#endif
+
+// ---- mt_post_pass.mm ------------------------------------------------------------------------
+bool mt_post_set(Renderer* r, i32 layer, Name shader); // false: the shader would not load; the pass is off
+bool mt_post_active(const Renderer* r);
+bool mt_post_prepare(Renderer* r, u32 width, u32 height); // the target for this size; false: draw straight
+void mt_post_draw(Renderer* r, FrameInFlight& f, id<MTLRenderCommandEncoder> enc, const RenderView& view); // inside the window's pass
+void mt_post_destroy(Renderer* r); // nothing in flight
+
+// ---- mt_gpu_profile.mm ----------------------------------------------------------------------
+bool mt_gpu_profile_create(Renderer* r);  // nothing to do (false never) where it cannot sample
+void mt_gpu_profile_destroy(Renderer* r);
+void mt_gpu_frame_begin(Renderer* r, FrameInFlight& f); // whether this frame is timed
+// Timestamps on an encoder about to be made, when the frame is timed. Render: `first` takes
+// the draw's start, `last` its end (with the post pass, the world's encoder is first).
+void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLBlitPassDescriptor* d);
+void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLComputePassDescriptor* d);
+void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLRenderPassDescriptor* d, bool first, bool last);
+void mt_gpu_collect(Renderer* r, FrameInFlight& f); // it has completed
 
 // ---- sdl3/mt_platform_sdl3.mm ---------------------------------------------------------------
 // The layer to present through, from the window's native handle; null (logged) on failure.

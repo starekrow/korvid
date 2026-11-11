@@ -18,15 +18,31 @@ id<MTLBuffer> mt_buffer(Renderer* r, usize bytes, MTLResourceOptions storage, co
     return b;
 }
 
-// Queued on the frame being recorded; released once its command buffer has completed, which
-// is after every earlier frame's on the queue.
+// Queued on the slot of the next frame to be submitted (the one being recorded, or between
+// frames the one about to be), and released once that frame has completed: after every
+// earlier frame on the queue too. An object queued between frames may be what that frame
+// uses (a staging buffer its upload reads), so it must not go at the wait that opens it.
 void mt_defer_release(Renderer* r, id obj) {
     if (obj) r->frames[r->frame_index].garbage.push(obj);
 }
 
+// The slot's last frame has completed: what it owned goes; what was queued since stays for
+// the frame being opened.
 void mt_run_garbage(Renderer*, FrameInFlight& f) {
+    u32 n = f.garbage_owned <= f.garbage.len ? f.garbage_owned : f.garbage.len;
+    for (u32 i = 0; i < n; ++i) [f.garbage[i] release];
+    if (n) {
+        u32 rest = f.garbage.len - n;
+        if (rest) memmove(f.garbage.data, f.garbage.data + n, sizeof(id) * rest);
+        f.garbage.len = rest;
+    }
+    f.garbage_owned = 0;
+}
+
+void mt_release_all(Renderer*, FrameInFlight& f) {
     for (id obj : f.garbage) [obj release];
     f.garbage.clear();
+    f.garbage_owned = 0;
 }
 
 // ---- the frame ring -------------------------------------------------------------------------

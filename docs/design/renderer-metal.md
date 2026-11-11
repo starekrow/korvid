@@ -99,11 +99,41 @@ Measured on an M3 Max, `example_testbed` at 1920x1080 under API validation: 12 t
 checks a run in debug, dev and ship, all passing (culled rows included); no validation
 messages; 96 to 121 fps with vsync on a 120 Hz panel, 350 to 500 without.
 
-## Open, not blocking
+## Parity (milestone 4)
 
-- **Vsync settles near 100 fps on a 120 Hz ProMotion panel,** not 120: the frame loop's
-  pacing against `displaySyncEnabled` and the panel's variable refresh is milestone 4's to
-  measure, with the GPU timing.
+- **The full-frame pass** (`mt_post_pass.mm`) is renderer-vulkan's: the layers below the post
+  layer draw into a private target of the drawable's size and format, the window's pass opens
+  with one triangle through the game's post shader, the layers above draw over it. No layouts
+  to move the target between; Metal orders the world's writes before the post pass's read and
+  that read before the next frame's writes. `post.slang` makes the triangle's clip-space y for
+  Metal under `KV_TARGET_METAL` (uv (0, 0) is the window's top left on both backends; Slang's
+  output without the define is byte-identical). The game's post shader's bindings are checked
+  against its reflection like the sprite shaders'.
+- **Read-only bytes cannot meet a writable argument.** The post parameters went first as
+  `setFragmentBytes`; Metal's validation refused them, because Slang emits a `StructuredBuffer`
+  as a writable `device` pointer and bytes are read-only. They go in a small shared buffer per
+  frame in flight, as Vulkan's do. (The same emission is behind the sprite vertex shader's
+  "writable resources" warning: still a Slang matter.)
+- **GPU timing** (`mt_gpu_profile.mm`): the frame's start and end are its command buffer's
+  (`GPUStartTime`, `GPUEndTime`); inside them, timestamps at the end of the upload blit, the
+  sort and the last draw (Apple GPUs sample at stage boundaries only, and the M3 Max has the
+  timestamp counter set alone). Two measurements shaped it: an encoder with nothing to do
+  writes no samples, and an unwritten sample still holds what an earlier frame wrote there,
+  so a sample outside the command buffer's window is not this frame's and its pass is an
+  empty span; and the samples, `GPUStartTime` and `sampleTimestamps:gpuTimestamp:` are one
+  clock in nanoseconds, put on the engine's by an offset. renderer_gpu_stats and the
+  profiler's gpu track get the frame, the sort and the draw; Apple GPUs have no statistics
+  counters, so invocations and overdraw stay zero. Orbit at 2560x1440: 1.7 ms a frame, the
+  sort 0.25, the draws and the post pass 1.45.
+- **The gallery** (`example_gallery`, `tools/ppm_compare.py`) draws nine fixed scenes at
+  960x540 pixels on any display and compares two sets within a tolerance; the Metal set is
+  committed as PNGs (`modules/example_gallery/references/metal/`). Run to run on one GPU the
+  pictures are identical; the tolerance waits for the first Vulkan set.
+- **Vsync** holds 120 Hz on the ProMotion panel once a run is a second old (rocks, arcanum,
+  arcfire, the testbed with and without `--check-sort`). Milestone 3's near-100 fps did not
+  come back and was not explained; nothing since touched the frame's pacing.
+
+## Open, not blocking
 
 - **Read-only buffers are `device`, not `const device`.** Metal warns "writable resources in
   non-void vertex function" for the sprite vertex shader, because Slang emits
@@ -112,7 +142,5 @@ messages; 96 to 121 fps with vsync on a 120 Hz panel, 350 to 500 without.
   Metal; otherwise it is a Slang issue to file.
 - **`kMaxTextures` lives twice:** `renderer_internal.h` and the array in
   `sprite_fragment.slangh`. The reflection check above should compare the array's length too.
-- **What a frame costs,** argument-buffer residency included, is milestone 4's to measure
-  against the Vulkan numbers, with the full-frame pass and GPU timing, which the Metal
-  renderer does not have yet (a post shader is refused with a warning; `renderer_gpu_stats`
-  is never valid).
+- **What a frame costs against Vulkan's** on comparable work waits for numbers from the same
+  scenes on both; arcfire's performance notes take the macOS ones.

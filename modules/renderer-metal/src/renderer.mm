@@ -163,6 +163,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
         if (ok) r->layer = mt_platform_layer(r->window, &r->metal_view);
         if (ok && !r->layer) ok = false;
         if (ok) configure_layer(r);
+        ok = ok && mt_gpu_profile_create(r);
         ok = ok && mt_create_resource_pools(r);
         ok = ok && mt_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
         ok = ok && mt_create_static_buffers(r);
@@ -195,9 +196,11 @@ void renderer_destroy(Renderer* r) {
     for (FrameInFlight& f : r->frames) {
         if (f.cb) { [f.cb waitUntilCompleted]; [f.cb release]; f.cb = nil; }
     }
-    for (FrameInFlight& f : r->frames) { mt_run_garbage(r, f); f.garbage.free(); f.dirty_slots.free(); }
+    for (FrameInFlight& f : r->frames) { mt_release_all(r, f); f.garbage.free(); f.dirty_slots.free(); }
     [g_shot.buffer release];
     g_shot = Shot{};
+    mt_post_destroy(r);
+    mt_gpu_profile_destroy(r);
     mt_destroy_pipelines(r);
     mt_destroy_resources(r);
     mt_platform_release(r->metal_view);
@@ -376,32 +379,21 @@ void renderer_material_destroy(Renderer* r, Handle material) {
     mt_mark_material_dirty(r, row);
 }
 
-// The full-frame pass is milestone 4's on Metal: until then the frame is drawn straight to
-// the window, as with no post shader, and a game that asks is told once.
 bool renderer_post_layer(Renderer* r, i32 layer, const char* shader) {
     if (!r) return false;
-    r->post_layer  = layer;
-    r->post_shader = shader && *shader ? name_intern(shader) : Name{};
-    if (!r->post_shader.is_null() && !r->post_warned) {
-        KV_WARN("metal", "post shader '%s': the full-frame pass is not in the Metal renderer yet (slice 7, milestone 4); drawn without it", shader);
-        r->post_warned = true;
-    }
-    return r->post_shader.is_null();
+    return mt_post_set(r, layer, shader && *shader ? name_intern(shader) : Name{});
 }
 
 void renderer_post_params(Renderer* r, const f32* params, u32 count) {
     if (!r) return;
     if (count > KV_POST_PARAMS) count = KV_POST_PARAMS;
-    if (count) memcpy(r->post_params, params, sizeof(f32) * 4 * count);
-    r->post_param_count = count;
+    if (count) memcpy(r->post.params, params, sizeof(f32) * 4 * count);
+    r->post.param_count = count;
 }
 
 Handle renderer_default_material(const Renderer* r) { return r ? r->default_material : Handle{}; }
 
 f64 renderer_last_wait(const Renderer* r) { return r ? r->last_wait : 0.0; }
-
-// GPU timing is milestone 4's.
-RendererGpuStats renderer_gpu_stats(const Renderer*) { return RendererGpuStats{}; }
 
 bool renderer_check_sort(Renderer* r) {
     if (!r) return false;
@@ -529,6 +521,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
             waited += time_now() - t;
             if (f.cb.status == MTLCommandBufferStatusError)
                 KV_ERROR("metal", "frame failed on the GPU: %s", f.cb.error ? f.cb.error.localizedDescription.UTF8String : "?");
+            mt_gpu_collect(r, f); // its timestamps, now that it has completed
             [f.cb release];
             f.cb = nil;
         }
@@ -564,11 +557,13 @@ bool renderer_render(Renderer* r, const RenderView& view) {
 
         id<MTLCommandBuffer> cb = [r->queue commandBuffer];
         cb.label = @"frame";
+        mt_gpu_frame_begin(r, f);
         if (!mt_record_frame(r, f, cb, drawable, view)) return false;
         if (drawable && g_shot.pending) record_screenshot(r, cb, drawable.texture);
         if (drawable) [cb presentDrawable:drawable];
         [cb commit];
         f.cb = [cb retain]; // waited for when this slot comes round again
+        f.garbage_owned = f.garbage.len; // released when it has; anything queued later waits for the next
         f.submitted = true;
         mt_ring_submitted(r, f);
         presented = drawable != nil;

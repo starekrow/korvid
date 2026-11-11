@@ -216,7 +216,35 @@ changed around it, and found:
   order kormake gives `example_testbed`'s. Its exit line counts the name table, which the
   window's path makes one block longer (no leak: nothing is live after `names_shutdown`).
 
+## Milestone 4: parity
+
+The full-frame pass, GPU timing and the gallery are in `docs/design/renderer-metal.md`. What
+the milestone found around them:
+
+- **Every module the Windows root builds now builds on macOS**, and `example_gallery` with
+  them: 23 suites pass in debug, dev and ship. rocks, arcanum and arcfire (Shoreline and
+  Orbit, with arcfire's three shaders and its post pass) run under Metal's validation with no
+  message, at 120 fps.
+- **Determinism on arm64.** Each demo at rate 4, at 1 thread and at 16, hashed alike tick for
+  tick: rocks over 5,623 ticks, arcanum's whole demo (1,865), Shoreline's (14,265) and
+  Orbit's (20,242). Shoreline is 14,265 ticks here and 14,156 on Windows: each platform keeps
+  its libm, as between Linux and Windows.
+- **A use-after-free in both renderers' deferred destruction.** An object queued for release
+  between frames went on the slot of the frame about to be recorded, and was released at the
+  wait that opens that frame, before it was recorded: arcanum's 2048x1024 font atlas is past
+  half the frame ring, so its staging buffer is a one-off, and Metal crashed copying from it
+  after it was freed. Vulkan's code is the same (its vkDestroyBuffer before the copy is
+  undefined; a driver may well keep the memory long enough), and it has a second case Metal
+  does not: a texture replaced between frames was destroyed while the other frame in flight
+  could still sample it (Metal's command buffers retain what they use). Now a slot releases at
+  its wait only what was queued up to its last frame's submit; what came after waits for the
+  frame after. The Vulkan half is built and tested on Linux and Windows, not here.
+- **The post parameters** first went as bytes, which Metal's validation refused against the
+  shader's writable buffer (renderer-metal.md has why); they go in a buffer per frame.
+
 ### Still to come in later milestones
 
-- The full-frame pass, GPU timing, and `rocks`, `arcanum` and `arcfire` (milestone 4).
-- Vsync near 100 fps on a 120 Hz panel, not 120 (milestone 4's measurements).
+- One CPU side for both renderers (milestone 5).
+- The Vulkan gallery set and the tolerance it fixes (with a Linux or Windows run).
+- Packaging, the rest of the root's documentation, arcfire's macOS performance notes
+  (milestone 6).

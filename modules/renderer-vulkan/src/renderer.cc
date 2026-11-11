@@ -521,6 +521,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     f.submit_ticks = os_ticks(); // where an uncalibrated GPU timeline starts
     VK_CHECK(vkQueueSubmit2(r->queue, 1, &si, f.fence));
     f.submitted = true;
+    f.garbage_owned = f.garbage.len; // destroyed when its fence passes; anything queued later waits for the next
     rv_ring_submitted(r, f);
 
     if (have_image) {
