@@ -646,3 +646,75 @@ per-user files under %APPDATA%, the sync I/O backend, WASAPI, MSVC /W4 /WX on th
 build, the ship build packaged) and Windows' own hash matrix and recorded runs. The window
 resize that remakes the full-frame pass's target is untested on Linux too: nothing here
 resizes a window from a script.
+
+## Windows, first look
+
+Entries 2026-11-11, `windows-dev` (MSVC `/O2`, against gcc's `-O2`; no LTO on either), the
+same machine (Radeon 780M, 16 threads), `--prof-report`, a 1280 x 720 window, which at the
+panel's 150% is a 1920 x 1080 swapchain: 2.25 times Linux's pixels, if Linux's was 1280 x
+720 (no entry here says). Zone times are averages over every report window; a zone outside
+a window's top ten counts as nothing there. The Linux side is this notebook's earlier
+entries, on older commits, so the ratios are rough until Linux runs the same set at the
+same commit.
+
+**Power plan.** Run once on Windows' Balanced plan and again on Performance (on AC): every
+number moved 10% or less (the tick at 1 thread 2.12 to 1.92 ms, the rest within noise).
+The power plan is not the gap.
+
+**The CPU** (Performance plan; ms a frame).
+
+| | Windows | Linux |
+|---|---|---|
+| `--stress --spike-hunt`, tick at 1 / 8 / 16 threads | 1.92 / 2.19 / 2.46 | 1.00 / 1.12 / 1.22 (slice 2, M4); 1.57 all threads (slice 5, M4) |
+| the same, `sprite.extract` | 0.82 / 0.81 / 0.71 | 0.28 / 0.31 / 0.31 (slice 2); 0.20 (slice 5) |
+| `--stress --stage orbit --spike-hunt`, tick / extract | 3.49 / 1.17 | 1.28 to 1.30 / 0.26 to 0.38 (slice 6, M4) |
+
+Stress here: bullets peak 25,041, mean 4,355; sprites peak 43,791. The tick is one and a
+half to two times Linux's and the gap grows with load; threads behave as they do on Linux
+(slightly slower with more, at this size). The extract is three to four times Linux's,
+the largest gap and the first lead. Orbit's Linux entry reports 690 to 3,140 sprites where
+this run's mean is 10,522, so that row compares different stretches of the stage.
+
+**The GPU.** Under load it is the same chip doing the same work a pixel: at rank 56
+(`--bench ring --dial rank=56`, overdraw 25.8 here, 29 on Linux) the draw is 4.66 ms
+against 2.37, about the pixel ratio; the nebula adds 0.65 ms here (`--bench ring` against
+`--bench ring --gas`) against 0.31, the pixel ratio again. The sort, which does not depend
+on the window, is 0.22 against 0.19 to 0.21. At light load it is not: `--bench ring` draws
+in 1.98 ms against 0.36 (5.5 times, for 2.25 times the pixels), on either power plan,
+which does not govern the GPU's clocks. Unexplained; never near a frame's budget.
+
+**Open: `--gas` halves the tick.** `--bench ring` ticks at about 1.45 ms and `--bench ring
+--gas` at about 0.85, steady window by window and alike on both power plans, though the
+flag only adds the nebula plane to the stage (`stage.cc`, `gas_test`): the same sim, the
+same 635 sprites. Not yet looked at on Linux.
+
+**The extract, looked into** (`--stress --spike-hunt --threads 1`, 45 s; zones and counters
+added for the runs and taken out after). Spike hunting does take on Windows (its log line;
+the fills, poison and guard pages all check it), so the comparisons above that name it
+are like for like. An extract visits 8,456 slots on average, 5,198 of them live, and
+sends 4,509 deltas: nearly every live row moved. The Sets pass is 0.58 of its 0.74 ms, the
+Removes 0.1. That is about 165 ns a delta, against slice 3 M5's 50 to 100 and slice 5's
+58 (0.20 ms for 3,470).
+
+The code cl makes for the loop is tight: `is_alive`, `handle_at` and the bounds checks
+inline, three calls to `schema_equal` a row, and `out.push` calling `Array::reserve` out
+of line every push (cl does not inline it; a few ns). A sampled profile (Visual Studio's
+collector, unelevated, read with `xperf -tle -a profile -detail`) puts `extract_sprites`
+and `schema_equal` second and third of the process, together about 17% of its samples;
+first is `Map<Handle,u32>::find_dense`, the renderer's entity-to-slot lookup in
+`renderer_apply` (the `apply` zone, not the extract). Two changes to `schema_equal`, each
+measured and backed out: comparing a word at a time inline instead of calling the CRT's
+`memcmp` per field (0.82 to 0.74 ms, inside the run-to-run noise), and comparing
+neighbouring fields as one run of bytes (0.74 to 0.78, none). The compare's cost is not
+its instructions: it is where each row's data is first loaded, so the misses land on it.
+The extract is memory-bound here, and why that is three times Linux's per delta on the
+same machine is open: the next step is `perf record` of the same run on Linux at this
+commit, to see whether the samples spread the same way (everything slower alike: memory
+or clocks) or not (a function cl compiles worse). Linux's transparent huge pages against
+Windows' 4 KB pages is one candidate; the arrays a pass streams through (the current and
+previous transforms, the sprites, the three side tables, the delta list) are several MB at
+stress.
+
+To do: the same set on Linux at the same commit, with the swapchain's size logged, and a
+`perf record` of the stress run beside this one; `renderer_apply`'s handle map; the
+light-load GPU draw; the `--gas` tick.
