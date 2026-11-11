@@ -35,9 +35,14 @@ Each backend is compared against its own set for its regressions, and the two se
 each other for parity; the first comparison of the two fixes the picture tool's tolerance
 (`modules/tool_picture`), which is not loosened after. Against Metal the Vulkan set passes
 seven scenes at the defaults (`transform` with 87 pixels off at the glyph's edges); `blends`
-and `shaders` fail at 6.6% and 6.4%, every checker cell edge a pixel over in one triangle
-of the field's quad: the checker's cells sit on pixel boundaries under nearest sampling,
-where two GPUs round a texel edge differently. A decision for the scene, not the tolerance.
+and `shaders` failed at 6.6% and 6.4%, every checker cell edge a pixel over in one triangle
+of the field's quad. Their background was 900x480 units with the checker repeated 15x8,
+7.5 pixels a texel, so every texel edge fell on a pixel's centre, where nearest sampling's
+rounding is each GPU's own. A decision for the scene, not the tolerance: the background is
+960x512 now, 8 pixels a texel, every edge on a pixel edge. The Metal set has the two new
+pictures (the other seven are unchanged); the Vulkan set's `blends` and `shaders` are the
+old scene's until they are drawn again on Linux (`picture png` over a fresh `--out`), after
+which the two sets should agree in all nine.
 
 ## Files
 

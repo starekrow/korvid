@@ -211,7 +211,10 @@ void shoot(Gallery& g, const char* scene, const RenderView& view) {
 // opaque glyph over both, tints.
 void scene_blends(Gallery& g) {
     Sprite bg = at(0, 0, g.opaque_checker);
-    bg.size = vec2{900, 480}; bg.uv = rect2{0, 0, 15, 8}; bg.layer = -10; // the uv repeats the checker
+    // The uv repeats the checker: 64 units a repeat, 8 a texel, so every texel edge falls on a
+    // pixel edge. (At 900x480, 7.5 a texel, edges fell on pixel centres, where each backend's
+    // rounding picked a side and the references could not agree.)
+    bg.size = vec2{960, 512}; bg.uv = rect2{0, 0, 15, 8}; bg.layer = -10;
     add(g, bg);
     for (i32 i = 0; i < 5; ++i) {
         Sprite a = at(-320.0f + 120.0f * (f32)i, 60, g.alpha_disc, 140);
@@ -341,7 +344,7 @@ RenderView scene_camera(Gallery& g) {
 // A game's sprite shader, and a post shader over the layers below 5; a glyph above it.
 void scene_shaders(Gallery& g) {
     Sprite bg = at(0, 0, g.opaque_checker);
-    bg.size = vec2{900, 480}; bg.uv = rect2{0, 0, 15, 8}; bg.layer = -10;
+    bg.size = vec2{960, 512}; bg.uv = rect2{0, 0, 15, 8}; bg.layer = -10; // 8 units a texel, as in blends
     add(g, bg);
     for (i32 i = 0; i < 3; ++i) add(g, at(-300.0f + 300.0f * (f32)i, 40, g.rings, 200));
     Sprite over = at(0, -180, g.alpha_glyph, 96);
