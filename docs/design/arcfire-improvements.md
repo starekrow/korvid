@@ -67,6 +67,31 @@ that finds an engine limit adds a line here.
   clear (arcfire does it when a stage is entered). Right for scenery a title shows across
   runs; a `KindDesc` flag saying "cleared with the sim" would save a game the list.
 
+## On macOS (slice 7)
+
+Measured on an M3 Max (12 performance cores, 4 efficiency), a dev build with
+`--spike-hunt --prof-report`, the window at 2560 x 1440 pixels (Retina: four times the
+pixels of 1280 x 720), Metal at 120 Hz. Every run held 120 fps; most of a frame is the wait
+for a drawable.
+
+- **The GPU.** Shoreline's demo: 1.0 to 1.1 ms a frame (sort 0.25 to 0.3, draw 0.75 to
+  0.8). Rank 56's peak (`--stress --dial rank=56`: 55,600 bullets, 74,300 sprites): 4.4 ms
+  (draw 4.2, sort 0.19), 8.3 worst. Against the Radeon 780M's 0.43 and 3.3 it is the same
+  shape at four times the pixels: fill. The first frame's GPU time is 70 ms, once (first use
+  of the textures and pipelines). Overdraw is not measured: Metal has no pipeline
+  statistics, so the fps line leaves the number out rather than print 0.
+- **The tick at rank 56's peak** is 4 to 5 ms, the extract about half of it (2.4 to 2.8 ms,
+  around 50 ns a delta against Linux's 65). Threads still do not help: 4.0 ms a tick at 1
+  thread, 5.0 at 12, 5.1 at the default 16; the pool's fan-out, with four slower cores in
+  it, costs more than it saves. The grain-size question above stands on this machine too.
+- **Loading (R5).** macOS reads synchronously, on the main thread, in the asset pump. A dev
+  build's boot reads arcfire's 101 files (13 MB, loose) in one pump of 24 ms on a warm
+  cache; decoding in the same pumps is about four times that (sounds 58 ms, textures 22,
+  fonts 9). `example_sockit2m`: 3.0 GB/s of engine reads, 5.6 GB/s straight from the
+  queue; its cold pass is warm here (macOS cannot drop one file's pages unprivileged).
+  A `dispatch_io` backend would move the 24 ms off the main thread and not the decoding,
+  so it waits for a game whose reads show.
+
 ## Fixed
 
 - **A pass over the whole frame** (slice 6, M2). `renderer_post_layer(r, layer, shader)`:

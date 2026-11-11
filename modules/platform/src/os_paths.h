@@ -4,7 +4,9 @@
 
 namespace kv {
 
-// The running executable's directory with a trailing separator. False if the OS will not say.
+// The running executable's directory with a trailing separator: where the build puts what
+// it needs beside it (shaders/, assets/, its pack). In a macOS .app that is the bundle's
+// Contents/Resources/, not Contents/MacOS/. False if the OS will not say.
 bool os_base_path(char* out, u32 cap);
 // The per-user writable directory for (org, app), created if missing, with a trailing
 // separator. False with a log line if there is no home to put it in.

@@ -24,7 +24,7 @@ config, from the master file's host_config) or with a config (host-debug).
 usage: kormake build <platform>-<config> [--no-unity] [--cxx PATH]
        kormake gen   <platform>-<config> [--no-unity] [--cxx PATH]
        kormake test  <platform>-<config> [MODULE]
-       kormake package <platform>-<config> <exe>   (dist/<exe>/: the exe, its pack, shaders, licenses)
+       kormake package <platform>-<config> <exe>   (dist/<exe>/: the exe, its pack, shaders, licenses; on macOS an .app)
        kormake check [<platform>-<config>]
        kormake graph [<platform>-<config>] [--dot] [--why MODULE]
        kormake clean [<platform>-<config>]
@@ -177,11 +177,18 @@ local function run(cmd, target, opts, rest)
     if rc ~= 0 then return rc end
     local dist = util.join(root, "dist/" .. exe)
     if not kfs.rmtree(dist) and kfs.isdir(dist) then util.fail("package: cannot remove %s", dist) end
-    kfs.mkdirp(util.join(dist, "licenses"))
-    local function copy_in(from, name) kfs.copy(from, util.join(dist, name or util.basename(from))) end
-    copy_in(util.join(build, "bin/" .. exe_bin))
+    -- Where the executable goes and where what it reads goes: one directory, or for a
+    -- toolchain that packages applications (package = "app"), <exe>.app's Contents/MacOS/
+    -- and Contents/Resources/ (package_app.lua does the rest).
+    local app = inst.toolchain.fields.package == "app" and util.join(dist, exe .. ".app") or nil
+    local exe_dir = app and util.join(app, "Contents/MacOS") or dist
+    local res = app and util.join(app, "Contents/Resources") or dist
+    kfs.mkdirp(exe_dir)
+    kfs.mkdirp(util.join(res, "licenses"))
+    local function copy_in(from, name) kfs.copy(from, util.join(res, name or util.basename(from))) end
+    kfs.copy(util.join(build, "bin/" .. exe_bin), util.join(exe_dir, exe_bin))
     if pack then copy_in(util.join(build, pack)) end
-    if kfs.isdir(util.join(build, "bin/shaders")) then util.copy_tree(util.join(build, "bin/shaders"), util.join(dist, "shaders")) end
+    if kfs.isdir(util.join(build, "bin/shaders")) then util.copy_tree(util.join(build, "bin/shaders"), util.join(res, "shaders")) end
     local copied = 0
     for _, f in ipairs({ "LICENSE", "NOTICE" }) do
       if kfs.isfile(util.join(root, f)) then copy_in(util.join(root, f)); copied = copied + 1 end
@@ -195,8 +202,13 @@ local function run(cmd, target, opts, rest)
         copied = copied + 1
       end
     end
-    print(string.format("kormake: %s: %s%s, %d license files%s", dist, exe, pack and (", " .. util.basename(pack)) or ", no pack", copied,
-      kfs.isfile(util.join(root, "LICENSE")) and "" or " (the repository has no LICENSE at its root)"))
+    local bundle = ""
+    if app then
+      local libs, signed = kormake.load("package_app").run(build, app, exe_bin, inst.toolchain)
+      bundle = string.format(", %d librar%s bundled, signed %s", libs, libs == 1 and "y" or "ies", signed)
+    end
+    print(string.format("kormake: %s: %s%s, %d license files%s%s", app or dist, exe, pack and (", " .. util.basename(pack)) or ", no pack", copied,
+      bundle, kfs.isfile(util.join(root, "LICENSE")) and "" or " (the repository has no LICENSE at its root)"))
     return 0
   end
   if cmd == "test" then

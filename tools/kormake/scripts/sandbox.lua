@@ -43,6 +43,8 @@ local module_fields = {
   flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, probe = true,
   sdk = true, -- the Apple SDK the xcode probe asks xcrun for ("macosx")
   flag_framework = true, -- how a toolchain links an external's frameworks ("-framework %s")
+  package = true, -- "app": kormake package writes an application bundle (package_app.lua)
+  os_min = true,  -- the oldest OS release the toolchain builds for ("26.0"), for what packaging writes
 }
 
 -- module "name" { fields } or module "name" (defaults). One per file.

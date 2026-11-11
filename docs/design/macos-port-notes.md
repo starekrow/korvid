@@ -247,9 +247,40 @@ the milestone found around them:
 - **The post parameters** first went as bytes, which Metal's validation refused against the
   shader's writable buffer (renderer-metal.md has why); they go in a buffer per frame.
 
-### Still to come in later milestones
+## Milestone 6: ship
 
-- One CPU side for both renderers (milestone 5).
-- The Vulkan gallery set and the tolerance it fixes (with a Linux or Windows run).
-- Packaging, the rest of the root's documentation, arcfire's macOS performance notes
-  (milestone 6).
+- **`kormake package` writes an `.app`** for a toolchain with `package = "app"` (macOS's).
+  The package command puts the executable in `Contents/MacOS/` and the pack, `shaders/` and
+  the licenses in `Contents/Resources/`; `package_app.lua` does the rest. It walks
+  `otool -L` from the executable (anything outside `/System/`, `/usr/lib/` and `@`-relative
+  names, and those libraries' own), copies each into `Contents/Frameworks/`, gives it the
+  install name `@rpath/<name>`, rewrites the references and adds the rpath
+  `@executable_path/../Frameworks`: Homebrew's `libSDL3.0.dylib` travels with the game. Then
+  `Info.plist` (identifier `org.korvid.<exe>` with `_` as `-`, `LSMinimumSystemVersion`
+  from the toolchain's new `os_min`, which its flags use too, high resolution) and a
+  signature, libraries first, then the bundle, checked with `codesign --verify --strict`.
+  Ad-hoc unless `KORMAKE_CODESIGN_IDENTITY` names an identity: arm64 code does not run
+  unsigned, and `install_name_tool` breaks the linker's signature, so signing is last and
+  not optional. Notarizing is not kormake's. Every command's output goes to
+  `build/<target>/package.log`.
+- **The base path inside a bundle.** `os_base_path` on macOS answers
+  `<app>/Contents/Resources/` when the executable is in `<app>/Contents/MacOS/` and the
+  bundle has the folder; the pack, the shaders and the assets are found where a bundle
+  keeps them, and nothing above the platform knows. (An iOS app is flat.)
+- **Checked:** rocks, arcanum and arcfire packaged from `macos-ship`, run from another
+  directory: SDL3 is the bundle's (`lsof` on the running process), the pack mounts from
+  `Resources/`, both shader libraries load, 120 fps, and Orbit's post pass draws.
+- **I/O (R5)** stays on the sync backend: arcfire's boot reads 13 MB in one 24 ms pump,
+  a quarter of its decoding. The numbers, and arcfire's performance on this machine, are in
+  `arcfire-improvements.md`, "On macOS".
+- **The fps line's overdraw** is left out when the backend has no fragment counts (Metal),
+  instead of printing 0.
+- **README**: "Building on macOS".
+
+### Still to come
+
+- One CPU side for both renderers (milestone 5, waiting on a decision).
+- iOS: the platforms in kormake (milestone 7) and a Simulator run (milestone 8).
+- The gallery's blends and shaders scenes sample their checker at 7.5 pixels a texel, so
+  every edge is at a pixel centre and the backends round it differently; the Vulkan set
+  and its tolerance follow the fix.

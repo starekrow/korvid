@@ -394,8 +394,12 @@ void run(Engine& engine, FrameLoopState& s) {
                     s.idle_frames ? s.idle_total / (f64)s.idle_frames * 1e3 : 0.0, (unsigned long long)s.idle_frames);
             if (s.gpu_frames) {
                 f64 n = (f64)s.gpu_frames;
-                KV_INFO("frameloop", "gpu %.3f ms/frame (worst %.3f): sort %.3f, draw %.3f; overdraw %.2f", s.gpu_sum / n, s.gpu_worst, s.gpu_sort / n,
-                        s.gpu_draw / n, s.gpu_overdraw / n);
+                // Overdraw needs fragment counts, which Metal does not give: no number, not 0.
+                if (s.gpu_overdraw > 0.0)
+                    KV_INFO("frameloop", "gpu %.3f ms/frame (worst %.3f): sort %.3f, draw %.3f; overdraw %.2f", s.gpu_sum / n, s.gpu_worst, s.gpu_sort / n,
+                            s.gpu_draw / n, s.gpu_overdraw / n);
+                else
+                    KV_INFO("frameloop", "gpu %.3f ms/frame (worst %.3f): sort %.3f, draw %.3f", s.gpu_sum / n, s.gpu_worst, s.gpu_sort / n, s.gpu_draw / n);
                 s.gpu_frames = 0;
                 s.gpu_sum = s.gpu_worst = s.gpu_sort = s.gpu_draw = s.gpu_overdraw = 0.0;
             }

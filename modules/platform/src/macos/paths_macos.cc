@@ -1,7 +1,8 @@
 // The executable's directory from dyld; the preference directory under
 // ~/Library/Application Support/<org>/<app>/, the same place SDL puts it on macOS. Inside
-// an .app the executable's directory is Contents/MacOS/; finding the bundle's Resources/
-// from it is the packager's milestone (slice 7, M6), shared with iOS through src/apple/.
+// an .app (kormake package) the executable is in Contents/MacOS/ and what sits beside it
+// elsewhere (the pack, shaders/, assets/) is in Contents/Resources/: the base path is that,
+// when it is there. (An iOS app is flat, its resources beside the executable.)
 #include "../os_paths.h"
 #include "korvid/platform/io.h"
 #include "korvid/core/log.h"
@@ -11,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace kv {
@@ -30,6 +32,15 @@ bool os_base_path(char* out, u32 cap) {
     char* slash = strrchr(out, '/');
     if (!slash) return false;
     slash[1] = 0;
+    // In a bundle: <app>/Contents/MacOS/ -> <app>/Contents/Resources/, if the bundle has one.
+    const char* macos = "/Contents/MacOS/";
+    usize len = strlen(out), tail = strlen(macos);
+    if (len >= tail && strcmp(out + len - tail, macos) == 0) {
+        char resources[PATH_MAX];
+        int r = snprintf(resources, sizeof resources, "%.*s/Contents/Resources/", (int)(len - tail), out);
+        struct stat st;
+        if (r > 0 && (u32)r < cap && stat(resources, &st) == 0 && S_ISDIR(st.st_mode)) memcpy(out, resources, (usize)r + 1);
+    }
     return true;
 }
 

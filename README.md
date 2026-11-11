@@ -183,3 +183,41 @@ resize, so the event pump stalls for the length of the drag. Measured here: 2.5 
 configure with the cairo plugin, 4.3 ms with the GTK plugin, at hundreds of configures
 per second. Keyboard resizes and borderless windows are unaffected. Nothing in the
 engine runs during the stall; `--hitch-ms` shows it as time spent in the pump.
+
+## Building on macOS
+
+macOS 26 or later on Apple silicon. The renderer is `renderer-metal`; everything the
+Linux build has builds here (the `macos` root in `kormake.lua`).
+
+1. **Xcode** from the App Store, opened once to accept its license, then the Metal
+   compiler, which Xcode no longer installs by itself:
+
+       xcodebuild -downloadComponent MetalToolchain
+
+   kormake asks `xcrun` for the compiler and the SDK, so no particular `PATH` or shell is
+   needed. If `xcrun` finds the Command Line Tools instead of Xcode, point it at Xcode:
+   `sudo xcode-select -s /Applications/Xcode.app`.
+2. **Ninja and SDL 3.4.20** from Homebrew: `brew install ninja sdl3`. The version is
+   pinned in `modules/toolchain-macos/module.lua`, as on Windows. Elsewhere than
+   `/opt/homebrew/opt/sdl3`? Set `KORMAKE_SDL3_DIR` to the folder that holds `include/`
+   and `lib/`.
+3. **slangc**, the shader compiler: the macOS release from
+   <https://github.com/shader-slang/slang/releases>, unpacked anywhere, its `bin/` on
+   `PATH`. It drives Xcode's Metal compiler to write `.metallib` files.
+
+Then:
+
+    tools/kormake/bootstrap.sh                          # once, and after a pull that changes tools/kormake/scripts/
+    tools/kormake/bin/macos/kormake build macos-dev     # the macos root, with tests (macos-debug, macos-ship likewise)
+    tools/kormake/bin/macos/kormake test macos-dev      # runs them
+    build/macos-dev/bin/example_arcfire                 # the shooter; --demo flies itself
+    MTL_DEBUG_LAYER=1 build/macos-debug/bin/example_testbed   # Metal's API validation (off unless asked for)
+    tools/kormake/bin/macos/kormake package macos-ship example_arcfire  # dist/example_arcfire/example_arcfire.app
+
+`kormake package` writes an application bundle: the executable in `Contents/MacOS/`, its
+pack, shaders and licenses in `Contents/Resources/` (where the engine's base path looks
+inside a bundle), Homebrew's SDL3 copied into `Contents/Frameworks/` and linked by
+`@rpath`, an `Info.plist`, and a signature. The signature is ad-hoc, which runs on the
+machine that built it; set `KORMAKE_CODESIGN_IDENTITY` to a Developer ID to sign for
+others (notarizing is up to you: `xcrun notarytool`). `build/macos-ship/package.log` has
+what the packager ran.

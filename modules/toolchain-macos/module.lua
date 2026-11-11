@@ -8,17 +8,21 @@
 --                      from being the compiler's choice. Each platform still keeps its libm.
 --   -Wno-nullability-completeness  the SDK's headers, where this tool cannot reach them.
 -- Source directories: posix and the Apple family's shared code, then macOS's own, then the
--- SDL3 backends (window and keyboard, gamepads) that Linux uses too.
+-- SDL3 backends (window and keyboard, gamepads) that Linux uses too. kormake package writes
+-- an .app (package = "app"): the executable, its resources, SDL3 bundled, signed.
+local os_min = "26.0"
 module "toolchain.macos" {
   provides  = "toolchain",
   platforms = { "macos" },
   tag       = "macos",
   sdk       = "macosx",
   probe     = "xcode",
+  package   = "app",
+  os_min    = os_min,
   srcdirs   = { "posix", "apple", "macos", "sdl3", "sdl3_pads" }, -- src/<dir>/ picked up on this platform, in this order
   cxx       = "clang++",
   ar        = "ar",
-  cxxflags  = { "-std=c++20", "-arch", "arm64", "-mmacosx-version-min=26.0", "-fno-exceptions", "-fno-rtti",
+  cxxflags  = { "-std=c++20", "-arch", "arm64", "-mmacosx-version-min=" .. os_min, "-fno-exceptions", "-fno-rtti",
                 "-fno-strict-aliasing", "-ffp-contract=off", "-Wall", "-Wextra", "-Werror", "-Wno-nullability-completeness" },
   configs   = {
     debug = { cxxflags = { "-g", "-O0", "-DKV_DEBUG=1" } },
@@ -27,7 +31,7 @@ module "toolchain.macos" {
   },
   -- CoreFoundation: platform_hid's run-loop timer for live resize. Every process on macOS
   -- loads it already; linking it names what the engine calls directly.
-  ldflags   = { "-arch", "arm64", "-mmacosx-version-min=26.0", "-framework", "CoreFoundation" },
+  ldflags   = { "-arch", "arm64", "-mmacosx-version-min=" .. os_min, "-framework", "CoreFoundation" },
   rules     = {
     cxx  = { command = '$cxx $cxxflags $defines $includes -MMD -MF $out.d -c $in -o $out', depfile = "$out.d", deps = "gcc" },
     ar   = { command = "rm -f $out && $ar crs $out $in" },
