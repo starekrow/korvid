@@ -49,6 +49,17 @@ struct HostWindow {
 
     // Translates OS events into bus events and updates input.raw. Call once per frame.
     void pump(EventBus& bus, Input& input);
+    // The same for the events already queued, without asking the OS for more: for code
+    // running inside an OS modal loop (on_modal), where asking would re-enter the loop
+    // that holds the thread.
+    void drain(EventBus& bus, Input& input);
+    // Some OSes hold the thread that pumps in a loop of their own while the window is being
+    // resized: on macOS a live resize runs AppKit's event-tracking loop inside pump until
+    // the mouse is released, so no frame runs for as long as the drag. While such a loop
+    // runs, the backend calls fn(ctx) about every 4 ms from inside it. Null stops it. A
+    // backend whose window has a thread of its own (Win32) never calls it. The module sets
+    // this; a frame loop asks for it through platform_modal_frame.
+    void on_modal(void (*fn)(void* ctx), void* ctx);
     // Framebuffer pixels per window unit: what pointer coordinates are scaled by.
     f32  pixel_scale() const;
 
@@ -71,6 +82,9 @@ struct HostWindow {
     u32   height_     = 0;
     bool  vsync_      = true;
     bool  focused_    = false;
+    void (*modal_fn_)(void*) = nullptr;
+    void* modal_ctx_  = nullptr;
+    void* modal_timer_ = nullptr; // the backend's: on macOS a CFRunLoopTimer in the event-tracking mode
 };
 
 } // namespace kv

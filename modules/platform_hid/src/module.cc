@@ -139,11 +139,33 @@ static HidState* state(Engine& e) {
     return engine_module_state_as<HidState>(e, "platform_hid");
 }
 
+// The window's on_modal hook, from inside an OS modal loop that holds platform_pump: the
+// events queued so far reach the bus, then the frame loop's frame runs. Not re-entered: a
+// frame that somehow started another modal loop would otherwise nest frames.
+static void hid_modal(void* ctx) {
+    Engine& e = *(Engine*)ctx;
+    HidState* s = state(e);
+    if (!s || !s->modal_frame || s->in_modal_frame) return;
+    s->in_modal_frame = true;
+    s->window.drain(e.events, s->input);
+    s->modal_frame(s->modal_user);
+    s->in_modal_frame = false;
+}
+
 HostWindow* platform_open_window(Engine& e, const WindowDesc& desc) {
     HidState* s = state(e);
     if (!s) { KV_ERROR("hid", "module not started"); return nullptr; }
     if (s->window.is_open()) { KV_ERROR("hid", "a window is already open"); return nullptr; }
-    return s->window.open(desc) ? &s->window : nullptr;
+    if (!s->window.open(desc)) return nullptr;
+    s->window.on_modal(hid_modal, &e);
+    return &s->window;
+}
+
+void platform_modal_frame(Engine& e, void (*fn)(void* user), void* user) {
+    HidState* s = state(e);
+    if (!s) return;
+    s->modal_frame = fn;
+    s->modal_user  = user;
 }
 
 bool platform_video_up(Engine&) { return hid_video_up(); }

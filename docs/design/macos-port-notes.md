@@ -151,9 +151,22 @@ in dev and 50 in debug and in ship with no failure.
   by name, never key bits, so no recording changes.
 - **`WindowSurface::Metal`** opens the window with `SDL_WINDOW_METAL`, which
   `SDL_Metal_CreateView` needs.
-- **Not checked by a person yet:** dragging and resizing the window while `example_window`
-  reports its gaps (a backend whose window blocks the loop during a drag shows a gap as long
-  as the drag), Cmd+Q, the Command keys, Mission Control and full screen.
+- **Live resize held the loop for the whole drag.** Grabbing a corner runs AppKit's
+  event-tracking loop on the main thread, inside `SDL_PollEvent`, until the mouse is released:
+  `example_window` showed one gap as long as the drag. Windows answered the same thing with a
+  window thread of its own; AppKit wants its windows and their events on the main thread, so
+  here the frames run inside AppKit's loop instead, as SDL documents (live-resize expose
+  events may be drawn from directly). A CoreFoundation timer in the event-tracking run-loop
+  mode alone fires every 4 ms there, mouse moving or not, and never in an ordinary pump;
+  each tick drains SDL's queue into the bus without pumping the OS (`SDL_PeepEvents`,
+  `HostWindow::drain`) and calls the frame function a frame loop gave
+  `platform_modal_frame`. Measured by hand: 250 frames a second through the drag, every one
+  from inside the resize, longest gap 6.0 to 6.5 ms (4.6 to 5.0 ms outside it: the timer's
+  phase sets the pace there, not the loop's sleep); 11.2 ms once, as the mouse is released
+  and the loop takes over again. Nothing reaches the 20 ms hitch line. The I/O queue is not
+  pumped while the resize lasts. The game frame loop takes the same hook when it runs here
+  (milestone 3).
+- **Not checked by a person yet:** Cmd+Q, the Command keys, Mission Control and full screen.
 
 ### The shaders
 

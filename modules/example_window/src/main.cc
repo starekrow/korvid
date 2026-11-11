@@ -63,6 +63,39 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_wheel", KV_ON(MouseWheel, on_wheel)},
 };
 
+// The loop's health and one frame of it, shared by the loop and by the frames run from
+// inside an OS modal loop (platform_modal_frame: a live resize on macOS), so the gaps it
+// reports cover both.
+struct Loop {
+    Engine* e = nullptr;
+    f64 hitch_ms = 20.0;
+    f64 last = 0.0, second = 0.0, worst = 0.0;
+    u32 frames = 0, modal_frames = 0;
+};
+
+void frame(Loop& l) {
+    f64 now = time_now();
+    f64 gap = now - l.last;
+    l.last = now;
+    if (gap * 1000.0 > l.hitch_ms) KV_WARN("window", "frame gap %.1f ms", gap * 1000.0);
+    if (gap > l.worst) l.worst = gap;
+    engine_frame(*l.e, gap);
+    ++l.frames;
+    if (now - l.second >= 1.0) {
+        if (l.modal_frames) KV_INFO("window", "%u frames (%u inside a live resize), longest gap %.1f ms", l.frames, l.modal_frames, l.worst * 1000.0);
+        else KV_INFO("window", "%u frames, longest gap %.1f ms", l.frames, l.worst * 1000.0);
+        l.frames = l.modal_frames = 0;
+        l.worst = 0.0;
+        l.second = now;
+    }
+}
+
+void modal_frame(void* user) {
+    Loop& l = *(Loop*)user;
+    ++l.modal_frames;
+    frame(l);
+}
+
 int run(int argc, char** argv) {
     f64 run_seconds = 0.0, hitch_ms = 20.0;
     bool borderless = false;
@@ -81,26 +114,19 @@ int run(int argc, char** argv) {
     d.borderless = borderless;
     int rc = 0;
     if (!platform_open_window(e, d)) rc = 1;
-    f64 start = time_now(), last = start, second = start, worst = 0.0;
-    u32 frames = 0;
+    f64 start = time_now();
+    Loop l;
+    l.e = &e;
+    l.hitch_ms = hitch_ms;
+    l.last = l.second = start;
+    platform_modal_frame(e, modal_frame, &l);
     while (rc == 0 && !e.quit_requested) {
-        f64 now = time_now();
-        f64 gap = now - last;
-        last = now;
-        if (gap * 1000.0 > hitch_ms) KV_WARN("window", "frame gap %.1f ms", gap * 1000.0);
-        if (gap > worst) worst = gap;
-        platform_pump(e);
-        engine_frame(e, gap);
-        ++frames;
-        if (now - second >= 1.0) {
-            KV_INFO("window", "%u frames, longest gap %.1f ms", frames, worst * 1000.0);
-            frames = 0;
-            worst = 0.0;
-            second = now;
-        }
-        if (run_seconds > 0.0 && now - start >= run_seconds) break;
+        platform_pump(e); // on macOS a live resize runs inside this, its frames through modal_frame
+        frame(l);
+        if (run_seconds > 0.0 && time_now() - start >= run_seconds) break;
         time_sleep(0.004); // nothing to present: pace the loop at about 250 Hz
     }
+    platform_modal_frame(e, nullptr, nullptr);
     engine_shutdown(e);
     names_shutdown();
     mem_shutdown();

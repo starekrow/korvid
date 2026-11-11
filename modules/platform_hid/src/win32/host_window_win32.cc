@@ -420,4 +420,14 @@ void HostWindow::pump(EventBus& bus, Input& input) {
     sdl_pads_pump(bus, input);
 }
 
+// pump never asks the OS for anything here: it takes what the window's thread queued.
+void HostWindow::drain(EventBus& bus, Input& input) { pump(bus, input); }
+
+// The window's thread takes the system's modal move and size loops, so the frame loop is
+// never held in one and this is never called.
+void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {
+    modal_fn_  = fn;
+    modal_ctx_ = ctx;
+}
+
 } // namespace kv

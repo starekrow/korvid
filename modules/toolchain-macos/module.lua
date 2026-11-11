@@ -25,7 +25,9 @@ module "toolchain.macos" {
     dev   = { cxxflags = { "-g", "-O2", "-DKV_DEV=1" } },
     ship  = { cxxflags = { "-O2", "-DNDEBUG" } },
   },
-  ldflags   = { "-arch", "arm64", "-mmacosx-version-min=26.0" },
+  -- CoreFoundation: platform_hid's run-loop timer for live resize. Every process on macOS
+  -- loads it already; linking it names what the engine calls directly.
+  ldflags   = { "-arch", "arm64", "-mmacosx-version-min=26.0", "-framework", "CoreFoundation" },
   rules     = {
     cxx  = { command = '$cxx $cxxflags $defines $includes -MMD -MF $out.d -c $in -o $out', depfile = "$out.d", deps = "gcc" },
     ar   = { command = "rm -f $out && $ar crs $out $in" },

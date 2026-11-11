@@ -39,6 +39,9 @@ struct HidState {
     u32          text_override_len = 0, text_override_backspaces = 0;
     HidPress     presses[KV_HID_PRESSES] = {}; // the CLI's, being held
     u32          press_count = 0;
+    void       (*modal_frame)(void* user) = nullptr; // platform_modal_frame's
+    void*        modal_user = nullptr;
+    bool         in_modal_frame = false;
 };
 
 // Opens the window. Null if one is already open or SDL refused. Owned by the module.
@@ -58,5 +61,14 @@ void platform_text_input(Engine& e, bool on);
 void input_text_override(Engine& e, const char* text, u32 backspaces = 0);
 // The module's input, or null if the module is not started. Likewise.
 Input*      platform_input(Engine& e);
+// Some OSes hold the main thread in a loop of their own while the window is resized (macOS:
+// a live resize runs until the mouse is released), so platform_pump does not return and no
+// frame runs for the length of the drag. While such a loop lasts, fn(user) is called about
+// every 4 ms from inside platform_pump, after the window's queued events have reached the
+// bus: a frame loop runs a frame there (engine_frame, render) and must not call
+// platform_pump, which is still running further up the stack. The I/O queue is not pumped
+// meanwhile. Null turns it off. On Windows the window has a thread of its own and fn is
+// never called. One per process, for whoever drives the frames.
+void platform_modal_frame(Engine& e, void (*fn)(void* user), void* user);
 
 } // namespace kv

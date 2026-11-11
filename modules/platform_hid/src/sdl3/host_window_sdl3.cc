@@ -4,8 +4,42 @@
 #include "../hid_backend.h"
 #include "../sdl3_pads/sdl_pads.h"
 #include <SDL3/SDL.h>
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 
 namespace kv {
+
+#if defined(__APPLE__)
+// A live resize runs AppKit's event-tracking loop on the main thread, inside SDL_PollEvent,
+// until the mouse is released: pump does not return, and no frame runs. SDL sends live-resize
+// expose events from inside it, but only while the size changes, not while the mouse holds
+// still. A run-loop timer in the event-tracking mode alone fires only there, steadily, and
+// never during an ordinary pump (the default mode): the window's on_modal hook runs from it.
+// The mode's name is AppKit's NSEventTrackingRunLoopMode, as a CFString.
+namespace {
+constexpr CFTimeInterval kModalInterval = 0.004;
+
+void modal_tick(CFRunLoopTimerRef, void* info) {
+    HostWindow* w = (HostWindow*)info;
+    if (w->modal_fn_) w->modal_fn_(w->modal_ctx_);
+}
+
+void* modal_timer_start(HostWindow* w) {
+    CFRunLoopTimerContext ctx = {0, w, nullptr, nullptr, nullptr};
+    CFRunLoopTimerRef t = CFRunLoopTimerCreate(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + kModalInterval,
+                                               kModalInterval, 0, 0, modal_tick, &ctx);
+    if (t) CFRunLoopAddTimer(CFRunLoopGetMain(), t, CFSTR("NSEventTrackingRunLoopMode"));
+    return t;
+}
+
+void modal_timer_stop(void* timer) {
+    if (!timer) return;
+    CFRunLoopTimerInvalidate((CFRunLoopTimerRef)timer);
+    CFRelease((CFRunLoopTimerRef)timer);
+}
+} // namespace
+#endif
 
 bool hid_video_up() {
     if (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) return true;
@@ -71,12 +105,19 @@ bool HostWindow::open(const WindowDesc& desc) {
     width_   = (u32)pw;
     height_  = (u32)ph;
     focused_ = (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS) != 0;
+#if defined(__APPLE__)
+    modal_timer_ = modal_timer_start(this);
+#endif
     KV_INFO("window", "opened '%s' %ux%u px", desc.title, width_, height_);
     return true;
 }
 
 void HostWindow::close() {
     if (!native_) return;
+#if defined(__APPLE__)
+    modal_timer_stop(modal_timer_);
+    modal_timer_ = nullptr;
+#endif
     SDL_DestroyWindow((SDL_Window*)native_);
     native_ = nullptr;
     width_ = height_ = 0;
@@ -109,9 +150,10 @@ f32 HostWindow::pixel_scale() const {
     return (f32)width_ / (f32)ww;
 }
 
-void HostWindow::pump(EventBus& bus, Input& input) {
-    SDL_Event e;
-    while (SDL_PollEvent(&e)) {
+namespace {
+
+// One OS event into bus events and raw input: pump's and drain's.
+void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
         switch (e.type) {
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
@@ -120,21 +162,21 @@ void HostWindow::pump(EventBus& bus, Input& input) {
 
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
             u32 nw = (u32)e.window.data1, nh = (u32)e.window.data2;
-            if (nw != width_ || nh != height_) {
-                width_  = nw;
-                height_ = nh;
+            if (nw != w.width_ || nh != w.height_) {
+                w.width_  = nw;
+                w.height_ = nh;
                 bus.emit(WindowResized{nw, nh});
             }
             break;
         }
 
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
-            focused_ = true;
+            w.focused_ = true;
             bus.emit(FocusChanged{true});
             break;
 
         case SDL_EVENT_WINDOW_FOCUS_LOST:
-            focused_ = false;
+            w.focused_ = false;
             input.raw.clear(); // keys released while unfocused never report an up edge
             bus.emit(FocusChanged{false});
             break;
@@ -162,7 +204,7 @@ void HostWindow::pump(EventBus& bus, Input& input) {
 
         // SDL reports the pointer in window units; the engine works in framebuffer pixels.
         case SDL_EVENT_MOUSE_MOTION: {
-            f32 s = pixel_scale();
+            f32 s = w.pixel_scale();
             MouseState& m = input.raw.mouse;
             f32 nx = e.motion.x * s, ny = e.motion.y * s;
             bus.emit(MouseMoved{nx, ny, e.motion.xrel * s, e.motion.yrel * s});
@@ -181,7 +223,7 @@ void HostWindow::pump(EventBus& bus, Input& input) {
             default: goto done;
             }
             {
-                f32 s = pixel_scale();
+                f32 s = w.pixel_scale();
                 MouseState& m = input.raw.mouse;
                 m.x = e.button.x * s; m.y = e.button.y * s;
                 bool down = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
@@ -202,7 +244,24 @@ void HostWindow::pump(EventBus& bus, Input& input) {
             input_gamepad_event(&e, bus, input); // pads arrive on the same queue
             break;
         }
-    }
+}
+
+} // namespace
+
+void HostWindow::pump(EventBus& bus, Input& input) {
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) translate(*this, e, bus, input);
+}
+
+// SDL_PeepEvents takes from SDL's queue without pumping the OS for more.
+void HostWindow::drain(EventBus& bus, Input& input) {
+    SDL_Event e;
+    while (SDL_PeepEvents(&e, 1, SDL_GETEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST) == 1) translate(*this, e, bus, input);
+}
+
+void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {
+    modal_fn_  = fn;
+    modal_ctx_ = ctx;
 }
 
 } // namespace kv
