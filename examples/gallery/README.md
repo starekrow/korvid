@@ -15,7 +15,7 @@ pixels.
 
     build/macos-dev/bin/example_gallery --out DIR      # nine PPMs into DIR (a dev or debug build: ship cannot screenshot)
     build/macos-dev/bin/example_gallery --scene sort   # one scene
-    build/macos-dev/bin/picture compare DIR modules/example_gallery/references/metal    # against the committed references
+    build/macos-dev/bin/picture compare DIR examples/gallery/references/metal    # against the committed references
     build/macos-dev/bin/picture png DIR OUT            # a set of PNGs, to keep as references
 
 | Scene | What it draws |
@@ -33,7 +33,7 @@ PNGs; `references/vulkan/` those renderer-vulkan draws on Linux (a Radeon 780M, 
 GNOME on Wayland; `blends` and `shaders` drawn again Nov 11 for the new background).
 Each backend is compared against its own set for its regressions, and the two sets against
 each other for parity; the first comparison of the two fixes the picture tool's tolerance
-(`modules/tool_picture`), which is not loosened after. Against Metal the Vulkan set passes
+(`tools/picture`), which is not loosened after. Against Metal the Vulkan set passes
 seven scenes at the defaults (`transform` with 87 pixels off at the glyph's edges); `blends`
 and `shaders` failed at 6.6% and 6.4%, every checker cell edge a pixel over in one triangle
 of the field's quad. Their background was 900x480 units with the checker repeated 15x8,

@@ -2,10 +2,10 @@
 """Arcfire's sounds and music: the vendored effects, copied unmodified under new names, and
 the two music tracks, resampled. Stdlib only. Run from anywhere:
 
-    python3 modules/example_arcfire/tools/make_sounds.py ~/code/asset-packs/arcfire
+    python3 examples/arcfire/tools/make_sounds.py ~/code/asset-packs/arcfire
 
 The argument is the directory the archives were downloaded and unpacked into (`pack/`
-under it holds one directory per archive). Writes modules/example_arcfire/assets/sound/
+under it holds one directory per archive). Writes examples/arcfire/assets/sound/
 (Kenney's Sci-Fi Sounds and Impact Sounds, CC0, as they are) and assets/music/ (Juhani
 Junkala's 5 Chiptunes (Action), CC0: four tracks, Shoreline's and Orbit's, folded to mono and halved in rate, 22,050
 Hz 16-bit WAV, about a quarter of the size; the engine streams only Ogg Vorbis, and

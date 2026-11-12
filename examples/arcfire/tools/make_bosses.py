@@ -2,7 +2,7 @@
 """Arcfire's bosses, kitbashed from Kenney's Pixel Shmup (assets/kenney/, CC0) into
 assets/generated/. Deterministic: the same files every run. Run from anywhere:
 
-    python3 modules/example_arcfire/tools/make_bosses.py
+    python3 examples/arcfire/tools/make_bosses.py
 
 Each boss is two images, at the pack's pixel scale (drawn at 2x, as the pack's ships are),
 and the missile boat (a midsize airship, one body) is one, generated/boat.png:

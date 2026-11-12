@@ -4,7 +4,9 @@
 project "korvid"
 requires_kormake "1.0"
 
-modulepath { "modules" }
+-- The engine, the examples, the tools. Each of examples/ and tools/ has a korvid.config
+-- that points back here, so kormake works from inside them.
+modulepath { "modules", "examples", "tools" }
 
 platforms { "linux", "windows", "macos", "ios", "iossim" }
 configs   { "debug", "dev", "ship" }

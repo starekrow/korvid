@@ -3,7 +3,7 @@
 from Kenney's Pixel Shmup terrain tiles (assets/kenney/tiles.png). Stdlib only; run from
 anywhere:
 
-    python3 modules/example_arcfire/tools/make_maps.py
+    python3 examples/arcfire/tools/make_maps.py
 
 The map is 17 tiles wide (16 px tiles, drawn at 2x: 544 units over the 540-unit field) and
 as many rows as MAP_LENGTH (the stage, and what scrolls by at its bosses) plus the field's

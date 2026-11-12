@@ -2,10 +2,10 @@
 """Arcfire's art: the vendored files, copied unmodified under new names, and the pieces made
 here, drawn by this script. Run from anywhere:
 
-    python3 modules/example_arcfire/tools/make_art.py ~/code/asset-packs/arcfire
+    python3 examples/arcfire/tools/make_art.py ~/code/asset-packs/arcfire
 
 The argument is the directory the archives were downloaded and unpacked into (`pack/` under
-it holds one directory per archive). Writes modules/example_arcfire/assets/: the vendored
+it holds one directory per archive). Writes examples/arcfire/assets/: the vendored
 files where CREDITS.md lists them, and everything made here under `made/`. Needs Pillow.
 
 What is made here, and from what:

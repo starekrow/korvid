@@ -47,7 +47,7 @@ It is done when:
 
 ## Where slice 1 left it
 
-What this slice changes, as the code stands (`modules/example_arcfire/src`):
+What this slice changes, as the code stands (`examples/arcfire/src`):
 
 - **Emitters** are `Emitter{at, count, cadence, timer, fired, speed}` on the `air` and
   `ground` kinds; `enemies.cc` fires `bullets_fire_aimed` (a fan of `count × bullet_density`

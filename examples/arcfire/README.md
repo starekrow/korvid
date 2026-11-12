@@ -35,7 +35,7 @@ Built (below), from `build/linux-dev/bin`:
 | twenty thousand bullets | `./example_arcfire --stress` (Shoreline) or `--stress --stage orbit` (and 3,000 ships in the battle) |
 | one pattern, measured | `./example_arcfire --bench ring` (any name in `assets/patterns/patterns.json`) |
 | determinism | `./example_arcfire --demo --hash --threads 1` against `--threads 16`: the same hashes, tick for tick; `--again` plays it twice in one process |
-| a recorded run replayed | `./example_arcfire --replay ../../../modules/example_arcfire/tests/replays/normal.kvr` (ends `matched`) |
+| a recorded run replayed | `./example_arcfire --replay ../../../examples/arcfire/tests/replays/normal.kvr` (ends `matched`) |
 | timings | add `--spike-hunt --prof-report`; to run a long mode four times faster, `--cli-stdin` and type `rate 4` |
 
 ## Building and running
@@ -90,7 +90,7 @@ hash every 60 ticks (the frame loop's; its README has the file). A run started f
 title records the arguments that start it, so its replay goes straight in. Two recorded bot
 runs, Shoreline at Normal and Hard, are in `tests/replays/`; replayed from the repository
 root, `build/linux-dev/bin/example_arcfire --replay
-modules/example_arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 14648,
+examples/arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 14648,
 matched`. A change to the
 sim makes them diverge, and they are recorded again (`--autoplay --stage shoreline
 --difficulty normal --record ...`).

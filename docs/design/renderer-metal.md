@@ -127,7 +127,7 @@ messages; 96 to 121 fps with vsync on a 120 Hz panel, 350 to 500 without.
   sort 0.25, the draws and the post pass 1.45.
 - **The gallery** (`example_gallery`, compared by the picture tool, `tool_picture`) draws nine fixed scenes at
   960x540 pixels on any display and compares two sets within a tolerance; the Metal set is
-  committed as PNGs (`modules/example_gallery/references/metal/`). Run to run on one GPU the
+  committed as PNGs (`examples/gallery/references/metal/`). Run to run on one GPU the
   pictures are identical; the tolerance waits for the first Vulkan set.
 - **Vsync** holds 120 Hz on the ProMotion panel once a run is a second old (rocks, arcanum,
   arcfire, the testbed with and without `--check-sort`). Milestone 3's near-100 fps did not

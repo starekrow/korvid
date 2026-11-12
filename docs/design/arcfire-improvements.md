@@ -1,10 +1,10 @@
 # Arcfire improvements
 
-Nov 9, 2026. What `example_arcfire` (modules/example_arcfire/docs/Arcfire-Master-PRD.md)
+Nov 9, 2026. What `example_arcfire` (examples/arcfire/docs/Arcfire-Master-PRD.md)
 asks of the engine. A living note: an item arrives when the game finds it, moves to
 "Fixed" when a slice builds it (saying where), and the numbers table at the end is the
 engine's side of the story. Measurements live in
-`modules/example_arcfire/docs/performance-notes.md`, the game's notebook; an entry there
+`examples/arcfire/docs/performance-notes.md`, the game's notebook; an entry there
 that finds an engine limit adds a line here.
 
 ## Identified at PRD time
