@@ -1,5 +1,129 @@
 # Korvid
 
+Korvid is a multi-platform game engine with support for 2D accelerated graphics,
+audio, keyboard/mouse/gamepad inputs, resource packs, collision, a built-in CLI,
+and other niceties. It runs on Linux, Windows, macOS, and iOS. Dependencies are
+minimal; on most platforms you'll just need a local C++ compiler and a few
+packages - SDL3 for desktops, slangc and Ninja if you don't already have them.
+
+The engine is fully deterministic on each platform (though not across
+platforms). This can make it _much_ easier to track down bugs, since replays
+will trace the exact same paths through your code with just an initial state and
+an input script.
+
+The engine provides its own build tool, kormake, that understands its module
+format and makes some tasks easier.
+
+Korvid is written in what is sometimes called the Orthodox C++ style: No STL, no
+exceptions, templates used sparingly, new/delete not used. Games are also C++
+modules today, but more languages are coming. You'll get the best use out of
+the engine if you choose a language that can work directly with data structures
+in memory.
+
+Some notable roadmap items:
+
+  - Android support
+  - 3D graphics
+  - More animation types
+  - Physics
+  - Authoring environment
+  - Additional language support
+
+## Quick Start
+
+Install dependencies for your platform (see [Platform Notes](#platform-notes) for details):
+- Linux: g++, SDL3, Vulkan, Ninja, slang compiler
+  - Ubuntu distributions would look something like this, your mileage may vary:
+    `apt-get install libsdl3-dev libvulkan-dev vulkan-validationlayers ninja-build slang-compiler`
+    (the validation layers are for debug builds, which turn them on)
+- Windows: Visual Studio with C++, SDL3, Vulkan SDK
+  - unpack the SDL3 windows release into korvid/vendor/
+  - this is pinned to 3.4.20 right now, needs work
+- macOS: Xcode, sdl3, slang compiler, Metal tools
+  - Get the metal tools: `xcodebuild -downloadComponent MetalToolchain`
+  - Slang compiler: unpack it somewhere, put bin/ in your path
+  - the rest: `brew install ninja sdl3`
+
+In `tools/kormake`, run `bootstrap.sh` or `bootstrap.bat` for your platform. If
+that reports an error, see BUILDING.md in that directory for how it's 
+supposed to work. Add `tools/kormake/bin/<platform>` to your PATH.
+
+Then in `examples`, run `kormake`. That should build all the examples, and any 
+tools they need.
+
+Try them out. The examples build into `build/<platform>-<config>/bin`, so
+something like `build/linux-debug/bin/arcfire` should bring up one of the
+example games.
+
+Run tests: In `modules` or `examples`, run `kormake test`.
+
+## Notable Engine Features
+
+### Modules
+
+Korvid is structured around modules. Each module is a collection of code,
+headers, assets, and metadata. Modules can require other modules by name to be
+part of the finished executable, and kormake keeps them all straight, detects
+and complains about cycles, and handles all the compiling and linking. You are
+encouraged to build your games in your own directories and repos;
+`korvid.config` in the root of your project will help kormake find the engine
+you want it to use and all the modules your project has and depends on. 
+
+Korvid itself is entirely formed of modules, including all the tools (except
+kormake).
+
+Setting up a module is dead easy: You need a directory, a header file if others
+will be calling you, usually some code in a file that kormake can compile, and a
+module.lua that names the module and any of its dependencies. Put that somewhere
+kormake can find it and you have your own module that others can depend on and
+link with. Note that the toolchains and platforms are modules themselves.
+
+### Cross-Platform
+
+Korvid currently runs on Linux, Windows, macOS, and iOS. It is designed as a
+three-layer engine, with an outer ring of services and entities, an inner
+rendering engine, and a platform rendering core. Service modules can easily 
+adapt to the platform as well - I/O is just a service, as is windowing.
+
+kormake also has built-in support for building binaries for the host machine in
+a cross-compiling setup. This makes it possible for host tools to be built out
+of the same modules as the game itself, and allows your toolchain to re-use the
+same portability, windowing, and rendering features that are built into the
+engine.
+
+### Packaging
+
+Korvid includes its own asset packager, `kpack`. Asset packs (`.kpak` files) are
+ZIP files with an index and files stored uncompressed at 4KiB chunk alignment.
+The asset loader will in fact work with any ZIP file, but it can do some nice
+optimizations with a properly laid out .kpak file.
+
+### Minimal Dependencies
+
+Korvid rejects package creep. Most of the items that would drop you into 
+dependency hell have been vendored directly in this repo. The big ones - the
+compilers, vulkan support, SDL on desktops - are up to you, but if you
+poke around in here you'll find vendored inflate/deflate, a Vorbis decoder, and 
+other things that were better compiled in than linked from who-knows-where.
+
+### Deterministic Engine
+
+...details on hashing et al...
+
+## Engine Structure
+
+## Platform Notes
+
+### Linux
+### Windows
+### macOS
+### iOS
+### Android (TBD)
+
+
+---------------------------------------------
+Old generated content, ignore
+
 Step 2: a Vulkan 1.3 sprite renderer behind a render interface, sprite entities with
 a per-tick delta extract into the renderer's persistent world, and an example game with
 a three-state machine (INIT, RUN, EXIT) that bounces four balls over a tiled background:
