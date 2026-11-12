@@ -30,7 +30,7 @@ pixels.
 
 `references/metal/` holds the pictures renderer-metal draws on an M3 Max (macOS 26.7), as
 PNGs; `references/vulkan/` those renderer-vulkan draws on Linux (a Radeon 780M, RADV 26.0.8,
-GNOME on Wayland, Nov 10); against Metal they fail and pass in the same counts Windows's did.
+GNOME on Wayland; `blends` and `shaders` drawn again Nov 11 for the new background).
 Each backend is compared against its own set for its regressions, and the two sets against
 each other for parity; the first comparison of the two fixes the picture tool's tolerance
 (`modules/tool_picture`), which is not loosened after. Against Metal the Vulkan set passes
@@ -39,10 +39,11 @@ and `shaders` failed at 6.6% and 6.4%, every checker cell edge a pixel over in o
 of the field's quad. Their background was 900x480 units with the checker repeated 15x8,
 7.5 pixels a texel, so every texel edge fell on a pixel's centre, where nearest sampling's
 rounding is each GPU's own. A decision for the scene, not the tolerance: the background is
-960x512 now, 8 pixels a texel, every edge on a pixel edge. The Metal set has the two new
-pictures (the other seven are unchanged); the Vulkan set's `blends` and `shaders` are the
-old scene's until they are drawn again on Linux (`picture png` over a fresh `--out`), after
-which the two sets should agree in all nine.
+960x512 now, 8 pixels a texel, every edge on a pixel edge. Both sets have the two new
+pictures (the other seven are unchanged), and they agree in all nine at the defaults:
+`blends`, `shaders` and `sort` within 2 levels, the filtering scenes within 1, `camera` with
+4 pixels and `transform` with 87 past the threshold, at the glyph's and the screen
+sprites' edges.
 
 ## Files
 
