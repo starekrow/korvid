@@ -90,7 +90,7 @@ hash every 60 ticks (the frame loop's; its README has the file). A run started f
 title records the arguments that start it, so its replay goes straight in. Two recorded bot
 runs, Shoreline at Normal and Hard, are in `tests/replays/`; replayed from the repository
 root, `build/linux-dev/bin/example_arcfire --replay
-modules/example_arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 14521,
+modules/example_arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 14168,
 matched`. A change to the
 sim makes them diverge, and they are recorded again (`--autoplay --stage shoreline
 --difficulty normal --record ...`).

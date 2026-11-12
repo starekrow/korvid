@@ -15,7 +15,14 @@
 
 namespace kv::arcfire {
 
-u64 seed_of(Handle h, u64 tick, u32 salt) { return hash_mix(h.bits ^ hash_mix(tick * 0x9E3779B97F4A7C15ull + salt)); }
+// A handle's kind id is its registration number, which moves when a module is added or the
+// list is reordered (slice 7's touchpad, registered before the game, moved every one), so it
+// is replaced by the kind's name hash, as the state hash does: a seed depends on what the
+// entity is (its kind, slot and generation), never on how many modules came first.
+u64 seed_of(Handle h, u64 tick, u32 salt) {
+    u64 stable = (h.bits & 0x000FFFFFFFFFFFFFull) ^ kv_handle_kind_name_hash(h.kind());
+    return hash_mix(stable ^ hash_mix(tick * 0x9E3779B97F4A7C15ull + salt));
+}
 
 bool patterns_load(Engine& e, Game& g) {
     g.pattern_index = asset_load_blob(e, "example_arcfire/patterns/patterns.json");

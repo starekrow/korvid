@@ -92,6 +92,25 @@ for a drawable.
   A `dispatch_io` backend would move the 24 ms off the main thread and not the decoding,
   so it waits for a game whose reads show.
 
+## Found on Linux after slice 7
+
+- **A handle's kind id is a registration number, and arcfire seeded from it.** `seed_of`
+  (the pattern runners' `$rand`, every fire, the chips' toss) mixed the owner's raw handle
+  bits, kind id included. The touchpad module (slice 7), registered before the game, moved
+  every one of arcfire's kind ids by one, and with them every seed: Shoreline's demo ran a
+  different game from tick 372 on, deterministically, on every platform. The state hash
+  already replaces a kind id with its name's hash for this reason; `seed_of` now does too,
+  so a seed depends on the entity's kind, slot and generation, and a pre-touchpad build and
+  today's hash alike tick for tick. A raw `Handle::bits` is fine as a map key within a run;
+  anything that reaches the sim (a seed, an order) wants the name hash. An engine helper
+  (`handle_stable_bits`) would say so where the next game looks.
+- **The asset tests waited a number of ticks for a read.** Since their fixtures moved to
+  the temporary directory (iOS: the app bundle is read-only), Linux reads them from tmpfs,
+  which io_uring hands to a worker thread instead of finishing at submit as it does from
+  the page cache; the audio, level and tilemap suites failed under load, level by a
+  segfault, the audio one alone too. They wait in real time now, and remove their scratch
+  trees (`io_remove_tree`, new) instead of leaving one in /tmp per run.
+
 ## Fixed
 
 - **A pass over the whole frame** (slice 6, M2). `renderer_post_layer(r, layer, shader)`:

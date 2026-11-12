@@ -718,3 +718,21 @@ stress.
 To do: the same set on Linux at the same commit, with the swapchain's size logged, and a
 `perf record` of the stress run beside this one; `renderer_apply`'s handle map; the
 light-load GPU draw; the `--gas` tick.
+
+## Linux, after slice 7: the seeds
+
+Every demo had changed on Linux at the slice's last commit: Shoreline ended at tick 13,786
+on another hash, though it still hashed alike at 1 and 16 threads. Bisected to the
+touchpad (8ed2e6b), which the frame loop now brings up before the game: its kind took
+number 5 and moved every one of arcfire's kind ids by one. The state hash names kinds by
+their name's hash, so the state matched at the moment; but `seed_of`, which seeds every
+pattern runner's `$rand`, every fire and the chips' toss, mixed the owner's raw handle,
+kind id and all, so at tick 372, the first pattern started, the runs parted. The seed now
+takes the kind's name hash in place of its id (as the state hash does): a build from before
+the touchpad and today's hash alike tick for tick (2,425 ticks compared). That is a new
+game from the first pattern on, on every platform: Shoreline's demo hashes
+1bd0cb38e9544314 at tick 13,793 seven ways (1, 8 and 16 threads, a kpak, a zip, sync and
+io_uring), Orbit's 0f848fbb2a467830 at tick 17,952 at 1 and 16 threads; the two recorded
+runs were made again (14,168 and 14,769 ticks) and replay matching at 1 and 16. macOS's and
+Windows's numbers in the notes above are from before the touchpad, and each platform's
+recordings want making again there.
