@@ -19,13 +19,14 @@ Then build the configuration you want and run the executable from its bin direct
 (no window, no assets: the tool runs anywhere):
 
 ```bash
-tools/kormake/bin/linux/kormake build linux-dev
+tools/kormake/bin/linux/kormake cpukiller dev    # or, in this directory: kormake dev
 build/linux-dev/bin/cpukiller --quick
 ```
 
-`kormake build linux-debug` is everything checked with the validation layers on;
-`linux-dev` is the build to measure with; `linux-ship` has neither. `kormake build`
-builds every module and example; `kormake test linux-debug` runs the test suites.
+`kormake cpukiller` builds this example and what it links, in linux-debug unless a config follows:
+debug is everything checked with the validation layers on, `dev` the build to measure
+with, `ship` neither. `kormake test cpukiller` runs its tests; at the root, `kormake` builds
+every module and example and `kormake test` runs every suite.
 The debug build runs too, but it measures its own checks: use dev for numbers.
 
 ## The scenarios

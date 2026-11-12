@@ -22,13 +22,14 @@ Then build the configuration you want and run the executable from its bin direct
 (no window, no assets: the tool runs anywhere):
 
 ```bash
-tools/kormake/bin/linux/kormake build linux-dev
+tools/kormake/bin/linux/kormake sockit2m dev    # or, in this directory: kormake dev
 build/linux-dev/bin/sockit2m --quick
 ```
 
-`kormake build linux-debug` is everything checked with the validation layers on;
-`linux-dev` is the build to measure with; `linux-ship` has neither. `kormake build`
-builds every module and example; `kormake test linux-debug` runs the test suites.
+`kormake sockit2m` builds this example and what it links, in linux-debug unless a config follows:
+debug is everything checked with the validation layers on, `dev` the build to measure
+with, `ship` neither. `kormake test sockit2m` runs its tests; at the root, `kormake` builds
+every module and example and `kormake test` runs every suite.
 The debug build runs too, but it measures its own checks: use dev for numbers.
 
 ## Two modes

@@ -23,12 +23,12 @@ tools/kormake/bootstrap.sh
 Then build the configuration you want and run the executable from its bin directory:
 
 ```bash
-tools/kormake/bin/linux/kormake build linux-dev
+tools/kormake/bin/linux/kormake arcanum dev    # or, in this directory: kormake dev
 build/linux-dev/bin/arcanum
 ```
 
 The ship build packs the game's assets into `bin/arcanum.kpak`, and
-`kormake package linux-ship arcanum` makes `dist/arcanum/`, which runs
+`kormake package arcanum ship` makes `dist/arcanum/`, which runs
 on its own.
 
 Controls: arrows or WASD (or the left stick or the d-pad) walk; Enter, Space or South talks

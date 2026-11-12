@@ -19,13 +19,14 @@ Then build the configuration you want and run the executable from its bin direct
 where the shaders and this module's `assets/` have been copied next to it:
 
 ```bash
-tools/kormake/bin/linux/kormake build linux-debug
+tools/kormake/bin/linux/kormake testbed debug    # or, in this directory: kormake debug
 build/linux-debug/bin/testbed --run-seconds 3
 ```
 
-`kormake build linux-debug` is everything checked with the validation layers on;
-`linux-dev` is the build to measure with; `linux-ship` has neither. `kormake build`
-builds every module and example; `kormake test linux-debug` runs the test suites.
+`kormake testbed` builds this example and what it links, in linux-debug unless a config follows:
+debug is everything checked with the validation layers on, `dev` the build to measure
+with, `ship` neither. `kormake test testbed` runs its tests; at the root, `kormake` builds
+every module and example and `kormake test` runs every suite.
 
 ## What it shows
 

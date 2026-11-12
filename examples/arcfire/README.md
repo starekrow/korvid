@@ -49,7 +49,7 @@ tools/kormake/bootstrap.sh
 Then build the configuration you want and run the executable from its bin directory:
 
 ```bash
-tools/kormake/bin/linux/kormake build linux-dev
+tools/kormake/bin/linux/kormake arcfire dev    # or, in this directory: kormake dev
 build/linux-dev/bin/arcfire
 ```
 
