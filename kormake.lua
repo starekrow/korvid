@@ -2,7 +2,7 @@
 -- module paths, and writes build/<platform>-<config>/build.ninja.
 
 project "korvid"
-requires_kormake "1.0"
+requires_kormake "1.1"
 
 -- The engine, the examples, the tools. Each of examples/ and tools/ has a korvid.config
 -- that points back here, so kormake works from inside them.

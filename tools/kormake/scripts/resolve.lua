@@ -140,8 +140,12 @@ function M.run(c, platform, config, opts)
     -- Outputs: the target's at the build directory's top, the host's (when it is not the
     -- target) under host/.
     local prefix = (plat == platform and conf == config) and "" or "host/"
+    -- Selectable: what a command line can name, with a phony of its module's name; the
+    -- target's instance, or a host module's only one.
     local inst = { module = rec, platform = plat, config = conf, key = key, deps = {}, tools = {}, why = why, tests = false,
-                   prefix = prefix, toolchain = pp.toolchain, host = (plat == host_platform and conf == host_config) }
+                   prefix = prefix, toolchain = pp.toolchain, host = (plat == host_platform and conf == host_config),
+                   selectable = (prefix == "" or host_only(rec)) and rec.fields.provides ~= "toolchain"
+                     and not rec.fields.system and not rec.fields.prebuilt }
     g.by_key[key] = inst
     g.instances[#g.instances + 1] = inst
     visiting[key] = true
@@ -189,9 +193,19 @@ function M.run(c, platform, config, opts)
     return inst
   end
 
+  -- Toolchains and tools that are not built from source are never roots of a target
+  -- build. A host module is a root of every build its host supports.
+  local function buildable(rec)
+    local builds = host_only(rec) and has_platform(rec, host_platform) or has_platform(rec, platform)
+    return builds and rec.fields.provides ~= "toolchain" and not rec.fields.system and not rec.fields.prebuilt
+  end
+
   -- Roots.
+  -- A project of its own (a korvid.config that adds module paths) has its modules as the
+  -- one root, with their tests; the master file's roots are the engine's.
   local roots = master.roots
   if #roots == 0 then roots = { { name = "all", fields = { modules = "*" } } } end
+  if c.project then roots = { { name = "project", fields = { modules = "*", tests = true }, project = true } } end
   local wanted = {}
   for _, root in ipairs(roots) do
     local patterns = root.fields.modules and util.as_list(root.fields.modules) or { root.name }
@@ -199,11 +213,7 @@ function M.run(c, platform, config, opts)
     local applies = not root.fields.platforms or util.contains(util.as_list(root.fields.platforms), platform)
     for _, rec in ipairs(applies and c.modules or {}) do
       for _, pat in ipairs(patterns) do
-        -- Toolchains and tools that are not built from source are never roots of a target
-        -- build. A host module is a root of every build its host supports.
-        local builds = host_only(rec) and has_platform(rec, host_platform) or has_platform(rec, platform)
-        if util.matches(rec.name, pat) and builds and rec.fields.provides ~= "toolchain"
-           and not rec.fields.system and not rec.fields.prebuilt then
+        if util.matches(rec.name, pat) and buildable(rec) and (rec.project or not root.project) then
           local inst = instance_of(rec.name, platform, config, "root '" .. root.name .. "'")
           wanted[#wanted + 1] = inst
           if root.fields.tests and rec.tests_dir then inst.tests = true end
@@ -213,6 +223,28 @@ function M.run(c, platform, config, opts)
     end
   end
   if #wanted == 0 then util.fail("no module matched any root") end
+
+  -- Every other module the platform supports, so a command line can name it without the
+  -- build file changing: built only when asked for. One that does not resolve here (an
+  -- external the toolchain does not know, a dependency that does not build) is left out,
+  -- everything it added taken back, and the reason kept for whoever names it.
+  -- What the roots reach: the default build (`all`), as it was before anything below.
+  for _, inst in ipairs(g.instances) do inst.in_roots = true end
+  g.unavailable = {}
+  for _, rec in ipairs(c.modules) do
+    local key = rec.name .. "@" .. (host_only(rec) and (host_platform .. "-" .. host_config) or (platform .. "-" .. config))
+    if buildable(rec) and not g.by_key[key] then
+      local n_inst, n_order = #g.instances, #g.order
+      local ok, err = pcall(instance_of, rec.name, platform, config, "available")
+      if not ok then
+        for i = #g.instances, n_inst + 1, -1 do g.by_key[g.instances[i].key] = nil; g.instances[i] = nil end
+        for i = #g.order, n_order + 1, -1 do g.order[i] = nil end
+        for k in pairs(visiting) do visiting[k] = nil end
+        for i = #stack, 1, -1 do stack[i] = nil end
+        g.unavailable[rec.name] = tostring(err)
+      end
+    end
+  end
 
   -- The closure of each instance's link deps in dependency order, for include paths,
   -- link lines and module lists.

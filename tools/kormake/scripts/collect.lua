@@ -1,5 +1,6 @@
--- kormake: collect. Evaluate the master file, scan the module paths, evaluate every
--- module.lua, apply the directory convention. Output: a list of module records.
+-- kormake: collect. Find the engine root (a kormake.lua, or a korvid.config naming one),
+-- evaluate the master file, scan the module paths, evaluate every module.lua, apply the
+-- directory convention. Output: a list of module records and where things go.
 local util = kormake.load("util")
 local sandbox = kormake.load("sandbox")
 local M = {}
@@ -13,7 +14,45 @@ local function convention(rec)
   rec.assets_dir = kfs.isdir(util.join(dir, "assets")) and util.join(dir, "assets") or nil
 end
 
-function M.run(root_dir)
+-- Whether path is dir or lies under it (both real paths).
+function M.under(path, dir)
+  if path == dir then return true end
+  local d = dir:sub(-1) == "/" and dir or (dir .. "/")
+  return path:sub(1, #d) == d
+end
+
+-- Walks up from start: the first directory with a korvid.config or a kormake.lua settles
+-- it. A kormake.lua is the engine root itself; a korvid.config names it (engine "..").
+-- The anchor is the directory the file was found in.
+function M.discover(start)
+  local from = kfs.realpath(start) or util.fail("no directory '%s'", start)
+  local dir = from
+  while true do
+    local cfg = util.join(dir, "korvid.config")
+    if kfs.isfile(cfg) then
+      local decl = sandbox.eval_config(cfg, kfs.read(cfg))
+      if not decl.engine then util.fail("%s names no engine; add engine \"<path to the engine's root>\"", cfg) end
+      local e = util.expand_home(decl.engine)
+      local root = kfs.realpath(util.is_abs(e) and e or util.join(dir, e))
+      if not root or not kfs.isfile(util.join(root, "kormake.lua")) then
+        util.fail("%s: engine '%s' is not a directory with a kormake.lua", cfg, decl.engine)
+      end
+      return { root = root, anchor = dir, start = from, config = cfg, decl = decl }
+    end
+    if kfs.isfile(util.join(dir, "kormake.lua")) then return { root = dir, anchor = dir, start = from } end
+    local parent = util.dirname(dir)
+    if parent == dir or parent == "" or parent == "." or dir == "/" or dir:match("^%a:/?$") then
+      util.fail("no korvid.config or kormake.lua in %s or any parent; a project outside the engine needs a " ..
+        "korvid.config that names it (engine \"../korvid\")", from)
+    end
+    dir = parent
+  end
+end
+
+-- found: what discover returned.
+function M.run(found)
+  local root_dir = found.root
+  local decl = found.decl or {}
   local master_path = util.join(root_dir, "kormake.lua")
   local text = kfs.read(master_path)
   if not text then util.fail("no master file at %s", master_path) end
@@ -24,17 +63,39 @@ function M.run(root_dir)
     if want_major > have_major then util.fail("%s requires kormake %s, this is %s", master_path, master.requires, KORMAKE_VERSION) end
   end
 
-  local paths = {}
-  for _, p in ipairs(master.modulepaths) do paths[#paths + 1] = util.expand_home(p) end
+  -- Module paths: the master file's (relative to the root), the config's (relative to it;
+  -- its own directory unless it says otherwise), then KORMAKE_MODULE_PATH. Each directory
+  -- once, by its real path.
+  local paths, seen_path = {}, {}
+  local added = false -- whether the config adds a path the master file does not list
+  local project_paths = {} -- the ones it adds: a project's own modules
+  local function add(p, base, from_config)
+    p = util.expand_home(p)
+    local full = util.is_abs(p) and p or util.join(base, p)
+    local real = kfs.realpath(full)
+    if not real or not kfs.isdir(real) then util.fail("module path '%s' is not a directory", p) end
+    if seen_path[real] then return end
+    seen_path[real] = true
+    paths[#paths + 1] = real
+    if from_config then added = true; project_paths[real] = true end
+  end
+  for _, p in ipairs(master.modulepaths) do add(p, root_dir) end
+  if found.config then for _, p in ipairs(decl.modulepaths or { "." }) do add(p, found.anchor, true) end end
   local envpath = kfs.getenv("KORMAKE_MODULE_PATH")
   -- Entries are separated as in PATH: ':' on POSIX, ';' on Windows (where ':' is a drive's).
   local sep = KORMAKE_HOST == "windows" and ";" or ":"
-  if envpath then for p in envpath:gmatch("[^" .. sep .. "]+") do paths[#paths + 1] = util.expand_home(p) end end
+  if envpath then for p in envpath:gmatch("[^" .. sep .. "]+") do add(p, root_dir) end end
+
+  -- What a command line may call a target or a phony: never a module's name.
+  local reserved = { host = true, all = true, tests = true, check = true, ["build.ninja"] = true }
+  for _, cf in ipairs(master.configs) do
+    reserved[cf] = true
+    reserved["host-" .. cf] = true
+    for _, p in ipairs(master.platforms) do reserved[p .. "-" .. cf] = true end
+  end
 
   local modules, by_name = {}, {}
-  for _, path in ipairs(paths) do
-    local full = util.is_abs(path) and path or util.join(root_dir, path)
-    if not kfs.isdir(full) then util.fail("module path '%s' is not a directory", path) end
+  for _, full in ipairs(paths) do
     local names = kfs.listdir(full)
     table.sort(names)
     for _, name in ipairs(names) do
@@ -42,9 +103,10 @@ function M.run(root_dir)
       local mfile = util.join(dir, "module.lua")
       if kfs.isdir(dir) and kfs.isfile(mfile) then
         local mtext = kfs.read(mfile)
-        local decl = sandbox.eval_module(mfile, mtext)
-        local rec = { name = decl.name, dir = dir, file = mfile, fields = decl.fields }
-        local override = master.overrides[decl.name]
+        local mdecl = sandbox.eval_module(mfile, mtext)
+        local rec = { name = mdecl.name, dir = dir, file = mfile, fields = mdecl.fields, project = project_paths[full] }
+        if reserved[rec.name] then util.fail("%s: a module may not be called '%s' (a target or a build name)", mfile, rec.name) end
+        local override = master.overrides[mdecl.name]
         if override and override.path then
           -- An override names the directory that wins; other copies are ignored.
           local want = util.is_abs(override.path) and override.path or util.join(root_dir, override.path)
@@ -62,7 +124,24 @@ function M.run(root_dir)
       end
     end
   end
-  return { master = master, modules = modules, by_name = by_name, root_dir = root_dir }
+  -- Where outputs go: the engine root's build/ and dist/ while the module paths are the
+  -- master file's (the configs in examples/ and tools/); beside the config when it adds
+  -- one (a project of its own, whose modules are then the roots: resolve.lua). build "dir"
+  -- names the directory that holds <target>/.
+  local base = added and found.anchor or root_dir
+  local build_root = util.join(base, "build")
+  if decl.build then
+    local b = util.expand_home(decl.build)
+    build_root = util.is_abs(b) and b or util.join(found.anchor, b)
+  end
+  return { master = master, modules = modules, by_name = by_name, root_dir = root_dir, base_dir = base,
+           build_root = build_root, anchor = found.anchor, start = found.start, config = found.config,
+           default_target = decl.target, project = added,
+           -- Where a regeneration starts: the config's directory when the config changes the
+           -- build (its paths, its build directory), else the root, so a build file written
+           -- from examples/ is the one written from the root.
+           regen_dir = (added or decl.build) and found.anchor or root_dir,
+           regen_config = (added or decl.build) and found.config or nil }
 end
 
 return M

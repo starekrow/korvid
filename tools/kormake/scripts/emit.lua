@@ -45,7 +45,7 @@ end
 function M.run(c, g, opts)
   local root = c.root_dir
   local target = g.platform .. "-" .. g.config
-  local build = util.join(root, "build/" .. target)
+  local build = util.join(c.build_root, target)
   local q = util.shell_quote
   kfs.mkdirp(build)
 
@@ -229,7 +229,8 @@ function M.run(c, g, opts)
   local jobs = g.toolchain.fields.test_jobs
   if jobs then w("pool test_pool\n  depth = " .. math.floor(jobs)) end
   w("rule run_test\n  command = " .. self .. ' _test $in $out' .. runner .. (jobs and "\n  pool = test_pool" or "") .. '\n  description = TEST $in')
-  w("rule regen\n  command = " .. self .. " gen " .. target .. (opts.no_unity and " --no-unity" or "") ..
+  -- From where the regeneration sees the same module paths (collect.lua's regen_dir).
+  w("rule regen\n  command = " .. self .. " -C " .. util.ninja_escape(q(c.regen_dir)) .. " gen " .. target .. (opts.no_unity and " --no-unity" or "") ..
     (opts.cxx and (" --cxx " .. util.ninja_escape(q(opts.cxx))) or "") .. "\n  generator = 1\n  description = KORMAKE gen " .. target)
   w("")
 
@@ -382,6 +383,7 @@ function M.run(c, g, opts)
   end
 
   local libs_by_key = {}
+  local outputs_by_key = {} -- what a selectable instance's phony stands for
   local runtime_by_key = {} -- files an executable needs next to it
 
   -- What a module stages beside its executables: its tool outputs (shaders and the like) and
@@ -436,6 +438,7 @@ function M.run(c, g, opts)
     if f.provides == "toolchain" or f.system or f.prebuilt then goto continue end
     if output == "headers" then
       runtime_by_key[inst.key] = stage_runtime(inst, inst.prefix .. "gen/" .. sym)
+      outputs_by_key[inst.key] = runtime_by_key[inst.key]
       goto continue
     end
     do
@@ -495,8 +498,11 @@ function M.run(c, g, opts)
           local lib = pre .. "lib/" .. naming.lib_file:format("kv_" .. sym)
           w(string.format("build %s: %s %s%s", lib, rule(inst, "ar"), table.concat(objs, " "), overrides(inst)))
           libs_by_key[inst.key] = lib
-          all[#all + 1] = lib
+          if inst.in_roots then all[#all + 1] = lib end
         end
+        local outs = { libs_by_key[inst.key] }
+        for _, r in ipairs(runtime) do outs[#outs + 1] = r end
+        outputs_by_key[inst.key] = outs
       elseif output == "exe" then
         local libs, mods, rt = {}, {}, {}
         for i = #inst.closure, 1, -1 do
@@ -513,7 +519,9 @@ function M.run(c, g, opts)
         local exe = pre .. "bin/" .. exe_name(inst) .. naming.exe_suffix
         w(string.format("build %s: %s %s %s%s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
           #rt > 0 and (" || " .. table.concat(rt, " ")) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
-        all[#all + 1] = exe
+        if inst.in_roots then all[#all + 1] = exe end
+        local outs = { exe }
+        outputs_by_key[inst.key] = outs
         -- Rules that run once per executable over its staged assets (a pack): part of the
         -- default build in ship, buildable by name in the other configs.
         for _, t in ipairs(inst.tools) do
@@ -530,7 +538,10 @@ function M.run(c, g, opts)
               local outp = pre .. "bin/" .. r.outputs:gsub("%%{exe}", exe_name(inst))
               local implicit = tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""
               w(string.format("build %s: %s %s%s", util.ninja_escape(outp), rname, table.concat(ins, " "), implicit))
-              if g.config == "ship" then all[#all + 1] = outp end
+              if g.config == "ship" then
+                if inst.in_roots then all[#all + 1] = outp end
+                outs[#outs + 1] = outp
+              end
             end
             ::skip_rule::
           end
@@ -540,9 +551,11 @@ function M.run(c, g, opts)
     ::continue::
   end
 
-  -- Tests: one executable per module with a tests/ directory, never a unity build.
+  -- Tests: one executable per selectable module with a tests/ directory, never a unity
+  -- build. `tests` and `check` hold the ones a root asks for; the rest are built and run
+  -- by name (kormake test MODULE).
   for _, inst in ipairs(g.order) do
-    if not inst.tests then goto skip end
+    if not (inst.selectable and inst.module.tests_dir) then goto skip end
     do
       local m = inst.module
       local sym = util.symbol(m.name)
@@ -575,8 +588,11 @@ function M.run(c, g, opts)
       w(string.format("build %s: %s %s %s%s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
         #rt > 0 and (" || " .. table.concat(rt, " ")) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
       w(string.format("build %stest/%s.ok: run_test %s", pre, sym, exe))
-      tests[#tests + 1] = exe
-      checks[#checks + 1] = pre .. "test/" .. sym .. ".ok"
+      if inst.tests then
+        tests[#tests + 1] = exe
+        checks[#checks + 1] = pre .. "test/" .. sym .. ".ok"
+      end
+      inst.test_stamp = pre .. "test/" .. sym .. ".ok"
     end
     ::skip::
   end
@@ -586,8 +602,18 @@ function M.run(c, g, opts)
   w("build check: phony " .. table.concat(checks, " "))
   w("build all: phony " .. table.concat(all, " ") .. " tests")
   w("default all")
+  -- A phony per selectable module, named for it: what `kormake NAME` asks Ninja for.
+  w("")
+  for _, inst in ipairs(g.order) do
+    if inst.selectable then
+      local outs = {}
+      for _, o in ipairs(outputs_by_key[inst.key] or {}) do outs[#outs + 1] = util.ninja_escape(o) end
+      w(string.format("build %s: phony%s", util.ninja_escape(inst.module.name), #outs > 0 and (" " .. table.concat(outs, " ")) or ""))
+    end
+  end
   -- Regenerate when any input changes.
   local inputs = { util.join(root, "kormake.lua") }
+  if c.regen_config then inputs[#inputs + 1] = c.regen_config end
   for _, f in ipairs(module_files) do inputs[#inputs + 1] = f end
   local esc = {}
   for _, i in ipairs(inputs) do esc[#esc + 1] = util.ninja_escape(i) end
@@ -598,7 +624,7 @@ function M.run(c, g, opts)
   kfs.write(util.join(build, "build.ninja"), table.concat(out, "\n") .. "\n", true)
   kfs.write(util.join(build, "compile_commands.json"), "[\n" .. table.concat(cc, ",\n") .. "\n]\n")
   -- Where clangd looks.
-  kfs.write(util.join(root, "build/compile_commands.json"), "[\n" .. table.concat(cc, ",\n") .. "\n]\n")
+  kfs.write(util.join(c.build_root, "compile_commands.json"), "[\n" .. table.concat(cc, ",\n") .. "\n]\n")
   return build
 end
 

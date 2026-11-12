@@ -108,4 +108,26 @@ function M.eval_master(path, text)
   return m
 end
 
+-- A korvid.config: engine, modulepath, build, target. Paths are relative to the file.
+function M.eval_config(path, text)
+  local env = base_env()
+  local m = {}
+  local function str(what)
+    return function(v)
+      if type(v) ~= "string" or v == "" then util.fail("%s: %s takes a string", path, what) end
+      m[what] = v
+    end
+  end
+  env.engine, env.build, env.target = str("engine"), str("build"), str("target")
+  env.modulepath = function(t)
+    m.modulepaths = m.modulepaths or {}
+    for _, p in ipairs(util.as_list(t)) do m.modulepaths[#m.modulepaths + 1] = p end
+  end
+  local chunk, err = load(text, "=" .. path, "t", env)
+  if not chunk then util.fail("%s", err) end
+  local ok, perr = pcall(chunk)
+  if not ok then util.fail("%s", tostring(perr)) end
+  return m
+end
+
 return M
