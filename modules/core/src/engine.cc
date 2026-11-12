@@ -370,9 +370,12 @@ void expand(const Engine& e, const Array<u32>& ids, Array<u32>& out) {
     }
 }
 
-// The first resource both touch that is a real one, not a module's implicit state.
+// The first resource two writers share that needs an order between them: not a module's
+// implicit state, and not a sink (a command queue: appends from anywhere land in unit
+// order). Every shared resource is looked at, in either list's order.
 u32 first_conflict(const Engine& e, const Array<u32>& a, const Array<u32>& b) {
-    for (u32 x : a) if (contains(b, x) && !e.resources[x - 1].implicit) return x;
+    for (u32 x : a)
+        if (contains(b, x) && !e.resources[x - 1].implicit && !e.resources[x - 1].sink) return x;
     return 0;
 }
 
@@ -469,16 +472,25 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
 
     // Readers after writers; a pair writing the same thing is remembered for the check below.
     // A module's state is not a conflict: its systems keep declaration order among themselves.
-    // A read marked '^' turns its edge around: that reader goes before the writers.
+    // A read marked '^' turns its edge around: that reader goes before the writers. Every
+    // resource a writer and a reader share counts, not only the first. A reader that wants
+    // one of them early and another as it stands asks for both orders: the pair is put
+    // aside until every other edge is in, and then follows the path those make between the
+    // two; with none, the schedule says so and wants an `after` or `before`.
+    struct Torn { u32 writer, reader, after, before; };
+    Array<Torn> torn = array_in<Torn>(mem_scratch());
     for (u32 i = 0; i < n; ++i)
         for (u32 j = 0; j < n; ++j) {
             if (i == j) continue;
+            u32 after = 0, before = 0; // the first resource putting j after i, or before it
             for (u32 x : pend[i].writes_eff) {
                 if (!contains(pend[j].reads_eff, x) || e.resources[x - 1].implicit) continue;
-                if (contains(pend[j].early_eff, x)) edges.push(Edge{j, i, x});
-                else edges.push(Edge{i, j, x});
-                break;
+                if (contains(pend[j].early_eff, x)) { if (!before) before = x; }
+                else if (!after) after = x;
             }
+            if (after && before) torn.push(Torn{i, j, after, before});
+            else if (after) edges.push(Edge{i, j, after});
+            else if (before) edges.push(Edge{j, i, before});
         }
 
     // Declared order. For systems, a name in another phase is checked for direction; for
@@ -535,18 +547,27 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
                 if (reaches(edges, n, i, j) || reaches(edges, n, j, i)) continue;
                 edges.push(Edge{i, j, st});
             }
+    // The torn pairs: the order the rest of the schedule already gives them.
+    for (const Torn& t : torn) {
+        bool after = reaches(edges, n, t.writer, t.reader);
+        if (after || reaches(edges, n, t.reader, t.writer)) {
+            KV_INFO("engine", "  %s %s %s: its other edges say so (it reads %s early, %s as it stands)", pend[t.reader].sys.name(),
+                    after ? "after" : "before", pend[t.writer].sys.name(), resource_name(e, t.before), resource_name(e, t.after));
+            continue;
+        }
+        KV_ERROR("engine", "'%s' reads '%s' early (^) and '%s' as it stands, both written by '%s' (%s), and nothing else orders the two: "
+                 "add `after` or `before` to say which comes first",
+                 pend[t.reader].sys.name(), resource_name(e, t.before), resource_name(e, t.after), pend[t.writer].sys.name(), what);
+        torn.free();
+        edges.free();
+        return false;
+    }
+    torn.free();
     // Two writers of one resource need a path between them, either way round. A sink (a
     // command queue) is the exception: appends from anywhere land in unit order.
     for (u32 i = 0; i < n; ++i)
         for (u32 j = i + 1; j < n; ++j) {
             u32 r = first_conflict(e, pend[i].writes_eff, pend[j].writes_eff);
-            while (r && e.resources[r - 1].sink) {
-                // Skip sinks and look for a real conflict beyond them.
-                u32 next = 0;
-                for (u32 x : pend[i].writes_eff)
-                    if (x > r && contains(pend[j].writes_eff, x) && !e.resources[x - 1].implicit && !e.resources[x - 1].sink) { next = x; break; }
-                r = next;
-            }
             if (!r) continue;
             if (reaches(edges, n, i, j) || reaches(edges, n, j, i)) continue;
             KV_ERROR("engine", "'%s' and '%s' both write '%s' (%s) with no order between them: add `after` or `before`",

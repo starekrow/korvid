@@ -111,6 +111,38 @@ KV_MODULE_DEFINE(k_joined_clash) = {.name = "j", .components = k_components, .ki
 constinit const SystemDesc k_joined_unknown_systems[] = {{.name = "j.what", .phase = Phase::Sim, .fn = sys_other, .writes = "*[Vel+Nope].Pos"}};
 KV_MODULE_DEFINE(k_joined_unknown) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_joined_unknown_systems};
 
+// A sink (a command queue) needs no order between its writers; a real resource two systems
+// also both write still does, wherever it sits in their lists. Module resources number after
+// the kinds' columns, so the sink comes first here by id and by list: the case a check by
+// id order would pass over.
+constinit const ResourceDesc k_queue_res[] = {{".queue", true}};
+constinit const SystemDesc k_sink_ok_systems[] = {
+    {.name = "q.one", .phase = Phase::Sim, .fn = sys_other, .writes = "q.queue", .state = StateUse::None},
+    {.name = "q.two", .phase = Phase::Sim, .fn = sys_other, .writes = "q.queue", .state = StateUse::None},
+};
+KV_MODULE_DEFINE(k_sink_ok) = {.name = "q", .components = k_components, .kinds = k_kinds, .resources = k_queue_res, .systems = k_sink_ok_systems};
+constinit const SystemDesc k_sink_clash_systems[] = {
+    {.name = "q.one", .phase = Phase::Sim, .fn = sys_other, .writes = "q.queue, s.body.Vel", .state = StateUse::None},
+    {.name = "q.two", .phase = Phase::Sim, .fn = sys_other, .writes = "q.queue, s.body.Vel", .state = StateUse::None},
+};
+KV_MODULE_DEFINE(k_sink_clash) = {.name = "q", .components = k_components, .kinds = k_kinds, .resources = k_queue_res, .systems = k_sink_clash_systems};
+
+// A reader of two things one writer writes, one of them early (^) and one as it stands:
+// it would have to run both before and after the writer. Every shared resource counts, so
+// with nothing else ordering the two this is refused, not ordered by whichever came first
+// in the list; with an order declared, the declaration settles it.
+constinit const SystemDesc k_mixed_read_systems[] = {
+    {.name = "m.write", .phase = Phase::Sim, .fn = sys_move, .writes = "*.Pos, *.Vel", .state = StateUse::None},
+    {.name = "m.read",  .phase = Phase::Sim, .fn = sys_steer, .reads = "^*.Pos, *.Vel", .state = StateUse::None},
+};
+KV_MODULE_DEFINE(k_mixed_read) = {.name = "m", .components = k_components, .kinds = k_kinds, .systems = k_mixed_read_systems};
+// The same pair with an order declared: the declaration settles it.
+constinit const SystemDesc k_mixed_ordered_systems[] = {
+    {.name = "m.write", .phase = Phase::Sim, .fn = sys_move, .writes = "*.Pos, *.Vel", .state = StateUse::None},
+    {.name = "m.read",  .phase = Phase::Sim, .fn = sys_steer, .reads = "^*.Pos, *.Vel", .before = "m.write", .state = StateUse::None},
+};
+KV_MODULE_DEFINE(k_mixed_ordered) = {.name = "m", .components = k_components, .kinds = k_kinds, .systems = k_mixed_ordered_systems};
+
 const char* order(const Engine& e, Phase p, char* buf, usize cap) {
     buf[0] = 0;
     for (const ScheduledSystem& s : e.phases.systems[(u32)p]) { strncat(buf, s.desc->name, cap - strlen(buf) - 1); strncat(buf, " ", cap - strlen(buf) - 1); }
@@ -143,6 +175,27 @@ void test_schedule(kv::TestCtx& c) {
         KV_CHECK(c, init_fails(c, late));
         const ModuleDesc* const bad[] = {&k_early_write};
         KV_CHECK(c, init_fails(c, bad));
+    }
+
+    // Sinks: their writers need no order, a real resource beside one still does.
+    {
+        const ModuleDesc* const ok[] = {&k_sink_ok};
+        Engine x;
+        KV_CHECK(c, engine_init(x, ok));
+        engine_shutdown(x);
+        const ModuleDesc* const clash[] = {&k_sink_clash};
+        KV_CHECK(c, init_fails(c, clash));
+    }
+
+    // A reader both before (^) and after one writer cannot be placed.
+    {
+        const ModuleDesc* const mixed[] = {&k_mixed_read};
+        KV_CHECK(c, init_fails(c, mixed));
+        const ModuleDesc* const ordered[] = {&k_mixed_ordered};
+        Engine x;
+        KV_CHECK(c, engine_init(x, ordered));
+        KV_CHECK(c, strcmp(order(x, Phase::Sim, buf, sizeof buf), "m.read m.write ") == 0);
+        engine_shutdown(x);
     }
 
     // Joined filters.

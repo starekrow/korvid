@@ -448,6 +448,11 @@ struct SystemDesc {
     // what it reads in the phase. A read marked '^' ("^.npc.Local2") is of the phase's
     // earlier value: that reader runs before the writers instead. An AI that reads where
     // it stands to write the intent a later system moves it by reads its position that way.
+    // Every resource a reader shares with a writer counts: one read early and another as it
+    // stands from the same writer ask for both orders, and the pair follows whatever path
+    // the rest of the schedule makes between them (logged), or with none is refused until
+    // an `after` or `before` says which. Two writers of one resource need an order, unless
+    // the resource is a sink (ResourceDesc::sink), wherever it sits in either list.
     const char* reads  = nullptr;
     const char* writes = nullptr;
     const char* after  = nullptr; // system names; needed between two writers, optional otherwise; "?name" only if that system exists
