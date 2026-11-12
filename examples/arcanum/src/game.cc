@@ -442,6 +442,44 @@ void talk(TickContext& ctx, Game& g, Handle npc) {
 
 // ---- saving and loading --------------------------------------------------------------------------
 
+// The save's format, written as "version". 1: kinds named "example_arcanum.*" and the game
+// "example_arcanum", from when the module was named so. 2: the module is "arcanum", and so
+// are its kinds and the game.
+constexpr i64 kSaveVersion = 2;
+
+// An older save brought up to kSaveVersion in place, or false when it cannot be. None can
+// yet: a version 1 save names kinds that are not there any more, so it is refused.
+bool upgrade_save(JsonDoc& doc, i64 version) {
+    (void)doc;
+    (void)version;
+    return false;
+}
+
+// The save read back: parsed, arcanum's, and at kSaveVersion (upgraded when older). Null
+// when it is good, else what the menu says.
+const char* read_save(const u8* data, usize size, JsonDoc& doc) {
+    if (!save_parse(SaveFormat::Json, data, size, mem_scratch(), doc)) {
+        KV_WARN("arcanum", "load: %s at byte %u", doc.error, doc.error_at);
+        return "The save does not load";
+    }
+    // Version 1 named the game for the module it was then.
+    const char* game = json_string(json_get(doc, doc.root(), "game"), "");
+    if (strcmp(game, "arcanum") != 0 && strcmp(game, "example_arcanum") != 0) {
+        KV_WARN("arcanum", "load: not an arcanum save");
+        return "The save does not load";
+    }
+    i64 version = json_i64(json_get(doc, doc.root(), "version"), 0);
+    if (version > kSaveVersion) {
+        KV_WARN("arcanum", "load: save version %lld, newer than this game's %lld", (long long)version, (long long)kSaveVersion);
+        return "The save is from a newer version";
+    }
+    if (version < kSaveVersion && !upgrade_save(doc, version)) {
+        KV_WARN("arcanum", "load: save version %lld cannot be upgraded to %lld", (long long)version, (long long)kSaveVersion);
+        return "The save is from an older version";
+    }
+    return nullptr;
+}
+
 // The save: what level, which entity the player is, and the kinds that change. The bytes
 // are copied into the write at submission; the menu says "Saved" when the disk has them.
 void save_game(TickContext& ctx, Game& g) {
@@ -452,7 +490,7 @@ void save_game(TickContext& ctx, Game& g) {
     w.init(mem_general());
     w.begin_object();
     w.key("game");       w.string_value("arcanum");
-    w.key("version");    w.int_value(1);
+    w.key("version");    w.int_value(kSaveVersion);
     w.key("tick");       w.uint_value(e.clock.tick_total);
     w.key("level");      w.string_value(level_name(e, level_current(e)));
     w.key("player");     save_handle(w, g.player);
@@ -518,16 +556,16 @@ void files(TickContext& ctx) {
         else {
             MemScope scope;
             JsonDoc doc;
-            const char* level = nullptr;
-            if (!save_parse(SaveFormat::Json, g.load_data, g.load_size, mem_scratch(), doc)) KV_WARN("arcanum", "load: %s at byte %u", doc.error, doc.error_at);
-            else if (strcmp(json_string(json_get(doc, doc.root(), "game"), ""), "arcanum") != 0) KV_WARN("arcanum", "load: not an arcanum save");
-            else level = json_string(json_get(doc, doc.root(), "level"), "");
-            if (level && level[0]) if (const JsonValue* lv = json_get(doc, doc.root(), "levels")) level_load(e, doc, *lv);
-            g.rocks_broken = (u32)json_u64(json_get(doc, doc.root(), "broken"), 0);
-            LevelTransition t;
-            t.fade_out = 0.3f; t.fade_in = 0.3f; t.entry = "load";
-            if (!level || !level_request(e, level, t)) why = "The save does not load";
-            else KV_INFO("arcanum", "load: %s, %u bytes, level %s", g.save_path, (u32)g.load_size, level);
+            why = read_save(g.load_data, g.load_size, doc);
+            if (!why) {
+                const char* level = json_string(json_get(doc, doc.root(), "level"), "");
+                if (level[0]) if (const JsonValue* lv = json_get(doc, doc.root(), "levels")) level_load(e, doc, *lv);
+                g.rocks_broken = (u32)json_u64(json_get(doc, doc.root(), "broken"), 0);
+                LevelTransition t;
+                t.fade_out = 0.3f; t.fade_in = 0.3f; t.entry = "load";
+                if (!level[0] || !level_request(e, level, t)) why = "The save does not load";
+                else KV_INFO("arcanum", "load: %s, %u bytes, level %s", g.save_path, (u32)g.load_size, level);
+            }
         }
         if (why) {
             // Back to the menu, which says why; the sim was held for nothing.
@@ -953,8 +991,8 @@ void restore(TickContext& ctx, Game& g, const LevelBuild& b) {
     Engine& e = *ctx.engine;
     MemScope scope;
     JsonDoc doc;
-    if (!save_parse(SaveFormat::Json, g.load_data, g.load_size, mem_scratch(), doc)) {
-        KV_ERROR("arcanum", "load: %s at byte %u", doc.error, doc.error_at); // it parsed when it arrived
+    if (read_save(g.load_data, g.load_size, doc)) {
+        KV_ERROR("arcanum", "load: the save read when it arrived and does not now");
         return;
     }
     (void)b;

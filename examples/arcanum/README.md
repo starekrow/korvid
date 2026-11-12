@@ -49,7 +49,11 @@ the disk's speed never reaches the state. `--screenshot FILE --screenshot-tick N
 a moment of it.
 
 The save is `~/.local/share/korvid/arcanum/save.json` (the demo's is `save-demo.json`,
-so a scripted run never overwrites a game).
+so a scripted run never overwrites a game). It carries a `version`, which is 2 since the
+module lost its `example_` prefix and its kinds were renamed with it. A save from a newer
+version is refused, and so is an older one unless `upgrade_save` (src/game.cc) can bring
+it up. For now that is a stub that brings up nothing, so version 1 saves say "The save is
+from an older version".
 
 ## How it is built
 
