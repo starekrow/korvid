@@ -801,3 +801,19 @@ io_uring), Orbit's 0f848fbb2a467830 at tick 17,952 at 1 and 16 threads; the two 
 runs were made again (14,168 and 14,769 ticks) and replay matching at 1 and 16. macOS's and
 Windows's numbers in the notes above are from before the touchpad, and each platform's
 recordings want making again there.
+
+## Linux, the scheduler's access modes (branch `scheduler-access-modes`)
+
+Units are numbered by declaration rank now, not by schedule position, so commands from two
+units in one phase apply in another order than before: Shoreline's demo is main's to tick
+10,292 and then parts (two drops spawned in one tick, from two units, swap slots); numbered
+the old way the branch is main's to the last tick. New demo hashes: Shoreline
+df0a09551471e9b0 at tick 14,321, Orbit 5ba13cf991c250e4 at tick 17,910, the same tick for
+tick as each kind says and with every kind a snapshot (`--early-reads snapshot`). The
+recorded runs were made again (14,648 and 14,769 ticks) and replay matching at 1 and 16
+threads both ways. The boss parts and the egg shell are snapshot kinds: their copy costs
+3.3 µs a tick; every kind a snapshot, 27.6 µs and 83 KB a tick at stress (328 KB at the
+peak). In the first eight seconds of `--stress`, before the runs part, the tick is 0.96 ms
+against main's 1.09 at 16 threads and 0.64 against 0.70 at 1 (`balanced`). The whole
+account is in `docs/design/scheduler.md`.
+
