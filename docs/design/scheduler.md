@@ -297,6 +297,33 @@ checked and placed by separate functions.
 context): every demo above the same tick for tick as before them, both ways, and both
 recordings matching at 1 and 16 threads both ways.
 
+**What correctness costs.** The branch numbering units in run order (a throwaway build,
+one line changed) plays arcfire's stress as main does, hash for hash (8,398 ticks
+compared), so the pair isolates the scheduler and its checks. Mean tick, timed around
+`run_tick` (ship builds have no profiler), over 45 s of `--stress` (about 2,700 ticks),
+runs alternated, `balanced`:
+
+| | main | branch | difference |
+|---|---|---|---|
+| ship, 16 threads | 1.37, 1.33 ms | 1.37, 1.32 ms | none (−0.6%) |
+| ship, 1 thread | 0.98, 1.00 ms | 0.98, 0.98 ms | none |
+| dev, 1 thread | 1.14, 1.19 ms | 1.17, 1.15 ms | none |
+| dev, 16 threads (7 pairs) | 1.37 to 1.57 ms | 1.37 to 1.66 ms | about +0.07 ms (+5%) |
+
+- Ship pays nothing measurable. The checks are compiled out; the snapshot copies (parts
+  and shell) are 5 µs, under half a percent; the views, the deferred audio appends, the
+  numbering and the honest level `.glows` added do not show.
+- Dev at 16 threads is slower in six pairs of seven, by 0.02 to 0.14 ms, and not at 1
+  thread, so not the per-access checks. With the profiler recording, the difference is
+  8.5 µs a tick, 5.5 of them the copy. The guard (a thread-local read at every
+  `engine_table` call and `parallel_for` chunk) is the suspect, but a build without it
+  did not settle it: one build's runs spread 1.35 to 1.66 ms, wider than the gap. A
+  `performance` profile or `perf` would.
+- Snapshots where they are not needed are the real cost: every kind a snapshot is 1.43
+  against 1.35 ms in ship (about +6%) and 1.55 against 1.42 in dev (about +9%), one run
+  each; the copies are 44 µs and 95 KB a tick at stress. Order stays the default for
+  that reason, and a kind is a snapshot where it buys parallelism or breaks a cycle.
+
 **Not done here.** Windows and macOS have not run the branch; their recordings want
 making again there. The tuning of the mix by itself is above, under Later.
 

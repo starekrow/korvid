@@ -817,3 +817,9 @@ peak). In the first eight seconds of `--stress`, before the runs part, the tick 
 against main's 1.09 at 16 threads and 0.64 against 0.70 at 1 (`balanced`). The whole
 account is in `docs/design/scheduler.md`.
 
+The cost of the checks, against main on the same game (the branch numbering units in run
+order, which hashes as main does through `--stress`): ship 1.37/1.33 ms a tick against
+main's 1.37/1.33 at 16 threads and 0.98/0.98 against 0.98/1.00 at 1; dev the same at 1
+thread and about 0.07 ms (5%) more at 16, not yet pinned down under `balanced`. Every kind
+a snapshot: +6% in ship, +9% in dev, one run each.
+
