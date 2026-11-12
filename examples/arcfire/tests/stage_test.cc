@@ -18,7 +18,7 @@ char* slurp(const char* name, kv::usize* len) {
     char exe[512];
     if (!kv::platform_exe_dir(exe, sizeof exe)) return nullptr;
     char path[700];
-    snprintf(path, sizeof path, "%sassets/example_arcfire/%s", exe, name);
+    snprintf(path, sizeof path, "%sassets/arcfire/%s", exe, name);
     FILE* f = fopen(path, "rb");
     if (!f) return nullptr;
     fseek(f, 0, SEEK_END);
@@ -49,7 +49,7 @@ void test_stage(kv::TestCtx& c) {
     KV_CHECK(c, text != nullptr);
     if (text) {
         KV_CHECK(c, stage_parse(text, len, def, why, sizeof why));
-        KV_CHECK(c, def.formation_count == 37 && def.ground_count == 0 && def.length > 0.0f && !strcmp(def.map, "example_arcfire/maps/shoreline.tmj") && def.planes == (8u | 16u | 32u)); // the low clouds with their shadows, the high
+        KV_CHECK(c, def.formation_count == 37 && def.ground_count == 0 && def.length > 0.0f && !strcmp(def.map, "arcfire/maps/shoreline.tmj") && def.planes == (8u | 16u | 32u)); // the low clouds with their shadows, the high
         for (u32 i = 0; i < def.formation_count; ++i) KV_CHECK(c, def.formations[i].pattern[0] != 0 && def.formations[i].entry == KV_BML_NONE);
         u32 speeds = 0;
         for (u32 i = 0; i < def.mark_count; ++i) {

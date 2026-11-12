@@ -1,4 +1,4 @@
-# example_cpukiller
+# cpukiller
 
 A stress tool for the job pool, the memory system and the engine's tick rate. No window
 by default. It measures what the pool costs to dispatch, how contention scales with chunk
@@ -20,7 +20,7 @@ Then build the configuration you want and run the executable from its bin direct
 
 ```bash
 tools/kormake/bin/linux/kormake build linux-dev
-build/linux-dev/bin/example_cpukiller --quick
+build/linux-dev/bin/cpukiller --quick
 ```
 
 `kormake build linux-debug` is everything checked with the validation layers on;
@@ -66,7 +66,7 @@ time at level barriers and in the serial residue, which is the number to beat.
 |---|---|
 | `src/main.cc` | the scenarios, the report, the window mode, `main` |
 | `src/stress.cc` | the engine scenario as a module: the kind, the systems, the handler, `cpukiller_core_modules()` |
-| `include/korvid/example_cpukiller/module.h` | the record, `cpukiller_set_bodies`, the headless module list |
+| `include/korvid/cpukiller/module.h` | the record, `cpukiller_set_bodies`, the headless module list |
 
 The module keeps two module lists of its own (`module_list = false` in `module.lua`): the
 generated one with the window for `--window`, and `cpukiller_core_modules()` with only

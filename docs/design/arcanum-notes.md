@@ -1,6 +1,6 @@
 # Arcanum notes
 
-Nov 8, 2026. What `example_arcanum` asked of the engine during slice 5, as found while
+Nov 8, 2026. What `arcanum` asked of the engine during slice 5, as found while
 building it. Each item is either fixed in the slice (and says where) or is a candidate
 for a later one.
 
@@ -10,7 +10,7 @@ for a later one.
   `music/` found nothing. Staging is now recursive.
 - **kormake could not build a tool from source.** The pack rule needed `kpack`. Tools
   are now host instances: `host` is a target and a module platform, a host module
-  (`tool_kpack`) is built for the build machine in the host config whatever the target, and
+  (`kpack`) is built for the build machine in the host config whatever the target, and
   a cross build carries the host's instances under `host/` in the same graph. The
   platform module split (`platform`, `platform_hid`, `platform_audio`) keeps the packer
   off SDL.

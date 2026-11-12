@@ -1,4 +1,4 @@
-# example_sockit2m
+# sockit2m
 
 Sock it to me: an I/O torture test the way the engine does I/O. Nothing blocks and
 everything is pumped. It writes a working set of files, reads it back through the I/O
@@ -23,7 +23,7 @@ Then build the configuration you want and run the executable from its bin direct
 
 ```bash
 tools/kormake/bin/linux/kormake build linux-dev
-build/linux-dev/bin/example_sockit2m --quick
+build/linux-dev/bin/sockit2m --quick
 ```
 
 `kormake build linux-debug` is everything checked with the validation layers on;
@@ -103,4 +103,4 @@ where 8 MB costs 5. `docs/design/idle.md` has the design that came of it.
 |---|---|
 | `src/torture.h`, `src/torture.cc` | `Options`, the pattern, `PumpClock`, the working set, `FsJob`, `SockJob`, and the module with its two systems |
 | `src/main.cc` | the driver (engine or direct), the scenarios, the report, `main` |
-| `include/korvid/example_sockit2m/module.h` | the record, `sockit2m_set_jobs`, `sockit2m_allocator` |
+| `include/korvid/sockit2m/module.h` | the record, `sockit2m_set_jobs`, `sockit2m_allocator` |

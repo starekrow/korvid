@@ -1,6 +1,6 @@
 # xml
 
-XML reading for the rest of the engine: BulletML patterns first (`example_arcfire`), and
+XML reading for the rest of the engine: BulletML patterns first (`arcfire`), and
 any format that is XML (Tiled's TMX, later). It is yxml (MIT, vendored and pinned in
 `src/vendor/`) behind a tree API in the shape of the JSON reader's, and it is present only
 in an executable whose modules depend on it.

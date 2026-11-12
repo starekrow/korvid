@@ -1,4 +1,4 @@
-// example_rocks: an asteroids-like. The ship is steered from the keyboard (or by a script
+// rocks: an asteroids-like. The ship is steered from the keyboard (or by a script
 // with --demo), bullets expire by scheduled event, rocks split when hit and spawn debris,
 // waves arrive on a timer, the ship's death is a trigger on its Health column, and a
 // restart follows two seconds later. Escape (or Start on a pad) pauses: the sim holds, a
@@ -8,7 +8,7 @@
 // kept are the thruster voice and the assets. The field is a fixed 1280 x 720 world
 // units; the camera fits it to the window, and the HUD is anchored to the window's corner,
 // so the run is the same on any window or display.
-#include "korvid/example_rocks/module.h"
+#include "korvid/rocks/module.h"
 #include "korvid/anim/module.h"
 #include "korvid/asset/font.h"
 #include "korvid/asset/material.h"
@@ -651,23 +651,23 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     if (g->font.is_null()) return false;
     // Two clips, two ways: the flame's flipbook is a file; the fade is built here, one
     // second of alpha from one to zero, played at 1 / lifetime by each piece of debris.
-    g->flame_clip = anim_load(engine, "example_rocks/flame.anim.json");
+    g->flame_clip = anim_load(engine, "rocks/flame.anim.json");
     static const AnimKey k_fade_keys[] = {{.time = 0.0f, .v = {1.0f}}, {.time = 1.0f, .v = {0.0f}}};
     static const AnimTrackDesc k_fade_tracks[] = {{.channel = AnimChannel::Alpha, .interp = AnimInterp::Linear, .keys = k_fade_keys}};
     AnimClipDesc fade;
-    fade.name = "example_rocks.fade"; fade.loop = AnimLoop::Once; fade.tracks = k_fade_tracks;
+    fade.name = "rocks.fade"; fade.loop = AnimLoop::Once; fade.tracks = k_fade_tracks;
     g->fade_clip = anim_create(engine, fade);
     if (g->flame_clip.is_null() || g->fade_clip.is_null()) return false;
-    const char* sounds[SND_COUNT] = {"example_rocks/shot.wav", "example_rocks/break.wav", "example_rocks/boom.wav", "example_rocks/thrust.wav"};
+    const char* sounds[SND_COUNT] = {"rocks/shot.wav", "rocks/break.wav", "rocks/boom.wav", "rocks/thrust.wav"};
     for (u32 i = 0; i < SND_COUNT; ++i) {
         g->sounds[i] = asset_load_sound(engine, sounds[i]);
         if (g->sounds[i].is_null()) return false;
     }
     // Each look is a material file; the file names its texture. The handles are usable
     // now and show the placeholder until the files and textures arrive.
-    const char* looks[LOOK_COUNT] = {"example_rocks/ship.material.json", "example_rocks/rock.material.json",
-                                     "example_rocks/bullet.material.json", "example_rocks/debris.material.json",
-                                     "example_rocks/white.material.json", "example_rocks/flame.material.json"};
+    const char* looks[LOOK_COUNT] = {"rocks/ship.material.json", "rocks/rock.material.json",
+                                     "rocks/bullet.material.json", "rocks/debris.material.json",
+                                     "rocks/white.material.json", "rocks/flame.material.json"};
     for (u32 i = 0; i < LOOK_COUNT; ++i) {
         g->looks[i] = asset_load_material(engine, looks[i]);
         const MaterialAsset* m = asset_material(engine, g->looks[i]);
@@ -726,8 +726,8 @@ constinit const HandlerDesc k_handlers[] = {
 
 } // namespace
 
-KV_MODULE_DEFINE(example_rocks_module) = {
-    .name       = "example_rocks",
+KV_MODULE_DEFINE(rocks_module) = {
+    .name       = "rocks",
     .events     = k_events,
     .components = k_components,
     .kinds      = k_kinds,

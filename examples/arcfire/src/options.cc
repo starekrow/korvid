@@ -1,4 +1,4 @@
-// example_arcfire: options. Up to two satellites, children of the ship. Unfocused they orbit
+// arcfire: options. Up to two satellites, children of the ship. Unfocused they orbit
 // it, opposite each other, a turn every two seconds; focused they hold beside it, left and
 // right, so the player aims them, easing between the two. Each fires the ship's weapon two
 // levels lower on the ship's volley (control, ship.cc), its own beam when the weapon is the
@@ -51,8 +51,8 @@ void options(TickContext& ctx) {
     const Transform2* sp = ships->prev<Transform2>(g.ship);
     if (!s || !sx || !sp) return;
     f32 sideways = clampf((sx->position.x - sp->position.x) / kShipSpeed, -1.0f, 1.0f);
-    Span<Local2> ol = ctx.write<Local2>("example_arcfire.option.Local2");
-    Span<Option> oo = ctx.write<Option>("example_arcfire.option.Option");
+    Span<Local2> ol = ctx.write<Local2>("arcfire.option.Local2");
+    Span<Option> oo = ctx.write<Option>("arcfire.option.Option");
     const Table* options = engine_table(*ctx.engine, g_option_kind);
     f32 turn = (f32)ctx.tick * (2.0f * KV_PI / kOrbitTicks);
     for (u32 i = 0; i < options->rows(); ++i) {

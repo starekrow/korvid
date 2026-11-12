@@ -1,4 +1,4 @@
-// Two lists: with the window (the usual stack, in the order kormake gives example_testbed's,
+// Two lists: with the window (the usual stack, in the order kormake gives testbed's,
 // the same closure) and without (the core alone).
 #include "korvid/core/module.h"
 #include "korvid/platform/module.h"
@@ -19,7 +19,7 @@
 #include "korvid/cli/module.h"
 #include "korvid/touchpad/module.h"
 #include "korvid/frameloop/module.h"
-#include "korvid/example_cpukiller/module.h"
+#include "korvid/cpukiller/module.h"
 
 namespace {
 constinit const kv::ModuleDesc* const k_window_modules[] = {
@@ -33,9 +33,9 @@ constinit const kv::ModuleDesc* const k_window_modules[] = {
     &kv::cli_module,
     &kv::touchpad_module, // the frame loop's: the on-screen pad
     &kv::frameloop_module,
-    &kv::example_cpukiller_module,
+    &kv::cpukiller_module,
 };
-constinit const kv::ModuleDesc* const k_core_modules[] = {&kv::example_cpukiller_module};
+constinit const kv::ModuleDesc* const k_core_modules[] = {&kv::cpukiller_module};
 }
 
 kv::Span<const kv::ModuleDesc* const> kv_module_list() {

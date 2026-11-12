@@ -27,7 +27,7 @@ struct ModuleHeapDesc {
 // A kind's capacity, set by the root over what its KindDesc says: a stress run that wants
 // more of a kind than the game ships with. Capacity is address space; rows commit as used.
 struct KindCapacity {
-    const char* kind;     // the full name, "example_arcfire.bullet"
+    const char* kind;     // the full name, "arcfire.bullet"
     u32         capacity;
 };
 struct EngineConfig {

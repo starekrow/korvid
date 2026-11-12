@@ -1,6 +1,6 @@
 # Arcfire improvements
 
-Nov 9, 2026. What `example_arcfire` (examples/arcfire/docs/Arcfire-Master-PRD.md)
+Nov 9, 2026. What `arcfire` (examples/arcfire/docs/Arcfire-Master-PRD.md)
 asks of the engine. A living note: an item arrives when the game finds it, moves to
 "Fixed" when a slice builds it (saying where), and the numbers table at the end is the
 engine's side of the story. Measurements live in
@@ -87,7 +87,7 @@ for a drawable.
 - **Loading (R5).** macOS reads synchronously, on the main thread, in the asset pump. A dev
   build's boot reads arcfire's 101 files (13 MB, loose) in one pump of 24 ms on a warm
   cache; decoding in the same pumps is about four times that (sounds 58 ms, textures 22,
-  fonts 9). `example_sockit2m`: 3.0 GB/s of engine reads, 5.6 GB/s straight from the
+  fonts 9). `sockit2m`: 3.0 GB/s of engine reads, 5.6 GB/s straight from the
   queue; its cold pass is warm here (macOS cannot drop one file's pages unprivileged).
   A `dispatch_io` backend would move the 24 ms off the main thread and not the decoding,
   so it waits for a game whose reads show.

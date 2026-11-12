@@ -1,10 +1,10 @@
-// example_arcanum: a JRPG skeleton. Two Tiled maps loaded through the level module, a
+// arcanum: a JRPG skeleton. Two Tiled maps loaded through the level module, a
 // player who walks in eight directions under the "move" action, collides with the map's
 // solids (tilemap_move) and with the villagers, pushes rocks, loses a heart for walking
 // into a villager, sorts by its feet against trees and houses, and walks through exits to
 // the other map; a pause menu with save and load, a level select and the credits; music
 // that crossfades between the maps.
-#include "korvid/example_arcanum/module.h"
+#include "korvid/arcanum/module.h"
 #include "korvid/anim/player.h"
 #include "korvid/anim/sheet.h"
 #include "korvid/asset/blob.h"
@@ -93,7 +93,7 @@ constinit const KindDesc k_kinds[] = {
     {.name = ".rock",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Move2", .capacity = 32},
 };
 // What a save holds: the player, and what lives in the level and can change.
-constinit const char* const k_saved_kinds[] = {"example_arcanum.player", "example_arcanum.npc", "example_arcanum.rock"};
+constinit const char* const k_saved_kinds[] = {"arcanum.player", "arcanum.npc", "arcanum.rock"};
 
 constexpr f32 kWalkSpeed   = 64.0f;   // px per second
 constexpr f32 kNpcSpeed    = 24.0f;
@@ -104,14 +104,14 @@ constexpr u32 L_ACTOR = 1;                   // everything solid here is on one 
 constexpr i32 kHpMax = 5;
 constexpr f32 kHurtTime = 1.0f;              // seconds of blinking, untouchable
 constexpr u32 kSheets = 3;
-const char* const k_sheet_paths[kSheets] = {"example_arcanum/actors/NinjaBlue.png", "example_arcanum/actors/OldMan.png", "example_arcanum/actors/ManGreen.png"};
+const char* const k_sheet_paths[kSheets] = {"arcanum/actors/NinjaBlue.png", "arcanum/actors/OldMan.png", "arcanum/actors/ManGreen.png"};
 const char* const k_sheet_names[kSheets] = {"NinjaBlue", "OldMan", "ManGreen"};
-const char* const k_sheet_files[kSheets] = {"example_arcanum/actors/NinjaBlue.sheet.json", "example_arcanum/actors/OldMan.sheet.json", "example_arcanum/actors/ManGreen.sheet.json"};
+const char* const k_sheet_files[kSheets] = {"arcanum/actors/NinjaBlue.sheet.json", "arcanum/actors/OldMan.sheet.json", "arcanum/actors/ManGreen.sheet.json"};
 const char* const k_facings[4] = {"down", "up", "left", "right"};
 
 constinit const LevelDesc k_levels[] = {
-    {"village", "example_arcanum/maps/village.tmj"},
-    {"field",   "example_arcanum/maps/field.tmj"},
+    {"village", "arcanum/maps/village.tmj"},
+    {"field",   "arcanum/maps/field.tmj"},
 };
 
 constinit const InputActionDesc k_actions[] = {
@@ -418,7 +418,7 @@ void next_page(Engine& e, Game& g) {
 void talk(TickContext& ctx, Game& g, Handle npc) {
     Engine& e = *ctx.engine;
     if (!ctx.alive(npc)) return;
-    const Actor* a = &ctx.read<Actor>("example_arcanum.npc.Actor")[npc.index()];
+    const Actor* a = &ctx.read<Actor>("arcanum.npc.Actor")[npc.index()];
     Quest* q = ctx.attached<Quest>(npc);
     if (q && !q->done && g.rocks_broken >= q->rocks_wanted) { q->done = 1; KV_INFO("arcanum", "quest: done"); }
     const char* lines = ctx.prop_str(npc, q && q->done ? "dialogue_done" : "dialogue", "...");
@@ -433,7 +433,7 @@ void talk(TickContext& ctx, Game& g, Handle npc) {
     o.enter.seconds = 0.15f;
     g.dialogue = ui_open(e, g.ui, "dialogue", o);
     char face[96];
-    snprintf(face, sizeof face, "example_arcanum/faces/%s.png", k_sheet_names[a ? a->sheet % kSheets : 0]);
+    snprintf(face, sizeof face, "arcanum/faces/%s.png", k_sheet_names[a ? a->sheet % kSheets : 0]);
     ui_set_texture(e, g.dialogue, "face", face, rect2{0, 0, 38, 38});
     ui_set_text(e, g.dialogue, "who", ctx.prop_str(npc, "display", "Villager"));
     show_page(e, g);
@@ -451,7 +451,7 @@ void save_game(TickContext& ctx, Game& g) {
     SaveWriter w;
     w.init(mem_general());
     w.begin_object();
-    w.key("game");       w.string_value("example_arcanum");
+    w.key("game");       w.string_value("arcanum");
     w.key("version");    w.int_value(1);
     w.key("tick");       w.uint_value(e.clock.tick_total);
     w.key("level");      w.string_value(level_name(e, level_current(e)));
@@ -520,7 +520,7 @@ void files(TickContext& ctx) {
             JsonDoc doc;
             const char* level = nullptr;
             if (!save_parse(SaveFormat::Json, g.load_data, g.load_size, mem_scratch(), doc)) KV_WARN("arcanum", "load: %s at byte %u", doc.error, doc.error_at);
-            else if (strcmp(json_string(json_get(doc, doc.root(), "game"), ""), "example_arcanum") != 0) KV_WARN("arcanum", "load: not an arcanum save");
+            else if (strcmp(json_string(json_get(doc, doc.root(), "game"), ""), "arcanum") != 0) KV_WARN("arcanum", "load: not an arcanum save");
             else level = json_string(json_get(doc, doc.root(), "level"), "");
             if (level && level[0]) if (const JsonValue* lv = json_get(doc, doc.root(), "levels")) level_load(e, doc, *lv);
             g.rocks_broken = (u32)json_u64(json_get(doc, doc.root(), "broken"), 0);
@@ -604,7 +604,7 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
 // Back to the village as the map has it, the hero whole: from the game-over screen when
 // there is no save, or to the title.
 void restart(Engine& e, Game& g, bool to_title) {
-    Table* players = engine_table(e, "example_arcanum.player");
+    Table* players = engine_table(e, "arcanum.player");
     Vitals* v = players->get<Vitals>(g.player);
     v->hp = v->hp_max;
     v->hurt = 0.0f;
@@ -641,7 +641,7 @@ void on_covered(TickContext& ctx, Span<const UiCovered> covers) {
             g.aim = Handle{};
             ui_set_visible(e, g.hud, "", true);
             if (g.aim_broke) {
-                if (Table* rocks = ctx.write_kind("example_arcanum.rock")) rocks->destroy(g.aim_rock);
+                if (Table* rocks = ctx.write_kind("arcanum.rock")) rocks->destroy(g.aim_rock);
                 ++g.rocks_broken;
                 KV_INFO("arcanum", "broken: %u rocks", g.rocks_broken);
             }
@@ -730,7 +730,7 @@ void modes(TickContext& ctx) {
 // player's, sim state, so a demo breaks the same rock in every run.
 void strike(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
-    Table* players = engine_table(e, "example_arcanum.player");
+    Table* players = engine_table(e, "arcanum.player");
     Vitals* v = players->get<Vitals>(g.player);
     f32 x = 0.5f - 0.5f * cosf(g.aim_t * kAimSpeed);
     f32 close = 1.0f - fabsf(x - 0.5f) * 2.0f;
@@ -751,8 +751,8 @@ void walk(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
-    Span<Move2> move = ctx.write<Move2>("example_arcanum.player.Move2");
-    Span<Actor> actor = ctx.write<Actor>("example_arcanum.player.Actor");
+    Span<Move2> move = ctx.write<Move2>("arcanum.player.Move2");
+    Span<Actor> actor = ctx.write<Actor>("arcanum.player.Actor");
     u32 i = g.player.index();
     if (i >= move.len || level_state(e) == LevelState::Loading) return;
     actor[i].swing = actor[i].swing > (f32)ctx.dt ? actor[i].swing - (f32)ctx.dt : 0.0f;
@@ -795,9 +795,9 @@ void react(TickContext& ctx) {
     Engine& e = *ctx.engine;
     // The player's columns this system writes, through its table (they are declared one by
     // one: the whole kind would include the intent the resolve reads, a cycle).
-    Table* players = (Table*)ctx.read_kind("example_arcanum.player");
-    ctx.write<Vitals>("example_arcanum.player.Vitals"); ctx.write<Sprite>("example_arcanum.player.Sprite"); ctx.write<AnimPlayer>("example_arcanum.player.AnimPlayer");
-    Span<const MoveResult2> npc_moves = ctx.read<MoveResult2>("example_arcanum.npc.MoveResult2");
+    Table* players = (Table*)ctx.read_kind("arcanum.player");
+    ctx.write<Vitals>("arcanum.player.Vitals"); ctx.write<Sprite>("arcanum.player.Sprite"); ctx.write<AnimPlayer>("arcanum.player.AnimPlayer");
+    Span<const MoveResult2> npc_moves = ctx.read<MoveResult2>("arcanum.npc.MoveResult2");
     const TilemapAsset* m = tilemap_get(e, g.map);
     Transform2* t = players->get<Transform2>(g.player);
     if (!t || !m || m->state != AssetState::Ready || level_state(e) == LevelState::Loading) return;
@@ -848,12 +848,12 @@ void react(TickContext& ctx) {
 // each end, by intent: one that the player stands in the way of waits.
 void villagers(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
-    Span<const Local2> local = ctx.read<Local2>("example_arcanum.npc.Local2");
-    Span<Move2> move = ctx.write<Move2>("example_arcanum.npc.Move2");
-    Span<Actor> actor = ctx.write<Actor>("example_arcanum.npc.Actor");
-    Span<AnimPlayer> player = ctx.write<AnimPlayer>("example_arcanum.npc.AnimPlayer");
-    Span<Sprite> sprite = ctx.write<Sprite>("example_arcanum.npc.Sprite");
-    Span<const MoveResult2> last = ctx.read<MoveResult2>("example_arcanum.npc.MoveResult2"); // last tick's: an early read
+    Span<const Local2> local = ctx.read<Local2>("arcanum.npc.Local2");
+    Span<Move2> move = ctx.write<Move2>("arcanum.npc.Move2");
+    Span<Actor> actor = ctx.write<Actor>("arcanum.npc.Actor");
+    Span<AnimPlayer> player = ctx.write<AnimPlayer>("arcanum.npc.AnimPlayer");
+    Span<Sprite> sprite = ctx.write<Sprite>("arcanum.npc.Sprite");
+    Span<const MoveResult2> last = ctx.read<MoveResult2>("arcanum.npc.MoveResult2"); // last tick's: an early read
     static const u32 k_player_xf = ctx.column_id(".player.Transform2");
     Span<const Transform2> pxf = ctx.read<Transform2>(k_player_xf);
     const point2* player_at = g.player.index() < pxf.len ? &pxf[g.player.index()].position : nullptr;
@@ -988,7 +988,7 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
         if (b.entry[0] && !strcmp(o.name, b.entry)) at = &o;
     }
     if (!at) at = tilemap_object_find(m, "player_start");
-    Table* players = ctx.write_kind("example_arcanum.player");
+    Table* players = ctx.write_kind("arcanum.player");
     if (Transform2* t = players->get<Transform2>(g.player)) {
         if (at && strcmp(b.entry, "reload") != 0) {
             *t = transform2_at(tilemap_to_world(point2{0, 0}, at->x, at->y));
@@ -997,8 +997,8 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
         players->get<Sprite>(g.player)->layer = (i32)objects_layer;
         g.exit_armed = exit_at(m, feet_of(t->position)) == nullptr;
     }
-    Table* npcs = ctx.write_kind("example_arcanum.npc");
-    Table* rocks = ctx.write_kind("example_arcanum.rock");
+    Table* npcs = ctx.write_kind("arcanum.npc");
+    Table* rocks = ctx.write_kind("arcanum.rock");
     const MapLayer* objs = tilemap_layer_find(m, "objects");
     for (u32 i = 0; objs && i < objs->objects.count; ++i) {
         const MapObject& o = m.objects[objs->objects.first + i];
@@ -1160,10 +1160,10 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     }
     // The rocks' sheet: the map loads it too, into the level's scope; this reference keeps
     // it for the material, which lives as long as the game.
-    g->nature_texture = asset_load_texture(e, "example_arcanum/tiles/TilesetNature.png");
+    g->nature_texture = asset_load_texture(e, "arcanum/tiles/TilesetNature.png");
     g->rock_material = material_of(g->nature_texture);
 
-    g->ui = ui_load(e, "example_arcanum/ui/arcanum.ui.json", asset_scope_global(e));
+    g->ui = ui_load(e, "arcanum/ui/arcanum.ui.json", asset_scope_global(e));
     UiOpen hud_open;
     hud_open.layer = 90;
     hud_open.input = false;
@@ -1174,18 +1174,18 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     title_open.layer = 110;
     title_open.hold = true;
     g->title = ui_open(e, g->ui, "title", title_open);
-    g->sounds[SND_MOVE]   = asset_load_sound(e, "example_arcanum/sounds/move.wav");
-    g->sounds[SND_ACCEPT] = asset_load_sound(e, "example_arcanum/sounds/accept.wav");
-    g->sounds[SND_CANCEL] = asset_load_sound(e, "example_arcanum/sounds/cancel.wav");
-    g->sounds[SND_BREAK]  = asset_load_sound(e, "example_arcanum/sounds/break.wav");
-    g->sounds[SND_HIT]    = asset_load_sound(e, "example_arcanum/sounds/hit.wav");
-    g->sounds[SND_ALERT]  = asset_load_sound(e, "example_arcanum/sounds/alert.wav");
-    g->credits = asset_load_blob(e, "example_arcanum/credits.json");
+    g->sounds[SND_MOVE]   = asset_load_sound(e, "arcanum/sounds/move.wav");
+    g->sounds[SND_ACCEPT] = asset_load_sound(e, "arcanum/sounds/accept.wav");
+    g->sounds[SND_CANCEL] = asset_load_sound(e, "arcanum/sounds/cancel.wav");
+    g->sounds[SND_BREAK]  = asset_load_sound(e, "arcanum/sounds/break.wav");
+    g->sounds[SND_HIT]    = asset_load_sound(e, "arcanum/sounds/hit.wav");
+    g->sounds[SND_ALERT]  = asset_load_sound(e, "arcanum/sounds/alert.wav");
+    g->credits = asset_load_blob(e, "arcanum/credits.json");
     // The save, in the per-user directory; the demo keeps its own so a scripted run never
     // overwrites a player's game.
     const char* pref = platform_pref_path(e, "korvid", "arcanum");
     if (pref[0]) snprintf(g->save_path, sizeof g->save_path, "%ssave%s.json", pref, g->demo ? "-demo" : "");
-    Table* players = engine_table(e, "example_arcanum.player");
+    Table* players = engine_table(e, "arcanum.player");
     Actor pa{};
     g->player = players->spawn(transform2_at(point2{0, 0}), actor_sprite(*g, 0, 2), pa, Vitals{kHpMax, kHpMax, 0.0f, 0, Rng::seeded(0x4152434e).state}, AnimPlayer{}, feet_body(ColliderPusher), Move2{}, MoveResult2{});
     engine_entity_name_set(e, g->player, "player");
@@ -1193,7 +1193,7 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     cfg.levels = k_levels;
     cfg.load = [](Engine& en, const char* map, Handle scope) { return tilemap_load(en, map, scope); };
     if (!level_catalog(e, cfg)) return false;
-    const char* const remembered[] = {"example_arcanum.rock"}; // a level keeps its rocks as they were left
+    const char* const remembered[] = {"arcanum.rock"}; // a level keeps its rocks as they were left
     if (!level_persist(e, remembered)) return false;
     level_request(e, "village");
     KV_INFO("arcanum", "Arrows or WASD (or a pad's stick) walk, Escape or Start opens the menu, Enter or South chooses, Backspace or East goes back.");
@@ -1231,8 +1231,8 @@ constinit const SystemDesc k_systems[] = {
 
 } // namespace
 
-KV_MODULE_DEFINE(example_arcanum_module) = {
-    .name       = "example_arcanum",
+KV_MODULE_DEFINE(arcanum_module) = {
+    .name       = "arcanum",
     .components = k_components,
     .kinds      = k_kinds,
     .systems    = k_systems,

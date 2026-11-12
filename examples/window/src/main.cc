@@ -5,7 +5,7 @@
 // shows a gap as long as the drag. Esc or closing the window quits; --run-seconds N quits
 // by itself; --borderless opens one without a frame. Gamepad buttons and disconnections
 // are logged too (platform_hid logs each pad as it connects).
-#include "korvid/example_window/module.h"
+#include "korvid/window/module.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/platform_hid/host_window.h"
@@ -135,8 +135,8 @@ int run(int argc, char** argv) {
 
 } // namespace
 
-KV_MODULE_DEFINE(example_window_module) = {
-    .name     = "example_window",
+KV_MODULE_DEFINE(window_module) = {
+    .name     = "window",
     .handlers = k_handlers,
 };
 

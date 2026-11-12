@@ -1,4 +1,4 @@
-// example_arcfire: the enemies. An air row follows its formation's path by distance and
+// arcfire: the enemies. An air row follows its formation's path by distance and
 // starts its pattern once, where its emitter says along the path; a ground row rides the
 // scroll and runs its pattern while the ship is above it (it does not turn around).
 // Both flash white for the ticks after a hit, by drawing their sprite added instead of
@@ -24,7 +24,7 @@ void flash(const Game& g, Health& h, Sprite& s, Tex tex) {
 // in `patterns` (patterns.cc), after this.
 void enemies(TickContext& ctx) {
     const Game& g = ctx.state_as<const Game>();
-    Span<const Transform2> ship_xf = ctx.read<Transform2>("example_arcfire.ship.Transform2");
+    Span<const Transform2> ship_xf = ctx.read<Transform2>("arcfire.ship.Transform2");
     Span<const Stage> stage_row = ctx.read<Stage>(ARC_WORLD(Stage));
     if (!stage_row.len || g.ship.index() >= ship_xf.len) return;
     point2 target = ship_xf[g.ship.index()].position;

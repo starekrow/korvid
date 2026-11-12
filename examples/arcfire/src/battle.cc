@@ -1,4 +1,4 @@
-// example_arcfire: the battle over Orbit, half an orbit away. A capital ship (cyan, the
+// arcfire: the battle over Orbit, half an orbit away. A capital ship (cyan, the
 // defenders') drifts down the stage in four sections; the attackers (orange) come at it in
 // waves from the field's edges and swarm it, strafing pass after pass, firing into its
 // sections, then break off and leave; its fighters (cyan) dogfight among them, each chasing

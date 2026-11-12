@@ -1,4 +1,4 @@
-// example_arcfire: who flies the ship when the player does not. Both drive the action map
+// arcfire: who flies the ship when the player does not. Both drive the action map
 // through input_action_override, so the ship is flown by the same code whoever holds the
 // stick, and both steer by one rule (`steer`, below) from sim state only.
 //

@@ -192,7 +192,7 @@ A system that reads a stream outside a handler reads its batch through the conte
 ## Inventory
 
 Seven modules have handlers: collision (1), frameloop (1), rocks (12), arcfire (20),
-arcanum (5), testbed (5), cpukiller (1), example_window (8, all logging or quitting).
+arcanum (5), testbed (5), cpukiller (1), window (8, all logging or quitting).
 Events come from systems (`ctx.emit`, `cc.emit` in chunks), handlers (chains), timers, the
 engine's writer (input, pumps, `frameloop.exit`, `Spawned`, `SimReset`) and the triggers
 (`StateEdge`). Systems that read the tick's batch directly: rocks `.pause` (KeyDown,

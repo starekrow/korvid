@@ -1,4 +1,4 @@
-// example_arcfire: the weapons. Four types, each at five power levels, as rows of the
+// arcfire: the weapons. Four types, each at five power levels, as rows of the
 // tables below (the slice 4 PRD's starting numbers; the closing tuning pass settles them):
 //
 //   Spread  a fan of shots from the nose, more and wider with power, narrowed when focused
@@ -195,16 +195,16 @@ void beams(TickContext& ctx) {
     // The columns it writes (not the kind: a beam's transform is the compose's, which this
     // follows); the table for liveness and the parents.
     const Table* bt = engine_table(e, g_beam_kind);
-    Span<Local2> bl = ctx.write<Local2>("example_arcfire.beam.Local2");
-    Span<Sprite> bs = ctx.write<Sprite>("example_arcfire.beam.Sprite");
-    Span<Beam> bb = ctx.write<Beam>("example_arcfire.beam.Beam");
-    Span<const Parent> bp = ctx.read<Parent>("example_arcfire.beam.Parent");
+    Span<Local2> bl = ctx.write<Local2>("arcfire.beam.Local2");
+    Span<Sprite> bs = ctx.write<Sprite>("arcfire.beam.Sprite");
+    Span<Beam> bb = ctx.write<Beam>("arcfire.beam.Beam");
+    Span<const Parent> bp = ctx.read<Parent>("arcfire.beam.Parent");
     const Table* ships = engine_table(e, g_ship_kind);
     const Table* options = engine_table(e, g_option_kind);
     const u16 hull_kind = engine_table_now(e, g_boss_kind)->kind;
-    Span<const Parent> op = ctx.read<Parent>("example_arcfire.option.Parent");
-    Span<const Transform2> ox = ctx.read<Transform2>("example_arcfire.option.Transform2");
-    Span<const Option> oo = ctx.read<Option>("example_arcfire.option.Option");
+    Span<const Parent> op = ctx.read<Parent>("arcfire.option.Parent");
+    Span<const Transform2> ox = ctx.read<Transform2>("arcfire.option.Transform2");
+    Span<const Option> oo = ctx.read<Option>("arcfire.option.Option");
     MemScope scope;
     Array<CollisionHit> hits = array_in<CollisionHit>(mem_scratch());
     // Each owner's rows by segment, so a segment is cast after its parent, whatever slots

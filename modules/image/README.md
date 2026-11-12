@@ -2,7 +2,7 @@
 
 Image files in memory: PNG both ways and binary PPM both ways. Plain functions over
 bytes, with no engine state and no I/O, so the asset module (textures) and a host tool
-(`tool_picture`) use the same code. PNG's zlib is the `inflate` module's, miniz's tinfl
+(`picture`) use the same code. PNG's zlib is the `inflate` module's, miniz's tinfl
 and tdefl; nothing is linked from the system.
 
 ## Using it

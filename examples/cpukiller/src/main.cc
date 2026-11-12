@@ -1,10 +1,10 @@
-// example_cpukiller: a stress tool. No window. It measures the job pool's dispatch
+// cpukiller: a stress tool. No window. It measures the job pool's dispatch
 // overhead and contention, nested batches, the memory system under cross-thread load,
 // and the engine's tick rate on one thread against many, with the state hash as the
 // referee. Numbers go to stdout as a table; every scenario also checks that the memory
 // accounting comes back to where it started.
 //
-//   example_cpukiller [--threads N] [--bodies N] [--ticks N] [--quick] [--window] [--profile FILE]
+//   cpukiller [--threads N] [--bodies N] [--ticks N] [--quick] [--window] [--profile FILE]
 //
 // Every scenario is a zone and every case a mark, so --profile FILE gives a trace of the
 // whole run; the engine scenario's breakdown (what the ticks spent where, and how much of
@@ -14,7 +14,7 @@
 // pool and memory scenarios run while the window and swapchain are alive, and the engine
 // ticks are driven through the frame loop with a render after every batch of ticks:
 // memory can behave differently with a GPU's fingers in it.
-#include "korvid/example_cpukiller/module.h"
+#include "korvid/cpukiller/module.h"
 #include "korvid/core/atomic.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/core/arena.h"

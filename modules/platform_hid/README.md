@@ -12,7 +12,7 @@ On Windows the window has a thread of its own, so the system's modal move and si
 block that thread and never the frame loop; it is per-monitor DPI aware (`WindowDesc`
 sizes are logical, the framebuffer and the pointer physical); Alt and F10 open no menu;
 Alt+F4 asks to close. Gamepads use SDL's gamepad subsystem alone, polled by the window's pump.
-`example_window` shows the frame loop's gaps while the window is dragged, on any backend.
+`window` shows the frame loop's gaps while the window is dragged, on any backend.
 
 ## How it works
 

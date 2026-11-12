@@ -31,7 +31,7 @@ struct WindowDesc {
 // Keyboard resizes and borderless windows are unaffected. Remedy when it matters: open
 // borderless on Wayland and provide edge resizing through SDL_SetWindowHitTest, so the
 // engine owns the frame and each configure costs only a few protocol calls. Diagnose with
-// `example_testbed --hitch-ms 50` plus WAYLAND_DEBUG=1; the hitch lines use libwayland's timestamps.
+// `testbed --hitch-ms 50` plus WAYLAND_DEBUG=1; the hitch lines use libwayland's timestamps.
 
 // The process's entry, for a frame loop's main: calls run(argc, argv, ctx) and returns what
 // it returns, as a plain call on the desktop. On iOS the OS owns the main thread's loop:

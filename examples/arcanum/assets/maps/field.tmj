@@ -21,7 +21,7 @@
   {
    "name": "music",
    "type": "string",
-   "value": "example_arcanum/music/road.ogg"
+   "value": "arcanum/music/road.ogg"
   }
  ],
  "tilesets": [

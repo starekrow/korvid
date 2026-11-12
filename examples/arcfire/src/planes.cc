@@ -1,4 +1,4 @@
-// example_arcfire: the parallax planes and the ground's scroll. Planes of seamless
+// arcfire: the parallax planes and the ground's scroll. Planes of seamless
 // textures (each a grid of still tiles on its own layer: space's three, the sky's three,
 // a stage showing the ones it names) and the ground map (three layers of still tiles) all
 // scroll by the renderer's layer offset (sprite/layers.h), each at its own rate: one

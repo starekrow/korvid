@@ -1,4 +1,4 @@
-// example_arcfire: what the game's files share. The components and events are declared
+// arcfire: what the game's files share. The components and events are declared
 // here and registered in module.cc; each system and handler lives in the file named for
 // its part of the game (planes, ship, enemies, bullets, hits, egg, stage, hud, pilot,
 // stats), and this header is how they find each other.
@@ -9,7 +9,7 @@
 // The module's own state (Game, below) is presentation and bookkeeping: asset handles, the
 // stage as read from its file (never changed after), the UI's screens, the counters.
 #pragma once
-#include "korvid/example_arcfire/module.h"
+#include "korvid/arcfire/module.h"
 #include "field.h"
 #include "path.h"
 #include "scoring.h"
@@ -484,7 +484,7 @@ struct Game {
 // ---- across files --------------------------------------------------------------------------
 
 // The world row's columns, by name, for ctx.read/ctx.write.
-#define ARC_WORLD(c) "example_arcfire.world." #c
+#define ARC_WORLD(c) "arcfire.world." #c
 
 // Sprites (module.cc): a texture's material, a sprite of a cell of a sheet.
 Sprite sprite_of(const Game& g, Tex tex, rect2 uv, vec2 size, i32 layer, color tint = color_white(), bool additive = false);

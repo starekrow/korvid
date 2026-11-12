@@ -1,4 +1,4 @@
-// example_arcfire: the dissolve. The sprite's own texture, eaten away where noise falls
+// arcfire: the dissolve. The sprite's own texture, eaten away where noise falls
 // below the sprite's tint alpha (its progress: 0 whole, 1 gone), with a bright burning edge
 // along the cut. The tint's color still multiplies the texture; its alpha does not dim it.
 // Material: params0.z the noise's scale across the sprite, params0.w the edge's width,

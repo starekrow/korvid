@@ -1,1 +1,1 @@
-{ "texture": "example_testbed/ball.png", "blend": "alpha", "tint": [0.5, 1.0, 0.5, 1.0] }
+{ "texture": "testbed/ball.png", "blend": "alpha", "tint": [0.5, 1.0, 0.5, 1.0] }

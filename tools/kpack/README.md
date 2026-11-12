@@ -1,4 +1,4 @@
-# tool_kpack
+# kpack
 
 The packer, `bin/kpack`. It builds a `.kpak` from a directory or a list of files, and lists, verifies,
 extracts and repacks any zip. It is an engine like a game, built the way every Korvid
@@ -23,11 +23,11 @@ Engine flags go first: `kpack --verbose --threads 4 pack ...`. The exit status i
 success, 1 when the job failed (a file that would not read, a bad CRC, a write that
 failed), 2 for a command line the CLI refused.
 
-**In a build.** A game opts in with `tools = { "tool_kpack" }` in its `module.lua`. kpack's
+**In a build.** A game opts in with `tools = { "kpack" }` in its `module.lua`. kpack's
 `pack` rule runs once per such executable over exactly the assets its module closure
 stages under `bin/assets/` (kormake knows the list; Ninja passes it in a response file),
 writing `bin/<exe>.kpak`. The ship config builds it by default; the other configs build
-it by name (`ninja -C build/linux-dev bin/example_rocks.kpak`). `kormake package
+it by name (`ninja -C build/linux-dev bin/rocks.kpak`). `kormake package
 linux-ship <exe>` puts the executable, the pack, the shaders and the licenses in
 `dist/<exe>/`.
 
@@ -35,7 +35,7 @@ linux-ship <exe>` puts the executable, the pack, the shaders and the licenses in
 
 ## How it works
 
-A command checks its arguments and starts a job; `tool_kpack.pump` (PreSim, main thread,
+A command checks its arguments and starts a job; `kpack.pump` (PreSim, main thread,
 every tick) runs it in stages:
 
 1. For `pack`: list the directory (`io_list_files`) or read the response file through
@@ -53,7 +53,7 @@ every tick) runs it in stages:
 | name | kind | what |
 |---|---|---|
 | `kpack pack`, `kpack list`, `kpack verify`, `kpack extract`, `kpack repack` | CLI commands | above |
-| `tool_kpack.pump` | system, phase PreSim, main thread, `Always` | the job |
+| `kpack.pump` | system, phase PreSim, main thread, `Always` | the job |
 | `pack` | exported rule | `per = "exe"`, `inputs = "assets"`, `outputs = "%{exe}.kpak"` |
 
 ## Behaviour worth knowing

@@ -9,12 +9,12 @@
 
 namespace {
 
-// A staged asset of this module, beside the test executable: <exe dir>/assets/example_arcanum/<name>.
+// A staged asset of this module, beside the test executable: <exe dir>/assets/arcanum/<name>.
 char* slurp(const char* name) {
     char exe[512];
     if (!kv::platform_exe_dir(exe, sizeof exe)) return nullptr; // ends in a separator
     char path[700];
-    snprintf(path, sizeof path, "%sassets/example_arcanum/%s", exe, name);
+    snprintf(path, sizeof path, "%sassets/arcanum/%s", exe, name);
     FILE* f = fopen(path, "rb");
     if (!f) return nullptr;
     fseek(f, 0, SEEK_END);

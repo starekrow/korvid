@@ -1,4 +1,4 @@
-// example_arcfire: reading a boss file. A boss is its hull, its entry, its parts and its
+// arcfire: reading a boss file. A boss is its hull, its entry, its parts and its
 // phases:
 //
 //   { "title": "CARRIER", "size": [192, 352], "sheet": [4, 2],

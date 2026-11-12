@@ -1,4 +1,4 @@
-// example_arcfire: items. A cancelled bullet (a bomb, a death) becomes a score chip; the
+// arcfire: items. A cancelled bullet (a bomb, a death) becomes a score chip; the
 // last member of a formation shot down to the last one drops a bomb; an item carrier (a
 // formation the stage marks) drops what it carries: a weapon item, which shows a type and
 // cycles through the four while it drifts down, slower than the rest (taking it takes the
@@ -101,8 +101,8 @@ u32 cancel_bullets(TickContext& ctx, Game& g, point2 at, f32 radius, u32* overfl
 // the end of their life.
 void items(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
-    Span<const Transform2> ship_xf = ctx.read<Transform2>("example_arcfire.ship.Transform2");
-    Span<const Ship> ships = ctx.read<Ship>("example_arcfire.ship.Ship");
+    Span<const Transform2> ship_xf = ctx.read<Transform2>("arcfire.ship.Transform2");
+    Span<const Ship> ships = ctx.read<Ship>("arcfire.ship.Ship");
     if (g.ship.index() >= ship_xf.len) return;
     point2 ship = ship_xf[g.ship.index()].position;
     bool live = ships[g.ship.index()].live != 0;
@@ -132,9 +132,9 @@ void items(TickContext& ctx) {
 void on_pickup(TickContext& ctx, Span<const Pickup> picks) {
     Game& g = ctx.state_as<Game>();
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
-    Span<const Item> its = ctx.read<Item>("example_arcfire.item.Item");
-    Span<const Transform2> xf = ctx.read<Transform2>("example_arcfire.item.Transform2");
-    Span<Ship> ships = ctx.write<Ship>("example_arcfire.ship.Ship");
+    Span<const Item> its = ctx.read<Item>("arcfire.item.Item");
+    Span<const Transform2> xf = ctx.read<Transform2>("arcfire.item.Transform2");
+    Span<Ship> ships = ctx.write<Ship>("arcfire.ship.Ship");
     if (!run.len) return;
     for (const Pickup& p : picks) {
         u32 i = p.item.index();

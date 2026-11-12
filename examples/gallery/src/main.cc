@@ -1,6 +1,6 @@
 // The renderer's features in fixed scenes, each drawn and written as a screenshot
-// (gallery_<scene>.ppm), then compared with another backend's by the picture tool
-// (tool_picture). It drives the render interface directly: a window, a renderer, a stream
+// (gallery_<scene>.ppm), then compared with another backend's by the picture tool.
+// It drives the render interface directly: a window, a renderer, a stream
 // of sprite deltas built here, and RenderViews with chosen interpolation points. No sim,
 // no frame loop, no libm in any position, so two backends' pictures differ only where
 // their GPUs do.
@@ -10,8 +10,8 @@
 // every backend draws the same pixels. Textures are made here; the game shader and the post
 // shader are this module's own (shaders/). Neither reads the clock.
 //
-//   example_gallery [--out DIR] [--scene NAME]   (DIR: where the PPMs go, "." by default)
-#include "korvid/example_gallery/module.h"
+//   gallery [--out DIR] [--scene NAME]   (DIR: where the PPMs go, "." by default)
+#include "korvid/gallery/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
@@ -440,8 +440,8 @@ int run(int argc, char** argv) {
 
 } // namespace
 
-KV_MODULE_DEFINE(example_gallery_module) = {
-    .name = "example_gallery",
+KV_MODULE_DEFINE(gallery_module) = {
+    .name = "gallery",
 };
 
 } // namespace kv

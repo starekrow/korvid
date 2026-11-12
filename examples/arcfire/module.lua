@@ -3,14 +3,14 @@
 -- from a stage script keyed to scroll distance, aimed bullets, grazes, the egg (a death in
 -- slow motion), a HUD in side panels; every count a dial, and three ways for it to fly
 -- itself (--demo, --autoplay, --stress).
-module "example_arcfire" {
+module "arcfire" {
   output        = "exe",
   engine_module = true,
   deps  = { "core", "platform", "platform_hid", "math", "render", "asset", "sprite", "scene", "text", "audio",
             "collision", "ui", "cli", "frameloop", "xml", "bulletml", "anim", "tilemap", "save" },
-  -- kpack packs the staged assets into bin/example_arcfire.kpak in the ship build; the shader
+  -- kpack packs the staged assets into bin/arcfire.kpak in the ship build; the shader
   -- rule compiles shaders/*.slang into bin/shaders/ (the game's fragment shaders).
-  tools = { "tool_kpack", ["shader-compile"] = { install = "shaders" } },
+  tools = { "kpack", ["shader-compile"] = { install = "shaders" } },
   licenses = { "assets/LICENSE-CC0.txt", "assets/LICENSE-Kenney.txt", "assets/LICENSE-ScreamingBrainStudios.txt",
                "assets/LICENSE-Kenney-SciFiSounds.txt", "assets/LICENSE-Kenney-ImpactSounds.txt", "assets/LICENSE-JuhaniJunkala.txt", "assets/CREDITS.md" },
 }

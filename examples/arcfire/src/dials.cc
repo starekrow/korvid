@@ -1,4 +1,4 @@
-// example_arcfire: the dials. Every count the game has is a dial, and a position of the
+// arcfire: the dials. Every count the game has is a dial, and a position of the
 // dials is a way to run it: Easy, Normal and Hard (the difficulties), Stress (every count
 // up, the ship invulnerable under the bot, the stage looping) and Demo (Normal, the script
 // on the stick, the stage ending). `--dial name=value` moves one dial for a measurement. The

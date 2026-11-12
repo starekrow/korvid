@@ -14,7 +14,7 @@ Game state to bytes and back. Three layers, each usable without the next:
    same as the run that made it.
 
 The module reads and writes bytes in memory. Where they go is the game's: the platform's
-I/O queue and `platform_pref_path` give a per-user directory (`example_arcanum` keeps its
+I/O queue and `platform_pref_path` give a per-user directory (`arcanum` keeps its
 save there).
 
 ## Writing
@@ -78,12 +78,12 @@ builds again from its map (tiles), and not presentation (menus, labels).
 A handle is written by its kind's name, never its id (the id is only the order kinds
 registered in, which moves when a module is added), and then:
 
-- **by its name**, when the issuer names it: `"render.material@example_arcanum/actors/OldMan.png:alpha"`,
-  `"level.root@level.root"`, `"example_arcanum.npc@OldMan"`. On load the issuer finds the
+- **by its name**, when the issuer names it: `"render.material@arcanum/actors/OldMan.png:alpha"`,
+  `"level.root@level.root"`, `"arcanum.npc@OldMan"`. On load the issuer finds the
   name, so the handle means the same thing in a run that made its materials in another
   order or built its level root afresh. A name nothing answers to now reads as null, with
   a warning.
-- **by slot**, otherwise: `"example_arcanum.npc#3:1"`, remade with today's kind id. That
+- **by slot**, otherwise: `"arcanum.npc#3:1"`, remade with today's kind id. That
   is right for kinds the save restores, whose slots come back exactly.
 
 Every renderer texture and material, asset record and named entity has a name (see the

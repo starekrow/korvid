@@ -8,7 +8,7 @@
 //
 // Handles are written by the kind's name, never its id (an id is only the order kinds
 // registered in), and then by the handle's own name when its issuer gives it one
-// ("render.material@example_arcanum/hero.png:alpha", "level.root@level.root"), or by slot
+// ("render.material@arcanum/hero.png:alpha", "level.root@level.root"), or by slot
 // and generation ("game.npc#3:1"). A named handle is found by name on load, so it means
 // the same thing in a run that made things in another order; one by slot is remade with
 // today's kind id, which is right for kinds the save restores. For anything else the game

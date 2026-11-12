@@ -1,11 +1,11 @@
-# example_rocks
+# rocks
 
 An asteroids-like, written the way the engine would like a game written: seven kinds, seven
 systems with declared sets, twelve handlers, scheduled events for bullet expiry and waves,
 a trigger for the ship's death, a published score, and no handle kept anywhere except on
 the events that carry them. The ship flies from the keyboard or the first gamepad, or
 from a script with `--demo` so a run is reproducible: two runs of
-`example_rocks --demo --run-seconds 30 --hash` print identical hashes, at `--threads 1`
+`rocks --demo --run-seconds 30 --hash` print identical hashes, at `--threads 1`
 and `--threads 8`, and the demo pauses itself for 90 ticks along the way without
 changing a hash. Escape or Start pauses, Q quits, a hit shakes the camera.
 
@@ -22,7 +22,7 @@ where the shaders and this module's `assets/` have been copied next to it:
 
 ```bash
 tools/kormake/bin/linux/kormake build linux-debug
-build/linux-debug/bin/example_rocks --demo
+build/linux-debug/bin/rocks --demo
 ```
 
 `kormake build linux-debug` is everything checked with the validation layers on;
@@ -68,13 +68,13 @@ the bus drops it. `on_ship_hit` decrements `Health`.
 ticket the game cancels at game over so a wave does not land on a dead ship; the
 `Restart` 120 ticks after death.
 
-**The trigger.** `example_rocks.death` watches `example_rocks.ship.Health.hp` crossing
+**The trigger.** `rocks.death` watches `rocks.ship.Health.hp` crossing
 below 1; `on_edge` turns the `StateEdge` into `GameOver` handling: cancel the wave,
 schedule the restart, log the score. `on_restart` clears the kinds with `destroy_all` and
 starts over.
 
 **The score** is a struct the module publishes (`engine_publish`) as
-`example_rocks.score`; its own handlers declare the write, `game` declares the read, and
+`rocks.score`; its own handlers declare the write, `game` declares the read, and
 another module could read it the same way.
 
 **Materials** come from four files (`ship`, `rock`, `bullet`, `debris`); bullets and
@@ -97,7 +97,7 @@ debris are additive dots.
   slice 2 PRD's checklist runs against it. The demo also pauses at tick 400 for 90
   paused ticks; the hash lines are per sim tick, so a paused run and an unpaused one
   print the same sequence.
-- **Pause is a system, not a flag.** `example_rocks.pause` runs on every tick
+- **Pause is a system, not a flag.** `rocks.pause` runs on every tick
   (`RunWhen::Always`, phase PreSim): it watches `KeyDown` and `PadButtonDown`, spawns a
   screen-space dimmer in the `overlay` kind and calls `engine_pause`. Nothing else in the
   game knows about pausing: the sim systems simply do not run, the timers hold, and the
@@ -132,10 +132,10 @@ debris are additive dots.
   its alpha from the thrust. The kind is cosmetic: the clip comes from a file and starts
   when the file arrives, which is not a tick the hash may depend on.
 - **Debris fades by clip.** There is no `Lifetime` and no fade system any more: each
-  piece plays `example_rocks.fade`, a one-second alpha ramp built at startup with
+  piece plays `rocks.fade`, a one-second alpha ramp built at startup with
   `anim_create`, at `1 / lifetime`, and `on_anim_finished` destroys it when
   `AnimFinished` arrives.
-- **The camera shake** is `example_rocks.camera` in PostSim writing `sprite.camera`; the
+- **The camera shake** is `rocks.camera` in PostSim writing `sprite.camera`; the
   offset is a function of the tick, so a run is still reproducible, and the camera is not
   hashed in any case.
 - **The game heap.** `main.cc` declares a `game` heap with a soft limit of 16 MB and a

@@ -1,4 +1,4 @@
-// example_sockit2m: the jobs, shared by the module's systems and the direct loop. A job
+// sockit2m: the jobs, shared by the module's systems and the direct loop. A job
 // is stepped: FsJob submits reads up to the depth and reaps what the queue has finished,
 // SockJob runs the echo server and the clients one round. Neither blocks; whoever steps
 // them decides the cadence (a tick, a frame, a tight loop).

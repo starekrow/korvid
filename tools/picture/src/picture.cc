@@ -11,7 +11,7 @@
 // missing layer, a sort out of order or a picture upside down changes many pixels by a
 // lot. The defaults are a first guess, to be fixed by the first comparison of two backends
 // and not loosened after (docs/PRDs/Engine-Slice-7-PRD.md, R9).
-#include "korvid/tool_picture/module.h"
+#include "korvid/picture/module.h"
 #include "korvid/core/array.h"
 #include "korvid/core/cli.h"
 #include "korvid/core/engine.h"
@@ -55,7 +55,7 @@ struct PictureState {
     u32        submitted = 0, completed = 0, failures = 0, writes_out = 0, write_failures = 0;
 };
 
-PictureState* state(Engine& e) { return engine_module_state_as<PictureState>(e, "tool_picture"); }
+PictureState* state(Engine& e) { return engine_module_state_as<PictureState>(e, "picture"); }
 
 void say(const char* fmt, ...) KV_PRINTF(1, 2);
 void say(const char* fmt, ...) {
@@ -86,7 +86,7 @@ void finish(Engine& e, PictureState& s, int code) {
 }
 
 bool busy(CliContext& ctx, PictureState* s) {
-    if (!s) { ctx.fail("the tool_picture module is not up"); return true; }
+    if (!s) { ctx.fail("the picture module is not up"); return true; }
     if (s->op != Op::None) { ctx.fail("picture is busy with another job"); return true; }
     return false;
 }
@@ -402,8 +402,8 @@ constinit const SystemDesc k_systems[] = {
 
 } // namespace
 
-KV_MODULE_DEFINE(tool_picture_module) = {
-    .name     = "tool_picture",
+KV_MODULE_DEFINE(picture_module) = {
+    .name     = "picture",
     .systems  = k_systems,
     .commands = k_commands,
     .startup  = picture_startup,

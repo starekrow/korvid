@@ -3,7 +3,7 @@
 -- as the engine's own path allows: one pump per frame, socket handling in a tick system,
 -- completions reaped by a main-thread system. The same scenarios also run as a tight loop
 -- over the primitives (--direct), for comparison. It prints what it saw in numbers.
-module "example_sockit2m" {
+module "sockit2m" {
   output        = "exe",
   deps          = { "core", "platform" },
   engine_module = true,

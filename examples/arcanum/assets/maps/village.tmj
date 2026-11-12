@@ -21,7 +21,7 @@
   {
    "name": "music",
    "type": "string",
-   "value": "example_arcanum/music/village.ogg"
+   "value": "arcanum/music/village.ogg"
   }
  ],
  "tilesets": [
@@ -3382,7 +3382,7 @@
       {
        "name": "sheet",
        "type": "string",
-       "value": "example_arcanum/actors/OldMan.png"
+       "value": "arcanum/actors/OldMan.png"
       },
       {
        "name": "route",
@@ -3426,7 +3426,7 @@
       {
        "name": "sheet",
        "type": "string",
-       "value": "example_arcanum/actors/ManGreen.png"
+       "value": "arcanum/actors/ManGreen.png"
       },
       {
        "name": "route",

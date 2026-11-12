@@ -2,7 +2,7 @@
 
 The operating system as an engine sees it with no display and no devices: a file read
 queue with its mounts, the executable's and the user's directories, and TCP sockets. It
-links no external library, so a tool built on the engine (`tool_kpack`) needs nothing
+links no external library, so a tool built on the engine (`kpack`) needs nothing
 installed on the build machine beyond the compiler. The window, the keyboard and gamepads
 are `platform_hid`'s; the audio device is `platform_audio`'s. Nothing here blocks the
 thread that calls it, and nothing here runs a thread of its own: everything is pumped once
@@ -74,7 +74,7 @@ for (Session& s : sessions) {
 ```
 
 Throughput through a tick system is what the kernel buffers hold times the tick rate;
-`example_sockit2m` prints the numbers.
+`sockit2m` prints the numbers.
 
 **Writes** go through the same queue: `write_file(IoWriteRequest{path, data, size})` copies
 the bytes at submission (the caller's buffer is free to go), creates or truncates the file
@@ -83,7 +83,7 @@ at the pump under the same priorities and budget as reads (`IORING_OP_WRITE` on 
 settings file is a write to `platform_pref_path(e, org, app)`, the per-user directory
 for the names given ($XDG_DATA_HOME, or ~/.local/share, then `<org>/<app>/`) (created on first use).
 
-**Assets go through mounts.** `read_asset(IoRequest{path = "example_rocks/rock.png"})`
+**Assets go through mounts.** `read_asset(IoRequest{path = "rocks/rock.png"})`
 takes a logical path, normalizes it (`a//b`, `./a` and backslashes are `a/b`; `..` and
 absolute paths fail with `EINVAL`) and looks it up in the queue's mounts, the last mounted
 first: a directory (`mount_dir`) is a whole-file read of the file under it, a pack

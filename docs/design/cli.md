@@ -32,7 +32,7 @@ on the way in, so a module is a directory wherever its things appear.
     > ls /
     buses/  clips/  clock/  events/  fonts/  handlers/  kinds/  materials/  mem/
     modules/  perf/  resources/  sounds/  systems/  textures/  triggers/  voices/
-    > cd /kinds/example_rocks
+    > cd /kinds/rocks
     > ls
     bullet/   14 live of 4096
     rock/     9 live of 1024
@@ -40,7 +40,7 @@ on the way in, so a module is a directory wherever its things appear.
     > print rock/3/Velocity
     Velocity{v=(30, -12), spin=0.4}
     > patch rock/3/Velocity/spin 2
-    > cd /materials/example_rocks
+    > cd /materials/rocks
     > patch rock.material.json tint 1 0.5 0.5
     > patch /clock/rate 0.25
 
@@ -81,12 +81,12 @@ once it can again; the sim never waits for a reader.
 
 One request per line. Responses are lines.
 
-    ls /materials/example_rocks
-    rock.material.json  ready, alpha, row 2, texture 'example_rocks/rock.png'
+    ls /materials/rocks
+    rock.material.json  ready, alpha, row 2, texture 'rocks/rock.png'
     ok
 
-    #7 patch /materials/example_rocks/rock.material.json tint 1 0.5 0.5
-    #7 { "texture": "example_rocks/rock.png", "blend": "alpha", "tint": [1, 0.5, 0.5, 1], "params": [0, 0, 0, 0, 0, 0, 0, 0] }
+    #7 patch /materials/rocks/rock.material.json tint 1 0.5 0.5
+    #7 { "texture": "rocks/rock.png", "blend": "alpha", "tint": [1, 0.5, 0.5, 1], "params": [0, 0, 0, 0, 0, 0, 0, 0] }
     #7 state ready, row 2, texture slot 3
     #7 ok
 

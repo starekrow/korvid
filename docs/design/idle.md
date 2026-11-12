@@ -11,7 +11,7 @@ order until `bytes_per_pump` would be passed (at least one always goes, so a fil
 than the budget still loads), and never more than `bytes_in_flight` at once. What is left
 waits for the next pump. The synchronous backend performs reads until it has passed the
 budget. Defaults: 8 MB per pump, 64 MB in flight. `pumps_capped` counts pumps that left
-an admissible read waiting; `example_sockit2m` shows what the budget buys (`--budget`).
+an admissible read waiting; `sockit2m` shows what the budget buys (`--budget`).
 
 ## Idle priority
 
@@ -40,5 +40,5 @@ before the render, with a budget of the smaller of that wait and its smoothed va
 waiting for vblank rather than the time after it. Without vsync there is no wait and no
 slack. `--no-idle` turns it off; the fps line reports idle ms per frame.
 
-A game that drives frames itself, as `example_sockit2m` does, computes its own slack
+A game that drives frames itself, as `sockit2m` does, computes its own slack
 from its own deadline and calls `engine_idle_run` the same way.

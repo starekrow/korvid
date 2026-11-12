@@ -95,7 +95,7 @@ is the render interface's and must be on the include path whichever backend is b
 both backends compile the same engine shaders. kormake learned to stage a header-only
 module's shaders; the Linux build's Ninja file changed only in where they are read from.
 
-Measured on an M3 Max, `example_testbed` at 1920x1080 under API validation: 12 to 13 sort
+Measured on an M3 Max, `testbed` at 1920x1080 under API validation: 12 to 13 sort
 checks a run in debug, dev and ship, all passing (culled rows included); no validation
 messages; 96 to 121 fps with vsync on a 120 Hz panel, 350 to 500 without.
 
@@ -125,7 +125,7 @@ messages; 96 to 121 fps with vsync on a 120 Hz panel, 350 to 500 without.
   profiler's gpu track get the frame, the sort and the draw; Apple GPUs have no statistics
   counters, so invocations and overdraw stay zero. Orbit at 2560x1440: 1.7 ms a frame, the
   sort 0.25, the draws and the post pass 1.45.
-- **The gallery** (`example_gallery`, compared by the picture tool, `tool_picture`) draws nine fixed scenes at
+- **The gallery** (`gallery`, compared by the `picture` tool) draws nine fixed scenes at
   960x540 pixels on any display and compares two sets within a tolerance; the Metal set is
   committed as PNGs (`examples/gallery/references/metal/`). Run to run on one GPU the
   pictures are identical; the tolerance waits for the first Vulkan set.

@@ -126,7 +126,7 @@ struct IoQueue {
 
     // Submits a whole-file read. Null handle if the path is too long or the queue is full.
     Handle read_file(const IoRequest& req);
-    // Submits a read of an asset by its logical path ("example_rocks/rock.png"): normalized
+    // Submits a read of an asset by its logical path ("rocks/rock.png"): normalized
     // ("a//b", "./a", "a\b" are "a/b"; ".." and absolute paths fail), then looked up in the
     // mounts, the last mounted first. A pack hit is a ranged read of the pack's file (and
     // an inflate, for a deflated entry); a directory hit is a whole-file read. The

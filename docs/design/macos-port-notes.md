@@ -31,12 +31,12 @@ was done, and what is still open, milestone by milestone, in the manner of
   close-on-exec and non-blocking right after; an accepted socket gets the same, and
   `SO_NOSIGPIPE` once per socket replaces `MSG_NOSIGNAL` per send (the SDK declares
   `MSG_NOSIGNAL` without saying which kernels honour it, so it is not relied on). Linux is
-  unchanged. `example_sockit2m` echoes 120 MB over loopback byte for byte through it.
+  unchanged. `sockit2m` echoes 120 MB over loopback byte for byte through it.
 - **Paths** (`platform/src/macos/paths_macos.cc`, new). The executable's directory from
   `_NSGetExecutablePath` and `realpath`; the preference directory
   `~/Library/Application Support/<org>/<app>/`, where SDL puts it. Inside an `.app` the
   executable's directory is `Contents/MacOS/`; finding `Resources/` from it is milestone 6's.
-- **`/proc/self/exe` in an example.** `example_sockit2m` read it for its working directory
+- **`/proc/self/exe` in an example.** `sockit2m` read it for its working directory
   instead of calling `platform_exe_dir`, which existed for exactly that; it calls it now,
   on every platform.
 - **Page-cache eviction.** `sockit2m`'s cold pass evicts its files with `posix_fadvise`,
@@ -138,7 +138,7 @@ in dev and 50 in debug and in ship with no failure.
 ### The window
 
 - **SDL3's Cocoa backend serves as is.** `src/sdl3/` and `src/sdl3_pads/` were Linux's;
-  `example_window` opens through the `cocoa` video driver, logs its events and runs at the
+  `window` opens through the `cocoa` video driver, logs its events and runs at the
   250 Hz it paces itself to, with gaps of about 5 ms once up (one of 27 to 104 ms while the
   window first appears). Cmd+Q already worked: SDL reports it as `SDL_EVENT_QUIT`, which the
   pump already made a `CloseRequested`.
@@ -158,7 +158,7 @@ in dev and 50 in debug and in ship with no failure.
   `SDL_Metal_CreateView` needs.
 - **Live resize held the loop for the whole drag.** Grabbing a corner runs AppKit's
   event-tracking loop on the main thread, inside `SDL_PollEvent`, until the mouse is released:
-  `example_window` showed one gap as long as the drag. Windows answered the same thing with a
+  `window` showed one gap as long as the drag. Windows answered the same thing with a
   window thread of its own; AppKit wants its windows and their events on the main thread, so
   here the frames run inside AppKit's loop instead, as SDL documents (live-resize expose
   events may be drawn from directly). A CoreFoundation timer in the event-tracking run-loop
@@ -208,7 +208,7 @@ changed around it, and found:
   (`platform_modal_frame`), sharing its clock with the loop.
 - **The outer engine joins the macOS root**: asset, sprite, scene, text, anim, collision,
   tilemap, level, audio, ui and the frame loop, with their suites (21 in all, every config),
-  and `example_testbed`, `example_stones` and `example_cpukiller` run on Metal.
+  and `testbed`, `stones` and `cpukiller` run on Metal.
 - **`asset`'s vendored stb_vorbis** silenced a gcc-only warning group, and clang flags a
   comparison inside it that gcc does not: both handled as `inflate`'s were.
 - **An engine bug, every platform: an entity's description could run past its buffer.**
@@ -216,9 +216,9 @@ changed around it, and found:
   before ended one byte short, leaving no terminator; the testbed's log printed a stray byte
   after the blinker's line on macOS (`0xF9`, whatever followed on the stack). Separators now
   go in only with room for a terminator; `kind_test` truncates a description at every length.
-- **`example_cpukiller --window` could not start, every platform.** Its hand-written module
+- **`cpukiller --window` could not start, every platform.** Its hand-written module
   list predates the frame loop's needing scene, text and the CLI; it now lists them, in the
-  order kormake gives `example_testbed`'s. Its exit line counts the name table, which the
+  order kormake gives `testbed`'s. Its exit line counts the name table, which the
   window's path makes one block longer (no leak: nothing is live after `names_shutdown`).
 
 ## Milestone 4: parity
@@ -226,7 +226,7 @@ changed around it, and found:
 The full-frame pass, GPU timing and the gallery are in `docs/design/renderer-metal.md`. What
 the milestone found around them:
 
-- **Every module the Windows root builds now builds on macOS**, and `example_gallery` with
+- **Every module the Windows root builds now builds on macOS**, and `gallery` with
   them: 23 suites pass in debug, dev and ship. rocks, arcanum and arcfire (Shoreline and
   Orbit, with arcfire's three shaders and its post pass) run under Metal's validation with no
   message, at 120 fps.
@@ -324,14 +324,14 @@ the milestone found around them:
   starve) and `exit`s with its result. `pump` drains UIKit's loop
   (`CFRunLoopRunInMode(..., 0, true)` until nothing is handled), so UIKit's events and the
   scene's lifecycle arrive between frames and `frameloop` is the same loop as everywhere:
-  `frameloop_main` goes through `platform_app_main`, and so does `example_window`. The
+  `frameloop_main` goes through `platform_app_main`, and so does `window`. The
   SDK (iOS 27.2) wants the scene lifecycle: the app delegate hands out a configuration
   whose delegate is ours, and the Info.plist declares a one-scene manifest.
 - **Lifecycle.** The scene's activation is the window's focus (`FocusChanged`); on iOS a
   window without focus holds the sim (`HoldFocus`, through `hid_backend_holds_unfocused`,
   false on the desktop). In the background `pump` waits in UIKit's loop until the scene is
   back: no frame, no GPU work (iOS refuses it there). Seen in the Simulator with
-  `example_window`: focus lost when another app opened, "in the background: waiting",
+  `window`: focus lost when another app opened, "in the background: waiting",
   back, focus gained, 4.5 ms frame gaps either side.
 - **Keys** from a hardware keyboard: `pressesBegan`/`Ended` on the view controller, their
   HID usages through `input_ios.cc`'s table. Touch, gamepads (GameController) and text
@@ -344,7 +344,7 @@ the milestone found around them:
   assets, licenses at the top), an iOS Info.plist (scene manifest, launch screen, full
   screen, MinimumOSVersion), signed ad-hoc. A package without a pack now carries its
   modules' loose `assets/` (the testbed has no pack). `kormake package iossim-dev
-  example_testbed`, then `xcrun simctl install booted dist/example_testbed/example_testbed.app`.
+  testbed`, then `xcrun simctl install booted dist/testbed/testbed.app`.
 - **The tests.** The `ios` root is the whole engine but the games: 21 suites build for the
   Simulator and the device and pass inside the Simulator (`kormake test iossim-dev`).
 - **The Simulator cannot run the renderer.** Its GPU is an Apple2 with tier 1 argument
@@ -377,7 +377,7 @@ development profile.
   an iOS app now starts in its own `tmp/` (`platform_app_main`), so a relative path the
   engine writes (`--screenshot`, `--profile`) lands where `devicectl device copy from
   --domain-type appDataContainer` reaches it.
-- **The renderer on iOS.** `kormake package ios-dev example_testbed` signs for development
+- **The renderer on iOS.** `kormake package ios-dev testbed` signs for development
   (`sign_app.sh`); installed and launched with `devicectl`, it runs on the A17 Pro (Apple9,
   tier 2 argument buffers) at 60 fps, 1290x2796, its screenshot the same scene in the same
   colors as macOS's. 60 and not 120: an iPhone holds a CAMetalLayer to 60 Hz unless the
@@ -396,7 +396,7 @@ development profile.
   and a geometry request on the scene); `open` waits for the turn so the first frame is at
   the size it keeps. And the gallery closes and reopens its window, which unbalanced
   UIKit's appearance transitions: close now hides the one window and open shows it again.
-  The gallery goes through `platform_app_main` as `example_window` does.
+  The gallery goes through `platform_app_main` as `window` does.
 
 ## The touchpad
 

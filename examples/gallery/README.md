@@ -1,4 +1,4 @@
-# example_gallery
+# gallery
 
 The renderer's features in fixed scenes, each drawn and written as a screenshot, so two
 backends can be compared picture by picture, or one backend before and after a change.
@@ -13,8 +13,8 @@ whatever size in window units gives a framebuffer of exactly 960x540 pixels on t
 (480x270 on a 2x Retina Mac, 960x540 on a 1x desktop), so every backend draws the same
 pixels.
 
-    build/macos-dev/bin/example_gallery --out DIR      # nine PPMs into DIR (a dev or debug build: ship cannot screenshot)
-    build/macos-dev/bin/example_gallery --scene sort   # one scene
+    build/macos-dev/bin/gallery --out DIR      # nine PPMs into DIR (a dev or debug build: ship cannot screenshot)
+    build/macos-dev/bin/gallery --scene sort   # one scene
     build/macos-dev/bin/picture compare DIR examples/gallery/references/metal    # against the committed references
     build/macos-dev/bin/picture png DIR OUT            # a set of PNGs, to keep as references
 

@@ -1,4 +1,4 @@
-// example_sockit2m: sock it to me. An I/O torture test the way the engine does I/O:
+// sockit2m: sock it to me. An I/O torture test the way the engine does I/O:
 // nothing blocks, everything is pumped. It writes a working set of files, reads it back
 // through the I/O queue on io_uring (cold, then hot) and on the synchronous path with a
 // bounded number of requests in flight, blasts loopback TCP through the non-blocking
@@ -17,7 +17,7 @@
 // frame (or one loop step) takes at worst and at the 99th percentile, which is the number
 // that says whether the sim would have hitched.
 //
-//   example_sockit2m [--dir PATH] [--files N] [--size KB] [--inflight N] [--conns N]
+//   sockit2m [--dir PATH] [--files N] [--size KB] [--inflight N] [--conns N]
 //                    [--chunk KB] [--seconds S] [--tick-hz N] [--budget KB] [--frame-ms N]
 //                    [--quick] [--keep] [--direct | --compare]
 //
@@ -34,7 +34,7 @@
 // --frame-ms (one tick by default): the reads go only through engine_idle_run in the
 // time each frame has left, so the frame stays at its budget while the disk is kept busy.
 #include "torture.h"
-#include "korvid/example_sockit2m/module.h"
+#include "korvid/sockit2m/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"

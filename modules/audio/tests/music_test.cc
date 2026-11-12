@@ -113,8 +113,8 @@ void test_music(kv::TestCtx& c) {
     KV_CHECK(c, engine_init(e, list));
     auto frames = [&](u32 n) { for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); time_sleep(0.002); } };
     Handle scope = asset_scope_create(e, "music");
-    Handle village = asset_load_stream(e, "example_arcanum/music/village.ogg", scope);
-    Handle road = asset_load_stream(e, "example_arcanum/music/road.ogg", scope);
+    Handle village = asset_load_stream(e, "arcanum/music/village.ogg", scope);
+    Handle road = asset_load_stream(e, "arcanum/music/road.ogg", scope);
     for (u32 i = 0; i < 100 && asset_stream(e, road)->state == AssetState::Pending; ++i) frames(1);
     if (asset_stream(e, village)->state != AssetState::Ready) {
         KV_INFO("test", "music: arcanum's tracks are not staged in this build; the module part is skipped");

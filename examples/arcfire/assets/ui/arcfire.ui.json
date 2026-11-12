@@ -3,7 +3,7 @@
   "pixel": false,
   "actions": { "move": "move", "confirm": "confirm", "cancel": "cancel" },
   "style": {
-    "font": "example_arcfire/font/PublicPixel.ttf",
+    "font": "arcfire/font/PublicPixel.ttf",
     "size": 16,
     "line": 24,
     "space": 16,
@@ -24,16 +24,16 @@
       "red": "#ff5040"
     },
     "images": {
-      "egg": { "texture": "example_arcfire/made/eggs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 },
-      "bomb": { "texture": "example_arcfire/made/bombs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 },
-      "cursor": { "texture": "example_arcfire/made/cursor.png", "rect": [0, 0, 32, 32], "scale": 0.75 },
-      "vignette": { "texture": "example_arcfire/made/vignette.png", "rect": [0, 0, 135, 180], "scale": 4 }
+      "egg": { "texture": "arcfire/made/eggs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 },
+      "bomb": { "texture": "arcfire/made/bombs.png", "rect": [0, 0, 16, 16], "frames": 2, "scale": 1.5 },
+      "cursor": { "texture": "arcfire/made/cursor.png", "rect": [0, 0, 32, 32], "scale": 0.75 },
+      "vignette": { "texture": "arcfire/made/vignette.png", "rect": [0, 0, 135, 180], "scale": 4 }
     },
     "sounds": {
-      "move": "example_arcfire/sound/ui_move.ogg",
-      "select": "example_arcfire/sound/ui_select.ogg",
-      "cancel": "example_arcfire/sound/ui_cancel.ogg",
-      "tick": "example_arcfire/sound/ui_move.ogg"
+      "move": "arcfire/sound/ui_move.ogg",
+      "select": "arcfire/sound/ui_select.ogg",
+      "cancel": "arcfire/sound/ui_cancel.ogg",
+      "tick": "arcfire/sound/ui_move.ogg"
     }
   },
   "screens": {

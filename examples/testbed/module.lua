@@ -1,4 +1,4 @@
-module "example_testbed" {
+module "testbed" {
   output        = "exe",
   engine_module = true,
   deps   = { "core", "platform", "platform_hid", "math", "render", "asset", "sprite", "frameloop" },

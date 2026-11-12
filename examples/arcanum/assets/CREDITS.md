@@ -1,4 +1,4 @@
-# Credits for example_arcanum's assets
+# Credits for arcanum's assets
 
 ## Ninja Adventure - Asset Pack
 

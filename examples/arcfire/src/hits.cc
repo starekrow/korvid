@@ -1,4 +1,4 @@
-// example_arcfire: hits. The collision module reports overlaps between colliders whose
+// arcfire: hits. The collision module reports overlaps between colliders whose
 // masks meet; `on_overlap` sorts each pair by its kinds into what it means (a shot on an
 // enemy, a bullet on the hitbox, an enemy on the hitbox, a bullet through the graze ring,
 // a bullet on the shell), and a handler each does the rest. They write the run in a chain
@@ -58,20 +58,20 @@ bool hurt(TickContext& ctx, Game& g, Handle target, i32 damage, point2 at, bool*
     *killed = false;
     const u16 k = target.kind(), air = hk(e, g_air_kind), ground = hk(e, g_ground_kind), part = hk(e, g_part_kind);
     if (k == part) {
-        Health& hp = ctx.write<Health>("example_arcfire.part.Health")[target.index()];
+        Health& hp = ctx.write<Health>("arcfire.part.Health")[target.index()];
         if (hp.hp <= 0) { *killed = true; return false; } // down already (its trigger takes it): through
         if (part_absorbs(g, ctx, target)) { boss_ping(ctx, g, at); sfx(ctx, g, SFX_PING); return true; }
         hp.hp -= damage;
         hp.flash = kFlashTicks;
         *killed = hp.hp <= 0;
         sfx(ctx, g, SFX_HIT);
-        fx_sparks(ctx, g, ctx.read<Transform2>("example_arcfire.part.Transform2")[target.index()].position, 2, kSparkHit, 2.0f);
+        fx_sparks(ctx, g, ctx.read<Transform2>("arcfire.part.Transform2")[target.index()].position, 2, kSparkHit, 2.0f);
         return true;
     }
     if (k == air || k == ground) {
         bool is_air = k == air;
-        Health& hp = ctx.write<Health>(is_air ? "example_arcfire.air.Health" : "example_arcfire.ground.Health")[target.index()];
-        point2 pos = ctx.read<Transform2>(is_air ? "example_arcfire.air.Transform2" : "example_arcfire.ground.Transform2")[target.index()].position;
+        Health& hp = ctx.write<Health>(is_air ? "arcfire.air.Health" : "arcfire.ground.Health")[target.index()];
+        point2 pos = ctx.read<Transform2>(is_air ? "arcfire.air.Transform2" : "arcfire.ground.Transform2")[target.index()].position;
         if (hp.hp <= 0) { *killed = true; return false; } // killed already this tick: through
         hp.hp -= damage;
         hp.flash = kFlashTicks;
@@ -79,8 +79,8 @@ bool hurt(TickContext& ctx, Game& g, Handle target, i32 damage, point2 at, bool*
         fx_sparks(ctx, g, pos, 2, kSparkHit, 2.0f);
         if (hp.hp <= 0) {
             ctx.destroy(target);
-            ctx.emit(Kill{pos, hp.score, 0, is_air ? ctx.read<Mover>("example_arcfire.air.Mover")[target.index()].formation : Handle{}});
-            if (!is_air) drop_item(ctx, g, ctx.read<Ground>("example_arcfire.ground.Ground")[target.index()].drop, pos); // a ground item carrier
+            ctx.emit(Kill{pos, hp.score, 0, is_air ? ctx.read<Mover>("arcfire.air.Mover")[target.index()].formation : Handle{}});
+            if (!is_air) drop_item(ctx, g, ctx.read<Ground>("arcfire.ground.Ground")[target.index()].drop, pos); // a ground item carrier
             *killed = true;
         }
         return true;
@@ -94,8 +94,8 @@ bool hurt(TickContext& ctx, Game& g, Handle target, i32 damage, point2 at, bool*
 // down (it flies on to the next).
 void on_shot_hit(TickContext& ctx, Span<const ShotHit> hits) {
     Game& g = ctx.state_as<Game>();
-    Span<Shot> shot = ctx.write<Shot>("example_arcfire.shot.Shot");
-    Span<const Transform2> shot_xf = ctx.read<Transform2>("example_arcfire.shot.Transform2");
+    Span<Shot> shot = ctx.write<Shot>("arcfire.shot.Shot");
+    Span<const Transform2> shot_xf = ctx.read<Transform2>("arcfire.shot.Transform2");
     for (const ShotHit& h : hits) {
         Shot& s = shot[h.shot.index()];
         if (s.spent) continue;
@@ -119,7 +119,7 @@ void on_beam_hit(TickContext& ctx, Span<const BeamHit> hits) {
 
 void on_bullet_hit(TickContext& ctx, Span<const BulletHit> hits) {
     Game& g = ctx.state_as<Game>();
-    Span<Ship> ships = ctx.write<Ship>("example_arcfire.ship.Ship");
+    Span<Ship> ships = ctx.write<Ship>("arcfire.ship.Ship");
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
     Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
     if (g.ship.index() >= ships.len || !run.len) return;
@@ -137,7 +137,7 @@ void on_bullet_hit(TickContext& ctx, Span<const BulletHit> hits) {
 
 void on_rammed(TickContext& ctx, Span<const Rammed> rams) {
     Game& g = ctx.state_as<Game>();
-    Span<Ship> ships = ctx.write<Ship>("example_arcfire.ship.Ship");
+    Span<Ship> ships = ctx.write<Ship>("arcfire.ship.Ship");
     Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
     if (g.ship.index() >= ships.len) return;
     Ship& s = ships[g.ship.index()];

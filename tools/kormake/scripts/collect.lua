@@ -104,7 +104,8 @@ function M.run(found)
       if kfs.isdir(dir) and kfs.isfile(mfile) then
         local mtext = kfs.read(mfile)
         local mdecl = sandbox.eval_module(mfile, mtext)
-        local rec = { name = mdecl.name, dir = dir, file = mfile, fields = mdecl.fields, project = project_paths[full] }
+        local rec = { name = mdecl.name, dir = dir, file = mfile, fields = mdecl.fields, project = project_paths[full],
+                      modulepath = full }
         if reserved[rec.name] then util.fail("%s: a module may not be called '%s' (a target or a build name)", mfile, rec.name) end
         local override = master.overrides[mdecl.name]
         if override and override.path then

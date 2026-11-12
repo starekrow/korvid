@@ -1,4 +1,4 @@
-// example_gallery: a full-frame post shader. The world's image as it is in the left half;
+// gallery: a full-frame post shader. The world's image as it is in the left half;
 // in the right half its channels rotated and darkened by the first parameter's w, with a
 // line at the middle in the parameter's color. Uses the uv (+y down) and the size, so a
 // backend that turns the pass over or misplaces it shows at once. No time.

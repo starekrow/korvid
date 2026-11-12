@@ -1,7 +1,7 @@
-// example_sockit2m: the jobs, the working set, and the module whose systems step the jobs
+// sockit2m: the jobs, the working set, and the module whose systems step the jobs
 // inside the engine's tick.
 #include "torture.h"
-#include "korvid/example_sockit2m/module.h"
+#include "korvid/sockit2m/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"
@@ -338,22 +338,22 @@ constinit const SystemDesc k_systems[] = {
 
 } // namespace
 
-KV_MODULE_DEFINE(example_sockit2m_module) = {
-    .name    = "example_sockit2m",
+KV_MODULE_DEFINE(sockit2m_module) = {
+    .name    = "sockit2m",
     .systems = k_systems,
     .startup = sockit2m_startup,
     .memory  = {.reserve = 64 * 1024},
 };
 
 void sockit2m_set_jobs(Engine& e, FsJob* fs, SockJob* sock) {
-    Sockit2m* s = engine_module_state_as<Sockit2m>(e, "example_sockit2m");
+    Sockit2m* s = engine_module_state_as<Sockit2m>(e, "sockit2m");
     if (!s) return;
     s->fs = fs;
     s->sock = sock;
 }
 
 Allocator* sockit2m_allocator(Engine& e) {
-    Sockit2m* s = engine_module_state_as<Sockit2m>(e, "example_sockit2m");
+    Sockit2m* s = engine_module_state_as<Sockit2m>(e, "sockit2m");
     return s ? s->general : mem_general();
 }
 

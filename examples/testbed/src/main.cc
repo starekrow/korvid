@@ -1,4 +1,4 @@
-// example_testbed: the entry point. The game is the example_testbed module (game.cc); the loop, window,
+// testbed: the entry point. The game is the testbed module (game.cc); the loop, window,
 // renderer and options are the frameloop module's. This file is the config.
 #include "korvid/frameloop/frameloop.h"
 

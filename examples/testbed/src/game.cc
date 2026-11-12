@@ -1,4 +1,4 @@
-// example_testbed: the example game, written the way a game is meant to be written here. Balls are
+// testbed: the example game, written the way a game is meant to be written here. Balls are
 // a kind (Transform2, Sprite, Motion, Bounces). One system moves every ball and emits
 // Bounced at the edges; a handler counts bounces and re-aims the random ball. The blinker
 // lives by scheduled events: BlinkOff destroys it and schedules BlinkOn, BlinkOn spawns
@@ -6,7 +6,7 @@
 // BlinkOff for. A trigger fires when a ball's bounce count passes two. The state machine
 // (INIT -> RUN -> EXIT) spawns and destroys by command, so it holds no handles and no
 // writes. No window, renderer, loop or options here: those are the frameloop module's.
-#include "korvid/example_testbed/module.h"
+#include "korvid/testbed/module.h"
 #include "korvid/asset/material.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
@@ -123,7 +123,7 @@ bool bounce(Transform2& t, vec2& v, f32 half_size, f32 half_w, f32 half_h, f32 d
 // ---- systems -------------------------------------------------------------------------
 
 // Phase Sim: every ball moves and bounces. World units are pixels, origin at the center.
-void example_testbed_move(TickContext& ctx) {
+void testbed_move(TickContext& ctx) {
     static const u32 k_window = ctx.resource_id("platform_hid.window"); // looked up once
     const HostWindow* window = ctx.resource<const HostWindow>(k_window);
     f32 half_w = (f32)window->width() * 0.5f, half_h = (f32)window->height() * 0.5f;
@@ -140,30 +140,30 @@ void example_testbed_move(TickContext& ctx) {
 }
 
 // Phase Sim: what happened this tick, then the state machine.
-void example_testbed_sim(TickContext& ctx) {
+void testbed_sim(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
 
     for (const KeyDown& e : ctx.received<KeyDown>()) {
         ++g.key_edges;
-        if (!e.repeat) KV_INFO("example_testbed", "tick %llu: key down %s", (unsigned long long)ctx.tick, key_name(e.key));
+        if (!e.repeat) KV_INFO("testbed", "tick %llu: key down %s", (unsigned long long)ctx.tick, key_name(e.key));
     }
     for (const KeyUp& e : ctx.received<KeyUp>()) {
         ++g.key_edges;
-        KV_INFO("example_testbed", "tick %llu: key up   %s", (unsigned long long)ctx.tick, key_name(e.key));
+        KV_INFO("testbed", "tick %llu: key up   %s", (unsigned long long)ctx.tick, key_name(e.key));
     }
     for (const AssetReady& e : ctx.received<AssetReady>()) {
         char text[160];
         kv_handle_describe(e.asset.bits, text, sizeof text);
-        KV_INFO("example_testbed", "asset ready: %s", text);
+        KV_INFO("testbed", "asset ready: %s", text);
     }
     for (const AssetFailed& e : ctx.received<AssetFailed>()) {
         char text[160];
         kv_handle_describe(e.asset.bits, text, sizeof text);
-        KV_WARN("example_testbed", "asset failed (%s): %s", asset_error_name(e.error), text);
+        KV_WARN("testbed", "asset failed (%s): %s", asset_error_name(e.error), text);
     }
     for (const ExitRequested& e : ctx.received<ExitRequested>()) {
         if (g.exit_requested) continue;
-        KV_INFO("example_testbed", "exit requested: %s", e.reason == ExitReason::WindowClosed ? "window closed" :
+        KV_INFO("testbed", "exit requested: %s", e.reason == ExitReason::WindowClosed ? "window closed" :
                                                e.reason == ExitReason::Escape ? "escape" : "timer");
         g.exit_requested = true;
     }
@@ -198,7 +198,7 @@ void example_testbed_sim(TickContext& ctx) {
             far_away.size     = vec2{32.0f, 32.0f};
             for (u32 i = 0; i < kSwarmOffscreen; ++i)
                 ctx.spawn_later("sprite.entity", transform2_at(point2{w + 1000.0f + (f32)i, 0.0f}), far_away);
-            KV_INFO("example_testbed", "swarm: %u balls, %u off-screen sprites", kSwarmBalls, kSwarmOffscreen);
+            KV_INFO("testbed", "swarm: %u balls, %u off-screen sprites", kSwarmBalls, kSwarmOffscreen);
         }
         set_state(g, ST_RUN);
         break;
@@ -284,7 +284,7 @@ void on_state_edge(TickContext&, Span<const StateEdge> edges) {
 
 // ---- startup, shutdown, the tables -----------------------------------------------------
 
-bool example_testbed_startup(Engine& engine, ModuleInstance& self) {
+bool testbed_startup(Engine& engine, ModuleInstance& self) {
     Game* g = arena_push<Game>(self.arena);
     if (!g) return false;
     self.set_state(g);
@@ -295,29 +295,29 @@ bool example_testbed_startup(Engine& engine, ModuleInstance& self) {
     // ball texture through alpha and additive blending with different tints; the
     // background is the default checkerboard, opaque and dark). The rows exist now and
     // show the placeholder; AssetReady arrives on the bus as each file and texture lands.
-    const char* looks[LOOK_COUNT] = {"example_testbed/white.material.json", "example_testbed/blue_add.material.json",
-                                     "example_testbed/green.material.json", "example_testbed/magenta.material.json"};
+    const char* looks[LOOK_COUNT] = {"testbed/white.material.json", "testbed/blue_add.material.json",
+                                     "testbed/green.material.json", "testbed/magenta.material.json"};
     for (u32 i = 0; i < LOOK_COUNT; ++i) {
         g->looks[i] = asset_load_material(engine, looks[i]);
         const MaterialAsset* m = asset_material(engine, g->looks[i]);
         if (!m) return false;
         g->materials[i] = m->material;
     }
-    g->bg_look = asset_load_material(engine, "example_testbed/background.material.json");
+    g->bg_look = asset_load_material(engine, "testbed/background.material.json");
     const MaterialAsset* bg = asset_material(engine, g->bg_look);
     if (!bg) return false;
     g->bg_material = bg->material;
     return true;
 }
 
-void example_testbed_shutdown(Engine&, ModuleInstance& self) {
+void testbed_shutdown(Engine&, ModuleInstance& self) {
     Game* g = self.state_as<Game>();
-    if (g) KV_INFO("example_testbed", "%llu key edges seen", (unsigned long long)g->key_edges);
+    if (g) KV_INFO("testbed", "%llu key edges seen", (unsigned long long)g->key_edges);
 }
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".move", .phase = Phase::Sim, .fn = example_testbed_move, .reads = ".ball.Sprite, platform_hid.window", .writes = ".ball.Transform2, .ball.Motion", .emits = "Bounced"},
-    {.name = ".sim",  .phase = Phase::Sim, .fn = example_testbed_sim,  .reads = "platform_hid.window, .ball, sprite.entity, KeyDown, KeyUp, AssetReady, AssetFailed, ExitRequested"}, // after move: it reads what move writes
+    {.name = ".move", .phase = Phase::Sim, .fn = testbed_move, .reads = ".ball.Sprite, platform_hid.window", .writes = ".ball.Transform2, .ball.Motion", .emits = "Bounced"},
+    {.name = ".sim",  .phase = Phase::Sim, .fn = testbed_sim,  .reads = "platform_hid.window, .ball, sprite.entity, KeyDown, KeyUp, AssetReady, AssetFailed, ExitRequested"}, // after move: it reads what move writes
 };
 constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_bounced",   KV_ON(Bounced, on_bounced), .phase = Phase::PostSim, .writes = ".ball.Bounces, .ball.Motion"},
@@ -329,16 +329,16 @@ constinit const HandlerDesc k_handlers[] = {
 
 } // namespace
 
-KV_MODULE_DEFINE(example_testbed_module) = {
-    .name       = "example_testbed",
+KV_MODULE_DEFINE(testbed_module) = {
+    .name       = "testbed",
     .events     = k_events,
     .components = k_components,
     .kinds      = k_kinds,
     .systems    = k_systems,
     .handlers   = k_handlers,
     .triggers   = k_triggers,
-    .startup    = example_testbed_startup,
-    .shutdown   = example_testbed_shutdown,
+    .startup    = testbed_startup,
+    .shutdown   = testbed_shutdown,
     .memory     = {.reserve = 64 * 1024},
 };
 

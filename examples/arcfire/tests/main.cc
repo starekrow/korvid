@@ -12,7 +12,7 @@ int main() {
     test_stage(c);
     test_boss(c);
     test_scoring(c);
-    int rc = kv::test_report(c, "example_arcfire_tests");
+    int rc = kv::test_report(c, "arcfire_tests");
     kv::mem_shutdown();
     return rc;
 }

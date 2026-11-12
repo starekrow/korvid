@@ -60,9 +60,9 @@ one unity file per module, copies a module's `assets/` to `bin/assets/<module>/`
 runs the bound shader compiler over `shaders/`. The toolchain and the shader compiler are
 modules too (`toolchain-linux`, `slang`).
 
-The engine's modules are in `modules/`, the examples in `examples/<name>/` (module
-`example_<name>`) and the tools in `tools/<name>/` (`tools/kpack` is `tool_kpack`, which
-writes `bin/kpack`); `tools/kormake` is kormake itself. `examples/` and `tools/` each have a
+The engine's modules are in `modules/`, the examples in `examples/<name>/` and the tools
+in `tools/<name>/`, each module named for its directory (`examples/arcfire` is `arcfire`,
+which builds `bin/arcfire`); `tools/kormake` is kormake itself. `examples/` and `tools/` each have a
 `korvid.config` naming the engine root, and a game kept outside this repository does the
 same (`engine "../korvid"`): it then builds into its own `build/`. kormake builds what you
 name, by module, executable or directory name, or with no name the module whose directory
@@ -108,18 +108,18 @@ you are in; at the root it builds everything. `tools/kormake/README.md` is the m
     frameloop        what every game needs and no game decides: options, window and
                      renderer from a FrameLoopConfig, the loop (pump, ticks, extract,
                      render), resize, reporting, ExitRequested on the bus
-    example_testbed  the testbed: balls as a kind, one move system over a view, a bounce
+    testbed          the testbed: balls as a kind, one move system over a view, a bounce
                      handler, a blinker on scheduled events, a trigger at the third bounce
-    example_rocks    an asteroids-like: ship, bullets, rocks and debris as kinds; control,
+    rocks            an asteroids-like: ship, bullets, rocks and debris as kinds; control,
                      move, wrap and fade systems; overlaps become hits in handlers, rocks
                      split, bullets expire by timer, waves arrive by timer, the ship's death
                      is a trigger on its Health column, a restart follows; --demo scripts
                      the ship so runs reproduce
-    example_stones   the same engine used the other way: plain structs in an Array, one
+    stones           the same engine used the other way: plain structs in an Array, one
                      tick that does input, motion, n-squared collision and sprite syncing
                      in order; the engine supplies the window, the keys, the sprites and
                      reflection for the log, and nothing else is asked of it
-    example_cpukiller a stress tool, no window: the job pool's dispatch overhead and
+    cpukiller        a stress tool, no window: the job pool's dispatch overhead and
                      contention, nested batches, the memory system under cross-thread
                      load, and the engine's tick rate on one thread against many with the
                      state hash as the referee; prints a table
@@ -128,22 +128,22 @@ you are in; at the root it builds everything. `tools/kormake/README.md` is the m
     tools/kormake/bin/linux/kormake              # at the root: everything in linux-debug: libraries, examples, shaders, assets, tests
     tools/kormake/bin/linux/kormake test         # runs the tests (add dev or ship to either for linux-dev, linux-ship)
     tools/kormake/bin/linux/kormake rocks dev    # one example and what it links, in linux-dev (or: cd examples/rocks && kormake dev)
-    build/linux-debug/bin/example_testbed         # opens a window; Esc or close exits via ST_EXIT
-    build/linux-debug/bin/example_rocks --demo    # the asteroids-like, flying itself; without --demo, you fly
-    build/linux-debug/bin/example_stones          # stones in a box, written immediate-mode style
-    build/linux-debug/bin/example_cpukiller       # the stress table (--threads N, --bodies N, --ticks N, --quick)
-    build/linux-debug/bin/example_cpukiller --window  # the same with the window, renderer and swapchain alive
-    build/linux-debug/bin/example_cpukiller --profile t.json  # plus a trace of the whole run
-    build/linux-debug/bin/example_testbed --run-seconds 2   # exits by itself (smoke test)
-    build/linux-debug/bin/example_testbed --no-validation   # debug builds enable the validation layers by default
-    build/linux-debug/bin/example_testbed --no-vsync        # mailbox/immediate present instead of fifo
-    build/linux-debug/bin/example_testbed --borderless      # no libdecor frame (see note below)
-    build/linux-debug/bin/example_testbed --hitch-ms 50     # log where any frame over 50 ms spent its time
-    build/linux-debug/bin/example_testbed --hash            # log the sim state hash per tick (--hash-systems: per system)
-    build/linux-debug/bin/example_testbed --trace-events    # print every delivered event with its emitter (dev builds)
-    build/linux-debug/bin/example_testbed --threads 1       # serial; the default uses every core
-    build/linux-debug/bin/example_testbed --prof-report      # the top zones per frame with every fps line
-    build/linux-debug/bin/example_testbed --profile t.json   # a trace for Perfetto (ui.perfetto.dev) or chrome://tracing
+    build/linux-debug/bin/testbed         # opens a window; Esc or close exits via ST_EXIT
+    build/linux-debug/bin/rocks --demo    # the asteroids-like, flying itself; without --demo, you fly
+    build/linux-debug/bin/stones          # stones in a box, written immediate-mode style
+    build/linux-debug/bin/cpukiller       # the stress table (--threads N, --bodies N, --ticks N, --quick)
+    build/linux-debug/bin/cpukiller --window  # the same with the window, renderer and swapchain alive
+    build/linux-debug/bin/cpukiller --profile t.json  # plus a trace of the whole run
+    build/linux-debug/bin/testbed --run-seconds 2   # exits by itself (smoke test)
+    build/linux-debug/bin/testbed --no-validation   # debug builds enable the validation layers by default
+    build/linux-debug/bin/testbed --no-vsync        # mailbox/immediate present instead of fifo
+    build/linux-debug/bin/testbed --borderless      # no libdecor frame (see note below)
+    build/linux-debug/bin/testbed --hitch-ms 50     # log where any frame over 50 ms spent its time
+    build/linux-debug/bin/testbed --hash            # log the sim state hash per tick (--hash-systems: per system)
+    build/linux-debug/bin/testbed --trace-events    # print every delivered event with its emitter (dev builds)
+    build/linux-debug/bin/testbed --threads 1       # serial; the default uses every core
+    build/linux-debug/bin/testbed --prof-report      # the top zones per frame with every fps line
+    build/linux-debug/bin/testbed --profile t.json   # a trace for Perfetto (ui.perfetto.dev) or chrome://tracing
 
 Needs a C compiler for the bootstrap, g++ (or clang++ via `--cxx`), ninja, libsdl3-dev,
 libvulkan-dev, zlib1g-dev, slang-compiler, and for debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached
@@ -186,7 +186,7 @@ Then, from any prompt:
     tools\kormake\bin\windows\kormake.exe dev                     # windows-dev: what the windows root lists, with tests
     tools\kormake\bin\windows\kormake.exe test dev                # runs them
     tools\kormake\bin\windows\kormake.exe arcfire dev             # one game and what it links
-    build\windows-dev\bin\example_window.exe                      # a window, its events, and the frame loop's gaps
+    build\windows-dev\bin\window.exe                      # a window, its events, and the frame loop's gaps
 
 kormake.exe carries its scripts inside it, so run `bootstrap.bat` again after a pull that
 changes `tools\kormake\scripts\`; a stale one stops at `gen` on a field it does not know.
@@ -225,9 +225,9 @@ Then:
     tools/kormake/bootstrap.sh                          # once, and after a pull that changes tools/kormake/scripts/
     tools/kormake/bin/macos/kormake dev                 # macos-dev: the macos root, with tests (debug, ship likewise)
     tools/kormake/bin/macos/kormake test dev            # runs them
-    build/macos-dev/bin/example_arcfire                 # the shooter; --demo flies itself
-    MTL_DEBUG_LAYER=1 build/macos-debug/bin/example_testbed   # Metal's API validation (off unless asked for)
-    tools/kormake/bin/macos/kormake package arcfire ship  # dist/example_arcfire/example_arcfire.app
+    build/macos-dev/bin/arcfire                 # the shooter; --demo flies itself
+    MTL_DEBUG_LAYER=1 build/macos-debug/bin/testbed   # Metal's API validation (off unless asked for)
+    tools/kormake/bin/macos/kormake package arcfire ship  # dist/arcfire/arcfire.app
 
 `kormake package` writes an application bundle: the executable in `Contents/MacOS/`, its
 pack, shaders and licenses in `Contents/Resources/` (where the engine's base path looks
@@ -243,9 +243,9 @@ run in a booted Simulator, and an app installs there:
 
     xcrun simctl boot "iPhone 18 Pro"                      # any simulator; or open Simulator.app
     tools/kormake/bin/macos/kormake test iossim-dev        # builds for the Simulator, runs each test in it
-    tools/kormake/bin/macos/kormake package iossim-dev example_window
-    xcrun simctl install booted dist/example_window/example_window.app
-    xcrun simctl launch --console-pty booted org.korvid.example-window   # its log in this terminal
+    tools/kormake/bin/macos/kormake package iossim-dev window
+    xcrun simctl install booted dist/window/window.app
+    xcrun simctl launch --console-pty booted org.korvid.window   # its log in this terminal
 
 The Simulator's GPU has no indirect draws, which the renderer is built on, so a game starts
 there and stops at the renderer; drawing on iOS needs a device (A14 or later). On a device,
@@ -253,9 +253,9 @@ with an Apple developer account signed into Xcode, the device connected and in D
 Mode, and a development profile Xcode has made (build any app to the device once):
 
     KORMAKE_IOS_TEST_BUNDLE_ID=com.example.tests tools/kormake/bin/macos/kormake test ios-dev   # every suite on the device
-    tools/kormake/bin/macos/kormake package ios-dev example_testbed                            # signed for development
-    xcrun devicectl device install app --device "<name>" dist/example_testbed/example_testbed.app
-    xcrun devicectl device process launch --device "<name>" --console org.korvid.example-testbed
+    tools/kormake/bin/macos/kormake package ios-dev testbed                            # signed for development
+    xcrun devicectl device install app --device "<name>" dist/testbed/testbed.app
+    xcrun devicectl device process launch --device "<name>" --console org.korvid.testbed
 
 The bundle identifier is one your profile covers (a wildcard profile covers any).
 `tools/ios/device_test.sh` and `tools/ios/sign_app.sh` say what else they read from the

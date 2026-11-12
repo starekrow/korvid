@@ -1,4 +1,4 @@
-// example_arcfire: what the game sounds like. Every effect is a row of the table below: its
+// arcfire: what the game sounds like. Every effect is a row of the table below: its
 // file, its volume, its priority (the audio module's: under load a busy voice of no higher
 // priority is taken, and a sound asked for twice in a tick starts once), and how far its
 // pitch wanders, so a hundred shots do not ring as one. The volley and the grazes are the
@@ -42,16 +42,16 @@ constexpr f32 kMusicVolume = 0.55f;
 void sounds_load(Engine& e, Game& g) {
     for (u32 i = 0; i < SFX_COUNT; ++i) {
         char path[96];
-        snprintf(path, sizeof path, "example_arcfire/sound/%s.ogg", k_sfx[i].file);
+        snprintf(path, sizeof path, "arcfire/sound/%s.ogg", k_sfx[i].file);
         g.sfx[i] = asset_load_sound(e, path, asset_scope_global(e));
     }
     // Each stage's two tracks, by k_stage_names' order: Shoreline's, Orbit's.
     static const char* const k_tracks[kStageCount][2] = {{"stage", "boss"}, {"orbit", "orbit_boss"}};
     for (u32 i = 0; i < kStageCount; ++i) {
         char path[96];
-        snprintf(path, sizeof path, "example_arcfire/music/%s.wav", k_tracks[i][0]);
+        snprintf(path, sizeof path, "arcfire/music/%s.wav", k_tracks[i][0]);
         g.music_stage[i] = asset_load_sound(e, path, asset_scope_global(e));
-        snprintf(path, sizeof path, "example_arcfire/music/%s.wav", k_tracks[i][1]);
+        snprintf(path, sizeof path, "arcfire/music/%s.wav", k_tracks[i][1]);
         g.music_boss[i] = asset_load_sound(e, path, asset_scope_global(e));
     }
 }

@@ -1,4 +1,4 @@
-// example_arcfire: what the game remembers between runs. Two files in the platform's
+// arcfire: what the game remembers between runs. Two files in the platform's
 // per-user directory, written through the save module's writer and read as JSON:
 // options.json (the volumes, arcade's starting difficulty, the dev counters) and
 // scores.json (three tables of ten, one per arcade starting difficulty). The demo keeps
@@ -141,7 +141,7 @@ void options_save(Engine& e, Game& g) {
     SaveWriter w;
     w.init(mem_general());
     w.begin_object();
-    w.key("game");    w.string_value("example_arcfire");
+    w.key("game");    w.string_value("arcfire");
     w.key("master");  w.uint_value(g.options.master);
     w.key("music");   w.uint_value(g.options.music);
     w.key("effects"); w.uint_value(g.options.effects);
@@ -157,7 +157,7 @@ void scores_save(Engine& e, Game& g) {
     SaveWriter w;
     w.init(mem_general());
     w.begin_object();
-    w.key("game"); w.string_value("example_arcfire");
+    w.key("game"); w.string_value("arcfire");
     for (u32 t = 0; t < kScoreTables; ++t) {
         w.key(k_table_keys[t]);
         w.begin_array();

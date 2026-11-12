@@ -1,4 +1,4 @@
-// example_arcfire: the bomb. With one in hand and the ship live, the bomb action clears the
+// arcfire: the bomb. With one in hand and the ship live, the bomb action clears the
 // field: every bullet becomes a chip (items.cc), every enemy on the field takes the blast
 // (a handler, as a shot's hit is, so a kill pays as usual), the screen flashes and shakes,
 // and for two seconds the hitbox meets nothing (the ring still grazes and picks up). Two
@@ -27,9 +27,9 @@ void bomb(TickContext& ctx) {
     const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
     Span<const EggState> es = ctx.read<EggState>(ARC_WORLD(EggState));
-    Span<Ship> ships = ctx.write<Ship>("example_arcfire.ship.Ship");
-    Span<Collider2> cols = ctx.write<Collider2>("example_arcfire.ship.Collider2");
-    Span<const Transform2> xf = ctx.read<Transform2>("example_arcfire.ship.Transform2");
+    Span<Ship> ships = ctx.write<Ship>("arcfire.ship.Ship");
+    Span<Collider2> cols = ctx.write<Collider2>("arcfire.ship.Collider2");
+    Span<const Transform2> xf = ctx.read<Transform2>("arcfire.ship.Transform2");
     u32 i = g.ship.index();
     if (!run.len || i >= ships.len) return;
     Ship& s = ships[i];
@@ -66,8 +66,8 @@ void on_bomb(TickContext& ctx, Span<const Bombed> blasts) {
         const u32 kinds[] = {g_air_kind, g_ground_kind};
         for (u32 kind : kinds) {
             bool air = kind == g_air_kind;
-            Span<const Health> hp = ctx.read<Health>(air ? "example_arcfire.air.Health" : "example_arcfire.ground.Health");
-            Span<const Transform2> xf = ctx.read<Transform2>(air ? "example_arcfire.air.Transform2" : "example_arcfire.ground.Transform2");
+            Span<const Health> hp = ctx.read<Health>(air ? "arcfire.air.Health" : "arcfire.ground.Health");
+            Span<const Transform2> xf = ctx.read<Transform2>(air ? "arcfire.air.Transform2" : "arcfire.ground.Transform2");
             KindRows t = ctx.rows(kind); // liveness and handles, declared with the columns
             for (u32 i = 0; i < t.rows(); ++i) {
                 if (!t.alive(i) || hp[i].hp <= 0 || !in_field(xf[i].position, 0.0f)) continue;
@@ -76,8 +76,8 @@ void on_bomb(TickContext& ctx, Span<const Bombed> blasts) {
                 hurt(ctx, g, t.handle_at(i), kBlastDamage, xf[i].position, &killed); // a kill pays and drops as a shot's does
             }
         }
-        Span<Health> php = ctx.write<Health>("example_arcfire.part.Health");
-        Span<const Transform2> pxf = ctx.read<Transform2>("example_arcfire.part.Transform2");
+        Span<Health> php = ctx.write<Health>("arcfire.part.Health");
+        Span<const Transform2> pxf = ctx.read<Transform2>("arcfire.part.Transform2");
         KindRows parts = ctx.rows(g_part_kind);
         for (u32 i = 0; i < parts.rows(); ++i) {
             if (!parts.alive(i) || php[i].hp <= 0 || !in_field(pxf[i].position, 0.0f) || part_absorbs(g, ctx, parts.handle_at(i))) continue;

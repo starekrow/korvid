@@ -208,12 +208,24 @@ function M.run(c, platform, config, opts)
   if c.project then roots = { { name = "project", fields = { modules = "*", tests = true }, project = true } } end
   local wanted = {}
   for _, root in ipairs(roots) do
-    local patterns = root.fields.modules and util.as_list(root.fields.modules) or { root.name }
+    -- paths: only the modules found in those module paths (relative to the root), every one
+    -- of them unless modules says otherwise.
+    local in_paths
+    if root.fields.paths then
+      in_paths = {}
+      for _, p in ipairs(util.as_list(root.fields.paths)) do
+        local real = kfs.realpath(util.is_abs(p) and p or util.join(c.root_dir, p))
+        if not real then util.fail("root '%s': path '%s' is not a directory", root.name, p) end
+        in_paths[real] = true
+      end
+    end
+    local patterns = root.fields.modules and util.as_list(root.fields.modules) or { in_paths and "*" or root.name }
     -- A root may name the platforms it applies to; on any other it is left out.
     local applies = not root.fields.platforms or util.contains(util.as_list(root.fields.platforms), platform)
     for _, rec in ipairs(applies and c.modules or {}) do
       for _, pat in ipairs(patterns) do
-        if util.matches(rec.name, pat) and buildable(rec) and (rec.project or not root.project) then
+        if util.matches(rec.name, pat) and buildable(rec) and (rec.project or not root.project)
+           and (not in_paths or in_paths[rec.modulepath]) then
           local inst = instance_of(rec.name, platform, config, "root '" .. root.name .. "'")
           wanted[#wanted + 1] = inst
           if root.fields.tests and rec.tests_dir then inst.tests = true end

@@ -1,4 +1,4 @@
-// example_arcfire: the ground. A stage may name a Tiled map (Shoreline's sea and islands,
+// arcfire: the ground. A stage may name a Tiled map (Shoreline's sea and islands,
 // tools/make_maps.py), which is spawned once as still tiles on the map's layers and scrolled
 // by the renderer's layer offset (planes.cc), so a map of thousands of tiles costs one
 // value a tick. Its `enemies` layer places the ground rows: each comes into view at the

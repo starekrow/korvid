@@ -1,4 +1,4 @@
-// example_arcfire: the field. The sim plays on a 540 x 720 rectangle of world units centered
+// arcfire: the field. The sim plays on a 540 x 720 rectangle of world units centered
 // on the origin, +y up, whatever the window: the camera fits it (hud.cc) and the side
 // panels cover the rest. Everything that clamps, culls or wraps reads these.
 #pragma once

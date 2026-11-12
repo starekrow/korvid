@@ -1,4 +1,4 @@
-// example_gallery: a game's sprite shader. Rings across the quad from its local coordinates,
+// gallery: a game's sprite shader. Rings across the quad from its local coordinates,
 // in the material's tint and its params1 color, cut to a disc; the texture's alpha, through
 // sprite_texel, keeps the bindless path in the picture. No time: every frame is the same.
 #include "sprite_fragment.slangh"

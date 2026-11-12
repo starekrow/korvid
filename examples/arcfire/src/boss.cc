@@ -1,4 +1,4 @@
-// example_arcfire: bosses. A boss is a hull (`boss`, one row) and its parts (`part`, a row
+// arcfire: bosses. A boss is a hull (`boss`, one row) and its parts (`part`, a row
 // each, children of the hull or of another part), from its definition (boss_data.cc). The
 // collision module composes the parts where the hull is before it tests them, so a turret
 // on a swaying hull is hit where it is drawn.
@@ -90,16 +90,16 @@ void bosses_load(Engine& e, Game& g) {
     g.boss_count = KV_COUNTOF(k_boss_names);
     for (u32 i = 0; i < g.boss_count; ++i) {
         char path[128];
-        snprintf(path, sizeof path, "example_arcfire/bosses/%s.boss.json", k_boss_names[i]);
+        snprintf(path, sizeof path, "arcfire/bosses/%s.boss.json", k_boss_names[i]);
         g.boss_blobs[i] = asset_load_blob(e, path);
         for (u32 k = 0; k < 2; ++k) {
-            snprintf(path, sizeof path, "example_arcfire/generated/%s%s.png", k_boss_names[i], k ? "_parts" : "");
+            snprintf(path, sizeof path, "arcfire/generated/%s%s.png", k_boss_names[i], k ? "_parts" : "");
             g.boss_tex[i][k] = asset_load_texture(e, path);
             g.boss_alpha[i][k] = boss_material(e, g.boss_tex[i][k], BlendMode::Alpha);
             g.boss_additive[i][k] = boss_material(e, g.boss_tex[i][k], BlendMode::Additive);
         }
         // Its hull burning away, the dissolve shader's (a material file, as a game shader's are).
-        snprintf(path, sizeof path, "example_arcfire/materials/%s_dissolve.material.json", k_boss_names[i]);
+        snprintf(path, sizeof path, "arcfire/materials/%s_dissolve.material.json", k_boss_names[i]);
         g.boss_dissolve[i] = asset_load_material(e, path);
     }
 }
@@ -178,8 +178,8 @@ Handle boss_spawn(TickContext& ctx, Game& g, const Dials& d, u32 di) {
 }
 
 bool part_absorbs(const Game& g, TickContext& ctx, Handle part) {
-    Span<const Part> pa = ctx.read<Part>("example_arcfire.part.Part");
-    Span<const Boss> bo = ctx.read<Boss>("example_arcfire.boss.Boss");
+    Span<const Part> pa = ctx.read<Part>("arcfire.part.Part");
+    Span<const Boss> bo = ctx.read<Boss>("arcfire.boss.Boss");
     if (part.index() >= pa.len) return true;
     const Part& p = pa[part.index()];
     if (p.boss.index() >= bo.len) return true;
@@ -371,9 +371,9 @@ void on_part_down(TickContext& ctx, Span<const StateEdge> edges) {
     // go by command.
     const Table* pt = engine_table(*ctx.engine, g_part_kind);
     const Table* bt = engine_table(*ctx.engine, g_boss_kind);
-    Span<const Part> parts = ctx.read<Part>("example_arcfire.part.Part");
-    Span<const Transform2> part_xf = ctx.read<Transform2>("example_arcfire.part.Transform2");
-    Span<Boss> boss_rows = ctx.write<Boss>("example_arcfire.boss.Boss");
+    Span<const Part> parts = ctx.read<Part>("arcfire.part.Part");
+    Span<const Transform2> part_xf = ctx.read<Transform2>("arcfire.part.Transform2");
+    Span<Boss> boss_rows = ctx.write<Boss>("arcfire.boss.Boss");
     Span<const Dials> dials_row = ctx.read<Dials>(ARC_WORLD(Dials));
     u32 sparks = dials_row.len ? dials_row[0].particles : 8;
     for (const StateEdge& se : edges) {

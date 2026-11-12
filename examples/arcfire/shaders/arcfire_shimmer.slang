@@ -1,4 +1,4 @@
-// example_arcfire: the shimmer, the full-frame pass over the world. Each of up to sixteen
+// arcfire: the shimmer, the full-frame pass over the world. Each of up to sixteen
 // rings (gPostParams: a center in window pixels, +y down; the radius so far; the strength
 // left) bends the world's image across its band: the far side of the crest pushed
 // outward, the near side drawn in, as air over a blast front would, a few pixels at most,

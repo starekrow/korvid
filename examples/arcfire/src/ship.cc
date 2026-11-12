@@ -1,4 +1,4 @@
-// example_arcfire: the ship. Eight directions at two speeds, the focus that slows it,
+// arcfire: the ship. Eight directions at two speeds, the focus that slows it,
 // shows its hitbox and narrows the shot, and its weapon (weapons.cc) fired while the button
 // is held. The hitbox is the ship's own collider, a circle of three units; the graze ring
 // around it, and its beam, are child rows (a row has one collider).
@@ -39,10 +39,10 @@ void control(TickContext& ctx) {
     static const u32 k_actions_id = ctx.resource_id("input.actions");
     Game& g = ctx.state_as<Game>();
     const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
-    Span<Transform2> xf = ctx.write<Transform2>("example_arcfire.ship.Transform2");
-    Span<Ship> ships = ctx.write<Ship>("example_arcfire.ship.Ship");
-    Span<Sprite> ring = ctx.write<Sprite>("example_arcfire.ring.Sprite");
-    Span<Sprite> mark = ctx.write<Sprite>("example_arcfire.mark.Sprite");
+    Span<Transform2> xf = ctx.write<Transform2>("arcfire.ship.Transform2");
+    Span<Ship> ships = ctx.write<Ship>("arcfire.ship.Ship");
+    Span<Sprite> ring = ctx.write<Sprite>("arcfire.ring.Sprite");
+    Span<Sprite> mark = ctx.write<Sprite>("arcfire.mark.Sprite");
     u32 i = g.ship.index();
     if (g.ship.is_null() || i >= ships.len) return;
     Ship& s = ships[i];
@@ -65,7 +65,7 @@ void control(TickContext& ctx) {
     s.cooldown = weapon_fire(g, shots_table, p, s.weapon, s.power, focus);
     // The options fire with it, two levels lower, from where they were as the tick began.
     KindRows options = ctx.rows(g_option_kind);
-    Span<const Transform2> ox = ctx.read<Transform2>("example_arcfire.option.Transform2");
+    Span<const Transform2> ox = ctx.read<Transform2>("arcfire.option.Transform2");
     for (u32 k = 0; k < options.rows(); ++k)
         if (options.alive(k)) weapon_fire(g, shots_table, ox[k].position, s.weapon, option_power(s.power), focus);
     sfx(ctx, g, SFX_SHOT);

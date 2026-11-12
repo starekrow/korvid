@@ -1,4 +1,4 @@
-// Korvid image: binary PPM (P6, 8-bit), what --screenshot and example_gallery write.
+// Korvid image: binary PPM (P6, 8-bit), what --screenshot and gallery write.
 // Header comments ('#' to the end of the line) are allowed between the header's fields;
 // maxval must be 255.
 #pragma once

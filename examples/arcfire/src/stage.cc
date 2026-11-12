@@ -1,4 +1,4 @@
-// example_arcfire: the stage. Distance is the stage's clock: `scroll` adds the speed to it
+// arcfire: the stage. Distance is the stage's clock: `scroll` adds the speed to it
 // every sim tick, and `stage` runs each mark of the stage file as the distance crosses
 // it, the one place the game turns distance into events. Nothing reads a tick count to
 // know where the stage is, so a death in slow motion or a pause changes when (in wall

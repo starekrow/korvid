@@ -1,6 +1,6 @@
-// example_arcfire: what the game reports. Every tick it counts what the stress runs read
+// arcfire: what the game reports. Every tick it counts what the stress runs read
 // (bullets, sprites, the extract's deltas, the pairs the broadphase tested) into the
-// resource `example_arcfire.stats`, which the HUD's dev counters show; every report
+// resource `arcfire.stats`, which the HUD's dev counters show; every report
 // interval it logs them beside the frame loop's fps line; at the exit, the peaks and the
 // means. The notebook (docs/performance-notes.md) is written from these lines.
 #include "arcfire.h"

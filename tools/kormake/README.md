@@ -108,9 +108,13 @@ instances are a second set in the same Ninja file, under `host/` in the build di
 A NAME picks out one module. kormake tries three things in order and takes the first that
 matches:
 
-1. the module's name (`tool_kpack`, `example_arcfire`);
-2. its executable's name (`kpack`, which its `exe` field sets);
-3. its directory's name (`arcfire` for `examples/arcfire`).
+1. the module's name (`kpack`, `arcfire`);
+2. its executable's name, when its `exe` field sets one;
+3. its directory's name, when that differs from the module's (`korvid-audio-fmod/`
+   declaring `audio.fmod`).
+
+The modules in this repository are named for their directories, so the first step is the
+one that matters here.
 
 If two modules match at the same step, kormake stops and lists them both. Name the module
 to settle it.
@@ -220,7 +224,7 @@ The master file, at the engine root. It runs top to bottom in a sandbox (only `s
     host_config "dev"                       -- what tools build in; the default is dev
     bind "render" { linux = "renderer-vulkan" }   -- overrides a toolchain's default binding
     override "audio" { path = "../audio-fork" }   -- this copy wins over any other of that name
-    root "examples" { modules = "example_*", platforms = { "linux" } }
+    root "examples" { paths = "examples", platforms = { "linux" } }
     root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
 
 A module path is a directory of module directories. A module is any directory directly
@@ -229,6 +233,8 @@ without one (`tools/kormake`, `tools/ios`) are ignored. If two modules have the 
 that is an error naming both paths, unless an `override` picks one.
 
 A root's `modules` takes names or `*`/`?` globs, and defaults to the root's own name.
+`paths` limits the root to the modules found in those module paths (relative to the root),
+and then `modules` defaults to `*`.
 `platforms` limits the platforms the root applies to. `tests = true` adds the tests of the
 root's modules to `tests` and `check`. With no roots at all, every module is a root. A
 module that is not in any root is still in the Ninja file if its platform supports it, and
@@ -263,7 +269,7 @@ the build directory, never in the source tree.
 | `output` | `"lib"` (the default) is a static library; `"exe"` is an executable; `"headers"` compiles nothing |
 | `deps` | Modules this one links, and whose `include/` it sees. A dependency on an interface also links the backend bound for the platform |
 | `provides` | The interface this module implements (`"render"`, `"shader-compile"`), or `"toolchain"` |
-| `platforms` | The platforms the module builds for; the default is all of them. `"host"` builds it only for the machine running the build, whoever asks for it (`tool_kpack`). Linking such a module is an error; name it in `tools` |
+| `platforms` | The platforms the module builds for; the default is all of them. `"host"` builds it only for the machine running the build, whoever asks for it (`kpack`). Linking such a module is an error; name it in `tools` |
 | `tools` | Tool modules or interfaces whose rules apply to this module's files. Each one is built for the host. `["shader-compile"] = { install = "shaders" }` writes the outputs to `bin/shaders/` instead of `gen/` |
 | `exports` | The rules the module offers as a tool: `rule "name" { inputs, outputs, command, deps, per, platforms }` (see Tool rules) |
 | `external` | System libraries by name and version: `{ sdl3 = ">=3.2" }`, or `{ sdl3 = { ">=3.2", platforms = { "linux" } } }`. The toolchain defines what each name means |
@@ -273,7 +279,7 @@ the build directory, never in the source tree.
 | `unity` | `false` compiles each source on its own; this overrides `--no-unity` and `--unity` |
 | `engine_module` | The module registers a `ModuleDesc`. Each executable gets a generated `gen/<exe>/modules.gen.cc` listing every engine module in its closure, in dependency order |
 | `module_list` | `false`: the executable writes its own module list |
-| `exe` | The executable's file name, when it differs from the module's (`tool_kpack` writes `bin/kpack`) |
+| `exe` | The executable's file name, when it differs from the module's (`exe = "mygame"` for a module called `mygame.core`) |
 | `licenses` | Files under the module that `package` copies into `licenses/` as `<module>-<file>` |
 | `system` | A tool that is found on `PATH` rather than built (`slang`: `system = "slangc"`) |
 | `prebuilt` | A tool binary vendored per host: `{ linux = "bin/linux/slangc" }` |
@@ -333,7 +339,7 @@ it). Ninja runs there.
 
 Ninja targets: `all` (the default: the roots, plus `tests`), `tests` (the roots' test
 executables), `check` (the roots' test stamps), and one phony per module, named for the
-module (`ninja -C build/linux-dev example_arcfire`).
+module (`ninja -C build/linux-dev arcfire`).
 
 ## ENVIRONMENT
 
@@ -376,14 +382,14 @@ error of kormake's own, which is printed as `kormake: <message>`.
     kormake kpack picture                # both tools, built for the host
     kormake test collision               # one module's tests
     kormake test linux-dev               # every test the roots ask for
-    kormake package arcfire ship         # dist/example_arcfire/
+    kormake package arcfire ship         # dist/arcfire/
     kormake graph --why renderer-vulkan  # who pulls in the Vulkan renderer
     kormake graph arcfire --dot | dot -Tsvg > arcfire.svg
     kormake check windows-dev            # does the Windows graph resolve (on any host)
     kormake -C ~/code/mygame             # a project outside the engine, built from anywhere
 
 The 1.0 forms still work: `kormake build linux-debug`, `kormake test linux-dev collision`,
-`kormake package linux-ship example_arcfire`.
+`kormake package linux-ship arcfire`.
 
 ## NOTES
 

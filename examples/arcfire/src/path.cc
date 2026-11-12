@@ -1,4 +1,4 @@
-// example_arcfire: Catmull-Rom paths by arc length.
+// arcfire: Catmull-Rom paths by arc length.
 #include "path.h"
 #include <math.h>
 

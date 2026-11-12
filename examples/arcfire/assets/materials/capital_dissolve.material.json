@@ -1,2 +1,2 @@
-{ "texture": "example_arcfire/generated/capital.png", "blend": "alpha", "shader": "arcfire_dissolve",
+{ "texture": "arcfire/generated/capital.png", "blend": "alpha", "shader": "arcfire_dissolve",
   "params": [0, 0, 5, 0.09, 1.0, 0.6, 0.25, 0] }

@@ -1,4 +1,4 @@
-// example_arcfire: the module record. What the game declares to the engine (components,
+// arcfire: the module record. What the game declares to the engine (components,
 // kinds, events, the systems and handlers of every file), the startup that loads its art
 // and its stage, and the sprite helpers every file draws with. The game itself is in the
 // files the tables below name.
@@ -182,7 +182,7 @@ constinit const KindDesc k_kinds[] = {
 
 // A part's death is its health crossing below one: delivered as a StateEdge the next tick.
 constinit const TriggerDesc k_triggers[] = {
-    {.name = "example_arcfire.part_down", .field = "example_arcfire.part.Health.hp", .edge = TriggerEdge::CrossedBelow, .value = 1.0, .id = &g_part_down},
+    {.name = "arcfire.part_down", .field = "arcfire.part.Health.hp", .edge = TriggerEdge::CrossedBelow, .value = 1.0, .id = &g_part_down},
 };
 
 // ---- events --------------------------------------------------------------------------------------
@@ -328,13 +328,13 @@ constinit const HandlerDesc k_handlers[] = {
 // ---- startup -------------------------------------------------------------------------------------
 
 constinit const char* const k_texture_paths[TEX_COUNT] = {
-    "example_arcfire/kenney/ships.png", "example_arcfire/kenney/tiles.png", "example_arcfire/space/stars.png",
-    "example_arcfire/space/nebula.png", "example_arcfire/space/cloud.png",  "example_arcfire/made/bullets.png",
-    "example_arcfire/made/dot.png",     "example_arcfire/made/ring.png",    "example_arcfire/made/soft.png",
-    "example_arcfire/made/spark.png",   "example_arcfire/made/egg.png",     "example_arcfire/made/clouds_low.png",
-    "example_arcfire/made/clouds_high.png", "example_arcfire/made/beam.png",    "example_arcfire/made/items.png",
-    "example_arcfire/generated/boat.png", "example_arcfire/generated/debris.png", "example_arcfire/generated/segments.png",
-    "example_arcfire/generated/capital.png",
+    "arcfire/kenney/ships.png", "arcfire/kenney/tiles.png", "arcfire/space/stars.png",
+    "arcfire/space/nebula.png", "arcfire/space/cloud.png",  "arcfire/made/bullets.png",
+    "arcfire/made/dot.png",     "arcfire/made/ring.png",    "arcfire/made/soft.png",
+    "arcfire/made/spark.png",   "arcfire/made/egg.png",     "arcfire/made/clouds_low.png",
+    "arcfire/made/clouds_high.png", "arcfire/made/beam.png",    "arcfire/made/items.png",
+    "arcfire/generated/boat.png", "arcfire/generated/debris.png", "arcfire/generated/segments.png",
+    "arcfire/generated/capital.png",
 };
 
 Handle material_of(Engine& e, Handle texture, BlendMode blend) {
@@ -384,8 +384,8 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
         g->additive[i] = material_of(e, g->textures[i], BlendMode::Additive);
     }
     bosses_load(e, *g);
-    g->nebula = asset_load_material(e, "example_arcfire/materials/nebula.material.json");
-    g->capital_dissolve = asset_load_material(e, "example_arcfire/materials/capital_dissolve.material.json");
+    g->nebula = asset_load_material(e, "arcfire/materials/nebula.material.json");
+    g->capital_dissolve = asset_load_material(e, "arcfire/materials/capital_dissolve.material.json");
     if (frameloop_flag(e, "--gas")) g->gas_test = true;
     sounds_load(e, *g);
     g->boom_clip = fx_boom_clip(e);
@@ -393,7 +393,7 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     // long the disk takes never reaches the state.
     for (u32 i = 0; i < kStageCount; ++i) {
         char stage_path[96];
-        snprintf(stage_path, sizeof stage_path, "example_arcfire/stages/%s.stage.json", k_stage_names[i]);
+        snprintf(stage_path, sizeof stage_path, "arcfire/stages/%s.stage.json", k_stage_names[i]);
         g->stage_blobs[i] = asset_load_blob(e, stage_path);
     }
     KV_INFO("arcfire", "%s: %s at %s", g->front_door ? "the title" : g->plan.arcade ? "arcade" : g->plan.stage_select ? "stage select" : "run",
@@ -446,8 +446,8 @@ Sprite enemy_sprite(const Game& g, Look look) {
 } // namespace kv::arcfire
 
 namespace kv {
-KV_MODULE_DEFINE(example_arcfire_module) = {
-    .name       = "example_arcfire",
+KV_MODULE_DEFINE(arcfire_module) = {
+    .name       = "arcfire",
     .events     = arcfire::k_events,
     .components = arcfire::k_components,
     .kinds      = arcfire::k_kinds,

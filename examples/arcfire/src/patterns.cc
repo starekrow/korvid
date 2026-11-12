@@ -1,4 +1,4 @@
-// example_arcfire: patterns. Every enemy fires a BulletML pattern from the library
+// arcfire: patterns. Every enemy fires a BulletML pattern from the library
 // (assets/patterns/: patterns.json names the documents, each one pattern), compiled once
 // at load by the bulletml module. An enemy's Runner runs its pattern; a bullet whose
 // definition has actions of its own is an `active` bullet with a Runner too. The
@@ -25,7 +25,7 @@ u64 seed_of(Handle h, u64 tick, u32 salt) {
 }
 
 bool patterns_load(Engine& e, Game& g) {
-    g.pattern_index = asset_load_blob(e, "example_arcfire/patterns/patterns.json");
+    g.pattern_index = asset_load_blob(e, "arcfire/patterns/patterns.json");
     return !g.pattern_index.is_null();
 }
 
@@ -48,7 +48,7 @@ bool patterns_ready(Engine& e, Game& g, bool& failed) {
         for (const JsonValue* v = json_first(doc, doc.root()); v && g.pattern_count < Game::kMaxPatterns; v = json_next(doc, *v)) {
             char path[128];
             snprintf(g.pattern_names[g.pattern_count], kPatternName, "%s", json_string(v, ""));
-            snprintf(path, sizeof path, "example_arcfire/patterns/%s.xml", g.pattern_names[g.pattern_count]);
+            snprintf(path, sizeof path, "arcfire/patterns/%s.xml", g.pattern_names[g.pattern_count]);
             g.pattern_blobs[g.pattern_count++] = asset_load_blob(e, path);
         }
     }
@@ -107,7 +107,7 @@ void on_fire(void* user, const BmlFire& f) {
 // runner steps, and its pattern fires.
 void patterns(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
-    Span<const Transform2> ship_xf = ctx.read<Transform2>("example_arcfire.ship.Transform2");
+    Span<const Transform2> ship_xf = ctx.read<Transform2>("arcfire.ship.Transform2");
     Span<const Dials> dials_row = ctx.read<Dials>(ARC_WORLD(Dials));
     if (!dials_row.len || g.ship.index() >= ship_xf.len || !g.lib.entries.len) return;
     const Dials& d = dials_row[0];
@@ -145,7 +145,7 @@ void patterns(TickContext& ctx) {
 // transform's writer (it reads the parts' composed places), as these write their own.
 void actives(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
-    Span<const Transform2> ship_xf = ctx.read<Transform2>("example_arcfire.ship.Transform2");
+    Span<const Transform2> ship_xf = ctx.read<Transform2>("arcfire.ship.Transform2");
     Span<const Dials> dials_row = ctx.read<Dials>(ARC_WORLD(Dials));
     if (!dials_row.len || g.ship.index() >= ship_xf.len || !g.lib.entries.len) return;
     const Dials& d = dials_row[0];

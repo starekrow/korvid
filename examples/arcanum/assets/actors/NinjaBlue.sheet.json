@@ -1,4 +1,4 @@
-{ "texture": "example_arcanum/actors/NinjaBlue.png", "cell": [16, 16], "fps": 6.67,
+{ "texture": "arcanum/actors/NinjaBlue.png", "cell": [16, 16], "fps": 6.67,
   "clips": {
     "walk.down": {"column": 0, "rows": [0, 1, 2, 3]},
     "idle.down": {"cells": [[0, 0]]},

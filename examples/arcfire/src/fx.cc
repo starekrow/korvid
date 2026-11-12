@@ -1,4 +1,4 @@
-// example_arcfire: effects. Sparks and debris are particles, a cosmetic kind: they drift,
+// arcfire: effects. Sparks and debris are particles, a cosmetic kind: they drift,
 // spin, slow and fade over their life and are never part of the state. Their randomness
 // is the module's own stream, not the sim's, so a dial that changes how many sparks fly
 // changes nothing the sim draws. Explosions are a flipbook of Kenney's burst tiles on a
@@ -46,7 +46,7 @@ Handle fx_boom_clip(Engine& e) {
     track.channel = AnimChannel::Uv;
     track.keys = Span<const AnimKey>(keys, KV_COUNTOF(keys));
     AnimClipDesc desc;
-    desc.name = "example_arcfire.boom";
+    desc.name = "arcfire.boom";
     desc.duration = (f32)KV_COUNTOF(kFrames) * kFrame;
     desc.tracks = Span<const AnimTrackDesc>(&track, 1);
     return anim_create(e, desc);
@@ -114,8 +114,8 @@ void fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 
 void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
     Game& g = ctx.state_as<Game>();
     if (!g.stage.map[0]) return; // in space (Orbit) there is no ground to fall on
-    Span<const Transform2> xf = ctx.read<Transform2>("example_arcfire.air.Transform2");
-    Span<const Sprite> sp = ctx.read<Sprite>("example_arcfire.air.Sprite");
+    Span<const Transform2> xf = ctx.read<Transform2>("arcfire.air.Transform2");
+    Span<const Sprite> sp = ctx.read<Sprite>("arcfire.air.Sprite");
     for (const Spawned& s : spawns) {
         if (s.kind != g_air_kind || s.entity.is_null() || s.entity.index() >= xf.len) continue;
         Sprite shadow = sp[s.entity.index()];

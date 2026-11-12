@@ -1,4 +1,4 @@
-// example_arcfire: paths. A formation flies a path of up to eight points as a Catmull-Rom
+// arcfire: paths. A formation flies a path of up to eight points as a Catmull-Rom
 // spline through them, at a speed along its length: the spline is measured once, segment
 // by segment, so `path_at(p, s)` is where a mover is after `s` units of travel. Members of
 // one formation start on the same path at different ticks and keep their spacing because

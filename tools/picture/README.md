@@ -1,4 +1,4 @@
-# tool_picture
+# picture
 
 The picture tool, `bin/picture`. It compares screenshots picture by picture within a
 tolerance, writes their differences as pictures, and turns screenshots into PNGs to keep
@@ -18,7 +18,7 @@ picture png A DIR                           # every picture of A as DIR/<name>.p
 picture help
 ```
 
-A and B are `.ppm` (binary P6: what `--screenshot` and `example_gallery` write) or `.png`
+A and B are `.ppm` (binary P6: what `--screenshot` and `gallery` write) or `.png`
 (any the image module reads; references are kept as PNGs, a few to a hundred kilobytes
 where a PPM is 1.5 MB). Given two directories, every picture in A (its own files, not its
 subdirectories') meets the one of the same name in B, `.ppm` before `.png`; given a file
@@ -49,7 +49,7 @@ decode or write, 2 for a command line the CLI refused.
 ## How it works
 
 A command checks its arguments, lists A (and B) with `io_list_files`, pairs the pictures
-by name and starts a job; `tool_picture.pump` (PreSim, main thread, every tick) runs it:
+by name and starts a job; `picture.pump` (PreSim, main thread, every tick) runs it:
 every file is read through the I/O queue and decoded to RGB8 as it arrives; once all
 are in, each pair is compared (or each picture encoded), its line printed and any
 picture to write submitted as a write; when the writes are done, the summary is printed
@@ -60,7 +60,7 @@ and `tool_finish` gives the exit status.
 Commands: `picture compare <a> <b> [--threshold N] [--max-fraction F] [--max-channel N]
 [--diff DIR]`, `picture png <a> <dir>`.
 
-Header `korvid/tool_picture/module.h`: `tool_picture_module`, the record; kormake puts it
+Header `korvid/picture/module.h`: `picture_module`, the record; kormake puts it
 in the list.
 
 What the module registers with the engine: the two commands, the `.pump` system and its

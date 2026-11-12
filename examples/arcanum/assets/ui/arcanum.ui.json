@@ -3,7 +3,7 @@
   "pixel": true,
   "actions": { "move": "move", "confirm": "confirm", "cancel": "cancel" },
   "style": {
-    "font": "example_arcanum/ui/NormalFont.ttf",
+    "font": "arcanum/ui/NormalFont.ttf",
     "size": 8,
     "line": 11,
     "space": 3,
@@ -22,21 +22,21 @@
       "blood": "#200408f0"
     },
     "frames": {
-      "panel": { "texture": "example_arcanum/ui/panel_dark.png", "insets": [4, 4, 4, 4] },
-      "light": { "texture": "example_arcanum/ui/panel.png", "insets": [6, 6, 5, 5] },
-      "dialog": { "texture": "example_arcanum/ui/dialog.png", "insets": [8, 8, 8, 8] },
-      "face": { "texture": "example_arcanum/ui/faceset_box.png", "insets": [5, 5, 5, 5] }
+      "panel": { "texture": "arcanum/ui/panel_dark.png", "insets": [4, 4, 4, 4] },
+      "light": { "texture": "arcanum/ui/panel.png", "insets": [6, 6, 5, 5] },
+      "dialog": { "texture": "arcanum/ui/dialog.png", "insets": [8, 8, 8, 8] },
+      "face": { "texture": "arcanum/ui/faceset_box.png", "insets": [5, 5, 5, 5] }
     },
     "images": {
-      "cursor": { "texture": "example_arcanum/ui/arrow.png", "rect": [4, 1, 8, 14], "scale": 0.5 },
-      "heart": { "texture": "example_arcanum/ui/heart.png", "rect": [0, 0, 16, 16], "frames": 5 },
-      "hammer": { "texture": "example_arcanum/items/hammer.png", "rect": [0, 0, 9, 16] }
+      "cursor": { "texture": "arcanum/ui/arrow.png", "rect": [4, 1, 8, 14], "scale": 0.5 },
+      "heart": { "texture": "arcanum/ui/heart.png", "rect": [0, 0, 16, 16], "frames": 5 },
+      "hammer": { "texture": "arcanum/items/hammer.png", "rect": [0, 0, 9, 16] }
     },
     "sounds": {
-      "move": "example_arcanum/sounds/move.wav",
-      "select": "example_arcanum/sounds/accept.wav",
-      "cancel": "example_arcanum/sounds/cancel.wav",
-      "tick": "example_arcanum/sounds/voice.wav"
+      "move": "arcanum/sounds/move.wav",
+      "select": "arcanum/sounds/accept.wav",
+      "cancel": "arcanum/sounds/cancel.wav",
+      "tick": "arcanum/sounds/voice.wav"
     }
   },
   "screens": {

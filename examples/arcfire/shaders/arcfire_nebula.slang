@@ -1,4 +1,4 @@
-// example_arcfire: the nebula. A procedural field of gas over the deep plane: four octaves
+// arcfire: the nebula. A procedural field of gas over the deep plane: four octaves
 // of value noise, warped once by two more, mapped from the sprite's tint (the dark of it)
 // to the material's bright color where it is densest. The game scrolls the sprite's uv
 // with the stage, so the field comes down the screen as the planes do; it also drifts a

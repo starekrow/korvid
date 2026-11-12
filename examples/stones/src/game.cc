@@ -1,4 +1,4 @@
-// example_stones, written the way you'd write it if you didn't want to learn the engine.
+// stones, written the way you'd write it if you didn't want to learn the engine.
 //
 // There's a player stone and a bunch of loose stones in a box. Arrows push the player,
 // the player chases the mouse while the left button is down, space drops another stone
@@ -6,7 +6,7 @@
 // is my own structs in my own arrays, updated in one function, top to bottom, every tick.
 // The engine gives me a window, the keys, sprites to draw with, and a way to print my
 // structs. That's all I asked it for.
-#include "korvid/example_stones/module.h"
+#include "korvid/stones/module.h"
 #include "korvid/asset/material.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
@@ -182,8 +182,8 @@ bool stones_startup(Engine& engine, ModuleInstance& self) {
     Renderer* r = renderer_get(engine);
     if (!r) return false;
     KV_UNUSED(r);
-    g->stone_look  = asset_load_material(engine, "example_stones/stone.material.json");
-    g->player_look = asset_load_material(engine, "example_stones/player.material.json");
+    g->stone_look  = asset_load_material(engine, "stones/stone.material.json");
+    g->player_look = asset_load_material(engine, "stones/player.material.json");
     const MaterialAsset* stone  = asset_material(engine, g->stone_look);
     const MaterialAsset* player = asset_material(engine, g->player_look);
     if (!stone || !player) return false;
@@ -214,8 +214,8 @@ constinit const SystemDesc k_systems[] = {
 
 } // namespace
 
-KV_MODULE_DEFINE(example_stones_module) = {
-    .name       = "example_stones",
+KV_MODULE_DEFINE(stones_module) = {
+    .name       = "stones",
     .components = k_components,
     .systems    = k_systems,
     .startup    = stones_startup,

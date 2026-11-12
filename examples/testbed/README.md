@@ -1,4 +1,4 @@
-# example_testbed
+# testbed
 
 The smallest game that uses everything once: a kind, a view system, a handler, timers,
 a command spawn with a ticket, a trigger, assets from files, and a state machine that
@@ -20,7 +20,7 @@ where the shaders and this module's `assets/` have been copied next to it:
 
 ```bash
 tools/kormake/bin/linux/kormake build linux-debug
-build/linux-debug/bin/example_testbed --run-seconds 3
+build/linux-debug/bin/testbed --run-seconds 3
 ```
 
 `kormake build linux-debug` is everything checked with the validation layers on;
@@ -29,17 +29,17 @@ builds every module and example; `kormake test linux-debug` runs the test suites
 
 ## What it shows
 
-**A kind with the game's own components.** `example_testbed.ball` is `Transform2`,
+**A kind with the game's own components.** `testbed.ball` is `Transform2`,
 `Sprite`, `Motion` (velocity and a "re-aim on bounce" flag) and `Bounces` (a count, with
 `CompPrev` so a trigger can watch it).
 
-**A view system.** `example_testbed.move` (Sim) iterates every kind with `Transform2`,
+**A view system.** `testbed.move` (Sim) iterates every kind with `Transform2`,
 `Motion` and `Sprite` through `ctx.view`, moves each ball, keeps it inside the window
 (read from the `platform_hid.window` resource), and emits `Bounced{ball}` at an edge. It
-declares exactly what it touches; the scheduler puts `example_testbed.sim` after it because `sim`
+declares exactly what it touches; the scheduler puts `testbed.sim` after it because `sim`
 reads the kind `move` writes.
 
-**A state machine as a system.** `example_testbed.sim` (Sim) reads keys, asset events and
+**A state machine as a system.** `testbed.sim` (Sim) reads keys, asset events and
 `ExitRequested` from the bus, then runs INIT (spawn the background and the balls by
 command), RUN, EXIT (destroy everything by command, quit). It holds no handles and no
 writes: spawning and destroying are commands, and the one handle it needs comes back
@@ -51,7 +51,7 @@ matches the blinker's spawn ticket to learn its handle and schedules `BlinkOff` 
 out. `on_blink_off` destroys it and schedules `BlinkOn` 30 ticks out; `on_blink_on`
 spawns a new one by command, and the dance repeats. `on_edge` logs the trigger.
 
-**A trigger.** `example_testbed.third_bounce` watches `example_testbed.ball.Bounces.count`
+**A trigger.** `testbed.third_bounce` watches `testbed.ball.Bounces.count`
 crossing above 2 and emits `StateEdge` without anyone polling.
 
 **Assets from files.** Startup loads five material files (`white`, `blue_add`, `green`,
@@ -72,10 +72,10 @@ its sort back and verifies it; the log reports rows, visible rows and buckets in
 | `src/game.cc` | everything above: components, the kind, events, the trigger, the systems, the handlers, startup |
 | `assets/ball.png`, `assets/*.material.json` | the ball and its five looks |
 
-What the module registers: components `Motion`, `Bounces`; kind `example_testbed.ball`
+What the module registers: components `Motion`, `Bounces`; kind `testbed.ball`
 (65,536 slots, for the swarm); events `Bounced`, `BlinkOn`, `BlinkOff`; systems
-`example_testbed.move`, `example_testbed.sim` (Sim); handlers `on_bounced`, `on_spawned`,
-`on_blink_off`, `on_blink_on`, `on_edge`; trigger `example_testbed.third_bounce`.
+`testbed.move`, `testbed.sim` (Sim); handlers `on_bounced`, `on_spawned`,
+`on_blink_off`, `on_blink_on`, `on_edge`; trigger `testbed.third_bounce`.
 
 ## Behaviour worth knowing
 

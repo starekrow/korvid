@@ -1,4 +1,4 @@
-// example_arcfire: value noise for the game's shaders. Cheap and smooth enough for a
+// arcfire: value noise for the game's shaders. Cheap and smooth enough for a
 // nebula and a burning edge; nothing here needs to match the CPU.
 #pragma once
 

@@ -1,6 +1,6 @@
-# example_stones
+# stones
 
-The engine used the other way round. `example_rocks` is written the way the engine would
+The engine used the other way round. `rocks` is written the way the engine would
 like: kinds, systems with declared sets, handlers, timers, a trigger. This one is written
 the way you would write it on a Saturday: a `Stone` struct, an `Array<Stone>`, and one
 function that does input, motion, collision and drawing in order, every tick.
@@ -40,7 +40,7 @@ where the shaders and this module's `assets/` have been copied next to it:
 
 ```bash
 tools/kormake/bin/linux/kormake build linux-debug
-build/linux-debug/bin/example_stones
+build/linux-debug/bin/stones
 ```
 
 `kormake build linux-debug` is everything checked with the validation layers on;
@@ -109,11 +109,11 @@ nothing.
 an event on the edge:
 
 ```cpp
-{.name = ".tenth_bump", .field = "example_stones.stone.Stone.bumps", .edge = TriggerEdge::CrossedAbove, .value = 9}
+{.name = ".tenth_bump", .field = "stones.stone.Stone.bumps", .edge = TriggerEdge::CrossedAbove, .value = 9}
 ```
 
 **Publish the stones for someone else.** Another module (a scoreboard, a replay recorder,
-a debug overlay) reads them through `ctx.resource<const Game>("example_stones.game")` once
+a debug overlay) reads them through `ctx.resource<const Game>("stones.game")` once
 this module declares the resource and publishes it at startup, and the scheduler then
 knows that module reads what this one writes.
 

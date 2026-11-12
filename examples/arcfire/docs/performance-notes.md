@@ -492,7 +492,7 @@ use) and sorts by layer and slot, so 2,048 buckets where there were 768. The sor
 the same build before and after under `--bench ring --dial rank=56` (a Radeon 780M): 0.175
 to 0.198 ms a frame before, 0.192 to 0.211 after, about 0.015 ms; the draws unchanged. The
 shaders are named by their file (`arcfire_nebula`), not by the module's prefix the PRD
-proposed (`example_arcfire.nebula`): the shader rule's outputs are its inputs' stems, so
+proposed (`arcfire.nebula`): the shader rule's outputs are its inputs' stems, so
 the prefix is in the file name. The interface is `sprite_fragment.slangh` rather than all
 of `sprite_common.slangh`: the varyings, the bindings and a texel helper.
 

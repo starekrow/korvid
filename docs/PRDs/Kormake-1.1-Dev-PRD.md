@@ -40,14 +40,13 @@ edges, bindings and the Ninja graph stay exactly as they are.
 - Every command, argument, option, file and environment variable is documented in one
   place.
 - Existing command lines keep working: `kormake build linux-debug`,
-  `kormake test linux-dev collision` and `kormake package linux-ship example_arcfire`.
-- No change to what gets built. Module names, asset paths, outputs and state hashes stay
-  as they are.
+  `kormake test linux-dev collision` and `kormake package linux-ship <game>`.
+- Module names lose their `example_` and `tool_` prefixes: each module is named for its
+  directory (`arcfire`, `kpack`). This is the one change that reaches the games (see
+  Renaming).
 
 **Non-goals**
 
-- Renaming modules. `example_arcfire` keeps its name. Its directory becomes
-  `examples/arcfire`, and its assets still stage to `bin/assets/example_arcfire/`.
 - Moving the toolchain modules or `slang`. Those are platform plumbing, not developer
   tools, so they stay in `modules/`.
 - A `run` command, IDE projects, or a kormake binary that rebuilds itself.
@@ -59,18 +58,34 @@ edges, bindings and the Ninja graph stay exactly as they are.
 kormake.lua            master file; modulepath { "modules", "examples", "tools" }
 modules/               engine modules, toolchains, slang
 examples/korvid.config engine ".."
-examples/arcfire/      module "example_arcfire" (and arcanum, rocks, testbed, ...)
+examples/arcfire/      module "arcfire" (and arcanum, rocks, testbed, ...)
 tools/korvid.config    engine ".."
-tools/kpack/           module "tool_kpack" (exe kpack)
-tools/picture/         module "tool_picture" (exe picture)
+tools/kpack/           module "kpack"
+tools/picture/         module "picture"
 tools/kormake/         kormake itself (not a module)
 tools/ios/             scripts (not a module)
 ```
 
-Each example drops its `example_` prefix from the directory name, but not from the module
-name. `tool` is the library that tools link, so it stays in `modules/`. Directories under
+Each module is named for its directory: `example_arcfire` becomes `arcfire`, `tool_kpack`
+becomes `kpack` (its `exe` field goes, being the same), and so on. `tool` is the library that tools link, so it stays in `modules/`. Directories under
 a module path that have no `module.lua` are ignored, as they are today, so `tools/kormake`
 and `tools/ios` can sit beside the tool modules.
+
+**Renaming.** A module's name is in more places than its directory, so the rename reaches
+the games:
+
+- assets stage to `bin/assets/arcfire/`, and every asset path in code, JSON and maps reads
+  `arcfire/...`;
+- headers move to `include/korvid/arcfire/`, and module symbols become `kv::arcfire_module`;
+- kind, column and system names become `arcfire.ship`, `arcanum.player.Actor` and so on;
+- executables, packs and `dist/` follow (`bin/arcfire`, `bin/arcfire.kpak`), as do iOS
+  bundle identifiers (`org.korvid.arcfire`).
+
+Kind names feed the state hash, so demo hashes change, and so do the recorded replays,
+which also name their executable. Recording the replays again and noting the new hashes
+waits until the other changes that affect them have landed. Arcanum's saves written before
+the rename name the old kinds and the old game, so they no longer load. The save
+directories (`~/.local/share/korvid/<game>`) were never named for the module, so they stay.
 
 ## Command line
 
@@ -85,8 +100,9 @@ kormake [COMMAND] [NAME...] [TARGET] [OPTIONS]
   It can appear anywhere among the arguments. When it is omitted, the target is the
   config's `target` if it sets one, otherwise the host platform in the master file's
   first config. (1.0 used the master's first platform, which was wrong on macOS.)
-- **NAME** is a module, matched in this order: its module name (`tool_kpack`), its
-  executable name (`kpack`), then its directory name (`arcfire`). A name that matches
+- **NAME** is a module, matched in this order: its module name (`kpack`), its
+  executable name (an `exe` field), then its directory name (for a module whose
+  directory is named differently). A name that matches
   two modules at the same step is an error that lists both. Names that collide with a
   config or a platform-config are refused when modules are collected. A NAME with a
   slash in it, or `.`, is a directory instead: it selects every module under it, so
@@ -111,7 +127,7 @@ platform supports. A module outside the roots that fails to resolve is dropped f
 graph and its reason is recorded. That reason is printed only if someone names the
 module. Every selectable instance gets a Ninja phony named after its module: the target's
 instances, plus host-only modules. `kormake NAME` runs `ninja NAME`, and so does
-`ninja -C build/linux-dev example_arcfire`. Test edges are emitted for every selectable
+`ninja -C build/linux-dev arcfire`. Test edges are emitted for every selectable
 module that has tests. `tests` and `check` still cover only the modules whose roots ask
 for tests. `default all` is unchanged.
 
@@ -170,7 +186,7 @@ example `vendor/`), `%{root}` and `LICENSE`/`NOTICE` resolve.
 | ID | Requirement | Priority |
 | --- | --- | --- |
 | R1 | Examples under `examples/<name>/`, tool modules under `tools/<name>/`, master modulepath updated, `korvid.config` in both | P0 |
-| R2 | Module names, asset staging and outputs unchanged; demo and replay hashes unchanged | P0 |
+| R2 | Modules named for their directories (no `example_`/`tool_`); assets, headers, kinds and outputs follow; replays recorded again later | P0 |
 | R3 | Commands take module names (by module, executable or directory name), with ambiguity reported | P0 |
 | R4 | No name means the current directory decides: a module, the modules under a directory, or the roots | P0 |
 | R5 | The target is optional and positional, defaulting to the config's `target` or host plus first config; a bare config name means the host in that config | P0 |
@@ -196,16 +212,14 @@ example `vendor/`), `%{root}` and `LICENSE`/`NOTICE` resolve.
 linux-ship. `kormake kpack` and `kormake` run in `examples/arcfire` build only their
 closures, which is checked with `ninja -n`. A scratch project outside the repository,
 with one `korvid.config` and a hello module that links `core`, builds into its own
-`build/`. Arcfire's Shoreline demo hash is unchanged (a85e2f7fa02412e5 at tick 14171), as
-are arcanum's (9224de52db9aac0c) and the replays. Windows (`bootstrap.bat`, `cl`) and
+`build/`. Before the rename, arcfire's Shoreline demo hash was unchanged
+(a85e2f7fa02412e5 at tick 14171). After it, the games run their demos with every asset
+found, and the hashes and replays are left for later. Windows (`bootstrap.bat`, `cl`) and
 macOS are not verified on this branch. The code has no new OS calls, but Windows path case
 in the current-directory matching is worth a look there.
 
 ## Open questions
 
 - Should `kormake` with no arguments at the root keep building the roots with all their
-  tests? 1.1 says yes so that 1.0 behavior is unchanged. `kormake examples` would be the
-  short way to build just the examples.
-- Should examples eventually be renamed (`arcfire` rather than `example_arcfire`)? Doing
-  so changes asset paths, saved-file locations and hashes, so it is left for a separate
-  change.
+  tests? 1.1 says yes so that 1.0 behavior is unchanged. `kormake examples/` is the short way
+  to build just the examples.

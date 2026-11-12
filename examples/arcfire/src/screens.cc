@@ -1,4 +1,4 @@
-// example_arcfire: the screens around the runs.
+// arcfire: the screens around the runs.
 //
 //   - Options (the title's, the pause menu's): the three volumes, arcade's starting
 //     difficulty, the dev counters; up and down choose, left and right change; saved as the

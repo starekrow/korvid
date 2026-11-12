@@ -280,7 +280,7 @@ they read the module's tables, which only the pumps write.
 - **Decode is on the main thread.** A 4096x4096 PNG costs milliseconds in `asset.pump`.
   The pump decodes everything that arrived this frame; a burst of large textures shows up
   as a long tick. Cooked formats (BC, ASTC) are the fix and are a later slice.
-- **Paths are names.** `example_rocks/rock.png` and `example_rocks//rock.png` are two
+- **Paths are names.** `rocks/rock.png` and `rocks//rock.png` are two
   assets to the name table even though they are one file.
 - **Material edits do not touch the file.** `patch` changes the row; what you keep is
   what `dump` prints.

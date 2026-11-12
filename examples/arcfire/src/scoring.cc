@@ -1,4 +1,4 @@
-// example_arcfire: the score kept and the run's shape. The rules are scoring.h's; here is
+// arcfire: the score kept and the run's shape. The rules are scoring.h's; here is
 // the system that runs the chain's window down, pays the extends and begins a round. The
 // run: arcade goes round again at its stage's end a difficulty up, the score carried, and
 // ends after Hard; a stage select (--stage) ends with its stage. Either logs the results

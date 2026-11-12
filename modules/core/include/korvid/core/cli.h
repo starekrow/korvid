@@ -47,17 +47,17 @@ bool cli_arg_f32(CliContext& ctx, const char* arg, const char* what, f32* out);
 bool cli_arg_u32(CliContext& ctx, const char* arg, const char* what, u32* out);
 
 // ---- the filesystem ---------------------------------------------------------------------
-// What the game has, as paths: `ls /` names the top level, `cd /kinds/example_rocks` and
+// What the game has, as paths: `ls /` names the top level, `cd /kinds/rocks` and
 // `ls` names that module's kinds, `print rock/3` describes an entity, `patch
 // rock/3/Health/hp 1` writes a field. The tree is virtual: a module mounts a piece of it
 // by declaring a CliMountDesc in its ModuleDesc::mounts, and answers for the names under
 // it; the cli module owns the working directory, the path rules and the verbs. Names use
 // '/' between components; engine names map their dots to slashes on the way in, so a
-// module is a directory (`example_rocks.rock` is `/kinds/example_rocks/rock`).
+// module is a directory (`rocks.rock` is `/kinds/rocks/rock`).
 //
 // A mount answers three questions. list(dir) emits the children of one directory: `dir`
 // is "" for the mount's own root, otherwise the relative directory with a trailing slash
-// ("example_rocks/rock/"); a child whose name ends in '/' is a directory whose contents
+// ("rocks/rock/"); a child whose name ends in '/' is a directory whose contents
 // come on request, any other child is a leaf; the summary is one line and may be "".
 // describe(rel) prints a node, leaf or directory, through ctx.print, or returns false
 // for a name that is not there. patch(rel, values) sets a node from words, or fails
@@ -91,7 +91,7 @@ struct CliTree {
     bool add(const char* full_name, bool container, const char* summary);
 };
 
-// Engine names in the tree: "example_rocks.rock" <-> "example_rocks/rock".
+// Engine names in the tree: "rocks.rock" <-> "rocks/rock".
 void cli_dots_to_slashes(const char* name, char* out, usize cap);
 void cli_slashes_to_dots(const char* name, char* out, usize cap);
 

@@ -1,4 +1,4 @@
-# Credits for example_arcfire's assets
+# Credits for arcfire's assets
 
 Every file under this directory is listed here with where it came from. Vendored files
 are copied unmodified under new names by `tools/make_art.py`, which also draws everything

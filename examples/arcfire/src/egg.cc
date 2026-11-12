@@ -1,4 +1,4 @@
-// example_arcfire: the egg. A death is the game's set piece, not a setback: time slows to
+// arcfire: the egg. A death is the game's set piece, not a setback: time slows to
 // a quarter, the ship breaks into its four quarters, the bullets near it cancel into
 // sparks, and the egg drops: a small spherical machine that comes to rest where the ship
 // died, builds the new ship around itself as time comes back, and splits along its seam,
@@ -70,7 +70,7 @@ void egg(TickContext& ctx) {
     Table* ships = ctx.write_kind(g_ship_kind);
     Table* eggs = ctx.write_kind(g_egg_kind);
     Table* shells = ctx.write_kind(g_shell_kind);
-    Span<Collider2> ring_col = ctx.write<Collider2>("example_arcfire.ring.Collider2");
+    Span<Collider2> ring_col = ctx.write<Collider2>("arcfire.ring.Collider2");
     Collider2* ring = g.ring.index() < ring_col.len ? &ring_col[g.ring.index()] : nullptr;
     Transform2* xf = ships->get<Transform2>(g.ship);
     Sprite* sprite = ships->get<Sprite>(g.ship);

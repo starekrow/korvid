@@ -94,7 +94,7 @@ def make_map(name, title, music, seed, paths, pond, trees, houses, spawns, exits
     for (gid_local, x, y) in trees: objs.tile(FIRST["nature32.tsj"] + gid_local, x, y, 32, 32)
     for (gid_local, x, y) in houses: objs.tile(FIRST["house.tsj"] + gid_local, x, y, 64, 48)
     for (who, x, y, route) in npcs:
-        objs.point(who, x, y, [{"name": "sheet", "type": "string", "value": "example_arcanum/actors/" + who + ".png"},
+        objs.point(who, x, y, [{"name": "sheet", "type": "string", "value": "arcanum/actors/" + who + ".png"},
                                {"name": "route", "type": "string", "value": route}])
     for (x, y) in rocks: objs.point("rock", x, y)  # a pushable boulder from the nature sheet, the point its center
     sp = Objects()
@@ -134,7 +134,7 @@ def main():
     skip = {("x", W * 16 - 32): [(road_y * 16 - 16, (road_y + 4) * 16)]}
     v_trees = border_trees(rng, skip) + [(0, 64, 200), (3, 96, 300), (8, 240, 320), (0, 400, 330), (1, 520, 360), (8, 120, 380), (0, 470, 110)]
     v_houses = [(0, 200, 96), (1, 368, 96), (0, 112, 200)]
-    make_map("village.tmj", "Village", "example_arcanum/music/village.ogg", 7, v_paths, set(), v_trees, v_houses,
+    make_map("village.tmj", "Village", "arcanum/music/village.ogg", 7, v_paths, set(), v_trees, v_houses,
              [("player_start", 312, 248), ("east", W * 16 - 40, (road_y + 1) * 16 + 8)],
              [(W * 16 - 8, road_y * 16, 8, 48, "field", "west")],
              [("OldMan", 248, 120, ""), ("ManGreen", 260, 300, "0,0 96,0")],
@@ -146,7 +146,7 @@ def main():
     skip = {("x", 0): [(road_y * 16 - 16, (road_y + 4) * 16)]}
     f_trees = border_trees(rng, skip) + [(0, 96, 120), (1, 160, 140), (3, 300, 330), (0, 360, 120), (8, 200, 300),
                                          (1, 380, 410), (0, 470, 260), (3, 560, 120), (8, 120, 420), (0, 250, 420)]
-    make_map("field.tmj", "Field", "example_arcanum/music/road.ogg", 11, f_paths, f_pond, f_trees, [],
+    make_map("field.tmj", "Field", "arcanum/music/road.ogg", 11, f_paths, f_pond, f_trees, [],
              [("player_start", 48, (road_y + 1) * 16 + 8), ("west", 40, (road_y + 1) * 16 + 8)],
              [(0, road_y * 16, 8, 48, "village", "east")],
              [],

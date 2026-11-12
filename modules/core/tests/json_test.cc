@@ -10,7 +10,7 @@ void test_json(kv::TestCtx& c) {
 
     // A material file's worth of structure, with every value kind and some escapes.
     const char* text = R"({
-        "texture": "example_rocks/rock.png", "blend": "alpha",
+        "texture": "rocks/rock.png", "blend": "alpha",
         "tint": [1, 0.5, 0.25, 1], "params": [], "name": "a \"quoted\" \u00e9\n", "opaque": false, "nothing": null,
         "nested": {"n": -1.5e2, "list": [[1], {"k": true}]}
     })";
@@ -18,7 +18,7 @@ void test_json(kv::TestCtx& c) {
     KV_CHECK(c, json_parse(text, strlen(text), mem_scratch(), doc) && doc.error == nullptr);
     const JsonValue& root = doc.root();
     KV_CHECK(c, root.is_object() && root.count == 8);
-    KV_CHECK(c, strcmp(json_string(json_get(doc, root, "texture"), ""), "example_rocks/rock.png") == 0);
+    KV_CHECK(c, strcmp(json_string(json_get(doc, root, "texture"), ""), "rocks/rock.png") == 0);
     KV_CHECK(c, strcmp(json_string(json_get(doc, root, "blend"), ""), "alpha") == 0);
     f32 tint[4] = {};
     KV_CHECK(c, json_numbers(doc, json_get(doc, root, "tint"), tint, 4) == 4 && tint[1] == 0.5f && tint[2] == 0.25f);

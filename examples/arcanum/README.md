@@ -1,4 +1,4 @@
-# example_arcanum
+# arcanum
 
 A small JRPG, written to find out what a game larger than one screen asks of the engine.
 Two Tiled maps, a village and a field, built from the CC0 Ninja Adventure pack by
@@ -24,11 +24,11 @@ Then build the configuration you want and run the executable from its bin direct
 
 ```bash
 tools/kormake/bin/linux/kormake build linux-dev
-build/linux-dev/bin/example_arcanum
+build/linux-dev/bin/arcanum
 ```
 
-The ship build packs the game's assets into `bin/example_arcanum.kpak`, and
-`kormake package linux-ship example_arcanum` makes `dist/example_arcanum/`, which runs
+The ship build packs the game's assets into `bin/arcanum.kpak`, and
+`kormake package linux-ship arcanum` makes `dist/arcanum/`, which runs
 on its own.
 
 Controls: arrows or WASD (or the left stick or the d-pad) walk; Enter, Space or South talks

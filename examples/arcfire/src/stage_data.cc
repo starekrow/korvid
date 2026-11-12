@@ -1,4 +1,4 @@
-// example_arcfire: reading a stage file. A stage is a starting speed, named paths, and
+// arcfire: reading a stage file. A stage is a starting speed, named paths, and
 // marks by distance, each one action:
 //
 //   { "name": "Shoreline", "speed": 1.5,

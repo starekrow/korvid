@@ -1,4 +1,4 @@
-// example_arcfire: the program around a run. Run plainly, the game opens on a title
+// arcfire: the program around a run. Run plainly, the game opens on a title
 // (Arcade, Stage select, High scores, Options, Quit); a flag that names a run (--demo, --autoplay, --stress,
 // --bench, --stage, --arcade) goes straight into it. A run starts from a fresh sim
 // (engine_sim_reset), so a second run in the process is the same run as the first in a new

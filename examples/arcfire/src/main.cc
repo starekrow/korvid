@@ -1,4 +1,4 @@
-// example_arcfire: the entry point. The game is the module (module.cc and the files it
+// arcfire: the entry point. The game is the module (module.cc and the files it
 // names); the loop, the window, the renderer and the options are the frame loop's.
 #include "korvid/frameloop/frameloop.h"
 

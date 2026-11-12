@@ -1,7 +1,7 @@
 // Korvid asset: materials as files. A material file is JSON next to the textures under the
 // module's assets/:
 //
-//   { "texture": "example_rocks/rock.png", "blend": "alpha", "tint": [1, 1, 1, 1],
+//   { "texture": "rocks/rock.png", "blend": "alpha", "tint": [1, 1, 1, 1],
 //     "params": [0, 0, 0, 0, 0, 0, 0, 0], "filter": "nearest", "shader": "arcfire_nebula" }
 //
 // Every field is optional: no texture means the renderer's default, the rest default to

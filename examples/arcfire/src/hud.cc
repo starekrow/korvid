@@ -1,4 +1,4 @@
-// example_arcfire: what the player sees around the field. The camera fits the field to
+// arcfire: what the player sees around the field. The camera fits the field to
 // the window; the UI document (assets/ui/arcfire.ui.json) draws the side panels, the
 // score, the eggs, the restart's cover and the stage-clear banner; the menus are flow.cc's.
 // The HUD is two calls a tick: model values from the world row and the counters.
@@ -27,7 +27,7 @@ void upper(char* s) {
 } // namespace
 
 void hud_open(Engine& e, Game& g) {
-    g.ui = ui_load(e, "example_arcfire/ui/arcfire.ui.json", asset_scope_global(e));
+    g.ui = ui_load(e, "arcfire/ui/arcfire.ui.json", asset_scope_global(e));
     UiOpen o;
     o.layer = 90;
     o.input = false;
@@ -209,9 +209,9 @@ void hud(TickContext& ctx) {
     ui_model_set_int(e, "deltas", g.stats.deltas);
     ui_model_set_int(e, "pairs", g.stats.pairs_tested);
     // A boss's bar: its parts' health, open and armored, over their full.
-    Span<const Boss> boss_rows = ctx.read<Boss>("example_arcfire.boss.Boss");
-    Span<const Health> part_hp = ctx.read<Health>("example_arcfire.part.Health");
-    Span<const Part> parts = ctx.read<Part>("example_arcfire.part.Part");
+    Span<const Boss> boss_rows = ctx.read<Boss>("arcfire.boss.Boss");
+    Span<const Health> part_hp = ctx.read<Health>("arcfire.part.Health");
+    Span<const Part> parts = ctx.read<Part>("arcfire.part.Part");
     const Table* bt = engine_table(e, g_boss_kind);
     const Table* pt = engine_table(e, g_part_kind);
     // Bosses that come together (Orbit's gunships) share it: every live one's parts, over

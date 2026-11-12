@@ -2,7 +2,7 @@
 // systems that integrate in parallel, bounce and emit, churn entities by chunk commands,
 // and sum a reduction, plus a handler that eats the events. Run at one thread and at
 // many, the state hash must agree and the tick rate is the number worth having.
-#include "korvid/example_cpukiller/module.h"
+#include "korvid/cpukiller/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/random.h"
@@ -124,7 +124,7 @@ constinit const HandlerDesc k_handlers[] = {{.name = ".on_bounced", KV_ON(Bounce
 
 } // namespace
 
-KV_MODULE_DEFINE(example_cpukiller_module) = {
+KV_MODULE_DEFINE(cpukiller_module) = {
     .name       = "cpukiller",
     .events     = k_events,
     .components = k_components,

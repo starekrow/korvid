@@ -1,4 +1,4 @@
-// example_arcfire: the run's record and the score's rules (scoring.cc has the system that
+// arcfire: the run's record and the score's rules (scoring.cc has the system that
 // keeps them and the run's shape).
 //
 //   - The chain: a kill within the chain's window (`chain_window` ticks, 90 at Normal) of

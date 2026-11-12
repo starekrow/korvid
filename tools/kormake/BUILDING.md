@@ -171,7 +171,7 @@ or `FAILED:` come from Ninja and the compiler.
   it.
 - *`module 'x' (needed by y) does not support platform 'p'`*: `x` has a `platforms` list
   that leaves `p` out, and something on `p` links it.
-- *`'x' links 'tool_kpack', which is built for the host only; name it in tools`*: a host
+- *`'x' links 'kpack', which is built for the host only; name it in tools`*: a host
   tool was listed in `deps`.
 - *`external 'sdl3' (toolchain ...) is not at ...`*: the package is missing. The message
   includes the toolchain's `fetch` instructions.
