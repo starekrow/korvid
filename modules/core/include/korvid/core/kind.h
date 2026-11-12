@@ -3,8 +3,9 @@
 // slot pool for liveness plus one SoA column per component, on reserved pages committed
 // as rows are used. Every entity of a kind has every component of the kind. Each table
 // is a handle issuer (its kind name is the handle kind's name) and a set of resources:
-// "kind" for spawn and destroy, "kind.Component" for each column, "*.Component" in a
-// system's sets for that column in every kind.
+// "kind" for all of it (a write: spawn, destroy, every column), "kind.@alive" for which
+// slots are alive, "kind.Component" for each column, "*.Component" in a system's sets for
+// that column in every kind.
 //
 //   constinit const KindDesc k_kinds[] = {{.name = ".bullet", .components = "Transform2, Sprite, Velocity", .capacity = 4096}};
 //
@@ -114,6 +115,7 @@ struct Table {
     u32             module   = 0; // declaring module's index
     u16             kind     = 0; // handle kind
     u32             resource = 0; // id of "kind"
+    u32             alive_resource = 0; // id of "kind.@alive": which slots are alive
     Pool<u8>        slots;        // liveness and generations; the payload is unused
     Array<Column>   columns;      // in the kind's declared order
     u32             committed_rows = 0;

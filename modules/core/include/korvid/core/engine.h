@@ -36,9 +36,10 @@ struct EngineConfig {
     Span<const KindCapacity>   capacities   = {};
 };
 
-// What a resource is. A kind's resources sit together: the kind, then its columns, its
-// attachments and its bags, so the kind covers the `children` ids after its own.
-enum class ResourceClass : u8 { State, Published, Append, Kind, Column, Attachment, Bags };
+// What a resource is. A kind's resources sit together: the kind, then its liveness, its
+// columns, its attachments and its bags, so the kind covers the `children` ids after its
+// own, and an early read of it the first `early` of them (liveness and columns).
+enum class ResourceClass : u8 { State, Published, Append, Kind, Liveness, Column, Attachment, Bags };
 
 struct ResourceEntry {
     const char*   name;
@@ -47,7 +48,7 @@ struct ResourceEntry {
     void*         ptr      = nullptr; // what the owner published for systems to reach through the context
     const void*   type     = nullptr; // its type key
     u32           children = 0;     // a kind: the resources after it that it covers
-    u32           columns  = 0;     // a kind: how many of those are columns, which an early read covers
+    u32           early    = 0;     // a kind: how many of those an early read covers: its liveness and columns
     u32           table    = 0;     // a kind's resources: its kind id
     bool          cosmetic = false; // a column or attachment of a cosmetic component: never feeds the sim
     AppendFn      apply    = nullptr;
@@ -269,12 +270,20 @@ const char* engine_entity_name(Engine& e, Handle entity);
 // Every living named entity, in no particular order; fn returns false to stop.
 void        engine_entity_names_each(Engine& e, bool (*fn)(Handle entity, Name name, void* user), void* user);
 
-// Entity kinds, by name or id. Null for unknown.
+// Entity kinds, by name or id. Null for unknown. A table reached this way is the table as
+// it is now, beside every declared check: inside a system that reads the kind early from a
+// snapshot, that is a read the schedule never saw, so dev builds refuse it there (reach the
+// kind through the context). Elsewhere these are for code outside the schedule, and for a
+// system that only wants what never changes (a kind's handle kind, its name).
 u32    engine_kind_id(const Engine& e, const char* name);
 Table* engine_table(Engine& e, u32 kind_id);
 Table* engine_table(Engine& e, const char* name);
 // The table an entity handle was issued by, or null if the handle's kind is not one of
 // this engine's tables. Says nothing about whether the handle is still live: ask the table.
 Table* engine_table_of(Engine& e, Handle h);
+// The same without the check: the engine's own, on behalf of a system whose access the
+// context has already checked.
+Table* engine_table_now(Engine& e, u32 kind_id);
+Table* engine_table_of_now(Engine& e, Handle h);
 
 } // namespace kv

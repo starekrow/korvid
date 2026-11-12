@@ -417,8 +417,8 @@ void next_page(Engine& e, Game& g) {
 // A villager speaks: its face, its name to show and its lines, from its bag.
 void talk(TickContext& ctx, Game& g, Handle npc) {
     Engine& e = *ctx.engine;
-    const Table* npcs = ctx.read_kind("example_arcanum.npc");
-    const Actor* a = npcs->get<Actor>(npc);
+    if (!ctx.alive(npc)) return;
+    const Actor* a = &ctx.read<Actor>("example_arcanum.npc.Actor")[npc.index()];
     Quest* q = ctx.attached<Quest>(npc);
     if (q && !q->done && g.rocks_broken >= q->rocks_wanted) { q->done = 1; KV_INFO("arcanum", "quest: done"); }
     const char* lines = ctx.prop_str(npc, q && q->done ? "dialogue_done" : "dialogue", "...");
@@ -770,7 +770,7 @@ void walk(TickContext& ctx) {
         collision_query(ctx, rect2{at.x + ahead.x - 8.0f, at.y - 9.0f + ahead.y, 16.0f, 10.0f}, L_ACTOR, nearby);
         static const u32 k_npc = ctx.kind_id(".npc");
         static const u32 k_rock = ctx.kind_id(".rock");
-        u16 npc_hk = engine_table(e, k_npc)->kind, rock_hk = engine_table(e, k_rock)->kind;
+        u16 npc_hk = engine_table_now(e, k_npc)->kind, rock_hk = engine_table_now(e, k_rock)->kind; // handle kinds, which never change
         if (hammering) {
             actor[i].swing = 0.3f;
             play_sound(ctx, g, SND_HIT);
@@ -860,17 +860,17 @@ void villagers(TickContext& ctx) {
     const TilemapAsset* map = tilemap_get(*ctx.engine, g.map);
     if (map && map->state != AssetState::Ready) map = nullptr;
     static const u32 k_npc = ctx.kind_id(".npc");
-    const Table* table = engine_table(*ctx.engine, k_npc);
+    KindRows table = ctx.rows(k_npc);
     f32 step = kNpcSpeed * (f32)ctx.dt;
     for (u32 i = 0; i < move.len; ++i) {
-        if (!table->is_alive(i)) continue;
+        if (!table.alive(i)) continue;
         Actor& a = actor[i];
         Move2& mv = move[i];
         point2 at = local[i].position; // the level's root is at the origin
         f32 len = sqrtf(a.route.x * a.route.x + a.route.y * a.route.y);
         mv.delta = vec2{0, 0};
         a.moving = 0;
-        if (!g.provoked.is_null() && table->handle_at(i) == g.provoked && !a.hostile) {
+        if (!g.provoked.is_null() && table.handle_at(i) == g.provoked && !a.hostile) {
             // Hammered: it turns on the player, says so, and its color goes.
             a.hostile = 1;
             a.repath = 0.0f;
@@ -878,7 +878,7 @@ void villagers(TickContext& ctx) {
             g.provoked = Handle{};
             sprite[i].tint = color_rgba(1.0f, 0.55f, 0.55f, 1.0f);
             shout(ctx, g, "{shake}How DARE you!{/shake}");
-            KV_INFO("arcanum", "hostile: %s at tick %llu", engine_entity_name(*ctx.engine, table->handle_at(i)), (unsigned long long)ctx.tick);
+            KV_INFO("arcanum", "hostile: %s at tick %llu", engine_entity_name(*ctx.engine, table.handle_at(i)), (unsigned long long)ctx.tick);
         }
         if (a.hostile && player_at && map) {
             // The chase: the map's path toward the player, a waypoint at a time, at twice the
@@ -1217,11 +1217,11 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".menu", .phase = Phase::PreSim, .fn = menu, .reads = "input.actions", .appends = "audio.commands",
      .after = "level.run", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".modes", .phase = Phase::PreSim, .fn = modes, .appends = "audio.commands", .after = ".menu", .main_thread = true, .runs = RunWhen::Always},
-    // Before the resolve (it writes the intent): the villagers as they stand, except what
-    // the resolve writes, which is as the phase found it.
-    {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions, ^*[Collider2].Transform2, *[Collider2].Collider2, .npc, ^.npc.Local2, ^.npc.MoveResult2, .npc.@props",
+    // Before the resolve (it writes the intent): bodies where the phase found them; of the
+    // villager it faces, whether it lives, how it stands (villagers turns it) and its bag.
+    {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions, ^*[Collider2].Transform2, *[Collider2].Collider2, .npc.@alive, .npc.Actor, .npc.@props",
      .writes = ".player.Move2, .player.Actor, .npc.@Quest", .appends = "audio.commands", .main_thread = true},
-    {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .reads = "^.npc.Local2, ^.player.Transform2, ^.npc.MoveResult2", .writes = ".npc.Move2, .npc.Actor, .npc.AnimPlayer, .npc.Sprite", .appends = "audio.commands", .main_thread = true},
+    {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .reads = "^.npc.@alive, ^.npc.Local2, ^.player.Transform2, ^.npc.MoveResult2", .writes = ".npc.Move2, .npc.Actor, .npc.AnimPlayer, .npc.Sprite", .appends = "audio.commands", .main_thread = true},
     {.name = ".react", .phase = Phase::Sim, .fn = react, .reads = ".player, .npc.MoveResult2",
      .writes = ".player.Vitals, .player.Sprite, .player.AnimPlayer", .appends = "audio.commands", .main_thread = true},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true, .runs = RunWhen::Always},

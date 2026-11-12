@@ -133,7 +133,6 @@ void beam_spawn(Engine& e, Game& g, Handle owner) {
 // the field goes.
 void shots(TickContext& ctx) {
     const Game& g = ctx.state_as<const Game>();
-    Engine& e = *ctx.engine;
     MemScope scope;
     Array<point2> targets = array_in<point2>(mem_scratch());
     Table* st = ctx.write_kind(g_shot_kind);
@@ -145,20 +144,20 @@ void shots(TickContext& ctx) {
     if (bolts) {
         const u32 kinds[] = {g_air_kind, g_ground_kind};
         for (u32 kind : kinds) {
-            const Table* k = engine_table(e, kind);
-            Span<const Transform2> kx = k->rows_of<Transform2>();
-            Span<const Health> kh = k->rows_of<Health>();
-            for (u32 i = 0; i < k->rows(); ++i)
-                if (k->is_alive(i) && kh[i].hp > 0 && in_field(kx[i].position, 0.0f)) targets.push(kx[i].position);
+            KindRows k = ctx.rows(kind);
+            Span<const Transform2> kx = k.col<const Transform2>();
+            Span<const Health> kh = k.col<const Health>();
+            for (u32 i = 0; i < k.rows(); ++i)
+                if (k.alive(i) && kh[i].hp > 0 && in_field(kx[i].position, 0.0f)) targets.push(kx[i].position);
         }
-        const Table* parts = engine_table(e, g_part_kind);
-        const Table* bosses = engine_table(e, g_boss_kind);
-        Span<const Transform2> px = parts->rows_of<Transform2>();
-        Span<const Part> pp = parts->rows_of<Part>();
-        Span<const Health> ph = parts->rows_of<Health>();
-        for (u32 i = 0; i < parts->rows(); ++i) {
-            if (!parts->is_alive(i) || ph[i].hp <= 0) continue;
-            const Boss* b = bosses->get<Boss>(pp[i].boss);
+        KindRows parts = ctx.rows(g_part_kind);
+        Span<const Boss> bb = ctx.rows(g_boss_kind).col<const Boss>();
+        Span<const Transform2> px = parts.col<const Transform2>();
+        Span<const Part> pp = parts.col<const Part>();
+        Span<const Health> ph = parts.col<const Health>();
+        for (u32 i = 0; i < parts.rows(); ++i) {
+            if (!parts.alive(i) || ph[i].hp <= 0) continue;
+            const Boss* b = ctx.alive(pp[i].boss) ? &bb[pp[i].boss.index()] : nullptr;
             if (b && g.bosses[b->def].parts[pp[i].index].armored_until <= b->phase) targets.push(px[i].position);
         }
     }

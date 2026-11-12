@@ -188,20 +188,30 @@ constinit const SystemDesc k_attach_flow_systems[] = {{.name = "t.leak", .phase 
 KV_MODULE_DEFINE(k_attach_flow) = {.name = "t", .components = k_components, .kinds = k_attach_kinds, .systems = k_attach_flow_systems};
 
 // One mode per resource: two names covering Pos as read and read early are refused, as is
-// an early read of what the system writes; a kind's read is a default its named columns
-// override; a filter can leave a component out; module state is not named, and an early
-// read is of a kind or a column only.
+// an early read of what the system writes, and the whole kind as it stands with one of its
+// columns early; a unit that wants that names the parts (the kind's liveness is
+// "kind.@alive"); a filter can leave a component out; module state is not named, and an
+// early read is of a kind, its liveness or a column only.
 constinit const SystemDesc k_two_modes_systems[] = {{.name = "o.two", .phase = Phase::Sim, .fn = sys_other, .reads = "*.Pos, ^s.body.Pos"}};
 KV_MODULE_DEFINE(k_two_modes) = {.name = "o", .systems = k_two_modes_systems};
 constinit const SystemDesc k_early_own_systems[] = {{.name = "o.own", .phase = Phase::Sim, .fn = sys_other, .reads = "^s.body.Pos", .writes = "s.body.Pos"}};
 KV_MODULE_DEFINE(k_early_own) = {.name = "o", .systems = k_early_own_systems};
+Handle g_look_at;
+bool g_look_alive = false;
+void sys_look(TickContext& ctx) { g_look_alive = ctx.alive(g_look_at); }
 constinit const KindDesc k_o_kinds[] = {{.name = "o.thing", .components = "Pos, Vel", .capacity = 8}};
 constinit const SystemDesc k_kind_default_systems[] = {
     {.name = "o.vel",  .phase = Phase::Sim, .fn = sys_other, .writes = "o.thing.Vel", .state = StateUse::None},
     {.name = "o.move", .phase = Phase::Sim, .fn = sys_other, .reads = "o.thing.Vel", .writes = "o.thing.Pos", .state = StateUse::None},
-    {.name = "o.look", .phase = Phase::Sim, .fn = sys_other, .reads = "o.thing, ^o.thing.Pos", .state = StateUse::None},
+    {.name = "o.look", .phase = Phase::Sim, .fn = sys_look, .reads = "o.thing.@alive, o.thing.Vel, ^o.thing.Pos", .state = StateUse::None},
 };
 KV_MODULE_DEFINE(k_kind_default) = {.name = "o", .components = k_components, .kinds = k_o_kinds, .systems = k_kind_default_systems};
+// The whole kind as it stands and one column early: two modes on one column, refused; a
+// kind's liveness is written only with the kind.
+constinit const SystemDesc k_kind_mixed_systems[] = {{.name = "o.look", .phase = Phase::Sim, .fn = sys_other, .reads = "o.thing, ^o.thing.Pos", .state = StateUse::None}};
+KV_MODULE_DEFINE(k_kind_mixed) = {.name = "o", .components = k_components, .kinds = k_o_kinds, .systems = k_kind_mixed_systems};
+constinit const SystemDesc k_alive_write_systems[] = {{.name = "o.kill", .phase = Phase::Sim, .fn = sys_other, .writes = "o.thing.@alive", .state = StateUse::None}};
+KV_MODULE_DEFINE(k_alive_write) = {.name = "o", .components = k_components, .kinds = k_o_kinds, .systems = k_alive_write_systems};
 constinit const SystemDesc k_excluded_systems[] = {{.name = "j.split", .phase = Phase::Sim, .fn = sys_other, .reads = "*[Vel-Glow].Pos, ^*[Glow].Pos"}};
 KV_MODULE_DEFINE(k_excluded) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_excluded_systems};
 constinit const SystemDesc k_named_state_systems[] = {{.name = "o.peek", .phase = Phase::Sim, .fn = sys_other, .reads = "a.state"}};
@@ -346,6 +356,13 @@ void test_schedule(kv::TestCtx& c) {
                     look->mode(engine_resource_id(x, "o.thing.Vel"), &vel) && vel == Access::Read);
         // Units by rank, wherever they run: o.look is declared last and runs second.
         KV_CHECK(c, look && look->level == 2 && look->unit == 3);
+        // ctx.alive: a declared read of the liveness.
+        g_look_at = engine_table(x, "o.thing")->spawn(Pos{0, 0}, Vel{0, 0});
+        x.phases.run_tick(x, x.events, 1.0 / 60.0, 0);
+        KV_CHECK(c, g_look_alive);
+        engine_table(x, "o.thing")->destroy(g_look_at);
+        x.phases.run_tick(x, x.events, 1.0 / 60.0, 1);
+        KV_CHECK(c, !g_look_alive);
         // Ids from the context carry their engine.
         TickContext ctx{};
         ctx.engine = &x;
@@ -354,6 +371,10 @@ void test_schedule(kv::TestCtx& c) {
         u32 rows = 0;
         KV_CHECK(c, ctx_column(ctx, id, &TypeKey<Pos>::key, false, &rows) != nullptr);
         engine_shutdown(x);
+        const ModuleDesc* const kind_mixed[] = {&k_kind_mixed};
+        KV_CHECK(c, init_fails(c, kind_mixed));
+        const ModuleDesc* const alive_write[] = {&k_alive_write};
+        KV_CHECK(c, init_fails(c, alive_write));
         const ModuleDesc* const excluded[] = {&k_excluded};
         Engine y;
         KV_CHECK(c, engine_init(y, excluded));

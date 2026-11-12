@@ -41,7 +41,8 @@ And some promises were not kept:
 Every name a system can declare is a resource. Some resources contain others:
 
 ```
-kind ".npc"               liveness (spawn, destroy, which slots are alive)
+kind ".npc"               the whole kind
+├── ".npc.@alive"         its liveness: which slots are alive (spawn and destroy change it)
 ├── ".npc.Transform2"     a column
 ├── ".npc.Local2"
 ├── ".npc.@Quest"         an attachment store
@@ -65,15 +66,18 @@ set.
 | write      | `writes = "x"`              | x, to change                            | ordered against other writers  |
 | append     | `appends = "x"`             | nothing: records go to x's owner        | none                           |
 
-One unit, one mode per resource. A unit whose names cover a resource in two modes
-(`*.T` and `^*[A].T`) is refused at startup with both spellings named. A filter can
-exclude a component (`*[Collider2-Parent].Transform2`) to say "the rest of them". A
-kind's read is a default for what it covers: a column named in its own right takes its
-own read mode (`.npc, ^.npc.Transform2` reads the villagers as they stand except where
-they stand, which is as the phase found it). A write has no such default: a unit writing
-a kind writes all of it. A unit may not
-read early what it writes itself: its own writes would show in one mode and not the
-other.
+One unit, one mode per resource, however it is reached. A unit whose names cover a
+resource in two modes (`*.T` and `^*[A].T`, or `.npc` and `^.npc.Transform2`) is refused
+at startup with both spellings named. A unit that wants some of a kind as it stands and
+some early names the parts: `.npc.@alive, .npc.Actor, ^.npc.Transform2`. A filter can
+exclude a component (`*[Collider2-Parent].Transform2`) to say "the rest of them". A unit
+may not read early what it writes itself: its own writes would show one way and not the
+other. A kind's liveness is written only with the whole kind (`writes = ".npc"`), since a
+spawn writes every column.
+
+The context reads liveness checked like anything else: `ctx.alive(h)` and `ctx.rows(kind)`
+(a kind's rows for a loop, each column checked as it is taken) need a read of
+`kind.@alive`; `ctx.read_kind` needs the whole kind.
 
 The early read of a kind covers its liveness and its columns. Attachments and bags are
 sparse stores the engine does not copy: they are read as they stand or not at all, and an
@@ -181,6 +185,14 @@ and what it steals no longer depend on which thread got the lock first.
   caught (dev builds) instead of reaching the wrong resource. Code that caches ids in
   statics keeps working with one engine and is told when it does not.
 - **A failed job pool fails init** before any module starts.
+- **Tables around the context.** `engine_table` and `engine_table_of` hand out the table
+  as it is now. A snapshot reader that reaches a kind it reads early that way would read
+  the present while the schedule assumed the past, and nothing would tell it: dev builds
+  refuse it, naming the system and the kind. The engine's own lookups use
+  `engine_table_now` / `engine_table_of_now`, as does a system that wants only what never
+  changes (a kind's handle kind). The guard covers what runs inside a unit, its
+  `parallel_for` chunks included. Running a game with every kind a snapshot in a dev
+  build is the sweep that finds these.
 
 ## What stays
 
@@ -224,9 +236,17 @@ the rules found what the review said they would:
   stage left them: the "torn" pairs the old scheduler settled by its path, with one of the
   two reads seeing the other value. Both kinds are snapshots now, the case snapshots are
   for; every kind ordered is a cycle there, and init says so when forced.
-- Arcanum's `walk` read the villagers whole and, early, their positions; it runs before
-  the resolve, so what the resolve writes it was already seeing as the phase found it. It
-  says so now (`^.npc.Local2, ^.npc.MoveResult2`).
+- Arcanum's `walk` read the villagers whole and, early, their positions. It now names
+  what it reads of the one it faces: `.npc.@alive, .npc.Actor, .npc.@props`, with
+  positions early, and asks `ctx.alive`.
+- The sweep with every kind a snapshot found systems that read a kind early and reached
+  its table directly: arcanum's `villagers` (liveness), arcfire's `control` (the options'
+  liveness), `shots` (targets' rows and their bosses) and the pilots. The pilots (`bot`,
+  and `demo`, which declared no reads at all) read the whole field, the world's `Run` and
+  `Stage` and the ship's `Ship` included, none of it declared. They go through the
+  context now and declare it: the bot the field early, the demo as it stands in Input.
+  None of this changed a hash (the readers ran before their writers either way), which
+  is the point of the guard: the hash comparison could not have found them.
 - Arcfire's `.glows` declared no state and read the game's textures through it; it is a
   reader now, which costs Sim a level (15 to 16).
 - 29 declarations of `audio.commands` moved from `writes` to `appends`.
@@ -255,9 +275,9 @@ matching at 1 and 16 threads, as each kind says and with every kind a snapshot.
 **What it costs.** Arcfire `--stress`, dev build, `balanced` power profile, so the
 clocks move and differences under a tenth of a millisecond are noise.
 
-- The copies. As the kinds say (parts and the shell), 3.3 µs a tick, under 1 KB. Every
-  kind a snapshot, bullets included (the bot reads them early): 27.6 µs a tick, 83 KB a
-  tick on average and 328 KB at the peak, against a tick of about 1 ms.
+- The copies. As the kinds say (parts and the shell), 5.1 µs a tick, under 1 KB. Every
+  kind a snapshot, bullets included (the bot reads the field early): 44 µs a tick, 95 KB
+  a tick on average and 356 KB at the peak, against a tick of about 1 ms.
 - The levels. Sim has 22 units in 16 levels whichever way early reads go; arcfire's
   serial chain is its module state, not its early reads, so snapshots buy it nothing
   there. Arcanum's Sim is 5 levels either way.
@@ -268,9 +288,14 @@ clocks move and differences under a tenth of a millisecond are noise.
   The access check bisects one sorted list where it scanned two, in dev builds.
 
 **Size.** The scheduler's code (declarations to schedule, in `engine.cc`) went from 401
-lines to 606, and `phase.cc` from 402 to 540, comments and blank lines left out. The
-growth is the snapshots and their views, appends, the per-kind choice, and errors that
-say what to do; the order itself is now one pass over one table of constraints.
+lines to 630, and `phase.cc` from 402 to 563, comments and blank lines left out. The
+growth is the snapshots and their views, appends, the per-kind choice, the guard, and
+errors that say what to do; the order itself is one table of constraints, gathered,
+checked and placed by separate functions.
+
+**Hashes after the follow-ups** (liveness named, the guard, the pilots through the
+context): every demo above the same tick for tick as before them, both ways, and both
+recordings matching at 1 and 16 threads both ways.
 
 **Not done here.** Windows and macOS have not run the branch; their recordings want
 making again there. The tuning of the mix by itself is above, under Later.

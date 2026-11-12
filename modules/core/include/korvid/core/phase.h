@@ -186,6 +186,12 @@ Table*  ctx_props(TickContext& ctx, Handle h, bool write);                      
 bool    ctx_cancel(TickContext& ctx, u32 ticket);
 bool    ctx_state_allowed(const TickContext& ctx, bool write); // logs and asserts when not
 bool    ctx_may_append(TickContext& ctx, u32 resource_id); // declared in `appends` (or the owner's write); logs and asserts when not
+bool    ctx_alive(TickContext& ctx, Handle h);             // a read of the kind's liveness (kind.@alive), checked
+Table*  ctx_rows(TickContext& ctx, u32 kind_id);           // likewise: the unit's view of the kind, for its rows
+// The unit running on this thread (a system or handler, or a parallel_for chunk of one);
+// null outside the schedule. Returns the one it replaces.
+const ScheduledSystem* ctx_running(const ScheduledSystem* unit);
+const ScheduledSystem* ctx_running();
 bool    ctx_append(TickContext& ctx, u32 resource_id, const void* record, u32 size);
 
 // Per-chunk buffers for a parallel_for, in the caller's scratch: made before, merged after.
@@ -341,6 +347,12 @@ struct TickContext {
     // Every kind that has all of C...; the constness of each C is the access mode.
     template <class... C>
     KindRange<C...> view() { return KindRange<C...>{this}; }
+    // Whether an entity is alive: a read of its kind's liveness ("kind.@alive", or the kind).
+    bool alive(Handle h) { return ctx_alive(*this, h); }
+    // One kind's rows, as a view would give them: its liveness read here, each column as it
+    // is taken (k.col<const T>()). For a snapshot kind read early, the rows the phase began with.
+    template <class K>
+    KindRows rows(K kind) { Table* t = ctx_rows(*this, kind_of(kind)); return KindRows{this, t}; }
 
     // A published resource (engine_publish), by name or id; T const is a read, T a write.
     // Null, with a log line, if nothing is published under that name yet.
@@ -458,7 +470,9 @@ void parallel_for(TickContext& ctx, u32 count, u32 grain, F fn) {
     jobs_run(count, grain, [](u32 chunk, u32 begin, u32 end, void* user) {
         Closure& c = *(Closure*)user;
         ChunkContext cc{c.ctx, &c.pb->writers[chunk], &c.pb->commands[chunk], chunk};
+        const ScheduledSystem* was = ctx_running(c.ctx->system);
         (*c.fn)(cc, begin, end);
+        ctx_running(was);
     }, &cl, ctx_unit_name(ctx));
     ctx_parallel_end(ctx, pb);
 }
@@ -477,7 +491,9 @@ T parallel_reduce(TickContext& ctx, u32 count, u32 grain, T init, F fn, R combin
     jobs_run(count, grain, [](u32 chunk, u32 begin, u32 end, void* user) {
         Closure& c = *(Closure*)user;
         ChunkContext cc{c.ctx, &c.pb->writers[chunk], &c.pb->commands[chunk], chunk};
+        const ScheduledSystem* was = ctx_running(c.ctx->system);
         c.results[chunk] = (*c.fn)(cc, begin, end);
+        ctx_running(was);
     }, &cl, ctx_unit_name(ctx));
     ctx_parallel_end(ctx, pb);
     T acc = init;

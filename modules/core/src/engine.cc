@@ -189,8 +189,8 @@ bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules, const Engi
                              Span<const ComponentDesc* const>(attach, nattach), capacity);
             mem_set_owner(0);
             if (!ok) { KV_ERROR("engine", "kind '%s' in module '%s': table creation failed", name, m.name); return false; }
-            // The kind, then what it covers, together: columns first, which is all an early
-            // read of it covers, then attachments and bags.
+            // The kind, then what it covers, together: its liveness and columns first, which
+            // is all an early read of it covers, then attachments and bags.
             u32 kind_id = e.tables.len;
             auto add = [&](const char* rname, ResourceClass cls, bool cosmetic) {
                 ResourceEntry r{rname, i};
@@ -201,11 +201,16 @@ bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules, const Engi
                 return e.resources.len;
             };
             t.resource = add(name, ResourceClass::Kind, false);
+            {
+                char alive[KV_KIND_NAME_MAX + 8];
+                snprintf(alive, sizeof alive, "%s.@alive", name);
+                t.alive_resource = add(name_str(name_intern(alive)), ResourceClass::Liveness, false);
+            }
             for (Column& c : t.columns) c.resource = add(c.resource_name, ResourceClass::Column, !c.desc->is_sim());
             for (Attachment& a : t.attachments) a.resource = add(a.resource_name, ResourceClass::Attachment, !a.desc->is_sim());
             if (k.props) t.props_resource = add(t.props_resource_name, ResourceClass::Bags, false);
             e.resources[t.resource - 1].children = e.resources.len - t.resource;
-            e.resources[t.resource - 1].columns  = t.columns.len;
+            e.resources[t.resource - 1].early    = 1 + t.columns.len;
             if (k.id) *k.id = e.tables.len;
         }
     }
@@ -252,6 +257,7 @@ const char* class_name(ResourceClass c) {
     case ResourceClass::Published:  return "a published resource";
     case ResourceClass::Append:     return "an append resource";
     case ResourceClass::Kind:       return "a kind";
+    case ResourceClass::Liveness:   return "a kind's liveness";
     case ResourceClass::Column:     return "a column";
     case ResourceClass::Attachment: return "an attachment store";
     case ResourceClass::Bags:       return "property bags";
@@ -358,16 +364,21 @@ bool resolve_set(const Engine& e, const ModuleDesc& m, const char* unit, const c
 }
 
 // What a declared entry may be: a module's state only through `state`; an early read only of
-// a kind or a column, the things a phase start can be copied of; an append only to an append
-// resource, which no one but its owner writes.
+// a kind, its liveness or a column, the things a phase start can be copied of; a write of a
+// kind's liveness only as the whole kind, since a spawn writes every column; an append only
+// to an append resource, which no one but its owner writes.
 bool check_declared(const Engine& e, const char* unit, u32 module, UnitAccess d) {
     const ResourceEntry& r = e.resources[d.resource - 1];
     if (r.cls == ResourceClass::State) {
         KV_ERROR("engine", "'%s' names '%s': a module's state is declared with `state`, and only its own", unit, r.name);
         return false;
     }
-    if (d.mode == Access::Early && r.cls != ResourceClass::Kind && r.cls != ResourceClass::Column) {
-        KV_ERROR("engine", "'%s' reads '%s' early (^), but it is %s: only a kind or its columns are read early", unit, r.name, class_name(r.cls));
+    if (d.mode == Access::Early && r.cls != ResourceClass::Kind && r.cls != ResourceClass::Liveness && r.cls != ResourceClass::Column) {
+        KV_ERROR("engine", "'%s' reads '%s' early (^), but it is %s: only a kind, its liveness or its columns are read early", unit, r.name, class_name(r.cls));
+        return false;
+    }
+    if (d.mode == Access::Write && r.cls == ResourceClass::Liveness) {
+        KV_ERROR("engine", "'%s' writes '%s': spawning and destroying write every column, so write the kind ('%s')", unit, r.name, e.tables[r.table - 1].name);
         return false;
     }
     if (d.mode == Access::Append && r.cls != ResourceClass::Append) {
@@ -389,41 +400,30 @@ bool merge_modes(Access a, Access b, Access* out) {
     return false;
 }
 
-// `sys.declared` expanded into `sys.access`, sorted by resource: a kind covers its columns,
-// attachments and bags, or for an early read its columns; the module's state comes from
-// `state` (a handler always has it). A kind's read is a default for what it covers: a
-// resource named in its own right in another read mode takes that mode (".npc,
-// ^.npc.Transform2"); two names that each name it are held to one mode.
+// `sys.declared` expanded into `sys.access`, sorted by resource: a kind covers its liveness,
+// columns, attachments and bags, or for an early read its liveness and columns; the module's
+// state comes from `state` (a handler always has it). One mode per resource, however it is
+// reached: a unit that wants some of a kind as it stands and some early names the parts.
 bool build_access(const Engine& e, ScheduledSystem& sys, StateUse state) {
     const char* unit = sys.name();
     Array<u32> from = array_in<u32>(mem_scratch()); // which declared entry put each access there
-    Array<u8> by_kind = array_in<u8>(mem_scratch()); // and whether only as a kind's read covering it
-    auto add = [&](u32 id, Access mode, u32 d, bool covered) {
+    auto add = [&](u32 id, Access mode, u32 d) {
         for (u32 k = 0; k < sys.access.len; ++k) {
             if (sys.access[k].resource != id) continue;
             Access merged;
-            if (merge_modes(sys.access[k].mode, mode, &merged)) {
-                sys.access[k].mode = merged;
-                by_kind[k] = by_kind[k] && covered;
-                return true;
-            }
-            bool reads = sys.access[k].mode != Access::Write && sys.access[k].mode != Access::Append && mode != Access::Write && mode != Access::Append;
-            if (reads && by_kind[k] && !covered) { sys.access[k].mode = mode; from[k] = d; by_kind[k] = 0; return true; } // named: its own mode
-            if (reads && covered && !by_kind[k]) return true; // already named in its own right
-
+            if (merge_modes(sys.access[k].mode, mode, &merged)) { sys.access[k].mode = merged; return true; }
             const UnitAccess& was = sys.declared[from[k]];
             const UnitAccess& now = sys.declared[d];
+            bool own_write = (mode == Access::Early && sys.access[k].mode == Access::Write) || (mode == Access::Write && sys.access[k].mode == Access::Early);
             KV_ERROR("engine", "'%s' covers '%s' as %s (by %s'%s') and as %s (by %s'%s'): one mode per resource%s", unit, resource_name(e, id),
                      access_name(sys.access[k].mode), was.mode == Access::Early ? "^" : "", resource_name(e, was.resource),
                      access_name(mode), now.mode == Access::Early ? "^" : "", resource_name(e, now.resource),
-                     (mode == Access::Early) != (sys.access[k].mode == Access::Early) && (mode == Access::Write || sys.access[k].mode == Access::Write)
-                         ? " (an early read of what the unit writes itself would see its own writes in one mode and not the other)"
-                         : " (a filter can leave a component out: *[A-B].C)");
+                     own_write ? " (an early read of what the unit writes itself would see its own writes one way and not the other)"
+                               : " (name the parts of a kind one by one, '.k.@alive, .k.Column', or leave a component out with a filter, '*[A-B].C')");
             return false;
         }
         sys.access.push(UnitAccess{id, mode});
         from.push(d);
-        by_kind.push(covered ? 1 : 0);
         return true;
     };
     bool ok = true;
@@ -431,13 +431,12 @@ bool build_access(const Engine& e, ScheduledSystem& sys, StateUse state) {
         UnitAccess a = sys.declared[d];
         if (!check_declared(e, unit, sys.module->index, a)) { ok = false; break; }
         const ResourceEntry& r = e.resources[a.resource - 1];
-        u32 covers = r.cls == ResourceClass::Kind ? (a.mode == Access::Early ? r.columns : r.children) : 0;
-        for (u32 k = 0; ok && k <= covers; ++k) ok = add(a.resource + k, a.mode, d, k > 0 && a.mode != Access::Write);
+        u32 covers = r.cls == ResourceClass::Kind ? (a.mode == Access::Early ? r.early : r.children) : 0;
+        for (u32 k = 0; ok && k <= covers; ++k) ok = add(a.resource + k, a.mode, d);
     }
     if (ok && state != StateUse::None)
         sys.access.push(UnitAccess{sys.module->state_resource, state == StateUse::Write ? Access::Write : Access::Read});
     from.free();
-    by_kind.free();
     if (!ok) return false;
     // By resource: lookups bisect, and two units' lists merge in one walk.
     for (u32 i = 1; i < sys.access.len; ++i) {
@@ -631,20 +630,32 @@ bool declared_edges(const Engine& e, const Array<Pending>& pend, Phase phase, Ar
     return true;
 }
 
-// Orders one phase's units (or, with phase == Count, the handlers) into `out`, by level then
-// rank. Takes ownership of the pending units' arrays.
-bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSystem>& out) {
-    MemScope scope;
-    u32 n = pend.len;
-    const char* what = phase == Phase::Count ? "handlers" : phase_name(phase);
-    Array<Edge> base  = array_in<Edge>(mem_scratch());
-    Array<Edge> early = array_in<Edge>(mem_scratch());
-    Array<Pair> writers = array_in<Pair>(mem_scratch());
-    Array<Pair> sharers = array_in<Pair>(mem_scratch()); // of a module's state, one writing
+// One phase's constraints, as gathered from the access lists and the declarations.
+struct Constraints {
+    Array<Edge> base;    // readers after writers, `after` and `before`; then module state's
+    Array<Edge> early;   // an early reader before a writer, for every kind
+    Array<Pair> writers; // two writers of one resource: need a path
+    Array<Pair> sharers; // two units sharing a module's state, one writing
+};
 
-    // Every pair, every shared resource: one walk over two sorted lists.
-    for (u32 i = 0; i < n; ++i)
-        for (u32 j = i + 1; j < n; ++j) {
+// Which early edges a graph takes: as the kinds say, as the engine runs, or all of them.
+enum class EarlyEdges : u8 { AsDeclared, AsRun, All };
+
+void graph_with(const Engine& e, const Constraints& c, EarlyEdges which, Array<Edge>& out) {
+    for (const Edge& ed : c.base) out.push(ed);
+    for (const Edge& ed : c.early) {
+        const Table& t = e.tables[e.resources[ed.resource - 1].table - 1];
+        bool ordered = which == EarlyEdges::All ||
+                       (which == EarlyEdges::AsDeclared ? t.desc->early_reads == EarlyReads::Order : engine_early_reads(e, ed.resource) == EarlyReads::Order);
+        if (ordered) out.push(ed);
+    }
+}
+
+// Every pair of units, every resource they share, in one walk over two sorted lists; then
+// the declared edges.
+bool gather(const Engine& e, const Array<Pending>& pend, Phase phase, Constraints& c) {
+    for (u32 i = 0; i < pend.len; ++i)
+        for (u32 j = i + 1; j < pend.len; ++j) {
             const Array<UnitAccess>& a = pend[i].sys.access;
             const Array<UnitAccess>& b = pend[j].sys.access;
             for (u32 x = 0, y = 0; x < a.len && y < b.len;) {
@@ -654,35 +665,29 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
                 Access ma = a[x].mode, mb = b[y].mode;
                 ++x, ++y;
                 bool wa = ma == Access::Write, wb = mb == Access::Write;
-                if (!wa && !wb) continue;              // reads and appends never order
-                if (e.resources[r - 1].cls == ResourceClass::State) { sharers.push(Pair{i, j, r}); continue; }
-                if (wa && wb) { writers.push(Pair{i, j, r}); continue; }
+                if (!wa && !wb) continue; // reads and appends never order
+                if (e.resources[r - 1].cls == ResourceClass::State) { c.sharers.push(Pair{i, j, r}); continue; }
+                if (wa && wb) { c.writers.push(Pair{i, j, r}); continue; }
                 u32 w = wa ? i : j, o = wa ? j : i;
                 Access mo = wa ? mb : ma;
-                if (mo == Access::Read)  base.push(Edge{w, o, r, Why::Data});
-                if (mo == Access::Early) early.push(Edge{o, w, r, Why::Early});
+                if (mo == Access::Read)  c.base.push(Edge{w, o, r, Why::Data});
+                if (mo == Access::Early) c.early.push(Edge{o, w, r, Why::Early});
             }
         }
-    bool ok = declared_edges(e, pend, phase, base);
+    return declared_edges(e, pend, phase, c.base);
+}
 
-    // The early edges the kinds ask for themselves (KindDesc::early_reads, whatever the
-    // engine forces): with base, the graph module state is ordered along.
-    Array<Edge> declared = array_in<Edge>(mem_scratch());
-    for (const Edge& ed : base) declared.push(ed);
-    for (const Edge& ed : early)
-        if (e.tables[e.resources[ed.resource - 1].table - 1].desc->early_reads == EarlyReads::Order) declared.push(ed);
-
-    // An early reader of an ordered kind must come before its writer; if base puts it
-    // after, the reader asks for two things at once. (From a snapshot it can come after.)
-    Reach r0;
-    if (ok) r0.build(base, n);
-    for (u32 k = 0; ok && k < early.len; ++k) {
-        const Edge& ed = early[k];
+// An early reader of an ordered kind must come before its writer; if base puts it after,
+// the reader asks for two things at once. (From a snapshot it can come after.)
+bool check_early_readers(const Engine& e, const Array<Pending>& pend, const char* what, const Constraints& c) {
+    Reach r;
+    r.build(c.base, pend.len);
+    for (const Edge& ed : c.early) {
         u32 reader = ed.from, writer = ed.to;
-        if (engine_early_reads(e, ed.resource) == EarlyReads::Snapshot || !r0.from_to(writer, reader)) continue;
+        if (engine_early_reads(e, ed.resource) == EarlyReads::Snapshot || !r.from_to(writer, reader)) continue;
         const char* kind = e.tables[e.resources[ed.resource - 1].table - 1].name;
         const Edge* direct = nullptr;
-        for (const Edge& b : base) if (b.from == writer && b.to == reader && b.why == Why::Data) { direct = &b; break; }
+        for (const Edge& b : c.base) if (b.from == writer && b.to == reader && b.why == Why::Data) { direct = &b; break; }
         if (direct)
             KV_ERROR("engine", "'%s' reads '%s' early (^) and '%s' as it stands, both written by '%s' (%s): the first wants it before '%s', the second after. "
                      "Read both early, or both as they stand, or make kind '%s' a snapshot (KindDesc::early_reads)",
@@ -692,93 +697,83 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
             KV_ERROR("engine", "'%s' reads '%s' early (^), written by '%s' (%s), but the rest of the schedule puts it after '%s': "
                      "read it as it stands, reorder, or make kind '%s' a snapshot (KindDesc::early_reads)",
                      pend[reader].sys.name(), resource_name(e, ed.resource), pend[writer].sys.name(), what, pend[writer].sys.name(), kind);
-        ok = false;
-    }
-    Reach rd;
-    if (ok) {
-        rd.build(declared, n);
-        if (report_cycle(e, pend, declared, rd, what)) ok = false;
-    }
-
-    // Module state: two of a module's units that share it, one writing, and that nothing
-    // above orders, go the way one topological order of the rest has them (lowest rank
-    // first among the ready). Every such edge follows that order, so none makes a cycle,
-    // and none depends on which pair was looked at first.
-    if (ok && sharers.len) {
-        Array<u32> place = array_in<u32>(mem_scratch());
-        place.resize_fill(n, 0);
-        Array<u8> placed = array_in<u8>(mem_scratch());
-        placed.resize_fill(n, 0);
-        for (u32 at = 0; at < n; ++at) {
-            u32 pick = n;
-            for (u32 i = 0; i < n; ++i) {
-                if (placed[i]) continue;
-                bool ready = true;
-                for (const Edge& ed : declared) if (ed.to == i && !placed[ed.from]) { ready = false; break; }
-                if (ready && (pick == n || pend[i].rank < pend[pick].rank)) pick = i;
-            }
-            placed[pick] = 1;
-            place[pick] = at;
-        }
-        for (const Pair& p : sharers) {
-            if (rd.either(p.a, p.b)) continue;
-            bool a_first = place[p.a] < place[p.b];
-            base.push(Edge{a_first ? p.a : p.b, a_first ? p.b : p.a, p.resource, Why::State});
-        }
-    }
-    Reach r1;
-    if (ok) r1.build(base, n);
-
-    // Two writers of one resource: a path between them, either way round.
-    for (u32 k = 0; ok && k < writers.len; ++k) {
-        const Pair& p = writers[k];
-        if (r1.either(p.a, p.b)) continue;
-        KV_ERROR("engine", "'%s' and '%s' both write '%s' (%s) with no order between them: add `after` or `before`",
-                 pend[p.a].sys.name(), pend[p.b].sys.name(), resource_name(e, p.resource), what);
-        ok = false;
-    }
-
-    // With the early edges of the kinds whose early reads are ordered: still no cycle.
-    // Every kind a snapshot is always fine, base being acyclic; every kind ordered may not
-    // be, where a kind is a snapshot to break a cycle. The log says both.
-    Array<Edge> used = array_in<Edge>(mem_scratch()), all_order = array_in<Edge>(mem_scratch());
-    if (ok) {
-        for (const Edge& ed : base) { used.push(ed); all_order.push(ed); }
-        for (const Edge& ed : early) {
-            all_order.push(ed);
-            if (engine_early_reads(e, ed.resource) == EarlyReads::Order) used.push(ed);
-        }
-        Reach r2;
-        r2.build(used, n);
-        if (report_cycle(e, pend, used, r2, what)) ok = false;
-    }
-    if (!ok) {
-        for (Pending& p : pend) p.sys.free_buffers();
-        pend.clear();
         return false;
     }
+    return true;
+}
 
-    Array<u32> level = array_in<u32>(mem_scratch());
-    levels_of(used, n, level);
-    if (early.len) {
-        Array<u32> lv = array_in<u32>(mem_scratch());
-        levels_of(base, n, lv);
-        u32 snapshot_levels = count_levels(lv);
-        Reach r3;
-        r3.build(all_order, n);
-        bool order_ok = true;
-        for (u32 i = 0; i < n; ++i) order_ok = order_ok && !r3.from_to(i, i);
-        if (order_ok) levels_of(all_order, n, lv);
-        if (order_ok)
-            KV_INFO("engine", "  %u units in %u levels; %u with every early read ordered, %u with every one a snapshot", n, count_levels(level), count_levels(lv), snapshot_levels);
-        else
-            KV_INFO("engine", "  %u units in %u levels; every early read ordered makes a cycle, %u with every one a snapshot", n, count_levels(level), snapshot_levels);
+// Module state: two of a module's units that share it, one writing, and that nothing else
+// orders, go the way one topological order of the rest has them (base and the kinds' own
+// early edges; lowest rank first among the ready). Every such edge follows that order, so
+// none makes a cycle, and none depends on which pair was looked at first.
+bool order_state(const Engine& e, const Array<Pending>& pend, const char* what, Constraints& c) {
+    u32 n = pend.len;
+    Array<Edge> declared = array_in<Edge>(mem_scratch());
+    graph_with(e, c, EarlyEdges::AsDeclared, declared);
+    Reach r;
+    r.build(declared, n);
+    if (report_cycle(e, pend, declared, r, what)) return false;
+    if (!c.sharers.len) return true;
+    Array<u32> place = array_in<u32>(mem_scratch());
+    place.resize_fill(n, 0);
+    Array<u8> placed = array_in<u8>(mem_scratch());
+    placed.resize_fill(n, 0);
+    for (u32 at = 0; at < n; ++at) {
+        u32 pick = n;
+        for (u32 i = 0; i < n; ++i) {
+            if (placed[i]) continue;
+            bool ready = true;
+            for (const Edge& ed : declared) if (ed.to == i && !placed[ed.from]) { ready = false; break; }
+            if (ready && (pick == n || pend[i].rank < pend[pick].rank)) pick = i;
+        }
+        placed[pick] = 1;
+        place[pick] = at;
     }
+    for (const Pair& p : c.sharers) {
+        if (r.either(p.a, p.b)) continue;
+        bool a_first = place[p.a] < place[p.b];
+        c.base.push(Edge{a_first ? p.a : p.b, a_first ? p.b : p.a, p.resource, Why::State});
+    }
+    return true;
+}
 
-    u32 first_out = out.len;
-    // Why each unit sits where it does: one line for each unit before it, with the first
-    // reason and how many more.
-    for (u32 i = 0; i < n; ++i)
+// Two writers of one resource: a path between them in base, either way round, so they
+// keep their order whatever the early reads do.
+bool check_writers(const Engine& e, const Array<Pending>& pend, const char* what, const Constraints& c) {
+    Reach r;
+    r.build(c.base, pend.len);
+    for (const Pair& p : c.writers) {
+        if (r.either(p.a, p.b)) continue;
+        KV_ERROR("engine", "'%s' and '%s' both write '%s' (%s) with no order between them: add `after` or `before`",
+                 pend[p.a].sys.name(), pend[p.b].sys.name(), resource_name(e, p.resource), what);
+        return false;
+    }
+    return true;
+}
+
+// The levels three ways, for the log: as run, every kind ordered, every kind a snapshot.
+void log_levels(const Engine& e, u32 n, const Constraints& c, const Array<u32>& level) {
+    Array<u32> lv = array_in<u32>(mem_scratch());
+    levels_of(c.base, n, lv);
+    u32 snapshot_levels = count_levels(lv);
+    Array<Edge> all = array_in<Edge>(mem_scratch());
+    graph_with(e, c, EarlyEdges::All, all);
+    Reach r;
+    r.build(all, n);
+    bool acyclic = true;
+    for (u32 i = 0; i < n; ++i) acyclic = acyclic && !r.from_to(i, i);
+    if (acyclic) {
+        levels_of(all, n, lv);
+        KV_INFO("engine", "  %u units in %u levels; %u with every early read ordered, %u with every one a snapshot", n, count_levels(level), count_levels(lv), snapshot_levels);
+    } else {
+        KV_INFO("engine", "  %u units in %u levels; every early read ordered makes a cycle, %u with every one a snapshot", n, count_levels(level), snapshot_levels);
+    }
+}
+
+// Why each unit sits where it does: one line for each unit before it, with the first
+// reason and how many more.
+void log_edges(const Engine& e, const Array<Pending>& pend, const Array<Edge>& used) {
+    for (u32 i = 0; i < pend.len; ++i)
         for (u32 k = 0; k < used.len; ++k) {
             const Edge& ed = used[k];
             if (ed.to != i) continue;
@@ -791,20 +786,56 @@ bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSy
             if (more) KV_INFO("engine", "  %s after %s: %s and %u more", pend[i].sys.name(), pend[ed.from].sys.name(), why_text(e, ed, why, sizeof why), more);
             else      KV_INFO("engine", "  %s after %s: %s", pend[i].sys.name(), pend[ed.from].sys.name(), why_text(e, ed, why, sizeof why));
         }
-    for (u32 i = 0; i < n; ++i) {
+}
+
+// The units into `out` by (level, rank): insertion sort, n is small. Every edge climbs a
+// level, so this is a topological order. The units' arrays move with them.
+void place_units(Array<Pending>& pend, const Array<u32>& level, Array<ScheduledSystem>& out) {
+    u32 first = out.len;
+    for (u32 i = 0; i < pend.len; ++i) {
         pend[i].sys.level = level[i];
         pend[i].sys.rank  = pend[i].rank;
         out.push(pend[i].sys);
-        pend[i].sys = ScheduledSystem{}; // now owned by the schedule
+        pend[i].sys = ScheduledSystem{};
     }
-    // By (level, rank): insertion sort, n is small. Every edge climbs a level, so this is
-    // a topological order.
-    for (u32 i = first_out + 1; i < out.len; ++i) {
+    for (u32 i = first + 1; i < out.len; ++i) {
         ScheduledSystem s = out[i];
         u32 j = i;
-        while (j > first_out && (out[j - 1].level > s.level || (out[j - 1].level == s.level && out[j - 1].rank > s.rank))) { out[j] = out[j - 1]; --j; }
+        while (j > first && (out[j - 1].level > s.level || (out[j - 1].level == s.level && out[j - 1].rank > s.rank))) { out[j] = out[j - 1]; --j; }
         out[j] = s;
     }
+}
+
+// Orders one phase's units (or, with phase == Count, the handlers) into `out`: gather the
+// constraints, check them, complete them with module state, and place the units by level.
+// Takes ownership of the pending units' arrays.
+bool order_units(Engine& e, Array<Pending>& pend, Phase phase, Array<ScheduledSystem>& out) {
+    MemScope scope;
+    const char* what = phase == Phase::Count ? "handlers" : phase_name(phase);
+    Constraints c;
+    c.base = array_in<Edge>(mem_scratch());
+    c.early = array_in<Edge>(mem_scratch());
+    c.writers = array_in<Pair>(mem_scratch());
+    c.sharers = array_in<Pair>(mem_scratch());
+    Array<Edge> used = array_in<Edge>(mem_scratch());
+    bool ok = gather(e, pend, phase, c) && check_early_readers(e, pend, what, c) && order_state(e, pend, what, c) &&
+              check_writers(e, pend, what, c);
+    if (ok) {
+        graph_with(e, c, EarlyEdges::AsRun, used);
+        Reach r;
+        r.build(used, pend.len);
+        ok = !report_cycle(e, pend, used, r, what); // every kind forced ordered can still make one
+    }
+    if (!ok) {
+        for (Pending& p : pend) p.sys.free_buffers();
+        pend.clear();
+        return false;
+    }
+    Array<u32> level = array_in<u32>(mem_scratch());
+    levels_of(used, pend.len, level);
+    if (c.early.len) log_levels(e, pend.len, c, level);
+    log_edges(e, pend, used);
+    place_units(pend, level, out);
     pend.clear();
     return true;
 }
@@ -840,7 +871,7 @@ void plan_snapshots(Engine& e, Array<ScheduledSystem>& units, Array<KindSnapshot
         if (engine_early_reads(e, t.resource) != EarlyReads::Snapshot) continue;
         KindSnapshot ks;
         ks.table = &t;
-        ks.liveness = any(t.resource, Access::Early) && any(t.resource, Access::Write);
+        ks.liveness = any(t.alive_resource, Access::Early) && any(t.alive_resource, Access::Write);
         for (Column& c : t.columns)
             if (any(c.resource, Access::Early) && any(c.resource, Access::Write)) {
                 if (!ks.columns.len) ks.columns = array_in<KindSnapshot::Rows>(mem_general());
@@ -853,7 +884,7 @@ void plan_snapshots(Engine& e, Array<ScheduledSystem>& units, Array<KindSnapshot
         out.push(ks);
         for (ScheduledSystem& s : units) {
             bool reads_early = false;
-            for (u32 k = 0; k <= e.resources[t.resource - 1].columns; ++k) {
+            for (u32 k = 0; k <= e.resources[t.resource - 1].early; ++k) {
                 Access m;
                 reads_early = reads_early || (s.mode(t.resource + k, &m) && m == Access::Early);
             }
@@ -1425,7 +1456,7 @@ void apply_buffer(Engine& e, CommandBuffer& cb) {
             continue;
         }
         if (h->op == CMD_SPAWN) {
-            Table* t = engine_table(e, h->kind);
+            Table* t = engine_table_now(e, h->kind);
             Handle entity = t ? t->spawn() : Handle{};
             last = entity;
             for (u32 i = 0; i < h->components; ++i) {
@@ -1444,7 +1475,7 @@ void apply_buffer(Engine& e, CommandBuffer& cb) {
             }
             e.events.emit(Spawned{h->ticket, h->kind, entity}); // null entity: the kind was full or unknown
         } else if (h->op == CMD_DESTROY_ALL) {
-            if (Table* t = engine_table(e, h->kind)) t->destroy_all();
+            if (Table* t = engine_table_now(e, h->kind)) t->destroy_all();
         } else {
             for (Table& t : e.tables)
                 if (t.kind == h->entity.kind()) { t.destroy(h->entity); break; } // stale: silently nothing
@@ -1468,7 +1499,7 @@ void engine_apply_commands(Engine& e) {
         t.sweep_sparse(&gone);
         for (Name n : gone) {
             Handle* at = e.entity_names.find(n.hash);
-            if (at && engine_table_of(e, *at) == &t && t.name_of(*at) != n) e.entity_names.remove(n.hash);
+            if (at && engine_table_of_now(e, *at) == &t && t.name_of(*at) != n) e.entity_names.remove(n.hash);
         }
         names_unlock(e);
     }
@@ -1480,14 +1511,14 @@ namespace {
 
 // Whether `h` is alive and has the name `n` now.
 bool name_holds(Engine& e, Handle h, Name n) {
-    Table* t = engine_table_of(e, h);
+    Table* t = engine_table_of_now(e, h);
     return t && t->name_of(h) == n;
 }
 
 } // namespace
 
 bool engine_entity_name_set(Engine& e, Handle entity, const char* name) {
-    Table* t = engine_table_of(e, entity);
+    Table* t = engine_table_of_now(e, entity);
     if (!t || !t->valid(entity)) { KV_WARN("engine", "naming a stale entity '%s'", name ? name : ""); return false; }
     Name n = name && name[0] ? name_intern(name) : Name{};
     names_lock(e);
@@ -1534,7 +1565,7 @@ Handle engine_entity_find(Engine& e, const char* name) {
 }
 
 const char* engine_entity_name(Engine& e, Handle entity) {
-    Table* t = engine_table_of(e, entity);
+    Table* t = engine_table_of_now(e, entity);
     if (!t) return nullptr;
     names_lock(e);
     Name n = t->name_of(entity);
@@ -1640,7 +1671,7 @@ u32 engine_trigger_id(const Engine& e, const char* name) {
 
 void engine_request_quit(Engine& e) { e.quit_requested = true; }
 
-Table* engine_table_of(Engine& e, Handle h) {
+Table* engine_table_of_now(Engine& e, Handle h) {
     if (h.is_null()) return nullptr;
     const kv_handle_kind_desc* d = kv_handle_kind_desc_get(h.kind());
     if (!d || !d->ctx) return nullptr;
@@ -1648,6 +1679,29 @@ Table* engine_table_of(Engine& e, Handle h) {
     if (t < e.tables.data || t >= e.tables.data + e.tables.len || t->kind != h.kind()) return nullptr;
     return t;
 }
+
+namespace {
+
+// Dev builds: a table reached around the context by a unit that reads that kind early from
+// a snapshot. Its view is the kind as the phase found it; the table is the kind now.
+Table* checked_direct(Table* t) {
+#if KV_DEV
+    const ScheduledSystem* u = ctx_running();
+    if (t && u)
+        for (const Table& v : u->early)
+            if (v.index == t->index) {
+                KV_ERROR("engine", "'%s' reads kind '%s' early from a snapshot and reaches the table directly (engine_table): "
+                         "that is the kind as it is now, not as the phase found it. Reach it through the context (ctx.view, ctx.read, ctx.read_kind)",
+                         u->name(), t->name);
+                KV_VERIFY(!"a snapshot kind reached around the context: see the log");
+            }
+#endif
+    return t;
+}
+
+} // namespace
+
+Table* engine_table_of(Engine& e, Handle h) { return checked_direct(engine_table_of_now(e, h)); }
 
 // Every sim column of every live row, in slot order, with the entity's handle so identity
 // counts too. Field by field, so padding never matters. Each table's hash starts from its
@@ -1722,9 +1776,11 @@ u32 engine_kind_id(const Engine& e, const char* name) {
     return 0;
 }
 
-Table* engine_table(Engine& e, u32 kind_id) {
+Table* engine_table_now(Engine& e, u32 kind_id) {
     return kind_id && kind_id <= e.tables.len ? &e.tables[kind_id - 1] : nullptr;
 }
+
+Table* engine_table(Engine& e, u32 kind_id) { return checked_direct(engine_table_now(e, kind_id)); }
 
 Table* engine_table(Engine& e, const char* name) { return engine_table(e, engine_kind_id(e, name)); }
 

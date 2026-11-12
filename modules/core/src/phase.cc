@@ -19,6 +19,17 @@ const char* phase_name(Phase p) {
     }
 }
 
+namespace {
+thread_local const ScheduledSystem* t_running = nullptr;
+} // namespace
+
+const ScheduledSystem* ctx_running(const ScheduledSystem* unit) {
+    const ScheduledSystem* was = t_running;
+    t_running = unit;
+    return was;
+}
+const ScheduledSystem* ctx_running() { return t_running; }
+
 const char* access_name(Access a) {
     switch (a) {
     case Access::Read:   return "read";
@@ -64,19 +75,21 @@ namespace {
 // A unit runs with its own writer and command buffer; attribution follows it onto
 // whatever thread it is on.
 void run_unit(TickContext ctx, EventBus& events, ScheduledSystem& s, const void* events_data, u32 event_count) {
+    const ScheduledSystem* was = ctx_running(&s);
     ctx.state      = s.module->state;
     ctx.state_type = s.module->state_type;
     ctx.system     = &s;
     ctx.writer     = &events.writer(s.unit);
     ctx.commands   = &s.commands;
-    u16 was = mem_owner();
+    u16 owner_was = mem_owner();
     mem_set_owner((u16)(s.module->index + 1));
     {
         KV_ZONE(s.name());
         if (s.desc) s.desc->fn(ctx);
         else s.handler->fn(ctx, events_data, event_count);
     }
-    mem_set_owner(was);
+    mem_set_owner(owner_was);
+    ctx_running(was);
 }
 
 struct LevelJob {
@@ -330,14 +343,14 @@ const char* ctx_qualify(TickContext& ctx, const char* name);
 
 Table* ctx_kind(TickContext& ctx, const char* kind, bool write) {
     kind = ctx_qualify(ctx, kind);
-    Table* t = engine_table(*ctx.engine, kind);
+    Table* t = engine_table_now(*ctx.engine, engine_kind_id(*ctx.engine, kind));
     if (!t) { KV_ERROR("engine", "system '%s': unknown kind '%s'", system_name(ctx), kind); KV_VERIFY(!"unknown kind"); return nullptr; }
     if (!allowed(ctx, t->resource, write)) { deny(ctx, "kind", kind, write); return nullptr; }
     return write ? t : view_of(ctx, t);
 }
 
 Table* ctx_kind(TickContext& ctx, u32 kind_id, bool write) {
-    Table* t = engine_table(*ctx.engine, kind_id);
+    Table* t = engine_table_now(*ctx.engine, kind_id);
     if (!t) { KV_ERROR("engine", "system '%s': unknown kind id %u", system_name(ctx), kind_id); KV_VERIFY(!"unknown kind"); return nullptr; }
     if (!allowed(ctx, t->resource, write)) { deny(ctx, "kind", t->name, write); return nullptr; }
     return write ? t : view_of(ctx, t);
@@ -394,6 +407,20 @@ bool ctx_state_allowed(const TickContext& ctx, bool write) {
     KV_UNUSED(ctx); KV_UNUSED(write);
     return true;
 #endif
+}
+
+bool ctx_alive(TickContext& ctx, Handle h) {
+    Table* t = engine_table_of_now(*ctx.engine, h);
+    if (!t) return false;
+    if (!allowed(ctx, t->alive_resource, false)) { deny(ctx, "liveness", t->name, false); return false; }
+    return view_of(ctx, t)->valid(h);
+}
+
+Table* ctx_rows(TickContext& ctx, u32 kind_id) {
+    Table* t = engine_table_now(*ctx.engine, kind_id);
+    if (!t) { KV_ERROR("engine", "system '%s': unknown kind id %u", system_name(ctx), kind_id); KV_VERIFY(!"unknown kind"); return nullptr; }
+    if (!allowed(ctx, t->alive_resource, false)) { deny(ctx, "liveness", t->name, false); return nullptr; }
+    return view_of(ctx, t);
 }
 
 bool ctx_may_append(TickContext& ctx, u32 resource_id) {
@@ -474,7 +501,7 @@ u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, const char* kind, u32 c
 }
 
 u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, u32 kind_id, u32 component_count, bool ticketed) {
-    if (!engine_table(*ctx.engine, kind_id)) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind id %u", system_name(ctx), kind_id); return 0; }
+    if (!engine_table_now(*ctx.engine, kind_id)) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind id %u", system_name(ctx), kind_id); return 0; }
     CommandBuffer& b = buffer_of(ctx, cb);
     u32 ticket = 0;
     if (ticketed) ticket = ctx.system ? unit_ticket(ctx, &((ScheduledSystem*)ctx.system)->spawn_tickets) : 0;
@@ -508,7 +535,7 @@ Attachment* checked_store(TickContext& ctx, Table* t, u32 component_id, bool wri
 } // namespace
 
 void* ctx_attached(TickContext& ctx, Handle h, u32 component_id, const void* type, bool write) {
-    Table* t = engine_table_of(*ctx.engine, h);
+    Table* t = engine_table_of_now(*ctx.engine, h);
     if (!t || !t->valid(h)) return nullptr;
     Attachment* a = checked_store(ctx, t, component_id, write);
     if (!a || a->desc->type != type) return nullptr;
@@ -516,7 +543,7 @@ void* ctx_attached(TickContext& ctx, Handle h, u32 component_id, const void* typ
 }
 
 void* ctx_attach(TickContext& ctx, Handle h, u32 component_id, const void* type, const void* data) {
-    Table* t = engine_table_of(*ctx.engine, h);
+    Table* t = engine_table_of_now(*ctx.engine, h);
     if (!t || !t->valid(h)) return nullptr;
     Attachment* a = checked_store(ctx, t, component_id, true);
     if (!a || a->desc->type != type) return nullptr;
@@ -524,18 +551,18 @@ void* ctx_attach(TickContext& ctx, Handle h, u32 component_id, const void* type,
 }
 
 bool ctx_detach(TickContext& ctx, Handle h, u32 component_id) {
-    Table* t = engine_table_of(*ctx.engine, h);
+    Table* t = engine_table_of_now(*ctx.engine, h);
     if (!t || !t->valid(h)) return false;
     return checked_store(ctx, t, component_id, true) && t->detach(h, component_id);
 }
 
 Table* ctx_attachments(TickContext& ctx, u32 kind_id, u32 component_id, bool write) {
-    Table* t = engine_table(*ctx.engine, kind_id);
+    Table* t = engine_table_now(*ctx.engine, kind_id);
     return checked_store(ctx, t, component_id, write) ? t : nullptr;
 }
 
 Table* ctx_props(TickContext& ctx, Handle h, bool write) {
-    Table* t = engine_table_of(*ctx.engine, h);
+    Table* t = engine_table_of_now(*ctx.engine, h);
     if (!t || !t->valid(h)) return nullptr;
     if (!t->props_resource) { KV_ERROR("engine", "system '%s': kind '%s' has no property bags", system_name(ctx), t->name); return nullptr; }
     if (!allowed(ctx, t->props_resource, write)) { deny(ctx, "bags", t->props_resource_name, write); return nullptr; }
@@ -596,7 +623,7 @@ void ctx_name(TickContext& ctx, CommandBuffer* cb, Handle h, const char* name) {
 bool ctx_cancel(TickContext& ctx, u32 ticket) { return ctx.engine->timers.cancel(ticket); }
 
 void ctx_destroy_all(TickContext& ctx, CommandBuffer* cb, u32 kind_id) {
-    if (!engine_table(*ctx.engine, kind_id)) { KV_ERROR("engine", "system '%s': destroy_all of unknown kind id %u", system_name(ctx), kind_id); return; }
+    if (!engine_table_now(*ctx.engine, kind_id)) { KV_ERROR("engine", "system '%s': destroy_all of unknown kind id %u", system_name(ctx), kind_id); return; }
     command_destroy_all(buffer_of(ctx, cb), kind_id);
 }
 

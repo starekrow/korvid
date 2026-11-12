@@ -215,10 +215,11 @@ unknown name fails init with the system, the module and the name, as before.
 
 Each name has one mode for a system: read (after every writer in the phase), read early
 (`^`, the value the phase started with), write, or append (`appends`, see below). A
-system whose names cover one resource two ways is refused, except that a kind's read is a
-default for its columns: `.npc, ^.npc.Transform2` reads the villagers as they stand but
-their positions as the phase found them. A system cannot read early what it writes
-itself, and one that reads early from a writer and also reads, as it stands, something
+system whose names cover one resource two ways is refused, the whole kind and one of its
+columns included: one that wants the villagers as they stand but their positions as the
+phase found them names the parts, `.npc.@alive, .npc.Actor, ^.npc.Transform2`
+(`kind.@alive` is the kind's liveness: `ctx.alive(h)` and `ctx.rows(kind)` read it). A
+system cannot read early what it writes itself, and one that reads early from a writer and also reads, as it stands, something
 that writer writes is refused unless the kind is a snapshot (below). The whole model is
 in `docs/design/scheduler.md`.
 
@@ -230,7 +231,10 @@ after them, and a cycle the order would make is not there; the copy costs every 
 is needed (the `snapshot` zone, the `snapshot KB` counter). The game is the same either
 way: `--early-reads order|snapshot` forces one for every kind, and the hashes must not
 move. The startup log shows each phase's levels as declared, all ordered and all
-snapshots.
+snapshots. A snapshot reader must reach the kind through the context (`ctx.view`,
+`ctx.read`, `ctx.rows`, `ctx.read_kind`): `engine_table` hands out the table as it is now,
+and dev builds refuse it there. Run with `--early-reads snapshot` in a dev build to find
+any such read.
 
 `.main_thread = true` pins a system to the thread driving the engine, for code that talks
 to the OS, the GPU or a module's own pools (the asset pumps, the CLI). `.state` is what a

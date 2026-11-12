@@ -229,7 +229,8 @@ constinit const InputActionDesc k_actions[] = {
 // broadphase, whose overlaps the handlers sort into hits at the boundary.
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".demo", .phase = Phase::Input, .fn = demo, .before = "input.sample", .main_thread = true},
+    {.name = ".demo", .phase = Phase::Input, .fn = demo, .reads = ".bullet, .active, .ship, .air, .ground, .part, .boss, .item, .world",
+     .before = "input.sample", .main_thread = true},
     {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, .particle, .shadow, .boom, .fleet, .tracer, .capital, .air, .ground, .bullet, .active, .shot, .item, .formation, .boss, .part, tilemap.tile, tilemap.animtile", .appends = "audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
     // The chain's clock, the extends, a new round's dials: before the sim moves anything.
     {.name = ".scoring", .phase = Phase::PreSim, .fn = scoring, .writes = ".world.Run, .world.Stage, .world.Dials", .appends = "audio.commands", .after = ".boot",
@@ -237,17 +238,20 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".records", .phase = Phase::PreSim, .fn = records, .main_thread = true, .runs = RunWhen::Always},
     {.name = ".screens", .phase = Phase::PreSim, .fn = screens, .reads = "input.actions", .after = ".pause", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pause", .phase = Phase::PreSim, .fn = pause, .reads = "input.actions, input.state", .after = ".boot", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet.Transform2, ^.bullet.Velocity, ^.active.Transform2, ^.active.Velocity, ^.ship.Transform2, ^.air.Transform2, ^.ground.Transform2, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss, ^.item.Transform2, ^.item.Item, .world.Dials",
+    // The pilots read the field whole, through ctx.read_kind: the bot where everything stood
+    // as the tick began, the demo before anything in Input could move it.
+    {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet, ^.active, ^.ship, ^.air, ^.ground, ^.part, ^.boss, ^.item, ^.world",
      .main_thread = true},
     {.name = ".scroll", .phase = Phase::Sim, .fn = scroll, .writes = ".world.Stage"},
     {.name = ".stage", .phase = Phase::Sim, .fn = stage, .reads = ".world.Dials, .world.Run", .writes = ".world.Stage, .formation, .boss, .part", .appends = "audio.commands", .after = ".scroll"},
     {.name = ".planes", .phase = Phase::Sim, .fn = planes, .reads = ".world.Stage, .world.Dials, .plane.Plane, .plane.Sprite",
      .writes = "sprite.layers, .plane", .runs = RunWhen::Always},
-    {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "^.option.Transform2, input.actions, .world.Dials",
+    {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "^.option.@alive, ^.option.Transform2, input.actions, .world.Dials",
      .writes = ".ship.Transform2, .ship.Ship, .ship.Sprite, .shot, .ring.Sprite, .mark.Sprite", .appends = "audio.commands"},
     // Storm's bolts steer by the enemies as the tick began (^), before anything moves them.
     {.name = ".shots", .phase = Phase::Sim, .fn = shots,
-     .reads = "^.air.Transform2, ^.air.Health, ^.ground.Transform2, ^.ground.Health, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss.Boss",
+     .reads = "^.air.@alive, ^.air.Transform2, ^.air.Health, ^.ground.@alive, ^.ground.Transform2, ^.ground.Health, "
+              "^.part.@alive, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss.@alive, ^.boss.Boss",
      .writes = ".shot", .after = ".control", .state = StateUse::Read},
     // The beam is cut against everything where it is this tick: after every mover and the
     // collision module's compose.
