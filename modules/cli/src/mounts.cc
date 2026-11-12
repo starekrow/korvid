@@ -216,14 +216,22 @@ bool kinds_patch(CliContext& ctx, const char* rel, Span<const char* const> value
 
 // ---- /systems and /handlers -----------------------------------------------------------------------
 
-void sets_line(Engine& e, const Array<u32>& ids, char* out, usize cap) {
+// The declared entries in one mode, early reads marked as declared ('^').
+void sets_line(Engine& e, const Array<UnitAccess>& declared, Access a, Access b, char* out, usize cap) {
     usize at = 0;
     out[0] = 0;
-    for (u32 id : ids) {
-        if (id > e.resources.len) continue;
-        at += (usize)snprintf(out + at, cap - at, "%s%s", at ? ", " : "", e.resources[id - 1].name);
+    for (const UnitAccess& d : declared) {
+        if ((d.mode != a && d.mode != b) || d.resource > e.resources.len) continue;
+        at += (usize)snprintf(out + at, cap - at, "%s%s%s", at ? ", " : "", d.mode == Access::Early ? "^" : "", e.resources[d.resource - 1].name);
         if (at >= cap) break;
     }
+}
+
+void print_sets(CliContext& ctx, Engine& e, const ScheduledSystem& s) {
+    char line[1024];
+    sets_line(e, s.declared, Access::Read, Access::Early, line, sizeof line); ctx.print("reads:  %s", line[0] ? line : "(nothing)");
+    sets_line(e, s.declared, Access::Write, Access::Write, line, sizeof line); ctx.print("writes: %s", line[0] ? line : "(nothing)");
+    sets_line(e, s.declared, Access::Append, Access::Append, line, sizeof line); if (line[0]) ctx.print("appends: %s", line);
 }
 
 template <class F>
@@ -250,10 +258,8 @@ bool systems_describe(CliContext& ctx, const char* rel) {
     each_system(e, [&](ScheduledSystem& s, Phase p) {
         if (found || strcmp(s.name(), dotted) != 0) return;
         found = true;
-        char line[1024];
         ctx.print("%s: phase %s, level %u, unit %u, module %s", s.name(), phase_name(p), s.level, s.unit, s.module->desc->name);
-        sets_line(e, s.reads, line, sizeof line);  ctx.print("reads:  %s", line[0] ? line : "(nothing)");
-        sets_line(e, s.writes, line, sizeof line); ctx.print("writes: %s", line[0] ? line : "(nothing)");
+        print_sets(ctx, e, s);
         ctx.print("after: %s; before: %s; state %s; main thread %s; runs %s", s.desc->after ? s.desc->after : "-", s.desc->before ? s.desc->before : "-",
                   s.desc->state == StateUse::Write ? "write" : s.desc->state == StateUse::Read ? "read" : "none",
                   yes_no(s.desc->main_thread), s.desc->runs == RunWhen::Always ? "always" : "unpaused");
@@ -278,10 +284,8 @@ bool handlers_describe(CliContext& ctx, const char* rel) {
     cli_slashes_to_dots(rel, dotted, sizeof dotted);
     for (ScheduledSystem& h : e.handlers) {
         if (strcmp(h.name(), dotted) != 0) continue;
-        char line[1024];
         ctx.print("%s: on %s, level %u, unit %u, module %s", h.name(), h.handler->event_name ? h.handler->event_name : "?", h.level, h.unit, h.module->desc->name);
-        sets_line(e, h.reads, line, sizeof line);  ctx.print("reads:  %s", line[0] ? line : "(nothing)");
-        sets_line(e, h.writes, line, sizeof line); ctx.print("writes: %s", line[0] ? line : "(nothing)");
+        print_sets(ctx, e, h);
         ctx.print("after: %s; before: %s", h.handler->after ? h.handler->after : "-", h.handler->before ? h.handler->before : "-");
         return true;
     }
@@ -295,10 +299,10 @@ void resources_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user
     CliTree tree{dir, emit, user};
     for (u32 i = 0; i < e.resources.len; ++i) {
         const ResourceEntry& r = e.resources[i];
-        if (r.implicit) continue;
+        if (r.cls == ResourceClass::State) continue;
         char slashed[128], summary[96];
         cli_dots_to_slashes(r.name, slashed, sizeof slashed);
-        snprintf(summary, sizeof summary, "%s%s%s", e.modules[r.module].desc->name, r.ptr ? ", published" : "", r.sink ? ", sink" : "");
+        snprintf(summary, sizeof summary, "%s%s%s", e.modules[r.module].desc->name, r.ptr ? ", published" : "", r.cls == ResourceClass::Append ? ", takes appends" : "");
         if (!tree.add(slashed, false, summary)) return;
     }
 }
@@ -311,7 +315,7 @@ bool resources_describe(CliContext& ctx, const char* rel) {
     if (!id) return false;
     const ResourceEntry& r = e.resources[id - 1];
     ctx.print("%s: id %u, module %s, %s%s", r.name, id, e.modules[r.module].desc->name,
-              r.ptr ? "published (a column or a struct; see /kinds for columns)" : "declared, nothing published", r.sink ? ", sink" : "");
+              r.ptr ? "published (a column or a struct; see /kinds for columns)" : "declared, nothing published", r.cls == ResourceClass::Append ? ", takes appends" : "");
     return true;
 }
 

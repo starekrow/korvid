@@ -18,12 +18,19 @@ constinit const ResourceDesc k_resources[] = {{".score"}};
 void noop(TickContext&) {}
 constinit const SystemDesc k_systems[] = {
     {.name = ".a", .phase = Phase::Sim, .fn = noop, .writes = ".thing.Pos, .score"},
-    {.name = ".b", .phase = Phase::Sim, .fn = noop, .reads = ".thing.Pos", .after = "?.a, ?.nobody"},
+    {.name = ".b", .phase = Phase::Sim, .fn = noop, .reads = ".thing.Pos", .after = "?.a, ?absent.nobody"},
 };
 KV_MODULE_DEFINE(k_q) = {.name = "q", .components = k_components, .kinds = k_kinds, .resources = k_resources, .systems = k_systems};
 
 constinit const SystemDesc k_bad_systems[] = {{.name = ".c", .phase = Phase::Sim, .fn = noop, .reads = ".nothing"}};
 KV_MODULE_DEFINE(k_bad) = {.name = "q", .components = k_components, .kinds = k_kinds, .systems = k_bad_systems};
+
+// "?name" in a module that is there: the system has to be too, so a typo is an error.
+constinit const SystemDesc k_typo_systems[] = {
+    {.name = ".a", .phase = Phase::Sim, .fn = noop},
+    {.name = ".b", .phase = Phase::Sim, .fn = noop, .after = "?.aa"},
+};
+KV_MODULE_DEFINE(k_typo) = {.name = "q", .systems = k_typo_systems};
 
 } // namespace
 
@@ -62,4 +69,9 @@ void test_qualify(kv::TestCtx& c) {
     Engine f;
     KV_CHECK(c, !engine_init(f, list2)); // ".nothing" is q.nothing, which nobody declares
     engine_shutdown(f);
+
+    const ModuleDesc* const list3[] = {&k_typo};
+    Engine g;
+    KV_CHECK(c, !engine_init(g, list3)); // "?.aa": module q is here and has no q.aa
+    engine_shutdown(g);
 }

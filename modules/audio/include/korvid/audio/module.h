@@ -2,7 +2,7 @@
 //
 //   handle kind  audio.voice
 //   events       VoiceFinished{voice}
-//   resources    audio.commands        declare a write on it to call audio_play and friends
+//   resources    audio.commands        declare `appends` on it to call audio_play and friends
 //   systems      audio.extract         PostSim, main thread, Always: commands to the mixer,
 //                                      finished voices back, pause and resume with the sim
 //

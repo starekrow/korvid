@@ -122,8 +122,9 @@ debris are additive dots.
   ship's x; `on_rock_hit` plays a break pitched up by the rock's size; `on_edge` plays the
   boom and stops the thruster; `on_spawned` starts the thruster as a silent loop that
   `control` turns up while thrusting; `pause` plays a click on the Ui bus that does not
-  pause with the sim, so the resume is heard too. Every caller declares a write on
-  `audio.commands`, a sink resource: writers need no order between them.
+  pause with the sim, so the resume is heard too. Every caller declares `appends` on
+  `audio.commands`: the calls are requests applied at the boundary in unit order, and need
+  no order between callers.
 - **The flame is a child with a flipbook.** The `flame` kind has `Local2`, `Parent` and
   an `AnimPlayer`; `on_spawned` gives each new ship one, 30 units behind it, playing
   `flame.anim.json` (two frames of a sheet at 12 fps and a scale wobble on its `Local2`),

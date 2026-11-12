@@ -27,11 +27,17 @@ namespace kv {
 struct Engine;
 struct ModuleDesc;
 
+// An append resource's owner taking one record, at a phase boundary, on the main thread,
+// in unit order: what a unit handed to ctx.append.
+typedef void (*AppendFn)(Engine& e, const void* record, u32 size);
+
 // Something systems read or write: a component store, an input state, a world.
 // Declared by the module that owns it; referenced by name in system read/write sets.
+// With `apply` it is an append resource: only its owner's systems write it, everyone
+// else declares `appends` and hands it records, which need no order between units.
 struct ResourceDesc {
     const char* name;
-    bool        sink = false; // a command queue many units append to: writers need no order between them; appends land in unit order
+    AppendFn    apply = nullptr;
 };
 
 // What a module needs from the memory system. Declared, not requested at runtime.
@@ -50,7 +56,7 @@ struct ModuleInstance {
     Allocator         general;              // the general allocator, attributed to this module
     u32               index      = 0;       // position in the module list
     bool              started    = false;
-    u32               state_resource = 0;   // id of "<module>.state", the implicit resource its systems share
+    u32               state_resource = 0;   // id of "<module>.state": declared with SystemDesc::state, never by name
     char              state_name[64];        // that resource's name
 
     // Records the state and its type, so systems and shutdown get it back checked.

@@ -697,9 +697,9 @@ constinit const ResourceDesc k_resources[] = {{".score"}};
 
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".pause",   .phase = Phase::PreSim, .fn = pause, .writes = ".overlay, .label, audio.commands", .runs = RunWhen::Always},
+    {.name = ".pause",   .phase = Phase::PreSim, .fn = pause, .writes = ".overlay, .label", .appends = "audio.commands", .runs = RunWhen::Always},
     {.name = ".files",   .phase = Phase::PreSim, .fn = files, .writes = ".score", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "input.state", .writes = ".ship.Transform2, .ship.Velocity, .ship.Ship, .bullet, .flame, audio.commands", .before = ".move"},
+    {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "input.state", .writes = ".ship.Transform2, .ship.Velocity, .ship.Ship, .bullet, .flame", .appends = "audio.commands", .before = ".move"},
     // move and wrap touch no module state: they share levels with whatever else is free.
     {.name = ".move",    .phase = Phase::Sim, .fn = move,    .reads = "*.Velocity",    .writes = "*.Transform2", .state = StateUse::None},
     {.name = ".wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = "*.Velocity",    .writes = "*.Transform2", .after = ".move", .state = StateUse::None},
@@ -712,15 +712,15 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_exit",     KV_ON(ExitRequested, on_exit)},
     {.name = ".on_asset_failed", KV_ON(AssetFailed, on_asset_failed)},
     {.name = ".on_overlap",  KV_ON(OverlapBegin, on_overlap)},
-    {.name = ".on_spawned",  KV_ON(Spawned, on_spawned), .writes = ".flame, audio.commands"},
+    {.name = ".on_spawned",  KV_ON(Spawned, on_spawned), .writes = ".flame", .appends = "audio.commands"},
     {.name = ".on_anim_finished", KV_ON(AnimFinished, on_anim_finished)},
-    {.name = ".on_rock_hit", KV_ON(RockHit, on_rock_hit), .writes = ".rock, .score, audio.commands"},
+    {.name = ".on_rock_hit", KV_ON(RockHit, on_rock_hit), .writes = ".rock, .score", .appends = "audio.commands"},
     {.name = ".on_ship_hit", KV_ON(ShipHit, on_ship_hit), .reads = ".ship.Transform2", .writes = ".ship.Health"},
     {.name = ".on_score",    KV_ON(ScoreChanged, on_score)},
     {.name = ".on_expire",   KV_ON(Expire, on_expire)},
     {.name = ".on_wave",     KV_ON(SpawnWave, on_wave), .writes = ".score", .after = ".on_rock_hit"},
     // The score's writers in a chain: rock_hit, wave, edge, restart.
-    {.name = ".on_edge",     KV_ON(StateEdge, on_edge), .writes = ".label, audio.commands, .score", .after = ".on_wave"},
+    {.name = ".on_edge",     KV_ON(StateEdge, on_edge), .writes = ".label, .score", .appends = "audio.commands", .after = ".on_wave"},
     {.name = ".on_restart",  KV_ON(Restart, on_restart), .writes = ".score, .label", .after = ".on_edge"},
 };
 

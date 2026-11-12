@@ -1206,22 +1206,24 @@ void arcanum_shutdown(Engine&, ModuleInstance& self) {
 }
 
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_build",   KV_ON(LevelBuild, on_build), .writes = ".player, .npc, .rock, tilemap.tile, tilemap.animtile, audio.commands"},
+    {.name = ".on_build",   KV_ON(LevelBuild, on_build), .writes = ".player, .npc, .rock, tilemap.tile, tilemap.animtile", .appends = "audio.commands"},
     {.name = ".on_exit",    KV_ON(ExitRequested, on_exit)},
     {.name = ".on_loading", KV_ON(LevelLoading, on_loading)},
-    {.name = ".on_ui",      KV_ON(UiEvent, on_ui), .writes = "audio.commands, .player.Vitals", .after = ".on_build"},
+    {.name = ".on_ui",      KV_ON(UiEvent, on_ui), .writes = ".player.Vitals", .appends = "audio.commands", .after = ".on_build"},
     {.name = ".on_covered", KV_ON(UiCovered, on_covered), .writes = ".rock", .after = ".on_build"},
 };
 constinit const SystemDesc k_systems[] = {
     {.name = ".files", .phase = Phase::PreSim, .fn = files, .after = "level.run", .before = ".menu", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".menu", .phase = Phase::PreSim, .fn = menu, .reads = "input.actions", .writes = "audio.commands",
+    {.name = ".menu", .phase = Phase::PreSim, .fn = menu, .reads = "input.actions", .appends = "audio.commands",
      .after = "level.run", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".modes", .phase = Phase::PreSim, .fn = modes, .writes = "audio.commands", .after = ".menu", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions, ^*[Collider2].Transform2, *[Collider2].Collider2, .npc, .npc.@props",
-     .writes = ".player.Move2, .player.Actor, .npc.@Quest, audio.commands", .main_thread = true},
-    {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .reads = "^.npc.Local2, ^.player.Transform2, ^.npc.MoveResult2", .writes = ".npc.Move2, .npc.Actor, .npc.AnimPlayer, .npc.Sprite, audio.commands", .main_thread = true},
+    {.name = ".modes", .phase = Phase::PreSim, .fn = modes, .appends = "audio.commands", .after = ".menu", .main_thread = true, .runs = RunWhen::Always},
+    // Before the resolve (it writes the intent): the villagers as they stand, except what
+    // the resolve writes, which is as the phase found it.
+    {.name = ".walk", .phase = Phase::Sim, .fn = walk, .reads = "input.actions, ^*[Collider2].Transform2, *[Collider2].Collider2, .npc, ^.npc.Local2, ^.npc.MoveResult2, .npc.@props",
+     .writes = ".player.Move2, .player.Actor, .npc.@Quest", .appends = "audio.commands", .main_thread = true},
+    {.name = ".villagers", .phase = Phase::Sim, .fn = villagers, .reads = "^.npc.Local2, ^.player.Transform2, ^.npc.MoveResult2", .writes = ".npc.Move2, .npc.Actor, .npc.AnimPlayer, .npc.Sprite", .appends = "audio.commands", .main_thread = true},
     {.name = ".react", .phase = Phase::Sim, .fn = react, .reads = ".player, .npc.MoveResult2",
-     .writes = ".player.Vitals, .player.Sprite, .player.AnimPlayer, audio.commands", .main_thread = true},
+     .writes = ".player.Vitals, .player.Sprite, .player.AnimPlayer", .appends = "audio.commands", .main_thread = true},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".player.Vitals", .before = "ui.draw", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".demo", .phase = Phase::PostSim, .fn = demo, .main_thread = true, .runs = RunWhen::Always},

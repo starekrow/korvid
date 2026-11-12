@@ -152,7 +152,8 @@ constinit const KindDesc k_kinds[] = {
     {.name = ".active",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet, Runner", .capacity = 8192, .id = &g_active_kind},
     {.name = ".particle", .components = "Transform2, Sprite, Velocity, Particle", .capacity = 32768, .id = &g_particle_kind, .cosmetic = true},
     {.name = ".egg",      .components = "Transform2, Sprite, EggBody", .capacity = 1, .id = &g_egg_kind},
-    {.name = ".shell",    .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_shell_kind},
+    {.name = ".shell",    .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_shell_kind,
+     .early_reads = EarlyReads::Snapshot}, // as the part, with the egg for the stage
     // Chips and pickups; a formation's count of its members.
     {.name = ".item",     .components = "Transform2, Sprite, Velocity, Collider2, Item", .capacity = 4096, .id = &g_item_kind},
     {.name = ".formation", .components = "Formation", .capacity = 64, .id = &g_formation_kind},
@@ -160,7 +161,10 @@ constinit const KindDesc k_kinds[] = {
     {.name = ".shadow",   .components = "Transform2, Local2, Parent, Sprite", .capacity = 512, .id = &g_shadow_kind, .cosmetic = true},
     // A boss's hull, and its parts: children of the hull or of each other (boss.cc).
     {.name = ".boss",     .components = "Transform2, Sprite, Collider2, Boss", .capacity = 2, .id = &g_boss_kind},
-    {.name = ".part",     .components = "Transform2, Local2, Parent, Sprite, Collider2, Health, Emitter, Runner, Part", .capacity = 256, .id = &g_part_kind},
+    // A snapshot: the stage spawns and moves parts before the resolve, which reads them
+    // early (where the last compose put them) and the bosses as the stage left them.
+    {.name = ".part",     .components = "Transform2, Local2, Parent, Sprite, Collider2, Health, Emitter, Runner, Part", .capacity = 256, .id = &g_part_kind,
+     .early_reads = EarlyReads::Snapshot},
     // Explosions: a flipbook each, gone when it has played (fx.cc).
     // The beams: one on the ship (and one on each option), cut each tick at what it meets.
     // Options: children of the ship, bodies that eat bullets (options.cc).
@@ -226,9 +230,9 @@ constinit const InputActionDesc k_actions[] = {
 
 constinit const SystemDesc k_systems[] = {
     {.name = ".demo", .phase = Phase::Input, .fn = demo, .before = "input.sample", .main_thread = true},
-    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, .particle, .shadow, .boom, .fleet, .tracer, .capital, .air, .ground, .bullet, .active, .shot, .item, .formation, .boss, .part, tilemap.tile, tilemap.animtile, audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, .particle, .shadow, .boom, .fleet, .tracer, .capital, .air, .ground, .bullet, .active, .shot, .item, .formation, .boss, .part, tilemap.tile, tilemap.animtile", .appends = "audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
     // The chain's clock, the extends, a new round's dials: before the sim moves anything.
-    {.name = ".scoring", .phase = Phase::PreSim, .fn = scoring, .writes = ".world.Run, .world.Stage, .world.Dials, audio.commands", .after = ".boot",
+    {.name = ".scoring", .phase = Phase::PreSim, .fn = scoring, .writes = ".world.Run, .world.Stage, .world.Dials", .appends = "audio.commands", .after = ".boot",
      .main_thread = true},
     {.name = ".records", .phase = Phase::PreSim, .fn = records, .main_thread = true, .runs = RunWhen::Always},
     {.name = ".screens", .phase = Phase::PreSim, .fn = screens, .reads = "input.actions", .after = ".pause", .main_thread = true, .runs = RunWhen::Always},
@@ -236,11 +240,11 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet.Transform2, ^.bullet.Velocity, ^.active.Transform2, ^.active.Velocity, ^.ship.Transform2, ^.air.Transform2, ^.ground.Transform2, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss, ^.item.Transform2, ^.item.Item, .world.Dials",
      .main_thread = true},
     {.name = ".scroll", .phase = Phase::Sim, .fn = scroll, .writes = ".world.Stage"},
-    {.name = ".stage", .phase = Phase::Sim, .fn = stage, .reads = ".world.Dials, .world.Run", .writes = ".world.Stage, .formation, .boss, .part, audio.commands", .after = ".scroll"},
+    {.name = ".stage", .phase = Phase::Sim, .fn = stage, .reads = ".world.Dials, .world.Run", .writes = ".world.Stage, .formation, .boss, .part", .appends = "audio.commands", .after = ".scroll"},
     {.name = ".planes", .phase = Phase::Sim, .fn = planes, .reads = ".world.Stage, .world.Dials, .plane.Plane, .plane.Sprite",
      .writes = "sprite.layers, .plane", .runs = RunWhen::Always},
     {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "^.option.Transform2, input.actions, .world.Dials",
-     .writes = ".ship.Transform2, .ship.Ship, .ship.Sprite, .shot, .ring.Sprite, .mark.Sprite, audio.commands"},
+     .writes = ".ship.Transform2, .ship.Ship, .ship.Sprite, .shot, .ring.Sprite, .mark.Sprite", .appends = "audio.commands"},
     // Storm's bolts steer by the enemies as the tick began (^), before anything moves them.
     {.name = ".shots", .phase = Phase::Sim, .fn = shots,
      .reads = "^.air.Transform2, ^.air.Health, ^.ground.Transform2, ^.ground.Health, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss.Boss",
@@ -253,7 +257,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".beams", .phase = Phase::Sim, .fn = beams, .reads = "*[Collider2].Transform2, *[Collider2].Collider2, .ship.Ship, .ship.Transform2, .beam.Parent, .option.Parent, .option.Option",
      .writes = ".beam.Local2, .beam.Sprite, .beam.Beam", .state = StateUse::None},
     {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage, .world.Run, .world.Dials", .writes = ".air, .ground, .formation", .state = StateUse::Read},
-    {.name = ".bosses", .phase = Phase::Sim, .fn = bosses, .reads = ".world.Run, .world.Dials, .world.EggState", .writes = ".boss, .part, .formation, .shadow, audio.commands",
+    {.name = ".bosses", .phase = Phase::Sim, .fn = bosses, .reads = ".world.Run, .world.Dials, .world.EggState", .writes = ".boss, .part, .formation, .shadow", .appends = "audio.commands",
      .after = ".stage, .enemies", .before = ".patterns", .main_thread = true},
     // The active bullets steer before they fly; the enemies' patterns run after
     // collision.compose, which places a boss's parts this tick and comes after every
@@ -263,13 +267,13 @@ constinit const SystemDesc k_systems[] = {
      .writes = ".air.Emitter, .air.Runner, .ground.Emitter, .ground.Runner, .part.Emitter, .part.Runner", .after = ".enemies, .actives"},
     {.name = ".bullets", .phase = Phase::Sim, .fn = bullets, .reads = ".bullet.Velocity, .active.Velocity",
      .writes = ".bullet.Transform2, .bullet.Bullet, .active.Transform2, .active.Bullet", .after = ".actives", .state = StateUse::None},
-    {.name = ".egg", .phase = Phase::Sim, .fn = egg, .reads = "^.bullet, ^.active", .writes = ".world.EggState, .world.Chance, .ship, .ring.Collider2, .egg, .shell, audio.commands",
+    {.name = ".egg", .phase = Phase::Sim, .fn = egg, .reads = "^.bullet, ^.active", .writes = ".world.EggState, .world.Chance, .ship, .ring.Collider2, .egg, .shell", .appends = "audio.commands",
      .after = ".control", .main_thread = true},
     {.name = ".bomb", .phase = Phase::Sim, .fn = bomb, .reads = "input.actions, ^.bullet, ^.active, .world.EggState, .ship.Transform2",
-     .writes = ".world.Run, .ship.Ship, .ship.Collider2, audio.commands", .after = ".egg", .main_thread = true},
+     .writes = ".world.Run, .ship.Ship, .ship.Collider2", .appends = "audio.commands", .after = ".egg", .main_thread = true},
     {.name = ".items", .phase = Phase::Sim, .fn = items, .reads = ".ship.Transform2, .ship.Ship", .writes = ".item"},
     {.name = ".glows", .phase = Phase::Sim, .fn = glows, .reads = ".world.Dials, .bullet.Transform2, .bullet.Sprite, .active.Transform2, .active.Sprite",
-     .writes = ".glow, .aglow", .after = ".bullets", .state = StateUse::None},
+     .writes = ".glow, .aglow", .after = ".bullets", .state = StateUse::Read},
     {.name = ".battle", .phase = Phase::Sim, .fn = battle, .reads = ".world.Stage, .world.Dials", .writes = ".fleet, .tracer, .capital", .after = ".scroll"},
     {.name = ".particles", .phase = Phase::Sim, .fn = particles, .writes = ".particle", .state = StateUse::None},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true,
@@ -289,24 +293,24 @@ constinit const SystemDesc k_systems[] = {
 constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_overlap", KV_ON(OverlapBegin, on_overlap)},
     {.name = ".on_shot_hit", KV_ON(ShotHit, on_shot_hit), .reads = ".ground.Ground, .air.Transform2, .ground.Transform2, .air.Mover, .shot.Transform2, .part.Transform2, .part.Part, .boss.Boss",
-     .writes = ".air.Health, .ground.Health, .shot.Shot, .part.Health, audio.commands"},
+     .writes = ".air.Health, .ground.Health, .shot.Shot, .part.Health", .appends = "audio.commands"},
     {.name = ".on_bomb", KV_ON(Bombed, on_bomb), .reads = ".ground.Ground, .air.Transform2, .ground.Transform2, .air.Mover, .part.Transform2, .part.Part, .boss.Boss",
-     .writes = ".air.Health, .ground.Health, .part.Health, audio.commands", .after = ".on_shot_hit"},
-    {.name = ".on_part_down", KV_ON(StateEdge, on_part_down), .reads = ".world.Dials, .part.Part, .part.Transform2, .bullet, .active", .writes = ".boss.Boss, audio.commands"},
+     .writes = ".air.Health, .ground.Health, .part.Health", .appends = "audio.commands", .after = ".on_shot_hit"},
+    {.name = ".on_part_down", KV_ON(StateEdge, on_part_down), .reads = ".world.Dials, .part.Part, .part.Transform2, .bullet, .active", .writes = ".boss.Boss", .appends = "audio.commands"},
     {.name = ".on_boom_done", KV_ON(AnimFinished, on_boom_done)},
     {.name = ".on_bullet_hit", KV_ON(BulletHit, on_bullet_hit), .reads = ".world.Dials",
      .writes = ".bullet.Bullet, .active.Bullet, .world.Run, .ship.Ship"},
     {.name = ".on_rammed", KV_ON(Rammed, on_rammed), .reads = ".world.Dials", .writes = ".ship.Ship", .after = ".on_bullet_hit"},
-    {.name = ".on_graze", KV_ON(Graze, on_graze), .reads = ".world.Dials, .bullet.Transform2, .active.Transform2", .writes = ".bullet.Bullet, .active.Bullet, .world.Run, audio.commands",
+    {.name = ".on_graze", KV_ON(Graze, on_graze), .reads = ".world.Dials, .bullet.Transform2, .active.Transform2", .writes = ".bullet.Bullet, .active.Bullet, .world.Run", .appends = "audio.commands",
      .after = ".on_bullet_hit"},
     {.name = ".on_shell_hit", KV_ON(ShellHit, on_shell_hit), .reads = ".bullet.Transform2, .active.Transform2"},
-    {.name = ".on_kill", KV_ON(Kill, on_kill), .reads = ".world.Dials", .writes = ".world.Run, .formation, audio.commands", .after = ".on_graze"},
+    {.name = ".on_kill", KV_ON(Kill, on_kill), .reads = ".world.Dials", .writes = ".world.Run, .formation", .appends = "audio.commands", .after = ".on_graze"},
     {.name = ".on_beam_hit", KV_ON(BeamHit, on_beam_hit), .reads = ".ground.Ground, .air.Transform2, .ground.Transform2, .air.Mover, .part.Transform2, .part.Part, .boss.Boss",
-     .writes = ".air.Health, .ground.Health, .part.Health, audio.commands", .after = ".on_bomb"},
-    {.name = ".on_pickup", KV_ON(Pickup, on_pickup), .reads = ".item.Item, .item.Transform2", .writes = ".world.Run, .ship.Ship, .option, .beam, audio.commands",
+     .writes = ".air.Health, .ground.Health, .part.Health", .appends = "audio.commands", .after = ".on_bomb"},
+    {.name = ".on_pickup", KV_ON(Pickup, on_pickup), .reads = ".item.Item, .item.Transform2", .writes = ".world.Run, .ship.Ship, .option, .beam", .appends = "audio.commands",
      .after = ".on_kill, .on_rammed"},
     {.name = ".on_ship_died", KV_ON(ShipDied, on_ship_died),
-     .reads = ".world.Dials", .writes = ".world.Run, .world.EggState, .world.Stage, .ship, audio.commands", .after = ".on_pickup, .on_rammed"},
+     .reads = ".world.Dials", .writes = ".world.Run, .world.EggState, .world.Stage, .ship", .appends = "audio.commands", .after = ".on_pickup, .on_rammed"},
     {.name = ".on_member", KV_ON(SpawnMember, on_member), .reads = ".world.Run, .world.Dials"},
     {.name = ".on_stage_end", KV_ON(StageEnd, on_stage_end), .reads = ".world.Dials, .world.Stage", .writes = ".world.Run", .after = ".on_ship_died"},
     {.name = ".on_stage_next", KV_ON(StageNext, on_stage_next)},

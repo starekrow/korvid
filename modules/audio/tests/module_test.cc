@@ -31,7 +31,7 @@ void sys_play(TickContext& ctx) {
     g_voice = audio_play(ctx, p);
     g_live_after = audio_voice_live(ctx, g_voice);
 }
-constinit const SystemDesc k_systems[] = {{.name = ".play", .phase = Phase::Sim, .fn = sys_play, .writes = "audio.commands"}};
+constinit const SystemDesc k_systems[] = {{.name = ".play", .phase = Phase::Sim, .fn = sys_play, .appends = "audio.commands"}};
 KV_MODULE_DEFINE(k_t) = {.name = "t", .systems = k_systems, .handlers = k_handlers};
 
 } // namespace

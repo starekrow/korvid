@@ -207,8 +207,14 @@ doing so and the broadphase reports them after its movers.
   slots), not symmetric. A game that wants fairness alternates or slows both.
 - **Read your position early.** A system that reads where a body is to decide its intent
   reads a column the resolve writes. Mark the read `^` (`.reads = "^.npc.Local2"`): it is
-  this phase's earlier value, and the scheduler runs that system before the resolve
-  instead of after it.
+  the value the phase started with, and the scheduler runs that system before the resolve
+  instead of after it (or, for a snapshot kind, hands it a copy).
+- **Children the game moves before the resolve are snapshots.** The resolve reads child
+  bodies (`Parent`, not moving themselves) early, where the last compose put them. A kind
+  of child body that a Sim system spawns or moves before the resolve would ask the
+  resolve to run both before that system and after it; make the kind a snapshot
+  (`.early_reads = EarlyReads::Snapshot`), as arcfire's boss parts and egg shell are, and
+  the resolve sees them as the phase found them. Init names the kind when it is needed.
 - **Teleport before the resolve.** A system that writes a body's `Transform2` after the
   resolve (in a reaction) is a cycle: the resolve reads it. Teleport in the system that
   writes the intent, before.

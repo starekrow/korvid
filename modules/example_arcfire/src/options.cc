@@ -44,7 +44,7 @@ bool option_add(TickContext& ctx, Game& g) {
 // module composes them: each option's place on the ship; its beams' lean, which eases after
 // the ship's sideways movement this tick, so they sweep the way it goes.
 void options(TickContext& ctx) {
-    Game& g = ctx.state_as<Game>();
+    const Game& g = ctx.state_as<const Game>();
     const Table* ships = engine_table(*ctx.engine, g_ship_kind);
     const Ship* s = ships->get<Ship>(g.ship);
     const Transform2* sx = ships->get<Transform2>(g.ship);

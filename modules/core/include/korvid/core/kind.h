@@ -22,6 +22,13 @@
 
 namespace kv {
 
+// How a system's early read ('^') of a kind gets the phase's starting value. Order runs
+// the reader before every writer of what it reads early: nearly free, but it adds edges.
+// Snapshot copies what is read early and written at the phase start and hands the reader
+// the copy, with no order at all: the reader can run beside the writers, or a cycle the
+// edges would make is not there. The reader sees the same values either way.
+enum class EarlyReads : u8 { Order, Snapshot };
+
 struct KindDesc {
     const char*             name       = nullptr; // also the handle kind and the resource name; '.' prefix: the module's
     const char*             components = nullptr; // component names, comma-separated, resolved at init
@@ -38,6 +45,7 @@ struct KindDesc {
     // built from columns. See ctx.attach and ctx.prop_set.
     const char*             attachable = nullptr;
     bool                    props      = false;
+    EarlyReads              early_reads = EarlyReads::Order; // how early reads of it get the phase start (see EarlyReads)
 };
 
 constexpr u32 KV_KIND_NAME_MAX = 48;

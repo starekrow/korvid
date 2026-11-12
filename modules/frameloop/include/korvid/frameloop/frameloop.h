@@ -8,7 +8,9 @@
 // --no-validation, --no-vsync, --borderless, --hitch-ms N, --hash (log the state hash
 // after every tick), --hash-systems (and after every system), --trace-events (print every
 // delivered event with its emitter; dev builds), --threads N (main thread included; 1 is
-// serial; the default is every core), --profile FILE (a Chrome trace of every zone, mark
+// serial; the default is every core), --early-reads order|snapshot|kind (every kind's
+// early reads ordered, every kind's from a snapshot, or as each kind says, the default:
+// the game is the same, the schedule is not), --profile FILE (a Chrome trace of every zone, mark
 // and counter), --prof-report (the top zones with every fps line); --hitch-ms also dumps
 // the hitching frame's zone tree. --screenshot FILE writes one presented frame as a binary
 // PPM, frame 90 unless --screenshot-frame N says otherwise; --check-sort reads the GPU

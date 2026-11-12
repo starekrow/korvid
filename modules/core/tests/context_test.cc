@@ -95,7 +95,7 @@ void sys_bump(TickContext& ctx) {
 void sys_peek(TickContext& ctx) {
     g_counter_seen = ctx.resource<const Counter>("g.counter")->n;
     KV_ASSERT(ctx.resource<const Counter>("g.quiet") == nullptr); // declared, unpublished: null and a log line
-    KV_ASSERT(ctx.column_id("g.ship.Hp") == engine_resource_id(*ctx.engine, "g.ship.Hp"));
+    KV_ASSERT((ctx.column_id("g.ship.Hp") & 0xFFFFFF) == engine_resource_id(*ctx.engine, "g.ship.Hp")); // tagged with the engine
     KV_ASSERT(ctx.kind_id("g.rock") == engine_kind_id(*ctx.engine, "g.rock"));
 }
 
@@ -123,11 +123,18 @@ void test_context(kv::TestCtx& c) {
     Engine e;
     KV_CHECK(c, engine_init(e, list));
 
-    // Resolved sets: the wildcard became one id per kind that has the component.
+    // Resolved sets: the wildcard became one id per kind that has the component; the
+    // expanded list has the write on g.rock covering its columns, Vel included.
     const ScheduledSystem& move = e.phases.systems[(u32)Phase::Sim][0];
-    KV_CHECK(c, move.reads.len == 2 && move.writes.len == 4); // Vel in ship and rock; Pos in three kinds, plus g.rock
-    KV_CHECK(c, move.reads[0] == engine_resource_id(e, "g.ship.Vel") && move.reads[1] == engine_resource_id(e, "g.rock.Vel"));
-    KV_CHECK(c, move.writes[2] == engine_resource_id(e, "g.decal.Pos") && move.writes[3] == engine_resource_id(e, "g.rock"));
+    KV_CHECK(c, move.declared.len == 6); // Vel in ship and rock; Pos in three kinds, plus g.rock
+    KV_CHECK(c, move.declared[0].resource == engine_resource_id(e, "g.ship.Vel") && move.declared[0].mode == Access::Read &&
+                move.declared[1].resource == engine_resource_id(e, "g.rock.Vel"));
+    KV_CHECK(c, move.declared[4].resource == engine_resource_id(e, "g.decal.Pos") && move.declared[5].resource == engine_resource_id(e, "g.rock") &&
+                move.declared[5].mode == Access::Write);
+    Access rock_vel = Access::Read, ship_vel = Access::Write;
+    KV_CHECK(c, move.mode(engine_resource_id(e, "g.rock.Vel"), &rock_vel) && rock_vel == Access::Write);
+    KV_CHECK(c, move.mode(engine_resource_id(e, "g.ship.Vel"), &ship_vel) && ship_vel == Access::Read);
+    KV_CHECK(c, !move.mode(engine_resource_id(e, "g.ship.Hp"), &ship_vel));
     KV_CHECK(c, EventType<Spawned>::id == e.event_type_count - 2 && EventType<StateEdge>::id == e.event_type_count - 1 &&
                 EventType<SimReset>::id == e.event_type_count); // the core's events come last
 

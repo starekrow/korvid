@@ -1,7 +1,9 @@
 // The derived schedule: readers after writers whatever the declaration order, `after`
-// and `before` edges, kind writes covering their columns, the two rejections (unordered
-// double writers, cycles) with names in the message, the sim-to-cosmetic flow rule, and
-// the state hash: same operations, same hash; dead rows and padding invisible.
+// and `before` edges, kind writes covering their columns and attachments, early reads
+// both ways (ordered, and from a snapshot kind), one mode per resource, module state as
+// a resource, append resources, units numbered by rank, the rejections (unordered double
+// writers, cycles, contradictions) with names in the message, the sim-to-cosmetic flow
+// rule, and the state hash: same operations, same hash; dead rows and padding invisible.
 #include "korvid/core/engine.h"
 #include "korvid/core/module.h"
 #include "korvid/core/test.h"
@@ -111,37 +113,133 @@ KV_MODULE_DEFINE(k_joined_clash) = {.name = "j", .components = k_components, .ki
 constinit const SystemDesc k_joined_unknown_systems[] = {{.name = "j.what", .phase = Phase::Sim, .fn = sys_other, .writes = "*[Vel+Nope].Pos"}};
 KV_MODULE_DEFINE(k_joined_unknown) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_joined_unknown_systems};
 
-// A sink (a command queue) needs no order between its writers; a real resource two systems
-// also both write still does, wherever it sits in their lists. Module resources number after
-// the kinds' columns, so the sink comes first here by id and by list: the case a check by
-// id order would pass over.
-constinit const ResourceDesc k_queue_res[] = {{".queue", true}};
+// An append resource: its appenders need no order, and their records reach the owner in
+// unit order; a real resource two systems also both write still does. Only the owner
+// writes it; anyone else declares `appends`. Module resources number after the kinds'
+// columns, so the queue comes first here by id and by list: the case a check by id order
+// would pass over.
+char g_applied[64];
+void queue_apply(Engine&, const void* record, u32 size) { if (size == 1) strncat(g_applied, (const char*)record, 1); }
+void sys_append_a(TickContext& ctx) { char r = 'a'; ctx.append("q.queue", r); }
+void sys_append_b(TickContext& ctx) { char r = 'b'; ctx.append("q.queue", r); }
+constinit const ResourceDesc k_queue_res[] = {{".queue", queue_apply}};
 constinit const SystemDesc k_sink_ok_systems[] = {
-    {.name = "q.one", .phase = Phase::Sim, .fn = sys_other, .writes = "q.queue", .state = StateUse::None},
-    {.name = "q.two", .phase = Phase::Sim, .fn = sys_other, .writes = "q.queue", .state = StateUse::None},
+    {.name = "q.one", .phase = Phase::Sim, .fn = sys_append_a, .appends = "q.queue", .state = StateUse::None},
+    {.name = "q.two", .phase = Phase::Sim, .fn = sys_append_b, .appends = "q.queue", .state = StateUse::None},
 };
 KV_MODULE_DEFINE(k_sink_ok) = {.name = "q", .components = k_components, .kinds = k_kinds, .resources = k_queue_res, .systems = k_sink_ok_systems};
 constinit const SystemDesc k_sink_clash_systems[] = {
-    {.name = "q.one", .phase = Phase::Sim, .fn = sys_other, .writes = "q.queue, s.body.Vel", .state = StateUse::None},
-    {.name = "q.two", .phase = Phase::Sim, .fn = sys_other, .writes = "q.queue, s.body.Vel", .state = StateUse::None},
+    {.name = "q.one", .phase = Phase::Sim, .fn = sys_other, .writes = "s.body.Vel", .appends = "q.queue", .state = StateUse::None},
+    {.name = "q.two", .phase = Phase::Sim, .fn = sys_other, .writes = "s.body.Vel", .appends = "q.queue", .state = StateUse::None},
 };
 KV_MODULE_DEFINE(k_sink_clash) = {.name = "q", .components = k_components, .kinds = k_kinds, .resources = k_queue_res, .systems = k_sink_clash_systems};
+constinit const SystemDesc k_sink_writer_systems[] = {{.name = "o.writes", .phase = Phase::Sim, .fn = sys_other, .writes = "q.queue"}};
+KV_MODULE_DEFINE(k_sink_writer) = {.name = "o", .systems = k_sink_writer_systems};
+constinit const SystemDesc k_not_append_systems[] = {{.name = "o.appends", .phase = Phase::Sim, .fn = sys_other, .appends = "s.body.Vel"}};
+KV_MODULE_DEFINE(k_not_append) = {.name = "o", .systems = k_not_append_systems};
 
 // A reader of two things one writer writes, one of them early (^) and one as it stands:
-// it would have to run both before and after the writer. Every shared resource counts, so
-// with nothing else ordering the two this is refused, not ordered by whichever came first
-// in the list; with an order declared, the declaration settles it.
+// with the kind's early reads ordered it would have to run both before and after the
+// writer, and an order declared one way contradicts one of the reads, so both are refused.
+// With the kind a snapshot, the pair is fine: the reader runs after and sees Pos from the
+// copy, as the phase found it, and Vel as the writer left it.
 constinit const SystemDesc k_mixed_read_systems[] = {
     {.name = "m.write", .phase = Phase::Sim, .fn = sys_move, .writes = "*.Pos, *.Vel", .state = StateUse::None},
     {.name = "m.read",  .phase = Phase::Sim, .fn = sys_steer, .reads = "^*.Pos, *.Vel", .state = StateUse::None},
 };
 KV_MODULE_DEFINE(k_mixed_read) = {.name = "m", .components = k_components, .kinds = k_kinds, .systems = k_mixed_read_systems};
-// The same pair with an order declared: the declaration settles it.
 constinit const SystemDesc k_mixed_ordered_systems[] = {
     {.name = "m.write", .phase = Phase::Sim, .fn = sys_move, .writes = "*.Pos, *.Vel", .state = StateUse::None},
     {.name = "m.read",  .phase = Phase::Sim, .fn = sys_steer, .reads = "^*.Pos, *.Vel", .before = "m.write", .state = StateUse::None},
 };
 KV_MODULE_DEFINE(k_mixed_ordered) = {.name = "m", .components = k_components, .kinds = k_kinds, .systems = k_mixed_ordered_systems};
+// Within one module, sharing its state: refused all the same, not settled by declaration order.
+constinit const SystemDesc k_mixed_module_systems[] = {
+    {.name = "m.write", .phase = Phase::Sim, .fn = sys_move, .writes = "*.Pos, *.Vel"},
+    {.name = "m.read",  .phase = Phase::Sim, .fn = sys_steer, .reads = "^*.Pos, *.Vel"},
+};
+KV_MODULE_DEFINE(k_mixed_module) = {.name = "m", .components = k_components, .kinds = k_kinds, .systems = k_mixed_module_systems};
+
+f32 g_seen_pos = -1, g_seen_vel = -1;
+void sys_set_both(TickContext& ctx) {
+    for (KindRows k : ctx.view<Pos, Vel>()) for (u32 i = 0; i < k.rows(); ++i) if (k.alive(i)) { k.col<Pos>()[i].x += 1; k.col<Vel>()[i].dx += 2; }
+}
+void sys_see_both(TickContext& ctx) {
+    for (KindRows k : ctx.view<const Pos, const Vel>()) for (u32 i = 0; i < k.rows(); ++i) if (k.alive(i)) { g_seen_pos = k.col<const Pos>()[i].x; g_seen_vel = k.col<const Vel>()[i].dx; }
+}
+constinit const KindDesc k_snap_kinds[] = {{.name = "n.body", .components = "Pos, Vel", .capacity = 8, .early_reads = EarlyReads::Snapshot}};
+constinit const SystemDesc k_mixed_snap_systems[] = {
+    {.name = "n.read",  .phase = Phase::Sim, .fn = sys_see_both, .reads = "^*.Pos, *.Vel", .state = StateUse::None},
+    {.name = "n.write", .phase = Phase::Sim, .fn = sys_set_both, .writes = "*.Pos, *.Vel", .state = StateUse::None},
+};
+KV_MODULE_DEFINE(k_mixed_snap) = {.name = "n", .components = k_components, .kinds = k_snap_kinds, .systems = k_mixed_snap_systems};
+
+// One covers relation for the schedule and the checks: a write on a kind covers its
+// attachments too, so it and a writer of one of them need an order (they once shared a
+// level and could attach on one store at once); a cosmetic attachment read into a sim
+// write is the flow rule's, like a column.
+constinit const KindDesc k_attach_kinds[] = {{.name = "t.npc", .components = "Pos, Vel", .capacity = 8, .attachable = "Glow"}};
+constinit const SystemDesc k_attach_race_systems[] = {
+    {.name = "t.spawn", .phase = Phase::Sim, .fn = sys_other, .writes = "t.npc", .state = StateUse::None},
+    {.name = "t.tag",   .phase = Phase::Sim, .fn = sys_other, .writes = "t.npc.@Glow", .state = StateUse::None},
+};
+KV_MODULE_DEFINE(k_attach_race) = {.name = "t", .components = k_components, .kinds = k_attach_kinds, .systems = k_attach_race_systems};
+constinit const SystemDesc k_attach_flow_systems[] = {{.name = "t.leak", .phase = Phase::Sim, .fn = sys_other, .reads = "t.npc.@Glow", .writes = "t.npc.Vel"}};
+KV_MODULE_DEFINE(k_attach_flow) = {.name = "t", .components = k_components, .kinds = k_attach_kinds, .systems = k_attach_flow_systems};
+
+// One mode per resource: two names covering Pos as read and read early are refused, as is
+// an early read of what the system writes; a kind's read is a default its named columns
+// override; a filter can leave a component out; module state is not named, and an early
+// read is of a kind or a column only.
+constinit const SystemDesc k_two_modes_systems[] = {{.name = "o.two", .phase = Phase::Sim, .fn = sys_other, .reads = "*.Pos, ^s.body.Pos"}};
+KV_MODULE_DEFINE(k_two_modes) = {.name = "o", .systems = k_two_modes_systems};
+constinit const SystemDesc k_early_own_systems[] = {{.name = "o.own", .phase = Phase::Sim, .fn = sys_other, .reads = "^s.body.Pos", .writes = "s.body.Pos"}};
+KV_MODULE_DEFINE(k_early_own) = {.name = "o", .systems = k_early_own_systems};
+constinit const KindDesc k_o_kinds[] = {{.name = "o.thing", .components = "Pos, Vel", .capacity = 8}};
+constinit const SystemDesc k_kind_default_systems[] = {
+    {.name = "o.vel",  .phase = Phase::Sim, .fn = sys_other, .writes = "o.thing.Vel", .state = StateUse::None},
+    {.name = "o.move", .phase = Phase::Sim, .fn = sys_other, .reads = "o.thing.Vel", .writes = "o.thing.Pos", .state = StateUse::None},
+    {.name = "o.look", .phase = Phase::Sim, .fn = sys_other, .reads = "o.thing, ^o.thing.Pos", .state = StateUse::None},
+};
+KV_MODULE_DEFINE(k_kind_default) = {.name = "o", .components = k_components, .kinds = k_o_kinds, .systems = k_kind_default_systems};
+constinit const SystemDesc k_excluded_systems[] = {{.name = "j.split", .phase = Phase::Sim, .fn = sys_other, .reads = "*[Vel-Glow].Pos, ^*[Glow].Pos"}};
+KV_MODULE_DEFINE(k_excluded) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_excluded_systems};
+constinit const SystemDesc k_named_state_systems[] = {{.name = "o.peek", .phase = Phase::Sim, .fn = sys_other, .reads = "a.state"}};
+KV_MODULE_DEFINE(k_named_state) = {.name = "o", .systems = k_named_state_systems};
+constinit const SystemDesc k_early_queue_systems[] = {{.name = "o.peek", .phase = Phase::Sim, .fn = sys_other, .reads = "^q.queue"}};
+KV_MODULE_DEFINE(k_early_queue) = {.name = "o", .systems = k_early_queue_systems};
+
+// Module state is a resource: readers of it share a level, a writer is ordered against
+// them in declaration order.
+constinit const SystemDesc k_state_systems[] = {
+    {.name = "st.r1", .phase = Phase::Sim, .fn = sys_other, .state = StateUse::Read},
+    {.name = "st.r2", .phase = Phase::Sim, .fn = sys_other, .state = StateUse::Read},
+    {.name = "st.w",  .phase = Phase::Sim, .fn = sys_other},
+};
+KV_MODULE_DEFINE(k_state) = {.name = "st", .systems = k_state_systems};
+
+// A snapshot kind's liveness: grow spawns one at once, and count, after it (it also reads
+// what grow publishes as it stands), still sees the bodies the phase began with.
+struct Tally { u32 n; };
+Tally g_tally;
+u32 g_counted = 0, g_tally_seen = 0;
+void sys_grow(TickContext& ctx) {
+    ctx.write_kind("ns.body")->spawn(Pos{1, 1}, Vel{0, 0});
+    ++ctx.resource<Tally>("ns.tally")->n;
+}
+void sys_count(TickContext& ctx) {
+    g_counted = 0;
+    for (KindRows k : ctx.view<const Pos>()) for (u32 i = 0; i < k.rows(); ++i) g_counted += k.alive(i);
+    g_tally_seen = ctx.resource<const Tally>("ns.tally")->n;
+}
+bool ns_startup(Engine& e, ModuleInstance& self) { return engine_publish(e, self, ".tally", &g_tally); }
+constinit const KindDesc k_ns_kinds[] = {{.name = "ns.body", .components = "Pos, Vel", .capacity = 8, .early_reads = EarlyReads::Snapshot}};
+constinit const ResourceDesc k_ns_res[] = {{".tally"}};
+constinit const SystemDesc k_ns_systems[] = {
+    {.name = "ns.count", .phase = Phase::Sim, .fn = sys_count, .reads = "^ns.body, ns.tally", .state = StateUse::None},
+    {.name = "ns.grow",  .phase = Phase::Sim, .fn = sys_grow,  .writes = "ns.body, ns.tally", .state = StateUse::None},
+};
+KV_MODULE_DEFINE(k_ns) = {.name = "ns", .components = k_components, .kinds = k_ns_kinds, .resources = k_ns_res, .systems = k_ns_systems, .startup = ns_startup};
 
 const char* order(const Engine& e, Phase p, char* buf, usize cap) {
     buf[0] = 0;
@@ -177,25 +275,118 @@ void test_schedule(kv::TestCtx& c) {
         KV_CHECK(c, init_fails(c, bad));
     }
 
-    // Sinks: their writers need no order, a real resource beside one still does.
+    // Append resources: no order between appenders, records in unit order; a real resource
+    // beside one still needs one; only the owner writes it; only it takes appends.
     {
         const ModuleDesc* const ok[] = {&k_sink_ok};
         Engine x;
         KV_CHECK(c, engine_init(x, ok));
+        g_applied[0] = 0;
+        x.phases.run_tick(x, x.events, 1.0 / 60.0, 0);
+        KV_CHECK(c, strcmp(g_applied, "ab") == 0);
         engine_shutdown(x);
         const ModuleDesc* const clash[] = {&k_sink_clash};
         KV_CHECK(c, init_fails(c, clash));
+        const ModuleDesc* const writer[] = {&k_sink_ok, &k_sink_writer};
+        KV_CHECK(c, init_fails(c, writer));
+        const ModuleDesc* const not_append[] = {&k_a, &k_not_append};
+        KV_CHECK(c, init_fails(c, not_append));
     }
 
-    // A reader both before (^) and after one writer cannot be placed.
+    // A reader both before (^) and after one writer cannot be placed, nor settled by an
+    // order declared or by its module's; from a snapshot kind it is fine.
     {
         const ModuleDesc* const mixed[] = {&k_mixed_read};
         KV_CHECK(c, init_fails(c, mixed));
         const ModuleDesc* const ordered[] = {&k_mixed_ordered};
+        KV_CHECK(c, init_fails(c, ordered));
+        const ModuleDesc* const module[] = {&k_mixed_module};
+        KV_CHECK(c, init_fails(c, module));
+        const ModuleDesc* const snap[] = {&k_mixed_snap};
         Engine x;
-        KV_CHECK(c, engine_init(x, ordered));
-        KV_CHECK(c, strcmp(order(x, Phase::Sim, buf, sizeof buf), "m.read m.write ") == 0);
+        KV_CHECK(c, engine_init(x, snap));
+        KV_CHECK(c, strcmp(order(x, Phase::Sim, buf, sizeof buf), "n.write n.read ") == 0);
+        engine_table(x, "n.body")->spawn(Pos{10, 0}, Vel{20, 0});
+        x.phases.run_tick(x, x.events, 1.0 / 60.0, 0);
+        KV_CHECK(c, g_seen_pos == 10 && g_seen_vel == 22); // Pos as the phase found it, Vel as written
         engine_shutdown(x);
+        // Forced ordered, the snapshot kind's pair is a contradiction again.
+        Engine y;
+        y.early_reads = EarlyReadsChoice::Order;
+        KV_CHECK(c, !engine_init(y, snap));
+        engine_shutdown(y);
+    }
+
+    // Attachments are covered by their kind, for the order and the flow rule.
+    {
+        const ModuleDesc* const race[] = {&k_attach_race};
+        KV_CHECK(c, init_fails(c, race));
+        const ModuleDesc* const flow[] = {&k_attach_flow};
+        KV_CHECK(c, init_fails(c, flow));
+    }
+
+    // One mode per resource, and what may be read early.
+    {
+        const ModuleDesc* const two[] = {&k_a, &k_two_modes};
+        KV_CHECK(c, init_fails(c, two));
+        const ModuleDesc* const own[] = {&k_a, &k_early_own};
+        KV_CHECK(c, init_fails(c, own));
+        const ModuleDesc* const named_state[] = {&k_a, &k_named_state};
+        KV_CHECK(c, init_fails(c, named_state));
+        const ModuleDesc* const early_queue[] = {&k_sink_ok, &k_early_queue};
+        KV_CHECK(c, init_fails(c, early_queue));
+        const ModuleDesc* const kind_default[] = {&k_kind_default};
+        Engine x;
+        KV_CHECK(c, engine_init(x, kind_default));
+        KV_CHECK(c, strcmp(order(x, Phase::Sim, buf, sizeof buf), "o.vel o.look o.move ") == 0); // Vel as it stands, Pos before the move
+        const ScheduledSystem* look = nullptr;
+        for (const ScheduledSystem& u : x.phases.systems[(u32)Phase::Sim]) if (!strcmp(u.name(), "o.look")) look = &u;
+        Access pos = Access::Read, vel = Access::Early;
+        KV_CHECK(c, look && look->mode(engine_resource_id(x, "o.thing.Pos"), &pos) && pos == Access::Early &&
+                    look->mode(engine_resource_id(x, "o.thing.Vel"), &vel) && vel == Access::Read);
+        // Units by rank, wherever they run: o.look is declared last and runs second.
+        KV_CHECK(c, look && look->level == 2 && look->unit == 3);
+        // Ids from the context carry their engine.
+        TickContext ctx{};
+        ctx.engine = &x;
+        u32 id = ctx.resource_id("o.thing.Pos");
+        KV_CHECK(c, id >> 24 == x.serial && (id & 0xFFFFFF) == engine_resource_id(x, "o.thing.Pos"));
+        u32 rows = 0;
+        KV_CHECK(c, ctx_column(ctx, id, &TypeKey<Pos>::key, false, &rows) != nullptr);
+        engine_shutdown(x);
+        const ModuleDesc* const excluded[] = {&k_excluded};
+        Engine y;
+        KV_CHECK(c, engine_init(y, excluded));
+        engine_shutdown(y);
+    }
+
+    // Module state: two readers share a level; the writer after them, in declaration order.
+    {
+        const ModuleDesc* const st[] = {&k_state};
+        Engine x;
+        KV_CHECK(c, engine_init(x, st));
+        const Array<ScheduledSystem>& sim = x.phases.systems[(u32)Phase::Sim];
+        KV_CHECK(c, sim.len == 3 && sim[0].level == 1 && sim[1].level == 1 && sim[2].level == 2 && !strcmp(sim[2].name(), "st.w"));
+        engine_shutdown(x);
+    }
+
+    // A snapshot kind's early reader sees the liveness the phase began with; forced to
+    // order, the same declarations are a contradiction.
+    {
+        const ModuleDesc* const ns[] = {&k_ns};
+        Engine x;
+        KV_CHECK(c, engine_init(x, ns));
+        KV_CHECK(c, strcmp(order(x, Phase::Sim, buf, sizeof buf), "ns.grow ns.count ") == 0);
+        engine_table(x, "ns.body")->spawn(Pos{0, 0}, Vel{0, 0});
+        x.phases.run_tick(x, x.events, 1.0 / 60.0, 0);
+        KV_CHECK(c, g_counted == 1 && engine_table(x, "ns.body")->live() == 2 && g_tally_seen == 1); // the tally as grow left it
+        x.phases.run_tick(x, x.events, 1.0 / 60.0, 1);
+        KV_CHECK(c, g_counted == 2 && engine_table(x, "ns.body")->live() == 3);
+        engine_shutdown(x);
+        Engine y;
+        y.early_reads = EarlyReadsChoice::Order;
+        KV_CHECK(c, !engine_init(y, ns));
+        engine_shutdown(y);
     }
 
     // Joined filters.

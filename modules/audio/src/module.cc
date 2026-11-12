@@ -35,7 +35,15 @@ struct VoiceRec {
     bool      fade_stop = false;
     u64       order = 0;       // when it was asked for: the oldest of a priority is stolen first
     u32       batch = 0;       // the extract it waits for: a second play of its sound before it is one start
+    // The handles callers hold for it: its own from outside the schedule, a reservation
+    // from a system's play, more than one when plays merged. Each gets its VoiceFinished.
+    Handle    given[8];
+    u32       ngiven = 0;
 };
+
+// A system's play gets a reservation at once, numbered like a ticket by its unit, and the
+// voice behind it at the next boundary, in unit order. This bit in the index marks one.
+constexpr u32 kReserved = 0x80000000u;
 
 constexpr u32 kStreamRingFrames = 1u << 16; // about 1.4 s at 44.1 kHz, 512 KB stereo
 
@@ -75,8 +83,25 @@ struct AudioCommands {
     Array<Handle>   stolen;        // voices taken by a play: their VoiceFinished goes out at the extract
 };
 
+// What a system asks for, as an append record: applied at the boundary, in unit order.
+enum class ReqOp : u8 { Play, Queue, Fade, Music };
+struct AudioRequest {
+    ReqOp     op;
+    MixOp     mix = MixOp::Set; // Queue: Set, Stop or Bus
+    Handle    voice;            // Play: the reservation; Queue and Fade: as the caller holds it; Music: the stream
+    SoundPlay play;
+    MusicPlay music;
+    f32       volume = 0, pitch = 0, pan = 0, seconds = 0;
+    u8        bus = 0;
+    FadeCurve curve = FadeCurve::EqualPower;
+    bool      stop = false;
+};
+
 struct AudioState {
     Engine*       engine = nullptr;
+    u32           commands = 0;     // the id of "audio.commands"
+    Array<u32>    reserved;         // by unit (0: outside the schedule): its reservations so far
+    Array<u64>    pending;          // reservations made and not applied yet
     Music         music;
     Allocator*    general = nullptr;
     Mixer         mixer;
@@ -96,12 +121,28 @@ struct Lock {
     ~Lock() { os_mutex_unlock(&mu); }
 };
 
+// A voice's own handle, or a reservation it was given.
 void* voice_resolve(kv_handle h, void* ctx) {
     AudioCommands& c = *(AudioCommands*)ctx;
     Handle hh{h};
     u32 i = hh.index();
+    if (i & kReserved) {
+        for (VoiceRec& v : c.voices)
+            if (v.used)
+                for (u32 k = 0; k < v.ngiven; ++k)
+                    if (v.given[k] == hh) return &v;
+        return nullptr;
+    }
     if (i >= KV_AUDIO_VOICES || !c.voices[i].used || c.voices[i].gen != hh.gen()) return nullptr;
     return &c.voices[i];
+}
+
+// The voice's own handle, from any handle to it.
+Handle voice_own(const AudioCommands& c, const VoiceRec* v, u16 kind) { return Handle::make(kind, v->gen, (u32)(v - c.voices)); }
+
+// Every handle a caller holds for the voice in `slot`: what its VoiceFinished goes to.
+void push_given(Array<Handle>& to, const VoiceRec& v) {
+    for (u32 k = 0; k < v.ngiven; ++k) to.push(v.given[k]);
 }
 int voice_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     VoiceRec* v = (VoiceRec*)voice_resolve(h, ctx);
@@ -117,18 +158,24 @@ void free_voice(AudioState& s, u32 slot);
 // The lock held: a voice from the pool. A stream (asset.stream) makes a stream voice,
 // which holds a reference on it until it is done. A sound already starting this tick is
 // the same start; a full pool gives up its lowest-priority, oldest voice, or refuses.
-Handle play_locked(AudioState& s, const SoundPlay& play) {
+// `reserved` is the handle a system's play was given; null for a play from outside, which
+// gets the voice's own.
+Handle play_locked(AudioState& s, const SoundPlay& play, Handle reserved = Handle{}) {
     if (!play.sound.is_null()) {
         for (u32 i = 0; i < KV_AUDIO_VOICES; ++i) {
             VoiceRec& v = s.cmds.voices[i];
             if (!v.used || v.started || v.stopped || v.stream || v.batch != s.cmds.batch || v.play.sound != play.sound || v.play.bus != play.bus ||
-                v.play.loop != play.loop)
+                v.play.loop != play.loop || v.ngiven == KV_COUNTOF(v.given))
                 continue;
             u8 prio = v.play.priority > play.priority ? v.play.priority : play.priority;
             if (play.volume > v.play.volume) v.play = play; // the louder wins
             v.play.priority = prio;
             ++s.cmds.merged;
-            return Handle::make(s.kind, v.gen, i);
+            Handle h = reserved.is_null() ? Handle::make(s.kind, v.gen, i) : reserved;
+            bool known = false;
+            for (u32 k = 0; k < v.ngiven; ++k) known = known || v.given[k] == h;
+            if (!known) v.given[v.ngiven++] = h;
+            return h;
         }
     }
     u32 slot = KV_AUDIO_VOICES;
@@ -149,7 +196,7 @@ Handle play_locked(AudioState& s, const SoundPlay& play) {
         }
         // Its start, if it had one, is overwritten in the mixer by this one's (same slot,
         // new generation); anything still queued for it no longer resolves.
-        s.cmds.stolen.push(Handle::make(s.kind, s.cmds.voices[slot].gen, slot));
+        push_given(s.cmds.stolen, s.cmds.voices[slot]);
         free_voice(s, slot);
         ++s.cmds.steals;
     }
@@ -164,15 +211,21 @@ Handle play_locked(AudioState& s, const SoundPlay& play) {
         v.stream = s.engine && asset_stream(*s.engine, play.sound) != nullptr;
         if (v.stream) asset_ref(*s.engine, play.sound);
         if (v.gen == 0 || v.gen == 0xFFFFF) v.gen = 1; else ++v.gen;
-        return Handle::make(s.kind, v.gen, i);
+        v.given[0] = reserved.is_null() ? Handle::make(s.kind, v.gen, i) : reserved;
+        v.ngiven = 1;
+        return v.given[0];
     }
 }
 Handle play_in(AudioState& s, const SoundPlay& play) {
     Lock lock(s.cmds.mu);
     return play_locked(s, play);
 }
-bool queue_locked(AudioState& s, const Queued& q) {
-    if (q.op != MixOp::Bus && !voice_resolve(q.voice.bits, &s.cmds)) return false;
+bool queue_locked(AudioState& s, Queued q) {
+    if (q.op != MixOp::Bus) {
+        const VoiceRec* v = (const VoiceRec*)voice_resolve(q.voice.bits, &s.cmds);
+        if (!v) return false;
+        q.voice = voice_own(s.cmds, v, s.kind); // the extract works by slot
+    }
     s.cmds.queued.push(q);
     return true;
 }
@@ -220,6 +273,7 @@ void free_voice(AudioState& s, u32 slot) {
     v.used = false;
     v.started = false;
     v.fade_pending = false;
+    v.ngiven = 0;
 }
 
 // Decodes ahead until the ring is full, looping at the stream's loop points; at the end of
@@ -303,7 +357,7 @@ void audio_extract(TickContext& ctx) {
         }
         VoiceRec& v = s.cmds.voices[slot];
         if (!v.used || v.gen != gen) continue;
-        ctx.emit(VoiceFinished{Handle::make(s.kind, gen, slot)});
+        for (u32 k = 0; k < v.ngiven; ++k) ctx.emit(VoiceFinished{v.given[k]});
         free_voice(s, slot);
     }
 
@@ -363,7 +417,7 @@ void audio_extract(TickContext& ctx) {
             if (ready) start = cmd_for(v, i, snd);
         }
         if (finish) {
-            ctx.emit(VoiceFinished{Handle::make(s.kind, v.gen, i)});
+            for (u32 k = 0; k < v.ngiven; ++k) ctx.emit(VoiceFinished{v.given[k]});
             free_voice(s, i);
             continue;
         }
@@ -438,6 +492,9 @@ bool audio_startup(Engine& e, ModuleInstance& self) {
     s->kind = handle_kind_register(desc);
     if (!s->kind) return false;
     if (!engine_publish(e, self, ".commands", &s->cmds)) return false;
+    s->commands = engine_resource_id(e, "audio.commands");
+    s->reserved.alloc = s->pending.alloc = &self.general;
+    s->reserved.resize_fill(e.units + 1, 0);
     self.set_state(s);
 
     AudioDeviceDesc dd;
@@ -464,6 +521,8 @@ void audio_shutdown(Engine& e, ModuleInstance& self) {
     kv_handle_kind_unregister(s->kind);
     s->cmds.queued.free();
     s->cmds.stolen.free();
+    s->reserved.free();
+    s->pending.free();
     os_mutex_destroy(&s->cmds.mu);
 }
 
@@ -548,7 +607,27 @@ constinit const CliMountDesc k_mounts[] = {
 };
 
 constinit const EventTypeDesc k_events[]    = {KV_EVENT(VoiceFinished)};
-constinit const ResourceDesc  k_resources[] = {{".commands", true}};
+// A system's request, at the boundary, in unit order: what the call would have done then
+// and there. A play refused (every voice busy with higher priorities) finishes at once.
+void audio_apply(Engine& e, const void* record, u32 size) {
+    AudioState* s = state(e);
+    if (!s || size != sizeof(AudioRequest)) return;
+    AudioRequest q;
+    memcpy(&q, record, sizeof q);
+    Lock lock(s->cmds.mu);
+    switch (q.op) {
+    case ReqOp::Play:
+        for (u32 k = 0; k < s->pending.len; ++k)
+            if (s->pending[k] == q.voice.bits) { s->pending[k] = s->pending[s->pending.len - 1]; --s->pending.len; break; }
+        if (play_locked(*s, q.play, q.voice).is_null()) s->cmds.stolen.push(q.voice);
+        break;
+    case ReqOp::Queue: queue_locked(*s, Queued{q.mix, q.voice, q.volume, q.pitch, q.pan, q.bus}); break;
+    case ReqOp::Fade:  fade_locked(*s, q.voice, q.volume, q.seconds, q.curve, q.stop); break;
+    case ReqOp::Music: music_locked(*s, q.voice, q.music); break;
+    }
+}
+
+constinit const ResourceDesc  k_resources[] = {{".commands", audio_apply}};
 // Phase PostSim, main thread, every tick, after the extract: each stream voice's ring is
 // topped up from its decoder, so the mixer always has a second or so ahead of it.
 void audio_stream_fill(TickContext& ctx) {
@@ -584,22 +663,78 @@ KV_MODULE_DEFINE(audio_module) = {
 // ---- the API ------------------------------------------------------------------------------------
 
 namespace {
+// A system's call: it must declare `appends` on audio.commands. The id is per engine.
 AudioState* checked(TickContext& ctx) {
-    static const u32 k_cmds = ctx.resource_id("audio.commands"); // full: callers are other modules' systems
-    if (!ctx.resource<AudioCommands>(k_cmds)) return nullptr; // undeclared: the context has said so
-    return state(*ctx.engine);
+    AudioState* s = state(*ctx.engine);
+    return s && ctx.may_append(s->commands) ? s : nullptr;
 }
+bool live_locked(AudioState& s, Handle h) {
+    if (voice_resolve(h.bits, &s.cmds)) return true;
+    for (u64 p : s.pending) if (p == h.bits) return true;
+    return false;
+}
+bool live(AudioState& s, Handle h) { Lock lock(s.cmds.mu); return live_locked(s, h); }
 } // namespace
 
-Handle audio_play(TickContext& ctx, const SoundPlay& play) { AudioState* s = checked(ctx); return s ? play_in(*s, play) : Handle{}; }
-bool   audio_set(TickContext& ctx, Handle voice, f32 volume, f32 pitch, f32 pan) { AudioState* s = checked(ctx); return s && queue_in(*s, MixOp::Set, voice, volume, pitch, pan, 0); }
-bool   audio_stop(TickContext& ctx, Handle voice) { AudioState* s = checked(ctx); return s && queue_in(*s, MixOp::Stop, voice, 0, 0, 0, 0); }
-void   audio_bus_volume(TickContext& ctx, AudioBus bus, f32 volume) { if (AudioState* s = checked(ctx)) queue_in(*s, MixOp::Bus, Handle{}, volume, 0, 0, (u8)bus); }
-bool   audio_voice_live(TickContext& ctx, Handle voice) {
+// From a system, every call is a request applied at the boundary, in unit order (see
+// audio_apply); a play's handle is a reservation, live from the call on.
+Handle audio_play(TickContext& ctx, const SoundPlay& play) {
+    AudioState* s = checked(ctx);
+    if (!s) return Handle{};
+    u32 unit = ctx.system ? ctx.system->unit : 0;
+    u32 n = ++s->reserved[unit] & 0xFFFFFu; // the unit's own counter: no one else touches it
+    Handle h = Handle::make(s->kind, n ? n : 1, kReserved | unit);
+    { Lock lock(s->cmds.mu); s->pending.push(h.bits); }
+    AudioRequest q{};
+    q.op = ReqOp::Play; q.voice = h; q.play = play;
+    ctx.append(s->commands, q);
+    return h;
+}
+bool audio_set(TickContext& ctx, Handle voice, f32 volume, f32 pitch, f32 pan) {
+    AudioState* s = checked(ctx);
+    if (!s || !live(*s, voice)) return false;
+    AudioRequest q{};
+    q.op = ReqOp::Queue; q.mix = MixOp::Set; q.voice = voice; q.volume = volume; q.pitch = pitch; q.pan = pan;
+    return ctx.append(s->commands, q);
+}
+bool audio_stop(TickContext& ctx, Handle voice) {
+    AudioState* s = checked(ctx);
+    if (!s || !live(*s, voice)) return false;
+    AudioRequest q{};
+    q.op = ReqOp::Queue; q.mix = MixOp::Stop; q.voice = voice;
+    return ctx.append(s->commands, q);
+}
+void audio_bus_volume(TickContext& ctx, AudioBus bus, f32 volume) {
+    AudioState* s = checked(ctx);
+    if (!s) return;
+    AudioRequest q{};
+    q.op = ReqOp::Queue; q.mix = MixOp::Bus; q.volume = volume; q.bus = (u8)bus;
+    ctx.append(s->commands, q);
+}
+bool audio_voice_live(TickContext& ctx, Handle voice) {
+    AudioState* s = checked(ctx);
+    return s && live(*s, voice);
+}
+bool audio_fade(TickContext& ctx, Handle voice, f32 target, f32 seconds, FadeCurve curve, bool stop_at_end) {
+    AudioState* s = checked(ctx);
+    if (!s || !live(*s, voice)) return false;
+    AudioRequest q{};
+    q.op = ReqOp::Fade; q.voice = voice; q.volume = target; q.seconds = seconds; q.curve = curve; q.stop = stop_at_end;
+    return ctx.append(s->commands, q);
+}
+bool music_play(TickContext& ctx, Handle stream, const MusicPlay& p) {
     AudioState* s = checked(ctx);
     if (!s) return false;
-    Lock lock(s->cmds.mu);
-    return voice_resolve(voice.bits, &s->cmds) != nullptr;
+    AudioRequest q{};
+    q.op = ReqOp::Music; q.voice = stream; q.music = p;
+    return ctx.append(s->commands, q);
+}
+void music_stop(TickContext& ctx, f32 fade) {
+    AudioState* s = checked(ctx);
+    if (!s) return;
+    AudioRequest q{};
+    q.op = ReqOp::Music; q.music.fade_out = fade;
+    ctx.append(s->commands, q);
 }
 
 Handle audio_play(Engine& e, const SoundPlay& play) { AudioState* s = state(e); return s ? play_in(*s, play) : Handle{}; }
@@ -607,23 +742,11 @@ bool   audio_set(Engine& e, Handle voice, f32 volume, f32 pitch, f32 pan) { Audi
 bool   audio_stop(Engine& e, Handle voice) { AudioState* s = state(e); return s && queue_in(*s, MixOp::Stop, voice, 0, 0, 0, 0); }
 void   audio_bus_volume(Engine& e, AudioBus bus, f32 volume) { if (AudioState* s = state(e)) queue_in(*s, MixOp::Bus, Handle{}, volume, 0, 0, (u8)bus); }
 
-bool audio_fade(TickContext& ctx, Handle voice, f32 target, f32 seconds, FadeCurve curve, bool stop_at_end) {
-    AudioState* s = checked(ctx);
-    if (!s) return false;
-    Lock lock(s->cmds.mu);
-    return fade_locked(*s, voice, target, seconds, curve, stop_at_end);
-}
 bool audio_fade(Engine& e, Handle voice, f32 target, f32 seconds, FadeCurve curve, bool stop_at_end) {
     AudioState* s = state(e);
     if (!s) return false;
     Lock lock(s->cmds.mu);
     return fade_locked(*s, voice, target, seconds, curve, stop_at_end);
-}
-bool music_play(TickContext& ctx, Handle stream, const MusicPlay& p) {
-    AudioState* s = checked(ctx);
-    if (!s) return false;
-    Lock lock(s->cmds.mu);
-    return music_locked(*s, stream, p);
 }
 bool music_play(Engine& e, Handle stream, const MusicPlay& p) {
     AudioState* s = state(e);
@@ -639,7 +762,6 @@ void music_stop(Engine& e, f32 fade) {
     p.fade_out = fade;
     music_locked(*s, Handle{}, p);
 }
-void music_stop(TickContext& ctx, f32 fade) { if (checked(ctx)) music_stop(*ctx.engine, fade); }
 Handle music_current(Engine& e) {
     AudioState* s = state(e);
     return s ? s->music.stream : Handle{};

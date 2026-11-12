@@ -23,7 +23,7 @@ void flash(const Game& g, Health& h, Sprite& s, Tex tex) {
 // Phase Sim: movers, emitters started and stopped, the flash. The patterns themselves run
 // in `patterns` (patterns.cc), after this.
 void enemies(TickContext& ctx) {
-    Game& g = ctx.state_as<Game>();
+    const Game& g = ctx.state_as<const Game>();
     Span<const Transform2> ship_xf = ctx.read<Transform2>("example_arcfire.ship.Transform2");
     Span<const Stage> stage_row = ctx.read<Stage>(ARC_WORLD(Stage));
     if (!stage_row.len || g.ship.index() >= ship_xf.len) return;

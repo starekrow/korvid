@@ -36,13 +36,21 @@ struct EngineConfig {
     Span<const KindCapacity>   capacities   = {};
 };
 
+// What a resource is. A kind's resources sit together: the kind, then its columns, its
+// attachments and its bags, so the kind covers the `children` ids after its own.
+enum class ResourceClass : u8 { State, Published, Append, Kind, Column, Attachment, Bags };
+
 struct ResourceEntry {
-    const char* name;
-    u32         module;         // owning module's index
-    void*       ptr  = nullptr; // what the owner published for systems to reach through the context
-    const void* type = nullptr; // its type key
-    bool        implicit = false; // a module's state: ordered by rank among its systems, never a conflict
-    bool        sink     = false; // ResourceDesc::sink: two writers never conflict
+    const char*   name;
+    u32           module;           // owning module's index
+    ResourceClass cls      = ResourceClass::Published;
+    void*         ptr      = nullptr; // what the owner published for systems to reach through the context
+    const void*   type     = nullptr; // its type key
+    u32           children = 0;     // a kind: the resources after it that it covers
+    u32           columns  = 0;     // a kind: how many of those are columns, which an early read covers
+    u32           table    = 0;     // a kind's resources: its kind id
+    bool          cosmetic = false; // a column or attachment of a cosmetic component: never feeds the sim
+    AppendFn      apply    = nullptr;
 };
 
 struct ComponentEntry {
@@ -126,6 +134,8 @@ struct Engine {
     IdleStats             idle_stats;
     u32                   wave_cap     = 4; // handler waves per boundary; leftovers wait for the next
     u32                   threads      = 0; // threads the schedule may use, main included; 0: every core
+    EarlyReadsChoice      early_reads  = EarlyReadsChoice::PerKind; // set before init: as each kind says, or one way for all
+    u32                   serial       = 0; // this engine among the process's, 1..255: tags the ids the context hands out
     u32                   units        = 0; // systems plus handlers
     u64                   waves_capped = 0; // boundaries that hit the cap
     u64                   edges_fired  = 0;
@@ -139,6 +149,9 @@ struct Engine {
     Map<u64, Handle>      entity_names;              // Name::hash -> the entity that has it (or had: checked against the table)
     u32                   entity_names_lock = 0;     // a spin lock: names change outside the schedule and at boundaries
 };
+
+// How early reads of a kind's resource get their value, the engine's choice applied.
+EarlyReads engine_early_reads(const Engine& e, u32 resource_id);
 
 // The name language of the registration tables. A name starting with '.' means
 // "<module>." plus the rest ("?." keeps the '?' in front); anything else is itself. The
@@ -173,7 +186,8 @@ bool engine_rate(Engine& e, f64 rate);
 bool engine_time_scale(Engine& e, f32 scale);
 f32  engine_time_scale_get(const Engine& e);
 // Applies and clears every command buffer, the engine's own first and then each unit's
-// in unit order: the tick runner calls it after every phase and every handler wave.
+// in unit order (spawns, destroys, names and appends, each buffer in issue order): the
+// tick runner calls it after every phase and every handler wave.
 void engine_apply_commands(Engine& e);
 // Evaluates every state trigger over this tick's previous and current rows and emits
 // StateEdge events, pending. The tick runner calls it at the end of the tick.

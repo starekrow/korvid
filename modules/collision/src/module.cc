@@ -385,9 +385,11 @@ void collision_shutdown(Engine&, ModuleInstance& self) {
 constinit const ResourceDesc k_resources[] = {{".moved"}};
 constinit const SystemDesc k_systems[] = {
     {.name = ".resolve", .phase = Phase::Sim, .fn = resolve,
-     // A child body is read where the last compose put it (^): collision.compose places it
-     // after the resolve has moved its parent.
-     .reads = "*[Collider2].Transform2, ^*[Parent+Collider2].Transform2, *[Collider2].Collider2, *[Move2].Move2",
+     // A child body that does not move itself is read where the last compose put it (^):
+     // collision.compose places it after the resolve has moved its parent. A child that
+     // moves is the resolve's to write, so it is read as it stands, which before the compose
+     // is the same place. Every other body as it stands.
+     .reads = "*[Collider2-Parent].Transform2, ^*[Parent+Collider2-Move2].Transform2, *[Collider2].Collider2, *[Move2].Move2",
      .writes = "*[Move2].Transform2, *[Move2].Local2, *[MoveResult2].MoveResult2, .moved"},
     {.name = ".compose", .phase = Phase::Sim, .fn = compose_bodies, .reads = "*.Transform2, *[Parent+Collider2].Local2, *[Parent+Collider2].Parent",
      .writes = "*[Parent+Collider2].Transform2", .after = ".resolve", .state = StateUse::None},

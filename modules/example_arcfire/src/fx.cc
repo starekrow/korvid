@@ -163,7 +163,7 @@ void particles(TickContext& ctx) {
 // the renderer would otherwise draw it moving from wherever its last bullet died), and a
 // slot with no bullet has a glow of no size.
 void glows(TickContext& ctx) {
-    Game& g = ctx.state_as<Game>();
+    const Game& g = ctx.state_as<const Game>();
     Engine& e = *ctx.engine;
     Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
     bool on = dials.len && dials[0].glows;

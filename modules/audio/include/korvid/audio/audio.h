@@ -18,9 +18,15 @@
 // asked for again before the tick's extract has started it is one start: the louder
 // request's play wins, with the higher priority of the two, and both get its handle.
 //
-// Call these from a system or handler that declares a write on "audio.commands". They
-// take a lock, briefly, so any thread of the schedule may call them; the voice pool and
-// the command list are the game thread's, never the mixer's.
+// Call these from a system or handler that declares `appends = "audio.commands"`. Each
+// call is a request applied at the next boundary, in unit order with every other unit's,
+// so which voice a play gets, what it merges with and what it steals are the same run to
+// run whatever thread ran what. A play's handle is a reservation, live (audio_voice_live)
+// from the call on and good for set, stop and fade at once; a play that gets no voice
+// finishes, with VoiceFinished, at the next extract. The calls that answer whether a
+// voice is live answer from the last boundary (and the caller's own plays since). The
+// Engine& forms, for outside the schedule, act at once under the pool's lock; the pool
+// and the command list are the game thread's, never the mixer's.
 #pragma once
 #include "korvid/audio/mixer.h"
 #include "korvid/core/handle.h"

@@ -132,7 +132,7 @@ void beam_spawn(Engine& e, Game& g, Handle owner) {
 // when the tick began: an air or ground row with health, a boss's open part); what leaves
 // the field goes.
 void shots(TickContext& ctx) {
-    Game& g = ctx.state_as<Game>();
+    const Game& g = ctx.state_as<const Game>();
     Engine& e = *ctx.engine;
     MemScope scope;
     Array<point2> targets = array_in<point2>(mem_scratch());

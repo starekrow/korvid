@@ -19,6 +19,40 @@ const char* phase_name(Phase p) {
     }
 }
 
+const char* access_name(Access a) {
+    switch (a) {
+    case Access::Read:   return "read";
+    case Access::Early:  return "read early";
+    case Access::Write:  return "write";
+    case Access::Append: return "append";
+    }
+    return "?";
+}
+
+const char* early_reads_name(EarlyReadsChoice m) {
+    return m == EarlyReadsChoice::Snapshot ? "every kind a snapshot" : m == EarlyReadsChoice::Order ? "every kind ordered" : "as each kind says";
+}
+
+bool ScheduledSystem::mode(u32 resource, Access* out) const {
+    u32 lo = 0, hi = access.len;
+    while (lo < hi) {
+        u32 mid = (lo + hi) / 2;
+        if (access[mid].resource < resource) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo == access.len || access[lo].resource != resource) return false;
+    *out = access[lo].mode;
+    return true;
+}
+
+void ScheduledSystem::free_buffers() {
+    declared.free();
+    access.free();
+    commands.bytes.free();
+    for (Table& t : early) t.columns.free();
+    early.free();
+}
+
 u32 PhaseList::system_count() const {
     u32 n = 0;
     for (const Array<ScheduledSystem>& p : systems) n += p.len;
@@ -54,6 +88,53 @@ struct LevelJob {
 void level_job(u32 chunk, u32, u32, void* user) {
     LevelJob& lj = *(LevelJob*)user;
     run_unit(*lj.ctx, *lj.events, *lj.list[chunk], nullptr, 0);
+}
+
+// The phase start of its snapshot kinds, copied, and every early reader's view of them
+// made over again from the tables as they are now, with the copies where it reads
+// early. Nothing else runs.
+usize take_snapshots(PhaseList& pl, u32 phase) {
+    if (!pl.snapshots[phase].len) return 0;
+    KV_ZONE("snapshot");
+    usize copied = 0;
+    for (KindSnapshot& ks : pl.snapshots[phase]) {
+        const Table& t = *ks.table;
+        if (ks.liveness) {
+            ks.len  = t.slots.len;
+            ks.live = t.slots.live;
+            ks.gens.resize_fill(ks.len, 0);
+            if (ks.len) memcpy(ks.gens.data, t.slots.gens, (usize)ks.len * sizeof(u32));
+            copied += (usize)ks.len * sizeof(u32);
+        }
+        for (KindSnapshot::Rows& r : ks.columns) {
+            usize bytes = (usize)t.rows() * r.column->stride;
+            r.bytes.resize_fill((u32)bytes, 0);
+            if (bytes) memcpy(r.bytes.data, r.column->data, bytes);
+            copied += bytes;
+        }
+    }
+    for (ScheduledSystem& s : pl.systems[phase]) {
+        for (Table& view : s.early) {
+            const KindSnapshot* ks = nullptr;
+            for (const KindSnapshot& k : pl.snapshots[phase]) if (k.table->index == view.index) ks = &k;
+            const Table& t = *ks->table;
+            Array<Column> cols = view.columns;
+            view = t;
+            view.columns = cols;
+            memcpy(view.columns.data, t.columns.data, (usize)t.columns.len * sizeof(Column));
+            if (ks->liveness) {
+                view.slots.gens = (u32*)ks->gens.data;
+                view.slots.len  = ks->len;
+                view.slots.live = ks->live;
+            }
+            for (const KindSnapshot::Rows& r : ks->columns) {
+                Access m;
+                if (s.mode(r.column->resource, &m) && m == Access::Early)
+                    view.columns[(u32)(r.column - t.columns.data)].data = (u8*)r.bytes.data;
+            }
+        }
+    }
+    return copied;
 }
 
 // A phase boundary: at the tick's first one the timers fire; then pending events are
@@ -103,6 +184,7 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
     ctx.state_type = nullptr;
     if (g_prof_on) prof_tick(tick);
     KV_ZONE("tick");
+    usize snapshot_bytes = 0;
     auto runs = [&](const ScheduledSystem& s) { return !paused || s.desc->runs == RunWhen::Always; };
     for (u32 p = 0; p < (u32)Phase::Count; ++p) {
         boundary(engine, events, ctx, tick, p == 0);
@@ -116,6 +198,7 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
             KV_ZONE("prev copy");
             for (Table& t : engine.tables) t.begin_tick();
         }
+        snapshot_bytes += take_snapshots(*this, p); // the snapshot kinds' starting values, if this phase reads any early
         // Level by level: the systems of a level have no path between them and run at
         // once on the pool; each level waits for the last.
         Array<ScheduledSystem>& phase = systems[p];
@@ -149,6 +232,7 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
             engine_apply_commands(engine); // spawns and destroys issued this phase take effect
         }
     }
+    if (g_prof_on && snapshot_bytes) prof_counter("snapshot KB", snapshot_bytes / 1024);
     if (!paused) {
         KV_ZONE("triggers");
         engine_fire_triggers(engine, tick); // edges this tick, as pending StateEdge events for the next
@@ -166,30 +250,34 @@ void PhaseList::free() {
         for (ScheduledSystem& s : p) s.free_buffers();
         p.free();
     }
+    for (Array<KindSnapshot>& p : snapshots) {
+        for (KindSnapshot& k : p) {
+            k.gens.free();
+            for (KindSnapshot::Rows& r : k.columns) r.bytes.free();
+            k.columns.free();
+        }
+        p.free();
+    }
+    by_unit.free();
 }
 
 // ---- the accessors behind TickContext ---------------------------------------------
 
 namespace {
 
-[[maybe_unused]] bool has_id(const Array<u32>& ids, u32 id) { // only the dev checks use it
-    for (u32 x : ids) if (x == id) return true;
-    return false;
-}
-
 const char* system_name(const TickContext& ctx) { return ctx.system ? ctx.system->name() : "(no system)"; }
 
-// Declared access to a resource, or to the kind that owns it (write on a kind covers its
-// columns). Outside the schedule (no system) everything is allowed. Ship builds skip this.
-bool allowed(const TickContext& ctx, u32 resource, u32 kind_resource, bool write) {
+// Declared access to a resource, by the unit's one expanded list: the same list the
+// schedule was built from. A read is any mode but append; a write is a write. Outside the
+// schedule (no system) everything is allowed. Ship builds skip this.
+bool allowed(const TickContext& ctx, u32 resource, bool write) {
 #if KV_DEV
     if (!ctx.system) return true;
-    const ScheduledSystem& s = *ctx.system;
-    if (has_id(s.writes, resource) || (kind_resource && has_id(s.writes, kind_resource))) return true;
-    if (!write && (has_id(s.reads, resource) || (kind_resource && has_id(s.reads, kind_resource)))) return true;
-    return false;
+    Access m;
+    if (!ctx.system->mode(resource, &m)) return false;
+    return write ? m == Access::Write : m != Access::Append;
 #else
-    KV_UNUSED(ctx); KV_UNUSED(resource); KV_UNUSED(kind_resource); KV_UNUSED(write);
+    KV_UNUSED(ctx); KV_UNUSED(resource); KV_UNUSED(write);
     return true;
 #endif
 }
@@ -200,14 +288,40 @@ void deny(const TickContext& ctx, const char* what, const char* name, bool write
     KV_VERIFY(!"undeclared access: see the log");
 }
 
-Column* checked_column(TickContext& ctx, Table& t, Column* c, const void* type, bool write) {
+// The unit's view of a kind: for a snapshot kind it reads early, the kind as the phase
+// found it (liveness, and the columns it reads early); the table itself
+// otherwise.
+Table* view_of(const TickContext& ctx, Table* t) {
+    if (!t || !ctx.system || !ctx.system->early.len) return t;
+    for (Table& v : ((ScheduledSystem*)ctx.system)->early)
+        if (v.index == t->index) return &v;
+    return t;
+}
+
+Column* checked_column(TickContext& ctx, Column* c, const void* type, bool write) {
     if (c->desc->type != type) {
         KV_ERROR("engine", "system '%s' accesses column '%s' as another type", system_name(ctx), c->resource_name);
         KV_VERIFY(!"column type mismatch: see the log");
         return nullptr;
     }
-    if (!allowed(ctx, c->resource, t.resource, write)) { deny(ctx, "column", c->resource_name, write); return nullptr; }
+    if (!allowed(ctx, c->resource, write)) { deny(ctx, "column", c->resource_name, write); return nullptr; }
     return c;
+}
+
+// Ids from the context carry the engine's serial in their top byte; ids from anywhere
+// else (a table's own) have none. One from another engine is refused.
+constexpr u32 k_id_bits = 24;
+
+u32 tag_id(const TickContext& ctx, u32 id) { return id ? id | ctx.engine->serial << k_id_bits : 0; }
+
+u32 untag_id(const TickContext& ctx, u32 id) {
+    u32 serial = id >> k_id_bits;
+    if (serial && serial != ctx.engine->serial) {
+        KV_ERROR("engine", "system '%s' uses an id from another engine (kept in a static across engines?)", system_name(ctx));
+        KV_VERIFY(!"id from another engine");
+        return 0;
+    }
+    return id & ((1u << k_id_bits) - 1);
 }
 
 } // namespace
@@ -218,24 +332,28 @@ Table* ctx_kind(TickContext& ctx, const char* kind, bool write) {
     kind = ctx_qualify(ctx, kind);
     Table* t = engine_table(*ctx.engine, kind);
     if (!t) { KV_ERROR("engine", "system '%s': unknown kind '%s'", system_name(ctx), kind); KV_VERIFY(!"unknown kind"); return nullptr; }
-    if (!allowed(ctx, t->resource, 0, write)) { deny(ctx, "kind", kind, write); return nullptr; }
-    return t;
+    if (!allowed(ctx, t->resource, write)) { deny(ctx, "kind", kind, write); return nullptr; }
+    return write ? t : view_of(ctx, t);
 }
 
 Table* ctx_kind(TickContext& ctx, u32 kind_id, bool write) {
     Table* t = engine_table(*ctx.engine, kind_id);
     if (!t) { KV_ERROR("engine", "system '%s': unknown kind id %u", system_name(ctx), kind_id); KV_VERIFY(!"unknown kind"); return nullptr; }
-    if (!allowed(ctx, t->resource, 0, write)) { deny(ctx, "kind", t->name, write); return nullptr; }
-    return t;
+    if (!allowed(ctx, t->resource, write)) { deny(ctx, "kind", t->name, write); return nullptr; }
+    return write ? t : view_of(ctx, t);
 }
 
 Column* ctx_column(TickContext& ctx, u32 resource_id, const void* type, bool write, u32* rows) {
-    for (Table& t : ctx.engine->tables)
-        for (Column& c : t.columns)
+    resource_id = untag_id(ctx, resource_id);
+    const ResourceEntry* r = resource_id && resource_id <= ctx.engine->resources.len ? &ctx.engine->resources[resource_id - 1] : nullptr;
+    if (r && r->cls == ResourceClass::Column) {
+        Table* t = view_of(ctx, &ctx.engine->tables[r->table - 1]);
+        for (Column& c : t->columns)
             if (c.resource == resource_id) {
-                *rows = t.rows();
-                return checked_column(ctx, t, &c, type, write);
+                *rows = t->rows();
+                return checked_column(ctx, &c, type, write);
             }
+    }
     KV_ERROR("engine", "system '%s': resource %u is not a column", system_name(ctx), resource_id);
     KV_VERIFY(!"unknown column");
     return nullptr;
@@ -251,16 +369,56 @@ Column* ctx_column(TickContext& ctx, const char* column, const void* type, bool 
 Column* ctx_column_in(TickContext& ctx, Table& table, u32 component_id, const void* type, bool write) {
     Column* c = table.column(component_id);
     if (!c) return nullptr; // the view said the kind has it; a stray call just gets nothing
-    return checked_column(ctx, table, c, type, write);
+    return checked_column(ctx, c, type, write);
 }
 
 void* ctx_resource(TickContext& ctx, u32 resource_id, const void* type, bool write) {
+    resource_id = untag_id(ctx, resource_id);
     if (!resource_id || resource_id > ctx.engine->resources.len) { KV_ERROR("engine", "system '%s': unknown resource id %u", system_name(ctx), resource_id); KV_VERIFY(!"unknown resource"); return nullptr; }
     ResourceEntry& r = ctx.engine->resources[resource_id - 1];
-    if (!allowed(ctx, resource_id, 0, write)) { deny(ctx, "resource", r.name, write); return nullptr; }
+    if (!allowed(ctx, resource_id, write)) { deny(ctx, "resource", r.name, write); return nullptr; }
     if (!r.ptr) { KV_ERROR("engine", "system '%s': resource '%s' is declared but nothing is published under it", system_name(ctx), r.name); return nullptr; }
     if (r.type != type) { KV_ERROR("engine", "system '%s' reaches resource '%s' as another type", system_name(ctx), r.name); KV_VERIFY(!"resource type mismatch: see the log"); return nullptr; }
     return r.ptr;
+}
+
+bool ctx_state_allowed(const TickContext& ctx, bool write) {
+#if KV_DEV
+    if (!ctx.system || !ctx.system->module) return true;
+    if (allowed(ctx, ctx.system->module->state_resource, write)) return true;
+    KV_ERROR("engine", "system '%s' %s its module's state, but declares state = %s", system_name(ctx), write ? "writes" : "reads",
+             ctx.system->desc && ctx.system->desc->state == StateUse::Read ? "Read (state_as<const T> reads it)" : "None");
+    KV_VERIFY(!"undeclared state access: see the log");
+    return false;
+#else
+    KV_UNUSED(ctx); KV_UNUSED(write);
+    return true;
+#endif
+}
+
+bool ctx_may_append(TickContext& ctx, u32 resource_id) {
+    resource_id = untag_id(ctx, resource_id);
+    const ResourceEntry* r = resource_id && resource_id <= ctx.engine->resources.len ? &ctx.engine->resources[resource_id - 1] : nullptr;
+    if (!r || r->cls != ResourceClass::Append) {
+        KV_ERROR("engine", "system '%s' appends to '%s', which is not an append resource", system_name(ctx), r ? r->name : "?");
+        KV_VERIFY(!"append to a resource without apply");
+        return false;
+    }
+#if KV_DEV
+    Access m;
+    if (ctx.system && !(ctx.system->mode(resource_id, &m) && (m == Access::Append || m == Access::Write))) {
+        KV_ERROR("engine", "system '%s' appends to '%s' without declaring it in `appends`", system_name(ctx), r->name);
+        KV_VERIFY(!"undeclared append: see the log");
+        return false;
+    }
+#endif
+    return true;
+}
+
+bool ctx_append(TickContext& ctx, u32 resource_id, const void* record, u32 size) {
+    if (!ctx_may_append(ctx, resource_id)) return false;
+    command_append(ctx.commands ? *ctx.commands : ctx.engine->commands, untag_id(ctx, resource_id), record, size);
+    return true;
 }
 
 // A name starting with '.' is relative to the running unit's module, as in the tables.
@@ -273,13 +431,12 @@ u32 ctx_resource_id(TickContext& ctx, const char* name, bool column) {
     name = ctx_qualify(ctx, name);
     u32 id = engine_resource_id(*ctx.engine, name);
     if (!id) { KV_ERROR("engine", "system '%s': unknown resource '%s'", system_name(ctx), name); KV_VERIFY(!"unknown resource"); return 0; }
-    if (column) {
-        bool is_column = false;
-        for (const Table& t : ctx.engine->tables)
-            for (const Column& c : t.columns) is_column = is_column || c.resource == id;
-        if (!is_column) { KV_ERROR("engine", "system '%s': resource '%s' is not a column", system_name(ctx), name); KV_VERIFY(!"not a column"); return 0; }
+    if (column && ctx.engine->resources[id - 1].cls != ResourceClass::Column) {
+        KV_ERROR("engine", "system '%s': resource '%s' is not a column", system_name(ctx), name);
+        KV_VERIFY(!"not a column");
+        return 0;
     }
-    return id;
+    return tag_id(ctx, id);
 }
 
 u32 TickContext::kind_id(const char* name) {
@@ -290,7 +447,7 @@ u32 TickContext::kind_id(const char* name) {
 }
 
 u32    ctx_table_count(TickContext& ctx) { return ctx.engine->tables.len; }
-Table* ctx_table_at(TickContext& ctx, u32 i) { return &ctx.engine->tables[i]; }
+Table* ctx_table_at(TickContext& ctx, u32 i) { return view_of(ctx, &ctx.engine->tables[i]); }
 
 // Tickets: a unit's are (unit << 20) | its own counter, unique and the same run to run
 // whatever thread the unit was on; the engine's buffer and wheel number their own.
@@ -310,6 +467,7 @@ CommandBuffer& buffer_of(TickContext& ctx, CommandBuffer* cb) { return cb ? *cb 
 } // namespace
 
 u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, const char* kind, u32 component_count, bool ticketed) {
+    kind = ctx_qualify(ctx, kind);
     u32 id = engine_kind_id(*ctx.engine, kind);
     if (!id) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind '%s'", system_name(ctx), kind); return 0; }
     return ctx_spawn_begin(ctx, cb, id, component_count, ticketed);
@@ -343,7 +501,7 @@ Attachment* checked_store(TickContext& ctx, Table* t, u32 component_id, bool wri
         KV_ERROR("engine", "system '%s': kind '%s' does not attach '%s'", system_name(ctx), t ? t->name : "?", cd ? cd->name : "?");
         return nullptr;
     }
-    if (!allowed(ctx, a->resource, t->resource, write)) { deny(ctx, "attachments", a->resource_name, write); return nullptr; }
+    if (!allowed(ctx, a->resource, write)) { deny(ctx, "attachments", a->resource_name, write); return nullptr; }
     return a;
 }
 
@@ -380,7 +538,7 @@ Table* ctx_props(TickContext& ctx, Handle h, bool write) {
     Table* t = engine_table_of(*ctx.engine, h);
     if (!t || !t->valid(h)) return nullptr;
     if (!t->props_resource) { KV_ERROR("engine", "system '%s': kind '%s' has no property bags", system_name(ctx), t->name); return nullptr; }
-    if (!allowed(ctx, t->props_resource, t->resource, write)) { deny(ctx, "bags", t->props_resource_name, write); return nullptr; }
+    if (!allowed(ctx, t->props_resource, write)) { deny(ctx, "bags", t->props_resource_name, write); return nullptr; }
     return t;
 }
 

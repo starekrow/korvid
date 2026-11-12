@@ -1,17 +1,24 @@
 // Korvid core: the update schedule. A fixed, ordered list of tick phases; modules place
-// systems in them. Systems declare read/write sets by resource name; at init the names
-// become ids (a "*.Component" wildcard becomes that column in every kind). Within a
-// phase the order is derived: a reader runs after every writer of what it reads, `after`
-// and `before` add edges by hand, two writers with no path between them or a cycle is a
-// registration error, and ties break by module order then declaration order. Systems
-// with no path between them share a level and run concurrently on the job pool. A
-// module's own state is an implicit resource every system of the module writes unless
-// it says otherwise (`state`), so two systems of one module never race on it. In dev
-// builds every access through the TickContext is checked against the declared sets.
+// systems in them. Systems declare what they touch by resource name, each in one mode:
+// read (the value after every writer in the phase), read early ("^x": the value the
+// phase started with), write, or append (records handed to the resource's owner at the
+// boundary). At init the names become ids, expanded once over the resource tree (a kind
+// covers its liveness, columns, attachments and bags; an early read of a kind covers its
+// liveness and columns), and that one expansion is what both the schedule and the dev
+// checks at access time use. Within a phase the order is solved from the declarations:
+// readers after writers, `after` and `before`, and a module's systems that share its
+// state in declaration order unless something else orders them; writers of one resource
+// need an order, cycles are refused, ties break by module then declaration order.
+// Systems with no path between them share a level and run concurrently on the job pool.
+// How an early read gets its value is chosen per kind (EarlyReads): by running the reader
+// before the writers, or from a copy taken at the phase start. The values are the same
+// either way, so a game means the same whatever the choice. docs/design/scheduler.md has
+// the whole model.
 //
 // Every system and handler (a "unit") owns an event writer and a command buffer, and
 // each chunk of a parallel_for owns a pair of its own, merged into the unit's in chunk
-// order, so what a tick emits and spawns comes out in the same order whatever ran where.
+// order. Units are numbered by declaration rank, not by where the schedule puts them, so
+// what a tick emits, spawns and appends comes out in the same order however it ran.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/event.h"
@@ -37,9 +44,30 @@ enum class Phase : u8 {
 };
 const char* phase_name(Phase p);
 
-// What a system does with its module's state (ModuleInstance::state). Write, the default,
-// serializes it against every other system of the module; None lets it run beside them.
+// What a system does with its module's state (ModuleInstance::state), which is a resource
+// like any other ("<module>.state"). Write, the default, reaches it as state_as<T>(); Read
+// as state_as<const T>() only, beside the module's other readers; None not at all.
+// Handlers run one at a time and always have it.
 enum class StateUse : u8 { Write, Read, None };
+
+// How a unit touches one resource. A unit has one mode per resource; a write includes
+// reading it as it stands.
+enum class Access : u8 {
+    Read,   // as it stands after every writer in the phase
+    Early,  // as the phase found it ('^' in the reads)
+    Write,
+    Append, // records for the owner, applied at the boundary (ResourceDesc::apply)
+};
+const char* access_name(Access a);
+struct UnitAccess {
+    u32    resource;
+    Access mode;
+};
+
+// How early reads get their value: as each kind says (KindDesc::early_reads), or one way
+// for every kind, to compare the two. The game is the same either way.
+enum class EarlyReadsChoice : u8 { PerKind, Order, Snapshot };
+const char* early_reads_name(EarlyReadsChoice m);
 
 // When a system runs. Unpaused, the default, is gameplay: skipped on a paused tick along
 // with the timer wheel and the triggers. Always is for what keeps a paused game alive:
@@ -89,8 +117,9 @@ struct HandlerDesc {
     u32*        event      = nullptr; // &EventType<E>::id
     const char* event_name = nullptr;
     HandlerFn   fn         = nullptr;
-    const char* reads      = nullptr; // resource names, comma-separated
+    const char* reads      = nullptr; // resource names, comma-separated; no early reads ('^') at a boundary
     const char* writes     = nullptr;
+    const char* appends    = nullptr;
     const char* after      = nullptr; // handler names
     const char* before     = nullptr;
 };
@@ -124,6 +153,8 @@ void command_destroy(CommandBuffer& cb, Handle h);
 void command_destroy_all(CommandBuffer& cb, u32 kind_id);
 // Names an entity at the boundary; a null entity names the last one this buffer spawned.
 void command_name(CommandBuffer& cb, Handle h, u64 name_hash);
+// A record for an append resource's owner, handed to its apply function at the boundary.
+void command_append(CommandBuffer& cb, u32 resource_id, const void* record, u32 size);
 
 template <class T> struct RemoveConst          { typedef T type; static constexpr bool is_const = false; };
 template <class T> struct RemoveConst<const T> { typedef T type; static constexpr bool is_const = true; };
@@ -153,6 +184,9 @@ bool    ctx_detach(TickContext& ctx, Handle h, u32 component_id);
 Table*  ctx_attachments(TickContext& ctx, u32 kind_id, u32 component_id, bool write); // the table, its store's access checked
 Table*  ctx_props(TickContext& ctx, Handle h, bool write);                          // the entity's table, its bags' access checked
 bool    ctx_cancel(TickContext& ctx, u32 ticket);
+bool    ctx_state_allowed(const TickContext& ctx, bool write); // logs and asserts when not
+bool    ctx_may_append(TickContext& ctx, u32 resource_id); // declared in `appends` (or the owner's write); logs and asserts when not
+bool    ctx_append(TickContext& ctx, u32 resource_id, const void* record, u32 size);
 
 // Per-chunk buffers for a parallel_for, in the caller's scratch: made before, merged after.
 struct ParallelBuffers {
@@ -265,10 +299,14 @@ struct TickContext {
     u32                    wave     = 0;       // for a handler: which wave of the boundary this is
     bool                   paused   = false;   // a paused tick: the sim stands still, only RunWhen::Always systems run
 
-    // The module state as the type startup stored. Verified by a pointer compare.
+    // The module state as the type startup stored, verified by a pointer compare. T const
+    // is a read; T is a write. Checked against the system's `state` in dev builds.
     template <class T>
     T& state_as() const {
-        KV_VERIFY(state && state_type == type_key<T>());
+        typedef typename RemoveConst<T>::type U;
+        static_assert(sizeof(U) > 0, "a complete type");
+        KV_VERIFY(state && state_type == type_key<U>());
+        ctx_state_allowed(*this, !RemoveConst<T>::is_const);
         return *(T*)state;
     }
 
@@ -312,10 +350,20 @@ struct TickContext {
         return (T*)ctx_resource(*this, id_of(name), &TypeKey<U>::key, !RemoveConst<T>::is_const);
     }
 
+    // A record for an append resource (declared in `appends`), handed to its owner at
+    // the phase boundary in unit order. By name or id; false if not declared.
+    template <class T, class K>
+    bool append(K resource, const T& record) {
+        static_assert(__is_trivially_copyable(T), "append plain data");
+        return ctx_append(*this, id_of(resource), &record, (u32)sizeof(T));
+    }
+    template <class K>
+    bool may_append(K resource) { return ctx_may_append(*this, id_of(resource)); }
+
     // Names to ids, for code that would rather not look a name up every call:
     //   static const u32 k_bounces = ctx.column_id("hello.ball.Bounces");
-    // Ids are stable for the life of the engine; a program that initializes several
-    // engines in a row must not keep them across.
+    // Ids are stable for the life of the engine and carry it: one kept across into
+    // another engine is caught (dev builds) rather than reaching the wrong resource.
     u32 resource_id(const char* name) { return ctx_resource_id(*this, name, false); }
     u32 column_id(const char* name) { return ctx_resource_id(*this, name, true); } // asserts if not a column
     u32 kind_id(const char* name);
@@ -445,17 +493,19 @@ struct SystemDesc {
     Phase       phase  = Phase::Count;
     SystemFn    fn     = nullptr;
     // Resource names, comma-separated; see HandlerDesc. A reader runs after every writer of
-    // what it reads in the phase. A read marked '^' ("^.npc.Local2") is of the phase's
-    // earlier value: that reader runs before the writers instead. An AI that reads where
-    // it stands to write the intent a later system moves it by reads its position that way.
-    // Every resource a reader shares with a writer counts: one read early and another as it
-    // stands from the same writer ask for both orders, and the pair follows whatever path
-    // the rest of the schedule makes between them (logged), or with none is refused until
-    // an `after` or `before` says which. Two writers of one resource need an order, unless
-    // the resource is a sink (ResourceDesc::sink), wherever it sits in either list.
+    // what it reads in the phase. A read marked '^' ("^.npc.Local2") is of the value the
+    // phase started with: an AI that reads where things stand to write the intent a later
+    // system moves them by reads their positions that way. It may be of a kind or its
+    // columns, never of something the unit writes itself. A filter may leave a component
+    // out ("*[Collider2-Parent].Transform2"). One resource, one mode: two spellings that
+    // cover it differently are refused, as is a reader that wants one thing early and
+    // another as it stands from the same writer (say which it means). Two writers of one
+    // resource need an order. `appends` names append resources (ResourceDesc::apply),
+    // which need no order at all.
     const char* reads  = nullptr;
     const char* writes = nullptr;
-    const char* after  = nullptr; // system names; needed between two writers, optional otherwise; "?name" only if that system exists
+    const char* appends = nullptr;
+    const char* after  = nullptr; // system names; needed between two writers, optional otherwise; "?name": only if that module is in the build
     const char* before = nullptr;
     StateUse                state  = StateUse::Write; // what it does with its module's state
     bool                    main_thread = false;      // runs on the thread driving the engine: for code that talks to the OS, the GPU, or a module's own pools
@@ -467,23 +517,39 @@ struct SystemDesc {
 struct ScheduledSystem {
     const SystemDesc*  desc;
     ModuleInstance*    module;
-    Array<u32>         reads;  // resource ids; wildcards expanded
-    Array<u32>         writes;
+    Array<UnitAccess>  declared; // as written, a name per entry, unexpanded: for people
+    Array<UnitAccess>  access;   // expanded over the resource tree, by resource id: what the checks and the schedule use
     const HandlerDesc* handler = nullptr;
     const char*        full_name = nullptr; // the declared name with its module prefix expanded
-    u32                unit    = 0; // 1-based position among all units: systems in phase order, then handlers
+    u32                unit    = 0; // 1-based, by rank among all units: systems in phase order, then handlers
     u32                level   = 0; // 1 + the longest chain of edges before it; equal levels run concurrently
     u32                rank    = 0; // module order then declaration order
     CommandBuffer      commands;
     u32                spawn_tickets = 0; // the unit's own ticket counters (see phase.cc)
     u32                timer_tickets = 0;
+    Array<Table>       early;    // the snapshot kinds it reads early, as the phase found them
 
     const char* name() const { return full_name ? full_name : desc ? desc->name : handler->name; }
-    void        free_buffers() { reads.free(); writes.free(); commands.bytes.free(); }
+    // The unit's mode on a resource; false when it has none.
+    bool        mode(u32 resource, Access* out) const;
+    void        free_buffers();
+};
+
+// A snapshot kind's copy at a phase start, of what that phase reads early and writes.
+// Liveness only when a unit spawns or destroys there.
+struct KindSnapshot {
+    struct Rows { Column* column; Array<u8> bytes; };
+    Table*     table    = nullptr;
+    bool       liveness = false;
+    Array<u32> gens;       // the slots' generations and alive bits
+    u32        len = 0, live = 0;
+    Array<Rows> columns;
 };
 
 struct PhaseList {
-    Array<ScheduledSystem> systems[(u32)Phase::Count];
+    Array<ScheduledSystem> systems[(u32)Phase::Count];   // in run order: by level, then rank
+    Array<KindSnapshot>    snapshots[(u32)Phase::Count]; // taken at each phase start
+    Array<ScheduledSystem*> by_unit;                      // every unit, systems then handlers, at unit - 1
 
     u32  system_count() const;
 

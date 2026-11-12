@@ -195,24 +195,48 @@ constinit const SystemDesc k_systems[] = {
 at init. A name that starts with `.` is the module's own: in module `mygame`, `.rock` is
 `mygame.rock`, `.move` is `mygame.move`, `.rock.Velocity` is that kind's column. A set
 (`reads`, `writes`, `after`, `before`, a kind's `components`) is one string of
-comma-separated names; spaces around the commas are ignored. `?.layout` is an order that
-holds only if that system exists (`?` then the name). The same shorthand works at
+comma-separated names; spaces around the commas are ignored. `?ui.layout` is an order
+that holds only if that system exists (`?` then the name): its module may be missing from
+the build, but if the module is there the system has to be, so a typo fails init. The same shorthand works at
 runtime where the engine knows the module: `ctx.resource_id(".score")`,
 `ctx.write_kind(".rock")`, `engine_publish(engine, self, ".score", ...)`. Names of other
 modules' things are written in full (`input.state`, `scene.compose`), as are names the
 engine does not expand: an event type, a component, a handle kind, a clip's label.
 
-Naming resources: `.rock` is the kind (a write on it covers spawn, destroy and every
-column); `.rock.Velocity` is one column; `*.Velocity` is that column in every kind that
-has one; `input.state` and `platform_hid.window` are published resources reached with
-`ctx.resource<const Input>(...)`. `move` and `wrap` both write `*.Transform2`, so one of
-them must say `after` the other or init fails with both names; `move` reads what nobody
-in Sim writes, so it needs no edge of its own. An unknown name fails init with the
-system, the module and the name, as before.
+Naming resources: `.rock` is the kind (a write on it covers spawn, destroy, every column,
+its attachments and its bags); `.rock.Velocity` is one column; `*.Velocity` is that column
+in every kind that has one; `*[Collider2].Transform2` is it in every kind that also has
+`Collider2`, `*[Collider2-Parent].Transform2` in those without `Parent`; `.npc.@Quest` and
+`.npc.@props` are a kind's attachments and bags; `input.state` and `platform_hid.window`
+are published resources reached with `ctx.resource<const Input>(...)`. `move` and `wrap`
+both write `*.Transform2`, so one of them must say `after` the other or init fails with
+both names; `move` reads what nobody in Sim writes, so it needs no edge of its own. An
+unknown name fails init with the system, the module and the name, as before.
+
+Each name has one mode for a system: read (after every writer in the phase), read early
+(`^`, the value the phase started with), write, or append (`appends`, see below). A
+system whose names cover one resource two ways is refused, except that a kind's read is a
+default for its columns: `.npc, ^.npc.Transform2` reads the villagers as they stand but
+their positions as the phase found them. A system cannot read early what it writes
+itself, and one that reads early from a writer and also reads, as it stands, something
+that writer writes is refused unless the kind is a snapshot (below). The whole model is
+in `docs/design/scheduler.md`.
+
+**Early reads, per kind.** `KindDesc::early_reads` says how a `^` read of the kind gets
+the phase's starting value. `EarlyReads::Order`, the default and nearly free, runs the
+reader before the writers. `EarlyReads::Snapshot` copies what is read early and written
+at the phase start and hands the reader the copy: the reader runs beside the writers, or
+after them, and a cycle the order would make is not there; the copy costs every phase it
+is needed (the `snapshot` zone, the `snapshot KB` counter). The game is the same either
+way: `--early-reads order|snapshot` forces one for every kind, and the hashes must not
+move. The startup log shows each phase's levels as declared, all ordered and all
+snapshots.
 
 `.main_thread = true` pins a system to the thread driving the engine, for code that talks
-to the OS, the GPU or a module's own pools (the asset pumps, the CLI). `.state = StateUse::None`
-lets a system run beside its module's others. `.runs = RunWhen::Always` makes a system run
+to the OS, the GPU or a module's own pools (the asset pumps, the CLI). `.state` is what a
+system does with its module's state: `Write`, the default, is `ctx.state_as<Game>()`;
+`Read` is `ctx.state_as<const Game>()` only, beside the module's other readers; `None`
+lets it run beside all of them and reach none of it (dev builds check). `.runs = RunWhen::Always` makes a system run
 on paused ticks too (see below); the default, `Unpaused`, is right for gameplay.
 
 ### Mounts
@@ -224,12 +248,20 @@ asset module mounts `/materials`, `/textures`, `/fonts` and `/sounds`; the engin
 `/kinds`, `/systems`, `/clock` and the rest come with the cli module. See
 `docs/design/cli.md`. A command is for an action; a mount is for state.
 
-### Sink resources
+### Append resources
 
-`ResourceDesc{"audio.commands", true}` declares a sink: a command queue that any number of
-units append to. Two writers of a sink need no order between them (the appends land in
-unit order, which is fixed), while a plain resource with two unordered writers is a
-registration error. Readers of a sink still run after its writers.
+`ResourceDesc{".commands", audio_apply}` declares an append resource: something any
+number of units hand records to, which its owner applies. A system declares
+`.appends = "audio.commands"` and calls `ctx.append(resource, record)` (audio wraps it:
+`audio_play` and the rest); the record goes into the unit's command buffer, and at the
+phase boundary, with the spawns and destroys, the engine hands each to `audio_apply`, in
+unit order, whatever thread ran what. Appends need no order between units or with
+anything else. Only the owner's systems write an append resource; anyone else declaring a
+write on it is told to append.
+
+Commands (`spawn_later`, `destroy`, `destroy_all`, `name_later`) need no declaration at
+all: they land at the boundary when nothing runs. Spawning or destroying at once takes
+`write_kind`, which needs the write on the kind.
 
 ### Cosmetic kinds
 

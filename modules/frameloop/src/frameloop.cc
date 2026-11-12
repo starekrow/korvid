@@ -42,6 +42,7 @@ char            g_capacity_names[16][64];
 KindCapacity    g_capacities[32];
 u32             g_capacity_count = 0;
 u32             g_threads      = 0; // 0: every core
+EarlyReadsChoice g_early_reads = EarlyReadsChoice::PerKind;
 const char*     g_trace_path   = nullptr; // --profile FILE
 bool            g_prof_report  = false;   // --prof-report: the top zones with the fps line
 const char*     g_shot_path    = nullptr; // --screenshot FILE: one frame as a PPM
@@ -132,6 +133,13 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--hash-systems") == 0) g_hash_systems = true;
         else if (strcmp(argv[i], "--trace-events") == 0) g_trace_events = true;
         else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) g_threads = (u32)atoi(argv[++i]);
+        else if (strcmp(argv[i], "--early-reads") == 0 && i + 1 < argc) {
+            const char* v = argv[++i];
+            if (!strcmp(v, "order")) g_early_reads = EarlyReadsChoice::Order;
+            else if (!strcmp(v, "snapshot")) g_early_reads = EarlyReadsChoice::Snapshot;
+            else if (!strcmp(v, "kind")) g_early_reads = EarlyReadsChoice::PerKind;
+            else { KV_ERROR("frameloop", "--early-reads takes order, snapshot or kind, not '%s'", v); return false; }
+        }
         else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) g_trace_path = argv[++i];
         else if (strcmp(argv[i], "--prof-report") == 0) g_prof_report = true;
         else if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) g_shot_path = argv[++i];
@@ -180,7 +188,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         }
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
-                                  "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] "
+                                  "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] [--early-reads order|snapshot|kind] "
                                   "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|uring] [--idle-margin-ms N] [--no-idle] [--overlay] [--touchpad] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE]", argv[0]);
             return false;
         }
@@ -528,6 +536,7 @@ int frameloop_run(int argc, char** argv, void*) {
     engine.hash_systems = g_hash_systems;
     engine.trace.print  = g_trace_events;
     engine.threads      = g_threads;
+    engine.early_reads  = g_early_reads;
     if (g_trace_events && !KV_DEV) KV_WARN("frameloop", "--trace-events: the event trace exists in dev builds only");
     // The game's capacities, then the command line's (a later entry for a kind wins).
     EngineConfig engine_config = g_config.engine;

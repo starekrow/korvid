@@ -539,7 +539,7 @@ constinit const EventTypeDesc k_events[] = {
 };
 constinit const KindDesc k_kinds[] = {{.name = ".sprite", .components = "Transform2, Sprite", .capacity = 16384, .cosmetic = true}};
 constinit const SystemDesc k_systems[] = {
-    {.name = ".update", .phase = Phase::PreSim, .fn = ui_update, .reads = "input.actions, input.state", .writes = "audio.commands",
+    {.name = ".update", .phase = Phase::PreSim, .fn = ui_update, .reads = "input.actions, input.state", .appends = "audio.commands",
      .after = "?asset.pump_scopes, ?asset.pump, ?asset.pump_blobs, ?asset.pump_sounds", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".draw", .phase = Phase::PostSim, .fn = ui_draw, .writes = ".sprite", .after = "?anim.play", .before = "?scene.compose", .main_thread = true, .runs = RunWhen::Always},
 };
