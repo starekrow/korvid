@@ -719,6 +719,71 @@ To do: the same set on Linux at the same commit, with the swapchain's size logge
 `perf record` of the stress run beside this one; `renderer_apply`'s handle map; the
 light-load GPU draw; the `--gas` tick.
 
+**Linux at the same commit** (2026-11-11, `0a6410d` built in a scratch worktree, `linux-dev`,
+the same machine; gcc 15 `-O2`; `--prof-report`, zone averages over every report window as
+above; 45 s a run, one at a time). The window is 1280 x 720 and so is the swapchain (the
+log's line): Windows drew 2.25 times the pixels. Two power profiles, `balanced` and
+`performance` (power-profiles-daemon; the governor amd-pstate's). The stress run is not the
+same run as Windows' (each platform's libm: bullets peak 20,508 and mean 3,497 here, 25,041
+and 4,355 there), so per-delta figures compare better than ms.
+
+| | Linux, balanced | Linux, performance | Windows, Performance |
+|---|---|---|---|
+| `--stress --spike-hunt`, tick at 1 / 8 / 16 threads | 1.36 / 1.19 / 1.37 | 1.04 / 1.02 / 1.17 | 1.92 / 2.19 / 2.46 |
+| the same, `sprite.extract` | 0.43 / 0.26 / 0.42 | 0.35 / 0.27 / 0.34 | 0.82 / 0.81 / 0.71 |
+| extract a delta, 1 thread | 118 ns (3,624 a tick) | 97 ns | 165 ns (4,509) |
+| `--stress --stage orbit`, tick / extract | 2.11 / 0.65 | 1.81 / 0.51 | 3.49 / 1.17 |
+| `--bench ring`, tick; with `--gas` | 0.73; 0.78 | 0.53; 0.48 | 1.45; 0.85 |
+| GPU draw: `--bench ring` / `--gas` / `rank=56` | 0.46 / 0.83 / 1.90 | 0.48 / 0.82 / 1.89 | 1.98 / 2.63 / 4.66 |
+
+What it says:
+
+- **The extract's gap is 1.7 times a delta, not three.** The earlier Linux figures were
+  from older commits; Linux's own extract has slowed since slice 5 (58 ns a delta then, 97
+  now, at stress: worth its own look, below). The tick's gap is 1.8 to 2.1 times on
+  Performance against performance.
+- **The spread of the time is the same.** A `perf record` of the stress run at one thread
+  (performance, 45 s, 2,999 Hz) puts `renderer_apply` first (12.0%; it holds the inlined
+  `Map<Handle,u32>::find_dense` that tops Windows' profile), then `rv_record_frame` (11.7%),
+  `schema_equal` (7.3%), `extract_sprites` (7.1%), glibc's `memcmp` (4.0% with its PLT
+  stub) and `memmove` (3.6%): the extract and its compare 18% of the samples, against
+  about 17% on Windows. The same functions in the same proportions: Windows is slower
+  across the board, not in one place cl compiles worse.
+- **Not huge pages.** The engine never asks for them (`MADV_HUGEPAGE`), and the kernel
+  gives them only to those that do (`transparent_hugepage` is `madvise`): `smaps_rollup`
+  shows `AnonHugePages: 0 kB` during the stress run. Linux runs on 4 KB pages as Windows
+  does.
+- **Threads cost Windows more.** From one thread to sixteen the tick grows 12% here and 28%
+  there: waking the pool's workers is dearer on Windows (a parked core's wake, or the
+  scheduler's latency).
+- **The `--gas` effect and the light-load draw are Windows' alone.** Here the light bench
+  ticks alike with and without the nebula, and its GPU draw is 0.48 ms against Windows'
+  1.98 (4.1 times, for 2.25 times the pixels); under load the draws follow the pixels on
+  both. On this APU the CPU and the GPU share one power budget, and Windows' Performance
+  plan does not hold either at speed when the work is light. A light frame lets both clock
+  down; the nebula's 0.35 ms of GPU work keeps the package busy, and the CPU's tick comes
+  in faster with it. Even here clocks move a lot: on `balanced` the sim thread's core read
+  4.9 GHz, then 2.0, then 2.2 within one stress run, and `performance` took 20 to 30% off
+  every CPU number.
+
+The lead is clocks and wakes, not code. To settle it on Windows, in order:
+
+1. The light bench with and without `--gas`, and the stress run at 1 and 16 threads, with
+   `--no-vsync`. With nothing waiting on the display the package stays busy: if the gaps
+   close, it is power management.
+2. The same on the Ultimate Performance plan (`powercfg -duplicatescheme
+   e9a42b02-d5df-448d-aa00-03f14749eb61`), or with the minimum processor state at 100%
+   and core parking off (`powercfg -setacvalueindex scheme_current sub_processor
+   CPMINCORES 100`): if the 16-thread tick falls back toward the 1-thread one, the wakes
+   were parked cores.
+3. A clock reading beside the runs (`typeperf "\Processor Information(_Total)\% Processor
+   Performance"`), and the same `perf`-style breakdown from the sampled profile, by zone,
+   to set beside the one above.
+
+Linux's own slowing (58 to 97 ns a delta since slice 5) is the next look here: the stress
+stretch and the Sprite row (sorts, anchors and the screen flag since slice 5) are the
+candidates; the glows are off under stress.
+
 ## Linux, after slice 7: the seeds
 
 Every demo had changed on Linux at the slice's last commit: Shoreline ended at tick 13,786
