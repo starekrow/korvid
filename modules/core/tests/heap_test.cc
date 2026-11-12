@@ -8,6 +8,7 @@
 #include "korvid/core/job.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/module.h"
+#include "korvid/core/array.h"
 #include "korvid/core/test.h"
 #include <string.h>
 
@@ -131,6 +132,20 @@ void test_heap(kv::TestCtx& c) {
     free_in(&view, a1, 200 * 1024);
     free_in(&view, a3, 50 * 1024);
     KV_CHECK(c, mem_heap_used(heap) == 0);
+    // An array on that heap: growing past the limit fails and leaves it as it was.
+    {
+        Array<u8> arr = array_in<u8>(&view);
+        u8* first = arr.try_push_n(100 * 1024);
+        KV_CHECK(c, first != nullptr && arr.len == 100 * 1024);
+        memset(first, 7, 100 * 1024);
+        u8* before = arr.data;
+        u32 cap = arr.cap;
+        KV_CHECK(c, arr.try_push_n(200 * 1024) == nullptr && !arr.reserve(300 * 1024)); // would pass 256 KB
+        KV_CHECK(c, arr.data == before && arr.cap == cap && arr.len == 100 * 1024 && arr.data[100 * 1024 - 1] == 7);
+        KV_CHECK(c, arr.try_push(9) != nullptr && arr.len == 100 * 1024 + 1); // room in what it has
+        arr.free();
+        KV_CHECK(c, mem_heap_used(heap) == 0);
+    }
     Arena ar;
     KV_CHECK(c, arena_create(ar, 4u << 20, "limited", tag));
     KV_CHECK(c, arena_alloc(ar, 100 * 1024) != nullptr);      // commits 128 KB

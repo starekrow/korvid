@@ -105,6 +105,17 @@ struct Allocator {
   releases it for nested temporaries.
 - `Arena`, `Pool<T>`: the types an owner creates for itself.
 - `Array<T>` takes an `Allocator*` at creation (`array_in<T>(alloc)`), default general.
+  Growing it can fail (a heap at its hard limit): `reserve` returns false and leaves the
+  array as it was, `try_push` and `try_push_n` return null. `push`, `push_n` and
+  `resize_fill` have no way to say so and stop with a line naming the heap
+  (`array_grow_failed`), in every build: for what the caller cannot do without. The job
+  pool's queue takes the recoverable form, and runs a batch on the caller when it cannot
+  queue it; a pool with no memory for its workers runs without them.
+- Accounting is per thread: a fixed table of 256 blocks, one per live thread, summed by the
+  reports. A thread that exits folds its totals into a retired block and frees its slot for
+  the next new one (under the lock a report sums under, so a report never counts a thread
+  twice or not at all). Only a 257th thread alive at once counts privately, unseen by the
+  reports until it exits; hard limits are enforced from a separate, global count.
 - `MemTag`: module id from the registry, a category id, a heap id. Zero by default.
 - `mem_category_register(name)`, `mem_heap_register(name, budget)`: idempotent by name,
   startup only. `mem_stats_module/category/heap` and `mem_report` read them back.

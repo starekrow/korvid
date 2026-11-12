@@ -102,6 +102,11 @@ bool jobs_init(u32 workers) {
     p.up = true;
     if (workers) {
         p.threads = alloc_items<OsThread>(mem_general(), workers);
+        if (!p.threads) { // a heap at its limit: the pool runs every batch on the caller
+            KV_ERROR("jobs", "no memory for %u workers; running without", workers);
+            KV_INFO("jobs", "0 workers");
+            return true;
+        }
         for (u32 i = 0; i < workers; ++i) {
             p.threads[i] = OsThread();
             if (!os_thread_start(&p.threads[i], worker_main, (void*)(usize)(i + 1))) {
@@ -159,9 +164,16 @@ void jobs_run(u32 count, u32 grain, JobFn fn, void* user, const char* name) {
         for (u32 i = 0; i < chunks; ++i) run_task(Task{&b, i});
         return;
     }
-    bump(&g_stats.batches);
     os_mutex_lock(&p.mu);
-    for (u32 i = 0; i < chunks; ++i) p.queue.push(Task{&b, i});
+    Task* slots = p.queue.try_push_n(chunks);
+    if (!slots) { // the queue could not grow (a heap at its limit): this batch runs here
+        os_mutex_unlock(&p.mu);
+        bump(&g_stats.inline_batches);
+        for (u32 i = 0; i < chunks; ++i) run_task(Task{&b, i});
+        return;
+    }
+    bump(&g_stats.batches);
+    for (u32 i = 0; i < chunks; ++i) slots[i] = Task{&b, i};
     os_cond_broadcast(&p.cv);
     os_mutex_unlock(&p.mu);
 

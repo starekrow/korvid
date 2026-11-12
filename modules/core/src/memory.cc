@@ -1,4 +1,5 @@
 #include "korvid/core/memory.h"
+#include "korvid/core/array.h"
 #include "korvid/core/atomic.h"
 #include "korvid/core/log.h"
 #include "korvid/core/os_memory.h"
@@ -100,8 +101,9 @@ u8 registry_add(Registry& r, u32 max, const char* name) {
 // A thread's block is plain memory it alone writes; other threads read it with relaxed
 // atomic loads (plain moves on every target). Per-thread values may go negative, since
 // a block freed on another thread subtracts there; only the sum means anything. Blocks
-// come from a fixed table, are claimed once per thread and never handed back: when a
-// thread exits, its totals fold into the retired block and the slot is marked dead.
+// come from a fixed table of 256, one per live thread: when a thread exits, its totals fold
+// into the retired block, its slot is zeroed and marked free, and the next new thread takes
+// it, so threads come and go for ever without running out (only 256 at once would).
 struct ThreadBlock {
     i64 live_allocs;
     i64 live_bytes;
@@ -116,7 +118,7 @@ constexpr u32 kMaxThreads = 256;
 alignas(64) ThreadBlock g_blocks[kMaxThreads];
 ThreadBlock g_retired;      // folded totals of exited threads; written under g_retired_lock
 u32         g_retired_lock; // spin, taken once per thread lifetime
-u32         g_block_count;  // atomic bump
+u32         g_block_count;  // atomic: slots ever handed out, the table's high-water mark
 thread_local ThreadBlock* t_block = nullptr;
 
 inline void bump(i64& v, i64 d) { kv::atomic_store(&v, kv::atomic_load(&v, kv::MO_RELAXED) + d, kv::MO_RELAXED); }
@@ -125,8 +127,9 @@ inline i64  peek(const i64& v) { return kv::atomic_load(&v, kv::MO_RELAXED); }
 void lock_retired()   { while (kv::atomic_exchange(&g_retired_lock, 1u, kv::MO_ACQUIRE)) {} }
 void unlock_retired() { kv::atomic_store(&g_retired_lock, 0u, kv::MO_RELEASE); }
 
-void fold_into_retired(ThreadBlock& b) {
-    lock_retired();
+// Under the retired lock: a report holds it while it sums, so it sees a thread's totals
+// either in its block or in the retired one, never both and never neither.
+void fold_into_retired_locked(ThreadBlock& b) {
     g_retired.live_allocs  += peek(b.live_allocs);
     g_retired.live_bytes   += peek(b.live_bytes);
     g_retired.total_allocs += peek(b.total_allocs);
@@ -136,34 +139,51 @@ void fold_into_retired(ThreadBlock& b) {
         g_retired.heap_bytes[h]     += peek(b.heap_bytes[h]);
         g_retired.heap_committed[h] += peek(b.heap_committed[h]);
     }
-    unlock_retired();
 }
 
-// Folds the thread's block when the thread goes away.
+// Folds the thread's block when the thread goes away and frees its slot for the next
+// thread (the overflow block, which no slot holds, is only folded).
 struct ThreadBlockGuard {
     ~ThreadBlockGuard() {
         if (!t_block) return;
-        fold_into_retired(*t_block);
+        bool slot = t_block >= g_blocks && t_block < g_blocks + kMaxThreads;
+        lock_retired();
+        fold_into_retired_locked(*t_block);
         *t_block = ThreadBlock{};
-        kv::atomic_store(&t_block->in_use, 0u, kv::MO_RELEASE);
+        if (slot) kv::atomic_store(&t_block->in_use, 0u, kv::MO_RELEASE);
+        unlock_retired();
         t_block = nullptr;
     }
 };
 thread_local ThreadBlockGuard t_guard;
 
+// A free slot: one an exited thread left (its block zeroed before it was let go, which the
+// acquiring exchange makes visible), else a fresh one past the high-water mark.
+ThreadBlock* claim_block() {
+    u32 n = kv::atomic_load(&g_block_count, kv::MO_ACQUIRE);
+    if (n > kMaxThreads) n = kMaxThreads;
+    for (u32 i = 0; i < n; ++i)
+        if (!kv::atomic_load(&g_blocks[i].in_use, kv::MO_RELAXED) && kv::atomic_exchange(&g_blocks[i].in_use, 1u, kv::MO_ACQUIRE) == 0)
+            return &g_blocks[i];
+    // Past the mark: raise it by one and take that slot, unless a scan above, seeing it under
+    // the new mark and free, took it first; then raise it again.
+    for (;;) {
+        u32 i = kv::atomic_load(&g_block_count, kv::MO_ACQUIRE);
+        if (i >= kMaxThreads) return nullptr;
+        if (!kv::atomic_compare_exchange(&g_block_count, &i, i + 1, false, kv::MO_ACQ_REL, kv::MO_ACQUIRE)) continue;
+        if (kv::atomic_exchange(&g_blocks[i].in_use, 1u, kv::MO_ACQUIRE) == 0) return &g_blocks[i];
+    }
+}
+
 ThreadBlock& block() {
     if (!t_block) {
-        u32 i = kv::atomic_fetch_add(&g_block_count, 1u, kv::MO_ACQ_REL);
-        if (i >= kMaxThreads) {
-            kv::atomic_fetch_sub(&g_block_count, 1u, kv::MO_ACQ_REL);
-            // Past the table: this thread counts into a private block that rollups do
-            // not see until the thread exits and the guard folds it. Rare; 256 threads.
+        t_block = claim_block();
+        if (!t_block) {
+            // 256 threads live at once: this one counts into a private block that reports
+            // do not see until it exits and the guard folds it.
             static thread_local ThreadBlock overflow;
             t_block = &overflow;
-            return overflow;
         }
-        t_block = &g_blocks[i];
-        kv::atomic_store(&t_block->in_use, 1u, kv::MO_RELEASE);
         (void)t_guard; // odr-use: the guard exists for this thread
     }
     return *t_block;
@@ -199,9 +219,8 @@ void account_free(MemTag tag, i64 bytes) {
 // Sums every live block and the retired totals.
 ThreadBlock rollup() {
     ThreadBlock sum{};
-    lock_retired();
+    lock_retired(); // held through the sum: an exiting thread folds and frees its slot under it
     sum = g_retired;
-    unlock_retired();
     u32 n = kv::atomic_load(&g_block_count, kv::MO_ACQUIRE);
     if (n > kMaxThreads) n = kMaxThreads;
     for (u32 i = 0; i < n; ++i) {
@@ -217,6 +236,7 @@ ThreadBlock rollup() {
             sum.heap_committed[h] += peek(b.heap_committed[h]);
         }
     }
+    unlock_retired();
     return sum;
 }
 
@@ -765,6 +785,13 @@ u8 mem_heap_register(const char* name, usize soft, usize hard) {
     return id;
 }
 const char* mem_heap_name(u8 id) { return id < g_heaps_reg.count ? g_heaps_reg.names[id] : "?"; }
+
+void array_grow_failed(const Allocator* a, usize bytes) {
+    u8 heap = a ? a->tag.heap : 0;
+    KV_ERROR("mem", "an array could not grow to %llu bytes: heap '%s' refused (%llu of %llu bytes used); stopping",
+             (unsigned long long)bytes, mem_heap_name(heap), (unsigned long long)mem_heap_used(heap), (unsigned long long)mem_heap_hard(heap));
+    abort();
+}
 usize       mem_heap_budget(u8 id) { return id < KV_MEM_MAX_HEAPS ? g_heaps_reg.budgets[id] : 0; }
 usize       mem_heap_hard(u8 id) { return id < KV_MEM_MAX_HEAPS ? g_heap_hard[id] : 0; }
 u64         mem_heap_used(u8 id) { return id < KV_MEM_MAX_HEAPS ? kv::atomic_load(&g_heap_used[id], kv::MO_RELAXED) : 0; }
