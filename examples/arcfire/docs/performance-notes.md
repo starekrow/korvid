@@ -823,3 +823,16 @@ main's 1.37/1.33 at 16 threads and 0.98/0.98 against 0.98/1.00 at 1; dev the sam
 thread and about 0.07 ms (5%) more at 16, not yet pinned down under `balanced`. Every kind
 a snapshot: +6% in ship, +9% in dev, one run each.
 
+## Linux, events in the schedule and kormake 1.1 (Nov 12, 2026)
+
+Events moved into the schedule (`docs/design/events.md`): Shoreline's demo then hashed
+a85e2f7fa02412e5 at tick 14,172 and Orbit's 1b52151fc10a42fd at 17,333. kormake 1.1
+(branch `kormake-targets`, `docs/PRDs/Kormake-1.1-Dev-PRD.md`) moved the game to
+`examples/arcfire` with the layout, which changed nothing. Then it renamed the module
+`example_arcfire` to `arcfire`, and that is a new game: kind names feed the state hash, and
+`seed_of` takes the owner kind's name hash, so every pattern's `$rand` differs from the
+first pattern on. New demo hashes: Shoreline bd445be07fcb5267 at tick 13,974 (1 and 16
+threads, and `--io sync`), Orbit 5c07abf0f94aa2b0 at tick 20,660 (1 and 16 threads). The
+recorded runs were made again, Normal 14,586 ticks and Hard 16,834, and replay matching at
+1 and 16 threads. Arcanum (now `arcanum`) hashes a3256024dcf1f933 at tick 1,864. Windows and
+macOS recordings want making again there.

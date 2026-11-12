@@ -90,7 +90,7 @@ hash every 60 ticks (the frame loop's; its README has the file). A run started f
 title records the arguments that start it, so its replay goes straight in. Two recorded bot
 runs, Shoreline at Normal and Hard, are in `tests/replays/`; replayed from the repository
 root, `build/linux-dev/bin/arcfire --replay
-examples/arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 14648,
+examples/arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 14586,
 matched`. A change to the
 sim makes them diverge, and they are recorded again (`--autoplay --stage shoreline
 --difficulty normal --record ...`).
@@ -111,7 +111,7 @@ The ways it flies itself:
   `invulnerable` being 2). It wants its weapons by the stage's clock: Spread on the
   opening's power items (to level five), the Beam at the islands, Storm over the airfield
   and the carrier (a bomb in its core's phase), Lance and both options for the
-  battleship; it takes an egg on the way. The end mark ends it at tick 14459, the last sim tick; it
+  battleship; it takes an egg on the way. The end mark ends it at tick 13974, the last sim tick; it
   then reads its results, signs "DEMO" into its own table (`scores-demo.json`) and quits. `--demo --hash` prints the state hash every sim tick. The hashes match
   across runs, thread counts (`--threads 1`, `--threads 8`), I/O backends (`--io sync`,
   `--io uring`) and asset sources (loose files, `--pack` with a kpak of `bin/assets`, or
