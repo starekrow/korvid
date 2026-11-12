@@ -82,8 +82,8 @@ the games:
   bundle identifiers (`org.korvid.arcfire`).
 
 Kind names feed the state hash, so demo hashes change, and so do the recorded replays,
-which also name their executable. Recording the replays again and noting the new hashes
-waits until the other changes that affect them have landed. Arcanum's saves written before
+which also name their executable. The replays were recorded again and the new hashes noted
+(see Status). Arcanum's saves written before
 the rename name the old kinds and the old game, so they no longer load. The save
 directories (`~/.local/share/korvid/<game>`) were never named for the module, so they stay.
 
@@ -186,7 +186,7 @@ example `vendor/`), `%{root}` and `LICENSE`/`NOTICE` resolve.
 | ID | Requirement | Priority |
 | --- | --- | --- |
 | R1 | Examples under `examples/<name>/`, tool modules under `tools/<name>/`, master modulepath updated, `korvid.config` in both | P0 |
-| R2 | Modules named for their directories (no `example_`/`tool_`); assets, headers, kinds and outputs follow; replays recorded again later | P0 |
+| R2 | Modules named for their directories (no `example_`/`tool_`); assets, headers, kinds and outputs follow; demos and replays recorded again | P0 |
 | R3 | Commands take module names (by module, executable or directory name), with ambiguity reported | P0 |
 | R4 | No name means the current directory decides: a module, the modules under a directory, or the roots | P0 |
 | R5 | The target is optional and positional, defaulting to the config's `target` or host plus first config; a bare config name means the host in that config | P0 |
@@ -213,8 +213,8 @@ linux-ship. `kormake kpack` and `kormake` run in `examples/arcfire` build only t
 closures, which is checked with `ninja -n`. A scratch project outside the repository,
 with one `korvid.config` and a hello module that links `core`, builds into its own
 `build/`. Before the rename, arcfire's Shoreline demo hash was unchanged
-(a85e2f7fa02412e5 at tick 14171). After it, the games run their demos with every asset
-found, and the hashes and replays are left for later. Windows (`bootstrap.bat`, `cl`) and
+(a85e2f7fa02412e5 at tick 14171). After it, the demos hash alike across thread counts and
+the replays are recorded again (see Status). Windows (`bootstrap.bat`, `cl`) and
 macOS are not verified on this branch. The code has no new OS calls, but Windows path case
 in the current-directory matching is worth a look there.
 
@@ -223,3 +223,36 @@ in the current-directory matching is worth a look there.
 - Should `kormake` with no arguments at the root keep building the roots with all their
   tests? 1.1 says yes so that 1.0 behavior is unchanged. `kormake examples/` is the short way
   to build just the examples.
+
+## Status
+
+Built Nov 12, 2026 on branch `kormake-targets`, all P0 and P1 requirements. What the build
+added or settled beyond the text above:
+
+- **Soft and hard failures.** A module outside the roots is left out only when it cannot
+  build for the target: a platform it does not support, an external or interface the
+  platform lacks, a package that was not fetched, a private include or a tool binary that
+  is missing (the last three found by a check in emit before anything is written). A
+  cycle, a missing module or a bug in kormake still stops the run. `check` lists what was
+  left out, and why.
+- **What makes a project.** A config is a project only when its paths bring in modules
+  the master file's do not. A `korvid.config` at the engine root that just sets a `target`
+  stays the engine's. At a project's own directory, plain `kormake` builds the project's
+  roots, and a directory that holds both the project and an engine checked out inside it
+  selects the project's modules.
+- **Selection.** `gen` and `check` ignore the current directory. A module that is named
+  is an error if it cannot build, even beside a path NAME. A NAME with a backslash is a
+  path. `graph` with no selection prints what the roots reach.
+- **Safety.** `clean` with no target removes only the targets' directories and
+  `compile_commands.json`. A `build` directory may not be, or hold, the config's directory
+  or the engine root. A host instance's tests never run under the target's test runner.
+  Every `module.lua` collected is a regeneration input.
+- **Roots** take `paths` (module paths), since the examples are no longer `example_*`.
+- **Arcanum's save** is version 2. An older save is passed to `upgrade_save`, which is a
+  stub for now that refuses it ("The save is from an older version").
+- **Recorded again on Linux.** Shoreline's demo bd445be07fcb5267 at tick 13,974 (1 and 16
+  threads, `--io sync`); Orbit's 5c07abf0f94aa2b0 at tick 20,660; arcanum's
+  a3256024dcf1f933 at tick 1,864; arcfire's replays Normal 14,586 and Hard 16,834 ticks,
+  matched at 1 and 16 threads.
+- **Not verified:** Windows (`bootstrap.bat`, `cl`, a backslash path NAME) and macOS/iOS.
+  Their replays want recording again there.

@@ -90,8 +90,9 @@ end
 
 -- What the names mean, as module records, or nil for the roots. A module by name, then by
 -- executable name, then by directory name; a path, every module under it; no names, the
--- current directory (the module it is in, the modules under it, or the roots at the
--- root). explicit: whether the user named them (a directory's modules may skip quietly).
+-- current directory (the module it is in, the modules under it, or the roots at the root
+-- or at a project's own directory). Also the set of records that came with a directory
+-- rather than by name: those may skip quietly where a named one is an error.
 local function select_modules(c, names)
   local real = {}
   for _, rec in ipairs(c.modules) do real[rec] = kfs.realpath(rec.dir) or rec.dir end
@@ -101,24 +102,35 @@ local function select_modules(c, names)
       if collect.under(dir, real[rec]) then return { rec }, false end -- inside one module
       if collect.under(real[rec], dir) then list[#list + 1] = rec end
     end
+    -- In a project, a directory that holds both (the engine checked out under it) means
+    -- the project's.
+    if c.project then
+      local own = {}
+      for _, rec in ipairs(list) do if rec.project then own[#own + 1] = rec end end
+      if #own > 0 then list = own end
+    end
     return list, true
   end
+  local from_dir = {}
   if #names == 0 then
-    if c.start == c.root_dir then return nil end
+    if c.start == c.root_dir or (c.project and c.start == c.anchor) then return nil, from_dir end
     local list = under_dir(c.start)
-    if #list == 0 then return nil end
-    return list, false
+    if #list == 0 then return nil, from_dir end
+    for _, rec in ipairs(list) do from_dir[rec] = true end
+    return list, from_dir
   end
-  local out, explicit = {}, true
+  local out = {}
   local function add(rec) if not util.contains(out, rec) then out[#out + 1] = rec end end
   for _, n in ipairs(names) do
-    if n:find("/", 1, true) or n == "." or n == ".." then
+    if n:find("[/\\]") or n == "." or n == ".." then
       local dir = kfs.realpath(util.is_abs(n) and n or util.join(c.start, n))
       if not dir or not kfs.isdir(dir) then util.fail("'%s' is not a directory", n) end
       local list, many = under_dir(dir)
       if #list == 0 then util.fail("no module in or under %s", dir) end
-      if many then explicit = false end
-      for _, rec in ipairs(list) do add(rec) end
+      for _, rec in ipairs(list) do
+        if many and not util.contains(out, rec) then from_dir[rec] = true end
+        add(rec)
+      end
     else
       local found
       for _, how in ipairs({ "name", "exe", "dir" }) do
@@ -135,15 +147,16 @@ local function select_modules(c, names)
         if #hits == 1 then found = hits[1]; break end
       end
       if not found then util.fail("no module, executable or module directory is called '%s'", n) end
+      from_dir[found] = nil -- named: an error if it cannot build, whatever else brought it
       add(found)
     end
   end
-  return out, explicit
+  return out, from_dir
 end
 
 -- The selected modules' instances in this graph. A module the build cannot hold is an
 -- error when it was named, a note when it came with a directory.
-local function instances_of(g, recs, explicit)
+local function instances_of(g, recs, from_dir)
   local out = {}
   for _, rec in ipairs(recs) do
     local inst
@@ -157,7 +170,7 @@ local function instances_of(g, recs, explicit)
       else why = string.format("it does not build for %s", g.platform) end
     end
     if inst then out[#out + 1] = inst
-    elseif explicit then util.fail("%s: nothing to build for %s-%s: %s", rec.name, g.platform, g.config, why)
+    elseif not from_dir[rec] then util.fail("%s: nothing to build for %s-%s: %s", rec.name, g.platform, g.config, why)
     else print(string.format("kormake: skipping %s: %s", rec.name, why)) end
   end
   return out
@@ -198,21 +211,43 @@ local function run(cmd, words, opts)
   local platform, config = split_target(target, c)
   target = platform .. "-" .. config
   if cmd == "clean" then
+    -- What kormake writes there and nothing else: one target's directory, or every
+    -- target's and compile_commands.json (and the directory, if that leaves it empty).
     if #names > 0 then util.fail("clean takes a target, not modules") end
-    local dir = #words > 0 and util.join(c.build_root, target) or c.build_root
-    kfs.rmtree(dir)
-    print("kormake: removed " .. dir)
+    local dirs = {}
+    if #words > 0 then dirs[1] = util.join(c.build_root, target) else
+      for _, p in ipairs(c.master.platforms) do
+        for _, cf in ipairs(c.master.configs) do dirs[#dirs + 1] = util.join(c.build_root, p .. "-" .. cf) end
+      end
+      dirs[#dirs + 1] = util.join(c.build_root, "compile_commands.json")
+    end
+    for _, d in ipairs(dirs) do
+      if kfs.isdir(d) or kfs.isfile(d) then kfs.rmtree(d); print("kormake: removed " .. d) end
+    end
+    if #words == 0 and kfs.isdir(c.build_root) and #kfs.listdir(c.build_root) == 0 then kfs.rmtree(c.build_root) end
     return 0
   end
   local g = resolve.run(c, platform, config, opts)
-  local recs, explicit = select_modules(c, names)
-  local selected = recs and instances_of(g, recs, explicit) or nil
-  if selected and #selected == 0 then util.fail("nothing to do for %s", target) end
+  -- What the names (or the current directory) select, for the commands that act on
+  -- modules; gen and check take the whole graph wherever they run. After emit for those
+  -- that build, since emit can leave a module out too.
+  local selected, from_dir
+  local function choose()
+    local recs
+    recs, from_dir = select_modules(c, names)
+    selected = recs and instances_of(g, recs, from_dir) or nil
+    if selected and #selected == 0 then util.fail("nothing to do for %s", target) end
+  end
   if cmd == "check" then
+    if #names > 0 then choose() end
+    -- Modules outside the roots that cannot build here, and why: not a problem, but worth
+    -- knowing before someone names one.
+    for _, n in ipairs(util.sorted_keys(g.unavailable)) do print(string.format("kormake: left out of %s: %s: %s", target, n, g.unavailable[n])) end
     print(string.format("kormake: %d modules, %d instances for %s-%s, no problems", #c.modules, #g.instances, platform, config))
     return 0
   end
   if cmd == "graph" then
+    choose()
     if opts.why then
       local found = false
       for _, inst in ipairs(g.instances) do
@@ -245,7 +280,7 @@ local function run(cmd, words, opts)
     if opts.dot then
       print("digraph kormake {\n  rankdir=LR;")
       for _, inst in ipairs(g.instances) do
-        if show and not show[inst] then goto next_dot end
+        if (show and not show[inst]) or (not show and not inst.in_roots) then goto next_dot end
         for _, d in ipairs(inst.deps) do print(string.format('  "%s" -> "%s";', inst.key, d.key)) end
         for _, t in ipairs(inst.tools) do print(string.format('  "%s" -> "%s" [style=dashed];', inst.key, t.instance.key)) end
         ::next_dot::
@@ -253,8 +288,10 @@ local function run(cmd, words, opts)
       print("}")
       return 0
     end
+    -- Without a selection, what the roots reach (the default build), not the modules
+    -- outside them.
     for _, inst in ipairs(g.order) do
-      if show and not show[inst] then goto next_inst end
+      if (show and not show[inst]) or (not show and not inst.in_roots) then goto next_inst end
       local deps = {}
       for _, d in ipairs(inst.deps) do deps[#deps + 1] = d.module.name end
       local tools = {}
@@ -266,6 +303,7 @@ local function run(cmd, words, opts)
     return 0
   end
   local build = emit.run(c, g, opts)
+  if cmd ~= "gen" or #names > 0 then choose() end
   -- Ninja: the toolchain probe's when it found one (Visual Studio ships one), else PATH's.
   local ninja = g.ninja and util.shell_quote(util.native(g.ninja)) or "ninja"
   print(string.format("kormake: %s/build.ninja (%d instances)", build, #g.instances))
@@ -370,7 +408,7 @@ local function run(cmd, words, opts)
     if not selected then targets[1] = "check" else
       for _, inst in ipairs(selected) do
         if inst.test_stamp then targets[#targets + 1] = util.shell_quote(inst.test_stamp)
-        elseif explicit then util.fail("%s has no tests", inst.module.name) end
+        elseif not from_dir[inst.module] then util.fail("%s has no tests", inst.module.name) end
       end
       if #targets == 0 then print("kormake: no tests there"); return 0 end
     end
@@ -412,7 +450,7 @@ local ok, result = pcall(function()
   return run(cmd, words, opts)
 end)
 if not ok then
-  io.stderr:write("kormake: " .. tostring(result) .. "\n")
+  io.stderr:write("kormake: " .. util.message(result) .. "\n")
   return 1
 end
 return result

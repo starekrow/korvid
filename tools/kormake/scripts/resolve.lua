@@ -135,7 +135,7 @@ function M.run(c, platform, config, opts)
       end
       return g.by_key[key]
     end
-    if not has_platform(rec, plat) then util.fail("module '%s' (needed by %s) does not support platform '%s'", name, why, plat) end
+    if not has_platform(rec, plat) then util.soft_fail("module '%s' (needed by %s) does not support platform '%s'", name, why, plat) end
     local pp = platform_of(plat)
     -- Outputs: the target's at the build directory's top, the host's (when it is not the
     -- target) under host/.
@@ -161,7 +161,7 @@ function M.run(c, platform, config, opts)
       -- An interface: whoever uses it links the backend too, unless this is the backend.
       if interfaces[dep] and rec.fields.provides ~= dep then
         local bound = pp.bindings[dep]
-        if not bound then util.fail("'%s' depends on interface '%s' but no backend is bound for %s", name, dep, plat) end
+        if not bound then util.soft_fail("'%s' depends on interface '%s' but no backend is bound for %s", name, dep, plat) end
         for _, b in ipairs(bound) do
           local bi = instance_of(b, plat, conf, name .. " (via interface " .. dep .. ")")
           if not util.contains(inst.deps, bi) then inst.deps[#inst.deps + 1] = bi end
@@ -169,7 +169,7 @@ function M.run(c, platform, config, opts)
       end
     end
     for ext, spec in pairs(rec.fields.external or {}) do
-      if util.external_on(spec, plat) and not (pp.toolchain.fields.externals or {})[ext] then util.fail("'%s' needs external '%s', which toolchain '%s' does not know", name, ext, pp.toolchain.name) end
+      if util.external_on(spec, plat) and not (pp.toolchain.fields.externals or {})[ext] then util.soft_fail("'%s' needs external '%s', which toolchain '%s' does not know", name, ext, pp.toolchain.name) end
     end
     -- Tools: an interface or a tool module, instanced for the host. On a native build in
     -- the host config that is the target's own instance.
@@ -180,7 +180,7 @@ function M.run(c, platform, config, opts)
       local tmod = tname
       if interfaces[tname] then
         local bound = pp.bindings[tname]
-        if not bound then util.fail("'%s' needs tool interface '%s' but no backend is bound for %s", name, tname, plat) end
+        if not bound then util.soft_fail("'%s' needs tool interface '%s' but no backend is bound for %s", name, tname, plat) end
         tmod = bound[1]
       end
       local ti = instance_of(tmod, host_platform, host_config, name .. " (tool)")
@@ -237,9 +237,10 @@ function M.run(c, platform, config, opts)
   if #wanted == 0 then util.fail("no module matched any root") end
 
   -- Every other module the platform supports, so a command line can name it without the
-  -- build file changing: built only when asked for. One that does not resolve here (an
-  -- external the toolchain does not know, a dependency that does not build) is left out,
-  -- everything it added taken back, and the reason kept for whoever names it.
+  -- build file changing: built only when asked for. One that cannot build here (soft_fail:
+  -- an external the toolchain does not know, a dependency that does not build) is left out,
+  -- everything it added taken back, and the reason kept for whoever names it. Any other
+  -- failure (a cycle, a missing module, a bug) stops the run as it would for a root.
   -- What the roots reach: the default build (`all`), as it was before anything below.
   for _, inst in ipairs(g.instances) do inst.in_roots = true end
   g.unavailable = {}
@@ -249,11 +250,12 @@ function M.run(c, platform, config, opts)
       local n_inst, n_order = #g.instances, #g.order
       local ok, err = pcall(instance_of, rec.name, platform, config, "no root (built when named)")
       if not ok then
+        if not (type(err) == "table" and err.soft) then error(err, 0) end
         for i = #g.instances, n_inst + 1, -1 do g.by_key[g.instances[i].key] = nil; g.instances[i] = nil end
         for i = #g.order, n_order + 1, -1 do g.order[i] = nil end
         for k in pairs(visiting) do visiting[k] = nil end
         for i = #stack, 1, -1 do stack[i] = nil end
-        g.unavailable[rec.name] = tostring(err)
+        g.unavailable[rec.name] = util.message(err)
       end
     end
   end

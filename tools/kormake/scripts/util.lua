@@ -5,6 +5,20 @@ function M.fail(fmt, ...)
   error(string.format(fmt, ...), 0)
 end
 
+-- A failure that says a module cannot build where it was asked for (a platform it does not
+-- support, an external or an interface the platform lacks, a package not fetched), not that
+-- anything is wrong: a module outside the roots that fails so is left out of the build;
+-- anything else (a cycle, a missing module) stops it. Reported like fail's otherwise.
+function M.soft_fail(fmt, ...)
+  error(setmetatable({ soft = true, msg = string.format(fmt, ...) }, { __tostring = function(e) return e.msg end }), 0)
+end
+
+-- The message of an error caught by pcall: fail's string, or soft_fail's.
+function M.message(err)
+  if type(err) == "table" and err.msg then return err.msg end
+  return tostring(err)
+end
+
 function M.basename(path)
   return (path:gsub("^.*/", ""))
 end

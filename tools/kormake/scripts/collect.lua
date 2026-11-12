@@ -67,8 +67,7 @@ function M.run(found)
   -- its own directory unless it says otherwise), then KORMAKE_MODULE_PATH. Each directory
   -- once, by its real path.
   local paths, seen_path = {}, {}
-  local added = false -- whether the config adds a path the master file does not list
-  local project_paths = {} -- the ones it adds: a project's own modules
+  local project_paths = {} -- the paths the config adds that the master file does not list
   local function add(p, base, from_config)
     p = util.expand_home(p)
     local full = util.is_abs(p) and p or util.join(base, p)
@@ -77,7 +76,7 @@ function M.run(found)
     if seen_path[real] then return end
     seen_path[real] = true
     paths[#paths + 1] = real
-    if from_config then added = true; project_paths[real] = true end
+    if from_config then project_paths[real] = true end
   end
   for _, p in ipairs(master.modulepaths) do add(p, root_dir) end
   if found.config then for _, p in ipairs(decl.modulepaths or { "." }) do add(p, found.anchor, true) end end
@@ -125,6 +124,10 @@ function M.run(found)
       end
     end
   end
+  -- A project: a config whose paths bring in modules the master file's do not. A config
+  -- that adds none (in examples/, or at the root to set a target) is the engine's.
+  local added = false
+  for _, rec in ipairs(modules) do if rec.project then added = true end end
   -- Where outputs go: the engine root's build/ and dist/ while the module paths are the
   -- master file's (the configs in examples/ and tools/); beside the config when it adds
   -- one (a project of its own, whose modules are then the roots: resolve.lua). build "dir"
@@ -134,6 +137,12 @@ function M.run(found)
   if decl.build then
     local b = util.expand_home(decl.build)
     build_root = util.is_abs(b) and b or util.join(found.anchor, b)
+    -- clean removes what is under it, so it must not hold the project or the engine.
+    local real = kfs.realpath(build_root) or build_root
+    if M.under(found.anchor, real) or M.under(root_dir, real) then
+      util.fail("%s: build '%s' would hold %s; name a directory of its own", found.config, decl.build,
+        M.under(found.anchor, real) and found.anchor or root_dir)
+    end
   end
   return { master = master, modules = modules, by_name = by_name, root_dir = root_dir, base_dir = base,
            build_root = build_root, anchor = found.anchor, start = found.start, config = found.config,

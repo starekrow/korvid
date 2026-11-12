@@ -111,11 +111,15 @@ errors at this stage.
   interface also links the backend bound to it. Tool edges switch to the host platform in
   `host_config`. A module with `platforms = { "host" }` is always instanced that way.
   Cycles, missing modules, unsupported platforms, unknown externals and unbound interfaces
-  fail here, and the message names the module that asked.
+  fail here, and the message names the module that asked. The last three are *soft*
+  failures (`util.soft_fail`): they say a module cannot build here, not that anything is
+  wrong.
 - *Everything the roots reach* is marked `in_roots`: that is Ninja's `all`.
-- *Every other module* the platform supports is then tried. If one fails to resolve, the
+- *Every other module* the platform supports is then tried. If one fails softly, the
   instances it added are taken back out and the reason is kept in `g.unavailable`, which is
-  what `kormake NAME` prints when you ask for that module.
+  what `kormake NAME` prints when you ask for that module and what `check` lists as left
+  out. Any other failure (a cycle, a missing module, a bug in kormake) stops the run, as it
+  would for a root.
 - *Closures.* Each instance gets its closure: the link dependencies, in dependency order.
   This drives include paths, link lines and module lists.
 
@@ -134,6 +138,11 @@ toolchain, a `system` tool or a `prebuilt` one).
   so no rule needs a shell.
 - *Tool rules.* There is one Ninja rule per (tool, rule, platform variant), named
   `tool_<module>_<rule>[_<platform>]`.
+- *Left out.* First, for each instance outside the roots, kormake checks what would stop
+  the generation: its externals' package directories, its private includes, its tools'
+  binaries. If one fails, that instance and every instance built on it are left out
+  (`inst.dropped`, with the reason in `g.unavailable`) and get no edges. For the roots'
+  instances the same checks fail the run, with the toolchain's instructions.
 - *Per instance.* Each instance gets its sources: `src/*.cc`, then each of the toolchain's
   `srcdirs`, then the same again for `.mm`. With unity on and more than one source, these
   go into `gen/<module>/unity.cc`. An executable also gets `modules.gen.cc`. After that
@@ -147,12 +156,15 @@ toolchain, a `system` tool or a `prebuilt` one).
 - *Phonies.* kormake writes `tests`, `check`, `all` (with `default all`), and one phony
   per selectable module.
 - *Regeneration.* The `build.ninja` edge depends on the master file, every `module.lua`
-  and, for a project, its `korvid.config`.
+  collected (built here or not, so an edit can let a left-out module in) and, for a project
+  or a config that sets `build`, its `korvid.config`. A new module directory is not an
+  input: run kormake (any command) to pick it up.
 
 kormake then writes `compile_commands.json`, both beside `build.ninja` and one level up.
 
 **5. Run.** kormake runs `ninja -C build/<target>` with the selection's phonies (for
-`build`), its test stamps (for `test`), or nothing at all (Ninja's default). If the
+`build`), its test stamps (for `test`), Ninja's default (for `build` with nothing
+selected), or `check` (for `test` with nothing selected). If the
 toolchain probe found a Ninja, that one is used.
 
 ## Diagnosing a failed build
@@ -210,5 +222,5 @@ that changed nothing would leave `build.ninja` older than its inputs, and Ninja 
 regenerate it forever. If you see `KORMAKE gen` on every build, check for an input with a
 modification time in the future.
 
-**A clean slate.** `kormake clean <target>` removes `build/<target>/`. Removing a whole
-build directory is always safe, because everything in it is generated.
+**A clean slate.** `kormake clean <target>` removes `build/<target>/`. Everything kormake
+writes under a target's directory is generated, so removing one is always safe.

@@ -66,18 +66,22 @@ in any order, except that the command has to be the first word.
 
 **check**
 : Resolves the graph only. Cycles, missing modules, unknown externals, unbound interfaces,
-  duplicate names and sandbox violations are reported here, before any compiler runs.
+  duplicate names and sandbox violations are reported here, before any compiler runs. A
+  cycle or a missing module is an error wherever it is. A module outside the roots that
+  only cannot build for this target (a platform it does not support, an external or an
+  interface the platform lacks) is not an error: `check` lists it as left out, with why.
 
 **graph**
 : Prints the instance graph in dependency order: each instance's output, what it links,
   the tools it uses, and whether a root asks for its tests. With NAMEs (or a current
   directory that selects modules), it prints only those modules and what they reach.
-  `--dot` prints Graphviz input instead, with tool edges drawn dashed. `--why MODULE`
+  Without them it prints what the roots reach. `--dot` prints Graphviz input instead, with tool edges drawn dashed. `--why MODULE`
   prints the chain of instances that pulled MODULE into the graph.
 
 **clean**
-: Removes the target's build directory, or with no TARGET the whole build directory. This
-  command takes no NAMEs.
+: Removes the target's build directory. With no TARGET, it removes every target's
+  directory and `compile_commands.json`, and then the build directory itself if that
+  leaves it empty. It removes nothing else it finds there. This command takes no NAMEs.
 
 **help**, **--version**
 : Print the usage summary, or the version (`kormake 1.1 (Lua 5.5)`).
@@ -127,10 +131,10 @@ When there is no NAME, the current directory decides (`-C` changes which directo
 as current):
 
 - inside a module's directory: that module;
-- in a directory that holds modules (`examples/`, `tools/`, or a project's own
-  directory): every module under it;
-- at the engine root, or anywhere else with no module under it: the roots (Ninja's
-  default).
+- in a directory that holds modules (`examples/`, `tools/`): every module under it (in a
+  project, only the project's own, when the engine is checked out below it);
+- at the engine root, at a project's own directory, or anywhere else with no module under
+  it: the roots (Ninja's default).
 
 kormake builds and tests only the modules the target's platform supports. A module that
 was named but cannot be built for the target is an error, and kormake says why: it is a
@@ -189,15 +193,16 @@ as the master file, and its paths are relative to the file's own directory.
 It is best to write `engine` relative to your development directory, so the file works in
 any checkout that has the same layout. `examples/korvid.config` and `tools/korvid.config`
 both say `engine ".."`. A game kept beside the engine (`~/code/mygame/` next to
-`~/code/korvid/`) says `engine "../../korvid"` from `~/code/mygame/korvid.config` if its
-modules sit one level down, or puts the config in `~/code/` with `engine "korvid"`. A
+`~/code/korvid/`, its modules in `~/code/mygame/<module>/`) says `engine "../korvid"` in
+`~/code/mygame/korvid.config`. An engine checked out inside the game
+(`mygame/korvid/`) is `engine "korvid"`. A
 leading `~` means the home directory.
 
 **Projects.** The module paths are the master file's, then the config's, then
-`KORMAKE_MODULE_PATH`'s. Each directory is counted once, by its real path. If the config
-adds no path that the master file lacks (the in-tree configs), it shares everything with
-the engine root: the same `build/`, `dist/` and Ninja files. If it does add a path, it is
-a project of its own:
+`KORMAKE_MODULE_PATH`'s. Each directory is counted once, by its real path. If the config's
+paths bring in no module that the master file's do not (the in-tree configs, or one at the
+engine root that only sets a `target`), it shares everything with the engine root: the
+same `build/`, `dist/` and Ninja files. If they do, it is a project of its own:
 
 - its outputs go beside it, in `build/<target>/`, `build/compile_commands.json` and
   `dist/`, and nothing is written into the engine's tree;
@@ -206,7 +211,8 @@ a project of its own:
 - engine modules can still be named (`kormake arcfire` builds arcfire into the project's
   build directory).
 
-`build` moves the build directory, for a project or in-tree. The engine root is still
+`build` moves the build directory, for a project or in-tree. It may not be, or hold, the
+config's directory or the engine root, since `clean` removes what kormake writes under it. The engine root is still
 where the master file's paths, a toolchain's external `dir`s (such as `vendor/`) and
 `%{root}` are resolved, and where `package` gets `LICENSE` and `NOTICE` from.
 
@@ -324,7 +330,7 @@ binary is an implicit input to every edge it runs.
 Everything below is under `build/<target>/` (or `<build>/<target>/` when a config moves
 it). Ninja runs there.
 
-    build.ninja               the whole graph for the target; regenerated when kormake.lua, a module.lua or the korvid.config changes
+    build.ninja               the whole graph for the target; regenerated when kormake.lua or any module.lua changes, or a project's korvid.config
     compile_commands.json     every compile; build/compile_commands.json, beside the targets, is the last one written (where clangd looks)
     bin/<exe>                 executables, and the files they need beside them (SDL3.dll on Windows)
     bin/<module>_tests        test executables
@@ -377,7 +383,7 @@ error of kormake's own, which is printed as `kormake: <message>`.
     kormake                              # at the root: every root, with its tests (linux-debug on Linux)
     kormake dev                          # the same in linux-dev
     kormake arcfire dev                  # one game and what it links
-    cd examples/arcfire && kormake       # the same, from its directory
+    cd examples/arcfire && kormake dev   # the same, from its directory
     kormake examples/ ship               # every example, with packs
     kormake kpack picture                # both tools, built for the host
     kormake test collision               # one module's tests
