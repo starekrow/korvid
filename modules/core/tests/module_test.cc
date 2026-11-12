@@ -147,9 +147,9 @@ void test_module(kv::TestCtx& c) {
 
     // Events registered through the list work on the engine's bus.
     e.events.emit(EvC{7});
-    e.events.deliver();
+    e.events.merge_outside(true);
     KV_CHECK(c, e.events.read<EvC>().len == 1 && e.events.read<EvC>()[0].c == 7);
-    e.events.end_tick();
+    e.events.end_tick(Span<const u64>());
 
     // Shutdown in reverse; ids cleared.
     g_trace[0] = 0;

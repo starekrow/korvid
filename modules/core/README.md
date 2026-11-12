@@ -87,10 +87,11 @@ are slower to walk than a column and bags slower again: use them for what one en
 many has (a quest, a chest's loot, what a designer typed on a map object), and kinds for
 what every entity has.
 
-**Events** (`event.h`, `timer.h`). Typed per-tick buffers; emitting is an append into the
-running unit's writer, delivery at phase boundaries merges writers in a fixed order.
-Handlers subscribe to one type and run in capped waves; a type may ask for next-tick
-delivery. An event with a schema whose handle no longer resolves is dropped at delivery
+**Events** (`event.h`, `timer.h`). Every type is a stream in the schedule: emitting is an
+append into the running unit's writer (declared in `emits`), consuming is a declared read
+that runs after the emitters in its phase and gets every event since its last run, in
+unit order. Handlers are systems on one type with a phase; a type may ask for next-tick
+delivery. An event with a schema whose handle no longer resolves is dropped from a batch
 and counted. Scheduled events wait in a timer wheel keyed by tick; state triggers watch a
 component field across ticks and emit `StateEdge`.
 
@@ -333,10 +334,11 @@ kind table. Core has no `ModuleDesc` of its own; the engine is the host.
 - **Pools and arenas have one owner thread**, asserted in debug. The general allocator
   is the only shared one; a worker's bare `mem_alloc` is attributed to the module whose
   system is running.
-- **Handles in events are checked at delivery**, not at emit: an event naming an entity
-  destroyed at the same boundary is dropped and `dropped_stale` counts it.
-- **Waves are capped** (`Engine::wave_cap`, 4): a cascade deeper than that rolls into the
-  next boundary, and `waves_capped` counts it.
+- **Handles in events are checked per batch**, not at emit: an event naming an entity
+  destroyed since is dropped from that consumer's batch and `dropped_stale` counts it. In
+  the emitting phase nothing has died yet (destroys are commands).
+- **No waves.** A chain of events runs out in data order inside a phase; a loop reads
+  early and goes round once a phase. Nothing is capped or carried.
 - **Heaps fail, never kill.** An allocation past a hard limit returns null with the heap,
   module and category logged once; a table spawn past its capacity returns a null handle.
 - **The profiler is on when something reads it** and compiles to nothing in ship.

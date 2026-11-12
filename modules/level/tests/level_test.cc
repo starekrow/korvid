@@ -65,10 +65,10 @@ void sim_count(TickContext&) { ++g.sim_ticks; }
 
 constinit const KindDesc k_kinds[] = {{.name = ".thing", .components = "Transform2, Local2, Parent", .capacity = 8}};
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".leaving", KV_ON(LevelLeaving, on_leaving)},
-    {.name = ".loading", KV_ON(LevelLoading, on_loading)},
-    {.name = ".build", KV_ON(LevelBuild, on_build), .writes = ".thing"},
-    {.name = ".entered", KV_ON(LevelEntered, on_entered)},
+    {.name = ".leaving", KV_ON(LevelLeaving, on_leaving), .phase = Phase::Sim},
+    {.name = ".loading", KV_ON(LevelLoading, on_loading), .phase = Phase::Sim},
+    {.name = ".build", KV_ON(LevelBuild, on_build), .phase = Phase::Sim, .writes = ".thing"},
+    {.name = ".entered", KV_ON(LevelEntered, on_entered), .phase = Phase::Sim},
 };
 constinit const SystemDesc k_systems[] = {{.name = ".count", .phase = Phase::Sim, .fn = sim_count}};
 KV_MODULE_DEFINE(k_lt) = {.name = "lt", .kinds = k_kinds, .systems = k_systems, .handlers = k_handlers};

@@ -642,7 +642,7 @@ void audio_stream_fill(TickContext& ctx) {
 
 constinit const SystemDesc    k_systems[] = {
     {.name = ".extract", .phase = Phase::PostSim, .fn = audio_extract, .writes = ".commands",
-     .main_thread = true, .runs = RunWhen::Always},
+     .emits = "VoiceFinished", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".stream_fill", .phase = Phase::PostSim, .fn = audio_stream_fill, .writes = ".commands",
      .after = ".extract", .main_thread = true, .runs = RunWhen::Always},
 };

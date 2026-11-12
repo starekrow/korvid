@@ -34,8 +34,8 @@ constinit Seen g = {};
 void on_event(TickContext&, Span<const AnimEvent> evs) { for (const AnimEvent& e : evs) { ++g.events; g.last_name = e.name; g.last_entity = e.entity; } }
 void on_finished(TickContext&, Span<const AnimFinished> fs) { g.finished += fs.len; }
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_event", KV_ON(AnimEvent, on_event)},
-    {.name = ".on_finished", KV_ON(AnimFinished, on_finished)},
+    {.name = ".on_event", KV_ON(AnimEvent, on_event), .phase = Phase::Input},
+    {.name = ".on_finished", KV_ON(AnimFinished, on_finished), .phase = Phase::Input},
 };
 KV_MODULE_DEFINE(k_a) = {.name = "a", .kinds = k_kinds, .handlers = k_handlers};
 

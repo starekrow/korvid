@@ -41,9 +41,9 @@ void on_again(TickContext& ctx, Span<const Again>) {
 
 constinit const SystemDesc k_systems[] = {{.name = ".run", .phase = Phase::Sim, .fn = sys_run, .writes = ".thing.Count"}};
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_ping", KV_ON(Ping, on_ping)},
-    {.name = ".on_reset", KV_ON(SimReset, on_reset)},
-    {.name = ".on_again", KV_ON(Again, on_again), .writes = ".thing"},
+    {.name = ".on_ping", KV_ON(Ping, on_ping), .phase = Phase::Sim},
+    {.name = ".on_reset", KV_ON(SimReset, on_reset), .phase = Phase::Sim},
+    {.name = ".on_again", KV_ON(Again, on_again), .phase = Phase::PreSim, .writes = ".thing"},
 };
 KV_MODULE_DEFINE(k_r) = {.name = "r", .events = k_events, .components = k_components, .kinds = k_kinds,
                          .systems = k_systems, .handlers = k_handlers};

@@ -1,6 +1,9 @@
 #include "korvid/core/event.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
+#include "korvid/core/arena.h"
+#include "korvid/core/phase.h"
+#include "korvid/core/thread.h"
 #include <string.h>
 
 namespace kv {
@@ -101,112 +104,176 @@ void EventWriter::free() {
 void EventBus::init(u32 writer_count) {
     KV_ASSERT(writer_count >= 1);
     for (u32 i = 0; i < writer_count; ++i) writers.push(EventWriter{});
+    main_thread = thread_id();
 }
 
 void EventBus::free() {
     for (EventWriter& w : writers) w.free();
     writers.free();
-    for (EventBuffer& b : delivered) b.free();
-    delivered.free();
-    wave_start.free();
+    for (EventStream& st : streams) st.events.free();
+    streams.free();
+    held.free();
     stale_warned.free();
 }
 
+void EventBus::check_outside() const {
+#if KV_DEV
+    if (ctx_running() && thread_id() != main_thread) {
+        KV_ERROR("events", "'%s' emits into the engine's writer from a worker thread: emit through the context (ctx.emit, declared in `emits`)",
+                 ctx_running()->name());
+        KV_VERIFY(!"engine writer from a worker: see the log");
+    }
+#endif
+}
+
+void EventBus::check_read() const {
+#if KV_DEV
+    if (const ScheduledSystem* u = ctx_running()) {
+        KV_ERROR("events", "'%s' reads the tick's events from the bus: declare the type in `reads` and take ctx.received<E>(), its batch", u->name());
+        KV_VERIFY(!"bus read from inside a unit: see the log");
+    }
+#endif
+}
+
 namespace {
+
+void ensure_streams(Array<EventStream>& arr, u32 type_id) {
+    if (type_id >= arr.len) arr.resize_fill(type_id + 1, EventStream{});
+}
+
+// One writer's events of one type onto the end of a stream (or held, for a next-tick type).
+void take(EventBus& bus, EventWriter& w, u32 t, bool to_held) {
+    if (t >= w.by_type.len) return;
+    EventBuffer& src = w.by_type[t];
+    if (src.bytes.len == 0) return;
+    EventBuffer* dst;
+    if (to_held) dst = &bus.held.buffer(t, src.elem_size);
+    else {
+        ensure_streams(bus.streams, t);
+        dst = &bus.streams[t].events;
+        KV_ASSERT(dst->elem_size == 0 || dst->elem_size == src.elem_size);
+        dst->elem_size = src.elem_size;
+        bus.delivered_total += src.count();
+    }
+    memcpy(dst->bytes.push_n(src.bytes.len), src.bytes.data, src.bytes.len);
+#if KV_DEV
+    for (u32 i = 0; i < src.emitters.len; ++i) dst->emitters.push(src.emitters[i]);
+#endif
+    src.clear();
+}
+
+bool held_type(const EventBus& bus, u32 t) { return t < bus.types.len && bus.types[t] && bus.types[t]->next_tick(); }
+
+u32 type_count(const EventBus& bus, const EventWriter& w) { return w.by_type.len > bus.streams.len ? w.by_type.len : bus.streams.len; }
 
 bool handle_is_live(Handle& h, void*) { return h.is_null() || kv_handle_resolve(h.bits) != nullptr; }
 
 } // namespace
 
-void EventBus::deliver(bool tick_start) {
-    // Where this delivery starts, per type, so handlers see only what is new.
-    u32 ntypes = delivered.len;
-    for (const EventWriter& w : writers) if (w.by_type.len > ntypes) ntypes = w.by_type.len;
-    wave_start.resize_fill(ntypes, 0);
-    for (u32 t = 0; t < ntypes; ++t) wave_start[t] = t < delivered.len ? delivered[t].count() : 0;
-    dropped_last = 0;
-
-    // Writer order, then emission order within a writer: deterministic.
-    for (EventWriter& w : writers) {
-        for (u32 t = 0; t < w.by_type.len; ++t) {
-            EventBuffer& src = w.by_type[t];
-            if (src.bytes.len == 0) continue;
-            const EventTypeDesc* desc = t < types.len ? types[t] : nullptr;
-            if (desc && desc->next_tick() && !tick_start) continue; // held for the next tick
-            ensure_buffers(delivered, t);
-            EventBuffer& dst = delivered[t];
-            KV_ASSERT(dst.elem_size == 0 || dst.elem_size == src.elem_size);
-            dst.elem_size = src.elem_size;
-            u32 n = src.count();
-            if (desc && schema_has_handles(desc->fields)) {
-                // One at a time: an event naming the dead is dropped, and counted.
-                for (u32 i = 0; i < n; ++i) {
-                    u8* e = src.bytes.data + (usize)i * src.elem_size;
-                    if (!schema_each_handle(desc->fields, e, handle_is_live, nullptr)) {
-                        ++dropped_stale;
-                        ++dropped_last;
-#if KV_DEV
-                        // Right for an OverlapEnd whose entity died; a trap for an event about a
-                        // death that its own emitter caused. Said once a type, in dev builds.
-                        stale_warned.resize_fill(t + 1, 0);
-                        if (!stale_warned[t] && !(desc->flags & EvStaleOk)) {
-                            stale_warned[t] = 1;
-                            KV_WARN("events", "a %s was dropped at delivery: a handle in it was stale (said once for this type; EventBus::dropped_stale counts)",
-                                    desc->name);
-                        }
-#endif
-                        continue;
-                    }
-                    memcpy(dst.bytes.push_n(src.elem_size), e, src.elem_size);
-#if KV_DEV
-                    if (i < src.emitters.len) dst.emitters.push(src.emitters[i]);
-#endif
-                    ++delivered_total;
-                }
-            } else {
-                memcpy(dst.bytes.push_n(src.bytes.len), src.bytes.data, src.bytes.len);
-#if KV_DEV
-                for (u32 i = 0; i < src.emitters.len; ++i) dst.emitters.push(src.emitters[i]);
-#endif
-                delivered_total += n;
-            }
-            src.clear();
-        }
+void EventBus::begin_phase() {
+    for (EventStream& st : streams) {
+        st.phase_start = st.end();
+        st.merged = false;
     }
 }
 
-void EventBus::end_tick() {
-    for (EventBuffer& b : delivered) b.clear();
-    for (u32& s : wave_start) s = 0;
+void EventBus::merge(u32 type_id, u32 first, u32 last) {
+    ensure_streams(streams, type_id);
+    bool to_held = held_type(*this, type_id);
+    for (u32 u = first; u <= last && u < writers.len; ++u) take(*this, writers[u], type_id, to_held);
+    streams[type_id].merged = true;
 }
 
-u32 EventBus::new_count(u32 type_id) const {
-    if (type_id == 0 || type_id >= delivered.len) return 0;
-    u32 start = type_id < wave_start.len ? wave_start[type_id] : 0;
-    return delivered[type_id].count() - start;
+void EventBus::merge_all(u32 first, u32 last) {
+    for (u32 u = first; u <= last && u < writers.len; ++u)
+        for (u32 t = 1; t < writers[u].by_type.len; ++t) take(*this, writers[u], t, held_type(*this, t));
 }
 
-const void* EventBus::new_data(u32 type_id) const {
-    if (type_id == 0 || type_id >= delivered.len) return nullptr;
-    const EventBuffer& b = delivered[type_id];
-    u32 start = type_id < wave_start.len ? wave_start[type_id] : 0;
-    return b.bytes.data + (usize)start * b.elem_size;
+void EventBus::merge_outside(bool tick_start) {
+    if (tick_start)
+        for (u32 t = 1; t < held.by_type.len; ++t) take(*this, held, t, false);
+    EventWriter& w = writers[0];
+    for (u32 t = 1; t < type_count(*this, w); ++t) take(*this, w, t, !tick_start && held_type(*this, t));
+}
+
+const void* EventBus::batch(u32 type_id, u64 from, u64 to, u32* count) {
+    *count = 0;
+    if (type_id >= streams.len) return nullptr;
+    EventStream& st = streams[type_id];
+    if (from < st.base) from = st.base; // a fresh sim dropped them
+    if (to > st.end()) to = st.end();
+    if (from >= to) return nullptr;
+    u32 elem = st.events.elem_size;
+    u8* first = st.events.bytes.data + (usize)(from - st.base) * elem;
+    u32 n = (u32)(to - from);
+    const EventTypeDesc* desc = type_id < types.len ? types[type_id] : nullptr;
+    if (!desc || !schema_has_handles(desc->fields)) { *count = n; return first; }
+    // One at a time: an event naming the dead is dropped from this batch, and counted.
+    u8* out = nullptr;
+    u32 kept = 0;
+    for (u32 i = 0; i < n; ++i) {
+        u8* e = first + (usize)i * elem;
+        bool live = schema_each_handle(desc->fields, e, handle_is_live, nullptr);
+        if (!live) {
+            ++dropped_stale;
+#if KV_DEV
+            stale_warned.resize_fill(type_id + 1, 0);
+            if (!stale_warned[type_id] && !(desc->flags & EvStaleOk)) {
+                stale_warned[type_id] = 1;
+                KV_WARN("events", "a %s was dropped from a batch: a handle in it was stale (said once for this type; EventBus::dropped_stale counts)", desc->name);
+            }
+#endif
+            if (!out) { // the first dead one: copy what came before it, and go on copying
+                out = (u8*)alloc_in(mem_scratch(), (usize)n * elem);
+                memcpy(out, first, (usize)i * elem);
+                kept = i;
+            }
+            continue;
+        }
+        if (out) memcpy(out + (usize)kept++ * elem, e, elem);
+    }
+    if (!out) { *count = n; return first; }
+    *count = kept;
+    return out;
+}
+
+void EventBus::end_tick(Span<const u64> keep_from) {
+    for (u32 t = 1; t < streams.len; ++t) {
+        EventStream& st = streams[t];
+        u64 keep = t < keep_from.len ? keep_from[t] : st.end();
+        if (keep > st.end()) keep = st.end();
+        if (keep > st.base) {
+            u32 drop = (u32)(keep - st.base);
+            u32 elem = st.events.elem_size;
+            u32 left = st.events.count() - drop;
+            if (left) memmove(st.events.bytes.data, st.events.bytes.data + (usize)drop * elem, (usize)left * elem);
+            st.events.bytes.len = left * elem;
+#if KV_DEV
+            if (st.events.emitters.len >= drop) {
+                for (u32 i = 0; i + drop < st.events.emitters.len; ++i) st.events.emitters[i] = st.events.emitters[i + drop];
+                st.events.emitters.len -= drop;
+            }
+#endif
+            st.base = keep;
+        }
+        st.tick_start = st.end();
+        if (st.traced < st.base) st.traced = st.base;
+    }
+}
+
+void EventBus::drop_all() {
+    for (EventWriter& w : writers) w.clear();
+    held.clear();
+    for (EventStream& st : streams) {
+        st.base = st.end();
+        st.events.clear();
+        st.tick_start = st.phase_start = st.traced = st.base;
+    }
 }
 
 u32 EventBus::pending_count() const {
-    u32 n = 0;
+    u32 n = held.pending_count();
     for (const EventWriter& w : writers) n += w.pending_count();
-    return n;
-}
-
-u32 EventBus::pending_now() const {
-    u32 n = 0;
-    for (const EventWriter& w : writers)
-        for (u32 t = 0; t < w.by_type.len; ++t) {
-            const EventTypeDesc* desc = t < types.len ? types[t] : nullptr;
-            if (desc && desc->next_tick()) continue;
-            n += w.by_type[t].count();
-        }
     return n;
 }
 

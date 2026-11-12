@@ -18,7 +18,7 @@ const color kSparkHit{1.0f, 0.85f, 0.5f, 1.0f};
 const color kSparkGraze{0.6f, 0.9f, 1.0f, 1.0f};
 const color kSparkKill{1.0f, 0.6f, 0.25f, 1.0f};
 
-u16 hk(Engine& e, u32 kind_id) { return engine_table(e, kind_id)->kind; }
+u16 hk(Engine& e, u32 kind_id) { return engine_table_now(e, kind_id)->kind; } // a handle kind, which never changes
 
 // Whether the ship can be hurt now: not by the dials (always, or after the first death),
 // not while the egg plays.

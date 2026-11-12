@@ -1,15 +1,19 @@
-// Korvid core: events are plain-data facts in typed per-tick buffers.
-// Emitting is an append into a writer's pending buffer. At each phase boundary
-// deliver() merges every writer into the delivered buffers in writer order, so the
-// merge is deterministic. Consumers read whole batches; the batch accumulates through
-// the tick and end_tick() clears it. Pending events survive the end of a tick: they are
-// delivered at the next boundary. A type declared `next_tick` is held until the first
-// boundary of the following tick, never delivered within the tick it was emitted.
+// Korvid core: events are plain-data facts in typed streams. Emitting is an append into
+// a writer: each unit (system or handler) has its own, and writer 0 is the engine's, for
+// what happens outside the schedule. Writers merge into one stream per type in segments:
+// the tick start (held next-tick events, then the engine's writer), each phase (its units
+// in unit order, which is rank order, whatever ran where), and the boundary after it (the
+// engine's writer again: the commands' Spawned, the pumps' results). A phase's units of
+// one type merge as soon as its consumers there need them, which the schedule makes
+// after its last emitter there; the rest at the phase's end. A consumer (a unit reading
+// the type) has a cursor: its batch is what was merged after its last run and before
+// this one, or for an early read, before its phase began. So every consumer sees every
+// event once, in the same order, however the levels fell. docs/design/events.md.
 //
 // An event type may carry a field table (KV_EVENT_EX). Then the bus knows which fields
-// are handles and drops, at delivery, any event whose handle no longer resolves: stale
-// handles in events are dropped silently and counted. The table is also what the trace
-// prints. Slice 1 is single-threaded; one writer per thread comes later without API change.
+// are handles and drops, when a batch is made, any event whose handle no longer
+// resolves, counted. The table is also what the trace prints. A type declared
+// `next_tick` is held to the next tick's start.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/component.h"
@@ -80,48 +84,75 @@ struct EventWriter {
     void free();
 };
 
+// One type's stream: every event merged and not yet passed by every consumer, oldest
+// first, numbered from the start of the run.
+struct EventStream {
+    EventBuffer events;          // events.bytes holds numbers [base, end())
+    u64         base        = 0;
+    u64         tick_start  = 0; // the first merged this tick: what read() returns
+    u64         phase_start = 0; // the first merged this phase: where early batches end
+    u64         traced      = 0; // the dev trace has recorded up to here
+    bool        merged      = false; // this phase's units are in
+
+    u64 end() const { return base + events.count(); }
+};
+
 struct EventBus {
-    Array<EventWriter> writers;
-    Array<EventBuffer> delivered;
-    Array<u32>         wave_start;        // by type: delivered count before the last deliver()
+    Array<EventWriter> writers;   // 0: the engine's; unit u: writers[u]
+    Array<EventStream> streams;   // by type id
+    EventWriter        held;      // next-tick events, for the next tick's start
     Span<const EventTypeDesc* const> types; // by id, set by the engine; empty means no schemas
-    u64                delivered_total = 0;
-    u64                dropped_stale   = 0; // events dropped for a stale handle, ever
+    u64                delivered_total = 0; // merged, ever
+    u64                dropped_stale   = 0; // dropped from a batch for a stale handle, ever
     Array<u8>          stale_warned;        // by type: dev builds warn the first time a type is dropped
-    u32                dropped_last    = 0; // at the last deliver()
+    u32                main_thread     = 0; // the thread that may write the engine's writer during a tick
 
     void init(u32 writer_count = 1);
     void free();
 
     EventWriter& writer(u32 i) { return writers[i]; }
-    void set_emitter(const char* name) { for (EventWriter& w : writers) w.emitter = name; }
+    void set_emitter(const char* name) { writers[0].emitter = name; }
 
+    // Into the engine's writer: outside the schedule, or from a unit on the main thread
+    // for a fact that is not the unit's to order (a library reporting as it goes). Lands
+    // in the next segment, where no consumer of the same phase sees it.
     template <class E>
-    void emit(const E& e) { writers[0].emit(e); }
+    void emit(const E& e) { check_outside(); writers[0].emit(e); }
+    void check_outside() const;
+    void check_read() const; // dev builds: not from inside a unit, which has its batch
 
-    // Phase boundary: move everything pending into the delivered buffers. At the first
-    // boundary of a tick (tick_start) next-tick types move too; otherwise they wait.
-    void deliver(bool tick_start = true);
-    // End of tick: drop the delivered buffers. Pending stays pending.
-    void end_tick();
+    // A phase begins: early batches end at what is merged now.
+    void begin_phase();
+    // Units [first, last] (one phase's, in unit order) into the streams: one type, or
+    // every type. Next-tick types go to `held`.
+    void merge(u32 type_id, u32 first, u32 last);
+    void merge_all(u32 first, u32 last);
+    // The engine's writer; at a tick's start the held next-tick events go first.
+    void merge_outside(bool tick_start);
+    // Numbers [from, to) of one type, less any naming the dead: in place, or copied into
+    // the caller's scratch when something was dropped. `count` is what is left.
+    const void* batch(u32 type_id, u64 from, u64 to, u32* count);
+    // End of tick: drop what every consumer has passed (`keep_from` by type: the lowest
+    // cursor, or the stream's end for a type nobody reads). read() starts over.
+    void end_tick(Span<const u64> keep_from);
+    // Drop everything merged and pending: a fresh sim. Cursors behind the new base read
+    // from it.
+    void drop_all();
 
+    // This tick's events of a type, for code outside the schedule (tools, tests); a unit
+    // reads its batch through the context.
     template <class E>
     Span<const E> read() const {
+        check_read();
         u32 id = EventType<E>::id;
         KV_ASSERT(id != 0);
-        if (id == 0 || id >= delivered.len) return Span<const E>();
-        const EventBuffer& b = delivered[id];
-        return Span<const E>((const E*)b.bytes.data, b.count());
+        if (id == 0 || id >= streams.len) return Span<const E>();
+        const EventStream& s = streams[id];
+        u64 skip = s.tick_start > s.base ? s.tick_start - s.base : 0;
+        return Span<const E>((const E*)s.events.bytes.data + skip, (u32)(s.events.count() - skip));
     }
-    // What the last deliver() added, for handlers: nothing is handled twice.
-    u32         new_count(u32 type_id) const;
-    const void* new_data(u32 type_id) const;
-    template <class E>
-    Span<const E> read_new() const { return Span<const E>((const E*)new_data(EventType<E>::id), new_count(EventType<E>::id)); }
 
-    u32 pending_count() const;
-    // Pending events a mid-tick deliver(false) would move: everything but next-tick types.
-    u32 pending_now() const;
+    u32 pending_count() const; // in the writers and held
 };
 
 } // namespace kv

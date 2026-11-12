@@ -132,31 +132,45 @@ A system that reads a stream outside a handler reads its batch through the conte
   handler, later in the phase, sees the event, the enemy still in its table (the destroy
   is pending). Today the commands apply between waves, so the `Kill` names a dead handle
   and is dropped: arcfire's "the bus drops events whose handles are stale" lesson is this.
-- Timing moves. `on_spawned` sees spawns in the phase it is placed in, not at the next
-  boundary; arcfire's hit chain runs inside Sim instead of at the PostSim boundary.
-  Hashes and recordings change; the demos must still hash alike at 1 and 16 threads and
-  with every kind a snapshot.
+- Timing moves a little. A chain's commands land at its phase's end, not between its
+  steps; `Spawned` for a spawn made in a chain comes a phase later. Hashes and recordings
+  change; the demos must still hash alike at 1 and 16 threads and with every kind a
+  snapshot.
 
 ## Decisions taken from the inventory
 
-- **Phase per handler, chosen where its event comes from**:
+- **Phase per handler.** An old boundary handler ran after one phase's systems and before
+  the next's. That has two faithful places, and the declarations decide which:
+  - **the end of the phase that emits the event**, after its emitter, when what the
+    handler writes must be the next phase's start: arcanum's level build (PreSim, after
+    `level.run`), whose players and villagers Sim's early readers must see as Sim found
+    them;
+  - **the start of the next phase**, reading early (`^`) what that phase's systems write,
+    when systems earlier in the emitting phase read what the handler writes: arcfire's
+    and rocks' hit chains go in PostSim (the resolve, early in Sim, reads what the hits
+    change; in Sim that is a cycle).
+  The scheduler refuses the wrong one with the cycle or the contradiction it makes.
 
 | events | from | handlers go in |
 |---|---|---|
-| OverlapBegin | collision.broadphase, Sim | Sim (after the broadphase, by the stream) |
-| arcfire hits (ShotHit, BulletHit, Rammed, Graze, ShellHit, Pickup, Kill, ShipDied) | on_overlap, the hit handlers | Sim |
-| BeamHit, Bombed, StageEnd | .beams, .bomb, .stage (Sim) | Sim |
-| rocks RockHit, ShipHit | on_overlap | Sim |
-| StateEdge | triggers, end of tick | Sim (the tick after, as now) |
-| timers (SpawnMember, StageNext, RunOver, Expire, SpawnWave, Restart, Blink*) | tick start | Sim, or PreSim for flow (StageNext, RunOver) |
-| Spawned | the commands, every boundary | PostSim (shadows, flames, tickets) |
-| AnimFinished | anim.play, PostSim | PostSim of the tick after |
-| UiEvent, UiCovered | ui.update, PreSim | PreSim, after ui.update |
-| LevelBuild, LevelLoading | level.run, PreSim | PreSim, after level.run |
-| ExitRequested, AssetFailed, SimReset, input events | the engine's writer | Input or PreSim (the next tick start, or the boundary) |
+| OverlapBegin and the hit chains (ShotHit, BulletHit, Rammed, Graze, ShellHit, Pickup, Kill, ShipDied; RockHit, ShipHit) | collision.broadphase, Sim; then the hit handlers | PostSim, reads early |
+| BeamHit, Bombed, StageEnd | .beams, .bomb, .stage (Sim) | PostSim, with the hits |
+| StateEdge, timers, next-tick types | end of tick, tick start | Input (the tick after, as before) |
+| Spawned | the commands, every boundary | PostSim |
+| AnimFinished | anim.play, PostSim | Input of the tick after (as before) |
+| LevelBuild, LevelLoading, UiEvent, UiCovered | level.run, ui.update, PreSim | arcanum: PreSim, after them; arcfire's flow: Sim |
+| ExitRequested | frameloop.exit, PreSim | Sim |
+| input events | the engine's writer | Input |
 
 - **Ranks.** A module's handlers rank after its systems, in declaration order, so module
   state orders them after its systems in their phase unless something says otherwise.
+- **`after` among handlers.** Most of arcfire's (`on_bomb` after `on_shot_hit`,
+  `on_stage_end` after `on_ship_died`, `on_pickup` after `on_kill`) ordered handlers whose
+  events came in different waves, so they never applied: `StageEnd` was handled in wave
+  0, `ShipDied` in wave 2. They are gone; the events order the chain, and module state
+  (declaration order) the rest. What PostSim systems an early handler must precede is
+  said where the scheduler asks (`on_pickup`, `on_ship_died` before `anim.play`), and
+  arcanum's level build after `tilemap.pump`.
 - **Waves, the cap, `ctx.wave`, `Engine::handlers` and `waves_capped` go.** The boundary
   keeps the timers (tick start) and the commands; delivery is the segment merge.
 - **Stale drop per batch.** Each consumer's batch drops what names the dead when it is
@@ -204,4 +218,51 @@ stops there only because the last handler ignores what it sees.
 
 ## Results
 
-(When it runs.)
+Branch `handlers-in-schedule`, Linux, Nov 11, 2026.
+
+**What it took.** Core: the streams, the segments, the cursors, the engine's writer as
+the outside path, handlers built into their phases, waves and `Engine::handlers` gone.
+Engine modules declare what they emit (collision, anim, audio, level, ui, the frame loop)
+and two handlers got phases. Games: every handler a phase, every emitter `emits`, every
+reader of the tick's events a declared read. Two things in the scheduler itself turned up
+on the way:
+
+- Module state skipped a pair that only an ordered kind's early read put in order, and
+  the writers check (rightly) wanted an order that holds with every kind a snapshot. State
+  edges are now judged against the mode-independent graph and oriented along the order
+  that includes the kinds' early edges, so they never contradict one.
+- Handler-to-handler `after`s that never applied (above).
+
+**What the checks found.** The guard sweep (dev, every kind a snapshot) caught the hit
+handlers reaching tables directly once they read early: `hurt`'s handle kinds,
+`bullet_row`, `on_bomb`'s liveness walk. Handle kinds now come from `engine_table_now`
+(they never change), liveness from `ctx.rows` with `@alive` declared.
+
+**The same game, still.** Tick for tick, at rate 4:
+
+| run | ticks | hash | every kind a snapshot | 1 thread |
+|---|---|---|---|---|
+| arcanum `--demo` | 1,865 | 9224de52db9aac0c (main's) | the same | the same |
+| arcfire Shoreline `--demo` | 14,172 | a85e2f7fa02412e5 | the same | the same |
+| arcfire Orbit `--demo` | 17,333 | 1b52151fc10a42fd | the same | the same |
+| rocks `--demo` | 19,189 compared | | the same | the same |
+
+Arcanum's hash did not move at all. Arcfire's and rocks' did: the chains now settle in
+one phase with their commands at its end (where the waves applied them between handlers),
+`Spawned` arrives a phase later for spawns made in a chain, and the handler `after`s that
+never applied are gone. Both arcfire recordings were made again (14,648 and 14,769 ticks;
+the stage ends where it did) and replay matching at 1 and 16 threads, per kind and as
+snapshots. 25 suites pass in dev, debug and ship.
+
+**What it costs.** Dev build, `--stress`, 25 s traced twice each, the same game (the
+summaries match): the boundary and the new tick start take 17 µs a tick against main's 23
+for the waves; the tick is 1.09 ms against main's 1.01 and 1.07, which is main's own
+spread on `balanced`.
+
+**What is left open.**
+- Handlers still reach the engine directly (`engine_hold`, `ui_*`, `engine_request_quit`,
+  `platform_io`): outside the schedule, as before.
+- The phase of a handler is the author's choice between two places; nothing infers it.
+  A default could ("after the emitter, unless that is a cycle"), but a rule that moves
+  code between phases by itself is the kind of thing this branch set out to remove.
+- Windows and macOS have not run it.

@@ -326,7 +326,7 @@ constinit const ResourceDesc k_resources[]  = {{".clips"}};
 constinit const SystemDesc k_systems[] = {
     {.name = ".pump", .phase = Phase::PreSim, .fn = anim_pump, .writes = ".clips", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".play", .phase = Phase::PostSim, .fn = anim_play_system, .reads = ".clips", .writes = "*.AnimPlayer, *.Sprite, *.Local2, *.Transform2",
-     .after = "?text.layout", .before = "?scene.compose", .runs = RunWhen::Always},
+     .emits = "AnimEvent, AnimFinished", .after = "?text.layout", .before = "?scene.compose", .runs = RunWhen::Always},
 };
 
 } // namespace

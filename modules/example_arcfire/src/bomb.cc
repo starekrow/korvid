@@ -68,19 +68,19 @@ void on_bomb(TickContext& ctx, Span<const Bombed> blasts) {
             bool air = kind == g_air_kind;
             Span<const Health> hp = ctx.read<Health>(air ? "example_arcfire.air.Health" : "example_arcfire.ground.Health");
             Span<const Transform2> xf = ctx.read<Transform2>(air ? "example_arcfire.air.Transform2" : "example_arcfire.ground.Transform2");
-            const Table* t = engine_table(*ctx.engine, kind); // liveness and handles; the columns are declared
-            for (u32 i = 0; i < t->rows(); ++i) {
-                if (!t->is_alive(i) || hp[i].hp <= 0 || !in_field(xf[i].position, 0.0f)) continue;
+            KindRows t = ctx.rows(kind); // liveness and handles, declared with the columns
+            for (u32 i = 0; i < t.rows(); ++i) {
+                if (!t.alive(i) || hp[i].hp <= 0 || !in_field(xf[i].position, 0.0f)) continue;
                 fx_sparks(ctx, g, xf[i].position, 3, kSparkBlast, 3.0f);
                 bool killed = false;
-                hurt(ctx, g, t->handle_at(i), kBlastDamage, xf[i].position, &killed); // a kill pays and drops as a shot's does
+                hurt(ctx, g, t.handle_at(i), kBlastDamage, xf[i].position, &killed); // a kill pays and drops as a shot's does
             }
         }
         Span<Health> php = ctx.write<Health>("example_arcfire.part.Health");
         Span<const Transform2> pxf = ctx.read<Transform2>("example_arcfire.part.Transform2");
-        const Table* parts = engine_table(*ctx.engine, g_part_kind);
-        for (u32 i = 0; i < parts->rows(); ++i) {
-            if (!parts->is_alive(i) || php[i].hp <= 0 || !in_field(pxf[i].position, 0.0f) || part_absorbs(g, ctx, parts->handle_at(i))) continue;
+        KindRows parts = ctx.rows(g_part_kind);
+        for (u32 i = 0; i < parts.rows(); ++i) {
+            if (!parts.alive(i) || php[i].hp <= 0 || !in_field(pxf[i].position, 0.0f) || part_absorbs(g, ctx, parts.handle_at(i))) continue;
             php[i].hp -= kBlastDamage;
             php[i].flash = 4;
             fx_sparks(ctx, g, pxf[i].position, 3, kSparkBlast, 3.0f);

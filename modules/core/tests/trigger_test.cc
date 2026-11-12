@@ -32,13 +32,13 @@ struct Trace { u32 alarms_in_input; u32 alarm_n; u64 alarm_tick; u32 dead_edges;
 constinit Trace g = {};
 
 void sys_input(TickContext& ctx) {
-    for (const Alarm& a : ctx.events->read<Alarm>()) { ++g.alarms_in_input; g.alarm_n = a.n; g.alarm_tick = ctx.tick; }
-    for (const StateEdge& s : ctx.events->read<StateEdge>()) {
+    for (const Alarm& a : ctx.received<Alarm>()) { ++g.alarms_in_input; g.alarm_n = a.n; g.alarm_tick = ctx.tick; }
+    for (const StateEdge& s : ctx.received<StateEdge>()) {
         if (s.trigger == g_dead_id) { ++g.dead_edges; g.dead_entity = s.entity; g.dead_value = s.value; }
         else ++g.changed_edges;
     }
 }
-constinit const SystemDesc k_systems[] = {{.name = "t.input", .phase = Phase::Input, .fn = sys_input}};
+constinit const SystemDesc k_systems[] = {{.name = "t.input", .phase = Phase::Input, .fn = sys_input, .reads = "Alarm, StateEdge"}};
 KV_MODULE_DEFINE(k_t) = {.name = "t", .events = k_events, .components = k_components, .kinds = k_kinds,
                          .systems = k_systems, .triggers = k_triggers};
 

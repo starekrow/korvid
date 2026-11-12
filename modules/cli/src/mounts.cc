@@ -231,13 +231,19 @@ void print_sets(CliContext& ctx, Engine& e, const ScheduledSystem& s) {
     char line[1024];
     sets_line(e, s.declared, Access::Read, Access::Early, line, sizeof line); ctx.print("reads:  %s", line[0] ? line : "(nothing)");
     sets_line(e, s.declared, Access::Write, Access::Write, line, sizeof line); ctx.print("writes: %s", line[0] ? line : "(nothing)");
-    sets_line(e, s.declared, Access::Append, Access::Append, line, sizeof line); if (line[0]) ctx.print("appends: %s", line);
+    sets_line(e, s.declared, Access::Append, Access::Append, line, sizeof line); if (line[0]) ctx.print("appends: %s", line); // event types emitted among them
 }
 
 template <class F>
 void each_system(Engine& e, F fn) {
     for (u32 p = 0; p < (u32)Phase::Count; ++p)
-        for (ScheduledSystem& s : e.phases.systems[p]) fn(s, (Phase)p);
+        for (ScheduledSystem& s : e.phases.systems[p]) if (s.desc) fn(s, (Phase)p);
+}
+
+template <class F>
+void each_handler(Engine& e, F fn) {
+    for (u32 p = 0; p < (u32)Phase::Count; ++p)
+        for (ScheduledSystem& s : e.phases.systems[p]) if (s.handler) fn(s, (Phase)p);
 }
 
 void systems_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
@@ -270,26 +276,30 @@ bool systems_describe(CliContext& ctx, const char* rel) {
 void handlers_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
     Engine& e = *ctx.engine;
     CliTree tree{dir, emit, user};
-    for (ScheduledSystem& h : e.handlers) {
+    bool more = true;
+    each_handler(e, [&](ScheduledSystem& h, Phase p) {
+        if (!more) return;
         char slashed[128], summary[96];
         cli_dots_to_slashes(h.name(), slashed, sizeof slashed);
-        snprintf(summary, sizeof summary, "on %s, level %u", h.handler->event_name ? h.handler->event_name : "?", h.level);
-        if (!tree.add(slashed, false, summary)) return;
-    }
+        snprintf(summary, sizeof summary, "on %s, phase %s, level %u", h.handler->event_name ? h.handler->event_name : "?", phase_name(p), h.level);
+        more = tree.add(slashed, false, summary);
+    });
 }
 
 bool handlers_describe(CliContext& ctx, const char* rel) {
     Engine& e = *ctx.engine;
     char dotted[128];
     cli_slashes_to_dots(rel, dotted, sizeof dotted);
-    for (ScheduledSystem& h : e.handlers) {
-        if (strcmp(h.name(), dotted) != 0) continue;
-        ctx.print("%s: on %s, level %u, unit %u, module %s", h.name(), h.handler->event_name ? h.handler->event_name : "?", h.level, h.unit, h.module->desc->name);
+    bool found = false;
+    each_handler(e, [&](ScheduledSystem& h, Phase p) {
+        if (found || strcmp(h.name(), dotted) != 0) return;
+        found = true;
+        ctx.print("%s: on %s, phase %s, level %u, unit %u, module %s", h.name(), h.handler->event_name ? h.handler->event_name : "?", phase_name(p), h.level, h.unit,
+                  h.module->desc->name);
         print_sets(ctx, e, h);
         ctx.print("after: %s; before: %s", h.handler->after ? h.handler->after : "-", h.handler->before ? h.handler->before : "-");
-        return true;
-    }
-    return false;
+    });
+    return found;
 }
 
 // ---- /resources ----------------------------------------------------------------------------------

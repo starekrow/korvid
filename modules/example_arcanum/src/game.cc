@@ -1206,11 +1206,11 @@ void arcanum_shutdown(Engine&, ModuleInstance& self) {
 }
 
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_build",   KV_ON(LevelBuild, on_build), .writes = ".player, .npc, .rock, tilemap.tile, tilemap.animtile", .appends = "audio.commands"},
-    {.name = ".on_exit",    KV_ON(ExitRequested, on_exit)},
-    {.name = ".on_loading", KV_ON(LevelLoading, on_loading)},
-    {.name = ".on_ui",      KV_ON(UiEvent, on_ui), .writes = ".player.Vitals", .appends = "audio.commands", .after = ".on_build"},
-    {.name = ".on_covered", KV_ON(UiCovered, on_covered), .writes = ".rock", .after = ".on_build"},
+    {.name = ".on_build",   KV_ON(LevelBuild, on_build), .phase = Phase::PreSim, .writes = ".player, .npc, .rock, tilemap.tile, tilemap.animtile", .appends = "audio.commands", .after = "tilemap.pump"},
+    {.name = ".on_exit",    KV_ON(ExitRequested, on_exit), .phase = Phase::PreSim},
+    {.name = ".on_loading", KV_ON(LevelLoading, on_loading), .phase = Phase::PreSim},
+    {.name = ".on_ui",      KV_ON(UiEvent, on_ui), .phase = Phase::PreSim, .writes = ".player.Vitals", .appends = "audio.commands", .after = ".on_build"},
+    {.name = ".on_covered", KV_ON(UiCovered, on_covered), .phase = Phase::PreSim, .writes = ".rock", .after = ".on_build"},
 };
 constinit const SystemDesc k_systems[] = {
     {.name = ".files", .phase = Phase::PreSim, .fn = files, .after = "level.run", .before = ".menu", .main_thread = true, .runs = RunWhen::Always},

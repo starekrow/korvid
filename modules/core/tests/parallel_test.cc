@@ -66,9 +66,9 @@ bool p_startup(Engine&, ModuleInstance& self) { self.set_state(arena_push<PState
 
 constinit const SystemDesc k_systems[] = {
     {.name = ".s1",     .phase = Phase::Sim, .fn = sys_s1},
-    {.name = ".move_a", .phase = Phase::Sim, .fn = sys_move_a, .reads = ".a.Seq", .writes = ".a.Pos", .state = StateUse::None},
+    {.name = ".move_a", .phase = Phase::Sim, .fn = sys_move_a, .reads = ".a.Seq", .writes = ".a.Pos", .emits = "Moved", .state = StateUse::None},
     {.name = ".s2",     .phase = Phase::Sim, .fn = sys_s2},
-    {.name = ".move_b", .phase = Phase::Sim, .fn = sys_move_b, .reads = ".b", .writes = ".b.Pos", .state = StateUse::None},
+    {.name = ".move_b", .phase = Phase::Sim, .fn = sys_move_b, .reads = ".b", .writes = ".b.Pos", .emits = "Moved", .state = StateUse::None},
 };
 KV_MODULE_DEFINE(k_p) = {.name = "p", .events = k_events, .components = k_components, .kinds = k_kinds,
                          .systems = k_systems, .startup = p_startup, .memory = {.reserve = 4096}};

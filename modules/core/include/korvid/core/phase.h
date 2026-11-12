@@ -98,11 +98,13 @@ struct SimReset {
     u32 pad;
 };
 
-// A handler: subscribed to one event type, run at phase boundaries on each new batch of
-// it, in waves, under the same read/write rules as a system. Referenced by its id in the
-// table, never by function pointer in sim state.
+// A handler: a system that consumes one event type and is handed its batch, the events
+// emitted since it last ran (see SystemDesc on streams). It runs in its phase, in the
+// order the schedule gives it like any system, when its batch is not empty: paused ticks
+// included, since events come only from what ran. Referenced by its id in the table,
+// never by function pointer in sim state.
 //   void on_hit(TickContext& ctx, Span<const RockHit> hits);
-//   {.name = "rocks.on_hit", KV_ON(RockHit, on_hit), .reads = ..., .writes = ...}
+//   {.name = "rocks.on_hit", KV_ON(RockHit, on_hit), .phase = Phase::Sim, .reads = ..., .writes = ...}
 typedef void (*HandlerFn)(TickContext& ctx, const void* events, u32 count);
 template <class E, void (*F)(TickContext&, Span<const E>)>
 void handler_thunk(TickContext& ctx, const void* events, u32 count) { F(ctx, Span<const E>((const E*)events, count)); }
@@ -117,10 +119,12 @@ struct HandlerDesc {
     u32*        event      = nullptr; // &EventType<E>::id
     const char* event_name = nullptr;
     HandlerFn   fn         = nullptr;
-    const char* reads      = nullptr; // resource names, comma-separated; no early reads ('^') at a boundary
+    Phase       phase      = Phase::Count; // required
+    const char* reads      = nullptr; // as for a system; its own event is read as it stands unless named with '^'
     const char* writes     = nullptr;
     const char* appends    = nullptr;
-    const char* after      = nullptr; // handler names
+    const char* emits      = nullptr; // event types it emits
+    const char* after      = nullptr; // system or handler names, as for a system
     const char* before     = nullptr;
 };
 
@@ -187,6 +191,8 @@ bool    ctx_cancel(TickContext& ctx, u32 ticket);
 bool    ctx_state_allowed(const TickContext& ctx, bool write); // logs and asserts when not
 bool    ctx_may_append(TickContext& ctx, u32 resource_id); // declared in `appends` (or the owner's write); logs and asserts when not
 bool    ctx_alive(TickContext& ctx, Handle h);             // a read of the kind's liveness (kind.@alive), checked
+void    ctx_emit_check(const TickContext& ctx, u32 type_id);  // dev builds: declared in `emits`
+const void* ctx_received(TickContext& ctx, u32 type_id, u32* count); // the unit's batch of a type it consumes
 Table*  ctx_rows(TickContext& ctx, u32 kind_id);           // likewise: the unit's view of the kind, for its rows
 // The unit running on this thread (a system or handler, or a parallel_for chunk of one);
 // null outside the schedule. Returns the one it replaces.
@@ -264,7 +270,7 @@ struct ChunkContext {
     u32            chunk;
 
     template <class E>
-    void emit(const E& e) { writer->emit(e); }
+    void emit(const E& e) { ctx_emit_check(*ctx, EventType<E>::id); writer->emit(e); }
     template <class K, class... C>
     void spawn_later(K kind, const C&... c) {
         if (ctx_spawn_begin(*ctx, commands, kind, sizeof...(C), false) || sizeof...(C) == 0)
@@ -302,7 +308,6 @@ struct TickContext {
     const ScheduledSystem* system   = nullptr; // the running system or handler, whose sets gate the accessors; null: anything goes
     EventWriter*           writer   = nullptr; // the unit's; null: the bus's writer 0 (outside the schedule)
     CommandBuffer*         commands = nullptr; // the unit's; null: the engine's
-    u32                    wave     = 0;       // for a handler: which wave of the boundary this is
     bool                   paused   = false;   // a paused tick: the sim stands still, only RunWhen::Always systems run
 
     // The module state as the type startup stored, verified by a pointer compare. T const
@@ -317,9 +322,21 @@ struct TickContext {
     }
 
     // ---- events -----------------------------------------------------------------------
-    // Into this unit's writer, delivered at the next boundary in unit order.
+    // Into this unit's writer, declared in `emits`: its consumers in the phase run after it.
     template <class E>
-    void emit(const E& e) { if (writer) writer->emit(e); else events->emit(e); }
+    void emit(const E& e) {
+        if (!writer) { events->emit(e); return; }
+        ctx_emit_check(*this, EventType<E>::id);
+        writer->emit(e);
+    }
+    // The events of a type this unit consumes (declared in `reads`) that were emitted
+    // since it last ran: a handler's own are its span.
+    template <class E>
+    Span<const E> received() {
+        u32 n = 0;
+        const void* p = ctx_received(*this, EventType<E>::id, &n);
+        return Span<const E>((const E*)p, n);
+    }
 
     // ---- data access ---------------------------------------------------------------
     // A kind by name, or by the id its KindDesc::id slot received. Write access (declared
@@ -518,9 +535,13 @@ struct SystemDesc {
     // another as it stands from the same writer (say which it means). Two writers of one
     // resource need an order. `appends` names append resources (ResourceDesc::apply),
     // which need no order at all.
+    // An event type is a stream: `emits` names the types the system emits, `reads` the ones
+    // it consumes (by type name, "ShotHit"), which it does after every emitter of them in
+    // its phase, or with '^' up to the phase start. ctx.received<E>() is its batch.
     const char* reads  = nullptr;
     const char* writes = nullptr;
     const char* appends = nullptr;
+    const char* emits  = nullptr;
     const char* after  = nullptr; // system names; needed between two writers, optional otherwise; "?name": only if that module is in the build
     const char* before = nullptr;
     StateUse                state  = StateUse::Write; // what it does with its module's state
@@ -544,6 +565,9 @@ struct ScheduledSystem {
     u32                spawn_tickets = 0; // the unit's own ticket counters (see phase.cc)
     u32                timer_tickets = 0;
     Array<Table>       early;    // the snapshot kinds it reads early, as the phase found them
+    // A stream it consumes: where its last batch ended, and this run's.
+    struct Cursor { u32 type; bool early; u64 at, from, to; };
+    Array<Cursor>      cursors;
 
     const char* name() const { return full_name ? full_name : desc ? desc->name : handler->name; }
     // The unit's mode on a resource; false when it has none.
@@ -565,15 +589,18 @@ struct KindSnapshot {
 struct PhaseList {
     Array<ScheduledSystem> systems[(u32)Phase::Count];   // in run order: by level, then rank
     Array<KindSnapshot>    snapshots[(u32)Phase::Count]; // taken at each phase start
-    Array<ScheduledSystem*> by_unit;                      // every unit, systems then handlers, at unit - 1
+    Array<ScheduledSystem*> by_unit;                      // every unit, at unit - 1: phase by phase, by rank
+    u32                    first_unit[(u32)Phase::Count] = {}; // each phase's units are [first, last]
+    u32                    last_unit[(u32)Phase::Count]  = {};
 
     u32  system_count() const;
 
-    // Runs one tick: for each phase, the boundary (fire timers at the first, deliver, run
-    // handlers in waves, apply commands), then its systems level by level, the systems of
-    // a level concurrently, and their commands. At the end, triggers, the hash and end_tick.
-    // A paused tick skips the Unpaused systems, the timers, the triggers and the hash line;
-    // `tick` is then the sim tick that will run next.
+    // Runs one tick: the timers (unpaused) and the tick start's events; then for each phase
+    // its units level by level, a level concurrently, each stream its consumers need
+    // merged before their level; then the phase's events, its commands and the boundary's
+    // events. At the end, triggers, the hash and the streams' end of tick. A paused tick
+    // runs the Always systems and the handlers with events, skips the timers, the triggers
+    // and the hash line; `tick` is then the sim tick that will run next.
     void run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, bool paused = false);
     void free();
 };
@@ -581,5 +608,5 @@ struct PhaseList {
 } // namespace kv
 
 // The event and function of a handler, inside its designated initializer:
-//   {.name = "rocks.on_hit", KV_ON(RockHit, on_hit), .reads = ...}
+//   {.name = "rocks.on_hit", KV_ON(RockHit, on_hit), .phase = Phase::Sim, .reads = ...}
 #define KV_ON(E, FN) .event = &::kv::EventType<E>::id, .event_name = #E, .fn = &::kv::handler_thunk<E, FN>

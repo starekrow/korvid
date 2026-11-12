@@ -39,7 +39,8 @@ struct EngineConfig {
 // What a resource is. A kind's resources sit together: the kind, then its liveness, its
 // columns, its attachments and its bags, so the kind covers the `children` ids after its
 // own, and an early read of it the first `early` of them (liveness and columns).
-enum class ResourceClass : u8 { State, Published, Append, Kind, Liveness, Column, Attachment, Bags };
+// An event type is a stream: emitted into (appended), consumed (read).
+enum class ResourceClass : u8 { State, Published, Append, Stream, Kind, Liveness, Column, Attachment, Bags };
 
 struct ResourceEntry {
     const char*   name;
@@ -52,6 +53,7 @@ struct ResourceEntry {
     u32           table    = 0;     // a kind's resources: its kind id
     bool          cosmetic = false; // a column or attachment of a cosmetic component: never feeds the sim
     AppendFn      apply    = nullptr;
+    u32           event    = 0;     // a stream: its event type id
 };
 
 struct ComponentEntry {
@@ -76,7 +78,7 @@ struct TraceRecord {
     u64         tick;
     const char* emitter;
     u32         type;
-    u16         wave;
+    u16         phase;     // the segment it was merged in: a phase, or Phase::Count for the tick start and the boundaries
     u8          size;      // bytes kept, at most sizeof(data)
     u8          pad;
     u8          data[40];
@@ -124,7 +126,6 @@ struct Engine {
     Array<ComponentEntry> components; // id = index + 1 = ComponentType<T>::id; 0 is invalid
     Array<Table>          tables;     // kind id = index + 1; addresses stable after init
     Array<const EventTypeDesc*> event_types; // by id; slot 0 unused
-    Array<ScheduledSystem> handlers;  // in wave order
     Array<Trigger>        triggers;   // trigger id = index + 1
     CommandBuffer         commands;
     TimerWheel            timers;
@@ -133,12 +134,11 @@ struct Engine {
     u32                   idle_cursor  = 0;
     u32                   idle_next_id = 1;
     IdleStats             idle_stats;
-    u32                   wave_cap     = 4; // handler waves per boundary; leftovers wait for the next
     u32                   threads      = 0; // threads the schedule may use, main included; 0: every core
     EarlyReadsChoice      early_reads  = EarlyReadsChoice::PerKind; // set before init: as each kind says, or one way for all
     u32                   serial       = 0; // this engine among the process's, 1..255: tags the ids the context hands out
-    u32                   units        = 0; // systems plus handlers
-    u64                   waves_capped = 0; // boundaries that hit the cap
+    u32                   units        = 0; // systems and handlers
+    Array<u32>            streams;            // by event type id: its stream's resource id
     u64                   edges_fired  = 0;
     u32                   event_type_count = 0;
     u64                   frame_count      = 0;
@@ -173,7 +173,7 @@ void engine_shutdown(Engine& e);
 u32  engine_frame(Engine& e, f64 frame_dt);
 // Sim control, from anywhere on the main thread (a system, a CLI command, the loop); a
 // change applies from the next tick. Pause holds the sim: paused ticks run only the
-// RunWhen::Always systems and the handlers. Step lets n sim ticks through a pause (and
+// RunWhen::Always systems and the handlers that have events. Step lets n sim ticks through a pause (and
 // pauses first if the clock was running). Rate scales time while unpaused; <= 0 is refused.
 // Time scale is the game's factor on top of the rate (slow motion that the game ramps
 // tick by tick); 0 runs no sim ticks without being a pause, negative is refused. Neither
@@ -188,13 +188,13 @@ bool engine_time_scale(Engine& e, f32 scale);
 f32  engine_time_scale_get(const Engine& e);
 // Applies and clears every command buffer, the engine's own first and then each unit's
 // in unit order (spawns, destroys, names and appends, each buffer in issue order): the
-// tick runner calls it after every phase and every handler wave.
+// tick runner calls it after every phase.
 void engine_apply_commands(Engine& e);
 // Evaluates every state trigger over this tick's previous and current rows and emits
 // StateEdge events, pending. The tick runner calls it at the end of the tick.
 void engine_fire_triggers(Engine& e, u64 tick);
-// Records (and prints, if asked) what the last deliver() added. Dev builds only.
-void engine_trace_delivery(Engine& e, u64 tick, u32 wave);
+// Records (and prints, if asked) what the streams took since the last call. Dev builds only.
+void engine_trace_delivery(Engine& e, u64 tick, u32 phase);
 // Describes one event through its schema: "Type{...}", or just the name without one.
 int  engine_describe_event(const Engine& e, u32 type_id, const void* event, char* out, usize cap);
 void engine_request_quit(Engine& e);
@@ -207,9 +207,9 @@ void engine_request_quit(Engine& e);
 // Then SimReset is emitted, pending, for the modules whose own state follows the sim.
 // Cosmetic kinds, assets, module state and the clock's holds are left alone: a cosmetic
 // row parented to a sim entity is its owner's to clear, since the handle will be reused.
-// Main thread, on a held tick (a cover, a menu): the events this boundary has delivered
-// still reach their handlers, so call it from the handler that decides it, and spawn the
-// new run after.
+// Main thread, on a held tick (a cover, a menu), from the system or handler that decides
+// it: the units after it in the tick see the fresh sim, and every stream starts over (no
+// consumer sees an event about the old run). Spawn the new run after.
 void engine_sim_reset(Engine& e);
 
 // Idle tasks. Registration is startup-ish work from any module; the id removes it.

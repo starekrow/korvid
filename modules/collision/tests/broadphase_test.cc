@@ -17,10 +17,10 @@ constinit const KindDesc k_kinds[] = {{.name = ".thing", .components = "Transfor
 struct Seen { u32 begins, ends; Handle last_a, last_b; };
 constinit Seen g = {};
 void sys_watch(TickContext& ctx) {
-    for (const OverlapBegin& o : ctx.events->read<OverlapBegin>()) { ++g.begins; g.last_a = o.a; g.last_b = o.b; }
-    g.ends += ctx.events->read<OverlapEnd>().len;
+    for (const OverlapBegin& o : ctx.received<OverlapBegin>()) { ++g.begins; g.last_a = o.a; g.last_b = o.b; }
+    g.ends += ctx.received<OverlapEnd>().len;
 }
-constinit const SystemDesc k_systems[] = {{.name = ".watch", .phase = Phase::PostSim, .fn = sys_watch}};
+constinit const SystemDesc k_systems[] = {{.name = ".watch", .phase = Phase::PostSim, .fn = sys_watch, .reads = "OverlapBegin, OverlapEnd"}};
 KV_MODULE_DEFINE(k_c) = {.name = "c", .kinds = k_kinds, .systems = k_systems};
 
 } // namespace

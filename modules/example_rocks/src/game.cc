@@ -224,11 +224,11 @@ void pause(TickContext& ctx) {
         if (!ctx.paused && ctx.tick == 400 && !g.demo_paused_once) { toggle = true; g.demo_paused_once = true; g.paused_ticks = 0; }
         if (ctx.paused && ++g.paused_ticks == 90) toggle = true;
     } else {
-        for (const KeyDown& k : ctx.events->read<KeyDown>()) {
+        for (const KeyDown& k : ctx.received<KeyDown>()) {
             if (k.key == Key::Escape && !k.repeat) toggle = true;
             if (k.key == Key::Q) engine_request_quit(e);
         }
-        for (const PadButtonDown& b : ctx.events->read<PadButtonDown>())
+        for (const PadButtonDown& b : ctx.received<PadButtonDown>())
             if (b.button == PadButton::Start) toggle = true;
     }
     if (!toggle) return;
@@ -307,8 +307,8 @@ void camera(TickContext& ctx) {
     static const u32 k_camera = ctx.resource_id("sprite.camera");
     static const u32 k_window = ctx.resource_id("platform_hid.window");
     Game& g = ctx.state_as<Game>();
-    if (ctx.events->read<ShipHit>().len) g.shake = 12.0f;
-    if (ctx.events->read<GameOver>().len) g.shake = 28.0f;
+    if (ctx.received<ShipHit>().len) g.shake = 12.0f;
+    if (ctx.received<GameOver>().len) g.shake = 28.0f;
     Camera2* cam = ctx.resource<Camera2>(k_camera);
     const HostWindow* w = ctx.resource<const HostWindow>(k_window);
     if (w->width() && w->height()) {
@@ -697,31 +697,31 @@ constinit const ResourceDesc k_resources[] = {{".score"}};
 
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".pause",   .phase = Phase::PreSim, .fn = pause, .writes = ".overlay, .label", .appends = "audio.commands", .runs = RunWhen::Always},
+    {.name = ".pause",   .phase = Phase::PreSim, .fn = pause, .reads = "KeyDown, PadButtonDown", .writes = ".overlay, .label", .appends = "audio.commands", .runs = RunWhen::Always},
     {.name = ".files",   .phase = Phase::PreSim, .fn = files, .writes = ".score", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "input.state", .writes = ".ship.Transform2, .ship.Velocity, .ship.Ship, .bullet, .flame", .appends = "audio.commands", .before = ".move"},
     // move and wrap touch no module state: they share levels with whatever else is free.
     {.name = ".move",    .phase = Phase::Sim, .fn = move,    .reads = "*.Velocity",    .writes = "*.Transform2", .state = StateUse::None},
     {.name = ".wrap",    .phase = Phase::Sim, .fn = wrap,    .reads = "*.Velocity",    .writes = "*.Transform2", .after = ".move", .state = StateUse::None},
-    {.name = ".game",    .phase = Phase::Sim, .fn = game,    .reads = ".score"},
-    {.name = ".camera",  .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera"},
+    {.name = ".game",    .phase = Phase::Sim, .fn = game,    .reads = ".score", .emits = "Restart"},
+    {.name = ".camera",  .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window, ShipHit, GameOver", .writes = "sprite.camera"},
     {.name = ".hud",     .phase = Phase::PostSim, .fn = hud, .reads = ".score, .label.Label", .writes = ".label.Text", .runs = RunWhen::Always},
 };
 
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_exit",     KV_ON(ExitRequested, on_exit)},
-    {.name = ".on_asset_failed", KV_ON(AssetFailed, on_asset_failed)},
-    {.name = ".on_overlap",  KV_ON(OverlapBegin, on_overlap)},
-    {.name = ".on_spawned",  KV_ON(Spawned, on_spawned), .writes = ".flame", .appends = "audio.commands"},
-    {.name = ".on_anim_finished", KV_ON(AnimFinished, on_anim_finished)},
-    {.name = ".on_rock_hit", KV_ON(RockHit, on_rock_hit), .writes = ".rock, .score", .appends = "audio.commands"},
-    {.name = ".on_ship_hit", KV_ON(ShipHit, on_ship_hit), .reads = ".ship.Transform2", .writes = ".ship.Health"},
-    {.name = ".on_score",    KV_ON(ScoreChanged, on_score)},
-    {.name = ".on_expire",   KV_ON(Expire, on_expire)},
-    {.name = ".on_wave",     KV_ON(SpawnWave, on_wave), .writes = ".score", .after = ".on_rock_hit"},
-    // The score's writers in a chain: rock_hit, wave, edge, restart.
-    {.name = ".on_edge",     KV_ON(StateEdge, on_edge), .writes = ".label, .score", .appends = "audio.commands", .after = ".on_wave"},
-    {.name = ".on_restart",  KV_ON(Restart, on_restart), .writes = ".score, .label", .after = ".on_edge"},
+    {.name = ".on_exit",     KV_ON(ExitRequested, on_exit), .phase = Phase::Sim},
+    {.name = ".on_asset_failed", KV_ON(AssetFailed, on_asset_failed), .phase = Phase::Sim},
+    {.name = ".on_overlap",  KV_ON(OverlapBegin, on_overlap), .phase = Phase::PostSim, .emits = "RockHit, ShipHit"},
+    {.name = ".on_spawned",  KV_ON(Spawned, on_spawned), .phase = Phase::PostSim, .writes = ".flame", .appends = "audio.commands"},
+    {.name = ".on_anim_finished", KV_ON(AnimFinished, on_anim_finished), .phase = Phase::Input},
+    {.name = ".on_rock_hit", KV_ON(RockHit, on_rock_hit), .phase = Phase::PostSim, .writes = ".rock, .score", .appends = "audio.commands", .emits = "ScoreChanged"},
+    {.name = ".on_ship_hit", KV_ON(ShipHit, on_ship_hit), .phase = Phase::PostSim, .reads = ".ship.Transform2", .writes = ".ship.Health"},
+    {.name = ".on_score",    KV_ON(ScoreChanged, on_score), .phase = Phase::Input},
+    {.name = ".on_expire",   KV_ON(Expire, on_expire), .phase = Phase::Input},
+    // The score's writers keep declaration order where they share a phase (module state).
+    {.name = ".on_wave",     KV_ON(SpawnWave, on_wave), .phase = Phase::Input, .writes = ".score"},
+    {.name = ".on_edge",     KV_ON(StateEdge, on_edge), .phase = Phase::Input, .writes = ".label, .score", .appends = "audio.commands", .emits = "GameOver"},
+    {.name = ".on_restart",  KV_ON(Restart, on_restart), .phase = Phase::PostSim, .writes = ".score, .label"},
 };
 
 } // namespace

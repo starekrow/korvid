@@ -40,8 +40,8 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".always", .phase = Phase::Sim, .fn = sys_always, .runs = RunWhen::Always},
 };
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_ping", KV_ON(Ping, on_ping)},
-    {.name = ".on_edge", KV_ON(StateEdge, on_edge)},
+    {.name = ".on_ping", KV_ON(Ping, on_ping), .phase = Phase::Sim},
+    {.name = ".on_edge", KV_ON(StateEdge, on_edge), .phase = Phase::Sim},
 };
 constinit const TriggerDesc k_triggers[] = {
     {.name = ".three", .field = ".thing.Counter.n", .edge = TriggerEdge::CrossedAbove, .value = 2.5},

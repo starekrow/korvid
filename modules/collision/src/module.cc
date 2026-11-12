@@ -393,7 +393,7 @@ constinit const SystemDesc k_systems[] = {
      .writes = "*[Move2].Transform2, *[Move2].Local2, *[MoveResult2].MoveResult2, .moved"},
     {.name = ".compose", .phase = Phase::Sim, .fn = compose_bodies, .reads = "*.Transform2, *[Parent+Collider2].Local2, *[Parent+Collider2].Parent",
      .writes = "*[Parent+Collider2].Transform2", .after = ".resolve", .state = StateUse::None},
-    {.name = ".broadphase", .phase = Phase::Sim, .fn = broadphase, .reads = "*[Collider2].Transform2, *[Collider2].Collider2", .after = ".resolve"},
+    {.name = ".broadphase", .phase = Phase::Sim, .fn = broadphase, .reads = "*[Collider2].Transform2, *[Collider2].Collider2", .emits = "OverlapBegin, OverlapEnd", .after = ".resolve"},
     {.name = ".clear", .phase = Phase::PostSim, .fn = clear_intents, .writes = "*[Move2].Move2", .state = StateUse::None},
 };
 
@@ -409,7 +409,7 @@ void on_sim_reset(TickContext& ctx, Span<const SimReset>) {
 }
 
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_sim_reset", KV_ON(SimReset, on_sim_reset)},
+    {.name = ".on_sim_reset", KV_ON(SimReset, on_sim_reset), .phase = Phase::Sim, .writes = ".moved", .before = ".resolve"},
 };
 
 KV_MODULE_DEFINE(collision_module) = {

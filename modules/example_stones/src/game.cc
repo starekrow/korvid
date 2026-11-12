@@ -165,7 +165,7 @@ void stones_tick(TickContext& ctx) {
         KV_INFO("stones", "%u stones; %s", g.stones.len, text);
     }
 
-    for (const ExitRequested& e : ctx.events->read<ExitRequested>()) {
+    for (const ExitRequested& e : ctx.received<ExitRequested>()) {
         KV_UNUSED(e);
         engine_request_quit(*ctx.engine);
     }
@@ -202,12 +202,12 @@ void stones_shutdown(Engine&, ModuleInstance& self) {
 }
 
 // The engine wanted to know what I touch. Sprites: all of them, since I make and move
-// them. The keys and the window: I look at them.
+// them. The keys, the window and the reasons to quit: I look at them.
 constinit const SystemDesc k_systems[] = {
     {   .name = ".tick",
         .phase = Phase::Sim,
         .fn = stones_tick,
-        .reads = "input.state, platform_hid.window",
+        .reads = "input.state, platform_hid.window, ExitRequested",
         .writes = "sprite.entity"
     },
 };

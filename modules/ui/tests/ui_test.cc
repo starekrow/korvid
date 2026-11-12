@@ -32,9 +32,9 @@ void on_ui(TickContext&, Span<const UiEvent> evs) {
 void on_covered(TickContext&, Span<const UiCovered> cs) { for (const UiCovered& c : cs) { ++g.covered; g.user = c.user; } }
 void on_uncovered(TickContext&, Span<const UiUncovered> cs) { g.uncovered += cs.len; }
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_ui", KV_ON(UiEvent, on_ui)},
-    {.name = ".on_covered", KV_ON(UiCovered, on_covered)},
-    {.name = ".on_uncovered", KV_ON(UiUncovered, on_uncovered)},
+    {.name = ".on_ui", KV_ON(UiEvent, on_ui), .phase = Phase::Sim},
+    {.name = ".on_covered", KV_ON(UiCovered, on_covered), .phase = Phase::Sim},
+    {.name = ".on_uncovered", KV_ON(UiUncovered, on_uncovered), .phase = Phase::Sim},
 };
 KV_MODULE_DEFINE(k_t) = {.name = "ut", .handlers = k_handlers};
 

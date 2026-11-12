@@ -18,7 +18,7 @@ using namespace kv;
 struct Seen { u32 finished; Handle last; };
 constinit Seen g = {};
 void on_finished(TickContext&, Span<const VoiceFinished> fs) { for (const VoiceFinished& f : fs) { ++g.finished; g.last = f.voice; } }
-constinit const HandlerDesc k_handlers[] = {{.name = ".on_finished", KV_ON(VoiceFinished, on_finished)}};
+constinit const HandlerDesc k_handlers[] = {{.name = ".on_finished", KV_ON(VoiceFinished, on_finished), .phase = Phase::Input}};
 
 constinit Handle g_voice = {};
 constinit bool   g_live_after = false;

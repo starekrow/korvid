@@ -62,6 +62,7 @@ void ScheduledSystem::free_buffers() {
     commands.bytes.free();
     for (Table& t : early) t.columns.free();
     early.free();
+    cursors.free();
 }
 
 u32 PhaseList::system_count() const {
@@ -73,8 +74,24 @@ u32 PhaseList::system_count() const {
 namespace {
 
 // A unit runs with its own writer and command buffer; attribution follows it onto
-// whatever thread it is on.
-void run_unit(TickContext ctx, EventBus& events, ScheduledSystem& s, const void* events_data, u32 event_count) {
+// whatever thread it is on. Its batches are what its streams took since it last ran (or,
+// read early, up to its phase's start); a handler with nothing in its own is not called.
+void run_unit(TickContext ctx, EventBus& events, ScheduledSystem& s) {
+    for (ScheduledSystem::Cursor& c : s.cursors) {
+        const EventStream& st = events.streams[c.type];
+        c.from = c.at;
+        c.to   = c.early ? st.phase_start : st.end();
+        if (c.to < c.from) c.to = c.from; // a fresh sim moved the stream on
+        c.at   = c.to;
+    }
+    MemScope scope; // a batch that dropped the dead lives in scratch for the call
+    const void* data = nullptr;
+    u32 count = 0;
+    if (s.handler) {
+        for (const ScheduledSystem::Cursor& c : s.cursors)
+            if (c.type == *s.handler->event) data = events.batch(c.type, c.from, c.to, &count);
+        if (!count) return;
+    }
     const ScheduledSystem* was = ctx_running(&s);
     ctx.state      = s.module->state;
     ctx.state_type = s.module->state_type;
@@ -86,7 +103,7 @@ void run_unit(TickContext ctx, EventBus& events, ScheduledSystem& s, const void*
     {
         KV_ZONE(s.name());
         if (s.desc) s.desc->fn(ctx);
-        else s.handler->fn(ctx, events_data, event_count);
+        else s.handler->fn(ctx, data, count);
     }
     mem_set_owner(owner_was);
     ctx_running(was);
@@ -100,7 +117,7 @@ struct LevelJob {
 
 void level_job(u32 chunk, u32, u32, void* user) {
     LevelJob& lj = *(LevelJob*)user;
-    run_unit(*lj.ctx, *lj.events, *lj.list[chunk], nullptr, 0);
+    run_unit(*lj.ctx, *lj.events, *lj.list[chunk]);
 }
 
 // The phase start of its snapshot kinds, copied, and every early reader's view of them
@@ -150,38 +167,14 @@ usize take_snapshots(PhaseList& pl, u32 phase) {
     return copied;
 }
 
-// A phase boundary: at the tick's first one the timers fire; then pending events are
-// delivered and the handlers with new events run, in waves, each wave delivering what
-// the last emitted, up to the cap. Leftovers wait for the next boundary.
-void boundary(Engine& engine, EventBus& events, TickContext& ctx, u64 tick, bool tick_start) {
-    KV_ZONE("boundary");
-    if (tick_start && !ctx.paused) {
-        u32 fired = engine.timers.fired;
-        engine.timers.fire(tick, events);
-        if (engine.timers.fired != fired) KV_MARK_V("timers fired", engine.timers.fired - fired);
-    }
-    events.deliver(tick_start);
-    if (events.dropped_last) KV_MARK_V("stale events dropped", events.dropped_last);
-    engine_trace_delivery(engine, tick, 0);
-    for (u32 wave = 0;; ++wave) {
-        ctx.wave = wave;
-        for (ScheduledSystem& h : engine.handlers) {
-            u32 type = *h.handler->event;
-            u32 n = events.new_count(type);
-            if (!n) continue;
-            run_unit(ctx, events, h, events.new_data(type), n);
-        }
-        {
-            KV_ZONE("apply commands");
-            engine_apply_commands(engine);
-        }
-        if (events.pending_now() == 0) break;
-        if (wave + 1 >= engine.wave_cap) { ++engine.waves_capped; KV_MARK_V("wave capped", events.pending_now()); break; }
-        events.deliver(false);
-        if (events.dropped_last) KV_MARK_V("stale events dropped", events.dropped_last);
-        engine_trace_delivery(engine, tick, wave + 1);
-    }
-    ctx.wave = 0;
+// Before a level runs: the streams its units consume as they stand, merged from this
+// phase's units if they are not yet. Every emitter of them in the phase is done: the
+// schedule put the consumers after them.
+void merge_for_level(PhaseList& pl, EventBus& events, u32 phase, u32 i, u32 j) {
+    for (u32 k = i; k < j; ++k)
+        for (const ScheduledSystem::Cursor& c : pl.systems[phase][k].cursors)
+            if (!c.early && (c.type >= events.streams.len || !events.streams[c.type].merged))
+                events.merge(c.type, pl.first_unit[phase], pl.last_unit[phase]);
 }
 
 } // namespace
@@ -198,11 +191,24 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
     if (g_prof_on) prof_tick(tick);
     KV_ZONE("tick");
     usize snapshot_bytes = 0;
-    auto runs = [&](const ScheduledSystem& s) { return !paused || s.desc->runs == RunWhen::Always; };
+    // Handlers run whenever they have events; a system on a paused tick only if Always.
+    auto runs = [&](const ScheduledSystem& s) { return !paused || !s.desc || s.desc->runs == RunWhen::Always; };
+    auto main_thread = [](const ScheduledSystem& s) { return s.desc && s.desc->main_thread; };
+    // The tick start: the timers, then what came from outside the schedule and what was
+    // held for this tick.
+    {
+        KV_ZONE("tick start");
+        if (!paused) {
+            u32 fired = engine.timers.fired;
+            engine.timers.fire(tick, events);
+            if (engine.timers.fired != fired) KV_MARK_V("timers fired", engine.timers.fired - fired);
+        }
+        events.merge_outside(true);
+        engine_trace_delivery(engine, tick, (u32)Phase::Count);
+    }
     for (u32 p = 0; p < (u32)Phase::Count; ++p) {
-        boundary(engine, events, ctx, tick, p == 0);
         // A paused tick's number is the sim tick that runs next, which a fresh sim
-        // (engine_sim_reset, from a handler) just changed: the units after it see the new one.
+        // (engine_sim_reset) may just have changed: the units after it see the new one.
         if (paused) ctx.tick = tick = engine.clock.tick_count;
         if ((Phase)p == Phase::PreSim) {
             // Current becomes previous, before anything moves. On a paused tick too: what
@@ -211,38 +217,46 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
             KV_ZONE("prev copy");
             for (Table& t : engine.tables) t.begin_tick();
         }
+        events.begin_phase();
         snapshot_bytes += take_snapshots(*this, p); // the snapshot kinds' starting values, if this phase reads any early
-        // Level by level: the systems of a level have no path between them and run at
-        // once on the pool; each level waits for the last.
+        // Level by level: the units of a level have no path between them and run at once
+        // on the pool; each level waits for the last.
         Array<ScheduledSystem>& phase = systems[p];
         for (u32 i = 0; i < phase.len;) {
             u32 j = i + 1;
             while (j < phase.len && phase[j].level == phase[i].level) ++j;
             u32 n = j - i;
+            merge_for_level(*this, events, p, i, j);
             if (n == 1 || jobs_worker_count() == 0 || engine.hash_systems || paused) {
                 for (u32 k = i; k < j; ++k) {
                     if (!runs(phase[k])) continue;
-                    run_unit(ctx, events, phase[k], nullptr, 0);
+                    run_unit(ctx, events, phase[k]);
                     if (engine.hash_systems && !paused)
                         KV_INFO("hash", "tick %llu after %-24s %016llx", (unsigned long long)tick, phase[k].name(),
                                 (unsigned long long)engine_hash_state(engine));
                 }
             } else {
-                // Systems pinned to this thread run here first; the rest go to the pool at once.
+                // Units pinned to this thread run here first; the rest go to the pool at once.
                 MemScope scope;
                 Array<ScheduledSystem*> pooled = array_in<ScheduledSystem*>(mem_scratch());
                 for (u32 k = i; k < j; ++k) {
-                    if (phase[k].desc->main_thread) run_unit(ctx, events, phase[k], nullptr, 0);
+                    if (!runs(phase[k])) continue;
+                    if (main_thread(phase[k])) run_unit(ctx, events, phase[k]);
                     else pooled.push(&phase[k]);
                 }
-                if (pooled.len == 1) run_unit(ctx, events, *pooled[0], nullptr, 0);
+                if (pooled.len == 1) run_unit(ctx, events, *pooled[0]);
                 else if (pooled.len) { LevelJob lj{&ctx, &events, pooled.data}; jobs_run(pooled.len, 1, level_job, &lj, "level"); }
             }
             i = j;
         }
+        // The phase's events, its commands (spawns and destroys issued this phase take
+        // effect), and what the boundary says: the commands' Spawned, the engine's writer.
         {
-            KV_ZONE("apply commands");
-            engine_apply_commands(engine); // spawns and destroys issued this phase take effect
+            KV_ZONE("boundary");
+            events.merge_all(first_unit[p], last_unit[p]);
+            engine_apply_commands(engine);
+            events.merge_outside(false);
+            engine_trace_delivery(engine, tick, p);
         }
     }
     if (g_prof_on && snapshot_bytes) prof_counter("snapshot KB", snapshot_bytes / 1024);
@@ -250,7 +264,16 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
         KV_ZONE("triggers");
         engine_fire_triggers(engine, tick); // edges this tick, as pending StateEdge events for the next
     }
-    events.end_tick();
+    // Each stream keeps what a consumer has not reached.
+    {
+        MemScope scope;
+        Array<u64> keep = array_in<u64>(mem_scratch());
+        keep.resize_fill(events.streams.len, ~0ull);
+        for (const ScheduledSystem* u : by_unit)
+            for (const ScheduledSystem::Cursor& c : u->cursors)
+                if (c.type < keep.len && c.at < keep[c.type]) keep[c.type] = c.at;
+        events.end_tick(Span<const u64>(keep.data, keep.len));
+    }
     if ((engine.hash_ticks || engine.hash_systems) && !paused) {
         KV_ZONE("hash");
         engine.last_hash = engine_hash_state(engine);
@@ -414,6 +437,30 @@ bool ctx_alive(TickContext& ctx, Handle h) {
     if (!t) return false;
     if (!allowed(ctx, t->alive_resource, false)) { deny(ctx, "liveness", t->name, false); return false; }
     return view_of(ctx, t)->valid(h);
+}
+
+void ctx_emit_check(const TickContext& ctx, u32 type_id) {
+#if KV_DEV
+    if (!ctx.system || !type_id || type_id >= ctx.engine->streams.len) return;
+    u32 r = ctx.engine->streams[type_id];
+    Access m;
+    if (ctx.system->mode(r, &m) && m == Access::Append) return;
+    KV_ERROR("engine", "system '%s' emits '%s' without declaring it in `emits`", system_name(ctx), ctx.engine->resources[r - 1].name);
+    KV_VERIFY(!"undeclared emit: see the log");
+#else
+    KV_UNUSED(ctx); KV_UNUSED(type_id);
+#endif
+}
+
+const void* ctx_received(TickContext& ctx, u32 type_id, u32* count) {
+    *count = 0;
+    if (ctx.system)
+        for (const ScheduledSystem::Cursor& c : ctx.system->cursors)
+            if (c.type == type_id) return ctx.events->batch(type_id, c.from, c.to, count);
+    const char* name = type_id && type_id < ctx.engine->streams.len ? ctx.engine->resources[ctx.engine->streams[type_id] - 1].name : "?";
+    KV_ERROR("engine", "system '%s' reads the '%s' it received without declaring it in `reads`", system_name(ctx), name);
+    KV_VERIFY(!"undeclared received events: see the log");
+    return nullptr;
 }
 
 Table* ctx_rows(TickContext& ctx, u32 kind_id) {

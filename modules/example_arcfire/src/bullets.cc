@@ -39,7 +39,7 @@ void bullet_fire(ChunkContext& cc, const Game& g, const Dials& d, point2 at, con
 Bullet* bullet_row(TickContext& ctx, Handle h) {
     static const u32 k_plain = ctx.column_id("example_arcfire.bullet.Bullet");
     static const u32 k_active = ctx.column_id("example_arcfire.active.Bullet");
-    bool active = h.kind() == engine_table(*ctx.engine, g_active_kind)->kind;
+    bool active = h.kind() == engine_table_now(*ctx.engine, g_active_kind)->kind;
     Span<Bullet> rows = ctx.write<Bullet>(active ? k_active : k_plain);
     return h.index() < rows.len ? &rows[h.index()] : nullptr;
 }
@@ -47,7 +47,7 @@ Bullet* bullet_row(TickContext& ctx, Handle h) {
 const Transform2* bullet_xf(TickContext& ctx, Handle h) {
     static const u32 k_plain = ctx.column_id("example_arcfire.bullet.Transform2");
     static const u32 k_active = ctx.column_id("example_arcfire.active.Transform2");
-    bool active = h.kind() == engine_table(*ctx.engine, g_active_kind)->kind;
+    bool active = h.kind() == engine_table_now(*ctx.engine, g_active_kind)->kind;
     Span<const Transform2> rows = ctx.read<Transform2>(active ? k_active : k_plain);
     return h.index() < rows.len ? &rows[h.index()] : nullptr;
 }

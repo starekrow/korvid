@@ -54,7 +54,7 @@ struct ModuleDesc {
     Span<const KindDesc>       kinds;      // entity tables made of those components
     Span<const ResourceDesc>   resources;  // things systems read or write that are not columns
     Span<const SystemDesc>     systems;    // code in a phase, with its read and write sets
-    Span<const HandlerDesc>    handlers;   // code at a phase boundary, on one event type
+    Span<const HandlerDesc>    handlers;   // systems on one event type, handed its batch
     Span<const TriggerDesc>    triggers;   // state edges watched for you
     Span<const CliCommandDesc> commands;   // what the CLI can be told
     bool (*startup)(Engine&, ModuleInstance&);
@@ -289,9 +289,17 @@ sampling, the asset pumps, the sprite extract, the frame loop's exit, the CLI) a
 
 ### Handlers
 
-A handler runs at a phase boundary on the batch of one event type delivered there, under
-the same set rules as a system. Handles in a delivered event are live, so a handler that
-holds the write on a column may index it directly.
+A handler is a system on one event type: it has a phase, runs in the order the schedule
+gives it like any system (after every emitter of its event in the phase), and is handed
+its batch, the events emitted since it last ran; with none it is not called (paused ticks
+included, so a handler sees what Always systems and the engine emit). It declares what it
+emits in `emits` like any system. Handles in its batch are live, so a handler that holds
+the write on a column may index it directly. Where to put one that used to run at a
+boundary: at the end of the phase that emits its event when its writes are the next
+phase's start (arcanum's level build), or at the start of the next phase, reading early
+(`^`) what that phase writes, when systems earlier in the emitting phase read what it
+writes (arcfire's hits, in PostSim). The scheduler refuses the wrong one by name.
+`docs/design/events.md` has the model.
 
 ```cpp
 void on_hit(TickContext& ctx, Span<const RockHit> hits) {
@@ -384,23 +392,15 @@ capped), idle work in the frame's slack, then the render. What follows is one ti
 
 ```
 tick N
-  boundary (tick start)   timers due at N fire into pending
-                          deliver: every writer's pending -> delivered, next-tick types included
-                          handler waves, up to wave_cap:
-                              run each handler that has new events, in unit order
-                              apply commands
-                              if nothing new is pending, stop; else deliver again (same-tick types only)
-  phase Input             systems, level by level
-                          apply commands
-  boundary                deliver, handler waves, apply commands
+  tick start              timers due at N fire; held next-tick events and the engine's writer merge into the streams
+  phase Input             units (systems and handlers) level by level, each level's consumed streams merged first;
+                          then the phase's events, its commands, and the engine's writer (the commands' Spawned)
   prev copy               every CompPrev column: current -> previous
-  phase PreSim            systems, level by level; apply commands
-  boundary                deliver, handler waves, apply commands
-  phase Sim               systems, level by level; apply commands
-  boundary                deliver, handler waves, apply commands
-  phase PostSim           systems, level by level; apply commands
-  triggers                each TriggerDesc compares previous and current rows; edges become pending StateEdge
-  end of tick             delivered buffers are dropped; pending stays for tick N+1's first boundary
+  phase PreSim            the same
+  phase Sim               the same
+  phase PostSim           the same
+  triggers                each TriggerDesc compares previous and current rows; edges go to the engine's writer
+  end of tick             each stream keeps what a consumer has not reached
   hash                    if --hash: every sim column of every live row
 ```
 
@@ -411,22 +411,24 @@ systems run at once on the job pool (a pinned one runs on the main thread first)
 the next level waits for all of them. The schedule log at init prints every edge and
 why, and the order per phase with `|` between levels.
 
-**Events.** `ctx.emit(e)` appends to the running unit's writer; nothing is visible
-until the next boundary, where every writer's pending events are merged in unit order
-into the delivered batch for the type. `ctx.events->read<E>()` in a system returns the
-whole batch delivered so far this tick; a handler receives only what the last deliver
-added, so nothing is handled twice. A `next_tick` type waits for the next tick's first
-boundary however early it was emitted. An event emitted by a handler in wave 0 is
-delivered to the handlers of wave 1, and so on until the cap; what remains pending at
-the cap rolls into the next boundary, with `waves_capped` counting.
+**Events.** An event type is a stream. `ctx.emit(e)` appends to the running unit's
+writer, declared in `emits`; a unit that names the type in `reads` runs after every
+emitter of it in its phase and takes `ctx.received<E>()`: what was emitted since it last
+ran, in unit order however the levels fell, every event once. With `^` the batch ends at
+the phase start and needs no order, which is how a loop goes round (once a phase). A
+`next_tick` type waits for the next tick's start. The engine's writer (`e.events.emit`)
+is for what happens outside the schedule; its events land at the next boundary. An event
+naming a handle that no longer resolves is dropped from each batch it would be in. Code
+outside the schedule reads the tick's events with `e.events.read<E>()`; from inside a
+unit that is refused (dev builds).
 
 **Commands.** `ctx.spawn_later`, `ctx.destroy` and `ctx.destroy_all` go into the running
 unit's command buffer (one per parallel chunk, merged in chunk order). They are applied
-after every phase and after every handler wave, in unit order: the engine's own buffer
-first, then each unit's. A destroyed entity is still there for the rest of its phase;
-readers in the same phase see it, events naming it afterwards are dropped. A command
+after every phase, in unit order: the engine's own buffer first, then each unit's. A
+destroyed entity is still there for the rest of its phase; readers and consumers in the
+same phase see it, batches after it drop events naming it. A command
 spawn has no handle until it is applied; if `spawn_later` was asked for a ticket, a
-`Spawned{ticket, kind, entity}` event carries the handle at the next delivery. A system
+`Spawned{ticket, kind, entity}` event carries the handle, from the boundary after the phase. A system
 that holds the write on a kind spawns directly instead (`ctx.write_kind(k)->spawn(...)`)
 and has the handle at once.
 

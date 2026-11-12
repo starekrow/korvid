@@ -26,7 +26,7 @@ constinit ScopeSeen g_scope = {};
 void on_scope_ready(TickContext&, Span<const AssetScopeReady> rs) {
     for (const AssetScopeReady& r : rs) { ++g_scope.ready; g_scope.last = r.scope; g_scope.failed = r.failed; }
 }
-constinit const HandlerDesc k_scope_handlers[] = {{.name = ".on_scope_ready", KV_ON(AssetScopeReady, on_scope_ready)}};
+constinit const HandlerDesc k_scope_handlers[] = {{.name = ".on_scope_ready", KV_ON(AssetScopeReady, on_scope_ready), .phase = Phase::Sim}};
 KV_MODULE_DEFINE(k_scope_t) = {.name = "scope_t", .handlers = k_scope_handlers};
 
 // A short 16-bit mono WAV of `frames` frames at 8 kHz.

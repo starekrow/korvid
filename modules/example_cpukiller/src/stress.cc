@@ -116,11 +116,11 @@ bool stress_startup(Engine& engine, ModuleInstance& self) {
 
 constinit const SystemDesc k_systems[] = {
     {.name = ".integrate", .phase = Phase::Sim, .fn = integrate, .reads = ".body.Vel", .writes = ".body.Pos", .state = StateUse::None},
-    {.name = ".bounce",    .phase = Phase::Sim, .fn = bounce,    .writes = ".body.Pos, .body.Vel", .state = StateUse::None},
+    {.name = ".bounce",    .phase = Phase::Sim, .fn = bounce,    .writes = ".body.Pos, .body.Vel", .emits = "Bounced", .state = StateUse::None},
     {.name = ".churn",     .phase = Phase::Sim, .fn = churn,     .reads = ".body.Pos", .writes = ".body.Age", .state = StateUse::None},
     {.name = ".energy",    .phase = Phase::PostSim, .fn = energy, .reads = ".body.Vel"},
 };
-constinit const HandlerDesc k_handlers[] = {{.name = ".on_bounced", KV_ON(Bounced, on_bounced)}};
+constinit const HandlerDesc k_handlers[] = {{.name = ".on_bounced", KV_ON(Bounced, on_bounced), .phase = Phase::PostSim}};
 
 } // namespace
 

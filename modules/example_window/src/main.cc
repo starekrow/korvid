@@ -53,14 +53,14 @@ void on_pad_gone(TickContext&, Span<const GamepadDisconnected> evs) {
 }
 
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_pad_button", KV_ON(PadButtonDown, on_pad_button)},
-    {.name = ".on_pad_gone", KV_ON(GamepadDisconnected, on_pad_gone)},
-    {.name = ".on_close", KV_ON(CloseRequested, on_close)},
-    {.name = ".on_resized", KV_ON(WindowResized, on_resized)},
-    {.name = ".on_focus", KV_ON(FocusChanged, on_focus)},
-    {.name = ".on_key", KV_ON(KeyDown, on_key)},
-    {.name = ".on_button", KV_ON(MouseButtonDown, on_button)},
-    {.name = ".on_wheel", KV_ON(MouseWheel, on_wheel)},
+    {.name = ".on_pad_button", KV_ON(PadButtonDown, on_pad_button), .phase = Phase::Input},
+    {.name = ".on_pad_gone", KV_ON(GamepadDisconnected, on_pad_gone), .phase = Phase::Input},
+    {.name = ".on_close", KV_ON(CloseRequested, on_close), .phase = Phase::Input},
+    {.name = ".on_resized", KV_ON(WindowResized, on_resized), .phase = Phase::Input},
+    {.name = ".on_focus", KV_ON(FocusChanged, on_focus), .phase = Phase::Input},
+    {.name = ".on_key", KV_ON(KeyDown, on_key), .phase = Phase::Input},
+    {.name = ".on_button", KV_ON(MouseButtonDown, on_button), .phase = Phase::Input},
+    {.name = ".on_wheel", KV_ON(MouseWheel, on_wheel), .phase = Phase::Input},
 };
 
 // The loop's health and one frame of it, shared by the loop and by the frames run from

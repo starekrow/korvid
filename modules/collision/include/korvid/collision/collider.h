@@ -106,8 +106,8 @@ struct MoveResult2 {
     u8     pad = 0;
 };
 
-// Emitted by "collision.broadphase" in phase Sim, after the resolve, so handlers run at
-// the next phase boundary of the same tick and PostSim systems see them too.
+// Emitted by "collision.broadphase" in phase Sim, after the resolve: a consumer in Sim runs
+// after it, and PostSim's see them the same tick.
 struct OverlapBegin { Handle a, b; };
 struct OverlapEnd   { Handle a, b; };
 

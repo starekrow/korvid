@@ -94,7 +94,7 @@ void fx_blast(TickContext& ctx, Game& g, point2 at, Blast b) {
 // An explosion's clip has played: the row goes.
 void on_boom_done(TickContext& ctx, Span<const AnimFinished> done) {
     for (const AnimFinished& f : done)
-        if (f.entity.kind() == engine_table(*ctx.engine, g_boom_kind)->kind) ctx.destroy(f.entity);
+        if (f.entity.kind() == engine_table_now(*ctx.engine, g_boom_kind)->kind) ctx.destroy(f.entity);
 }
 
 void fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 speed) {

@@ -39,7 +39,7 @@ Every tick, in phase `Sim`:
    last compose put them.
 5. **`collision.broadphase`** finds every pair of colliders that overlap where everything
    ended, and diffs the list against last tick's: a new pair is an `OverlapBegin`, a pair
-   that is gone an `OverlapEnd`. Handlers run at the next boundary, the same tick.
+   that is gone an `OverlapEnd`. Their consumers run after it, in Sim or a later phase.
    Colliders are grouped by their (layer, mask) first: each group has a grid sized to its
    own largest member, a group is paired with itself only if it meets itself and with
    another only if their masks meet, and across two groups the smaller is walked over the

@@ -71,7 +71,7 @@ void sys_tally(TickContext& ctx) {
     const Table* ships = ctx.read_kind("g.ship");
     g_trace.hp_sum = 0;
     for (u32 i = 0; i < hp.len; ++i) if (ships->is_alive(i)) g_trace.hp_sum += (u32)hp[i].hp;
-    for (const Spawned& s : ctx.events->read<Spawned>()) {
+    for (const Spawned& s : ctx.received<Spawned>()) {
         if (s.ticket != g_trace.spawn_ticket) continue;
         g_trace.spawned      = s.entity;
         g_trace.spawned_kind = s.kind;
@@ -102,7 +102,7 @@ void sys_peek(TickContext& ctx) {
 constinit const ResourceDesc k_resources[]   = {{"g.counter"}, {"g.quiet"}};
 constinit const SystemDesc k_systems[] = {
     {.name = "g.move",  .phase = Phase::Sim,     .fn = sys_move,  .reads = "*.Vel",  .writes = "*.Pos, g.rock"},
-    {.name = "g.tally", .phase = Phase::PostSim, .fn = sys_tally, .reads = "g.ship.Hp, g.ship, g.rock"},
+    {.name = "g.tally", .phase = Phase::PostSim, .fn = sys_tally, .reads = "g.ship.Hp, g.ship, g.rock, Spawned"},
     {.name = "g.peek",  .phase = Phase::PostSim, .fn = sys_peek,  .reads = "g.counter, g.quiet"},  // after bump: it reads what bump writes
     {.name = "g.bump",  .phase = Phase::PostSim, .fn = sys_bump,  .writes = "g.counter"},
 };

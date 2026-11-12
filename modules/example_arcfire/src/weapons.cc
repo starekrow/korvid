@@ -201,7 +201,7 @@ void beams(TickContext& ctx) {
     Span<const Parent> bp = ctx.read<Parent>("example_arcfire.beam.Parent");
     const Table* ships = engine_table(e, g_ship_kind);
     const Table* options = engine_table(e, g_option_kind);
-    const u16 hull_kind = engine_table(e, g_boss_kind)->kind;
+    const u16 hull_kind = engine_table_now(e, g_boss_kind)->kind;
     Span<const Parent> op = ctx.read<Parent>("example_arcfire.option.Parent");
     Span<const Transform2> ox = ctx.read<Transform2>("example_arcfire.option.Transform2");
     Span<const Option> oo = ctx.read<Option>("example_arcfire.option.Option");

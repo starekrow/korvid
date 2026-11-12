@@ -23,7 +23,7 @@ constinit const KindDesc k_kinds[] = {
 struct Seen { u32 begins; Handle last_a, last_b; };
 constinit Seen g = {};
 void sys_watch(TickContext& ctx) {
-    for (const OverlapBegin& o : ctx.events->read<OverlapBegin>()) { ++g.begins; g.last_a = o.a; g.last_b = o.b; }
+    for (const OverlapBegin& o : ctx.received<OverlapBegin>()) { ++g.begins; g.last_a = o.a; g.last_b = o.b; }
 }
 // The boss moves right 10 units a tick, in Sim, as a game's mover does.
 void sys_move(TickContext& ctx) {
@@ -32,7 +32,7 @@ void sys_move(TickContext& ctx) {
 }
 constinit const SystemDesc k_systems[] = {
     {.name = ".move", .phase = Phase::Sim, .fn = sys_move, .writes = ".boss"},
-    {.name = ".watch", .phase = Phase::PostSim, .fn = sys_watch},
+    {.name = ".watch", .phase = Phase::PostSim, .fn = sys_watch, .reads = "OverlapBegin"},
 };
 KV_MODULE_DEFINE(k_k) = {.name = "k", .kinds = k_kinds, .systems = k_systems};
 

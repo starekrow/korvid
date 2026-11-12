@@ -199,15 +199,14 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
 // Phase PreSim, with the tick's input sampled: the reasons to leave become one event each.
 void frameloop_exit(TickContext& ctx) {
     FrameLoopState& s = ctx.state_as<FrameLoopState>();
-    EventBus& bus = *ctx.events;
     const Input* input = ctx.resource<const Input>("input.state");
-    if (s.config.exit_on_close && bus.read<CloseRequested>().len)
-        bus.emit(ExitRequested{ExitReason::WindowClosed});
+    if (s.config.exit_on_close && ctx.received<CloseRequested>().len)
+        ctx.emit(ExitRequested{ExitReason::WindowClosed});
     if (s.config.exit_on_escape && input && input->sampled.down(Key::Escape))
-        bus.emit(ExitRequested{ExitReason::Escape});
+        ctx.emit(ExitRequested{ExitReason::Escape});
     if (s.timer_fired && !s.timer_sent) {
         s.timer_sent = true;
-        bus.emit(ExitRequested{ExitReason::Timer});
+        ctx.emit(ExitRequested{ExitReason::Timer});
     }
 }
 
@@ -271,14 +270,14 @@ constinit const KindDesc      k_kinds[] = {
     {.name = ".overlay", .components = "Transform2, Text", .capacity = kOverlayLines, .id = &g_overlay_kind, .cosmetic = true},
 };
 constinit const SystemDesc    k_systems[] = {
-    {.name = ".exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = "input.state", .runs = RunWhen::Always},
+    {.name = ".exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = "input.state, CloseRequested", .emits = "ExitRequested", .runs = RunWhen::Always},
     // Recording and replay (replay.cc), sim ticks only: what the sample made of the named
     // actions; the file's actions before the sample.
     {.name = ".record", .phase = Phase::Input, .fn = replay_record, .reads = "input.actions", .after = "input.sample", .main_thread = true},
     {.name = ".replay", .phase = Phase::Input, .fn = replay_play, .before = "input.sample", .main_thread = true},
 };
 constinit const HandlerDesc   k_handlers[] = {
-    {.name = ".on_sim_reset", KV_ON(SimReset, replay_on_sim_reset)},
+    {.name = ".on_sim_reset", KV_ON(SimReset, replay_on_sim_reset), .phase = Phase::Sim},
 };
 
 // The frame's slack: what the renderer blocked for last frame (fences, acquire, present)

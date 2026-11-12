@@ -51,7 +51,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".react", .phase = Phase::Sim, .fn = sys_react, .reads = "*.MoveResult2, collision.moved"},
     {.name = ".query", .phase = Phase::PostSim, .fn = sys_query, .reads = "*[Collider2].Transform2, *[Collider2].Collider2"},
 };
-constinit const HandlerDesc k_handlers[] = {{.name = ".on_begin", KV_ON(OverlapBegin, on_begin)}};
+constinit const HandlerDesc k_handlers[] = {{.name = ".on_begin", KV_ON(OverlapBegin, on_begin), .phase = Phase::PostSim}};
 KV_MODULE_DEFINE(k_r) = {.name = "r", .kinds = k_kinds, .systems = k_systems, .handlers = k_handlers};
 
 constexpr u32 L_BODY = 0x2, L_ZONE = 0x4;

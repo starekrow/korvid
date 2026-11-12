@@ -337,7 +337,7 @@ constinit const SystemDesc k_systems[] = {
     // Main thread, after the asset pumps: loads and releases go through the asset module's
     // functions, as any main-thread code's do, so its tables are not this system's to declare.
     {.name = ".run", .phase = Phase::PreSim, .fn = level_run, .writes = ".root, .fade",
-     .after = "asset.pump_scopes, asset.pump, asset.pump_materials, asset.pump_fonts, asset.pump_sounds, asset.pump_blobs",
+     .emits = "LevelLeaving, LevelLoading, LevelBuild, LevelEntered", .after = "asset.pump_scopes, asset.pump, asset.pump_materials, asset.pump_fonts, asset.pump_sounds, asset.pump_blobs",
      .main_thread = true, .runs = RunWhen::Always},
 };
 constinit const CliCommandDesc k_commands[] = {

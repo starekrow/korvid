@@ -142,27 +142,26 @@ void example_testbed_move(TickContext& ctx) {
 // Phase Sim: what happened this tick, then the state machine.
 void example_testbed_sim(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
-    EventBus& bus = *ctx.events;
 
-    for (const KeyDown& e : bus.read<KeyDown>()) {
+    for (const KeyDown& e : ctx.received<KeyDown>()) {
         ++g.key_edges;
         if (!e.repeat) KV_INFO("example_testbed", "tick %llu: key down %s", (unsigned long long)ctx.tick, key_name(e.key));
     }
-    for (const KeyUp& e : bus.read<KeyUp>()) {
+    for (const KeyUp& e : ctx.received<KeyUp>()) {
         ++g.key_edges;
         KV_INFO("example_testbed", "tick %llu: key up   %s", (unsigned long long)ctx.tick, key_name(e.key));
     }
-    for (const AssetReady& e : bus.read<AssetReady>()) {
+    for (const AssetReady& e : ctx.received<AssetReady>()) {
         char text[160];
         kv_handle_describe(e.asset.bits, text, sizeof text);
         KV_INFO("example_testbed", "asset ready: %s", text);
     }
-    for (const AssetFailed& e : bus.read<AssetFailed>()) {
+    for (const AssetFailed& e : ctx.received<AssetFailed>()) {
         char text[160];
         kv_handle_describe(e.asset.bits, text, sizeof text);
         KV_WARN("example_testbed", "asset failed (%s): %s", asset_error_name(e.error), text);
     }
-    for (const ExitRequested& e : bus.read<ExitRequested>()) {
+    for (const ExitRequested& e : ctx.received<ExitRequested>()) {
         if (g.exit_requested) continue;
         KV_INFO("example_testbed", "exit requested: %s", e.reason == ExitReason::WindowClosed ? "window closed" :
                                                e.reason == ExitReason::Escape ? "escape" : "timer");
@@ -317,15 +316,15 @@ void example_testbed_shutdown(Engine&, ModuleInstance& self) {
 }
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".move", .phase = Phase::Sim, .fn = example_testbed_move, .reads = ".ball.Sprite, platform_hid.window", .writes = ".ball.Transform2, .ball.Motion"},
-    {.name = ".sim",  .phase = Phase::Sim, .fn = example_testbed_sim,  .reads = "platform_hid.window, .ball, sprite.entity"}, // after move: it reads what move writes
+    {.name = ".move", .phase = Phase::Sim, .fn = example_testbed_move, .reads = ".ball.Sprite, platform_hid.window", .writes = ".ball.Transform2, .ball.Motion", .emits = "Bounced"},
+    {.name = ".sim",  .phase = Phase::Sim, .fn = example_testbed_sim,  .reads = "platform_hid.window, .ball, sprite.entity, KeyDown, KeyUp, AssetReady, AssetFailed, ExitRequested"}, // after move: it reads what move writes
 };
 constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_bounced",   KV_ON(Bounced, on_bounced), .writes = ".ball.Bounces, .ball.Motion"},
-    {.name = ".on_spawned",   KV_ON(Spawned, on_spawned)},
-    {.name = ".on_blink_off", KV_ON(BlinkOff, on_blink_off)},
-    {.name = ".on_blink_on",  KV_ON(BlinkOn, on_blink_on), .reads = "platform_hid.window"},
-    {.name = ".on_edge",      KV_ON(StateEdge, on_state_edge)},
+    {.name = ".on_bounced",   KV_ON(Bounced, on_bounced), .phase = Phase::PostSim, .writes = ".ball.Bounces, .ball.Motion"},
+    {.name = ".on_spawned",   KV_ON(Spawned, on_spawned), .phase = Phase::PostSim},
+    {.name = ".on_blink_off", KV_ON(BlinkOff, on_blink_off), .phase = Phase::Input},
+    {.name = ".on_blink_on",  KV_ON(BlinkOn, on_blink_on), .phase = Phase::Input, .reads = "platform_hid.window"},
+    {.name = ".on_edge",      KV_ON(StateEdge, on_state_edge), .phase = Phase::Input},
 };
 
 } // namespace
