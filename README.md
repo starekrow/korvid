@@ -60,6 +60,15 @@ one unity file per module, copies a module's `assets/` to `bin/assets/<module>/`
 runs the bound shader compiler over `shaders/`. The toolchain and the shader compiler are
 modules too (`toolchain-linux`, `slang`).
 
+The engine's modules are in `modules/`, the examples in `examples/<name>/` (module
+`example_<name>`) and the tools in `tools/<name>/` (`tools/kpack` is `tool_kpack`, which
+writes `bin/kpack`); `tools/kormake` is kormake itself. `examples/` and `tools/` each have a
+`korvid.config` naming the engine root, and a game kept outside this repository does the
+same (`engine "../korvid"`): it then builds into its own `build/`. kormake builds what you
+name, by module, executable or directory name, or with no name the module whose directory
+you are in; at the root it builds everything. `tools/kormake/README.md` is the manual,
+`tools/kormake/BUILDING.md` how kormake is built and how to read a failed build.
+
     core             memory (a size-class general allocator with per-thread pages and
                      remote frees, arenas, scratch, pools on reserved pages, heaps with soft
                      and hard limits from the root's EngineConfig; see docs/design/allocators.md), handles with a kind registry and C API
@@ -115,9 +124,10 @@ modules too (`toolchain-linux`, `slang`).
                      load, and the engine's tick rate on one thread against many with the
                      state hash as the referee; prints a table
 
-    tools/kormake/bootstrap.sh                   # once: builds the build tool with the host C compiler
-    tools/kormake/bin/linux/kormake build linux-debug   # everything: libraries, examples, shaders, assets, tests
-    tools/kormake/bin/linux/kormake test linux-debug    # runs the tests (linux-dev and linux-ship likewise)
+    tools/kormake/bootstrap.sh                   # once (and after kormake changes): builds the build tool with the host C compiler
+    tools/kormake/bin/linux/kormake              # at the root: everything in linux-debug: libraries, examples, shaders, assets, tests
+    tools/kormake/bin/linux/kormake test         # runs the tests (add dev or ship to either for linux-dev, linux-ship)
+    tools/kormake/bin/linux/kormake rocks dev    # one example and what it links, in linux-dev (or: cd examples/rocks && kormake dev)
     build/linux-debug/bin/example_testbed         # opens a window; Esc or close exits via ST_EXIT
     build/linux-debug/bin/example_rocks --demo    # the asteroids-like, flying itself; without --demo, you fly
     build/linux-debug/bin/example_stones          # stones in a box, written immediate-mode style
@@ -173,8 +183,9 @@ what builds there so far. It uses MSVC and the SDL project's prebuilt SDL3 packa
 Then, from any prompt:
 
     tools\kormake\bootstrap.bat                                   # once: builds kormake.exe with cl
-    tools\kormake\bin\windows\kormake.exe build windows-dev       # what the windows root lists, with tests
-    tools\kormake\bin\windows\kormake.exe test windows-dev        # runs them
+    tools\kormake\bin\windows\kormake.exe dev                     # windows-dev: what the windows root lists, with tests
+    tools\kormake\bin\windows\kormake.exe test dev                # runs them
+    tools\kormake\bin\windows\kormake.exe arcfire dev             # one game and what it links
     build\windows-dev\bin\example_window.exe                      # a window, its events, and the frame loop's gaps
 
 kormake.exe carries its scripts inside it, so run `bootstrap.bat` again after a pull that
@@ -212,11 +223,11 @@ Linux build has builds here (the `macos` root in `kormake.lua`).
 Then:
 
     tools/kormake/bootstrap.sh                          # once, and after a pull that changes tools/kormake/scripts/
-    tools/kormake/bin/macos/kormake build macos-dev     # the macos root, with tests (macos-debug, macos-ship likewise)
-    tools/kormake/bin/macos/kormake test macos-dev      # runs them
+    tools/kormake/bin/macos/kormake dev                 # macos-dev: the macos root, with tests (debug, ship likewise)
+    tools/kormake/bin/macos/kormake test dev            # runs them
     build/macos-dev/bin/example_arcfire                 # the shooter; --demo flies itself
     MTL_DEBUG_LAYER=1 build/macos-debug/bin/example_testbed   # Metal's API validation (off unless asked for)
-    tools/kormake/bin/macos/kormake package macos-ship example_arcfire  # dist/example_arcfire/example_arcfire.app
+    tools/kormake/bin/macos/kormake package arcfire ship  # dist/example_arcfire/example_arcfire.app
 
 `kormake package` writes an application bundle: the executable in `Contents/MacOS/`, its
 pack, shaders and licenses in `Contents/Resources/` (where the engine's base path looks

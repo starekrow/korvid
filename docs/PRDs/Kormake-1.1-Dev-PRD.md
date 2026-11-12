@@ -128,7 +128,7 @@ finds settles the question:
 ```lua
 engine ".."                -- required: the engine root (holds kormake.lua), relative to this file
 modulepath { "." }         -- optional: module paths added after the master's, relative to this file; default "."
-build "build"              -- optional: the build base, relative to this file
+build "build"              -- optional: the directory that holds <target>/, relative to this file
 target "linux-dev"         -- optional: the default target
 ```
 
@@ -138,11 +138,15 @@ Duplicates are dropped by real path.
 **Where outputs go.** When the module paths come out the same as the master's (the
 in-tree `examples/` and `tools/` configs), the build base is the engine root. Every
 directory of the repository then shares one `build/`. When a config adds a module path,
-as an out-of-tree game does, the build base is the config's own directory. The game then
-gets `build/<target>/`, `build/compile_commands.json` and `dist/` beside the config, and
-the engine's tree is never written to. `build` overrides the base in either case. The
-regenerate rule runs `kormake -C <where discovery started> gen <target>` and lists the
-config among its inputs, so Ninja regenerates with the same view.
+as an out-of-tree game does, it is a project of its own. Its build base is the config's
+directory, so it gets `build/<target>/`, `build/compile_commands.json` and `dist/` beside
+the config, and the engine's tree is never written to. Its own modules are also the only
+roots, with their tests, which makes Ninja's default the game and not the whole engine;
+engine modules can still be named. `build` moves the build directory in either case. For a
+project, or a config that sets `build`, the regenerate rule runs
+`kormake -C <the config's directory> gen <target>` and lists the config among its inputs.
+Otherwise it runs from the root, so the file written from `examples/` matches the one
+written from the root.
 
 The engine root is still where the master file's relative paths, external `dir`s (for
 example `vendor/`), `%{root}` and `LICENSE`/`NOTICE` resolve.

@@ -235,7 +235,7 @@ function M.run(c, platform, config, opts)
     local key = rec.name .. "@" .. (host_only(rec) and (host_platform .. "-" .. host_config) or (platform .. "-" .. config))
     if buildable(rec) and not g.by_key[key] then
       local n_inst, n_order = #g.instances, #g.order
-      local ok, err = pcall(instance_of, rec.name, platform, config, "available")
+      local ok, err = pcall(instance_of, rec.name, platform, config, "no root (built when named)")
       if not ok then
         for i = #g.instances, n_inst + 1, -1 do g.by_key[g.instances[i].key] = nil; g.instances[i] = nil end
         for i = #g.order, n_order + 1, -1 do g.order[i] = nil end

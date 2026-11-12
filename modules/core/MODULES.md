@@ -83,8 +83,11 @@ never keep one across two engines in one process.
 
 ### The files
 
+A game lives in a directory of its own (`examples/<name>/` in this repository, or anywhere
+with a `korvid.config` above it naming the engine root: `tools/kormake/README.md`):
+
 ```
-modules/mygame/
+mygame/
   module.lua                      -- name, deps, output = "exe" for a game
   include/korvid/mygame/module.h  -- KV_MODULE_DECLARE(mygame_module)
   src/game.cc                     -- the tables and the code

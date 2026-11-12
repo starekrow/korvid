@@ -230,15 +230,6 @@ local function run(cmd, words, opts)
       if not found then print("kormake: '" .. opts.why .. "' is not in the graph") end
       return 0
     end
-    if opts.dot then
-      print("digraph kormake {\n  rankdir=LR;")
-      for _, inst in ipairs(g.instances) do
-        for _, d in ipairs(inst.deps) do print(string.format('  "%s" -> "%s";', inst.key, d.key)) end
-        for _, t in ipairs(inst.tools) do print(string.format('  "%s" -> "%s" [style=dashed];', inst.key, t.instance.key)) end
-      end
-      print("}")
-      return 0
-    end
     -- Named modules: those and what they reach.
     local show
     if selected then
@@ -250,6 +241,17 @@ local function run(cmd, words, opts)
         for _, t in ipairs(i.tools) do walk(t.instance) end
       end
       for _, i in ipairs(selected) do walk(i) end
+    end
+    if opts.dot then
+      print("digraph kormake {\n  rankdir=LR;")
+      for _, inst in ipairs(g.instances) do
+        if show and not show[inst] then goto next_dot end
+        for _, d in ipairs(inst.deps) do print(string.format('  "%s" -> "%s";', inst.key, d.key)) end
+        for _, t in ipairs(inst.tools) do print(string.format('  "%s" -> "%s" [style=dashed];', inst.key, t.instance.key)) end
+        ::next_dot::
+      end
+      print("}")
+      return 0
     end
     for _, inst in ipairs(g.order) do
       if show and not show[inst] then goto next_inst end
