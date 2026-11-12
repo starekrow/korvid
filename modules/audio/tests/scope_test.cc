@@ -54,6 +54,9 @@ void test_asset_scopes(kv::TestCtx& c) {
     KV_CHECK(c, engine_init(e, list));
     u64 tick = 0;
     auto run = [&](u32 n = 1) { for (u32 i = 0; i < n; ++i) { platform_io(e)->pump(); e.phases.run_tick(e, e.events, 1.0 / 60.0, tick++); } };
+    // Ticks until `done`, a millisecond apart, for up to two seconds: a read takes real time,
+    // not a number of ticks (io_uring punts a read from tmpfs to a worker thread).
+    auto settle = [&](auto done) { for (u32 i = 0; i < 2000 && !done(); ++i) { run(); time_sleep(0.001); } };
 
     char dir[512];
     // The fixtures go in a scratch directory mounted over the defaults, not beside the
@@ -78,7 +81,7 @@ void test_asset_scopes(kv::TestCtx& c) {
     KV_CHECK(c, asset_load_sound(e, "audio_scope_test/b.wav", field) == b && asset_refs(e, b) == 2 && asset_refs(e, a) == 1);
     KV_CHECK(c, asset_load_sound(e, "audio_scope_test/a.wav", town) == a && asset_refs(e, a) == 1); // held once per scope
     KV_CHECK(c, asset_scope_progress(e, town).members == 2 && asset_scope_progress(e, town).pending == 2);
-    for (u32 i = 0; i < 20 && g_scope.ready < 2; ++i) run();
+    settle([&] { return g_scope.ready >= 2; });
     KV_CHECK(c, g_scope.ready == 2);
     AssetScopeProgress tp = asset_scope_progress(e, town), fp = asset_scope_progress(e, field);
     KV_CHECK(c, tp.ready == 2 && tp.pending == 0 && tp.failed == 0 && tp.bytes == 2 * 400 * 4);
@@ -107,6 +110,7 @@ void test_asset_scopes(kv::TestCtx& c) {
     Handle cc = asset_load_sound(e, "audio_scope_test/c.wav", brief);
     asset_scope_release(e, brief);
     run(4);
+    settle([&] { return platform_io(e)->pending() == 0 && platform_io(e)->completions().len == 0; });
     KV_CHECK(c, asset_sound(e, cc) == nullptr && platform_io(e)->completions().len == 0 && platform_io(e)->pending() == 0);
 
     // Refusals: the global scope, a stale scope, a stale asset.
@@ -118,7 +122,7 @@ void test_asset_scopes(kv::TestCtx& c) {
     // word; without one they go at once. Either way the voice finishes and nothing is left.
     Handle loopy = asset_scope_create(e, "loopy");
     Handle snd = asset_load_sound(e, "audio_scope_test/c.wav", loopy);
-    for (u32 i = 0; i < 20 && asset_sound(e, snd)->state == AssetState::Pending; ++i) run();
+    settle([&] { return asset_sound(e, snd)->state != AssetState::Pending; });
     SoundPlay p;
     p.sound = snd; p.loop = true;
     Handle voice = audio_play(e, p);
@@ -137,6 +141,5 @@ void test_asset_scopes(kv::TestCtx& c) {
     run();
     KV_CHECK(c, asset_lifetime_stats(e).scopes == 1 && asset_lifetime_stats(e).dying == 0);
     engine_shutdown(e);
-    for (const char* name : names) { snprintf(path, sizeof path, "%s/%s.wav", dir, name); remove(path); }
-    io_remove(dir);
+    io_remove_tree(scratch);
 }

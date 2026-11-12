@@ -99,6 +99,9 @@ pack. A tool mounts nothing.
 
 `io_list_files(dir, fn, user)` walks a directory (sorted, hidden entries skipped) and
 `io_make_dirs(path)` is `mkdir -p`; both are synchronous, for tools and startup.
+`io_make_temp_dir(prefix, ...)` makes a fresh directory under the OS's temporary one, and
+`io_remove_tree(path)` removes a directory and all under it (a link inside goes as a link,
+never followed): a test's scratch, made and cleaned up.
 
 ## Quick reference
 

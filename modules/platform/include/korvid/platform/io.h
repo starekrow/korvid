@@ -169,6 +169,10 @@ i32  io_list_files(const char* dir, bool (*fn)(void* user, const char* relative)
 bool io_make_dirs(const char* path);
 // Removes a file, or a directory that is empty. Synchronous; true if it is gone after.
 bool io_remove(const char* path);
+// Removes a directory and everything under it, hidden entries included; a link inside is
+// removed itself, never followed. Synchronous: for tools and tests cleaning up after
+// themselves (io_make_temp_dir's directories). True if `path` is gone after.
+bool io_remove_tree(const char* path);
 // Makes a new, empty directory under the OS's temporary directory, its name starting with
 // `prefix`, for a tool's or a test's scratch work; its path (no trailing '/') in out.
 // Synchronous. False if none could be made.

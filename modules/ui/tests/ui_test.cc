@@ -10,6 +10,7 @@
 #include "korvid/audio/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
+#include "korvid/core/time.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/actions.h"
@@ -97,7 +98,8 @@ void test_ui(kv::TestCtx& c) {
 
     Handle doc = ui_load(e, "ui_test/test.ui.json", Handle{});
     asset_ref(e, doc);
-    for (u32 i = 0; i < 30 && !ui_ready(e, doc); ++i) frames(1);
+    // A millisecond apart, for up to two seconds: the read takes real time, not frames.
+    for (u32 i = 0; i < 2000 && !ui_ready(e, doc); ++i) { frames(1); time_sleep(0.001); }
     KV_CHECK(c, ui_ready(e, doc));
 
     // ---- a screen from the document; the same one from code -----------------------------
@@ -257,6 +259,5 @@ void test_ui(kv::TestCtx& c) {
     frames(2);
     KV_CHECK(c, !ui_ready(e, doc));
     engine_shutdown(e);
-    io_remove(path);
-    io_remove(root);
+    io_remove_tree(scratch);
 }

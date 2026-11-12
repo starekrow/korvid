@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32)
+#include <unistd.h> // symlink
+#endif
 
 namespace {
 
@@ -225,4 +228,41 @@ void test_io_write(kv::TestCtx& c) {
         q.free();
     }
     io_remove(path); io_remove(empty); io_remove(dir);
+}
+
+// io_remove_tree: a directory with files, hidden ones and an empty directory under it goes
+// whole; a link inside it to a directory outside goes as a link, and what it pointed at
+// stays. A path that is not there is gone already.
+void test_io_remove_tree(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("io_remove_tree");
+    char dir[200], outside[200], path[400];
+    KV_CHECK(c, io_make_temp_dir("korvid-tree", dir, sizeof dir) && io_make_temp_dir("korvid-tree-out", outside, sizeof outside));
+    const char* const files[] = {"a.txt", ".hidden", "sub/b.txt", "sub/deeper/c.txt", "sub/deeper/.d"};
+    snprintf(path, sizeof path, "%s/sub/deeper", dir); KV_CHECK(c, io_make_dirs(path));
+    snprintf(path, sizeof path, "%s/empty", dir);      KV_CHECK(c, io_make_dirs(path));
+    for (const char* f : files) {
+        snprintf(path, sizeof path, "%s/%s", dir, f);
+        FILE* fp = fopen(path, "wb");
+        KV_CHECK(c, fp != nullptr);
+        if (fp) { fputs(f, fp); fclose(fp); }
+    }
+    char kept[400];
+    snprintf(kept, sizeof kept, "%s/kept.txt", outside);
+    FILE* fp = fopen(kept, "wb");
+    if (fp) { fputs("kept", fp); fclose(fp); }
+#if !defined(_WIN32)
+    snprintf(path, sizeof path, "%s/sub/link", dir);
+    KV_CHECK(c, symlink(outside, path) == 0);
+#endif
+    KV_CHECK(c, io_remove_tree(dir));
+    fp = fopen(dir, "rb");
+    KV_CHECK(c, fp == nullptr); // gone
+    if (fp) fclose(fp);
+    fp = fopen(kept, "rb");
+    KV_CHECK(c, fp != nullptr); // the link's target untouched
+    if (fp) fclose(fp);
+    KV_CHECK(c, io_remove_tree(dir)); // gone already
+    KV_CHECK(c, io_remove_tree(outside));
+    KV_CHECK(c, !io_remove_tree(""));
 }

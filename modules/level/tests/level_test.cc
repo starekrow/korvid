@@ -10,6 +10,7 @@
 #include "korvid/cli/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
+#include "korvid/core/time.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
 #include "korvid/save/save.h"
@@ -108,7 +109,13 @@ void test_level(kv::TestCtx& c) {
     KV_CHECK(c, level_catalog(e, cfg) && level_find(e, "field") == 1 && level_find(e, "nowhere") == KV_LEVELS);
     KV_CHECK(c, !level_request(e, "nowhere") && !level_reload(e));
     auto frames = [&](u32 n) { for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); } };
-    auto until_active = [&]() { frames(1); for (u32 i = 0; i < 400 && !(level_state(e) == LevelState::Active && !e.clock.paused); ++i) frames(1); };
+    // Frames until the level is in and the sim runs, a millisecond apart, for up to two
+    // seconds: its reads take real time, not a number of frames (io_uring punts a read from
+    // tmpfs to a worker thread).
+    auto until_active = [&]() {
+        frames(1);
+        for (u32 i = 0; i < 2000 && !(level_state(e) == LevelState::Active && !e.clock.paused); ++i) { frames(1); time_sleep(0.001); }
+    };
 
     // The first level.
     LevelTransition quick;
@@ -201,8 +208,5 @@ void test_level(kv::TestCtx& c) {
     w.free();
 
     engine_shutdown(e);
-    char path[600];
-    const char* const names[] = {"town.map", "field.map", "shared.bin"};
-    for (const char* n : names) { snprintf(path, sizeof path, "%s/%s", dir, n); io_remove(path); }
-    io_remove(dir);
+    io_remove_tree(scratch);
 }

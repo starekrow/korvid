@@ -7,6 +7,7 @@
 #include "korvid/asset/scope.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
+#include "korvid/core/time.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
 #include "korvid/sprite/module.h"
@@ -81,7 +82,10 @@ void test_tilemap_load(kv::TestCtx& c) {
     Handle map = tilemap_load(e, "tilemap_test/maps/town.tmj", scope);
     KV_CHECK(c, !map.is_null() && tilemap_load(e, "tilemap_test/maps/town.tmj", scope) == map && asset_refs(e, map) == 1);
     KV_CHECK(c, asset_scope_progress(e, scope).pending == 1);
-    for (u32 i = 0; i < 50 && tilemap_get(e, map)->state == AssetState::Pending; ++i) frames(1);
+    // Frames until a load is in, a millisecond apart, for up to two seconds: a read takes
+    // real time, not a number of frames (io_uring punts a read from tmpfs to a worker thread).
+    auto settle = [&](Handle h) { for (u32 i = 0; i < 2000 && tilemap_get(e, h)->state == AssetState::Pending; ++i) { frames(1); time_sleep(0.001); } };
+    settle(map);
     const TilemapAsset* m = tilemap_get(e, map);
     KV_CHECK(c, m->state == AssetState::Ready && m->tileset_count == 2 && strcmp(m->tilesets[0].image, "tilemap_test/tiles/town.png") == 0);
     KV_CHECK(c, m->tilesets[0].tiles.count == 3 && m->solid_rect_count == 3 && tilemap_solid(*m, 0, 1));
@@ -169,17 +173,13 @@ void test_tilemap_load(kv::TestCtx& c) {
     KV_CHECK(c, put(path, "{\"width\": 1,"));
     Handle bad = tilemap_load(e, "tilemap_test/maps/bad.tmj", Handle{});
     asset_ref(e, bad);
-    frames(4);
+    frames(1);
+    settle(bad);
     KV_CHECK(c, tilemap_get(e, bad)->state == AssetState::Failed && strstr(tilemap_get(e, bad)->error_text, "JSON"));
     asset_unref(e, bad);
     frames(1);
     KV_CHECK(c, tilemap_get(e, bad) == nullptr);
 
     engine_shutdown(e);
-    snprintf(path, sizeof path, "%s/maps/town.tmj", root); io_remove(path);
-    snprintf(path, sizeof path, "%s/maps/bad.tmj", root); io_remove(path);
-    snprintf(path, sizeof path, "%s/tiles/town.tsj", root); io_remove(path);
-    snprintf(path, sizeof path, "%s/maps", root); io_remove(path);
-    snprintf(path, sizeof path, "%s/tiles", root); io_remove(path);
-    io_remove(root);
+    io_remove_tree(scratch);
 }
