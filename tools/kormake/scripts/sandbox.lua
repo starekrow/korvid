@@ -55,6 +55,10 @@ local module_fields = {
   test_jobs = true, -- at most this many tests at once, for a runner that cannot run more
 }
 
+-- What a rule "name" { ... } in exports may set. configs: the configs whose default build
+-- holds a per-exe rule's outputs (kpack's pack: ship); they are built by name in the rest.
+local rule_fields = { inputs = true, outputs = true, command = true, deps = true, per = true, configs = true, platforms = true }
+
 -- module "name" { fields } or module "name" (defaults). One per file.
 function M.eval_module(path, text)
   local env = base_env()
@@ -72,10 +76,27 @@ function M.eval_module(path, text)
       end
     end
   end
-  -- rule "name" { inputs, outputs, command, deps } inside exports.
+  -- rule "name" { inputs, outputs, command, deps, per, configs, platforms } inside exports.
+  -- A per-exe rule (per = "exe") runs over an executable's staged assets, so its inputs
+  -- are "assets", in each platform variant too.
   env.rule = function(name)
     return function(fields)
+      if type(name) ~= "string" or name == "" or type(fields) ~= "table" then util.fail("%s: rule needs a name and a table", path) end
       local r = copy_data(fields)
+      local function check(t, where)
+        for k in pairs(t) do
+          if not rule_fields[k] or (k == "platforms" and where ~= "") then util.fail("%s: rule '%s'%s has an unknown field '%s'", path, name, where, tostring(k)) end
+        end
+      end
+      check(r, "")
+      for p, v in pairs(r.platforms or {}) do check(v, " (platforms." .. tostring(p) .. ")") end
+      local variants = { r }
+      for _, v in pairs(r.platforms or {}) do variants[#variants + 1] = v end
+      for _, v in ipairs(variants) do
+        local per, inputs = v.per or r.per, v.inputs or r.inputs
+        if per ~= nil and per ~= "exe" then util.fail("%s: rule '%s': per takes \"exe\"", path, name) end
+        if per == "exe" and inputs ~= "assets" then util.fail("%s: rule '%s': per-exe rules take inputs = \"assets\"", path, name) end
+      end
       r.name = name
       return r
     end

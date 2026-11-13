@@ -39,8 +39,8 @@ in any order, except that the command has to be the first word.
 
 **build** (the default)
 : Builds the named modules (see NAMES): each one's executable or library, everything it
-  links, its staged assets and shaders, and in the ship config its pack. A module's tests
-  are not built. With no NAME and nothing chosen by the current directory, kormake builds
+  links, its staged assets and shaders, and in the ship config its pack (see Tool rules).
+  A module's tests are not built. With no NAME and nothing chosen by the current directory, kormake builds
   Ninja's default, `all`: every root of the master file and the tests those roots ask for.
 
 **test**
@@ -321,8 +321,11 @@ can use these placeholders:
 fields for one platform, or for one toolchain family. A rule with `per = "exe"` and
 `inputs = "assets"` runs once per executable instead, over every asset that executable
 stages, passed in a response file (`%{rsp}`) and with `%{exe}` available in `outputs`.
-This is how kpack's pack rule writes `bin/<exe>.kpak`. Outputs of per-exe rules are part
-of the default build in ship, and can be built by name in the other configs. The tool's
+This is how kpack's pack rule writes `bin/<exe>.kpak`. A per-exe rule's `configs` names
+the configs whose default build holds its outputs (kpack's says `{ "ship" }`); in the
+others they are built by name, or by `package`, which ships them beside the executable.
+A rule with any other field is an error, as is a per-exe rule whose inputs are not
+`"assets"`. The tool's
 binary is an implicit input to every edge it runs.
 
 ### The build directory

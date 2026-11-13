@@ -203,12 +203,7 @@ function M.run(c, g, opts)
           for _, pi in ipairs(inst.module.fields.private_includes or {}) do
             if not kfs.isdir(util.join(inst.module.dir, pi)) then util.fail("private include '%s' is not a directory", pi) end
           end
-          for _, t in ipairs(inst.tools) do
-            tool_path(t.instance)
-            for _, r in ipairs(t.instance.module.fields.exports or {}) do
-              if r.per == "exe" and r.inputs ~= "assets" then util.fail("rule '%s' of '%s': per-exe rules take inputs = \"assets\"", r.name, t.instance.module.name) end
-            end
-          end
+          for _, t in ipairs(inst.tools) do tool_path(t.instance) end
         end)
         if not ok then why = util.message(err) end
       end
@@ -299,32 +294,40 @@ function M.run(c, g, opts)
     for k, x in pairs(v) do out[k] = x end
     return out, "_" .. util.symbol(platform)
   end
-  for _, inst in ipairs(g.instances) do
-    for _, t in ipairs(inst.dropped and {} or inst.tools) do
-      local tf = t.instance.module.fields
-      for _, r0 in ipairs(tf.exports or {}) do
+  -- The rules an instance's tools export, as its platform sees them, each with the tool it
+  -- came from and its Ninja rule's name: tool_<tool>_<rule>[_<platform>].
+  local function tool_rules_of(inst)
+    local list = {}
+    for _, t in ipairs(inst.tools) do
+      for _, r0 in ipairs(t.instance.module.fields.exports or {}) do
         local r, variant = rule_variant(r0, inst.platform, flags(inst).tc.fields.family)
-        local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant
-        if not tool_rules[rname] then
-          local tool, implicit = tool_path(t.instance)
-          local cmd = r.command or util.fail("rule '%s' of '%s' has no command", r.name, t.instance.module.name)
-          -- Ninja quotes $in and $out itself when a path needs it.
-          -- The program in the host's spelling: Windows' CreateProcess takes "host/bin/x.exe"
-          -- as a bare name to search for, and finds "host\bin\x.exe" where it is.
-          cmd = cmd:gsub("%%{tool}", (util.ninja_escape(program(util.native(tool))):gsub("%%", "%%%%"))):gsub("%%{in}", "$in")
-            :gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp")
-            :gsub("%%{shader_includes}", (table.concat(shader_includes, " "):gsub("%%", "%%%%")))
-          -- The consuming platform's target ("apple-ios26.0-simulator"), for a compiler that
-          -- writes code for it (Metal's, through slangc).
-          if cmd:find("%{triple}", 1, true) then
-            local triple = flags(inst).tc.fields.triple or util.fail("rule '%s' of '%s' wants %%{triple}; toolchain '%s' has none",
-              r.name, t.instance.module.name, flags(inst).tc.rec.name)
-            cmd = cmd:gsub("%%{triple}", (triple:gsub("%%", "%%%%")))
-          end
-          local rsp = r.per == "exe" and "\n  rspfile = $out.rsp\n  rspfile_content = $in" or ""
-          w("rule " .. rname .. "\n  command = " .. cmd .. (r.deps == "depfile" and "\n  depfile = $out.d\n  deps = gcc" or "") .. rsp .. "\n  description = " .. r.name:upper() .. " $out")
-          tool_rules[rname] = { rule = r, tool = tool, implicit = implicit }
+        list[#list + 1] = { tool = t, rule = r, name = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant }
+      end
+    end
+    return list
+  end
+  for _, inst in ipairs(g.instances) do
+    for _, tr in ipairs(inst.dropped and {} or tool_rules_of(inst)) do
+      local t, r, rname = tr.tool, tr.rule, tr.name
+      if not tool_rules[rname] then
+        local tool, implicit = tool_path(t.instance)
+        local cmd = r.command or util.fail("rule '%s' of '%s' has no command", r.name, t.instance.module.name)
+        -- Ninja quotes $in and $out itself when a path needs it.
+        -- The program in the host's spelling: Windows' CreateProcess takes "host/bin/x.exe"
+        -- as a bare name to search for, and finds "host\bin\x.exe" where it is.
+        cmd = cmd:gsub("%%{tool}", (util.ninja_escape(program(util.native(tool))):gsub("%%", "%%%%"))):gsub("%%{in}", "$in")
+          :gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp")
+          :gsub("%%{shader_includes}", (table.concat(shader_includes, " "):gsub("%%", "%%%%")))
+        -- The consuming platform's target ("apple-ios26.0-simulator"), for a compiler that
+        -- writes code for it (Metal's, through slangc).
+        if cmd:find("%{triple}", 1, true) then
+          local triple = flags(inst).tc.fields.triple or util.fail("rule '%s' of '%s' wants %%{triple}; toolchain '%s' has none",
+            r.name, t.instance.module.name, flags(inst).tc.rec.name)
+          cmd = cmd:gsub("%%{triple}", (triple:gsub("%%", "%%%%")))
         end
+        local rsp = r.per == "exe" and "\n  rspfile = $out.rsp\n  rspfile_content = $in" or ""
+        w("rule " .. rname .. "\n  command = " .. cmd .. (r.deps == "depfile" and "\n  depfile = $out.d\n  deps = gcc" or "") .. rsp .. "\n  description = " .. r.name:upper() .. " $out")
+        tool_rules[rname] = { rule = r, tool = tool, implicit = implicit }
       end
     end
   end
@@ -430,27 +433,22 @@ function M.run(c, g, opts)
     local pre = inst.prefix
     -- Tool outputs: shaders and the like.
     local runtime = {}
-    for _, t in ipairs(inst.tools) do
-      for _, r0 in ipairs(t.instance.module.fields.exports or {}) do
-        local r, variant = rule_variant(r0, inst.platform, flags(inst).tc.fields.family)
-        if r.per == "exe" then goto next_rule end -- runs once per executable, below
-        local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant
-        local pat_dir, pat_glob = util.dirname(r.inputs), util.basename(r.inputs)
-        local dir = util.join(m.dir, pat_dir)
-        if kfs.isdir(dir) then
-          for _, n in ipairs(kfs.listdir(dir)) do
-            if util.matches(n, pat_glob) then
-              local stem = util.stem(n)
-              local outname = r.outputs:gsub("%%{stem}", stem)
-              local outpath = t.spec.install and (pre .. "bin/" .. t.spec.install .. "/" .. outname) or (gen .. "/" .. outname)
-              local tr = tool_rules[rname]
-              w(string.format("build %s: %s %s%s", util.ninja_escape(outpath), rname, util.ninja_escape(util.join(dir, n)),
-                tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""))
-              runtime[#runtime + 1] = outpath
-            end
+    for _, tr0 in ipairs(tool_rules_of(inst)) do
+      local t, r, rname = tr0.tool, tr0.rule, tr0.name
+      local dir = util.join(m.dir, util.dirname(r.inputs))
+      -- A per-exe rule runs once per executable, below.
+      if r.per ~= "exe" and kfs.isdir(dir) then
+        local pat_glob = util.basename(r.inputs)
+        for _, n in ipairs(kfs.listdir(dir)) do
+          if util.matches(n, pat_glob) then
+            local outname = r.outputs:gsub("%%{stem}", util.stem(n))
+            local outpath = t.spec.install and (pre .. "bin/" .. t.spec.install .. "/" .. outname) or (gen .. "/" .. outname)
+            local tr = tool_rules[rname]
+            w(string.format("build %s: %s %s%s", util.ninja_escape(outpath), rname, util.ninja_escape(util.join(dir, n)),
+              tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""))
+            runtime[#runtime + 1] = outpath
           end
         end
-        ::next_rule::
       end
     end
     -- Assets: bin/assets/<module>/<path>, subdirectories kept.
@@ -576,27 +574,30 @@ function M.run(c, g, opts)
         local outs = { exe }
         outputs_by_key[inst.key] = outs
         -- Rules that run once per executable over its staged assets (a pack): part of the
-        -- default build in ship, buildable by name in the other configs.
-        for _, t in ipairs(inst.tools) do
-          for _, r0 in ipairs(t.instance.module.fields.exports or {}) do
-            local r, variant = rule_variant(r0, inst.platform, flags(inst).tc.fields.family)
-            if r.per ~= "exe" then goto skip_rule end
-            do
-              local rname = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant
-              local tr = tool_rules[rname]
-              local ins = {}
-              local staged = pre .. "bin/assets/"
-              for _, p in ipairs(rt) do if p:sub(1, #staged) == staged then ins[#ins + 1] = p end end
-              if r.inputs ~= "assets" then util.fail("rule '%s' of '%s': per-exe rules take inputs = \"assets\"", r.name, t.instance.module.name) end
-              local outp = pre .. "bin/" .. r.outputs:gsub("%%{exe}", exe_name(inst))
-              local implicit = tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""
-              w(string.format("build %s: %s %s%s", util.ninja_escape(outp), rname, util.ninja_paths(ins), implicit))
-              if g.config == "ship" then
-                if inst.in_roots then all[#all + 1] = outp end
-                outs[#outs + 1] = outp
+        -- default build in the configs the rule names, buildable by name in the others.
+        -- Their outputs are what `package` ships beside the executable.
+        inst.per_exe_outputs = {}
+        for _, tr0 in ipairs(tool_rules_of(inst)) do
+          local r = tr0.rule
+          if r.per == "exe" then
+            local tr = tool_rules[tr0.name]
+            local ins = {}
+            local staged = pre .. "bin/assets/"
+            for _, p in ipairs(rt) do if p:sub(1, #staged) == staged then ins[#ins + 1] = p end end
+            local outp = pre .. "bin/" .. r.outputs:gsub("%%{exe}", exe_name(inst))
+            local implicit = tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""
+            w(string.format("build %s: %s %s%s", util.ninja_escape(outp), tr0.name, util.ninja_paths(ins), implicit))
+            inst.per_exe_outputs[#inst.per_exe_outputs + 1] = outp
+            local configs = util.as_list(r.configs or {})
+            for _, cf in ipairs(configs) do
+              if not util.contains(c.master.configs, cf) then
+                util.fail("rule '%s' of '%s' names config '%s', which is not in the master file's configs", r.name, tr0.tool.instance.module.name, cf)
               end
             end
-            ::skip_rule::
+            if util.contains(configs, g.config) then
+              if inst.in_roots then all[#all + 1] = outp end
+              outs[#outs + 1] = outp
+            end
           end
         end
       end

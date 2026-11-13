@@ -3,6 +3,6 @@ module "packer" {
   output    = "exe",
   platforms = { "host" },
   exports   = {
-    rule "pack" { per = "exe", inputs = "assets", outputs = "%{exe}.pak", command = "%{tool} %{out} @%{rsp}" },
+    rule "pack" { per = "exe", inputs = "assets", outputs = "%{exe}.pak", configs = { "ship" }, command = "%{tool} %{out} @%{rsp}" },
   },
 }

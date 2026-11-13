@@ -13,6 +13,7 @@ module "kpack" {
       per     = "exe",
       inputs  = "assets",
       outputs = "%{exe}.kpak",
+      configs = { "ship" }, -- in ship's default build; by name in the others
       command = "%{tool} pack %{out} bin/assets @%{rsp}",
     },
   },
