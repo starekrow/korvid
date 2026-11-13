@@ -12,7 +12,7 @@
 #include "korvid/platform/io.h"
 #include "korvid/render/renderer.h"
 #include "asset_internal.h"
-#include "vendor/stb_truetype.h"
+#include "korvid/truetype/truetype.h"
 #include <stdlib.h>
 #include <string.h>
 

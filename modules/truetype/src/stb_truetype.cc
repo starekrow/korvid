@@ -1,6 +1,6 @@
-// The stb_truetype implementation, once, with its allocations on the engine's general
-// allocator (attributed to whoever is running: the asset pump). The free macro has no
-// size, so a header carries it.
+// The stb_truetype implementation, once for the engine, with its allocations on the
+// engine's general allocator (attributed to whoever is running: the asset pump, a tool).
+// The free macro has no size, so a header carries it.
 #include "korvid/core/memory.h"
 #include <string.h>
 
@@ -49,7 +49,7 @@ void stb_free(void* p) {
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wcast-function-type"
 #endif
-#include "vendor/stb_truetype.h"
+#include "../vendor/stb_truetype.h"
 #if KV_COMPILER_MSVC
 #pragma warning(pop)
 #else

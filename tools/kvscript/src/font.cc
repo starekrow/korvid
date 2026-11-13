@@ -1,6 +1,5 @@
-// kvscript: kv.font, TrueType text drawn into a kv.image with stb_truetype (the asset
-// module's copy, compiled here once more, privately). Its math is kv's, as the asset
-// module's is, so a glyph comes out the same on every platform. Drawing follows Pillow's
+// kvscript: kv.font, TrueType text drawn into a kv.image with the truetype module's
+// stb_truetype, whose math is kv's, so a glyph comes out the same on every platform. Drawing follows Pillow's
 // ImageDraw.text where a port from it should match: the size is the em in pixels, the
 // anchor is two letters (l m r, then a m s d), and the ink is blended in by the coverage
 // as Pillow blends it into an RGBA picture.
@@ -10,35 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define STBTT_STATIC
-#define STB_TRUETYPE_IMPLEMENTATION
-#define STBTT_ifloor(x)  ((int)kv::floor((kv::f64)(x)))
-#define STBTT_iceil(x)   ((int)kv::ceil((kv::f64)(x)))
-#define STBTT_sqrt(x)    kv::sqrt((kv::f64)(x))
-#define STBTT_pow(x, y)  kv::pow((kv::f64)(x), (kv::f64)(y))
-#define STBTT_fmod(x, y) kv::fmod((kv::f64)(x), (kv::f64)(y))
-#define STBTT_cos(x)     kv::cos((kv::f64)(x))
-#define STBTT_acos(x)    kv::acos((kv::f64)(x))
-#define STBTT_fabs(x)    kv::fabs((kv::f64)(x))
-#if defined(_MSC_VER) && !defined(__clang__)
-#pragma warning(push, 0)
-#else
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Wsign-compare"
-#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
-#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-#pragma GCC diagnostic ignored "-Wunused-variable"
-#pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
-#include "stb_truetype.h"
-#if defined(_MSC_VER) && !defined(__clang__)
-#pragma warning(pop)
-#else
-#pragma GCC diagnostic pop
-#endif
+#include "korvid/truetype/truetype.h"
 
 namespace kv {
 
@@ -55,9 +26,9 @@ struct Font {
 };
 u8* font_bytes(Font* f) { return (u8*)(f + 1); }
 
-Font* check(lua_State* L, int i) { return (Font*)luaL_checkudata(L, i, kFontMeta); }
+Font* check_font(lua_State* L, int i) { return (Font*)luaL_checkudata(L, i, kFontMeta); }
 
-int l_load(lua_State* L) {
+int font_load(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
     f64 px = luaL_checknumber(L, 2);
     IoBytes file;
@@ -91,7 +62,7 @@ f32 advance(Font* f, const char* text) {
 }
 
 int l_measure(lua_State* L) {
-    Font* f = check(L, 1);
+    Font* f = check_font(L, 1);
     lua_pushnumber(L, advance(f, luaL_checkstring(L, 2)));
     lua_pushnumber(L, f->ascent - f->descent);
     return 2;
@@ -99,7 +70,7 @@ int l_measure(lua_State* L) {
 
 // font:draw(image, text, x, y, r, g, b, a, anchor): one line of ASCII (or Latin-1 bytes).
 int l_draw(lua_State* L) {
-    Font* f = check(L, 1);
+    Font* f = check_font(L, 1);
     Image* m = kvscript_check_image(L, 2);
     const char* text = luaL_checkstring(L, 3);
     f64 x = luaL_checknumber(L, 4), y = luaL_checknumber(L, 5);
@@ -151,19 +122,19 @@ int l_draw(lua_State* L) {
     return 0;
 }
 
-constexpr luaL_Reg k_methods[] = {{"draw", l_draw}, {"measure", l_measure}, {nullptr, nullptr}};
-constexpr luaL_Reg k_functions[] = {{"load", l_load}, {nullptr, nullptr}};
+constexpr luaL_Reg k_font_methods[] = {{"draw", l_draw}, {"measure", l_measure}, {nullptr, nullptr}};
+constexpr luaL_Reg k_font_functions[] = {{"load", font_load}, {nullptr, nullptr}};
 
 } // namespace
 
 void kvscript_open_font(lua_State* L) {
     luaL_newmetatable(L, kFontMeta);
     lua_newtable(L);
-    luaL_setfuncs(L, k_methods, 0);
+    luaL_setfuncs(L, k_font_methods, 0);
     lua_setfield(L, -2, "__index");
     lua_pop(L, 1);
     lua_newtable(L);
-    luaL_setfuncs(L, k_functions, 0);
+    luaL_setfuncs(L, k_font_functions, 0);
 }
 
 } // namespace kv
