@@ -4,8 +4,8 @@ make_art.py and the old make_bosses.py drew. Run from anywhere:
 
     python3 examples/arcfire/tools/cut_art.py ~/code/asset-packs
 
-The argument is the directory that holds the packs as received (assets/CREDITS.md lists
-each with its size and sha256). Writes assets/generated/ (the bosses' hulls and parts, the
+The argument is the directory that holds the packs as received (assets/CREDITS.md names
+each pack and its authors). Writes assets/generated/ (the bosses' hulls and parts, the
 missile boat, Orbit's debris, segments and capital ship) and these in assets/made/: egg,
 eggs, items, beam, clouds_low, clouds_high. Every texture keeps the size and cell layout
 the game and the boss files expect, so nothing in the sim changes. Needs Pillow.

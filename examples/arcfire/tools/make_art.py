@@ -7,7 +7,7 @@ the items come from the newer packs through tools/cut_art.py. Run from anywhere:
 
 The argument is the directory the archives were downloaded and unpacked into (`pack/` under
 it holds one directory per archive). Writes examples/arcfire/assets/: the vendored
-files where CREDITS.md lists them, and everything made here under `made/`. Needs Pillow.
+files under their new names (VENDORED, below), and everything made here under `made/`. Needs Pillow.
 
 What is made here, and from what:
   made/bullets.png   64 x 32: two 32 px cells cut from M484's Bullet Collection 1 (the

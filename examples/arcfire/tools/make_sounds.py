@@ -10,7 +10,7 @@ under it holds one directory per archive). Writes examples/arcfire/assets/sound/
 Junkala's 5 Chiptunes (Action), CC0: four tracks, Shoreline's and Orbit's, folded to mono and halved in rate, 22,050
 Hz 16-bit WAV, about a quarter of the size; the engine streams only Ogg Vorbis, and
 nothing here encodes it).
-assets/CREDITS.md lists every file.
+assets/CREDITS.md names the packs and their authors.
 """
 import array
 import shutil
