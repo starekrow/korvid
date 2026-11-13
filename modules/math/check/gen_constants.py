@@ -107,6 +107,158 @@ w("// 2/pi's fractional bits, 32 to a word, most significant first (Payne-Hanek)
 w("inline constexpr u32 kTwoOverPi[41] = {")
 for i in range(0, 41, 6): w("    " + " ".join(f"0x{x:08x}u," for x in words[i:i + 6]))
 w("};")
+
+# ---- the default f32 functions (src/fast.cc) ----------------------------------------
+# Each polynomial interpolates its function at Chebyshev nodes (near the minimax one),
+# solved exactly in fractions, then rounded to doubles; the degree is the smallest whose
+# error (weighted as it reaches the result) is near 2^-44.
+def dcos(x):
+    x2, t, s, n = x * x, D(1), D(1), 0
+    while True:
+        n += 2
+        t *= -x2 / (n * (n - 1))
+        s += t
+        if abs(t) < D(10) ** -440: return s
+
+def series_at(coef, z, eps=D(10) ** -440):
+    s, p, n = D(0), D(1), 0
+    while True:
+        t = coef(n) * p
+        s += t
+        if n > 5 and abs(t) < eps: return s
+        p *= z
+        n += 1
+
+def cheb_fit(g, a, b, n):
+    nodes = [(a + b) / 2 + (b - a) / 2 * dcos((2 * k + 1) * PI / (2 * n)) for k in range(n)]
+    A = [[frac(x) ** j for j in range(n)] + [frac(g(x))] for x in nodes]
+    for c in range(n):
+        piv = max(range(c, n), key=lambda r: abs(A[r][c]))
+        A[c], A[piv] = A[piv], A[c]
+        for r in range(n):
+            if r != c and A[r][c] != 0:
+                f = A[r][c] / A[c][c]
+                A[r] = [x - f * y for x, y in zip(A[r], A[c])]
+    return [A[i][n] / A[i][i] for i in range(n)]
+
+getcontext().prec = 80  # enough for fitting; the tables below go back to 450
+sin_g = lambda z: series_at(lambda n: D((-1) ** (n + 1)) / factorial(2 * n + 3), z, D(10) ** -75)
+cos_g = lambda z: series_at(lambda n: D((-1) ** (n + 1)) / factorial(2 * n + 2), z, D(10) ** -75)
+atan_g = lambda z: series_at(lambda n: D((-1) ** (n + 1)) / (2 * n + 3), z, D(10) ** -75)
+def asin_c(n):
+    m = n + 1
+    return D(factorial(2 * m)) / (D(4) ** m * D(factorial(m)) ** 2 * (2 * m + 1))
+asin_g = lambda z: series_at(asin_c, z, D(10) ** -75)
+tan_pi8 = (D(2).sqrt() - 1)
+tan_pi16 = (1 / tan_pi8).__class__(0)
+def dsin(x):
+    t, s, n = x, x, 1
+    while True:
+        n += 2
+        t *= -x * x / (n * (n - 1))
+        s += t
+        if abs(t) < D(10) ** -440: return s
+def dtan(x): return dsin(x) / dcos(x)
+tan_pi16 = dtan(PI / 16)
+fits = [
+    ("kSinP", "sin r = r + r z P(z), z = r^2, |r| <= pi/4", sin_g, (PI / 4) ** 2 * D("1.0001"), 5),
+    ("kCosP", "cos r = 1 + z P(z), z = r^2, |r| <= pi/4", cos_g, (PI / 4) ** 2 * D("1.0001"), 6),
+    ("kAtanP", "atan u = u + u z P(z), z = u^2, |u| <= tan(pi/16)", atan_g, tan_pi16 ** 2 * D("1.0001"), 6),
+    ("kAsinP", "asin s = s + s w P(w), w = s^2 <= 1/4", asin_g, D("0.25"), 10),
+]
+import sys
+def fit_err(g, c, a, b, wfn, pts=400):
+    worst = D(0)
+    for i in range(pts + 1):
+        z = a + (b - a) * D(i) / pts
+        p = D(0)
+        for x in reversed(c): p = p * z + D(float(x))
+        worst = max(worst, abs(g(z) - p) * wfn(z))
+    return worst
+for name, what, g, b, n in fits:
+    c = cheb_fit(g, D(0), b, n)
+    print(f"{name}: n={n}, error ~2^{float(fit_err(g, c, D(0), b, lambda z: abs(z)).ln() / D(2).ln()):.1f}", file=sys.stderr)
+    w(f"// {what}.")
+    w(f"inline constexpr f64 {name}[{n}] = {{")
+    for x in c: w(f"    {rd(x)},")
+    w("};")
+getcontext().prec = 450
+p1 = split(pio2, 33)
+w("// pi/2 less its first 33 bits (kPio2_1), rounded: two parts are enough for a float under 2^20.")
+w(f"inline constexpr f64 kPio2_1t = {rd(pio2 - p1)};")
+w(f"inline constexpr f64 kTanPi8 = {rd(frac(tan_pi8))};")
+w("// atan's sectors: k = 0..4 at k pi/8, by the bounds tan((2k+1) pi/16); cos and sin of each.")
+w("inline constexpr f64 kAtanBound[4] = {")
+for k in range(4): w(f"    {rd(frac(dtan((2 * k + 1) * PI / 16)))},")
+w("};")
+for nm, fn in (("kAtanCos", dcos), ("kAtanSin", dsin)):
+    w(f"inline constexpr f64 {nm}[5] = {{")
+    for k in range(5):
+        v = fn(k * PI / 8)
+        if abs(v) < D(10) ** -400: v = D(0)
+        if abs(v - 1) < D(10) ** -400: v = D(1)
+        w(f"    {rd(frac(v))},")
+    w("};")
+w("inline constexpr f64 kAtanTheta[5] = {")
+for k in range(5): w(f"    {rd(frac(k * PI / 8))},")
+w("};")
+w(f"inline constexpr f64 kInvLn2N = {rd(64 / ln2)}; // 64/ln 2: exp's argument in 64ths of a power of two")
+w("// 2^(r/64) - 1 = c1 r + ... + c4 r^4, |r| <= 1/2: (ln2/64)^n / n!; the next term is under 2^-55.")
+w("inline constexpr f64 kExpP[4] = {")
+for n in range(1, 5): w(f"    {rd((ln2 / 64) ** n / factorial(n))},")
+w("};")
+w("// 2^(j/64), j = 0..63.")
+w("inline constexpr f64 kExp2T[64] = {")
+for j in range(64): w(f"    {rd(frac((D(j) / 64 * LN2).exp()))},")
+w("};")
+# log: z in [0x3f330000, 2 * that) as floats, cut into 64 by the bits under the exponent;
+# 1/c for each, to 29 bits so a float times it is exact in double, and log c. The cell
+# holding 1 has c = 1, so near 1 the reduction is exact and the log is all polynomial.
+OFF = 0x3f330000
+import struct
+def f32_of(b): return struct.unpack("<f", struct.pack("<I", b))[0]
+invc, logc, log2c = [], [], []
+for i in range(64):
+    lo, hi = F(f32_of(OFF + (i << 17))), F(f32_of(OFF + ((i + 1) << 17)))
+    if lo <= 1 < hi:
+        ic = F(1)
+    else:
+        c = (lo + hi) / 2
+        ic = split(1 / c, 29) if False else None
+        x = 1 / c
+        e = 0
+        while x >= 2 ** 28 * F(2) ** e: e += 1
+        while x < 2 ** 28 * F(2) ** e: e -= 1
+        ic = F(round(x / F(2) ** e)) * F(2) ** e  # nearest, 29 significant bits
+    invc.append(ic)
+    lic = -D(ic.numerator).ln() + D(ic.denominator).ln()  # -ln(invc) = ln(c)
+    logc.append(lic)
+    log2c.append(lic / LN2)
+w("// log: 1/c (29 bits) and log c, log2 c, for the 64 cells of [0x1.66p-1, 0x1.66p+0) (src/fast.cc).")
+w("inline constexpr f64 kLogInvC[64] = {")
+for x in invc: w(f"    {float(x).hex()},")
+w("};")
+w("inline constexpr f64 kLogC[64] = {")
+for x in logc: w(f"    {rd(frac(x))},")
+w("};")
+w("inline constexpr f64 kLog2C[64] = {")
+for x in log2c: w(f"    {rd(frac(x))},")
+w("};")
+rmax = F(0)
+for i in range(64):
+    lo, hi = F(f32_of(OFF + (i << 17))), F(f32_of(OFF + ((i + 1) << 17)))
+    rmax = max(rmax, abs(lo * invc[i] - 1), abs(hi * invc[i] - 1))
+getcontext().prec = 80
+def l1p_g(r):  # (log(1 + r) - r) / r^2
+    return series_at(lambda n: D((-1) ** (n + 1)) / (n + 2), r, D(10) ** -75)
+rb = D(rmax.numerator) / D(rmax.denominator) * D("1.0001")
+c = cheb_fit(l1p_g, -rb, rb, 5)
+print(f"kLog1pP: n=5 on |r| <= {float(rb):.6f}, error ~2^{float(fit_err(l1p_g, c, -rb, rb, lambda r: abs(r)).ln() / D(2).ln()):.1f}", file=sys.stderr)
+getcontext().prec = 450
+w(f"// log(1 + r) = r + r^2 P(r), |r| <= {float(rb):.6f} (the cells' widest).")
+w("inline constexpr f64 kLog1pP[5] = {")
+for x in c: w(f"    {rd(x)},")
+w("};")
 w("} // namespace kv::math_constants")
 path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "constants.h")
 open(path, "w").write("\n".join(out) + "\n")

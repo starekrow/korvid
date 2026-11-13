@@ -64,9 +64,9 @@ f64 acos(f64 x) {
     return atan2(sqrt((1.0 - x) * (1.0 + x)), x);
 }
 
-f32 atan(f32 x) { return isnan(x) ? math_bits::nan32() : (f32)atan((f64)x); }
-f32 atan2(f32 y, f32 x) { return isnan(x) || isnan(y) ? math_bits::nan32() : (f32)atan2((f64)y, (f64)x); }
-f32 asin(f32 x) { return isnan(x) || fabs(x) > 1.0f ? math_bits::nan32() : (f32)asin((f64)x); }
-f32 acos(f32 x) { return isnan(x) || fabs(x) > 1.0f ? math_bits::nan32() : (f32)acos((f64)x); }
+f32 atan_hp(f32 x) { return isnan(x) ? math_bits::nan32() : (f32)atan((f64)x); }
+f32 atan2_hp(f32 y, f32 x) { return isnan(x) || isnan(y) ? math_bits::nan32() : (f32)atan2((f64)y, (f64)x); }
+f32 asin_hp(f32 x) { return isnan(x) || fabs(x) > 1.0f ? math_bits::nan32() : (f32)asin((f64)x); }
+f32 acos_hp(f32 x) { return isnan(x) || fabs(x) > 1.0f ? math_bits::nan32() : (f32)acos((f64)x); }
 
 } // namespace kv

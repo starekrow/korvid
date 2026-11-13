@@ -157,8 +157,8 @@ f64 tan(f64 x) {
     return math_bits::f64_of(math_bits::of(num / den) ^ (odd & 0x8000000000000000ull));
 }
 
-f32 sin(f32 x) { return isnan(x) ? math_bits::nan32() : (f32)sin((f64)x); }
-f32 cos(f32 x) { return isnan(x) ? math_bits::nan32() : (f32)cos((f64)x); }
-f32 tan(f32 x) { return isnan(x) ? math_bits::nan32() : (f32)tan((f64)x); }
+f32 sin_hp(f32 x) { return isnan(x) ? math_bits::nan32() : (f32)sin((f64)x); }
+f32 cos_hp(f32 x) { return isnan(x) ? math_bits::nan32() : (f32)cos((f64)x); }
+f32 tan_hp(f32 x) { return isnan(x) ? math_bits::nan32() : (f32)tan((f64)x); }
 
 } // namespace kv

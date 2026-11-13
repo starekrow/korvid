@@ -230,15 +230,14 @@ f64 pow(f64 x, f64 y) {
     return (x < 0.0 && odd) ? -r : r;
 }
 
-f32 exp(f32 x)   { return isnan(x) ? math_bits::nan32() : (f32)exp((f64)x); }
-f32 exp2(f32 x)  { return isnan(x) ? math_bits::nan32() : (f32)exp2((f64)x); }
-f32 log(f32 x)   { f64 r = log((f64)x); return isnan(r) ? math_bits::nan32() : (f32)r; }
-f32 log2(f32 x)  { f64 r = log2((f64)x); return isnan(r) ? math_bits::nan32() : (f32)r; }
-f32 log10(f32 x) { f64 r = log10((f64)x); return isnan(r) ? math_bits::nan32() : (f32)r; }
-// For f32, one double carries y log2 x well enough (|y log2 x| <= 150 short of an overflow
-// or an underflow, 2^-45 of the result): the ordinary case skips the two-double path.
-f32 pow(f32 x, f32 y) {
-    if (x > 0.0f && x != 1.0f && isfinite(x) && isfinite(y) && y != 0.0f) return (f32)exp2((f64)y * log2((f64)x));
+f32 exp_hp(f32 x)   { return isnan(x) ? math_bits::nan32() : (f32)exp((f64)x); }
+f32 exp2_hp(f32 x)  { return isnan(x) ? math_bits::nan32() : (f32)exp2((f64)x); }
+f32 log_hp(f32 x)   { f64 r = log((f64)x); return isnan(r) ? math_bits::nan32() : (f32)r; }
+f32 log2_hp(f32 x)  { f64 r = log2((f64)x); return isnan(r) ? math_bits::nan32() : (f32)r; }
+f32 log10_hp(f32 x) { f64 r = log10((f64)x); return isnan(r) ? math_bits::nan32() : (f32)r; }
+// The two-double pow, rounded: correctly rounded where the one-double fast path (fast.cc)
+// misses about one input in 10^6.
+f32 pow_hp(f32 x, f32 y) {
     f64 r = pow((f64)x, (f64)y);
     return isnan(r) ? math_bits::nan32() : (f32)r;
 }

@@ -12,8 +12,16 @@ for some inputs, and a game that steps the same simulation on two of them drifts
 Here the exact functions (`floor`, `fmod`, `sqrt`, ...) are computed by their bits or by
 the instruction, and the transcendentals in double with `+ - * /` alone and rounded once,
 which every IEEE 754 machine does alike as long as no multiply is fused into an add (the
-toolchains see to that). The f32 ones are correctly rounded for all but a handful of the
-2^32 inputs; `check/README.md` has the counts and the speed against glibc.
+toolchains see to that).
+
+Each f32 transcendental comes in two kinds. The default (`sin`) is built for speed: as
+fast as glibc's or near it (`sinf` and `cosf` faster), within an ulp, and correctly
+rounded on all but a few dozen of the 2^32 inputs, where glibc's `sinf` misses about one
+in a hundred. The `_hp` one (`sin_hp`) is correctly rounded on all but a handful, at
+about twice the default's time. Both give the same bits on every platform, so a game can
+mix them freely; `_hp` is for a value that must be the right one to the last bit, a
+reference to compare against or a result checked against another library's.
+`check/README.md` has the counts and the times.
 
 ## How it works
 
@@ -64,7 +72,9 @@ Header `korvid/math/scalar.h` (in `kv`, each for `f32` and `f64`, by argument ty
 | name | kind | what |
 |---|---|---|
 | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2` | functions | radians |
-| `exp`, `exp2`, `log`, `log2`, `log10`, `pow` | functions | `log2` of a power of two is exact; `pow` with an integer exponent of 64 or less is repeated squaring, exact when the result is |
+| `exp`, `exp2`, `log`, `log2`, `log10`, `pow` | functions | `log2` of a power of two is exact; `pow` is exact when the result is |
+| `sin_hp`, ..., `pow_hp` | functions | the same thirteen, correctly rounded nearly always and slower (for `f64` the same functions under a second name) |
+| `math_raw::sin`, ... | functions | the f32 defaults' double results before their rounding; the tests hash these |
 | `sqrt`, `fabs`, `floor`, `ceil`, `trunc`, `round`, `lround`, `fmod`, `copysign`, `ldexp`, `frexp` | functions | exact; `lround` returns `i64` |
 | `isnan`, `isinf`, `isfinite`, `signbit` | functions | by the bits |
 | `KV_PI`, `KV_INF`, `KV_NAN` | constants | `f32`; every NaN the functions return is `KV_NAN` (0x7fc00000), or its f64 form |

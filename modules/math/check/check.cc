@@ -61,6 +61,7 @@ struct Fn2 {
     MpfrFn2 mpfr;
 };
 
+// The defaults, then the _hp ones; the f64 functions once (with the defaults' rows).
 static const Fn1 kFn1[] = {
     {"sin", kv::sin, kv::sin, ::sin, mpfr_sin},       {"cos", kv::cos, kv::cos, ::cos, mpfr_cos},
     {"tan", kv::tan, kv::tan, ::tan, mpfr_tan},       {"asin", kv::asin, kv::asin, ::asin, mpfr_asin},
@@ -68,10 +69,18 @@ static const Fn1 kFn1[] = {
     {"exp", kv::exp, kv::exp, ::exp, mpfr_exp},       {"exp2", kv::exp2, kv::exp2, ::exp2, mpfr_exp2},
     {"log", kv::log, kv::log, ::log, mpfr_log},       {"log2", kv::log2, kv::log2, ::log2, mpfr_log2},
     {"log10", kv::log10, kv::log10, ::log10, mpfr_log10},
+    {"sin_hp", kv::sin_hp, nullptr, ::sin, mpfr_sin},       {"cos_hp", kv::cos_hp, nullptr, ::cos, mpfr_cos},
+    {"tan_hp", kv::tan_hp, nullptr, ::tan, mpfr_tan},       {"asin_hp", kv::asin_hp, nullptr, ::asin, mpfr_asin},
+    {"acos_hp", kv::acos_hp, nullptr, ::acos, mpfr_acos},  {"atan_hp", kv::atan_hp, nullptr, ::atan, mpfr_atan},
+    {"exp_hp", kv::exp_hp, nullptr, ::exp, mpfr_exp},       {"exp2_hp", kv::exp2_hp, nullptr, ::exp2, mpfr_exp2},
+    {"log_hp", kv::log_hp, nullptr, ::log, mpfr_log},       {"log2_hp", kv::log2_hp, nullptr, ::log2, mpfr_log2},
+    {"log10_hp", kv::log10_hp, nullptr, ::log10, mpfr_log10},
 };
 static const Fn2 kFn2[] = {
     {"atan2", kv::atan2, kv::atan2, mpfr_atan2},
     {"pow", kv::pow, kv::pow, mpfr_pow},
+    {"atan2_hp", kv::atan2_hp, nullptr, mpfr_atan2},
+    {"pow_hp", kv::pow_hp, nullptr, mpfr_pow},
 };
 
 static u32 bits32(float x) { u32 b; memcpy(&b, &x, 4); return b; }
@@ -233,11 +242,11 @@ int main(int argc, char** argv) {
     for (const Fn1& f : kFn1) if (!only || !strcmp(only, f.name)) exhaustive_f32(f);
     for (const Fn2& f : kFn2) if (!only || !strcmp(only, f.name)) sampled_f32_2(f, 200000000);
     for (const Fn1& f : kFn1) {
-        if (only && strcmp(only, f.name)) continue;
+        if ((only && strcmp(only, f.name)) || !f.kv64) continue;
         sampled_f64(f.name, [&](Mpfr& m, double x, double, double* got, double* want) { *got = f.kv64(x); *want = m.f64(f.mpfr, x); }, 4000000);
     }
     for (const Fn2& f : kFn2) {
-        if (only && strcmp(only, f.name)) continue;
+        if ((only && strcmp(only, f.name)) || !f.kv64) continue;
         sampled_f64(f.name, [&](Mpfr& m, double x, double y, double* got, double* want) {
             if (f.mpfr == mpfr_pow) { x = fabs(x); }
             *got = f.kv64(x, y); *want = m.f64(f.mpfr, x, y); }, 4000000);

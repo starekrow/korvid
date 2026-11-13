@@ -7,9 +7,10 @@
 // src/: each is computed in double with + - * / alone, from constants generated once
 // (check/gen_constants.py), and rounded once at the end, so any IEEE 754 machine that
 // does not fuse a multiply into an add gets the same result. The toolchains pin that
-// (-ffp-contract=off, /fp:precise). The f32 ones are correctly rounded nearly always
-// (check/README.md has the counts); the f64 ones are within a few units in the last place.
-// Both overloads take their type: sin(0.5f) is f32, sin(0.5) is f64.
+// (-ffp-contract=off, /fp:precise). Each f32 transcendental comes twice: the default,
+// fast and within an ulp, and the _hp one, correctly rounded nearly always and slower
+// (check/README.md has the counts and the times). The f64 ones are within a few ulp.
+// The overloads take their type: sin(0.5f) is f32, sin(0.5) is f64.
 #pragma once
 #include "korvid/core/types.h"
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -34,6 +35,11 @@ inline f64 nan64() { return f64_of(0x7ff8000000000000ull); }
 // The nearest integer to v, |v| < 2^51, without a branch: adding 1.5 * 2^52 leaves no bits
 // below the units, and taking it away again is exact. Ties go to even.
 inline f64 nearest(f64 v) { return (v + 0x1.8p52) - 0x1.8p52; }
+// c ? a : b by the bits, so the compiler cannot make a branch of it.
+inline f64 select(bool c, f64 a, f64 b) {
+    u64 m = 0ull - (u64)c;
+    return f64_of((of(a) & m) | (of(b) & ~m));
+}
 } // namespace math_bits
 
 // ---- classification -----------------------------------------------------------
@@ -107,6 +113,10 @@ f64 fmod(f64 x, f64 y);            // x - n*y, n = trunc(x/y), exact; the sign o
 inline f32 fmod(f32 x, f32 y) { return (f32)fmod((f64)x, (f64)y); } // exact in double, so exact once rounded
 
 // ---- transcendental -------------------------------------------------------------
+// f32, the defaults: as fast as glibc's or near it, never more than an ulp from the true
+// value and correctly rounded for all but a few dozen of the 2^32 inputs (check/README.md),
+// the same bits on every platform. Each is a short polynomial in double over a table or
+// a reduction, rounded once.
 f32 sin(f32 x);
 f32 cos(f32 x);
 f32 tan(f32 x);
@@ -121,6 +131,44 @@ f32 log2(f32 x);
 f32 log10(f32 x);
 f32 pow(f32 x, f32 y);
 
+// The defaults' double results, before their one rounding to f32: what the tests hash. A
+// platform whose arithmetic differs moves these in their last bits, which the rounding to
+// f32 would hide on all but the rare input near a rounding boundary.
+namespace math_raw {
+f64 sin(f32 x);
+f64 cos(f32 x);
+f64 tan(f32 x);
+f64 asin(f32 x);
+f64 acos(f32 x);
+f64 atan(f32 x);
+f64 atan2(f32 y, f32 x);
+f64 exp(f32 x);
+f64 exp2(f32 x);
+f64 log(f32 x);
+f64 log2(f32 x);
+f64 log10(f32 x);
+f64 pow(f32 x, f32 y);
+} // namespace math_raw
+
+// f32, high precision: correctly rounded for all but a handful of the 2^32 inputs, at
+// about twice the defaults' time. The same bits everywhere too: a game may mix them,
+// say _hp where a value is kept or compared and the default where it is drawn.
+f32 sin_hp(f32 x);
+f32 cos_hp(f32 x);
+f32 tan_hp(f32 x);
+f32 asin_hp(f32 x);
+f32 acos_hp(f32 x);
+f32 atan_hp(f32 x);
+f32 atan2_hp(f32 y, f32 x);
+f32 exp_hp(f32 x);
+f32 exp2_hp(f32 x);
+f32 log_hp(f32 x);
+f32 log2_hp(f32 x);
+f32 log10_hp(f32 x);
+f32 pow_hp(f32 x, f32 y);
+
+// f64: one kind, within an ulp or a few. The _hp names are the same functions, so code
+// written for either type says _hp alike.
 f64 sin(f64 x);
 f64 cos(f64 x);
 f64 tan(f64 x);
@@ -134,5 +182,18 @@ f64 log(f64 x);
 f64 log2(f64 x);
 f64 log10(f64 x);
 f64 pow(f64 x, f64 y);
+inline f64 sin_hp(f64 x) { return sin(x); }
+inline f64 cos_hp(f64 x) { return cos(x); }
+inline f64 tan_hp(f64 x) { return tan(x); }
+inline f64 asin_hp(f64 x) { return asin(x); }
+inline f64 acos_hp(f64 x) { return acos(x); }
+inline f64 atan_hp(f64 x) { return atan(x); }
+inline f64 atan2_hp(f64 y, f64 x) { return atan2(y, x); }
+inline f64 exp_hp(f64 x) { return exp(x); }
+inline f64 exp2_hp(f64 x) { return exp2(x); }
+inline f64 log_hp(f64 x) { return log(x); }
+inline f64 log2_hp(f64 x) { return log2(x); }
+inline f64 log10_hp(f64 x) { return log10(x); }
+inline f64 pow_hp(f64 x, f64 y) { return pow(x, y); }
 
 } // namespace kv
