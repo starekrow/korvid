@@ -1,5 +1,5 @@
 // kvscript: the module. One command, `kvscript run SCRIPT [ARGS...]`: a Lua state with the
-// standard libraries and `kv` (image, font, zip, fs), the script read through the
+// standard libraries and `kv` (image, font, zip, fs, json, sha256, random), the script read through the
 // platform's blocking I/O and run to its end, inside the command, on the main thread; then
 // the tool finishes with the script's status. `arg` holds the script (arg[0]) and its
 // arguments, which also come to the chunk as `...`. A script that returns a number exits
@@ -14,6 +14,7 @@
 #include "korvid/core/format.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/module.h"
+#include "korvid/core/random.h"
 #include "korvid/inflate/inflate.h"
 #include "korvid/pack/zip.h"
 #include "korvid/platform/io.h"
@@ -205,6 +206,51 @@ int zip_has(lua_State* L) {
 constexpr luaL_Reg k_zip_methods[] = {{"names", zip_names}, {"read", zip_read}, {"has", zip_has}, {nullptr, nullptr}};
 constexpr luaL_Reg k_zip[] = {{"open", zip_open}, {nullptr, nullptr}};
 
+// ---- kv.random --------------------------------------------------------------------------------
+// kv.random(seed): the engine's Mt19937 seeded as Python's random.Random(seed), with Python's
+// names, so a tool ported from Python draws the same numbers: r:random(), r:randint(a, b),
+// r:randrange(n), r:choice(list), r:getrandbits32().
+
+constexpr const char* kRandomMeta = "kv.random";
+
+Mt19937* random_check(lua_State* L) { return (Mt19937*)luaL_checkudata(L, 1, kRandomMeta); }
+int random_new(lua_State* L) {
+    lua_Integer seed = luaL_checkinteger(L, 1);
+    if (seed < 0) seed = -seed; // Python seeds from abs(seed)
+    Mt19937* m = (Mt19937*)lua_newuserdatauv(L, sizeof(Mt19937), 0);
+    *m = Mt19937::seeded((u64)seed);
+    luaL_setmetatable(L, kRandomMeta);
+    return 1;
+}
+int random_random(lua_State* L) { lua_pushnumber(L, random_check(L)->unit()); return 1; }
+int random_bits(lua_State* L) { lua_pushinteger(L, random_check(L)->next()); return 1; }
+int random_randrange(lua_State* L) {
+    Mt19937* m = random_check(L);
+    lua_Integer n = luaL_checkinteger(L, 2);
+    if (n <= 0 || n > 0xffffffffll) return luaL_error(L, "random: randrange(%d): 1 to 2^32 - 1", (int)n);
+    lua_pushinteger(L, m->below((u32)n));
+    return 1;
+}
+int random_randint(lua_State* L) {
+    Mt19937* m = random_check(L);
+    lua_Integer a = luaL_checkinteger(L, 2), b = luaL_checkinteger(L, 3);
+    if (b < a || b - a >= 0xffffffffll) return luaL_error(L, "random: randint(%d, %d)", (int)a, (int)b);
+    lua_pushinteger(L, m->range(a, b));
+    return 1;
+}
+int random_choice(lua_State* L) {
+    Mt19937* m = random_check(L);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    lua_Integer n = luaL_len(L, 2);
+    if (n <= 0) return luaL_error(L, "random: choice of an empty list");
+    lua_geti(L, 2, (lua_Integer)m->below((u32)n) + 1);
+    return 1;
+}
+constexpr luaL_Reg k_random_methods[] = {
+    {"random", random_random}, {"randint", random_randint}, {"randrange", random_randrange},
+    {"choice", random_choice}, {"getrandbits32", random_bits}, {nullptr, nullptr},
+};
+
 // ---- running a script ----------------------------------------------------------------------
 
 int traceback(lua_State* L) {
@@ -230,6 +276,14 @@ int run_script(const char* path, Span<const char* const> args) {
     lua_setfield(L, -2, "zip");
     kvscript_open_fs(L);
     lua_setfield(L, -2, "fs");
+    kvscript_open_json_sha(L);
+    luaL_newmetatable(L, kRandomMeta);
+    lua_newtable(L);
+    luaL_setfuncs(L, k_random_methods, 0);
+    lua_setfield(L, -2, "__index");
+    lua_pop(L, 1);
+    lua_pushcfunction(L, random_new);
+    lua_setfield(L, -2, "random");
     lua_setglobal(L, "kv");
     lua_createtable(L, (int)args.len, 1);
     lua_pushstring(L, path);

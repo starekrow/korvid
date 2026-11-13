@@ -192,7 +192,7 @@ state.
   bullets. The tiles never move: each plane's layer is scrolled by its rate times the speed
   (`sprite/layers.h`), wrapped by a whole tile as a snap, so a plane is one value a tick.
 - **The ground** (`ground.cc`, `assets/maps/`): a stage may name a Tiled map, here
-  Shoreline's sea and islands, written by `tools/make_maps.py` from Kenney's terrain tiles
+  Shoreline's sea and islands, written by `tools/make_maps.lua` from Kenney's terrain tiles
   and drawn at twice their size. Its 15,000 tiles are spawned once into the tilemap
   module's still kind and scrolled by layer with the stage's distance, so they cost the
   extract nothing a tick. The map's `enemies` layer places the ground rows: turrets, tanks
@@ -378,7 +378,7 @@ state.
 | `assets/stages/shoreline.stage.json`, `assets/stages/orbit.stage.json`, `assets/maps/` | the stages; Shoreline's ground map and tileset |
 | `assets/ui/arcfire.ui.json` | the HUD and every screen |
 | `assets/CREDITS.md`, `assets/LICENSE-*.txt` | who made what |
-| `tools/make_art.py`, `tools/cut_art.lua`, `tools/make_maps.py`, `tools/make_sounds.py` | copies the vendored art in and makes `assets/made/`'s cuts and plain shapes; cuts the bosses, Orbit's segments, debris and capital ship, the egg, the items, the beam and the clouds from the CC0 packs; writes the maps; copies the sounds in and resamples the music |
+| `tools/make_art.lua`, `tools/cut_art.lua`, `tools/make_maps.lua`, `tools/make_sounds.lua` (`kormake run`) | copies the vendored art in and makes `assets/made/`'s cuts and plain shapes; cuts the bosses, Orbit's segments, debris and capital ship, the egg, the items, the beam and the clouds from the CC0 packs; writes the maps; copies the sounds in and resamples the music |
 | `tests/` | paths; the stage file, the boss files and the parsers' rules |
 | `docs/` | the PRDs and the performance notebook |
 

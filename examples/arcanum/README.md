@@ -100,7 +100,7 @@ from an older version".
   integer zoom that shows 240 rows, with pixel snap.
 - **The credits** are `assets/credits.json`, read as a blob and shown as one rich-text label
   in a scroll. A test checks that every author `CREDITS.md` names appears in them.
-- **The maps** were first written by `tools/make_maps.py` (stdlib Python). They are plain
+- **The maps** were first written by `tools/make_maps.lua` (`kormake run`; once Python). They are plain
   Tiled JSON: open `assets/maps/*.tmj` in Tiled, edit, save, then type `level reload` into
   the CLI (`--cli-stdin`) to see the change without restarting.
 
@@ -114,7 +114,7 @@ from an older version".
 | `src/main.cc` | the frame loop's config |
 | `assets/maps/` | `village.tmj`, `field.tmj` and the four tilesets (`.tsj`) |
 | `assets/credits.json`, `assets/CREDITS.md`, `assets/LICENSE-NinjaAdventure.txt` | who made what |
-| `tools/make_maps.py` | the maps' first versions |
+| `tools/make_maps.lua` | the maps' first versions |
 | `tests/credits_test.cc` | the credits name everyone |
 
 What the game wanted and the engine did not have is in `docs/design/arcanum-notes.md`.

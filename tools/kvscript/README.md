@@ -3,7 +3,7 @@
 The script runner, `bin/kvscript`: Lua 5.5 with the engine's modules as libraries, for the
 tools that make a game's assets: cut sprites from a sheet, fit and composite them, draw
 a few letters, read a zip of a pack, write PNGs. Before it they were Python scripts that
-needed Pillow; now they need nothing the engine does not build. It is an engine tool, as
+needed Python and Pillow; now they need nothing the engine does not build. It is an engine tool, as
 `kpack` and `picture` are (see `modules/tool`): built for the host, its one command
 `kvscript run`, which `kormake run` builds and calls.
 
@@ -32,6 +32,9 @@ Lua's own libraries, all of them, and `kv`:
 | `img:save(path)`, `img:encode()` | PNG, to a file or as a string |
 | `kv.font.load(path, px)`, `font:draw(img, text, x, y, r, g, b, a [, anchor])`, `font:measure(text)` | TrueType (stb_truetype) at px to the em; anchor `l`/`m`/`r` then `a`/`m`/`s`/`d` |
 | `kv.zip.open(path)`, `z:names()`, `z:read(name)`, `z:has(name)` | a zip read whole; names in the archive's order; entries stored or deflated, CRCs checked |
+| `kv.json.encode(value [, {indent = n, separators = {item, key}}])`, `kv.json.object(k, v, ...)`, `kv.json.null` | JSON as Python's `json.dump` writes it: objects keep the order their keys were set, floats as Python's `repr`, ASCII escapes; a plain table is an array |
+| `kv.sha256(bytes)` | the digest, 64 hex digits |
+| `kv.random(seed)`, `r:random()`, `r:randint(a, b)`, `r:randrange(n)`, `r:choice(list)`, `r:getrandbits32()` | the engine's `Mt19937`, seeded as Python's `random.Random(seed)`: a port draws the same numbers |
 | `kv.fs.read`, `write`, `exists`, `is_file`, `is_dir`, `mkdir`, `list`, `remove`, `remove_tree`, `temp_dir` | files through the platform (UTF-8 paths on every OS); `read` and `write` return nil and a message on failure, `list` every file under a directory |
 
 Use `kv.fs` rather than Lua's `io` for files: `io` is the C library's, which on Windows
@@ -47,8 +50,12 @@ does not take UTF-8 paths.
   `key`, `scale` and `bbox` are Pillow's crop, a color key, `point(lambda v: int(v * k))`
   and `getbbox`; `font:draw` places and blends text as `ImageDraw.text` does into RGBA.
   arcfire's `cut_art.lua`, ported from `cut_art.py`, makes all twenty of its pictures
-  identical to Pillow's in every channel. Only the PNG bytes differ: the image module's
-  encoder is not Pillow's.
+  identical to Pillow's in every channel, and `make_art.lua` its eight. Only the PNG bytes
+  differ: the image module's encoder is not Pillow's.
+- **Python's files, to the byte.** `kv.json`, `kv.random` and Lua's `string.pack` were
+  enough for the other ports to write exactly what the Python wrote: arcfire's
+  `make_maps.lua` (Shoreline's map and tileset, the islands placed by Python's random
+  numbers) and `make_sounds.lua` (the music, resampled), and arcanum's `make_maps.lua`.
 - **The engine's math.** Lua's `math` library and its `%`, `^` and `//` are kv's
   (`modules/math`, through the lua module), so a script computes the same on every
   platform, as the engine does.

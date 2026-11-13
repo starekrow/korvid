@@ -19,5 +19,7 @@ void kvscript_open_image(lua_State* L);
 void kvscript_open_font(lua_State* L);
 void kvscript_open_zip(lua_State* L);
 void kvscript_open_fs(lua_State* L);
+// Sets kv.sha256 and kv.json on the table at the top of the stack.
+void kvscript_open_json_sha(lua_State* L);
 
 } // namespace kv
