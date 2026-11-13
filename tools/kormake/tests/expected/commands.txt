@@ -33,6 +33,8 @@ $ kormake graph --why base cross-dev
 base@cross-dev: pulled in by root 'all'
 base@{host}-dev: pulled in by compiler
   compiler@{host}-dev: pulled in by gfx (tool)
+  gfx@cross-dev: pulled in by game
+  game@cross-dev: pulled in by root 'all'
 [exit 0]
 
 $ kormake build extra host-dev

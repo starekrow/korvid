@@ -119,7 +119,9 @@ function M.run(c, platform, config, opts)
   local visiting = {}
   local stack = {}
 
-  local function instance_of(name, plat, conf, why)
+  -- why: who asked, for messages; parent: that instance (none for a root), which graph
+  -- --why walks.
+  local function instance_of(name, plat, conf, why, parent)
     local rec = by_name[name]
     if not rec then util.fail("module '%s' is needed by %s but does not exist", name, why) end
     if host_only(rec) then plat, conf = host_platform, host_config end
@@ -142,7 +144,7 @@ function M.run(c, platform, config, opts)
     local prefix = (plat == platform and conf == config) and "" or "host/"
     -- Selectable: what a command line can name, with a phony of its module's name; the
     -- target's instance, or a host module's only one.
-    local inst = { module = rec, platform = plat, config = conf, key = key, deps = {}, tools = {}, why = why, tests = false,
+    local inst = { module = rec, platform = plat, config = conf, key = key, deps = {}, tools = {}, why = why, parent = parent, tests = false,
                    prefix = prefix, toolchain = pp.toolchain, host = (plat == host_platform and conf == host_config),
                    selectable = (prefix == "" or host_only(rec)) and rec.fields.provides ~= "toolchain"
                      and not rec.fields.system and not rec.fields.prebuilt }
@@ -156,14 +158,14 @@ function M.run(c, platform, config, opts)
       if drec and host_only(drec) and not host_only(rec) then
         util.fail("'%s' links '%s', which is built for the host only; name it in tools instead", name, dep)
       end
-      local d = instance_of(dep, plat, conf, name)
+      local d = instance_of(dep, plat, conf, name, inst)
       inst.deps[#inst.deps + 1] = d
       -- An interface: whoever uses it links the backend too, unless this is the backend.
       if interfaces[dep] and rec.fields.provides ~= dep then
         local bound = pp.bindings[dep]
         if not bound then util.soft_fail("'%s' depends on interface '%s' but no backend is bound for %s", name, dep, plat) end
         for _, b in ipairs(bound) do
-          local bi = instance_of(b, plat, conf, name .. " (via interface " .. dep .. ")")
+          local bi = instance_of(b, plat, conf, name .. " (via interface " .. dep .. ")", inst)
           if not util.contains(inst.deps, bi) then inst.deps[#inst.deps + 1] = bi end
         end
       end
@@ -183,7 +185,7 @@ function M.run(c, platform, config, opts)
         if not bound then util.soft_fail("'%s' needs tool interface '%s' but no backend is bound for %s", name, tname, plat) end
         tmod = bound[1]
       end
-      local ti = instance_of(tmod, host_platform, host_config, name .. " (tool)")
+      local ti = instance_of(tmod, host_platform, host_config, name .. " (tool)", inst)
       inst.tools[#inst.tools + 1] = { instance = ti, spec = spec, name = tname }
     end
 

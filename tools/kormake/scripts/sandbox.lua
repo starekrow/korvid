@@ -32,18 +32,24 @@ local function copy_data(v, depth)
   end
 end
 
+-- What any module may set.
 local module_fields = {
   output = true, deps = true, provides = true, platforms = true, external = true, tools = true,
-  exports = true, sources = true, defines = true, prebuilt = true, system = true, bindings = true,
-  platform = true, unity = true, engine_module = true, module_list = true, licenses = true, exe = true, private_includes = true,
-  tag = true, srcdirs = true, cxx = true, cxxflags = true, ldflags = true, configs = true, ar = true, externals = true,
-  -- A toolchain's own: the linker, its compile/archive/link rules, how it names outputs,
-  -- how it spells flags, and a probe that finds the tools on the host.
-  link = true, rules = true, obj_suffix = true, exe_suffix = true, lib_file = true,
+  exports = true, sources = true, defines = true, prebuilt = true, system = true,
+  unity = true, engine_module = true, module_list = true, licenses = true, exe = true, private_includes = true,
+}
+-- What only a toolchain (provides = "toolchain") may set, at its top or in a per_platform
+-- section: its tag and source directories, the compiler, archiver and linker with their
+-- flags (configs: per config), what each external means (externals) and the default
+-- backend of each interface (bindings), its compile/archive/link rules, how it names
+-- outputs and spells flags, and a probe that finds the tools on the host.
+local toolchain_fields = {
+  tag = true, srcdirs = true, cxx = true, ar = true, link = true, cxxflags = true, ldflags = true, configs = true,
+  externals = true, bindings = true, rules = true, obj_suffix = true, exe_suffix = true, lib_file = true,
   flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, probe = true,
   sdk = true, -- the Apple SDK the xcode probe asks xcrun for ("macosx")
   flag_framework = true, -- how a toolchain links an external's frameworks ("-framework %s")
-  package = true, -- "app": kormake package writes an application bundle (package_app.lua)
+  package = true, -- "app" or "iosapp": kormake package writes an application bundle (package_app.lua)
   os_min = true,  -- the oldest OS release the toolchain builds for ("26.0"), for what packaging writes
   -- A toolchain that serves several platforms: per_platform[<platform>] is laid over its
   -- fields for that platform (resolve.lua says how); triple is the target's
@@ -70,9 +76,23 @@ function M.eval_module(path, text)
     result = { name = name, fields = {} }
     return function(fields)
       if type(fields) ~= "table" then util.fail("%s: module '%s' takes a table", path, name) end
+      local toolchain = fields.provides == "toolchain"
       for k, v in pairs(fields) do
-        if type(k) ~= "string" or not module_fields[k] then util.fail("%s: module '%s' has an unknown field '%s'", path, name, tostring(k)) end
+        if type(k) ~= "string" or not (module_fields[k] or toolchain_fields[k]) then
+          util.fail("%s: module '%s' has an unknown field '%s'", path, name, tostring(k))
+        end
+        if toolchain_fields[k] and not toolchain then
+          util.fail("%s: module '%s' sets '%s', which only a toolchain (provides = \"toolchain\") may set", path, name, k)
+        end
         result.fields[k] = copy_data(v)
+      end
+      for plat, sec in pairs(result.fields.per_platform or {}) do
+        if type(sec) ~= "table" then util.fail("%s: per_platform.%s takes a table", path, tostring(plat)) end
+        for k in pairs(sec) do
+          if not toolchain_fields[k] or k == "per_platform" then
+            util.fail("%s: module '%s': per_platform.%s sets '%s', which is not a toolchain field", path, name, tostring(plat), tostring(k))
+          end
+        end
       end
     end
   end

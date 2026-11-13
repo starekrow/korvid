@@ -302,6 +302,8 @@ interface), and `probe` (`"msvc"` or `"xcode"`: a script that finds the compiler
 and Ninja). For a toolchain that serves several platforms there are also `per_platform`,
 `triple`, `family`, `sdk` and `os_min`, along with `package` (`"app"` or `"iosapp"`),
 `test_runner` and `test_jobs`. `modules/toolchain-linux/module.lua` is the plain case.
+Another module that sets one of these is an error, as is a `per_platform` section that
+sets anything else.
 
 An external in a toolchain's `externals` lists `libs` to link, and Apple `frameworks`.
 For a package kept in a directory (an SDK, an unpacked download), it also lists `dir`

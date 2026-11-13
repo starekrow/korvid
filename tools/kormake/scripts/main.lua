@@ -262,11 +262,10 @@ local function run(cmd, words, opts)
         if inst.module.name == opts.why then
           found = true
           print(string.format("%s: pulled in by %s", inst.key, inst.why))
-          local i = inst
-          while i and i.why and not i.why:match("^root ") do
-            local parent = i.why:gsub(" %(.*$", "")
-            i = g.by_key[parent .. "@" .. i.platform .. "-" .. i.config]
-            if i then print(string.format("  %s: pulled in by %s", i.key, i.why)) end
+          local i = inst.parent
+          while i do
+            print(string.format("  %s: pulled in by %s", i.key, i.why))
+            i = i.parent
           end
         end
       end
@@ -345,70 +344,8 @@ local function run(cmd, words, opts)
     return kfs.exec(string.format("%s -C %s %s", ninja, util.shell_quote(build), table.concat(targets, " ")))
   end
   if cmd == "package" then
-    -- A self-contained directory: the executable, its pack, its shaders, the licenses of
-    -- everything it links. dist/<exe>/ under the root, replaced each time.
     if not selected or #selected ~= 1 then util.fail("package makes one executable: name it (kormake package NAME [TARGET])") end
-    local inst = selected[1]
-    local exe = inst.module.fields.exe or inst.module.name
-    if inst.module.fields.output ~= "exe" or inst.prefix ~= "" then util.fail("'%s' is not an executable of %s", inst.module.name, target) end
-    local exe_file = inst.module.fields.exe or inst.module.name
-    local exe_bin = exe_file .. inst.toolchain.fields.exe_suffix
-    -- Its packs: what its per-exe rules write, as emit named them.
-    local packs = inst.per_exe_outputs or {}
-    local q = util.shell_quote
-    local want = { q("bin/" .. exe_bin) }
-    for _, p in ipairs(packs) do want[#want + 1] = q(p) end
-    local rc = kfs.exec(string.format("%s -C %s %s", ninja, q(build), table.concat(want, " ")))
-    if rc ~= 0 then return rc end
-    local dist = util.join(c.base_dir, "dist/" .. exe)
-    if not kfs.rmtree(dist) and kfs.isdir(dist) then util.fail("package: cannot remove %s", dist) end
-    -- Where the executable goes and where what it reads goes: one directory, or for a
-    -- toolchain that packages applications, <exe>.app: a macOS one's (package = "app")
-    -- Contents/MacOS/ and Contents/Resources/, an iOS one's (package = "iosapp") top, where
-    -- both go (package_app.lua does the rest).
-    local kind = inst.toolchain.fields.package
-    local app = (kind == "app" or kind == "iosapp") and util.join(dist, exe .. ".app") or nil
-    local exe_dir = kind == "app" and util.join(app, "Contents/MacOS") or app or dist
-    local res = kind == "app" and util.join(app, "Contents/Resources") or app or dist
-    kfs.mkdirp(exe_dir)
-    kfs.mkdirp(util.join(res, "licenses"))
-    local function copy_in(from, name) kfs.copy(from, util.join(res, name or util.basename(from))) end
-    kfs.copy(util.join(build, "bin/" .. exe_bin), util.join(exe_dir, exe_bin))
-    for _, p in ipairs(packs) do copy_in(util.join(build, p)) end
-    if kfs.isdir(util.join(build, "bin/shaders")) then util.copy_tree(util.join(build, "bin/shaders"), util.join(res, "shaders")) end
-    local copied = 0
-    for _, f in ipairs({ "LICENSE", "NOTICE" }) do
-      if kfs.isfile(util.join(root, f)) then copy_in(util.join(root, f)); copied = copied + 1 end
-    end
-    local mods = {}
-    for _, d in ipairs(inst.closure) do mods[#mods + 1] = d end
-    mods[#mods + 1] = inst
-    -- Without a pack (an executable that has none), what it reads is the loose assets: its
-    -- modules' folders of bin/assets/, as the build staged them, into assets/.
-    local loose = 0
-    if #packs == 0 then
-      for _, d in ipairs(mods) do
-        local from = util.join(build, "bin/assets/" .. d.module.name)
-        if kfs.isdir(from) then util.copy_tree(from, util.join(res, "assets/" .. d.module.name)); loose = loose + 1 end
-      end
-    end
-    for _, d in ipairs(mods) do
-      for _, f in ipairs(util.as_list(d.module.fields.licenses or {})) do
-        copy_in(util.join(d.module.dir, f), "licenses/" .. d.module.name .. "-" .. util.basename(f))
-        copied = copied + 1
-      end
-    end
-    local pack_names = {}
-    for _, p in ipairs(packs) do pack_names[#pack_names + 1] = util.basename(p) end
-    local bundle = ""
-    if app then
-      local libs, signed = kormake.load("package_app").run(build, app, exe_bin, inst.toolchain, root)
-      bundle = kind == "app" and string.format(", %d librar%s bundled, signed %s", libs, libs == 1 and "y" or "ies", signed) or (", signed " .. signed)
-    end
-    print(string.format("kormake: %s: %s%s, %d license files%s%s", app or dist, exe,
-      #packs > 0 and (", " .. table.concat(pack_names, ", ")) or (loose > 0 and string.format(", loose assets of %d module%s", loose, loose == 1 and "" or "s") or ", no pack"), copied,
-      bundle, kfs.isfile(util.join(root, "LICENSE")) and "" or " (the repository has no LICENSE at its root)"))
-    return 0
+    return kormake.load("package").run(c, build, selected[1], ninja, target)
   end
   if cmd == "test" then
     -- The selection's test stamps (a directory's modules without tests skip), or `check`:

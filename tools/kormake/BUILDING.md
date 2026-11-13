@@ -61,7 +61,8 @@ tools/kormake/
   scripts/resolve.lua    builds the instance graph
   scripts/emit.lua       writes build.ninja and compile_commands.json
   scripts/probe_msvc.lua, probe_xcode.lua    toolchain probes: find the compiler, SDK and Ninja
-  scripts/package_app.lua                    the .app bundle for `kormake package` on Apple platforms
+  scripts/package.lua                        `kormake package`: dist/<exe>/
+  scripts/package_app.lua                    ... and the .app bundle on Apple platforms
   tests/run.sh       kormake's own test (see Testing kormake)
   tests/fixture/     ... an engine root of its own that the test generates
   tests/expected/    ... and what it must generate
