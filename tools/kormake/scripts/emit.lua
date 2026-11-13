@@ -464,6 +464,33 @@ function M.run(c, g, opts)
     return runtime
   end
 
+  -- What a program (an executable, or a module's tests) links and has staged beside it:
+  -- the instance's own library (a test's module) and its closure's, last dependency first;
+  -- every file the instance and its closure stage (assets, shaders) and a package's runtime
+  -- files; and the externals' link flags.
+  local function link_inputs(inst)
+    local libs, mods, staged = {}, {}, {}
+    if libs_by_key[inst.key] then libs[#libs + 1] = libs_by_key[inst.key] end
+    for i = #inst.closure, 1, -1 do
+      local d = inst.closure[i]
+      if libs_by_key[d.key] then libs[#libs + 1] = libs_by_key[d.key] end
+      mods[#mods + 1] = d.module
+      for _, r in ipairs(runtime_by_key[d.key] or {}) do staged[#staged + 1] = r end
+    end
+    mods[#mods + 1] = inst.module
+    for _, r in ipairs(runtime_by_key[inst.key] or {}) do staged[#staged + 1] = r end
+    local extlibs, extdirs = extlibs_of(inst, mods)
+    for _, r in ipairs(runtime_of(inst, mods)) do staged[#staged + 1] = r end
+    return { libs = libs, staged = staged, extlibs = extlibs,
+             flags = util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")) }
+  end
+  -- A program's link. What is staged for it is order-only: building the program also
+  -- builds what it reads, and a changed asset does not relink it.
+  local function link(inst, exe, objs, li)
+    w(string.format("build %s: %s %s %s%s\n  libs = %s%s", util.ninja_escape(exe), rule(inst, "link"), util.ninja_paths(objs),
+      util.ninja_paths(li.libs), #li.staged > 0 and (" || " .. util.ninja_paths(li.staged)) or "", li.flags, overrides(inst)))
+  end
+
   -- Libraries and executables.
   for _, inst in ipairs(g.order) do
     local m = inst.module
@@ -540,21 +567,11 @@ function M.run(c, g, opts)
         for _, r in ipairs(runtime) do outs[#outs + 1] = r end
         outputs_by_key[inst.key] = outs
       elseif output == "exe" then
-        local libs, mods, rt = {}, {}, {}
-        for i = #inst.closure, 1, -1 do
-          local d = inst.closure[i]
-          if libs_by_key[d.key] then libs[#libs + 1] = libs_by_key[d.key] end
-          mods[#mods + 1] = d.module
-          for _, r in ipairs(runtime_by_key[d.key] or {}) do rt[#rt + 1] = r end
-        end
-        mods[#mods + 1] = m
-        local extlibs, extdirs = extlibs_of(inst, mods)
-        inst.extlibs = extlibs
-        for _, r in ipairs(runtime) do rt[#rt + 1] = r end
-        for _, r in ipairs(runtime_of(inst, mods)) do rt[#rt + 1] = r end
+        local li = link_inputs(inst)
+        inst.extlibs = li.extlibs
+        local rt = li.staged
         local exe = pre .. "bin/" .. exe_name(inst) .. naming.exe_suffix
-        w(string.format("build %s: %s %s %s%s\n  libs = %s%s", util.ninja_escape(exe), rule(inst, "link"), util.ninja_paths(objs), util.ninja_paths(libs),
-          #rt > 0 and (" || " .. util.ninja_paths(rt)) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
+        link(inst, exe, objs, li)
         if inst.in_roots then all[#all + 1] = exe end
         local outs = { exe }
         outputs_by_key[inst.key] = outs
@@ -606,27 +623,14 @@ function M.run(c, g, opts)
         compile(inst, s, obj, includes, define_flags(inst))
         objs[#objs + 1] = obj
       end
-      -- Order-only inputs, as an executable's: the staged assets and shaders of the module
-      -- and its closure (a test reads them beside itself), and a package's runtime files.
-      -- The stamp takes the same files as implicit inputs, so a changed asset reruns the
-      -- test without relinking it.
-      local libs, mods, rt = {}, {}, {}
-      if libs_by_key[inst.key] then libs[#libs + 1] = libs_by_key[inst.key] end
-      for i = #inst.closure, 1, -1 do
-        local d = inst.closure[i]
-        if libs_by_key[d.key] then libs[#libs + 1] = libs_by_key[d.key] end
-        mods[#mods + 1] = d.module
-        for _, r in ipairs(runtime_by_key[d.key] or {}) do rt[#rt + 1] = r end
-      end
-      mods[#mods + 1] = m
-      for _, r in ipairs(runtime_by_key[inst.key] or {}) do rt[#rt + 1] = r end
-      local extlibs, extdirs = extlibs_of(inst, mods)
-      for _, r in ipairs(runtime_of(inst, mods)) do rt[#rt + 1] = r end
+      -- Linked as an executable is. The stamp takes what is staged as implicit inputs, so
+      -- a changed asset reruns the test without relinking it.
+      local li = link_inputs(inst)
       local exe = pre .. "bin/" .. sym .. "_tests" .. flags(inst).tc.fields.exe_suffix
-      w(string.format("build %s: %s %s %s%s\n  libs = %s%s", util.ninja_escape(exe), rule(inst, "link"), util.ninja_paths(objs), util.ninja_paths(libs),
-        #rt > 0 and (" || " .. util.ninja_paths(rt)) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
+      link(inst, exe, objs, li)
       w(string.format("build %s: %s %s%s", util.ninja_escape(pre .. "test/" .. sym .. ".ok"),
-        (pre ~= "" and runner ~= "") and "run_test_host" or "run_test", util.ninja_escape(exe), #rt > 0 and (" | " .. util.ninja_paths(rt)) or ""))
+        (pre ~= "" and runner ~= "") and "run_test_host" or "run_test", util.ninja_escape(exe),
+        #li.staged > 0 and (" | " .. util.ninja_paths(li.staged)) or ""))
       if inst.tests then
         tests[#tests + 1] = exe
         checks[#checks + 1] = pre .. "test/" .. sym .. ".ok"
