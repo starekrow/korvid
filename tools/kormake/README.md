@@ -47,7 +47,7 @@ in any order, except that the command has to be the first word.
 : Builds and runs the tests of the named modules. Each module's tests are one executable,
   `bin/<module>_tests`, built from `tests/*.cc`. A test passes when it exits 0, and kormake
   then writes a stamp, `test/<module>.ok`, so a test that passed is not run again until
-  its executable changes. Naming a module that has no tests is an error. When the modules
+  its executable, or a file staged for it (an asset, a shader), changes. Naming a module that has no tests is an error. When the modules
   come from a directory, the ones without tests are skipped. With nothing selected,
   kormake runs `check`: every test that the roots ask for.
 

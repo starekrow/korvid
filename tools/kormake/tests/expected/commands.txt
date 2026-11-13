@@ -1,0 +1,40 @@
+$ kormake gen host-dev
+kormake: {root}/build/{host}-dev/build.ninja (7 instances)
+kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+[exit 0]
+
+$ kormake gen host-ship
+kormake: {root}/build/{host}-ship/build.ninja (8 instances)
+kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+[exit 0]
+
+$ kormake gen cross-dev
+kormake: {root}/build/cross-dev/build.ninja (8 instances)
+kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+[exit 0]
+
+$ kormake check cross-dev
+kormake: 9 modules, 8 instances for cross-dev, no problems
+[exit 0]
+
+$ kormake graph cross-dev
+base@cross-dev                           lib      deps:   [tests]
+base@{host}-dev                           lib      deps: 
+compiler@{host}-dev                       exe      deps: base
+gfx@cross-dev                            headers  deps: base  tools: compiler
+gfx-soft@cross-dev                       lib      deps: base
+packer@{host}-dev                         exe      deps: 
+game@cross-dev                           exe      deps: gfx, gfx-soft  tools: packer  [tests]
+[exit 0]
+
+$ kormake graph --why base cross-dev
+base@cross-dev: pulled in by root 'all'
+base@{host}-dev: pulled in by compiler
+  compiler@{host}-dev: pulled in by gfx (tool)
+[exit 0]
+
+$ kormake build extra host-dev
+kormake: extra: nothing to build for {host}-dev: external 'missing' (toolchain toolchain.host) is not at {root}/packages/missing.
+Fetch it into packages/missing.
+[exit 1]
+

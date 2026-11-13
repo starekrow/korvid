@@ -1,0 +1,33 @@
+-- A toolchain whose commands are never run: only the Ninja file it shapes matters.
+module "toolchain.cross" {
+  provides  = "toolchain",
+  platforms = { "cross" },
+  tag       = "cross",
+  srcdirs   = { "cross" },
+  cxx       = "fakecc",
+  ar        = "fakear",
+  cxxflags  = { "-std=c++20" },
+  configs   = { dev = { cxxflags = { "-O1" } }, ship = { cxxflags = { "-O2" } } },
+  ldflags   = { "-lm" },
+  rules     = {
+    cxx  = { command = "$cxx $cxxflags $defines $includes -c $in -o $out", depfile = "$out.d", deps = "gcc" },
+    ar   = { command = "$ar $out $in" },
+    link = { command = "$cxx $in -o $out $libs $ldflags" },
+  },
+  obj_suffix   = ".o",
+  exe_suffix   = "",
+  lib_file     = "lib%s.a",
+  flag_include = "-I%s",
+  flag_define  = "-D%s",
+  flag_lib     = "-l%s",
+  flag_libdir  = "-L%s",
+  flag_include_system = "-isystem%s",
+  externals = {
+    sys     = { libs = { "sys" } },
+    pkg     = { dir = "packages/pkg", include = { "include" }, libs = { "pkg" }, libdirs = { "lib" }, runtime = { "lib/pkg.dll" } },
+    missing = { dir = "packages/missing", fetch = "Fetch it into packages/missing." },
+  },
+  bindings  = { gfx = "gfx-soft" },
+  test_runner = { "%{root}/run-on-device", "--wait" },
+  test_jobs = 1,
+}

@@ -62,6 +62,9 @@ tools/kormake/
   scripts/emit.lua       writes build.ninja and compile_commands.json
   scripts/probe_msvc.lua, probe_xcode.lua    toolchain probes: find the compiler, SDK and Ninja
   scripts/package_app.lua                    the .app bundle for `kormake package` on Apple platforms
+  tests/run.sh       kormake's own test (see Testing kormake)
+  tests/fixture/     ... an engine root of its own that the test generates
+  tests/expected/    ... and what it must generate
   vendor/lua/        Lua 5.5.1
 ```
 
@@ -171,6 +174,31 @@ kormake then writes `compile_commands.json`, both beside `build.ninja` and one l
 `build`), its test stamps (for `test`), Ninja's default (for `build` with nothing
 selected), or `check` (for `test` with nothing selected). If the
 toolchain probe found a Ninja, that one is used.
+
+## Testing kormake
+
+    tools/kormake/tests/run.sh             # bootstrap, then compare
+    tools/kormake/tests/run.sh --update    # bootstrap, then write tests/expected/
+
+`tests/fixture/` is a small engine root that reaches every kind of edge kormake writes:
+a unity library with a platform source directory, a package with a runtime file, assets
+(one with a name Ninja has to escape), an interface bound to a backend, a header-only
+module that stages a tool's outputs, two host tools (one per-file rule, one per-exe pack),
+tests, a cross platform with a test runner, and a module left out for a missing package.
+Its toolchains name compilers that do not exist, since nothing is compiled.
+
+The script copies the fixture to a temporary directory, runs `gen` for `host-dev`,
+`host-ship` and `cross-dev`, and then `check`, `graph`, `graph --why` and a `build` of
+the left-out module. It compares each `build.ninja` and the commands' output with
+`tests/expected/`. Paths are written as `{root}` and `{kormake}`, and the host's
+platform as `{host}`, so the expected files are the same on Linux and macOS. When Ninja
+is on `PATH`, it also parses each file with a dry run.
+
+Run it after any change to `scripts/`. A difference is either a bug or a change you
+meant; for the second, run it with `--update` and commit `tests/expected/` with the
+change, so the diff shows what the change does to the Ninja files. The test runs on
+Linux and macOS only: Windows quotes paths its own way, so its files would need expected
+files of their own, and there is no `run.bat`.
 
 ## Diagnosing a failed build
 
