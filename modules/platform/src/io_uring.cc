@@ -7,7 +7,10 @@
 #include "korvid/core/atomic.h"
 #include "korvid/core/memory.h"
 
-#if defined(__linux__)
+// Not on Android: its seccomp policy answers an app's io_uring_setup with SIGSYS, which
+// kills the process where an error would have let it fall back (adb's shell gets EPERM,
+// so a test would not show it). Android takes the branch with no ring.
+#if defined(__linux__) && !defined(__ANDROID__)
 
 #include <errno.h>
 #include <linux/io_uring.h>

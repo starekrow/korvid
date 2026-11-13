@@ -22,4 +22,14 @@ void print_err(const char* fmt, ...) KV_PRINTF(1, 2);
 void vprint_err(const char* fmt, va_list args);
 void print_flush();
 
+// Where print, print_err and the log go, for a process with no standard streams (an
+// Android app, whose output is the system's log): when set, every write is handed to
+// `sink` as the bytes it would have sent to stdout (err false) or stderr (err true), not
+// NUL-terminated, on the calling thread; the sink cuts lines and takes its own lock. Null
+// (the default) is the C library's streams. Set before any thread prints.
+using OutputSink = void (*)(bool err, const char* text, usize len);
+void output_set_sink(OutputSink sink);
+// One write to the sink or the stream, as print and the log make them.
+void output_write(bool err, const char* text, usize len);
+
 } // namespace kv

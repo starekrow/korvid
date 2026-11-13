@@ -49,7 +49,7 @@ local toolchain_fields = {
   flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, probe = true,
   sdk = true, -- the Apple SDK the xcode probe asks xcrun for ("macosx")
   flag_framework = true, -- how a toolchain links an external's frameworks ("-framework %s")
-  package = true, -- "app" or "iosapp": kormake package writes an application bundle (package_app.lua)
+  package = true, -- "app" or "iosapp": kormake package writes an application bundle (package_app.lua); "apk": an Android package (package_apk.lua)
   os_min = true,  -- the oldest OS release the toolchain builds for ("26.0"), for what packaging writes
   -- A toolchain that serves several platforms: per_platform[<platform>] is laid over its
   -- fields for that platform (resolve.lua says how); triple is the target's
@@ -63,6 +63,13 @@ local toolchain_fields = {
   -- for a toolchain whose platforms differ in it; ndk is the Android NDK version the
   -- android probe looks for ("30.0.16248370").
   arch = true, ndk = true,
+  -- An application the OS loads as a library (Android): an executable whose closure holds
+  -- the module app_module names (the window's) is linked as app_file ("lib%s.so") with
+  -- app_ldflags after the toolchain's own; every other executable, the tests among them,
+  -- stays a program. abi is the directory such a library has in a package ("arm64-v8a"),
+  -- build_tools the SDK build tools the apk packager runs ("36.0.0"), target_api the API
+  -- level it is checked against ("36").
+  app_module = true, app_file = true, app_ldflags = true, abi = true, build_tools = true, target_api = true,
 }
 
 -- What a rule "name" { ... } in exports may set. configs: the configs whose default build

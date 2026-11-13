@@ -93,7 +93,97 @@ Four suites at once.
 - Linux: `kormake test linux-debug` and `linux-dev` pass as before, and kormake's own
   tests (`tools/kormake/tests/run.sh`).
 
+## Milestone 2: an app
+
+`window` builds as `libwindow.so`, `kormake package androidemu-debug window` writes
+`dist/window/window.apk`, and it installs, launches, logs and survives being sent away.
+
+### The build
+
+- **An app is a shared library.** Three toolchain fields: `app_module` (`platform_hid`),
+  `app_file` (`lib%s.so`) and `app_ldflags` (`-shared -Wl,--no-undefined
+  -Wl,-u,ANativeActivity_onCreate`). An executable whose closure holds the window's module
+  links that way; the rest, every test among them, stay programs for adb's shell. `main`
+  stays `main`: the entry calls it by name.
+- **`package = "apk"`** (`package_apk.lua`): a generated manifest (`org.korvid.<exe>`, API
+  33 to 36, one `NativeActivity`, `hasCode="false"`, `extractNativeLibs="false"`,
+  `configChanges` for turns and resizes, debuggable unless ship), then `aapt package` over
+  the staged `lib/<abi>/` and `assets/` with every entry stored, `zipalign -P 16`,
+  `apksigner` with the debug key (made by `keytool` the first time). Three tools from the
+  build tools and the Java runtime; no Gradle, no `javac`.
+- **`aapt`, not `aapt2`.** `aapt2 link` takes a manifest, resources and an assets directory
+  and has no way to take `lib/`; `aapt add` has no "store this" switch and deflated the
+  library, which a package with `extractNativeLibs="false"` may not hold. `aapt package`
+  does all of it in one call. It is the old tool, still in build tools 36; if it leaves,
+  the replacement is appending one stored entry to `aapt2`'s output ourselves.
+- `apksigner` on Java 25 prints four "restricted method" warnings about its own native
+  library and signs correctly; they go to `build/<target>/package.log`.
+
+### The entry
+
+`platform_hid/src/android/host_window_android.cc`, our own, in place of the NDK's
+`native_app_glue`. `ANativeActivity_onCreate` (the OS's thread) sets the callbacks and
+starts a thread that calls the game's `main`; `platform_app_main` is a plain call. The
+callbacks post to a ring and wake an `ALooper` through a pipe; `pump` drains both and the
+input queue. The window and the input queue are handed over under a lock with the OS's
+thread waiting, since on its return the old one is gone.
+
+- **Arguments**: the intent's string extra `args`, split at spaces.
+  `adb shell 'am start -n org.korvid.window/android.app.NativeActivity --es args
+  "--run-seconds 14"'`: the outer quotes matter, adb's shell splits the line again without
+  them (the first try launched with `--run-seconds` alone and "6" as a package).
+- **Output**: core gained `output_set_sink` (format.h): `print`, `print_err` and the log
+  go through one `output_write`, to the C streams unless a sink is set. The Android entry
+  sets one that cuts lines for logcat, tag `korvid` (`adb logcat -s korvid`). Core knows
+  nothing of Android.
+- **The end**: when `main` returns the activity is finished and the process `_exit`s with
+  its result (logged as `exit N`). A library stays loaded in a process that lives on, and
+  the next launch would meet the last one's statics.
+- **Full screen**: the system's bars hidden through the window's insets controller and the
+  window laid out under the cutout, by JNI on the OS's thread, again each time focus
+  returns. The window's shape follows what was asked (`setRequestedOrientation`, sensor
+  landscape or portrait) and `open` waits for the turn: `window` asked for 960x540 and got
+  2424x1080.
+
+### What it found
+
+- **io_uring kills an app.** Under adb's shell `io_uring_setup` answered `EPERM` and the
+  queue fell back, which is what milestone 1 saw. In an app the seccomp policy answers
+  with `SIGSYS`: "Fatal signal 31 (SIGSYS), code 1 (SYS_SECCOMP), syscall 425". There is
+  no error to fall back from, so `io_uring.cc` is compiled out on Android
+  (`__linux__ && !__ANDROID__`) and the queue has no ring there until R4's.
+- **The system's "Viewing full screen" tip takes the focus.** The first time any app hides
+  the bars, Android shows a tip in a window of its own (`ImmersiveModeConfirmation`) and
+  the app loses window focus until it is dismissed: `window` logged "focus gained, focus
+  lost" in its first second and took no key. That is the system working, and the sim
+  holding under it is right. In the emulator, once:
+  `adb shell settings put secure immersive_mode_confirmations confirmed`.
+- **Home in under a second does not take the surface.** A loop of Home and relaunch at
+  0.4 s a step never destroyed the window (the launcher's animation had not finished); at
+  a second a step each round does.
+
+### What ran
+
+- `window` in the emulator: opened, key A from `adb shell input keyevent`, Home ("focus
+  lost", "no surface: waiting"), relaunched ("a surface again", "focus gained"), the
+  recents screen and back, Back arriving as Escape, which closes it: `exit 0`. About 243
+  frames a second with gaps of 4 to 7 ms while on screen.
+- **The lifecycle loop**: Home and relaunch fifty times: 50 surfaces lost, 50 regained, the
+  process alive and taking a key at the end, no ANR and no fatal signal.
+- `kormake test` for `androidemu-debug`, `-dev` and `-ship`: thirteen suites now
+  (`platform_hid_tests` with the Android key table), all passing. arm64 builds the same and
+  packages `lib/arm64-v8a/libwindow.so`; not run.
+- Linux: both suites' configs pass, kormake's own tests pass, `rocks --demo --hash` runs
+  through the changed log and print.
+
+### Not done here
+
+- Touches reach `Input` (the code is iOS's shape) but `window` logs only the mouse, so
+  nothing has shown them yet: milestone 5, with the touchpad.
+- The insets read `142 137 0 63` in landscape; whether the top is the real status bar there
+  or the portrait one read too early is checked with the touchpad on screen.
+- A ship library is not stripped separately: ship compiles without `-g`.
+
 ### Still to come
 
-Milestone 2: an executable that is a shared library, the native entry, logcat, the
-packager.
+Milestone 3: assets and shaders from inside the package.

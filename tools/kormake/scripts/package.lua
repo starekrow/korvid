@@ -10,7 +10,8 @@ function M.run(c, build, inst, ninja, target)
   local root = c.root_dir
   local exe = inst.module.fields.exe or inst.module.name
   if inst.module.fields.output ~= "exe" or inst.prefix ~= "" then util.fail("'%s' is not an executable of %s", inst.module.name, target) end
-  local exe_bin = exe .. inst.toolchain.fields.exe_suffix
+  -- The file emit linked: the program, or on Android an app's lib<exe>.so.
+  local exe_bin = inst.exe_file or (exe .. inst.toolchain.fields.exe_suffix)
   -- Its packs: what its per-exe rules write, as emit named them.
   local packs = inst.per_exe_outputs or {}
   local q = util.shell_quote
@@ -28,6 +29,14 @@ function M.run(c, build, inst, ninja, target)
   local app = (kind == "app" or kind == "iosapp") and util.join(dist, exe .. ".app") or nil
   local exe_dir = kind == "app" and util.join(app, "Contents/MacOS") or app or dist
   local res = kind == "app" and util.join(app, "Contents/Resources") or app or dist
+  -- An Android package (package = "apk") is staged as it is laid out inside: the library
+  -- under lib/<abi>/, what it reads under assets/ (package_apk.lua makes the .apk of it).
+  local stage = kind == "apk" and util.join(dist, "apk") or nil
+  if stage then
+    if not inst.is_app then util.fail("package: '%s' does not link the window, so on Android it is a program for adb's shell, not an app", exe) end
+    exe_dir = util.join(stage, "lib/" .. (inst.toolchain.fields.abi or util.fail("toolchain '%s' names no abi", inst.toolchain.name)))
+    res = util.join(stage, "assets")
+  end
   kfs.mkdirp(exe_dir)
   kfs.mkdirp(util.join(res, "licenses"))
   local function copy_in(from, name) kfs.copy(from, util.join(res, name or util.basename(from))) end
@@ -63,7 +72,12 @@ function M.run(c, build, inst, ninja, target)
     local libs, signed = kormake.load("package_app").run(build, app, exe_bin, inst.toolchain, root)
     bundle = kind == "app" and string.format(", %d librar%s bundled, signed %s", libs, libs == 1 and "y" or "ies", signed) or (", signed " .. signed)
   end
-  print(string.format("kormake: %s: %s%s, %d license files%s%s", app or dist, exe,
+  local apk = nil
+  if stage then
+    local path, signed, id = kormake.load("package_apk").run(build, dist, stage, exe, exe_bin, inst.toolchain, target:match("%-([^%-]+)$"))
+    apk, bundle = path, string.format(", %s, signed %s", id, signed)
+  end
+  print(string.format("kormake: %s: %s%s, %d license files%s%s", apk or app or dist, exe,
     #packs > 0 and (", " .. table.concat(pack_names, ", ")) or (loose > 0 and string.format(", loose assets of %d module%s", loose, loose == 1 and "" or "s") or ", no pack"), copied,
     bundle, kfs.isfile(util.join(root, "LICENSE")) and "" or " (the repository has no LICENSE at its root)"))
   return 0

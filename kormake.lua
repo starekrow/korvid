@@ -66,7 +66,8 @@ root "ios" {
 -- these are the modules below the window, with their tests, which run inside the running
 -- emulator (kormake test androidemu-dev).
 root "android" {
-  modules   = { "lua", "tool", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml" },
+  modules   = { "lua", "tool", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
+                "platform_hid", "window" },
   tests     = true,
   platforms = { "android", "androidemu" },
 }

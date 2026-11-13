@@ -56,8 +56,24 @@ module "toolchain.android" {
   flag_libdir  = "-L%s",
   flag_include_system = "-isystem%s",
   externals = {
-    zlib   = { libs = { "z" } },
+    zlib    = { libs = { "z" } },
+    -- The NDK's own: the activity, its window, the looper and the input queue.
+    android = { libs = { "android" } },
   },
+  -- An executable that links the window is an app: the OS loads lib<name>.so into a process
+  -- of its own making and calls ANativeActivity_onCreate (platform_hid/src/android), which
+  -- runs the game's main on a thread. Everything else, the tests among them, is a program
+  -- for adb's shell. --no-undefined: a shared link would otherwise leave a missing symbol
+  -- for the device's loader to find.
+  app_module  = "platform_hid",
+  app_file    = "lib%s.so",
+  app_ldflags = { "-shared", "-Wl,--no-undefined", "-Wl,-u,ANativeActivity_onCreate" },
+  -- kormake package writes an .apk (package_apk.lua) with the SDK's build tools, checked
+  -- against this API level.
+  package     = "apk",
+  build_tools = "36.0.0",
+  target_api  = "36",
+  os_min      = "33",
   bindings  = {
     ["shader-compile"] = "slang",
   },
@@ -67,6 +83,7 @@ module "toolchain.android" {
     android = {
       tag  = "android",
       arch = "aarch64",
+      abi  = "arm64-v8a",
       test_runner = { "sh", "%{root}/tools/android/emu_test.sh" },
       test_jobs   = 4,
     },
@@ -74,6 +91,7 @@ module "toolchain.android" {
     androidemu = {
       tag  = "androidemu",
       arch = "x86_64",
+      abi  = "x86_64",
       test_runner = { "sh", "%{root}/tools/android/emu_test.sh" },
       test_jobs   = 4,
     },

@@ -311,7 +311,9 @@ interface), and `probe` (`"msvc"` or `"xcode"`: a script that finds the compiler
 and Ninja). For a toolchain that serves several platforms there are also `per_platform`,
 `triple`, `arch` (for platforms that differ in it: `"aarch64"`, `"x86_64"`), `family`, `sdk`,
 `ndk` (the Android NDK version the `android` probe finds) and `os_min`, along with
-`package` (`"app"` or `"iosapp"`), `test_runner` and `test_jobs`. `modules/toolchain-linux/module.lua` is the plain case.
+`package` (`"app"`, `"iosapp"` or `"apk"`), `test_runner` and `test_jobs`. A toolchain
+whose applications are libraries the OS loads (Android) says so with `app_module`,
+`app_file` and `app_ldflags`, and packages them with `abi`, `build_tools` and `target_api`. `modules/toolchain-linux/module.lua` is the plain case.
 Another module that sets one of these is an error, as is a `per_platform` section that
 sets anything else.
 

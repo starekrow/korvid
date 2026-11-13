@@ -432,9 +432,24 @@ function M.run(c, g, opts)
   end
   -- A program's link. What is staged for it is order-only: building the program also
   -- builds what it reads, and a changed asset does not relink it.
-  local function link(inst, exe, objs, li)
-    w(string.format("build %s: %s %s %s%s\n  libs = %s%s", util.ninja_escape(exe), rule(inst, "link"), util.ninja_paths(objs),
-      util.ninja_paths(li.libs), #li.staged > 0 and (" || " .. util.ninja_paths(li.staged)) or "", li.flags, overrides(inst)))
+  local function link(inst, exe, objs, li, more_ldflags)
+    w(string.format("build %s: %s %s %s%s\n  libs = %s%s%s", util.ninja_escape(exe), rule(inst, "link"), util.ninja_paths(objs),
+      util.ninja_paths(li.libs), #li.staged > 0 and (" || " .. util.ninja_paths(li.staged)) or "", li.flags, overrides(inst),
+      more_ldflags and ("\n  ldflags = " .. flags(inst).ldflags .. " " .. more_ldflags) or ""))
+  end
+  -- An executable's file under bin/, and the link flags it adds. On a toolchain whose
+  -- applications are libraries the OS loads (app_module, app_file: Android), an executable
+  -- that links the window is one: lib<name>.so, linked shared. inst.exe_file is what
+  -- `package` reads.
+  local function exe_file(inst)
+    local tcf = flags(inst).tc.fields
+    local app = false
+    if tcf.app_module and tcf.app_file and inst.prefix == "" then
+      for _, d in ipairs(inst.closure) do if d.module.name == tcf.app_module then app = true end end
+    end
+    inst.is_app = app
+    inst.exe_file = app and tcf.app_file:format(exe_name(inst)) or (exe_name(inst) .. tcf.exe_suffix)
+    return inst.exe_file, app and flag_list(tcf.app_ldflags) or nil
   end
 
   -- Libraries and executables.
@@ -516,8 +531,9 @@ function M.run(c, g, opts)
         local li = link_inputs(inst)
         inst.extlibs = li.extlibs
         local rt = li.staged
-        local exe = pre .. "bin/" .. exe_name(inst) .. naming.exe_suffix
-        link(inst, exe, objs, li)
+        local file, app_ldflags = exe_file(inst)
+        local exe = pre .. "bin/" .. file
+        link(inst, exe, objs, li, app_ldflags)
         if inst.in_roots then all[#all + 1] = exe end
         local outs = { exe }
         outputs_by_key[inst.key] = outs
