@@ -17,7 +17,7 @@ local collect = kormake.load("collect")
 local resolve = kormake.load("resolve")
 local emit = kormake.load("emit")
 
-local commands = { build = true, gen = true, check = true, graph = true, test = true, package = true, clean = true, help = true }
+local commands = { build = true, gen = true, check = true, graph = true, test = true, package = true, clean = true, help = true, run = true }
 
 local function usage()
   io.stderr:write([[
@@ -26,6 +26,7 @@ usage: kormake [COMMAND] [NAME...] [TARGET] [OPTIONS]
   build    build the named modules, or what the current directory means (the default)
   test     build and run their tests
   package  dist/<exe>/: one executable, its pack, shaders and licenses (an .app on Apple)
+  run      kormake run SCRIPT.lua [ARGS...]: the script with kvscript, built for the host
   gen      write build.ninja and compile_commands.json only
   check    resolve only: cycles, bindings, duplicates
   graph    the instance graph [--dot] [--why MODULE]
@@ -364,6 +365,27 @@ local function run(cmd, words, opts)
   return 2
 end
 
+-- `kormake run SCRIPT [ARGS...]`: the script with the engine's script runner (tools/kvscript),
+-- built for the host first (quietly: a built one costs a no-op Ninja run). Everything after
+-- the script is the script's, options and targets alike, so this comes before the
+-- command line is parsed. The script runs from the current directory.
+local function run_script(args)
+  local script = args[2]
+  if not script then util.fail("run: kormake run SCRIPT.lua [ARGS...]") end
+  local c = collect.run(collect.discover(kfs.cwd()))
+  local config = c.master.host_config or "dev"
+  local g = resolve.run(c, KORMAKE_HOST, config, {})
+  if not c.by_name.kvscript then util.fail("run: this engine has no kvscript module (tools/kvscript)") end
+  local build = emit.run(c, g, {})
+  local ninja = g.ninja and util.shell_quote(util.native(g.ninja)) or "ninja"
+  local rc = kfs.exec(string.format("%s --quiet -C %s kvscript", ninja, util.shell_quote(build)))
+  if rc ~= 0 then return rc end
+  local exe = util.join(build, "bin/kvscript" .. g.toolchain.fields.exe_suffix)
+  local words = { util.shell_quote(util.native(exe)), "run", util.shell_quote(script) }
+  for i = 3, #args do words[#words + 1] = util.shell_quote(args[i]) end
+  return kfs.exec(table.concat(words, " "))
+end
+
 -- What the Ninja file runs for the host's own steps, so no rule needs a shell: _copy IN OUT
 -- copies a file; _test EXE STAMP runs a test executable in the build directory and, if it
 -- passes, writes the stamp. Neither reads the master file.
@@ -388,6 +410,7 @@ local function internal(args)
 end
 
 local ok, result = pcall(function()
+  if arg[1] == "run" then return run_script(arg) end
   if arg[1] and arg[1]:sub(1, 1) == "_" then
     local rc = internal(arg)
     if rc then return rc end

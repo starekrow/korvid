@@ -13,6 +13,7 @@ kormake — build Korvid modules and the programs and tools made from them
     kormake check   [TARGET] [OPTIONS]
     kormake graph   [NAME...] [TARGET] [--dot] [--why MODULE] [OPTIONS]
     kormake clean   [TARGET] [OPTIONS]
+    kormake run     SCRIPT.lua [ARGS...]
     kormake help | --help | -h
     kormake --version | -v
 
@@ -80,6 +81,14 @@ in any order, except that the command has to be the first word.
   directory that selects modules), it prints only those modules and what they reach.
   Without them it prints what the roots reach. `--dot` prints Graphviz input instead, with tool edges drawn dashed. `--why MODULE`
   prints the chain of instances that pulled MODULE into the graph.
+
+**run**
+: Runs a Lua script with the engine's script runner, `kvscript` (`tools/kvscript`):
+  Lua 5.5 with `kv.image`, `kv.font`, `kv.zip` and `kv.fs`, for the tools that make a
+  game's assets. kormake builds `kvscript` for the host first (quietly; a built one costs
+  a Ninja run that does nothing) and runs the script from the current directory. Every
+  word after the script is the script's, options and targets alike. The exit status is
+  the script's.
 
 **clean**
 : Removes the target's build directory. With no TARGET, it removes every target's

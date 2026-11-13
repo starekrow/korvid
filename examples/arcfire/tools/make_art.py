@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Arcfire's art: the vendored files, copied unmodified under new names, and the pieces made
 here: cuts from the packs and plain shapes. The bosses, the egg, the clouds, the beam and
-the items come from the newer packs through tools/cut_art.py. Run from anywhere:
+the items come from the newer packs through tools/cut_art.lua. Run from anywhere:
 
     python3 examples/arcfire/tools/make_art.py ~/code/asset-packs/arcfire
 

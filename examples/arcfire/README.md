@@ -254,7 +254,7 @@ state.
   bay; then two deck hatches; then the bridge). Orbit has two more: a pair of gunships
   that come on one mark and cross each other's paths as they sway (each two turrets, then
   its bow gun; the stage waits for both), and the station core at the end, the game's last
-  three phases (a ring of six shield emitters, then four weapon mounts, then the core). The art is cut by `tools/cut_art.py`
+  three phases (a ring of six shield emitters, then four weapon mounts, then the core). The art is cut by `tools/cut_art.lua` (`kormake run`)
   from the CC0 packs (ARES hulls, surt's ship parts, Commander's capital ship) into
   `assets/generated/`. The HUD shows a boss's parts' health as a
   bar.
@@ -378,7 +378,7 @@ state.
 | `assets/stages/shoreline.stage.json`, `assets/stages/orbit.stage.json`, `assets/maps/` | the stages; Shoreline's ground map and tileset |
 | `assets/ui/arcfire.ui.json` | the HUD and every screen |
 | `assets/CREDITS.md`, `assets/LICENSE-*.txt` | who made what |
-| `tools/make_art.py`, `tools/cut_art.py`, `tools/make_maps.py`, `tools/make_sounds.py` | copies the vendored art in and makes `assets/made/`'s cuts and plain shapes; cuts the bosses, Orbit's segments, debris and capital ship, the egg, the items, the beam and the clouds from the CC0 packs; writes the maps; copies the sounds in and resamples the music |
+| `tools/make_art.py`, `tools/cut_art.lua`, `tools/make_maps.py`, `tools/make_sounds.py` | copies the vendored art in and makes `assets/made/`'s cuts and plain shapes; cuts the bosses, Orbit's segments, debris and capital ship, the egg, the items, the beam and the clouds from the CC0 packs; writes the maps; copies the sounds in and resamples the music |
 | `tests/` | paths; the stage file, the boss files and the parsers' rules |
 | `docs/` | the PRDs and the performance notebook |
 
