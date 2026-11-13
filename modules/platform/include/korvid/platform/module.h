@@ -40,7 +40,7 @@ struct PlatformMounts {
     u32         pack_count = 0;
     const char* assets_dir = nullptr;
     bool        none = false;           // mount nothing, not even <exe dir>/assets/ (a tool)
-    IoBackend   io_backend = IoBackend::Auto; // the frame loop's --io sync|uring
+    IoBackend   io_backend = IoBackend::Auto; // the frame loop's --io sync|ring
 };
 void platform_configure_mounts(const PlatformMounts& mounts);
 

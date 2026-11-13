@@ -90,7 +90,10 @@ for a drawable.
   fonts 9). `sockit2m`: 3.0 GB/s of engine reads, 5.6 GB/s straight from the
   queue; its cold pass is warm here (macOS cannot drop one file's pages unprivileged).
   A `dispatch_io` backend would move the 24 ms off the main thread and not the decoding,
-  so it waits for a game whose reads show.
+  so it waits for a game whose reads show. (Done after all, without `dispatch_io`'s
+  copies: the dispatch ring, GCD's workers doing `pread`. Orbit's boot spends 137 ms in
+  the platform pump against 199 synchronous, its worst pump 35 ms against 66; what is
+  left there is opening and sizing each file, still on the main thread.)
 
 ## Found on Linux after slice 7
 

@@ -270,7 +270,7 @@ the milestone found around them:
 - **Checked:** rocks, arcanum and arcfire packaged from `macos-ship`, run from another
   directory: SDL3 is the bundle's (`lsof` on the running process), the pack mounts from
   `Resources/`, both shader libraries load, 120 fps, and Orbit's post pass draws.
-- **I/O (R5)** stays on the sync backend: arcfire's boot reads 13 MB in one 24 ms pump,
+- **I/O (R5)** stays on the sync backend (until the dispatch ring, below): arcfire's boot reads 13 MB in one 24 ms pump,
   a quarter of its decoding. The numbers, and arcfire's performance on this machine, are in
   `arcfire-improvements.md`, "On macOS".
 - **The fps line's overdraw** is left out when the backend has no fragment counts (Metal),
@@ -418,6 +418,27 @@ with the left mouse button as a finger. The logic is plain arithmetic, tested he
 (`touchpad_tests`: the layout and its refusals, placement in the safe area, drag and clamp,
 the margins, one stick, slides, taps, the stick's finger never pressing a button). Textures
 and layout rules beyond positions are to come.
+
+## Async I/O: the dispatch ring
+
+The I/O queue's async ring (`io_ring.h`: push, enter, pop, the shape of io_uring) on the
+Apple family is `platform/src/apple/io_ring_apple.cc`, and the queue's default there.
+There is no kernel ring: POSIX AIO allows 16 requests a process, and `dispatch_io` reads
+into buffers of its own, a copy per read. So enter hands each pushed request to a
+concurrent dispatch queue (user-initiated), a GCD worker does the blocking `pread` or
+`pwrite` straight into the queue's buffer and posts the result to a completion list under
+an unfair lock, pop takes from it; a semaphore wakes a waiting enter. The queue's thread
+never blocks on a read. `--io sync` still picks the synchronous path, and the platform
+tests run every I/O test on both.
+
+Measured with `sockit2m --compare`, three runs a backend (`examples/sockit2m/README.md`
+has the table): reads straight from the queue 1.4 times as fast (8.8 GB/s cold against
+6.2), latency 6.5 ms against 9.2, worst pump 1.0 ms against 1.6; idle reads 1.3 to 1.45
+times; sockets under unbudgeted file load twice the rate. Engine-mode reads are a tick's
+latency on either backend and the same 3.0 GB/s. Orbit's boot: 137 ms in the platform
+pump against 199, worst pump 35 ms against 66. What is left on the main thread is the
+open and the size of each file, which the queue does before it hands the read over; a
+worker could do both.
 
 ### Still to come
 

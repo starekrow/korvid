@@ -123,7 +123,7 @@ struct IoQueue {
 
     bool init(Allocator* storage, u32 max_in_flight, IoBackend backend = IoBackend::Auto);
     void free();
-    const char* backend_name() const; // "io_uring", "ioring" (Windows) or "sync"
+    const char* backend_name() const; // "io_uring", "ioring" (Windows), "dispatch" (Apple) or "sync"
 
     // Submits a whole-file read. Null handle if the path is too long or the queue is full.
     Handle read_file(const IoRequest& req);

@@ -89,6 +89,17 @@ Linux's. Zero data errors. The ring needs overlapped handles: on a synchronous o
 Windows performs the ring's reads one by one inside the submit (cold: 0.8 GB/s, the
 whole read time spent in the pump), so `os_file_open` makes every handle overlapped.
 
+On macOS (an M3 Max, 2026-11-13, dev build, three runs of each backend, medians), the
+queue on the dispatch ring (Grand Central Dispatch's workers doing `pread`; macOS has no
+kernel ring): in direct mode 8.8 GB/s cold and 9.2 hot against 6.2 and 6.6 with `--io
+sync` (1.4 times), latency 6.5 ms against 9.2, worst pump 1.0 ms against 1.6; idle reads
+from the slack 4.5 GB/s cold and 7.0 hot against 3.5 and 4.8; direct mode with sockets and
+no budget keeps sockets at 279 MB/s against 145. Engine-mode reads are 3.0 GB/s on both:
+their latency is a tick, and the tick, not the backend, sets that number. The cold pass is
+partly warm (macOS cannot drop one file's pages without privileges). Sockets as before:
+120 MB/s each way in engine mode, 629 MB/s and 10.4 M lines per second direct. Zero data
+errors.
+
 The findings that changed the engine: a pump's cost is proportional to the bytes it
 admits, hence the queue's byte budget; sockets served from a tick system are bound by
 what the kernel buffers hold per tick; the first cold submission of 64 MB costs 43 ms
@@ -108,7 +119,7 @@ where 8 MB costs 5. `docs/design/idle.md` has the design that came of it.
 | `--frame-ms N` | one tick | the paced period of the idle scenarios |
 | `--quick` | | a small set, one-second socket runs |
 | `--keep` | | leave the files behind |
-| `--io sync`, `--io ring` | the platform's choice | the queue's backend in both modes: `ring` is io_uring or Windows I/O rings |
+| `--io sync`, `--io ring` | the platform's choice | the queue's backend in both modes: `ring` is io_uring, Windows I/O rings, or the dispatch ring on the Apple family |
 | `--direct`, `--compare` | | the tight loop instead; both |
 
 ## Where things are

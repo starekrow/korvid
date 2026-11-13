@@ -161,7 +161,7 @@ const char* io_ring_name(const IoRing* r) { return r ? "io_uring" : "sync"; }
 
 } // namespace kv
 
-#elif !defined(_WIN32) // Windows has its own: win32/io_ring_win32.cc
+#elif !defined(_WIN32) && !defined(__APPLE__) // Windows and the Apple family have their own: win32/io_ring_win32.cc, apple/io_ring_apple.cc
 
 namespace kv {
 
