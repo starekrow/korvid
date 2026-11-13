@@ -7,7 +7,7 @@
 #include "korvid/core/time.h"
 #include <errno.h>
 #include <fcntl.h>
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,13 +25,13 @@ void PumpClock::add(f64 ms) {
     ++total; sum_ms += ms;
     if (ms > worst_ms) worst_ms = ms;
     f64 us = ms * 1e3;
-    u32 b = us < 1.0 ? 0 : (u32)ceil(log2(us));
+    u32 b = us < 1.0 ? 0 : (u32)kv::ceil(kv::log2(us));
     if (b > 31) b = 31;
     ++counts[b];
 }
 
 f64 PumpClock::percentile_ms(f64 p) const {
-    u64 want = (u64)ceil(p * (f64)total), seen = 0;
+    u64 want = (u64)kv::ceil(p * (f64)total), seen = 0;
     if (want == 0) want = 1;
     for (u32 b = 0; b < 32; ++b) { seen += counts[b]; if (seen >= want) return (f64)(1ull << b) / 1e3; }
     return worst_ms;

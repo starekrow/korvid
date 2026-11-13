@@ -6,12 +6,12 @@
 #include "korvid/sprite/transform2.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace {
 
 using namespace kv;
-bool near(f32 a, f32 b) { return fabsf(a - b) < 1e-4f; }
+bool near(f32 a, f32 b) { return kv::fabs(a - b) < 1e-4f; }
 
 constinit const KindDesc k_kinds[] = {{.name = ".mover", .components = "Transform2", .capacity = 4}};
 KV_MODULE_DEFINE(k_ct) = {.name = "ct", .kinds = k_kinds};
@@ -55,10 +55,10 @@ void test_camera(kv::TestCtx& c) {
     *t->prev<Transform2>(h) = transform2_at(point2{10.3f, 7.8f});
     r = camera_resolve(e, cam, 640, 360, 1.0f);
     f32 left = r.center.x - 160.0f, bottom = r.center.y - 90.0f;
-    KV_CHECK(c, near(left * 2.0f, roundf(left * 2.0f)) && near(bottom * 2.0f, roundf(bottom * 2.0f)) && fabsf(r.center.x - 10.3f) <= 0.25f);
+    KV_CHECK(c, near(left * 2.0f, kv::round(left * 2.0f)) && near(bottom * 2.0f, kv::round(bottom * 2.0f)) && kv::fabs(r.center.x - 10.3f) <= 0.25f);
     r = camera_resolve(e, cam, 641, 361, 1.0f); // odd: the center sits on a half pixel so the corner does not
     left = r.center.x - 641.0f / 4.0f;
-    KV_CHECK(c, near(left * 2.0f, roundf(left * 2.0f)));
+    KV_CHECK(c, near(left * 2.0f, kv::round(left * 2.0f)));
 
     // A stale follow leaves the center alone.
     t->destroy(h);

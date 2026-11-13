@@ -15,7 +15,7 @@
 #include "korvid/asset/material.h"
 #include "korvid/core/log.h"
 #include "korvid/sprite/layers.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace kv::arcfire {
 
@@ -62,9 +62,9 @@ void planes_spawn(Engine& e, Game& g, const Dials& d) {
         // field and its offset, and up the field and a whole repeat more, which the scroll
         // wraps by (whole repeats, so a tile moved up by all of them shows the same).
         f32 origin = -0.5f * pd.full;
-        i32 first = (i32)floorf((-0.5f * kFieldW - fabsf(pd.offset.x) - origin) / tile);
-        i32 last = (i32)ceilf((0.5f * kFieldW + fabsf(pd.offset.x) - origin) / tile);
-        u32 rows = n * (u32)ceilf((kFieldH + pd.full) / pd.full);
+        i32 first = (i32)kv::floor((-0.5f * kFieldW - kv::fabs(pd.offset.x) - origin) / tile);
+        i32 last = (i32)kv::ceil((0.5f * kFieldW + kv::fabs(pd.offset.x) - origin) / tile);
+        u32 rows = n * (u32)kv::ceil((kFieldH + pd.full) / pd.full);
         for (u32 r = 0; r < rows; ++r)
             for (i32 k = first; k <= last; ++k) {
                 point2 at{origin + ((f32)k + 0.5f) * tile, kFieldBottom + ((f32)r + 0.5f) * tile};
@@ -133,9 +133,9 @@ void planes(TickContext& ctx) {
 
     for (u32 p = 0; p < KV_COUNTOF(k_planes); ++p) {
         f32 repeat = k_planes[p].full; // the texture's period, whatever the tiles' size
-        f32 before = fmodf(g.plane_scrolled[p], repeat);
+        f32 before = kv::fmod(g.plane_scrolled[p], repeat);
         g.plane_scrolled[p] += speed * k_planes[p].rate;
-        f32 now = fmodf(g.plane_scrolled[p], repeat);
+        f32 now = kv::fmod(g.plane_scrolled[p], repeat);
         layers->set(k_planes[p].layer, vec2{0.0f, -now}, now < before); // wrapped: the same picture, no sweep
     }
     // The gas comes down with the stage at the deep plane's rate: its uv moves, the sprite does not.

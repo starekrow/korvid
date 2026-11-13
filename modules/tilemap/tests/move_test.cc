@@ -11,6 +11,7 @@
 //   row 7  . . . . . . . . . .
 //
 // plus one solid rectangle: map pixels (32, 32, 4, 8), a post inside cell (2, 2).
+#include <stdlib.h>
 #include "korvid/tilemap/tilemap.h"
 #include "korvid/core/test.h"
 #include <string.h>

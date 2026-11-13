@@ -7,7 +7,7 @@
 #include "korvid/core/module.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/test.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace {
@@ -69,7 +69,7 @@ void test_fields(kv::TestCtx& c) {
     Every a{};
     a.b = true; a.u8v = 250; a.u16v = 65000; a.u32v = 4000000000u; a.u64v = 18446744073709551615ull;
     a.i8v = -128; a.i16v = -32000; a.i32v = -2000000000; a.i64v = (-0x7FFFFFFFFFFFFFFFll - 1);
-    a.f32v[0] = 0.1f; a.f32v[1] = NAN; a.f32v[2] = -INFINITY; a.f64v = 1.0 / 3.0; a.h = node;
+    a.f32v[0] = 0.1f; a.f32v[1] = kv::KV_NAN; a.f32v[2] = -kv::KV_INF; a.f64v = 1.0 / 3.0; a.h = node;
     strcpy(a.name, "caf\xc3\xa9 \"x\"");
     SaveWriter w;
     w.init(mem_general());
@@ -78,7 +78,7 @@ void test_fields(kv::TestCtx& c) {
     KV_CHECK(c, parse(w, doc));
     Every b{};
     KV_CHECK(c, load_fields(doc, doc.root(), k_every_fields, &b) == KV_COUNTOF(k_every_fields));
-    KV_CHECK(c, same_bits(a, b) && b.h == node && isnan(b.f32v[1]));
+    KV_CHECK(c, same_bits(a, b) && b.h == node && kv::isnan(b.f32v[1]));
 
     // A file from another version: fields missing keep their values, unknown keys are
     // ignored, a value of the wrong shape is skipped, integers clamp to the field.
@@ -86,7 +86,7 @@ void test_fields(kv::TestCtx& c) {
     KV_CHECK(c, json_parse(old, strlen(old), mem_scratch(), doc));
     Every d = a;
     KV_CHECK(c, load_fields(doc, doc.root(), k_every_fields, &d) == 5); // u8v, i8v, f32v, h, b; not name
-    KV_CHECK(c, d.u8v == 255 && d.i8v == -128 && d.f32v[0] == 7 && d.f32v[1] == 8 && d.f32v[2] == -INFINITY);
+    KV_CHECK(c, d.u8v == 255 && d.i8v == -128 && d.f32v[0] == 7 && d.f32v[1] == 8 && d.f32v[2] == -kv::KV_INF);
     KV_CHECK(c, d.h.is_null() && !d.b && !strcmp(d.name, a.name) && d.u64v == a.u64v);
 
     // Handles: by kind name; a kind nobody has reads as null; text that is not a handle too.

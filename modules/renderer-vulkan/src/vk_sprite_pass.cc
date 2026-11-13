@@ -9,7 +9,7 @@
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 #include <stdio.h>
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace kv {
@@ -586,7 +586,7 @@ bool rv_verify_sort(Renderer* r) {
             bool ordered = true;
             if (!k || k == kKeySortMax) ordered = true;                          // the first, or the first unsorted
             else if (k > kKeySortMax || !r->check_keys || ka == kb) ordered = row > prev;
-            else if (fabsf(ka - kb) <= 1e-3f * (1.0f + fabsf(ka))) ordered = true; // a near tie: either order
+            else if (kv::fabs(ka - kb) <= 1e-3f * (1.0f + kv::fabs(ka))) ordered = true; // a near tie: either order
             else ordered = ka < kb;
             if (!ordered) { if (bad++ < 8) KV_ERROR("vulkan", "sort check: bucket %u entry %u row %u (key %g) after row %u (key %g)", b, k, row, kb, prev, ka); }
             if (seen[row]++) { if (bad++ < 8) KV_ERROR("vulkan", "sort check: row %u listed twice", row); }
@@ -671,7 +671,7 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
     point2 center = rect_center(view.view);
     affine2 proj  = ortho2d(rect2_from_center(point2{0, 0}, rect_size(view.view))) * affine2_rotate(-view.rotation) *
                     affine2_translate(vec2{-center.x, -center.y});
-    f32 cs = fabsf(cosf(view.rotation)), sn = fabsf(sinf(view.rotation));
+    f32 cs = kv::fabs(kv::cos(view.rotation)), sn = kv::fabs(kv::sin(view.rotation));
     f32 hx = 0.5f * (view.view.w * cs + view.view.h * sn), hy = 0.5f * (view.view.w * sn + view.view.h * cs);
     f32 sw = (f32)s.extent.width, sh = (f32)s.extent.height;
     affine2 screen = ortho2d(rect2{-sw * 0.5f, -sh * 0.5f, sw, sh});

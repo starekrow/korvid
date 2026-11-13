@@ -16,13 +16,13 @@
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_audio/module.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdlib.h>
 
 namespace {
 
 using namespace kv;
-bool near(f32 a, f32 b, f32 eps = 1e-3f) { return fabsf(a - b) < eps; }
+bool near(f32 a, f32 b, f32 eps = 1e-3f) { return kv::fabs(a - b) < eps; }
 
 MixCmd play(u32 slot, const f32* samples, u32 frames, f32 volume, bool loop) {
     MixCmd c{};
@@ -66,7 +66,7 @@ void test_fades(kv::TestCtx& c) {
         mixer_render(m, out, 1);
         f32 v0 = m.voices[0].active ? m.voices[0].volume : 0.0f, v1 = m.voices[1].volume;
         f32 p = v0 * v0 + v1 * v1;
-        if (fabsf(p - 1.0f) > worst) worst = fabsf(p - 1.0f);
+        if (kv::fabs(p - 1.0f) > worst) worst = kv::fabs(p - 1.0f);
     }
     KV_CHECK(c, worst < 1e-3f);
     // The fade that stopped finished its voice and said so.

@@ -3,7 +3,7 @@
 #include "korvid/save/writer.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/test.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -46,7 +46,7 @@ void test_writer(kv::TestCtx& c) {
     for (f32 v : f32s) {
         w.reset(); w.f32_value(v); KV_CHECK(c, w.finish());
         w.out.push(0);
-        KV_CHECK(c, strtof((const char*)w.out.data, nullptr) == v && signbit(strtof((const char*)w.out.data, nullptr)) == signbit(v));
+        KV_CHECK(c, strtof((const char*)w.out.data, nullptr) == v && kv::signbit(strtof((const char*)w.out.data, nullptr)) == kv::signbit(v));
     }
     w.reset(); w.f32_value(0.15f); KV_CHECK(c, w.finish() && text_is(w, "0.15\n"));
     for (f64 v : f64s) {
@@ -54,7 +54,7 @@ void test_writer(kv::TestCtx& c) {
         w.out.push(0);
         KV_CHECK(c, strtod((const char*)w.out.data, nullptr) == v);
     }
-    w.reset(); w.begin_array(true); w.f32_value(NAN); w.f64_value(-INFINITY); w.end_array();
+    w.reset(); w.begin_array(true); w.f32_value(kv::KV_NAN); w.f64_value(-kv::KV_INF); w.end_array();
     KV_CHECK(c, w.finish() && text_is(w, "[\"nan\", \"-inf\"]\n"));
 
     // Mistakes: a value without a key, an unbalanced end, two top-level values, an open container.

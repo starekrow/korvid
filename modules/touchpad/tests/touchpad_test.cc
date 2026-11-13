@@ -2,7 +2,7 @@
 // a phone held landscape (2796x1290 pixels at 3 per point, a camera housing on the left).
 #include "korvid/core/test.h"
 #include "korvid/touchpad/touchpad.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace {
@@ -16,7 +16,7 @@ TouchpadScreen phone() {
     return s;
 }
 
-bool near(f32 a, f32 b, f32 eps = 1e-3f) { return fabsf(a - b) <= eps; }
+bool near(f32 a, f32 b, f32 eps = 1e-3f) { return kv::fabs(a - b) <= eps; }
 
 TouchPoint at(u32 id, f32 x, f32 y, bool ended = false) { return TouchPoint{id, x, y, ended}; }
 
@@ -127,7 +127,7 @@ void test_touchpad_stick(TestCtx& c) {
     // ...where a drag cannot take it past either.
     t = at(11, left - 1000, bottom + 1000);
     touchpad_update(cfg, se, &t, 1, s, 0.016);
-    KV_CHECK(c, near(se.center.x, left + m) && near(se.center.y, bottom - m) && near(sqrtf(se.axis.x * se.axis.x + se.axis.y * se.axis.y), 1));
+    KV_CHECK(c, near(se.center.x, left + m) && near(se.center.y, bottom - m) && near(kv::sqrt(se.axis.x * se.axis.x + se.axis.y * se.axis.y), 1));
 
     // Outside the region (the top quarter, the right half) no stick starts; nor does a
     // finger already down that slides in.

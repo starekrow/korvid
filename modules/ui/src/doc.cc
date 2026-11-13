@@ -9,7 +9,7 @@
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/utf8.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -163,7 +163,7 @@ void advance(Engine& e, Handle h, UiDoc& d) {
 
 f32 to_linear(u32 c) {
     f32 v = (f32)c / 255.0f;
-    return v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
+    return v <= 0.04045f ? v / 12.92f : kv::pow((v + 0.055f) / 1.055f, 2.4f);
 }
 
 u32 hex(char c) { return c >= '0' && c <= '9' ? (u32)(c - '0') : c >= 'a' && c <= 'f' ? (u32)(c - 'a' + 10) : c >= 'A' && c <= 'F' ? (u32)(c - 'A' + 10) : 99; }

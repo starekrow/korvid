@@ -9,7 +9,7 @@
 #include "korvid/core/memory.h"
 #include "korvid/inflate/inflate.h"
 #include "korvid/pack/zip.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,7 +63,7 @@ f32 num(const JsonValue* v, f32 dflt = 0.0f) { return (f32)json_number(v, dflt);
 
 f32 srgb_to_linear(u32 c) {
     f32 v = (f32)c / 255.0f;
-    return v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
+    return v <= 0.04045f ? v / 12.92f : kv::pow((v + 0.055f) / 1.055f, 2.4f);
 }
 
 // "#AARRGGBB" or "#RRGGBB", Tiled's sRGB, as a linear color.
@@ -456,8 +456,8 @@ point2 tilemap_to_world(point2 origin, f32 map_x, f32 map_y) { return point2{ori
 
 bool tilemap_cell_of(const TilemapAsset& m, point2 origin, point2 world, i32* x, i32* y) {
     f32 mx = world.x - origin.x, my = origin.y - world.y;
-    *x = (i32)floorf(mx / (f32)m.tile_w);
-    *y = (i32)floorf(my / (f32)m.tile_h);
+    *x = (i32)kv::floor(mx / (f32)m.tile_w);
+    *y = (i32)kv::floor(my / (f32)m.tile_h);
     return *x >= 0 && *y >= 0 && (u32)*x < m.width && (u32)*y < m.height;
 }
 

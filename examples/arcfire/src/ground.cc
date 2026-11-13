@@ -9,7 +9,7 @@
 #include "korvid/asset/scope.h"
 #include "korvid/core/log.h"
 #include "korvid/tilemap/tilemap.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -117,7 +117,7 @@ void ground_map_show(TickContext& ctx, Game& g, bool show) {
 
 void ground_spawn(TickContext& ctx, const Game& g, const Dials& d, const GroundDef& gd, point2 at, bool bench) {
     Look look = gd.kind == GroundTank ? Look::Tank : gd.kind == GroundBunker ? Look::Bunker : Look::Turret;
-    Health h{bench ? 1 << 30 : (i32)ceilf((f32)gd.health * d.enemy_health), 0, gd.score, (u32)look};
+    Health h{bench ? 1 << 30 : (i32)kv::ceil((f32)gd.health * d.enemy_health), 0, gd.score, (u32)look};
     Emitter em{gd.entry, 0.0f, EmitIdle, 0};
     Ground gr{bench ? 0.0f : 1.0f, bench ? 1u : 0u, (u32)gd.kind, gd.launch, gd.kind == GroundBunker ? kBunkerFirst : 0u,
               gd.kind == GroundTank ? kTankSpeed : 0.0f, at.x, gd.route * 0.5f, gd.drop, 0};

@@ -5,7 +5,7 @@
 // result depends on nothing but them.
 #include "bml_internal.h"
 #include "korvid/core/random.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace kv {
@@ -25,7 +25,7 @@ f32 next_unit(u64* state) {
 }
 
 f32 wrap360(f32 d) {
-    d = fmodf(d, 360.0f);
+    d = kv::fmod(d, 360.0f);
     return d < 0.0f ? d + 360.0f : d;
 }
 f32 wrap180(f32 d) {
@@ -211,7 +211,7 @@ f32 bml_eval(const u32* code, u32 at, const f32* params, u32 nparams, f32 rank, 
             case E_SUB: a -= b; break;
             case E_MUL: a *= b; break;
             case E_DIV: a = b != 0.0f ? a / b : 0.0f; break; // never a NaN in sim state
-            default:    a = b != 0.0f ? fmodf(a, b) : 0.0f; break;
+            default:    a = b != 0.0f ? kv::fmod(a, b) : 0.0f; break;
             }
             st[sp - 1] = a;
             break;
@@ -273,13 +273,13 @@ BmlStep bml_step(const BmlLibrary& lib, BmlRunner& r, const BmlWorld& w, BmlFire
 
 vec2 bml_velocity(f32 dir, f32 speed, f32 mx, f32 my) {
     f32 a = dir * kDeg;
-    return vec2{sinf(a) * speed + mx, cosf(a) * speed - my};
+    return vec2{kv::sin(a) * speed + mx, kv::cos(a) * speed - my};
 }
 
 f32 bml_aim(point2 from, point2 to) {
     f32 dx = to.x - from.x, dy = to.y - from.y;
     if (dx == 0.0f && dy == 0.0f) return 180.0f; // on the target: straight down the screen
-    return wrap360(atan2f(dx, dy) / kDeg);
+    return wrap360(kv::atan2(dx, dy) / kDeg);
 }
 
 } // namespace kv

@@ -1,4 +1,3 @@
 module "math" {
-  output = "headers",
-  deps   = { "core" },
+  deps = { "core" },
 }

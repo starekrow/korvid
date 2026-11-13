@@ -3,7 +3,7 @@
 // distance apart on it stay that far apart along it whatever the tick.
 #include "../src/path.cc"
 #include "korvid/core/test.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 void test_path(kv::TestCtx& c) {
     using namespace kv;
@@ -13,7 +13,7 @@ void test_path(kv::TestCtx& c) {
     Path line;
     const point2 two[] = {{0, 0}, {300, 400}};
     path_build(line, two, 2);
-    KV_CHECK(c, fabsf(line.length - 500.0f) < 0.01f);
+    KV_CHECK(c, kv::fabs(line.length - 500.0f) < 0.01f);
     KV_CHECK(c, nearly(path_at(line, 250.0f), point2{150, 200}, 0.05f));
     KV_CHECK(c, path_at(line, -5.0f) == two[0] && path_at(line, 900.0f) == two[1]);
 
@@ -34,7 +34,7 @@ void test_path(kv::TestCtx& c) {
     f32 worst = 0.0f;
     for (f32 at = 0.0f; at + 1.0f < curve.length; at += 7.0f) {
         f32 step = distance(path_at(curve, at), path_at(curve, at + 1.0f));
-        worst = fabsf(step - 1.0f) > worst ? fabsf(step - 1.0f) : worst;
+        worst = kv::fabs(step - 1.0f) > worst ? kv::fabs(step - 1.0f) : worst;
     }
     KV_CHECK(c, worst < 0.02f);
     // More points than a path holds: the first eight.
@@ -42,5 +42,5 @@ void test_path(kv::TestCtx& c) {
     for (u32 i = 0; i < 10; ++i) many[i] = point2{(f32)i * 10.0f, 0.0f};
     Path capped;
     path_build(capped, many, 10);
-    KV_CHECK(c, capped.count == kPathPoints && fabsf(capped.length - 70.0f) < 0.01f);
+    KV_CHECK(c, capped.count == kPathPoints && kv::fabs(capped.length - 70.0f) < 0.01f);
 }

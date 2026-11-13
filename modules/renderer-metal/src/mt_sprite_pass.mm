@@ -15,7 +15,7 @@
 #include "korvid/core/memory.h"
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -445,7 +445,7 @@ bool mt_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
     point2 center = rect_center(view.view);
     affine2 proj  = metal_clip(ortho2d(rect2_from_center(point2{0, 0}, rect_size(view.view))) * affine2_rotate(-view.rotation) *
                                affine2_translate(vec2{-center.x, -center.y}));
-    f32 cs = fabsf(cosf(view.rotation)), sn = fabsf(sinf(view.rotation));
+    f32 cs = kv::fabs(kv::cos(view.rotation)), sn = kv::fabs(kv::sin(view.rotation));
     f32 hx = 0.5f * (view.view.w * cs + view.view.h * sn), hy = 0.5f * (view.view.w * sn + view.view.h * cs);
     f32 sw = (f32)width, sh = (f32)height;
     affine2 screen = metal_clip(ortho2d(rect2{-sw * 0.5f, -sh * 0.5f, sw, sh}));
@@ -540,7 +540,7 @@ bool mt_verify_sort(Renderer* r) {
             bool ordered = true;
             if (!k || k == kKeySortMax) ordered = true;
             else if (k > kKeySortMax || !r->check_keys || ka == kb) ordered = row > prev;
-            else if (fabsf(ka - kb) <= 1e-3f * (1.0f + fabsf(ka))) ordered = true;
+            else if (kv::fabs(ka - kb) <= 1e-3f * (1.0f + kv::fabs(ka))) ordered = true;
             else ordered = ka < kb;
             if (!ordered) { if (bad++ < 8) KV_ERROR("metal", "sort check: bucket %u entry %u row %u (key %g) after row %u (key %g)", b, k, row, kb, prev, ka); }
             if (seen[row]++) { if (bad++ < 8) KV_ERROR("metal", "sort check: row %u listed twice", row); }

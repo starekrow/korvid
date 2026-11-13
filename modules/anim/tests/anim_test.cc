@@ -17,7 +17,7 @@
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 #include "korvid/sprite/world.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace {
@@ -39,7 +39,7 @@ constinit const HandlerDesc k_handlers[] = {
 };
 KV_MODULE_DEFINE(k_a) = {.name = "a", .kinds = k_kinds, .handlers = k_handlers};
 
-bool near(f32 a, f32 b, f32 eps = 1e-4f) { return fabsf(a - b) < eps; }
+bool near(f32 a, f32 b, f32 eps = 1e-4f) { return kv::fabs(a - b) < eps; }
 
 // A four-frame flipbook over one second with an event at the start and one at 0.5.
 Handle make_flipbook(Engine& e, AnimLoop loop) {

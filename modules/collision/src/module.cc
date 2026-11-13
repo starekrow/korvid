@@ -9,7 +9,6 @@
 #include "korvid/scene/module.h"
 #include "korvid/scene/parent.h"
 #include "korvid/sprite/transform2.h"
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -131,7 +130,7 @@ struct Grid {
     Map<u64, u32> heads;
     f32           cell = 1.0f;
 
-    i32  coord(f32 v) const { return (i32)floorf(v / cell); }
+    i32  coord(f32 v) const { return (i32)kv::floor(v / cell); }
     void insert(Array<Body>& bs, u32 i) {
         Body& b = bs[i];
         b.cell = cell_key(coord(b.b[0]), coord(b.b[1]));

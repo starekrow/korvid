@@ -96,7 +96,7 @@ void set_state(Game& g, GameState next) {
 
 vec2 random_direction(Rng& rng, f32 speed) {
     f32 a = rng.range(0.0f, 2.0f * KV_PI);
-    return vec2{cosf(a) * speed, sinf(a) * speed};
+    return vec2{kv::cos(a) * speed, kv::sin(a) * speed};
 }
 
 // Spawns by command: the ball exists after this phase, and Spawned carries the ticket.

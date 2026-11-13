@@ -5,7 +5,7 @@
 // Beam (weapons.cc), and is a body on the shell's layer: a bullet that meets it is eaten,
 // as the egg's shell eats them. An option item adds one; a death takes both.
 #include "arcfire.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace kv::arcfire {
 
@@ -59,7 +59,7 @@ void options(TickContext& ctx) {
         if (!options->is_alive(i)) continue;
         f32 side = oo[i].index == 0 ? -1.0f : 1.0f;
         point2 want = s->focus ? point2{side * kHold.x, kHold.y}
-                               : point2{cosf(turn + KV_PI * (f32)oo[i].index) * kOrbit, sinf(turn + KV_PI * (f32)oo[i].index) * kOrbit};
+                               : point2{kv::cos(turn + KV_PI * (f32)oo[i].index) * kOrbit, kv::sin(turn + KV_PI * (f32)oo[i].index) * kOrbit};
         ol[i].position += (want - ol[i].position) * kEase;
         oo[i].tilt += (sideways * kTiltMost - oo[i].tilt) * kTiltEase;
     }

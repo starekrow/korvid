@@ -16,7 +16,7 @@
 #include "arcfire.h"
 #include "korvid/asset/material.h"
 #include "korvid/core/log.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace kv::arcfire {
 
@@ -54,19 +54,19 @@ f32 section_gone(const StageDef& st, u32 section, f32 clock) {
 }
 
 vec2 unit(vec2 v) {
-    f32 l = sqrtf(v.x * v.x + v.y * v.y);
+    f32 l = kv::sqrt(v.x * v.x + v.y * v.y);
     return l > 1e-4f ? vec2{v.x / l, v.y / l} : vec2{0.0f, 1.0f};
 }
 
 f32 apart(point2 a, point2 b) {
     vec2 d = b - a;
-    return sqrtf(d.x * d.x + d.y * d.y);
+    return kv::sqrt(d.x * d.x + d.y * d.y);
 }
 
 // Turn toward `to` no harder than `accel` a tick, no faster than `top`.
 void seek(vec2& v, point2 from, point2 to, f32 accel, f32 top) {
     v += unit(to - from) * accel;
-    f32 l = sqrtf(v.x * v.x + v.y * v.y);
+    f32 l = kv::sqrt(v.x * v.x + v.y * v.y);
     if (l > top) v = v * (top / l);
 }
 
@@ -81,14 +81,14 @@ point2 off_field(Game& g) {
 
 void ship_spawn(TickContext& ctx, Game& g, u32 side, point2 at, vec2 v, point2 aim) {
     Sprite s = sprite_of(g, TEX_SHIPS, ship_uv(side ? 2 : 1, side ? 1 : 0), vec2{kFleetSize, kFleetSize}, Z_FLEET, kSide[side]);
-    ctx.spawn_later(g_fleet_kind, transform2_at(at, atan2f(v.y, v.x) - 0.5f * KV_PI), s, Velocity{v},
+    ctx.spawn_later(g_fleet_kind, transform2_at(at, kv::atan2(v.y, v.x) - 0.5f * KV_PI), s, Velocity{v},
                     Fleet{side, Inbound, 20u + g.fx.below(120), 0u, g.fx.range(0.0f, 6.28f), aim});
 }
 
 void tracer(TickContext& ctx, Game& g, u32 side, point2 at, vec2 dir, vec2 carry) {
     vec2 v = dir * kTracerSpeed + carry * 0.3f;
     Sprite s = sprite_of(g, TEX_SOFT, rect2_unit(), vec2{10.0f, 2.5f}, Z_TRACER, kTrace[side], true);
-    ctx.spawn_later(g_tracer_kind, transform2_at(at + dir * 8.0f, atan2f(v.y, v.x)), s, Velocity{v}, Tracer{side, 18u + g.fx.below(16)});
+    ctx.spawn_later(g_tracer_kind, transform2_at(at + dir * 8.0f, kv::atan2(v.y, v.x)), s, Velocity{v}, Tracer{side, 18u + g.fx.below(16)});
 }
 
 } // namespace
@@ -209,20 +209,20 @@ void battle(TickContext& ctx) {
                 f.state = Inbound;
                 f.phase += 0.025f;
                 point2 centre = targets ? standing[0] : mid;
-                quarry = centre + vec2{cosf(f.phase) * (60.0f + 40.0f * sinf(f.phase * 0.37f)), sinf(f.phase * 1.3f) * 70.0f};
+                quarry = centre + vec2{kv::cos(f.phase) * (60.0f + 40.0f * kv::sin(f.phase * 0.37f)), kv::sin(f.phase * 1.3f) * 70.0f};
                 u32 k = g.fx.below(ft->rows() ? ft->rows() : 1);
                 if (g.fx.below(40) == 0 && ft->is_alive(k) && fl[k].side == SideAttack) { f.state = Chasing; f.passes = k; }
             }
             seek(v, p, quarry, 0.2f, 3.4f);
             vec2 to = quarry - p;
-            f32 ahead = to.x * v.x + to.y * v.y, reach = sqrtf(to.x * to.x + to.y * to.y) * sqrtf(v.x * v.x + v.y * v.y);
+            f32 ahead = to.x * v.x + to.y * v.y, reach = kv::sqrt(to.x * to.x + to.y * to.y) * kv::sqrt(v.x * v.x + v.y * v.y);
             if (chasing && !f.cooldown && apart(p, quarry) < 120.0f && ahead > 0.9f * reach) {
                 tracer(ctx, g, f.side, p, unit(v), v);
                 f.cooldown = 20 + g.fx.below(30);
             }
         }
         p += v;
-        fx[i].rotation = atan2f(v.y, v.x) - 0.5f * KV_PI;
+        fx[i].rotation = kv::atan2(v.y, v.x) - 0.5f * KV_PI;
     }
     // Reinforcements while the capital ship stands: the fighters, from round it; the
     // attackers, a wave at a time from one edge, in a loose group.

@@ -1,6 +1,6 @@
 // tilemap_move: a box swept through the solids, one axis at a time, in map pixels (y down).
 #include "korvid/tilemap/tilemap.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace kv {
 
@@ -13,8 +13,8 @@ struct Box { f32 x0, y0, x1, y1; }; // half-open, map pixels, y down
 template <class F>
 void each_solid(const TilemapAsset& m, f32 x0, f32 y0, f32 x1, f32 y1, F fn) {
     f32 tw = (f32)m.tile_w, th = (f32)m.tile_h;
-    i32 cx0 = (i32)floorf(x0 / tw) - 1, cx1 = (i32)floorf(x1 / tw) + 1;
-    i32 cy0 = (i32)floorf(y0 / th) - 1, cy1 = (i32)floorf(y1 / th) + 1;
+    i32 cx0 = (i32)kv::floor(x0 / tw) - 1, cx1 = (i32)kv::floor(x1 / tw) + 1;
+    i32 cy0 = (i32)kv::floor(y0 / th) - 1, cy1 = (i32)kv::floor(y1 / th) + 1;
     for (i32 cy = cy0; cy <= cy1; ++cy)
         for (i32 cx = cx0; cx <= cx1; ++cx)
             if (tilemap_solid(m, cx, cy)) fn(Box{(f32)cx * tw, (f32)cy * th, (f32)(cx + 1) * tw, (f32)(cy + 1) * th});

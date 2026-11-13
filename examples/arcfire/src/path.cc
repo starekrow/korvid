@@ -1,6 +1,5 @@
 // arcfire: Catmull-Rom paths by arc length.
 #include "path.h"
-#include <math.h>
 
 namespace kv::arcfire {
 

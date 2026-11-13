@@ -5,6 +5,6 @@
 -- over the primitives (--direct), for comparison. It prints what it saw in numbers.
 module "sockit2m" {
   output        = "exe",
-  deps          = { "core", "platform" },
+  deps = { "core", "math", "platform" },
   engine_module = true,
 }

@@ -9,7 +9,7 @@
 // bullets never become sixty thousand rows: the rest are paid in score at once.
 #include "arcfire.h"
 #include "korvid/core/log.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace kv::arcfire {
 
@@ -85,7 +85,7 @@ u32 cancel_bullets(TickContext& ctx, Game& g, point2 at, f32 radius, u32* overfl
                 u64 h = seed_of(bullets_table->handle_at(i), ctx.tick, 0xC41Bu);
                 f32 a = -0.6f + 1.2f * (f32)(h & 0xFFFFu) / 65535.0f;
                 f32 up = 1.2f * (f32)((h >> 16) & 0xFFFFu) / 65535.0f;
-                item_drop(ctx, g, ItemChip, p, vec2{sinf(a) * 1.2f, 1.2f + up});
+                item_drop(ctx, g, ItemChip, p, vec2{kv::sin(a) * 1.2f, 1.2f + up});
                 ++chips;
             }
             if (cancelled <= 48) fx_sparks(ctx, g, p, 1, kSparkChip, 1.5f);

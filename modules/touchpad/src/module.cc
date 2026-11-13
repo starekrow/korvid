@@ -16,7 +16,7 @@
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace kv {
@@ -55,7 +55,7 @@ void make_textures(Engine& e, TouchpadModule& s) {
     for (u32 y = 0; y < kTexture; ++y)
         for (u32 x = 0; x < kTexture; ++x) {
             f32 dx = ((f32)x + 0.5f) / (f32)kTexture - 0.5f, dy = ((f32)y + 0.5f) / (f32)kTexture - 0.5f;
-            f32 d = sqrtf(dx * dx + dy * dy) * (f32)kTexture; // pixels from the centre
+            f32 d = kv::sqrt(dx * dx + dy * dy) * (f32)kTexture; // pixels from the centre
             f32 outer = (f32)kTexture * 0.5f - 1.0f;
             f32 in_disc = d < outer - 0.5f ? 1.0f : d > outer + 0.5f ? 0.0f : outer + 0.5f - d;
             f32 inner = outer - (f32)kTexture * 0.06f; // the ring: 6% of the width, a pixel of edge both sides

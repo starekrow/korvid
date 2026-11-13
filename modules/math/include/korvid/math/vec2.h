@@ -2,7 +2,7 @@
 // and point + point does not compile. Plain structs, free functions, header-only.
 #pragma once
 #include "korvid/core/types.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace kv {
 
@@ -31,7 +31,7 @@ inline bool operator!=(vec2 a, vec2 b) { return !(a == b); }
 inline f32  dot(vec2 a, vec2 b)      { return a.x * b.x + a.y * b.y; }
 inline f32  cross(vec2 a, vec2 b)    { return a.x * b.y - a.y * b.x; } // z of the 3D cross
 inline f32  length_sq(vec2 a)        { return dot(a, a); }
-inline f32  length(vec2 a)           { return sqrtf(length_sq(a)); }
+inline f32  length(vec2 a)           { return sqrt(length_sq(a)); }
 inline vec2 perp(vec2 a)             { return vec2{-a.y, a.x}; }       // rotated +90 degrees
 inline vec2 normalize(vec2 a) {
     f32 l = length(a);
@@ -57,11 +57,10 @@ inline vec2   as_vec(point2 p)   { return vec2{p.x, p.y}; }
 inline point2 as_point(vec2 v)   { return point2{v.x, v.y}; }
 
 // ---- scalars ---------------------------------------------------------------
-constexpr f32 KV_PI = 3.14159265358979323846f;
 
 inline f32 lerp(f32 a, f32 b, f32 t) { return a + (b - a) * t; }
 inline f32 clampf(f32 v, f32 lo, f32 hi) { return v < lo ? lo : (v > hi ? hi : v); }
-inline bool nearly(f32 a, f32 b, f32 eps = 1e-5f) { return fabsf(a - b) <= eps; }
+inline bool nearly(f32 a, f32 b, f32 eps = 1e-5f) { return fabs(a - b) <= eps; }
 inline bool nearly(vec2 a, vec2 b, f32 eps = 1e-5f) { return nearly(a.x, b.x, eps) && nearly(a.y, b.y, eps); }
 inline bool nearly(point2 a, point2 b, f32 eps = 1e-5f) { return nearly(a.x, b.x, eps) && nearly(a.y, b.y, eps); }
 

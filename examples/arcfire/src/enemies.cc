@@ -4,7 +4,7 @@
 // Both flash white for the ticks after a hit, by drawing their sprite added instead of
 // blended, and both leave the field without a word.
 #include "arcfire.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace kv::arcfire {
 
@@ -81,7 +81,7 @@ void enemies(TickContext& ctx) {
             // A launch: a formation of popcorn up out of the bunker, one event a member.
             gk.timer = kBunkerEvery;
             const FormationDef& f = g.stage.formations[gk.launch];
-            u32 count = (u32)lroundf((f32)f.count * dials_row[0].formation_count);
+            u32 count = (u32)kv::lround((f32)f.count * dials_row[0].formation_count);
             if (count == 0) count = 1;
             Handle group = formations->spawn(Formation{count, 0, 0, 0});
             for (u32 m = 0; m < count; ++m) ctx.schedule(SpawnMember{gk.launch, m, run_row[0].epoch, 0, group, p}, ctx.tick + (u64)m * f.spacing);

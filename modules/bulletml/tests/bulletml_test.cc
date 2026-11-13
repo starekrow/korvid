@@ -3,7 +3,7 @@
 // references and params, the changes, $rand, the budget, and what does not compile.
 #include "korvid/bulletml/bulletml.h"
 #include "korvid/core/test.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace {
@@ -26,7 +26,7 @@ u32 run(const BmlLibrary& lib, BmlRunner& r, Log& log, u32 ticks, BmlWorld w = B
     return ticks;
 }
 
-bool near(f32 a, f32 b, f32 eps = 1e-3f) { return fabsf(a - b) <= eps; }
+bool near(f32 a, f32 b, f32 eps = 1e-3f) { return kv::fabs(a - b) <= eps; }
 
 } // namespace
 

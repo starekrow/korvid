@@ -7,12 +7,12 @@
 #include "korvid/platform_hid/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdlib.h>
 
 namespace {
 using namespace kv;
-bool near(f32 a, f32 b) { return fabsf(a - b) < 1e-4f; }
+bool near(f32 a, f32 b) { return kv::fabs(a - b) < 1e-4f; }
 }
 
 void test_actions(kv::TestCtx& c) {

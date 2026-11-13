@@ -34,7 +34,7 @@
 #include "arcfire.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/platform_hid/actions.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace kv::arcfire {
@@ -163,13 +163,13 @@ Plan steer_rule(TickContext& ctx, const Game& g, f32 clear, u32 want) {
         vec2 d = p - at[i].position;
         f32 dist = length(d);
         if (dist < 90.0f && dist > 0.01f) push += d * ((1.0f - dist / 90.0f) / dist);
-        if (at[i].position.y > p.y + 60.0f && in_field(at[i].position, -20.0f) && fabsf(d.x) < nearest) { nearest = fabsf(d.x); aim_x = at[i].position.x; }
+        if (at[i].position.y > p.y + 60.0f && in_field(at[i].position, -20.0f) && kv::fabs(d.x) < nearest) { nearest = kv::fabs(d.x); aim_x = at[i].position.x; }
     }
     const Table* ground = ctx.read_kind(g_ground_kind);
     Span<const Transform2> gt = ground->rows_of<Transform2>();
     for (u32 i = 0; i < ground->rows(); ++i)
-        if (ground->is_alive(i) && gt[i].position.y > p.y + 60.0f && fabsf(gt[i].position.x - p.x) < nearest) {
-            nearest = fabsf(gt[i].position.x - p.x);
+        if (ground->is_alive(i) && gt[i].position.y > p.y + 60.0f && kv::fabs(gt[i].position.x - p.x) < nearest) {
+            nearest = kv::fabs(gt[i].position.x - p.x);
             aim_x = gt[i].position.x;
         }
     // A boss: the lowest of its open parts that end its phase is the target, ahead of
@@ -202,9 +202,9 @@ Plan steer_rule(TickContext& ctx, const Game& g, f32 clear, u32 want) {
         if (ship->weapon == WeaponSpread) {
             f32 mx = 0.0f, ang = 0.0f;
             spread_inner(ship->power, true, &mx, &ang);
-            off = mx + (pos.y - p.y - kMuzzleUp) * tanf(ang);
+            off = mx + (pos.y - p.y - kMuzzleUp) * kv::tan(ang);
         }
-        aim_x = fabsf(pos.x - off - p.x) < fabsf(pos.x + off - p.x) ? pos.x - off : pos.x + off;
+        aim_x = kv::fabs(pos.x - off - p.x) < kv::fabs(pos.x + off - p.x) ? pos.x - off : pos.x + off;
         nearest = 0.0f;
         at_part = true;
     }
@@ -213,7 +213,7 @@ Plan steer_rule(TickContext& ctx, const Game& g, f32 clear, u32 want) {
     for (u32 i = 0; i < boss_table->rows(); ++i) {
         if (!boss_table->is_alive(i)) continue;
         f32 below = (bx[i].position.y + bc[i].offset.y - bc[i].half.y) - p.y; // from the ship up to the hull's lowest edge
-        if (below < 70.0f && fabsf(bx[i].position.x - p.x) < bc[i].half.x + 40.0f) push.y -= 1.0f - (below > 0.0f ? below / 70.0f : 0.0f);
+        if (below < 70.0f && kv::fabs(bx[i].position.x - p.x) < bc[i].half.x + 40.0f) push.y -= 1.0f - (below > 0.0f ? below / 70.0f : 0.0f);
     }
     if (length_sq(push) > 1e-4f) {
         // The walls push back, so a dodge does not end in a corner.
@@ -235,7 +235,7 @@ Plan steer_rule(TickContext& ctx, const Game& g, f32 clear, u32 want) {
     }
     f32 goal_x = nearest < 1e9f ? aim_x : 0.0f;
     plan.move = vec2{clampf((goal_x - p.x) / 60.0f, -1.0f, 1.0f), clampf((kShipStart.y - p.y) / 60.0f, -1.0f, 1.0f)};
-    plan.focus = at_part && fabsf(goal_x - p.x) < 6.0f;
+    plan.focus = at_part && kv::fabs(goal_x - p.x) < 6.0f;
     return plan;
 }
 

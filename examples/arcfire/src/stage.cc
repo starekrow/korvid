@@ -7,7 +7,7 @@
 #include "korvid/asset/blob.h"
 #include "korvid/core/log.h"
 #include "korvid/frameloop/frameloop.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 
 namespace kv::arcfire {
@@ -259,8 +259,8 @@ void stage(TickContext& ctx) {
             // One event, its members on the ticks the spacing gives from here, so they
             // arrive on time whatever the frame rate or the time scale.
             const FormationDef& f = def.formations[m.index];
-            u32 count = (u32)lroundf((f32)f.count * d.formation_count);
-            u32 spacing = (u32)lroundf((f32)f.spacing * d.formation_spacing);
+            u32 count = (u32)kv::lround((f32)f.count * d.formation_count);
+            u32 spacing = (u32)kv::lround((f32)f.spacing * d.formation_spacing);
             if (count == 0) count = 1;
             // Its row first, which counts its members down; then the members, by event.
             Handle group = ctx.write_kind(g_formation_kind)->spawn(Formation{count, 0, 0, f.drop});
@@ -311,7 +311,7 @@ void on_member(TickContext& ctx, Span<const SpawnMember> members) {
         if (m.offset.x != 0.0f || m.offset.y != 0.0f) // a bunker's launch: the path starts where the bunker is
             for (u32 k = 0; k < mv.path.count; ++k) mv.path.pts[k] += vec2{m.offset.x, m.offset.y};
         point2 at = path_at(mv.path, 0.0f);
-        Health h{(i32)ceilf((f32)f.health * dials_row[0].enemy_health), 0, f.score, (u32)f.look};
+        Health h{(i32)kv::ceil((f32)f.health * dials_row[0].enemy_health), 0, f.score, (u32)f.look};
         Emitter em{f.entry, f.fire_at, EmitIdle, 0};
         f32 radius = f.look == Look::Boat ? 34.0f : f.look == Look::Heavy ? 26.0f : 18.0f; // the boat, the big ship, the rest
         Sprite s = enemy_sprite(g, f.look);

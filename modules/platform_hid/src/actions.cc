@@ -4,7 +4,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/utf8.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace kv {
@@ -60,7 +60,7 @@ bool parse_binding(const char* text, ActionKind kind, ActionBinding& b, const ch
 HidState* pstate(Engine& e) { return engine_module_state_as<HidState>(e, "platform_hid"); }
 
 vec2 clamp_unit(vec2 v) {
-    f32 l = sqrtf(v.x * v.x + v.y * v.y);
+    f32 l = kv::sqrt(v.x * v.x + v.y * v.y);
     return l > 1.0f ? vec2{v.x / l, v.y / l} : v;
 }
 
@@ -156,7 +156,7 @@ void input_actions_sample(InputActions& as, const InputState& in, bool paused) {
             case BindingKind::Stick:
                 if (pad) {
                     f32 x = pad->axis(b.stick ? PadAxis::RightX : PadAxis::LeftX), y = -pad->axis(b.stick ? PadAxis::RightY : PadAxis::LeftY);
-                    f32 l = sqrtf(x * x + y * y);
+                    f32 l = kv::sqrt(x * x + y * y);
                     // Rescaled past the dead zone, so a stick just outside it is slow, not a jump.
                     if (l > as.dead_zone) { f32 s = (l - as.dead_zone) / (1.0f - as.dead_zone) / l; v = vec2{x * s, y * s}; }
                 }

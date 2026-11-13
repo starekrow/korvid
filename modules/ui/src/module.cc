@@ -16,7 +16,6 @@
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -259,7 +258,7 @@ void ui_update(TickContext& ctx) {
     if (list != KV_UI_NONE) {
         UiNode& l = sc->nodes[list];
         u32 count = child_count(*sc, list);
-        if (count && step && fabsf(mv.y) > 0.5f) {
+        if (count && step && kv::fabs(mv.y) > 0.5f) {
             l.focus = mv.y < 0.0f ? (l.focus + 1) % count : (l.focus + count - 1) % count;
             play(ctx, s, *sc, "move");
         }
@@ -308,7 +307,7 @@ void ensure_white(Engine& e, UiState_& s) {
     for (u32 y = 0; y < kIris; ++y)
         for (u32 x = 0; x < kIris; ++x) {
             f32 dx = ((f32)x + 0.5f) / (f32)kIris - 0.5f, dy = ((f32)y + 0.5f) / (f32)kIris - 0.5f;
-            f32 edge = (sqrtf(dx * dx + dy * dy) - 0.5f) * (f32)kIris + 0.5f;
+            f32 edge = (kv::sqrt(dx * dx + dy * dy) - 0.5f) * (f32)kIris + 0.5f;
             f32 alpha = edge < 0.0f ? 0.0f : edge > 1.0f ? 1.0f : edge;
             u8* p = px + ((usize)y * kIris + x) * 4;
             p[0] = p[1] = p[2] = 255;
@@ -369,7 +368,7 @@ void ui_draw(TickContext& ctx) {
     UiDoc* lead = order.len ? s.docs.get(order.last()->doc) : nullptr;
     f32 design_h = lead ? lead->design.y : 270.0f;
     s.scale = s.win_h / design_h;
-    if (!lead || lead->pixel) s.scale = floorf(s.scale) >= 1.0f ? floorf(s.scale) : 1.0f;
+    if (!lead || lead->pixel) s.scale = kv::floor(s.scale) >= 1.0f ? kv::floor(s.scale) : 1.0f;
 
     s.quads.clear();
     UiStats st{};
@@ -390,7 +389,7 @@ void ui_draw(TickContext& ctx) {
             static const i8 k_x[] = {0, -1, 0, 1, -1, 1, -1, 0, 1}, k_y[] = {0, -1, -1, -1, 0, 0, 1, 1, 1};
             ax = (f32)k_x[(u32)sc->motion.from % 9]; ay = (f32)k_y[(u32)sc->motion.from % 9];
             f32 dx = ax * s.win_w * (1.0f - shown), dy = ay * s.win_h * (1.0f - shown);
-            for (u32 q = first; q < s.quads.len; ++q) { s.quads[q].x += floorf(dx); s.quads[q].y += floorf(dy); }
+            for (u32 q = first; q < s.quads.len; ++q) { s.quads[q].x += kv::floor(dx); s.quads[q].y += kv::floor(dy); }
         }
     }
     // Covers, over everything.
@@ -410,9 +409,9 @@ void ui_draw(TickContext& ctx) {
         }
         // The iris: a disc of clear over the focus, shrinking to nothing, and black around it.
         f32 cx = c.desc.focus.x * s.win_w, cy = c.desc.focus.y * s.win_h;
-        f32 reach = sqrtf(s.win_w * s.win_w + s.win_h * s.win_h);
+        f32 reach = kv::sqrt(s.win_w * s.win_w + s.win_h * s.win_h);
         f32 r = reach * (1.0f - a);
-        f32 x0 = floorf(cx - r), y0 = floorf(cy - r), d = ceilf(2.0f * r);
+        f32 x0 = kv::floor(cx - r), y0 = kv::floor(cy - r), d = kv::ceil(2.0f * r);
         if (d >= 1.0f && !s.iris_material.is_null()) {
             UiQuad disc = q;
             disc.material = s.iris_material;

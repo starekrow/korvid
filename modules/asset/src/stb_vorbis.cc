@@ -28,7 +28,37 @@
 #define STB_VORBIS_NO_STDIO
 #define STB_VORBIS_NO_PUSHDATA_API
 #define STB_VORBIS_NO_INTEGER_CONVERSION
+// Its math is kv's, not the platform's libm, so a sound decodes to the same samples on
+// every platform. It includes these itself; here first, they are already in when it
+// does, so the seven names below are macros in its own lines alone. Each is the double
+// function it would have called.
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <math.h>
+#include <limits.h>
+#if defined(_MSC_VER) || defined(__MINGW32__)
+#include <malloc.h>
+#endif
+#if defined(__linux__)
+#include <alloca.h>
+#endif
+#include "korvid/math/scalar.h"
+#define sin(x)      kv::sin((kv::f64)(x))
+#define cos(x)      kv::cos((kv::f64)(x))
+#define exp(x)      kv::exp((kv::f64)(x))
+#define log(x)      kv::log((kv::f64)(x))
+#define pow(x, y)   kv::pow((kv::f64)(x), (kv::f64)(y))
+#define floor(x)    kv::floor((kv::f64)(x))
+#define ldexp(x, e) kv::ldexp((kv::f64)(x), (kv::i32)(e))
 #include "vendor/stb_vorbis.c"
+#undef sin
+#undef cos
+#undef exp
+#undef log
+#undef pow
+#undef floor
+#undef ldexp
 #if KV_COMPILER_MSVC
 #pragma warning(pop)
 #else

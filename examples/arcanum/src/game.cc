@@ -38,7 +38,6 @@
 #include "korvid/text/text.h"
 #include "korvid/tilemap/tilemap.h"
 #include "korvid/ui/ui.h"
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -221,7 +220,7 @@ Sprite rock_sprite(const Game& g, i32 layer) {
 // The facing a direction is mostly in.
 u8 facing_of(vec2 d, u8 was) {
     if (d.x == 0.0f && d.y == 0.0f) return was;
-    if (fabsf(d.x) > fabsf(d.y)) return d.x < 0 ? 2 : 3;
+    if (kv::fabs(d.x) > kv::fabs(d.y)) return d.x < 0 ? 2 : 3;
     return d.y < 0 ? 0 : 1;
 }
 
@@ -750,7 +749,7 @@ void modes(TickContext& ctx) {
     if (g.aim.is_null() || ui_covering(e)) return;
     if (!g.aim_struck) {
         g.aim_t += dt;
-        f32 x = 0.5f - 0.5f * cosf(g.aim_t * kAimSpeed); // 0 to 1 and back, from the left
+        f32 x = 0.5f - 0.5f * kv::cos(g.aim_t * kAimSpeed); // 0 to 1 and back, from the left
         ui_set_offset(e, g.aim, "needle", vec2{(x - 0.5f) * 200.0f, 0.0f});
         return;
     }
@@ -770,8 +769,8 @@ void strike(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
     Table* players = engine_table(e, "arcanum.player");
     Vitals* v = players->get<Vitals>(g.player);
-    f32 x = 0.5f - 0.5f * cosf(g.aim_t * kAimSpeed);
-    f32 close = 1.0f - fabsf(x - 0.5f) * 2.0f;
+    f32 x = 0.5f - 0.5f * kv::cos(g.aim_t * kAimSpeed);
+    f32 close = 1.0f - kv::fabs(x - 0.5f) * 2.0f;
     Rng r;
     r.state = v->luck;
     f32 roll = r.unit();
@@ -905,7 +904,7 @@ void villagers(TickContext& ctx) {
         Actor& a = actor[i];
         Move2& mv = move[i];
         point2 at = local[i].position; // the level's root is at the origin
-        f32 len = sqrtf(a.route.x * a.route.x + a.route.y * a.route.y);
+        f32 len = kv::sqrt(a.route.x * a.route.x + a.route.y * a.route.y);
         mv.delta = vec2{0, 0};
         a.moving = 0;
         if (!g.provoked.is_null() && table.handle_at(i) == g.provoked && !a.hostile) {
@@ -934,7 +933,7 @@ void villagers(TickContext& ctx) {
                 a.repath = 0.3f;
             }
             vec2 d{a.goal.x - at.x, a.goal.y - at.y};
-            f32 dist = sqrtf(d.x * d.x + d.y * d.y);
+            f32 dist = kv::sqrt(d.x * d.x + d.y * d.y);
             f32 chase = kChaseSpeed * (f32)ctx.dt;
             if (dist > 0.01f) mv.delta = dist <= chase ? d : vec2{d.x / dist * chase, d.y / dist * chase};
             a.moving = dist > 0.01f;
@@ -944,7 +943,7 @@ void villagers(TickContext& ctx) {
             if ((last[i].hit_x || last[i].hit_y) && last[i].blocker != g.player) a.route_dir ^= 1;
             point2 goal = a.route_dir ? a.home : point2{a.home.x + a.route.x, a.home.y + a.route.y};
             vec2 to{goal.x - at.x, goal.y - at.y};
-            f32 dist = sqrtf(to.x * to.x + to.y * to.y);
+            f32 dist = kv::sqrt(to.x * to.x + to.y * to.y);
             if (dist <= step) { mv.delta = to; a.route_dir ^= 1; }
             else mv.delta = vec2{to.x / dist * step, to.y / dist * step};
             a.moving = 1;

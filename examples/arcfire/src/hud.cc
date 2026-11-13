@@ -10,7 +10,7 @@
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/camera.h"
 #include "korvid/ui/ui.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 
 namespace kv::arcfire {
@@ -126,7 +126,7 @@ void camera(TickContext& ctx) {
     }
     if (g.shake > 0.1f && !ctx.paused) {
         f32 t = (f32)ctx.tick;
-        cam->center = point2{sinf(t * 1.9f) * g.shake, cosf(t * 2.7f) * g.shake};
+        cam->center = point2{kv::sin(t * 1.9f) * g.shake, kv::cos(t * 2.7f) * g.shake};
         g.shake *= 0.85f;
     } else if (!ctx.paused) {
         g.shake = 0.0f;

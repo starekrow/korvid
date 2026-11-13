@@ -4,7 +4,6 @@
 // straight, they die at the end of their life or past the field's edge, and they meet only
 // the hitbox, the graze ring and the shell (never each other, never an enemy).
 #include "arcfire.h"
-#include <math.h>
 
 namespace kv::arcfire {
 

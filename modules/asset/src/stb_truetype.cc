@@ -23,6 +23,18 @@ void stb_free(void* p) {
 #define STBTT_malloc(x, u) ((void)(u), stb_alloc(x))
 #define STBTT_free(x, u)   ((void)(u), stb_free(x))
 #define STB_TRUETYPE_IMPLEMENTATION
+// Its math is kv's, not the platform's libm, so a glyph rasterizes to the same pixels on
+// every platform; with these defined it does not include <math.h>. Each is the double
+// function it would have called.
+#include "korvid/math/scalar.h"
+#define STBTT_ifloor(x)   ((int)kv::floor((kv::f64)(x)))
+#define STBTT_iceil(x)    ((int)kv::ceil((kv::f64)(x)))
+#define STBTT_sqrt(x)     kv::sqrt((kv::f64)(x))
+#define STBTT_pow(x, y)   kv::pow((kv::f64)(x), (kv::f64)(y))
+#define STBTT_fmod(x, y)  kv::fmod((kv::f64)(x), (kv::f64)(y))
+#define STBTT_cos(x)      kv::cos((kv::f64)(x))
+#define STBTT_acos(x)     kv::acos((kv::f64)(x))
+#define STBTT_fabs(x)     kv::fabs((kv::f64)(x))
 // Vendored, not ours: its warnings are silenced for its own lines only.
 #if KV_COMPILER_MSVC
 #pragma warning(push, 0)

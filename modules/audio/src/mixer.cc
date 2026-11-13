@@ -1,6 +1,6 @@
 #include "korvid/audio/mixer.h"
 #include "korvid/core/atomic.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace kv {
@@ -91,7 +91,7 @@ inline void fade_step(Mixer& m, MixVoice& v) {
     ++v.fade_pos;
     f32 p = (f32)v.fade_pos / (f32)v.fade_len;
     if (v.curve == FadeCurve::Linear) v.volume = v.fade_from + (v.fade_to - v.fade_from) * p;
-    else v.volume = v.fade_from * cosf(p * 1.57079633f) + v.fade_to * sinf(p * 1.57079633f);
+    else v.volume = v.fade_from * kv::cos(p * 1.57079633f) + v.fade_to * kv::sin(p * 1.57079633f);
     if (v.fade_pos == v.fade_len) {
         v.volume = v.fade_to;
         if (v.fade_stop) { v.active = false; m.done.push((u64)(&v - m.voices) | ((u64)v.gen << 32)); }
@@ -107,7 +107,7 @@ void mix_stream(Mixer& m, MixVoice& v, f32* out, u32 frames) {
     if (step <= 0.0) return;
     f32 bus = m.bus_gain[v.bus] * m.bus_gain[(u32)AudioBus::Master];
     f32 theta = (v.pan + 1.0f) * 0.25f * 3.14159265f;
-    f32 pl = cosf(theta), pr = sinf(theta);
+    f32 pl = kv::cos(theta), pr = kv::sin(theta);
     u32 oc = m.out_channels;
     u32 avail = r.available();
     u64 base = r.read;
@@ -139,7 +139,7 @@ void mix_voice(Mixer& m, MixVoice& v, f32* out, u32 frames) {
     if (step <= 0.0) return; // pitch 0: held
     f32 bus = m.bus_gain[v.bus] * m.bus_gain[(u32)AudioBus::Master];
     f32 theta = (v.pan + 1.0f) * 0.25f * 3.14159265f;
-    f32 pl = cosf(theta), pr = sinf(theta);
+    f32 pl = kv::cos(theta), pr = kv::sin(theta);
     u32 oc = m.out_channels, sc = v.channels;
     for (u32 i = 0; i < frames && v.active; ++i) {
         f32 gain = v.volume * bus, gl = gain * pl, gr = gain * pr;
@@ -164,7 +164,7 @@ void mix_voice(Mixer& m, MixVoice& v, f32* out, u32 frames) {
         v.pos += step;
         fade_step(m, v);
         if (v.active && v.pos >= (f64)v.frames) {
-            if (v.loop) v.pos = fmod(v.pos, (f64)v.frames);
+            if (v.loop) v.pos = kv::fmod(v.pos, (f64)v.frames);
             else { v.active = false; m.done.push((u64)(&v - m.voices) | ((u64)v.gen << 32)); break; }
         }
     }

@@ -16,7 +16,7 @@
 // ship (`beam`), shown while the shot is held with the Beam in hand; `beams` casts it.
 #include "arcfire.h"
 #include "korvid/core/memory.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace kv::arcfire {
 
@@ -61,7 +61,7 @@ u32 level(u32 power) { return (power < 1 ? 1 : power > kMaxPower ? kMaxPower : p
 
 // A shot going `ang` radians clockwise from up at `speed`, its sprite turned to match.
 void shot_spawn(Table& shots, const Sprite& s, point2 at, f32 ang, f32 speed, f32 radius, const Shot& shot) {
-    vec2 v{sinf(ang) * speed, cosf(ang) * speed};
+    vec2 v{kv::sin(ang) * speed, kv::cos(ang) * speed};
     shots.spawn(transform2_at(at, -ang), s, Velocity{v}, collider_circle(radius, L_SHOT, L_AIR | L_GROUND), shot);
 }
 
@@ -169,14 +169,14 @@ void shots(TickContext& ctx) {
             f32 bd = 1e18f;
             for (const point2& q : targets) { f32 d = length_sq(q - p); if (d < bd) { bd = d; best = &q; } }
             // Turn toward it, no faster than the bolt's rate.
-            f32 have = atan2f(v[i].v.x, v[i].v.y), want = atan2f(best->x - p.x, best->y - p.y);
+            f32 have = kv::atan2(v[i].v.x, v[i].v.y), want = kv::atan2(best->x - p.x, best->y - p.y);
             f32 d = want - have;
             while (d > KV_PI) d -= 2.0f * KV_PI;
             while (d < -KV_PI) d += 2.0f * KV_PI;
             f32 turn = sh[i].turn;
             have += d < -turn ? -turn : d > turn ? turn : d;
             f32 speed = length(v[i].v);
-            v[i].v = vec2{sinf(have) * speed, cosf(have) * speed};
+            v[i].v = vec2{kv::sin(have) * speed, kv::cos(have) * speed};
             t[i].rotation = -have;
         }
         p += v[i].v;
@@ -249,7 +249,7 @@ void beams(TickContext& ctx) {
             f32 lean = on_option && sg->parent < 0 ? oo[w.owner.index()].tilt : 0.0f;
             f32 ang = (sg->parent < 0 ? lean : w.angle[sg->parent]) + sg->angle * (s->focus ? kBeamFocusSpread : 1.0f) * kDeg;
             f32 most = sg->splits ? kBeamSplit : kBeamReach - (sg->parent < 0 ? 0.0f : kBeamSplit);
-            vec2 dir{sinf(ang), cosf(ang)};
+            vec2 dir{kv::sin(ang), kv::cos(ang)};
             f32 width = l.width;
             hits.clear();
             collision_cast_all(ctx, rect2{o.x - width * 0.5f, o.y - width * 0.5f, width, width}, dir * most, L_AIR | L_GROUND, hits);

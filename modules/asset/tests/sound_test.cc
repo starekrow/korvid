@@ -4,7 +4,7 @@
 #include "korvid/asset/sound.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/test.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -38,7 +38,7 @@ usize make_wav(u8* out, u32 frames, u32 channels, u32 bits, bool is_float, f32 (
     return (usize)(p - out);
 }
 
-f32 tone(u32 i, u32 ch) { return ch == 0 ? sinf((f32)i * 0.1f) * 0.9f : -0.5f; }
+f32 tone(u32 i, u32 ch) { return ch == 0 ? kv::sin((f32)i * 0.1f) * 0.9f : -0.5f; }
 
 } // namespace
 
@@ -55,13 +55,13 @@ void test_sound(kv::TestCtx& c) {
         KV_CHECK(c, s.rate == 22050 && s.channels == 2 && s.frames == 200 && s.samples);
         f32 tol = bits == 8 ? 0.02f : 0.001f;
         bool ok = true;
-        for (u32 i = 0; i < 200 && ok; ++i) ok = fabsf(s.samples[i * 2] - tone(i, 0)) < tol && fabsf(s.samples[i * 2 + 1] + 0.5f) < tol;
+        for (u32 i = 0; i < 200 && ok; ++i) ok = kv::fabs(s.samples[i * 2] - tone(i, 0)) < tol && kv::fabs(s.samples[i * 2 + 1] + 0.5f) < tol;
         KV_CHECK(c, ok);
         free_in(mem_general(), s.samples, (usize)s.frames * s.channels * 4);
     }
     SoundAsset f{};
     usize n = make_wav(buf, 50, 1, 32, true, tone);
-    KV_CHECK(c, sound_decode_wav(buf, n, mem_general(), f, &why) && f.channels == 1 && fabsf(f.samples[7] - tone(7, 0)) < 1e-6f);
+    KV_CHECK(c, sound_decode_wav(buf, n, mem_general(), f, &why) && f.channels == 1 && kv::fabs(f.samples[7] - tone(7, 0)) < 1e-6f);
     free_in(mem_general(), f.samples, (usize)f.frames * 4);
     SoundAsset bad{};
     KV_CHECK(c, !sound_decode("not a sound", 11, mem_general(), bad, &why) && why);
@@ -80,7 +80,7 @@ void test_sound(kv::TestCtx& c) {
         KV_CHECK(c, ok && o.rate >= 8000 && o.channels >= 1 && o.frames > 1000);
         if (ok) {
             f32 peak = 0.0f;
-            for (u32 i = 0; i < o.frames * o.channels; ++i) if (fabsf(o.samples[i]) > peak) peak = fabsf(o.samples[i]);
+            for (u32 i = 0; i < o.frames * o.channels; ++i) if (kv::fabs(o.samples[i]) > peak) peak = kv::fabs(o.samples[i]);
             KV_CHECK(c, peak > 0.01f && peak <= 1.0f);
             KV_INFO("test", "decoded %s: %u Hz x%u, %u frames, peak %.2f", path, o.rate, o.channels, o.frames, peak);
             free_in(mem_general(), o.samples, (usize)o.frames * o.channels * 4);

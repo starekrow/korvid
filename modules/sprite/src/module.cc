@@ -139,7 +139,7 @@ Camera2 camera_resolve(Engine& e, const Camera2& cam, u32 width, u32 height, f32
     if (cam.pixel_snap) {
         // The view's corner on a world pixel: the screen's pixels then each cover whole
         // texels (at an integer zoom), whatever the window's parity.
-        f32 left = floorf((out.center.x - hw) * z + 0.5f) / z, bottom = floorf((out.center.y - hh) * z + 0.5f) / z;
+        f32 left = kv::floor((out.center.x - hw) * z + 0.5f) / z, bottom = kv::floor((out.center.y - hh) * z + 0.5f) / z;
         out.center = point2{left + hw, bottom + hh};
     }
     return out;

@@ -31,7 +31,6 @@
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 #include "korvid/text/text.h"
-#include <math.h>
 #include <stdlib.h>
 
 namespace kv {
@@ -160,7 +159,7 @@ Sprite sprite_of(const Game& g, Look look, f32 size, i32 layer, color tint = col
     return s;
 }
 
-vec2 heading(f32 rotation) { return vec2{cosf(rotation), sinf(rotation)}; }
+vec2 heading(f32 rotation) { return vec2{kv::cos(rotation), kv::sin(rotation)}; }
 
 // A label in screen space, at `at` from its anchor: banners from the middle, over the
 // dimmer; the HUD from the window's top-right corner. The anchor puts it there on any
@@ -317,7 +316,7 @@ void camera(TickContext& ctx) {
     }
     if (g.shake > 0.05f) {
         f32 t = (f32)ctx.tick;
-        cam->center = point2{sinf(t * 1.7f) * g.shake, cosf(t * 2.3f) * g.shake};
+        cam->center = point2{kv::sin(t * 1.7f) * g.shake, kv::cos(t * 2.3f) * g.shake};
         g.shake *= 0.86f;
     } else {
         g.shake = 0.0f;
@@ -491,8 +490,8 @@ void on_rock_hit(TickContext& ctx, Span<const RockHit> hits) {
         ctx.destroy(h.bullet);
         if (size < 2) {
             f32 a = g.rng.range(0.5f, 1.1f);
-            vec2 d1{drift.x * cosf(a) - drift.y * sinf(a), drift.x * sinf(a) + drift.y * cosf(a)};
-            vec2 d2{drift.x * cosf(-a) - drift.y * sinf(-a), drift.x * sinf(-a) + drift.y * cosf(-a)};
+            vec2 d1{drift.x * kv::cos(a) - drift.y * kv::sin(a), drift.x * kv::sin(a) + drift.y * kv::cos(a)};
+            vec2 d2{drift.x * kv::cos(-a) - drift.y * kv::sin(-a), drift.x * kv::sin(-a) + drift.y * kv::cos(-a)};
             spawn_rock(*rocks, g, at, (u8)(size + 1), d1 * 1.4f);
             spawn_rock(*rocks, g, at, (u8)(size + 1), d2 * 1.4f);
         }

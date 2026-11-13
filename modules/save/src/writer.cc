@@ -1,6 +1,6 @@
 #include "korvid/save/writer.h"
 #include "korvid/core/log.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -114,7 +114,7 @@ void SaveWriter::uint_value(u64 v) {
 
 void SaveWriter::f64_value(f64 v) {
     if (v != v) { string_value("nan"); return; }
-    if (isinf(v)) { string_value(v < 0 ? "-inf" : "inf"); return; }
+    if (kv::isinf(v)) { string_value(v < 0 ? "-inf" : "inf"); return; }
     char b[40];
     for (int p = 15; p <= 17; ++p) { // the fewest digits that read back the same
         snprintf(b, sizeof b, "%.*g", p, v);
@@ -125,7 +125,7 @@ void SaveWriter::f64_value(f64 v) {
 
 void SaveWriter::f32_value(f32 v) {
     if (v != v) { string_value("nan"); return; }
-    if (isinf(v)) { string_value(v < 0 ? "-inf" : "inf"); return; }
+    if (kv::isinf(v)) { string_value(v < 0 ? "-inf" : "inf"); return; }
     char b[32];
     for (int p = 6; p <= 9; ++p) {
         snprintf(b, sizeof b, "%.*g", p, (double)v);

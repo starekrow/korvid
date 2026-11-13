@@ -8,7 +8,7 @@
 #include "korvid/sprite/module.h"
 #include "korvid/sprite/transform2.h"
 #include "korvid/sprite/world.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace {
 
@@ -21,8 +21,8 @@ constinit const KindDesc k_kinds[] = {
 };
 KV_MODULE_DEFINE(k_s) = {.name = "s", .kinds = k_kinds};
 
-bool near(point2 a, point2 b, f32 eps = 1e-3f) { return fabsf(a.x - b.x) < eps && fabsf(a.y - b.y) < eps; }
-bool near(f32 a, f32 b, f32 eps = 1e-4f) { return fabsf(a - b) < eps; }
+bool near(point2 a, point2 b, f32 eps = 1e-3f) { return kv::fabs(a.x - b.x) < eps && kv::fabs(a.y - b.y) < eps; }
+bool near(f32 a, f32 b, f32 eps = 1e-4f) { return kv::fabs(a - b) < eps; }
 
 } // namespace
 

@@ -5,15 +5,15 @@
 // ring survives a producer thread hammering it.
 #include "korvid/audio/mixer.h"
 #include "korvid/core/test.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include "korvid/core/os_thread.h"
 
 namespace {
 
 using namespace kv;
 
-bool near(f32 a, f32 b, f32 eps = 1e-3f) { return fabsf(a - b) < eps; }
-bool near(f64 a, f64 b, f64 eps = 1e-3) { return fabs(a - b) < eps; } // a voice position is f64
+bool near(f32 a, f32 b, f32 eps = 1e-3f) { return kv::fabs(a - b) < eps; }
+bool near(f64 a, f64 b, f64 eps = 1e-3) { return kv::fabs(a - b) < eps; } // a voice position is f64
 
 MixCmd play_cmd(u32 slot, u32 gen, const f32* samples, u32 frames, u32 rate, u32 channels, f32 pitch = 1.0f, bool loop = false) {
     MixCmd c{};

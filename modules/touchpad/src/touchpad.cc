@@ -3,7 +3,7 @@
 #include "korvid/touchpad/touchpad.h"
 #include "korvid/core/json.h"
 #include "korvid/core/memory.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace kv {
@@ -179,7 +179,7 @@ void touchpad_update(const TouchpadConfig& c, TouchpadState& st, const TouchPoin
     }
     if (stick) {
         f32 dx = stick->x - st.center.x, dy = stick->y - st.center.y;
-        f32 len = sqrtf(dx * dx + dy * dy);
+        f32 len = kv::sqrt(dx * dx + dy * dy);
         if (len > radius) {
             if (c.drag) {
                 // The centre follows the thumb out to the radius, as far as the margins let it.
@@ -188,7 +188,7 @@ void touchpad_update(const TouchpadConfig& c, TouchpadState& st, const TouchPoin
                 st.center.y = clampf(st.center.y + dy * pull, b[1], b[3]);
                 dx = stick->x - st.center.x;
                 dy = stick->y - st.center.y;
-                len = sqrtf(dx * dx + dy * dy);
+                len = kv::sqrt(dx * dx + dy * dy);
             }
             if (len > radius) { dx *= radius / len; dy *= radius / len; }
         }

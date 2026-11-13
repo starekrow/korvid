@@ -4,7 +4,6 @@
 // around it, and its beam, are child rows (a row has one collider).
 #include "arcfire.h"
 #include "korvid/platform_hid/actions.h"
-#include <math.h>
 
 namespace kv::arcfire {
 

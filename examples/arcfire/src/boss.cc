@@ -24,7 +24,7 @@
 #include "korvid/asset/scope.h"
 #include "korvid/asset/texture.h"
 #include "korvid/core/log.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -160,7 +160,7 @@ Handle boss_spawn(TickContext& ctx, Game& g, const Dials& d, u32 di) {
         s.size = p.size;
         s.layer = Z_PART;
         Collider2 c = collider_circle(p.radius, L_AIR, L_SHOT);
-        Health hp{(i32)ceilf((f32)p.health * d.enemy_health), 0, p.score, 0};
+        Health hp{(i32)kv::ceil((f32)p.health * d.enemy_health), 0, p.score, 0};
         Emitter em{p.pattern_count ? p.entries[0] : KV_BML_NONE, 0.0f, EmitIdle, kFirstFire + i * kFireStagger};
         Part part{h, i, 0, p.launch != kNoFormation ? p.every / 2 : 0, 0};
         made[i] = parts->spawn(transform2_at(world), local2_at(p.at), Parent{p.parent < 0 ? h : made[p.parent]}, s, c, hp, em, Runner{}, part);
@@ -228,7 +228,7 @@ void bosses(TickContext& ctx) {
         case BossState::Holding: {
             const PhaseDef& ph = def.phases[b.phase < def.phase_count ? b.phase : def.phase_count - 1];
             f32 t = (f32)b.clock;
-            point2 want{b.hold.x + sinf(t * ph.sway_rate) * ph.sway, b.hold.y + sinf(t * ph.sway_rate * 1.7f) * 6.0f};
+            point2 want{b.hold.x + kv::sin(t * ph.sway_rate) * ph.sway, b.hold.y + kv::sin(t * ph.sway_rate * 1.7f) * 6.0f};
             p += (want - p) * kSwayFollow;
             if (b.clock >= def.timeout) {
                 // Out of time: the stomp. Every part still standing turns to the stomp's
@@ -249,7 +249,7 @@ void bosses(TickContext& ctx) {
         }
         case BossState::Stomping: {
             f32 t = (f32)b.clock / (f32)(def.stomp_ticks ? def.stomp_ticks : 1);
-            p.y = b.hold.y - def.dive * sinf(KV_PI * (t < 1.0f ? t : 1.0f));
+            p.y = b.hold.y - def.dive * kv::sin(KV_PI * (t < 1.0f ? t : 1.0f));
             p.x += (b.hold.x - p.x) * kSwayFollow;
             if (b.clock >= def.stomp_ticks) {
                 b.state = (u32)BossState::Leaving;
@@ -352,7 +352,7 @@ void bosses(TickContext& ctx) {
             // the stomp, once.
             part.timer = stomp ? 0 : pd.every;
             const FormationDef& f = g.stage.formations[pd.launch];
-            u32 count = (u32)lroundf((f32)f.count * dials_row[0].formation_count);
+            u32 count = (u32)kv::lround((f32)f.count * dials_row[0].formation_count);
             if (count == 0) count = 1;
             Handle group = formations->spawn(Formation{count, 0, 0, 0});
             for (u32 m = 0; m < count; ++m)

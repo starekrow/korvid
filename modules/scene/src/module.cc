@@ -5,12 +5,11 @@
 #include "korvid/core/profile.h"
 #include "korvid/math/fields.h"
 #include "korvid/sprite/transform2.h"
-#include <math.h>
 
 namespace kv {
 
 Placement2 placement_compose(const Placement2& parent, const Local2& local) {
-    f32 cs = cosf(parent.rotation), sn = sinf(parent.rotation);
+    f32 cs = kv::cos(parent.rotation), sn = kv::sin(parent.rotation);
     f32 lx = local.position.x * parent.scale.x, ly = local.position.y * parent.scale.y;
     Placement2 w;
     w.position = point2{parent.position.x + cs * lx - sn * ly, parent.position.y + sn * lx + cs * ly};

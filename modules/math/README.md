@@ -1,10 +1,19 @@
 # math
 
 2D math as plain structs and free functions: vectors and points that are different
-types, rectangles, linear RGBA colors, 2x3 affine transforms, and the field traits that
-let all of them appear in component schemas. Header only; every function is inline; no
-SIMD, no templates. The platform's `libm` does the transcendentals, which is why
-determinism is promised within one build and platform and not across them.
+types, rectangles, linear RGBA colors, 2x3 affine transforms, the field traits that let
+all of them appear in component schemas, and the scalar functions (`sin`, `atan2`,
+`pow`, `floor`, ...) that the whole engine calls instead of the platform's libm. No SIMD,
+no templates.
+
+The scalar functions give the same bits on every platform. The platform's libm does not:
+glibc, Apple's libm and Microsoft's CRT each round `sinf` their own way in the last bit
+for some inputs, and a game that steps the same simulation on two of them drifts apart.
+Here the exact functions (`floor`, `fmod`, `sqrt`, ...) are computed by their bits or by
+the instruction, and the transcendentals in double with `+ - * /` alone and rounded once,
+which every IEEE 754 machine does alike as long as no multiply is fused into an add (the
+toolchains see to that). The f32 ones are correctly rounded for all but a handful of the
+2^32 inputs; `check/README.md` has the counts and the speed against glibc.
 
 ## How it works
 
@@ -50,6 +59,19 @@ Interpolate placements per field and rebuild with `affine2_trs` where rotation m
 
 ## Quick reference
 
+Header `korvid/math/scalar.h` (in `kv`, each for `f32` and `f64`, by argument type):
+
+| name | kind | what |
+|---|---|---|
+| `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2` | functions | radians |
+| `exp`, `exp2`, `log`, `log2`, `log10`, `pow` | functions | `log2` of a power of two is exact; `pow` with an integer exponent of 64 or less is repeated squaring, exact when the result is |
+| `sqrt`, `fabs`, `floor`, `ceil`, `trunc`, `round`, `lround`, `fmod`, `copysign`, `ldexp`, `frexp` | functions | exact; `lround` returns `i64` |
+| `isnan`, `isinf`, `isfinite`, `signbit` | functions | by the bits |
+| `KV_PI`, `KV_INF`, `KV_NAN` | constants | `f32`; every NaN the functions return is `KV_NAN` (0x7fc00000), or its f64 form |
+
+Mixing the types in one call (`pow(x, 2.0)` with `x` an `f32`) is ambiguous on purpose:
+say which.
+
 Header `korvid/math/vec2.h`:
 
 | name | kind | what |
@@ -59,7 +81,7 @@ Header `korvid/math/vec2.h`:
 | `dot`, `cross`, `length`, `length_sq`, `normalize`, `perp`, `distance` | functions | `cross` is the z of the 3D cross; `perp` rotates +90 degrees; `normalize` of zero is zero |
 | `lerp(a, b, t)` | function | for vec2, point2, f32 |
 | `as_vec(p)`, `as_point(v)` | functions | the explicit conversions |
-| `clampf`, `nearly(a, b, eps)`, `KV_PI` | functions, constant | scalars |
+| `clampf`, `nearly(a, b, eps)` | functions | scalars |
 
 Header `korvid/math/rect2.h`:
 
@@ -105,7 +127,13 @@ The module registers nothing with the engine; it has no `ModuleDesc`.
   should keep its angle unwrapped if it wants smooth interpolation.
 - **Compare with `nearly`**, not `==`, after any arithmetic; `==` is exact and is there
   for the schema's change detection, where exact is right.
-- **No 3D, no doubles.** `f64` appears in the engine for time only.
+- **No 3D, and doubles only in the scalar functions.** `f64` appears in the engine for
+  time, and in `scalar.h` for the vendored decoders (stb_vorbis, stb_truetype), whose
+  math is routed here too.
+- **Never `<math.h>`.** Nothing in the engine includes it except `asset`'s stb_vorbis
+  file, which needs it before its own include and calls kv's functions anyway; the built
+  objects reference no libm function at all. Its C++ form also costs every file that
+  includes it about 25,000 lines of libstdc++.
 
 ## Not in this module
 

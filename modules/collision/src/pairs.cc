@@ -8,7 +8,7 @@
 #include "korvid/core/arena.h"
 #include "korvid/core/map.h"
 #include "korvid/core/sort.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace kv {
 
@@ -37,7 +37,7 @@ bool collision_items_overlap(const CollItem& a, const CollItem& b) {
     vec2 d = b.p - a.p;
     bool ca = a.shape == (u8)ColliderShape::Circle, cb = b.shape == (u8)ColliderShape::Circle;
     if (ca && cb) { f32 r = a.r + b.r; return length_sq(d) < r * r; }
-    if (!ca && !cb) return fabsf(d.x) < a.half.x + b.half.x && fabsf(d.y) < a.half.y + b.half.y;
+    if (!ca && !cb) return kv::fabs(d.x) < a.half.x + b.half.x && kv::fabs(d.y) < a.half.y + b.half.y;
     // Circle against box: the box's nearest point to the circle's center.
     const CollItem& box = ca ? b : a;
     const CollItem& cir = ca ? a : b;
@@ -85,7 +85,7 @@ void collision_find_pairs(Span<const CollItem> items, Array<CollPair>& out, Coll
     for (Group& grp : groups) {
         grp.cell = 2.0f * (grp.max_r > 0.5f ? grp.max_r : 0.5f);
         for (u32 i : grp.members) {
-            u64 key = grid_key((i32)floorf(items[i].p.x / grp.cell), (i32)floorf(items[i].p.y / grp.cell));
+            u64 key = grid_key((i32)kv::floor(items[i].p.x / grp.cell), (i32)kv::floor(items[i].p.y / grp.cell));
             u32* head = grp.heads.get_or_insert(key, 0xFFFFFFFFu);
             next[i] = *head;
             *head = i;
@@ -108,7 +108,7 @@ void collision_find_pairs(Span<const CollItem> items, Array<CollPair>& out, Coll
             if (ga == gb) {
                 // Within a group that meets itself: neighbouring cells, each pair once.
                 for (u32 i : A.members) {
-                    i32 cx = (i32)floorf(items[i].p.x / A.cell), cy = (i32)floorf(items[i].p.y / A.cell);
+                    i32 cx = (i32)kv::floor(items[i].p.x / A.cell), cy = (i32)kv::floor(items[i].p.y / A.cell);
                     for (i32 dy = -1; dy <= 1; ++dy)
                         for (i32 dx = -1; dx <= 1; ++dx) {
                             u32* head = A.heads.find(grid_key(cx + dx, cy + dy));
@@ -125,8 +125,8 @@ void collision_find_pairs(Span<const CollItem> items, Array<CollPair>& out, Coll
             for (u32 i : S.members) {
                 const CollItem& a = items[i];
                 f32 reach = a.r + L.max_r;
-                i32 x0 = (i32)floorf((a.p.x - reach) / L.cell), x1 = (i32)floorf((a.p.x + reach) / L.cell);
-                i32 y0 = (i32)floorf((a.p.y - reach) / L.cell), y1 = (i32)floorf((a.p.y + reach) / L.cell);
+                i32 x0 = (i32)kv::floor((a.p.x - reach) / L.cell), x1 = (i32)kv::floor((a.p.x + reach) / L.cell);
+                i32 y0 = (i32)kv::floor((a.p.y - reach) / L.cell), y1 = (i32)kv::floor((a.p.y + reach) / L.cell);
                 u64 cells = (u64)(x1 - x0 + 1) * (u64)(y1 - y0 + 1);
                 if (cells > L.members.len) {
                     for (u32 j : L.members) consider(i, j);

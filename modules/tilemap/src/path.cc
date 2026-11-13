@@ -2,7 +2,7 @@
 #include "korvid/tilemap/tilemap.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/memory.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace kv {
@@ -15,8 +15,8 @@ bool walkable(const TilemapAsset& m, i32 x, i32 y, vec2 size) {
     f32 cx = ((f32)x + 0.5f) * (f32)m.tile_w, cy = ((f32)y + 0.5f) * (f32)m.tile_h;
     f32 x0 = cx - size.x * 0.5f, x1 = cx + size.x * 0.5f, y0 = cy - size.y * 0.5f, y1 = cy + size.y * 0.5f;
     // A box wider than a cell reaches into its neighbours: they must be clear too.
-    for (i32 ny = (i32)floorf(y0 / (f32)m.tile_h); ny <= (i32)floorf((y1 - 0.001f) / (f32)m.tile_h); ++ny)
-        for (i32 nx = (i32)floorf(x0 / (f32)m.tile_w); nx <= (i32)floorf((x1 - 0.001f) / (f32)m.tile_w); ++nx)
+    for (i32 ny = (i32)kv::floor(y0 / (f32)m.tile_h); ny <= (i32)kv::floor((y1 - 0.001f) / (f32)m.tile_h); ++ny)
+        for (i32 nx = (i32)kv::floor(x0 / (f32)m.tile_w); nx <= (i32)kv::floor((x1 - 0.001f) / (f32)m.tile_w); ++nx)
             if (tilemap_solid(m, nx, ny)) return false;
     for (u32 i = 0; i < m.solid_rect_count; ++i) {
         const rect2& r = m.solid_rects[i];

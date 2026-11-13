@@ -10,7 +10,7 @@
 #include "korvid/anim/clip.h"
 #include "korvid/anim/player.h"
 #include "korvid/core/job.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 
 namespace kv::arcfire {
 
@@ -81,7 +81,7 @@ void fx_blast(TickContext& ctx, Game& g, point2 at, Blast b) {
         for (u32 i = 0; i < ring; ++i) {
             f32 a = 2.0f * KV_PI * (f32)i / (f32)(ring ? ring : 1);
             Sprite s = sprite_of(g, TEX_SPARK, rect2_unit(), vec2{6, 6}, Z_FX, hot, true);
-            ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{vec2{cosf(a) * 7.0f, sinf(a) * 7.0f}}, Particle{28, 28, 0.0f, 0.95f, 1.0f, 0.0f});
+            ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{vec2{kv::cos(a) * 7.0f, kv::sin(a) * 7.0f}}, Particle{28, 28, 0.0f, 0.95f, 1.0f, 0.0f});
         }
         hud_flash(*ctx.engine);
         fx_shimmer(g, at, 300.0f, 1.0f, 50);
@@ -103,7 +103,7 @@ void fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 
         f32 v = speed * g.fx.range(0.3f, 1.0f);
         u32 life = 10 + g.fx.below(14);
         Sprite s = sprite_of(g, TEX_SPARK, rect2_unit(), vec2{5, 5}, Z_FX, tint, true);
-        ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{vec2{cosf(a) * v, sinf(a) * v}}, Particle{life, life, 0.0f, 0.9f, 1.0f, 0.0f});
+        ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{vec2{kv::cos(a) * v, kv::sin(a) * v}}, Particle{life, life, 0.0f, 0.9f, 1.0f, 0.0f});
     }
 }
 
@@ -125,7 +125,7 @@ void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
         const Transform2& at = xf[s.entity.index()];
         f32 r = -at.rotation;
         vec2 o = kShadowOffset;
-        Local2 local = local2_at(point2{o.x * cosf(r) - o.y * sinf(r), o.x * sinf(r) + o.y * cosf(r)});
+        Local2 local = local2_at(point2{o.x * kv::cos(r) - o.y * kv::sin(r), o.x * kv::sin(r) + o.y * kv::cos(r)});
         // Born where the composition will put it, so its first frame is not drawn moving
         // there from the world's origin (a streak across the field, once an enemy).
         ctx.spawn_later(g_shadow_kind, transform2_at(at.position + o, at.rotation), local, Parent{s.entity}, shadow);

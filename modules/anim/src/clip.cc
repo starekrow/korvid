@@ -3,7 +3,6 @@
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/save/writer.h"
-#include <math.h>
 #include <string.h>
 
 namespace kv {

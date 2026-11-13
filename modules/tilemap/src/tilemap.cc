@@ -19,7 +19,6 @@
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 #include "tilemap_internal.h"
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
 

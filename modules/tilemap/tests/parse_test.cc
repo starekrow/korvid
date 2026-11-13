@@ -5,7 +5,7 @@
 #include "korvid/core/arena.h"
 #include "korvid/core/test.h"
 #include "fixtures.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace kv { void tilemap_build_solids(TilemapAsset& m, Allocator* a); }
@@ -14,7 +14,7 @@ namespace {
 
 using namespace kv;
 
-bool near(f32 a, f32 b) { return fabsf(a - b) < 1e-4f; }
+bool near(f32 a, f32 b) { return kv::fabs(a - b) < 1e-4f; }
 
 bool parse(const char* json, TilemapAsset& m, Arena& ar, char* err, usize cap) {
     m = TilemapAsset{};

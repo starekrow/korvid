@@ -19,7 +19,6 @@
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
-#include <math.h>
 
 namespace kv {
 
@@ -126,7 +125,7 @@ void stones_tick(TickContext& ctx) {
         f32 mx, my;
         mouse_screen(mouse.x, mouse.y, window->width(), window->height(), &mx, &my);
         vec2 to{mx - player.pos.x, my - player.pos.y};
-        f32 dist = sqrtf(to.x * to.x + to.y * to.y);
+        f32 dist = kv::sqrt(to.x * to.x + to.y * to.y);
         if (dist > kPlayerRadius * 0.5f) player.vel += to * (kPush * dt / dist);
     }
     if (input->sampled.down(Key::Space) && g.ticks % 10 == 0 && g.stones.len < 200) {

@@ -8,7 +8,7 @@
 #include "korvid/core/memory.h"
 #include "korvid/core/utf8.h"
 #include "korvid/render/renderer.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -192,7 +192,7 @@ void natural(Ctx& c, UiNode& n, f32 inner_w, f32 inner_h, f32* cw, f32* ch) {
         f32 mx = ui_number(c.s, n.max, 1.0f);
         if (n.bar) { *cw = 60.0f; *ch = 6.0f; return; }
         const UiImage* im = c.doc ? ui_doc_image(*c.doc, n.image) : nullptr;
-        u32 count = mx > 0.0f ? (u32)ceilf(mx) : 0;
+        u32 count = mx > 0.0f ? (u32)kv::ceil(mx) : 0;
         if (im && count) { *cw = im->rect.w * im->scale * (f32)count + n.gap * (f32)(count - 1); *ch = im->rect.h * im->scale; }
         return;
     }
@@ -225,7 +225,7 @@ void natural(Ctx& c, UiNode& n, f32 inner_w, f32 inner_h, f32* cw, f32* ch) {
             measure(c, k, inner_w, inner_h);
             const UiNode& ch_ = c.sc.nodes[k];
             if (!ch_.visible) continue;
-            f32 w = ch_.w + fabsf(ch_.offset.x), h = ch_.h + fabsf(ch_.offset.y);
+            f32 w = ch_.w + kv::fabs(ch_.offset.x), h = ch_.h + kv::fabs(ch_.offset.y);
             if (w > *cw) *cw = w;
             if (h > *ch) *ch = h;
         }
@@ -311,7 +311,7 @@ void quad(Ctx& c, Handle material, rect2 uv, f32 x, f32 y, f32 w, f32 h, color t
     q.material = material;
     q.uv = rect2{uv.x + uv.w * u0, uv.y + uv.h * v0, uv.w * (u1 - u0), uv.h * (v1 - v0)};
     q.x = r.x * c.k; q.y = r.y * c.k; q.w = r.w * c.k; q.h = r.h * c.k;
-    if (snap) { q.x = floorf(q.x + 0.5f); q.y = floorf(q.y + 0.5f); q.w = floorf(q.w + 0.5f); q.h = floorf(q.h + 0.5f); }
+    if (snap) { q.x = kv::floor(q.x + 0.5f); q.y = kv::floor(q.y + 0.5f); q.w = kv::floor(q.w + 0.5f); q.h = kv::floor(q.h + 0.5f); }
     q.tint = tint;
     q.layer = c.sc.open.layer;
     c.s.quads.push(q);
@@ -322,7 +322,7 @@ void quad_px(Ctx& c, Handle material, rect2 uv, f32 x, f32 y, f32 w, f32 h, colo
     quad(c, material, uv, x / c.k, y / c.k, w / c.k, h / c.k, tint, clip, false);
     if (!c.s.quads.len) return;
     UiQuad& q = c.s.quads.last();
-    q.x = floorf(q.x + 0.5f); q.y = floorf(q.y + 0.5f);
+    q.x = kv::floor(q.x + 0.5f); q.y = kv::floor(q.y + 0.5f);
 }
 
 void nine(Ctx& c, const UiFrame& f, const UiNode& n, color tint) {
@@ -379,7 +379,7 @@ void text(Ctx& c, const UiNode& n, bool caret) {
             f32 lw = b.line_w[l.line];
             f32 ax = n.align == UiAlign::Center ? (iw * c.k - lw) * 0.5f : n.align == UiAlign::End ? iw * c.k - lw : 0.0f;
             f32 dx = 0.0f, dy = 0.0f;
-            if (rc.fx & FX_WAVE) dy = sinf(t * 6.0f - (f32)l.index * 0.6f) * 1.5f * c.k;
+            if (rc.fx & FX_WAVE) dy = kv::sin(t * 6.0f - (f32)l.index * 0.6f) * 1.5f * c.k;
             if (rc.fx & FX_SHAKE) {
                 u64 hsh = hash_mix(((u64)l.index << 32) ^ (u64)(t * 20.0f));
                 dx = ((f32)(hsh % 3) - 1.0f) * 0.75f * c.k;
@@ -433,7 +433,7 @@ void emit_node(Ctx& c, u32 i) {
                 quad(c, c.s.white_material, rect2_unit(), n.x + 1, n.y + 1, (n.w - 2) * frac, n.h - 2, node_color(c, n.fill, color_rgba(0.9f, 0.6f, 0.1f)), n.clip);
             }
         } else if (const UiImage* im = c.doc ? ui_doc_image(*c.doc, n.image) : nullptr) {
-            u32 count = mx > 0.0f ? (u32)ceilf(mx) : 0;
+            u32 count = mx > 0.0f ? (u32)kv::ceil(mx) : 0;
             for (u32 k = 0; k < count; ++k) {
                 f32 part = v - (f32)k;
                 part = part < 0.0f ? 0.0f : part > 1.0f ? 1.0f : part;
@@ -451,7 +451,7 @@ void emit_node(Ctx& c, u32 i) {
             bool focused = idx == n.focus;
             Name want = focused ? name_lookup("focus") : item.color;
             if (focused && c.doc) if (const UiImage* cur = ui_doc_image(*c.doc, name_lookup("cursor"))) {
-                f32 bob = floorf(sinf(c.sc.time * 6.0f) * 1.5f + 0.5f);
+                f32 bob = kv::floor(kv::sin(c.sc.time * 6.0f) * 1.5f + 0.5f);
                 f32 cw_ = cur->rect.w * cur->scale, ch_ = cur->rect.h * cur->scale;
                 image(c, *cur, 0, item.x - cw_ - 2.0f + bob, item.y + (item.h - ch_) * 0.5f, cw_, ch_, white, n.clip);
             }

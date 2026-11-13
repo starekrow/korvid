@@ -10,14 +10,14 @@
 #include "korvid/sprite/module.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <string.h>
 
 namespace {
 
 using namespace kv;
 
-bool near(f32 a, f32 b, f32 eps = 1e-3f) { return fabsf(a - b) < eps; }
+bool near(f32 a, f32 b, f32 eps = 1e-3f) { return kv::fabs(a - b) < eps; }
 
 // A font where every glyph is 10 wide, 12 high, advances 11, sits with its center 5
 // right of and 6 above the pen; the space has no ink; 'A' before 'V' kerns by -2. It

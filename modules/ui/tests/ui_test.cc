@@ -16,7 +16,7 @@
 #include "korvid/platform_hid/actions.h"
 #include "korvid/platform_hid/module.h"
 #include "korvid/sprite/module.h"
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -132,7 +132,7 @@ void test_ui(kv::TestCtx& c) {
     f32 W = 1280.0f / st->scale, H = 720.0f / st->scale;
     KV_CHECK(c, st->scale == 4.0f); // 720 / 180, whole
     rect2 r = ui_rect(e, menu, "");
-    KV_CHECK(c, r.w == 100.0f && fabsf(r.x - (W - 100.0f) * 0.5f) < 0.01f && fabsf(r.y + r.h * 0.5f - H * 0.5f) < 0.01f);
+    KV_CHECK(c, r.w == 100.0f && kv::fabs(r.x - (W - 100.0f) * 0.5f) < 0.01f && kv::fabs(r.y + r.h * 0.5f - H * 0.5f) < 0.01f);
     rect2 cr = ui_rect(e, menu, "corner");
     KV_CHECK(c, cr.x + cr.w == r.x + r.w - 4.0f - 1.0f && cr.y + cr.h == r.y + r.h - 6.0f - 2.0f); // bottom-right of the inside, offset
     Handle hud = ui_open(e, doc, "hud", uo(90, false));
@@ -196,7 +196,7 @@ void test_ui(kv::TestCtx& c) {
     ui_scroll(e, roll, "view", 500.0f);
     frames(1);
     rect2 view = ui_rect(e, roll, "view"), tall = ui_rect(e, roll, "tall");
-    KV_CHECK(c, fabsf((tall.y + tall.h) - (view.y + view.h)) < 0.01f); // scrolled to the bottom, no further
+    KV_CHECK(c, kv::fabs((tall.y + tall.h) - (view.y + view.h)) < 0.01f); // scrolled to the bottom, no further
     ui_scroll(e, roll, "view", -1000.0f);
     frames(1);
     KV_CHECK(c, ui_rect(e, roll, "tall").y == view.y);

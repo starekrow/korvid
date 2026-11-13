@@ -24,7 +24,7 @@
 #include "korvid/ui/ui.h"
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
+#include "korvid/math/scalar.h"
 #include <time.h>
 
 namespace kv::arcfire {
@@ -357,7 +357,7 @@ void screens(TickContext& ctx) {
     Engine& e = *ctx.engine;
     const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
     vec2 move = action_axis(a, g.act_move);
-    bool sideways = action_repeat(a, g.act_move, 18, 6) && fabsf(move.x) > fabsf(move.y);
+    bool sideways = action_repeat(a, g.act_move, 18, 6) && kv::fabs(move.x) > kv::fabs(move.y);
     if (sideways && !g.options_screen.is_null() && ui_top(e) == g.options_screen) options_change(e, g, move.x < 0.0f ? -1 : 1);
     if (sideways && !g.scores_screen.is_null() && ui_top(e) == g.scores_screen && !g.demo) {
         g.table_shown = (g.table_shown + (move.x < 0.0f ? kScoreTables - 1 : 1)) % kScoreTables;

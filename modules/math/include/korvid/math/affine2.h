@@ -17,13 +17,13 @@ inline affine2 affine2_identity() { return affine2{}; }
 inline affine2 affine2_translate(vec2 t) { return affine2{1, 0, 0, 1, t.x, t.y}; }
 inline affine2 affine2_scale(vec2 s)     { return affine2{s.x, 0, 0, s.y, 0, 0}; }
 inline affine2 affine2_rotate(f32 radians) {
-    f32 cs = cosf(radians), sn = sinf(radians);
+    f32 cs = cos(radians), sn = sin(radians);
     return affine2{cs, sn, -sn, cs, 0, 0};
 }
 
 // Translate * Rotate * Scale: scale first, then rotate, then move. The sprite transform.
 inline affine2 affine2_trs(point2 position, f32 radians, vec2 scale) {
-    f32 cs = cosf(radians), sn = sinf(radians);
+    f32 cs = cos(radians), sn = sin(radians);
     return affine2{cs * scale.x, sn * scale.x, -sn * scale.y, cs * scale.y, position.x, position.y};
 }
 
