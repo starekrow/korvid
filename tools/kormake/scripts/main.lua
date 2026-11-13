@@ -229,8 +229,7 @@ local function run(cmd, words, opts)
   end
   local g = resolve.run(c, platform, config, opts)
   -- What the names (or the current directory) select, for the commands that act on
-  -- modules; gen and check take the whole graph wherever they run. After emit for those
-  -- that build, since emit can leave a module out too.
+  -- modules; gen and check take the whole graph wherever they run.
   local selected, from_dir
   local function choose()
     local recs
@@ -243,8 +242,17 @@ local function run(cmd, words, opts)
     -- Modules outside the roots that cannot build here, and why: not a problem, but worth
     -- knowing before someone names one.
     for _, n in ipairs(util.sorted_keys(g.unavailable)) do print(string.format("kormake: left out of %s: %s: %s", target, n, g.unavailable[n])) end
-    print(string.format("kormake: %d modules, %d instances for %s-%s, no problems", #c.modules, #g.instances, platform, config))
-    return 0
+    -- Roots that cannot build on this machine (a package not fetched): what gen would stop
+    -- on. The modules that share a reason, on one line.
+    local reasons, by_reason = {}, {}
+    for _, inst in ipairs(g.problems) do
+      if not by_reason[inst.problem] then by_reason[inst.problem] = {}; reasons[#reasons + 1] = inst.problem end
+      table.insert(by_reason[inst.problem], inst.module.name)
+    end
+    for _, why in ipairs(reasons) do print(string.format("kormake: cannot build %s for %s: %s", table.concat(by_reason[why], ", "), target, why)) end
+    print(string.format("kormake: %d modules, %d instances for %s-%s, %s", #c.modules, #g.instances, platform, config,
+      #g.problems == 0 and "no problems" or (#g.problems == 1 and "1 problem" or (#g.problems .. " problems"))))
+    return #g.problems == 0 and 0 or 1
   end
   if cmd == "graph" then
     choose()
@@ -296,8 +304,9 @@ local function run(cmd, words, opts)
       for _, d in ipairs(inst.deps) do deps[#deps + 1] = d.module.name end
       local tools = {}
       for _, t in ipairs(inst.tools) do tools[#tools + 1] = t.instance.module.name end
-      print(string.format("%-40s %-8s deps: %s%s%s", inst.key, inst.module.fields.output or "lib", table.concat(deps, ", "),
-        #tools > 0 and ("  tools: " .. table.concat(tools, ", ")) or "", inst.tests and "  [tests]" or ""))
+      print(string.format("%-40s %-8s deps: %s%s%s%s", inst.key, inst.module.fields.output or "lib", table.concat(deps, ", "),
+        #tools > 0 and ("  tools: " .. table.concat(tools, ", ")) or "", inst.tests and "  [tests]" or "",
+        inst.problem and ("  [cannot build: " .. inst.problem:match("^[^\n]*") .. "]") or ""))
       ::next_inst::
     end
     return 0

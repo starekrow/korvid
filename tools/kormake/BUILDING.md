@@ -125,6 +125,14 @@ errors at this stage.
   would for a root.
 - *Closures.* Each instance gets its closure: the link dependencies, in dependency order.
   This drives include paths, link lines and module lists.
+- *What this machine has.* Each instance's externals that a toolchain keeps in a
+  directory are looked for (`KORMAKE_<NAME>_DIR`, the external's `env`, its `dir`), its
+  private includes must be directories, and its tools need a binary for the host. These
+  fail softly too. Outside the roots such an instance is left out (`inst.dropped`, the
+  reason in `g.unavailable`), along with every instance built on it, and gets no edges. In
+  the roots it is a problem (`inst.problem`, in `g.problems`): `check` reports it and
+  exits 1, `graph` marks it, and emit stops on the first. Resolve keeps where it found
+  each package (`g.external_dir`) and each tool's program (`g.tool_path`) for emit.
 
 An instance is *selectable* (it gets a phony and can be named) when it is the target's own
 instance, or the only instance of a host module, and it is something kormake builds (not a
@@ -141,11 +149,6 @@ toolchain, a `system` tool or a `prebuilt` one).
   so no rule needs a shell.
 - *Tool rules.* There is one Ninja rule per (tool, rule, platform variant), named
   `tool_<module>_<rule>[_<platform>]`.
-- *Left out.* First, for each instance outside the roots, kormake checks what would stop
-  the generation: its externals' package directories, its private includes, its tools'
-  binaries. If one fails, that instance and every instance built on it are left out
-  (`inst.dropped`, with the reason in `g.unavailable`) and get no edges. For the roots'
-  instances the same checks fail the run, with the toolchain's instructions.
 - *Per instance.* Each instance gets its sources: `src/*.cc`, then each of the toolchain's
   `srcdirs`, then the same again for `.mm`. With unity on and more than one source, these
   go into `gen/<module>/unity.cc`. An executable also gets `modules.gen.cc`. After that

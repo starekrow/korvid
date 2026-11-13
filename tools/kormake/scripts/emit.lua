@@ -14,19 +14,6 @@ local function flag_list(t) return table.concat(t or {}, " ") end
 -- The executable's file name: the module's, unless it sets exe.
 local function exe_name(inst) return inst.module.fields.exe or inst.module.name end
 
-local function tool_path(inst)
-  local f = inst.module.fields
-  if f.system then return f.system, false end
-  if f.prebuilt then
-    local p = f.prebuilt[inst.platform]
-    if not p then util.fail("tool '%s' has no prebuilt binary for %s", inst.module.name, inst.platform) end
-    return util.join(inst.module.dir, p), true
-  end
-  -- The host instance, built in this graph.
-  if f.output == "exe" then return inst.prefix .. "bin/" .. exe_name(inst) .. inst.toolchain.fields.exe_suffix, true end
-  util.fail("tool '%s' is neither built from source, prebuilt nor a system lookup", inst.module.name)
-end
-
 -- What a toolchain module must say: its rules and how it names and spells things. Nothing
 -- is assumed about the compiler family.
 local required_fields = { "obj_suffix", "exe_suffix", "lib_file", "flag_include", "flag_define", "flag_lib" }
@@ -99,37 +86,8 @@ function M.run(c, g, opts)
   local out = {}
   local function w(s) out[#out + 1] = s end
 
-  -- An external the toolchain keeps in a directory (a prebuilt package or an installed SDK)
-  -- is found wherever KORMAKE_<NAME>_DIR says, else where the variable its `env` names
-  -- says (an SDK's installer sets one), else at its `dir` under the project root. A
-  -- package that is not there stops the generation, with the toolchain's instructions.
-  local external_dirs = {}
-  local function external_dir(fl, ext)
-    local e = fl.externals[ext]
-    if not e.dir and not e.env then return nil end
-    local key = fl.tc.rec.name .. ":" .. ext
-    if external_dirs[key] then return external_dirs[key] end
-    local var = "KORMAKE_" .. ext:upper():gsub("[^%w]", "_") .. "_DIR"
-    local env = kfs.getenv(var)
-    if env == "" then env = nil end
-    if not env and e.env then
-      env = kfs.getenv(e.env)
-      if env == "" then env = nil end
-      if env then var = e.env end
-    end
-    if not env and not e.dir then
-      util.fail("external '%s' (toolchain %s): neither %s nor %s is set.\n%s", ext, fl.tc.rec.name, var, e.env,
-        e.fetch or ("Set " .. var .. " to the directory that holds it."))
-    end
-    local dir = env and (env:gsub("\\", "/"):gsub("/$", "")) or (util.is_abs(e.dir) and e.dir or util.join(root, e.dir))
-    local check = util.join(dir, e.check or (e.include and e.include[1]) or ".")
-    if not (kfs.isdir(check) or kfs.isfile(check)) then
-      util.fail("external '%s' (toolchain %s) is not at %s%s.\n%s", ext, fl.tc.rec.name, dir,
-        env and (", where " .. var .. " points") or "", e.fetch or ("Set " .. var .. " to the directory that holds it."))
-    end
-    external_dirs[key] = dir
-    return dir
-  end
+  -- Where an external's package is (resolve found it, or it is not kept in a directory).
+  local function external_dir(fl, ext) return g.external_dir(fl.tc.rec, ext) end
   -- The externals of these modules that apply on the instance's platform, in name order.
   local function externals_used(inst, mods)
     local seen, list = {}, {}
@@ -186,35 +144,9 @@ function M.run(c, g, opts)
     return outs
   end
 
-  -- A module outside the roots must not stop the generation: what would (a package not
-  -- fetched, a private include that is not there, a tool with no binary for the host)
-  -- leaves it out, and everything built on it, with the reason kept for whoever names it.
-  -- The roots' modules fail as they always have, below.
-  for _, inst in ipairs(g.order) do
-    if inst.in_roots then goto next_inst end
-    do
-      local why
-      for _, d in ipairs(inst.closure) do if d.dropped then why = d.module.name .. " cannot build: " .. d.dropped end end
-      for _, t in ipairs(inst.tools) do if t.instance.dropped then why = "its tool " .. t.instance.module.name .. " cannot build: " .. t.instance.dropped end end
-      if not why then
-        local ok, err = pcall(function()
-          local fl = flags(inst)
-          for _, ext in ipairs(externals_used(inst, { inst.module })) do external_dir(fl, ext) end
-          for _, pi in ipairs(inst.module.fields.private_includes or {}) do
-            if not kfs.isdir(util.join(inst.module.dir, pi)) then util.fail("private include '%s' is not a directory", pi) end
-          end
-          for _, t in ipairs(inst.tools) do tool_path(t.instance) end
-        end)
-        if not ok then why = util.message(err) end
-      end
-      if why then
-        inst.dropped = why
-        if inst.selectable then g.unavailable[inst.module.name] = why end
-        inst.selectable = false
-      end
-    end
-    ::next_inst::
-  end
+  -- A root that cannot build here (resolve.lua's problems) stops the generation: the first,
+  -- in dependency order.
+  if #g.problems > 0 then util.fail("%s: %s", g.problems[1].module.name, g.problems[1].problem) end
 
   local cc = {} -- compile_commands.json entries
   local all, tests, checks = {}, {}, {}
@@ -310,7 +242,7 @@ function M.run(c, g, opts)
     for _, tr in ipairs(inst.dropped and {} or tool_rules_of(inst)) do
       local t, r, rname = tr.tool, tr.rule, tr.name
       if not tool_rules[rname] then
-        local tool, implicit = tool_path(t.instance)
+        local tool, implicit = g.tool_path(t.instance)
         local cmd = r.command or util.fail("rule '%s' of '%s' has no command", r.name, t.instance.module.name)
         -- Ninja quotes $in and $out itself when a path needs it.
         -- The program in the host's spelling: Windows' CreateProcess takes "host/bin/x.exe"
@@ -342,9 +274,7 @@ function M.run(c, g, opts)
     -- The module's private include directories (a vendored library's own headers, which
     -- it includes by <name>): its own sources and tests only, never its dependents'.
     for _, p in ipairs(inst.module.fields.private_includes or {}) do
-      local d = util.join(inst.module.dir, p)
-      if not kfs.isdir(d) then util.fail("module '%s': private include '%s' is not a directory", inst.module.name, p) end
-      dirs[#dirs + 1] = flag(d)
+      dirs[#dirs + 1] = flag(util.join(inst.module.dir, p))
     end
     for _, e in ipairs(extra or {}) do dirs[#dirs + 1] = flag(e) end
     -- A package's headers, for the module that names it (not its dependents: the package

@@ -69,7 +69,10 @@ in any order, except that the command has to be the first word.
   duplicate names and sandbox violations are reported here, before any compiler runs. A
   cycle or a missing module is an error wherever it is. A module outside the roots that
   only cannot build for this target (a platform it does not support, an external or an
-  interface the platform lacks) is not an error: `check` lists it as left out, with why.
+  interface the platform lacks, a package that is not there) is not an error: `check`
+  lists it as left out, with why. A root that cannot build on this machine (its package
+  is not fetched) is a problem: `check` names it, with the toolchain's instructions, and
+  exits 1, and `gen` and `build` stop on it. `graph` still prints, marking it.
 
 **graph**
 : Prints the instance graph in dependency order: each instance's output, what it links,

@@ -14,6 +14,8 @@ kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system librarie
 [exit 0]
 
 $ kormake check cross-dev
+kormake: left out of cross-dev: extra: external 'missing' (toolchain toolchain.cross) is not at {root}/packages/missing.
+Fetch it into packages/missing.
 kormake: 9 modules, 8 instances for cross-dev, no problems
 [exit 0]
 
@@ -36,5 +38,27 @@ base@{host}-dev: pulled in by compiler
 $ kormake build extra host-dev
 kormake: extra: nothing to build for {host}-dev: external 'missing' (toolchain toolchain.host) is not at {root}/packages/missing.
 Fetch it into packages/missing.
+[exit 1]
+
+$ KORMAKE_PKG_DIR=nowhere kormake check host-dev
+kormake: left out of {host}-dev: extra: external 'missing' (toolchain toolchain.host) is not at {root}/packages/missing.
+Fetch it into packages/missing.
+kormake: cannot build base for {host}-dev: external 'pkg' (toolchain toolchain.host) is not at nowhere, where KORMAKE_PKG_DIR points.
+Set KORMAKE_PKG_DIR to the directory that holds it.
+kormake: 9 modules, 7 instances for {host}-dev, 1 problem
+[exit 1]
+
+$ KORMAKE_PKG_DIR=nowhere kormake graph host-dev
+base@{host}-dev                           lib      deps:   [tests]  [cannot build: external 'pkg' (toolchain toolchain.host) is not at nowhere, where KORMAKE_PKG_DIR points.]
+compiler@{host}-dev                       exe      deps: base
+gfx@{host}-dev                            headers  deps: base  tools: compiler
+gfx-soft@{host}-dev                       lib      deps: base
+packer@{host}-dev                         exe      deps: 
+game@{host}-dev                           exe      deps: gfx, gfx-soft  tools: packer  [tests]
+[exit 0]
+
+$ KORMAKE_PKG_DIR=nowhere kormake gen host-dev
+kormake: base: external 'pkg' (toolchain toolchain.host) is not at nowhere, where KORMAKE_PKG_DIR points.
+Set KORMAKE_PKG_DIR to the directory that holds it.
 [exit 1]
 

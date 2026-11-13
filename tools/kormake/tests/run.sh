@@ -31,11 +31,14 @@ mkdir -p "$out"
 normalize() {
   sed -E -e "s|$root|{root}|g" -e "s|$KORMAKE|{kormake}|g" -e "s/(^|[^a-z])$host-(dev|ship)/\1{host}-\2/g"
 }
-# One command, its output and exit status, into commands.txt.
+# One command, its output and exit status, into commands.txt. With VAR=value words
+# first, the command runs with those set.
 run() {
-  echo "\$ kormake $*" >>"$out/commands.txt.raw"
+  vars=
+  while [ "${1#*=}" != "$1" ]; do vars="$vars $1"; shift; done
+  echo "\$${vars} kormake $*" >>"$out/commands.txt.raw"
   rc=0
-  (cd "$root" && "$KORMAKE" "$@") >>"$out/commands.txt.raw" 2>&1 || rc=$?
+  (cd "$root" && env $vars "$KORMAKE" "$@") >>"$out/commands.txt.raw" 2>&1 || rc=$?
   echo "[exit $rc]" >>"$out/commands.txt.raw"
   echo >>"$out/commands.txt.raw"
 }
@@ -53,6 +56,10 @@ run check cross-dev
 run graph cross-dev
 run graph --why base cross-dev
 run build extra host-dev
+# A root's package that is not there: a problem check reports, graph marks and gen stops on.
+run KORMAKE_PKG_DIR=nowhere check host-dev
+run KORMAKE_PKG_DIR=nowhere graph host-dev
+run KORMAKE_PKG_DIR=nowhere gen host-dev
 normalize <"$out/commands.txt.raw" >"$out/commands.txt"
 rm "$out/commands.txt.raw"
 

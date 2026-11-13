@@ -273,6 +273,92 @@ function M.run(c, platform, config, opts)
     for _, d in ipairs(inst.deps) do walk(d) end
     inst.closure = list -- dependencies first, the instance itself excluded
   end
+
+  -- An external the toolchain keeps in a directory (a prebuilt package or an installed SDK)
+  -- is found wherever KORMAKE_<NAME>_DIR says, else where the variable its `env` names
+  -- says (an SDK's installer sets one), else at its `dir` under the project root. tc is the
+  -- toolchain as the platform sees it. A package that is not there is a soft failure, with
+  -- the toolchain's instructions.
+  local external_dirs = {}
+  local function external_dir(tc, ext)
+    local e = tc.fields.externals[ext]
+    if not e.dir and not e.env then return nil end
+    local key = tc.name .. ":" .. ext
+    if external_dirs[key] then return external_dirs[key] end
+    local var = "KORMAKE_" .. ext:upper():gsub("[^%w]", "_") .. "_DIR"
+    local env = kfs.getenv(var)
+    if env == "" then env = nil end
+    if not env and e.env then
+      env = kfs.getenv(e.env)
+      if env == "" then env = nil end
+      if env then var = e.env end
+    end
+    if not env and not e.dir then
+      util.soft_fail("external '%s' (toolchain %s): neither %s nor %s is set.\n%s", ext, tc.name, var, e.env,
+        e.fetch or ("Set " .. var .. " to the directory that holds it."))
+    end
+    local dir = env and (env:gsub("\\", "/"):gsub("/$", "")) or (util.is_abs(e.dir) and e.dir or util.join(c.root_dir, e.dir))
+    local check = util.join(dir, e.check or (e.include and e.include[1]) or ".")
+    if not (kfs.isdir(check) or kfs.isfile(check)) then
+      util.soft_fail("external '%s' (toolchain %s) is not at %s%s.\n%s", ext, tc.name, dir,
+        env and (", where " .. var .. " points") or "", e.fetch or ("Set " .. var .. " to the directory that holds it."))
+    end
+    external_dirs[key] = dir
+    return dir
+  end
+  g.external_dir = external_dir
+
+  -- A tool instance's program, and whether it is a file the build depends on (built here,
+  -- or vendored) rather than a name looked up on PATH.
+  local function tool_path(inst)
+    local f = inst.module.fields
+    if f.system then return f.system, false end
+    if f.prebuilt then
+      local p = f.prebuilt[inst.platform]
+      if not p then util.soft_fail("tool '%s' has no prebuilt binary for %s", inst.module.name, inst.platform) end
+      return util.join(inst.module.dir, p), true
+    end
+    -- The host instance, built in this graph.
+    if f.output == "exe" then return inst.prefix .. "bin/" .. (f.exe or inst.module.name) .. inst.toolchain.fields.exe_suffix, true end
+    util.fail("tool '%s' is neither built from source, prebuilt nor a system lookup", inst.module.name)
+  end
+  g.tool_path = tool_path
+
+  -- What would stop an instance building on this machine, past what the graph says: a
+  -- package that is not where the toolchain looks, a private include that is not a
+  -- directory, a tool with no binary for the host. Outside the roots the instance is left
+  -- out, with everything built on it, and the reason kept for whoever names it. In the
+  -- roots it is a problem: check reports it, graph marks it, and emit stops on the first.
+  g.problems = {}
+  for _, inst in ipairs(g.order) do
+    local why
+    for _, d in ipairs(inst.closure) do if d.dropped then why = d.module.name .. " cannot build: " .. d.dropped end end
+    for _, t in ipairs(inst.tools) do if t.instance.dropped then why = "its tool " .. t.instance.module.name .. " cannot build: " .. t.instance.dropped end end
+    if not why then
+      local ok, err = pcall(function()
+        local f = inst.module.fields
+        for _, ext in ipairs(util.sorted_keys(f.external or {})) do
+          if util.external_on(f.external[ext], inst.platform) then external_dir(inst.toolchain, ext) end
+        end
+        for _, pi in ipairs(f.private_includes or {}) do
+          if not kfs.isdir(util.join(inst.module.dir, pi)) then util.soft_fail("private include '%s' is not a directory", pi) end
+        end
+        for _, t in ipairs(inst.tools) do tool_path(t.instance) end
+      end)
+      if not ok then
+        if not (type(err) == "table" and err.soft) then error(err, 0) end
+        why = util.message(err)
+      end
+    end
+    if why and inst.in_roots then
+      inst.problem = why
+      g.problems[#g.problems + 1] = inst
+    elseif why then
+      inst.dropped = why
+      if inst.selectable then g.unavailable[inst.module.name] = why end
+      inst.selectable = false
+    end
+  end
   return g
 end
 
