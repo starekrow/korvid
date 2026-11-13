@@ -25,9 +25,5 @@ By **CodeManu**. Released under **CC0 1.0 Universal** (`LICENSE-CC0.txt`). Recei
 | `flame.png` | `9.png`, the flame: frames 0, 3, 6, ... 21 (eight of its 61, cells read left to right, top to bottom), each cut at 45,37 to 61,69 in its cell, turned a quarter counter-clockwise so the tips trail left, and set in a 32 px cell (8 px from the top); eight cells in a row |
 | `dot.png` | `10.png`, cell column 4, row 0: the white disc, 13 px, centred in 16 x 16 |
 
-## Not from a pack
-
-`white.png` is a 4 x 4 white fill, the pause dimmer's texture. The sounds (`shot.wav`,
-`break.wav`, `boom.wav`, `thrust.wav`) were made during development and are not credited
-to anyone. The materials (`*.material.json`), `flame.anim.json` and `touchpad.json` are
-written for the game.
+The materials (`*.material.json`), `flame.anim.json` and `touchpad.json` are written for
+the game.

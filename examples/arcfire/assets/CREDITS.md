@@ -1,9 +1,9 @@
 # Credits for arcfire's assets
 
-Every file under this directory is listed here with where it came from. Vendored files
-are copied unmodified under new names by `tools/make_art.py`, which also cuts and draws the
-simple pieces in `made/`; `tools/cut_art.py` cuts the bosses and the rest from the newer
-packs (below). The archives were downloaded on 2026-11-09 from OpenGameArt.org and each
+Every asset taken from a pack is listed here with where it came from. Vendored files are
+copied unmodified under new names by `tools/make_art.py`, which also cuts the pieces of
+`made/` listed below; `tools/cut_art.py` cuts the bosses and the rest from the newer packs
+(below). The archives were downloaded on 2026-11-09 from OpenGameArt.org and each
 license was read from the archive's own file (or, where it has none, from the page). The
 unpacked archives are kept at `~/code/asset-packs/arcfire` on the development machine.
 
@@ -72,20 +72,13 @@ archive's `License.txt` is the CC0 legal code, kept here as `LICENSE-CC0.txt`.
 | `font/PublicPixel.ttf` | `PublicPixel.ttf` |
 | `LICENSE-CC0.txt` | `License.txt` |
 
-## Made here
+## Cut from the packs above
 
-By `tools/make_art.py` on 2026-11-09: cuts from the packs above, and plain shapes (a
-disc, a ring, a gradient, a fill), Korvid's, under the repository's license (Apache 2.0,
-`LICENSE` at the root). No image generation was used.
+By `tools/make_art.py` on 2026-11-09.
 
 | file | what |
 |---|---|
 | `made/bullets.png` | two 32 px cells cut from M484's Bullet Collection 1 (the round bullet with the red rim at 462,193; the cyan needle at 13,66), its black ground keyed to transparent; otherwise unchanged |
-| `made/dot.png` | the hitbox: a white disc |
-| `made/ring.png` | the graze ring: a one-pixel white circle |
-| `made/soft.png` | the shell and glows: a white disc fading to its edge |
-| `made/spark.png` | sparks: a white square |
-| `made/vignette.png` | the field's vignette: a dark ramp from clear in the middle to the edges, drawn here |
 | `made/cursor.png` | the menus' cursor: Kenney's player ship (Pixel Shmup `Tilemap/ships_packed.png`, column 0, row 0) turned to point right |
 | `made/bombs.png` | the HUD's bomb pips: Kenney's shield tile (`kenney/tiles.png`, column 2, row 2), dimmed for a bomb spent and as it is for one in hand |
 
