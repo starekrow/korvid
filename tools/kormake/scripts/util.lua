@@ -147,6 +147,13 @@ function M.ninja_escape(s)
   return (s:gsub("([ :$])", "$%1"))
 end
 
+-- A list of paths for a build line: each escaped, joined by spaces.
+function M.ninja_paths(list)
+  local esc = {}
+  for _, s in ipairs(list) do esc[#esc + 1] = M.ninja_escape(s) end
+  return table.concat(esc, " ")
+end
+
 function M.json_string(s)
   return '"' .. s:gsub('[\\"]', '\\%0'):gsub("\n", "\\n") .. '"'
 end

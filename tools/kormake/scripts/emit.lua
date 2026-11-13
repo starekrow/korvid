@@ -532,7 +532,7 @@ function M.run(c, g, opts)
       if output == "lib" then
         if #objs > 0 then
           local lib = pre .. "lib/" .. naming.lib_file:format("kv_" .. sym)
-          w(string.format("build %s: %s %s%s", lib, rule(inst, "ar"), table.concat(objs, " "), overrides(inst)))
+          w(string.format("build %s: %s %s%s", util.ninja_escape(lib), rule(inst, "ar"), util.ninja_paths(objs), overrides(inst)))
           libs_by_key[inst.key] = lib
           if inst.in_roots then all[#all + 1] = lib end
         end
@@ -553,8 +553,8 @@ function M.run(c, g, opts)
         for _, r in ipairs(runtime) do rt[#rt + 1] = r end
         for _, r in ipairs(runtime_of(inst, mods)) do rt[#rt + 1] = r end
         local exe = pre .. "bin/" .. exe_name(inst) .. naming.exe_suffix
-        w(string.format("build %s: %s %s %s%s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
-          #rt > 0 and (" || " .. table.concat(rt, " ")) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
+        w(string.format("build %s: %s %s %s%s\n  libs = %s%s", util.ninja_escape(exe), rule(inst, "link"), util.ninja_paths(objs), util.ninja_paths(libs),
+          #rt > 0 and (" || " .. util.ninja_paths(rt)) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
         if inst.in_roots then all[#all + 1] = exe end
         local outs = { exe }
         outputs_by_key[inst.key] = outs
@@ -569,11 +569,11 @@ function M.run(c, g, opts)
               local tr = tool_rules[rname]
               local ins = {}
               local staged = pre .. "bin/assets/"
-              for _, p in ipairs(rt) do if p:sub(1, #staged) == staged then ins[#ins + 1] = util.ninja_escape(p) end end
+              for _, p in ipairs(rt) do if p:sub(1, #staged) == staged then ins[#ins + 1] = p end end
               if r.inputs ~= "assets" then util.fail("rule '%s' of '%s': per-exe rules take inputs = \"assets\"", r.name, t.instance.module.name) end
               local outp = pre .. "bin/" .. r.outputs:gsub("%%{exe}", exe_name(inst))
               local implicit = tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""
-              w(string.format("build %s: %s %s%s", util.ninja_escape(outp), rname, table.concat(ins, " "), implicit))
+              w(string.format("build %s: %s %s%s", util.ninja_escape(outp), rname, util.ninja_paths(ins), implicit))
               if g.config == "ship" then
                 if inst.in_roots then all[#all + 1] = outp end
                 outs[#outs + 1] = outp
@@ -623,12 +623,10 @@ function M.run(c, g, opts)
       local extlibs, extdirs = extlibs_of(inst, mods)
       for _, r in ipairs(runtime_of(inst, mods)) do rt[#rt + 1] = r end
       local exe = pre .. "bin/" .. sym .. "_tests" .. flags(inst).tc.fields.exe_suffix
-      w(string.format("build %s: %s %s %s%s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
-        #rt > 0 and (" || " .. table.concat(rt, " ")) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
-      local rt_esc = {}
-      for _, r in ipairs(rt) do rt_esc[#rt_esc + 1] = util.ninja_escape(r) end
-      w(string.format("build %stest/%s.ok: %s %s%s", pre, sym, (pre ~= "" and runner ~= "") and "run_test_host" or "run_test", exe,
-        #rt_esc > 0 and (" | " .. table.concat(rt_esc, " ")) or ""))
+      w(string.format("build %s: %s %s %s%s\n  libs = %s%s", util.ninja_escape(exe), rule(inst, "link"), util.ninja_paths(objs), util.ninja_paths(libs),
+        #rt > 0 and (" || " .. util.ninja_paths(rt)) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
+      w(string.format("build %s: %s %s%s", util.ninja_escape(pre .. "test/" .. sym .. ".ok"),
+        (pre ~= "" and runner ~= "") and "run_test_host" or "run_test", util.ninja_escape(exe), #rt > 0 and (" | " .. util.ninja_paths(rt)) or ""))
       if inst.tests then
         tests[#tests + 1] = exe
         checks[#checks + 1] = pre .. "test/" .. sym .. ".ok"
@@ -639,17 +637,16 @@ function M.run(c, g, opts)
   end
 
   w("")
-  w("build tests: phony " .. table.concat(tests, " "))
-  w("build check: phony " .. table.concat(checks, " "))
-  w("build all: phony " .. table.concat(all, " ") .. " tests")
+  w("build tests: phony " .. util.ninja_paths(tests))
+  w("build check: phony " .. util.ninja_paths(checks))
+  w("build all: phony " .. util.ninja_paths(all) .. " tests")
   w("default all")
   -- A phony per selectable module, named for it: what `kormake NAME` asks Ninja for.
   w("")
   for _, inst in ipairs(g.order) do
     if inst.selectable then
-      local outs = {}
-      for _, o in ipairs(outputs_by_key[inst.key] or {}) do outs[#outs + 1] = util.ninja_escape(o) end
-      w(string.format("build %s: phony%s", util.ninja_escape(inst.module.name), #outs > 0 and (" " .. table.concat(outs, " ")) or ""))
+      local outs = outputs_by_key[inst.key] or {}
+      w(string.format("build %s: phony%s", util.ninja_escape(inst.module.name), #outs > 0 and (" " .. util.ninja_paths(outs)) or ""))
     end
   end
   -- Regenerate when any input changes.
@@ -657,9 +654,7 @@ function M.run(c, g, opts)
   if c.regen_config then inputs[#inputs + 1] = c.regen_config end
   -- Every module file collected, built here or not: an edit may let a left-out one in.
   for _, rec in ipairs(c.modules) do inputs[#inputs + 1] = rec.file end
-  local esc = {}
-  for _, i in ipairs(inputs) do esc[#esc + 1] = util.ninja_escape(i) end
-  w("build build.ninja: regen | " .. table.concat(esc, " "))
+  w("build build.ninja: regen | " .. util.ninja_paths(inputs))
 
   kfs.mkdirp(util.join(build, "test"))
   kfs.mkdirp(util.join(build, "host/test"))
