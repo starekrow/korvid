@@ -109,7 +109,8 @@ Names (`name.h`): interned strings compared as integers. Hashing (`hash.h`): one
 64-bit hash, never seeded. UTF-8 (`utf8.h`), the engine's one text encoding: total
 decoding (malformed bytes are U+FFFD, one at a time), encoding, validation and copies
 that truncate at a character boundary. A JSON reader (`json.h`), the CLI registry (`cli.h`), a
-seeded PCG32 (`random.h`), a test harness (`test.h`), a leveled log (`log.h`), and
+seeded PCG32 and a Mersenne Twister that draws Python's and std::mt19937's numbers
+(`random.h`), a test harness (`test.h`), a leveled log (`log.h`), and
 formatted text and the standard streams (`format.h`: `format`, which is snprintf, and
 `print`, `print_err`) without including `<stdio.h>`, which only core's own stream code
 does. Files are the platform module's (`io.h`), queued or blocking.
@@ -307,6 +308,7 @@ Header `korvid/core/utf8.h`, `json.h`, `cli.h`, `random.h`, `log.h`, `test.h`, `
 | `json_get`, `json_at`, `json_first`, `json_next`, `json_number`, `json_bool`, `json_string`, `json_numbers` | functions | walking and typed reads with defaults |
 | `CliCommandDesc`, `CliContext`, `cli_arg_f32`, `cli_arg_u32` | records, functions | a command as module data; `print`, `fail`; argument parsing |
 | `Rng` | record | PCG32: `seeded(seed, stream)`, `next`, `unit`, `range`, `below`, `chance` |
+| `Mt19937` | record | MT19937: `seeded(seed)` as Python's `random.Random(seed)`, `seeded_std(seed)` as `std::mt19937`; `next`, `unit`, `below`, `range` as `getrandbits(32)`, `random()`, `randrange(n)`, `randint(lo, hi)`; 2.5 KB, for matching another program's numbers, not for the sim |
 | `KV_TRACE`..`KV_ERROR`, `log_set_level`, `log_level`, `log_write` | macros, functions | leveled log to stdout |
 | `TestCtx`, `KV_CHECK(ctx, expr)`, `test_report(ctx, exe)` | record, macro, function | one test executable per module, no registration |
 | `format`, `vformat` | functions | snprintf's contract and language |

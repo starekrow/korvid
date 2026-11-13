@@ -38,4 +38,26 @@ void test_random(kv::TestCtx& c) {
     for (u32 k = 0; k < 8; ++k) spread &= buckets[k] > 1000 && buckets[k] < 1500;
     KV_CHECK(c, spread);
     KV_CHECK(c, r.below(0) == 0);
+
+    // Mt19937 against the references: std::mt19937's 10000th output (the C++ standard's
+    // own check), and Python's random.Random(0x5407e), random.Random(0) and a seed of two
+    // words, number for number: getrandbits(32), random(), randint(3, 7), randrange(12).
+    c.begin("random: Mt19937");
+    Mt19937 s = Mt19937::seeded_std();
+    u32 x = 0;
+    for (u32 i = 0; i < 10000; ++i) x = s.next();
+    KV_CHECK(c, x == 4123659995u);
+    Mt19937 p = Mt19937::seeded(0x5407e);
+    KV_CHECK(c, p.next() == 758137947u && p.next() == 132149255u && p.next() == 2818820525u && p.next() == 620935951u);
+    p = Mt19937::seeded(0x5407e);
+    KV_CHECK(c, p.unit() == 0x1.69822207e0700p-3 && p.unit() == 0x1.5007934940aecp-1 && p.unit() == 0x1.0df1fe1f501aap-1);
+    const i64 ints[8] = {5, 6, 7, 6, 7, 5, 7, 4};
+    bool ok = true;
+    for (i64 v : ints) ok &= p.range(3, 7) == v;
+    const u32 belows[8] = {8, 0, 5, 4, 5, 7, 8, 4};
+    for (u32 v : belows) ok &= p.below(12) == v;
+    KV_CHECK(c, ok);
+    Mt19937 z = Mt19937::seeded(0), w = Mt19937::seeded((1ull << 40) | 5);
+    KV_CHECK(c, z.next() == 3626764237u && z.next() == 1654615998u && z.next() == 3255389356u);
+    KV_CHECK(c, w.next() == 2166296868u && w.next() == 2220160828u && w.next() == 1153647273u);
 }
