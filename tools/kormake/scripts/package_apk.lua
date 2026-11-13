@@ -15,6 +15,13 @@
 --   - a signature: the debug key (~/.android/debug.keystore, made with keytool the first
 --     time, the one Android's own tools use), or the keystore KORMAKE_ANDROID_KEYSTORE
 --     names with KORMAKE_ANDROID_KEY_ALIAS and KORMAKE_ANDROID_KEYSTORE_PASS.
+-- A package whose game draws (it links a module that provides "render") says it needs
+-- Vulkan 1.3, so a store or an installer refuses a device that cannot run it. A debug
+-- package carries the Khronos validation layer when there is one to carry: Android has no
+-- system layers, and the loader looks beside the app's own library. It is looked for at
+-- <dir>/<abi>/libVkLayer_khronos_validation.so, <dir> being KORMAKE_ANDROID_VK_LAYERS or
+-- <sdk>/vulkan-validation-layers (the android-binaries archive of a Vulkan-ValidationLayers
+-- release, unpacked there).
 -- One ABI a package: the toolchain's abi.
 local util = kormake.load("util")
 local M = {}
@@ -37,7 +44,7 @@ function M.package_id(exe) return "org.korvid." .. segment(exe) end
 
 -- build: the build directory (for the log); dist: dist/<exe>/; stage: dist/<exe>/apk/;
 -- lib: the library's file name. Returns the .apk's path and who signed it.
-function M.run(build, dist, stage, exe, lib, tc, config)
+function M.run(build, dist, stage, exe, lib, tc, config, draws)
   local q = util.shell_quote
   local f = tc.fields
   local log = util.join(build, "package.log")
@@ -66,6 +73,8 @@ function M.run(build, dist, stage, exe, lib, tc, config)
     '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="' .. xml(id) .. '"',
     '          android:versionCode="1" android:versionName="1.0">',
     '  <uses-sdk android:minSdkVersion="' .. xml(f.os_min or "33") .. '" android:targetSdkVersion="' .. xml(api) .. '"/>',
+    draws and '  <uses-feature android:name="android.hardware.vulkan.version" android:version="0x403000" android:required="true"/>' or false,
+    draws and '  <uses-feature android:name="android.hardware.vulkan.level" android:version="1" android:required="true"/>' or false,
     '  <application android:label="' .. xml(exe) .. '" android:hasCode="false" android:extractNativeLibs="false"',
     '               android:appCategory="game" android:isGame="true">',
     '    <activity android:name="android.app.NativeActivity" android:exported="true" android:launchMode="singleTask"',
@@ -84,7 +93,22 @@ function M.run(build, dist, stage, exe, lib, tc, config)
   local work = util.join(build, "package-apk")
   kfs.mkdirp(work)
   local manifest_path = util.join(work, "AndroidManifest.xml")
-  kfs.write(manifest_path, table.concat(manifest, "\n"), true)
+  local lines = {}
+  for _, line in ipairs(manifest) do if line then lines[#lines + 1] = line end end
+  kfs.write(manifest_path, table.concat(lines, "\n"), true)
+
+  -- The validation layer, in a debug package of a game that draws.
+  local layer_note = ""
+  if draws and config == "debug" then
+    local dir = env("KORMAKE_ANDROID_VK_LAYERS") or util.join(sdk, "vulkan-validation-layers")
+    local layer = util.join(dir, f.abi .. "/libVkLayer_khronos_validation.so")
+    if kfs.isfile(layer) then
+      kfs.copy(layer, util.join(stage, "lib/" .. f.abi .. "/libVkLayer_khronos_validation.so"))
+      layer_note = ", with the validation layer"
+    else
+      layer_note = ", without the validation layer (none at " .. layer .. ")"
+    end
+  end
 
   local unaligned, apk = util.join(work, exe .. ".unaligned.apk"), util.join(dist, exe .. ".apk")
   if not kfs.isfile(util.join(stage, "lib/" .. f.abi .. "/" .. lib)) then util.fail("package: %s is not staged under lib/%s/", lib, f.abi) end
@@ -107,7 +131,7 @@ function M.run(build, dist, stage, exe, lib, tc, config)
   run("apksigner", tool("apksigner") .. " sign --ks " .. q(ks) .. " --ks-pass " .. q("pass:" .. pass) .. " --v4-signing-enabled false" ..
       (alias and (" --ks-key-alias " .. q(alias)) or "") .. " " .. q(apk))
   kfs.rmtree(stage)
-  return apk, signed, id
+  return apk, signed .. layer_note, id
 end
 
 return M

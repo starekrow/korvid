@@ -344,6 +344,33 @@ bool renderer_screenshot(Renderer* r, const char* path) {
 
 // ---- the render world ---------------------------------------------------------------------
 
+// The surface taken away, or a new one. Letting go: the GPU finishes, the swapchain and
+// every retired one go (they were made from the surface and must not outlive it), then the
+// surface. Taking: a surface for the new window, the swapchain built by the next frame.
+bool renderer_set_surface(Renderer* r, void* native_window) {
+    if (!r || !r->device) return false;
+    if (r->surface) {
+        vkDeviceWaitIdle(r->device);
+        rv_destroy_swapchain_now(r);
+        for (FrameInFlight& f : r->frames) {
+            f.garbage_owned = f.garbage.len; // the device is idle: all of it
+            rv_run_garbage(r, f);
+        }
+        vkDestroySurfaceKHR(r->instance, r->surface, nullptr);
+        r->surface = VK_NULL_HANDLE;
+        KV_INFO("vulkan", "surface released");
+    }
+    r->window = native_window;
+    if (!native_window) return true;
+    if (!vk_platform_create_surface(native_window, r->instance, &r->surface)) return false;
+    VkBool32 present = VK_FALSE;
+    vkGetPhysicalDeviceSurfaceSupportKHR(r->gpu, r->queue_family, r->surface, &present);
+    if (!present) { KV_ERROR("vulkan", "the new surface cannot be presented to from the renderer's queue"); return false; }
+    r->swapchain_dirty = true;
+    KV_INFO("vulkan", "surface taken");
+    return true;
+}
+
 void renderer_resize(Renderer* r, u32 width, u32 height) {
     if (!r) return;
     r->want_width      = width;
@@ -475,9 +502,10 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     for (u32 slot : f.dirty_slots) rv_write_texture_slot(r, f.textures, slot);
     f.dirty_slots.clear();
 
-    if (r->swapchain_dirty && !rv_recreate_swapchain(r)) return false;
+    // Without a surface (Android has taken it) the frame runs its uploads and presents nothing.
+    if (r->surface && r->swapchain_dirty && !rv_recreate_swapchain(r)) return false;
 
-    bool have_image = r->swapchain.handle != VK_NULL_HANDLE;
+    bool have_image = r->surface && r->swapchain.handle != VK_NULL_HANDLE;
     u32  image_index = 0;
     if (have_image) {
         KV_ZONE_WAIT("acquire");
@@ -491,7 +519,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         } else if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
             KV_ERROR("vulkan", "vkAcquireNextImageKHR: %s", vk_result_name(acq));
             return false;
-        } else if (acq == VK_SUBOPTIMAL_KHR) {
+        } else if (acq == VK_SUBOPTIMAL_KHR && !r->swapchain.unrotated) {
             r->swapchain_dirty = true; // rebuild next frame; draw this one
         }
     }
@@ -536,8 +564,10 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         f64 t = time_now();
         VkResult pres = vkQueuePresentKHR(r->queue, &pi);
         waited += time_now() - t;
-        if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) r->swapchain_dirty = true;
-        else if (pres != VK_SUCCESS) KV_ERROR("vulkan", "vkQueuePresentKHR: %s", vk_result_name(pres));
+        // An unrotated swapchain on a turned screen is suboptimal for as long as it lives,
+        // by choice (vk_swapchain.cc): only a resize rebuilds it.
+        if (pres == VK_ERROR_OUT_OF_DATE_KHR || (pres == VK_SUBOPTIMAL_KHR && !r->swapchain.unrotated)) r->swapchain_dirty = true;
+        else if (pres != VK_SUCCESS && pres != VK_SUBOPTIMAL_KHR) KV_ERROR("vulkan", "vkQueuePresentKHR: %s", vk_result_name(pres));
     }
 
     if (r->shot_recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now

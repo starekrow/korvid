@@ -413,6 +413,9 @@ bool renderer_screenshot(Renderer* r, const char* path) {
 
 // ---- the render world ---------------------------------------------------------------------
 
+// The layer lives as long as its view on every Apple platform: nothing to let go of.
+bool renderer_set_surface(Renderer*, void*) { return true; }
+
 void renderer_resize(Renderer* r, u32 width, u32 height) {
     if (!r) return;
     r->want_width  = width;

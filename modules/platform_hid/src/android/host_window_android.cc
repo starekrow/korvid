@@ -85,6 +85,7 @@ struct DroidApp {
     f32            density = 1.0f;
     JNIEnv*        env = nullptr; // the game's thread, attached
     bool           opened = false; // a HostWindow is open
+    HostWindow*    host = nullptr; // it, for its surface hook
 };
 
 DroidApp g_app; // one application per process
@@ -307,10 +308,20 @@ void take_handoffs() {
         if (app.queue) AInputQueue_attachLooper(app.queue, app.looper, kLooperInput, nullptr, nullptr);
         app.queue_handoff = false;
     }
-    if (app.window_handoff) {
-        app.window = app.pending_window;
-        app.window_handoff = false;
+    bool window_changed = app.window_handoff;
+    ANativeWindow* next = app.pending_window;
+    pthread_mutex_unlock(&app.lock);
+    if (window_changed) {
+        // Whoever draws lets go of the old surface before the OS's thread is told it may
+        // return (and destroy it), and takes the new one after it is ours.
+        HostWindow* host = app.opened ? app.host : nullptr;
+        if (host && app.window && host->surface_fn_) host->surface_fn_(host->surface_ctx_, nullptr);
+        app.window = next;
+        if (host) host->native_ = next;
+        if (host && next && host->surface_fn_) host->surface_fn_(host->surface_ctx_, next);
     }
+    pthread_mutex_lock(&app.lock);
+    if (window_changed) app.window_handoff = false;
     pthread_cond_broadcast(&app.cond);
     pthread_mutex_unlock(&app.lock);
 }
@@ -460,6 +471,7 @@ bool HostWindow::open(const WindowDesc& desc) {
     app.density = read_density();
     read_insets(insets_);
     app.opened = true;
+    app.host   = this;
     // What came before the window is in its fields: only the state survives the ring.
     pthread_mutex_lock(&app.lock);
     while (app.head != app.tail) {
@@ -478,6 +490,7 @@ bool HostWindow::open(const WindowDesc& desc) {
 void HostWindow::close() {
     if (!native_ && !g_app.opened) return;
     g_app.opened = false;
+    g_app.host   = nullptr;
     native_ = nullptr;
     width_ = height_ = 0;
     focused_ = false;
@@ -495,7 +508,7 @@ void HostWindow::pump(EventBus& bus, Input& input) {
     // No surface: nothing may be drawn and nothing is seen. Wait in the looper until there
     // is one again, or the activity is gone (the Close is in the ring then).
     if (g_app.opened && !on_screen()) {
-        native_ = nullptr; // whoever draws lets go before waiting: the renderer's hook, milestone 4
+        native_ = nullptr; // whoever draws has let go already (on_surface, from the handoff)
         KV_INFO("window", "no surface: waiting");
         for (;;) {
             poll_looper(250);

@@ -60,6 +60,8 @@ module "toolchain.android" {
     zlib    = { libs = { "z" } },
     -- The NDK's own: the activity, its window, the looper and the input queue.
     android = { libs = { "android" } },
+    -- The system's libvulkan.so, opened at run time; the headers are the NDK's.
+    vulkan  = { },
   },
   -- An executable that links the window is an app: the OS loads lib<name>.so into a process
   -- of its own making and calls ANativeActivity_onCreate (platform_hid/src/android), which
@@ -76,6 +78,7 @@ module "toolchain.android" {
   target_api  = "36",
   os_min      = "33",
   bindings  = {
+    render             = "renderer-vulkan",
     ["shader-compile"] = "slang",
   },
   per_platform = {

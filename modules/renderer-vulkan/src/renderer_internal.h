@@ -266,6 +266,7 @@ struct Swapchain {
     Array<VkImage>     images;
     Array<VkImageView> views;
     Array<VkSemaphore> present; // one "rendering done" semaphore per image
+    bool               unrotated = false; // identity on a turned screen: suboptimal by choice, never rebuilt for it
 };
 
 // The GPU tables and the sort scratch, all sized for `capacity` sprite rows.

@@ -148,7 +148,14 @@ namespace {
 int score_device(Renderer* r, VkPhysicalDevice gpu, u32* queue_family) {
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(gpu, &props);
-    if (props.apiVersion < VK_API_VERSION_1_3) return -1;
+    // A device that will not do says why, each reason by name: a phone's GPU is refused
+    // far from a debugger, and "no suitable GPU" names nothing.
+    auto refuse = [&](const char* why) {
+        KV_WARN("vulkan", "GPU '%s' (Vulkan %u.%u.%u) cannot run the renderer: %s", props.deviceName, VK_API_VERSION_MAJOR(props.apiVersion),
+                VK_API_VERSION_MINOR(props.apiVersion), VK_API_VERSION_PATCH(props.apiVersion), why);
+        return -1;
+    };
+    if (props.apiVersion < VK_API_VERSION_1_3) return refuse("Vulkan 1.3 is required");
 
     VkPhysicalDeviceVulkan13Features f13{};
     f13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
@@ -162,14 +169,23 @@ int score_device(Renderer* r, VkPhysicalDevice gpu, u32* queue_family) {
     f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     f2.pNext = &f11;
     vkGetPhysicalDeviceFeatures2(gpu, &f2);
-    if (!f13.dynamicRendering || !f13.synchronization2) return -1;
-    if (!f2.features.drawIndirectFirstInstance) return -1; // indirect draws start at the bucket's offset
-    if (!f11.shaderDrawParameters) return -1; // SV_InstanceID in the sprite shader
-    if (!f12.descriptorIndexing || !f12.runtimeDescriptorArray ||
-        !f12.shaderSampledImageArrayNonUniformIndexing ||
-        !f12.descriptorBindingSampledImageUpdateAfterBind ||
-        !f12.descriptorBindingPartiallyBound || !f12.descriptorBindingVariableDescriptorCount)
-        return -1;
+    if (!f13.dynamicRendering) return refuse("no dynamicRendering");
+    if (!f13.synchronization2) return refuse("no synchronization2");
+    if (!f2.features.drawIndirectFirstInstance) return refuse("no drawIndirectFirstInstance"); // indirect draws start at the bucket's offset
+    if (!f11.shaderDrawParameters) return refuse("no shaderDrawParameters"); // SV_InstanceID in the sprite shader
+    if (!f12.descriptorIndexing) return refuse("no descriptorIndexing");
+    if (!f12.runtimeDescriptorArray) return refuse("no runtimeDescriptorArray");
+    if (!f12.shaderSampledImageArrayNonUniformIndexing) return refuse("no shaderSampledImageArrayNonUniformIndexing");
+    if (!f12.descriptorBindingSampledImageUpdateAfterBind) return refuse("no descriptorBindingSampledImageUpdateAfterBind");
+    if (!f12.descriptorBindingPartiallyBound) return refuse("no descriptorBindingPartiallyBound");
+    if (!f12.descriptorBindingVariableDescriptorCount) return refuse("no descriptorBindingVariableDescriptorCount");
+    VkPhysicalDeviceVulkan12Properties p12{};
+    p12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES;
+    VkPhysicalDeviceProperties2 p2{};
+    p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    p2.pNext = &p12;
+    vkGetPhysicalDeviceProperties2(gpu, &p2);
+    if (p12.maxPerStageDescriptorUpdateAfterBindSampledImages < kMaxTextures) return refuse("fewer update-after-bind sampled images a stage than the texture slots");
 
     u32 ext_count = 0;
     vkEnumerateDeviceExtensionProperties(gpu, nullptr, &ext_count, nullptr);
@@ -180,7 +196,7 @@ int score_device(Renderer* r, VkPhysicalDevice gpu, u32* queue_family) {
     for (u32 i = 0; i < ext_count; ++i)
         if (strcmp(exts[i].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0) has_swapchain = true;
     exts.free();
-    if (!has_swapchain) return -1;
+    if (!has_swapchain) return refuse("no VK_KHR_swapchain");
 
     u32 qf_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(gpu, &qf_count, nullptr);
@@ -195,7 +211,7 @@ int score_device(Renderer* r, VkPhysicalDevice gpu, u32* queue_family) {
         if (present) { *queue_family = i; found = true; }
     }
     qfs.free();
-    if (!found) return -1;
+    if (!found) return refuse("no queue family both draws and presents to this surface");
 
     int score = 1;
     if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)        score = 3;

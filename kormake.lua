@@ -67,7 +67,9 @@ root "ios" {
 -- emulator (kormake test androidemu-dev).
 root "android" {
   modules   = { "lua", "tool", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
-                "platform_hid", "window" },
+                "platform_hid", "window",
+                "render", "asset", "sprite", "scene", "text", "touchpad", "frameloop", "renderer-vulkan",
+                "testbed", "gallery" },
   tests     = true,
   platforms = { "android", "androidemu" },
 }

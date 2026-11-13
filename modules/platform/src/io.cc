@@ -443,7 +443,7 @@ namespace {
 // Opens an archive (a whole file, or `span` bytes at `base` inside one) and reads its
 // table into `m`, allocating from `a`. What a mount is, without a queue to hold it:
 // mount_pack_at pushes it, io_read_bundled and io_archive_entry use it as it is.
-bool archive_open(IoMount& m, Allocator* a, const char* path, u64 base, u64 span, const char* prefix) {
+bool archive_open(IoMount& m, Allocator* a, const char* path, u64 base, u64 span, const char* prefix, bool quiet = false) {
     if (prefix && strlen(prefix) >= sizeof m.prefix) { KV_ERROR("io", "mount: prefix too long: '%s'", prefix); return false; }
     if (prefix) memcpy(m.prefix, prefix, strlen(prefix) + 1);
     m.base = base;
@@ -523,8 +523,9 @@ bool archive_open(IoMount& m, Allocator* a, const char* path, u64 base, u64 span
     char where[160] = "";
     if (base || m.prefix[0])
         format(where, sizeof where, " (%s%s%s%s)", m.prefix[0] ? "under " : "", m.prefix, base && m.prefix[0] ? ", " : "", base ? "an archive inside it" : "");
-    KV_INFO("io", "mounted pack %s%s: %u entries, %s, %u deflated, %u unaligned, %u unsupported%s", path, where, t.count, index_note,
-            t.deflated, t.unaligned, t.unsupported, names);
+    if (!quiet)
+        KV_INFO("io", "mounted pack %s%s: %u entries, %s, %u deflated, %u unaligned, %u unsupported%s", path, where, t.count, index_note,
+                t.deflated, t.unaligned, t.unsupported, names);
     return true;
 }
 
@@ -568,7 +569,7 @@ int     g_bundle_state = 0; // 0 not tried, 1 open, -1 failed
 IoMount* bundle_mount() {
     if (g_bundle_state == 0) {
         const char* archive = os_bundle_archive();
-        g_bundle_state = archive && archive_open(g_bundle, mem_general(), archive, 0, 0, kBundlePrefix) ? 1 : -1;
+        g_bundle_state = archive && archive_open(g_bundle, mem_general(), archive, 0, 0, kBundlePrefix, true) ? 1 : -1;
     }
     return g_bundle_state == 1 ? &g_bundle : nullptr;
 }
@@ -626,7 +627,7 @@ bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc, i32* err)
 
 bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* size) {
     IoMount m{};
-    if (!archive_open(m, mem_general(), archive, 0, 0, nullptr)) return false;
+    if (!archive_open(m, mem_general(), archive, 0, 0, nullptr, true)) return false;
     char norm[KV_PACK_PATH_MAX];
     const PackEntry* pe = pack_normalize(name, norm, sizeof norm) ? pack_find(m.table, norm) : nullptr;
     bool ok = pe && pe->method == ZipStored && pe->csize == pe->size && entry_data_at(m, *pe, offset);

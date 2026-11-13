@@ -170,6 +170,11 @@ void platform_modal_frame(Engine& e, void (*fn)(void* user), void* user) {
     s->modal_user  = user;
 }
 
+void platform_surface_hook(Engine& e, void (*fn)(void* user, void* native), void* user) {
+    HidState* s = state(e);
+    if (s) s->window.on_surface(fn, user);
+}
+
 bool platform_video_up(Engine&) { return hid_video_up(); }
 
 HostWindow* platform_window(Engine& e) {

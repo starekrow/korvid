@@ -67,6 +67,13 @@ RenderCaps renderer_caps(const Renderer* r);
 
 // The window's framebuffer size changed; the backend recreates what depends on it.
 void       renderer_resize(Renderer* r, u32 width, u32 height);
+// The window's surface is going away (native_window null: the backend waits for the GPU
+// and lets go of everything made from it, before returning) or there is a new one (the
+// backend draws to it from the next frame). For an OS that takes the surface while the
+// program runs: Android, through platform_surface_hook. Between the two no frame may be
+// drawn; renderer_frame without a surface runs its uploads and presents nothing. A backend
+// whose surface lives as long as its window returns true and does nothing.
+bool       renderer_set_surface(Renderer* r, void* native_window);
 
 // ---- the render world -------------------------------------------------------------
 // Applies a tick's worth (or a frame's worth) of sprite deltas to the persistent world.

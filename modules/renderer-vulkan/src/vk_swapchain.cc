@@ -85,8 +85,18 @@ bool create_swapchain(Renderer* r) {
     ci.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT; // screenshots
     ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    ci.preTransform     = caps.currentTransform;
-    ci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    // A phone's screen is turned against its panel (a landscape game on a portrait panel),
+    // and currentTransform says by how much. Passing it back promises to draw already
+    // rotated, which nothing here does; identity has the compositor turn the image. Correct
+    // everywhere, at a cost on a real device that pre-rotation would save (slice 8, R7).
+    bool unrotated = caps.currentTransform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR &&
+                     (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR);
+    ci.preTransform     = unrotated ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : caps.currentTransform;
+    // Opaque where the surface offers it (every desktop does); Android's often offer only
+    // "inherit", which for an app's own window is opaque.
+    ci.compositeAlpha   = (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR :
+                          (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) ? VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR :
+                          VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
     ci.presentMode      = present_mode;
     ci.clipped          = VK_TRUE;
     ci.oldSwapchain     = old;
@@ -101,6 +111,7 @@ bool create_swapchain(Renderer* r) {
     Swapchain& s = r->swapchain;
     s.handle = sc;
     s.format = chosen.format;
+    s.unrotated = unrotated;
     s.extent = extent;
 
     u32 n = 0;

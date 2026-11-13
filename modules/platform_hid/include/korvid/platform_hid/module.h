@@ -71,4 +71,10 @@ Input*      platform_input(Engine& e);
 // never called. One per process, for whoever drives the frames.
 void platform_modal_frame(Engine& e, void (*fn)(void* user), void* user);
 
+// The window's surface taken away and given back (HostWindow::on_surface has the terms):
+// fn(user, null) from inside platform_pump before the surface is destroyed, fn(user,
+// native) when there is a new one. Only Android calls it. Null turns it off. One per
+// process, for whoever owns the renderer.
+void platform_surface_hook(Engine& e, void (*fn)(void* user, void* native), void* user);
+
 } // namespace kv

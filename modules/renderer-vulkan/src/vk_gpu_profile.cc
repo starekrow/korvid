@@ -23,7 +23,7 @@ namespace kv {
 constexpr u32 kGpuStatCount = 3; // vertex, fragment, compute invocations, in the flags' bit order
 
 void rv_name(Renderer* r, VkObjectType type, u64 handle, const char* name) {
-    if (!r->debug_utils || !handle || !name) return;
+    if (!r->debug_utils || !handle || !name || !vk_platform_object_names()) return;
     VkDebugUtilsObjectNameInfoEXT ni{};
     ni.sType        = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
     ni.objectType   = type;

@@ -244,6 +244,11 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     rd.sprite_rows   = s->config.sprite_rows;
     s->renderer = renderer_create(engine, rd);
     if (!s->renderer) return false;
+    // Where the OS takes the window's surface while the game runs (Android), the renderer
+    // lets go of it and takes the next one from inside the pump.
+    platform_surface_hook(engine, [](void* user, void* native) {
+        if (!renderer_set_surface((Renderer*)user, native)) KV_ERROR("frameloop", "the renderer could not take the window's new surface");
+    }, s->renderer);
     if (s->config.sprite_rows) sprite_rows_hint(engine, s->config.sprite_rows); // the extract's tables, sized once too
     if (s->config.touchpad_layout) touchpad_layout(engine, s->config.touchpad_layout);
     if (g_touchpad) touchpad_enable(engine, true); // a touch screen turns it on by itself
@@ -456,6 +461,7 @@ void run(Engine& engine, FrameLoopState& s) {
         }
     }
     platform_modal_frame(engine, nullptr, nullptr);
+    platform_surface_hook(engine, nullptr, nullptr); // the renderer goes down before the window does
     if (s.modal_frames) KV_INFO("frameloop", "%llu frames ran inside live resizes", (unsigned long long)s.modal_frames);
 }
 

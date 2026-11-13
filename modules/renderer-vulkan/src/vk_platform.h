@@ -15,5 +15,14 @@ const char* const* vk_platform_instance_extensions(u32* count);
 // A surface for HostWindow::native_handle(); false (logged) on failure. Destroyed with
 // vkDestroySurfaceKHR.
 bool vk_platform_create_surface(void* native_window, VkInstance instance, VkSurfaceKHR* out);
+// Whether objects may be given debug names (vkSetDebugUtilsObjectNameEXT). True wherever
+// the extension is offered, except in the Android emulator, whose guest driver offers it
+// and then dereferences null inside it for a query pool or an image (emulator 37.2,
+// vulkan.ranchu.so: vk_common_SetDebugUtilsObjectNameEXT).
+#if defined(__ANDROID__)
+bool vk_platform_object_names();
+#else
+inline bool vk_platform_object_names() { return true; }
+#endif
 
 } // namespace kv

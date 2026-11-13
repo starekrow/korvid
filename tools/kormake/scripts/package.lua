@@ -74,7 +74,10 @@ function M.run(c, build, inst, ninja, target)
   end
   local apk = nil
   if stage then
-    local path, signed, id = kormake.load("package_apk").run(build, dist, stage, exe, exe_bin, inst.toolchain, target:match("%-([^%-]+)$"))
+    -- A game that draws links the module that provides "render".
+    local draws = false
+    for _, d in ipairs(inst.closure) do if d.module.fields.provides == "render" then draws = true end end
+    local path, signed, id = kormake.load("package_apk").run(build, dist, stage, exe, exe_bin, inst.toolchain, target:match("%-([^%-]+)$"), draws)
     apk, bundle = path, string.format(", %s, signed %s", id, signed)
   end
   print(string.format("kormake: %s: %s%s, %d license files%s%s", apk or app or dist, exe,

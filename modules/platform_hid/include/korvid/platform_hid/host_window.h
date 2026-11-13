@@ -84,6 +84,15 @@ struct HostWindow {
     // Text input from the OS on or off (an input method's window, a phone's keyboard).
     void text_input(bool on);
 
+    // Some OSes take the window's surface away while the program runs and give another
+    // later (Android, whenever the app leaves the screen). fn(ctx, null) is called from
+    // inside pump before the old surface is gone: whoever draws to it lets go there, since
+    // on return it is destroyed. fn(ctx, native) is called, from pump too, when there is a
+    // new one, which native_handle() then returns. Never called where the window's surface
+    // lives as long as the window. Null stops it. A frame loop asks through
+    // platform_surface_hook.
+    void on_surface(void (*fn)(void* ctx, void* native), void* ctx) { surface_fn_ = fn; surface_ctx_ = ctx; }
+
     // The window as an opaque pointer: an SDL_Window* where SDL is the backend, an HWND on
     // Windows. The renderer turns it into a surface on its side; no graphics API headers
     // are included here.
@@ -99,6 +108,8 @@ struct HostWindow {
     f32   insets_[4]  = {};
     void (*modal_fn_)(void*) = nullptr;
     void* modal_ctx_  = nullptr;
+    void (*surface_fn_)(void*, void*) = nullptr;
+    void* surface_ctx_ = nullptr;
     void* modal_timer_ = nullptr; // the backend's: on macOS a CFRunLoopTimer in the event-tracking mode
 };
 

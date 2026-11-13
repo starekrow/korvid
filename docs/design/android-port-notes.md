@@ -235,6 +235,84 @@ code reads it. No `AAssetManager`, one read path on every platform.
 - The log's "9 unaligned" for the package is the pack format's own measure (its 4 KiB
   rule read from the central directory), not a fault.
 
+## Milestone 4: drawing
+
+`testbed` bounces its balls in the emulator at 60 fps, 2424x1080, and the gallery's nine
+pictures are the Vulkan references' to the byte.
+
+### The renderer
+
+- **`vk_platform_android.cc`**: `dlopen("libvulkan.so")`, `VK_KHR_android_surface`, a
+  surface from the `ANativeWindow`. `renderer-vulkan` is the toolchain's `render` binding;
+  the headers are the NDK's (1.4.335).
+- **The surface taken and given back.** New in the render interface:
+  `renderer_set_surface(r, native)`. With null the Vulkan backend waits for the device,
+  destroys the swapchain and every retired one in the frames' garbage (they were made from
+  the surface), then the surface; with a window it makes a surface, checks the queue still
+  presents to it, and the next frame builds the swapchain. A frame without a surface runs
+  its uploads and presents nothing. Metal and D3D12 answer true and do nothing (two
+  one-line functions, not compiled here).
+- **Who calls it.** `HostWindow::on_surface` and `platform_surface_hook` (platform_hid):
+  the frame loop registers the renderer after creating it. On Android the hook runs inside
+  the window's handoff, on the game's thread: let go, then tell the OS's thread it may
+  return, then take the new one. Nothing else calls it.
+- **Rotation.** The swapchain passed the surface's `currentTransform` back as its
+  `preTransform`, a promise to draw pre-rotated that nothing kept. It now asks for identity
+  when the surface is turned and supports it, and the compositor turns the image: a
+  landscape game on the Pixel's portrait panel is upright. Such a swapchain is "suboptimal"
+  at every present for as long as it lives, so that answer no longer marks it dirty (it
+  would be rebuilt every frame) and is not logged as an error. True pre-rotation is still
+  R7's P1.
+- **Composite alpha** is opaque where offered, else inherit.
+- **A refused GPU is told why**: `score_device` logs the device and the one requirement it
+  failed, each by name, and now checks the update-after-bind sampled-image limit against
+  the texture slots.
+- **The package** of a game that draws declares `android.hardware.vulkan.version` 1.3 and
+  level 1, required.
+
+### What it found
+
+- **The emulator's driver crashes on debug names.** `vkSetDebugUtilsObjectNameEXT` on a
+  query pool, and on an image, is a null dereference inside the guest's
+  `vulkan.ranchu.so` (`vk_common_SetDebugUtilsObjectNameEXT+283`, emulator 37.2.13, API
+  36 image revision 7). The extension is offered, so the renderer named its objects, as it
+  does everywhere. `vk_platform_object_names()` is false when `ro.boot.qemu` is 1 and
+  `rv_name` asks it; labels on command buffers are untouched and work. A device is
+  unaffected, and the names come back by themselves there.
+- **`wm size` gives the gallery its size.** The window is the screen, so the gallery drew
+  at 2424x1080, comparable with nothing. `adb shell wm size 540x960` makes the emulator's
+  display 960x540 in landscape; `wm size reset` after.
+- **The gallery's `--out DIR` wants the directory to exist**; `--out .` is the app's
+  external files directory.
+- The insets in landscape read `142 137 0 63`, and `0 137 142 63` after the emulator is
+  turned the other way up: the cutout follows the turn. The 137 at the top is what Android
+  reports for the status bar there even while it is hidden.
+
+### What ran
+
+- `testbed --check-sort --screenshot shot.ppm`: 16 sort checks passed, 0 failed; the
+  screenshot (2424x1080) pulled from `/sdcard/Android/data/org.korvid.testbed/files/`; 0
+  validation errors (the layer was not there: see below).
+- **The lifecycle loop with the renderer drawing**: Home and relaunch fifty times: "surface
+  released" 50, "surface taken" 50, 60 fps and passing sort checks after, the sim's tick
+  count showing it held while away, no error and no fatal signal. The emulator turned
+  through all four ways up, drawing throughout.
+- **The gallery** at 960x540 against `references/vulkan`: nine of nine, largest channel
+  difference 0. The same GPU drew both, through a different OS, loader, surface and
+  swapchain; that is what this proves.
+- `kormake test` for the three `androidemu` configs: eighteen suites (asset, sprite, scene,
+  text and touchpad joined). arm64 builds and packages. Linux: both configs' suites,
+  kormake's tests, the gallery against its references, `rocks` and `arcanum` hashes
+  unchanged (`4fb2e4cb04ff9ee4` at 600, `a3256024dcf1f933` at 1864).
+
+### Not done
+
+- **The validation layer is not downloaded**, so "debug builds run with it and it reports
+  nothing" is unproved. The packager is ready: a debug package of a game that draws takes
+  `<abi>/libVkLayer_khronos_validation.so` from `KORMAKE_ANDROID_VK_LAYERS` or
+  `~/Android/Sdk/vulkan-validation-layers/` and says in its last line whether it did.
+- Pre-rotation (P1).
+
 ### Still to come
 
-Milestone 4: the Vulkan surface, the surface lost and regained, drawing.
+Milestone 5: AAudio, touch shown working through the touchpad, the games, the hashes.
