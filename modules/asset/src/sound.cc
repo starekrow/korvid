@@ -1,11 +1,11 @@
 #include "korvid/asset/sound.h"
+#include "korvid/core/format.h"
 #include "korvid/asset/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/platform/io.h"
 #include "asset_internal.h"
-#include <stdio.h>
 #include <string.h>
 
 // The decoder's declarations only; the implementation is stb_vorbis.cc.
@@ -128,9 +128,9 @@ kv_handle sound_find_name(const char* name, void* ctx) {
 }
 int sound_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     SoundAsset* s = ((AssetState_*)ctx)->sounds.get(Handle{h});
-    if (!s) return snprintf(out, cap, "stale");
+    if (!s) return format(out, cap, "stale");
     const char* st = s->state == AssetState::Ready ? "ready" : s->state == AssetState::Failed ? "failed" : "pending";
-    return snprintf(out, cap, "'%s' %s %u Hz x%u %.2fs", s->path, st, s->rate, s->channels, s->seconds());
+    return format(out, cap, "'%s' %s %u Hz x%u %.2fs", s->path, st, s->rate, s->channels, s->seconds());
 }
 
 void fail_sound(Engine& e, AssetState_& s, Handle h, SoundAsset& snd, AssetError err, const char* detail) {

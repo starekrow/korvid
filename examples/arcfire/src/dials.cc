@@ -5,6 +5,7 @@
 // dials live in the world row, so the hash covers them: another position is another run.
 #include "arcfire.h"
 #include "korvid/core/log.h"
+#include "korvid/core/format.h"
 #include "korvid/frameloop/frameloop.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -114,12 +115,12 @@ void dials_apply_options(Engine& e, Dials& d) {
 
 void dials_log(const Dials& d) {
     char line[512];
-    usize n = (usize)snprintf(line, sizeof line, "dials: %s", position_name(d.position));
+    usize n = (usize)format(line, sizeof line, "dials: %s", position_name(d.position));
     for (const DialField& f : k_dial_fields) {
         if (n >= sizeof line) break;
         const u8* at = (const u8*)&d + f.offset;
-        if (f.scale) { f32 v; memcpy(&v, at, sizeof v); n += (usize)snprintf(line + n, sizeof line - n, ", %s %g", f.name, (f64)v); }
-        else { u32 v; memcpy(&v, at, sizeof v); n += (usize)snprintf(line + n, sizeof line - n, ", %s %u", f.name, v); }
+        if (f.scale) { f32 v; memcpy(&v, at, sizeof v); n += (usize)format(line + n, sizeof line - n, ", %s %g", f.name, (f64)v); }
+        else { u32 v; memcpy(&v, at, sizeof v); n += (usize)format(line + n, sizeof line - n, ", %s %u", f.name, v); }
     }
     KV_INFO("arcfire", "%s", line);
 }

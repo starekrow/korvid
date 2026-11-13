@@ -1,7 +1,7 @@
 #include "korvid/core/cli.h"
+#include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -9,7 +9,7 @@ namespace kv {
 
 void CliContext::vprint(const char* fmt, va_list args) {
     char line[1024];
-    vsnprintf(line, sizeof line, fmt, args);
+    vformat(line, sizeof line, fmt, args);
     if (sink) sink(user, line);
 }
 
@@ -25,7 +25,7 @@ void CliContext::fail(const char* fmt, ...) {
     failed = true;
     va_list args;
     va_start(args, fmt);
-    vsnprintf(error, sizeof error, fmt, args);
+    vformat(error, sizeof error, fmt, args);
     va_end(args);
 }
 
@@ -69,12 +69,12 @@ bool cli_resolve(CliContext& ctx, const char* arg, char* out, usize cap) {
         usize i = 0;
         for (; t->name[i] && i + 1 < sizeof kind; ++i) kind[i] = t->name[i] == '.' ? '/' : t->name[i];
         kind[i] = 0;
-        snprintf(named, sizeof named, "/kinds/%s/%u%s", kind, h.index(), slash ? slash : "");
+        format(named, sizeof named, "/kinds/%s/%u%s", kind, h.index(), slash ? slash : "");
         arg = named;
     }
     const char* base = arg && arg[0] == '/' ? "" : (ctx.cwd ? ctx.cwd : "/");
     char joined[2 * KV_CLI_PATH_MAX];
-    int n = snprintf(joined, sizeof joined, "%s/%s", base, arg ? arg : "");
+    int n = format(joined, sizeof joined, "%s/%s", base, arg ? arg : "");
     if (n < 0 || (usize)n >= sizeof joined) { ctx.fail("path too long"); return false; }
     // Walk the components, applying "." and "..", building `out` in place.
     usize len = 0;

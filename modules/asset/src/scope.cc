@@ -1,12 +1,12 @@
 // Scopes and references: who holds which asset, and what happens when nobody does.
 #include "korvid/asset/scope.h"
+#include "korvid/core/format.h"
 #include "korvid/core/cli.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/utf8.h"
 #include "korvid/platform/io.h"
 #include "asset_internal.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -83,9 +83,9 @@ kv_handle scope_find_name(const char* name, void* ctx) {
 int scope_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     AssetState_& s = *(AssetState_*)ctx;
     AssetScope_* sc = s.scopes.get(Handle{h});
-    if (!sc) return snprintf(out, cap, "stale");
+    if (!sc) return format(out, cap, "stale");
     AssetScopeProgress p = progress_of(s, *sc);
-    return snprintf(out, cap, "'%s' %u assets, %u pending, %u failed", sc->name, p.members, p.pending, p.failed);
+    return format(out, cap, "'%s' %u assets, %u pending, %u failed", sc->name, p.members, p.pending, p.failed);
 }
 
 void retire(Engine& e, AssetState_& s, Handle h) {
@@ -391,8 +391,8 @@ void asset_scopes_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* u
         AssetScope_& sc = s->scopes.items[i];
         AssetScopeProgress p = progress_of(*s, sc);
         char name[64], summary[128];
-        snprintf(name, sizeof name, "%u-%s", i, sc.name);
-        snprintf(summary, sizeof summary, "%u assets: %u pending, %u ready, %u failed, %llu KB", p.members, p.pending, p.ready,
+        format(name, sizeof name, "%u-%s", i, sc.name);
+        format(summary, sizeof summary, "%u assets: %u pending, %u ready, %u failed, %llu KB", p.members, p.pending, p.ready,
                  p.failed, (unsigned long long)(p.bytes / 1024));
         if (!tree.add(name, false, summary)) return;
     }
@@ -404,7 +404,7 @@ bool asset_scopes_describe(CliContext& ctx, const char* rel) {
         if (!s->scopes.is_alive(i)) continue;
         AssetScope_& sc = s->scopes.items[i];
         char name[64];
-        snprintf(name, sizeof name, "%u-%s", i, sc.name);
+        format(name, sizeof name, "%u-%s", i, sc.name);
         if (strcmp(name, rel) != 0) continue;
         AssetScopeProgress p = progress_of(*s, sc);
         ctx.print("scope '%s'%s: %u assets, %u pending, %u ready, %u failed, %llu KB", sc.name, sc.global ? " (global)" : "",

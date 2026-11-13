@@ -17,11 +17,11 @@
 // free-list links. Single owner.
 #pragma once
 #include "korvid/core/handle.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/os_memory.h"
 #include "korvid/core/thread.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -110,7 +110,7 @@ struct Pool {
         const Pool& p = *(const Pool*)ctx;
         Handle hh{h};
         const char* state = p.valid(hh) ? "alive" : hh.index() < p.len ? "stale" : "out of range";
-        return snprintf(out, cap, "%s (%u live of %u slots)", state, p.live, p.len);
+        return format(out, cap, "%s (%u live of %u slots)", state, p.live, p.len);
     }
 
     // The handle for a slot, whatever its state. For iteration with is_alive().

@@ -1,4 +1,5 @@
 #include "korvid/audio/module.h"
+#include "korvid/core/format.h"
 #include "korvid/core/atomic.h"
 #include "korvid/asset/scope.h"
 #include "korvid/asset/sound.h"
@@ -146,8 +147,8 @@ void push_given(Array<Handle>& to, const VoiceRec& v) {
 }
 int voice_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     VoiceRec* v = (VoiceRec*)voice_resolve(h, ctx);
-    if (!v) return snprintf(out, cap, "stale");
-    return snprintf(out, cap, "%s vol %.2f pitch %.2f%s", v->started ? "playing" : "waiting", v->play.volume, v->play.pitch, v->play.loop ? " loop" : "");
+    if (!v) return format(out, cap, "stale");
+    return format(out, cap, "%s vol %.2f pitch %.2f%s", v->started ? "playing" : "waiting", v->play.volume, v->play.pitch, v->play.loop ? " loop" : "");
 }
 
 // The device thread.
@@ -536,9 +537,9 @@ void voices_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         const VoiceRec& v = s->cmds.voices[i];
         if (!v.used) continue;
         char name[16], summary[256], sound[KV_ASSET_PATH_MAX] = "?";
-        snprintf(name, sizeof name, "%u", i);
-        if (const SoundAsset* snd = asset_sound(*ctx.engine, v.play.sound)) snprintf(sound, sizeof sound, "%s", snd->path);
-        snprintf(summary, sizeof summary, "%s %s, vol %.2f, pitch %.2f, pan %.2f%s%s", v.started ? "playing" : "waiting", sound, v.play.volume, v.play.pitch, v.play.pan,
+        format(name, sizeof name, "%u", i);
+        if (const SoundAsset* snd = asset_sound(*ctx.engine, v.play.sound)) format(sound, sizeof sound, "%s", snd->path);
+        format(summary, sizeof summary, "%s %s, vol %.2f, pitch %.2f, pan %.2f%s%s", v.started ? "playing" : "waiting", sound, v.play.volume, v.play.pitch, v.play.pan,
                  v.play.loop ? ", loop" : "", v.play.pause_with_sim ? "" : ", plays through pause");
         if (!emit(user, name, summary)) return;
     }
@@ -574,7 +575,7 @@ void buses_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
     if (!s) return;
     for (u32 b = 0; b < (u32)AudioBus::Count; ++b) {
         char summary[32];
-        snprintf(summary, sizeof summary, "%.2f", s->mixer.bus_gain[b]); // a snapshot: the device thread owns it
+        format(summary, sizeof summary, "%.2f", s->mixer.bus_gain[b]); // a snapshot: the device thread owns it
         if (!emit(user, bus_name(b), summary)) return;
     }
 }

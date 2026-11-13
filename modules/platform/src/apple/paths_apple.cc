@@ -7,11 +7,11 @@
 // rule everywhere else. Plain POSIX and dyld, no Foundation: nothing here needs NSBundle.
 #include "../os_paths.h"
 #include "korvid/platform/io.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include <limits.h>
 #include <mach-o/dyld.h>
 #include <pwd.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -39,7 +39,7 @@ bool os_base_path(char* out, u32 cap) {
     usize len = strlen(out), tail = strlen(macos);
     if (len >= tail && strcmp(out + len - tail, macos) == 0) {
         char resources[PATH_MAX];
-        int r = snprintf(resources, sizeof resources, "%.*s/Contents/Resources/", (int)(len - tail), out);
+        int r = kv::format(resources, sizeof resources, "%.*s/Contents/Resources/", (int)(len - tail), out);
         struct stat st;
         if (r > 0 && (u32)r < cap && stat(resources, &st) == 0 && S_ISDIR(st.st_mode)) memcpy(out, resources, (usize)r + 1);
     }
@@ -53,7 +53,7 @@ bool os_pref_path(const char* org, const char* app, char* out, u32 cap) {
         home = pw ? pw->pw_dir : nullptr;
     }
     if (!home || !home[0]) { KV_WARN("platform", "no preference path: no home directory"); return false; }
-    int n = snprintf(out, cap, "%s/Library/Application Support/%s/%s/", home, org, app);
+    int n = kv::format(out, cap, "%s/Library/Application Support/%s/%s/", home, org, app);
     if (n <= 0 || (u32)n >= cap) { KV_WARN("platform", "no preference path: too long"); return false; }
     if (!io_make_dirs(out)) { KV_WARN("platform", "no preference path: cannot create %s", out); return false; }
     return true;

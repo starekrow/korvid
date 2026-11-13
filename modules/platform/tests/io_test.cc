@@ -1,4 +1,5 @@
 #include "korvid/platform/io.h"
+#include "korvid/core/format.h"
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
 #include <errno.h>
@@ -70,7 +71,7 @@ void test_backend(kv::TestCtx& c, const Files& f, kv::IoBackend backend) {
 
     // A larger file comes back whole, and a cancel while in flight still completes.
     char big_path[256];
-    snprintf(big_path, sizeof big_path, "%s/big.bin", f.dir);
+    format(big_path, sizeof big_path, "%s/big.bin", f.dir);
     const u32 big = 3 * 1024 * 1024 + 123;
     {
         u8* buf = (u8*)mem_alloc(big);
@@ -108,9 +109,9 @@ void test_io(kv::TestCtx& c) {
     // Two files to read, one with a known payload.
     Files f;
     KV_CHECK(c, io_make_temp_dir("korvid-io", f.dir, sizeof f.dir));
-    snprintf(f.a, sizeof f.a, "%s/a.bin", f.dir);
-    snprintf(f.b, sizeof f.b, "%s/b.bin", f.dir);
-    snprintf(f.missing, sizeof f.missing, "%s/nope.bin", f.dir);
+    format(f.a, sizeof f.a, "%s/a.bin", f.dir);
+    format(f.b, sizeof f.b, "%s/b.bin", f.dir);
+    format(f.missing, sizeof f.missing, "%s/nope.bin", f.dir);
     FILE* fp = fopen(f.a, "wb"); fwrite("hello io", 1, 8, fp); fclose(fp);
     fp = fopen(f.b, "wb"); fclose(fp); // empty
 
@@ -137,7 +138,7 @@ void test_io_budget(kv::TestCtx& c) {
     u8* buf = (u8*)mem_alloc(size);
     memset(buf, 0x5A, size);
     for (u32 i = 0; i < 6; ++i) {
-        snprintf(paths[i], sizeof paths[i], "%s/f%u.bin", dir, i);
+        format(paths[i], sizeof paths[i], "%s/f%u.bin", dir, i);
         FILE* fp = fopen(paths[i], "wb"); fwrite(buf, 1, size, fp); fclose(fp);
     }
     mem_free(buf);
@@ -184,15 +185,15 @@ void test_io_write(kv::TestCtx& c) {
     char dir[200];
     KV_CHECK(c, io_make_temp_dir("korvid-iow", dir, sizeof dir));
     char path[300], empty[300], bad[300], gone[300];
-    snprintf(path, sizeof path, "%s/save.txt", dir);
-    snprintf(empty, sizeof empty, "%s/empty.txt", dir);
-    snprintf(bad, sizeof bad, "%s/no-such-dir/x.txt", dir);
-    snprintf(gone, sizeof gone, "%s/never.txt", dir);
+    format(path, sizeof path, "%s/save.txt", dir);
+    format(empty, sizeof empty, "%s/empty.txt", dir);
+    format(bad, sizeof bad, "%s/no-such-dir/x.txt", dir);
+    format(gone, sizeof gone, "%s/never.txt", dir);
     for (u32 pass = 0; pass < 2; ++pass) {
         IoQueue q;
         KV_CHECK(c, q.init(nullptr, 16, pass == 0 ? IoBackend::Sync : IoBackend::Auto));
         char payload[64];
-        snprintf(payload, sizeof payload, "score %u\n", 1200 + pass);
+        format(payload, sizeof payload, "score %u\n", 1200 + pass);
         IoWriteRequest w; w.path = path; w.data = payload; w.size = strlen(payload); w.user = 10;
         IoWriteRequest we; we.path = empty; we.user = 11;
         IoWriteRequest wb; wb.path = bad; wb.data = "x"; wb.size = 1; wb.user = 12;
@@ -218,7 +219,7 @@ void test_io_write(kv::TestCtx& c) {
         KV_CHECK(c, wait_for(q, 1) == 1);
         const IoCompletion* cr = by_user(q, 20);
         char expect[32];
-        snprintf(expect, sizeof expect, "score %u\n", 1200 + pass);
+        format(expect, sizeof expect, "score %u\n", 1200 + pass);
         KV_CHECK(c, cr && cr->status == IoStatus::Done && cr->size == 11 && memcmp(cr->data, expect, 11) == 0);
         mem_free(cr->data);
         q.reap(hr);
@@ -239,20 +240,20 @@ void test_io_remove_tree(kv::TestCtx& c) {
     char dir[200], outside[200], path[400];
     KV_CHECK(c, io_make_temp_dir("korvid-tree", dir, sizeof dir) && io_make_temp_dir("korvid-tree-out", outside, sizeof outside));
     const char* const files[] = {"a.txt", ".hidden", "sub/b.txt", "sub/deeper/c.txt", "sub/deeper/.d"};
-    snprintf(path, sizeof path, "%s/sub/deeper", dir); KV_CHECK(c, io_make_dirs(path));
-    snprintf(path, sizeof path, "%s/empty", dir);      KV_CHECK(c, io_make_dirs(path));
+    format(path, sizeof path, "%s/sub/deeper", dir); KV_CHECK(c, io_make_dirs(path));
+    format(path, sizeof path, "%s/empty", dir);      KV_CHECK(c, io_make_dirs(path));
     for (const char* f : files) {
-        snprintf(path, sizeof path, "%s/%s", dir, f);
+        format(path, sizeof path, "%s/%s", dir, f);
         FILE* fp = fopen(path, "wb");
         KV_CHECK(c, fp != nullptr);
         if (fp) { fputs(f, fp); fclose(fp); }
     }
     char kept[400];
-    snprintf(kept, sizeof kept, "%s/kept.txt", outside);
+    format(kept, sizeof kept, "%s/kept.txt", outside);
     FILE* fp = fopen(kept, "wb");
     if (fp) { fputs("kept", fp); fclose(fp); }
 #if !defined(_WIN32)
-    snprintf(path, sizeof path, "%s/sub/link", dir);
+    format(path, sizeof path, "%s/sub/link", dir);
     KV_CHECK(c, symlink(outside, path) == 0);
 #endif
     KV_CHECK(c, io_remove_tree(dir));

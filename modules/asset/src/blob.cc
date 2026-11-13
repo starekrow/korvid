@@ -1,9 +1,9 @@
 #include "korvid/asset/blob.h"
+#include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"
 #include "asset_internal.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -18,9 +18,9 @@ kv_handle blob_find_name(const char* name, void* ctx) {
 }
 int blob_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     BlobAsset* b = ((AssetState_*)ctx)->blobs.get(Handle{h});
-    if (!b) return snprintf(out, cap, "stale");
+    if (!b) return format(out, cap, "stale");
     const char* st = b->state == AssetState::Ready ? "ready" : b->state == AssetState::Failed ? "failed" : "pending";
-    return snprintf(out, cap, "'%s' %s %llu bytes", b->path, st, (unsigned long long)b->size);
+    return format(out, cap, "'%s' %s %llu bytes", b->path, st, (unsigned long long)b->size);
 }
 
 void fail_blob(Engine& e, AssetState_& s, Handle h, BlobAsset& b, AssetError err) {

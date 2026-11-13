@@ -1,4 +1,5 @@
 #include "korvid/frameloop/frameloop.h"
+#include "korvid/core/format.h"
 #include "korvid/frameloop/module.h"
 #include "frameloop_internal.h"
 #include "korvid/asset/font.h"
@@ -18,7 +19,6 @@
 #include "korvid/sprite/module.h"
 #include "korvid/sprite/transform2.h"
 #include "korvid/text/text.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -397,7 +397,7 @@ void run(Engine& engine, FrameLoopState& s) {
         if (s.config.report_every_seconds && now >= next_report) {
             const MemSample& mem = mem_last_sample();
             char scaled[32] = "";
-            if (engine.clock.scale != 1.0) snprintf(scaled, sizeof scaled, " (time scale %.2f)", engine.clock.scale);
+            if (engine.clock.scale != 1.0) format(scaled, sizeof scaled, " (time scale %.2f)", engine.clock.scale);
             KV_INFO("frameloop", "%u fps, tick %llu%s, alpha %.2f, %u sprites, %u deltas/frame, %ux%u, %s, %llu KB live, idle %.1f ms/frame on %llu",
                     frames_in_window, (unsigned long long)engine.clock.tick_count, scaled, engine.clock.alpha(),
                     renderer_sprite_count(s.renderer), s.deltas_last_frame, s.window->width(), s.window->height(),
@@ -417,10 +417,10 @@ void run(Engine& engine, FrameLoopState& s) {
             }
             if (g_overlay) {
                 char line[96];
-                snprintf(line, sizeof line, "%u fps  tick %llu  %u sprites  %u deltas", frames_in_window,
+                format(line, sizeof line, "%u fps  tick %llu  %u sprites  %u deltas", frames_in_window,
                          (unsigned long long)engine.clock.tick_count, renderer_sprite_count(s.renderer), s.deltas_last_frame);
                 overlay_set(engine, s, 0, line);
-                snprintf(line, sizeof line, "%llu KB live  idle %.1f ms%s", (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
+                format(line, sizeof line, "%llu KB live  idle %.1f ms%s", (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
                          s.idle_frames ? s.idle_total / (f64)s.idle_frames * 1e3 : 0.0, engine.clock.paused ? "  PAUSED" : "");
                 overlay_set(engine, s, 1, line);
                 u32 shown = 0;
@@ -429,7 +429,7 @@ void run(Engine& engine, FrameLoopState& s) {
                     u32 frames = 1;
                     u32 n = prof_top(top, &frames);
                     for (; shown < n; ++shown) {
-                        snprintf(line, sizeof line, "%-28.28s %6.3f ms", top[shown].name, prof_ms(top[shown].wall) / frames);
+                        format(line, sizeof line, "%-28.28s %6.3f ms", top[shown].name, prof_ms(top[shown].wall) / frames);
                         overlay_set(engine, s, 2 + shown, line);
                     }
                 }
@@ -454,7 +454,7 @@ void run(Engine& engine, FrameLoopState& s) {
 void cli_screenshot(CliContext& ctx, Span<const char* const> args) {
     if (args.len != 1 || !args[0][0]) { ctx.fail("screenshot FILE"); return; }
     if (strlen(args[0]) >= sizeof g_cli_shot) { ctx.fail("the path is too long"); return; }
-    snprintf(g_cli_shot, sizeof g_cli_shot, "%s", args[0]);
+    format(g_cli_shot, sizeof g_cli_shot, "%s", args[0]);
     ctx.print("the next frame goes to %s", args[0]);
 }
 
@@ -522,7 +522,7 @@ int frameloop_run(int argc, char** argv, void*) {
     static char exe_name[128];
     const char* name = argv[0];
     for (const char* p = argv[0]; *p; ++p) if (*p == '/' || *p == '\\') name = p + 1;
-    snprintf(exe_name, sizeof exe_name, "%s", name);
+    format(exe_name, sizeof exe_name, "%s", name);
     usize len = strlen(exe_name);
     if (len > 4 && (exe_name[len - 4] == '.') && (exe_name[len - 3] | 0x20) == 'e' && (exe_name[len - 2] | 0x20) == 'x' &&
         (exe_name[len - 1] | 0x20) == 'e')

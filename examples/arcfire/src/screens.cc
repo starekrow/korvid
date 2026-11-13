@@ -18,11 +18,11 @@
 // screen here holds the sim.
 #include "arcfire.h"
 #include "korvid/core/log.h"
+#include "korvid/core/format.h"
 #include "korvid/core/name.h"
 #include "korvid/platform_hid/actions.h"
 #include "korvid/platform_hid/module.h"
 #include "korvid/ui/ui.h"
-#include <stdio.h>
 #include <string.h>
 #include "korvid/math/scalar.h"
 #include <time.h>
@@ -60,17 +60,17 @@ const char* ordinal(u32 n) { return n == 1 ? "ST" : n == 2 ? "ND" : n == 3 ? "RD
 
 void options_show(Engine& e, Game& g) {
     char line[48], pos[16];
-    snprintf(line, sizeof line, "MASTER VOLUME   < %2u >", g.options.master);
+    format(line, sizeof line, "MASTER VOLUME   < %2u >", g.options.master);
     ui_set_text(e, g.options_screen, "master", line);
-    snprintf(line, sizeof line, "MUSIC           < %2u >", g.options.music);
+    format(line, sizeof line, "MUSIC           < %2u >", g.options.music);
     ui_set_text(e, g.options_screen, "music", line);
-    snprintf(line, sizeof line, "EFFECTS         < %2u >", g.options.effects);
+    format(line, sizeof line, "EFFECTS         < %2u >", g.options.effects);
     ui_set_text(e, g.options_screen, "effects", line);
-    snprintf(pos, sizeof pos, "%s", position_name(g.options.start));
+    format(pos, sizeof pos, "%s", position_name(g.options.start));
     caps(pos);
-    snprintf(line, sizeof line, "ARCADE STARTS  < %s >", pos);
+    format(line, sizeof line, "ARCADE STARTS  < %s >", pos);
     ui_set_text(e, g.options_screen, "start", line);
-    snprintf(line, sizeof line, "DEV COUNTERS   < %s >", g.options.dev ? "ON" : "OFF");
+    format(line, sizeof line, "DEV COUNTERS   < %s >", g.options.dev ? "ON" : "OFF");
     ui_set_text(e, g.options_screen, "dev", line);
 }
 
@@ -100,9 +100,9 @@ void options_close(Engine& e, Game& g) {
     // What the screen under it shows.
     if (!g.title_screen.is_null()) {
         char note[64], pos[16];
-        snprintf(pos, sizeof pos, "%s", position_name((u32)g.start));
+        format(pos, sizeof pos, "%s", position_name((u32)g.start));
         caps(pos);
-        snprintf(note, sizeof note, "ARCADE STARTS AT %s", pos);
+        format(note, sizeof note, "ARCADE STARTS AT %s", pos);
         ui_model_set_str(e, "title_note", note);
         ui_set_visible(e, g.title_screen, "column", true);
     }
@@ -120,9 +120,9 @@ i32 result_row(const Game& g, u32* table) {
 
 void name_open(Engine& e, Game& g, u32 table, i32 row) {
     char line[64], pos[16];
-    snprintf(pos, sizeof pos, "%s", g.demo ? "THE DEMO" : position_name((u32)k_table_positions[table]));
+    format(pos, sizeof pos, "%s", g.demo ? "THE DEMO" : position_name((u32)k_table_positions[table]));
     caps(pos);
-    snprintf(line, sizeof line, "%u%s ON %s", (u32)row + 1, ordinal((u32)row + 1), pos);
+    format(line, sizeof line, "%u%s ON %s", (u32)row + 1, ordinal((u32)row + 1), pos);
     ui_model_set_str(e, "name_rank", line);
     g.name_screen = open_screen(e, g, "name", 116);
     ui_set_text(e, g.name_screen, "entry", g.demo ? "" : g.last_name);
@@ -131,16 +131,16 @@ void name_open(Engine& e, Game& g, u32 table, i32 row) {
 
 void name_submit(Engine& e, Game& g) {
     char name[kNameMax + 1];
-    snprintf(name, sizeof name, "%s", ui_field_text(e, g.name_screen, "entry"));
+    format(name, sizeof name, "%s", ui_field_text(e, g.name_screen, "entry"));
     caps(name);
     close_screen(e, g.name_screen);
     u32 table = 1;
     i32 row = result_row(g, &table);
     if (row >= 0) {
         ScoreRow r{};
-        snprintf(r.name, sizeof r.name, "%s", name);
+        format(r.name, sizeof r.name, "%s", name);
         r.score = g.result.score;
-        snprintf(r.stage, sizeof r.stage, "%s", g.result.stage);
+        format(r.stage, sizeof r.stage, "%s", g.result.stage);
         r.round = g.result.round;
         r.restarts = g.result.restarts;
         time_t now = time(nullptr);
@@ -152,7 +152,7 @@ void name_submit(Engine& e, Game& g) {
 #endif
         strftime(r.date, sizeof r.date, "%Y-%m-%d", &local);
         score_insert(g.scores[table], (u32)row, r);
-        if (!g.demo) snprintf(g.last_name, sizeof g.last_name, "%s", name);
+        if (!g.demo) format(g.last_name, sizeof g.last_name, "%s", name);
         scores_save(e, g);
         options_save(e, g); // the name, offered next time
         KV_INFO("arcfire", "high score: %s, %lld, row %d of table %u", name, (long long)r.score, row + 1, table);
@@ -163,23 +163,23 @@ void name_submit(Engine& e, Game& g) {
 void scores_show(Engine& e, Game& g) {
     u32 t = g.table_shown;
     char head[48], pos[16];
-    snprintf(pos, sizeof pos, "%s", g.demo ? "THE DEMO" : position_name((u32)k_table_positions[t]));
+    format(pos, sizeof pos, "%s", g.demo ? "THE DEMO" : position_name((u32)k_table_positions[t]));
     caps(pos);
-    snprintf(head, sizeof head, g.demo ? "%s" : "<  %s  >", pos);
+    format(head, sizeof head, g.demo ? "%s" : "<  %s  >", pos);
     ui_model_set_str(e, "scores_table", head);
     char text[2048];
-    usize n = (usize)snprintf(text, sizeof text, "{c=dim}    NAME          SCORE  STAGE         RESTARTS{/c}\n");
+    usize n = (usize)format(text, sizeof text, "{c=dim}    NAME          SCORE  STAGE         RESTARTS{/c}\n");
     const ScoreTable& table = g.scores[t];
     for (u32 i = 0; i < kScoreRows && n < sizeof text; ++i) {
         bool lit = (i32)i == g.new_row && t == g.lit_table;
         if (i < table.count) {
             const ScoreRow& r = table.rows[i];
             char stage[24];
-            snprintf(stage, sizeof stage, "%.10s %u", r.stage, r.round);
-            n += (usize)snprintf(text + n, sizeof text - n, "%s%2u  %-8s %10lld  %-12s %3u%s\n", lit ? "{c=gold}" : "", i + 1, r.name,
+            format(stage, sizeof stage, "%.10s %u", r.stage, r.round);
+            n += (usize)format(text + n, sizeof text - n, "%s%2u  %-8s %10lld  %-12s %3u%s\n", lit ? "{c=gold}" : "", i + 1, r.name,
                                  (long long)r.score, stage, r.restarts, lit ? "{/c}" : "");
         } else {
-            n += (usize)snprintf(text + n, sizeof text - n, "{c=dim}%2u  --------          -{/c}\n", i + 1);
+            n += (usize)format(text + n, sizeof text - n, "{c=dim}%2u  --------          -{/c}\n", i + 1);
         }
     }
     ui_set_text(e, g.scores_screen, "rows", text);
@@ -197,7 +197,7 @@ void options_open(Engine& e, Game& g, i32 layer) {
 
 void gameover_open(Engine& e, Game& g, i64 score) {
     char line[48];
-    snprintf(line, sizeof line, "SCORE %lld", (long long)score);
+    format(line, sizeof line, "SCORE %lld", (long long)score);
     ui_model_set_str(e, "gameover_score", line);
     ui_model_set_int(e, "gameover_count", kGameOverTicks / 60);
     g.gameover_score = score;
@@ -215,10 +215,10 @@ void results_open(Engine& e, Game& g, const RunResult& r) {
     card_close(e, g);
     g.card_ticks = 0;
     char pos[16];
-    snprintf(pos, sizeof pos, "%s", position_name(r.position));
+    format(pos, sizeof pos, "%s", position_name(r.position));
     caps(pos);
     char text[1024];
-    snprintf(text, sizeof text,
+    format(text, sizeof text,
              "SCORE          %12lld\n{pause=0.3}"
              "STAGE          %12s\n{pause=0.2}"
              "ROUND          %12u\n{pause=0.2}"
@@ -256,12 +256,12 @@ void card_open(Engine& e, Game& g, u32 round, u32 position) {
     char line[48], pos[16];
     ui_model_set_str(e, "card_stage", g.stage.name);
     char number[16];
-    snprintf(number, sizeof number, "STAGE %u", g.stage_at + 1);
+    format(number, sizeof number, "STAGE %u", g.stage_at + 1);
     ui_model_set_str(e, "card_number", number);
-    snprintf(pos, sizeof pos, "%s", position_name(position));
+    format(pos, sizeof pos, "%s", position_name(position));
     caps(pos);
-    if (round > 1) snprintf(line, sizeof line, "ROUND %u  %s", round, pos);
-    else snprintf(line, sizeof line, "%s", pos);
+    if (round > 1) format(line, sizeof line, "ROUND %u  %s", round, pos);
+    else format(line, sizeof line, "%s", pos);
     ui_model_set_str(e, "card_round", line);
     if (g.card_screen.is_null()) {
         UiOpen o;
@@ -281,7 +281,7 @@ RunResult run_result(Engine& e, const Game& g, i64 score) {
     const Stage* st = world->get<Stage>(g.world);
     const Dials* d = world->get<Dials>(g.world);
     r.score = score;
-    snprintf(r.stage, sizeof r.stage, "%s", g.stage.name);
+    format(r.stage, sizeof r.stage, "%s", g.stage.name);
     r.round = st ? st->loops + 1 : 1;
     r.position = d ? d->position : (u32)g.start;
     r.start = (u32)g.start;

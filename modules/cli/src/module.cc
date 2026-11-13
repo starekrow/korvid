@@ -1,9 +1,9 @@
 #include "cli_internal.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/core/utf8.h"
 #include "os_stdin.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -27,7 +27,7 @@ usize cli_ascii_escape(const char* in, char* out, usize cap) {
         u32 cp = utf8_next(p);
         if (cp == '\\') put("\\\\", 2);
         else if (cp < 0x80) put(start, 1);
-        else { char e[16]; int n = snprintf(e, sizeof e, "\\u{%X}", cp); put(e, (usize)n); }
+        else { char e[16]; int n = format(e, sizeof e, "\\u{%X}", cp); put(e, (usize)n); }
     }
     if (cap) out[at < cap ? at : cap - 1] = 0;
     return at;
@@ -86,12 +86,12 @@ void respond(Request& rq, const char* line) {
     if (rq.sink) { rq.sink(rq.user, line); return; }
     Session& s = *rq.session;
     char out[kLineMax + 48];
-    int n = rq.id[0] ? snprintf(out, sizeof out, "%s %s\n", rq.id, line) : snprintf(out, sizeof out, "%s\n", line);
+    int n = rq.id[0] ? format(out, sizeof out, "%s %s\n", rq.id, line) : format(out, sizeof out, "%s\n", line);
     if (n < 0) return;
     const char* send = out;
     char esc[kLineMax * 4];
     if (s.ascii) { cli_ascii_escape(out, esc, sizeof esc); send = esc; n = (int)strlen(esc); }
-    if (s.is_stdin) { fputs(send, stdout); fflush(stdout); return; }
+    if (s.is_stdin) { print("%s", send); print_flush(); return; }
     if (s.dropped && s.sock.out.len == 0) { s.sock.write_str("!dropped\n"); s.dropped = false; }
     if (!s.sock.write(send, (u32)n)) { s.dropped = true; ++rq.cli->dropped; }
 }
@@ -168,11 +168,11 @@ bool run_request(Engine& e, CliState& cli, Request& rq, const char* text) {
     if (ctx.failed) ++cli.failed;
     char tail[256];
     if (rq.sink && !rq.session) { // an external caller: the status line is the result
-        if (ctx.failed) { snprintf(tail, sizeof tail, "err: %s", ctx.error); rq.sink(rq.user, tail); }
+        if (ctx.failed) { format(tail, sizeof tail, "err: %s", ctx.error); rq.sink(rq.user, tail); }
         return !ctx.failed;
     }
-    if (rq.id[0]) snprintf(tail, sizeof tail, ctx.failed ? "err %s" : "ok", ctx.error);
-    else          snprintf(tail, sizeof tail, ctx.failed ? "err: %s" : "ok", ctx.error);
+    if (rq.id[0]) format(tail, sizeof tail, ctx.failed ? "err %s" : "ok", ctx.error);
+    else          format(tail, sizeof tail, ctx.failed ? "err: %s" : "ok", ctx.error);
     respond(rq, tail);
     return !ctx.failed;
 }
@@ -211,7 +211,7 @@ void cli_help(CliContext& ctx, Span<const char* const>) {
     for (const CliCommandDesc* c : cli->commands) ctx.print("%-16s %s", c->name, c->help ? c->help : "");
     char line[512];
     usize at = 0;
-    for (const CliMountDesc* m : cli->mounts) at += (usize)snprintf(line + at, sizeof line - at, "%s%s", at ? " " : "", m->path);
+    for (const CliMountDesc* m : cli->mounts) at += (usize)format(line + at, sizeof line - at, "%s%s", at ? " " : "", m->path);
     ctx.print("the filesystem: ls, cd, pwd, print, patch over %s", line);
 }
 

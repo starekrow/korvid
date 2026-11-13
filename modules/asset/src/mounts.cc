@@ -2,10 +2,10 @@
 // format owns the tool: a material prints as its file would read and takes the same
 // fields as the file; the rest print their records.
 #include "korvid/asset/module.h"
+#include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include "korvid/render/renderer.h"
 #include "asset_internal.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -23,7 +23,7 @@ void materials_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user
         const MaterialAsset* m = asset_material_at(e, i);
         if (!m) continue;
         char summary[200];
-        snprintf(summary, sizeof summary, "%s, %s, row %u, texture '%s'", state_name(m->state), blend_mode_name(m->desc.blend), m->material.index(), m->texture_path);
+        format(summary, sizeof summary, "%s, %s, row %u, texture '%s'", state_name(m->state), blend_mode_name(m->desc.blend), m->material.index(), m->texture_path);
         if (!tree.add(m->path, false, summary)) return;
     }
 }
@@ -87,7 +87,7 @@ void textures_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user)
         if (!s->textures.is_alive(i)) continue;
         const TextureAsset& t = s->textures.items[i];
         char summary[96];
-        snprintf(summary, sizeof summary, "%s, %ux%u, slot %u", state_name(t.state), t.width, t.height, t.texture.index());
+        format(summary, sizeof summary, "%s, %ux%u, slot %u", state_name(t.state), t.width, t.height, t.texture.index());
         if (!tree.add(t.path, false, summary)) return;
     }
 }
@@ -111,8 +111,8 @@ void fonts_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         if (!s->fonts.is_alive(i)) continue;
         const FontAsset& f = s->fonts.items[i];
         char name[KV_ASSET_PATH_MAX + 16], summary[96];
-        snprintf(name, sizeof name, "%s@%g", f.path, f.px);
-        snprintf(summary, sizeof summary, "%s, atlas %ux%u, line %.1f", state_name(f.state), f.atlas_width, f.atlas_height, f.line_height);
+        format(name, sizeof name, "%s@%g", f.path, f.px);
+        format(summary, sizeof summary, "%s, atlas %ux%u, line %.1f", state_name(f.state), f.atlas_width, f.atlas_height, f.line_height);
         if (!tree.add(name, false, summary)) return;
     }
 }
@@ -123,7 +123,7 @@ bool fonts_describe(CliContext& ctx, const char* rel) {
         if (!s->fonts.is_alive(i)) continue;
         const FontAsset& f = s->fonts.items[i];
         char name[KV_ASSET_PATH_MAX + 16];
-        snprintf(name, sizeof name, "%s@%g", f.path, f.px);
+        format(name, sizeof name, "%s@%g", f.path, f.px);
         if (strcmp(name, rel) != 0) continue;
         ctx.print("%s at %g px: %s, %u glyphs in %u ranges, atlas %ux%u (slot %u, material row %u), ascent %.1f, descent %.1f, line %.1f, %u kerning pairs, %u misses, built in %.1f ms",
                   f.path, f.px, state_name(f.state), f.glyph_count, f.range_count, f.atlas_width, f.atlas_height, f.texture.index(),
@@ -140,7 +140,7 @@ void sounds_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         if (!s->sounds.is_alive(i)) continue;
         const SoundAsset& snd = s->sounds.items[i];
         char summary[96];
-        snprintf(summary, sizeof summary, "%s, %u Hz x%u, %.2f s", state_name(snd.state), snd.rate, snd.channels, snd.seconds());
+        format(summary, sizeof summary, "%s, %u Hz x%u, %.2f s", state_name(snd.state), snd.rate, snd.channels, snd.seconds());
         if (!tree.add(snd.path, false, summary)) return;
     }
 }

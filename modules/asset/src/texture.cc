@@ -1,4 +1,5 @@
 #include "korvid/asset/texture.h"
+#include "korvid/core/format.h"
 #include "korvid/asset/module.h"
 #include "korvid/image/png.h"
 #include "korvid/core/engine.h"
@@ -6,7 +7,6 @@
 #include "korvid/platform/io.h"
 #include "korvid/render/renderer.h"
 #include "asset_internal.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -23,9 +23,9 @@ kv_handle asset_find_name(const char* name, void* ctx) {
 }
 int asset_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     TextureAsset* t = ((AssetState_*)ctx)->textures.get(Handle{h});
-    if (!t) return snprintf(out, cap, "stale");
+    if (!t) return format(out, cap, "stale");
     const char* st = t->state == AssetState::Ready ? "ready" : t->state == AssetState::Failed ? "failed" : "pending";
-    return snprintf(out, cap, "'%s' %s %ux%u", t->path, st, t->width, t->height);
+    return format(out, cap, "'%s' %s %ux%u", t->path, st, t->width, t->height);
 }
 
 const char* k_error_names[(u32)AssetError::Count] = {"none", "not found", "read error", "decode error", "upload error", "parse error"};

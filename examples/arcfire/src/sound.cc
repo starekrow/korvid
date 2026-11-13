@@ -10,9 +10,9 @@
 // the boss has died or left.
 #include "arcfire.h"
 #include "korvid/asset/scope.h"
+#include "korvid/core/format.h"
 #include "korvid/asset/sound.h"
 #include "korvid/audio/audio.h"
-#include <stdio.h>
 
 namespace kv::arcfire {
 
@@ -42,16 +42,16 @@ constexpr f32 kMusicVolume = 0.55f;
 void sounds_load(Engine& e, Game& g) {
     for (u32 i = 0; i < SFX_COUNT; ++i) {
         char path[96];
-        snprintf(path, sizeof path, "arcfire/sound/%s.ogg", k_sfx[i].file);
+        format(path, sizeof path, "arcfire/sound/%s.ogg", k_sfx[i].file);
         g.sfx[i] = asset_load_sound(e, path, asset_scope_global(e));
     }
     // Each stage's two tracks, by k_stage_names' order: Shoreline's, Orbit's.
     static const char* const k_tracks[kStageCount][2] = {{"stage", "boss"}, {"orbit", "orbit_boss"}};
     for (u32 i = 0; i < kStageCount; ++i) {
         char path[96];
-        snprintf(path, sizeof path, "arcfire/music/%s.wav", k_tracks[i][0]);
+        format(path, sizeof path, "arcfire/music/%s.wav", k_tracks[i][0]);
         g.music_stage[i] = asset_load_sound(e, path, asset_scope_global(e));
-        snprintf(path, sizeof path, "arcfire/music/%s.wav", k_tracks[i][1]);
+        format(path, sizeof path, "arcfire/music/%s.wav", k_tracks[i][1]);
         g.music_boss[i] = asset_load_sound(e, path, asset_scope_global(e));
     }
 }

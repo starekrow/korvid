@@ -6,6 +6,7 @@
 // the list of non-empty buckets it keeps; it never visits a sprite to draw.
 #include "renderer_internal.h"
 #include "korvid/core/arena.h"
+#include "korvid/core/format.h"
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 #include <stdio.h>
@@ -17,7 +18,7 @@ namespace kv {
 // Reads <exe dir>/shaders/<name>. SPIR-V is precompiled by the build; nothing compiles here.
 bool rv_load_shader(Renderer* r, const char* name, VkShaderModule* out) {
     char path[1024];
-    snprintf(path, sizeof path, "%sshaders/%s", r->base_path, name);
+    format(path, sizeof path, "%sshaders/%s", r->base_path, name);
     FILE* f = fopen(path, "rb");
     if (!f) { KV_ERROR("vulkan", "cannot open shader '%s'", path); return false; }
     fseek(f, 0, SEEK_END);
@@ -363,7 +364,7 @@ u32 rv_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_
         // Its label: the layers it covers and its blend, for a capture tool.
         char label[64];
         if (r->debug_utils) {
-            snprintf(label, sizeof label, "layers %d..%d %s", (i32)(first / kSlotCount) + kLayerMin, (i32)(last / kSlotCount) + kLayerMin,
+            format(label, sizeof label, "layers %d..%d %s", (i32)(first / kSlotCount) + kLayerMin, (i32)(last / kSlotCount) + kLayerMin,
                      gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
             rv_label_begin(r, cmd, label);
         }
@@ -486,7 +487,7 @@ bool rv_create_game_pipeline(Renderer* r, GamePipe& gp) {
     if (gp.failed || !gp.module) return false;
     if (gp.pipeline || !r->swapchain.handle) return true; // made, or to be made with the format
     char label[96];
-    snprintf(label, sizeof label, "%s %s", name_str(gp.shader), blend_mode_name(gp.blend));
+    format(label, sizeof label, "%s %s", name_str(gp.shader), blend_mode_name(gp.blend));
     gp.pipeline = make_sprite_pipeline(r, gp.module, gp.blend, label);
     if (!gp.pipeline) {
         gp.failed = true;
@@ -514,7 +515,7 @@ u32 rv_material_slot(Renderer* r, Name shader, BlendMode blend) {
     gp.shader = shader;
     gp.blend  = blend;
     char file[96];
-    snprintf(file, sizeof file, "%s.spv", name_str(shader));
+    format(file, sizeof file, "%s.spv", name_str(shader));
     if (!rv_load_shader(r, file, &gp.module)) {
         gp.failed = true;
         KV_ERROR("vulkan", "game shader '%s' did not load: its sprites draw with the engine's", name_str(shader));

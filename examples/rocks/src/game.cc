@@ -9,6 +9,7 @@
 // units; the camera fits it to the window, and the HUD is anchored to the window's corner,
 // so the run is the same on any window or display.
 #include "korvid/rocks/module.h"
+#include "korvid/core/format.h"
 #include "korvid/anim/module.h"
 #include "korvid/asset/font.h"
 #include "korvid/asset/material.h"
@@ -600,7 +601,7 @@ void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
             Score* s = ctx.resource<Score>(k_score);
             s->high = score->total;
             char text[32];
-            int n = snprintf(text, sizeof text, "%d\n", score->total);
+            int n = format(text, sizeof text, "%d\n", score->total);
             IoWriteRequest w;
             w.path = g.high_path; w.data = text; w.size = (usize)n;
             if (platform_io(*ctx.engine)->write_file(w).is_null()) KV_WARN("rocks", "could not queue the high score write");
@@ -609,7 +610,7 @@ void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
         ctx.emit(GameOver{score->total});
         ctx.schedule_in(Restart{}, kRestartTicks);
         char line[48];
-        snprintf(line, sizeof line, "GAME OVER   %d", score->total);
+        format(line, sizeof line, "GAME OVER   %d", score->total);
         spawn_label(*labels, g, ROLE_OVER, line, point2{0, 0}, TextAlign::Center, 1.5f, 50, color_rgba(1.0f, 0.5f, 0.4f));
         KV_INFO("rocks", "game over: %d points", score->total);
     }
@@ -678,7 +679,7 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     // demo keeps its own file so a scripted run never changes a player's record.
     const char* pref = platform_pref_path(engine, "korvid", "rocks");
     if (pref[0]) {
-        snprintf(g->high_path, sizeof g->high_path, "%shighscore%s.txt", pref, frameloop_flag(engine, "--demo") ? "-demo" : "");
+        format(g->high_path, sizeof g->high_path, "%shighscore%s.txt", pref, frameloop_flag(engine, "--demo") ? "-demo" : "");
         IoRequest req;
         req.path = g->high_path;
         g->high_read = platform_io(engine)->read_file(req);

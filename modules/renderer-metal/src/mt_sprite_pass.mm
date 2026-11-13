@@ -11,6 +11,7 @@
 // writes visible to the next, and Metal tracks hazards between encoders and command buffers.
 #include "renderer_internal.h"
 #include "korvid/core/arena.h"
+#include "korvid/core/format.h"
 #include "korvid/core/json.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/profile.h"
@@ -31,7 +32,7 @@ namespace kv {
 // renumbered every buffer after it) fails here by name instead of drawing garbage.
 bool mt_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32 count) {
     char path[1024];
-    snprintf(path, sizeof path, "%sshaders/%s.metallib.json", r->base_path, lib);
+    kv::format(path, sizeof path, "%sshaders/%s.metallib.json", r->base_path, lib);
     FILE* f = fopen(path, "rb");
     if (!f) { KV_WARN("metal", "no reflection for '%s' (%s): bindings unchecked", lib, path); return true; }
     MemScope scope;
@@ -68,7 +69,7 @@ bool mt_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32
 // Reads <exe dir>/shaders/<name>.metallib. Compiled by the build; nothing compiles here.
 bool mt_load_library(Renderer* r, const char* name, id<MTLLibrary>* out) {
     char path[1024];
-    snprintf(path, sizeof path, "%sshaders/%s.metallib", r->base_path, name);
+    kv::format(path, sizeof path, "%sshaders/%s.metallib", r->base_path, name);
     @autoreleasepool {
         NSError* err = nil;
         *out = [r->device newLibraryWithURL:[NSURL fileURLWithPath:@(path)] error:&err];
@@ -169,7 +170,7 @@ bool create_game_pipeline(Renderer* r, GamePipe& gp) {
     if (gp.failed || !gp.fragment) return false;
     if (gp.pipeline) return true;
     char label[96];
-    snprintf(label, sizeof label, "%s %s", name_str(gp.shader), blend_mode_name(gp.blend));
+    kv::format(label, sizeof label, "%s %s", name_str(gp.shader), blend_mode_name(gp.blend));
     gp.pipeline = make_sprite_pipeline(r, gp.fragment, gp.blend, label);
     if (!gp.pipeline) {
         gp.failed = true;
@@ -400,7 +401,7 @@ u32 record_draws(Renderer* r, id<MTLRenderCommandEncoder> enc, u32 first_bucket,
         const GamePipe* gp = slot >= kBlendCount ? &r->game_pipes[slot - kBlendCount] : nullptr;
         id<MTLRenderPipelineState> pipe = gp ? (gp->pipeline ? gp->pipeline : r->pipelines[(u32)gp->blend]) : r->pipelines[slot];
         char label[64];
-        snprintf(label, sizeof label, "layers %d..%d %s", (i32)(first / kSlotCount) + kLayerMin, (i32)(last / kSlotCount) + kLayerMin,
+        kv::format(label, sizeof label, "layers %d..%d %s", (i32)(first / kSlotCount) + kLayerMin, (i32)(last / kSlotCount) + kLayerMin,
                  gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
         [enc pushDebugGroup:@(label)];
         [enc setRenderPipelineState:pipe];

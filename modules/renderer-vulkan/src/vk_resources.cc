@@ -1,7 +1,7 @@
 // Korvid renderer-vulkan: memory, buffers, the frame ring, deferred destruction, textures,
 // materials, the handle kinds and pools, the GPU tables and the descriptor sets.
 #include "renderer_internal.h"
-#include <stdio.h>
+#include "korvid/core/format.h"
 #include <string.h>
 
 namespace kv {
@@ -395,16 +395,16 @@ void* texture_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->texture
 int texture_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     Renderer* r = (Renderer*)ctx;
     Texture* t = r->textures.get(Handle{h});
-    if (!t) return snprintf(out, cap, "stale");
-    return snprintf(out, cap, "'%s' %ux%u slot %u %s", name_str(t->name), t->width, t->height, Handle{h}.index(),
+    if (!t) return format(out, cap, "stale");
+    return format(out, cap, "'%s' %ux%u slot %u %s", name_str(t->name), t->width, t->height, Handle{h}.index(),
                     t->resident ? "resident" : "placeholder");
 }
 void* material_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->materials.get(Handle{h}); }
 int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     Renderer* r = (Renderer*)ctx;
     MaterialRecord* m = r->materials.get(Handle{h});
-    if (!m) return snprintf(out, cap, "stale");
-    return snprintf(out, cap, "'%s' %s texture slot %u row %u", name_str(m->name), blend_mode_name(m->blend), renderer_texture_slot(r, m->texture), Handle{h}.index());
+    if (!m) return format(out, cap, "stale");
+    return format(out, cap, "'%s' %s texture slot %u row %u", name_str(m->name), blend_mode_name(m->blend), renderer_texture_slot(r, m->texture), Handle{h}.index());
 }
 
 const char* texture_name_of(kv_handle h, void* ctx) {

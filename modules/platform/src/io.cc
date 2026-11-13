@@ -1,4 +1,5 @@
 #include "korvid/platform/io.h"
+#include "korvid/core/format.h"
 #include "korvid/core/sort.h"
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"
@@ -7,7 +8,6 @@
 #include "io_ring.h"
 #include "os_file.h"
 #include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -22,10 +22,10 @@ void* io_resolve(kv_handle h, void* ctx) { return ((IoQueue*)ctx)->entries.get(H
 int io_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     IoQueue& q = *(IoQueue*)ctx;
     IoEntry* e = q.entries.get(Handle{h});
-    if (!e) return snprintf(out, cap, "stale");
+    if (!e) return format(out, cap, "stale");
     const char* st = e->status == IoStatus::Pending ? (e->in_flight ? "in flight" : "pending") :
                      e->status == IoStatus::Done ? "done" : e->status == IoStatus::Failed ? "failed" : "cancelled";
-    return snprintf(out, cap, "%s '%s'", st, e->path);
+    return format(out, cap, "%s '%s'", st, e->path);
 }
 
 // Higher priority first, then submission order.
@@ -506,7 +506,7 @@ bool IoQueue::mount_pack(const char* path) {
     const PackTable& t = m.table;
     char names[160] = "";
     if (t.skipped || t.duplicates || t.not_utf8)
-        snprintf(names, sizeof names, "; names: %u skipped (unsafe or empty), %u duplicated (the last kept), %u not UTF-8 (kept as bytes)",
+        format(names, sizeof names, "; names: %u skipped (unsafe or empty), %u duplicated (the last kept), %u not UTF-8 (kept as bytes)",
                  t.skipped, t.duplicates, t.not_utf8);
     KV_INFO("io", "mounted pack %s: %u entries, %s, %u deflated, %u unaligned, %u unsupported%s", path, t.count, index_note,
             t.deflated, t.unaligned, t.unsupported, names);
@@ -527,7 +527,7 @@ Handle IoQueue::read_asset(const IoRequest& req) {
             IoMount& m = mounts[i];
             if (!m.is_pack) {
                 char full[512];
-                int n = snprintf(full, sizeof full, "%s%s", m.path, norm);
+                int n = format(full, sizeof full, "%s%s", m.path, norm);
                 if (n < 0 || (usize)n >= sizeof e.path || os_path_kind(full) != OsPathKind::File) continue;
                 memcpy(e.path, full, (usize)n + 1);
                 e.fail_errno = 0;
@@ -536,7 +536,7 @@ Handle IoQueue::read_asset(const IoRequest& req) {
             PackEntry* pe = const_cast<PackEntry*>(pack_find(m.table, norm));
             if (!pe) continue;
             char where[sizeof m.path + KV_PACK_PATH_MAX + 2];
-            snprintf(where, sizeof where, "%s:%s", m.path, norm);
+            format(where, sizeof where, "%s:%s", m.path, norm);
             utf8_copy(e.path, sizeof e.path, where); // for logs only: a long one is cut
             if (pe->flags & PackEntryUnsupported) { e.fail_errno = ENOTSUP; break; }
             if (!pe->data_offset) { // a plain zip: the local header says where the data is

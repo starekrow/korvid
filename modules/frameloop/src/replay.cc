@@ -21,6 +21,7 @@
 // developer's file, outside the run's I/O.
 #include "frameloop_internal.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/platform_hid/actions.h"
@@ -129,12 +130,12 @@ bool replay_arg(int& i, int argc, char** argv) {
 }
 
 void replay_keep_arg(const char* arg) {
-    if (g_rep.arg_count < kMaxArgs) snprintf(g_rep.args[g_rep.arg_count++], sizeof g_rep.args[0], "%s", arg);
+    if (g_rep.arg_count < kMaxArgs) format(g_rep.args[g_rep.arg_count++], sizeof g_rep.args[0], "%s", arg);
     g_rep.cli_args = g_rep.arg_count;
 }
 
 bool replay_open(const char* exe, bool (*apply)(const char* arg, const char* value)) {
-    snprintf(g_rep.exe, sizeof g_rep.exe, "%s", exe);
+    format(g_rep.exe, sizeof g_rep.exe, "%s", exe);
     if (g_rep.record_path && g_rep.replay_path) { KV_ERROR("frameloop", "--record and --replay: one at a time"); return false; }
     g_rep.recording = g_rep.record_path != nullptr;
     if (!g_rep.replay_path) return true;
@@ -162,9 +163,9 @@ bool replay_open(const char* exe, bool (*apply)(const char* arg, const char* val
         const char* nl = (const char*)memchr(p, '\n', (usize)(end - p));
         usize n = nl ? (usize)(nl - p) : (usize)(end - p);
         char line[128];
-        snprintf(line, sizeof line, "%.*s", (int)(n < sizeof line - 1 ? n : sizeof line - 1), p);
-        if (!strncmp(line, "exe ", 4)) snprintf(exe_in_file, sizeof exe_in_file, "%s", line + 4);
-        else if (!strncmp(line, "arg ", 4) && g_rep.arg_count < kMaxArgs) snprintf(g_rep.args[g_rep.arg_count++], sizeof g_rep.args[0], "%.95s", line + 4);
+        format(line, sizeof line, "%.*s", (int)(n < sizeof line - 1 ? n : sizeof line - 1), p);
+        if (!strncmp(line, "exe ", 4)) format(exe_in_file, sizeof exe_in_file, "%s", line + 4);
+        else if (!strncmp(line, "arg ", 4) && g_rep.arg_count < kMaxArgs) format(g_rep.args[g_rep.arg_count++], sizeof g_rep.args[0], "%.95s", line + 4);
         p += n + 1;
     }
     if (strcmp(exe_in_file, exe)) {
@@ -192,7 +193,7 @@ void frameloop_record_note(Engine&, const char* args) {
         while (*p == ' ') ++p;
         const char* q = p;
         while (*q && *q != ' ') ++q;
-        if (q > p) snprintf(g_rep.args[g_rep.arg_count++], sizeof g_rep.args[0], "%.*s", (int)(q - p), p);
+        if (q > p) format(g_rep.args[g_rep.arg_count++], sizeof g_rep.args[0], "%.*s", (int)(q - p), p);
         p = q;
     }
 }
@@ -283,10 +284,10 @@ void replay_finish(Engine& e) {
     if (g_rep.recording) {
         put_record(e.clock.tick_count > g_rep.last_tick ? e.clock.tick_count : g_rep.last_tick, kRecEnd);
         char header[kMaxArgs * 104 + 2048];
-        usize n = (usize)snprintf(header, sizeof header, "exe %s\n", g_rep.exe);
-        for (u32 i = 0; i < g_rep.arg_count && n < sizeof header; ++i) n += (usize)snprintf(header + n, sizeof header - n, "arg %s\n", g_rep.args[i]);
+        usize n = (usize)format(header, sizeof header, "exe %s\n", g_rep.exe);
+        for (u32 i = 0; i < g_rep.arg_count && n < sizeof header; ++i) n += (usize)format(header + n, sizeof header - n, "arg %s\n", g_rep.args[i]);
         Span<const char* const> names = frameloop_config(e).recorded_actions;
-        for (u32 i = 0; i < names.len && n < sizeof header; ++i) n += (usize)snprintf(header + n, sizeof header - n, "action %s\n", names[i]);
+        for (u32 i = 0; i < names.len && n < sizeof header; ++i) n += (usize)format(header + n, sizeof header - n, "action %s\n", names[i]);
         if (n > sizeof header) n = sizeof header;
         FILE* f = fopen(g_rep.record_path, "wb");
         u32 hl = (u32)n;

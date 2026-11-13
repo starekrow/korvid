@@ -1,6 +1,7 @@
 // The ui module: screens, input and events, the model, and the sprites it draws.
 #include "ui_internal.h"
 #include "korvid/asset/material.h"
+#include "korvid/core/format.h"
 #include "korvid/asset/scope.h"
 #include "korvid/core/sort.h"
 #include "korvid/audio/audio.h"
@@ -16,7 +17,6 @@
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -29,8 +29,8 @@ void* screen_resolve(kv_handle h, void* ctx) { return ((UiState_*)ctx)->screens.
 const char* screen_name_of(kv_handle h, void* ctx) { UiScreen* s = ((UiState_*)ctx)->screens.get(Handle{h}); return s ? s->name : nullptr; }
 int screen_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     UiScreen* s = ((UiState_*)ctx)->screens.get(Handle{h});
-    return s ? snprintf(out, cap, "'%s' %u nodes, layer %d%s%s", s->name, s->nodes.len, s->open.layer, s->open.input ? ", input" : "", s->open.hold ? ", holds" : "")
-             : snprintf(out, cap, "stale");
+    return s ? format(out, cap, "'%s' %u nodes, layer %d%s%s", s->name, s->nodes.len, s->open.layer, s->open.input ? ", input" : "", s->open.hold ? ", holds" : "")
+             : format(out, cap, "stale");
 }
 
 void free_nodes(UiState_& s, UiScreen& sc) {
@@ -724,8 +724,8 @@ bool ui_set_texture(Engine& e, Handle screen, const char* path, const char* text
 bool ui_set_value(Engine& e, Handle screen, const char* path, f32 value, f32 max) {
     UiNode* n = node_of(e, screen, path);
     if (!n) return false;
-    snprintf(n->value, sizeof n->value, "%g", value);
-    snprintf(n->max, sizeof n->max, "%g", max);
+    format(n->value, sizeof n->value, "%g", value);
+    format(n->max, sizeof n->max, "%g", max);
     return true;
 }
 

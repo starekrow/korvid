@@ -1,8 +1,8 @@
 // Files and directories on Windows: handles from CreateFileW, positional ReadFile, the
 // FindFirstFileExW walk. Handles are not inheritable, as O_CLOEXEC makes descriptors.
 #include "../os_file.h"
+#include "korvid/core/format.h"
 #include "wide.h"
-#include <stdio.h>
 #include <string.h>
 #include <wchar.h>
 
@@ -126,7 +126,7 @@ bool os_make_temp_dir(const char* prefix, char* out, u32 cap) {
     while (len > 1 && base[len - 1] == '/') base[--len] = 0;
     static u32 counter = 0;
     for (u32 attempt = 0; attempt < 1000; ++attempt) {
-        int k = snprintf(out, cap, "%s/%s-%lu-%u", base, prefix, (unsigned long)GetCurrentProcessId(), ++counter);
+        int k = kv::format(out, cap, "%s/%s-%lu-%u", base, prefix, (unsigned long)GetCurrentProcessId(), ++counter);
         if (k <= 0 || (u32)k >= cap) return false;
         wchar_t w[KV_WIDE_PATH_MAX];
         if (!widen(out, w, KV_WIDE_PATH_MAX)) return false;

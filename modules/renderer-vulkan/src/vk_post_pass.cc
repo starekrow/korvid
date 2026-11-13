@@ -6,6 +6,7 @@
 // order, and the barrier that opens a frame's world waits for the last frame's reads.
 #include "renderer_internal.h"
 #include "korvid/core/time.h"
+#include "korvid/core/format.h"
 
 #include <string.h>
 
@@ -118,7 +119,7 @@ bool rv_post_set(Renderer* r, i32 layer, Name shader) {
     if (!post_layout(r)) { post_fail(r, "has no layout"); return false; }
     if (!p.vertex && !rv_load_shader(r, "post.spv", &p.vertex)) { post_fail(r, "has no vertex shader (post.spv)"); return false; }
     char file[96];
-    snprintf(file, sizeof file, "%s.spv", name_str(shader));
+    format(file, sizeof file, "%s.spv", name_str(shader));
     if (!rv_load_shader(r, file, &p.module)) { post_fail(r, "did not load"); return false; }
     return rv_post_create_pipeline(r);
 }
@@ -196,7 +197,7 @@ bool rv_post_create_pipeline(Renderer* r) {
         return false;
     }
     char label[96];
-    snprintf(label, sizeof label, "post %s", name_str(p.shader));
+    format(label, sizeof label, "post %s", name_str(p.shader));
     rv_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)p.pipeline, label);
     return true;
 }

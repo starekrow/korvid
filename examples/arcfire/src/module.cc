@@ -4,6 +4,7 @@
 // files the tables below name.
 #include "arcfire.h"
 #include "korvid/anim/player.h"
+#include "korvid/core/format.h"
 #include "korvid/asset/blob.h"
 #include "korvid/asset/material.h"
 #include "korvid/asset/scope.h"
@@ -13,7 +14,6 @@
 #include "korvid/platform_hid/actions.h"
 #include "korvid/ui/ui.h"
 #include <stddef.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -355,7 +355,7 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     g->stress = frameloop_flag(e, "--stress");
     g->autoplay = frameloop_flag(e, "--autoplay");
     g->fx = Rng::seeded(0xa2cf12e, 3);
-    if (const char* bench = frameloop_option(e, "--bench")) snprintf(g->bench, sizeof g->bench, "%s", bench);
+    if (const char* bench = frameloop_option(e, "--bench")) format(g->bench, sizeof g->bench, "%s", bench);
     // The run's shape: run plainly, the title; a flag that names a run goes straight into
     // it: arcade unless a stage is named, and the demo, a stress run and the bench are runs
     // of their own. --difficulty is where arcade or the stage starts.
@@ -364,7 +364,7 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     if (const char* name = frameloop_option(e, "--stage")) {
         stage_index = arcfire::stage_named(name);
         if (stage_index == kStageCount) { KV_WARN("arcfire", "--stage %s: shoreline or orbit; Shoreline it is", name); stage_index = 0; }
-        snprintf(g->stage_name, sizeof g->stage_name, "%s", k_stage_names[stage_index]);
+        format(g->stage_name, sizeof g->stage_name, "%s", k_stage_names[stage_index]);
         stage_named = true;
     }
     g->front_door = !stage_named && !g->demo && !g->stress && !g->autoplay && !g->bench[0] && !frameloop_flag(e, "--arcade");
@@ -393,7 +393,7 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
     // long the disk takes never reaches the state.
     for (u32 i = 0; i < kStageCount; ++i) {
         char stage_path[96];
-        snprintf(stage_path, sizeof stage_path, "arcfire/stages/%s.stage.json", k_stage_names[i]);
+        format(stage_path, sizeof stage_path, "arcfire/stages/%s.stage.json", k_stage_names[i]);
         g->stage_blobs[i] = asset_load_blob(e, stage_path);
     }
     KV_INFO("arcfire", "%s: %s at %s", g->front_door ? "the title" : g->plan.arcade ? "arcade" : g->plan.stage_select ? "stage select" : "run",

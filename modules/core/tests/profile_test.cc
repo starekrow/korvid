@@ -2,6 +2,7 @@
 // from worker threads arrive with the thread's name, a frame can be kept and dumped, the
 // trace file holds every record, and the ring survives overflow with a count.
 #include "korvid/core/atomic.h"
+#include "korvid/core/format.h"
 #include "korvid/core/job.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/profile.h"
@@ -50,7 +51,7 @@ void test_profile(kv::TestCtx& c) {
     char path[1024];
     const char* tmp = getenv("TMPDIR");
     usize tlen = tmp ? strlen(tmp) : 0;
-    snprintf(path, sizeof path, "%s%sprof_test.json", tlen ? tmp : "", tlen && tmp[tlen - 1] != '/' ? "/" : "");
+    format(path, sizeof path, "%s%sprof_test.json", tlen ? tmp : "", tlen && tmp[tlen - 1] != '/' ? "/" : "");
     prof_enable(true);
     prof_thread_name("main");
     prof_keep_frame(true);

@@ -3,6 +3,7 @@
 // both; lookups by logical path, the last mount first; misses, bad paths and unsupported
 // entries; a corrupted pack byte caught by the CRC check.
 #include "korvid/platform/io.h"
+#include "korvid/core/format.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/array.h"
 #include "korvid/core/memory.h"
@@ -88,14 +89,14 @@ void test_io_mounts(kv::TestCtx& c) {
     char dir[256];
     KV_CHECK(c, io_make_temp_dir("korvid-mount", dir, sizeof dir));
     char loose[320], pack[320], zip[320], bad[320], path[352];
-    snprintf(loose, sizeof loose, "%s/loose", dir);
-    snprintf(pack, sizeof pack, "%s/game.kpak", dir);
-    snprintf(zip, sizeof zip, "%s/plain.zip", dir);
-    snprintf(bad, sizeof bad, "%s/bad.kpak", dir);
+    format(loose, sizeof loose, "%s/loose", dir);
+    format(pack, sizeof pack, "%s/game.kpak", dir);
+    format(zip, sizeof zip, "%s/plain.zip", dir);
+    format(bad, sizeof bad, "%s/bad.kpak", dir);
     io_make_dirs(loose);
-    snprintf(path, sizeof path, "%s/x", loose);
+    format(path, sizeof path, "%s/x", loose);
     io_make_dirs(path);
-    snprintf(path, sizeof path, "%s/x/a.txt", loose);
+    format(path, sizeof path, "%s/x/a.txt", loose);
     FILE* f = fopen(path, "wb"); fwrite("from loose", 1, 10, f); fclose(f);
 
     static u8 big[20000];
@@ -124,6 +125,6 @@ void test_io_mounts(kv::TestCtx& c) {
     with_backend(c, IoBackend::Sync, loose, pack, zip, bad);
     with_backend(c, IoBackend::Auto, loose, pack, zip, bad);
 
-    io_remove(path); snprintf(path, sizeof path, "%s/x", loose); io_remove(path); io_remove(loose);
+    io_remove(path); format(path, sizeof path, "%s/x", loose); io_remove(path); io_remove(loose);
     io_remove(pack); io_remove(zip); io_remove(bad); io_remove(dir);
 }

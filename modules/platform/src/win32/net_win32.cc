@@ -3,11 +3,11 @@
 // EINPROGRESS; SO_REUSEADDR would let another process take the port, so a listener holds
 // it with SO_EXCLUSIVEADDRUSE instead; and there is no SIGPIPE to suppress.
 #include "korvid/platform/net.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "wide.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <stdio.h>
 #include <string.h>
 #pragma comment(lib, "ws2_32.lib")
 
@@ -30,7 +30,7 @@ const char* net_error(int code) {
     wchar_t w[256];
     DWORD n = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, (DWORD)code, 0, w, 256, nullptr);
     while (n > 0 && (w[n - 1] == L'\r' || w[n - 1] == L'\n' || w[n - 1] == L'.')) w[--n] = 0;
-    if (n == 0 || !narrow(w, text, (int)sizeof text)) snprintf(text, sizeof text, "Winsock error %d", code);
+    if (n == 0 || !narrow(w, text, (int)sizeof text)) kv::format(text, sizeof text, "Winsock error %d", code);
     return text;
 }
 

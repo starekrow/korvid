@@ -1,8 +1,8 @@
 #include "korvid/core/handle.h"
+#include "korvid/core/format.h"
 #include "korvid/core/atomic.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/log.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace {
@@ -136,10 +136,10 @@ uint32_t kv_handle_kind_count(void) { return count(); }
 
 int kv_handle_describe(kv_handle h, char* out, size_t cap) {
     if (!out || cap == 0) return 0;
-    if (h == 0) return snprintf(out, cap, "null");
+    if (h == 0) return kv::format(out, cap, "null");
     uint16_t kind = kv_handle_kind(h);
     const Kind* k = kind_of(h);
-    int n = snprintf(out, cap, "%s#%u:%u", k ? k->name : (kind < count() ? "(unregistered)" : "(unknown)"),
+    int n = kv::format(out, cap, "%s#%u:%u", k ? k->name : (kind < count() ? "(unregistered)" : "(unknown)"),
                      kv_handle_index(h), kv_handle_gen(h));
     if (n < 0) return 0;
     if ((size_t)n >= cap) return (int)cap - 1;

@@ -4,11 +4,11 @@
 // writes are a kind's fields (through the schema) and the clock.
 #include "cli_internal.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/format.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/name.h"
 #include "korvid/core/profile.h"
 #include "korvid/core/utf8.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -56,7 +56,7 @@ int row_summary(const Table& t, u32 slot, char* out, usize cap) {
         while (sp > full && *sp != ' ') --sp;
         if (*sp == ' ') body = sp + 1;
     }
-    return snprintf(out, cap, "%.120s", body);
+    return format(out, cap, "%.120s", body);
 }
 
 void kinds_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
@@ -68,7 +68,7 @@ void kinds_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         for (Table& tab : e.tables) {
             char slashed[KV_KIND_NAME_MAX], summary[96];
             cli_dots_to_slashes(tab.name, slashed, sizeof slashed);
-            snprintf(summary, sizeof summary, "%u live of %u%s", tab.live(), tab.capacity, tab.desc->cosmetic ? ", cosmetic" : "");
+            format(summary, sizeof summary, "%u live of %u%s", tab.live(), tab.capacity, tab.desc->cosmetic ? ", cosmetic" : "");
             if (!tree.add(slashed, true, summary)) return;
         }
         return;
@@ -82,7 +82,7 @@ void kinds_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         for (u32 i = 0; i < t->rows(); ++i) {
             if (!t->is_alive(i)) continue;
             char name[16], summary[160];
-            snprintf(name, sizeof name, "%u/", i);
+            format(name, sizeof name, "%u/", i);
             row_summary(*t, i, summary, sizeof summary);
             if (!emit(user, name, summary)) return;
         }
@@ -95,7 +95,7 @@ void kinds_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
     if (!slash) {
         for (const Column& c : t->columns) {
             char name[64], summary[200];
-            snprintf(name, sizeof name, "%s/", c.desc->name);
+            format(name, sizeof name, "%s/", c.desc->name);
             component_describe(*c.desc, c.data + (usize)slot * c.stride, summary, sizeof summary);
             if (!emit(user, name, summary)) return;
         }
@@ -112,8 +112,8 @@ void kinds_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
             if (f.type == FieldType::Char) schema_field_string(f, row, summary, sizeof summary);
             else for (u32 l = 0; l < f.count && at < sizeof summary; ++l) {
                 f64 v = 0.0;
-                if (schema_field_lane(f, row, l, &v)) at += (usize)snprintf(summary + at, sizeof summary - at, "%s%g", l ? " " : "", v);
-                else { Handle h; memcpy(&h, row + f.offset, sizeof h); at += (usize)snprintf(summary + at, sizeof summary - at, "%s", h.is_null() ? "null" : kind_name(h)); break; }
+                if (schema_field_lane(f, row, l, &v)) at += (usize)format(summary + at, sizeof summary - at, "%s%g", l ? " " : "", v);
+                else { Handle h; memcpy(&h, row + f.offset, sizeof h); at += (usize)format(summary + at, sizeof summary - at, "%s", h.is_null() ? "null" : kind_name(h)); break; }
             }
             if (!emit(user, f.name, summary)) return;
         }
@@ -155,7 +155,7 @@ bool kinds_describe(CliContext& ctx, const char* rel) {
         char line[512];
         usize at = 0;
         for (const Column& c : t->columns)
-            at += (usize)snprintf(line + at, sizeof line - at, "%s%s%s%s", at ? ", " : "", c.desc->name, c.desc->has_prev() ? " (prev)" : "", c.desc->is_sim() ? "" : " (cosmetic)");
+            at += (usize)format(line + at, sizeof line - at, "%s%s%s%s", at ? ", " : "", c.desc->name, c.desc->has_prev() ? " (prev)" : "", c.desc->is_sim() ? "" : " (cosmetic)");
         ctx.print("%s: %u live of %u, module %s%s", t->name, t->live(), t->capacity, e.modules[t->module].desc->name, t->desc->cosmetic ? ", cosmetic kind" : "");
         ctx.print("columns: %s", line);
         return true;
@@ -179,8 +179,8 @@ bool kinds_describe(CliContext& ctx, const char* rel) {
     if (f->type == FieldType::Char) { schema_field_string(*f, row, line, sizeof line); ctx.print("%s", line); return true; }
     for (u32 l = 0; l < f->count; ++l) {
         f64 v = 0.0;
-        if (schema_field_lane(*f, row, l, &v)) at += (usize)snprintf(line + at, sizeof line - at, "%s%g", l ? " " : "", v);
-        else { Handle h; memcpy(&h, row + f->offset, sizeof h); char hd[160]; kv_handle_describe(h.bits, hd, sizeof hd); at += (usize)snprintf(line + at, sizeof line - at, "%s", hd); break; }
+        if (schema_field_lane(*f, row, l, &v)) at += (usize)format(line + at, sizeof line - at, "%s%g", l ? " " : "", v);
+        else { Handle h; memcpy(&h, row + f->offset, sizeof h); char hd[160]; kv_handle_describe(h.bits, hd, sizeof hd); at += (usize)format(line + at, sizeof line - at, "%s", hd); break; }
     }
     ctx.print("%s", line);
     return true;
@@ -198,7 +198,7 @@ bool kinds_patch(CliContext& ctx, const char* rel, Span<const char* const> value
         usize at = 0;
         str[0] = 0;
         for (u32 i = 0; i < values.len && at < sizeof str; ++i)
-            at += (usize)snprintf(str + at, sizeof str - at, "%s%s", i ? " " : "", values[i]);
+            at += (usize)format(str + at, sizeof str - at, "%s%s", i ? " " : "", values[i]);
         utf8_trim(str);
         u8* srow = const_cast<Column*>(col)->data + (usize)slot * col->stride;
         schema_field_set_string(*f, srow, str);
@@ -222,7 +222,7 @@ void sets_line(Engine& e, const Array<UnitAccess>& declared, Access a, Access b,
     out[0] = 0;
     for (const UnitAccess& d : declared) {
         if ((d.mode != a && d.mode != b) || d.resource > e.resources.len) continue;
-        at += (usize)snprintf(out + at, cap - at, "%s%s%s", at ? ", " : "", d.mode == Access::Early ? "^" : "", e.resources[d.resource - 1].name);
+        at += (usize)format(out + at, cap - at, "%s%s%s", at ? ", " : "", d.mode == Access::Early ? "^" : "", e.resources[d.resource - 1].name);
         if (at >= cap) break;
     }
 }
@@ -251,7 +251,7 @@ void systems_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) 
     each_system(*ctx.engine, [&](ScheduledSystem& s, Phase p) {
         char slashed[128], summary[96];
         cli_dots_to_slashes(s.name(), slashed, sizeof slashed);
-        snprintf(summary, sizeof summary, "%s, level %u%s%s", phase_name(p), s.level, s.desc->main_thread ? ", main thread" : "", s.desc->runs == RunWhen::Always ? ", always" : "");
+        format(summary, sizeof summary, "%s, level %u%s%s", phase_name(p), s.level, s.desc->main_thread ? ", main thread" : "", s.desc->runs == RunWhen::Always ? ", always" : "");
         tree.add(slashed, false, summary);
     });
 }
@@ -281,7 +281,7 @@ void handlers_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user)
         if (!more) return;
         char slashed[128], summary[96];
         cli_dots_to_slashes(h.name(), slashed, sizeof slashed);
-        snprintf(summary, sizeof summary, "on %s, phase %s, level %u", h.handler->event_name ? h.handler->event_name : "?", phase_name(p), h.level);
+        format(summary, sizeof summary, "on %s, phase %s, level %u", h.handler->event_name ? h.handler->event_name : "?", phase_name(p), h.level);
         more = tree.add(slashed, false, summary);
     });
 }
@@ -312,7 +312,7 @@ void resources_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user
         if (r.cls == ResourceClass::State) continue;
         char slashed[128], summary[96];
         cli_dots_to_slashes(r.name, slashed, sizeof slashed);
-        snprintf(summary, sizeof summary, "%s%s%s", e.modules[r.module].desc->name, r.ptr ? ", published" : "", r.cls == ResourceClass::Append ? ", takes appends" : "");
+        format(summary, sizeof summary, "%s%s%s", e.modules[r.module].desc->name, r.ptr ? ", published" : "", r.cls == ResourceClass::Append ? ", takes appends" : "");
         if (!tree.add(slashed, false, summary)) return;
     }
 }
@@ -335,7 +335,7 @@ void fields_line(Span<const FieldDesc> fields, char* out, usize cap) {
     usize at = 0;
     out[0] = 0;
     for (const FieldDesc& f : fields) {
-        at += (usize)snprintf(out + at, cap - at, "%s%s %s%s", at ? ", " : "", field_type_name(f.type), f.name, f.count > 1 ? "[]" : "");
+        at += (usize)format(out + at, cap - at, "%s%s %s%s", at ? ", " : "", field_type_name(f.type), f.name, f.count > 1 ? "[]" : "");
         if (at >= cap) break;
     }
 }
@@ -347,7 +347,7 @@ void events_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         const EventTypeDesc* d = e.event_types[i];
         if (!d) continue;
         char summary[96];
-        snprintf(summary, sizeof summary, "%u bytes, %u fields%s", d->size, d->fields.len, d->next_tick() ? ", next tick" : "");
+        format(summary, sizeof summary, "%u bytes, %u fields%s", d->size, d->fields.len, d->next_tick() ? ", next tick" : "");
         if (!emit(user, d->name, summary)) return;
     }
 }
@@ -374,7 +374,7 @@ void triggers_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user)
     for (const Trigger& t : e.triggers) {
         char slashed[128], summary[128];
         cli_dots_to_slashes(t.name, slashed, sizeof slashed);
-        snprintf(summary, sizeof summary, "%s %s %g", t.field_name, edge_name(t.desc->edge), t.desc->value);
+        format(summary, sizeof summary, "%s %s %g", t.field_name, edge_name(t.desc->edge), t.desc->value);
         if (!tree.add(slashed, false, summary)) return;
     }
 }
@@ -404,18 +404,18 @@ const ClockLeaf k_clock_leaves[] = {
 
 int clock_value(Engine& e, const char* name, char* out, usize cap) {
     const TickClock& c = e.clock;
-    if (!strcmp(name, "tick"))       return snprintf(out, cap, "%llu", (unsigned long long)c.tick_count);
-    if (!strcmp(name, "tick_total")) return snprintf(out, cap, "%llu", (unsigned long long)c.tick_total);
-    if (!strcmp(name, "paused"))     return snprintf(out, cap, "%d", c.paused ? 1 : 0);
-    if (!strcmp(name, "holds"))      return snprintf(out, cap, "%#x%s%s%s", c.holds, c.holds & HoldUser ? " user" : "",
+    if (!strcmp(name, "tick"))       return format(out, cap, "%llu", (unsigned long long)c.tick_count);
+    if (!strcmp(name, "tick_total")) return format(out, cap, "%llu", (unsigned long long)c.tick_total);
+    if (!strcmp(name, "paused"))     return format(out, cap, "%d", c.paused ? 1 : 0);
+    if (!strcmp(name, "holds"))      return format(out, cap, "%#x%s%s%s", c.holds, c.holds & HoldUser ? " user" : "",
                                                      c.holds & HoldLoading ? " loading" : "", c.holds & HoldFocus ? " focus" : "");
-    if (!strcmp(name, "rate"))       return snprintf(out, cap, "%g", c.rate);
-    if (!strcmp(name, "scale"))      return snprintf(out, cap, "%g", c.scale);
-    if (!strcmp(name, "step"))       return snprintf(out, cap, "%u", c.step_ticks);
-    if (!strcmp(name, "dt"))         return snprintf(out, cap, "%g", c.tick_dt);
-    if (!strcmp(name, "alpha"))      return snprintf(out, cap, "%.3f", (f64)c.alpha());
-    if (!strcmp(name, "dropped"))    return snprintf(out, cap, "%llu", (unsigned long long)c.dropped_time_ticks);
-    if (!strcmp(name, "frame"))      return snprintf(out, cap, "%llu", (unsigned long long)e.frame_count);
+    if (!strcmp(name, "rate"))       return format(out, cap, "%g", c.rate);
+    if (!strcmp(name, "scale"))      return format(out, cap, "%g", c.scale);
+    if (!strcmp(name, "step"))       return format(out, cap, "%u", c.step_ticks);
+    if (!strcmp(name, "dt"))         return format(out, cap, "%g", c.tick_dt);
+    if (!strcmp(name, "alpha"))      return format(out, cap, "%.3f", (f64)c.alpha());
+    if (!strcmp(name, "dropped"))    return format(out, cap, "%llu", (unsigned long long)c.dropped_time_ticks);
+    if (!strcmp(name, "frame"))      return format(out, cap, "%llu", (unsigned long long)e.frame_count);
     return -1;
 }
 
@@ -424,7 +424,7 @@ void clock_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
     for (const ClockLeaf& l : k_clock_leaves) {
         char v[64], summary[128];
         clock_value(*ctx.engine, l.name, v, sizeof v);
-        snprintf(summary, sizeof summary, "%-8s %s", v, l.what);
+        format(summary, sizeof summary, "%-8s %s", v, l.what);
         if (!emit(user, l.name, summary)) return;
     }
 }
@@ -457,7 +457,7 @@ void modules_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) 
     Engine& e = *ctx.engine;
     for (const ModuleInstance& m : e.modules) {
         char summary[128];
-        snprintf(summary, sizeof summary, "%s, arena %llu KB used, %llu KB peak", m.started ? "up" : "down",
+        format(summary, sizeof summary, "%s, arena %llu KB used, %llu KB peak", m.started ? "up" : "down",
                  (unsigned long long)(m.arena.used / 1024), (unsigned long long)(m.arena.peak / 1024));
         if (!emit(user, m.desc->name, summary)) return;
     }
@@ -482,11 +482,11 @@ void mem_list(CliContext&, const char* dir, CliEmitFn emit, void* user) {
     if (dir[0]) return;
     const MemSample& s = mem_last_sample();
     char v[64];
-    snprintf(v, sizeof v, "%llu KB", (unsigned long long)(s.live_bytes / 1024));      if (!emit(user, "live", v)) return;
-    snprintf(v, sizeof v, "%llu KB", (unsigned long long)(s.committed_bytes / 1024)); if (!emit(user, "committed", v)) return;
-    snprintf(v, sizeof v, "%llu KB", (unsigned long long)(s.peak_live_bytes / 1024)); if (!emit(user, "peak", v)) return;
-    snprintf(v, sizeof v, "%llu", (unsigned long long)s.live_allocs);                 if (!emit(user, "allocs", v)) return;
-    snprintf(v, sizeof v, "%llu", (unsigned long long)s.frame);                       emit(user, "sampled_at_frame", v);
+    format(v, sizeof v, "%llu KB", (unsigned long long)(s.live_bytes / 1024));      if (!emit(user, "live", v)) return;
+    format(v, sizeof v, "%llu KB", (unsigned long long)(s.committed_bytes / 1024)); if (!emit(user, "committed", v)) return;
+    format(v, sizeof v, "%llu KB", (unsigned long long)(s.peak_live_bytes / 1024)); if (!emit(user, "peak", v)) return;
+    format(v, sizeof v, "%llu", (unsigned long long)s.live_allocs);                 if (!emit(user, "allocs", v)) return;
+    format(v, sizeof v, "%llu", (unsigned long long)s.frame);                       emit(user, "sampled_at_frame", v);
 }
 
 bool mem_describe(CliContext& ctx, const char* rel) {
@@ -511,7 +511,7 @@ void perf_list(CliContext&, const char* dir, CliEmitFn emit, void* user) {
     u32 n = prof_top(top, &frames);
     for (u32 i = 0; i < n; ++i) {
         char summary[96];
-        snprintf(summary, sizeof summary, "%.3f ms avg, %.3f ms worst, %.1f calls/frame%s", prof_ms(top[i].wall) / frames, prof_ms(top[i].worst), (f64)top[i].calls / frames, top[i].wait ? ", wait" : "");
+        format(summary, sizeof summary, "%.3f ms avg, %.3f ms worst, %.1f calls/frame%s", prof_ms(top[i].wall) / frames, prof_ms(top[i].worst), (f64)top[i].calls / frames, top[i].wait ? ", wait" : "");
         if (!emit(user, top[i].name, summary)) return;
     }
 }
@@ -542,7 +542,7 @@ void names_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         NameList& l = *(NameList*)u;
         Table* t = engine_table_of(*l.e, h);
         char summary[96];
-        snprintf(summary, sizeof summary, "%s/%u", t ? t->name : "?", h.index());
+        format(summary, sizeof summary, "%s/%u", t ? t->name : "?", h.index());
         l.more = l.emit(l.user, name_str(n), summary);
         return l.more;
     }, &nl);

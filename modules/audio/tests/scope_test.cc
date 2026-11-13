@@ -4,6 +4,7 @@
 // the pump keeps it; a read still out when its asset retires is reaped, not left on the
 // queue; a retired sound a voice is playing waits for the mixer before its samples go.
 #include "korvid/asset/module.h"
+#include "korvid/core/format.h"
 #include "korvid/core/time.h"
 #include "korvid/asset/scope.h"
 #include "korvid/asset/sound.h"
@@ -63,12 +64,12 @@ void test_asset_scopes(kv::TestCtx& c) {
     // executable: an iOS app's bundle is signed and read-only.
     char scratch[400];
     KV_CHECK(c, io_make_temp_dir("korvid-audio-scope-test", scratch, sizeof scratch) && platform_io(e)->mount_dir(scratch));
-    snprintf(dir, sizeof dir, "%s/audio_scope_test", scratch);
+    format(dir, sizeof dir, "%s/audio_scope_test", scratch);
     io_make_dirs(dir);
     char path[600];
     const char* const names[] = {"a", "b", "c"};
     for (const char* name : names) {
-        snprintf(path, sizeof path, "%s/%s.wav", dir, name);
+        format(path, sizeof path, "%s/%s.wav", dir, name);
         KV_CHECK(c, write_wav(path, name[0] == 'c' ? 48000 : 400));
     }
 

@@ -1,6 +1,7 @@
 // The credits screen shows everyone CREDITS.md names: every **name** on a "By" line of
 // CREDITS.md is in credits.json, and so are the lines the project requires.
 #include "korvid/core/memory.h"
+#include "korvid/core/format.h"
 #include "korvid/platform/io.h"
 #include "korvid/core/test.h"
 #include <stdio.h>
@@ -14,7 +15,7 @@ char* slurp(const char* name) {
     char exe[512];
     if (!kv::platform_exe_dir(exe, sizeof exe)) return nullptr; // ends in a separator
     char path[700];
-    snprintf(path, sizeof path, "%sassets/arcanum/%s", exe, name);
+    kv::format(path, sizeof path, "%sassets/arcanum/%s", exe, name);
     FILE* f = fopen(path, "rb");
     if (!f) return nullptr;
     fseek(f, 0, SEEK_END);
@@ -43,7 +44,7 @@ void test_credits(kv::TestCtx& c) {
             if (!end) break;
             *end = 0;
             ++names;
-            if (!strstr(json, p + 2)) { KV_CHECK(c, false); fprintf(stderr, "credits.json does not name '%s'\n", p + 2); }
+            if (!strstr(json, p + 2)) { KV_CHECK(c, false); kv::print_err("credits.json does not name '%s'\n", p + 2); }
             p = strstr(end + 2, "**");
         }
     }

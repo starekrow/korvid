@@ -7,10 +7,10 @@
 // runner's randomness is its own stream, seeded from its entity and the tick.
 #include "arcfire.h"
 #include "korvid/asset/blob.h"
+#include "korvid/core/format.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/json.h"
 #include "korvid/core/log.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv::arcfire {
@@ -47,8 +47,8 @@ bool patterns_ready(Engine& e, Game& g, bool& failed) {
         }
         for (const JsonValue* v = json_first(doc, doc.root()); v && g.pattern_count < Game::kMaxPatterns; v = json_next(doc, *v)) {
             char path[128];
-            snprintf(g.pattern_names[g.pattern_count], kPatternName, "%s", json_string(v, ""));
-            snprintf(path, sizeof path, "arcfire/patterns/%s.xml", g.pattern_names[g.pattern_count]);
+            format(g.pattern_names[g.pattern_count], kPatternName, "%s", json_string(v, ""));
+            format(path, sizeof path, "arcfire/patterns/%s.xml", g.pattern_names[g.pattern_count]);
             g.pattern_blobs[g.pattern_count++] = asset_load_blob(e, path);
         }
     }

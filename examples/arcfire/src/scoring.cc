@@ -5,7 +5,7 @@
 // line, shows the banner and quits after it. The demo ends at once.
 #include "arcfire.h"
 #include "korvid/core/log.h"
-#include <stdio.h>
+#include "korvid/core/format.h"
 
 namespace kv::arcfire {
 
@@ -27,7 +27,7 @@ bool arcade_next(const Game& g, const Stage& s, const Dials& d, u32* stage, Posi
 RunResult result_of(const Game& g, const Run& r, const Dials& d, u32 round) {
     RunResult out{};
     out.score = r.score;
-    snprintf(out.stage, sizeof out.stage, "%s", g.stage.name);
+    format(out.stage, sizeof out.stage, "%s", g.stage.name);
     out.round = round + 1;
     out.position = d.position;
     out.start = (u32)g.start;

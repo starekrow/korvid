@@ -1,7 +1,7 @@
 #include "korvid/save/writer.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -102,13 +102,13 @@ void SaveWriter::number_text(const char* text) { if (before_value()) put(text); 
 
 void SaveWriter::int_value(i64 v) {
     char b[32];
-    snprintf(b, sizeof b, "%lld", (long long)v);
+    kv::format(b, sizeof b, "%lld", (long long)v);
     number_text(b);
 }
 
 void SaveWriter::uint_value(u64 v) {
     char b[32];
-    snprintf(b, sizeof b, "%llu", (unsigned long long)v);
+    kv::format(b, sizeof b, "%llu", (unsigned long long)v);
     number_text(b);
 }
 
@@ -117,7 +117,7 @@ void SaveWriter::f64_value(f64 v) {
     if (kv::isinf(v)) { string_value(v < 0 ? "-inf" : "inf"); return; }
     char b[40];
     for (int p = 15; p <= 17; ++p) { // the fewest digits that read back the same
-        snprintf(b, sizeof b, "%.*g", p, v);
+        kv::format(b, sizeof b, "%.*g", p, v);
         if (strtod(b, nullptr) == v) break;
     }
     number_text(b);
@@ -128,7 +128,7 @@ void SaveWriter::f32_value(f32 v) {
     if (kv::isinf(v)) { string_value(v < 0 ? "-inf" : "inf"); return; }
     char b[32];
     for (int p = 6; p <= 9; ++p) {
-        snprintf(b, sizeof b, "%.*g", p, (double)v);
+        kv::format(b, sizeof b, "%.*g", p, (double)v);
         if (strtof(b, nullptr) == v) break;
     }
     number_text(b);
@@ -155,7 +155,7 @@ void SaveWriter::put_string(const char* s, u32 len) {
         case '\r': esc = "\\r"; break;
         case '\t': esc = "\\t"; break;
         default:
-            if (c < 0x20) { snprintf(hex, sizeof hex, "\\u%04x", c); esc = hex; }
+            if (c < 0x20) { kv::format(hex, sizeof hex, "\\u%04x", c); esc = hex; }
         }
         if (!esc) { ++run; continue; }
         put(s + i - run, run);

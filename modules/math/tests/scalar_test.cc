@@ -1,6 +1,6 @@
 #include "korvid/math/scalar.h"
+#include "korvid/core/format.h"
 #include "korvid/core/test.h"
-#include <stdio.h>
 
 // The scalar functions: C's special cases (Annex F), exact results that must be exact, and
 // for each function a hash of every bit it returns over a few hundred thousand inputs.
@@ -67,7 +67,7 @@ template <class F> u64 hash_f64_2(F f) {
 }
 
 void golden(TestCtx& c, const char* name, u64 got, u64 want) {
-    if (got != want) fprintf(stderr, "math: %s hashes to 0x%016llxull, not 0x%016llxull\n", name, (unsigned long long)got, (unsigned long long)want);
+    if (got != want) print_err("math: %s hashes to 0x%016llxull, not 0x%016llxull\n", name, (unsigned long long)got, (unsigned long long)want);
     c.check(got == want, name, __FILE__, __LINE__);
 }
 } // namespace

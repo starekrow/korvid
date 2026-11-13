@@ -5,6 +5,7 @@
 #include "../src/stage_data.cc"
 #include "../src/boss_data.cc"
 #include "korvid/core/test.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"
 #include <stdio.h>
@@ -18,7 +19,7 @@ char* slurp(const char* name, kv::usize* len) {
     char exe[512];
     if (!kv::platform_exe_dir(exe, sizeof exe)) return nullptr;
     char path[700];
-    snprintf(path, sizeof path, "%sassets/arcfire/%s", exe, name);
+    kv::format(path, sizeof path, "%sassets/arcfire/%s", exe, name);
     FILE* f = fopen(path, "rb");
     if (!f) return nullptr;
     fseek(f, 0, SEEK_END);
@@ -160,7 +161,7 @@ void test_boss(kv::TestCtx& c) {
     const char* const orbit[] = {"gunship_left", "gunship_right", "station"};
     for (const char* name : orbit) {
         char path[64];
-        snprintf(path, sizeof path, "bosses/%s.boss.json", name);
+        format(path, sizeof path, "bosses/%s.boss.json", name);
         text = slurp(path, &len);
         KV_CHECK(c, text != nullptr);
         if (!text) continue;
@@ -182,19 +183,19 @@ void test_boss(kv::TestCtx& c) {
     };
     const char* entry = R"("entry": {"path": [[0, 400], [0, 200]]})";
     char doc[512];
-    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "radius": 8}], "phases": [{"ends": ["a"]}]})", entry);
+    format(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "radius": 8}], "phases": [{"ends": ["a"]}]})", entry);
     KV_CHECK(c, fails_with(doc, "a boss has a core"));
-    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true, "parent": "b"}], "phases": [{"ends": ["a"]}]})", entry);
+    format(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true, "parent": "b"}], "phases": [{"ends": ["a"]}]})", entry);
     KV_CHECK(c, fails_with(doc, "rides on \"b\""));
-    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true}], "phases": [{"name": "p", "ends": ["nope"]}]})", entry);
+    format(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true}], "phases": [{"name": "p", "ends": ["nope"]}]})", entry);
     KV_CHECK(c, fails_with(doc, "ends with \"nope\""));
-    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true, "armored_until": 2}], "phases": [{"ends": ["a"]}]})", entry);
+    format(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true, "armored_until": 2}], "phases": [{"ends": ["a"]}]})", entry);
     KV_CHECK(c, fails_with(doc, "opens in phase 2 of 1"));
-    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true, "launch": {"path": "none"}}], "phases": [{"ends": ["a"]}]})", entry);
+    format(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true, "launch": {"path": "none"}}], "phases": [{"ends": ["a"]}]})", entry);
     KV_CHECK(c, fails_with(doc, "launches on no path"));
     KV_CHECK(c, fails_with(R"({"parts": []})", "an entry is a path"));
-    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true}, {"name": "a"}], "phases": [{"ends": ["a"]}]})", entry);
+    format(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true}, {"name": "a"}], "phases": [{"ends": ["a"]}]})", entry);
     KV_CHECK(c, fails_with(doc, "a name of its own"));
-    snprintf(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true}], "phases": [{"ends": ["a"]}]})", entry);
+    format(doc, sizeof doc, R"({%s, "parts": [{"name": "a", "core": true}], "phases": [{"ends": ["a"]}]})", entry);
     KV_CHECK(c, fails_with(doc, "a boss has a stomp"));
 }

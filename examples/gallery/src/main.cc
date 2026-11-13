@@ -12,6 +12,7 @@
 //
 //   gallery [--out DIR] [--scene NAME]   (DIR: where the PPMs go, "." by default)
 #include "korvid/gallery/module.h"
+#include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
@@ -189,7 +190,7 @@ RenderView view_of(f32 alpha) {
 void shoot(Gallery& g, const char* scene, const RenderView& view) {
     for (u32 i = 0; i < 4; ++i) { platform_pump(*g.e); renderer_render(g.r, view); }
     char path[512];
-    snprintf(path, sizeof path, "%s/gallery_%s.ppm", g.out, scene);
+    format(path, sizeof path, "%s/gallery_%s.ppm", g.out, scene);
     remove(path);
     renderer_screenshot(g.r, path);
     for (u32 i = 0; i < 8; ++i) {

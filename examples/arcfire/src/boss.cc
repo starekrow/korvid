@@ -20,12 +20,12 @@
 //     way out. Then it leaves upward, paying nothing for what stands.
 #include "arcfire.h"
 #include "korvid/asset/blob.h"
+#include "korvid/core/format.h"
 #include "korvid/asset/material.h"
 #include "korvid/asset/scope.h"
 #include "korvid/asset/texture.h"
 #include "korvid/core/log.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv::arcfire {
@@ -90,16 +90,16 @@ void bosses_load(Engine& e, Game& g) {
     g.boss_count = KV_COUNTOF(k_boss_names);
     for (u32 i = 0; i < g.boss_count; ++i) {
         char path[128];
-        snprintf(path, sizeof path, "arcfire/bosses/%s.boss.json", k_boss_names[i]);
+        format(path, sizeof path, "arcfire/bosses/%s.boss.json", k_boss_names[i]);
         g.boss_blobs[i] = asset_load_blob(e, path);
         for (u32 k = 0; k < 2; ++k) {
-            snprintf(path, sizeof path, "arcfire/generated/%s%s.png", k_boss_names[i], k ? "_parts" : "");
+            format(path, sizeof path, "arcfire/generated/%s%s.png", k_boss_names[i], k ? "_parts" : "");
             g.boss_tex[i][k] = asset_load_texture(e, path);
             g.boss_alpha[i][k] = boss_material(e, g.boss_tex[i][k], BlendMode::Alpha);
             g.boss_additive[i][k] = boss_material(e, g.boss_tex[i][k], BlendMode::Additive);
         }
         // Its hull burning away, the dissolve shader's (a material file, as a game shader's are).
-        snprintf(path, sizeof path, "arcfire/materials/%s_dissolve.material.json", k_boss_names[i]);
+        format(path, sizeof path, "arcfire/materials/%s_dissolve.material.json", k_boss_names[i]);
         g.boss_dissolve[i] = asset_load_material(e, path);
     }
 }
@@ -111,7 +111,7 @@ bool bosses_ready(Engine& e, Game& g, char* why, usize why_cap) {
     for (u32 i = 0; i < g.boss_count; ++i) {
         const BlobAsset* b = asset_blob(e, g.boss_blobs[i]);
         if (!b || b->state == AssetState::Pending) return false;
-        if (b->state != AssetState::Ready) { snprintf(why, why_cap, "boss %s did not load", k_boss_names[i]); return false; }
+        if (b->state != AssetState::Ready) { format(why, why_cap, "boss %s did not load", k_boss_names[i]); return false; }
     }
     // Each into the stage that names it (its paths and bays' formations are that stage's);
     // one no stage names, into the first.
@@ -128,7 +128,7 @@ bool bosses_ready(Engine& e, Game& g, char* why, usize why_cap) {
             st.boss_of[m] = kMaxBosses;
             for (u32 i = 0; i < g.boss_count; ++i)
                 if (!strcmp(st.boss_names[m], g.bosses[i].name)) st.boss_of[m] = i;
-            if (st.boss_of[m] == kMaxBosses) { snprintf(why, why_cap, "a boss mark names \"%s\", which the game does not have", st.boss_names[m]); return false; }
+            if (st.boss_of[m] == kMaxBosses) { format(why, why_cap, "a boss mark names \"%s\", which the game does not have", st.boss_names[m]); return false; }
         }
     g.bosses_parsed = true;
     return true;

@@ -1,5 +1,5 @@
 #include "korvid/image/ppm.h"
-#include <stdio.h>
+#include "korvid/core/format.h"
 #include <string.h>
 
 namespace kv {
@@ -60,7 +60,7 @@ bool ppm_decode(const void* data, usize size, Allocator* pixels, PpmImage& out, 
 
 void ppm_encode(const u8* rgb, u32 width, u32 height, Array<u8>& out) {
     char head[48];
-    int n = snprintf(head, sizeof head, "P6\n%u %u\n255\n", width, height);
+    int n = format(head, sizeof head, "P6\n%u %u\n255\n", width, height);
     usize bytes = (usize)width * height * 3;
     out.reserve(out.len + (u32)n + (u32)bytes);
     memcpy(out.push_n((u32)n), head, (usize)n);

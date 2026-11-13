@@ -35,13 +35,13 @@
 // time each frame has left, so the frame stays at its budget while the disk is kept busy.
 #include "torture.h"
 #include "korvid/sockit2m/module.h"
+#include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/name.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/module.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -58,11 +58,11 @@ const char* g_mode = "engine";
 void report(const char* name, const char* what, const char* numbers, const char* note) {
     if (g_row_count >= KV_COUNTOF(g_rows)) return;
     Row& r = g_rows[g_row_count++];
-    snprintf(r.mode, sizeof r.mode, "%s", g_mode);
-    snprintf(r.name, sizeof r.name, "%s", name);
-    snprintf(r.what, sizeof r.what, "%s", what);
-    snprintf(r.numbers, sizeof r.numbers, "%s", numbers);
-    snprintf(r.note, sizeof r.note, "%s", note);
+    format(r.mode, sizeof r.mode, "%s", g_mode);
+    format(r.name, sizeof r.name, "%s", name);
+    format(r.what, sizeof r.what, "%s", what);
+    format(r.numbers, sizeof r.numbers, "%s", numbers);
+    format(r.note, sizeof r.note, "%s", note);
 }
 
 MemStats g_base;
@@ -133,10 +133,10 @@ f64 g_fs_solo_mbs = 0.0, g_sock_solo_mbs = 0.0;
 
 void clock_note(char* out, usize cap, const Driver& d, const PumpClock& clock) {
     if (d.e)
-        snprintf(out, cap, "%llu frames, %llu ticks; frame avg %.1f us, p99 <= %.3f ms, worst %.2f ms",
+        format(out, cap, "%llu frames, %llu ticks; frame avg %.1f us, p99 <= %.3f ms, worst %.2f ms",
                  (unsigned long long)clock.total, (unsigned long long)d.ticks(), clock.avg_ms() * 1e3, clock.percentile_ms(0.99), clock.worst_ms);
     else
-        snprintf(out, cap, "%llu pumps; pump avg %.1f us, p99 <= %.3f ms, worst %.2f ms",
+        format(out, cap, "%llu pumps; pump avg %.1f us, p99 <= %.3f ms, worst %.2f ms",
                  (unsigned long long)clock.total, clock.avg_ms() * 1e3, clock.percentile_ms(0.99), clock.worst_ms);
 }
 
@@ -150,10 +150,10 @@ void scenario_fs_read(Driver& d, IoBackend backend, const char* name, bool cold)
     while (!fs.done()) clock.add(d.step(&fs, nullptr));
     d.finish(&fs, nullptr);
     char what[96], numbers[64], note[400], cn[160];
-    snprintf(what, sizeof what, "%u MB in %u files, %u in flight, %s, %s cache", g_opt.files * g_opt.size_kb / 1024, g_opt.files, g_opt.inflight, fs.q->backend_name(), cold ? "cold" : "hot");
-    snprintf(numbers, sizeof numbers, "%8.1f MB/s %8.0f files/s", fs.mb_per_s(), (f64)g_opt.files / fs.seconds());
+    format(what, sizeof what, "%u MB in %u files, %u in flight, %s, %s cache", g_opt.files * g_opt.size_kb / 1024, g_opt.files, g_opt.inflight, fs.q->backend_name(), cold ? "cold" : "hot");
+    format(numbers, sizeof numbers, "%8.1f MB/s %8.0f files/s", fs.mb_per_s(), (f64)g_opt.files / fs.seconds());
     clock_note(cn, sizeof cn, d, clock);
-    snprintf(note, sizeof note, "latency avg %.2f ms, max %.2f ms; %s%s", fs.lat_sum / g_opt.files * 1e3, fs.lat_max * 1e3, cn, fs.failed ? "; DATA ERRORS" : "");
+    format(note, sizeof note, "latency avg %.2f ms, max %.2f ms; %s%s", fs.lat_sum / g_opt.files * 1e3, fs.lat_max * 1e3, cn, fs.failed ? "; DATA ERRORS" : "");
     report(name, what, numbers, note);
     if (backend == IoBackend::Auto && !cold) g_fs_solo_mbs = fs.mb_per_s();
     fs.end();
@@ -174,15 +174,15 @@ void scenario_sockets(Driver& d, bool lines, const char* name) {
     f64 s = sj.seconds();
     clock_note(cn, sizeof cn, d, clock);
     if (lines) {
-        snprintf(what, sizeof what, "%u conns, \"N\\n\" lines echoed, %.0f s", conns, seconds);
-        snprintf(numbers, sizeof numbers, "%8.0f lines/s %7.1f MB/s", (f64)sj.round_trips / s, (f64)(sj.tx + sj.rx) / 1048576.0 / s);
-        snprintf(note, sizeof note, "%llu round trips, rtt avg %.3f ms, max %.2f ms; %s%s",
+        format(what, sizeof what, "%u conns, \"N\\n\" lines echoed, %.0f s", conns, seconds);
+        format(numbers, sizeof numbers, "%8.0f lines/s %7.1f MB/s", (f64)sj.round_trips / s, (f64)(sj.tx + sj.rx) / 1048576.0 / s);
+        format(note, sizeof note, "%llu round trips, rtt avg %.3f ms, max %.2f ms; %s%s",
                  (unsigned long long)sj.round_trips, sj.round_trips ? sj.rtt_sum / (f64)sj.round_trips * 1e3 : 0.0, sj.rtt_max * 1e3,
                  cn, sj.failed ? "; DATA ERRORS" : "");
     } else {
-        snprintf(what, sizeof what, "%u conns x %u KB chunks echoed, %.0f s", conns, g_opt.chunk_kb, seconds);
-        snprintf(numbers, sizeof numbers, "%8.1f MB/s out %7.1f MB/s back", (f64)sj.tx / 1048576.0 / s, (f64)sj.rx / 1048576.0 / s);
-        snprintf(note, sizeof note, "%llu MB verified byte for byte; %s%s", (unsigned long long)(sj.verified / 1048576), cn, sj.failed ? "; DATA ERRORS" : "");
+        format(what, sizeof what, "%u conns x %u KB chunks echoed, %.0f s", conns, g_opt.chunk_kb, seconds);
+        format(numbers, sizeof numbers, "%8.1f MB/s out %7.1f MB/s back", (f64)sj.tx / 1048576.0 / s, (f64)sj.rx / 1048576.0 / s);
+        format(note, sizeof note, "%llu MB verified byte for byte; %s%s", (unsigned long long)(sj.verified / 1048576), cn, sj.failed ? "; DATA ERRORS" : "");
         g_sock_solo_mbs = (f64)sj.rx / 1048576.0 / s;
     }
     report(name, what, numbers, note);
@@ -209,10 +209,10 @@ void scenario_both(Driver& d, u32 inflight, const char* name) {
     char what[96], numbers[64], note[400], cn[160];
     clock_note(cn, sizeof cn, d, clock);
     usize budget = fs.q->budget.bytes_per_pump;
-    if (budget) snprintf(what, sizeof what, "reads (%s, %u in flight, %llu MB/pump) + %u echo conns", fs.q->backend_name(), inflight, (unsigned long long)(budget >> 20), g_opt.conns);
-    else        snprintf(what, sizeof what, "reads (%s, %u in flight, no budget) + %u echo conns", fs.q->backend_name(), inflight, g_opt.conns);
-    snprintf(numbers, sizeof numbers, "%8.1f MB/s files %6.1f MB/s sock", fs_mbs, sock_mbs);
-    snprintf(note, sizeof note, "files at %.0f%% of solo, sockets at %.0f%% of solo; file latency avg %.2f ms, max %.2f ms; %s%s",
+    if (budget) format(what, sizeof what, "reads (%s, %u in flight, %llu MB/pump) + %u echo conns", fs.q->backend_name(), inflight, (unsigned long long)(budget >> 20), g_opt.conns);
+    else        format(what, sizeof what, "reads (%s, %u in flight, no budget) + %u echo conns", fs.q->backend_name(), inflight, g_opt.conns);
+    format(numbers, sizeof numbers, "%8.1f MB/s files %6.1f MB/s sock", fs_mbs, sock_mbs);
+    format(note, sizeof note, "files at %.0f%% of solo, sockets at %.0f%% of solo; file latency avg %.2f ms, max %.2f ms; %s%s",
              g_fs_solo_mbs > 0 ? 100.0 * fs_mbs / g_fs_solo_mbs : 0.0, g_sock_solo_mbs > 0 ? 100.0 * sock_mbs / g_sock_solo_mbs : 0.0,
              fs.lat_sum / g_opt.files * 1e3, fs.lat_max * 1e3, cn, fs.failed || sj.failed ? "; DATA ERRORS" : "");
     report(name, what, numbers, note);
@@ -237,9 +237,9 @@ void scenario_idle(Driver& d, bool cold, const char* name) {
     d.finish(&fs, nullptr);
     d.pace_s = 0.0;
     char what[96], numbers[64], note[400];
-    snprintf(what, sizeof what, "%u MB idle-priority reads, frames paced at %.1f ms, %s cache", g_opt.files * g_opt.size_kb / 1024, period * 1e3, cold ? "cold" : "hot");
-    snprintf(numbers, sizeof numbers, "%8.1f MB/s %8.0f files/s", fs.mb_per_s(), (f64)g_opt.files / fs.seconds());
-    snprintf(note, sizeof note, "latency avg %.2f ms, max %.2f ms; %llu frames, idle %.2f ms/frame in %llu calls, %llu MB admitted idle; frame worst %.2f ms of work incl. idle%s",
+    format(what, sizeof what, "%u MB idle-priority reads, frames paced at %.1f ms, %s cache", g_opt.files * g_opt.size_kb / 1024, period * 1e3, cold ? "cold" : "hot");
+    format(numbers, sizeof numbers, "%8.1f MB/s %8.0f files/s", fs.mb_per_s(), (f64)g_opt.files / fs.seconds());
+    format(note, sizeof note, "latency avg %.2f ms, max %.2f ms; %llu frames, idle %.2f ms/frame in %llu calls, %llu MB admitted idle; frame worst %.2f ms of work incl. idle%s",
              fs.lat_sum / g_opt.files * 1e3, fs.lat_max * 1e3, (unsigned long long)d.paced_frames,
              d.paced_frames ? d.idle_s / (f64)d.paced_frames * 1e3 : 0.0, (unsigned long long)(q->idle_calls - idle_calls0),
              (unsigned long long)((q->idle_bytes - idle_bytes0) >> 20), clock.worst_ms, fs.failed ? "; DATA ERRORS" : "");
@@ -280,7 +280,7 @@ bool run_engine_mode() {
     // the leak check sees the jobs' allocations and nothing else.
     q->queued.reserve(g_opt.files + 16);
     q->completed.reserve(g_opt.files + 16);
-    printf("engine: platform queue on %s, tick %.0f Hz, up to %u ticks per frame\n", q->backend_name(), g_opt.tick_hz, e.clock.max_ticks_per_frame);
+    print("engine: platform queue on %s, tick %.0f Hz, up to %u ticks per frame\n", q->backend_name(), g_opt.tick_hz, e.clock.max_ticks_per_frame);
     g_base = mem_stats();
     Driver d; d.e = &e;
     run_all(d);
@@ -314,7 +314,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--keep") == 0) o.keep = true;
         else if (strcmp(argv[i], "--direct") == 0) o.direct = true;
         else if (strcmp(argv[i], "--compare") == 0) o.compare = true;
-        else { fprintf(stderr, "usage: %s [--dir PATH] [--files N] [--size KB] [--inflight N] [--conns N] [--chunk KB] [--seconds S] [--tick-hz N] [--budget KB] [--frame-ms N] [--quick] [--keep] [--direct | --compare]\n", argv[0]); return 2; }
+        else { print_err("usage: %s [--dir PATH] [--files N] [--size KB] [--inflight N] [--conns N] [--chunk KB] [--seconds S] [--tick-hz N] [--budget KB] [--frame-ms N] [--quick] [--keep] [--direct | --compare]\n", argv[0]); return 2; }
     }
     if (o.quick) { o.files = o.files > 32 ? 32 : o.files; o.size_kb = o.size_kb > 256 ? 256 : o.size_kb; }
     if (o.files < 1) o.files = 1;
@@ -325,15 +325,15 @@ int main(int argc, char** argv) {
     if (o.chunk_kb < 1) o.chunk_kb = 1;
     if (o.tick_hz < 1.0) o.tick_hz = 1.0;
     if (!make_work_dir()) return 1;
-    printf("sockit2m: %u files x %u KB = %u MB in %s, %u reads in flight, %u connections, %u KB chunks, %.0f s per socket run%s\n",
+    print("sockit2m: %u files x %u KB = %u MB in %s, %u reads in flight, %u connections, %u KB chunks, %.0f s per socket run%s\n",
            o.files, o.size_kb, o.files * o.size_kb / 1024, g_work_dir, o.inflight, o.conns, o.chunk_kb, o.quick ? 1.0 : o.seconds, o.quick ? ", quick" : "");
 
     g_base = mem_stats();
     f64 write_mbs = 0.0;
     if (!write_working_set(&write_mbs)) { remove_working_set(); return 1; }
     char what[96], numbers[64];
-    snprintf(what, sizeof what, "%u files x %u KB, fwrite then sync", o.files, o.size_kb);
-    snprintf(numbers, sizeof numbers, "%8.1f MB/s", write_mbs);
+    format(what, sizeof what, "%u files x %u KB, fwrite then sync", o.files, o.size_kb);
+    format(numbers, sizeof numbers, "%8.1f MB/s", write_mbs);
     g_mode = "setup";
     report("fs write", what, numbers, "synchronous; the disk's write number");
     mem_settled("fs write");
@@ -341,15 +341,15 @@ int main(int argc, char** argv) {
     if (!o.direct) run_engine_mode();
     if (o.direct || o.compare) run_direct_mode();
 
-    printf("\n%-7s %-16s %-62s %-34s %s\n", "mode", "scenario", "what", "numbers", "notes");
+    print("\n%-7s %-16s %-62s %-34s %s\n", "mode", "scenario", "what", "numbers", "notes");
     for (u32 i = 0; i < g_row_count; ++i) {
         const Row& r = g_rows[i];
-        printf("%-7s %-16s %-62s %-34s %s\n", r.mode, r.name, r.what, r.numbers, r.note);
+        print("%-7s %-16s %-62s %-34s %s\n", r.mode, r.name, r.what, r.numbers, r.note);
     }
     if (!o.keep) remove_working_set();
-    else printf("\nworking set kept in %s\n", g_work_dir);
+    else print("\nworking set kept in %s\n", g_work_dir);
     MemStats s = mem_stats();
-    printf("\n%s: %u errors; memory at exit: %llu live allocations, %llu bytes\n", g_errors ? "FAILED" : "ok", g_errors,
+    print("\n%s: %u errors; memory at exit: %llu live allocations, %llu bytes\n", g_errors ? "FAILED" : "ok", g_errors,
            (unsigned long long)s.live_allocs, (unsigned long long)s.live_bytes);
     names_shutdown();
     mem_shutdown();

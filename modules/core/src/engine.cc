@@ -1,6 +1,7 @@
 // The registry. Reads the module list once, in order, and turns the declarations into
 // ids, a schedule and started instances. Every check here names what clashed.
 #include "korvid/core/engine.h"
+#include "korvid/core/format.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/atomic.h"
 #include "korvid/core/hash.h"
@@ -11,7 +12,6 @@
 #include "korvid/core/log.h"
 #include "korvid/core/name.h"
 #include "korvid/core/memory.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -203,7 +203,7 @@ bool register_kinds(Engine& e, Span<const ModuleDesc* const> modules, const Engi
             t.resource = add(name, ResourceClass::Kind, false);
             {
                 char alive[KV_KIND_NAME_MAX + 8];
-                snprintf(alive, sizeof alive, "%s.@alive", name);
+                format(alive, sizeof alive, "%s.@alive", name);
                 t.alive_resource = add(name_str(name_intern(alive)), ResourceClass::Liveness, false);
             }
             for (Column& c : t.columns) c.resource = add(c.resource_name, ResourceClass::Column, !c.desc->is_sim());
@@ -581,8 +581,8 @@ const char* why_text(const Engine& e, const Edge& ed, char* buf, usize cap) {
     switch (ed.why) {
     case Why::Data:     return resource_name(e, ed.resource);
     case Why::Declared: return "declared";
-    case Why::State:    snprintf(buf, cap, "%s, in declaration order", resource_name(e, ed.resource)); return buf;
-    case Why::Early:    snprintf(buf, cap, "^%s", resource_name(e, ed.resource)); return buf;
+    case Why::State:    format(buf, cap, "%s, in declaration order", resource_name(e, ed.resource)); return buf;
+    case Why::Early:    format(buf, cap, "^%s", resource_name(e, ed.resource)); return buf;
     }
     return "?";
 }
@@ -596,7 +596,7 @@ bool report_cycle(const Engine& e, const Array<Pending>& pend, const Array<Edge>
     // Forward from start, always to a unit that gets back to it, until start again.
     char line[1024];
     u32 at = start, n = 0;
-    int k0 = snprintf(line, sizeof line, "%s", pend[start].sys.name());
+    int k0 = format(line, sizeof line, "%s", pend[start].sys.name());
     if (k0 > 0) n = (u32)k0;
     for (u32 steps = 0; steps <= pend.len; ++steps) {
         const Edge* step = nullptr;
@@ -604,7 +604,7 @@ bool report_cycle(const Engine& e, const Array<Pending>& pend, const Array<Edge>
             if (ed.from == at && (ed.to == start || reach.from_to(ed.to, start))) { step = &ed; break; }
         if (!step) break;
         char why[160];
-        int k = snprintf(line + n, sizeof line - n, " -> %s (%s)", pend[step->to].sys.name(), why_text(e, *step, why, sizeof why));
+        int k = format(line + n, sizeof line - n, " -> %s (%s)", pend[step->to].sys.name(), why_text(e, *step, why, sizeof why));
         if (k < 0 || n + (u32)k >= sizeof line) break;
         n += (u32)k;
         at = step->to;
@@ -1089,7 +1089,7 @@ void log_order(const Engine& e) {
         u32 last_level = 0;
         for (const ScheduledSystem& s : e.phases.systems[p]) {
             const char* sep = at == 0 ? "" : s.level != last_level ? " | " : ", ";
-            int n = snprintf(line + at, sizeof line - at, "%s%s", sep, s.name());
+            int n = format(line + at, sizeof line - at, "%s%s", sep, s.name());
             if (n < 0 || at + (u32)n >= sizeof line) break;
             at += (u32)n;
             last_level = s.level;
@@ -1103,7 +1103,7 @@ void log_kinds(const Engine& e) {
         char line[512];
         u32 at = 0;
         for (const Column& c : t.columns) {
-            int n = snprintf(line + at, sizeof line - at, "%s%s", at ? ", " : "", c.desc->name);
+            int n = format(line + at, sizeof line - at, "%s%s", at ? ", " : "", c.desc->name);
             if (n < 0 || at + (u32)n >= sizeof line) break;
             at += (u32)n;
         }
@@ -1152,7 +1152,7 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineC
         ModuleInstance inst;
         inst.desc  = modules[i];
         inst.index = i;
-        snprintf(inst.state_name, sizeof inst.state_name, "%s.state", modules[i]->name);
+        format(inst.state_name, sizeof inst.state_name, "%s.state", modules[i]->name);
         e.modules.push(inst);
     }
     // Every module's state is a resource its systems share; registered first so kinds
@@ -1671,8 +1671,8 @@ void engine_fire_triggers(Engine& e, u64 tick) {
 
 int engine_describe_event(const Engine& e, u32 type_id, const void* event, char* out, usize cap) {
     const EventTypeDesc* d = type_id < e.event_types.len ? e.event_types[type_id] : nullptr;
-    if (!d) return snprintf(out, cap, "event#%u", type_id);
-    if (d->fields.len == 0) return snprintf(out, cap, "%s{..}", d->name);
+    if (!d) return format(out, cap, "event#%u", type_id);
+    if (d->fields.len == 0) return format(out, cap, "%s{..}", d->name);
     return schema_describe(d->name, d->fields, event, out, cap);
 }
 
@@ -1840,7 +1840,7 @@ const char* engine_qualify(const char* module, const char* name) {
     const char* body = optional ? name + 1 : name;
     if (body[0] != '.' || !module) return name;
     char full[2 * KV_KIND_NAME_MAX + 64];
-    int n = snprintf(full, sizeof full, "%s%s%s", optional ? "?" : "", module, body);
+    int n = format(full, sizeof full, "%s%s%s", optional ? "?" : "", module, body);
     if (n <= 0 || (usize)n >= sizeof full) { KV_ERROR("engine", "name '%s' in module '%s' is too long", name, module); return name; }
     return name_str(name_intern(full));
 }

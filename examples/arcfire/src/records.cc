@@ -9,12 +9,12 @@
 // only through the run it starts, as the dials do.
 #include "arcfire.h"
 #include "korvid/audio/audio.h"
+#include "korvid/core/format.h"
 #include "korvid/core/json.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"
 #include "korvid/save/writer.h"
 #include "korvid/ui/ui.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv::arcfire {
@@ -23,7 +23,7 @@ namespace {
 
 u32 clamp_volume(u64 v) { return v > 10 ? 10 : (u32)v; }
 
-void copy_str(char* out, usize cap, const char* s) { snprintf(out, cap, "%s", s ? s : ""); }
+void copy_str(char* out, usize cap, const char* s) { format(out, cap, "%s", s ? s : ""); }
 
 void read_options(Game& g, const JsonDoc& doc) {
     const JsonValue& o = doc.root();
@@ -82,8 +82,8 @@ Handle write(Engine& e, const char* path, SaveWriter& w, const char* what) {
 void records_load(Engine& e, Game& g) {
     const char* pref = platform_pref_path(e, "korvid", "arcfire");
     if (pref && pref[0]) {
-        if (!g.demo) snprintf(g.options_path, sizeof g.options_path, "%soptions.json", pref);
-        snprintf(g.scores_path, sizeof g.scores_path, "%sscores%s.json", pref, g.demo ? "-demo" : "");
+        if (!g.demo) format(g.options_path, sizeof g.options_path, "%soptions.json", pref);
+        format(g.scores_path, sizeof g.scores_path, "%sscores%s.json", pref, g.demo ? "-demo" : "");
     }
     g.options_read = read(e, g.options_path);
     g.scores_read = read(e, g.scores_path);

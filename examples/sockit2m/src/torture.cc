@@ -2,6 +2,7 @@
 // inside the engine's tick.
 #include "torture.h"
 #include "korvid/sockit2m/module.h"
+#include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"
@@ -43,19 +44,19 @@ f64 PumpClock::percentile_ms(f64 p) const {
 
 bool make_work_dir() {
     char base[480];
-    if (g_opt.dir) snprintf(base, sizeof base, "%s", g_opt.dir);
+    if (g_opt.dir) format(base, sizeof base, "%s", g_opt.dir);
     else if (platform_exe_dir(base, sizeof base)) {
         usize n = strlen(base);
         if (n > 1 && (base[n - 1] == '/' || base[n - 1] == '\\')) base[n - 1] = 0; // joined with '/' below
     } else {
-        snprintf(base, sizeof base, ".");
+        format(base, sizeof base, ".");
     }
-    snprintf(g_work_dir, sizeof g_work_dir, "%s/sockit2m-XXXXXX", base);
+    format(g_work_dir, sizeof g_work_dir, "%s/sockit2m-XXXXXX", base);
     if (!mkdtemp(g_work_dir)) { KV_ERROR("sockit2m", "cannot create a working directory under '%s': %s", base, strerror(errno)); return false; }
     return true;
 }
 
-void file_path(char* out, usize cap, u32 i) { snprintf(out, cap, "%s/f%04u.bin", g_work_dir, i); }
+void file_path(char* out, usize cap, u32 i) { format(out, cap, "%s/f%04u.bin", g_work_dir, i); }
 
 bool write_working_set(f64* mb_per_s) {
     usize size = (usize)g_opt.size_kb * 1024;
@@ -212,7 +213,7 @@ void SockJob::client_send(Client& c, u32 id) {
         // Keep up to 2048 lines outstanding; the ring of send times is twice that.
         char buf[16];
         while (c.sent - c.acked < 2048 && c.sock.out.len < kFlowMark) {
-            int len = snprintf(buf, sizeof buf, "%llu\n", (unsigned long long)c.sent);
+            int len = format(buf, sizeof buf, "%llu\n", (unsigned long long)c.sent);
             if (!c.sock.write(buf, (u32)len)) break;
             c.sent_at[c.sent & 4095] = time_now();
             ++c.sent; tx += (u64)len;

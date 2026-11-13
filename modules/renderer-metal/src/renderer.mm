@@ -6,6 +6,7 @@
 // renderer_internal.h for how the source is split and what differs.
 #include "renderer_internal.h"
 #include "korvid/core/arena.h"
+#include "korvid/core/format.h"
 #include "korvid/core/hash.h"
 #include "korvid/renderer-metal/module.h"
 #include "korvid/core/engine.h"
@@ -148,7 +149,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     for (FrameInFlight& f : r->frames) { f.garbage.alloc = ga; f.dirty_slots.alloc = ga; }
     r->window      = desc.native_window;
     if (const PlatformState* ps = engine_module_state_as<PlatformState>(engine, "platform"))
-        snprintf(r->base_path, sizeof r->base_path, "%s", ps->base_path);
+        kv::format(r->base_path, sizeof r->base_path, "%s", ps->base_path);
     r->start_time  = time_now();
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;
@@ -259,7 +260,7 @@ Handle renderer_texture_create(Renderer* r, const TextureDesc& desc) {
     if (desc.name && desc.name[0]) t.name = name_intern(desc.name);
     else {
         char derived[32];
-        snprintf(derived, sizeof derived, "texture:%u", r->textures_made);
+        kv::format(derived, sizeof derived, "texture:%u", r->textures_made);
         t.name = name_intern(derived);
     }
     Handle h = r->textures.create(t);
@@ -312,7 +313,7 @@ Name derived_material_name(const Renderer* r, const MaterialRecord& m) {
     h = hash_mix(h ^ hash_bytes(m.params, sizeof m.params));
     h = hash_mix(h ^ m.shader.hash);
     char text[32];
-    snprintf(text, sizeof text, "material:%016llx", (unsigned long long)h);
+    kv::format(text, sizeof text, "material:%016llx", (unsigned long long)h);
     return name_intern(text);
 }
 
@@ -405,7 +406,7 @@ bool renderer_check_sort(Renderer* r) {
 
 bool renderer_screenshot(Renderer* r, const char* path) {
     if (!r || !path || strlen(path) >= sizeof g_shot.path) return false;
-    snprintf(g_shot.path, sizeof g_shot.path, "%s", path);
+    kv::format(g_shot.path, sizeof g_shot.path, "%s", path);
     g_shot.pending = true;
     return true;
 }

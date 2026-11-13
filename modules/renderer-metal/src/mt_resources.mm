@@ -4,7 +4,7 @@
 // writes it) or private (only the GPU does), and there are no descriptor sets to write.
 #include "renderer_internal.h"
 #include "korvid/core/handle.h"
-#include <stdio.h>
+#include "korvid/core/format.h"
 #include <string.h>
 
 namespace kv {
@@ -331,16 +331,16 @@ void* texture_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->texture
 int texture_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     Renderer* r = (Renderer*)ctx;
     Texture* t = r->textures.get(Handle{h});
-    if (!t) return snprintf(out, cap, "stale");
-    return snprintf(out, cap, "'%s' %ux%u slot %u %s", name_str(t->name), t->width, t->height, Handle{h}.index(),
+    if (!t) return kv::format(out, cap, "stale");
+    return kv::format(out, cap, "'%s' %ux%u slot %u %s", name_str(t->name), t->width, t->height, Handle{h}.index(),
                     t->resident ? "resident" : "placeholder");
 }
 void* material_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->materials.get(Handle{h}); }
 int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     Renderer* r = (Renderer*)ctx;
     MaterialRecord* m = r->materials.get(Handle{h});
-    if (!m) return snprintf(out, cap, "stale");
-    return snprintf(out, cap, "'%s' %s texture slot %u row %u", name_str(m->name), blend_mode_name(m->blend), renderer_texture_slot(r, m->texture), Handle{h}.index());
+    if (!m) return kv::format(out, cap, "stale");
+    return kv::format(out, cap, "'%s' %s texture slot %u row %u", name_str(m->name), blend_mode_name(m->blend), renderer_texture_slot(r, m->texture), Handle{h}.index());
 }
 const char* texture_name_of(kv_handle h, void* ctx) {
     Texture* t = ((Renderer*)ctx)->textures.get(Handle{h});

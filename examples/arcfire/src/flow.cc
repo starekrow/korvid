@@ -19,6 +19,7 @@
 // so its hashes can be compared with the first's, tick for tick.
 #include "arcfire.h"
 #include "korvid/core/log.h"
+#include "korvid/core/format.h"
 #include "korvid/core/name.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/platform_hid/actions.h"
@@ -64,7 +65,7 @@ void open_title(Engine& e, Game& g) {
     g.demo = false;
     g.idle_ticks = 0;
     char note[64];
-    snprintf(note, sizeof note, "ARCADE STARTS AT %s", position_name((u32)g.start));
+    format(note, sizeof note, "ARCADE STARTS AT %s", position_name((u32)g.start));
     g.scores_from_title = false;
     for (char* c = note; *c; ++c) *c = (char)(*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
     ui_model_set_str(e, "title_note", note);
@@ -162,7 +163,7 @@ void run_begin(TickContext& ctx, Game& g) {
     g.result = RunResult{};
     if (g.front_door) { // a recording of a run the title chose says how to start it
         char note[96];
-        snprintf(note, sizeof note, "%s %s --difficulty %s", g.arcade ? "--arcade" : "--stage", g.arcade ? "" : k_stage_names[g.stage_at], position_name((u32)g.start));
+        format(note, sizeof note, "%s %s --difficulty %s", g.arcade ? "--arcade" : "--stage", g.arcade ? "" : k_stage_names[g.stage_at], position_name((u32)g.start));
         frameloop_record_note(e, note);
     }
     g.mode = Mode::Run;
@@ -302,7 +303,7 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
                 u32 picked = stage_named(item);
                 g.select_stage = picked < kStageCount ? picked : 0;
                 char upper_name[32];
-                snprintf(upper_name, sizeof upper_name, "%s", g.stages[g.select_stage].name);
+                format(upper_name, sizeof upper_name, "%s", g.stages[g.select_stage].name);
                 ui_model_set_str(e, "select_stage", upper_name);
                 g.difficulty_screen = open_menu(e, g, "difficulty", 114, position_name((u32)g.start));
                 ui_set_visible(e, g.select_screen, "column", false);

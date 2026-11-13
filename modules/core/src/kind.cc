@@ -1,8 +1,8 @@
 #include "korvid/core/kind.h"
+#include "korvid/core/format.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/profile.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -96,9 +96,9 @@ bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentD
         Attachment& a = attachments.push(Attachment{});
         a.desc = cd;
         a.rows.stride = (cd->size + cd->align - 1) / cd->align * cd->align;
-        snprintf(a.resource_name, sizeof a.resource_name, "%s.@%s", full_name, cd->name);
+        format(a.resource_name, sizeof a.resource_name, "%s.@%s", full_name, cd->name);
     }
-    if (d.props) snprintf(props_resource_name, sizeof props_resource_name, "%s.@props", full_name);
+    if (d.props) format(props_resource_name, sizeof props_resource_name, "%s.@props", full_name);
     columns.reserve(comps.len); // never grows again: resource names are pointed at
     for (const ComponentDesc* cd : comps) {
         Column c;
@@ -111,7 +111,7 @@ bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentD
             c.prev = (u8*)os_reserve(bytes);
             if (!c.prev) { KV_ERROR("kind", "'%s': cannot reserve %llu bytes for %s (prev)", name, (unsigned long long)bytes, cd->name); return false; }
         }
-        snprintf(c.resource_name, sizeof c.resource_name, "%s.%s", name, cd->name);
+        format(c.resource_name, sizeof c.resource_name, "%s.%s", name, cd->name);
         columns.push(c);
     }
     kv_handle_kind_desc kd{};
@@ -413,7 +413,7 @@ u32 Table::props_of(Handle h, u32* first) const {
 
 int Table::describe(Handle h, char* out, usize cap) const {
     if (!valid(h))
-        return snprintf(out, cap, "%s (%u live)", h.index() < rows() ? "stale" : "out of range", live());
+        return format(out, cap, "%s (%u live)", h.index() < rows() ? "stale" : "out of range", live());
     usize at = 0;
     // A separator goes in only with room for a terminator after it, and counts either way,
     // as snprintf's length does. (Written into the last byte, it left the text unterminated
@@ -444,11 +444,11 @@ int Table::describe(Handle h, char* out, usize cap) const {
         usize room = at < cap ? cap - at : 0;
         const char* lead = k ? ", " : " @props{";
         switch (p.value.type) {
-        case PropType::Int:    n = snprintf(dst, room, "%s%s=%lld", lead, name_str(p.key), (long long)p.value.i); break;
-        case PropType::Float:  n = snprintf(dst, room, "%s%s=%g", lead, name_str(p.key), p.value.f); break;
-        case PropType::Bool:   n = snprintf(dst, room, "%s%s=%s", lead, name_str(p.key), p.value.i ? "true" : "false"); break;
-        case PropType::String: n = snprintf(dst, room, "%s%s=\"%s\"", lead, name_str(p.key), name_str(Name{p.value.bits})); break;
-        case PropType::Handle: n = snprintf(dst, room, "%s%s=%s", lead, name_str(p.key), kind_name(Handle{p.value.bits})); break;
+        case PropType::Int:    n = format(dst, room, "%s%s=%lld", lead, name_str(p.key), (long long)p.value.i); break;
+        case PropType::Float:  n = format(dst, room, "%s%s=%g", lead, name_str(p.key), p.value.f); break;
+        case PropType::Bool:   n = format(dst, room, "%s%s=%s", lead, name_str(p.key), p.value.i ? "true" : "false"); break;
+        case PropType::String: n = format(dst, room, "%s%s=\"%s\"", lead, name_str(p.key), name_str(Name{p.value.bits})); break;
+        case PropType::Handle: n = format(dst, room, "%s%s=%s", lead, name_str(p.key), kind_name(Handle{p.value.bits})); break;
         case PropType::None:   break;
         }
         if (n > 0) at += (usize)n;

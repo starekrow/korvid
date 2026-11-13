@@ -1,4 +1,5 @@
 #include "korvid/asset/font.h"
+#include "korvid/core/format.h"
 #include "korvid/core/sort.h"
 #include "korvid/asset/module.h"
 #include "korvid/core/engine.h"
@@ -12,7 +13,6 @@
 #include "korvid/render/renderer.h"
 #include "asset_internal.h"
 #include "vendor/stb_truetype.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,9 +34,9 @@ kv_handle font_find_name(const char* name, void* ctx) {
 }
 int font_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     FontAsset* f = ((AssetState_*)ctx)->fonts.get(Handle{h});
-    if (!f) return snprintf(out, cap, "stale");
+    if (!f) return format(out, cap, "stale");
     const char* st = f->state == AssetState::Ready ? "ready" : f->state == AssetState::Failed ? "failed" : "pending";
-    return snprintf(out, cap, "'%s' %gpx %s atlas %ux%u", f->path, f->px, st, f->atlas_width, f->atlas_height);
+    return format(out, cap, "'%s' %gpx %s atlas %ux%u", f->path, f->px, st, f->atlas_width, f->atlas_height);
 }
 
 void fail_font(Engine& e, AssetState_& s, Handle h, FontAsset& f, AssetError err, const char* detail) {
@@ -338,8 +338,8 @@ Handle font_load(Engine& e, AssetState_& st, const char* path, const FontDesc& d
         default_hash = hash_bytes(d.data, sizeof(FontRange) * d.len);
     }
     char key[KV_ASSET_PATH_MAX + 40];
-    if (set_hash == default_hash) snprintf(key, sizeof key, "%s@%g", path, px);
-    else snprintf(key, sizeof key, "%s@%g#%016llx", path, px, (unsigned long long)set_hash);
+    if (set_hash == default_hash) format(key, sizeof key, "%s@%g", path, px);
+    else format(key, sizeof key, "%s@%g#%016llx", path, px, (unsigned long long)set_hash);
     Name name = name_intern(key);
     if (const Handle* existing = s->font_by_key.find(name)) return *existing;
 
@@ -357,7 +357,7 @@ Handle font_load(Engine& e, AssetState_& st, const char* path, const FontDesc& d
     md.blend   = BlendMode::Alpha;
     md.filter  = TextureFilter::Linear; // glyphs are drawn at any scale
     char material_name[KV_ASSET_PATH_MAX + 48];
-    snprintf(material_name, sizeof material_name, "font:%s", key);
+    format(material_name, sizeof material_name, "font:%s", key);
     md.name    = material_name;
     f.material = renderer_material_create(r, md);
     if (f.material.is_null()) { renderer_texture_destroy(r, f.texture); return Handle{}; }

@@ -15,6 +15,7 @@
 // ticks are driven through the frame loop with a render after every batch of ticks:
 // memory can behave differently with a GPU's fingers in it.
 #include "korvid/cpukiller/module.h"
+#include "korvid/core/format.h"
 #include "korvid/core/atomic.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/core/arena.h"
@@ -27,7 +28,6 @@
 #include "korvid/core/profile.h"
 #include "korvid/core/thread.h"
 #include "korvid/core/time.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,10 +50,10 @@ u32 g_row_count = 0;
 void report(const char* name, const char* detail, f64 serial_ms, f64 parallel_ms, const char* note) {
     if (g_row_count >= KV_COUNTOF(g_rows)) return;
     Row& r = g_rows[g_row_count++];
-    snprintf(r.name, sizeof r.name, "%s", name);
-    snprintf(r.detail, sizeof r.detail, "%s", detail);
+    format(r.name, sizeof r.name, "%s", name);
+    format(r.detail, sizeof r.detail, "%s", detail);
     r.serial_ms = serial_ms; r.parallel_ms = parallel_ms;
-    snprintf(r.note, sizeof r.note, "%s", note);
+    format(r.note, sizeof r.note, "%s", note);
 }
 
 // Accounting must come back to where it was, or something leaked across threads.
@@ -91,8 +91,8 @@ void scenario_overhead() {
         for (u32 r = 0; r < reps; ++r) jobs_run(chunks, 1, nothing, nullptr);
         f64 ser = ms_since(t0);
         char detail[64], note[160];
-        snprintf(detail, sizeof detail, "%u empty chunks x %u", chunks, reps);
-        snprintf(note, sizeof note, "%.2f us/batch, %.0f ns/chunk, caller ran %llu%%, %llu helper waits",
+        format(detail, sizeof detail, "%u empty chunks x %u", chunks, reps);
+        format(note, sizeof note, "%.2f us/batch, %.0f ns/chunk, caller ran %llu%%, %llu helper waits",
                  par * 1e3 / reps, par * 1e6 / reps / chunks, (unsigned long long)(st.tasks ? 100 * st.tasks_by_caller / st.tasks : 0),
                  (unsigned long long)st.helper_waits / reps);
         report("dispatch", detail, ser, par, note);
@@ -128,8 +128,8 @@ void scenario_contention() {
         f64 par = ms_since(t0);
         JobStats st = jobs_stats();
         char detail[64], note[160];
-        snprintf(detail, sizeof detail, "%u items, grain %u (%u chunks)", total_items, grain, jobs_chunks(total_items, grain));
-        snprintf(note, sizeof note, "speedup %.1fx of %u, %llu worker waits, caller ran %llu%%", ser / par, g_threads,
+        format(detail, sizeof detail, "%u items, grain %u (%u chunks)", total_items, grain, jobs_chunks(total_items, grain));
+        format(note, sizeof note, "speedup %.1fx of %u, %llu worker waits, caller ran %llu%%", ser / par, g_threads,
                  (unsigned long long)st.worker_waits, (unsigned long long)(st.tasks ? 100 * st.tasks_by_caller / st.tasks : 0));
         report("contention", detail, ser, par, note);
     }
@@ -161,8 +161,8 @@ void scenario_nested() {
     f64 par = ms_since(t0);
     JobStats st = jobs_stats();
     char detail[64], note[160];
-    snprintf(detail, sizeof detail, "%u outer x %u inner chunks", outer, n.inner);
-    snprintf(note, sizeof note, "speedup %.1fx, %llu batches, %llu helper waits", ser / par, (unsigned long long)st.batches, (unsigned long long)st.helper_waits);
+    format(detail, sizeof detail, "%u outer x %u inner chunks", outer, n.inner);
+    format(note, sizeof note, "speedup %.1fx, %llu batches, %llu helper waits", ser / par, (unsigned long long)st.batches, (unsigned long long)st.helper_waits);
     report("nested", detail, ser, par, note);
 }
 
@@ -243,8 +243,8 @@ void run_memory_case(const char* name, u32 count, u32 grain, JobFn fn, void* use
     f64 par = ms_since(t0);
     bool ok2 = mem_settled(name);
     char detail[64], note[160];
-    snprintf(detail, sizeof detail, "%llu %s", (unsigned long long)ops, unit);
-    snprintf(note, sizeof note, "speedup %.1fx, %.1f M%s/s parallel%s", ser / par, (f64)ops / par / 1e3, unit, ok1 && ok2 ? "" : ", LEAK");
+    format(detail, sizeof detail, "%llu %s", (unsigned long long)ops, unit);
+    format(note, sizeof note, "speedup %.1fx, %.1f M%s/s parallel%s", ser / par, (f64)ops / par / 1e3, unit, ok1 && ok2 ? "" : ", LEAK");
     report(name, detail, ser, par, note);
 }
 
@@ -271,8 +271,8 @@ void scenario_memory() {
     bool ok2 = mem_settled("mem remote-free");
     free_items(mem_general(), r.slots, chunks * per);
     char detail[64], note[160];
-    snprintf(detail, sizeof detail, "%llu allocs freed by another chunk", (unsigned long long)chunks * per);
-    snprintf(note, sizeof note, "speedup %.1fx, %.1f M allocs+frees/s%s", ser / par, (f64)chunks * per / par / 1e3, ok1 && ok2 ? "" : ", LEAK");
+    format(detail, sizeof detail, "%llu allocs freed by another chunk", (unsigned long long)chunks * per);
+    format(note, sizeof note, "speedup %.1fx, %.1f M allocs+frees/s%s", ser / par, (f64)chunks * per / par / 1e3, ok1 && ok2 ? "" : ", LEAK");
     report("mem remote-free", detail, ser, par, note);
 
     u32 scopes = g_quick ? 4000 : 20000;
@@ -350,22 +350,22 @@ void scenario_engine() {
     EngineRun many = run_engine(g_threads, ticks, g_window); // in window mode the other scenarios run in here
     EngineRun one  = run_engine(1, ticks, false);
     char detail[64], note[160];
-    snprintf(detail, sizeof detail, "%u bodies, %u ticks%s", g_bodies, ticks, g_window ? ", window" : "");
-    snprintf(note, sizeof note, "%.0f -> %.0f ticks/s, speedup %.1fx, hashes %s%s", ticks / (one.ms / 1e3), ticks / (many.ms / 1e3),
+    format(detail, sizeof detail, "%u bodies, %u ticks%s", g_bodies, ticks, g_window ? ", window" : "");
+    format(note, sizeof note, "%.0f -> %.0f ticks/s, speedup %.1fx, hashes %s%s", ticks / (one.ms / 1e3), ticks / (many.ms / 1e3),
              one.ms / many.ms, one.hash == many.hash ? "EQUAL" : "DIFFER", g_window ? ", a render per 16 ticks" : "");
     report("engine", detail, one.ms, many.ms, note);
     if (one.hash != many.hash) KV_ERROR("cpukiller", "state hash differs between 1 and %u threads: %016llx vs %016llx",
                                         g_threads, (unsigned long long)one.hash, (unsigned long long)many.hash);
     // Where the ticks went, from the profiler: the top zones of each run, and the workers'
     // time split into busy and waiting.
-    printf("\nengine breakdown (%u ticks):\n", ticks);
-    printf("  %-32s %10s %10s\n", "zone", "1 thread", "all");
+    print("\nengine breakdown (%u ticks):\n", ticks);
+    print("  %-32s %10s %10s\n", "zone", "1 thread", "all");
     for (u32 i = 0; i < 5 && i < kTop && one.top[i]; ++i) {
         f64 m = 0;
         for (u32 k = 0; k < kTop; ++k) if (many.top[k] && strcmp(many.top[k], one.top[i]) == 0) m = many.top_ms[k];
-        printf("  %-32s %10.1f %10.1f  ms, summed over threads\n", one.top[i], one.top_ms[i], m);
+        print("  %-32s %10.1f %10.1f  ms, summed over threads\n", one.top[i], one.top_ms[i], m);
     }
-    printf("  %-32s %10s %10.1f  ms busy, %.1f ms waiting (%.0f%% of worker time)\n", "workers", "", many.busy_ms, many.wait_ms,
+    print("  %-32s %10s %10.1f  ms busy, %.1f ms waiting (%.0f%% of worker time)\n", "workers", "", many.busy_ms, many.wait_ms,
            many.busy_ms + many.wait_ms > 0 ? 100.0 * many.wait_ms / (many.busy_ms + many.wait_ms) : 0.0);
 }
 
@@ -380,14 +380,14 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--quick") == 0) g_quick = true;
         else if (strcmp(argv[i], "--window") == 0) g_window = true;
         else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) g_trace = argv[++i];
-        else { fprintf(stderr, "usage: %s [--threads N] [--bodies N] [--ticks N] [--quick] [--window] [--profile FILE]\n", argv[0]); return 2; }
+        else { print_err("usage: %s [--threads N] [--bodies N] [--ticks N] [--quick] [--window] [--profile FILE]\n", argv[0]); return 2; }
     }
     if (g_threads < 1) g_threads = 1;
     // The profiler is always on here: the breakdown reads it. A trace is written on request.
     prof_enable(true);
     prof_thread_name("main");
     if (g_trace) prof_trace_open(g_trace);
-    printf("cpukiller: %u threads (%u cpus)%s%s\n", g_threads, os_cpu_count(), g_quick ? ", quick" : "", g_window ? ", window" : "");
+    print("cpukiller: %u threads (%u cpus)%s%s\n", g_threads, os_cpu_count(), g_quick ? ", quick" : "", g_window ? ", window" : "");
 
     if (g_window) {
         FrameLoopConfig cfg;
@@ -403,15 +403,15 @@ int main(int argc, char** argv) {
     }
     scenario_engine();
 
-    printf("\n%-16s %-40s %10s %10s  %s\n", "scenario", "what", "serial ms", "par ms", "notes");
+    print("\n%-16s %-40s %10s %10s  %s\n", "scenario", "what", "serial ms", "par ms", "notes");
     for (u32 i = 0; i < g_row_count; ++i) {
         const Row& r = g_rows[i];
-        printf("%-16s %-40s %10.2f %10.2f  %s\n", r.name, r.detail, r.serial_ms, r.parallel_ms, r.note);
+        print("%-16s %-40s %10.2f %10.2f  %s\n", r.name, r.detail, r.serial_ms, r.parallel_ms, r.note);
     }
     prof_collect();
     prof_shutdown();
     MemStats s = mem_stats();
-    printf("\nmemory at exit: %llu live allocations, %llu bytes, %llu KB committed\n",
+    print("\nmemory at exit: %llu live allocations, %llu bytes, %llu KB committed\n",
            (unsigned long long)s.live_allocs, (unsigned long long)s.live_bytes, (unsigned long long)s.committed_bytes / 1024);
     names_shutdown();
     mem_shutdown();

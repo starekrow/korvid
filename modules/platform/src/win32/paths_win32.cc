@@ -3,10 +3,10 @@
 // come back with '/' separators, as the engine writes them everywhere else.
 #include "../os_paths.h"
 #include "korvid/platform/io.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "wide.h"
 #include <shlobj.h>
-#include <stdio.h>
 #include <string.h>
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")
@@ -36,7 +36,7 @@ bool os_pref_path(const char* org, const char* app, char* out, u32 cap) {
     CoTaskMemFree(dir);
     if (!ok) { KV_WARN("platform", "no preference path: too long"); return false; }
     forward_slashes(base);
-    int n = snprintf(out, cap, "%s/%s/%s/", base, org, app);
+    int n = kv::format(out, cap, "%s/%s/%s/", base, org, app);
     if (n <= 0 || (u32)n >= cap) { KV_WARN("platform", "no preference path: too long"); return false; }
     if (!io_make_dirs(out)) { KV_WARN("platform", "no preference path: cannot create %s", out); return false; }
     return true;

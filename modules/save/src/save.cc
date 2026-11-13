@@ -1,8 +1,8 @@
 #include "korvid/save/save.h"
+#include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -105,10 +105,10 @@ void save_handle(SaveWriter& w, Handle h) {
     // run that made things in another order; the rest by slot and generation.
     char text[KV_SAVE_HANDLE_MAX];
     const char* name = kv_handle_name(h.bits);
-    int n = name ? snprintf(text, sizeof text, "%s@%s", kind, name) : snprintf(text, sizeof text, "%s#%u:%u", kind, h.index(), h.gen());
+    int n = name ? format(text, sizeof text, "%s@%s", kind, name) : format(text, sizeof text, "%s#%u:%u", kind, h.index(), h.gen());
     if (n >= (int)sizeof text) {
         KV_WARN("save", "handle name '%s' is too long to save; written by slot", name ? name : "");
-        n = snprintf(text, sizeof text, "%s#%u:%u", kind, h.index(), h.gen());
+        n = format(text, sizeof text, "%s#%u:%u", kind, h.index(), h.gen());
     }
     w.string_value(text, (u32)n);
 }
@@ -225,7 +225,7 @@ void row_members(SaveWriter& w, const Table& t, Handle h, u32 i) {
     for (const Attachment& a : t.attachments) {
         const void* row = t.attached(h, *a.desc->id);
         if (!row) continue;
-        snprintf(key, sizeof key, "@%s", a.desc->name);
+        format(key, sizeof key, "@%s", a.desc->name);
         w.key(key);
         save_fields(w, a.desc->fields, row);
     }
@@ -379,7 +379,7 @@ void fill_row(const JsonDoc& doc, const JsonValue& obj, Table& t, u32 slot, cons
     Handle h = t.handle_at(slot);
     for (const Attachment& a : t.attachments) {
         char key[KV_KIND_NAME_MAX + 2];
-        snprintf(key, sizeof key, "@%s", a.desc->name);
+        format(key, sizeof key, "@%s", a.desc->name);
         const JsonValue* att = json_get(doc, obj, key);
         if (!att || !att->is_object()) continue;
         MemScope scope;

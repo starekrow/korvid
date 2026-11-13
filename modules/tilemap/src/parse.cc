@@ -2,6 +2,7 @@
 // allocator the caller gives (the map's arena): strings, layers, cells, objects,
 // tilesets, tiles, properties, rectangles, frames.
 #include "korvid/tilemap/tilemap.h"
+#include "korvid/core/format.h"
 #include "korvid/core/sort.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/array.h"
@@ -11,7 +12,6 @@
 #include "korvid/pack/zip.h"
 #include "korvid/math/scalar.h"
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -28,7 +28,7 @@ struct Parse {
     bool fail(const char* fmt, ...) KV_PRINTF(2, 3) {
         va_list args;
         va_start(args, fmt);
-        if (cap) vsnprintf(error, cap, fmt, args);
+        if (cap) vformat(error, cap, fmt, args);
         va_end(args);
         return false;
     }
@@ -324,7 +324,7 @@ bool parse_json(Parse& p, const char* json, usize len, JsonDoc& doc) {
 bool tilemap_resolve(const char* base, const char* rel, char* out, usize cap) {
     char joined[512];
     const char* slash = base ? strrchr(base, '/') : nullptr;
-    int n = slash ? snprintf(joined, sizeof joined, "%.*s/%s", (int)(slash - base), base, rel) : snprintf(joined, sizeof joined, "%s", rel);
+    int n = slash ? format(joined, sizeof joined, "%.*s/%s", (int)(slash - base), base, rel) : format(joined, sizeof joined, "%s", rel);
     if (n < 0 || (usize)n >= sizeof joined) return false;
     // Resolve "..": segments onto a stack.
     char segs[64][128];

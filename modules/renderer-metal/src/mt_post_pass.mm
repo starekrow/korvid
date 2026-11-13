@@ -5,7 +5,7 @@
 // in flight, as Vulkan's does.
 #include "renderer_internal.h"
 #include "korvid/core/time.h"
-#include <stdio.h>
+#include "korvid/core/format.h"
 #include <string.h>
 
 namespace kv {
@@ -63,7 +63,7 @@ bool post_pipeline(Renderer* r) {
     @autoreleasepool {
         MTLRenderPipelineDescriptor* d = [[MTLRenderPipelineDescriptor new] autorelease];
         char label[96];
-        snprintf(label, sizeof label, "post %s", name_str(p.shader));
+        kv::format(label, sizeof label, "post %s", name_str(p.shader));
         d.label            = @(label);
         d.vertexFunction   = p.vertex;
         d.fragmentFunction = p.fragment;

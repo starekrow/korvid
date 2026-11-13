@@ -1,7 +1,7 @@
 #include "korvid/core/component.h"
+#include "korvid/core/format.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/utf8.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -117,33 +117,33 @@ u64 scalar_bits(FieldType t, const u8* p) {
 
 int print_scalar(FieldType t, const u8* p, char* out, usize cap) {
     switch (t) {
-    case FieldType::Bool:   return snprintf(out, cap, "%s", *p ? "true" : "false");
-    case FieldType::U8:     return snprintf(out, cap, "%u", *p);
-    case FieldType::I8:     return snprintf(out, cap, "%d", *(const i8*)p);
-    case FieldType::U16:    { u16 v; memcpy(&v, p, 2); return snprintf(out, cap, "%u", v); }
-    case FieldType::I16:    { i16 v; memcpy(&v, p, 2); return snprintf(out, cap, "%d", v); }
-    case FieldType::U32:    { u32 v; memcpy(&v, p, 4); return snprintf(out, cap, "%u", v); }
-    case FieldType::I32:    { i32 v; memcpy(&v, p, 4); return snprintf(out, cap, "%d", v); }
-    case FieldType::F32:    { f32 v; memcpy(&v, p, 4); return snprintf(out, cap, "%g", (double)v); }
-    case FieldType::U64:    { u64 v; memcpy(&v, p, 8); return snprintf(out, cap, "%llu", (unsigned long long)v); }
-    case FieldType::I64:    { i64 v; memcpy(&v, p, 8); return snprintf(out, cap, "%lld", (long long)v); }
-    case FieldType::F64:    { f64 v; memcpy(&v, p, 8); return snprintf(out, cap, "%g", v); }
+    case FieldType::Bool:   return format(out, cap, "%s", *p ? "true" : "false");
+    case FieldType::U8:     return format(out, cap, "%u", *p);
+    case FieldType::I8:     return format(out, cap, "%d", *(const i8*)p);
+    case FieldType::U16:    { u16 v; memcpy(&v, p, 2); return format(out, cap, "%u", v); }
+    case FieldType::I16:    { i16 v; memcpy(&v, p, 2); return format(out, cap, "%d", v); }
+    case FieldType::U32:    { u32 v; memcpy(&v, p, 4); return format(out, cap, "%u", v); }
+    case FieldType::I32:    { i32 v; memcpy(&v, p, 4); return format(out, cap, "%d", v); }
+    case FieldType::F32:    { f32 v; memcpy(&v, p, 4); return format(out, cap, "%g", (double)v); }
+    case FieldType::U64:    { u64 v; memcpy(&v, p, 8); return format(out, cap, "%llu", (unsigned long long)v); }
+    case FieldType::I64:    { i64 v; memcpy(&v, p, 8); return format(out, cap, "%lld", (long long)v); }
+    case FieldType::F64:    { f64 v; memcpy(&v, p, 8); return format(out, cap, "%g", v); }
     case FieldType::Handle: {
         Handle h; memcpy(&h.bits, p, 8);
-        if (h.is_null()) return snprintf(out, cap, "null");
+        if (h.is_null()) return format(out, cap, "null");
         const char* kind = kv_handle_kind_name(h.kind());
-        return snprintf(out, cap, "%s#%u", kind[0] ? kind : "?", h.index());
+        return format(out, cap, "%s#%u", kind[0] ? kind : "?", h.index());
     }
-    case FieldType::Char: return snprintf(out, cap, "%u", *p); // strings print whole, not here
+    case FieldType::Char: return format(out, cap, "%u", *p); // strings print whole, not here
     case FieldType::Count: break;
     }
-    return snprintf(out, cap, "?");
+    return format(out, cap, "?");
 }
 
 // snprintf-style accumulation: `at` keeps growing past cap so the return value is right.
 struct Out {
     char* buf; usize cap; usize at = 0;
-    void put(const char* s) { int n = snprintf(buf + (at < cap ? at : cap), at < cap ? cap - at : 0, "%s", s); if (n > 0) at += (usize)n; }
+    void put(const char* s) { int n = format(buf + (at < cap ? at : cap), at < cap ? cap - at : 0, "%s", s); if (n > 0) at += (usize)n; }
     void scalar(FieldType t, const u8* p) { int n = print_scalar(t, p, buf + (at < cap ? at : cap), at < cap ? cap - at : 0); if (n > 0) at += (usize)n; }
 };
 
@@ -204,7 +204,7 @@ int schema_describe(const char* name, Span<const FieldDesc> fields, const void* 
 
 int schema_field_string(const FieldDesc& f, const void* row, char* out, usize cap) {
     if (cap) out[0] = 0;
-    if (f.type != FieldType::Char) return snprintf(out, cap, "?");
+    if (f.type != FieldType::Char) return format(out, cap, "?");
     const u8* p = (const u8*)row + f.offset;
     usize at = 0;
     auto put = [&](const char* s, usize n) {
@@ -215,7 +215,7 @@ int schema_field_string(const FieldDesc& f, const void* row, char* out, usize ca
     for (u32 i = 0; i < f.count && p[i]; ++i) {
         char c = (char)p[i];
         if (c == '"' || c == '\\') { char e[2] = {'\\', c}; put(e, 2); }
-        else if ((u8)c < 0x20 || c == 0x7F) { char e[5]; snprintf(e, sizeof e, "\\x%02x", (u8)c); put(e, 4); }
+        else if ((u8)c < 0x20 || c == 0x7F) { char e[5]; format(e, sizeof e, "\\x%02x", (u8)c); put(e, 4); }
         else put(&c, 1);
     }
     put("\"", 1);

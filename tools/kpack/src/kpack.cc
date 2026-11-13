@@ -2,6 +2,7 @@
 // read, or a pack's entries to read back), read through the I/O queue within its
 // budgets, then packed, written, checked or extracted.
 #include "korvid/kpack/module.h"
+#include "korvid/core/format.h"
 #include "korvid/core/array.h"
 #include "korvid/core/cli.h"
 #include "korvid/core/engine.h"
@@ -12,7 +13,6 @@
 #include "korvid/platform/io.h"
 #include "korvid/tool/tool.h"
 #include <stdarg.h>
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -51,9 +51,9 @@ void say(const char* fmt, ...) KV_PRINTF(1, 2);
 void say(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    vfprintf(stdout, fmt, args);
+    vprint(fmt, args);
     va_end(args);
-    fputc('\n', stdout);
+    print("\n");
 }
 
 void reset(KpackState& s) {
@@ -84,8 +84,8 @@ bool add_file(KpackState& s, const char* path) {
     if (rl && strncmp(path, s.root, rl) == 0 && (path[rl] == '/' || s.root[rl - 1] == '/')) rel = path + rl + (path[rl] == '/' ? 1 : 0);
     Item it{};
     if (!pack_normalize(rel, it.name, sizeof it.name)) { KV_ERROR("kpack", "'%s' is not a usable name under '%s'", path, s.root); return false; }
-    int n = path[0] == '/' || rl == 0 || rel != path ? snprintf(it.path, sizeof it.path, "%s", path)
-                                                     : snprintf(it.path, sizeof it.path, "%s/%s", s.root, path);
+    int n = path[0] == '/' || rl == 0 || rel != path ? format(it.path, sizeof it.path, "%s", path)
+                                                     : format(it.path, sizeof it.path, "%s/%s", s.root, path);
     if (n < 0 || (usize)n >= sizeof it.path) { KV_ERROR("kpack", "path too long: '%s'", path); return false; }
     s.items.push(it);
     return true;
@@ -95,7 +95,7 @@ bool add_listed(void* user, const char* relative) {
     KpackState& s = *(KpackState*)user;
     Item it{};
     if (!pack_normalize(relative, it.name, sizeof it.name)) return true; // not a usable name: skipped
-    int n = snprintf(it.path, sizeof it.path, "%s/%s", s.root, relative);
+    int n = format(it.path, sizeof it.path, "%s/%s", s.root, relative);
     if (n < 0 || (usize)n >= sizeof it.path) return true; // too long to read: skipped
     s.items.push(it);
     return true;
@@ -110,13 +110,13 @@ bool items_from_pack(CliContext& ctx, KpackState& s, const char* path) {
         const char* name = pack_entry_name(t, t.entries[i]);
         if (strncmp(name, ".kpak/", 6) == 0) continue;
         Item it{};
-        snprintf(it.name, sizeof it.name, "%s", name);
-        snprintf(it.path, sizeof it.path, "%s", name);
+        format(it.name, sizeof it.name, "%s", name);
+        format(it.path, sizeof it.path, "%s", name);
         it.crc = t.entries[i].crc;
         it.from_mount = true;
         s.items.push(it);
     }
-    snprintf(s.source, sizeof s.source, "%s", path);
+    format(s.source, sizeof s.source, "%s", path);
     return true;
 }
 
@@ -127,8 +127,8 @@ void cmd_pack(CliContext& ctx, Span<const char* const> args) {
     KpackState* s = state(*ctx.engine);
     if (busy(ctx, s)) return;
     if (args.len < 2) { ctx.fail("kpack pack <out.kpak> <root dir> [file | @listfile]...: no files means every file under root"); return; }
-    snprintf(s->out, sizeof s->out, "%s", args[0]);
-    snprintf(s->root, sizeof s->root, "%s", args[1]);
+    format(s->out, sizeof s->out, "%s", args[0]);
+    format(s->root, sizeof s->root, "%s", args[1]);
     usize rl = strlen(s->root);
     while (rl > 1 && s->root[rl - 1] == '/') s->root[--rl] = 0;
     s->op = Op::Pack;
@@ -136,7 +136,7 @@ void cmd_pack(CliContext& ctx, Span<const char* const> args) {
     for (u32 i = 2; i < args.len; ++i) {
         if (args[i][0] == '@') {
             if (s->list[0]) { ctx.fail("one @listfile per run"); reset(*s); return; }
-            snprintf(s->list, sizeof s->list, "%s", args[i] + 1);
+            format(s->list, sizeof s->list, "%s", args[i] + 1);
             s->stage = Stage::ReadList;
         } else if (!add_file(*s, args[i])) { ctx.fail("bad file name '%s'", args[i]); reset(*s); return; }
     }
@@ -155,8 +155,8 @@ void cmd_list(CliContext& ctx, Span<const char* const> args) {
     for (u32 i = 0; i < t.count; ++i) {
         const PackEntry& e = t.entries[i];
         char where[32];
-        if (e.data_offset) snprintf(where, sizeof where, "@%llu%s", (unsigned long long)e.data_offset, e.data_offset % KV_PACK_ALIGN ? "" : " aligned");
-        else snprintf(where, sizeof where, "header @%llu", (unsigned long long)e.header_offset);
+        if (e.data_offset) format(where, sizeof where, "@%llu%s", (unsigned long long)e.data_offset, e.data_offset % KV_PACK_ALIGN ? "" : " aligned");
+        else format(where, sizeof where, "header @%llu", (unsigned long long)e.header_offset);
         ctx.print("%10llu %10llu %-7s %08x %-20s %s", (unsigned long long)e.size, (unsigned long long)e.csize,
                   e.method == ZipStored ? "stored" : e.method == ZipDeflate ? "deflate" : "other", e.crc, where, pack_entry_name(t, e));
     }
@@ -168,7 +168,7 @@ void start_readback(CliContext& ctx, Op op, Span<const char* const> args, u32 wa
     if (busy(ctx, s)) return;
     if (args.len != want) { ctx.fail("%s", usage); return; }
     if (!items_from_pack(ctx, *s, args[0])) { reset(*s); return; }
-    if (want > 1) snprintf(s->out, sizeof s->out, "%s", args[1]);
+    if (want > 1) format(s->out, sizeof s->out, "%s", args[1]);
     s->op = op;
     s->stage = Stage::Read;
 }
@@ -227,7 +227,7 @@ void on_read(Engine& e, KpackState& s, Item& it) {
         it.data = nullptr;
     } else if (s.op == Op::Extract) {
         char path[1024];
-        snprintf(path, sizeof path, "%s/%s", s.out, it.name);
+        format(path, sizeof path, "%s/%s", s.out, it.name);
         if (char* slash = strrchr(path, '/')) { *slash = 0; io_make_dirs(path); *slash = '/'; }
         IoWriteRequest w;
         w.path = path; w.data = it.data; w.size = it.size; w.alloc = s.general; w.user = 2;

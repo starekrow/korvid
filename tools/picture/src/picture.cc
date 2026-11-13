@@ -12,6 +12,7 @@
 // lot. The defaults are a first guess, to be fixed by the first comparison of two backends
 // and not loosened after (docs/PRDs/Engine-Slice-7-PRD.md, R9).
 #include "korvid/picture/module.h"
+#include "korvid/core/format.h"
 #include "korvid/core/array.h"
 #include "korvid/core/cli.h"
 #include "korvid/core/engine.h"
@@ -23,7 +24,6 @@
 #include "korvid/platform/io.h"
 #include "korvid/tool/tool.h"
 #include <stdarg.h>
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -61,9 +61,9 @@ void say(const char* fmt, ...) KV_PRINTF(1, 2);
 void say(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    vfprintf(stdout, fmt, args);
+    vprint(fmt, args);
     va_end(args);
-    fputc('\n', stdout);
+    print("\n");
 }
 
 void free_pic(PictureState& s, Pic& p) {
@@ -118,7 +118,7 @@ void stem_of(const char* path, char* out, usize cap) {
 
 bool add_pic(PictureState& s, const char* dir, const char* name) {
     Pic p{};
-    int n = dir ? snprintf(p.path, sizeof p.path, "%s/%s", dir, name) : snprintf(p.path, sizeof p.path, "%s", name);
+    int n = dir ? format(p.path, sizeof p.path, "%s/%s", dir, name) : format(p.path, sizeof p.path, "%s", name);
     if (n < 0 || (usize)n >= sizeof p.path) { KV_ERROR("picture", "path too long: '%s'", name); return false; }
     stem_of(name, p.name, sizeof p.name);
     s.pics.push(p);
@@ -168,14 +168,14 @@ void cmd_compare(CliContext& ctx, Span<const char* const> args) {
         if (!strcmp(a, "--threshold") && has_value) { if (!cli_arg_u32(ctx, args[++i], "--threshold", &s->threshold)) return; }
         else if (!strcmp(a, "--max-channel") && has_value) { if (!cli_arg_u32(ctx, args[++i], "--max-channel", &s->max_channel)) return; }
         else if (!strcmp(a, "--max-fraction") && has_value) { if (!cli_arg_f32(ctx, args[++i], "--max-fraction", &s->max_fraction)) return; }
-        else if (!strcmp(a, "--diff") && has_value) snprintf(s->out, sizeof s->out, "%s", args[++i]);
+        else if (!strcmp(a, "--diff") && has_value) format(s->out, sizeof s->out, "%s", args[++i]);
         else if (a[0] == '-' && a[1] == '-') { ctx.fail("%s: unknown option '%s'", usage, a); return; }
         else if (npos < 2) pos[npos++] = a;
         else { ctx.fail("%s", usage); return; }
     }
     if (npos != 2) { ctx.fail("%s", usage); return; }
-    snprintf(s->a, sizeof s->a, "%s", pos[0]);
-    snprintf(s->b, sizeof s->b, "%s", pos[1]);
+    format(s->a, sizeof s->a, "%s", pos[0]);
+    format(s->b, sizeof s->b, "%s", pos[1]);
     bool a_dir = false, b_dir = false;
     if (!gather(ctx, *s, s->a, &a_dir)) { reset(*s); return; }
     s->count_a = s->pics.len;
@@ -200,8 +200,8 @@ void cmd_png(CliContext& ctx, Span<const char* const> args) {
     PictureState* s = state(*ctx.engine);
     if (busy(ctx, s)) return;
     if (args.len != 2) { ctx.fail("picture png <file or dir> <out dir>: every picture as a PNG, to keep as a reference"); return; }
-    snprintf(s->a, sizeof s->a, "%s", args[0]);
-    snprintf(s->out, sizeof s->out, "%s", args[1]);
+    format(s->a, sizeof s->a, "%s", args[0]);
+    format(s->out, sizeof s->out, "%s", args[1]);
     bool dir = false;
     if (!gather(ctx, *s, s->a, &dir)) { reset(*s); return; }
     s->count_a = s->pics.len;
@@ -238,7 +238,7 @@ void write_png(Engine& e, PictureState& s, const char* name, const u8* rgb, u32 
     file.alloc = s.general;
     const char* why = nullptr;
     char path[1024];
-    snprintf(path, sizeof path, "%s/%s", s.out, name);
+    format(path, sizeof path, "%s/%s", s.out, name);
     if (!png_encode(rgb, w, h, 3, file, &why)) { KV_ERROR("picture", "%s: %s", path, why); ++s.write_failures; return; }
     IoWriteRequest r;
     r.path = path; r.data = file.data; r.size = file.len; r.alloc = s.general; r.user = 1;
@@ -271,7 +271,7 @@ bool compare(Engine& e, PictureState& s, const Pic& a, const Pic& b) {
     if (first >= 0) {
         const u8* pa = a.rgb + first * 3;
         const u8* pb = b.rgb + first * 3;
-        snprintf(where, sizeof where, "; first at (%u, %u): (%u, %u, %u) against (%u, %u, %u)", (u32)(first % a.width), (u32)(first / a.width),
+        format(where, sizeof where, "; first at (%u, %u): (%u, %u, %u) against (%u, %u, %u)", (u32)(first % a.width), (u32)(first / a.width),
                  pa[0], pa[1], pa[2], pb[0], pb[1], pb[2]);
     }
     say("%s %-28s largest channel difference %3u, %llu pixels past %u (%.4f%%)%s", ok ? "ok  " : "FAIL", a.name, worst,
@@ -285,7 +285,7 @@ bool compare(Engine& e, PictureState& s, const Pic& a, const Pic& b) {
             diff[i] = (u8)(x * 8 > 255 ? 255 : x * 8);
         }
         char name[160];
-        snprintf(name, sizeof name, "%s.diff.png", a.name);
+        format(name, sizeof name, "%s.diff.png", a.name);
         write_png(e, s, name, diff, a.width, a.height);
         free_in(s.general, diff, n * 3);
     }
@@ -300,7 +300,7 @@ void work(Engine& e, PictureState& s) {
             const Pic& p = s.pics[i];
             if (!p.ok) continue;
             char name[160];
-            snprintf(name, sizeof name, "%s.png", p.name);
+            format(name, sizeof name, "%s.png", p.name);
             write_png(e, s, name, p.rgb, p.width, p.height);
         }
     } else {

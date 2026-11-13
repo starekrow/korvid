@@ -2,6 +2,7 @@
 // nine slices, images, meters, and rich text glyph by glyph with its effects.
 #include "ui_internal.h"
 #include "korvid/asset/font.h"
+#include "korvid/core/format.h"
 #include "korvid/asset/material.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/hash.h"
@@ -9,7 +10,6 @@
 #include "korvid/core/utf8.h"
 #include "korvid/render/renderer.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -472,8 +472,8 @@ void emit_node(Ctx& c, u32 i) {
 void ui_model_text(UiState_& s, const char* key, char* out, usize cap) {
     const UiModelValue* v = s.model.find(name_lookup(key).hash);
     if (!v) { out[0] = 0; return; }
-    if (v->type == 0) snprintf(out, cap, "%lld", (long long)v->i);
-    else if (v->type == 1) snprintf(out, cap, "%g", v->f);
+    if (v->type == 0) format(out, cap, "%lld", (long long)v->i);
+    else if (v->type == 1) format(out, cap, "%g", v->f);
     else utf8_copy(out, cap, name_str(v->s));
 }
 

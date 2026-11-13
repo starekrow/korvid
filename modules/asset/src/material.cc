@@ -1,4 +1,5 @@
 #include "korvid/asset/material.h"
+#include "korvid/core/format.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/cli.h"
 #include "korvid/core/engine.h"
@@ -9,7 +10,6 @@
 #include "korvid/platform/io.h"
 #include "korvid/render/renderer.h"
 #include "asset_internal.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -54,7 +54,7 @@ bool material_parse(const char* text, usize len, MaterialDesc& desc, char* textu
 }
 
 int material_format(const MaterialDesc& desc, const char* texture_path, char* out, usize cap) {
-    return snprintf(out, cap, "{ \"texture\": \"%s\", \"blend\": \"%s\", \"filter\": \"%s\", \"tint\": [%g, %g, %g, %g], \"params\": [%g, %g, %g, %g, %g, %g, %g, %g] }",
+    return format(out, cap, "{ \"texture\": \"%s\", \"blend\": \"%s\", \"filter\": \"%s\", \"tint\": [%g, %g, %g, %g], \"params\": [%g, %g, %g, %g, %g, %g, %g, %g] }",
                     texture_path ? texture_path : "", blend_mode_name(desc.blend), desc.filter == TextureFilter::Linear ? "linear" : "nearest",
                     desc.tint.r, desc.tint.g, desc.tint.b, desc.tint.a,
                     desc.params[0], desc.params[1], desc.params[2], desc.params[3],
@@ -73,9 +73,9 @@ kv_handle material_find_name(const char* name, void* ctx) {
 }
 int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     MaterialAsset* m = ((AssetState_*)ctx)->materials.get(Handle{h});
-    if (!m) return snprintf(out, cap, "stale");
+    if (!m) return format(out, cap, "stale");
     const char* st = m->state == AssetState::Ready ? "ready" : m->state == AssetState::Failed ? "failed" : "pending";
-    return snprintf(out, cap, "'%s' %s %s texture '%s'", m->path, st, blend_mode_name(m->desc.blend), m->texture_path);
+    return format(out, cap, "'%s' %s %s texture '%s'", m->path, st, blend_mode_name(m->desc.blend), m->texture_path);
 }
 
 void fail_material(Engine& e, AssetState_& s, Handle h, MaterialAsset& m, AssetError err, const char* detail) {
@@ -155,7 +155,7 @@ void asset_materials_pump(TickContext& ctx) {
         free_in(s.general, c.data, c.size);
         if (!ok) {
             char detail[160];
-            snprintf(detail, sizeof detail, "%s (byte %u)", why, at);
+            format(detail, sizeof detail, "%s (byte %u)", why, at);
             fail_material(e, s, h, *m, AssetError::Parse, detail);
             continue;
         }
@@ -236,7 +236,7 @@ Handle asset_material_for_texture(Engine& e, Handle texture_asset, BlendMode ble
     const TextureAsset* t = s ? asset_texture(e, texture_asset) : nullptr;
     if (!t || !r) { KV_ERROR("asset", "asset_material_for_texture: %s", !t ? "not a texture asset" : "no renderer"); return Handle{}; }
     char path[KV_ASSET_PATH_MAX];
-    int n = snprintf(path, sizeof path, "%s:%s%s", t->path, blend_mode_name(blend), filter == TextureFilter::Linear ? ":linear" : "");
+    int n = format(path, sizeof path, "%s:%s%s", t->path, blend_mode_name(blend), filter == TextureFilter::Linear ? ":linear" : "");
     if (n < 0 || (usize)n >= sizeof path) { KV_ERROR("asset", "material name too long for '%s'", t->path); return Handle{}; }
     Name name = name_intern(path);
     if (const Handle* existing = s->material_by_path.find(name)) return asset_hold(*s, scope, *existing);

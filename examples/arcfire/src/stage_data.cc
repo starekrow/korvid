@@ -23,8 +23,8 @@
 // Marks are sorted by distance here, so the file may list them in any order.
 #include "arcfire.h"
 #include "korvid/core/json.h"
+#include "korvid/core/format.h"
 #include "korvid/core/memory.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv::arcfire {
@@ -40,7 +40,7 @@ u32 stage_named(const char* name) {
 namespace {
 
 bool fail(char* why, usize cap, const char* text) {
-    snprintf(why, cap, "%s", text);
+    format(why, cap, "%s", text);
     return false;
 }
 
@@ -85,15 +85,15 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
     MemScope scope;
     JsonDoc doc;
     if (!json_parse(text, len, mem_scratch(), doc)) {
-        snprintf(why, why_cap, "%s at byte %u", doc.error, doc.error_at);
+        format(why, why_cap, "%s at byte %u", doc.error, doc.error_at);
         return false;
     }
     const JsonValue& root = doc.root();
     if (!root.is_object()) return fail(why, why_cap, "a stage is an object");
     out = StageDef{};
-    snprintf(out.name, sizeof out.name, "%s", json_string(json_get(doc, root, "name"), "Stage"));
+    format(out.name, sizeof out.name, "%s", json_string(json_get(doc, root, "name"), "Stage"));
     out.speed = (f32)json_number(json_get(doc, root, "speed"), 1.0);
-    snprintf(out.map, sizeof out.map, "%s", json_string(json_get(doc, root, "map"), ""));
+    format(out.map, sizeof out.map, "%s", json_string(json_get(doc, root, "map"), ""));
     out.battle = json_bool(json_get(doc, root, "battle"), false);
     if (const JsonValue* planes = json_get(doc, root, "planes")) {
         out.planes = 0;
@@ -120,7 +120,7 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             pts[n++] = point2{v[0], v[1]};
         }
         if (n < 2) return fail(why, why_cap, "a path has two points or more");
-        snprintf(out.path_names[out.path_count], sizeof out.path_names[0], "%s", p->key);
+        format(out.path_names[out.path_count], sizeof out.path_names[0], "%s", p->key);
         path_build(out.paths[out.path_count++], pts, n);
     }
 
@@ -139,19 +139,19 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             d.path = kMaxPaths;
             for (u32 i = 0; i < out.path_count; ++i)
                 if (!strcmp(out.path_names[i], path)) d.path = i;
-            if (d.path == kMaxPaths) { snprintf(why, why_cap, "no path \"%s\"", path); return false; }
+            if (d.path == kMaxPaths) { format(why, why_cap, "no path \"%s\"", path); return false; }
             d.count = (u32)json_u64(json_get(doc, *f, "count"), 1);
             d.spacing = (u32)json_u64(json_get(doc, *f, "spacing"), 12);
             d.look = look_named(json_string(json_get(doc, *f, "sprite"), "red"));
             d.health = (i32)json_i64(json_get(doc, *f, "health"), 1);
             d.score = (i32)json_i64(json_get(doc, *f, "score"), 100);
             d.fire_at = (f32)json_number(json_get(doc, *f, "fire_at"), 0.5);
-            snprintf(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *f, "pattern"), d.look == Look::Debris ? "" : "aimed"));
+            format(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *f, "pattern"), d.look == Look::Debris ? "" : "aimed"));
             d.entry = KV_BML_NONE;
             d.speed = (f32)json_number(json_get(doc, *f, "speed"), 3.0);
             // An item carrier: what its last member shot down leaves.
             const char* drop = json_string(json_get(doc, *f, "drop"), "");
-            if (!drop_named(drop, &d.drop)) { snprintf(why, why_cap, "no drop \"%s\" (weapon, spread, beam, storm, lance, power, option, egg)", drop); return false; }
+            if (!drop_named(drop, &d.drop)) { format(why, why_cap, "no drop \"%s\" (weapon, spread, beam, storm, lance, power, option, egg)", drop); return false; }
             mk.kind = MarkKind::Formation;
             mk.index = out.formation_count;
             out.formations[out.formation_count++] = d;
@@ -161,7 +161,7 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             d.x = (f32)json_number(json_get(doc, *gr, "x"), 0.0);
             d.health = (i32)json_i64(json_get(doc, *gr, "health"), 10);
             d.score = (i32)json_i64(json_get(doc, *gr, "score"), 500);
-            snprintf(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *gr, "pattern"), "ring"));
+            format(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *gr, "pattern"), "ring"));
             d.entry = KV_BML_NONE;
             mk.kind = MarkKind::Ground;
             mk.index = out.ground_count;
@@ -177,10 +177,10 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             d.cell = (u32)json_u64(json_get(doc, *sg, "cell"), 0);
             d.health = (i32)json_i64(json_get(doc, *sg, "health"), 14);
             d.score = (i32)json_i64(json_get(doc, *sg, "score"), 500);
-            snprintf(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *sg, "pattern"), "ring"));
+            format(d.pattern, sizeof d.pattern, "%s", json_string(json_get(doc, *sg, "pattern"), "ring"));
             d.entry = KV_BML_NONE;
             const char* drop = json_string(json_get(doc, *sg, "drop"), "");
-            if (!drop_named(drop, &d.drop)) { snprintf(why, why_cap, "no drop \"%s\"", drop); return false; }
+            if (!drop_named(drop, &d.drop)) { format(why, why_cap, "no drop \"%s\"", drop); return false; }
             if (d.cell > 1) return fail(why, why_cap, "a segment's cell is 0 (a truss) or 1 (a module)");
             mk.kind = MarkKind::Segment;
             mk.index = out.segment_count;
@@ -193,7 +193,7 @@ bool stage_parse(const char* text, usize len, StageDef& out, char* why, usize wh
             const JsonValue* one = boss->is_array() ? json_first(doc, *boss) : boss;
             for (; one; one = boss->is_array() ? json_next(doc, *one) : nullptr) {
                 if (out.boss_mark_count == kMaxBosses) return fail(why, why_cap, "too many bosses");
-                snprintf(out.boss_names[out.boss_mark_count++], sizeof out.boss_names[0], "%s", json_string(one, ""));
+                format(out.boss_names[out.boss_mark_count++], sizeof out.boss_names[0], "%s", json_string(one, ""));
             }
             mk.value = (f32)(out.boss_mark_count - mk.index);
             if (mk.value < 1.0f) return fail(why, why_cap, "a boss mark names a boss");

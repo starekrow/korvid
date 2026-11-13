@@ -5,10 +5,10 @@
 // time) a mark comes, never which tick of the stage's own clock it comes on.
 #include "arcfire.h"
 #include "korvid/asset/blob.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 
 namespace kv::arcfire {
 
@@ -20,19 +20,19 @@ bool resolve_stage(const Game& g, StageDef& st, char* why, usize cap) {
     for (u32 i = 0; i < st.formation_count; ++i) {
         FormationDef& f = st.formations[i];
         if (!f.pattern[0]) { f.entry = KV_BML_NONE; continue; }
-        if ((f.entry = bml_find(g.lib, f.pattern)) == KV_BML_NONE) { snprintf(why, cap, "no pattern \"%s\"", f.pattern); return false; }
+        if ((f.entry = bml_find(g.lib, f.pattern)) == KV_BML_NONE) { format(why, cap, "no pattern \"%s\"", f.pattern); return false; }
     }
     for (u32 i = 0; i < st.ground_count; ++i) {
         GroundDef& gd = st.grounds[i];
-        if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "no pattern \"%s\"", gd.pattern); return false; }
+        if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { format(why, cap, "no pattern \"%s\"", gd.pattern); return false; }
     }
     for (u32 i = 0; i < st.map_ground_count; ++i) {
         GroundDef& gd = st.map_grounds[i];
-        if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "the map's enemy: no pattern \"%s\"", gd.pattern); return false; }
+        if ((gd.entry = bml_find(g.lib, gd.pattern)) == KV_BML_NONE) { format(why, cap, "the map's enemy: no pattern \"%s\"", gd.pattern); return false; }
     }
     for (u32 i = 0; i < st.segment_count; ++i) {
         SegmentDef& sd = st.segments[i];
-        if ((sd.entry = bml_find(g.lib, sd.pattern)) == KV_BML_NONE) { snprintf(why, cap, "a segment: no pattern \"%s\"", sd.pattern); return false; }
+        if ((sd.entry = bml_find(g.lib, sd.pattern)) == KV_BML_NONE) { format(why, cap, "a segment: no pattern \"%s\"", sd.pattern); return false; }
     }
     return true;
 }
@@ -42,26 +42,26 @@ bool resolve_patterns(Game& g, char* why, usize cap) {
     for (u32 b = 0; b < g.boss_count; ++b) {
         BossDef& def = g.bosses[b];
         if (def.stomp[0] && (def.stomp_entry = bml_find(g.lib, def.stomp)) == KV_BML_NONE) {
-            snprintf(why, cap, "boss %s: no stomp pattern \"%s\"", def.name, def.stomp);
+            format(why, cap, "boss %s: no stomp pattern \"%s\"", def.name, def.stomp);
             return false;
         }
         for (u32 i = 0; i < def.part_count; ++i) {
             PartDef& p = g.bosses[b].parts[i];
             for (u32 k = 0; k < p.pattern_count; ++k)
                 if ((p.entries[k] = bml_find(g.lib, p.patterns[k])) == KV_BML_NONE) {
-                    snprintf(why, cap, "boss %s, part %s: no pattern \"%s\"", g.bosses[b].name, p.name, p.patterns[k]);
+                    format(why, cap, "boss %s, part %s: no pattern \"%s\"", g.bosses[b].name, p.name, p.patterns[k]);
                     return false;
                 }
         }
     }
-    if (g.bench[0] && (g.bench_entry = bml_find(g.lib, g.bench)) == KV_BML_NONE) { snprintf(why, cap, "--bench: no pattern \"%s\"", g.bench); return false; }
+    if (g.bench[0] && (g.bench_entry = bml_find(g.lib, g.bench)) == KV_BML_NONE) { format(why, cap, "--bench: no pattern \"%s\"", g.bench); return false; }
     return true;
 }
 
 // The bench (--bench NAME): no marks but a far end, a slow scroll for the planes, and one
 // emitter at the top of the field running NAME again and again.
 void bench_stage(Game& g, StageDef& st) {
-    snprintf(st.name, sizeof st.name, "BENCH %.24s", g.bench);
+    format(st.name, sizeof st.name, "BENCH %.24s", g.bench);
     st.speed = 0.6f;
     st.length = 1.0e9f;
     st.formation_count = st.ground_count = st.map_ground_count = st.boss_mark_count = st.segment_count = 0;
@@ -351,8 +351,8 @@ void on_stage_end(TickContext& ctx, Span<const StageEnd> ends) {
         // no sim tick passes between); every run's last hashed tick is this one.
         if (g.demo) { run_over(ctx, g); continue; }
         char label[48] = "";
-        if (onward && next_stage > stage_row[0].index) snprintf(label, sizeof label, "NEXT: STAGE %u", next_stage + 1);
-        else if (onward || loop) snprintf(label, sizeof label, "NEXT ROUND: %s", position_name((u32)next));
+        if (onward && next_stage > stage_row[0].index) format(label, sizeof label, "NEXT: STAGE %u", next_stage + 1);
+        else if (onward || loop) format(label, sizeof label, "NEXT ROUND: %s", position_name((u32)next));
         hud_stage_clear(*ctx.engine, g, bonus, label[0] ? label : nullptr);
         if (onward) ctx.schedule(StageNext{next_stage, (u32)next}, ctx.tick + kRunOverTicks);
         else if (!loop) ctx.schedule(RunOver{se.loops, 0}, ctx.tick + kRunOverTicks);

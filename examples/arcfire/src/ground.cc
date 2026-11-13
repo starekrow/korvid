@@ -7,10 +7,10 @@
 // popcorn.
 #include "arcfire.h"
 #include "korvid/asset/scope.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/tilemap/tilemap.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv::arcfire {
@@ -36,8 +36,8 @@ bool bunker_formation(StageDef& st, const TilemapAsset& m, const MapObject& o, u
     u32 p = kMaxPaths;
     for (u32 i = 0; i < st.path_count; ++i)
         if (!strcmp(st.path_names[i], path)) p = i;
-    if (p == kMaxPaths) { snprintf(why, cap, "a bunker's path \"%s\" is not one of the stage's", path); return false; }
-    if (st.formation_count == kMaxFormations) { snprintf(why, cap, "too many formations with the bunkers'"); return false; }
+    if (p == kMaxPaths) { format(why, cap, "a bunker's path \"%s\" is not one of the stage's", path); return false; }
+    if (st.formation_count == kMaxFormations) { format(why, cap, "too many formations with the bunkers'"); return false; }
     FormationDef f{};
     f.path = p;
     f.count = (u32)prop_num(m, o, "count", 4);
@@ -47,7 +47,7 @@ bool bunker_formation(StageDef& st, const TilemapAsset& m, const MapObject& o, u
     f.score = 50;
     f.fire_at = 0.3f;
     f.speed = 2.6f;
-    snprintf(f.pattern, sizeof f.pattern, "%s", prop_str(m, o, "launch", "aimed"));
+    format(f.pattern, sizeof f.pattern, "%s", prop_str(m, o, "launch", "aimed"));
     f.entry = KV_BML_NONE;
     *index = st.formation_count;
     st.formations[st.formation_count++] = f;
@@ -60,13 +60,13 @@ bool ground_map_ready(TickContext& ctx, Game& g, StageDef& st, char* why, usize 
     Engine& e = *ctx.engine;
     if (!st.map[0]) return true;
     if (g.map_parsed) { // one map for the game (Shoreline's), read once
-        if (strcmp(st.map, g.stages[0].map) && strcmp(st.map, g.stages[1].map)) { snprintf(why, why_cap, "a second map"); return false; }
+        if (strcmp(st.map, g.stages[0].map) && strcmp(st.map, g.stages[1].map)) { format(why, why_cap, "a second map"); return false; }
         return true;
     }
     if (g.map.is_null()) g.map = tilemap_load(e, st.map, asset_scope_global(e));
     const TilemapAsset* m = tilemap_get(e, g.map);
     if (!m || m->state == AssetState::Pending) return false;
-    if (m->state != AssetState::Ready) { snprintf(why, why_cap, "the map %s did not load", st.map); return false; }
+    if (m->state != AssetState::Ready) { format(why, why_cap, "the map %s did not load", st.map); return false; }
 
     // Where the map is at distance 0: centered on the field, its last row's bottom on the
     // field's bottom, so the map's bottom is the stage's start and its top the stage's end.
@@ -78,7 +78,7 @@ bool ground_map_ready(TickContext& ctx, Game& g, StageDef& st, char* why, usize 
     if (const MapLayer* layer = tilemap_layer_find(*m, "enemies")) {
         for (u32 k = 0; k < layer->objects.count; ++k) {
             const MapObject& o = m->objects[layer->objects.first + k];
-            if (st.map_ground_count == kMaxGrounds) { snprintf(why, why_cap, "the map has more than %u enemies", kMaxGrounds); return false; }
+            if (st.map_ground_count == kMaxGrounds) { format(why, why_cap, "the map has more than %u enemies", kMaxGrounds); return false; }
             GroundDef gd{};
             gd.kind = !strcmp(o.name, "tank") ? GroundTank : !strcmp(o.name, "bunker") ? GroundBunker : GroundTurret;
             gd.x = g.map_origin.x + o.x * kMapScale;
@@ -86,8 +86,8 @@ bool ground_map_ready(TickContext& ctx, Game& g, StageDef& st, char* why, usize 
             gd.health = (i32)prop_num(*m, o, "health", 12);
             gd.score = (i32)prop_num(*m, o, "score", 500);
             gd.route = (f32)prop_num(*m, o, "route", 0);
-            if (!drop_named(prop_str(*m, o, "drop", ""), &gd.drop)) { snprintf(why, why_cap, "the map's %s drops something unknown", o.name); return false; }
-            snprintf(gd.pattern, sizeof gd.pattern, "%s", prop_str(*m, o, "pattern", "ring"));
+            if (!drop_named(prop_str(*m, o, "drop", ""), &gd.drop)) { format(why, why_cap, "the map's %s drops something unknown", o.name); return false; }
+            format(gd.pattern, sizeof gd.pattern, "%s", prop_str(*m, o, "pattern", "ring"));
             gd.entry = KV_BML_NONE;
             if (gd.kind == GroundBunker && !bunker_formation(st, *m, o, &gd.launch, why, why_cap)) return false;
             // In order of `at`, so the stage's cursor walks them as the distance grows.

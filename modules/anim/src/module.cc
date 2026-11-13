@@ -1,5 +1,6 @@
 #include "anim_internal.h"
 #include "korvid/asset/scope.h"
+#include "korvid/core/format.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -12,7 +13,6 @@
 #include "korvid/scene/parent.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -37,7 +37,7 @@ void derive_name(AnimClip& c) {
     h = hash_mix(h ^ hash_bytes(&c.duration, sizeof c.duration));
     for (const AnimTrack& t : c.tracks) h = hash_mix(h ^ (u64)t.channel ^ ((u64)t.interp << 8) ^ ((u64)t.count << 16));
     for (const AnimKey& k : c.keys) h = hash_mix(h ^ hash_bytes(&k.time, sizeof k.time) ^ hash_bytes(k.v, sizeof k.v) * 31 ^ k.event.hash);
-    snprintf(c.path, sizeof c.path, "clip:%016llx", (unsigned long long)h);
+    format(c.path, sizeof c.path, "clip:%016llx", (unsigned long long)h);
 }
 
 // The asset module's view of a clip: its count, state, size and name; retirement frees it.
@@ -62,9 +62,9 @@ void clip_retire(Engine& e, void* user, Handle h) {
 }
 int clip_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     AnimClip* c = ((AnimState_*)ctx)->clips.get(Handle{h});
-    if (!c) return snprintf(out, cap, "stale");
+    if (!c) return format(out, cap, "stale");
     const char* st = c->state == AssetState::Ready ? "ready" : c->state == AssetState::Failed ? "failed" : "pending";
-    return snprintf(out, cap, "'%s' %s %.3fs %s, %u tracks, %u players", c->path, st, c->duration, anim_loop_name(c->loop), c->tracks.len, c->players);
+    return format(out, cap, "'%s' %s %.3fs %s, %u tracks, %u players", c->path, st, c->duration, anim_loop_name(c->loop), c->tracks.len, c->players);
 }
 
 void fail_clip(Engine& e, AnimState_& s, Handle h, AnimClip& c, AssetError err, const char* detail) {
@@ -103,7 +103,7 @@ void anim_pump(TickContext& ctx) {
         free_in(s.general, c.data, c.size);
         if (!ok) {
             char detail[160];
-            snprintf(detail, sizeof detail, "%s (byte %u)", why, at);
+            format(detail, sizeof detail, "%s (byte %u)", why, at);
             fail_clip(e, s, h, *clip, AssetError::Parse, detail);
             continue;
         }
@@ -286,7 +286,7 @@ void clips_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         if (!s->clips.is_alive(i)) continue;
         const AnimClip& c = s->clips.items[i];
         char summary[96];
-        snprintf(summary, sizeof summary, "%s, %.3f s %s, %u tracks, %u players", clip_state_name(c.state), c.duration, anim_loop_name(c.loop), c.tracks.len, c.players);
+        format(summary, sizeof summary, "%s, %.3f s %s, %u tracks, %u players", clip_state_name(c.state), c.duration, anim_loop_name(c.loop), c.tracks.len, c.players);
         if (!tree.add(c.path, false, summary)) return;
     }
 }
@@ -299,11 +299,11 @@ bool clips_describe(CliContext& ctx, const char* rel) {
         ctx.print("%s: %s, %.3f s, %s, %u tracks, %u keys, %u players", c.path, clip_state_name(c.state), c.duration, anim_loop_name(c.loop), c.tracks.len, c.keys.len, c.players);
         for (const AnimTrack& t : c.tracks) {
             char line[512];
-            usize at = (usize)snprintf(line, sizeof line, "  %-8s %-6s", anim_channel_name(t.channel), t.interp == AnimInterp::Linear ? "linear" : "step");
+            usize at = (usize)format(line, sizeof line, "  %-8s %-6s", anim_channel_name(t.channel), t.interp == AnimInterp::Linear ? "linear" : "step");
             for (u32 k = 0; k < t.count && at < sizeof line - 40; ++k) {
                 const AnimKey& key = c.keys[t.first + k];
-                if (t.channel == AnimChannel::Event) at += (usize)snprintf(line + at, sizeof line - at, " [%g %s]", key.time, name_str(key.event));
-                else at += (usize)snprintf(line + at, sizeof line - at, " [%g: %g %g %g %g]", key.time, key.v[0], key.v[1], key.v[2], key.v[3]);
+                if (t.channel == AnimChannel::Event) at += (usize)format(line + at, sizeof line - at, " [%g %s]", key.time, name_str(key.event));
+                else at += (usize)format(line + at, sizeof line - at, " [%g: %g %g %g %g]", key.time, key.v[0], key.v[1], key.v[2], key.v[3]);
             }
             ctx.print("%s%s", line, t.count && at >= sizeof line - 40 ? " ..." : "");
         }

@@ -10,7 +10,6 @@
 #include "korvid/save/save.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {

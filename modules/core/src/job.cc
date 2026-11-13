@@ -1,4 +1,5 @@
 #include "korvid/core/job.h"
+#include "korvid/core/format.h"
 #include "korvid/core/atomic.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/array.h"
@@ -7,7 +8,6 @@
 #include "korvid/core/profile.h"
 #include "korvid/core/thread.h"
 #include "korvid/core/os_thread.h"
-#include <stdio.h>
 
 namespace kv {
 
@@ -63,7 +63,7 @@ void worker_main(void* arg) {
     thread_id();
 #if KV_PROFILE
     char name[32];
-    snprintf(name, sizeof name, "worker %u", (u32)(usize)arg);
+    format(name, sizeof name, "worker %u", (u32)(usize)arg);
     prof_thread_name(name);
 #else
     (void)arg;

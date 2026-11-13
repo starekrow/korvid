@@ -1,6 +1,7 @@
 // The tilemap module: records in the asset module's scopes, the load pipeline (map blob,
 // tileset blobs, textures, materials), and instances as rows of cosmetic sprites.
 #include "korvid/tilemap/module.h"
+#include "korvid/core/format.h"
 #include "korvid/tilemap/tilemap.h"
 #include "korvid/anim/clip.h"
 #include "korvid/anim/player.h"
@@ -19,7 +20,6 @@
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 #include "tilemap_internal.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -105,14 +105,14 @@ void kind_retire(Engine& e, void* user, Handle h) {
 void* map_resolve(kv_handle h, void* ctx) { return ((TilemapState*)ctx)->maps.get(Handle{h}); }
 int map_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     TilemapAsset* m = ((TilemapState*)ctx)->maps.get(Handle{h});
-    if (!m) return snprintf(out, cap, "stale");
+    if (!m) return format(out, cap, "stale");
     const char* st = m->state == AssetState::Ready ? "ready" : m->state == AssetState::Failed ? "failed" : "pending";
-    return snprintf(out, cap, "'%s' %s %ux%u of %ux%u, %u layers", m->path, st, m->width, m->height, m->tile_w, m->tile_h, m->layer_count);
+    return format(out, cap, "'%s' %s %ux%u of %ux%u, %u layers", m->path, st, m->width, m->height, m->tile_w, m->tile_h, m->layer_count);
 }
 void* instance_resolve(kv_handle h, void* ctx) { return ((TilemapState*)ctx)->instances.get(Handle{h}); }
 int instance_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     Instance* in = ((TilemapState*)ctx)->instances.get(Handle{h});
-    return in ? snprintf(out, cap, "%u rows", in->row_count) : snprintf(out, cap, "stale");
+    return in ? format(out, cap, "%u rows", in->row_count) : format(out, cap, "stale");
 }
 
 // Destroys a row of either tile kind.
@@ -151,7 +151,7 @@ void make_tile_clips(Engine& e, TilemapAsset& m) {
             track.channel = AnimChannel::Uv;
             track.keys = Span<const AnimKey>(keys, tile.frames.count);
             char name[KV_ASSET_PATH_MAX + 24];
-            snprintf(name, sizeof name, "%s#tile%u", m.path, ts.first_gid + tile.local);
+            format(name, sizeof name, "%s#tile%u", m.path, ts.first_gid + tile.local);
             AnimClipDesc d;
             d.name = name;
             d.duration = at;
@@ -184,7 +184,7 @@ void advance(Engine& e, TilemapState& s, Handle h, TilemapAsset& m) {
         for (u32 i = 0; i < m.tileset_count; ++i) {
             if (m.tilesets[i].image) continue;
             const BlobAsset* b = asset_blob(e, d->tileset_blob[i]);
-            if (!b || b->state == AssetState::Failed) { snprintf(why, sizeof why, "tileset '%s' did not load", m.tilesets[i].name); fail_map(e, s, h, m, AssetError::NotFound, why); return; }
+            if (!b || b->state == AssetState::Failed) { format(why, sizeof why, "tileset '%s' did not load", m.tilesets[i].name); fail_map(e, s, h, m, AssetError::NotFound, why); return; }
             if (b->state != AssetState::Ready) return;
         }
         for (u32 i = 0; i < m.tileset_count; ++i) {
@@ -194,7 +194,7 @@ void advance(Engine& e, TilemapState& s, Handle h, TilemapAsset& m) {
             utf8_copy(base, sizeof base, m.tilesets[i].name);
             if (!tilemap_parse_tileset((const char*)b->data, b->size, base, &arena->a, m, i, why, sizeof why)) {
                 char full[KV_ASSET_PATH_MAX + sizeof why + 4];
-                snprintf(full, sizeof full, "%s: %s", base, why);
+                format(full, sizeof full, "%s: %s", base, why);
                 fail_map(e, s, h, m, AssetError::Parse, full);
                 return;
             }
@@ -484,7 +484,7 @@ u32 tilemap_spawn_props(TickContext& ctx, Handle entity, const TilemapAsset& m, 
         case MapPropType::Color: {
             char hex[16];
             auto byte = [](f32 v) { return (unsigned)(v <= 0.0f ? 0 : v >= 1.0f ? 255 : (u32)(v * 255.0f + 0.5f)); };
-            snprintf(hex, sizeof hex, "#%02x%02x%02x%02x", byte(p.col.r), byte(p.col.g), byte(p.col.b), byte(p.col.a));
+            format(hex, sizeof hex, "#%02x%02x%02x%02x", byte(p.col.r), byte(p.col.g), byte(p.col.b), byte(p.col.a));
             ok = ctx.prop_set_str(entity, p.name, hex);
             break;
         }
@@ -499,13 +499,13 @@ int tilemap_object_name(const TilemapAsset& m, const MapObject& o, char* out, us
         u32 same = 0;
         for (u32 i = 0; i < m.object_count; ++i)
             if (m.objects[i].name && !strcmp(m.objects[i].name, o.name)) ++same;
-        if (same == 1) return snprintf(out, cap, "%s", o.name);
+        if (same == 1) return format(out, cap, "%s", o.name);
     }
     const char* stem = strrchr(m.path, '/');
     stem = stem ? stem + 1 : m.path;
     const char* dot = strrchr(stem, '.');
     int len = dot ? (int)(dot - stem) : (int)strlen(stem);
-    return snprintf(out, cap, "%.*s#%u", len, stem, o.id);
+    return format(out, cap, "%.*s#%u", len, stem, o.id);
 }
 
 namespace {

@@ -1,4 +1,5 @@
 #include "korvid/asset/stream.h"
+#include "korvid/core/format.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -11,7 +12,6 @@
 #define STB_VORBIS_NO_INTEGER_CONVERSION
 #include "vendor/stb_vorbis.c"
 #undef STB_VORBIS_HEADER_ONLY
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -101,9 +101,9 @@ kv_handle stream_find_name(const char* name, void* ctx) {
 }
 int stream_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     StreamAsset* s = ((AssetState_*)ctx)->streams.get(Handle{h});
-    if (!s) return snprintf(out, cap, "stale");
+    if (!s) return format(out, cap, "stale");
     const char* st = s->state == AssetState::Ready ? "ready" : s->state == AssetState::Failed ? "failed" : "pending";
-    return snprintf(out, cap, "'%s' %s %u Hz x%u %.1fs%s", s->path, st, s->rate, s->channels, s->seconds(), s->loop_tagged ? " loop-tagged" : "");
+    return format(out, cap, "'%s' %s %u Hz x%u %.1fs%s", s->path, st, s->rate, s->channels, s->seconds(), s->loop_tagged ? " loop-tagged" : "");
 }
 
 void fail_stream(Engine& e, AssetState_& s, Handle h, StreamAsset& st, AssetError err, const char* why) {

@@ -1,4 +1,5 @@
 #include "korvid/text/module.h"
+#include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/log.h"
@@ -10,7 +11,6 @@
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 #include <stdarg.h>
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -18,7 +18,7 @@ namespace kv {
 int text_set(Text& t, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    int n = vsnprintf(t.str, sizeof t.str, fmt, args);
+    int n = vformat(t.str, sizeof t.str, fmt, args);
     va_end(args);
     if (n >= (int)sizeof t.str) utf8_trim(t.str); // never end on half a character
     return n;

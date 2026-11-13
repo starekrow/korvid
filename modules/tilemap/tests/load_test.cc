@@ -2,6 +2,7 @@
 // a map and its external tileset read through the mounts into a scope; Ready waits for
 // both; an instance's rows; an instance goes when its owner dies and when its map retires.
 #include "korvid/tilemap/module.h"
+#include "korvid/core/format.h"
 #include "korvid/tilemap/tilemap.h"
 #include "korvid/asset/module.h"
 #include "korvid/asset/scope.h"
@@ -69,12 +70,12 @@ void test_tilemap_load(kv::TestCtx& c) {
     // executable: an iOS app's bundle is signed and read-only.
     char scratch[400];
     KV_CHECK(c, io_make_temp_dir("korvid-tilemap-test", scratch, sizeof scratch) && platform_io(e)->mount_dir(scratch));
-    snprintf(root, sizeof root, "%s/tilemap_test", scratch);
-    snprintf(path, sizeof path, "%s/maps", root); io_make_dirs(path);
-    snprintf(path, sizeof path, "%s/tiles", root); io_make_dirs(path);
-    snprintf(path, sizeof path, "%s/maps/town.tmj", root);
+    format(root, sizeof root, "%s/tilemap_test", scratch);
+    format(path, sizeof path, "%s/maps", root); io_make_dirs(path);
+    format(path, sizeof path, "%s/tiles", root); io_make_dirs(path);
+    format(path, sizeof path, "%s/maps/town.tmj", root);
     KV_CHECK(c, put(path, k_map));
-    snprintf(path, sizeof path, "%s/tiles/town.tsj", root);
+    format(path, sizeof path, "%s/tiles/town.tsj", root);
     KV_CHECK(c, put(path, k_tileset));
     auto frames = [&](u32 n) { for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); } };
 
@@ -120,7 +121,7 @@ void test_tilemap_load(kv::TestCtx& c) {
     // The animated tile (local 10, frames 10 and 11 at 250 ms) plays its map's clip.
     u32 tile_gid = m->tilesets[0].first_gid + 10;
     char want[64];
-    snprintf(want, sizeof want, "tilemap_test/maps/town.tmj#tile%u", tile_gid);
+    format(want, sizeof want, "tilemap_test/maps/town.tmj#tile%u", tile_gid);
     Handle clip = anim_find(e, want);
     const AnimClip* ac = anim_clip(e, clip);
     KV_CHECK(c, ac && ac->state == AssetState::Ready && ac->duration == 0.5f && ac->keys.len == 2 && ac->loop == AnimLoop::Loop);
@@ -169,7 +170,7 @@ void test_tilemap_load(kv::TestCtx& c) {
     KV_CHECK(c, asset_lifetime_stats(e).dying == 0);
 
     // A map that does not parse fails with its reason.
-    snprintf(path, sizeof path, "%s/maps/bad.tmj", root);
+    format(path, sizeof path, "%s/maps/bad.tmj", root);
     KV_CHECK(c, put(path, "{\"width\": 1,"));
     Handle bad = tilemap_load(e, "tilemap_test/maps/bad.tmj", Handle{});
     asset_ref(e, bad);

@@ -3,6 +3,7 @@
 // the old level's children go with its root; no sim tick runs while the level loads;
 // reload reads the files again; a request mid-transition waits; the CLI's commands.
 #include "korvid/level/level.h"
+#include "korvid/core/format.h"
 #include "korvid/level/module.h"
 #include "korvid/asset/blob.h"
 #include "korvid/asset/module.h"
@@ -48,7 +49,7 @@ void on_build(TickContext& ctx, Span<const LevelBuild> es) {
     for (const LevelBuild& b : es) {
         ++g.built;
         g.last_level = b.level; g.root = b.root; g.map = b.map;
-        snprintf(g.entry, sizeof g.entry, "%s", b.entry);
+        format(g.entry, sizeof g.entry, "%s", b.entry);
         g.built_at = ctx.engine->clock.tick_count;
         g.sim_while_loading += g.built_at - g.loading_at; // the sim stood still from the load to the build
         Table* things = ctx.write_kind("lt.thing");
@@ -75,7 +76,7 @@ KV_MODULE_DEFINE(k_lt) = {.name = "lt", .kinds = k_kinds, .systems = k_systems, 
 
 bool write(const char* dir, const char* name, const char* text) {
     char path[600];
-    snprintf(path, sizeof path, "%s/%s", dir, name);
+    format(path, sizeof path, "%s/%s", dir, name);
     FILE* f = fopen(path, "wb");
     if (!f) return false;
     fputs(text, f);
@@ -83,7 +84,7 @@ bool write(const char* dir, const char* name, const char* text) {
 }
 
 struct Lines { u32 n = 0; char text[16][128]; };
-void collect(void* user, const char* line) { Lines& l = *(Lines*)user; if (l.n < 16) snprintf(l.text[l.n++], 128, "%s", line); }
+void collect(void* user, const char* line) { Lines& l = *(Lines*)user; if (l.n < 16) format(l.text[l.n++], 128, "%s", line); }
 
 } // namespace
 
@@ -98,7 +99,7 @@ void test_level(kv::TestCtx& c) {
     // executable: an iOS app's bundle is signed and read-only.
     char scratch[400];
     KV_CHECK(c, io_make_temp_dir("korvid-level-test", scratch, sizeof scratch) && platform_io(e)->mount_dir(scratch));
-    snprintf(dir, sizeof dir, "%s/level_test", scratch);
+    format(dir, sizeof dir, "%s/level_test", scratch);
     io_make_dirs(dir);
     KV_CHECK(c, write(dir, "town.map", "town v1") && write(dir, "field.map", "field v1") && write(dir, "shared.bin", "shared"));
     // The scratch mount is the directory these went into.

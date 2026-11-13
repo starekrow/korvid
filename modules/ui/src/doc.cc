@@ -1,6 +1,7 @@
 // UI documents: the asset, the style, and screens built from their JSON.
 #include "ui_internal.h"
 #include "korvid/asset/blob.h"
+#include "korvid/core/format.h"
 #include "korvid/asset/font.h"
 #include "korvid/asset/material.h"
 #include "korvid/asset/scope.h"
@@ -10,7 +11,6 @@
 #include "korvid/core/memory.h"
 #include "korvid/core/utf8.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -29,8 +29,8 @@ kv_handle doc_find_name(const char* name, void* ctx) {
 }
 int doc_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     UiDoc* d = ((UiState_*)ctx)->docs.get(Handle{h});
-    if (!d) return snprintf(out, cap, "stale");
-    return snprintf(out, cap, "'%s' %s, %u frames, %u images, %u sounds", d->path,
+    if (!d) return format(out, cap, "stale");
+    return format(out, cap, "'%s' %s, %u frames, %u images, %u sounds", d->path,
                     d->state == AssetState::Ready ? "ready" : d->state == AssetState::Failed ? "failed" : "pending",
                     d->frames.len, d->images.len, d->sounds.len);
 }
@@ -230,7 +230,7 @@ bool build(Engine& e, UiState_& s, UiScreen& sc, const JsonDoc& doc, const JsonV
     auto num_or_key = [&](const char* key, char* out) {
         const JsonValue* x = json_get(doc, n, key);
         if (x && x->is_string()) utf8_copy(out, 24, x->str);
-        else if (x && x->is_number()) snprintf(out, 24, "%g", x->number);
+        else if (x && x->is_number()) format(out, 24, "%g", x->number);
     };
     num_or_key("value", value);
     num_or_key("max", max);

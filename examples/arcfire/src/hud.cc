@@ -4,6 +4,7 @@
 // The HUD is two calls a tick: model values from the world row and the counters.
 #include "arcfire.h"
 #include "korvid/asset/scope.h"
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/platform_hid/actions.h"
 #include "korvid/platform_hid/host_window.h"
@@ -11,7 +12,6 @@
 #include "korvid/sprite/camera.h"
 #include "korvid/ui/ui.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 
 namespace kv::arcfire {
 
@@ -94,10 +94,10 @@ void hud_stomp(Engine& e, Game& g, bool on) {
 void hud_stage_clear(Engine& e, Game& g, i64 bonus, const char* next) {
     char text[48];
     if (next) {
-        snprintf(text, sizeof text, "%s", next);
+        format(text, sizeof text, "%s", next);
         upper(text);
     } else {
-        snprintf(text, sizeof text, "THE END");
+        format(text, sizeof text, "THE END");
     }
     ui_model_set_int(e, "stage_bonus", bonus);
     ui_model_set_str(e, "next_round", text);
@@ -190,7 +190,7 @@ void hud(TickContext& ctx) {
     if (Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials)); dials.len) {
         ui_model_set_int(e, "chain_window", dials[0].chain_window);
         char name[16];
-        snprintf(name, sizeof name, "%s", position_name(dials[0].position));
+        format(name, sizeof name, "%s", position_name(dials[0].position));
         upper(name);
         ui_model_set_str(e, "difficulty", name);
     }
@@ -201,7 +201,7 @@ void hud(TickContext& ctx) {
     ui_model_set_int(e, "options", engine_table(e, g_option_kind)->live());
     ui_model_set_str(e, "stage", g.stage.name);
     char text[48];
-    snprintf(text, sizeof text, "%.0f / %.0f", (f64)stage_clock(stage_row[0]), (f64)g.stage.length);
+    format(text, sizeof text, "%.0f / %.0f", (f64)stage_clock(stage_row[0]), (f64)g.stage.length);
     ui_model_set_str(e, "distance", text);
     ui_model_set_int(e, "sprites", g.stats.sprites);
     ui_model_set_int(e, "bullets", g.stats.bullets);

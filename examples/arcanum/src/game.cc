@@ -5,6 +5,7 @@
 // the other map; a pause menu with save and load, a level select and the credits; music
 // that crossfades between the maps.
 #include "korvid/arcanum/module.h"
+#include "korvid/core/format.h"
 #include "korvid/anim/player.h"
 #include "korvid/anim/sheet.h"
 #include "korvid/asset/blob.h"
@@ -38,7 +39,6 @@
 #include "korvid/text/text.h"
 #include "korvid/tilemap/tilemap.h"
 #include "korvid/ui/ui.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -432,7 +432,7 @@ void talk(TickContext& ctx, Game& g, Handle npc) {
     o.enter.seconds = 0.15f;
     g.dialogue = ui_open(e, g.ui, "dialogue", o);
     char face[96];
-    snprintf(face, sizeof face, "arcanum/faces/%s.png", k_sheet_names[a ? a->sheet % kSheets : 0]);
+    format(face, sizeof face, "arcanum/faces/%s.png", k_sheet_names[a ? a->sheet % kSheets : 0]);
     ui_set_texture(e, g.dialogue, "face", face, rect2{0, 0, 38, 38});
     ui_set_text(e, g.dialogue, "who", ctx.prop_str(npc, "display", "Villager"));
     show_page(e, g);
@@ -1056,8 +1056,17 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
         a.sheet = which;
         a.home = tilemap_to_world(point2{0, 0}, o.x, o.y);
         if (const MapProperty* route = tilemap_property(m, o.props, "route")) {
-            f32 x0, y0, x1, y1;
-            if (sscanf(route->str, "%f,%f %f,%f", &x0, &y0, &x1, &y1) == 4) a.route = vec2{x1 - x0, -(y1 - y0)};
+            // "x0,y0 x1,y1": four numbers, a comma inside each pair (strtof skips the space).
+            f32 v[4];
+            const char* at = route->str;
+            bool ok = true;
+            for (u32 i = 0; i < 4 && ok; ++i) {
+                char* end = nullptr;
+                v[i] = strtof(at, &end);
+                ok = end != at && (i % 2 == 1 || *end == ',');
+                at = i % 2 == 0 ? end + 1 : end;
+            }
+            if (ok) a.route = vec2{v[2] - v[0], -(v[3] - v[1])};
         }
         Handle npc = npcs->spawn(transform2_at(a.home), local2_at(a.home), p, actor_sprite(g, which, (i32)objects_layer), a, AnimPlayer{}, feet_body(0), Move2{}, MoveResult2{});
         engine_entity_name_set(*ctx.engine, npc, name);
@@ -1221,7 +1230,7 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     // The save, in the per-user directory; the demo keeps its own so a scripted run never
     // overwrites a player's game.
     const char* pref = platform_pref_path(e, "korvid", "arcanum");
-    if (pref[0]) snprintf(g->save_path, sizeof g->save_path, "%ssave%s.json", pref, g->demo ? "-demo" : "");
+    if (pref[0]) format(g->save_path, sizeof g->save_path, "%ssave%s.json", pref, g->demo ? "-demo" : "");
     Table* players = engine_table(e, "arcanum.player");
     Actor pa{};
     g->player = players->spawn(transform2_at(point2{0, 0}), actor_sprite(*g, 0, 2), pa, Vitals{kHpMax, kHpMax, 0.0f, 0, Rng::seeded(0x4152434e).state}, AnimPlayer{}, feet_body(ColliderPusher), Move2{}, MoveResult2{});

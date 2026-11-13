@@ -1,4 +1,5 @@
 #include "korvid/tool/tool.h"
+#include "korvid/core/format.h"
 #include "korvid/tool/module.h"
 #include "korvid/cli/module.h"
 #include "korvid/core/engine.h"
@@ -7,7 +8,6 @@
 #include "korvid/core/name.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "korvid/core/time.h"
@@ -34,13 +34,12 @@ bool tool_startup(Engine&, ModuleInstance& self) {
 // The request's lines are the tool's output; the failure line goes to stderr.
 void print_line(void* user, const char* line) {
     bool* failed = (bool*)user;
-    if (strncmp(line, "err: ", 5) == 0) { *failed = true; fprintf(stderr, "%s\n", line + 5); return; }
-    fputs(line, stdout);
-    fputc('\n', stdout);
+    if (strncmp(line, "err: ", 5) == 0) { *failed = true; print_err("%s\n", line + 5); return; }
+    print("%s\n", line);
 }
 
 void usage(const char* name) {
-    fprintf(stderr, "usage: %s [--threads N] [--verbose] [--max-ticks N] <command> [args...]\n"
+    print_err("usage: %s [--threads N] [--verbose] [--max-ticks N] <command> [args...]\n"
                     "       %s help    (every command this tool knows)\n", name, name);
 }
 
@@ -73,7 +72,7 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
         if (strcmp(argv[first], "--threads") == 0 && first + 1 < argc) threads = (u32)atoi(argv[++first]);
         else if (strcmp(argv[first], "--max-ticks") == 0 && first + 1 < argc) max_ticks = (u64)atoll(argv[++first]);
         else if (strcmp(argv[first], "--verbose") == 0) verbose = true;
-        else { fprintf(stderr, "%s: unknown option %s\n", config.name, argv[first]); usage(config.name); return 2; }
+        else { print_err("%s: unknown option %s\n", config.name, argv[first]); usage(config.name); return 2; }
     }
     if (first >= argc) { usage(config.name); return 2; }
 
@@ -82,13 +81,13 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
     char line[2048];
     usize at = 0;
     bool help = argc - first == 1 && strcmp(argv[first], "help") == 0;
-    if (!help) at += (usize)snprintf(line, sizeof line, "%s", config.name);
+    if (!help) at += (usize)format(line, sizeof line, "%s", config.name);
     for (int i = first; i < argc && at < sizeof line; ++i) {
-        if (strchr(argv[i], '"')) { fprintf(stderr, "%s: arguments may not contain '\"'\n", config.name); return 2; }
+        if (strchr(argv[i], '"')) { print_err("%s: arguments may not contain '\"'\n", config.name); return 2; }
         bool quote = strchr(argv[i], ' ') || strchr(argv[i], '\t') || !argv[i][0];
-        at += (usize)snprintf(line + at, sizeof line - at, "%s%s%s%s", at ? " " : "", quote ? "\"" : "", argv[i], quote ? "\"" : "");
+        at += (usize)format(line + at, sizeof line - at, "%s%s%s%s", at ? " " : "", quote ? "\"" : "", argv[i], quote ? "\"" : "");
     }
-    if (at >= sizeof line) { fprintf(stderr, "%s: command line too long\n", config.name); return 2; }
+    if (at >= sizeof line) { print_err("%s: command line too long\n", config.name); return 2; }
 
     LogLevel was = log_level();
     if (!verbose && was < LogLevel::Warn) log_set_level(LogLevel::Warn);

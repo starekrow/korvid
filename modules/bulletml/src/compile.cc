@@ -7,9 +7,9 @@
 // was.
 #include "bml_internal.h"
 #include "korvid/core/arena.h"
+#include "korvid/core/format.h"
 #include "korvid/xml/xml.h"
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,10 +37,10 @@ struct Compiler {
     bool fail(const XmlNode* where, const char* fmt, ...) {
         if (!ok) return false;
         ok = false;
-        int n = snprintf(why, why_cap, "line %u, <%s>: ", where ? where->line : 0, where ? where->name : "?");
+        int n = format(why, why_cap, "line %u, <%s>: ", where ? where->line : 0, where ? where->name : "?");
         va_list ap;
         va_start(ap, fmt);
-        if (n >= 0 && (usize)n < why_cap) vsnprintf(why + n, why_cap - (usize)n, fmt, ap);
+        if (n >= 0 && (usize)n < why_cap) vformat(why + n, why_cap - (usize)n, fmt, ap);
         va_end(ap);
         return false;
     }
@@ -213,7 +213,7 @@ struct Compiler {
     u32 bullet(const XmlNode& n, u32 id = KV_BML_NONE) {
         if (id == KV_BML_NONE) { lib.bullets.push(BmlBullet{}); id = lib.bullets.len - 1; }
         BmlBullet b{};
-        snprintf(b.label, sizeof b.label, "%s", xml_attr_or(doc, n, "label", ""));
+        format(b.label, sizeof b.label, "%s", xml_attr_or(doc, n, "label", ""));
         typed(n, "direction", true, b.dir_type, b.dir_expr);
         typed(n, "speed", false, b.speed_type, b.speed_expr);
         for (const XmlNode* c = xml_child(doc, n); c && ok; c = xml_next_named(doc, *c)) {
@@ -335,23 +335,23 @@ u32 bml_compile(BmlLibrary& lib, const char* name, const char* text, usize len, 
     MemScope scope;
     XmlDoc doc;
     if (!xml_parse(text, len, mem_scratch(), doc)) {
-        snprintf(why, why_cap, "line %u, column %u: %s", doc.error_line, doc.error_col, doc.error);
+        format(why, why_cap, "line %u, column %u: %s", doc.error_line, doc.error_col, doc.error);
         return KV_BML_NONE;
     }
     const XmlNode& root = doc.root();
-    if (strcmp(root.name, "bulletml") != 0) { snprintf(why, why_cap, "the root is <%s>, not <bulletml>", root.name); return KV_BML_NONE; }
+    if (strcmp(root.name, "bulletml") != 0) { format(why, why_cap, "the root is <%s>, not <bulletml>", root.name); return KV_BML_NONE; }
     const char* type = xml_attr_or(doc, root, "type", "none");
     if (strcmp(type, "vertical") && strcmp(type, "none")) {
-        snprintf(why, why_cap, "type \"%s\": this library reads vertical documents", type);
+        format(why, why_cap, "type \"%s\": this library reads vertical documents", type);
         return KV_BML_NONE;
     }
-    if (bml_find(lib, name) != KV_BML_NONE) { snprintf(why, why_cap, "a pattern \"%s\" is already in the library", name); return KV_BML_NONE; }
+    if (bml_find(lib, name) != KV_BML_NONE) { format(why, why_cap, "a pattern \"%s\" is already in the library", name); return KV_BML_NONE; }
     // Where the library was, to put it back on a failure.
     const u32 ops0 = lib.ops.len, actions0 = lib.actions.len, code0 = lib.code.len, bullets0 = lib.bullets.len;
 
     Compiler c(lib, doc, why, why_cap);
     BmlEntry entry{};
-    snprintf(entry.name, sizeof entry.name, "%s", name);
+    format(entry.name, sizeof entry.name, "%s", name);
     // Labels first, so references go forward and back.
     for (const XmlNode* n = xml_child(doc, root); n && c.ok; n = xml_next_named(doc, *n)) {
         const char* label = xml_attr_or(doc, *n, "label", "");

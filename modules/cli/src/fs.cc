@@ -3,9 +3,9 @@
 // the mount. The root lists the mounts.
 #include "cli_internal.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/format.h"
 #include "korvid/core/sort.h"
 #include "korvid/core/memory.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -84,7 +84,7 @@ void list_dir(CliContext& ctx, CliState& cli, const char* path, u32 cap) {
     if (strcmp(path, "/") == 0) {
         for (const CliMountDesc* m : cli.mounts) {
             char name[64];
-            snprintf(name, sizeof name, "%s/", m->path + 1);
+            format(name, sizeof name, "%s/", m->path + 1);
             collect_emit(&col, name, "");
         }
     } else {
@@ -92,7 +92,7 @@ void list_dir(CliContext& ctx, CliState& cli, const char* path, u32 cap) {
         const CliMountDesc* m = mount_of(cli, path, &rel);
         if (!m) { ctx.fail("no such path: %s", path); return; }
         char dir[KV_CLI_PATH_MAX];
-        snprintf(dir, sizeof dir, "%s%s", rel, rel[0] ? "/" : "");
+        format(dir, sizeof dir, "%s%s", rel, rel[0] ? "/" : "");
         m->list(ctx, dir, collect_emit, &col);
     }
     if (entries.len > 1) kv::sort(entries.data, entries.len, sizeof(Entry), entry_compare);
@@ -138,7 +138,7 @@ void cli_fs_cd(CliContext& ctx, Span<const char* const> args) {
     Node n = classify(ctx, cli, path);
     if (n == Node::None) { ctx.fail("no such path: %s", path); return; }
     if (n == Node::Leaf) { ctx.fail("not a directory: %s", path); return; }
-    snprintf(ctx.cwd, KV_CLI_PATH_MAX, "%s", path); // resolved into a buffer of the same size: it fits
+    format(ctx.cwd, KV_CLI_PATH_MAX, "%s", path); // resolved into a buffer of the same size: it fits
     ctx.print("%s", ctx.cwd);
 }
 

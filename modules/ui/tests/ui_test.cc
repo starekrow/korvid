@@ -5,6 +5,7 @@
 // emits select and cancel; a reveal runs at its rate, honours pauses, completes on confirm
 // and says so; model values feed meters; a scroll clamps; a holding screen holds the sim.
 #include "korvid/ui/module.h"
+#include "korvid/core/format.h"
 #include "korvid/asset/module.h"
 #include "korvid/asset/scope.h"
 #include "korvid/audio/module.h"
@@ -90,9 +91,9 @@ void test_ui(kv::TestCtx& c) {
     // executable: an iOS app's bundle is signed and read-only.
     char scratch[400];
     KV_CHECK(c, io_make_temp_dir("korvid-ui-test", scratch, sizeof scratch) && platform_io(e)->mount_dir(scratch));
-    snprintf(root, sizeof root, "%s/ui_test", scratch);
+    format(root, sizeof root, "%s/ui_test", scratch);
     io_make_dirs(root);
-    snprintf(path, sizeof path, "%s/test.ui.json", root);
+    format(path, sizeof path, "%s/test.ui.json", root);
     KV_CHECK(c, put(path, k_doc));
     auto frames = [&](u32 n) { for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); } };
 

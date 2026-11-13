@@ -2,6 +2,7 @@
 // its texture has a size.
 #include "anim_internal.h"
 #include "korvid/asset/blob.h"
+#include "korvid/core/format.h"
 #include "korvid/asset/material.h"
 #include "korvid/asset/scope.h"
 #include "korvid/core/engine.h"
@@ -9,7 +10,6 @@
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/utf8.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -165,9 +165,9 @@ kv_handle sheet_find_name(const char* name, void* ctx) {
 }
 int sheet_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     AnimSheet* s = ((AnimState_*)ctx)->sheets.get(Handle{h});
-    if (!s) return snprintf(out, cap, "stale");
+    if (!s) return format(out, cap, "stale");
     const char* st = s->state == AssetState::Ready ? "ready" : s->state == AssetState::Failed ? "failed" : "pending";
-    return snprintf(out, cap, "'%s' %s, %ux%u cells of %gx%g, %u clips, %u sets", s->path, st, s->cols, s->rows, s->cell_size.x, s->cell_size.y, s->clips.len, s->sets.len);
+    return format(out, cap, "'%s' %s, %ux%u cells of %gx%g, %u clips, %u sets", s->path, st, s->cols, s->rows, s->cell_size.x, s->cell_size.y, s->clips.len, s->sets.len);
 }
 
 u32* sheet_refs(void* user, Handle h) { AnimSheet* s = ((AnimState_*)user)->sheets.get(h); return s ? &s->refs : nullptr; }
@@ -232,7 +232,7 @@ void advance(Engine& e, AnimState_& s, Handle h, AnimSheet& sh) {
     for (AnimClipDesc& d : parsed.clips) {
         char name[2 * KV_ASSET_PATH_MAX];
         Name local = name_intern(d.name);
-        int n = snprintf(name, sizeof name, "%s#%s", sh.path, d.name);
+        int n = format(name, sizeof name, "%s#%s", sh.path, d.name);
         if (n < 0 || n >= (int)KV_ASSET_PATH_MAX) { fail_sheet(e, s, h, sh, AssetError::Parse, "a clip's full name is too long"); return; }
         d.name = name;
         Handle clip = anim_create(e, d, Handle{}); // held by the sheet

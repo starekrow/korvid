@@ -25,8 +25,8 @@
 // shot away takes it along). The patterns are found in the library at boot.
 #include "arcfire.h"
 #include "korvid/core/json.h"
+#include "korvid/core/format.h"
 #include "korvid/core/memory.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv::arcfire {
@@ -36,7 +36,7 @@ namespace {
 constexpr f32 kPartPixels = 24.0f, kPartScale = 2.0f; // a sheet's cell, and how large it is drawn
 
 bool boss_fail(char* why, usize cap, const char* name, const char* text) {
-    snprintf(why, cap, "boss %s: %s", name, text);
+    format(why, cap, "boss %s: %s", name, text);
     return false;
 }
 
@@ -60,14 +60,14 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
     MemScope scope;
     JsonDoc doc;
     if (!json_parse(text, len, mem_scratch(), doc)) {
-        snprintf(why, why_cap, "boss %s: %s at byte %u", name, doc.error, doc.error_at);
+        format(why, why_cap, "boss %s: %s at byte %u", name, doc.error, doc.error_at);
         return false;
     }
     const JsonValue& root = doc.root();
     if (!root.is_object()) return boss_fail(why, why_cap, name, "a boss is an object");
     out = BossDef{};
-    snprintf(out.name, sizeof out.name, "%s", name);
-    snprintf(out.title, sizeof out.title, "%s", json_string(json_get(doc, root, "title"), name));
+    format(out.name, sizeof out.name, "%s", name);
+    format(out.title, sizeof out.title, "%s", json_string(json_get(doc, root, "title"), name));
     point2 size = xy_of(doc, json_get(doc, root, "size"), point2{128, 128});
     out.size = vec2{size.x, size.y};
     point2 sheet = xy_of(doc, json_get(doc, root, "sheet"), point2{1, 1});
@@ -99,7 +99,7 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
             u32 k = 0;
             for (const JsonValue* xy = json_first(doc, *p); xy && k < kPathPoints; xy = json_next(doc, *xy)) pts[k++] = xy_of(doc, xy, point2{0, 0});
             if (k < 2) return boss_fail(why, why_cap, name, "a path has two points or more");
-            snprintf(stage.path_names[stage.path_count], sizeof stage.path_names[0], "%.11s.%.11s", name, p->key);
+            format(stage.path_names[stage.path_count], sizeof stage.path_names[0], "%.11s.%.11s", name, p->key);
             path_build(stage.paths[stage.path_count++], pts, k);
         }
     }
@@ -111,14 +111,14 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
         if (out.part_count == kMaxParts) return boss_fail(why, why_cap, name, "too many parts");
         PartDef& p = out.parts[out.part_count];
         p = PartDef{};
-        snprintf(p.name, sizeof p.name, "%s", json_string(json_get(doc, *v, "name"), ""));
+        format(p.name, sizeof p.name, "%s", json_string(json_get(doc, *v, "name"), ""));
         if (!p.name[0] || part_named(out, p.name) >= 0) return boss_fail(why, why_cap, name, "a part has a name of its own");
         p.at = xy_of(doc, json_get(doc, *v, "at"), point2{0, 0});
         p.parent = -1;
         p.launch = kNoFormation;
         if (const JsonValue* parent = json_get(doc, *v, "parent")) {
             p.parent = part_named(out, json_string(parent, ""));
-            if (p.parent < 0) { snprintf(why, why_cap, "boss %s: part %s rides on \"%s\", which is not a part before it", name, p.name, json_string(parent, "")); return false; }
+            if (p.parent < 0) { format(why, why_cap, "boss %s: part %s rides on \"%s\", which is not a part before it", name, p.name, json_string(parent, "")); return false; }
         }
         point2 cell = xy_of(doc, json_get(doc, *v, "cell"), point2{0, 0});
         point2 open = xy_of(doc, json_get(doc, *v, "open"), cell);
@@ -133,21 +133,21 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
         p.core = json_bool(json_get(doc, *v, "core"), false);
         has_core = has_core || p.core;
         if (const JsonValue* pat = json_get(doc, *v, "pattern")) {
-            if (pat->is_string()) snprintf(p.patterns[p.pattern_count++], kPatternName, "%s", pat->str);
+            if (pat->is_string()) format(p.patterns[p.pattern_count++], kPatternName, "%s", pat->str);
             else
                 for (const JsonValue* x = json_first(doc, *pat); x && p.pattern_count < kMaxPartPatterns; x = json_next(doc, *x))
-                    snprintf(p.patterns[p.pattern_count++], kPatternName, "%s", json_string(x, ""));
+                    format(p.patterns[p.pattern_count++], kPatternName, "%s", json_string(x, ""));
         }
         for (u32 k = 0; k < kMaxPartPatterns; ++k) p.entries[k] = KV_BML_NONE;
         if (const JsonValue* l = json_get(doc, *v, "launch")) { // a bay: a formation every so often, from where it is
             if (stage.formation_count == kMaxFormations) return boss_fail(why, why_cap, name, "too many formations with the stage's");
             char path[24];
-            snprintf(path, sizeof path, "%.11s.%.11s", name, json_string(json_get(doc, *l, "path"), ""));
+            format(path, sizeof path, "%.11s.%.11s", name, json_string(json_get(doc, *l, "path"), ""));
             FormationDef f{};
             f.path = kMaxPaths;
             for (u32 i = 0; i < stage.path_count; ++i)
                 if (!strcmp(stage.path_names[i], path)) f.path = i;
-            if (f.path == kMaxPaths) { snprintf(why, why_cap, "boss %s: part %s launches on no path \"%s\"", name, p.name, path); return false; }
+            if (f.path == kMaxPaths) { format(why, why_cap, "boss %s: part %s launches on no path \"%s\"", name, p.name, path); return false; }
             f.count = (u32)json_u64(json_get(doc, *l, "count"), 4);
             f.spacing = (u32)json_u64(json_get(doc, *l, "spacing"), 10);
             f.look = boss_look(json_string(json_get(doc, *l, "sprite"), "red"));
@@ -155,13 +155,13 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
             f.score = (i32)json_i64(json_get(doc, *l, "score"), 50);
             f.fire_at = (f32)json_number(json_get(doc, *l, "fire_at"), 0.3);
             f.speed = (f32)json_number(json_get(doc, *l, "speed"), 2.8);
-            snprintf(f.pattern, sizeof f.pattern, "%s", json_string(json_get(doc, *l, "pattern"), "aimed"));
+            format(f.pattern, sizeof f.pattern, "%s", json_string(json_get(doc, *l, "pattern"), "aimed"));
             f.entry = KV_BML_NONE;
             p.launch = stage.formation_count;
             stage.formations[stage.formation_count++] = f;
             p.every = (u32)json_u64(json_get(doc, *v, "every"), 300);
         }
-        if (!drop_named(json_string(json_get(doc, *v, "drop"), ""), &p.drop)) { snprintf(why, why_cap, "boss %s: part %s drops something unknown", name, p.name); return false; }
+        if (!drop_named(json_string(json_get(doc, *v, "drop"), ""), &p.drop)) { format(why, why_cap, "boss %s: part %s drops something unknown", name, p.name); return false; }
         out.total += p.health;
         ++out.part_count;
     }
@@ -172,14 +172,14 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
         if (out.phase_count == kMaxPhases) return boss_fail(why, why_cap, name, "too many phases");
         PhaseDef& ph = out.phases[out.phase_count++];
         ph = PhaseDef{};
-        snprintf(ph.name, sizeof ph.name, "%s", json_string(json_get(doc, *v, "name"), ""));
+        format(ph.name, sizeof ph.name, "%s", json_string(json_get(doc, *v, "name"), ""));
         point2 sway = xy_of(doc, json_get(doc, *v, "sway"), point2{0, 0});
         ph.sway = sway.x;
         ph.sway_rate = sway.y;
         const JsonValue* ends = json_get(doc, *v, "ends");
         for (const JsonValue* x = ends ? json_first(doc, *ends) : nullptr; x; x = json_next(doc, *x)) {
             i32 k = part_named(out, json_string(x, ""));
-            if (k < 0) { snprintf(why, why_cap, "boss %s: phase %s ends with \"%s\", which is not a part", name, ph.name, json_string(x, "")); return false; }
+            if (k < 0) { format(why, why_cap, "boss %s: phase %s ends with \"%s\", which is not a part", name, ph.name, json_string(x, "")); return false; }
             ph.ends |= 1u << k;
         }
         if (!ph.ends) return boss_fail(why, why_cap, name, "a phase ends with parts");
@@ -188,11 +188,11 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
     for (u32 i = 0; i < out.part_count; ++i) {
         const PartDef& p = out.parts[i];
         if (p.armored_until >= out.phase_count)
-            { snprintf(why, why_cap, "boss %s: part %s opens in phase %u of %u", name, p.name, p.armored_until, out.phase_count); return false; }
+            { format(why, why_cap, "boss %s: part %s opens in phase %u of %u", name, p.name, p.armored_until, out.phase_count); return false; }
     }
     const JsonValue* stomp = json_get(doc, root, "stomp");
     if (!stomp) return boss_fail(why, why_cap, name, "a boss has a stomp");
-    snprintf(out.stomp, sizeof out.stomp, "%s", json_string(json_get(doc, *stomp, "pattern"), ""));
+    format(out.stomp, sizeof out.stomp, "%s", json_string(json_get(doc, *stomp, "pattern"), ""));
     out.stomp_entry = KV_BML_NONE;
     out.stomp_ticks = (u32)(json_number(json_get(doc, *stomp, "seconds"), 5.0) * 60.0);
     out.dive = (f32)json_number(json_get(doc, *stomp, "dive"), 200.0);

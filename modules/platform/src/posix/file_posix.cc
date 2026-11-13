@@ -1,5 +1,6 @@
 // Files and directories on POSIX: descriptors, pread, opendir.
 #include "../os_file.h"
+#include "korvid/core/format.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -78,7 +79,7 @@ bool os_make_temp_dir(const char* prefix, char* out, u32 cap) {
     if (!tmp || !tmp[0]) tmp = "/tmp";
     usize n = strlen(tmp);
     while (n > 1 && tmp[n - 1] == '/') --n;
-    int len = snprintf(out, cap, "%.*s/%s-XXXXXX", (int)n, tmp, prefix);
+    int len = format(out, cap, "%.*s/%s-XXXXXX", (int)n, tmp, prefix);
     if (len <= 0 || (u32)len >= cap) return false;
     return mkdtemp(out) != nullptr;
 }
