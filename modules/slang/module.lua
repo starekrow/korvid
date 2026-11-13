@@ -22,10 +22,15 @@ module "slang" {
       platforms = {
         -- The Apple family (toolchain.apple's family): Metal's compiler builds for the
         -- consuming platform's triple (air64-apple-ios26.0-simulator), since a library is
-        -- built for one OS and an iOS Metal refuses a macOS library.
+        -- built for one OS and an iOS Metal refuses a macOS library. It compiles Slang's
+        -- generated MSL, not our source, so its warnings are about Slang's code: temporaries
+        -- holding an atomic's unused result, and every StructuredBuffer declared writable
+        -- (device*, never const), which a vertex function that returns a value is warned
+        -- for, with no flag to name. -w quiets that stage; Slang's own diagnostics on the
+        -- source (implicit conversions, type errors) come before it and still show.
         apple = {
           outputs = "%{stem}.metallib",
-          command = "%{tool} %{in} %{shader_includes} -target metallib -DKV_TARGET_METAL=1 -Xmetal -target -Xmetal air64-%{triple} " ..
+          command = "%{tool} %{in} %{shader_includes} -target metallib -DKV_TARGET_METAL=1 -Xmetal -target -Xmetal air64-%{triple} -Xmetal -w " ..
                     "-depfile %{depfile} -reflection-json %{out}.json -o %{out}",
         },
         -- Wherever renderer-d3d12 is bound: DXIL, which holds one entry point per blob where
