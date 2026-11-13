@@ -12,6 +12,7 @@
 //
 //   gallery [--out DIR] [--scene NAME]   (DIR: where the PPMs go, "." by default)
 #include "korvid/gallery/module.h"
+#include "korvid/platform/io.h"
 #include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -21,7 +22,6 @@
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/module.h"
 #include "korvid/render/renderer.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -191,14 +191,15 @@ void shoot(Gallery& g, const char* scene, const RenderView& view) {
     for (u32 i = 0; i < 4; ++i) { platform_pump(*g.e); renderer_render(g.r, view); }
     char path[512];
     format(path, sizeof path, "%s/gallery_%s.ppm", g.out, scene);
-    remove(path);
+    io_remove(path);
     renderer_screenshot(g.r, path);
     for (u32 i = 0; i < 8; ++i) {
         platform_pump(*g.e);
         renderer_render(g.r, view);
-        if (FILE* f = fopen(path, "rb")) { // the frame that carries it writes it before render returns
-            bool any = fgetc(f) != EOF;
-            fclose(f);
+        IoBytes shot; // the frame that carries it writes it before render returns
+        if (io_read_now(path, &shot)) {
+            bool any = shot.size > 0;
+            shot.free();
             if (any) { ++g.written; KV_INFO("gallery", "%s", path); return; }
         }
     }

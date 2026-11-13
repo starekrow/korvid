@@ -109,7 +109,10 @@ Names (`name.h`): interned strings compared as integers. Hashing (`hash.h`): one
 64-bit hash, never seeded. UTF-8 (`utf8.h`), the engine's one text encoding: total
 decoding (malformed bytes are U+FFFD, one at a time), encoding, validation and copies
 that truncate at a character boundary. A JSON reader (`json.h`), the CLI registry (`cli.h`), a
-seeded PCG32 (`random.h`), a test harness (`test.h`), a leveled log (`log.h`).
+seeded PCG32 (`random.h`), a test harness (`test.h`), a leveled log (`log.h`), and
+formatted text and the standard streams (`format.h`: `format`, which is snprintf, and
+`print`, `print_err`) without including `<stdio.h>`, which only core's own stream code
+does. Files are the platform module's (`io.h`), queued or blocking.
 
 ## Using it
 
@@ -295,7 +298,7 @@ Header `korvid/core/profile.h`:
 | `prof_trace_open(path)`, `prof_trace_close()`, `prof_shutdown()` | functions | a Chrome JSON trace |
 | `prof_track(name)`, `prof_track_begin(track, name, ticks)`, `prof_track_end(track, ticks)`, `prof_track_counter(track, name, value, ticks)` | functions | a track: spans timed on another clock (the GPU's), shown like a thread |
 
-Header `korvid/core/utf8.h`, `json.h`, `cli.h`, `random.h`, `log.h`, `test.h`:
+Header `korvid/core/utf8.h`, `json.h`, `cli.h`, `random.h`, `log.h`, `test.h`, `format.h`:
 
 | name | kind | what |
 |---|---|---|
@@ -306,6 +309,8 @@ Header `korvid/core/utf8.h`, `json.h`, `cli.h`, `random.h`, `log.h`, `test.h`:
 | `Rng` | record | PCG32: `seeded(seed, stream)`, `next`, `unit`, `range`, `below`, `chance` |
 | `KV_TRACE`..`KV_ERROR`, `log_set_level`, `log_level`, `log_write` | macros, functions | leveled log to stdout |
 | `TestCtx`, `KV_CHECK(ctx, expr)`, `test_report(ctx, exe)` | record, macro, function | one test executable per module, no registration |
+| `format`, `vformat` | functions | snprintf's contract and language |
+| `print`, `vprint`, `print_err`, `vprint_err`, `print_flush` | functions | to stdout (buffered) and stderr |
 
 Header `korvid/core/os_memory.h`: `os_page_size`, `os_reserve`, `os_commit`, `os_decommit`,
 `os_release`, `os_page_align`: the page layer, the only ported part of the memory system.

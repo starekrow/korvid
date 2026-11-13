@@ -17,15 +17,15 @@
 // The file (.kvr): "KVR1", a u32 header length, the header (lines: `exe NAME`, `arg TOKEN`,
 // `action NAME`), then records, each a varint of ticks since the last and a byte: 1, an
 // action (u8 index, u8 down, f32 x, f32 y); 2, a hash (u64); 3, the end. Little-endian.
-// The frame loop reads and writes it with stdio, at startup and at shutdown: it is a
-// developer's file, outside the run's I/O.
+// The frame loop reads and writes it with the platform's blocking I/O, at startup and at
+// shutdown: it is a developer's file, outside the run's I/O queue.
 #include "frameloop_internal.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
+#include "korvid/platform/io.h"
 #include "korvid/platform_hid/actions.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -139,15 +139,11 @@ bool replay_open(const char* exe, bool (*apply)(const char* arg, const char* val
     if (g_rep.record_path && g_rep.replay_path) { KV_ERROR("frameloop", "--record and --replay: one at a time"); return false; }
     g_rep.recording = g_rep.record_path != nullptr;
     if (!g_rep.replay_path) return true;
-    FILE* f = fopen(g_rep.replay_path, "rb");
-    if (!f) { KV_ERROR("frameloop", "--replay %s: cannot open it", g_rep.replay_path); return false; }
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    g_rep.cap = size > 0 ? (usize)size : 1;
-    g_rep.data = (u8*)alloc_in(mem_general(), g_rep.cap, 8);
-    g_rep.len = fread(g_rep.data, 1, (usize)(size > 0 ? size : 0), f);
-    fclose(f);
+    IoBytes file;
+    if (!io_read_now(g_rep.replay_path, &file, mem_general())) { KV_ERROR("frameloop", "--replay %s: cannot read it", g_rep.replay_path); return false; }
+    g_rep.data = file.data; // the general allocator's, size + 1 bytes: freed as cap
+    g_rep.cap = file.size + 1;
+    g_rep.len = file.size;
     char magic[4];
     u32 header = 0;
     if (!get(magic, 4) || memcmp(magic, "KVR1", 4) || !get(&header, 4) || g_rep.at + header > g_rep.len) {
@@ -289,11 +285,10 @@ void replay_finish(Engine& e) {
         Span<const char* const> names = frameloop_config(e).recorded_actions;
         for (u32 i = 0; i < names.len && n < sizeof header; ++i) n += (usize)format(header + n, sizeof header - n, "action %s\n", names[i]);
         if (n > sizeof header) n = sizeof header;
-        FILE* f = fopen(g_rep.record_path, "wb");
+        IoFileWriter w;
         u32 hl = (u32)n;
-        bool ok = f && fwrite("KVR1", 1, 4, f) == 4 && fwrite(&hl, 4, 1, f) == 1 && fwrite(header, 1, n, f) == n &&
-                  (g_rep.len == 0 || fwrite(g_rep.data, 1, g_rep.len, f) == g_rep.len);
-        if (f) fclose(f);
+        bool ok = w.open(g_rep.record_path) && w.write("KVR1", 4) && w.write(&hl, 4) && w.write(header, n) && w.write(g_rep.data, g_rep.len);
+        ok = w.close() && ok;
         if (ok) KV_INFO("frameloop", "record: %s, %u ticks, %u bytes", g_rep.record_path, (u32)e.clock.tick_count, (u32)(g_rep.len + n + 8));
         else KV_ERROR("frameloop", "record: could not write %s", g_rep.record_path);
     } else if (g_rep.playing && !g_rep.ended) {

@@ -6,10 +6,10 @@
 // the list of non-empty buckets it keeps; it never visits a sprite to draw.
 #include "renderer_internal.h"
 #include "korvid/core/arena.h"
+#include "korvid/platform/io.h"
 #include "korvid/core/format.h"
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
-#include <stdio.h>
 #include "korvid/math/scalar.h"
 #include <string.h>
 
@@ -19,25 +19,20 @@ namespace kv {
 bool rv_load_shader(Renderer* r, const char* name, VkShaderModule* out) {
     char path[1024];
     format(path, sizeof path, "%sshaders/%s", r->base_path, name);
-    FILE* f = fopen(path, "rb");
-    if (!f) { KV_ERROR("vulkan", "cannot open shader '%s'", path); return false; }
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (len <= 0 || (len % 4) != 0) { fclose(f); KV_ERROR("vulkan", "bad SPIR-V size in '%s'", path); return false; }
-    MemScope scope; // the words are needed only until the module is created
-    u32* words = arena_push_n<u32>(*scope.arena, (u32)(len / 4));
-    bool ok = words && fread(words, 1, (usize)len, f) == (usize)len;
-    fclose(f);
-    if (!ok) { KV_ERROR("vulkan", "short read on '%s'", path); return false; }
+    IoBytes file; // needed only until the module is created
+    if (!io_read_now(path, &file)) { KV_ERROR("vulkan", "cannot read shader '%s'", path); return false; }
+    if (file.size == 0 || (file.size % 4) != 0) { file.free(); KV_ERROR("vulkan", "bad SPIR-V size in '%s'", path); return false; }
+    const u32* words = (const u32*)file.data;
+    usize len = file.size;
 
     VkShaderModuleCreateInfo ci{};
     ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     ci.codeSize = (usize)len;
     ci.pCode    = words;
     VkResult res = vkCreateShaderModule(r->device, &ci, nullptr, out);
+    file.free();
     if (res != VK_SUCCESS) { KV_ERROR("vulkan", "vkCreateShaderModule: %s", vk_result_name(res)); return false; }
-    KV_INFO("vulkan", "shader '%s' loaded (%ld bytes)", name, len);
+    KV_INFO("vulkan", "shader '%s' loaded (%llu bytes)", name, (unsigned long long)len);
     return true;
 }
 
@@ -610,9 +605,9 @@ bool rv_verify_sort(Renderer* r) {
 bool rv_write_screenshot(Renderer* r) {
     r->shot_recorded = false;
     if (!r->shot_buffer.mapped) return false;
-    FILE* f = fopen(r->shot_path, "wb");
-    if (!f) { KV_ERROR("vulkan", "cannot write screenshot '%s'", r->shot_path); rv_defer_destroy_buffer(r, r->shot_buffer); return false; }
-    fprintf(f, "P6\n%u %u\n255\n", r->shot_width, r->shot_height);
+    IoFileWriter f;
+    if (!f.open(r->shot_path)) { KV_ERROR("vulkan", "cannot write screenshot '%s'", r->shot_path); rv_defer_destroy_buffer(r, r->shot_buffer); return false; }
+    f.print("P6\n%u %u\n255\n", r->shot_width, r->shot_height);
     bool bgra = r->swapchain.format == VK_FORMAT_B8G8R8A8_SRGB || r->swapchain.format == VK_FORMAT_B8G8R8A8_UNORM;
     const u8* px = (const u8*)r->shot_buffer.mapped;
     MemScope scope;
@@ -624,10 +619,10 @@ bool rv_write_screenshot(Renderer* r) {
             row[x * 3 + 1] = src[1];
             row[x * 3 + 2] = bgra ? src[0] : src[2];
         }
-        fwrite(row, 1, r->shot_width * 3, f);
+        f.write(row, r->shot_width * 3);
     }
-    fclose(f);
-    KV_INFO("vulkan", "screenshot '%s' %ux%u", r->shot_path, r->shot_width, r->shot_height);
+    if (!f.close()) KV_ERROR("vulkan", "screenshot '%s': write failed (errno %d)", r->shot_path, f.error);
+    else KV_INFO("vulkan", "screenshot '%s' %ux%u", r->shot_path, r->shot_width, r->shot_height);
     rv_defer_destroy_buffer(r, r->shot_buffer);
     return true;
 }

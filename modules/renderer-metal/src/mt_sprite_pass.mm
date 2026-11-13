@@ -11,13 +11,13 @@
 // writes visible to the next, and Metal tracks hazards between encoders and command buffers.
 #include "renderer_internal.h"
 #include "korvid/core/arena.h"
+#include "korvid/platform/io.h"
 #include "korvid/core/format.h"
 #include "korvid/core/json.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -33,17 +33,14 @@ namespace kv {
 bool mt_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32 count) {
     char path[1024];
     kv::format(path, sizeof path, "%sshaders/%s.metallib.json", r->base_path, lib);
-    FILE* f = fopen(path, "rb");
-    if (!f) { KV_WARN("metal", "no reflection for '%s' (%s): bindings unchecked", lib, path); return true; }
-    MemScope scope;
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char* text = len > 0 ? arena_push_n<char>(*scope.arena, (u32)len) : nullptr;
-    bool read = text && fread(text, 1, (usize)len, f) == (usize)len;
-    fclose(f);
+    if (!kv::io_is_file(path)) { KV_WARN("metal", "no reflection for '%s' (%s): bindings unchecked", lib, path); return true; }
+    MemScope scope; // the text and the document, both in scratch, go with it
+    kv::IoBytes file;
+    bool read = kv::io_read_now(path, &file, mem_scratch()) && file.size > 0;
+    const char* text = (const char*)file.data;
+    usize len = file.size;
     JsonDoc doc;
-    if (!read || !json_parse(text, (usize)len, mem_scratch(), doc)) { KV_WARN("metal", "cannot read the reflection '%s'", path); return true; }
+    if (!read || !json_parse(text, len, mem_scratch(), doc)) { KV_WARN("metal", "cannot read the reflection '%s'", path); return true; }
     const JsonValue* params = json_get(doc, doc.root(), "parameters");
     bool ok = true;
     for (u32 i = 0; i < count; ++i) {

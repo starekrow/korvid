@@ -2,10 +2,10 @@
 // and 24-bit and float too, a bad file is refused; an Ogg Vorbis file from the system's
 // sound theme decodes if one is installed (skipped otherwise).
 #include "korvid/asset/sound.h"
+#include "korvid/platform/io.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/test.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace {
@@ -71,10 +71,11 @@ void test_sound(kv::TestCtx& c) {
     // Ogg: the freedesktop sound theme ships .oga files (Vorbis in Ogg); use one if present.
     const char* candidates[] = {"/usr/share/sounds/freedesktop/stereo/bell.oga", "/usr/share/sounds/freedesktop/stereo/message.oga"};
     for (const char* path : candidates) {
-        FILE* fp = fopen(path, "rb");
-        if (!fp) continue;
-        usize len = fread(buf, 1, sizeof buf, fp);
-        fclose(fp);
+        IoBytes file;
+        if (!io_read_now(path, &file)) continue;
+        usize len = file.size < sizeof buf ? file.size : sizeof buf; // as much as the buffer holds
+        memcpy(buf, file.data, len);
+        file.free();
         SoundAsset o{};
         bool ok = sound_decode(buf, len, mem_general(), o, &why);
         KV_CHECK(c, ok && o.rate >= 8000 && o.channels >= 1 && o.frames > 1000);

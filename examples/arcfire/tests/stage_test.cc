@@ -8,7 +8,6 @@
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,15 +19,12 @@ char* slurp(const char* name, kv::usize* len) {
     if (!kv::platform_exe_dir(exe, sizeof exe)) return nullptr;
     char path[700];
     kv::format(path, sizeof path, "%sassets/arcfire/%s", exe, name);
-    FILE* f = fopen(path, "rb");
-    if (!f) return nullptr;
-    fseek(f, 0, SEEK_END);
-    long n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char* text = (char*)malloc((size_t)n + 1);
-    *len = fread(text, 1, (size_t)n, f);
-    fclose(f);
-    text[*len] = 0;
+    kv::IoBytes file;
+    if (!kv::io_read_now(path, &file)) return nullptr;
+    char* text = (char*)malloc(file.size + 1); // the caller's to free
+    memcpy(text, file.data, file.size + 1);    // the NUL after the bytes too
+    *len = file.size;
+    file.free();
     return text;
 }
 

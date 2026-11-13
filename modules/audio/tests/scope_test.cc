@@ -14,7 +14,6 @@
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_audio/module.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,16 +31,16 @@ KV_MODULE_DEFINE(k_scope_t) = {.name = "scope_t", .handlers = k_scope_handlers};
 
 // A short 16-bit mono WAV of `frames` frames at 8 kHz.
 bool write_wav(const char* path, u32 frames) {
-    FILE* f = fopen(path, "wb");
-    if (!f) return false;
+    IoFileWriter f;
+    if (!f.open(path)) return false;
     u32 data = frames * 2, riff = 36 + data, fmt_len = 16, rate = 8000, byte_rate = 16000;
     u16 pcm = 1, ch = 1, align = 2, bits = 16;
-    fwrite("RIFF", 1, 4, f); fwrite(&riff, 4, 1, f); fwrite("WAVEfmt ", 1, 8, f);
-    fwrite(&fmt_len, 4, 1, f); fwrite(&pcm, 2, 1, f); fwrite(&ch, 2, 1, f); fwrite(&rate, 4, 1, f);
-    fwrite(&byte_rate, 4, 1, f); fwrite(&align, 2, 1, f); fwrite(&bits, 2, 1, f);
-    fwrite("data", 1, 4, f); fwrite(&data, 4, 1, f);
-    for (u32 i = 0; i < frames; ++i) { i16 v = (i16)((i % 40) * 500 - 10000); fwrite(&v, 2, 1, f); }
-    return fclose(f) == 0;
+    f.write("RIFF", 4); f.write(&riff, 4); f.write("WAVEfmt ", 8);
+    f.write(&fmt_len, 4); f.write(&pcm, 2); f.write(&ch, 2); f.write(&rate, 4);
+    f.write(&byte_rate, 4); f.write(&align, 2); f.write(&bits, 2);
+    f.write("data", 4); f.write(&data, 4);
+    for (u32 i = 0; i < frames; ++i) { i16 v = (i16)((i % 40) * 500 - 10000); f.write(&v, 2); }
+    return f.close();
 }
 
 } // namespace

@@ -18,7 +18,6 @@
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 #include "fixtures.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -51,10 +50,7 @@ constinit const SystemDesc k_systems[] = {{.name = ".spawn", .phase = Phase::Sim
 KV_MODULE_DEFINE(k_tt) = {.name = "tt", .kinds = k_kinds, .systems = k_systems};
 
 bool put(const char* path, const char* text) {
-    FILE* f = fopen(path, "wb");
-    if (!f) return false;
-    fputs(text, f);
-    return fclose(f) == 0;
+    return io_write_now(path, text, strlen(text));
 }
 
 } // namespace

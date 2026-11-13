@@ -12,7 +12,6 @@
 #include "korvid/pack/zip.h"
 #include "foreign_zip.h"
 #include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,7 +19,7 @@ namespace {
 
 using namespace kv;
 
-bool to_file(void* user, const void* p, usize n) { return fwrite(p, 1, n, (FILE*)user) == n; }
+bool to_file(void* user, const void* p, usize n) { return ((IoFileWriter*)user)->write(p, n); }
 
 // Reads one logical path to completion: the status, and the bytes when Done.
 IoStatus read_one(IoQueue& q, const char* path, Array<u8>& out, i32* err) {
@@ -97,30 +96,31 @@ void test_io_mounts(kv::TestCtx& c) {
     format(path, sizeof path, "%s/x", loose);
     io_make_dirs(path);
     format(path, sizeof path, "%s/x/a.txt", loose);
-    FILE* f = fopen(path, "wb"); fwrite("from loose", 1, 10, f); fclose(f);
+    KV_CHECK(c, io_write_now(path, "from loose", 10));
 
     static u8 big[20000];
     for (u32 i = 0; i < sizeof big; ++i) big[i] = (u8)(i * 3);
     const PackWriteFile files[] = {{"x/a.txt", "from pack", 9}, {"x/big.bin", big, sizeof big}, {"x/empty", "", 0}};
     const char* why = nullptr;
-    f = fopen(pack, "wb");
+    IoFileWriter w;
+    KV_CHECK(c, w.open(pack));
     MemScope scope;
-    KV_CHECK(c, kpak_write(files, to_file, f, mem_scratch(), &why));
-    fclose(f);
-    f = fopen(zip, "wb"); fwrite(k_foreign, 1, sizeof k_foreign, f); fclose(f);
+    KV_CHECK(c, kpak_write(files, to_file, &w, mem_scratch(), &why));
+    KV_CHECK(c, w.close());
+    KV_CHECK(c, io_write_now(zip, k_foreign, sizeof k_foreign));
     // The bad pack: the same, with a byte in big.bin's data flipped (the first entry after
     // the index is x/a.txt; big.bin's data starts on a later 4 KiB boundary).
-    f = fopen(pack, "rb");
-    fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
-    u8* bytes = (u8*)alloc_in(mem_general(), (usize)n);
-    KV_CHECK(c, fread(bytes, 1, (usize)n, f) == (usize)n); fclose(f);
+    IoBytes packed;
+    KV_CHECK(c, io_read_now(pack, &packed));
+    u8* bytes = packed.data;
+    usize n = packed.size;
     usize target = 0;
-    for (usize at = 0; at + 4 < (usize)n; at += KV_PACK_ALIGN)
+    for (usize at = 0; at + 4 < n; at += KV_PACK_ALIGN)
         if (at && bytes[at] == 0 && bytes[at + 1] == 3 && bytes[at + 2] == 6) { target = at + 100; break; }
     KV_CHECK(c, target != 0);
     bytes[target] ^= 0xFF;
-    f = fopen(bad, "wb"); fwrite(bytes, 1, (usize)n, f); fclose(f);
-    free_in(mem_general(), bytes, (usize)n);
+    KV_CHECK(c, io_write_now(bad, bytes, n));
+    packed.free();
 
     with_backend(c, IoBackend::Sync, loose, pack, zip, bad);
     with_backend(c, IoBackend::Auto, loose, pack, zip, bad);

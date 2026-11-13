@@ -178,6 +178,40 @@ bool io_remove_tree(const char* path);
 // Synchronous. False if none could be made.
 bool io_make_temp_dir(const char* prefix, char* out, u32 cap);
 
+// ---- Blocking file I/O ----------------------------------------------------------------
+// For tools, startup, shutdown and tests: never for a tick, which goes through the queue.
+// The same OS layer as the queue's (UTF-8 paths, CreateFileW on Windows), so a file reads
+// and writes alike either way. Errors are errno values, as IoCompletion::error.
+
+// A whole file's bytes, with a NUL after them (not counted in size), so text can be used
+// as a C string. free() returns them to the allocator they came from.
+struct IoBytes {
+    u8*        data  = nullptr;
+    usize      size  = 0;
+    Allocator* alloc = nullptr;
+    void free();
+};
+// Reads a whole file now, its bytes from `alloc` (null: general). False, with `out` empty
+// and *err set if given, when it cannot be opened or read.
+bool io_read_now(const char* path, IoBytes* out, Allocator* alloc = nullptr, i32* err = nullptr);
+// Writes a whole file now: created, or truncated if it exists. False (*err) on failure.
+bool io_write_now(const char* path, const void* data, usize size, i32* err = nullptr);
+
+// A file written in pieces, now: open (created or truncated), write and print as often as
+// need be, close. A failure sticks: what follows does nothing, and close reports it.
+struct IoFileWriter {
+    OsFile file  = -1;
+    i32    error = 0;
+    bool open(const char* path);
+    bool write(const void* data, usize size);
+    bool print(const char* fmt, ...) KV_PRINTF(2, 3); // formatted, up to 4 KiB a call
+    bool close();                                      // false if anything failed
+};
+
+// What a path names, following links.
+bool io_is_file(const char* path);
+bool io_is_dir(const char* path);
+
 // The platform module's queue, or null if the module is not started.
 IoQueue* platform_io(Engine& e);
 // Directory of the running executable, with a trailing separator. Assets live beneath it.

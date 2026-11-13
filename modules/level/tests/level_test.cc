@@ -19,7 +19,6 @@
 #include "korvid/scene/parent.h"
 #include "korvid/sprite/module.h"
 #include "korvid/sprite/transform2.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -77,10 +76,7 @@ KV_MODULE_DEFINE(k_lt) = {.name = "lt", .kinds = k_kinds, .systems = k_systems, 
 bool write(const char* dir, const char* name, const char* text) {
     char path[600];
     format(path, sizeof path, "%s/%s", dir, name);
-    FILE* f = fopen(path, "wb");
-    if (!f) return false;
-    fputs(text, f);
-    return fclose(f) == 0;
+    return io_write_now(path, text, strlen(text));
 }
 
 struct Lines { u32 n = 0; char text[16][128]; };

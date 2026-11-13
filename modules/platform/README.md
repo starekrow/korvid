@@ -97,8 +97,14 @@ are deflated or unaligned. At startup the module mounts, in order, `<exe dir>/as
 `--pack FILE` and `--assets DIR`), so a pack overrides loose files and a mod overrides the
 pack. A tool mounts nothing.
 
-`io_list_files(dir, fn, user)` walks a directory (sorted, hidden entries skipped) and
-`io_make_dirs(path)` is `mkdir -p`; both are synchronous, for tools and startup.
+**Blocking files**, for tools, startup, shutdown and tests (a tick uses the queue):
+`io_read_now(path, &bytes)` reads a whole file into an `IoBytes` (a NUL after the bytes,
+so text is a C string; `free()` returns them), `io_write_now(path, data, size)` writes one
+whole, and an `IoFileWriter` (`open`, `write`, `print`, `close`, a failure that sticks)
+writes one in pieces. `io_is_file` and `io_is_dir` say what a path names. They stand on
+the queue's own OS layer, UTF-8 paths and all, so nothing in the engine needs `<stdio.h>`
+to touch a file. `io_list_files(dir, fn, user)` walks a directory (sorted, hidden entries
+skipped) and `io_make_dirs(path)` is `mkdir -p`.
 `io_make_temp_dir(prefix, ...)` makes a fresh directory under the OS's temporary one, and
 `io_remove_tree(path)` removes a directory and all under it (a link inside goes as a link,
 never followed): a test's scratch, made and cleaned up.

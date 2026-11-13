@@ -3,7 +3,6 @@
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
 #include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #if !defined(_WIN32)
@@ -76,7 +75,7 @@ void test_backend(kv::TestCtx& c, const Files& f, kv::IoBackend backend) {
     {
         u8* buf = (u8*)mem_alloc(big);
         for (u32 i = 0; i < big; ++i) buf[i] = (u8)(i * 7 + (i >> 8));
-        FILE* fp = fopen(big_path, "wb"); fwrite(buf, 1, big, fp); fclose(fp);
+        KV_CHECK(c, io_write_now(big_path, buf, big));
         mem_free(buf);
     }
     IoRequest rbig; rbig.path = big_path; rbig.user = 5;
@@ -112,8 +111,8 @@ void test_io(kv::TestCtx& c) {
     format(f.a, sizeof f.a, "%s/a.bin", f.dir);
     format(f.b, sizeof f.b, "%s/b.bin", f.dir);
     format(f.missing, sizeof f.missing, "%s/nope.bin", f.dir);
-    FILE* fp = fopen(f.a, "wb"); fwrite("hello io", 1, 8, fp); fclose(fp);
-    fp = fopen(f.b, "wb"); fclose(fp); // empty
+    KV_CHECK(c, io_write_now(f.a, "hello io", 8));
+    KV_CHECK(c, io_write_now(f.b, "", 0)); // empty
 
     test_backend(c, f, IoBackend::Sync);
     test_backend(c, f, IoBackend::Auto); // io_uring where the kernel allows it, sync otherwise
@@ -139,7 +138,7 @@ void test_io_budget(kv::TestCtx& c) {
     memset(buf, 0x5A, size);
     for (u32 i = 0; i < 6; ++i) {
         format(paths[i], sizeof paths[i], "%s/f%u.bin", dir, i);
-        FILE* fp = fopen(paths[i], "wb"); fwrite(buf, 1, size, fp); fclose(fp);
+        KV_CHECK(c, io_write_now(paths[i], buf, size));
     }
     mem_free(buf);
 
@@ -223,9 +222,7 @@ void test_io_write(kv::TestCtx& c) {
         KV_CHECK(c, cr && cr->status == IoStatus::Done && cr->size == 11 && memcmp(cr->data, expect, 11) == 0);
         mem_free(cr->data);
         q.reap(hr);
-        FILE* fp = fopen(gone, "rb");
-        KV_CHECK(c, fp == nullptr); // the cancelled write never happened
-        if (fp) fclose(fp);
+        KV_CHECK(c, !io_is_file(gone)); // the cancelled write never happened
         q.free();
     }
     io_remove(path); io_remove(empty); io_remove(dir);
@@ -244,26 +241,51 @@ void test_io_remove_tree(kv::TestCtx& c) {
     format(path, sizeof path, "%s/empty", dir);      KV_CHECK(c, io_make_dirs(path));
     for (const char* f : files) {
         format(path, sizeof path, "%s/%s", dir, f);
-        FILE* fp = fopen(path, "wb");
-        KV_CHECK(c, fp != nullptr);
-        if (fp) { fputs(f, fp); fclose(fp); }
+        KV_CHECK(c, io_write_now(path, f, strlen(f)));
     }
     char kept[400];
     format(kept, sizeof kept, "%s/kept.txt", outside);
-    FILE* fp = fopen(kept, "wb");
-    if (fp) { fputs("kept", fp); fclose(fp); }
+    KV_CHECK(c, io_write_now(kept, "kept", 4));
 #if !defined(_WIN32)
     format(path, sizeof path, "%s/sub/link", dir);
     KV_CHECK(c, symlink(outside, path) == 0);
 #endif
     KV_CHECK(c, io_remove_tree(dir));
-    fp = fopen(dir, "rb");
-    KV_CHECK(c, fp == nullptr); // gone
-    if (fp) fclose(fp);
-    fp = fopen(kept, "rb");
-    KV_CHECK(c, fp != nullptr); // the link's target untouched
-    if (fp) fclose(fp);
+    KV_CHECK(c, !io_is_dir(dir));    // gone
+    KV_CHECK(c, io_is_file(kept));   // the link's target untouched
     KV_CHECK(c, io_remove_tree(dir)); // gone already
     KV_CHECK(c, io_remove_tree(outside));
     KV_CHECK(c, !io_remove_tree(""));
+}
+
+// The blocking calls: a whole file written and read back, with the NUL after it; a file
+// written in pieces; what a missing file and a directory give.
+void test_io_now(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("io_read_now, io_write_now, IoFileWriter");
+    char dir[200], path[300], missing[300];
+    KV_CHECK(c, io_make_temp_dir("korvid-now", dir, sizeof dir));
+    format(path, sizeof path, "%s/a.bin", dir);
+    format(missing, sizeof missing, "%s/none", dir);
+    static u8 bytes[70000];
+    for (u32 i = 0; i < sizeof bytes; ++i) bytes[i] = (u8)(i * 7 + 1);
+    KV_CHECK(c, io_write_now(path, bytes, sizeof bytes) && io_is_file(path) && !io_is_dir(path));
+    IoBytes got;
+    KV_CHECK(c, io_read_now(path, &got) && got.size == sizeof bytes && memcmp(got.data, bytes, sizeof bytes) == 0 && got.data[got.size] == 0);
+    got.free();
+    KV_CHECK(c, got.data == nullptr && got.size == 0);
+    i32 err = 0;
+    KV_CHECK(c, !io_read_now(missing, &got, nullptr, &err) && err != 0 && got.data == nullptr);
+    KV_CHECK(c, !io_read_now(dir, &got) || got.size == 0); // a directory: refused, or nothing in it
+    got.free();
+    IoFileWriter w;
+    KV_CHECK(c, w.open(path) && w.print("P6\n%u %u\n", 3u, 2u) && w.write("abc", 3) && w.close());
+    KV_CHECK(c, io_read_now(path, &got) && got.size == 10 && memcmp(got.data, "P6\n3 2\nabc", 10) == 0);
+    got.free();
+    format(missing, sizeof missing, "%s/no/such/dir/x", dir);
+    IoFileWriter bad;
+    KV_CHECK(c, !bad.open(missing) && !bad.write("x", 1) && !bad.close() && bad.error != 0);
+    KV_CHECK(c, io_write_now(path, "", 0) && io_read_now(path, &got) && got.size == 0 && got.data && got.data[0] == 0);
+    got.free();
+    KV_CHECK(c, io_remove_tree(dir));
 }

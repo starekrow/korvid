@@ -6,6 +6,7 @@
 // renderer_internal.h for how the source is split and what differs.
 #include "renderer_internal.h"
 #include "korvid/core/arena.h"
+#include "korvid/platform/io.h"
 #include "korvid/core/format.h"
 #include "korvid/core/hash.h"
 #include "korvid/renderer-metal/module.h"
@@ -14,7 +15,6 @@
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/module.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace kv {
@@ -113,19 +113,19 @@ void record_screenshot(Renderer* r, id<MTLCommandBuffer> cb, id<MTLTexture> imag
 // Binary PPM, RGB, from the drawable's BGRA (sRGB-encoded bytes).
 void write_screenshot(Renderer* r) {
     g_shot.recorded = false;
-    FILE* f = fopen(g_shot.path, "wb");
-    if (!f) { KV_ERROR("metal", "cannot write screenshot '%s'", g_shot.path); return; }
-    fprintf(f, "P6\n%u %u\n255\n", g_shot.width, g_shot.height);
+    kv::IoFileWriter f;
+    if (!f.open(g_shot.path)) { KV_ERROR("metal", "cannot write screenshot '%s'", g_shot.path); return; }
+    f.print("P6\n%u %u\n255\n", g_shot.width, g_shot.height);
     const u8* px = (const u8*)g_shot.buffer.contents;
     MemScope scope;
     u8* row = arena_push_n<u8>(*scope.arena, g_shot.width * 3);
     for (u32 y = 0; y < g_shot.height; ++y) {
         const u8* src = px + (usize)y * g_shot.width * 4;
         for (u32 x = 0; x < g_shot.width; ++x, src += 4) { row[x * 3 + 0] = src[2]; row[x * 3 + 1] = src[1]; row[x * 3 + 2] = src[0]; }
-        fwrite(row, 1, g_shot.width * 3, f);
+        f.write(row, g_shot.width * 3);
     }
-    fclose(f);
-    KV_INFO("metal", "screenshot '%s' %ux%u", g_shot.path, g_shot.width, g_shot.height);
+    if (!f.close()) KV_ERROR("metal", "screenshot '%s': write failed (errno %d)", g_shot.path, f.error);
+    else KV_INFO("metal", "screenshot '%s' %ux%u", g_shot.path, g_shot.width, g_shot.height);
     mt_defer_release(r, g_shot.buffer);
     g_shot.buffer = nil;
 }

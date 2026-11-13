@@ -18,7 +18,6 @@
 #include "korvid/platform_hid/module.h"
 #include "korvid/sprite/module.h"
 #include "korvid/math/scalar.h"
-#include <stdio.h>
 #include <string.h>
 
 namespace {
@@ -71,10 +70,7 @@ UiOpen uo(i32 layer, bool input = true, bool hold = false) {
 }
 
 bool put(const char* path, const char* text) {
-    FILE* f = fopen(path, "wb");
-    if (!f) return false;
-    fputs(text, f);
-    return fclose(f) == 0;
+    return io_write_now(path, text, strlen(text));
 }
 
 } // namespace

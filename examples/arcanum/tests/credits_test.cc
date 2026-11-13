@@ -4,7 +4,6 @@
 #include "korvid/core/format.h"
 #include "korvid/platform/io.h"
 #include "korvid/core/test.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,15 +15,11 @@ char* slurp(const char* name) {
     if (!kv::platform_exe_dir(exe, sizeof exe)) return nullptr; // ends in a separator
     char path[700];
     kv::format(path, sizeof path, "%sassets/arcanum/%s", exe, name);
-    FILE* f = fopen(path, "rb");
-    if (!f) return nullptr;
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char* text = (char*)malloc((size_t)len + 1);
-    size_t got = fread(text, 1, (size_t)len, f);
-    fclose(f);
-    text[got] = 0;
+    kv::IoBytes file;
+    if (!kv::io_read_now(path, &file)) return nullptr;
+    char* text = (char*)malloc(file.size + 1); // the caller's to free
+    memcpy(text, file.data, file.size + 1);    // the NUL after the bytes too
+    file.free();
     return text;
 }
 
