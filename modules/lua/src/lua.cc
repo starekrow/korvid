@@ -1,8 +1,9 @@
-// Lua 5.5.1 (tools/kormake/vendor/lua, unchanged: kormake's own copy) compiled as C++, all
-// of it in this one file as Lua's onelua.c does. Its errors are longjmp, not exceptions
-// (the engine has none), so the bindings keep nothing with a destructor alive across a
-// call that can raise. Its math library and its arithmetic (%, ^, //) are kv's (scalar.h),
-// so a script computes the same on every platform, as the engine does.
+// Lua 5.5.1 (vendor/lua, unchanged; kormake's bootstrap compiles the same copy, as C)
+// compiled as C++ for the engine, all of it in this one file as Lua's onelua.c does. Its
+// errors are longjmp, not exceptions (the engine has none), so the bindings keep nothing
+// with a destructor alive across a call that can raise. Its math library and its
+// arithmetic (%, ^, //) are kv's (scalar.h), so a script computes the same on every
+// platform, as the engine does.
 #include "korvid/math/scalar.h"
 #define LUA_USE_LONGJMP
 #if !defined(_WIN32)

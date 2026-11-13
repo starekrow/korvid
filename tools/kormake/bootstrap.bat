@@ -1,6 +1,6 @@
 @echo off
-rem Builds kormake from source with MSVC: the vendored Lua, the embedded scripts, and the
-rem host. Output: tools\kormake\bin\windows\kormake.exe. Run from anywhere. Uses the cl on
+rem Builds kormake from source with MSVC: the engine's vendored Lua (the lua module's,
+rem modules\lua\vendor\lua), the embedded scripts, and the host. Output: tools\kormake\bin\windows\kormake.exe. Run from anywhere. Uses the cl on
 rem PATH (a Developer Command Prompt) if there is one; otherwise finds the newest Visual
 rem Studio or Build Tools with the C++ tools through vswhere and sets it up for this run.
 setlocal
@@ -8,6 +8,7 @@ set "here=%~dp0"
 set "here=%here:~0,-1%"
 set "out=%here%\bin\windows"
 set "tmp=%here%\bin\.build"
+set "lua=%here%\..\..\modules\lua\vendor\lua"
 if not exist "%out%" mkdir "%out%" || goto fail
 if not exist "%tmp%" mkdir "%tmp%" || goto fail
 
@@ -43,10 +44,10 @@ for %%f in ("%here%\scripts\*.lua") do call :add_script "%%~ff"
 "%tmp%\embed.exe" "%tmp%\scripts.inc" %scripts% || goto fail
 
 set "luasrc="
-for %%f in ("%here%\vendor\lua\*.c") do (
+for %%f in ("%lua%\*.c") do (
   if /i not "%%~nxf"=="lua.c" if /i not "%%~nxf"=="luac.c" call :add_lua "%%~ff"
 )
-cl %cflags% /I"%here%\vendor\lua" /I"%tmp%" /Fo"%tmp%\\" /Fe"%out%\kormake.exe" "%here%\src\kormake.c" "%here%\src\os_win32.c" %luasrc% >"%tmp%\kormake.log" || (type "%tmp%\kormake.log" & goto fail)
+cl %cflags% /I"%lua%" /I"%tmp%" /Fo"%tmp%\\" /Fe"%out%\kormake.exe" "%here%\src\kormake.c" "%here%\src\os_win32.c" %luasrc% >"%tmp%\kormake.log" || (type "%tmp%\kormake.log" & goto fail)
 echo kormake: %out%\kormake.exe
 endlocal
 exit /b 0

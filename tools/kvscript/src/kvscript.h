@@ -2,9 +2,7 @@
 // kv.zip, kv.fs), each opened onto the stack as a table.
 #pragma once
 #include "korvid/core/types.h"
-#include "lua.h"
-#include "lauxlib.h"
-#include "lualib.h"
+#include "korvid/lua/lua.h"
 
 namespace kv {
 

@@ -50,7 +50,8 @@ does not take UTF-8 paths.
   identical to Pillow's in every channel. Only the PNG bytes differ: the image module's
   encoder is not Pillow's.
 - **The engine's math.** Lua's `math` library and its `%`, `^` and `//` are kv's
-  (`modules/math`), so a script computes the same on every platform, as the engine does.
+  (`modules/math`, through the lua module), so a script computes the same on every
+  platform, as the engine does.
 - **Errors are Lua's.** A bad argument or a file that cannot be read raises; a script
   that wants to go on uses `pcall`, or `kv.fs.read`'s nil.
 - **Pictures are Lua values.** Their pixels live in the Lua heap and go with the
@@ -58,11 +59,9 @@ does not take UTF-8 paths.
 
 ## How it is built
 
-`src/lua.cc` compiles kormake's own Lua 5.5.1 (`tools/kormake/vendor/lua`, unchanged) as
-C++ in one file, as Lua's `onelua.c` does, with `longjmp` for its errors (the engine has
-no exceptions) and its math names defined to kv's after `<math.h>`. Because of that the
-bindings keep nothing with a destructor alive across a call that can raise, and every
-buffer that must outlive one is a userdata. `src/image.cc` is `kv.image`, `src/font.cc`
-`kv.font` (the asset module's stb_truetype, compiled once more with `STBTT_STATIC`),
-`src/kvscript.cc` the module, the command, `kv.zip` and `kv.fs`. The module is not a unity
-build: Lua's sources define short macros that must stay in their file.
+Lua is the engine's lua module (`modules/lua`: the official 5.5.1 compiled as C++, errors
+by `longjmp`, math on kv's functions), stb_truetype the truetype module's. Because Lua's
+errors are `longjmp`, the bindings keep nothing with a destructor alive across a call that
+can raise, and every buffer that must outlive one is a userdata. `src/image.cc` is
+`kv.image`, `src/font.cc` `kv.font`, `src/kvscript.cc` the module, the command, `kv.zip`
+and `kv.fs`.

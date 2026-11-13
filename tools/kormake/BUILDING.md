@@ -20,9 +20,10 @@ Both scripts can be run from any directory, and both do the same three steps:
    `scripts/*.lua`. The result is `bin/.build/scripts.inc`: a C array of
    `{name, text}` entries, one per script, where the name is the file name without
    `.lua`.
-2. **Lua.** They compile every `vendor/lua/*.c` except `lua.c` and `luac.c` (the
+2. **Lua.** They compile every `modules/lua/vendor/lua/*.c` except `lua.c` and `luac.c` (the
    standalone interpreter and compiler). This is Lua 5.5.1, unchanged.
-   `vendor/UPGRADE.md` explains how to move to a newer release.
+   It is the engine's lua module's copy, the one the engine and its tools use too;
+   `modules/lua/vendor/UPGRADE.md` explains how to move to a newer release.
 3. **The host.** They compile `src/kormake.c` with the OS layer (`src/os_posix.c` or
    `src/os_win32.c`) and link everything into one executable.
 
@@ -66,7 +67,7 @@ tools/kormake/
   tests/run.sh       kormake's own test (see Testing kormake)
   tests/fixture/     ... an engine root of its own that the test generates
   tests/expected/    ... and what it must generate
-  vendor/lua/        Lua 5.5.1
+  (modules/lua/vendor/lua/   Lua 5.5.1, the lua module's, which the bootstrap compiles in)
 ```
 
 **The host** (`kormake.c`) gives the scripts a small API. The global `kfs` holds
