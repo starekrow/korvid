@@ -152,7 +152,12 @@ toolchain, a `system` tool or a `prebuilt` one).
   it stages (assets, shaders, DLLs) as order-only inputs, so building the executable also
   builds what it reads.
 - *Tests.* Every selectable module with a `tests/` directory gets
-  `bin/<module>_tests` and `test/<module>.ok`.
+  `bin/<module>_tests` and `test/<module>.ok`. Like an executable's link, the test's link
+  takes what the module and its closure stage (assets, shaders, DLLs) as order-only
+  inputs. The stamp takes the same files as implicit inputs, so a changed asset re-copies
+  and reruns the test without relinking it, and a module's test only reruns for its own
+  closure's files. A host instance's edges (`host/bin/...`, `host/test/...`, with
+  `run_test_host` when the target has a runner) work the same way.
 - *Phonies.* kormake writes `tests`, `check`, `all` (with `default all`), and one phony
   per selectable module.
 - *Regeneration.* The `build.ninja` edge depends on the master file, every `module.lua`

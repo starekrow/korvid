@@ -608,6 +608,8 @@ function M.run(c, g, opts)
       end
       -- Order-only inputs, as an executable's: the staged assets and shaders of the module
       -- and its closure (a test reads them beside itself), and a package's runtime files.
+      -- The stamp takes the same files as implicit inputs, so a changed asset reruns the
+      -- test without relinking it.
       local libs, mods, rt = {}, {}, {}
       if libs_by_key[inst.key] then libs[#libs + 1] = libs_by_key[inst.key] end
       for i = #inst.closure, 1, -1 do
@@ -623,7 +625,10 @@ function M.run(c, g, opts)
       local exe = pre .. "bin/" .. sym .. "_tests" .. flags(inst).tc.fields.exe_suffix
       w(string.format("build %s: %s %s %s%s\n  libs = %s%s", exe, rule(inst, "link"), table.concat(objs, " "), table.concat(libs, " "),
         #rt > 0 and (" || " .. table.concat(rt, " ")) or "", util.trim(table.concat(extlibs, " ") .. " " .. table.concat(extdirs, " ")), overrides(inst)))
-      w(string.format("build %stest/%s.ok: %s %s", pre, sym, (pre ~= "" and runner ~= "") and "run_test_host" or "run_test", exe))
+      local rt_esc = {}
+      for _, r in ipairs(rt) do rt_esc[#rt_esc + 1] = util.ninja_escape(r) end
+      w(string.format("build %stest/%s.ok: %s %s%s", pre, sym, (pre ~= "" and runner ~= "") and "run_test_host" or "run_test", exe,
+        #rt_esc > 0 and (" | " .. table.concat(rt_esc, " ")) or ""))
       if inst.tests then
         tests[#tests + 1] = exe
         checks[#checks + 1] = pre .. "test/" .. sym .. ".ok"
