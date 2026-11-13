@@ -9,6 +9,13 @@
 #if !defined(_WIN32)
 #define LUA_USE_POSIX
 #endif
+// iOS has no system(): Lua's own switch makes os.execute answer that no shell is there.
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#define LUA_USE_IOS
+#endif
+#endif
 // Vendored, not ours: its warnings are silenced for its own lines only.
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma warning(push, 0)

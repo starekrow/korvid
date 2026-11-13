@@ -3,7 +3,9 @@
 // Ambient: the game's sound mixes with other apps' and is silenced by the ring switch, as a
 // game's should be until it asks otherwise (slice 8: the audio session's policy). The
 // "null device" (tests) is the same unit with its output zeroed after the callback runs, so
-// the callback keeps a device's pace.
+// the callback keeps a device's pace. SDL_AUDIO_DRIVER=dummy in the environment makes it one
+// too, as it does on the SDL platforms (SIMCTL_CHILD_ or DEVICECTL_CHILD_ passes it to an
+// app in the Simulator or on a device): a silent run from the outside.
 #include "korvid/platform_audio/audio.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -11,6 +13,7 @@
 #include "../audio_backend.h"
 #import <AVFAudio/AVFAudio.h>
 #include <AudioToolbox/AudioToolbox.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace kv {
@@ -56,6 +59,7 @@ bool platform_audio_open(Engine& e, const AudioDeviceDesc& desc) {
     KV_UNUSED(e);
     if (g_audio.unit) { KV_ERROR("audio", "a device is already open"); return false; }
     if (!desc.callback || desc.channels == 0 || desc.channels > 8 || desc.rate == 0) { KV_ERROR("audio", "bad device description"); return false; }
+    if (const char* driver = getenv("SDL_AUDIO_DRIVER"); driver && strcmp(driver, "dummy") == 0) g_null_device = true;
     @autoreleasepool {
         AVAudioSession* session = [AVAudioSession sharedInstance];
         NSError* err = nil;

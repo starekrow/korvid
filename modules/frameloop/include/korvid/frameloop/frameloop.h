@@ -8,7 +8,9 @@
 // --no-validation, --no-vsync, --borderless, --hitch-ms N, --hash (log the state hash
 // after every tick), --hash-systems (and after every system), --trace-events (print every
 // delivered event with its emitter; dev builds), --threads N (main thread included; 1 is
-// serial; the default is every core), --early-reads order|snapshot|kind (every kind's
+// serial; the default is every core), --rate X (the developer's rate from the start, as the
+// CLI's `rate X`: a recorded run or a demo four times faster where nothing can type to the
+// CLI, an app on a phone), --early-reads order|snapshot|kind (every kind's
 // early reads ordered, every kind's from a snapshot, or as each kind says, the default:
 // the game is the same, the schedule is not), --profile FILE (a Chrome trace of every zone, mark
 // and counter), --prof-report (the top zones with every fps line); --hitch-ms also dumps

@@ -36,7 +36,8 @@ void                   platform_audio_close(Engine& e);
 // The open device's format, or a record with open == false.
 const AudioDeviceInfo& platform_audio(Engine& e);
 // Before the device opens: true makes it a null device that plays nothing (SDL's dummy
-// driver), for tests and headless runs. SDL_AUDIO_DRIVER in the environment still wins.
+// driver), for tests and headless runs. SDL_AUDIO_DRIVER in the environment still wins; on
+// iOS, which has no SDL, SDL_AUDIO_DRIVER=dummy makes the device a null one too.
 void                   platform_audio_null_device(bool on);
 
 } // namespace kv

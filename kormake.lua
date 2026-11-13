@@ -38,7 +38,7 @@ root "windows" {
 -- renderer-metal there, and the root holds every module the windows root does, and
 -- sockit2m.
 root "macos" {
-  modules   = { "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "tool", "kpack", "picture", "save",
+  modules   = { "lua", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "tool", "kpack", "picture", "save",
                 "bulletml", "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
                 "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal",
                 "sockit2m", "window", "testbed", "stones", "cpukiller",
@@ -52,7 +52,7 @@ root "macos" {
 -- iossim-dev) or on a device (kormake test ios-dev), and the games, which `kormake package
 -- ios-dev <game>` makes apps of. The Simulator cannot draw them (no indirect draws).
 root "ios" {
-  modules   = { "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
+  modules   = { "lua", "tool", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
                 "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
                 "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal",
                 "window", "testbed", "stones", "rocks", "arcanum",

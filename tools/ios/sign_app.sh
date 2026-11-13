@@ -39,7 +39,7 @@ for d in dirs:
         team = p.get("TeamIdentifier", [""])[0]
         if app not in (team + "." + bundle, team + ".*"): continue
         if device and device not in p.get("ProvisionedDevices", []): continue
-        if p.get("ExpirationDate") and p["ExpirationDate"].replace(tzinfo=None) < datetime.datetime.utcnow(): continue
+        if p.get("ExpirationDate") and p["ExpirationDate"].replace(tzinfo=datetime.timezone.utc) < datetime.datetime.now(datetime.timezone.utc): continue
         if not best or os.path.getmtime(f) > os.path.getmtime(best): best = f
 if not best:
     sys.stderr.write("sign_app: no development profile covers %s%s (build an app with that identifier to a device in Xcode once)\n" %
