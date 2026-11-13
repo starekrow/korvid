@@ -99,11 +99,15 @@ void modal_frame(void* user) {
 int run(int argc, char** argv) {
     f64 run_seconds = 0.0, hitch_ms = 20.0;
     bool borderless = false;
+    const char* bundled = nullptr;
+    const char* asset = nullptr;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--run-seconds") == 0 && i + 1 < argc) run_seconds = atof(argv[++i]);
         else if (strcmp(argv[i], "--hitch-ms") == 0 && i + 1 < argc) hitch_ms = atof(argv[++i]);
         else if (strcmp(argv[i], "--borderless") == 0) borderless = true;
-        else { KV_ERROR("window", "unknown option '%s' (--run-seconds N, --hitch-ms N, --borderless)", argv[i]); return 2; }
+        else if (strcmp(argv[i], "--bundled") == 0 && i + 1 < argc) bundled = argv[++i];
+        else if (strcmp(argv[i], "--asset") == 0 && i + 1 < argc) asset = argv[++i];
+        else { KV_ERROR("window", "unknown option '%s' (--run-seconds N, --hitch-ms N, --borderless, --bundled NAME, --asset PATH)", argv[i]); return 2; }
     }
     Engine e;
     if (!engine_init(e, kv_module_list())) return 1;
@@ -114,6 +118,21 @@ int run(int argc, char** argv) {
     d.borderless = borderless;
     int rc = 0;
     if (!platform_open_window(e, d)) rc = 1;
+    // Where a platform keeps a program's files, shown: a bundled file read now
+    // ("shaders/sprite.spv"), an asset through the mounts ("window/hello.txt").
+    if (bundled) {
+        IoBytes b;
+        i32 err = 0;
+        if (io_read_bundled(bundled, &b, nullptr, &err)) KV_INFO("window", "bundled '%s': %llu bytes", bundled, (unsigned long long)b.size);
+        else KV_ERROR("window", "bundled '%s': %s", bundled, strerror(err));
+        b.free();
+    }
+    Handle asset_read;
+    if (asset) {
+        IoRequest r;
+        r.path = asset;
+        asset_read = platform_io(e)->read_asset(r);
+    }
     f64 start = time_now();
     Loop l;
     l.e = &e;
@@ -122,6 +141,19 @@ int run(int argc, char** argv) {
     platform_modal_frame(e, modal_frame, &l);
     while (rc == 0 && !e.quit_requested) {
         platform_pump(e); // on macOS a live resize runs inside this, its frames through modal_frame
+        if (!asset_read.is_null()) {
+            IoQueue* io = platform_io(e);
+            for (const IoCompletion& c : io->completions()) {
+                if (c.request != asset_read) continue;
+                IoCompletion done = c;
+                io->reap(asset_read);
+                asset_read = Handle{};
+                if (done.status == IoStatus::Done) KV_INFO("window", "asset '%s': %llu bytes, starting \"%.24s\"", asset, (unsigned long long)done.size, done.size ? (const char*)done.data : "");
+                else KV_ERROR("window", "asset '%s': %s", asset, strerror(done.error));
+                if (done.data) free_in(mem_general(), done.data, done.size ? done.size : 1);
+                break;
+            }
+        }
         frame(l);
         if (run_seconds > 0.0 && time_now() - start >= run_seconds) break;
         time_sleep(0.004); // nothing to present: pace the loop at about 250 Hz

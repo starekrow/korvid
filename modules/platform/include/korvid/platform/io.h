@@ -101,6 +101,8 @@ struct IoMount {
     char      path[256];   // the directory (with a trailing '/') or the pack file
     bool      is_pack;
     OsFile    fd = -1;     // the pack's file, open for the queue's life
+    u64       base = 0;    // where the archive starts in that file (a pack inside another archive)
+    char      prefix[64] = {}; // only the archive's entries under this are seen, without it ("assets/")
     PackTable table;
 };
 
@@ -137,7 +139,13 @@ struct IoQueue {
     // are read now, synchronously, and its descriptor stays open until free(). False
     // with a log line if the directory or the archive is not usable.
     bool   mount_dir(const char* dir);
-    bool   mount_pack(const char* path);
+    // With a prefix, only the entries under it are mounted, named without it: the part of
+    // a larger archive that is this program's (an Android package's "assets/").
+    // mount_pack_at mounts an archive that is `size` bytes at `offset` inside a file: a pack
+    // stored, uncompressed, as an entry of another archive, read in place with the same
+    // ranged reads. io_archive_entry finds such an entry.
+    bool   mount_pack(const char* path, const char* prefix = nullptr);
+    bool   mount_pack_at(const char* path, u64 offset, u64 size, const char* prefix = nullptr);
     // Submits a whole-file write (create or truncate); the bytes are copied now. Same
     // pump, priorities, budget and completions as a read. Null handle as above.
     Handle write_file(const IoWriteRequest& req);
@@ -210,6 +218,16 @@ struct IoFileWriter {
 };
 
 // What a path names, following links.
+// A file that ships with the program, by its name under the program's own directory
+// ("shaders/sprite.spv"): beside the executable on the desktop, in an Apple bundle's
+// resources, inside the package on Android (a stored or deflated entry under "assets/").
+// What must be read before the mounts exist, or by something that has no queue. Blocking,
+// as io_read_now, which it is everywhere but Android.
+bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc = nullptr, i32* err = nullptr);
+// Where a stored (uncompressed) entry's bytes are inside a zip archive, for mount_pack_at.
+// False if the archive cannot be read, has no such entry, or holds it deflated.
+bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* size);
+
 bool io_is_file(const char* path);
 bool io_is_dir(const char* path);
 

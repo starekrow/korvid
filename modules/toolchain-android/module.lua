@@ -16,8 +16,9 @@
 --                      (operator new, the guards of local statics) come from libc++; linked
 --                      in, a test is one file to push and a package carries no
 --                      libc++_shared.so.
--- Source directories: posix, then linux (what is the kernel's, not glibc's: bionic is a
--- third libc, and docs/design/android-port-notes.md lists what it lacks), then android.
+-- Source directories: posix and android. Not linux: the one file there is the paths, and
+-- an Android app's are its own (platform/src/android). The posix sources met bionic, a
+-- third libc, unchanged (docs/design/android-port-notes.md).
 -- No SDL: the window, input and audio are native, as on iOS and Windows.
 --
 -- The two platforms differ in their architecture and in how a test runs; per_platform holds
@@ -30,7 +31,7 @@ module "toolchain.android" {
   probe     = "android",
   ndk       = "30.0.16248370", -- r30, the LTS
   triple    = "linux-android33",
-  srcdirs   = { "posix", "linux", "android" }, -- src/<dir>/ picked up on these platforms, in this order
+  srcdirs   = { "posix", "android" }, -- src/<dir>/ picked up on these platforms, in this order
   cxx       = "clang++",
   ar        = "llvm-ar",
   cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-ffp-contract=off", "-fno-math-errno",

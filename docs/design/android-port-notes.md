@@ -184,6 +184,57 @@ thread waiting, since on its return the old one is gone.
   or the portrait one read too early is checked with the touchpad on screen.
 - A ship library is not stripped separately: ship compiles without `-g`.
 
+## Milestone 3: files
+
+An app's files are entries of its package, and the package is a zip: the engine's own pack
+code reads it. No `AAssetManager`, one read path on every platform.
+
+- **The layout.** What a desktop build has beside its executable is under `assets/` in the
+  package: `assets/assets/<module>/...` (loose assets), `assets/shaders/`,
+  `assets/<exe>.kpak`, the licenses. Every entry stored; `zipalign -P 16 4096`, so the
+  library is on a 16 KiB boundary and every other entry on a 4 KiB one, which keeps a
+  pack's own entries where it aligned them.
+- **Two general forms of a mount** (`io.h`): `mount_pack(path, prefix)` shows only the
+  entries under a prefix, named without it; `mount_pack_at(path, offset, size)` mounts an
+  archive lying inside a file, every read at its offset. `io_archive_entry` finds a stored
+  entry's bytes for the second. Opening an archive no longer needs a queue (`archive_open`
+  inside io.cc), so the two helpers below have none.
+- **`io_read_bundled(name)`**: a file that ships with the program, read now:
+  `<exe dir>/<name>` on the desktop, the package's `assets/<name>` on Android (stored or
+  deflated, the CRC checked). `renderer-vulkan` loads its SPIR-V through it instead of
+  building a path from the base path. Metal and D3D12 still build theirs, which is right
+  where they run; they were not touched, being unbuildable here.
+- **Startup** (`platform/src/module.cc`): when `os_bundle_archive()` names an archive, the
+  first mount is its `assets/assets/` and the game's pack is mounted in place from
+  `assets/<exe>.kpak`. Elsewhere `os_bundle_archive` is an inline null.
+- **The paths** (`platform/src/android/paths_android.cc`; the toolchain's source
+  directories are now `posix` and `android`, since the one file under `linux` was the
+  paths). `platform_android_app(package, internal)` (`korvid/platform/android.h`) is called
+  by platform_hid's entry with `getPackageResourcePath()` and the activity's internal
+  directory. An app has no base path, and its preference directory is
+  `<internal>/<org>/<app>/`. A program that was never told (a test) keeps
+  `/proc/self/exe`, and its preference directory is under `TMPDIR`.
+
+### What ran
+
+- `platform_tests` grew from 200 to 233 checks: an outer archive holding a pack and loose
+  files under `assets/`, the pack mounted in place and read on both backends, the prefix
+  hiding what is outside it, a prefix over a plain zip's deflated entry, the refusals. They
+  pass on Linux and in the emulator.
+- `window --bundled LICENSE --asset window/hello.txt`, packaged and launched: "mounted
+  pack .../base.apk (under assets/assets/)", "bundled 'LICENSE': 11358 bytes", "asset
+  'window/hello.txt': 30 bytes". The same two options on Linux read
+  `shaders/sprite.spv` and the loose file.
+- Linux: every suite, `rocks --demo --hash` unchanged (`4fb2e4cb04ff9ee4` at tick 600)
+  with its shaders loaded through `io_read_bundled`, and from `rocks.kpak` in ship.
+
+### Not shown yet
+
+- A game's pack inside a package: no Android executable has a pack until the games build
+  (milestone 5). The mount is tested with a made archive, not an installed one.
+- The log's "9 unaligned" for the package is the pack format's own measure (its 4 KiB
+  rule read from the central directory), not a fault.
+
 ### Still to come
 
-Milestone 3: assets and shaders from inside the package.
+Milestone 4: the Vulkan surface, the surface lost and regained, drawing.

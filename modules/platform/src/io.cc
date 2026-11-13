@@ -7,6 +7,8 @@
 #include "korvid/inflate/inflate.h"
 #include "io_ring.h"
 #include "os_file.h"
+#include "os_paths.h"
+#include "korvid/platform/module.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -436,13 +438,19 @@ bool IoQueue::mount_dir(const char* dir) {
     return true;
 }
 
-bool IoQueue::mount_pack(const char* path) {
-    IoMount m{};
+namespace {
+
+// Opens an archive (a whole file, or `span` bytes at `base` inside one) and reads its
+// table into `m`, allocating from `a`. What a mount is, without a queue to hold it:
+// mount_pack_at pushes it, io_read_bundled and io_archive_entry use it as it is.
+bool archive_open(IoMount& m, Allocator* a, const char* path, u64 base, u64 span, const char* prefix) {
+    if (prefix && strlen(prefix) >= sizeof m.prefix) { KV_ERROR("io", "mount: prefix too long: '%s'", prefix); return false; }
+    if (prefix) memcpy(m.prefix, prefix, strlen(prefix) + 1);
+    m.base = base;
     if (!path || strlen(path) >= sizeof m.path) { KV_ERROR("io", "mount: bad pack path"); return false; }
     i32 err = 0;
     OsFile fd = os_file_open(path, false, &err);
     if (fd < 0) { KV_WARN("io", "mount: cannot open '%s': %s", path, strerror(err)); return false; }
-    Allocator* a = mounts.allocator();
     const char* why = nullptr;
     ZipTail tail;
     u8* buf = nullptr;
@@ -456,14 +464,18 @@ bool IoQueue::mount_pack(const char* path) {
     };
     u64 size = 0;
     if (!os_file_size(fd, &size, &err)) return give_up(strerror(err));
+    // An archive inside the file: every offset below is the archive's own, read at base.
+    if (base > size || span > size - base) return give_up("the archive runs past the end of the file");
+    size = span ? span : size - base;
+    auto rd = [&](void* to, usize n, u64 at) { return pread_all(fd, to, n, base + at); };
     // The tail, then the Zip64 end record if the tail points at one.
     buf_len = size < KV_ZIP_TAIL_MAX ? (usize)size : KV_ZIP_TAIL_MAX;
     buf = (u8*)alloc_in(a, buf_len ? buf_len : 1);
-    if (!buf || !pread_all(fd, buf, buf_len, size - buf_len)) return give_up("cannot read the end");
+    if (!buf || !rd(buf, buf_len, size - buf_len)) return give_up("cannot read the end");
     if (!zip_find_end(buf, buf_len, size - buf_len, &tail, &why)) return give_up(why);
     if (tail.needs_zip64) {
         u8 rec[56];
-        if (tail.zip64_end + sizeof rec > size || !pread_all(fd, rec, sizeof rec, tail.zip64_end)) return give_up("cannot read the Zip64 end");
+        if (tail.zip64_end + sizeof rec > size || !rd(rec, sizeof rec, tail.zip64_end)) return give_up("cannot read the Zip64 end");
         if (!zip_read_zip64_end(rec, sizeof rec, &tail, &why)) return give_up(why);
     }
     free_in(a, buf, buf_len ? buf_len : 1);
@@ -472,7 +484,7 @@ bool IoQueue::mount_pack(const char* path) {
     // The central directory.
     buf_len = (usize)tail.cd_size;
     buf = (u8*)alloc_in(a, buf_len ? buf_len : 1);
-    if (!buf || !pread_all(fd, buf, buf_len, tail.cd_offset)) return give_up("cannot read the central directory");
+    if (!buf || !rd(buf, buf_len, tail.cd_offset)) return give_up("cannot read the central directory");
     if (!zip_read_central(buf, buf_len, tail, a, &m.table, &why)) return give_up(why);
     free_in(a, buf, buf_len ? buf_len : 1);
     buf = nullptr; buf_len = 0;
@@ -482,12 +494,12 @@ bool IoQueue::mount_pack(const char* path) {
         u8 hdr[30];
         u64 data_at = 0; usize need = 0;
         PackTable indexed;
-        if (ie->method == ZipStored && pread_all(fd, hdr, sizeof hdr, ie->header_offset)) {
+        if (ie->method == ZipStored && rd(hdr, sizeof hdr, ie->header_offset)) {
             zip_local_data_offset(hdr, sizeof hdr, ie->header_offset, &data_at, &need);
             if (need) data_at = ie->header_offset + need;
             buf_len = (usize)ie->size;
             buf = (u8*)alloc_in(a, buf_len ? buf_len : 1);
-            if (need && buf && data_at + buf_len <= size && pread_all(fd, buf, buf_len, data_at) && crc32(0, buf, buf_len) == ie->crc &&
+            if (need && buf && data_at + buf_len <= size && rd(buf, buf_len, data_at) && crc32(0, buf, buf_len) == ie->crc &&
                 kpak_read_index(buf, buf_len, tail, a, &indexed, &why)) {
                 pack_table_free(m.table, a);
                 m.table = indexed;
@@ -508,10 +520,119 @@ bool IoQueue::mount_pack(const char* path) {
     if (t.skipped || t.duplicates || t.not_utf8)
         format(names, sizeof names, "; names: %u skipped (unsafe or empty), %u duplicated (the last kept), %u not UTF-8 (kept as bytes)",
                  t.skipped, t.duplicates, t.not_utf8);
-    KV_INFO("io", "mounted pack %s: %u entries, %s, %u deflated, %u unaligned, %u unsupported%s", path, t.count, index_note,
+    char where[160] = "";
+    if (base || m.prefix[0])
+        format(where, sizeof where, " (%s%s%s%s)", m.prefix[0] ? "under " : "", m.prefix, base && m.prefix[0] ? ", " : "", base ? "an archive inside it" : "");
+    KV_INFO("io", "mounted pack %s%s: %u entries, %s, %u deflated, %u unaligned, %u unsupported%s", path, where, t.count, index_note,
             t.deflated, t.unaligned, t.unsupported, names);
+    return true;
+}
+
+void archive_close(IoMount& m, Allocator* a) {
+    pack_table_free(m.table, a);
+    if (m.fd >= 0) os_file_close(m.fd);
+    m.fd = -1;
+}
+
+} // namespace
+
+bool IoQueue::mount_pack(const char* path, const char* prefix) { return mount_pack_at(path, 0, 0, prefix); }
+
+bool IoQueue::mount_pack_at(const char* path, u64 base, u64 span, const char* prefix) {
+    IoMount m{};
+    if (!archive_open(m, mounts.allocator(), path, base, span, prefix)) return false;
     mounts.push(m);
     return true;
+}
+
+namespace {
+
+// One entry of a mounted archive, read now: for io_read_bundled and io_archive_entry, which
+// run before there is a queue or beside it. The data's place comes from the local header.
+bool entry_data_at(const IoMount& m, const PackEntry& pe, u64* at) {
+    if (pe.data_offset) { *at = m.base + pe.data_offset; return true; }
+    u8 hdr[30];
+    u64 unused = 0; usize need = 0;
+    if (!pread_all(m.fd, hdr, sizeof hdr, m.base + pe.header_offset)) return false;
+    zip_local_data_offset(hdr, sizeof hdr, pe.header_offset, &unused, &need);
+    if (!need) return false;
+    *at = m.base + pe.header_offset + need;
+    return true;
+}
+
+// The program's own archive (os_bundle_archive), opened at its first use and kept for the
+// process's life.
+IoMount g_bundle;
+int     g_bundle_state = 0; // 0 not tried, 1 open, -1 failed
+
+IoMount* bundle_mount() {
+    if (g_bundle_state == 0) {
+        const char* archive = os_bundle_archive();
+        g_bundle_state = archive && archive_open(g_bundle, mem_general(), archive, 0, 0, kBundlePrefix) ? 1 : -1;
+    }
+    return g_bundle_state == 1 ? &g_bundle : nullptr;
+}
+
+} // namespace
+
+void io_bundle_close() {
+    if (g_bundle_state == 1) archive_close(g_bundle, mem_general());
+    g_bundle = IoMount{};
+    g_bundle_state = 0;
+}
+
+bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc, i32* err) {
+    *out = IoBytes{};
+    i32 unused = 0;
+    if (!err) err = &unused;
+    if (!os_bundle_archive()) {
+        char path[KV_PLATFORM_PATH_MAX + 256];
+        char base[KV_PLATFORM_PATH_MAX];
+        if (!os_base_path(base, sizeof base)) base[0] = 0;
+        format(path, sizeof path, "%s%s", base, name);
+        return io_read_now(path, out, alloc, err);
+    }
+    IoMount* m = bundle_mount();
+    char norm[KV_PACK_PATH_MAX], full[sizeof m->prefix + KV_PACK_PATH_MAX];
+    if (!m) { *err = EIO; return false; }
+    if (!pack_normalize(name, norm, sizeof norm)) { *err = EINVAL; return false; }
+    format(full, sizeof full, "%s%s", m->prefix, norm);
+    const PackEntry* pe = pack_find(m->table, full);
+    if (!pe) { *err = ENOENT; return false; }
+    u64 at = 0;
+    if ((pe->flags & PackEntryUnsupported) || !entry_data_at(*m, *pe, &at)) { *err = ENOTSUP; return false; }
+    Allocator* a = alloc ? alloc : mem_general();
+    u8* data = (u8*)a->alloc(a, (usize)pe->size + 1, 16);
+    if (!data) { *err = ENOMEM; return false; }
+    bool ok = false;
+    if (pe->method == ZipStored) {
+        ok = pe->csize == pe->size && pread_all(m->fd, data, (usize)pe->size, at);
+    } else {
+        u8* packed = (u8*)alloc_in(mem_general(), (usize)pe->csize + 1);
+        if (packed && pread_all(m->fd, packed, (usize)pe->csize, at)) {
+            InflateOut r = inflate_raw(packed, (usize)pe->csize, data, (usize)pe->size);
+            ok = r.result == InflateResult::Ok && r.produced == pe->size;
+        }
+        free_in(mem_general(), packed, (usize)pe->csize + 1);
+    }
+    if (ok && crc32(0, data, (usize)pe->size) != pe->crc) ok = false;
+    if (!ok) { a->free(a, data, (usize)pe->size + 1); *err = EIO; return false; }
+    data[pe->size] = 0;
+    out->data = data;
+    out->size = (usize)pe->size;
+    out->alloc = a;
+    return true;
+}
+
+bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* size) {
+    IoMount m{};
+    if (!archive_open(m, mem_general(), archive, 0, 0, nullptr)) return false;
+    char norm[KV_PACK_PATH_MAX];
+    const PackEntry* pe = pack_normalize(name, norm, sizeof norm) ? pack_find(m.table, norm) : nullptr;
+    bool ok = pe && pe->method == ZipStored && pe->csize == pe->size && entry_data_at(m, *pe, offset);
+    if (ok) *size = pe->size;
+    archive_close(m, mem_general());
+    return ok;
 }
 
 Handle IoQueue::read_asset(const IoRequest& req) {
@@ -533,7 +654,10 @@ Handle IoQueue::read_asset(const IoRequest& req) {
                 e.fail_errno = 0;
                 break;
             }
-            PackEntry* pe = const_cast<PackEntry*>(pack_find(m.table, norm));
+            const char* in_archive = norm;
+            char prefixed[sizeof m.prefix + KV_PACK_PATH_MAX];
+            if (m.prefix[0]) { format(prefixed, sizeof prefixed, "%s%s", m.prefix, norm); in_archive = prefixed; }
+            PackEntry* pe = const_cast<PackEntry*>(pack_find(m.table, in_archive));
             if (!pe) continue;
             char where[sizeof m.path + KV_PACK_PATH_MAX + 2];
             format(where, sizeof where, "%s:%s", m.path, norm);
@@ -543,7 +667,7 @@ Handle IoQueue::read_asset(const IoRequest& req) {
                 u8 hdr[30];
                 u64 at = 0; usize need = 0;
                 ++header_reads;
-                if (!pread_all(m.fd, hdr, sizeof hdr, pe->header_offset)) { e.fail_errno = EIO; break; }
+                if (!pread_all(m.fd, hdr, sizeof hdr, m.base + pe->header_offset)) { e.fail_errno = EIO; break; }
                 zip_local_data_offset(hdr, sizeof hdr, pe->header_offset, &at, &need);
                 if (!need) { e.fail_errno = EILSEQ; break; }
                 pe->data_offset = pe->header_offset + need;
@@ -551,7 +675,7 @@ Handle IoQueue::read_asset(const IoRequest& req) {
             e.ranged      = true;
             e.fd_borrowed = true;
             e.fd          = m.fd;
-            e.offset      = pe->data_offset;
+            e.offset      = m.base + pe->data_offset;
             e.length      = (usize)pe->csize;
             e.size        = e.length;
             e.method      = pe->method;

@@ -10,7 +10,8 @@
 --     tree with it, every entry stored (-0 ""): the engine reads an asset in place, and the
 --     loader maps the library from the package (extractNativeLibs false). aapt and not
 --     aapt2, which links resources and has no way to take a lib/ directory;
---   - zipalign, with 16 KiB pages for the library;
+--   - zipalign: 16 KiB pages for the library, and 4 KiB for every other stored entry, so a
+--     pack inside keeps the alignment its own entries were written with;
 --   - a signature: the debug key (~/.android/debug.keystore, made with keytool the first
 --     time, the one Android's own tools use), or the keystore KORMAKE_ANDROID_KEYSTORE
 --     names with KORMAKE_ANDROID_KEY_ALIAS and KORMAKE_ANDROID_KEYSTORE_PASS.
@@ -89,7 +90,7 @@ function M.run(build, dist, stage, exe, lib, tc, config)
   if not kfs.isfile(util.join(stage, "lib/" .. f.abi .. "/" .. lib)) then util.fail("package: %s is not staged under lib/%s/", lib, f.abi) end
   run("aapt package", tool("aapt") .. " package -f -M " .. q(manifest_path) .. " -I " .. q(jar) .. ' -0 ""' ..
       (config ~= "ship" and " --debug-mode" or "") .. " -F " .. q(unaligned) .. " " .. q(stage))
-  run("zipalign", tool("zipalign") .. " -f -P 16 4 " .. q(unaligned) .. " " .. q(apk))
+  run("zipalign", tool("zipalign") .. " -f -P 16 4096 " .. q(unaligned) .. " " .. q(apk))
 
   local ks, alias, pass = env("KORMAKE_ANDROID_KEYSTORE"), env("KORMAKE_ANDROID_KEY_ALIAS"), env("KORMAKE_ANDROID_KEYSTORE_PASS")
   local signed = "with " .. (ks or "the debug key")

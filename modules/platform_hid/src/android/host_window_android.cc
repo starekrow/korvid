@@ -25,6 +25,7 @@
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"
+#include "korvid/platform/android.h"
 #include "../hid_backend.h"
 
 #include <android/configuration.h>
@@ -196,6 +197,17 @@ char* intent_args(ANativeActivity* a) {
     char* out = utf ? strdup(utf) : nullptr;
     if (utf) env->ReleaseStringUTFChars(val, utf);
     return out;
+}
+
+// The installed package's path, for the layer below: where the app's files are.
+void tell_platform(ANativeActivity* a) {
+    JNIEnv* env = a->env;
+    jclass activity = env->GetObjectClass(a->clazz);
+    jstring path = (jstring)env->CallObjectMethod(a->clazz, env->GetMethodID(activity, "getPackageResourcePath", "()Ljava/lang/String;"));
+    if (!jni_ok(env) || !path) { __android_log_write(ANDROID_LOG_ERROR, "korvid", "the package's path is unknown: no assets"); return; }
+    const char* utf = env->GetStringUTFChars(path, nullptr);
+    platform_android_app(utf, a->internalDataPath);
+    if (utf) env->ReleaseStringUTFChars(path, utf);
 }
 
 void* game_thread(void*) {
@@ -393,6 +405,7 @@ extern "C" JNIEXPORT void ANativeActivity_onCreate(ANativeActivity* activity, vo
     activity->callbacks->onInputQueueCreated    = on_queue_created;
     activity->callbacks->onInputQueueDestroyed  = on_queue_destroyed;
     app.args = intent_args(activity);
+    tell_platform(activity);
     go_immersive(activity);
     if (pipe2(app.wake, O_NONBLOCK | O_CLOEXEC) != 0) {
         __android_log_print(ANDROID_LOG_ERROR, "korvid", "pipe: %s", strerror(errno));

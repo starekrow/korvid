@@ -21,11 +21,32 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
     PlatformState* s = arena_push<PlatformState>(self.arena);
     if (!s) return false;
     self.set_state(s);
-    if (!os_base_path(s->base_path, sizeof s->base_path)) {
+    if (!os_bundle_archive() && !os_base_path(s->base_path, sizeof s->base_path)) {
         KV_WARN("platform", "the executable's directory is unknown; assets resolve from the working directory");
         s->base_path[0] = 0;
     }
     if (!s->io.init(&self.general, 4096, g_mounts.io_backend)) return false;
+    // A program whose files are inside an archive (an Android app's package): what would
+    // be assets/ beside the executable is the archive's entries under <prefix>assets/, and
+    // <exe>.kpak a stored entry mounted where it lies. There is no directory to look in.
+    if (const char* archive = os_bundle_archive()) {
+        s->base_path[0] = 0;
+        char name[KV_PLATFORM_PATH_MAX];
+        if (!g_mounts.none) {
+            format(name, sizeof name, "%sassets/", kBundlePrefix);
+            s->io.mount_pack(archive, name);
+        }
+        u64 at = 0, size = 0;
+        if (g_mounts.exe_name) {
+            format(name, sizeof name, "%s%s.kpak", kBundlePrefix, g_mounts.exe_name);
+            if (io_archive_entry(archive, name, &at, &size)) s->io.mount_pack_at(archive, at, size);
+        }
+        for (u32 i = 0; i < g_mounts.pack_count; ++i)
+            if (!s->io.mount_pack(g_mounts.packs[i])) return false;
+        if (g_mounts.assets_dir && !s->io.mount_dir(g_mounts.assets_dir)) return false;
+        engine_idle_add(engine, "platform.io", io_idle, &s->io);
+        return true;
+    }
     // The executable's assets/ directory is the first mount, when there is one; the frame
     // loop mounts packs over it.
     char path[KV_PLATFORM_PATH_MAX + 64];
@@ -47,6 +68,7 @@ void platform_shutdown(Engine&, ModuleInstance& self) {
     if (!s) return;
     if (s->pump_count) KV_WARN("platform", "%u pump hooks still added at shutdown", s->pump_count);
     s->io.free();
+    io_bundle_close();
 }
 
 } // namespace

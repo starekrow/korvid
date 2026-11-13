@@ -125,6 +125,50 @@ void test_io_mounts(kv::TestCtx& c) {
     with_backend(c, IoBackend::Sync, loose, pack, zip, bad);
     with_backend(c, IoBackend::Auto, loose, pack, zip, bad);
 
+    // An archive that holds this program's files under a prefix, a pack among them, as an
+    // Android package does: the pack mounted where it lies inside the outer file, and the
+    // outer one's entries under the prefix, named without it.
+    {
+        char outer[320];
+        format(outer, sizeof outer, "%s/outer.zip", dir);
+        IoBytes inner;
+        KV_CHECK(c, io_read_now(pack, &inner));
+        const PackWriteFile outer_files[] = {{"assets/game.kpak", inner.data, inner.size}, {"assets/x/a.txt", "from outer", 10}, {"other/secret", "no", 2}};
+        IoFileWriter ow;
+        KV_CHECK(c, ow.open(outer));
+        KV_CHECK(c, kpak_write(outer_files, to_file, &ow, mem_scratch(), &why));
+        KV_CHECK(c, ow.close());
+        u64 at = 0, size = 0;
+        KV_CHECK(c, io_archive_entry(outer, "assets/game.kpak", &at, &size) && size == inner.size && at > 0);
+        KV_CHECK(c, !io_archive_entry(outer, "assets/none", &at, &size) && !io_archive_entry(zip, "maps/town.tmj", &at, &size)); // missing; deflated
+        KV_CHECK(c, io_archive_entry(outer, "assets/game.kpak", &at, &size));
+        const IoBackend backends[] = {IoBackend::Sync, IoBackend::Auto};
+        for (IoBackend backend : backends) {
+            IoQueue q;
+            Array<u8> got;
+            i32 err = 0;
+            KV_CHECK(c, q.init(nullptr, 16, backend));
+            KV_CHECK(c, q.mount_pack(outer, "assets/"));
+            KV_CHECK(c, read_one(q, "x/a.txt", got, &err) == IoStatus::Done && got.len == 10 && memcmp(got.data, "from outer", 10) == 0);
+            KV_CHECK(c, read_one(q, "other/secret", got, &err) == IoStatus::Failed && err == ENOENT); // outside the prefix
+            KV_CHECK(c, read_one(q, "assets/x/a.txt", got, &err) == IoStatus::Failed && err == ENOENT); // named without it
+            KV_CHECK(c, read_one(q, "game.kpak", got, &err) == IoStatus::Done && got.len == inner.size);
+            KV_CHECK(c, q.mount_pack_at(outer, at, size));
+            KV_CHECK(c, read_one(q, "x/a.txt", got, &err) == IoStatus::Done && got.len == 9 && memcmp(got.data, "from pack", 9) == 0);
+            KV_CHECK(c, read_one(q, "x/big.bin", got, &err) == IoStatus::Done && got.len == 20000 && got[19999] == (u8)((19999u * 3u) & 0xFFu));
+            KV_CHECK(c, !q.mount_pack_at(outer, at, size + (1u << 30)) && !q.mount_pack_at(outer, at + 1, size - 1)); // past the end; not an archive
+            q.free();
+            // A prefix on a plain zip, its entry deflated.
+            IoQueue z;
+            KV_CHECK(c, z.init(nullptr, 16, backend) && z.mount_pack(zip, "maps/"));
+            KV_CHECK(c, read_one(z, "town.tmj", got, &err) == IoStatus::Done && got.len == 600);
+            KV_CHECK(c, read_one(z, "dup.txt", got, &err) == IoStatus::Failed && err == ENOENT);
+            z.free();
+        }
+        inner.free();
+        io_remove(outer);
+    }
+
     io_remove(path); format(path, sizeof path, "%s/x", loose); io_remove(path); io_remove(loose);
     io_remove(pack); io_remove(zip); io_remove(bad); io_remove(dir);
 }
