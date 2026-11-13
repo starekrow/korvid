@@ -12,7 +12,9 @@
 -- does not return in dev and is nothing in ship) trips it; gcc has no such warning. String
 -- literals are pooled in every config (/GF; /O2 implies it, /Od does not), so one literal
 -- has one address everywhere, as gcc and its linker make it: the profiler keys zones by
--- the address of their name. Threads
+-- the address of their name. Floating point is /fp:precise, which is cl's default, said
+-- outright because kv's math (modules/math) counts on it: no multiply fused into an add,
+-- nothing reordered, so every platform gets the same bits. Threads
 -- get Linux's 8 MiB stack; the main thread too (/STACK).
 module "toolchain.windows" {
   provides  = "toolchain",
@@ -25,7 +27,7 @@ module "toolchain.windows" {
   link      = "link",
   cxxflags  = { "/std:c++20", "/permissive-", "/Zc:preprocessor", "/Zc:__cplusplus", "/Zc:inline", "/utf-8",
                 "/EHs-c-", "/GR-", "/D_HAS_EXCEPTIONS=0", "/MD", "/bigobj", "/W4", "/WX",
-                "/D_CRT_SECURE_NO_WARNINGS", "/DUNICODE", "/D_UNICODE", "/wd4702", "/GF" },
+                "/D_CRT_SECURE_NO_WARNINGS", "/DUNICODE", "/D_UNICODE", "/wd4702", "/GF", "/fp:precise" },
   configs   = {
     debug = { cxxflags = { "/Od", "/Z7", "/DKV_DEBUG=1" }, ldflags = { "/DEBUG" } },
     dev   = { cxxflags = { "/O2", "/Z7", "/DKV_DEV=1" }, ldflags = { "/DEBUG" } },

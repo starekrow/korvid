@@ -9,7 +9,10 @@
 --                      the renderer refuses them at start).
 --   -ffp-contract=off  arm64 clang fuses multiply-adds by default and the x64 builds of the
 --                      same source do not; off keeps a difference in a hash or a screenshot
---                      from being the compiler's choice. Each platform still keeps its libm.
+--                      from being the compiler's choice. kv's math (modules/math) counts on
+--                      it to give every platform the same bits.
+--   -fno-math-errno    nothing reads errno after a math function; without it the sqrt
+--                      builtin keeps a call into libm for a negative argument.
 --   -Wno-nullability-completeness  the SDK's headers, where this tool cannot reach them.
 -- Source directories: posix and the family's shared code (apple: nothing AppKit or UIKit,
 -- which building for iOS checks), then the platform's own; macOS adds the SDL3 backends
@@ -29,7 +32,7 @@ module "toolchain.apple" {
   srcdirs   = { "posix", "apple" }, -- src/<dir>/ picked up on these platforms, in this order
   cxx       = "clang++",
   ar        = "ar",
-  cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-ffp-contract=off",
+  cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-ffp-contract=off", "-fno-math-errno",
                 "-Wall", "-Wextra", "-Werror", "-Wno-nullability-completeness" },
   configs   = {
     debug = { cxxflags = { "-g", "-O0", "-DKV_DEBUG=1" } },

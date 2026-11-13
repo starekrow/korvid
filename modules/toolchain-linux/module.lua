@@ -1,7 +1,11 @@
 -- The Linux platform: tag, source subdirectories, the compiler (a system lookup until
 -- pinned compiler modules exist), flags per config, what each external means here, and
 -- the default bindings for the interfaces this platform builds. The rules are gcc's (and
--- clang's): a depfile per object, ar for libraries, the compiler driver for links.
+-- clang's): a depfile per object, ar for libraries, the compiler driver for links. No
+-- multiply is fused into an add (-ffp-contract=off: gcc's default in ISO mode, clang's
+-- not) and nothing reads errno after a math function (-fno-math-errno, so the sqrt
+-- builtin is the instruction alone): kv's math (modules/math) gives every platform the
+-- same bits on those terms.
 module "toolchain.linux" {
   provides  = "toolchain",
   platforms = { "linux" },
@@ -9,7 +13,7 @@ module "toolchain.linux" {
   srcdirs   = { "posix", "linux", "sdl3", "sdl3_pads", "sdl3_audio" }, -- src/<dir>/ picked up on this platform, in this order
   cxx       = "g++",
   ar        = "ar",
-  cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-Wall", "-Wextra", "-Werror" },
+  cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-ffp-contract=off", "-fno-math-errno", "-Wall", "-Wextra", "-Werror" },
   configs   = {
     debug = { cxxflags = { "-g", "-O0", "-DKV_DEBUG=1" } },
     dev   = { cxxflags = { "-g", "-O2", "-DKV_DEV=1" } },
