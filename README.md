@@ -29,18 +29,29 @@ Some notable roadmap items:
   - Authoring environment
   - Additional language support
 
+A fair amount of AI was used to develop this engine. All the music and art in 
+the examples was created by humans and is credited. See 
+`docs/development-notes.md` for details. 
+
+Korvid builds from scratch in about 3 seconds on my laptop, which makes me very
+happy.
+
 ## Quick Start
 
-Install dependencies for your platform (see [Platform Notes](#platform-notes) for details):
-- Linux: g++, SDL3, Vulkan, Ninja, slang compiler
+Install dependencies for your platform (see [Platform Notes](#platform-notes) 
+for details):
+
+- Linux: needs g++, SDL3, Vulkan, Ninja, slang compiler
   - Ubuntu distributions would look something like this, your mileage may vary:
     `apt-get install libsdl3-dev libvulkan-dev vulkan-validationlayers ninja-build slang-compiler`
     (the validation layers are for debug builds, which turn them on)
-- Windows: Visual Studio with C++, SDL3, Vulkan SDK
+
+- Windows: needs Visual Studio with C++, SDL3, Vulkan SDK
   - unpack the SDL3 windows release into korvid/vendor/
   - this is pinned to 3.4.20 right now, needs work
-- macOS: Xcode, sdl3, slang compiler, Metal tools
-  - Get the metal tools: `xcodebuild -downloadComponent MetalToolchain`
+
+- macOS: needs Xcode, sdl3, Ninja, slang compiler, Metal tools
+  - Get the Metal tools: `xcodebuild -downloadComponent MetalToolchain`
   - Slang compiler: unpack it somewhere, put bin/ in your path
   - the rest: `brew install ninja sdl3`
 
@@ -109,6 +120,35 @@ other things that were better compiled in than linked from who-knows-where.
 ### Deterministic Engine
 
 ...details on hashing et al...
+
+
+### Automatic Ordering
+
+At almost no runtime cost, you can opt in to a scheduler that will guarantee
+correct ordering of all your runtime systems and event handlers. You declare the
+data components that each one reads and writes, and the scheduler solves it for
+you at startup. If some constraint can't be satisfied, you get back a decent
+description of exactly what's wrong.
+
+You also get built-in tooling for putting some values aside at the beginning of
+a tick if that's needed to keep your game consistent.
+
+If you have spent too many days tracking down why something happens a frame
+early or a frame late, or either one depending on the phase of the moon, this
+system is for you.
+
+### Parallel Execution
+
+The engine provides a mechanism for spreading work across cores and still
+keeping the game deterministic. It builds on the ordering constraints and can
+guarantee in-order execution on just the parts that matter.
+
+### Reflection
+
+Most engine structures are reflected to allow inspection by name, typed field
+handling, and various kinds of snapshots. Your game can use the same system to
+reflect its types for log printing, snapshots, interaction through the command
+line, and compatibility with the execution ordering and event systems.
 
 ## Engine Structure
 
