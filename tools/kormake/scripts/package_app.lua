@@ -45,8 +45,7 @@ local function plist_string(s) return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gs
 -- it), a launch screen (without one iOS shows the app letterboxed, in a compatibility mode),
 -- full screen. Nothing to bundle: the engine links no library that iOS does not have. Signed
 -- ad-hoc for the Simulator; for a device with the development profile and identity
--- (tools/ios/sign_app.sh: Xcode's profiles, or KORMAKE_IOS_PROFILE and
--- KORMAKE_CODESIGN_IDENTITY).
+-- (ios.lua: Xcode's profiles, or KORMAKE_IOS_PROFILE and KORMAKE_CODESIGN_IDENTITY).
 local function ios_app(build, app, exe_name, tc, root)
   local q = util.shell_quote
   local id = "org.korvid." .. exe_name:gsub("[^%w%-%.]", "-")
@@ -84,7 +83,8 @@ local function ios_app(build, app, exe_name, tc, root)
   }
   kfs.write(util.join(app, "Info.plist"), table.concat(plist, "\n") .. "\n")
   if not sim then
-    run(build, "tools/ios/sign_app.sh", "sh " .. q(util.join(root, "tools/ios/sign_app.sh")) .. " " .. q(app))
+    local err = kormake.load("ios").sign(util.join(build, "sign"), app, id, nil)
+    if err then util.fail("package: %s", err) end
     return 0, "for development"
   end
   local identity = kfs.getenv("KORMAKE_CODESIGN_IDENTITY")

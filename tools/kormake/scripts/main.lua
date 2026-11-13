@@ -394,6 +394,9 @@ local function internal(args)
     kfs.copy(args[2], args[3])
     return 0
   end
+  -- _ios_test EXE: a test executable run on the connected iOS device (ios.lua), the ios
+  -- toolchain's test_runner under _test.
+  if args[1] == "_ios_test" and #args == 2 then return kormake.load("ios").test(args[2]) end
   if args[1] == "_test" and #args >= 3 then
     local exe = util.native(args[2])
     if KORMAKE_HOST ~= "windows" and not util.is_abs(exe) and not exe:find("/") then exe = "./" .. exe end

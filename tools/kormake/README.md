@@ -247,7 +247,7 @@ The master file, at the engine root. It runs top to bottom in a sandbox (only `s
 
 A module path is a directory of module directories. A module is any directory directly
 under a path entry that has a `module.lua`. kormake does not search deeper, and directories
-without one (`tools/kormake`, `tools/ios`) are ignored. If two modules have the same name,
+without one (`tools/kormake`) are ignored. If two modules have the same name,
 that is an error naming both paths, unless an `override` picks one.
 
 A root's `modules` takes names or `*`/`?` globs, and defaults to the root's own name.
@@ -384,7 +384,11 @@ module (`ninja -C build/linux-dev arcfire`).
   the development identity on iOS.
 
 **KORMAKE_IOS_TEST_BUNDLE_ID**, **KORMAKE_IOS_DEVICE**, **KORMAKE_IOS_PROFILE**
-: Settings for running tests on an iOS device and signing for it (see `tools/ios/`).
+: Running tests on an iOS device and signing for it (`scripts/ios.lua`): the identifier
+  every test installs as (one the profile covers; required), the device by name or
+  identifier (the one physical device connected when unset), and the profile (the newest
+  of Xcode's that covers the identifier and the device when unset). Variables named
+  `DEVICECTL_CHILD_<NAME>` reach a test on the device as `<NAME>`.
 
 **HOME**, **USERPROFILE**
 : What a leading `~` in a path expands to.

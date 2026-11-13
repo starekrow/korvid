@@ -177,12 +177,16 @@ function M.run(c, g, opts)
   local self = util.ninja_escape(program(kfs.self() or "kormake"))
   w("rule copy\n  command = " .. self .. ' _copy $in $out\n  description = COPY $out')
   -- A test the host cannot run itself (the iOS Simulator's, a device's) runs under the
-  -- toolchain's test_runner, its words after the stamp (%{root}: the project's root). With
+  -- toolchain's test_runner, its words after the stamp (%{root}: the project's root,
+  -- %{kormake}: this kormake). With
   -- test_jobs, no more than that many run at once (a device installs each as the same app).
   local runner = g.toolchain.fields.test_runner
   if runner then
     local words = {}
-    for _, word in ipairs(util.as_list(runner)) do words[#words + 1] = util.ninja_escape(q((word:gsub("%%{root}", (root:gsub("%%", "%%%%")))))) end
+    for _, word in ipairs(util.as_list(runner)) do
+      word = word:gsub("%%{root}", (root:gsub("%%", "%%%%"))):gsub("%%{kormake}", ((kfs.self() or "kormake"):gsub("%%", "%%%%")))
+      words[#words + 1] = util.ninja_escape(q(word))
+    end
     runner = " " .. table.concat(words, " ")
   else
     runner = ""

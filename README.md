@@ -417,10 +417,11 @@ with an Apple developer account signed into Xcode, the device connected and in D
 Mode, and a development profile Xcode has made (build any app to the device once):
 
     KORMAKE_IOS_TEST_BUNDLE_ID=com.example.tests tools/kormake/bin/macos/kormake test ios-dev   # every suite on the device
-    tools/kormake/bin/macos/kormake package ios-dev testbed                            # signed for development
+    tools/kormake/bin/macos/kormake package testbed ios-dev                            # signed for development
     xcrun devicectl device install app --device "<name>" dist/testbed/testbed.app
     xcrun devicectl device process launch --device "<name>" --console org.korvid.testbed
 
-The bundle identifier is one your profile covers (a wildcard profile covers any).
-`tools/ios/device_test.sh` and `tools/ios/sign_app.sh` say what else they read from the
-environment.
+The bundle identifier is one your profile covers (a wildcard profile covers any). kormake
+does the signing and the device runs itself, with what macOS ships (`security`, `plutil`,
+`codesign`, `devicectl`); `tools/kormake/README.md` lists the variables it reads.
+`DEVICECTL_CHILD_SDL_AUDIO_DRIVER=dummy` keeps the tests silent.

@@ -362,12 +362,15 @@ An iPhone 15 Pro Max (A17 Pro, iOS 27.2), a paid developer account, Xcode's wild
 development profile.
 
 - **The tests.** `KORMAKE_IOS_TEST_BUNDLE_ID=<an identifier the profile covers> kormake test
-  ios-dev` runs every suite on the connected device: `tools/ios/device_test.sh` (the `ios`
-  toolchain's `test_runner`) makes each executable an app with `assets/` and `shaders/`
-  beside it, signs it (`tools/ios/sign_app.sh`: Xcode's newest profile that covers the
-  identifier and the device, the first Apple Development identity, entitlements from the
-  profile), installs it and runs it to its end through `devicectl --console`, one at a time
-  (`test_jobs = 1`: each installs as the same app). All 21 suites pass, 11,749 checks.
+  ios-dev` runs every suite on the connected device: kormake's `_ios_test` (the `ios`
+  toolchain's `test_runner`; `scripts/ios.lua`, at first `tools/ios/device_test.sh`)
+  makes each executable an app with `assets/` and `shaders/` beside it, signs it (Xcode's
+  newest profile that covers the identifier and the device, the first Apple Development
+  identity, entitlements from the profile), installs it and runs it to its end through
+  `devicectl --console`, one at a time (`test_jobs = 1`: each installs as the same app).
+  All 21 suites pass, 11,749 checks. (The scripts read the profiles and devicectl's list
+  with Python at first; `plutil -extract` reads one field at a time, which is all they
+  needed, so the Lua has no parser and nothing to install.)
 - **devicectl reported a crash as exit code 0** (a null dereference after a failed check):
   a pass is exit code 0 and the suite's own "checks passed" line together.
 - **What the device found:** tests that wrote beside the executable or in the working
@@ -378,7 +381,7 @@ development profile.
   engine writes (`--screenshot`, `--profile`) lands where `devicectl device copy from
   --domain-type appDataContainer` reaches it.
 - **The renderer on iOS.** `kormake package ios-dev testbed` signs for development
-  (`sign_app.sh`); installed and launched with `devicectl`, it runs on the A17 Pro (Apple9,
+  (now `scripts/ios.lua`); installed and launched with `devicectl`, it runs on the A17 Pro (Apple9,
   tier 2 argument buffers) at 60 fps, 1290x2796, its screenshot the same scene in the same
   colors as macOS's. 60 and not 120: an iPhone holds a CAMetalLayer to 60 Hz unless the
   Info.plist says `CADisableMinimumFrameDurationOnPhone`, which is slice 8's to decide.
