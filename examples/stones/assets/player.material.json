@@ -1,1 +1,1 @@
-{ "texture": "stones/stone.png", "blend": "alpha", "tint": [1.0, 0.75, 0.45, 1.0] }
+{ "texture": "stones/player.png", "blend": "alpha" }
