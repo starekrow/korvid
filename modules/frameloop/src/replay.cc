@@ -55,6 +55,8 @@ struct Replay {
     u64         last_tick = 0, next_tick = 0;
     bool        recording = false, playing = false, ended = false, diverged = false;
     u64         hashes_checked = 0;
+    // Recording: the hash of a hash tick, taken where a replay compares it (before the sample).
+    u64         hash = 0, hash_tick = ~0ull;
 };
 Replay g_rep;
 
@@ -202,7 +204,10 @@ void replay_record(TickContext& ctx) {
     const InputActions& a = *ctx.resource<const InputActions>("input.actions");
     u64 t = ctx.tick;
     if (t % kHashEvery == 0) {
-        u64 h = engine_hash_state(*ctx.engine); // the state after the last tick, as a replay sees it here
+        // The state after the last tick, as a replay sees it: hashed before the sample (by
+        // replay_play), not here, since the input phase's event handlers run in between and
+        // can change it on this very tick (a boss part going down).
+        u64 h = g_rep.hash_tick == t ? g_rep.hash : engine_hash_state(*ctx.engine);
         put_record(t, kRecHash);
         put(&h, 8);
     }
@@ -223,8 +228,13 @@ void replay_record(TickContext& ctx) {
 }
 
 // Phase Input, sim ticks only, before the sample: the file's actions for this tick; the
-// hashes compared where it has them.
+// hashes compared where it has them. Recording, the hash of a hash tick is taken here, so
+// the recording holds what a replay will compare.
 void replay_play(TickContext& ctx) {
+    if (g_rep.recording && ctx.tick % kHashEvery == 0) {
+        g_rep.hash = engine_hash_state(*ctx.engine);
+        g_rep.hash_tick = ctx.tick;
+    }
     if (!g_rep.playing || g_rep.ended || !resolve(*ctx.engine)) return;
     Engine& e = *ctx.engine;
     u64 t = ctx.tick;
