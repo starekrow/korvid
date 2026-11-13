@@ -8,7 +8,7 @@ requires_kormake "1.1"
 -- that points back here, so kormake works from inside them.
 modulepath { "modules", "examples", "tools" }
 
-platforms { "linux", "windows", "macos", "ios", "iossim" }
+platforms { "linux", "windows", "macos", "ios", "iossim", "android", "androidemu" }
 configs   { "debug", "dev", "ship" }
 
 -- Platform modules supply the defaults (toolchain.linux binds render and shader-compile);
@@ -59,4 +59,14 @@ root "ios" {
                 "arcfire", "gallery" },
   tests     = true,
   platforms = { "ios", "iossim" },
+}
+
+-- Android is slice 8 (docs/PRDs/Engine-Slice-8-PRD.md): a phone's arm64 (`android`) and the
+-- emulator's x86-64 (`androidemu`), native as iOS is. Brought up a milestone at a time:
+-- these are the modules below the window, with their tests, which run inside the running
+-- emulator (kormake test androidemu-dev).
+root "android" {
+  modules   = { "lua", "tool", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml" },
+  tests     = true,
+  platforms = { "android", "androidemu" },
 }

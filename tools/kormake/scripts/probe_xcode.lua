@@ -31,9 +31,9 @@ function M.run(build, tc)
               "  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer", sdk, sdk)
   end
   local ar = capture(build, "ar", "xcrun --sdk " .. sdk .. " -f ar") or "ar"
-  -- The target: Apple silicon, the toolchain's triple (its OS, release floor and, for a
+  -- The target: the toolchain's arch (Apple silicon unless it says), its triple (its OS, release floor and, for a
   -- simulator, environment), so one clang serves the whole family.
-  local target = tc.fields.triple and { "-target", "arm64-" .. tc.fields.triple } or {}
+  local target = tc.fields.triple and { "-target", (tc.fields.arch or "arm64") .. "-" .. tc.fields.triple } or {}
   local cxxflags, ldflags = { "-isysroot", q(root) }, { "-isysroot", q(root) }
   for _, f in ipairs(target) do cxxflags[#cxxflags + 1] = f; ldflags[#ldflags + 1] = f end
   return { cxx = cxx, ar = ar, cxxflags = cxxflags, ldflags = ldflags }

@@ -237,7 +237,7 @@ The master file, at the engine root. It runs top to bottom in a sandbox (only `s
     project "korvid"
     requires_kormake "1.1"                  -- a major version newer than this binary is an error
     modulepath { "modules", "examples", "tools" }
-    platforms { "linux", "windows", "macos", "ios", "iossim" }
+    platforms { "linux", "windows", "macos", "ios", "iossim", "android", "androidemu" }
     configs   { "debug", "dev", "ship" }    -- the first is the default config
     host_config "dev"                       -- what tools build in; the default is dev
     bind "render" { linux = "renderer-vulkan" }   -- overrides a toolchain's default binding
@@ -309,8 +309,9 @@ config), `rules` (`cxx`, `ar` and `link`, as Ninja commands), `obj_suffix`, `exe
 `flag_libdir`, `flag_framework`, `externals`, `bindings` (the default backend for each
 interface), and `probe` (`"msvc"` or `"xcode"`: a script that finds the compiler, the SDK
 and Ninja). For a toolchain that serves several platforms there are also `per_platform`,
-`triple`, `family`, `sdk` and `os_min`, along with `package` (`"app"` or `"iosapp"`),
-`test_runner` and `test_jobs`. `modules/toolchain-linux/module.lua` is the plain case.
+`triple`, `arch` (for platforms that differ in it: `"aarch64"`, `"x86_64"`), `family`, `sdk`,
+`ndk` (the Android NDK version the `android` probe finds) and `os_min`, along with
+`package` (`"app"` or `"iosapp"`), `test_runner` and `test_jobs`. `modules/toolchain-linux/module.lua` is the plain case.
 Another module that sets one of these is an error, as is a `per_platform` section that
 sets anything else.
 

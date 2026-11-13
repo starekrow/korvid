@@ -59,6 +59,10 @@ local toolchain_fields = {
   -- the project's root).
   per_platform = true, triple = true, family = true, test_runner = true,
   test_jobs = true, -- at most this many tests at once, for a runner that cannot run more
+  -- arch is the target's architecture as its compiler spells it ("aarch64", "x86_64"),
+  -- for a toolchain whose platforms differ in it; ndk is the Android NDK version the
+  -- android probe looks for ("30.0.16248370").
+  arch = true, ndk = true,
 }
 
 -- What a rule "name" { ... } in exports may set. configs: the configs whose default build
