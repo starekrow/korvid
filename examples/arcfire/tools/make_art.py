@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Arcfire's art: the vendored files, copied unmodified under new names, and the pieces made
-here, drawn by this script. Run from anywhere:
+here: cuts from the packs and plain shapes. The bosses, the egg, the clouds, the beam and
+the items come from the newer packs through tools/cut_art.py. Run from anywhere:
 
     python3 examples/arcfire/tools/make_art.py ~/code/asset-packs/arcfire
 
@@ -16,17 +17,8 @@ What is made here, and from what:
   made/ring.png      48 x 48 white ring, 1 px: the graze ring
   made/soft.png      64 x 64 white disc fading to its edge: the shell, glows
   made/spark.png     4 x 4 white: sparks
-  made/egg.png       16 x 16 the egg: a spherical machine that builds the new ship
-  made/eggs.png      32 x 16 the HUD's pips: an egg spent (dim), an egg in hand
   made/bombs.png     32 x 16 the HUD's bomb pips: Kenney's shield tile (tiles_packed, column
                      2, row 2), dimmed for a bomb spent, as it is for one in hand
-  made/clouds_low.png  512 x 512 seamless: four clusters of cumulus in the pack's whites and
-                     greys, for the low cloud plane and (darkened by the game) its shadows
-  made/clouds_high.png 512 x 512 seamless: thin wisps, half transparent, for the high plane
-  made/beam.png      16 x 64: the Beam's strip, a white core in cyan with a deep blue edge
-                     and pulses along it, repeating up its length
-  made/items.png     96 x 16: the items' badges: Spread, Beam, Storm and Lance (their letters
-                     on their colors), then power, then option
   made/vignette.png  135 x 180: the field's vignette, clear in the middle and darkening to
                      its edges and corners (drawn 4 times up, over the field, under the HUD)
   made/cursor.png    32 x 32: the menus' cursor, Kenney's player ship (ships_packed, column
@@ -108,175 +100,6 @@ def ring(size):
     return im
 
 
-# The egg is a machine, not a chicken's: a steel sphere, lit from the upper left, banded at
-# its seam (where it opens), with a cyan core in the seam that builds the ship. Drawn to
-# Kenney's palette: a dark outline, four steel tones, the core's two cyans.
-STEEL = [(46, 52, 72), (82, 92, 118), (130, 142, 170), (196, 206, 226)]
-OUTLINE = (24, 26, 38)
-SEAM = (34, 38, 54)
-CORE = [(60, 170, 220), (150, 240, 255), (235, 255, 255)]
-
-
-def egg():
-    im = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
-    px = im.load()
-    c, r = 7.5, 7.0
-    light = (-0.5, -0.6, 0.62)
-    for y in range(16):
-        for x in range(16):
-            dx, dy = (x - c) / r, (y - c) / r
-            d2 = dx * dx + dy * dy
-            if d2 > 1.0:
-                continue
-            if d2 > 0.78:
-                px[x, y] = OUTLINE + (255,)
-                continue
-            nz = math.sqrt(1.0 - d2)
-            lit = max(0.0, dx * light[0] + dy * light[1] + nz * light[2])
-            tone = STEEL[min(3, int(lit * 4.2))]
-            if y in (7, 8) and abs(x - c) > 2.5:
-                tone = SEAM if y == 8 else STEEL[0]  # the seam: a groove under a dark lip
-            px[x, y] = tone + (255,)
-    # The core, in the seam: bright at its middle, cyan to its edge.
-    for x, y, k in [(6, 7, 1), (7, 7, 2), (8, 7, 2), (9, 7, 1), (6, 8, 0), (7, 8, 1), (8, 8, 1), (9, 8, 0)]:
-        px[x, y] = CORE[k] + (255,)
-    # Two rivets either side of the seam and a glint.
-    for x, y in [(3, 5), (12, 5), (3, 10), (12, 10)]:
-        px[x, y] = STEEL[0] + (255,)
-    px[5, 3] = (236, 242, 255, 255)
-    return im
-
-
-# Clouds in the pack's whites and greys with a cool underside: no outline (they are
-# weather, not objects), flat tones, hard pixel edges. Seamless: every shape is drawn at
-# the nine offsets of the tile's wrap.
-CLOUD_WHITE = (255, 255, 255)
-CLOUD_LIGHT = (220, 225, 231)   # the pack's light grey
-CLOUD_SHADE = (196, 206, 226)   # STEEL's lightest: the underside
-CLOUD_RIM = (170, 184, 210)
-
-
-def wrapped(draw, box, fill, size):
-    x0, y0, x1, y1 = box
-    for dx in (-size, 0, size):
-        for dy in (-size, 0, size):
-            draw.ellipse((x0 + dx, y0 + dy, x1 + dx, y1 + dy), fill=fill)
-
-
-def clouds_low(size=512, seed=0xC10D):
-    """Cumulus: a few big clusters of overlapping round puffs, white on top, a grey band
-    and a cool rim underneath, clear sky between them."""
-    import random
-    from PIL import ImageDraw
-    rnd = random.Random(seed)
-    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    puffs = []
-    for cluster in range(4):
-        cx, cy = rnd.randrange(size), (cluster * size // 4 + rnd.randint(-20, 20)) % size
-        w = rnd.randint(50, 90)
-        for k in range(rnd.randint(7, 11)):
-            r = rnd.randint(12, 24)
-            x = cx + rnd.randint(-w // 2, w // 2)
-            y = cy + rnd.randint(-8, 8) - (r * abs(x - cx)) // (w * 2 + 1) - r // 4 # a dome
-            puffs.append((x, y, r))
-    for (x, y, r) in puffs:
-        wrapped(d, (x - r - 1, y - r + 5, x + r + 1, y + r + 6), CLOUD_RIM + (255,), size)
-    for (x, y, r) in puffs:
-        wrapped(d, (x - r, y - r + 3, x + r, y + r + 3), CLOUD_SHADE + (255,), size)
-    for (x, y, r) in puffs:
-        wrapped(d, (x - r, y - r, x + r, y + r - 1), CLOUD_LIGHT + (255,), size)
-    for (x, y, r) in puffs:
-        wrapped(d, (x - r + 2, y - r, x + r - 3, y + r - 5), CLOUD_WHITE + (255,), size)
-    return im
-
-
-def clouds_high(size=512, seed=0x5A1E):
-    """Cirrus: thin slanted strokes, thick in the middle and tapering at both ends, drawn
-    opaque and then made half transparent as a whole, so overlaps do not band."""
-    import math
-    import random
-    from PIL import ImageDraw
-    rnd = random.Random(seed)
-    solid = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(solid)
-    strokes = []
-    for _ in range(14):
-        x, y = rnd.randrange(size), rnd.randrange(size)
-        n = rnd.randint(14, 26)
-        sx, sy = rnd.uniform(0.8, 2.0) * rnd.choice((-1, 1)), rnd.uniform(3.0, 4.5)
-        strokes.append([(x + sx * k, y + sy * k, 1.0 + 4.0 * math.sin(math.pi * k / (n - 1))) for k in range(n)])
-    for st in strokes:
-        for (x, y, r) in st:
-            wrapped(d, (x - r - 1, y - r - 1, x + r + 1, y + r + 1), CLOUD_LIGHT + (255,), size)
-    for st in strokes:
-        for (x, y, r) in st:
-            if r > 2.0:
-                wrapped(d, (x - r + 1.5, y - r + 1.5, x + r - 1.5, y + r - 1.5), CLOUD_WHITE + (255,), size)
-    px = solid.load()
-    for yy in range(size):
-        for xx in range(size):
-            c = px[xx, yy]
-            if c[3]:
-                px[xx, yy] = c[:3] + (130,)
-    return solid
-
-
-def beam():
-    """The beam's strip: across, a white core, cyan, a darker cyan edge fading out; along,
-    brighter pulses every 16 px, so the scroll shows."""
-    w, h = 16, 64
-    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    px = im.load()
-    for y in range(h):
-        pulse = 1.0 if (y % 16) < 4 else 0.88
-        for x in range(w):
-            d = abs(x - 7.5) / 8.0  # 0 at the middle, 1 at the edge
-            if d < 0.2:
-                c = (255, 255, 255)
-            elif d < 0.5:
-                c = (150, 240, 255)
-            elif d < 0.8:
-                c = (44, 160, 230)
-            else:
-                c = (30, 80, 170)  # a deep edge, so it reads over the pale sea
-            a = (1.0 if d < 0.8 else 0.6) * pulse
-            px[x, y] = tuple(int(v * pulse) for v in c) + (int(255 * a),)
-    return im
-
-
-# The items' badges: a rounded square in a weapon's color, its letter in white, a dark
-# outline; 5 x 5 pixel letters.
-LETTERS = {
-    "S": ["01111", "10000", "01110", "00001", "11110"],
-    "B": ["11110", "10001", "11110", "10001", "11110"],
-    "T": ["11111", "00100", "00100", "00100", "00100"],
-    "L": ["10000", "10000", "10000", "10000", "11111"],
-    "P": ["11110", "10001", "11110", "10000", "10000"],
-    "O": ["01110", "10001", "10001", "10001", "01110"],
-}
-BADGES = [("S", (252, 104, 59)), ("B", (44, 197, 246)), ("T", (140, 200, 60)), ("L", (255, 189, 32)), ("P", (200, 60, 90)),
-          ("O", (70, 110, 230))]
-
-
-def items():
-    from PIL import ImageDraw
-    im = Image.new("RGBA", (16 * len(BADGES), 16), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    for i, (letter, color) in enumerate(BADGES):
-        x0 = i * 16
-        d.rounded_rectangle((x0 + 1, 1, x0 + 14, 14), radius=3, fill=OUTLINE)
-        d.rounded_rectangle((x0 + 2, 2, x0 + 13, 13), radius=2, fill=color)
-        d.line((x0 + 3, 3, x0 + 12, 3), fill=tuple(min(255, c + 60) for c in color))
-        rows = LETTERS[letter]
-        cells = [(x, y) for y, row in enumerate(rows) for x, bit in enumerate(row) if bit == "1"]
-        for x, y in cells:  # a drop shadow, then the letter over it
-            im.putpixel((x0 + 6 + x, 6 + y), OUTLINE + (255,))
-        for x, y in cells:
-            im.putpixel((x0 + 5 + x, 5 + y), (255, 255, 255, 255))
-    return im
-
-
 def vignette(w=135, h=180):
     im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     px = im.load()
@@ -309,19 +132,8 @@ def main():
     ring(48).save(made / "ring.png")
     disc(64, 31.5, soft=True).save(made / "soft.png")
     Image.new("RGBA", (4, 4), (255, 255, 255, 255)).save(made / "spark.png")
-    egg().save(made / "egg.png")
     cursor(pack).save(made / "cursor.png")
     vignette().save(made / "vignette.png")
-    pips = Image.new("RGBA", (32, 16), (0, 0, 0, 0))
-    spent = egg()
-    px = spent.load()
-    for y in range(16):
-        for x in range(16):
-            r, g, b, a = px[x, y]
-            px[x, y] = (r // 3, g // 3, b // 3 + 20, a // 2)
-    pips.paste(spent, (0, 0))
-    pips.paste(egg(), (16, 0))
-    pips.save(made / "eggs.png")
     tiles = Image.open(pack / "pack/kenney_pixelshmup/Tilemap/tiles_packed.png").convert("RGBA")
     shield = tiles.crop((32, 32, 48, 48))
     dim = shield.copy()
@@ -334,10 +146,6 @@ def main():
     bombs.paste(dim, (0, 0))
     bombs.paste(shield, (16, 0))
     bombs.save(made / "bombs.png")
-    clouds_low().save(made / "clouds_low.png")
-    clouds_high().save(made / "clouds_high.png")
-    beam().save(made / "beam.png")
-    items().save(made / "items.png")
     for archive in sorted(pack.glob("*.zip")) + sorted(pack.glob("*.png")):
         print(f"{archive.name}: sha256 {hashlib.sha256(archive.read_bytes()).hexdigest()}")
 

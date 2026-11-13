@@ -1,8 +1,9 @@
 # Credits for arcfire's assets
 
 Every file under this directory is listed here with where it came from. Vendored files
-are copied unmodified under new names by `tools/make_art.py`, which also draws everything
-in `made/`. The archives were downloaded on 2026-11-09 from OpenGameArt.org and each
+are copied unmodified under new names by `tools/make_art.py`, which also cuts and draws the
+simple pieces in `made/`; `tools/cut_art.py` cuts the bosses and the rest from the newer
+packs (below). The archives were downloaded on 2026-11-09 from OpenGameArt.org and each
 license was read from the archive's own file (or, where it has none, from the page). The
 unpacked archives are kept at `~/code/asset-packs/arcfire` on the development machine.
 
@@ -73,8 +74,9 @@ archive's `License.txt` is the CC0 legal code, kept here as `LICENSE-CC0.txt`.
 
 ## Made here
 
-Drawn by `tools/make_art.py` on 2026-11-09, Korvid's, under the repository's license
-(Apache 2.0, `LICENSE` at the root). No image generation was used.
+By `tools/make_art.py` on 2026-11-09: cuts from the packs above, and plain shapes (a
+disc, a ring, a gradient, a fill), Korvid's, under the repository's license (Apache 2.0,
+`LICENSE` at the root). No image generation was used.
 
 | file | what |
 |---|---|
@@ -83,14 +85,8 @@ Drawn by `tools/make_art.py` on 2026-11-09, Korvid's, under the repository's lic
 | `made/ring.png` | the graze ring: a one-pixel white circle |
 | `made/soft.png` | the shell and glows: a white disc fading to its edge |
 | `made/spark.png` | sparks: a white square |
-| `made/egg.png` | the egg: a spherical machine (a shaded steel sphere, its seam and core), drawn by the script |
-| `made/eggs.png` | the HUD's pips: the egg, spent (dimmed) and in hand |
-| `made/clouds_low.png` | the low clouds, 512 x 512 seamless: cumulus drawn by the script in the pack's whites and greys (and, darkened by the game, their shadows) |
-| `made/clouds_high.png` | the high wisps, 512 x 512 seamless: tapered strokes in the same whites, half transparent |
-| `made/beam.png` | the Beam's strip, 16 x 64: a white core in cyan with a deep blue edge and pulses along it |
 | `made/vignette.png` | the field's vignette: a dark ramp from clear in the middle to the edges, drawn here |
 | `made/cursor.png` | the menus' cursor: Kenney's player ship (Pixel Shmup `Tilemap/ships_packed.png`, column 0, row 0) turned to point right |
-| `made/items.png` | the items' badges, 16 px: Spread, Beam, Storm and Lance (their letters on their colors), power and option |
 | `made/bombs.png` | the HUD's bomb pips: Kenney's shield tile (`kenney/tiles.png`, column 2, row 2), dimmed for a bomb spent and as it is for one in hand |
 
 ## Sci-Fi Sounds and Impact Sounds
@@ -147,26 +143,81 @@ CC0 creative commons license".
 | `music/orbit.wav` | `Juhani Junkala [Retro Game Music Pack] Level 2.wav`, likewise (Orbit's stage) |
 | `music/orbit_boss.wav` | `Juhani Junkala [Retro Game Music Pack] Ending.wav`, likewise (Orbit's bosses) |
 
-## Generated: the bosses
+## Modular ships
 
-Kitbashed by `tools/make_bosses.py` on 2026-11-09 (Orbit's on 2026-11-10) from Kenney's
-Pixel Shmup (above, CC0), deterministically (the same files every run). Korvid's, under the repository's license
-(Apache 2.0). No image generation was used. Images made another way can replace these
-files without code changes, as long as each part's cell stays where its `.boss.json` says.
+By **surt**. Released under **CC0 1.0 Universal** (`LICENSE-CC0.txt`). Received as
+`modular_ships.png` (640 x 480, 23,190 bytes, sha256
+7dc502b0b46e2f222fef8eaa10bc33a2982508d57baddf82f737889ec7cafdcc): a kit of ship parts in
+four colorways on a solid blue ground, and ships assembled from it.
 
-| file | what |
+## ARES sprites
+
+By **Binngi**. Released under **CC0 1.0 Universal** (`LICENSE-CC0.txt`). Received as
+`ARES sprites.zip` (14,810,557 bytes, sha256
+30901455eb763c55189c445b1aa20e94d53a778f006010e2b222a8b85162c889); used:
+`ARES Spritesheet.png` (green) and `ARES Spritesheet2.png` (red).
+
+## Ships (Commander)
+
+By **Commander**. Released under **CC0 1.0 Universal** (`LICENSE-CC0.txt`). Received as
+`tipone.png` (900 x 1100, 836,671 bytes, sha256
+30b44757f31a8889e2d5d256b82c0dcc046d236a54cc77c6785ae0d1ac147127), one of three
+colorings of the sheet.
+
+## Space Shooter (Remastered) and Space Shooter Extension
+
+By **Kenney** (https://www.kenney.nl). Released under **CC0 1.0 Universal**; the packs'
+own license files are `LICENSE-Kenney-SpaceShooter.txt` and
+`LICENSE-Kenney-SpaceShooterExtension.txt`. Received as
+`kenney_space-shooter-remastered.zip` (1,108,777 bytes, sha256
+0edbe0ab5cda6c44901d8c42f150268fdfa0c8d48492098669f37e9c296929b5) and
+`kenney_spaceShooterExtension.zip` (2,840,182 bytes, sha256
+77efd54b343bbd123af8cc7f534446706731b9cf5a34f38d8fcc54e7245f9c91).
+
+## Shiny boulders
+
+By **SpiderDave**. Released under **CC0 1.0 Universal** (`LICENSE-CC0.txt`). Received as
+`boulders.png` (1024 x 768, 510,541 bytes, sha256
+4de06744276069a8892b7988b468273ab35d1f44777b13fba5ce0516d29679d1), 16 px boulders on a
+solid ground.
+
+## Clouds
+
+By **Sam** and **魔大农**. Released under **CC0 1.0 Universal** (`LICENSE-CC0.txt`).
+Received as `clouds.png` (1024 x 1024, 437,221 bytes, sha256
+94859924c791878bd615fc6cd15db0d76c648047453d4a8c4a2c67be12bb8673), five clouds.
+
+The packs above were received on 2026-11-12 and are kept under `~/code/asset-packs` on the
+development machine; their source pages are not recorded here yet.
+
+## Cut from the packs: the bosses and the rest
+
+By `tools/cut_art.py` (2026-11-12), deterministically, from the packs as received. Every
+texture keeps the size and cell layout the game and the `.boss.json` files expect. The
+parts are pieces of surt's kit (each 24 px cell holds one piece, centred; flipped top to
+bottom on a boss that faces down); `tools/cut_art.py` names each piece by its place on the
+sheet.
+
+| file | from |
 |---|---|
-| `generated/carrier.png` | the carrier's hull, 96 x 176: drawn by the script in the pack's palette and style (its outline slate, greys, white and orange accent), with two copies of the pack's vent tile (`kenney/tiles.png` column 4, row 1) as deck machinery and sockets where the parts sit |
-| `generated/carrier_parts.png` | its parts, 24 px cells: the pack's turret tiles (`kenney/tiles.png` column 6 row 1, column 5 row 1) as they are; launch bays shut and open, and the core armored and open, drawn by the script in the pack's palette |
-| `generated/battleship.png` | the battleship's hull, 224 x 96, broadside, bow right: drawn by the script in the pack's palette and style, with the pack's vent tile twice as funnels, a bow wave and wake, and sockets where the parts sit |
-| `generated/boat.png` | the missile boat, a midsize airship: drawn by `tools/make_bosses.py` in the pack's palette and style (no pack pixels); Korvid's, under the repository's license |
-| `generated/gunship_left.png`, `generated/gunship_right.png` | Orbit's gunships, 48 x 80, bow down: drawn by the script in the pack's palette and style, the left with the orange band, the right with cyan |
-| `generated/gunship_left_parts.png`, `generated/gunship_right_parts.png` | their parts, 24 px cells: the pack's two turret tiles as they are; the bow gun shuttered and open, drawn by the script |
-| `generated/station.png`, `generated/station_parts.png` | the station core, 128 x 128, rings on spokes with sockets, and its parts (shield emitter, weapon mount armored and open, the core armored and open): drawn by the script in the pack's palette, no pack pixels |
-| `generated/segments.png` | Orbit's station segments, two 96 x 48 cells (a truss with two turret pads, a module with a window band and solar vanes): drawn by the script, with the pack's vent tile once on the module |
-| `generated/capital.png` | the capital ship in Orbit's background battle, 224 x 40, broadside, four sections of 56 x 40: drawn by the script in the pack's palette and style, with the pack's vent tile once |
-| `generated/debris.png` | Orbit's wreckage, three 24 px cells: drawn by the script in the pack's palette, no pack pixels |
-| `generated/battleship_parts.png` | its parts, 24 px cells: a main gun, the pack's two turret tiles as anti-air mounts, a missile bay shut and open, a deck hatch shut and open, the bridge armored and open, the rest drawn by the script in the pack's palette |
+| `generated/carrier.png` | ARES's red capsule hull, turned bow down (its cabin where the core sits), scaled into 96 x 176 |
+| `generated/carrier_parts.png` | surt: the twin-barrelled turret (both turret cells), a plain block (bay shut), a strut frame (bay open), a block (core armored), a domed cockpit (core open) |
+| `generated/battleship.png` | ARES's green capsule hull, broadside, bow right, scaled into 224 x 96 |
+| `generated/battleship_parts.png` | surt: the twin turret (main guns), the single-barrelled turret (anti-air), a flat plate and a vent block (missile bay shut and open), a block and an open thruster block (hatches armored and open), a block and the tall dome (bridge armored and open) |
+| `generated/gunship_left.png`, `generated/gunship_left_parts.png` | surt's white ship (two pods), turned bow down and set in 48 x 80; its parts from the white colorway: the small twin gun, a block (gun armored), a domed cockpit (gun open) |
+| `generated/gunship_right.png`, `generated/gunship_right_parts.png` | surt's long blue ship (red dome), likewise, its parts from the blue colorway |
+| `generated/station.png` | ARES's red ring station, turned an eighth so its spokes run under the weapon mounts, scaled into 128 x 128 |
+| `generated/station_parts.png` | surt: a small domed pod (emitters), a block and the twin turret (weapons armored and open), a block and a domed cockpit (core armored and open) |
+| `generated/boat.png` | surt's tall orange ship, doubled (nearest neighbour), nose up, in 32 x 72 |
+| `generated/debris.png` | three of ARES's small rocks, scaled into 24 px cells |
+| `generated/segments.png` | Kenney's Extension `PNG/Sprites/Station/spaceStation_022.png` (a hub between solar panels: the truss) and `spaceStation_001.png` (a module with a window band), each scaled into a 96 x 48 cell |
+| `generated/capital.png` | Commander's long ship (the sheet's second shape, 98 x 462 at 295,27), broadside, bow left, scaled into 224 x 40 |
+| `made/egg.png` | SpiderDave's boulder at column 1, row 0, its ground made transparent |
+| `made/eggs.png` | the HUD's pips: the same boulder, dimmed (spent) and as it is (in hand) |
+| `made/items.png` | Kenney's `PNG/Power-ups/powerupRed.png`, `powerupBlue.png`, `powerupGreen.png` and `powerupYellow.png` scaled to 16 px with the weapons' letters S, B, T and L over them in Public Pixel (above); then `bolt_gold.png` (power) and `star_silver.png` (option) |
+| `made/beam.png` | Kenney's `PNG/Lasers/laserBlue01.png`, scaled to 12 x 64 in the strip's middle |
+| `made/clouds_low.png` | Sam and 魔大农's clouds, four of the five scaled to about a fifth and laid on a seamless 512 px tile (the game darkens a copy for their shadows) |
+| `made/clouds_high.png` | the same clouds smaller, stretched thin and half transparent, on a seamless 512 px tile |
 
 The boss files (`bosses/*.boss.json`) are written by hand for the game, as are the patterns
 `fan_storm`, `carrier_stomp`, `broadside`, `core_burst` and `wall_walk`, and Orbit's

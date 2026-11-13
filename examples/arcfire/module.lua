@@ -12,5 +12,6 @@ module "arcfire" {
   -- rule compiles shaders/*.slang into bin/shaders/ (the game's fragment shaders).
   tools = { "kpack", ["shader-compile"] = { install = "shaders" } },
   licenses = { "assets/LICENSE-CC0.txt", "assets/LICENSE-Kenney.txt", "assets/LICENSE-ScreamingBrainStudios.txt",
-               "assets/LICENSE-Kenney-SciFiSounds.txt", "assets/LICENSE-Kenney-ImpactSounds.txt", "assets/LICENSE-JuhaniJunkala.txt", "assets/CREDITS.md" },
+               "assets/LICENSE-Kenney-SciFiSounds.txt", "assets/LICENSE-Kenney-ImpactSounds.txt", "assets/LICENSE-JuhaniJunkala.txt",
+               "assets/LICENSE-Kenney-SpaceShooter.txt", "assets/LICENSE-Kenney-SpaceShooterExtension.txt", "assets/CREDITS.md" },
 }
