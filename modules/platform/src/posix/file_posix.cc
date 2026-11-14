@@ -55,6 +55,20 @@ OsPathKind os_path_kind(const char* path) {
     return OsPathKind::Other;
 }
 
+bool os_path_stat(const char* path, OsStat* out) {
+    struct stat st;
+    *out = OsStat{};
+    if (stat(path, &st) != 0) return false;
+    out->kind = S_ISREG(st.st_mode) ? OsPathKind::File : S_ISDIR(st.st_mode) ? OsPathKind::Dir : OsPathKind::Other;
+    out->size = (u64)st.st_size;
+#if defined(__APPLE__)
+    out->mtime_ns = (i64)st.st_mtimespec.tv_sec * 1000000000ll + st.st_mtimespec.tv_nsec;
+#else
+    out->mtime_ns = (i64)st.st_mtim.tv_sec * 1000000000ll + st.st_mtim.tv_nsec;
+#endif
+    return true;
+}
+
 bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user) {
     DIR* d = opendir(dir);
     if (!d) return false;

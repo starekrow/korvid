@@ -2,7 +2,8 @@
 // allocator of the caller's choosing (the scratch arena, usually: nothing here frees), so
 // a file's structure can be walked and copied out without any allocation of its own.
 // Strings are unescaped and NUL-terminated; numbers are doubles; every error names its
-// byte offset. Nothing is written: the engine reads formats, tools write them.
+// byte offset and line, and every node knows the line it began on, so whoever gives the
+// values meaning can say where a mistake is. Nothing is written: the engine reads formats, tools write them.
 //
 //   JsonDoc doc;
 //   if (!json_parse(text, len, mem_scratch(), doc)) KV_ERROR("...", "%s at %u", doc.error, doc.error_at);
@@ -26,6 +27,7 @@ struct JsonValue {
     f64         number = 0.0;     // Number, and Bool as 0 or 1
     u64         bits   = 0;       // an integer literal's exact value (two's complement when negative)
     bool        integer = false;  // the Number was written without fraction or exponent and fits 64 bits
+    u32         line   = 0;       // 1-based line the value starts on (a member's: its name's)
 
     bool is_null()   const { return type == JsonType::Null; }
     bool is_bool()   const { return type == JsonType::Bool; }
@@ -40,6 +42,7 @@ struct JsonDoc {
     u32         count    = 0;
     const char* error    = nullptr; // static text; null when the parse succeeded
     u32         error_at = 0;       // byte offset
+    u32         error_line = 0;     // and its 1-based line
 
     const JsonValue& root() const { return nodes[0]; }
 };
@@ -48,7 +51,12 @@ constexpr u32 KV_JSON_MAX_DEPTH = 64;
 
 // Parses [text, text + len). Nodes and strings come from `alloc`; the caller owns them
 // (and frees nothing when the allocator is an arena). False with doc.error set on failure.
-bool json_parse(const char* text, usize len, Allocator* alloc, JsonDoc& doc);
+//
+// flags: KV_JSON_LINE_COMMENTS also passes over `//` to the end of the line wherever
+// white space may stand. That is not JSON, and nothing of the engine's own is written
+// that way; it is there for the formats that choose to let their authors do it (.berg).
+constexpr u32 KV_JSON_LINE_COMMENTS = 1u << 0;
+bool json_parse(const char* text, usize len, Allocator* alloc, JsonDoc& doc, u32 flags = 0);
 
 // Walking. Null when absent or when `v` is not the container asked about.
 const JsonValue* json_get(const JsonDoc& doc, const JsonValue& object, const char* key);

@@ -78,4 +78,24 @@ void test_json(kv::TestCtx& c) {
     KV_CHECK(c, !iv[3]->integer && json_i64(iv[3], 0) == 3 && !iv[4]->integer && json_u64(iv[4], 0) == 1000);
     KV_CHECK(c, !iv[5]->integer && json_u64(iv[5], 0) == ~0ull); // past u64: the double, clamped
     KV_CHECK(c, json_i64(iv[6], 0) == -2 && json_u64(iv[6], 9) == 0 && json_i64(nullptr, 4) == 4);
+
+    // Lines: every node knows where it began, a member by its name; an error knows too.
+    const char* lined = "{\n  \"meta\": { \"type\": \"sprite\" },\n  \"rules\": [\n    { \"match\": \"*.png\",\n      \"meta\":\n        { \"cook\": false } }\n  ]\n}";
+    KV_CHECK(c, json_parse(lined, strlen(lined), mem_scratch(), doc) && doc.error_line == 0 && doc.root().line == 1);
+    KV_CHECK(c, json_get(doc, doc.root(), "meta")->line == 2 && json_get(doc, *json_get(doc, doc.root(), "meta"), "type")->line == 2);
+    const JsonValue* rules = json_get(doc, doc.root(), "rules");
+    KV_CHECK(c, rules->line == 3 && json_at(doc, *rules, 0)->line == 4);
+    const JsonValue* rmeta = json_get(doc, *json_at(doc, *rules, 0), "meta");
+    KV_CHECK(c, rmeta->line == 5 && json_get(doc, *rmeta, "cook")->line == 6);
+    const char* broken = "{\n  \"a\": 1,\n  \"b\" 2\n}";
+    KV_CHECK(c, !json_parse(broken, strlen(broken), mem_scratch(), doc) && doc.error_line == 3);
+    KV_CHECK(c, !json_parse("[1,\r\n2,\r\n]", 10, mem_scratch(), doc) && doc.error_line == 3);
+
+    // Line comments, only when asked for; lines still count through them, and a // inside
+    // a string is text.
+    const char* commented = "// a rule file\n{\n  \"url\": \"http://x\", // why\n  // between members\n  \"n\": 2\n}\n// the end";
+    KV_CHECK(c, !json_parse(commented, strlen(commented), mem_scratch(), doc));
+    KV_CHECK(c, json_parse(commented, strlen(commented), mem_scratch(), doc, KV_JSON_LINE_COMMENTS) && doc.root().count == 2);
+    KV_CHECK(c, strcmp(json_string(json_get(doc, doc.root(), "url"), ""), "http://x") == 0 && json_get(doc, doc.root(), "n")->line == 5);
+    KV_CHECK(c, !json_parse("[1, / 2]", 8, mem_scratch(), doc, KV_JSON_LINE_COMMENTS) && !json_parse("[1] /", 5, mem_scratch(), doc, KV_JSON_LINE_COMMENTS));
 }

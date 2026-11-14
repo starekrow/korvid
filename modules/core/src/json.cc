@@ -16,16 +16,24 @@ struct Parser {
     u32         count, cap;
     const char* error;
     u32         error_at;
+    u32         error_line;
     u32         depth;
+    u32         line;
+    u32         flags;
 
     bool fail(const char* why) {
-        if (!error) { error = why; error_at = (u32)at; }
+        if (!error) { error = why; error_at = (u32)at; error_line = line; }
         return false;
     }
     bool more() const { return at < len; }
     char peek() const { return at < len ? text[at] : 0; }
     void skip_space() {
-        while (at < len && (text[at] == ' ' || text[at] == '\t' || text[at] == '\n' || text[at] == '\r')) ++at;
+        // The only place a newline is passed: a string cannot hold a raw one.
+        for (;;) {
+            while (at < len && (text[at] == ' ' || text[at] == '\t' || text[at] == '\n' || text[at] == '\r')) { if (text[at] == '\n') ++line; ++at; }
+            if (!(flags & KV_JSON_LINE_COMMENTS) || at + 1 >= len || text[at] != '/' || text[at + 1] != '/') break;
+            while (at < len && text[at] != '\n') ++at;
+        }
     }
 
     // Nodes live in one array that doubles; indices stay valid, pointers do not until the end.
@@ -160,6 +168,7 @@ struct Parser {
     bool value(u32 idx) {
         skip_space();
         if (!more()) return fail("unexpected end of text");
+        if (!nodes[idx].line) nodes[idx].line = line;
         char c = peek();
         if (c == '{' || c == '[') {
             if (++depth > KV_JSON_MAX_DEPTH) return fail("nesting too deep");
@@ -180,6 +189,7 @@ struct Parser {
                 if (child == ~0u) return fail("out of memory");
                 if (object) {
                     if (peek() != '"') return fail("expected a member name");
+                    nodes[child].line = line;
                     const char* key; u32 klen;
                     if (!string(&key, &klen)) return false;
                     nodes[child].key = key;
@@ -206,11 +216,13 @@ struct Parser {
 
 } // namespace
 
-bool json_parse(const char* text, usize len, Allocator* alloc, JsonDoc& doc) {
+bool json_parse(const char* text, usize len, Allocator* alloc, JsonDoc& doc, u32 flags) {
     Parser p{};
     p.text  = text;
     p.len   = len;
     p.alloc = alloc ? alloc : mem_general();
+    p.line  = 1;
+    p.flags = flags;
     doc = JsonDoc{};
     u32 root = p.node();
     bool ok = root != ~0u && p.value(root);
@@ -222,6 +234,7 @@ bool json_parse(const char* text, usize len, Allocator* alloc, JsonDoc& doc) {
     doc.count    = p.count;
     doc.error    = ok ? nullptr : (p.error ? p.error : "parse error");
     doc.error_at = p.error_at;
+    doc.error_line = ok ? 0 : p.error_line;
     return ok;
 }
 

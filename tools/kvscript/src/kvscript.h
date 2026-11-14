@@ -1,5 +1,5 @@
-// kvscript's pieces, for its own files: the Lua state's libraries (kv.image, kv.font,
-// kv.zip, kv.fs), each opened onto the stack as a table.
+// kvscript's pieces, for its own files: the libraries that are its own (kv.image,
+// kv.font), each opened onto the stack as a table. The rest of kv is modules/script.
 #pragma once
 #include "korvid/core/types.h"
 #include "korvid/lua/lua.h"
@@ -17,9 +17,5 @@ Image* kvscript_check_image(lua_State* L, int index);
 // Each pushes its library's table.
 void kvscript_open_image(lua_State* L);
 void kvscript_open_font(lua_State* L);
-void kvscript_open_zip(lua_State* L);
-void kvscript_open_fs(lua_State* L);
-// Sets kv.sha256 and kv.json on the table at the top of the stack.
-void kvscript_open_json_sha(lua_State* L);
 
 } // namespace kv

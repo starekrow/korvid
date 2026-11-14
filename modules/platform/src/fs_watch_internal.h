@@ -1,0 +1,37 @@
+// Korvid platform: what the watcher's backends share. An event sink that folds repeats,
+// and the seam a native backend fills (linux/fs_watch_linux.cc).
+#pragma once
+#include "korvid/platform/fs_watch.h"
+
+namespace kv {
+
+struct FsSink {
+    struct Ev { FsEventKind kind; u32 root; u32 text; };
+    Array<Ev>   evs;
+    Array<char> text;
+
+    void clear() { evs.len = 0; text.len = 0; }
+    void free()  { evs.free(); text.free(); }
+    // dir and name are joined with a slash when both are non-empty.
+    void emit(FsEventKind kind, u32 root, const char* dir, const char* name);
+};
+
+// Calls fn for every file and directory under dir, depth first, parents before children,
+// with paths relative to dir. Skips nothing: the caller decides what a name means.
+struct FsWalkEntry { const char* path; bool is_dir; u64 size; i64 mtime_ns; };
+void fs_walk(const char* dir, void (*fn)(void* user, const FsWalkEntry& e), void* user);
+
+#if defined(__linux__) && !defined(__ANDROID__)
+#define KV_FS_NATIVE 1
+struct FsNative;
+FsNative*   fs_native_create();
+void        fs_native_destroy(FsNative* n);
+bool        fs_native_add(FsNative* n, u32 root, const char* dir);
+void        fs_native_remove(FsNative* n, u32 root);
+void        fs_native_poll(FsNative* n, FsSink& sink);
+const char* fs_native_name();
+#else
+#define KV_FS_NATIVE 0
+#endif
+
+} // namespace kv

@@ -263,7 +263,7 @@ kormake tool rule.
 | S1 | `fs_watch` in `platform`: inotify and poll backends, tests for add, change, remove, rename, new directory, overflow | P0 |
 | S2 | `process` in `platform`: spawn, poll, stderr, kill; posix | P0 |
 | S3 | `modules/script`: kvscript's `kv` libraries as a library; kvscript unchanged in behavior | P0 |
-| S4 | JSON nodes carry a line; JSON to Lua tables with key order and lines kept | P0 |
+| S4 | JSON nodes carry a line; an opt-in flag for `//` line comments; JSON to Lua tables with key order and lines kept, `"//"` keys dropped for `.berg` | P0 |
 | S5 | Glob matching (`*`, `?`, `**`, character classes) in `core`, with tests | P0 |
 | S6 | Engine pools readable and writable from Lua by field name | P0 |
 | S7 | The event loop, coalescing, hash-decides, the stability test, `--log` and `--replay` | P0 |
@@ -332,3 +332,31 @@ Reviewed Nov 14; each was a question in the first draft.
    between dev and debug. Someday a project's `.berg` file can split them (or any
    configs) into trees of their own; and if goldberg is fast and reliable enough, it
    may not matter much either way.
+
+## As built
+
+**Milestone 1, Ground** (Nov 14). S1 to S6, each with tests, on Linux in debug, dev and
+ship; `core`, `platform` and `script` also cross-build for Android.
+
+- **Glob** (`korvid/core/glob.h`). `*`, `?`, classes and `**` as a whole segment. A rule's
+  pattern with no slash names a file at any depth (`glob_match_path`), so `"*.png"` in a
+  `goldberg.berg` means every PNG under it and `"ui/*.json"` means the ones in `ui/`.
+- **JSON.** Nodes and errors carry lines. `KV_JSON_LINE_COMMENTS` is the opt-in flag for
+  `//` comments; only `.berg` loading will pass it.
+- **SHA-256** moved from kvscript to `korvid/core/sha256.h`, with a streaming form, so a
+  job can hash without Lua.
+- **The watcher** (`korvid/platform/fs_watch.h`). inotify and poll pass the same test.
+  A directory moved away is one `DirRemoved`; its files are not reported one by one, on
+  either backend. A poll with `now` walks at once: goldberg's "has every watcher
+  delivered what it has".
+- **Processes** (`korvid/platform/process.h`). fork and exec, since `posix_spawn` cannot
+  change directory portably (Android before API 34). The child gets its own process
+  group. Windows is a stub that fails with a message.
+- **`modules/script`.** kvscript's `kv.fs`, `kv.zip`, `kv.json`, `kv.sha256` and
+  `kv.random`, plus `kv.json.decode` (ordered objects, lines, `comments`, `drop`) and
+  the kind binding. kvscript keeps `kv.image` and `kv.font`.
+- **Kinds in Lua** (`script_push_kind`): `spawn`, `destroy`, `get`, `set`, `row`, `each`.
+  Mistakes are Lua errors. Access is the calling system's to declare.
+- **Not done here:** the native watchers for macOS and Windows, and Windows processes,
+  as the PRD says. Nothing was run on macOS or Windows.
+

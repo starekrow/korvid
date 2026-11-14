@@ -1,0 +1,316 @@
+#include "korvid/platform/fs_watch.h"
+#include "fs_watch_internal.h"
+#include "os_file.h"
+#include "korvid/core/hash.h"
+#include "korvid/core/log.h"
+#include "korvid/core/map.h"
+#include "korvid/core/sort.h"
+#include "korvid/core/time.h"
+#include "korvid/platform/module.h"
+#include <new>
+#include <string.h>
+
+namespace kv {
+
+const char* fs_event_kind_name(FsEventKind k) {
+    switch (k) {
+    case FsEventKind::Added:      return "added";
+    case FsEventKind::Changed:    return "changed";
+    case FsEventKind::Removed:    return "removed";
+    case FsEventKind::DirAdded:   return "dir-added";
+    case FsEventKind::DirRemoved: return "dir-removed";
+    case FsEventKind::Rescan:     return "rescan";
+    }
+    return "?";
+}
+
+// ---- the sink ------------------------------------------------------------------------
+
+void FsSink::emit(FsEventKind kind, u32 root, const char* dir, const char* name) {
+    u32 dl = dir ? (u32)strlen(dir) : 0, nl = name ? (u32)strlen(name) : 0;
+    u32 at = text.len;
+    char* p = text.push_n(dl + nl + 2);
+    u32 n = 0;
+    if (dl) { memcpy(p, dir, dl); n = dl; }
+    if (dl && nl) p[n++] = '/';
+    if (nl) { memcpy(p + n, name, nl); n += nl; }
+    p[n] = 0;
+    text.len = at + n + 1;
+    // A repeat of the last thing said about this path says nothing new. Only the last:
+    // added, removed, added is three facts.
+    for (u32 i = evs.len; i-- > 0;) {
+        const Ev& e = evs.data[i];
+        if (e.root != root || strcmp(text.data + e.text, p) != 0) continue;
+        if (e.kind == kind) { text.len = at; return; }
+        break;
+    }
+    evs.push(Ev{kind, root, at});
+}
+
+// ---- walking -------------------------------------------------------------------------
+
+namespace {
+
+struct Names { Array<char> text; Array<u32> at; };
+
+void fsw_collect_name(void* user, const char* name) {
+    Names* n = (Names*)user;
+    u32 len = (u32)strlen(name);
+    n->at.push(n->text.len);
+    memcpy(n->text.push_n(len + 1), name, len + 1);
+}
+
+struct NameCmp { const char* text; };
+int name_cmp(const void* a, const void* b, void* ctx) {
+    const char* t = ((NameCmp*)ctx)->text;
+    return strcmp(t + *(const u32*)a, t + *(const u32*)b);
+}
+
+void walk_in(char* abs, u32 abs_len, u32 abs_cap, u32 rel_at, void (*fn)(void*, const FsWalkEntry&), void* user, u32 depth) {
+    if (depth > 64) return;
+    Names names{};
+    if (!os_dir_each(abs, fsw_collect_name, &names)) { names.text.free(); names.at.free(); return; }
+    NameCmp cmp{names.text.data};
+    sort(names.at.data, names.at.len, sizeof(u32), name_cmp, &cmp);
+    for (u32 i = 0; i < names.at.len; ++i) {
+        const char* name = names.text.data + names.at.data[i];
+        u32 nl = (u32)strlen(name);
+        if (abs_len + 1 + nl + 1 > abs_cap) continue; // too deep a path to name: not seen
+        abs[abs_len] = '/';
+        memcpy(abs + abs_len + 1, name, nl + 1);
+        OsStat st;
+        if (os_path_stat(abs, &st) && (st.kind == OsPathKind::File || st.kind == OsPathKind::Dir)) {
+            FsWalkEntry e{abs + rel_at, st.kind == OsPathKind::Dir, st.size, st.mtime_ns};
+            fn(user, e);
+            if (e.is_dir) walk_in(abs, abs_len + 1 + nl, abs_cap, rel_at, fn, user, depth + 1);
+        }
+        abs[abs_len] = 0;
+    }
+    names.text.free();
+    names.at.free();
+}
+
+} // namespace
+
+void fs_walk(const char* dir, void (*fn)(void* user, const FsWalkEntry& e), void* user) {
+    char abs[KV_PLATFORM_PATH_MAX * 2];
+    u32 n = (u32)strlen(dir);
+    while (n > 1 && dir[n - 1] == '/') --n;
+    if (n + 2 > sizeof abs) return;
+    memcpy(abs, dir, n);
+    abs[n] = 0;
+    walk_in(abs, n, (u32)sizeof abs, n + 1, fn, user, 0);
+}
+
+// ---- the polling backend -------------------------------------------------------------
+
+struct FsPollEntry { u32 text; bool is_dir; u64 size; i64 mtime_ns; };
+
+struct FsPollRoot {
+    u32                id;
+    char*              dir;
+    Array<FsPollEntry> entries; // sorted by path, a directory's contents right after it
+    Array<char>        text;
+};
+
+namespace {
+
+// Orders paths so that everything under a directory follows it directly: '/' sorts
+// before every other byte.
+int path_cmp(const char* a, const char* b) {
+    for (;; ++a, ++b) {
+        u8 x = (u8)*a, y = (u8)*b;
+        if (x == y) { if (!x) return 0; continue; }
+        if (!x) return -1;
+        if (!y) return 1;
+        if (x == '/') return -1;
+        if (y == '/') return 1;
+        return x < y ? -1 : 1;
+    }
+}
+
+struct EntryCmp { const char* text; };
+int entry_cmp(const void* a, const void* b, void* ctx) {
+    const char* t = ((EntryCmp*)ctx)->text;
+    return path_cmp(t + ((const FsPollEntry*)a)->text, t + ((const FsPollEntry*)b)->text);
+}
+
+struct Snapshot { Array<FsPollEntry> entries; Array<char> text; };
+
+void snap_entry(void* user, const FsWalkEntry& e) {
+    Snapshot* s = (Snapshot*)user;
+    u32 len = (u32)strlen(e.path);
+    FsPollEntry pe{s->text.len, e.is_dir, e.size, e.mtime_ns};
+    memcpy(s->text.push_n(len + 1), e.path, len + 1);
+    s->entries.push(pe);
+}
+
+void snapshot(const char* dir, Snapshot& s) {
+    fs_walk(dir, snap_entry, &s);
+    EntryCmp cmp{s.text.data};
+    sort(s.entries.data, s.entries.len, sizeof(FsPollEntry), entry_cmp, &cmp);
+}
+
+bool under(const char* path, const char* dir) {
+    usize n = strlen(dir);
+    return strncmp(path, dir, n) == 0 && path[n] == '/';
+}
+
+void poll_root(FsPollRoot& r, FsSink& sink) {
+    Snapshot now{};
+    snapshot(r.dir, now);
+    u32 i = 0, j = 0;
+    const char* gone_dir = nullptr; // the removed directory whose contents are being passed over
+    while (i < r.entries.len || j < now.entries.len) {
+        const FsPollEntry* a = i < r.entries.len ? &r.entries.data[i] : nullptr;
+        const FsPollEntry* b = j < now.entries.len ? &now.entries.data[j] : nullptr;
+        const char* ap = a ? r.text.data + a->text : nullptr;
+        const char* bp = b ? now.text.data + b->text : nullptr;
+        int c = !a ? 1 : !b ? -1 : path_cmp(ap, bp);
+        if (c == 0 && a->is_dir != b->is_dir) c = -1; // one kind went and the other came: the going first
+        if (c < 0) {
+            if (!(gone_dir && under(ap, gone_dir))) {
+                sink.emit(a->is_dir ? FsEventKind::DirRemoved : FsEventKind::Removed, r.id, ap, nullptr);
+                gone_dir = a->is_dir ? ap : nullptr;
+            }
+            ++i;
+        } else if (c > 0) {
+            sink.emit(b->is_dir ? FsEventKind::DirAdded : FsEventKind::Added, r.id, bp, nullptr);
+            ++j;
+        } else {
+            if (!a->is_dir && (a->size != b->size || a->mtime_ns != b->mtime_ns)) sink.emit(FsEventKind::Changed, r.id, bp, nullptr);
+            ++i; ++j;
+        }
+    }
+    r.entries.free();
+    r.text.free();
+    r.entries = now.entries;
+    r.text    = now.text;
+}
+
+char* fsw_dup_str(const char* s) {
+    usize n = strlen(s) + 1;
+    char* p = (char*)mem_alloc(n);
+    memcpy(p, s, n);
+    return p;
+}
+
+} // namespace
+
+struct FsWatchState {
+    bool            native = false;
+#if KV_FS_NATIVE
+    FsNative*       n = nullptr;
+#endif
+    Array<FsPollRoot> roots;
+    f64             interval = 0.25;
+    f64             last_walk = 0.0;
+    u32             next_id = 0;
+    FsSink          sink;
+    Array<FsEvent>  out;
+};
+
+bool fs_watch_has_native() { return KV_FS_NATIVE != 0; }
+
+bool FsWatcher::init(FsWatchBackend backend, f64 poll_interval) {
+    free();
+    bool native = backend != FsWatchBackend::Poll && fs_watch_has_native();
+    if (backend == FsWatchBackend::Native && !native) return false;
+    FsWatchState* s = new (mem_alloc(sizeof(FsWatchState))) FsWatchState{};
+    s->native   = native;
+    s->interval = poll_interval;
+    s->last_walk = time_now();
+#if KV_FS_NATIVE
+    if (native) {
+        s->n = fs_native_create();
+        if (!s->n) {
+            if (backend == FsWatchBackend::Native) { mem_free(s); return false; }
+            KV_WARN("platform", "fs_watch: no native watcher (the OS refused one); polling");
+            s->native = false;
+        }
+    }
+#endif
+    state = s;
+    return true;
+}
+
+void FsWatcher::free() {
+    if (!state) return;
+#if KV_FS_NATIVE
+    if (state->n) fs_native_destroy(state->n);
+#endif
+    for (FsPollRoot& r : state->roots) {
+        if (r.dir) mem_free(r.dir);
+        r.entries.free();
+        r.text.free();
+    }
+    state->roots.free();
+    state->sink.free();
+    state->out.free();
+    mem_free(state);
+    state = nullptr;
+}
+
+const char* FsWatcher::backend_name() const {
+    if (!state) return "none";
+#if KV_FS_NATIVE
+    if (state->native) return fs_native_name();
+#endif
+    return "poll";
+}
+
+u32 FsWatcher::add_root(const char* dir) {
+    if (!state || !dir || os_path_kind(dir) != OsPathKind::Dir) return ~0u;
+    u32 id = state->next_id++;
+#if KV_FS_NATIVE
+    if (state->native) return fs_native_add(state->n, id, dir) ? id : ~0u;
+#endif
+    FsPollRoot r{};
+    r.id  = id;
+    r.dir = fsw_dup_str(dir);
+    Snapshot s{};
+    snapshot(dir, s);
+    r.entries = s.entries;
+    r.text    = s.text;
+    state->roots.push(r);
+    return id;
+}
+
+void FsWatcher::remove_root(u32 id) {
+    if (!state) return;
+#if KV_FS_NATIVE
+    if (state->native) { fs_native_remove(state->n, id); return; }
+#endif
+    for (u32 i = 0; i < state->roots.len; ++i) {
+        FsPollRoot& r = state->roots.data[i];
+        if (r.id != id) continue;
+        mem_free(r.dir);
+        r.entries.free();
+        r.text.free();
+        state->roots.data[i] = state->roots.data[state->roots.len - 1];
+        --state->roots.len;
+        return;
+    }
+}
+
+Span<const FsEvent> FsWatcher::poll(bool now) {
+    if (!state) return {};
+    FsWatchState& s = *state;
+    s.sink.clear();
+    s.out.len = 0;
+    bool walked = false;
+#if KV_FS_NATIVE
+    if (s.native) { fs_native_poll(s.n, s.sink); walked = true; }
+#endif
+    if (!walked) {
+        f64 t = time_now();
+        if (now || t - s.last_walk >= s.interval) {
+            for (FsPollRoot& r : s.roots) poll_root(r, s.sink);
+            s.last_walk = time_now();
+        }
+    }
+    for (const FsSink::Ev& e : s.sink.evs) s.out.push(FsEvent{e.kind, e.root, s.sink.text.data + e.text});
+    return Span<const FsEvent>(s.out.data, s.out.len);
+}
+
+} // namespace kv

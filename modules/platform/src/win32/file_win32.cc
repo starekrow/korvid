@@ -91,6 +91,25 @@ OsPathKind os_path_kind(const char* path) {
     return OsPathKind::File;
 }
 
+bool os_path_stat(const char* path, OsStat* out) {
+    *out = OsStat{};
+    wchar_t w[KV_WIDE_PATH_MAX];
+    if (!widen(path, w, KV_WIDE_PATH_MAX)) return false;
+    HANDLE h = CreateFileW(w, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    BY_HANDLE_FILE_INFORMATION info;
+    BOOL ok = GetFileInformationByHandle(h, &info);
+    CloseHandle(h);
+    if (!ok) return false;
+    out->kind = (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? OsPathKind::Dir
+              : (info.dwFileAttributes & FILE_ATTRIBUTE_DEVICE) ? OsPathKind::Other : OsPathKind::File;
+    out->size = ((u64)info.nFileSizeHigh << 32) | info.nFileSizeLow;
+    // FILETIME: 100 ns units. Only ever compared with another.
+    out->mtime_ns = (i64)((((u64)info.ftLastWriteTime.dwHighDateTime << 32) | info.ftLastWriteTime.dwLowDateTime) * 100ull);
+    return true;
+}
+
 bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user) {
     wchar_t w[KV_WIDE_PATH_MAX];
     if (!widen(dir, w, KV_WIDE_PATH_MAX - 2)) return false;

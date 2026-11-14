@@ -6,6 +6,6 @@
 module "kvscript" {
   output           = "exe",
   platforms        = { "host" },
-  deps             = { "core", "platform", "cli", "tool", "inflate", "image", "pack", "math", "lua", "truetype" },
+  deps             = { "core", "platform", "cli", "tool", "inflate", "image", "pack", "math", "lua", "truetype", "script" },
   engine_module    = true,
 }

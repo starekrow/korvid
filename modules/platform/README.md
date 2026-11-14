@@ -33,6 +33,18 @@ arrived and queues what is to be sent, draining the queue when flushed. A queue 
 grows past its limit drops writes and counts them rather than stall the frame. Loopback
 by default. This is the CLI's transport and may be a game's.
 
+**Watching** (`fs_watch.h`). An `FsWatcher` is given directory trees and polled, like a
+socket: no thread, no blocking. inotify on Linux; everywhere, and as the only backend on
+the other platforms for now, a polling backend that walks the trees at an interval and
+compares sizes and modification times. Events are hints (added, changed, removed, a
+directory come or gone, rescan): the reader compares content before believing one. The
+header says what holds on both backends.
+
+**Processes** (`process.h`). `Process::spawn` takes an argument vector, a working
+directory and additions to the environment; `running`, `read_out`, `read_err` and `kill`
+never block. The child has no stdin and its own process group, so killing it takes what
+it started. POSIX only so far: on Windows `spawn` fails and says so. For tools.
+
 **Directories.** `platform_base_path` is the executable's directory, read from
 `/proc/self/exe` at startup; `platform_pref_path(e, org, app)` is the per-user directory
 for saves and settings, `$XDG_DATA_HOME/<org>/<app>/` (or `~/.local/share/<org>/<app>/`),

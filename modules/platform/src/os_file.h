@@ -20,6 +20,10 @@ i64    os_file_write(OsFile f, const void* buf, usize n, i32* err);
 enum class OsPathKind : u8 { None, File, Dir, Other };
 // What a path names, following links.
 OsPathKind os_path_kind(const char* path);
+// What a path names with its size and modification time (nanoseconds since the OS's
+// epoch: only ever compared with another), following links. False if nothing is there.
+struct OsStat { OsPathKind kind = OsPathKind::None; u64 size = 0; i64 mtime_ns = 0; };
+bool os_path_stat(const char* path, OsStat* out);
 // Calls fn with each entry's name in dir, '.' and '..' left out, in no particular order.
 // False if dir cannot be read.
 bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user);

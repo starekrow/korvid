@@ -470,6 +470,10 @@ Each slice gets its own PRD (`Goldberg-Slice-N-PRD.md`) before it is built.
   others are variations of.
 - **A writer with no lifetime goldberg can see is a flaw in a static cook**, patched
   with `settle` in the tool's metadata and not modeled further.
+- **Comments in `.berg`.** A `"//"` key is stripped wherever it appears, by convention.
+  `.berg` files also allow `//` line comments, which plain JSON does not. Nothing in
+  Korvid's own trees uses line comments except the tests that prove they work: whether
+  to is an author's decision.
 - **The game connects to goldberg.**
 - **The conventions are a `.berg` file**, so they are read, explained and overridden
   like any other layer.
@@ -497,8 +501,6 @@ Each slice gets its own PRD (`Goldberg-Slice-N-PRD.md`) before it is built.
   `"land": false`); and whether a file may both land and feed a further step.
 - **A stem with two files.** `ship.berg` speaks for `ship.png` and `ship.json` alike,
   narrowed by `match`. If that surprises in practice, `ship.png.berg` is the fallback.
-- **Comments in `.berg`.** JSON has none. A `"//"` key, JSON5, or wait for the format
-  after JSON.
 - **Tag precedence**, still open in the design; slice 1 uses the set rule above.
 - **Shaders.** Compiled by a kormake tool rule today. They are assets by any definition;
   whether goldberg takes them, and when.

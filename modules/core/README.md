@@ -108,7 +108,9 @@ per-thread rings, read between frames into summaries, a frame tree, and a Chrome
 Names (`name.h`): interned strings compared as integers. Hashing (`hash.h`): one fixed
 64-bit hash, never seeded. UTF-8 (`utf8.h`), the engine's one text encoding: total
 decoding (malformed bytes are U+FFFD, one at a time), encoding, validation and copies
-that truncate at a character boundary. A JSON reader (`json.h`), the CLI registry (`cli.h`), a
+that truncate at a character boundary. A JSON reader (`json.h`) whose nodes and errors
+carry their line, glob matching for paths (`glob.h`: `*`, `?`, classes, `**`), SHA-256 for
+content identity (`sha256.h`, apart from the table hash), the CLI registry (`cli.h`), a
 seeded PCG32 and a Mersenne Twister that draws Python's and std::mt19937's numbers
 (`random.h`), a test harness (`test.h`), a leveled log (`log.h`), and
 formatted text and the standard streams (`format.h`: `format`, which is snprintf, and
