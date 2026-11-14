@@ -1174,6 +1174,7 @@ void cmd_explain(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, a
 void cmd_status(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "status"); }
 void cmd_clean(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "clean"); }
 void cmd_replay(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "replay"); }
+void cmd_learn(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "learn"); }
 
 bool goldberg_startup(Engine&, ModuleInstance& self) {
     GoldbergState* s = arena_push<GoldbergState>(self.arena);
@@ -1213,6 +1214,7 @@ constinit const CliCommandDesc k_commands[] = {
     {.name = "goldberg explain", .help = "goldberg explain PATH: what this file is, what happens to it, and why", .fn = cmd_explain},
     {.name = "goldberg status", .help = "goldberg status: dirty, running, failed", .fn = cmd_status},
     {.name = "goldberg clean", .help = "goldberg clean --out DIR [--state FILE]: remove what goldberg wrote there, and its state", .fn = cmd_clean},
+    {.name = "goldberg learn", .help = "goldberg learn FILE [--dry-run] [--scan]: run FILE's converter once, see what it writes, and declare that in the .berg file that registers it", .fn = cmd_learn},
     {.name = "goldberg replay", .help = "goldberg replay LOG [--dump FILE]: feed a recorded event log to a fresh session, with no file system under it", .fn = cmd_replay},
 };
 constinit const SystemDesc k_systems[] = {

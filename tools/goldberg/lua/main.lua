@@ -10,11 +10,13 @@ local Session = require("session")
 local Rules = require("rules")
 local solve = require("solve")
 local explain = require("explain")
+local Learn = require("learn")
 
 local json = kv.json
 local goldberg = {}
 
 local run -- the running cook or watch: { session, mode, opts, log, t0 }
+local learning -- or the `goldberg learn` under way
 
 local function say(fmt, ...) host.print(string.format(fmt, ...)) end
 local function complain(fmt, ...) host.warn("goldberg: " .. string.format(fmt, ...)) end
@@ -27,7 +29,7 @@ end
 -- ---- arguments ------------------------------------------------------------------------
 
 local VALUE = { ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--state"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true, ["--stamp"] = true }
-local FLAG = { ["-v"] = "verbose", ["--quiet"] = "quiet", ["-q"] = "quiet" }
+local FLAG = { ["-v"] = "verbose", ["--quiet"] = "quiet", ["-q"] = "quiet", ["--dry-run"] = "dry_run", ["--scan"] = "scan", ["--keep"] = "keep" }
 
 local function parse(words)
     local o = { roots = {}, names = {} }
@@ -248,6 +250,7 @@ local function write_outputs()
 end
 
 function goldberg.event(ev)
+    if learning then learning:event(ev) return end
     if not run then return end
     if run.log then run.log[#run.log + 1] = log_event(ev) end
     run.session:event(ev)
@@ -333,9 +336,55 @@ end
 
 -- ---- explain ----------------------------------------------------------------------------------
 
--- Without a session: finds the file's asset root (given with --root, or the nearest
--- `assets` directory above it that sits beside a module.lua), reads the few rule files
--- that speak for it, and solves it. Nothing is cooked and nothing is watched.
+-- Where a file given on the command line is: its asset root (given with --root, or the
+-- nearest `assets` directory above it that sits beside a module.lua) and its path under
+-- it. { name, dir (the root as the user would write it), abs (the root, absolute), rel },
+-- or nil and why.
+local function locate(arg, o)
+    local full = absolute(arg):gsub("/%./", "/")
+    if not kv.fs.is_file(full) then return nil, arg .. ": no such file" end
+    local root_name, root_dir, rel
+    for _, r in ipairs(o.roots) do
+        local dir = absolute(r.dir):gsub("/+$", "")
+        if full:sub(1, #dir + 1) == dir .. "/" then root_name, root_dir, rel = r.name, r.dir:gsub("/+$", ""), full:sub(#dir + 2) end
+    end
+    if not root_name then
+        local dir = dirname(full)
+        while dir ~= "" do
+            if Rules.basename(dir) == "assets" and kv.fs.is_file(dirname(dir) .. "/module.lua") then
+                local text = kv.fs.read(dirname(dir) .. "/module.lua") or ""
+                root_name = text:match('module%s*"([^"]+)"') or Rules.basename(dirname(dir))
+                rel = full:sub(#dir + 2)
+                -- Shown as the user wrote it: the argument, less the part under the root.
+                root_dir = arg:sub(-#rel) == rel and #arg > #rel and arg:sub(1, #arg - #rel - 1) or dir
+                break
+            end
+            dir = dirname(dir)
+        end
+        if not root_name then return nil, arg .. ": not under an asset root. Give --root NAME=DIR, or keep it under a module's assets/" end
+        root_dir = root_dir:gsub("/+$", "")
+    end
+    return { name = root_name, dir = root_dir, abs = full:sub(1, #full - #rel - 1), rel = rel }
+end
+
+-- The few rule files that speak for one located file, read now.
+local function rules_for(loc, o)
+    local rules = Rules.new()
+    rules:set("conventions", read_conventions(), "conventions")
+    local project = read_project{ project = o.project or find_project(loc.abs) }
+    if project then rules:set("project", project.text, project.display) end
+    for _, layer in ipairs(Rules.chain(loc.name, loc.rel)) do
+        local file = layer.key:match("^[^:]*:(.*)$")
+        if file and layer.key ~= "conventions" and layer.key ~= "project" then
+            local text = kv.fs.read(loc.abs .. "/" .. file)
+            if text then rules:set(layer.key, text, loc.dir .. "/" .. file) end
+        end
+    end
+    return rules
+end
+
+-- Without a session: finds the file's asset root, reads the rule files that speak for
+-- it, and solves it. Nothing is cooked and nothing is watched.
 local function explain_now(words)
     local o, why = parse(words)
     if not o then return usage(why) end
@@ -343,61 +392,21 @@ local function explain_now(words)
     local failed = false
     local explained = {}
     for _, arg in ipairs(o.names) do
-        local full = absolute(arg):gsub("/%./", "/")
-        if not kv.fs.is_file(full) then
-            complain("%s: no such file", arg)
+        local loc, where = locate(arg, o)
+        if not loc then
+            complain("%s", where)
             failed = true
-            goto continue
-        end
-        do
-            local root_name, root_dir, rel
-            for _, r in ipairs(o.roots) do
-                local dir = absolute(r.dir):gsub("/+$", "")
-                if full:sub(1, #dir + 1) == dir .. "/" then root_name, root_dir, rel = r.name, r.dir:gsub("/+$", ""), full:sub(#dir + 2) end
-            end
-            if not root_name then
-                local dir = dirname(full)
-                while dir ~= "" do
-                    if Rules.basename(dir) == "assets" and kv.fs.is_file(dirname(dir) .. "/module.lua") then
-                        local text = kv.fs.read(dirname(dir) .. "/module.lua") or ""
-                        root_name = text:match('module%s*"([^"]+)"') or Rules.basename(dirname(dir))
-                        rel = full:sub(#dir + 2)
-                        -- Shown as the user wrote it: the argument, less the part under the root.
-                        root_dir = arg:sub(-#rel) == rel and #arg > #rel and arg:sub(1, #arg - #rel - 1) or dir
-                        break
-                    end
-                    dir = dirname(dir)
-                end
-                if not root_name then
-                    complain("%s: not under an asset root. Give --root NAME=DIR, or keep it under a module's assets/", arg)
-                    failed = true
-                    goto continue
-                end
-                root_dir = root_dir:gsub("/+$", "")
-            end
-            local abs_root = full:sub(1, #full - #rel - 1)
-            local rules = Rules.new()
-            rules:set("conventions", read_conventions(), "conventions")
-            local project = read_project{ project = o.project or find_project(abs_root) }
-            if project then rules:set("project", project.text, project.display) end
-            for _, layer in ipairs(Rules.chain(root_name, rel)) do
-                local file = layer.key:match("^[^:]*:(.*)$")
-                if file and layer.key ~= "conventions" and layer.key ~= "project" then
-                    local text = kv.fs.read(abs_root .. "/" .. file)
-                    if text then rules:set(layer.key, text, root_dir .. "/" .. file) end
-                end
-            end
-            local eff, prov, reg, _, warn = rules:effective(root_name, rel)
+        else
+            local eff, prov, reg, _, warn = rules_for(loc, o):effective(loc.name, loc.rel)
             local a
             if not eff then a = { action = "error", error = prov, why = {} }
-            else a = solve.solve(root_name, rel, eff, prov, reg); a.rule_warn = warn end
-            for _, line in ipairs(explain.lines(rel, a, eff, prov or {}, o.out)) do
+            else a = solve.solve(loc.name, loc.rel, eff, prov, reg); a.rule_warn = warn end
+            for _, line in ipairs(explain.lines(loc.rel, a, eff, prov or {}, o.out)) do
                 say("%s", line)
                 explained[#explained + 1] = line
             end
             if a.error then failed = true end
         end
-        ::continue::
     end
     if o.dump then kv.fs.write(o.dump, table.concat(explained, "\n") .. "\n") end
     host.finish(failed and 1 or 0)
@@ -411,6 +420,14 @@ function goldberg.command(words)
         if run then complain("a %s is already running", run.mode) return end
         start(verb, words)
     elseif verb == "explain" then explain_now(words)
+    elseif verb == "learn" then
+        if run or learning then complain("goldberg is busy") return end
+        local o, why = parse(words)
+        if not o then return usage(why) end
+        if #o.names ~= 1 then return usage("learn FILE [--root NAME=DIR] [--dry-run] [--scan] [--keep]: FILE is one source a shell converter takes") end
+        local loc, where = locate(o.names[1], o)
+        if not loc then return usage(where) end
+        learning = Learn.start(loc, rules_for(loc, o), o)
     elseif verb == "replay" then replay(words)
     elseif verb == "clean" then
         local o, why = parse(words)

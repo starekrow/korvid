@@ -304,6 +304,20 @@ The builder is the only thing that changes it, and it accepts changes at any tim
   like any other, and `.env` files applied the same way. The script
   file is an input of every step that runs it, so editing the script recooks. A non-zero
   exit fails the step, with the tail of stderr in the message.
+- **Learning a converter.** What a script writes is found out by running it, not by
+  reading it, so goldberg does the running: `goldberg learn FILE` solves `FILE`, runs the
+  converter it is handed to once, as a cook would, into a directory of its own that it
+  watches, and reads off what appeared. The source's stem in a name becomes `{stem}`;
+  names that differ only in a number become one pattern. The result replaces the
+  converter's `outputs`, in the `.berg` file that registers it, and nothing else in
+  that file moves. A registration may therefore start with no `outputs` at all: a cook
+  takes in whatever such a converter writes and says to run `learn`. It also reports
+  what a person would want to know before trusting the script: files finished far apart
+  (a candidate for `"outputs": "scan"`, which `learn --scan` declares with a settle time
+  taken from the run), files made and removed, an output whose name says one type and
+  whose converter says another, and writes into the source tree. Later, the same
+  observation can propose the registration itself (`from`, `to`, the rule that types the
+  source) and can run over every source a converter takes, not one.
 - **The streaming case is tested with a script.** Create a file, sleep, write, sleep,
   write another, exit; registered with `"outputs": "scan"` and a `settle`. The test
   asserts that each file is admitted once quiet, that its downstream step runs before
@@ -349,6 +363,7 @@ That works the same for a devkit or a phone as for a window on the same machine.
 goldberg cook    [GAME] [CONFIG]      cook until stable, then exit
 goldberg watch   [GAME] [CONFIG]      cook, then keep watching; listen for games
 goldberg explain PATH                 what this file is, what happens to it, and why
+goldberg learn   FILE                 run FILE's converter once and declare what it wrote
 goldberg status                       dirty, running, failed; connected games
 goldberg clean   [GAME]               remove what goldberg wrote, and its state
 goldberg clean attic [GAME]          empty the attic: what goldberg took out of the output tree
@@ -358,6 +373,10 @@ goldberg clean attic [GAME]          empty the attic: what goldberg took out of 
   `CONFIG` defaults as kormake's does, and picks the output tree.
 - `explain` and `status` against a running `watch` ask it (`--port`); `explain` without
   one solves the file on the spot and cooks nothing.
+- `learn` is how a converter's `outputs` get written: goldberg runs the script on one
+  source, watches where it writes, turns the names it saw into patterns, and changes that
+  one value in the `.berg` file that registers the converter. It cooks nothing. See
+  "Learning a converter" under The cook.
 - While `watch` runs, the same verbs are its CLI, on stdin and on TCP, beside the
   engine's own (`ls /kinds/goldberg/...`, `/mem`, `/perf`).
 
@@ -407,6 +426,7 @@ goldberg asks for these, and they belong to the engine:
 | G12 | A second cook of an unchanged tree runs no step | P0 |
 | G13 | A bad `.berg` file or a failed step fails only what depends on it | P1 |
 | G14 | Command-line (shell-script) converters registered in `.berg`, with declared or scanned outputs; `copy` is a converter like them | P0 |
+| G14c | `goldberg learn`: a converter's `outputs` declared from a watched run, written into its `.berg` file in place | P1 |
 | G14a | Whether a file lands in the output tree is a solver answer, from its type and `land`, and is explained | P0 |
 | G14b | Lua converters in process; protocol converters; discovered edges; fan-in | P1 |
 | G15 | The game's connection: changed outputs down, loads up, reload in the asset module | P1 |

@@ -234,7 +234,7 @@ and a project's own shell converters this is tiny, and it is the real algorithm.
 
 ### Commands
 
-`cook`, `watch`, `explain`, `status`, `clean`, as the master PRD lists them, plus
+`cook`, `watch`, `explain`, `learn`, `status`, `clean`, as the master PRD lists them, plus
 `--log`, `--replay`, `--watch inotify|poll|none`, `--roots FILE` and `-v` (print each
 step). While `watch` runs the same verbs answer on stdin and on `--cli-port`, with
 `touch PATH` to post a `file-changed` by hand.
@@ -275,6 +275,7 @@ kormake tool rule.
 | S13 | The startup scan of the output tree | P0 |
 | S14 | Shell converters: registration, substitution, declared outputs at exit, undeclared sweep, script as input | P0 |
 | S15 | Scanned outputs and `settle`; withdrawal on failure; the streaming test | P0 |
+| S15a | `goldberg learn FILE`: run the file's converter once, watch its work directory, write the `outputs` it showed into the registering `.berg` file, in place (added Nov 14) | P1 |
 | S16 | kormake: the cook edge, the roots file, `<exe>.assets`, package from the output tree, no copy edges | P0 |
 | S17 | The platform mount from `<exe>.assets` | P0 |
 | S18 | `cook`, `watch`, `explain`, `status`, `clean`; the lock | P0 |
@@ -589,3 +590,58 @@ Different from the PRD, or decided here:
 
 Not done: Windows (`tool.bat`, `cmd /c`, and process spawning itself); a limit on
 running scripts taken from the machine; `explain` for a file in the work root.
+
+**`goldberg learn`** (Nov 14, after milestone 5, asked for in review). S15a.
+
+```
+$ goldberg learn assets/ships/big.sheet
+goldberg: learn: "cut" on ships/big.sheet wrote 4 files in 0.00 s
+  big.atlas.json   (by its name a data; as an output of "cut" it is a texture)
+  big_0.png
+  big_1.png
+  big_2.png
+goldberg: learn: wrote into assets/goldberg.berg, converter "cut": "outputs": ["{stem}.atlas.json", "{stem}_*.png"] (it declared none)
+```
+
+- **What it does.** Finds the file's asset root as `explain` does, solves it, and takes
+  the converter the answer hands it to. Runs that script once with the command line a
+  cook would build, into a temporary directory that it watches, with the asset root
+  watched beside it. When the script ends, the files still there are its outputs.
+- **From names to patterns.** The source's stem, where it stands alone in a name,
+  becomes `{stem}`. Names that then differ only in their digits become one pattern with
+  `*` for the digits; a name with no sibling keeps its digits.
+- **The edit** (`lua/bergedit.lua`) sets one value at a path of keys in the file's text.
+  A key that is there has its value replaced where it stands. One that is not is added
+  after the last member of its object, on a line of its own where the neighbours have
+  lines of their own, and after a comma on the same line where they do not. Comments,
+  spacing and order are not touched. The new text is parsed before it is written, and
+  written whole.
+- **A declaration that already holds is left alone**, however it is spelled: every file
+  matched by some declared pattern, and every pattern matched by some file.
+- **`--dry-run`** says what it would write. **`--scan`** declares `"outputs": "scan"`
+  with a `settle` of twice the longest pause seen inside one file's writing, and at
+  least 0.1 s. Without it, files finished more than half a second apart get a line
+  suggesting it. **`--keep`** leaves what the script wrote.
+- **What else it says:** a file made and removed again (scratch, not an output); an
+  output whose name gives it a type that is neither the converter's `to` nor related to
+  it; any file under the asset root that changed while the script ran, since a
+  converter writes only into `{work}`.
+- **It changes nothing** when the script fails, writes nothing, or the new text would
+  not parse; and it says which.
+- **It is not the session.** It cooks nothing, lands nothing, and reads and writes no
+  state. It is not replayed, so it reads the clock and the `.berg` file for itself; it
+  shares the host's runner and the command-line builder with the cook.
+
+Decided here:
+
+- **The "cooked tree" it watches is the converter's work directory**, a fresh one, not
+  the output tree: that is where a converter writes, and nothing a script puts anywhere
+  else can be an output.
+- **One sample.** A converter that writes different names for different sources is
+  learned from the one it was shown. `{stem}` and the digits rule are the only
+  generalizing it does.
+- **It needs the registration to exist** (`from`, `to`, `shell`). Proposing that too,
+  from a bare script and a sample, is in the master PRD as later work.
+
+Not done: `learn` over every source a converter takes; `learn` inside a running
+`watch`; Windows.

@@ -559,6 +559,88 @@ void test_scripts(TestCtx& c) {
     t.free();
 }
 
+// goldberg learn: the converter run once, what it wrote turned into a declaration, and
+// that written into the .berg file with the rest of the file untouched.
+void test_learn(TestCtx& c) {
+    c.begin("goldberg learn");
+    if (!process_supported()) return;
+    Tree t;
+    KV_CHECK(c, t.make("kv-goldberg-learn"));
+    char root[600], out[600], sheet[600], level[600], png[600];
+    snprintf(root, sizeof root, "g=%s/assets", t.dir);
+    snprintf(out, sizeof out, "%s/out", t.dir);
+    snprintf(sheet, sizeof sheet, "%s/assets/ships/big.sheet", t.dir);
+    snprintf(level, sizeof level, "%s/assets/world.level", t.dir);
+    snprintf(png, sizeof png, "%s/assets/a.png", t.dir);
+    const char* berg = R"({
+  // the module's rules, with a comment that must survive
+  "types": { "sheet": { "runtime": false }, "level": {} },
+  "converters": {
+    "cut": {
+      "from": "sheet",   // what it takes
+      "to": "texture",
+      "shell": "tools/cut"
+    },
+    "hum": { "from": "level", "to": "map", "shell": "tools/hum", "outputs": ["wrong.tmj"] }
+  },
+  "rules": [
+    { "match": "*.sheet", "meta": { "type": "sheet" } },
+    { "match": "*.level", "meta": { "type": "level" } }
+  ]
+})";
+    t.put("assets/goldberg.berg", berg);
+    t.put("assets/tools/cut.sh", "for i in 0 1 2; do echo \"frame $i\" > \"$2/${GOLDBERG_STEM}_$i.png\"; done\necho '{}' > \"$2/$GOLDBERG_STEM.atlas.json\"\n");
+    t.put("assets/tools/hum.sh", "echo a > \"$2/one.tmj\"\nsleep 0.3\necho b >> \"$2/one.tmj\"\nsleep 0.7\necho c > \"$2/two.tmj\"\n");
+    t.put("assets/ships/big.sheet", "sheet");
+    t.put("assets/world.level", "level");
+    t.put("assets/a.png", "png");
+
+    // With no outputs declared a cook takes what the script writes, and says what to run.
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 1); // hum's declaration is wrong
+    KV_CHECK(c, has(g_out.data, "the converter \"cut\" declares no outputs; it wrote 4 (big.atlas.json, big_0.png, big_1.png, big_2.png). `goldberg learn`"));
+    KV_CHECK(c, has(g_err.data, "the converter \"hum\" did not write \"wrong.tmj\", which it declares"));
+
+    // --dry-run says what it would write and writes nothing.
+    KV_CHECK(c, gb("learn", sheet, "--root", root, "--dry-run") == 0);
+    KV_CHECK(c, has(g_out.data, "\"cut\" on ships/big.sheet wrote 4 files") && has(g_out.data, "would write into") && strcmp(t.read("assets/goldberg.berg"), berg) == 0);
+    KV_CHECK(c, has(g_out.data, "big.atlas.json   (by its name a data; as an output of \"cut\" it is a texture)"));
+    // For real: one member added, on a line of its own like its neighbours; every other byte as it was.
+    KV_CHECK(c, gb("learn", sheet, "--root", root) == 0);
+    KV_CHECK(c, has(g_out.data, "converter \"cut\": \"outputs\": [\"{stem}.atlas.json\", \"{stem}_*.png\"] (it declared none)"));
+    const char* b = t.read("assets/goldberg.berg");
+    KV_CHECK(c, has(b, "      \"shell\": \"tools/cut\",\n      \"outputs\": [\"{stem}.atlas.json\", \"{stem}_*.png\"]\n    },"));
+    KV_CHECK(c, has(b, "// the module's rules, with a comment that must survive") && has(b, "\"from\": \"sheet\",   // what it takes") && has(b, "\"outputs\": [\"wrong.tmj\"] }"));
+    KV_CHECK(c, strlen(b) == strlen(berg) + strlen(",\n      \"outputs\": [\"{stem}.atlas.json\", \"{stem}_*.png\"]"));
+    // Again: the declaration holds, and nothing is written.
+    KV_CHECK(c, gb("learn", sheet, "--root", root) == 0 && has(g_out.data, "already declares this") && has(g_out.data, "Nothing was changed"));
+
+    // A wrong declaration is replaced, in place, on its one line. The script takes a
+    // second over two files, and learn says what that could mean.
+    KV_CHECK(c, gb("learn", level, "--root", root) == 0);
+    KV_CHECK(c, has(g_out.data, "converter \"hum\": \"outputs\": [\"one.tmj\", \"two.tmj\"] (it declared [\"wrong.tmj\"])") && has(g_out.data, "`goldberg learn --scan`"));
+    KV_CHECK(c, has(t.read("assets/goldberg.berg"), "\"hum\": { \"from\": \"level\", \"to\": \"map\", \"shell\": \"tools/hum\", \"outputs\": [\"one.tmj\", \"two.tmj\"] }"));
+    // The cook now has nothing to say about either.
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0 && !has(g_out.data, "declare") && io_is_file(t.path("out/g/ships/big_2.png")) && io_is_file(t.path("out/g/two.tmj")));
+    // --scan declares it as a streaming converter, with a settle time from what was seen.
+    KV_CHECK(c, gb("learn", level, "--root", root, "--scan") == 0 && has(g_out.data, "\"outputs\": \"scan\", \"settle\": "));
+    b = t.read("assets/goldberg.berg");
+    KV_CHECK(c, has(b, "\"shell\": \"tools/hum\", \"outputs\": \"scan\", \"settle\": 0.") && has(b, "\"outputs\": [\"{stem}.atlas.json\", \"{stem}_*.png\"]\n"));
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out) == 0 && strcmp(t.read("out/g/one.tmj"), "a\nb\n") == 0);
+
+    // A script that fails, writes nothing, or writes into the source tree: said, and nothing changed.
+    char before[2000];
+    snprintf(before, sizeof before, "%s", t.read("assets/goldberg.berg"));
+    t.put("assets/tools/cut.sh", "echo 'blunt knife' >&2\nexit 4\n");
+    KV_CHECK(c, gb("learn", sheet, "--root", root) == 1 && has(g_err.data, "the converter \"cut\" failed (exit 4) on ships/big.sheet: blunt knife. Nothing was changed"));
+    t.put("assets/tools/cut.sh", "echo x > \"$(dirname \"$1\")/beside.png\"\n");
+    KV_CHECK(c, gb("learn", sheet, "--root", root) == 1 && has(g_err.data, "wrote nothing into its work directory") && has(g_err.data, "1 file under the asset root") && has(g_err.data, "ships/beside.png"));
+    KV_CHECK(c, strcmp(t.read("assets/goldberg.berg"), before) == 0);
+    // A file no converter takes, and one that is not there.
+    KV_CHECK(c, gb("learn", png, "--root", root) == 1 && has(g_err.data, "no converter takes this file"));
+    KV_CHECK(c, gb("learn", "/no/such/file.sheet", "--root", root) == 2 && gb("learn") == 2);
+    t.free();
+}
+
 } // namespace
 
 int main() {
@@ -567,6 +649,7 @@ int main() {
     test_mistakes(c);
     test_cook(c);
     test_scripts(c);
+    test_learn(c);
     g_out.free();
     g_err.free();
     names_shutdown();
