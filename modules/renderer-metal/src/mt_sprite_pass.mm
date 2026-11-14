@@ -235,36 +235,15 @@ void record_texture_uploads(Renderer* r, id<MTLBlitCommandEncoder> blit) {
     r->uploads.clear();
 }
 
-bool record_table_copies(Renderer* r, id<MTLBlitCommandEncoder> blit) {
-    bool ok = true;
-    u32 rows = rw_dirty_runs(r->world.sprite_dirty, r->world.sprites.len, 32, [&](u32 a, u32 b) {
-        usize bytes = (usize)(b - a) * sizeof(GpuSprite);
-        RingSpan span = rc_ring_alloc(r, bytes, 16);
-        if (!span.ptr) { ok = false; return; }
-        GpuSprite* dst = (GpuSprite*)span.ptr;
-        rw_stage_sprites(r->world, a, b, dst);
-        [blit copyFromBuffer:span.buffer sourceOffset:span.offset toBuffer:r->tables.sprites destinationOffset:(NSUInteger)a * sizeof(GpuSprite) size:bytes];
-    });
-    r->rows_uploaded += rows;
-    KV_COUNTER("sprite rows uploaded", rows);
-    rw_dirty_runs(r->world.material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
-        usize bytes = (usize)(b - a) * sizeof(GpuMaterial);
-        RingSpan span = rc_ring_alloc(r, bytes, 16);
-        if (!span.ptr) { ok = false; return; }
-        GpuMaterial* dst = (GpuMaterial*)span.ptr;
-        for (u32 i = a; i < b; ++i) rc_material_row(r, i, dst[i - a]);
-        [blit copyFromBuffer:span.buffer sourceOffset:span.offset toBuffer:r->material_table destinationOffset:(NSUInteger)a * sizeof(GpuMaterial) size:bytes];
-    });
-    return ok;
-}
-
 void dispatch(id<MTLComputeCommandEncoder> enc, id<MTLComputePipelineState> pipe, u32 groups) {
     [enc setComputePipelineState:pipe];
     [enc dispatchThreadgroups:MTLSizeMake(groups, 1, 1) threadsPerThreadgroup:MTLSizeMake(kComputeGroup, 1, 1)];
 }
 
 void record_sort(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, const PushData& push) {
-    u32 blocks = (r->world.sprites.len + kBlockRows - 1) / kBlockRows;
+    SortStep steps[kSortSteps];
+    rc_sort_steps(r, steps);
+    const id<MTLComputePipelineState> pipes[kSortSteps] = {r->cs_count, r->cs_scan, r->cs_bucket_scan, r->cs_scatter};
     MTLComputePassDescriptor* cp = [MTLComputePassDescriptor computePassDescriptor];
     cp.dispatchType = MTLDispatchTypeSerial; // in order, each dispatch's writes seen by the next
     rb_gpu_attach(r, f, cp);
@@ -279,14 +258,14 @@ void record_sort(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, const P
     [enc setBuffer:r->tables.block_hist offset:0 atIndex:kSortBlockHist];
     [enc setBuffer:r->sort_meta offset:0 atIndex:kSortMeta];
     [enc setBuffer:r->indirect offset:0 atIndex:kSortIndirect];
-    [enc pushDebugGroup:@"count"];       dispatch(enc, r->cs_count, blocks);                        [enc popDebugGroup];
-    [enc pushDebugGroup:@"scan"];        dispatch(enc, r->cs_scan, kBucketCount / kComputeGroup);    [enc popDebugGroup];
-    [enc pushDebugGroup:@"bucket scan"]; dispatch(enc, r->cs_bucket_scan, 1);                       [enc popDebugGroup];
-    [enc pushDebugGroup:@"scatter"];     dispatch(enc, r->cs_scatter, blocks);                      [enc popDebugGroup];
+    for (u32 i = 0; i < kSortSteps; ++i) {
+        [enc pushDebugGroup:@(steps[i].label)];
+        dispatch(enc, pipes[i], steps[i].groups);
+        [enc popDebugGroup];
+    }
     // Buckets with keyed rows: one group each sorts its range by key, the bucket in the push block.
     bool keyed = false;
-    for (u32 b = 0; b < kBucketCount; ++b) {
-        if (!r->world.keyed_counts[b] || !r->world.bucket_counts[b]) continue;
+    for (u32 b = 0; rw_next_keyed(r->world, &b); ++b) {
         if (!keyed) { [enc pushDebugGroup:@"key sort"]; [enc setComputePipelineState:r->cs_key_sort]; keyed = true; }
         PushData p = push;
         p.key_bucket = b;
@@ -318,102 +297,101 @@ void record_sort_check(Renderer* r, id<MTLCommandBuffer> cb) {
     r->check_recorded = true;
 }
 
-// One indirect draw per non-empty bucket in [first_bucket, end_bucket), the pipeline bound
-// once per run of a slot (Metal has no multi-draw: renderer-vulkan's fallback is the path).
-// A game slot whose pipeline failed draws with its blend's engine pipeline.
-u32 record_draws(Renderer* r, id<MTLRenderCommandEncoder> enc, u32 first_bucket, u32 end_bucket) {
+} // namespace
+
+// The steps of the core's frame (korvid/render/core/frame.inl), in the order it calls them.
+// f.rec is the command buffer being recorded; each pass is an encoder of its own, kept in
+// the frame while it is open (f.blit for the uploads, f.enc for a render pass).
+
+bool rb_record_begin(Renderer* r, FrameInFlight& f) {
+    f.rec = [r->queue commandBuffer];
+    f.rec.label = @"frame";
+    rb_gpu_frame_begin(r, f);
+    f.world_pass = false;
+    return true;
+}
+
+// Uploads are a blit: textures, then the rows the ticks changed, from the ring into the
+// private tables. Metal orders them after the frame before's reads.
+void rb_upload_begin(Renderer* r, FrameInFlight& f) {
+    MTLBlitPassDescriptor* bp = [MTLBlitPassDescriptor blitPassDescriptor];
+    rb_gpu_attach(r, f, bp);
+    f.blit = [f.rec blitCommandEncoderWithDescriptor:bp];
+    f.blit.label = @"upload";
+    record_texture_uploads(r, f.blit);
+}
+
+void rb_copy_rows(Renderer*, FrameInFlight& f, RbBuffer& table, const RingSpan& span, u64 offset, u64 bytes) {
+    [f.blit copyFromBuffer:span.buffer sourceOffset:(NSUInteger)span.offset toBuffer:table destinationOffset:(NSUInteger)offset size:(NSUInteger)bytes];
+}
+
+void rb_upload_end(Renderer*, FrameInFlight& f) {
+    [f.blit endEncoding];
+    f.blit = nil;
+}
+
+void rb_sort(Renderer* r, FrameInFlight& f, const PushData& push) { record_sort(r, f, f.rec, push); }
+void rb_read_sort(Renderer* r, FrameInFlight& f) { record_sort_check(r, f.rec); }
+void rb_sort_end(Renderer*, FrameInFlight&, bool) {}
+
+// A render pass into the world's target or the drawable. The draw's GPU timing starts at the
+// first render pass of the frame and ends at the window's.
+void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView& view) {
+    bool world = pass == RcPass::World;
+    MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rb_gpu_attach(r, f, rp, world || !f.world_pass, !world);
+    rp.colorAttachments[0].texture     = world ? r->post.target : f.drawable.texture;
+    rp.colorAttachments[0].loadAction  = MTLLoadActionClear;
+    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rp.colorAttachments[0].clearColor  = MTLClearColorMake(view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a);
+    f.enc = [f.rec renderCommandEncoderWithDescriptor:rp];
+    f.enc.label = world ? @"world" : @"draw";
+    if (world) f.world_pass = true;
+}
+
+void rb_pass_post(Renderer* r, FrameInFlight& f, const RenderView& view) { rb_post_draw(r, f, f.enc, view); }
+
+void rb_bind_sprites(Renderer* r, FrameInFlight& f, const PushData& push) {
+    id<MTLRenderCommandEncoder> enc = f.enc;
+    [enc setViewport:(MTLViewport){0.0, 0.0, (double)f.width, (double)f.height, 0.0, 1.0}];
+    [enc setVertexBytes:&push length:sizeof push atIndex:kBindPush];
+    [enc setFragmentBytes:&push length:sizeof push atIndex:kBindPush];
+    id<MTLBuffer> bound[] = {f.layers, r->material_table, f.bindless, r->tables.sprites, r->tables.sorted};
+    NSUInteger offsets[] = {0, 0, 0, 0, 0};
+    [enc setVertexBuffers:bound offsets:offsets withRange:NSMakeRange(kBindLayers, 5)];
+    [enc setFragmentBuffers:bound offsets:offsets withRange:NSMakeRange(kBindLayers, 5)];
+    static_assert(kBindMaterials == kBindLayers + 1 && kBindBindless == kBindLayers + 2 && kBindSprites == kBindLayers + 3 &&
+                  kBindSorted == kBindLayers + 4, "the sprite buffers are bound as one range");
+    rb_use_textures(r, enc);
+}
+
+// One indirect draw per non-empty bucket of a run (rw_next_run), the pipeline bound once
+// (Metal has no multi-draw). A game slot whose pipeline failed draws with its blend's engine
+// pipeline.
+u32 rb_draw_run(Renderer* r, FrameInFlight& f, const DrawRun& run) {
+    id<MTLRenderCommandEncoder> enc = f.enc;
     u32 draws = 0;
-    u32 b = first_bucket;
-    DrawRun run;
-    while (rw_next_run(r->world.bucket_counts, &b, end_bucket, &run)) {
-        u32 slot = run.slot, first = run.first, last = run.last;
-        const GamePipe* gp = slot >= kBlendCount ? &r->game_pipes[slot - kBlendCount] : nullptr;
-        id<MTLRenderPipelineState> pipe = gp ? (gp->pipeline ? gp->pipeline : r->pipelines[(u32)gp->blend]) : r->pipelines[slot];
-        char label[64];
-        rw_run_label(label, sizeof label, run, gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
-        [enc pushDebugGroup:@(label)];
-        [enc setRenderPipelineState:pipe];
-        for (u32 n = first; n <= last; ++n) {
-            if (!r->world.bucket_counts[n]) continue;
-            [enc drawPrimitives:MTLPrimitiveTypeTriangle indirectBuffer:r->indirect indirectBufferOffset:(NSUInteger)n * sizeof(MTLDrawPrimitivesIndirectArguments)];
-            ++draws;
-        }
-        [enc popDebugGroup];
+    u32 slot = run.slot, first = run.first, last = run.last;
+    const GamePipe* gp = slot >= kBlendCount ? &r->game_pipes[slot - kBlendCount] : nullptr;
+    id<MTLRenderPipelineState> pipe = gp ? (gp->pipeline ? gp->pipeline : r->pipelines[(u32)gp->blend]) : r->pipelines[slot];
+    char label[64];
+    rw_run_label(label, sizeof label, run, gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
+    [enc pushDebugGroup:@(label)];
+    [enc setRenderPipelineState:pipe];
+    for (u32 n = first; n <= last; ++n) {
+        if (!r->world.bucket_counts[n]) continue;
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle indirectBuffer:r->indirect indirectBufferOffset:(NSUInteger)n * sizeof(MTLDrawPrimitivesIndirectArguments)];
+        ++draws;
     }
+    [enc popDebugGroup];
     return draws;
 }
 
-} // namespace
-
-bool rb_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, const RenderView& view) {
-    KV_ZONE("record");
-    // Uploads first: textures, then the rows the ticks changed.
-    MTLBlitPassDescriptor* bp = [MTLBlitPassDescriptor blitPassDescriptor];
-    rb_gpu_attach(r, f, bp);
-    id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoderWithDescriptor:bp];
-    blit.label = @"upload";
-    record_texture_uploads(r, blit);
-    bool copied = record_table_copies(r, blit);
-    [blit endEncoding];
-    if (!copied) return false;
-
-    u32 width  = drawable ? (u32)drawable.texture.width : 0;
-    u32 height = drawable ? (u32)drawable.texture.height : 0;
-    bool draw = drawable && r->world.sprites.len > 0;
-    // World: the view's center to the origin, the camera's rotation undone, the ortho of a
-    // rect that size about the origin; the cull rect is the rotated view's bounding box.
-    // Screen: the window in pixels about its center. Then y flipped for Metal.
-    f32 sw = (f32)width, sh = (f32)height;
-    PushData push = rw_push_block(r->world, view, sw, sh, (f32)(time_now() - r->start_time), KV_RB_CLIP_Y_UP != 0);
-
-    if (draw) {
-        record_sort(r, f, cb, push);
-        if (r->check_pending) { rc_snapshot_keys(r, view.alpha); record_sort_check(r, cb); }
-    }
-    if (!drawable) return true;
-
-    // With a post shader, the world (the layers below the post layer) goes into the target
-    // first, and the window's pass begins with the post shader; the layers at and above the
-    // post layer draw over it there.
-    bool post = rb_post_prepare(r, width, height);
-    u32 split = post ? rw_bucket_of(r->post.layer, 0) : 0;
-    u32 draws = 0;
-    auto bind_sprites = [&](id<MTLRenderCommandEncoder> enc) {
-        [enc setViewport:(MTLViewport){0.0, 0.0, (double)width, (double)height, 0.0, 1.0}];
-        [enc setVertexBytes:&push length:sizeof push atIndex:kBindPush];
-        [enc setFragmentBytes:&push length:sizeof push atIndex:kBindPush];
-        id<MTLBuffer> bound[] = {f.layers, r->material_table, f.bindless, r->tables.sprites, r->tables.sorted};
-        NSUInteger offsets[] = {0, 0, 0, 0, 0};
-        [enc setVertexBuffers:bound offsets:offsets withRange:NSMakeRange(kBindLayers, 5)];
-        [enc setFragmentBuffers:bound offsets:offsets withRange:NSMakeRange(kBindLayers, 5)];
-        static_assert(kBindMaterials == kBindLayers + 1 && kBindBindless == kBindLayers + 2 && kBindSprites == kBindLayers + 3 &&
-                      kBindSorted == kBindLayers + 4, "the sprite buffers are bound as one range");
-        rb_use_textures(r, enc);
-    };
-    auto pass_into = [&](id<MTLTexture> target, NSString* label, bool first, bool last) {
-        MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];
-        rb_gpu_attach(r, f, rp, first, last);
-        rp.colorAttachments[0].texture     = target;
-        rp.colorAttachments[0].loadAction  = MTLLoadActionClear;
-        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-        rp.colorAttachments[0].clearColor  = MTLClearColorMake(view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a);
-        id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
-        enc.label = label;
-        return enc;
-    };
-    @autoreleasepool {
-        if (post) {
-            id<MTLRenderCommandEncoder> world = pass_into(r->post.target, @"world", true, false);
-            if (draw) { bind_sprites(world); draws += record_draws(r, world, 0, split); }
-            [world endEncoding];
-        }
-        id<MTLRenderCommandEncoder> enc = pass_into(drawable.texture, @"draw", !post, true);
-        if (post) rb_post_draw(r, f, enc, view);
-        if (draw) { bind_sprites(enc); draws += record_draws(r, enc, split, kBucketCount); }
-        KV_COUNTER("indirect draws", draws);
-        [enc endEncoding];
-    }
-    return true;
+void rb_pass_end(Renderer*, FrameInFlight& f, RcPass) {
+    [f.enc endEncoding];
+    f.enc = nil;
 }
+
+bool rb_record_end(Renderer*, FrameInFlight&) { return true; }
 
 } // namespace kv

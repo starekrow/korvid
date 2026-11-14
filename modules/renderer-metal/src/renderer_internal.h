@@ -37,6 +37,7 @@
 #define KV_RB_CLIP_Y_UP  1
 #define KV_RB_SHADER_EXT ".metallib"
 #define KV_RB_SURFACE    RendererSurface::Metal
+#define KV_RB_FRAME_SCOPE @autoreleasepool
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"
@@ -97,6 +98,13 @@ struct PendingUpload {
 
 struct FrameInFlight : FrameCore {
     id<MTLCommandBuffer> cb = nil;       // retained until renderer_render waits for it, as for a fence
+    // While the frame is recorded (core/frame.inl's steps): its command buffer and drawable,
+    // autoreleased and alive for the frame's scope, and the encoder that is open.
+    id<MTLCommandBuffer>        rec = nil;
+    id<CAMetalDrawable>         drawable = nil;
+    id<MTLBlitCommandEncoder>   blit = nil;
+    id<MTLRenderCommandEncoder> enc = nil;
+    bool                        world_pass = false; // the world's pass ran: the window's is not the frame's first
     id<MTLBuffer>        bindless = nil; // the argument buffer: samplers and texture ids, shared storage
     id<MTLBuffer>        layers = nil;   // the layers' offsets, previous and current: float4 each, shared
     bool                 gpu_stamped = false; // it carries timestamps (mt_gpu_profile.mm)
@@ -177,7 +185,6 @@ bool rb_create_bindless(Renderer* r); // the samplers and every frame's argument
 void rb_use_textures(Renderer* r, id<MTLRenderCommandEncoder> enc);
 
 
-bool rb_create_tables(Renderer* r, u32 rows);
 bool rb_create_static_buffers(Renderer* r);
 void rb_destroy_resources(Renderer* r); // everything above; nothing in flight
 
@@ -187,9 +194,6 @@ bool rb_load_shaders(Renderer* r);
 bool rb_create_pipelines(Renderer* r);
 bool rb_create_compute_pipelines(Renderer* r);
 void rb_destroy_pipelines(Renderer* r);
-// Records one frame into cb: uploads, table copies, the sort, and the draws into drawable's
-// texture when there is one (nil: a zero-size window; the uploads still go).
-bool rb_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, const RenderView& view);
 #if KV_DEV || KV_DEBUG
 // A library's buffer, texture and sampler indices by name, against the reflection the build
 // writes beside it (<lib>.metallib.json). False, logged by name, on any difference.
@@ -199,7 +203,6 @@ bool rb_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32
 
 // ---- mt_post_pass.mm ------------------------------------------------------------------------
 bool rb_post_active(const Renderer* r);
-bool rb_post_prepare(Renderer* r, u32 width, u32 height); // the target for this size; false: draw straight
 void rb_post_draw(Renderer* r, FrameInFlight& f, id<MTLRenderCommandEncoder> enc, const RenderView& view); // inside the window's pass
 void rb_post_destroy(Renderer* r); // nothing in flight
 

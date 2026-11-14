@@ -217,6 +217,12 @@ bool rw_next_run(const u32* bucket_counts, u32* cursor, u32 end, DrawRun* out) {
     return true;
 }
 
+bool rw_next_keyed(const RenderWorld& w, u32* bucket) {
+    for (u32 b = *bucket; b < kBucketCount; ++b)
+        if (w.keyed_counts[b] && w.bucket_counts[b]) { *bucket = b; return true; }
+    return false;
+}
+
 void rw_run_label(char* out, usize cap, const DrawRun& run, const char* what) {
     format(out, cap, "layers %d..%d %s", (i32)(run.first / kSlotCount) + kLayerMin, (i32)(run.last / kSlotCount) + kLayerMin, what);
 }

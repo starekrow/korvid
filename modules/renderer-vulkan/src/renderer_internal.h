@@ -19,6 +19,7 @@
 #define KV_RB_CLIP_Y_UP  0
 #define KV_RB_SHADER_EXT ".spv"
 #define KV_RB_SURFACE    RendererSurface::Vulkan
+#define KV_RB_FRAME_SCOPE 
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"
@@ -87,6 +88,8 @@ struct FrameInFlight : FrameCore {
     VkSemaphore     acquire = VK_NULL_HANDLE; // swapchain image available
     VkDescriptorSet tables  = VK_NULL_HANDLE; // set 0: sprite, material and sort buffers
     VkDescriptorSet textures = VK_NULL_HANDLE; // set 1: the sampler and the bindless array
+    u32             image = 0;                  // the swapchain image this frame draws into (rb_frame_acquire)
+    bool            push_stale = false;         // the post pass displaced the sprites' push block
     bool            tables_dirty = true;        // the table buffers changed: rewrite set 0 once the fence passes
     Buffer          layers;                     // the layers' offsets, previous and current: float4 each, host-visible
     // GPU timing (vk_gpu_profile.cc): whether this frame wrote its timestamps and its
@@ -230,7 +233,6 @@ VkFormat rb_vk_format(TextureFormat f);
 
 
 // Pools, handle kinds, tables, descriptors.
-bool rb_create_tables(Renderer* r, u32 rows); // sprite tables for `rows`; the old ones retire
 bool rb_create_static_buffers(Renderer* r);   // material table, sort meta, indirect
 bool rb_create_descriptors(Renderer* r);
 void rb_write_tables_set(Renderer* r, FrameInFlight& f);
@@ -248,14 +250,11 @@ bool rb_create_pipelines(Renderer* r);  // graphics: needs the swapchain format
 void rb_defer_destroy_pipelines(Renderer* r);
 void rb_destroy_pipelines_now(Renderer* r);
 bool rb_create_compute_pipelines(Renderer* r);
-// Records one frame: uploads, table copies, the sort, and the draws when there is an image.
-bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view);
 bool rb_load_shader(Renderer* r, const char* name, VkShaderModule* out); // <exe>/shaders/<name>
-u32  rb_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_bucket);
 
 // ---- vk_post_pass.cc --------------------------------------------------------------------
 bool rb_post_active(const Renderer* r);      // a post shader set and loaded, and a target to draw into
-bool rb_post_prepare(Renderer* r);           // the target for the swapchain's size and format; false: draw straight
+bool rb_post_prepare(Renderer* r, u32 width, u32 height);         // the target for the swapchain's size and format; false: draw straight
 void rb_post_begin_world(Renderer* r, VkCommandBuffer cmd, const RenderView& view); // rendering into the target
 void rb_post_end_world(Renderer* r, VkCommandBuffer cmd); // ends it; the target becomes readable
 void rb_post_draw(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, const RenderView& view); // the target to the window, inside its rendering

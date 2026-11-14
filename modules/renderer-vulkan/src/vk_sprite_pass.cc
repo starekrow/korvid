@@ -144,65 +144,29 @@ void record_texture_uploads(Renderer* r, VkCommandBuffer cmd) {
     r->uploads.clear();
 }
 
-// Dirty sprite rows and material rows, staged into the ring and copied into the tables.
-bool record_table_copies(Renderer* r, VkCommandBuffer cmd) {
-    bool ok = true;
-    u32 rows = rw_dirty_runs(r->world.sprite_dirty, r->world.sprites.len, 32, [&](u32 a, u32 b) {
-        VkDeviceSize bytes = (VkDeviceSize)(b - a) * sizeof(GpuSprite);
-        RingSpan span = rc_ring_alloc(r, bytes, 16);
-        if (!span.ptr) { ok = false; return; }
-        GpuSprite* dst = (GpuSprite*)span.ptr;
-        rw_stage_sprites(r->world, a, b, dst);
-        VkBufferCopy region{span.offset, (VkDeviceSize)a * sizeof(GpuSprite), bytes};
-        vkCmdCopyBuffer(cmd, span.buffer.buffer, r->tables.sprites.buffer, 1, &region);
-    });
-    r->rows_uploaded += rows;
-    KV_COUNTER("sprite rows uploaded", rows);
-
-    rw_dirty_runs(r->world.material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
-        VkDeviceSize bytes = (VkDeviceSize)(b - a) * sizeof(GpuMaterial);
-        RingSpan span = rc_ring_alloc(r, bytes, 16);
-        if (!span.ptr) { ok = false; return; }
-        GpuMaterial* dst = (GpuMaterial*)span.ptr;
-        for (u32 i = a; i < b; ++i) rc_material_row(r, i, dst[i - a]);
-        VkBufferCopy region{span.offset, (VkDeviceSize)a * sizeof(GpuMaterial), bytes};
-        vkCmdCopyBuffer(cmd, span.buffer.buffer, r->material_table.buffer, 1, &region);
-    });
-    return ok;
-}
-
 // ---- the sort -------------------------------------------------------------------------------
 
+// The four kernels in rc_sort_steps' order, each one's writes seen by the next, then the
+// key sort for the buckets that hold keyed rows; the outputs readied for the draws.
 void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
-    u32 blocks = (r->world.sprites.len + kBlockRows - 1) / kBlockRows;
     const VkPipelineStageFlags2 cs = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
     const VkAccessFlags2 rw = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+    SortStep steps[kSortSteps];
+    rc_sort_steps(r, steps);
+    const VkPipeline pipes[kSortSteps] = {r->cs_count, r->cs_scan, r->cs_bucket_scan, r->cs_scatter};
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->pipe_layout, 0, 1, &f.tables, 0, nullptr);
-    rb_label_begin(r, cmd, "count");
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_count);
-    vkCmdDispatch(cmd, blocks, 1, 1);
-    rb_label_end(r, cmd);
-    buffer_barrier(cmd, cs, rw, cs, rw);
-    rb_label_begin(r, cmd, "scan");
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_scan);
-    vkCmdDispatch(cmd, kBucketCount / kComputeGroup, 1, 1);
-    rb_label_end(r, cmd);
-    buffer_barrier(cmd, cs, rw, cs, rw);
-    rb_label_begin(r, cmd, "bucket scan");
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_bucket_scan);
-    vkCmdDispatch(cmd, 1, 1, 1);
-    rb_label_end(r, cmd);
-    buffer_barrier(cmd, cs, rw, cs, rw);
-    rb_label_begin(r, cmd, "scatter");
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_scatter);
-    vkCmdDispatch(cmd, blocks, 1, 1);
-    rb_label_end(r, cmd);
+    for (u32 i = 0; i < kSortSteps; ++i) {
+        if (i) buffer_barrier(cmd, cs, rw, cs, rw);
+        rb_label_begin(r, cmd, steps[i].label);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipes[i]);
+        vkCmdDispatch(cmd, steps[i].groups, 1, 1);
+        rb_label_end(r, cmd);
+    }
     // Buckets with keyed rows: one group each sorts its range by key. The rest stay in row
     // order and cost nothing here.
     bool keyed = false;
-    for (u32 b = 0; b < kBucketCount; ++b) {
-        if (!r->world.keyed_counts[b] || !r->world.bucket_counts[b]) continue;
+    for (u32 b = 0; rw_next_keyed(r->world, &b); ++b) {
         if (!keyed) {
             buffer_barrier(cmd, cs, rw, cs, rw);
             rb_label_begin(r, cmd, "key sort");
@@ -292,39 +256,34 @@ void record_screenshot(Renderer* r, VkCommandBuffer cmd, VkImage image, VkExtent
 
 } // namespace
 
-// One indirect draw per run of buckets in [first_bucket, end_bucket): from a non-empty
-// bucket to the last non-empty bucket of the same pipeline slot before one of another slot
-// intervenes. Buckets in between with nothing in them draw zero instances. Without
-// multi-draw, one call per non-empty bucket. A game slot whose pipeline failed draws with
-// its blend's engine pipeline.
-u32 rb_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_bucket) {
+// One indirect draw for a run of buckets (rw_next_run): buckets in it with nothing in them
+// draw zero instances. Without multi-draw, one call per non-empty bucket. A game slot whose
+// pipeline failed draws with its blend's engine pipeline.
+u32 rb_draw_run(Renderer* r, FrameInFlight& f, const DrawRun& run) {
+    VkCommandBuffer cmd = f.cmd;
     u32 draws = 0;
-    u32 b = first_bucket;
-    DrawRun run;
-    while (rw_next_run(r->world.bucket_counts, &b, end_bucket, &run)) {
-        u32 slot = run.slot, first = run.first, last = run.last;
-        const GamePipe* gp = slot >= kBlendCount ? &r->game_pipes[slot - kBlendCount] : nullptr;
-        VkPipeline pipe = gp ? (gp->pipeline ? gp->pipeline : r->pipelines[(u32)gp->blend]) : r->pipelines[slot];
-        // Its label: the layers it covers and its blend, for a capture tool.
-        char label[64];
-        if (r->debug_utils) {
-            rw_run_label(label, sizeof label, run, gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
-            rb_label_begin(r, cmd, label);
-        }
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-        if (r->multi_draw_indirect) {
-            vkCmdDrawIndirect(cmd, r->indirect.buffer, (VkDeviceSize)first * sizeof(VkDrawIndirectCommand),
-                              last - first + 1, sizeof(VkDrawIndirectCommand));
-            ++draws;
-        } else {
-            for (u32 n = first; n <= last; ++n) {
-                if (!r->world.bucket_counts[n]) continue;
-                vkCmdDrawIndirect(cmd, r->indirect.buffer, (VkDeviceSize)n * sizeof(VkDrawIndirectCommand), 1, sizeof(VkDrawIndirectCommand));
-                ++draws;
-            }
-        }
-        if (r->debug_utils) rb_label_end(r, cmd);
+    u32 slot = run.slot, first = run.first, last = run.last;
+    const GamePipe* gp = slot >= kBlendCount ? &r->game_pipes[slot - kBlendCount] : nullptr;
+    VkPipeline pipe = gp ? (gp->pipeline ? gp->pipeline : r->pipelines[(u32)gp->blend]) : r->pipelines[slot];
+    // Its label: the layers it covers and its blend, for a capture tool.
+    char label[64];
+    if (r->debug_utils) {
+        rw_run_label(label, sizeof label, run, gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
+        rb_label_begin(r, cmd, label);
     }
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    if (r->multi_draw_indirect) {
+        vkCmdDrawIndirect(cmd, r->indirect.buffer, (VkDeviceSize)first * sizeof(VkDrawIndirectCommand),
+                          last - first + 1, sizeof(VkDrawIndirectCommand));
+        ++draws;
+    } else {
+        for (u32 n = first; n <= last; ++n) {
+            if (!r->world.bucket_counts[n]) continue;
+            vkCmdDrawIndirect(cmd, r->indirect.buffer, (VkDeviceSize)n * sizeof(VkDrawIndirectCommand), 1, sizeof(VkDrawIndirectCommand));
+            ++draws;
+        }
+    }
+    if (r->debug_utils) rb_label_end(r, cmd);
     return draws;
 }
 
@@ -478,144 +437,158 @@ void rb_destroy_pipelines_now(Renderer* r) {
 
 // ---- the frame -----------------------------------------------------------------------------------
 
-bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view) {
-    KV_ZONE("record");
-    Swapchain& s = r->swapchain;
-    VkCommandBuffer cmd = f.cmd;
+namespace {
 
+const VkShaderStageFlags k_push_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+
+void image_barrier(VkCommandBuffer cmd, VkImage image, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access, VkImageLayout from,
+                   VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, VkImageLayout to) {
+    VkImageMemoryBarrier2 b{};
+    b.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    b.srcStageMask        = src_stage;
+    b.srcAccessMask       = src_access;
+    b.dstStageMask        = dst_stage;
+    b.dstAccessMask       = dst_access;
+    b.oldLayout           = from;
+    b.newLayout           = to;
+    b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image               = image;
+    b.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkDependencyInfo dep{};
+    dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers    = &b;
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+void set_viewport(Renderer* r, VkCommandBuffer cmd) {
+    const VkExtent2D e = r->swapchain.extent;
+    VkViewport vp{0.0f, 0.0f, (f32)e.width, (f32)e.height, 0.0f, 1.0f};
+    VkRect2D scissor{{0, 0}, e};
+    vkCmdSetViewport(cmd, 0, 1, &vp);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+}
+
+} // namespace
+
+// The steps of the core's frame (korvid/render/core/frame.inl), in the order it calls them.
+// One command buffer holds the frame; f.image is the swapchain image it draws into.
+
+bool rb_record_begin(Renderer* r, FrameInFlight& f) {
     VK_CHECK(vkResetCommandPool(r->device, f.pool, 0));
     VkCommandBufferBeginInfo bi{};
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
-    rb_gpu_frame_begin(r, f, cmd);
-    f.gpu_pixels = have_image ? (u64)s.extent.width * s.extent.height : 0;
+    VK_CHECK(vkBeginCommandBuffer(f.cmd, &bi));
+    rb_gpu_frame_begin(r, f, f.cmd);
+    f.gpu_pixels = f.have_image ? (u64)f.width * f.height : 0;
+    f.push_stale = false;
+    return true;
+}
 
-    // Uploads first: textures, then the rows the ticks changed. The previous frame read
-    // the tables in its compute and vertex stages and wrote them in its copies; both must
-    // be done before this frame's copies land.
-    rb_label_begin(r, cmd, "upload");
-    record_texture_uploads(r, cmd);
-    buffer_barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
-                        VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+// Textures, then the tables opened for the rows the ticks changed. The previous frame read
+// the tables in its compute and vertex stages and wrote them in its copies; both must be
+// done before this frame's copies land.
+void rb_upload_begin(Renderer* r, FrameInFlight& f) {
+    rb_label_begin(r, f.cmd, "upload");
+    record_texture_uploads(r, f.cmd);
+    buffer_barrier(f.cmd, VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                          VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
                    VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
-                        VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+                          VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
                    VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
-    if (!record_table_copies(r, cmd)) return false;
-    buffer_barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+}
+
+void rb_copy_rows(Renderer*, FrameInFlight& f, RbBuffer& table, const RingSpan& span, u64 offset, u64 bytes) {
+    VkBufferCopy region{span.offset, offset, bytes};
+    vkCmdCopyBuffer(f.cmd, span.buffer.buffer, table.buffer, 1, &region);
+}
+
+void rb_upload_end(Renderer* r, FrameInFlight& f) {
+    buffer_barrier(f.cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-    rb_label_end(r, cmd);
-    rb_gpu_mark(r, f, cmd, kGpuUploaded);
-    rb_gpu_stats_begin(r, f, cmd); // the sort's and the drawing's shader invocations
+    rb_label_end(r, f.cmd);
+    rb_gpu_mark(r, f, f.cmd, kGpuUploaded);
+    rb_gpu_stats_begin(r, f, f.cmd); // the sort's and the drawing's shader invocations
+}
 
-    bool draw = have_image && r->world.sprites.len > 0;
-    // World: move the view's center to the origin, undo the camera's rotation, then the
-    // ortho of a rect that size about the origin. The cull rect is the rotated view's
-    // bounding box. Screen: the window in pixels about its center, no camera.
-    f32 sw = (f32)s.extent.width, sh = (f32)s.extent.height;
-    PushData push = rw_push_block(r->world, view, sw, sh, (f32)(time_now() - r->start_time), KV_RB_CLIP_Y_UP != 0);
-    vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, &push);
+// The push block is pushed once here, for the sort and for the draws after it.
+void rb_sort(Renderer* r, FrameInFlight& f, const PushData& push) {
+    vkCmdPushConstants(f.cmd, r->pipe_layout, k_push_stages, 0, sizeof push, &push);
+    rb_label_begin(r, f.cmd, "sort");
+    record_sort(r, f, f.cmd);
+    rb_label_end(r, f.cmd);
+}
 
-    if (draw) {
-        rb_label_begin(r, cmd, "sort");
-        record_sort(r, f, cmd);
-        rb_label_end(r, cmd);
-        if (r->check_pending) { rc_snapshot_keys(r, view.alpha); record_sort_check(r, cmd); }
+void rb_read_sort(Renderer* r, FrameInFlight& f) { record_sort_check(r, f.cmd); }
+
+void rb_sort_end(Renderer* r, FrameInFlight& f, bool) { rb_gpu_mark(r, f, f.cmd, kGpuSorted); }
+
+void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView& view) {
+    VkCommandBuffer cmd = f.cmd;
+    if (pass == RcPass::World) {
+        rb_label_begin(r, cmd, "world");
+        rb_post_begin_world(r, cmd, view);
+        return;
     }
-    rb_gpu_mark(r, f, cmd, kGpuSorted);
+    const Swapchain& s = r->swapchain;
+    // Undefined -> color attachment. Waiting on the acquire semaphore happens at
+    // COLOR_ATTACHMENT_OUTPUT, so that is where the barrier starts too.
+    image_barrier(cmd, s.images[f.image], VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    VkRenderingAttachmentInfo color{};
+    color.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    color.imageView   = s.views[f.image];
+    color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color.loadOp      = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
+    color.clearValue.color = {{view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a}};
+    VkRenderingInfo ri{};
+    ri.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    ri.renderArea           = {{0, 0}, s.extent};
+    ri.layerCount           = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments    = &color;
+    rb_label_begin(r, cmd, "draw");
+    vkCmdBeginRendering(cmd, &ri);
+}
 
-    if (have_image) {
-        // Undefined -> color attachment. Waiting on the acquire semaphore happens at
-        // COLOR_ATTACHMENT_OUTPUT, so that is where the barrier starts too.
-        VkImageMemoryBarrier2 to_color{};
-        to_color.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        to_color.srcStageMask        = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        to_color.srcAccessMask       = 0;
-        to_color.dstStageMask        = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        to_color.dstAccessMask       = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        to_color.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
-        to_color.newLayout           = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        to_color.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        to_color.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        to_color.image               = s.images[image_index];
-        to_color.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        VkDependencyInfo dep{};
-        dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dep.imageMemoryBarrierCount = 1;
-        dep.pImageMemoryBarriers    = &to_color;
-        vkCmdPipelineBarrier2(cmd, &dep);
+// The post pass has its own layout: it disturbs the sprites' sets and push block, which
+// rb_bind_sprites then puts back.
+void rb_pass_post(Renderer* r, FrameInFlight& f, const RenderView& view) {
+    set_viewport(r, f.cmd);
+    rb_post_draw(r, f, f.cmd, view);
+    f.push_stale = true;
+}
 
-        // With a post shader, the world (the layers below the post layer) goes into the
-        // target first, and the window's rendering begins with the post pass.
-        bool post = rb_post_prepare(r);
-        u32 split = post ? rw_bucket_of(r->post.layer, 0) : 0;
-        VkViewport vp{0.0f, 0.0f, (f32)s.extent.width, (f32)s.extent.height, 0.0f, 1.0f};
-        VkRect2D scissor{{0, 0}, s.extent};
-        VkDescriptorSet sets[2] = {f.tables, f.textures};
-        auto bind_sprites = [&]() {
-            vkCmdSetViewport(cmd, 0, 1, &vp);
-            vkCmdSetScissor(cmd, 0, 1, &scissor);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->pipe_layout, 0, 2, sets, 0, nullptr);
-        };
-        u32 draws = 0;
-        if (post) {
-            rb_label_begin(r, cmd, "world");
-            rb_post_begin_world(r, cmd, view);
-            if (draw) { bind_sprites(); draws += rb_record_draws(r, cmd, 0, split); }
-            rb_post_end_world(r, cmd);
-            rb_label_end(r, cmd);
-        }
-
-        VkRenderingAttachmentInfo color{};
-        color.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        color.imageView   = s.views[image_index];
-        color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        color.loadOp      = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        color.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
-        color.clearValue.color = {{view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a}};
-        VkRenderingInfo ri{};
-        ri.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-        ri.renderArea           = {{0, 0}, s.extent};
-        ri.layerCount           = 1;
-        ri.colorAttachmentCount = 1;
-        ri.pColorAttachments    = &color;
-        rb_label_begin(r, cmd, "draw");
-        vkCmdBeginRendering(cmd, &ri);
-
-        if (post) {
-            vkCmdSetViewport(cmd, 0, 1, &vp);
-            vkCmdSetScissor(cmd, 0, 1, &scissor);
-            rb_post_draw(r, f, cmd, view);
-        }
-        if (draw) {
-            // The post pass's layout disturbed the sprites' sets and push block.
-            bind_sprites();
-            if (post) vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, &push);
-            draws += rb_record_draws(r, cmd, split, kBucketCount);
-        }
-        KV_COUNTER("indirect draws", draws);
-
-        vkCmdEndRendering(cmd);
-        rb_label_end(r, cmd);
-
-        if (r->shot_pending) record_screenshot(r, cmd, s.images[image_index], s.extent);
-
-        VkImageMemoryBarrier2 to_present = to_color;
-        to_present.srcStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        to_present.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        to_present.dstStageMask  = VK_PIPELINE_STAGE_2_NONE;
-        to_present.dstAccessMask = 0;
-        to_present.oldLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        to_present.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        dep.pImageMemoryBarriers = &to_present;
-        vkCmdPipelineBarrier2(cmd, &dep);
+void rb_bind_sprites(Renderer* r, FrameInFlight& f, const PushData& push) {
+    set_viewport(r, f.cmd);
+    VkDescriptorSet sets[2] = {f.tables, f.textures};
+    vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->pipe_layout, 0, 2, sets, 0, nullptr);
+    if (f.push_stale) {
+        vkCmdPushConstants(f.cmd, r->pipe_layout, k_push_stages, 0, sizeof push, &push);
+        f.push_stale = false;
     }
+}
 
-    rb_gpu_stats_end(r, f, cmd);
-    rb_gpu_mark(r, f, cmd, kGpuDrawn);
-    rb_gpu_mark(r, f, cmd, kGpuEnd);
-    VK_CHECK(vkEndCommandBuffer(cmd));
+void rb_pass_end(Renderer* r, FrameInFlight& f, RcPass pass) {
+    if (pass == RcPass::World) rb_post_end_world(r, f.cmd);
+    else vkCmdEndRendering(f.cmd);
+    rb_label_end(r, f.cmd);
+}
+
+void rb_read_window(Renderer* r, FrameInFlight& f) { record_screenshot(r, f.cmd, r->swapchain.images[f.image], r->swapchain.extent); }
+
+bool rb_record_end(Renderer* r, FrameInFlight& f) {
+    if (f.have_image)
+        image_barrier(f.cmd, r->swapchain.images[f.image], VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_NONE, 0, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    rb_gpu_stats_end(r, f, f.cmd);
+    rb_gpu_mark(r, f, f.cmd, kGpuDrawn);
+    rb_gpu_mark(r, f, f.cmd, kGpuEnd);
+    VK_CHECK(vkEndCommandBuffer(f.cmd));
     return true;
 }
 

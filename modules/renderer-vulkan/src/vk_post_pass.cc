@@ -209,7 +209,7 @@ void rb_post_defer_destroy_pipeline(Renderer* r) {
 
 // The target for the swapchain as it is now: made again when its size or format moved.
 // A format the device cannot both draw into and sample turns the pass off.
-bool rb_post_prepare(Renderer* r) {
+bool rb_post_prepare(Renderer* r, u32, u32) {
     PostPass& p = r->post;
     if (!rb_post_active(r)) return false;
     const Swapchain& s = r->swapchain;

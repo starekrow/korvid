@@ -152,53 +152,39 @@ void renderer_resize(Renderer* r, u32 width, u32 height) {
 
 // ---- the frame ------------------------------------------------------------------------------
 
-bool renderer_render(Renderer* r, const RenderView& view) {
-    if (!r) return false;
-    FrameInFlight& f = r->frames[r->frame_index];
+// The steps of the core's frame (korvid/render/core/frame.inl) that wait, acquire, submit
+// and present. renderer_render itself is the core's.
 
-    // Wait for this slot's previous frame; what it queued for destruction can go, its span
-    // of the ring is free, and its descriptor sets may be rewritten.
-    f64 waited = 0.0;
+// This slot's previous frame has passed its fence: its timestamps and counts can be read.
+bool rb_frame_wait(Renderer* r, FrameInFlight& f, f64* waited) {
     {
         KV_ZONE_WAIT("frame fence");
         f64 t = time_now();
         VK_CHECK(vkWaitForFences(r->device, 1, &f.fence, VK_TRUE, UINT64_MAX));
-        waited += time_now() - t;
+        *waited += time_now() - t;
     }
-    r->last_wait = 0.0;
-    rb_gpu_collect(r, f); // its timestamps and counts, now that the fence has passed
-    rc_ring_release(r, f);
-    rc_run_garbage(r, f);
-    if (r->world.sprites.len > r->tables.capacity) {
-        // Growth remarks every row dirty, so the next frame uploads the table whole: logged
-        // with the frame, so a hitch can be found by it (FrameLoopConfig::sprite_rows avoids it).
-        KV_INFO("vulkan", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->world.sprites.len, r->tables.capacity);
-        if (!rb_create_tables(r, r->world.sprites.len)) return false;
-    }
-    if (f.tables_dirty) rb_write_tables_set(r, f);
-    // The layers' offsets for this frame: previous and current, the shader interpolates.
-    f32* lo = (f32*)f.layers.mapped;
-    for (u32 i = 0; i < kLayerCount; ++i) {
-        lo[i * 4 + 0] = r->world.layer_prev[i][0]; lo[i * 4 + 1] = r->world.layer_prev[i][1];
-        lo[i * 4 + 2] = r->world.layer_cur[i][0];  lo[i * 4 + 3] = r->world.layer_cur[i][1];
-    }
-    for (u32 slot : f.dirty_slots) rb_write_texture_slot(r, f.textures, slot);
-    f.dirty_slots.clear();
+    rb_gpu_collect(r, f);
+    return true;
+}
 
+void rb_frame_slot(Renderer* r, FrameInFlight& f, u32 slot) { rb_write_texture_slot(r, f.textures, slot); }
+
+bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited) {
+    if (f.tables_dirty) rb_write_tables_set(r, f); // the tables grew: this frame's set 0, now that its fence has passed
     // Without a surface (Android has taken it) the frame runs its uploads and presents nothing.
     if (r->surface && r->swapchain_dirty && !rb_recreate_swapchain(r)) return false;
 
-    bool have_image = r->surface && r->swapchain.handle != VK_NULL_HANDLE;
-    u32  image_index = 0;
-    if (have_image) {
+    f.have_image = r->surface && r->swapchain.handle != VK_NULL_HANDLE;
+    f.image      = 0;
+    if (f.have_image) {
         KV_ZONE_WAIT("acquire");
         f64 t = time_now();
         VkResult acq = vkAcquireNextImageKHR(r->device, r->swapchain.handle, UINT64_MAX, f.acquire,
-                                             VK_NULL_HANDLE, &image_index);
-        waited += time_now() - t;
+                                             VK_NULL_HANDLE, &f.image);
+        *waited += time_now() - t;
         if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
             r->swapchain_dirty = true; // the semaphore was not signaled; the frame still runs its uploads
-            have_image = false;
+            f.have_image = false;
         } else if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
             KV_ERROR("vulkan", "vkAcquireNextImageKHR: %s", vk_result_name(acq));
             return false;
@@ -207,7 +193,12 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         }
     }
 
-    if (!rb_record_frame(r, f, have_image, image_index, view)) return false;
+    f.width  = r->swapchain.extent.width;
+    f.height = r->swapchain.extent.height;
+    return true;
+}
+
+bool rb_frame_submit(Renderer* r, FrameInFlight& f) {
     VK_CHECK(vkResetFences(r->device, 1, &f.fence)); // only once the submit is certain
 
     VkSemaphoreSubmitInfo wait{};
@@ -216,53 +207,47 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSemaphoreSubmitInfo signal{};
     signal.sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    signal.semaphore = have_image ? r->swapchain.present[image_index] : VK_NULL_HANDLE;
+    signal.semaphore = f.have_image ? r->swapchain.present[f.image] : VK_NULL_HANDLE;
     signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
     VkCommandBufferSubmitInfo cbi{};
     cbi.sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
     cbi.commandBuffer = f.cmd;
     VkSubmitInfo2 si{};
     si.sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-    si.waitSemaphoreInfoCount   = have_image ? 1 : 0;
+    si.waitSemaphoreInfoCount   = f.have_image ? 1 : 0;
     si.pWaitSemaphoreInfos      = &wait;
     si.commandBufferInfoCount   = 1;
     si.pCommandBufferInfos      = &cbi;
-    si.signalSemaphoreInfoCount = have_image ? 1 : 0;
+    si.signalSemaphoreInfoCount = f.have_image ? 1 : 0;
     si.pSignalSemaphoreInfos    = &signal;
     f.submit_ticks = os_ticks(); // where an uncalibrated GPU timeline starts
     VK_CHECK(vkQueueSubmit2(r->queue, 1, &si, f.fence));
-    f.submitted = true;
-    f.garbage_owned = f.garbage.len; // destroyed when its fence passes; anything queued later waits for the next
-    rc_ring_submitted(r, f);
+    return true;
+}
 
-    if (have_image) {
-        KV_ZONE_WAIT("present");
-        VkPresentInfoKHR pi{};
-        pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        pi.waitSemaphoreCount = 1;
-        pi.pWaitSemaphores    = &r->swapchain.present[image_index];
-        pi.swapchainCount     = 1;
-        pi.pSwapchains        = &r->swapchain.handle;
-        pi.pImageIndices      = &image_index;
-        f64 t = time_now();
-        VkResult pres = vkQueuePresentKHR(r->queue, &pi);
-        waited += time_now() - t;
-        // An unrotated swapchain on a turned screen is suboptimal for as long as it lives,
-        // by choice (vk_swapchain.cc): only a resize rebuilds it.
-        if (pres == VK_ERROR_OUT_OF_DATE_KHR || (pres == VK_SUBOPTIMAL_KHR && !r->swapchain.unrotated)) r->swapchain_dirty = true;
-        else if (pres != VK_SUCCESS && pres != VK_SUBOPTIMAL_KHR) KV_ERROR("vulkan", "vkQueuePresentKHR: %s", vk_result_name(pres));
-    }
+bool rb_frame_present(Renderer* r, FrameInFlight& f, f64* waited) {
+    if (!f.have_image) return true;
+    KV_ZONE_WAIT("present");
+    VkPresentInfoKHR pi{};
+    pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores    = &r->swapchain.present[f.image];
+    pi.swapchainCount     = 1;
+    pi.pSwapchains        = &r->swapchain.handle;
+    pi.pImageIndices      = &f.image;
+    f64 t = time_now();
+    VkResult pres = vkQueuePresentKHR(r->queue, &pi);
+    *waited += time_now() - t;
+    // An unrotated swapchain on a turned screen is suboptimal for as long as it lives,
+    // by choice (vk_swapchain.cc): only a resize rebuilds it.
+    if (pres == VK_ERROR_OUT_OF_DATE_KHR || (pres == VK_SUBOPTIMAL_KHR && !r->swapchain.unrotated)) r->swapchain_dirty = true;
+    else if (pres != VK_SUCCESS && pres != VK_SUBOPTIMAL_KHR) KV_ERROR("vulkan", "vkQueuePresentKHR: %s", vk_result_name(pres));
+    return true;
+}
 
-    if (r->shot_recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now
-        VK_CHECK(vkWaitForFences(r->device, 1, &f.fence, VK_TRUE, UINT64_MAX));
-        if (r->shot_recorded) rc_write_screenshot(r);
-        if (r->check_recorded) rc_verify_sort(r);
-    }
-
-    r->last_wait = waited;
-    r->frame_index = (r->frame_index + 1) % kFramesInFlight;
-    ++r->frame_count;
-    return have_image;
+bool rb_frame_finish(Renderer* r, FrameInFlight& f) {
+    VK_CHECK(vkWaitForFences(r->device, 1, &f.fence, VK_TRUE, UINT64_MAX));
+    return true;
 }
 
 } // namespace kv

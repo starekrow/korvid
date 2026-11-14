@@ -13,6 +13,7 @@
 #include "korvid/core/hash.h"
 #include "korvid/core/log.h"
 #include "korvid/core/profile.h"
+#include "korvid/core/time.h"
 #include "korvid/platform/io.h"
 #include <string.h>
 
@@ -480,3 +481,5 @@ bool rc_write_screenshot(Renderer* r) {
 }
 
 } // namespace kv
+
+#include "korvid/render/core/frame.inl"

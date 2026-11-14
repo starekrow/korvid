@@ -176,79 +176,69 @@ void renderer_resize(Renderer* r, u32 width, u32 height) {
 
 // ---- the frame ------------------------------------------------------------------------------
 
-bool renderer_render(Renderer* r, const RenderView& view) {
-    if (!r) return false;
-    FrameInFlight& f = r->frames[r->frame_index];
-    f64 waited = 0.0;
-    bool presented = false;
-    @autoreleasepool {
-        // This slot's previous frame: once it completes, what it queued for release can go,
-        // its span of the ring is free, and its argument buffer may be rewritten. Vulkan's
-        // fence wait.
-        if (f.cb) {
-            KV_ZONE_WAIT("frame completion");
-            f64 t = time_now();
-            [f.cb waitUntilCompleted];
-            waited += time_now() - t;
-            if (f.cb.status == MTLCommandBufferStatusError)
-                KV_ERROR("metal", "frame failed on the GPU: %s", f.cb.error ? f.cb.error.localizedDescription.UTF8String : "?");
-            rb_gpu_collect(r, f); // its timestamps, now that it has completed
-            [f.cb release];
-            f.cb = nil;
-        }
-        r->last_wait = 0.0;
-        rc_ring_release(r, f);
-        rc_run_garbage(r, f);
-        if (r->world.sprites.len > r->tables.capacity) {
-            KV_INFO("metal", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->world.sprites.len, r->tables.capacity);
-            if (!rb_create_tables(r, r->world.sprites.len)) return false;
-        }
-        f32* lo = (f32*)f.layers.contents;
-        for (u32 i = 0; i < kLayerCount; ++i) {
-            lo[i * 4 + 0] = r->world.layer_prev[i][0]; lo[i * 4 + 1] = r->world.layer_prev[i][1];
-            lo[i * 4 + 2] = r->world.layer_cur[i][0];  lo[i * 4 + 3] = r->world.layer_cur[i][1];
-        }
-        for (u32 slot : f.dirty_slots) rb_write_texture_slot(r, f, slot);
-        f.dirty_slots.clear();
+// The steps of the core's frame (korvid/render/core/frame.inl) that wait, acquire, submit
+// and present. renderer_render itself is the core's, inside an @autoreleasepool
+// (KV_RB_FRAME_SCOPE): the command buffer and the drawable live until it closes.
 
-        // The drawable's size follows the window's, set before the next drawable is asked for.
-        // A window with no area (minimized) has no drawable; the frame still sends its uploads.
-        if (r->size_dirty) {
-            if (r->want_width && r->want_height) r->layer.drawableSize = CGSizeMake(r->want_width, r->want_height);
-            r->size_dirty = false;
-        }
-        id<CAMetalDrawable> drawable = nil;
-        if (r->want_width && r->want_height) {
-            KV_ZONE_WAIT("drawable");
-            f64 t = time_now();
-            drawable = [r->layer nextDrawable];
-            waited += time_now() - t;
-            if (!drawable) KV_WARN("metal", "no drawable this frame");
-        }
-
-        id<MTLCommandBuffer> cb = [r->queue commandBuffer];
-        cb.label = @"frame";
-        rb_gpu_frame_begin(r, f);
-        if (!rb_record_frame(r, f, cb, drawable, view)) return false;
-        if (drawable && r->shot_pending) record_screenshot(r, cb, drawable.texture);
-        if (drawable) [cb presentDrawable:drawable];
-        [cb commit];
-        f.cb = [cb retain]; // waited for when this slot comes round again
-        f.garbage_owned = f.garbage.len; // released when it has; anything queued later waits for the next
-        f.submitted = true;
-        rc_ring_submitted(r, f);
-        presented = drawable != nil;
-
-        if (r->shot_recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now
-            [cb waitUntilCompleted];
-            if (r->shot_recorded) rc_write_screenshot(r);
-            if (r->check_recorded) rc_verify_sort(r);
-        }
+// This slot's previous frame: a command buffer waited on, where Vulkan waits on a fence.
+bool rb_frame_wait(Renderer* r, FrameInFlight& f, f64* waited) {
+    if (!f.cb) return true;
+    {
+        KV_ZONE_WAIT("frame completion");
+        f64 t = time_now();
+        [f.cb waitUntilCompleted];
+        *waited += time_now() - t;
     }
-    r->last_wait = waited;
-    r->frame_index = (r->frame_index + 1) % kFramesInFlight;
-    ++r->frame_count;
-    return presented;
+    if (f.cb.status == MTLCommandBufferStatusError)
+        KV_ERROR("metal", "frame failed on the GPU: %s", f.cb.error ? f.cb.error.localizedDescription.UTF8String : "?");
+    rb_gpu_collect(r, f); // its timestamps, now that it has completed
+    [f.cb release];
+    f.cb = nil;
+    return true;
+}
+
+void rb_frame_slot(Renderer* r, FrameInFlight& f, u32 slot) { rb_write_texture_slot(r, f, slot); }
+
+// The drawable's size follows the window's, set before the next drawable is asked for. A
+// window with no area (minimized) has no drawable; the frame still sends its uploads.
+bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited) {
+    if (r->size_dirty) {
+        if (r->want_width && r->want_height) r->layer.drawableSize = CGSizeMake(r->want_width, r->want_height);
+        r->size_dirty = false;
+    }
+    f.drawable = nil;
+    if (r->want_width && r->want_height) {
+        KV_ZONE_WAIT("drawable");
+        f64 t = time_now();
+        f.drawable = [r->layer nextDrawable];
+        *waited += time_now() - t;
+        if (!f.drawable) KV_WARN("metal", "no drawable this frame");
+    }
+    f.have_image = f.drawable != nil;
+    f.width  = f.drawable ? (u32)f.drawable.texture.width : 0;
+    f.height = f.drawable ? (u32)f.drawable.texture.height : 0;
+    return true;
+}
+
+void rb_read_window(Renderer* r, FrameInFlight& f) { record_screenshot(r, f.rec, f.drawable.texture); }
+
+// Presenting is part of the command buffer: scheduled before it is committed.
+bool rb_frame_submit(Renderer*, FrameInFlight& f) {
+    if (f.drawable) [f.rec presentDrawable:f.drawable];
+    [f.rec commit];
+    f.cb = [f.rec retain]; // waited for when this slot comes round again
+    f.rec = nil;
+    return true;
+}
+
+bool rb_frame_present(Renderer*, FrameInFlight& f, f64*) {
+    f.drawable = nil;
+    return true;
+}
+
+bool rb_frame_finish(Renderer*, FrameInFlight& f) {
+    [f.cb waitUntilCompleted];
+    return true;
 }
 
 } // namespace kv

@@ -53,6 +53,7 @@
 #define KV_RB_CLIP_Y_UP  1
 #define KV_RB_SHADER_EXT ".dxil.zip"
 #define KV_RB_SURFACE    RendererSurface::D3D12
+#define KV_RB_FRAME_SCOPE 
 
 namespace kv {
 
@@ -145,6 +146,7 @@ struct FrameInFlight : FrameCore {
     ID3D12CommandAllocator*    allocator = nullptr;
     ID3D12GraphicsCommandList* cmd       = nullptr;
     u64                        fence_value = 0; // the queue's fence reaches it when this frame is done
+    u32                        image = 0;       // the back buffer this frame draws into (rb_frame_acquire)
     Buffer                     layers;          // the layers' offsets: upload heap, float4 each
     Buffer                     post_params;     // the post pass's parameters: upload heap
     bool                       gpu_stamped = false, gpu_counted = false;
@@ -273,7 +275,6 @@ D3D12_CPU_DESCRIPTOR_HANDLE rb_heap_cpu(Renderer* r, u32 index);
 D3D12_CPU_DESCRIPTOR_HANDLE rb_rtv(Renderer* r, u32 index);
 
 
-bool rb_create_tables(Renderer* r, u32 rows);
 bool rb_create_static_buffers(Renderer* r);
 bool rb_create_heaps_and_root(Renderer* r);
 // A root signature from its description, version 1.1. Null (logged) on failure.
@@ -291,13 +292,10 @@ bool rb_load_shaders(Renderer* r);
 bool rb_create_pipelines(Renderer* r);
 bool rb_create_compute_pipelines(Renderer* r);
 void rb_destroy_pipelines(Renderer* r);
-bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view);
-u32  rb_record_draws(Renderer* r, ID3D12GraphicsCommandList* cmd, u32 first_bucket, u32 end_bucket);
 bool rb_create_game_pipeline(Renderer* r, GamePipe& gp);
 
 // ---- d3d_post_pass.cc ---------------------------------------------------------------------
 bool rb_post_active(const Renderer* r);
-bool rb_post_prepare(Renderer* r);
 void rb_post_begin_world(Renderer* r, ID3D12GraphicsCommandList* cmd, const RenderView& view);
 void rb_post_end_world(Renderer* r, ID3D12GraphicsCommandList* cmd);
 void rb_post_draw(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd, const RenderView& view);

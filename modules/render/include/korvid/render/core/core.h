@@ -15,6 +15,8 @@
 //                        projections it pushes (ortho2d targets Vulkan's, y down)
 //     KV_RB_SHADER_EXT   ".spv": what follows a compiled shader's name in <exe>/shaders/
 //     KV_RB_SURFACE      the RendererSurface the backend draws into
+//     KV_RB_FRAME_SCOPE  what opens the block a frame runs in: nothing, or Metal's
+//                        @autoreleasepool
 //
 // and two types, each whatever the backend likes:
 //
@@ -41,6 +43,8 @@
 //     PostPass      post;
 //     FrameInFlight frames[kFramesInFlight];
 //     GpuProfiler   gpu_prof;                  with `RendererGpuStats last`
+//
+// and its FrameInFlight has `RbBuffer layers`, the layers' offsets for the frame, mapped.
 //
 // and it defines the rb_ functions declared at the end of this header.
 //
@@ -73,6 +77,9 @@
 #endif
 #ifndef KV_RB_SURFACE
 #error "the backend's renderer_internal.h defines KV_RB_SURFACE"
+#endif
+#ifndef KV_RB_FRAME_SCOPE
+#error "the backend's renderer_internal.h defines KV_RB_FRAME_SCOPE (empty, or @autoreleasepool)"
 #endif
 
 namespace kv {
@@ -143,7 +150,20 @@ struct FrameCore {
     u64              ring_end   = 0;  // the ring head when this frame was submitted
     u64              ring_bytes = 0;  // what the frame took, released when it is done
     bool             submitted  = false;
+    bool             have_image = false; // rb_frame_acquire's answer: there is an image to draw into,
+    u32              width = 0, height = 0; // and its size in pixels (0 when there is none)
 };
+
+// The two passes of a frame that draw sprites: the world's, into the post pass's target
+// (only when a post shader is on), and the window's.
+enum class RcPass : u8 { World, Window };
+
+// The sort, in the order its kernels run (sprite_sort.slang): each step's label for a
+// capture tool and its workgroups. rc_sort_steps fills them; a backend's rb_sort dispatches
+// its four pipelines in this order, each one's writes visible to the next, then one group
+// per bucket that holds keyed rows (rw_next_keyed) through the key sort.
+constexpr u32 kSortSteps = 4;
+struct SortStep { const char* label; u32 groups; };
 
 // The GPU tables and the sort scratch, all sized for `capacity` sprite rows.
 struct SpriteTables {
@@ -241,6 +261,8 @@ void rc_snapshot_keys(Renderer* r, f32 alpha); // when the check is recorded
 bool rc_verify_sort(Renderer* r);
 bool rc_write_screenshot(Renderer* r);
 
+void rc_sort_steps(const Renderer* r, SortStep out[kSortSteps]);
+
 // ---- the backend's functions the core calls --------------------------------------------------
 
 // A buffer's mapping (null when it has none or there is no buffer), and its retirement
@@ -265,5 +287,51 @@ bool rb_game_pipe_load(Renderer* r, GamePipe& gp);
 // The post pass's shader changed (r->post.shader is still the old one): the backend drops
 // the old pipeline, loads the new, sets r->post. False: it would not load; the pass is off.
 bool rb_post_set(Renderer* r, i32 layer, Name shader);
+
+// ---- the frame (frame.inl): the steps of renderer_render that are the backend's ----------------
+// Each takes the frame in flight being recorded; what a backend needs from one step to the
+// next (a command buffer, an open encoder, the image's index) it keeps in its FrameInFlight.
+
+// Blocks until this slot's last frame is done on the GPU, and takes that frame's timings.
+// Adds what it waited, in seconds. False: the device is gone.
+bool rb_frame_wait(Renderer* r, FrameInFlight& f, f64* waited);
+// One texture slot written into this frame's own set (or table, or argument buffer).
+void rb_frame_slot(Renderer* r, FrameInFlight& f, u32 slot);
+// The image this frame draws into: f.have_image, f.width, f.height. Rebuilds what a resize
+// or a new surface asks for first. No image (no surface, no area, a swapchain out of date)
+// is not an error: the frame still sends its uploads. False: give the frame up.
+bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited);
+bool rb_frame_submit(Renderer* r, FrameInFlight& f);
+bool rb_frame_present(Renderer* r, FrameInFlight& f, f64* waited); // nothing when there is no image
+bool rb_frame_finish(Renderer* r, FrameInFlight& f);               // blocks until the frame just submitted is done
+// Sprite tables for at least `rows` rows; the old ones retire with the frame.
+bool rb_create_tables(Renderer* r, u32 rows);
+
+bool rb_record_begin(Renderer* r, FrameInFlight& f);
+// The uploads: begin records the staged textures and readies the tables to be copied into;
+// each run of dirty rows is one copy from its span of the ring; end readies the tables to
+// be read.
+void rb_upload_begin(Renderer* r, FrameInFlight& f);
+void rb_copy_rows(Renderer* r, FrameInFlight& f, RbBuffer& table, const RingSpan& span, u64 offset, u64 bytes);
+void rb_upload_end(Renderer* r, FrameInFlight& f);
+// The compute sort over the tables (rc_sort_steps), then its outputs copied where
+// rc_verify_sort will read them (sets check_recorded). rb_sort_end is called whether or not
+// the frame sorted: the outputs readied for the draws, the GPU's mark.
+void rb_sort(Renderer* r, FrameInFlight& f, const PushData& push);
+void rb_read_sort(Renderer* r, FrameInFlight& f);
+void rb_sort_end(Renderer* r, FrameInFlight& f, bool sorted);
+// The post pass's target for an image of this size; false: the frame draws straight to the window.
+bool rb_post_prepare(Renderer* r, u32 width, u32 height);
+// A pass that clears to the view's color; then, in it: the post shader's triangle (the
+// window's pass only), the sprites' bindings, and a run of buckets drawn (returns the draw
+// calls it took).
+void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView& view);
+void rb_pass_post(Renderer* r, FrameInFlight& f, const RenderView& view);
+void rb_bind_sprites(Renderer* r, FrameInFlight& f, const PushData& push);
+u32  rb_draw_run(Renderer* r, FrameInFlight& f, const DrawRun& run);
+void rb_pass_end(Renderer* r, FrameInFlight& f, RcPass pass);
+// The window's image copied where rc_write_screenshot will read it (sets shot_recorded).
+void rb_read_window(Renderer* r, FrameInFlight& f);
+bool rb_record_end(Renderer* r, FrameInFlight& f);
 
 } // namespace kv

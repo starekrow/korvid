@@ -124,66 +124,57 @@ void renderer_resize(Renderer* r, u32 width, u32 height) {
 
 // ---- the frame ------------------------------------------------------------------------------
 
-bool renderer_render(Renderer* r, const RenderView& view) {
-    if (!r) return false;
-    FrameInFlight& f = r->frames[r->frame_index];
+// The steps of the core's frame (korvid/render/core/frame.inl) that wait, acquire, submit
+// and present. renderer_render itself is the core's.
 
-    // Wait for this slot's previous frame; what it queued for destruction can go, its span
-    // of the ring is free, and its descriptor table may be rewritten.
-    f64 waited = 0.0;
+bool rb_frame_wait(Renderer* r, FrameInFlight& f, f64* waited) {
     {
         KV_ZONE_WAIT("frame fence");
         f64 t = time_now();
         if (!rb_wait_fence(r, f.fence_value)) return false;
-        waited += time_now() - t;
+        *waited += time_now() - t;
     }
-    r->last_wait = 0.0;
     rb_gpu_collect(r, f);
-    rc_ring_release(r, f);
-    rc_run_garbage(r, f);
-    if (r->world.sprites.len > r->tables.capacity) {
-        KV_INFO("d3d12", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->world.sprites.len, r->tables.capacity);
-        if (!rb_create_tables(r, r->world.sprites.len)) return false;
-    }
-    f32* lo = (f32*)f.layers.mapped;
-    for (u32 i = 0; i < kLayerCount; ++i) {
-        lo[i * 4 + 0] = r->world.layer_prev[i][0]; lo[i * 4 + 1] = r->world.layer_prev[i][1];
-        lo[i * 4 + 2] = r->world.layer_cur[i][0];  lo[i * 4 + 3] = r->world.layer_cur[i][1];
-    }
-    u32 fi = r->frame_index;
-    for (u32 slot : f.dirty_slots) rb_write_texture_slot(r, fi, slot);
-    f.dirty_slots.clear();
+    return true;
+}
 
+void rb_frame_slot(Renderer* r, FrameInFlight& f, u32 slot) { rb_write_texture_slot(r, (u32)(&f - r->frames), slot); }
+
+bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited) {
     if (r->swapchain_dirty && !rb_recreate_swapchain(r)) return false;
-
-    bool have_image = r->swapchain.handle != nullptr;
-    u32  image_index = 0;
-    if (have_image) {
+    f.have_image = r->swapchain.handle != nullptr;
+    f.image      = 0;
+    if (f.have_image) {
         // The frame latency object: signaled once a back buffer is free to draw into. What
         // vkAcquireNextImageKHR's wait is on Vulkan.
         KV_ZONE_WAIT("acquire");
         f64 t = time_now();
         WaitForSingleObjectEx(r->swapchain.waitable, 1000, TRUE);
-        waited += time_now() - t;
-        image_index = r->swapchain.handle->GetCurrentBackBufferIndex();
+        *waited += time_now() - t;
+        f.image = r->swapchain.handle->GetCurrentBackBufferIndex();
     }
+    f.width  = r->swapchain.width;
+    f.height = r->swapchain.height;
+    return true;
+}
 
-    if (!rb_record_frame(r, f, have_image, image_index, view)) return false;
+bool rb_frame_submit(Renderer* r, FrameInFlight& f) {
     ID3D12CommandList* lists[] = {f.cmd};
     f.submit_ticks = os_ticks();
     r->queue->ExecuteCommandLists(1, lists);
     D3D_CHECK(r->queue->Signal(r->fence, r->fence_next));
     f.fence_value = r->fence_next++;
-    f.submitted = true;
-    f.garbage_owned = f.garbage.len;
-    rc_ring_submitted(r, f);
+    return true;
+}
 
-    if (have_image) {
+// Presents when there is an image, then drains the debug layer's messages for the frame.
+bool rb_frame_present(Renderer* r, FrameInFlight& f, f64* waited) {
+    if (f.have_image) {
         KV_ZONE_WAIT("present");
         f64 t = time_now();
         UINT flags = !r->vsync && r->swapchain.tearing ? DXGI_PRESENT_ALLOW_TEARING : 0;
         HRESULT hr = r->swapchain.handle->Present(r->vsync ? 1 : 0, flags);
-        waited += time_now() - t;
+        *waited += time_now() - t;
         if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             KV_ERROR("d3d12", "Present: %s (removed: %s)", hr_name(hr), hr_name(r->device->GetDeviceRemovedReason()));
             rb_drain_messages(r);
@@ -191,18 +182,10 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         }
         if (FAILED(hr)) KV_ERROR("d3d12", "Present: %s", hr_name(hr));
     }
-
-    if (r->shot_recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now
-        if (!rb_wait_fence(r, f.fence_value)) return false;
-        if (r->shot_recorded) rc_write_screenshot(r);
-        if (r->check_recorded) rc_verify_sort(r);
-    }
     rb_drain_messages(r);
-
-    r->last_wait = waited;
-    r->frame_index = (r->frame_index + 1) % kFramesInFlight;
-    ++r->frame_count;
-    return have_image;
+    return true;
 }
+
+bool rb_frame_finish(Renderer* r, FrameInFlight& f) { return rb_wait_fence(r, f.fence_value); }
 
 } // namespace kv

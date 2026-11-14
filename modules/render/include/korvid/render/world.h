@@ -93,6 +93,9 @@ u32 rw_dirty_runs(Array<u64>& bits, u32 rows, u32 join, F copy_run) {
 // look at and is left after the run; false when there is no run before `end`.
 struct DrawRun { u32 slot, first, last; };
 bool rw_next_run(const u32* bucket_counts, u32* cursor, u32 end, DrawRun* out);
+// The buckets the key sort must visit: those with rows whose sort is not Row. `*bucket`
+// starts at the first to look at and is left on the one found; the caller steps past it.
+bool rw_next_keyed(const RenderWorld& w, u32* bucket);
 // A run's label for a capture tool: the layers it covers and what draws them (a blend's
 // name or a game shader's).
 void rw_run_label(char* out, usize cap, const DrawRun& run, const char* what);

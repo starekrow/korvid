@@ -128,7 +128,7 @@ bool rb_post_create_pipeline(Renderer* r) {
 // The target for the swapchain as it is now: made again when its size moved. That happens
 // only after a resize, which waited for the GPU, so every frame's descriptor of it can be
 // written here.
-bool rb_post_prepare(Renderer* r) {
+bool rb_post_prepare(Renderer* r, u32, u32) {
     PostPass& p = r->post;
     if (!rb_post_active(r)) return false;
     const Swapchain& s = r->swapchain;

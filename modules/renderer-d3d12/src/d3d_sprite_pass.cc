@@ -92,35 +92,6 @@ void record_texture_uploads(Renderer* r, ID3D12GraphicsCommandList* cmd) {
     r->uploads.clear();
 }
 
-// Dirty sprite rows and material rows, staged into the ring and copied into the tables.
-bool record_table_copies(Renderer* r, ID3D12GraphicsCommandList* cmd) {
-    bool ok = true;
-    rb_transition(cmd, r->tables.sprites, D3D12_RESOURCE_STATE_COPY_DEST);
-    rb_transition(cmd, r->material_table, D3D12_RESOURCE_STATE_COPY_DEST);
-    u32 rows = rw_dirty_runs(r->world.sprite_dirty, r->world.sprites.len, 32, [&](u32 a, u32 b) {
-        u64 bytes = (u64)(b - a) * sizeof(GpuSprite);
-        RingSpan span = rc_ring_alloc(r, bytes, 16);
-        if (!span.ptr) { ok = false; return; }
-        GpuSprite* dst = (GpuSprite*)span.ptr;
-        rw_stage_sprites(r->world, a, b, dst);
-        cmd->CopyBufferRegion(r->tables.sprites.resource, (u64)a * sizeof(GpuSprite), span.buffer.resource, span.offset, bytes);
-    });
-    r->rows_uploaded += rows;
-    KV_COUNTER("sprite rows uploaded", rows);
-
-    rw_dirty_runs(r->world.material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
-        u64 bytes = (u64)(b - a) * sizeof(GpuMaterial);
-        RingSpan span = rc_ring_alloc(r, bytes, 16);
-        if (!span.ptr) { ok = false; return; }
-        GpuMaterial* dst = (GpuMaterial*)span.ptr;
-        for (u32 i = a; i < b; ++i) rc_material_row(r, i, dst[i - a]);
-        cmd->CopyBufferRegion(r->material_table.resource, (u64)a * sizeof(GpuMaterial), span.buffer.resource, span.offset, bytes);
-    });
-    rb_transition(cmd, r->tables.sprites, kShaderRead);
-    rb_transition(cmd, r->material_table, kShaderRead);
-    return ok;
-}
-
 // The root parameters the sort and the sprites read, on one bind point or the other.
 template <class SetSrv, class SetUav>
 void bind_tables(Renderer* r, FrameInFlight& f, SetSrv srv, SetUav uav, bool writes) {
@@ -138,7 +109,9 @@ void bind_tables(Renderer* r, FrameInFlight& f, SetSrv srv, SetUav uav, bool wri
 // ---- the sort -------------------------------------------------------------------------------
 
 void record_sort(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd, const PushData& push) {
-    u32 blocks = (r->world.sprites.len + kBlockRows - 1) / kBlockRows;
+    SortStep steps[kSortSteps];
+    rc_sort_steps(r, steps);
+    ID3D12PipelineState* const pipes[kSortSteps] = {r->cs_count, r->cs_scan, r->cs_bucket_scan, r->cs_scatter};
     const D3D12_RESOURCE_STATES uav = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     rb_transition(cmd, r->tables.sorted, uav);
     rb_transition(cmd, r->tables.bucket_of, uav);
@@ -151,28 +124,15 @@ void record_sort(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd, 
     bind_tables(r, f,
                 [&](u32 i, D3D12_GPU_VIRTUAL_ADDRESS a) { cmd->SetComputeRootShaderResourceView(i, a); },
                 [&](u32 i, D3D12_GPU_VIRTUAL_ADDRESS a) { cmd->SetComputeRootUnorderedAccessView(i, a); }, true);
-    rb_label_begin(r, cmd, "count");
-    cmd->SetPipelineState(r->cs_count);
-    cmd->Dispatch(blocks, 1, 1);
-    rb_label_end(r, cmd);
-    uav_barrier(cmd);
-    rb_label_begin(r, cmd, "scan");
-    cmd->SetPipelineState(r->cs_scan);
-    cmd->Dispatch(kBucketCount / kComputeGroup, 1, 1);
-    rb_label_end(r, cmd);
-    uav_barrier(cmd);
-    rb_label_begin(r, cmd, "bucket scan");
-    cmd->SetPipelineState(r->cs_bucket_scan);
-    cmd->Dispatch(1, 1, 1);
-    rb_label_end(r, cmd);
-    uav_barrier(cmd);
-    rb_label_begin(r, cmd, "scatter");
-    cmd->SetPipelineState(r->cs_scatter);
-    cmd->Dispatch(blocks, 1, 1);
-    rb_label_end(r, cmd);
+    for (u32 i = 0; i < kSortSteps; ++i) {
+        if (i) uav_barrier(cmd);
+        rb_label_begin(r, cmd, steps[i].label);
+        cmd->SetPipelineState(pipes[i]);
+        cmd->Dispatch(steps[i].groups, 1, 1);
+        rb_label_end(r, cmd);
+    }
     bool keyed = false;
-    for (u32 b = 0; b < kBucketCount; ++b) {
-        if (!r->world.keyed_counts[b] || !r->world.bucket_counts[b]) continue;
+    for (u32 b = 0; rw_next_keyed(r->world, &b); ++b) {
         if (!keyed) {
             uav_barrier(cmd);
             rb_label_begin(r, cmd, "key sort");
@@ -243,27 +203,24 @@ void record_screenshot(Renderer* r, ID3D12GraphicsCommandList* cmd, ID3D12Resour
 
 } // namespace
 
-// One ExecuteIndirect per run of buckets, as renderer-vulkan's multi-draw: from a non-empty
-// bucket to the last non-empty bucket of the same pipeline slot before one of another slot
-// intervenes; empty buckets between draw nothing.
-u32 rb_record_draws(Renderer* r, ID3D12GraphicsCommandList* cmd, u32 first_bucket, u32 end_bucket) {
+// One ExecuteIndirect for a run of buckets (rw_next_run), as renderer-vulkan's multi-draw:
+// empty buckets in it draw nothing. A game slot whose pipeline failed draws with its blend's
+// engine pipeline.
+u32 rb_draw_run(Renderer* r, FrameInFlight& f, const DrawRun& run) {
+    ID3D12GraphicsCommandList* cmd = f.cmd;
     u32 draws = 0;
-    u32 b = first_bucket;
-    DrawRun run;
-    while (rw_next_run(r->world.bucket_counts, &b, end_bucket, &run)) {
-        u32 slot = run.slot, first = run.first, last = run.last;
-        const GamePipe* gp = slot >= kBlendCount ? &r->game_pipes[slot - kBlendCount] : nullptr;
-        ID3D12PipelineState* pipe = gp ? (gp->pipeline ? gp->pipeline : r->pipelines[(u32)gp->blend]) : r->pipelines[slot];
-        char label[64];
-        if (r->markers) {
-            rw_run_label(label, sizeof label, run, gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
-            rb_label_begin(r, cmd, label);
-        }
-        cmd->SetPipelineState(pipe);
-        cmd->ExecuteIndirect(r->draw_signature, last - first + 1, r->indirect.resource, (u64)first * sizeof(DrawArgs), nullptr, 0);
-        ++draws;
-        if (r->markers) rb_label_end(r, cmd);
+    u32 slot = run.slot, first = run.first, last = run.last;
+    const GamePipe* gp = slot >= kBlendCount ? &r->game_pipes[slot - kBlendCount] : nullptr;
+    ID3D12PipelineState* pipe = gp ? (gp->pipeline ? gp->pipeline : r->pipelines[(u32)gp->blend]) : r->pipelines[slot];
+    char label[64];
+    if (r->markers) {
+        rw_run_label(label, sizeof label, run, gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
+        rb_label_begin(r, cmd, label);
     }
+    cmd->SetPipelineState(pipe);
+    cmd->ExecuteIndirect(r->draw_signature, last - first + 1, r->indirect.resource, (u64)first * sizeof(DrawArgs), nullptr, 0);
+    ++draws;
+    if (r->markers) rb_label_end(r, cmd);
     return draws;
 }
 
@@ -363,98 +320,117 @@ void rb_destroy_pipelines(Renderer* r) {
 
 // ---- the frame -----------------------------------------------------------------------------------
 
-bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view) {
-    KV_ZONE("record");
-    Swapchain& s = r->swapchain;
+namespace {
+
+void set_viewport(Renderer* r, ID3D12GraphicsCommandList* cmd) {
+    const Swapchain& s = r->swapchain;
+    D3D12_VIEWPORT vp{0.0f, 0.0f, (f32)s.width, (f32)s.height, 0.0f, 1.0f};
+    D3D12_RECT scissor{0, 0, (LONG)s.width, (LONG)s.height};
+    cmd->RSSetViewports(1, &vp);
+    cmd->RSSetScissorRects(1, &scissor);
+}
+
+} // namespace
+
+// The steps of the core's frame (korvid/render/core/frame.inl), in the order it calls them.
+// One command list holds the frame; f.image is the back buffer it draws into.
+
+bool rb_record_begin(Renderer* r, FrameInFlight& f) {
+    D3D_CHECK(f.allocator->Reset()); // its last list has passed its fence
+    D3D_CHECK(f.cmd->Reset(f.allocator, nullptr));
+    ID3D12DescriptorHeap* heaps[] = {r->heap, r->sampler_heap};
+    f.cmd->SetDescriptorHeaps(2, heaps);
+    rb_gpu_frame_begin(r, f, f.cmd);
+    f.gpu_pixels = f.have_image ? (u64)f.width * f.height : 0;
+    return true;
+}
+
+// Textures, then the tables opened for the rows the ticks changed. Queue order and the
+// tables' transitions keep this frame's copies after the last frame's reads.
+void rb_upload_begin(Renderer* r, FrameInFlight& f) {
+    rb_label_begin(r, f.cmd, "upload");
+    record_texture_uploads(r, f.cmd);
+    rb_transition(f.cmd, r->tables.sprites, D3D12_RESOURCE_STATE_COPY_DEST);
+    rb_transition(f.cmd, r->material_table, D3D12_RESOURCE_STATE_COPY_DEST);
+}
+
+void rb_copy_rows(Renderer*, FrameInFlight& f, RbBuffer& table, const RingSpan& span, u64 offset, u64 bytes) {
+    f.cmd->CopyBufferRegion(table.resource, offset, span.buffer.resource, span.offset, bytes);
+}
+
+void rb_upload_end(Renderer* r, FrameInFlight& f) {
+    rb_transition(f.cmd, r->tables.sprites, kShaderRead);
+    rb_transition(f.cmd, r->material_table, kShaderRead);
+    rb_label_end(r, f.cmd);
+    rb_gpu_mark(r, f, f.cmd, kGpuUploaded);
+    rb_gpu_stats_begin(r, f, f.cmd);
+}
+
+void rb_sort(Renderer* r, FrameInFlight& f, const PushData& push) {
+    rb_label_begin(r, f.cmd, "sort");
+    record_sort(r, f, f.cmd, push);
+    rb_label_end(r, f.cmd);
+}
+
+void rb_read_sort(Renderer* r, FrameInFlight& f) { record_sort_check(r, f.cmd); }
+
+void rb_sort_end(Renderer* r, FrameInFlight& f, bool sorted) {
+    if (sorted) finish_sort(r, f.cmd);
+    rb_gpu_mark(r, f, f.cmd, kGpuSorted);
+}
+
+void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView& view) {
+    ID3D12GraphicsCommandList* cmd = f.cmd;
+    if (pass == RcPass::World) {
+        rb_label_begin(r, cmd, "world");
+        rb_post_begin_world(r, cmd, view);
+        return;
+    }
+    rb_transition(cmd, r->swapchain.buffers[f.image], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    rb_label_begin(r, cmd, "draw");
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv = rb_rtv(r, f.image);
+    cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+    const f32 clear[4] = {view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a};
+    cmd->ClearRenderTargetView(rtv, clear, 0, nullptr);
+}
+
+// The post pass has its own root signature, which displaces the sprites'; rb_bind_sprites
+// sets theirs again whenever it is called.
+void rb_pass_post(Renderer* r, FrameInFlight& f, const RenderView& view) {
+    set_viewport(r, f.cmd);
+    rb_post_draw(r, f, f.cmd, view);
+}
+
+void rb_bind_sprites(Renderer* r, FrameInFlight& f, const PushData& push) {
     ID3D12GraphicsCommandList* cmd = f.cmd;
     u32 fi = (u32)(&f - r->frames);
+    set_viewport(r, cmd);
+    cmd->SetGraphicsRootSignature(r->root);
+    cmd->SetGraphicsRoot32BitConstants(kRootPush, sizeof push / 4, &push, 0);
+    bind_tables(r, f,
+                [&](u32 i, D3D12_GPU_VIRTUAL_ADDRESS a) { cmd->SetGraphicsRootShaderResourceView(i, a); },
+                [&](u32, D3D12_GPU_VIRTUAL_ADDRESS) {}, false);
+    cmd->SetGraphicsRootDescriptorTable(kRootTextures, rb_heap_gpu(r, kHeapTextures + fi * kMaxTextures));
+    cmd->SetGraphicsRootDescriptorTable(kRootSamplers, r->sampler_heap->GetGPUDescriptorHandleForHeapStart());
+    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    D3D12_VERTEX_BUFFER_VIEW rows{r->tables.sorted.gpu(), (UINT)r->tables.sorted.size, sizeof(u32)};
+    cmd->IASetVertexBuffers(0, 1, &rows);
+}
 
-    D3D_CHECK(f.allocator->Reset()); // its last list has passed its fence
-    D3D_CHECK(cmd->Reset(f.allocator, nullptr));
-    ID3D12DescriptorHeap* heaps[] = {r->heap, r->sampler_heap};
-    cmd->SetDescriptorHeaps(2, heaps);
-    rb_gpu_frame_begin(r, f, cmd);
-    f.gpu_pixels = have_image ? (u64)s.width * s.height : 0;
+void rb_pass_end(Renderer* r, FrameInFlight& f, RcPass pass) {
+    if (pass == RcPass::World) rb_post_end_world(r, f.cmd);
+    rb_label_end(r, f.cmd);
+}
 
-    // Uploads first: textures, then the rows the ticks changed. Queue order and the tables'
-    // transitions keep this frame's copies after the last frame's reads.
-    rb_label_begin(r, cmd, "upload");
-    record_texture_uploads(r, cmd);
-    if (!record_table_copies(r, cmd)) return false;
-    rb_label_end(r, cmd);
-    rb_gpu_mark(r, f, cmd, kGpuUploaded);
-    rb_gpu_stats_begin(r, f, cmd);
+void rb_read_window(Renderer* r, FrameInFlight& f) { record_screenshot(r, f.cmd, r->swapchain.buffers[f.image]); }
 
-    bool draw = have_image && r->world.sprites.len > 0;
-    f32 sw = (f32)s.width, sh = (f32)s.height;
-    PushData push = rw_push_block(r->world, view, sw, sh, (f32)(time_now() - r->start_time), KV_RB_CLIP_Y_UP != 0);
-
-    if (draw) {
-        rb_label_begin(r, cmd, "sort");
-        record_sort(r, f, cmd, push);
-        rb_label_end(r, cmd);
-        if (r->check_pending) { rc_snapshot_keys(r, view.alpha); record_sort_check(r, cmd); }
-        finish_sort(r, cmd);
-    }
-    rb_gpu_mark(r, f, cmd, kGpuSorted);
-
-    if (have_image) {
-        ID3D12Resource* image = s.buffers[image_index];
-        rb_transition(cmd, image, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-        bool post = rb_post_prepare(r);
-        u32 split = post ? rw_bucket_of(r->post.layer, 0) : 0;
-        D3D12_VIEWPORT vp{0.0f, 0.0f, sw, sh, 0.0f, 1.0f};
-        D3D12_RECT scissor{0, 0, (LONG)s.width, (LONG)s.height};
-        auto bind_sprites = [&]() {
-            cmd->RSSetViewports(1, &vp);
-            cmd->RSSetScissorRects(1, &scissor);
-            cmd->SetGraphicsRootSignature(r->root);
-            cmd->SetGraphicsRoot32BitConstants(kRootPush, sizeof push / 4, &push, 0);
-            bind_tables(r, f,
-                        [&](u32 i, D3D12_GPU_VIRTUAL_ADDRESS a) { cmd->SetGraphicsRootShaderResourceView(i, a); },
-                        [&](u32, D3D12_GPU_VIRTUAL_ADDRESS) {}, false);
-            cmd->SetGraphicsRootDescriptorTable(kRootTextures, rb_heap_gpu(r, kHeapTextures + fi * kMaxTextures));
-            cmd->SetGraphicsRootDescriptorTable(kRootSamplers, r->sampler_heap->GetGPUDescriptorHandleForHeapStart());
-            cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            D3D12_VERTEX_BUFFER_VIEW rows{r->tables.sorted.gpu(), (UINT)r->tables.sorted.size, sizeof(u32)};
-            cmd->IASetVertexBuffers(0, 1, &rows);
-        };
-        u32 draws = 0;
-        if (post) {
-            rb_label_begin(r, cmd, "world");
-            rb_post_begin_world(r, cmd, view);
-            if (draw) { bind_sprites(); draws += rb_record_draws(r, cmd, 0, split); }
-            rb_post_end_world(r, cmd);
-            rb_label_end(r, cmd);
-        }
-
-        rb_label_begin(r, cmd, "draw");
-        D3D12_CPU_DESCRIPTOR_HANDLE rtv = rb_rtv(r, image_index);
-        cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-        const f32 clear[4] = {view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a};
-        cmd->ClearRenderTargetView(rtv, clear, 0, nullptr);
-        if (post) {
-            cmd->RSSetViewports(1, &vp);
-            cmd->RSSetScissorRects(1, &scissor);
-            rb_post_draw(r, f, cmd, view);
-        }
-        if (draw) {
-            bind_sprites(); // the post pass's root signature displaced the sprites'
-            draws += rb_record_draws(r, cmd, split, kBucketCount);
-        }
-        KV_COUNTER("indirect draws", draws);
-        rb_label_end(r, cmd);
-
-        if (r->shot_pending) record_screenshot(r, cmd, image);
-        rb_transition(cmd, image, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-    }
-
-    rb_gpu_stats_end(r, f, cmd);
-    rb_gpu_mark(r, f, cmd, kGpuDrawn);
-    rb_gpu_mark(r, f, cmd, kGpuEnd);
-    rb_gpu_frame_end(r, f, cmd);
-    D3D_CHECK(cmd->Close());
+bool rb_record_end(Renderer* r, FrameInFlight& f) {
+    if (f.have_image) rb_transition(f.cmd, r->swapchain.buffers[f.image], D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+    rb_gpu_stats_end(r, f, f.cmd);
+    rb_gpu_mark(r, f, f.cmd, kGpuDrawn);
+    rb_gpu_mark(r, f, f.cmd, kGpuEnd);
+    rb_gpu_frame_end(r, f, f.cmd);
+    D3D_CHECK(f.cmd->Close());
     return true;
 }
 
