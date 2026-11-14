@@ -501,7 +501,68 @@ layer" and carries the 30 MB library beside the game's.
   four seconds after an app's exit before starting the next, where the two crashes had
   followed an exit at once; that is a correlation, not a finding.
 
-### Still to come
+## Milestone 7: text
 
-Milestone 7: composed text through one Java class (`KorvidActivity`), which needs a JDK
-for `javac` (`sudo apt install openjdk-25-jdk-headless`) and is P1.
+`platform_text_input` raises the on-screen keyboard and what is typed on it reaches
+`InputState::text`.
+
+- **One Java class**, `platform_hid/src/android/java/org/korvid/KorvidActivity.java`: a
+  `NativeActivity` that adds a one-pixel view. While a text field wants typing the view
+  holds the focus and offers an `InputConnection` (plain text, no suggestions, so a Latin
+  keyboard commits each character as typed); `commitText` goes to the engine as UTF-8
+  bytes, composing text is kept until the input method finishes it, `deleteSurroundingText`
+  is backspaces, the keyboard's Done is Enter as a key. `textInput(boolean)` shows and
+  hides the keyboard on the UI thread.
+- **Native side** (`host_window_android.cc`): the two native methods are registered with
+  `RegisterNatives` in `ANativeActivity_onCreate` (the library is loaded by NativeActivity,
+  not `System.loadLibrary`, so the VM would not find them by name); they append to a
+  buffer under the app's lock and `drain` hands it to `input.raw.type`. Whether the
+  activity is ours is asked once, by looking for `textInput`.
+- **A hardware keyboard's characters.** Its keys reach native code first, as keys, with no
+  character. While text is wanted the entry leaves the printable ones unhandled, so they
+  go on to `KorvidActivity.dispatchKeyEvent`, which knows the layout's character
+  (`getUnicodeChar`, Shift applied) and sends it the same way. The key's state and its
+  KeyDown are set either way.
+- **The packager** compiles `src/android/java/` of the toolchain's `app_module` with
+  `javac --release 17` against `android.jar` and `d8 --min-api 33` into `classes.dex`,
+  when `javac` is on the host; the manifest then names `org.korvid.KorvidActivity` and
+  `hasCode` is true. Without `javac` the package is as it was before (NativeActivity, no
+  code) and its last line says "without Java". Still no Gradle.
+- **The launch name changed**: `am start -n org.korvid.<game>/org.korvid.KorvidActivity`.
+  (The earlier milestones' commands in these notes say `android.app.NativeActivity`, which
+  is what a package built without a JDK still has.)
+
+### What ran
+
+`window --text` in the emulator (`adb shell settings put secure
+show_ime_with_hard_keyboard 1`, so the keyboard shows beside the host's):
+
+- The keyboard came up over the window; `dumpsys input_method` names the served view as
+  `KorvidActivity$TextSink` and its connection as `KorvidActivity$Connection`.
+- Taps on its keys: `typed "k"`, `typed "o"`, Shift then v: `typed "V"`, the delete key:
+  `1 backspaces` and `key Backspace`, Done: `key Enter`.
+- `adb shell input text Hi5` (key events, the hardware path): `typed "H"` with `key
+  LShift` and `key H`, `typed "i"`, `typed "5"`.
+- Every game repackaged with the class: arcanum and rocks hash as before at 8 threads,
+  testbed through Home and relaunch twenty times (20 released, 20 taken, 91 sort checks,
+  no error). Twenty-six suites in the three emulator configs; arm64 packages carry
+  `classes.dex`; Linux's suites and kormake's tests pass.
+
+### Not shown
+
+- Anything beyond ASCII: an accented key, an input method that composes (the code path
+  is there, nothing injected it), an emoji (sent as UTF-8 from Java, so not CESU-8).
+- A game's own text field on a phone-sized screen: arcanum's name entry was not driven by
+  the on-screen keyboard here, and nothing moves a field out from under the keyboard.
+
+## The slice, against its exit criteria
+
+Met in the emulator: the suites in three configs; every game packaged, installed, drawing,
+sounding and touched; demo and replay hashes equal to Linux's at 1 and 8 threads; the
+gallery identical to the Vulkan references; the lifecycle loop; debug builds clean under
+validation; the other platforms' behaviour on Linux unchanged; the README and these notes.
+
+Not met, or not provable here: anything on arm64 or a real GPU ("What only a device can
+settle", above); pre-rotation (P1, deferred); Windows, macOS and iOS were not built after
+these changes (the two renderer stubs, `probe_xcode`'s `arch`, core's output sink and
+io.cc's mounts all compile on Linux, and none of them was compiled anywhere else).

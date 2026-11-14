@@ -88,6 +88,13 @@ struct DroidApp {
     JNIEnv*        env = nullptr; // the game's thread, attached
     bool           opened = false; // a HostWindow is open
     HostWindow*    host = nullptr; // it, for its surface hook
+
+    // Typed text from Java (KorvidActivity), under the lock: UTF-8 and a count of
+    // backspaces, taken by drain. text_on is the game's thread's: a text field wants typing.
+    char           typed[256];
+    u32            typed_len = 0, typed_backspaces = 0;
+    bool           text_on = false;
+    bool           java = false; // the activity is KorvidActivity
 };
 
 DroidApp g_app; // one application per process
@@ -185,6 +192,43 @@ void go_immersive(ANativeActivity* a) {
     jni_ok(env);
     env->CallVoidMethod(ctl, env->GetMethodID(ctl_class, "hide", "(I)V"), bars);
     jni_ok(env);
+}
+
+// KorvidActivity's native methods: what the input method committed, on the UI thread.
+void JNICALL java_text(JNIEnv* env, jclass, jbyteArray utf8) {
+    jsize n = utf8 ? env->GetArrayLength(utf8) : 0;
+    if (n <= 0) return;
+    pthread_mutex_lock(&g_app.lock);
+    u32 room = (u32)sizeof g_app.typed - 1 - g_app.typed_len;
+    if ((u32)n <= room) { // whole or not at all: never half a code point
+        env->GetByteArrayRegion(utf8, 0, n, (jbyte*)(g_app.typed + g_app.typed_len));
+        g_app.typed_len += (u32)n;
+        g_app.typed[g_app.typed_len] = 0;
+    }
+    pthread_mutex_unlock(&g_app.lock);
+    wake();
+}
+
+void JNICALL java_backspace(JNIEnv*, jclass, jint count) {
+    if (count <= 0) return;
+    pthread_mutex_lock(&g_app.lock);
+    g_app.typed_backspaces += (u32)count;
+    pthread_mutex_unlock(&g_app.lock);
+    wake();
+}
+
+// The activity is KorvidActivity when the package was built with a JDK, NativeActivity
+// itself when not: only the first has these methods, and only then is there composed text.
+bool register_java(ANativeActivity* a) {
+    JNIEnv* env = a->env;
+    jclass activity = env->GetObjectClass(a->clazz);
+    if (!env->GetMethodID(activity, "textInput", "(Z)V")) { env->ExceptionClear(); return false; }
+    static const JNINativeMethod methods[] = {
+        {"nativeText", "([B)V", (void*)java_text},
+        {"nativeBackspace", "(I)V", (void*)java_backspace},
+    };
+    if (env->RegisterNatives(activity, methods, 2) != 0) { jni_ok(env); return false; }
+    return true;
 }
 
 // The intent's string extra "args", malloc'd, or null.
@@ -429,6 +473,7 @@ extern "C" JNIEXPORT void ANativeActivity_onCreate(ANativeActivity* activity, vo
     activity->callbacks->onInputQueueCreated    = on_queue_created;
     activity->callbacks->onInputQueueDestroyed  = on_queue_destroyed;
     app.args = intent_args(activity);
+    app.java = register_java(activity);
     tell_platform(activity);
     go_immersive(activity);
     if (pipe2(app.wake, O_NONBLOCK | O_CLOEXEC) != 0) {
@@ -511,7 +556,21 @@ void HostWindow::close() {
 }
 
 void HostWindow::present_blank() {} // the system shows the activity's background
-void HostWindow::text_input(bool) {} // milestone 7: the on-screen keyboard
+// The on-screen keyboard up or down, and typed text wanted or not: KorvidActivity's
+// textInput, which does its work on the UI thread. A package without the class (built
+// without a JDK) has keys and no text.
+void HostWindow::text_input(bool on) {
+    DroidApp& app = g_app;
+    app.text_on = on;
+    if (!app.java) {
+        if (on) KV_WARN("window", "no typed text: this package has no KorvidActivity (it was built without a JDK)");
+        return;
+    }
+    JNIEnv* env = app.env;
+    jclass activity = env->GetObjectClass(app.activity->clazz);
+    env->CallVoidMethod(app.activity->clazz, env->GetMethodID(activity, "textInput", "(Z)V"), on ? JNI_TRUE : JNI_FALSE);
+    jni_ok(env);
+}
 bool HostWindow::touch_screen() const { return true; }
 f32  HostWindow::pixel_scale() const { return g_app.density; }
 
@@ -583,6 +642,19 @@ void HostWindow::drain(EventBus& bus, Input& input) {
             bus.emit(WindowResized{w, h});
         }
     }
+    // What Java's input connection committed since the last pump.
+    pthread_mutex_lock(&app.lock);
+    char typed[sizeof app.typed];
+    u32 backspaces = app.typed_backspaces;
+    memcpy(typed, app.typed, app.typed_len + 1u);
+    typed[app.typed_len] = 0;
+    app.typed_len = 0;
+    app.typed_backspaces = 0;
+    pthread_mutex_unlock(&app.lock);
+    if (app.text_on) {
+        input.raw.backspaces += backspaces;
+        if (typed[0]) input.raw.type(typed);
+    }
     // Input: touches and a hardware keyboard's keys.
     AInputEvent* ev = nullptr;
     while (app.queue && AInputQueue_getEvent(app.queue, &ev) >= 0) {
@@ -601,7 +673,13 @@ void HostWindow::drain(EventBus& bus, Input& input) {
                 input.raw.set(k, down);
                 if (down) bus.emit(KeyDown{k, 0, repeat});
                 else      bus.emit(KeyUp{k, 0});
-                handled = 1; // Back among them: it is Escape, not "leave the app"
+                // Back among them: it is Escape, not "leave the app". While a text field
+                // wants typing, a key that types goes on to Java unhandled, where the
+                // layout's character for it is known (KorvidActivity.dispatchKeyEvent).
+                bool types = (k >= Key::A && k <= Key::Num9) || k == Key::Space;
+                handled = app.text_on && app.java && types ? 0 : 1;
+            } else if (app.text_on && app.java) {
+                handled = 0; // punctuation and the rest have no Key: Java has their characters
             }
         } else if (type == AINPUT_EVENT_TYPE_MOTION && (AInputEvent_getSource(ev) & AINPUT_SOURCE_CLASS_POINTER)) {
             int action = AMotionEvent_getAction(ev);

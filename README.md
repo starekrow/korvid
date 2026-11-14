@@ -431,6 +431,9 @@ does the signing and the device runs itself, with what macOS ships (`security`, 
 From a Linux host (the other hosts are untried). Android is native: a `NativeActivity`, the
 NDK's clang, AAudio, and the Vulkan renderer Linux and Windows draw with. No SDL, no
 Gradle, no Android Studio: kormake compiles with the NDK and writes the `.apk` itself.
+One class of Java (the activity, for typed text from the on-screen keyboard) is compiled
+with `javac` when a JDK is installed; without one a package still builds, and has keys but
+no typed text.
 There are two platforms: `androidemu` is x86-64, for the emulator on an x86-64 host;
 `android` is arm64, for a phone. Everything below has run in the emulator; the arm64 build
 is built and packaged and has not yet met a device (`docs/design/android-port-notes.md`).
@@ -445,8 +448,8 @@ is built and packaged and has not yet met a device (`docs/design/android-port-no
 
    kormake itself needs neither line: it looks under `ANDROID_HOME`, then `~/Android/Sdk`.
 2. **The SDK's pieces**, about 3 GB to download and 8 GB installed (the versions are what
-   `modules/toolchain-android/module.lua` pins; a Java runtime, 17 or later, runs the
-   tools):
+   `modules/toolchain-android/module.lua` pins; a JDK, 17 or later, runs the tools and
+   compiles the activity: `sudo apt install openjdk-25-jdk-headless`):
 
        sdkmanager "platform-tools" "build-tools;36.0.0" "platforms;android-36" "ndk;30.0.16248370" \
                   "emulator" "system-images;android-36;google_apis;x86_64"
@@ -466,7 +469,7 @@ Then:
     tools/kormake/bin/linux/kormake test androidemu-dev            # every suite, run inside the emulator
     tools/kormake/bin/linux/kormake package androidemu-dev rocks   # dist/rocks/rocks.apk, signed with the debug key
     adb install -r dist/rocks/rocks.apk
-    adb shell 'am start -n org.korvid.rocks/android.app.NativeActivity --es args "--demo --hash"'
+    adb shell 'am start -n org.korvid.rocks/org.korvid.KorvidActivity --es args "--demo --hash"'
     adb logcat -s korvid                                           # the game's output
 
 Arguments go in the intent's `args` (the outer quotes keep adb's shell from splitting them

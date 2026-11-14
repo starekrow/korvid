@@ -22,6 +22,11 @@
 -- <dir>/<abi>/libVkLayer_khronos_validation.so, <dir> being KORMAKE_ANDROID_VK_LAYERS or
 -- <sdk>/vulkan-validation-layers (the android-binaries archive of a Vulkan-ValidationLayers
 -- release, unpacked there).
+-- Java: when the app's window module has a src/android/java/ directory and the host has
+-- javac, its sources are compiled (javac --release 17 against android.jar, then d8) into
+-- the package's classes.dex, and the activity is org.korvid.KorvidActivity, a
+-- NativeActivity that also offers the input method a connection (typed text). Without
+-- javac the activity is NativeActivity itself, hasCode is false, and the package says so.
 -- One ABI a package: the toolchain's abi.
 local util = kormake.load("util")
 local M = {}
@@ -44,7 +49,7 @@ function M.package_id(exe) return "org.korvid." .. segment(exe) end
 
 -- build: the build directory (for the log); dist: dist/<exe>/; stage: dist/<exe>/apk/;
 -- lib: the library's file name. Returns the .apk's path and who signed it.
-function M.run(build, dist, stage, exe, lib, tc, config, draws)
+function M.run(build, dist, stage, exe, lib, tc, config, draws, java_dir)
   local q = util.shell_quote
   local f = tc.fields
   local log = util.join(build, "package.log")
@@ -66,6 +71,34 @@ function M.run(build, dist, stage, exe, lib, tc, config, draws)
   end
   local function tool(name) return q(util.join(tools, name)) end
 
+  -- The Java, if there is any and a compiler for it: classes, then one classes.dex at the
+  -- package's top.
+  local work = util.join(build, "package-apk")
+  kfs.mkdirp(work)
+  local java_note, has_java = "", false
+  if java_dir and kfs.isdir(java_dir) then
+    local sources = {}
+    for _, f2 in ipairs(util.sorted_files_recursive(java_dir)) do
+      if f2:match("%.java$") then sources[#sources + 1] = q(util.join(java_dir, f2)) end
+    end
+    local have_javac = kfs.exec("javac -version > " .. q(util.join(work, "javac.txt")) .. " 2>&1") == 0
+    if #sources > 0 and have_javac then
+      local classes, dex = util.join(work, "classes"), util.join(work, "dex")
+      kfs.rmtree(classes); kfs.rmtree(dex)
+      kfs.mkdirp(classes); kfs.mkdirp(dex)
+      run("javac", "javac --release 17 -Xlint:-options -classpath " .. q(jar) .. " -d " .. q(classes) .. " " .. table.concat(sources, " "))
+      local class_files = {}
+      for _, f2 in ipairs(util.sorted_files_recursive(classes)) do
+        if f2:match("%.class$") then class_files[#class_files + 1] = q(util.join(classes, f2)) end
+      end
+      run("d8", tool("d8") .. " --release --min-api " .. (f.os_min or "33") .. " --lib " .. q(jar) .. " --output " .. q(dex) .. " " .. table.concat(class_files, " "))
+      kfs.copy(util.join(dex, "classes.dex"), util.join(stage, "classes.dex"))
+      has_java = true
+    elseif #sources > 0 then
+      java_note = ", without Java (no javac: no typed text from the on-screen keyboard)"
+    end
+  end
+
   local id = M.package_id(exe)
   local libname = lib:match("^lib(.*)%.so$") or util.fail("package: '%s' is not a lib<name>.so", lib)
   local manifest = {
@@ -75,10 +108,11 @@ function M.run(build, dist, stage, exe, lib, tc, config, draws)
     '  <uses-sdk android:minSdkVersion="' .. xml(f.os_min or "33") .. '" android:targetSdkVersion="' .. xml(api) .. '"/>',
     draws and '  <uses-feature android:name="android.hardware.vulkan.version" android:version="0x403000" android:required="true"/>' or false,
     draws and '  <uses-feature android:name="android.hardware.vulkan.level" android:version="1" android:required="true"/>' or false,
-    '  <application android:label="' .. xml(exe) .. '" android:hasCode="false" android:extractNativeLibs="false"',
+    '  <application android:label="' .. xml(exe) .. '" android:hasCode="' .. (has_java and "true" or "false") .. '" android:extractNativeLibs="false"',
     '               android:appCategory="game" android:isGame="true">',
-    '    <activity android:name="android.app.NativeActivity" android:exported="true" android:launchMode="singleTask"',
+    '    <activity android:name="' .. (has_java and "org.korvid.KorvidActivity" or "android.app.NativeActivity") .. '" android:exported="true" android:launchMode="singleTask"',
     '              android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboard|keyboardHidden|navigation|uiMode|touchscreen"',
+    '              android:windowSoftInputMode="stateAlwaysHidden|adjustNothing"',
     '              android:theme="@android:style/Theme.NoTitleBar.Fullscreen">',
     '      <meta-data android:name="android.app.lib_name" android:value="' .. xml(libname) .. '"/>',
     '      <intent-filter>',
@@ -90,8 +124,6 @@ function M.run(build, dist, stage, exe, lib, tc, config, draws)
     '</manifest>',
     '',
   }
-  local work = util.join(build, "package-apk")
-  kfs.mkdirp(work)
   local manifest_path = util.join(work, "AndroidManifest.xml")
   local lines = {}
   for _, line in ipairs(manifest) do if line then lines[#lines + 1] = line end end
@@ -131,7 +163,7 @@ function M.run(build, dist, stage, exe, lib, tc, config, draws)
   run("apksigner", tool("apksigner") .. " sign --ks " .. q(ks) .. " --ks-pass " .. q("pass:" .. pass) .. " --v4-signing-enabled false" ..
       (alias and (" --ks-key-alias " .. q(alias)) or "") .. " " .. q(apk))
   kfs.rmtree(stage)
-  return apk, signed .. layer_note, id
+  return apk, signed .. layer_note .. java_note, id, has_java and "org.korvid.KorvidActivity" or "android.app.NativeActivity"
 end
 
 return M

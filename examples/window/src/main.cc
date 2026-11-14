@@ -101,13 +101,15 @@ int run(int argc, char** argv) {
     bool borderless = false;
     const char* bundled = nullptr;
     const char* asset = nullptr;
+    bool text = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--run-seconds") == 0 && i + 1 < argc) run_seconds = atof(argv[++i]);
         else if (strcmp(argv[i], "--hitch-ms") == 0 && i + 1 < argc) hitch_ms = atof(argv[++i]);
         else if (strcmp(argv[i], "--borderless") == 0) borderless = true;
         else if (strcmp(argv[i], "--bundled") == 0 && i + 1 < argc) bundled = argv[++i];
         else if (strcmp(argv[i], "--asset") == 0 && i + 1 < argc) asset = argv[++i];
-        else { KV_ERROR("window", "unknown option '%s' (--run-seconds N, --hitch-ms N, --borderless, --bundled NAME, --asset PATH)", argv[i]); return 2; }
+        else if (strcmp(argv[i], "--text") == 0) text = true;
+        else { KV_ERROR("window", "unknown option '%s' (--run-seconds N, --hitch-ms N, --borderless, --bundled NAME, --asset PATH, --text)", argv[i]); return 2; }
     }
     Engine e;
     if (!engine_init(e, kv_module_list())) return 1;
@@ -127,6 +129,9 @@ int run(int argc, char** argv) {
         else KV_ERROR("window", "bundled '%s': %s", bundled, strerror(err));
         b.free();
     }
+    // Typed text, as a text field would ask for it: the OS's keyboard up where there is one,
+    // and what arrives logged each frame.
+    if (text && rc == 0) platform_text_input(e, true);
     Handle asset_read;
     if (asset) {
         IoRequest r;
@@ -141,6 +146,13 @@ int run(int argc, char** argv) {
     platform_modal_frame(e, modal_frame, &l);
     while (rc == 0 && !e.quit_requested) {
         platform_pump(e); // on macOS a live resize runs inside this, its frames through modal_frame
+        if (text) {
+            if (Input* in = platform_input(e)) {
+                if (in->raw.text_len || in->raw.backspaces)
+                    KV_INFO("window", "typed \"%s\" (%u bytes), %u backspaces", in->raw.text, in->raw.text_len, in->raw.backspaces);
+                in->sample(); // nothing ticks here: take what was typed, as a tick would
+            }
+        }
         if (!asset_read.is_null()) {
             IoQueue* io = platform_io(e);
             for (const IoCompletion& c : io->completions()) {

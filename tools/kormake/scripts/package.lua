@@ -75,10 +75,14 @@ function M.run(c, build, inst, ninja, target)
   local apk = nil
   if stage then
     -- A game that draws links the module that provides "render".
-    local draws = false
-    for _, d in ipairs(inst.closure) do if d.module.fields.provides == "render" then draws = true end end
-    local path, signed, id = kormake.load("package_apk").run(build, dist, stage, exe, exe_bin, inst.toolchain, target:match("%-([^%-]+)$"), draws)
-    apk, bundle = path, string.format(", %s, signed %s", id, signed)
+    local draws, java_dir = false, nil
+    for _, d in ipairs(inst.closure) do
+      if d.module.fields.provides == "render" then draws = true end
+      -- The window module's Java (its activity), if it has any.
+      if d.module.name == inst.toolchain.fields.app_module then java_dir = util.join(d.module.dir, "src/android/java") end
+    end
+    local path, signed, id, activity = kormake.load("package_apk").run(build, dist, stage, exe, exe_bin, inst.toolchain, target:match("%-([^%-]+)$"), draws, java_dir)
+    apk, bundle = path, string.format(", %s/%s, signed %s", id, activity, signed)
   end
   print(string.format("kormake: %s: %s%s, %d license files%s%s", apk or app or dist, exe,
     #packs > 0 and (", " .. table.concat(pack_names, ", ")) or (loose > 0 and string.format(", loose assets of %d module%s", loose, loose == 1 and "" or "s") or ", no pack"), copied,

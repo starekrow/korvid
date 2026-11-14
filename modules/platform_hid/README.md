@@ -175,4 +175,11 @@ directory is the app's external files directory.
 - **Keys** are `AKEYCODE_*` through `input_android.cc`; Back is Escape. **Touches** are
   `TouchPoint`s. **Gamepads** are key events from a gamepad source and motion events from
   a joystick source; a pad is never reported gone (Android tells only Java).
-- **Text input** is not there yet: `text_input` does nothing.
+- **Typed text** comes through the package's one Java class,
+  `src/android/java/org/korvid/KorvidActivity.java`, a `NativeActivity` with a one-pixel
+  view that offers the input method a connection: what the on-screen keyboard commits (and
+  what an input method finishes composing) reaches `InputState::text` as UTF-8, and a
+  hardware keyboard's printable keys go on to Java unhandled while a text field wants
+  typing, where the layout's character is known. `text_input` raises and lowers the
+  keyboard. kormake compiles the class into the package when the host has `javac`; without
+  it the activity is `NativeActivity` and `text_input` warns once.
