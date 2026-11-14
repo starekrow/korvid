@@ -109,7 +109,14 @@ Arcfire and arcanum are packed with it and use the atlases on every backend: one
 
 **The rig (R10).** `VK_LAYER_KHRONOS_profiles` with the profile's JSON, simulating API version, features, properties and extensions, under the validation layer. Validation checks each call against what the device now claims, so a seventeenth sampled image, a fifth storage buffer, a 256-wide group or a 1.3 entry point is an error and fails the run. `tools/vulkan/baseline_run.sh` wraps a command in that environment; the layer and the JSON come from the Vulkan SDK or the distribution, found by the script, which says what is missing.
 
-What the rig cannot show, carried to the day there is a phone: driver bugs in old compute implementations (the sort is the engine's most demanding shader and old mobile compilers are where such shaders break); the speed of the sort, the `switch` and the per-bucket draws on a tile-based GPU; memory on a 2 to 4 GB phone; whether real 2020 to 2022 devices in number lack descriptor indexing at all. That last one decides how much this slice is worth and is answerable from gpuinfo.org's reports before M3 starts (for review 1).
+What the rig cannot show, carried to the day there is a phone: driver bugs in old compute implementations (the sort is the engine's most demanding shader and old mobile compilers are where such shaders break); the speed of the sort, the `switch` and the per-bucket draws on a tile-based GPU; memory on a 2 to 4 GB phone; whether real 2020 to 2022 devices in number lack descriptor indexing at all. That last one decides how much this slice is worth and is answerable from gpuinfo.org's reports (for review 1).
+
+**Read on Nov 13: worth building.** Two sources, neither a census of this engine's players.
+
+- Android's distribution dashboard (active devices, 28 days to Nov 24, 2025; a year old): of handhelds, 26.7% report Vulkan 1.3 or 1.4, 62.1% report 1.1, 3.9% report 1.0 and 7.4% none. So `renderer-vulkan` as it stands starts on about a quarter of phones and a 1.1 backend on about nine in ten. The API version is the larger gate, not descriptor indexing.
+- gpuinfo.org's Android reports (submitted by people who run a GPU tool, so newer and better phones than the average): `VK_EXT_descriptor_indexing` with all five features the renderer uses on 78% of reports, `VK_KHR_dynamic_rendering` on 59%, `VK_KHR_synchronization2` on 70%. By distinct device, 1,963 have descriptor indexing and 1,173 do not; of devices whose report is from 2024 or later, 1,443 have it and 372 (a fifth) do not, and those are mostly Mali (199) and PowerVR (129): cheap phones and tablets still being sold. Where the extension exists it is generous (all but 18 devices offer 500,000 update-after-bind images or more). `drawIndirectFirstInstance` is on 98%; five reports have the 128-invocation compute limit and three the 4-storage-buffer one, so R5 and R6 answer the profile's letter more than its devices, and are cheap.
+
+What this says of the middle tier (1.1 calls with bindless kept): it would reach some large part of the 1.1 phones, and no figure here says how large. The baseline backend reaches all of them, so the middle tier stays out of scope unless 15 textures proves the limit games hit.
 
 ## Out of scope
 
@@ -147,7 +154,7 @@ Each leaves every platform building and `renderer-vulkan` drawing as before.
 
 In the order a wrong answer costs most:
 
-1. **Whether to build it before knowing who needs it.** The profile is a floor, not a census. If nearly every Vulkan phone since 2020 offers descriptor indexing, a cheaper tier (1.1 calls, bindless kept) covers them and this slice serves a sliver. An afternoon with gpuinfo.org answers it; M1 and M2 are worth doing either way.
+1. **Whether it is worth building.** Read on Nov 13 ("Testing without the hardware"): about a quarter of active phones report Vulkan 1.3 and about nine in ten report 1.1 or better, so the answer looks like yes. The figures are a year old and not this engine's audience; a game's own Play Console numbers would be the real ones.
 2. **A separate backend, not flags in `renderer-vulkan`.** Flags would put about thirty conditionals in the 1.3 backend's passes, barriers, descriptors and device check. The price of the separate one is M2.
 3. **Sixteen textures and atlases as the game's job.** The alternative that keeps more textures (a set a pipeline slot) is held until a game needs it.
 4. **Arcfire and arcanum packed for every platform**, not only where they must be.
