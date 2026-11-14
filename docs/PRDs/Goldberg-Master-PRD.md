@@ -486,6 +486,9 @@ Each slice gets its own PRD (`Goldberg-Slice-N-PRD.md`) before it is built.
 - **How a dev build finds its output tree.** A path kormake bakes in, a file beside the
   executable, or an argument. Android and iOS dev builds bundle assets today and need
   an answer of their own until the Live slice gives them the connection.
+- **Sources and targets for a game.** Slice 1 uses a roots file and a path file that
+  kormake writes. A game wants a better way to say where its assets come from and which
+  trees they cook into, including splitting dev from debug in the project's `.berg`.
 - **How kormake hands over the roots.** Arguments on the rule's command line, or a
   manifest in the build directory that `goldberg watch` can also read.
 - **Terminal, beyond the proposal.** Types marked runtime plus a `land` override is the
