@@ -197,7 +197,12 @@ void spawn_rock(Table& rocks, Game& g, point2 at, u8 size, vec2 drift) {
 // lasts its own time; AnimFinished destroys it.
 void spawn_debris(TickContext& ctx, Game& g, point2 at, u32 count, color tint) {
     for (u32 i = 0; i < count; ++i) {
-        vec2 v = heading(g.rng.range(0.0f, 2.0f * KV_PI)) * g.rng.range(60.0f, 220.0f);
+        // One draw a statement, here and below: C++ leaves the order of a product's operands
+        // and of a call's arguments to the compiler, and gcc and clang choose differently,
+        // which made the same seed two games. The order written is the one gcc had.
+        f32 speed = g.rng.range(60.0f, 220.0f);
+        f32 dir   = g.rng.range(0.0f, 2.0f * KV_PI);
+        vec2 v = heading(dir) * speed;
         f32 life = g.rng.range(0.3f, 0.8f);
         ctx.spawn_later(g_debris_kind, transform2_at(at), sprite_of(g, LOOK_DEBRIS, 6.0f, 0, tint), Velocity{v, 0.0f},
                         anim_player(g.fade_clip, 1.0f / life));
@@ -572,9 +577,14 @@ void on_wave(TickContext& ctx, Span<const SpawnWave> waves) {
             f32 u = g.rng.unit();
             point2 at = g.rng.chance(0.5f) ? point2{(u - 0.5f) * 2.0f * hw, g.rng.chance(0.5f) ? hh : -hh}
                                             : point2{g.rng.chance(0.5f) ? hw : -hw, (u - 0.5f) * 2.0f * hh};
-            vec2 toward = normalize(point2{g.rng.range(-200.0f, 200.0f), g.rng.range(-120.0f, 120.0f)} - at) * g.rng.range(40.0f, 110.0f);
-            ctx.spawn_later(g_rock_kind, transform2_at(at, g.rng.range(0.0f, 2.0f * KV_PI)), sprite_of(g, LOOK_ROCK, kRockSprite[0], 1),
-                            Velocity{toward, g.rng.range(-1.0f, 1.0f)}, collider_circle(kRockRadius[0], L_ROCK, L_SHIP | L_BULLET), RockSize{0});
+            f32 speed = g.rng.range(40.0f, 110.0f);
+            f32 aim_x = g.rng.range(-200.0f, 200.0f);
+            f32 aim_y = g.rng.range(-120.0f, 120.0f);
+            vec2 toward = normalize(point2{aim_x, aim_y} - at) * speed;
+            f32 spin  = g.rng.range(-1.0f, 1.0f);
+            f32 angle = g.rng.range(0.0f, 2.0f * KV_PI);
+            ctx.spawn_later(g_rock_kind, transform2_at(at, angle), sprite_of(g, LOOK_ROCK, kRockSprite[0], 1),
+                            Velocity{toward, spin}, collider_circle(kRockRadius[0], L_ROCK, L_SHIP | L_BULLET), RockSize{0});
         }
         KV_INFO("rocks", "wave %u: %u rocks", score->wave, wave.count);
         g.next_wave = ctx.schedule_in(SpawnWave{wave.count + 1}, kWaveTicks);

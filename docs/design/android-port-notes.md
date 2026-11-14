@@ -313,6 +313,86 @@ pictures are the Vulkan references' to the byte.
   `~/Android/Sdk/vulkan-validation-layers/` and says in its last line whether it did.
 - Pre-rotation (P1).
 
+## Milestone 5: playing
+
+Every game runs in the emulator with sound and the touchpad, and every hash is Linux's.
+
+### Sound
+
+`platform_audio/src/android/audio_aaudio.cc`: an AAudio output stream, float at the rate
+asked, low-latency mode, the data callback on AAudio's realtime thread pulling from the
+mixer in chunks of at most 1024 frames as RemoteIO's does. The emulator gives 48000 Hz and
+bursts of 960 frames. The stream stops on the activity's pause and starts on its resume:
+platform_hid's entry calls `platform_android_foreground` (`korvid/platform/android.h`) and
+the audio backend listens, so neither module knows the other. A disconnected device
+(`AAUDIO_ERROR_DISCONNECTED`) is answered by a thread that closes the stream and opens
+another, since the error callback may not close it. rocks, played by touch for 14 seconds:
+"688448 frames rendered in 1379 callbacks, peak 2 voices, 0 clipped samples, 0 commands
+dropped". `audio_tests` pass. Not exercised: the disconnect (the emulator has no headset
+to pull), and latency, which an emulator cannot say.
+
+### The hashes
+
+All at 1 and 8 threads in the emulator, against Linux:
+
+| Run | Tick | Hash | Linux |
+| --- | --- | --- | --- |
+| `rocks --demo --run-seconds 12` | 600 | `4fb2e4cb04ff9ee4` | the same |
+| `arcanum --demo` | 1864 | `a3256024dcf1f933` | the same, and every one of the 1865 ticks before it |
+| `arcfire --demo` (Shoreline) | 14153 | `0581f62fde0741db` | the same |
+| `arcfire --demo --stage orbit` | 18864 | `4def9ab637bb3288` | the same |
+| `arcfire --replay normal.kvr` | 14122 | matched, 236 hashes | recorded on Linux |
+| `arcfire --replay hard.kvr` | 15264 | matched, 255 hashes | recorded on Linux |
+
+A different OS, libc and compiler (clang against g++), the same simulation: kv's math
+doing what it was written for. `cpukiller --quick` reports its engine hashes equal across
+its own thread counts.
+
+### What it found
+
+- **rocks diverged from Linux at tick 60, and the fault was the game's.** Android agreed
+  with itself at 1 and 8 threads (`b78127534d031c8e`) and not with Linux. `--hash-systems`
+  on both put the first difference at the first wave's spawn, where three expressions each
+  draw more than one random number: `heading(rng) * rng`, `normalize(...) * rng`, and two
+  draws among one call's arguments. C++ leaves the order of a product's operands and of a
+  call's arguments to the compiler; gcc takes them right to left, clang left to right, so
+  the same seed made two games. Each draw is now a statement of its own, in the order gcc
+  had, so Linux's hash is what it was and clang's is the same. (macOS and iOS, clang both,
+  will have had Android's old hash for rocks; they should now have Linux's. Not run here.)
+  Worth a rule: one draw from an `Rng` a statement. arcanum and arcfire had no such
+  expression on the paths their demos take, or they would not match.
+- **The program's name.** The entry passed `korvid` as `argv[0]`, and the frame loop names
+  the game's pack by it: rocks looked for `assets/korvid.kpak`, mounted nothing and warned
+  that every asset was missing. `argv[0]` is now the library's name without `lib` and
+  `.so`, from `dladdr`. With it: "mounted pack .../base.apk (an archive inside it): 23
+  entries, indexed". That is milestone 3's unproved case, a real pack read in place from
+  inside an installed package, index and all.
+- **bionic deprecates `strtok`**, which under `-Werror` stopped arcanum's credits test; it
+  cuts its lines by hand now.
+- **The emulator itself crashed once** (`Segmentation fault (core dumped)`, after a run of
+  "glGetIntegerv: error null ctx" lines from its GLES translator), between installing
+  rocks and launching it, after an hour of installs, launches and display-size changes. It
+  was restarted and did not do it again through everything in this milestone. Nothing of
+  ours was running in it at the time; noted in case it recurs.
+- **Saves** go where they should: arcanum's demo wrote and read
+  `/data/user/0/org.korvid.arcanum/files/korvid/arcanum/save-demo.json` and logged matching
+  state hashes.
+
+### Touch
+
+rocks without `--demo`, driven by `adb shell input`: "touchpad: on: the screen is
+touched", the layout loaded, a swipe in the stick's region turned the ship and taps on the
+buttons fired and thrust. `adb` injects one pointer at a time, so two fingers at once (the
+stick held while a button is tapped) are the one thing here that only a hand on the
+emulator's window, or a phone, shows.
+
+### What ran
+
+- `kormake test` for the three `androidemu` configs: twenty-six suites, the games' own
+  among them, all passing. arm64 builds all eight apps in three configs; unrun.
+- stones and cpukiller run; sockit2m builds as a program for adb's shell.
+- Linux: both configs' suites, kormake's tests, rocks' hash at 1 and 16 threads.
+
 ### Still to come
 
-Milestone 5: AAudio, touch shown working through the touchpad, the games, the hashes.
+Milestone 6: the thread ring for I/O, pre-rotation, gamepads, the README.

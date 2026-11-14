@@ -11,4 +11,11 @@ namespace kv {
 // app's private files directory, where saves go. Both are copied.
 void platform_android_app(const char* package, const char* internal);
 
+// Whether the app is in the foreground (resumed), and one listener for when that changes:
+// the entry calls platform_android_foreground from the activity's resume and pause, on the
+// OS's thread, and the listener (the audio device's, which stops its stream while the app is
+// away) runs there. Null removes it.
+void platform_android_foreground(bool foreground);
+void platform_android_on_foreground(void (*fn)(bool foreground));
+
 } // namespace kv

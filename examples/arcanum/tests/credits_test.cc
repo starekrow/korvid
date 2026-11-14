@@ -32,7 +32,10 @@ void test_credits(kv::TestCtx& c) {
     KV_CHECK(c, md && json);
     if (!md || !json) { free(md); free(json); return; }
     unsigned names = 0;
-    for (char* line = strtok(md, "\n"); line; line = strtok(nullptr, "\n")) {
+    // Line by line, cut in place (not strtok: bionic marks it deprecated, and the build is -Werror).
+    for (char *line = md, *next = nullptr; line && *line; line = next) {
+        next = strchr(line, '\n');
+        if (next) *next++ = 0;
         if (strncmp(line, "By ", 3) != 0) continue;
         for (char* p = strstr(line, "**"); p; ) {
             char* end = strstr(p + 2, "**");

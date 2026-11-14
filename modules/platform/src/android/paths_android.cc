@@ -9,6 +9,7 @@
 #include "korvid/platform/io.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -19,12 +20,31 @@ namespace {
 
 char g_package[512];
 char g_internal[512];
+pthread_mutex_t g_fg_lock = PTHREAD_MUTEX_INITIALIZER;
+void (*g_fg_listener)(bool) = nullptr;
+bool g_foreground = true;
 
 } // namespace
 
 void platform_android_app(const char* package, const char* internal) {
     format(g_package, sizeof g_package, "%s", package ? package : "");
     format(g_internal, sizeof g_internal, "%s", internal ? internal : "");
+}
+
+void platform_android_foreground(bool foreground) {
+    pthread_mutex_lock(&g_fg_lock);
+    g_foreground = foreground;
+    void (*fn)(bool) = g_fg_listener;
+    pthread_mutex_unlock(&g_fg_lock);
+    if (fn) fn(foreground);
+}
+
+void platform_android_on_foreground(void (*fn)(bool foreground)) {
+    pthread_mutex_lock(&g_fg_lock);
+    g_fg_listener = fn;
+    bool now = g_foreground;
+    pthread_mutex_unlock(&g_fg_lock);
+    if (fn && !now) fn(false); // opened while away: starts when the app is back
 }
 
 const char* os_bundle_archive() { return g_package[0] ? g_package : nullptr; }

@@ -34,6 +34,7 @@
 #include <android/looper.h>
 #include <android/native_activity.h>
 #include <android/native_window.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <jni.h>
@@ -225,8 +226,19 @@ void* game_thread(void*) {
         if (chdir(out_dir) != 0) KV_WARN("window", "cannot enter %s: %s", out_dir, strerror(errno));
     }
 
-    // argv: the library's name, then the intent's "args" split at spaces.
-    static char  name[] = "korvid";
+    // argv: the program's name, then the intent's "args" split at spaces. The name is the
+    // library's without "lib" and ".so" (librocks.so is rocks), as the loader knows it:
+    // what the frame loop names the game's pack by.
+    static char  name[128] = "korvid";
+    Dl_info self;
+    if (dladdr((void*)&game_thread, &self) && self.dli_fname) {
+        const char* base = strrchr(self.dli_fname, '/');
+        base = base ? base + 1 : self.dli_fname;
+        if (strncmp(base, "lib", 3) == 0) base += 3;
+        usize n = strlen(base);
+        if (n > 3 && strcmp(base + n - 3, ".so") == 0) n -= 3;
+        if (n > 0 && n < sizeof name) { memcpy(name, base, n); name[n] = 0; }
+    }
     static char* argv[64];
     int argc = 0;
     argv[argc++] = name;
@@ -267,8 +279,8 @@ void* game_thread(void*) {
 }
 
 // The activity's callbacks, on the OS's thread.
-void on_resume(ANativeActivity*) { post(DroidMsgType::Resumed, true); }
-void on_pause(ANativeActivity*) { post(DroidMsgType::Resumed, false); }
+void on_resume(ANativeActivity*) { platform_android_foreground(true); post(DroidMsgType::Resumed, true); }
+void on_pause(ANativeActivity*) { platform_android_foreground(false); post(DroidMsgType::Resumed, false); }
 void on_focus(ANativeActivity* a, int focused) {
     if (focused) go_immersive(a); // the bars come back with a dialog or the recents screen
     post(DroidMsgType::Focus, focused != 0);

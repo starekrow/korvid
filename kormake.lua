@@ -69,7 +69,8 @@ root "android" {
   modules   = { "lua", "tool", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
                 "platform_hid", "window",
                 "render", "asset", "sprite", "scene", "text", "touchpad", "frameloop", "renderer-vulkan",
-                "testbed", "gallery" },
+                "platform_audio", "audio", "anim", "collision", "tilemap", "level", "ui",
+                "testbed", "gallery", "stones", "rocks", "arcanum", "arcfire", "cpukiller", "sockit2m" },
   tests     = true,
   platforms = { "android", "androidemu" },
 }

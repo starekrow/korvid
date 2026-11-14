@@ -60,6 +60,8 @@ module "toolchain.android" {
     zlib    = { libs = { "z" } },
     -- The NDK's own: the activity, its window, the looper and the input queue.
     android = { libs = { "android" } },
+    -- The audio device: AAudio, the system's since API 26.
+    aaudio  = { libs = { "aaudio" } },
     -- The system's libvulkan.so, opened at run time; the headers are the NDK's.
     vulkan  = { },
   },
