@@ -645,3 +645,54 @@ Decided here:
 
 Not done: `learn` over every source a converter takes; `learn` inside a running
 `watch`; Windows.
+
+**Milestone 6, Live, and close** (Nov 14). The live half of S8 and S11, S18, S19, S20.
+
+- **The exit**, with `goldberg watch` running, on inotify and on the polling watcher:
+  a source saved is cooked again and nothing else is; saved with the same bytes, nothing
+  is. A `goldberg.berg` saved re-solves what it speaks for and touches only what got a
+  different answer. A sidecar added and removed moves its stem and puts it back. A rule
+  file that stops parsing is reported with its line while its last good version stays
+  in force, and mending it clears the report. A source or a directory of them deleted
+  takes the outputs away. The tests drive a real watch over its CLI port.
+- **The session's CLI.** `goldberg watch` reads commands on stdin, terminal or not, and
+  on `--cli-port N`. `status`, `explain PATH` and `touch PATH` (with or without
+  `goldberg` in front) are answered at once from the session; `quit` saves the state
+  and ends it; the engine's own commands work beside them (`ls /kinds/goldberg`).
+  `modules/tool` gained `ToolConfig::session` and `--cli-port` for this.
+- **`status`** says stable or working, the counts, and then each step running, each
+  failure and each soft warning (S20). `explain` in a session accepts a path or a key,
+  so a file a converter made can be explained, and adds the step's state.
+- **The project's `goldberg.berg`** is looked at four times a second by a watch and
+  arrives as a `project-changed` event, so a log holds it.
+- **The lock** (Decided, 7): `<state>.lock`, held with `flock` for the life of the
+  process, so there is never a stale one. A cook waits for another cook, up to
+  `--lock-wait` (60 s), saying so after the first second, and then finds nothing to do.
+- **The README** (`tools/goldberg/README.md`) is the manual. The notes, with what was
+  measured, are `docs/design/goldberg-notes.md`: 65 ms for arcfire's first cook, 4 ms
+  for its second, 41 ms for a build with nothing to do, about a millisecond from a save
+  to its copy under a watch.
+- **The master PRD** was corrected where this slice proved it wrong: declared outputs
+  (a private directory, not held events), where the work directory is, how the tree is
+  named on the command line, and the two questions the handover closed.
+
+Decided here:
+
+- **A cook that finds a watch on its tree does nothing and exits 0.** Waiting out
+  `--lock-wait` and failing would break every build made while a watch runs. It trusts
+  the watch to be cooking; it does not ask whether it has finished.
+- **Engine flags stay before the command** (`goldberg --cli-port 4711 watch ...`), as
+  for every tool.
+
+Not done:
+
+- **`status` and `explain` from another terminal** without knowing the port; a `cook`
+  that asks the watch to settle before it returns.
+- **`goldberg status` with no session** says only that none is running here.
+- **The lock on Windows**, with everything else Windows.
+- **Embedding the Lua** in the binary.
+
+**Slice 1 against its exit criteria.** Met on Linux: every criterion in "Goal and exit
+criteria" above. Not met: the last one, in part. macOS and Windows were to build and
+cook the examples on the polling watcher; the code is written and none of it has been
+compiled or run there.

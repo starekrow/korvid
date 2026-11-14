@@ -259,6 +259,12 @@ end
 function Session:event(ev)
     local k = ev.kind
     if k == "step-exit" then if self.graph then self.graph:step_exit(ev) end return end
+    if k == "project-changed" then
+        -- The project's goldberg.berg, read again (or gone): it speaks for every file.
+        if ev.text then self.rules:set("project", ev.text, ev.path) else self.rules:remove("project") end
+        for key, f in pairs(self.files) do if not f.is_berg and not (f.work and not f.vname) then self.unsolved[key] = true end end
+        return
+    end
     if k == "cook-done" then if self.graph then self.graph:cook_done(ev) end return end
     if k == "cook-failed" then if self.graph then self.graph:cook_failed(ev) end return end
     if self.graph and ev.root == self.out_root then self.graph:out_event(ev) return end
@@ -409,6 +415,17 @@ function Session:dump()
     for _, h in ipairs(self.history) do out[#out + 1] = h end
     for _, r in ipairs(self.requests) do out[#out + 1] = "request " .. r end
     return table.concat(out, "\n") .. "\n"
+end
+
+-- One file's effective metadata and who said each key, as its answer was made from.
+function Session:metadata(f)
+    local base
+    if f.work then
+        local maker = self.graph and self.graph.by_work[f.work]
+        if maker then base = { type = maker.conv.to, file = maker.conv.file, where = 'converter "' .. maker.conv.name .. '"' } end
+    end
+    local name, path = self:place(f)
+    return self.rules:effective(name, path, base)
 end
 
 -- Counts for the last line of a cook.

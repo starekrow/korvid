@@ -248,9 +248,12 @@ The builder is the only thing that changes it, and it accepts changes at any tim
   produced the outputs on disk does not run.
 - **Declared outputs, accepted at exit.** This is the normal case. A converter's
   registration says what it writes (names or patterns, from its inputs and parameters).
-  While its process runs, watcher events for those paths are held; when it exits
-  cleanly, the files are hashed and enter the graph together. Nothing downstream ever
-  sees a file half written, and a failed run contributes nothing.
+  It writes into a directory of its own that nothing watches; when it exits cleanly,
+  its files are moved into the step's work directory, hashed, and enter the graph
+  together. Nothing downstream ever sees a file half written, and a failed run
+  contributes nothing. (As first written, watcher events were to be held while the
+  process ran. A private directory needs no holding, works with no watcher at all, and
+  leaves a failed run nothing to clean out of the graph.)
 - **Scanned outputs, by declaration.** A converter that runs long and produces as it
   goes (the level cooker), or cannot say what it will write, says `"outputs": "scan"`.
   goldberg then takes whatever appears in the step's work directory, as it appears: each
@@ -269,8 +272,9 @@ The builder is the only thing that changes it, and it accepts changes at any tim
   step open, and stability off, until its outputs have been quiet that long. With
   `"outputs": "scan"` the same key is simply how a file is known to be finished. On a
   converter with declared outputs it is a patch, and `explain` says so.
-- **Intermediates** land in a work directory under `build/goldberg/`, which is watched
-  like an asset root. Only a terminal file goes to the output tree.
+- **Intermediates** land in a work directory beside the saved state (under
+  `build/goldberg/`), which is a root like an asset root: watched, scanned at startup,
+  its files solved like any others. Only a terminal file goes to the output tree.
 - **When a long step ends**, what it wrote last time and did not write this time is
   removed, with everything downstream of it.
 - **Tool categories.** A converter says what kind of tool runs it, and the category
@@ -369,10 +373,14 @@ goldberg clean   [GAME]               remove what goldberg wrote, and its state
 goldberg clean attic [GAME]          empty the attic: what goldberg took out of the output tree
 ```
 
+As slice 1 built it, a tree is named by `--roots FILE` (kormake writes one per program)
+or by `--root NAME=DIR` and `--out DIR`, not yet by `GAME` and `CONFIG` alone;
+`tools/goldberg/README.md` is the manual for what runs today.
+
 - `GAME` defaults the way a kormake name does: the module whose directory this is.
   `CONFIG` defaults as kormake's does, and picks the output tree.
-- `explain` and `status` against a running `watch` ask it (`--port`); `explain` without
-  one solves the file on the spot and cooks nothing.
+- `explain` and `status` are asked of a running `watch` on its stdin or its CLI port
+  (`--cli-port`); `explain` without one solves the file on the spot and cooks nothing.
 - `learn` is how a converter's `outputs` get written: goldberg runs the script on one
   source, watches where it writes, turns the names it saw into patterns, and changes that
   one value in the `.berg` file that registers the converter. It cooks nothing. See
@@ -464,8 +472,10 @@ slice 3 when the time comes.
   and draft/final state, load telemetry feeding edges, game-supplied converters,
   goldberg on a different host from the target.
 - **Small things, noted:** `env` metadata and `.env` files for child processes; a
-  `cook` that finds a `watch` already running on the same game and asks it, where today
-  the two would both write.
+  `cook` that finds a `watch` already running on the same game and asks it to finish
+  and report, where today it trusts the watch and exits at once; `goldberg status` and
+  `explain` from another terminal finding the running watch by themselves, where today
+  they need its port.
 
 Each slice gets its own PRD (`Goldberg-Slice-N-PRD.md`) before it is built.
 
@@ -500,6 +510,12 @@ Each slice gets its own PRD (`Goldberg-Slice-N-PRD.md`) before it is built.
   it) is moved to `.goldberg.attic/<timestamp>/<its path>` in the output tree. That is
   the escape hatch. A cook warns on its way out while an attic exists, and only
   `goldberg clean attic` empties it.
+- **One goldberg on a tree at a time**, by a lock beside the state. A cook waits for
+  another cook. A cook that finds a watch does nothing and succeeds: the watch has the
+  tree and cooks what changes.
+- **A dev build finds its tree** through `<program>.assets`, a one-line file kormake
+  writes beside the executable; **kormake hands over the roots** in a roots file per
+  program, which `goldberg watch` reads too.
 - **The game connects to goldberg.**
 - **The conventions are a `.berg` file**, so they are read, explained and overridden
   like any other layer.
@@ -513,14 +529,12 @@ Each slice gets its own PRD (`Goldberg-Slice-N-PRD.md`) before it is built.
   is then made from the graph (kpack as a sink, tag closures), and whether the loose
   tree still reaches `dist/` beside it, is open until then. Meanwhile kpack packs the
   cooked tree as it packed the staged one.
-- **How a dev build finds its output tree.** A path kormake bakes in, a file beside the
-  executable, or an argument. Android and iOS dev builds bundle assets today and need
-  an answer of their own until the Live slice gives them the connection.
+- **How a bundled dev build finds its output tree.** A desktop build reads
+  `<program>.assets`. Android and iOS dev builds bundle the cooked tree and need an
+  answer of their own until the Live slice gives them the connection.
 - **Sources and targets for a game.** Slice 1 uses a roots file and a path file that
   kormake writes. A game wants a better way to say where its assets come from and which
   trees they cook into, including splitting dev from debug in the project's `.berg`.
-- **How kormake hands over the roots.** Arguments on the rule's command line, or a
-  manifest in the build directory that `goldberg watch` can also read.
 - **Terminal, beyond the proposal.** Types marked runtime plus a `land` override is the
   starting rule. Not settled: whether being consumed by a fan-in step should by itself
   stop a runtime-typed file from landing (the atlas case, without anyone writing

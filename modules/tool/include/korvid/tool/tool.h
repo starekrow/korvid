@@ -20,6 +20,11 @@
 //
 // Engine flags come before the command: --threads N, --verbose (INFO lines; a tool logs
 // warnings and errors only by default), --max-ticks N (stop with 2 if not finished).
+// --cli-port N opens the CLI's listener on loopback for the length of the run.
+//
+// A tool with a command that stays up (goldberg watch) names it in ToolConfig::session:
+// while that command runs, stdin is a CLI session too, terminal or not, and the CLI's
+// `quit` is the tool's to answer (Engine::quit_requested).
 #pragma once
 #include "korvid/core/engine.h"
 
@@ -27,6 +32,7 @@ namespace kv {
 
 struct ToolConfig {
     const char*  name   = "tool";     // the command prefix and the name in usage lines
+    const char*  session = nullptr;   // the first word of a command that runs as a session, or null
     EngineConfig engine = {};
 };
 

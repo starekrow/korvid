@@ -36,6 +36,9 @@ namespace kv {
 
 constexpr u32 kGbPath = 200;
 
+int  goldberg_lock(const char* path, const char* who, char* holder, usize cap, i64* handle); // lock.cc
+void goldberg_unlock(i64 handle);
+
 // ---- the pools ---------------------------------------------------------------------------
 
 // One thing that happened, waiting for Lua. The kind is a GbEv.
@@ -204,6 +207,7 @@ struct GoldbergState {
     u32             max_procs = 8;
     Array<Hold>     holds;
     Array<Held>     held;
+    i64             lock = -1;           // the lock on the output tree's state, while held
     f64             watch_floor = 0;     // the least time a held file waits: over the polling watcher's interval
     char            out_dir[600] = {};   // the output tree
     char            attic[700] = {};     // where what leaves it goes: <out>/.goldberg.attic/<stamp>
@@ -889,6 +893,40 @@ int host_remove_work(lua_State* L) {
     return 0;
 }
 
+// host.lock(path, who): takes the lock file at `path` for this process. true; or false and
+// the holder's line ("watch 1234"); or nil when the file cannot be made.
+int host_lock(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    char holder[128];
+    if (s.lock >= 0) { lua_pushboolean(L, 1); return 1; }
+    int r = goldberg_lock(luaL_checkstring(L, 1), luaL_checkstring(L, 2), holder, sizeof holder, &s.lock);
+    if (r < 0) { lua_pushnil(L); return 1; }
+    lua_pushboolean(L, r == 1);
+    lua_pushstring(L, holder);
+    return 2;
+}
+int host_sleep(lua_State* L) { time_sleep(luaL_checknumber(L, 1)); return 0; }
+
+// host.stat(path): size and modification time, or nothing if it is not there.
+int host_stat(lua_State* L) {
+    IoStat st;
+    if (!io_stat(luaL_checkstring(L, 1), &st)) return 0;
+    lua_pushinteger(L, (lua_Integer)st.size);
+    lua_pushinteger(L, st.mtime_ns);
+    return 2;
+}
+
+// host.touch(root, path): a file-changed event for that file, as if a watcher had sent it.
+int host_touch(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    u32 at;
+    check_root(L, 1, &at);
+    const char* path = luaL_checkstring(L, 2);
+    if (strlen(path) >= kGbPath) return luaL_error(L, "'%s': a path too long", path);
+    push_pending(s, EvChanged, at, path);
+    return 0;
+}
+
 // host.write_atomic(path, text): the file written whole, its directory made if need be.
 int host_write_atomic(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
@@ -908,6 +946,7 @@ int host_glob(lua_State* L) { lua_pushboolean(L, glob_match(luaL_checkstring(L, 
 int host_glob_path(lua_State* L) { lua_pushboolean(L, glob_match_path(luaL_checkstring(L, 1), luaL_checkstring(L, 2))); return 1; }
 int host_print(lua_State* L) { print("%s\n", luaL_checkstring(L, 1)); return 0; }
 int host_warn(lua_State* L) { print_err("%s\n", luaL_checkstring(L, 1)); return 0; }
+int host_flush(lua_State*) { print_flush(); return 0; }
 int host_now(lua_State* L) { lua_pushnumber(L, time_now()); return 1; }
 int host_cwd(lua_State* L) {
     char cwd[1024];
@@ -932,6 +971,7 @@ int host_finish(lua_State* L) {
 constexpr luaL_Reg k_host[] = {
     {"add_root", host_add_root}, {"scan", host_scan}, {"watch", host_watch}, {"hash", host_hash},
     {"set_out", host_set_out}, {"copy", host_copy}, {"remove_output", host_remove_output}, {"write_atomic", host_write_atomic},
+    {"flush", host_flush}, {"lock", host_lock}, {"sleep", host_sleep}, {"stat", host_stat}, {"touch", host_touch},
     {"run", host_run}, {"clear_work", host_clear_work}, {"remove_work", host_remove_work},
     {"glob", host_glob}, {"glob_path", host_glob_path}, {"print", host_print}, {"warn", host_warn},
     {"now", host_now}, {"cwd", host_cwd}, {"active", host_active}, {"finish", host_finish}, {nullptr, nullptr},
@@ -1090,6 +1130,8 @@ void pump(TickContext& ctx) {
     }
     if (!s.active) return;
     lua_State* L = s.L;
+    // The CLI's `quit`, in a session: the state is saved and the run ends.
+    if (e.quit_requested) { call_app(s, e, "quit", 0, 0); return; }
 
     // 2. The sources.
     if (s.watcher.is_open()) {
@@ -1154,10 +1196,40 @@ void pump(TickContext& ctx) {
     if (s.active && idle) time_sleep(0.002); // nothing to do this tick: do not spin
 }
 
-// Every verb is one command: it leaves its words for the pump.
+// What a running session answers at once, in the CLI's own turn: it reads the session and
+// changes no pool.
+bool session_verb(const char* v) { return strcmp(v, "status") == 0 || strcmp(v, "explain") == 0 || strcmp(v, "touch") == 0; }
+
+// Every other verb is one command: it leaves its words for the pump.
 void cmd_any(CliContext& ctx, Span<const char* const> args, const char* verb) {
     GoldbergState* s = state_of(*ctx.engine);
     if (!s) { ctx.fail("the goldberg module is not up"); return; }
+    if (s->active && s->loaded && !s->failed && session_verb(verb)) {
+        lua_State* L = s->L;
+        int top = lua_gettop(L);
+        lua_pushcfunction(L, script_traceback);
+        lua_getglobal(L, "goldberg");
+        lua_getfield(L, -1, "ask");
+        lua_remove(L, -2);
+        lua_createtable(L, (int)args.len + 1, 0);
+        lua_pushstring(L, verb);
+        lua_rawseti(L, -2, 1);
+        for (u32 i = 0; i < args.len; ++i) { lua_pushstring(L, args[i]); lua_rawseti(L, -2, (lua_Integer)i + 2); }
+        // The answer: a list of lines, and a message if the request failed.
+        if (lua_pcall(L, 1, 2, top + 1) != LUA_OK) { ctx.fail("%s", lua_tostring(L, -1)); lua_settop(L, top); return; }
+        if (lua_istable(L, -2)) {
+            lua_Integer n = (lua_Integer)lua_rawlen(L, -2);
+            for (lua_Integer i = 1; i <= n; ++i) {
+                lua_rawgeti(L, -2, i);
+                if (lua_type(L, -1) == LUA_TSTRING) ctx.print("%s", lua_tostring(L, -1));
+                lua_pop(L, 1);
+            }
+        }
+        if (lua_type(L, -1) == LUA_TSTRING) ctx.fail("%s", lua_tostring(L, -1));
+        lua_settop(L, top);
+        return;
+    }
+    if (strcmp(verb, "touch") == 0) { ctx.fail("touch is for a running `goldberg watch`"); return; }
     if (s->command_words) { ctx.fail("goldberg is busy with another command"); return; }
     u32 n = (u32)strlen(verb);
     memcpy(s->command.push_n(n + 1), verb, n + 1);
@@ -1174,6 +1246,7 @@ void cmd_explain(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, a
 void cmd_status(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "status"); }
 void cmd_clean(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "clean"); }
 void cmd_replay(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "replay"); }
+void cmd_touch(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "touch"); }
 void cmd_learn(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "learn"); }
 
 bool goldberg_startup(Engine&, ModuleInstance& self) {
@@ -1190,6 +1263,7 @@ void goldberg_shutdown(Engine&, ModuleInstance& self) {
     if (!s) return;
     if (s->L) lua_close(s->L);
     s->watcher.free();
+    goldberg_unlock(s->lock);
     for (Proc* pr : s->procs) proc_free(pr);
     s->procs.free();
     s->holds.free();
@@ -1215,6 +1289,11 @@ constinit const CliCommandDesc k_commands[] = {
     {.name = "goldberg status", .help = "goldberg status: dirty, running, failed", .fn = cmd_status},
     {.name = "goldberg clean", .help = "goldberg clean --out DIR [--state FILE]: remove what goldberg wrote there, and its state", .fn = cmd_clean},
     {.name = "goldberg learn", .help = "goldberg learn FILE [--dry-run] [--scan]: run FILE's converter once, see what it writes, and declare that in the .berg file that registers it", .fn = cmd_learn},
+    {.name = "goldberg touch", .help = "goldberg touch PATH: in a running watch, look at this file again as if it had been saved", .fn = cmd_touch},
+    // In a session (goldberg watch, on stdin or the CLI's port) the same verbs without the tool's name.
+    {.name = "status", .help = "status: the running goldberg session: dirty, running, failed, warned", .fn = cmd_status},
+    {.name = "explain", .help = "explain PATH: what this file is, what happens to it, and why", .fn = cmd_explain},
+    {.name = "touch", .help = "touch PATH: look at this file again as if it had been saved", .fn = cmd_touch},
     {.name = "goldberg replay", .help = "goldberg replay LOG [--dump FILE]: feed a recorded event log to a fresh session, with no file system under it", .fn = cmd_replay},
 };
 constinit const SystemDesc k_systems[] = {

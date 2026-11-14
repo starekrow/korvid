@@ -39,7 +39,7 @@ void print_line(void* user, const char* line) {
 }
 
 void usage(const char* name) {
-    print_err("usage: %s [--threads N] [--verbose] [--max-ticks N] <command> [args...]\n"
+    print_err("usage: %s [--threads N] [--verbose] [--max-ticks N] [--cli-port N] <command> [args...]\n"
                     "       %s help    (every command this tool knows)\n", name, name);
 }
 
@@ -67,11 +67,13 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
     u32 threads = 0;
     u64 max_ticks = 0;
     bool verbose = false;
+    u32 cli_port = 0;
     int first = 1;
     for (; first < argc && strncmp(argv[first], "--", 2) == 0; ++first) {
         if (strcmp(argv[first], "--threads") == 0 && first + 1 < argc) threads = (u32)atoi(argv[++first]);
         else if (strcmp(argv[first], "--max-ticks") == 0 && first + 1 < argc) max_ticks = (u64)atoll(argv[++first]);
         else if (strcmp(argv[first], "--verbose") == 0) verbose = true;
+        else if (strcmp(argv[first], "--cli-port") == 0 && first + 1 < argc) cli_port = (u32)atoi(argv[++first]);
         else { print_err("%s: unknown option %s\n", config.name, argv[first]); usage(config.name); return 2; }
     }
     if (first >= argc) { usage(config.name); return 2; }
@@ -93,6 +95,8 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
     if (!verbose && was < LogLevel::Warn) log_set_level(LogLevel::Warn);
     CliConfig cli;
     cli.no_stdin = true; // a tool's stdin is the build's, not a CLI session
+    if (config.session && strcmp(argv[first], config.session) == 0) { cli.no_stdin = false; cli.stdin_ = true; }
+    cli.port = (u16)cli_port;
     cli_configure(cli);
     PlatformMounts mounts;
     mounts.none = true; // a tool mounts what its commands name, never the assets beside it

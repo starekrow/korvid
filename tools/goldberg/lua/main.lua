@@ -28,7 +28,7 @@ end
 
 -- ---- arguments ------------------------------------------------------------------------
 
-local VALUE = { ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--state"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true, ["--stamp"] = true }
+local VALUE = { ["--lock-wait"] = true, ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--state"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true, ["--stamp"] = true }
 local FLAG = { ["-v"] = "verbose", ["--quiet"] = "quiet", ["-q"] = "quiet", ["--dry-run"] = "dry_run", ["--scan"] = "scan", ["--keep"] = "keep" }
 
 local function parse(words)
@@ -196,6 +196,32 @@ local function start(mode, words)
         cfg.out_root = host.add_root("(out)", o.out, false)
         host.set_out(o.out, os.date("%Y%m%d-%H%M%S"))
         o.state_file = state_path(o)
+        -- One goldberg on a tree at a time. Another cook is waited for; a watch is not:
+        -- it stays, and it is already cooking what changes.
+        local lock = o.state_file:gsub("%.json$", "") .. ".lock"
+        kv.fs.mkdir(dirname(lock))
+        local waited, limit, told = 0, tonumber(o["lock-wait"]) or 60, false
+        while true do
+            local got, holder = host.lock(lock, mode)
+            if got then break end
+            if got == nil then return usage("cannot make the lock file " .. lock) end
+            holder = holder or ""
+            if holder:match("^watch") and mode == "cook" then
+                if not o.quiet then say("goldberg: %s: a goldberg watch has this tree (%s) and cooks what changes; nothing done here", cfg.game, holder) end
+                if o.stamp and not kv.fs.is_file(o.stamp) then host.write_atomic(o.stamp, "cooked by a watch\n") end
+                host.finish(0)
+                return
+            end
+            if waited >= limit then
+                return usage(string.format("another goldberg (%s) has had %s for %d s: not cooked. --lock-wait SECONDS waits longer", holder, o.out, limit))
+            end
+            if not told and waited >= 1 then
+                told = true
+                complain("waiting for another goldberg (%s) to finish with %s", holder, o.out)
+            end
+            host.sleep(0.05)
+            waited = waited + 0.05
+        end
         cfg.state = kv.fs.read(o.state_file)
         -- Where converters write, beside the state: a root like the others, watched, so
         -- a file a converter makes arrives as any file does.
@@ -206,6 +232,16 @@ local function start(mode, words)
         cfg.run_dir = scratch .. ".run"
     end
     run = { session = Session.new(cfg), mode = mode, opts = o, cfg = cfg, t0 = host.now() }
+    -- A watch keeps an eye on the project's goldberg.berg too: one file, looked at a few
+    -- times a second, since watching its directory would be watching the whole project.
+    if mode == "watch" then
+        local dir = o.project or find_project(host.cwd())
+        if dir then
+            run.project_file = dir .. "/goldberg.berg"
+            run.project_size, run.project_time = host.stat(run.project_file)
+            run.project_next = host.now() + 0.25
+        end
+    end
     if o.log then run.log = { log_start(cfg) } end
     -- Watchers first, then the scan: a file written during the scan is not missed, and
     -- the hash drops the duplicate.
@@ -232,6 +268,7 @@ local function report(final)
         say("goldberg: %s: %d files, %d rule files, %d failed, %d warned, nothing cooked: no --out (%.0f ms%s)", run.cfg.game, t.files, t.rules, t.failed, t.warned, ms,
             final and "" or ", watching with " .. run.backend)
     end
+    if not final then host.flush() end -- a watch's lines are read as they are said
     return t
 end
 
@@ -257,8 +294,80 @@ function goldberg.event(ev)
     run.said_stable = false
 end
 
+-- The project's rule file, if it changed: an event like any other, so a log holds it.
+local function poll_project()
+    if not run.project_file or host.now() < run.project_next then return end
+    run.project_next = host.now() + 0.25
+    local size, time = host.stat(run.project_file)
+    if size == run.project_size and time == run.project_time then return end
+    run.project_size, run.project_time = size, time
+    local text = size and kv.fs.read(run.project_file) or nil
+    goldberg.event{ kind = "project-changed", root = 0, path = run.project_file, text = text }
+end
+
+function goldberg.quit()
+    if run then
+        write_outputs()
+        say("goldberg: %s: stopped", run.cfg.game)
+        run = nil
+    end
+    host.finish(0)
+end
+
+-- A verb asked of the running session, answered at once: the lines, and a message if it
+-- could not be done.
+function goldberg.ask(words)
+    if not run then return {}, "no session is running here" end
+    local s, verb, out = run.session, words[1], {}
+    if verb == "status" then
+        local t = s:totals()
+        local busy = s.graph and s.graph:busy() or { running = {}, waiting = 0 }
+        local state = s:stable() and "stable" or "working"
+        out[#out + 1] = string.format("goldberg: %s: %s: %d files, %d cooked, %d clean, %d failed, %d warned, %d running, %d waiting (%s, watching with %s)",
+            run.cfg.game, state, t.files, t.cooked or 0, t.clean or 0, t.failed, t.warned, #busy.running, busy.waiting + s.hashing, run.mode, run.backend)
+        for _, r in ipairs(busy.running) do out[#out + 1] = "  running  " .. r end
+        for _, e in ipairs(t.errors) do out[#out + 1] = "  failed   " .. e end
+        for _, w in ipairs(t.warnings) do out[#out + 1] = "  warned   " .. w end
+        return out
+    elseif verb == "explain" or verb == "touch" then
+        if #words < 2 then return out, verb .. " PATH" end
+        for i = 2, #words do
+            -- A path on disk, or a file's key as a dump prints it ("arcfire:ships/ship.png").
+            local arg, f = words[i], s.files[words[i]]
+            if not f then
+                local full = absolute(arg):gsub("/%./", "/")
+                for n, r in ipairs(s.roots) do
+                    local dir = (r.abs or r.dir):gsub("/+$", "")
+                    if n ~= s.out_root and full:sub(1, #dir + 1) == dir .. "/" then f = s.files[s:key(n, full:sub(#dir + 2))] end
+                end
+            end
+            if not f then return out, arg .. ": not a file this session knows (give its path, or its key as `root:path`)" end
+            if verb == "touch" then
+                host.touch(f.root, f.path)
+                out[#out + 1] = "touched " .. f.key
+            elseif f.is_berg then
+                local rec = s.rules:get(f.key)
+                out[#out + 1] = f.key
+                out[#out + 1] = "  a rule file" .. (rec and rec.err and (", broken: " .. rec.err .. (rec.doc and " (its last good version is in force)" or "")) or "")
+            elseif not f.answer then
+                out[#out + 1] = f.key
+                out[#out + 1] = "  not solved yet"
+            else
+                local eff, prov = s:metadata(f)
+                local _, path = s:place(f)
+                for _, line in ipairs(explain.lines(path, f.answer, eff, eff and prov or {}, run.opts.out)) do out[#out + 1] = line end
+                local step = s.graph and s.graph.steps[f.key]
+                if step then out[#out + 1] = string.format("  %-8s%s%s", "step", step.state, step.error and (": " .. step.error) or "") end
+            end
+        end
+        return out
+    end
+    return out, "not something a running session answers: " .. tostring(verb)
+end
+
 function goldberg.tick(quiet)
     if not run then return end
+    poll_project()
     local s = run.session
     if s:has_work() then
         if run.log then run.log[#run.log + 1] = '{"kind": "settle"}' end
@@ -454,8 +563,8 @@ function goldberg.command(words)
         say("goldberg: removed %s and its state", o.out)
         host.finish(0)
     elseif verb == "status" then
-        if not run then say("goldberg: no session is running here") host.finish(0) return end
-        report(false)
+        say("goldberg: no session is running here. status is asked of a running `goldberg watch`, on its stdin or its --cli-port")
+        host.finish(0)
     else
         usage("unknown command " .. tostring(verb))
     end

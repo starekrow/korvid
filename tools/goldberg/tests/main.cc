@@ -7,6 +7,7 @@
 #include "korvid/platform/io.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/module.h"
+#include "korvid/platform/net.h"
 #include "korvid/platform/process.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -18,7 +19,7 @@ using namespace kv;
 
 struct Tree {
     char dir[512] = {};
-    char out[600] = {};   // the last dump read, as text
+    char out[1200] = {};  // the last path asked for
     Array<char> text;
 
     bool make(const char* prefix) { return io_make_temp_dir(prefix, dir, sizeof dir); }
@@ -30,7 +31,7 @@ struct Tree {
         return io_write_now(path, content, strlen(content));
     }
     const char* path(const char* rel) {
-        snprintf(out, sizeof out, "%s/%s", dir, rel);
+        if (snprintf(out, sizeof out, "%s/%s", dir, rel) >= (int)sizeof out) out[0] = 0;
         return out;
     }
     // A file's text, valid until the next read.
@@ -641,6 +642,210 @@ void test_learn(TestCtx& c) {
     t.free();
 }
 
+// ---- a goldberg that stays up -------------------------------------------------------------------
+
+// `goldberg watch` (or any goldberg) left running, its output gathered as it comes.
+struct Running {
+    Process p;
+    Array<char> out, err;
+    Array<const char*> argv;
+    char exe[700] = {};
+
+    template <class... A>
+    bool start(A... words) {
+        if (!platform_exe_dir(exe, sizeof exe)) return false;
+        usize len = strlen(exe);
+        snprintf(exe + len, sizeof exe - len, "goldberg");
+        const char* const list[] = {words...};
+        argv.push(exe);
+        for (const char* w : list) argv.push(w);
+        ProcessDesc d;
+        d.argv = Span<const char* const>(argv.data, argv.len);
+        return p.spawn(d);
+    }
+    void pump() {
+        char buf[4096];
+        for (;;) { i32 r = p.read_out(buf, sizeof buf); if (r <= 0) break; if (out.len) --out.len; memcpy(out.push_n((u32)r), buf, (usize)r); out.push(0); }
+        for (;;) { i32 r = p.read_err(buf, sizeof buf); if (r <= 0) break; if (err.len) --err.len; memcpy(err.push_n((u32)r), buf, (usize)r); err.push(0); }
+    }
+    const char* text() { pump(); return out.len ? out.data : ""; }
+    const char* errors() { pump(); return err.len ? err.data : ""; }
+    // Waits for the process to end by itself; its exit status, or -1 after `seconds`.
+    int wait(f64 seconds) {
+        f64 t0 = time_now();
+        while (p.running()) { pump(); if (time_now() - t0 > seconds) return -1; time_sleep(0.005); }
+        pump();
+        return p.code;
+    }
+    void free() { p.free(); out.free(); err.free(); argv.free(); }
+};
+
+// Polls until `fn` holds, for five seconds at most.
+template <class F>
+bool eventually(Running& r, F fn) {
+    f64 t0 = time_now();
+    for (;;) {
+        r.pump();
+        if (fn()) return true;
+        if (time_now() - t0 > 5.0) return false;
+        time_sleep(0.01);
+    }
+}
+
+// One request to a goldberg's CLI port: the response lines in g_out, true if it ended "ok".
+bool ask(Running& r, u16 port, const char* line) {
+    g_out.len = 0;
+    NetSocket sock;
+    if (!net_connect_local(port, sock)) { g_out.push(0); return false; }
+    sock.write_str(line);
+    sock.write_str("\n");
+    bool ok = false, done = false;
+    f64 t0 = time_now();
+    while (!done && time_now() - t0 < 5.0) {
+        sock.flush();
+        r.pump();
+        char buf[4096];
+        i32 n = sock.read(buf, sizeof buf);
+        if (n < 0) break;
+        if (n > 0) memcpy(g_out.push_n((u32)n), buf, (usize)n);
+        else time_sleep(0.002);
+        // The last line says how it went.
+        if (g_out.len && g_out.data[g_out.len - 1] == '\n') {
+            u32 at = g_out.len - 1;
+            while (at > 0 && g_out.data[at - 1] != '\n') --at;
+            if (strncmp(g_out.data + at, "ok\n", 3) == 0) { ok = true; done = true; }
+            else if (strncmp(g_out.data + at, "err", 3) == 0) done = true;
+        }
+    }
+    sock.close();
+    sock.out.free();
+    g_out.push(0);
+    return ok;
+}
+
+bool file_is(Tree& t, const char* rel, const char* content) { return io_is_file(t.path(rel)) && strcmp(t.read(rel), content) == 0; }
+
+// The live session: a watch that stays up while sources and rules change under it.
+void test_watch(TestCtx& c) {
+    c.begin("goldberg watch");
+    if (!process_supported()) return;
+    for (int pass = 0; pass < 2; ++pass) {
+        const char* backend = pass ? "poll" : "auto";
+        Tree t;
+        KV_CHECK(c, t.make("kv-goldberg-watch"));
+        char root[600], out[600], port_text[16], a_png[600], hud[600];
+        snprintf(root, sizeof root, "g=%s/assets", t.dir);
+        snprintf(out, sizeof out, "%s/out", t.dir);
+        snprintf(a_png, sizeof a_png, "%s/assets/a.png", t.dir);
+        snprintf(hud, sizeof hud, "%s/assets/ui/hud.json", t.dir);
+        u16 port = (u16)(41000 + (u32)(os_ticks() % 20000));
+        snprintf(port_text, sizeof port_text, "%u", port);
+        t.put("assets/a.png", "a1");
+        t.put("assets/ui/hud.json", "{}");
+        t.put("assets/ships/ship.png", "ship");
+        t.put("assets/goldberg.berg", "{}");
+
+        Running w;
+        KV_CHECK(c, w.start("--cli-port", port_text, "watch", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", backend));
+        KV_CHECK(c, eventually(w, [&] { return has(w.text(), "3 files, 3 cooked, 0 clean, 0 failed") && has(w.text(), ", watching with "); }));
+        KV_CHECK(c, file_is(t, "out/g/a.png", "a1") && file_is(t, "out/g/ui/hud.json", "{}") && file_is(t, "out/g/ships/ship.png", "ship"));
+
+        // A source saved: that one is cooked again, and nothing else.
+        t.put("assets/a.png", "a2, saved");
+        KV_CHECK(c, eventually(w, [&] { return file_is(t, "out/g/a.png", "a2, saved") && has(w.text(), "3 files, 4 cooked"); }));
+        // Saved with the same bytes: nothing is cooked.
+        t.put("assets/a.png", "a2, saved");
+        time_sleep(0.6);
+        KV_CHECK(c, ask(w, port, "status") && has(g_out.data, "game: stable: 3 files, 4 cooked") && has(g_out.data, "0 failed, 0 warned, 0 running, 0 waiting"));
+
+        // A goldberg.berg saved: what it speaks for is solved again, and only what got a
+        // different answer is touched.
+        t.put("assets/goldberg.berg", R"({ "rules": [ { "match": "ui/**", "meta": { "cook": false } }, { "match": "*.png", "meta": { "filter": "nearest" } } ] })");
+        KV_CHECK(c, eventually(w, [&] { return !io_is_file(t.path("out/g/ui/hud.json")); }));
+        KV_CHECK(c, eventually(w, [&] { return ask(w, port, "status") && has(g_out.data, "stable: 3 files, 4 cooked"); }) && file_is(t, "out/g/a.png", "a2, saved"));
+        // A sidecar arrives and speaks for its stem; it goes, and the stem is as it was.
+        t.put("assets/ships/ship.berg", R"({ "meta": { "out": "ships/hero.png" } })");
+        KV_CHECK(c, eventually(w, [&] { return file_is(t, "out/g/ships/hero.png", "ship") && !io_is_file(t.path("out/g/ships/ship.png")); }));
+        KV_CHECK(c, io_remove(t.path("assets/ships/ship.berg")));
+        KV_CHECK(c, eventually(w, [&] { return file_is(t, "out/g/ships/ship.png", "ship") && !io_is_file(t.path("out/g/ships/hero.png")); }));
+
+        // A rule file that stops parsing: it is reported, with its line, and its last good
+        // version stays in force. Nothing under it moves.
+        t.put("assets/goldberg.berg", "{\n  \"rules\": [\n  }\n");
+        KV_CHECK(c, eventually(w, [&] { return ask(w, port, "status") && has(g_out.data, "/assets/goldberg.berg:3: "); }));
+        KV_CHECK(c, !io_is_file(t.path("out/g/ui/hud.json")) && file_is(t, "out/g/a.png", "a2, saved") && file_is(t, "out/g/ships/ship.png", "ship"));
+        KV_CHECK(c, ask(w, port, "explain g:a.png") && has(g_out.data, "filter") && has(g_out.data, "its last good version is still in force"));
+        // Mended: the error is gone, and the new rules are the rules.
+        t.put("assets/goldberg.berg", "{}");
+        KV_CHECK(c, eventually(w, [&] { return file_is(t, "out/g/ui/hud.json", "{}"); }));
+        KV_CHECK(c, eventually(w, [&] { return ask(w, port, "status") && has(g_out.data, "stable") && has(g_out.data, "0 failed") && !has(g_out.data, "goldberg.berg:3"); }));
+
+        // The verbs: explain by path, touch, and a file nobody typed.
+        char line[900];
+        snprintf(line, sizeof line, "explain %s", hud);
+        KV_CHECK(c, ask(w, port, line) && has(g_out.data, "ui/hud.json") && has(g_out.data, "type    data") && has(g_out.data, "step    clean"));
+        snprintf(line, sizeof line, "goldberg touch %s", a_png);
+        KV_CHECK(c, ask(w, port, line) && has(g_out.data, "touched g:a.png"));
+        KV_CHECK(c, !ask(w, port, "explain /no/such/file") && has(g_out.data, "not a file this session knows"));
+        t.put("assets/odd.xyz", "?");
+        KV_CHECK(c, eventually(w, [&] { return ask(w, port, "status") && has(g_out.data, "1 warned") && has(g_out.data, "  warned   g:odd.xyz: no type"); }));
+        KV_CHECK(c, ask(w, port, "ls /kinds/goldberg") && has(g_out.data, "file") && has(g_out.data, "step"));
+
+        // The project's rule file, which is in no asset root, is seen too.
+        t.put("goldberg.berg", R"({ "rules": [ { "match": "*.xyz", "meta": { "cook": false } } ] })");
+        KV_CHECK(c, eventually(w, [&] { return !io_is_file(t.path("out/g/odd.xyz")) && ask(w, port, "status") && has(g_out.data, "0 warned"); }));
+
+        // A source deleted: its output goes. A directory of them too.
+        KV_CHECK(c, io_remove(t.path("assets/a.png")));
+        KV_CHECK(c, eventually(w, [&] { return !io_is_file(t.path("out/g/a.png")); }));
+        KV_CHECK(c, io_remove_tree(t.path("assets/ships")));
+        KV_CHECK(c, eventually(w, [&] { return !io_is_file(t.path("out/g/ships/ship.png")); }) && file_is(t, "out/g/ui/hud.json", "{}"));
+
+        // A cook of the same tree while the watch has it does nothing, and says why.
+        KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0 && has(g_out.data, "a goldberg watch has this tree (watch "));
+
+        // quit: the state is saved and the watch ends.
+        KV_CHECK(c, ask(w, port, "quit") || true);
+        KV_CHECK(c, w.wait(5.0) == 0 && has(w.text(), "game: stopped") && io_is_file(t.path(".goldberg-state/out.json")));
+        // And the next cook finds everything as the watch left it.
+        KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0 && has(g_out.data, "0 cooked, 1 clean, 0 failed"));
+        w.free();
+        t.free();
+    }
+}
+
+// Two cooks of one tree: the second waits for the first, then finds nothing to do.
+void test_lock(TestCtx& c) {
+    c.begin("goldberg lock");
+    if (!process_supported()) return;
+    Tree t;
+    KV_CHECK(c, t.make("kv-goldberg-lock"));
+    char root[600], out[600];
+    snprintf(root, sizeof root, "g=%s/assets", t.dir);
+    snprintf(out, sizeof out, "%s/out", t.dir);
+    t.put("assets/goldberg.berg", R"({ "types": { "slow": {} }, "converters": { "nap": { "from": "slow", "to": "text", "shell": "nap", "outputs": ["{stem}.txt"] } },
+  "rules": [ { "match": "*.slow", "meta": { "type": "slow" } } ] })");
+    t.put("assets/nap.sh", "sleep 1\necho rested > \"$2/$GOLDBERG_STEM.txt\"\n");
+    t.put("assets/one.slow", "z");
+    Running first;
+    KV_CHECK(c, first.start("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none"));
+    time_sleep(0.3);
+    f64 t0 = time_now();
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
+    KV_CHECK(c, time_now() - t0 > 0.5 && has(g_out.data, "0 cooked, 2 clean") && file_is(t, "out/g/one.txt", "rested\n"));
+    KV_CHECK(c, first.wait(5.0) == 0 && has(first.text(), "2 cooked"));
+    first.free();
+    // One that will not wait says who has the tree.
+    Running again;
+    t.put("assets/one.slow", "zz");
+    KV_CHECK(c, again.start("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none"));
+    time_sleep(0.3);
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none", "--lock-wait", "0") == 2 && has(g_err.data, "another goldberg (cook "));
+    KV_CHECK(c, again.wait(5.0) == 0);
+    again.free();
+    t.free();
+}
+
 } // namespace
 
 int main() {
@@ -650,6 +855,8 @@ int main() {
     test_cook(c);
     test_scripts(c);
     test_learn(c);
+    test_watch(c);
+    test_lock(c);
     g_out.free();
     g_err.free();
     names_shutdown();

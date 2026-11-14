@@ -413,6 +413,20 @@ function Graph:stable()
     return self.unchecked == 0 and self.running == 0 and self.swept
 end
 
+-- What is not at rest, for status: { running = { lines }, waiting = n }.
+function Graph:busy()
+    local t = { running = {}, waiting = 0 }
+    local keys = {}
+    for key in pairs(self.steps) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local step = self.steps[key]
+        if step.state == "running" then t.running[#t.running + 1] = string.format("%s (%s)", key, step.kind == "copy" and "copy" or step.conv.name)
+        elseif step.state == "unchecked" then t.waiting = t.waiting + 1 end
+    end
+    return t
+end
+
 -- { cooked, clean, failed, errors } for the last line.
 function Graph:totals()
     local t = { cooked = self.cooked, clean = 0, failed = 0, removed = self.removed, errors = {} }
