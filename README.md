@@ -6,10 +6,11 @@ and other niceties. It runs on Linux, Windows, macOS, iOS, and Android. Dependen
 minimal; on most platforms you'll just need a local C++ compiler and a few
 packages - SDL3 for desktops, slangc and Ninja if you don't already have them.
 
-The engine is fully deterministic on each platform (though not across
-platforms). This can make it _much_ easier to track down bugs, since replays
-will trace the exact same paths through your code with just an initial state and
-an input script.
+The engine is fully deterministic across platforms (if you use the engine's
+transcendentals - they're about the same speed as glibc's, and more accurate).
+This can make it _much_ easier to track down bugs, since replays will trace the
+exact same paths through your code with just an initial state and an input
+script.
 
 The engine provides its own build tool, kormake, that understands its module
 format and makes some tasks easier.
@@ -22,12 +23,15 @@ in memory.
 
 Some notable roadmap items:
 
-  - Android support
+  - Android support 
+    - nearly done, needs device testing
   - 3D graphics
   - More animation types
   - Physics
   - Authoring environment
+    - Design is started: docs/design/asset-toolchain-design.md
   - Additional language support
+    - Has Lua now, but you have to write your own adapters
 
 A fair amount of AI was used to develop this engine. All the music and art in 
 the examples was created by humans and is credited. See 
@@ -91,9 +95,9 @@ link with. Note that the toolchains and platforms are modules themselves.
 
 ### Cross-Platform
 
-Korvid currently runs on Linux, Windows, macOS, iOS, and Android. It is designed as a
-three-layer engine, with an outer ring of services and entities, an inner
-rendering engine, and a platform rendering core. Service modules can easily 
+Korvid currently runs on Linux, Windows, macOS, iOS, and Android. It is designed
+as a three-layer engine, with an outer ring of services and entities, an inner
+rendering engine, and a platform rendering core. Service modules can easily
 adapt to the platform as well - I/O is just a service, as is windowing.
 
 kormake also has built-in support for building binaries for the host machine in
@@ -119,8 +123,21 @@ other things that were better compiled in than linked from who-knows-where.
 
 ### Deterministic Engine
 
-...details on hashing et al...
+Korvid provides a fully deterministic engine environment that makes replays
+easy and can help bisect an issue down to a single tick on a single system. The
+correct ordering of systems and data modifications (see below), along with 
+stable transcendental functions (sin, cos, pow and friends) and stable random 
+number generation all combine to provide this capability. This means that your
+game could play exactly the same way, every time on every platform, from a 
+single starting point.
 
+The main advantage you get from this is that if you make a change that shouldn't 
+affect the way your simulation runs, you can actually check it. If one of your 
+platforms is acting a bit differently from the others, you can track down 
+exactly why.
+
+Not all games will need this capability, but it is astonishingly useful both for
+debugging and for netplay.
 
 ### Automatic Ordering
 
@@ -151,78 +168,6 @@ reflect its types for log printing, snapshots, interaction through the command
 line, and compatibility with the execution ordering and event systems.
 
 ## Engine Structure
-
-## Platform Notes
-
-### Linux
-### Windows
-### macOS
-### iOS
-### Android
-
-
----------------------------------------------
-Old generated content, ignore
-
-Step 2: a Vulkan 1.3 sprite renderer behind a render interface, sprite entities with
-a per-tick delta extract into the renderer's persistent world, and an example game with
-a three-state machine (INIT, RUN, EXIT) that bounces four balls over a tiled background:
-horizontal, vertical, random, and one that blinks in and out of existence, each with its
-own material so all three blend modes are on screen. Textures and materials are
-renderer-issued handles whose index is the GPU slot or row; a null or stale material
-renders with the built-in red/white checkerboard.
-
-Module registration is declarative (`core/module.h`): a module is one `constinit`
-`ModuleDesc` with tables of event types, component schemas, entity kinds, resources and
-systems, plus startup/shutdown for OS resources and module state. A kind is a fixed set
-of components with a capacity; the engine builds a table per kind (one SoA column per
-component on reserved pages, a handle kind, a resource per column) and copies the `prev`
-columns at the top of PreSim. Systems reach data through the `TickContext`: `write_kind`
-for the table a system holds the write on, `read<T>`/`write<T>` for one column by name,
-`view<A, const B>()` for every kind with those components (constness is the access mode),
-`resource<const T>(name)` for what a module published under one of its declared resources
-(the window, the input state), and `spawn_later`/`destroy` commands applied at the phase
-boundary. Names resolve to ids once with `resource_id`, `column_id` and `kind_id`. In dev
-builds an access the system did not declare asserts with the system and resource named. Nothing registers itself and nothing runs before main;
-the build-generated list (`build/<target>/gen/<exe>/modules.gen.cc`) is the only input. Modules
-start in list order and stop in reverse, and event, component and kind ids are assigned in
-list then declaration order. Within each tick phase (input, presim, sim, postsim) the
-order is derived from the systems' read/write sets: a reader runs after every writer of
-what it reads, `after`/`before` add edges by hand, two writers of one resource with no
-path between them or a cycle is a registration error naming the systems, and ties break
-by module then declaration order. A system that reads a cosmetic column may not write a
-sim one. `engine_init` logs the order and the reason for every edge. `--hash` logs a hash
-of every sim column of every live entity after each tick, `--hash-systems` after each
-system, to locate where two runs diverge.
-
-Events are plain data in typed per-tick buffers, delivered at phase boundaries. An event
-type may carry a field schema (`KV_EVENT_EX`); then an event whose handle no longer
-resolves is dropped at delivery and counted, and the dev trace (`--trace-events`) prints
-every delivered event with who emitted it. Modules declare handlers (`KV_ON(Event, fn)`)
-that run at every boundary on the new batch of their event, in waves: what a wave emits
-is delivered to the next, up to a cap of four, and what remains waits for the next
-boundary. Handlers have read/write sets and are ordered like systems. A type flagged
-`EvNextTick` is held until the next tick's first boundary. Systems with no path between them share a level and run at once on the job pool
-(`--threads N`; a module's own state is an implicit resource its systems write unless they
-declare `.state = StateUse::None`; a system that talks to the OS, the GPU or a module's own
-pools declares `.main_thread = true` and runs on the driving thread); `parallel_for(ctx, rows, grain, fn)` splits one system's
-rows over the pool, each chunk emitting and spawning into buffers merged in chunk order, so
-hashes agree across thread counts. The profiler (`core/profile.h`, docs/design/profiler.md)
-records zones, waits, marks and counters into a ring per thread; every system, handler,
-boundary, chunk and frame is zoned for free, `--prof-report` logs the top zones with the fps
-line, `--profile FILE` writes a Chrome trace, and `--hitch-ms` dumps the hitching frame's tree. `ctx.schedule(event, tick)`
-files an event in the timer wheel for the first boundary of that tick. Triggers declare
-an edge on one field of a `prev` component (`Changed`, `CrossedBelow`, `CrossedAbove`);
-the engine evaluates them at the end of every tick and emits `StateEdge` for the next.
-
-Modules follow the kormake directory convention (`module.lua`, `include/korvid/<name>/`,
-`src/`, `src/<platform>/`, `shaders/`, `assets/`, `tests/`). kormake (`tools/kormake`, its
-own README there) reads `kormake.lua` and every `module.lua`, resolves the instance graph
-for a platform and config, and writes `build/<platform>-<config>/build.ninja` plus
-`compile_commands.json`. It generates each executable's module list in dependency order,
-one unity file per module, copies a module's `assets/` to `bin/assets/<module>/`, and
-runs the bound shader compiler over `shaders/`. The toolchain and the shader compiler are
-modules too (`toolchain-linux`, `slang`).
 
 The engine's modules are in `modules/`, the examples in `examples/<name>/` and the tools
 in `tools/<name>/`, each module named for its directory (`examples/arcfire` is `arcfire`,
@@ -309,14 +254,19 @@ you are in; at the root it builds everything. `tools/kormake/README.md` is the m
     build/linux-debug/bin/testbed --prof-report      # the top zones per frame with every fps line
     build/linux-debug/bin/testbed --profile t.json   # a trace for Perfetto (ui.perfetto.dev) or chrome://tracing
 
-Needs a C compiler for the bootstrap, g++ (or clang++ via `--cxx`), ninja, libsdl3-dev,
-libvulkan-dev, zlib1g-dev, slang-compiler, and for debug runs vulkan-validationlayers. Nothing links libvulkan: the loader is reached
-through SDL and every entry point is loaded at runtime (renderer-vulkan/src/vk_funcs.h).
 
-## Building on Windows
+## Platform Notes
 
-Windows is being brought up a module at a time; the `windows` root in `kormake.lua` lists
-what builds there so far. It uses MSVC and the SDL project's prebuilt SDL3 package.
+### Linux
+
+Needs a C compiler for the bootstrap, g++ (or clang++ via `--cxx`), ninja,
+libsdl3-dev, libvulkan-dev, zlib1g-dev, slang-compiler, and for debug runs
+vulkan-validationlayers. Nothing links libvulkan: the loader is reached through
+SDL and every entry point is loaded at runtime (renderer-vulkan/src/vk_funcs.h).
+
+### Windows
+
+Windows uses MSVC and the SDL project's prebuilt SDL3 package.
 
 1. **Visual Studio 2022 or later, or the Build Tools**, with the "Desktop development
    with C++" workload. Nothing else is needed from it: kormake finds `cl`, the Windows SDK
@@ -363,7 +313,7 @@ configure with the cairo plugin, 4.3 ms with the GTK plugin, at hundreds of conf
 per second. Keyboard resizes and borderless windows are unaffected. Nothing in the
 engine runs during the stall; `--hitch-ms` shows it as time spent in the pump.
 
-## Building on macOS
+### macOS
 
 macOS 26 or later on Apple silicon. The renderer is `renderer-metal`; everything the
 Linux build has builds here (the `macos` root in `kormake.lua`).
@@ -426,7 +376,7 @@ does the signing and the device runs itself, with what macOS ships (`security`, 
 `codesign`, `devicectl`); `tools/kormake/README.md` lists the variables it reads.
 `DEVICECTL_CHILD_SDL_AUDIO_DRIVER=dummy` keeps the tests silent.
 
-## Building for Android
+### Android
 
 From a Linux host (the other hosts are untried). Android is native: a `NativeActivity`, the
 NDK's clang, AAudio, and the Vulkan renderer Linux and Windows draw with. No SDL, no
@@ -434,6 +384,7 @@ Gradle, no Android Studio: kormake compiles with the NDK and writes the `.apk` i
 One class of Java (the activity, for typed text from the on-screen keyboard) is compiled
 with `javac` when a JDK is installed; without one a package still builds, and has keys but
 no typed text.
+
 There are two platforms: `androidemu` is x86-64, for the emulator on an x86-64 host;
 `android` is arm64, for a phone. Everything below has run in the emulator; the arm64 build
 is built and packaged and has not yet met a device (`docs/design/android-port-notes.md`).
