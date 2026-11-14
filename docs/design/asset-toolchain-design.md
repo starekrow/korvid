@@ -150,7 +150,9 @@ What goldberg needs the library to support:
 - **Reports.** Warnings (fallback matches, out-of-pack loads, fragmentation), pack budgets, and the assets responsible.
 - **Forms.** Editing declarations and per-asset overrides without hand-editing sidecars.
 
-Since goldberg uses the engine's UI for its own purposes, this library is general engine UI, not goldberg-specific. Any game or tool built on Korvid inherits it.
+Since goldberg uses the engine's UI for its own purposes, this library is general engine UI, not goldberg-specific. Any game or tool built on Korvid inherits it. Its design is its own document: Krome, `docs/design/krome.md`. goldberg is a customer of it and nothing more.
+
+Start order: the solver and the converters need no UI, so goldberg starts headless, builds or refreshes its own UI assets like any others, and only then brings up the window that loads them. A UI asset that fails to build is reported by the CLI.
 
 ## Open questions
 
