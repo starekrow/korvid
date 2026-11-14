@@ -18,6 +18,10 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverityFlagBit
     // may want (sprite_fragment.slangh), and the engine's, like most game shaders, reads only
     // some. Unread outputs are legal; the layers warn about them anyway.
     if (data && data->pMessageIdName && strstr(data->pMessageIdName, "Shader-OutputNotConsumed")) return VK_FALSE;
+    // Expected too: on a turned screen (a phone's) the swapchain asks for an identity
+    // transform and has the compositor turn the image (vk_swapchain.cc says why); the layers
+    // note the cost at every swapchain. Pre-rotation would remove the note with its cause.
+    if (data && data->pMessageIdName && strstr(data->pMessageIdName, "Swapchain-PreTransform")) return VK_FALSE;
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
         ++r->validation_errors;
         KV_ERROR("vulkan", "%s", msg);

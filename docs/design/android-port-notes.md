@@ -475,6 +475,32 @@ state survives.
   137 pixels at the top in landscape is wanted or wasteful there.
 - The debug names on Vulkan objects, off in the emulator only.
 
+## After milestone 6: the checks finished, and validation
+
+The emulator restarted (it came back with its installed apps), the JDK installed, and the
+validation layer fetched: the `android-binaries` archive of Vulkan-ValidationLayers
+1.4.363.1, its `x86_64` and `arm64-v8a` libraries under
+`~/Android/Sdk/vulkan-validation-layers/`. A debug package now ends "with the validation
+layer" and carries the 30 MB library beside the game's.
+
+- **The two checks the crash cut short.** arcfire's Orbit on the thread ring, 8 threads:
+  `4def9ab637bb3288` at tick 18864, Linux's. rocks through Home and relaunch 25 times with
+  its sound playing: 25 surfaces released and taken, no error, and at its exit "2914752
+  frames rendered in 5801 callbacks, 0 clipped samples, 0 commands dropped".
+- **Debug builds under validation report nothing.** testbed, stones, rocks, arcanum and
+  arcfire's Shoreline and Orbit, each a debug package run through its demo: "0 validation
+  errors, 0 warnings", and the hashes what they are without the layer. testbed through
+  Home and relaunch fifty times with the layer on: 50 released, 50 taken, 177 sort checks
+  passed, 0 errors, 0 warnings. Milestone 4's unproved criterion is proved.
+- **One note is expected and no longer counted**: `WARNING-Swapchain-PreTransform`, which
+  the layer raises at every swapchain made with an identity transform on a turned screen.
+  That is the choice milestone 4 made, and the messenger passes over it as it does the
+  shaders' unread outputs. It was the layer's only remark (two a run: the first swapchain
+  and the one after the turn settles). Pre-rotation would remove the note with its cause.
+- The emulator did not crash in this session's hundred-odd launches. Each run here waited
+  four seconds after an app's exit before starting the next, where the two crashes had
+  followed an exit at once; that is a correlation, not a finding.
+
 ### Still to come
 
 Milestone 7: composed text through one Java class (`KorvidActivity`), which needs a JDK
