@@ -110,6 +110,14 @@ bool os_path_stat(const char* path, OsStat* out) {
     return true;
 }
 
+bool os_current_dir(char* out, u32 cap) {
+    wchar_t w[KV_WIDE_PATH_MAX];
+    DWORD n = GetCurrentDirectoryW(KV_WIDE_PATH_MAX, w);
+    if (n == 0 || n >= (DWORD)KV_WIDE_PATH_MAX || !narrow(w, out, (int)cap)) return false;
+    forward_slashes(out);
+    return true;
+}
+
 bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user) {
     wchar_t w[KV_WIDE_PATH_MAX];
     if (!widen(dir, w, KV_WIDE_PATH_MAX - 2)) return false;

@@ -228,6 +228,12 @@ bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc = nullptr,
 // False if the archive cannot be read, has no such entry, or holds it deflated.
 bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* size);
 
+// What a path names, with its size and modification time (nanoseconds from the OS's
+// epoch: for comparing with another, nothing else). False if nothing is there.
+struct IoStat { bool is_file = false, is_dir = false; u64 size = 0; i64 mtime_ns = 0; };
+bool io_stat(const char* path, IoStat* out);
+// The process's working directory, '/' separated, no trailing slash.
+bool io_current_dir(char* out, u32 cap);
 bool io_is_file(const char* path);
 bool io_is_dir(const char* path);
 

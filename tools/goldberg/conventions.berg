@@ -1,0 +1,36 @@
+{
+  "//": "goldberg's built-in layer: what a file is by its name, and which types the game reads. Every other .berg file is applied after this one, so anything here can be overridden. Later rules win: the specific patterns come after the general ones.",
+
+  "types": {
+    "texture":  { "runtime": true },
+    "material": { "runtime": true },
+    "anim":     { "runtime": true },
+    "map":      { "runtime": true },
+    "sound":    { "runtime": true },
+    "font":     { "runtime": true },
+    "data":     { "runtime": true },
+    "text":     { "runtime": true }
+  },
+
+  "rules": [
+    { "match": "*.png",           "meta": { "type": "texture" } },
+
+    { "match": "*.json",          "meta": { "type": "data" } },
+    { "match": "*.xml",           "meta": { "type": "data.xml" } },
+    { "match": "*.material.json", "meta": { "type": "material" } },
+    { "match": "*.sheet.json",    "meta": { "type": "anim" } },
+    { "match": "*.anim.json",     "meta": { "type": "anim" } },
+
+    { "match": "*.tmj",           "meta": { "type": "map" } },
+    { "match": "*.tsj",           "meta": { "type": "map" } },
+
+    { "match": "*.ogg",           "meta": { "type": "sound" } },
+    { "match": "*.wav",           "meta": { "type": "sound" } },
+    { "match": "*.ttf",           "meta": { "type": "font" } },
+
+    { "match": "*.txt",           "meta": { "type": "text" } },
+    { "match": "*.md",            "meta": { "type": "text" } },
+
+    { "match": "*.berg",          "meta": { "cook": false } }
+  ]
+}

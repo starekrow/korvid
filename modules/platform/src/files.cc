@@ -80,6 +80,19 @@ bool IoFileWriter::close() {
     return false;
 }
 
+bool io_stat(const char* path, IoStat* out) {
+    OsStat st;
+    *out = IoStat{};
+    if (!os_path_stat(path, &st)) return false;
+    out->is_file  = st.kind == OsPathKind::File;
+    out->is_dir   = st.kind == OsPathKind::Dir;
+    out->size     = st.size;
+    out->mtime_ns = st.mtime_ns;
+    return true;
+}
+
+bool io_current_dir(char* out, u32 cap) { return os_current_dir(out, cap); }
+
 bool io_is_file(const char* path) { return os_path_kind(path) == OsPathKind::File; }
 bool io_is_dir(const char* path) { return os_path_kind(path) == OsPathKind::Dir; }
 

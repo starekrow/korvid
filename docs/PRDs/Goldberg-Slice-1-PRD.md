@@ -360,3 +360,50 @@ ship; `core`, `platform` and `script` also cross-build for Android.
 - **Not done here:** the native watchers for macOS and Windows, and Windows processes,
   as the PRD says. Nothing was run on macOS or Windows.
 
+**Milestone 2, The loop and the rules** (Nov 14). S7 to S10 and `explain`; nothing is
+cooked yet. `goldberg cook --root NAME=DIR` scans, watches, reads the rule files, solves
+every file and prints a line; the 183 files of the eight asset roots solve from the
+conventions alone, with no fallback warning.
+
+- **The host** (`tools/goldberg/src/goldberg.cc`) is one system, `goldberg.pump`. Three
+  pools: `goldberg.event`, `goldberg.file`, `goldberg.berg`. Sources append to a pending
+  list, which is folded (one event per path) and moved into event rows; rows go to Lua
+  in sequence order. Commands leave their words for the pump, since the CLI runs them
+  in its own system.
+- **Hashing** is one batch a tick on the job pool. The tick waits for its batch; the
+  loop does not interleave with it. Rule files come back with their text.
+- **The application** is Lua in `tools/goldberg/lua/`: `berg` (reading and layering),
+  `rules` (the chain for a file), `solve`, `session`, `explain`, `main`.
+- **A session reads nothing itself.** Everything it learns is an event and everything it
+  wants goes out through `io`. `--log FILE` records the events and where the session
+  settled; `goldberg replay LOG` feeds them to a fresh session with an `io` that does
+  nothing, and `--dump` of both is byte-identical, with the tree moved away. The test
+  for rules changing under a running graph is a log with events added by hand.
+- **Solving waits for the rules.** A file is solved at a settle, and there is no settle
+  while a rule file is being read, so the first scan solves each file once.
+- **One step per file.** A file's answer is `copy` (it lands as it is), `convert` (the
+  next converter, found by the path search), `keep` (an ingredient), `ignore` or
+  `error`. A chain is each output being solved in its turn, not a list of steps made
+  up front; `explain` shows the whole path found.
+- **Scope.** Types and converters are in scope wherever the file that declares them
+  speaks: the solver sees what the file's chain of rule files declared.
+- **The conventions** (`tools/goldberg/conventions.berg`) as the PRD's table, with the
+  types declared there.
+
+Different from the PRD, or decided here:
+
+- **The Lua is read from the source tree at start**, found from the host's own
+  `__FILE__`, or `GOLDBERG_LUA`. An edit to it needs no build. Embedding it in the
+  binary wants a kormake feature (a generated source) and is not done.
+- **goldberg's tests run the built binary** (`tools/goldberg/tests`, through
+  `Process`). A test executable does not link an executable module's objects, so
+  kormake now builds the executable before its tests and reruns them when it changes.
+  kormake was bootstrapped again for that; its binary had been behind its scripts.
+- **The project's `goldberg.berg` is read once at start**, not watched. Watching one
+  file's directory without its tree is for the live milestone.
+- **`explain` with no `--root`** finds the asset root itself: the nearest `assets`
+  directory above the file that sits beside a `module.lua`, whose `module "name"` line
+  it reads for the name. A cook never reads `module.lua`.
+- **`status`** has nothing to ask yet: it answers only inside a running session.
+- **`io_stat` and `io_current_dir`** joined the platform's file calls.
+

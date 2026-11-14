@@ -273,7 +273,8 @@ The module's name comes from this line, not from its directory's name.
     src/*.cc                 sources (only src/, not its subdirectories, except the ones below)
     src/<dir>/*.cc           sources for a platform: the toolchain's srcdirs, in its order (posix, linux, sdl3, ...)
     src/*.mm, src/<dir>/*.mm Objective-C++, picked up where a toolchain lists the directory
-    tests/*.cc               the module's test executable, with the module and its closure linked
+    tests/*.cc               the module's test executable, with the module and its closure linked (an executable's tests
+                             link its closure only and run after the executable is built: they start it, they do not contain it)
     shaders/                 inputs for the tool rules the module uses (the shader rule takes shaders/*.slang)
     assets/                  copied to bin/assets/<module>/, with subdirectories and without hidden files
 

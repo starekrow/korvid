@@ -593,9 +593,14 @@ function M.run(c, g, opts)
       local li = link_inputs(inst)
       local exe = pre .. "bin/" .. sym .. "_tests" .. flags(inst).tc.fields.exe_suffix
       link(inst, exe, objs, li)
+      -- An executable's tests do not link it (it has a main of its own): they run it, so
+      -- it is built before they are, and they run again when it changes.
+      local implicit = {}
+      for _, p in ipairs(li.staged) do implicit[#implicit + 1] = p end
+      if m.fields.output == "exe" and outputs_by_key[inst.key] then implicit[#implicit + 1] = outputs_by_key[inst.key][1] end
       w(string.format("build %s: %s %s%s", util.ninja_escape(pre .. "test/" .. sym .. ".ok"),
         (pre ~= "" and runner ~= "") and "run_test_host" or "run_test", util.ninja_escape(exe),
-        #li.staged > 0 and (" | " .. util.ninja_paths(li.staged)) or ""))
+        #implicit > 0 and (" | " .. util.ninja_paths(implicit)) or ""))
       if inst.tests then
         tests[#tests + 1] = exe
         checks[#checks + 1] = pre .. "test/" .. sym .. ".ok"

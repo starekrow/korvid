@@ -1,0 +1,273 @@
+-- A session: the files goldberg knows, the rules over them, and each file's answer.
+--
+-- Everything a session learns arrives as an event (session:event), and everything it
+-- wants done leaves through its `io` table (io.hash, io.scan). It reads no file and no
+-- clock of its own, so the same events in the same order make the same session: that is
+-- what `goldberg replay` runs, with an `io` that does nothing.
+--
+-- The records live in the engine's pools (host.kinds.file, host.kinds.berg): a row per
+-- file with its path, size, time and hash. What a row cannot hold stays here: the
+-- answer, and who is waiting for what.
+local Rules = require("rules")
+local solve = require("solve")
+
+local Session = {}
+Session.__index = Session
+
+local function hidden(path)
+    return path:sub(1, 1) == "." or path:find("/.", 1, true) ~= nil
+end
+
+local function unhex(hex)
+    return (hex:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))
+end
+
+-- cfg: { game, roots = { { name, dir } }, conventions = text, project = { text, display } or nil, io }
+function Session.new(cfg)
+    local s = setmetatable({
+        game = cfg.game, roots = cfg.roots, io = cfg.io,
+        rules = Rules.new(),
+        files = {},        -- "<root>:<path>" -> { key, root, path, h, is_berg, answer, line, ... }
+        count = 0,
+        unsolved = {},     -- keys whose answer may have changed
+        hashing = 0,       -- hash requests not yet answered
+        berg_hashing = 0,  -- of those, rule files: nothing is solved while one is being read
+        gen = {},          -- per root: the scan now running or last run
+        requests = {},     -- everything asked of io, in order, as text
+        changed = {},      -- keys whose answer changed at the last settle
+        solves = 0,        -- answers computed, ever
+        history = {},      -- one line per settle: how many were solved and whose answer changed
+    }, Session)
+    s.rules:set("conventions", cfg.conventions, "conventions")
+    if cfg.project then s.rules:set("project", cfg.project.text, cfg.project.display) end
+    for i = 1, #cfg.roots do s.gen[i] = 0 end
+    return s
+end
+
+function Session:key(root, path) return self.roots[root].name .. ":" .. path end
+
+local function request(self, what, root, path, extra)
+    self.requests[#self.requests + 1] = string.format("%s %s%s", what, self:key(root, path), extra or "")
+end
+
+function Session:scan(root)
+    self.gen[root] = self.gen[root] + 1
+    request(self, "scan", root, "")
+    self.io.scan(root)
+end
+
+local function ask_hash(self, f)
+    if f.hashing then f.again = true; return end
+    f.hashing = true
+    self.hashing = self.hashing + 1
+    if f.is_berg then self.berg_hashing = self.berg_hashing + 1 end
+    request(self, "hash", f.root, f.path, f.is_berg and " +text" or "")
+    self.io.hash(f.root, f.path, f.is_berg)
+end
+
+-- Marks every file a rule file speaks for.
+local function mark_affected(self, root, berg_path)
+    local dir, name = Rules.dirname(berg_path), Rules.basename(berg_path)
+    local prefix = dir == "" and "" or (dir .. "/")
+    local sidecar = name ~= "goldberg.berg" and Rules.stem(name) or nil
+    for key, f in pairs(self.files) do
+        if f.root == root and not f.is_berg and f.path:sub(1, #prefix) == prefix then
+            if not sidecar then self.unsolved[key] = true
+            elseif Rules.dirname(f.path) == dir and Rules.stem(Rules.basename(f.path)) == sidecar then self.unsolved[key] = true end
+        end
+    end
+end
+
+local function touch(self, ev)
+    if hidden(ev.path) then return end
+    local key = self:key(ev.root, ev.path)
+    local f = self.files[key]
+    local files = host.kinds.file
+    if not f then
+        local is_berg = ev.path:sub(-5) == ".berg"
+        local h = files:spawn{ path = ev.path, root = ev.root, is_berg = is_berg, scan = self.gen[ev.root] }
+        if not h then error("goldberg.file is full: more files than the pool holds") end
+        f = { key = key, root = ev.root, path = ev.path, h = h, is_berg = is_berg }
+        self.files[key] = f
+        self.count = self.count + 1
+        if not is_berg then self.unsolved[key] = true end
+        ask_hash(self, f)
+        return
+    end
+    files:set(f.h, "scan", self.gen[ev.root])
+    -- Seen again with the size and time it was hashed at: nothing to read.
+    if ev.kind == "file-seen" and files:get(f.h, "hashed") and files:get(f.h, "size") == ev.size and files:get(f.h, "mtime") == ev.mtime then return end
+    ask_hash(self, f)
+end
+
+local function forget(self, key)
+    local f = self.files[key]
+    if not f then return end
+    host.kinds.file:destroy(f.h)
+    self.files[key] = nil
+    self.unsolved[key] = nil
+    self.count = self.count - 1
+    if f.hashing then
+        -- Its answer will find nobody.
+        self.hashing = self.hashing - 1
+        if f.is_berg then self.berg_hashing = self.berg_hashing - 1 end
+    end
+    if f.is_berg then
+        if f.berg_h then host.kinds.berg:destroy(f.berg_h) end
+        self.rules:remove(key)
+        mark_affected(self, f.root, f.path)
+    end
+    self.removed = self.removed or {}
+    self.removed[#self.removed + 1] = key
+end
+
+local function hashed(self, ev)
+    local key = self:key(ev.root, ev.path)
+    local f = self.files[key]
+    if not f or not f.hashing then return end
+    f.hashing = false
+    self.hashing = self.hashing - 1
+    if f.is_berg then self.berg_hashing = self.berg_hashing - 1 end
+    local files = host.kinds.file
+    local was = f.hash
+    f.hash = ev.hash
+    files:set(f.h, "size", ev.size)
+    files:set(f.h, "mtime", ev.mtime)
+    files:set(f.h, "hash", unhex(ev.hash))
+    files:set(f.h, "hashed", true)
+    if f.again then f.again = false; ask_hash(self, f) end
+    if was == ev.hash then return end -- hashes decide: the same bytes are no change
+    if f.is_berg then
+        local root = self.roots[f.root]
+        self.rules:set(key, ev.text or "", root.dir .. "/" .. f.path)
+        local rec = self.rules:get(key)
+        local bergs = host.kinds.berg
+        if not f.berg_h then f.berg_h = bergs:spawn{ path = f.path, root = f.root } end
+        if f.berg_h then bergs:set(f.berg_h, "version", rec.version); bergs:set(f.berg_h, "ok", rec.ok) end
+        mark_affected(self, f.root, f.path)
+    else
+        f.content = (f.content or 0) + 1
+    end
+end
+
+function Session:event(ev)
+    local k = ev.kind
+    if k == "file-seen" or k == "file-added" or k == "file-changed" then touch(self, ev)
+    elseif k == "file-removed" or k == "hash-failed" then
+        local key = self:key(ev.root, ev.path)
+        local f = self.files[key]
+        -- A hash that failed for a file asked about again is not a removal yet.
+        if k == "hash-failed" and f and f.again then
+            f.hashing, f.again = false, false
+            self.hashing = self.hashing - 1
+            if f.is_berg then self.berg_hashing = self.berg_hashing - 1 end
+            ask_hash(self, f)
+        else
+            forget(self, key)
+        end
+    elseif k == "dir-removed" then
+        local prefix = ev.path .. "/"
+        local gone = {}
+        for key, f in pairs(self.files) do
+            if f.root == ev.root and f.path:sub(1, #prefix) == prefix then gone[#gone + 1] = key end
+        end
+        table.sort(gone)
+        for _, key in ipairs(gone) do forget(self, key) end
+    elseif k == "hashed" then hashed(self, ev)
+    elseif k == "scan-done" then
+        -- What this scan did not see is gone: it went while nobody was watching.
+        local gen, gone = self.gen[ev.root], {}
+        for key, f in pairs(self.files) do
+            if f.root == ev.root and host.kinds.file:get(f.h, "scan") ~= gen then gone[#gone + 1] = key end
+        end
+        table.sort(gone)
+        for _, key in ipairs(gone) do forget(self, key) end
+    elseif k == "rescan" then self:scan(ev.root)
+    end
+end
+
+-- Whether settle() has anything to do, and may do it: no rule file is being read.
+function Session:can_settle()
+    return self.berg_hashing == 0 and next(self.unsolved) ~= nil
+end
+
+-- Solves every file whose answer may have changed. Returns how many answers did.
+function Session:settle()
+    local keys = {}
+    for key in pairs(self.unsolved) do keys[#keys + 1] = key end
+    table.sort(keys)
+    self.unsolved = {}
+    self.changed = {}
+    for _, key in ipairs(keys) do
+        local f = self.files[key]
+        local name = self.roots[f.root].name
+        local eff, prov, reg, used, warn = self.rules:effective(name, f.path)
+        local a
+        if not eff then a = { action = "error", error = prov, why = {} }
+        else
+            a = solve.solve(name, f.path, eff, prov, reg)
+            a.rule_warn = warn
+        end
+        self.solves = self.solves + 1
+        local line = solve.line(a)
+        if line ~= f.line then
+            f.answer, f.line = a, line
+            self.changed[#self.changed + 1] = key
+        else
+            f.answer = a -- the same answer; the provenance may have moved
+        end
+    end
+    self.history[#self.history + 1] = string.format("settle solved=%d changed=%s", #keys, table.concat(self.changed, ","))
+    return #self.changed
+end
+
+function Session:stable()
+    return self.hashing == 0 and next(self.unsolved) == nil
+end
+
+-- The session as text, the same for the same session: every file and its answer, then
+-- everything asked of the host.
+function Session:dump()
+    local keys, out = {}, {}
+    for key in pairs(self.files) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local f = self.files[key]
+        out[#out + 1] = string.format("file %s %s%s", key, f.is_berg and "rules" or (f.line or "unsolved"), f.hash and (" #" .. f.hash:sub(1, 12)) or "")
+    end
+    for _, h in ipairs(self.history) do out[#out + 1] = h end
+    for _, r in ipairs(self.requests) do out[#out + 1] = "request " .. r end
+    return table.concat(out, "\n") .. "\n"
+end
+
+-- Counts for the last line of a cook.
+function Session:totals()
+    local t = { files = 0, rules = 0, failed = 0, warned = 0, errors = {}, warnings = {} }
+    local keys = {}
+    for key in pairs(self.files) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local f = self.files[key]
+        if f.is_berg then
+            t.rules = t.rules + 1
+            local rec = self.rules:get(key)
+            if rec and rec.err then t.errors[#t.errors + 1] = rec.err end
+        else
+            t.files = t.files + 1
+            local a = f.answer
+            if a and a.error then
+                t.failed = t.failed + 1
+                -- A broken rule file is reported once, above, not once per file under it.
+                local from_rules = false
+                for _, e in ipairs(t.errors) do if e == a.error then from_rules = true end end
+                if not from_rules then t.errors[#t.errors + 1] = string.format("%s: %s", key, a.error) end
+            elseif a and a.warn then
+                t.warned = t.warned + 1
+                t.warnings[#t.warnings + 1] = string.format("%s: %s", key, a.warn)
+            end
+        end
+    end
+    return t
+end
+
+return Session
