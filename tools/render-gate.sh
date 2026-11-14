@@ -35,6 +35,9 @@ keep=build/render-gate/$platform-$backend
 out=$keep/run
 refs=examples/gallery/references/$backend
 mkdir -p "$out"
+# The run directory as the executables read a path: native on Windows (C:/...; Git Bash's
+# /c/... means nothing to them), the same path elsewhere. Redirects are the shell's and take either.
+native_out=$(cd "$out" && { pwd -W 2>/dev/null || pwd; })
 rm -f "$out"/*.ppm "$out"/*.log
 
 failed=0
@@ -66,7 +69,7 @@ elif cmp -s "$out/shaders.sum" "$keep/shaders.sum"; then pass "compiled shaders 
 else fail "compiled shaders differ from the baseline"; diff "$keep/shaders.sum" "$out/shaders.sum"; fi
 
 step "gallery: exact against references/$backend"
-(cd "$dev" && ./gallery$exe --out "$OLDPWD/$out" >"$OLDPWD/$out/gallery.log" 2>&1) || fail "gallery did not run (see $out/gallery.log)"
+(cd "$dev" && ./gallery$exe --out "$native_out" >"$OLDPWD/$out/gallery.log" 2>&1) || fail "gallery did not run (see $out/gallery.log)"
 if [ ! -d "$refs" ]; then
     if [ $baseline -eq 1 ]; then
         echo "no committed references for $backend. Make them from this run and commit them:"
@@ -82,7 +85,7 @@ grep -E "sort checks:|renderer down" "$out/testbed.log"
 grep -q "sort checks: [1-9][0-9]* passed, 0 failed" "$out/testbed.log" && pass "sort checks" || fail "sort checks (see $out/testbed.log)"
 
 step "arcfire demo (debug, validation on), with a screenshot"
-(cd "$debug" && ./arcfire$exe --demo --check-sort --run-seconds 12 --screenshot "$OLDPWD/$out/arcfire.ppm" --screenshot-frame 300 \
+(cd "$debug" && ./arcfire$exe --demo --check-sort --run-seconds 12 --screenshot "$native_out/arcfire.ppm" --screenshot-frame 300 \
     >"$OLDPWD/$out/arcfire.log" 2>&1) || fail "arcfire exited with an error"
 grep -E "sort checks:|renderer down" "$out/arcfire.log"
 grep -q "sort checks: [1-9][0-9]* passed, 0 failed" "$out/arcfire.log" && pass "sort checks" || fail "sort checks (see $out/arcfire.log)"

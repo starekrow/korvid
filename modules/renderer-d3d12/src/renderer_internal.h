@@ -18,7 +18,9 @@
 //   - Bindings are registers: one root signature serves the sort and the sprites, with the
 //     push block as root constants, the tables as root descriptors (GPU addresses: a table
 //     that grows is rebound, not rewritten) and the bindless textures as one descriptor table
-//     per frame in flight in a shader-visible heap. Samplers are static.
+//     per frame in flight in a shader-visible heap. The two samplers are a table of their own
+//     in a sampler heap: gSamplers is an array a shader indexes, which static samplers cannot
+//     back (the debug layer refuses the pipeline).
 //   - The vertex shader cannot see the indirect draw's base instance (SV_StartInstanceLocation
 //     is SM 6.8), so the sorted rows are also an instance-rate vertex buffer (sprite.slang).
 //   - Resources have states, not layouts and stages: each buffer remembers its own, and a
