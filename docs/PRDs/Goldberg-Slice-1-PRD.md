@@ -444,3 +444,12 @@ Different from the PRD, or decided here:
   is what milestone 2 did.
 - **`io_rename`** joined the platform's file calls.
 
+**The attic** (Nov 14, after milestone 3, asked for in review). A file goldberg takes
+out of the output tree is moved to `<out>/.goldberg.attic/<YYYYMMDD-HHMMSS>/<its path>`,
+one folder per run, and the directories it leaves empty go. A file about to be written
+again is written over, with no trip to the attic. If the move fails the file stays
+where it was and the cook says so. A cook warns on its way out, every time, while the
+attic exists ("goldberg found files in the attic"); `goldberg clean attic --out DIR`
+empties it. The attic is hidden, so the scan of the output tree does not see it and
+nothing packs it.
+

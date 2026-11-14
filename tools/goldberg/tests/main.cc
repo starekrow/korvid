@@ -342,14 +342,40 @@ void test_cook(TestCtx& c) {
     KV_CHECK(c, io_remove(t.path("assets/ui/hud.json")) && io_remove(t.path("assets/ui/big.bin")));
     t.put("out/g/stray/left.txt", "nobody's");
     KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
-    KV_CHECK(c, has(g_out.data, "removed g/ui/hud.json (its source g:ui/hud.json is gone)") && has(g_out.data, "removed g/stray/left.txt (nothing here cooks to it)"));
-    KV_CHECK(c, has(g_out.data, "2 files, 0 cooked, 1 clean, 0 failed, 3 removed"));
+    KV_CHECK(c, has(g_out.data, "moved g/ui/hud.json to the attic (its source g:ui/hud.json is gone)") && has(g_out.data, "moved g/stray/left.txt to the attic (nothing here cooks to it)"));
+    KV_CHECK(c, has(g_out.data, "2 files, 0 cooked, 1 clean, 0 failed, 3 to the attic"));
     KV_CHECK(c, !io_is_file(t.path("out/g/ui/hud.json")) && !io_is_dir(t.path("out/g/ui")) && !io_is_dir(t.path("out/g/stray")) && io_is_file(t.path("out/g/a.png")));
+    // Nothing was deleted: each file is in the attic, under this run's folder, at its own
+    // path. A cook says so on its way out, every time, until someone empties it.
+    KV_CHECK(c, has(g_err.data, "goldberg found files in the attic: ") && has(g_err.data, "/out/.goldberg.attic"));
+    {
+        char attic[700];
+        snprintf(attic, sizeof attic, "%s/out/.goldberg.attic", t.dir);
+        struct Found { u32 n; bool hud, bin, stray; char first[300]; } found{};
+        io_list_files(attic, [](void* user, const char* rel) {
+            Found* f = (Found*)user;
+            if (!f->n++) snprintf(f->first, sizeof f->first, "%s", rel);
+            if (strstr(rel, "/g/ui/hud.json")) f->hud = true;
+            if (strstr(rel, "/g/ui/big.bin")) f->bin = true;
+            if (strstr(rel, "/g/stray/left.txt")) f->stray = true;
+            return true;
+        }, &found);
+        KV_CHECK(c, found.n == 3 && found.hud && found.bin && found.stray);
+        char rel[900];
+        snprintf(rel, sizeof rel, "out/.goldberg.attic/%s", found.first);
+        KV_CHECK(c, found.n && strlen(t.read(rel)) > 0);
+    }
+    // The attic is not part of the tree: the next cook leaves it alone and still says it is there.
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, "2 files, 0 cooked, 1 clean, 0 failed (") && has(g_err.data, "goldberg found files in the attic"));
+    KV_CHECK(c, gb("clean", "attic", "--out", out) == 0 && has(g_out.data, "emptied the attic") && !io_is_dir(t.path("out/.goldberg.attic")) && io_is_file(t.path("out/g/a.png")));
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0 && !has(g_err.data, "attic"));
+    KV_CHECK(c, gb("clean", "attic", "--out", out) == 0 && has(g_out.data, "has no attic"));
 
     // A rule change that stops a file cooking takes its output away; one that starts it, brings it.
     t.put("assets/goldberg.berg", R"({ "rules": [ { "match": "*.png", "meta": { "cook": false } } ] })");
     KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
-    KV_CHECK(c, has(g_out.data, "2 files, 1 cooked, 0 clean, 0 failed, 1 removed") && !io_is_file(t.path("out/g/a.png")) && strcmp(t.read("out/g/notes/todo.txt"), "todo") == 0);
+    KV_CHECK(c, has(g_out.data, "2 files, 1 cooked, 0 clean, 0 failed, 1 to the attic") && !io_is_file(t.path("out/g/a.png")) && strcmp(t.read("out/g/notes/todo.txt"), "todo") == 0);
     // "out" moves a file's place in the tree: the old place is cleared.
     t.put("assets/goldberg.berg", R"({ "rules": [ { "match": "todo.txt", "meta": { "out": "docs/list.txt" } } ] })");
     KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);

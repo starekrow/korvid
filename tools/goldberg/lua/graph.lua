@@ -6,8 +6,10 @@
 -- converter uses.
 --
 -- The graph owns the output tree. It learns what is there from a scan at startup
--- (events on the output root), and what no step accounts for, it removes: a source
+-- (events on the output root), and what no step accounts for, it takes out: a source
 -- deleted while goldberg was not running takes its output with it at the next cook.
+-- Nothing taken out is deleted. It is moved to the attic (.goldberg.attic/<stamp>/ in
+-- the output tree), which only `goldberg clean attic` empties.
 local json = kv.json
 
 local Graph = {}
@@ -51,11 +53,13 @@ end
 
 local function remove_output(g, output, why)
     g.s:request("remove", output)
-    g.s.io.remove_output(output)
+    -- Never deleted: moved to the attic, where a person can get it back.
+    local moved = g.s.io.remove_output(output)
     g.present[output] = nil
     g.built[output] = nil
     g.removed = g.removed + 1
-    g.notes[#g.notes + 1] = string.format("removed %s (%s)", output, why)
+    if moved == false then g.notes[#g.notes + 1] = string.format("could not move %s to the attic: it is still in the output tree (%s)", output, why)
+    else g.notes[#g.notes + 1] = string.format("moved %s to the attic (%s)", output, why) end
 end
 
 local function drop_step(g, output, why)

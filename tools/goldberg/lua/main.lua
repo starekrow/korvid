@@ -117,6 +117,7 @@ end
 -- ---- the output tree -----------------------------------------------------------------------
 
 local MARKER = ".goldberg"
+local ATTIC = ".goldberg.attic"
 
 -- The output tree is goldberg's: what no source accounts for is removed from it. So it
 -- only ever takes a directory that is new, empty, or already marked as one of its own.
@@ -129,7 +130,7 @@ local function claim_out(out, game)
     end
     if not kv.fs.mkdir(out) then return nil, "cannot make " .. out end
     if not kv.fs.is_file(out .. "/" .. MARKER) then
-        kv.fs.write(out .. "/" .. MARKER, "goldberg's output tree for " .. game .. ". Files here that no source accounts for are removed at the next cook.\n")
+        kv.fs.write(out .. "/" .. MARKER, "goldberg's output tree for " .. game .. ". Files here that no source accounts for are moved to " .. ATTIC .. "/ at the next cook.\n")
     end
     return true
 end
@@ -178,7 +179,7 @@ local function start(mode, words)
         -- The output tree is a root that is scanned and never watched.
         cfg.roots[#cfg.roots + 1] = { name = "(out)", dir = o.out }
         cfg.out_root = host.add_root("(out)", o.out, false)
-        host.set_out(o.out)
+        host.set_out(o.out, os.date("%Y%m%d-%H%M%S"))
         o.state_file = state_path(o)
         cfg.state = kv.fs.read(o.state_file)
     end
@@ -201,7 +202,7 @@ local function report(final)
         for _, n in ipairs(s.graph.notes) do say("goldberg: %s", n) end
         s.graph.notes = {}
         say("goldberg: %s: %d files, %d cooked, %d clean, %d failed%s%s (%.0f ms%s)", run.cfg.game, t.files, t.cooked, t.clean, t.failed,
-            t.removed > 0 and string.format(", %d removed", t.removed) or "", t.warned > 0 and string.format(", %d warned", t.warned) or "", ms,
+            t.removed > 0 and string.format(", %d to the attic", t.removed) or "", t.warned > 0 and string.format(", %d warned", t.warned) or "", ms,
             final and "" or ", watching with " .. run.backend)
     else
         say("goldberg: %s: %d files, %d rule files, %d failed, %d warned, nothing cooked: no --out (%.0f ms%s)", run.cfg.game, t.files, t.rules, t.failed, t.warned, ms,
@@ -243,6 +244,10 @@ function goldberg.tick(quiet)
     if run.mode == "cook" then
         local t = report(true)
         write_outputs()
+        -- The escape hatch is not a place to forget things in.
+        if run.opts.out and kv.fs.is_dir(run.opts.out .. "/" .. ATTIC) then
+            complain("goldberg found files in the attic: %s/%s (what it took out of the output tree; `goldberg clean attic --out %s` empties it)", run.opts.out, ATTIC, run.opts.out)
+        end
         host.finish((t.failed > 0 or #t.errors > 0) and 1 or 0)
         run = nil
     elseif not run.said_stable then
@@ -385,7 +390,15 @@ function goldberg.command(words)
     elseif verb == "clean" then
         local o, why = parse(words)
         if not o then return usage(why) end
-        if not o.out then return usage("clean --out DIR [--state FILE]") end
+        if not o.out then return usage("clean [attic] --out DIR [--state FILE]") end
+        if o.names[1] == "attic" then
+            local attic = o.out .. "/" .. ATTIC
+            if not kv.fs.is_file(o.out .. "/" .. MARKER) then return usage(o.out .. " is not a goldberg output tree (no " .. MARKER .. " in it)") end
+            if kv.fs.is_dir(attic) then kv.fs.remove_tree(attic); say("goldberg: emptied the attic of %s", o.out)
+            else say("goldberg: %s has no attic", o.out) end
+            host.finish(0)
+            return
+        end
         if kv.fs.is_dir(o.out) then
             if not kv.fs.is_file(o.out .. "/" .. MARKER) then return usage(o.out .. " is not a goldberg output tree (no " .. MARKER .. " in it): not removed") end
             kv.fs.remove_tree(o.out)

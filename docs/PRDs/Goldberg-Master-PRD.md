@@ -351,6 +351,7 @@ goldberg watch   [GAME] [CONFIG]      cook, then keep watching; listen for games
 goldberg explain PATH                 what this file is, what happens to it, and why
 goldberg status                       dirty, running, failed; connected games
 goldberg clean   [GAME]               remove what goldberg wrote, and its state
+goldberg clean attic [GAME]          empty the attic: what goldberg took out of the output tree
 ```
 
 - `GAME` defaults the way a kormake name does: the module whose directory this is.
@@ -474,6 +475,11 @@ Each slice gets its own PRD (`Goldberg-Slice-N-PRD.md`) before it is built.
   `.berg` files also allow `//` line comments, which plain JSON does not. Nothing in
   Korvid's own trees uses line comments except the tests that prove they work: whether
   to is an author's decision.
+- **Nothing goldberg takes out of an output tree is deleted.** A file that leaves for any
+  reason but being written again (its source gone, its answer changed, nothing cooks to
+  it) is moved to `.goldberg.attic/<timestamp>/<its path>` in the output tree. That is
+  the escape hatch. A cook warns on its way out while an attic exists, and only
+  `goldberg clean attic` empties it.
 - **The game connects to goldberg.**
 - **The conventions are a `.berg` file**, so they are read, explained and overridden
   like any other layer.

@@ -165,6 +165,7 @@ struct GoldbergState {
     Array<HashReq>  hashes;              // asked for, not yet run
     Array<CopyReq>  copies;              // likewise
     char            out_dir[600] = {};   // the output tree
+    char            attic[700] = {};     // where what leaves it goes: <out>/.goldberg.attic/<stamp>
     u32             tmp_serial = 0;
     Array<ScanItem> scan;                // files a scan found, not yet events
     Array<char>     scan_text;
@@ -468,13 +469,14 @@ int host_hash(lua_State* L) {
     return 0;
 }
 
-// host.set_out(dir): the output tree. host.copy(root, source, output) queues a copy into
+// host.set_out(dir, stamp): the output tree, and the name of this run's attic folder. host.copy(root, source, output) queues a copy into
 // it; its result comes back as a cook-done or cook-failed event for `output`.
 int host_set_out(lua_State* L) {
     GoldbergState& s = *state_of(L);
     const char* dir = luaL_checkstring(L, 1);
     if (strlen(dir) >= sizeof s.out_dir) return luaL_error(L, "the output tree's path is too long");
     format(s.out_dir, sizeof s.out_dir, "%s", dir);
+    format(s.attic, sizeof s.attic, "%s/.goldberg.attic/%s", dir, luaL_optstring(L, 2, "0"));
     return 0;
 }
 
@@ -494,16 +496,22 @@ int host_copy(lua_State* L) {
     return 0;
 }
 
-// host.remove_output(output): removes a file of the output tree, and the directories it
-// leaves empty, up to the tree. True if the file is gone afterwards.
+// host.remove_output(output): takes a file out of the output tree. It is not deleted: it
+// is moved to the attic, <out>/.goldberg.attic/<stamp>/<output>, where a person can get it
+// back. (A file about to be written again is simply written over; this is for the ones
+// nothing will replace.) The directories it leaves empty go, up to the tree. True if the
+// file is no longer in the tree; false, and the file where it was, if it could not be moved.
 int host_remove_output(lua_State* L) {
     GoldbergState& s = *state_of(L);
     const char* output = luaL_checkstring(L, 1);
-    if (!s.out_dir[0] || strstr(output, "..")) return luaL_error(L, "remove: '%s' is not in the output tree", output);
-    char path[1300];
+    if (!s.out_dir[0] || !s.attic[0] || strstr(output, "..")) return luaL_error(L, "remove: '%s' is not in the output tree", output);
+    char path[1300], to[1500], dir[1500];
     format(path, sizeof path, "%s/%s", s.out_dir, output);
-    io_remove(path);
-    bool gone = !io_is_file(path);
+    if (io_is_file(path)) {
+        format(to, sizeof to, "%s/%s", s.attic, output);
+        parent_dir(to, dir, sizeof dir);
+        if (!io_make_dirs(dir) || !io_rename(path, to)) { lua_pushboolean(L, 0); return 1; }
+    }
     usize floor = strlen(s.out_dir);
     for (;;) {
         char* slash = strrchr(path, '/');
@@ -511,7 +519,7 @@ int host_remove_output(lua_State* L) {
         *slash = 0;
         if (!io_remove(path)) break; // not empty, or not ours to remove
     }
-    lua_pushboolean(L, gone);
+    lua_pushboolean(L, 1);
     return 1;
 }
 
