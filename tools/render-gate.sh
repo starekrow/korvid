@@ -27,6 +27,10 @@ case $platform in
 esac
 baseline=0
 for a in "$@"; do [ "$a" = "--baseline" ] && baseline=1; done
+# A debug run under the backend's validation. Vulkan's and D3D12's debug builds turn theirs
+# on themselves; Metal's is the environment's (MTL_DEBUG_LAYER), so on macOS it is set here,
+# for these runs only: the bench below runs the dev build without it, as the baseline did.
+validated() { if [ "$platform" = macos ]; then MTL_DEBUG_LAYER=1 "$@"; else "$@"; fi; }
 
 kormake=tools/kormake/bin/$platform/kormake$exe
 dev=build/$platform-dev/bin
@@ -80,16 +84,20 @@ elif "$dev/picture$exe" compare "$out" "$refs" --threshold 0 --max-fraction 0 --
 else fail "gallery differs"; cat "$out/compare.log"; fi
 
 step "sort check (testbed, debug, validation on)"
-(cd "$debug" && ./testbed$exe --check-sort --swarm --run-seconds 6 >"$OLDPWD/$out/testbed.log" 2>&1) || fail "testbed exited with an error"
+(cd "$debug" && validated ./testbed$exe --check-sort --swarm --run-seconds 6 >"$OLDPWD/$out/testbed.log" 2>&1) || fail "testbed exited with an error"
 grep -E "sort checks:|renderer down" "$out/testbed.log"
 grep -q "sort checks: [1-9][0-9]* passed, 0 failed" "$out/testbed.log" && pass "sort checks" || fail "sort checks (see $out/testbed.log)"
 
 step "arcfire demo (debug, validation on), with a screenshot"
-(cd "$debug" && ./arcfire$exe --demo --check-sort --run-seconds 12 --screenshot "$native_out/arcfire.ppm" --screenshot-frame 300 \
+(cd "$debug" && validated ./arcfire$exe --demo --check-sort --run-seconds 12 --screenshot "$native_out/arcfire.ppm" --screenshot-frame 300 \
     >"$OLDPWD/$out/arcfire.log" 2>&1) || fail "arcfire exited with an error"
 grep -E "sort checks:|renderer down" "$out/arcfire.log"
 grep -q "sort checks: [1-9][0-9]* passed, 0 failed" "$out/arcfire.log" && pass "sort checks" || fail "sort checks (see $out/arcfire.log)"
 # Vulkan and D3D12 count their validation messages; Metal's validation aborts or logs.
+if [ "$platform" = macos ]; then
+    grep -q "API validation on" "$out/arcfire.log" && pass "Metal's validation on" || fail "Metal's validation was not on (see $out/arcfire.log)"
+    grep -q -i -E "failed assertion|validation error" "$out/arcfire.log" "$out/testbed.log" && fail "validation messages (see $out/arcfire.log)"
+fi
 if grep -q "validation errors" "$out/arcfire.log"; then
     grep -q " 0 validation errors, 0 warnings" "$out/arcfire.log" && pass "no validation message" || fail "validation messages (see $out/arcfire.log)"
 fi
