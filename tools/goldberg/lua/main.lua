@@ -26,7 +26,7 @@ end
 
 -- ---- arguments ------------------------------------------------------------------------
 
-local VALUE = { ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true }
+local VALUE = { ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--state"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true }
 local FLAG = { ["-v"] = true }
 
 local function parse(words)
@@ -110,7 +110,36 @@ local function log_start(cfg)
     local roots = {}
     for i, r in ipairs(cfg.roots) do roots[i] = json.object("name", r.name, "dir", r.dir) end
     return json.encode(json.object("kind", "start", "game", cfg.game or json.null, "roots", roots, "conventions", cfg.conventions,
-        "project", cfg.project and json.object("text", cfg.project.text, "display", cfg.project.display) or json.null))
+        "project", cfg.project and json.object("text", cfg.project.text, "display", cfg.project.display) or json.null,
+        "out_root", cfg.out_root or json.null, "state", cfg.state or json.null))
+end
+
+-- ---- the output tree -----------------------------------------------------------------------
+
+local MARKER = ".goldberg"
+
+-- The output tree is goldberg's: what no source accounts for is removed from it. So it
+-- only ever takes a directory that is new, empty, or already marked as one of its own.
+local function claim_out(out, game)
+    if kv.fs.is_dir(out) and not kv.fs.is_file(out .. "/" .. MARKER) then
+        local there = kv.fs.list(out)
+        if there and #there > 0 then
+            return nil, string.format("%s holds files and is not a goldberg output tree (no %s in it). goldberg removes what it did not cook from its output tree, so it will not take this one", out, MARKER)
+        end
+    end
+    if not kv.fs.mkdir(out) then return nil, "cannot make " .. out end
+    if not kv.fs.is_file(out .. "/" .. MARKER) then
+        kv.fs.write(out .. "/" .. MARKER, "goldberg's output tree for " .. game .. ". Files here that no source accounts for are removed at the next cook.\n")
+    end
+    return true
+end
+
+local function state_path(o)
+    if o.state then return o.state end
+    local out = o.out:gsub("/+$", "")
+    local dir, name = out:match("^(.*)/([^/]*)$")
+    if not dir then dir, name = ".", out end
+    return dir .. "/.goldberg-state/" .. name .. ".json"
 end
 
 local function log_event(ev)
@@ -141,8 +170,18 @@ local function start(mode, words)
     end
 
     local cfg = { game = o.game or o.roots[1].name, roots = o.roots, conventions = read_conventions(), project = read_project(o) }
-    cfg.io = { hash = host.hash, scan = host.scan }
+    cfg.io = { hash = host.hash, scan = host.scan, copy = host.copy, remove_output = host.remove_output }
     for _, r in ipairs(cfg.roots) do host.add_root(r.name, r.dir) end
+    if o.out then
+        local ok, err = claim_out(o.out, cfg.game)
+        if not ok then return usage(err) end
+        -- The output tree is a root that is scanned and never watched.
+        cfg.roots[#cfg.roots + 1] = { name = "(out)", dir = o.out }
+        cfg.out_root = host.add_root("(out)", o.out, false)
+        host.set_out(o.out)
+        o.state_file = state_path(o)
+        cfg.state = kv.fs.read(o.state_file)
+    end
     run = { session = Session.new(cfg), mode = mode, opts = o, cfg = cfg, t0 = host.now() }
     if o.log then run.log = { log_start(cfg) } end
     -- Watchers first, then the scan: a file written during the scan is not missed, and
@@ -158,12 +197,23 @@ local function report(final)
     for _, e in ipairs(t.errors) do complain("%s", e) end
     if run.opts.verbose then for _, w in ipairs(t.warnings) do complain("%s", w) end end
     local ms = (host.now() - run.t0) * 1000
-    say("goldberg: %s: %d files, %d rule files, %d failed, %d warned (%.0f ms%s)", run.cfg.game, t.files, t.rules, t.failed, t.warned, ms,
-        final and "" or ", watching with " .. run.backend)
+    if s.graph then
+        for _, n in ipairs(s.graph.notes) do say("goldberg: %s", n) end
+        s.graph.notes = {}
+        say("goldberg: %s: %d files, %d cooked, %d clean, %d failed%s%s (%.0f ms%s)", run.cfg.game, t.files, t.cooked, t.clean, t.failed,
+            t.removed > 0 and string.format(", %d removed", t.removed) or "", t.warned > 0 and string.format(", %d warned", t.warned) or "", ms,
+            final and "" or ", watching with " .. run.backend)
+    else
+        say("goldberg: %s: %d files, %d rule files, %d failed, %d warned, nothing cooked: no --out (%.0f ms%s)", run.cfg.game, t.files, t.rules, t.failed, t.warned, ms,
+            final and "" or ", watching with " .. run.backend)
+    end
     return t
 end
 
 local function write_outputs()
+    if run.session.graph and run.opts.state_file then
+        if not host.write_atomic(run.opts.state_file, run.session.graph:state_text()) then complain("cannot write the state to %s", run.opts.state_file) end
+    end
     if run.opts.dump then
         local ok, err = kv.fs.write(run.opts.dump, run.session:dump())
         if not ok then complain("%s", err) end
@@ -184,10 +234,10 @@ end
 function goldberg.tick(quiet)
     if not run then return end
     local s = run.session
-    if s:can_settle() then
+    if s:has_work() then
         if run.log then run.log[#run.log + 1] = '{"kind": "settle"}' end
-        s:settle()
-        return -- what the answers ask for goes out before anything is called stable
+        s:advance()
+        return -- what that asked for goes out before anything is called stable
     end
     if not (quiet and s:stable()) then return end
     if run.mode == "cook" then
@@ -224,12 +274,14 @@ local function replay(words)
             for i, r in ipairs(rec.roots) do roots[i] = { name = r.name, dir = r.dir } end
             local project = rec.project ~= json.null and { text = rec.project.text, display = rec.project.display } or nil
             session = Session.new{ game = rec.game ~= json.null and rec.game or nil, roots = roots, conventions = rec.conventions, project = project,
-                                   io = { hash = function() end, scan = function() end } }
+                                   out_root = rec.out_root ~= json.null and rec.out_root or nil,
+                                   state = rec.state ~= json.null and rec.state or nil,
+                                   io = { hash = function() end, scan = function() end, copy = function() end, remove_output = function() end } }
             for i = 1, #roots do session:scan(i) end
         elseif not session then
             return usage(path .. ": the log does not begin with a start record")
         elseif rec.kind == "settle" then
-            session:settle()
+            session:advance()
         else
             session:event{ kind = rec.kind, root = rec.root, path = rec.path, size = rec.size, mtime = rec.mtime, hash = rec.hash, text = rec.text }
         end
@@ -330,6 +382,17 @@ function goldberg.command(words)
         start(verb, words)
     elseif verb == "explain" then explain_now(words)
     elseif verb == "replay" then replay(words)
+    elseif verb == "clean" then
+        local o, why = parse(words)
+        if not o then return usage(why) end
+        if not o.out then return usage("clean --out DIR [--state FILE]") end
+        if kv.fs.is_dir(o.out) then
+            if not kv.fs.is_file(o.out .. "/" .. MARKER) then return usage(o.out .. " is not a goldberg output tree (no " .. MARKER .. " in it): not removed") end
+            kv.fs.remove_tree(o.out)
+        end
+        kv.fs.remove(state_path(o))
+        say("goldberg: removed %s and its state", o.out)
+        host.finish(0)
     elseif verb == "status" then
         if not run then say("goldberg: no session is running here") host.finish(0) return end
         report(false)

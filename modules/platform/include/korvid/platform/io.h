@@ -228,6 +228,10 @@ bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc = nullptr,
 // False if the archive cannot be read, has no such entry, or holds it deflated.
 bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* size);
 
+// Renames a file, replacing one already at `to`: on one file system, all at once, so a
+// reader sees the old file or the new and never half of either. How a file is written
+// whole: to a temporary name beside it, then renamed.
+bool io_rename(const char* from, const char* to);
 // What a path names, with its size and modification time (nanoseconds from the OS's
 // epoch: for comparing with another, nothing else). False if nothing is there.
 struct IoStat { bool is_file = false, is_dir = false; u64 size = 0; i64 mtime_ns = 0; };

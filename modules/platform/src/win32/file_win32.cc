@@ -110,6 +110,12 @@ bool os_path_stat(const char* path, OsStat* out) {
     return true;
 }
 
+bool os_rename(const char* from, const char* to) {
+    wchar_t wf[KV_WIDE_PATH_MAX], wt[KV_WIDE_PATH_MAX];
+    if (!widen(from, wf, KV_WIDE_PATH_MAX) || !widen(to, wt, KV_WIDE_PATH_MAX)) return false;
+    return MoveFileExW(wf, wt, MOVEFILE_REPLACE_EXISTING) != 0;
+}
+
 bool os_current_dir(char* out, u32 cap) {
     wchar_t w[KV_WIDE_PATH_MAX];
     DWORD n = GetCurrentDirectoryW(KV_WIDE_PATH_MAX, w);

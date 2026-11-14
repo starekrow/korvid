@@ -24,6 +24,8 @@ OsPathKind os_path_kind(const char* path);
 // epoch: only ever compared with another), following links. False if nothing is there.
 struct OsStat { OsPathKind kind = OsPathKind::None; u64 size = 0; i64 mtime_ns = 0; };
 bool os_path_stat(const char* path, OsStat* out);
+// Renames a file over whatever is at `to`.
+bool os_rename(const char* from, const char* to);
 // The working directory, '/' separated.
 bool os_current_dir(char* out, u32 cap);
 // Calls fn with each entry's name in dir, '.' and '..' left out, in no particular order.

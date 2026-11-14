@@ -69,6 +69,8 @@ bool os_path_stat(const char* path, OsStat* out) {
     return true;
 }
 
+bool os_rename(const char* from, const char* to) { return rename(from, to) == 0; }
+
 bool os_current_dir(char* out, u32 cap) { return getcwd(out, cap) != nullptr; }
 
 bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user) {

@@ -10,6 +10,8 @@
 -- answer, and who is waiting for what.
 local Rules = require("rules")
 local solve = require("solve")
+local Graph = require("graph")
+local json = kv.json
 
 local Session = {}
 Session.__index = Session
@@ -22,7 +24,9 @@ local function unhex(hex)
     return (hex:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))
 end
 
--- cfg: { game, roots = { { name, dir } }, conventions = text, project = { text, display } or nil, io }
+-- cfg: { game, roots = { { name, dir } }, conventions = text, project = { text, display } or nil, io,
+--        out_root = index of the output tree among the roots, or nil for a session that cooks nothing,
+--        state = the saved state's text, or nil }
 function Session.new(cfg)
     local s = setmetatable({
         game = cfg.game, roots = cfg.roots, io = cfg.io,
@@ -41,6 +45,25 @@ function Session.new(cfg)
     s.rules:set("conventions", cfg.conventions, "conventions")
     if cfg.project then s.rules:set("project", cfg.project.text, cfg.project.display) end
     for i = 1, #cfg.roots do s.gen[i] = 0 end
+    s.known = {}       -- from the saved state: key -> { size, mtime, hash }, for files not yet seen
+    s.touched = {}     -- keys whose step may need another look: a new answer, or new content
+    s.removed = {}
+    local state
+    if cfg.state then
+        state = json.decode(cfg.state)
+        if state and json.is_object(state) and state.version == 1 and json.is_object(state.files) then
+            for _, key in ipairs(json.keys(state.files)) do
+                local k = state.files[key]
+                s.known[key] = { size = k.size, mtime = k.mtime, hash = k.hash }
+            end
+        else
+            state = nil -- unreadable, or another version's: a full cook
+        end
+    end
+    if cfg.out_root then
+        s.out_root = cfg.out_root
+        s.graph = Graph.new(s, state)
+    end
     return s
 end
 
@@ -48,6 +71,11 @@ function Session:key(root, path) return self.roots[root].name .. ":" .. path end
 
 local function request(self, what, root, path, extra)
     self.requests[#self.requests + 1] = string.format("%s %s%s", what, self:key(root, path), extra or "")
+end
+
+-- For the graph: something asked of io, as text.
+function Session:request(what, text)
+    self.requests[#self.requests + 1] = what .. " " .. text
 end
 
 function Session:scan(root)
@@ -91,6 +119,17 @@ local function touch(self, ev)
         self.files[key] = f
         self.count = self.count + 1
         if not is_berg then self.unsolved[key] = true end
+        -- The state remembers it at this size and time: its hash is known without a read.
+        local k = self.known[key]
+        if k and not is_berg and ev.kind == "file-seen" and k.size == ev.size and k.mtime == ev.mtime and type(k.hash) == "string" and #k.hash == 64 then
+            f.hash = k.hash
+            files:set(h, "size", ev.size)
+            files:set(h, "mtime", ev.mtime)
+            files:set(h, "hash", unhex(k.hash))
+            files:set(h, "hashed", true)
+            self.touched[key] = true
+            return
+        end
         ask_hash(self, f)
         return
     end
@@ -117,7 +156,7 @@ local function forget(self, key)
         self.rules:remove(key)
         mark_affected(self, f.root, f.path)
     end
-    self.removed = self.removed or {}
+    self.touched[key] = nil
     self.removed[#self.removed + 1] = key
 end
 
@@ -146,12 +185,15 @@ local function hashed(self, ev)
         if f.berg_h then bergs:set(f.berg_h, "version", rec.version); bergs:set(f.berg_h, "ok", rec.ok) end
         mark_affected(self, f.root, f.path)
     else
-        f.content = (f.content or 0) + 1
+        self.touched[key] = true
     end
 end
 
 function Session:event(ev)
     local k = ev.kind
+    if k == "cook-done" then if self.graph then self.graph:cook_done(ev) end return end
+    if k == "cook-failed" then if self.graph then self.graph:cook_failed(ev) end return end
+    if self.graph and ev.root == self.out_root then self.graph:out_event(ev) return end
     if k == "file-seen" or k == "file-added" or k == "file-changed" then touch(self, ev)
     elseif k == "file-removed" or k == "hash-failed" then
         local key = self:key(ev.root, ev.path)
@@ -213,6 +255,7 @@ function Session:settle()
         if line ~= f.line then
             f.answer, f.line = a, line
             self.changed[#self.changed + 1] = key
+            self.touched[key] = true
         else
             f.answer = a -- the same answer; the provenance may have moved
         end
@@ -221,8 +264,40 @@ function Session:settle()
     return #self.changed
 end
 
+-- Whether advance() would do anything now. The driver logs a marker each time it calls
+-- advance, so a replay advances at the same points.
+function Session:has_work()
+    if self:can_settle() then return true end
+    if not self.graph then return false end
+    if next(self.touched) ~= nil or #self.removed > 0 then return true end
+    return self.hashing == 0 and next(self.unsolved) == nil and self.graph:ready()
+end
+
+-- One step of the session's own work: solve what can be solved, bring the graph up to
+-- date with the answers, and, once every source is hashed and solved and the output tree
+-- has been read, plan and start the cooks.
+function Session:advance()
+    if self:can_settle() then self:settle() end
+    local g = self.graph
+    if not g then self.touched, self.removed = {}, {} return end
+    if self.berg_hashing > 0 then return end -- answers may be about to change
+    local removed = self.removed
+    self.removed = {}
+    for _, key in ipairs(removed) do g:file_removed(key) end
+    local keys = {}
+    for key in pairs(self.touched) do if not self.unsolved[key] then keys[#keys + 1] = key end end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        self.touched[key] = nil
+        g:file_changed(key)
+    end
+    if self.hashing == 0 and next(self.unsolved) == nil and g:ready() then g:plan() end
+end
+
 function Session:stable()
-    return self.hashing == 0 and next(self.unsolved) == nil
+    if self.hashing ~= 0 or next(self.unsolved) ~= nil then return false end
+    if not self.graph then return true end
+    return next(self.touched) == nil and #self.removed == 0 and self.graph:stable()
 end
 
 -- The session as text, the same for the same session: every file and its answer, then
@@ -235,6 +310,7 @@ function Session:dump()
         local f = self.files[key]
         out[#out + 1] = string.format("file %s %s%s", key, f.is_berg and "rules" or (f.line or "unsolved"), f.hash and (" #" .. f.hash:sub(1, 12)) or "")
     end
+    if self.graph then self.graph:dump(out) end
     for _, h in ipairs(self.history) do out[#out + 1] = h end
     for _, r in ipairs(self.requests) do out[#out + 1] = "request " .. r end
     return table.concat(out, "\n") .. "\n"
@@ -266,6 +342,12 @@ function Session:totals()
                 t.warnings[#t.warnings + 1] = string.format("%s: %s", key, a.warn)
             end
         end
+    end
+    if self.graph then
+        local g = self.graph:totals()
+        t.cooked, t.clean, t.removed = g.cooked, g.clean, g.removed
+        t.failed = t.failed + g.failed
+        for _, e in ipairs(g.errors) do t.errors[#t.errors + 1] = e end
     end
     return t
 end

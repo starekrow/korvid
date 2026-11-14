@@ -407,3 +407,40 @@ Different from the PRD, or decided here:
 - **`status`** has nothing to ask yet: it answers only inside a running session.
 - **`io_stat` and `io_current_dir`** joined the platform's file calls.
 
+**Milestone 3, The graph and the copy** (Nov 14). S11 to S13, with `cook` and `clean`.
+Run beside kormake's copy, not yet in place of it.
+
+- **The exit:** all eight asset roots cooked with `goldberg cook --root ... --out DIR`
+  and compared with `build/linux-dev/bin/assets/` by `diff -r`: identical, 183 files.
+  Arcfire's 103 files cook in about 50 ms; the second cook runs no step, reads no source
+  and takes about 4 ms.
+- **Steps** are rows of `goldberg.step`: an output, its source, the key of what made it.
+  A step's key is the hash of the converter, its version, the source's content hash and
+  the output's path. It is clean when the saved state has that key for the output and
+  the file in the tree has the size and time the state recorded.
+- **`copy`** is one batch a tick on the job pool, like hashing: read, hash, write to
+  `<name>.tmp-<n>`, rename. Its result is a `cook-done` or `cook-failed` event, so a
+  replay has the same graph without copying anything.
+- **The output tree is a root that is scanned and never watched.** Its files arrive as
+  `file-seen` events. Once every source is hashed and solved, what no step accounts for
+  is removed with a line saying why, and the directories that leaves empty go too.
+- **State** is one JSON file: per source its size, time and hash; per output its key,
+  size, time and source. A source seen with the size and time the state has is not
+  read. A missing or unreadable state is a full cook. Without `--state` it is
+  `<out>/../.goldberg-state/<name>.json`; kormake will name the PRD's path.
+- **Removal:** a source gone, an answer that no longer lands, or an `out` that moved
+  takes the old output away. Two sources for one output is an error naming both.
+
+Different from the PRD, or decided here:
+
+- **The output tree carries a marker, `.goldberg`.** goldberg removes what it did not
+  cook from its output tree, so it takes only a directory that is new, empty, or
+  already marked, and `clean` removes only a marked one. A wrong `--out` cannot cost
+  anyone a directory. The marker is a hidden file, so nothing lists or packs it.
+- **A file whose rules are broken has no step**, so its old output is removed like any
+  other that nothing accounts for. In a live session a rule file that stops parsing
+  keeps its last good version, so this bites only when a rule file never parsed.
+- **`--out` is optional.** Without it a cook solves, reports and writes nothing, which
+  is what milestone 2 did.
+- **`io_rename`** joined the platform's file calls.
+

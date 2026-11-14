@@ -280,12 +280,127 @@ void test_mistakes(TestCtx& c) {
     t.free();
 }
 
+void test_cook(TestCtx& c) {
+    c.begin("goldberg cook");
+    Tree t;
+    KV_CHECK(c, t.make("kv-goldberg-cook"));
+    char root[600], out[600], dump[600], log[600], dump2[600];
+    snprintf(root, sizeof root, "g=%s/assets", t.dir);
+    snprintf(out, sizeof out, "%s/out", t.dir);
+    snprintf(dump, sizeof dump, "%s/dump.txt", t.dir);
+    snprintf(dump2, sizeof dump2, "%s/dump2.txt", t.dir);
+    snprintf(log, sizeof log, "%s/log.jsonl", t.dir);
+    t.put("assets/a.png", "the a");
+    t.put("assets/ui/hud.json", "{ \"hud\": 1 }");
+    t.put("assets/ui/big.bin", "0123456789");
+    t.put("assets/notes/todo.txt", "todo");
+    t.put("assets/goldberg.berg", R"({ "rules": [ { "match": "notes/**", "meta": { "cook": false } }, { "match": "*.bin", "meta": { "type": "data" } } ] })");
+
+    // The first cook copies what lands, and nothing else: no rule file, nothing ignored.
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--dump", dump, "--log", log, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, "goldberg: game: 4 files, 3 cooked, 0 clean, 0 failed"));
+    KV_CHECK(c, strcmp(t.read("out/g/a.png"), "the a") == 0 && strcmp(t.read("out/g/ui/hud.json"), "{ \"hud\": 1 }") == 0 && strcmp(t.read("out/g/ui/big.bin"), "0123456789") == 0);
+    KV_CHECK(c, !io_is_file(t.path("out/g/notes/todo.txt")) && !io_is_file(t.path("out/g/goldberg.berg")) && io_is_file(t.path("out/.goldberg")));
+    KV_CHECK(c, io_is_file(t.path(".goldberg-state/out.json")));
+    const char* d = t.read("dump.txt");
+    KV_CHECK(c, has(d, "step g/a.png <- g:a.png clean") && has(d, "request copy g:a.png -> g/a.png") && count(d, "request copy") == 3 && count(d, "\nstep ") == 3);
+    // No temporary file is left behind.
+    KV_CHECK(c, !has(t.read("out/g/a.png"), "tmp"));
+
+    // The log replays to the same graph and the same list of steps, with nothing under it.
+    KV_CHECK(c, gb("replay", log, "--dump", dump2) == 0);
+    {
+        IoBytes a, b;
+        KV_CHECK(c, io_read_now(dump, &a) && io_read_now(dump2, &b) && a.size == b.size && memcmp(a.data, b.data, a.size) == 0);
+        a.free(); b.free();
+    }
+
+    // A second cook of an unchanged tree runs no step and reads no source.
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--dump", dump, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, "goldberg: game: 4 files, 0 cooked, 3 clean, 0 failed"));
+    d = t.read("dump.txt");
+    KV_CHECK(c, count(d, "request copy") == 0 && count(d, "request hash") == 1 && has(d, "request hash g:goldberg.berg +text"));
+
+    // One source changes: one step runs.
+    t.put("assets/a.png", "the a, changed");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--dump", dump, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, "4 files, 1 cooked, 2 clean, 0 failed") && strcmp(t.read("out/g/a.png"), "the a, changed") == 0);
+    // Written again with the same bytes: hashed, since its time moved, and not cooked.
+    t.put("assets/a.png", "the a, changed");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--dump", dump, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, "4 files, 0 cooked, 3 clean, 0 failed") && has(t.read("dump.txt"), "request hash g:a.png"));
+
+    // An output someone deleted, and one someone changed, are cooked again.
+    KV_CHECK(c, io_remove(t.path("out/g/ui/hud.json")));
+    t.put("out/g/ui/big.bin", "tampered with");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, "4 files, 2 cooked, 1 clean, 0 failed") && strcmp(t.read("out/g/ui/hud.json"), "{ \"hud\": 1 }") == 0 && strcmp(t.read("out/g/ui/big.bin"), "0123456789") == 0);
+
+    // A source deleted while goldberg was not running: the next cook's scan of the output
+    // tree removes what it made, and the directory it leaves empty. So with a file that
+    // nothing here ever cooked.
+    KV_CHECK(c, io_remove(t.path("assets/ui/hud.json")) && io_remove(t.path("assets/ui/big.bin")));
+    t.put("out/g/stray/left.txt", "nobody's");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, "removed g/ui/hud.json (its source g:ui/hud.json is gone)") && has(g_out.data, "removed g/stray/left.txt (nothing here cooks to it)"));
+    KV_CHECK(c, has(g_out.data, "2 files, 0 cooked, 1 clean, 0 failed, 3 removed"));
+    KV_CHECK(c, !io_is_file(t.path("out/g/ui/hud.json")) && !io_is_dir(t.path("out/g/ui")) && !io_is_dir(t.path("out/g/stray")) && io_is_file(t.path("out/g/a.png")));
+
+    // A rule change that stops a file cooking takes its output away; one that starts it, brings it.
+    t.put("assets/goldberg.berg", R"({ "rules": [ { "match": "*.png", "meta": { "cook": false } } ] })");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, "2 files, 1 cooked, 0 clean, 0 failed, 1 removed") && !io_is_file(t.path("out/g/a.png")) && strcmp(t.read("out/g/notes/todo.txt"), "todo") == 0);
+    // "out" moves a file's place in the tree: the old place is cleared.
+    t.put("assets/goldberg.berg", R"({ "rules": [ { "match": "todo.txt", "meta": { "out": "docs/list.txt" } } ] })");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
+    KV_CHECK(c, strcmp(t.read("out/g/docs/list.txt"), "todo") == 0 && !io_is_file(t.path("out/g/notes/todo.txt")) && strcmp(t.read("out/g/a.png"), "the a, changed") == 0);
+
+    // Two sources that cook to one place are an error naming both, and neither wins quietly.
+    t.put("assets/b.png", "the b");
+    t.put("assets/goldberg.berg", R"({ "rules": [ { "match": "b.png", "meta": { "out": "a.png" } } ] })");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 1);
+    KV_CHECK(c, has(g_err.data, "g:a.png and g:b.png both cook to g/a.png") || has(g_err.data, "g:b.png and g:a.png both cook to g/a.png"));
+    t.put("assets/goldberg.berg", "{}");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0 && strcmp(t.read("out/g/b.png"), "the b") == 0);
+
+    // The state deleted: always safe. Everything is cooked again, nothing is lost.
+    KV_CHECK(c, io_remove(t.path(".goldberg-state/out.json")));
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, "3 files, 3 cooked, 0 clean, 0 failed") && strcmp(t.read("out/g/a.png"), "the a, changed") == 0);
+    // And a state that is not one: the same.
+    t.put(".goldberg-state/out.json", "not json at all");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0 && has(g_out.data, "3 files, 3 cooked"));
+
+    // A source that cannot be read fails its own step and no other.
+    KV_CHECK(c, io_make_dirs(t.path("assets/dir.png")));   // a directory with a file's name is not a file: not seen
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
+
+    // The output tree is only ever a directory that is goldberg's, new or empty.
+    t.put("precious/thesis.txt", "years of work");
+    char precious[600];
+    snprintf(precious, sizeof precious, "%s/precious", t.dir);
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", precious, "--watch", "none") == 2);
+    KV_CHECK(c, has(g_err.data, "is not a goldberg output tree") && strcmp(t.read("precious/thesis.txt"), "years of work") == 0);
+    KV_CHECK(c, gb("clean", "--out", precious) == 2 && io_is_file(t.path("precious/thesis.txt")));
+
+    // clean removes the tree and the state.
+    KV_CHECK(c, gb("clean", "--out", out) == 0 && !io_is_dir(out) && !io_is_file(t.path(".goldberg-state/out.json")));
+    KV_CHECK(c, gb("clean", "--out", out) == 0); // nothing there: nothing to do
+
+    // With both watchers: the same cook.
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "poll") == 0 && has(g_out.data, "3 files, 3 cooked"));
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out) == 0 && has(g_out.data, "3 files, 0 cooked, 3 clean"));
+
+    t.free();
+}
+
 } // namespace
 
 int main() {
     TestCtx c;
     test_rules(c);
     test_mistakes(c);
+    test_cook(c);
     g_out.free();
     g_err.free();
     names_shutdown();

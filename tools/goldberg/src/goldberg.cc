@@ -67,19 +67,31 @@ struct GbBerg {
     bool ok;      // it parsed
 };
 
+// One converter run, wanted or done: what it reads, what it writes, and the key of what
+// it was last made from. The state is a GbStepState.
+struct GbStep {
+    char output[kGbPath + 64]; // relative to the output tree
+    char source[kGbPath];
+    u32  root;
+    u8   key[32];
+    u8   state;
+};
+
 namespace {
 
-enum GbEv : u8 { EvSeen, EvAdded, EvChanged, EvRemoved, EvDirAdded, EvDirRemoved, EvRescan, EvScanDone, EvHashed, EvHashFailed, EvCount };
+enum GbEv : u8 { EvSeen, EvAdded, EvChanged, EvRemoved, EvDirAdded, EvDirRemoved, EvRescan, EvScanDone, EvHashed, EvHashFailed, EvCookDone, EvCookFailed, EvCount };
 constexpr const char* kEvNames[EvCount] = {"file-seen", "file-added", "file-changed", "file-removed", "dir-added", "dir-removed",
-                                           "rescan", "scan-done", "hashed", "hash-failed"};
+                                           "rescan", "scan-done", "hashed", "hash-failed", "cook-done", "cook-failed"};
 
 constinit const FieldDesc k_event_fields[] = {KV_FIELDS(GbEvent, seq, kind, root, path, size, mtime, hash, text)};
 constinit const FieldDesc k_file_fields[]  = {KV_FIELDS(GbFile, path, root, size, mtime, hash, hashed, is_berg, scan)};
 constinit const FieldDesc k_berg_fields[]  = {KV_FIELDS(GbBerg, path, root, version, ok)};
+constinit const FieldDesc k_step_fields[]  = {KV_FIELDS(GbStep, output, source, root, key, state)};
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(GbEvent, k_event_fields),
     KV_COMPONENT(GbFile, k_file_fields),
     KV_COMPONENT(GbBerg, k_berg_fields),
+    KV_COMPONENT(GbStep, k_step_fields),
 };
 // Tools have no simulation to hash: the pools are for inspection (ls /kinds/goldberg) and
 // for memory that is laid out, not for determinism.
@@ -87,6 +99,7 @@ constinit const KindDesc k_kinds[] = {
     {.name = ".event", .components = "GbEvent", .capacity = 16384, .cosmetic = true},
     {.name = ".file",  .components = "GbFile",  .capacity = 262144, .cosmetic = true},
     {.name = ".berg",  .components = "GbBerg",  .capacity = 16384, .cosmetic = true},
+    {.name = ".step",  .components = "GbStep",  .capacity = 262144, .cosmetic = true},
 };
 
 struct Pending {
@@ -105,6 +118,7 @@ struct Root {
     char name[64];
     char dir[512];
     u32  watch;  // the watcher's id, or ~0u
+    bool watched; // false for the output tree: scanned, never watched
 };
 
 struct HashReq {
@@ -117,6 +131,18 @@ struct HashReq {
     u8    hash[32];
     char* text;
     u32   text_len;
+};
+
+// One copy: a source under a root to a path under the output tree, written whole.
+struct CopyReq {
+    u32  root;
+    char source[kGbPath];
+    char output[kGbPath + 64];
+    bool ok;
+    u64  size;
+    i64  mtime;
+    u8   hash[32];
+    char error[200];
 };
 
 struct ScanItem { u32 root; u32 path; u64 size; i64 mtime; bool end; };
@@ -137,6 +163,9 @@ struct GoldbergState {
     Array<Root>     roots;
     FsWatcher       watcher;
     Array<HashReq>  hashes;              // asked for, not yet run
+    Array<CopyReq>  copies;              // likewise
+    char            out_dir[600] = {};   // the output tree
+    u32             tmp_serial = 0;
     Array<ScanItem> scan;                // files a scan found, not yet events
     Array<char>     scan_text;
     u32             scan_at = 0;
@@ -205,6 +234,55 @@ void run_hashes(GoldbergState& s) {
         else push_pending(s, EvHashFailed, r.root, r.path);
     }
     s.hashes.len = 0;
+}
+
+// ---- copying: one batch a tick, on the job pool ----------------------------------------------
+
+void parent_dir(const char* path, char* out, usize cap) {
+    format(out, cap, "%s", path);
+    char* slash = strrchr(out, '/');
+    if (slash) *slash = 0; else out[0] = 0;
+}
+
+void copy_job(u32 chunk, u32 begin, u32 end, void* user) {
+    GoldbergState& s = *(GoldbergState*)user;
+    for (u32 i = begin; i < end; ++i) {
+        CopyReq& r = s.copies.data[i];
+        char from[800], to[900], tmp[960], dir[900];
+        format(from, sizeof from, "%s/%s", s.roots.data[r.root].dir, r.source);
+        format(to, sizeof to, "%s/%s", s.out_dir, r.output);
+        format(tmp, sizeof tmp, "%s.tmp-%u-%u", to, s.tmp_serial, i);
+        IoBytes bytes;
+        i32 err = 0;
+        if (!io_read_now(from, &bytes, nullptr, &err)) { format(r.error, sizeof r.error, "cannot read %s (errno %d)", from, err); continue; }
+        sha256(bytes.data, bytes.size, r.hash);
+        parent_dir(to, dir, sizeof dir);
+        bool ok = (!dir[0] || io_make_dirs(dir)) && io_write_now(tmp, bytes.data, bytes.size, &err);
+        bytes.free();
+        if (!ok) { format(r.error, sizeof r.error, "cannot write %s (errno %d)", tmp, err); io_remove(tmp); continue; }
+        // Whole, or not at all: a reader of the output tree never sees half a file.
+        if (!io_rename(tmp, to)) { format(r.error, sizeof r.error, "cannot rename %s into place", tmp); io_remove(tmp); continue; }
+        IoStat st;
+        if (io_stat(to, &st)) { r.size = st.size; r.mtime = st.mtime_ns; }
+        r.ok = true;
+    }
+    (void)chunk;
+}
+
+void run_copies(GoldbergState& s) {
+    if (!s.copies.len) return;
+    ++s.tmp_serial;
+    jobs_run(s.copies.len, 2, copy_job, &s, "goldberg.copy");
+    for (CopyReq& r : s.copies) {
+        if (r.ok) push_pending(s, EvCookDone, r.root, r.output, r.size, r.mtime, r.hash);
+        else {
+            u32 n = (u32)strlen(r.error);
+            char* text = (char*)mem_alloc(n + 1);
+            memcpy(text, r.error, n + 1);
+            push_pending(s, EvCookFailed, r.root, r.output, 0, 0, nullptr, text, n);
+        }
+    }
+    s.copies.len = 0;
 }
 
 // ---- the scan ----------------------------------------------------------------------------------
@@ -336,6 +414,7 @@ int host_add_root(lua_State* L) {
     usize n = strlen(r.dir);
     while (n > 1 && r.dir[n - 1] == '/') r.dir[--n] = 0;
     r.watch = ~0u;
+    r.watched = lua_isnoneornil(L, 3) || lua_toboolean(L, 3);
     s.roots.push(r);
     lua_pushinteger(L, s.roots.len); // 1-based, as Lua counts
     return 1;
@@ -370,7 +449,7 @@ int host_watch(lua_State* L) {
         s.watcher.free();
         return luaL_error(L, "--watch %s: this platform has no such watcher", mode);
     }
-    for (Root& r : s.roots) r.watch = s.watcher.add_root(r.dir); // a root that is not there yet is simply not watched
+    for (Root& r : s.roots) if (r.watched) r.watch = s.watcher.add_root(r.dir); // a root that is not there yet is simply not watched
     lua_pushstring(L, s.watcher.backend_name());
     return 1;
 }
@@ -387,6 +466,68 @@ int host_hash(lua_State* L) {
     r.want_text = lua_toboolean(L, 3);
     s.hashes.push(r);
     return 0;
+}
+
+// host.set_out(dir): the output tree. host.copy(root, source, output) queues a copy into
+// it; its result comes back as a cook-done or cook-failed event for `output`.
+int host_set_out(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    const char* dir = luaL_checkstring(L, 1);
+    if (strlen(dir) >= sizeof s.out_dir) return luaL_error(L, "the output tree's path is too long");
+    format(s.out_dir, sizeof s.out_dir, "%s", dir);
+    return 0;
+}
+
+int host_copy(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    u32 at;
+    check_root(L, 1, &at);
+    const char* source = luaL_checkstring(L, 2);
+    const char* output = luaL_checkstring(L, 3);
+    CopyReq r{};
+    if (!s.out_dir[0]) return luaL_error(L, "copy: there is no output tree");
+    if (strlen(source) >= sizeof r.source || strlen(output) >= sizeof r.output) return luaL_error(L, "copy: '%s': a path too long", output);
+    r.root = at;
+    format(r.source, sizeof r.source, "%s", source);
+    format(r.output, sizeof r.output, "%s", output);
+    s.copies.push(r);
+    return 0;
+}
+
+// host.remove_output(output): removes a file of the output tree, and the directories it
+// leaves empty, up to the tree. True if the file is gone afterwards.
+int host_remove_output(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    const char* output = luaL_checkstring(L, 1);
+    if (!s.out_dir[0] || strstr(output, "..")) return luaL_error(L, "remove: '%s' is not in the output tree", output);
+    char path[1300];
+    format(path, sizeof path, "%s/%s", s.out_dir, output);
+    io_remove(path);
+    bool gone = !io_is_file(path);
+    usize floor = strlen(s.out_dir);
+    for (;;) {
+        char* slash = strrchr(path, '/');
+        if (!slash || (usize)(slash - path) <= floor) break;
+        *slash = 0;
+        if (!io_remove(path)) break; // not empty, or not ours to remove
+    }
+    lua_pushboolean(L, gone);
+    return 1;
+}
+
+// host.write_atomic(path, text): the file written whole, its directory made if need be.
+int host_write_atomic(lua_State* L) {
+    const char* path = luaL_checkstring(L, 1);
+    usize n = 0;
+    const char* text = luaL_checklstring(L, 2, &n);
+    char tmp[1100], dir[1100];
+    if (strlen(path) + 16 >= sizeof tmp) return luaL_error(L, "'%s': a path too long", path);
+    parent_dir(path, dir, sizeof dir);
+    format(tmp, sizeof tmp, "%s.tmp", path);
+    bool ok = (!dir[0] || io_make_dirs(dir)) && io_write_now(tmp, text, n) && io_rename(tmp, path);
+    if (!ok) io_remove(tmp);
+    lua_pushboolean(L, ok);
+    return 1;
 }
 
 int host_glob(lua_State* L) { lua_pushboolean(L, glob_match(luaL_checkstring(L, 1), luaL_checkstring(L, 2))); return 1; }
@@ -416,6 +557,7 @@ int host_finish(lua_State* L) {
 
 constexpr luaL_Reg k_host[] = {
     {"add_root", host_add_root}, {"scan", host_scan}, {"watch", host_watch}, {"hash", host_hash},
+    {"set_out", host_set_out}, {"copy", host_copy}, {"remove_output", host_remove_output}, {"write_atomic", host_write_atomic},
     {"glob", host_glob}, {"glob_path", host_glob_path}, {"print", host_print}, {"warn", host_warn},
     {"now", host_now}, {"cwd", host_cwd}, {"active", host_active}, {"finish", host_finish}, {nullptr, nullptr},
 };
@@ -453,6 +595,8 @@ bool load_app(GoldbergState& s, Engine& e) {
     lua_setfield(L, -2, "file");
     script_push_kind(L, engine_table(e, "goldberg.berg"));
     lua_setfield(L, -2, "berg");
+    script_push_kind(L, engine_table(e, "goldberg.step"));
+    lua_setfield(L, -2, "step");
     lua_setfield(L, -2, "kinds");
     lua_pushstring(L, s.lua_dir);
     lua_setfield(L, -2, "lua_dir");
@@ -506,11 +650,22 @@ void push_event(lua_State* L, GoldbergState& s, const GbEvent& ev) {
     lua_setfield(L, -2, "root");
     lua_pushstring(L, ev.path);
     lua_setfield(L, -2, "path");
-    if (ev.kind == EvSeen || ev.kind == EvHashed) {
+    if (ev.kind == EvSeen || ev.kind == EvHashed || ev.kind == EvCookDone) {
         lua_pushinteger(L, (lua_Integer)ev.size);
         lua_setfield(L, -2, "size");
         lua_pushinteger(L, ev.mtime);
         lua_setfield(L, -2, "mtime");
+    }
+    if (ev.kind == EvCookFailed && ev.text) {
+        const Text& t = s.texts.data[ev.text - 1];
+        lua_pushlstring(L, t.data, t.len);
+        lua_setfield(L, -2, "text");
+    }
+    if (ev.kind == EvCookDone) {
+        char hex[65];
+        sha256_hex(ev.hash, hex);
+        lua_pushlstring(L, hex, 64);
+        lua_setfield(L, -2, "hash");
     }
     if (ev.kind == EvHashed) {
         char hex[65];
@@ -532,6 +687,7 @@ void pump(TickContext& ctx) {
     s.events = ctx_kind(ctx, "goldberg.event", true);
     ctx_kind(ctx, "goldberg.file", true);
     ctx_kind(ctx, "goldberg.berg", true);
+    ctx_kind(ctx, "goldberg.step", true);
 
     // 1. A command.
     if (s.command_words) {
@@ -563,6 +719,7 @@ void pump(TickContext& ctx) {
         }
     }
     run_hashes(s);
+    run_copies(s);
     // The scan's files, a pool's worth at a time.
     u32 room = s.events->capacity - s.events->live();
     for (; s.scan_at < s.scan.len && s.pending.len < room; ++s.scan_at) {
@@ -596,7 +753,7 @@ void pump(TickContext& ctx) {
     if (s.failed) return;
 
     // 5. Is anything left? The watchers are asked once more before the host says no.
-    bool quiet = !s.pending.len && !s.hashes.len && !s.scan.len && !delivered;
+    bool quiet = !s.pending.len && !s.hashes.len && !s.copies.len && !s.scan.len && !delivered;
     if (quiet && s.watcher.is_open()) {
         for (const FsEvent& ev : s.watcher.poll(true)) {
             u32 root = ~0u;
@@ -631,6 +788,7 @@ void cmd_cook(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args
 void cmd_watch(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "watch"); }
 void cmd_explain(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "explain"); }
 void cmd_status(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "status"); }
+void cmd_clean(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "clean"); }
 void cmd_replay(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "replay"); }
 
 bool goldberg_startup(Engine&, ModuleInstance& self) {
@@ -653,6 +811,7 @@ void goldberg_shutdown(Engine&, ModuleInstance& self) {
     s->command.free();
     s->roots.free();
     s->hashes.free();
+    s->copies.free();
     s->scan.free();
     s->scan_text.free();
     s->pending.free();
@@ -665,10 +824,11 @@ constinit const CliCommandDesc k_commands[] = {
     {.name = "goldberg watch", .help = "goldberg watch [GAME] [CONFIG]: cook, then keep watching", .fn = cmd_watch},
     {.name = "goldberg explain", .help = "goldberg explain PATH: what this file is, what happens to it, and why", .fn = cmd_explain},
     {.name = "goldberg status", .help = "goldberg status: dirty, running, failed", .fn = cmd_status},
+    {.name = "goldberg clean", .help = "goldberg clean --out DIR [--state FILE]: remove what goldberg wrote there, and its state", .fn = cmd_clean},
     {.name = "goldberg replay", .help = "goldberg replay LOG [--dump FILE]: feed a recorded event log to a fresh session, with no file system under it", .fn = cmd_replay},
 };
 constinit const SystemDesc k_systems[] = {
-    {.name = ".pump", .phase = Phase::PreSim, .fn = pump, .writes = "goldberg.event, goldberg.file, goldberg.berg", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".pump", .phase = Phase::PreSim, .fn = pump, .writes = "goldberg.event, goldberg.file, goldberg.berg, goldberg.step", .main_thread = true, .runs = RunWhen::Always},
 };
 
 } // namespace
