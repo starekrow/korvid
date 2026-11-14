@@ -3,6 +3,5 @@
 module "cpukiller" {
   output        = "exe",
   deps          = { "core", "platform", "platform_hid", "math", "render", "asset", "sprite", "frameloop" },
-  engine_module = true,
-  module_list   = false,   -- it carries two lists of its own: with the window and without
+  engine_module = true,   -- kormake's list is the one with the window; src/core_modules.cc has the one without
 }
