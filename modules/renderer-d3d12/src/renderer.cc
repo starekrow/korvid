@@ -20,11 +20,11 @@ namespace kv {
 
 // ---- shared helpers ----------------------------------------------------------------------
 
-u32 rd_material_row_of(const Renderer* r, Handle material) {
+u32 rb_material_row_of(const Renderer* r, Handle material) {
     return r->materials.valid(material) ? material.index() : 0;
 }
 
-u32 rd_bucket_of(i32 layer, u32 slot) {
+u32 rb_bucket_of(i32 layer, u32 slot) {
     if (layer < kLayerMin) layer = kLayerMin;
     if (layer > kLayerMax) layer = kLayerMax;
     u32 b = slot < kSlotCount ? slot : (u32)BlendMode::Alpha;
@@ -65,7 +65,6 @@ void write_placement(f32 out[4], f32* scale_y, const Placement2& p) {
 
 // ---- lifetime -------------------------------------------------------------------------------
 
-RendererSurface renderer_surface() { return RendererSurface::D3D12; }
 
 Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     RendererD3d12State* owner = engine_module_state_as<RendererD3d12State>(engine, "renderer-d3d12");
@@ -94,20 +93,20 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->want_width  = desc.width;
     r->want_height = desc.height;
 
-    bool ok = rd_create_device(r);
-    ok = ok && rd_create_frames(r);
-    ok = ok && rd_gpu_profile_create(r);
-    ok = ok && rd_create_resource_pools(r);
-    ok = ok && rd_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
-    ok = ok && rd_create_static_buffers(r);
+    bool ok = rb_create_device(r);
+    ok = ok && rb_create_frames(r);
+    ok = ok && rb_gpu_profile_create(r);
+    ok = ok && rb_create_resource_pools(r);
+    ok = ok && rb_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
+    ok = ok && rb_create_static_buffers(r);
     u64 ring = (u64)desc.sprite_rows * sizeof(GpuSprite) * kFramesInFlight;
-    ok = ok && rd_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
-    ok = ok && rd_create_heaps_and_root(r);
-    ok = ok && rd_load_shaders(r);
-    ok = ok && rd_create_default_texture(r);
-    ok = ok && rd_create_compute_pipelines(r);
-    ok = ok && rd_recreate_swapchain(r); // also builds the graphics pipelines
-    if (r->device) rd_drain_messages(r);
+    ok = ok && rb_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
+    ok = ok && rb_create_heaps_and_root(r);
+    ok = ok && rb_load_shaders(r);
+    ok = ok && rb_create_default_texture(r);
+    ok = ok && rb_create_compute_pipelines(r);
+    ok = ok && rb_recreate_swapchain(r); // also builds the graphics pipelines
+    if (r->device) rb_drain_messages(r);
     if (!ok) {
         renderer_destroy(r);
         return nullptr;
@@ -122,18 +121,18 @@ void renderer_destroy(Renderer* r) {
     free_in(mem_general(), r->check_keys, sizeof(f32) * (r->check_rows ? r->check_rows : 1));
     r->check_keys = nullptr;
     if (r->device) {
-        rd_wait_idle(r); // the one wait-idle: nothing is in flight after this
-        rd_destroy_pipelines(r);
-        rd_post_destroy(r);
-        rd_destroy_swapchain(r);
-        rd_destroy_frames(r); // runs every frame's garbage
-        rd_destroy_resources(r);
-        rd_gpu_profile_destroy(r);
-        rd_drain_messages(r);
+        rb_wait_idle(r); // the one wait-idle: nothing is in flight after this
+        rb_destroy_pipelines(r);
+        rb_post_destroy(r);
+        rb_destroy_swapchain(r);
+        rb_destroy_frames(r); // runs every frame's garbage
+        rb_destroy_resources(r);
+        rb_gpu_profile_destroy(r);
+        rb_drain_messages(r);
     } else {
-        rd_destroy_resources(r);
+        rb_destroy_resources(r);
     }
-    rd_destroy_device(r);
+    rb_destroy_device(r);
     KV_INFO("d3d12", "renderer down after %llu frames, %llu deltas, %llu rows uploaded, ring peak %llu KB (%u grows); %u debug layer errors, %u warnings",
             (unsigned long long)r->frame_count, (unsigned long long)r->deltas_applied, (unsigned long long)r->rows_uploaded,
             (unsigned long long)(r->ring.peak / 1024), r->ring.grows, r->validation_errors, r->validation_warnings);
@@ -191,7 +190,7 @@ Handle renderer_texture_create(Renderer* r, const TextureDesc& desc) {
     Handle h = r->textures.create(t);
     if (h.is_null()) { KV_ERROR("d3d12", "out of texture slots (%u)", kMaxTextures); return h; }
     r->texture_by_name.get_or_insert(t.name.hash, h); // the first live one keeps the name
-    rd_mark_slot_dirty(r, h.index()); // shows the default until the upload lands
+    rb_mark_slot_dirty(r, h.index()); // shows the default until the upload lands
     return h;
 }
 
@@ -205,21 +204,21 @@ bool renderer_texture_upload(Renderer* r, Handle texture, u32 width, u32 height,
     }
     t->width  = width;
     t->height = height;
-    if (!rd_create_texture_resource(r, *t)) return false;
-    if (!rd_stage_texture(r, texture.index(), *t, (const u8*)pixels)) return false;
-    rd_mark_slot_dirty(r, texture.index());
+    if (!rb_create_texture_resource(r, *t)) return false;
+    if (!rb_stage_texture(r, texture.index(), *t, (const u8*)pixels)) return false;
+    rb_mark_slot_dirty(r, texture.index());
     return true;
 }
 
 void renderer_texture_destroy(Renderer* r, Handle texture) {
     Texture* t = r ? r->textures.get(texture) : nullptr;
     if (!t || texture.index() == 0) return; // the default stays
-    rd_defer_destroy_texture(r, *t);
+    rb_defer_destroy_texture(r, *t);
     u32 slot = texture.index();
     Name name = t->name;
     r->textures.destroy(texture);
     rename_after_destroy(r->textures, r->texture_by_name, name, texture);
-    rd_mark_slot_dirty(r, slot); // back to the default, in each set once its frame has passed
+    rb_mark_slot_dirty(r, slot); // back to the default, in each set once its frame has passed
 }
 
 u32 renderer_texture_slot(const Renderer* r, Handle texture) {
@@ -248,7 +247,7 @@ void fill_material(Renderer* r, MaterialRecord& m, const MaterialDesc& desc) {
     m.texture = desc.texture;
     m.blend   = (u32)desc.blend < (u32)BlendMode::Count ? desc.blend : BlendMode::Alpha;
     m.shader  = desc.shader && desc.shader[0] ? name_intern(desc.shader) : Name{};
-    m.slot    = rd_material_slot(r, m.shader, m.blend);
+    m.slot    = rb_material_slot(r, m.shader, m.blend);
     m.filter  = (u32)desc.filter < (u32)TextureFilter::Count ? desc.filter : TextureFilter::Nearest;
     m.tint    = desc.tint;
     for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) m.params[i] = desc.params[i];
@@ -272,7 +271,7 @@ Handle renderer_material_create(Renderer* r, const MaterialDesc& desc) {
     Handle h = r->materials.create(m);
     if (h.is_null()) { KV_ERROR("d3d12", "out of materials (%u)", kMaxMaterials); return h; }
     r->material_by_name.get_or_insert(m.name.hash, h);
-    rd_mark_material_dirty(r, h.index());
+    rb_mark_material_dirty(r, h.index());
     return h;
 }
 
@@ -281,8 +280,8 @@ bool renderer_material_set(Renderer* r, Handle material, const MaterialDesc& des
     if (!m) return false;
     u32 before = m->slot;
     fill_material(r, *m, desc);
-    if (m->slot != before) rd_rebind_material(r, material.index()); // the sprites' buckets moved
-    rd_mark_material_dirty(r, material.index());
+    if (m->slot != before) rb_rebind_material(r, material.index()); // the sprites' buckets moved
+    rb_mark_material_dirty(r, material.index());
     return true;
 }
 
@@ -305,13 +304,13 @@ void renderer_material_destroy(Renderer* r, Handle material) {
     Name name = r->materials.get(material)->name;
     r->materials.destroy(material);
     rename_after_destroy(r->materials, r->material_by_name, name, material);
-    rd_rebind_material(r, row);      // its sprites fall back to the default
-    rd_mark_material_dirty(r, row);  // the row is rewritten as a copy of the default
+    rb_rebind_material(r, row);      // its sprites fall back to the default
+    rb_mark_material_dirty(r, row);  // the row is rewritten as a copy of the default
 }
 
 bool renderer_post_layer(Renderer* r, i32 layer, const char* shader) {
     if (!r) return false;
-    return rd_post_set(r, layer, shader && *shader ? name_intern(shader) : Name{});
+    return rb_post_set(r, layer, shader && *shader ? name_intern(shader) : Name{});
 }
 
 void renderer_post_params(Renderer* r, const f32* params, u32 count) {
@@ -373,8 +372,8 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
         }
         case SpriteDeltaKind::Set: {
             const RenderSpriteState& st = d.state;
-            u32 material = rd_material_row_of(r, st.material);
-            u32 bucket   = rd_bucket_of(st.layer, r->materials.items[material].slot);
+            u32 material = rb_material_row_of(r, st.material);
+            u32 bucket   = rb_bucket_of(st.layer, r->materials.items[material].slot);
             RenderSprite* s;
             u32 slot;
             if (u32* found = r->sprite_of_entity.find(d.entity)) {
@@ -451,16 +450,16 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     {
         KV_ZONE_WAIT("frame fence");
         f64 t = time_now();
-        if (!rd_wait_fence(r, f.fence_value)) return false;
+        if (!rb_wait_fence(r, f.fence_value)) return false;
         waited += time_now() - t;
     }
     r->last_wait = 0.0;
-    rd_gpu_collect(r, f);
-    rd_ring_release(r, f);
-    rd_run_garbage(r, f);
+    rb_gpu_collect(r, f);
+    rb_ring_release(r, f);
+    rb_run_garbage(r, f);
     if (r->sprites.len > r->tables.capacity) {
         KV_INFO("d3d12", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->sprites.len, r->tables.capacity);
-        if (!rd_create_tables(r, r->sprites.len)) return false;
+        if (!rb_create_tables(r, r->sprites.len)) return false;
     }
     f32* lo = (f32*)f.layers.mapped;
     for (u32 i = 0; i < kLayerCount; ++i) {
@@ -468,10 +467,10 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         lo[i * 4 + 2] = r->layer_cur[i][0];  lo[i * 4 + 3] = r->layer_cur[i][1];
     }
     u32 fi = r->frame_index;
-    for (u32 slot : f.dirty_slots) rd_write_texture_slot(r, fi, slot);
+    for (u32 slot : f.dirty_slots) rb_write_texture_slot(r, fi, slot);
     f.dirty_slots.clear();
 
-    if (r->swapchain_dirty && !rd_recreate_swapchain(r)) return false;
+    if (r->swapchain_dirty && !rb_recreate_swapchain(r)) return false;
 
     bool have_image = r->swapchain.handle != nullptr;
     u32  image_index = 0;
@@ -485,7 +484,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         image_index = r->swapchain.handle->GetCurrentBackBufferIndex();
     }
 
-    if (!rd_record_frame(r, f, have_image, image_index, view)) return false;
+    if (!rb_record_frame(r, f, have_image, image_index, view)) return false;
     ID3D12CommandList* lists[] = {f.cmd};
     f.submit_ticks = os_ticks();
     r->queue->ExecuteCommandLists(1, lists);
@@ -493,7 +492,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     f.fence_value = r->fence_next++;
     f.submitted = true;
     f.garbage_owned = f.garbage.len;
-    rd_ring_submitted(r, f);
+    rb_ring_submitted(r, f);
 
     if (have_image) {
         KV_ZONE_WAIT("present");
@@ -503,18 +502,18 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         waited += time_now() - t;
         if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             KV_ERROR("d3d12", "Present: %s (removed: %s)", hr_name(hr), hr_name(r->device->GetDeviceRemovedReason()));
-            rd_drain_messages(r);
+            rb_drain_messages(r);
             return false;
         }
         if (FAILED(hr)) KV_ERROR("d3d12", "Present: %s", hr_name(hr));
     }
 
     if (r->shot_recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now
-        if (!rd_wait_fence(r, f.fence_value)) return false;
-        if (r->shot_recorded) rd_write_screenshot(r);
-        if (r->check_recorded) rd_verify_sort(r);
+        if (!rb_wait_fence(r, f.fence_value)) return false;
+        if (r->shot_recorded) rb_write_screenshot(r);
+        if (r->check_recorded) rb_verify_sort(r);
     }
-    rd_drain_messages(r);
+    rb_drain_messages(r);
 
     r->last_wait = waited;
     r->frame_index = (r->frame_index + 1) % kFramesInFlight;

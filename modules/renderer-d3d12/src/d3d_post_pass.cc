@@ -51,13 +51,13 @@ bool post_root(Renderer* r) {
     d.pParameters       = rp;
     d.NumStaticSamplers = 1;
     d.pStaticSamplers   = &s;
-    p.root = rd_make_root_signature(r, d, "post");
+    p.root = rb_make_root_signature(r, d, "post");
     return p.root != nullptr;
 }
 
 void post_destroy_target_later(Renderer* r) {
     PostPass& p = r->post;
-    rd_defer_release(r, p.target);
+    rb_defer_release(r, p.target);
     p.target = nullptr;
     p.width = p.height = 0;
 }
@@ -70,31 +70,31 @@ void post_fail(Renderer* r, const char* why) {
 
 } // namespace
 
-bool rd_post_set(Renderer* r, i32 layer, Name shader) {
+bool rb_post_set(Renderer* r, i32 layer, Name shader) {
     PostPass& p = r->post;
     p.layer = layer;
     if (shader == p.shader) return !p.failed;
-    rd_defer_release(r, p.pipeline);
+    rb_defer_release(r, p.pipeline);
     p.pipeline = nullptr;
-    rd_free_shader(p.fragment);
+    rb_free_shader(p.fragment);
     p.shader = shader;
     p.failed = false;
     if (shader.is_null()) { post_destroy_target_later(r); return true; }
 
     if (!post_root(r)) { post_fail(r, "has no root signature"); return false; }
-    if (!p.vertex.data && !rd_load_shader(r, "post.dxil.zip", "vs_post", &p.vertex)) { post_fail(r, "has no vertex shader (post.dxil.zip)"); return false; }
+    if (!p.vertex.data && !rb_load_shader(r, "post.dxil.zip", "vs_post", &p.vertex)) { post_fail(r, "has no vertex shader (post.dxil.zip)"); return false; }
     char file[96];
     format(file, sizeof file, "%s.dxil.zip", name_str(shader));
-    if (!rd_load_shader(r, file, "fs_main", &p.fragment)) { post_fail(r, "did not load"); return false; }
-    return rd_post_create_pipeline(r);
+    if (!rb_load_shader(r, file, "fs_main", &p.fragment)) { post_fail(r, "did not load"); return false; }
+    return rb_post_create_pipeline(r);
 }
 
-bool rd_post_active(const Renderer* r) {
+bool rb_post_active(const Renderer* r) {
     const PostPass& p = r->post;
     return !p.shader.is_null() && !p.failed && p.pipeline;
 }
 
-bool rd_post_create_pipeline(Renderer* r) {
+bool rb_post_create_pipeline(Renderer* r) {
     PostPass& p = r->post;
     if (p.shader.is_null() || p.failed || !p.fragment.data) return false;
     if (p.pipeline) return true;
@@ -115,22 +115,22 @@ bool rd_post_create_pipeline(Renderer* r) {
     if (FAILED(hr)) {
         p.pipeline = nullptr;
         KV_ERROR("d3d12", "post pipeline: %s", hr_name(hr));
-        rd_drain_messages(r);
+        rb_drain_messages(r);
         post_fail(r, "does not link with vs_post");
         return false;
     }
     char label[96];
     format(label, sizeof label, "post %s", name_str(p.shader));
-    rd_name(p.pipeline, label);
+    rb_name(p.pipeline, label);
     return true;
 }
 
 // The target for the swapchain as it is now: made again when its size moved. That happens
 // only after a resize, which waited for the GPU, so every frame's descriptor of it can be
 // written here.
-bool rd_post_prepare(Renderer* r) {
+bool rb_post_prepare(Renderer* r) {
     PostPass& p = r->post;
-    if (!rd_post_active(r)) return false;
+    if (!rb_post_active(r)) return false;
     const Swapchain& s = r->swapchain;
     if (p.target && p.width == s.width && p.height == s.height) return true;
     post_destroy_target_later(r);
@@ -149,34 +149,34 @@ bool rd_post_prepare(Renderer* r) {
     HRESULT hr = r->device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
                                                     IID_PPV_ARGS(&p.target));
     if (FAILED(hr)) { KV_ERROR("d3d12", "world target: %s", hr_name(hr)); post_fail(r, "has no target"); return false; }
-    rd_name(p.target, "world target");
+    rb_name(p.target, "world target");
     p.target_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     p.width  = s.width;
     p.height = s.height;
-    r->device->CreateRenderTargetView(p.target, nullptr, rd_rtv(r, kRtvPost));
-    for (u32 f = 0; f < kFramesInFlight; ++f) r->device->CreateShaderResourceView(p.target, nullptr, rd_heap_cpu(r, kHeapPost + f));
+    r->device->CreateRenderTargetView(p.target, nullptr, rb_rtv(r, kRtvPost));
+    for (u32 f = 0; f < kFramesInFlight; ++f) r->device->CreateShaderResourceView(p.target, nullptr, rb_heap_cpu(r, kHeapPost + f));
     KV_INFO("d3d12", "world target %ux%u for post shader '%s'", p.width, p.height, name_str(p.shader));
     return true;
 }
 
-void rd_post_begin_world(Renderer* r, ID3D12GraphicsCommandList* cmd, const RenderView& view) {
+void rb_post_begin_world(Renderer* r, ID3D12GraphicsCommandList* cmd, const RenderView& view) {
     PostPass& p = r->post;
-    rd_transition(cmd, p.target, p.target_state, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    rb_transition(cmd, p.target, p.target_state, D3D12_RESOURCE_STATE_RENDER_TARGET);
     p.target_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    D3D12_CPU_DESCRIPTOR_HANDLE rtv = rd_rtv(r, kRtvPost);
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv = rb_rtv(r, kRtvPost);
     cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
     const f32 clear[4] = {view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a};
     cmd->ClearRenderTargetView(rtv, clear, 0, nullptr);
 }
 
-void rd_post_end_world(Renderer* r, ID3D12GraphicsCommandList* cmd) {
+void rb_post_end_world(Renderer* r, ID3D12GraphicsCommandList* cmd) {
     PostPass& p = r->post;
-    rd_transition(cmd, p.target, p.target_state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    rb_transition(cmd, p.target, p.target_state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     p.target_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 }
 
 // The frame's parameters (its fence has passed, so nothing reads them), then one triangle.
-void rd_post_draw(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd, const RenderView& view) {
+void rb_post_draw(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd, const RenderView& view) {
     PostPass& p = r->post;
     u32 fi = (u32)(&f - r->frames);
     memcpy(f.post_params.mapped, p.params, sizeof p.params);
@@ -187,25 +187,25 @@ void rd_post_draw(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd,
     push.tick    = r->tick;
     push.count   = p.param_count;
     push.alpha   = view.alpha;
-    rd_label_begin(r, cmd, "post");
+    rb_label_begin(r, cmd, "post");
     cmd->SetPipelineState(p.pipeline);
     cmd->SetGraphicsRootSignature(p.root);
     cmd->SetGraphicsRoot32BitConstants(kPostPush, sizeof push / 4, &push, 0);
-    cmd->SetGraphicsRootDescriptorTable(kPostWorld, rd_heap_gpu(r, kHeapPost + fi));
+    cmd->SetGraphicsRootDescriptorTable(kPostWorld, rb_heap_gpu(r, kHeapPost + fi));
     cmd->SetGraphicsRootShaderResourceView(kPostParams, f.post_params.gpu());
     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmd->DrawInstanced(3, 1, 0, 0);
-    rd_label_end(r, cmd);
+    rb_label_end(r, cmd);
 }
 
 // The GPU idle.
-void rd_post_destroy(Renderer* r) {
+void rb_post_destroy(Renderer* r) {
     PostPass& p = r->post;
-    rd_release(p.pipeline);
-    rd_release(p.target);
-    rd_release(p.root);
-    rd_free_shader(p.vertex);
-    rd_free_shader(p.fragment);
+    rb_release(p.pipeline);
+    rb_release(p.target);
+    rb_release(p.root);
+    rb_free_shader(p.vertex);
+    rb_free_shader(p.fragment);
     p = PostPass{};
 }
 

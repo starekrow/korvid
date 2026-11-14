@@ -21,11 +21,11 @@ namespace kv {
 
 // ---- shared helpers ----------------------------------------------------------------------
 
-u32 rv_material_row_of(const Renderer* r, Handle material) {
+u32 rb_material_row_of(const Renderer* r, Handle material) {
     return r->materials.valid(material) ? material.index() : 0;
 }
 
-u32 rv_bucket_of(i32 layer, u32 slot) {
+u32 rb_bucket_of(i32 layer, u32 slot) {
     if (layer < kLayerMin) layer = kLayerMin;
     if (layer > kLayerMax) layer = kLayerMax;
     u32 b = slot < kSlotCount ? slot : (u32)BlendMode::Alpha;
@@ -66,7 +66,6 @@ void write_placement(f32 out[4], f32* scale_y, const Placement2& p) {
 
 // ---- lifetime -------------------------------------------------------------------------------
 
-RendererSurface renderer_surface() { return RendererSurface::Vulkan; }
 
 Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     RendererVulkanState* owner = engine_module_state_as<RendererVulkanState>(engine, "renderer-vulkan");
@@ -94,23 +93,23 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->want_width  = desc.width;
     r->want_height = desc.height;
 
-    bool ok = rv_create_instance(r);
+    bool ok = rb_create_instance(r);
     if (ok && !vk_platform_create_surface(r->window, r->instance, &r->surface)) ok = false;
-    ok = ok && rv_create_device(r);
-    ok = ok && rv_create_frames(r);
-    ok = ok && rv_gpu_profile_create(r);
-    ok = ok && rv_create_resource_pools(r);
-    ok = ok && rv_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
-    ok = ok && rv_create_static_buffers(r);
+    ok = ok && rb_create_device(r);
+    ok = ok && rb_create_frames(r);
+    ok = ok && rb_gpu_profile_create(r);
+    ok = ok && rb_create_resource_pools(r);
+    ok = ok && rb_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
+    ok = ok && rb_create_static_buffers(r);
     // The ring holds a frame's uploads for every frame in flight: at most every row of the
     // tables a frame (after a growth), so a hint for the tables is one for the ring too.
     VkDeviceSize ring = (VkDeviceSize)desc.sprite_rows * sizeof(GpuSprite) * kFramesInFlight;
-    ok = ok && rv_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
-    ok = ok && rv_create_descriptors(r);
-    ok = ok && rv_load_shaders(r);
-    ok = ok && rv_create_default_texture(r);
-    ok = ok && rv_create_compute_pipelines(r);
-    ok = ok && rv_recreate_swapchain(r); // also builds the graphics pipelines, which need the format
+    ok = ok && rb_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
+    ok = ok && rb_create_descriptors(r);
+    ok = ok && rb_load_shaders(r);
+    ok = ok && rb_create_default_texture(r);
+    ok = ok && rb_create_compute_pipelines(r);
+    ok = ok && rb_recreate_swapchain(r); // also builds the graphics pipelines, which need the format
     if (!ok) {
         renderer_destroy(r);
         return nullptr;
@@ -126,15 +125,15 @@ void renderer_destroy(Renderer* r) {
     r->check_keys = nullptr;
     if (r->device) {
         vkDeviceWaitIdle(r->device); // the one wait-idle: nothing is in flight after this
-        rv_destroy_pipelines_now(r);
-        rv_post_destroy_now(r);
-        rv_destroy_swapchain_now(r);
-        rv_destroy_frames(r); // runs every frame's garbage
-        rv_destroy_resources(r);
-        rv_gpu_profile_destroy(r);
+        rb_destroy_pipelines_now(r);
+        rb_post_destroy_now(r);
+        rb_destroy_swapchain_now(r);
+        rb_destroy_frames(r); // runs every frame's garbage
+        rb_destroy_resources(r);
+        rb_gpu_profile_destroy(r);
         vkDestroyDevice(r->device, nullptr);
     } else {
-        rv_destroy_resources(r); // pools and arrays only
+        rb_destroy_resources(r); // pools and arrays only
     }
     if (r->surface)   vkDestroySurfaceKHR(r->instance, r->surface, nullptr);
     if (r->messenger) vkDestroyDebugUtilsMessengerEXT(r->instance, r->messenger, nullptr);
@@ -195,7 +194,7 @@ Handle renderer_texture_create(Renderer* r, const TextureDesc& desc) {
     Handle h = r->textures.create(t);
     if (h.is_null()) { KV_ERROR("vulkan", "out of texture slots (%u)", kMaxTextures); return h; }
     r->texture_by_name.get_or_insert(t.name.hash, h); // the first live one keeps the name
-    rv_mark_slot_dirty(r, h.index()); // shows the default until the upload lands
+    rb_mark_slot_dirty(r, h.index()); // shows the default until the upload lands
     return h;
 }
 
@@ -209,21 +208,21 @@ bool renderer_texture_upload(Renderer* r, Handle texture, u32 width, u32 height,
     }
     t->width  = width;
     t->height = height;
-    if (!rv_create_texture_image(r, *t)) return false;
-    if (!rv_stage_texture(r, texture.index(), *t, (const u8*)pixels)) return false;
-    rv_mark_slot_dirty(r, texture.index());
+    if (!rb_create_texture_image(r, *t)) return false;
+    if (!rb_stage_texture(r, texture.index(), *t, (const u8*)pixels)) return false;
+    rb_mark_slot_dirty(r, texture.index());
     return true;
 }
 
 void renderer_texture_destroy(Renderer* r, Handle texture) {
     Texture* t = r ? r->textures.get(texture) : nullptr;
     if (!t || texture.index() == 0) return; // the default stays
-    rv_defer_destroy_texture(r, *t);
+    rb_defer_destroy_texture(r, *t);
     u32 slot = texture.index();
     Name name = t->name;
     r->textures.destroy(texture);
     rename_after_destroy(r->textures, r->texture_by_name, name, texture);
-    rv_mark_slot_dirty(r, slot); // back to the default, in each set once its frame has passed
+    rb_mark_slot_dirty(r, slot); // back to the default, in each set once its frame has passed
 }
 
 u32 renderer_texture_slot(const Renderer* r, Handle texture) {
@@ -252,7 +251,7 @@ void fill_material(Renderer* r, MaterialRecord& m, const MaterialDesc& desc) {
     m.texture = desc.texture;
     m.blend   = (u32)desc.blend < (u32)BlendMode::Count ? desc.blend : BlendMode::Alpha;
     m.shader  = desc.shader && desc.shader[0] ? name_intern(desc.shader) : Name{};
-    m.slot    = rv_material_slot(r, m.shader, m.blend);
+    m.slot    = rb_material_slot(r, m.shader, m.blend);
     m.filter  = (u32)desc.filter < (u32)TextureFilter::Count ? desc.filter : TextureFilter::Nearest;
     m.tint    = desc.tint;
     for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) m.params[i] = desc.params[i];
@@ -276,7 +275,7 @@ Handle renderer_material_create(Renderer* r, const MaterialDesc& desc) {
     Handle h = r->materials.create(m);
     if (h.is_null()) { KV_ERROR("vulkan", "out of materials (%u)", kMaxMaterials); return h; }
     r->material_by_name.get_or_insert(m.name.hash, h);
-    rv_mark_material_dirty(r, h.index());
+    rb_mark_material_dirty(r, h.index());
     return h;
 }
 
@@ -285,8 +284,8 @@ bool renderer_material_set(Renderer* r, Handle material, const MaterialDesc& des
     if (!m) return false;
     u32 before = m->slot;
     fill_material(r, *m, desc);
-    if (m->slot != before) rv_rebind_material(r, material.index()); // the sprites' buckets moved
-    rv_mark_material_dirty(r, material.index());
+    if (m->slot != before) rb_rebind_material(r, material.index()); // the sprites' buckets moved
+    rb_mark_material_dirty(r, material.index());
     return true;
 }
 
@@ -309,13 +308,13 @@ void renderer_material_destroy(Renderer* r, Handle material) {
     Name name = r->materials.get(material)->name;
     r->materials.destroy(material);
     rename_after_destroy(r->materials, r->material_by_name, name, material);
-    rv_rebind_material(r, row);      // its sprites fall back to the default
-    rv_mark_material_dirty(r, row);  // the row is rewritten as a copy of the default
+    rb_rebind_material(r, row);      // its sprites fall back to the default
+    rb_mark_material_dirty(r, row);  // the row is rewritten as a copy of the default
 }
 
 bool renderer_post_layer(Renderer* r, i32 layer, const char* shader) {
     if (!r) return false;
-    return rv_post_set(r, layer, shader && *shader ? name_intern(shader) : Name{});
+    return rb_post_set(r, layer, shader && *shader ? name_intern(shader) : Name{});
 }
 
 void renderer_post_params(Renderer* r, const f32* params, u32 count) {
@@ -351,10 +350,10 @@ bool renderer_set_surface(Renderer* r, void* native_window) {
     if (!r || !r->device) return false;
     if (r->surface) {
         vkDeviceWaitIdle(r->device);
-        rv_destroy_swapchain_now(r);
+        rb_destroy_swapchain_now(r);
         for (FrameInFlight& f : r->frames) {
             f.garbage_owned = f.garbage.len; // the device is idle: all of it
-            rv_run_garbage(r, f);
+            rb_run_garbage(r, f);
         }
         vkDestroySurfaceKHR(r->instance, r->surface, nullptr);
         r->surface = VK_NULL_HANDLE;
@@ -401,8 +400,8 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
         }
         case SpriteDeltaKind::Set: {
             const RenderSpriteState& st = d.state;
-            u32 material = rv_material_row_of(r, st.material);
-            u32 bucket   = rv_bucket_of(st.layer, r->materials.items[material].slot);
+            u32 material = rb_material_row_of(r, st.material);
+            u32 bucket   = rb_bucket_of(st.layer, r->materials.items[material].slot);
             RenderSprite* s;
             u32 slot;
             if (u32* found = r->sprite_of_entity.find(d.entity)) {
@@ -483,27 +482,27 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         waited += time_now() - t;
     }
     r->last_wait = 0.0;
-    rv_gpu_collect(r, f); // its timestamps and counts, now that the fence has passed
-    rv_ring_release(r, f);
-    rv_run_garbage(r, f);
+    rb_gpu_collect(r, f); // its timestamps and counts, now that the fence has passed
+    rb_ring_release(r, f);
+    rb_run_garbage(r, f);
     if (r->sprites.len > r->tables.capacity) {
         // Growth remarks every row dirty, so the next frame uploads the table whole: logged
         // with the frame, so a hitch can be found by it (FrameLoopConfig::sprite_rows avoids it).
         KV_INFO("vulkan", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->sprites.len, r->tables.capacity);
-        if (!rv_create_tables(r, r->sprites.len)) return false;
+        if (!rb_create_tables(r, r->sprites.len)) return false;
     }
-    if (f.tables_dirty) rv_write_tables_set(r, f);
+    if (f.tables_dirty) rb_write_tables_set(r, f);
     // The layers' offsets for this frame: previous and current, the shader interpolates.
     f32* lo = (f32*)f.layers.mapped;
     for (u32 i = 0; i < kLayerCount; ++i) {
         lo[i * 4 + 0] = r->layer_prev[i][0]; lo[i * 4 + 1] = r->layer_prev[i][1];
         lo[i * 4 + 2] = r->layer_cur[i][0];  lo[i * 4 + 3] = r->layer_cur[i][1];
     }
-    for (u32 slot : f.dirty_slots) rv_write_texture_slot(r, f.textures, slot);
+    for (u32 slot : f.dirty_slots) rb_write_texture_slot(r, f.textures, slot);
     f.dirty_slots.clear();
 
     // Without a surface (Android has taken it) the frame runs its uploads and presents nothing.
-    if (r->surface && r->swapchain_dirty && !rv_recreate_swapchain(r)) return false;
+    if (r->surface && r->swapchain_dirty && !rb_recreate_swapchain(r)) return false;
 
     bool have_image = r->surface && r->swapchain.handle != VK_NULL_HANDLE;
     u32  image_index = 0;
@@ -524,7 +523,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         }
     }
 
-    if (!rv_record_frame(r, f, have_image, image_index, view)) return false;
+    if (!rb_record_frame(r, f, have_image, image_index, view)) return false;
     VK_CHECK(vkResetFences(r->device, 1, &f.fence)); // only once the submit is certain
 
     VkSemaphoreSubmitInfo wait{};
@@ -550,7 +549,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     VK_CHECK(vkQueueSubmit2(r->queue, 1, &si, f.fence));
     f.submitted = true;
     f.garbage_owned = f.garbage.len; // destroyed when its fence passes; anything queued later waits for the next
-    rv_ring_submitted(r, f);
+    rb_ring_submitted(r, f);
 
     if (have_image) {
         KV_ZONE_WAIT("present");
@@ -572,8 +571,8 @@ bool renderer_render(Renderer* r, const RenderView& view) {
 
     if (r->shot_recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now
         VK_CHECK(vkWaitForFences(r->device, 1, &f.fence, VK_TRUE, UINT64_MAX));
-        if (r->shot_recorded) rv_write_screenshot(r);
-        if (r->check_recorded) rv_verify_sort(r);
+        if (r->shot_recorded) rb_write_screenshot(r);
+        if (r->check_recorded) rb_verify_sort(r);
     }
 
     r->last_wait = waited;

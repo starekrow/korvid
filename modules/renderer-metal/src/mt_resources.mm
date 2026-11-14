@@ -11,7 +11,7 @@ namespace kv {
 
 // ---- buffers and deferred release -----------------------------------------------------------
 
-id<MTLBuffer> mt_buffer(Renderer* r, usize bytes, MTLResourceOptions storage, const char* label) {
+id<MTLBuffer> rb_buffer(Renderer* r, usize bytes, MTLResourceOptions storage, const char* label) {
     id<MTLBuffer> b = [r->device newBufferWithLength:bytes ? bytes : 16 options:storage];
     if (!b) { KV_ERROR("metal", "out of memory for a %llu byte buffer (%s)", (unsigned long long)bytes, label); return nil; }
     if (label) b.label = @(label); // the names a GPU capture shows, in every build: free without one
@@ -22,13 +22,13 @@ id<MTLBuffer> mt_buffer(Renderer* r, usize bytes, MTLResourceOptions storage, co
 // frames the one about to be), and released once that frame has completed: after every
 // earlier frame on the queue too. An object queued between frames may be what that frame
 // uses (a staging buffer its upload reads), so it must not go at the wait that opens it.
-void mt_defer_release(Renderer* r, id obj) {
+void rb_defer_release(Renderer* r, id obj) {
     if (obj) r->frames[r->frame_index].garbage.push(obj);
 }
 
 // The slot's last frame has completed: what it owned goes; what was queued since stays for
 // the frame being opened.
-void mt_run_garbage(Renderer*, FrameInFlight& f) {
+void rb_run_garbage(Renderer*, FrameInFlight& f) {
     u32 n = f.garbage_owned <= f.garbage.len ? f.garbage_owned : f.garbage.len;
     for (u32 i = 0; i < n; ++i) [f.garbage[i] release];
     if (n) {
@@ -39,7 +39,7 @@ void mt_run_garbage(Renderer*, FrameInFlight& f) {
     f.garbage_owned = 0;
 }
 
-void mt_release_all(Renderer*, FrameInFlight& f) {
+void rb_release_all(Renderer*, FrameInFlight& f) {
     for (id obj : f.garbage) [obj release];
     f.garbage.clear();
     f.garbage_owned = 0;
@@ -51,9 +51,9 @@ void mt_release_all(Renderer*, FrameInFlight& f) {
 // frame's allocations are contiguous in ring order, so releasing a frame moves the tail to
 // where it ended. The CPU writes spans; a blit copies them where they go.
 
-bool mt_ring_init(Renderer* r, usize bytes) {
+bool rb_ring_init(Renderer* r, usize bytes) {
     FrameRing& g = r->ring;
-    g.buf = mt_buffer(r, bytes, MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined, "upload ring");
+    g.buf = rb_buffer(r, bytes, MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined, "upload ring");
     if (!g.buf) return false;
     g.size = bytes;
     g.head = g.tail = g.used = g.frame_bytes = 0;
@@ -68,8 +68,8 @@ bool ring_grow(Renderer* r, usize need) {
     while (cap < need * 2) cap *= 2;
     // Spans handed out so far point at the old buffer, which lives until this frame
     // completes; the accounting restarts in the new one.
-    mt_defer_release(r, g.buf);
-    g.buf = mt_buffer(r, cap, MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined, "upload ring");
+    rb_defer_release(r, g.buf);
+    g.buf = rb_buffer(r, cap, MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined, "upload ring");
     if (!g.buf) return false;
     g.size = cap;
     g.head = g.tail = g.used = 0;
@@ -82,7 +82,7 @@ bool ring_grow(Renderer* r, usize need) {
 
 } // namespace
 
-RingSpan mt_ring_alloc(Renderer* r, usize bytes, usize align) {
+RingSpan rb_ring_alloc(Renderer* r, usize bytes, usize align) {
     FrameRing& g = r->ring;
     RingSpan out;
     if (bytes == 0) return out;
@@ -116,13 +116,13 @@ RingSpan mt_ring_alloc(Renderer* r, usize bytes, usize align) {
     return out;
 }
 
-void mt_ring_submitted(Renderer* r, FrameInFlight& f) {
+void rb_ring_submitted(Renderer* r, FrameInFlight& f) {
     f.ring_end   = r->ring.head;
     f.ring_bytes = r->ring.frame_bytes;
     r->ring.frame_bytes = 0;
 }
 
-void mt_ring_release(Renderer* r, FrameInFlight& f) {
+void rb_ring_release(Renderer* r, FrameInFlight& f) {
     FrameRing& g = r->ring;
     if (!f.submitted || f.ring_bytes == 0) return;
     g.used -= f.ring_bytes;
@@ -148,27 +148,27 @@ id<MTLTexture> slot_texture(Renderer* r, u32 slot) {
 
 } // namespace
 
-void mt_defer_destroy_texture(Renderer* r, Texture& t) {
-    mt_defer_release(r, t.tex);
+void rb_defer_destroy_texture(Renderer* r, Texture& t) {
+    rb_defer_release(r, t.tex);
     t.tex = nil;
     t.resident = false;
 }
 
 // A slot's contents changed. Each frame's argument buffer is rewritten once that frame's
 // command buffer has completed, so no frame in flight sees an entry change under it.
-void mt_mark_slot_dirty(Renderer* r, u32 slot) {
+void rb_mark_slot_dirty(Renderer* r, u32 slot) {
     for (FrameInFlight& f : r->frames) f.dirty_slots.push(slot);
 }
 
-void mt_write_texture_slot(Renderer* r, FrameInFlight& f, u32 slot) {
+void rb_write_texture_slot(Renderer* r, FrameInFlight& f, u32 slot) {
     MTLResourceID* ids = (MTLResourceID*)((u8*)f.bindless.contents + kBindlessTextures);
     ids[slot] = slot_texture(r, slot).gpuResourceID;
 }
 
 // The texture for a record's size and format, private to the GPU; a previous one is
 // released after the frames in flight.
-bool mt_create_texture(Renderer* r, Texture& t) {
-    if (t.tex) mt_defer_destroy_texture(r, t);
+bool rb_create_texture(Renderer* r, Texture& t) {
+    if (t.tex) rb_defer_destroy_texture(r, t);
     @autoreleasepool {
         MTLTextureDescriptor* d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixel_format(t.format)
                                                                                      width:t.width height:t.height mipmapped:NO];
@@ -183,7 +183,7 @@ bool mt_create_texture(Renderer* r, Texture& t) {
 
 // Copies tightly packed pixels into the frame ring (or a one-off staging buffer when they
 // would not fit) and queues the copy for the next frame's blit, ahead of its draws.
-bool mt_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels) {
+bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels) {
     usize bytes = (usize)t.width * t.height * 4;
     PendingUpload up{};
     up.slot   = slot;
@@ -191,18 +191,18 @@ bool mt_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels) {
     up.width  = t.width;
     up.height = t.height;
     if (bytes <= r->ring.size / 2) {
-        RingSpan span = mt_ring_alloc(r, bytes, 16);
+        RingSpan span = rb_ring_alloc(r, bytes, 16);
         if (!span.ptr) return false;
         memcpy(span.ptr, pixels, bytes);
         up.src    = span.buffer;
         up.offset = span.offset;
     } else {
-        id<MTLBuffer> staging = mt_buffer(r, bytes, MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined, "texture staging");
+        id<MTLBuffer> staging = rb_buffer(r, bytes, MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined, "texture staging");
         if (!staging) return false;
         memcpy(staging.contents, pixels, bytes);
         up.src    = staging;
         up.offset = 0;
-        mt_defer_release(r, staging); // alive until this frame completes, after the copy
+        rb_defer_release(r, staging); // alive until this frame completes, after the copy
     }
     r->uploads.push(up);
     t.resident = true;
@@ -211,7 +211,7 @@ bool mt_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels) {
 
 // The red and white checkerboard at slot 0, and the default material at row 0, as
 // renderer-vulkan's. Its upload rides the first frame like any other.
-bool mt_create_default_texture(Renderer* r) {
+bool rb_create_default_texture(Renderer* r) {
     Texture t{};
     t.width = t.height = kDefaultTexSize;
     t.format = TextureFormat::RGBA8_SRGB;
@@ -219,7 +219,7 @@ bool mt_create_default_texture(Renderer* r) {
     Handle h = r->textures.create(t);
     if (h.index() != 0) { KV_ERROR("metal", "default texture is not slot 0"); return false; }
     Texture& slot0 = r->textures.items[0];
-    if (!mt_create_texture(r, slot0)) return false;
+    if (!rb_create_texture(r, slot0)) return false;
 
     u8 pixels[kDefaultTexSize * kDefaultTexSize * 4];
     for (u32 y = 0; y < kDefaultTexSize; ++y) {
@@ -232,9 +232,9 @@ bool mt_create_default_texture(Renderer* r) {
             p[3] = 255;
         }
     }
-    if (!mt_stage_texture(r, 0, slot0, pixels)) return false;
+    if (!rb_stage_texture(r, 0, slot0, pixels)) return false;
     for (FrameInFlight& f : r->frames)
-        for (u32 slot = 0; slot < kMaxTextures; ++slot) mt_write_texture_slot(r, f, slot);
+        for (u32 slot = 0; slot < kMaxTextures; ++slot) rb_write_texture_slot(r, f, slot);
 
     MaterialRecord m{};
     m.texture = h;
@@ -246,13 +246,13 @@ bool mt_create_default_texture(Renderer* r) {
     r->texture_by_name.set(t.name.hash, h);
     r->material_by_name.set(m.name.hash, r->default_material);
     if (r->default_material.index() != 0) { KV_ERROR("metal", "default material is not row 0"); return false; }
-    mt_mark_material_dirty(r, 0);
+    rb_mark_material_dirty(r, 0);
     return true;
 }
 
 // The two samplers (nearest, linear; repeat, as renderer-vulkan's) and one argument buffer
 // per frame in flight, the samplers written once.
-bool mt_create_bindless(Renderer* r) {
+bool rb_create_bindless(Renderer* r) {
     @autoreleasepool {
         MTLSamplerDescriptor* d = [[MTLSamplerDescriptor new] autorelease];
         d.minFilter = d.magFilter = MTLSamplerMinMagFilterNearest;
@@ -267,7 +267,7 @@ bool mt_create_bindless(Renderer* r) {
     }
     if (!r->sampler || !r->sampler_linear) { KV_ERROR("metal", "cannot make the samplers"); return false; }
     for (FrameInFlight& f : r->frames) {
-        f.bindless = mt_buffer(r, kBindlessBytes, MTLResourceStorageModeShared, "bindless textures");
+        f.bindless = rb_buffer(r, kBindlessBytes, MTLResourceStorageModeShared, "bindless textures");
         if (!f.bindless) return false;
         memset(f.bindless.contents, 0, kBindlessBytes);
         MTLResourceID* samplers = (MTLResourceID*)((u8*)f.bindless.contents + kBindlessSamplers);
@@ -279,7 +279,7 @@ bool mt_create_bindless(Renderer* r) {
 
 // Argument-buffer entries are not resources the encoder can see: every texture a draw may
 // sample is declared for the pass. At most kMaxTextures, a few microseconds.
-void mt_use_textures(Renderer* r, id<MTLRenderCommandEncoder> enc) {
+void rb_use_textures(Renderer* r, id<MTLRenderCommandEncoder> enc) {
     id<MTLResource> list[kMaxTextures];
     NSUInteger n = 0;
     for (u32 i = 0; i < r->textures.len; ++i)
@@ -289,7 +289,7 @@ void mt_use_textures(Renderer* r, id<MTLRenderCommandEncoder> enc) {
 
 // ---- materials ------------------------------------------------------------------------------
 
-void mt_material_row(Renderer* r, u32 row, GpuMaterial& out) {
+void rb_material_row(Renderer* r, u32 row, GpuMaterial& out) {
     out = GpuMaterial{};
     const MaterialRecord* m = r->materials.is_alive(row) ? &r->materials.items[row] : nullptr;
     if (!m) m = &r->materials.items[0];
@@ -301,18 +301,18 @@ void mt_material_row(Renderer* r, u32 row, GpuMaterial& out) {
     out.slot    = m->slot;
 }
 
-void mt_mark_material_dirty(Renderer* r, u32 row) {
+void rb_mark_material_dirty(Renderer* r, u32 row) {
     r->material_dirty[row >> 6] |= (u64)1 << (row & 63);
 }
 
-void mt_rebind_material(Renderer* r, u32 row) {
+void rb_rebind_material(Renderer* r, u32 row) {
     u32 slot = r->materials.is_alive(row) ? r->materials.items[row].slot : r->materials.items[0].slot;
     for (u32 i = 0; i < r->sprites.len; ++i) {
         if (!r->sprites.is_alive(i)) continue;
         RenderSprite& s = r->sprites.items[i];
         if (s.gpu.material != row) continue;
         if (!r->materials.is_alive(row)) s.gpu.material = 0;
-        u32 bucket = mt_bucket_of(s.gpu.layer, slot);
+        u32 bucket = rb_bucket_of(s.gpu.layer, slot);
         if (bucket != s.bucket) {
             --r->bucket_counts[s.bucket];
             ++r->bucket_counts[bucket];
@@ -363,7 +363,7 @@ kv_handle material_find_name(const char* name, void* ctx) {
 
 } // namespace
 
-bool mt_create_resource_pools(Renderer* r) {
+bool rb_create_resource_pools(Renderer* r) {
     kv_handle_kind_desc td{};
     td.name = "render.texture"; td.type_key = type_key<Texture>(); td.ctx = r;
     td.resolve = texture_resolve; td.describe = texture_describe;
@@ -390,23 +390,23 @@ bool mt_create_resource_pools(Renderer* r) {
 
 // Sprite tables for at least `rows` rows (rounded up to whole blocks). Previous tables are
 // released after the frame; every row is marked for upload.
-bool mt_create_tables(Renderer* r, u32 rows) {
+bool rb_create_tables(Renderer* r, u32 rows) {
     SpriteTables& t = r->tables;
     u32 cap = kBlockRows;
     while (cap < rows) cap *= 2;
     if (cap > kMaxSprites) cap = kMaxSprites;
     if (t.capacity) {
-        mt_defer_release(r, t.sprites);
-        mt_defer_release(r, t.bucket_of);
-        mt_defer_release(r, t.block_hist);
-        mt_defer_release(r, t.sorted);
+        rb_defer_release(r, t.sprites);
+        rb_defer_release(r, t.bucket_of);
+        rb_defer_release(r, t.block_hist);
+        rb_defer_release(r, t.sorted);
     }
     t.capacity = cap;
     const MTLResourceOptions gpu = MTLResourceStorageModePrivate;
-    t.sprites    = mt_buffer(r, sizeof(GpuSprite) * cap, gpu, "sprite rows");
-    t.bucket_of  = mt_buffer(r, sizeof(u32) * cap, gpu, "sprite buckets");
-    t.block_hist = mt_buffer(r, sizeof(u32) * (usize)t.blocks() * kBucketCount, gpu, "sort block counts");
-    t.sorted     = mt_buffer(r, sizeof(u32) * cap, gpu, "sorted rows");
+    t.sprites    = rb_buffer(r, sizeof(GpuSprite) * cap, gpu, "sprite rows");
+    t.bucket_of  = rb_buffer(r, sizeof(u32) * cap, gpu, "sprite buckets");
+    t.block_hist = rb_buffer(r, sizeof(u32) * (usize)t.blocks() * kBucketCount, gpu, "sort block counts");
+    t.sorted     = rb_buffer(r, sizeof(u32) * cap, gpu, "sorted rows");
     if (!t.sprites || !t.bucket_of || !t.block_hist || !t.sorted) return false;
     r->sprite_dirty.resize_fill(cap / 64, 0);
     for (u32 w = 0; w < (r->sprites.len + 63) / 64; ++w) r->sprite_dirty[w] = ~(u64)0; // the new table knows nothing
@@ -415,21 +415,21 @@ bool mt_create_tables(Renderer* r, u32 rows) {
     return true;
 }
 
-bool mt_create_static_buffers(Renderer* r) {
+bool rb_create_static_buffers(Renderer* r) {
     for (FrameInFlight& f : r->frames) {
-        f.layers = mt_buffer(r, sizeof(f32) * 4 * kLayerCount, MTLResourceStorageModeShared, "layer offsets");
+        f.layers = rb_buffer(r, sizeof(f32) * 4 * kLayerCount, MTLResourceStorageModeShared, "layer offsets");
         if (!f.layers) return false;
         memset(f.layers.contents, 0, sizeof(f32) * 4 * kLayerCount);
     }
-    r->material_table = mt_buffer(r, sizeof(GpuMaterial) * kMaxMaterials, MTLResourceStorageModePrivate, "material rows");
-    r->sort_meta      = mt_buffer(r, sizeof(u32) * (2 * kBucketCount + 4), MTLResourceStorageModePrivate, "sort totals");
-    r->indirect       = mt_buffer(r, sizeof(MTLDrawPrimitivesIndirectArguments) * kBucketCount, MTLResourceStorageModePrivate, "indirect draws");
+    r->material_table = rb_buffer(r, sizeof(GpuMaterial) * kMaxMaterials, MTLResourceStorageModePrivate, "material rows");
+    r->sort_meta      = rb_buffer(r, sizeof(u32) * (2 * kBucketCount + 4), MTLResourceStorageModePrivate, "sort totals");
+    r->indirect       = rb_buffer(r, sizeof(MTLDrawPrimitivesIndirectArguments) * kBucketCount, MTLResourceStorageModePrivate, "indirect draws");
     static_assert(sizeof(MTLDrawPrimitivesIndirectArguments) == 16, "the sort writes a uint4 per bucket");
     return r->material_table && r->sort_meta && r->indirect;
 }
 
 // Nothing in flight: textures, tables, ring, samplers, argument buffers, pools.
-void mt_destroy_resources(Renderer* r) {
+void rb_destroy_resources(Renderer* r) {
     for (u32 i = 0; i < r->textures.len; ++i)
         if (r->textures.is_alive(i)) { [r->textures.items[i].tex release]; r->textures.items[i].tex = nil; }
     auto drop = [](id<MTLBuffer>& b) { [b release]; b = nil; };

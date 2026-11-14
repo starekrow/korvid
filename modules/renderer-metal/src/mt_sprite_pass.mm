@@ -6,7 +6,7 @@
 //   - Metal's clip space has y up where ortho2d's (Vulkan's) has it down: the projections in
 //     the push block are negated in y here, so the shaders and the math stay as they are.
 //   - Argument-buffer entries are not resources the encoder can see: the textures a draw may
-//     sample are declared resident for the pass (mt_use_textures).
+//     sample are declared resident for the pass (rb_use_textures).
 // Barriers are gone: a serial compute encoder runs its dispatches in order with their
 // writes visible to the next, and Metal tracks hazards between encoders and command buffers.
 #include "renderer_internal.h"
@@ -30,7 +30,7 @@ namespace kv {
 // parameter by name with the buffer index the MSL holds. The constants in
 // renderer_internal.h are checked against it, so a header that moved a declaration (and so
 // renumbered every buffer after it) fails here by name instead of drawing garbage.
-bool mt_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32 count) {
+bool rb_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32 count) {
     char path[1024];
     kv::format(path, sizeof path, "%sshaders/%s.metallib.json", r->base_path, lib);
     if (!kv::io_is_file(path)) { KV_WARN("metal", "no reflection for '%s' (%s): bindings unchecked", lib, path); return true; }
@@ -64,7 +64,7 @@ bool mt_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32
 #endif
 
 // Reads <exe dir>/shaders/<name>.metallib. Compiled by the build; nothing compiles here.
-bool mt_load_library(Renderer* r, const char* name, id<MTLLibrary>* out) {
+bool rb_load_library(Renderer* r, const char* name, id<MTLLibrary>* out) {
     char path[1024];
     kv::format(path, sizeof path, "%sshaders/%s.metallib", r->base_path, name);
     @autoreleasepool {
@@ -79,8 +79,8 @@ bool mt_load_library(Renderer* r, const char* name, id<MTLLibrary>* out) {
     return true;
 }
 
-bool mt_load_shaders(Renderer* r) {
-    if (!mt_load_library(r, "sprite", &r->sprite_lib) || !mt_load_library(r, "sprite_sort", &r->sort_lib)) return false;
+bool rb_load_shaders(Renderer* r) {
+    if (!rb_load_library(r, "sprite", &r->sprite_lib) || !rb_load_library(r, "sprite_sort", &r->sort_lib)) return false;
     r->vs_main = [r->sprite_lib newFunctionWithName:@"vs_main"];
     r->fs_main = [r->sprite_lib newFunctionWithName:@"fs_main"];
     if (!r->vs_main || !r->fs_main) { KV_ERROR("metal", "sprite.metallib has no vs_main or fs_main"); return false; }
@@ -90,7 +90,7 @@ bool mt_load_shaders(Renderer* r) {
     static const MtExpected sort[] = {{"gPush", kSortPush}, {"gLayers", kSortLayers}, {"gSprites", kSortSprites},
                                     {"gMaterials", kSortMaterials}, {"gSorted", kSortSorted}, {"gBucketOf", kSortBucketOf},
                                     {"gBlockHist", kSortBlockHist}, {"gSortMeta", kSortMeta}, {"gIndirect", kSortIndirect}};
-    if (!mt_check_bindings(r, "sprite", sprite, KV_COUNTOF(sprite)) || !mt_check_bindings(r, "sprite_sort", sort, KV_COUNTOF(sort))) return false;
+    if (!rb_check_bindings(r, "sprite", sprite, KV_COUNTOF(sprite)) || !rb_check_bindings(r, "sprite_sort", sort, KV_COUNTOF(sort))) return false;
 #endif
     return true;
 }
@@ -178,7 +178,7 @@ bool create_game_pipeline(Renderer* r, GamePipe& gp) {
 
 } // namespace
 
-bool mt_create_pipelines(Renderer* r) {
+bool rb_create_pipelines(Renderer* r) {
     for (u32 i = 0; i < kBlendCount; ++i) {
         r->pipelines[i] = make_sprite_pipeline(r, r->fs_main, (BlendMode)i, blend_mode_name((BlendMode)i));
         if (!r->pipelines[i]) return false;
@@ -188,14 +188,14 @@ bool mt_create_pipelines(Renderer* r) {
     return true;
 }
 
-bool mt_create_compute_pipelines(Renderer* r) {
+bool rb_create_compute_pipelines(Renderer* r) {
     return create_compute(r, "cs_count", &r->cs_count) && create_compute(r, "cs_scan", &r->cs_scan) &&
            create_compute(r, "cs_bucket_scan", &r->cs_bucket_scan) && create_compute(r, "cs_scatter", &r->cs_scatter) &&
            create_compute(r, "cs_key_sort", &r->cs_key_sort);
 }
 
 // Nothing in flight.
-void mt_destroy_pipelines(Renderer* r) {
+void rb_destroy_pipelines(Renderer* r) {
     for (u32 i = 0; i < kBlendCount; ++i) { [r->pipelines[i] release]; r->pipelines[i] = nil; }
     id<MTLComputePipelineState>* cs[] = {&r->cs_count, &r->cs_scan, &r->cs_bucket_scan, &r->cs_scatter, &r->cs_key_sort};
     for (id<MTLComputePipelineState>* p : cs) { [*p release]; *p = nil; }
@@ -214,7 +214,7 @@ void mt_destroy_pipelines(Renderer* r) {
 // The pipeline slot for a material, as renderer-vulkan's: its blend's, or a game shader's
 // (assigned here, its library loaded and its pipeline made at once: the layer's format is
 // known from the start on Metal).
-u32 mt_material_slot(Renderer* r, Name shader, BlendMode blend) {
+u32 rb_material_slot(Renderer* r, Name shader, BlendMode blend) {
     u32 engine = (u32)blend < kBlendCount ? (u32)blend : (u32)BlendMode::Alpha;
     if (shader.is_null()) return engine;
     u32 free_slot = kGameSlots;
@@ -232,7 +232,7 @@ u32 mt_material_slot(Renderer* r, Name shader, BlendMode blend) {
     gp.used   = true;
     gp.shader = shader;
     gp.blend  = blend;
-    if (!mt_load_library(r, name_str(shader), &gp.library) || !(gp.fragment = [gp.library newFunctionWithName:@"fs_main"])) {
+    if (!rb_load_library(r, name_str(shader), &gp.library) || !(gp.fragment = [gp.library newFunctionWithName:@"fs_main"])) {
         gp.failed = true;
         KV_ERROR("metal", "game shader '%s' did not load: its sprites draw with the engine's", name_str(shader));
         return engine;
@@ -287,7 +287,7 @@ bool record_table_copies(Renderer* r, id<MTLBlitCommandEncoder> blit) {
     bool ok = true;
     u32 rows = for_dirty_runs(r->sprite_dirty, r->sprites.len, 32, [&](u32 a, u32 b) {
         usize bytes = (usize)(b - a) * sizeof(GpuSprite);
-        RingSpan span = mt_ring_alloc(r, bytes, 16);
+        RingSpan span = rb_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuSprite* dst = (GpuSprite*)span.ptr;
         for (u32 i = a; i < b; ++i) dst[i - a] = r->sprites.is_alive(i) ? r->sprites.items[i].gpu : GpuSprite{};
@@ -297,10 +297,10 @@ bool record_table_copies(Renderer* r, id<MTLBlitCommandEncoder> blit) {
     KV_COUNTER("sprite rows uploaded", rows);
     for_dirty_runs(r->material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
         usize bytes = (usize)(b - a) * sizeof(GpuMaterial);
-        RingSpan span = mt_ring_alloc(r, bytes, 16);
+        RingSpan span = rb_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuMaterial* dst = (GpuMaterial*)span.ptr;
-        for (u32 i = a; i < b; ++i) mt_material_row(r, i, dst[i - a]);
+        for (u32 i = a; i < b; ++i) rb_material_row(r, i, dst[i - a]);
         [blit copyFromBuffer:span.buffer sourceOffset:span.offset toBuffer:r->material_table destinationOffset:(NSUInteger)a * sizeof(GpuMaterial) size:bytes];
     });
     return ok;
@@ -315,7 +315,7 @@ void record_sort(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, const P
     u32 blocks = (r->sprites.len + kBlockRows - 1) / kBlockRows;
     MTLComputePassDescriptor* cp = [MTLComputePassDescriptor computePassDescriptor];
     cp.dispatchType = MTLDispatchTypeSerial; // in order, each dispatch's writes seen by the next
-    mt_gpu_attach(r, f, cp);
+    rb_gpu_attach(r, f, cp);
     id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoderWithDescriptor:cp];
     enc.label = @"sort";
     [enc setBytes:&push length:sizeof push atIndex:kSortPush];
@@ -364,8 +364,8 @@ void record_sort_check(Renderer* r, id<MTLCommandBuffer> cb) {
     u32 rows = r->sprites.len;
     usize meta_bytes = sizeof(u32) * (2 * kBucketCount + 4);
     usize bytes = sizeof(u32) * (usize)rows * 2 + meta_bytes;
-    mt_defer_release(r, r->check_buffer);
-    r->check_buffer = mt_buffer(r, bytes, MTLResourceStorageModeShared, "sort check");
+    rb_defer_release(r, r->check_buffer);
+    r->check_buffer = rb_buffer(r, bytes, MTLResourceStorageModeShared, "sort check");
     if (!r->check_buffer) { r->check_pending = false; return; }
     id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
     blit.label = @"sort check";
@@ -422,11 +422,11 @@ affine2 metal_clip(affine2 m) {
 
 } // namespace
 
-bool mt_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, const RenderView& view) {
+bool rb_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, const RenderView& view) {
     KV_ZONE("record");
     // Uploads first: textures, then the rows the ticks changed.
     MTLBlitPassDescriptor* bp = [MTLBlitPassDescriptor blitPassDescriptor];
-    mt_gpu_attach(r, f, bp);
+    rb_gpu_attach(r, f, bp);
     id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoderWithDescriptor:bp];
     blit.label = @"upload";
     record_texture_uploads(r, blit);
@@ -468,8 +468,8 @@ bool mt_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
     // With a post shader, the world (the layers below the post layer) goes into the target
     // first, and the window's pass begins with the post shader; the layers at and above the
     // post layer draw over it there.
-    bool post = mt_post_prepare(r, width, height);
-    u32 split = post ? mt_bucket_of(r->post.layer, 0) : 0;
+    bool post = rb_post_prepare(r, width, height);
+    u32 split = post ? rb_bucket_of(r->post.layer, 0) : 0;
     u32 draws = 0;
     auto bind_sprites = [&](id<MTLRenderCommandEncoder> enc) {
         [enc setViewport:(MTLViewport){0.0, 0.0, (double)width, (double)height, 0.0, 1.0}];
@@ -481,11 +481,11 @@ bool mt_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
         [enc setFragmentBuffers:bound offsets:offsets withRange:NSMakeRange(kBindLayers, 5)];
         static_assert(kBindMaterials == kBindLayers + 1 && kBindBindless == kBindLayers + 2 && kBindSprites == kBindLayers + 3 &&
                       kBindSorted == kBindLayers + 4, "the sprite buffers are bound as one range");
-        mt_use_textures(r, enc);
+        rb_use_textures(r, enc);
     };
     auto pass_into = [&](id<MTLTexture> target, NSString* label, bool first, bool last) {
         MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];
-        mt_gpu_attach(r, f, rp, first, last);
+        rb_gpu_attach(r, f, rp, first, last);
         rp.colorAttachments[0].texture     = target;
         rp.colorAttachments[0].loadAction  = MTLLoadActionClear;
         rp.colorAttachments[0].storeAction = MTLStoreActionStore;
@@ -501,7 +501,7 @@ bool mt_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
             [world endEncoding];
         }
         id<MTLRenderCommandEncoder> enc = pass_into(drawable.texture, @"draw", !post, true);
-        if (post) mt_post_draw(r, f, enc, view);
+        if (post) rb_post_draw(r, f, enc, view);
         if (draw) { bind_sprites(enc); draws += record_draws(r, enc, split, kBucketCount); }
         KV_COUNTER("indirect draws", draws);
         [enc endEncoding];
@@ -511,7 +511,7 @@ bool mt_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
 
 // renderer-vulkan's check, on the buffer the frame filled: every bucket's run holds exactly
 // its rows, in (key, row) order, once each; the counts agree with the CPU's.
-bool mt_verify_sort(Renderer* r) {
+bool rb_verify_sort(Renderer* r) {
     r->check_recorded = false;
     if (!r->check_buffer) return false;
     u32 rows = r->check_rows;
@@ -554,7 +554,7 @@ bool mt_verify_sort(Renderer* r) {
     u32 in_use = 0;
     for (u32 b = 0; b < kBucketCount; ++b) in_use += totals[b] != 0;
     KV_INFO("metal", "sort check: %u rows, %u visible, %u buckets in use: %s", rows, visible_rows, in_use, bad ? "FAILED" : "ok");
-    mt_defer_release(r, r->check_buffer);
+    rb_defer_release(r, r->check_buffer);
     r->check_buffer = nil;
     return bad == 0;
 }

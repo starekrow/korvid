@@ -59,7 +59,7 @@ bool pick_adapter(Renderer* r) {
         KV_INFO("d3d12", "adapter '%s': %llu MB dedicated video memory", name, (unsigned long long)(d.DedicatedVideoMemory >> 20));
         break;
     }
-    rd_release(f6);
+    rb_release(f6);
     if (!r->adapter) { KV_ERROR("d3d12", "no hardware adapter makes a D3D12 device"); return false; }
     return true;
 }
@@ -88,7 +88,7 @@ bool check_features(Renderer* r) {
 
 } // namespace
 
-bool rd_create_device(Renderer* r) {
+bool rb_create_device(Renderer* r) {
     if (r->validation) {
         ID3D12Debug* debug = nullptr;
         if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)))) {
@@ -102,7 +102,7 @@ bool rd_create_device(Renderer* r) {
     D3D_CHECK(CreateDXGIFactory2(r->validation ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&r->factory)));
     if (!pick_adapter(r)) return false;
     D3D_CHECK(D3D12CreateDevice(r->adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&r->device)));
-    rd_name(r->device, "korvid");
+    rb_name(r->device, "korvid");
     if (!check_features(r)) return false;
 
     if (r->validation && SUCCEEDED(r->device->QueryInterface(IID_PPV_ARGS(&r->info_queue)))) {
@@ -121,19 +121,19 @@ bool rd_create_device(Renderer* r) {
     D3D12_COMMAND_QUEUE_DESC qd{};
     qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     D3D_CHECK(r->device->CreateCommandQueue(&qd, IID_PPV_ARGS(&r->queue)));
-    rd_name(r->queue, "direct queue");
+    rb_name(r->queue, "direct queue");
     D3D_CHECK(r->device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&r->fence)));
     r->fence_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (!r->fence_event) { KV_ERROR("d3d12", "CreateEvent failed (%lu)", (unsigned long)GetLastError()); return false; }
     return true;
 }
 
-void rd_destroy_device(Renderer* r) {
-    rd_release(r->info_queue);
-    rd_release(r->fence);
+void rb_destroy_device(Renderer* r) {
+    rb_release(r->info_queue);
+    rb_release(r->fence);
     if (r->fence_event) CloseHandle(r->fence_event);
     r->fence_event = nullptr;
-    rd_release(r->queue);
+    rb_release(r->queue);
     if (r->device && r->validation) {
         // What is still alive, by name, now that everything should be gone.
         ID3D12DebugDevice* dd = nullptr;
@@ -144,12 +144,12 @@ void rd_destroy_device(Renderer* r) {
             dd->Release();
         }
     }
-    rd_release(r->device);
-    rd_release(r->adapter);
-    rd_release(r->factory);
+    rb_release(r->device);
+    rb_release(r->adapter);
+    rb_release(r->factory);
 }
 
-void rd_drain_messages(Renderer* r) {
+void rb_drain_messages(Renderer* r) {
     ID3D12InfoQueue* q = r->info_queue;
     if (!q) return;
     u64 n = q->GetNumStoredMessages();
@@ -177,18 +177,18 @@ void rd_drain_messages(Renderer* r) {
     q->ClearStoredMessages();
 }
 
-bool rd_wait_fence(Renderer* r, u64 value) {
+bool rb_wait_fence(Renderer* r, u64 value) {
     if (value == 0 || r->fence->GetCompletedValue() >= value) return true;
     D3D_CHECK(r->fence->SetEventOnCompletion(value, r->fence_event));
     WaitForSingleObject(r->fence_event, INFINITE);
     return true;
 }
 
-bool rd_wait_idle(Renderer* r) {
+bool rb_wait_idle(Renderer* r) {
     if (!r->queue || !r->fence) return true;
     u64 v = r->fence_next++;
     D3D_CHECK(r->queue->Signal(r->fence, v));
-    return rd_wait_fence(r, v);
+    return rb_wait_fence(r, v);
 }
 
 } // namespace kv

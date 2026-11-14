@@ -21,11 +21,11 @@ namespace kv {
 
 // ---- shared helpers ----------------------------------------------------------------------
 
-u32 mt_material_row_of(const Renderer* r, Handle material) {
+u32 rb_material_row_of(const Renderer* r, Handle material) {
     return r->materials.valid(material) ? material.index() : 0;
 }
 
-u32 mt_bucket_of(i32 layer, u32 slot) {
+u32 rb_bucket_of(i32 layer, u32 slot) {
     if (layer < kLayerMin) layer = kLayerMin;
     if (layer > kLayerMax) layer = kLayerMax;
     u32 b = slot < kSlotCount ? slot : (u32)BlendMode::Alpha;
@@ -97,8 +97,8 @@ void record_screenshot(Renderer* r, id<MTLCommandBuffer> cb, id<MTLTexture> imag
         return;
     }
     u32 w = (u32)image.width, h = (u32)image.height;
-    mt_defer_release(r, g_shot.buffer);
-    g_shot.buffer = mt_buffer(r, (usize)w * h * 4, MTLResourceStorageModeShared, "screenshot");
+    rb_defer_release(r, g_shot.buffer);
+    g_shot.buffer = rb_buffer(r, (usize)w * h * 4, MTLResourceStorageModeShared, "screenshot");
     if (!g_shot.buffer) return;
     id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
     blit.label = @"screenshot";
@@ -126,7 +126,7 @@ void write_screenshot(Renderer* r) {
     }
     if (!f.close()) KV_ERROR("metal", "screenshot '%s': write failed (errno %d)", g_shot.path, f.error);
     else KV_INFO("metal", "screenshot '%s' %ux%u", g_shot.path, g_shot.width, g_shot.height);
-    mt_defer_release(r, g_shot.buffer);
+    rb_defer_release(r, g_shot.buffer);
     g_shot.buffer = nil;
 }
 
@@ -134,7 +134,6 @@ void write_screenshot(Renderer* r) {
 
 // ---- lifetime -------------------------------------------------------------------------------
 
-RendererSurface renderer_surface() { return RendererSurface::Metal; }
 
 Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     RendererMetalState* owner = engine_module_state_as<RendererMetalState>(engine, "renderer-metal");
@@ -166,17 +165,17 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
         if (ok) r->layer = mt_platform_layer(r->window, &r->metal_view);
         if (ok && !r->layer) ok = false;
         if (ok) configure_layer(r);
-        ok = ok && mt_gpu_profile_create(r);
-        ok = ok && mt_create_resource_pools(r);
-        ok = ok && mt_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
-        ok = ok && mt_create_static_buffers(r);
+        ok = ok && rb_gpu_profile_create(r);
+        ok = ok && rb_create_resource_pools(r);
+        ok = ok && rb_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
+        ok = ok && rb_create_static_buffers(r);
         usize ring = (usize)desc.sprite_rows * sizeof(GpuSprite) * kFramesInFlight;
-        ok = ok && mt_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
-        ok = ok && mt_create_bindless(r);
-        ok = ok && mt_load_shaders(r);
-        ok = ok && mt_create_default_texture(r);
-        ok = ok && mt_create_compute_pipelines(r);
-        ok = ok && mt_create_pipelines(r);
+        ok = ok && rb_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
+        ok = ok && rb_create_bindless(r);
+        ok = ok && rb_load_shaders(r);
+        ok = ok && rb_create_default_texture(r);
+        ok = ok && rb_create_compute_pipelines(r);
+        ok = ok && rb_create_pipelines(r);
     }
     if (!ok) {
         renderer_destroy(r);
@@ -199,13 +198,13 @@ void renderer_destroy(Renderer* r) {
     for (FrameInFlight& f : r->frames) {
         if (f.cb) { [f.cb waitUntilCompleted]; [f.cb release]; f.cb = nil; }
     }
-    for (FrameInFlight& f : r->frames) { mt_release_all(r, f); f.garbage.free(); f.dirty_slots.free(); }
+    for (FrameInFlight& f : r->frames) { rb_release_all(r, f); f.garbage.free(); f.dirty_slots.free(); }
     [g_shot.buffer release];
     g_shot = Shot{};
-    mt_post_destroy(r);
-    mt_gpu_profile_destroy(r);
-    mt_destroy_pipelines(r);
-    mt_destroy_resources(r);
+    rb_post_destroy(r);
+    rb_gpu_profile_destroy(r);
+    rb_destroy_pipelines(r);
+    rb_destroy_resources(r);
     mt_platform_release(r->metal_view);
     r->metal_view = nullptr;
     r->layer = nil;
@@ -266,7 +265,7 @@ Handle renderer_texture_create(Renderer* r, const TextureDesc& desc) {
     Handle h = r->textures.create(t);
     if (h.is_null()) { KV_ERROR("metal", "out of texture slots (%u)", kMaxTextures); return h; }
     r->texture_by_name.get_or_insert(t.name.hash, h);
-    mt_mark_slot_dirty(r, h.index());
+    rb_mark_slot_dirty(r, h.index());
     return h;
 }
 
@@ -280,21 +279,21 @@ bool renderer_texture_upload(Renderer* r, Handle texture, u32 width, u32 height,
     }
     t->width  = width;
     t->height = height;
-    if (!mt_create_texture(r, *t)) return false;
-    if (!mt_stage_texture(r, texture.index(), *t, (const u8*)pixels)) return false;
-    mt_mark_slot_dirty(r, texture.index());
+    if (!rb_create_texture(r, *t)) return false;
+    if (!rb_stage_texture(r, texture.index(), *t, (const u8*)pixels)) return false;
+    rb_mark_slot_dirty(r, texture.index());
     return true;
 }
 
 void renderer_texture_destroy(Renderer* r, Handle texture) {
     Texture* t = r ? r->textures.get(texture) : nullptr;
     if (!t || texture.index() == 0) return;
-    mt_defer_destroy_texture(r, *t);
+    rb_defer_destroy_texture(r, *t);
     u32 slot = texture.index();
     Name name = t->name;
     r->textures.destroy(texture);
     rename_after_destroy(r->textures, r->texture_by_name, name, texture);
-    mt_mark_slot_dirty(r, slot);
+    rb_mark_slot_dirty(r, slot);
 }
 
 u32 renderer_texture_slot(const Renderer* r, Handle texture) {
@@ -321,7 +320,7 @@ void fill_material(Renderer* r, MaterialRecord& m, const MaterialDesc& desc) {
     m.texture = desc.texture;
     m.blend   = (u32)desc.blend < (u32)BlendMode::Count ? desc.blend : BlendMode::Alpha;
     m.shader  = desc.shader && desc.shader[0] ? name_intern(desc.shader) : Name{};
-    m.slot    = mt_material_slot(r, m.shader, m.blend);
+    m.slot    = rb_material_slot(r, m.shader, m.blend);
     m.filter  = (u32)desc.filter < (u32)TextureFilter::Count ? desc.filter : TextureFilter::Nearest;
     m.tint    = desc.tint;
     for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) m.params[i] = desc.params[i];
@@ -345,7 +344,7 @@ Handle renderer_material_create(Renderer* r, const MaterialDesc& desc) {
     Handle h = r->materials.create(m);
     if (h.is_null()) { KV_ERROR("metal", "out of materials (%u)", kMaxMaterials); return h; }
     r->material_by_name.get_or_insert(m.name.hash, h);
-    mt_mark_material_dirty(r, h.index());
+    rb_mark_material_dirty(r, h.index());
     return h;
 }
 
@@ -354,8 +353,8 @@ bool renderer_material_set(Renderer* r, Handle material, const MaterialDesc& des
     if (!m) return false;
     u32 before = m->slot;
     fill_material(r, *m, desc);
-    if (m->slot != before) mt_rebind_material(r, material.index());
-    mt_mark_material_dirty(r, material.index());
+    if (m->slot != before) rb_rebind_material(r, material.index());
+    rb_mark_material_dirty(r, material.index());
     return true;
 }
 
@@ -378,13 +377,13 @@ void renderer_material_destroy(Renderer* r, Handle material) {
     Name name = r->materials.get(material)->name;
     r->materials.destroy(material);
     rename_after_destroy(r->materials, r->material_by_name, name, material);
-    mt_rebind_material(r, row);
-    mt_mark_material_dirty(r, row);
+    rb_rebind_material(r, row);
+    rb_mark_material_dirty(r, row);
 }
 
 bool renderer_post_layer(Renderer* r, i32 layer, const char* shader) {
     if (!r) return false;
-    return mt_post_set(r, layer, shader && *shader ? name_intern(shader) : Name{});
+    return rb_post_set(r, layer, shader && *shader ? name_intern(shader) : Name{});
 }
 
 void renderer_post_params(Renderer* r, const f32* params, u32 count) {
@@ -443,8 +442,8 @@ void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
         }
         case SpriteDeltaKind::Set: {
             const RenderSpriteState& st = d.state;
-            u32 material = mt_material_row_of(r, st.material);
-            u32 bucket   = mt_bucket_of(st.layer, r->materials.items[material].slot);
+            u32 material = rb_material_row_of(r, st.material);
+            u32 bucket   = rb_bucket_of(st.layer, r->materials.items[material].slot);
             RenderSprite* s;
             u32 slot;
             if (u32* found = r->sprite_of_entity.find(d.entity)) {
@@ -527,23 +526,23 @@ bool renderer_render(Renderer* r, const RenderView& view) {
             waited += time_now() - t;
             if (f.cb.status == MTLCommandBufferStatusError)
                 KV_ERROR("metal", "frame failed on the GPU: %s", f.cb.error ? f.cb.error.localizedDescription.UTF8String : "?");
-            mt_gpu_collect(r, f); // its timestamps, now that it has completed
+            rb_gpu_collect(r, f); // its timestamps, now that it has completed
             [f.cb release];
             f.cb = nil;
         }
         r->last_wait = 0.0;
-        mt_ring_release(r, f);
-        mt_run_garbage(r, f);
+        rb_ring_release(r, f);
+        rb_run_garbage(r, f);
         if (r->sprites.len > r->tables.capacity) {
             KV_INFO("metal", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->sprites.len, r->tables.capacity);
-            if (!mt_create_tables(r, r->sprites.len)) return false;
+            if (!rb_create_tables(r, r->sprites.len)) return false;
         }
         f32* lo = (f32*)f.layers.contents;
         for (u32 i = 0; i < kLayerCount; ++i) {
             lo[i * 4 + 0] = r->layer_prev[i][0]; lo[i * 4 + 1] = r->layer_prev[i][1];
             lo[i * 4 + 2] = r->layer_cur[i][0];  lo[i * 4 + 3] = r->layer_cur[i][1];
         }
-        for (u32 slot : f.dirty_slots) mt_write_texture_slot(r, f, slot);
+        for (u32 slot : f.dirty_slots) rb_write_texture_slot(r, f, slot);
         f.dirty_slots.clear();
 
         // The drawable's size follows the window's, set before the next drawable is asked for.
@@ -563,21 +562,21 @@ bool renderer_render(Renderer* r, const RenderView& view) {
 
         id<MTLCommandBuffer> cb = [r->queue commandBuffer];
         cb.label = @"frame";
-        mt_gpu_frame_begin(r, f);
-        if (!mt_record_frame(r, f, cb, drawable, view)) return false;
+        rb_gpu_frame_begin(r, f);
+        if (!rb_record_frame(r, f, cb, drawable, view)) return false;
         if (drawable && g_shot.pending) record_screenshot(r, cb, drawable.texture);
         if (drawable) [cb presentDrawable:drawable];
         [cb commit];
         f.cb = [cb retain]; // waited for when this slot comes round again
         f.garbage_owned = f.garbage.len; // released when it has; anything queued later waits for the next
         f.submitted = true;
-        mt_ring_submitted(r, f);
+        rb_ring_submitted(r, f);
         presented = drawable != nil;
 
         if (g_shot.recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now
             [cb waitUntilCompleted];
             if (g_shot.recorded) write_screenshot(r);
-            if (r->check_recorded) mt_verify_sort(r);
+            if (r->check_recorded) rb_verify_sort(r);
         }
     }
     r->last_wait = waited;

@@ -8,32 +8,32 @@
 
 namespace kv {
 
-bool rd_create_frames(Renderer* r) {
+bool rb_create_frames(Renderer* r) {
     for (u32 i = 0; i < kFramesInFlight; ++i) {
         FrameInFlight& f = r->frames[i];
         D3D_CHECK(r->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&f.allocator)));
         D3D_CHECK(r->device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, f.allocator, nullptr, IID_PPV_ARGS(&f.cmd)));
         D3D_CHECK(f.cmd->Close()); // created recording; each frame resets it
-        rd_name(f.cmd, i ? "frame 1" : "frame 0");
+        rb_name(f.cmd, i ? "frame 1" : "frame 0");
     }
     return true;
 }
 
-void rd_destroy_frames(Renderer* r) {
+void rb_destroy_frames(Renderer* r) {
     for (FrameInFlight& f : r->frames) {
         f.garbage_owned = f.garbage.len;
-        rd_run_garbage(r, f);
+        rb_run_garbage(r, f);
         f.garbage.free();
         f.dirty_slots.free();
-        rd_release(f.cmd);
-        rd_release(f.allocator);
+        rb_release(f.cmd);
+        rb_release(f.allocator);
     }
 }
 
 namespace {
 
 void release_buffers(Swapchain& s) {
-    for (ID3D12Resource*& b : s.buffers) rd_release(b);
+    for (ID3D12Resource*& b : s.buffers) rb_release(b);
 }
 
 bool get_buffers(Renderer* r) {
@@ -47,8 +47,8 @@ bool get_buffers(Renderer* r) {
     rv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
     for (u32 i = 0; i < kBackBuffers; ++i) {
         D3D_CHECK(s.handle->GetBuffer(i, IID_PPV_ARGS(&s.buffers[i])));
-        rd_name(s.buffers[i], "back buffer");
-        r->device->CreateRenderTargetView(s.buffers[i], &rv, rd_rtv(r, i));
+        rb_name(s.buffers[i], "back buffer");
+        r->device->CreateRenderTargetView(s.buffers[i], &rv, rb_rtv(r, i));
     }
     return true;
 }
@@ -59,25 +59,25 @@ UINT swapchain_flags(const Swapchain& s) {
 
 } // namespace
 
-void rd_destroy_swapchain(Renderer* r) {
+void rb_destroy_swapchain(Renderer* r) {
     Swapchain& s = r->swapchain;
     release_buffers(s);
     if (s.waitable) CloseHandle(s.waitable);
-    rd_release(s.handle);
+    rb_release(s.handle);
     s = Swapchain{};
 }
 
-bool rd_recreate_swapchain(Renderer* r) {
+bool rb_recreate_swapchain(Renderer* r) {
     r->swapchain_dirty = false;
     Swapchain& s = r->swapchain;
     u32 w = r->want_width, h = r->want_height;
     if (w == 0 || h == 0) { // minimized: nothing to draw into until the next resize
-        if (s.handle) { rd_wait_idle(r); rd_destroy_swapchain(r); }
+        if (s.handle) { rb_wait_idle(r); rb_destroy_swapchain(r); }
         return true;
     }
     if (s.handle && s.width == w && s.height == h) return true;
     if (s.handle) {
-        rd_wait_idle(r);
+        rb_wait_idle(r);
         release_buffers(s);
         D3D_CHECK(s.handle->ResizeBuffers(0, w, h, DXGI_FORMAT_UNKNOWN, swapchain_flags(s)));
     } else {
@@ -113,7 +113,7 @@ bool rd_recreate_swapchain(Renderer* r) {
     KV_INFO("d3d12", "swapchain %ux%u, %u buffers, B8G8R8A8 sRGB views, vsync %s, tearing %s", s.width, s.height, kBackBuffers,
             r->vsync ? "on" : "off", s.tearing ? "allowed" : "not supported");
     // The pipelines know only the format, which never changes: made once.
-    if (!r->pipelines[0] && !rd_create_pipelines(r)) return false;
+    if (!r->pipelines[0] && !rb_create_pipelines(r)) return false;
     return true;
 }
 

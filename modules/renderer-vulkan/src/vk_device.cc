@@ -76,7 +76,7 @@ bool has_instance_extension(const char* name) {
 
 } // namespace
 
-bool rv_create_instance(Renderer* r) {
+bool rb_create_instance(Renderer* r) {
     u32 surface_ext_count = 0;
     const char* const* surface_exts = vk_platform_instance_extensions(&surface_ext_count);
     if (!surface_exts) return false;
@@ -225,7 +225,7 @@ int score_device(Renderer* r, VkPhysicalDevice gpu, u32* queue_family) {
 
 } // namespace
 
-bool rv_create_device(Renderer* r) {
+bool rb_create_device(Renderer* r) {
     u32 count = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(r->instance, &count, nullptr));
     if (count == 0) { KV_ERROR("vulkan", "no Vulkan devices"); return false; }

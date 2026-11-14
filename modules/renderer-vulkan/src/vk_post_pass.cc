@@ -79,17 +79,17 @@ bool post_layout(Renderer* r) {
     VK_CHECK(vkCreateSampler(r->device, &sci, nullptr, &p.sampler));
 
     for (u32 i = 0; i < kFramesInFlight; ++i) {
-        if (!rv_create_host_buffer(r, sizeof p.params, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, p.param_buffers[i])) return false;
-        rv_name(r, VK_OBJECT_TYPE_BUFFER, (u64)p.param_buffers[i].buffer, "post params");
+        if (!rb_create_host_buffer(r, sizeof p.params, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, p.param_buffers[i])) return false;
+        rb_name(r, VK_OBJECT_TYPE_BUFFER, (u64)p.param_buffers[i].buffer, "post params");
     }
     return true;
 }
 
 void post_destroy_target_later(Renderer* r) {
     PostPass& p = r->post;
-    if (p.view)   rv_defer_destroy(r, Garbage::ImageViewKind, (u64)p.view);
-    if (p.image)  rv_defer_destroy(r, Garbage::ImageKind, (u64)p.image);
-    if (p.memory) rv_defer_destroy(r, Garbage::MemoryKind, (u64)p.memory);
+    if (p.view)   rb_defer_destroy(r, Garbage::ImageViewKind, (u64)p.view);
+    if (p.image)  rb_defer_destroy(r, Garbage::ImageKind, (u64)p.image);
+    if (p.memory) rb_defer_destroy(r, Garbage::MemoryKind, (u64)p.memory);
     p.view = VK_NULL_HANDLE; p.image = VK_NULL_HANDLE; p.memory = VK_NULL_HANDLE;
     p.extent = {0, 0};
     p.format = VK_FORMAT_UNDEFINED;
@@ -103,13 +103,13 @@ void post_fail(Renderer* r, const char* why) {
 
 } // namespace
 
-bool rv_post_set(Renderer* r, i32 layer, Name shader) {
+bool rb_post_set(Renderer* r, i32 layer, Name shader) {
     PostPass& p = r->post;
     p.layer = layer;
     if (shader == p.shader) return !p.failed;
     // A different shader: the old one's pipeline retires with the frame, its module now
     // (a module is not referenced once its pipelines exist).
-    rv_post_defer_destroy_pipeline(r);
+    rb_post_defer_destroy_pipeline(r);
     if (p.module) vkDestroyShaderModule(r->device, p.module, nullptr);
     p.module = VK_NULL_HANDLE;
     p.shader = shader;
@@ -117,20 +117,20 @@ bool rv_post_set(Renderer* r, i32 layer, Name shader) {
     if (shader.is_null()) { post_destroy_target_later(r); return true; }
 
     if (!post_layout(r)) { post_fail(r, "has no layout"); return false; }
-    if (!p.vertex && !rv_load_shader(r, "post.spv", &p.vertex)) { post_fail(r, "has no vertex shader (post.spv)"); return false; }
+    if (!p.vertex && !rb_load_shader(r, "post.spv", &p.vertex)) { post_fail(r, "has no vertex shader (post.spv)"); return false; }
     char file[96];
     format(file, sizeof file, "%s.spv", name_str(shader));
-    if (!rv_load_shader(r, file, &p.module)) { post_fail(r, "did not load"); return false; }
-    return rv_post_create_pipeline(r);
+    if (!rb_load_shader(r, file, &p.module)) { post_fail(r, "did not load"); return false; }
+    return rb_post_create_pipeline(r);
 }
 
-bool rv_post_active(const Renderer* r) {
+bool rb_post_active(const Renderer* r) {
     const PostPass& p = r->post;
     return !p.shader.is_null() && !p.failed && p.pipeline;
 }
 
 // The pipeline: vs_post, the game's fs_main, no blending, the swapchain's format.
-bool rv_post_create_pipeline(Renderer* r) {
+bool rb_post_create_pipeline(Renderer* r) {
     PostPass& p = r->post;
     if (p.shader.is_null() || p.failed || !p.module) return false;
     if (p.pipeline || !r->swapchain.handle) return true; // made, or to be made with the format
@@ -198,20 +198,20 @@ bool rv_post_create_pipeline(Renderer* r) {
     }
     char label[96];
     format(label, sizeof label, "post %s", name_str(p.shader));
-    rv_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)p.pipeline, label);
+    rb_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)p.pipeline, label);
     return true;
 }
 
-void rv_post_defer_destroy_pipeline(Renderer* r) {
-    if (r->post.pipeline) rv_defer_destroy(r, Garbage::PipelineKind, (u64)r->post.pipeline);
+void rb_post_defer_destroy_pipeline(Renderer* r) {
+    if (r->post.pipeline) rb_defer_destroy(r, Garbage::PipelineKind, (u64)r->post.pipeline);
     r->post.pipeline = VK_NULL_HANDLE;
 }
 
 // The target for the swapchain as it is now: made again when its size or format moved.
 // A format the device cannot both draw into and sample turns the pass off.
-bool rv_post_prepare(Renderer* r) {
+bool rb_post_prepare(Renderer* r) {
     PostPass& p = r->post;
-    if (!rv_post_active(r)) return false;
+    if (!rb_post_active(r)) return false;
     const Swapchain& s = r->swapchain;
     if (p.image && p.extent.width == s.extent.width && p.extent.height == s.extent.height && p.format == s.format) return true;
     post_destroy_target_later(r);
@@ -235,13 +235,13 @@ bool rv_post_prepare(Renderer* r) {
     ici.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
     ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VK_CHECK(vkCreateImage(r->device, &ici, nullptr, &p.image));
-    rv_name(r, VK_OBJECT_TYPE_IMAGE, (u64)p.image, "world target");
+    rb_name(r, VK_OBJECT_TYPE_IMAGE, (u64)p.image, "world target");
     VkMemoryRequirements req;
     vkGetImageMemoryRequirements(r->device, p.image, &req);
     VkMemoryAllocateInfo mai{};
     mai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize  = req.size;
-    mai.memoryTypeIndex = rv_find_memory_type(r, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    mai.memoryTypeIndex = rb_find_memory_type(r, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (mai.memoryTypeIndex == UINT32_MAX) { KV_ERROR("vulkan", "no device-local memory type"); return false; }
     VK_CHECK(vkAllocateMemory(r->device, &mai, nullptr, &p.memory));
     VK_CHECK(vkBindImageMemory(r->device, p.image, p.memory, 0));
@@ -258,7 +258,7 @@ bool rv_post_prepare(Renderer* r) {
     return true;
 }
 
-void rv_post_begin_world(Renderer* r, VkCommandBuffer cmd, const RenderView& view) {
+void rb_post_begin_world(Renderer* r, VkCommandBuffer cmd, const RenderView& view) {
     PostPass& p = r->post;
     // The last frame's post pass read the target; what it held is not wanted.
     VkImageMemoryBarrier2 b{};
@@ -295,7 +295,7 @@ void rv_post_begin_world(Renderer* r, VkCommandBuffer cmd, const RenderView& vie
     vkCmdBeginRendering(cmd, &ri);
 }
 
-void rv_post_end_world(Renderer* r, VkCommandBuffer cmd) {
+void rb_post_end_world(Renderer* r, VkCommandBuffer cmd) {
     vkCmdEndRendering(cmd);
     VkImageMemoryBarrier2 b{};
     b.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -318,7 +318,7 @@ void rv_post_end_world(Renderer* r, VkCommandBuffer cmd) {
 
 // The frame's set (its fence has passed, so nothing reads it): the target, the sampler,
 // this frame's parameters. Then one triangle.
-void rv_post_draw(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, const RenderView& view) {
+void rb_post_draw(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, const RenderView& view) {
     PostPass& p = r->post;
     u32 fi = (u32)(&f - r->frames);
     Buffer& pb = p.param_buffers[fi];
@@ -349,16 +349,16 @@ void rv_post_draw(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, const Rend
     push.tick    = r->tick;
     push.count   = p.param_count;
     push.alpha   = view.alpha;
-    rv_label_begin(r, cmd, "post");
+    rb_label_begin(r, cmd, "post");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 0, 1, &p.sets[fi], 0, nullptr);
     vkCmdPushConstants(cmd, p.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof push, &push);
     vkCmdDraw(cmd, 3, 1, 0, 0);
-    rv_label_end(r, cmd);
+    rb_label_end(r, cmd);
 }
 
 // Device idle.
-void rv_post_destroy_now(Renderer* r) {
+void rb_post_destroy_now(Renderer* r) {
     PostPass& p = r->post;
     if (p.pipeline)   vkDestroyPipeline(r->device, p.pipeline, nullptr);
     if (p.module)     vkDestroyShaderModule(r->device, p.module, nullptr);
@@ -370,7 +370,7 @@ void rv_post_destroy_now(Renderer* r) {
     if (p.pool)       vkDestroyDescriptorPool(r->device, p.pool, nullptr);
     if (p.layout)     vkDestroyPipelineLayout(r->device, p.layout, nullptr);
     if (p.set_layout) vkDestroyDescriptorSetLayout(r->device, p.set_layout, nullptr);
-    for (Buffer& b : p.param_buffers) rv_destroy_buffer(r, b);
+    for (Buffer& b : p.param_buffers) rb_destroy_buffer(r, b);
     p = PostPass{};
 }
 

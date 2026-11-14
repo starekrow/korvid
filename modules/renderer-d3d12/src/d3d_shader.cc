@@ -53,13 +53,13 @@ const char* dxil_entry_name(const u8* blob, usize size) {
 
 } // namespace
 
-void rd_free_shader(ShaderBlob& b) {
+void rb_free_shader(ShaderBlob& b) {
     free_in(mem_general(), b.data, b.size);
     b = ShaderBlob{};
 }
 
 // Every one of `entries` out of <exe>/shaders/<file>, read once. All or nothing.
-bool rd_load_shader_entries(Renderer* r, const char* file, const char* const* entries, ShaderBlob* outs, u32 n) {
+bool rb_load_shader_entries(Renderer* r, const char* file, const char* const* entries, ShaderBlob* outs, u32 n) {
     char path[1024];
     format(path, sizeof path, "%sshaders/%s", r->base_path, file);
     IoBytes zip;
@@ -109,13 +109,13 @@ bool rd_load_shader_entries(Renderer* r, const char* file, const char* const* en
     }
     for (u32 i = 0; i < n; ++i) {
         if (!outs[i].data) KV_ERROR("d3d12", "shader '%s' has no entry point '%s'", path, entries[i]);
-        rd_free_shader(outs[i]);
+        rb_free_shader(outs[i]);
     }
     return false;
 }
 
-bool rd_load_shader(Renderer* r, const char* file, const char* entry, ShaderBlob* out) {
-    return rd_load_shader_entries(r, file, &entry, out, 1);
+bool rb_load_shader(Renderer* r, const char* file, const char* entry, ShaderBlob* out) {
+    return rb_load_shader_entries(r, file, &entry, out, 1);
 }
 
 } // namespace kv

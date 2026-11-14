@@ -22,7 +22,7 @@
 
 namespace kv {
 
-bool mt_gpu_profile_create(Renderer* r) {
+bool rb_gpu_profile_create(Renderer* r) {
 #if KV_PROFILE
     GpuProfiler& g = r->gpu_prof;
     if (![r->device supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary]) {
@@ -50,7 +50,7 @@ bool mt_gpu_profile_create(Renderer* r) {
     return true;
 }
 
-void mt_gpu_profile_destroy(Renderer* r) {
+void rb_gpu_profile_destroy(Renderer* r) {
     [r->gpu_prof.samples release];
     r->gpu_prof.samples = nil;
 }
@@ -73,11 +73,11 @@ void calibrate(Renderer* r) {
 
 } // namespace
 
-void mt_gpu_frame_begin(Renderer* r, FrameInFlight& f) {
+void rb_gpu_frame_begin(Renderer* r, FrameInFlight& f) {
     f.gpu_stamped = r->gpu_prof.samples && prof_enabled();
 }
 
-void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLBlitPassDescriptor* d) {
+void rb_gpu_attach(Renderer* r, FrameInFlight& f, MTLBlitPassDescriptor* d) {
     if (!f.gpu_stamped) return;
     MTLBlitPassSampleBufferAttachmentDescriptor* a = d.sampleBufferAttachments[0];
     a.sampleBuffer              = r->gpu_prof.samples;
@@ -85,7 +85,7 @@ void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLBlitPassDescriptor* d) {
     a.endOfEncoderSampleIndex   = base_of(r, f) + kGpuUploadEnd;
 }
 
-void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLComputePassDescriptor* d) {
+void rb_gpu_attach(Renderer* r, FrameInFlight& f, MTLComputePassDescriptor* d) {
     if (!f.gpu_stamped) return;
     MTLComputePassSampleBufferAttachmentDescriptor* a = d.sampleBufferAttachments[0];
     a.sampleBuffer              = r->gpu_prof.samples;
@@ -93,7 +93,7 @@ void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLComputePassDescriptor* d) {
     a.endOfEncoderSampleIndex   = base_of(r, f) + kGpuSortEnd;
 }
 
-void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLRenderPassDescriptor* d, bool first, bool last) {
+void rb_gpu_attach(Renderer* r, FrameInFlight& f, MTLRenderPassDescriptor* d, bool first, bool last) {
     if (!f.gpu_stamped) return;
     MTLRenderPassSampleBufferAttachmentDescriptor* a = d.sampleBufferAttachments[0];
     a.sampleBuffer               = r->gpu_prof.samples;
@@ -109,7 +109,7 @@ void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLRenderPassDescriptor* d, bo
 // with nothing to do (no uploads, no sort without sprites) writes none, and an unwritten
 // sample still holds what an earlier frame wrote there (measured), so a sample outside the
 // window is not this frame's, and its pass is an empty span at the mark before it.
-void mt_gpu_collect(Renderer* r, FrameInFlight& f) {
+void rb_gpu_collect(Renderer* r, FrameInFlight& f) {
     GpuProfiler& g = r->gpu_prof;
     if (!f.gpu_stamped || !f.cb) return;
     f.gpu_stamped = false;

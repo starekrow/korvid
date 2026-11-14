@@ -30,7 +30,7 @@ void post_fail(Renderer* r, const char* why) {
 
 void release_target_later(Renderer* r) {
     PostPass& p = r->post;
-    mt_defer_release(r, p.target);
+    rb_defer_release(r, p.target);
     p.target = nil;
     p.width = p.height = 0;
 }
@@ -50,7 +50,7 @@ bool post_setup(Renderer* r) {
         if (!p.sampler) return false;
     }
     if (!p.vertex) {
-        if (!p.vertex_lib && !mt_load_library(r, "post", &p.vertex_lib)) return false;
+        if (!p.vertex_lib && !rb_load_library(r, "post", &p.vertex_lib)) return false;
         p.vertex = [p.vertex_lib newFunctionWithName:@"vs_post"];
         if (!p.vertex) { KV_ERROR("metal", "post.metallib has no vs_post"); return false; }
     }
@@ -81,13 +81,13 @@ bool post_pipeline(Renderer* r) {
 
 } // namespace
 
-bool mt_post_set(Renderer* r, i32 layer, Name shader) {
+bool rb_post_set(Renderer* r, i32 layer, Name shader) {
     PostPass& p = r->post;
     p.layer = layer;
     if (shader == p.shader) return !p.failed;
     // A different shader: the old pipeline is released after the frame; its library and
     // function now (a pipeline does not need them once made).
-    mt_defer_release(r, p.pipeline);
+    rb_defer_release(r, p.pipeline);
     p.pipeline = nil;
     [p.fragment release]; p.fragment = nil;
     [p.library release];  p.library = nil;
@@ -96,25 +96,25 @@ bool mt_post_set(Renderer* r, i32 layer, Name shader) {
     if (shader.is_null()) { release_target_later(r); return true; }
 
     if (!post_setup(r)) { post_fail(r, "has no vertex shader (post.metallib) or sampler"); return false; }
-    if (!mt_load_library(r, name_str(shader), &p.library)) { post_fail(r, "did not load"); return false; }
+    if (!rb_load_library(r, name_str(shader), &p.library)) { post_fail(r, "did not load"); return false; }
     p.fragment = [p.library newFunctionWithName:@"fs_main"];
     if (!p.fragment) { post_fail(r, "has no fs_main"); return false; }
 #if KV_DEV || KV_DEBUG
     static const MtExpected want[] = {{"gPost", kPostPush}, {"gPostParams", kPostParams}, {"gWorld", 0}, {"gWorldSampler", 0}};
-    if (!mt_check_bindings(r, name_str(shader), want, KV_COUNTOF(want))) { post_fail(r, "binds differently from the renderer"); return false; }
+    if (!rb_check_bindings(r, name_str(shader), want, KV_COUNTOF(want))) { post_fail(r, "binds differently from the renderer"); return false; }
 #endif
     return post_pipeline(r);
 }
 
-bool mt_post_active(const Renderer* r) {
+bool rb_post_active(const Renderer* r) {
     const PostPass& p = r->post;
     return !p.shader.is_null() && !p.failed && p.pipeline;
 }
 
 // The target for the drawable as it is now: made again when its size moved.
-bool mt_post_prepare(Renderer* r, u32 width, u32 height) {
+bool rb_post_prepare(Renderer* r, u32 width, u32 height) {
     PostPass& p = r->post;
-    if (!mt_post_active(r) || !width || !height) return false;
+    if (!rb_post_active(r) || !width || !height) return false;
     if (p.target && p.width == width && p.height == height) return true;
     release_target_later(r);
     @autoreleasepool {
@@ -135,10 +135,10 @@ bool mt_post_prepare(Renderer* r, u32 width, u32 height) {
 // frame's buffer (its slot's last frame has completed, so nothing reads it): not as bytes,
 // which are read-only, where the shader's StructuredBuffer comes out of Slang as a writable
 // device pointer, and Metal's validation refuses the pair.
-void mt_post_draw(Renderer* r, FrameInFlight& f, id<MTLRenderCommandEncoder> enc, const RenderView& view) {
+void rb_post_draw(Renderer* r, FrameInFlight& f, id<MTLRenderCommandEncoder> enc, const RenderView& view) {
     PostPass& p = r->post;
     id<MTLBuffer>& pb = p.param_buffers[&f - r->frames];
-    if (!pb) pb = mt_buffer(r, sizeof p.params, MTLResourceStorageModeShared, "post params");
+    if (!pb) pb = rb_buffer(r, sizeof p.params, MTLResourceStorageModeShared, "post params");
     if (pb) memcpy(pb.contents, p.params, sizeof p.params);
     PostPushData push{};
     push.size[0] = (f32)p.width;
@@ -158,7 +158,7 @@ void mt_post_draw(Renderer* r, FrameInFlight& f, id<MTLRenderCommandEncoder> enc
     [enc popDebugGroup];
 }
 
-void mt_post_destroy(Renderer* r) {
+void rb_post_destroy(Renderer* r) {
     PostPass& p = r->post;
     [p.pipeline release];
     [p.fragment release];

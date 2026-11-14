@@ -17,7 +17,7 @@ namespace kv {
 
 // Reads shaders/<name> from the program's own files: beside the executable, or inside an
 // Android package. SPIR-V is precompiled by the build; nothing compiles here.
-bool rv_load_shader(Renderer* r, const char* name, VkShaderModule* out) {
+bool rb_load_shader(Renderer* r, const char* name, VkShaderModule* out) {
     char path[1024];
     format(path, sizeof path, "shaders/%s", name);
     IoBytes file; // needed only until the module is created
@@ -80,7 +80,7 @@ bool create_compute(Renderer* r, const char* entry, VkPipeline* out) {
     ci.stage.pName  = entry;
     ci.layout       = r->pipe_layout;
     VK_CHECK(vkCreateComputePipelines(r->device, VK_NULL_HANDLE, 1, &ci, nullptr, out));
-    rv_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)*out, entry);
+    rb_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)*out, entry);
     return true;
 }
 
@@ -177,7 +177,7 @@ bool record_table_copies(Renderer* r, VkCommandBuffer cmd) {
     bool ok = true;
     u32 rows = for_dirty_runs(r->sprite_dirty, r->sprites.len, 32, [&](u32 a, u32 b) {
         VkDeviceSize bytes = (VkDeviceSize)(b - a) * sizeof(GpuSprite);
-        RingSpan span = rv_ring_alloc(r, bytes, 16);
+        RingSpan span = rb_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuSprite* dst = (GpuSprite*)span.ptr;
         for (u32 i = a; i < b; ++i) {
@@ -192,10 +192,10 @@ bool record_table_copies(Renderer* r, VkCommandBuffer cmd) {
 
     for_dirty_runs(r->material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
         VkDeviceSize bytes = (VkDeviceSize)(b - a) * sizeof(GpuMaterial);
-        RingSpan span = rv_ring_alloc(r, bytes, 16);
+        RingSpan span = rb_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuMaterial* dst = (GpuMaterial*)span.ptr;
-        for (u32 i = a; i < b; ++i) rv_material_row(r, i, dst[i - a]);
+        for (u32 i = a; i < b; ++i) rb_material_row(r, i, dst[i - a]);
         VkBufferCopy region{span.offset, (VkDeviceSize)a * sizeof(GpuMaterial), bytes};
         vkCmdCopyBuffer(cmd, span.buffer, r->material_table.buffer, 1, &region);
     });
@@ -210,25 +210,25 @@ void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
     const VkAccessFlags2 rw = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->pipe_layout, 0, 1, &f.tables, 0, nullptr);
-    rv_label_begin(r, cmd, "count");
+    rb_label_begin(r, cmd, "count");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_count);
     vkCmdDispatch(cmd, blocks, 1, 1);
-    rv_label_end(r, cmd);
+    rb_label_end(r, cmd);
     buffer_barrier(cmd, cs, rw, cs, rw);
-    rv_label_begin(r, cmd, "scan");
+    rb_label_begin(r, cmd, "scan");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_scan);
     vkCmdDispatch(cmd, kBucketCount / kComputeGroup, 1, 1);
-    rv_label_end(r, cmd);
+    rb_label_end(r, cmd);
     buffer_barrier(cmd, cs, rw, cs, rw);
-    rv_label_begin(r, cmd, "bucket scan");
+    rb_label_begin(r, cmd, "bucket scan");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_bucket_scan);
     vkCmdDispatch(cmd, 1, 1, 1);
-    rv_label_end(r, cmd);
+    rb_label_end(r, cmd);
     buffer_barrier(cmd, cs, rw, cs, rw);
-    rv_label_begin(r, cmd, "scatter");
+    rb_label_begin(r, cmd, "scatter");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_scatter);
     vkCmdDispatch(cmd, blocks, 1, 1);
-    rv_label_end(r, cmd);
+    rb_label_end(r, cmd);
     // Buckets with keyed rows: one group each sorts its range by key. The rest stay in row
     // order and cost nothing here.
     bool keyed = false;
@@ -236,7 +236,7 @@ void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
         if (!r->keyed_counts[b] || !r->bucket_counts[b]) continue;
         if (!keyed) {
             buffer_barrier(cmd, cs, rw, cs, rw);
-            rv_label_begin(r, cmd, "key sort");
+            rb_label_begin(r, cmd, "key sort");
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->cs_key_sort);
             keyed = true;
         }
@@ -244,7 +244,7 @@ void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
                            offsetof(PushData, key_bucket), sizeof(u32), &b);
         vkCmdDispatch(cmd, 1, 1, 1);
     }
-    if (keyed) rv_label_end(r, cmd);
+    if (keyed) rb_label_end(r, cmd);
     buffer_barrier(cmd, cs, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                    VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                    VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
@@ -272,8 +272,8 @@ void record_sort_check(Renderer* r, VkCommandBuffer cmd) {
     u32 rows = r->sprites.len;
     VkDeviceSize meta_bytes = sizeof(u32) * (2 * kBucketCount + 4);
     VkDeviceSize bytes = sizeof(u32) * (VkDeviceSize)rows * 2 + meta_bytes;
-    if (r->check_buffer.buffer) rv_defer_destroy_buffer(r, r->check_buffer);
-    if (!rv_create_host_buffer(r, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, r->check_buffer)) { r->check_pending = false; return; }
+    if (r->check_buffer.buffer) rb_defer_destroy_buffer(r, r->check_buffer);
+    if (!rb_create_host_buffer(r, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, r->check_buffer)) { r->check_pending = false; return; }
     buffer_barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                    VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
     VkBufferCopy c0{0, 0, sizeof(u32) * rows};
@@ -293,8 +293,8 @@ void record_sort_check(Renderer* r, VkCommandBuffer cmd) {
 // the present barrier after it expects.
 void record_screenshot(Renderer* r, VkCommandBuffer cmd, VkImage image, VkExtent2D extent) {
     VkDeviceSize bytes = (VkDeviceSize)extent.width * extent.height * 4;
-    if (r->shot_buffer.buffer) rv_defer_destroy_buffer(r, r->shot_buffer);
-    if (!rv_create_host_buffer(r, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, r->shot_buffer)) { r->shot_pending = false; return; }
+    if (r->shot_buffer.buffer) rb_defer_destroy_buffer(r, r->shot_buffer);
+    if (!rb_create_host_buffer(r, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, r->shot_buffer)) { r->shot_pending = false; return; }
     r->shot_width  = extent.width;
     r->shot_height = extent.height;
 
@@ -343,7 +343,7 @@ void record_screenshot(Renderer* r, VkCommandBuffer cmd, VkImage image, VkExtent
 // intervenes. Buckets in between with nothing in them draw zero instances. Without
 // multi-draw, one call per non-empty bucket. A game slot whose pipeline failed draws with
 // its blend's engine pipeline.
-u32 rv_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_bucket) {
+u32 rb_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_bucket) {
     u32 draws = 0;
     u32 b = first_bucket;
     while (b < end_bucket) {
@@ -362,7 +362,7 @@ u32 rv_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_
         if (r->debug_utils) {
             format(label, sizeof label, "layers %d..%d %s", (i32)(first / kSlotCount) + kLayerMin, (i32)(last / kSlotCount) + kLayerMin,
                      gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
-            rv_label_begin(r, cmd, label);
+            rb_label_begin(r, cmd, label);
         }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
         if (r->multi_draw_indirect) {
@@ -376,7 +376,7 @@ u32 rv_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_
                 ++draws;
             }
         }
-        if (r->debug_utils) rv_label_end(r, cmd);
+        if (r->debug_utils) rb_label_end(r, cmd);
         b = last + 1;
     }
     return draws;
@@ -384,11 +384,11 @@ u32 rv_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_
 
 // ---- shaders and pipelines --------------------------------------------------------------------
 
-bool rv_load_shaders(Renderer* r) {
-    return rv_load_shader(r, "sprite.spv", &r->sprite_shader) && rv_load_shader(r, "sprite_sort.spv", &r->sort_shader);
+bool rb_load_shaders(Renderer* r) {
+    return rb_load_shader(r, "sprite.spv", &r->sprite_shader) && rb_load_shader(r, "sprite_sort.spv", &r->sort_shader);
 }
 
-bool rv_create_compute_pipelines(Renderer* r) {
+bool rb_create_compute_pipelines(Renderer* r) {
     return create_compute(r, "cs_count", &r->cs_count) && create_compute(r, "cs_scan", &r->cs_scan) &&
            create_compute(r, "cs_bucket_scan", &r->cs_bucket_scan) && create_compute(r, "cs_scatter", &r->cs_scatter) &&
            create_compute(r, "cs_key_sort", &r->cs_key_sort);
@@ -462,24 +462,24 @@ VkPipeline make_sprite_pipeline(Renderer* r, VkShaderModule fragment, BlendMode 
     VkPipeline out = VK_NULL_HANDLE;
     VkResult res = vkCreateGraphicsPipelines(r->device, VK_NULL_HANDLE, 1, &ci, nullptr, &out);
     if (res != VK_SUCCESS) { KV_ERROR("vulkan", "pipeline %s: %s", label, vk_result_name(res)); return VK_NULL_HANDLE; }
-    rv_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)out, label);
+    rb_name(r, VK_OBJECT_TYPE_PIPELINE, (u64)out, label);
     return out;
 }
 
 // One graphics pipeline per blend mode with the engine's fragment shader, and one per game
 // pipe in use; everything else is shared. Needs the swapchain format.
-bool rv_create_pipelines(Renderer* r) {
+bool rb_create_pipelines(Renderer* r) {
     for (u32 i = 0; i < kBlendCount; ++i) {
         r->pipelines[i] = make_sprite_pipeline(r, r->sprite_shader, (BlendMode)i, blend_mode_name((BlendMode)i));
         if (!r->pipelines[i]) return false;
     }
     for (GamePipe& gp : r->game_pipes)
-        if (gp.used && !gp.failed) rv_create_game_pipeline(r, gp);
-    rv_post_create_pipeline(r);
+        if (gp.used && !gp.failed) rb_create_game_pipeline(r, gp);
+    rb_post_create_pipeline(r);
     return true;
 }
 
-bool rv_create_game_pipeline(Renderer* r, GamePipe& gp) {
+bool rb_create_game_pipeline(Renderer* r, GamePipe& gp) {
     if (gp.failed || !gp.module) return false;
     if (gp.pipeline || !r->swapchain.handle) return true; // made, or to be made with the format
     char label[96];
@@ -492,7 +492,7 @@ bool rv_create_game_pipeline(Renderer* r, GamePipe& gp) {
     return gp.pipeline != VK_NULL_HANDLE;
 }
 
-u32 rv_material_slot(Renderer* r, Name shader, BlendMode blend) {
+u32 rb_material_slot(Renderer* r, Name shader, BlendMode blend) {
     u32 engine = (u32)blend < kBlendCount ? (u32)blend : (u32)BlendMode::Alpha;
     if (shader.is_null()) return engine;
     u32 free_slot = kGameSlots;
@@ -512,29 +512,29 @@ u32 rv_material_slot(Renderer* r, Name shader, BlendMode blend) {
     gp.blend  = blend;
     char file[96];
     format(file, sizeof file, "%s.spv", name_str(shader));
-    if (!rv_load_shader(r, file, &gp.module)) {
+    if (!rb_load_shader(r, file, &gp.module)) {
         gp.failed = true;
         KV_ERROR("vulkan", "game shader '%s' did not load: its sprites draw with the engine's", name_str(shader));
         return engine;
     }
-    rv_create_game_pipeline(r, gp);
+    rb_create_game_pipeline(r, gp);
     return gp.failed ? engine : kBlendCount + free_slot;
 }
 
 // A format change: the pipelines in flight retire with the frame.
-void rv_defer_destroy_pipelines(Renderer* r) {
+void rb_defer_destroy_pipelines(Renderer* r) {
     for (u32 i = 0; i < kBlendCount; ++i) {
-        rv_defer_destroy(r, Garbage::PipelineKind, (u64)r->pipelines[i]);
+        rb_defer_destroy(r, Garbage::PipelineKind, (u64)r->pipelines[i]);
         r->pipelines[i] = VK_NULL_HANDLE;
     }
     for (GamePipe& gp : r->game_pipes) {
-        if (gp.pipeline) rv_defer_destroy(r, Garbage::PipelineKind, (u64)gp.pipeline);
+        if (gp.pipeline) rb_defer_destroy(r, Garbage::PipelineKind, (u64)gp.pipeline);
         gp.pipeline = VK_NULL_HANDLE;
     }
-    rv_post_defer_destroy_pipeline(r);
+    rb_post_defer_destroy_pipeline(r);
 }
 
-void rv_destroy_pipelines_now(Renderer* r) {
+void rb_destroy_pipelines_now(Renderer* r) {
     for (u32 i = 0; i < kBlendCount; ++i) {
         if (r->pipelines[i]) vkDestroyPipeline(r->device, r->pipelines[i], nullptr);
         r->pipelines[i] = VK_NULL_HANDLE;
@@ -553,7 +553,7 @@ void rv_destroy_pipelines_now(Renderer* r) {
 
 // Every bucket's run in sorted[] holds exactly the rows whose bucket it is, in ascending
 // row order, once each; the counts agree with the CPU's where nothing was culled.
-bool rv_verify_sort(Renderer* r) {
+bool rb_verify_sort(Renderer* r) {
     r->check_recorded = false;
     if (!r->check_buffer.mapped) return false;
     u32 rows = r->check_rows;
@@ -598,16 +598,16 @@ bool rv_verify_sort(Renderer* r) {
     if (bad) ++r->checks_failed; else ++r->checks_passed;
     KV_INFO("vulkan", "sort check: %u rows, %u visible, %u buckets in use: %s", rows, visible_rows,
             [&] { u32 n = 0; for (u32 b = 0; b < kBucketCount; ++b) n += totals[b] != 0; return n; }(), bad ? "FAILED" : "ok");
-    rv_defer_destroy_buffer(r, r->check_buffer);
+    rb_defer_destroy_buffer(r, r->check_buffer);
     return bad == 0;
 }
 
 // Binary PPM, RGB. The swapchain is BGRA or RGBA; sRGB-encoded bytes either way.
-bool rv_write_screenshot(Renderer* r) {
+bool rb_write_screenshot(Renderer* r) {
     r->shot_recorded = false;
     if (!r->shot_buffer.mapped) return false;
     IoFileWriter f;
-    if (!f.open(r->shot_path)) { KV_ERROR("vulkan", "cannot write screenshot '%s'", r->shot_path); rv_defer_destroy_buffer(r, r->shot_buffer); return false; }
+    if (!f.open(r->shot_path)) { KV_ERROR("vulkan", "cannot write screenshot '%s'", r->shot_path); rb_defer_destroy_buffer(r, r->shot_buffer); return false; }
     f.print("P6\n%u %u\n255\n", r->shot_width, r->shot_height);
     bool bgra = r->swapchain.format == VK_FORMAT_B8G8R8A8_SRGB || r->swapchain.format == VK_FORMAT_B8G8R8A8_UNORM;
     const u8* px = (const u8*)r->shot_buffer.mapped;
@@ -624,13 +624,13 @@ bool rv_write_screenshot(Renderer* r) {
     }
     if (!f.close()) KV_ERROR("vulkan", "screenshot '%s': write failed (errno %d)", r->shot_path, f.error);
     else KV_INFO("vulkan", "screenshot '%s' %ux%u", r->shot_path, r->shot_width, r->shot_height);
-    rv_defer_destroy_buffer(r, r->shot_buffer);
+    rb_defer_destroy_buffer(r, r->shot_buffer);
     return true;
 }
 
 // ---- the frame -----------------------------------------------------------------------------------
 
-bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view) {
+bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view) {
     KV_ZONE("record");
     Swapchain& s = r->swapchain;
     VkCommandBuffer cmd = f.cmd;
@@ -640,13 +640,13 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
-    rv_gpu_frame_begin(r, f, cmd);
+    rb_gpu_frame_begin(r, f, cmd);
     f.gpu_pixels = have_image ? (u64)s.extent.width * s.extent.height : 0;
 
     // Uploads first: textures, then the rows the ticks changed. The previous frame read
     // the tables in its compute and vertex stages and wrote them in its copies; both must
     // be done before this frame's copies land.
-    rv_label_begin(r, cmd, "upload");
+    rb_label_begin(r, cmd, "upload");
     record_texture_uploads(r, cmd);
     buffer_barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
                         VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
@@ -657,9 +657,9 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
     buffer_barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-    rv_label_end(r, cmd);
-    rv_gpu_mark(r, f, cmd, kGpuUploaded);
-    rv_gpu_stats_begin(r, f, cmd); // the sort's and the drawing's shader invocations
+    rb_label_end(r, cmd);
+    rb_gpu_mark(r, f, cmd, kGpuUploaded);
+    rb_gpu_stats_begin(r, f, cmd); // the sort's and the drawing's shader invocations
 
     bool draw = have_image && r->sprites.len > 0;
     // World: move the view's center to the origin, undo the camera's rotation, then the
@@ -686,12 +686,12 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
     vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, &push);
 
     if (draw) {
-        rv_label_begin(r, cmd, "sort");
+        rb_label_begin(r, cmd, "sort");
         record_sort(r, f, cmd);
-        rv_label_end(r, cmd);
+        rb_label_end(r, cmd);
         if (r->check_pending) { snapshot_keys(r, view.alpha); record_sort_check(r, cmd); }
     }
-    rv_gpu_mark(r, f, cmd, kGpuSorted);
+    rb_gpu_mark(r, f, cmd, kGpuSorted);
 
     if (have_image) {
         // Undefined -> color attachment. Waiting on the acquire semaphore happens at
@@ -716,8 +716,8 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
 
         // With a post shader, the world (the layers below the post layer) goes into the
         // target first, and the window's rendering begins with the post pass.
-        bool post = rv_post_prepare(r);
-        u32 split = post ? rv_bucket_of(r->post.layer, 0) : 0;
+        bool post = rb_post_prepare(r);
+        u32 split = post ? rb_bucket_of(r->post.layer, 0) : 0;
         VkViewport vp{0.0f, 0.0f, (f32)s.extent.width, (f32)s.extent.height, 0.0f, 1.0f};
         VkRect2D scissor{{0, 0}, s.extent};
         VkDescriptorSet sets[2] = {f.tables, f.textures};
@@ -728,11 +728,11 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
         };
         u32 draws = 0;
         if (post) {
-            rv_label_begin(r, cmd, "world");
-            rv_post_begin_world(r, cmd, view);
-            if (draw) { bind_sprites(); draws += rv_record_draws(r, cmd, 0, split); }
-            rv_post_end_world(r, cmd);
-            rv_label_end(r, cmd);
+            rb_label_begin(r, cmd, "world");
+            rb_post_begin_world(r, cmd, view);
+            if (draw) { bind_sprites(); draws += rb_record_draws(r, cmd, 0, split); }
+            rb_post_end_world(r, cmd);
+            rb_label_end(r, cmd);
         }
 
         VkRenderingAttachmentInfo color{};
@@ -748,24 +748,24 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
         ri.layerCount           = 1;
         ri.colorAttachmentCount = 1;
         ri.pColorAttachments    = &color;
-        rv_label_begin(r, cmd, "draw");
+        rb_label_begin(r, cmd, "draw");
         vkCmdBeginRendering(cmd, &ri);
 
         if (post) {
             vkCmdSetViewport(cmd, 0, 1, &vp);
             vkCmdSetScissor(cmd, 0, 1, &scissor);
-            rv_post_draw(r, f, cmd, view);
+            rb_post_draw(r, f, cmd, view);
         }
         if (draw) {
             // The post pass's layout disturbed the sprites' sets and push block.
             bind_sprites();
             if (post) vkCmdPushConstants(cmd, r->pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, &push);
-            draws += rv_record_draws(r, cmd, split, kBucketCount);
+            draws += rb_record_draws(r, cmd, split, kBucketCount);
         }
         KV_COUNTER("indirect draws", draws);
 
         vkCmdEndRendering(cmd);
-        rv_label_end(r, cmd);
+        rb_label_end(r, cmd);
 
         if (r->shot_pending) record_screenshot(r, cmd, s.images[image_index], s.extent);
 
@@ -780,9 +780,9 @@ bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
         vkCmdPipelineBarrier2(cmd, &dep);
     }
 
-    rv_gpu_stats_end(r, f, cmd);
-    rv_gpu_mark(r, f, cmd, kGpuDrawn);
-    rv_gpu_mark(r, f, cmd, kGpuEnd);
+    rb_gpu_stats_end(r, f, cmd);
+    rb_gpu_mark(r, f, cmd, kGpuDrawn);
+    rb_gpu_mark(r, f, cmd, kGpuEnd);
     VK_CHECK(vkEndCommandBuffer(cmd));
     return true;
 }

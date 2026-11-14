@@ -22,7 +22,7 @@ namespace kv {
 
 constexpr u32 kGpuStatCount = 3; // vertex, fragment, compute invocations, in the flags' bit order
 
-void rv_name(Renderer* r, VkObjectType type, u64 handle, const char* name) {
+void rb_name(Renderer* r, VkObjectType type, u64 handle, const char* name) {
     if (!r->debug_utils || !handle || !name || !vk_platform_object_names()) return;
     VkDebugUtilsObjectNameInfoEXT ni{};
     ni.sType        = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
@@ -32,7 +32,7 @@ void rv_name(Renderer* r, VkObjectType type, u64 handle, const char* name) {
     vkSetDebugUtilsObjectNameEXT(r->device, &ni);
 }
 
-void rv_label_begin(Renderer* r, VkCommandBuffer cmd, const char* name) {
+void rb_label_begin(Renderer* r, VkCommandBuffer cmd, const char* name) {
     if (!r->debug_utils) return;
     VkDebugUtilsLabelEXT l{};
     l.sType      = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
@@ -40,11 +40,11 @@ void rv_label_begin(Renderer* r, VkCommandBuffer cmd, const char* name) {
     vkCmdBeginDebugUtilsLabelEXT(cmd, &l);
 }
 
-void rv_label_end(Renderer* r, VkCommandBuffer cmd) {
+void rb_label_end(Renderer* r, VkCommandBuffer cmd) {
     if (r->debug_utils) vkCmdEndDebugUtilsLabelEXT(cmd);
 }
 
-bool rv_gpu_profile_create(Renderer* r) {
+bool rb_gpu_profile_create(Renderer* r) {
 #if KV_PROFILE
     GpuProfiler& g = r->gpu_prof;
     if (g.timestamps) {
@@ -53,7 +53,7 @@ bool rv_gpu_profile_create(Renderer* r) {
         qi.queryType  = VK_QUERY_TYPE_TIMESTAMP;
         qi.queryCount = kGpuMarks * kFramesInFlight;
         VK_CHECK(vkCreateQueryPool(r->device, &qi, nullptr, &g.stamps));
-        rv_name(r, VK_OBJECT_TYPE_QUERY_POOL, (u64)g.stamps, "gpu timestamps");
+        rb_name(r, VK_OBJECT_TYPE_QUERY_POOL, (u64)g.stamps, "gpu timestamps");
     }
     if (g.statistics) {
         VkQueryPoolCreateInfo qi{};
@@ -64,7 +64,7 @@ bool rv_gpu_profile_create(Renderer* r) {
                                 VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT |
                                 VK_QUERY_PIPELINE_STATISTIC_COMPUTE_SHADER_INVOCATIONS_BIT;
         VK_CHECK(vkCreateQueryPool(r->device, &qi, nullptr, &g.stats));
-        rv_name(r, VK_OBJECT_TYPE_QUERY_POOL, (u64)g.stats, "gpu statistics");
+        rb_name(r, VK_OBJECT_TYPE_QUERY_POOL, (u64)g.stats, "gpu statistics");
     }
     if (g.timestamps) g.track = prof_track("gpu");
 #else
@@ -73,7 +73,7 @@ bool rv_gpu_profile_create(Renderer* r) {
     return true;
 }
 
-void rv_gpu_profile_destroy(Renderer* r) {
+void rb_gpu_profile_destroy(Renderer* r) {
     GpuProfiler& g = r->gpu_prof;
     if (g.stamps) vkDestroyQueryPool(r->device, g.stamps, nullptr);
     if (g.stats)  vkDestroyQueryPool(r->device, g.stats, nullptr);
@@ -114,7 +114,7 @@ void calibrate(Renderer* r) {
 
 } // namespace
 
-void rv_gpu_frame_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
+void rb_gpu_frame_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
     f.gpu_stamped = f.gpu_counted = false;
     GpuProfiler& g = r->gpu_prof;
     if (!prof_enabled()) return;
@@ -122,28 +122,28 @@ void rv_gpu_frame_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
     if (g.stamps) {
         vkCmdResetQueryPool(cmd, g.stamps, s * kGpuMarks, kGpuMarks);
         f.gpu_stamped = true;
-        rv_gpu_mark(r, f, cmd, kGpuStart);
+        rb_gpu_mark(r, f, cmd, kGpuStart);
     }
     if (g.stats) vkCmdResetQueryPool(cmd, g.stats, s, 1);
 }
 
-void rv_gpu_mark(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, GpuMark mark) {
+void rb_gpu_mark(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, GpuMark mark) {
     if (!f.gpu_stamped) return;
     // When everything before it has finished: the start, the end of each pass.
     vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, r->gpu_prof.stamps, frame_slot(r, f) * kGpuMarks + mark);
 }
 
-void rv_gpu_stats_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
+void rb_gpu_stats_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
     if (!r->gpu_prof.stats || !prof_enabled() || f.gpu_counted) return;
     vkCmdBeginQuery(cmd, r->gpu_prof.stats, frame_slot(r, f), 0);
     f.gpu_counted = true;
 }
 
-void rv_gpu_stats_end(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
+void rb_gpu_stats_end(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
     if (f.gpu_counted) vkCmdEndQuery(cmd, r->gpu_prof.stats, frame_slot(r, f));
 }
 
-void rv_gpu_collect(Renderer* r, FrameInFlight& f) {
+void rb_gpu_collect(Renderer* r, FrameInFlight& f) {
     GpuProfiler& g = r->gpu_prof;
     if (!f.submitted || (!f.gpu_stamped && !f.gpu_counted)) return;
     u32 s = frame_slot(r, f);

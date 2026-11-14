@@ -21,21 +21,21 @@ u32 frame_slot(const Renderer* r, const FrameInFlight& f) { return (u32)(&f - r-
 
 } // namespace
 
-void rd_name(ID3D12Object* object, const char* name) {
+void rb_name(ID3D12Object* object, const char* name) {
     if (!object || !name) return;
     wchar_t w[128];
     if (MultiByteToWideChar(CP_UTF8, 0, name, -1, w, KV_COUNTOF(w)) > 0) object->SetName(w);
 }
 
-void rd_label_begin(Renderer* r, ID3D12GraphicsCommandList* cmd, const char* name) {
+void rb_label_begin(Renderer* r, ID3D12GraphicsCommandList* cmd, const char* name) {
     if (r->markers) cmd->BeginEvent(1 /* ANSI text */, name, (UINT)strlen(name) + 1);
 }
 
-void rd_label_end(Renderer* r, ID3D12GraphicsCommandList* cmd) {
+void rb_label_end(Renderer* r, ID3D12GraphicsCommandList* cmd) {
     if (r->markers) cmd->EndEvent();
 }
 
-bool rd_gpu_profile_create(Renderer* r) {
+bool rb_gpu_profile_create(Renderer* r) {
 #if KV_PROFILE
     GpuProfiler& g = r->gpu_prof;
     u64 freq = 0;
@@ -45,12 +45,12 @@ bool rd_gpu_profile_create(Renderer* r) {
     qd.Type  = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
     qd.Count = kGpuMarks * kFramesInFlight;
     D3D_CHECK(r->device->CreateQueryHeap(&qd, IID_PPV_ARGS(&g.stamps)));
-    rd_name(g.stamps, "gpu timestamps");
+    rb_name(g.stamps, "gpu timestamps");
     qd.Type  = D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS;
     qd.Count = kFramesInFlight;
     D3D_CHECK(r->device->CreateQueryHeap(&qd, IID_PPV_ARGS(&g.stats)));
-    rd_name(g.stats, "gpu statistics");
-    if (!rd_create_buffer(r, D3D12_HEAP_TYPE_READBACK, kSlotBytes * kFramesInFlight, false, g.readback, "gpu query results")) return false;
+    rb_name(g.stats, "gpu statistics");
+    if (!rb_create_buffer(r, D3D12_HEAP_TYPE_READBACK, kSlotBytes * kFramesInFlight, false, g.readback, "gpu query results")) return false;
     g.timestamps = true;
     g.track = prof_track("gpu");
 #else
@@ -59,37 +59,37 @@ bool rd_gpu_profile_create(Renderer* r) {
     return true;
 }
 
-void rd_gpu_profile_destroy(Renderer* r) {
+void rb_gpu_profile_destroy(Renderer* r) {
     GpuProfiler& g = r->gpu_prof;
-    rd_release(g.stamps);
-    rd_release(g.stats);
-    rd_destroy_buffer(g.readback);
+    rb_release(g.stamps);
+    rb_release(g.stats);
+    rb_destroy_buffer(g.readback);
     g.timestamps = false;
 }
 
-void rd_gpu_frame_begin(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd) {
+void rb_gpu_frame_begin(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd) {
     f.gpu_stamped = f.gpu_counted = false;
     if (!r->gpu_prof.timestamps || !prof_enabled()) return;
     f.gpu_stamped = true;
-    rd_gpu_mark(r, f, cmd, kGpuStart);
+    rb_gpu_mark(r, f, cmd, kGpuStart);
 }
 
-void rd_gpu_mark(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd, GpuMark mark) {
+void rb_gpu_mark(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd, GpuMark mark) {
     if (!f.gpu_stamped) return;
     cmd->EndQuery(r->gpu_prof.stamps, D3D12_QUERY_TYPE_TIMESTAMP, frame_slot(r, f) * kGpuMarks + mark);
 }
 
-void rd_gpu_stats_begin(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd) {
+void rb_gpu_stats_begin(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd) {
     if (!f.gpu_stamped || f.gpu_counted) return;
     cmd->BeginQuery(r->gpu_prof.stats, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, frame_slot(r, f));
     f.gpu_counted = true;
 }
 
-void rd_gpu_stats_end(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd) {
+void rb_gpu_stats_end(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd) {
     if (f.gpu_counted) cmd->EndQuery(r->gpu_prof.stats, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, frame_slot(r, f));
 }
 
-void rd_gpu_frame_end(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd) {
+void rb_gpu_frame_end(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd) {
     GpuProfiler& g = r->gpu_prof;
     u32 s = frame_slot(r, f);
     if (f.gpu_stamped)
@@ -98,7 +98,7 @@ void rd_gpu_frame_end(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* 
         cmd->ResolveQueryData(g.stats, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, s, 1, g.readback.resource, s * kSlotBytes + kStampBytes);
 }
 
-void rd_gpu_collect(Renderer* r, FrameInFlight& f) {
+void rb_gpu_collect(Renderer* r, FrameInFlight& f) {
     GpuProfiler& g = r->gpu_prof;
     if (!f.submitted || !f.gpu_stamped) return;
     const u8* slot = (const u8*)g.readback.mapped + frame_slot(r, f) * kSlotBytes;

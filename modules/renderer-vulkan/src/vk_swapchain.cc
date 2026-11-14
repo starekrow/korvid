@@ -12,9 +12,9 @@ namespace {
 // Queues the current chain's objects for destruction after the frame and forgets them.
 void retire_swapchain(Renderer* r) {
     Swapchain& s = r->swapchain;
-    for (VkSemaphore sem : s.present) rv_defer_destroy(r, Garbage::SemaphoreKind, (u64)sem);
-    for (VkImageView v : s.views) rv_defer_destroy(r, Garbage::ImageViewKind, (u64)v);
-    rv_defer_destroy(r, Garbage::SwapchainKind, (u64)s.handle);
+    for (VkSemaphore sem : s.present) rb_defer_destroy(r, Garbage::SemaphoreKind, (u64)sem);
+    for (VkImageView v : s.views) rb_defer_destroy(r, Garbage::ImageViewKind, (u64)v);
+    rb_defer_destroy(r, Garbage::SwapchainKind, (u64)s.handle);
     s.present.clear();
     s.views.clear();
     s.images.clear();
@@ -119,7 +119,7 @@ bool create_swapchain(Renderer* r) {
     s.images.push_n(n);
     vkGetSwapchainImagesKHR(r->device, sc, &n, s.images.data);
     for (u32 i = 0; i < n; ++i) {
-        rv_name(r, VK_OBJECT_TYPE_IMAGE, (u64)s.images[i], "swapchain image");
+        rb_name(r, VK_OBJECT_TYPE_IMAGE, (u64)s.images[i], "swapchain image");
         VkImageViewCreateInfo vci{};
         vci.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         vci.image            = s.images[i];
@@ -146,19 +146,19 @@ bool create_swapchain(Renderer* r) {
 
 } // namespace
 
-bool rv_recreate_swapchain(Renderer* r) {
+bool rb_recreate_swapchain(Renderer* r) {
     VkFormat before = r->swapchain.format;
     if (!create_swapchain(r)) return false;
     r->swapchain_dirty = false;
     if (r->swapchain.handle && (before != r->swapchain.format || !r->pipelines[0])) {
-        rv_defer_destroy_pipelines(r);
-        if (!rv_create_pipelines(r)) return false;
+        rb_defer_destroy_pipelines(r);
+        if (!rb_create_pipelines(r)) return false;
     }
     return true;
 }
 
 // Device idle only.
-void rv_destroy_swapchain_now(Renderer* r) {
+void rb_destroy_swapchain_now(Renderer* r) {
     Swapchain& s = r->swapchain;
     for (VkSemaphore sem : s.present) vkDestroySemaphore(r->device, sem, nullptr);
     for (VkImageView v : s.views) vkDestroyImageView(r->device, v, nullptr);
@@ -172,7 +172,7 @@ void rv_destroy_swapchain_now(Renderer* r) {
 
 // ---- frames in flight -------------------------------------------------------------------
 
-bool rv_create_frames(Renderer* r) {
+bool rb_create_frames(Renderer* r) {
     for (u32 i = 0; i < kFramesInFlight; ++i) {
         FrameInFlight& f = r->frames[i];
         VkCommandPoolCreateInfo pci{};
@@ -201,17 +201,17 @@ bool rv_create_frames(Renderer* r) {
 }
 
 // Device idle only: whatever the frames still hold as garbage can go now.
-void rv_destroy_frames(Renderer* r) {
+void rb_destroy_frames(Renderer* r) {
     for (u32 i = 0; i < kFramesInFlight; ++i) {
         FrameInFlight& f = r->frames[i];
         f.garbage_owned = f.garbage.len; // the device is idle: all of it
-        rv_run_garbage(r, f);
+        rb_run_garbage(r, f);
         f.garbage.free();
         f.dirty_slots.free();
         if (f.acquire) vkDestroySemaphore(r->device, f.acquire, nullptr);
         if (f.fence)   vkDestroyFence(r->device, f.fence, nullptr);
         if (f.pool)    vkDestroyCommandPool(r->device, f.pool, nullptr); // frees the command buffer
-        rv_destroy_buffer(r, f.layers);
+        rb_destroy_buffer(r, f.layers);
         f = FrameInFlight{};
     }
 }

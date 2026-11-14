@@ -12,6 +12,14 @@
 #pragma once
 #include "korvid/render/renderer.h"
 #include "korvid/render/material.h"
+#include "korvid/render/core/layout.h"
+
+// What this backend tells the render core (korvid/render/core/core.h).
+#define KV_RB_NAME       "vulkan"
+#define KV_RB_CLIP_Y_UP  0
+#define KV_RB_SHADER_EXT ".spv"
+#define KV_RB_SURFACE    RendererSurface::Vulkan
+#include "korvid/render/core/core.h"
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"
@@ -22,83 +30,6 @@
 #include "vk_platform.h"
 
 namespace kv {
-
-constexpr u32 kFramesInFlight = 2;
-constexpr u32 kMaxTextures    = 1024; // bindless array size; slot 0 is the default texture
-constexpr u32 kMaxMaterials   = 4096; // GPU material rows; row 0 is the default material
-constexpr u32 kMaxSprites     = 1u << 20;
-constexpr u32 kDefaultTexSize = 16;   // checkerboard texels per side
-constexpr u32 kDefaultTexCell = 2;    // texels per checker cell
-constexpr u32 kBlendCount     = (u32)BlendMode::Count;
-
-// Sort buckets: layers clamped to [kLayerMin, kLayerMax], eight pipeline slots per layer:
-// the three blends with the engine's fragment shader, then five game shaders' (shader,
-// blend) pairs as materials name them. Mirrored by sprite_common.slangh.
-constexpr i32 kLayerMin     = -128;
-constexpr i32 kLayerMax     = 127;
-constexpr u32 kLayerCount   = 256;
-constexpr u32 kSlotCount    = 8;
-constexpr u32 kGameSlots    = kSlotCount - kBlendCount; // 5
-constexpr u32 kBucketCount  = kLayerCount * kSlotCount; // 2048
-constexpr u32 kBlockRows    = 1024;                      // sprite rows per compute block
-constexpr u32 kComputeGroup = 256;                       // threads per compute workgroup
-
-constexpr u32 kInitialSpriteRows = 4096;
-constexpr u32 kInitialRingBytes  = 8u << 20;
-
-// ---- GPU-side layouts: std430, mirrored by sprite_common.slangh --------------------------
-
-// One sprite row. Slot-addressed: the row index is the render world's pool slot.
-struct GpuSprite {
-    f32 prev[4];    // position x, y, rotation, scale x, at the start of the stamped tick
-    f32 cur[4];     // the same, now
-    f32 scale_y[2]; // prev scale y, cur scale y
-    f32 size[2];    // quad size in world units before the placement's scale
-    f32 uv[4];      // x, y, w, h
-    f32 tint[4];
-    u32 material;   // material row
-    u32 stamp;      // the tick of the last Set; rows stamped with the frame's tick interpolate
-    i32 layer;
-    u32 flags;      // bit 0: alive; bit 1: screen space; bits 2-3: SpriteSort
-    f32 order;      // the sort key or the feet's offset
-    u32 pad[3];
-};
-static_assert(sizeof(GpuSprite) == 112, "GpuSprite must match sprite_common.slangh");
-
-constexpr u32 kSpriteAlive  = 1;
-constexpr u32 kSpriteScreen = 2; // placed in window pixels through the screen view, not the camera
-constexpr u32 kSpriteSortShift = 2;   // SpriteSort in bits 2-3
-constexpr u32 kSpriteAnchorShift = 4; // a screen row's anchor: bits 4-5 x, 6-7 y; 0 center, 1 low (left, bottom), 2 high
-constexpr u32 kKeySortMax = 2048;     // visible rows of one keyed bucket the key sort orders (the rest keep row order)
-
-// One material row.
-struct GpuMaterial {
-    f32 tint[4];
-    f32 params[8];
-    u32 texture; // bindless slot, resolved through the texture pool when the row is written
-    u32 blend;
-    u32 filter;  // TextureFilter: which sampler
-    u32 slot;    // its pipeline slot: the blend's, or a game shader's
-};
-static_assert(sizeof(GpuMaterial) == 64, "GpuMaterial must match sprite_common.slangh");
-
-// Shared by every stage: the vertex shader uses the views, the compute passes the cull
-// rects. World rows go through `view`, screen rows (kSpriteScreen) through `screen`.
-struct PushData {
-    f32 view[4];         // world to clip: affine2 a, b, c, d
-    f32 view_trans[2];   // tx, ty
-    f32 alpha;           // interpolation point for rows stamped with `tick`
-    u32 tick;
-    f32 cull[4];         // world rows: the view's bounding rect in world units, x, y, w, h
-    f32 screen[4];       // screen pixels (center origin, +y up) to clip
-    f32 screen_trans[2];
-    u32 row_count;       // sprite rows the compute passes look at
-    u32 key_bucket;      // cs_key_sort: the bucket this dispatch sorts
-    f32 screen_cull[4];  // screen rows: the window rect in pixels, x, y, w, h
-    f32 time;            // the render time in seconds, for game shaders
-    u32 pad_t[3];
-};
-static_assert(sizeof(PushData) == 112, "PushData must match sprite_common.slangh");
 
 // ---- CPU-side records ---------------------------------------------------------------------
 
@@ -121,19 +52,6 @@ struct Texture {
     Name           name;   // TextureDesc::name, or "texture:<n>"
 };
 
-// A material: what the API was told, kept so a row can be rewritten when the texture it
-// names comes and goes. Its pool index is its GPU row.
-struct MaterialRecord {
-    Handle    texture;
-    BlendMode blend;
-    TextureFilter filter;
-    color     tint;
-    f32       params[KV_MATERIAL_PARAMS];
-    Name      name;   // MaterialDesc::name, or derived from the content at creation
-    Name      shader; // a game fragment shader's name, or none
-    u32       slot;   // its pipeline slot: the blend, or kBlendCount + its game pipe
-};
-
 // A game fragment shader with a blend: a pipeline slot of its own. Made when a material
 // first names the pair; a shader that will not load or link is `failed`, and its slot draws
 // with the engine's pipeline of its blend.
@@ -143,14 +61,6 @@ struct GamePipe {
     VkShaderModule module = VK_NULL_HANDLE;
     VkPipeline     pipeline = VK_NULL_HANDLE;
     bool           used = false, failed = false;
-};
-
-// A sprite in the render world. The GPU row, plus what the GPU does not need.
-struct RenderSprite {
-    GpuSprite gpu;
-    Handle    entity;
-    u32       bucket; // the CPU's copy of the sort bucket, for the per-bucket counts
-    bool      keyed;  // its sort is not Row: counted in keyed_counts[bucket]
 };
 
 // Something to destroy once the frame that last used it has passed its fence.
@@ -212,10 +122,6 @@ struct FrameInFlight {
     u64             submit_ticks = 0;
     u64             gpu_pixels = 0;
 };
-
-// The frame's timestamps: its start, after the uploads, after the sort, after the drawing,
-// its end. Spans: the frame, the uploads, the sort, the draw.
-enum GpuMark : u32 { kGpuStart, kGpuUploaded, kGpuSorted, kGpuDrawn, kGpuEnd, kGpuMarks };
 
 struct GpuProfiler {
     bool            timestamps = false;    // the queue can, and this is a profiling build
@@ -388,107 +294,107 @@ struct Renderer {
 #define VK_CHECK(call) VK_CHECK_RET(call, false)
 
 // ---- vk_device.cc -----------------------------------------------------------------------
-bool rv_create_instance(Renderer* r);
-bool rv_create_device(Renderer* r);
+bool rb_create_instance(Renderer* r);
+bool rb_create_device(Renderer* r);
 
 // ---- vk_resources.cc --------------------------------------------------------------------
-u32  rv_find_memory_type(Renderer* r, u32 type_bits, VkMemoryPropertyFlags flags);
-bool rv_create_host_buffer(Renderer* r, VkDeviceSize size, VkBufferUsageFlags usage, Buffer& out);
-bool rv_create_device_buffer(Renderer* r, VkDeviceSize size, VkBufferUsageFlags usage, Buffer& out);
-void rv_destroy_buffer(Renderer* r, Buffer& b);
+u32  rb_find_memory_type(Renderer* r, u32 type_bits, VkMemoryPropertyFlags flags);
+bool rb_create_host_buffer(Renderer* r, VkDeviceSize size, VkBufferUsageFlags usage, Buffer& out);
+bool rb_create_device_buffer(Renderer* r, VkDeviceSize size, VkBufferUsageFlags usage, Buffer& out);
+void rb_destroy_buffer(Renderer* r, Buffer& b);
 // Deferred destruction: queued on the slot of the next frame to be submitted, run after
 // that frame's fence passes.
-void rv_defer_destroy(Renderer* r, Garbage::Kind kind, u64 handle);
-void rv_defer_destroy_buffer(Renderer* r, Buffer& b);
-void rv_run_garbage(Renderer* r, FrameInFlight& f); // what the slot's last frame owned; its fence has passed
+void rb_defer_destroy(Renderer* r, Garbage::Kind kind, u64 handle);
+void rb_defer_destroy_buffer(Renderer* r, Buffer& b);
+void rb_run_garbage(Renderer* r, FrameInFlight& f); // what the slot's last frame owned; its fence has passed
 
 // The frame ring. Allocation is for the frame being recorded; release happens at that
 // frame's fence. A span is valid until the frame is submitted; its buffer is kept alive
 // through the garbage queue if the ring grows meanwhile.
-bool     rv_ring_init(Renderer* r, VkDeviceSize bytes);
-RingSpan rv_ring_alloc(Renderer* r, VkDeviceSize bytes, VkDeviceSize align);
-void     rv_ring_submitted(Renderer* r, FrameInFlight& f); // close the frame's span
-void     rv_ring_release(Renderer* r, FrameInFlight& f);   // the frame's fence has passed
+bool     rb_ring_init(Renderer* r, VkDeviceSize bytes);
+RingSpan rb_ring_alloc(Renderer* r, VkDeviceSize bytes, VkDeviceSize align);
+void     rb_ring_submitted(Renderer* r, FrameInFlight& f); // close the frame's span
+void     rb_ring_release(Renderer* r, FrameInFlight& f);   // the frame's fence has passed
 
 // Textures.
-bool rv_create_texture_image(Renderer* r, Texture& t);
-bool rv_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels); // queues the upload
-void rv_defer_destroy_texture(Renderer* r, Texture& t);
-void rv_destroy_texture_now(Renderer* r, Texture& t);
-bool rv_create_default_texture(Renderer* r);
-void rv_mark_slot_dirty(Renderer* r, u32 slot);
-void rv_write_texture_slot(Renderer* r, VkDescriptorSet set, u32 slot);
-VkFormat rv_vk_format(TextureFormat f);
+bool rb_create_texture_image(Renderer* r, Texture& t);
+bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels); // queues the upload
+void rb_defer_destroy_texture(Renderer* r, Texture& t);
+void rb_destroy_texture_now(Renderer* r, Texture& t);
+bool rb_create_default_texture(Renderer* r);
+void rb_mark_slot_dirty(Renderer* r, u32 slot);
+void rb_write_texture_slot(Renderer* r, VkDescriptorSet set, u32 slot);
+VkFormat rb_vk_format(TextureFormat f);
 
 // Materials: the pool record becomes a GPU row, uploaded with the next frame.
-void rv_material_row(Renderer* r, u32 row, GpuMaterial& out);
-void rv_mark_material_dirty(Renderer* r, u32 row);
+void rb_material_row(Renderer* r, u32 row, GpuMaterial& out);
+void rb_mark_material_dirty(Renderer* r, u32 row);
 // Every sprite using material row `row` is rebucketed (its blend may have changed) and
 // marked for upload. For material edits and destruction; never on the frame path.
-void rv_rebind_material(Renderer* r, u32 row);
+void rb_rebind_material(Renderer* r, u32 row);
 
 // Pools, handle kinds, tables, descriptors.
-bool rv_create_resource_pools(Renderer* r);
-bool rv_create_tables(Renderer* r, u32 rows); // sprite tables for `rows`; the old ones retire
-bool rv_create_static_buffers(Renderer* r);   // material table, sort meta, indirect
-bool rv_create_descriptors(Renderer* r);
-void rv_write_tables_set(Renderer* r, FrameInFlight& f);
-void rv_destroy_resources(Renderer* r); // everything above, device idle
+bool rb_create_resource_pools(Renderer* r);
+bool rb_create_tables(Renderer* r, u32 rows); // sprite tables for `rows`; the old ones retire
+bool rb_create_static_buffers(Renderer* r);   // material table, sort meta, indirect
+bool rb_create_descriptors(Renderer* r);
+void rb_write_tables_set(Renderer* r, FrameInFlight& f);
+void rb_destroy_resources(Renderer* r); // everything above, device idle
 
 // ---- vk_swapchain.cc --------------------------------------------------------------------
-bool rv_create_frames(Renderer* r);
-void rv_destroy_frames(Renderer* r);
-bool rv_recreate_swapchain(Renderer* r); // fenced: the old chain retires with the frame
-void rv_destroy_swapchain_now(Renderer* r);
+bool rb_create_frames(Renderer* r);
+void rb_destroy_frames(Renderer* r);
+bool rb_recreate_swapchain(Renderer* r); // fenced: the old chain retires with the frame
+void rb_destroy_swapchain_now(Renderer* r);
 
 // ---- vk_sprite_pass.cc ------------------------------------------------------------------
-bool rv_load_shaders(Renderer* r);
-bool rv_create_pipelines(Renderer* r);  // graphics: needs the swapchain format
-void rv_defer_destroy_pipelines(Renderer* r);
-void rv_destroy_pipelines_now(Renderer* r);
-bool rv_create_compute_pipelines(Renderer* r);
+bool rb_load_shaders(Renderer* r);
+bool rb_create_pipelines(Renderer* r);  // graphics: needs the swapchain format
+void rb_defer_destroy_pipelines(Renderer* r);
+void rb_destroy_pipelines_now(Renderer* r);
+bool rb_create_compute_pipelines(Renderer* r);
 // Records one frame: uploads, table copies, the sort, and the draws when there is an image.
-bool rv_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view);
-bool rv_load_shader(Renderer* r, const char* name, VkShaderModule* out); // <exe>/shaders/<name>
-u32  rv_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_bucket);
+bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view);
+bool rb_load_shader(Renderer* r, const char* name, VkShaderModule* out); // <exe>/shaders/<name>
+u32  rb_record_draws(Renderer* r, VkCommandBuffer cmd, u32 first_bucket, u32 end_bucket);
 
 // ---- vk_post_pass.cc --------------------------------------------------------------------
-bool rv_post_set(Renderer* r, i32 layer, Name shader);
-bool rv_post_active(const Renderer* r);      // a post shader set and loaded, and a target to draw into
-bool rv_post_prepare(Renderer* r);           // the target for the swapchain's size and format; false: draw straight
-void rv_post_begin_world(Renderer* r, VkCommandBuffer cmd, const RenderView& view); // rendering into the target
-void rv_post_end_world(Renderer* r, VkCommandBuffer cmd); // ends it; the target becomes readable
-void rv_post_draw(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, const RenderView& view); // the target to the window, inside its rendering
-bool rv_post_create_pipeline(Renderer* r);   // needs the swapchain format
-void rv_post_defer_destroy_pipeline(Renderer* r);
-void rv_post_destroy_now(Renderer* r);
+bool rb_post_set(Renderer* r, i32 layer, Name shader);
+bool rb_post_active(const Renderer* r);      // a post shader set and loaded, and a target to draw into
+bool rb_post_prepare(Renderer* r);           // the target for the swapchain's size and format; false: draw straight
+void rb_post_begin_world(Renderer* r, VkCommandBuffer cmd, const RenderView& view); // rendering into the target
+void rb_post_end_world(Renderer* r, VkCommandBuffer cmd); // ends it; the target becomes readable
+void rb_post_draw(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, const RenderView& view); // the target to the window, inside its rendering
+bool rb_post_create_pipeline(Renderer* r);   // needs the swapchain format
+void rb_post_defer_destroy_pipeline(Renderer* r);
+void rb_post_destroy_now(Renderer* r);
 
 // vk_gpu_profile.cc. Names and labels (VK_EXT_debug_utils, when the instance has it: a
 // no-op unless a capture tool or layer listens). Timing: query pools made after the
 // frames, a frame's queries reset and its marks and statistics written while it records
 // (while the profiler records), read once its fence has passed (never waited for).
-void rv_name(Renderer* r, VkObjectType type, u64 handle, const char* name);
-void rv_label_begin(Renderer* r, VkCommandBuffer cmd, const char* name);
-void rv_label_end(Renderer* r, VkCommandBuffer cmd);
-bool rv_gpu_profile_create(Renderer* r);
-void rv_gpu_profile_destroy(Renderer* r);
-void rv_gpu_frame_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd); // resets, then the start mark
-void rv_gpu_mark(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, GpuMark mark);
-void rv_gpu_stats_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd);
-void rv_gpu_stats_end(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd);
-void rv_gpu_collect(Renderer* r, FrameInFlight& f); // after its fence
+void rb_name(Renderer* r, VkObjectType type, u64 handle, const char* name);
+void rb_label_begin(Renderer* r, VkCommandBuffer cmd, const char* name);
+void rb_label_end(Renderer* r, VkCommandBuffer cmd);
+bool rb_gpu_profile_create(Renderer* r);
+void rb_gpu_profile_destroy(Renderer* r);
+void rb_gpu_frame_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd); // resets, then the start mark
+void rb_gpu_mark(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd, GpuMark mark);
+void rb_gpu_stats_begin(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd);
+void rb_gpu_stats_end(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd);
+void rb_gpu_collect(Renderer* r, FrameInFlight& f); // after its fence
 // Writes the screenshot buffer the frame filled; the frame's fence has passed.
-bool rv_write_screenshot(Renderer* r);
+bool rb_write_screenshot(Renderer* r);
 // Verifies the sort outputs the frame read back; the frame's fence has passed.
-bool rv_verify_sort(Renderer* r);
+bool rb_verify_sort(Renderer* r);
 
 // ---- renderer.cc ------------------------------------------------------------------------
 // Row index for a material handle: its row, or 0 (the default) when null or stale.
-u32  rv_material_row_of(const Renderer* r, Handle material);
-u32  rv_bucket_of(i32 layer, u32 slot);
+u32  rb_material_row_of(const Renderer* r, Handle material);
+u32  rb_bucket_of(i32 layer, u32 slot);
 // The pipeline slot for a material: its blend's, or a game shader's (assigned here, its
 // module loaded and its pipeline made once the swapchain's format is known).
-u32  rv_material_slot(Renderer* r, Name shader, BlendMode blend);
-bool rv_create_game_pipeline(Renderer* r, GamePipe& gp);
+u32  rb_material_slot(Renderer* r, Name shader, BlendMode blend);
+bool rb_create_game_pipeline(Renderer* r, GamePipe& gp);
 
 } // namespace kv

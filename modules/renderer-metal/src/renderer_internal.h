@@ -30,6 +30,14 @@
 #import <QuartzCore/CAMetalLayer.h>
 #include "korvid/render/renderer.h"
 #include "korvid/render/material.h"
+#include "korvid/render/core/layout.h"
+
+// What this backend tells the render core (korvid/render/core/core.h).
+#define KV_RB_NAME       "metal"
+#define KV_RB_CLIP_Y_UP  1
+#define KV_RB_SHADER_EXT ".metallib"
+#define KV_RB_SURFACE    RendererSurface::Metal
+#include "korvid/render/core/core.h"
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"
@@ -39,77 +47,9 @@
 
 namespace kv {
 
-constexpr u32 kFramesInFlight = 2;
-constexpr u32 kMaxTextures    = 1024; // bindless array size; slot 0 is the default texture (sprite_fragment.slangh's BindlessSet)
-constexpr u32 kMaxMaterials   = 4096; // GPU material rows; row 0 is the default material
-constexpr u32 kMaxSprites     = 1u << 20;
-constexpr u32 kDefaultTexSize = 16;   // checkerboard texels per side
-constexpr u32 kDefaultTexCell = 2;    // texels per checker cell
-constexpr u32 kBlendCount     = (u32)BlendMode::Count;
-
-// Sort buckets, as renderer-vulkan's: layers clamped to [kLayerMin, kLayerMax], eight
-// pipeline slots per layer (the three blends, then five game shaders).
-constexpr i32 kLayerMin     = -128;
-constexpr i32 kLayerMax     = 127;
-constexpr u32 kLayerCount   = 256;
-constexpr u32 kSlotCount    = 8;
-constexpr u32 kGameSlots    = kSlotCount - kBlendCount; // 5
-constexpr u32 kBucketCount  = kLayerCount * kSlotCount; // 2048
-constexpr u32 kBlockRows    = 1024;                      // sprite rows per compute block
-constexpr u32 kComputeGroup = 256;                       // threads per threadgroup: MSL has no numthreads, every dispatch says it
-
-constexpr u32   kInitialSpriteRows = 4096;
-constexpr usize kInitialRingBytes  = 8u << 20;
-
-// ---- GPU-side layouts: mirrored by sprite_common.slangh ------------------------------------
-
-struct GpuSprite {
-    f32 prev[4];    // position x, y, rotation, scale x, at the start of the stamped tick
-    f32 cur[4];     // the same, now
-    f32 scale_y[2]; // prev scale y, cur scale y
-    f32 size[2];    // quad size in world units before the placement's scale
-    f32 uv[4];      // x, y, w, h
-    f32 tint[4];
-    u32 material;   // material row
-    u32 stamp;      // the tick of the last Set; rows stamped with the frame's tick interpolate
-    i32 layer;
-    u32 flags;      // bit 0: alive; bit 1: screen space; bits 2-3: SpriteSort
-    f32 order;      // the sort key or the feet's offset
-    u32 pad[3];
-};
-static_assert(sizeof(GpuSprite) == 112, "GpuSprite must match sprite_common.slangh");
-
-constexpr u32 kSpriteAlive  = 1;
-constexpr u32 kSpriteScreen = 2;
-constexpr u32 kSpriteSortShift = 2;
-constexpr u32 kSpriteAnchorShift = 4;
-constexpr u32 kKeySortMax = 2048;
-
-struct GpuMaterial {
-    f32 tint[4];
-    f32 params[8];
-    u32 texture; // bindless slot
-    u32 blend;
-    u32 filter;  // TextureFilter: which sampler
-    u32 slot;    // its pipeline slot
-};
-static_assert(sizeof(GpuMaterial) == 64, "GpuMaterial must match sprite_common.slangh");
-
-struct PushData {
-    f32 view[4];
-    f32 view_trans[2];
-    f32 alpha;
-    u32 tick;
-    f32 cull[4];
-    f32 screen[4];
-    f32 screen_trans[2];
-    u32 row_count;
-    u32 key_bucket;
-    f32 screen_cull[4];
-    f32 time;
-    u32 pad_t[3];
-};
-static_assert(sizeof(PushData) == 112, "PushData must match sprite_common.slangh");
+// The constants and the GPU-side layouts are render's (korvid/render/core/layout.h).
+// kMaxTextures is also the length of sprite_fragment.slangh's BindlessSet; every dispatch
+// names kComputeGroup, since MSL has no numthreads.
 
 // Buffer indices, as Slang numbers the globals in declaration order through the include
 // chain (docs/design/renderer-metal.md). A dev build checks these against the reflection
@@ -135,17 +75,6 @@ struct Texture {
     Name           name;
 };
 
-struct MaterialRecord {
-    Handle        texture;
-    BlendMode     blend;
-    TextureFilter filter;
-    color         tint;
-    f32           params[KV_MATERIAL_PARAMS];
-    Name          name;
-    Name          shader;
-    u32           slot;
-};
-
 struct GamePipe {
     Name                       shader;
     BlendMode                  blend = BlendMode::Alpha;
@@ -153,13 +82,6 @@ struct GamePipe {
     id<MTLFunction>            fragment = nil;
     id<MTLRenderPipelineState> pipeline = nil;
     bool                       used = false, failed = false;
-};
-
-struct RenderSprite {
-    GpuSprite gpu;
-    Handle    entity;
-    u32       bucket;
-    bool      keyed;
 };
 
 struct PendingUpload {
@@ -310,70 +232,70 @@ struct Renderer {
 };
 
 // ---- mt_resources.mm ------------------------------------------------------------------------
-id<MTLBuffer> mt_buffer(Renderer* r, usize bytes, MTLResourceOptions storage, const char* label); // +1
-void mt_defer_release(Renderer* r, id obj); // after the next frame to be submitted completes; nil is fine
-void mt_run_garbage(Renderer* r, FrameInFlight& f);  // what the slot's last frame owned; it has completed
-void mt_release_all(Renderer* r, FrameInFlight& f);  // everything; nothing is in flight
+id<MTLBuffer> rb_buffer(Renderer* r, usize bytes, MTLResourceOptions storage, const char* label); // +1
+void rb_defer_release(Renderer* r, id obj); // after the next frame to be submitted completes; nil is fine
+void rb_run_garbage(Renderer* r, FrameInFlight& f);  // what the slot's last frame owned; it has completed
+void rb_release_all(Renderer* r, FrameInFlight& f);  // everything; nothing is in flight
 
-bool     mt_ring_init(Renderer* r, usize bytes);
-RingSpan mt_ring_alloc(Renderer* r, usize bytes, usize align);
-void     mt_ring_submitted(Renderer* r, FrameInFlight& f);
-void     mt_ring_release(Renderer* r, FrameInFlight& f);
+bool     rb_ring_init(Renderer* r, usize bytes);
+RingSpan rb_ring_alloc(Renderer* r, usize bytes, usize align);
+void     rb_ring_submitted(Renderer* r, FrameInFlight& f);
+void     rb_ring_release(Renderer* r, FrameInFlight& f);
 
-bool mt_create_texture(Renderer* r, Texture& t); // any previous texture is released after the frame
-bool mt_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels);
-void mt_defer_destroy_texture(Renderer* r, Texture& t);
-bool mt_create_default_texture(Renderer* r);
-void mt_mark_slot_dirty(Renderer* r, u32 slot);
-void mt_write_texture_slot(Renderer* r, FrameInFlight& f, u32 slot);
-bool mt_create_bindless(Renderer* r); // the samplers and every frame's argument buffer
+bool rb_create_texture(Renderer* r, Texture& t); // any previous texture is released after the frame
+bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels);
+void rb_defer_destroy_texture(Renderer* r, Texture& t);
+bool rb_create_default_texture(Renderer* r);
+void rb_mark_slot_dirty(Renderer* r, u32 slot);
+void rb_write_texture_slot(Renderer* r, FrameInFlight& f, u32 slot);
+bool rb_create_bindless(Renderer* r); // the samplers and every frame's argument buffer
 // The textures a draw may sample, made resident for a render encoder.
-void mt_use_textures(Renderer* r, id<MTLRenderCommandEncoder> enc);
+void rb_use_textures(Renderer* r, id<MTLRenderCommandEncoder> enc);
 
-void mt_material_row(Renderer* r, u32 row, GpuMaterial& out);
-void mt_mark_material_dirty(Renderer* r, u32 row);
-void mt_rebind_material(Renderer* r, u32 row);
+void rb_material_row(Renderer* r, u32 row, GpuMaterial& out);
+void rb_mark_material_dirty(Renderer* r, u32 row);
+void rb_rebind_material(Renderer* r, u32 row);
 
-bool mt_create_resource_pools(Renderer* r);
-bool mt_create_tables(Renderer* r, u32 rows);
-bool mt_create_static_buffers(Renderer* r);
-void mt_destroy_resources(Renderer* r); // everything above; nothing in flight
+bool rb_create_resource_pools(Renderer* r);
+bool rb_create_tables(Renderer* r, u32 rows);
+bool rb_create_static_buffers(Renderer* r);
+void rb_destroy_resources(Renderer* r); // everything above; nothing in flight
 
 // ---- mt_sprite_pass.mm ----------------------------------------------------------------------
-bool mt_load_library(Renderer* r, const char* name, id<MTLLibrary>* out); // <exe>/shaders/<name>.metallib
-bool mt_load_shaders(Renderer* r);
-bool mt_create_pipelines(Renderer* r);
-bool mt_create_compute_pipelines(Renderer* r);
-void mt_destroy_pipelines(Renderer* r);
-u32  mt_material_slot(Renderer* r, Name shader, BlendMode blend);
+bool rb_load_library(Renderer* r, const char* name, id<MTLLibrary>* out); // <exe>/shaders/<name>.metallib
+bool rb_load_shaders(Renderer* r);
+bool rb_create_pipelines(Renderer* r);
+bool rb_create_compute_pipelines(Renderer* r);
+void rb_destroy_pipelines(Renderer* r);
+u32  rb_material_slot(Renderer* r, Name shader, BlendMode blend);
 // Records one frame into cb: uploads, table copies, the sort, and the draws into drawable's
 // texture when there is one (nil: a zero-size window; the uploads still go).
-bool mt_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, const RenderView& view);
-bool mt_verify_sort(Renderer* r);
+bool rb_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable, const RenderView& view);
+bool rb_verify_sort(Renderer* r);
 #if KV_DEV || KV_DEBUG
 // A library's buffer, texture and sampler indices by name, against the reflection the build
 // writes beside it (<lib>.metallib.json). False, logged by name, on any difference.
 struct MtExpected { const char* name; u32 index; };
-bool mt_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32 count);
+bool rb_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32 count);
 #endif
 
 // ---- mt_post_pass.mm ------------------------------------------------------------------------
-bool mt_post_set(Renderer* r, i32 layer, Name shader); // false: the shader would not load; the pass is off
-bool mt_post_active(const Renderer* r);
-bool mt_post_prepare(Renderer* r, u32 width, u32 height); // the target for this size; false: draw straight
-void mt_post_draw(Renderer* r, FrameInFlight& f, id<MTLRenderCommandEncoder> enc, const RenderView& view); // inside the window's pass
-void mt_post_destroy(Renderer* r); // nothing in flight
+bool rb_post_set(Renderer* r, i32 layer, Name shader); // false: the shader would not load; the pass is off
+bool rb_post_active(const Renderer* r);
+bool rb_post_prepare(Renderer* r, u32 width, u32 height); // the target for this size; false: draw straight
+void rb_post_draw(Renderer* r, FrameInFlight& f, id<MTLRenderCommandEncoder> enc, const RenderView& view); // inside the window's pass
+void rb_post_destroy(Renderer* r); // nothing in flight
 
 // ---- mt_gpu_profile.mm ----------------------------------------------------------------------
-bool mt_gpu_profile_create(Renderer* r);  // nothing to do (false never) where it cannot sample
-void mt_gpu_profile_destroy(Renderer* r);
-void mt_gpu_frame_begin(Renderer* r, FrameInFlight& f); // whether this frame is timed
+bool rb_gpu_profile_create(Renderer* r);  // nothing to do (false never) where it cannot sample
+void rb_gpu_profile_destroy(Renderer* r);
+void rb_gpu_frame_begin(Renderer* r, FrameInFlight& f); // whether this frame is timed
 // Timestamps on an encoder about to be made, when the frame is timed. Render: `first` takes
 // the draw's start, `last` its end (with the post pass, the world's encoder is first).
-void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLBlitPassDescriptor* d);
-void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLComputePassDescriptor* d);
-void mt_gpu_attach(Renderer* r, FrameInFlight& f, MTLRenderPassDescriptor* d, bool first, bool last);
-void mt_gpu_collect(Renderer* r, FrameInFlight& f); // it has completed
+void rb_gpu_attach(Renderer* r, FrameInFlight& f, MTLBlitPassDescriptor* d);
+void rb_gpu_attach(Renderer* r, FrameInFlight& f, MTLComputePassDescriptor* d);
+void rb_gpu_attach(Renderer* r, FrameInFlight& f, MTLRenderPassDescriptor* d, bool first, bool last);
+void rb_gpu_collect(Renderer* r, FrameInFlight& f); // it has completed
 
 // ---- sdl3/mt_platform_sdl3.mm, ios/mt_platform_ios.mm -------------------------------------
 // The layer to present through, from the window's native handle; null (logged) on failure.
@@ -382,7 +304,7 @@ CAMetalLayer* mt_platform_layer(void* native_window, void** view_out);
 void          mt_platform_release(void* view);
 
 // ---- renderer.mm ----------------------------------------------------------------------------
-u32 mt_material_row_of(const Renderer* r, Handle material);
-u32 mt_bucket_of(i32 layer, u32 slot);
+u32 rb_material_row_of(const Renderer* r, Handle material);
+u32 rb_bucket_of(i32 layer, u32 slot);
 
 } // namespace kv
