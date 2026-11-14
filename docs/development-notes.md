@@ -262,7 +262,30 @@ game at best. What I hope is that someone will take this, rip out all the assets
 and maps and behaviors, and build an awesome bullet hell on the game core for me
 to play.
 
+These notes will need some organization at some point.
 
+Adding stable transcendental functions to the engine (to enable cross-platform
+determinism) turned out to be very straightforward. I started out asking for a
+libm replacement that was correct. The idea was that then you could swap in any
+platform primitives that were correct and faster. That got shot down immediately
+- no-one makes them correct, and the correct versions of some like `pow` were
+powerfully slow. But, with a bit of tweaking I ended up with versions that are
+more accurate than the platform libraries and about the same speed. And suddenly
+my replays all matched across platforms - all 5, the desktops and mobiles.
 
+You do lose some performance - the flags that prevent platform FP shenanigans
+also prevent some nice optimizations. But my experience has been that the real
+impact of that is pretty small. You're much more likely to lose your frame rate
+to cache or overdraw or something than exactly how long sin() takes. If sin() is
+the problem, you need to do something different anyway.
 
+I'm really happy with the design of `goldberg`. I always wanted to make a self-
+assembling toolchain for a game; asset cooking is such a pain in the ass. After
+building the self-ordering in-tick systems, it was a natural next step to build
+a DAG around the asset pipelines. Building it as an engine-based tool brings
+together a bunch of capabilities that are usually quite hard in tools - good
+multichannel async I/O, math that matches the game's, systems that can handle
+tens of thousands of items quickly, safe parallelism. We get a lot of extras for
+free, like state hashing, memory tracking, and a CLI to help you dig around
+inside your cooker. So frikkin cool.
 
