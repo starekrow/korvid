@@ -12,6 +12,7 @@ enum class WindowSurface : u8 {
     Software, // the system draws it; present_blank() works, nothing else draws
     Vulkan,   // a renderer creates a Vulkan surface from native_handle()
     Metal,    // a renderer finds a CAMetalLayer through native_handle(): an SDL window's view on macOS, the UIView on iOS
+    D3D12,    // a renderer makes a DXGI swapchain for native_handle(), the HWND (Windows only)
 };
 
 struct WindowDesc {

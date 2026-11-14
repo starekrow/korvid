@@ -13,7 +13,7 @@
 #pragma once
 #include "sprite_common.slangh"
 
-[[vk::binding(1, 0)]] StructuredBuffer<GpuMaterial> gMaterials;
+[[vk::binding(1, 0)]] StructuredBuffer<GpuMaterial> gMaterials KV_REG(t1);
 #if defined(KV_TARGET_METAL)
 // Metal has no unbounded texture array: Slang would make gTextures[] a flexible array
 // member, which MSL refuses, and binding a fixed array of textures straight to a stage
@@ -30,8 +30,8 @@ ParameterBlock<BindlessSet> gBindless;
 #define gSamplers gBindless.samplers
 #define gTextures gBindless.textures
 #else
-[[vk::binding(0, 1)]] SamplerState                  gSamplers[2]; // nearest, linear
-[[vk::binding(1, 1)]] Texture2D                     gTextures[];  // variable count: last binding
+[[vk::binding(0, 1)]] SamplerState                  gSamplers[2] KV_REG(s0);             // nearest, linear
+[[vk::binding(1, 1)]] Texture2D                     gTextures[]  KV_REG_SPACE(t0, space1); // variable count: last binding
 #endif
 
 struct SpriteVaryings {

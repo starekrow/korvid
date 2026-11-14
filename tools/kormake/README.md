@@ -332,7 +332,9 @@ can use these placeholders:
 - `%{triple}`: the consuming toolchain's target triple.
 
 `deps = "depfile"` reads a gcc-style depfile. `platforms = { apple = { ... } }` replaces
-fields for one platform, or for one toolchain family. A rule with `per = "exe"` and
+fields for one platform, or for one toolchain family, or for wherever a module is bound to
+an interface (`["renderer-d3d12"] = { ... }`: the shader rule writes DXIL wherever that
+backend is bound, whatever the platform); a bound module's variant wins. A rule with `per = "exe"` and
 `inputs = "assets"` runs once per executable instead, over every asset that executable
 stages, passed in a response file (`%{rsp}`) and with `%{exe}` available in `outputs`.
 This is how kpack's pack rule writes `bin/<exe>.kpak`. A per-exe rule's `configs` names

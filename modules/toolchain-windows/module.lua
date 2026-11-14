@@ -73,6 +73,10 @@ module "toolchain.windows" {
                 "https://vulkan.lunarg.com/sdk/home), then open a new prompt so VULKAN_SDK and PATH are set.\n" ..
                 "README.md, \"Building on Windows\", has the steps.",
     },
+    -- Direct3D 12 (renderer-d3d12, when kormake.lua binds it): the Windows SDK's headers,
+    -- which the msvc probe already puts on every compile, and its import libraries. The
+    -- runtime is the system's d3d12.dll and dxgi.dll.
+    d3d12 = { libs = { "d3d12", "dxgi", "dxguid" } },
   },
   bindings  = {
     render             = "renderer-vulkan",

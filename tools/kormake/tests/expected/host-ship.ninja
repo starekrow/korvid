@@ -33,8 +33,8 @@ rule tool_packer_pack
   rspfile = $out.rsp
   rspfile_content = $in
   description = PACK $out
-rule tool_compiler_compile
-  command = 'host/bin/compiler' $in -o $out
+rule tool_compiler_compile_{host}_gfx_soft
+  command = 'host/bin/compiler' $in --soft -o $out
   description = COMPILE $out
 
 build obj/base/unity.o: cxx_host {root}/build/{host}-ship/gen/base/unity.cc
@@ -77,7 +77,7 @@ build host/bin/compiler: link_host host/obj/compiler/unity.o host/lib/libkv_base
   link = 
   cxxflags = -std=c++20 -O1
   ldflags = -lm
-build bin/shaders/sprite.bin: tool_compiler_compile {root}/modules/gfx/shaders/sprite.shd | host/bin/compiler
+build bin/shaders/sprite.soft: tool_compiler_compile_{host}_gfx_soft {root}/modules/gfx/shaders/sprite.shd | host/bin/compiler
 build obj/gfx_soft/soft.o: cxx_host {root}/modules/gfx-soft/src/soft.cc
   includes = -I'{root}/modules/base/include' -I'{root}/build/{host}-ship/gen/gfx_soft'
   defines = 
@@ -102,7 +102,7 @@ build obj/game/unity.o: cxx_host {root}/build/{host}-ship/gen/game/unity.cc
   defines = 
 build bin/assets/game/level.txt: copy {root}/modules/game/assets/level.txt
 build bin/pkg.dll: copy {root}/packages/pkg/lib/pkg.dll
-build bin/game: link_host obj/game/unity.o lib/libkv_gfx_soft.a lib/libkv_base.a || bin/shaders/sprite.bin bin/assets/base/base.txt bin/assets/base/odd$ name$$.txt bin/assets/base/sub/s.txt bin/assets/game/level.txt bin/pkg.dll
+build bin/game: link_host obj/game/unity.o lib/libkv_gfx_soft.a lib/libkv_base.a || bin/shaders/sprite.soft bin/assets/base/base.txt bin/assets/base/odd$ name$$.txt bin/assets/base/sub/s.txt bin/assets/game/level.txt bin/pkg.dll
   libs = -lpkg -L'{root}/packages/pkg/lib'
 build bin/game.pak: tool_packer_pack bin/assets/base/base.txt bin/assets/base/odd$ name$$.txt bin/assets/base/sub/s.txt bin/assets/game/level.txt | host/bin/packer
 build obj/base/tests/base_test.o: cxx_host {root}/modules/base/tests/base_test.cc
@@ -130,9 +130,9 @@ build host/test/compiler.ok: run_test host/bin/compiler_tests | host/bin/assets/
 build obj/game/tests/game_test.o: cxx_host {root}/modules/game/tests/game_test.cc
   includes = -I'{root}/modules/base/include' -I'{root}/modules/game/tests'
   defines = 
-build bin/game_tests: link_host obj/game/tests/game_test.o lib/libkv_gfx_soft.a lib/libkv_base.a || bin/shaders/sprite.bin bin/assets/base/base.txt bin/assets/base/odd$ name$$.txt bin/assets/base/sub/s.txt bin/assets/game/level.txt bin/pkg.dll
+build bin/game_tests: link_host obj/game/tests/game_test.o lib/libkv_gfx_soft.a lib/libkv_base.a || bin/shaders/sprite.soft bin/assets/base/base.txt bin/assets/base/odd$ name$$.txt bin/assets/base/sub/s.txt bin/assets/game/level.txt bin/pkg.dll
   libs = -lpkg -L'{root}/packages/pkg/lib'
-build test/game.ok: run_test bin/game_tests | bin/shaders/sprite.bin bin/assets/base/base.txt bin/assets/base/odd$ name$$.txt bin/assets/base/sub/s.txt bin/assets/game/level.txt bin/pkg.dll
+build test/game.ok: run_test bin/game_tests | bin/shaders/sprite.soft bin/assets/base/base.txt bin/assets/base/odd$ name$$.txt bin/assets/base/sub/s.txt bin/assets/game/level.txt bin/pkg.dll
 
 build tests: phony bin/base_tests bin/game_tests
 build check: phony test/base.ok test/game.ok
@@ -141,7 +141,7 @@ default all
 
 build base: phony lib/libkv_base.a bin/assets/base/base.txt bin/assets/base/odd$ name$$.txt bin/assets/base/sub/s.txt
 build compiler: phony host/bin/compiler
-build gfx: phony bin/shaders/sprite.bin
+build gfx: phony bin/shaders/sprite.soft
 build gfx-soft: phony lib/libkv_gfx_soft.a
 build packer: phony host/bin/packer
 build game: phony bin/game bin/game.pak

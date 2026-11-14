@@ -214,17 +214,31 @@ function M.run(c, g, opts)
   end
   local tool_rules = {}
   -- A rule as a consuming instance's platform sees it: the rule's fields with those of its
-  -- `platforms[<platform>]` variant over them, or else of the variant for the platform's
-  -- toolchain family (the shader rule's Metal form, `platforms = { apple = ... }`). The
-  -- Ninja rule's name carries the platform only when a variant applies, so a rule without
-  -- one is named as it always was.
+  -- variant for a module bound to an interface on that platform (the shader rule's DXIL
+  -- form, `platforms = { ["renderer-d3d12"] = ... }`: the shader format follows the
+  -- backend, not the OS), or else of its `platforms[<platform>]` variant, or else of the
+  -- variant for the platform's toolchain family (the shader rule's Metal form,
+  -- `platforms = { apple = ... }`). The Ninja rule's name carries the key only when a
+  -- variant applies, so a rule without one is named as it always was.
   local function rule_variant(r, platform, family)
-    local v = r.platforms and (r.platforms[platform] or (family and r.platforms[family]))
+    if not r.platforms then return r, "" end
+    local v, key
+    local bound = g.platform_of(platform).bindings
+    local ifaces = {}
+    for iface in pairs(bound) do ifaces[#ifaces + 1] = iface end
+    table.sort(ifaces) -- the same choice every run when two bound modules both have variants
+    for _, iface in ipairs(ifaces) do
+      for _, b in ipairs(bound[iface]) do
+        if not v and r.platforms[b] then v, key = r.platforms[b], platform .. "_" .. b end
+      end
+    end
+    if not v then v, key = r.platforms[platform], platform end
+    if not v and family then v, key = r.platforms[family], platform end
     if not v then return r, "" end
     local out = {}
     for k, x in pairs(r) do if k ~= "platforms" then out[k] = x end end
     for k, x in pairs(v) do out[k] = x end
-    return out, "_" .. util.symbol(platform)
+    return out, "_" .. util.symbol(key)
   end
   -- The rules an instance's tools export, as its platform sees them, each with the tool it
   -- came from and its Ninja rule's name: tool_<tool>_<rule>[_<platform>].

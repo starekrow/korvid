@@ -28,6 +28,17 @@ module "slang" {
           command = "%{tool} %{in} %{shader_includes} -target metallib -DKV_TARGET_METAL=1 -Xmetal -target -Xmetal air64-%{triple} " ..
                     "-depfile %{depfile} -reflection-json %{out}.json -o %{out}",
         },
+        -- Wherever renderer-d3d12 is bound: DXIL, which holds one entry point per blob where
+        -- SPIR-V and a Metal library hold many. A .zip output is slangc's container, one
+        -- signed blob per entry point (DXC signs it; no dxil.dll), which the backend reads
+        -- by entry name. KV_TARGET_D3D12 turns on the render interface's registers
+        -- (binding.slangh) and its vertex fetch of the sorted rows. Shader model 6.0: what
+        -- every D3D12 GPU runs, the oldest Xbox and the ARM laptops included.
+        ["renderer-d3d12"] = {
+          outputs = "%{stem}.dxil.zip",
+          command = "%{tool} %{in} %{shader_includes} -target dxil -profile sm_6_0 -DKV_TARGET_D3D12=1 " ..
+                    "-depfile %{depfile} -o %{out}",
+        },
       },
     },
   },

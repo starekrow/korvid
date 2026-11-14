@@ -15,6 +15,10 @@ configs   { "debug", "dev", "ship" }
 -- a line here would override them for one platform.
 -- bind "render" { linux = "renderer-vulkan" }
 
+-- The d3d12 branch: Windows draws with Direct3D 12. Drop this line (or name renderer-vulkan)
+-- for the toolchain's default, Vulkan; the shaders follow the binding (slang's rule).
+bind "render" { windows = "renderer-d3d12" }
+
 root "examples" { paths = "examples", platforms = { "linux" } }
 root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
 
@@ -23,7 +27,7 @@ root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
 root "windows" {
   modules   = { "core", "math", "inflate", "pack", "platform", "platform_hid", "cli", "tool", "kpack",
                 "render", "asset", "sprite", "scene", "text", "anim", "collision", "tilemap", "level",
-                "platform_audio", "audio", "renderer-vulkan", "touchpad", "frameloop", "save", "ui", "xml", "bulletml", "image", "picture",
+                "platform_audio", "audio", "renderer-vulkan", "renderer-d3d12", "touchpad", "frameloop", "save", "ui", "xml", "bulletml", "image", "picture",
                 "window", "testbed", "stones", "rocks", "arcanum",
                 "cpukiller", "arcfire", "gallery", "sockit2m" },
   tests     = true,

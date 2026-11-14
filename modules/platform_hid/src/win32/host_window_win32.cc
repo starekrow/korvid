@@ -183,9 +183,10 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
-    // A Vulkan window is the renderer's to paint; erasing it would flash the background.
+    // A renderer's window (Vulkan or D3D12) is the renderer's to paint; erasing it would
+    // flash the background.
     case WM_ERASEBKGND:
-        if (g_win.desc.surface == WindowSurface::Vulkan) return 1;
+        if (g_win.desc.surface != WindowSurface::Software) return 1;
         break;
     default: break;
     }

@@ -4,7 +4,9 @@
 //
 // Set 0, the tables: sprite rows, material rows, the sort's scratch and its outputs.
 // Set 1, the textures: the sampler and the bindless array (variable count: last binding).
+// D3D12's registers: binding.slangh.
 #pragma once
+#include "binding.slangh"
 
 // A bucket is a layer and a pipeline slot: slots 0-2 the engine's blends (opaque, alpha,
 // additive), 3-7 the game shaders' (shader, blend) pairs, as the renderer assigns them.
@@ -61,12 +63,12 @@ struct PushData {
     uint   pad_t0, pad_t1, pad_t2;
 };
 
-[[vk::push_constant]] ConstantBuffer<PushData> gPush;
+[[vk::push_constant]] ConstantBuffer<PushData> gPush KV_REG(b0);
 
 // Each layer's scroll offset: xy at the previous tick, zw now, by layer + kLayerMin. Every
 // world row on the layer is drawn moved by it (screen rows are not), so a plane or a map of
 // sprites that never change scrolls for one value a tick.
-[[vk::binding(7, 0)]] StructuredBuffer<float4> gLayers;
+[[vk::binding(7, 0)]] StructuredBuffer<float4> gLayers KV_REG(t7);
 
 // The interpolation point of a row: rows set this tick move from prev to cur; the rest
 // did not move and sit at cur.

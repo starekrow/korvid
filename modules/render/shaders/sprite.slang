@@ -3,10 +3,16 @@
 // the sorted index list the compute sort wrote. The quad corners come from the vertex
 // index; placement, UVs, tint and texture come from the row and its material. A game's
 // fragment shader replaces fs_main for its material's sprites (sprite_fragment.slangh).
+//
+// D3D12 has no base instance in a shader before SM 6.8 (SV_StartInstanceLocation), so there
+// the sorted list is bound as an instance-rate vertex buffer instead: a per-instance fetch
+// does honour the draw's StartInstanceLocation, and hands vs_main the row itself.
 #include "sprite_fragment.slangh"
 
-[[vk::binding(0, 0)]] StructuredBuffer<GpuSprite>   gSprites;
+[[vk::binding(0, 0)]] StructuredBuffer<GpuSprite>   gSprites KV_REG(t0);
+#if !defined(KV_TARGET_D3D12)
 [[vk::binding(2, 0)]] StructuredBuffer<uint>        gSorted;
+#endif
 
 // Two triangles over the unit quad centered at the origin, +y up in world space.
 static const float2 kCorners[6] = {
@@ -15,8 +21,12 @@ static const float2 kCorners[6] = {
 };
 
 [shader("vertex")]
+#if defined(KV_TARGET_D3D12)
+SpriteVaryings vs_main(uint vid : SV_VertexID, uint row : ROW) {
+#else
 SpriteVaryings vs_main(uint vid : SV_VertexID, uint iid : SV_InstanceID, uint base : SV_StartInstanceLocation) {
     uint        row = gSorted[base + iid];
+#endif
     GpuSprite   s   = gSprites[row];
     GpuMaterial m   = gMaterials[s.material];
 

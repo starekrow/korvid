@@ -1,0 +1,15 @@
+// Korvid render: D3D12's half of a declaration's binding. Vulkan binds by set and binding
+// ([[vk::binding]]), Metal by Slang's own buffer indices; D3D12 (KV_TARGET_D3D12, the DXIL
+// shader rule's define) binds by register. KV_REG pins a declaration to the register that
+// renderer-d3d12's root signatures name, so a game shader that declares only some of the
+// interface still lines up with them. Read-only tables are SRVs (t), the sort's outputs UAVs
+// (u), a push block root constants (b0), the samplers static (s); the bindless textures are
+// a table of their own in space 1. Elsewhere it is nothing.
+#pragma once
+#if defined(KV_TARGET_D3D12)
+#define KV_REG(r) : register(r)
+#define KV_REG_SPACE(r, s) : register(r, s)
+#else
+#define KV_REG(r)
+#define KV_REG_SPACE(r, s)
+#endif

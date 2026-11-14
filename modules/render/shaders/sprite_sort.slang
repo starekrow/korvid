@@ -9,13 +9,13 @@
 // non-empty with the counts and offsets written here.
 #include "sprite_common.slangh"
 
-[[vk::binding(0, 0)]] StructuredBuffer<GpuSprite>   gSprites;
-[[vk::binding(1, 0)]] StructuredBuffer<GpuMaterial> gMaterials;
-[[vk::binding(2, 0)]] RWStructuredBuffer<uint>      gSorted;    // row indices in draw order
-[[vk::binding(3, 0)]] RWStructuredBuffer<uint>      gBucketOf;  // per row: bucket or kCulled
-[[vk::binding(4, 0)]] RWStructuredBuffer<uint>      gBlockHist; // [block][bucket]: counts, then offsets
-[[vk::binding(5, 0)]] RWStructuredBuffer<uint>      gSortMeta;  // [0, 768) totals, [768, 1536) starts, [1536] visible
-[[vk::binding(6, 0)]] RWStructuredBuffer<uint4>     gIndirect;  // VkDrawIndirectCommand per bucket
+[[vk::binding(0, 0)]] StructuredBuffer<GpuSprite>   gSprites   KV_REG(t0);
+[[vk::binding(1, 0)]] StructuredBuffer<GpuMaterial> gMaterials KV_REG(t1);
+[[vk::binding(2, 0)]] RWStructuredBuffer<uint>      gSorted    KV_REG(u2);  // row indices in draw order
+[[vk::binding(3, 0)]] RWStructuredBuffer<uint>      gBucketOf  KV_REG(u3);  // per row: bucket or kCulled
+[[vk::binding(4, 0)]] RWStructuredBuffer<uint>      gBlockHist KV_REG(u4); // [block][bucket]: counts, then offsets
+[[vk::binding(5, 0)]] RWStructuredBuffer<uint>      gSortMeta  KV_REG(u5);  // [0, 768) totals, [768, 1536) starts, [1536] visible
+[[vk::binding(6, 0)]] RWStructuredBuffer<uint4>     gIndirect  KV_REG(u6);  // VkDrawIndirectCommand per bucket
 
 static const uint kStarts = kBucketCount;
 static const uint kVisible = 2 * kBucketCount;

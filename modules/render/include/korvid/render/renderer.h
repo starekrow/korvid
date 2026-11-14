@@ -54,7 +54,7 @@ struct RenderView {
 // What kind of window surface the bound backend draws into, for whoever opens the window
 // before a renderer exists (the frame loop maps it to platform_hid's WindowSurface). Known
 // at link time: the binding decides it.
-enum class RendererSurface : u8 { Vulkan, Metal };
+enum class RendererSurface : u8 { Vulkan, Metal, D3D12 };
 RendererSurface renderer_surface();
 
 // One renderer per process in slice 1. Null if one exists already or creation failed.

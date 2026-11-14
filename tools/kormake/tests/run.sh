@@ -2,7 +2,7 @@
 # kormake's own test: generates the fixture (tests/fixture, an engine root of its own) for a
 # few targets and compares the Ninja files and the commands' output with tests/expected/.
 # Paths are written as {root} (the fixture's copy) and {kormake}, the host's platform as
-# {host}, so the files are the same on every POSIX host. Ninja, when it is on PATH, parses
+# {host}, so the files are the same on every host, Windows (under Git Bash) too. Ninja, when it is on PATH, parses
 # each file (a dry run).
 #
 #   tests/run.sh            bootstrap kormake, then compare
@@ -12,24 +12,50 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 update=
 [ "$1" = "--update" ] && update=1
-# The host's platform, as bootstrap.sh names it.
+# The host's platform, as the bootstrap scripts name it. On Windows (Git Bash, MSYS2, Cygwin)
+# kormake is bootstrap.bat's, built with MSVC, and spells paths C:/like/this: native
+# turns a POSIX path into that spelling, so the outputs normalize the same as elsewhere.
 host=$(uname -s | tr '[:upper:]' '[:lower:]')
-case "$host" in darwin) host=macos;; esac
+exe=
+native() { printf '%s' "$1"; }
+case "$host" in
+  darwin) host=macos;;
+  mingw*|msys*|cygwin*) host=windows; exe=.exe; native() { cygpath -m "$1"; };;
+esac
 if [ -z "$KORMAKE" ]; then
-  "$here/../bootstrap.sh" >/dev/null
-  KORMAKE="$here/../bin/$host/kormake"
+  if [ "$host" = windows ]; then "$here/../bootstrap.bat" >/dev/null; else "$here/../bootstrap.sh" >/dev/null; fi
+  KORMAKE="$here/../bin/$host/kormake$exe"
 fi
-KORMAKE=$(cd "$(dirname "$KORMAKE")" && pwd)/$(basename "$KORMAKE")
+KORMAKE=$(native "$(cd "$(dirname "$KORMAKE")" && pwd)/$(basename "$KORMAKE")")
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cp -R "$here/fixture" "$tmp/fixture"
-root=$(cd "$tmp/fixture" && pwd -P)
+root=$(native "$(cd "$tmp/fixture" && pwd -P)")
 out="$tmp/out"
 mkdir -p "$out"
 
+# A string as an extended regular expression that matches only itself.
+re() { printf '%s' "$1" | sed -e 's/[][\.*^$+?(){}]/\\&/g'; }
+# A path as Ninja writes it on a build line: $, space and colon escaped (C$:/Users/A$ B).
+ninja_path() { printf '%s' "$1" | sed -e 's/\$/$$/g' -e 's/ /$ /g' -e 's/:/$:/g'; }
+# What differs by host spelling only. On Windows kormake quotes with "..." where POSIX
+# quotes with '...' and names a program host\bin\x (the expected files hold neither " nor
+# \), and the graph's columns pad around "windows" where they pad around "linux" or
+# "macos", two letters shorter: the padding is given back so one expected set serves all.
+host_spelling() {
+  if [ "$host" = windows ]; then
+    pad=$(printf '%*s' $((${#host} - 5)) '')
+    sed -E -e "s|\"|'|g" -e 's|\\|/|g' -e "s/(\{host\}-(dev|ship))(  +)/\1\3$pad/g"
+  else
+    cat
+  fi
+}
 normalize() {
-  sed -E -e "s|$root|{root}|g" -e "s|$KORMAKE|{kormake}|g" -e "s/(^|[^a-z])$host-(dev|ship)/\1{host}-\2/g"
+  sed -E -e "s|$(re "$(ninja_path "$root")")|{root}|g" -e "s|$(re "$root")|{root}|g" \
+         -e "s|$(re "$(ninja_path "$KORMAKE")")|{kormake}|g" -e "s|$(re "$KORMAKE")|{kormake}|g" \
+         -e "s/(^|[^a-z])$host-(dev|ship)/\1{host}-\2/g" \
+         -e "s/_${host}([ _]|\$)/_{host}\1/g" | host_spelling # a rule variant's name: tool_x_y_<platform>[_<module>]
 }
 # One command, its output and exit status, into commands.txt. With VAR=value words
 # first, the command runs with those set.

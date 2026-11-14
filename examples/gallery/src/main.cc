@@ -365,7 +365,11 @@ HostWindow* open_window(Engine& e) {
     d.title   = "korvid gallery";
     d.width   = kWidth;
     d.height  = kHeight;
-    d.surface = renderer_surface() == RendererSurface::Metal ? WindowSurface::Metal : WindowSurface::Vulkan;
+    switch (renderer_surface()) { // as the frame loop maps it
+    case RendererSurface::Metal: d.surface = WindowSurface::Metal; break;
+    case RendererSurface::D3D12: d.surface = WindowSurface::D3D12; break;
+    default:                     d.surface = WindowSurface::Vulkan; break;
+    }
     HostWindow* w = platform_open_window(e, d);
     if (!w || (w->width() == kWidth && w->height() == kHeight)) return w;
     f32 scale = w->pixel_scale();
