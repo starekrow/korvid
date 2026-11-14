@@ -118,6 +118,8 @@ function M.parse(text, name)
             if type(c.shell) ~= "string" then return fail(name, cline, 'the converter "%s" needs "shell": the script it runs, without its extension', cname) end
             if c.args ~= nil and type(c.args) ~= "string" then return fail(name, cline, 'the converter "%s": "args" is one string', cname) end
             if c.settle ~= nil and (type(c.settle) ~= "number" or c.settle < 0) then return fail(name, cline, 'the converter "%s": "settle" is a number of seconds', cname) end
+            -- "outputs" may be left out: everything the script writes is then taken in at
+            -- its exit, with a line saying so. `goldberg learn` writes the declaration.
             local outputs = c.outputs
             if outputs == "scan" then
                 if c.settle == nil then return fail(name, cline, 'the converter "%s": "outputs": "scan" needs a "settle" time', cname) end
@@ -126,8 +128,8 @@ function M.parse(text, name)
                 for _, o in ipairs(outputs) do
                     if type(o) ~= "string" then return fail(name, cline, 'the converter "%s": "outputs" is a list of names or patterns, or "scan"', cname) end
                 end
-            else
-                return fail(name, cline, 'the converter "%s" needs "outputs": a list of names or patterns, or "scan"', cname)
+            elseif outputs ~= nil then
+                return fail(name, cline, 'the converter "%s": "outputs" is a list of names or patterns, or "scan"', cname)
             end
             rec.converters[cname] = { from = c.from, to = c.to, shell = c.shell, args = c.args, outputs = outputs, settle = c.settle, line = cline }
         end

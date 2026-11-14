@@ -31,6 +31,8 @@
     { "match": "*.txt",           "meta": { "type": "text" } },
     { "match": "*.md",            "meta": { "type": "text" } },
 
-    { "match": "*.berg",          "meta": { "cook": false } }
+    { "match": "*.berg",          "meta": { "cook": false } },
+    { "match": "*.sh",            "meta": { "cook": false } },
+    { "match": "*.bat",           "meta": { "cook": false } }
   ]
 }

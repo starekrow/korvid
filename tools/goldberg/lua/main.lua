@@ -62,6 +62,12 @@ end
 
 local function dirname(path) return path:match("^(.*)/[^/]*$") or "" end
 
+local function absolute(path)
+    if path:sub(1, 1) == "/" or path:match("^%a:[/\\]") then return path end
+    return host.cwd() .. "/" .. (path:gsub("^%./", ""))
+end
+
+
 -- The project's directory: the nearest one at or above `from` that holds korvid.config
 -- or kormake.lua.
 local function find_project(from)
@@ -112,7 +118,8 @@ local function log_start(cfg)
     for i, r in ipairs(cfg.roots) do roots[i] = json.object("name", r.name, "dir", r.dir) end
     return json.encode(json.object("kind", "start", "game", cfg.game or json.null, "roots", roots, "conventions", cfg.conventions,
         "project", cfg.project and json.object("text", cfg.project.text, "display", cfg.project.display) or json.null,
-        "out_root", cfg.out_root or json.null, "state", cfg.state or json.null))
+        "out_root", cfg.out_root or json.null, "work_root", cfg.work_root or json.null, "run_dir", cfg.run_dir or json.null,
+        "state", cfg.state or json.null))
 end
 
 -- ---- the output tree -----------------------------------------------------------------------
@@ -150,6 +157,7 @@ local function log_event(ev)
     if ev.mtime then o.mtime = ev.mtime end
     if ev.hash then o.hash = ev.hash end
     if ev.text then o.text = ev.text end
+    if ev.code then o.code = ev.code end
     return json.encode(o)
 end
 
@@ -172,8 +180,12 @@ local function start(mode, words)
     end
 
     local cfg = { game = o.game or o.roots[1].name, roots = o.roots, conventions = read_conventions(), project = read_project(o) }
-    cfg.io = { hash = host.hash, scan = host.scan, copy = host.copy, remove_output = host.remove_output }
-    for _, r in ipairs(cfg.roots) do host.add_root(r.name, r.dir) end
+    cfg.io = { hash = host.hash, scan = host.scan, copy = host.copy, remove_output = host.remove_output,
+               run = host.run, clear_work = host.clear_work, remove_work = host.remove_work }
+    for _, r in ipairs(cfg.roots) do
+        r.abs = absolute(r.dir)
+        host.add_root(r.name, r.dir)
+    end
     if o.out then
         local ok, err = claim_out(o.out, cfg.game)
         if not ok then return usage(err) end
@@ -183,6 +195,13 @@ local function start(mode, words)
         host.set_out(o.out, os.date("%Y%m%d-%H%M%S"))
         o.state_file = state_path(o)
         cfg.state = kv.fs.read(o.state_file)
+        -- Where converters write, beside the state: a root like the others, watched, so
+        -- a file a converter makes arrives as any file does.
+        local scratch = absolute(o.state_file):gsub("%.json$", "")
+        if not kv.fs.mkdir(scratch .. ".work") then return usage("cannot make " .. scratch .. ".work") end
+        cfg.roots[#cfg.roots + 1] = { name = "(work)", dir = scratch .. ".work", abs = scratch .. ".work" }
+        cfg.work_root = host.add_root("(work)", scratch .. ".work")
+        cfg.run_dir = scratch .. ".run"
     end
     run = { session = Session.new(cfg), mode = mode, opts = o, cfg = cfg, t0 = host.now() }
     if o.log then run.log = { log_start(cfg) } end
@@ -288,15 +307,18 @@ local function replay(words)
             local project = rec.project ~= json.null and { text = rec.project.text, display = rec.project.display } or nil
             session = Session.new{ game = rec.game ~= json.null and rec.game or nil, roots = roots, conventions = rec.conventions, project = project,
                                    out_root = rec.out_root ~= json.null and rec.out_root or nil,
+                                   work_root = rec.work_root ~= json.null and rec.work_root or nil,
+                                   run_dir = rec.run_dir ~= json.null and rec.run_dir or nil,
                                    state = rec.state ~= json.null and rec.state or nil,
-                                   io = { hash = function() end, scan = function() end, copy = function() end, remove_output = function() end } }
+                                   io = { hash = function() end, scan = function() end, copy = function() end, remove_output = function() end,
+                                          run = function() end, clear_work = function() end, remove_work = function() end } }
             for i = 1, #roots do session:scan(i) end
         elseif not session then
             return usage(path .. ": the log does not begin with a start record")
         elseif rec.kind == "settle" then
             session:advance()
         else
-            session:event{ kind = rec.kind, root = rec.root, path = rec.path, size = rec.size, mtime = rec.mtime, hash = rec.hash, text = rec.text }
+            session:event{ kind = rec.kind, root = rec.root, path = rec.path, size = rec.size, mtime = rec.mtime, hash = rec.hash, text = rec.text, code = rec.code }
         end
     end
     if not session then return usage(path .. ": an empty log") end
@@ -310,11 +332,6 @@ local function replay(words)
 end
 
 -- ---- explain ----------------------------------------------------------------------------------
-
-local function absolute(path)
-    if path:sub(1, 1) == "/" or path:match("^%a:[/\\]") then return path end
-    return host.cwd() .. "/" .. path
-end
 
 -- Without a session: finds the file's asset root (given with --root, or the nearest
 -- `assets` directory above it that sits beside a module.lua), reads the few rule files
@@ -411,7 +428,12 @@ function goldberg.command(words)
             if not kv.fs.is_file(o.out .. "/" .. MARKER) then return usage(o.out .. " is not a goldberg output tree (no " .. MARKER .. " in it): not removed") end
             kv.fs.remove_tree(o.out)
         end
-        kv.fs.remove(state_path(o))
+        local state = state_path(o)
+        kv.fs.remove(state)
+        -- And what converters made on the way: scratch, beside the state.
+        local scratch = state:gsub("%.json$", "")
+        if kv.fs.is_dir(scratch .. ".work") then kv.fs.remove_tree(scratch .. ".work") end
+        if kv.fs.is_dir(scratch .. ".run") then kv.fs.remove_tree(scratch .. ".run") end
         say("goldberg: removed %s and its state", o.out)
         host.finish(0)
     elseif verb == "status" then

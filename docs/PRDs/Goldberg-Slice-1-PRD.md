@@ -521,3 +521,71 @@ Not done:
   `dist/<game>/` is the fix. A package made now carries the marker, so a later ship
   cook takes the directory over.
 
+
+**Milestone 5, Scripts** (Nov 14). S14 and S15, on Linux.
+
+- **The exit:** a chain of two shell converters cooks in order, lands only what the
+  second made, and runs again when either script is edited (the second alone when only
+  it changed; the first alone when its edit changes nothing it writes). The streaming
+  script passes in a plain `goldberg cook`, on inotify and on the polling watcher: its
+  first file lands while it is still running, and the cook ends after it does.
+- **A step is one converter run on one file**, of two kinds: `copy`, and `shell`. A
+  shell step writes into a directory of its own in the work root, and each file there
+  is a file like any other, hashed and solved in its turn. A chain is that, repeated.
+  A step whose file another step made waits for that step, unless the maker scans.
+- **The work root** is a root like the asset roots, watched: `<state>.work/` beside the
+  state file (so `build/goldberg/<program>/<dev|ship>/state.work/`, one per state, where
+  the PRD's table had one shared between them). A step's directory is one component,
+  `<8 hex>-<file>.<converter>/`. It is scratch: what leaves it is deleted, not put in
+  the attic. `goldberg clean` removes it with the state.
+- **A file a converter made** has the converter's `to` as its type unless a rule gives
+  it a subtype of that, and rules see it beside its source: what `ships/big.sheet`
+  turned into is matched as `ships/<name>`, lands at `<module>/ships/<name>`, and is
+  governed by the `goldberg.berg` over `ships/`.
+- **Declared outputs** (the normal case): the script runs in `<state>.run/<step>/`,
+  which nobody watches. At a clean exit the host moves its files over the step's
+  directory, removes what the last run left there and this one did not write, and
+  posts an event for each, then `step-exit`. A failed run's directory is thrown away,
+  so it contributes nothing and what was cooked before stays. A declared pattern that
+  matched nothing fails the step by name. A file nothing declared is taken in, with a
+  line.
+- **Scanned outputs:** the script writes into the step's directory itself. The host
+  holds each watcher event there until its file has been quiet for `settle`, then
+  delivers it; what follows cooks while the script still runs. At exit everything left
+  is seen once more, and a file the run did not touch (same size and time as before it
+  started) is last run's and goes. If it fails, the directory is emptied and what was
+  cooked from it follows.
+- **`settle` on a converter with declared outputs** holds the step open that long after
+  the process ends, as the master PRD says.
+- **The step's key:** the registration, the script's hash, the source's hash, the
+  metadata handed over, and where the source sits. The script is an input: it is a file
+  under the asset root (`*.sh` and `*.bat` are `"cook": false` in the conventions), and
+  a change to it sends every step that runs it back to be checked.
+- **The command:** `/bin/sh <script>.sh <args>`, started in the directory it is to
+  write into. `args` defaults to `{in} {work}`. `{in}`, `{work}`, `{name}`, `{stem}` and
+  any metadata key (`{tint}`, `{atlas.pad}`) are filled in, and are in the environment
+  as `GOLDBERG_IN`, `GOLDBERG_WORK`, `GOLDBERG_NAME`, `GOLDBERG_STEM` and
+  `GOLDBERG_META_<KEY>`. A name that cannot be filled in fails the step and says which.
+- **The saved state** gained `ran`: per shell step, its key and the hash of each file
+  it made. A second cook reads the work root, finds them, and runs nothing.
+- **Up to eight scripts run at once**; the rest wait their turn in the host.
+- **The sweep of the output tree is now last**, once nothing is left to cook, since
+  what a converter will make is not known until it has run.
+
+Different from the PRD, or decided here:
+
+- **`outputs` may be left out.** Everything the script writes is then taken in at exit,
+  with a line that says so and names `goldberg learn`.
+- **A shell converter is registered in a `.berg` file under an asset root.** One in the
+  project's file or the conventions is refused with that sentence: its script would be
+  outside every root, where nothing hashes it.
+- **On the polling watcher a held file waits at least 0.3 s**, whatever `settle` says:
+  a walk every 0.25 s cannot tell quiet from not yet looked.
+- **A smart script that skips an unchanged output** loses it under `"outputs": "scan"`
+  (not touched means last run's) and under declared outputs (not in the run's
+  directory). A converter writes everything it makes, every run.
+- **Failure does not spread.** A failed step leaves what follows it as it was, clean and
+  stale; the cook's exit status and the step's own line carry the failure.
+
+Not done: Windows (`tool.bat`, `cmd /c`, and process spawning itself); a limit on
+running scripts taken from the machine; `explain` for a file in the work root.

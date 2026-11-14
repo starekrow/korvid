@@ -1,21 +1,31 @@
--- The graph of cook steps, and the output tree they write.
+-- The graph of cook steps, the output tree they write, and the work directories.
 --
--- A step is one converter run: a source, an output, and the key of what the output was
--- last made from. A step whose key matches what made the file in the output tree does
--- not run. In this slice's first half every step is a copy; the shape is the one every
--- converter uses.
+-- A step is one converter run on one file. Its key is the hash of everything the result
+-- depends on; a step whose key matches what made its outputs last time does not run.
+-- There are two kinds, and nothing outside this file treats them differently:
+--   copy    the file lands in the output tree as it is
+--   shell   a script takes it somewhere: it writes files into the step's directory in
+--           the work root, and each of those is a file like any other, solved in its
+--           turn. A chain of converters is that, repeated.
+--
+-- A step whose file was made by another step waits for that step, unless the maker
+-- scans: then its files arrive while it runs, and what follows them runs too.
 --
 -- The graph owns the output tree. It learns what is there from a scan at startup
 -- (events on the output root), and what no step accounts for, it takes out: a source
 -- deleted while goldberg was not running takes its output with it at the next cook.
--- Nothing taken out is deleted. It is moved to the attic (.goldberg.attic/<stamp>/ in
--- the output tree), which only `goldberg clean attic` empties.
+-- Nothing taken out of the output tree is deleted. It is moved to the attic
+-- (.goldberg.attic/<stamp>/ in the output tree), which only `goldberg clean attic`
+-- empties. The work root is scratch: what leaves it is deleted.
 local json = kv.json
+local convert = require("convert")
+local berg = require("berg")
 
 local Graph = {}
 Graph.__index = Graph
 
 local COPY_VERSION = "1"
+local SHELL_VERSION = "1"
 
 local STATE = { unchecked = 0, clean = 1, dirty = 2, running = 3, failed = 4 }
 
@@ -23,20 +33,33 @@ local STATE = { unchecked = 0, clean = 1, dirty = 2, running = 3, failed = 4 }
 function Graph.new(session, state)
     local g = setmetatable({
         s = session,
-        steps = {},       -- output -> step
-        by_file = {},     -- file key -> output
+        steps = {},       -- file key -> step
+        claim = {},       -- output -> the file key whose copy writes it
+        by_work = {},     -- a step's directory in the work root -> the shell step
+        by_script = {},   -- a script's file key -> { [file key] = true }: the steps that run it
         present = {},     -- output -> { size, mtime }: what is in the output tree
         built = {},       -- output -> { key, size, mtime, source }: what made it
+        ran = {},         -- file key -> { key, outputs = { name -> hash } }: a shell step's last good run
+        orphan_runs = {}, -- file key -> directory: runs whose step went while they ran
         out_scanned = false,
         swept = false,
+        replan = false,   -- something changed that plan() should look at
         unchecked = 0, running = 0,
         cooked = 0, removed = 0,
-        notes = {},       -- lines to print: removals, collisions
+        notes = {},       -- lines to print: removals, collisions, undeclared outputs
     }, Graph)
     if state and state.built then
         for _, out in ipairs(json.keys(state.built)) do
             local b = state.built[out]
             g.built[out] = { key = b.key, size = b.size, mtime = b.mtime, source = b.source }
+        end
+    end
+    if state and json.is_object(state.ran) then
+        for _, key in ipairs(json.keys(state.ran)) do
+            local r = state.ran[key]
+            local outputs = {}
+            if json.is_object(r.outputs) then for _, name in ipairs(json.keys(r.outputs)) do outputs[name] = r.outputs[name] end end
+            g.ran[key] = { key = r.key, outputs = outputs }
         end
     end
     return g
@@ -48,6 +71,7 @@ local function set_state(g, step, state)
     step.state = state
     if state == "unchecked" then g.unchecked = g.unchecked + 1 end
     if state == "running" then g.running = g.running + 1 end
+    g.replan = true
     if step.h then host.kinds.step:set(step.h, "state", STATE[state]) end
 end
 
@@ -62,41 +86,87 @@ local function remove_output(g, output, why)
     else g.notes[#g.notes + 1] = string.format("moved %s to the attic (%s)", output, why) end
 end
 
-local function drop_step(g, output, why)
-    local step = g.steps[output]
-    if not step then return end
-    set_state(g, step, "clean") -- out of the counts
-    if step.h then host.kinds.step:destroy(step.h) end
-    g.steps[output] = nil
-    if g.by_file[step.file] == output then g.by_file[step.file] = nil end
-    if g.present[output] or g.built[output] then remove_output(g, output, why) end
+local function unlink_script(g, step)
+    if step.script and g.by_script[step.script] then
+        g.by_script[step.script][step.file] = nil
+        if next(g.by_script[step.script]) == nil then g.by_script[step.script] = nil end
+    end
+    step.script = nil
 end
 
--- A file's answer or content changed: make, move, or drop its step.
+local function drop_step(g, key, why)
+    local step = g.steps[key]
+    if not step then return end
+    local was_running = step.state == "running"
+    set_state(g, step, "clean") -- out of the counts
+    if step.h then host.kinds.step:destroy(step.h) end
+    g.steps[key] = nil
+    if step.kind == "copy" then
+        if g.claim[step.output] == key then g.claim[step.output] = nil end
+        if g.present[step.output] or g.built[step.output] then remove_output(g, step.output, why) end
+    else
+        unlink_script(g, step)
+        g.by_work[step.work] = nil
+        g.ran[key] = nil
+        -- What it made goes with it, and so does everything cooked from that. A run
+        -- still going is cleared when it ends.
+        if was_running and not step.exited then g.orphan_runs[key] = step.work
+        else g.s:clear_work(step.work) end
+    end
+end
+
+-- A file's answer or content changed: make, change, or drop its step.
 function Graph:file_changed(key)
+    -- A script is an input of every step that runs it.
+    if self.by_script[key] then
+        local users = {}
+        for user in pairs(self.by_script[key]) do users[#users + 1] = user end
+        table.sort(users)
+        for _, user in ipairs(users) do
+            local step = self.steps[user]
+            if step and step.state == "running" then step.again = true
+            elseif step then set_state(self, step, "unchecked") end
+        end
+    end
     local f = self.s.files[key]
     local a = f and f.answer
-    local want = a and a.action == "copy" and a.output or nil
-    local have = self.by_file[key]
-    if have and have ~= want then drop_step(self, have, "its source no longer cooks to it") end
-    if not want then return end
-    local step = self.steps[want]
-    if step and step.file ~= key then
-        -- Two sources, one output: neither is right.
-        local msg = string.format("%s and %s both cook to %s", step.file, key, want)
-        step.error = msg
-        set_state(self, step, "failed")
-        f.collision = msg
-        self.notes[#self.notes + 1] = msg
-        return
+    local kind, out
+    if a and a.action == "copy" and a.output then kind, out = "copy", a.output
+    elseif a and a.action == "convert" and a.conv then kind = "shell" end
+    local step = self.steps[key]
+    if step and (step.kind ~= kind or (kind == "copy" and step.output ~= out) or (kind == "shell" and step.conv.name ~= a.conv.name)) then
+        drop_step(self, key, "its source no longer cooks to it")
+        step = nil
     end
-    f.collision = nil
-    if not step then
-        step = { output = want, file = key, root = f.root, source = f.path }
-        step.h = host.kinds.step:spawn{ output = want, source = f.path, root = f.root }
-        self.steps[want] = step
-        self.by_file[key] = want
-        step.state = "clean"
+    if not kind then return end
+    if kind == "copy" then
+        local owner = self.claim[out]
+        if owner and owner ~= key then
+            -- Two sources, one output: neither is right.
+            local msg = string.format("%s and %s both cook to %s", owner, key, out)
+            local other = self.steps[owner]
+            if other then other.error = msg; set_state(self, other, "failed") end
+            f.collision = msg
+            self.notes[#self.notes + 1] = msg
+            return
+        end
+        f.collision = nil
+        if not step then
+            step = { kind = "copy", output = out, file = key, root = f.root, source = f.path, state = "clean" }
+            step.h = host.kinds.step:spawn{ output = out, source = f.path, root = f.root }
+            self.steps[key] = step
+            self.claim[out] = key
+        end
+    else
+        if not step then
+            step = { kind = "shell", file = key, root = f.root, source = f.path, state = "clean", work = convert.work_dir(key, a.conv.name) }
+            step.h = host.kinds.step:spawn{ output = "(work)/" .. step.work, source = f.path, root = f.root }
+            self.steps[key] = step
+            self.by_work[step.work] = step
+        end
+        step.conv, step.params = a.conv, a.params
+        -- What it made before is looked at again: its type is this converter's to say.
+        self.s:resolve_work(step.work)
     end
     step.error = nil
     if step.state == "running" then step.again = true -- its result will be of the old content
@@ -104,12 +174,17 @@ function Graph:file_changed(key)
 end
 
 function Graph:file_removed(key)
-    local have = self.by_file[key]
-    if have then drop_step(self, have, "its source is gone") end
+    drop_step(self, key, "its source is gone")
+    if self.by_script[key] then
+        for user in pairs(self.by_script[key]) do
+            local step = self.steps[user]
+            if step and step.state ~= "running" then set_state(self, step, "unchecked") end
+        end
+    end
 end
 
 -- What a copy of this content to this place is made from.
-local function step_key(source_hash, output)
+local function copy_key(source_hash, output)
     return kv.sha256("copy\0" .. COPY_VERSION .. "\0" .. source_hash .. "\0" .. output)
 end
 
@@ -120,44 +195,166 @@ function Graph:out_event(ev)
 end
 
 function Graph:ready()
-    return self.out_scanned and (self.unchecked > 0 or not self.swept)
+    if not self.out_scanned then return false end
+    return self.replan or (not self.swept and self.unchecked == 0 and self.running == 0)
 end
 
--- With every source hashed and solved and the output tree read: sweep what nothing
--- accounts for (once), decide which steps are dirty, and start them.
-function Graph:plan()
-    if not self.swept then
-        self.swept = true
-        local outs = {}
-        for out in pairs(self.present) do if not self.steps[out] then outs[#outs + 1] = out end end
-        table.sort(outs)
-        for _, out in ipairs(outs) do
-            local b = self.built[out]
-            remove_output(self, out, b and ("its source " .. b.source .. " is gone") or "nothing here cooks to it")
-        end
-        -- What the state remembers of files that are no longer there is forgotten too.
-        for out in pairs(self.built) do if not self.steps[out] then self.built[out] = nil end end
+local function fail(g, step, why)
+    step.error = why
+    step.again = false
+    g.ran[step.file] = nil
+    set_state(g, step, "failed")
+end
+
+-- Whether the step that made this file may still change it.
+local function maker_busy(g, f)
+    if not f.work then return false end
+    local maker = g.by_work[f.work]
+    if not maker then return false end
+    if maker.state == "unchecked" then return true end
+    return maker.state == "running" and not (maker.scan and not maker.exited)
+end
+
+local function params_text(params)
+    local keys, parts = {}, {}
+    for k in pairs(params or {}) do keys[#keys + 1] = k end
+    table.sort(keys)
+    for _, k in ipairs(keys) do parts[#parts + 1] = k .. "=" .. berg.show(params[k]) end
+    return table.concat(parts, " ")
+end
+
+local function check_copy(g, step, f)
+    local out = step.output
+    local key = copy_key(f.hash, out)
+    local b, p = g.built[out], g.present[out]
+    if b and p and b.key == key and b.size == p.size and b.mtime == p.mtime then
+        set_state(g, step, "clean")
+    else
+        set_state(g, step, "running")
+        g.s:request("copy", step.file .. " -> " .. out)
+        g.s.io.copy(step.root, step.source, out)
     end
+end
+
+local function check_shell(g, step, f)
+    local s, conv = g.s, step.conv
+    local script, kind = convert.script(conv, function(k) return s.files[k] ~= nil end)
+    unlink_script(g, step)
+    if not script then return fail(g, step, kind) end
+    step.script = script
+    g.by_script[script] = g.by_script[script] or {}
+    g.by_script[script][step.file] = true
+    local sf = s.files[script]
+    if not sf.hash then return end -- being read: looked at again when it is in
+    local scan = conv.outputs == "scan"
+    local write_dir = (scan and s:root_dir(s.work_root) or s.run_dir) .. "/" .. step.work
+    local vars = convert.vars(s:root_dir(f.root) .. "/" .. f.path, write_dir)
+    local argv, env = convert.command(conv, s:root_dir(sf.root) .. "/" .. sf.path, kind, vars, step.params)
+    if not argv then return fail(g, step, env) end
+    local patterns, bad = convert.patterns(conv, vars, step.params)
+    if bad then return fail(g, step, bad) end
+    local _, place = s:place(f)
+    local key = kv.sha256(table.concat({ "shell", SHELL_VERSION, convert.signature(conv), sf.hash, f.hash, params_text(step.params), place }, "\0"))
+    local saved = g.ran[step.file]
+    if saved and saved.key == key then
+        local all = true
+        for name, hash in pairs(saved.outputs) do
+            local made = s.files[s:key(s.work_root, step.work .. "/" .. name)]
+            if not made or made.hash ~= hash then all = false end
+        end
+        if all then set_state(g, step, "clean") return end
+    end
+    step.run_key, step.patterns, step.scan, step.exited = key, patterns, scan, false
+    set_state(g, step, "running")
+    s:request("run", step.file .. " " .. conv.name)
+    s.io.run{ root = f.root, path = f.path, argv = argv, env = env, work_root = s.work_root, dir = step.work, write_dir = write_dir, scan = scan, settle = conv.settle or 0 }
+end
+
+-- A run that ended well, with everything it wrote hashed: hold it to what it declared.
+local function finish_shell(g, step)
+    local s, conv = g.s, step.conv
+    local made = s:work_list(step.work) -- { { name, hash } }, sorted
+    local outputs, undeclared = {}, {}
+    local patterns = type(step.patterns) == "table" and step.patterns or nil
+    local hit = {}
+    for _, m in ipairs(made) do
+        outputs[m.name] = m.hash
+        local declared = false
+        for i, p in ipairs(patterns or {}) do
+            if host.glob_path(p, m.name) then declared, hit[i] = true, true end
+        end
+        if not declared then undeclared[#undeclared + 1] = m.name end
+    end
+    for i, p in ipairs(patterns or {}) do
+        if not hit[i] then
+            return fail(g, step, string.format('the converter "%s" did not write "%s", which it declares (%s). If it no longer writes that, `goldberg learn` on this file corrects the declaration', conv.name, p, conv.file))
+        end
+    end
+    if conv.outputs == nil then
+        g.notes[#g.notes + 1] = string.format('%s: the converter "%s" declares no outputs; it wrote %d (%s). `goldberg learn` on this file writes the declaration into %s',
+            step.file, conv.name, #made, table.concat(undeclared, ", "), conv.file)
+    elseif patterns and #undeclared > 0 then
+        g.notes[#g.notes + 1] = string.format('%s: the converter "%s" wrote %s, which it does not declare. Taken in; declare it in %s, or run `goldberg learn` on this file',
+            step.file, conv.name, table.concat(undeclared, ", "), conv.file)
+    end
+    g.ran[step.file] = { key = step.run_key, outputs = outputs }
+    if step.h then host.kinds.step:set(step.h, "key", (step.run_key:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))) end
+    g.cooked = g.cooked + 1
+    step.cooked = true
+    step.exited = false
+    if step.again then step.again = false; set_state(g, step, "unchecked")
+    else set_state(g, step, "clean") end
+end
+
+-- With every file hashed and solved and the output tree read: finish the runs that
+-- ended, decide which steps are dirty and start them, and, once nothing is left to do,
+-- sweep what nothing accounts for (once).
+function Graph:plan()
+    local s = self.s
+    local again = true
+    while again do
+        again = false
+        local keys = {}
+        for key, step in pairs(self.steps) do
+            if step.state == "unchecked" or (step.state == "running" and step.exited) then keys[#keys + 1] = key end
+        end
+        table.sort(keys)
+        for _, key in ipairs(keys) do
+            local step = self.steps[key]
+            local f = step and s.files[key]
+            if step and f then
+                local before = step.state
+                if step.state == "running" then finish_shell(self, step)
+                elseif f.hash and not maker_busy(self, f) then
+                    if step.kind == "copy" then check_copy(self, step, f) else check_shell(self, step, f) end
+                end
+                -- A step that came to rest may have freed the ones after it.
+                if step.state ~= before and step.state ~= "running" then again = true end
+            end
+        end
+    end
+    self.replan = false
+    if self.swept or self.unchecked > 0 or self.running > 0 then return end
+    self.swept = true
     local outs = {}
-    for out, step in pairs(self.steps) do if step.state == "unchecked" then outs[#outs + 1] = out end end
+    for out in pairs(self.present) do if not self.claim[out] then outs[#outs + 1] = out end end
     table.sort(outs)
     for _, out in ipairs(outs) do
-        local step = self.steps[out]
-        local f = self.s.files[step.file]
-        local key = step_key(f.hash, out)
-        local b, p = self.built[out], self.present[out]
-        if b and p and b.key == key and b.size == p.size and b.mtime == p.mtime then
-            set_state(self, step, "clean")
-        else
-            set_state(self, step, "running")
-            self.s:request("copy", self.s.roots[step.root].name .. ":" .. step.source .. " -> " .. out)
-            self.s.io.copy(step.root, step.source, out)
-        end
+        local b = self.built[out]
+        remove_output(self, out, b and ("its source " .. b.source .. " is gone") or "nothing here cooks to it")
+    end
+    -- What the state remembers of files that are no longer there is forgotten too.
+    for out in pairs(self.built) do if not self.claim[out] then self.built[out] = nil end end
+    for key in pairs(self.ran) do if not self.steps[key] then self.ran[key] = nil end end
+    -- And in the work root: directories no step writes to.
+    for _, dir in ipairs(s:work_dirs()) do
+        if not self.by_work[dir] then s:clear_work(dir) end
     end
 end
 
 function Graph:cook_done(ev)
-    local step = self.steps[ev.path]
+    local key = self.claim[ev.path]
+    local step = key and self.steps[key]
     if not step then
         -- Dropped while it ran: what it wrote has no owner.
         self.present[ev.path] = { size = ev.size, mtime = ev.mtime }
@@ -166,7 +363,7 @@ function Graph:cook_done(ev)
     end
     local f = self.s.files[step.file]
     self.present[ev.path] = { size = ev.size, mtime = ev.mtime }
-    self.built[ev.path] = { key = step_key(ev.hash, ev.path), size = ev.size, mtime = ev.mtime, source = step.file }
+    self.built[ev.path] = { key = copy_key(ev.hash, ev.path), size = ev.size, mtime = ev.mtime, source = step.file }
     if step.h then host.kinds.step:set(step.h, "key", (self.built[ev.path].key:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))) end
     self.cooked = self.cooked + 1
     step.cooked = true
@@ -180,11 +377,36 @@ function Graph:cook_done(ev)
 end
 
 function Graph:cook_failed(ev)
-    local step = self.steps[ev.path]
+    local key = self.claim[ev.path]
+    local step = key and self.steps[key]
     if not step then return end
     step.error = ev.text or "the cook failed"
     step.again = false
     set_state(self, step, "failed")
+end
+
+-- A converter's process ended. Its files' events came first; their hashes may not be in
+-- yet, so a run that ended well is finished by plan(), once they are.
+function Graph:step_exit(ev)
+    local key = self.s:key(ev.root, ev.path)
+    local step = self.steps[key]
+    if not step or step.kind ~= "shell" or step.state ~= "running" or step.exited then
+        local dir = self.orphan_runs[key]
+        if dir then self.orphan_runs[key] = nil; self.s:clear_work(dir) end
+        return
+    end
+    if ev.code ~= 0 then
+        local text = (ev.text or ""):gsub("%s+$", ""):gsub("\n", " | ")
+        local how = ev.code < 0 and "could not be started" or string.format("failed (exit %d)", ev.code)
+        local again = step.again
+        fail(self, step, string.format('the converter "%s" %s%s', step.conv.name, how, text ~= "" and (": " .. text) or ""))
+        -- A scanning run that fails takes back what it delivered, and all cooked from it.
+        if step.scan then self.s:clear_work(step.work) end
+        if again then set_state(self, step, "unchecked") end
+        return
+    end
+    step.exited = true
+    self.replan = true
 end
 
 function Graph:stable()
@@ -194,11 +416,11 @@ end
 -- { cooked, clean, failed, errors } for the last line.
 function Graph:totals()
     local t = { cooked = self.cooked, clean = 0, failed = 0, removed = self.removed, errors = {} }
-    local outs = {}
-    for out in pairs(self.steps) do outs[#outs + 1] = out end
-    table.sort(outs)
-    for _, out in ipairs(outs) do
-        local step = self.steps[out]
+    local keys = {}
+    for key in pairs(self.steps) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local step = self.steps[key]
         if step.state == "failed" then
             t.failed = t.failed + 1
             t.errors[#t.errors + 1] = string.format("%s: %s", step.file, step.error)
@@ -207,9 +429,10 @@ function Graph:totals()
     return t
 end
 
--- The state to save: what each source was when it was last hashed, and what made each output.
+-- The state to save: what each file was when it was last hashed, what made each output,
+-- and what each converter's last good run made.
 function Graph:state_text()
-    local files, built = json.object(), json.object()
+    local files, built, ran = json.object(), json.object(), json.object()
     local keys = {}
     for key, f in pairs(self.s.files) do if not f.is_berg and f.hash then keys[#keys + 1] = key end end
     table.sort(keys)
@@ -225,16 +448,28 @@ function Graph:state_text()
         local b = self.built[out]
         built[out] = json.object("key", b.key, "size", b.size, "mtime", b.mtime, "source", b.source)
     end
-    return json.encode(json.object("version", 1, "files", files, "built", built), { indent = 1 }) .. "\n"
+    keys = {}
+    for key in pairs(self.ran) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local r = self.ran[key]
+        local outputs, names = json.object(), {}
+        for name in pairs(r.outputs) do names[#names + 1] = name end
+        table.sort(names)
+        for _, name in ipairs(names) do outputs[name] = r.outputs[name] end
+        ran[key] = json.object("key", r.key, "outputs", outputs)
+    end
+    return json.encode(json.object("version", 1, "files", files, "built", built, "ran", ran), { indent = 1 }) .. "\n"
 end
 
 function Graph:dump(out)
-    local outs = {}
-    for o in pairs(self.steps) do outs[#outs + 1] = o end
-    table.sort(outs)
-    for _, o in ipairs(outs) do
-        local step = self.steps[o]
-        out[#out + 1] = string.format("step %s <- %s %s%s", o, step.file, step.state, step.error and (" error=" .. step.error) or "")
+    local keys = {}
+    for key in pairs(self.steps) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local step = self.steps[key]
+        local what = step.kind == "copy" and step.output or ("(work)/" .. step.work .. " by " .. step.conv.name)
+        out[#out + 1] = string.format("step %s <- %s %s%s", what, step.file, step.state, step.error and (" error=" .. step.error) or "")
     end
 end
 

@@ -167,6 +167,7 @@ function M.solve(module, path, eff, prov, reg)
     a.action, a.path, a.step = "convert", found[1].path, found[1].path[1]
     a.result = found[1].type
     local c = reg.converters[a.step]
+    a.conv = c
     a.why.path = string.format("the only path from %s to %s (%s: converter \"%s\")", t, target or "a runtime type", c.file, a.step)
     a.lands = eff.land == true
     a.why.lands = eff.land == true and from_where(prov.land) or (t .. " is not what the game reads: its converter's outputs land, if they are")

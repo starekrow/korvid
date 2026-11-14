@@ -420,6 +420,145 @@ void test_cook(TestCtx& c) {
     t.free();
 }
 
+// Shell converters: a script per step, a chain of two, and the script that streams.
+void test_scripts(TestCtx& c) {
+    c.begin("goldberg scripts");
+    if (!process_supported()) return;
+    Tree t;
+    KV_CHECK(c, t.make("kv-goldberg-sh"));
+    char root[600], out[600], dump[600], log[600], dump2[600];
+    snprintf(root, sizeof root, "g=%s/assets", t.dir);
+    snprintf(out, sizeof out, "%s/out", t.dir);
+    snprintf(dump, sizeof dump, "%s/dump.txt", t.dir);
+    snprintf(dump2, sizeof dump2, "%s/dump2.txt", t.dir);
+    snprintf(log, sizeof log, "%s/log.jsonl", t.dir);
+    const char* berg = R"({
+  "types": { "sheet": { "runtime": false }, "frames": { "runtime": false } },
+  "converters": {
+    "cut":  { "from": "sheet",  "to": "frames",  "shell": "tools/cut",  "outputs": ["{stem}.frames"] },
+    "pack": { "from": "frames", "to": "texture", "shell": "tools/pack", "args": "{in} {work} {tint}", "outputs": ["{stem}.png"] }
+  },
+  "rules": [
+    { "match": "*.sheet",  "meta": { "type": "sheet" } },
+    { "match": "*.frames", "meta": { "tint": "red" } }
+  ]
+})";
+    t.put("assets/goldberg.berg", berg);
+    t.put("assets/tools/cut.sh", "tr a-z A-Z < \"$1\" > \"$2/$GOLDBERG_STEM.frames\"\n");
+    t.put("assets/tools/pack.sh", "{ echo \"packed $3 $GOLDBERG_META_TINT\"; cat \"$1\"; } > \"$2/$GOLDBERG_STEM.png\"\n");
+    t.put("assets/ships/big.sheet", "big sheet\n");
+    t.put("assets/a.png", "plain");
+#define COOK(...) gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none" __VA_OPT__(,) __VA_ARGS__)
+
+    // A chain of two cooks in order and lands only what the last one made, beside the source.
+    KV_CHECK(c, COOK("--dump", dump, "--log", log) == 0);
+    KV_CHECK(c, has(g_out.data, "goldberg: game: 4 files, 4 cooked, 0 clean, 0 failed"));
+    KV_CHECK(c, strcmp(t.read("out/g/ships/big.png"), "packed red red\nBIG SHEET\n") == 0 && strcmp(t.read("out/g/a.png"), "plain") == 0);
+    KV_CHECK(c, !io_is_file(t.path("out/g/ships/big.frames")) && !io_is_file(t.path("out/g/ships/big.sheet")) && !io_is_dir(t.path("out/g/tools")));
+    const char* d = t.read("dump.txt");
+    KV_CHECK(c, has(d, "file g:ships/big.sheet convert type=sheet path=cut>pack lands=no #") && has(d, "file g:tools/cut.sh ignore #"));
+    KV_CHECK(c, has(d, "/big.frames convert type=frames path=pack lands=no tint=\"red\" #") && has(d, "/big.png copy type=texture path=copy lands=yes out=g/ships/big.png #"));
+    {
+        const char* cut = strstr(d, "request run g:ships/big.sheet cut");
+        const char* pack = cut ? strstr(cut, "big.frames pack") : nullptr;
+        const char* land = pack ? strstr(pack, "-> g/ships/big.png") : nullptr;
+        KV_CHECK(c, cut && pack && land && count(d, "request run ") == 2);
+    }
+    // The log replays to the same graph, with no script run.
+    KV_CHECK(c, gb("replay", log, "--dump", dump2) == 0);
+    {
+        IoBytes a, b;
+        KV_CHECK(c, io_read_now(dump, &a) && io_read_now(dump2, &b) && a.size == b.size && memcmp(a.data, b.data, a.size) == 0);
+        a.free(); b.free();
+    }
+    // Nothing changed: nothing runs.
+    KV_CHECK(c, COOK("--dump", dump) == 0 && has(g_out.data, "4 files, 0 cooked, 4 clean, 0 failed") && count(t.read("dump.txt"), "request run ") == 0);
+
+    // The second script edited: its step runs again, the first does not.
+    t.put("assets/tools/pack.sh", "{ echo \"PACKED $3\"; cat \"$1\"; } > \"$2/$GOLDBERG_STEM.png\"\n");
+    KV_CHECK(c, COOK("--dump", dump) == 0);
+    d = t.read("dump.txt");
+    KV_CHECK(c, count(d, "request run ") == 1 && has(d, "big.frames pack") && strcmp(t.read("out/g/ships/big.png"), "PACKED red\nBIG SHEET\n") == 0);
+    // The first script edited: both run, since what it makes changed.
+    t.put("assets/tools/cut.sh", "tr a-z A-Z < \"$1\" | tr ' ' '_' > \"$2/$GOLDBERG_STEM.frames\"\n");
+    KV_CHECK(c, COOK("--dump", dump) == 0 && count(t.read("dump.txt"), "request run ") == 2 && strcmp(t.read("out/g/ships/big.png"), "PACKED red\nBIG_SHEET\n") == 0);
+    // Edited without changing what it makes: it runs, and nothing after it does.
+    t.put("assets/tools/cut.sh", "# the same\ntr a-z A-Z < \"$1\" | tr ' ' '_' > \"$2/$GOLDBERG_STEM.frames\"\n");
+    KV_CHECK(c, COOK("--dump", dump) == 0 && count(t.read("dump.txt"), "request run ") == 1 && has(g_out.data, "1 cooked, 3 clean"));
+    // The source changes, and so does a parameter a rule gives the second step.
+    t.put("assets/ships/big.sheet", "bigger\n");
+    KV_CHECK(c, COOK() == 0 && strcmp(t.read("out/g/ships/big.png"), "PACKED red\nBIGGER\n") == 0);
+    t.put("assets/ships/goldberg.berg", R"({ "rules": [ { "match": "*.frames", "meta": { "tint": "blue" } } ] })");
+    KV_CHECK(c, COOK("--dump", dump) == 0 && count(t.read("dump.txt"), "request run ") == 1 && strcmp(t.read("out/g/ships/big.png"), "PACKED blue\nBIGGER\n") == 0);
+
+    // A script that fails fails its step, with what it said; what was cooked before stays.
+    t.put("assets/tools/pack.sh", "echo 'no ink left' >&2\nexit 3\n");
+    KV_CHECK(c, COOK() == 1);
+    KV_CHECK(c, has(g_err.data, "big.frames: the converter \"pack\" failed (exit 3): no ink left") && strcmp(t.read("out/g/ships/big.png"), "PACKED blue\nBIGGER\n") == 0);
+    // A declared output it did not write is a failure that names it; one it wrote and did
+    // not declare is taken in, with a line.
+    t.put("assets/tools/pack.sh", "echo x > \"$2/other.png\"\n");
+    KV_CHECK(c, COOK() == 1 && has(g_err.data, "the converter \"pack\" did not write \"big.png\", which it declares"));
+    t.put("assets/tools/pack.sh", "echo x > \"$2/$GOLDBERG_STEM.png\"\necho y > \"$2/extra.png\"\n");
+    KV_CHECK(c, COOK() == 0 && has(g_out.data, "the converter \"pack\" wrote extra.png, which it does not declare"));
+    KV_CHECK(c, strcmp(t.read("out/g/ships/extra.png"), "y\n") == 0 && strcmp(t.read("out/g/ships/big.png"), "x\n") == 0);
+    // It stops writing the extra: that output leaves (for the attic), the other stays.
+    t.put("assets/tools/pack.sh", "echo x > \"$2/$GOLDBERG_STEM.png\"\n");
+    KV_CHECK(c, COOK() == 0 && !io_is_file(t.path("out/g/ships/extra.png")) && io_is_file(t.path("out/g/ships/big.png")) && has(g_out.data, "moved g/ships/extra.png to the attic"));
+    // No script, and a name the command line cannot fill in: each says which.
+    KV_CHECK(c, io_remove(t.path("assets/tools/pack.sh")));
+    KV_CHECK(c, COOK() == 1 && has(g_err.data, "the converter \"pack\" runs tools/pack.sh, which is not there"));
+    t.put("assets/tools/pack.sh", "echo x > \"$2/$GOLDBERG_STEM.png\"\n");
+    t.put("assets/ships/goldberg.berg", R"({ "rules": [ { "match": "*.frames", "meta": { "tint": null } } ] })");
+    KV_CHECK(c, COOK() == 1 && has(g_err.data, "in \"args\", {tint} is not {in}, {work}, {name}, {stem} or a key of the asset's metadata"));
+    t.put("assets/ships/goldberg.berg", R"({ "rules": [ { "match": "*.frames", "meta": { "tint": "blue" } } ] })");
+    KV_CHECK(c, COOK() == 0);
+    // The source goes: so does everything made from it, down to the output tree.
+    KV_CHECK(c, io_remove(t.path("assets/ships/big.sheet")));
+    KV_CHECK(c, COOK("--dump", dump) == 0 && !io_is_file(t.path("out/g/ships/big.png")) && io_is_file(t.path("out/g/a.png")));
+    KV_CHECK(c, !has(t.read("dump.txt"), "(work)") || !has(t.read("dump.txt"), "file (work)"));
+    KV_CHECK(c, COOK("--dump", dump) == 0 && !has(t.read("dump.txt"), "file (work)") && has(g_out.data, "0 cooked"));
+
+    // The streaming converter: it makes a file, sleeps, writes it, sleeps, writes another,
+    // sleeps, and ends. Each file is taken once it has been quiet, what follows it is
+    // cooked while the script still runs, and the cook does not end before the script.
+    t.put("assets/goldberg.berg", R"({
+  "types": { "level": { "runtime": false } },
+  "converters": { "hum": { "from": "level", "to": "map", "shell": "tools/hum", "outputs": "scan", "settle": 0.25 } },
+  "rules": [ { "match": "*.level", "meta": { "type": "level" } } ]
+})");
+    io_remove(t.path("assets/ships/goldberg.berg"));
+    t.put("assets/tools/hum.sh", ": > \"$2/one.tmj\"\nsleep 0.1\necho first >> \"$2/one.tmj\"\nsleep 1.2\necho second > \"$2/two.tmj\"\nsleep 0.4\n");
+    t.put("assets/world.level", "a level");
+    for (int pass = 0; pass < 2; ++pass) {
+        const char* watch = pass ? "poll" : "auto";
+        if (pass) { KV_CHECK(c, gb("clean", "--out", out) == 0); }
+        f64 t0 = time_now();
+        KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", watch, "--dump", dump, "--log", log) == 0);
+        f64 took = time_now() - t0;
+        KV_CHECK(c, took >= 1.65 && strcmp(t.read("out/g/one.tmj"), "first\n") == 0 && strcmp(t.read("out/g/two.tmj"), "second\n") == 0);
+        d = t.read("dump.txt");
+        KV_CHECK(c, has(d, "/one.tmj copy type=map path=copy lands=yes out=g/one.tmj #") && count(d, "/one.tmj -> g/one.tmj") == 1);
+        const char* l = t.read("log.jsonl");
+        const char* one = nullptr;
+        for (const char* p = l; (p = strstr(p, "\"kind\": \"cook-done\"")); ++p) {
+            const char* end = strchr(p, '\n');
+            const char* hit = strstr(p, "g/one.tmj");
+            if (hit && end && hit < end) { one = p; break; }
+        }
+        const char* exited = strstr(l, "\"kind\": \"step-exit\"");
+        KV_CHECK(c, one && exited && one < exited);
+    }
+    // Run again with nothing changed: the script does not run.
+    KV_CHECK(c, COOK("--dump", dump) == 0 && count(t.read("dump.txt"), "request run ") == 0);
+    // It fails after delivering: what it delivered is taken back, with what was cooked from it.
+    t.put("assets/tools/hum.sh", "echo early > \"$2/one.tmj\"\nsleep 0.6\necho 'the hum stopped' >&2\nexit 1\n");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out) == 1);
+    KV_CHECK(c, has(g_err.data, "the converter \"hum\" failed (exit 1): the hum stopped") && !io_is_file(t.path("out/g/one.tmj")) && !io_is_file(t.path("out/g/two.tmj")));
+#undef COOK
+    t.free();
+}
+
 } // namespace
 
 int main() {
@@ -427,6 +566,7 @@ int main() {
     test_rules(c);
     test_mistakes(c);
     test_cook(c);
+    test_scripts(c);
     g_out.free();
     g_err.free();
     names_shutdown();

@@ -71,7 +71,9 @@ end
 --   reg   { types, converters }, each entry with the file that declared it
 --   used  the keys of the rule files that exist in the chain
 -- or nil and a message when a rule file in the chain is broken and never parsed.
-function Rules:effective(root, path)
+-- `base`, for a file a converter made: { type, file, where }. Its type is the converter's
+-- "to"; a rule may refine that (say "texture.color.srgb" of a "texture"), not contradict it.
+function Rules:effective(root, path, base)
     local eff, prov, reg, used, warn = {}, {}, { types = {}, converters = {} }, {}, nil
     local name = basename(path)
     for _, layer in ipairs(Rules.chain(root, path)) do
@@ -96,6 +98,13 @@ function Rules:effective(root, path)
                 else hit = host.glob_path(rule.match, rel) end
                 if hit then berg.apply(eff, prov, rule.meta, { file = rec.display, where = 'rule "' .. rule.match .. '"' }) end
             end
+        end
+    end
+    if base then
+        local t = eff.type
+        if type(t) ~= "string" or not (t == base.type or t:sub(1, #base.type + 1) == base.type .. ".") then
+            eff.type = base.type
+            prov.type = { file = base.file, where = base.where, over = prov.type }
         end
     end
     return eff, prov, reg, used, warn

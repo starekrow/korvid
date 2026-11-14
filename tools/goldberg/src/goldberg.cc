@@ -26,6 +26,7 @@
 #include "korvid/core/time.h"
 #include "korvid/platform/fs_watch.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/process.h"
 #include "korvid/script/script.h"
 #include "korvid/tool/tool.h"
 #include <stdlib.h>
@@ -79,9 +80,9 @@ struct GbStep {
 
 namespace {
 
-enum GbEv : u8 { EvSeen, EvAdded, EvChanged, EvRemoved, EvDirAdded, EvDirRemoved, EvRescan, EvScanDone, EvHashed, EvHashFailed, EvCookDone, EvCookFailed, EvCount };
+enum GbEv : u8 { EvSeen, EvAdded, EvChanged, EvRemoved, EvDirAdded, EvDirRemoved, EvRescan, EvScanDone, EvHashed, EvHashFailed, EvCookDone, EvCookFailed, EvStepExit, EvCount };
 constexpr const char* kEvNames[EvCount] = {"file-seen", "file-added", "file-changed", "file-removed", "dir-added", "dir-removed",
-                                           "rescan", "scan-done", "hashed", "hash-failed", "cook-done", "cook-failed"};
+                                           "rescan", "scan-done", "hashed", "hash-failed", "cook-done", "cook-failed", "step-exit"};
 
 constinit const FieldDesc k_event_fields[] = {KV_FIELDS(GbEvent, seq, kind, root, path, size, mtime, hash, text)};
 constinit const FieldDesc k_file_fields[]  = {KV_FIELDS(GbFile, path, root, size, mtime, hash, hashed, is_berg, scan)};
@@ -147,6 +148,41 @@ struct CopyReq {
 
 struct ScanItem { u32 root; u32 path; u64 size; i64 mtime; bool end; };
 
+// What a scanning step's directory held when its run began: a file still exactly so when
+// the run ends was not written by it.
+struct Before { u32 path; u64 size; i64 mtime; };
+
+// One converter run: a child process, where it writes, and what happens when it ends.
+//   declared outputs (scan false): it writes into run_dir, which nobody watches. At a
+//     clean exit the files are moved over the step's directory in the work root, what
+//     the last run left there and this one did not write is removed, and each is an
+//     event. A failed run's directory is thrown away: it contributes nothing.
+//   scanned outputs (scan true): it writes into the step's directory itself, which is
+//     watched; its files are held until they have been quiet for `settle` and then
+//     delivered while it still runs.
+// Either way the last event is step-exit, for the source it ran on.
+struct Proc {
+    Process     p;
+    bool        started = false;
+    u32         root = 0;               // the source's
+    char        path[kGbPath] = {};
+    u32         work_root = 0;
+    char        dir[kGbPath] = {};      // the step's directory, relative to the work root
+    char        run_dir[900] = {};      // where it writes: absolute
+    bool        scan = false;
+    f64         settle = 0;
+    f64         exited_at = -1;
+    Array<char> words;                  // argv then env, NUL separated
+    u32         argc = 0, envc = 0;
+    Array<char> err;                    // what it wrote to stderr (the tail is kept)
+    Array<Before> before;
+    Array<char>   before_text;
+};
+
+// A directory whose watcher events wait until their file has been quiet a while.
+struct Hold { u32 root; char prefix[kGbPath]; f64 settle; };
+struct Held { u8 kind; u32 root; char path[kGbPath]; f64 due; };
+
 struct Text { char* data; u32 len; };
 
 struct GoldbergState {
@@ -164,6 +200,11 @@ struct GoldbergState {
     FsWatcher       watcher;
     Array<HashReq>  hashes;              // asked for, not yet run
     Array<CopyReq>  copies;              // likewise
+    Array<Proc*>    procs;               // converter runs, waiting and running
+    u32             max_procs = 8;
+    Array<Hold>     holds;
+    Array<Held>     held;
+    f64             watch_floor = 0;     // the least time a held file waits: over the polling watcher's interval
     char            out_dir[600] = {};   // the output tree
     char            attic[700] = {};     // where what leaves it goes: <out>/.goldberg.attic/<stamp>
     u32             tmp_serial = 0;
@@ -316,6 +357,259 @@ void scan_root(GoldbergState& s, u32 root) {
     s.scan.push(end);
 }
 
+u8 fs_kind(FsEventKind k) {
+    return k == FsEventKind::Added ? EvAdded : k == FsEventKind::Changed ? EvChanged : k == FsEventKind::Removed ? EvRemoved
+         : k == FsEventKind::DirAdded ? EvDirAdded : k == FsEventKind::DirRemoved ? EvDirRemoved : EvRescan;
+}
+
+bool is_fs_event_held(GoldbergState& s, u8 kind, u32 root, const char* path) {
+    if (kind != EvAdded && kind != EvChanged && kind != EvRemoved) return false;
+    for (const Hold& hold : s.holds) {
+        if (hold.root != root || strncmp(path, hold.prefix, strlen(hold.prefix)) != 0) continue;
+        // A watcher that walks cannot tell quiet from not yet looked: with it, a file is
+        // not called quiet before the next walk has had its say.
+        f64 due = time_now() + (hold.settle > s.watch_floor ? hold.settle : s.watch_floor);
+        for (Held& h : s.held) {
+            if (h.root != root || strcmp(h.path, path) != 0) continue;
+            if (kind == EvRemoved) h.kind = EvRemoved;
+            else if (h.kind == EvRemoved) h.kind = EvAdded;
+            h.due = due;
+            return true;
+        }
+        Held h{};
+        h.kind = kind;
+        h.root = root;
+        format(h.path, sizeof h.path, "%s", path);
+        h.due = due;
+        s.held.push(h);
+        return true;
+    }
+    return false;
+}
+
+// ---- converter runs --------------------------------------------------------------------------------
+
+struct ListCtx { Array<char>* text; Array<u32>* at; };
+bool list_one(void* user, const char* relative) {
+    ListCtx* c = (ListCtx*)user;
+    c->at->push(c->text->len);
+    u32 n = (u32)strlen(relative);
+    memcpy(c->text->push_n(n + 1), relative, n + 1);
+    return true;
+}
+
+void proc_free(Proc* pr) {
+    pr->p.free();
+    pr->words.free();
+    pr->err.free();
+    pr->before.free();
+    pr->before_text.free();
+    mem_free(pr);
+}
+
+void step_dir_of(GoldbergState& s, const Proc& pr, char* out, usize cap) {
+    format(out, cap, "%s/%s", s.roots.data[pr.work_root].dir, pr.dir);
+}
+
+void push_exit(GoldbergState& s, const Proc& pr, i64 code, const char* text, u32 len) {
+    char* copy = nullptr;
+    if (len) {
+        copy = (char*)mem_alloc(len + 1);
+        memcpy(copy, text, len);
+        copy[len] = 0;
+    }
+    push_pending(s, EvStepExit, pr.root, pr.path, 0, code, nullptr, copy, len);
+}
+
+bool proc_start(GoldbergState& s, Proc& pr) {
+    char step_dir[900];
+    step_dir_of(s, pr, step_dir, sizeof step_dir);
+    if (pr.scan) {
+        io_make_dirs(step_dir);
+        ListCtx c{&pr.before_text, nullptr};
+        Array<u32> at{};
+        c.at = &at;
+        io_list_files(step_dir, list_one, &c);
+        for (u32 off : at) {
+            char full[1200];
+            format(full, sizeof full, "%s/%s", step_dir, pr.before_text.data + off);
+            IoStat st;
+            if (io_stat(full, &st)) pr.before.push(Before{off, st.size, st.mtime_ns});
+        }
+        at.free();
+        Hold h{};
+        h.root = pr.work_root;
+        format(h.prefix, sizeof h.prefix, "%s/", pr.dir);
+        h.settle = pr.settle;
+        s.holds.push(h);
+    } else {
+        io_remove_tree(pr.run_dir); // a fresh directory for every run
+        io_make_dirs(pr.run_dir);
+    }
+    Array<const char*> argv{}, env{};
+    const char* w = pr.words.data;
+    for (u32 i = 0; i < pr.argc; ++i, w += strlen(w) + 1) argv.push(w);
+    for (u32 i = 0; i < pr.envc; ++i, w += strlen(w) + 1) env.push(w);
+    ProcessDesc d;
+    d.argv = Span<const char* const>(argv.data, argv.len);
+    d.env  = Span<const char* const>(env.data, env.len);
+    d.cwd  = pr.run_dir;
+    bool ok = pr.p.spawn(d);
+    argv.free();
+    env.free();
+    pr.started = true;
+    return ok;
+}
+
+void drop_hold(GoldbergState& s, const Proc& pr) {
+    char prefix[kGbPath];
+    format(prefix, sizeof prefix, "%s/", pr.dir);
+    for (u32 i = 0; i < s.holds.len; ++i) {
+        if (s.holds.data[i].root != pr.work_root || strcmp(s.holds.data[i].prefix, prefix) != 0) continue;
+        s.holds.data[i] = s.holds.data[s.holds.len - 1];
+        --s.holds.len;
+        break;
+    }
+    // What was waiting to be quiet is final now: the writer is gone.
+    u32 n = (u32)strlen(prefix), keep = 0;
+    for (u32 i = 0; i < s.held.len; ++i) {
+        Held& h = s.held.data[i];
+        if (h.root == pr.work_root && strncmp(h.path, prefix, n) == 0) push_pending(s, h.kind, h.root, h.path);
+        else s.held.data[keep++] = h;
+    }
+    s.held.len = keep;
+}
+
+// A run with declared outputs ended well: its files replace the step's.
+void commit_run(GoldbergState& s, Proc& pr) {
+    char step_dir[900];
+    step_dir_of(s, pr, step_dir, sizeof step_dir);
+    Array<char> text{}, old_text{};
+    Array<u32> at{}, old_at{};
+    ListCtx c{&text, &at}, oc{&old_text, &old_at};
+    io_list_files(pr.run_dir, list_one, &c);
+    io_make_dirs(step_dir);
+    io_list_files(step_dir, list_one, &oc);
+    for (u32 off : old_at) {
+        const char* rel = old_text.data + off;
+        bool again = false;
+        for (u32 n : at) if (strcmp(text.data + n, rel) == 0) { again = true; break; }
+        if (again) continue;
+        char full[1200], path[kGbPath * 2];
+        format(full, sizeof full, "%s/%s", step_dir, rel);
+        io_remove(full);
+        format(path, sizeof path, "%s/%s", pr.dir, rel);
+        if (strlen(path) < kGbPath) push_pending(s, EvRemoved, pr.work_root, path);
+    }
+    for (u32 off : at) {
+        const char* rel = text.data + off;
+        char from[1200], to[1200], dir[1200], path[kGbPath * 2];
+        format(from, sizeof from, "%s/%s", pr.run_dir, rel);
+        format(to, sizeof to, "%s/%s", step_dir, rel);
+        format(path, sizeof path, "%s/%s", pr.dir, rel);
+        if (strlen(path) >= kGbPath) { print_err("goldberg: '%s': a converter's output with a path too long to track\n", to); continue; }
+        parent_dir(to, dir, sizeof dir);
+        if (!io_make_dirs(dir) || !io_rename(from, to)) { print_err("goldberg: cannot move %s into the work directory\n", from); continue; }
+        push_pending(s, EvChanged, pr.work_root, path);
+    }
+    io_remove_tree(pr.run_dir);
+    text.free(); at.free(); old_text.free(); old_at.free();
+}
+
+// A scanning run ended well: everything it left is seen once more (the watcher may have
+// missed some, or there may be none), and what it did not touch is last run's and goes.
+void finish_scan(GoldbergState& s, Proc& pr) {
+    char step_dir[900];
+    step_dir_of(s, pr, step_dir, sizeof step_dir);
+    Array<char> text{};
+    Array<u32> at{};
+    ListCtx c{&text, &at};
+    io_list_files(step_dir, list_one, &c);
+    for (u32 off : at) {
+        const char* rel = text.data + off;
+        char full[1200], path[kGbPath * 2];
+        format(full, sizeof full, "%s/%s", step_dir, rel);
+        format(path, sizeof path, "%s/%s", pr.dir, rel);
+        if (strlen(path) >= kGbPath) { print_err("goldberg: '%s': a converter's output with a path too long to track\n", full); continue; }
+        IoStat st;
+        if (!io_stat(full, &st)) continue;
+        bool stale = false;
+        for (const Before& b : pr.before) if (strcmp(pr.before_text.data + b.path, rel) == 0) { stale = b.size == st.size && b.mtime == st.mtime_ns; break; }
+        if (stale) { io_remove(full); push_pending(s, EvRemoved, pr.work_root, path); }
+        else push_pending(s, EvSeen, pr.work_root, path, st.size, st.mtime_ns);
+    }
+    text.free(); at.free();
+}
+
+void drain(Proc& pr) {
+    char buf[4096];
+    for (;;) { i32 r = pr.p.read_out(buf, sizeof buf); if (r <= 0) break; } // stdout is not kept
+    for (;;) {
+        i32 r = pr.p.read_err(buf, sizeof buf);
+        if (r <= 0) break;
+        memcpy(pr.err.push_n((u32)r), buf, (usize)r);
+        if (pr.err.len > 8192) { memmove(pr.err.data, pr.err.data + pr.err.len - 4096, 4096); pr.err.len = 4096; }
+    }
+}
+
+void poll_procs(GoldbergState& s) {
+    u32 running = 0;
+    for (Proc* pr : s.procs) if (pr->started) ++running;
+    f64 now = time_now();
+    for (u32 i = 0; i < s.procs.len;) {
+        Proc& pr = *s.procs.data[i];
+        bool done = false;
+        if (!pr.started) {
+            if (running >= s.max_procs) { ++i; continue; }
+            ++running;
+            if (!proc_start(s, pr)) {
+                if (pr.scan) drop_hold(s, pr);
+                push_exit(s, pr, -1, pr.p.error, (u32)strlen(pr.p.error));
+                done = true;
+            }
+        } else {
+            drain(pr);
+            if (pr.exited_at < 0 && !pr.p.running()) { drain(pr); pr.exited_at = now; }
+            // A converter with declared outputs and a settle time is held open that long
+            // after it ends: its real writer may not be the process that was started.
+            if (pr.exited_at >= 0 && now >= pr.exited_at + (pr.scan ? 0.0 : pr.settle)) {
+                i32 code = pr.p.code;
+                if (pr.scan) drop_hold(s, pr);
+                if (code == 0) { if (pr.scan) finish_scan(s, pr); else commit_run(s, pr); }
+                else if (!pr.scan) io_remove_tree(pr.run_dir);
+                u32 tail = pr.err.len > 600 ? 600 : pr.err.len;
+                push_exit(s, pr, code, pr.err.data + pr.err.len - tail, tail);
+                done = true;
+            }
+        }
+        if (done) {
+            proc_free(&pr);
+            memmove(s.procs.data + i, s.procs.data + i + 1, sizeof(Proc*) * (s.procs.len - i - 1));
+            --s.procs.len;
+        } else ++i;
+    }
+}
+
+// A watcher's event: into the queue, or, under a scanning step's directory, held until
+// the file has been quiet. True if it went into the queue.
+bool take_fs_event(GoldbergState& s, u8 kind, u32 root, const char* path) {
+    if (is_fs_event_held(s, kind, root, path)) return false;
+    push_pending(s, kind, root, path);
+    return true;
+}
+
+void release_held(GoldbergState& s) {
+    if (!s.held.len) return;
+    f64 now = time_now();
+    u32 keep = 0;
+    for (u32 i = 0; i < s.held.len; ++i) {
+        Held& h = s.held.data[i];
+        if (now >= h.due) push_pending(s, h.kind, h.root, h.path);
+        else s.held.data[keep++] = h;
+    }
+    s.held.len = keep;
+}
+
 // ---- the queue -----------------------------------------------------------------------------------
 
 bool is_fs_kind(u8 k) { return k == EvSeen || k == EvAdded || k == EvChanged || k == EvRemoved; }
@@ -416,6 +710,7 @@ int host_add_root(lua_State* L) {
     while (n > 1 && r.dir[n - 1] == '/') r.dir[--n] = 0;
     r.watch = ~0u;
     r.watched = lua_isnoneornil(L, 3) || lua_toboolean(L, 3);
+    if (r.watched && s.watcher.is_open()) r.watch = s.watcher.add_root(r.dir); // a root added to a session already watching
     s.roots.push(r);
     lua_pushinteger(L, s.roots.len); // 1-based, as Lua counts
     return 1;
@@ -451,6 +746,7 @@ int host_watch(lua_State* L) {
         return luaL_error(L, "--watch %s: this platform has no such watcher", mode);
     }
     for (Root& r : s.roots) if (r.watched) r.watch = s.watcher.add_root(r.dir); // a root that is not there yet is simply not watched
+    s.watch_floor = strcmp(s.watcher.backend_name(), "poll") == 0 ? 0.3 : 0.0;
     lua_pushstring(L, s.watcher.backend_name());
     return 1;
 }
@@ -523,6 +819,76 @@ int host_remove_output(lua_State* L) {
     return 1;
 }
 
+// host.run{ root, path, argv, env, work_root, dir, write_dir, scan, settle }: queues one
+// converter run for the source root:path. `dir` is the step's directory in the work root;
+// `write_dir` is where the process writes and starts (the step's directory itself when
+// it scans, a private one otherwise). Its end comes back as a step-exit event.
+int host_run(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    luaL_checktype(L, 1, LUA_TTABLE);
+    Proc* pr = (Proc*)mem_alloc(sizeof(Proc));
+    *pr = Proc{};
+    auto fail = [&](const char* why) { proc_free(pr); return luaL_error(L, "run: %s", why); };
+    lua_getfield(L, 1, "root");      lua_Integer root = lua_tointeger(L, -1);
+    lua_getfield(L, 1, "work_root"); lua_Integer work = lua_tointeger(L, -1);
+    lua_getfield(L, 1, "path");      const char* path = lua_tostring(L, -1);
+    lua_getfield(L, 1, "dir");       const char* dir = lua_tostring(L, -1);
+    lua_getfield(L, 1, "write_dir"); const char* write_dir = lua_tostring(L, -1);
+    lua_getfield(L, 1, "scan");      pr->scan = lua_toboolean(L, -1);
+    lua_getfield(L, 1, "settle");    pr->settle = lua_tonumber(L, -1);
+    if (root < 1 || root > (lua_Integer)s.roots.len || work < 1 || work > (lua_Integer)s.roots.len) return fail("no such root");
+    if (!path || !dir || !write_dir || strlen(path) >= kGbPath || strlen(dir) >= kGbPath - 2 || strlen(write_dir) >= sizeof pr->run_dir) return fail("a path is missing or too long");
+    pr->root = (u32)root - 1;
+    pr->work_root = (u32)work - 1;
+    format(pr->path, sizeof pr->path, "%s", path);
+    format(pr->dir, sizeof pr->dir, "%s", dir);
+    format(pr->run_dir, sizeof pr->run_dir, "%s", write_dir);
+    lua_pop(L, 7);
+    for (int pass = 0; pass < 2; ++pass) {
+        lua_getfield(L, 1, pass ? "env" : "argv");
+        if (lua_istable(L, -1)) {
+            lua_Integer n = (lua_Integer)lua_rawlen(L, -1);
+            for (lua_Integer i = 1; i <= n; ++i) {
+                lua_rawgeti(L, -1, i);
+                usize len = 0;
+                const char* w = lua_type(L, -1) == LUA_TSTRING ? lua_tolstring(L, -1, &len) : nullptr;
+                if (!w) return fail("argv and env are lists of strings");
+                memcpy(pr->words.push_n((u32)len + 1), w, len + 1);
+                if (pass) ++pr->envc; else ++pr->argc;
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+    }
+    if (!pr->argc) return fail("no command");
+    s.procs.push(pr);
+    return 0;
+}
+
+// host.clear_work(work_root, dir): a step's directory and everything in it, gone.
+// host.remove_work(work_root, path): one file of the work root.
+// The work root is goldberg's scratch: what leaves it is deleted, not put in the attic.
+int host_clear_work(lua_State* L) {
+    u32 at;
+    Root* r = check_root(L, 1, &at);
+    const char* dir = luaL_checkstring(L, 2);
+    if (!dir[0] || strstr(dir, "..") || dir[0] == '/') return luaL_error(L, "clear_work: '%s' is not a step's directory", dir);
+    char full[1200];
+    format(full, sizeof full, "%s/%s", r->dir, dir);
+    io_remove_tree(full);
+    return 0;
+}
+int host_remove_work(lua_State* L) {
+    u32 at;
+    Root* r = check_root(L, 1, &at);
+    const char* path = luaL_checkstring(L, 2);
+    if (!path[0] || strstr(path, "..") || path[0] == '/') return luaL_error(L, "remove_work: '%s' is not in the work root", path);
+    char full[1200];
+    format(full, sizeof full, "%s/%s", r->dir, path);
+    io_remove(full);
+    return 0;
+}
+
 // host.write_atomic(path, text): the file written whole, its directory made if need be.
 int host_write_atomic(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
@@ -566,6 +932,7 @@ int host_finish(lua_State* L) {
 constexpr luaL_Reg k_host[] = {
     {"add_root", host_add_root}, {"scan", host_scan}, {"watch", host_watch}, {"hash", host_hash},
     {"set_out", host_set_out}, {"copy", host_copy}, {"remove_output", host_remove_output}, {"write_atomic", host_write_atomic},
+    {"run", host_run}, {"clear_work", host_clear_work}, {"remove_work", host_remove_work},
     {"glob", host_glob}, {"glob_path", host_glob_path}, {"print", host_print}, {"warn", host_warn},
     {"now", host_now}, {"cwd", host_cwd}, {"active", host_active}, {"finish", host_finish}, {nullptr, nullptr},
 };
@@ -610,6 +977,12 @@ bool load_app(GoldbergState& s, Engine& e) {
     lua_setfield(L, -2, "lua_dir");
     lua_pushboolean(L, fs_watch_has_native());
     lua_setfield(L, -2, "has_native_watch");
+#if defined(_WIN32)
+    lua_pushboolean(L, 1);
+#else
+    lua_pushboolean(L, 0);
+#endif
+    lua_setfield(L, -2, "windows");
     lua_newtable(L);
     for (u32 i = 0; i < EvCount; ++i) { lua_pushstring(L, kEvNames[i]); lua_rawseti(L, -2, (lua_Integer)i); }
     lua_setfield(L, -2, "event_names");
@@ -664,7 +1037,11 @@ void push_event(lua_State* L, GoldbergState& s, const GbEvent& ev) {
         lua_pushinteger(L, ev.mtime);
         lua_setfield(L, -2, "mtime");
     }
-    if (ev.kind == EvCookFailed && ev.text) {
+    if (ev.kind == EvStepExit) {
+        lua_pushinteger(L, ev.mtime);
+        lua_setfield(L, -2, "code");
+    }
+    if ((ev.kind == EvCookFailed || ev.kind == EvStepExit) && ev.text) {
         const Text& t = s.texts.data[ev.text - 1];
         lua_pushlstring(L, t.data, t.len);
         lua_setfield(L, -2, "text");
@@ -720,12 +1097,12 @@ void pump(TickContext& ctx) {
             u32 root = ~0u;
             for (u32 i = 0; i < s.roots.len; ++i) if (s.roots.data[i].watch == ev.root) root = i;
             if (root == ~0u) continue;
-            u8 kind = ev.kind == FsEventKind::Added ? EvAdded : ev.kind == FsEventKind::Changed ? EvChanged : ev.kind == FsEventKind::Removed ? EvRemoved
-                    : ev.kind == FsEventKind::DirAdded ? EvDirAdded : ev.kind == FsEventKind::DirRemoved ? EvDirRemoved : EvRescan;
             if (strlen(ev.path) >= kGbPath) { print_err("goldberg: '%s/%s': a path too long to track\n", s.roots.data[root].dir, ev.path); continue; }
-            push_pending(s, kind, root, ev.path);
+            take_fs_event(s, fs_kind(ev.kind), root, ev.path);
         }
     }
+    poll_procs(s);
+    release_held(s);
     run_hashes(s);
     run_copies(s);
     // The scan's files, a pool's worth at a time.
@@ -761,21 +1138,20 @@ void pump(TickContext& ctx) {
     if (s.failed) return;
 
     // 5. Is anything left? The watchers are asked once more before the host says no.
-    bool quiet = !s.pending.len && !s.hashes.len && !s.copies.len && !s.scan.len && !delivered;
-    if (quiet && s.watcher.is_open()) {
+    bool idle = !s.pending.len && !s.hashes.len && !s.copies.len && !s.scan.len && !delivered;
+    if (idle && s.watcher.is_open()) {
         for (const FsEvent& ev : s.watcher.poll(true)) {
             u32 root = ~0u;
             for (u32 i = 0; i < s.roots.len; ++i) if (s.roots.data[i].watch == ev.root) root = i;
             if (root == ~0u || strlen(ev.path) >= kGbPath) continue;
-            u8 kind = ev.kind == FsEventKind::Added ? EvAdded : ev.kind == FsEventKind::Changed ? EvChanged : ev.kind == FsEventKind::Removed ? EvRemoved
-                    : ev.kind == FsEventKind::DirAdded ? EvDirAdded : ev.kind == FsEventKind::DirRemoved ? EvDirRemoved : EvRescan;
-            push_pending(s, kind, root, ev.path);
-            quiet = false;
+            if (take_fs_event(s, fs_kind(ev.kind), root, ev.path)) idle = false;
         }
     }
+    // A converter still running, or a file of its still settling, is something left.
+    bool quiet = idle && !s.procs.len && !s.held.len;
     lua_pushboolean(L, quiet);
     call_app(s, e, "tick", 1, 0);
-    if (s.active && quiet) time_sleep(0.002); // nothing to do this tick: do not spin
+    if (s.active && idle) time_sleep(0.002); // nothing to do this tick: do not spin
 }
 
 // Every verb is one command: it leaves its words for the pump.
@@ -813,6 +1189,10 @@ void goldberg_shutdown(Engine&, ModuleInstance& self) {
     if (!s) return;
     if (s->L) lua_close(s->L);
     s->watcher.free();
+    for (Proc* pr : s->procs) proc_free(pr);
+    s->procs.free();
+    s->holds.free();
+    s->held.free();
     for (Pending& p : s->pending) if (p.text) mem_free(p.text);
     for (HashReq& r : s->hashes) if (r.text) mem_free(r.text);
     for (Text& t : s->texts) mem_free(t.data);

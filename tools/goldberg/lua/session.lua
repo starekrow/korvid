@@ -24,9 +24,16 @@ local function unhex(hex)
     return (hex:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))
 end
 
--- cfg: { game, roots = { { name, dir } }, conventions = text, project = { text, display } or nil, io,
+-- cfg: { game, roots = { { name, dir, abs } }, conventions = text, project = { text, display } or nil, io,
 --        out_root = index of the output tree among the roots, or nil for a session that cooks nothing,
+--        work_root = index of the work root (where converters write), run_dir = where a
+--        converter with declared outputs writes until it ends,
 --        state = the saved state's text, or nil }
+--
+-- A file in the work root was made by a converter. It is a file like any other, with two
+-- differences: its type is its converter's "to" unless a rule refines it, and rules see
+-- it where its source is (`place`), so the goldberg.berg over ships/ also governs what
+-- ships/big.sheet turned into.
 function Session.new(cfg)
     local s = setmetatable({
         game = cfg.game, roots = cfg.roots, io = cfg.io,
@@ -41,6 +48,8 @@ function Session.new(cfg)
         changed = {},      -- keys whose answer changed at the last settle
         solves = 0,        -- answers computed, ever
         history = {},      -- one line per settle: how many were solved and whose answer changed
+        work_root = cfg.work_root, run_dir = cfg.run_dir,
+        work_files = {},   -- a step's directory in the work root -> { [key] = true }
     }, Session)
     s.rules:set("conventions", cfg.conventions, "conventions")
     if cfg.project then s.rules:set("project", cfg.project.text, cfg.project.display) end
@@ -68,6 +77,16 @@ function Session.new(cfg)
 end
 
 function Session:key(root, path) return self.roots[root].name .. ":" .. path end
+
+-- A root's directory as a child process can use it.
+function Session:root_dir(root) return self.roots[root].abs or self.roots[root].dir end
+
+-- Where rules see a file: the asset root's name and the path under it. For a source,
+-- where it is; for a file a converter made, beside the file it was made from.
+function Session:place(f)
+    if f.vname then return f.vname, f.vpath, f.vroot end
+    return self.roots[f.root].name, f.path, f.root
+end
 
 local function request(self, what, root, path, extra)
     self.requests[#self.requests + 1] = string.format("%s %s%s", what, self:key(root, path), extra or "")
@@ -99,9 +118,10 @@ local function mark_affected(self, root, berg_path)
     local prefix = dir == "" and "" or (dir .. "/")
     local sidecar = name ~= "goldberg.berg" and Rules.stem(name) or nil
     for key, f in pairs(self.files) do
-        if f.root == root and not f.is_berg and f.path:sub(1, #prefix) == prefix then
+        local _, path, at = self:place(f)
+        if at == root and not f.is_berg and path:sub(1, #prefix) == prefix and not (f.work and not f.vname) then
             if not sidecar then self.unsolved[key] = true
-            elseif Rules.dirname(f.path) == dir and Rules.stem(Rules.basename(f.path)) == sidecar then self.unsolved[key] = true end
+            elseif Rules.dirname(path) == dir and Rules.stem(Rules.basename(path)) == sidecar then self.unsolved[key] = true end
         end
     end
 end
@@ -112,11 +132,20 @@ local function touch(self, ev)
     local f = self.files[key]
     local files = host.kinds.file
     if not f then
-        local is_berg = ev.path:sub(-5) == ".berg"
+        local work, rel
+        if ev.root == self.work_root then
+            work, rel = ev.path:match("^([^/]+)/(.+)$")
+            if not work then return end -- loose in the work root: nobody's
+        end
+        local is_berg = ev.path:sub(-5) == ".berg" and not work
         local h = files:spawn{ path = ev.path, root = ev.root, is_berg = is_berg, scan = self.gen[ev.root] }
         if not h then error("goldberg.file is full: more files than the pool holds") end
-        f = { key = key, root = ev.root, path = ev.path, h = h, is_berg = is_berg }
+        f = { key = key, root = ev.root, path = ev.path, h = h, is_berg = is_berg, work = work, rel = rel }
         self.files[key] = f
+        if work then
+            self.work_files[work] = self.work_files[work] or {}
+            self.work_files[work][key] = true
+        end
         self.count = self.count + 1
         if not is_berg then self.unsolved[key] = true end
         -- The state remembers it at this size and time: its hash is known without a read.
@@ -146,6 +175,10 @@ local function forget(self, key)
     self.files[key] = nil
     self.unsolved[key] = nil
     self.count = self.count - 1
+    if f.work and self.work_files[f.work] then
+        self.work_files[f.work][key] = nil
+        if next(self.work_files[f.work]) == nil then self.work_files[f.work] = nil end
+    end
     if f.hashing then
         -- Its answer will find nobody.
         self.hashing = self.hashing - 1
@@ -189,8 +222,43 @@ local function hashed(self, ev)
     end
 end
 
+-- A step's directory in the work root, emptied: what a converter made is taken back, and
+-- everything cooked from it follows as it would for a source that was deleted.
+function Session:clear_work(dir)
+    self:request("clear", "(work)/" .. dir)
+    self.io.clear_work(self.work_root, dir)
+    local keys = {}
+    for key in pairs(self.work_files[dir] or {}) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do forget(self, key) end
+end
+
+-- The files of a step's directory are solved again: who made them changed.
+function Session:resolve_work(dir)
+    for key in pairs(self.work_files[dir] or {}) do self.unsolved[key] = true end
+end
+
+-- What a step's directory holds: { { name, hash } }, by name.
+function Session:work_list(dir)
+    local out = {}
+    for key in pairs(self.work_files[dir] or {}) do
+        local f = self.files[key]
+        out[#out + 1] = { name = f.rel, hash = f.hash }
+    end
+    table.sort(out, function(a, b) return a.name < b.name end)
+    return out
+end
+
+function Session:work_dirs()
+    local out = {}
+    for dir in pairs(self.work_files) do out[#out + 1] = dir end
+    table.sort(out)
+    return out
+end
+
 function Session:event(ev)
     local k = ev.kind
+    if k == "step-exit" then if self.graph then self.graph:step_exit(ev) end return end
     if k == "cook-done" then if self.graph then self.graph:cook_done(ev) end return end
     if k == "cook-failed" then if self.graph then self.graph:cook_failed(ev) end return end
     if self.graph and ev.root == self.out_root then self.graph:out_event(ev) return end
@@ -240,14 +308,35 @@ function Session:settle()
     table.sort(keys)
     self.unsolved = {}
     self.changed = {}
-    for _, key in ipairs(keys) do
+    local done = {}
+    local function solve_one(key)
+        if done[key] then return end
+        done[key] = true
         local f = self.files[key]
-        local name = self.roots[f.root].name
-        local eff, prov, reg, used, warn = self.rules:effective(name, f.path)
+        if not f then return end
+        local base
+        if f.work then
+            -- Made by a converter: placed beside its source, which is placed first.
+            local maker = self.graph and self.graph.by_work[f.work]
+            local src = maker and self.files[maker.file]
+            if not src then
+                -- Nobody's yet: its maker's step is made when the source is solved, and
+                -- asks for this again. One that never is, the sweep removes.
+                f.answer, f.line, f.vname, f.vpath, f.vroot = nil, nil, nil, nil, nil
+                return
+            end
+            if self.unsolved_now[maker.file] then solve_one(maker.file) end
+            local sname, spath, sroot = self:place(src)
+            local dir = Rules.dirname(spath)
+            f.vname, f.vpath, f.vroot = sname, (dir == "" and "" or dir .. "/") .. f.rel, sroot
+            base = { type = maker.conv.to, file = maker.conv.file, where = 'converter "' .. maker.conv.name .. '"' }
+        end
+        local name, path = self:place(f)
+        local eff, prov, reg, used, warn = self.rules:effective(name, path, base)
         local a
         if not eff then a = { action = "error", error = prov, why = {} }
         else
-            a = solve.solve(name, f.path, eff, prov, reg)
+            a = solve.solve(name, path, eff, prov, reg)
             a.rule_warn = warn
         end
         self.solves = self.solves + 1
@@ -258,8 +347,14 @@ function Session:settle()
             self.touched[key] = true
         else
             f.answer = a -- the same answer; the provenance may have moved
+            -- A converter's registration is not in the line: its step looks for itself.
+            if a.action == "convert" then self.touched[key] = true end
         end
     end
+    self.unsolved_now = {}
+    for _, key in ipairs(keys) do self.unsolved_now[key] = true end
+    for _, key in ipairs(keys) do solve_one(key) end
+    self.unsolved_now = nil
     self.history[#self.history + 1] = string.format("settle solved=%d changed=%s", #keys, table.concat(self.changed, ","))
     return #self.changed
 end
@@ -329,7 +424,7 @@ function Session:totals()
             local rec = self.rules:get(key)
             if rec and rec.err then t.errors[#t.errors + 1] = rec.err end
         else
-            t.files = t.files + 1
+            if not f.work then t.files = t.files + 1 end -- "files" are sources: what converters made is not counted
             local a = f.answer
             if a and a.error then
                 t.failed = t.failed + 1
