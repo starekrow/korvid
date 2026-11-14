@@ -175,8 +175,14 @@ function M.test(exe)
   kfs.mkdirp(app)
   kfs.copy(exe, util.join(app, name))
   kfs.exec("chmod +x " .. q(util.join(app, name)))
-  for _, d in ipairs({ "assets", "shaders" }) do
-    if kfs.isdir(util.join(bin, d)) then util.copy_tree(util.join(bin, d), util.join(app, d)) end
+  if kfs.isdir(util.join(bin, "shaders")) then util.copy_tree(util.join(bin, "shaders"), util.join(app, "shaders")) end
+  -- Its assets: the tree goldberg cooked for it, named by <test>.assets beside it, module
+  -- by module (nothing of goldberg's own in the tree goes into the bundle).
+  local tree = ((kfs.read(util.join(bin, name .. ".assets")) or ""):match("^[^\r\n]*"))
+  if tree and tree ~= "" and kfs.isdir(tree) then
+    for _, n in ipairs(kfs.listdir(tree)) do
+      if n:sub(1, 1) ~= "." and kfs.isdir(util.join(tree, n)) then util.copy_tree(util.join(tree, n), util.join(app, "assets/" .. n)) end
+    end
   end
   kfs.write(util.join(app, "Info.plist"), info_plist(name, bundle_id))
   local err = M.sign(work, app, bundle_id, device)

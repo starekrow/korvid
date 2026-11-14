@@ -221,6 +221,9 @@ local function run(cmd, words, opts)
         for _, cf in ipairs(c.master.configs) do dirs[#dirs + 1] = util.join(c.build_root, p .. "-" .. cf) end
       end
       dirs[#dirs + 1] = util.join(c.build_root, "compile_commands.json")
+      -- What goldberg cooked for the programs built here, and what it remembers of it.
+      -- (A ship game's tree is dist/<game>/assets/: clean leaves dist/ alone, as it always has.)
+      for _, d in ipairs({ "assets", "assets-ship", "goldberg" }) do dirs[#dirs + 1] = util.join(c.build_root, d) end
     end
     for _, d in ipairs(dirs) do
       if kfs.isdir(d) or kfs.isfile(d) then kfs.rmtree(d); print("kormake: removed " .. d) end

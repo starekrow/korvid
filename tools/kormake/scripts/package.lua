@@ -1,5 +1,5 @@
 -- kormake: package. A self-contained directory for one executable: the executable, its
--- packs, its shaders, the licenses of everything it links. dist/<exe>/ under the build
+-- cooked assets, its shaders, the licenses of everything it links. dist/<exe>/ under the build
 -- base, replaced each time; on a toolchain that packages applications, dist/<exe>/<exe>.app
 -- (package_app.lua). Runs after emit, which names the executable's packs.
 local util = kormake.load("util")
@@ -15,12 +15,26 @@ function M.run(c, build, inst, ninja, target)
   -- Its packs: what its per-exe rules write, as emit named them.
   local packs = inst.per_exe_outputs or {}
   local q = util.shell_quote
+  -- Packs are not part of a package for now: goldberg cooks loose, and the loose tree is
+  -- what ships. A pack is still built by name (kormake bin/<exe>.kpak).
+  packs = {}
   local want = { q("bin/" .. exe_bin) }
-  for _, p in ipairs(packs) do want[#want + 1] = q(p) end
   local rc = kfs.exec(string.format("%s -C %s %s", ninja, q(build), table.concat(want, " ")))
   if rc ~= 0 then return rc end
   local dist = util.join(c.base_dir, "dist/" .. exe)
-  if not kfs.rmtree(dist) and kfs.isdir(dist) then util.fail("package: cannot remove %s", dist) end
+  -- The tree goldberg cooked for this executable (emit named it). A ship game that
+  -- packages as a plain directory was cooked straight into dist/<exe>/assets/: that stays,
+  -- and everything else in dist/<exe>/ is replaced. Anywhere else, the tree is copied in.
+  local tree = inst.assets_tree
+  local in_place = tree ~= nil and tree == util.join(dist, "assets")
+  if in_place then
+    for _, n in ipairs(kfs.isdir(dist) and kfs.listdir(dist) or {}) do
+      if n ~= "assets" then kfs.rmtree(util.join(dist, n)) end
+    end
+    if kfs.isdir(util.join(tree, ".goldberg.attic")) then
+      print("kormake: package: " .. util.join(tree, ".goldberg.attic") .. " would ship with the game: `goldberg clean attic --out " .. tree .. "` empties it")
+    end
+  elseif not kfs.rmtree(dist) and kfs.isdir(dist) then util.fail("package: cannot remove %s", dist) end
   -- Where the executable goes and where what it reads goes: one directory, or for a
   -- toolchain that packages applications, <exe>.app: a macOS one's (package = "app")
   -- Contents/MacOS/ and Contents/Resources/, an iOS one's (package = "iosapp") top, where
@@ -50,13 +64,23 @@ function M.run(c, build, inst, ninja, target)
   local mods = {}
   for _, d in ipairs(inst.closure) do mods[#mods + 1] = d end
   mods[#mods + 1] = inst
-  -- Without a pack (an executable that has none), what it reads is the loose assets: its
-  -- modules' folders of bin/assets/, as the build staged them, into assets/.
+  -- What it reads is the loose assets: its modules' folders of the cooked tree, into
+  -- assets/ (or already there, for a tree cooked in place). Module by module, so nothing
+  -- of goldberg's own in the tree (its marker, its attic) is packaged.
   local loose = 0
-  if #packs == 0 then
+  if tree then
     for _, d in ipairs(mods) do
-      local from = util.join(build, "bin/assets/" .. d.module.name)
-      if kfs.isdir(from) then util.copy_tree(from, util.join(res, "assets/" .. d.module.name)); loose = loose + 1 end
+      local from = util.join(tree, d.module.name)
+      if kfs.isdir(from) then
+        if not in_place then util.copy_tree(from, util.join(res, "assets/" .. d.module.name)) end
+        loose = loose + 1
+      end
+    end
+    -- A plain directory's assets/ is where a ship cook of this game writes. Copied in from
+    -- another config's tree, it carries goldberg's marker with it, so that cook will take
+    -- the directory as its own (and cook over it) rather than refuse it as a stranger's.
+    if not in_place and not kind and loose > 0 and kfs.isfile(util.join(tree, ".goldberg")) then
+      kfs.copy(util.join(tree, ".goldberg"), util.join(res, "assets/.goldberg"))
     end
   end
   for _, d in ipairs(mods) do

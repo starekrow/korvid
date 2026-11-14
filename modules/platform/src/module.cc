@@ -47,11 +47,12 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
         engine_idle_add(engine, "platform.io", io_idle, &s->io);
         return true;
     }
-    // The executable's assets/ directory is the first mount, when there is one; the frame
-    // loop mounts packs over it.
-    char path[KV_PLATFORM_PATH_MAX + 64];
-    format(path, sizeof path, "%sassets", s->base_path);
-    if (!g_mounts.none && os_path_kind(path) == OsPathKind::Dir) s->io.mount_dir(path);
+    // What the program reads is the first mount, when there is one; the frame loop mounts
+    // packs over it. In a build tree that is the output tree goldberg cooked for this
+    // executable, named by <exe>.assets beside it (one line: the directory; kormake writes
+    // the file). A packaged program has no such file and reads assets/ beside itself.
+    char path[KV_PLATFORM_PATH_MAX * 2];
+    if (!g_mounts.none && platform_assets_dir(path, sizeof path)) s->io.mount_dir(path);
     if (g_mounts.exe_name) {
         format(path, sizeof path, "%s%s.kpak", s->base_path, g_mounts.exe_name);
         if (os_path_kind(path) == OsPathKind::File) s->io.mount_pack(path);
@@ -136,5 +137,26 @@ const char* platform_base_path(Engine& e) {
 }
 
 bool platform_exe_dir(char* out, u32 cap) { return os_base_path(out, cap); }
+
+bool platform_assets_dir(char* out, u32 cap) {
+    char base[KV_PLATFORM_PATH_MAX], exe[128], path[KV_PLATFORM_PATH_MAX + 160];
+    if (!os_base_path(base, sizeof base)) return false;
+    if (os_exe_name(exe, sizeof exe)) {
+        format(path, sizeof path, "%s%s.assets", base, exe);
+        IoBytes named;
+        if (os_path_kind(path) == OsPathKind::File && io_read_now(path, &named)) {
+            usize n = 0;
+            while (n < named.size && n + 1 < cap && named.data[n] != '\n' && named.data[n] != '\r') { out[n] = (char)named.data[n]; ++n; }
+            out[n] = 0;
+            named.free();
+            if (n && os_path_kind(out) == OsPathKind::Dir) return true;
+            KV_WARN("platform", "%s names '%s', which is not a directory: the assets were not cooked (build the program, or run goldberg cook)", path, out);
+            return false;
+        }
+    }
+    int n = format(out, cap, "%sassets", base);
+    return n > 0 && (u32)n < cap && os_path_kind(out) == OsPathKind::Dir;
+}
+
 
 } // namespace kv

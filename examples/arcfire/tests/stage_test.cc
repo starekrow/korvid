@@ -13,12 +13,12 @@
 
 namespace {
 
-// A staged asset of this module, beside the test executable.
+// A cooked asset of this module, from the test's own output tree.
 char* slurp(const char* name, kv::usize* len) {
-    char exe[512];
-    if (!kv::platform_exe_dir(exe, sizeof exe)) return nullptr;
-    char path[700];
-    kv::format(path, sizeof path, "%sassets/arcfire/%s", exe, name);
+    char assets[1024];
+    if (!kv::platform_assets_dir(assets, sizeof assets)) return nullptr;
+    char path[1200];
+    kv::format(path, sizeof path, "%s/arcfire/%s", assets, name);
     kv::IoBytes file;
     if (!kv::io_read_now(path, &file)) return nullptr;
     char* text = (char*)malloc(file.size + 1); // the caller's to free

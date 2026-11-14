@@ -25,6 +25,23 @@ bool os_base_path(char* out, u32 cap) {
     return true;
 }
 
+bool os_exe_name(char* out, u32 cap) {
+    static wchar_t w[32768];
+    DWORD n = GetModuleFileNameW(nullptr, w, (DWORD)(sizeof w / sizeof w[0]));
+    if (n == 0 || n >= sizeof w / sizeof w[0]) return false;
+    char path[4096];
+    if (!narrow(w, path, (int)sizeof path)) return false;
+    forward_slashes(path);
+    const char* slash = strrchr(path, '/');
+    const char* name = slash ? slash + 1 : path;
+    usize len = strlen(name);
+    if (len > 4 && (strcmp(name + len - 4, ".exe") == 0 || strcmp(name + len - 4, ".EXE") == 0)) len -= 4;
+    if (!len || len >= cap) return false;
+    memcpy(out, name, len);
+    out[len] = 0;
+    return true;
+}
+
 bool os_pref_path(const char* org, const char* app, char* out, u32 cap) {
     PWSTR dir = nullptr;
     if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &dir))) {

@@ -3,7 +3,7 @@
 # test runner for the `androidemu` and `android` platforms (toolchain-android's test_runner),
 # as `xcrun simctl spawn booted` is the iOS Simulator's. A test is an ordinary executable
 # against bionic, so it runs from adb's shell with no package: pushed to
-# /data/local/tmp/korvid/<target>/bin/ with what the build put beside it (assets/, shaders/),
+# /data/local/tmp/korvid/<target>/bin/ with what it reads (its cooked assets, shaders/),
 # and run from the directory above, as kormake runs a test from the build directory here.
 #
 #   emu_test.sh /abs/path/to/build/<target>/bin/<suite>_tests
@@ -45,14 +45,26 @@ fi
 
 dir=/data/local/tmp/korvid/$target
 "$adb" shell "mkdir -p $dir/bin $dir/tmp"
-# What the tests read beside them, once for all of a build's suites: adb's sync sends only
-# what changed, and the lock keeps suites that start together from sending it twice.
-for d in assets shaders; do
-  if [ -d "$bin/$d" ]; then
-    ( flock 9; "$adb" push --sync "$bin/$d" "$dir/bin/" >/dev/null 2>&1 ) 9>"$bin/.emu_test.$d.lock" ||
-      { echo "emu_test: could not push $d/" >&2; exit 2; }
+# What the tests read beside them. Shaders are the build's, once for all of its suites.
+# Assets are the tree goldberg cooked for this suite, named by <suite>.assets beside it:
+# its modules' folders go into assets/ on the device, where every suite's land together
+# (a module's cooked files are the same whichever suite brought them). adb's sync sends
+# only what changed, and the lock keeps suites that start together from sending it twice.
+if [ -d "$bin/shaders" ]; then
+  ( flock 9; "$adb" push --sync "$bin/shaders" "$dir/bin/" >/dev/null 2>&1 ) 9>"$bin/.emu_test.shaders.lock" ||
+    { echo "emu_test: could not push shaders/" >&2; exit 2; }
+fi
+if [ -f "$bin/$name.assets" ]; then
+  tree=$(head -n 1 "$bin/$name.assets" | tr -d '\r')
+  if [ -d "$tree" ]; then
+    "$adb" shell "mkdir -p $dir/bin/assets"
+    for m in "$tree"/*/; do
+      [ -d "$m" ] || continue
+      ( flock 9; "$adb" push --sync "${m%/}" "$dir/bin/assets/" >/dev/null 2>&1 ) 9>"$bin/.emu_test.assets.lock" ||
+        { echo "emu_test: could not push $(basename "$m")/ of $tree" >&2; exit 2; }
+    done
   fi
-done
+fi
 "$adb" push "$exe" "$dir/bin/$name" >/dev/null 2>&1 || { echo "emu_test: could not push $name" >&2; exit 2; }
 
 log=$(mktemp "${TMPDIR:-/tmp}/emu_test.XXXXXX")

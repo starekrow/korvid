@@ -110,7 +110,9 @@ inflated on delivery for a deflated entry and checked against its CRC-32 in debu
 builds. A path no mount has completes `Failed` with `ENOENT`; the completion looks the
 same whichever answered. Mounting a pack reads its tail, central directory and index
 synchronously and logs one line: entries, whether the index was used, how many entries
-are deflated or unaligned. At startup the module mounts, in order, `<exe dir>/assets/`,
+are deflated or unaligned. At startup the module mounts, in order, the program's loose
+assets (the output tree goldberg cooked for it, named by `<exe>.assets` beside the
+executable in a build tree; `<exe dir>/assets/` for a packaged program: `platform_assets_dir`),
 `<exe dir>/<exe>.kpak`, then what `platform_configure_mounts` named (the frame loop's
 `--pack FILE` and `--assets DIR`), so a pack overrides loose files and a mod overrides the
 pack. A tool mounts nothing.

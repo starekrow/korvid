@@ -453,3 +453,71 @@ attic exists ("goldberg found files in the attic"); `goldberg clean attic --out 
 empties it. The attic is hidden, so the scan of the output tree does not see it and
 nothing packs it.
 
+**Milestone 4, The handover** (Nov 14). S16 and S17. kormake copies no asset; goldberg
+cooks every program's.
+
+Proved on Linux, in debug, dev and ship, with the old `bin/assets/` directories moved
+away so nothing could fall back to them:
+
+- Every example builds and every test passes. arcfire's recorded runs replay and match:
+  Normal on the dev build (tick 14,122, 236 hashes), Hard on the ship build reading
+  `dist/arcfire/assets/` (tick 15,264, 255 hashes).
+- A build with nothing to do runs the cook edges and nothing else, in about 40 ms for
+  the whole tree.
+- `kormake package arcfire linux-ship` leaves the tree cooked in place and replaces the
+  rest of `dist/arcfire/`; `kormake package rocks linux-dev` copies its tree in; the
+  packaged `rocks` runs from `/tmp` and loads its assets.
+- `ninja bin/arcfire.kpak` packs the cooked tree (106 entries, nothing of goldberg's own).
+- `androidemu-dev` builds and `kormake package arcfire androidemu-dev` makes an `.apk`
+  with the cooked assets in it.
+
+How it is put together:
+
+- **One cook edge per program** with assets in its closure, executables and tests alike
+  (`goldberg cook --roots FILE --stamp FILE --quiet`). It depends on a phony that is
+  never a file, so it runs at every build; `restat` and a stamp goldberg rewrites only
+  when the tree changed keep that from rerunning anything else.
+- **`<target>/goldberg/<program>.roots`**, written by `gen`: the program, its tree, its
+  state file, the project directory, and each module's name and `assets/`.
+- **`<target>/bin/<program>.assets`**: one line, the tree. `platform_assets_dir` reads it
+  (the platform module's first mount, and the two tests that read a file directly);
+  with no such file it is `assets/` beside the executable, as before. Each OS gained
+  `os_exe_name` for it.
+- **Trees.** `build/assets/<program>/` in every config but ship. In ship,
+  `dist/<program>/assets/` for a game that packages as a plain directory, and
+  `build/assets-ship/<program>/` for a test or a game that packages as a bundle or an
+  `.apk`: the PRD's table had no place for those, and a test has no business in `dist/`.
+- **`package`** takes the tree's module folders (so not goldberg's marker or attic). It
+  ships no pack. A tree cooked in place stays; otherwise `dist/<exe>/` is replaced, as
+  it always was, so packaging another target over a ship tree costs the next ship build
+  a recook.
+- **kpack's rule** takes `%{assets}` (the tree) and names no config.
+- **`kormake clean`** with no target also removes `build/assets/`, `build/assets-ship/`
+  and `build/goldberg/`.
+
+Written and not run, each waiting for its machine:
+
+- **The Android emulator:** `tools/android/emu_test.sh` now pushes the suite's tree
+  (from `<suite>.assets`) module by module into `assets/` on the device. No emulator was
+  running here. The `.apk` was built and listed, not installed.
+- **macOS and iOS:** `os_exe_name` in `paths_apple.cc`; the `.app` and the iOS package
+  take the tree through the same `package.lua` path as Linux; `ios.lua`'s device test
+  bundle reads `<test>.assets`. The Simulator's tests run from the build directory and
+  should find their tree through the `.assets` file. None of it compiled here.
+- **Windows:** `os_exe_name`, `os_rename`, `os_current_dir` and `os_path_stat` in the
+  win32 sources, and goldberg itself as a host tool (the polling watcher; the process
+  stub). None of it compiled here. A Windows build now needs goldberg to build and
+  cook before any game runs.
+
+Not done:
+
+- **The lock** (S18, Decided 7). Two cooks of one program at once are not kept apart.
+  Two targets built at the same moment could both write one tree; each file is still
+  written whole.
+- **The attic in a ship tree.** A tree cooked in place is the shipped directory, so an
+  attic in it would ship. `package` says so when it sees one; it does not move it.
+- **An old package in the way.** A `dist/<game>/assets/` left by a package made before
+  this milestone has no marker, so a ship cook refuses it and says why. Removing
+  `dist/<game>/` is the fix. A package made now carries the marker, so a later ship
+  cook takes the directory over.
+

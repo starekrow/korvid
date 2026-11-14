@@ -266,7 +266,7 @@ function M.run(c, g, opts)
         -- The program in the host's spelling: Windows' CreateProcess takes "host/bin/x.exe"
         -- as a bare name to search for, and finds "host\bin\x.exe" where it is.
         cmd = cmd:gsub("%%{tool}", (util.ninja_escape(program(util.native(tool))):gsub("%%", "%%%%"))):gsub("%%{in}", "$in")
-          :gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp")
+          :gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp"):gsub("%%{assets}", "$assets")
           :gsub("%%{shader_includes}", (table.concat(shader_includes, " "):gsub("%%", "%%%%")))
         -- The consuming platform's target ("apple-ios26.0-simulator"), for a compiler that
         -- writes code for it (Metal's, through slangc).
@@ -399,15 +399,63 @@ function M.run(c, g, opts)
         end
       end
     end
-    -- Assets: bin/assets/<module>/<path>, subdirectories kept.
-    if m.assets_dir then
-      for _, n in ipairs(util.sorted_files_recursive(m.assets_dir)) do
-        local outpath = pre .. "bin/assets/" .. m.name .. "/" .. n
-        w(string.format("build %s: copy %s", util.ninja_escape(outpath), util.ninja_escape(util.join(m.assets_dir, n))))
-        runtime[#runtime + 1] = outpath
+    -- Assets are not staged here: goldberg cooks them, once per program (cook, below).
+    return runtime
+  end
+
+  -- Assets. Nothing copies them: goldberg (tools/goldberg, built for the host) cooks the
+  -- assets/ of a program's modules into that program's output tree, and the program
+  -- finds the tree through <program>.assets beside it. One edge per program, which runs
+  -- at every build: Ninja does not know goldberg's inputs (a rule file that does not exist
+  -- yet is one), so goldberg's own state decides, and a cook with nothing to do costs a
+  -- scan. Its stamp changes only when the tree did, so nothing downstream reruns for it.
+  --
+  -- The tree: build/assets/<program>/ in every config but ship (dev and debug share it);
+  -- in ship, dist/<program>/assets/ for a game that packages as a plain directory, where
+  -- the tree is the shipped one, and build/assets-ship/<program>/ for everything else (a
+  -- test, a program that packages as a bundle or an .apk, which copies it in).
+  local goldberg_tool, cook_rule = nil, false
+  local function json_string(v) return '"' .. v:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"' end
+  local function cook(inst, program_name, is_game)
+    local roots, seen = {}, {}
+    local function add(m) if m.assets_dir and not seen[m.name] then seen[m.name] = true; roots[#roots + 1] = m end end
+    for _, d in ipairs(inst.closure) do add(d.module) end
+    add(inst.module)
+    if #roots == 0 then return nil end
+    if goldberg_tool == nil then
+      for _, i in ipairs(g.instances) do
+        if i.module.name == "goldberg" and i.module.fields.output == "exe" and not i.dropped then goldberg_tool = g.tool_path(i) end
+      end
+      if not goldberg_tool then
+        util.fail("'%s' has assets, and nothing here cooks them: the goldberg module (the engine's tools/goldberg) is not on a module path, or cannot build for this host",
+          inst.module.name)
       end
     end
-    return runtime
+    local pre = inst.prefix
+    local ship = g.config == "ship"
+    local tree
+    if not ship then tree = util.join(c.build_root, "assets/" .. program_name)
+    elseif is_game and not flags(inst).tc.fields.package then tree = util.join(c.base_dir, "dist/" .. program_name .. "/assets")
+    else tree = util.join(c.build_root, "assets-ship/" .. program_name) end
+    local state = util.join(c.build_root, "goldberg/" .. program_name .. "/" .. (ship and "ship" or "dev") .. "/state.json")
+    local lines = {}
+    for _, m in ipairs(roots) do lines[#lines + 1] = string.format('    { "name": %s, "dir": %s }', json_string(m.name), json_string(m.assets_dir)) end
+    local roots_rel = pre .. "goldberg/" .. program_name .. ".roots"
+    kfs.mkdirp(util.join(build, pre .. "goldberg"))
+    kfs.mkdirp(util.join(build, pre .. "bin"))
+    kfs.write(util.join(build, roots_rel), string.format('{\n  "game": %s,\n  "out": %s,\n  "state": %s,\n  "project": %s,\n  "roots": [\n%s\n  ]\n}\n',
+      json_string(program_name), json_string(tree), json_string(state), json_string(c.base_dir), table.concat(lines, ",\n")), true)
+    kfs.write(util.join(build, pre .. "bin/" .. program_name .. ".assets"), tree .. "\n", true)
+    if not cook_rule then
+      cook_rule = true
+      w("rule goldberg_cook\n  command = " .. util.ninja_escape(program(util.native(goldberg_tool))) ..
+        " cook --roots $in --stamp $out --quiet\n  restat = 1\n  description = COOK $in")
+      -- Never a file, so always out of date: what makes the cook edges run every time.
+      w("build always-cook: phony")
+    end
+    local stamp = pre .. "goldberg/" .. program_name .. ".cooked"
+    w(string.format("build %s: goldberg_cook %s | %s always-cook", util.ninja_escape(stamp), util.ninja_escape(roots_rel), util.ninja_escape(goldberg_tool)))
+    return stamp, tree
   end
 
   -- What a program (an executable, or a module's tests) links and has staged beside it:
@@ -530,27 +578,29 @@ function M.run(c, g, opts)
       elseif output == "exe" then
         local li = link_inputs(inst)
         inst.extlibs = li.extlibs
-        local rt = li.staged
+        -- Its assets, cooked: building the program builds what it reads.
+        local cook_stamp, tree = cook(inst, exe_name(inst), true)
+        inst.assets_tree = tree
+        if cook_stamp then li.staged[#li.staged + 1] = cook_stamp end
         local file, app_ldflags = exe_file(inst)
         local exe = pre .. "bin/" .. file
         link(inst, exe, objs, li, app_ldflags)
         if inst.in_roots then all[#all + 1] = exe end
         local outs = { exe }
         outputs_by_key[inst.key] = outs
-        -- Rules that run once per executable over its staged assets (a pack): part of the
+        -- Rules that run once per executable over its cooked assets (a pack): part of the
         -- default build in the configs the rule names, buildable by name in the others.
-        -- Their outputs are what `package` ships beside the executable.
+        -- Their outputs are what `package` ships beside the executable. The rule's command
+        -- names the tree as %{assets}; its input is the cook's stamp.
         inst.per_exe_outputs = {}
         for _, tr0 in ipairs(tool_rules_of(inst)) do
           local r = tr0.rule
-          if r.per == "exe" then
+          if r.per == "exe" and cook_stamp then
             local tr = tool_rules[tr0.name]
-            local ins = {}
-            local staged = pre .. "bin/assets/"
-            for _, p in ipairs(rt) do if p:sub(1, #staged) == staged then ins[#ins + 1] = p end end
             local outp = pre .. "bin/" .. r.outputs:gsub("%%{exe}", exe_name(inst))
             local implicit = tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""
-            w(string.format("build %s: %s %s%s", util.ninja_escape(outp), tr0.name, util.ninja_paths(ins), implicit))
+            w(string.format("build %s: %s %s%s\n  assets = %s", util.ninja_escape(outp), tr0.name, util.ninja_escape(cook_stamp), implicit,
+              util.ninja_escape(q(tree))))
             inst.per_exe_outputs[#inst.per_exe_outputs + 1] = outp
             local configs = util.as_list(r.configs or {})
             for _, cf in ipairs(configs) do
@@ -597,6 +647,9 @@ function M.run(c, g, opts)
       -- it is built before they are, and they run again when it changes.
       local implicit = {}
       for _, p in ipairs(li.staged) do implicit[#implicit + 1] = p end
+      -- A test's assets are cooked as a game's are, into a tree of its own.
+      local cook_stamp = cook(inst, sym .. "_tests", false)
+      if cook_stamp then implicit[#implicit + 1] = cook_stamp end
       if m.fields.output == "exe" and outputs_by_key[inst.key] then implicit[#implicit + 1] = outputs_by_key[inst.key][1] end
       w(string.format("build %s: %s %s%s", util.ninja_escape(pre .. "test/" .. sym .. ".ok"),
         (pre ~= "" and runner ~= "") and "run_test_host" or "run_test", util.ninja_escape(exe),

@@ -26,8 +26,8 @@ end
 
 -- ---- arguments ------------------------------------------------------------------------
 
-local VALUE = { ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--state"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true }
-local FLAG = { ["-v"] = true }
+local VALUE = { ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--state"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true, ["--stamp"] = true }
+local FLAG = { ["-v"] = "verbose", ["--quiet"] = "quiet", ["-q"] = "quiet" }
 
 local function parse(words)
     local o = { roots = {}, names = {} }
@@ -48,7 +48,7 @@ local function parse(words)
             end
             i = i + 2
         elseif FLAG[w] then
-            o.verbose = true
+            o[FLAG[w]] = true
             i = i + 1
         elseif w:sub(1, 1) == "-" then
             return nil, "unknown option " .. w
@@ -91,7 +91,7 @@ local function read_project(o)
     return { text = text, display = path }
 end
 
--- A roots file, as kormake writes it: { "game", "out", "project", "roots": [ { "name", "dir" } ] }.
+-- A roots file, as kormake writes it: { "game", "out", "state", "project", "roots": [ { "name", "dir" } ] }.
 local function read_roots_file(o)
     local text, err = kv.fs.read(o.roots_file)
     if not text then return nil, err end
@@ -100,6 +100,7 @@ local function read_roots_file(o)
     o.game = o.game or doc.game
     o.out = o.out or doc.out
     o.project = o.project or doc.project
+    o.state = o.state or doc.state
     for _, r in ipairs(doc.roots or {}) do o.roots[#o.roots + 1] = { name = r.name, dir = r.dir } end
     return true
 end
@@ -201,9 +202,11 @@ local function report(final)
     if s.graph then
         for _, n in ipairs(s.graph.notes) do say("goldberg: %s", n) end
         s.graph.notes = {}
-        say("goldberg: %s: %d files, %d cooked, %d clean, %d failed%s%s (%.0f ms%s)", run.cfg.game, t.files, t.cooked, t.clean, t.failed,
+        -- Under a build, a cook with nothing to do says nothing.
+        local idle = t.cooked == 0 and t.removed == 0 and t.failed == 0 and #t.errors == 0
+        if not (run.opts.quiet and final and idle) then say("goldberg: %s: %d files, %d cooked, %d clean, %d failed%s%s (%.0f ms%s)", run.cfg.game, t.files, t.cooked, t.clean, t.failed,
             t.removed > 0 and string.format(", %d to the attic", t.removed) or "", t.warned > 0 and string.format(", %d warned", t.warned) or "", ms,
-            final and "" or ", watching with " .. run.backend)
+            final and "" or ", watching with " .. run.backend) end
     else
         say("goldberg: %s: %d files, %d rule files, %d failed, %d warned, nothing cooked: no --out (%.0f ms%s)", run.cfg.game, t.files, t.rules, t.failed, t.warned, ms,
             final and "" or ", watching with " .. run.backend)
@@ -244,6 +247,11 @@ function goldberg.tick(quiet)
     if run.mode == "cook" then
         local t = report(true)
         write_outputs()
+        local failed = t.failed > 0 or #t.errors > 0
+        -- For a build: a file that changes only when the output tree did.
+        if run.opts.stamp and not failed and (t.cooked > 0 or t.removed > 0 or not kv.fs.is_file(run.opts.stamp)) then
+            host.write_atomic(run.opts.stamp, "cooked " .. os.date("%Y-%m-%d %H:%M:%S") .. "\n")
+        end
         -- The escape hatch is not a place to forget things in.
         if run.opts.out and kv.fs.is_dir(run.opts.out .. "/" .. ATTIC) then
             complain("goldberg found files in the attic: %s/%s (what it took out of the output tree; `goldberg clean attic --out %s` empties it)", run.opts.out, ATTIC, run.opts.out)

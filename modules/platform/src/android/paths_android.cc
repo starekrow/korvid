@@ -60,6 +60,19 @@ bool os_base_path(char* out, u32 cap) {
     return true;
 }
 
+bool os_exe_name(char* out, u32 cap) {
+    if (g_package[0]) return false; // an app: its files are in its package
+    char path[4096];
+    ssize_t n = readlink("/proc/self/exe", path, sizeof path - 1);
+    if (n <= 0) return false;
+    path[n] = 0;
+    const char* slash = strrchr(path, '/');
+    const char* name = slash ? slash + 1 : path;
+    if (!name[0] || strlen(name) >= cap) return false;
+    memcpy(out, name, strlen(name) + 1);
+    return true;
+}
+
 bool os_pref_path(const char* org, const char* app, char* out, u32 cap) {
     const char* root = g_internal[0] ? g_internal : getenv("TMPDIR");
     if (!root || !root[0]) { KV_WARN("platform", "no preference path: not an app, and TMPDIR is not set"); return false; }

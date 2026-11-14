@@ -40,7 +40,7 @@ in any order, except that the command has to be the first word.
 
 **build** (the default)
 : Builds the named modules (see NAMES): each one's executable or library, everything it
-  links, its staged assets and shaders, and in the ship config its pack (see Tool rules).
+  links, its shaders, and its assets, cooked by goldberg into its output tree (see Assets).
   A module's tests are not built. With no NAME and nothing chosen by the current directory, kormake builds
   Ninja's default, `all`: every root of the master file and the tests those roots ask for.
 
@@ -54,7 +54,7 @@ in any order, except that the command has to be the first word.
 
 **package**
 : Builds one executable and puts it in `dist/<exe>/` together with what it needs at run
-  time: its pack (or its loose assets, if it has no pack), its shaders, the repository's
+  time: its cooked assets, loose (a pack is built by name and not packaged, for now), its shaders, the repository's
   `LICENSE` and `NOTICE`, and every license file named by a module in its closure (see
   `licenses`). When the toolchain packages applications, the result is an `.app` instead:
   macOS gets `Contents/MacOS` and `Contents/Resources` with SDL3 bundled and the app
@@ -92,8 +92,9 @@ in any order, except that the command has to be the first word.
 
 **clean**
 : Removes the target's build directory. With no TARGET, it removes every target's
-  directory and `compile_commands.json`, and then the build directory itself if that
-  leaves it empty. It removes nothing else it finds there. This command takes no NAMEs.
+  directory, `compile_commands.json`, and what goldberg cooked and remembers (`assets/`,
+  `assets-ship/`, `goldberg/`), and then the build directory itself if that leaves it
+  empty. It removes nothing else it finds there, and never `dist/`. This command takes no NAMEs.
 
 **help**, **--version**
 : Print the usage summary, or the version (`kormake 1.1 (Lua 5.5)`).
@@ -276,7 +277,7 @@ The module's name comes from this line, not from its directory's name.
     tests/*.cc               the module's test executable, with the module and its closure linked (an executable's tests
                              link its closure only and run after the executable is built: they start it, they do not contain it)
     shaders/                 inputs for the tool rules the module uses (the shader rule takes shaders/*.slang)
-    assets/                  copied to bin/assets/<module>/, with subdirectories and without hidden files
+    assets/                  cooked by goldberg into the output tree of every program that links the module (see Assets)
 
 Vendored C code is compiled through a `.cc` file that includes it. Generated sources go in
 the build directory, never in the source tree.
@@ -339,14 +340,34 @@ can use these placeholders:
 fields for one platform, or for one toolchain family, or for wherever a module is bound to
 an interface (`["renderer-d3d12"] = { ... }`: the shader rule writes DXIL wherever that
 backend is bound, whatever the platform); a bound module's variant wins. A rule with `per = "exe"` and
-`inputs = "assets"` runs once per executable instead, over every asset that executable
-stages, passed in a response file (`%{rsp}`) and with `%{exe}` available in `outputs`.
+`inputs = "assets"` runs once per executable instead, after that executable's assets are
+cooked, with the output tree as `%{assets}` and `%{exe}` available in `outputs`.
 This is how kpack's pack rule writes `bin/<exe>.kpak`. A per-exe rule's `configs` names
-the configs whose default build holds its outputs (kpack's says `{ "ship" }`); in the
-others they are built by name, or by `package`, which ships them beside the executable.
+the configs whose default build holds its outputs (kpack's names none: goldberg cooks
+loose, in ship too, until packs are made from its graph); in the others they are built by
+name (`ninja -C build/<target> bin/<exe>.kpak`).
 A rule with any other field is an error, as is a per-exe rule whose inputs are not
 `"assets"`. The tool's
 binary is an implicit input to every edge it runs.
+
+### Assets
+
+Nothing in kormake copies an asset. For every program (an executable, or a module's
+tests) with an `assets/` directory in its closure, the graph has one edge that runs
+`goldberg cook` (tools/goldberg, built for the host) over those directories and into that
+program's output tree. The edge runs at every build: goldberg's own state decides what
+is out of date, and a cook with nothing to do costs a scan. Its stamp changes only when
+the tree did, so nothing reruns for it.
+
+    build/assets/<program>/<module>/...        every config but ship (dev and debug share it)
+    dist/<program>/assets/<module>/...         ship, for a game that packages as a plain directory: cooked in place
+    build/assets-ship/<program>/<module>/...   ship, for anything else: a test, a game packaged as a bundle or an .apk
+    build/goldberg/<program>/<dev|ship>/       goldberg's state for that tree
+    <target>/goldberg/<program>.roots          what the cook is told: the program, the tree, the state, each module's assets/
+    <target>/bin/<program>.assets              one line, the tree's path: how the program finds it (the platform module reads it)
+
+A packaged program has no `.assets` file and reads `assets/` beside itself, which
+`package` fills from the tree, module by module. `docs/PRDs/Goldberg-Master-PRD.md`.
 
 ### The build directory
 
@@ -357,9 +378,10 @@ it). Ninja runs there.
     compile_commands.json     every compile; build/compile_commands.json, beside the targets, is the last one written (where clangd looks)
     bin/<exe>                 executables, and the files they need beside them (SDL3.dll on Windows)
     bin/<module>_tests        test executables
-    bin/assets/<module>/      staged assets
+    bin/<program>.assets      where that program's cooked assets are (see Assets)
+    goldberg/<program>.roots  what its cook is told; goldberg/<program>.cooked, the cook's stamp
     bin/shaders/              compiled shaders
-    bin/<exe>.kpak            a pack (in ship by default; by name in other configs)
+    bin/<exe>.kpak            a pack (by name)
     obj/<module>/             objects
     lib/                      libraries (libkv_<module>.a, kv_<module>.lib)
     gen/<module>/             generated sources: unity.cc, modules.gen.cc, tool outputs that are not installed

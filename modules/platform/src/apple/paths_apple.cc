@@ -46,6 +46,17 @@ bool os_base_path(char* out, u32 cap) {
     return true;
 }
 
+bool os_exe_name(char* out, u32 cap) {
+    char raw[PATH_MAX];
+    uint32_t raw_cap = sizeof raw;
+    if (_NSGetExecutablePath(raw, &raw_cap) != 0) return false;
+    const char* slash = strrchr(raw, '/');
+    const char* name = slash ? slash + 1 : raw;
+    if (!name[0] || strlen(name) >= cap) return false;
+    memcpy(out, name, strlen(name) + 1);
+    return true;
+}
+
 bool os_pref_path(const char* org, const char* app, char* out, u32 cap) {
     const char* home = getenv("HOME");
     if (!home || !home[0]) {

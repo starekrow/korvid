@@ -8,6 +8,9 @@ namespace kv {
 // it needs beside it (shaders/, assets/, its pack). In a macOS .app that is the bundle's
 // Contents/Resources/, not Contents/MacOS/. False if the OS will not say.
 bool os_base_path(char* out, u32 cap);
+// The running executable's file name, without ".exe". False where a program has no file
+// of its own to name (an Android app).
+bool os_exe_name(char* out, u32 cap);
 // The per-user writable directory for (org, app), created if missing, with a trailing
 // separator. False with a log line if there is no home to put it in.
 bool os_pref_path(const char* org, const char* app, char* out, u32 cap);

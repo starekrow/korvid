@@ -248,6 +248,12 @@ const char* platform_base_path(Engine& e);
 // The same, asked of the OS directly, for code with no engine (a test). False if the OS
 // will not say.
 bool        platform_exe_dir(char* out, u32 cap);
+// Where this program's loose assets are, with no trailing separator: the output tree
+// goldberg cooked for it, named by <exe>.assets beside the executable (one line, which
+// kormake writes), or assets/ beside the executable when there is no such file (a
+// packaged program). Without an engine: for tools, and tests that read a file directly.
+// False if neither is a directory.
+bool        platform_assets_dir(char* out, u32 cap);
 // The per-user directory for saves and settings, created if need be, with a trailing
 // separator: $XDG_DATA_HOME/<org>/<app>/, or ~/.local/share/<org>/<app>/, on Linux;
 // ~/Library/Application Support/<org>/<app>/ on macOS (where SDL puts it on each). The first
