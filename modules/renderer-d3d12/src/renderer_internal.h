@@ -45,13 +45,35 @@
 #undef near
 #undef far
 #include "korvid/render/core/layout.h"
-#include "korvid/render/world.h"
 
 // What this backend tells the render core (korvid/render/core/core.h).
 #define KV_RB_NAME       "d3d12"
 #define KV_RB_CLIP_Y_UP  1
 #define KV_RB_SHADER_EXT ".dxil.zip"
 #define KV_RB_SURFACE    RendererSurface::D3D12
+
+namespace kv {
+
+// A buffer: a committed resource, its heap's kind and the state it was last left in.
+// Upload and readback buffers stay mapped and in the one state their heap allows.
+struct Buffer {
+    ID3D12Resource*       resource = nullptr;
+    u64                   size     = 0;
+    void*                 mapped   = nullptr;
+    D3D12_RESOURCE_STATES state    = D3D12_RESOURCE_STATE_COMMON;
+    D3D12_GPU_VIRTUAL_ADDRESS gpu() const { return resource ? resource->GetGPUVirtualAddress() : 0; }
+};
+
+// Destroyed once the frame that last used it has passed its fence: every D3D12 object is
+// a COM object, so one kind does.
+struct Garbage { IUnknown* object; };
+
+// What the render core holds of this backend's (korvid/render/core/core.h).
+using RbBuffer  = Buffer;
+using RbGarbage = Garbage;
+
+} // namespace kv
+
 #include "korvid/render/core/core.h"
 
 namespace kv {
@@ -92,22 +114,8 @@ enum RootParam : u32 {
 
 // ---- CPU-side records ---------------------------------------------------------------------
 
-// A buffer: a committed resource, its heap's kind and the state it was last left in.
-// Upload and readback buffers stay mapped and in the one state their heap allows.
-struct Buffer {
-    ID3D12Resource*       resource = nullptr;
-    u64                   size     = 0;
-    void*                 mapped   = nullptr;
-    D3D12_RESOURCE_STATES state    = D3D12_RESOURCE_STATE_COMMON;
-    D3D12_GPU_VIRTUAL_ADDRESS gpu() const { return resource ? resource->GetGPUVirtualAddress() : 0; }
-};
-
-struct Texture {
+struct Texture : TextureCore {
     ID3D12Resource* resource = nullptr;
-    u32             width = 0, height = 0;
-    TextureFormat   format = TextureFormat::RGBA8_SRGB;
-    bool            resident = false;
-    Name            name;
 };
 
 // A shader blob, copied out of its container: what a pipeline state is made from.
@@ -117,17 +125,10 @@ struct ShaderBlob {
     D3D12_SHADER_BYTECODE code() const { return D3D12_SHADER_BYTECODE{data, size}; }
 };
 
-struct GamePipe {
-    Name                 shader;
-    BlendMode            blend = BlendMode::Alpha;
+struct GamePipe : GamePipeCore {
     ShaderBlob           fragment;
     ID3D12PipelineState* pipeline = nullptr;
-    bool                 used = false, failed = false;
 };
-
-// Destroyed once the frame that last used it has passed its fence: every D3D12 object is
-// a COM object, so one kind does.
-struct Garbage { IUnknown* object; };
 
 // A staged texture upload, recorded into the next frame's command list.
 struct PendingUpload {
@@ -138,31 +139,12 @@ struct PendingUpload {
     u32             width, height, pitch; // pitch: 256-aligned, as a placed footprint needs
 };
 
-struct RingSpan {
-    ID3D12Resource* resource = nullptr;
-    u64             offset = 0;
-    void*           ptr    = nullptr;
-};
-
-// The frame ring, as renderer-vulkan's: one upload-heap buffer, a frame's spans released
-// at its fence.
-struct FrameRing {
-    Buffer buf;
-    u64    head = 0, tail = 0, used = 0, frame_bytes = 0, peak = 0;
-    u32    grows = 0;
-};
-
-struct FrameInFlight {
+struct FrameInFlight : FrameCore {
     ID3D12CommandAllocator*    allocator = nullptr;
     ID3D12GraphicsCommandList* cmd       = nullptr;
     u64                        fence_value = 0; // the queue's fence reaches it when this frame is done
-    Array<Garbage>             garbage;
-    u32                        garbage_owned = 0;
-    Array<u32>                 dirty_slots;     // texture slots to rewrite in this frame's table
-    u64                        ring_end = 0, ring_bytes = 0;
     Buffer                     layers;          // the layers' offsets: upload heap, float4 each
     Buffer                     post_params;     // the post pass's parameters: upload heap
-    bool                       submitted = false;
     bool                       gpu_stamped = false, gpu_counted = false;
     u64                        submit_ticks = 0;
     u64                        gpu_pixels = 0;
@@ -180,10 +162,7 @@ struct GpuProfiler {
     RendererGpuStats last;
 };
 
-struct PostPass {
-    Name                 shader;
-    i32                  layer = 0;
-    bool                 failed = false;
+struct PostPass : PostCore {
     ShaderBlob           vertex;   // the engine's vs_post
     ShaderBlob           fragment; // the game's fs_main
     ID3D12RootSignature* root = nullptr;
@@ -191,8 +170,6 @@ struct PostPass {
     ID3D12Resource*      target = nullptr; // the world: the swapchain's size, sRGB
     D3D12_RESOURCE_STATES target_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
     u32                  width = 0, height = 0;
-    f32                  params[KV_POST_PARAMS * 4] = {};
-    u32                  param_count = 0;
 };
 
 struct Swapchain {
@@ -203,19 +180,8 @@ struct Swapchain {
     bool             tearing = false;    // DXGI_FEATURE_PRESENT_ALLOW_TEARING: vsync off really off
 };
 
-struct SpriteTables {
-    u32    capacity = 0;
-    Buffer sprites, bucket_of, block_hist, sorted;
-    u32    blocks() const { return capacity / kBlockRows; }
-};
-
-struct Renderer {
-    Renderer**  owner_slot = nullptr;
-    Allocator*  general    = nullptr;
+struct Renderer : RenderCore {
     HWND        window     = nullptr;
-    char        base_path[512] = {};
-    bool        validation = false;
-    bool        vsync      = true;
     bool        markers    = false; // event markers for PIX and the like
 
     IDXGIFactory4*      factory = nullptr;
@@ -231,7 +197,6 @@ struct Renderer {
 
     Swapchain swapchain;
     bool      swapchain_dirty = true;
-    u32       want_width = 0, want_height = 0;
 
     ID3D12DescriptorHeap* heap = nullptr;     // shader visible: textures, post inputs
     ID3D12DescriptorHeap* rtv_heap = nullptr;
@@ -244,41 +209,17 @@ struct Renderer {
     ID3D12PipelineState*  pipelines[kBlendCount] = {};
     GamePipe              game_pipes[kGameSlots];
     PostPass              post;
-    f64                   start_time = 0.0;
     ID3D12PipelineState*  cs_count = nullptr, *cs_scan = nullptr, *cs_bucket_scan = nullptr,
                          *cs_scatter = nullptr, *cs_key_sort = nullptr;
 
-    RenderWorld world; // the sprites, the materials, what is dirty, the bucket counts (korvid/render/world.h)
     Pool<Texture>        textures;
-    Handle               default_material;
-    u16                  texture_kind = 0, material_kind = 0;
     Array<PendingUpload> uploads;
 
-    Map<u64, Handle>     texture_by_name;
-    u32                  textures_made = 0;
-    f32*                 check_keys = nullptr;
-    u64                  rows_uploaded  = 0;
 
-    SpriteTables tables;
-    Buffer       material_table;
-    Buffer       sort_meta;
-    Buffer       indirect;
-    FrameRing    ring;
 
     FrameInFlight frames[kFramesInFlight];
-    u32           frame_index = 0;
-    u64           frame_count = 0;
 
-    char   shot_path[512] = {};
-    bool   shot_pending = false, shot_recorded = false;
-    Buffer shot_buffer;
-    u32    shot_width = 0, shot_height = 0, shot_pitch = 0;
-    bool   check_pending = false, check_recorded = false;
-    Buffer check_buffer;
-    u32    check_rows = 0;
-    u32    checks_passed = 0, checks_failed = 0;
 
-    f64 last_wait = 0.0;
     u32 validation_errors = 0, validation_warnings = 0;
 };
 
@@ -316,30 +257,20 @@ bool rb_create_buffer(Renderer* r, D3D12_HEAP_TYPE heap, u64 size, bool uav, Buf
 void rb_destroy_buffer(Buffer& b);
 void rb_defer_release(Renderer* r, IUnknown* object);
 void rb_defer_destroy_buffer(Renderer* r, Buffer& b);
-void rb_run_garbage(Renderer* r, FrameInFlight& f);
 // Records a transition when the buffer is not already in `to`; a UAV barrier when it is a
 // UAV staying one (one dispatch's writes before the next one's reads).
 void rb_transition(ID3D12GraphicsCommandList* cmd, Buffer& b, D3D12_RESOURCE_STATES to);
 void rb_transition(ID3D12GraphicsCommandList* cmd, ID3D12Resource* res, D3D12_RESOURCE_STATES from, D3D12_RESOURCE_STATES to);
 
-bool     rb_ring_init(Renderer* r, u64 bytes);
-RingSpan rb_ring_alloc(Renderer* r, u64 bytes, u64 align);
-void     rb_ring_submitted(Renderer* r, FrameInFlight& f);
-void     rb_ring_release(Renderer* r, FrameInFlight& f);
 
 DXGI_FORMAT rb_dxgi_format(TextureFormat f);
-bool rb_create_texture_resource(Renderer* r, Texture& t);
-bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels);
-void rb_defer_destroy_texture(Renderer* r, Texture& t);
 bool rb_create_default_texture(Renderer* r);
-void rb_mark_slot_dirty(Renderer* r, u32 slot);
 void rb_write_texture_slot(Renderer* r, u32 frame, u32 slot);
 D3D12_GPU_DESCRIPTOR_HANDLE rb_heap_gpu(Renderer* r, u32 index);
 D3D12_CPU_DESCRIPTOR_HANDLE rb_heap_cpu(Renderer* r, u32 index);
 D3D12_CPU_DESCRIPTOR_HANDLE rb_rtv(Renderer* r, u32 index);
 
 
-bool rb_create_resource_pools(Renderer* r);
 bool rb_create_tables(Renderer* r, u32 rows);
 bool rb_create_static_buffers(Renderer* r);
 bool rb_create_heaps_and_root(Renderer* r);
@@ -361,11 +292,8 @@ void rb_destroy_pipelines(Renderer* r);
 bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view);
 u32  rb_record_draws(Renderer* r, ID3D12GraphicsCommandList* cmd, u32 first_bucket, u32 end_bucket);
 bool rb_create_game_pipeline(Renderer* r, GamePipe& gp);
-bool rb_write_screenshot(Renderer* r);
-bool rb_verify_sort(Renderer* r);
 
 // ---- d3d_post_pass.cc ---------------------------------------------------------------------
-bool rb_post_set(Renderer* r, i32 layer, Name shader);
 bool rb_post_active(const Renderer* r);
 bool rb_post_prepare(Renderer* r);
 void rb_post_begin_world(Renderer* r, ID3D12GraphicsCommandList* cmd, const RenderView& view);
@@ -388,6 +316,5 @@ void rb_gpu_frame_end(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* 
 void rb_gpu_collect(Renderer* r, FrameInFlight& f);
 
 // ---- renderer.cc --------------------------------------------------------------------------
-u32  rb_material_slot(Renderer* r, Name shader, BlendMode blend);
 
 } // namespace kv

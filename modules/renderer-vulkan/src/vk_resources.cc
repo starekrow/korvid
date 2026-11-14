@@ -67,7 +67,7 @@ void rb_destroy_buffer(Renderer* r, Buffer& b) {
 // the wait that opens that frame (slice 7 found the staging buffer freed before its copy).
 
 void rb_defer_destroy(Renderer* r, Garbage::Kind kind, u64 handle) {
-    if (handle) r->frames[r->frame_index].garbage.push(Garbage{kind, handle});
+    if (handle) rc_defer(r, Garbage{kind, handle});
 }
 
 void rb_defer_destroy_buffer(Renderer* r, Buffer& b) {
@@ -77,114 +77,11 @@ void rb_defer_destroy_buffer(Renderer* r, Buffer& b) {
     b = Buffer{};
 }
 
-void rb_run_garbage(Renderer* r, FrameInFlight& f) {
-    u32 owned = f.garbage_owned <= f.garbage.len ? f.garbage_owned : f.garbage.len;
-    for (u32 i = 0; i < owned; ++i) {
-        const Garbage& g = f.garbage[i];
-        switch (g.kind) {
-        case Garbage::BufferKind:    vkDestroyBuffer(r->device, (VkBuffer)g.handle, nullptr); break;
-        case Garbage::ImageKind:     vkDestroyImage(r->device, (VkImage)g.handle, nullptr); break;
-        case Garbage::ImageViewKind: vkDestroyImageView(r->device, (VkImageView)g.handle, nullptr); break;
-        case Garbage::MemoryKind:    vkFreeMemory(r->device, (VkDeviceMemory)g.handle, nullptr); break;
-        case Garbage::SwapchainKind: vkDestroySwapchainKHR(r->device, (VkSwapchainKHR)g.handle, nullptr); break;
-        case Garbage::SemaphoreKind: vkDestroySemaphore(r->device, (VkSemaphore)g.handle, nullptr); break;
-        case Garbage::PipelineKind:  vkDestroyPipeline(r->device, (VkPipeline)g.handle, nullptr); break;
-        }
-    }
-    // What was queued after the frame's submit stays, first, for the frame after.
-    u32 rest = f.garbage.len - owned;
-    if (owned && rest) memmove(f.garbage.data, f.garbage.data + owned, sizeof(Garbage) * rest);
-    f.garbage.len   = rest;
-    f.garbage_owned = 0;
-}
-
 // ---- the frame ring -----------------------------------------------------------------------
 // [tail, head) is owned by frames in flight, the frame being recorded included; `used`
 // counts those bytes with wrap gaps so head == tail is unambiguous. A frame's allocations
 // are contiguous in ring order even when they begin before the previous frame's fence
 // passes, so releasing a frame is moving the tail to where that frame ended.
-
-bool rb_ring_init(Renderer* r, VkDeviceSize bytes) {
-    FrameRing& g = r->ring;
-    if (!rb_create_host_buffer(r, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, g.buf)) return false;
-    rb_name(r, VK_OBJECT_TYPE_BUFFER, (u64)g.buf.buffer, "upload ring");
-    g.head = g.tail = g.used = g.frame_bytes = 0;
-    return true;
-}
-
-namespace {
-
-bool ring_grow(Renderer* r, VkDeviceSize need) {
-    FrameRing& g = r->ring;
-    VkDeviceSize cap = g.buf.size * 2;
-    while (cap < need * 2) cap *= 2;
-    // Spans handed out so far point at the old buffer, which stays alive until this
-    // frame's fence; the accounting restarts in the new one.
-    rb_defer_destroy_buffer(r, g.buf);
-    if (!rb_create_host_buffer(r, cap, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, g.buf)) return false;
-    rb_name(r, VK_OBJECT_TYPE_BUFFER, (u64)g.buf.buffer, "upload ring");
-    g.head = g.tail = g.used = 0;
-    // The old buffer's spans are the garbage queue's now, this frame's included: counted
-    // against the new buffer they would be released from it, and `used` would wrap.
-    g.frame_bytes = 0;
-    for (FrameInFlight& f : r->frames) f.ring_bytes = 0;
-    ++g.grows;
-    KV_INFO("vulkan", "frame ring grown to %llu KB", (unsigned long long)(cap / 1024));
-    return true;
-}
-
-} // namespace
-
-RingSpan rb_ring_alloc(Renderer* r, VkDeviceSize bytes, VkDeviceSize align) {
-    FrameRing& g = r->ring;
-    RingSpan out;
-    if (bytes == 0) return out;
-    for (u32 attempt = 0; attempt < 2; ++attempt) {
-        VkDeviceSize cap  = g.buf.size;
-        VkDeviceSize head = (g.head + align - 1) / align * align;
-        VkDeviceSize gap  = head - g.head;
-        bool ok = false;
-        if (g.used == 0) {
-            g.head = g.tail = 0; head = 0; gap = 0;
-            ok = bytes <= cap;
-        } else if (g.head >= g.tail) {         // free: [head, cap) then [0, tail)
-            if (head + bytes <= cap) ok = true;
-            else if (bytes < g.tail) { gap = cap - g.head; head = 0; ok = true; } // wrap; the rest of the buffer is a gap
-        } else {                               // free: [head, tail)
-            ok = head + bytes < g.tail;
-        }
-        if (ok) {
-            out.buffer = g.buf.buffer;
-            out.offset = head;
-            out.ptr    = (u8*)g.buf.mapped + head;
-            g.head     = head + bytes;
-            if (g.head == cap) g.head = 0;
-            g.used        += gap + bytes;
-            g.frame_bytes += gap + bytes;
-            if (g.used > g.peak) g.peak = g.used;
-            return out;
-        }
-        if (!ring_grow(r, bytes + align)) return RingSpan{};
-    }
-    return out;
-}
-
-void rb_ring_submitted(Renderer* r, FrameInFlight& f) {
-    f.ring_end   = r->ring.head;
-    f.ring_bytes = r->ring.frame_bytes;
-    r->ring.frame_bytes = 0;
-}
-
-void rb_ring_release(Renderer* r, FrameInFlight& f) {
-    FrameRing& g = r->ring;
-    // A frame that took nothing (or whose spans went with a retired buffer) ends where
-    // the frame before it did; its end mark says nothing about the current buffer.
-    if (!f.submitted || f.ring_bytes == 0) return;
-    g.used -= f.ring_bytes;
-    g.tail  = f.ring_end;
-    f.ring_bytes = 0;
-    if (g.used == 0) g.head = g.tail = 0;
-}
 
 // ---- textures -------------------------------------------------------------------------------
 
@@ -206,12 +103,6 @@ void rb_destroy_texture_now(Renderer* r, Texture& t) {
     if (t.memory) vkFreeMemory(r->device, t.memory, nullptr);
     t.view = VK_NULL_HANDLE; t.image = VK_NULL_HANDLE; t.memory = VK_NULL_HANDLE;
     t.resident = false;
-}
-
-// A slot's contents changed. Each frame's set is rewritten once that frame's fence has
-// passed, so no pending command buffer sees a descriptor change under it.
-void rb_mark_slot_dirty(Renderer* r, u32 slot) {
-    for (FrameInFlight& f : r->frames) f.dirty_slots.push(slot);
 }
 
 namespace {
@@ -242,7 +133,7 @@ void rb_write_texture_slot(Renderer* r, VkDescriptorSet set, u32 slot) {
 
 // The image and view for a texture record's size and format. Any previous image is
 // destroyed after the frames in flight.
-bool rb_create_texture_image(Renderer* r, Texture& t) {
+bool rb_texture_create(Renderer* r, Texture& t) {
     if (t.image) rb_defer_destroy_texture(r, t);
 
     VkImageCreateInfo ici{};
@@ -290,11 +181,11 @@ bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels) {
     up.image  = t.image;
     up.width  = t.width;
     up.height = t.height;
-    if (bytes <= r->ring.buf.size / 2) {
-        RingSpan span = rb_ring_alloc(r, bytes, 16);
+    if (bytes <= r->ring.size / 2) {
+        RingSpan span = rc_ring_alloc(r, bytes, 16);
         if (!span.ptr) return false;
         memcpy(span.ptr, pixels, (usize)bytes);
-        up.src    = span.buffer;
+        up.src    = span.buffer.buffer;
         up.offset = span.offset;
     } else {
         Buffer staging;
@@ -320,7 +211,7 @@ bool rb_create_default_texture(Renderer* r) {
     Handle h = r->textures.create(t);
     if (h.index() != 0) { KV_ERROR("vulkan", "default texture is not slot 0"); return false; }
     Texture& slot0 = r->textures.items[0];
-    if (!rb_create_texture_image(r, slot0)) return false;
+    if (!rb_texture_create(r, slot0)) return false;
 
     u8 pixels[kDefaultTexSize * kDefaultTexSize * 4];
     for (u32 y = 0; y < kDefaultTexSize; ++y) {
@@ -349,68 +240,6 @@ bool rb_create_default_texture(Renderer* r) {
     if (r->default_material.index() != 0) { KV_ERROR("vulkan", "default material is not row 0"); return false; }
     rw_mark_material_dirty(r->world, 0);
     return true;
-}
-
-// ---- materials --------------------------------------------------------------------------------
-
-// ---- handle kinds and pools -----------------------------------------------------------------
-
-namespace {
-
-void* texture_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->textures.get(Handle{h}); }
-int texture_describe(kv_handle h, void* ctx, char* out, size_t cap) {
-    Renderer* r = (Renderer*)ctx;
-    Texture* t = r->textures.get(Handle{h});
-    if (!t) return format(out, cap, "stale");
-    return format(out, cap, "'%s' %ux%u slot %u %s", name_str(t->name), t->width, t->height, Handle{h}.index(),
-                    t->resident ? "resident" : "placeholder");
-}
-void* material_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->world.materials.get(Handle{h}); }
-int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
-    Renderer* r = (Renderer*)ctx;
-    MaterialRecord* m = r->world.materials.get(Handle{h});
-    if (!m) return format(out, cap, "stale");
-    return format(out, cap, "'%s' %s texture slot %u row %u", name_str(m->name), blend_mode_name(m->blend), renderer_texture_slot(r, m->texture), Handle{h}.index());
-}
-
-const char* texture_name_of(kv_handle h, void* ctx) {
-    Texture* t = ((Renderer*)ctx)->textures.get(Handle{h});
-    return t ? name_str(t->name) : nullptr;
-}
-kv_handle texture_find_name(const char* name, void* ctx) {
-    Renderer* r = (Renderer*)ctx;
-    Handle* h = r->texture_by_name.find(name_lookup(name).hash);
-    return h && r->textures.valid(*h) ? h->bits : 0;
-}
-const char* material_name_of(kv_handle h, void* ctx) {
-    MaterialRecord* m = ((Renderer*)ctx)->world.materials.get(Handle{h});
-    return m ? name_str(m->name) : nullptr;
-}
-kv_handle material_find_name(const char* name, void* ctx) {
-    Renderer* r = (Renderer*)ctx;
-    Handle* h = r->world.material_by_name.find(name_lookup(name).hash);
-    return h && r->world.materials.valid(*h) ? h->bits : 0;
-}
-
-} // namespace
-
-bool rb_create_resource_pools(Renderer* r) {
-    kv_handle_kind_desc td{};
-    td.name = "render.texture"; td.type_key = type_key<Texture>(); td.ctx = r;
-    td.resolve = texture_resolve; td.describe = texture_describe;
-    td.name_of = texture_name_of; td.find_name = texture_find_name; td.flags = KV_HANDLE_GENERATIONAL;
-    r->texture_kind = handle_kind_register(td);
-    kv_handle_kind_desc md{};
-    md.name = "render.material"; md.type_key = type_key<MaterialRecord>(); md.ctx = r;
-    md.resolve = material_resolve; md.describe = material_describe;
-    md.name_of = material_name_of; md.find_name = material_find_name; md.flags = KV_HANDLE_GENERATIONAL;
-    r->material_kind = handle_kind_register(md);
-    if (!r->texture_kind || !r->material_kind) return false;
-    r->textures.use_kind(r->texture_kind);
-    r->world.materials.use_kind(r->material_kind);
-    r->texture_by_name.init(r->general);
-    r->uploads.alloc = r->general;
-    return r->textures.init(kMaxTextures, r->general->tag) && rw_init(r->world, r->general);
 }
 
 // ---- the GPU tables ------------------------------------------------------------------------------
@@ -638,13 +467,31 @@ void rb_destroy_resources(Renderer* r) {
     if (r->textures_layout) vkDestroyDescriptorSetLayout(r->device, r->textures_layout, nullptr);
     r->pipe_layout = VK_NULL_HANDLE; r->sampler = VK_NULL_HANDLE; r->sampler_linear = VK_NULL_HANDLE; r->desc_pool = VK_NULL_HANDLE;
     r->tables_layout = VK_NULL_HANDLE; r->textures_layout = VK_NULL_HANDLE;
-    if (r->texture_kind)  kv_handle_kind_unregister(r->texture_kind);
-    if (r->material_kind) kv_handle_kind_unregister(r->material_kind);
-    r->texture_kind = r->material_kind = 0;
-    r->textures.free();
-    r->texture_by_name.free();
-    rw_free(r->world);
+    rc_free_pools(r);
     r->uploads.free();
+}
+
+// ---- what the render core asks of a buffer and of the garbage queue (core.h) ----------------------
+
+void* rb_buffer_ptr(const RbBuffer& b) { return b.mapped; }
+void  rb_buffer_retire(Renderer* r, RbBuffer& b) { rb_defer_destroy_buffer(r, b); }
+
+bool rb_ring_buffer(Renderer* r, u64 bytes, RbBuffer& out) {
+    if (!rb_create_host_buffer(r, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, out)) return false;
+    rb_name(r, VK_OBJECT_TYPE_BUFFER, (u64)out.buffer, "upload ring");
+    return true;
+}
+
+void rb_garbage_destroy(Renderer* r, const RbGarbage& g) {
+    switch (g.kind) {
+    case Garbage::BufferKind:    vkDestroyBuffer(r->device, (VkBuffer)g.handle, nullptr); break;
+    case Garbage::ImageKind:     vkDestroyImage(r->device, (VkImage)g.handle, nullptr); break;
+    case Garbage::ImageViewKind: vkDestroyImageView(r->device, (VkImageView)g.handle, nullptr); break;
+    case Garbage::MemoryKind:    vkFreeMemory(r->device, (VkDeviceMemory)g.handle, nullptr); break;
+    case Garbage::SwapchainKind: vkDestroySwapchainKHR(r->device, (VkSwapchainKHR)g.handle, nullptr); break;
+    case Garbage::SemaphoreKind: vkDestroySemaphore(r->device, (VkSemaphore)g.handle, nullptr); break;
+    case Garbage::PipelineKind:  vkDestroyPipeline(r->device, (VkPipeline)g.handle, nullptr); break;
+    }
 }
 
 } // namespace kv

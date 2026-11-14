@@ -40,6 +40,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->owner_slot   = &owner->renderer;
     owner->renderer = r;
     for (FrameInFlight& f : r->frames) { f.garbage.alloc = ga; f.dirty_slots.alloc = ga; }
+    r->uploads.alloc = ga;
     r->window = (HWND)desc.native_window;
     if (const PlatformState* ps = engine_module_state_as<PlatformState>(engine, "platform"))
         format(r->base_path, sizeof r->base_path, "%s", ps->base_path);
@@ -53,11 +54,11 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     bool ok = rb_create_device(r);
     ok = ok && rb_create_frames(r);
     ok = ok && rb_gpu_profile_create(r);
-    ok = ok && rb_create_resource_pools(r);
+    ok = ok && rc_create_pools(r);
     ok = ok && rb_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
     ok = ok && rb_create_static_buffers(r);
     u64 ring = (u64)desc.sprite_rows * sizeof(GpuSprite) * kFramesInFlight;
-    ok = ok && rb_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
+    ok = ok && rc_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
     ok = ok && rb_create_heaps_and_root(r);
     ok = ok && rb_load_shaders(r);
     ok = ok && rb_create_default_texture(r);
@@ -104,195 +105,10 @@ Renderer* renderer_get(Engine& engine) {
     return s ? s->renderer : nullptr;
 }
 
-RenderCaps renderer_caps(const Renderer*) {
-    RenderCaps c;
-    c.backend          = "d3d12";
-    c.max_textures     = kMaxTextures;
-    c.max_materials    = kMaxMaterials;
-    c.frames_in_flight = kFramesInFlight;
-    c.srgb_output      = true; // the render target views encode
-    c.texture_formats[(u32)TextureFormat::RGBA8_SRGB]  = true;
-    c.texture_formats[(u32)TextureFormat::RGBA8_UNORM] = true;
-    return c;
-}
-
-
-namespace {
-
-// A name whose holder died goes to the next live record with the same name, if any.
-template <class T>
-void rename_after_destroy(Pool<T>& pool, Map<u64, Handle>& by_name, Name name, Handle gone) {
-    Handle* at = by_name.find(name.hash);
-    if (!at || *at != gone) return;
-    for (u32 i = 0; i < pool.len; ++i)
-        if (pool.is_alive(i) && pool.items[i].name == name) { *at = pool.handle_at(i); return; }
-    by_name.remove(name.hash);
-}
-
-} // namespace
 
 // ---- textures -------------------------------------------------------------------------------
 
-Handle renderer_texture_create(Renderer* r, const TextureDesc& desc) {
-    if (!r || (u32)desc.format >= (u32)TextureFormat::Count) return Handle{};
-    Texture t{};
-    t.format = desc.format;
-    ++r->textures_made;
-    if (desc.name && desc.name[0]) t.name = name_intern(desc.name);
-    else {
-        char derived[32];
-        format(derived, sizeof derived, "texture:%u", r->textures_made);
-        t.name = name_intern(derived);
-    }
-    Handle h = r->textures.create(t);
-    if (h.is_null()) { KV_ERROR("d3d12", "out of texture slots (%u)", kMaxTextures); return h; }
-    r->texture_by_name.get_or_insert(t.name.hash, h); // the first live one keeps the name
-    rb_mark_slot_dirty(r, h.index()); // shows the default until the upload lands
-    return h;
-}
-
-bool renderer_texture_upload(Renderer* r, Handle texture, u32 width, u32 height, const void* pixels, usize bytes) {
-    Texture* t = r ? r->textures.get(texture) : nullptr;
-    if (!t || texture.index() == 0 || !pixels) return false;
-    if (width == 0 || height == 0 || width > 16384 || height > 16384 || bytes != (usize)width * height * 4) {
-        KV_ERROR("d3d12", "texture '%s': %ux%u with %llu bytes is not a tightly packed RGBA8 image",
-                 name_str(t->name), width, height, (unsigned long long)bytes);
-        return false;
-    }
-    t->width  = width;
-    t->height = height;
-    if (!rb_create_texture_resource(r, *t)) return false;
-    if (!rb_stage_texture(r, texture.index(), *t, (const u8*)pixels)) return false;
-    rb_mark_slot_dirty(r, texture.index());
-    return true;
-}
-
-void renderer_texture_destroy(Renderer* r, Handle texture) {
-    Texture* t = r ? r->textures.get(texture) : nullptr;
-    if (!t || texture.index() == 0) return; // the default stays
-    rb_defer_destroy_texture(r, *t);
-    u32 slot = texture.index();
-    Name name = t->name;
-    r->textures.destroy(texture);
-    rename_after_destroy(r->textures, r->texture_by_name, name, texture);
-    rb_mark_slot_dirty(r, slot); // back to the default, in each set once its frame has passed
-}
-
-u32 renderer_texture_slot(const Renderer* r, Handle texture) {
-    return r && r->textures.valid(texture) ? texture.index() : 0;
-}
-
 // ---- materials ------------------------------------------------------------------------------
-
-namespace {
-
-// What an unnamed material is: its texture's name and everything it draws with, hashed.
-// The same content made in any order gets the same name.
-Name derived_material_name(const Renderer* r, const MaterialRecord& m) {
-    const Texture* t = r->textures.get(m.texture);
-    u64 h = hash_mix(0x6d6174657269616cull ^ (t ? t->name.hash : 0));
-    h = hash_mix(h ^ (u64)m.blend ^ ((u64)m.filter << 8));
-    h = hash_mix(h ^ hash_bytes(&m.tint, sizeof m.tint));
-    h = hash_mix(h ^ hash_bytes(m.params, sizeof m.params));
-    h = hash_mix(h ^ m.shader.hash);
-    char text[32];
-    format(text, sizeof text, "material:%016llx", (unsigned long long)h);
-    return name_intern(text);
-}
-
-void fill_material(Renderer* r, MaterialRecord& m, const MaterialDesc& desc) {
-    m.texture = desc.texture;
-    m.blend   = (u32)desc.blend < (u32)BlendMode::Count ? desc.blend : BlendMode::Alpha;
-    m.shader  = desc.shader && desc.shader[0] ? name_intern(desc.shader) : Name{};
-    m.slot    = rb_material_slot(r, m.shader, m.blend);
-    m.filter  = (u32)desc.filter < (u32)TextureFilter::Count ? desc.filter : TextureFilter::Nearest;
-    m.tint    = desc.tint;
-    for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) m.params[i] = desc.params[i];
-}
-
-} // namespace
-
-Handle renderer_material_create(Renderer* r, const MaterialDesc& desc) {
-    if (!r) return Handle{};
-    MaterialRecord m{};
-    fill_material(r, m, desc);
-    if (desc.name && desc.name[0]) m.name = name_intern(desc.name);
-    else {
-        m.name = derived_material_name(r, m);
-#if KV_DEV
-        bool inserted = false;
-        r->world.material_by_name.get_or_insert(m.name.hash, Handle{}, &inserted);
-        if (inserted) { r->world.material_by_name.remove(m.name.hash); KV_INFO("d3d12", "material named %s by its content", name_str(m.name)); }
-#endif
-    }
-    Handle h = r->world.materials.create(m);
-    if (h.is_null()) { KV_ERROR("d3d12", "out of materials (%u)", kMaxMaterials); return h; }
-    r->world.material_by_name.get_or_insert(m.name.hash, h);
-    rw_mark_material_dirty(r->world, h.index());
-    return h;
-}
-
-bool renderer_material_set(Renderer* r, Handle material, const MaterialDesc& desc) {
-    MaterialRecord* m = r ? r->world.materials.get(material) : nullptr;
-    if (!m) return false;
-    u32 before = m->slot;
-    fill_material(r, *m, desc);
-    if (m->slot != before) rw_rebind_material(r->world, material.index()); // the sprites' buckets moved
-    rw_mark_material_dirty(r->world, material.index());
-    return true;
-}
-
-bool renderer_material_get(const Renderer* r, Handle material, MaterialDesc* out) {
-    const MaterialRecord* m = r ? r->world.materials.get(material) : nullptr;
-    if (!m || !out) return false;
-    out->texture = m->texture;
-    out->blend   = m->blend;
-    out->filter  = m->filter;
-    out->tint    = m->tint;
-    out->name    = name_str(m->name);
-    out->shader  = m->shader.is_null() ? nullptr : name_str(m->shader);
-    for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) out->params[i] = m->params[i];
-    return true;
-}
-
-void renderer_material_destroy(Renderer* r, Handle material) {
-    if (!r || material == r->default_material || !r->world.materials.valid(material)) return;
-    u32 row = material.index();
-    Name name = r->world.materials.get(material)->name;
-    r->world.materials.destroy(material);
-    rename_after_destroy(r->world.materials, r->world.material_by_name, name, material);
-    rw_rebind_material(r->world, row);      // its sprites fall back to the default
-    rw_mark_material_dirty(r->world, row);  // the row is rewritten as a copy of the default
-}
-
-bool renderer_post_layer(Renderer* r, i32 layer, const char* shader) {
-    if (!r) return false;
-    return rb_post_set(r, layer, shader && *shader ? name_intern(shader) : Name{});
-}
-
-void renderer_post_params(Renderer* r, const f32* params, u32 count) {
-    if (!r) return;
-    if (count > KV_POST_PARAMS) count = KV_POST_PARAMS;
-    if (count) memcpy(r->post.params, params, sizeof(f32) * 4 * count);
-    r->post.param_count = count;
-}
-
-Handle renderer_default_material(const Renderer* r) { return r ? r->default_material : Handle{}; }
-
-f64 renderer_last_wait(const Renderer* r) { return r ? r->last_wait : 0.0; }
-
-bool renderer_check_sort(Renderer* r) {
-    if (!r) return false;
-    r->check_pending = true;
-    return true;
-}
-
-bool renderer_screenshot(Renderer* r, const char* path) {
-    if (!r || !path || strlen(path) >= sizeof r->shot_path) return false;
-    strncpy(r->shot_path, path, sizeof r->shot_path - 1);
-    r->shot_pending = true;
-    return true;
-}
 
 // ---- the render world ---------------------------------------------------------------------
 
@@ -305,8 +121,6 @@ void renderer_resize(Renderer* r, u32 width, u32 height) {
     r->want_height     = height;
     r->swapchain_dirty = true;
 }
-
-u32 renderer_sprite_count(const Renderer* r) { return r ? r->world.sprites.live : 0; }
 
 // ---- the frame ------------------------------------------------------------------------------
 
@@ -325,8 +139,8 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     }
     r->last_wait = 0.0;
     rb_gpu_collect(r, f);
-    rb_ring_release(r, f);
-    rb_run_garbage(r, f);
+    rc_ring_release(r, f);
+    rc_run_garbage(r, f);
     if (r->world.sprites.len > r->tables.capacity) {
         KV_INFO("d3d12", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->world.sprites.len, r->tables.capacity);
         if (!rb_create_tables(r, r->world.sprites.len)) return false;
@@ -362,7 +176,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     f.fence_value = r->fence_next++;
     f.submitted = true;
     f.garbage_owned = f.garbage.len;
-    rb_ring_submitted(r, f);
+    rc_ring_submitted(r, f);
 
     if (have_image) {
         KV_ZONE_WAIT("present");
@@ -380,8 +194,8 @@ bool renderer_render(Renderer* r, const RenderView& view) {
 
     if (r->shot_recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now
         if (!rb_wait_fence(r, f.fence_value)) return false;
-        if (r->shot_recorded) rb_write_screenshot(r);
-        if (r->check_recorded) rb_verify_sort(r);
+        if (r->shot_recorded) rc_write_screenshot(r);
+        if (r->check_recorded) rc_verify_sort(r);
     }
     rb_drain_messages(r);
 

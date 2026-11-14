@@ -149,24 +149,24 @@ bool record_table_copies(Renderer* r, VkCommandBuffer cmd) {
     bool ok = true;
     u32 rows = rw_dirty_runs(r->world.sprite_dirty, r->world.sprites.len, 32, [&](u32 a, u32 b) {
         VkDeviceSize bytes = (VkDeviceSize)(b - a) * sizeof(GpuSprite);
-        RingSpan span = rb_ring_alloc(r, bytes, 16);
+        RingSpan span = rc_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuSprite* dst = (GpuSprite*)span.ptr;
         rw_stage_sprites(r->world, a, b, dst);
         VkBufferCopy region{span.offset, (VkDeviceSize)a * sizeof(GpuSprite), bytes};
-        vkCmdCopyBuffer(cmd, span.buffer, r->tables.sprites.buffer, 1, &region);
+        vkCmdCopyBuffer(cmd, span.buffer.buffer, r->tables.sprites.buffer, 1, &region);
     });
     r->rows_uploaded += rows;
     KV_COUNTER("sprite rows uploaded", rows);
 
     rw_dirty_runs(r->world.material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
         VkDeviceSize bytes = (VkDeviceSize)(b - a) * sizeof(GpuMaterial);
-        RingSpan span = rb_ring_alloc(r, bytes, 16);
+        RingSpan span = rc_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuMaterial* dst = (GpuMaterial*)span.ptr;
         for (u32 i = a; i < b; ++i) rc_material_row(r, i, dst[i - a]);
         VkBufferCopy region{span.offset, (VkDeviceSize)a * sizeof(GpuMaterial), bytes};
-        vkCmdCopyBuffer(cmd, span.buffer, r->material_table.buffer, 1, &region);
+        vkCmdCopyBuffer(cmd, span.buffer.buffer, r->material_table.buffer, 1, &region);
     });
     return ok;
 }
@@ -221,16 +221,6 @@ void record_sort(Renderer* r, FrameInFlight& f, VkCommandBuffer cmd) {
 
 // ---- the sort check -------------------------------------------------------------------------------
 
-// Copies sorted[], bucket_of[] and the sort meta into a host buffer, after the sort.
-// Each row's key as this frame computes it (cs_key_sort's formula on the CPU's copy of the
-// rows), kept for the check: the rows may change before the frame's fence passes.
-void snapshot_keys(Renderer* r, f32 alpha) {
-    u32 rows = r->world.sprites.len;
-    free_in(mem_general(), r->check_keys, sizeof(f32) * (r->check_rows ? r->check_rows : 1));
-    r->check_keys = (f32*)alloc_in(mem_general(), sizeof(f32) * (rows ? rows : 1));
-    rw_snapshot_keys(r->world, alpha, r->check_keys);
-}
-
 void record_sort_check(Renderer* r, VkCommandBuffer cmd) {
     u32 rows = r->world.sprites.len;
     VkDeviceSize meta_bytes = sizeof(u32) * (2 * kBucketCount + 4);
@@ -260,6 +250,7 @@ void record_screenshot(Renderer* r, VkCommandBuffer cmd, VkImage image, VkExtent
     if (!rb_create_host_buffer(r, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, r->shot_buffer)) { r->shot_pending = false; return; }
     r->shot_width  = extent.width;
     r->shot_height = extent.height;
+    r->shot_rgba   = !(r->swapchain.format == VK_FORMAT_B8G8R8A8_SRGB || r->swapchain.format == VK_FORMAT_B8G8R8A8_UNORM);
 
     VkImageMemoryBarrier2 to_src{};
     to_src.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -447,33 +438,12 @@ bool rb_create_game_pipeline(Renderer* r, GamePipe& gp) {
     return gp.pipeline != VK_NULL_HANDLE;
 }
 
-u32 rb_material_slot(Renderer* r, Name shader, BlendMode blend) {
-    u32 engine = (u32)blend < kBlendCount ? (u32)blend : (u32)BlendMode::Alpha;
-    if (shader.is_null()) return engine;
-    u32 free_slot = kGameSlots;
-    for (u32 i = 0; i < kGameSlots; ++i) {
-        GamePipe& gp = r->game_pipes[i];
-        if (gp.used && gp.shader == shader && gp.blend == blend) return gp.failed ? engine : kBlendCount + i;
-        if (!gp.used && free_slot == kGameSlots) free_slot = i;
-    }
-    if (free_slot == kGameSlots) {
-        KV_ERROR("vulkan", "game shader '%s': all %u game pipeline slots are taken; drawn with the engine's", name_str(shader), kGameSlots);
-        return engine;
-    }
-    GamePipe& gp = r->game_pipes[free_slot];
-    gp = GamePipe{};
-    gp.used   = true;
-    gp.shader = shader;
-    gp.blend  = blend;
+bool rb_game_pipe_load(Renderer* r, GamePipe& gp) {
     char file[96];
-    format(file, sizeof file, "%s.spv", name_str(shader));
-    if (!rb_load_shader(r, file, &gp.module)) {
-        gp.failed = true;
-        KV_ERROR("vulkan", "game shader '%s' did not load: its sprites draw with the engine's", name_str(shader));
-        return engine;
-    }
+    format(file, sizeof file, "%s" KV_RB_SHADER_EXT, name_str(gp.shader));
+    if (!rb_load_shader(r, file, &gp.module)) return false;
     rb_create_game_pipeline(r, gp);
-    return gp.failed ? engine : kBlendCount + free_slot;
+    return true;
 }
 
 // A format change: the pipelines in flight retire with the frame.
@@ -504,43 +474,6 @@ void rb_destroy_pipelines_now(Renderer* r) {
     if (r->sprite_shader) vkDestroyShaderModule(r->device, r->sprite_shader, nullptr);
     if (r->sort_shader)   vkDestroyShaderModule(r->device, r->sort_shader, nullptr);
     r->sprite_shader = r->sort_shader = VK_NULL_HANDLE;
-}
-
-// Every bucket's run in sorted[] holds exactly the rows whose bucket it is, in ascending
-// row order, once each; the counts agree with the CPU's where nothing was culled.
-bool rb_verify_sort(Renderer* r) {
-    r->check_recorded = false;
-    if (!r->check_buffer.mapped) return false;
-    bool ok = rw_verify_sort(r->world, (const u32*)r->check_buffer.mapped, r->check_rows, r->check_keys, KV_RB_NAME);
-    if (ok) ++r->checks_passed; else ++r->checks_failed;
-    rb_defer_destroy_buffer(r, r->check_buffer);
-    return ok;
-}
-
-// Binary PPM, RGB. The swapchain is BGRA or RGBA; sRGB-encoded bytes either way.
-bool rb_write_screenshot(Renderer* r) {
-    r->shot_recorded = false;
-    if (!r->shot_buffer.mapped) return false;
-    IoFileWriter f;
-    if (!f.open(r->shot_path)) { KV_ERROR("vulkan", "cannot write screenshot '%s'", r->shot_path); rb_defer_destroy_buffer(r, r->shot_buffer); return false; }
-    f.print("P6\n%u %u\n255\n", r->shot_width, r->shot_height);
-    bool bgra = r->swapchain.format == VK_FORMAT_B8G8R8A8_SRGB || r->swapchain.format == VK_FORMAT_B8G8R8A8_UNORM;
-    const u8* px = (const u8*)r->shot_buffer.mapped;
-    MemScope scope;
-    u8* row = arena_push_n<u8>(*scope.arena, r->shot_width * 3);
-    for (u32 y = 0; y < r->shot_height; ++y) {
-        const u8* src = px + (usize)y * r->shot_width * 4;
-        for (u32 x = 0; x < r->shot_width; ++x, src += 4) {
-            row[x * 3 + 0] = bgra ? src[2] : src[0];
-            row[x * 3 + 1] = src[1];
-            row[x * 3 + 2] = bgra ? src[0] : src[2];
-        }
-        f.write(row, r->shot_width * 3);
-    }
-    if (!f.close()) KV_ERROR("vulkan", "screenshot '%s': write failed (errno %d)", r->shot_path, f.error);
-    else KV_INFO("vulkan", "screenshot '%s' %ux%u", r->shot_path, r->shot_width, r->shot_height);
-    rb_defer_destroy_buffer(r, r->shot_buffer);
-    return true;
 }
 
 // ---- the frame -----------------------------------------------------------------------------------
@@ -588,7 +521,7 @@ bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
         rb_label_begin(r, cmd, "sort");
         record_sort(r, f, cmd);
         rb_label_end(r, cmd);
-        if (r->check_pending) { snapshot_keys(r, view.alpha); record_sort_check(r, cmd); }
+        if (r->check_pending) { rc_snapshot_keys(r, view.alpha); record_sort_check(r, cmd); }
     }
     rb_gpu_mark(r, f, cmd, kGpuSorted);
 

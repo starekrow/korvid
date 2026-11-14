@@ -42,53 +42,25 @@ void configure_layer(Renderer* r) {
 
 // A requested screenshot of the drawable just drawn: a blit into a shared buffer, written as
 // a PPM once the frame completes (the dev stall renderer-vulkan's has too).
-struct Shot {
-    char          path[512] = {};
-    bool          pending = false, recorded = false;
-    id<MTLBuffer> buffer = nil;
-    u32           width = 0, height = 0;
-};
-Shot g_shot;
-
 void record_screenshot(Renderer* r, id<MTLCommandBuffer> cb, id<MTLTexture> image) {
-    g_shot.pending = false;
+    r->shot_pending = false;
     if (r->layer.framebufferOnly) {
         if (!r->shot_warned) KV_WARN("metal", "screenshots need a dev or debug build (the layer's drawables are framebuffer-only)");
         r->shot_warned = true;
         return;
     }
     u32 w = (u32)image.width, h = (u32)image.height;
-    rb_defer_release(r, g_shot.buffer);
-    g_shot.buffer = rb_buffer(r, (usize)w * h * 4, MTLResourceStorageModeShared, "screenshot");
-    if (!g_shot.buffer) return;
+    rb_defer_release(r, r->shot_buffer);
+    r->shot_buffer = rb_buffer(r, (usize)w * h * 4, MTLResourceStorageModeShared, "screenshot");
+    if (!r->shot_buffer) return;
     id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
     blit.label = @"screenshot";
     [blit copyFromTexture:image sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(w, h, 1)
-                 toBuffer:g_shot.buffer destinationOffset:0 destinationBytesPerRow:(NSUInteger)w * 4 destinationBytesPerImage:(NSUInteger)w * h * 4];
+                 toBuffer:r->shot_buffer destinationOffset:0 destinationBytesPerRow:(NSUInteger)w * 4 destinationBytesPerImage:(NSUInteger)w * h * 4];
     [blit endEncoding];
-    g_shot.width = w;
-    g_shot.height = h;
-    g_shot.recorded = true;
-}
-
-// Binary PPM, RGB, from the drawable's BGRA (sRGB-encoded bytes).
-void write_screenshot(Renderer* r) {
-    g_shot.recorded = false;
-    kv::IoFileWriter f;
-    if (!f.open(g_shot.path)) { KV_ERROR("metal", "cannot write screenshot '%s'", g_shot.path); return; }
-    f.print("P6\n%u %u\n255\n", g_shot.width, g_shot.height);
-    const u8* px = (const u8*)g_shot.buffer.contents;
-    MemScope scope;
-    u8* row = arena_push_n<u8>(*scope.arena, g_shot.width * 3);
-    for (u32 y = 0; y < g_shot.height; ++y) {
-        const u8* src = px + (usize)y * g_shot.width * 4;
-        for (u32 x = 0; x < g_shot.width; ++x, src += 4) { row[x * 3 + 0] = src[2]; row[x * 3 + 1] = src[1]; row[x * 3 + 2] = src[0]; }
-        f.write(row, g_shot.width * 3);
-    }
-    if (!f.close()) KV_ERROR("metal", "screenshot '%s': write failed (errno %d)", g_shot.path, f.error);
-    else KV_INFO("metal", "screenshot '%s' %ux%u", g_shot.path, g_shot.width, g_shot.height);
-    rb_defer_release(r, g_shot.buffer);
-    g_shot.buffer = nil;
+    r->shot_width = w;
+    r->shot_height = h;
+    r->shot_recorded = true;
 }
 
 } // namespace
@@ -107,6 +79,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->owner_slot   = &owner->renderer;
     owner->renderer = r;
     for (FrameInFlight& f : r->frames) { f.garbage.alloc = ga; f.dirty_slots.alloc = ga; }
+    r->uploads.alloc = ga;
     r->window      = desc.native_window;
     if (const PlatformState* ps = engine_module_state_as<PlatformState>(engine, "platform"))
         kv::format(r->base_path, sizeof r->base_path, "%s", ps->base_path);
@@ -127,11 +100,11 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
         if (ok && !r->layer) ok = false;
         if (ok) configure_layer(r);
         ok = ok && rb_gpu_profile_create(r);
-        ok = ok && rb_create_resource_pools(r);
+        ok = ok && rc_create_pools(r);
         ok = ok && rb_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
         ok = ok && rb_create_static_buffers(r);
         usize ring = (usize)desc.sprite_rows * sizeof(GpuSprite) * kFramesInFlight;
-        ok = ok && rb_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
+        ok = ok && rc_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
         ok = ok && rb_create_bindless(r);
         ok = ok && rb_load_shaders(r);
         ok = ok && rb_create_default_texture(r);
@@ -160,8 +133,8 @@ void renderer_destroy(Renderer* r) {
         if (f.cb) { [f.cb waitUntilCompleted]; [f.cb release]; f.cb = nil; }
     }
     for (FrameInFlight& f : r->frames) { rb_release_all(r, f); f.garbage.free(); f.dirty_slots.free(); }
-    [g_shot.buffer release];
-    g_shot = Shot{};
+    [r->shot_buffer release];
+    r->shot_buffer = nil;
     rb_post_destroy(r);
     rb_gpu_profile_destroy(r);
     rb_destroy_pipelines(r);
@@ -185,191 +158,9 @@ Renderer* renderer_get(Engine& engine) {
     return s ? s->renderer : nullptr;
 }
 
-RenderCaps renderer_caps(const Renderer*) {
-    RenderCaps c;
-    c.backend          = "metal";
-    c.max_textures     = kMaxTextures;
-    c.max_materials    = kMaxMaterials;
-    c.frames_in_flight = kFramesInFlight;
-    c.srgb_output      = true;
-    c.texture_formats[(u32)TextureFormat::RGBA8_SRGB]  = true;
-    c.texture_formats[(u32)TextureFormat::RGBA8_UNORM] = true;
-    return c;
-}
-
-namespace {
-
-template <class T>
-void rename_after_destroy(Pool<T>& pool, Map<u64, Handle>& by_name, Name name, Handle gone) {
-    Handle* at = by_name.find(name.hash);
-    if (!at || *at != gone) return;
-    for (u32 i = 0; i < pool.len; ++i)
-        if (pool.is_alive(i) && pool.items[i].name == name) { *at = pool.handle_at(i); return; }
-    by_name.remove(name.hash);
-}
-
-} // namespace
-
 // ---- textures -------------------------------------------------------------------------------
 
-Handle renderer_texture_create(Renderer* r, const TextureDesc& desc) {
-    if (!r || (u32)desc.format >= (u32)TextureFormat::Count) return Handle{};
-    Texture t{};
-    t.format = desc.format;
-    ++r->textures_made;
-    if (desc.name && desc.name[0]) t.name = name_intern(desc.name);
-    else {
-        char derived[32];
-        kv::format(derived, sizeof derived, "texture:%u", r->textures_made);
-        t.name = name_intern(derived);
-    }
-    Handle h = r->textures.create(t);
-    if (h.is_null()) { KV_ERROR("metal", "out of texture slots (%u)", kMaxTextures); return h; }
-    r->texture_by_name.get_or_insert(t.name.hash, h);
-    rb_mark_slot_dirty(r, h.index());
-    return h;
-}
-
-bool renderer_texture_upload(Renderer* r, Handle texture, u32 width, u32 height, const void* pixels, usize bytes) {
-    Texture* t = r ? r->textures.get(texture) : nullptr;
-    if (!t || texture.index() == 0 || !pixels) return false;
-    if (width == 0 || height == 0 || width > 16384 || height > 16384 || bytes != (usize)width * height * 4) {
-        KV_ERROR("metal", "texture '%s': %ux%u with %llu bytes is not a tightly packed RGBA8 image",
-                 name_str(t->name), width, height, (unsigned long long)bytes);
-        return false;
-    }
-    t->width  = width;
-    t->height = height;
-    if (!rb_create_texture(r, *t)) return false;
-    if (!rb_stage_texture(r, texture.index(), *t, (const u8*)pixels)) return false;
-    rb_mark_slot_dirty(r, texture.index());
-    return true;
-}
-
-void renderer_texture_destroy(Renderer* r, Handle texture) {
-    Texture* t = r ? r->textures.get(texture) : nullptr;
-    if (!t || texture.index() == 0) return;
-    rb_defer_destroy_texture(r, *t);
-    u32 slot = texture.index();
-    Name name = t->name;
-    r->textures.destroy(texture);
-    rename_after_destroy(r->textures, r->texture_by_name, name, texture);
-    rb_mark_slot_dirty(r, slot);
-}
-
-u32 renderer_texture_slot(const Renderer* r, Handle texture) {
-    return r && r->textures.valid(texture) ? texture.index() : 0;
-}
-
 // ---- materials ------------------------------------------------------------------------------
-
-namespace {
-
-Name derived_material_name(const Renderer* r, const MaterialRecord& m) {
-    const Texture* t = r->textures.get(m.texture);
-    u64 h = hash_mix(0x6d6174657269616cull ^ (t ? t->name.hash : 0));
-    h = hash_mix(h ^ (u64)m.blend ^ ((u64)m.filter << 8));
-    h = hash_mix(h ^ hash_bytes(&m.tint, sizeof m.tint));
-    h = hash_mix(h ^ hash_bytes(m.params, sizeof m.params));
-    h = hash_mix(h ^ m.shader.hash);
-    char text[32];
-    kv::format(text, sizeof text, "material:%016llx", (unsigned long long)h);
-    return name_intern(text);
-}
-
-void fill_material(Renderer* r, MaterialRecord& m, const MaterialDesc& desc) {
-    m.texture = desc.texture;
-    m.blend   = (u32)desc.blend < (u32)BlendMode::Count ? desc.blend : BlendMode::Alpha;
-    m.shader  = desc.shader && desc.shader[0] ? name_intern(desc.shader) : Name{};
-    m.slot    = rb_material_slot(r, m.shader, m.blend);
-    m.filter  = (u32)desc.filter < (u32)TextureFilter::Count ? desc.filter : TextureFilter::Nearest;
-    m.tint    = desc.tint;
-    for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) m.params[i] = desc.params[i];
-}
-
-} // namespace
-
-Handle renderer_material_create(Renderer* r, const MaterialDesc& desc) {
-    if (!r) return Handle{};
-    MaterialRecord m{};
-    fill_material(r, m, desc);
-    if (desc.name && desc.name[0]) m.name = name_intern(desc.name);
-    else {
-        m.name = derived_material_name(r, m);
-#if KV_DEV
-        bool inserted = false;
-        r->world.material_by_name.get_or_insert(m.name.hash, Handle{}, &inserted);
-        if (inserted) { r->world.material_by_name.remove(m.name.hash); KV_INFO("metal", "material named %s by its content", name_str(m.name)); }
-#endif
-    }
-    Handle h = r->world.materials.create(m);
-    if (h.is_null()) { KV_ERROR("metal", "out of materials (%u)", kMaxMaterials); return h; }
-    r->world.material_by_name.get_or_insert(m.name.hash, h);
-    rw_mark_material_dirty(r->world, h.index());
-    return h;
-}
-
-bool renderer_material_set(Renderer* r, Handle material, const MaterialDesc& desc) {
-    MaterialRecord* m = r ? r->world.materials.get(material) : nullptr;
-    if (!m) return false;
-    u32 before = m->slot;
-    fill_material(r, *m, desc);
-    if (m->slot != before) rw_rebind_material(r->world, material.index());
-    rw_mark_material_dirty(r->world, material.index());
-    return true;
-}
-
-bool renderer_material_get(const Renderer* r, Handle material, MaterialDesc* out) {
-    const MaterialRecord* m = r ? r->world.materials.get(material) : nullptr;
-    if (!m || !out) return false;
-    out->texture = m->texture;
-    out->blend   = m->blend;
-    out->filter  = m->filter;
-    out->tint    = m->tint;
-    out->name    = name_str(m->name);
-    out->shader  = m->shader.is_null() ? nullptr : name_str(m->shader);
-    for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) out->params[i] = m->params[i];
-    return true;
-}
-
-void renderer_material_destroy(Renderer* r, Handle material) {
-    if (!r || material == r->default_material || !r->world.materials.valid(material)) return;
-    u32 row = material.index();
-    Name name = r->world.materials.get(material)->name;
-    r->world.materials.destroy(material);
-    rename_after_destroy(r->world.materials, r->world.material_by_name, name, material);
-    rw_rebind_material(r->world, row);
-    rw_mark_material_dirty(r->world, row);
-}
-
-bool renderer_post_layer(Renderer* r, i32 layer, const char* shader) {
-    if (!r) return false;
-    return rb_post_set(r, layer, shader && *shader ? name_intern(shader) : Name{});
-}
-
-void renderer_post_params(Renderer* r, const f32* params, u32 count) {
-    if (!r) return;
-    if (count > KV_POST_PARAMS) count = KV_POST_PARAMS;
-    if (count) memcpy(r->post.params, params, sizeof(f32) * 4 * count);
-    r->post.param_count = count;
-}
-
-Handle renderer_default_material(const Renderer* r) { return r ? r->default_material : Handle{}; }
-
-f64 renderer_last_wait(const Renderer* r) { return r ? r->last_wait : 0.0; }
-
-bool renderer_check_sort(Renderer* r) {
-    if (!r) return false;
-    r->check_pending = true;
-    return true;
-}
-
-bool renderer_screenshot(Renderer* r, const char* path) {
-    if (!r || !path || strlen(path) >= sizeof g_shot.path) return false;
-    kv::format(g_shot.path, sizeof g_shot.path, "%s", path);
-    g_shot.pending = true;
-    return true;
-}
 
 // ---- the render world ---------------------------------------------------------------------
 
@@ -382,8 +173,6 @@ void renderer_resize(Renderer* r, u32 width, u32 height) {
     r->want_height = height;
     r->size_dirty  = true;
 }
-
-u32 renderer_sprite_count(const Renderer* r) { return r ? r->world.sprites.live : 0; }
 
 // ---- the frame ------------------------------------------------------------------------------
 
@@ -408,8 +197,8 @@ bool renderer_render(Renderer* r, const RenderView& view) {
             f.cb = nil;
         }
         r->last_wait = 0.0;
-        rb_ring_release(r, f);
-        rb_run_garbage(r, f);
+        rc_ring_release(r, f);
+        rc_run_garbage(r, f);
         if (r->world.sprites.len > r->tables.capacity) {
             KV_INFO("metal", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->world.sprites.len, r->tables.capacity);
             if (!rb_create_tables(r, r->world.sprites.len)) return false;
@@ -441,19 +230,19 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         cb.label = @"frame";
         rb_gpu_frame_begin(r, f);
         if (!rb_record_frame(r, f, cb, drawable, view)) return false;
-        if (drawable && g_shot.pending) record_screenshot(r, cb, drawable.texture);
+        if (drawable && r->shot_pending) record_screenshot(r, cb, drawable.texture);
         if (drawable) [cb presentDrawable:drawable];
         [cb commit];
         f.cb = [cb retain]; // waited for when this slot comes round again
         f.garbage_owned = f.garbage.len; // released when it has; anything queued later waits for the next
         f.submitted = true;
-        rb_ring_submitted(r, f);
+        rc_ring_submitted(r, f);
         presented = drawable != nil;
 
-        if (g_shot.recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now
+        if (r->shot_recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now
             [cb waitUntilCompleted];
-            if (g_shot.recorded) write_screenshot(r);
-            if (r->check_recorded) rb_verify_sort(r);
+            if (r->shot_recorded) rc_write_screenshot(r);
+            if (r->check_recorded) rc_verify_sort(r);
         }
     }
     r->last_wait = waited;

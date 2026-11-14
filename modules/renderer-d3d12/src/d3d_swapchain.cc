@@ -22,7 +22,7 @@ bool rb_create_frames(Renderer* r) {
 void rb_destroy_frames(Renderer* r) {
     for (FrameInFlight& f : r->frames) {
         f.garbage_owned = f.garbage.len;
-        rb_run_garbage(r, f);
+        rc_run_garbage(r, f);
         f.garbage.free();
         f.dirty_slots.free();
         rb_release(f.cmd);

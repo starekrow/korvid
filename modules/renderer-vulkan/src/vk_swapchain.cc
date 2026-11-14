@@ -205,7 +205,7 @@ void rb_destroy_frames(Renderer* r) {
     for (u32 i = 0; i < kFramesInFlight; ++i) {
         FrameInFlight& f = r->frames[i];
         f.garbage_owned = f.garbage.len; // the device is idle: all of it
-        rb_run_garbage(r, f);
+        rc_run_garbage(r, f);
         f.garbage.free();
         f.dirty_slots.free();
         if (f.acquire) vkDestroySemaphore(r->device, f.acquire, nullptr);

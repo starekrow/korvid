@@ -214,31 +214,10 @@ void rb_destroy_pipelines(Renderer* r) {
 // The pipeline slot for a material, as renderer-vulkan's: its blend's, or a game shader's
 // (assigned here, its library loaded and its pipeline made at once: the layer's format is
 // known from the start on Metal).
-u32 rb_material_slot(Renderer* r, Name shader, BlendMode blend) {
-    u32 engine = (u32)blend < kBlendCount ? (u32)blend : (u32)BlendMode::Alpha;
-    if (shader.is_null()) return engine;
-    u32 free_slot = kGameSlots;
-    for (u32 i = 0; i < kGameSlots; ++i) {
-        GamePipe& gp = r->game_pipes[i];
-        if (gp.used && gp.shader == shader && gp.blend == blend) return gp.failed ? engine : kBlendCount + i;
-        if (!gp.used && free_slot == kGameSlots) free_slot = i;
-    }
-    if (free_slot == kGameSlots) {
-        KV_ERROR("metal", "game shader '%s': all %u game pipeline slots are taken; drawn with the engine's", name_str(shader), kGameSlots);
-        return engine;
-    }
-    GamePipe& gp = r->game_pipes[free_slot];
-    gp = GamePipe{};
-    gp.used   = true;
-    gp.shader = shader;
-    gp.blend  = blend;
-    if (!rb_load_library(r, name_str(shader), &gp.library) || !(gp.fragment = [gp.library newFunctionWithName:@"fs_main"])) {
-        gp.failed = true;
-        KV_ERROR("metal", "game shader '%s' did not load: its sprites draw with the engine's", name_str(shader));
-        return engine;
-    }
+bool rb_game_pipe_load(Renderer* r, GamePipe& gp) {
+    if (!rb_load_library(r, name_str(gp.shader), &gp.library) || !(gp.fragment = [gp.library newFunctionWithName:@"fs_main"])) return false;
     if (r->vs_main) create_game_pipeline(r, gp); // not before the engine's shaders are in
-    return gp.failed ? engine : kBlendCount + free_slot;
+    return true;
 }
 
 // ---- the frame ------------------------------------------------------------------------------
@@ -260,7 +239,7 @@ bool record_table_copies(Renderer* r, id<MTLBlitCommandEncoder> blit) {
     bool ok = true;
     u32 rows = rw_dirty_runs(r->world.sprite_dirty, r->world.sprites.len, 32, [&](u32 a, u32 b) {
         usize bytes = (usize)(b - a) * sizeof(GpuSprite);
-        RingSpan span = rb_ring_alloc(r, bytes, 16);
+        RingSpan span = rc_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuSprite* dst = (GpuSprite*)span.ptr;
         rw_stage_sprites(r->world, a, b, dst);
@@ -270,7 +249,7 @@ bool record_table_copies(Renderer* r, id<MTLBlitCommandEncoder> blit) {
     KV_COUNTER("sprite rows uploaded", rows);
     rw_dirty_runs(r->world.material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
         usize bytes = (usize)(b - a) * sizeof(GpuMaterial);
-        RingSpan span = rb_ring_alloc(r, bytes, 16);
+        RingSpan span = rc_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuMaterial* dst = (GpuMaterial*)span.ptr;
         for (u32 i = a; i < b; ++i) rc_material_row(r, i, dst[i - a]);
@@ -316,14 +295,6 @@ void record_sort(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, const P
     }
     if (keyed) [enc popDebugGroup];
     [enc endEncoding];
-}
-
-// renderer-vulkan's: each row's key as this frame computes it, kept for the check.
-void snapshot_keys(Renderer* r, f32 alpha) {
-    u32 rows = r->world.sprites.len;
-    free_in(mem_general(), r->check_keys, sizeof(f32) * (r->check_rows ? r->check_rows : 1));
-    r->check_keys = (f32*)alloc_in(mem_general(), sizeof(f32) * (rows ? rows : 1));
-    rw_snapshot_keys(r->world, alpha, r->check_keys);
 }
 
 // sorted[], bucket_of[] and the sort meta into a shared buffer, after the sort.
@@ -397,7 +368,7 @@ bool rb_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
 
     if (draw) {
         record_sort(r, f, cb, push);
-        if (r->check_pending) { snapshot_keys(r, view.alpha); record_sort_check(r, cb); }
+        if (r->check_pending) { rc_snapshot_keys(r, view.alpha); record_sort_check(r, cb); }
     }
     if (!drawable) return true;
 
@@ -443,18 +414,6 @@ bool rb_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
         [enc endEncoding];
     }
     return true;
-}
-
-// renderer-vulkan's check, on the buffer the frame filled: every bucket's run holds exactly
-// its rows, in (key, row) order, once each; the counts agree with the CPU's.
-bool rb_verify_sort(Renderer* r) {
-    r->check_recorded = false;
-    if (!r->check_buffer) return false;
-    bool ok = rw_verify_sort(r->world, (const u32*)r->check_buffer.contents, r->check_rows, r->check_keys, KV_RB_NAME);
-    if (ok) ++r->checks_passed; else ++r->checks_failed;
-    rb_defer_release(r, r->check_buffer);
-    r->check_buffer = nil;
-    return ok;
 }
 
 } // namespace kv

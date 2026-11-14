@@ -72,7 +72,7 @@ void rb_transition(ID3D12GraphicsCommandList* cmd, Buffer& b, D3D12_RESOURCE_STA
 // that frame's fence passes; what is queued between frames waits for the frame after.
 
 void rb_defer_release(Renderer* r, IUnknown* object) {
-    if (object) r->frames[r->frame_index].garbage.push(Garbage{object});
+    if (object) rc_defer(r, Garbage{object});
 }
 
 void rb_defer_destroy_buffer(Renderer* r, Buffer& b) {
@@ -80,91 +80,8 @@ void rb_defer_destroy_buffer(Renderer* r, Buffer& b) {
     b = Buffer{};
 }
 
-void rb_run_garbage(Renderer*, FrameInFlight& f) {
-    u32 owned = f.garbage_owned <= f.garbage.len ? f.garbage_owned : f.garbage.len;
-    for (u32 i = 0; i < owned; ++i) f.garbage[i].object->Release();
-    u32 rest = f.garbage.len - owned;
-    if (owned && rest) memmove(f.garbage.data, f.garbage.data + owned, sizeof(Garbage) * rest);
-    f.garbage.len   = rest;
-    f.garbage_owned = 0;
-}
-
 // ---- the frame ring -----------------------------------------------------------------------
 // renderer-vulkan's ring, on an upload heap.
-
-bool rb_ring_init(Renderer* r, u64 bytes) {
-    FrameRing& g = r->ring;
-    if (!rb_create_buffer(r, D3D12_HEAP_TYPE_UPLOAD, bytes, false, g.buf, "upload ring")) return false;
-    g.head = g.tail = g.used = g.frame_bytes = 0;
-    return true;
-}
-
-namespace {
-
-bool ring_grow(Renderer* r, u64 need) {
-    FrameRing& g = r->ring;
-    u64 cap = g.buf.size * 2;
-    while (cap < need * 2) cap *= 2;
-    rb_defer_destroy_buffer(r, g.buf);
-    if (!rb_create_buffer(r, D3D12_HEAP_TYPE_UPLOAD, cap, false, g.buf, "upload ring")) return false;
-    g.head = g.tail = g.used = 0;
-    g.frame_bytes = 0;
-    for (FrameInFlight& f : r->frames) f.ring_bytes = 0;
-    ++g.grows;
-    KV_INFO("d3d12", "frame ring grown to %llu KB", (unsigned long long)(cap / 1024));
-    return true;
-}
-
-} // namespace
-
-RingSpan rb_ring_alloc(Renderer* r, u64 bytes, u64 align) {
-    FrameRing& g = r->ring;
-    RingSpan out;
-    if (bytes == 0) return out;
-    for (u32 attempt = 0; attempt < 2; ++attempt) {
-        u64 cap  = g.buf.size;
-        u64 head = (g.head + align - 1) / align * align;
-        u64 gap  = head - g.head;
-        bool ok = false;
-        if (g.used == 0) {
-            g.head = g.tail = 0; head = 0; gap = 0;
-            ok = bytes <= cap;
-        } else if (g.head >= g.tail) {
-            if (head + bytes <= cap) ok = true;
-            else if (bytes < g.tail) { gap = cap - g.head; head = 0; ok = true; }
-        } else {
-            ok = head + bytes < g.tail;
-        }
-        if (ok) {
-            out.resource = g.buf.resource;
-            out.offset   = head;
-            out.ptr      = (u8*)g.buf.mapped + head;
-            g.head       = head + bytes;
-            if (g.head == cap) g.head = 0;
-            g.used        += gap + bytes;
-            g.frame_bytes += gap + bytes;
-            if (g.used > g.peak) g.peak = g.used;
-            return out;
-        }
-        if (!ring_grow(r, bytes + align)) return RingSpan{};
-    }
-    return out;
-}
-
-void rb_ring_submitted(Renderer* r, FrameInFlight& f) {
-    f.ring_end   = r->ring.head;
-    f.ring_bytes = r->ring.frame_bytes;
-    r->ring.frame_bytes = 0;
-}
-
-void rb_ring_release(Renderer* r, FrameInFlight& f) {
-    FrameRing& g = r->ring;
-    if (!f.submitted || f.ring_bytes == 0) return;
-    g.used -= f.ring_bytes;
-    g.tail  = f.ring_end;
-    f.ring_bytes = 0;
-    if (g.used == 0) g.head = g.tail = 0;
-}
 
 // ---- descriptors ----------------------------------------------------------------------------
 
@@ -198,10 +115,6 @@ void rb_defer_destroy_texture(Renderer* r, Texture& t) {
     t.resident = false;
 }
 
-void rb_mark_slot_dirty(Renderer* r, u32 slot) {
-    for (FrameInFlight& f : r->frames) f.dirty_slots.push(slot);
-}
-
 // The view a slot shows in a frame's table: its own texture, or the default's. Written once
 // that frame's fence has passed, so no list in flight sees it change.
 void rb_write_texture_slot(Renderer* r, u32 frame, u32 slot) {
@@ -217,7 +130,7 @@ void rb_write_texture_slot(Renderer* r, u32 frame, u32 slot) {
 
 // A texture for the record's size and format, waiting for its copy. Any previous one is
 // released after the frames in flight.
-bool rb_create_texture_resource(Renderer* r, Texture& t) {
+bool rb_texture_create(Renderer* r, Texture& t) {
     if (t.resource) rb_defer_destroy_texture(r, t);
     D3D12_HEAP_PROPERTIES hp{};
     hp.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -247,11 +160,11 @@ bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels) {
     up.height   = t.height;
     up.pitch    = pitch;
     u8* dst = nullptr;
-    if (bytes <= r->ring.buf.size / 2) {
-        RingSpan span = rb_ring_alloc(r, bytes, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+    if (bytes <= r->ring.size / 2) {
+        RingSpan span = rc_ring_alloc(r, bytes, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
         if (!span.ptr) return false;
         dst       = (u8*)span.ptr;
-        up.src    = span.resource;
+        up.src    = span.buffer.resource;
         up.offset = span.offset;
     } else {
         Buffer staging;
@@ -275,7 +188,7 @@ bool rb_create_default_texture(Renderer* r) {
     Handle h = r->textures.create(t);
     if (h.index() != 0) { KV_ERROR("d3d12", "default texture is not slot 0"); return false; }
     Texture& slot0 = r->textures.items[0];
-    if (!rb_create_texture_resource(r, slot0)) return false;
+    if (!rb_texture_create(r, slot0)) return false;
 
     u8 pixels[kDefaultTexSize * kDefaultTexSize * 4];
     for (u32 y = 0; y < kDefaultTexSize; ++y) {
@@ -304,68 +217,6 @@ bool rb_create_default_texture(Renderer* r) {
     if (r->default_material.index() != 0) { KV_ERROR("d3d12", "default material is not row 0"); return false; }
     rw_mark_material_dirty(r->world, 0);
     return true;
-}
-
-// ---- materials --------------------------------------------------------------------------------
-
-// ---- handle kinds and pools -----------------------------------------------------------------
-
-namespace {
-
-void* texture_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->textures.get(Handle{h}); }
-int texture_describe(kv_handle h, void* ctx, char* out, size_t cap) {
-    Renderer* r = (Renderer*)ctx;
-    Texture* t = r->textures.get(Handle{h});
-    if (!t) return format(out, cap, "stale");
-    return format(out, cap, "'%s' %ux%u slot %u %s", name_str(t->name), t->width, t->height, Handle{h}.index(),
-                    t->resident ? "resident" : "placeholder");
-}
-void* material_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->world.materials.get(Handle{h}); }
-int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
-    Renderer* r = (Renderer*)ctx;
-    MaterialRecord* m = r->world.materials.get(Handle{h});
-    if (!m) return format(out, cap, "stale");
-    return format(out, cap, "'%s' %s texture slot %u row %u", name_str(m->name), blend_mode_name(m->blend), renderer_texture_slot(r, m->texture), Handle{h}.index());
-}
-
-const char* texture_name_of(kv_handle h, void* ctx) {
-    Texture* t = ((Renderer*)ctx)->textures.get(Handle{h});
-    return t ? name_str(t->name) : nullptr;
-}
-kv_handle texture_find_name(const char* name, void* ctx) {
-    Renderer* r = (Renderer*)ctx;
-    Handle* h = r->texture_by_name.find(name_lookup(name).hash);
-    return h && r->textures.valid(*h) ? h->bits : 0;
-}
-const char* material_name_of(kv_handle h, void* ctx) {
-    MaterialRecord* m = ((Renderer*)ctx)->world.materials.get(Handle{h});
-    return m ? name_str(m->name) : nullptr;
-}
-kv_handle material_find_name(const char* name, void* ctx) {
-    Renderer* r = (Renderer*)ctx;
-    Handle* h = r->world.material_by_name.find(name_lookup(name).hash);
-    return h && r->world.materials.valid(*h) ? h->bits : 0;
-}
-
-} // namespace
-
-bool rb_create_resource_pools(Renderer* r) {
-    kv_handle_kind_desc td{};
-    td.name = "render.texture"; td.type_key = type_key<Texture>(); td.ctx = r;
-    td.resolve = texture_resolve; td.describe = texture_describe;
-    td.name_of = texture_name_of; td.find_name = texture_find_name; td.flags = KV_HANDLE_GENERATIONAL;
-    r->texture_kind = handle_kind_register(td);
-    kv_handle_kind_desc md{};
-    md.name = "render.material"; md.type_key = type_key<MaterialRecord>(); md.ctx = r;
-    md.resolve = material_resolve; md.describe = material_describe;
-    md.name_of = material_name_of; md.find_name = material_find_name; md.flags = KV_HANDLE_GENERATIONAL;
-    r->material_kind = handle_kind_register(md);
-    if (!r->texture_kind || !r->material_kind) return false;
-    r->textures.use_kind(r->texture_kind);
-    r->world.materials.use_kind(r->material_kind);
-    r->texture_by_name.init(r->general);
-    r->uploads.alloc = r->general;
-    return r->textures.init(kMaxTextures, r->general->tag) && rw_init(r->world, r->general);
 }
 
 // ---- the GPU tables ------------------------------------------------------------------------------
@@ -544,13 +395,19 @@ void rb_destroy_resources(Renderer* r) {
     rb_release(r->heap);
     rb_release(r->rtv_heap);
     rb_release(r->sampler_heap);
-    if (r->texture_kind)  kv_handle_kind_unregister(r->texture_kind);
-    if (r->material_kind) kv_handle_kind_unregister(r->material_kind);
-    r->texture_kind = r->material_kind = 0;
-    r->textures.free();
-    r->texture_by_name.free();
-    rw_free(r->world);
+    rc_free_pools(r);
     r->uploads.free();
 }
+
+// ---- what the render core asks of a buffer and of the garbage queue (core.h) ----------------------
+
+void* rb_buffer_ptr(const RbBuffer& b) { return b.mapped; }
+void  rb_buffer_retire(Renderer* r, RbBuffer& b) { rb_defer_destroy_buffer(r, b); }
+
+bool rb_ring_buffer(Renderer* r, u64 bytes, RbBuffer& out) {
+    return rb_create_buffer(r, D3D12_HEAP_TYPE_UPLOAD, bytes, false, out, "upload ring");
+}
+
+void rb_garbage_destroy(Renderer*, const RbGarbage& g) { g.object->Release(); }
 
 } // namespace kv

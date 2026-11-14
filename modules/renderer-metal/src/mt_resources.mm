@@ -23,20 +23,7 @@ id<MTLBuffer> rb_buffer(Renderer* r, usize bytes, MTLResourceOptions storage, co
 // earlier frame on the queue too. An object queued between frames may be what that frame
 // uses (a staging buffer its upload reads), so it must not go at the wait that opens it.
 void rb_defer_release(Renderer* r, id obj) {
-    if (obj) r->frames[r->frame_index].garbage.push(obj);
-}
-
-// The slot's last frame has completed: what it owned goes; what was queued since stays for
-// the frame being opened.
-void rb_run_garbage(Renderer*, FrameInFlight& f) {
-    u32 n = f.garbage_owned <= f.garbage.len ? f.garbage_owned : f.garbage.len;
-    for (u32 i = 0; i < n; ++i) [f.garbage[i] release];
-    if (n) {
-        u32 rest = f.garbage.len - n;
-        if (rest) memmove(f.garbage.data, f.garbage.data + n, sizeof(id) * rest);
-        f.garbage.len = rest;
-    }
-    f.garbage_owned = 0;
+    if (obj) rc_defer(r, obj);
 }
 
 void rb_release_all(Renderer*, FrameInFlight& f) {
@@ -50,86 +37,6 @@ void rb_release_all(Renderer*, FrameInFlight& f) {
 // included; `used` counts those bytes with wrap gaps so head == tail is unambiguous. A
 // frame's allocations are contiguous in ring order, so releasing a frame moves the tail to
 // where it ended. The CPU writes spans; a blit copies them where they go.
-
-bool rb_ring_init(Renderer* r, usize bytes) {
-    FrameRing& g = r->ring;
-    g.buf = rb_buffer(r, bytes, MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined, "upload ring");
-    if (!g.buf) return false;
-    g.size = bytes;
-    g.head = g.tail = g.used = g.frame_bytes = 0;
-    return true;
-}
-
-namespace {
-
-bool ring_grow(Renderer* r, usize need) {
-    FrameRing& g = r->ring;
-    usize cap = g.size * 2;
-    while (cap < need * 2) cap *= 2;
-    // Spans handed out so far point at the old buffer, which lives until this frame
-    // completes; the accounting restarts in the new one.
-    rb_defer_release(r, g.buf);
-    g.buf = rb_buffer(r, cap, MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined, "upload ring");
-    if (!g.buf) return false;
-    g.size = cap;
-    g.head = g.tail = g.used = 0;
-    g.frame_bytes = 0;
-    for (FrameInFlight& f : r->frames) f.ring_bytes = 0;
-    ++g.grows;
-    KV_INFO("metal", "frame ring grown to %llu KB", (unsigned long long)(cap / 1024));
-    return true;
-}
-
-} // namespace
-
-RingSpan rb_ring_alloc(Renderer* r, usize bytes, usize align) {
-    FrameRing& g = r->ring;
-    RingSpan out;
-    if (bytes == 0) return out;
-    for (u32 attempt = 0; attempt < 2; ++attempt) {
-        usize cap  = g.size;
-        usize head = (g.head + align - 1) / align * align;
-        usize gap  = head - g.head;
-        bool ok = false;
-        if (g.used == 0) {
-            g.head = g.tail = 0; head = 0; gap = 0;
-            ok = bytes <= cap;
-        } else if (g.head >= g.tail) {
-            if (head + bytes <= cap) ok = true;
-            else if (bytes < g.tail) { gap = cap - g.head; head = 0; ok = true; }
-        } else {
-            ok = head + bytes < g.tail;
-        }
-        if (ok) {
-            out.buffer = g.buf;
-            out.offset = head;
-            out.ptr    = (u8*)g.buf.contents + head;
-            g.head     = head + bytes;
-            if (g.head == cap) g.head = 0;
-            g.used        += gap + bytes;
-            g.frame_bytes += gap + bytes;
-            if (g.used > g.peak) g.peak = g.used;
-            return out;
-        }
-        if (!ring_grow(r, bytes + align)) return RingSpan{};
-    }
-    return out;
-}
-
-void rb_ring_submitted(Renderer* r, FrameInFlight& f) {
-    f.ring_end   = r->ring.head;
-    f.ring_bytes = r->ring.frame_bytes;
-    r->ring.frame_bytes = 0;
-}
-
-void rb_ring_release(Renderer* r, FrameInFlight& f) {
-    FrameRing& g = r->ring;
-    if (!f.submitted || f.ring_bytes == 0) return;
-    g.used -= f.ring_bytes;
-    g.tail  = f.ring_end;
-    f.ring_bytes = 0;
-    if (g.used == 0) g.head = g.tail = 0;
-}
 
 // ---- textures -------------------------------------------------------------------------------
 
@@ -154,12 +61,6 @@ void rb_defer_destroy_texture(Renderer* r, Texture& t) {
     t.resident = false;
 }
 
-// A slot's contents changed. Each frame's argument buffer is rewritten once that frame's
-// command buffer has completed, so no frame in flight sees an entry change under it.
-void rb_mark_slot_dirty(Renderer* r, u32 slot) {
-    for (FrameInFlight& f : r->frames) f.dirty_slots.push(slot);
-}
-
 void rb_write_texture_slot(Renderer* r, FrameInFlight& f, u32 slot) {
     MTLResourceID* ids = (MTLResourceID*)((u8*)f.bindless.contents + kBindlessTextures);
     ids[slot] = slot_texture(r, slot).gpuResourceID;
@@ -167,7 +68,7 @@ void rb_write_texture_slot(Renderer* r, FrameInFlight& f, u32 slot) {
 
 // The texture for a record's size and format, private to the GPU; a previous one is
 // released after the frames in flight.
-bool rb_create_texture(Renderer* r, Texture& t) {
+bool rb_texture_create(Renderer* r, Texture& t) {
     if (t.tex) rb_defer_destroy_texture(r, t);
     @autoreleasepool {
         MTLTextureDescriptor* d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixel_format(t.format)
@@ -191,7 +92,7 @@ bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels) {
     up.width  = t.width;
     up.height = t.height;
     if (bytes <= r->ring.size / 2) {
-        RingSpan span = rb_ring_alloc(r, bytes, 16);
+        RingSpan span = rc_ring_alloc(r, bytes, 16);
         if (!span.ptr) return false;
         memcpy(span.ptr, pixels, bytes);
         up.src    = span.buffer;
@@ -219,7 +120,7 @@ bool rb_create_default_texture(Renderer* r) {
     Handle h = r->textures.create(t);
     if (h.index() != 0) { KV_ERROR("metal", "default texture is not slot 0"); return false; }
     Texture& slot0 = r->textures.items[0];
-    if (!rb_create_texture(r, slot0)) return false;
+    if (!rb_texture_create(r, slot0)) return false;
 
     u8 pixels[kDefaultTexSize * kDefaultTexSize * 4];
     for (u32 y = 0; y < kDefaultTexSize; ++y) {
@@ -287,67 +188,6 @@ void rb_use_textures(Renderer* r, id<MTLRenderCommandEncoder> enc) {
     if (n) [enc useResources:list count:n usage:MTLResourceUsageRead stages:MTLRenderStageFragment];
 }
 
-// ---- materials ------------------------------------------------------------------------------
-
-// ---- handle kinds and pools -----------------------------------------------------------------
-
-namespace {
-
-void* texture_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->textures.get(Handle{h}); }
-int texture_describe(kv_handle h, void* ctx, char* out, size_t cap) {
-    Renderer* r = (Renderer*)ctx;
-    Texture* t = r->textures.get(Handle{h});
-    if (!t) return kv::format(out, cap, "stale");
-    return kv::format(out, cap, "'%s' %ux%u slot %u %s", name_str(t->name), t->width, t->height, Handle{h}.index(),
-                    t->resident ? "resident" : "placeholder");
-}
-void* material_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->world.materials.get(Handle{h}); }
-int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
-    Renderer* r = (Renderer*)ctx;
-    MaterialRecord* m = r->world.materials.get(Handle{h});
-    if (!m) return kv::format(out, cap, "stale");
-    return kv::format(out, cap, "'%s' %s texture slot %u row %u", name_str(m->name), blend_mode_name(m->blend), renderer_texture_slot(r, m->texture), Handle{h}.index());
-}
-const char* texture_name_of(kv_handle h, void* ctx) {
-    Texture* t = ((Renderer*)ctx)->textures.get(Handle{h});
-    return t ? name_str(t->name) : nullptr;
-}
-kv_handle texture_find_name(const char* name, void* ctx) {
-    Renderer* r = (Renderer*)ctx;
-    Handle* h = r->texture_by_name.find(name_lookup(name).hash);
-    return h && r->textures.valid(*h) ? h->bits : 0;
-}
-const char* material_name_of(kv_handle h, void* ctx) {
-    MaterialRecord* m = ((Renderer*)ctx)->world.materials.get(Handle{h});
-    return m ? name_str(m->name) : nullptr;
-}
-kv_handle material_find_name(const char* name, void* ctx) {
-    Renderer* r = (Renderer*)ctx;
-    Handle* h = r->world.material_by_name.find(name_lookup(name).hash);
-    return h && r->world.materials.valid(*h) ? h->bits : 0;
-}
-
-} // namespace
-
-bool rb_create_resource_pools(Renderer* r) {
-    kv_handle_kind_desc td{};
-    td.name = "render.texture"; td.type_key = type_key<Texture>(); td.ctx = r;
-    td.resolve = texture_resolve; td.describe = texture_describe;
-    td.name_of = texture_name_of; td.find_name = texture_find_name; td.flags = KV_HANDLE_GENERATIONAL;
-    r->texture_kind = handle_kind_register(td);
-    kv_handle_kind_desc md{};
-    md.name = "render.material"; md.type_key = type_key<MaterialRecord>(); md.ctx = r;
-    md.resolve = material_resolve; md.describe = material_describe;
-    md.name_of = material_name_of; md.find_name = material_find_name; md.flags = KV_HANDLE_GENERATIONAL;
-    r->material_kind = handle_kind_register(md);
-    if (!r->texture_kind || !r->material_kind) return false;
-    r->textures.use_kind(r->texture_kind);
-    r->world.materials.use_kind(r->material_kind);
-    r->texture_by_name.init(r->general);
-    r->uploads.alloc = r->general;
-    return r->textures.init(kMaxTextures, r->general->tag) && rw_init(r->world, r->general);
-}
-
 // ---- the GPU tables ------------------------------------------------------------------------------
 
 // Sprite tables for at least `rows` rows (rounded up to whole blocks). Previous tables are
@@ -403,13 +243,21 @@ void rb_destroy_resources(Renderer* r) {
     }
     [r->sampler release];        r->sampler = nil;
     [r->sampler_linear release]; r->sampler_linear = nil;
-    if (r->texture_kind)  kv_handle_kind_unregister(r->texture_kind);
-    if (r->material_kind) kv_handle_kind_unregister(r->material_kind);
-    r->texture_kind = r->material_kind = 0;
-    r->textures.free();
-    r->texture_by_name.free();
-    rw_free(r->world);
+    rc_free_pools(r);
     r->uploads.free();
 }
+
+// ---- what the render core asks of a buffer and of the garbage queue (core.h) ----------------------
+
+// A buffer in private storage has no contents; nor has no buffer.
+void* rb_buffer_ptr(const RbBuffer& b) { return b.contents; }
+void  rb_buffer_retire(Renderer* r, RbBuffer& b) { rb_defer_release(r, b); b = nil; }
+
+bool rb_ring_buffer(Renderer* r, u64 bytes, RbBuffer& out) {
+    out = rb_buffer(r, (usize)bytes, MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined, "upload ring");
+    return out != nil;
+}
+
+void rb_garbage_destroy(Renderer*, const RbGarbage& g) { [g release]; }
 
 } // namespace kv

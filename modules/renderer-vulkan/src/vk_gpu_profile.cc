@@ -187,6 +187,4 @@ void rb_gpu_collect(Renderer* r, FrameInFlight& f) {
     if (st.valid) g.last = st;
 }
 
-RendererGpuStats renderer_gpu_stats(const Renderer* r) { return r ? r->gpu_prof.last : RendererGpuStats{}; }
-
 } // namespace kv
