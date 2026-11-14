@@ -157,10 +157,11 @@ bool io_ring_pop(IoRing* r, u64* user, i32* res) {
 
 u32 io_ring_in_flight(const IoRing* r) { return r->in_flight; }
 u32 io_ring_entries(const IoRing* r) { return r->entries; }
+const char* io_ring_name(const IoRing* r) { return r ? "io_uring" : "sync"; }
 
 } // namespace kv
 
-#else
+#elif !defined(_WIN32) // Windows has its own: win32/io_ring_win32.cc
 
 namespace kv {
 
@@ -173,6 +174,7 @@ bool    io_ring_enter(IoRing*, u32) { return false; }
 bool    io_ring_pop(IoRing*, u64*, i32*) { return false; }
 u32     io_ring_in_flight(const IoRing*) { return 0; }
 u32     io_ring_entries(const IoRing*) { return 0; }
+const char* io_ring_name(const IoRing*) { return "sync"; }
 
 } // namespace kv
 

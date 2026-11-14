@@ -7,12 +7,10 @@
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"
 #include <errno.h>
-#include <fcntl.h>
 #include "korvid/math/scalar.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 namespace kv {
 
@@ -52,7 +50,8 @@ bool make_work_dir() {
         format(base, sizeof base, ".");
     }
     format(g_work_dir, sizeof g_work_dir, "%s/sockit2m-XXXXXX", base);
-    if (!mkdtemp(g_work_dir)) { KV_ERROR("sockit2m", "cannot create a working directory under '%s': %s", base, strerror(errno)); return false; }
+    i32 err = 0;
+    if (!workset_make_unique_dir(g_work_dir, &err)) { KV_ERROR("sockit2m", "cannot create a working directory under '%s': %s", base, strerror(err)); return false; }
     return true;
 }
 
@@ -70,44 +69,11 @@ bool write_working_set(f64* mb_per_s) {
         if (!f || fwrite(buf, 1, size, f) != size) { KV_ERROR("sockit2m", "cannot write '%s': %s", path, strerror(errno)); if (f) fclose(f); mem_free(buf); return false; }
         fclose(f);
     }
-    sync(); // what the disk took, not what the page cache took
+    workset_flush(); // what the disk took, not what the page cache took
     f64 s = time_now() - t0;
     mem_free(buf);
     *mb_per_s = (f64)g_opt.files * (f64)size / 1048576.0 / s;
     return true;
-}
-
-// Drops the working set from the page cache (clean pages after sync; no root needed), so
-// the next read pass meets the disk rather than memory. macOS has no posix_fadvise and no
-// unprivileged way to drop one file's pages (purge(8) is root's), so there the files are
-// flushed and the eviction reports failure: the run then says the cold pass may be warm.
-bool evict_working_set() {
-#if defined(__APPLE__)
-    for (u32 i = 0; i < g_opt.files; ++i) {
-        char path[600];
-        file_path(path, sizeof path, i);
-        int fd = open(path, O_RDONLY);
-        if (fd >= 0) { fsync(fd); close(fd); }
-    }
-    return false;
-#else
-    bool ok = true;
-    for (u32 i = 0; i < g_opt.files; ++i) {
-        char path[600];
-        file_path(path, sizeof path, i);
-        int fd = open(path, O_RDONLY);
-        if (fd < 0) { ok = false; continue; }
-        fdatasync(fd);
-        if (posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED) != 0) ok = false;
-        close(fd);
-    }
-    return ok;
-#endif
-}
-
-void remove_working_set() {
-    for (u32 i = 0; i < g_opt.files; ++i) { char path[600]; file_path(path, sizeof path, i); unlink(path); }
-    rmdir(g_work_dir);
 }
 
 // ---- files -----------------------------------------------------------------------------------------

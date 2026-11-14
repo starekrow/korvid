@@ -32,7 +32,8 @@ struct IoRing;
 
 enum class IoPriority : u8 { Idle, Low, Normal, High }; // Idle: served only from idle time
 enum class IoStatus : u8 { Pending, Done, Failed, Cancelled };
-enum class IoBackend : u8 { Auto, Sync, Uring };
+// Ring: the platform's async ring, io_uring on Linux and I/O rings on Windows 11.
+enum class IoBackend : u8 { Auto, Sync, Ring };
 
 struct IoBudget {
     usize bytes_per_pump      = 8u << 20;  // admitted per pump; 0: unlimited. At least one read always goes.
@@ -122,7 +123,7 @@ struct IoQueue {
 
     bool init(Allocator* storage, u32 max_in_flight, IoBackend backend = IoBackend::Auto);
     void free();
-    const char* backend_name() const { return ring ? "io_uring" : "sync"; }
+    const char* backend_name() const; // "io_uring", "ioring" (Windows) or "sync"
 
     // Submits a whole-file read. Null handle if the path is too long or the queue is full.
     Handle read_file(const IoRequest& req);

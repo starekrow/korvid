@@ -1,5 +1,13 @@
 // Files and directories on Windows: handles from CreateFileW, positional ReadFile, the
 // FindFirstFileExW walk. Handles are not inheritable, as O_CLOEXEC makes descriptors.
+//
+// Every file handle is opened FILE_FLAG_OVERLAPPED. The I/O ring (io_ring_win32.cc) is only
+// asynchronous on such a handle: on a synchronous one Windows performs the ring's reads one
+// after another inside SubmitIoRing (64 MB cold: 55 ms in the submit at 1.1 GB/s, against
+// 1 ms and 3.1 GB/s overlapped, measured here). The blocking calls below wait for their own
+// operation on an event of their own, so they can share a handle with the ring (a pack
+// mount is read both ways). An overlapped handle has no file position: a sequential write
+// goes at the end of the file, which for a file just created is the same thing.
 #include "../os_file.h"
 #include "korvid/core/format.h"
 #include "wide.h"
@@ -11,15 +19,36 @@ namespace kv {
 namespace {
 i32 fail_errno() { return errno_from_win32(GetLastError()); }
 HANDLE file_handle(OsFile f) { return (HANDLE)(intptr_t)f; }
+
+// One operation on an overlapped handle, waited for: the bytes moved, 0 at the end of the
+// file, or -1 with *err set. The event is the operation's own, so a completion of another
+// operation on the same handle (the ring's) cannot wake it.
+i64 overlapped_wait(HANDLE h, bool write, void* buf, DWORD want, u64 at, i32* err) {
+    OVERLAPPED ov = {};
+    ov.Offset     = (DWORD)at;
+    ov.OffsetHigh = (DWORD)(at >> 32);
+    ov.hEvent     = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!ov.hEvent) { *err = fail_errno(); return -1; }
+    BOOL started = write ? WriteFile(h, buf, want, nullptr, &ov) : ReadFile(h, buf, want, nullptr, &ov);
+    DWORD moved = 0, e = 0;
+    if (!started && GetLastError() != ERROR_IO_PENDING) e = GetLastError();
+    else if (!GetOverlappedResult(h, &ov, &moved, TRUE)) e = GetLastError();
+    CloseHandle(ov.hEvent);
+    if (!e) return moved;
+    if (!write && e == ERROR_HANDLE_EOF) return 0;
+    *err = errno_from_win32(e);
+    return -1;
+}
 } // namespace
 
 OsFile os_file_open(const char* path, bool write, i32* err) {
     wchar_t w[KV_WIDE_PATH_MAX];
     if (!widen(path, w, KV_WIDE_PATH_MAX, err)) return -1;
     // Readers let others read, write and delete meanwhile, as POSIX descriptors do.
-    HANDLE h = write ? CreateFileW(w, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr)
+    // Overlapped, for the ring: see the top of the file.
+    HANDLE h = write ? CreateFileW(w, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr)
                      : CreateFileW(w, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
     if (h == INVALID_HANDLE_VALUE) { *err = fail_errno(); return -1; }
     return (OsFile)(intptr_t)h;
 }
@@ -33,26 +62,17 @@ bool os_file_size(OsFile f, u64* size, i32* err) {
     return true;
 }
 
-// An offset in the OVERLAPPED of a synchronous handle reads there without seeking (the
-// position moves, but nothing here uses it). One call moves at most 1 GiB.
+// At the offset, waited for. One call moves at most 1 GiB.
 i64 os_file_read_at(OsFile f, void* buf, usize n, u64 at, i32* err) {
-    OVERLAPPED ov = {};
-    ov.Offset     = (DWORD)at;
-    ov.OffsetHigh = (DWORD)(at >> 32);
     DWORD want = n > (1u << 30) ? (1u << 30) : (DWORD)n;
-    DWORD got = 0;
-    if (ReadFile(file_handle(f), buf, want, &got, &ov)) return got;
-    if (GetLastError() == ERROR_HANDLE_EOF) return 0;
-    *err = fail_errno();
-    return -1;
+    return overlapped_wait(file_handle(f), false, buf, want, at, err);
 }
 
+// At the end of the file (an offset of all ones: an overlapped handle has no position), so
+// a file written from its creation is written in order. One call moves at most 1 GiB.
 i64 os_file_write(OsFile f, const void* buf, usize n, i32* err) {
     DWORD want = n > (1u << 30) ? (1u << 30) : (DWORD)n;
-    DWORD put = 0;
-    if (WriteFile(file_handle(f), buf, want, &put, nullptr)) return put;
-    *err = fail_errno();
-    return -1;
+    return overlapped_wait(file_handle(f), true, (void*)buf, want, ~0ull, err);
 }
 
 OsPathKind os_path_kind(const char* path) {

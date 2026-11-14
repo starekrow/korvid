@@ -24,6 +24,7 @@ struct Options {
     bool keep     = false;
     bool direct   = false;  // the tight loop instead of the engine
     bool compare  = false;  // both
+    IoBackend io  = IoBackend::Auto; // --io: the queue's backend in both modes (the platform's, in engine mode)
 };
 extern Options g_opt;
 extern char    g_work_dir[512];
@@ -48,6 +49,12 @@ void file_path(char* out, usize cap, u32 i);
 bool write_working_set(f64* mb_per_s);
 bool evict_working_set();
 void remove_working_set();
+
+// What the working set needs from the OS, one source per OS (src/posix/, src/win32/).
+// A new directory from a template ending "XXXXXX", replaced in place; *err on failure.
+bool workset_make_unique_dir(char* path, i32* err);
+// The working set's writes on the disk, not only in the cache.
+void workset_flush();
 
 // One pass over the working set through a queue with at most `inflight` reads out.
 struct FsJob {

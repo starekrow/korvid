@@ -309,7 +309,7 @@ bool IoQueue::init(Allocator* storage, u32 max_in_flight, IoBackend backend) {
     if (storage) tag = storage->tag;
     if (!entries.init(max_in_flight, tag)) return false;
     if (backend != IoBackend::Sync) ring = io_ring_create(kRingEntries);
-    if (backend == IoBackend::Uring && !ring) KV_WARN("io", "io_uring was asked for and is not available");
+    if (backend == IoBackend::Ring && !ring) KV_WARN("io", "the async ring was asked for and is not available");
     if (!ring) KV_INFO("io", "synchronous reads");
     return true;
 }
@@ -700,6 +700,8 @@ bool IoQueue::reap(Handle request) {
     }
     return false;
 }
+
+const char* IoQueue::backend_name() const { return io_ring_name(ring); }
 
 void IoQueue::pump() {
     ++pumps;

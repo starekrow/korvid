@@ -51,8 +51,8 @@ primitives can do. `--compare` prints both in one table with a mode column.
 
 | scenario | what it measures |
 |---|---|
-| fs write | the disk's write number: `fwrite` then `sync`, setup |
-| fs read cold | the set evicted from the page cache (`posix_fadvise`), read through io_uring with `--inflight` reads out; macOS cannot evict without root, so there it is warm and the run warns |
+| fs write | the disk's write number: `fwrite` then `sync` (on Windows, `FlushFileBuffers` on each file), setup |
+| fs read cold | the set evicted from the page cache, read through the async ring (io_uring, Windows I/O rings) with `--inflight` reads out. Linux evicts with `posix_fadvise`; Windows opens each file once with `FILE_FLAG_NO_BUFFERING`, which makes the cache manager purge it; macOS cannot evict without root, so there it is warm and the run warns |
 | fs read hot | the same with the cache warm: the kernel completes the reads inside the submit |
 | fs read sync | the synchronous backend, hot (direct mode only; the platform's queue chose its backend) |
 | sockets bulk | `--conns` connections each streaming `--chunk` KB chunks, echoed and verified byte for byte |
@@ -77,6 +77,18 @@ keep 103% of their solo rate with the budget and 79% without, with a 45 ms worst
 frame's work staying at the period. Direct mode: sockets 700 MB/s each way and 13.8 M
 lines per second at 0.3 ms round trip. Zero data errors throughout.
 
+On Windows 11 on the same laptop (2026-11-13, the same set, dev build), the queue on
+Windows I/O rings: cold reads 1.69 GB/s at 4 us per frame, against 0.75 GB/s with
+`--io sync`; in direct mode a cold pump costs 0.4 ms on the ring against 11.7 ms
+synchronous. Hot reads 2.1 GB/s on either backend (a hot read is a copy inside the
+submit, as with io_uring), worst frame 8 ms under the budget. Idle reads from the slack
+1.36 GB/s cold (0.59 synchronous). Sockets the same 120 MB/s each way in engine mode and
+100% of solo under file load with the budget; direct mode is loopback's own number,
+260 MB/s each way and 7.9 M lines per second at 0.55 ms round trip, under half of
+Linux's. Zero data errors. The ring needs overlapped handles: on a synchronous one
+Windows performs the ring's reads one by one inside the submit (cold: 0.8 GB/s, the
+whole read time spent in the pump), so `os_file_open` makes every handle overlapped.
+
 The findings that changed the engine: a pump's cost is proportional to the bytes it
 admits, hence the queue's byte budget; sockets served from a tick system are bound by
 what the kernel buffers hold per tick; the first cold submission of 64 MB costs 43 ms
@@ -96,6 +108,7 @@ where 8 MB costs 5. `docs/design/idle.md` has the design that came of it.
 | `--frame-ms N` | one tick | the paced period of the idle scenarios |
 | `--quick` | | a small set, one-second socket runs |
 | `--keep` | | leave the files behind |
+| `--io sync`, `--io ring` | the platform's choice | the queue's backend in both modes: `ring` is io_uring or Windows I/O rings |
 | `--direct`, `--compare` | | the tight loop instead; both |
 
 ## Where things are

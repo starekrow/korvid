@@ -157,8 +157,8 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--io") == 0 && i + 1 < argc) {
             const char* b = argv[++i];
             if (!strcmp(b, "sync")) g_mounts.io_backend = IoBackend::Sync;
-            else if (!strcmp(b, "uring")) g_mounts.io_backend = IoBackend::Uring;
-            else { KV_ERROR("frameloop", "--io sync or --io uring"); return false; }
+            else if (!strcmp(b, "uring") || !strcmp(b, "ring")) g_mounts.io_backend = IoBackend::Ring; // the platform's async ring
+            else { KV_ERROR("frameloop", "--io sync, or --io ring (uring): the async ring, io_uring or Windows I/O rings"); return false; }
         }
         else if (strcmp(argv[i], "--idle-margin-ms") == 0 && i + 1 < argc) g_idle_margin = atof(argv[++i]) * 1e-3;
         else if (strcmp(argv[i], "--no-idle") == 0) g_idle = false;

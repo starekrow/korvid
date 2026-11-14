@@ -141,7 +141,7 @@ void clock_note(char* out, usize cap, const Driver& d, const PumpClock& clock) {
 }
 
 void scenario_fs_read(Driver& d, IoBackend backend, const char* name, bool cold) {
-    if (d.e && backend == IoBackend::Sync) return; // the platform's queue chose its backend at startup
+    // The engine's queue chose its backend at startup (--io); only the direct mode adds the sync row.
     FsJob fs;
     PumpClock clock;
     if (cold && !evict_working_set()) KV_WARN("sockit2m", "could not evict the working set; the cold pass may be warm");
@@ -155,7 +155,7 @@ void scenario_fs_read(Driver& d, IoBackend backend, const char* name, bool cold)
     clock_note(cn, sizeof cn, d, clock);
     format(note, sizeof note, "latency avg %.2f ms, max %.2f ms; %s%s", fs.lat_sum / g_opt.files * 1e3, fs.lat_max * 1e3, cn, fs.failed ? "; DATA ERRORS" : "");
     report(name, what, numbers, note);
-    if (backend == IoBackend::Auto && !cold) g_fs_solo_mbs = fs.mb_per_s();
+    if (backend == g_opt.io && !cold) g_fs_solo_mbs = fs.mb_per_s();
     fs.end();
     mem_settled(name);
 }
@@ -195,7 +195,7 @@ void scenario_both(Driver& d, u32 inflight, const char* name) {
     FsJob fs;
     SockJob sj;
     PumpClock clock;
-    if (!fs.begin(d.queue(), IoBackend::Auto, d.alloc(), inflight) || !sj.begin(g_opt.conns, false, 3600.0, d.alloc())) {
+    if (!fs.begin(d.queue(), g_opt.io, d.alloc(), inflight) || !sj.begin(g_opt.conns, false, 3600.0, d.alloc())) {
         report(name, "could not start", "", "FAILED"); ++g_errors; fs.end(); sj.end(); return;
     }
     d.begin(&fs, &sj);
@@ -227,7 +227,7 @@ void scenario_idle(Driver& d, bool cold, const char* name) {
     FsJob fs;
     PumpClock clock;
     if (cold && !evict_working_set()) KV_WARN("sockit2m", "could not evict the working set; the cold pass may be warm");
-    if (!fs.begin(d.queue(), IoBackend::Auto, d.alloc(), g_opt.files, IoPriority::Idle)) { report(name, "could not start", "", "FAILED"); ++g_errors; return; }
+    if (!fs.begin(d.queue(), g_opt.io, d.alloc(), g_opt.files, IoPriority::Idle)) { report(name, "could not start", "", "FAILED"); ++g_errors; return; }
     IoQueue* q = d.queue();
     u64 idle_calls0 = q->idle_calls, idle_bytes0 = q->idle_bytes;
     f64 period = g_opt.frame_ms > 0.0 ? g_opt.frame_ms * 1e-3 : 1.0 / g_opt.tick_hz;
@@ -249,9 +249,9 @@ void scenario_idle(Driver& d, bool cold, const char* name) {
 }
 
 void run_all(Driver& d) {
-    scenario_fs_read(d, IoBackend::Auto, "fs read cold", true);
-    scenario_fs_read(d, IoBackend::Auto, "fs read hot", false);
-    scenario_fs_read(d, IoBackend::Sync, "fs read sync", false);
+    scenario_fs_read(d, g_opt.io, "fs read cold", true);
+    scenario_fs_read(d, g_opt.io, "fs read hot", false);
+    if (!d.e && g_opt.io != IoBackend::Sync) scenario_fs_read(d, IoBackend::Sync, "fs read sync", false);
     scenario_sockets(d, false, "sockets bulk");
     scenario_sockets(d, true, "sockets lines");
     scenario_both(d, g_opt.inflight, "both");
@@ -269,6 +269,9 @@ bool run_engine_mode() {
     g_mode = "engine";
     Engine e;
     e.clock.tick_dt = 1.0 / g_opt.tick_hz;
+    PlatformMounts mounts;
+    mounts.io_backend = g_opt.io; // the platform's queue on the backend asked for
+    platform_configure_mounts(mounts);
     LogLevel was = log_level();
     log_set_level(LogLevel::Warn); // the schedule log, once, is enough
     bool ok = engine_init(e, kv_module_list());
@@ -314,7 +317,9 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--keep") == 0) o.keep = true;
         else if (strcmp(argv[i], "--direct") == 0) o.direct = true;
         else if (strcmp(argv[i], "--compare") == 0) o.compare = true;
-        else { print_err("usage: %s [--dir PATH] [--files N] [--size KB] [--inflight N] [--conns N] [--chunk KB] [--seconds S] [--tick-hz N] [--budget KB] [--frame-ms N] [--quick] [--keep] [--direct | --compare]\n", argv[0]); return 2; }
+        else if (strcmp(argv[i], "--io") == 0 && i + 1 < argc && !strcmp(argv[i + 1], "sync")) { o.io = IoBackend::Sync; ++i; }
+        else if (strcmp(argv[i], "--io") == 0 && i + 1 < argc && (!strcmp(argv[i + 1], "ring") || !strcmp(argv[i + 1], "uring"))) { o.io = IoBackend::Ring; ++i; }
+        else { print_err("usage: %s [--dir PATH] [--files N] [--size KB] [--inflight N] [--conns N] [--chunk KB] [--seconds S] [--tick-hz N] [--budget KB] [--frame-ms N] [--io sync|ring] [--quick] [--keep] [--direct | --compare]\n", argv[0]); return 2; }
     }
     if (o.quick) { o.files = o.files > 32 ? 32 : o.files; o.size_kb = o.size_kb > 256 ? 256 : o.size_kb; }
     if (o.files < 1) o.files = 1;

@@ -13,10 +13,14 @@ per frame, by the frame loop in a game and by the `tool` module in a tool.
 **Files** (`io.h`). A batched asynchronous read queue shaped like io_uring: submit any
 time with a priority, the pump hands reads to the backend and collects completions, and
 a completion sits on the list until its consumer reaps it and takes the data. Nothing
-completes inline. On Linux the backend is an io_uring driven by raw syscalls (one
-enter per pump, completions reaped without waiting, short reads continued, cancels
-honoured when the ring answers); elsewhere, or when the kernel refuses a ring, the pump
-performs the reads itself in priority order. A pump is bounded in bytes, not requests
+completes inline. The async backend is a ring: on Linux an io_uring driven by raw
+syscalls, on Windows 11 the OS's I/O rings (`ioringapi.h`, version 3 or later for writes;
+looked up in KernelBase by name, so an executable still starts on Windows 10). Either way
+one submit per pump, completions reaped without waiting, short reads continued, cancels
+honoured when the ring answers, and the same plain file handles the synchronous path
+uses. Elsewhere (macOS), or when the OS refuses a ring, the pump performs the reads itself
+in priority order. `IoBackend::Ring` asks for the ring whatever the OS calls it;
+`backend_name()` says which ran: `io_uring`, `ioring` or `sync`. A pump is bounded in bytes, not requests
 (8 MB per pump, 64 MB in flight by default), because the kernel does work at submission
 in proportion to the size; what does not fit waits. `IoPriority::Idle` reads wait for
 idle time: the module's idle task `platform.io` serves them from the slack the frame loop
@@ -117,7 +121,7 @@ Header `korvid/platform/io.h`:
 |---|---|---|
 | `IoPriority` | enum | `Idle` (idle time only), `Low`, `Normal`, `High` |
 | `IoStatus` | enum | `Pending`, `Done`, `Failed`, `Cancelled` |
-| `IoBackend` | enum | `Auto`, `Sync`, `Uring`: what `init` tries |
+| `IoBackend` | enum | `Auto`, `Sync`, `Ring` (the async ring: io_uring, or Windows I/O rings): what `init` tries |
 | `IoBudget` | record | `bytes_per_pump` (8 MB), `bytes_in_flight` (64 MB), `idle_bytes_per_call` (4 MB); 0 is unlimited |
 | `IoRequest` | record | `path` (copied), `alloc` (the data's home; null: general), `priority`, `user` |
 | `IoCompletion` | record | `request`, `status`, `data`, `size`, `user`, `error` (errno) |
@@ -174,6 +178,6 @@ What the module registers with the engine:
 
 The window and input (`platform_hid`), the audio device (`platform_audio`), inflating on
 the job pool (a deflated pack entry is inflated on the main thread at the pump),
-unmounting, io_uring for sockets, IPv6 and non-loopback listeners by default, Windows and
-macOS. Residency streaming sits above the queue, in the asset module and whatever comes
-after it.
+unmounting, the ring for sockets, IPv6 and non-loopback listeners by default, an async
+backend on macOS. Residency streaming sits above the queue, in the asset module and
+whatever comes after it.

@@ -25,7 +25,7 @@ root "windows" {
                 "render", "asset", "sprite", "scene", "text", "anim", "collision", "tilemap", "level",
                 "platform_audio", "audio", "renderer-vulkan", "touchpad", "frameloop", "save", "ui", "xml", "bulletml", "image", "picture",
                 "window", "testbed", "stones", "rocks", "arcanum",
-                "cpukiller", "arcfire", "gallery" },
+                "cpukiller", "arcfire", "gallery", "sockit2m" },
   tests     = true,
   platforms = { "windows" },
 }
