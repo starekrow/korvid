@@ -156,4 +156,5 @@ Nov 13. All five milestones, on `render-core`; what each machine proved is in th
 - **The screenshot's file writer is in the compiled-in half**, not the linked one: it needs `platform`'s file writer, which `render` does not depend on.
 - **Milestone 4 was made**, and the question "For review" 4 asked of it came out well: twenty-two steps, each with a body in all three backends but `rb_sort_end` (empty on Metal) and `rb_record_end` (only a `return` there).
 - **There were no backend READMEs to update** (R8): each backend's `renderer_internal.h` header lists its files against the contract, and `modules/render/README.md` is new.
-- **Not run:** resize, minimise and vsync off by hand on any backend; Vulkan on Windows.
+- **Metal closed at milestone 5 with no change** (macOS on an M3 Max, the iOS Simulator): the scripted and hand-written Metal code built and drew as it was. The gate passed, the gallery exact against `references/metal`, sort checks under Metal's validation; the bench, three runs a side interleaved with `main`, within noise (`render` 1.37 ms on both, GPU frame 1.29 against 1.32), uncapped with vsync off; arcfire's recorded runs match; the iOS builds and the Simulator's 27 suites pass.
+- **Not run:** resize and minimise by hand on any backend; vsync off by hand on Vulkan and D3D12; Vulkan on Windows.
