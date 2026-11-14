@@ -103,6 +103,9 @@ finds an entity of another restored by the same load.
 
 ## CBOR, later
 
+The format this becomes is KBOR (`docs/design/kbor.md`): CBOR with a key table, so a
+repeated key costs a byte. The plan below stands as written.
+
 A second `SaveFormat` needs two pieces and nothing else changes:
 
 - **Writing**: each `SaveWriter` call becomes its CBOR item. `begin_object` and
