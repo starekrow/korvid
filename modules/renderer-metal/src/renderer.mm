@@ -21,46 +21,7 @@ namespace kv {
 
 // ---- shared helpers ----------------------------------------------------------------------
 
-u32 rb_material_row_of(const Renderer* r, Handle material) {
-    return r->materials.valid(material) ? material.index() : 0;
-}
-
-u32 rb_bucket_of(i32 layer, u32 slot) {
-    if (layer < kLayerMin) layer = kLayerMin;
-    if (layer > kLayerMax) layer = kLayerMax;
-    u32 b = slot < kSlotCount ? slot : (u32)BlendMode::Alpha;
-    return (u32)(layer - kLayerMin) * kSlotCount + b;
-}
-
-const char* blend_mode_name(BlendMode mode) {
-    switch (mode) {
-    case BlendMode::Opaque:   return "opaque";
-    case BlendMode::Alpha:    return "alpha";
-    case BlendMode::Additive: return "additive";
-    default:                  return "?";
-    }
-}
-
-bool blend_mode_parse(const char* s, BlendMode* out) {
-    if (!s) return false;
-    if (strcmp(s, "opaque") == 0)   { *out = BlendMode::Opaque;   return true; }
-    if (strcmp(s, "alpha") == 0)    { *out = BlendMode::Alpha;    return true; }
-    if (strcmp(s, "additive") == 0) { *out = BlendMode::Additive; return true; }
-    return false;
-}
-
 namespace {
-
-void mark_sprite_dirty(Renderer* r, u32 slot) {
-    u32 w = slot >> 6;
-    if (w >= r->sprite_dirty.len) r->sprite_dirty.resize_fill(w + 1, 0);
-    r->sprite_dirty[w] |= (u64)1 << (slot & 63);
-}
-
-void write_placement(f32 out[4], f32* scale_y, const Placement2& p) {
-    out[0] = p.position.x; out[1] = p.position.y; out[2] = p.rotation; out[3] = p.scale.x;
-    *scale_y = p.scale.y;
-}
 
 // The layer: the device, the format the pipelines are made for, vsync, and drawables a
 // screenshot can read in the builds that take them.
@@ -211,7 +172,7 @@ void renderer_destroy(Renderer* r) {
     [r->queue release];  r->queue = nil;
     [r->device release]; r->device = nil;
     KV_INFO("metal", "renderer down after %llu frames, %llu deltas, %llu rows uploaded, ring peak %llu KB (%u grows)",
-            (unsigned long long)r->frame_count, (unsigned long long)r->deltas_applied, (unsigned long long)r->rows_uploaded,
+            (unsigned long long)r->frame_count, (unsigned long long)r->world.deltas_applied, (unsigned long long)r->rows_uploaded,
             (unsigned long long)(r->ring.peak / 1024), r->ring.grows);
     if (r->checks_passed || r->checks_failed) KV_INFO("metal", "sort checks: %u passed, %u failed", r->checks_passed, r->checks_failed);
     if (r->owner_slot) *r->owner_slot = nullptr;
@@ -337,29 +298,29 @@ Handle renderer_material_create(Renderer* r, const MaterialDesc& desc) {
         m.name = derived_material_name(r, m);
 #if KV_DEV
         bool inserted = false;
-        r->material_by_name.get_or_insert(m.name.hash, Handle{}, &inserted);
-        if (inserted) { r->material_by_name.remove(m.name.hash); KV_INFO("metal", "material named %s by its content", name_str(m.name)); }
+        r->world.material_by_name.get_or_insert(m.name.hash, Handle{}, &inserted);
+        if (inserted) { r->world.material_by_name.remove(m.name.hash); KV_INFO("metal", "material named %s by its content", name_str(m.name)); }
 #endif
     }
-    Handle h = r->materials.create(m);
+    Handle h = r->world.materials.create(m);
     if (h.is_null()) { KV_ERROR("metal", "out of materials (%u)", kMaxMaterials); return h; }
-    r->material_by_name.get_or_insert(m.name.hash, h);
-    rb_mark_material_dirty(r, h.index());
+    r->world.material_by_name.get_or_insert(m.name.hash, h);
+    rw_mark_material_dirty(r->world, h.index());
     return h;
 }
 
 bool renderer_material_set(Renderer* r, Handle material, const MaterialDesc& desc) {
-    MaterialRecord* m = r ? r->materials.get(material) : nullptr;
+    MaterialRecord* m = r ? r->world.materials.get(material) : nullptr;
     if (!m) return false;
     u32 before = m->slot;
     fill_material(r, *m, desc);
-    if (m->slot != before) rb_rebind_material(r, material.index());
-    rb_mark_material_dirty(r, material.index());
+    if (m->slot != before) rw_rebind_material(r->world, material.index());
+    rw_mark_material_dirty(r->world, material.index());
     return true;
 }
 
 bool renderer_material_get(const Renderer* r, Handle material, MaterialDesc* out) {
-    const MaterialRecord* m = r ? r->materials.get(material) : nullptr;
+    const MaterialRecord* m = r ? r->world.materials.get(material) : nullptr;
     if (!m || !out) return false;
     out->texture = m->texture;
     out->blend   = m->blend;
@@ -372,13 +333,13 @@ bool renderer_material_get(const Renderer* r, Handle material, MaterialDesc* out
 }
 
 void renderer_material_destroy(Renderer* r, Handle material) {
-    if (!r || material == r->default_material || !r->materials.valid(material)) return;
+    if (!r || material == r->default_material || !r->world.materials.valid(material)) return;
     u32 row = material.index();
-    Name name = r->materials.get(material)->name;
-    r->materials.destroy(material);
-    rename_after_destroy(r->materials, r->material_by_name, name, material);
-    rb_rebind_material(r, row);
-    rb_mark_material_dirty(r, row);
+    Name name = r->world.materials.get(material)->name;
+    r->world.materials.destroy(material);
+    rename_after_destroy(r->world.materials, r->world.material_by_name, name, material);
+    rw_rebind_material(r->world, row);
+    rw_mark_material_dirty(r->world, row);
 }
 
 bool renderer_post_layer(Renderer* r, i32 layer, const char* shader) {
@@ -422,91 +383,7 @@ void renderer_resize(Renderer* r, u32 width, u32 height) {
     r->size_dirty  = true;
 }
 
-void renderer_apply(Renderer* r, Span<const SpriteDelta> deltas) {
-    if (!r) return;
-    KV_ZONE("apply");
-    for (const SpriteDelta& d : deltas) {
-        ++r->deltas_applied;
-        switch (d.kind) {
-        case SpriteDeltaKind::Tick:
-            ++r->tick;
-            memcpy(r->layer_prev, r->layer_cur, sizeof r->layer_prev);
-            break;
-        case SpriteDeltaKind::Layer: {
-            i32 l = d.state.layer < -128 ? -128 : d.state.layer > 127 ? 127 : d.state.layer;
-            f32* cur = r->layer_cur[l + 128];
-            cur[0] = d.state.placement.position.x;
-            cur[1] = d.state.placement.position.y;
-            if (d.state.snap) memcpy(r->layer_prev[l + 128], cur, sizeof(f32) * 2);
-            break;
-        }
-        case SpriteDeltaKind::Set: {
-            const RenderSpriteState& st = d.state;
-            u32 material = rb_material_row_of(r, st.material);
-            u32 bucket   = rb_bucket_of(st.layer, r->materials.items[material].slot);
-            RenderSprite* s;
-            u32 slot;
-            if (u32* found = r->sprite_of_entity.find(d.entity)) {
-                slot = *found;
-                s = &r->sprites.items[slot];
-                if (s->gpu.stamp != r->tick) {
-                    memcpy(s->gpu.prev, s->gpu.cur, sizeof s->gpu.prev);
-                    s->gpu.scale_y[0] = s->gpu.scale_y[1];
-                    s->gpu.stamp = r->tick;
-                }
-                if (st.snap) write_placement(s->gpu.prev, &s->gpu.scale_y[0], st.placement);
-                if (bucket != s->bucket) {
-                    --r->bucket_counts[s->bucket];
-                    ++r->bucket_counts[bucket];
-                    if (s->keyed) { --r->keyed_counts[s->bucket]; ++r->keyed_counts[bucket]; }
-                    s->bucket = bucket;
-                }
-            } else {
-                RenderSprite fresh{};
-                fresh.entity = d.entity;
-                fresh.bucket = bucket;
-                Handle h = r->sprites.create(fresh);
-                if (h.is_null()) { KV_ERROR("metal", "render world is full (%u sprites)", kMaxSprites); break; }
-                slot = h.index();
-                s = &r->sprites.items[slot];
-                r->sprite_of_entity.set(d.entity, slot);
-                ++r->bucket_counts[bucket];
-                write_placement(s->gpu.prev, &s->gpu.scale_y[0], st.placement);
-                s->gpu.stamp = r->tick;
-            }
-            write_placement(s->gpu.cur, &s->gpu.scale_y[1], st.placement);
-            s->gpu.size[0] = st.size.x; s->gpu.size[1] = st.size.y;
-            s->gpu.uv[0] = st.uv.x; s->gpu.uv[1] = st.uv.y; s->gpu.uv[2] = st.uv.w; s->gpu.uv[3] = st.uv.h;
-            s->gpu.tint[0] = st.tint.r; s->gpu.tint[1] = st.tint.g; s->gpu.tint[2] = st.tint.b; s->gpu.tint[3] = st.tint.a;
-            s->gpu.material = material;
-            s->gpu.layer    = st.layer;
-            i32 ax = 0, ay = 0;
-            screen_anchor_dir(st.anchor, &ax, &ay);
-            u32 anchor = (u32)(ax < 0 ? 1 : ax > 0 ? 2 : 0) | (u32)(ay < 0 ? 1 : ay > 0 ? 2 : 0) << 2;
-            s->gpu.flags    = kSpriteAlive | (st.space == SpriteSpace::Screen ? kSpriteScreen : 0) | ((u32)st.sort << kSpriteSortShift) |
-                              (anchor << kSpriteAnchorShift);
-            s->gpu.order    = st.order;
-            bool keyed = st.sort != SpriteSort::Row;
-            if (keyed != s->keyed) { if (keyed) ++r->keyed_counts[bucket]; else --r->keyed_counts[bucket]; s->keyed = keyed; }
-            mark_sprite_dirty(r, slot);
-            break;
-        }
-        case SpriteDeltaKind::Remove: {
-            if (u32* found = r->sprite_of_entity.find(d.entity)) {
-                u32 slot = *found;
-                --r->bucket_counts[r->sprites.items[slot].bucket];
-                if (r->sprites.items[slot].keyed) --r->keyed_counts[r->sprites.items[slot].bucket];
-                r->sprites.destroy(r->sprites.handle_at(slot));
-                r->sprite_of_entity.remove(d.entity);
-                mark_sprite_dirty(r, slot);
-            }
-            break;
-        }
-        }
-    }
-}
-
-u32 renderer_sprite_count(const Renderer* r) { return r ? r->sprites.live : 0; }
+u32 renderer_sprite_count(const Renderer* r) { return r ? r->world.sprites.live : 0; }
 
 // ---- the frame ------------------------------------------------------------------------------
 
@@ -533,14 +410,14 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         r->last_wait = 0.0;
         rb_ring_release(r, f);
         rb_run_garbage(r, f);
-        if (r->sprites.len > r->tables.capacity) {
-            KV_INFO("metal", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->sprites.len, r->tables.capacity);
-            if (!rb_create_tables(r, r->sprites.len)) return false;
+        if (r->world.sprites.len > r->tables.capacity) {
+            KV_INFO("metal", "sprite tables grow at frame %llu: %u rows live, %u held", (unsigned long long)r->frame_count, r->world.sprites.len, r->tables.capacity);
+            if (!rb_create_tables(r, r->world.sprites.len)) return false;
         }
         f32* lo = (f32*)f.layers.contents;
         for (u32 i = 0; i < kLayerCount; ++i) {
-            lo[i * 4 + 0] = r->layer_prev[i][0]; lo[i * 4 + 1] = r->layer_prev[i][1];
-            lo[i * 4 + 2] = r->layer_cur[i][0];  lo[i * 4 + 3] = r->layer_cur[i][1];
+            lo[i * 4 + 0] = r->world.layer_prev[i][0]; lo[i * 4 + 1] = r->world.layer_prev[i][1];
+            lo[i * 4 + 2] = r->world.layer_cur[i][0];  lo[i * 4 + 3] = r->world.layer_cur[i][1];
         }
         for (u32 slot : f.dirty_slots) rb_write_texture_slot(r, f, slot);
         f.dirty_slots.clear();

@@ -35,6 +35,7 @@
 // Names: rw_ is the linked half's, rc_ this half's, rb_ a backend's.
 #pragma once
 #include "korvid/render/core/layout.h"
+#include "korvid/render/world.h"
 
 #ifndef KV_RB_NAME
 #error "the backend's renderer_internal.h defines KV_RB_NAME before including korvid/render/core/core.h"
@@ -48,3 +49,15 @@
 #ifndef KV_RB_SURFACE
 #error "the backend's renderer_internal.h defines KV_RB_SURFACE"
 #endif
+
+namespace kv {
+
+// A backend's Renderer has, by these names, what the core's functions use:
+//     RenderWorld world;
+struct Renderer;
+
+// A material row as the GPU holds it: the record's, or the default's when the row is dead,
+// its texture resolved to a bindless slot. For the frame's upload of dirty rows.
+void rc_material_row(Renderer* r, u32 row, GpuMaterial& out);
+
+} // namespace kv

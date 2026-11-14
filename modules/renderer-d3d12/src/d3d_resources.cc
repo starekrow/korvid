@@ -298,49 +298,15 @@ bool rb_create_default_texture(Renderer* r) {
     m.slot    = (u32)BlendMode::Alpha;
     m.tint    = color_white();
     m.name    = name_intern("default");
-    r->default_material = r->materials.create(m);
+    r->default_material = r->world.materials.create(m);
     r->texture_by_name.set(t.name.hash, h);
-    r->material_by_name.set(m.name.hash, r->default_material);
+    r->world.material_by_name.set(m.name.hash, r->default_material);
     if (r->default_material.index() != 0) { KV_ERROR("d3d12", "default material is not row 0"); return false; }
-    rb_mark_material_dirty(r, 0);
+    rw_mark_material_dirty(r->world, 0);
     return true;
 }
 
 // ---- materials --------------------------------------------------------------------------------
-
-void rb_material_row(Renderer* r, u32 row, GpuMaterial& out) {
-    out = GpuMaterial{};
-    const MaterialRecord* m = r->materials.is_alive(row) ? &r->materials.items[row] : nullptr;
-    if (!m) m = &r->materials.items[0];
-    out.tint[0] = m->tint.r; out.tint[1] = m->tint.g; out.tint[2] = m->tint.b; out.tint[3] = m->tint.a;
-    for (u32 i = 0; i < KV_MATERIAL_PARAMS; ++i) out.params[i] = m->params[i];
-    out.texture = renderer_texture_slot(r, m->texture);
-    out.blend   = (u32)m->blend;
-    out.filter  = (u32)m->filter;
-    out.slot    = m->slot;
-}
-
-void rb_mark_material_dirty(Renderer* r, u32 row) {
-    r->material_dirty[row >> 6] |= (u64)1 << (row & 63);
-}
-
-void rb_rebind_material(Renderer* r, u32 row) {
-    u32 slot = r->materials.is_alive(row) ? r->materials.items[row].slot : r->materials.items[0].slot;
-    for (u32 i = 0; i < r->sprites.len; ++i) {
-        if (!r->sprites.is_alive(i)) continue;
-        RenderSprite& s = r->sprites.items[i];
-        if (s.gpu.material != row) continue;
-        if (!r->materials.is_alive(row)) s.gpu.material = 0; // the material is gone: the default
-        u32 bucket = rb_bucket_of(s.gpu.layer, slot);
-        if (bucket != s.bucket) {
-            --r->bucket_counts[s.bucket];
-            ++r->bucket_counts[bucket];
-            if (s.keyed) { --r->keyed_counts[s.bucket]; ++r->keyed_counts[bucket]; }
-            s.bucket = bucket;
-        }
-        r->sprite_dirty[i >> 6] |= (u64)1 << (i & 63);
-    }
-}
 
 // ---- handle kinds and pools -----------------------------------------------------------------
 
@@ -354,10 +320,10 @@ int texture_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     return format(out, cap, "'%s' %ux%u slot %u %s", name_str(t->name), t->width, t->height, Handle{h}.index(),
                     t->resident ? "resident" : "placeholder");
 }
-void* material_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->materials.get(Handle{h}); }
+void* material_resolve(kv_handle h, void* ctx) { return ((Renderer*)ctx)->world.materials.get(Handle{h}); }
 int material_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     Renderer* r = (Renderer*)ctx;
-    MaterialRecord* m = r->materials.get(Handle{h});
+    MaterialRecord* m = r->world.materials.get(Handle{h});
     if (!m) return format(out, cap, "stale");
     return format(out, cap, "'%s' %s texture slot %u row %u", name_str(m->name), blend_mode_name(m->blend), renderer_texture_slot(r, m->texture), Handle{h}.index());
 }
@@ -372,13 +338,13 @@ kv_handle texture_find_name(const char* name, void* ctx) {
     return h && r->textures.valid(*h) ? h->bits : 0;
 }
 const char* material_name_of(kv_handle h, void* ctx) {
-    MaterialRecord* m = ((Renderer*)ctx)->materials.get(Handle{h});
+    MaterialRecord* m = ((Renderer*)ctx)->world.materials.get(Handle{h});
     return m ? name_str(m->name) : nullptr;
 }
 kv_handle material_find_name(const char* name, void* ctx) {
     Renderer* r = (Renderer*)ctx;
-    Handle* h = r->material_by_name.find(name_lookup(name).hash);
-    return h && r->materials.valid(*h) ? h->bits : 0;
+    Handle* h = r->world.material_by_name.find(name_lookup(name).hash);
+    return h && r->world.materials.valid(*h) ? h->bits : 0;
 }
 
 } // namespace
@@ -396,14 +362,10 @@ bool rb_create_resource_pools(Renderer* r) {
     r->material_kind = handle_kind_register(md);
     if (!r->texture_kind || !r->material_kind) return false;
     r->textures.use_kind(r->texture_kind);
-    r->materials.use_kind(r->material_kind);
-    r->sprite_of_entity.init(r->general);
+    r->world.materials.use_kind(r->material_kind);
     r->texture_by_name.init(r->general);
-    r->material_by_name.init(r->general);
-    r->sprite_dirty.alloc = r->material_dirty.alloc = r->uploads.alloc = r->general;
-    r->material_dirty.resize_fill((kMaxMaterials + 63) / 64, 0);
-    return r->textures.init(kMaxTextures, r->general->tag) && r->materials.init(kMaxMaterials, r->general->tag) &&
-           r->sprites.init(kMaxSprites, r->general->tag);
+    r->uploads.alloc = r->general;
+    return r->textures.init(kMaxTextures, r->general->tag) && rw_init(r->world, r->general);
 }
 
 // ---- the GPU tables ------------------------------------------------------------------------------
@@ -429,8 +391,8 @@ bool rb_create_tables(Renderer* r, u32 rows) {
         !rb_create_buffer(r, dh, sizeof(u32) * (u64)t.blocks() * kBucketCount, true, t.block_hist, "sort block counts") ||
         !rb_create_buffer(r, dh, sizeof(u32) * (u64)cap, true, t.sorted, "sorted rows"))
         return false;
-    r->sprite_dirty.resize_fill(cap / 64, 0);
-    for (u32 w = 0; w < (r->sprites.len + 63) / 64; ++w) r->sprite_dirty[w] = ~(u64)0;
+    r->world.sprite_dirty.resize_fill(cap / 64, 0);
+    for (u32 w = 0; w < (r->world.sprites.len + 63) / 64; ++w) r->world.sprite_dirty[w] = ~(u64)0;
     KV_INFO("d3d12", "sprite tables: %u rows, %u blocks, %llu KB", cap, t.blocks(),
             (unsigned long long)((t.sprites.size + t.bucket_of.size + t.block_hist.size + t.sorted.size) / 1024));
     return true;
@@ -586,13 +548,8 @@ void rb_destroy_resources(Renderer* r) {
     if (r->material_kind) kv_handle_kind_unregister(r->material_kind);
     r->texture_kind = r->material_kind = 0;
     r->textures.free();
-    r->materials.free();
     r->texture_by_name.free();
-    r->material_by_name.free();
-    r->sprites.free();
-    r->sprite_of_entity.free();
-    r->sprite_dirty.free();
-    r->material_dirty.free();
+    rw_free(r->world);
     r->uploads.free();
 }
 

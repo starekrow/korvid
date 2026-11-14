@@ -31,6 +31,7 @@
 #include "korvid/render/renderer.h"
 #include "korvid/render/material.h"
 #include "korvid/render/core/layout.h"
+#include "korvid/render/world.h"
 
 // What this backend tells the render core (korvid/render/core/core.h).
 #define KV_RB_NAME       "metal"
@@ -186,24 +187,15 @@ struct Renderer {
     id<MTLComputePipelineState> cs_count = nil, cs_scan = nil, cs_bucket_scan = nil, cs_scatter = nil, cs_key_sort = nil;
     f64 start_time = 0.0;
 
+    RenderWorld world; // the sprites, the materials, what is dirty, the bucket counts (korvid/render/world.h)
     Pool<Texture>        textures;
-    Pool<MaterialRecord> materials;
     Handle               default_material;
     u16                  texture_kind = 0, material_kind = 0;
     Array<PendingUpload> uploads;
 
-    Pool<RenderSprite>   sprites;
-    Map<Handle, u32>     sprite_of_entity;
     Map<u64, Handle>     texture_by_name;
-    Map<u64, Handle>     material_by_name;
     u32                  textures_made = 0;
-    Array<u64>           sprite_dirty;
-    Array<u64>           material_dirty;
-    u32                  bucket_counts[kBucketCount] = {};
-    u32                  keyed_counts[kBucketCount] = {};
     f32*                 check_keys = nullptr;
-    u32                  tick = 0;
-    u64                  deltas_applied = 0;
     u64                  rows_uploaded  = 0;
 
     SpriteTables  tables;
@@ -213,8 +205,6 @@ struct Renderer {
     FrameRing     ring;
 
     FrameInFlight frames[kFramesInFlight];
-    f32           layer_prev[kLayerCount][2] = {};
-    f32           layer_cur[kLayerCount][2]  = {};
     u32           frame_index = 0;
     u64           frame_count = 0;
 
@@ -252,9 +242,6 @@ bool rb_create_bindless(Renderer* r); // the samplers and every frame's argument
 // The textures a draw may sample, made resident for a render encoder.
 void rb_use_textures(Renderer* r, id<MTLRenderCommandEncoder> enc);
 
-void rb_material_row(Renderer* r, u32 row, GpuMaterial& out);
-void rb_mark_material_dirty(Renderer* r, u32 row);
-void rb_rebind_material(Renderer* r, u32 row);
 
 bool rb_create_resource_pools(Renderer* r);
 bool rb_create_tables(Renderer* r, u32 rows);
@@ -304,7 +291,5 @@ CAMetalLayer* mt_platform_layer(void* native_window, void** view_out);
 void          mt_platform_release(void* view);
 
 // ---- renderer.mm ----------------------------------------------------------------------------
-u32 rb_material_row_of(const Renderer* r, Handle material);
-u32 rb_bucket_of(i32 layer, u32 slot);
 
 } // namespace kv

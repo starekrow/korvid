@@ -92,59 +92,28 @@ void record_texture_uploads(Renderer* r, ID3D12GraphicsCommandList* cmd) {
     r->uploads.clear();
 }
 
-// Walks a dirty bitmap over [0, rows) and calls copy_run(a, b) for every run of set bits,
-// joining runs separated by fewer than `join` clean rows (uploading a clean row again is
-// cheaper than another copy region). Clears the bits.
-template <class F>
-u32 for_dirty_runs(Array<u64>& bits, u32 rows, u32 join, F copy_run) {
-    u32 words = (rows + 63) / 64;
-    if (words > bits.len) words = bits.len;
-    u32 run_a = 0, run_b = 0; // current run [run_a, run_b)
-    bool open = false;
-    u32 copied = 0;
-    for (u32 w = 0; w < words; ++w) {
-        u64 word = bits[w];
-        if (!word) continue;
-        bits[w] = 0;
-        while (word) {
-            u32 bit = KV_CTZ64(word);
-            word &= word - 1;
-            u32 i = w * 64 + bit;
-            if (i >= rows) break;
-            if (open && i <= run_b + join) { run_b = i + 1; continue; }
-            if (open) { copy_run(run_a, run_b); copied += run_b - run_a; }
-            run_a = i; run_b = i + 1; open = true;
-        }
-    }
-    if (open) { copy_run(run_a, run_b); copied += run_b - run_a; }
-    return copied;
-}
-
 // Dirty sprite rows and material rows, staged into the ring and copied into the tables.
 bool record_table_copies(Renderer* r, ID3D12GraphicsCommandList* cmd) {
     bool ok = true;
     rb_transition(cmd, r->tables.sprites, D3D12_RESOURCE_STATE_COPY_DEST);
     rb_transition(cmd, r->material_table, D3D12_RESOURCE_STATE_COPY_DEST);
-    u32 rows = for_dirty_runs(r->sprite_dirty, r->sprites.len, 32, [&](u32 a, u32 b) {
+    u32 rows = rw_dirty_runs(r->world.sprite_dirty, r->world.sprites.len, 32, [&](u32 a, u32 b) {
         u64 bytes = (u64)(b - a) * sizeof(GpuSprite);
         RingSpan span = rb_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuSprite* dst = (GpuSprite*)span.ptr;
-        for (u32 i = a; i < b; ++i) {
-            if (r->sprites.is_alive(i)) dst[i - a] = r->sprites.items[i].gpu;
-            else dst[i - a] = GpuSprite{};
-        }
+        rw_stage_sprites(r->world, a, b, dst);
         cmd->CopyBufferRegion(r->tables.sprites.resource, (u64)a * sizeof(GpuSprite), span.resource, span.offset, bytes);
     });
     r->rows_uploaded += rows;
     KV_COUNTER("sprite rows uploaded", rows);
 
-    for_dirty_runs(r->material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
+    rw_dirty_runs(r->world.material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
         u64 bytes = (u64)(b - a) * sizeof(GpuMaterial);
         RingSpan span = rb_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuMaterial* dst = (GpuMaterial*)span.ptr;
-        for (u32 i = a; i < b; ++i) rb_material_row(r, i, dst[i - a]);
+        for (u32 i = a; i < b; ++i) rc_material_row(r, i, dst[i - a]);
         cmd->CopyBufferRegion(r->material_table.resource, (u64)a * sizeof(GpuMaterial), span.resource, span.offset, bytes);
     });
     rb_transition(cmd, r->tables.sprites, kShaderRead);
@@ -169,7 +138,7 @@ void bind_tables(Renderer* r, FrameInFlight& f, SetSrv srv, SetUav uav, bool wri
 // ---- the sort -------------------------------------------------------------------------------
 
 void record_sort(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd, const PushData& push) {
-    u32 blocks = (r->sprites.len + kBlockRows - 1) / kBlockRows;
+    u32 blocks = (r->world.sprites.len + kBlockRows - 1) / kBlockRows;
     const D3D12_RESOURCE_STATES uav = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     rb_transition(cmd, r->tables.sorted, uav);
     rb_transition(cmd, r->tables.bucket_of, uav);
@@ -203,7 +172,7 @@ void record_sort(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd, 
     rb_label_end(r, cmd);
     bool keyed = false;
     for (u32 b = 0; b < kBucketCount; ++b) {
-        if (!r->keyed_counts[b] || !r->bucket_counts[b]) continue;
+        if (!r->world.keyed_counts[b] || !r->world.bucket_counts[b]) continue;
         if (!keyed) {
             uav_barrier(cmd);
             rb_label_begin(r, cmd, "key sort");
@@ -229,20 +198,14 @@ void finish_sort(Renderer* r, ID3D12GraphicsCommandList* cmd) {
 // Each row's key as this frame computes it (cs_key_sort's formula on the CPU's copy of the
 // rows), kept for the check: the rows may change before the frame's fence passes.
 void snapshot_keys(Renderer* r, f32 alpha) {
-    u32 rows = r->sprites.len;
+    u32 rows = r->world.sprites.len;
     free_in(mem_general(), r->check_keys, sizeof(f32) * (r->check_rows ? r->check_rows : 1));
     r->check_keys = (f32*)alloc_in(mem_general(), sizeof(f32) * (rows ? rows : 1));
-    for (u32 i = 0; i < rows; ++i) {
-        const GpuSprite& g = r->sprites.items[i].gpu;
-        u32 mode = (g.flags >> kSpriteSortShift) & 3;
-        f32 t = g.stamp == r->tick ? alpha : 1.0f;
-        f32 y = g.prev[1] + (g.cur[1] - g.prev[1]) * t;
-        r->check_keys[i] = !r->sprites.is_alive(i) ? 0.0f : mode == 1 ? g.order : mode == 2 ? -(y + g.order) : 0.0f;
-    }
+    rw_snapshot_keys(r->world, alpha, r->check_keys);
 }
 
 void record_sort_check(Renderer* r, ID3D12GraphicsCommandList* cmd) {
-    u32 rows = r->sprites.len;
+    u32 rows = r->world.sprites.len;
     u64 meta_bytes = sizeof(u32) * (2 * kBucketCount + 4);
     u64 bytes = sizeof(u32) * (u64)rows * 2 + meta_bytes;
     if (r->check_buffer.resource) rb_defer_destroy_buffer(r, r->check_buffer);
@@ -296,28 +259,20 @@ void record_screenshot(Renderer* r, ID3D12GraphicsCommandList* cmd, ID3D12Resour
 u32 rb_record_draws(Renderer* r, ID3D12GraphicsCommandList* cmd, u32 first_bucket, u32 end_bucket) {
     u32 draws = 0;
     u32 b = first_bucket;
-    while (b < end_bucket) {
-        if (!r->bucket_counts[b]) { ++b; continue; }
-        u32 slot = b % kSlotCount;
-        u32 first = b, last = b;
-        for (u32 n = b + 1; n < end_bucket; ++n) {
-            if (!r->bucket_counts[n]) continue;
-            if (n % kSlotCount != slot) break;
-            last = n;
-        }
+    DrawRun run;
+    while (rw_next_run(r->world.bucket_counts, &b, end_bucket, &run)) {
+        u32 slot = run.slot, first = run.first, last = run.last;
         const GamePipe* gp = slot >= kBlendCount ? &r->game_pipes[slot - kBlendCount] : nullptr;
         ID3D12PipelineState* pipe = gp ? (gp->pipeline ? gp->pipeline : r->pipelines[(u32)gp->blend]) : r->pipelines[slot];
         char label[64];
         if (r->markers) {
-            format(label, sizeof label, "layers %d..%d %s", (i32)(first / kSlotCount) + kLayerMin, (i32)(last / kSlotCount) + kLayerMin,
-                   gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
+            rw_run_label(label, sizeof label, run, gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
             rb_label_begin(r, cmd, label);
         }
         cmd->SetPipelineState(pipe);
         cmd->ExecuteIndirect(r->draw_signature, last - first + 1, r->indirect.resource, (u64)first * sizeof(DrawArgs), nullptr, 0);
         ++draws;
         if (r->markers) rb_label_end(r, cmd);
-        b = last + 1;
     }
     return draws;
 }
@@ -442,50 +397,10 @@ void rb_destroy_pipelines(Renderer* r) {
 bool rb_verify_sort(Renderer* r) {
     r->check_recorded = false;
     if (!r->check_buffer.mapped) return false;
-    u32 rows = r->check_rows;
-    const u32* sorted    = (const u32*)r->check_buffer.mapped;
-    const u32* bucket_of = sorted + rows;
-    const u32* meta      = bucket_of + rows;
-    const u32* totals    = meta;
-    const u32* starts    = meta + kBucketCount;
-    u32 visible_rows = 0, bad = 0, seen_total = 0;
-    MemScope scope;
-    u8* seen = arena_push_n<u8>(*scope.arena, rows ? rows : 1);
-    memset(seen, 0, rows);
-    for (u32 i = 0; i < rows; ++i) if (bucket_of[i] != 0xFFFFFFFFu) ++visible_rows;
-    u32 expect_start = 0;
-    for (u32 b = 0; b < kBucketCount; ++b) {
-        if (starts[b] != expect_start) { ++bad; KV_ERROR("d3d12", "sort check: bucket %u starts at %u, expected %u", b, starts[b], expect_start); }
-        expect_start += totals[b];
-        if (totals[b] > r->bucket_counts[b]) { ++bad; KV_ERROR("d3d12", "sort check: bucket %u has %u rows on the GPU, %u on the CPU", b, totals[b], r->bucket_counts[b]); }
-        // In (key, row) order: a bucket with no keyed rows has every key 0, so that is row
-        // order. Keys within a hair of each other may come in either order (the GPU and the
-        // CPU interpolate with different roundings); past kKeySortMax rows, row order resumes.
-        u32 prev = 0;
-        for (u32 k = 0; k < totals[b]; ++k) {
-            u32 row = sorted[starts[b] + k];
-            if (row >= rows || bucket_of[row] != b) { if (bad++ < 8) KV_ERROR("d3d12", "sort check: bucket %u entry %u is row %u (bucket %u)", b, k, row, row < rows ? bucket_of[row] : ~0u); continue; }
-            f32 ka = r->check_keys && k ? r->check_keys[prev] : 0.0f, kb = r->check_keys ? r->check_keys[row] : 0.0f;
-            bool ordered = true;
-            if (!k || k == kKeySortMax) ordered = true;                          // the first, or the first unsorted
-            else if (k > kKeySortMax || !r->check_keys || ka == kb) ordered = row > prev;
-            else if (kv::fabs(ka - kb) <= 1e-3f * (1.0f + kv::fabs(ka))) ordered = true; // a near tie: either order
-            else ordered = ka < kb;
-            if (!ordered) { if (bad++ < 8) KV_ERROR("d3d12", "sort check: bucket %u entry %u row %u (key %g) after row %u (key %g)", b, k, row, kb, prev, ka); }
-            if (seen[row]++) { if (bad++ < 8) KV_ERROR("d3d12", "sort check: row %u listed twice", row); }
-            prev = row;
-            ++seen_total;
-        }
-    }
-    if (seen_total != visible_rows || meta[2 * kBucketCount] != visible_rows) {
-        ++bad;
-        KV_ERROR("d3d12", "sort check: %u rows visible, %u listed, GPU says %u", visible_rows, seen_total, meta[2 * kBucketCount]);
-    }
-    if (bad) ++r->checks_failed; else ++r->checks_passed;
-    KV_INFO("d3d12", "sort check: %u rows, %u visible, %u buckets in use: %s", rows, visible_rows,
-            [&] { u32 n = 0; for (u32 b = 0; b < kBucketCount; ++b) n += totals[b] != 0; return n; }(), bad ? "FAILED" : "ok");
+    bool ok = rw_verify_sort(r->world, (const u32*)r->check_buffer.mapped, r->check_rows, r->check_keys, KV_RB_NAME);
+    if (ok) ++r->checks_passed; else ++r->checks_failed;
     rb_defer_destroy_buffer(r, r->check_buffer);
-    return bad == 0;
+    return ok;
 }
 
 // Binary PPM, RGB, from the BGRA readback (sRGB-encoded bytes, as the window shows them).
@@ -515,17 +430,6 @@ bool rb_write_screenshot(Renderer* r) {
 
 // ---- the frame -----------------------------------------------------------------------------------
 
-namespace {
-
-// D3D12's clip space has y up, as Metal's does; ortho2d targets Vulkan's, y down. Negating
-// the y row turns one into the other.
-affine2 d3d_clip(affine2 m) {
-    m.b = -m.b; m.d = -m.d; m.ty = -m.ty;
-    return m;
-}
-
-} // namespace
-
 bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_index, const RenderView& view) {
     KV_ZONE("record");
     Swapchain& s = r->swapchain;
@@ -548,25 +452,9 @@ bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
     rb_gpu_mark(r, f, cmd, kGpuUploaded);
     rb_gpu_stats_begin(r, f, cmd);
 
-    bool draw = have_image && r->sprites.len > 0;
-    point2 center = rect_center(view.view);
-    affine2 proj  = d3d_clip(ortho2d(rect2_from_center(point2{0, 0}, rect_size(view.view))) * affine2_rotate(-view.rotation) *
-                             affine2_translate(vec2{-center.x, -center.y}));
-    f32 cs = kv::fabs(kv::cos(view.rotation)), sn = kv::fabs(kv::sin(view.rotation));
-    f32 hx = 0.5f * (view.view.w * cs + view.view.h * sn), hy = 0.5f * (view.view.w * sn + view.view.h * cs);
+    bool draw = have_image && r->world.sprites.len > 0;
     f32 sw = (f32)s.width, sh = (f32)s.height;
-    affine2 screen = d3d_clip(ortho2d(rect2{-sw * 0.5f, -sh * 0.5f, sw, sh}));
-    PushData push{};
-    push.view[0] = proj.a; push.view[1] = proj.b; push.view[2] = proj.c; push.view[3] = proj.d;
-    push.view_trans[0] = proj.tx; push.view_trans[1] = proj.ty;
-    push.alpha     = view.alpha;
-    push.tick      = r->tick;
-    push.cull[0] = center.x - hx; push.cull[1] = center.y - hy; push.cull[2] = 2.0f * hx; push.cull[3] = 2.0f * hy;
-    push.screen[0] = screen.a; push.screen[1] = screen.b; push.screen[2] = screen.c; push.screen[3] = screen.d;
-    push.screen_trans[0] = screen.tx; push.screen_trans[1] = screen.ty;
-    push.row_count = r->sprites.len;
-    push.screen_cull[0] = -sw * 0.5f; push.screen_cull[1] = -sh * 0.5f; push.screen_cull[2] = sw; push.screen_cull[3] = sh;
-    push.time = (f32)(time_now() - r->start_time);
+    PushData push = rw_push_block(r->world, view, sw, sh, (f32)(time_now() - r->start_time), KV_RB_CLIP_Y_UP != 0);
 
     if (draw) {
         rb_label_begin(r, cmd, "sort");
@@ -582,7 +470,7 @@ bool rb_record_frame(Renderer* r, FrameInFlight& f, bool have_image, u32 image_i
         rb_transition(cmd, image, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
         bool post = rb_post_prepare(r);
-        u32 split = post ? rb_bucket_of(r->post.layer, 0) : 0;
+        u32 split = post ? rw_bucket_of(r->post.layer, 0) : 0;
         D3D12_VIEWPORT vp{0.0f, 0.0f, sw, sh, 0.0f, 1.0f};
         D3D12_RECT scissor{0, 0, (LONG)s.width, (LONG)s.height};
         auto bind_sprites = [&]() {

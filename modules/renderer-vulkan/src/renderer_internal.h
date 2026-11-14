@@ -13,6 +13,7 @@
 #include "korvid/render/renderer.h"
 #include "korvid/render/material.h"
 #include "korvid/render/core/layout.h"
+#include "korvid/render/world.h"
 
 // What this backend tells the render core (korvid/render/core/core.h).
 #define KV_RB_NAME       "vulkan"
@@ -225,26 +226,15 @@ struct Renderer {
     VkPipeline            cs_count = VK_NULL_HANDLE, cs_scan = VK_NULL_HANDLE,
                           cs_bucket_scan = VK_NULL_HANDLE, cs_scatter = VK_NULL_HANDLE, cs_key_sort = VK_NULL_HANDLE;
 
+    RenderWorld world; // the sprites, the materials, what is dirty, the bucket counts (korvid/render/world.h)
     Pool<Texture>        textures;  // slot = index; 0 is the default checkerboard
-    Pool<MaterialRecord> materials; // row = index; 0 is the default material
     Handle               default_material;
     u16                  texture_kind = 0, material_kind = 0;
     Array<PendingUpload> uploads;   // staged, not yet recorded
 
-    // The persistent render world: the outer engine's entity handle maps to a slot here,
-    // and the slot is the GPU row.
-    Pool<RenderSprite>   sprites;
-    Map<Handle, u32>     sprite_of_entity;
     Map<u64, Handle>     texture_by_name;  // Name::hash -> the first live texture with the name
-    Map<u64, Handle>     material_by_name;
     u32                  textures_made = 0;
-    Array<u64>           sprite_dirty;   // bit per slot: row to upload
-    Array<u64>           material_dirty; // bit per row
-    u32                  bucket_counts[kBucketCount] = {};
-    u32                  keyed_counts[kBucketCount] = {};  // rows whose sort is not Row: their buckets get the key sort
     f32*                 check_keys = nullptr;             // --check-sort: each row's key as the checked frame computed it
-    u32                  tick = 0;       // Tick deltas seen; the stamp of the newest rows
-    u64                  deltas_applied = 0;
     u64                  rows_uploaded  = 0;
 
     SpriteTables tables;
@@ -254,10 +244,6 @@ struct Renderer {
     FrameRing    ring;
 
     FrameInFlight frames[kFramesInFlight];
-    // The layers' scroll offsets (world units) at the last tick and the one before, by layer
-    // + 128: copied into the frame's buffer when it is recorded, interpolated by alpha.
-    f32           layer_prev[kLayerCount][2] = {};
-    f32           layer_cur[kLayerCount][2]  = {};
     u32           frame_index = 0;
     u64           frame_count = 0;
 
@@ -326,12 +312,6 @@ void rb_mark_slot_dirty(Renderer* r, u32 slot);
 void rb_write_texture_slot(Renderer* r, VkDescriptorSet set, u32 slot);
 VkFormat rb_vk_format(TextureFormat f);
 
-// Materials: the pool record becomes a GPU row, uploaded with the next frame.
-void rb_material_row(Renderer* r, u32 row, GpuMaterial& out);
-void rb_mark_material_dirty(Renderer* r, u32 row);
-// Every sprite using material row `row` is rebucketed (its blend may have changed) and
-// marked for upload. For material edits and destruction; never on the frame path.
-void rb_rebind_material(Renderer* r, u32 row);
 
 // Pools, handle kinds, tables, descriptors.
 bool rb_create_resource_pools(Renderer* r);
@@ -389,9 +369,6 @@ bool rb_write_screenshot(Renderer* r);
 bool rb_verify_sort(Renderer* r);
 
 // ---- renderer.cc ------------------------------------------------------------------------
-// Row index for a material handle: its row, or 0 (the default) when null or stale.
-u32  rb_material_row_of(const Renderer* r, Handle material);
-u32  rb_bucket_of(i32 layer, u32 slot);
 // The pipeline slot for a material: its blend's, or a game shader's (assigned here, its
 // module loaded and its pipeline made once the swapchain's format is known).
 u32  rb_material_slot(Renderer* r, Name shader, BlendMode blend);

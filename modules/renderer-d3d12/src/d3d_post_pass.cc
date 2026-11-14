@@ -184,7 +184,7 @@ void rb_post_draw(Renderer* r, FrameInFlight& f, ID3D12GraphicsCommandList* cmd,
     push.size[0] = (f32)p.width;
     push.size[1] = (f32)p.height;
     push.time    = (f32)(time_now() - r->start_time);
-    push.tick    = r->tick;
+    push.tick    = r->world.tick;
     push.count   = p.param_count;
     push.alpha   = view.alpha;
     rb_label_begin(r, cmd, "post");

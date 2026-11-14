@@ -245,33 +245,6 @@ u32 rb_material_slot(Renderer* r, Name shader, BlendMode blend) {
 
 namespace {
 
-// renderer-vulkan's: calls copy_run(a, b) for every run of set bits over [0, rows),
-// joining runs separated by fewer than `join` clean rows. Clears the bits.
-template <class F>
-u32 for_dirty_runs(Array<u64>& bits, u32 rows, u32 join, F copy_run) {
-    u32 words = (rows + 63) / 64;
-    if (words > bits.len) words = bits.len;
-    u32 run_a = 0, run_b = 0;
-    bool open = false;
-    u32 copied = 0;
-    for (u32 w = 0; w < words; ++w) {
-        u64 word = bits[w];
-        if (!word) continue;
-        bits[w] = 0;
-        while (word) {
-            u32 bit = KV_CTZ64(word);
-            word &= word - 1;
-            u32 i = w * 64 + bit;
-            if (i >= rows) break;
-            if (open && i <= run_b + join) { run_b = i + 1; continue; }
-            if (open) { copy_run(run_a, run_b); copied += run_b - run_a; }
-            run_a = i; run_b = i + 1; open = true;
-        }
-    }
-    if (open) { copy_run(run_a, run_b); copied += run_b - run_a; }
-    return copied;
-}
-
 void record_texture_uploads(Renderer* r, id<MTLBlitCommandEncoder> blit) {
     for (const PendingUpload& up : r->uploads) {
         // The slot may have been destroyed or re-uploaded since: then this copy has no target.
@@ -285,22 +258,22 @@ void record_texture_uploads(Renderer* r, id<MTLBlitCommandEncoder> blit) {
 
 bool record_table_copies(Renderer* r, id<MTLBlitCommandEncoder> blit) {
     bool ok = true;
-    u32 rows = for_dirty_runs(r->sprite_dirty, r->sprites.len, 32, [&](u32 a, u32 b) {
+    u32 rows = rw_dirty_runs(r->world.sprite_dirty, r->world.sprites.len, 32, [&](u32 a, u32 b) {
         usize bytes = (usize)(b - a) * sizeof(GpuSprite);
         RingSpan span = rb_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuSprite* dst = (GpuSprite*)span.ptr;
-        for (u32 i = a; i < b; ++i) dst[i - a] = r->sprites.is_alive(i) ? r->sprites.items[i].gpu : GpuSprite{};
+        rw_stage_sprites(r->world, a, b, dst);
         [blit copyFromBuffer:span.buffer sourceOffset:span.offset toBuffer:r->tables.sprites destinationOffset:(NSUInteger)a * sizeof(GpuSprite) size:bytes];
     });
     r->rows_uploaded += rows;
     KV_COUNTER("sprite rows uploaded", rows);
-    for_dirty_runs(r->material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
+    rw_dirty_runs(r->world.material_dirty, kMaxMaterials, 8, [&](u32 a, u32 b) {
         usize bytes = (usize)(b - a) * sizeof(GpuMaterial);
         RingSpan span = rb_ring_alloc(r, bytes, 16);
         if (!span.ptr) { ok = false; return; }
         GpuMaterial* dst = (GpuMaterial*)span.ptr;
-        for (u32 i = a; i < b; ++i) rb_material_row(r, i, dst[i - a]);
+        for (u32 i = a; i < b; ++i) rc_material_row(r, i, dst[i - a]);
         [blit copyFromBuffer:span.buffer sourceOffset:span.offset toBuffer:r->material_table destinationOffset:(NSUInteger)a * sizeof(GpuMaterial) size:bytes];
     });
     return ok;
@@ -312,7 +285,7 @@ void dispatch(id<MTLComputeCommandEncoder> enc, id<MTLComputePipelineState> pipe
 }
 
 void record_sort(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, const PushData& push) {
-    u32 blocks = (r->sprites.len + kBlockRows - 1) / kBlockRows;
+    u32 blocks = (r->world.sprites.len + kBlockRows - 1) / kBlockRows;
     MTLComputePassDescriptor* cp = [MTLComputePassDescriptor computePassDescriptor];
     cp.dispatchType = MTLDispatchTypeSerial; // in order, each dispatch's writes seen by the next
     rb_gpu_attach(r, f, cp);
@@ -334,7 +307,7 @@ void record_sort(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, const P
     // Buckets with keyed rows: one group each sorts its range by key, the bucket in the push block.
     bool keyed = false;
     for (u32 b = 0; b < kBucketCount; ++b) {
-        if (!r->keyed_counts[b] || !r->bucket_counts[b]) continue;
+        if (!r->world.keyed_counts[b] || !r->world.bucket_counts[b]) continue;
         if (!keyed) { [enc pushDebugGroup:@"key sort"]; [enc setComputePipelineState:r->cs_key_sort]; keyed = true; }
         PushData p = push;
         p.key_bucket = b;
@@ -347,21 +320,15 @@ void record_sort(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, const P
 
 // renderer-vulkan's: each row's key as this frame computes it, kept for the check.
 void snapshot_keys(Renderer* r, f32 alpha) {
-    u32 rows = r->sprites.len;
+    u32 rows = r->world.sprites.len;
     free_in(mem_general(), r->check_keys, sizeof(f32) * (r->check_rows ? r->check_rows : 1));
     r->check_keys = (f32*)alloc_in(mem_general(), sizeof(f32) * (rows ? rows : 1));
-    for (u32 i = 0; i < rows; ++i) {
-        const GpuSprite& g = r->sprites.items[i].gpu;
-        u32 mode = (g.flags >> kSpriteSortShift) & 3;
-        f32 t = g.stamp == r->tick ? alpha : 1.0f;
-        f32 y = g.prev[1] + (g.cur[1] - g.prev[1]) * t;
-        r->check_keys[i] = !r->sprites.is_alive(i) ? 0.0f : mode == 1 ? g.order : mode == 2 ? -(y + g.order) : 0.0f;
-    }
+    rw_snapshot_keys(r->world, alpha, r->check_keys);
 }
 
 // sorted[], bucket_of[] and the sort meta into a shared buffer, after the sort.
 void record_sort_check(Renderer* r, id<MTLCommandBuffer> cb) {
-    u32 rows = r->sprites.len;
+    u32 rows = r->world.sprites.len;
     usize meta_bytes = sizeof(u32) * (2 * kBucketCount + 4);
     usize bytes = sizeof(u32) * (usize)rows * 2 + meta_bytes;
     rb_defer_release(r, r->check_buffer);
@@ -386,38 +353,23 @@ void record_sort_check(Renderer* r, id<MTLCommandBuffer> cb) {
 u32 record_draws(Renderer* r, id<MTLRenderCommandEncoder> enc, u32 first_bucket, u32 end_bucket) {
     u32 draws = 0;
     u32 b = first_bucket;
-    while (b < end_bucket) {
-        if (!r->bucket_counts[b]) { ++b; continue; }
-        u32 slot = b % kSlotCount;
-        u32 first = b, last = b;
-        for (u32 n = b + 1; n < end_bucket; ++n) {
-            if (!r->bucket_counts[n]) continue;
-            if (n % kSlotCount != slot) break;
-            last = n;
-        }
+    DrawRun run;
+    while (rw_next_run(r->world.bucket_counts, &b, end_bucket, &run)) {
+        u32 slot = run.slot, first = run.first, last = run.last;
         const GamePipe* gp = slot >= kBlendCount ? &r->game_pipes[slot - kBlendCount] : nullptr;
         id<MTLRenderPipelineState> pipe = gp ? (gp->pipeline ? gp->pipeline : r->pipelines[(u32)gp->blend]) : r->pipelines[slot];
         char label[64];
-        kv::format(label, sizeof label, "layers %d..%d %s", (i32)(first / kSlotCount) + kLayerMin, (i32)(last / kSlotCount) + kLayerMin,
-                 gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
+        rw_run_label(label, sizeof label, run, gp ? name_str(gp->shader) : blend_mode_name((BlendMode)slot));
         [enc pushDebugGroup:@(label)];
         [enc setRenderPipelineState:pipe];
         for (u32 n = first; n <= last; ++n) {
-            if (!r->bucket_counts[n]) continue;
+            if (!r->world.bucket_counts[n]) continue;
             [enc drawPrimitives:MTLPrimitiveTypeTriangle indirectBuffer:r->indirect indirectBufferOffset:(NSUInteger)n * sizeof(MTLDrawPrimitivesIndirectArguments)];
             ++draws;
         }
         [enc popDebugGroup];
-        b = last + 1;
     }
     return draws;
-}
-
-// Metal's clip space has y up; ortho2d targets Vulkan's, y down. Negating the y row turns one
-// into the other: y' = -(b x + d y + ty).
-affine2 metal_clip(affine2 m) {
-    m.b = -m.b; m.d = -m.d; m.ty = -m.ty;
-    return m;
 }
 
 } // namespace
@@ -436,28 +388,12 @@ bool rb_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
 
     u32 width  = drawable ? (u32)drawable.texture.width : 0;
     u32 height = drawable ? (u32)drawable.texture.height : 0;
-    bool draw = drawable && r->sprites.len > 0;
+    bool draw = drawable && r->world.sprites.len > 0;
     // World: the view's center to the origin, the camera's rotation undone, the ortho of a
     // rect that size about the origin; the cull rect is the rotated view's bounding box.
     // Screen: the window in pixels about its center. Then y flipped for Metal.
-    point2 center = rect_center(view.view);
-    affine2 proj  = metal_clip(ortho2d(rect2_from_center(point2{0, 0}, rect_size(view.view))) * affine2_rotate(-view.rotation) *
-                               affine2_translate(vec2{-center.x, -center.y}));
-    f32 cs = kv::fabs(kv::cos(view.rotation)), sn = kv::fabs(kv::sin(view.rotation));
-    f32 hx = 0.5f * (view.view.w * cs + view.view.h * sn), hy = 0.5f * (view.view.w * sn + view.view.h * cs);
     f32 sw = (f32)width, sh = (f32)height;
-    affine2 screen = metal_clip(ortho2d(rect2{-sw * 0.5f, -sh * 0.5f, sw, sh}));
-    PushData push{};
-    push.view[0] = proj.a; push.view[1] = proj.b; push.view[2] = proj.c; push.view[3] = proj.d;
-    push.view_trans[0] = proj.tx; push.view_trans[1] = proj.ty;
-    push.alpha     = view.alpha;
-    push.tick      = r->tick;
-    push.cull[0] = center.x - hx; push.cull[1] = center.y - hy; push.cull[2] = 2.0f * hx; push.cull[3] = 2.0f * hy;
-    push.screen[0] = screen.a; push.screen[1] = screen.b; push.screen[2] = screen.c; push.screen[3] = screen.d;
-    push.screen_trans[0] = screen.tx; push.screen_trans[1] = screen.ty;
-    push.row_count = r->sprites.len;
-    push.screen_cull[0] = -sw * 0.5f; push.screen_cull[1] = -sh * 0.5f; push.screen_cull[2] = sw; push.screen_cull[3] = sh;
-    push.time = (f32)(time_now() - r->start_time);
+    PushData push = rw_push_block(r->world, view, sw, sh, (f32)(time_now() - r->start_time), KV_RB_CLIP_Y_UP != 0);
 
     if (draw) {
         record_sort(r, f, cb, push);
@@ -469,7 +405,7 @@ bool rb_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
     // first, and the window's pass begins with the post shader; the layers at and above the
     // post layer draw over it there.
     bool post = rb_post_prepare(r, width, height);
-    u32 split = post ? rb_bucket_of(r->post.layer, 0) : 0;
+    u32 split = post ? rw_bucket_of(r->post.layer, 0) : 0;
     u32 draws = 0;
     auto bind_sprites = [&](id<MTLRenderCommandEncoder> enc) {
         [enc setViewport:(MTLViewport){0.0, 0.0, (double)width, (double)height, 0.0, 1.0}];
@@ -514,49 +450,11 @@ bool rb_record_frame(Renderer* r, FrameInFlight& f, id<MTLCommandBuffer> cb, id<
 bool rb_verify_sort(Renderer* r) {
     r->check_recorded = false;
     if (!r->check_buffer) return false;
-    u32 rows = r->check_rows;
-    const u32* sorted    = (const u32*)r->check_buffer.contents;
-    const u32* bucket_of = sorted + rows;
-    const u32* meta      = bucket_of + rows;
-    const u32* totals    = meta;
-    const u32* starts    = meta + kBucketCount;
-    u32 visible_rows = 0, bad = 0, seen_total = 0;
-    MemScope scope;
-    u8* seen = arena_push_n<u8>(*scope.arena, rows ? rows : 1);
-    memset(seen, 0, rows);
-    for (u32 i = 0; i < rows; ++i) if (bucket_of[i] != 0xFFFFFFFFu) ++visible_rows;
-    u32 expect_start = 0;
-    for (u32 b = 0; b < kBucketCount; ++b) {
-        if (starts[b] != expect_start) { ++bad; KV_ERROR("metal", "sort check: bucket %u starts at %u, expected %u", b, starts[b], expect_start); }
-        expect_start += totals[b];
-        if (totals[b] > r->bucket_counts[b]) { ++bad; KV_ERROR("metal", "sort check: bucket %u has %u rows on the GPU, %u on the CPU", b, totals[b], r->bucket_counts[b]); }
-        u32 prev = 0;
-        for (u32 k = 0; k < totals[b]; ++k) {
-            u32 row = sorted[starts[b] + k];
-            if (row >= rows || bucket_of[row] != b) { if (bad++ < 8) KV_ERROR("metal", "sort check: bucket %u entry %u is row %u (bucket %u)", b, k, row, row < rows ? bucket_of[row] : ~0u); continue; }
-            f32 ka = r->check_keys && k ? r->check_keys[prev] : 0.0f, kb = r->check_keys ? r->check_keys[row] : 0.0f;
-            bool ordered = true;
-            if (!k || k == kKeySortMax) ordered = true;
-            else if (k > kKeySortMax || !r->check_keys || ka == kb) ordered = row > prev;
-            else if (kv::fabs(ka - kb) <= 1e-3f * (1.0f + kv::fabs(ka))) ordered = true;
-            else ordered = ka < kb;
-            if (!ordered) { if (bad++ < 8) KV_ERROR("metal", "sort check: bucket %u entry %u row %u (key %g) after row %u (key %g)", b, k, row, kb, prev, ka); }
-            if (seen[row]++) { if (bad++ < 8) KV_ERROR("metal", "sort check: row %u listed twice", row); }
-            prev = row;
-            ++seen_total;
-        }
-    }
-    if (seen_total != visible_rows || meta[2 * kBucketCount] != visible_rows) {
-        ++bad;
-        KV_ERROR("metal", "sort check: %u rows visible, %u listed, GPU says %u", visible_rows, seen_total, meta[2 * kBucketCount]);
-    }
-    if (bad) ++r->checks_failed; else ++r->checks_passed;
-    u32 in_use = 0;
-    for (u32 b = 0; b < kBucketCount; ++b) in_use += totals[b] != 0;
-    KV_INFO("metal", "sort check: %u rows, %u visible, %u buckets in use: %s", rows, visible_rows, in_use, bad ? "FAILED" : "ok");
+    bool ok = rw_verify_sort(r->world, (const u32*)r->check_buffer.contents, r->check_rows, r->check_keys, KV_RB_NAME);
+    if (ok) ++r->checks_passed; else ++r->checks_failed;
     rb_defer_release(r, r->check_buffer);
     r->check_buffer = nil;
-    return bad == 0;
+    return ok;
 }
 
 } // namespace kv
