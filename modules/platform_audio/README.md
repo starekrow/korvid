@@ -1,7 +1,9 @@
 # platform_audio
 
 The audio device: one playback stream whose callback runs on its own realtime thread and
-fills interleaved f32 frames. SDL3 is the backend. The audio module mixes into it; a tool
+fills interleaved f32 frames. SDL3 is the backend on the desktop (`src/sdl3_audio/`), Core
+Audio's RemoteIO on iOS (`src/ios/`), AAudio on Android (`src/android/`, where the stream
+stops while the app is not in the foreground and is made again if its device goes away). The audio module mixes into it; a tool
 that makes noise can link this without a window, and a tool that is silent leaves it out.
 
 ## Using it

@@ -20,7 +20,9 @@ one submit per pump, completions reaped without waiting, short reads continued, 
 honoured when the ring answers, and the same plain file handles the synchronous path
 uses. Elsewhere (macOS), or when the OS refuses a ring, the pump performs the reads itself
 in priority order. `IoBackend::Ring` asks for the ring whatever the OS calls it;
-`backend_name()` says which ran: `io_uring`, `ioring` or `sync`. A pump is bounded in bytes, not requests
+`backend_name()` says which ran: `io_uring`, `ioring`, `dispatch` (the Apple family: Grand
+Central Dispatch's workers), `threads` (Android, whose apps are refused io_uring: four
+threads of the ring's own) or `sync`. A pump is bounded in bytes, not requests
 (8 MB per pump, 64 MB in flight by default), because the kernel does work at submission
 in proportion to the size; what does not fit waits. `IoPriority::Idle` reads wait for
 idle time: the module's idle task `platform.io` serves them from the slack the frame loop
@@ -125,7 +127,7 @@ Header `korvid/platform/io.h`:
 | `IoBudget` | record | `bytes_per_pump` (8 MB), `bytes_in_flight` (64 MB), `idle_bytes_per_call` (4 MB); 0 is unlimited |
 | `IoRequest` | record | `path` (copied), `alloc` (the data's home; null: general), `priority`, `user` |
 | `IoCompletion` | record | `request`, `status`, `data`, `size`, `user`, `error` (errno) |
-| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`; counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes` |
+| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`; counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes` |
 | `platform_io(engine)` | function | the module's queue |
 | `platform_pref_path(engine, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none |
 | `platform_base_path(engine)` | function | the executable's directory with a trailing separator; assets live beneath it |
@@ -181,3 +183,18 @@ the job pool (a deflated pack entry is inflated on the main thread at the pump),
 unmounting, the ring for sockets, IPv6 and non-loopback listeners by default, an async
 backend on macOS. Residency streaming sits above the queue, in the asset module and
 whatever comes after it.
+
+## A program's own files
+
+On the desktop they are beside the executable; in an Apple bundle, in its resources; on
+Android, inside the installed package, which is a zip the queue reads like any pack.
+
+- `io_read_bundled(name, &bytes)` reads one such file now, by its name under the program's
+  directory (`shaders/sprite.spv`): what must be read before the mounts exist.
+- `mount_pack(path, "assets/")` mounts only an archive's entries under a prefix, named
+  without it. `mount_pack_at(path, offset, size)` mounts an archive stored (uncompressed)
+  as an entry of another, in place; `io_archive_entry` finds the offset.
+- On Android the module's startup does both for the package: its `assets/assets/` is the
+  first mount and `assets/<exe>.kpak` the game's pack. `platform_android_app`
+  (`korvid/platform/android.h`) is how the app's entry says where the package is, and
+  `platform_android_foreground` how it says the app left the screen.

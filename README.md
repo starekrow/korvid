@@ -2,7 +2,7 @@
 
 Korvid is a multi-platform game engine with support for 2D accelerated graphics,
 audio, keyboard/mouse/gamepad inputs, resource packs, collision, a built-in CLI,
-and other niceties. It runs on Linux, Windows, macOS, and iOS. Dependencies are
+and other niceties. It runs on Linux, Windows, macOS, iOS, and Android. Dependencies are
 minimal; on most platforms you'll just need a local C++ compiler and a few
 packages - SDL3 for desktops, slangc and Ninja if you don't already have them.
 
@@ -91,7 +91,7 @@ link with. Note that the toolchains and platforms are modules themselves.
 
 ### Cross-Platform
 
-Korvid currently runs on Linux, Windows, macOS, and iOS. It is designed as a
+Korvid currently runs on Linux, Windows, macOS, iOS, and Android. It is designed as a
 three-layer engine, with an outer ring of services and entities, an inner
 rendering engine, and a platform rendering core. Service modules can easily 
 adapt to the platform as well - I/O is just a service, as is windowing.
@@ -158,7 +158,7 @@ line, and compatibility with the execution ordering and event systems.
 ### Windows
 ### macOS
 ### iOS
-### Android (TBD)
+### Android
 
 
 ---------------------------------------------
@@ -425,3 +425,65 @@ The bundle identifier is one your profile covers (a wildcard profile covers any)
 does the signing and the device runs itself, with what macOS ships (`security`, `plutil`,
 `codesign`, `devicectl`); `tools/kormake/README.md` lists the variables it reads.
 `DEVICECTL_CHILD_SDL_AUDIO_DRIVER=dummy` keeps the tests silent.
+
+## Building for Android
+
+From a Linux host (the other hosts are untried). Android is native: a `NativeActivity`, the
+NDK's clang, AAudio, and the Vulkan renderer Linux and Windows draw with. No SDL, no
+Gradle, no Android Studio: kormake compiles with the NDK and writes the `.apk` itself.
+There are two platforms: `androidemu` is x86-64, for the emulator on an x86-64 host;
+`android` is arm64, for a phone. Everything below has run in the emulator; the arm64 build
+is built and packaged and has not yet met a device (`docs/design/android-port-notes.md`).
+
+1. **The command-line tools** from developer.android.com/studio ("Command line tools
+   only"), unpacked so that `sdkmanager` is at
+   `~/Android/Sdk/cmdline-tools/latest/bin/sdkmanager`. In your shell's startup file, in
+   this order:
+
+       export ANDROID_HOME="$HOME/Android/Sdk"
+       export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator"
+
+   kormake itself needs neither line: it looks under `ANDROID_HOME`, then `~/Android/Sdk`.
+2. **The SDK's pieces**, about 3 GB to download and 8 GB installed (the versions are what
+   `modules/toolchain-android/module.lua` pins; a Java runtime, 17 or later, runs the
+   tools):
+
+       sdkmanager "platform-tools" "build-tools;36.0.0" "platforms;android-36" "ndk;30.0.16248370" \
+                  "emulator" "system-images;android-36;google_apis;x86_64"
+
+3. **An emulator**, made once and started whenever it is wanted (it needs `/dev/kvm`):
+
+       avdmanager create avd -n korvid -k "system-images;android-36;google_apis;x86_64" -d pixel_9
+       emulator -avd korvid -gpu host -no-metrics
+       adb shell settings put secure immersive_mode_confirmations confirmed   # once: Android's "viewing full screen" tip takes the focus
+
+   `avdmanager` prints "Could not load devices from .../devices.xml" and makes the AVD all
+   the same. `-gpu host` passes this machine's Vulkan through, which the renderer needs
+   (1.3, descriptor indexing).
+
+Then:
+
+    tools/kormake/bin/linux/kormake test androidemu-dev            # every suite, run inside the emulator
+    tools/kormake/bin/linux/kormake package androidemu-dev rocks   # dist/rocks/rocks.apk, signed with the debug key
+    adb install -r dist/rocks/rocks.apk
+    adb shell 'am start -n org.korvid.rocks/android.app.NativeActivity --es args "--demo --hash"'
+    adb logcat -s korvid                                           # the game's output
+
+Arguments go in the intent's `args` (the outer quotes keep adb's shell from splitting them
+again). What a run writes with a relative path (`--screenshot shot.ppm`, `--profile`)
+lands in `/sdcard/Android/data/org.korvid.<game>/files/`, where `adb pull` reads it; saves
+go to the app's private directory. The window is the screen, and the size a game asks for
+only chooses landscape or portrait; `adb shell wm size 540x960` gives the emulator a
+960x540 screen for pictures that must be that size (`wm size reset` after). Touch drives
+the on-screen pad every game already binds; a keyboard's Back, or the Back gesture, is
+Escape.
+
+`kormake package android-dev rocks` builds the arm64 package the same way; `adb install`
+puts it on a connected phone, and `kormake test android-dev` runs the suites there.
+
+A debug package of a game that draws carries the Khronos validation layer when one is
+installed: unpack the `android-binaries` archive of a
+[Vulkan-ValidationLayers release](https://github.com/KhronosGroup/Vulkan-ValidationLayers/releases)
+into `~/Android/Sdk/vulkan-validation-layers/` (so that `x86_64/` and `arm64-v8a/` are
+directly inside it), or point `KORMAKE_ANDROID_VK_LAYERS` at wherever it is. The package's
+last line says whether it took one.

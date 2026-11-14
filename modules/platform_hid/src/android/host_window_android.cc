@@ -14,7 +14,7 @@
 // without it holds the sim (hid_backend_holds_unfocused). With no surface (Home, the recents
 // screen, the screen off) pump waits in the looper until there is one again: no frame, no
 // GPU work. Touches are TouchPoints in framebuffer pixels; keys from a hardware keyboard go
-// through input_android.cc's table, and Back is Escape.
+// through input_android.cc's table, and Back is Escape; gamepads are there too.
 //
 // Arguments come from the launching intent's string extra "args" (adb shell am start -n
 // <package>/android.app.NativeActivity --es args "--demo --hash"), split at spaces. Output
@@ -27,6 +27,7 @@
 #include "korvid/core/time.h"
 #include "korvid/platform/android.h"
 #include "../hid_backend.h"
+#include "android_pads.h"
 
 #include <android/configuration.h>
 #include <android/input.h>
@@ -588,7 +589,9 @@ void HostWindow::drain(EventBus& bus, Input& input) {
         if (AInputQueue_preDispatchEvent(app.queue, ev)) continue; // an input method took it
         int handled = 0;
         int type = AInputEvent_getType(ev);
-        if (type == AINPUT_EVENT_TYPE_KEY) {
+        if (input_android_pad_event(ev, bus, input)) {
+            handled = 1;
+        } else if (type == AINPUT_EVENT_TYPE_KEY) {
             Key k = key_from_scancode((u32)AKeyEvent_getKeyCode(ev));
             int action = AKeyEvent_getAction(ev);
             if (k != Key::Unknown && (action == AKEY_EVENT_ACTION_DOWN || action == AKEY_EVENT_ACTION_UP)) {

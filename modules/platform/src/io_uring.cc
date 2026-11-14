@@ -9,7 +9,7 @@
 
 // Not on Android: its seccomp policy answers an app's io_uring_setup with SIGSYS, which
 // kills the process where an error would have let it fall back (adb's shell gets EPERM,
-// so a test would not show it). Android takes the branch with no ring.
+// so a test would not show it). Android's ring is threads: android/io_ring_android.cc.
 #if defined(__linux__) && !defined(__ANDROID__)
 
 #include <errno.h>
@@ -164,7 +164,7 @@ const char* io_ring_name(const IoRing* r) { return r ? "io_uring" : "sync"; }
 
 } // namespace kv
 
-#elif !defined(_WIN32) && !defined(__APPLE__) // Windows and the Apple family have their own: win32/io_ring_win32.cc, apple/io_ring_apple.cc
+#elif !defined(_WIN32) && !defined(__APPLE__) && !defined(__ANDROID__) // Windows, the Apple family and Android have their own: win32/io_ring_win32.cc, apple/io_ring_apple.cc, android/io_ring_android.cc
 
 namespace kv {
 

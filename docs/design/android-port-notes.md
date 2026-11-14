@@ -393,6 +393,89 @@ emulator's window, or a phone, shows.
 - stones and cpukiller run; sockit2m builds as a program for adb's shell.
 - Linux: both configs' suites, kormake's tests, rocks' hash at 1 and 16 threads.
 
+## Milestone 6: ship
+
+The P1s that fit, the documents, and what is left for a device.
+
+### The thread ring
+
+`platform/src/android/io_ring_android.cc`: the Apple dispatch ring's shape with four
+threads of its own in place of GCD's workers (a submission list and a completion list
+under one lock, a condition for each side). It is the queue's default on Android
+(`backend_name()` is `threads`); `--io sync` still picks the synchronous path, and the
+platform tests run every I/O test on both. The two files were not merged into one posix
+ring: the Apple one cannot be built here, and its GCD pool grows where this one is fixed.
+
+- `platform_tests` (233 checks, both backends) fifty times in a loop in the emulator: 50
+  of 50.
+- `sockit2m --compare` in the emulator, hot cache, 256 MB in 256 files: 2880 MB/s through
+  the ring against 2199 synchronous in the tight loop (1.3 times), 2212 in engine mode;
+  latency 19.6 ms against 25.4; the worst pump 4.1 ms against 8.2. Sockets: 489 MB/s
+  echoed and verified. An emulator's numbers on a desktop's disk: the shape, not the size.
+- rocks on the ring: `4fb2e4cb04ff9ee4` at tick 600, as before.
+
+### Gamepads
+
+`input_android.cc`: a key event from a gamepad source is a pad's button
+(`AKEYCODE_BUTTON_*`), a motion event from a joystick source its sticks (`AXIS_X/Y`,
+`AXIS_Z/RZ`), triggers (`LTRIGGER` or `BRAKE`, `RTRIGGER` or `GAS`, the larger) and hat
+(the four dpad buttons). A pad takes a slot the first time its device id is heard from.
+`adb shell input gamepad keyevent BUTTON_A` (and `BUTTON_START`, `DPAD_LEFT`) reached
+`window` as "gamepad 0", "pad 0 South", "pad 0 Start", "pad 0 DpadLeft", and a keyboard's
+arrow stayed a key. Sticks and triggers are written from the documentation and have had
+no event to answer. A pad is never reported gone: Android tells that to Java only.
+
+### Not done
+
+- **Pre-rotation** (R7's P1). The compositor turns the image, which is correct, and the
+  emulator's compositor does it for nothing, so nothing here could measure what
+  pre-rotation saves; it touches the sprite pass's projection, the post pass and the
+  screenshot, all of which work. It waits for a phone to say what the turn costs.
+- **The validation layer** is still not downloaded (milestone 4): the debug run with it
+  on is unproved.
+- **The last end-to-end pass was cut short.** After the ring and the gamepads went in,
+  every suite passed again in the three emulator configs and rocks hashed as Linux's on
+  the ring. arcfire's Orbit on the ring, and a Home-and-relaunch loop with sound playing
+  (the AAudio stream stopped and started), were next when the emulator crashed, and have
+  not run. The ring is the tests' default and passed them; the audio stop and start ran
+  once per round in milestone 5's play test, unlooped.
+
+### The emulator crashes
+
+Twice in this slice the emulator's own process died: `Segmentation fault (core dumped)`,
+exit code 139, each time after about thirty lines of
+`gfxstream/host/gl/glestranslator/gles_v2/gles_v2_imp.cpp:glTexParameteri: error null
+ctx` (and `glGenTextures`, `glBindTexture`, `glTexImage2D`, `glGetString`). Both times one
+of our apps had just exited (its `VkDevice` and `VkInstance` destroyed are the log's last
+Vulkan lines) and the next was being launched; the first was after an hour of use, the
+second after about fifty minutes. Well over a hundred other launches in the same pattern
+were fine. Emulator 37.2.13, `-gpu host`, RADV 26.0.8, API 36 image revision 7.
+
+What is known: the fault is in the host's GLES translator, which draws Android's own
+interface (the launcher, the app-start animation), not in the Vulkan path the games use,
+and a guest app cannot by rights bring the host process down. What is not: whether the way
+our process ends (`_exit` from the game's thread as soon as `main` returns, the activity
+finishing behind it) makes the race more likely. Untried: a newer emulator, `-gpu
+swiftshader_indirect`, and exiting only after `onDestroy`. A restart recovers; the AVD's
+state survives.
+
+### What only a device can settle
+
+- Whether a phone's GPU passes the renderer's requirements at all, and which fail: the
+  update-after-bind sampled-image count, `descriptorBindingVariableDescriptorCount`,
+  `drawIndirectFirstInstance` on older Mali drivers. The refusal names the one that did.
+- Performance on a tile-based GPU: the compute sort, the post pass, load and store
+  actions; whether pre-rotation is worth its code; frame pacing (Swappy, if it is uneven).
+- arm64: the build has never run. The lock-free code met a weakly ordered CPU on macOS;
+  this is the same code on another one. `kormake test android-dev` is the first thing to run.
+- 16 KiB pages (Android 15 and later may; the emulator image used here has 4 KiB).
+- The job pool on big and little cores, thermal throttling, battery.
+- Audio latency, and the stream surviving a headset pulled or a call coming in.
+- Gamepad sticks and triggers; two fingers on the touchpad at once; whether the insets'
+  137 pixels at the top in landscape is wanted or wasteful there.
+- The debug names on Vulkan objects, off in the emulator only.
+
 ### Still to come
 
-Milestone 6: the thread ring for I/O, pre-rotation, gamepads, the README.
+Milestone 7: composed text through one Java class (`KorvidActivity`), which needs a JDK
+for `javac` (`sudo apt install openjdk-25-jdk-headless`) and is P1.

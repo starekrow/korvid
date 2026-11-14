@@ -3,8 +3,9 @@
 What a person at the machine touches and looks at: the window, the keyboard, the mouse,
 gamepads, and the input action map over them. The window and keyboard backend is per
 platform, picked by the toolchain's source directories: SDL3 on Linux and macOS
-(`src/sdl3/`), native Win32 on Windows (`src/win32/`), behind `src/hid_backend.h`. Gamepads come from
-SDL3 on every platform (`src/sdl3_pads/`). Nothing outside this module and
+(`src/sdl3/`), native Win32 on Windows (`src/win32/`), UIKit on iOS (`src/ios/`), a
+`NativeActivity` on Android (`src/android/`), behind `src/hid_backend.h`. Gamepads come from
+SDL3 on the desktop (`src/sdl3_pads/`) and from Android's own input events there. Nothing outside this module and
 `platform_audio` sees either, so a port adds a backend, not an API. The module starts
 headless: the display and gamepads come up with the first window.
 
@@ -153,3 +154,25 @@ What the module registers with the engine:
 ## Not in this module
 
 Touch, more than one window, controller rumble.
+
+## Android
+
+`src/android/host_window_android.cc` is the app's entry as well as its window:
+`ANativeActivity_onCreate` runs the game's `main` on a thread of its own, and the
+activity's callbacks reach `pump` through a ring and an `ALooper`. Arguments are the
+launching intent's string extra `args`; output goes to logcat (tag `korvid`); the working
+directory is the app's external files directory.
+
+- **The surface comes and goes.** Android destroys the window's surface whenever the app
+  leaves the screen and makes another when it returns. `HostWindow::on_surface` (through
+  `platform_surface_hook`) is called from inside `pump` with null before the old one goes
+  and with the new handle after: the frame loop passes both to `renderer_set_surface`.
+  While there is none, `pump` waits: no frame runs.
+- **Focus holds the sim** (`hid_backend_holds_unfocused`), as on iOS: resumed, with window
+  focus, with a surface.
+- **The window is the screen.** The size asked for chooses landscape or portrait.
+  `safe_insets` reports the cutout and the system bars' edges; the bars are hidden.
+- **Keys** are `AKEYCODE_*` through `input_android.cc`; Back is Escape. **Touches** are
+  `TouchPoint`s. **Gamepads** are key events from a gamepad source and motion events from
+  a joystick source; a pad is never reported gone (Android tells only Java).
+- **Text input** is not there yet: `text_input` does nothing.

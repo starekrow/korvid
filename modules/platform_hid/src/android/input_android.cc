@@ -2,8 +2,21 @@
 // event from a hardware keyboard (or the emulator's host keyboard) reports them. They name
 // the key's meaning on the device's layout rather than its position; a phone's game is
 // played by touch, and a keyboard there is a developer's. Back is Escape: every game
-// already takes Escape as "close this, or go up a menu". No gamepads yet (milestone 6).
+// already takes Escape as "close this, or go up a menu".
+//
+// Gamepads need no library: a pad's buttons are key events whose source is a gamepad
+// (AKEYCODE_BUTTON_*), its sticks, triggers and hat motion events whose source is a joystick
+// (AMOTION_EVENT_AXIS_*). A pad takes a slot the first time its device id is heard from.
+// Android tells native code nothing when a pad goes away (that is InputManager's, in Java),
+// so a pad stays connected, at rest, once seen. Written against the documentation and
+// checked with `adb shell input gamepad keyevent`; the emulator passes no real pad through,
+// so sticks and triggers wait for a device.
 #include "korvid/platform_hid/input.h"
+#include "korvid/platform_hid/events.h"
+#include "korvid/core/event.h"
+#include "korvid/core/log.h"
+#include "android_pads.h"
+#include <android/input.h>
 #include <android/keycodes.h>
 
 namespace kv {
@@ -57,6 +70,90 @@ u32 scancode_from_key(Key k) {
     return 0;
 }
 
-void input_gamepads_close(Input&) {}
+namespace {
+
+struct PadKey { PadButton button; i32 code; };
+
+const PadKey g_pad_keys[] = {
+    {PadButton::South, AKEYCODE_BUTTON_A}, {PadButton::East, AKEYCODE_BUTTON_B}, {PadButton::West, AKEYCODE_BUTTON_X}, {PadButton::North, AKEYCODE_BUTTON_Y},
+    {PadButton::Back, AKEYCODE_BUTTON_SELECT}, {PadButton::Guide, AKEYCODE_BUTTON_MODE}, {PadButton::Start, AKEYCODE_BUTTON_START},
+    {PadButton::LStick, AKEYCODE_BUTTON_THUMBL}, {PadButton::RStick, AKEYCODE_BUTTON_THUMBR},
+    {PadButton::LShoulder, AKEYCODE_BUTTON_L1}, {PadButton::RShoulder, AKEYCODE_BUTTON_R1},
+    {PadButton::DpadUp, AKEYCODE_DPAD_UP}, {PadButton::DpadDown, AKEYCODE_DPAD_DOWN},
+    {PadButton::DpadLeft, AKEYCODE_DPAD_LEFT}, {PadButton::DpadRight, AKEYCODE_DPAD_RIGHT},
+};
+
+// The slot of a device id, taking a free one (and saying so) the first time it is heard from.
+int pad_slot(EventBus& bus, InputState& s, i32 device) {
+    u32 id = (u32)device + 1; // a device id may be 0
+    for (u32 i = 0; i < KV_MAX_GAMEPADS; ++i) if (s.pads[i].connected && s.pads[i].id == id) return (int)i;
+    for (u32 i = 0; i < KV_MAX_GAMEPADS; ++i) {
+        if (s.pads[i].connected) continue;
+        s.pads[i] = GamepadState{};
+        s.pads[i].connected = true;
+        s.pads[i].id = id;
+        KV_INFO("input", "gamepad %u: Android input device %d", i, (int)device);
+        bus.emit(GamepadConnected{(u8)i});
+        return (int)i;
+    }
+    return -1;
+}
+
+void pad_button(EventBus& bus, GamepadState& p, u8 slot, PadButton b, bool down) {
+    if (p.down(b) == down) return;
+    p.set(b, down);
+    if (down) bus.emit(PadButtonDown{b, slot});
+    else      bus.emit(PadButtonUp{b, slot});
+}
+
+f32 stick(f32 v) { return v > -KV_PAD_DEAD_ZONE && v < KV_PAD_DEAD_ZONE ? 0.0f : v; }
+
+} // namespace
+
+bool input_android_pad_event(const AInputEvent* ev, EventBus& bus, Input& input) {
+    i32 source = AInputEvent_getSource(ev);
+    i32 type = AInputEvent_getType(ev);
+    InputState& s = input.raw;
+    if (type == AINPUT_EVENT_TYPE_KEY && (source & AINPUT_SOURCE_GAMEPAD) == AINPUT_SOURCE_GAMEPAD) {
+        i32 code = AKeyEvent_getKeyCode(ev);
+        i32 action = AKeyEvent_getAction(ev);
+        for (const PadKey& k : g_pad_keys) {
+            if (k.code != code) continue;
+            int slot = pad_slot(bus, s, AInputEvent_getDeviceId(ev));
+            if (slot >= 0 && (action == AKEY_EVENT_ACTION_DOWN || action == AKEY_EVENT_ACTION_UP))
+                pad_button(bus, s.pads[slot], (u8)slot, k.button, action == AKEY_EVENT_ACTION_DOWN);
+            return true;
+        }
+        return false; // a key the pad has that is not a pad button (Back on some): the keyboard's table
+    }
+    if (type == AINPUT_EVENT_TYPE_MOTION && (source & AINPUT_SOURCE_JOYSTICK) == AINPUT_SOURCE_JOYSTICK) {
+        if ((AMotionEvent_getAction(ev) & AMOTION_EVENT_ACTION_MASK) != AMOTION_EVENT_ACTION_MOVE) return true;
+        int slot = pad_slot(bus, s, AInputEvent_getDeviceId(ev));
+        if (slot < 0) return true;
+        GamepadState& p = s.pads[slot];
+        auto axis = [&](i32 a) { return AMotionEvent_getAxisValue(ev, a, 0); };
+        p.axes[(u32)PadAxis::LeftX]  = stick(axis(AMOTION_EVENT_AXIS_X));
+        p.axes[(u32)PadAxis::LeftY]  = stick(axis(AMOTION_EVENT_AXIS_Y));
+        p.axes[(u32)PadAxis::RightX] = stick(axis(AMOTION_EVENT_AXIS_Z));
+        p.axes[(u32)PadAxis::RightY] = stick(axis(AMOTION_EVENT_AXIS_RZ));
+        // A trigger is LTRIGGER on some pads and BRAKE on others (GAS for the right): the larger.
+        f32 lt = axis(AMOTION_EVENT_AXIS_LTRIGGER), lb = axis(AMOTION_EVENT_AXIS_BRAKE);
+        f32 rt = axis(AMOTION_EVENT_AXIS_RTRIGGER), rg = axis(AMOTION_EVENT_AXIS_GAS);
+        p.axes[(u32)PadAxis::LeftTrigger]  = lt > lb ? lt : lb;
+        p.axes[(u32)PadAxis::RightTrigger] = rt > rg ? rt : rg;
+        // The hat is two axes of -1, 0 or 1: the four dpad buttons.
+        f32 hx = axis(AMOTION_EVENT_AXIS_HAT_X), hy = axis(AMOTION_EVENT_AXIS_HAT_Y);
+        pad_button(bus, p, (u8)slot, PadButton::DpadLeft,  hx < -0.5f);
+        pad_button(bus, p, (u8)slot, PadButton::DpadRight, hx > 0.5f);
+        pad_button(bus, p, (u8)slot, PadButton::DpadUp,    hy < -0.5f);
+        pad_button(bus, p, (u8)slot, PadButton::DpadDown,  hy > 0.5f);
+        return true;
+    }
+    return false;
+}
+
+void input_gamepads_close(Input& input) {
+    for (GamepadState& p : input.raw.pads) p = GamepadState{};
+}
 
 } // namespace kv
