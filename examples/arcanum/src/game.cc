@@ -1058,13 +1058,13 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
         if (const MapProperty* route = tilemap_property(m, o.props, "route")) {
             // "x0,y0 x1,y1": four numbers, a comma inside each pair (strtof skips the space).
             f32 v[4];
-            const char* at = route->str;
+            const char* rp = route->str;
             bool ok = true;
-            for (u32 i = 0; i < 4 && ok; ++i) {
+            for (u32 n = 0; n < 4 && ok; ++n) {
                 char* end = nullptr;
-                v[i] = strtof(at, &end);
-                ok = end != at && (i % 2 == 1 || *end == ',');
-                at = i % 2 == 0 ? end + 1 : end;
+                v[n] = strtof(rp, &end);
+                ok = end != rp && (n % 2 == 1 || *end == ',');
+                rp = n % 2 == 0 ? end + 1 : end;
             }
             if (ok) a.route = vec2{v[2] - v[0], -(v[3] - v[1])};
         }
