@@ -1,17 +1,22 @@
-// Korvid renderer-d3d12: what the renderer's source files share. The Renderer struct, the
-// GPU-side layouts the shaders mirror (the same bytes as renderer-vulkan's: one set of
-// shader sources), and the private functions each file provides:
+// Korvid renderer-d3d12: what the renderer's source files share. This backend's half of the
+// renderer: the device and what is made from it. The other half is render's core
+// (korvid/render/core/core.h): the render world, the public API, the frame's order of work.
+// The core is built into this module by render_core.cc, against the types below; this
+// header gives it RbBuffer, RbGarbage and five values, completes its records (Texture,
+// GamePipe, PostPass, FrameInFlight, Renderer) and the sources define the rb_ functions it
+// calls. Each file provides:
 //   d3d_device.cc       factory, adapter, device, queue, the debug layer's messages
 //   d3d_shader.cc       slangc's DXIL containers: <name>.dxil.zip, a blob per entry point
-//   d3d_resources.cc    buffers and their states, the frame ring, garbage, textures,
-//                       materials, the handle kinds and pools, descriptor heaps, the root
-//                       signature
+//   d3d_resources.cc    buffers and their states, garbage released, textures, the tables,
+//                       descriptor heaps, the root signature; the core's buffer and ring hooks
 //   d3d_swapchain.cc    the DXGI flip-model swapchain, frames in flight, resizing
-//   d3d_sprite_pass.cc  pipelines and the frame's commands: uploads, the compute sort, the
-//                       indirect draws
+//   d3d_sprite_pass.cc  pipelines and the frame's recording steps: uploads, the compute
+//                       sort, the passes, the indirect draws
 //   d3d_post_pass.cc    the full-frame pass: the world's target, the post pipeline
 //   d3d_gpu_profile.cc  timestamps and pipeline statistics, names and event markers
-//   renderer.cc         the public API behind korvid/render/renderer.h
+//   renderer.cc         create and destroy, and the frame's steps that wait, acquire,
+//                       submit and present
+//   render_core.cc      the render core, compiled here
 // This header and the sources next to it are the only place a D3D12 header is included.
 //
 // Where it differs from the Vulkan backend, and why:
@@ -268,7 +273,6 @@ void rb_transition(ID3D12GraphicsCommandList* cmd, ID3D12Resource* res, D3D12_RE
 
 
 DXGI_FORMAT rb_dxgi_format(TextureFormat f);
-bool rb_create_default_texture(Renderer* r);
 void rb_write_texture_slot(Renderer* r, u32 frame, u32 slot);
 D3D12_GPU_DESCRIPTOR_HANDLE rb_heap_gpu(Renderer* r, u32 index);
 D3D12_CPU_DESCRIPTOR_HANDLE rb_heap_cpu(Renderer* r, u32 index);

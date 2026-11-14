@@ -146,3 +146,14 @@ Decisions the milestones lean on, in the order a wrong answer costs most:
 4. **Whether milestone 4 is worth it** is asked again when milestone 3 closes. Milestones 1 to 3 remove most of the duplication with little risk to the frame's path; milestone 4 shares the order of the frame, which is the most valuable thing to have written once and the only step that could cost a call or blur a backend's own flow. If the shared record function needs more than a few steps whose only reason is one backend, it stays three functions that call the shared pieces.
 5. **Exact gallery comparison** as the test, per backend against its own references on the same machine. If a driver update lands mid-slice the references are retaken at the parent commit, not loosened.
 6. **Prerequisites:** the Mac and the Windows machine reachable at each gate; D3D12's first gallery references committed before milestone 1's code.
+
+## As built
+
+Nov 13. All five milestones, on `render-core`; what each machine proved is in the commits, and the result is described in `docs/design/renderer.md`, "The core and the backends". Where it departs from the plan above:
+
+- **Deriving, not a `gpu` member** (R3): said in "The shape".
+- **The identical-line count ended at 194, not under 60.** Backend lines fell by 2,790 (the criterion asked for 2,000). Of the 194, 26 are preprocessor lines, 27 the contract's signatures and 88 shorter than thirty characters; the criterion should have excluded what is identical by agreement. `renderer.md` has the table.
+- **The screenshot's file writer is in the compiled-in half**, not the linked one: it needs `platform`'s file writer, which `render` does not depend on.
+- **Milestone 4 was made**, and the question "For review" 4 asked of it came out well: twenty-two steps, each with a body in all three backends but `rb_sort_end` (empty on Metal) and `rb_record_end` (only a `return` there).
+- **There were no backend READMEs to update** (R8): each backend's `renderer_internal.h` header lists its files against the contract, and `modules/render/README.md` is new.
+- **Not run:** resize, minimise and vsync off by hand on any backend; Vulkan on Windows.

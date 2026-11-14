@@ -56,6 +56,11 @@ struct RenderView {
 // at link time: the binding decides it.
 enum class RendererSurface : u8 { Vulkan, Metal, D3D12 };
 RendererSurface renderer_surface();
+// The same answer as platform_hid's WindowSurface (korvid/platform_hid/host_window.h), by
+// value, since render cannot name that type: whoever opens the window writes
+// `desc.surface = (WindowSurface)renderer_window_surface();`. The one place the two enums
+// meet is the render core, which every backend builds with both in sight.
+u8 renderer_window_surface();
 
 // One renderer per process in slice 1. Null if one exists already or creation failed.
 Renderer*  renderer_create(Engine& engine, const RendererDesc& desc);

@@ -2,6 +2,8 @@
 
 Nov 13, 2026 · @starekrow
 
+> Written before "One render core" took the number: that slice is Slice 9 (Engine-Slice-9-PRD.md) and this one follows it. Its extraction of a `render_world` module, and R11, are done there, differently: `renderer-vulkan11` is written against the core's contract (`korvid/render/core/core.h`), and `vulkan-common` is what the two Vulkan backends share beyond it.
+
 ## Goal and exit criteria
 
 Slice 8's Android runs on a phone whose driver offers Vulkan 1.3 and full descriptor indexing, and refuses every other. Slice 9 adds a second Vulkan backend, `renderer-vulkan11`, that asks for nothing beyond what Khronos's `VP_ANDROID_baseline_2022` profile guarantees, so a game built on it starts on any phone that meets that profile.

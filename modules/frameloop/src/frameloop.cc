@@ -225,11 +225,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     desc.title      = s->config.title;
     desc.width      = s->config.width;
     desc.height     = s->config.height;
-    switch (renderer_surface()) {
-    case RendererSurface::Metal: desc.surface = WindowSurface::Metal; break;
-    case RendererSurface::D3D12: desc.surface = WindowSurface::D3D12; break;
-    default:                     desc.surface = WindowSurface::Vulkan; break;
-    }
+    desc.surface    = (WindowSurface)renderer_window_surface(); // what the bound backend draws into
     desc.vsync      = s->config.vsync;
     desc.borderless = s->config.borderless;
     s->window = platform_open_window(engine, desc);

@@ -1,7 +1,9 @@
 # Renderer
 
-Nov 7, 2026 (game shaders and the full-frame pass: Nov 10). The sprite renderer after slice 3: what lives on the
-GPU, what a frame does, and the rules the pieces follow.
+Nov 7, 2026 (game shaders and the full-frame pass: Nov 10; the core and the backends: Nov 13). The sprite renderer
+after slice 3: what lives on the GPU, what a frame does, and the rules the pieces follow. The mechanisms are described
+as Vulkan has them, where they were first built; the last section says what is shared between the three backends and
+what each writes for itself.
 
 ## Principle
 
@@ -13,7 +15,7 @@ list it would build again.
 
 ## The tables
 
-- **Sprite rows** (`GpuSprite`, 96 bytes, device-local): slot-addressed by the render
+- **Sprite rows** (`GpuSprite`, 112 bytes, device-local): slot-addressed by the render
   world's pool index, so `sprite_of_entity` is the only lookup and the CPU mirror
   (`Pool<RenderSprite>`) and the GPU row share an index. A row holds the previous and
   current placement, the tick stamp of its last `Set`, material row, uv, size, tint,
@@ -191,3 +193,82 @@ to the window as it did before, and none of the pass's objects exist until a sha
 Its cost on a Radeon 780M at 1280 x 720: about 0.1 ms of GPU a frame and one more layer of
 overdraw.
 
+## The core and the backends
+
+Slice 9 (docs/PRDs/Engine-Slice-9-PRD.md). Three backends draw this renderer: `renderer-vulkan` (Linux, Windows,
+Android), `renderer-metal` (macOS, iOS) and `renderer-d3d12` (Windows). Each was first a copy of the one before it with
+the calls changed. What they had in common is now written once, in `render`, in two halves, and a backend holds only
+what differs. The core shares structure; it does not hide the backends. There is no hardware abstraction here, no
+table of function pointers and no template over a backend.
+
+**The linked half** (`korvid/render/world.h`, `render/src/world.cc`) needs no GPU type, so it is ordinary code that
+links with any backend and is tested without one (`render_tests`). `RenderWorld` is the sprites and their rows, the
+materials' records, the dirty bitmaps, the bucket and keyed counts, the layers' offsets and the tick. Over it:
+`rw_apply` (the whole of `renderer_apply`), the buckets, material rows and rebinding, the dirty-run and draw-run walks,
+the push block (with a flag for clip spaces whose y is up), the key snapshot and the sort verifier.
+
+**The compiled-in half** (`korvid/render/core/`: `layout.h`, `core.h`, `core.inl`, `frame.inl`) is built inside each
+backend's library by a two-line source, `src/render_core.cc` (`.mm` on Metal), after that backend's
+`renderer_internal.h`, so it sees the backend's types whole. It holds the functions of `renderer.h` (all but create,
+destroy, get, resize and set-surface, which are each backend's), the pools and their handle kinds, the default texture
+and material, the game shaders' slots, the frame ring, the garbage queue, the CPU's half of `--check-sort` and
+`--screenshot`, and the frame.
+
+**The contract** is `core.h`, and it is the whole of what a new backend has to meet:
+
+- *Five values*, as `#define`s: `KV_RB_NAME` (the log channel), `KV_RB_CLIP_Y_UP`, `KV_RB_SHADER_EXT`, `KV_RB_SURFACE`,
+  `KV_RB_FRAME_SCOPE` (empty, or Metal's `@autoreleasepool`). The core uses what they are worth and never asks which
+  backend it is: there is no `#if` on a backend's name in the core.
+- *Two types*: `RbBuffer` (a struct on Vulkan and D3D12, the `MTLBuffer` itself on Metal) and `RbGarbage` (one thing
+  to destroy once the frame that last used it is done).
+- *Five records completed by deriving*: `Texture : TextureCore`, `GamePipe : GamePipeCore`, `PostPass : PostCore`,
+  `FrameInFlight : FrameCore`, `Renderer : RenderCore`. Plain data on plain data, nothing virtual. The core's functions
+  use the core's part and the members the contract names (`textures`, `game_pipes`, `post`, `frames`, `gpu_prof`, a
+  frame's `layers`); a backend's files see one struct and spell their own fields as they always did.
+- *The `rb_` functions*, the same names and signatures in all three, at the height of a pass and never of an API call.
+  Resources: a buffer's mapping and retirement, the ring's buffer, one piece of garbage destroyed, a texture's image
+  made, staged and retired, a game pipeline loaded, the post shader set, the tables made. The frame: wait, write a
+  slot, acquire, submit, present, finish; and to record it: begin, the uploads (begin, copy a run of rows, end), the
+  sort (run, read back, end), the post target, a pass (begin, the post triangle, bind the sprites, draw a run of
+  buckets, end), read the window back, end.
+
+**The frame** (`frame.inl`) is the order of work the three agree on, written once: wait for the slot's last frame,
+release its span of the ring and its garbage, grow the tables, write the layers and the changed texture slots, acquire,
+record, submit, present, and the dev stall for a screenshot or a sort check. The core stages the dirty rows and walks
+the draw runs; the backend copies a run (`rb_copy_rows`) and issues one (`rb_draw_run`), which is where Vulkan's
+multi-draw, Metal's loop and D3D12's `ExecuteIndirect` stay. The sort's order is `rc_sort_steps`: four kernels with
+their labels and group counts, then `rw_next_keyed` for the buckets the key sort visits; each backend dispatches them in
+a loop with its own barrier between. What a backend must carry from one step to the next (the image's index; on Metal
+the command buffer, the drawable and the open encoder) lives in its `FrameInFlight`.
+
+**The rules of the seam**, which are what keep it from growing into the thing it replaced:
+
+1. No templates over the backend, no virtual functions, no tables of function pointers. A name has one definition in
+   a build.
+2. A function is the core's when its bodies in the backends are the same once the names are normalised. If they are
+   only alike, it stays in the backends (the post pass's objects, the profiler, the swapchain, the binding model,
+   barriers and resource states).
+3. The core does not reach into what a backend added to a record, other than the members the contract names. The
+   backends read and write the core's fields freely.
+4. A piece goes in the linked half when it falls out as plain data in, plain data out; in the compiled-in half when
+   making it backend-blind would take a handle, a callback or a copy it does not need. If it has to be argued into
+   either, it is in the wrong one.
+5. Names: `rw_` the linked half, `rc_` the compiled-in half, `rb_` a backend.
+
+**What it came to** (`tools/render-overlap.sh`, main at the slice's start against its end):
+
+| | Before | After |
+| --- | --- | --- |
+| Lines in the three backends' `src/` | 9,712 | 6,922 |
+| Distinct code lines identical in all three | 686 | 194 |
+| The CPU's `record` zone, arcfire `--bench ring --dial rank=56`, Vulkan on a Radeon 780M | 0.075 ms | 0.074 ms |
+
+The PRD asked for the identical lines to fall under 60, counted the same way. They did not, and the count is the wrong
+measure of the end: of the 194, 26 are includes and preprocessor lines, 27 are the contract's own signatures (identical
+because the contract says so), and 88 more are under thirty characters (`f64 t = time_now();`, a loop header, a
+`PostPass& p = r->post;`). What is left that could still move is the common skeleton of `renderer_create` and
+`renderer_destroy`, which differ in every step between their first and last lines.
+
+`tools/render-gate.sh` is what held the pictures still while this was done: on each backend's own machine, the three
+configs built, the tests, shader sources and compiled shaders unchanged, the gallery exact against that backend's
+references, the sort checks, arcfire under validation, and the bench numbers beside the baseline's.

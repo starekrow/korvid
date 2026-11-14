@@ -1,13 +1,21 @@
-// Korvid renderer-vulkan: what the renderer's source files share. The Renderer struct,
-// the GPU-side layouts the shaders mirror, and the private functions each file provides:
+// Korvid renderer-vulkan: what the renderer's source files share. This backend's half of the
+// renderer: the device and what is made from it. The other half is render's core
+// (korvid/render/core/core.h): the render world, the public API, the frame's order of work.
+// The core is built into this module by render_core.cc, against the types below; this
+// header gives it RbBuffer, RbGarbage and five values, completes its records (Texture,
+// GamePipe, PostPass, FrameInFlight, Renderer) and the sources define the rb_ functions it
+// calls. Each file provides:
 //   vk_device.cc       instance, debug messenger, physical device, device and queue
-//   vk_resources.cc    memory, buffers, the frame ring, garbage, textures, materials,
-//                      the handle kinds and pools, descriptor layouts and sets
+//   vk_resources.cc    memory, buffers, garbage destroyed, textures, the tables,
+//                      descriptor layouts and sets; the core's buffer and ring hooks
 //   vk_swapchain.cc    swapchain, frames in flight, fenced recreation
-//   vk_sprite_pass.cc  shaders, pipelines, and the frame's commands: uploads, the compute
-//                      sort, the indirect draws
+//   vk_sprite_pass.cc  shaders, pipelines, and the frame's recording steps: uploads, the
+//                      compute sort, the passes, the indirect draws
 //   vk_post_pass.cc    the full-frame pass: the world's target, the post pipeline
-//   renderer.cc        the public API behind korvid/render/renderer.h
+//   vk_gpu_profile.cc  timestamps and pipeline statistics, names and labels
+//   renderer.cc        create and destroy, the surface, and the frame's steps that wait,
+//                      acquire, submit and present
+//   render_core.cc     the render core, compiled here
 // This header and the sources next to it are the only place a Vulkan header is included.
 #pragma once
 #include "korvid/render/renderer.h"
@@ -227,7 +235,6 @@ void rb_defer_destroy_buffer(Renderer* r, Buffer& b);
 
 // Textures.
 void rb_destroy_texture_now(Renderer* r, Texture& t);
-bool rb_create_default_texture(Renderer* r);
 void rb_write_texture_slot(Renderer* r, VkDescriptorSet set, u32 slot);
 VkFormat rb_vk_format(TextureFormat f);
 

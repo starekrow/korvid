@@ -15,11 +15,20 @@
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform_hid/host_window.h"
 #include <string.h>
 
 namespace kv {
 
 RendererSurface renderer_surface() { return KV_RB_SURFACE; }
+
+u8 renderer_window_surface() {
+    switch (KV_RB_SURFACE) {
+    case RendererSurface::Metal: return (u8)WindowSurface::Metal;
+    case RendererSurface::D3D12: return (u8)WindowSurface::D3D12;
+    default:                     return (u8)WindowSurface::Vulkan;
+    }
+}
 
 RenderCaps renderer_caps(const Renderer*) {
     RenderCaps c;
@@ -117,6 +126,49 @@ void rc_free_pools(Renderer* r) {
 
 void rc_mark_slot_dirty(Renderer* r, u32 slot) {
     for (FrameInFlight& f : r->frames) f.dirty_slots.push(slot);
+}
+
+// The hardcoded defaults. Slot 0: a red and white checkerboard; what a stale or null texture
+// reference shows, and what a pending texture shows until its upload. Its upload rides the
+// first frame like any other; until then every slot of every frame's set points at it.
+// Row 0: the material a sprite with none, or with one that has gone, draws with.
+bool rc_create_defaults(Renderer* r) {
+    Texture t{};
+    t.width = t.height = kDefaultTexSize;
+    t.format = TextureFormat::RGBA8_SRGB;
+    t.name = name_intern("default");
+    Handle h = r->textures.create(t);
+    if (h.index() != 0) { KV_ERROR(KV_RB_NAME, "default texture is not slot 0"); return false; }
+    Texture& slot0 = r->textures.items[0];
+    if (!rb_texture_create(r, slot0)) return false;
+
+    u8 pixels[kDefaultTexSize * kDefaultTexSize * 4];
+    for (u32 y = 0; y < kDefaultTexSize; ++y) {
+        for (u32 x = 0; x < kDefaultTexSize; ++x) {
+            bool red = ((x / kDefaultTexCell) + (y / kDefaultTexCell)) & 1;
+            u8* p = pixels + (y * kDefaultTexSize + x) * 4;
+            p[0] = 255;
+            p[1] = red ? 0 : 255;
+            p[2] = red ? 0 : 255;
+            p[3] = 255;
+        }
+    }
+    if (!rb_stage_texture(r, 0, slot0, pixels)) return false;
+    for (FrameInFlight& f : r->frames)
+        for (u32 slot = 0; slot < kMaxTextures; ++slot) rb_frame_slot(r, f, slot);
+
+    MaterialRecord m{};
+    m.texture = h;
+    m.blend   = BlendMode::Alpha;
+    m.slot    = (u32)BlendMode::Alpha;
+    m.tint    = color_white();
+    m.name    = name_intern("default");
+    r->default_material = r->world.materials.create(m);
+    r->texture_by_name.set(t.name.hash, h);
+    r->world.material_by_name.set(m.name.hash, r->default_material);
+    if (r->default_material.index() != 0) { KV_ERROR(KV_RB_NAME, "default material is not row 0"); return false; }
+    rw_mark_material_dirty(r->world, 0);
+    return true;
 }
 
 // ---- textures and materials: the API --------------------------------------------------------

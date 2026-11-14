@@ -1,30 +1,35 @@
-// Korvid renderer-metal: what the renderer's source files share. The Renderer struct, the
-// GPU-side layouts the shaders mirror, and the private functions each file provides:
-//   mt_resources.mm    buffers, the frame ring, deferred release, textures, materials, the
-//                      handle kinds and pools, the tables, the argument buffers
-//   mt_sprite_pass.mm  shaders, pipelines, and the frame's commands: uploads, the compute
-//                      sort, the indirect draws, the sort check
+// Korvid renderer-metal: what the renderer's source files share. This backend's half of the
+// renderer: the device and what is made from it. The other half is render's core
+// (korvid/render/core/core.h): the render world, the public API, the frame's order of work.
+// The core is built into this module by render_core.mm, against the types below; this
+// header gives it RbBuffer, RbGarbage and five values, completes its records (Texture,
+// GamePipe, PostPass, FrameInFlight, Renderer) and the sources define the rb_ functions it
+// calls. Each file provides:
+//   mt_resources.mm    buffers, deferred release, textures, the tables, the argument
+//                      buffers; the core's buffer and ring hooks
+//   mt_sprite_pass.mm  shaders, pipelines, and the frame's recording steps: the upload blit,
+//                      the compute sort, the passes, the indirect draws
 //   mt_post_pass.mm    the full-frame pass: the world's target, the game's post shader
 //   mt_gpu_profile.mm  GPU timing: timestamps around the frame's encoders
-//   renderer.mm        the public API behind korvid/render/renderer.h, and the frame
+//   renderer.mm        create and destroy, the layer, the screenshot's blit, and the frame's
+//                      steps that wait, take a drawable, commit and present
+//   render_core.mm     the render core, compiled here
 //   sdl3/mt_platform_sdl3.mm  the CAMetalLayer, from SDL's window (macOS)
 //   ios/mt_platform_ios.mm    the CAMetalLayer, the layer of platform_hid's UIView (iOS)
 // This header and the sources next to it are the only place a Metal header is included.
 //
-// The CPU side is renderer-vulkan's, ported as it is (slice 7 extracts what the two share
-// once both run; until then the constants and layouts below must match renderer-vulkan's
-// renderer_internal.h and render/shaders/sprite_common.slangh). What differs is the API:
-// the frame is a command buffer waited on instead of a fence, the drawable comes from the
-// layer instead of a swapchain, an argument buffer per frame holds the bindless textures
-// instead of a descriptor set, and Metal tracks hazards between encoders, so the barriers
-// are gone.
+// What differs from the other backends is the API: the frame is a command buffer waited on
+// instead of a fence, the drawable comes from the layer instead of a swapchain, an argument
+// buffer per frame holds the bindless textures instead of a descriptor set, each pass is an
+// encoder of its own, and Metal tracks hazards between encoders, so there are no barriers.
 //
 // Ownership: Metal objects are held as Vulkan handles are, by pointer in plain records,
 // made with a +1 reference (the new... methods, or retain) and released explicitly, at once
 // or after the frame that last used them. The engine's pools and arrays copy records as
 // bytes, which automatic reference counting cannot follow, so this module builds without it
 // (clang's default for .mm). Autoreleased objects (a command buffer, a drawable, a
-// descriptor) live inside an @autoreleasepool around each entry point that makes them.
+// descriptor) live inside an @autoreleasepool: the core's frame runs in one
+// (KV_RB_FRAME_SCOPE), as does each other entry point that makes them.
 #pragma once
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -178,7 +183,6 @@ void rb_defer_release(Renderer* r, id obj); // after the next frame to be submit
 void rb_release_all(Renderer* r, FrameInFlight& f);  // everything; nothing is in flight
 
 
-bool rb_create_default_texture(Renderer* r);
 void rb_write_texture_slot(Renderer* r, FrameInFlight& f, u32 slot);
 bool rb_create_bindless(Renderer* r); // the samplers and every frame's argument buffer
 // The textures a draw may sample, made resident for a render encoder.

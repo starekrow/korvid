@@ -55,8 +55,9 @@ define path is untouched, but no Mac checked it.
 - Resizing and minimizing were written, not exercised: every run was scripted.
 - Shader model 6.0 throughout; SM 6.6's `ResourceDescriptorHeap` would make the bindless
   table unnecessary, at the price of the oldest hardware.
-- The shared CPU half (render world, materials, ring) is copied, not shared: a third copy
-  is the point to pull it into a module of its own.
+- The shared CPU half (render world, materials, ring) was copied, not shared, when this was written: a third
+  copy was the point to pull it out. Slice 9 did: `render`'s core (docs/design/renderer.md, "The core and the
+  backends"). The surface kinds' two switches went with it (`renderer_window_surface`).
 - kormake's own test (`tools/kormake/tests/run.sh`) now runs on Windows under Git Bash too,
   against the same expected files, and its fixture has a bound-module rule variant. The
   regenerated expectations were made on Windows; a Linux or macOS run should confirm them.

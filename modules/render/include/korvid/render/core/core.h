@@ -227,6 +227,9 @@ struct RenderCore {
 // The texture and material pools and their handle kinds, the name maps, the world.
 bool rc_create_pools(Renderer* r);
 void rc_free_pools(Renderer* r);
+// The default texture (slot 0, a checkerboard) and the default material (row 0), after the
+// pools, the tables and the ring exist.
+bool rc_create_defaults(Renderer* r);
 
 // A material row as the GPU holds it: the record's, or the default's when the row is dead,
 // its texture resolved to a bindless slot. For the frame's upload of dirty rows.

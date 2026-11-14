@@ -61,7 +61,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     ok = ok && rc_ring_init(r, ring > kInitialRingBytes ? ring : kInitialRingBytes);
     ok = ok && rb_create_heaps_and_root(r);
     ok = ok && rb_load_shaders(r);
-    ok = ok && rb_create_default_texture(r);
+    ok = ok && rc_create_defaults(r);
     ok = ok && rb_create_compute_pipelines(r);
     ok = ok && rb_recreate_swapchain(r); // also builds the graphics pipelines
     if (r->device) rb_drain_messages(r);

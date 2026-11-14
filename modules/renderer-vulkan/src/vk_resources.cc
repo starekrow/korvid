@@ -200,48 +200,6 @@ bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels) {
     return true;
 }
 
-// The hardcoded default: a red and white checkerboard at slot 0; what a stale or null
-// texture reference shows, and what a pending texture shows until its upload. Its upload
-// rides the first frame like any other; until then every slot points at its view.
-bool rb_create_default_texture(Renderer* r) {
-    Texture t{};
-    t.width = t.height = kDefaultTexSize;
-    t.format = TextureFormat::RGBA8_SRGB;
-    t.name = name_intern("default");
-    Handle h = r->textures.create(t);
-    if (h.index() != 0) { KV_ERROR("vulkan", "default texture is not slot 0"); return false; }
-    Texture& slot0 = r->textures.items[0];
-    if (!rb_texture_create(r, slot0)) return false;
-
-    u8 pixels[kDefaultTexSize * kDefaultTexSize * 4];
-    for (u32 y = 0; y < kDefaultTexSize; ++y) {
-        for (u32 x = 0; x < kDefaultTexSize; ++x) {
-            bool red = ((x / kDefaultTexCell) + (y / kDefaultTexCell)) & 1;
-            u8* p = pixels + (y * kDefaultTexSize + x) * 4;
-            p[0] = 255;
-            p[1] = red ? 0 : 255;
-            p[2] = red ? 0 : 255;
-            p[3] = 255;
-        }
-    }
-    if (!rb_stage_texture(r, 0, slot0, pixels)) return false;
-    for (FrameInFlight& f : r->frames)
-        for (u32 slot = 0; slot < kMaxTextures; ++slot) rb_write_texture_slot(r, f.textures, slot);
-
-    MaterialRecord m{};
-    m.texture = h;
-    m.blend   = BlendMode::Alpha;
-    m.slot    = (u32)BlendMode::Alpha;
-    m.tint    = color_white();
-    m.name    = name_intern("default");
-    r->default_material = r->world.materials.create(m);
-    r->texture_by_name.set(t.name.hash, h);
-    r->world.material_by_name.set(m.name.hash, r->default_material);
-    if (r->default_material.index() != 0) { KV_ERROR("vulkan", "default material is not row 0"); return false; }
-    rw_mark_material_dirty(r->world, 0);
-    return true;
-}
-
 // ---- the GPU tables ------------------------------------------------------------------------------
 
 // Sprite tables for at least `rows` rows (rounded up to whole blocks). Previous tables

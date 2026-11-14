@@ -59,6 +59,9 @@ pipeline, failing by name if a header has moved one.
 
 ## The backend (milestone 3)
 
+(Since slice 9 the CPU side described here as ported is shared: `render`'s core, docs/design/renderer.md, "The core
+and the backends". What follows is the port as it was made.)
+
 `modules/renderer-metal` is renderer-vulkan's CPU side ported as it is (the render world, the
 dirty rows and their runs, the bucket counts, the ring, the materials, the game pipes, the
 sort check), with Metal's calls where Vulkan's were:
