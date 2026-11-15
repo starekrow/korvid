@@ -62,6 +62,7 @@ struct KromeLook {
     f32   size = 0.0f;                     // font size, logical pixels
     Name  image;                           // an image node's texture, by asset path
     color tint{1, 1, 1, 1};
+    f32   line_height = 0.0f;              // a text's lines, times its size; 0: the font's own
     u32   set = 0;
 };
 
@@ -79,7 +80,8 @@ constexpr u32 KROME_LOOK_FONT     = 1u << 10;
 constexpr u32 KROME_LOOK_SIZE     = 1u << 11;
 constexpr u32 KROME_LOOK_IMAGE    = 1u << 12;
 constexpr u32 KROME_LOOK_TINT     = 1u << 13;
-constexpr u32 KROME_LOOK_INHERITED = KROME_LOOK_COLOR | KROME_LOOK_FONT | KROME_LOOK_SIZE;
+constexpr u32 KROME_LOOK_LINE_HEIGHT = 1u << 14;
+constexpr u32 KROME_LOOK_INHERITED = KROME_LOOK_COLOR | KROME_LOOK_FONT | KROME_LOOK_SIZE | KROME_LOOK_LINE_HEIGHT;
 
 // Node flags.
 constexpr u16 KROME_FILL     = 1u << 0; // a bare `fill`: fill along the parent's direction
@@ -90,6 +92,7 @@ constexpr u16 KROME_SELECTED = 1u << 4;
 constexpr u16 KROME_HIDDEN   = 1u << 5; // takes no space and draws nothing
 constexpr u16 KROME_DEAD     = 1u << 6; // rebuilt away: in no list, kept until the tree is built again
 constexpr u16 KROME_SUBPIXEL = 1u << 7; // its text's pen is kept to a quarter pixel, not snapped to whole ones
+constexpr u16 KROME_NOWRAP   = 1u << 8; // its text stays on one line whatever width it gets
 
 struct KromeNode {
     KromeType  type = KromeType::Box;
@@ -111,6 +114,7 @@ struct KromeNode {
 
     // Layout's answers, in logical pixels.
     vec2  want;       // what it asked for
+    f32   narrowest = 0.0f; // the least width it can take: a wrapping text's longest word
     rect2 rect;       // what it got, in the screen's space
     vec2  content;    // a container's children's extent (what a scroll box scrolls over)
     vec2  scroll;     // a scroll box's offset, clamped by layout
@@ -179,6 +183,10 @@ struct KromeMeasure {
     vec2 (*text)(void* user, const char* s, u32 len, Name font, f32 size) = nullptr;
     // An image's natural size in logical pixels; zero if not known yet.
     vec2 (*image)(void* user, Name path) = nullptr;
+    // A paragraph's: its widest line and its height broken at `width` (<= 0: only at `\n`),
+    // its lines `line_height` times its size apart (0: the font's), and the narrowest width it
+    // can break to. Without it, text is one line and does not wrap.
+    vec2 (*paragraph)(void* user, const char* s, u32 len, Name font, f32 size, f32 line_height, f32 width, f32* narrowest) = nullptr;
 };
 
 // The default font and size where nothing says (DejaVu Sans, which the text module ships).

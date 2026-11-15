@@ -105,6 +105,31 @@ void test_text(kv::TestCtx& c) {
     text_set(t, "%s", many);
     KV_CHECK(c, strlen(t.str) == 62 && utf8_valid(t.str, strlen(t.str)));
 
+    // Over several lines (slice 3): wrapped at 30 (two glyphs of 11 and a space fit, the
+    // third word does not), the lines 14 apart going down, centered about the pen.
+    {
+        Text w;
+        w.wrap = 30.0f;
+        Array<GlyphPlacement> lines{};
+        u32 n = text_layout_paragraph(ff.f, w, "ab cd ef", ~0u, lines);
+        KV_CHECK(c, n == 6 && near(lines[0].center.x, 5) && near(lines[0].center.y, 6) && near(lines[2].center.y, 6 - 14) && near(lines[4].center.y, 6 - 28));
+        w.align = TextAlign::Center;
+        lines.clear();
+        text_layout_paragraph(ff.f, w, "ab cd ef", ~0u, lines);
+        // The frame is the wrap (30): a 22-wide line starts 4 in, from -15.
+        KV_CHECK(c, near(lines[0].center.x, -15 + 4 + 5));
+        // Shown: the first glyphs only, the layout unchanged.
+        lines.clear();
+        KV_CHECK(c, text_layout_paragraph(ff.f, w, "ab cd ef", 3, lines) == 2); // a, b, and the space (no ink)
+        // A line height of its own, and `\n`; a scale.
+        Text h;
+        h.line_height = 40.0f;
+        h.scale = 2.0f;
+        lines.clear();
+        KV_CHECK(c, text_layout_paragraph(ff.f, h, "a\nb", ~0u, lines) == 2 && near(lines[1].center.y - lines[0].center.y, -40) && near(lines[0].size.x, 20));
+        lines.free();
+    }
+
     // A font that is not ready lays out as nothing.
     ff.f.state = AssetState::Pending;
     KV_CHECK(c, text_layout(ff.f, t, out, &width) == 0 && width == 0.0f);

@@ -12,6 +12,29 @@ vec2 fake_text(void*, const char*, u32 len, Name, f32 size) { return vec2{(f32)l
 vec2 fake_image(void*, Name) { return vec2{32, 24}; }
 const KromeMeasure k_measure{nullptr, fake_text, fake_image};
 
+// Paragraphs the same way: a character half the size wide, lines size + 2 apart (or the
+// line height times the size), broken greedily at spaces; a word longer than the width
+// overflows its line.
+vec2 fake_paragraph(void*, const char* s, u32 len, Name, f32 size, f32 lh, f32 width, f32* narrowest) {
+    f32 ch = size * 0.5f, line = lh > 0.0f ? lh * size : size + 2.0f;
+    f32 widest = 0.0f, x = 0.0f, word = 0.0f;
+    u32 lines = 1;
+    *narrowest = 0.0f;
+    for (u32 i = 0; i <= len; ++i) {
+        bool end = i == len || s[i] == ' ' || s[i] == '\n';
+        if (!end) { word += ch; continue; }
+        if (word > *narrowest) *narrowest = word;
+        f32 need = x > 0.0f ? x + ch + word : word;
+        if (width > 0.0f && x > 0.0f && need > width) { ++lines; x = word; }
+        else x = need;
+        if (x > widest) widest = x;
+        word = 0.0f;
+        if (i < len && s[i] == '\n') { ++lines; x = 0.0f; }
+    }
+    return vec2{widest, line * (f32)lines};
+}
+const KromeMeasure k_wrapping{nullptr, fake_text, fake_image, fake_paragraph};
+
 bool near(f32 a, f32 b) { return a - b < 0.001f && b - a < 0.001f; }
 bool rect_is(const rect2& r, f32 x, f32 y, f32 w, f32 h) {
     if (near(r.x, x) && near(r.y, y) && near(r.w, w) && near(r.h, h)) return true;
@@ -42,6 +65,7 @@ struct T {
         if (why) KV_ERROR("test", "flag %s: %s", w, why);
     }
     void layout(f32 w = 200, f32 h = 100) { krome_layout(t, t.root, rect2{0, 0, w, h}, k_measure); }
+    void wrap_layout(f32 w = 200, f32 h = 300) { krome_layout(t, t.root, rect2{0, 0, w, h}, k_wrapping); }
     const rect2& r(u32 n) { return t.nodes[n].rect; }
 };
 
@@ -257,4 +281,62 @@ void test_layout(kv::TestCtx& c) {
         KV_CHECK(c, abut);
         KV_CHECK(c, rect_is(krome_pixel_rect(rect2{1, 1, 10, 10}, 1.5f), 2, 2, 15, 15));
     }
+
+    {   // Wrapping (slice 3): a text gets no more width than its column, and is as tall as its
+        // lines there; what follows it is placed below them. Size 10: a character is 5 wide,
+        // a line 12 high.
+        T x;
+        u32 root = x.box(KROME_NONE);
+        x.set(root, "size", KromeValue::num(10));
+        u32 col = x.box(root);
+        x.set(col, "w", KromeValue::num(100));
+        u32 a = x.text(col, "aaaa bbbb cccc dddd"); // 95 wide on one line: two words a line at 100? no, 3 (70)
+        u32 b = x.text(col, "short");
+        u32 one = x.text(col, "nowrap stays on one line");
+        x.flag(one, "nowrap");
+        x.wrap_layout();
+        // "aaaa bbbb cccc" is 70, + " dddd" is 95: one line at 100.
+        KV_CHECK(c, rect_is(x.r(a), 0, 0, 95, 12));
+        x.t.set_text(a, "aaaa bbbb cccc dddd eeee ffff");
+        x.wrap_layout();
+        KV_CHECK(c, rect_is(x.r(a), 0, 0, 100, 24) && rect_is(x.r(b), 0, 24, 25, 12));
+        KV_CHECK(c, rect_is(x.r(one), 0, 36, 120, 12)); // wider than the column: it overflows
+        KV_CHECK(c, x.t.nodes[a].narrowest == 20 && x.t.nodes[one].narrowest == 120);
+    }
+    {   // A hugging column inside a narrow one shrinks to it, and its text wraps; a fill in a
+        // row wraps in its share; the column's height follows.
+        T x;
+        u32 root = x.box(KROME_NONE);
+        x.set(root, "size", KromeValue::num(10));
+        u32 outer = x.box(root);
+        x.set(outer, "w", KromeValue::num(60));
+        x.set(outer, "pad", KromeValue::num(5));
+        u32 inner = x.box(outer);
+        u32 t = x.text(inner, "one two three four");
+        u32 row = x.box(root, "row");
+        x.set(row, "w", KromeValue::num(100));
+        x.set(row, "gap", KromeValue::num(10));
+        u32 label = x.text(row, "label");
+        u32 body = x.text(row, "aa bb cc dd ee ff gg");
+        x.flag(body, "fill");
+        u32 below = x.text(root, "below");
+        x.wrap_layout();
+        KV_CHECK(c, rect_is(x.r(inner), 5, 5, 50, 24) && rect_is(x.r(t), 5, 5, 50, 24)); // one two / three four
+        KV_CHECK(c, rect_is(x.r(outer), 0, 0, 60, 34));
+        KV_CHECK(c, rect_is(x.r(label), 0, 34, 25, 12) && rect_is(x.r(body), 35, 34, 65, 24)); // aa bb cc dd / ee ff gg
+        KV_CHECK(c, rect_is(x.r(row), 0, 34, 100, 24) && rect_is(x.r(below), 0, 58, 25, 12));
+        // Without a paragraph measure, text is one line, as before.
+        x.layout();
+        KV_CHECK(c, rect_is(x.r(t), 5, 5, 90, 12));
+    }
+    {   // line-height inherits, times the size.
+        T x;
+        u32 root = x.box(KROME_NONE);
+        x.set(root, "size", KromeValue::num(10));
+        x.set(root, "line-height", KromeValue::num(2));
+        u32 t = x.text(root, "a\nb");
+        x.wrap_layout();
+        KV_CHECK(c, rect_is(x.r(t), 0, 0, 5, 40));
+    }
 }
+

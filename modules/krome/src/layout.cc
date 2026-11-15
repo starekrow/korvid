@@ -25,44 +25,64 @@ KromeSize mode_of(const KromeNode& n, bool horizontal, KromeDir parent_dir) {
 
 bool visible(const KromeNode& n) { return !(n.flags & KROME_HIDDEN); }
 
+bool wraps(const KromeNode& n) { return n.type == KromeType::Text && !(n.flags & KROME_NOWRAP); }
+
 struct Layout {
     KromeTree&          t;
     const KromeMeasure& m;
+    bool                wrapped = false; // some text got less width than one line: heights again
 
     // ---- up -------------------------------------------------------------------------------
 
-    void want(u32 i, Name font, f32 size) {
+    void want(u32 i, Name font, f32 size, f32 lh) {
         KromeNode& n = t.nodes[i];
         const KromeLook& l = t.looks[n.look];
         if (l.set & KROME_LOOK_FONT) font = l.font;
         if (l.set & KROME_LOOK_SIZE) size = l.size;
+        if (l.set & KROME_LOOK_LINE_HEIGHT) lh = l.line_height;
         vec2 c{0, 0};
+        f32 narrow = 0.0f;  // the content's least width
         if (n.type == KromeType::Text) {
             const char* s = t.text(i);
-            if (m.text) c = m.text(m.user, s, (u32)strlen(s), font, size);
+            if (m.paragraph) {
+                f32 nw = 0.0f;
+                c = m.paragraph(m.user, s, (u32)strlen(s), font, size, lh, 0.0f, &nw);
+                narrow = wraps(n) ? nw : c.x;
+            } else if (m.text) {
+                c = m.text(m.user, s, (u32)strlen(s), font, size);
+                narrow = c.x;
+            }
         } else if (n.type == KromeType::Image) {
             if (m.image && (l.set & KROME_LOOK_IMAGE)) c = m.image(m.user, l.image);
         }
         // Children: along the direction they add up, across it the largest; in a stack the
         // largest each way.
+        if (n.type == KromeType::Image) narrow = c.x;
         u32 k = 0;
-        f32 along = 0, across = 0;
+        f32 along = 0, across = 0, narrow_kids = 0;
         bool row = n.dir == KromeDir::Row;
         for (u32 ch = n.first; ch != KROME_NONE; ch = t.nodes[ch].next) {
             KromeNode& cn = t.nodes[ch];
             if (!visible(cn)) continue;
-            want(ch, font, size);
+            want(ch, font, size, lh);
             vec2 w = cn.want;
             if (n.dir == KromeDir::Stack) {
                 if (w.x > c.x) c.x = w.x;
                 if (w.y > c.y) c.y = w.y;
+                if (cn.narrowest > narrow_kids) narrow_kids = cn.narrowest;
                 continue;
             }
             along += row ? w.x : w.y;
             f32 x = row ? w.y : w.x;
             if (x > across) across = x;
+            // A row's children stay side by side, at their own least widths; a column's least
+            // width is its widest child's.
+            if (row) narrow_kids += cn.narrowest;
+            else if (cn.narrowest > narrow_kids) narrow_kids = cn.narrowest;
             ++k;
         }
+        if (row && k > 1) narrow_kids += n.gap * (f32)(k - 1);
+        if (narrow_kids > narrow) narrow = narrow_kids;
         if (n.dir != KromeDir::Stack && k) {
             along += n.gap * (f32)(k - 1);
             vec2 kids = row ? vec2{along, across} : vec2{across, along};
@@ -73,6 +93,42 @@ struct Layout {
         vec2 padded{c.x + n.pad[0] + n.pad[2], c.y + n.pad[1] + n.pad[3]};
         n.want.x = clampr(n.w.mode == KromeSize::Fixed ? n.w.value : padded.x, n.w);
         n.want.y = clampr(n.h.mode == KromeSize::Fixed ? n.h.value : padded.y, n.h);
+        f32 least = narrow + n.pad[0] + n.pad[2];
+        n.narrowest = n.w.mode == KromeSize::Fixed ? n.want.x : clampr(least < n.want.x ? least : n.want.x, n.w);
+    }
+
+    // ---- heights at the widths given -------------------------------------------------------
+
+    // Again from the leaves up, heights only: a wrapped text's at the width it got, and every
+    // container's from its children's. Widths do not change.
+    void heights(u32 i, Name font, f32 size, f32 lh) {
+        KromeNode& n = t.nodes[i];
+        const KromeLook& l = t.looks[n.look];
+        if (l.set & KROME_LOOK_FONT) font = l.font;
+        if (l.set & KROME_LOOK_SIZE) size = l.size;
+        if (l.set & KROME_LOOK_LINE_HEIGHT) lh = l.line_height;
+        f32 c = 0.0f;
+        if (n.type == KromeType::Text && m.paragraph) {
+            const char* s = t.text(i);
+            f32 inner = n.rect.w - n.pad[0] - n.pad[2];
+            f32 nw = 0.0f;
+            c = m.paragraph(m.user, s, (u32)strlen(s), font, size, lh, wraps(n) ? inner : 0.0f, &nw).y;
+        } else {
+            c = n.content.y; // an image's, or what the children added up to before
+            if (n.first != KROME_NONE) c = 0.0f;
+            if (n.type == KromeType::Image) c = n.content.y;
+        }
+        u32 k = 0;
+        f32 along = 0.0f;
+        for (u32 ch = n.first; ch != KROME_NONE; ch = t.nodes[ch].next) {
+            KromeNode& cn = t.nodes[ch];
+            if (!visible(cn)) continue;
+            heights(ch, font, size, lh);
+            if (n.dir == KromeDir::Col) { along += cn.want.y; ++k; }
+            else if (cn.want.y > c) c = cn.want.y;
+        }
+        if (n.dir == KromeDir::Col && k) { along += n.gap * (f32)(k - 1); if (along > c) c = along; }
+        n.want.y = clampr(n.h.mode == KromeSize::Fixed ? n.h.value : c + n.pad[1] + n.pad[3], n.h);
     }
 
     // ---- down -----------------------------------------------------------------------------
@@ -83,6 +139,10 @@ struct Layout {
         const KromeAxis& a = horizontal ? c.w : c.h;
         f32 want = horizontal ? c.want.x : c.want.y;
         if (mode == KromeSize::Fill) return clampr(room, a);
+        // Hugging across: no wider than the room, unless it cannot be narrower (a text wraps
+        // to fit; one line, an image or a fixed size does not).
+        if (horizontal && mode == KromeSize::Hug && want > room && c.narrowest < want)
+            return room > c.narrowest ? room : c.narrowest;
         return want; // hug and fixed are already clamped
     }
 
@@ -95,6 +155,7 @@ struct Layout {
     void place(u32 i, rect2 r) {
         KromeNode& n = t.nodes[i];
         n.rect = r;
+        if (wraps(n) && r.w + 0.01f < n.want.x) wrapped = true;
         if (n.first == KROME_NONE) { n.scroll = vec2{0, 0}; return; }
         rect2 in{r.x + n.pad[0], r.y + n.pad[1], r.w - n.pad[0] - n.pad[2], r.h - n.pad[1] - n.pad[3]};
         if (in.w < 0) in.w = 0;
@@ -194,6 +255,7 @@ void krome_layout(KromeTree& t, u32 node, rect2 space, const KromeMeasure& m, bo
     // Font and size inherit from above the subtree: an overlay's from the node it opened at.
     Name font = name_intern(KROME_DEFAULT_FONT);
     f32 size = KROME_DEFAULT_SIZE;
+    f32 line_height = 0.0f;
     {
         u32 chain[KROME_MAX_DEPTH];
         u32 depth = 0;
@@ -202,12 +264,19 @@ void krome_layout(KromeTree& t, u32 node, rect2 space, const KromeMeasure& m, bo
             const KromeLook& lk = t.looks[t.nodes[chain[--depth]].look];
             if (lk.set & KROME_LOOK_FONT) font = lk.font;
             if (lk.set & KROME_LOOK_SIZE) size = lk.size;
+            if (lk.set & KROME_LOOK_LINE_HEIGHT) line_height = lk.line_height;
         }
     }
-    l.want(node, font, size);
+    l.want(node, font, size, line_height);
     KromeNode& n = t.nodes[node];
     rect2 r = fill ? space : rect2{space.x, space.y, n.want.x, n.want.y};
     l.place(node, r);
+    // Text that wrapped is taller than one line: heights at the widths given, and placed again.
+    if (l.wrapped) {
+        l.heights(node, font, size, line_height);
+        if (!fill) r.h = n.want.y;
+        l.place(node, r);
+    }
     if (node == t.root) t.dirty = false;
 }
 

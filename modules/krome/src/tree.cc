@@ -138,6 +138,7 @@ bool look_prop(KromeLook& l, const char* prop, const KromeValue& v, const char**
     if (!strcmp(prop, "border"))       { if (v.kind != KromeValue::Number || v.n < 0) *why = "border takes a number, 0 or more"; else { l.border = v.n; l.set |= KROME_LOOK_BORDER; } return true; }
     if (!strcmp(prop, "opacity"))      { if (v.kind != KromeValue::Number || v.n < 0 || v.n > 1) *why = "opacity takes a number from 0 to 1"; else { l.opacity = v.n; l.set |= KROME_LOOK_OPACITY; } return true; }
     if (!strcmp(prop, "size"))         { if (v.kind != KromeValue::Number || v.n <= 0) *why = "size takes a number above 0"; else { l.size = v.n; l.set |= KROME_LOOK_SIZE; } return true; }
+    if (!strcmp(prop, "line-height"))  { if (v.kind != KromeValue::Number || v.n <= 0) *why = "line-height takes a number above 0, times the size"; else { l.line_height = v.n; l.set |= KROME_LOOK_LINE_HEIGHT; } return true; }
     if (!strcmp(prop, "font"))         { if (v.kind != KromeValue::String) *why = "font takes an asset path"; else { l.font = name_intern(v.s); l.set |= KROME_LOOK_FONT; } return true; }
     if (!strcmp(prop, "image"))        { if (v.kind != KromeValue::String) *why = "image takes an asset path"; else { l.image = name_intern(v.s); l.set |= KROME_LOOK_IMAGE; } return true; }
     if (!strcmp(prop, "radius")) {
@@ -176,6 +177,7 @@ void overlay(KromeLook& to, const KromeLook& from) {
     if (s & KROME_LOOK_SIZE) to.size = from.size;
     if (s & KROME_LOOK_IMAGE) to.image = from.image;
     if (s & KROME_LOOK_TINT) to.tint = from.tint;
+    if (s & KROME_LOOK_LINE_HEIGHT) to.line_height = from.line_height;
     to.set |= s;
 }
 
@@ -236,7 +238,7 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
     if (why) return why;
     if (!at) { at = looks.len; looks.push(l); *slot = state == KromeState::Base ? at : at + 1; }
     else looks[at] = l;
-    if (!strcmp(prop, "font") || !strcmp(prop, "size") || !strcmp(prop, "image")) dirty = true;
+    if (!strcmp(prop, "font") || !strcmp(prop, "size") || !strcmp(prop, "image") || !strcmp(prop, "line-height")) dirty = true;
     return nullptr;
 }
 
@@ -246,7 +248,7 @@ const char* KromeTree::flag(u32 node, const char* w) {
     struct Bit { const char* word; u16 bit; };
     static const Bit bits[] = {{"fill", KROME_FILL}, {"clip", KROME_CLIP}, {"scroll", KROME_SCROLL},
                                {"disabled", KROME_DISABLED}, {"selected", KROME_SELECTED}, {"hidden", KROME_HIDDEN},
-                               {"subpixel", KROME_SUBPIXEL}};
+                               {"subpixel", KROME_SUBPIXEL}, {"nowrap", KROME_NOWRAP}};
     for (const Bit& b : bits) if (!strcmp(w, b.word)) { n.flags |= b.bit; dirty = true; return nullptr; }
     if (!strcmp(w, "left"))   { n.align_x = KromeAlign::Start; dirty = true; return nullptr; }
     if (!strcmp(w, "center")) { n.align_x = KromeAlign::Center; dirty = true; return nullptr; }
@@ -268,6 +270,7 @@ KromeLook KromeTree::resolve_look(u32 node, KromeState state, const KromeLook* p
     if (!(l.set & KROME_LOOK_COLOR)) l.text_color = parent ? parent->text_color : color{1, 1, 1, 1};
     if (!(l.set & KROME_LOOK_FONT)) l.font = parent ? parent->font : name_intern(KROME_DEFAULT_FONT);
     if (!(l.set & KROME_LOOK_SIZE)) l.size = parent ? parent->size : KROME_DEFAULT_SIZE;
+    if (!(l.set & KROME_LOOK_LINE_HEIGHT)) l.line_height = parent ? parent->line_height : 0.0f;
     if (parent) l.opacity *= parent->opacity;
     // What was inherited counts as said from here down.
     l.set |= KROME_LOOK_INHERITED;

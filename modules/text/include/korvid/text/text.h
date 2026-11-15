@@ -34,6 +34,17 @@ struct Text {
     TextAlign   align = TextAlign::Left;
     color       shadow = color{0, 0, 0, 0};   // a drop shadow's color; alpha 0: none
     vec2        shadow_offset{2.0f, -2.0f};   // where it falls, in the label's units (pixels for screen text), +y up
+    f32         wrap = 0.0f;                  // lines break at this width, the label's units; 0: one line (and `\n`)
+    f32         line_height = 0.0f;           // lines this far apart, the label's units; 0: the font's
+    u32         subpixel = 0;                 // 1: pens kept to a quarter pixel (typeset), not whole pixels
+};
+
+// A label's text past 64 bytes: a string the text module keeps (text_paragraph_set), drawn
+// in place of Text::str with the Text's font, look and wrap. `shown` code points of it are
+// drawn (all by default), so it can be revealed a character at a time without reflowing.
+struct Paragraph {
+    u32 string = 0;   // the text module's; 0: none yet
+    u32 shown  = ~0u;
 };
 
 // Formats into `str`, truncating to fit at a code point boundary; returns what snprintf

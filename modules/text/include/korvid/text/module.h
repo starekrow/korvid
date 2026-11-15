@@ -38,4 +38,21 @@ struct TextStats {
 };
 const TextStats* text_stats(Engine& e);
 
+// The layout over several lines: a wrap, a `\n`, or a paragraph's string (`str`, of any
+// length), its first `shown` glyphs. The pen is on the first line's baseline, lines go down
+// (-y), aligned as one line is: Left from the pen, Center and Right about it. Appends to
+// `out`; returns how many.
+u32 text_layout_paragraph(const FontAsset& font, const Text& t, const char* str, u32 shown, Array<GlyphPlacement>& out);
+
+// A paragraph's string: set (made the first time), read, and given back when the label goes.
+// Sim code writes them, so a replay writes the same ones; the handle is what is hashed.
+void        text_paragraph_set(Engine& e, Paragraph& p, const char* utf8);
+const char* text_paragraph_get(Engine& e, const Paragraph& p);
+void        text_paragraph_free(Engine& e, Paragraph& p);
+// How many code points a paragraph has: what `shown` counts to.
+u32         text_paragraph_length(Engine& e, const Paragraph& p);
+// Where a paragraph's page ends at a height (the label's units): the code points of the lines
+// that fit, for a game that shows it a page at a time.
+u32         text_paragraph_fit(Engine& e, const Text& t, const Paragraph& p, f32 height);
+
 } // namespace kv

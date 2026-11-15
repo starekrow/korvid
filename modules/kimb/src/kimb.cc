@@ -224,6 +224,7 @@ constinit const KimbKernelProp k_props[] = {
     {"gap", KimbType::Number, true},
     {"h", KimbType::Size, true},
     {"image", KimbType::String, false},
+    {"line-height", KimbType::Number, false},
     {"opacity", KimbType::Number, false},
     {"pad", KimbType::Box4, true},
     {"radius", KimbType::Box4, false},
@@ -236,7 +237,7 @@ constinit const KimbKernelProp k_props[] = {
 
 const char* const k_nodes[] = {"box", "text", "image", "hit"};
 const char* const k_flags[] = {"fill", "clip", "scroll", "disabled", "selected", "hidden", "left", "center", "right", "top", "middle", "bottom",
-                               "subpixel"};
+                               "subpixel", "nowrap"};
 const char* const k_states[] = {"hover", "pressed", "focused", "disabled", "selected"};
 
 bool in(const char* w, const char* const* list, u32 n) {

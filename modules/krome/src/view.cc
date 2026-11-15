@@ -3,6 +3,7 @@
 // changed, and the pointer routed top first through overlays and screens
 // (docs/PRDs/Krome-Slice-1-PRD.md, "Paint and the display list", "Input and overlays").
 #include "internal.h"
+#include "korvid/typeset/typeset.h"
 #include "korvid/core/arena.h"
 #include "korvid/asset/font.h"
 #include "korvid/asset/texture.h"
@@ -60,6 +61,22 @@ vec2 measure_text(void* user, const char* str, u32 len, Name font, f32 size) {
     if (!fa) return vec2{(f32)utf8_count(str) * size * 0.55f, size * 1.25f};
     (void)len;
     return vec2{font_measure(*fa, str) / s.scale, fa->line_height / s.scale};
+}
+
+// A paragraph's measure in logical pixels: its widest line and height broken at `width`
+// (logical; <= 0 unbroken), and the narrowest width it breaks to. A guess until the font is in.
+vec2 measure_paragraph(void* user, const char* str, u32 len, Name font, f32 size, f32 lh, f32 width, f32* narrowest) {
+    KromeModule& s = *(KromeModule*)user;
+    const FontAsset* fa = ready_font(s, font_for(s, font, size));
+    f32 line = lh > 0.0f ? floor(lh * size * s.scale + 0.5f) : 0.0f;
+    if (!fa) {
+        *narrowest = 0.0f;
+        return vec2{(f32)utf8_count(str) * size * 0.55f, (line > 0.0f ? line / s.scale : size * 1.25f)};
+    }
+    TypesetMeasure m = typeset_measure(*fa, str, len, width > 0.0f ? width * s.scale : 0.0f, line);
+    *narrowest = m.narrowest / s.scale;
+    // One line unbroken is as wide as the font says it is: what painting measures too.
+    return vec2{(width > 0.0f ? m.widest : m.widest) / s.scale, m.height / s.scale};
 }
 
 vec2 measure_image(void* user, Name path) {
@@ -153,7 +170,43 @@ void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
     u32 slot = p.r ? renderer_texture_slot(p.r, fa->texture) : 0;
     f32 scale = s.scale;
     rect2 in{r.x + n.pad[0] * scale, r.y + n.pad[1] * scale, r.w - (n.pad[0] + n.pad[2]) * scale, r.h - (n.pad[1] + n.pad[3]) * scale};
-    f32 width = font_measure(*fa, str), height = fa->line_height;
+    color c = faded(l.text_color, l.opacity);
+    u32 len = (u32)strlen(str);
+    // Broken into lines when one line is wider than the width it got (and it may wrap), or it
+    // has a `\n`; then the paragraph's lines are aligned in that width. One line is placed as
+    // it always was, whole.
+    f32 one = font_measure(*fa, str);
+    bool multi = strchr(str, '\n') || (!(n.flags & KROME_NOWRAP) && one > in.w + 0.5f) || l.line_height > 0.0f;
+    if (multi) {
+        TypesetParams tp;
+        tp.width = (n.flags & KROME_NOWRAP) ? 0.0f : in.w;
+        tp.align = n.align_x == KromeAlign::Center ? TypesetAlign::Center : n.align_x == KromeAlign::End ? TypesetAlign::Right : TypesetAlign::Left;
+        tp.line_height = l.line_height > 0.0f ? floor(l.line_height * l.size * scale + 0.5f) : 0.0f;
+        tp.subpixel = (n.flags & KROME_SUBPIXEL) != 0;
+        Typeset t;
+        t.glyphs.alloc = t.lines.alloc = mem_scratch();
+        MemScope scope;
+        typeset_paragraph(*fa, str, len, tp, t);
+        f32 top = in.y;
+        if (n.align_y == KromeAlign::Center) top += (in.h - t.height) * 0.5f;
+        else if (n.align_y == KromeAlign::End) top += in.h - t.height;
+        f32 x0 = floor(in.x + 0.5f), y0 = floor(top + 0.5f);
+        for (const TypesetGlyph& tg : t.glyphs) {
+            const Glyph* g = tg.glyph;
+            if (!g || g->size.x <= 0 || g->size.y <= 0) continue;
+            f32 pen = x0 + (tp.subpixel ? floor(tg.x) : tg.x);
+            UiGlyph gl;
+            f32 cx = pen + g->offset.x, cy = y0 + t.lines[tg.line].baseline - g->offset.y;
+            gl.rect = rect2{floor(cx - g->size.x * 0.5f + 0.5f), floor(cy - g->size.y * 0.5f + 0.5f), g->size.x, g->size.y};
+            gl.uv = g->uv;
+            gl.texture = g->texture.is_null() ? slot : renderer_texture_slot(p.r, g->texture);
+            gl.tint = c;
+            gl.clip = clip;
+            p.list.glyph(gl);
+        }
+        return;
+    }
+    f32 width = one, height = fa->line_height;
     f32 x = in.x, top = in.y;
     if (n.align_x == KromeAlign::Center) x += (in.w - width) * 0.5f;
     else if (n.align_x == KromeAlign::End) x += in.w - width;
@@ -161,7 +214,6 @@ void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
     else if (n.align_y == KromeAlign::End) top += in.h - height;
     f32 baseline = floor(top + fa->ascent + 0.5f);
     x = floor(x + 0.5f);
-    color c = faded(l.text_color, l.opacity);
     u32 prev = 0;
     for (const char* q = str; *q;) {
         u32 cp = utf8_next(q);
@@ -442,7 +494,7 @@ void krome_view_frame(KromeModule& s) {
     for (KromeScreen* sc : s.screens) if (sc->loading) waiting = true;
     if (waiting) engine_want_frame(*s.e);
     f32 W = s.win_w / s.scale, H = s.win_h / s.scale;
-    KromeMeasure m{&s, measure_text, measure_image};
+    KromeMeasure m{&s, measure_text, measure_image, measure_paragraph};
     for (KromeScreen* sc : s.screens) {
         if (!sc->ready) continue;
         if (landed) sc->tree.dirty = true;

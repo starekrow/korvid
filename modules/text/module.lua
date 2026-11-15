@@ -2,7 +2,7 @@
 -- sprites, children of the label through the scene module, from a font asset's atlas.
 -- Ships DejaVu Sans as the default font (assets/, with its license).
 module "text" {
-  deps          = { "core", "math", "render", "platform", "asset", "sprite", "scene" },
+  deps          = { "core", "math", "render", "platform", "asset", "sprite", "scene", "typeset" },
   engine_module = true,
   licenses = { "assets/DejaVuSans-LICENSE.txt" },
 }

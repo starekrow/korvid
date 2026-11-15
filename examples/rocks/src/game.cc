@@ -166,8 +166,9 @@ vec2 heading(f32 rotation) { return vec2{kv::cos(rotation), kv::sin(rotation)}; 
 // dimmer; the HUD from the window's top-right corner. The anchor puts it there on any
 // window, so its position, which is sim state, never depends on the window's size.
 void spawn_label(Table& labels, const Game& g, Role role, const char* str, point2 at, TextAlign align, f32 scale, i32 layer, color tint,
-                 ScreenAnchor anchor = ScreenAnchor::Center) {
+                 ScreenAnchor anchor = ScreenAnchor::Center, f32 wrap = 0.0f) {
     Text t;
+    t.wrap  = wrap;
     t.font  = g.font;
     t.scale = scale;
     t.tint  = tint;
@@ -245,8 +246,9 @@ void pause(TickContext& ctx) {
         dim.space = SpriteSpace::Screen;
         overlay->spawn(transform2_at(point2{0, 0}), dim);
         spawn_label(*labels, g, ROLE_PAUSED, "PAUSED", point2{0, 10}, TextAlign::Center, 2.0f, 101, color_white());
-        spawn_label(*labels, g, ROLE_PAUSED, "Escape or Start resumes, Q quits", point2{0, -40}, TextAlign::Center, 0.75f, 101,
-                    color_rgba(1.0f, 1.0f, 1.0f, 0.7f));
+        // The hint wraps at a width of its own, centered under the title (slice 3's wrap).
+        spawn_label(*labels, g, ROLE_PAUSED, "Escape or Start resumes the game, and Q quits it", point2{0, -40}, TextAlign::Center, 0.75f, 101,
+                    color_rgba(1.0f, 1.0f, 1.0f, 0.7f), ScreenAnchor::Center, 220.0f);
         engine_pause(e, true);
         KV_INFO("rocks", "paused: Escape or Start resumes, Q quits");
     } else {
