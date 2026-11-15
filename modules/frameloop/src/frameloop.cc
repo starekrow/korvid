@@ -12,6 +12,7 @@
 #include "korvid/core/time.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/platform/module.h"
+#include "korvid/platform/io.h"
 #include "korvid/platform_hid/module.h"
 #include "korvid/touchpad/module.h"
 #include "korvid/render/renderer.h"
@@ -73,6 +74,11 @@ struct FrameLoopState {
     u64             modal_frames = 0;   // frames run inside an OS modal loop (a live resize)
     u32             presented_w = 0, presented_h = 0;
     u32             deltas_last_frame = 0;
+    // Pacing::OnDemand: frames still owed after the last activity, when the last frame was,
+    // and the polls that found nothing to do.
+    u32             demand_tail = 0;
+    f64             demand_last = 0.0;
+    u64             demand_sleeps = 0;
     // The GPU's frames over the report window (renderer_gpu_stats, a frame late), when measured.
     u32             gpu_frames = 0;
     f64             gpu_sum = 0.0, gpu_worst = 0.0, gpu_sort = 0.0, gpu_draw = 0.0;
@@ -128,6 +134,12 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--no-validation") == 0) cfg.validation = false;
         else if (strcmp(argv[i], "--validation") == 0) cfg.validation = true;
         else if (strcmp(argv[i], "--no-vsync") == 0) cfg.vsync = false;
+        else if (strcmp(argv[i], "--pacing") == 0 && i + 1 < argc) {
+            const char* v = argv[++i];
+            if (!strcmp(v, "demand")) cfg.pacing = Pacing::OnDemand;
+            else if (!strcmp(v, "continuous")) cfg.pacing = Pacing::Continuous;
+            else { KV_ERROR("frameloop", "--pacing takes demand or continuous, not '%s'", v); return false; }
+        }
         else if (strcmp(argv[i], "--borderless") == 0) cfg.borderless = true;
         else if (strcmp(argv[i], "--hitch-ms") == 0 && i + 1 < argc) g_hitch_ms = atof(argv[++i]);
         else if (strcmp(argv[i], "--hash") == 0) g_hash_ticks = true;
@@ -357,6 +369,31 @@ void modal_frame(void* user) {
     ++s.modal_frames;
 }
 
+// Pacing::OnDemand: whether this pass of the loop should tick and draw. The platform is
+// pumped here; what it delivered, the window's size, I/O under way, a load being held for,
+// sprite deltas, a frame someone asked for, or a quarter second gone by, says yes.
+constexpr f64 k_demand_heartbeat = 0.25, k_demand_poll = 0.004;
+bool demand_frame(Engine& engine, FrameLoopState& s) {
+    Input* in = platform_input(engine);
+    InputState before;
+    if (in) before = in->raw;
+    platform_pump(engine);
+    bool want = engine.frame_wanted || s.demand_tail > 0;
+    if (in && memcmp(&before, &in->raw, sizeof before) != 0) want = true;
+    if (s.window && (s.window->width() != s.presented_w || s.window->height() != s.presented_h)) want = true;
+    if (IoQueue* io = platform_io(engine)) if (io->pending() || io->completions().len) want = true;
+    if (engine_holds(engine) & HoldLoading) want = true;
+    if (Array<SpriteDelta>* d = sprite_deltas(engine)) if (d->len > 1) want = true; // more than the tick marker
+    f64 now = time_now();
+    if (now - s.demand_last >= k_demand_heartbeat) want = true;
+    if (!want) return false;
+    // A few frames after anything, so what a tick changed reaches the screen.
+    s.demand_tail = engine.frame_wanted || (in && memcmp(&before, &in->raw, sizeof before) != 0) ? 3 : s.demand_tail ? s.demand_tail - 1 : 0;
+    engine.frame_wanted = false;
+    s.demand_last = now;
+    return true;
+}
+
 void run(Engine& engine, FrameLoopState& s) {
     f64 start = time_now();
     s.engine = &engine;
@@ -366,10 +403,21 @@ void run(Engine& engine, FrameLoopState& s) {
     bool collecting = prof_enabled();
     platform_modal_frame(engine, modal_frame, &s);
 
+    bool on_demand = s.config.pacing == Pacing::OnDemand;
+    bool slept = false;
     while (!engine.quit_requested) {
+        if (on_demand && !demand_frame(engine, s)) {
+            time_sleep(k_demand_poll);
+            ++s.demand_sleeps;
+            slept = true;
+            continue;
+        }
         f64 now = time_now();
         f64 dt  = now - s.prev;
         s.prev = now;
+        // Woken from sleep: a tick's worth, so input is sampled now and the time asleep
+        // is not run as a burst of ticks.
+        if (slept) { dt = engine.clock.tick_dt; slept = false; }
 
         if (collecting) prof_frame(engine.frame_count);
         {

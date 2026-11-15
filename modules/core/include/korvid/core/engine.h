@@ -143,6 +143,7 @@ struct Engine {
     u32                   event_type_count = 0;
     u64                   frame_count      = 0;
     bool                  quit_requested   = false;
+    bool                  frame_wanted     = false; // engine_want_frame: a loop that paces on demand draws another frame
     bool                  hash_ticks       = false; // log the state hash after every tick
     bool                  hash_systems     = false; // and after every system, to locate drift
     u64                   last_hash        = 0;     // the state hash after the last tick, when hashing
@@ -285,5 +286,11 @@ Table* engine_table_of(Engine& e, Handle h);
 // context has already checked.
 Table* engine_table_now(Engine& e, u32 kind_id);
 Table* engine_table_of_now(Engine& e, Handle h);
+
+// Asks the loop for another frame: a loop that draws only on demand (the frame loop's
+// Pacing::OnDemand) runs a tick and draws once more; one that draws every vsync ignores it.
+// For whatever changed what is on screen without input to show it (a UI's new list, a load
+// that landed).
+inline void engine_want_frame(Engine& e) { e.frame_wanted = true; }
 
 } // namespace kv

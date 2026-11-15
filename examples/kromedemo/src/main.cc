@@ -7,7 +7,10 @@
 // outside the menu that must close it and reach nothing, the About modal and a press
 // outside it that must do nothing, a disabled button. Then it checks the model and quits:
 // "kromedemo: demo passed", or what did not hold. --shots DIR writes screenshots of the
-// form, the menu and the modal as it goes.
+// form, the menu and the modal as it goes. It paces on demand: still, it draws nothing and
+// ticks four times a second (--pacing continuous for every vsync). --bench opens a screen of
+// two thousand nodes instead and lays it out and paints it every tick: run it with
+// --prof-report for the cost.
 #include "korvid/kromedemo/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/format.h"
@@ -26,6 +29,7 @@ namespace {
 
 struct Demo {
     Name form;
+    Name bench;
     bool demo = false;
     const char* shots = nullptr;
     u32  step = 0, wait = 0;
@@ -88,7 +92,9 @@ void kromedemo_tick(TickContext& ctx) {
     Engine& e = *ctx.engine;
     Demo& d = ctx.state_as<Demo>();
     if (ctx.tick % 30 == 0) krome_set(e, d.form, "ticks", (f64)ctx.tick);
+    if (!d.bench.is_null()) { krome_set(e, d.bench, "tick", (f64)ctx.tick); engine_want_frame(e); return; }
     if (!d.demo || !krome_ready(e, d.form)) return;
+    engine_want_frame(e); // the pilot is input the window does not see: keep the loop awake for it
     if (d.wait) { --d.wait; return; }
     if (d.step >= KV_COUNTOF(k_steps)) return;
     const Step& s = k_steps[d.step];
@@ -145,7 +151,8 @@ bool kromedemo_startup(Engine& e, ModuleInstance& self) {
     *d = Demo{};
     d->demo = frameloop_flag(e, "--demo");
     d->shots = frameloop_option(e, "--shots");
-    d->form = krome_open(e, "kromedemo/form.lua");
+    if (frameloop_flag(e, "--bench")) d->bench = krome_open(e, "kromedemo/bench.lua");
+    else d->form = krome_open(e, "kromedemo/form.lua");
     self.set_state(d);
     return true;
 }
@@ -171,7 +178,7 @@ KV_MODULE_DEFINE(kromedemo_module) = {
 } // namespace kv
 
 namespace {
-constinit const char* const k_flags[] = {"--demo"};
+constinit const char* const k_flags[] = {"--demo", "--bench"};
 constinit const char* const k_options[] = {"--shots"};
 constinit const kv::FrameLoopConfig k_config = {
     .title          = "korvid krome demo",
@@ -180,6 +187,7 @@ constinit const kv::FrameLoopConfig k_config = {
     .exit_on_escape = false, // Escape closes Krome's overlays
     .flags          = k_flags,
     .options        = k_options,
+    .pacing         = kv::Pacing::OnDemand, // a tool's window: frames when something happens
 };
 } // namespace
 

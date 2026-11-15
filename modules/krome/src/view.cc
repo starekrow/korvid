@@ -424,6 +424,12 @@ void krome_view_frame(KromeModule& s) {
         if (!f.ready && ready_font(s, &f)) { f.ready = true; landed = true; }
     for (KromeImage& i : s.images)
         if (!i.ready && ready_image(s, &i)) { i.ready = true; landed = true; }
+    // Something still on its way keeps a loop that paces on demand ticking until it lands.
+    bool waiting = false;
+    for (KromeFont& f : s.fonts) if (!f.ready && !f.asset.is_null()) waiting = true;
+    for (KromeImage& i : s.images) if (!i.ready && !i.asset.is_null()) waiting = true;
+    for (KromeScreen* sc : s.screens) if (sc->loading) waiting = true;
+    if (waiting) engine_want_frame(*s.e);
     f32 W = s.win_w / s.scale, H = s.win_h / s.scale;
     KromeMeasure m{&s, measure_text, measure_image};
     for (KromeScreen* sc : s.screens) {
@@ -463,7 +469,7 @@ void krome_view_frame(KromeModule& s) {
             sc->repaint = false;
         }
         ++s.paints;
-        if (r) { renderer_ui_set(r, layer, s.list); ++s.submits; }
+        if (r) { renderer_ui_set(r, layer, s.list); ++s.submits; engine_want_frame(*s.e); }
         if (!known) s.layers.push(layer);
     }
     for (u32 i = 0; i < s.layers.len;) {

@@ -2,6 +2,7 @@
 // outside), and the C++ API (korvid/krome/krome.h).
 #include "internal.h"
 #include "korvid/core/arena.h"
+#include "korvid/core/cli.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/event.h"
 #include "korvid/core/format.h"
@@ -10,6 +11,7 @@
 #include "korvid/platform/io.h"
 #include "korvid/core/profile.h"
 #include "korvid/platform_hid/input.h"
+#include <stdlib.h>
 #include <string.h>
 
 namespace kv {
@@ -178,6 +180,155 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     krome_lua_close(*s);
 }
 
+// ---- /krome in the CLI --------------------------------------------------------------------------
+// ls /krome: the screens (their names are asset paths, so they nest); ls a screen: its nodes
+// that have an id, and its overlays (overlay<N>/); print a screen or an overlay: its tree as
+// laid out; print a node: its rect, flags, look and text; patch a node: a property, for the
+// run (`patch /krome/kromedemo/form.lua/save bg #ff0000`).
+
+struct CliPath { KromeScreen* screen = nullptr; KromeTree* tree = nullptr; u32 overlay = 0; u32 node = KROME_NONE; bool rest_bad = false; };
+
+// "kromedemo/form.lua[/overlay2][/id]" (a trailing slash allowed).
+CliPath resolve(KromeModule& s, const char* rel) {
+    CliPath p;
+    usize best = 0;
+    for (KromeScreen* sc : s.screens) {
+        const char* n = name_str(sc->name);
+        usize len = strlen(n);
+        if (len > best && strncmp(rel, n, len) == 0 && (rel[len] == 0 || rel[len] == '/')) { p.screen = sc; best = len; }
+    }
+    if (!p.screen) return p;
+    p.tree = &p.screen->tree;
+    const char* rest = rel + best;
+    if (*rest == '/') ++rest;
+    if (!strncmp(rest, "overlay", 7)) {
+        u32 id = (u32)strtoul(rest + 7, nullptr, 10);
+        KromeOverlay* o = krome_overlay(*p.screen, id);
+        if (!o) { p.rest_bad = true; return p; }
+        p.overlay = id;
+        p.tree = &o->tree;
+        rest = strchr(rest, '/');
+        rest = rest ? rest + 1 : "";
+    }
+    char word[96];
+    usize n = 0;
+    while (rest[n] && rest[n] != '/' && n + 1 < sizeof word) { word[n] = rest[n]; ++n; }
+    word[n] = 0;
+    if (!n) return p;
+    if (word[0] == '#') {
+        u32 i = (u32)strtoul(word + 1, nullptr, 10);
+        if (i < p.tree->nodes.len) p.node = i; else p.rest_bad = true;
+    } else {
+        p.node = krome_find(*p.tree, name_intern(word));
+        if (p.node == KROME_NONE) p.rest_bad = true;
+    }
+    return p;
+}
+
+void node_line(const KromeTree& t, u32 i, char* out, usize cap) {
+    const KromeNode& n = t.nodes[i];
+    const char* text = t.text(i);
+    format(out, cap, "%s %.0f,%.0f %.0fx%.0f%s%s%s%s%.40s%s", krome_type_name(n.type), n.rect.x, n.rect.y, n.rect.w, n.rect.h,
+           n.event.is_null() ? "" : " -> ", n.event.is_null() ? "" : name_str(n.event), (n.flags & KROME_DISABLED) ? " disabled" : "",
+           *text ? "  \"" : "", text, *text ? "\"" : "");
+}
+
+void krome_cli_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
+    KromeModule* s = krome_state(*ctx.engine);
+    if (!s) return;
+    char summary[160];
+    if (dir[0]) {
+        CliPath p = resolve(*s, dir);
+        if (p.screen && !p.rest_bad && p.node == KROME_NONE) {
+            for (u32 i = 0; i < p.tree->nodes.len; ++i) {
+                if (p.tree->nodes[i].id.is_null()) continue;
+                node_line(*p.tree, i, summary, sizeof summary);
+                if (!emit(user, name_str(p.tree->nodes[i].id), summary)) return;
+            }
+            if (!p.overlay)
+                for (KromeOverlay* o : p.screen->overlays) {
+                    char name[32];
+                    format(name, sizeof name, "overlay%u/", o->id);
+                    format(summary, sizeof summary, "%u nodes%s", o->tree.nodes.len, o->modal ? ", modal" : "");
+                    if (!emit(user, name, summary)) return;
+                }
+            return;
+        }
+    }
+    CliTree tree{dir, emit, user};
+    for (KromeScreen* sc : s->screens) {
+        format(summary, sizeof summary, "%s, %u nodes, layer %d, %u overlays", sc->ready ? "ready" : sc->loading ? "loading" : "failed",
+               sc->tree.nodes.len, sc->layer, sc->overlays.len);
+        if (!tree.add(name_str(sc->name), true, summary)) return;
+    }
+}
+
+bool krome_cli_describe(CliContext& ctx, const char* rel) {
+    KromeModule* s = krome_state(*ctx.engine);
+    if (!s) return false;
+    CliPath p = resolve(*s, rel);
+    if (!p.screen || p.rest_bad) return false;
+    char line[200];
+    const KromeTree& t = *p.tree;
+    if (p.node == KROME_NONE) {
+        for (u32 i = 0; i < t.nodes.len; ++i) {
+            u32 depth = 0;
+            for (u32 q = t.nodes[i].parent; q != KROME_NONE; q = t.nodes[q].parent) ++depth;
+            node_line(t, i, line, sizeof line);
+            ctx.print("%*s#%u %s%s%s", (int)depth * 2, "", i, t.nodes[i].id.is_null() ? "" : name_str(t.nodes[i].id), t.nodes[i].id.is_null() ? "" : " ", line);
+        }
+        return true;
+    }
+    const KromeNode& n = t.nodes[p.node];
+    node_line(t, p.node, line, sizeof line);
+    ctx.print("%s", line);
+    ctx.print("line %u, dir %s, pad %g %g %g %g, gap %g, flags 0x%x", n.line, n.dir == KromeDir::Row ? "row" : n.dir == KromeDir::Col ? "col" : "stack",
+              n.pad[0], n.pad[1], n.pad[2], n.pad[3], n.gap, n.flags);
+    KromeLook l = t.resolve_look(p.node, KromeState::Base, nullptr);
+    ctx.print("bg %.2f %.2f %.2f %.2f, radius %g %g %g %g, border %g, color %.2f %.2f %.2f %.2f, size %g, font %s",
+              l.bg.r, l.bg.g, l.bg.b, l.bg.a, l.radius[0], l.radius[1], l.radius[2], l.radius[3], l.border,
+              l.text_color.r, l.text_color.g, l.text_color.b, l.text_color.a, l.size, name_str(l.font));
+    for (u32 st = 1; st < (u32)KromeState::Count; ++st)
+        if (n.states[st]) ctx.print("has a %s look", krome_state_name((KromeState)st));
+    return true;
+}
+
+bool krome_cli_patch(CliContext& ctx, const char* rel, Span<const char* const> values) {
+    KromeModule* s = krome_state(*ctx.engine);
+    if (!s) return false;
+    CliPath p = resolve(*s, rel);
+    if (!p.screen || p.rest_bad || p.node == KROME_NONE) { ctx.fail("no such node"); return false; }
+    if (values.len < 1) { ctx.fail("patch NODE PROPERTY [VALUE...]"); return false; }
+    const char* prop = values[0];
+    const char* why = nullptr;
+    if (values.len == 1) why = p.tree->flag(p.node, prop);
+    else {
+        // One word: a number, a range (a..b) or a string; more: numbers.
+        KromeValue v;
+        f32 nums[4];
+        u32 count = 0;
+        bool all_numbers = true;
+        for (u32 i = 1; i < values.len && i <= 4; ++i) {
+            char* end = nullptr;
+            nums[count++] = (f32)strtod(values[i], &end);
+            if (!end || *end) all_numbers = false;
+        }
+        const char* dots = strstr(values[1], "..");
+        if (values.len == 2 && dots && dots != values[1]) v = KromeValue::range((f32)strtod(values[1], nullptr), (f32)strtod(dots + 2, nullptr));
+        else if (all_numbers) v = count == 1 ? KromeValue::num(nums[0]) : KromeValue::nums(nums, count);
+        else v = KromeValue::str(values[1]);
+        why = p.tree->set(p.node, prop, v);
+    }
+    if (why) { ctx.fail("%s: %s", prop, why); return false; }
+    p.tree->dirty = true;
+    p.screen->repaint = true;
+    if (KromeOverlay* o = p.overlay ? krome_overlay(*p.screen, p.overlay) : nullptr) o->placed = false;
+    engine_want_frame(*ctx.engine);
+    return true;
+}
+
+constinit const CliMountDesc k_mounts[] = {{.path = "/krome", .list = krome_cli_list, .describe = krome_cli_describe, .patch = krome_cli_patch}};
+
 constinit const FieldDesc k_event_fields[] = {KV_FIELDS(KromeEvent, screen, node, event, value)};
 constinit const FieldDesc k_set_fields[] = {KV_FIELDS(KromeSet, screen, key, number, kind, pad, text)};
 constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(KromeEvent, k_event_fields, 0), KV_EVENT_EX(KromeSet, k_set_fields, 0)};
@@ -195,6 +346,7 @@ KV_MODULE_DEFINE(krome_module) = {
     .name     = "krome",
     .events   = k_events,
     .systems  = k_systems,
+    .mounts   = k_mounts,
     .startup  = krome_startup,
     .shutdown = krome_shutdown,
     .memory   = {.reserve = 64 * 1024},

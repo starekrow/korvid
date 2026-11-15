@@ -92,6 +92,7 @@ renders once.
 | `--quiet` | log at Warn and above |
 | `--validation`, `--no-validation` | the Vulkan validation layers (on in debug builds) |
 | `--no-vsync` | mailbox or immediate presentation; no slack, so no idle work |
+| `--pacing demand\|continuous` | `FrameLoopConfig::pacing`: continuous draws every vsync; demand draws when something happened (input, the window, I/O, a load, sprite deltas, `engine_want_frame`), polls the platform every 4 ms between and wakes four times a second: for a tool's window |
 | `--borderless` | no title bar; sidesteps the GNOME Wayland resize stall |
 | `--hitch-ms N` | log a frame longer than N ms with its pump, tick and render split, and its zone tree |
 | `--hash`, `--hash-systems` | the state hash after every tick; after every system |

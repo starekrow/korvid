@@ -284,3 +284,40 @@ Reviewed Nov 15; each was a question in the first draft.
 4. **No scrollbar** in this slice; the scrollbar is slice 4's.
 5. **Model values are scalars** (numbers, strings, booleans) in this slice.
 6. **Pacing and the tool window stay in this slice.**
+
+## As built
+
+Nov 15, 2026, on branch tool-stuff; Linux proved. Numbers in `docs/design/krome-notes.md`.
+
+**Milestone 1, the tree and layout** (0b81565). As planned. Ranges are bounds and set no
+mode, so `fill` with a range still fills; minimums are pinned before maximums.
+
+**Milestone 2, the primitive** (2d6e97f). On Vulkan, with the gallery's `ui` scene and its
+reference; the render gate passes on Linux. The lists live in one host-visible buffer per
+frame slot, rewritten before recording only when they changed (a bigger buffer rewrites
+the slot's descriptor set, which a recording command buffer must not see). The push
+block's spare words carry a draw's region and count, so the sprite shaders compile to the
+same bytes; the render gate now allows new shaders and holds the old ones byte-identical.
+**Not done: Metal and D3D12** have stubs that draw no UI; their `rb_ui_buffer` and
+`rb_ui_draw`, and the gallery references, wait for those machines.
+
+**Milestone 3, Lua and the model** (840a331). As planned. The module's state is
+`KromeModule` (`KromeState` was taken by the looks' states). A node made in a tail call
+(`return col { ... }`) has no line from Lua and takes its first child's. Numeric strings
+are numbers. Screens cannot `require` another file yet.
+
+**Milestone 4, paint, input and overlays** (2098661). As planned, and `kromedemo --demo`
+passes with no validation message. Additions: `looks = { ... }` in a helper's table, for a
+look whose state shares its name with a flag (`disabled`); `krome_find_rect`, which looks
+in overlays; `input_pointer_override` in `platform_hid`; goldberg's conventions now land
+`.lua` as a script. Overlay texts are filled once, when the overlay opens. Lua's raw
+events (press, release, drag) are not given to handlers yet; captures and clicks are.
+
+**Milestone 5, still, and close.** `Pacing::OnDemand` (`--pacing demand`) and
+`engine_want_frame`; `/krome` in the CLI; the README, the notes. **Not done: KS13, a tool
+with a window.** `tool_run` ticks as fast as the work allows. A window on it either spins
+a core when idle, or throttles the work to the display: a render at vsync every tick caps
+goldberg's cooking at 60 ticks a second, and sleeping between frames slows it the same
+way. Which a tool wants (render on its own thread, a frame every N ticks, or pace on
+demand only while the work is idle) is a decision for goldberg's window, which is the only
+customer, and is left for that slice.

@@ -32,6 +32,12 @@ namespace kv {
 
 struct Engine;
 
+// Continuous: a frame every vsync, as a game wants. OnDemand: a frame when something
+// happened (input, the window, I/O, a load, sprite deltas, engine_want_frame), and between
+// them no ticks and no drawing, the platform polled every few milliseconds and the loop
+// woken at least four times a second (timers, the CLI). For a tool's window.
+enum class Pacing : u8 { Continuous, OnDemand };
+
 struct FrameLoopConfig {
     const char* title      = "korvid";
     u32         width      = 1280;
@@ -50,6 +56,7 @@ struct FrameLoopConfig {
     Span<const char* const> options = {}; // flags the game accepts that take a value ("--dial"), each as often as it likes; frameloop_option
     Span<const char* const> recorded_actions = {}; // the actions --record keeps and --replay drives: the gameplay ones, not pause or quit
     EngineConfig engine = {};             // heaps and which module lives in which
+    Pacing      pacing = Pacing::Continuous;  // --pacing demand|continuous
 };
 
 enum class ExitReason : u8 { WindowClosed, Escape, Timer };
@@ -62,6 +69,8 @@ int frameloop_main(int argc, char** argv, const FrameLoopConfig& config);
 const FrameLoopConfig& frameloop_config(Engine& e);
 // Whether one of the game's declared flags was on the command line.
 bool frameloop_flag(Engine& e, const char* flag);
+// Another frame, please (engine_want_frame): for code that does not see the engine's header.
+inline void frameloop_request_frame(Engine& e) { engine_want_frame(e); }
 // The value given after the `index`th occurrence of one of the game's declared options
 // ("--dial bullets=2" twice is index 0 and 1), or null when there are not that many.
 const char* frameloop_option(Engine& e, const char* option, u32 index = 0);

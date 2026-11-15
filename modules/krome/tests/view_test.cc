@@ -5,7 +5,9 @@
 #include "korvid/krome/krome.h"
 #include "../src/internal.h"
 #include "korvid/asset/module.h"
+#include "korvid/cli/module.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/format.h"
 #include "korvid/core/test.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/module.h"
@@ -61,6 +63,18 @@ rect2 rect_of(const KromeTree& t, const char* id) {
     return n == KROME_NONE ? rect2{-1, -1, 0, 0} : t.nodes[n].rect;
 }
 
+// What a CLI request printed, lines joined by newlines.
+char g_cli_out[4096];
+void cli_sink(void*, const char* line) {
+    usize n = strlen(g_cli_out);
+    format(g_cli_out + n, sizeof g_cli_out - n, "%s\n", line);
+}
+const char* cli(Engine& e, const char* request) {
+    g_cli_out[0] = 0;
+    cli_run(e, request, cli_sink, nullptr);
+    return g_cli_out;
+}
+
 bool rect_is(rect2 r, f32 x, f32 y, f32 w, f32 h) {
     if (r.x == x && r.y == y && r.w == w && r.h == h) return true;
     KV_ERROR("test", "rect (%g, %g, %g, %g), wanted (%g, %g, %g, %g)", r.x, r.y, r.w, r.h, x, y, w, h);
@@ -82,7 +96,7 @@ u32 first_fill(KromeModule& s, KromeScreen& sc) {
 void test_view(kv::TestCtx& c) {
     using namespace kv;
     c.begin("krome view");
-    const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &asset_module, &krome_module};
+    const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &cli_module, &asset_module, &krome_module};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     KromeModule& s = *krome_state(e);
@@ -182,6 +196,24 @@ void test_view(kv::TestCtx& c) {
     krome_pointer(s, 310, 260, true, 0, false);
     krome_pointer(s, 310, 260, false, 0, false);
     KV_CHECK(c, sc.overlays.len == 0 && strcmp(krome_model_text(e, form, "oks"), "1") == 0);
+
+    // /krome in the CLI: the screens, a screen's named nodes, a node, a patch.
+    KV_CHECK(c, strstr(cli(e, "ls /krome"), "kv/") != nullptr);
+    KV_CHECK(c, strstr(cli(e, "ls /krome/kv"), "view/") != nullptr);
+    const char* nodes = cli(e, "ls /krome/kv/view");
+    KV_CHECK(c, strstr(nodes, "save") && strstr(nodes, "hit 10,10 100x30 -> save") && strstr(nodes, "low"));
+    KV_CHECK(c, strstr(cli(e, "print /krome/kv/view/off"), "disabled") != nullptr);
+    const char* tree_text = cli(e, "print /krome/kv/view");
+    if (!strstr(tree_text, "#0 box 0,0 800x600")) KV_ERROR("test", "print:\n%s", tree_text);
+    KV_CHECK(c, strstr(tree_text, "#0 box 0,0 800x600") != nullptr && strstr(tree_text, "  #2 save hit 10,10") != nullptr);
+    cli(e, "patch /krome/kv/view/save bg #00ff00");
+    KV_CHECK(c, first_fill(s, sc) == 0xFF00FF00u);
+    KV_CHECK(c, strstr(cli(e, "patch /krome/kv/view/save bg blue"), "bg takes a color") != nullptr);
+    cli(e, "patch /krome/kv/view/save w 150");
+    frames(e, 1);
+    KV_CHECK(c, rect_is(rect_of(t, "save"), 10, 10, 150, 30) && rect_is(rect_of(t, "menu"), 170, 10, 100, 30));
+    cli(e, "patch /krome/kv/view/save w 100");
+    frames(e, 1);
 
     // At a scale of 2 the same layout lands on twice the pixels, and the pointer finds it there.
     krome_viewport(e, 1600, 1200, 2.0f);

@@ -214,6 +214,7 @@ Header `korvid/core/engine.h`:
 | name | kind | what |
 |---|---|---|
 | `Engine` | record | `events`, `phases`, `clock`, `modules`, `resources`, `components`, `tables`, `handlers`, `triggers`, `commands`, `timers`, `trace`, `idle`, `threads`, `hash_ticks`, `quit_requested` |
+| `engine_want_frame(e)` | function | another frame from a loop that paces on demand (Krome's new list, a load that landed) |
 | `EngineConfig`, `HeapDesc`, `ModuleHeapDesc`, `KindCapacity` | records | the heap table, which module lives in which, and kinds' capacities over their KindDesc's (`Table::capacity`; a full kind logs once and counts `Table::refused`) |
 | `engine_init(e, modules, config)`, `engine_shutdown(e)` | functions | register and start everything in order; undo it in reverse |
 | `engine_frame(e, dt)` | function | advance the clock, run the ticks it owes; returns how many |
