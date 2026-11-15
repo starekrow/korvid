@@ -218,6 +218,10 @@ struct IoQueue {
 // tools and startup, never for a tick. Returns the count, or -1 if `dir` cannot be read;
 // `fn` returning false stops the walk.
 i32  io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user);
+struct IoStat;
+// The same walk with each file's size and modification time, as io_stat would give them,
+// from the listing itself: for a walk that would stat every file, at no cost a file more.
+i32  io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relative, const IoStat& st), void* user);
 // Creates a directory and its parents (mkdir -p). Synchronous; true if it exists after.
 bool io_make_dirs(const char* path);
 // Removes a file, or a directory that is empty. Synchronous; true if it is gone after.

@@ -84,6 +84,24 @@ bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void
     return true;
 }
 
+namespace {
+struct EachStat { const char* dir; void (*fn)(void*, const char*, const OsStat&); void* user; };
+void each_stat_one(void* user, const char* name) {
+    EachStat* c = (EachStat*)user;
+    char path[4096];
+    int n = format(path, sizeof path, "%s/%s", c->dir, name);
+    if (n < 0 || (usize)n >= sizeof path) return;
+    OsStat st;
+    if (os_path_stat(path, &st)) c->fn(c->user, name, st);
+}
+} // namespace
+
+// readdir does not carry sizes and times: a stat an entry, as a caller would have made.
+bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user) {
+    EachStat c{dir, fn, user};
+    return os_dir_each(dir, each_stat_one, &c);
+}
+
 bool os_make_dir(const char* path) {
     return mkdir(path, 0755) == 0 || errno == EEXIST;
 }

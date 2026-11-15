@@ -701,41 +701,55 @@ Handle IoQueue::read_asset(const IoRequest& req) {
 
 namespace {
 
-int compare_names(const void* a, const void* b) { return strcmp(*(const char* const*)a, *(const char* const*)b); }
+// One directory level: entries sorted by name, then files reported and directories walked.
+// What each entry is, its size and time come with the listing (os_dir_each_stat): on
+// Windows nothing is asked of a file, where asking twice (what it is, then its stat) was
+// most of a big tree's scan.
+struct ListEntry { char* name; OsStat st; };
 
-// One directory level: names sorted, then files reported and directories walked.
-void collect_name(void* user, const char* name) {
+int compare_entries(const void* a, const void* b) { return strcmp(((const ListEntry*)a)->name, ((const ListEntry*)b)->name); }
+
+void collect_entry(void* user, const char* name, const OsStat& st) {
     if (name[0] == '.') return;
     usize n = strlen(name);
     char* copy = (char*)alloc_in(mem_general(), n + 1);
     memcpy(copy, name, n + 1);
-    ((Array<char*>*)user)->push(copy);
+    ((Array<ListEntry>*)user)->push(ListEntry{copy, st});
 }
 
-i32 walk(char* full, usize root_len, usize len, usize cap, bool (*fn)(void*, const char*), void* user, bool* stop) {
-    Array<char*> names;
-    if (!os_dir_each(full, collect_name, &names)) { names.free(); return -1; }
-    if (names.len > 1) kv::sort(names.data, names.len, sizeof(char*), compare_names);
+i32 walk(char* full, usize root_len, usize len, usize cap, bool (*fn)(void*, const char*, const IoStat&), void* user, bool* stop) {
+    Array<ListEntry> entries;
+    if (!os_dir_each_stat(full, collect_entry, &entries)) { entries.free(); return -1; }
+    if (entries.len > 1) kv::sort(entries.data, entries.len, sizeof(ListEntry), compare_entries);
     i32 count = 0;
-    for (char* name : names) {
-        usize n = strlen(name);
+    for (const ListEntry& e : entries) {
+        usize n = strlen(e.name);
         if (!*stop && len + 1 + n < cap) {
             full[len] = '/';
-            memcpy(full + len + 1, name, n + 1);
-            OsPathKind kind = os_path_kind(full);
-            if (kind == OsPathKind::Dir) { i32 sub = walk(full, root_len, len + 1 + n, cap, fn, user, stop); if (sub > 0) count += sub; }
-            else if (kind == OsPathKind::File) { ++count; if (!fn(user, full + root_len + 1)) *stop = true; }
+            memcpy(full + len + 1, e.name, n + 1);
+            if (e.st.kind == OsPathKind::Dir) { i32 sub = walk(full, root_len, len + 1 + n, cap, fn, user, stop); if (sub > 0) count += sub; }
+            else if (e.st.kind == OsPathKind::File) {
+                ++count;
+                IoStat st;
+                st.is_file  = true;
+                st.size     = e.st.size;
+                st.mtime_ns = e.st.mtime_ns;
+                if (!fn(user, full + root_len + 1, st)) *stop = true;
+            }
             full[len] = 0;
         }
-        free_in(mem_general(), name, n + 1);
+        free_in(mem_general(), e.name, n + 1);
     }
-    names.free();
+    entries.free();
     return count;
 }
 
+struct NameOnly { bool (*fn)(void*, const char*); void* user; };
+bool name_only(void* user, const char* relative, const IoStat&) { NameOnly* c = (NameOnly*)user; return c->fn(c->user, relative); }
+
 } // namespace
 
-i32 io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user) {
+i32 io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relative, const IoStat& st), void* user) {
     char full[1024];
     usize n = dir ? strlen(dir) : 0;
     if (!n || n >= sizeof full) return -1;
@@ -743,6 +757,11 @@ i32 io_list_files(const char* dir, bool (*fn)(void* user, const char* relative),
     while (n > 1 && full[n - 1] == '/') full[--n] = 0;
     bool stop = false;
     return walk(full, n, n, sizeof full, fn, user, &stop);
+}
+
+i32 io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user) {
+    NameOnly c{fn, user};
+    return io_list_files_stat(dir, name_only, &c);
 }
 
 bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize n), void* user, i32* err, usize chunk) {

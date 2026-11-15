@@ -221,8 +221,13 @@ bool Process::spawn(const ProcessDesc& desc) {
         si.StartupInfo.hStdOutput = out_w;
         si.StartupInfo.hStdError  = err_w;
         si.lpAttributeList        = attrs;
+        // A console program gets a console. With one here (a terminal, Ninja), the child
+        // shares it; CREATE_NO_WINDOW would give every child a console of its own, and every
+        // console a conhost.exe: a second process started for each one asked for. With
+        // none (a GUI parent), CREATE_NO_WINDOW, so no child flashes a window.
+        DWORD console = GetConsoleCP() ? 0 : CREATE_NO_WINDOW; // a console attached, shown or not
         started = CreateProcessW(nullptr, cmd.data, nullptr, nullptr, TRUE,
-                                 CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
+                                 CREATE_SUSPENDED | console | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
                                  env.data, desc.cwd ? wcwd : nullptr, &si.StartupInfo, &pi) != 0;
         if (!started) spawn_err = GetLastError();
     } else {

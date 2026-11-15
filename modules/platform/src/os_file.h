@@ -31,6 +31,10 @@ bool os_current_dir(char* out, u32 cap);
 // Calls fn with each entry's name in dir, '.' and '..' left out, in no particular order.
 // False if dir cannot be read.
 bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user);
+// The same with what os_path_stat would say of each entry, for walks that would otherwise
+// ask it of every one: on Windows the listing itself carries it, no query a file (a
+// symbolic link is still asked, so it is followed); elsewhere one stat an entry.
+bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user);
 // Creates one directory. True if it was made or a directory is already there.
 bool os_make_dir(const char* path);
 // Removes a file or an empty directory. True if it was removed.

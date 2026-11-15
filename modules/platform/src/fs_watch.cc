@@ -51,43 +51,46 @@ void FsSink::emit(FsEventKind kind, u32 root, const char* dir, const char* name)
 
 namespace {
 
-struct Names { Array<char> text; Array<u32> at; };
+// A directory's entries with what each is, its size and time: from the listing itself
+// (os_dir_each_stat), where asking of each entry by its path was most of a walk's time
+// on Windows, a watch's start included.
+struct NameStat { u32 at; OsStat st; };
+struct Names { Array<char> text; Array<NameStat> list; };
 
-void fsw_collect_name(void* user, const char* name) {
+void fsw_collect_name(void* user, const char* name, const OsStat& st) {
     Names* n = (Names*)user;
     u32 len = (u32)strlen(name);
-    n->at.push(n->text.len);
+    n->list.push(NameStat{n->text.len, st});
     memcpy(n->text.push_n(len + 1), name, len + 1);
 }
 
 struct NameCmp { const char* text; };
 int name_cmp(const void* a, const void* b, void* ctx) {
     const char* t = ((NameCmp*)ctx)->text;
-    return strcmp(t + *(const u32*)a, t + *(const u32*)b);
+    return strcmp(t + ((const NameStat*)a)->at, t + ((const NameStat*)b)->at);
 }
 
 void walk_in(char* abs, u32 abs_len, u32 abs_cap, u32 rel_at, void (*fn)(void*, const FsWalkEntry&), void* user, u32 depth) {
     if (depth > 64) return;
     Names names{};
-    if (!os_dir_each(abs, fsw_collect_name, &names)) { names.text.free(); names.at.free(); return; }
+    if (!os_dir_each_stat(abs, fsw_collect_name, &names)) { names.text.free(); names.list.free(); return; }
     NameCmp cmp{names.text.data};
-    sort(names.at.data, names.at.len, sizeof(u32), name_cmp, &cmp);
-    for (u32 i = 0; i < names.at.len; ++i) {
-        const char* name = names.text.data + names.at.data[i];
+    sort(names.list.data, names.list.len, sizeof(NameStat), name_cmp, &cmp);
+    for (u32 i = 0; i < names.list.len; ++i) {
+        const NameStat& ns = names.list.data[i];
+        const char* name = names.text.data + ns.at;
         u32 nl = (u32)strlen(name);
         if (abs_len + 1 + nl + 1 > abs_cap) continue; // too deep a path to name: not seen
+        if (ns.st.kind != OsPathKind::File && ns.st.kind != OsPathKind::Dir) continue;
         abs[abs_len] = '/';
         memcpy(abs + abs_len + 1, name, nl + 1);
-        OsStat st;
-        if (os_path_stat(abs, &st) && (st.kind == OsPathKind::File || st.kind == OsPathKind::Dir)) {
-            FsWalkEntry e{abs + rel_at, st.kind == OsPathKind::Dir, st.size, st.mtime_ns};
-            fn(user, e);
-            if (e.is_dir) walk_in(abs, abs_len + 1 + nl, abs_cap, rel_at, fn, user, depth + 1);
-        }
+        FsWalkEntry e{abs + rel_at, ns.st.kind == OsPathKind::Dir, ns.st.size, ns.st.mtime_ns};
+        fn(user, e);
+        if (e.is_dir) walk_in(abs, abs_len + 1 + nl, abs_cap, rel_at, fn, user, depth + 1);
         abs[abs_len] = 0;
     }
     names.text.free();
-    names.at.free();
+    names.list.free();
 }
 
 } // namespace

@@ -95,6 +95,19 @@ bool os_path_stat(const char* path, OsStat* out) {
     *out = OsStat{};
     wchar_t w[KV_WIDE_PATH_MAX];
     if (!widen(path, w, KV_WIDE_PATH_MAX)) return false;
+    // The attributes, the size and the time come with the directory's own record: no handle
+    // is opened, which on Windows is the cost (every filter driver, the antivirus's among
+    // them, sees an open). Not for a reparse point (a symbolic link, a junction), which
+    // that record describes as itself: that is opened below, and followed, as before.
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    if (!GetFileAttributesExW(w, GetFileExInfoStandard, &fa)) return false;
+    if (!(fa.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        out->kind = (fa.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? OsPathKind::Dir
+                  : (fa.dwFileAttributes & FILE_ATTRIBUTE_DEVICE) ? OsPathKind::Other : OsPathKind::File;
+        out->size = ((u64)fa.nFileSizeHigh << 32) | fa.nFileSizeLow;
+        out->mtime_ns = (i64)((((u64)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime) * 100ull);
+        return true;
+    }
     HANDLE h = CreateFileW(w, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
@@ -138,6 +151,39 @@ bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void
         if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
         char name[MAX_PATH * 4];
         if (narrow(fd.cFileName, name, (int)sizeof name)) fn(user, name);
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return true;
+}
+
+// The listing's own record of each entry: its attributes, size and last write, as
+// os_path_stat reads them, with no query a file. A reparse point (a symbolic link, a
+// junction) is the one asked, by its path, so that it is followed as os_path_stat follows it.
+bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user) {
+    wchar_t w[KV_WIDE_PATH_MAX];
+    if (!widen(dir, w, KV_WIDE_PATH_MAX - 2)) return false;
+    usize n = wcslen(w);
+    if (n && w[n - 1] != L'/' && w[n - 1] != L'\\') w[n++] = L'/';
+    w[n++] = L'*';
+    w[n] = 0;
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileExW(w, FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
+    if (h == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_NOT_FOUND; // empty: no entries at all
+    do {
+        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+        char name[MAX_PATH * 4];
+        if (!narrow(fd.cFileName, name, (int)sizeof name)) continue;
+        OsStat st;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+            char path[KV_WIDE_PATH_MAX * 3];
+            if (format(path, sizeof path, "%s/%s", dir, name) >= (int)sizeof path || !os_path_stat(path, &st)) continue;
+        } else {
+            st.kind = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? OsPathKind::Dir
+                    : (fd.dwFileAttributes & FILE_ATTRIBUTE_DEVICE) ? OsPathKind::Other : OsPathKind::File;
+            st.size = ((u64)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+            st.mtime_ns = (i64)((((u64)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime) * 100ull);
+        }
+        fn(user, name, st);
     } while (FindNextFileW(h, &fd));
     FindClose(h);
     return true;

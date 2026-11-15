@@ -13,6 +13,7 @@
 #include "../os_file.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
+#include "korvid/core/map.h"
 #include "korvid/platform/module.h"
 #include "wide.h"
 #include <new>
@@ -44,6 +45,8 @@ struct FsWinRoot {
     bool        pending = false;
     bool        gone = false;        // the root itself went: reported, nothing more to read
     Array<char*> dirs;               // directories under the root, relative, '/' separated
+    Map<u64, u32> dir_at;            // a directory's path hash -> its index in dirs: a big tree's
+                                     // thousands of directories are not each compared with all
 };
 
 struct FsNative {
@@ -53,30 +56,45 @@ struct FsNative {
 namespace {
 
 bool is_known_dir(const FsWinRoot& r, const char* rel) {
-    for (char* d : r.dirs) if (strcmp(d, rel) == 0) return true;
+    const u32* at = r.dir_at.find(hash_str(rel));
+    if (!at) return false;
+    if (strcmp(r.dirs.data[*at], rel) == 0) return true;
+    for (char* d : r.dirs) if (strcmp(d, rel) == 0) return true; // two paths, one hash: look the long way
     return false;
 }
 
 void add_dir(FsWinRoot& r, const char* rel) {
-    if (!is_known_dir(r, rel)) r.dirs.push(win_dup_str(rel));
+    if (is_known_dir(r, rel)) return;
+    u64 h = hash_str(rel);
+    if (!r.dir_at.has(h)) r.dir_at.set(h, r.dirs.len);
+    r.dirs.push(win_dup_str(rel));
 }
 
-// Forgets rel and every directory under it.
+void index_dirs(FsWinRoot& r) {
+    r.dir_at.clear();
+    for (u32 i = 0; i < r.dirs.len; ++i) { u64 h = hash_str(r.dirs.data[i]); if (!r.dir_at.has(h)) r.dir_at.set(h, i); }
+}
+
+// Forgets rel and every directory under it. Rare (a directory went), so the index is
+// simply made again after.
 void drop_dirs(FsWinRoot& r, const char* rel) {
     usize n = strlen(rel);
+    bool dropped = false;
     for (u32 i = r.dirs.len; i-- > 0;) {
         char* d = r.dirs.data[i];
-        if (strncmp(d, rel, n) == 0 && (d[n] == 0 || d[n] == '/')) {
-            mem_free(d);
-            r.dirs.data[i] = r.dirs.data[r.dirs.len - 1];
-            --r.dirs.len;
-        }
+        if (strncmp(d, rel, n) != 0 || (d[n] != 0 && d[n] != '/')) continue;
+        mem_free(d);
+        r.dirs.data[i] = r.dirs.data[r.dirs.len - 1];
+        --r.dirs.len;
+        dropped = true;
     }
+    if (dropped) index_dirs(r);
 }
 
 void forget_dirs(FsWinRoot& r) {
     for (char* d : r.dirs) mem_free(d);
     r.dirs.len = 0;
+    r.dir_at.clear();
 }
 
 struct WalkInto { FsWinRoot* root; const char* prefix; FsSink* sink; };
@@ -131,6 +149,7 @@ void close_root(FsWinRoot* r) {
     if (r->ov.hEvent) CloseHandle(r->ov.hEvent);
     forget_dirs(*r);
     r->dirs.free();
+    r->dir_at.free();
     if (r->buf) mem_free(r->buf);
     if (r->dir) mem_free(r->dir);
     r->~FsWinRoot();
