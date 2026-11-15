@@ -1,4 +1,8 @@
 #include "korvid/platform_hid/input.h"
+#include "korvid/platform_hid/events.h"
+#include "korvid/platform_hid/host_window.h"
+#include "korvid/core/utf8.h"
+#include <string.h>
 
 namespace kv {
 
@@ -36,5 +40,20 @@ const char* mouse_button_name(MouseButton b) { return (u32)b < (u32)MouseButton:
 
 const char* pad_button_name(PadButton b) { return (u32)b < (u32)PadButton::Count ? g_pad_button_names[(u32)b] : "Invalid"; }
 const char* pad_axis_name(PadAxis a) { return (u32)a < (u32)PadAxis::Count ? g_pad_axis_names[(u32)a] : "Invalid"; }
+
+void input_typed(EventBus& bus, Input& input, const char* utf8) {
+    if (!utf8 || !*utf8) return;
+    input.raw.type(utf8);
+    const char* p = utf8;
+    while (*p) {
+        TextTyped t{};
+        usize left = strlen(p);
+        usize n = utf8_prefix(p, left < sizeof t.text - 1 ? left : sizeof t.text - 1);
+        if (!n) break;
+        memcpy(t.text, p, n);
+        bus.emit(t);
+        p += n;
+    }
+}
 
 } // namespace kv

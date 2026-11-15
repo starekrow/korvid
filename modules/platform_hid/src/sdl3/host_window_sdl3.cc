@@ -1,6 +1,8 @@
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/core/log.h"
+#include "korvid/core/utf8.h"
+#include <string.h>
 #include "../hid_backend.h"
 #include "../sdl3_pads/sdl_pads.h"
 #include <SDL3/SDL.h>
@@ -150,6 +152,36 @@ void HostWindow::text_input(bool on) {
     else SDL_StopTextInput((SDL_Window*)native_);
 }
 
+void HostWindow::text_area(rect2 r, f32 caret) {
+    if (!native_) return;
+    // SDL wants window units; the rect is framebuffer pixels.
+    f32 k = pixel_scale();
+    SDL_Rect rr{(int)(r.x / k), (int)(r.y / k), (int)(r.w / k), (int)(r.h / k)};
+    SDL_SetTextInputArea((SDL_Window*)native_, &rr, (int)(caret / k));
+}
+
+bool HostWindow::clipboard_get(Array<char>& out) {
+    if (!native_ || !SDL_HasClipboardText()) return false;
+    char* t = SDL_GetClipboardText();
+    if (!t) return false;
+    usize n = strlen(t);
+    if (n) memcpy(out.push_n((u32)n), t, n);
+    SDL_free(t);
+    return n > 0;
+}
+
+bool HostWindow::clipboard_set(const char* utf8) { return native_ && SDL_SetClipboardText(utf8 ? utf8 : ""); }
+
+void HostWindow::cursor(CursorShape shape) {
+    if (!native_ || (u32)shape >= (u32)CursorShape::Count) return;
+    static SDL_Cursor* made[(u32)CursorShape::Count] = {};
+    static const SDL_SystemCursor which[] = {SDL_SYSTEM_CURSOR_DEFAULT, SDL_SYSTEM_CURSOR_TEXT, SDL_SYSTEM_CURSOR_POINTER, SDL_SYSTEM_CURSOR_MOVE,
+                                             SDL_SYSTEM_CURSOR_EW_RESIZE, SDL_SYSTEM_CURSOR_NS_RESIZE, SDL_SYSTEM_CURSOR_NOT_ALLOWED};
+    SDL_Cursor*& c = made[(u32)shape];
+    if (!c) c = SDL_CreateSystemCursor(which[(u32)shape]);
+    if (c) SDL_SetCursor(c);
+}
+
 // Framebuffer pixels per window unit (2 on a scaled desktop); 1 when SDL has no answer.
 f32 HostWindow::pixel_scale() const {
     int ww = 0, wh = 0;
@@ -189,8 +221,23 @@ void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
             break;
 
         case SDL_EVENT_TEXT_INPUT:
-            input.raw.type(e.text.text);
+            input_typed(bus, input, e.text.text);
             break;
+
+        case SDL_EVENT_TEXT_EDITING: {
+            // An input method composing: its text and where its caret is, in bytes.
+            TextComposing tc{};
+            const char* src = e.edit.text ? e.edit.text : "";
+            usize sl = strlen(src);
+            usize n = utf8_prefix(src, sl < sizeof tc.text - 1 ? sl : sizeof tc.text - 1);
+            memcpy(tc.text, src, n);
+            // SDL counts in code points: turn them into bytes of what was kept.
+            auto bytes_at = [&](i32 cps) { const char* p = tc.text; for (i32 k = 0; k < cps && *p; ++k) utf8_next(p); return (u32)(p - tc.text); };
+            tc.caret = bytes_at(e.edit.start < 0 ? 0 : e.edit.start);
+            tc.selection = e.edit.length > 0 ? bytes_at(e.edit.start + e.edit.length) - tc.caret : 0;
+            bus.emit(tc);
+            break;
+        }
 
         case SDL_EVENT_KEY_DOWN: {
             Key k = key_from_scancode((u32)e.key.scancode);

@@ -2,7 +2,9 @@
 // over SDL3 on Linux and macOS, native Win32 on Windows, native UIKit on iOS. It is not an entity. Platform
 // changes arrive as events on the bus.
 #pragma once
+#include "korvid/core/array.h"
 #include "korvid/core/event.h"
+#include "korvid/math/rect2.h"
 #include "korvid/platform_hid/input.h"
 
 namespace kv {
@@ -40,6 +42,13 @@ struct WindowDesc {
 // has launched, from inside the OS's loop, and ends the process with its result. A HostWindow
 // there pumps that loop itself, so `run` is the same loop on every platform.
 int platform_app_main(int argc, char** argv, int (*run)(int argc, char** argv, void* ctx), void* ctx);
+
+// The pointer's shape over the window (platform_cursor). Nothing on a touch screen.
+enum class CursorShape : u8 { Arrow, IBeam, Hand, Move, ResizeEW, ResizeNS, Forbidden, Count };
+
+// Typed text from a host: into the input state, and as TextTyped events (split at code
+// points). Every host's text goes through it.
+void input_typed(EventBus& bus, Input& input, const char* utf8);
 
 struct HostWindow {
     // Creates the window; false (with the reason logged) if the system refuses. Asserts if
@@ -83,6 +92,14 @@ struct HostWindow {
     void present_blank();
     // Text input from the OS on or off (an input method's window, a phone's keyboard).
     void text_input(bool on);
+    // Where the caret is, in framebuffer pixels: the input method's candidates open beside
+    // it, and a phone's keyboard keeps out of its way. `caret` is its x within the rect.
+    void text_area(rect2 r, f32 caret);
+    // The system clipboard's text (UTF-8), appended to `out`; false when it has none or the
+    // host cannot read it. Setting it: false when the host cannot.
+    bool clipboard_get(Array<char>& out);
+    bool clipboard_set(const char* utf8);
+    void cursor(CursorShape shape);
 
     // Some OSes take the window's surface away while the program runs and give another
     // later (Android, whenever the app leaves the screen). fn(ctx, null) is called from

@@ -11,6 +11,7 @@
 #pragma once
 #include "korvid/core/module.h"
 #include "korvid/platform_hid/actions.h"
+#include "korvid/platform_hid/events.h"
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/input.h"
 
@@ -37,6 +38,12 @@ struct HidState {
     u32          text_requests = 0; // platform_text_input's count
     char         text_override[KV_INPUT_TEXT_MAX] = {}; // input_text_override's, for the next sample
     u32          text_override_len = 0, text_override_backspaces = 0;
+    struct KeyEdge { Key key; bool down; };
+    KeyEdge      key_overrides[16] = {};   // input_key_override's, for the next sample
+    u32          key_override_count = 0;
+    TextComposing compose_override{};      // input_compose_override's
+    bool         compose_pending = false;
+    Array<char>  clipboard;                // the process's own, when the host has none to give
     bool         pointer_override = false; // input_pointer_override's, for the next sample
     f32          pointer_x = 0.0f, pointer_y = 0.0f, pointer_wheel = 0.0f;
     u8           pointer_buttons = 0;
@@ -59,9 +66,26 @@ HostWindow* platform_window(Engine& e);
 // Asks the OS for typed text (InputState::text) while on; a text field turns it on while it
 // has the focus. Counted: on twice needs off twice.
 void platform_text_input(Engine& e, bool on);
-// Types text (and Backspaces) as if from the keyboard, into the next sample: for demo
-// scripts and tests.
+// Types text (and Backspaces) as if from the keyboard, into the next sample (and as
+// TextTyped): for demo scripts and tests.
 void input_text_override(Engine& e, const char* text, u32 backspaces = 0);
+// A key goes down or up as if from the keyboard, at the next sample: its state and a KeyDown
+// or KeyUp. For demo scripts and tests (Shift held, then an arrow pressed).
+void input_key_override(Engine& e, Key key, bool down);
+// An input method's composition, as if from the OS, at the next sample (TextComposing). An
+// empty text ends it.
+void input_compose_override(Engine& e, const char* text, u32 caret);
+
+// Where the focused text field's caret is, in framebuffer pixels (and the caret's x within
+// the rect): the input method opens beside it.
+void platform_text_area(Engine& e, rect2 r, f32 caret);
+// The clipboard's text, appended to `out`: the system's, or, where the host cannot give it
+// (headless, a host not yet filled in), what this process last set. False when empty.
+bool platform_clipboard_get(Engine& e, Array<char>& out);
+// Sets the system's clipboard and the process's own.
+void platform_clipboard_set(Engine& e, const char* utf8);
+// The pointer's shape over the window.
+void platform_cursor(Engine& e, CursorShape shape);
 // Puts the pointer at (x, y) (framebuffer pixels, top-left origin) with these buttons held
 // (MouseButton bits) and this much wheel, as if from the mouse, into the next sample; it
 // stays there until the mouse or another override moves it. For demo scripts and tests.

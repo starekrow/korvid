@@ -295,6 +295,14 @@ void HostWindow::close() {
 
 void HostWindow::present_blank() {} // UIKit shows the view's background; nothing to attach
 void HostWindow::text_input(bool) {} // slice 8: the on-screen keyboard
+
+// Not yet on this host (Krome slice 3): the input method's area is not told, the clipboard is
+// the platform module's own (inside this process only), the cursor keeps its shape.
+void HostWindow::text_area(rect2, f32) {}
+bool HostWindow::clipboard_get(Array<char>&) { return false; }
+bool HostWindow::clipboard_set(const char*) { return false; }
+void HostWindow::cursor(CursorShape) {}
+
 bool HostWindow::touch_screen() const { return true; }
 
 f32 HostWindow::pixel_scale() const {

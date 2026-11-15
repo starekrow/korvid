@@ -17,6 +17,18 @@ struct MouseButtonDown { MouseButton button; f32 x, y; };
 struct MouseButtonUp   { MouseButton button; f32 x, y; };
 struct MouseWheel      { f32 dx, dy; };           // dy positive away from the user
 
+// Text from the OS's text input (layouts, dead keys, an input method's commit), UTF-8, while
+// a text field asks for it (platform_text_input). A long commit comes as several, split at
+// code points. Events, so a reader in the Frame cycle sees each once however frames and
+// ticks fall; InputState::text has the same for a tick's reader.
+constexpr u32 KV_TEXT_TYPED = 32;
+struct TextTyped { char text[KV_TEXT_TYPED]; };
+// What an input method is composing, before it commits: drawn by the field at its caret and
+// not yet part of it. `caret` and `selection` are byte offsets into `text` (selection 0: none).
+// An empty text ends the composition (committed as TextTyped, or abandoned).
+constexpr u32 KV_TEXT_COMPOSING = 64;
+struct TextComposing { char text[KV_TEXT_COMPOSING]; u32 caret; u32 selection; };
+
 struct GamepadConnected    { u8 pad; };           // index into InputState::pads
 struct GamepadDisconnected { u8 pad; };
 struct PadButtonDown { PadButton button; u8 pad; };

@@ -329,6 +329,14 @@ bool HostWindow::open(const WindowDesc& desc) {
 // Windows sends WM_CHAR whenever the window has the keyboard; nothing to switch.
 void HostWindow::text_input(bool) {}
 
+// Not yet on this host (Krome slice 3): the input method's area is not told, the clipboard is
+// the platform module's own (inside this process only), the cursor keeps its shape.
+void HostWindow::text_area(rect2, f32) {}
+bool HostWindow::clipboard_get(Array<char>&) { return false; }
+bool HostWindow::clipboard_set(const char*) { return false; }
+void HostWindow::cursor(CursorShape) {}
+
+
 void HostWindow::close() {
     if (!native_) return;
     Win32Window& w = g_win;
@@ -384,7 +392,7 @@ void HostWindow::pump(EventBus& bus, Input& input) {
         case WinMsgType::Char: {
             char utf8[5] = {};
             utf8_encode(m.a, utf8);
-            input.raw.type(utf8);
+            input_typed(bus, input, utf8);
             break;
         }
         case WinMsgType::Key: {

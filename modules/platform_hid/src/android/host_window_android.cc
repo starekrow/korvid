@@ -559,6 +559,13 @@ void HostWindow::present_blank() {} // the system shows the activity's backgroun
 // The on-screen keyboard up or down, and typed text wanted or not: KorvidActivity's
 // textInput, which does its work on the UI thread. A package without the class (built
 // without a JDK) has keys and no text.
+// Not yet on this host (Krome slice 3): the input method's area is not told, the clipboard is
+// the platform module's own (inside this process only), the cursor keeps its shape.
+void HostWindow::text_area(rect2, f32) {}
+bool HostWindow::clipboard_get(Array<char>&) { return false; }
+bool HostWindow::clipboard_set(const char*) { return false; }
+void HostWindow::cursor(CursorShape) {}
+
 void HostWindow::text_input(bool on) {
     DroidApp& app = g_app;
     app.text_on = on;
@@ -653,7 +660,7 @@ void HostWindow::drain(EventBus& bus, Input& input) {
     pthread_mutex_unlock(&app.lock);
     if (app.text_on) {
         input.raw.backspaces += backspaces;
-        if (typed[0]) input.raw.type(typed);
+        if (typed[0]) input_typed(bus, input, typed);
     }
     // Input: touches and a hardware keyboard's keys.
     AInputEvent* ev = nullptr;

@@ -39,6 +39,7 @@ void hid_shutdown(Engine& e, ModuleInstance& self) {
         platform_pump_remove(e, hid_pump, s);
         s->window.close(); // the service ends with the module, whoever opened it
         input_gamepads_close(s->input);
+        s->clipboard.free();
     }
     hid_backend_shutdown();
 }
@@ -49,8 +50,26 @@ void input_sample(TickContext& ctx) {
     if (s.text_override_len || s.text_override_backspaces) {
         s.input.raw.type(s.text_override);
         s.input.raw.backspaces += s.text_override_backspaces;
+        // As events too, as a host's text is.
+        for (const char* p = s.text_override; *p;) {
+            TextTyped t{};
+            usize left = strlen(p);
+            usize n = utf8_prefix(p, left < sizeof t.text - 1 ? left : sizeof t.text - 1);
+            if (!n) break;
+            memcpy(t.text, p, n);
+            ctx.emit(t);
+            p += n;
+        }
         s.text_override[0] = 0; s.text_override_len = 0; s.text_override_backspaces = 0;
     }
+    for (u32 i = 0; i < s.key_override_count; ++i) {
+        const HidState::KeyEdge& k = s.key_overrides[i];
+        s.input.raw.set(k.key, k.down);
+        if (k.down) ctx.emit(KeyDown{k.key, 0, false});
+        else ctx.emit(KeyUp{k.key, 0});
+    }
+    s.key_override_count = 0;
+    if (s.compose_pending) { ctx.emit(s.compose_override); s.compose_pending = false; }
     if (s.pointer_override) {
         // As the mouse would: the state, and the events its changes make.
         MouseState& m = s.input.raw.mouse;
@@ -110,6 +129,8 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT(MouseButtonDown),
     KV_EVENT(MouseButtonUp),
     KV_EVENT(MouseWheel),
+    KV_EVENT(TextTyped),
+    KV_EVENT(TextComposing),
     KV_EVENT(GamepadConnected),
     KV_EVENT(GamepadDisconnected),
     KV_EVENT(PadButtonDown),
@@ -139,7 +160,7 @@ constinit const CliCommandDesc k_commands[] = {
 };
 constinit const SystemDesc   k_systems[] = {
     {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = "input.state, input.actions",
-     .emits = "MouseButtonDown, MouseButtonUp, MouseWheel", .runs = RunWhen::Always},
+     .emits = "MouseButtonDown, MouseButtonUp, MouseWheel, TextTyped, TextComposing, KeyDown, KeyUp", .runs = RunWhen::Always},
 };
 
 } // namespace
@@ -227,6 +248,51 @@ void input_text_override(Engine& e, const char* text, u32 backspaces) {
     s->text_override_len += n;
     s->text_override[s->text_override_len] = 0;
     s->text_override_backspaces += backspaces;
+}
+
+void input_key_override(Engine& e, Key key, bool down) {
+    HidState* s = state(e);
+    if (!s || s->key_override_count == KV_COUNTOF(s->key_overrides)) return;
+    s->key_overrides[s->key_override_count++] = HidState::KeyEdge{key, down};
+}
+
+void input_compose_override(Engine& e, const char* text, u32 caret) {
+    HidState* s = state(e);
+    if (!s) return;
+    s->compose_override = TextComposing{};
+    usize n = text ? strlen(text) : 0;
+    n = utf8_prefix(text ? text : "", n < sizeof s->compose_override.text - 1 ? n : sizeof s->compose_override.text - 1);
+    if (n) memcpy(s->compose_override.text, text, n);
+    s->compose_override.caret = caret > n ? (u32)n : caret;
+    s->compose_pending = true;
+}
+
+void platform_text_area(Engine& e, rect2 r, f32 caret) {
+    HidState* s = state(e);
+    if (s && s->window.is_open()) s->window.text_area(r, caret);
+}
+
+bool platform_clipboard_get(Engine& e, Array<char>& out) {
+    HidState* s = state(e);
+    if (!s) return false;
+    if (s->window.is_open() && s->window.clipboard_get(out)) return true;
+    if (!s->clipboard.len) return false;
+    memcpy(out.push_n(s->clipboard.len), s->clipboard.data, s->clipboard.len);
+    return true;
+}
+
+void platform_clipboard_set(Engine& e, const char* utf8) {
+    HidState* s = state(e);
+    if (!s) return;
+    usize n = utf8 ? strlen(utf8) : 0;
+    s->clipboard.clear();
+    if (n) memcpy(s->clipboard.push_n((u32)n), utf8, n);
+    if (s->window.is_open()) s->window.clipboard_set(utf8 ? utf8 : "");
+}
+
+void platform_cursor(Engine& e, CursorShape shape) {
+    HidState* s = state(e);
+    if (s && s->window.is_open()) s->window.cursor(shape);
 }
 
 void InputState::type(const char* utf8) {
