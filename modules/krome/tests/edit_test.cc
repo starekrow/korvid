@@ -5,8 +5,10 @@
 #include "korvid/krome/krome.h"
 #include "../src/internal.h"
 #include "korvid/asset/module.h"
+#include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/format.h"
+#include "korvid/core/kbor.h"
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/io.h"
@@ -164,6 +166,7 @@ void test_edit(kv::TestCtx& c) {
     key(e, Key::C, true);
     KV_CHECK(c, !strcmp(krome_tree(e, sc)->text(krome_find(*krome_tree(e, sc), name_intern("ro"))), "fixed text") && clip_is(e, "fixed text"));
 
+    // (The numbers below run before the focus test: it ends in a theme switch.)
     // The focus kept, by its id, when the tree is built again (a theme switch), with what was
     // being typed.
     click_id(e, sc, "name");
@@ -172,6 +175,50 @@ void test_edit(kv::TestCtx& c) {
     frames(e, 2);
     t = krome_tree(e, sc);
     KV_CHECK(c, s->focus.node == krome_find(*t, name_intern("name")) && !strcmp(t->text(s->focus.node), "Evea b!"));
+    // The numbers: a 10,000-character paragraph laid out, and a keystroke in a 1,000-line edit.
+    {
+        KromeModule& km = *s;
+        const FontAsset* fa = nullptr;
+        for (const KromeFont& kf : km.fonts) if (const FontAsset* a = asset_font(e, kf.asset)) if (a->state == AssetState::Ready) fa = a;
+        Array<char> big{};
+        for (u32 i = 0; i < 1000; ++i) {
+            char line[64];
+            i32 n = format(line, sizeof line, "line %u of the notes, written out at length\n", i);
+            memcpy(big.push_n((u32)n), line, (usize)n);
+        }
+        big.push(0);
+        if (fa) {
+            Typeset ts;
+            f64 t0 = time_now();
+            typeset_paragraph(*fa, big.data, 10000, TypesetParams{600.0f}, ts);
+            f64 t1 = time_now();
+            KV_INFO("test", "edit numbers: a 10,000-character paragraph laid out at 600 px in %.2f ms (%u lines)", (t1 - t0) * 1e3, ts.lines.len);
+            ts.free();
+        }
+        {   // Past KromeSet's 56 bytes: a KBOR document of one string.
+            MemScope scope;
+            JsonBuilder jb(mem_scratch());
+            JsonDoc doc;
+            jb.finish(jb.string(big.data, big.len - 1), doc);
+            Array<u8> k{};
+            kbor_write(doc, k);
+            krome_set_doc(e, sc, "notes", k.data, k.len);
+            k.free();
+            jb.free();
+        }
+        frames(e, 2);
+        click_id(e, sc, "notes");
+        key(e, Key::End, true);
+        f64 t0 = time_now();
+        type(e, "x");
+        f64 t1 = time_now();
+        KV_CHECK(c, s->focus.buf.len == big.len); // the 1000 lines and the x (the NUL not counted, the x is)
+        KV_INFO("test", "edit numbers: a keystroke in a %u-byte, 1,000-line edit: %.2f ms over the two frames it took",
+                big.len - 1, (t1 - t0) * 1e3);
+        big.free();
+        key(e, Key::Escape);
+    }
+
     // Closing the screen takes the keyboard back.
     krome_close(e, sc);
     KV_CHECK(c, s->focus.node == KROME_NONE);

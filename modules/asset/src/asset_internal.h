@@ -36,7 +36,7 @@ struct FontFace {
     usize size = 0;
     void* info = nullptr;  // stbtt_fontinfo, once read
     Handle io;
-    bool  ready = false, failed = false;
+    bool  ready = false, failed = false, missing = false; // missing: the file was not there
     u32   refs = 0;
 };
 

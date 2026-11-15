@@ -411,8 +411,7 @@ Nov 15, 2026, in review of the first draft.
 ## Open
 
 - [ ] Shaping: HarfBuzz later, or our own shaper for the scripts we need first?
-- [ ] Glyphs at small sizes: exact-size bitmaps per scale (as `ui` does for pixel fonts),
-      or a distance-field atlas?
+- [x] Glyphs at small sizes: exact-size bitmaps per scale, made on demand into pages (Slice 3 PRD).
 - [ ] Where Krome's update and draw sit in the schedule, and what a tool window with no
       simulation runs.
 - [ ] Multiple windows: goldberg's window is one. A tool with a detached panel needs

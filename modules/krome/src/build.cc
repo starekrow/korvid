@@ -283,8 +283,7 @@ void binding(Build& b, const KromeFrame* fr, u32 node, const KimbFile& f, const 
     n.binding = name_intern(path);
     if (n.type == KromeType::Edit) {
         // An edit's binding is its text, both ways.
-        char val[1024];
-        b.tree.set_text(node, krome_model_path_text(b.s, b.sc, path, val, sizeof val));
+        krome_model_into_text(b.s, b.sc, path, b.tree, node);
     } else if (krome_model_truthy(b.s, b.sc, path)) n.flags |= KROME_SELECTED;
     else n.flags &= (u16)~KROME_SELECTED;
     if (b.deps) b.deps->push(KromeDep{node, head_key(path), true});

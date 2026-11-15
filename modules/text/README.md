@@ -19,10 +19,24 @@ the pen, advance) and the kerning pairs. `asset_load_font(e, path, FontDesc{px, 
 takes another set. `AssetReady` follows. Before that, `font_glyph`
 answers null for everything and text lays out as nothing.
 
-**The component.** `Text { font, str[64], scale, tint, layer, space, align, shadow, shadow_offset }`. The
+**The component.** `Text { font, str[64], scale, tint, layer, space, align, shadow, shadow_offset, wrap, line_height, subpixel }`. The
 label's `Transform2` is the pen's start on the baseline; `Left` puts the first glyph
-there, `Center` and `Right` shift the line. Strings are UTF-8, one line, 64 bytes with
-the NUL; `text_set` truncates at a character boundary.
+there, `Center` and `Right` shift the line. Strings are UTF-8, 64 bytes with the NUL;
+`text_set` truncates at a character boundary.
+
+**Lines** (Krome slice 3). `wrap` (the label's units) breaks a label into lines through
+`typeset` (`modules/typeset`), as does a `\n`; they go down from the first baseline,
+`line_height` apart (the font's by default), aligned as one line is: `Left` from the pen,
+`Center` and `Right` about it, inside the wrap's width. `subpixel` keeps the pens to a
+quarter pixel. A label of one line with none of these is laid out as it always was.
+
+**Paragraph.** For more than 64 bytes: a `Paragraph { string, shown }` beside the `Text`
+(the module's own `text.label` has one) draws a string the module keeps
+(`text_paragraph_set(e, para, utf8)`, any length, freed with `text_paragraph_free`) in the
+Text's font, look and wrap, its first `shown` code points (all by default), so it can be
+revealed a character at a time without reflowing. `text_paragraph_fit(e, text, para,
+height)` says how many code points fill a height, for a game that shows a page at a time.
+Sim code writes the strings, so a replay writes the same ones; the handle is what is hashed.
 
 **The system.** `text.layout` runs in the Frame cycle (`docs/design/cycles.md`), once
 before each frame drawn whatever the sim does, reading `*.Text` and `*.Transform2` and
@@ -105,19 +119,17 @@ Depends on: core, math, render, platform, asset, sprite, scene.
   is the upgrade if a game needs thousands of changing characters.
 - **Text appears when the font does.** A label spawned before `AssetReady` lays out as
   nothing and then appears, a frame or two later; the layout notices the font's state.
-- **One line of UTF-8, no shaping.** Each code point is one glyph: no wrapping, no
-  right-to-left, no ligatures, no combining marks drawn as such. Kerning pairs from the
-  font are applied.
+- **No shaping.** Each code point is one glyph: no right-to-left, no ligatures, no
+  combining marks drawn as such. Kerning pairs from the font are applied (the Latin set).
 - **Glyphs are sampled linearly** (the font's material asks for `TextureFilter::Linear`),
   so text at a scale of its own stays smooth while pixel art beside it stays sharp.
 - **A drop shadow is one field.** `Text::shadow` (a color; alpha 0 is none) and
   `shadow_offset` (label units, pixels on screen, +y up) draw every glyph a second time
   under itself: the shadows are keyed under the glyphs in the same layer
   (`SpriteSort::Key`), so a label's shadow never covers another label's glyphs.
-- **What the font lacks is U+FFFD.** A code point outside the font's table (outside its
-  set, or missing from the file) and a malformed byte both draw the replacement glyph,
-  or nothing if the font has none; the first miss per font is logged, and `print
-  /fonts/...` counts them.
+- **What no face has is U+FFFD.** A code point no face of the font has (the font, then its
+  fallback list) and a malformed byte both draw the replacement glyph, or nothing if the font
+  has none; the first miss per font is logged, and `print /fonts/...` counts them.
 - **A label's world transform is its pen.** Rotating or scaling the label rotates and
   scales the line, since glyphs are children.
 - **Screen-space labels are in pixels at the font's size** times `scale`; world-space

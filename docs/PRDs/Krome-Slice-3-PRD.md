@@ -278,3 +278,73 @@ Each leaves the tree building and every example running.
 - **Win32, iOS and Android get stubs** for the area, the clipboard and the cursor.
 - **`edit` has three events**: submit (`->`), `change` and `blur`.
 - **The password field waits** for the widgets (slice 4).
+
+## As built
+
+Nov 15, 2026, on branch tool-stuff: `7a0f053` (1), `888ea2f` (2), `7fa8c56` (3), `8413c16`
+(4), and the commit with this section (5). Every done-when holds on Linux but two that are
+yours to judge or that the platforms decide (below). Metal, D3D12, Win32, iOS and Android
+build untested.
+
+- **Glyphs** (1). A font asset is a strike over faces read once per file; glyphs are made the
+  first time they are asked for, from any thread (ASCII lock-free once made, the rest under
+  the strike's lock), into 512x512 pages packed by shelves, and a `Glyph` names its page.
+  Pages stay **RGBA8**, not R8: the renderer has no one-channel format, and the sprite and UI
+  shaders read coverage from alpha. Nothing is rasterized up front; the old fixed set is now
+  only where kerning is read (pairs outside it are not kerned). `asset.fonts_flush` uploads
+  what changed after the text drawers: the rectangle on Vulkan (`renderer_texture_update`),
+  the page on Metal and D3D12, through the render core, until they are filled in.
+- **Crisp small text, without hinting** (1). The contrast curve on the coverage this PRD
+  planned made 9 px text heavier, not crisper: the swapchain is sRGB, so coverage blends in
+  linear light, which thickens light ink on a dark ground and thins dark ink on a light one.
+  The correction moved to the UI shader, by the ink's own luminance (light ink thinner, dark
+  fuller), and the glyphs keep stb_truetype's coverage. Metrics round to whole pixels and a
+  glyph's box sits on whole pixels from the pen. Beside FreeType's hinted DejaVu (Pillow's,
+  standing in for the platform's) the weight now matches; the stems are a little softer,
+  since FreeType grid-fits them. **Whether that is crisp enough is yours to judge**
+  (`kromedemo --type --shots DIR`). The game's sprite path (`text`) does not have the
+  correction yet.
+- **Fallback** (1) is shown with arcfire's PublicPixel behind DejaVu in `asset_tests` (CJK
+  that DejaVu lacks: 元, 円). kromedemo does not ship a fallback: PublicPixel's license is not
+  recorded in the repository, and no CJK font is vendored.
+- **Paragraphs** (2). `typeset` as planned. Layout answers a node's `narrowest` width too: a
+  hugging node gets no more than its room unless it cannot be narrower, and when any text
+  wrapped, heights are laid out again at the widths given and the tree placed again. Painting
+  decides a wrap by layout's width, not the pixel-rounded rect (4: rounding had wrapped the
+  last letter of menu items given exactly their line). `Text` gained `wrap`, `line_height`
+  and `subpixel` (no recorded replay holds a `Text`); `Paragraph` keeps strings in the text
+  module's table, and the module's own `text.label` carries one (a read of `*.Paragraph`
+  needs a kind that has it).
+- **The platform** (3). `TextTyped` and `TextComposing` events through one `input_typed`;
+  `platform_text_area`, `platform_clipboard_*` (with the process's own clipboard, which is
+  what a headless run or a stub host gets back), `platform_cursor`; stubs elsewhere. Key
+  overrides and composition overrides drive demos and tests. `Key` gained Delete, Home, End,
+  PageUp and PageDown, appended (the input state's size, and so replays, unchanged).
+- **`edit`** (4). As planned, with these found on the way: an input method answers every
+  telling of the caret's area with its state, so the area is told only when it moves, and is
+  where a composition began, not the composition's own caret; a press and a drag in the same
+  frame keep the press (a double press is not a drag); an edit's bound text is read at full
+  length (a 1 KB buffer had truncated it). The blink wakes an on-demand window at each turn
+  through `engine_want_frame_at`, new in core. The focus survives a rebuild by id, and goes
+  with its screen or overlay.
+- **The gallery's UI picture** (5) changed with the shader's coverage curve: its Vulkan
+  reference is made again. **Metal's and D3D12's need making again on those machines.**
+- **Not done:** `ui`'s labels on `typeset` (KT22, P2): `ui` keeps its own breaking. The
+  9 px comparison against a GTK and a macOS screenshot: against FreeType instead, here.
+
+**Numbers** (Linux, AMD 780M, the dev build):
+
+| what | measured |
+|---|---|
+| a strike made Ready (DejaVu, its kerning) | 1.1 to 1.4 ms (was 4.9 ms with the fixed set rasterized) |
+| glyphs made on demand, 14 px | 2.4 us each (214 in 0.51 ms); asked again, 2 ns |
+| a 10,000-character paragraph laid out at 600 px | 1.4 ms, 225 lines |
+| a keystroke in a 45 KB, 1,000-line edit | 3.9 ms over the two frames it takes (the whole text laid out again each frame) |
+| kromedemo, Lua against markup, with the notes field: form, menu, About, the edit, the composition | largest channel difference 0 (when the desktop's pointer is not over the window) |
+| render-gate, Linux | passes, with the gallery's UI reference made again |
+| tests | core, kim, kimb, kimc, typeset 43, asset 40, text 31, platform_hid 251, krome 228, goldberg, ui all pass |
+
+**Open:** hinting, if the pictures say so; laying out only the lines a keystroke touches in a
+long `edit`; `ui` on `typeset`; the hosts' text input, clipboard and cursor; the text input
+protocol beyond composition (K25).
+

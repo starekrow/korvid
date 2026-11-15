@@ -285,6 +285,8 @@ void krome_emit(KromeModule& s, const KromeEvent& ev);
 bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* path);
 u32  krome_model_length(KromeModule& s, KromeScreen& sc, const char* path);
 const char* krome_model_path_text(KromeModule& s, KromeScreen& sc, const char* path, char* out, usize cap);
+// The model's text at a path into a tree node's text, whatever its length (an edit's).
+void krome_model_into_text(KromeModule& s, KromeScreen& sc, const char* path, KromeTree& tree, u32 node);
 // A binding's press: the value at the path flipped, and what reads it told.
 void krome_model_flip(KromeModule& s, KromeScreen& sc, const char* path);
 // A KBOR document as a Lua value at a model key (krome_set_doc).

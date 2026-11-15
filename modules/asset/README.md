@@ -37,6 +37,19 @@ Priorities: loads go in at `IoPriority::Normal`. The queue admits reads within a
 budget per pump (8 MB by default) so a burst of loads cannot stall a frame; what does
 not fit waits for the next pump or for idle time (see `docs/design/idle.md`).
 
+
+**Fonts** (Krome slice 3). A font asset is a strike: a TrueType file at one pixel size. The
+file is read once, whatever sizes use it, and parsed by stb_truetype. Glyphs are made the
+first time they are asked for (`font_glyph`, from any thread), rasterized into the strike's
+pages (512x512, packed by shelves, a page more when one fills) and kept: a `Glyph*` lives
+as long as the strike, and names its page. Nothing is made up front unless `FontDesc::ranges`
+asks. A code point the face lacks comes from the first face down the fallback list (the
+font's own, or the engine's) that has it, at the same pixel size on the same baseline. The
+metrics are rounded to whole pixels; a glyph's box sits on whole pixels from the pen; the
+coverage is stb_truetype's, unhinted, and how heavy it reads is corrected where it is drawn
+(the UI shader, by the ink's luminance). `font_glyph_at` makes quarter-pixel copies for
+subpixel positioning. `asset.fonts_flush` uploads what changed before the frame draws.
+Kerning is read for the Latin set.
 ## Lifetimes
 
 An asset lives while something holds it. The holders are **scopes**
@@ -71,7 +84,7 @@ voice on them has stopped.
 Every record is named, so a save or a tool can say what it means: a file's record by its
 path, a font by `path@px`, a scope by its name. The renderer objects the module makes
 carry the same names: a texture asset's renderer texture is called its path, a material
-file's row its path, a font's atlas material `font:<path>@<px>`.
+file's row its path, a font's page materials `font:<path>@<px>:page<N>`.
 `asset_material_for_texture(e, texture, blend, filter, scope)` makes the material a sprite
 needs for a texture asset without a file, named `<path>:<blend>` (`:linear` added for that
 filter), held by the scope and holding the texture; the same texture and look is the
@@ -189,12 +202,15 @@ Header `korvid/asset/font.h`:
 
 | name | kind | what |
 |---|---|---|
-| `Glyph` | record | `uv` (atlas), `size` (pixels), `offset` (quad center from the pen, +y up), `advance` |
-| `FontAsset` | record | `path`, `state`, `error`, `texture`, `material` (alpha, white), `px`, `ascent`, `descent`, `line_height`, `atlas_width/height`, `codepoints`/`glyphs` (sorted), `ascii` index, `replacement`, `kern_pairs`/`kern_values` (sorted), `ranges`, `misses` |
-| `FontDesc`, `FontRange`, `font_default_ranges()` | records | `px` and the character set as inclusive code point ranges; the default: ASCII, Latin-1, Latin Extended-A, common punctuation, euro, trade mark, U+FFFD |
-| `asset_load_font(e, path, px)`, `asset_load_font(e, path, desc[, scope])` | functions | handle at once; px in [4, 256]; at most `KV_FONT_MAX_GLYPHS` (8192) code points |
+| `FontAsset` | record | `path`, `state`, `error`, `texture`, `material` (the first page's), `px`, `ascent`, `descent`, `line_height` (whole pixels), `strike` (the glyph cache), `kern_pairs`/`kern_values` (sorted); for a table built by hand, `codepoints`/`glyphs`, `ascii`, `replacement` |
+| `Glyph` | record | `uv`, `size`, `offset`, `advance`, and its page's `texture` and `material` |
+| `FontDesc`, `FontRange` | records | `px`; `ranges` made at load (none by default); `fallback`, faces after this one by asset path |
+| `asset_load_font(e, path, px)`, `asset_load_font(e, path, desc[, scope])` | functions | handle at once; px in [4, 256]; a file is read once for every size of it |
+| `asset_set_font_fallback(e, paths)` | function | the fallback list for fonts loaded from now on with none of their own |
 | `asset_font(e, h)` | function | the record, or null if stale |
-| `font_glyph(font, cp)`, `font_glyph_or_replacement(font, cp)`, `font_kern(font, a, b)`, `font_measure(font, utf8, scale)` | functions | lookups over a Ready font (ASCII direct, the rest by binary search); nothing before |
+| `font_glyph(font, cp)`, `font_glyph_or_replacement(font, cp)`, `font_glyph_at(font, cp, quarter)` | functions | the glyph, made on the first ask (from any thread), from the first face that has it; a quarter-pixel copy for subpixel positioning |
+| `font_kern(font, a, b)`, `font_measure(font, utf8, scale)` | functions | kerning (the Latin set), a line's width |
+| `font_generation(font)`, `font_counts(font, &glyphs, &pages)` | functions | grows when a fallback lands (lay text out again); what has been made |
 | `font_index(font)` | function | fills the ASCII index and U+FFFD from `codepoints`, for a table built by hand |
 
 Header `korvid/asset/sound.h`:
@@ -253,6 +269,7 @@ What the module registers with the engine:
 | `asset.pump` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.textures` |
 | `asset.pump_materials` | system, phase PreSim, main thread, after `asset.pump` | reads `asset.textures`, writes `asset.materials` |
 | `asset.pump_fonts` | system, phase PreSim, main thread, after `asset.pump_materials` | writes `asset.fonts` |
+| `asset.fonts_flush` | system, phase Frame, main thread, after the text drawers | uploads the glyph pages that changed: the rectangle where the backend can (`renderer_texture_update`), the page elsewhere |
 | `asset.pump_sounds` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.sounds` |
 | `asset.pump_blobs` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.blobs` |
 | `asset.pump_streams` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.streams`: checks each file opens, reads its length and loop points |

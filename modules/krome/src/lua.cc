@@ -588,6 +588,22 @@ const char* krome_model_path_text(KromeModule& s, KromeScreen& sc, const char* p
     return v;
 }
 
+void krome_model_into_text(KromeModule& s, KromeScreen& sc, const char* path, KromeTree& tree, u32 node) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) { tree.set_text(node, ""); return; }
+    push_path(L, sc.store, path);
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        usize n = 0;
+        const char* str = lua_tolstring(L, -1, &n);
+        tree.set_text(node, str, (u32)n); // copied while the model still holds it
+    } else {
+        char val[128];
+        const char* v = value_text(L, -1, val, sizeof val);
+        tree.set_text(node, v);
+    }
+    lua_pop(L, 1);
+}
+
 void krome_model_flip(KromeModule& s, KromeScreen& sc, const char* path) {
     lua_State* L = s.L;
     if (!L || sc.store == LUA_NOREF) return;
@@ -684,8 +700,8 @@ void krome_model_changed(KromeModule& s, KromeScreen& sc, u64 key) {
         if (n.type == KromeType::Edit) {
             // An edit shows the model's text, unless it is the one being typed in.
             if (!krome_is_focused(s, sc.id, 0, d.node)) {
-                char val[1024];
-                sc.tree.set_text(d.node, krome_model_path_text(s, sc, name_str(n.binding), val, sizeof val));
+                krome_model_into_text(s, sc, name_str(n.binding), sc.tree, d.node);
+                sc.tree.dirty = true;
                 sc.repaint = true;
             }
             continue;

@@ -107,13 +107,29 @@ void test_font(kv::TestCtx& c) {
     const Glyph* yuan = font_glyph(fb, 0x5143);
     KV_CHECK(c, !font_glyph(f, 0x5143) && yuan && yuan->size.x > 0);
     KV_CHECK(c, font_glyph(fb, 'A')->advance == a->advance); // DejaVu's own still comes first
-    KV_CHECK(c, font_generation(fb) >= 1);
     // The engine's list, for fonts loaded after it is set.
     asset_set_font_fallback(e, Span<const char* const>(fallback, 1));
     Handle hd = asset_load_font(e, "text/DejaVuSans.ttf", 18.0f);
     KV_CHECK(c, settle(e, hd));
     for (u32 i = 0; i < 5; ++i) frame(e);
     KV_CHECK(c, font_glyph(*asset_font(e, hd), 0x5186) != nullptr);
+
+    // The numbers: a strike's glyphs made as asked (Latin, Greek, Cyrillic at 14 px).
+    {
+        Handle h14 = asset_load_font(e, "text/DejaVuSans.ttf", 14.0f);
+        KV_CHECK(c, settle(e, h14));
+        const FontAsset& f14 = *asset_font(e, h14);
+        f64 t0 = time_now();
+        u32 made = 0;
+        for (u32 cp = 0x21; cp < 0x7F; ++cp) made += font_glyph(f14, cp) != nullptr;
+        for (u32 cp = 0x391; cp < 0x3CA; ++cp) made += font_glyph(f14, cp) != nullptr;
+        for (u32 cp = 0x410; cp < 0x450; ++cp) made += font_glyph(f14, cp) != nullptr;
+        f64 t1 = time_now();
+        for (u32 cp = 0x21; cp < 0x7F; ++cp) font_glyph(f14, cp);
+        f64 t2 = time_now();
+        KV_INFO("test", "font numbers: %u glyphs made at 14 px in %.2f ms (%.1f us each); asked again, %.3f us each",
+                made, (t1 - t0) * 1e3, (t1 - t0) * 1e6 / (made ? made : 1), (t2 - t1) * 1e6 / 94.0);
+    }
 
     // Small sizes: whole-pixel metrics.
     Handle h9 = asset_load_font(e, "text/DejaVuSans.ttf", 9.0f);

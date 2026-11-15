@@ -82,6 +82,21 @@ input method's window where there is one. `input_text_override(e, "Rowan\n")` ty
 next sample, for demos and tests. `input_pointer_override(e, x, y, buttons, wheel)` puts the pointer somewhere with these
 buttons held, as the mouse would, for the next sample: Krome's demo clicks through a form with it.
 
+**As events too** (Krome slice 3). Each commit is a `TextTyped` (UTF-8, split at code
+points into 31-byte pieces), and what an input method is composing, before it commits, a
+`TextComposing` (its text, caret and selection in bytes; empty when it ends), so a reader in
+the Frame cycle sees each once however frames and ticks fall. Every host types through
+`input_typed`, which keeps `InputState::text` too. SDL3 turns `TEXT_EDITING` into
+`TextComposing`. `input_key_override(e, key, down)` and `input_compose_override(e, text,
+caret)` drive keys and an input method as the text override drives typing.
+
+**What a text field asks of the platform.** `platform_text_area(e, rect, caret)` tells the
+input method where the caret is (its candidates open there; tell it only when it moves: an
+input method answers each telling with its state). `platform_clipboard_get` and `_set` read
+and write the system clipboard, and keep the process's own, which is what a headless run or
+a host not yet filled in gets back. `platform_cursor(e, CursorShape)` sets the pointer's
+shape. SDL3 (Linux, macOS) does all of it; Win32, iOS and Android have stubs.
+
 ## Quick reference
 
 Header `korvid/platform_hid/host_window.h`:

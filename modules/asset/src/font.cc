@@ -404,7 +404,8 @@ void asset_fonts_pump(TickContext& ctx) {
         if (c.status != IoStatus::Done) {
             face->io = Handle{};
             face->failed = true;
-            KV_WARN("asset", "font file '%s': %s", face->path, c.status == IoStatus::Failed && c.error == 2 ? "not found" : "could not be read");
+            face->missing = c.status == IoStatus::Failed && c.error == 2;
+            KV_WARN("asset", "font file '%s': %s", face->path, face->missing ? "not found" : "could not be read");
             if (c.data) free_in(s.general, c.data, c.size);
         } else if (!face_take(s, *face, (u8*)c.data, c.size)) {
             free_in(s.general, c.data, c.size);
@@ -424,7 +425,11 @@ void asset_fonts_pump(TickContext& ctx) {
         Handle h = s.fonts.handle_at(i);
         if (f.state == AssetState::Pending) {
             FontFace* first = st->faces[0];
-            if (first->failed) { fail_font(e, s, h, f, AssetError::Decode, "its file did not read as a TrueType font"); continue; }
+            if (first->failed) {
+                if (first->missing) fail_font(e, s, h, f, AssetError::NotFound, nullptr);
+                else fail_font(e, s, h, f, AssetError::Decode, first->data ? "not a TrueType font" : "its file could not be read");
+                continue;
+            }
             if (!first->ready) continue;
             const char* why = nullptr;
             if (!build_strike(s, f, &why)) { fail_font(e, s, h, f, AssetError::Decode, why); continue; }

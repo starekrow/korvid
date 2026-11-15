@@ -4,7 +4,7 @@ UI for tools and dialogs: screens laid out with rows, columns and stacks, styled
 and per state, drawn on the renderer's UI primitive, written in markup (`.kim`, loaded as
 `.kimb`) or Lua, wired up in a Lua state of Krome's own. To anyone outside it is Korvid UI.
 The design is `docs/design/krome.md`; what is built and what is next is
-`docs/PRDs/Krome-Master-PRD.md` and its slices (1: the kernel; 2: the markup).
+`docs/PRDs/Krome-Master-PRD.md` and its slices (1: the kernel; 2: the markup; 3: text).
 
 ## How it works
 
@@ -12,8 +12,8 @@ The design is `docs/design/krome.md`; what is built and what is next is
 prelude in markup (the widgets, the styles, the themes: `krome/std`, this module's asset),
 and content in markup. Nothing in the kernel knows a widget: a button is a definition.
 
-**The tree** (`korvid/krome/tree.h`). A screen is a tree of four kernel types: `box`,
-`text`, `image`, `hit`. A node has flags (`fill`, `clip`, `scroll`, `disabled`,
+**The tree** (`korvid/krome/tree.h`). A screen is a tree of five kernel types: `box`,
+`text`, `image`, `hit`, `edit`. A node has flags (`fill`, `clip`, `scroll`, `disabled`,
 `selected`, `hidden`, the alignments), properties set by name and refused with a reason,
 a content string, an id, an event, a binding, and a look per state (`hover`, `pressed`,
 `focused`, `disabled`, `selected`) over its base look. Text color, font and size inherit.
@@ -23,6 +23,28 @@ size is `hug`, `fill` or a number, bounded by a range (`"120..400"`); fills shar
 left, minimums pinned before maximums; a bare `fill` fills along the parent's direction.
 Rects are logical pixels; painting multiplies by the window's scale and rounds each edge.
 Layout runs only when something marked the tree.
+
+**Text wraps** (slice 3) at the width layout gives it: a hugging node is no wider than its
+room unless it cannot be narrower (its `narrowest`: a wrapping text's longest word), and
+when any text wrapped, heights are laid out again at the widths given and the tree placed
+again. A tree with no wrapped text lays out as before. `nowrap` keeps a text on one line;
+its `left`, `center` and `right` align its lines; `line-height` (times the size, inherited)
+spaces them. Paragraphs are `typeset`'s (`modules/typeset`); glyphs are made at the exact
+pixel size the window's scale gives, when first drawn, from a fallback font where the first
+lacks one (`modules/asset`, "Fonts"). `subpixel` keeps a text's pens to a quarter pixel.
+
+**`edit`** (slice 3) holds text a person types: one line, or many with `multiline`;
+`readonly`; `placeholder="..."` while empty; `@name` binds its text both ways; `-> event` on
+Enter (Ctrl+Enter in many lines), `change=` once a frame it changed in, `blur=` when it loses
+the keyboard. A press gives it the keyboard (the `focused` look); a double press selects a
+word, a triple a line, a drag a selection; a press elsewhere, Escape or closing its screen
+takes it away. Keys move, select and erase by character or word (Ctrl, or Option on a Mac),
+by line and page in many lines; Ctrl or Command with A, C, X, V, Z, Shift+Z and Y; the
+clipboard is the system's (`platform_clipboard_*`). An input method's composition is drawn
+underlined at the caret, and the input method told where it began. It clips its text and
+scrolls to keep the caret in view; the caret blinks while the window has focus, waking an
+on-demand window at each turn (`engine_want_frame_at`). The focus is found again by id when
+its tree is built again. `cursor=` sets the pointer's shape (an edit's is the I-beam).
 
 **Documents.** A `.kimb` (`modules/kim` compiles it from `.kim`; goldberg does that as it
 cooks) is read once, through the I/O queue or from what `krome_provide` gave, and kept:
@@ -154,19 +176,22 @@ Header `korvid/krome/krome.h`:
 | `krome.pump`, `krome.input`, `krome.paint` (Frame) | systems | documents, scripts, rebuilds and model values; the pointer; layout and paint |
 | `/krome` | CLI mount | `ls` screens and named nodes, `print` a tree or a node, `patch NODE PROPERTY VALUE...` |
 
-In Lua: the helpers, `model`, `emit(name, value)`, `open_overlay(tree, opts)`,
-`close_overlay([id])`, `theme(name)`, `changed(key)`, `kim(file, screen)`.
+In Lua: the helpers (and `edit`, with `bind = "key"`), `model`, `emit(name, value)`,
+`open_overlay(tree, opts)`, `close_overlay([id])`, `theme(name)`, `changed(key)`, `kim(file, screen)`.
 
-Properties: layout `w`, `h`, `pad`, `gap`, `dir`, `anchor`; look `bg`, `bg2` (a gradient to
-it), `angle`, `radius` (one, two or four), `border`, `border-color`, `shadow` (x y blur
-[spread]), `shadow-color`, `color`, `opacity`, `font`, `size`, `image`, `tint`. The
+Properties: layout `w`, `h`, `pad`, `gap`, `dir`, `anchor`; an edit's `placeholder`,
+`change`, `blur`; `cursor`; look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
+or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
+`opacity`, `font`, `size`, `line-height`, `image`, `tint`, `caret-color`, `selection-color`.
+Flags: `fill`, `clip`, `scroll`, `disabled`, `selected`, `hidden`, the alignments,
+`subpixel`, `nowrap`, `multiline`, `readonly`. The
 vocabulary is fixed (`modules/kimb`); `prop name type` in a prelude types a definition's
 parameter.
 
 **`krome/std`** (`assets/std.kim`): themes `dark` (first, so a screen starts in it) and
 `light`; `row`, `col`, `stack`, `spacer`, `separator`, `label`, `heading`, `field`, `badge`,
-`button` (and `[danger]`), `checkbox` (bind it: `checkbox "Wrap" @wrap`), `menu-item`,
-`panel`; styles `page`, `menu`, `panel`, `list`, `list-row`. A game's own `def` or `style`
+`button` (and `[danger]`), `checkbox` (bind it: `checkbox "Wrap" @wrap`), `input` and
+`textarea` (bind them: `textarea @notes placeholder="Notes"`), `menu-item`, `panel`; styles `page`, `menu`, `panel`, `list`, `list-row`. A game's own `def` or `style`
 of the same name wins, and its `theme dark` overrides the tokens it names.
 
 ## Behaviour worth knowing
@@ -185,13 +210,17 @@ of the same name wins, and its `theme dark` overrides the tokens it names.
   the tree is built whole again. Scroll offsets survive a rebuild by id.
 - **`return col { ... }` is a tail call**, which Lua gives no line: such a node takes its
   first child's.
-- **Text is one line**, in today's fonts. Paragraphs, wrapping and `edit` are slice 3.
+- **One edit has the keyboard** across every screen. Tab order and keyboard focus without a
+  pointer are slice 4's.
+- **No shaping** beyond kerning, left to right only.
 - **Screen scripts cannot `require`** another file; a `.kimb` screen takes several scripts.
 - **Metal and D3D12 draw no UI yet**: their backends have stubs for the primitive.
 
 ## Not in this module
 
-The parser (`modules/kim`) and the document's meaning (`modules/kimb`), which this links.
-Paragraph text and editing (slice 3), the widget set (4), vector shapes (5), reload (6).
+The parser (`modules/kim`) and the document's meaning (`modules/kimb`), which this links;
+paragraphs and the edit buffer (`modules/typeset`); fonts and their pages (`modules/asset`);
+typed text, composition, the clipboard and the cursor (`modules/platform_hid`). The widget
+set and focus order (slice 4), vector shapes (5), reload (6).
 A tool with a window is the frame loop with the tool's work in the Work cycle
 (`kromedemo --work`).
