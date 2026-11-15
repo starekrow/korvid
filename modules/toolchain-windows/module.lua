@@ -15,7 +15,12 @@
 -- the address of their name. Floating point is /fp:precise, which is cl's default, said
 -- outright because kv's math (modules/math) counts on it: no multiply fused into an add,
 -- nothing reordered, so every platform gets the same bits. Threads
--- get Linux's 8 MiB stack; the main thread too (/STACK).
+-- get Linux's 8 MiB stack; the main thread too (/STACK). The system DLLs the platform
+-- module uses for one thing each (shell32 and ole32 for the preference directory, ws2_32
+-- for sockets) are delay-loaded, opened on the first call: imported outright, shell32
+-- brings user32, gdi32 and the rest of the shell with it, 4 ms of every process's start,
+-- which a tool that starts many (goldberg's converters) pays thousands of times. LNK4199
+-- is that a program never calls one of them.
 module "toolchain.windows" {
   provides  = "toolchain",
   platforms = { "windows" },
@@ -33,7 +38,8 @@ module "toolchain.windows" {
     dev   = { cxxflags = { "/O2", "/Z7", "/DKV_DEV=1" }, ldflags = { "/DEBUG" } },
     ship  = { cxxflags = { "/O2", "/DNDEBUG" } },
   },
-  ldflags   = { "/INCREMENTAL:NO", "/STACK:8388608" },
+  ldflags   = { "/INCREMENTAL:NO", "/STACK:8388608", "delayimp.lib", "/DELAYLOAD:shell32.dll",
+                "/DELAYLOAD:ole32.dll", "/DELAYLOAD:ws2_32.dll", "/IGNORE:4199" },
   rules     = {
     cxx  = { command = '$cxx /nologo /showIncludes $cxxflags $defines $includes /c $in /Fo$out', deps = "msvc" },
     ar   = { command = "$ar /nologo /OUT:$out $in" },
