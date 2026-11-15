@@ -1,5 +1,5 @@
 // Korvid platform: what the watcher's backends share. An event sink that folds repeats,
-// and the seam a native backend fills (linux/fs_watch_linux.cc).
+// and the seam a native backend fills (linux/fs_watch_linux.cc, win32/fs_watch_win32.cc).
 #pragma once
 #include "korvid/platform/fs_watch.h"
 
@@ -21,7 +21,7 @@ struct FsSink {
 struct FsWalkEntry { const char* path; bool is_dir; u64 size; i64 mtime_ns; };
 void fs_walk(const char* dir, void (*fn)(void* user, const FsWalkEntry& e), void* user);
 
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
 #define KV_FS_NATIVE 1
 struct FsNative;
 FsNative*   fs_native_create();

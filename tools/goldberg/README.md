@@ -97,7 +97,7 @@ processes under it, and can dump what it decided. The same log gives the same du
 | `--out DIR` | the output tree |
 | `--state FILE` | the saved state. Default: `<out>/../.goldberg-state/<name>.json` |
 | `--project DIR` | where the project's `goldberg.berg` is. Default: the nearest directory at or above the current one with a `korvid.config` or `kormake.lua` |
-| `--watch MODE` | `auto` (default), `inotify`, `poll`, or `none` |
+| `--watch MODE` | `auto` (default: the native watcher where there is one), `native`, the native one by its name (`inotify` on Linux, `readdirectorychanges` on Windows), `poll`, or `none` |
 | `--lock-wait S` | how long a cook waits for another cook on the same tree. Default 60 |
 | `--stamp FILE` | a file rewritten only when the tree changed, for a build system |
 | `--log FILE` | every event, one JSON object a line, for `replay` |
@@ -161,7 +161,7 @@ root:
 | Key | Meaning |
 |---|---|
 | `from`, `to` | the type it takes and the type of what it makes |
-| `shell` | its script, without the extension, relative to the `.berg` file. It runs as `/bin/sh <shell>.sh <args>` |
+| `shell` | its script, without the extension, relative to the `.berg` file. It runs as `/bin/sh <shell>.sh <args>`; on Windows `<shell>.bat` through `cmd /c` when there is one, else `<shell>.sh` through the `sh` on `PATH` (Git's, MSYS2's) |
 | `args` | the arguments, one string split at spaces. Default `{in} {work}` |
 | `outputs` | names or patterns of what it writes under `{work}`; or `"scan"`; or left out |
 | `settle` | seconds. With `"scan"`, how long a file must be quiet to be taken. Otherwise how long the step is held open after the script ends |

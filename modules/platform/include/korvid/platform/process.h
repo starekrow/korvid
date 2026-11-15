@@ -3,8 +3,12 @@
 // with a socket. For tools (goldberg's converters); a game has no business here.
 //
 // The child's stdin is empty. Its stdout and stderr are pipes the owner must drain: a
-// child that fills one waits until it is read. It runs in a process group of its own, so
-// kill() takes what it started with it (a shell script's `sleep`).
+// child that fills one waits until it is read. It runs in a process group of its own (a
+// job object on Windows), so kill() takes what it started with it (a shell script's
+// `sleep`), and reports 128 + 9 as a SIGKILL does.
+//
+// On Windows argv is quoted as the C runtime parses it, and {"cmd", "/c", ...} is run as
+// `cmd /d /s /c "..."`, the one form in which cmd hands a batch file its arguments as given.
 #pragma once
 #include "korvid/core/types.h"
 
@@ -22,6 +26,7 @@ struct Process {
     bool exited = false;
     i32  code = 0;               // once exited: its status, or 128 + the signal that ended it
     char error[160] = {};        // why spawn failed
+    void* os[2] = {};            // Windows: the process's handle and its job's; unused elsewhere
 
     // False with `error` set if the program cannot be started (not found, not executable,
     // no such directory). Nothing is left to free then.

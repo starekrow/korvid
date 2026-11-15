@@ -123,6 +123,22 @@ void test_process(kv::TestCtx& c) {
     p.free();
     KV_CHECK(c, !p.is_open() && time_now() - t0 < 2.0);
 
+#if defined(_WIN32)
+    // A batch file through cmd /c gets its arguments as they were given: the last one keeps
+    // its closing quote (cmd strips the line's last quote unless it is asked with /s), and
+    // an & stays inside its argument.
+    char bat[600];
+    snprintf(bat, sizeof bat, "%s/args.bat", dir);
+    const char* args_bat = "@echo off\r\necho 1=%1 2=%2\r\n";
+    KV_CHECK(c, io_write_now(bat, args_bat, strlen(args_bat)));
+    const char* via_cmd[] = {"cmd", "/c", bat, "salt & pepper", "two"};
+    d = ProcessDesc{};
+    d.argv = Span<const char* const>(via_cmd, 5);
+    out.len = err.len = 0;
+    KV_CHECK(c, p.spawn(d) && run_out(p, out, err) && p.code == 0 && strcmp(out.data, "1=\"salt & pepper\" 2=\"two\"\r\n") == 0);
+    p.free();
+#endif
+
     out.free();
     err.free();
     io_remove_tree(dir);

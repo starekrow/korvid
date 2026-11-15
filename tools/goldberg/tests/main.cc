@@ -782,9 +782,9 @@ void test_watch(TestCtx& c) {
 
         // The verbs: explain by path, touch, and a file nobody typed.
         char line[900];
-        snprintf(line, sizeof line, "explain %s", hud);
+        snprintf(line, sizeof line, "explain \"%s\"", hud); // quoted: a temp directory may have a space in it (C:/Users/A B/...)
         KV_CHECK(c, ask(w, port, line) && has(g_out.data, "ui/hud.json") && has(g_out.data, "type    data") && has(g_out.data, "step    clean"));
-        snprintf(line, sizeof line, "goldberg touch %s", a_png);
+        snprintf(line, sizeof line, "goldberg touch \"%s\"", a_png);
         KV_CHECK(c, ask(w, port, line) && has(g_out.data, "touched g:a.png"));
         KV_CHECK(c, !ask(w, port, "explain /no/such/file") && has(g_out.data, "not a file this session knows"));
         t.put("assets/odd.xyz", "?");

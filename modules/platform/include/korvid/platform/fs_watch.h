@@ -2,8 +2,8 @@
 // never blocks and never spawns a thread, as the sockets do not. Whoever owns one polls
 // it once a tick.
 //
-// Two backends. The native one asks the OS (inotify on Linux) and hears of a change as
-// it is made. The polling one walks the trees at an interval and compares sizes and
+// Two backends. The native one asks the OS (inotify on Linux, ReadDirectoryChangesW on
+// Windows) and hears of a change as it is made. The polling one walks the trees at an interval and compares sizes and
 // modification times with the walk before: slower to notice, correct everywhere, and all
 // there is on a platform with no native backend yet.
 //
@@ -44,7 +44,7 @@ struct FsWatcher {
     bool init(FsWatchBackend backend = FsWatchBackend::Auto, f64 poll_interval = 0.25);
     void free();
     bool is_open() const { return state != nullptr; }
-    const char* backend_name() const; // "inotify", "poll"
+    const char* backend_name() const; // "inotify", "readdirectorychanges", "poll"
 
     // Watches dir and everything under it. The id, or ~0u if the directory cannot be
     // read. Ids are not reused while the watcher lives.

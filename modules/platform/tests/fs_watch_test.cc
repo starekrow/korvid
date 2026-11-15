@@ -83,14 +83,15 @@ void run(TestCtx& c, FsWatchBackend backend, const char* expect_name) {
     KV_CHECK(c, io_remove(path) && wait_for(w, h, "removed b.png"));
 
     // A rename is a removal and an arrival; a rename onto a file that exists is an arrival
-    // at least (the editor's write-a-temp-then-rename).
+    // at least (the editor's write-a-temp-then-rename). io_rename, not the C library's:
+    // Windows' rename() will not replace a file that is there.
     snprintf(path, sizeof path, "%s/a.png", dir);
     snprintf(path2, sizeof path2, "%s/c.png", dir);
-    KV_CHECK(c, rename(path, path2) == 0 && wait_for(w, h, "removed a.png") && wait_for(w, h, "added c.png"));
+    KV_CHECK(c, io_rename(path, path2) && wait_for(w, h, "removed a.png") && wait_for(w, h, "added c.png"));
     h.clear();
     KV_CHECK(c, write_text(dir, "c.png.tmp", "the new c, longer"));
     snprintf(path, sizeof path, "%s/c.png.tmp", dir);
-    KV_CHECK(c, rename(path, path2) == 0);
+    KV_CHECK(c, io_rename(path, path2));
     drain(w, h);
     KV_CHECK(c, h.has("added c.png") || h.has("changed c.png"));
 

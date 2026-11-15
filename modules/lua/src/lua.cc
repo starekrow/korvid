@@ -4,6 +4,13 @@
 // with a destructor alive across a call that can raise. Its math library and its
 // arithmetic (%, ^, //) are kv's (scalar.h), so a script computes the same on every
 // platform, as the engine does.
+#if defined(_MSC_VER) && !defined(__clang__)
+// C4701 (a variable maybe used uninitialized: lvm.c's and lobject.c's n1 and n2, which Lua's
+// number macros always set) comes from cl's optimizer, which does not honour the push below
+// around the lines it is about. Off for the whole of this file, which is Lua's alone
+// (unity = false); the engine's own files keep it.
+#pragma warning(disable: 4701)
+#endif
 #include "korvid/math/scalar.h"
 #define LUA_USE_LONGJMP
 #if !defined(_WIN32)

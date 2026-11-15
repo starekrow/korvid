@@ -76,7 +76,7 @@ tests that run the built binary.
   Embedding wants a generated-source feature in kormake.
 - **Polling and `settle`.** A walk every 250 ms cannot tell a quiet file from one it has
   not looked at, so held files wait at least 300 ms on the polling watcher whatever the
-  converter's `settle` says. macOS and Windows have only that watcher today.
+  converter's `settle` says. macOS has only that watcher today.
 - **A converter must write everything, every run.** A file it did not write this time is
   taken as left over from last time. A script that skips unchanged outputs loses them.
 - **Failure does not spread downstream.** A failed step leaves what was cooked from its
@@ -93,8 +93,37 @@ tests that run the built binary.
 - **The project's `goldberg.berg` is polled** four times a second in a watch, since it
   sits in no watched root. In a cook it is read once.
 
+## Windows
+
+Done on the Windows machine (Nov 15), after slice 1 closed on Linux:
+
+- **It builds.** The only thing in the way was the vendored Lua, which kormake now builds
+  for every program with assets: cl's optimizer reports C4701 on Lua's number macros
+  (`n1`, `n2` in lvm.c and lobject.c), past the `push, 0` around the vendored lines. It is
+  off for the whole of `modules/lua/src/lua.cc`, which is Lua's alone (`unity = false`).
+- **Processes** (`win32/process_win32.cc`): CreateProcessW, the child suspended until it
+  is in a job object (kill ends the job: what a script started goes with it, and the code
+  is 128 + 9 as on posix), stdout and stderr on pipes read through PeekNamedPipe, only the
+  three standard handles inherited. `cmd /c` is run as `cmd /d /s /c "..."`: in the plain
+  form cmd strips the line's last quote, which took the closing quote off a converter's
+  last argument, its work directory. A `tool.bat` converter cooks.
+- **The lock** (`lock.cc`): LockFileEx on a byte far past the end of the file, which the OS
+  lets go of with the process, as flock; past the end so the holder's line stays
+  readable.
+- **The watcher** (`win32/fs_watch_win32.cc`): ReadDirectoryChangesW over each root's
+  tree, overlapped, so a poll never waits. Windows does not say whether a name that went
+  was a directory, so each root keeps the ones it knows of. On the polling watcher
+  `learn` measured a script's outputs up to a walk late, and said 0.43 s for files written
+  0.7 s apart; on this one the times are the writes'.
+- **Tests.** `platform` (725 checks: the process suite and both watchers), `goldberg`
+  (237), `lua` and `script` pass in dev; goldberg, lua and script are in the windows root
+  now. Two tests were Linux's: the watcher test renamed onto an existing file with the C
+  library's `rename`, which Windows' will not do (`io_rename` does), and the watch test
+  sent a path unquoted down the CLI, which a temporary directory with a space in it
+  (`C:/Users/A B/...`) splits. The render gate passes (D3D12), and arcfire runs from its
+  cooked tree in dev and in ship.
+
 ## Not run
 
-macOS, iOS and Windows compile paths touched by the handover; the Android emulator test
-runner; Windows process spawning (a stub), `tool.bat`, and the lock (a no-op there). The
-slice PRD lists each under the milestone that wrote it.
+macOS and iOS compile paths touched by the handover; the Android emulator test runner.
+The slice PRD lists each under the milestone that wrote it.

@@ -29,7 +29,7 @@ root "windows" {
                 "render", "asset", "sprite", "scene", "text", "anim", "collision", "tilemap", "level",
                 "platform_audio", "audio", "renderer-vulkan", "renderer-d3d12", "touchpad", "frameloop", "save", "ui", "xml", "bulletml", "image", "picture",
                 "window", "testbed", "stones", "rocks", "arcanum",
-                "cpukiller", "arcfire", "gallery", "sockit2m" },
+                "cpukiller", "arcfire", "gallery", "sockit2m", "lua", "script", "goldberg" },
   tests     = true,
   platforms = { "windows" },
 }
