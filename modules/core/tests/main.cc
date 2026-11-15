@@ -25,6 +25,7 @@ void test_profile(kv::TestCtx&);
 void test_json(kv::TestCtx&);
 void test_json_count(kv::TestCtx&);
 void test_kbor(kv::TestCtx&);
+void test_json_build(kv::TestCtx&);
 void test_cycles(kv::TestCtx&);
 void test_cycles_leave_the_sim(kv::TestCtx&);
 void test_cycles_fair(kv::TestCtx&);
@@ -67,6 +68,7 @@ int main() {
     test_json(c);
     test_json_count(c);
     test_kbor(c);
+    test_json_build(c);
     test_cycles(c);
     test_cycles_leave_the_sim(c);
     test_cycles_fair(c);

@@ -133,4 +133,72 @@ const char* json_type_name(JsonType t);
 constexpr u32 KV_JSON_WRITE_PRETTY = 1u << 0;
 void json_write(const JsonDoc& doc, Array<u8>& out, u32 flags = KV_JSON_WRITE_PRETTY);
 
+// ---- building a tree -------------------------------------------------------------------------
+// A JsonDoc made by hand, for whatever writes a format (kim's compiler, a tool) rather than
+// reading one. Values are made first and attached after, in any order; finish() lays them
+// out as a parse would (node 0 the root, each container's children side by side), so the
+// tree walks, writes (json_write, kbor_write) and reads exactly like a parsed one. Members
+// keep the order they were set in, and a key set twice is there twice: whoever wants it
+// canonical sorts and dedupes before setting.
+//
+// Strings, keys and the finished nodes come from `alloc`, the document's allocator; the
+// builder's own lists from the general allocator, until reset() or free(). A value is
+// attached once; attaching one twice, or one to itself, is refused.
+//
+//   JsonBuilder b(&arena.a);
+//   JsonRef o = b.object();
+//   b.set(o, "kim", b.integer(1));
+//   b.set(o, "file", b.string("ui/form.kim"));
+//   JsonDoc doc;
+//   b.finish(o, doc);
+using JsonRef = u32;
+constexpr JsonRef KV_JSON_NO_REF = ~0u;
+
+struct JsonBuilder {
+    struct Item {
+        JsonValue v;
+        u32       first = KV_JSON_NO_REF, last = KV_JSON_NO_REF, next = KV_JSON_NO_REF;
+        u32       count = 0;
+        bool      attached = false;
+    };
+
+    Allocator*  alloc = nullptr;
+    Array<Item> items{};
+    bool        failed = false; // an allocation failed or a value was attached twice
+
+    explicit JsonBuilder(Allocator* a) : alloc(a) {}
+
+    JsonRef null();
+    JsonRef boolean(bool v);
+    JsonRef integer(i64 v);
+    JsonRef unsigned_integer(u64 v);
+    JsonRef number(f64 v);                  // a float: written with a fraction, as 1.0
+    JsonRef string(const char* s);
+    JsonRef string(const char* s, u32 len); // the bytes copied, a NUL after them
+    JsonRef bytes(const void* data, u32 len);
+    JsonRef array();
+    JsonRef object();
+
+    // Appends `v` to an array, or to an object as a member named `key` (copied). False,
+    // and nothing attached, when the container is not one or `v` is already attached.
+    bool push(JsonRef array, JsonRef v);
+    bool set(JsonRef object, const char* key, JsonRef v);
+    // The line a value says it began on (JsonValue::line), for a builder with lines to keep.
+    void line(JsonRef v, u32 line);
+
+    u32  count(JsonRef container) const { return container < items.len ? items[container].count : 0; }
+    JsonType type(JsonRef v) const { return v < items.len ? items[v].v.type : JsonType::Null; }
+
+    // Lays out the tree under `root` into `doc`: its nodes one block from `alloc`, exactly
+    // as many as are reachable. False (and doc a lone null, with doc.error) when anything
+    // failed along the way.
+    bool finish(JsonRef root, JsonDoc& doc);
+    void reset() { items.clear(); failed = false; }
+    void free() { items.free(); }
+
+private:
+    JsonRef make(JsonType t);
+    const char* copy(const char* s, u32 len, bool with_len);
+};
+
 } // namespace kv
