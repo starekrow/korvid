@@ -24,6 +24,13 @@ output tree; a file a converter takes is handed to the converter, and what that 
 is treated the same way in its turn. What a file is comes from `.berg` files, layered
 from goldberg's own conventions down to one file's sidecar.
 
+Hashing, copying and converter runs are I/O: tasks on goldberg's own I/O queue, run on
+worker threads in three lanes (eight converters at once; hashes and copies by the number
+of cores), each started the moment a worker is free. The main thread only turns what
+finished into events for the session, so the converters stay busy however often it
+ticks. A converter's outputs are hashed as they are moved into the work tree and arrive
+as one event each.
+
 A cook and a watch are one program on one path. Both scan, both run the watchers, both
 react to events until nothing is left to do. A cook then exits. A watch says so and
 stays. Content hashes decide what changed: a file saved with the same bytes cooks
@@ -60,6 +67,7 @@ stdin, and on a TCP port with `--cli-port N` (loopback; one line in, lines out, 
 | `status` | stable or working; counts; each step running, each failure, each soft warning |
 | `explain PATH` | as below, from the session, with the step's state. `PATH` is a path on disk or a key (`arcfire:ships/ship.png`) |
 | `touch PATH` | looks at the file again as if it had been saved |
+| `cook` | looks at every file again (every root scanned, every step checked against the output tree, what nothing accounts for taken out) with the whole of each tick until stable, then says `cooked again` |
 | `quit` | saves the state and exits |
 | `ls /kinds/goldberg`, `help`, ... | the engine's own CLI: goldberg's records are pools like any other |
 
@@ -100,6 +108,7 @@ processes under it, and can dump what it decided. The same log gives the same du
 | `--watch MODE` | `auto` (default: the native watcher where there is one), `native`, the native one by its name (`inotify` on Linux, `readdirectorychanges` on Windows), `poll`, or `none` |
 | `--lock-wait S` | how long a cook waits for another cook on the same tree. Default 60 |
 | `--stamp FILE` | a file rewritten only when the tree changed, for a build system |
+| `--share PERCENT` | how much of the main thread the session's own work may take: the events of each tick, then a sleep in proportion. Default 100 for a cook, 40 for a watch (100 while it is asked to `cook`). Hashing, copying and converters are not held back by it: they run on worker threads |
 | `--log FILE` | every event, one JSON object a line, for `replay` |
 | `--dump FILE` | every file, its answer, every step and everything asked of the host, as text |
 | `--quiet` | say nothing when there was nothing to do |
@@ -199,7 +208,7 @@ the asset root changed while the script ran.
 | `<out>/` | the output tree: `<root name>/<path>` for each file that lands |
 | `<out>/.goldberg` | the mark that the tree is goldberg's |
 | `<out>/.goldberg.attic/<YYYYMMDD-HHMMSS>/` | what a run took out of the tree. Never deleted by a cook; every cook says so while it exists |
-| `<state>.json` | per source its size, time and hash; per output what made it. Deleting it is always safe: everything is cooked again |
+| `<state>.json` | per source its size, time and hash; per output what made it. Deleting it is always safe: everything is cooked again. A cook writes it at its end; a watch each time it is stable and something changed, a slice of it a tick |
 | `<state>.work/` | what converters made, a directory per step. Scratch |
 | `<state>.run/` | where a converter with declared outputs writes until it ends |
 | `<state>.lock` | held by the goldberg that has the tree |
@@ -221,6 +230,49 @@ cooking what changes.
 
 `GOLDBERG_LUA`: the directory holding goldberg's Lua (`main.lua`), when it is not
 `tools/goldberg/lua` in the source tree the binary was built from.
+
+## Measuring
+
+```
+kormake test --heavy goldberg [TARGET] [-- OPTIONS]
+build/<target>/bin/goldberg_heavy [OPTIONS]
+```
+
+The heavy test (`tests/heavy/main.cc`) is a synthetic cook big enough to act like a real
+one, for putting one machine's numbers beside another's. It writes a tree of seeded noise
+(1 GiB by default) in size classes, each a file of 1/N of the tree and each holding about
+the same share of it: by default one file of a fifth, two of a tenth, three of a
+twentieth, 17 of a hundredth, 1,667 of a ten-thousandth and 16,667 of a hundred-thousandth
+(about 11 KB). It drops those files from the OS's cache, then has the goldberg beside it
+cook the tree through a shell converter that replaces every 32 bytes with their SHA-256
+(`--work swap`: swaps every pair of bytes instead), which nothing can skip. Then it checks
+the output tree, cooks again with nothing changed, and again with one file per class
+rewritten. Last, it starts a watch on the cooked tree, at a watch's own share: it must be
+stable having cooked nothing, and a small source saved must reach the output tree.
+
+It prints each phase's time, the cold cook split into before the first converter ran,
+while they ran (and how busy goldberg kept its eight), and after the last one, and the CPU
+of goldberg against its converters. Then a line per size class from what the converter
+recorded of each of its runs: the time per run (mean, p50, p95, max), a run's rate, the
+share spent reading and writing, and when in the cook the class's runs started and ended.
+The tree, its outputs and the digest at the end are the same on every machine for the same
+options; a different digest means a machine did different work.
+
+| Option | Meaning |
+|---|---|
+| `--size N` | about how big the tree is: `512M`, `2G` |
+| `--classes 5,10,...` | the size classes, as divisors of `--size` |
+| `--work hash\|swap` | what the converter does to each file |
+| `--dir DIR` | where the tree goes. Default `build/<target>/bench/goldberg`, never the OS's temporary directory (memory, on some systems). It needs about three times `--size` free: sources, the converters' outputs in the work tree, and the output tree |
+| `--seed N`, `--touch N` | the noise; how many files per class the last cook finds changed |
+| `--watch MODE` | goldberg's `--watch` |
+| `--no-evict`, `--keep` | leave the cache warm; leave the tree |
+
+Dropping the cache: Linux writes the files back and advises the kernel it does not need
+them (and says how much stayed in memory); macOS invalidates a mapping of each; Windows
+opens each without buffering. None of it needs privileges, and only Linux and macOS can
+say how well it worked. The test fails when a cook fails or an output is wrong, never on a
+time.
 
 ## See also
 

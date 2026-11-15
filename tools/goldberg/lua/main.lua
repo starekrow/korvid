@@ -28,7 +28,7 @@ end
 
 -- ---- arguments ------------------------------------------------------------------------
 
-local VALUE = { ["--lock-wait"] = true, ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--state"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true, ["--stamp"] = true }
+local VALUE = { ["--lock-wait"] = true, ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--state"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true, ["--stamp"] = true, ["--share"] = true }
 local FLAG = { ["-v"] = "verbose", ["--quiet"] = "quiet", ["-q"] = "quiet", ["--dry-run"] = "dry_run", ["--scan"] = "scan", ["--keep"] = "keep" }
 
 local function parse(words)
@@ -248,6 +248,10 @@ local function start(mode, words)
     run.backend = host.watch(o.watch or "auto")
     for i = 1, #cfg.roots do run.session:scan(i) end
     host.active(true)
+    -- Its share of each tick for its events: a cook takes all of it; a watch, beside
+    -- whatever else the machine is doing, 40%, until it is asked to cook.
+    run.share = (tonumber(o.share) or (mode == "cook" and 100 or 40)) / 100
+    host.share(run.share)
 end
 
 local function report(final)
@@ -272,10 +276,38 @@ local function report(final)
     return t
 end
 
-local function write_outputs()
-    if run.session.graph and run.opts.state_file then
-        if not host.write_atomic(run.opts.state_file, run.session.graph:state_text()) then complain("cannot write the state to %s", run.opts.state_file) end
-    end
+-- ---- the state ----------------------------------------------------------------------------
+-- A cook writes it whole at its end. A watch begins a write each time it is stable and the
+-- state changed, and makes it a slice a tick, within its share, so that tens of thousands
+-- of files never stop the main thread for the length of their encoding; the file is
+-- replaced once the text is complete. A quit finishes a write under way first.
+
+local TICK = 1 / 60
+
+local function wants_state()
+    return run.session.graph and run.opts.state_file and (run.session:state_changed() or not kv.fs.is_file(run.opts.state_file))
+end
+
+local function put_state(text)
+    if host.write_atomic(run.opts.state_file, text) then return end
+    complain("cannot write the state to %s", run.opts.state_file)
+    run.session.state_dirty = true -- tried again at the next chance
+end
+
+-- From here on, what changes is the next write's.
+local function begin_state()
+    run.session:state_taken()
+    return run.session.graph:state_writer()
+end
+
+local function state_slice()
+    if not run.state_job then return end
+    local text = run.state_job(host.now() + run.share * TICK)
+    if text then run.state_job = nil; put_state(text) end
+end
+
+-- The dump and the log: for tests and for people, written whole.
+local function write_debug()
     if run.opts.dump then
         local ok, err = kv.fs.write(run.opts.dump, run.session:dump())
         if not ok then complain("%s", err) end
@@ -284,6 +316,13 @@ local function write_outputs()
         local ok, err = kv.fs.write(run.opts.log, table.concat(run.log, "\n") .. "\n")
         if not ok then complain("%s", err) end
     end
+end
+
+-- Everything, now: a write under way finished first, then a whole one if more changed.
+local function write_outputs()
+    if run.state_job then put_state(run.state_job(nil)); run.state_job = nil end
+    if wants_state() then put_state(begin_state()(nil)) end
+    write_debug()
 end
 
 function goldberg.event(ev)
@@ -329,6 +368,18 @@ function goldberg.ask(words)
         for _, e in ipairs(t.errors) do out[#out + 1] = "  failed   " .. e end
         for _, w in ipairs(t.warnings) do out[#out + 1] = "  warned   " .. w end
         return out
+    elseif verb == "cook" then
+        -- Everything looked at again, now and with the whole of each tick: every root
+        -- scanned (only what changed is read), every step checked against the output
+        -- tree, and what no source accounts for taken out, as a cook would.
+        if #words > 1 then return out, "cook takes nothing in a session: it looks at every file again" end
+        if not s.graph then return out, "this session has no output tree to cook into" end
+        s.graph:recheck()
+        for i = 1, #s.roots do s:scan(i) end
+        run.recook = host.now()
+        host.share(1)
+        out[#out + 1] = "cooking"
+        return out
     elseif verb == "explain" or verb == "touch" then
         if #words < 2 then return out, verb .. " PATH" end
         for i = 2, #words do
@@ -368,6 +419,7 @@ end
 function goldberg.tick(quiet)
     if not run then return end
     poll_project()
+    state_slice()
     local s = run.session
     if s:has_work() then
         if run.log then run.log[#run.log + 1] = '{"kind": "settle"}' end
@@ -375,6 +427,12 @@ function goldberg.tick(quiet)
         return -- what that asked for goes out before anything is called stable
     end
     if not (quiet and s:stable()) then return end
+    if run.recook then
+        say("goldberg: %s: cooked again (%.0f ms)", run.cfg.game, (host.now() - run.recook) * 1000)
+        run.recook = nil
+        host.share(run.share)
+        run.said_stable = false -- and the usual line, below
+    end
     if run.mode == "cook" then
         local t = report(true)
         write_outputs()
@@ -391,7 +449,8 @@ function goldberg.tick(quiet)
         run = nil
     elseif not run.said_stable then
         report(false)
-        write_outputs()
+        if not run.state_job and wants_state() then run.state_job = begin_state() end
+        write_debug()
         run.said_stable = true
     end
 end

@@ -55,8 +55,18 @@ function Session.new(cfg)
     if cfg.project then s.rules:set("project", cfg.project.text, cfg.project.display) end
     for i = 1, #cfg.roots do s.gen[i] = 0 end
     s.known = {}       -- from the saved state: key -> { size, mtime, hash }, for files not yet seen
+    -- Whether the state to save differs from the one read: a file hashed, gone, or never
+    -- seen again, or a step's record changed (the graph sets it). A cook that changed none
+    -- of those does not write the state again: at tens of thousands of files that write
+    -- was a third of a cook with nothing to do.
+    s.state_dirty = cfg.state == nil
     s.touched = {}     -- keys whose step may need another look: a new answer, or new content
     s.removed = {}
+    -- Per root, the scans asked for whose scan-done has not arrived. Nothing is planned
+    -- while one is out: a step's outputs in the work root, not seen yet, would look
+    -- missing, and the step would run again. (A session that takes its events a share at
+    -- a time sees the work root's files ticks after the output tree's scan is done.)
+    s.scanning = {}
     local state
     if cfg.state then
         state = json.decode(cfg.state)
@@ -67,6 +77,7 @@ function Session.new(cfg)
             end
         else
             state = nil -- unreadable, or another version's: a full cook
+            s.state_dirty = true
         end
     end
     if cfg.out_root then
@@ -98,6 +109,7 @@ function Session:request(what, text)
 end
 
 function Session:scan(root)
+    self.scanning[root] = (self.scanning[root] or 0) + 1
     self.gen[root] = self.gen[root] + 1
     request(self, "scan", root, "")
     self.io.scan(root)
@@ -150,6 +162,7 @@ local function touch(self, ev)
         if not is_berg then self.unsolved[key] = true end
         -- The state remembers it at this size and time: its hash is known without a read.
         local k = self.known[key]
+        self.known[key] = nil -- what is left once the scans are done went while nobody looked
         if k and not is_berg and ev.kind == "file-seen" and k.size == ev.size and k.mtime == ev.mtime and type(k.hash) == "string" and #k.hash == 64 then
             f.hash = k.hash
             files:set(h, "size", ev.size)
@@ -159,6 +172,7 @@ local function touch(self, ev)
             self.touched[key] = true
             return
         end
+        if ev.kind == "file-made" then return end -- made() has its hash
         ask_hash(self, f)
         return
     end
@@ -171,6 +185,7 @@ end
 local function forget(self, key)
     local f = self.files[key]
     if not f then return end
+    if f.hash and not f.is_berg then self.state_dirty = true end
     host.kinds.file:destroy(f.h)
     self.files[key] = nil
     self.unsolved[key] = nil
@@ -202,6 +217,7 @@ local function hashed(self, ev)
     if f.is_berg then self.berg_hashing = self.berg_hashing - 1 end
     local files = host.kinds.file
     local was = f.hash
+    if not f.is_berg then self.state_dirty = true end -- its size and time, at least, are new
     f.hash = ev.hash
     files:set(f.h, "size", ev.size)
     files:set(f.h, "mtime", ev.mtime)
@@ -220,6 +236,20 @@ local function hashed(self, ev)
     else
         self.touched[key] = true
     end
+end
+
+-- A converter's output, moved into the work root by the host and hashed on its way in:
+-- seen and hashed in one event. If a hash of it is already out (a watcher's event got
+-- there first), that one finishes and the file is asked for again.
+local function made(self, ev)
+    local key = self:key(ev.root, ev.path)
+    if not self.files[key] then touch(self, ev) end
+    local f = self.files[key]
+    if not f then return end -- hidden
+    if f.hashing then f.again = true return end
+    f.hashing = true
+    self.hashing = self.hashing + 1
+    hashed(self, ev)
 end
 
 -- A step's directory in the work root, emptied: what a converter made is taken back, and
@@ -258,6 +288,10 @@ end
 
 function Session:event(ev)
     local k = ev.kind
+    if k == "scan-done" then
+        local n = self.scanning[ev.root]
+        if n then self.scanning[ev.root] = n > 1 and n - 1 or nil end
+    end
     if k == "step-exit" then if self.graph then self.graph:step_exit(ev) end return end
     if k == "project-changed" then
         -- The project's goldberg.berg, read again (or gone): it speaks for every file.
@@ -269,6 +303,7 @@ function Session:event(ev)
     if k == "cook-failed" then if self.graph then self.graph:cook_failed(ev) end return end
     if self.graph and ev.root == self.out_root then self.graph:out_event(ev) return end
     if k == "file-seen" or k == "file-added" or k == "file-changed" then touch(self, ev)
+    elseif k == "file-made" then made(self, ev)
     elseif k == "file-removed" or k == "hash-failed" then
         local key = self:key(ev.root, ev.path)
         local f = self.files[key]
@@ -371,7 +406,7 @@ function Session:has_work()
     if self:can_settle() then return true end
     if not self.graph then return false end
     if next(self.touched) ~= nil or #self.removed > 0 then return true end
-    return self.hashing == 0 and next(self.unsolved) == nil and self.graph:ready()
+    return self.hashing == 0 and next(self.unsolved) == nil and next(self.scanning) == nil and self.graph:ready()
 end
 
 -- One step of the session's own work: solve what can be solved, bring the graph up to
@@ -392,11 +427,23 @@ function Session:advance()
         self.touched[key] = nil
         g:file_changed(key)
     end
-    if self.hashing == 0 and next(self.unsolved) == nil and g:ready() then g:plan() end
+    if self.hashing == 0 and next(self.unsolved) == nil and next(self.scanning) == nil and g:ready() then g:plan() end
+end
+
+-- Whether the state written now would differ from the one read, or last written.
+function Session:state_changed()
+    return self.state_dirty or next(self.known) ~= nil
+end
+
+-- A write of the state begins: it accounts for everything changed so far, the files the
+-- state knew and nobody saw included.
+function Session:state_taken()
+    self.state_dirty = false
+    self.known = {}
 end
 
 function Session:stable()
-    if self.hashing ~= 0 or next(self.unsolved) ~= nil then return false end
+    if self.hashing ~= 0 or next(self.unsolved) ~= nil or next(self.scanning) ~= nil then return false end
     if not self.graph then return true end
     return next(self.touched) == nil and #self.removed == 0 and self.graph:stable()
 end

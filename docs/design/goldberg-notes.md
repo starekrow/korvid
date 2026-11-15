@@ -26,6 +26,97 @@ build, and at 4 ms that decision costs nothing anyone will notice.
 Size: about 1,400 lines of C++ in the host, 2,600 of Lua in the application, and 900 of
 tests that run the built binary.
 
+### At scale: the heavy test
+
+`kormake test --heavy goldberg linux-dev`, defaults: 1.07 GiB in 18,357 files over six
+size classes, every 32 bytes hashed by a shell converter, ext4 on NVMe, the cache dropped
+(0.0% resident). Digest `1fccef70833884e2`. Nov 14, 2026.
+
+| What | First run | `posix_spawn` | The syscall cuts | I/O as tasks |
+|---|---|---|---|---|
+| Cold cook | 192 s | 23 s | 22.7 s | 12.5 s (2.0 s before the first converter, 7.7 s of converters, 2.8 s after) |
+| Converters busy (their own time only) | 1% of eight | 7% | 8% | 22% |
+| CPU, converters / goldberg and the shell | 9.7 s / 237 s | 9.7 s / 62 s | 10 s / 62 s | 13 s / 81 s |
+| The 16,667 files of 10 KB | 163 s, 171 us a run | 10 s, 135 us a run | 8.4 s, 137 us a run | 5.3 s, 187 us a run |
+| The 21 files of 10 MB to 200 MB | 2 s, 125 to 140 MB/s a run | the same | the same | 2.5 s, 90 to 110 MB/s a run (hashing and copying beside them now) |
+| Second cook, nothing changed (the whole run) | 6.2 s | 6.7 s | 4.5 s | 4.6 s |
+| One file per class changed | 8.8 s | 9.0 s | 9.3 s | 7.6 s |
+
+The changed cook is not slow: one file per class includes the 200 MB, 100 MB and 50 MB
+ones, about 380 MB hashed, converted and copied again. On a tree of 10,000 small files,
+six changed files cook in the time nothing changed does.
+
+At first goldberg was the cook, not the work, and nearly all of it was `fork()`: each
+converter was started by a fork of goldberg (5.9 GB mapped, 16 threads), which copied its
+page tables on the main thread and left its pages copy-on-write until the child exec'd.
+The main thread spent four fifths of its time in the kernel. Linux and macOS now start a
+child with `posix_spawnp` (a vfork underneath: modules/platform/src/posix/process_posix.cc);
+iOS and Android still fork. `Graph:plan()` also walked and sorted every step (36,714 here)
+whenever a converter ended; it now walks only the steps that are unchecked or have ended,
+which measured nothing at this size (23.0 s with the old walk).
+
+Then a syscall trace of a 10,000-file cook (strace on the main thread) showed 100 calls a
+converter, and these were cut, halving them (1,002,316 to 532,581):
+
+- `io_make_dirs` made every directory from `/` down on every call, three calls a step: 33
+  `mkdir`, 31 of them failing. It now tries the leaf first and walks up only past a
+  missing parent. `commit_run` also made the step's directory twice and before it needed
+  to.
+- A spawn made a third pipe that only the fork path reads, and set close-on-exec with two
+  `fcntl` a pipe where Linux has `pipe2(O_CLOEXEC)`.
+- `io_remove_tree` removed a directory with `remove()`, which tries `unlink` first.
+- A cook with nothing to do re-encoded and rewrote the whole state (8.4 MB at 10,000
+  files, pretty-printed): 1.2 s of a 3.2 s cook. It is now written only when a file was
+  hashed, went, or a step's record changed, and without indentation (7.8 MB).
+
+Then hashing, copying and converter runs became tasks on an `IoQueue` of goldberg's own
+(`IoQueue::run_task`, `modules/platform/src/io_task.cc`): worker threads in lanes with
+limits (runs 8, hashes one a core, copies half that), a worker taking the next task the
+moment it is free instead of at the next tick. Hashes and copies stream (`io_read_each`,
+`io_copy_now`) instead of reading whole files, and are no longer a batch the tick waits
+for. A run's task spawns, drains and waits for its converter, moves what it wrote and
+hashes it, and the tick gets one `file-made` event an output instead of a change, a hash
+request and its answer. The first try was slower: `io_read_each` took a 1 MB buffer for
+every file, which glibc maps and unmaps, and an unmap in a process of 40 threads stops
+every core it runs on (24 workers at a fifth of a core each, mostly in the kernel). Sized
+to the file and on the stack for small ones, the workers went quiet.
+
+Now the main thread is the limit: Lua at 100% while the converters run. A watch takes a
+share of it (`--share`, 40% by default): its events are budgeted to that share of a 60 Hz
+tick, and it sleeps in proportion to what each tick used. Hashing and converters are not
+held back, so a watch's first cook of 10,000 small files took 4.3 s at 40% against 3.3 s
+at 100%. `cook`, asked of a watch, runs at 100% until stable.
+
+A watch wrote its state each time it was stable, and encoding 7.8 MB of it in Lua was one
+tick of 1.2 s at 10,000 files: what a GUI would have frozen for. The state is now written
+as text directly (`string.format`, not a JSON value per entry and then an encoding), and
+in a watch as a coroutine that does a slice a tick within the share: 17 slices at 10,000
+files, the last (joining the text) 10 ms, the write 2.4 ms. Entries are read as they are
+reached, not from a snapshot, which is safe because an out-of-date entry only costs a hash
+or a cook at the next start; a change during the write makes the session dirty again.
+
+The share broke a watch's start, and the heavy test now has a watch phase that would have
+caught it. Nothing was planned until the output tree's scan was in, but nothing waited for
+the work root's: a cook takes its events in a few large ticks and saw the converters'
+outputs first in practice, while a watch at 40%, taking a few hundred events a tick, planned
+before it had seen them, found the outputs missing and ran the converters again (3,567
+cooks on an up-to-date tree of 10,000 files; at 18,357 it never settled). Planning now waits
+until every root's scan is in. On the 1 GiB tree, a watch at 40% is stable in 7.6 s having
+cooked nothing (a cook with nothing to do: 4.0 s at 100%), and a saved 8 KB source is right
+in the output tree 6.9 ms later.
+
+What still takes a long tick, at 10,000 files: a watch's start, where solving every file
+(190 ms) and the first plan over every step (275 ms) are each one tick; and the line a
+watch prints when stable, whose counts walk every step (50 ms).
+
+Left as they are: `posix_spawn`'s file actions ask `getrlimit` five times a spawn (2 us
+each); the work root holds a directory per step, so a cook opens and, in a cook as in a
+watch, puts an inotify watch on each (10,000 here); and most of a converter's time on the
+main thread is Lua. Each child has ended by the first time goldberg asks, so the eight run
+as fast as goldberg ticks, not as fast as they finish. Also seen: `io_make_dirs` was the
+45 `mkdir` a file the first run counted, and the `goldberg.event` pool fills at 16,384 near
+the end of the cold cook (logged; nothing lost).
+
 ## What held
 
 - **One path for a cook and a watch.** There is no code that knows which it is in until
@@ -86,7 +177,7 @@ tests that run the built binary.
   sprite in this directory" has no place yet. Slice 2.
 - **A converter's script lives under an asset root**, so that it is hashed like any
   source. Tools shared across modules will want somewhere better.
-- **Eight scripts at once**, a constant.
+- **Eight scripts at once**, a constant (now a lane's limit, set at startup).
 - **Paths are 200 bytes** in the pools. A longer one is reported and not tracked.
 - **`status` and `explain` reach a watch only through its port or its stdin.** From
   another terminal you have to know the port.

@@ -316,11 +316,15 @@ void test_cook(TestCtx& c) {
         a.free(); b.free();
     }
 
-    // A second cook of an unchanged tree runs no step and reads no source.
+    // A second cook of an unchanged tree runs no step and reads no source, and leaves the
+    // state as it found it: not written again.
+    IoStat before{}, after{};
+    KV_CHECK(c, io_stat(t.path(".goldberg-state/out.json"), &before));
     KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--dump", dump, "--watch", "none") == 0);
     KV_CHECK(c, has(g_out.data, "goldberg: game: 4 files, 0 cooked, 3 clean, 0 failed"));
     d = t.read("dump.txt");
     KV_CHECK(c, count(d, "request copy") == 0 && count(d, "request hash") == 1 && has(d, "request hash g:goldberg.berg +text"));
+    KV_CHECK(c, io_stat(t.path(".goldberg-state/out.json"), &after) && after.mtime_ns == before.mtime_ns && after.size == before.size);
 
     // One source changes: one step runs.
     t.put("assets/a.png", "the a, changed");
@@ -345,6 +349,8 @@ void test_cook(TestCtx& c) {
     KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
     KV_CHECK(c, has(g_out.data, "moved g/ui/hud.json to the attic (its source g:ui/hud.json is gone)") && has(g_out.data, "moved g/stray/left.txt to the attic (nothing here cooks to it)"));
     KV_CHECK(c, has(g_out.data, "2 files, 0 cooked, 1 clean, 0 failed, 3 to the attic"));
+    // Nothing cooked, and the state is written: it no longer knows the files that went.
+    KV_CHECK(c, !has(t.read(".goldberg-state/out.json"), "g:ui/hud.json") && has(t.read(".goldberg-state/out.json"), "g:a.png"));
     KV_CHECK(c, !io_is_file(t.path("out/g/ui/hud.json")) && !io_is_dir(t.path("out/g/ui")) && !io_is_dir(t.path("out/g/stray")) && io_is_file(t.path("out/g/a.png")));
     // Nothing was deleted: each file is in the attic, under this run's folder, at its own
     // path. A cook says so on its way out, every time, until someone empties it.
@@ -682,12 +688,12 @@ struct Running {
 
 // Polls until `fn` holds, for five seconds at most.
 template <class F>
-bool eventually(Running& r, F fn) {
+bool eventually(Running& r, F fn, f64 seconds = 5.0) {
     f64 t0 = time_now();
     for (;;) {
         r.pump();
         if (fn()) return true;
-        if (time_now() - t0 > 5.0) return false;
+        if (time_now() - t0 > seconds) return false;
         time_sleep(0.01);
     }
 }
@@ -791,6 +797,15 @@ void test_watch(TestCtx& c) {
         KV_CHECK(c, eventually(w, [&] { return ask(w, port, "status") && has(g_out.data, "1 warned") && has(g_out.data, "  warned   g:odd.xyz: no type"); }));
         KV_CHECK(c, ask(w, port, "ls /kinds/goldberg") && has(g_out.data, "file") && has(g_out.data, "step"));
 
+        // Asked to cook: what a watch does not watch (its output tree) is checked as a cook
+        // would. An output changed behind its back is made again, a stray goes to the attic.
+        t.put("out/g/ships/ship.png", "tampered");
+        t.put("out/g/stray.txt", "nobody's");
+        KV_CHECK(c, ask(w, port, "cook") && has(g_out.data, "cooking"));
+        KV_CHECK(c, eventually(w, [&] { return has(w.text(), "cooked again"); }));
+        KV_CHECK(c, file_is(t, "out/g/ships/ship.png", "ship") && !io_is_file(t.path("out/g/stray.txt")));
+        KV_CHECK(c, !ask(w, port, "cook now") && has(g_out.data, "takes nothing"));
+
         // The project's rule file, which is in no asset root, is seen too.
         t.put("goldberg.berg", R"({ "rules": [ { "match": "*.xyz", "meta": { "cook": false } } ] })");
         KV_CHECK(c, eventually(w, [&] { return !io_is_file(t.path("out/g/odd.xyz")) && ask(w, port, "status") && has(g_out.data, "0 warned"); }));
@@ -815,6 +830,49 @@ void test_watch(TestCtx& c) {
 }
 
 // Two cooks of one tree: the second waits for the first, then finds nothing to do.
+// A watch with a small share takes its events a few a tick and writes its state a slice a
+// tick. Started on a tree a cook left up to date, it cooks nothing; a change made while it
+// runs is cooked, and what it writes is the whole state: after it quits, a cook of the
+// same tree has nothing to do. (That nothing is planned until every root's scan is in
+// shows only at a size where the scan outgrows the event pool, ticks apart: the heavy
+// test's watch phase is the one that would catch it.)
+void test_state_slices(TestCtx& c) {
+    c.begin("goldberg, a watch with a small share");
+    if (!process_supported()) return;
+    Tree t;
+    KV_CHECK(c, t.make("kv-goldberg-slices"));
+    char root[600], out[600], port_text[16], name[64], body[64];
+    snprintf(root, sizeof root, "g=%s/assets", t.dir);
+    snprintf(out, sizeof out, "%s/out", t.dir);
+    t.put("assets/goldberg.berg", R"({ "types": { "raw": { "runtime": false } },
+  "converters": { "up": { "from": "raw", "to": "text", "shell": "up", "outputs": ["{stem}_*.txt"] } },
+  "rules": [ { "match": "*.raw", "meta": { "type": "raw" } } ] })");
+    // Ten outputs a run: the work root is the biggest of the three, as in a real cook.
+    t.put("assets/up.sh", "for i in 0 1 2 3 4 5 6 7 8 9; do cp \"$1\" \"$2/${GOLDBERG_STEM}_$i.txt\"; done\n");
+    for (u32 i = 0; i < 300; ++i) {
+        snprintf(name, sizeof name, "assets/d%u/f%03u.raw", i / 50, i);
+        snprintf(body, sizeof body, "file %u", i);
+        t.put(name, body);
+    }
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, " 3300 cooked, 0 clean, 0 failed"));
+    u16 port = (u16)(41000 + (u32)(os_ticks() % 20000));
+    snprintf(port_text, sizeof port_text, "%u", port);
+    Running w;
+    KV_CHECK(c, w.start("--cli-port", port_text, "watch", "game", "--root", root, "--project", t.dir, "--out", out, "--share", "20"));
+    KV_CHECK(c, eventually(w, [&] { return has(w.text(), ", watching with "); }, 30.0));
+    KV_CHECK(c, has(w.text(), " 0 cooked, 3300 clean, 0 failed"));
+    t.put("assets/d3/f170.raw", "changed while watched");
+    KV_CHECK(c, eventually(w, [&] { return file_is(t, "out/g/d3/f170_9.txt", "changed while watched"); }, 30.0));
+    KV_CHECK(c, eventually(w, [&] { return ask(w, port, "status") && has(g_out.data, "stable"); }, 30.0));
+    KV_CHECK(c, ask(w, port, "quit"));
+    KV_CHECK(c, w.wait(10.0) == 0 && has(w.text(), "game: stopped"));
+    w.free();
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none") == 0);
+    KV_CHECK(c, has(g_out.data, " 0 cooked, 3300 clean, 0 failed"));
+    t.free();
+}
+
 void test_lock(TestCtx& c) {
     c.begin("goldberg lock");
     if (!process_supported()) return;
@@ -856,6 +914,7 @@ int main() {
     test_scripts(c);
     test_learn(c);
     test_watch(c);
+    test_state_slices(c);
     test_lock(c);
     g_out.free();
     g_err.free();

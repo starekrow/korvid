@@ -1,16 +1,21 @@
 // goldberg: the host. Everything the Lua application cannot do for itself: the pools its
-// records live in, the sources that feed the event queue (the scan, the watchers, hash
-// results), hashing on the job pool, and the pump that hands each tick's events to Lua
-// in order. What an event means, and everything that follows from it, is Lua's
+// records live in, the sources that feed the event queue (the scan, the watchers, what
+// its I/O finished), and the pump that hands each tick's events to Lua in order.
+//
+// Hashing, copying and converter runs are I/O: tasks on an IoQueue of goldberg's own, in
+// three lanes (runs, hashes, copies), each with its own limit. They run on the queue's
+// workers and a worker that finishes takes the next at once, so the converters stay busy
+// however often the pump runs; the pump only turns what finished into events. What an event means, and everything that follows from it, is Lua's
 // (lua/main.lua and what it requires).
 //
 // One system, goldberg.pump, each tick:
 //   1. a command the CLI left is handed to Lua (commands never touch the pools: the CLI
 //      runs them in its own system, so they leave a request and the pump carries it out);
-//   2. the sources are polled into the pending list: watcher events, finished hashes,
-//      the scan's files;
+//   2. the sources are polled into the pending list: watcher events, what the queue
+//      finished (hashes, copies, runs), the scan's files;
 //   3. pending events are folded (one per path) and moved into goldberg.event rows;
-//   4. the rows go to Lua in sequence order, and are destroyed;
+//   4. the rows go to Lua in sequence order, and are destroyed, as many as the session's
+//      share of the tick allows (all of them, in a cook);
 //   5. Lua is told whether the host has anything left (goldberg.tick), and decides
 //      whether the session is stable.
 #include "korvid/goldberg/module.h"
@@ -19,7 +24,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/format.h"
 #include "korvid/core/glob.h"
-#include "korvid/core/job.h"
+#include "korvid/core/thread.h"
 #include "korvid/core/log.h"
 #include "korvid/core/sha256.h"
 #include "korvid/core/sort.h"
@@ -35,6 +40,7 @@
 namespace kv {
 
 constexpr u32 kGbPath = 200;
+constexpr f64 kTick = 1.0 / 60.0; // the tick a session's share is of: a frame at 60 Hz
 
 int  goldberg_lock(const char* path, const char* who, char* holder, usize cap, i64* handle); // lock.cc
 void goldberg_unlock(i64 handle);
@@ -83,9 +89,11 @@ struct GbStep {
 
 namespace {
 
-enum GbEv : u8 { EvSeen, EvAdded, EvChanged, EvRemoved, EvDirAdded, EvDirRemoved, EvRescan, EvScanDone, EvHashed, EvHashFailed, EvCookDone, EvCookFailed, EvStepExit, EvCount };
+// file-made: a converter's output, moved into the work root and hashed on its way in: a
+// file seen and hashed, in one event.
+enum GbEv : u8 { EvSeen, EvAdded, EvChanged, EvRemoved, EvDirAdded, EvDirRemoved, EvRescan, EvScanDone, EvHashed, EvHashFailed, EvCookDone, EvCookFailed, EvStepExit, EvMade, EvCount };
 constexpr const char* kEvNames[EvCount] = {"file-seen", "file-added", "file-changed", "file-removed", "dir-added", "dir-removed",
-                                           "rescan", "scan-done", "hashed", "hash-failed", "cook-done", "cook-failed", "step-exit"};
+                                           "rescan", "scan-done", "hashed", "hash-failed", "cook-done", "cook-failed", "step-exit", "file-made"};
 
 constinit const FieldDesc k_event_fields[] = {KV_FIELDS(GbEvent, seq, kind, root, path, size, mtime, hash, text)};
 constinit const FieldDesc k_file_fields[]  = {KV_FIELDS(GbFile, path, root, size, mtime, hash, hashed, is_berg, scan)};
@@ -125,9 +133,17 @@ struct Root {
     bool watched; // false for the output tree: scanned, never watched
 };
 
+// Every request handed to the queue starts with this: what it is, and where it sits in the
+// list of the ones not yet finished (shutdown frees what never finished).
+enum TaskKind : u8 { TaskHash, TaskCopy, TaskRun };
+enum Lane : u8 { LaneRun, LaneHash, LaneCopy };
+struct TaskHead { u8 kind; u32 live_at; };
+
 struct HashReq {
+    TaskHead head{TaskHash, 0};
     u32   root;
     char  path[kGbPath];
+    char  full[800];
     bool  want_text;
     bool  ok;
     u64   size;
@@ -139,9 +155,11 @@ struct HashReq {
 
 // One copy: a source under a root to a path under the output tree, written whole.
 struct CopyReq {
+    TaskHead head{TaskCopy, 0};
     u32  root;
     char source[kGbPath];
     char output[kGbPath + 64];
+    char from[800], to[900], tmp[960];
     bool ok;
     u64  size;
     i64  mtime;
@@ -164,9 +182,14 @@ struct Before { u32 path; u64 size; i64 mtime; };
 //     watched; its files are held until they have been quiet for `settle` and then
 //     delivered while it still runs.
 // Either way the last event is step-exit, for the source it ran on.
+// What a run left in the work root, for its events: a file and what it was hashed as.
+struct Made { u32 path; u64 size; i64 mtime; u8 hash[32]; };
+
 struct Proc {
+    TaskHead    head{TaskRun, 0};
     Process     p;
-    bool        started = false;
+    bool        spawn_failed = false;
+    i32         code = 0;
     u32         root = 0;               // the source's
     char        path[kGbPath] = {};
     u32         work_root = 0;
@@ -180,6 +203,11 @@ struct Proc {
     Array<char> err;                    // what it wrote to stderr (the tail is kept)
     Array<Before> before;
     Array<char>   before_text;
+    char          step_dir[900] = {};   // the step's directory in the work root: absolute
+    // A declared run's results, made by its task: paths relative to the work root.
+    Array<Made>   made;
+    Array<u32>    gone;                 // last run's files this one did not write: removed
+    Array<char>   made_text;
 };
 
 // A directory whose watcher events wait until their file has been quiet a while.
@@ -201,10 +229,15 @@ struct GoldbergState {
     // Sources.
     Array<Root>     roots;
     FsWatcher       watcher;
-    Array<HashReq>  hashes;              // asked for, not yet run
-    Array<CopyReq>  copies;              // likewise
-    Array<Proc*>    procs;               // converter runs, waiting and running
+    IoQueue         io;                  // hashes, copies and runs, as tasks
+    bool            io_ready = false;
+    Array<TaskHead*> live;               // handed to the queue, not yet finished
+    u32             runs = 0;            // of those, converter runs
     u32             max_procs = 8;
+    // The session's share of a tick (1/60 s) for its events: 1 is all of them every tick
+    // (a cook, or a watch asked to cook); less leaves the rest for the next tick, and a
+    // headless session sleeps out the remainder.
+    f64             share = 1.0;
     Array<Hold>     holds;
     Array<Held>     held;
     i64             lock = -1;           // the lock on the output tree's state, while held
@@ -241,48 +274,27 @@ void push_pending(GoldbergState& s, u8 kind, u32 root, const char* path, u64 siz
     s.pending.push(p);
 }
 
-// ---- hashing: one batch a tick, on the job pool ---------------------------------------------
+// ---- what is handed to the queue ----------------------------------------------------------------
 
-void hash_job(u32, u32 begin, u32 end, void* user) {
-    GoldbergState& s = *(GoldbergState*)user;
-    for (u32 i = begin; i < end; ++i) {
-        HashReq& r = s.hashes.data[i];
-        char full[800];
-        format(full, sizeof full, "%s/%s", s.roots.data[r.root].dir, r.path);
-        IoBytes bytes;
-        r.ok = io_read_now(full, &bytes);
-        if (!r.ok) continue;
-        sha256(bytes.data, bytes.size, r.hash);
-        r.size = bytes.size;
-        if (r.want_text) {
-            r.text = (char*)mem_alloc(bytes.size + 1);
-            memcpy(r.text, bytes.data, bytes.size);
-            r.text[bytes.size] = 0;
-            r.text_len = (u32)bytes.size;
-        }
-        bytes.free();
-    }
+void live_add(GoldbergState& s, TaskHead* h) { h->live_at = s.live.len; s.live.push(h); }
+void live_remove(GoldbergState& s, TaskHead* h) {
+    TaskHead* last = s.live.data[s.live.len - 1];
+    s.live.data[h->live_at] = last;
+    last->live_at = h->live_at;
+    --s.live.len;
 }
 
-void run_hashes(GoldbergState& s) {
-    if (!s.hashes.len) return;
-    // The modification time is read before the bytes: a write in between leaves a time
-    // that is older than the content, and the next event for the file asks again.
-    for (HashReq& r : s.hashes) {
-        char full[800];
-        format(full, sizeof full, "%s/%s", s.roots.data[r.root].dir, r.path);
-        IoStat st;
-        r.mtime = io_stat(full, &st) ? st.mtime_ns : 0;
-    }
-    jobs_run(s.hashes.len, 4, hash_job, &s, "goldberg.hash");
-    for (HashReq& r : s.hashes) {
-        if (r.ok) push_pending(s, EvHashed, r.root, r.path, r.size, r.mtime, r.hash, r.text, r.text_len);
-        else push_pending(s, EvHashFailed, r.root, r.path);
-    }
-    s.hashes.len = 0;
+bool submit(GoldbergState& s, TaskHead* h, IoTaskFn fn, u8 lane, const char* name) {
+    IoTaskRequest r;
+    r.fn = fn;
+    r.arg = h;
+    r.name = name;
+    r.lane = lane;
+    r.user = (u64)(uintptr_t)h;
+    if (s.io.run_task(r).is_null()) return false;
+    live_add(s, h);
+    return true;
 }
-
-// ---- copying: one batch a tick, on the job pool ----------------------------------------------
 
 void parent_dir(const char* path, char* out, usize cap) {
     format(out, cap, "%s", path);
@@ -290,45 +302,73 @@ void parent_dir(const char* path, char* out, usize cap) {
     if (slash) *slash = 0; else out[0] = 0;
 }
 
-void copy_job(u32 chunk, u32 begin, u32 end, void* user) {
-    GoldbergState& s = *(GoldbergState*)user;
-    for (u32 i = begin; i < end; ++i) {
-        CopyReq& r = s.copies.data[i];
-        char from[800], to[900], tmp[960], dir[900];
-        format(from, sizeof from, "%s/%s", s.roots.data[r.root].dir, r.source);
-        format(to, sizeof to, "%s/%s", s.out_dir, r.output);
-        format(tmp, sizeof tmp, "%s.tmp-%u-%u", to, s.tmp_serial, i);
+// ---- hashing: a task each, the file streamed ------------------------------------------------------
+
+struct Sum { Sha256 h; u64 n; };
+bool sum_piece(void* user, const u8* data, usize n) { Sum& m = *(Sum*)user; m.h.update(data, n); m.n += n; return true; }
+
+i32 hash_task(void* arg, const IoTaskCtl&) {
+    HashReq& r = *(HashReq*)arg;
+    // The modification time is read before the bytes: a write in between leaves a time
+    // that is older than the content, and the next event for the file asks again.
+    IoStat st;
+    r.mtime = io_stat(r.full, &st) ? st.mtime_ns : 0;
+    if (r.want_text) { // a rule file: small, and wanted whole
         IoBytes bytes;
-        i32 err = 0;
-        if (!io_read_now(from, &bytes, nullptr, &err)) { format(r.error, sizeof r.error, "cannot read %s (errno %d)", from, err); continue; }
+        r.ok = io_read_now(r.full, &bytes);
+        if (!r.ok) return 0;
         sha256(bytes.data, bytes.size, r.hash);
-        parent_dir(to, dir, sizeof dir);
-        bool ok = (!dir[0] || io_make_dirs(dir)) && io_write_now(tmp, bytes.data, bytes.size, &err);
+        r.size = bytes.size;
+        r.text = (char*)mem_alloc(bytes.size + 1);
+        memcpy(r.text, bytes.data, bytes.size);
+        r.text[bytes.size] = 0;
+        r.text_len = (u32)bytes.size;
         bytes.free();
-        if (!ok) { format(r.error, sizeof r.error, "cannot write %s (errno %d)", tmp, err); io_remove(tmp); continue; }
-        // Whole, or not at all: a reader of the output tree never sees half a file.
-        if (!io_rename(tmp, to)) { format(r.error, sizeof r.error, "cannot rename %s into place", tmp); io_remove(tmp); continue; }
-        IoStat st;
-        if (io_stat(to, &st)) { r.size = st.size; r.mtime = st.mtime_ns; }
-        r.ok = true;
+        return 0;
     }
-    (void)chunk;
+    Sum m;
+    m.h.init();
+    m.n = 0;
+    r.ok = io_read_each(r.full, sum_piece, &m);
+    if (r.ok) { m.h.finish(r.hash); r.size = m.n; }
+    return 0;
 }
 
-void run_copies(GoldbergState& s) {
-    if (!s.copies.len) return;
-    ++s.tmp_serial;
-    jobs_run(s.copies.len, 2, copy_job, &s, "goldberg.copy");
-    for (CopyReq& r : s.copies) {
-        if (r.ok) push_pending(s, EvCookDone, r.root, r.output, r.size, r.mtime, r.hash);
-        else {
-            u32 n = (u32)strlen(r.error);
-            char* text = (char*)mem_alloc(n + 1);
-            memcpy(text, r.error, n + 1);
-            push_pending(s, EvCookFailed, r.root, r.output, 0, 0, nullptr, text, n);
-        }
+void hash_done(GoldbergState& s, HashReq& r) {
+    if (r.ok) push_pending(s, EvHashed, r.root, r.path, r.size, r.mtime, r.hash, r.text, r.text_len);
+    else push_pending(s, EvHashFailed, r.root, r.path);
+    r.text = nullptr; // the event has it now
+}
+
+// ---- copying: a task each, streamed, whole or not at all --------------------------------------------
+
+i32 copy_task(void* arg, const IoTaskCtl&) {
+    CopyReq& r = *(CopyReq*)arg;
+    char dir[900];
+    i32 err = 0;
+    parent_dir(r.to, dir, sizeof dir);
+    if (dir[0] && !io_make_dirs(dir)) { format(r.error, sizeof r.error, "cannot make %s", dir); return 0; }
+    if (!io_copy_now(r.from, r.tmp, r.hash, &err)) {
+        format(r.error, sizeof r.error, "cannot copy %s to %s (errno %d)", r.from, r.tmp, err);
+        io_remove(r.tmp);
+        return 0;
     }
-    s.copies.len = 0;
+    // Whole, or not at all: a reader of the output tree never sees half a file.
+    if (!io_rename(r.tmp, r.to)) { format(r.error, sizeof r.error, "cannot rename %s into place", r.tmp); io_remove(r.tmp); return 0; }
+    IoStat st;
+    if (io_stat(r.to, &st)) { r.size = st.size; r.mtime = st.mtime_ns; }
+    r.ok = true;
+    return 0;
+}
+
+void copy_done(GoldbergState& s, CopyReq& r) {
+    if (r.ok) push_pending(s, EvCookDone, r.root, r.output, r.size, r.mtime, r.hash);
+    else {
+        u32 n = (u32)strlen(r.error);
+        char* text = (char*)mem_alloc(n + 1);
+        memcpy(text, r.error, n + 1);
+        push_pending(s, EvCookFailed, r.root, r.output, 0, 0, nullptr, text, n);
+    }
 }
 
 // ---- the scan ----------------------------------------------------------------------------------
@@ -408,6 +448,9 @@ void proc_free(Proc* pr) {
     pr->err.free();
     pr->before.free();
     pr->before_text.free();
+    pr->made.free();
+    pr->gone.free();
+    pr->made_text.free();
     mem_free(pr);
 }
 
@@ -425,44 +468,29 @@ void push_exit(GoldbergState& s, const Proc& pr, i64 code, const char* text, u32
     push_pending(s, EvStepExit, pr.root, pr.path, 0, code, nullptr, copy, len);
 }
 
-bool proc_start(GoldbergState& s, Proc& pr) {
-    char step_dir[900];
-    step_dir_of(s, pr, step_dir, sizeof step_dir);
-    if (pr.scan) {
-        io_make_dirs(step_dir);
-        ListCtx c{&pr.before_text, nullptr};
-        Array<u32> at{};
-        c.at = &at;
-        io_list_files(step_dir, list_one, &c);
-        for (u32 off : at) {
-            char full[1200];
-            format(full, sizeof full, "%s/%s", step_dir, pr.before_text.data + off);
-            IoStat st;
-            if (io_stat(full, &st)) pr.before.push(Before{off, st.size, st.mtime_ns});
-        }
-        at.free();
-        Hold h{};
-        h.root = pr.work_root;
-        format(h.prefix, sizeof h.prefix, "%s/", pr.dir);
-        h.settle = pr.settle;
-        s.holds.push(h);
-    } else {
-        io_remove_tree(pr.run_dir); // a fresh directory for every run
-        io_make_dirs(pr.run_dir);
+// What a run needs from the main thread before its task goes: a scanning run's hold, and
+// what its step's directory held when it began (a file still exactly so when the run ends
+// was not written by it).
+void proc_prepare(GoldbergState& s, Proc& pr) {
+    step_dir_of(s, pr, pr.step_dir, sizeof pr.step_dir);
+    if (!pr.scan) return;
+    io_make_dirs(pr.step_dir);
+    ListCtx c{&pr.before_text, nullptr};
+    Array<u32> at{};
+    c.at = &at;
+    io_list_files(pr.step_dir, list_one, &c);
+    for (u32 off : at) {
+        char full[1200];
+        format(full, sizeof full, "%s/%s", pr.step_dir, pr.before_text.data + off);
+        IoStat st;
+        if (io_stat(full, &st)) pr.before.push(Before{off, st.size, st.mtime_ns});
     }
-    Array<const char*> argv{}, env{};
-    const char* w = pr.words.data;
-    for (u32 i = 0; i < pr.argc; ++i, w += strlen(w) + 1) argv.push(w);
-    for (u32 i = 0; i < pr.envc; ++i, w += strlen(w) + 1) env.push(w);
-    ProcessDesc d;
-    d.argv = Span<const char* const>(argv.data, argv.len);
-    d.env  = Span<const char* const>(env.data, env.len);
-    d.cwd  = pr.run_dir;
-    bool ok = pr.p.spawn(d);
-    argv.free();
-    env.free();
-    pr.started = true;
-    return ok;
+    at.free();
+    Hold h{};
+    h.root = pr.work_root;
+    format(h.prefix, sizeof h.prefix, "%s/", pr.dir);
+    h.settle = pr.settle;
+    s.holds.push(h);
 }
 
 void drop_hold(GoldbergState& s, const Proc& pr) {
@@ -485,36 +513,56 @@ void drop_hold(GoldbergState& s, const Proc& pr) {
 }
 
 // A run with declared outputs ended well: its files replace the step's.
-void commit_run(GoldbergState& s, Proc& pr) {
-    char step_dir[900];
-    step_dir_of(s, pr, step_dir, sizeof step_dir);
+// A declared run that ended well, on its worker: what it wrote is moved over the step's
+// directory in the work root, hashed on the way, and what last run left there and this one
+// did not write is removed. The events are the main thread's (run_done).
+void commit_files(Proc& pr) {
     Array<char> text{}, old_text{};
     Array<u32> at{}, old_at{};
     ListCtx c{&text, &at}, oc{&old_text, &old_at};
     io_list_files(pr.run_dir, list_one, &c);
-    io_make_dirs(step_dir);
-    io_list_files(step_dir, list_one, &oc);
+    io_list_files(pr.step_dir, list_one, &oc); // last run's, if there was one: not there is none
+    auto record = [&](const char* rel) {
+        u32 off = pr.made_text.len;
+        char path[kGbPath * 2];
+        format(path, sizeof path, "%s/%s", pr.dir, rel);
+        u32 n = (u32)strlen(path);
+        memcpy(pr.made_text.push_n(n + 1), path, n + 1);
+        return off;
+    };
     for (u32 off : old_at) {
         const char* rel = old_text.data + off;
         bool again = false;
         for (u32 n : at) if (strcmp(text.data + n, rel) == 0) { again = true; break; }
         if (again) continue;
-        char full[1200], path[kGbPath * 2];
-        format(full, sizeof full, "%s/%s", step_dir, rel);
+        char full[1200];
+        format(full, sizeof full, "%s/%s", pr.step_dir, rel);
         io_remove(full);
-        format(path, sizeof path, "%s/%s", pr.dir, rel);
-        if (strlen(path) < kGbPath) push_pending(s, EvRemoved, pr.work_root, path);
+        if (strlen(pr.dir) + 1 + strlen(rel) < kGbPath) pr.gone.push(record(rel));
     }
+    char made[1200] = {}; // the last directory made below, made once
     for (u32 off : at) {
         const char* rel = text.data + off;
-        char from[1200], to[1200], dir[1200], path[kGbPath * 2];
+        char from[1200], to[1200], dir[1200];
         format(from, sizeof from, "%s/%s", pr.run_dir, rel);
-        format(to, sizeof to, "%s/%s", step_dir, rel);
-        format(path, sizeof path, "%s/%s", pr.dir, rel);
-        if (strlen(path) >= kGbPath) { print_err("goldberg: '%s': a converter's output with a path too long to track\n", to); continue; }
+        format(to, sizeof to, "%s/%s", pr.step_dir, rel);
+        if (strlen(pr.dir) + 1 + strlen(rel) >= kGbPath) { print_err("goldberg: '%s': a converter's output with a path too long to track\n", to); continue; }
+        Made m{};
+        Sum sum;
+        sum.h.init();
+        sum.n = 0;
+        if (!io_read_each(from, sum_piece, &sum)) { print_err("goldberg: cannot read %s, which a converter wrote\n", from); continue; }
+        sum.h.finish(m.hash);
         parent_dir(to, dir, sizeof dir);
-        if (!io_make_dirs(dir) || !io_rename(from, to)) { print_err("goldberg: cannot move %s into the work directory\n", from); continue; }
-        push_pending(s, EvChanged, pr.work_root, path);
+        bool have = strcmp(dir, made) == 0 || io_make_dirs(dir);
+        if (have) format(made, sizeof made, "%s", dir);
+        if (!have || !io_rename(from, to)) { print_err("goldberg: cannot move %s into the work directory\n", from); continue; }
+        IoStat st;
+        if (!io_stat(to, &st)) continue;
+        m.size = st.size;
+        m.mtime = st.mtime_ns;
+        m.path = record(rel);
+        pr.made.push(m);
     }
     io_remove_tree(pr.run_dir);
     text.free(); at.free(); old_text.free(); old_at.free();
@@ -556,42 +604,81 @@ void drain(Proc& pr) {
     }
 }
 
-void poll_procs(GoldbergState& s) {
-    u32 running = 0;
-    for (Proc* pr : s.procs) if (pr->started) ++running;
-    f64 now = time_now();
-    for (u32 i = 0; i < s.procs.len;) {
-        Proc& pr = *s.procs.data[i];
-        bool done = false;
-        if (!pr.started) {
-            if (running >= s.max_procs) { ++i; continue; }
-            ++running;
-            if (!proc_start(s, pr)) {
-                if (pr.scan) drop_hold(s, pr);
-                push_exit(s, pr, -1, pr.p.error, (u32)strlen(pr.p.error));
-                done = true;
-            }
-        } else {
-            drain(pr);
-            if (pr.exited_at < 0 && !pr.p.running()) { drain(pr); pr.exited_at = now; }
-            // A converter with declared outputs and a settle time is held open that long
-            // after it ends: its real writer may not be the process that was started.
-            if (pr.exited_at >= 0 && now >= pr.exited_at + (pr.scan ? 0.0 : pr.settle)) {
-                i32 code = pr.p.code;
-                if (pr.scan) drop_hold(s, pr);
-                if (code == 0) { if (pr.scan) finish_scan(s, pr); else commit_run(s, pr); }
-                else if (!pr.scan) io_remove_tree(pr.run_dir);
-                u32 tail = pr.err.len > 600 ? 600 : pr.err.len;
-                push_exit(s, pr, code, pr.err.data + pr.err.len - tail, tail);
-                done = true;
-            }
-        }
-        if (done) {
-            proc_free(&pr);
-            memmove(s.procs.data + i, s.procs.data + i + 1, sizeof(Proc*) * (s.procs.len - i - 1));
-            --s.procs.len;
-        } else ++i;
+// One converter run, on its worker: started, drained until it ends (killed if the queue
+// asks it to stop), held open for `settle` when it declares its outputs (its real writer
+// may not be the process that was started), and, if it ended well, its files committed.
+i32 run_task(void* arg, const IoTaskCtl& ctl) {
+    Proc& pr = *(Proc*)arg;
+    if (!pr.scan) {
+        io_remove_tree(pr.run_dir); // a fresh directory for every run
+        io_make_dirs(pr.run_dir);
     }
+    Array<const char*> argv{}, env{};
+    const char* w = pr.words.data;
+    for (u32 i = 0; i < pr.argc; ++i, w += strlen(w) + 1) argv.push(w);
+    for (u32 i = 0; i < pr.envc; ++i, w += strlen(w) + 1) env.push(w);
+    ProcessDesc d;
+    d.argv = Span<const char* const>(argv.data, argv.len);
+    d.env  = Span<const char* const>(env.data, env.len);
+    d.cwd  = pr.run_dir;
+    bool ok = pr.p.spawn(d);
+    argv.free();
+    env.free();
+    if (!ok) { pr.spawn_failed = true; return 0; }
+    for (;;) {
+        pr.p.wait(0.05);
+        drain(pr);
+        if (ctl.cancelled()) pr.p.kill();
+        if (!pr.p.running()) { drain(pr); break; }
+    }
+    if (!pr.scan && pr.settle > 0) {
+        f64 end = time_now() + pr.settle;
+        for (f64 now = time_now(); now < end && !ctl.cancelled(); now = time_now()) { pr.p.wait(end - now < 0.05 ? end - now : 0.05); drain(pr); }
+    }
+    pr.code = pr.p.code;
+    if (!pr.scan) {
+        if (pr.code == 0) commit_files(pr);
+        else io_remove_tree(pr.run_dir); // a failed run contributes nothing
+    }
+    return 0;
+}
+
+// A run's task is over: its events, the last of them step-exit.
+void run_done(GoldbergState& s, Proc& pr, IoStatus status) {
+    if (pr.scan) drop_hold(s, pr);
+    if (pr.spawn_failed || status != IoStatus::Done) {
+        const char* why = pr.spawn_failed ? pr.p.error : "stopped";
+        push_exit(s, pr, -1, why, (u32)strlen(why));
+        return;
+    }
+    if (pr.code == 0) {
+        if (pr.scan) finish_scan(s, pr);
+        else {
+            for (u32 off : pr.gone) push_pending(s, EvRemoved, pr.work_root, pr.made_text.data + off);
+            for (const Made& m : pr.made) push_pending(s, EvMade, pr.work_root, pr.made_text.data + m.path, m.size, m.mtime, m.hash);
+        }
+    }
+    u32 tail = pr.err.len > 600 ? 600 : pr.err.len;
+    push_exit(s, pr, pr.code, pr.err.data + pr.err.len - tail, tail);
+}
+
+// What the queue finished since the last tick, as events.
+void drain_io(GoldbergState& s) {
+    if (!s.io_ready) return;
+    s.io.pump();
+    Span<const IoCompletion> list = s.io.completions();
+    if (!list.len) return;
+    Array<IoCompletion> done{};
+    for (const IoCompletion& c : list) done.push(c);
+    for (const IoCompletion& c : done) {
+        s.io.reap(c.request);
+        TaskHead* h = (TaskHead*)(uintptr_t)c.user;
+        live_remove(s, h);
+        if (h->kind == TaskHash) { HashReq* r = (HashReq*)h; if (c.status != IoStatus::Done) r->ok = false; hash_done(s, *r); if (r->text) mem_free(r->text); mem_free(r); }
+        else if (h->kind == TaskCopy) { CopyReq* r = (CopyReq*)h; if (c.status != IoStatus::Done && !r->error[0]) format(r->error, sizeof r->error, "stopped"); copy_done(s, *r); mem_free(r); }
+        else { Proc* pr = (Proc*)h; run_done(s, *pr, c.status); --s.runs; proc_free(pr); }
+    }
+    done.free();
 }
 
 // A watcher's event: into the queue, or, under a scanning step's directory, held until
@@ -643,8 +730,10 @@ void fill_rows(GoldbergState& s) {
     for (; taken < s.pending.len; ++taken) {
         Pending& p = s.pending.data[taken];
         if (p.dead) { if (p.text) mem_free(p.text); continue; }
+        // The pool is full (a session behind on its events): the rest wait in the list.
+        if (s.events->live() >= s.events->capacity) break;
         Handle h = s.events->spawn();
-        if (h.is_null()) break; // the pool is full: the rest wait a tick
+        if (h.is_null()) break;
         GbEvent* e = s.events->get<GbEvent>(h);
         e->seq  = ++s.seq;
         e->kind = p.kind;
@@ -761,11 +850,13 @@ int host_hash(lua_State* L) {
     check_root(L, 1, &at);
     const char* path = luaL_checkstring(L, 2);
     if (strlen(path) >= kGbPath) return luaL_error(L, "'%s': a path of %d bytes or more", path, (int)kGbPath);
-    HashReq r{};
-    r.root = at;
-    format(r.path, sizeof r.path, "%s", path);
-    r.want_text = lua_toboolean(L, 3);
-    s.hashes.push(r);
+    HashReq* r = (HashReq*)mem_alloc(sizeof(HashReq));
+    *r = HashReq{};
+    r->root = at;
+    format(r->path, sizeof r->path, "%s", path);
+    format(r->full, sizeof r->full, "%s/%s", s.roots.data[at].dir, path);
+    r->want_text = lua_toboolean(L, 3);
+    if (!submit(s, &r->head, hash_task, LaneHash, r->path)) { push_pending(s, EvHashFailed, at, path); mem_free(r); }
     return 0;
 }
 
@@ -786,13 +877,21 @@ int host_copy(lua_State* L) {
     check_root(L, 1, &at);
     const char* source = luaL_checkstring(L, 2);
     const char* output = luaL_checkstring(L, 3);
-    CopyReq r{};
     if (!s.out_dir[0]) return luaL_error(L, "copy: there is no output tree");
-    if (strlen(source) >= sizeof r.source || strlen(output) >= sizeof r.output) return luaL_error(L, "copy: '%s': a path too long", output);
-    r.root = at;
-    format(r.source, sizeof r.source, "%s", source);
-    format(r.output, sizeof r.output, "%s", output);
-    s.copies.push(r);
+    if (strlen(source) >= sizeof CopyReq::source || strlen(output) >= sizeof CopyReq::output) return luaL_error(L, "copy: '%s': a path too long", output);
+    CopyReq* r = (CopyReq*)mem_alloc(sizeof(CopyReq));
+    *r = CopyReq{};
+    r->root = at;
+    format(r->source, sizeof r->source, "%s", source);
+    format(r->output, sizeof r->output, "%s", output);
+    format(r->from, sizeof r->from, "%s/%s", s.roots.data[at].dir, source);
+    format(r->to, sizeof r->to, "%s/%s", s.out_dir, output);
+    format(r->tmp, sizeof r->tmp, "%s.tmp-%u", r->to, ++s.tmp_serial);
+    if (!submit(s, &r->head, copy_task, LaneCopy, r->output)) {
+        format(r->error, sizeof r->error, "the queue would not take it");
+        copy_done(s, *r);
+        mem_free(r);
+    }
     return 0;
 }
 
@@ -865,7 +964,15 @@ int host_run(lua_State* L) {
         lua_pop(L, 1);
     }
     if (!pr->argc) return fail("no command");
-    s.procs.push(pr);
+    proc_prepare(s, *pr);
+    if (!submit(s, &pr->head, run_task, LaneRun, pr->path)) {
+        pr->spawn_failed = true;
+        format(pr->p.error, sizeof pr->p.error, "the queue would not take it");
+        run_done(s, *pr, IoStatus::Failed);
+        proc_free(pr);
+        return 0;
+    }
+    ++s.runs;
     return 0;
 }
 
@@ -955,6 +1062,13 @@ int host_cwd(lua_State* L) {
     return 1;
 }
 
+// host.share(x): the session's share of a tick for its events, (0, 1]; 1 is all of them.
+int host_share(lua_State* L) {
+    f64 x = luaL_checknumber(L, 1);
+    state_of(L)->share = x <= 0.05 ? 0.05 : x >= 1.0 ? 1.0 : x;
+    return 0;
+}
+
 // host.active(on): whether the pump should keep ticking a session.
 int host_active(lua_State* L) { state_of(L)->active = lua_toboolean(L, 1); return 0; }
 
@@ -974,7 +1088,7 @@ constexpr luaL_Reg k_host[] = {
     {"flush", host_flush}, {"lock", host_lock}, {"sleep", host_sleep}, {"stat", host_stat}, {"touch", host_touch},
     {"run", host_run}, {"clear_work", host_clear_work}, {"remove_work", host_remove_work},
     {"glob", host_glob}, {"glob_path", host_glob_path}, {"print", host_print}, {"warn", host_warn},
-    {"now", host_now}, {"cwd", host_cwd}, {"active", host_active}, {"finish", host_finish}, {nullptr, nullptr},
+    {"now", host_now}, {"cwd", host_cwd}, {"active", host_active}, {"share", host_share}, {"finish", host_finish}, {nullptr, nullptr},
 };
 
 // The application's directory: tools/goldberg/lua beside this source, unless told
@@ -1071,7 +1185,7 @@ void push_event(lua_State* L, GoldbergState& s, const GbEvent& ev) {
     lua_setfield(L, -2, "root");
     lua_pushstring(L, ev.path);
     lua_setfield(L, -2, "path");
-    if (ev.kind == EvSeen || ev.kind == EvHashed || ev.kind == EvCookDone) {
+    if (ev.kind == EvSeen || ev.kind == EvHashed || ev.kind == EvCookDone || ev.kind == EvMade) {
         lua_pushinteger(L, (lua_Integer)ev.size);
         lua_setfield(L, -2, "size");
         lua_pushinteger(L, ev.mtime);
@@ -1086,7 +1200,7 @@ void push_event(lua_State* L, GoldbergState& s, const GbEvent& ev) {
         lua_pushlstring(L, t.data, t.len);
         lua_setfield(L, -2, "text");
     }
-    if (ev.kind == EvCookDone) {
+    if (ev.kind == EvCookDone || ev.kind == EvMade) {
         char hex[65];
         sha256_hex(ev.hash, hex);
         lua_pushlstring(L, hex, 64);
@@ -1109,6 +1223,7 @@ void pump(TickContext& ctx) {
     Engine& e = *ctx.engine;
     GoldbergState& s = ctx.state_as<GoldbergState>();
     if (s.failed) return;
+    f64 tick_start = time_now();
     s.events = ctx_kind(ctx, "goldberg.event", true);
     ctx_kind(ctx, "goldberg.file", true);
     ctx_kind(ctx, "goldberg.berg", true);
@@ -1143,10 +1258,8 @@ void pump(TickContext& ctx) {
             take_fs_event(s, fs_kind(ev.kind), root, ev.path);
         }
     }
-    poll_procs(s);
+    drain_io(s);
     release_held(s);
-    run_hashes(s);
-    run_copies(s);
     // The scan's files, a pool's worth at a time.
     u32 room = s.events->capacity - s.events->live();
     for (; s.scan_at < s.scan.len && s.pending.len < room; ++s.scan_at) {
@@ -1158,29 +1271,33 @@ void pump(TickContext& ctx) {
     }
     if (s.scan_at == s.scan.len) { s.scan.len = 0; s.scan_text.len = 0; s.scan_at = 0; }
 
-    // 3 and 4. Into rows, and to Lua in order.
+    // 3 and 4. Into rows, and to Lua in order, within the session's share of the tick:
+    // what does not fit stays in its rows for the next. One always goes.
     fill_rows(s);
     u32 delivered = 0;
+    f64 budget = s.share >= 1.0 ? 0.0 : s.share * kTick;
     if (s.events->live()) {
         Array<Handle> order{};
         for (u32 i = 0; i < s.events->rows(); ++i) if (s.events->is_alive(i)) order.push(s.events->handle_at(i));
         SeqCmp cmp{s.events};
         sort(order.data, order.len, sizeof(Handle), seq_cmp, &cmp);
         for (Handle h : order) {
+            if (budget > 0 && delivered && time_now() - tick_start >= budget) break;
+            GbEvent* ev = s.events->get<GbEvent>(h);
             if (!s.failed) {
-                push_event(L, s, *s.events->get<GbEvent>(h));
+                push_event(L, s, *ev);
                 if (call_app(s, e, "event", 1, 0)) ++delivered;
             }
+            if (ev->text) { Text& t = s.texts.data[ev->text - 1]; mem_free(t.data); t.data = nullptr; }
             s.events->destroy(h);
         }
         order.free();
-        for (Text& t : s.texts) mem_free(t.data);
-        s.texts.len = 0;
+        if (!s.events->live()) s.texts.len = 0; // every one delivered: the texts start over
     }
     if (s.failed) return;
 
     // 5. Is anything left? The watchers are asked once more before the host says no.
-    bool idle = !s.pending.len && !s.hashes.len && !s.copies.len && !s.scan.len && !delivered;
+    bool idle = !s.pending.len && !s.io.pending() && !s.scan.len && !delivered && !s.events->live();
     if (idle && s.watcher.is_open()) {
         for (const FsEvent& ev : s.watcher.poll(true)) {
             u32 root = ~0u;
@@ -1190,15 +1307,24 @@ void pump(TickContext& ctx) {
         }
     }
     // A converter still running, or a file of its still settling, is something left.
-    bool quiet = idle && !s.procs.len && !s.held.len;
+    bool quiet = idle && !s.runs && !s.held.len;
     lua_pushboolean(L, quiet);
     call_app(s, e, "tick", 1, 0);
     if (s.active && idle) time_sleep(0.002); // nothing to do this tick: do not spin
+    else if (s.active && s.share < 1.0) {
+        // Headless, nothing paces the ticks: a session with less than all of each sleeps
+        // in proportion to what this one used, so that its share is what it takes of the
+        // main thread, whatever the tick spent it on (events are budgeted; what Lua does
+        // after them is not). The queue's workers go on meanwhile.
+        f64 used = time_now() - tick_start;
+        f64 rest = used * (1.0 - s.share) / s.share;
+        time_sleep(rest < 4 * kTick ? rest : 4 * kTick);
+    }
 }
 
 // What a running session answers at once, in the CLI's own turn: it reads the session and
 // changes no pool.
-bool session_verb(const char* v) { return strcmp(v, "status") == 0 || strcmp(v, "explain") == 0 || strcmp(v, "touch") == 0; }
+bool session_verb(const char* v) { return strcmp(v, "status") == 0 || strcmp(v, "explain") == 0 || strcmp(v, "touch") == 0 || strcmp(v, "cook") == 0; }
 
 // Every other verb is one command: it leaves its words for the pump.
 void cmd_any(CliContext& ctx, Span<const char* const> args, const char* verb) {
@@ -1253,6 +1379,17 @@ bool goldberg_startup(Engine&, ModuleInstance& self) {
     GoldbergState* s = arena_push<GoldbergState>(self.arena);
     if (!s) return false;
     s->general = &self.general;
+    // The queue: no reads of its own (goldberg's are tasks), workers for every lane at once.
+    u32 cpus = os_cpu_count() ? os_cpu_count() : 1;
+    if (s->io.init(&self.general, 1u << 18, IoBackend::Sync) && s->io.start_tasks(s->max_procs + cpus)) {
+        s->io.set_lane(LaneRun, s->max_procs);
+        s->io.set_lane(LaneHash, cpus);
+        s->io.set_lane(LaneCopy, cpus > 4 ? cpus / 2 : 2);
+        s->io_ready = true;
+    } else {
+        KV_ERROR("goldberg", "the I/O queue did not start");
+        return false;
+    }
     find_lua_dir(*s);
     self.set_state(s);
     return true;
@@ -1261,20 +1398,24 @@ bool goldberg_startup(Engine&, ModuleInstance& self) {
 void goldberg_shutdown(Engine&, ModuleInstance& self) {
     GoldbergState* s = self.state_as<GoldbergState>();
     if (!s) return;
+    // The queue first: running converters are killed, the rest never start, and then
+    // what was handed to it can go.
+    if (s->io_ready) s->io.free();
+    for (TaskHead* h : s->live) {
+        if (h->kind == TaskHash) { HashReq* r = (HashReq*)h; if (r->text) mem_free(r->text); mem_free(r); }
+        else if (h->kind == TaskCopy) mem_free(h);
+        else proc_free((Proc*)h);
+    }
+    s->live.free();
     if (s->L) lua_close(s->L);
     s->watcher.free();
     goldberg_unlock(s->lock);
-    for (Proc* pr : s->procs) proc_free(pr);
-    s->procs.free();
     s->holds.free();
     s->held.free();
     for (Pending& p : s->pending) if (p.text) mem_free(p.text);
-    for (HashReq& r : s->hashes) if (r.text) mem_free(r.text);
     for (Text& t : s->texts) mem_free(t.data);
     s->command.free();
     s->roots.free();
-    s->hashes.free();
-    s->copies.free();
     s->scan.free();
     s->scan_text.free();
     s->pending.free();
@@ -1294,6 +1435,7 @@ constinit const CliCommandDesc k_commands[] = {
     {.name = "status", .help = "status: the running goldberg session: dirty, running, failed, warned", .fn = cmd_status},
     {.name = "explain", .help = "explain PATH: what this file is, what happens to it, and why", .fn = cmd_explain},
     {.name = "touch", .help = "touch PATH: look at this file again as if it had been saved", .fn = cmd_touch},
+    {.name = "cook", .help = "cook: look at every file again, with the whole of each tick, until stable", .fn = cmd_cook},
     {.name = "goldberg replay", .help = "goldberg replay LOG [--dump FILE]: feed a recorded event log to a fresh session, with no file system under it", .fn = cmd_replay},
 };
 constinit const SystemDesc k_systems[] = {

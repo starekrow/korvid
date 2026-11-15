@@ -44,6 +44,7 @@ function Graph.new(session, state)
         out_scanned = false,
         swept = false,
         replan = false,   -- something changed that plan() should look at
+        todo = {},        -- file key -> true: the steps plan() looks at (unchecked, or ran and ended)
         unchecked = 0, running = 0,
         cooked = 0, removed = 0,
         notes = {},       -- lines to print: removals, collisions, undeclared outputs
@@ -69,6 +70,10 @@ local function set_state(g, step, state)
     if step.state == "unchecked" then g.unchecked = g.unchecked - 1 end
     if step.state == "running" then g.running = g.running - 1 end
     step.state = state
+    -- plan() looks only at these: a graph of tens of thousands of steps is not walked
+    -- for every converter that ends.
+    if state == "unchecked" or (state == "running" and step.exited) then g.todo[step.file] = true
+    else g.todo[step.file] = nil end
     if state == "unchecked" then g.unchecked = g.unchecked + 1 end
     if state == "running" then g.running = g.running + 1 end
     g.replan = true
@@ -81,6 +86,7 @@ local function remove_output(g, output, why)
     local moved = g.s.io.remove_output(output)
     g.present[output] = nil
     g.built[output] = nil
+    g.s.state_dirty = true
     g.removed = g.removed + 1
     if moved == false then g.notes[#g.notes + 1] = string.format("could not move %s to the attic: it is still in the output tree (%s)", output, why)
     else g.notes[#g.notes + 1] = string.format("moved %s to the attic (%s)", output, why) end
@@ -101,6 +107,7 @@ local function drop_step(g, key, why)
     set_state(g, step, "clean") -- out of the counts
     if step.h then host.kinds.step:destroy(step.h) end
     g.steps[key] = nil
+    g.todo[key] = nil
     if step.kind == "copy" then
         if g.claim[step.output] == key then g.claim[step.output] = nil end
         if g.present[step.output] or g.built[step.output] then remove_output(g, step.output, why) end
@@ -108,6 +115,7 @@ local function drop_step(g, key, why)
         unlink_script(g, step)
         g.by_work[step.work] = nil
         g.ran[key] = nil
+        g.s.state_dirty = true
         -- What it made goes with it, and so does everything cooked from that. A run
         -- still going is cleared when it ends.
         if was_running and not step.exited then g.orphan_runs[key] = step.work
@@ -203,6 +211,7 @@ local function fail(g, step, why)
     step.error = why
     step.again = false
     g.ran[step.file] = nil
+    g.s.state_dirty = true
     set_state(g, step, "failed")
 end
 
@@ -298,6 +307,7 @@ local function finish_shell(g, step)
             step.file, conv.name, table.concat(undeclared, ", "), conv.file)
     end
     g.ran[step.file] = { key = step.run_key, outputs = outputs }
+    s.state_dirty = true
     if step.h then host.kinds.step:set(step.h, "key", (step.run_key:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))) end
     g.cooked = g.cooked + 1
     step.cooked = true
@@ -315,9 +325,7 @@ function Graph:plan()
     while again do
         again = false
         local keys = {}
-        for key, step in pairs(self.steps) do
-            if step.state == "unchecked" or (step.state == "running" and step.exited) then keys[#keys + 1] = key end
-        end
+        for key in pairs(self.todo) do keys[#keys + 1] = key end
         table.sort(keys)
         for _, key in ipairs(keys) do
             local step = self.steps[key]
@@ -344,8 +352,8 @@ function Graph:plan()
         remove_output(self, out, b and ("its source " .. b.source .. " is gone") or "nothing here cooks to it")
     end
     -- What the state remembers of files that are no longer there is forgotten too.
-    for out in pairs(self.built) do if not self.claim[out] then self.built[out] = nil end end
-    for key in pairs(self.ran) do if not self.steps[key] then self.ran[key] = nil end end
+    for out in pairs(self.built) do if not self.claim[out] then self.built[out] = nil; s.state_dirty = true end end
+    for key in pairs(self.ran) do if not self.steps[key] then self.ran[key] = nil; s.state_dirty = true end end
     -- And in the work root: directories no step writes to.
     for _, dir in ipairs(s:work_dirs()) do
         if not self.by_work[dir] then s:clear_work(dir) end
@@ -364,6 +372,7 @@ function Graph:cook_done(ev)
     local f = self.s.files[step.file]
     self.present[ev.path] = { size = ev.size, mtime = ev.mtime }
     self.built[ev.path] = { key = copy_key(ev.hash, ev.path), size = ev.size, mtime = ev.mtime, source = step.file }
+    self.s.state_dirty = true
     if step.h then host.kinds.step:set(step.h, "key", (self.built[ev.path].key:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))) end
     self.cooked = self.cooked + 1
     step.cooked = true
@@ -406,7 +415,19 @@ function Graph:step_exit(ev)
         return
     end
     step.exited = true
+    self.todo[key] = true
     self.replan = true
+end
+
+-- Every step looked at again once the output tree has been read again (its scan is
+-- coming): a session asked to cook checks what it would otherwise trust, and sweeps again.
+function Graph:recheck()
+    self.out_scanned = false
+    self.present = {}
+    self.swept = false
+    for _, step in pairs(self.steps) do
+        if step.state ~= "running" then set_state(self, step, "unchecked") end
+    end
 end
 
 function Graph:stable()
@@ -445,36 +466,76 @@ end
 
 -- The state to save: what each file was when it was last hashed, what made each output,
 -- and what each converter's last good run made.
-function Graph:state_text()
-    local files, built, ran = json.object(), json.object(), json.object()
-    local keys = {}
-    for key, f in pairs(self.s.files) do if not f.is_berg and f.hash then keys[#keys + 1] = key end end
-    table.sort(keys)
-    local rows = host.kinds.file
-    for _, key in ipairs(keys) do
-        local f = self.s.files[key]
-        files[key] = json.object("size", rows:get(f.h, "size"), "mtime", rows:get(f.h, "mtime"), "hash", f.hash)
-    end
-    local outs = {}
-    for out in pairs(self.built) do outs[#outs + 1] = out end
-    table.sort(outs)
-    for _, out in ipairs(outs) do
-        local b = self.built[out]
-        built[out] = json.object("key", b.key, "size", b.size, "mtime", b.mtime, "source", b.source)
-    end
-    keys = {}
-    for key in pairs(self.ran) do keys[#keys + 1] = key end
-    table.sort(keys)
-    for _, key in ipairs(keys) do
-        local r = self.ran[key]
-        local outputs, names = json.object(), {}
-        for name in pairs(r.outputs) do names[#names + 1] = name end
-        table.sort(names)
-        for _, name in ipairs(names) do outputs[name] = r.outputs[name] end
-        ran[key] = json.object("key", r.key, "outputs", outputs)
-    end
-    return json.encode(json.object("version", 1, "files", files, "built", built, "ran", ran), { indent = 1 }) .. "\n"
+-- JSON text for a string or a number, without building a JSON value first: a state of
+-- tens of thousands of files is mostly these.
+local function jstr(v)
+    if not v:find('[%c"\\]') then return '"' .. v .. '"' end
+    return json.encode(v)
 end
+local function jnum(v)
+    if math.type(v) == "integer" then return tostring(v) end
+    return v and string.format("%.17g", v) or "null"
+end
+
+-- The state as text, made a piece at a time: returns a function that works until host.now()
+-- passes its `deadline` (nil: until it is done) and returns the text once it is complete,
+-- nil while it is not. The files, outputs and runs are the ones there when it began; each
+-- is read as it is reached, so what changes meanwhile may be written as it was or as it is
+-- now. Either is safe (an entry that is out of date costs a hash or a cook at the next
+-- start, as a missing state does), and a change sets the session dirty again, so another
+-- write follows this one. Keys are not sorted: the state is only ever read by goldberg.
+function Graph:state_writer()
+    local g, s = self, self.s
+    local files, outs, rans = {}, {}, {}
+    for key, f in pairs(s.files) do if not f.is_berg and f.hash then files[#files + 1] = key end end
+    for out in pairs(g.built) do outs[#outs + 1] = out end
+    for key in pairs(g.ran) do rans[#rans + 1] = key end
+    local rows = host.kinds.file
+    local parts, deadline = { '{"version":1,"files":{' }, nil
+    local function each(list, piece)
+        local first = true
+        for i = 1, #list do
+            local text = piece(list[i])
+            if text then
+                parts[#parts + 1] = first and text or ("," .. text)
+                first = false
+            end
+            if i % 128 == 0 and deadline and host.now() >= deadline then coroutine.yield() end
+        end
+    end
+    local co = coroutine.create(function()
+        each(files, function(key)
+            local f = s.files[key]
+            if not (f and f.hash and f.h) then return nil end
+            return string.format('%s:{"size":%s,"mtime":%s,"hash":"%s"}', jstr(key), jnum(rows:get(f.h, "size")), jnum(rows:get(f.h, "mtime")), f.hash)
+        end)
+        parts[#parts + 1] = '},"built":{'
+        each(outs, function(out)
+            local b = g.built[out]
+            if not b then return nil end
+            return string.format('%s:{"key":"%s","size":%s,"mtime":%s,"source":%s}', jstr(out), b.key, jnum(b.size), jnum(b.mtime), jstr(b.source))
+        end)
+        parts[#parts + 1] = '},"ran":{'
+        each(rans, function(key)
+            local r = g.ran[key]
+            if not r then return nil end
+            local o = {}
+            for name, hash in pairs(r.outputs) do o[#o + 1] = jstr(name) .. ':"' .. hash .. '"' end
+            return string.format('%s:{"key":"%s","outputs":{%s}}', jstr(key), r.key, table.concat(o, ","))
+        end)
+        parts[#parts + 1] = "}}\n"
+    end)
+    return function(until_time)
+        deadline = until_time
+        local ok, err = coroutine.resume(co)
+        if not ok then error(err, 0) end
+        if coroutine.status(co) == "dead" then return table.concat(parts) end
+        return nil
+    end
+end
+
+-- The whole state as text, now.
+function Graph:state_text() return self:state_writer()(nil) end
 
 function Graph:dump(out)
     local keys = {}
