@@ -51,6 +51,14 @@ void input_sample(TickContext& ctx) {
         s.input.raw.backspaces += s.text_override_backspaces;
         s.text_override[0] = 0; s.text_override_len = 0; s.text_override_backspaces = 0;
     }
+    if (s.pointer_override) {
+        s.input.raw.mouse.x = s.pointer_x;
+        s.input.raw.mouse.y = s.pointer_y;
+        s.input.raw.mouse.buttons = s.pointer_buttons;
+        s.input.raw.mouse.wheel += s.pointer_wheel;
+        s.pointer_override = false;
+        s.pointer_wheel = 0.0f;
+    }
     // The CLI's presses stand in for the devices while they last.
     for (u32 i = 0; i < s.press_count;) {
         HidPress& p = s.presses[i];
@@ -188,6 +196,16 @@ void platform_text_input(Engine& e, bool on) {
     u32 before = s->text_requests;
     if (on) ++s->text_requests; else if (s->text_requests) --s->text_requests;
     if ((before == 0) != (s->text_requests == 0) && s->window.is_open()) s->window.text_input(s->text_requests != 0);
+}
+
+void input_pointer_override(Engine& e, f32 x, f32 y, u8 buttons, f32 wheel) {
+    HidState* s = engine_module_state_as<HidState>(e, "platform_hid");
+    if (!s) return;
+    s->pointer_override = true;
+    s->pointer_x = x;
+    s->pointer_y = y;
+    s->pointer_buttons = buttons;
+    s->pointer_wheel += wheel;
 }
 
 void input_text_override(Engine& e, const char* text, u32 backspaces) {

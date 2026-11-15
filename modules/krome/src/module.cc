@@ -8,6 +8,8 @@
 #include "korvid/core/log.h"
 #include "korvid/core/phase.h"
 #include "korvid/platform/io.h"
+#include "korvid/core/profile.h"
+#include "korvid/platform_hid/input.h"
 #include <string.h>
 
 namespace kv {
@@ -32,6 +34,9 @@ void krome_emit(KromeModule& s, const KromeEvent& ev) {
 namespace {
 
 void free_screen(KromeModule& s, KromeScreen* sc) {
+    krome_free_overlays(s, *sc);
+    if (s.under.screen == sc->id) s.under = KromeTarget{};
+    if (s.captured.screen == sc->id) s.captured = KromeTarget{};
     krome_lua_release(s, *sc);
     if (sc->io.is_null() == false) if (IoQueue* io = platform_io(*s.e)) io->cancel(sc->io);
     free_in(s.general, sc->source, sc->source_len + 1);
@@ -61,6 +66,8 @@ KromeScreen* new_screen(KromeModule& s, Name name, i32 layer) {
 }
 
 void run(KromeModule& s, KromeScreen& sc, const char* source, usize len) {
+    krome_free_overlays(s, sc);
+    sc.repaint = true;
     sc.loading = false;
     sc.ready = krome_lua_run(s, sc, source, len, name_str(sc.name));
     sc.failed = !sc.ready;
@@ -126,6 +133,26 @@ void krome_pump(TickContext& ctx) {
     s.ctx = nullptr;
 }
 
+// Phase PreSim, main thread, every tick, after the pump: the pointer and Escape as this
+// tick's sample has them.
+void krome_input(TickContext& ctx) {
+    KromeModule& s = ctx.state_as<KromeModule>();
+    if (!s.input_id) s.input_id = ctx.resource_id("input.state"); // per engine: a static would outlive it
+    const Input* in = ctx.resource<const Input>(s.input_id);
+    if (!in) return;
+    s.ctx = &ctx;
+    const MouseState& m = in->sampled.mouse;
+    krome_pointer(s, m.x, m.y, m.down(MouseButton::Left), m.wheel, in->sampled.down(Key::Escape));
+    s.ctx = nullptr;
+}
+
+// Phase PostSim, main thread, every tick: layout and paint where something changed.
+void krome_paint(TickContext& ctx) {
+    KV_ZONE("krome.paint");
+    KromeModule& s = ctx.state_as<KromeModule>();
+    krome_view_frame(s);
+}
+
 bool krome_startup(Engine& e, ModuleInstance& self) {
     KromeModule* s = arena_push<KromeModule>(self.arena);
     if (!s) return false;
@@ -133,6 +160,10 @@ bool krome_startup(Engine& e, ModuleInstance& self) {
     s->e = &e;
     s->general = &self.general;
     s->screens.alloc = &self.general;
+    s->fonts.alloc = &self.general;
+    s->images.alloc = &self.general;
+    s->layers.alloc = &self.general;
+    s->list.init(&self.general);
     if (!krome_lua_open(*s)) return false;
     self.set_state(s);
     return true;
@@ -143,6 +174,7 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     if (!s) return;
     for (KromeScreen* sc : s->screens) free_screen(*s, sc);
     s->screens.free();
+    krome_free_view(*s);
     krome_lua_close(*s);
 }
 
@@ -152,6 +184,9 @@ constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(KromeEvent, k_event_fiel
 constinit const SystemDesc k_systems[] = {
     {.name = ".pump", .phase = Phase::PreSim, .fn = krome_pump, .reads = "KromeSet", .emits = "KromeEvent",
      .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".input", .phase = Phase::PreSim, .fn = krome_input, .reads = "input.state", .emits = "KromeEvent",
+     .after = ".pump", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".paint", .phase = Phase::PostSim, .fn = krome_paint, .main_thread = true, .runs = RunWhen::Always},
 };
 
 } // namespace
@@ -230,7 +265,7 @@ bool krome_press(Engine& e, Name screen, const char* id) {
     KromeScreen* sc = s ? krome_screen(*s, screen) : nullptr;
     if (!sc || !sc->ready || !id) return false;
     u32 n = krome_find(sc->tree, name_intern(id));
-    return n != KROME_NONE && krome_fire(*s, *sc, n, 1.0);
+    return n != KROME_NONE && krome_fire(*s, *sc, sc->tree, n, 1.0);
 }
 
 const KromeTree* krome_tree(Engine& e, Name screen) {
@@ -239,10 +274,47 @@ const KromeTree* krome_tree(Engine& e, Name screen) {
     return sc ? &sc->tree : nullptr;
 }
 
+bool krome_find_rect(Engine& e, Name screen, const char* id, rect2* out) {
+    KromeModule* s = krome_state(e);
+    KromeScreen* sc = s ? krome_screen(*s, screen) : nullptr;
+    if (!sc || !id) return false;
+    Name n = name_intern(id);
+    for (u32 k = sc->overlays.len; k > 0; --k) {
+        u32 i = krome_find(sc->overlays[k - 1]->tree, n);
+        if (i != KROME_NONE) { *out = sc->overlays[k - 1]->tree.nodes[i].rect; return true; }
+    }
+    u32 i = krome_find(sc->tree, n);
+    if (i == KROME_NONE) return false;
+    *out = sc->tree.nodes[i].rect;
+    return true;
+}
+
 u32 krome_find(const KromeTree& t, Name id) {
     if (id.is_null()) return KROME_NONE;
     for (u32 i = 0; i < t.nodes.len; ++i) if (t.nodes[i].id == id) return i;
     return KROME_NONE;
+}
+
+void krome_viewport(Engine& e, f32 width, f32 height, f32 scale) {
+    KromeModule* s = krome_state(e);
+    if (!s) return;
+    s->viewport_fixed = true;
+    s->win_w = width;
+    s->win_h = height;
+    s->scale = scale > 0.0f ? scale : 1.0f;
+    for (KromeScreen* sc : s->screens) {
+        sc->tree.dirty = true;
+        for (KromeOverlay* o : sc->overlays) o->placed = false;
+    }
+}
+
+KromeStats krome_stats(Engine& e) {
+    KromeStats st;
+    if (KromeModule* s = krome_state(e)) {
+        st.layouts = s->layouts; st.paints = s->paints; st.submits = s->submits;
+        st.fired = s->fired; st.script_errors = s->script_errors;
+    }
+    return st;
 }
 
 const char* krome_model_text(Engine& e, Name screen, const char* key) {

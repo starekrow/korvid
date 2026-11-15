@@ -9,6 +9,8 @@
 #include "korvid/core/time.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
+#include "korvid/platform_hid/module.h"
+#include "korvid/asset/module.h"
 #include <string.h>
 
 namespace {
@@ -75,7 +77,7 @@ void frames(Engine& e, u32 n) {
 }
 
 u64 run_hash(bool with_krome, u32 ticks) {
-    const ModuleDesc* const with[] = {&platform_module, &krome_module, &k_kt};
+    const ModuleDesc* const with[] = {&platform_module, &platform_hid_module, &asset_module, &krome_module, &k_kt};
     const ModuleDesc* const without[] = {&platform_module, &k_kt_quiet};
     Engine e;
     if (with_krome ? !engine_init(e, with) : !engine_init(e, without)) return 0;
@@ -96,7 +98,7 @@ void test_lua(kv::TestCtx& c) {
     using namespace kv;
     c.begin("krome lua");
     g_seen = Seen{};
-    const ModuleDesc* const list[] = {&platform_module, &krome_module, &k_kt};
+    const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &asset_module, &krome_module, &k_kt};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     KromeModule* s = krome_state(e);

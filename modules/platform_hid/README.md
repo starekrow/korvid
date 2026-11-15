@@ -79,7 +79,8 @@ layouts, dead keys and input methods applied; `WM_CHAR` on Windows, surrogate pa
 and `backspaces` the Backspaces among it, auto-repeat included. A text field asks for it with
 `platform_text_input(e, true)` (counted, so two fields need two offs); SDL then shows an
 input method's window where there is one. `input_text_override(e, "Rowan\n")` types into the
-next sample, for demos and tests.
+next sample, for demos and tests. `input_pointer_override(e, x, y, buttons, wheel)` puts the pointer somewhere with these
+buttons held, as the mouse would, for the next sample: Krome's demo clicks through a form with it.
 
 ## Quick reference
 

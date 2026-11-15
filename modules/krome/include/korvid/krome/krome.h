@@ -17,15 +17,14 @@
 //
 // Krome is cosmetic: none of its state is hashed, and its events are traced, not hashed.
 #pragma once
-#include "korvid/core/module.h"
 #include "korvid/core/name.h"
+#include "korvid/krome/module.h"
 #include "korvid/krome/tree.h"
 
 namespace kv {
 
 struct Engine;
 
-KV_MODULE_DECLARE(krome_module);
 
 // Out: a node's event fired (a press, or the script's emit). Name hashes; node is the id, 0
 // when the node has none or the script emitted it.
@@ -59,7 +58,18 @@ bool krome_press(Engine& e, Name screen, const char* id);
 const KromeTree* krome_tree(Engine& e, Name screen);
 // A node by id; KROME_NONE when none.
 u32 krome_find(const KromeTree& t, Name id);
+// Where the node with this id is, in logical pixels, on the screen or the topmost of its
+// overlays that has it. False when none does.
+bool krome_find_rect(Engine& e, Name screen, const char* id, rect2* out);
 // A model value as text, as {key} shows it; "" when unset. Valid until the next call.
 const char* krome_model_text(Engine& e, Name screen, const char* key);
+
+// The view's size when there is no window to ask (a test, a tool drawing off screen):
+// physical pixels and the scale they are of logical ones. Once set, the window is not read.
+void krome_viewport(Engine& e, f32 width, f32 height, f32 scale);
+
+// What the view has done over the run: layouts, lists painted, lists handed to the renderer.
+struct KromeStats { u64 layouts = 0, paints = 0, submits = 0, fired = 0, script_errors = 0; };
+KromeStats krome_stats(Engine& e);
 
 } // namespace kv

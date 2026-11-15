@@ -9,7 +9,8 @@
     "sound":    { "runtime": true },
     "font":     { "runtime": true },
     "data":     { "runtime": true },
-    "text":     { "runtime": true }
+    "text":     { "runtime": true },
+    "script":   { "runtime": true }
   },
 
   "rules": [
@@ -30,6 +31,7 @@
 
     { "match": "*.txt",           "meta": { "type": "text" } },
     { "match": "*.md",            "meta": { "type": "text" } },
+    { "match": "*.lua",           "meta": { "type": "script" } },
 
     { "match": "*.berg",          "meta": { "cook": false } },
     { "match": "*.sh",            "meta": { "cook": false } },

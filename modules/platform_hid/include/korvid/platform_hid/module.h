@@ -37,6 +37,9 @@ struct HidState {
     u32          text_requests = 0; // platform_text_input's count
     char         text_override[KV_INPUT_TEXT_MAX] = {}; // input_text_override's, for the next sample
     u32          text_override_len = 0, text_override_backspaces = 0;
+    bool         pointer_override = false; // input_pointer_override's, for the next sample
+    f32          pointer_x = 0.0f, pointer_y = 0.0f, pointer_wheel = 0.0f;
+    u8           pointer_buttons = 0;
     HidPress     presses[KV_HID_PRESSES] = {}; // the CLI's, being held
     u32          press_count = 0;
     void       (*modal_frame)(void* user) = nullptr; // platform_modal_frame's
@@ -59,6 +62,10 @@ void platform_text_input(Engine& e, bool on);
 // Types text (and Backspaces) as if from the keyboard, into the next sample: for demo
 // scripts and tests.
 void input_text_override(Engine& e, const char* text, u32 backspaces = 0);
+// Puts the pointer at (x, y) (framebuffer pixels, top-left origin) with these buttons held
+// (MouseButton bits) and this much wheel, as if from the mouse, into the next sample; it
+// stays there until the mouse or another override moves it. For demo scripts and tests.
+void input_pointer_override(Engine& e, f32 x, f32 y, u8 buttons, f32 wheel = 0.0f);
 // The module's input, or null if the module is not started. Likewise.
 Input*      platform_input(Engine& e);
 // Some OSes hold the main thread in a loop of their own while the window is resized (macOS:

@@ -1,0 +1,186 @@
+// kromedemo: Krome's first screen, a form in Lua (assets/form.lua). The game's side is
+// small: it opens the screen, tells it the tick count now and then (krome_set), and
+// listens for its events (KromeEvent): "quit" ends the run.
+//
+// --demo drives the pointer through the form as a person would (input_pointer_override):
+// buttons, the list's wheel and an item in it, the menu and a pick from it, a press
+// outside the menu that must close it and reach nothing, the About modal and a press
+// outside it that must do nothing, a disabled button. Then it checks the model and quits:
+// "kromedemo: demo passed", or what did not hold. --shots DIR writes screenshots of the
+// form, the menu and the modal as it goes.
+#include "korvid/kromedemo/module.h"
+#include "korvid/core/engine.h"
+#include "korvid/core/format.h"
+#include "korvid/core/log.h"
+#include "korvid/core/name.h"
+#include "korvid/frameloop/frameloop.h"
+#include "korvid/krome/krome.h"
+#include "korvid/platform_hid/host_window.h"
+#include "korvid/platform_hid/module.h"
+#include "korvid/render/renderer.h"
+#include <string.h>
+
+namespace kv {
+
+namespace {
+
+struct Demo {
+    Name form;
+    bool demo = false;
+    const char* shots = nullptr;
+    u32  step = 0, wait = 0;
+    u32  failures = 0;
+};
+
+
+// A step of the pilot: where the pointer goes and what it does there.
+enum class Act : u8 { Move, Click, Wheel, Shot, Check, Quit };
+struct Step { Act act; const char* id; f32 value; const char* expect; };
+
+// Positions are found when the step runs, so a reflow or a scroll is followed.
+constinit const Step k_steps[] = {
+    {Act::Shot, "form", 0, nullptr},
+    {Act::Click, "up", 0, nullptr}, {Act::Click, "up", 0, nullptr}, {Act::Click, "down", 0, nullptr},
+    {Act::Check, "level", 0, "4"},
+    {Act::Click, "save", 0, nullptr}, {Act::Click, "save", 0, nullptr},
+    {Act::Check, "saves", 0, "2"},
+    {Act::Wheel, "list", -3, nullptr},
+    {Act::Click, "item8", 0, nullptr},
+    {Act::Check, "picked", 0, "item8"},
+    {Act::Click, "menu", 0, nullptr},
+    {Act::Shot, "menu", 0, nullptr},
+    {Act::Click, "roomy", 0, nullptr},
+    {Act::Check, "choice", 0, "roomy"},
+    {Act::Click, "menu", 0, nullptr},
+    {Act::Click, "save", 0, nullptr},  // outside the open menu: closes it, saves nothing
+    {Act::Check, "saves", 0, "2"},
+    {Act::Click, "about", 0, nullptr},
+    {Act::Shot, "about", 0, nullptr},
+    {Act::Click, "save", 0, nullptr},  // under the modal: nothing
+    {Act::Check, "saves", 0, "2"},
+    {Act::Click, "ok", 0, nullptr},
+    {Act::Check, "abouts", 0, "1"},
+    {Act::Click, "later", 0, nullptr}, // disabled
+    {Act::Check, "saves", 0, "2"},
+    {Act::Quit, nullptr, 0, nullptr},
+    {Act::Click, "quit", 0, nullptr},  // its event ends the run
+};
+
+f32 window_scale(Engine& e) {
+    HostWindow* w = platform_window(e);
+    f32 k = w ? w->pixel_scale() : 1.0f;
+    return k > 0.0f ? k : 1.0f;
+}
+
+// The pointer to the center of a node, in the window's pixels.
+bool aim(Engine& e, const Demo& d, const char* id, f32* x, f32* y) {
+    rect2 r;
+    if (!krome_find_rect(e, d.form, id, &r)) return false;
+    f32 k = window_scale(e);
+    *x = (r.x + r.w * 0.5f) * k;
+    *y = (r.y + r.h * 0.5f) * k;
+    return true;
+}
+
+// Phase PreSim, main thread: the pilot, a step every few ticks; and the tick count, every
+// half second, for the form's title bar.
+void kromedemo_tick(TickContext& ctx) {
+    Engine& e = *ctx.engine;
+    Demo& d = ctx.state_as<Demo>();
+    if (ctx.tick % 30 == 0) krome_set(e, d.form, "ticks", (f64)ctx.tick);
+    if (!d.demo || !krome_ready(e, d.form)) return;
+    if (d.wait) { --d.wait; return; }
+    if (d.step >= KV_COUNTOF(k_steps)) return;
+    const Step& s = k_steps[d.step];
+    f32 x = 0, y = 0;
+    switch (s.act) {
+    case Act::Move:
+        if (aim(e, d, s.id, &x, &y)) input_pointer_override(e, x, y, 0);
+        break;
+    case Act::Click: {
+        // Three ticks a click: over it, down, up.
+        static u32 phase = 0;
+        if (!aim(e, d, s.id, &x, &y)) { KV_ERROR("kromedemo", "demo: no '%s' on screen", s.id); ++d.failures; break; }
+        input_pointer_override(e, x, y, phase == 1 ? 1 : 0);
+        if (++phase < 3) { d.wait = 1; return; }
+        phase = 0;
+        break;
+    }
+    case Act::Wheel:
+        if (aim(e, d, s.id, &x, &y)) input_pointer_override(e, x, y, 0, s.value);
+        break;
+    case Act::Shot:
+        if (d.shots) {
+            char path[600];
+            format(path, sizeof path, "%s/kromedemo_%s.ppm", d.shots, s.id);
+            if (Renderer* r = renderer_get(e)) renderer_screenshot(r, path);
+        }
+        break;
+    case Act::Check: {
+        const char* got = krome_model_text(e, d.form, s.id);
+        if (strcmp(got, s.expect) != 0) { KV_ERROR("kromedemo", "demo: %s is '%s', wanted '%s'", s.id, got, s.expect); ++d.failures; }
+        break;
+    }
+    case Act::Quit:
+        if (d.failures) KV_ERROR("kromedemo", "demo: %u checks failed", d.failures);
+        else KV_INFO("kromedemo", "demo passed");
+        break;
+    }
+    ++d.step;
+    d.wait = 6;
+}
+
+void kromedemo_events(TickContext& ctx) {
+    for (const KromeEvent& ev : ctx.received<KromeEvent>()) {
+        KV_INFO("kromedemo", "event %s from %s, %g", name_str(Name{ev.event}), ev.node ? name_str(Name{ev.node}) : "the script", ev.value);
+        if (ev.event == name_intern("quit").hash) engine_request_quit(*ctx.engine);
+    }
+}
+
+void kromedemo_exit(TickContext& ctx, Span<const ExitRequested>) { engine_request_quit(*ctx.engine); }
+
+bool kromedemo_startup(Engine& e, ModuleInstance& self) {
+    Demo* d = arena_push<Demo>(self.arena);
+    if (!d) return false;
+    *d = Demo{};
+    d->demo = frameloop_flag(e, "--demo");
+    d->shots = frameloop_option(e, "--shots");
+    d->form = krome_open(e, "kromedemo/form.lua");
+    self.set_state(d);
+    return true;
+}
+
+constinit const SystemDesc k_systems[] = {
+    {.name = ".tick", .phase = Phase::PreSim, .fn = kromedemo_tick, .before = "krome.input", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".events", .phase = Phase::Sim, .fn = kromedemo_events, .reads = "KromeEvent", .main_thread = true},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".exit", KV_ON(ExitRequested, kromedemo_exit), .phase = Phase::PreSim},
+};
+
+} // namespace
+
+KV_MODULE_DEFINE(kromedemo_module) = {
+    .name     = "kromedemo",
+    .systems  = k_systems,
+    .handlers = k_handlers,
+    .startup  = kromedemo_startup,
+    .memory   = {.reserve = 4 * 1024},
+};
+
+} // namespace kv
+
+namespace {
+constinit const char* const k_flags[] = {"--demo"};
+constinit const char* const k_options[] = {"--shots"};
+constinit const kv::FrameLoopConfig k_config = {
+    .title          = "korvid krome demo",
+    .width          = 1000,
+    .height         = 640,
+    .exit_on_escape = false, // Escape closes Krome's overlays
+    .flags          = k_flags,
+    .options        = k_options,
+};
+} // namespace
+
+int main(int argc, char** argv) { return kv::frameloop_main(argc, argv, k_config); }

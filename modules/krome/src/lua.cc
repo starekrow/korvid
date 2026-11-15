@@ -40,7 +40,13 @@ local function make(w, dir, defaults)
     end
     for k, v in pairs(t) do
       if type(k) == "string" then
-        if k == "id" then n.id = tostring(v)
+        if k == "looks" and type(v) == "table" then
+          -- States' looks under a key of their own, beside the flags of the same names
+          -- (disabled = true with looks = { disabled = { ... } }).
+          for sk, sv in pairs(v) do
+            if states[sk] and type(sv) == "table" then n.s = n.s or {}; n.s[sk] = sv end
+          end
+        elseif k == "id" then n.id = tostring(v)
         elseif k == "event" then n.e = tostring(v)
         elseif states[k] and type(v) == "table" then n.s = n.s or {}; n.s[k] = v
         elseif v == true then n.f[#n.f + 1] = k
@@ -117,11 +123,13 @@ const char* value_text(lua_State* L, int idx, char* out, usize cap) {
 // ---- the tree from tables -------------------------------------------------------------------------
 
 struct Build {
-    KromeModule&  s;
-    KromeScreen& sc;
-    lua_State*   L;
-    const char*  chunk;
-    u32          errors = 0;
+    KromeModule&    s;
+    KromeScreen&    sc;
+    KromeTree&      tree;  // the screen's, or an overlay's
+    Array<KromeDep>* deps; // where texts that read the model are noted; null: filled once
+    lua_State*      L;
+    const char*     chunk;
+    u32             errors = 0;
 
     void error(u32 line, const char* fmt, ...) KV_PRINTF(3, 4) {
         char msg[256];
@@ -201,7 +209,7 @@ void props(Build& b, u32 node, u32 line, KromeState state) {
             const char* name = lua_tostring(L, -2);
             KromeValue v;
             if (!to_value(L, &v)) b.error(line, "%s: not a value a property takes", name);
-            else if (const char* why = b.sc.tree.set(node, name, v, state)) b.error(line, "%s%s%s: %s", state == KromeState::Base ? "" : krome_state_name(state),
+            else if (const char* why = b.tree.set(node, name, v, state)) b.error(line, "%s%s%s: %s", state == KromeState::Base ? "" : krome_state_name(state),
                                                                                   state == KromeState::Base ? "" : ".", name, why);
         }
         lua_pop(L, 1);
@@ -209,19 +217,24 @@ void props(Build& b, u32 node, u32 line, KromeState state) {
 }
 
 // The names a content string reads, as {name}.
-void deps_of(KromeScreen& sc, u32 node, const char* s) {
+bool reads_model(const char* s) {
+    const char* p = strchr(s, '{');
+    return p && strchr(p + 1, '}');
+}
+void deps_of(Array<KromeDep>& deps, u32 node, const char* s) {
     for (const char* p = s; (p = strchr(p, '{'));) {
         const char* end = strchr(p + 1, '}');
         if (!end) break;
-        if (end > p + 1) sc.deps.push(KromeDep{node, name_intern(p + 1, (usize)(end - p - 1)).hash});
+        if (end > p + 1) deps.push(KromeDep{node, name_intern(p + 1, (usize)(end - p - 1)).hash});
         p = end + 1;
     }
 }
+void fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node);
 
 // The node table at the top of the stack, as a child of `parent`.
 void build_node(Build& b, u32 parent) {
     lua_State* L = b.L;
-    KromeTree& t = b.sc.tree;
+    KromeTree& t = b.tree;
     if (!lua_istable(L, -1)) { b.error(parent != KROME_NONE ? t.nodes[parent].line : 0, "a child that is not a node"); return; }
     lua_getfield(L, -1, "l");
     u32 line = lua_isinteger(L, -1) ? (u32)lua_tointeger(L, -1) : 0;
@@ -267,7 +280,8 @@ void build_node(Build& b, u32 parent) {
         usize len = 0;
         const char* s = lua_tolstring(L, -1, &len);
         t.set_text(n, s, (u32)len);
-        deps_of(b.sc, n, s);
+        if (b.deps) deps_of(*b.deps, n, s);
+        else if (reads_model(s)) fill_node(b.s, b.sc, t, n);
     }
     lua_pop(L, 1);
     if (lua_getfield(L, -1, "id") == LUA_TSTRING) t.set(n, "id", KromeValue::str(lua_tostring(L, -1)));
@@ -286,8 +300,8 @@ void build_node(Build& b, u32 parent) {
 }
 
 // Each node that reads the model shows its text with the values filled in.
-void fill_node(KromeModule& s, KromeScreen& sc, u32 node) {
-    const char* raw = sc.tree.raw_text(node);
+void fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node) {
+    const char* raw = tree.raw_text(node);
     char out[1024];
     usize n = 0;
     char val[128];
@@ -303,7 +317,46 @@ void fill_node(KromeModule& s, KromeScreen& sc, u32 node) {
         for (; *v && n + 1 < sizeof out; ++v) out[n++] = *v;
         p = end + 1;
     }
-    sc.tree.set_shown(node, out, (u32)n);
+    tree.set_shown(node, out, (u32)n);
+}
+
+// open_overlay(tree[, { anchor = id, side = "below", modal = false, dim = "#00000080" }]):
+// the overlay's id. Upvalues: the module, the screen's id.
+int script_open_overlay(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    KromeModule* s = state_of(L, 1);
+    KromeScreen* sc = krome_screen_by_id(*s, (u32)lua_tointeger(L, lua_upvalueindex(2)));
+    if (!sc) return 0;
+    u32 id = krome_open_overlay(*s, *sc);
+    KromeOverlay* o = krome_overlay(*sc, id);
+    if (lua_istable(L, 2)) {
+        if (lua_getfield(L, 2, "anchor") == LUA_TSTRING) o->anchor = name_intern(lua_tostring(L, -1));
+        lua_pop(L, 1);
+        if (lua_getfield(L, 2, "side") == LUA_TSTRING) {
+            const char* side = lua_tostring(L, -1);
+            o->side = !strcmp(side, "above") ? KromeSide::Above : !strcmp(side, "right") ? KromeSide::Right
+                    : !strcmp(side, "left") ? KromeSide::Left : !strcmp(side, "pointer") ? KromeSide::Pointer : KromeSide::Below;
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, 2, "modal");
+        o->modal = lua_toboolean(L, -1) != 0;
+        lua_pop(L, 1);
+        if (lua_getfield(L, 2, "dim") == LUA_TSTRING) krome_parse_color(lua_tostring(L, -1), &o->dim);
+        lua_pop(L, 1);
+    }
+    lua_pushvalue(L, 1);
+    krome_lua_build_overlay(*s, *sc, *o);
+    lua_pop(L, 1);
+    lua_pushinteger(L, (lua_Integer)id);
+    return 1;
+}
+
+// close_overlay([id]): that one, or the top one.
+int script_close_overlay(lua_State* L) {
+    KromeModule* s = state_of(L, 1);
+    KromeScreen* sc = krome_screen_by_id(*s, (u32)lua_tointeger(L, lua_upvalueindex(2)));
+    if (sc) krome_close_overlay(*s, *sc, (u32)luaL_optinteger(L, 1, 0));
+    return 0;
 }
 
 } // namespace
@@ -387,6 +440,14 @@ bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize le
     lua_pushinteger(L, sc.id);
     lua_pushcclosure(L, script_emit, 2);
     lua_setfield(L, -2, "emit");
+    lua_pushlightuserdata(L, &s);
+    lua_pushinteger(L, sc.id);
+    lua_pushcclosure(L, script_open_overlay, 2);
+    lua_setfield(L, -2, "open_overlay");
+    lua_pushlightuserdata(L, &s);
+    lua_pushinteger(L, sc.id);
+    lua_pushcclosure(L, script_close_overlay, 2);
+    lua_setfield(L, -2, "close_overlay");
     lua_pushvalue(L, -1);
     sc.env = luaL_ref(L, LUA_REGISTRYINDEX);
     lua_setupvalue(L, -2, 1);            // chunk, its _ENV the env
@@ -429,11 +490,11 @@ bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize le
             return false;
         }
     }
-    Build b{s, sc, L, chunk};
+    Build b{s, sc, sc.tree, &sc.deps, L, chunk};
     build_node(b, KROME_NONE);
     lua_pop(L, 1);
     if (b.errors) s.script_errors += b.errors;
-    for (const KromeDep& d : sc.deps) fill_node(s, sc, d.node);
+    for (const KromeDep& d : sc.deps) fill_node(s, sc, sc.tree, d.node);
     sc.tree.dirty = true;
     return sc.tree.root != KROME_NONE;
 }
@@ -451,7 +512,14 @@ const char* krome_model_value_text(KromeModule& s, KromeScreen& sc, const char* 
 
 void krome_model_changed(KromeModule& s, KromeScreen& sc, u64 key) {
     for (const KromeDep& d : sc.deps)
-        if (d.key == key) fill_node(s, sc, d.node);
+        if (d.key == key) fill_node(s, sc, sc.tree, d.node);
+}
+
+bool krome_lua_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o) {
+    Build b{s, sc, o.tree, nullptr, s.L, name_str(sc.name)};
+    build_node(b, KROME_NONE);
+    s.script_errors += b.errors;
+    return o.tree.root != KROME_NONE;
 }
 
 void krome_model_set_number(KromeModule& s, KromeScreen& sc, const char* key, f64 v, bool boolean) {
@@ -476,9 +544,9 @@ void krome_model_set_string(KromeModule& s, KromeScreen& sc, const char* key, co
     krome_model_changed(s, sc, name_intern(key).hash);
 }
 
-bool krome_fire(KromeModule& s, KromeScreen& sc, u32 node, f64 value) {
-    if (node >= sc.tree.nodes.len) return false;
-    const KromeNode& n = sc.tree.nodes[node];
+bool krome_fire(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, f64 value) {
+    if (node >= tree.nodes.len) return false;
+    const KromeNode& n = tree.nodes[node];
     if (n.event.is_null()) return false;
     Name id = n.id, event = n.event;
     lua_State* L = s.L;
