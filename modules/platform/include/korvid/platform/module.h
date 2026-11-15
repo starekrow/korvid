@@ -3,8 +3,9 @@
 // executable's and the user's directories, and sockets (net.h). No SDL and no external
 // library; the window, input and gamepads are platform_hid's, the audio device
 // platform_audio's, so a tool links this and nothing heavy.
-// The module registers one idle task, "platform.io", which serves the I/O queue's idle
-// reads and whatever the frame's pumps held back under their byte budget.
+// The module has one system, "platform.io_idle" in the Work cycle (docs/design/cycles.md),
+// which serves the I/O queue's idle reads and whatever the frame's pumps held back under
+// their byte budget, in the time the cycle has left.
 #pragma once
 #include "korvid/core/module.h"
 #include "korvid/platform/io.h"

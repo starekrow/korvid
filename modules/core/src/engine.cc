@@ -1237,7 +1237,6 @@ void engine_shutdown(Engine& e) {
         mem_set_owner(0);
     }
     jobs_shutdown();
-    e.idle.free();
     e.commands.bytes.free();
     e.commands.count = 0;
     e.timers.free();
@@ -1269,61 +1268,7 @@ void engine_shutdown(Engine& e) {
             (unsigned long long)e.frame_count, (unsigned long long)e.clock.tick_count);
 }
 
-// ---- idle tasks ------------------------------------------------------------------------
-
-u32 engine_idle_add(Engine& e, const char* name, IdleFn fn, void* user) {
-    if (!fn) return 0;
-    IdleTask t{name ? name : "idle", fn, user, e.idle_next_id++, mem_owner(), 0, 0.0};
-    e.idle.push(t);
-    return t.id;
-}
-
-bool engine_idle_remove(Engine& e, u32 id) {
-    for (u32 i = 0; i < e.idle.len; ++i) {
-        if (e.idle[i].id != id) continue;
-        for (u32 j = i + 1; j < e.idle.len; ++j) e.idle[j - 1] = e.idle[j];
-        --e.idle.len;
-        if (e.idle_cursor > i) --e.idle_cursor;
-        return true;
-    }
-    return false;
-}
-
-// Round-robin from the cursor: a round visits every task once; rounds continue while a
-// task answered More and time remains. A task that answers Done leaves the list and the
-// cursor stays on its successor.
-f64 engine_idle_run(Engine& e, f64 budget) {
-    if (e.idle.len == 0 || budget <= 0.0) return 0.0;
-    KV_ZONE("idle");
-    f64 start = time_now();
-    f64 used  = 0.0;
-    ++e.idle_stats.runs;
-    bool more = true;
-    while (more && e.idle.len) {
-        more = false;
-        for (u32 n = 0; n < e.idle.len && used < budget;) {
-            u32 i = e.idle_cursor % e.idle.len;
-            IdleTask& t = e.idle[i];
-            u16 was = mem_owner();
-            mem_set_owner(t.owner);
-            f64 t0 = time_now();
-            IdleResult r = t.fn(e, budget - used, t.user);
-            f64 dt = time_now() - t0;
-            mem_set_owner(was);
-            t.calls++;
-            t.seconds += dt;
-            ++e.idle_stats.calls;
-            used = time_now() - start;
-            if (r == IdleResult::Done) { engine_idle_remove(e, t.id); continue; } // n stays: one fewer task in the round
-            e.idle_cursor = (i + 1) % e.idle.len;
-            ++n;
-            if (r == IdleResult::More) more = true;
-        }
-    }
-    e.idle_stats.seconds += used;
-    e.idle_stats.last     = used;
-    return used;
-}
+// ---- the cycles ------------------------------------------------------------------------
 
 u32 engine_frame(Engine& e, f64 frame_dt) {
     KV_ZONE("ticks");
@@ -1369,11 +1314,8 @@ f64 engine_work(Engine& e, f64 budget) {
             if (!e.work_more || time_now() >= e.work_deadline) break;
         }
     }
-    f64 used = time_now() - start;
-    // The idle tasks, until they are Work units, with what is left.
-    if (budget > used) used += engine_idle_run(e, budget - used);
     e.work_deadline = 0.0;
-    return used;
+    return time_now() - start;
 }
 
 void engine_sim_reset(Engine& e) {

@@ -14,7 +14,7 @@
 // inside the submit), so a pump admits reads until bytes_per_pump would be passed, and
 // never more than bytes_in_flight at once. The rest wait for the next pump. Requests at
 // IoPriority::Idle are never admitted by the pump at all: they wait for pump_idle, which
-// the platform module calls from the engine's idle time with a budget of its own.
+// the platform module calls from its Work unit with the time the Work cycle has left.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/atomic.h"
@@ -198,7 +198,7 @@ struct IoQueue {
     // Once per frame: hand queued reads to the backend within the budget and collect what
     // has finished.
     void   pump();
-    // From idle time: admits up to `bytes` more, idle-priority reads included, and collects
+    // From spare time (the Work cycle): admits up to `bytes` more, idle-priority reads included, and collects
     // what has finished. Returns the bytes admitted; 0 means nothing could go now.
     usize  pump_idle(usize bytes);
     // How many bytes an idle call may admit in `seconds`, from what earlier calls cost:

@@ -20,8 +20,8 @@ One frame:
 
 1. `platform_pump`: OS events onto the bus, raw input, the I/O queue's pump.
 2. `engine_frame(dt)`: the ticks the clock owes at 60 Hz, up to four.
-3. The Work cycle (`engine_work`, docs/design/cycles.md), then the idle tasks: the time
-   the renderer blocked for last frame, less a margin; with work pending, until the frame's
+3. The Work cycle (`engine_work`, docs/design/cycles.md): the time the renderer blocked
+   for last frame, less a margin; with work pending, until the frame's
    deadline (the period less what the frame has spent and what the render costs).
 4. The Frame cycle (`engine_frame_cycle`), then the render: the window's size reaches the renderer at render rate, the sprite
    module's deltas are applied, and the world as of the last tick is drawn interpolated

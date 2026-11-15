@@ -31,8 +31,9 @@
 // queue is built for. Inside the engine the sockets move once per tick, so their
 // throughput is what the kernel buffers hold times the tick rate: --tick-hz shows the
 // dependence. The idle scenario flags every read IoPriority::Idle and paces frames at
-// --frame-ms (one tick by default): the reads go only through engine_idle_run in the
-// time each frame has left, so the frame stays at its budget while the disk is kept busy.
+// --frame-ms (one tick by default): the reads go only through the Work cycle (engine_work,
+// the platform's io_idle unit) in the time each frame has left, so the frame stays at its
+// budget while the disk is kept busy.
 #include "torture.h"
 #include "korvid/sockit2m/module.h"
 #include "korvid/core/format.h"
@@ -108,7 +109,7 @@ struct Driver {
             engine_frame(*e, dt);
             if (pace_s > 0.0) { // a frame with a deadline: idle work in the slack, then wait for it
                 f64 slack = pace_s - (time_now() - t) - 0.0005;
-                if (slack > 0.0) idle_s += engine_idle_run(*e, slack);
+                if (slack > 0.0) idle_s += engine_work(*e, slack);
                 f64 busy = (time_now() - t) * 1e3; // the frame's work, idle included; the wait is not work
                 f64 left = pace_s - (time_now() - t);
                 if (left > 0.0) time_sleep(left);

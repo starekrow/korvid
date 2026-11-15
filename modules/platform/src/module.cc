@@ -1,6 +1,7 @@
 #include "korvid/platform/module.h"
 #include "korvid/core/format.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/phase.h"
 #include "korvid/core/log.h"
 #include "os_paths.h"
 #include "os_file.h"
@@ -11,13 +12,17 @@ namespace {
 
 PlatformMounts g_mounts; // what platform_configure_mounts said, for the next startup
 
-// Idle time: the queue admits what the frame's pumps held back, idle reads included.
-IdleResult io_idle(Engine&, f64 seconds, void* user) {
-    IoQueue& q = *(IoQueue*)user;
-    return q.pump_idle(q.idle_bytes_for(seconds)) ? IdleResult::More : IdleResult::Nothing;
+// The Work cycle (docs/design/cycles.md): in the time the cycle has, the queue admits what
+// the frame's pumps held back, idle reads included, sized to that time; more while
+// something went in.
+void io_idle(TickContext& ctx) {
+    PlatformState& s = ctx.state_as<PlatformState>();
+    f64 left = ctx.time_left();
+    if (left <= 0.0) return;
+    if (s.io.pump_idle(s.io.idle_bytes_for(left))) ctx.more();
 }
 
-bool platform_startup(Engine& engine, ModuleInstance& self) {
+bool platform_startup(Engine&, ModuleInstance& self) {
     PlatformState* s = arena_push<PlatformState>(self.arena);
     if (!s) return false;
     self.set_state(s);
@@ -44,7 +49,6 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
         for (u32 i = 0; i < g_mounts.pack_count; ++i)
             if (!s->io.mount_pack(g_mounts.packs[i])) return false;
         if (g_mounts.assets_dir && !s->io.mount_dir(g_mounts.assets_dir)) return false;
-        engine_idle_add(engine, "platform.io", io_idle, &s->io);
         return true;
     }
     // What the program reads is the first mount, when there is one; the frame loop mounts
@@ -60,7 +64,6 @@ bool platform_startup(Engine& engine, ModuleInstance& self) {
     for (u32 i = 0; i < g_mounts.pack_count; ++i)
         if (!s->io.mount_pack(g_mounts.packs[i])) return false; // asked for by name: not having it is an error
     if (g_mounts.assets_dir && !s->io.mount_dir(g_mounts.assets_dir)) return false;
-    engine_idle_add(engine, "platform.io", io_idle, &s->io);
     return true;
 }
 
@@ -72,10 +75,15 @@ void platform_shutdown(Engine&, ModuleInstance& self) {
     io_bundle_close();
 }
 
+constinit const SystemDesc k_systems[] = {
+    {.name = "platform.io_idle", .phase = Phase::Work, .fn = io_idle, .main_thread = true}, // the full name: nothing to intern
+};
+
 } // namespace
 
 KV_MODULE_DEFINE(platform_module) = {
     .name     = "platform",
+    .systems  = k_systems,
     .startup  = platform_startup,
     .shutdown = platform_shutdown,
     .memory   = {.reserve = 64 * 1024},

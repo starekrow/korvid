@@ -40,7 +40,7 @@ runs: the platform module owns the queue and `platform_pump` pumps it once per f
 `sockit2m.files` reaps and refills in PreSim on the main thread; the driver loop is
 `platform_pump` plus `engine_frame` on real time with a fixed tick clock (`--tick-hz`,
 60 by default); file data lands in the module's allocator; the idle scenario paces frames
-and hands the slack to `engine_idle_run`. The platform module needs no display and
+and hands the slack to the Work cycle (`engine_work`). The platform module needs no display and
 links no SDL. This is what a game gets.
 
 **Direct** (`--direct`). The same jobs in a tight loop over the primitives: an `IoQueue`

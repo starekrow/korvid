@@ -28,7 +28,6 @@ void test_kbor(kv::TestCtx&);
 void test_cycles(kv::TestCtx&);
 void test_glob(kv::TestCtx&);
 void test_sha256(kv::TestCtx&);
-void test_idle(kv::TestCtx&);
 void test_pause(kv::TestCtx&);
 void test_qualify(kv::TestCtx&);
 void test_utf8(kv::TestCtx&);
@@ -69,7 +68,6 @@ int main() {
     test_glob(c);
     test_sha256(c);
     test_utf8(c);
-    test_idle(c);
     test_pause(c);
     test_qualify(c);
     kv::names_shutdown();

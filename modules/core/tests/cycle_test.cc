@@ -1,7 +1,8 @@
 // The cycles outside the tick (docs/design/cycles.md): the Frame cycle once per call, the
 // Work cycle while a unit says more and the budget lasts, events across cycles delivered
 // at the consumer's next run, both ways, commands at a cycle's boundary, the cycles running
-// while the sim is paused, idle tasks inside engine_work, streams trimmed without ticks.
+// while the sim is paused, every Work unit once a cycle with the time left, streams
+// trimmed without ticks.
 #include "korvid/core/engine.h"
 #include "korvid/core/kind.h"
 #include "korvid/core/test.h"
@@ -21,8 +22,8 @@ struct Drawn { u32 frame; };
 constinit const EventTypeDesc k_events[] = {KV_EVENT(Ticked), KV_EVENT(Drawn)};
 
 struct Seen {
-    u32 ticks, frames, frame_got_ticks, sim_got_draws, work_runs, work_left, idle_calls;
-    f64 last_frame_dt;
+    u32 ticks, frames, frame_got_ticks, sim_got_draws, work_runs, work_left, other_runs;
+    f64 last_frame_dt, left_seen;
 };
 constinit Seen g = {};
 
@@ -40,17 +41,17 @@ void sys_frame(TickContext& ctx) {
 }
 void sys_work(TickContext& ctx) {
     ++g.work_runs;
+    g.left_seen = ctx.time_left();
     if (g.work_left) { --g.work_left; if (g.work_left) ctx.more(); }
 }
-IdleResult idle_task(Engine&, f64, void*) {
-    ++g.idle_calls;
-    return IdleResult::Nothing;
-}
+// A second Work unit with nothing of its own to do: it runs once a cycle all the same.
+void sys_other(TickContext&) { ++g.other_runs; }
 
 constinit const SystemDesc k_systems[] = {
     {.name = ".tick", .phase = Phase::Sim, .fn = sys_tick, .reads = "Drawn", .emits = "Ticked"},
     {.name = ".frame", .phase = Phase::Frame, .fn = sys_frame, .reads = "Ticked", .emits = "Drawn", .main_thread = true},
     {.name = ".work", .phase = Phase::Work, .fn = sys_work, .main_thread = true},
+    {.name = ".other", .phase = Phase::Work, .fn = sys_other, .main_thread = true},
 };
 KV_MODULE_DEFINE(k_cy) = {.name = "cy", .events = k_events, .components = k_components, .kinds = k_kinds, .systems = k_systems};
 
@@ -81,21 +82,21 @@ void test_cycles(kv::TestCtx& c) {
 
     // Work: once with nothing to do; again while it says more, within the budget.
     engine_work(e, 0.0);
-    KV_CHECK(c, g.work_runs == 1 && !engine_work_pending(e) && g.idle_calls == 0);
+    KV_CHECK(c, g.work_runs == 1 && g.other_runs == 1 && !engine_work_pending(e) && g.left_seen == 0.0);
     g.work_left = 5;
     g.work_runs = 0;
     engine_work(e, 1.0);
-    KV_CHECK(c, g.work_runs == 5 && !engine_work_pending(e));
+    KV_CHECK(c, g.work_runs == 5 && g.other_runs == 6 && !engine_work_pending(e) && g.left_seen > 0.5 && g.left_seen <= 1.0);
     // A spent budget stops it with work pending.
     g.work_left = 1000;
     g.work_runs = 0;
     engine_work(e, 0.0);
     KV_CHECK(c, g.work_runs == 1 && engine_work_pending(e) && g.work_left == 999);
-    // Idle tasks run in what Work leaves of the budget.
+    // A budget is time a unit sees left.
     g.work_left = 0;
-    engine_idle_add(e, "cy.idle", idle_task, nullptr);
     engine_work(e, 0.5);
-    KV_CHECK(c, g.idle_calls >= 1);
+    KV_CHECK(c, g.left_seen > 0.0);
+    engine_frame_cycle(e, 0.016);
 
     // Paused, the Sim stands still and the other cycles run.
     engine_pause(e, true);

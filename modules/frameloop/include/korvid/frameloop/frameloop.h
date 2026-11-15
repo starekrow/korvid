@@ -18,8 +18,9 @@
 // PPM, frame 90 unless --screenshot-frame N says otherwise; --check-sort reads the GPU
 // sort back every 30th frame and verifies it. --cli-port N listens for CLI sessions on
 // loopback; --cli-stdin reads commands from stdin even when it is a terminal (it always
-// does when stdin is not one). Idle work (engine_idle_run) gets the time the renderer
-// blocked for last frame less --idle-margin-ms (1.5 by default); --no-idle turns it off.
+// does when stdin is not one). The Work cycle (engine_work, docs/design/cycles.md) gets the
+// time the renderer blocked for last frame less --idle-margin-ms (1.5 by default), or with
+// work pending until the frame's deadline; --no-idle gives it one cycle a frame and no more.
 // --capacity KIND=N (repeatable) sets a kind's capacity over the game's (EngineConfig);
 // --sprite-rows N the renderer's first sprite table size over the config's. The touchpad
 // (an on-screen gamepad) is on where the screen is touched; --touchpad turns it on with

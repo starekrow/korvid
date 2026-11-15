@@ -57,7 +57,7 @@ bool            g_check_sort   = false;   // --check-sort: verify the GPU sort e
 CliConfig       g_cli;                    // --cli-port N, --cli-stdin, --cli-ascii
 PlatformMounts  g_mounts;                 // --pack FILE (repeatable), --assets DIR
 f64             g_idle_margin  = 0.0015;  // --idle-margin-ms N: slack kept back from idle work
-bool            g_idle         = true;    // --no-idle
+bool            g_idle         = true;    // --no-idle: no slack for the Work cycle, one cycle a frame
 bool            g_overlay      = false;   // --overlay: the report on screen
 bool            g_touchpad     = false;   // --touchpad: the on-screen pad, the mouse a finger
 
@@ -87,8 +87,8 @@ struct FrameLoopState {
     f64             gpu_sum = 0.0, gpu_worst = 0.0, gpu_sort = 0.0, gpu_draw = 0.0;
     f64             gpu_overdraw = 0.0;
     f64             wait_ema   = 0.0;    // the renderer's blocked time per frame, smoothed
-    f64             idle_total = 0.0;    // seconds of idle work in the report window
-    u64             idle_frames = 0;     // frames that ran idle work in the window
+    f64             work_total = 0.0;    // seconds of the Work cycle in the report window
+    u64             work_frames = 0;     // frames that ran Work in the window
     bool            timer_fired = false; // the loop raises it; the system emits it once
     bool            timer_sent  = false;
     Handle          overlay_font;              // asset.font, when --overlay
@@ -306,10 +306,10 @@ constinit const HandlerDesc   k_handlers[] = {
 };
 
 // The frame's slack: what the renderer blocked for last frame (fences, acquire, present)
-// is time this frame may spend on idle work before rendering, less a margin. Smoothed,
+// is time this frame may give the Work cycle before rendering, less a margin. Smoothed,
 // and never more than the last measurement, so one long frame does not buy the next a
 // budget it does not have. No vsync, no blocking, no slack.
-f64 idle_slack(FrameLoopState& s) {
+f64 work_slack(FrameLoopState& s) {
     f64 wait = renderer_last_wait(s.renderer);
     s.wait_ema = s.wait_ema == 0.0 ? wait : s.wait_ema * 0.8 + wait * 0.2;
     f64 budget = (wait < s.wait_ema ? wait : s.wait_ema) - g_idle_margin;
@@ -443,18 +443,18 @@ void run(Engine& engine, FrameLoopState& s) {
         u32 ran = engine_frame(engine, dt);
         if (!loading) g_shot_ticks += ran; // the ticks a script counts: not the ones a load held, which follow the disk
         f64 t_ticked = time_now();
-        // The Work cycle (and the idle tasks after it) in the time before the frame is due:
+        // The Work cycle in the time before the frame is due:
         // with work to do, until the frame's deadline (the period less what this frame has
-        // spent, what the render will cost the CPU and the margin); without, idle's slack,
+        // spent, what the render will cost the CPU and the margin); without, the slack:
         // the time the renderer waited last frame. At least one cycle either way.
         {
-            f64 budget = idle_slack(s);
-            if (engine_work_pending(engine)) {
+            f64 budget = work_slack(s);
+            if (g_idle && engine_work_pending(engine)) {
                 f64 deadline = s.period - (time_now() - now) - s.render_cpu - g_idle_margin;
                 if (deadline > budget) budget = deadline;
             }
             f64 used = engine_work(engine, budget);
-            if (used > 0.0) { s.idle_total += used; ++s.idle_frames; }
+            if (used > 0.0) { s.work_total += used; ++s.work_frames; }
         }
         {
             KV_ZONE("render");
@@ -488,12 +488,12 @@ void run(Engine& engine, FrameLoopState& s) {
             const MemSample& mem = mem_last_sample();
             char scaled[32] = "";
             if (engine.clock.scale != 1.0) format(scaled, sizeof scaled, " (time scale %.2f)", engine.clock.scale);
-            KV_INFO("frameloop", "%u fps, tick %llu%s, alpha %.2f, %u sprites, %u deltas/frame, %ux%u, %s, %llu KB live, idle %.1f ms/frame on %llu",
+            KV_INFO("frameloop", "%u fps, tick %llu%s, alpha %.2f, %u sprites, %u deltas/frame, %ux%u, %s, %llu KB live, work %.1f ms/frame on %llu",
                     frames_in_window, (unsigned long long)engine.clock.tick_count, scaled, engine.clock.alpha(),
                     renderer_sprite_count(s.renderer), s.deltas_last_frame, s.window->width(), s.window->height(),
                     s.window->focused() ? "focused" : "unfocused",
                     (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
-                    s.idle_frames ? s.idle_total / (f64)s.idle_frames * 1e3 : 0.0, (unsigned long long)s.idle_frames);
+                    s.work_frames ? s.work_total / (f64)s.work_frames * 1e3 : 0.0, (unsigned long long)s.work_frames);
             if (s.gpu_frames) {
                 f64 n = (f64)s.gpu_frames;
                 // Overdraw needs fragment counts, which Metal does not give: no number, not 0.
@@ -511,7 +511,7 @@ void run(Engine& engine, FrameLoopState& s) {
                          (unsigned long long)engine.clock.tick_count, renderer_sprite_count(s.renderer), s.deltas_last_frame);
                 overlay_set(engine, s, 0, line);
                 format(line, sizeof line, "%llu KB live  idle %.1f ms%s", (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
-                         s.idle_frames ? s.idle_total / (f64)s.idle_frames * 1e3 : 0.0, engine.clock.paused ? "  PAUSED" : "");
+                         s.work_frames ? s.work_total / (f64)s.work_frames * 1e3 : 0.0, engine.clock.paused ? "  PAUSED" : "");
                 overlay_set(engine, s, 1, line);
                 u32 shown = 0;
                 if (g_prof_report) {
@@ -525,8 +525,8 @@ void run(Engine& engine, FrameLoopState& s) {
                 }
                 for (u32 i = 2 + shown; i < kOverlayLines; ++i) overlay_set(engine, s, i, "");
             }
-            s.idle_total = 0.0;
-            s.idle_frames = 0;
+            s.work_total = 0.0;
+            s.work_frames = 0;
             if (g_prof_report) prof_log_summary(10);
             frames_in_window = 0;
             next_report += (f64)s.config.report_every_seconds;

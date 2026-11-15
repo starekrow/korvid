@@ -100,8 +100,12 @@ cuts a range into chunks and the caller works the queue too, so nested batches p
 `parallel_for` and `parallel_reduce` give each chunk its own event writer and command
 buffer, merged in chunk order, so results never depend on which thread ran what.
 
-**Idle time** (`engine.h`). The frame loop hands its slack to `engine_idle_run`, which
-serves registered tasks round-robin within the budget. `docs/design/idle.md`.
+**Cycles** (`engine.h`, `phase.h`). Beside the tick, two cycles a loop runs when it
+wants: `Phase::Frame` once before each frame drawn (`engine_frame_cycle`), and
+`Phase::Work` over and over while a unit says `ctx.more()` and the budget lasts
+(`engine_work`; a unit sizes its slice by `ctx.time_left()`). The frame loop gives Work its
+slack, background work such as the platform's idle reads is a Work unit, and nothing in
+either cycle is in a replay. `docs/design/cycles.md`.
 
 **Tools in core.** The profiler (`profile.h`): zones, waits, marks and counters into
 per-thread rings, read between frames into summaries, a frame tree, and a Chrome trace.
@@ -242,7 +246,6 @@ Header `korvid/core/cli.h`, the filesystem side:
 | `schema_field_lane(f, row, lane, &v)`, `schema_field_set(f, row, lane, v)` | functions | (component.h) a field's lane as a double, and back |
 | `engine_hash_state(e)` | function | the hash of every sim column of every live entity |
 | `engine_describe_event(e, type, event, out, cap)` | function | an event through its schema |
-| `engine_idle_add(e, name, fn, user)`, `engine_idle_remove(e, id)`, `engine_idle_run(e, seconds)` | functions | idle tasks: More, Nothing or Done, served round-robin in the budget |
 | `EventTrace`, `TraceRecord` | records | the dev ring of delivered events with their emitters (`--trace-events`) |
 
 Header `korvid/core/phase.h`:

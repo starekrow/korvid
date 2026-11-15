@@ -108,12 +108,11 @@ allows, so:
   it records input. That is the replay question Krome deferred, now in one place.
 - **Pausing** holds the Sim only. Frame and Work run whatever the clock's holds are.
 
-### Idle becomes Work
+### Idle became Work
 
-An idle task is Work by another name: a slice, then More, Nothing or Done. Idle tasks stay
-as they are for now, run at the end of each `engine_work` with what is left of the budget,
-and move to Work units one at a time (the I/O queue's idle reads first). Then
-`engine_idle_*` goes.
+An idle task was Work by another name: a slice, then More, Nothing or Done. The one there
+was, the I/O queue's idle reads, is the platform's Work unit `platform.io_idle`, and
+`engine_idle_*` is gone.
 
 ### Pacing
 
@@ -157,9 +156,13 @@ Nov 15, 2026, on branch tool-stuff.
 - **Core.** `Phase::Frame` and `Phase::Work` after the four Sim phases (`KV_SIM_PHASES`);
   `PhaseList::run_cycle` runs one as a tick runs a phase, levels and boundary, and trims the
   streams (`EventBus::trim`) without moving the tick's window. `engine_frame_cycle`,
-  `engine_work`, `engine_work_pending`, `ctx.more()`, `ctx.time_left()`. Idle tasks run
-  inside `engine_work` after the Work units, with what is left. `core_tests` checks the
-  cycles (events both ways, repeats, the budget, pause, commands, trimming).
+  `engine_work`, `engine_work_pending`, `ctx.more()`, `ctx.time_left()`. `core_tests`
+  checks the cycles (events both ways, repeats, every unit once a cycle, the budget,
+  pause, commands, trimming).
+- **Idle tasks are gone** (later the same day). The platform's idle reads are a Work unit,
+  `platform.io_idle`; `sockit2m` hands its slack to `engine_work`; `engine_idle_*`,
+  `IdleStats` and `idle_test` are removed. A tool now serves idle reads too, in the 5 ms
+  it gives Work.
 - **The frame loop.** Work runs where idle ran. With work pending its budget is a deadline,
   not idle's slack: the frame period (smoothed) less what this frame has spent, what a
   render costs the CPU besides its wait, and the margin. Idle's slack alone shrank as work
@@ -174,6 +177,5 @@ Nov 15, 2026, on branch tool-stuff.
 - **A tool with a window** is the frame loop with Work units: `kromedemo --work` counts
   primes in the Work cycle behind its window, 86 to 87% of the wall time computing on
   continuous or on-demand pacing, 40 frames drawn in the 0.8 s it takes.
-- **Not built:** refusing sim writes from Frame and Work; idle tasks moved to Work units;
-  the extract moved to Frame. Arcfire's recorded replay matches (236 hashes): the Sim cycle
+- **Not built:** refusing sim writes from Frame and Work; the extract moved to Frame. Arcfire's recorded replay matches (236 hashes): the Sim cycle
   is unchanged.

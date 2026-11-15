@@ -91,31 +91,6 @@ struct EventTrace {
 };
 
 
-// ---- idle tasks ------------------------------------------------------------------------
-// Work that runs when the frame has time to spare: the frame loop measures its slack and
-// hands it to engine_idle_run, which calls the registered tasks round-robin until the
-// budget is used or nobody has anything to do. A task slices its own work: it is called
-// with the time left and answers More (call me again if there is time), Nothing (nothing
-// now, keep me) or Done (remove me). Main thread; a task that wants workers uses the pool.
-enum class IdleResult : u8 { Nothing, More, Done };
-typedef IdleResult (*IdleFn)(Engine& e, f64 budget_seconds, void* user);
-
-struct IdleTask {
-    const char* name;
-    IdleFn      fn;
-    void*       user;
-    u32         id;
-    u16         owner;   // memory owner (module index + 1) at registration; set around each call
-    u64         calls;
-    f64         seconds;
-};
-
-struct IdleStats {
-    u64 runs    = 0;   // engine_idle_run calls that found a task
-    u64 calls   = 0;   // task calls
-    f64 seconds = 0.0; // time spent, ever
-    f64 last    = 0.0; // the last run
-};
 
 struct Engine {
     EventBus              events;
@@ -130,10 +105,6 @@ struct Engine {
     CommandBuffer         commands;
     TimerWheel            timers;
     EventTrace            trace;
-    Array<IdleTask>       idle;        // in registration order; served round-robin from idle_cursor
-    u32                   idle_cursor  = 0;
-    u32                   idle_next_id = 1;
-    IdleStats             idle_stats;
     u32                   threads      = 0; // threads the schedule may use, main included; 0: every core
     EarlyReadsChoice      early_reads  = EarlyReadsChoice::PerKind; // set before init: as each kind says, or one way for all
     u32                   serial       = 0; // this engine among the process's, 1..255: tags the ids the context hands out
@@ -219,12 +190,6 @@ void engine_request_quit(Engine& e);
 // consumer sees an event about the old run). Spawn the new run after.
 void engine_sim_reset(Engine& e);
 
-// Idle tasks. Registration is startup-ish work from any module; the id removes it.
-u32  engine_idle_add(Engine& e, const char* name, IdleFn fn, void* user);
-bool engine_idle_remove(Engine& e, u32 id);
-// Runs the tasks within the budget and returns the seconds used. The frame loop's call.
-f64  engine_idle_run(Engine& e, f64 budget_seconds);
-
 // The started instance of a module, by name; null if absent or not started.
 ModuleInstance* engine_module(Engine& e, const char* name);
 void*           engine_module_state(Engine& e, const char* name);
@@ -293,20 +258,21 @@ Table* engine_table_of(Engine& e, Handle h);
 Table* engine_table_now(Engine& e, u32 kind_id);
 Table* engine_table_of_now(Engine& e, Handle h);
 
-// Asks the loop for another frame: a loop that draws only on demand (the frame loop's
-// Pacing::OnDemand) runs a tick and draws once more; one that draws every vsync ignores it.
-// For whatever changed what is on screen without input to show it (a UI's new list, a load
-// that landed).
 // The cycles outside the tick (docs/design/cycles.md). engine_frame_cycle runs the Frame
 // phase once, `dt` the time since its last run: a loop calls it before each frame it
 // draws. engine_work runs Work cycles back to back while a unit of the last one said
-// ctx.more() and `budget` seconds last, then the idle tasks with what is left; it returns
-// the seconds used. engine_work_pending says whether the last Work cycle had more to do,
-// so a loop knows not to sleep. None of these reset the scratch arena: engine_frame does.
+// ctx.more() and `budget` seconds last (at least one cycle), and returns the seconds it
+// used; a unit sizes its slice by ctx.time_left(). What used to be idle tasks are Work
+// units. engine_work_pending says whether the last Work cycle had more to do, so a loop
+// knows not to sleep. None of these reset the scratch arena: engine_frame does.
 void engine_frame_cycle(Engine& e, f64 dt);
 f64  engine_work(Engine& e, f64 budget);
 inline bool engine_work_pending(const Engine& e) { return e.work_pending; }
 
+// Asks the loop for another frame: a loop that draws only on demand (the frame loop's
+// Pacing::OnDemand) runs a tick and draws once more; one that draws every vsync ignores it.
+// For whatever changed what is on screen without input to show it (a UI's new list, a load
+// that landed).
 inline void engine_want_frame(Engine& e) { e.frame_wanted = true; }
 
 } // namespace kv

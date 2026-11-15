@@ -383,8 +383,8 @@ The module arena (`self.arena`) for what lives as long as the module; `self.gene
 general allocator attributed to the module, for anything growable (set an `Array`'s or
 `Map`'s `alloc` to `&self.general`, free in shutdown); `mem_scratch()` with a `MemScope`
 for temporaries inside a call; kind tables for entities, which the module never
-allocates. Whatever runs under a module's name (its startup, systems, handlers, jobs,
-idle tasks) is charged to it, so `mem_report` and the leak report at exit name the
+allocates. Whatever runs under a module's name (its startup, systems, handlers, jobs)
+is charged to it, so `mem_report` and the leak report at exit name the
 module, and a heap limit the root set for it applies.
 
 ## How code flows through a tick
@@ -449,8 +449,9 @@ merged in chunk order after the loop, so the result does not depend on which thr
 which chunk. A worker's bare `mem_alloc` is charged to the module.
 
 **Between ticks.** `engine_frame` returns; the frame loop spends the frame's slack on
-idle tasks (`engine_idle_run`), then renders the world as of the last tick interpolated
-by the clock's alpha. Several ticks in one frame run back to back, each a full tick.
+the Work cycle (`engine_work`), runs the Frame cycle (`engine_frame_cycle`), then renders
+the world as of the last tick interpolated by the clock's alpha. Several ticks in one
+frame run back to back, each a full tick. `docs/design/cycles.md`.
 
 ## What the rules buy
 

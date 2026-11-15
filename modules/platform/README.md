@@ -25,8 +25,8 @@ Central Dispatch's workers), `threads` (Android, whose apps are refused io_uring
 threads of the ring's own) or `sync`. A pump is bounded in bytes, not requests
 (8 MB per pump, 64 MB in flight by default), because the kernel does work at submission
 in proportion to the size; what does not fit waits. `IoPriority::Idle` reads wait for
-idle time: the module's idle task `platform.io` serves them from the slack the frame loop
-hands `engine_idle_run`, sized to the time it is given. `docs/design/idle.md`.
+idle time: the module's Work unit `platform.io_idle` serves them in the Work cycle
+(`docs/design/cycles.md`), sized to the time the cycle has left. `docs/design/idle.md`.
 
 **Sockets** (`net.h`). A listener accepts without blocking; a socket reads what has
 arrived and queues what is to be sent, draining the queue when flushed. A queue that
@@ -169,7 +169,7 @@ What the module registers with the engine:
 | name | kind | notes |
 |---|---|---|
 | `platform.io` | handle kind | an I/O request; `kv_handle_describe` prints its state and path |
-| `platform.io` | idle task | serves idle reads and what the pumps held back |
+| `platform.io_idle` | system, phase Work, main thread | serves idle reads and what the pumps held back, in the time the cycle has |
 
 ## Behaviour worth knowing
 
