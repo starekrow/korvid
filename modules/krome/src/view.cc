@@ -489,15 +489,14 @@ void krome_view_frame(KromeModule& s) {
 void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool escape) {
     s.px = x;
     s.py = y;
-    // Escape closes the topmost overlay, light or modal.
-    if (escape && !s.escape) {
+    // Escape (a press) closes the topmost overlay, light or modal.
+    if (escape) {
         KromeScreen* order[k_max_screens];
         u32 n = 0;
         screens_top_first(s, order, &n);
         for (u32 i = 0; i < n; ++i)
             if (order[i]->overlays.len) { krome_close_overlay(s, *order[i], 0); break; }
     }
-    s.escape = escape;
 
     KromeTarget under = hit(s, x, y);
     if (!(under == s.under)) {

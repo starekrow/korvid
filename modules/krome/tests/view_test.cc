@@ -55,7 +55,7 @@ return {
 )lua";
 
 void frames(Engine& e, u32 n) {
-    for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); }
+    for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); engine_frame_cycle(e, 1.0 / 60.0); }
 }
 
 rect2 rect_of(const KromeTree& t, const char* id) {

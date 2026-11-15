@@ -16,6 +16,7 @@
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/core/name.h"
+#include "korvid/core/time.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/krome/krome.h"
 #include "korvid/platform_hid/host_window.h"
@@ -34,6 +35,11 @@ struct Demo {
     const char* shots = nullptr;
     u32  step = 0, wait = 0;
     u32  failures = 0;
+    // --work: a tool's work in the Work cycle, behind the window (docs/design/cycles.md).
+    bool work = false;
+    u64  next = 2, primes = 0;
+    f64  started = 0.0, computing = 0.0;
+    u64  frames_at_start = 0;
 };
 
 
@@ -136,6 +142,33 @@ void kromedemo_tick(TickContext& ctx) {
     d.wait = 6;
 }
 
+// The Work cycle: primes by trial division, a slice at a time, while the cycle has time.
+constexpr u64 k_work_limit = 4000000;
+void kromedemo_work(TickContext& ctx) {
+    Demo& d = ctx.state_as<Demo>();
+    if (!d.work || d.next >= k_work_limit) return;
+    Engine& e = *ctx.engine;
+    if (d.started == 0.0) { d.started = time_now(); d.frames_at_start = e.frame_cycles; }
+    f64 t0 = time_now();
+    // Slices of a few thousand numbers until the cycle's time is nearly gone.
+    do {
+        for (u64 end = d.next + 4000; d.next < end && d.next < k_work_limit; ++d.next) {
+            u64 n = d.next;
+            bool prime = n >= 2;
+            for (u64 f = 2; f * f <= n && prime; ++f) if (n % f == 0) prime = false;
+            if (prime) ++d.primes;
+        }
+    } while (d.next < k_work_limit && ctx.time_left() > 0.0005);
+    d.computing += time_now() - t0;
+    krome_set(e, d.form, "ticks", (f64)d.primes); // the title bar shows the count as it goes
+    if (d.next < k_work_limit) { ctx.more(); return; }
+    f64 wall = time_now() - d.started;
+    KV_INFO("kromedemo", "work: %llu primes below %llu in %.2f s, computing %.2f s (%.0f%%), %llu frames drawn meanwhile",
+            (unsigned long long)d.primes, (unsigned long long)k_work_limit, wall, d.computing, 100.0 * d.computing / wall,
+            (unsigned long long)(e.frame_cycles - d.frames_at_start));
+    engine_request_quit(e);
+}
+
 void kromedemo_events(TickContext& ctx) {
     for (const KromeEvent& ev : ctx.received<KromeEvent>()) {
         KV_INFO("kromedemo", "event %s from %s, %g", name_str(Name{ev.event}), ev.node ? name_str(Name{ev.node}) : "the script", ev.value);
@@ -150,6 +183,7 @@ bool kromedemo_startup(Engine& e, ModuleInstance& self) {
     if (!d) return false;
     *d = Demo{};
     d->demo = frameloop_flag(e, "--demo");
+    d->work = frameloop_flag(e, "--work");
     d->shots = frameloop_option(e, "--shots");
     if (frameloop_flag(e, "--bench")) d->bench = krome_open(e, "kromedemo/bench.lua");
     else d->form = krome_open(e, "kromedemo/form.lua");
@@ -160,6 +194,7 @@ bool kromedemo_startup(Engine& e, ModuleInstance& self) {
 constinit const SystemDesc k_systems[] = {
     {.name = ".tick", .phase = Phase::PreSim, .fn = kromedemo_tick, .before = "krome.input", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".events", .phase = Phase::Sim, .fn = kromedemo_events, .reads = "KromeEvent", .main_thread = true},
+    {.name = ".work", .phase = Phase::Work, .fn = kromedemo_work, .main_thread = true},
 };
 constinit const HandlerDesc k_handlers[] = {
     {.name = ".exit", KV_ON(ExitRequested, kromedemo_exit), .phase = Phase::PreSim},
@@ -178,7 +213,7 @@ KV_MODULE_DEFINE(kromedemo_module) = {
 } // namespace kv
 
 namespace {
-constinit const char* const k_flags[] = {"--demo", "--bench"};
+constinit const char* const k_flags[] = {"--demo", "--bench", "--work"};
 constinit const char* const k_options[] = {"--shots"};
 constinit const kv::FrameLoopConfig k_config = {
     .title          = "korvid krome demo",

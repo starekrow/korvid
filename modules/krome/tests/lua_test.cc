@@ -73,7 +73,7 @@ return {
 const f64 kDt = 1.0 / 60.0;
 
 void frames(Engine& e, u32 n) {
-    for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, kDt); }
+    for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, kDt); engine_frame_cycle(e, kDt); }
 }
 
 u64 run_hash(bool with_krome, u32 ticks) {

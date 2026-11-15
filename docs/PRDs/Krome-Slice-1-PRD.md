@@ -321,3 +321,10 @@ goldberg's cooking at 60 ticks a second, and sleeping between frames slows it th
 way. Which a tool wants (render on its own thread, a frame every N ticks, or pace on
 demand only while the work is idle) is a decision for goldberg's window, which is the only
 customer, and is left for that slice.
+
+**After the slice, KS13** (Nov 15): settled by cycles (`docs/design/cycles.md`) rather than
+`ToolConfig::window`. A tool's work goes in the Work cycle and Krome in the Frame cycle; a
+tool with a window is the frame loop with both, the work filling the time between frames
+(`kromedemo --work`: 86% of the wall time to the work, the window drawing meanwhile). What
+remains for goldberg's window is running its command line through the frame loop.
+

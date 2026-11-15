@@ -11,6 +11,7 @@
 #include "korvid/platform/io.h"
 #include "korvid/core/profile.h"
 #include "korvid/platform_hid/input.h"
+#include "korvid/platform_hid/events.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -135,16 +136,31 @@ void krome_pump(TickContext& ctx) {
     s.ctx = nullptr;
 }
 
-// Phase PreSim, main thread, every tick, after the pump: the pointer and Escape as this
-// tick's sample has them.
+// The Frame cycle, after the pump: what the pointer and the keys did since the last frame.
+// Presses, releases, the wheel and Escape come as events, so none is lost or counted twice
+// however frames and ticks fall; where the pointer is now comes from the raw state.
 void krome_input(TickContext& ctx) {
     KromeModule& s = ctx.state_as<KromeModule>();
     if (!s.input_id) s.input_id = ctx.resource_id("input.state"); // per engine: a static would outlive it
     const Input* in = ctx.resource<const Input>(s.input_id);
-    if (!in) return;
     s.ctx = &ctx;
-    const MouseState& m = in->sampled.mouse;
-    krome_pointer(s, m.x, m.y, m.down(MouseButton::Left), m.wheel, in->sampled.down(Key::Escape));
+    // The left button's changes in order: from up, down first; from down, up first.
+    Span<const MouseButtonDown> downs = ctx.received<MouseButtonDown>();
+    Span<const MouseButtonUp> ups = ctx.received<MouseButtonUp>();
+    u32 d = 0, u = 0;
+    for (;;) {
+        while (d < downs.len && downs[d].button != MouseButton::Left) ++d;
+        while (u < ups.len && ups[u].button != MouseButton::Left) ++u;
+        if (!s.down && d < downs.len) { krome_pointer(s, downs[d].x, downs[d].y, true, 0.0f, false); ++d; continue; }
+        if (s.down && u < ups.len) { krome_pointer(s, ups[u].x, ups[u].y, false, 0.0f, false); ++u; continue; }
+        break;
+    }
+    f32 wheel = 0.0f;
+    for (const MouseWheel& w : ctx.received<MouseWheel>()) wheel += w.dy;
+    bool escape = false;
+    for (const KeyDown& k : ctx.received<KeyDown>()) if (k.key == Key::Escape && !k.repeat) escape = true;
+    f32 x = in ? in->raw.mouse.x : s.px, y = in ? in->raw.mouse.y : s.py;
+    krome_pointer(s, x, y, s.down, wheel, escape);
     s.ctx = nullptr;
 }
 
@@ -333,11 +349,12 @@ constinit const FieldDesc k_event_fields[] = {KV_FIELDS(KromeEvent, screen, node
 constinit const FieldDesc k_set_fields[] = {KV_FIELDS(KromeSet, screen, key, number, kind, pad, text)};
 constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(KromeEvent, k_event_fields, 0), KV_EVENT_EX(KromeSet, k_set_fields, 0)};
 constinit const SystemDesc k_systems[] = {
-    {.name = ".pump", .phase = Phase::PreSim, .fn = krome_pump, .reads = "KromeSet", .emits = "KromeEvent",
-     .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".input", .phase = Phase::PreSim, .fn = krome_input, .reads = "input.state", .emits = "KromeEvent",
-     .after = ".pump", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".paint", .phase = Phase::PostSim, .fn = krome_paint, .main_thread = true, .runs = RunWhen::Always},
+    // The Frame cycle (docs/design/cycles.md): once before each frame drawn, never in a tick.
+    {.name = ".pump", .phase = Phase::Frame, .fn = krome_pump, .reads = "KromeSet", .emits = "KromeEvent", .main_thread = true},
+    {.name = ".input", .phase = Phase::Frame, .fn = krome_input,
+     .reads = "input.state, MouseButtonDown, MouseButtonUp, MouseWheel, KeyDown", .emits = "KromeEvent",
+     .after = ".pump", .main_thread = true},
+    {.name = ".paint", .phase = Phase::Frame, .fn = krome_paint, .after = ".input", .main_thread = true},
 };
 
 } // namespace

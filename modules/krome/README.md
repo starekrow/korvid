@@ -45,7 +45,11 @@ at the pointer), flipped and held inside the window. Input goes top first. A lig
 overlay closes on a press outside it, and the press goes no further; a modal takes all
 input until `close_overlay()`; Escape closes the top one.
 
-**Drawing.** `krome.paint` (PostSim) lays out what changed and paints the screens of each
+**The Frame cycle.** Krome's systems run in `Phase::Frame` (docs/design/cycles.md): once
+before each frame drawn, never in a tick, so nothing Krome does is in a replay. Presses,
+releases, the wheel and Escape arrive as events, so a click between two frames is kept.
+
+**Drawing.** `krome.paint` lays out what changed and paints the screens of each
 layer into one `UiList` (`korvid/render/ui.h`): a box per node with a background, border,
 shadow or image, a glyph per character from the asset font at the size times the scale,
 clips for `clip` and `scroll`. A layer whose screens did not change is not painted and
@@ -91,7 +95,7 @@ Header `korvid/krome/krome.h`:
 | `krome_viewport(e, w, h, scale)` | function | the view's size without a window |
 | `krome_stats(e)` | function | layouts, paints, lists handed over, events, script errors |
 | `KromeEvent`, `KromeSet` | events | out and in |
-| `krome.pump`, `krome.input` (PreSim), `krome.paint` (PostSim) | systems | scripts and model values; the pointer; layout and paint |
+| `krome.pump`, `krome.input`, `krome.paint` (Frame) | systems | scripts and model values; the pointer; layout and paint |
 | `/krome` | CLI mount | `ls` screens and named nodes, `print` a tree or a node, `patch NODE PROPERTY VALUE...` |
 
 In Lua: the helpers, `model`, `emit(name, value)`, `open_overlay(tree, opts)`, `close_overlay([id])`.
@@ -114,4 +118,5 @@ it), `angle`, `radius` (one, two or four), `border`, `border-color`, `shadow` (x
 ## Not in this module
 
 The markup and the prelude (slice 2), paragraph text and editing (3), the widget set (4),
-vector shapes (5), reload (6), a tool's window (see the slice 1 PRD, As built).
+vector shapes (5), reload (6). A tool with a window is the frame loop with the tool's work
+in the Work cycle (`kromedemo --work`).

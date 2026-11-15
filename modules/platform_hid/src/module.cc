@@ -52,10 +52,19 @@ void input_sample(TickContext& ctx) {
         s.text_override[0] = 0; s.text_override_len = 0; s.text_override_backspaces = 0;
     }
     if (s.pointer_override) {
-        s.input.raw.mouse.x = s.pointer_x;
-        s.input.raw.mouse.y = s.pointer_y;
-        s.input.raw.mouse.buttons = s.pointer_buttons;
-        s.input.raw.mouse.wheel += s.pointer_wheel;
+        // As the mouse would: the state, and the events its changes make.
+        MouseState& m = s.input.raw.mouse;
+        u8 was = m.buttons;
+        m.x = s.pointer_x;
+        m.y = s.pointer_y;
+        m.buttons = s.pointer_buttons;
+        m.wheel += s.pointer_wheel;
+        for (u32 b = 0; b < (u32)MouseButton::Count; ++b) {
+            bool before = (was >> b) & 1u, now = (m.buttons >> b) & 1u;
+            if (now && !before) ctx.emit(MouseButtonDown{(MouseButton)b, m.x, m.y});
+            if (before && !now) ctx.emit(MouseButtonUp{(MouseButton)b, m.x, m.y});
+        }
+        if (s.pointer_wheel != 0.0f) ctx.emit(MouseWheel{0.0f, s.pointer_wheel});
         s.pointer_override = false;
         s.pointer_wheel = 0.0f;
     }
@@ -129,7 +138,8 @@ constinit const CliCommandDesc k_commands[] = {
     {.name = "press", .help = "ACTION [TICKS] [X Y]: hold an action for TICKS sampled ticks (6), an Axis2 toward X Y", .fn = cli_press},
 };
 constinit const SystemDesc   k_systems[] = {
-    {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = "input.state, input.actions", .runs = RunWhen::Always},
+    {.name = "input.sample", .phase = Phase::Input, .fn = input_sample, .writes = "input.state, input.actions",
+     .emits = "MouseButtonDown, MouseButtonUp, MouseWheel", .runs = RunWhen::Always},
 };
 
 } // namespace
