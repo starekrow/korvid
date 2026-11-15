@@ -1,7 +1,7 @@
 // goldberg, heavy: a synthetic cook big enough to behave like a real one. A tree of files
 // full of seeded noise in a spread of size classes (a few of a fifth of the tree each, down
 // to tens of thousands of a few kilobytes), the OS's cache dropped, then cooked by the
-// built goldberg through a shell converter that does work nothing can skip: every 32-byte
+// built goldberg through a converter that does work nothing can skip: every 32-byte
 // block replaced by its SHA-256 (or, with --work swap, every pair of bytes swapped). Then a
 // cook with nothing to do, and one with a file per class changed. It reports what each
 // phase took and, from what the converter recorded of every run, what each size class
@@ -14,8 +14,8 @@
 // the end depend on --size, --classes, --seed and --work alone. It fails on a cook that
 // fails or an output that is wrong, never on a time.
 //
-// This executable is also the converter: `goldberg_heavy xform MODE IN OUT TIMES` is what
-// the generated script runs, once per file.
+// This executable is also the converter: `goldberg_heavy xform MODE IN OUT TIMES`, run by
+// goldberg directly once per file (an "exec" converter: no shell, one process a run).
 #include "korvid/core/array.h"
 #include "korvid/core/atomic.h"
 #include "korvid/core/job.h"
@@ -423,23 +423,33 @@ void evict_job(u32, u32 begin, u32 end, void* user) {
 
 bool put_text(const char* path, const char* text) { return io_write_now(path, text, strlen(text)); }
 
-bool write_rules(Bench& b) {
-    char path[1200], text[3000];
-    snprintf(path, sizeof path, "%s/goldberg.berg", b.src);
-    bool ok = put_text(path, R"({
-  "//": "goldberg_heavy's tree: noise in, every file cooked by xform.sh into one that lands",
-  "types": { "noise": { "runtime": false }, "cooked": { "runtime": true } },
-  "converters": { "xform": { "from": "noise", "to": "cooked", "shell": "xform", "outputs": ["{stem}.cooked"] } },
-  "rules": [ { "match": "*.noise", "meta": { "type": "noise" } } ]
+// A string as JSON writes it, without the quotes: a Windows path's backslashes doubled.
+void json_text(const char* s, char* out, usize cap) {
+    usize n = 0;
+    for (; *s && n + 2 < cap; ++s) {
+        if (*s == '\\' || *s == '"') out[n++] = '\\';
+        out[n++] = *s;
+    }
+    out[n] = 0;
 }
-)");
-    const char* mode = b.o.hash ? "hash" : "swap";
-    snprintf(path, sizeof path, "%s/xform.sh", b.src);
-    snprintf(text, sizeof text, "exec '%s' xform %s \"$1\" \"$2/$GOLDBERG_STEM.cooked\" '%s'\n", b.self, mode, b.times);
-    ok = ok && put_text(path, text);
-    snprintf(path, sizeof path, "%s/xform.bat", b.src);
-    snprintf(text, sizeof text, "@\"%s\" xform %s \"%%~1\" \"%%~2/%%GOLDBERG_STEM%%.cooked\" \"%s\"\r\n", b.self, mode, b.times);
-    return ok && put_text(path, text);
+
+// The tree's rules: the converter is this executable, run by goldberg directly ("exec": no
+// shell between, so a run is one process). Its mode and where it records each run are the
+// asset's metadata, so a path with a space in it stays one argument.
+bool write_rules(Bench& b) {
+    char path[1200], self[1600], times[1600], text[5000];
+    json_text(b.self, self, sizeof self);
+    json_text(b.times, times, sizeof times);
+    snprintf(path, sizeof path, "%s/goldberg.berg", b.src);
+    snprintf(text, sizeof text, R"({
+  "//": "goldberg_heavy's tree: noise in, every file cooked by goldberg_heavy xform into one that lands",
+  "types": { "noise": { "runtime": false }, "cooked": { "runtime": true } },
+  "converters": { "xform": { "from": "noise", "to": "cooked", "exec": "%s",
+                             "args": "xform {mode} {in} {work}/{stem}.cooked {times}", "outputs": ["{stem}.cooked"] } },
+  "rules": [ { "match": "*.noise", "meta": { "type": "noise", "mode": "%s", "times": "%s" } } ]
+}
+)", self, b.o.hash ? "hash" : "swap", times);
+    return put_text(path, text);
 }
 
 // ---- running goldberg -------------------------------------------------------------------------
@@ -774,7 +784,7 @@ int usage(const char* why) {
     if (why) fprintf(stderr, "goldberg_heavy: %s\n", why);
     fprintf(stderr,
             "usage: goldberg_heavy [--size 1G] [--classes 5,10,20,100,10000,100000] [--work hash|swap]\n"
-            "                      [--dir DIR] [--seed N] [--touch N] [--watch auto|inotify|poll|none]\n"
+            "                      [--dir DIR] [--seed N] [--touch N] [--watch auto|native|poll|none]\n"
             "                      [--no-evict] [--keep]\n"
             "  --size      about how big the tree is (K, M, G)\n"
             "  --classes   the size classes, each a file of 1/N of --size; each class holds about the\n"
@@ -854,7 +864,6 @@ int bench(Options& o) {
         usize m = strlen(b.o.dir);
         snprintf(b.o.dir + m, sizeof b.o.dir - m, "bench/goldberg");
     }
-    if (strchr(b.o.dir, '\'') || strchr(b.self, '\'')) { fprintf(stderr, "goldberg_heavy: a path with a ' in it: use --dir\n"); return 2; }
     char mark[800];
     snprintf(mark, sizeof mark, "%s/%s", b.o.dir, kMark);
     if (io_is_dir(b.o.dir)) {
@@ -868,6 +877,19 @@ int bench(Options& o) {
     if (!io_make_dirs(b.src) || !io_make_dirs(b.state) || !io_make_dirs(b.times) || !put_text(mark, "goldberg_heavy's scratch: removed at its next run\n")) {
         fprintf(stderr, "goldberg_heavy: cannot make %s\n", b.o.dir);
         return 1;
+    }
+    // The converter is this program, run from a copy made for this run. Windows keeps
+    // something for every launch of an image file, and a file launched a few hundred
+    // thousand times starts two or three times slower (12 ms a launch fresh, 30-40 ms
+    // after a few cooks at 64M): the cook would measure how many runs came before it.
+    {
+        char fresh[sizeof b.self];
+        snprintf(fresh, sizeof fresh, "%s/xform%s", b.o.dir, kExe);
+        if (!io_copy_now(b.self, fresh)) { fprintf(stderr, "goldberg_heavy: cannot copy myself to %s\n", fresh); return 1; }
+#if !defined(_WIN32)
+        chmod(fresh, 0755);
+#endif
+        snprintf(b.self, sizeof b.self, "%s", fresh);
     }
     plan(b);
     // Sources, what the converter makes (kept in the state's work tree) and the output
@@ -995,8 +1017,8 @@ int bench(Options& o) {
     {
         File& saved = b.files[b.classes[b.classes.len - 1].first]; // the smallest class's first
         WatchRun wr = watch(b, saved);
-        u32 n = 99;
-        ok = step(b, wr.ready > 0 && cooked(wr.line, &n) && n == 0, "a watch started on the cooked tree cooked something, or never said it was stable") && ok;
+        u32 made = 99;
+        ok = step(b, wr.ready > 0 && cooked(wr.line, &made) && made == 0, "a watch started on the cooked tree cooked something, or never said it was stable") && ok;
         ok = step(b, wr.ok, "a watch did not cook a saved source") && ok;
         printf("  %-26s %9.2f s   %s\n", "watch, until stable", wr.ready, wr.line);
         char each[16];

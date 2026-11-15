@@ -164,13 +164,14 @@ no rule types is copied as it is, with a soft warning.
 
 ## Converters
 
-`copy` is built in. A shell converter is registered in a `.berg` file under an asset
-root:
+`copy` is built in. Others are registered in a `.berg` file under an asset root, with a
+script (`shell`) or a program (`exec`), one or the other:
 
 | Key | Meaning |
 |---|---|
 | `from`, `to` | the type it takes and the type of what it makes |
 | `shell` | its script, without the extension, relative to the `.berg` file. It runs as `/bin/sh <shell>.sh <args>`; on Windows `<shell>.bat` through `cmd /c` when there is one, else `<shell>.sh` through the `sh` on `PATH` (Git's, MSYS2's) |
+| `exec` | a program, run directly as `<exec> <args>` with no shell between: one process a run, which on Windows is half the cost of a `.bat` (a `cmd.exe` less). A path relative to the `.berg` file (`tools/cut`; on Windows `tools/cut.exe` is looked for first) is an input as a script is: a new build of it runs its steps again. It is kept out of the output tree by convention when it ends in `.exe`; give one without an extension a rule (`"cook": false`). A name with no slash is found on `PATH`, and an absolute path is run as it is; neither is hashed, so their steps run again only when the registration or the sources change |
 | `args` | the arguments, one string split at spaces. Default `{in} {work}` |
 | `outputs` | names or patterns of what it writes under `{work}`; or `"scan"`; or left out |
 | `settle` | seconds. With `"scan"`, how long a file must be quiet to be taken. Otherwise how long the step is held open after the script ends |

@@ -1,11 +1,14 @@
--- Shell converters: where a step's script is, the command line that runs it, and the
--- names it said it would write. Used by the cook (graph.lua) and by `goldberg learn`.
+-- Converters: where a step's script or program is, the command line that runs it, and
+-- the names it said it would write. Used by the cook (graph.lua) and by `goldberg learn`.
 --
 -- A converter is registered in a .berg file under an asset root:
 --   "cut": { "from": "sheet", "to": "texture", "shell": "tools/cut",
 --            "args": "{in} {work}", "outputs": ["{stem}_*.png"] }
 -- `shell` names a script without its extension, relative to that .berg file. It runs as
 -- `/bin/sh tools/cut.sh <args>`, in the directory it is to write into ({work}).
+-- `exec` instead names a program, run directly with the args and nothing between (one
+-- process a run): under the .berg file's directory (an input, as a script is), on PATH, or
+-- by an absolute path.
 -- In `args` and `outputs`: {in} the source's full path, {work} the directory to write
 -- into, {name} the source's file name, {stem} that name up to its first dot, and any key
 -- of the asset's metadata ({filter}, {atlas.pad}). The same are in the environment, as
@@ -23,18 +26,47 @@ function M.work_dir(key, conv_name)
     return kv.sha256(key .. "\0" .. conv_name):sub(1, 8) .. "-" .. basename(key:match("^[^:]*:(.*)$") or key) .. "." .. conv_name
 end
 
--- The converter's registration as text, the same for the same registration.
+-- The converter's registration as text, the same for the same registration. "exec" only
+-- when it is there, so a shell converter's text (and every step's key) is what it was.
 function M.signature(conv)
     local parts = {}
     for _, k in ipairs{ "from", "to", "shell", "args", "outputs", "settle" } do
         parts[#parts + 1] = k .. "=" .. (conv[k] == nil and "" or berg.show(conv[k]))
     end
+    if conv.exec ~= nil then parts[#parts + 1] = "exec=" .. berg.show(conv.exec) end
     return table.concat(parts, " ")
 end
 
--- script(conv, has): the key ("<root>:<path>") of the script's file and its kind ("sh" or
--- "bat"), or nil and why. has(key) says whether the session knows such a file.
+local function is_abs(p) return p:sub(1, 1) == "/" or p:match("^%a:[/\\]") ~= nil end
+
+-- An "exec" converter's program: a path under its .berg file's directory (the key of that
+-- file, "<root>:<path>", and "exe": an input, as a script is; on Windows `<path>.exe` is
+-- looked for first), or a name found on PATH or an absolute path (false, "exe" and the
+-- program: run as it is, and not something the session can hash). Or nil and why.
+local function program(conv, has)
+    local p = conv.exec
+    if not p:find("/", 1, true) and not p:find("\\", 1, true) then return false, "exe", p end -- on PATH
+    if is_abs(p) then return false, "exe", p end
+    local root, berg_path = (conv.key or ""):match("^([^:]+):(.*)$")
+    if not root then
+        return nil, string.format('the converter "%s" is registered in %s: a program by a relative path is found beside the .berg file of an asset root, so register it in one, or give "exec" an absolute path', conv.name, conv.file)
+    end
+    if p:find("..", 1, true) then
+        return nil, string.format('the converter "%s": "exec" names a program under its .berg file\'s directory, on PATH, or by an absolute path, not "%s"', conv.name, p)
+    end
+    local dir = dirname(berg_path)
+    local base = root .. ":" .. (dir == "" and "" or dir .. "/") .. p
+    if host.windows and has(base .. ".exe") then return base .. ".exe", "exe" end
+    if has(base) then return base, "exe" end
+    return nil, string.format('the converter "%s" runs %s%s, which is not there (registered in %s)', conv.name, p, host.windows and "(.exe)" or "", conv.file)
+end
+
+-- script(conv, has): the key ("<root>:<path>") of the script's file and its kind ("sh",
+-- "bat" or, for an "exec" converter, "exe"), or nil and why. For a program that is not
+-- under an asset root (on PATH, or by an absolute path), false, "exe" and the program.
+-- has(key) says whether the session knows such a file.
 function M.script(conv, has)
+    if conv.exec then return program(conv, has) end
     local root, berg_path = (conv.key or ""):match("^([^:]+):(.*)$")
     if not root then
         return nil, string.format('the converter "%s" is registered in %s: a shell converter\'s script is found beside the .berg file of an asset root, so register it in one', conv.name, conv.file)
@@ -82,7 +114,8 @@ end
 -- command(conv, script, kind, vars, params): argv and env for one run, or nil and why.
 function M.command(conv, script, kind, vars, params)
     local argv
-    if kind == "bat" then argv = { "cmd", "/c", script }
+    if kind == "exe" then argv = { script } -- the program itself: no shell between
+    elseif kind == "bat" then argv = { "cmd", "/c", script }
     else argv = { host.windows and "sh" or "/bin/sh", script } end
     for word in (conv.args or "{in} {work}"):gmatch("%S+") do
         local w, bad = subst(word, vars, params or {})

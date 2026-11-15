@@ -413,7 +413,7 @@ end
 -- date with the answers, and, once every source is hashed and solved and the output tree
 -- has been read, plan and start the cooks.
 function Session:advance()
-    if self:can_settle() then self:settle() end
+    if self:can_settle() then host.zone("lua.settle") self:settle() host.zone_end() end
     local g = self.graph
     if not g then self.touched, self.removed = {}, {} return end
     if self.berg_hashing > 0 then return end -- answers may be about to change
@@ -423,11 +423,13 @@ function Session:advance()
     local keys = {}
     for key in pairs(self.touched) do if not self.unsolved[key] then keys[#keys + 1] = key end end
     table.sort(keys)
+    host.zone("lua.file_changed")
     for _, key in ipairs(keys) do
         self.touched[key] = nil
         g:file_changed(key)
     end
-    if self.hashing == 0 and next(self.unsolved) == nil and next(self.scanning) == nil and g:ready() then g:plan() end
+    host.zone_end()
+    if self.hashing == 0 and next(self.unsolved) == nil and next(self.scanning) == nil and g:ready() then host.zone("lua.plan") g:plan() host.zone_end() end
 end
 
 -- Whether the state written now would differ from the one read, or last written.

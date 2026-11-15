@@ -214,6 +214,63 @@ Done on the Windows machine (Nov 15), after slice 1 closed on Linux:
   (`C:/Users/A B/...`) splits. The render gate passes (D3D12), and arcfire runs from its
   cooked tree in dev and in ship.
 
+### Windows at scale
+
+`goldberg_heavy --size 64M` (18,359 files, the six classes, hashed) and `--size 1M` (550
+files in two classes), NTFS on NVMe, 16 cpus, dev, the repository excluded from Defender
+from the second column on. Digests `5df3639838e0a3e6` (64M) and `9e24a0808df2b717` (1M)
+throughout. Nov 15, 2026.
+
+| What | First run | `exec`, no shell | No console a child | A fresh converter |
+|---|---|---|---|---|
+| Cold cook, 1M | 7.8 s | 5.4 s | 3.3 to 4.5 s | 1.9 s |
+| Cold cook, 64M | 270 s | | 150 to 252 s | 75.6 s (72.6 s of converters) |
+| Nothing changed, 64M | 14.3 s | | 5.9 s | 6.0 s |
+| Six changed, 64M | | | 6.1 s | 6.5 s |
+| A watch, one save | | | 36 to 41 ms | 28 ms (1M) |
+
+Where it went, in the order it was found:
+
+- **The shell.** A `shell` converter is `cmd /d /s /c "tool.bat ..."`: cmd and the script
+  are two more programs a run, and a .bat is read a line at a time. A converter can now
+  name a program, `"exec": "tools/up"` (or a name on PATH, or an absolute path), which
+  is started with its arguments and no shell (`convert.lua`; `.exe` is tried first on
+  Windows, and `conventions.berg` does not cook `*.exe`). The heavy test's converter is
+  the heavy test itself, `goldberg_heavy xform ...`, where it was a script.
+- **A console a child.** `CREATE_NO_WINDOW` gives each child a console of its own, and so a
+  `conhost.exe`, a third process a run. A goldberg with a console (a terminal, Ninja,
+  kormake) now lets its children share it; only a goldberg without one (started from a
+  GUI) asks for none (`GetConsoleCP`: `GetConsoleWindow` is null under mintty, which has
+  a hidden console).
+- **What a start costs.** CreateProcess and a run of an empty program: 11 to 12 ms,
+  against well under 1 ms for posix_spawn on Linux. Each new file: 8 to 9 ms outside the
+  Defender exclusion, 3.7 ms in it. Those two are most of a 10 KB file's cook; the hashing
+  is microseconds. Eight lanes keep eight starts in flight, not more cores busy.
+- **A converter launched too often.** The cold cook grew slower run after run (150, 191,
+  252 s) on the same tree. Windows keeps something for every launch of an image *file*:
+  the one exe goldberg_heavy had been started from, on the order of 100,000 times, took 28 to 40 ms a
+  launch, where a copy of it (any name, any directory) and a fresh link took 12 to 14.
+  Writing the same bytes over it did not help; a new file at the same path did. Measured
+  at 0.12 ms more a launch for each thousand. The heavy test now cooks with a copy of
+  itself made for the run, `<dir>/xform.exe`. A real converter would see it too, after a
+  great many cooks; relinking or reinstalling it starts over.
+- **The scan** (nothing changed, 18,000 files: 1,733 ms to 20 ms). A walk asked each name
+  for its size and time, a CreateFile and a close each. `io_list_files_stat` hands the
+  walk's callback what the listing already carries (`FindFirstFileExW` has the size, time
+  and attributes; a symbolic link is still asked, so it is followed). The watcher's walk
+  uses it too, and `os_path_stat` uses `GetFileAttributesExW`, no handle opened.
+- **Folding events** (757 ms to 4 ms, "fill rows"). Folding a path's events into one was a
+  search back through the pending list for each; it is one pass with a table by path.
+- **The watcher's directories** (5,541 of them: 760 ms to 320 ms to start). Each root's
+  list of known directories was searched by name; it has an index by hash.
+- **What is left** of nothing changed, 18,000 files: 0.7 s in all, of it Lua's settle
+  0.3 s, handing events to Lua 0.2 s, making the session 0.17 s.
+
+The profile came from the engine's profiler, which every tool now has: `--profile FILE`
+writes a trace (Chrome's format), `--prof-report` prints the zones by total time at the
+end. goldberg has zones around its scan, events and Lua's tick, and Lua can add its own
+(`host.zone(name)` ... `host.zone_end()`).
+
 ## Not run
 
 macOS and iOS compile paths touched by the handover; the Android emulator test runner.

@@ -33,6 +33,7 @@
 
     { "match": "*.berg",          "meta": { "cook": false } },
     { "match": "*.sh",            "meta": { "cook": false } },
-    { "match": "*.bat",           "meta": { "cook": false } }
+    { "match": "*.bat",           "meta": { "cook": false } },
+    { "match": "*.exe",           "meta": { "cook": false } }
   ]
 }

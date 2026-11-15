@@ -66,13 +66,14 @@ function Learn.start(loc, rules, o)
         return nil
     end
     local conv = a.conv
-    local script, kind = convert.script(conv, function(key) return kv.fs.is_file(loc.abs .. "/" .. key:match("^[^:]*:(.*)$")) end)
-    if not script then complain("%s", kind) host.finish(1) return nil end
+    local script, kind, outside = convert.script(conv, function(key) return kv.fs.is_file(loc.abs .. "/" .. key:match("^[^:]*:(.*)$")) end)
+    if script == nil then complain("%s", kind) host.finish(1) return nil end
     local temp = kv.fs.temp_dir("goldberg-learn")
     local work = temp .. "/out"
     local input = loc.abs .. "/" .. loc.rel
     local vars = convert.vars(input, work)
-    local argv, env = convert.command(conv, loc.abs .. "/" .. script:match("^[^:]*:(.*)$"), kind, vars, a.params)
+    local program = script and (loc.abs .. "/" .. script:match("^[^:]*:(.*)$")) or outside -- outside: on PATH, or absolute
+    local argv, env = convert.command(conv, program, kind, vars, a.params)
     if not argv then complain("%s", env) kv.fs.remove_tree(temp) host.finish(1) return nil end
 
     local self = setmetatable({

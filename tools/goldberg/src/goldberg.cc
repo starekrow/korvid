@@ -28,6 +28,8 @@
 #include "korvid/core/log.h"
 #include "korvid/core/sha256.h"
 #include "korvid/core/sort.h"
+#include "korvid/core/name.h"
+#include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/fs_watch.h"
 #include "korvid/platform/io.h"
@@ -374,16 +376,15 @@ void copy_done(GoldbergState& s, CopyReq& r) {
 // ---- the scan ----------------------------------------------------------------------------------
 
 struct ScanCtx { GoldbergState* s; u32 root; };
-bool scan_one(void* user, const char* relative) {
+// A file the walk found, with its size and time from the listing: nothing asked of it.
+bool scan_one(void* user, const char* relative, const IoStat& st) {
     ScanCtx* c = (ScanCtx*)user;
     GoldbergState& s = *c->s;
-    char full[800];
-    format(full, sizeof full, "%s/%s", s.roots.data[c->root].dir, relative);
     ScanItem it{};
     it.root  = c->root;
     it.path  = s.scan_text.len;
-    IoStat st;
-    if (io_stat(full, &st)) { it.size = st.size; it.mtime = st.mtime_ns; }
+    it.size  = st.size;
+    it.mtime = st.mtime_ns;
     u32 n = (u32)strlen(relative);
     memcpy(s.scan_text.push_n(n + 1), relative, n + 1);
     s.scan.push(it);
@@ -391,8 +392,9 @@ bool scan_one(void* user, const char* relative) {
 }
 
 void scan_root(GoldbergState& s, u32 root) {
+    KV_ZONE("goldberg.scan");
     ScanCtx c{&s, root};
-    io_list_files(s.roots.data[root].dir, scan_one, &c); // hidden files left out, as the copy left them
+    io_list_files_stat(s.roots.data[root].dir, scan_one, &c); // hidden files left out, as the copy left them
     ScanItem end{};
     end.root = root;
     end.path = s.scan_text.len;
@@ -707,21 +709,40 @@ bool is_fs_kind(u8 k) { return k == EvSeen || k == EvAdded || k == EvChanged || 
 
 // One event per path: of several, what the last leaves true. Anything ending in a removal
 // is a removal; anything else that includes an arrival is an arrival; otherwise a change.
+// A directory event, a rescan or the end of a scan is a boundary: nothing folds across it.
+//
+// One pass, with a map from each path to the last of its events since the boundary, and
+// what came before that last: whether any of it was an arrival (added or seen), and
+// whether every arrival was a sighting. That is all the last event's kind depends on: a
+// removal stays one; with no arrival before it, it is what it was; a sighting after only
+// sightings is a sighting; anything else is an arrival. (The pass that compared each
+// event with every one before it took 750 ms over a scan of 36,000 files.)
 void fold_pending(GoldbergState& s) {
-    for (u32 i = s.pending.len; i-- > 0;) {
-        Pending& later = s.pending.data[i];
-        if (later.dead || !is_fs_kind(later.kind)) continue;
-        const char* path = s.pending_text.data + later.path;
-        for (u32 j = i; j-- > 0;) {
-            Pending& earlier = s.pending.data[j];
-            if (earlier.dead) continue;
-            // A directory event or a rescan between them is a boundary: do not fold across it.
-            if (earlier.kind == EvDirAdded || earlier.kind == EvDirRemoved || earlier.kind == EvRescan || earlier.kind == EvScanDone) break;
-            if (!is_fs_kind(earlier.kind) || earlier.root != later.root || strcmp(s.pending_text.data + earlier.path, path) != 0) continue;
-            if (later.kind != EvRemoved && (earlier.kind == EvAdded || earlier.kind == EvSeen)) later.kind = earlier.kind == EvSeen && later.kind == EvSeen ? EvSeen : EvAdded;
-            earlier.dead = true;
+    struct Group { u32 last; u8 last_kind; bool arrival; bool all_seen; }; // last_kind: as it came
+    Map<u64, Group> groups;
+    for (u32 i = 0; i < s.pending.len; ++i) {
+        Pending& p = s.pending.data[i];
+        if (p.dead) continue;
+        if (p.kind == EvDirAdded || p.kind == EvDirRemoved || p.kind == EvRescan || p.kind == EvScanDone) { groups.clear(); continue; }
+        if (!is_fs_kind(p.kind)) continue;
+        const char* path = s.pending_text.data + p.path;
+        u64 key = hash_mix(hash_str(path) ^ ((u64)p.root * 0x9E3779B97F4A7C15ull));
+        u8 came = p.kind;
+        Group* g = groups.find(key);
+        Pending* prev = g ? &s.pending.data[g->last] : nullptr;
+        if (prev && prev->root == p.root && strcmp(s.pending_text.data + prev->path, path) == 0) {
+            if (g->last_kind == EvAdded || g->last_kind == EvSeen) { g->arrival = true; g->all_seen = g->all_seen && g->last_kind == EvSeen; }
+            prev->dead = true;
+            g->last = i;
+            g->last_kind = came;
+            if (came != EvRemoved && g->arrival) p.kind = came == EvSeen && g->all_seen ? EvSeen : EvAdded;
+            continue;
         }
+        // A new path, or (a 64-bit hash shared by two paths) one that takes the slot: the
+        // other then simply folds no further, which is never wrong, only less tidy.
+        groups.set(key, Group{i, came, false, true});
     }
+    groups.free();
 }
 
 void fill_rows(GoldbergState& s) {
@@ -1055,6 +1076,11 @@ int host_print(lua_State* L) { print("%s\n", luaL_checkstring(L, 1)); return 0; 
 int host_warn(lua_State* L) { print_err("%s\n", luaL_checkstring(L, 1)); return 0; }
 int host_flush(lua_State*) { print_flush(); return 0; }
 int host_now(lua_State* L) { lua_pushnumber(L, time_now()); return 1; }
+// host.zone(name), host.zone_end(): the engine's profiler from Lua (--prof-report, --profile), so
+// what the Lua spends is seen beside what the C++ does. The profiler keys a zone by its
+// name's address: the name is interned, one address for one name.
+int host_zone(lua_State* L) { if (prof_enabled()) prof_begin(name_str(name_intern(luaL_checkstring(L, 1)))); return 0; }
+int host_zone_end(lua_State*) { if (prof_enabled()) prof_end(); return 0; }
 int host_cwd(lua_State* L) {
     char cwd[1024];
     if (!io_current_dir(cwd, sizeof cwd)) return luaL_error(L, "the current directory cannot be read");
@@ -1088,7 +1114,7 @@ constexpr luaL_Reg k_host[] = {
     {"flush", host_flush}, {"lock", host_lock}, {"sleep", host_sleep}, {"stat", host_stat}, {"touch", host_touch},
     {"run", host_run}, {"clear_work", host_clear_work}, {"remove_work", host_remove_work},
     {"glob", host_glob}, {"glob_path", host_glob_path}, {"print", host_print}, {"warn", host_warn},
-    {"now", host_now}, {"cwd", host_cwd}, {"active", host_active}, {"share", host_share}, {"finish", host_finish}, {nullptr, nullptr},
+    {"now", host_now}, {"zone", host_zone}, {"zone_end", host_zone_end}, {"cwd", host_cwd}, {"active", host_active}, {"share", host_share}, {"finish", host_finish}, {nullptr, nullptr},
 };
 
 // The application's directory: tools/goldberg/lua beside this source, unless told
@@ -1231,6 +1257,7 @@ void pump(TickContext& ctx) {
 
     // 1. A command.
     if (s.command_words) {
+        KV_ZONE("goldberg.command");
         if (!load_app(s, e)) { s.failed = true; tool_finish(e, 1); return; }
         lua_State* L = s.L;
         lua_createtable(L, (int)s.command_words, 0);
@@ -1250,6 +1277,7 @@ void pump(TickContext& ctx) {
 
     // 2. The sources.
     if (s.watcher.is_open()) {
+        KV_ZONE("goldberg.watcher");
         for (const FsEvent& ev : s.watcher.poll()) {
             u32 root = ~0u;
             for (u32 i = 0; i < s.roots.len; ++i) if (s.roots.data[i].watch == ev.root) root = i;
@@ -1258,9 +1286,10 @@ void pump(TickContext& ctx) {
             take_fs_event(s, fs_kind(ev.kind), root, ev.path);
         }
     }
-    drain_io(s);
+    { KV_ZONE("goldberg.drain io"); drain_io(s); }
     release_held(s);
     // The scan's files, a pool's worth at a time.
+    { KV_ZONE("goldberg.scan to events");
     u32 room = s.events->capacity - s.events->live();
     for (; s.scan_at < s.scan.len && s.pending.len < room; ++s.scan_at) {
         const ScanItem& it = s.scan.data[s.scan_at];
@@ -1270,10 +1299,11 @@ void pump(TickContext& ctx) {
         else push_pending(s, EvSeen, it.root, path, it.size, it.mtime);
     }
     if (s.scan_at == s.scan.len) { s.scan.len = 0; s.scan_text.len = 0; s.scan_at = 0; }
+    }
 
     // 3 and 4. Into rows, and to Lua in order, within the session's share of the tick:
     // what does not fit stays in its rows for the next. One always goes.
-    fill_rows(s);
+    { KV_ZONE("goldberg.fill rows"); fill_rows(s); }
     u32 delivered = 0;
     f64 budget = s.share >= 1.0 ? 0.0 : s.share * kTick;
     if (s.events->live()) {
@@ -1281,6 +1311,7 @@ void pump(TickContext& ctx) {
         for (u32 i = 0; i < s.events->rows(); ++i) if (s.events->is_alive(i)) order.push(s.events->handle_at(i));
         SeqCmp cmp{s.events};
         sort(order.data, order.len, sizeof(Handle), seq_cmp, &cmp);
+        KV_ZONE("goldberg.events to lua");
         for (Handle h : order) {
             if (budget > 0 && delivered && time_now() - tick_start >= budget) break;
             GbEvent* ev = s.events->get<GbEvent>(h);
@@ -1309,7 +1340,7 @@ void pump(TickContext& ctx) {
     // A converter still running, or a file of its still settling, is something left.
     bool quiet = idle && !s.runs && !s.held.len;
     lua_pushboolean(L, quiet);
-    call_app(s, e, "tick", 1, 0);
+    { KV_ZONE("goldberg.lua tick"); call_app(s, e, "tick", 1, 0); }
     if (s.active && idle) time_sleep(0.002); // nothing to do this tick: do not spin
     else if (s.active && s.share < 1.0) {
         // Headless, nothing paces the ticks: a session with less than all of each sleeps

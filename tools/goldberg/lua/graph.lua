@@ -247,23 +247,29 @@ end
 
 local function check_shell(g, step, f)
     local s, conv = g.s, step.conv
-    local script, kind = convert.script(conv, function(k) return s.files[k] ~= nil end)
+    local script, kind, outside = convert.script(conv, function(k) return s.files[k] ~= nil end)
     unlink_script(g, step)
-    if not script then return fail(g, step, kind) end
-    step.script = script
-    g.by_script[script] = g.by_script[script] or {}
-    g.by_script[script][step.file] = true
-    local sf = s.files[script]
-    if not sf.hash then return end -- being read: looked at again when it is in
+    if script == nil then return fail(g, step, kind) end
+    -- A program on PATH or by an absolute path is run as it is: nothing to hash or watch,
+    -- so its steps are keyed by its name (in the signature) and not by its bytes.
+    local sf, program, script_hash = nil, outside, ""
+    if script then
+        step.script = script
+        g.by_script[script] = g.by_script[script] or {}
+        g.by_script[script][step.file] = true
+        sf = s.files[script]
+        if not sf.hash then return end -- being read: looked at again when it is in
+        program, script_hash = s:root_dir(sf.root) .. "/" .. sf.path, sf.hash
+    end
     local scan = conv.outputs == "scan"
     local write_dir = (scan and s:root_dir(s.work_root) or s.run_dir) .. "/" .. step.work
     local vars = convert.vars(s:root_dir(f.root) .. "/" .. f.path, write_dir)
-    local argv, env = convert.command(conv, s:root_dir(sf.root) .. "/" .. sf.path, kind, vars, step.params)
+    local argv, env = convert.command(conv, program, kind, vars, step.params)
     if not argv then return fail(g, step, env) end
     local patterns, bad = convert.patterns(conv, vars, step.params)
     if bad then return fail(g, step, bad) end
     local _, place = s:place(f)
-    local key = kv.sha256(table.concat({ "shell", SHELL_VERSION, convert.signature(conv), sf.hash, f.hash, params_text(step.params), place }, "\0"))
+    local key = kv.sha256(table.concat({ "shell", SHELL_VERSION, convert.signature(conv), script_hash, f.hash, params_text(step.params), place }, "\0"))
     local saved = g.ran[step.file]
     if saved and saved.key == key then
         local all = true

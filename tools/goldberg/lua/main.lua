@@ -231,7 +231,9 @@ local function start(mode, words)
         cfg.work_root = host.add_root("(work)", scratch .. ".work")
         cfg.run_dir = scratch .. ".run"
     end
+    host.zone("lua.session new")
     run = { session = Session.new(cfg), mode = mode, opts = o, cfg = cfg, t0 = host.now() }
+    host.zone_end()
     -- A watch keeps an eye on the project's goldberg.berg too: one file, looked at a few
     -- times a second, since watching its directory would be watching the whole project.
     if mode == "watch" then
@@ -434,8 +436,8 @@ function goldberg.tick(quiet)
         run.said_stable = false -- and the usual line, below
     end
     if run.mode == "cook" then
-        local t = report(true)
-        write_outputs()
+        host.zone("lua.report") local t = report(true) host.zone_end()
+        host.zone("lua.write outputs") write_outputs() host.zone_end()
         local failed = t.failed > 0 or #t.errors > 0
         -- For a build: a file that changes only when the output tree did.
         if run.opts.stamp and not failed and (t.cooked > 0 or t.removed > 0 or not kv.fs.is_file(run.opts.stamp)) then

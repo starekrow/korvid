@@ -12,6 +12,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
 
 namespace {
 
@@ -568,6 +571,86 @@ void test_scripts(TestCtx& c) {
 
 // goldberg learn: the converter run once, what it wrote turned into a declaration, and
 // that written into the .berg file with the rest of the file untouched.
+// A path for a JSON document: a Windows path's backslashes doubled.
+void json_path(const char* s, char* out, usize cap) {
+    usize n = 0;
+    for (; *s && n + 2 < cap; ++s) {
+        if (*s == '\\' || *s == '"') out[n++] = '\\';
+        out[n++] = *s;
+    }
+    out[n] = 0;
+}
+
+// "exec": a program run as it is, with no shell between. By an absolute path (this test
+// executable, as a converter: `--upper IN OUT`); then as a program under the asset root,
+// which is an input as a script is (a new build of it runs its steps again) and does not
+// land. And the mistakes.
+void test_exec(TestCtx& c) {
+    c.begin("goldberg exec");
+    if (!process_supported()) return;
+#if defined(_WIN32)
+    const char* ext = ".exe";
+#else
+    const char* ext = "";
+#endif
+    char self[800], self_json[1600];
+    KV_CHECK(c, platform_exe_dir(self, sizeof self));
+    usize n = strlen(self);
+    snprintf(self + n, sizeof self - n, "goldberg_tests%s", ext);
+    json_path(self, self_json, sizeof self_json);
+    Tree t;
+    KV_CHECK(c, t.make("kv-goldberg-exec"));
+    char root[600], out[600], dump[600], berg[3200];
+    snprintf(root, sizeof root, "g=%s/assets", t.dir);
+    snprintf(out, sizeof out, "%s/out", t.dir);
+    snprintf(dump, sizeof dump, "%s/dump.txt", t.dir);
+#define COOK(...) gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none" __VA_OPT__(,) __VA_ARGS__)
+
+    // By an absolute path: it cooks, and a second cook runs nothing.
+    snprintf(berg, sizeof berg, R"({
+  "types": { "low": { "runtime": false } },
+  "converters": { "up": { "from": "low", "to": "text", "exec": "%s", "args": "--upper {in} {work}/{stem}.txt", "outputs": ["{stem}.txt"] } },
+  "rules": [ { "match": "*.low", "meta": { "type": "low" } } ]
+})", self_json);
+    t.put("assets/goldberg.berg", berg);
+    t.put("assets/a.low", "quiet words\n");
+    KV_CHECK(c, COOK() == 0 && strcmp(t.read("out/g/a.txt"), "QUIET WORDS\n") == 0);
+    KV_CHECK(c, COOK("--dump", dump) == 0 && !has(t.read("dump.txt"), "request run"));
+
+    // Under the asset root: found beside the .berg file (up.exe first on Windows), kept out
+    // of the output tree (by convention for .exe, by a rule where a program has no
+    // extension), and an input: a different build of it runs the step again.
+    char prog[900];
+    snprintf(prog, sizeof prog, "%s/assets/tools/up%s", t.dir, ext);
+    io_make_dirs(t.path("assets/tools"));
+    KV_CHECK(c, io_copy_now(self, prog));
+#if !defined(_WIN32)
+    chmod(prog, 0755);
+#endif
+    t.put("assets/goldberg.berg", R"({
+  "types": { "low": { "runtime": false } },
+  "converters": { "up": { "from": "low", "to": "text", "exec": "tools/up", "args": "--upper {in} {work}/{stem}.txt", "outputs": ["{stem}.txt"] } },
+  "rules": [ { "match": "*.low", "meta": { "type": "low" } }, { "match": "tools/up", "meta": { "cook": false } } ]
+})");
+    KV_CHECK(c, COOK("--dump", dump) == 0 && has(t.read("dump.txt"), "request run g:a.low up") && strcmp(t.read("out/g/a.txt"), "QUIET WORDS\n") == 0);
+    KV_CHECK(c, !io_is_dir(t.path("out/g/tools")));
+    KV_CHECK(c, COOK("--dump", dump) == 0 && !has(t.read("dump.txt"), "request run"));
+    if (FILE* f = fopen(prog, "ab")) { fputs("a new build", f); fclose(f); } // bytes past the end: it still runs
+    KV_CHECK(c, COOK("--dump", dump) == 0 && has(t.read("dump.txt"), "request run g:a.low up"));
+
+    // Both "shell" and "exec", or a program that is not there: said, and nothing cooked.
+    t.put("assets/goldberg.berg", R"({ "types": { "low": { "runtime": false } },
+  "converters": { "up": { "from": "low", "to": "text", "shell": "tools/up", "exec": "tools/up" } },
+  "rules": [ { "match": "*.low", "meta": { "type": "low" } } ] })");
+    KV_CHECK(c, COOK() == 1 && has(g_err.data, "needs \"shell\" (the script it runs, without its extension) or \"exec\" (the program it runs), not both"));
+    t.put("assets/goldberg.berg", R"({ "types": { "low": { "runtime": false } },
+  "converters": { "up": { "from": "low", "to": "text", "exec": "tools/nope" } },
+  "rules": [ { "match": "*.low", "meta": { "type": "low" } } ] })");
+    KV_CHECK(c, COOK() == 1 && has(g_err.data, "runs tools/nope") && has(g_err.data, "which is not there"));
+#undef COOK
+    t.free();
+}
+
 void test_learn(TestCtx& c) {
     c.begin("goldberg learn");
     if (!process_supported()) return;
@@ -906,12 +989,22 @@ void test_lock(TestCtx& c) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    // As a converter for test_exec: `goldberg_tests --upper IN OUT` writes IN upper-cased.
+    if (argc == 4 && !strcmp(argv[1], "--upper")) {
+        FILE* in = fopen(argv[2], "rb");
+        FILE* out = in ? fopen(argv[3], "wb") : nullptr;
+        if (!out) { if (in) fclose(in); fprintf(stderr, "cannot convert %s\n", argv[2]); return 1; }
+        for (int ch; (ch = fgetc(in)) != EOF;) fputc(ch >= 'a' && ch <= 'z' ? ch - 32 : ch, out);
+        fclose(in);
+        return fclose(out) == 0 ? 0 : 1;
+    }
     TestCtx c;
     test_rules(c);
     test_mistakes(c);
     test_cook(c);
     test_scripts(c);
+    test_exec(c);
     test_learn(c);
     test_watch(c);
     test_state_slices(c);
