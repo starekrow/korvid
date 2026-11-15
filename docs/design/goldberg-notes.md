@@ -229,6 +229,22 @@ throughout. Nov 15, 2026.
 | Six changed, 64M | | | 6.1 s | 6.5 s |
 | A watch, one save | | | 36 to 41 ms | 28 ms (1M) |
 
+At the end, the default 1.06 GiB (18,357 files, `kormake test --heavy goldberg windows-dev`)
+beside Linux's last column, the same tree and the same digest, `1fccef70833884e2`:
+
+| What | Windows | Linux |
+|---|---|---|
+| Cold cook | 78.2 s (2.4 s before the first converter, 75.0 s of converters, 0.9 s after) | 12.5 s |
+| The 16,667 files of 10 KB | 66.7 s, 870 us a run (p50) | 5.3 s |
+| The 21 files of 10 MB to 200 MB | 84 to 102 MB/s a run | 90 to 110 MB/s a run |
+| Nothing changed | 5.9 s | 4.6 s |
+| One file per class changed | 10.5 s | 7.6 s |
+| A watch, one save | 27 ms | |
+
+The large files cook as fast as on Linux; the gap is all in the small ones. A 10 KB
+run's own time is under a millisecond, and eight lanes finish 250 a second: about 30 ms of
+each lane's time a run is starting a process and making its file, not the run itself.
+
 Where it went, in the order it was found:
 
 - **The shell.** A `shell` converter is `cmd /d /s /c "tool.bat ..."`: cmd and the script
