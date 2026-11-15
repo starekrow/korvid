@@ -110,15 +110,32 @@ void test_extract(kv::TestCtx& c) {
     t.begin_tick(); w.transform(g)->position = point2{3, 3}; extract_sprites(e, st, nullptr, out);
     KV_CHECK(c, out.len == 4 && count_kind(out, SpriteDeltaKind::Tick) == 2 && out[3].state.placement.position == point2{3, 3});
 
-    // Through the schedule: a tick runs PreSim's copy and PostSim's extract on the module's
-    // own state, whose record of the renderer is separate from `st` and still empty, so
-    // both live entities are Sets, in slot order, with the state as of the tick.
+    // Through the schedule: a tick runs PreSim's copy, the Frame cycle the extract on the
+    // module's own state, whose record of the renderer is separate from `st` and still
+    // empty, so both live entities are Sets, in slot order, with the state as of the tick.
     w.sprite(g)->layer = 5;
     sprite_deltas(e)->clear();
-    e.phases.run_tick(e, e.events, 1.0 / 60.0, 0);
+    engine_frame(e, e.clock.tick_dt);
+    KV_CHECK(c, sprite_deltas(e)->len == 0); // a tick alone extracts nothing now
+    engine_frame_cycle(e, e.clock.tick_dt);
     Array<SpriteDelta>& deltas = *sprite_deltas(e);
     KV_CHECK(c, deltas.len == 3 && deltas[1].kind == SpriteDeltaKind::Set && deltas[1].entity == g && deltas[1].state.layer == 5);
     KV_CHECK(c, deltas[2].entity == d);
+    // A frame with no tick in it: no marker, nothing moved, nothing to say.
+    deltas.clear();
+    engine_frame_cycle(e, e.clock.tick_dt);
+    KV_CHECK(c, deltas.len == 0);
+    // Two ticks in one frame, the sprite moving in each: first where it was when the last
+    // tick began, at once; then the marker; then where it is, interpolated from there.
+    engine_frame(e, e.clock.tick_dt);
+    w.transform(g)->position = point2{50, 4};
+    engine_frame(e, e.clock.tick_dt);
+    w.transform(g)->position = point2{60, 4}; // as if the second tick moved it on
+    engine_frame_cycle(e, e.clock.tick_dt);
+    KV_CHECK(c, deltas.len == 3 && deltas[0].kind == SpriteDeltaKind::Set && deltas[0].entity == g && deltas[0].state.snap &&
+                deltas[0].state.placement.position == point2{50, 4} && deltas[0].state.layer == 5);
+    KV_CHECK(c, deltas[1].kind == SpriteDeltaKind::Tick && deltas[2].entity == g && !deltas[2].state.snap &&
+                deltas[2].state.placement.position == point2{60, 4});
 
     // Layer scroll: a layer's offset goes out once when it changes, after the Tick marker;
     // a snap goes out even unchanged, and is cleared once sent.

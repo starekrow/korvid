@@ -375,7 +375,7 @@ void modal_frame(void* user) {
 
 // Pacing::OnDemand: whether this pass of the loop should tick and draw. The platform is
 // pumped here; what it delivered, the window's size, I/O under way, a load being held for,
-// sprite deltas, a frame someone asked for, or a quarter second gone by, says yes.
+// a frame someone asked for, or a quarter second gone by, says yes.
 constexpr f64 k_demand_heartbeat = 0.25, k_demand_poll = 0.004, k_demand_work = 0.008;
 bool demand_frame(Engine& engine, FrameLoopState& s) {
     Input* in = platform_input(engine);
@@ -387,7 +387,6 @@ bool demand_frame(Engine& engine, FrameLoopState& s) {
     if (s.window && (s.window->width() != s.presented_w || s.window->height() != s.presented_h)) want = true;
     if (IoQueue* io = platform_io(engine)) if (io->pending() || io->completions().len) want = true;
     if (engine_holds(engine) & HoldLoading) want = true;
-    if (Array<SpriteDelta>* d = sprite_deltas(engine)) if (d->len > 1) want = true; // more than the tick marker
     f64 now = time_now();
     if (now - s.demand_last >= k_demand_heartbeat) want = true;
     if (!want) return false;
@@ -417,7 +416,8 @@ void run(Engine& engine, FrameLoopState& s) {
                 f64 dt = slept ? engine.clock.tick_dt : now - s.prev;
                 s.prev = now;
                 slept = false;
-                engine_frame(engine, dt);
+                // Ticks that ran may have moved sprites, which only a frame's extract can tell.
+                if (engine_frame(engine, dt) && renderer_sprite_count(s.renderer)) engine_want_frame(engine);
                 engine_work(engine, k_demand_work);
                 continue;
             }

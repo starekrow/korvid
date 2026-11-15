@@ -95,8 +95,8 @@ Depends on: core, math, render, sprite.
   the broadphase, so they collide where they are drawn; a Sim system that reads them
   after that pass sees them composed.
 - **A destroyed parent's child lingers one frame.** The orphan is destroyed by command at
-  the end of PostSim, after the extract has sent its last placement; the next tick's
-  extract removes it.
+  the end of PostSim; the frame's extract still sends its last placement, and the next
+  frame's removes it.
 - **Only placement is inherited.** Not tint, layer, space or visibility; a child in screen
   space with a parent in world space composes pixels against world units, which is almost
   never what anyone wants.

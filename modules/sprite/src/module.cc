@@ -39,12 +39,16 @@ void sprite_shutdown(Engine&, ModuleInstance& self) {
     s->deltas.free();
 }
 
-// Phase PostSim: what this tick changed, in every kind with Transform2 and Sprite,
-// appended for the renderer. The engine copied current into previous at PreSim.
+// The Frame cycle: what the ticks since the last frame changed, in every kind with
+// Transform2 and Sprite, appended for the renderer. The engine copied current into previous
+// at each tick's PreSim.
 void sprite_extract(TickContext& ctx) {
     SpriteState& s = ctx.state_as<SpriteState>();
     u32 before = s.deltas.len;
-    extract_sprites(*ctx.engine, s.extract, &s.layers, s.deltas);
+    u64 total = ctx.engine->clock.tick_total;
+    u32 ticks = (u32)(total - s.extract.seen_ticks);
+    s.extract.seen_ticks = total;
+    extract_sprites(*ctx.engine, s.extract, &s.layers, s.deltas, ticks);
     KV_MARK_V("extract deltas", s.deltas.len - before);
 }
 
@@ -63,7 +67,7 @@ constinit const KindDesc    k_kinds[] = {
 
 constinit const ResourceDesc k_resources[] = {{".deltas"}, {".camera"}, {".layers"}};
 constinit const SystemDesc   k_systems[]   = {
-    {.name = ".extract", .phase = Phase::PostSim, .fn = sprite_extract, .reads = "*.Transform2, *.Sprite", .writes = ".deltas, .layers", .runs = RunWhen::Always},
+    {.name = ".extract", .phase = Phase::Frame, .fn = sprite_extract, .reads = "*.Transform2, *.Sprite", .writes = ".deltas, .layers"},
 };
 
 } // namespace

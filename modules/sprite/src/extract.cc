@@ -11,10 +11,53 @@ void ExtractState::free() {
     tables.free();
 }
 
-void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<SpriteDelta>& out) {
-    SpriteDelta tick{};
-    tick.kind = SpriteDeltaKind::Tick;
-    out.push(tick);
+namespace {
+
+bool is_sprite_table(const Table& t) { return t.has(ComponentType<Transform2>::id) && t.has(ComponentType<Sprite>::id); }
+
+// More than one tick since the last extract: every sprite the renderer knows whose previous
+// copy (where it was when the last tick began) is not what the renderer was told goes
+// there first, at once, so the last tick's motion is all that is interpolated.
+void catch_up(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
+    for (Table& table : e.tables) {
+        if (!is_sprite_table(table) || table.index >= st.tables.len) continue;
+        if (table.desc && table.desc->still) continue; // its rows do not move
+        ExtractTable& et = st.tables[table.index];
+        Span<const Transform2> prev = table.prev_rows_of<Transform2>();
+        u32 n = et.sent.len < table.rows() ? et.sent.len : table.rows();
+        for (u32 i = 0; i < n; ++i) {
+            if (et.sent[i].is_null() || !table.is_alive(i) || table.handle_at(i) != et.sent[i]) continue;
+            if (component_equal(transform2_schema(), &prev[i], &et.sent_placements[i])) continue;
+            const Sprite& look = et.sent_sprites[i];
+            SpriteDelta d{};
+            d.kind            = SpriteDeltaKind::Set;
+            d.entity          = et.sent[i];
+            d.state.placement = prev[i];
+            d.state.material  = look.material;
+            d.state.uv        = look.uv;
+            d.state.size      = look.size;
+            d.state.tint      = look.tint;
+            d.state.layer     = look.layer;
+            d.state.space     = look.space;
+            d.state.anchor    = look.anchor;
+            d.state.sort      = look.sort;
+            d.state.order     = look.order;
+            d.state.snap      = true;
+            out.push(d);
+            et.sent_placements[i] = prev[i];
+        }
+    }
+}
+
+} // namespace
+
+void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<SpriteDelta>& out, u32 ticks) {
+    if (ticks >= 2) catch_up(e, st, out);
+    if (ticks >= 1) {
+        SpriteDelta tick{};
+        tick.kind = SpriteDeltaKind::Tick;
+        out.push(tick);
+    }
 
     // The layers that moved (or snapped) since the renderer was last told.
     for (u32 i = 0; layers && i < 256; ++i) {
@@ -42,7 +85,7 @@ void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<Sp
     }
 
     for (Table& table : e.tables) {
-        if (!table.has(ComponentType<Transform2>::id) || !table.has(ComponentType<Sprite>::id)) continue;
+        if (!is_sprite_table(table)) continue;
         ExtractTable& et = st.tables[table.index];
         // A still kind (a map's tiles): nothing to look at unless rows came or went.
         bool still = table.desc && table.desc->still;

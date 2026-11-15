@@ -1,5 +1,6 @@
-// Korvid sprite: the extract. Each tick, what changed in every kind that has Transform2
-// and Sprite becomes a run of deltas for the renderer's persistent world: a Tick marker,
+// Korvid sprite: the extract. Once a frame (the Frame cycle, docs/design/cycles.md), what
+// changed in every kind that has Transform2 and Sprite becomes a run of deltas for the
+// renderer's persistent world: a Tick marker when ticks ran since the last extract,
 // a Remove for every entity the renderer knew that is gone, and a Set for every entity
 // the renderer has not seen or whose transform or sprite differs from what it was last
 // told. Nothing is copied twice. The record of what the renderer knows lives here, per
@@ -11,6 +12,13 @@
 // transform: then the entity got there without passing through the space between (a
 // wrap, a respawn), the Set carries `snap`, and the renderer shows it there at once. A
 // system teleports by writing the previous copy along with the current one.
+//
+// Several ticks in one frame. The renderer interpolates a sprite from where it was told it
+// was to where it is now over the last tick. When more than one tick ran since the last
+// extract, a sprite that moved first goes to where it was at the start of the last tick
+// (the engine's previous copy) with snap, before the Tick marker, so what is interpolated
+// is the last tick's motion and not the whole frame's. A frame with no tick in it has no
+// marker, so the renderer keeps interpolating the last tick.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/render/sprite.h"
@@ -38,12 +46,14 @@ struct ExtractState {
     // copy of megabytes in one tick) in the middle of a run.
     u32 rows_hint = 0;
     vec2 sent_layers[256] = {}; // the layers' offsets the renderer was last told
+    u64  seen_ticks = 0;        // the clock's tick_total at the last extract (the module's system)
     void free();
 };
 
-// Appends one tick's deltas to `out`, starting with the Tick marker (then a Layer delta for
-// each layer whose offset changed, clearing its snap), and updates the record of what the
-// renderer knows. `layers` may be null.
-void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<SpriteDelta>& out);
+// Appends the deltas since the last extract to `out`, `ticks` ticks later: with two or more,
+// the catch-up Sets; with one or more, the Tick marker; then a Layer delta for each layer
+// whose offset changed (clearing its snap), the Removes and the Sets. Updates the record of
+// what the renderer knows. `layers` may be null.
+void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<SpriteDelta>& out, u32 ticks = 1);
 
 } // namespace kv

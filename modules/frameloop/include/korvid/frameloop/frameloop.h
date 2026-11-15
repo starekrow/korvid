@@ -34,7 +34,7 @@ namespace kv {
 struct Engine;
 
 // Continuous: a frame every vsync, as a game wants. OnDemand: a frame when something
-// happened (input, the window, I/O, a load, sprite deltas, engine_want_frame), and between
+// happened (input, the window, I/O, a load, ticks with sprites in them, engine_want_frame), and between
 // them no ticks and no drawing, the platform polled every few milliseconds and the loop
 // woken at least four times a second (timers, the CLI). For a tool's window.
 enum class Pacing : u8 { Continuous, OnDemand };

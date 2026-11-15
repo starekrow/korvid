@@ -155,7 +155,8 @@ has all of them.
   The default camera is one world unit per pixel with the origin at the window's center,
   +y up. Screen-space sprites ignore it.
 - **Pause is the engine's.** `engine_pause` (or the CLI's `pause`) holds the sim; the
-  loop keeps running paused ticks, so input, the extract and the CLI stay alive. Handle
+  loop keeps running paused ticks, so input and the CLI stay alive, and the Frame
+  cycle (Krome, the extract) runs whatever the sim does. Handle
   `ExitRequested` in a handler (or an `Always` system), never in a Sim system: a quit
   asked for during a pause would otherwise wait for the resume.
 - **`--overlay` puts the report on screen**: the fps line and the memory line at the

@@ -2,8 +2,8 @@
 
 What a drawable thing is, on the game's side of the render boundary. The module declares
 two components, `Transform2` and `Sprite`; any kind that has both is drawn, whoever
-declared it. At the end of every tick the extract looks at every such kind, finds what is
-new, moved, changed or gone since it last looked, and writes a delta stream the frame
+declared it. Before each frame is drawn the extract looks at every such kind, finds what
+is new, moved, changed or gone since it last looked, and writes a delta stream the frame
 loop hands to the renderer. The renderer keeps a persistent world keyed by entity handle
 and never sees an entity, a component or a kind. The module never includes a graphics
 API.
@@ -22,8 +22,10 @@ stone in a game that keeps its own structs. `SpriteWorld` is the convenience sur
 that table (`create`, `destroy`, typed lookups). A game's own kinds add whatever else they
 want next to the two components and are drawn the same way.
 
-**The extract.** The system `sprite.extract` runs in PostSim, after every writer of a
-`Transform2` or `Sprite` column, reading `*.Transform2` and `*.Sprite`. Per kind, it
+**The extract.** The system `sprite.extract` runs in the Frame cycle
+(`docs/design/cycles.md`): once before each frame drawn, after every tick that frame
+holds and after every Frame-cycle writer of a `Transform2` or `Sprite` column, reading
+`*.Transform2` and `*.Sprite`. Per kind, it
 keeps the handle it last sent for each slot and the `Sprite` it last described. Then:
 
 1. A slot whose handle changed or died since the last extract becomes a `Remove` for the
@@ -33,8 +35,12 @@ keeps the handle it last sent for each slot and the `Sprite` it last described. 
    that differs from what was sent but equals the engine's previous copy is a teleport:
    the `Set` carries `snap`, and the renderer shows the sprite there at once instead of
    interpolating across the gap.
-3. The tick's deltas start with a `Tick` marker, so the renderer knows where "previous"
-   ends whatever the tick-to-frame ratio.
+3. When ticks ran since the last extract, a `Tick` marker, so the renderer knows where
+   "previous" ends. A frame with no tick in it has none, and the renderer keeps
+   interpolating the last tick. When more than one ran, a sprite that moved first gets a
+   `Set` with `snap` at its previous copy (where it was when the last tick began), before
+   the marker: what the renderer interpolates is the last tick's motion, as when the
+   extract ran every tick.
 
 4. After the `Tick` marker, a `Layer` delta for each layer whose scroll offset changed
    (the resource `sprite.layers`): see layer scroll below.
@@ -125,7 +131,7 @@ Header `korvid/sprite/extract.h`:
 | name | kind | what |
 |---|---|---|
 | `ExtractState`, `ExtractTable` | records | per table: the handle and the `Sprite` last sent, by slot |
-| `extract_sprites(engine, state, layers, out)` | function | one tick's deltas appended to `out`, starting with `Tick`; `layers` may be null |
+| `extract_sprites(engine, state, layers, out, ticks)` | function | the deltas `ticks` ticks after the last extract appended to `out` (catch-up Sets with two or more, a `Tick` with one or more); `layers` may be null |
 
 Header `korvid/sprite/layers.h`:
 
@@ -157,7 +163,7 @@ What the module registers with the engine:
 | `sprite.entity` | kind | `Transform2`, `Sprite`; 1 M slots of address space |
 | `sprite.deltas` | resource | the delta array; the extract writes it |
 | `sprite.layers` | resource | the layer offsets; a game's scroll writes it, the extract reads what changed |
-| `sprite.extract` | system, phase PostSim | reads `*.Transform2`, `*.Sprite`; writes `sprite.deltas`, `sprite.layers` |
+| `sprite.extract` | system, phase Frame | reads `*.Transform2`, `*.Sprite`; writes `sprite.deltas`, `sprite.layers` |
 
 ## Behaviour worth knowing
 
@@ -194,8 +200,9 @@ What the module registers with the engine:
   the frame loop centers on the entity's interpolated position at the alpha the sprites
   use, so it stands still on screen. Then `bounds` clamps and `pixel_snap` puts the view's
   corner on a world pixel, which keeps pixel art from shimmering at an integer zoom.
-- **The extract runs on paused ticks** (`RunWhen::Always`), so menus and overlays drawn
-  while the sim holds still reach the renderer.
+- **The extract runs whatever the sim does.** It is in the Frame cycle, so menus and
+  overlays drawn while the sim holds still reach the renderer, and a frame that held no
+  tick costs it only the compare.
 - **The extract is one thread** and linear in the rows of every drawable kind, dead
   slots included; a kind with a huge capacity and few live rows still costs its
   high-water mark. A `still` kind is the exception: nothing, until it spawns or loses a row.

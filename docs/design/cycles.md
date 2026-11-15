@@ -143,8 +143,7 @@ cycle is the piece they leave to threads or coroutines.
 
 ## Open questions
 
-- [ ] The extract: PostSim now, which is once a tick; the Frame cycle is once a frame,
-      which is where it belongs. Moving it touches interpolation.
+- [x] The extract: moved to the Frame cycle (As built).
 - [ ] A per-unit budget in Work, if one greedy unit starving the rest shows up.
 - [ ] Refusing sim writes from Frame and Work: in the scheduler's expanded sets, or a dev
       check at the boundary.
@@ -177,5 +176,13 @@ Nov 15, 2026, on branch tool-stuff.
 - **A tool with a window** is the frame loop with Work units: `kromedemo --work` counts
   primes in the Work cycle behind its window, 86 to 87% of the wall time computing on
   continuous or on-demand pacing, 40 frames drawn in the 0.8 s it takes.
-- **Not built:** refusing sim writes from Frame and Work; the extract moved to Frame. Arcfire's recorded replay matches (236 hashes): the Sim cycle
+- **The extract is in the Frame cycle** (later still). It ran every tick and appended a
+  tick's deltas each time; now it runs once before each frame and compares against what it
+  last told the renderer, which was always its test, so nothing a tick changed is missed.
+  Two things keep interpolation as it was: a frame with no tick sends no `Tick` marker
+  (the renderer keeps interpolating the last tick), and a frame with several sends each
+  moved sprite first to its previous copy, with snap, so only the last tick's motion is
+  interpolated. Arcfire's ring bench: the ticks 0.5 ms a frame cheaper, the Frame cycle
+  0.48 ms, the extract itself the same; the replay matches.
+- **Not built:** refusing sim writes from Frame and Work. Arcfire's recorded replay matches (236 hashes): the Sim cycle
   is unchanged.
