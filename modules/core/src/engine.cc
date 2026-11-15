@@ -414,6 +414,25 @@ bool check_declared(const Engine& e, const char* unit, u32 module, UnitAccess d)
     return true;
 }
 
+// The Frame and Work cycles run as often as the machine allows and are never in a replay:
+// a unit in one may write cosmetic kinds, cosmetic components and its own state, never
+// the simulation's kinds (docs/design/cycles.md, Determinism). Checked on the expanded
+// access, so a kind named whole is caught at its first sim column.
+bool check_cycle_writes(const Engine& e, const ScheduledSystem& sys, Phase phase) {
+    if ((u32)phase < KV_SIM_PHASES) return true;
+    for (const UnitAccess& a : sys.access) {
+        if (a.mode != Access::Write) continue;
+        const ResourceEntry& r = e.resources[a.resource - 1];
+        if (!r.table || r.cosmetic) continue;
+        const Table& t = e.tables[r.table - 1];
+        if (t.desc && t.desc->cosmetic) continue;
+        KV_ERROR("engine", "'%s' runs in the %s cycle and writes '%s', which is the simulation's: a Frame or Work unit writes only "
+                 "cosmetic kinds and its own state; send the sim an event instead (docs/design/cycles.md)", sys.name(), phase_name(phase), r.name);
+        return false;
+    }
+    return true;
+}
+
 // The one mode a unit has on a resource it covers twice: a write includes the read; any
 // other pair is a contradiction.
 bool merge_modes(Access a, Access b, Access* out) {
@@ -985,6 +1004,7 @@ bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
             p.sys.desc = &s;
             p.rank = rank++;
             if (!make_unit(e, i, name, s.reads, s.writes, s.appends, s.emits, s.state, p)) { ok = false; break; }
+            if (!check_cycle_writes(e, p.sys, s.phase)) { p.sys.free_buffers(); ok = false; break; }
             pend[(u32)s.phase].push(p);
         }
         for (const HandlerDesc& h : m.handlers) {
@@ -998,6 +1018,7 @@ bool build_schedule(Engine& e, Span<const ModuleDesc* const> modules) {
             p.sys.handler = &h;
             p.rank = rank++;
             if (!make_unit(e, i, name, h.reads, h.writes, h.appends, h.emits, StateUse::Write, p)) { ok = false; break; }
+            if (!check_cycle_writes(e, p.sys, h.phase)) { p.sys.free_buffers(); ok = false; break; }
             pend[(u32)h.phase].push(p);
         }
     }

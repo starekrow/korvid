@@ -105,7 +105,8 @@ wants: `Phase::Frame` once before each frame drawn (`engine_frame_cycle`), and
 `Phase::Work` over and over while a unit says `ctx.more()` and the budget lasts
 (`engine_work`; a unit sizes its slice by `ctx.time_left()`). The frame loop gives Work its
 slack, background work such as the platform's idle reads is a Work unit, and nothing in
-either cycle is in a replay. `docs/design/cycles.md`.
+either cycle is in a replay, so neither writes the simulation: a declared write to a sim
+kind fails init, and a spawn, destroy or timer into one is refused. `docs/design/cycles.md`.
 
 **Tools in core.** The profiler (`profile.h`): zones, waits, marks and counters into
 per-thread rings, read between frames into summaries, a frame tree, and a Chrome trace.

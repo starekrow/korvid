@@ -121,3 +121,82 @@ void test_cycles(kv::TestCtx& c) {
     KV_CHECK(c, e.frame_cycles == g.frames && e.work_cycles >= 8);
     engine_shutdown(e);
 }
+
+namespace {
+
+using namespace kv;
+
+// A sim kind and a cosmetic one, and units in the Frame and Work cycles that reach for them.
+struct Hp { i32 n; };
+struct Glow { i32 n; };
+constinit const FieldDesc k_hp_fields[] = {KV_FIELDS(Hp, n)};
+constinit const FieldDesc k_glow_fields[] = {KV_FIELDS(Glow, n)};
+constinit const ComponentDesc k_sim_components[] = {KV_COMPONENT(Hp, k_hp_fields, 0), KV_COMPONENT(Glow, k_glow_fields, 0)};
+constinit const KindDesc k_sim_kinds[] = {
+    {.name = ".unit", .components = "Hp", .capacity = 16},
+    {.name = ".fx", .components = "Glow", .capacity = 16, .cosmetic = true},
+};
+void sys_nothing(TickContext&) {}
+
+constinit const SystemDesc k_frame_writes_column[] = {{.name = ".bad", .phase = Phase::Frame, .fn = sys_nothing, .writes = ".unit.Hp"}};
+constinit const SystemDesc k_work_writes_kind[] = {{.name = ".bad", .phase = Phase::Work, .fn = sys_nothing, .writes = ".unit"}};
+constinit const SystemDesc k_frame_writes_fx[] = {{.name = ".fine", .phase = Phase::Frame, .fn = sys_nothing, .writes = ".fx"}};
+constinit const SystemDesc k_sim_writes_unit[] = {{.name = ".fine", .phase = Phase::Sim, .fn = sys_nothing, .writes = ".unit"}};
+KV_MODULE_DEFINE(k_m1) = {.name = "m1", .components = k_sim_components, .kinds = k_sim_kinds, .systems = k_frame_writes_column};
+KV_MODULE_DEFINE(k_m2) = {.name = "m2", .components = k_sim_components, .kinds = k_sim_kinds, .systems = k_work_writes_kind};
+KV_MODULE_DEFINE(k_m3) = {.name = "m3", .components = k_sim_components, .kinds = k_sim_kinds, .systems = k_frame_writes_fx};
+KV_MODULE_DEFINE(k_m4) = {.name = "m4", .components = k_sim_components, .kinds = k_sim_kinds, .systems = k_sim_writes_unit};
+
+struct Ping2 { u32 n; };
+constinit const EventTypeDesc k_ping_events[] = {KV_EVENT(Ping2)};
+void on_ping_frame(TickContext&, Span<const Ping2>) {}
+constinit const HandlerDesc k_frame_handler[] = {{.name = ".on", KV_ON(Ping2, on_ping_frame), .phase = Phase::Frame, .writes = ".unit.Hp"}};
+KV_MODULE_DEFINE(k_m5) = {.name = "m5", .events = k_ping_events, .components = k_sim_components, .kinds = k_sim_kinds, .handlers = k_frame_handler};
+
+// At run time: what a Frame unit may not do by command, and may do to a cosmetic kind.
+struct Tried { Handle unit; bool done; };
+constinit Tried g_try = {};
+void sys_frame_commands(TickContext& ctx) {
+    if (g_try.done) return;
+    g_try.done = true;
+    ctx.spawn_later("rt.unit", Hp{1});
+    ctx.spawn_later("rt.fx", Glow{1});
+    ctx.destroy(g_try.unit);
+    ctx.destroy_all("rt.unit");
+    ctx.schedule(Ping2{1}, ctx.tick + 3);
+}
+constinit const SystemDesc k_rt_systems[] = {{.name = ".cmds", .phase = Phase::Frame, .fn = sys_frame_commands, .main_thread = true}};
+KV_MODULE_DEFINE(k_rt) = {.name = "rt", .events = k_ping_events, .components = k_sim_components, .kinds = k_sim_kinds, .systems = k_rt_systems};
+
+bool starts(const ModuleDesc* m) {
+    const ModuleDesc* const list[] = {m};
+    Engine e;
+    bool ok = engine_init(e, list);
+    engine_shutdown(e);
+    return ok;
+}
+
+} // namespace
+
+void test_cycles_leave_the_sim(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("cycles leave the sim");
+    // Refused at startup: a column of a sim kind, a sim kind whole, from a handler too.
+    KV_CHECK(c, !starts(&k_m1) && !starts(&k_m2) && !starts(&k_m5));
+    // Allowed: a cosmetic kind from Frame; a sim kind from the Sim.
+    KV_CHECK(c, starts(&k_m3) && starts(&k_m4));
+
+    g_try = Tried{};
+    const ModuleDesc* const list[] = {&k_rt};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    g_try.unit = engine_table(e, "rt.unit")->spawn(Hp{5});
+    u64 timers = e.timers.fired;
+    engine_frame_cycle(e, 0.016);
+    // The sim's kind untouched (no spawn, no destroy), the cosmetic spawn through, no timer.
+    KV_CHECK(c, engine_table(e, "rt.unit")->live() == 1 && engine_table(e, "rt.unit")->valid(g_try.unit));
+    KV_CHECK(c, engine_table(e, "rt.fx")->live() == 1);
+    engine_frame(e, e.clock.tick_dt * 5);
+    KV_CHECK(c, e.timers.fired == timers);
+    engine_shutdown(e);
+}

@@ -599,6 +599,17 @@ u32 unit_ticket(TickContext& ctx, u32* counter) {
 
 CommandBuffer& buffer_of(TickContext& ctx, CommandBuffer* cb) { return cb ? *cb : ctx.engine->commands; }
 
+// The cycle the running unit is in, when it is Frame or Work: those leave the simulation
+// alone (docs/design/cycles.md). Null inside a tick and outside the schedule.
+const char* outside_sim(const TickContext& ctx) {
+    const ScheduledSystem* u = ctx.system;
+    if (!u) return nullptr;
+    Phase p = u->desc ? u->desc->phase : u->handler ? u->handler->phase : Phase::Count;
+    return (u32)p >= KV_SIM_PHASES && p != Phase::Count ? phase_name(p) : nullptr;
+}
+
+bool sim_kind(const Table* t) { return t && !(t->desc && t->desc->cosmetic); }
+
 } // namespace
 
 u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, const char* kind, u32 component_count, bool ticketed) {
@@ -609,7 +620,12 @@ u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, const char* kind, u32 c
 }
 
 u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, u32 kind_id, u32 component_count, bool ticketed) {
-    if (!engine_table_now(*ctx.engine, kind_id)) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind id %u", system_name(ctx), kind_id); return 0; }
+    Table* table = engine_table_now(*ctx.engine, kind_id);
+    if (!table) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind id %u", system_name(ctx), kind_id); return 0; }
+    if (const char* cycle = outside_sim(ctx); cycle && sim_kind(table)) {
+        KV_ERROR("engine", "system '%s' runs in the %s cycle and spawns into '%s', a kind the simulation owns: refused", system_name(ctx), cycle, table->name);
+        return 0;
+    }
     CommandBuffer& b = buffer_of(ctx, cb);
     u32 ticket = 0;
     if (ticketed) ticket = ctx.system ? unit_ticket(ctx, &((ScheduledSystem*)ctx.system)->spawn_tickets) : 0;
@@ -623,7 +639,16 @@ void ctx_spawn_component(CommandBuffer* cb, u32 component_id, const void* data, 
     command_spawn_component(*cb, component_id, data, size);
 }
 
-void ctx_destroy(TickContext& ctx, CommandBuffer* cb, Handle h) { command_destroy(buffer_of(ctx, cb), h); }
+void ctx_destroy(TickContext& ctx, CommandBuffer* cb, Handle h) {
+    if (const char* cycle = outside_sim(ctx)) {
+        Table* table = engine_table_of_now(*ctx.engine, h);
+        if (sim_kind(table)) {
+            KV_ERROR("engine", "system '%s' runs in the %s cycle and destroys an entity of '%s', a kind the simulation owns: refused", system_name(ctx), cycle, table->name);
+            return;
+        }
+    }
+    command_destroy(buffer_of(ctx, cb), h);
+}
 
 // ---- attachments and bags -----------------------------------------------------------------------
 
@@ -731,12 +756,22 @@ void ctx_name(TickContext& ctx, CommandBuffer* cb, Handle h, const char* name) {
 bool ctx_cancel(TickContext& ctx, u32 ticket) { return ctx.engine->timers.cancel(ticket); }
 
 void ctx_destroy_all(TickContext& ctx, CommandBuffer* cb, u32 kind_id) {
-    if (!engine_table_now(*ctx.engine, kind_id)) { KV_ERROR("engine", "system '%s': destroy_all of unknown kind id %u", system_name(ctx), kind_id); return; }
+    Table* table = engine_table_now(*ctx.engine, kind_id);
+    if (!table) { KV_ERROR("engine", "system '%s': destroy_all of unknown kind id %u", system_name(ctx), kind_id); return; }
+    if (const char* cycle = outside_sim(ctx); cycle && sim_kind(table)) {
+        KV_ERROR("engine", "system '%s' runs in the %s cycle and destroys all of '%s', a kind the simulation owns: refused", system_name(ctx), cycle, table->name);
+        return;
+    }
     command_destroy_all(buffer_of(ctx, cb), kind_id);
 }
 
 u32 ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick) {
     if (type_id == 0) { KV_ERROR("engine", "system '%s' schedules an unregistered event type", system_name(ctx)); KV_VERIFY(!"unregistered event"); return 0; }
+    // Timers fire in sim ticks and are part of the sim (a fresh sim drops them).
+    if (const char* cycle = outside_sim(ctx)) {
+        KV_ERROR("engine", "system '%s' runs in the %s cycle and schedules an event: timers are the simulation's; emit instead", system_name(ctx), cycle);
+        return 0;
+    }
     u32 ticket = ctx.system ? unit_ticket(ctx, &((ScheduledSystem*)ctx.system)->timer_tickets) : 0;
     return ctx.engine->timers.schedule(tick, type_id, size, event, system_name(ctx), ticket);
 }

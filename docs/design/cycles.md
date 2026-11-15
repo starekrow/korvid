@@ -101,8 +101,10 @@ The Sim cycle is the only one in a replay. The other two run as often as the mac
 allows, so:
 
 - **They do not write the simulation.** A Frame or Work unit may read any kind and write
-  cosmetic kinds and its own state; writing a sim kind is refused at startup (planned; see
-  As built).
+  cosmetic kinds, cosmetic components and its own state. A declared write that covers a
+  sim kind (the kind, its liveness, a column, an attachment, its bags) is refused at
+  startup, naming the unit and the resource; a spawn, a destroy or a `destroy_all` into a
+  sim kind, and any timer (`schedule`), is refused when issued. Events are the way in.
 - **What they emit to the Sim is input from outside**, as an event from code outside the
   schedule is today: a game that lets a UI drive its simulation records those events, as
   it records input. That is the replay question Krome deferred, now in one place.
@@ -145,8 +147,7 @@ cycle is the piece they leave to threads or coroutines.
 
 - [x] The extract: moved to the Frame cycle (As built).
 - [ ] A per-unit budget in Work, if one greedy unit starving the rest shows up.
-- [ ] Refusing sim writes from Frame and Work: in the scheduler's expanded sets, or a dev
-      check at the boundary.
+- [x] Refusing sim writes from Frame and Work: both (As built).
 
 ## As built
 
@@ -184,5 +185,11 @@ Nov 15, 2026, on branch tool-stuff.
   moved sprite first to its previous copy, with snap, so only the last tick's motion is
   interpolated. Arcfire's ring bench: the ticks 0.5 ms a frame cheaper, the Frame cycle
   0.48 ms, the extract itself the same; the replay matches.
-- **Not built:** refusing sim writes from Frame and Work. Arcfire's recorded replay matches (236 hashes): the Sim cycle
+- **Frame and Work leave the sim alone** (last). At startup, on each unit's expanded
+  access: a write reaching a resource of a non-cosmetic kind that is not itself a cosmetic
+  component fails init with the unit, its cycle and the resource named. At run time, in
+  the context: spawns, destroys and `destroy_all` into a sim kind, and every `schedule`,
+  are refused and logged (a spawn before anything reaches the command buffer, so nothing
+  half-written is left). Always on, not only in dev builds: they are cheap, and a replay
+  that drifts is not. Nothing in the tree tripped them; `core_tests` covers both halves. Arcfire's recorded replay matches (236 hashes): the Sim cycle
   is unchanged.
