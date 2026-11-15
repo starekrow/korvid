@@ -46,13 +46,17 @@ ninja_path() { printf '%s' "$1" | sed -e 's/\$/$$/g' -e 's/ /$ /g' -e 's/:/$:/g'
 host_spelling() {
   if [ "$host" = windows ]; then
     pad=$(printf '%*s' $((${#host} - 5)) '')
-    sed -E -e "s|\"|'|g" -e 's|\\|/|g' -e "s/(\{host\}-(dev|ship))(  +)/\1\3$pad/g"
+    # The fixture's cook is copy_assets.sh, or copy_assets.bat beside it on Windows.
+    sed -E -e "s|\"|'|g" -e "s/(\{host\}-(dev|ship))(  +)/\1\3$pad/g" -e "s|copy_assets\.bat|copy_assets.sh|g"
   else
     cat
   fi
 }
+# Backslashes first, before the paths are looked for: kormake writes some paths native
+# (C:\...), and the expected files hold no backslash.
+slashes() { if [ "$host" = windows ]; then sed -e 's|\\|/|g'; else cat; fi; }
 normalize() {
-  sed -E -e "s|$(re "$(ninja_path "$root")")|{root}|g" -e "s|$(re "$root")|{root}|g" \
+  slashes | sed -E -e "s|$(re "$(ninja_path "$root")")|{root}|g" -e "s|$(re "$root")|{root}|g" \
          -e "s|$(re "$(ninja_path "$KORMAKE")")|{kormake}|g" -e "s|$(re "$KORMAKE")|{kormake}|g" \
          -e "s/(^|[^a-z])$host-(dev|ship)/\1{host}-\2/g" \
          -e "s/_${host}([ _]|\$)/_{host}\1/g" | host_spelling # a rule variant's name: tool_x_y_<platform>[_<module>]

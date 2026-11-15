@@ -479,12 +479,20 @@ function M.run(c, g, opts)
   -- One command line of the cook, its words filled in from vars.
   local function cook_line(sp, vars)
     local out = {}
-    for _, word in ipairs(sp.program) do out[#out + 1] = program(word) end
+    -- A .bat runs as cmd /c, which does not read its line by the C runtime's rules: with
+    -- more than two quotes it strips the first and the last of the whole rest, and the last
+    -- argument loses its closing quote. `cmd /d /s /c "..."` is the form it reads as
+    -- written (/s: exactly the outer pair taken off; /d: no AutoRun), as platform's
+    -- process_win32.cc runs it.
+    local via_cmd = sp.program[1] == "cmd" and sp.program[2] == "/c"
+    for i, word in ipairs(sp.program) do if not (via_cmd and i <= 2) then out[#out + 1] = program(word) end end
     for _, word in ipairs(sp.args) do
       local filled = word:gsub("{([^}]*)}", function(v) return vars[v] end)
       out[#out + 1] = filled:find("[%s'\"$]") and q(filled) or filled
     end
-    return table.concat(out, " ")
+    local line = table.concat(out, " ")
+    if via_cmd then line = 'cmd /d /s /c "' .. line .. '"' end
+    return line
   end
   local function cook(inst, program_name, is_game)
     local roots, seen = {}, {}
