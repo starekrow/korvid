@@ -387,7 +387,8 @@ live status, reports and forms, over the same commands as its CLI.
 Nov 15, 2026, in review of the first draft.
 
 - **`.kim` is text, `.kimb` is binary**, and the runtime reads only binary.
-- **`kim` is its own module**, depending on `core` only; `krome` does not depend on it.
+- **`kim` is its own module**, depending on `core` and `kimb` (the document's meaning,
+  which `krome` links too); `krome` does not depend on `kim`.
 - **The prelude is a `.kim` file.** The engine ships reasonable defaults (`krome/std`);
   the author does what they like with them.
 - **`.kimb` is syntax, not meaning, one per `.kim`.** Definitions are expanded and styles
