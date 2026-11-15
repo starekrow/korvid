@@ -92,6 +92,10 @@ bool os_remove(const char* path) {
     return remove(path) == 0;   // ISO C: a file, or an empty directory on POSIX
 }
 
+bool os_remove_dir(const char* path) {
+    return rmdir(path) == 0 || errno == ENOENT;
+}
+
 bool os_make_temp_dir(const char* prefix, char* out, u32 cap) {
     const char* tmp = getenv("TMPDIR");
     if (!tmp || !tmp[0]) tmp = "/tmp";

@@ -1,5 +1,6 @@
 #include "korvid/platform/io.h"
 #include "korvid/core/format.h"
+#include "korvid/core/sha256.h"
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
 #include <errno.h>
@@ -228,6 +229,24 @@ void test_io_write(kv::TestCtx& c) {
     io_remove(path); io_remove(empty); io_remove(dir);
 }
 
+// io_make_dirs: several missing levels at once, a directory already there, a trailing
+// slash, and a file in the way (false, at the file and below it).
+void test_io_make_dirs(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("io_make_dirs");
+    char dir[200], path[400];
+    KV_CHECK(c, io_make_temp_dir("korvid-dirs", dir, sizeof dir));
+    format(path, sizeof path, "%s/a/b/c/d", dir);  KV_CHECK(c, io_make_dirs(path) && io_is_dir(path));
+    format(path, sizeof path, "%s/a/b", dir);      KV_CHECK(c, io_make_dirs(path) && io_is_dir(path));
+    format(path, sizeof path, "%s/a/b/c/d", dir);  KV_CHECK(c, io_make_dirs(path));
+    format(path, sizeof path, "%s/a/e/", dir);     KV_CHECK(c, io_make_dirs(path) && io_is_dir(path));
+    format(path, sizeof path, "%s/a/file", dir);   KV_CHECK(c, io_write_now(path, "f", 1));
+    KV_CHECK(c, !io_make_dirs(path));
+    format(path, sizeof path, "%s/a/file/under", dir); KV_CHECK(c, !io_make_dirs(path));
+    KV_CHECK(c, !io_make_dirs(""));
+    KV_CHECK(c, io_remove_tree(dir));
+}
+
 // io_remove_tree: a directory with files, hidden ones and an empty directory under it goes
 // whole; a link inside it to a directory outside goes as a link, and what it pointed at
 // stays. A path that is not there is gone already.
@@ -287,5 +306,36 @@ void test_io_now(kv::TestCtx& c) {
     KV_CHECK(c, !bad.open(missing) && !bad.write("x", 1) && !bad.close() && bad.error != 0);
     KV_CHECK(c, io_write_now(path, "", 0) && io_read_now(path, &got) && got.size == 0 && got.data && got.data[0] == 0);
     got.free();
+
+    // io_read_each and io_copy_now: a file of three pieces and a bit, in order, and a copy
+    // with the same bytes and the hash of them.
+    {
+        const usize n = 3 * 65536 + 5;
+        u8* big = (u8*)malloc(n);
+        for (usize i = 0; i < n; ++i) big[i] = (u8)(i * 131 + (i >> 9));
+        u8 want[32], got_hash[32];
+        sha256(big, n, want);
+        format(path, sizeof path, "%s/big.bin", dir);
+        KV_CHECK(c, io_write_now(path, big, n));
+        struct Each { u32 pieces; usize bytes; Sha256 h; } each{};
+        each.h.init();
+        auto piece = [](void* user, const u8* data, usize len) { Each& e = *(Each*)user; ++e.pieces; e.bytes += len; e.h.update(data, len); return true; };
+        KV_CHECK(c, io_read_each(path, piece, &each, nullptr, 65536) && each.pieces == 4 && each.bytes == n);
+        each.h.finish(got_hash);
+        KV_CHECK(c, memcmp(got_hash, want, 32) == 0);
+        u32 calls = 0;
+        auto stop = [](void* user, const u8*, usize) { ++*(u32*)user; return false; };
+        KV_CHECK(c, io_read_each(path, stop, &calls, nullptr, 65536) && calls == 1); // stopped, not failed
+        char copy[300];
+        format(copy, sizeof copy, "%s/copy.bin", dir);
+        memset(got_hash, 0, 32);
+        KV_CHECK(c, io_copy_now(path, copy, got_hash) && memcmp(got_hash, want, 32) == 0);
+        KV_CHECK(c, io_read_now(copy, &got) && got.size == n && memcmp(got.data, big, n) == 0);
+        got.free();
+        err = 0;
+        KV_CHECK(c, !io_read_each(missing, piece, &each, &err) && err != 0);
+        KV_CHECK(c, !io_copy_now(path, missing, nullptr, &err) && err != 0);
+        free(big);
+    }
     KV_CHECK(c, io_remove_tree(dir));
 }

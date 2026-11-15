@@ -17,6 +17,7 @@
 // the platform module calls from the engine's idle time with a budget of its own.
 #pragma once
 #include "korvid/core/array.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/handle.h"
 #include "korvid/core/pool.h"
 #include "korvid/pack/zip.h"
@@ -59,6 +60,37 @@ struct IoWriteRequest {
     u64         user     = 0;
 };
 
+// ---- Tasks ----------------------------------------------------------------------------
+// Blocking work that is not one read or one write: a child process run to its end, a file
+// hashed or copied as it streams. What a tool waits on, as I/O: submitted any time, run off
+// the caller's thread, finished onto the same completion list at the pump, reaped the same
+// way. A task runs on the queue's task workers (threads of its own: start_tasks), and is
+// taken by a worker the moment one is free and its lane has room, not at the next pump: a
+// worker that finishes one takes the next, so a lane stays full however often the queue
+// is pumped. Within the lanes with room, higher priority first, then submission order.
+//
+// A task touches only its `arg`, which is the caller's and stays where it is until the
+// completion is reaped (the queue never frees it). It returns 0 (Done) or an errno-like
+// code (Failed, in the completion's `error`). A task cancelled before it starts never
+// runs; one cancelled while it runs sees ctl.cancelled() and may stop early. Either way
+// it completes as Cancelled.
+struct IoTaskCtl {
+    u32  flag = 0;
+    bool cancelled() const { return atomic_load(&flag, MO_RELAXED) != 0; }
+};
+typedef i32 (*IoTaskFn)(void* arg, const IoTaskCtl& ctl);
+struct IoTaskRequest {
+    IoTaskFn    fn       = nullptr;
+    void*       arg      = nullptr;
+    const char* name     = "";                  // what describes it: the handle's description, logs; copied
+    u8          lane     = 0;                   // [0, kIoLanes)
+    IoPriority  priority = IoPriority::Normal;  // Idle runs last, but runs: tasks have no idle pump
+    u64         user     = 0;
+};
+constexpr u32 kIoLanes = 8;
+struct IoTask;  // the workers' node (io_task.cc)
+struct IoTasks; // the workers, their lists and the lanes
+
 struct IoCompletion {
     Handle   request;
     IoStatus status = IoStatus::Pending;
@@ -76,6 +108,7 @@ struct IoEntry {
     u64        user;
     u64        sequence;  // submission order, for stable priority ordering
     bool       write;     // a write: `buf` holds the copy to write, `size` its length
+    IoTask*    task;      // a task: its node, until the pump completes it
     // The ring's bookkeeping while a request is in flight.
     OsFile     fd;
     u8*        buf;
@@ -108,6 +141,8 @@ struct IoMount {
 
 struct IoQueue {
     Pool<IoEntry>       entries;
+    IoTasks*            tasks = nullptr; // start_tasks's workers; none until then
+    u32                 tasks_pending = 0, tasks_done = 0, tasks_failed = 0;
     Array<IoMount>      mounts;    // searched last first
     Array<Handle>       queued;    // submitted, not yet performed or handed to the ring
     Array<IoCompletion> completed; // finished, not yet reaped
@@ -149,6 +184,15 @@ struct IoQueue {
     // Submits a whole-file write (create or truncate); the bytes are copied now. Same
     // pump, priorities, budget and completions as a read. Null handle as above.
     Handle write_file(const IoWriteRequest& req);
+    // Starts `workers` task workers (once: false if they are already there, or a thread
+    // will not start). Every lane is unlimited until set_lane says otherwise, so the
+    // workers are the only cap.
+    bool   start_tasks(u32 workers);
+    // At most `limit` of the lane's tasks at once; 0: no limit but the workers. Any time:
+    // a raised limit is taken up by the next worker free.
+    void   set_lane(u32 lane, u32 limit);
+    // Submits a task. Null handle without workers, with a bad lane, or a full queue.
+    Handle run_task(const IoTaskRequest& req);
     // Cancels a request that has not completed yet; it completes as Cancelled.
     bool   cancel(Handle request);
     // Once per frame: hand queued reads to the backend within the budget and collect what
@@ -166,7 +210,7 @@ struct IoQueue {
     // Returns false if it was not there (already reaped).
     bool   reap(Handle request);
     // Requests neither completed nor reaped: queued plus in flight.
-    u32    pending() const { return queued.len + in_flight; }
+    u32    pending() const { return queued.len + in_flight + tasks_pending; }
 };
 
 // The files under a directory, recursively, in name order per directory, as paths relative
@@ -205,6 +249,14 @@ struct IoBytes {
 bool io_read_now(const char* path, IoBytes* out, Allocator* alloc = nullptr, i32* err = nullptr);
 // Writes a whole file now: created, or truncated if it exists. False (*err) on failure.
 bool io_write_now(const char* path, const void* data, usize size, i32* err = nullptr);
+// A file front to back in pieces of up to `chunk` bytes, each handed to fn, which may stop
+// the read by returning false. For what does not need the file whole in memory: a hash, a
+// copy. False with *err set if it cannot be opened or read (a stop is not a failure).
+bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize n), void* user, i32* err = nullptr, usize chunk = 1u << 20);
+// Copies a file in pieces, `to` created or truncated; with `hash`, the SHA-256 of what was
+// read. False with *err set if either side fails. What was written of `to` stays: a tool
+// that must never be seen half done copies to a temporary name and renames it.
+bool io_copy_now(const char* from, const char* to, u8 hash[32] = nullptr, i32* err = nullptr);
 
 // A file written in pieces, now: open (created or truncated), write and print as often as
 // need be, close. A failure sticks: what follows does nothing, and close reports it.

@@ -35,6 +35,10 @@ struct Process {
     // Asks the OS once; true until the child has ended. Output may remain to be read
     // after it has: read until both streams return -1.
     bool running();
+    // Blocks until either stream has something (or has ended), or `seconds` pass: for a
+    // thread that owns the process and has nothing else to do (an IoQueue task). With both
+    // streams ended, it waits a millisecond at most, since only running() can tell the end.
+    void wait(f64 seconds);
     // Bytes read, 0 when nothing has arrived, -1 at the end of the stream.
     i32  read_out(void* buf, u32 cap);
     i32  read_err(void* buf, u32 cap);

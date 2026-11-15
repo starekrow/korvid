@@ -159,6 +159,14 @@ bool os_remove(const char* path) {
     return DeleteFileW(w) != 0;
 }
 
+bool os_remove_dir(const char* path) {
+    wchar_t w[KV_WIDE_PATH_MAX];
+    if (!widen(path, w, KV_WIDE_PATH_MAX)) return false;
+    if (RemoveDirectoryW(w)) return true;
+    DWORD e = GetLastError();
+    return e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND;
+}
+
 // Under the user's temporary directory (GetTempPath2W where Windows has it, which keeps a
 // SYSTEM process's files private), named prefix-<pid>-<n>; CreateDirectoryW failing on a
 // name that exists makes the choice race-free, as mkdtemp's is.

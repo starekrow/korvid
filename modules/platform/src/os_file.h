@@ -35,6 +35,11 @@ bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void
 bool os_make_dir(const char* path);
 // Removes a file or an empty directory. True if it was removed.
 bool os_remove(const char* path);
+// Removes an empty directory, never a file or what a link points at. True if no directory
+// is there after (removed, or nothing was there); false for a file, a link, or a
+// directory with something in it. One call where the caller knows what it has: POSIX's
+// remove() tries a directory as a file first.
+bool os_remove_dir(const char* path);
 // A new, empty directory under the OS's temporary directory whose name starts with
 // prefix; its path, with '/' separators and none at the end, in out.
 bool os_make_temp_dir(const char* prefix, char* out, u32 cap);

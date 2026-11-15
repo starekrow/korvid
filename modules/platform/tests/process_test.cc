@@ -138,6 +138,19 @@ void test_process(kv::TestCtx& c) {
     KV_CHECK(c, p.spawn(d) && run_out(p, out, err) && p.code == 0 && strcmp(out.data, "1=\"salt & pepper\" 2=\"two\"\r\n") == 0);
     p.free();
 #endif
+    // wait: returns when there is output, not at its limit; with nothing, at its limit.
+    KV_CHECK(c, sh(p, "sleep 0.2; echo late"));
+    t0 = time_now();
+    p.wait(0.05);
+    f64 quiet = time_now() - t0;
+    KV_CHECK(c, quiet >= 0.04 && quiet < 0.15);
+    t0 = time_now();
+    p.wait(5.0);
+    f64 woke = time_now() - t0;
+    KV_CHECK(c, woke < 1.0);
+    char line[16] = {};
+    KV_CHECK(c, p.read_out(line, sizeof line - 1) > 0 && strncmp(line, "late", 4) == 0);
+    p.free();
 
     out.free();
     err.free();

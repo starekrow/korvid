@@ -1,11 +1,13 @@
 #include "korvid/platform/io.h"
 #include "korvid/core/format.h"
+#include "korvid/core/sha256.h"
 #include "korvid/core/sort.h"
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"
 #include "korvid/core/utf8.h"
 #include "korvid/inflate/inflate.h"
 #include "io_ring.h"
+#include "io_task.h"
 #include "os_file.h"
 #include "os_paths.h"
 #include "korvid/platform/module.h"
@@ -317,6 +319,9 @@ bool IoQueue::init(Allocator* storage, u32 max_in_flight, IoBackend backend) {
 }
 
 void IoQueue::free() {
+    // Tasks first: each is asked to stop, and the workers are joined before anything a
+    // task might be using goes.
+    io_tasks_stop(*this);
     // Reads still in the ring: wait for them, then let the normal path free their buffers.
     if (ring) {
         while (io_ring_in_flight(ring) > 0) {
@@ -740,19 +745,86 @@ i32 io_list_files(const char* dir, bool (*fn)(void* user, const char* relative),
     return walk(full, n, n, sizeof full, fn, user, &stop);
 }
 
+bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize n), void* user, i32* err, usize chunk) {
+    i32 e = 0;
+    OsFile f = os_file_open(path, false, &e);
+    if (f < 0) { if (err) *err = e; return false; }
+    if (!chunk) chunk = 1u << 20;
+    // A buffer the size of the file, up to `chunk`, and on the stack when it is small:
+    // a tool hashing ten thousand small files from a dozen threads must not map and unmap
+    // a megabyte for each (every unmap stops each core the process runs on).
+    u64 size = 0;
+    if (os_file_size(f, &size, &e) && size < chunk) chunk = size ? (usize)size : 1;
+    u8 small[16384];
+    u8* buf = chunk <= sizeof small ? small : (u8*)mem_alloc(chunk);
+    bool ok = buf != nullptr;
+    if (!ok) e = ENOMEM;
+    for (u64 at = 0; ok;) {
+        i64 n = os_file_read_at(f, buf, chunk, at, &e);
+        if (n < 0) { ok = false; break; }
+        if (n == 0 || !fn(user, buf, (usize)n)) break;
+        at += (u64)n;
+    }
+    if (buf != small) mem_free(buf);
+    os_file_close(f);
+    if (!ok && err) *err = e;
+    return ok;
+}
+
+namespace {
+struct CopyCtx { OsFile to; Sha256* hash; i32 err; };
+bool copy_piece(void* user, const u8* data, usize n) {
+    CopyCtx& c = *(CopyCtx*)user;
+    if (c.hash) c.hash->update(data, n);
+    while (n) {
+        i64 w = os_file_write(c.to, data, n, &c.err);
+        if (w <= 0) { if (!c.err) c.err = EIO; return false; }
+        data += w; n -= (usize)w;
+    }
+    return true;
+}
+} // namespace
+
+bool io_copy_now(const char* from, const char* to, u8 hash[32], i32* err) {
+    i32 e = 0;
+    OsFile out = os_file_open(to, true, &e);
+    if (out < 0) { if (err) *err = e; return false; }
+    Sha256 h;
+    h.init();
+    CopyCtx c{out, hash ? &h : nullptr, 0};
+    bool ok = io_read_each(from, copy_piece, &c, &e) && !c.err;
+    os_file_close(out);
+    if (!ok) { if (err) *err = c.err ? c.err : e; return false; }
+    if (hash) h.finish(hash);
+    return true;
+}
+
 bool io_make_dirs(const char* path) {
     char p[1024];
     usize n = path ? strlen(path) : 0;
     if (!n || n >= sizeof p) return false;
     memcpy(p, path, n + 1);
-    for (usize i = 1; i <= n; ++i) {
-        if (p[i] != '/' && p[i] != 0) continue;
-        char c = p[i];
-        p[i] = 0;
-        if (!os_make_dir(p)) return false;
-        p[i] = c;
+    while (n > 1 && p[n - 1] == '/') p[--n] = 0;
+    // The leaf first: a directory already there, or one whose parent is, costs one call
+    // (and the check below). Only past a missing parent is the path cut back, a level at a
+    // time, and made again from there down: making every level from the root each time
+    // was a dozen failed calls for every directory a tool asked for.
+    usize end = n;
+    while (!os_make_dir(p)) {
+        usize s = end;
+        do --s; while (s > 0 && p[s] != '/');
+        if (s == 0) return false; // nothing above it to make
+        p[s] = 0;
+        end = s;
     }
-    return os_path_kind(path) == OsPathKind::Dir;
+    while (end < n) {
+        p[end] = '/';
+        usize next = end + 1;
+        while (next < n && p[next]) ++next;
+        if (!os_make_dir(p)) return false;
+        end = next;
+    }
+    return os_path_kind(path) == OsPathKind::Dir; // what was there may have been a file
 }
 
 bool io_remove(const char* path) {
@@ -788,7 +860,7 @@ bool remove_tree(char* full, usize len, usize cap) {
         free_in(mem_general(), name, n + 1);
     }
     names.free();
-    return (os_remove(full) || os_path_kind(full) == OsPathKind::None) && ok;
+    return os_remove_dir(full) && ok; // emptied above: a directory
 }
 
 } // namespace
@@ -799,7 +871,10 @@ bool io_remove_tree(const char* path) {
     if (!n || n >= sizeof full) return false;
     memcpy(full, path, n + 1);
     while (n > 1 && full[n - 1] == '/') full[--n] = 0;
-    if (os_remove(full) || os_path_kind(full) == OsPathKind::None) return true; // a file, a link, an empty directory, or nothing
+    // Mostly a directory: an empty one, or nothing, goes in one call. Then a file or a
+    // link, and only then a directory with something in it.
+    if (os_remove_dir(full)) return true;
+    if (os_remove(full) || os_path_kind(full) == OsPathKind::None) return true;
     return os_path_kind(full) == OsPathKind::Dir && remove_tree(full, n, sizeof full);
 }
 
@@ -810,6 +885,7 @@ bool io_make_temp_dir(const char* prefix, char* out, u32 cap) {
 bool IoQueue::cancel(Handle request) {
     IoEntry* e = entries.get(request);
     if (!e || e->status != IoStatus::Pending) return false;
+    if (e->task) return io_tasks_cancel(*this, *e); // completes as Cancelled when a worker is done with it
     e->status = IoStatus::Cancelled; // queued: completes as Cancelled at the pump; in flight: when the ring answers
     if (!e->in_flight && e->fd >= 0 && !e->fd_borrowed) { os_file_close(e->fd); e->fd = -1; } // opened for sizing, never started
     return true;
@@ -830,6 +906,7 @@ const char* IoQueue::backend_name() const { return io_ring_name(ring); }
 
 void IoQueue::pump() {
     ++pumps;
+    io_tasks_complete(*this);
     bool capped = false;
     admit(*this, budget.bytes_per_pump, false, &capped);
     if (capped) ++pumps_capped;
@@ -837,6 +914,7 @@ void IoQueue::pump() {
 
 usize IoQueue::pump_idle(usize bytes) {
     ++idle_calls;
+    io_tasks_complete(*this);
     bool capped = false;
     f64 t0 = time_now();
     usize n = admit(*this, bytes ? bytes : 1, true, &capped);

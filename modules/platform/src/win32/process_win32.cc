@@ -272,6 +272,26 @@ bool Process::running() {
     return false;
 }
 
+// Anonymous pipes cannot be waited on: a look at each, then a short wait on the process
+// (which ends at once if it exits), until something is there or the time is up.
+void Process::wait(f64 seconds) {
+    auto has = [](i64 fd) {
+        HANDLE h = as_handle(fd);
+        if (!h) return false;
+        DWORD avail = 0;
+        return !PeekNamedPipe(h, nullptr, 0, nullptr, &avail, nullptr) || avail > 0; // data, or the end
+    };
+    if (out_fd < 0 && err_fd < 0) seconds = seconds < 0.001 ? seconds : 0.001;
+    ULONGLONG until = GetTickCount64() + (ULONGLONG)(seconds * 1000.0);
+    for (;;) {
+        if (has(out_fd) || has(err_fd)) return;
+        ULONGLONG now = GetTickCount64();
+        if (now >= until) return;
+        if (os[0] && !exited) WaitForSingleObject((HANDLE)os[0], 1);
+        else Sleep(1);
+    }
+}
+
 i32 Process::read_out(void* buf, u32 cap) { return pipe_read(out_fd, buf, cap); }
 i32 Process::read_err(void* buf, u32 cap) { return pipe_read(err_fd, buf, cap); }
 
