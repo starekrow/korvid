@@ -261,6 +261,29 @@ void EventBus::end_tick(Span<const u64> keep_from) {
     }
 }
 
+void EventBus::trim(Span<const u64> keep_from) {
+    for (u32 t = 1; t < streams.len; ++t) {
+        EventStream& st = streams[t];
+        u64 keep = t < keep_from.len ? keep_from[t] : st.end();
+        if (keep > st.tick_start) keep = st.tick_start;
+        if (keep > st.end()) keep = st.end();
+        if (keep <= st.base) continue;
+        u32 drop = (u32)(keep - st.base);
+        u32 elem = st.events.elem_size;
+        u32 left = st.events.count() - drop;
+        if (left) memmove(st.events.bytes.data, st.events.bytes.data + (usize)drop * elem, (usize)left * elem);
+        st.events.bytes.len = left * elem;
+#if KV_DEV
+        if (st.events.emitters.len >= drop) {
+            for (u32 i = 0; i + drop < st.events.emitters.len; ++i) st.events.emitters[i] = st.events.emitters[i + drop];
+            st.events.emitters.len -= drop;
+        }
+#endif
+        st.base = keep;
+        if (st.traced < st.base) st.traced = st.base;
+    }
+}
+
 void EventBus::drop_all() {
     for (EventWriter& w : writers) w.clear();
     held.clear();

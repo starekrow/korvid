@@ -77,6 +77,9 @@ struct FrameLoopState {
     // Pacing::OnDemand: frames still owed after the last activity, when the last frame was,
     // and the polls that found nothing to do.
     u32             demand_tail = 0;
+    // The Work cycle's deadline: the time between frames drawn and what a render costs the
+    // CPU besides its wait, both smoothed.
+    f64             period = 1.0 / 60.0, render_cpu = 0.0, last_frame_start = 0.0;
     f64             demand_last = 0.0;
     u64             demand_sleeps = 0;
     // The GPU's frames over the report window (renderer_gpu_stats, a frame late), when measured.
@@ -365,6 +368,7 @@ void modal_frame(void* user) {
     f64 dt  = now - s.prev;
     s.prev = now;
     engine_frame(engine, dt);
+    engine_frame_cycle(engine, dt);
     render_frame(engine, s);
     ++s.modal_frames;
 }
@@ -372,7 +376,7 @@ void modal_frame(void* user) {
 // Pacing::OnDemand: whether this pass of the loop should tick and draw. The platform is
 // pumped here; what it delivered, the window's size, I/O under way, a load being held for,
 // sprite deltas, a frame someone asked for, or a quarter second gone by, says yes.
-constexpr f64 k_demand_heartbeat = 0.25, k_demand_poll = 0.004;
+constexpr f64 k_demand_heartbeat = 0.25, k_demand_poll = 0.004, k_demand_work = 0.008;
 bool demand_frame(Engine& engine, FrameLoopState& s) {
     Input* in = platform_input(engine);
     InputState before;
@@ -407,6 +411,16 @@ void run(Engine& engine, FrameLoopState& s) {
     bool slept = false;
     while (!engine.quit_requested) {
         if (on_demand && !demand_frame(engine, s)) {
+            if (engine_work_pending(engine)) {
+                // Nothing to draw and work to do: the ticks owed and a slice of Work, no frame.
+                f64 now = time_now();
+                f64 dt = slept ? engine.clock.tick_dt : now - s.prev;
+                s.prev = now;
+                slept = false;
+                engine_frame(engine, dt);
+                engine_work(engine, k_demand_work);
+                continue;
+            }
             time_sleep(k_demand_poll);
             ++s.demand_sleeps;
             slept = true;
@@ -429,8 +443,17 @@ void run(Engine& engine, FrameLoopState& s) {
         u32 ran = engine_frame(engine, dt);
         if (!loading) g_shot_ticks += ran; // the ticks a script counts: not the ones a load held, which follow the disk
         f64 t_ticked = time_now();
-        if (f64 slack = idle_slack(s)) {
-            f64 used = engine_idle_run(engine, slack);
+        // The Work cycle (and the idle tasks after it) in the time before the frame is due:
+        // with work to do, until the frame's deadline (the period less what this frame has
+        // spent, what the render will cost the CPU and the margin); without, idle's slack,
+        // the time the renderer waited last frame. At least one cycle either way.
+        {
+            f64 budget = idle_slack(s);
+            if (engine_work_pending(engine)) {
+                f64 deadline = s.period - (time_now() - now) - s.render_cpu - g_idle_margin;
+                if (deadline > budget) budget = deadline;
+            }
+            f64 used = engine_work(engine, budget);
             if (used > 0.0) { s.idle_total += used; ++s.idle_frames; }
         }
         {
@@ -440,7 +463,16 @@ void run(Engine& engine, FrameLoopState& s) {
             if (g_shot_path && shot) { renderer_screenshot(s.renderer, g_shot_path); g_shot_taken = true; }
             if (g_cli_shot[0]) { renderer_screenshot(s.renderer, g_cli_shot); g_cli_shot[0] = 0; }
             if (g_check_sort && engine.frame_count % 30 == 10) renderer_check_sort(s.renderer);
+            engine_frame_cycle(engine, dt); // presentation: once for the frame about to be drawn
+            f64 r0 = time_now();
             render_frame(engine, s);
+            f64 cpu = time_now() - r0 - renderer_last_wait(s.renderer);
+            s.render_cpu = s.render_cpu * 0.9 + (cpu > 0.0 ? cpu : 0.0) * 0.1;
+            if (s.last_frame_start > 0.0) {
+                f64 p = now - s.last_frame_start;
+                if (p > 0.0 && p < 0.1) s.period = s.period * 0.9 + p * 0.1;
+            }
+            s.last_frame_start = now;
         }
         f64 t_rendered = time_now();
         ++frames_in_window;

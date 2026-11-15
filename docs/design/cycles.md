@@ -1,0 +1,179 @@
+# Cycles
+
+Nov 15, 2026. Three rhythms of work in one schedule: the simulation's fixed ticks, a
+frame's worth of presentation once per frame shown, and throughput work that runs
+whenever there is some. Written first, then built (see "As built").
+
+## Why
+
+The engine has one clock. Everything a system does happens in a tick: 60 a second, fixed,
+deterministic, recorded and replayed. That is right for a game's simulation and wrong for
+the two other kinds of work that live in the same process:
+
+- **Presentation** wants a run per frame shown, paced by the display (or by demand), and
+  never belongs in a replay: a UI's layout and paint, the pointer as the UI sees it, the
+  extract to the renderer.
+- **Throughput** wants to run as often as there is something to do: a tool's work
+  (goldberg's loop, kpack's pump), the I/O queue's idle reads, background loads. Today a
+  tool pretends its work is ticks ("ticks are not time", `modules/tool`), and a game's
+  background work is an idle task, a mechanism of its own outside the schedule.
+
+A tool with a window needs all three, and there was no honest way to give it them. Krome
+(`docs/PRDs/Krome-Slice-1-PRD.md`, KS13) stopped there: rendering at vsync every tick caps a
+tool's work at 60 ticks a second, and not rendering spins a core when idle.
+
+## The model
+
+A **cycle** is a run of phases with its own reason to run. There are three:
+
+| cycle | phases | runs | for |
+|---|---|---|---|
+| **Sim** | Input, PreSim, Sim, PostSim | 0 to N times a frame, at the clock's fixed rate | the simulation: recorded, hashed, paused by holds |
+| **Frame** | Frame | once before each frame is presented, and only then | presentation: a UI's input, layout and paint |
+| **Work** | Work | over and over, while a unit says there is more, until the time it was given runs out | throughput: a tool's work, background loads, idle reads |
+
+A system says where it runs as it says now, by phase: `.phase = Phase::Frame`,
+`.phase = Phase::Work`. The two new phases are scheduled exactly as the four are: one table
+of constraints, levels on the job pool, main-thread units first, early reads, snapshots,
+commands applied and events merged at the boundary. Nothing about what a declaration
+means changes; only when the phase runs.
+
+### Who runs the cycles
+
+The engine runs a cycle when asked; the loop decides when to ask.
+
+- `engine_frame(e, dt)`: the Sim ticks the clock owes, as now.
+- `engine_frame_cycle(e, dt)`: the Frame cycle once, `dt` the time since the last.
+- `engine_work(e, budget)`: Work cycles back to back while any unit of the last one said
+  `ctx.more()` and the budget lasts; the seconds it used.
+
+**The frame loop** (`modules/frameloop`), every pass:
+
+1. pump the platform;
+2. the Sim ticks owed (`engine_frame`);
+3. Work until the frame's deadline: the slack the renderer measured (what idle had), or
+   for as long as there is work when nothing is due to draw;
+4. when a frame is due: the Frame cycle, then the render;
+5. on demand, with nothing due and no work: sleep.
+
+**The tool loop** (`modules/tool`): pump, a tick (a tool's systems that are ticks stay
+ticks), then Work for a few milliseconds; it yields the core only when nothing has work
+and the disk is busy.
+
+A tool with a window is then the frame loop with the tool's modules in it: the Work cycle
+fills the time between frames, so the tool's throughput loses only what the frames cost,
+and when there is no work the window paces on demand.
+
+### Work says when it has more
+
+A Work unit does a slice and returns. If it has more, it calls `ctx.more()`; the cycle then
+runs again, every Work unit once more in schedule order, until a cycle where none said so or
+the budget is spent. `ctx.time_left()` is what remains of the budget, for a unit that sizes
+its slice. A unit with nothing to do returns at once. There is no per-unit budget: a unit
+that hogs a cycle delays the next frame, and the profiler shows it (`work` zone).
+
+### The Frame cycle draws
+
+It runs before the render, once per frame drawn, never for a frame not drawn (on demand,
+or a minimised window). It sees input as the frame has it: the pointer and the keys now
+(`Input::raw`), not the tick's sample, since a frame between two ticks should still see a
+hover. Its `dt` is the frame's: what a transition animates by.
+
+### Events and resources across cycles
+
+- **Events are delivered at the consumer's next run.** Streams are read by cursor; a unit
+  in the Frame cycle that reads an event the Sim emits gets everything since it last ran,
+  however many ticks that was. The other way, an event the Frame emits reaches a Sim
+  reader at its next tick. Streams keep what a consumer has not reached, as now; trimming
+  after a cycle never moves the tick's own window (`read()`), so a Sim reader misses
+  nothing emitted between ticks.
+- **Resources are shared one cycle at a time.** Cycles never overlap: each runs to its
+  end, boundary included, before another starts. Within a cycle the scheduler checks as
+  it checks a phase. Across cycles there is nothing to race.
+- **Commands** (spawns, destroys, appends) apply at the cycle's boundary.
+- **Order across cycles** is the loop's, not the solver's: `after` and `before` naming a
+  system in another cycle say nothing about order and are accepted as now (the phase
+  order); a dependency between cycles is an event or a resource.
+
+### Determinism
+
+The Sim cycle is the only one in a replay. The other two run as often as the machine
+allows, so:
+
+- **They do not write the simulation.** A Frame or Work unit may read any kind and write
+  cosmetic kinds and its own state; writing a sim kind is refused at startup (planned; see
+  As built).
+- **What they emit to the Sim is input from outside**, as an event from code outside the
+  schedule is today: a game that lets a UI drive its simulation records those events, as
+  it records input. That is the replay question Krome deferred, now in one place.
+- **Pausing** holds the Sim only. Frame and Work run whatever the clock's holds are.
+
+### Idle becomes Work
+
+An idle task is Work by another name: a slice, then More, Nothing or Done. Idle tasks stay
+as they are for now, run at the end of each `engine_work` with what is left of the budget,
+and move to Work units one at a time (the I/O queue's idle reads first). Then
+`engine_idle_*` goes.
+
+### Pacing
+
+The Frame cycle carries the frame's pacing: continuous, a frame every vsync; on demand, a
+frame when input, the window, a load or `engine_want_frame` asks. Work never draws, so it
+never asks for a frame; it only keeps the loop from sleeping.
+
+## What it costs
+
+A Frame and a Work cycle with nothing in them cost a phase's bookkeeping: a few
+microseconds. The Work cycle's loop costs a cycle's bookkeeping per repeat, so a Work unit
+should do a useful slice (hundreds of microseconds), not one item.
+
+## Prior art
+
+Bevy's `FixedMain` (0..N times a frame) against `Update` (once a frame); Unity's
+`FixedUpdate` against `Update`; Godot's `_physics_process` against `_process`. The Work
+cycle is the piece they leave to threads or coroutines.
+
+## Not now
+
+- **Work on its own thread.** Cycles run on the main loop; a Work unit fans out to the
+  job pool as any unit does. A cycle that runs beside the others needs the resources
+  split by cycle, and nothing asks for it yet.
+- **More than one Frame cycle** (one per window).
+- **A tool's command line through the frame loop.** A windowed goldberg needs its CLI
+  request run the way `tool_main` runs it; that is goldberg's window's to settle.
+
+## Open questions
+
+- [ ] The extract: PostSim now, which is once a tick; the Frame cycle is once a frame,
+      which is where it belongs. Moving it touches interpolation.
+- [ ] A per-unit budget in Work, if one greedy unit starving the rest shows up.
+- [ ] Refusing sim writes from Frame and Work: in the scheduler's expanded sets, or a dev
+      check at the boundary.
+
+## As built
+
+Nov 15, 2026, on branch tool-stuff.
+
+- **Core.** `Phase::Frame` and `Phase::Work` after the four Sim phases (`KV_SIM_PHASES`);
+  `PhaseList::run_cycle` runs one as a tick runs a phase, levels and boundary, and trims the
+  streams (`EventBus::trim`) without moving the tick's window. `engine_frame_cycle`,
+  `engine_work`, `engine_work_pending`, `ctx.more()`, `ctx.time_left()`. Idle tasks run
+  inside `engine_work` after the Work units, with what is left. `core_tests` checks the
+  cycles (events both ways, repeats, the budget, pause, commands, trimming).
+- **The frame loop.** Work runs where idle ran. With work pending its budget is a deadline,
+  not idle's slack: the frame period (smoothed) less what this frame has spent, what a
+  render costs the CPU besides its wait, and the margin. Idle's slack alone shrank as work
+  filled it: the wait it measures is the time work took, so the budget fell every frame
+  (42% of a run went to the work; with the deadline, 86%). The Frame cycle runs before
+  each render; on demand, pending work runs without drawing.
+- **The tool loop** gives Work 5 ms after each tick, and does not yield while work is
+  pending.
+- **Krome** is in the Frame cycle. It reads presses, releases, the wheel and Escape as
+  events (none lost or doubled however frames and ticks fall) and where the pointer is
+  from the raw state. `input_pointer_override` emits the events a mouse would.
+- **A tool with a window** is the frame loop with Work units: `kromedemo --work` counts
+  primes in the Work cycle behind its window, 86 to 87% of the wall time computing on
+  continuous or on-demand pacing, 40 frames drawn in the 0.8 s it takes.
+- **Not built:** refusing sim writes from Frame and Work; idle tasks moved to Work units;
+  the extract moved to Frame. Arcfire's recorded replay matches (236 hashes): the Sim cycle
+  is unchanged.

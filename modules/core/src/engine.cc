@@ -1347,6 +1347,35 @@ u32 engine_frame(Engine& e, f64 frame_dt) {
     return ticks;
 }
 
+void engine_frame_cycle(Engine& e, f64 dt) {
+    KV_ZONE("frame cycle");
+    ++e.frame_cycles;
+    e.phases.run_cycle(e, e.events, Phase::Frame, dt);
+}
+
+f64 engine_work(Engine& e, f64 budget) {
+    f64 start = time_now();
+    e.work_deadline = start + (budget > 0.0 ? budget : 0.0);
+    bool any = e.phases.systems[(u32)Phase::Work].len > 0;
+    e.work_pending = false;
+    if (any) {
+        KV_ZONE("work");
+        // At least one cycle, then again while a unit said more and the budget lasts.
+        for (;;) {
+            e.work_more = false;
+            e.phases.run_cycle(e, e.events, Phase::Work, 0.0);
+            ++e.work_cycles;
+            e.work_pending = e.work_more;
+            if (!e.work_more || time_now() >= e.work_deadline) break;
+        }
+    }
+    f64 used = time_now() - start;
+    // The idle tasks, until they are Work units, with what is left.
+    if (budget > used) used += engine_idle_run(e, budget - used);
+    e.work_deadline = 0.0;
+    return used;
+}
+
 void engine_sim_reset(Engine& e) {
     KV_ASSERT(e.clock.paused); // a held tick: no sim system is between its reads and its writes
     u32 emptied = 0;

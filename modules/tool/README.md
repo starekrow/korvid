@@ -21,7 +21,8 @@ the `main` such a tool needs and the rule for when it is done.
    The CLI never reads stdin in a tool: a build's pipes are not a session.
 4. Runs the request. Its lines go to stdout; a failure goes to stderr and the exit status
    is 2.
-5. Ticks the engine as fast as the work allows (a tick waiting only on the disk sleeps
+5. Ticks the engine as fast as the work allows, with the Work cycle (`engine_work`,
+   `docs/design/cycles.md`) given 5 ms after each tick; a tool's work may be either (a tick waiting only on the disk sleeps
    100 microseconds) until a system calls `tool_finish(e, code)`, or until `--max-ticks`.
 6. Shuts the engine down. In debug and dev builds, memory still live after shutdown makes
    the exit status 3. kormake builds tools for the host in the host config (dev by

@@ -25,6 +25,7 @@ void test_profile(kv::TestCtx&);
 void test_json(kv::TestCtx&);
 void test_json_count(kv::TestCtx&);
 void test_kbor(kv::TestCtx&);
+void test_cycles(kv::TestCtx&);
 void test_glob(kv::TestCtx&);
 void test_sha256(kv::TestCtx&);
 void test_idle(kv::TestCtx&);
@@ -64,6 +65,7 @@ int main() {
     test_json(c);
     test_json_count(c);
     test_kbor(c);
+    test_cycles(c);
     test_glob(c);
     test_sha256(c);
     test_utf8(c);

@@ -34,14 +34,19 @@ struct ModuleInstance;
 struct ScheduledSystem;
 struct TickContext;
 
-// Fixed order. Add phases here, never at runtime.
+// Fixed order. Add phases here, never at runtime. The first four are the Sim cycle, a
+// tick; Frame and Work are cycles of their own, run when the loop asks
+// (docs/design/cycles.md): Frame once before each frame drawn, Work while there is work.
 enum class Phase : u8 {
     Input,   // sample devices into per-tick input state
     PreSim,  // snapshot previous state, advance timers
     Sim,     // gameplay
     PostSim, // reactions to this tick's results
+    Frame,   // presentation: once per frame drawn (engine_frame_cycle); never in a replay
+    Work,    // throughput: over and over while a unit says ctx.more() (engine_work)
     Count
 };
+constexpr u32 KV_SIM_PHASES = 4; // Input..PostSim: what a tick runs
 const char* phase_name(Phase p);
 
 // What a system does with its module's state (ModuleInstance::state), which is a resource
@@ -309,6 +314,12 @@ struct TickContext {
     EventWriter*           writer   = nullptr; // the unit's; null: the bus's writer 0 (outside the schedule)
     CommandBuffer*         commands = nullptr; // the unit's; null: the engine's
     bool                   paused   = false;   // a paused tick: the sim stands still, only RunWhen::Always systems run
+
+    // ---- the Work cycle ---------------------------------------------------------------
+    // A Work unit with more to do says so, and the cycle runs again while time remains.
+    void more() const;
+    // Seconds left of what engine_work was given; 0 outside the Work cycle.
+    f64  time_left() const;
 
     // The module state as the type startup stored, verified by a pointer compare. T const
     // is a read; T is a write. Checked against the system's `state` in dev builds.
@@ -602,6 +613,10 @@ struct PhaseList {
     // runs the Always systems and the handlers with events, skips the timers, the triggers
     // and the hash line; `tick` is then the sim tick that will run next.
     void run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, bool paused = false);
+    // Runs one cycle that is a single phase outside the tick (Frame, Work), as a tick runs a
+    // phase: levels, then the boundary's events and commands. Then the streams keep what a
+    // consumer has not reached, the tick's own window untouched.
+    void run_cycle(Engine& engine, EventBus& events, Phase phase, f64 dt);
     void free();
 };
 

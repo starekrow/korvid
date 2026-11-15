@@ -144,6 +144,12 @@ struct Engine {
     u64                   frame_count      = 0;
     bool                  quit_requested   = false;
     bool                  frame_wanted     = false; // engine_want_frame: a loop that paces on demand draws another frame
+    // The Work cycle (engine_work): whether a unit of the running cycle said more, whether
+    // the last cycle ended with more to do, and when the running budget ends.
+    bool                  work_more        = false;
+    bool                  work_pending     = false;
+    f64                   work_deadline    = 0.0;
+    u64                   work_cycles      = 0, frame_cycles = 0;
     bool                  hash_ticks       = false; // log the state hash after every tick
     bool                  hash_systems     = false; // and after every system, to locate drift
     u64                   last_hash        = 0;     // the state hash after the last tick, when hashing
@@ -291,6 +297,16 @@ Table* engine_table_of_now(Engine& e, Handle h);
 // Pacing::OnDemand) runs a tick and draws once more; one that draws every vsync ignores it.
 // For whatever changed what is on screen without input to show it (a UI's new list, a load
 // that landed).
+// The cycles outside the tick (docs/design/cycles.md). engine_frame_cycle runs the Frame
+// phase once, `dt` the time since its last run: a loop calls it before each frame it
+// draws. engine_work runs Work cycles back to back while a unit of the last one said
+// ctx.more() and `budget` seconds last, then the idle tasks with what is left; it returns
+// the seconds used. engine_work_pending says whether the last Work cycle had more to do,
+// so a loop knows not to sleep. None of these reset the scratch arena: engine_frame does.
+void engine_frame_cycle(Engine& e, f64 dt);
+f64  engine_work(Engine& e, f64 budget);
+inline bool engine_work_pending(const Engine& e) { return e.work_pending; }
+
 inline void engine_want_frame(Engine& e) { e.frame_wanted = true; }
 
 } // namespace kv

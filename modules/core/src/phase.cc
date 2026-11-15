@@ -15,6 +15,8 @@ const char* phase_name(Phase p) {
     case Phase::PreSim:  return "presim";
     case Phase::Sim:     return "sim";
     case Phase::PostSim: return "postsim";
+    case Phase::Frame:   return "frame";
+    case Phase::Work:    return "work";
     default:             return "?";
     }
 }
@@ -206,7 +208,7 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
         events.merge_outside(true);
         engine_trace_delivery(engine, tick, (u32)Phase::Count);
     }
-    for (u32 p = 0; p < (u32)Phase::Count; ++p) {
+    for (u32 p = 0; p < KV_SIM_PHASES; ++p) {
         // A paused tick's number is the sim tick that runs next, which a fresh sim
         // (engine_sim_reset) may just have changed: the units after it see the new one.
         if (paused) ctx.tick = tick = engine.clock.tick_count;
@@ -279,6 +281,65 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
         engine.last_hash = engine_hash_state(engine);
         KV_INFO("hash", "tick %llu %016llx", (unsigned long long)tick, (unsigned long long)engine.last_hash);
     }
+}
+
+void TickContext::more() const { if (engine) engine->work_more = true; }
+f64  TickContext::time_left() const {
+    if (!engine || engine->work_deadline <= 0.0) return 0.0;
+    f64 left = engine->work_deadline - time_now();
+    return left > 0.0 ? left : 0.0;
+}
+
+void PhaseList::run_cycle(Engine& engine, EventBus& events, Phase phase, f64 dt) {
+    u32 p = (u32)phase;
+    if (p < KV_SIM_PHASES || p >= (u32)Phase::Count) return;
+    TickContext ctx;
+    ctx.engine = &engine;
+    ctx.events = &events;
+    ctx.dt     = dt;
+    ctx.tick   = engine.clock.tick_count;
+    ctx.paused = false;
+    ctx.state  = nullptr;
+    ctx.state_type = nullptr;
+    auto main_thread = [](const ScheduledSystem& s) { return s.desc && s.desc->main_thread; };
+    // What came from outside the schedule since the last boundary.
+    events.merge_outside(false);
+    events.begin_phase();
+    usize snapshot_bytes = take_snapshots(*this, p);
+    Array<ScheduledSystem>& units = systems[p];
+    for (u32 i = 0; i < units.len;) {
+        u32 j = i + 1;
+        while (j < units.len && units[j].level == units[i].level) ++j;
+        merge_for_level(*this, events, p, i, j);
+        if (j - i == 1 || jobs_worker_count() == 0) {
+            for (u32 k = i; k < j; ++k) run_unit(ctx, events, units[k]);
+        } else {
+            MemScope scope;
+            Array<ScheduledSystem*> pooled = array_in<ScheduledSystem*>(mem_scratch());
+            for (u32 k = i; k < j; ++k) {
+                if (main_thread(units[k])) run_unit(ctx, events, units[k]);
+                else pooled.push(&units[k]);
+            }
+            if (pooled.len == 1) run_unit(ctx, events, *pooled[0]);
+            else if (pooled.len) { LevelJob lj{&ctx, &events, pooled.data}; jobs_run(pooled.len, 1, level_job, &lj, "level"); }
+        }
+        i = j;
+    }
+    {
+        KV_ZONE("boundary");
+        events.merge_all(first_unit[p], last_unit[p]);
+        engine_apply_commands(engine);
+        events.merge_outside(false);
+        engine_trace_delivery(engine, ctx.tick, p);
+    }
+    if (g_prof_on && snapshot_bytes) prof_counter("snapshot KB", snapshot_bytes / 1024);
+    MemScope scope;
+    Array<u64> keep = array_in<u64>(mem_scratch());
+    keep.resize_fill(events.streams.len, ~0ull);
+    for (const ScheduledSystem* u : by_unit)
+        for (const ScheduledSystem::Cursor& c : u->cursors)
+            if (c.type < keep.len && c.at < keep[c.type]) keep[c.type] = c.at;
+    events.trim(Span<const u64>(keep.data, keep.len));
 }
 
 void PhaseList::free() {

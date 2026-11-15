@@ -80,6 +80,10 @@ bool tool_running(Engine& e) {
     return s && s->running && !s->finished;
 }
 
+// What a tool gives its Work cycle between two ticks: enough for a slice of real work, little
+// enough that a tool's tick systems keep their pace.
+constexpr f64 k_work_slice = 0.005;
+
 int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const ToolConfig& config) {
     u32 threads = 0;
     u64 max_ticks = 0;
@@ -162,10 +166,11 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
                 if (profiling) prof_frame(ticks);
                 platform_pump(e);
                 engine_frame(e, dt);
+                engine_work(e, k_work_slice); // the Work cycle (docs/design/cycles.md) between ticks
                 if (profiling) prof_collect();
                 ++ticks;
                 if (max_ticks && ticks >= max_ticks) { KV_ERROR("tool", "not finished after %llu ticks", (unsigned long long)ticks); break; }
-                if (io && io->pending() && io->completions().len == 0) time_sleep(0.0001);
+                if (io && io->pending() && io->completions().len == 0 && !engine_work_pending(e)) time_sleep(0.0001);
             }
             code = s->finished ? s->code : 2;
         }

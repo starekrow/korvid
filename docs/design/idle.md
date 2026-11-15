@@ -1,5 +1,8 @@
 # Idle time and I/O budgets
 
+Nov 15, 2026: idle tasks now run inside the Work cycle (`engine_work`, docs/design/cycles.md),
+after its units, and are to become Work units one at a time.
+
 Nov 7, 2026. Where a frame's spare time goes, and why the I/O queue counts bytes.
 
 ## The I/O budget

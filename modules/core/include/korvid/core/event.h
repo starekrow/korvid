@@ -135,6 +135,9 @@ struct EventBus {
     // End of tick: drop what every consumer has passed (`keep_from` by type: the lowest
     // cursor, or the stream's end for a type nobody reads). read() starts over.
     void end_tick(Span<const u64> keep_from);
+    // After a cycle outside the tick: drops what every consumer has passed, but nothing
+    // the tick's own window (tick_start, what read() returns) still holds.
+    void trim(Span<const u64> keep_from);
     // Drop everything merged and pending: a fresh sim. Cursors behind the new base read
     // from it.
     void drop_all();
