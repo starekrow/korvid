@@ -7,6 +7,7 @@ void test_layout(kv::TestCtx&);
 void test_lua(kv::TestCtx&);
 void test_view(kv::TestCtx&);
 void test_kimb(kv::TestCtx&);
+void test_defs(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
@@ -15,6 +16,7 @@ int main() {
     test_lua(c);
     test_view(c);
     test_kimb(c);
+    test_defs(c);
     kv::names_shutdown();
     kv::mem_shutdown();
     return kv::test_report(c, "krome_tests");

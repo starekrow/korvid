@@ -13,8 +13,38 @@ namespace kv {
 
 struct TickContext;
 
-// A node whose shown text reads a model key.
-struct KromeDep { u32 node; u64 key; };
+// A node that reads a model key: its shown text, or its selected state (a binding).
+struct KromeDep { u32 node; u64 key; bool binding = false; };
+
+// Where a definition's body or an each's block is being built: what its texts and
+// paths see (docs/PRDs/Krome-Slice-2-PRD.md, "Definitions", "Control flow and the model").
+// Kept for as long as the tree, so a region can be built again in the frame it was in.
+struct KromeFrame {
+    const KromeFrame* outer = nullptr;  // the frame the use (or the each) was written in
+    // A definition's expansion.
+    const KimbFile*  use_file = nullptr;
+    const JsonValue* use = nullptr;     // its children are what the body's slot holds
+    const KimbFile*  def_file = nullptr;
+    const char*      names[16] = {};
+    const char*      values[16] = {};
+    u32              params = 0;
+    // An each's element: `var` is the element at `path` in the model ("assets.3").
+    const char*      var = nullptr;
+    const char*      path = nullptr;
+};
+
+// An each or an if: the nodes after its anchor (a hidden node where it was written) are
+// what it built, and are built again when the model key it reads changes.
+struct KromeRegion {
+    u64               key;     // the model key its path starts with
+    u32               anchor;
+    u32               count;   // top-level nodes after the anchor that are its own
+    const KimbFile*   file;
+    const JsonValue*  src;     // the each or the if
+    const KromeFrame* frame;
+    bool              alive;
+    const KimbScope*  scope = nullptr; // a kim() piece's own, or the screen's
+};
 
 // A file Krome reads: a .kimb (a screen's, or a prelude a `use` names) or a script a
 // `script` line names. Read once through the I/O queue, or taken from what krome_provide
@@ -75,6 +105,10 @@ struct KromeScreen {
     bool       has_lua_file = false;
     Array<Name> uses;           // a Lua screen's `uses`
     KimbScope  scope;           // the file, then its uses: built once they are all in
+    Arena      frames;          // the KromeFrames its tree was built in, until it is built again
+    Array<KromeRegion> regions;
+    u32        dead = 0;        // nodes rebuilt away since the tree was last built whole
+    bool       waiting = false; // a kim() piece's file has not landed: built again when it does
     int        env = -2, store = -2, on = -2; // registry refs (LUA_NOREF is -2)
     Handle     io;              // its script's read, while it loads
     char*      source = nullptr; // a source given in memory, until it runs
@@ -101,6 +135,10 @@ struct KromeModule {
     Array<Provided>     provided;
     Name                theme;    // the theme every screen is in; null: each scope's first
     KimErrors           errors;   // the latest mistakes found loading and building (krome_errors)
+    // Lists and tables from C++ (krome_set_doc), applied by the pump in order.
+    struct SetDoc { Name screen; Name key; u8* data; usize size; };
+    Array<SetDoc>       set_docs;
+    u64                 rebuilt_regions = 0, rebuilt_nodes = 0;
     u32                 next_id = 1;
     TickContext*        ctx = nullptr; // the running system's, for emits; null outside one
     u64                 fired = 0, script_errors = 0;
@@ -146,6 +184,8 @@ Name krome_use_path(const char* use);
 // Whether every file the scope needs has landed: true when built (into sc.scope), false
 // while some are still loading; *failed when one never will.
 bool krome_scope_ready(KromeModule& s, KromeScreen& sc, bool* failed);
+// The same for any file: true with `scope` filled when every use has landed.
+bool krome_file_scope(KromeModule& s, const KimbFile& f, KimbScope& scope, bool* failed);
 
 // ---- building (build.cc) -------------------------------------------------------------------------
 
@@ -157,6 +197,9 @@ bool krome_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o);
 const char* krome_theme_of(KromeModule& s, const KimbScope& scope);
 // Each node that reads the model shows its text with the values filled in.
 void krome_fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node);
+// A model key changed: the texts and bindings that read it follow, the regions that read
+// it are built again.
+void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key);
 
 // ---- the Lua side (lua.cc) ----------------------------------------------------------------------
 
@@ -178,8 +221,15 @@ const char* krome_model_value_text(KromeModule& s, KromeScreen& sc, const char* 
 // A node's event: its handler, then KromeEvent. False when it has none.
 bool krome_fire(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, f64 value);
 void krome_emit(KromeModule& s, const KromeEvent& ev);
-// The model's value for a key as Lua has it, for `if` (truthy) and `each` (a list).
-bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* key);
+// The model at a dotted path ("assets.3.name": a key, then an element, then a field), as
+// `if` (truthy), `each` (a list's length) and text read it.
+bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* path);
+u32  krome_model_length(KromeModule& s, KromeScreen& sc, const char* path);
+const char* krome_model_path_text(KromeModule& s, KromeScreen& sc, const char* path, char* out, usize cap);
+// A binding's press: the value at the path flipped, and what reads it told.
+void krome_model_flip(KromeModule& s, KromeScreen& sc, const char* path);
+// A KBOR document as a Lua value at a model key (krome_set_doc).
+bool krome_model_set_doc(KromeModule& s, KromeScreen& sc, const char* key, const void* data, usize size);
 
 // ---- the view (view.cc) --------------------------------------------------------------------------
 

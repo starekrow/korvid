@@ -9,6 +9,7 @@
 #include "korvid/core/log.h"
 #include "korvid/lua/lua.h"
 #include "korvid/core/arena.h"
+#include "korvid/core/kbor.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,6 +74,11 @@ hit    = make("hit")
 text   = make("text")
 image  = make("image")
 spacer = make("box", nil, { fill = true })
+-- A screen of a .kimb as a piece of this tree, built in that file's scope.
+function kim(file, screen)
+  local info = getinfo(2, "l")
+  return { w = "@kim", file = file, screen = screen, l = info and info.currentline or 0 }
+end
 )lua";
 
 void* lua_alloc(void* ud, void* ptr, size_t osize, size_t nsize) {
@@ -299,6 +305,15 @@ int script_theme(lua_State* L) {
     return 0;
 }
 
+// changed(key): what reads the key follows, as if it were written (a list changed in
+// place). Upvalues: the module, the screen's id.
+int script_changed(lua_State* L) {
+    KromeModule* s = state_of(L, 1);
+    KromeScreen* sc = krome_screen_by_id(*s, (u32)lua_tointeger(L, lua_upvalueindex(2)));
+    if (sc) krome_model_changed(*s, *sc, name_intern(luaL_checkstring(L, 1)).hash);
+    return 0;
+}
+
 // close_overlay([id]): that one, or the top one.
 int script_close_overlay(lua_State* L) {
     KromeModule* s = state_of(L, 1);
@@ -378,7 +393,7 @@ void make_env(KromeModule& s, KromeScreen& sc) {
     lua_setfield(L, -3, "model");        // env store
     lua_pop(L, 1);                       // env
     struct Fn { const char* name; lua_CFunction fn; int ups; };
-    const Fn fns[] = {{"emit", script_emit, 2}, {"open_overlay", script_open_overlay, 2}, {"close_overlay", script_close_overlay, 2}, {"theme", script_theme, 1}};
+    const Fn fns[] = {{"emit", script_emit, 2}, {"open_overlay", script_open_overlay, 2}, {"close_overlay", script_close_overlay, 2}, {"theme", script_theme, 1}, {"changed", script_changed, 2}};
     for (const Fn& f : fns) {
         lua_pushlightuserdata(L, &s);
         if (f.ups == 2) lua_pushinteger(L, sc.id);
@@ -512,11 +527,33 @@ bool krome_lua_scripts(KromeModule& s, KromeScreen& sc, KromeDoc* const* scripts
     return ok;
 }
 
-bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* key) {
+namespace {
+
+// The model's value at a dotted path pushed (nil when any step is missing): a key, then
+// for each further part an element (a number, from 1) or a field.
+void push_path(lua_State* L, int store, const char* path) {
+    lua_rawgeti(L, LUA_REGISTRYINDEX, store);
+    const char* p = path;
+    while (*p) {
+        const char* dot = strchr(p, '.');
+        usize n = dot ? (usize)(dot - p) : strlen(p);
+        if (!lua_istable(L, -1)) { lua_pop(L, 1); lua_pushnil(L); return; }
+        bool digits = n > 0;
+        for (usize i = 0; i < n; ++i) if (p[i] < '0' || p[i] > '9') digits = false;
+        if (digits) lua_rawgeti(L, -1, (lua_Integer)strtoll(p, nullptr, 10));
+        else { lua_pushlstring(L, p, n); lua_gettable(L, -2); }
+        lua_remove(L, -2);
+        p += n;
+        if (*p == '.') ++p;
+    }
+}
+
+} // namespace
+
+bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* path) {
     lua_State* L = s.L;
     if (!L || sc.store == LUA_NOREF) return false;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store);
-    lua_getfield(L, -1, key);
+    push_path(L, sc.store, path);
     bool t;
     switch (lua_type(L, -1)) {
     case LUA_TNIL: t = false; break;
@@ -526,8 +563,103 @@ bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* key) {
     case LUA_TTABLE: t = lua_rawlen(L, -1) != 0; break;
     default: t = true;
     }
-    lua_pop(L, 2);
+    lua_pop(L, 1);
     return t;
+}
+
+u32 krome_model_length(KromeModule& s, KromeScreen& sc, const char* path) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) return 0;
+    push_path(L, sc.store, path);
+    u32 n = lua_istable(L, -1) ? (u32)lua_rawlen(L, -1) : 0;
+    lua_pop(L, 1);
+    return n;
+}
+
+const char* krome_model_path_text(KromeModule& s, KromeScreen& sc, const char* path, char* out, usize cap) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) return "";
+    push_path(L, sc.store, path);
+    const char* v = value_text(L, -1, out, cap);
+    if (v != out) { format(out, cap, "%s", v); v = out; }
+    lua_pop(L, 1);
+    return v;
+}
+
+void krome_model_flip(KromeModule& s, KromeScreen& sc, const char* path) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) return;
+    bool now = krome_model_truthy(s, sc, path);
+    // The table that holds the last part, then the part.
+    const char* last = strrchr(path, '.');
+    if (last) {
+        char parent[300];
+        format(parent, sizeof parent, "%.*s", (int)(last - path), path);
+        push_path(L, sc.store, parent);
+        ++last;
+    } else {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store);
+        last = path;
+    }
+    if (lua_istable(L, -1)) {
+        lua_pushboolean(L, !now);
+        bool digits = *last != 0;
+        for (const char* q = last; *q; ++q) if (*q < '0' || *q > '9') digits = false;
+        if (digits) lua_rawseti(L, -2, (lua_Integer)strtoll(last, nullptr, 10));
+        else lua_setfield(L, -2, last);
+    }
+    lua_pop(L, 1);
+    usize head = strcspn(path, ".");
+    krome_model_changed(s, sc, name_intern(path, head).hash);
+}
+
+namespace {
+
+void push_json(lua_State* L, const JsonDoc& doc, const JsonValue& v, u32 depth) {
+    switch (v.type) {
+    case JsonType::Bool: lua_pushboolean(L, json_bool(&v, false)); return;
+    case JsonType::Number:
+        if (v.integer()) lua_pushinteger(L, (lua_Integer)json_i64(&v, 0));
+        else lua_pushnumber(L, (lua_Number)v.number());
+        return;
+    case JsonType::String: lua_pushlstring(L, v.str(), v.len()); return;
+    case JsonType::Bytes: lua_pushlstring(L, (const char*)v.bytes(), v.len()); return;
+    case JsonType::Array:
+    case JsonType::Object: {
+        if (depth > 64) { lua_pushnil(L); return; }
+        lua_createtable(L, v.is_array() ? (int)v.count() : 0, v.is_object() ? (int)v.count() : 0);
+        lua_Integer i = 1;
+        for (const JsonValue* k = json_first(doc, v); k; k = json_next(doc, *k)) {
+            push_json(L, doc, *k, depth + 1);
+            if (v.is_array()) lua_rawseti(L, -2, i++);
+            else lua_setfield(L, -2, k->key);
+        }
+        return;
+    }
+    default: lua_pushnil(L); return;
+    }
+}
+
+} // namespace
+
+bool krome_model_set_doc(KromeModule& s, KromeScreen& sc, const char* key, const void* data, usize size) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) return false;
+    Arena arena;
+    if (!arena_create(arena, size * 32 + (64u << 10), "krome.set_doc", MemTag{})) return false;
+    JsonDoc doc;
+    bool ok = kbor_parse(data, size, &arena.a, doc);
+    if (ok) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store);
+        push_json(L, doc, doc.root(), 0);
+        lua_setfield(L, -2, key);
+        lua_pop(L, 1);
+    } else {
+        krome_error(s, name_str(sc.name), 0, nullptr, 0, "krome_set_doc %s: %s at byte %u", key, doc.error, doc.error_at);
+    }
+    arena_destroy(arena);
+    if (ok) krome_model_changed(s, sc, name_intern(key).hash);
+    return ok;
 }
 
 const char* krome_model_value_text(KromeModule& s, KromeScreen& sc, const char* key, char* out, usize cap) {
@@ -542,8 +674,17 @@ const char* krome_model_value_text(KromeModule& s, KromeScreen& sc, const char* 
 }
 
 void krome_model_changed(KromeModule& s, KromeScreen& sc, u64 key) {
-    for (const KromeDep& d : sc.deps)
-        if (d.key == key) krome_fill_node(s, sc, sc.tree, d.node);
+    for (u32 i = 0; i < sc.deps.len; ++i) {
+        const KromeDep d = sc.deps[i];
+        if (d.key != key) continue;
+        if (!d.binding) { krome_fill_node(s, sc, sc.tree, d.node); continue; }
+        KromeNode& n = sc.tree.nodes[d.node];
+        u16 was = n.flags;
+        if (krome_model_truthy(s, sc, name_str(n.binding))) n.flags |= KROME_SELECTED;
+        else n.flags &= (u16)~KROME_SELECTED;
+        if (n.flags != was) sc.repaint = true;
+    }
+    krome_rebuild_regions(s, sc, key);
 }
 
 void krome_model_set_number(KromeModule& s, KromeScreen& sc, const char* key, f64 v, bool boolean) {
@@ -571,8 +712,11 @@ void krome_model_set_string(KromeModule& s, KromeScreen& sc, const char* key, co
 bool krome_fire(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, f64 value) {
     if (node >= tree.nodes.len) return false;
     const KromeNode& n = tree.nodes[node];
-    if (n.event.is_null()) return false;
-    Name id = n.id, event = n.event;
+    if (n.event.is_null() && n.binding.is_null()) return false;
+    Name id = n.id, event = n.event, bound = n.binding;
+    // A binding first: the value flipped, so the handler sees it as the press left it.
+    if (!bound.is_null()) krome_model_flip(s, sc, name_str(bound));
+    if (event.is_null()) { ++s.fired; return true; }
     lua_State* L = s.L;
     if (L && sc.on != LUA_NOREF) {
         lua_rawgeti(L, LUA_REGISTRYINDEX, sc.on);

@@ -88,6 +88,7 @@ constexpr u16 KROME_SCROLL   = 1u << 2; // clips, and moves its content along it
 constexpr u16 KROME_DISABLED = 1u << 3;
 constexpr u16 KROME_SELECTED = 1u << 4;
 constexpr u16 KROME_HIDDEN   = 1u << 5; // takes no space and draws nothing
+constexpr u16 KROME_DEAD     = 1u << 6; // rebuilt away: in no list, kept until the tree is built again
 
 struct KromeNode {
     KromeType  type = KromeType::Box;
@@ -102,6 +103,7 @@ struct KromeNode {
     u32        text = KROME_NONE;  // content: an offset into KromeTree::strings, as written
     u32        shown = KROME_NONE; // the content with {name} filled in, when someone filled it
     Name       id, event;
+    Name       binding;        // @name: its selected state is the model's value there, a press flips it
     u32        look = 0;           // the base look: an index into KromeTree::looks
     u32        states[(u32)KromeState::Count] = {}; // for each state, 1 + an index into looks; 0: none
     u32        line = 0;           // where it was written, for errors (0: unknown)

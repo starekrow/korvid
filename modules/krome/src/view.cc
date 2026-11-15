@@ -310,7 +310,7 @@ KromeTarget pressable(KromeModule& s, KromeTarget t) {
     for (u32 n = t.node; n != KROME_NONE; n = tree->nodes[n].parent) {
         const KromeNode& node = tree->nodes[n];
         if (node.flags & KROME_DISABLED) return KromeTarget{};
-        if (found == KROME_NONE && (!node.event.is_null() || node.type == KromeType::Hit)) found = n;
+        if (found == KROME_NONE && (!node.event.is_null() || !node.binding.is_null() || node.type == KromeType::Hit)) found = n;
     }
     t.node = found;
     return found == KROME_NONE ? KromeTarget{} : t;

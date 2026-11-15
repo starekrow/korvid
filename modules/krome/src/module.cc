@@ -43,6 +43,8 @@ void free_screen(KromeModule& s, KromeScreen* sc) {
     krome_lua_release(s, *sc);
     free_in(s.general, sc->source, sc->source_len + 1);
     if (sc->arena.base) arena_destroy(sc->arena);
+    if (sc->frames.base) arena_destroy(sc->frames);
+    sc->regions.free();
     sc->uses.free();
     sc->tree.free();
     sc->deps.free();
@@ -80,7 +82,9 @@ void fail(KromeScreen& sc) {
 void built(KromeModule& s, KromeScreen& sc) {
     krome_free_overlays(s, sc);
     sc.repaint = true;
-    if (!krome_build_screen(s, sc)) { fail(sc); return; }
+    bool ok = krome_build_screen(s, sc);
+    if (sc.waiting) return; // a kim() piece's file is on its way: built again when it lands
+    if (!ok) { fail(sc); return; }
     sc.loading = false;
     sc.ready = true;
     sc.failed = false;
@@ -153,6 +157,12 @@ void krome_pump(TickContext& ctx) {
             engine_want_frame(*s.e);
         }
     }
+    for (const KromeModule::SetDoc& d : s.set_docs) {
+        KromeScreen* sc = krome_screen(s, d.screen);
+        if (sc && sc->ready) krome_model_set_doc(s, *sc, name_str(d.key), d.data, d.size);
+        free_in(s.general, d.data, d.size ? d.size : 1);
+    }
+    s.set_docs.clear();
     for (const KromeSet& set : ctx.received<KromeSet>()) {
         KromeScreen* sc = krome_screen(s, Name{set.screen});
         if (!sc || !sc->ready) continue;
@@ -213,6 +223,7 @@ bool krome_startup(Engine& e, ModuleInstance& self) {
     s->screens.alloc = &self.general;
     s->docs.alloc = &self.general;
     s->provided.alloc = &self.general;
+    s->set_docs.alloc = &self.general;
     s->fonts.alloc = &self.general;
     s->images.alloc = &self.general;
     s->layers.alloc = &self.general;
@@ -228,6 +239,8 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     for (KromeScreen* sc : s->screens) free_screen(*s, sc);
     s->screens.free();
     krome_free_docs(*s);
+    for (KromeModule::SetDoc& d : s->set_docs) free_in(s->general, d.data, d.size ? d.size : 1);
+    s->set_docs.free();
     krome_free_view(*s);
     krome_lua_close(*s);
 }
@@ -514,6 +527,14 @@ void send(Engine& e, Name screen, const char* key, f64 number, u32 kind, const c
 }
 } // namespace
 
+void krome_set_doc(Engine& e, Name screen, const char* key, const void* kbor, usize size) {
+    KromeModule* s = krome_state(e);
+    if (!s || !key || !kbor) return;
+    KromeModule::SetDoc d{screen, name_intern(key), (u8*)alloc_in(s->general, size ? size : 1, 16), size};
+    if (size) memcpy(d.data, kbor, size);
+    s->set_docs.push(d);
+}
+
 void krome_set(Engine& e, Name screen, const char* key, f64 value) { send(e, screen, key, value, 0, nullptr); }
 void krome_set(Engine& e, Name screen, const char* key, const char* value) { send(e, screen, key, 0.0, 2, value ? value : ""); }
 void krome_set_bool(Engine& e, Name screen, const char* key, bool value) { send(e, screen, key, value ? 1.0 : 0.0, 1, nullptr); }
@@ -549,7 +570,7 @@ bool krome_find_rect(Engine& e, Name screen, const char* id, rect2* out) {
 
 u32 krome_find(const KromeTree& t, Name id) {
     if (id.is_null()) return KROME_NONE;
-    for (u32 i = 0; i < t.nodes.len; ++i) if (t.nodes[i].id == id) return i;
+    for (u32 i = 0; i < t.nodes.len; ++i) if (t.nodes[i].id == id && !(t.nodes[i].flags & KROME_DEAD)) return i;
     return KROME_NONE;
 }
 
@@ -571,6 +592,7 @@ KromeStats krome_stats(Engine& e) {
     if (KromeModule* s = krome_state(e)) {
         st.layouts = s->layouts; st.paints = s->paints; st.submits = s->submits;
         st.fired = s->fired; st.script_errors = s->script_errors;
+        st.rebuilt_regions = s->rebuilt_regions; st.rebuilt_nodes = s->rebuilt_nodes;
     }
     return st;
 }

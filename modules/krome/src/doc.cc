@@ -144,24 +144,29 @@ const KimbFile* find_use(void* user, const char* use) {
 
 } // namespace
 
-bool krome_scope_ready(KromeModule& s, KromeScreen& sc, bool* failed) {
+bool krome_file_scope(KromeModule& s, const KimbFile& f, KimbScope& scope, bool* failed) {
     *failed = false;
-    const KimbFile* f = sc.doc ? &sc.doc->file : sc.has_lua_file ? &sc.lua_file : nullptr;
-    if (!f) return false;
-    // The scope is built into a scratch first: while a use is still on its way, the errors
-    // it would report are not errors yet.
+    // Built into a scratch first: while a use is still on its way, the errors it would
+    // report are not errors yet.
     KimErrors quiet;
     UseCtx c{&s, false, false};
-    KimbScope scope;
-    bool ok = kimb_scope(scope, *f, find_use, &c, quiet);
+    KimbScope out;
+    bool ok = kimb_scope(out, f, find_use, &c, quiet);
     if (c.waiting && !c.failed) return false;
     if (!ok) {
         for (u32 i = 0; i < quiet.count; ++i) krome_error(s, quiet.list[i].file, quiet.list[i].line, nullptr, 0, "%s", quiet.list[i].text);
         *failed = true;
         return false;
     }
-    sc.scope = scope;
+    scope = out;
     return true;
+}
+
+bool krome_scope_ready(KromeModule& s, KromeScreen& sc, bool* failed) {
+    *failed = false;
+    const KimbFile* f = sc.doc ? &sc.doc->file : sc.has_lua_file ? &sc.lua_file : nullptr;
+    if (!f) return false;
+    return krome_file_scope(s, *f, sc.scope, failed);
 }
 
 } // namespace kv

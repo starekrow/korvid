@@ -66,6 +66,10 @@ bool krome_ready(Engine& e, Name screen);
 void krome_set(Engine& e, Name screen, const char* key, f64 value);
 void krome_set(Engine& e, Name screen, const char* key, const char* value);
 void krome_set_bool(Engine& e, Name screen, const char* key, bool value);
+// A list or a table from C++: a KBOR document (JsonBuilder and kbor_write make one), set
+// as the Lua value it decodes to by the pump, in order with the others. An each over the
+// key is built again.
+void krome_set_doc(Engine& e, Name screen, const char* key, const void* kbor, usize size);
 
 // Fires the node with this id as a press would: its Lua handler, then KromeEvent. False when
 // there is no such screen or node, or it has no event. For tests, demos and the CLI.
@@ -86,7 +90,7 @@ const char* krome_model_text(Engine& e, Name screen, const char* key);
 void krome_viewport(Engine& e, f32 width, f32 height, f32 scale);
 
 // What the view has done over the run: layouts, lists painted, lists handed to the renderer.
-struct KromeStats { u64 layouts = 0, paints = 0, submits = 0, fired = 0, script_errors = 0; };
+struct KromeStats { u64 layouts = 0, paints = 0, submits = 0, fired = 0, script_errors = 0, rebuilt_regions = 0, rebuilt_nodes = 0; };
 KromeStats krome_stats(Engine& e);
 
 } // namespace kv
