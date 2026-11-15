@@ -395,7 +395,7 @@ void text(Ctx& c, const UiNode& n, bool caret) {
             f32 gx = x0 + ax + l.x + l.g->offset.x - l.g->size.x * 0.5f + dx + off;
             f32 gy = y0 + (f32)l.line * b.line_h + b.ascent - l.g->offset.y - l.g->size.y * 0.5f + dy + off;
             color tint = text_pass ? rc.c : color{shadow.r, shadow.g, shadow.b, shadow.a * rc.c.a};
-            quad_px(c, f->material, l.g->uv, gx, gy, l.g->size.x, l.g->size.y, tint, n.clip);
+            quad_px(c, l.g->material.is_null() ? f->material : l.g->material, l.g->uv, gx, gy, l.g->size.x, l.g->size.y, tint, n.clip);
         }
     if (caret && (u32)(c.sc.time * 2.0f) % 2 == 0) {
         f32 cx = x0 + last_x;

@@ -167,14 +167,23 @@ void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
         u32 cp = utf8_next(q);
         if (prev) x += font_kern(*fa, prev, cp);
         prev = cp;
-        const Glyph* g = font_glyph_or_replacement(*fa, cp);
+        // Whole pixels: each glyph's box snapped from the pen. Subpixel: the copy made at the
+        // pen's quarter, drawn from the whole pixel under it.
+        f32 pen = x;
+        u32 quarter = 0;
+        if (n.flags & KROME_SUBPIXEL) {
+            pen = floor(x);
+            quarter = (u32)((x - pen) * 4.0f + 0.5f);
+            if (quarter == 4) { quarter = 0; pen += 1.0f; }
+        }
+        const Glyph* g = quarter ? font_glyph_at(*fa, cp, quarter) : font_glyph_or_replacement(*fa, cp);
         if (!g) continue;
         if (g->size.x > 0 && g->size.y > 0) {
             UiGlyph gl;
-            f32 cx = x + g->offset.x, cy = baseline - g->offset.y;
+            f32 cx = pen + g->offset.x, cy = baseline - g->offset.y;
             gl.rect = rect2{floor(cx - g->size.x * 0.5f + 0.5f), floor(cy - g->size.y * 0.5f + 0.5f), g->size.x, g->size.y};
             gl.uv = g->uv;
-            gl.texture = slot;
+            gl.texture = g->texture.is_null() ? slot : renderer_texture_slot(p.r, g->texture);
             gl.tint = c;
             gl.clip = clip;
             p.list.glyph(gl);

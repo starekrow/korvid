@@ -200,6 +200,30 @@ bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels) {
     return true;
 }
 
+// A rectangle of the whole image, its rows packed, into the live image: the copy keeps the
+// rest. Only once the image has had its whole upload recorded (resident).
+bool rb_stage_texture_region(Renderer* r, u32 slot, Texture& t, const u8* pixels, u32 x, u32 y, u32 w, u32 h) {
+    if (!t.resident || !t.image) return false;
+    VkDeviceSize bytes = (VkDeviceSize)w * h * 4;
+    if (bytes > r->ring.size / 2) return false;
+    RingSpan span = rc_ring_alloc(r, bytes, 16);
+    if (!span.ptr) return false;
+    for (u32 row = 0; row < h; ++row)
+        memcpy((u8*)span.ptr + (usize)row * w * 4, pixels + ((usize)(y + row) * t.width + x) * 4, (usize)w * 4);
+    PendingUpload up{};
+    up.slot   = slot;
+    up.image  = t.image;
+    up.src    = span.buffer.buffer;
+    up.offset = span.offset;
+    up.width  = w;
+    up.height = h;
+    up.x      = x;
+    up.y      = y;
+    up.keep   = true;
+    r->uploads.push(up);
+    return true;
+}
+
 // ---- the GPU tables ------------------------------------------------------------------------------
 
 // Sprite tables for at least `rows` rows (rounded up to whole blocks). Previous tables

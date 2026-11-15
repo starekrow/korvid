@@ -36,9 +36,11 @@ u64 bytes_of(AssetState_& s, Handle h) {
     u16 k = h.kind();
     if (k == s.kind) { if (TextureAsset* t = s.textures.get(h)) return (u64)t->width * t->height * 4; }
     else if (k == s.font_kind) {
-        if (FontAsset* f = s.fonts.get(h))
-            return (u64)f->atlas_width * f->atlas_height * 4 + (u64)f->glyph_count * (sizeof(Glyph) + sizeof(u32)) +
-                   (u64)f->kern_count * (sizeof(u64) + sizeof(f32));
+        if (FontAsset* f = s.fonts.get(h)) {
+            u32 glyphs = 0, pages = 0;
+            font_counts(*f, &glyphs, &pages);
+            return (u64)pages * KV_FONT_PAGE * KV_FONT_PAGE * 4 + (u64)glyphs * (sizeof(Glyph) + 16) + (u64)f->kern_count * (sizeof(u64) + sizeof(f32));
+        }
     } else if (k == s.sound_kind) { if (SoundAsset* d = s.sounds.get(h)) return (u64)d->frames * d->channels * sizeof(f32); }
     else if (k == s.blob_kind) { if (BlobAsset* b = s.blobs.get(h)) return b->size; }
     else if (k == s.stream_kind) { if (StreamAsset* t = s.streams.get(h)) return t->size; }

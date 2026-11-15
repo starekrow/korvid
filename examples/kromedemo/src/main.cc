@@ -40,6 +40,8 @@ struct Demo {
     u32  step = 0, wait = 0;
     u32  failures = 0;
     u32  settled = 0;
+    bool type = false;     // --type: the small-text specimen; with --shots, its picture, then quit
+    u32  type_done = 0;
     // --work: a tool's work in the Work cycle, behind the window (docs/design/cycles.md).
     bool work = false;
     u64  next = 2, primes = 0;
@@ -111,6 +113,18 @@ void kromedemo_tick(TickContext& ctx) {
     Demo& d = ctx.state_as<Demo>();
     if (ctx.tick % 30 == 0 && !d.shots) krome_set(e, d.form, "ticks", (f64)ctx.tick);
     if (!d.bench.is_null()) { krome_set(e, d.bench, "tick", (f64)ctx.tick); engine_want_frame(e); return; }
+    if (d.type) {
+        if (!d.shots || !krome_ready(e, d.form)) return;
+        engine_want_frame(e);
+        if (!krome_settled(e)) { d.settled = 0; return; }
+        if (d.settled++ < 3) return;
+        if (d.type_done++ == 0) {
+            char path[600];
+            format(path, sizeof path, "%s/kromedemo_type.ppm", d.shots);
+            if (Renderer* r = renderer_get(e)) renderer_screenshot(r, path);
+        } else if (d.type_done > 6) engine_request_quit(e);
+        return;
+    }
     if (!d.demo || !krome_ready(e, d.form)) return;
     engine_want_frame(e); // the pilot is input the window does not see: keep the loop awake for it
     if (d.wait) { --d.wait; return; }
@@ -205,6 +219,7 @@ bool kromedemo_startup(Engine& e, ModuleInstance& self) {
     d->work = frameloop_flag(e, "--work");
     d->shots = frameloop_option(e, "--shots");
     if (frameloop_flag(e, "--bench")) d->bench = krome_open(e, "kromedemo/bench.lua");
+    else if (frameloop_flag(e, "--type")) { d->form = krome_open(e, "kromedemo/type.kimb", "type"); d->type = true; }
     else if (frameloop_flag(e, "--lua")) d->form = krome_open(e, "kromedemo/form_lua.lua");
     else d->form = krome_open(e, "kromedemo/form.kimb", "form");
     if (const char* theme = frameloop_option(e, "--theme")) krome_theme(e, theme);
@@ -234,7 +249,7 @@ KV_MODULE_DEFINE(kromedemo_module) = {
 } // namespace kv
 
 namespace {
-constinit const char* const k_flags[] = {"--demo", "--bench", "--work", "--lua"};
+constinit const char* const k_flags[] = {"--demo", "--bench", "--work", "--lua", "--type"};
 constinit const char* const k_options[] = {"--shots", "--theme"};
 constinit const kv::FrameLoopConfig k_config = {
     .title          = "korvid krome demo",

@@ -89,6 +89,7 @@ constexpr u16 KROME_DISABLED = 1u << 3;
 constexpr u16 KROME_SELECTED = 1u << 4;
 constexpr u16 KROME_HIDDEN   = 1u << 5; // takes no space and draws nothing
 constexpr u16 KROME_DEAD     = 1u << 6; // rebuilt away: in no list, kept until the tree is built again
+constexpr u16 KROME_SUBPIXEL = 1u << 7; // its text's pen is kept to a quarter pixel, not snapped to whole ones
 
 struct KromeNode {
     KromeType  type = KromeType::Box;

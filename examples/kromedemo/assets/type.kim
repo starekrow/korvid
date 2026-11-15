@@ -1,0 +1,21 @@
+// A specimen of small text (docs/PRDs/Krome-Slice-3-PRD.md, milestone 1): the same lines
+// at 9, 11 and 13 px, with whole-pixel pens and with subpixel positioning, and a line from
+// outside the Latin set that no font range declares. `kromedemo --type --shots DIR`.
+
+use "krome/std"
+
+screen type {
+    col [page] pad=16 gap=4 w=fill h=fill {
+        text "9 px" size=9 color=muted
+        text "The quick brown fox jumps over the lazy dog. 0123456789 Illegal1 = O0 rnm wvx" size=9
+        text "The quick brown fox jumps over the lazy dog. 0123456789 Illegal1 = O0 rnm wvx" size=9 subpixel
+        text "11 px" size=11 color=muted
+        text "The quick brown fox jumps over the lazy dog. 0123456789 Illegal1 = O0 rnm wvx" size=11
+        text "The quick brown fox jumps over the lazy dog. 0123456789 Illegal1 = O0 rnm wvx" size=11 subpixel
+        text "13 px" size=13 color=muted
+        text "The quick brown fox jumps over the lazy dog. 0123456789 Illegal1 = O0 rnm wvx" size=13
+        text "The quick brown fox jumps over the lazy dog. 0123456789 Illegal1 = O0 rnm wvx" size=13 subpixel
+        text "Outside the old set" size=11 color=muted
+        text "Ωμέγα, Жизнь, │├─┤ ≈ ≠ → ★ ½ ∞" size=13
+    }
+}

@@ -224,6 +224,17 @@ bool renderer_texture_upload(Renderer* r, Handle texture, u32 width, u32 height,
     return true;
 }
 
+bool renderer_texture_update(Renderer* r, Handle texture, const void* pixels, u32 width, u32 height, u32 x, u32 y, u32 w, u32 h) {
+    Texture* t = r ? r->textures.get(texture) : nullptr;
+    if (!t || texture.index() == 0 || !pixels) return false;
+    usize bytes = (usize)width * height * 4;
+    // Not uploaded yet, or at another size, or a rectangle outside it: the whole image.
+    if (t->width != width || t->height != height || x + w > width || y + h > height || !w || !h)
+        return renderer_texture_upload(r, texture, width, height, pixels, bytes);
+    if (rb_stage_texture_region(r, texture.index(), *t, (const u8*)pixels, x, y, w, h)) return true;
+    return renderer_texture_upload(r, texture, width, height, pixels, bytes);
+}
+
 void renderer_texture_destroy(Renderer* r, Handle texture) {
     Texture* t = r ? r->textures.get(texture) : nullptr;
     if (!t || texture.index() == 0) return; // the default stays

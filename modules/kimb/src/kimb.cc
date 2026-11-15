@@ -235,7 +235,8 @@ constinit const KimbKernelProp k_props[] = {
 };
 
 const char* const k_nodes[] = {"box", "text", "image", "hit"};
-const char* const k_flags[] = {"fill", "clip", "scroll", "disabled", "selected", "hidden", "left", "center", "right", "top", "middle", "bottom"};
+const char* const k_flags[] = {"fill", "clip", "scroll", "disabled", "selected", "hidden", "left", "center", "right", "top", "middle", "bottom",
+                               "subpixel"};
 const char* const k_states[] = {"hover", "pressed", "focused", "disabled", "selected"};
 
 bool in(const char* w, const char* const* list, u32 n) {

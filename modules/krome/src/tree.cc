@@ -245,7 +245,8 @@ const char* KromeTree::flag(u32 node, const char* w) {
     KromeNode& n = nodes[node];
     struct Bit { const char* word; u16 bit; };
     static const Bit bits[] = {{"fill", KROME_FILL}, {"clip", KROME_CLIP}, {"scroll", KROME_SCROLL},
-                               {"disabled", KROME_DISABLED}, {"selected", KROME_SELECTED}, {"hidden", KROME_HIDDEN}};
+                               {"disabled", KROME_DISABLED}, {"selected", KROME_SELECTED}, {"hidden", KROME_HIDDEN},
+                               {"subpixel", KROME_SUBPIXEL}};
     for (const Bit& b : bits) if (!strcmp(w, b.word)) { n.flags |= b.bit; dirty = true; return nullptr; }
     if (!strcmp(w, "left"))   { n.align_x = KromeAlign::Start; dirty = true; return nullptr; }
     if (!strcmp(w, "center")) { n.align_x = KromeAlign::Center; dirty = true; return nullptr; }

@@ -112,7 +112,9 @@ void fonts_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
         const FontAsset& f = s->fonts.items[i];
         char name[KV_ASSET_PATH_MAX + 16], summary[96];
         format(name, sizeof name, "%s@%g", f.path, f.px);
-        format(summary, sizeof summary, "%s, atlas %ux%u, line %.1f", state_name(f.state), f.atlas_width, f.atlas_height, f.line_height);
+        u32 glyphs = 0, pages = 0;
+        font_counts(f, &glyphs, &pages);
+        format(summary, sizeof summary, "%s, %u glyphs in %u pages, line %.1f", state_name(f.state), glyphs, pages, f.line_height);
         if (!tree.add(name, false, summary)) return;
     }
 }
@@ -125,9 +127,11 @@ bool fonts_describe(CliContext& ctx, const char* rel) {
         char name[KV_ASSET_PATH_MAX + 16];
         format(name, sizeof name, "%s@%g", f.path, f.px);
         if (strcmp(name, rel) != 0) continue;
-        ctx.print("%s at %g px: %s, %u glyphs in %u ranges, atlas %ux%u (slot %u, material row %u), ascent %.1f, descent %.1f, line %.1f, %u kerning pairs, %u misses, built in %.1f ms",
-                  f.path, f.px, state_name(f.state), f.glyph_count, f.range_count, f.atlas_width, f.atlas_height, f.texture.index(),
-                  f.material.index(), f.ascent, f.descent, f.line_height, f.kern_count, f.misses, f.build_seconds * 1e3);
+        u32 glyphs = 0, pages = 0;
+        font_counts(f, &glyphs, &pages);
+        ctx.print("%s at %g px: %s, %u glyphs made in %u pages of %ux%u (first slot %u), %u faces, ascent %.0f, descent %.0f, line %.0f, %u kerning pairs, %u misses, built in %.1f ms",
+                  f.path, f.px, state_name(f.state), glyphs, pages, f.atlas_width, f.atlas_height, f.texture.index(),
+                  f.strike ? f.strike->face_count : 0, f.ascent, f.descent, f.line_height, f.kern_count, f.misses, f.build_seconds * 1e3);
         return true;
     }
     return false;

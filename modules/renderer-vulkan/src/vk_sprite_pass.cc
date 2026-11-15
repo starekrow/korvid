@@ -109,11 +109,13 @@ void record_texture_uploads(Renderer* r, VkCommandBuffer cmd) {
 
         VkImageMemoryBarrier2 to_dst{};
         to_dst.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        to_dst.srcStageMask        = VK_PIPELINE_STAGE_2_NONE;
-        to_dst.srcAccessMask       = 0;
+        // A whole upload starts from nothing; a rectangle keeps the image's other pixels, and
+        // waits for the draws that sampled it before.
+        to_dst.srcStageMask        = up.keep ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_2_NONE;
+        to_dst.srcAccessMask       = up.keep ? VK_ACCESS_2_SHADER_SAMPLED_READ_BIT : 0;
         to_dst.dstStageMask        = VK_PIPELINE_STAGE_2_COPY_BIT;
         to_dst.dstAccessMask       = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-        to_dst.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+        to_dst.oldLayout           = up.keep ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED;
         to_dst.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -128,6 +130,7 @@ void record_texture_uploads(Renderer* r, VkCommandBuffer cmd) {
         VkBufferImageCopy region{};
         region.bufferOffset     = up.offset;
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageOffset      = {(i32)up.x, (i32)up.y, 0};
         region.imageExtent      = {up.width, up.height, 1};
         vkCmdCopyBufferToImage(cmd, up.src, up.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 

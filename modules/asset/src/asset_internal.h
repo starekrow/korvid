@@ -12,10 +12,12 @@
 #include "korvid/core/map.h"
 #include "korvid/core/name.h"
 #include "korvid/core/pool.h"
+#include "korvid/core/os_thread.h"
 
 namespace kv {
 
 struct Engine;
+struct Renderer;
 struct IoQueue;
 struct TickContext;
 struct ModuleInstance;
@@ -25,6 +27,42 @@ struct AssetScope_ {
     Array<Handle> members;        // each holds one reference
     bool          global = false;
     bool          ready_sent = false;
+};
+
+// A font file, read once and kept for its strikes (and the strikes it is a fallback of).
+struct FontFace {
+    char  path[KV_ASSET_PATH_MAX];
+    u8*   data = nullptr;
+    usize size = 0;
+    void* info = nullptr;  // stbtt_fontinfo, once read
+    Handle io;
+    bool  ready = false, failed = false;
+    u32   refs = 0;
+};
+
+// One page of a strike: its pixels kept here, uploaded where they changed.
+struct FontPage {
+    Handle texture, material;
+    u8*    rgba = nullptr;            // KV_FONT_PAGE squared, RGBA8
+    u32    x = 0, shelf_y = 0, shelf_h = 0;
+    u32    dirty_x0 = ~0u, dirty_y0 = ~0u, dirty_x1 = 0, dirty_y1 = 0; // what changed since the flush
+    bool   uploaded = false;
+};
+
+// A font asset's glyph cache (font.h): its faces, its pages, and every glyph made so far.
+struct FontStrike {
+    FontFace*      faces[1 + KV_FONT_MAX_FALLBACK] = {};
+    u32            face_count = 0;
+    f32            px = 0.0f;
+    OsMutex        lock;               // made, looked up past ASCII
+    const Glyph*   ascii[95] = {};     // ' '..'~' at quarter 0: read without the lock once set
+    Map<u64, u32>  index;              // code point << 2 | quarter -> 1 + glyph number, or kMissing
+    Array<Glyph*>  blocks;             // glyphs in blocks of 256 that never move
+    u32            count = 0;
+    Array<FontPage> pages;
+    u32            generation = 0;
+    Allocator*     alloc = nullptr;
+    Renderer*      renderer = nullptr; // null without one: glyphs are made, nothing is uploaded
 };
 
 // Memory whose owner has gone but which another thread may still read: freed when the
@@ -38,6 +76,8 @@ struct AssetState_ {
     Map<Name, Handle>   material_by_path; // interned path -> material asset
     Pool<FontAsset>     fonts;
     Map<Name, Handle>   font_by_key;      // interned "path@px" -> font asset
+    Array<FontFace*>    faces;            // every font file read, by path
+    Array<char*>        fallback;         // the engine's fallback list (asset_set_font_fallback)
     Pool<SoundAsset>    sounds;
     Map<Name, Handle>   sound_by_path;
     Pool<StreamAsset>   streams;
@@ -112,6 +152,7 @@ void asset_materials_pump(TickContext& ctx); // the "asset.pump_materials" syste
 bool asset_fonts_init(Engine& e, AssetState_& s, ModuleInstance& self);
 void asset_fonts_shutdown(Engine& e, AssetState_& s);
 void asset_fonts_pump(TickContext& ctx);     // the "asset.pump_fonts" system
+void asset_fonts_flush(TickContext& ctx);    // the "asset.fonts_flush" system: changed pages uploaded
 
 bool asset_sounds_init(Engine& e, AssetState_& s, ModuleInstance& self);
 void asset_sounds_shutdown(Engine& e, AssetState_& s);

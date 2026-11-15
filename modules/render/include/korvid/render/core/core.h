@@ -291,6 +291,10 @@ void  rb_garbage_destroy(Renderer* r, const RbGarbage& g);
 bool rb_texture_create(Renderer* r, Texture& t);
 // Stages the pixels (the ring, or a one-off buffer) and queues the upload for the next frame.
 bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels);
+// Stages the rectangle (x, y, w, h) of the whole image `pixels` (t's size) and queues its
+// copy into t's live image, which keeps the rest. False when the backend cannot (the
+// caller uploads the whole image instead).
+bool rb_stage_texture_region(Renderer* r, u32 slot, Texture& t, const u8* pixels, u32 x, u32 y, u32 w, u32 h);
 void rb_defer_destroy_texture(Renderer* r, Texture& t);
 
 // Loads the game shader gp.shader (<exe>/shaders/<name> KV_RB_SHADER_EXT) and builds its

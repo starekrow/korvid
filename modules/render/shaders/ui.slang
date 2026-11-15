@@ -137,8 +137,14 @@ float4 fs_ui(UiVaryings i) : SV_Target {
         uint slot = ui_word(i.item + 4u);
         float4 c = ui_color(ui_word(i.item + 8u));
         float4 t = gTextures[NonUniformResourceIndex(slot)].Sample(gSamplers[1], i.uv);
+        // Coverage blended in linear light (the swapchain is sRGB) makes light text on a dark
+        // ground heavier, and dark text on a light one thinner, than the same coverage blended
+        // as the platform's text is. A curve on the coverage by the ink's own luminance leans
+        // the other way: light ink thinner, dark ink fuller.
+        float lum = dot(c.rgb / max(c.a, 1e-4), float3(0.2126, 0.7152, 0.0722));
+        float a = pow(t.a, lerp(0.75, 1.45, saturate(lum)));
         // The texel is straight alpha: its coverage scales the premultiplied color.
-        return float4(c.rgb * t.rgb, c.a) * t.a;
+        return float4(c.rgb * t.rgb, c.a) * a;
     }
 
     float4 r = ui_float4(i.item + 24u);

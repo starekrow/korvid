@@ -137,6 +137,10 @@ void       renderer_post_params(Renderer* r, const f32* params, u32 count);
 // slot showed before. Resident before the next frame that references it.
 Handle renderer_texture_create(Renderer* r, const TextureDesc& desc);
 bool   renderer_texture_upload(Renderer* r, Handle texture, u32 width, u32 height, const void* pixels, usize bytes);
+// Part of a texture changed: `pixels` is the whole image (width x height, tightly packed
+// RGBA8, the size it was uploaded at) and (x, y, w, h) what changed. A backend that copies
+// a rectangle into the live image copies only that; one that cannot uploads the whole image.
+bool   renderer_texture_update(Renderer* r, Handle texture, const void* pixels, u32 width, u32 height, u32 x, u32 y, u32 w, u32 h);
 void   renderer_texture_destroy(Renderer* r, Handle texture); // deferred past the frames in flight
 u32    renderer_texture_slot(const Renderer* r, Handle texture); // the GPU index; 0 if stale
 

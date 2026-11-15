@@ -42,6 +42,7 @@ u32 text_layout(const FontAsset& font, const Text& text, Span<GlyphPlacement> ou
                 gp.center = vec2{(x + g->offset.x) * text.scale, g->offset.y * text.scale};
                 gp.size   = g->size * text.scale;
                 gp.uv     = g->uv;
+                gp.material = g->material.is_null() ? font.material : g->material;
             }
             ++n;
         }
@@ -68,6 +69,7 @@ u64 label_hash(const Text& t, const FontAsset* f) {
     u64 h = hash_bytes(t.str, strlen(t.str));
     h = hash_mix(h ^ t.font.bits);
     h = hash_mix(h ^ (u64)(f ? (u32)f->state : 0xFF));
+    h = hash_mix(h ^ (u64)(f ? font_generation(*f) : 0)); // a fallback that landed draws what was missing
     u32 bits[9];
     memcpy(&bits[0], &t.scale, 4);
     memcpy(&bits[1], &t.tint, 16);
@@ -124,7 +126,7 @@ void text_layout_system(TickContext& ctx) {
                 for (u32 g = 0; g < n; ++g) {
                     const GlyphPlacement& p = places[g];
                     Sprite spr;
-                    spr.material = font->material;
+                    spr.material = p.material;
                     spr.uv       = p.uv;
                     spr.size     = p.size;
                     spr.tint     = pass ? t.tint : t.shadow;

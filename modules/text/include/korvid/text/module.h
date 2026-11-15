@@ -18,9 +18,10 @@ KV_MODULE_DECLARE(text_module);
 // One glyph's place in a laid-out line, relative to the label: the quad's center and size
 // in the label's units (pixels times the text's scale), and its uv in the font's atlas.
 struct GlyphPlacement {
-    vec2  center;
-    vec2  size;
-    rect2 uv;
+    vec2   center;
+    vec2   size;
+    rect2  uv;
+    Handle material; // the glyph's page, or the font's for a table built by hand
 };
 
 // The layout on its own: writes up to `out.len` placements for the visible glyphs of

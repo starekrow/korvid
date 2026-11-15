@@ -87,7 +87,9 @@ struct PendingUpload {
     VkImage      image;
     VkBuffer     src;    // the ring, or a one-off staging buffer already queued as garbage
     VkDeviceSize offset;
-    u32          width, height;
+    u32          width, height;   // the copy's extent
+    u32          x = 0, y = 0;    // where it goes in the image
+    bool         keep = false;    // into the live image (its other pixels kept), not a new one
 };
 
 struct FrameInFlight : FrameCore {

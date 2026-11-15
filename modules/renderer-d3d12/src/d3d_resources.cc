@@ -147,6 +147,10 @@ bool rb_texture_create(Renderer* r, Texture& t) {
     return true;
 }
 
+// A rectangle into the live texture: not yet here (Krome slice 3); the caller uploads the
+// whole image.
+bool rb_stage_texture_region(Renderer*, u32, Texture&, const u8*, u32, u32, u32, u32) { return false; }
+
 // Copies tightly packed pixels into the ring (or a one-off staging buffer) at the pitch a
 // placed footprint needs, and queues the copy for the next frame's command list.
 bool rb_stage_texture(Renderer* r, u32 slot, Texture& t, const u8* pixels) {
