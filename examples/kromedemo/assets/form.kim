@@ -1,0 +1,68 @@
+// The demo's form in markup (docs/PRDs/Krome-Slice-2-PRD.md): the same screen as
+// form_lua.lua, pixel for pixel, out of krome/std's widgets and its dark theme. Its handlers
+// are form.lua; the menu and the About box are screens here that those handlers open.
+
+use "krome/std"
+script "kromedemo/form.lua"
+
+screen form {
+    col [page] {
+        row pad=16,10 bg=bar middle w=fill {
+            heading "Krome demo"
+            spacer
+            text "{ticks} ticks" color=muted
+        }
+        row pad=16 gap=16 w=fill h=fill {
+            col gap=12 w=260..360 h=fill {
+                field "Name" "{name}"
+                field "Level" "{level}"
+                row gap=8 {
+                    button "-" id=down -> down w=40
+                    button "+" id=up -> up w=40
+                }
+                field "Saved" "{saves} times"
+                field "Picked" "{picked}"
+                field "Menu" "{choice}"
+                spacer
+                row gap=8 {
+                    button "Save" id=save -> save
+                    button "Menu" id=menu -> menu
+                    button "Later" id=later -> save disabled
+                }
+            }
+            col gap=12 w=fill h=fill {
+                row middle gap=8 w=fill {
+                    text "Assets" size=16
+                    spacer
+                    button "About" id=about -> about
+                    button "Quit" id=quit -> quit [danger]
+                }
+                col id=list scroll h=220 [list] {
+                    each asset in assets {
+                        hit id="{asset.id}" -> item [list-row] { text "{asset.name}" }
+                    }
+                }
+                text "Scroll the list; pick an asset." color=muted
+                box w=fill h=60 radius=8 bg=accent bg2=violet angle=0 shadow=0,4,12 shadow-color=glow
+            }
+        }
+    }
+}
+
+screen menu {
+    col [menu] {
+        menu-item "Compact" id=compact -> compact
+        menu-item "Roomy" id=roomy -> roomy
+        menu-item "Close" id=close_menu -> close_menu
+    }
+}
+
+screen about {
+    col [panel] w=320 {
+        heading "About"
+        text "Krome: one screen, two ways to write it." color=muted
+        row right w=fill {
+            button "OK" id=ok -> ok w=80
+        }
+    }
+}

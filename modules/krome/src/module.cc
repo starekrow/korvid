@@ -472,6 +472,19 @@ const char* krome_current_theme(Engine& e, Name screen) {
     return krome_theme_of(*s, sc->scope);
 }
 
+bool krome_settled(Engine& e) {
+    KromeModule* s = krome_state(e);
+    if (!s) return true;
+    for (KromeScreen* sc : s->screens) {
+        if (sc->loading) return false;
+        if (sc->ready && (sc->tree.dirty || sc->repaint || sc->rebuild)) return false;
+        for (KromeOverlay* o : sc->overlays) if (!o->placed) return false;
+    }
+    for (const KromeFont& f : s->fonts) if (!f.ready && !f.asset.is_null()) return false;
+    for (const KromeImage& i : s->images) if (!i.ready && !i.asset.is_null()) return false;
+    return true;
+}
+
 const KimErrors* krome_errors(Engine& e) {
     KromeModule* s = krome_state(e);
     return s ? &s->errors : nullptr;

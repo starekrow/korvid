@@ -106,15 +106,21 @@ void test_kimb(kv::TestCtx& c) {
     KV_CHECK(c, rgba(t->resolve_look(count, KromeState::Base, nullptr).text_color) == 0x101010FFu && strcmp(t->text(count), "11") == 0);
     KV_CHECK(c, !strcmp(krome_current_theme(e, form), "light") && s->docs.len == reads);
     // From Lua too.
-    provide_text(e, "t/c.lua", "return { on = { dark = function() theme('dark') end } }");
+    provide_text(e, "t/c.lua", "return { on = { dark = function() theme('dark') end, pop = function() open_overlay(box { style = 'card', id = 'o' }) end } }");
     provide_json(e, "t/two.kimb", R"({"kim": 1, "file": "t/two.kim", "uses": ["krome/std"], "scripts": ["t/c.lua"],
-      "screens": {"s": {"w": "hit", "id": "d", "e": "dark", "s": ["card"]}}})");
+      "screens": {"s": {"w": "box", "c": [{"w": "hit", "id": "d", "e": "dark", "s": ["card"]}, {"w": "hit", "id": "pop", "e": "pop"}]}}})");
     Name two = krome_open(e, "t/two.kimb", "s");
     frames(e, 3);
-    KV_CHECK(c, krome_ready(e, two) && rgba(krome_tree(e, two)->looks[krome_tree(e, two)->nodes[0].look].bg) == 0xF0F0F0FFu);
+    auto bg_of = [&](const KromeTree* tr, const char* id) { u32 n = krome_find(*tr, name_intern(id)); return n == KROME_NONE ? 0u : rgba(tr->resolve_look(n, KromeState::Base, nullptr).bg); };
+    KV_CHECK(c, krome_ready(e, two) && bg_of(krome_tree(e, two), "d") == 0xF0F0F0FFu);
+    // An overlay open when the theme changes is restyled with its screen.
+    KV_CHECK(c, krome_press(e, two, "pop"));
+    KromeScreen* two_sc = krome_screen(*s, two);
+    KV_CHECK(c, two_sc->overlays.len == 1 && bg_of(&two_sc->overlays[0]->tree, "o") == 0xF0F0F0FFu);
     KV_CHECK(c, krome_press(e, two, "d"));
     frames(e, 1);
-    KV_CHECK(c, rgba(krome_tree(e, two)->looks[krome_tree(e, two)->nodes[0].look].bg) == 0x202430FFu && !strcmp(krome_current_theme(e, form), "dark"));
+    KV_CHECK(c, bg_of(krome_tree(e, two), "d") == 0x202430FFu && !strcmp(krome_current_theme(e, form), "dark"));
+    KV_CHECK(c, two_sc->overlays.len == 1 && bg_of(&two_sc->overlays[0]->tree, "o") == 0x202430FFu);
 
     // A Lua screen with uses: the same styles and tokens.
     Name lua = krome_open_source(e, "t/lua", "return { uses = { 'krome/std' }, root = box { style = 'card', gap = 'gap' } }");

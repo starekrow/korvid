@@ -1,13 +1,17 @@
-// kromedemo: Krome's first screen, a form in Lua (assets/form.lua). The game's side is
-// small: it opens the screen, tells it the tick count now and then (krome_set), and
-// listens for its events (KromeEvent): "quit" ends the run.
+// kromedemo: Krome's first screen, a form in markup (assets/form.kim, its handlers in
+// assets/form.lua) out of krome/std; --lua opens the same form as slice 1 wrote it, in Lua
+// (assets/form_lua.lua), which draws the same pixels. The game's side is small: it opens
+// the screen, tells it the tick count now and then (krome_set), and listens for its
+// events (KromeEvent): "quit" ends the run.
 //
 // --demo drives the pointer through the form as a person would (input_pointer_override):
 // buttons, the list's wheel and an item in it, the menu and a pick from it, a press
 // outside the menu that must close it and reach nothing, the About modal and a press
 // outside it that must do nothing, a disabled button. Then it checks the model and quits:
 // "kromedemo: demo passed", or what did not hold. --shots DIR writes screenshots of the
-// form, the menu and the modal as it goes. It paces on demand: still, it draws nothing and
+// form, the menu and the modal as it goes, each once Krome has settled (fonts in, painted),
+// with the tick count held at 0 so two runs' pictures compare; and then, in the light
+// theme, the form and the menu again. --theme light starts in it. It paces on demand: still, it draws nothing and
 // ticks four times a second (--pacing continuous for every vsync). --bench opens a screen of
 // two thousand nodes instead and lays it out and paints it every tick: run it with
 // --prof-report for the cost.
@@ -35,6 +39,7 @@ struct Demo {
     const char* shots = nullptr;
     u32  step = 0, wait = 0;
     u32  failures = 0;
+    u32  settled = 0;
     // --work: a tool's work in the Work cycle, behind the window (docs/design/cycles.md).
     bool work = false;
     u64  next = 2, primes = 0;
@@ -44,7 +49,7 @@ struct Demo {
 
 
 // A step of the pilot: where the pointer goes and what it does there.
-enum class Act : u8 { Move, Click, Wheel, Shot, Check, Quit };
+enum class Act : u8 { Move, Click, Wheel, Shot, Check, Theme, Quit };
 struct Step { Act act; const char* id; f32 value; const char* expect; };
 
 // Positions are found when the step runs, so a reflow or a scroll is followed.
@@ -72,6 +77,13 @@ constinit const Step k_steps[] = {
     {Act::Check, "abouts", 0, "1"},
     {Act::Click, "later", 0, nullptr}, // disabled
     {Act::Check, "saves", 0, "2"},
+    // The other theme: every screen and overlay restyled from the documents Krome keeps.
+    {Act::Theme, "light", 0, nullptr},
+    {Act::Shot, "light", 0, nullptr},
+    {Act::Click, "menu", 0, nullptr},
+    {Act::Shot, "light_menu", 0, nullptr},
+    {Act::Click, "close_menu", 0, nullptr},
+    {Act::Check, "saves", 0, "2"},
     {Act::Quit, nullptr, 0, nullptr},
     {Act::Click, "quit", 0, nullptr},  // its event ends the run
 };
@@ -97,7 +109,7 @@ bool aim(Engine& e, const Demo& d, const char* id, f32* x, f32* y) {
 void kromedemo_tick(TickContext& ctx) {
     Engine& e = *ctx.engine;
     Demo& d = ctx.state_as<Demo>();
-    if (ctx.tick % 30 == 0) krome_set(e, d.form, "ticks", (f64)ctx.tick);
+    if (ctx.tick % 30 == 0 && !d.shots) krome_set(e, d.form, "ticks", (f64)ctx.tick);
     if (!d.bench.is_null()) { krome_set(e, d.bench, "tick", (f64)ctx.tick); engine_want_frame(e); return; }
     if (!d.demo || !krome_ready(e, d.form)) return;
     engine_want_frame(e); // the pilot is input the window does not see: keep the loop awake for it
@@ -122,6 +134,10 @@ void kromedemo_tick(TickContext& ctx) {
         if (aim(e, d, s.id, &x, &y)) input_pointer_override(e, x, y, 0, s.value);
         break;
     case Act::Shot:
+        // A picture of what is settled: the fonts in, the change painted, and a frame since.
+        if (d.shots && !krome_settled(e)) { d.settled = 0; return; }
+        if (d.shots && d.settled++ < 3) return;
+        d.settled = 0;
         if (d.shots) {
             char path[600];
             format(path, sizeof path, "%s/kromedemo_%s.ppm", d.shots, s.id);
@@ -133,6 +149,9 @@ void kromedemo_tick(TickContext& ctx) {
         if (strcmp(got, s.expect) != 0) { KV_ERROR("kromedemo", "demo: %s is '%s', wanted '%s'", s.id, got, s.expect); ++d.failures; }
         break;
     }
+    case Act::Theme:
+        krome_theme(e, s.id);
+        break;
     case Act::Quit:
         if (d.failures) KV_ERROR("kromedemo", "demo: %u checks failed", d.failures);
         else KV_INFO("kromedemo", "demo passed");
@@ -186,7 +205,9 @@ bool kromedemo_startup(Engine& e, ModuleInstance& self) {
     d->work = frameloop_flag(e, "--work");
     d->shots = frameloop_option(e, "--shots");
     if (frameloop_flag(e, "--bench")) d->bench = krome_open(e, "kromedemo/bench.lua");
-    else d->form = krome_open(e, "kromedemo/form.lua");
+    else if (frameloop_flag(e, "--lua")) d->form = krome_open(e, "kromedemo/form_lua.lua");
+    else d->form = krome_open(e, "kromedemo/form.kimb", "form");
+    if (const char* theme = frameloop_option(e, "--theme")) krome_theme(e, theme);
     self.set_state(d);
     return true;
 }
@@ -213,8 +234,8 @@ KV_MODULE_DEFINE(kromedemo_module) = {
 } // namespace kv
 
 namespace {
-constinit const char* const k_flags[] = {"--demo", "--bench", "--work"};
-constinit const char* const k_options[] = {"--shots"};
+constinit const char* const k_flags[] = {"--demo", "--bench", "--work", "--lua"};
+constinit const char* const k_options[] = {"--shots", "--theme"};
 constinit const kv::FrameLoopConfig k_config = {
     .title          = "korvid krome demo",
     .width          = 1000,

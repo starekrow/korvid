@@ -52,6 +52,9 @@ void krome_provide(Engine& e, const char* path, const void* data, usize size);
 void krome_theme(Engine& e, const char* theme);
 // The theme a screen is in; null while it loads, or when its scope has none.
 const char* krome_current_theme(Engine& e, Name screen);
+// Nothing is loading, every font and image a screen asked for is in, and every screen has
+// been laid out and painted since it last changed: what a picture of it should wait for.
+bool krome_settled(Engine& e);
 // The mistakes found loading and building screens, with their files and lines (the latest
 // KV_KIMB_MAX_ERRORS; all are counted in KromeStats::script_errors and logged).
 const KimErrors* krome_errors(Engine& e);

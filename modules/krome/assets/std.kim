@@ -1,0 +1,171 @@
+// krome/std: the engine's prelude (docs/PRDs/Krome-Slice-2-PRD.md, "Meaning"). A file says
+// `use "krome/std"` to have it; nothing has it otherwise. Everything here is markup over
+// the kernel's four nodes: a game can use it, override a piece (its own def or style of
+// the same name wins, and its own `theme dark` overrides the tokens it names), or write a
+// prelude of its own instead.
+
+// ---- parameters ---------------------------------------------------------------------------
+
+prop label string
+prop value string
+prop title string
+
+// ---- themes -------------------------------------------------------------------------------
+// The tokens every style here reads. Dark is the first, so a screen starts in it. An
+// overlay is a tree of its own and inherits nothing from the screen under it: the raised
+// styles (menu, panel) say their own ink.
+
+theme dark {
+    page=#10131a ink=#e6e9ef muted=#8b95a7 bar=#1b2030
+    accent=#2f6fed accent-hover=#4a84f5 accent-down=#245ad0 violet=#8a3ffc glow=#2f6fed66
+    edge=#ffffff22 off-bg=#2a3140 off-ink=#5b6475 off-edge=#ffffff0d
+    raised=#1f2533 raised-edge=#ffffff1a item-hover=#2f3a52
+    well=#151922 row-hover=#232a38
+    danger=#3a2430 danger-hover=#4d2f3d danger-down=#2c1b25
+    shade=#00000099 deep-shade=#000000aa
+    on-accent=#e6e9ef raised-ink=#ffffff
+}
+
+theme light {
+    page=#f4f5f8 ink=#1a1d24 muted=#5d6676 bar=#e3e6ee
+    accent=#2f6fed accent-hover=#4a84f5 accent-down=#245ad0 violet=#8a3ffc glow=#2f6fed44
+    edge=#00000022 off-bg=#d5d9e2 off-ink=#8a92a2 off-edge=#0000000d
+    raised=#ffffff raised-edge=#0000001a item-hover=#dfe6f5
+    well=#ffffff row-hover=#e8edf7
+    danger=#c2405a danger-hover=#d25570 danger-down=#a8344c
+    shade=#00000033 deep-shade=#00000044
+    on-accent=#ffffff raised-ink=#1a1d24
+}
+
+// ---- layout -------------------------------------------------------------------------------
+
+def row {
+    box dir=row {
+        slot
+    }
+}
+
+def col {
+    box dir=col {
+        slot
+    }
+}
+
+def stack {
+    box dir=stack {
+        slot
+    }
+}
+
+def spacer {
+    box fill
+}
+
+def separator {
+    box w=fill h=1 bg=edge
+}
+
+// ---- text ---------------------------------------------------------------------------------
+
+def label label {
+    text "{label}"
+}
+
+def heading label {
+    text "{label}" size=18
+}
+
+// A label and a value in a row: the label in a column of its own width, muted.
+def field label value {
+    row gap=8 middle {
+        text "{label}" w=90 color=muted
+        text "{value}" w=fill
+    }
+}
+
+def badge label {
+    box [badge] {
+        text "{label}" size=12
+    }
+}
+
+// ---- controls -----------------------------------------------------------------------------
+
+style button {
+    pad=14,8 radius=6 bg=accent color=on-accent border=1 border-color=edge center middle
+    hover { bg=accent-hover }
+    pressed { bg=accent-down }
+    disabled { bg=off-bg color=off-ink border-color=off-edge }
+}
+
+// A dangerous button: written [danger] on a button.
+style danger {
+    bg=danger
+    hover { bg=danger-hover }
+    pressed { bg=danger-down }
+}
+
+def button label {
+    hit [button] {
+        text "{label}"
+    }
+}
+
+// Bound with @name: the box shows the value, a press flips it.
+style checkbox {
+    gap=8 middle
+}
+style check-box {
+    w=14 h=14 radius=3 border=1 border-color=edge bg=well
+    selected { bg=accent border-color=accent }
+}
+
+def checkbox label {
+    hit dir=row [checkbox] {
+        box [check-box]
+        text "{label}"
+    }
+}
+
+style menu-item {
+    w=fill pad=12,6 radius=4
+    hover { bg=item-hover }
+}
+
+def menu-item label {
+    hit [menu-item] {
+        text "{label}"
+    }
+}
+
+style menu {
+    bg=raised color=raised-ink radius=8 pad=4 w=160 shadow=0,6,16 shadow-color=shade border=1 border-color=raised-edge
+}
+
+style panel {
+    bg=raised color=raised-ink radius=10 pad=20 gap=14 shadow=0,10,30 shadow-color=deep-shade
+}
+
+def panel title {
+    col [panel] {
+        heading "{title}"
+        slot
+    }
+}
+
+style badge {
+    pad=6,2 radius=8 bg=accent
+}
+
+style page {
+    bg=page color=ink
+}
+
+style list {
+    w=fill bg=well radius=6 pad=4
+}
+
+style list-row {
+    w=fill pad=10,5 radius=4
+    hover { bg=row-hover }
+}
