@@ -18,6 +18,7 @@
 // Krome is cosmetic: none of its state is hashed, and its events are traced, not hashed.
 #pragma once
 #include "korvid/core/name.h"
+#include "korvid/kimb/kimb.h"
 #include "korvid/krome/module.h"
 #include "korvid/krome/tree.h"
 
@@ -39,6 +40,22 @@ constexpr i32 KROME_DEFAULT_LAYER = 100;
 // Opens the script at an asset path as a screen named by that path, read through the I/O
 // queue and run when it lands. Opening a name already open replaces it.
 Name krome_open(Engine& e, const char* script, i32 layer = KROME_DEFAULT_LAYER);
+// The screen named `screen` in a .kimb at an asset path (docs/PRDs/Krome-Slice-2-PRD.md):
+// the file and the preludes it uses read through the I/O queue, its `script` lines read and
+// run, its tree built once all are in. Its name is "<file>#<screen>".
+Name krome_open(Engine& e, const char* file, const char* screen, i32 layer = KROME_DEFAULT_LAYER);
+// Bytes for an asset path that Krome takes instead of reading it: a .kimb, a prelude, a
+// script. Copied. For tests, and for a game that compiles its own markup (the kim module).
+void krome_provide(Engine& e, const char* path, const void* data, usize size);
+// Every screen in this theme, from the next frame: its looks resolved again from the
+// documents Krome keeps, nothing read again. Null: each screen's first theme.
+void krome_theme(Engine& e, const char* theme);
+// The theme a screen is in; null while it loads, or when its scope has none.
+const char* krome_current_theme(Engine& e, Name screen);
+// The mistakes found loading and building screens, with their files and lines (the latest
+// KV_KIMB_MAX_ERRORS; all are counted in KromeStats::script_errors and logged).
+const KimErrors* krome_errors(Engine& e);
+void krome_clear_errors(Engine& e);
 // The same from a source in memory (copied), under a name of the caller's.
 Name krome_open_source(Engine& e, const char* name, const char* source, i32 layer = KROME_DEFAULT_LAYER);
 void krome_close(Engine& e, Name screen);

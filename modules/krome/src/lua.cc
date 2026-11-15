@@ -8,6 +8,7 @@
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/lua/lua.h"
+#include "korvid/core/arena.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,11 +18,18 @@ namespace kv {
 namespace {
 
 // The tree helpers, run once with debug.getinfo as their only argument (the debug library
-// itself is not left where scripts can reach it). Each makes a node in the canonical shape
-// (w, f, p, t, e, id, s, c, l) that the C++ side builds from.
+// itself is not left where scripts can reach it). Each makes a node in the shape a .kimb
+// holds (w, id, f, p, s, t, e, c), with `looks` for a state's look and `l` its line; the
+// C++ side makes a document of it and builds from that (build.cc).
 const char k_prelude[] = R"lua(
 local getinfo = ...
 local states = { hover = true, pressed = true, focused = true, disabled = true, selected = true }
+local function words(v)
+  if type(v) == "table" then return v end
+  local out = {}
+  for w in tostring(v):gmatch("%S+") do out[#out + 1] = w end
+  return out
+end
 local function make(w, dir, defaults)
   return function(t)
     if type(t) ~= "table" then t = { t } end
@@ -44,11 +52,12 @@ local function make(w, dir, defaults)
           -- States' looks under a key of their own, beside the flags of the same names
           -- (disabled = true with looks = { disabled = { ... } }).
           for sk, sv in pairs(v) do
-            if states[sk] and type(sv) == "table" then n.s = n.s or {}; n.s[sk] = sv end
+            if states[sk] and type(sv) == "table" then n.looks = n.looks or {}; n.looks[sk] = sv end
           end
+        elseif k == "style" or k == "styles" then n.s = words(v)
         elseif k == "id" then n.id = tostring(v)
         elseif k == "event" then n.e = tostring(v)
-        elseif states[k] and type(v) == "table" then n.s = n.s or {}; n.s[k] = v
+        elseif states[k] and type(v) == "table" then n.looks = n.looks or {}; n.looks[k] = v
         elseif v == true then n.f[#n.f + 1] = k
         elseif v ~= false then n.p[k] = v end
       end
@@ -121,191 +130,118 @@ const char* value_text(lua_State* L, int idx, char* out, usize cap) {
 }
 
 // ---- the tree from tables -------------------------------------------------------------------------
+// A script's tables made a document, so the builder that builds a .kimb builds them too:
+// a table with an array part is an array, any other an object of its string keys; a
+// node's `l` is its line.
 
-struct Build {
-    KromeModule&    s;
-    KromeScreen&    sc;
-    KromeTree&      tree;  // the screen's, or an overlay's
-    Array<KromeDep>* deps; // where texts that read the model are noted; null: filled once
-    lua_State*      L;
-    const char*     chunk;
-    u32             errors = 0;
-
-    void error(u32 line, const char* fmt, ...) KV_PRINTF(3, 4) {
-        char msg[256];
-        va_list args;
-        va_start(args, fmt);
-        vformat(msg, sizeof msg, fmt, args);
-        va_end(args);
-        KV_ERROR("krome", "%s:%u: %s", chunk, line, msg);
-        ++errors;
-    }
-};
-
-KromeType type_of(const char* w, bool* ok) {
-    *ok = true;
-    if (!strcmp(w, "box")) return KromeType::Box;
-    if (!strcmp(w, "text")) return KromeType::Text;
-    if (!strcmp(w, "image")) return KromeType::Image;
-    if (!strcmp(w, "hit")) return KromeType::Hit;
-    *ok = false;
-    return KromeType::Box;
-}
-
-// The value at the top of the stack as a property's: a number, a string ("120..400" is a
-// range), or a list of up to four numbers. False for anything else.
-bool to_value(lua_State* L, KromeValue* out) {
-    int t = lua_type(L, -1);
-    if (t == LUA_TNUMBER) { *out = KromeValue::num((f32)lua_tonumber(L, -1)); return true; }
-    if (t == LUA_TSTRING) {
-        const char* s = lua_tostring(L, -1);
-        // "120..400" is a range ("120.." no maximum), "8" a number, anything else a string.
-        const char* dots = strstr(s, "..");
-        if (dots && dots != s && dots - s < 32) {
-            char lo_text[32];
-            memcpy(lo_text, s, (usize)(dots - s));
-            lo_text[dots - s] = 0;
-            char* end = nullptr;
-            f64 lo = strtod(lo_text, &end);
-            if (*end == 0) {
-                f64 hi = 1e30;
-                if (dots[2]) { hi = strtod(dots + 2, &end); if (*end != 0) { *out = KromeValue::str(s); return true; } }
-                *out = KromeValue::range((f32)lo, (f32)hi);
-                return true;
-            }
-        }
-        if (*s) {
-            char* end = nullptr;
-            f64 n = strtod(s, &end);
-            if (*end == 0) { *out = KromeValue::num((f32)n); return true; }
-        }
-        *out = KromeValue::str(s);
-        return true;
-    }
-    if (t == LUA_TTABLE) {
-        f32 v[4];
-        u32 n = 0;
-        lua_Integer len = (lua_Integer)lua_rawlen(L, -1);
-        if (len < 1 || len > 4) return false;
-        for (lua_Integer i = 1; i <= len; ++i) {
-            lua_rawgeti(L, -1, i);
-            bool num = lua_type(L, -1) == LUA_TNUMBER;
-            if (num) v[n++] = (f32)lua_tonumber(L, -1);
-            lua_pop(L, 1);
-            if (!num) return false;
-        }
-        *out = KromeValue::nums(v, n);
-        return true;
-    }
+bool empty_table(lua_State* L, int idx) {
+    idx = lua_absindex(L, idx);
+    lua_pushnil(L);
+    if (!lua_next(L, idx)) return true;
+    lua_pop(L, 2);
     return false;
 }
 
-// Every property in the table at the top of the stack, into a state's look.
-void props(Build& b, u32 node, u32 line, KromeState state) {
-    lua_State* L = b.L;
+JsonRef to_json(lua_State* L, int idx, JsonBuilder& b, u32 depth) {
+    idx = lua_absindex(L, idx);
+    switch (lua_type(L, idx)) {
+    case LUA_TNUMBER:
+        if (lua_isinteger(L, idx)) return b.integer((i64)lua_tointeger(L, idx));
+        return b.number((f64)lua_tonumber(L, idx));
+    case LUA_TBOOLEAN: return b.boolean(lua_toboolean(L, idx) != 0);
+    case LUA_TSTRING: {
+        usize len = 0;
+        const char* str = lua_tolstring(L, idx, &len);
+        return b.string(str, (u32)len);
+    }
+    case LUA_TTABLE: break;
+    default: return b.null();
+    }
+    if (depth > KROME_MAX_DEPTH * 2) return b.null();
+    lua_Integer len = (lua_Integer)lua_rawlen(L, idx);
+    if (len > 0) {
+        JsonRef a = b.array();
+        for (lua_Integer i = 1; i <= len; ++i) {
+            lua_rawgeti(L, idx, i);
+            b.push(a, to_json(L, -1, b, depth + 1));
+            lua_pop(L, 1);
+        }
+        return a;
+    }
+    JsonRef o = b.object();
     lua_pushnil(L);
-    while (lua_next(L, -2)) {
+    while (lua_next(L, idx)) {
         if (lua_type(L, -2) == LUA_TSTRING) {
-            const char* name = lua_tostring(L, -2);
-            KromeValue v;
-            if (!to_value(L, &v)) b.error(line, "%s: not a value a property takes", name);
-            else if (const char* why = b.tree.set(node, name, v, state)) b.error(line, "%s%s%s: %s", state == KromeState::Base ? "" : krome_state_name(state),
-                                                                                  state == KromeState::Base ? "" : ".", name, why);
+            const char* key = lua_tostring(L, -2);
+            if (!strcmp(key, "l") && lua_isinteger(L, -1)) {
+                lua_Integer l = lua_tointeger(L, -1);
+                b.line(o, l > 0 && l < 0x7FFFFFFF ? (u32)l : 0);
+            } else if (lua_type(L, -1) == LUA_TTABLE && empty_table(L, -1) && (!strcmp(key, "f") || !strcmp(key, "c") || !strcmp(key, "p"))) {
+                // An empty list or map the helpers always make: nothing to say.
+            } else {
+                b.set(o, key, to_json(L, -1, b, depth + 1));
+            }
         }
         lua_pop(L, 1);
     }
+    return o;
 }
 
-// The names a content string reads, as {name}.
-bool reads_model(const char* s) {
-    const char* p = strchr(s, '{');
-    return p && strchr(p + 1, '}');
+// A node made in a tail call (`return col { ... }`) has no line of its own: it takes its
+// first child's, which is as near as Lua can say.
+void lines_from_children(JsonDoc& doc, JsonValue& n) {
+    const JsonValue* c = json_get(doc, n, "c");
+    if (c) for (const JsonValue* k = json_first(doc, *c); k; k = json_next(doc, *k)) lines_from_children(doc, const_cast<JsonValue&>(*k));
+    if (n.line == 0 && c)
+        for (const JsonValue* k = json_first(doc, *c); k; k = json_next(doc, *k))
+            if (k->line) { n.line = k->line; break; }
 }
-void deps_of(Array<KromeDep>& deps, u32 node, const char* s) {
-    for (const char* p = s; (p = strchr(p, '{'));) {
-        const char* end = strchr(p + 1, '}');
-        if (!end) break;
-        if (end > p + 1) deps.push(KromeDep{node, name_intern(p + 1, (usize)(end - p - 1)).hash});
-        p = end + 1;
-    }
-}
-void fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node);
 
-// The node table at the top of the stack, as a child of `parent`.
-void build_node(Build& b, u32 parent) {
-    lua_State* L = b.L;
-    KromeTree& t = b.tree;
-    if (!lua_istable(L, -1)) { b.error(parent != KROME_NONE ? t.nodes[parent].line : 0, "a child that is not a node"); return; }
-    lua_getfield(L, -1, "l");
-    u32 line = lua_isinteger(L, -1) ? (u32)lua_tointeger(L, -1) : 0;
-    lua_pop(L, 1);
-    lua_getfield(L, -1, "w");
-    bool ok = false;
-    KromeType type = lua_type(L, -1) == LUA_TSTRING ? type_of(lua_tostring(L, -1), &ok) : KromeType::Box;
-    if (!ok) b.error(line, "'%s' is not a node type (box, text, image, hit)", lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "?");
-    lua_pop(L, 1);
-    u32 n = t.add(type, parent);
-    if (n == KROME_NONE) { b.error(line, "nesting deeper than %u", KROME_MAX_DEPTH); return; }
-    // Children first: a node made in a tail call (`return col { ... }`) has no line of its
-    // own, and takes its first child's, which is as near as Lua can say.
-    if (lua_getfield(L, -1, "c") == LUA_TTABLE) {
-        lua_Integer len = (lua_Integer)lua_rawlen(L, -1);
-        for (lua_Integer i = 1; i <= len; ++i) {
-            lua_rawgeti(L, -1, i);
-            build_node(b, n);
+// The node table at `idx` as a document of one screen, "root", in `arena`; with `uses`
+// (a Lua table of names at uses_idx, or 0) as the file's.
+bool table_file(lua_State* L, int idx, int uses_idx, Arena& arena, KimbFile& f, const char* chunk, KromeModule& s) {
+    idx = lua_absindex(L, idx);
+    if (uses_idx) uses_idx = lua_absindex(L, uses_idx);
+    if (arena.base) arena_destroy(arena);
+    if (!arena_create(arena, 64u << 20, "krome.lua_doc", MemTag{})) return false;
+    JsonBuilder b(&arena.a);
+    JsonRef root = b.object();
+    b.set(root, "kim", b.integer(1));
+    b.set(root, "file", b.string(chunk));
+    if (uses_idx && lua_istable(L, uses_idx)) {
+        JsonRef u = b.array();
+        lua_Integer n = (lua_Integer)lua_rawlen(L, uses_idx);
+        for (lua_Integer i = 1; i <= n; ++i) {
+            lua_rawgeti(L, uses_idx, i);
+            if (lua_type(L, -1) == LUA_TSTRING) b.push(u, b.string(lua_tostring(L, -1)));
             lua_pop(L, 1);
         }
+        b.set(root, "uses", u);
     }
-    lua_pop(L, 1);
-    if (line == 0 || line > 0x7FFFFFFFu)
-        for (u32 ch = t.nodes[n].first; ch != KROME_NONE; ch = t.nodes[ch].next)
-            if (t.nodes[ch].line) { line = t.nodes[ch].line; break; }
-    if (line > 0x7FFFFFFFu) line = 0;
-    t.nodes[n].line = line;
-
-    if (lua_getfield(L, -1, "p") == LUA_TTABLE) props(b, n, line, KromeState::Base);
-    lua_pop(L, 1);
-    if (lua_getfield(L, -1, "f") == LUA_TTABLE) {
-        lua_Integer len = (lua_Integer)lua_rawlen(L, -1);
-        for (lua_Integer i = 1; i <= len; ++i) {
-            lua_rawgeti(L, -1, i);
-            if (lua_type(L, -1) == LUA_TSTRING) {
-                if (const char* why = t.flag(n, lua_tostring(L, -1))) b.error(line, "%s: %s", lua_tostring(L, -1), why);
-            }
-            lua_pop(L, 1);
-        }
-    }
-    lua_pop(L, 1);
-    if (lua_getfield(L, -1, "t") == LUA_TSTRING) {
-        usize len = 0;
-        const char* s = lua_tolstring(L, -1, &len);
-        t.set_text(n, s, (u32)len);
-        if (b.deps) deps_of(*b.deps, n, s);
-        else if (reads_model(s)) fill_node(b.s, b.sc, t, n);
-    }
-    lua_pop(L, 1);
-    if (lua_getfield(L, -1, "id") == LUA_TSTRING) t.set(n, "id", KromeValue::str(lua_tostring(L, -1)));
-    lua_pop(L, 1);
-    if (lua_getfield(L, -1, "e") == LUA_TSTRING) t.set(n, "event", KromeValue::str(lua_tostring(L, -1)));
-    lua_pop(L, 1);
-    if (lua_getfield(L, -1, "s") == LUA_TTABLE) {
-        lua_pushnil(L);
-        while (lua_next(L, -2)) {
-            KromeState st;
-            if (lua_type(L, -2) == LUA_TSTRING && krome_state_of(lua_tostring(L, -2), &st) && lua_istable(L, -1)) props(b, n, line, st);
-            lua_pop(L, 1);
-        }
-    }
-    lua_pop(L, 1);
+    JsonRef screens = b.object();
+    b.set(screens, "root", to_json(L, idx, b, 0));
+    b.set(root, "screens", screens);
+    JsonDoc doc;
+    bool ok = b.finish(root, doc);
+    b.free();
+    if (!ok) return false;
+    KimErrors quiet;
+    if (!kimb_from_doc(doc, f, quiet, chunk)) return false;
+    if (const JsonValue* r = json_get(f.doc, *f.screens, "root")) lines_from_children(f.doc, const_cast<JsonValue&>(*r));
+    (void)s;
+    return true;
 }
+
+} // namespace
 
 // Each node that reads the model shows its text with the values filled in.
-void fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node) {
+void krome_fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node) {
     const char* raw = tree.raw_text(node);
     char out[1024];
     usize n = 0;
     char val[128];
     for (const char* p = raw; *p && n + 1 < sizeof out;) {
+        if (p[0] == '{' && p[1] == '{') { out[n++] = '{'; p += 2; continue; }
         const char* end = *p == '{' ? strchr(p + 1, '}') : nullptr;
         if (!end) { out[n++] = *p++; continue; }
         char key[96];
@@ -313,12 +249,16 @@ void fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node) {
         if (klen >= sizeof key) klen = sizeof key - 1;
         memcpy(key, p + 1, klen);
         key[klen] = 0;
-        const char* v = krome_model_value_text(s, sc, key, val, sizeof val);
-        for (; *v && n + 1 < sizeof out; ++v) out[n++] = *v;
+        if (key[0] != '*') { // {*tag}: a span's look (slice 3), nothing to show
+            const char* v = krome_model_value_text(s, sc, key, val, sizeof val);
+            for (; *v && n + 1 < sizeof out; ++v) out[n++] = *v;
+        }
         p = end + 1;
     }
     tree.set_shown(node, out, (u32)n);
 }
+
+namespace {
 
 // open_overlay(tree[, { anchor = id, side = "below", modal = false, dim = "#00000080" }]):
 // the overlay's id. Upvalues: the module, the screen's id.
@@ -344,11 +284,19 @@ int script_open_overlay(lua_State* L) {
         if (lua_getfield(L, 2, "dim") == LUA_TSTRING) krome_parse_color(lua_tostring(L, -1), &o->dim);
         lua_pop(L, 1);
     }
-    lua_pushvalue(L, 1);
-    krome_lua_build_overlay(*s, *sc, *o);
-    lua_pop(L, 1);
+    if (!table_file(L, 1, 0, o->arena, o->file, name_str(sc->name), *s) || !krome_build_overlay(*s, *sc, *o))
+        krome_error(*s, name_str(sc->name), 0, nullptr, 0, "open_overlay: the tree would not build");
     lua_pushinteger(L, (lua_Integer)id);
     return 1;
+}
+
+// theme(name): every screen in that theme, from the next frame. Upvalues: the module.
+int script_theme(lua_State* L) {
+    KromeModule* s = state_of(L, 1);
+    const char* name = luaL_checkstring(L, 1);
+    s->theme = name_intern(name);
+    for (KromeScreen* sc : s->screens) sc->rebuild = true;
+    return 0;
 }
 
 // close_overlay([id]): that one, or the top one.
@@ -402,29 +350,22 @@ void krome_lua_release(KromeModule& s, KromeScreen& sc) {
     sc.env = sc.store = sc.on = LUA_NOREF;
 }
 
-bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize len, const char* chunk) {
+namespace {
+
+// A fresh environment for the screen: its own globals over the shared ones, the model and
+// its store, emit, the overlays, theme. Left in sc.env and sc.store.
+void make_env(KromeModule& s, KromeScreen& sc) {
     lua_State* L = s.L;
     krome_lua_release(s, sc);
-    sc.tree.clear();
-    sc.deps.clear();
-    char name[300];
-    format(name, sizeof name, "@%s", chunk);
-    if (luaL_loadbufferx(L, source, len, name, "t") != LUA_OK) {
-        KV_ERROR("krome", "%s", lua_tostring(L, -1));
-        lua_pop(L, 1);
-        ++s.script_errors;
-        return false;
-    }
-    // Its environment: its own globals over the shared ones, the model, emit.
-    lua_newtable(L);                     // chunk env
-    lua_newtable(L);                     // chunk env meta
+    lua_newtable(L);                     // env
+    lua_newtable(L);                     // env meta
     lua_pushglobaltable(L);
     lua_setfield(L, -2, "__index");
     lua_setmetatable(L, -2);
-    lua_newtable(L);                     // chunk env store
+    lua_newtable(L);                     // env store
     lua_pushvalue(L, -1);
     sc.store = luaL_ref(L, LUA_REGISTRYINDEX);
-    lua_newtable(L);                     // chunk env store proxy
+    lua_newtable(L);                     // env store proxy
     lua_newtable(L);                     // ... proxy meta
     lua_pushvalue(L, -3);
     lua_setfield(L, -2, "__index");
@@ -434,69 +375,159 @@ bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize le
     lua_pushcclosure(L, model_newindex, 3);
     lua_setfield(L, -2, "__newindex");
     lua_setmetatable(L, -2);
-    lua_setfield(L, -3, "model");        // chunk env store
-    lua_pop(L, 1);                       // chunk env
-    lua_pushlightuserdata(L, &s);
-    lua_pushinteger(L, sc.id);
-    lua_pushcclosure(L, script_emit, 2);
-    lua_setfield(L, -2, "emit");
-    lua_pushlightuserdata(L, &s);
-    lua_pushinteger(L, sc.id);
-    lua_pushcclosure(L, script_open_overlay, 2);
-    lua_setfield(L, -2, "open_overlay");
-    lua_pushlightuserdata(L, &s);
-    lua_pushinteger(L, sc.id);
-    lua_pushcclosure(L, script_close_overlay, 2);
-    lua_setfield(L, -2, "close_overlay");
-    lua_pushvalue(L, -1);
+    lua_setfield(L, -3, "model");        // env store
+    lua_pop(L, 1);                       // env
+    struct Fn { const char* name; lua_CFunction fn; int ups; };
+    const Fn fns[] = {{"emit", script_emit, 2}, {"open_overlay", script_open_overlay, 2}, {"close_overlay", script_close_overlay, 2}, {"theme", script_theme, 1}};
+    for (const Fn& f : fns) {
+        lua_pushlightuserdata(L, &s);
+        if (f.ups == 2) lua_pushinteger(L, sc.id);
+        lua_pushcclosure(L, f.fn, f.ups);
+        lua_setfield(L, -2, f.name);
+    }
     sc.env = luaL_ref(L, LUA_REGISTRYINDEX);
-    lua_setupvalue(L, -2, 1);            // chunk, its _ENV the env
+}
+
+// Runs a chunk in the screen's environment, leaving what it returned on the stack. False
+// (logged) when it would not load or raised.
+bool run_chunk(KromeModule& s, KromeScreen& sc, const char* source, usize len, const char* chunk) {
+    lua_State* L = s.L;
+    char name[300];
+    format(name, sizeof name, "@%s", chunk);
+    if (luaL_loadbufferx(L, source, len, name, "t") != LUA_OK) {
+        KV_ERROR("krome", "%s", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        ++s.script_errors;
+        return false;
+    }
+    lua_rawgeti(L, LUA_REGISTRYINDEX, sc.env);
+    lua_setupvalue(L, -2, 1);            // the chunk's _ENV
     if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
         KV_ERROR("krome", "%s", lua_tostring(L, -1));
         lua_pop(L, 1);
         ++s.script_errors;
         return false;
     }
-    if (!lua_istable(L, -1)) {
-        KV_ERROR("krome", "%s: the script returned no tree", chunk);
+    return true;
+}
+
+// The table at the top of the stack's model into the store, a later key over an earlier.
+void merge_model(lua_State* L, KromeScreen& sc) {
+    if (lua_getfield(L, -1, "model") == LUA_TTABLE) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store);
+        lua_pushnil(L);
+        while (lua_next(L, -3)) {
+            lua_pushvalue(L, -2);
+            lua_insert(L, -2);
+            lua_rawset(L, -4);
+        }
         lua_pop(L, 1);
-        ++s.script_errors;
+    }
+    lua_pop(L, 1);
+}
+
+} // namespace
+
+bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize len, const char* chunk) {
+    lua_State* L = s.L;
+    make_env(s, sc);
+    sc.uses.clear();
+    if (!run_chunk(s, sc, source, len, chunk)) return false;
+    if (!lua_istable(L, -1)) {
+        krome_error(s, chunk, 0, nullptr, 0, "the script returned no tree");
+        lua_pop(L, 1);
         return false;
     }
-    // A node, or a screen table: root, model, on.
+    // A node, or a screen table: root, model, on, uses.
     lua_getfield(L, -1, "w");
     bool node = !lua_isnil(L, -1);
     lua_pop(L, 1);
+    int uses = 0;
     if (!node) {
-        if (lua_getfield(L, -1, "model") == LUA_TTABLE) {
-            lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store);
-            lua_pushnil(L);
-            while (lua_next(L, -3)) {
-                lua_pushvalue(L, -2);
-                lua_insert(L, -2);
-                lua_rawset(L, -4);
-            }
-            lua_pop(L, 1);
-        }
-        lua_pop(L, 1);
+        merge_model(L, sc);
         if (lua_getfield(L, -1, "on") == LUA_TTABLE) sc.on = luaL_ref(L, LUA_REGISTRYINDEX);
         else lua_pop(L, 1);
-        lua_getfield(L, -1, "root");
-        lua_remove(L, -2);
+        lua_getfield(L, -1, "uses");     // screen uses
+        lua_getfield(L, -2, "root");     // screen uses root
         if (!lua_istable(L, -1)) {
-            KV_ERROR("krome", "%s: the screen table has no root", chunk);
-            lua_pop(L, 1);
-            ++s.script_errors;
+            krome_error(s, chunk, 0, nullptr, 0, "the screen table has no root");
+            lua_pop(L, 3);
             return false;
         }
+        lua_insert(L, -3);               // root screen uses
+        lua_remove(L, -2);               // root uses
+        lua_insert(L, -2);               // uses root
+        uses = -2;
     }
-    Build b{s, sc, sc.tree, &sc.deps, L, chunk};
-    build_node(b, KROME_NONE);
-    lua_pop(L, 1);
-    if (b.errors) s.script_errors += b.errors;
-    for (const KromeDep& d : sc.deps) fill_node(s, sc, sc.tree, d.node);
-    sc.tree.dirty = true;
-    return sc.tree.root != KROME_NONE;
+    bool ok = table_file(L, -1, uses, sc.arena, sc.lua_file, chunk, s);
+    lua_pop(L, node ? 1 : 2);
+    if (!ok) { krome_error(s, chunk, 0, nullptr, 0, "its tree would not make a document"); return false; }
+    sc.has_lua_file = true;
+    return true;
+}
+
+bool krome_lua_scripts(KromeModule& s, KromeScreen& sc, KromeDoc* const* scripts, u32 count) {
+    lua_State* L = s.L;
+    make_env(s, sc);
+    lua_newtable(L);                     // on
+    lua_newtable(L);                     // on, where each handler came from
+    bool ok = true;
+    for (u32 i = 0; i < count; ++i) {
+        const char* chunk = name_str(scripts[i]->path);
+        if (!run_chunk(s, sc, scripts[i]->source, scripts[i]->source_len, chunk)) { ok = false; continue; }
+        if (lua_isnil(L, -1)) { lua_pop(L, 1); continue; } // a script that only set things up
+        if (!lua_istable(L, -1)) {
+            krome_error(s, chunk, 0, nullptr, 0, "a screen's script returns { model = ..., on = ... }");
+            lua_pop(L, 1);
+            ok = false;
+            continue;
+        }
+        merge_model(L, sc);
+        if (lua_getfield(L, -1, "on") == LUA_TTABLE) {
+            lua_pushnil(L);
+            while (lua_next(L, -2)) {    // on from script key fn
+                if (lua_type(L, -2) == LUA_TSTRING) {
+                    const char* event = lua_tostring(L, -2);
+                    lua_getfield(L, -5, event);
+                    if (lua_type(L, -1) == LUA_TSTRING) {
+                        krome_error(s, chunk, 0, nullptr, 0, "the event '%s' is handled here and in %s", event, lua_tostring(L, -1));
+                        ok = false;
+                        lua_pop(L, 1);
+                    } else {
+                        lua_pop(L, 1);       // on from script son key fn
+                        lua_pushvalue(L, -2);
+                        lua_pushvalue(L, -2);
+                        lua_rawset(L, -8);   // on[event] = fn
+                        lua_pushstring(L, chunk);
+                        lua_setfield(L, -6, event); // from[event] = the script
+                    }
+                }
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 2);                   // on from
+    }
+    lua_pop(L, 1);                       // on
+    sc.on = luaL_ref(L, LUA_REGISTRYINDEX);
+    return ok;
+}
+
+bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* key) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) return false;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store);
+    lua_getfield(L, -1, key);
+    bool t;
+    switch (lua_type(L, -1)) {
+    case LUA_TNIL: t = false; break;
+    case LUA_TBOOLEAN: t = lua_toboolean(L, -1) != 0; break;
+    case LUA_TNUMBER: t = lua_tonumber(L, -1) != 0; break;
+    case LUA_TSTRING: t = lua_rawlen(L, -1) != 0; break;
+    case LUA_TTABLE: t = lua_rawlen(L, -1) != 0; break;
+    default: t = true;
+    }
+    lua_pop(L, 2);
+    return t;
 }
 
 const char* krome_model_value_text(KromeModule& s, KromeScreen& sc, const char* key, char* out, usize cap) {
@@ -512,14 +543,7 @@ const char* krome_model_value_text(KromeModule& s, KromeScreen& sc, const char* 
 
 void krome_model_changed(KromeModule& s, KromeScreen& sc, u64 key) {
     for (const KromeDep& d : sc.deps)
-        if (d.key == key) fill_node(s, sc, sc.tree, d.node);
-}
-
-bool krome_lua_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o) {
-    Build b{s, sc, o.tree, nullptr, s.L, name_str(sc.name)};
-    build_node(b, KROME_NONE);
-    s.script_errors += b.errors;
-    return o.tree.root != KROME_NONE;
+        if (d.key == key) krome_fill_node(s, sc, sc.tree, d.node);
 }
 
 void krome_model_set_number(KromeModule& s, KromeScreen& sc, const char* key, f64 v, bool boolean) {

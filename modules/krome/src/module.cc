@@ -41,8 +41,9 @@ void free_screen(KromeModule& s, KromeScreen* sc) {
     if (s.under.screen == sc->id) s.under = KromeTarget{};
     if (s.captured.screen == sc->id) s.captured = KromeTarget{};
     krome_lua_release(s, *sc);
-    if (sc->io.is_null() == false) if (IoQueue* io = platform_io(*s.e)) io->cancel(sc->io);
     free_in(s.general, sc->source, sc->source_len + 1);
+    if (sc->arena.base) arena_destroy(sc->arena);
+    sc->uses.free();
     sc->tree.free();
     sc->deps.free();
     free_items(s.general, sc, 1);
@@ -63,61 +64,93 @@ KromeScreen* new_screen(KromeModule& s, Name name, i32 layer) {
     sc->layer = layer;
     sc->tree.init(s.general);
     sc->deps.alloc = s.general;
+    sc->uses.alloc = s.general;
     sc->loading = true;
     s.screens.push(sc);
     return sc;
 }
 
-void run(KromeModule& s, KromeScreen& sc, const char* source, usize len) {
-    krome_free_overlays(s, sc);
-    sc.repaint = true;
+void fail(KromeScreen& sc) {
     sc.loading = false;
-    sc.ready = krome_lua_run(s, sc, source, len, name_str(sc.name));
-    sc.failed = !sc.ready;
-    if (sc.ready) KV_INFO("krome", "screen '%s': %u nodes", name_str(sc.name), sc.tree.nodes.len);
+    sc.ready = false;
+    sc.failed = true;
+    sc.stage = KromeStage::Failed;
 }
 
-// Phase PreSim, main thread, every tick: scripts that have landed run; model values from
-// outside go in.
-void krome_pump(TickContext& ctx) {
-    KromeModule& s = ctx.state_as<KromeModule>();
-    Engine& e = *ctx.engine;
-    s.ctx = &ctx;
-    IoQueue* io = platform_io(e);
-    for (u32 i = 0; i < s.screens.len; ++i) {
-        KromeScreen& sc = *s.screens[i];
-        if (!sc.loading) continue;
-        if (sc.source) {
+void built(KromeModule& s, KromeScreen& sc) {
+    krome_free_overlays(s, sc);
+    sc.repaint = true;
+    if (!krome_build_screen(s, sc)) { fail(sc); return; }
+    sc.loading = false;
+    sc.ready = true;
+    sc.failed = false;
+    sc.stage = KromeStage::Built;
+    KV_INFO("krome", "screen '%s': %u nodes", name_str(sc.name), sc.tree.nodes.len);
+}
+
+// One step of a screen that is loading: its file, then its scripts (a .kimb's) or its
+// script run (a Lua screen's), then the preludes it uses, then its tree.
+void advance(KromeModule& s, KromeScreen& sc) {
+    if (sc.stage == KromeStage::Read) {
+        if (sc.source) { // a Lua screen given as source
             char* src = sc.source;
             usize len = sc.source_len;
             sc.source = nullptr;
-            run(s, sc, src, len);
+            bool ok = krome_lua_run(s, sc, src, len, name_str(sc.name));
             free_in(s.general, src, len + 1);
-            continue;
+            if (!ok) { fail(sc); return; }
+            sc.stage = KromeStage::Uses;
+        } else if (sc.doc) {
+            if (sc.doc->failed) { fail(sc); return; }
+            if (!sc.doc->ready) return;
+            // Its scripts are asked for now, and run once all are in.
+            if (const JsonValue* list = sc.doc->file.scripts)
+                for (const JsonValue* v = json_first(sc.doc->file.doc, *list); v; v = json_next(sc.doc->file.doc, *v))
+                    if (v->str()) krome_doc(s, name_intern(v->str()), true);
+            sc.stage = KromeStage::Scripts;
+        } else {
+            KromeDoc* d = krome_doc(s, sc.script, true);
+            if (d->failed) { fail(sc); return; }
+            if (!d->ready) return;
+            if (!krome_lua_run(s, sc, d->source, d->source_len, name_str(sc.name))) { fail(sc); return; }
+            sc.stage = KromeStage::Uses;
         }
-        if (!io) continue;
-        if (sc.io.is_null()) {
-            IoRequest r;
-            r.path = name_str(sc.name);
-            r.alloc = s.general;
-            sc.io = io->read_asset(r);
-            if (sc.io.is_null()) { KV_ERROR("krome", "cannot read '%s'", name_str(sc.name)); sc.loading = false; sc.failed = true; }
-            continue;
-        }
-        for (const IoCompletion& c : io->completions()) {
-            if (c.request != sc.io) continue;
-            IoCompletion done = c;
-            io->reap(done.request);
-            sc.io = Handle{};
-            if (done.status != IoStatus::Done) {
-                KV_ERROR("krome", "cannot read '%s' (errno %d)", name_str(sc.name), done.error);
-                sc.loading = false;
-                sc.failed = true;
-            } else {
-                run(s, sc, (const char*)done.data, done.size);
+    }
+    if (sc.stage == KromeStage::Scripts) {
+        KromeDoc* list[64];
+        u32 n = 0;
+        if (const JsonValue* scripts = sc.doc->file.scripts)
+            for (const JsonValue* v = json_first(sc.doc->file.doc, *scripts); v && n < 64; v = json_next(sc.doc->file.doc, *v)) {
+                if (!v->str()) continue;
+                KromeDoc* d = krome_doc(s, name_intern(v->str()), true);
+                if (d->loading) return;
+                if (d->failed) { krome_error(s, sc.doc->file.file, v->line, nullptr, 0, "script \"%s\": cannot read it", v->str()); continue; }
+                list[n++] = d;
             }
-            free_in(s.general, done.data, done.size ? done.size : 1);
-            break;
+        // A script that fails names itself, and the screen opens with what the others gave.
+        krome_lua_scripts(s, sc, list, n);
+        sc.stage = KromeStage::Uses;
+    }
+    if (sc.stage == KromeStage::Uses) {
+        bool failed = false;
+        if (!krome_scope_ready(s, sc, &failed)) { if (failed) fail(sc); return; }
+        built(s, sc);
+    }
+}
+
+// Phase Frame, main thread: documents that have landed, screens that can go a step
+// further, rebuilds asked for (a theme switch), and model values from outside.
+void krome_pump(TickContext& ctx) {
+    KromeModule& s = ctx.state_as<KromeModule>();
+    s.ctx = &ctx;
+    krome_pump_docs(s);
+    for (u32 i = 0; i < s.screens.len; ++i) {
+        KromeScreen& sc = *s.screens[i];
+        if (sc.loading) advance(s, sc);
+        if (sc.ready && sc.rebuild) {
+            sc.rebuild = false;
+            krome_build_screen(s, sc);
+            engine_want_frame(*s.e);
         }
     }
     for (const KromeSet& set : ctx.received<KromeSet>()) {
@@ -178,6 +211,8 @@ bool krome_startup(Engine& e, ModuleInstance& self) {
     s->e = &e;
     s->general = &self.general;
     s->screens.alloc = &self.general;
+    s->docs.alloc = &self.general;
+    s->provided.alloc = &self.general;
     s->fonts.alloc = &self.general;
     s->images.alloc = &self.general;
     s->layers.alloc = &self.general;
@@ -192,6 +227,7 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     if (!s) return;
     for (KromeScreen* sc : s->screens) free_screen(*s, sc);
     s->screens.free();
+    krome_free_docs(*s);
     krome_free_view(*s);
     krome_lua_close(*s);
 }
@@ -375,8 +411,61 @@ Name krome_open(Engine& e, const char* script, i32 layer) {
     KromeModule* s = krome_state(e);
     if (!s || !script) return Name{};
     Name n = name_intern(script);
-    new_screen(*s, n, layer);
+    KromeScreen* sc = new_screen(*s, n, layer);
+    sc->script = n;
     return n;
+}
+
+Name krome_open(Engine& e, const char* file, const char* screen, i32 layer) {
+    KromeModule* s = krome_state(e);
+    if (!s || !file || !screen) return Name{};
+    char name[400];
+    format(name, sizeof name, "%s#%s", file, screen);
+    Name n = name_intern(name);
+    KromeScreen* sc = new_screen(*s, n, layer);
+    sc->doc = krome_doc(*s, name_intern(file), false);
+    sc->screen = name_intern(screen);
+    return n;
+}
+
+void krome_provide(Engine& e, const char* path, const void* data, usize size) {
+    KromeModule* s = krome_state(e);
+    if (!s || !path) return;
+    Name n = name_intern(path);
+    for (u32 i = 0; i < s->provided.len; ++i)
+        if (s->provided[i].path == n) {
+            free_in(s->general, s->provided[i].data, s->provided[i].size ? s->provided[i].size : 1);
+            s->provided[i] = s->provided[s->provided.len - 1];
+            --s->provided.len;
+            break;
+        }
+    KromeModule::Provided p{n, (char*)alloc_in(s->general, size ? size : 1, 16), size};
+    if (size) memcpy(p.data, data, size);
+    s->provided.push(p);
+}
+
+void krome_theme(Engine& e, const char* theme) {
+    KromeModule* s = krome_state(e);
+    if (!s) return;
+    s->theme = theme ? name_intern(theme) : Name{};
+    for (KromeScreen* sc : s->screens) sc->rebuild = true;
+    engine_want_frame(e);
+}
+
+const char* krome_current_theme(Engine& e, Name screen) {
+    KromeModule* s = krome_state(e);
+    KromeScreen* sc = s ? krome_screen(*s, screen) : nullptr;
+    if (!sc || !sc->ready) return nullptr;
+    return krome_theme_of(*s, sc->scope);
+}
+
+const KimErrors* krome_errors(Engine& e) {
+    KromeModule* s = krome_state(e);
+    return s ? &s->errors : nullptr;
+}
+
+void krome_clear_errors(Engine& e) {
+    if (KromeModule* s = krome_state(e)) s->errors = KimErrors{};
 }
 
 Name krome_open_source(Engine& e, const char* name, const char* source, i32 layer) {

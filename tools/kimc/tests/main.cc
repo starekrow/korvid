@@ -112,11 +112,31 @@ void test_compile(TestCtx& c) {
     KV_CHECK(c, read("bare.kimb") && kbor_parse(g_file.data, g_file.len, mem_scratch(), doc) && !json_get(doc, doc.root(), "lines"));
 }
 
+void test_check(TestCtx& c) {
+    c.begin("kimc check");
+    io_make_dirs(path("std"));
+    KV_CHECK(c, put("std/std.kim", "theme dark { panel=#202430 }\ndef button label { hit { text \"{label}\" } }\n"));
+    KV_CHECK(c, put("good.kim", "use \"krome/std\"\nscreen s { button \"Save\" }\n"));
+    KV_CHECK(c, put("bad.kim", "use \"krome/std\"\nscreen s {\n  box bg=panl {\n    buton \"Save\"\n  }\n}\n"));
+    char root[700];
+    snprintf(root, sizeof root, "krome=%s", path("std"));
+    KV_CHECK(c, kimc("check", path("good.kim"), "--root", root, "--as", "g/good.kim") == 0 && has(g_out.data, "g/good.kim: no mistakes (2 files)"));
+    KV_CHECK(c, kimc("check", path("bad.kim"), "--root", root, "--as", "g/bad.kim") == 1);
+    KV_CHECK(c, has(g_err.data, "g/bad.kim:3: bg: 'panl' is not a color, nor a token of every theme\n"));
+    KV_CHECK(c, has(g_err.data, "g/bad.kim:4: 'buton' is neither a kernel node (box, text, image, hit) nor a definition\n"));
+    // Without the root the use is not found; a cooked tree is found by the whole path.
+    KV_CHECK(c, kimc("check", path("good.kim"), "--as", "g/good.kim") == 1 && has(g_err.data, "g/good.kim:1: use \"krome/std\": no such prelude"));
+    io_make_dirs(path("tree/krome"));
+    KV_CHECK(c, kimc("compile", path("std/std.kim"), path("tree/krome/std.kimb"), "--as", "krome/std.kim") == 0);
+    KV_CHECK(c, kimc("check", path("good.kim"), "--tree", path("tree")) == 0);
+    KV_CHECK(c, kimc("check", path("good.kim"), "--root", "nodir") == 2);
+}
+
 void test_failures(TestCtx& c) {
     c.begin("kimc failures");
     KV_CHECK(c, put("bad.kim", "screen s {\n  box bg=#12 w=1x\n}\n"));
     KV_CHECK(c, kimc("compile", path("bad.kim"), path("bad.kimb"), "--as", "ui/bad.kim") == 1);
-    KV_CHECK(c, has(g_err.data, "ui/bad.kim:2:10: a color is #rrggbb or #rrggbbaa\n") && has(g_err.data, "ui/bad.kim:2:16: not a number or a range\n"));
+    KV_CHECK(c, has(g_err.data, "ui/bad.kim:2:10: a color is #rrggbb or #rrggbbaa (or #rgb, #rgba)\n") && has(g_err.data, "ui/bad.kim:2:16: not a number or a range\n"));
     KV_CHECK(c, !io_is_file(path("bad.kimb")) && !io_is_file(path("bad.kimb.kimc-tmp")));
     KV_CHECK(c, kimc("compile", path("missing.kim"), path("m.kimb")) == 1 && has(g_err.data, "cannot read"));
     KV_CHECK(c, kimc("compile", path("form.kim")) == 2);
@@ -131,6 +151,7 @@ int main() {
     if (!process_supported()) { KV_INFO("test", "kimc: no processes here; skipped"); return 0; }
     if (!io_make_temp_dir("kv-kimc", g_dir, sizeof g_dir)) { KV_ERROR("test", "no temporary directory"); return 1; }
     test_compile(c);
+    test_check(c);
     test_failures(c);
     io_remove_tree(g_dir);
     g_out.free();

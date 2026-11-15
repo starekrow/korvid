@@ -11,32 +11,6 @@
 
 namespace kv {
 
-KimError* KimErrors::add(const char* file, u32 line, u32 col, const char* fmt, ...) {
-    ++total;
-    if (count == KV_KIM_MAX_ERRORS) return nullptr;
-    KimError& e = list[count++];
-    e = KimError{};
-    e.file = file;
-    e.line = line;
-    e.col = col;
-    va_list args;
-    va_start(args, fmt);
-    vformat(e.text, sizeof e.text, fmt, args);
-    va_end(args);
-    return &e;
-}
-
-i32 KimErrors::format_one(u32 i, char* out, usize cap) const {
-    if (i >= count) return format(out, cap, "%s", "");
-    const KimError& e = list[i];
-    char where[64] = {};
-    if (e.col) format(where, sizeof where, "%u:%u", e.line, e.col);
-    else format(where, sizeof where, "%u", e.line);
-    if (e.used_file)
-        return format(out, cap, "%s:%s: %s (used at %s:%u)", e.file ? e.file : "?", where, e.text, e.used_file, e.used_line);
-    return format(out, cap, "%s:%s: %s", e.file ? e.file : "?", where, e.text);
-}
-
 namespace {
 
 struct Prop {
@@ -319,9 +293,9 @@ struct Parser {
             usize s = at++;
             while (hex(peek())) ++at;
             usize n = at - s - 1;
-            if ((n != 6 && n != 8) || word_char(peek())) {
+            if ((n != 3 && n != 4 && n != 6 && n != 8) || word_char(peek())) {
                 skip_token();
-                err(c0, "a color is #rrggbb or #rrggbbaa");
+                err(c0, "a color is #rrggbb or #rrggbbaa (or #rgb, #rgba)");
                 return KV_JSON_NO_REF;
             }
             return b.string(text + s, (u32)(at - s));

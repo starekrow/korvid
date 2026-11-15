@@ -10,7 +10,13 @@
     "font":     { "runtime": true },
     "data":     { "runtime": true },
     "text":     { "runtime": true },
-    "script":   { "runtime": true }
+    "script":   { "runtime": true },
+    "kim":      { "runtime": false },
+    "kimb":     { "runtime": true }
+  },
+
+  "converters": {
+    "kim": { "from": "kim", "to": "kimb", "builtin": "kim", "outputs": ["*.kimb"] }
   },
 
   "rules": [
@@ -32,6 +38,8 @@
     { "match": "*.txt",           "meta": { "type": "text" } },
     { "match": "*.md",            "meta": { "type": "text" } },
     { "match": "*.lua",           "meta": { "type": "script" } },
+    { "match": "*.kim",           "meta": { "type": "kim" } },
+    { "match": "*.kimb",          "meta": { "type": "kimb" } },
 
     { "match": "*.berg",          "meta": { "cook": false } },
     { "match": "*.sh",            "meta": { "cook": false } },

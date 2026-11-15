@@ -34,6 +34,7 @@ function M.signature(conv)
         parts[#parts + 1] = k .. "=" .. (conv[k] == nil and "" or berg.show(conv[k]))
     end
     if conv.exec ~= nil then parts[#parts + 1] = "exec=" .. berg.show(conv.exec) end
+    if conv.builtin ~= nil then parts[#parts + 1] = "builtin=" .. conv.builtin .. "@" .. tostring((host.builtins or {})[conv.builtin]) end
     return table.concat(parts, " ")
 end
 
@@ -66,6 +67,7 @@ end
 -- under an asset root (on PATH, or by an absolute path), false, "exe" and the program.
 -- has(key) says whether the session knows such a file.
 function M.script(conv, has)
+    if conv.builtin then return false, "builtin", conv.builtin end
     if conv.exec then return program(conv, has) end
     local root, berg_path = (conv.key or ""):match("^([^:]+):(.*)$")
     if not root then
@@ -114,6 +116,10 @@ end
 -- command(conv, script, kind, vars, params): argv and env for one run, or nil and why.
 function M.command(conv, script, kind, vars, params)
     local argv
+    if kind == "builtin" then
+        -- goldberg's own: its name, the source, and the asset path the result records.
+        return { script, vars["in"], vars.asset or vars.name }, {}
+    end
     if kind == "exe" then argv = { script } -- the program itself: no shell between
     elseif kind == "bat" then argv = { "cmd", "/c", script }
     else argv = { host.windows and "sh" or "/bin/sh", script } end

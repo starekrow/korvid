@@ -56,7 +56,7 @@ end
 local TOP = { meta = true, rules = true, types = true, converters = true }
 local RULE = { match = true, meta = true }
 local TYPE = { runtime = true, to = true }
-local CONVERTER = { from = true, to = true, shell = true, exec = true, args = true, outputs = true, settle = true }
+local CONVERTER = { from = true, to = true, shell = true, exec = true, builtin = true, args = true, outputs = true, settle = true }
 
 -- parse(text, name): the record, or nil and "name:line: what is wrong".
 --   { meta = entries or nil, rules = { { match, meta = entries, line } },
@@ -117,7 +117,16 @@ function M.parse(text, name)
             if type(c.from) ~= "string" or type(c.to) ~= "string" then return fail(name, cline, 'the converter "%s" needs "from" and "to" types', cname) end
             -- "shell": a script, run by sh (or cmd, for a .bat on Windows). "exec": a program,
             -- run directly, with nothing between it and goldberg. One or the other.
-            if (c.shell == nil) == (c.exec == nil) then return fail(name, cline, 'the converter "%s" needs "shell" (the script it runs, without its extension) or "exec" (the program it runs), not both', cname) end
+            -- "builtin": one goldberg runs itself, in process ("kim"). One of the three.
+            local ways = (c.shell ~= nil and 1 or 0) + (c.exec ~= nil and 1 or 0) + (c.builtin ~= nil and 1 or 0)
+            if ways ~= 1 then return fail(name, cline, 'the converter "%s" needs one of "shell" (the script it runs, without its extension), "exec" (the program it runs) or "builtin" (one goldberg has)', cname) end
+            if c.builtin ~= nil and (type(c.builtin) ~= "string" or not (host.builtins or {})[c.builtin]) then
+                local names = {}
+                for k in pairs(host.builtins or {}) do names[#names + 1] = k end
+                table.sort(names)
+                return fail(name, cline, 'the converter "%s": "builtin" names one goldberg has (%s)', cname, table.concat(names, ", "))
+            end
+            if c.builtin ~= nil and c.args ~= nil then return fail(name, cline, 'the converter "%s": a built-in converter takes no "args"', cname) end
             if c.shell ~= nil and type(c.shell) ~= "string" then return fail(name, cline, 'the converter "%s": "shell" is the script it runs, without its extension', cname) end
             if c.exec ~= nil and (type(c.exec) ~= "string" or c.exec == "") then return fail(name, cline, 'the converter "%s": "exec" is the program it runs: a path under its .berg file, a name on PATH, or an absolute path', cname) end
             if c.args ~= nil and type(c.args) ~= "string" then return fail(name, cline, 'the converter "%s": "args" is one string', cname) end
@@ -135,7 +144,7 @@ function M.parse(text, name)
             elseif outputs ~= nil then
                 return fail(name, cline, 'the converter "%s": "outputs" is a list of names or patterns, or "scan"', cname)
             end
-            rec.converters[cname] = { from = c.from, to = c.to, shell = c.shell, exec = c.exec, args = c.args, outputs = outputs, settle = c.settle, line = cline }
+            rec.converters[cname] = { from = c.from, to = c.to, shell = c.shell, exec = c.exec, builtin = c.builtin, args = c.args, outputs = outputs, settle = c.settle, line = cline }
         end
     end
     return rec

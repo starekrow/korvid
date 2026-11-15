@@ -2,7 +2,7 @@
 -- The parser and the compiler from .kim text to .kimb, the document as canonical KBOR.
 -- It knows the grammar, not the meaning: words, styles and tokens are resolved by Krome
 -- when it loads a .kimb. Core only, so goldberg, kimc and a game that reads text can link
--- it without Krome; Krome itself does not.
+-- it without Krome; Krome itself does not. Its errors are kimb's.
 module "kim" {
-  deps = { "core" },
+  deps = { "core", "kimb" },
 }

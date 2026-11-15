@@ -31,6 +31,7 @@
 #include "korvid/core/name.h"
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
+#include "korvid/kim/kim.h"
 #include "korvid/platform/fs_watch.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/process.h"
@@ -200,6 +201,7 @@ struct Proc {
     bool        scan = false;
     f64         settle = 0;
     f64         exited_at = -1;
+    char        builtin[16] = {};       // a built-in converter ("kim"), run in process; empty: a child process
     Array<char> words;                  // argv then env, NUL separated
     u32         argc = 0, envc = 0;
     Array<char> err;                    // what it wrote to stderr (the tail is kept)
@@ -608,6 +610,47 @@ void drain(Proc& pr) {
     }
 }
 
+// A built-in converter, on the run's worker in place of a child process: argv is the
+// converter's name, the source's full path, and its asset path (what the result records).
+// It writes into run_dir as a script would, and its errors go where a script's stderr
+// goes. 0, or 1 when it failed.
+//   kim  a .kim compiled to <name>.kimb (kim_compile): the source's name, ".kim" made ".kimb"
+i32 run_builtin(Proc& pr, const Array<const char*>& argv) {
+    auto say = [&](const char* text) {
+        u32 n = (u32)strlen(text);
+        memcpy(pr.err.push_n(n), text, n);
+    };
+    if (strcmp(pr.builtin, "kim") || argv.len < 3) { say("no such built-in converter\n"); return 1; }
+    const char* in = argv[1];
+    const char* asset = argv[2];
+    IoBytes src;
+    if (!io_read_now(in, &src)) { say("cannot read the source\n"); return 1; }
+    Array<u8> out{};
+    KimErrors errors;
+    bool ok = kim_compile((const char*)src.data, src.size, asset, out, errors);
+    src.free();
+    if (!ok) {
+        for (u32 i = 0; i < errors.count; ++i) {
+            char line[512];
+            errors.format_one(i, line, sizeof line);
+            say(line);
+            say("\n");
+        }
+        out.free();
+        return 1;
+    }
+    const char* name = strrchr(in, '/');
+    name = name ? name + 1 : in;
+    char target[1100];
+    usize nl = strlen(name);
+    if (nl > 4 && !strcmp(name + nl - 4, ".kim")) format(target, sizeof target, "%s/%sb", pr.run_dir, name);
+    else format(target, sizeof target, "%s/%s.kimb", pr.run_dir, name);
+    bool wrote = io_write_now(target, out.data, out.len);
+    out.free();
+    if (!wrote) { say("cannot write the .kimb\n"); return 1; }
+    return 0;
+}
+
 // One converter run, on its worker: started, drained until it ends (killed if the queue
 // asks it to stop), held open for `settle` when it declares its outputs (its real writer
 // may not be the process that was started), and, if it ended well, its files committed.
@@ -622,6 +665,14 @@ i32 run_task(void* arg, const IoTaskCtl& ctl) {
     const char* w = pr.words.data;
     for (u32 i = 0; i < pr.argc; ++i, w += strlen(w) + 1) argv.push(w);
     for (u32 i = 0; i < pr.envc; ++i, w += strlen(w) + 1) env.push(w);
+    if (pr.builtin[0]) {
+        pr.code = run_builtin(pr, argv);
+        argv.free();
+        env.free();
+        if (pr.code == 0) commit_files(pr);
+        else io_remove_tree(pr.run_dir);
+        return 0;
+    }
     ProcessDesc d;
     d.argv = Span<const char* const>(argv.data, argv.len);
     d.env  = Span<const char* const>(env.data, env.len);
@@ -993,6 +1044,9 @@ int host_run(lua_State* L) {
         lua_pop(L, 1);
     }
     if (!pr->argc) return fail("no command");
+    lua_getfield(L, 1, "builtin");
+    if (lua_type(L, -1) == LUA_TSTRING) format(pr->builtin, sizeof pr->builtin, "%s", lua_tostring(L, -1));
+    lua_pop(L, 1);
     proc_prepare(s, *pr);
     if (!submit(s, &pr->head, run_task, LaneRun, pr->path)) {
         pr->spawn_failed = true;
@@ -1171,6 +1225,12 @@ bool load_app(GoldbergState& s, Engine& e) {
     lua_pushboolean(L, 0);
 #endif
     lua_setfield(L, -2, "windows");
+    // The built-in converters and their versions: a step's key holds the version, so a new
+    // compiler cooks everything again.
+    lua_newtable(L);
+    lua_pushfstring(L, "%d", (int)KV_KIM_VERSION);
+    lua_setfield(L, -2, "kim");
+    lua_setfield(L, -2, "builtins");
     lua_newtable(L);
     for (u32 i = 0; i < EvCount; ++i) { lua_pushstring(L, kEvNames[i]); lua_rawseti(L, -2, (lua_Integer)i); }
     lua_setfield(L, -2, "event_names");

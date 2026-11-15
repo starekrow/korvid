@@ -1,8 +1,10 @@
 // Krome's insides: the module's state, a screen, and the Lua side's entry points.
 #pragma once
 #include "korvid/krome/krome.h"
+#include "korvid/core/arena.h"
 #include "korvid/core/array.h"
 #include "korvid/core/handle.h"
+#include "korvid/kimb/kimb.h"
 #include "korvid/render/ui.h"
 
 struct lua_State;
@@ -14,6 +16,23 @@ struct TickContext;
 // A node whose shown text reads a model key.
 struct KromeDep { u32 node; u64 key; };
 
+// A file Krome reads: a .kimb (a screen's, or a prelude a `use` names) or a script a
+// `script` line names. Read once through the I/O queue, or taken from what krome_provide
+// gave, and kept: a theme switch rebuilds from the documents, never from the disk.
+struct KromeDoc {
+    Name     path;            // the asset path read ("kromedemo/form.kimb", "kromedemo/form.lua")
+    bool     script = false;  // a Lua source, not a .kimb
+    Handle   io;
+    bool     loading = true, ready = false, failed = false;
+    Arena    arena;           // the document's nodes and strings
+    KimbFile file;
+    char*    source = nullptr; // a script's text
+    usize    source_len = 0;
+};
+
+// What a screen is waiting for before it can be built.
+enum class KromeStage : u8 { Read, Scripts, Uses, Built, Failed };
+
 // Where an overlay goes against its anchor.
 enum class KromeSide : u8 { Below, Above, Right, Left, Pointer };
 
@@ -21,6 +40,8 @@ enum class KromeSide : u8 { Below, Above, Right, Left, Pointer };
 struct KromeOverlay {
     u32       id = 0;
     KromeTree tree;
+    Arena     arena;             // its tree as a document (from the Lua table), for rebuilding
+    KimbFile  file;
     Name      anchor;            // the node it opens at, by id; null: the pointer or the window's center
     KromeSide side = KromeSide::Below;
     bool      modal = false;     // takes all input until closed; else it closes on a press outside
@@ -43,6 +64,17 @@ struct KromeScreen {
     i32        layer = KROME_DEFAULT_LAYER;
     KromeTree  tree;
     Array<KromeDep> deps;
+    // Where its tree comes from: a screen of a .kimb (doc, screen), or a script's root
+    // table made a document of its own (lua_file, in arena).
+    KromeStage stage = KromeStage::Read;
+    KromeDoc*  doc = nullptr;
+    Name       screen;          // the screen in doc
+    Name       script;          // a Lua screen's script, by asset path; null for one given as source
+    Arena      arena;
+    KimbFile   lua_file;
+    bool       has_lua_file = false;
+    Array<Name> uses;           // a Lua screen's `uses`
+    KimbScope  scope;           // the file, then its uses: built once they are all in
     int        env = -2, store = -2, on = -2; // registry refs (LUA_NOREF is -2)
     Handle     io;              // its script's read, while it loads
     char*      source = nullptr; // a source given in memory, until it runs
@@ -51,6 +83,7 @@ struct KromeScreen {
     Array<KromeOverlay*> overlays; // bottom first
     u32        next_overlay = 1;
     bool       repaint = true;      // its look changed (a hover, an overlay) since it was painted
+    bool       rebuild = false;     // its tree is to be built again from its document (a theme switch)
 };
 
 // A font at one pixel size, as text at a size and a scale asks for it.
@@ -62,6 +95,12 @@ struct KromeModule {
     Allocator*          general = nullptr;
     lua_State*          L = nullptr;
     Array<KromeScreen*> screens;
+    Array<KromeDoc*>    docs;
+    // Files given from memory (krome_provide), by asset path: taken in place of a read.
+    struct Provided { Name path; char* data; usize size; };
+    Array<Provided>     provided;
+    Name                theme;    // the theme every screen is in; null: each scope's first
+    KimErrors           errors;   // the latest mistakes found loading and building (krome_errors)
     u32                 next_id = 1;
     TickContext*        ctx = nullptr; // the running system's, for emits; null outside one
     u64                 fired = 0, script_errors = 0;
@@ -90,12 +129,46 @@ KromeModule*  krome_state(Engine& e);
 KromeScreen* krome_screen(KromeModule& s, Name name);
 KromeScreen* krome_screen_by_id(KromeModule& s, u32 id);
 
+// A mistake with its place: logged as file:line: text (and the use, through a definition),
+// kept in s.errors, counted in script_errors.
+void krome_error(KromeModule& s, const char* file, u32 line, const char* used_file, u32 used_line, const char* fmt, ...) KV_PRINTF(6, 7);
+
+// ---- documents (doc.cc) --------------------------------------------------------------------------
+
+// The document at an asset path, asked for if it is not yet (and read in the pump).
+KromeDoc* krome_doc(KromeModule& s, Name path, bool script);
+KromeDoc* krome_doc_loaded(KromeModule& s, Name path);
+// Reads and reaps what the queue finished for documents; requests what is wanted.
+void krome_pump_docs(KromeModule& s);
+void krome_free_docs(KromeModule& s);
+// A use's file: "krome/std" is "krome/std.kimb".
+Name krome_use_path(const char* use);
+// Whether every file the scope needs has landed: true when built (into sc.scope), false
+// while some are still loading; *failed when one never will.
+bool krome_scope_ready(KromeModule& s, KromeScreen& sc, bool* failed);
+
+// ---- building (build.cc) -------------------------------------------------------------------------
+
+// The screen's tree, from its document, in its scope and the module's theme. Overlays too.
+// What was scrolled stays scrolled, by id.
+bool krome_build_screen(KromeModule& s, KromeScreen& sc);
+// An overlay's tree, from its document, in the screen's scope.
+bool krome_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o);
+const char* krome_theme_of(KromeModule& s, const KimbScope& scope);
+// Each node that reads the model shows its text with the values filled in.
+void krome_fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node);
+
 // ---- the Lua side (lua.cc) ----------------------------------------------------------------------
 
 bool krome_lua_open(KromeModule& s);
 void krome_lua_close(KromeModule& s);
-// Runs a screen's script and builds its tree; false (logged) when it did not run.
+// Runs a screen's script: its model, its handlers, its uses, and its root made a document
+// (sc.lua_file). False (logged) when it did not run.
 bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize len, const char* chunk);
+// A .kimb screen's scripts, in order, in one environment: their models merged, their
+// handlers merged (one event handled twice is an error). False when one failed; what the
+// others gave stands.
+bool krome_lua_scripts(KromeModule& s, KromeScreen& sc, KromeDoc* const* scripts, u32 count);
 void krome_lua_release(KromeModule& s, KromeScreen& sc); // its refs
 // A model value, from Lua or from outside: the store, then every text that reads it.
 void krome_model_set_number(KromeModule& s, KromeScreen& sc, const char* key, f64 v, bool boolean);
@@ -105,8 +178,8 @@ const char* krome_model_value_text(KromeModule& s, KromeScreen& sc, const char* 
 // A node's event: its handler, then KromeEvent. False when it has none.
 bool krome_fire(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, f64 value);
 void krome_emit(KromeModule& s, const KromeEvent& ev);
-// An overlay from the node table at the top of the Lua stack (lua.cc), already added to sc.
-bool krome_lua_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o);
+// The model's value for a key as Lua has it, for `if` (truthy) and `each` (a list).
+bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* key);
 
 // ---- the view (view.cc) --------------------------------------------------------------------------
 

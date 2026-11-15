@@ -4,6 +4,7 @@
 #include "korvid/core/memory.h"
 #include "korvid/core/name.h"
 #include "korvid/core/test.h"
+#include "korvid/kim/kim.h"
 #include "korvid/platform/io.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/module.h"
@@ -642,11 +643,48 @@ void test_exec(TestCtx& c) {
     t.put("assets/goldberg.berg", R"({ "types": { "low": { "runtime": false } },
   "converters": { "up": { "from": "low", "to": "text", "shell": "tools/up", "exec": "tools/up" } },
   "rules": [ { "match": "*.low", "meta": { "type": "low" } } ] })");
-    KV_CHECK(c, COOK() == 1 && has(g_err.data, "needs \"shell\" (the script it runs, without its extension) or \"exec\" (the program it runs), not both"));
+    KV_CHECK(c, COOK() == 1 && has(g_err.data, "needs one of \"shell\" (the script it runs, without its extension), \"exec\" (the program it runs) or \"builtin\""));
     t.put("assets/goldberg.berg", R"({ "types": { "low": { "runtime": false } },
   "converters": { "up": { "from": "low", "to": "text", "exec": "tools/nope" } },
   "rules": [ { "match": "*.low", "meta": { "type": "low" } } ] })");
     KV_CHECK(c, COOK() == 1 && has(g_err.data, "runs tools/nope") && has(g_err.data, "which is not there"));
+#undef COOK
+    t.free();
+}
+
+// The built-in kim converter: a .kim cooks to a .kimb by convention, in process, with the
+// asset path recorded; a mistake fails the cook with its file and line.
+void test_kim(TestCtx& c) {
+    c.begin("goldberg kim");
+    Tree t;
+    KV_CHECK(c, t.make("kv-goldberg-kim"));
+    char root[600], out[600], dump[600];
+    snprintf(root, sizeof root, "g=%s/assets", t.dir);
+    snprintf(out, sizeof out, "%s/out", t.dir);
+    snprintf(dump, sizeof dump, "%s/dump.txt", t.dir);
+#define COOK(...) gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--watch", "none" __VA_OPT__(,) __VA_ARGS__)
+    const char* form = "use \"krome/std\"\nscreen form {\n  col gap=8 { button \"Save\" -> save }\n}\n";
+    t.put("assets/ui/form.kim", form);
+    t.put("assets/ui/form.lua", "return {}\n");
+    KV_CHECK(c, COOK("--dump", dump) == 0 && has(t.read("dump.txt"), "request run g:ui/form.kim kim"));
+    KV_CHECK(c, io_is_file(t.path("out/g/ui/form.kimb")) && !io_is_file(t.path("out/g/ui/form.kim")) && io_is_file(t.path("out/g/ui/form.lua")));
+    Array<u8> want{};
+    KimErrors e;
+    KV_CHECK(c, kim_compile(form, strlen(form), "g/ui/form.kim", want, e));
+    IoBytes got;
+    KV_CHECK(c, io_read_now(t.path("out/g/ui/form.kimb"), &got) && got.size == want.len && memcmp(got.data, want.data, want.len) == 0);
+    got.free();
+    want.free();
+    KV_CHECK(c, COOK("--dump", dump) == 0 && !has(t.read("dump.txt"), "request run"));
+
+    t.put("assets/ui/bad.kim", "screen s {\n  box bg=#12\n}\n");
+    KV_CHECK(c, COOK() == 1 && has(g_err.data, "the converter \"kim\" failed") && has(g_err.data, "g/ui/bad.kim:2:10: a color is #rrggbb or #rrggbbaa"));
+    KV_CHECK(c, !io_is_file(t.path("out/g/ui/bad.kimb")));
+
+    // A built-in converter is goldberg's: a name it does not have, or args, are refused.
+    t.put("assets/goldberg.berg", R"({ "types": { "low": { "runtime": false } },
+  "converters": { "up": { "from": "low", "to": "text", "builtin": "nope" } } })");
+    KV_CHECK(c, COOK() == 1 && has(g_err.data, "\"builtin\" names one goldberg has (kim)"));
 #undef COOK
     t.free();
 }
@@ -1005,6 +1043,7 @@ int main(int argc, char** argv) {
     test_cook(c);
     test_scripts(c);
     test_exec(c);
+    test_kim(c);
     test_learn(c);
     test_watch(c);
     test_state_slices(c);

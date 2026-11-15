@@ -208,7 +208,7 @@ void test_kim_errors(kv::TestCtx& c) {
         KV_CHECK(c, e.count == 3 && e.list[0].line == 3 && e.list[1].line == 3 && e.list[2].line == 5);
         char buf[300];
         e.format_one(0, buf, sizeof buf);
-        KV_CHECK(c, !strcmp(buf, "t.kim:3:12: a color is #rrggbb or #rrggbbaa"));
+        KV_CHECK(c, !strcmp(buf, "t.kim:3:12: a color is #rrggbb or #rrggbbaa (or #rgb, #rgba)"));
     }
 
     // Past the cap they are counted, not kept.

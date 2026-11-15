@@ -264,6 +264,8 @@ local function check_shell(g, step, f)
     local scan = conv.outputs == "scan"
     local write_dir = (scan and s:root_dir(s.work_root) or s.run_dir) .. "/" .. step.work
     local vars = convert.vars(s:root_dir(f.root) .. "/" .. f.path, write_dir)
+    local root_name, asset_path = s:place(f)
+    vars.asset = root_name .. "/" .. asset_path
     local argv, env = convert.command(conv, program, kind, vars, step.params)
     if not argv then return fail(g, step, env) end
     local patterns, bad = convert.patterns(conv, vars, step.params)
@@ -282,7 +284,8 @@ local function check_shell(g, step, f)
     step.run_key, step.patterns, step.scan, step.exited = key, patterns, scan, false
     set_state(g, step, "running")
     s:request("run", step.file .. " " .. conv.name)
-    s.io.run{ root = f.root, path = f.path, argv = argv, env = env, work_root = s.work_root, dir = step.work, write_dir = write_dir, scan = scan, settle = conv.settle or 0 }
+    s.io.run{ root = f.root, path = f.path, argv = argv, env = env, work_root = s.work_root, dir = step.work, write_dir = write_dir, scan = scan, settle = conv.settle or 0,
+              builtin = kind == "builtin" and conv.builtin or nil }
 end
 
 -- A run that ended well, with everything it wrote hashed: hold it to what it declared.

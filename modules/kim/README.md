@@ -35,8 +35,10 @@ if (!kim_compile(text, len, "game/form.kim", kimb, errors))
     for (u32 i = 0; i < errors.count; ++i) { char line[512]; errors.format_one(i, line, sizeof line); ... }
 ```
 
-The grammar and the document's shape are in `korvid/kim/kim.h`. `kimc` (`tools/kimc`) is
-the command line; `kbor decode` shows a `.kimb` as JSON.
+The grammar and the document's shape are in `korvid/kim/kim.h`. Errors (`KimErrors`) and
+the meaning (`kimb_check`) are `kimb`'s, which Krome links too. `kimc` (`tools/kimc`) is
+the command line; goldberg compiles `.kim` in process (its built-in `kim` converter);
+`kbor decode` shows a `.kimb` as JSON.
 
 ## Behaviour worth knowing
 

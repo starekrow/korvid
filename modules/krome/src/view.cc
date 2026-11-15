@@ -3,6 +3,7 @@
 // changed, and the pointer routed top first through overlays and screens
 // (docs/PRDs/Krome-Slice-1-PRD.md, "Paint and the display list", "Input and overlays").
 #include "internal.h"
+#include "korvid/core/arena.h"
 #include "korvid/asset/font.h"
 #include "korvid/asset/texture.h"
 #include "korvid/core/engine.h"
@@ -366,6 +367,7 @@ void krome_close_overlay(KromeModule& s, KromeScreen& sc, u32 id) {
     if (s.under.screen == sc.id && s.under.overlay == o->id) s.under = KromeTarget{};
     if (s.captured.screen == sc.id && s.captured.overlay == o->id) s.captured = KromeTarget{};
     o->tree.free();
+    if (o->arena.base) arena_destroy(o->arena);
     free_items(s.general, o, 1);
     sc.repaint = true;
 }

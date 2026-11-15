@@ -18,7 +18,7 @@
 // then an optional block of children. `each item in list { }` and `if name { }` are nodes
 // too. `//` comments to the end of a line wherever white space may stand.
 //
-// Values: numbers (8, -2, 1.5), strings ("..."), colors (#rrggbb, #rrggbbaa), ranges
+// Values: numbers (8, -2, 1.5), strings ("..."), colors (#rrggbb, #rrggbbaa, #rgb, #rgba), ranges
 // (120..400, ..400, 120..), lists (4,8 with no spaces) and bare words (a token or a
 // keyword: Krome decides which).
 //
@@ -45,34 +45,16 @@
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/json.h"
+#include "korvid/kimb/kimb.h"
 
 namespace kv {
 
 constexpr u32 KV_KIM_VERSION    = 1;
-constexpr u32 KV_KIM_MAX_ERRORS = 32;
+constexpr u32 KV_KIM_MAX_ERRORS = KV_KIMB_MAX_ERRORS;
 constexpr u32 KV_KIM_NO_LINES   = 1u << 0;
 
-// A mistake, with where it was made. `file` and `used_file` point at text that outlives
-// the errors (the caller's file name, a document's strings). A mistake found through a
-// definition also names where it was used.
-struct KimError {
-    const char* file      = nullptr;
-    u32         line      = 0;
-    u32         col       = 0; // 1-based; 0 when only the line is known
-    const char* used_file = nullptr;
-    u32         used_line = 0;
-    char        text[200] = {};
-};
-
-struct KimErrors {
-    KimError list[KV_KIM_MAX_ERRORS];
-    u32      count = 0; // stored
-    u32      total = 0; // found; past KV_KIM_MAX_ERRORS they are counted, not kept
-
-    KimError* add(const char* file, u32 line, u32 col, const char* fmt, ...) KV_PRINTF(5, 6);
-    // "file:line:col: text", and " (used at file:line)" when there is one.
-    i32 format_one(u32 i, char* out, usize cap) const;
-};
+// Errors are kimb's (KimError, KimErrors: korvid/kimb/kimb.h), so a mistake reads the
+// same from the parser as from the check.
 
 // Parses .kim text into the document. Nodes and strings from `alloc` (an arena: nothing
 // here frees). `file` is the asset path the document records. False, and the document a

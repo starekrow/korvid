@@ -5,6 +5,6 @@
 module "kimc" {
   output        = "exe",
   platforms     = { "host" },
-  deps          = { "core", "platform", "cli", "tool", "kim" },
+  deps          = { "core", "platform", "cli", "tool", "kim", "kimb" },
   engine_module = true,
 }
