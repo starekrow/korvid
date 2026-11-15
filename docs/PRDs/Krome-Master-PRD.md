@@ -58,11 +58,13 @@ typed at it).
   | module | holds | who links it |
   |---|---|---|
   | `krome` | the kernel nodes, layout, paint, input, styles, the prelude's meaning, the Lua bridge, the `.kimb` loader | any tool or game with Krome screens |
+  | `kimb` | the `.kimb` document and what its names mean: reading it with its lines, the scope, the kernel's vocabulary, the check | `krome`, `kim`, `kimc`, goldberg |
   | `kim` | the `.kim` parser and the `.kim` to `.kimb` compiler; reports what a file references | goldberg, `kimc`, and a game that reads text |
-  | `tools/kimc` | the command line over `kim`: compile, check, format | people and scripts |
+  | `tools/kimc` | the command line over `kim` and `kimb`: compile, check (format waits) | people and scripts |
 
-  `kim` depends on `core` only (KBOR is core's), so it can sit in goldberg, a tool or a
-  game without bringing Krome. `krome` does not depend on `kim`.
+  `kimb` depends on `core` only (KBOR is core's), and `kim` on `core` and `kimb`, so either
+  can sit in goldberg, a tool or a game without bringing Krome. `krome` links `kimb`, so a
+  mistake is found by the same rules everywhere, and does not depend on `kim`.
 - **Lua for behaviour.** A prelude is markup and Lua; a screen's logic is a Lua function
   that returns a tree. Lua is `modules/lua`, with the engine's math, so a handler's
   arithmetic is the same on every platform.
@@ -318,7 +320,7 @@ the model, a definition used with the wrong arguments: each names the line writt
 | K3 | A screen built as a Lua table and as `.kimb` is the same tree and the same pixels | P0 |
 | K4 | The runtime loads `.kimb` only; `krome` does not link `kim` | P0 |
 | K5 | `.kim` to `.kimb` is deterministic and canonical: the same document gives the same bytes | P0 |
-| K6 | `kim` depends on `core` only; a game can link it to read text | P0 |
+| K6 | `kim` depends on `core` and `kimb` only; a game can link it to read text | P0 |
 | K7 | Named styles with states, merged left to right, no selectors; theme tokens; declared inheritance | P0 |
 | K8 | Definitions with parameters and one slot; `each` and `if`; nothing more in markup | P0 |
 | K9 | Model binding: `@name` two-way, `{name}` in text, a change redraws only what read it | P0 |
@@ -357,8 +359,8 @@ the model, a definition used with the wrong arguments: each names the line writt
 2. **The markup.** The `kim` module, `.kimb`, `kimc` (compile, check, format), the
    loader; the prelude (props, styles with states, themes, definitions, `each`, `if`);
    errors with lines; a first standard prelude (label, button, checkbox, row and column
-   helpers); goldberg's converter if goldberg's slice 2 has landed, otherwise kormake
-   runs `kimc`.
+   helpers); goldberg's converter (built in: goldberg compiles and checks `.kim` in
+   process).
    *Done when* slice 1's form is a `.kim` file, is pixel for pixel what the Lua form
    drew, and a misspelled style names its line in all three places an error can surface.
 3. **Text.** Paragraphs in `text`, with a game's `Text` able to wrap; fallback, glyphs on

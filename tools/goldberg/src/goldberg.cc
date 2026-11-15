@@ -32,6 +32,8 @@
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 #include "korvid/kim/kim.h"
+#include "korvid/kimb/kimb.h"
+#include "korvid/core/arena.h"
 #include "korvid/platform/fs_watch.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/process.h"
@@ -202,6 +204,7 @@ struct Proc {
     f64         settle = 0;
     f64         exited_at = -1;
     char        builtin[16] = {};       // a built-in converter ("kim"), run in process; empty: a child process
+    Array<char> roots_text;             // a built-in's view of the asset roots: name, dir, NUL after each
     Array<char> words;                  // argv then env, NUL separated
     u32         argc = 0, envc = 0;
     Array<char> err;                    // what it wrote to stderr (the tail is kept)
@@ -457,6 +460,7 @@ void proc_free(Proc* pr) {
     pr->made.free();
     pr->gone.free();
     pr->made_text.free();
+    pr->roots_text.free();
     mem_free(pr);
 }
 
@@ -610,6 +614,89 @@ void drain(Proc& pr) {
     }
 }
 
+// ---- the kim converter's check -----------------------------------------------------------------
+
+struct KimCheck {
+    const Proc* pr = nullptr;
+    Arena*      arena = nullptr;
+    KimErrors*  errors = nullptr;
+    KimbFile    files[KV_KIMB_MAX_SCOPE];
+    char        names[KV_KIMB_MAX_SCOPE][160] = {};
+    u32         count = 0;
+    bool        outside = false; // a use whose root is not in this cook: nothing to check against
+};
+
+// A use ("krome/std") as the source under the root of its first part: that root's std.kim.
+const KimbFile* kim_find_use(void* user, const char* use) {
+    KimCheck& c = *(KimCheck*)user;
+    for (u32 i = 0; i < c.count; ++i) if (!strcmp(c.names[i], use)) return &c.files[i];
+    const char* slash = strchr(use, '/');
+    if (!slash) return nullptr;
+    usize nl = (usize)(slash - use);
+    const char* dir = nullptr;
+    for (const char* r = c.pr->roots_text.data; r && r < c.pr->roots_text.data + c.pr->roots_text.len;) {
+        const char* d = r + strlen(r) + 1;
+        if (strlen(r) == nl && !strncmp(r, use, nl)) dir = d;
+        r = d + strlen(d) + 1;
+    }
+    if (!dir) { c.outside = true; return nullptr; }
+    if (c.count == KV_KIMB_MAX_SCOPE) return nullptr;
+    char path[1200], file[200];
+    format(path, sizeof path, "%s/%s.kim", dir, slash + 1);
+    format(file, sizeof file, "%s.kim", use);
+    IoBytes b;
+    if (!io_read_now(path, &b)) return nullptr;
+    KimbFile& f = c.files[c.count];
+    format(c.names[c.count], sizeof c.names[0], "%s", use);
+    char* keep = (char*)arena_alloc(*c.arena, strlen(file) + 1, 1);
+    memcpy(keep, file, strlen(file) + 1);
+    JsonDoc doc;
+    KimErrors quiet; // a prelude's own mistakes are its own step's to report
+    bool ok = kim_parse((const char*)b.data, b.size, keep, &c.arena->a, doc, quiet) && kimb_from_doc(doc, f, quiet, keep);
+    b.free();
+    if (!ok) { c.outside = true; return nullptr; }
+    ++c.count;
+    return &f;
+}
+
+template <class Say>
+bool check_kim(const Proc& pr, const char*, const char* in, const char* asset, Say& say) {
+    IoBytes src;
+    if (!io_read_now(in, &src)) return true;
+    Arena arena;
+    if (!arena_create(arena, src.size * 64 + (64u << 20), "goldberg.kim", MemTag{})) { src.free(); return true; }
+    KimErrors errors;
+    KimCheck c;
+    c.pr = &pr;
+    c.arena = &arena;
+    c.errors = &errors;
+    JsonDoc doc;
+    KimbFile f;
+    bool ok = true;
+    if (kim_parse((const char*)src.data, src.size, asset, &arena.a, doc, errors) && kimb_from_doc(doc, f, errors, asset)) {
+        KimbScope scope;
+        KimErrors scope_errors;
+        bool scoped = kimb_scope(scope, f, kim_find_use, &c, scope_errors);
+        if (!c.outside) {
+            if (!scoped)
+                for (u32 i = 0; i < scope_errors.count; ++i) errors.add(scope_errors.list[i].file, scope_errors.list[i].line, 0, "%s", scope_errors.list[i].text);
+            if (scoped) kimb_check(scope, errors);
+        }
+    }
+    if (errors.total) {
+        ok = false;
+        for (u32 i = 0; i < errors.count; ++i) {
+            char line[512];
+            errors.format_one(i, line, sizeof line);
+            say(line);
+            say("\n");
+        }
+    }
+    src.free();
+    arena_destroy(arena);
+    return ok;
+}
+
 // A built-in converter, on the run's worker in place of a child process: argv is the
 // converter's name, the source's full path, and its asset path (what the result records).
 // It writes into run_dir as a script would, and its errors go where a script's stderr
@@ -639,6 +726,9 @@ i32 run_builtin(Proc& pr, const Array<const char*>& argv) {
         out.free();
         return 1;
     }
+    // Checked against the preludes it uses, where their roots are in this cook: a mistake
+    // the game would find at load fails the cook, with its line.
+    if (!check_kim(pr, (const char*)nullptr, in, asset, say)) { out.free(); return 1; }
     const char* name = strrchr(in, '/');
     name = name ? name + 1 : in;
     char target[1100];
@@ -1045,7 +1135,17 @@ int host_run(lua_State* L) {
     }
     if (!pr->argc) return fail("no command");
     lua_getfield(L, 1, "builtin");
-    if (lua_type(L, -1) == LUA_TSTRING) format(pr->builtin, sizeof pr->builtin, "%s", lua_tostring(L, -1));
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        format(pr->builtin, sizeof pr->builtin, "%s", lua_tostring(L, -1));
+        // The roots, for what the source names in other files (a .kim's uses): a copy, since
+        // the run is on a worker.
+        for (const Root& r : s.roots) {
+            if (!r.name[0]) continue;
+            usize a = strlen(r.name) + 1, b = strlen(r.dir) + 1;
+            memcpy(pr->roots_text.push_n((u32)a), r.name, a);
+            memcpy(pr->roots_text.push_n((u32)b), r.dir, b);
+        }
+    }
     lua_pop(L, 1);
     proc_prepare(s, *pr);
     if (!submit(s, &pr->head, run_task, LaneRun, pr->path)) {

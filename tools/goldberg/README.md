@@ -165,13 +165,14 @@ no rule types is copied as it is, with a soft warning.
 ## Converters
 
 `copy` is built in. Others are registered in a `.berg` file under an asset root, with a
-script (`shell`) or a program (`exec`), one or the other:
+script (`shell`), a program (`exec`) or one of goldberg's own (`builtin`), one of the three:
 
 | Key | Meaning |
 |---|---|
 | `from`, `to` | the type it takes and the type of what it makes |
 | `shell` | its script, without the extension, relative to the `.berg` file. It runs as `/bin/sh <shell>.sh <args>`; on Windows `<shell>.bat` through `cmd /c` when there is one, else `<shell>.sh` through the `sh` on `PATH` (Git's, MSYS2's) |
 | `exec` | a program, run directly as `<exec> <args>` with no shell between: one process a run, which on Windows is half the cost of a `.bat` (a `cmd.exe` less). A path relative to the `.berg` file (`tools/cut`; on Windows `tools/cut.exe` is looked for first) is an input as a script is: a new build of it runs its steps again. It is kept out of the output tree by convention when it ends in `.exe`; give one without an extension a rule (`"cook": false`). A name with no slash is found on `PATH`, and an absolute path is run as it is; neither is hashed, so their steps run again only when the registration or the sources change |
+| `builtin` | a converter goldberg runs itself, in process on the run's worker, with no child process and nothing to find on the host: `kim` (`.kim` markup to `.kimb`, below). It takes no `args`; its version is in every step's key, so a new compiler cooks its files again |
 | `args` | the arguments, one string split at spaces. Default `{in} {work}` |
 | `outputs` | names or patterns of what it writes under `{work}`; or `"scan"`; or left out |
 | `settle` | seconds. With `"scan"`, how long a file must be quiet to be taken. Otherwise how long the step is held open after the script ends |
@@ -194,6 +195,17 @@ in `{work}`.
   delivered is taken back.
 - The script is an input: edit it and every step that runs it is looked at again.
 - A non-zero exit fails the step, with the end of what the script wrote to stderr.
+
+**`kim`**, registered in `conventions.berg`: a `*.kim` (type `kim`, an ingredient) is
+compiled (`kim_compile`, `modules/kim`) to `<name>.kimb` (type `kimb`, which lands), recording
+its asset path (`<root>/<path>`). A mistake fails the step with `file:line:col`. It is then
+checked against the preludes it uses (`kimb_check`, `modules/kimb`) when their roots are in
+this cook: a `use "krome/std"` is the `std.kim` source under the root named `krome`, as
+kormake's cook of a game has it. A misspelled style, a token no theme has, a word that is
+neither the kernel's nor a definition fails the cook with its line, as it would fail at
+load. A use whose root is not in the cook is not checked against. A prelude's change does
+not cook again the screens that use it: their bytes do not depend on it (a `.kimb` is
+syntax; Krome resolves names at load), and the check waits for discovered edges.
 
 `goldberg learn FILE` writes `outputs` for you. It turns the source's stem into
 `{stem}` and names that differ only in a number into one pattern. `--dry-run` shows the

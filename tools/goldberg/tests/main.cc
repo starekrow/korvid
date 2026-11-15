@@ -681,6 +681,21 @@ void test_kim(TestCtx& c) {
     KV_CHECK(c, COOK() == 1 && has(g_err.data, "the converter \"kim\" failed") && has(g_err.data, "g/ui/bad.kim:2:10: a color is #rrggbb or #rrggbbaa"));
     KV_CHECK(c, !io_is_file(t.path("out/g/ui/bad.kimb")));
 
+    // Checked against its preludes where their root is in the cook: a misspelled style
+    // fails it, with the line; a prelude whose root is not here is not checked against.
+    t.put("assets/ui/bad.kim", "screen s { box }\n");
+    t.put("std/std.kim", "style card { bg=#202430 }\n");
+    t.put("assets/ui/styled.kim", "use \"krome/std\"\nscreen s {\n  box [crad]\n}\n");
+    char std_root[700];
+    snprintf(std_root, sizeof std_root, "krome=%s/std", t.dir);
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--root", std_root, "--project", t.dir, "--out", out, "--watch", "none") == 1);
+    KV_CHECK(c, has(g_err.data, "g/ui/styled.kim:3: no style 'crad'") && io_is_file(t.path("out/krome/std.kimb")));
+    t.put("assets/ui/styled.kim", "use \"krome/std\"\nscreen s {\n  box [card]\n}\n");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--root", std_root, "--project", t.dir, "--out", out, "--watch", "none") == 0 && io_is_file(t.path("out/g/ui/styled.kimb")));
+    t.put("assets/ui/styled.kim", "use \"krome/std\"\nscreen s {\n  box [crad]\n}\n");
+    KV_CHECK(c, COOK() == 0); // without krome's root: compiled, not checked
+    t.put("assets/ui/styled.kim", "screen s { box }\n");
+
     // A built-in converter is goldberg's: a name it does not have, or args, are refused.
     t.put("assets/goldberg.berg", R"({ "types": { "low": { "runtime": false } },
   "converters": { "up": { "from": "low", "to": "text", "builtin": "nope" } } })");

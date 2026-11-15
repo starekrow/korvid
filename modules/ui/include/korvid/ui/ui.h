@@ -26,9 +26,11 @@
 // document says pixel (pixel art stays crisp), continuous otherwise.
 //
 // Rich text, in a label's text:
-//   {c=gold} ... {/c}   a color from the style, or #rrggbb / #rrggbbaa
-//   {wave} ... {/wave}  each letter bobs        {shake} ... {/shake}  each letter jitters
-//   {pause=0.4}         the reveal waits         {=key}  a model value (ui_model_set_*)
+//   {*c=gold} ... {/c}   a color from the style, or #rrggbb / #rrggbbaa
+//   {*wave} ... {/wave}  each letter bobs       {*shake} ... {/shake}  each letter jitters
+//   {*pause=0.4}         the reveal waits       {key}  a model value (ui_model_set_*)
+//   A tag starts with *, a closing with /; anything else in braces is a model value, as in
+//   Krome's texts.
 //   {{                  a brace                  \n      a new line
 //
 // Input and events. The topmost open screen that takes input reads the action map (the
@@ -198,7 +200,7 @@ bool ui_reveal_all(Engine& e, Handle screen, const char* path);
 rect2 ui_rect(Engine& e, Handle screen, const char* path);
 
 // ---- the model -------------------------------------------------------------------------------
-// Named values labels show as {=key} and meters as "=key".
+// Named values labels show as {key} and meters as "=key".
 void ui_model_set_int(Engine& e, const char* key, i64 v);
 void ui_model_set_float(Engine& e, const char* key, f64 v);
 void ui_model_set_str(Engine& e, const char* key, const char* v);

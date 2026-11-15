@@ -5,6 +5,6 @@
 module "goldberg" {
   output        = "exe",
   platforms     = { "host" },
-  deps          = { "core", "platform", "cli", "tool", "lua", "script", "math", "kim" },
+  deps          = { "core", "platform", "cli", "tool", "lua", "script", "math", "kimb", "kim" },
   engine_module = true,
 }

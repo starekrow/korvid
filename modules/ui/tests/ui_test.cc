@@ -5,6 +5,7 @@
 // emits select and cancel; a reveal runs at its rate, honours pauses, completes on confirm
 // and says so; model values feed meters; a scroll clamps; a holding screen holds the sim.
 #include "korvid/ui/module.h"
+#include "../src/ui_internal.h"
 #include "korvid/core/format.h"
 #include "korvid/asset/module.h"
 #include "korvid/asset/scope.h"
@@ -55,7 +56,7 @@ const char* const k_doc = R"({
     "hud": { "type": "stack", "name": "bar", "anchor": "topleft", "dir": "row", "gap": 2, "padding": 3,
       "children": [ { "type": "box", "name": "a", "size": [8, 5] }, { "type": "box", "name": "b", "size": [12, 9] },
                     { "type": "meter", "name": "hp", "style": "bar", "value": "=hp", "max": "=hp_max", "size": [30, 4] } ] },
-    "talk": { "type": "label", "name": "line", "text": "ab{pause=0.5}cd", "reveal": 10 },
+    "talk": { "type": "label", "name": "line", "text": "ab{*pause=0.5}cd", "reveal": 10 },
     "roll": { "type": "scroll", "name": "view", "size": [50, 20],
       "children": [ { "type": "box", "name": "tall", "size": [40, 100] } ] },
     "hold": { "type": "box", "name": "x", "size": [1, 1] },
@@ -140,6 +141,14 @@ void test_ui(kv::TestCtx& c) {
     KV_CHECK(c, bar.x == 0 && bar.y == 0 && a.x == 3 && a.y == 3 && bb.x == 3 + 8 + 2 && hp.x == bb.x + 12 + 2);
     KV_CHECK(c, bar.w == 3 + 8 + 2 + 12 + 2 + 30 + 3 && bar.h == 3 + 9 + 3);
     ui_close(e, hud);
+    // Rich text: {key} is a model value, {*tag} a look or a pause, {/tag} its end, {{ a
+    // brace; the old spellings ({=key}, a bare {wave}) are model keys no one set.
+    if (UiState_* st = ui_state(e)) {
+        f32 secs = 0.0f;
+        KV_CHECK(c, ui_text_chars(*st, "HP {hp}/{hp_max} {*c=gold}ok{/c}{*wave}!{/wave}{{x", 10.0f, nullptr) == 12);
+        KV_CHECK(c, ui_text_chars(*st, "a{*pause=0.5}b", 10.0f, &secs) == 2 && secs > 0.69f && secs < 0.71f);
+        KV_CHECK(c, ui_text_chars(*st, "{=hp}{wave}{c=gold}", 10.0f, nullptr) == 0);
+    }
 
     // ---- a list: focus, repeat, select by name and event, cancel ---------------------------
     g = Seen{};

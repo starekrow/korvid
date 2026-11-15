@@ -47,8 +47,8 @@
             { "type": "stack", "name": "info", "anchor": "topright", "offset": [-32, 48], "gap": 12, "align": "end",
               "children": [
                 { "type": "label", "name": "score_title", "text": "SCORE", "color": "dim" },
-                { "type": "label", "name": "score", "text": "{=score}", "color": "gold", "font_scale": 2 },
-                { "type": "label", "name": "chain", "text": "CHAIN {=chain} X{=chain_mult}", "color": "gold" },
+                { "type": "label", "name": "score", "text": "{score}", "color": "gold", "font_scale": 2 },
+                { "type": "label", "name": "chain", "text": "CHAIN {chain} X{chain_mult}", "color": "gold" },
                 { "type": "meter", "name": "chain_bar", "style": "bar", "value": "=chain_left", "max": "=chain_window", "fill": "gold", "size": [120, 6] },
                 { "type": "box", "name": "gap1", "size": [8, 16] },
                 { "type": "label", "name": "eggs_title", "text": "EGGS", "color": "dim" },
@@ -57,38 +57,38 @@
                 { "type": "label", "name": "bombs_title", "text": "BOMBS", "color": "dim" },
                 { "type": "meter", "name": "bombs", "image": "bomb", "value": "=bombs", "max": "=bombs_max", "gap": 6 },
                 { "type": "box", "name": "gap_weapon", "size": [8, 8] },
-                { "type": "label", "name": "weapon", "text": "{=weapon}", "color": "cyan" },
+                { "type": "label", "name": "weapon", "text": "{weapon}", "color": "cyan" },
                 { "type": "meter", "name": "power", "style": "bar", "value": "=power", "max": "=power_max", "fill": "cyan", "size": [120, 8] },
-                { "type": "label", "name": "options", "text": "OPTIONS {=options}", "color": "dim" },
+                { "type": "label", "name": "options", "text": "OPTIONS {options}", "color": "dim" },
                 { "type": "box", "name": "gap2", "size": [8, 16] },
-                { "type": "label", "name": "restarts", "text": "RESTARTS {=restarts}", "color": "dim" },
-                { "type": "label", "name": "grazes", "text": "GRAZE {=grazes}", "color": "cyan" } ] } ] },
+                { "type": "label", "name": "restarts", "text": "RESTARTS {restarts}", "color": "dim" },
+                { "type": "label", "name": "grazes", "text": "GRAZE {grazes}", "color": "cyan" } ] } ] },
         { "type": "stack", "name": "boss", "anchor": "top", "offset": [0, 14], "gap": 6, "align": "center", "visible": false,
           "children": [
-            { "type": "label", "name": "boss_name", "text": "{=boss_name}", "color": "gold" },
+            { "type": "label", "name": "boss_name", "text": "{boss_name}", "color": "gold" },
             { "type": "meter", "name": "boss_bar", "style": "bar", "value": "=boss_hp", "max": "=boss_max", "fill": "gold", "size": [440, 10] } ] },
         { "type": "panel", "name": "right", "fill": "panel", "anchor": "center", "pivot": "left", "offset": [270, 0], "size": [1400, "fill"],
           "children": [
             { "type": "panel", "name": "edge", "fill": "edge", "anchor": "left", "size": [3, "fill"] },
             { "type": "stack", "name": "info", "anchor": "topleft", "offset": [32, 48], "gap": 12,
               "children": [
-                { "type": "label", "name": "stage", "text": "{=stage}", "color": "gold" },
-                { "type": "label", "name": "difficulty", "text": "{=difficulty}", "color": "cyan" },
-                { "type": "label", "name": "distance", "text": "{=distance}", "color": "dim" } ] },
+                { "type": "label", "name": "stage", "text": "{stage}", "color": "gold" },
+                { "type": "label", "name": "difficulty", "text": "{difficulty}", "color": "cyan" },
+                { "type": "label", "name": "distance", "text": "{distance}", "color": "dim" } ] },
             { "type": "stack", "name": "dev", "anchor": "bottomleft", "offset": [32, -40], "gap": 8, "visible": false,
               "children": [
-                { "type": "label", "name": "sprites", "text": "SPRITES {=sprites}", "color": "dim" },
-                { "type": "label", "name": "bullets", "text": "BULLETS {=bullets}", "color": "dim" },
-                { "type": "label", "name": "runners", "text": "RUNNERS {=runners}", "color": "dim" },
-                { "type": "label", "name": "deltas", "text": "DELTAS {=deltas}", "color": "dim" },
-                { "type": "label", "name": "pairs", "text": "PAIRS {=pairs}", "color": "dim" } ] } ] } ] },
+                { "type": "label", "name": "sprites", "text": "SPRITES {sprites}", "color": "dim" },
+                { "type": "label", "name": "bullets", "text": "BULLETS {bullets}", "color": "dim" },
+                { "type": "label", "name": "runners", "text": "RUNNERS {runners}", "color": "dim" },
+                { "type": "label", "name": "deltas", "text": "DELTAS {deltas}", "color": "dim" },
+                { "type": "label", "name": "pairs", "text": "PAIRS {pairs}", "color": "dim" } ] } ] } ] },
     "title": {
       "type": "box", "name": "title", "size": ["fill", "fill"],
       "children": [
         { "type": "panel", "name": "fill", "fill": "veil", "size": ["fill", "fill"] },
         { "type": "stack", "name": "column", "anchor": "center", "offset": [0, -40], "gap": 28, "align": "center",
           "children": [
-            { "type": "label", "name": "logo", "text": "{wave}ARCFIRE{/wave}", "color": "gold", "font_scale": 4 },
+            { "type": "label", "name": "logo", "text": "{*wave}ARCFIRE{/wave}", "color": "gold", "font_scale": 4 },
             { "type": "label", "name": "tag", "text": "a bullet hell over Shoreline", "color": "dim" },
             { "type": "box", "name": "gap", "size": [8, 24] },
             { "type": "list", "name": "items", "gap": 14, "items": [
@@ -97,7 +97,7 @@
               { "type": "label", "name": "scores", "text": "HIGH SCORES" },
               { "type": "label", "name": "options", "text": "OPTIONS" },
               { "type": "label", "name": "quit", "text": "QUIT" } ] },
-            { "type": "label", "name": "note", "text": "{=title_note}", "color": "cyan" } ] },
+            { "type": "label", "name": "note", "text": "{title_note}", "color": "cyan" } ] },
         { "type": "label", "name": "footer", "anchor": "bottom", "offset": [0, -20], "text": "Built with Korvid Engine", "color": "dim" } ] },
     "select": {
       "type": "box", "name": "shade", "size": ["fill", "fill"],
@@ -116,7 +116,7 @@
         { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
         { "type": "stack", "name": "column", "anchor": "center", "gap": 28, "align": "center",
           "children": [
-            { "type": "label", "name": "heading", "text": "{=select_stage}", "color": "gold", "font_scale": 2 },
+            { "type": "label", "name": "heading", "text": "{select_stage}", "color": "gold", "font_scale": 2 },
             { "type": "list", "name": "items", "gap": 14, "items": [
               { "type": "label", "name": "easy", "text": "EASY" },
               { "type": "label", "name": "normal", "text": "NORMAL" },
@@ -154,9 +154,9 @@
         { "type": "panel", "name": "fill", "fill": "shade", "size": ["fill", "fill"] },
         { "type": "stack", "name": "column", "anchor": "center", "gap": 24, "align": "center",
           "children": [
-            { "type": "label", "name": "heading", "text": "{shake}GAME OVER{/shake}", "color": "red", "font_scale": 3 },
-            { "type": "label", "name": "score", "text": "{=gameover_score}", "color": "gold" },
-            { "type": "label", "name": "count", "text": "CONTINUE?  {=gameover_count}", "color": "cyan", "font_scale": 2 },
+            { "type": "label", "name": "heading", "text": "{*shake}GAME OVER{/shake}", "color": "red", "font_scale": 3 },
+            { "type": "label", "name": "score", "text": "{gameover_score}", "color": "gold" },
+            { "type": "label", "name": "count", "text": "CONTINUE?  {gameover_count}", "color": "cyan", "font_scale": 2 },
             { "type": "list", "name": "items", "gap": 14, "items": [
               { "type": "label", "name": "continue", "text": "CONTINUE" },
               { "type": "label", "name": "end", "text": "END THE RUN" } ] },
@@ -176,8 +176,8 @@
         { "type": "panel", "name": "fill", "fill": "deep", "size": ["fill", "fill"] },
         { "type": "stack", "name": "column", "anchor": "center", "gap": 24, "align": "center",
           "children": [
-            { "type": "label", "name": "heading", "text": "{wave}A HIGH SCORE{/wave}", "color": "gold", "font_scale": 2 },
-            { "type": "label", "name": "rank", "text": "{=name_rank}", "color": "cyan" },
+            { "type": "label", "name": "heading", "text": "{*wave}A HIGH SCORE{/wave}", "color": "gold", "font_scale": 2 },
+            { "type": "label", "name": "rank", "text": "{name_rank}", "color": "cyan" },
             { "type": "panel", "name": "well", "fill": "edge", "size": [200, "fit"], "padding": [10, 8, 10, 8],
               "children": [ { "type": "field", "name": "entry", "anchor": "left", "max_length": 8 } ] },
             { "type": "label", "name": "hint", "text": "YOUR NAME, THEN ENTER", "color": "dim" } ] } ] },
@@ -188,7 +188,7 @@
         { "type": "stack", "name": "column", "anchor": "center", "gap": 24, "align": "center",
           "children": [
             { "type": "label", "name": "heading", "text": "HIGH SCORES", "color": "gold", "font_scale": 2 },
-            { "type": "label", "name": "table", "text": "{=scores_table}", "color": "cyan" },
+            { "type": "label", "name": "table", "text": "{scores_table}", "color": "cyan" },
             { "type": "label", "name": "rows", "text": "", "size": [720, "fit"] },
             { "type": "label", "name": "hint", "text": "CONFIRM TO GO ON", "color": "dim" } ] } ] },
     "attract": {
@@ -198,15 +198,15 @@
     "card": {
       "type": "stack", "name": "card", "anchor": "center", "offset": [0, -160], "gap": 12, "align": "center",
       "children": [
-        { "type": "label", "name": "number", "text": "{=card_number}", "color": "dim" },
-        { "type": "label", "name": "stage", "text": "{=card_stage}", "color": "gold", "font_scale": 2 },
-        { "type": "label", "name": "round", "text": "{=card_round}", "color": "cyan" } ] },
+        { "type": "label", "name": "number", "text": "{card_number}", "color": "dim" },
+        { "type": "label", "name": "stage", "text": "{card_stage}", "color": "gold", "font_scale": 2 },
+        { "type": "label", "name": "round", "text": "{card_round}", "color": "cyan" } ] },
     "confirm": {
       "type": "box", "name": "shade", "size": ["fill", "fill"],
       "children": [
         { "type": "stack", "name": "column", "anchor": "center", "offset": [0, 160], "gap": 20, "align": "center",
           "children": [
-            { "type": "label", "name": "question", "text": "{=confirm}", "color": "gold" },
+            { "type": "label", "name": "question", "text": "{confirm}", "color": "gold" },
             { "type": "list", "name": "items", "gap": 12, "items": [
               { "type": "label", "name": "no", "text": "NO" },
               { "type": "label", "name": "yes", "text": "YES" } ] } ] } ] },
@@ -221,12 +221,12 @@
     "clear": {
       "type": "stack", "name": "clear", "anchor": "center", "offset": [0, -80], "gap": 16, "align": "center",
       "children": [
-        { "type": "label", "name": "title", "text": "{wave}STAGE CLEAR{/wave}", "color": "gold", "font_scale": 3 },
-        { "type": "label", "name": "bonus", "text": "BONUS {=stage_bonus}", "color": "gold" },
-        { "type": "label", "name": "next", "text": "{=next_round}", "color": "cyan" } ] },
+        { "type": "label", "name": "title", "text": "{*wave}STAGE CLEAR{/wave}", "color": "gold", "font_scale": 3 },
+        { "type": "label", "name": "bonus", "text": "BONUS {stage_bonus}", "color": "gold" },
+        { "type": "label", "name": "next", "text": "{next_round}", "color": "cyan" } ] },
     "stomp": {
       "type": "panel", "name": "stomp", "fill": "warn", "anchor": "center", "size": [540, "fill"],
       "children": [
-        { "type": "label", "name": "warning", "anchor": "center", "offset": [0, 40], "text": "{shake}WARNING{/shake}", "color": "red", "font_scale": 3 } ] }
+        { "type": "label", "name": "warning", "anchor": "center", "offset": [0, 40], "text": "{*shake}WARNING{/shake}", "color": "red", "font_scale": 3 } ] }
   }
 }

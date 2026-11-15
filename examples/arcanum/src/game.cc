@@ -318,10 +318,10 @@ void fill_credits(Engine& e, Game& g) {
     if (!json_parse((const char*)b->data, b->size, mem_scratch(), doc)) return;
     Array<char> text = array_in<char>(mem_scratch());
     auto add = [&](const char* s) { u32 n = (u32)strlen(s); memcpy(text.push_n(n), s, n); };
-    add("{c=gold}"); add(json_string(json_get(doc, doc.root(), "title"), "Credits")); add("{/c}\n\n");
+    add("{*c=gold}"); add(json_string(json_get(doc, doc.root(), "title"), "Credits")); add("{/c}\n\n");
     const JsonValue* sections = json_get(doc, doc.root(), "sections");
     for (const JsonValue* sec = sections ? json_first(doc, *sections) : nullptr; sec; sec = json_next(doc, *sec)) {
-        add("{c=gold}"); add(json_string(json_get(doc, *sec, "heading"), "")); add("{/c}\n");
+        add("{*c=gold}"); add(json_string(json_get(doc, *sec, "heading"), "")); add("{/c}\n");
         const JsonValue* lines = json_get(doc, *sec, "lines");
         for (const JsonValue* l = lines ? json_first(doc, *lines) : nullptr; l; l = json_next(doc, *l)) { add(json_string(l, "")); add("\n"); }
         add("\n");
@@ -777,7 +777,7 @@ void strike(TickContext& ctx, Game& g) {
     v->luck = r.state;
     g.aim_struck = true;
     g.aim_broke = close >= 0.9f || roll < close * close; // the gold mark always breaks it
-    ui_set_text(e, g.aim, "result", g.aim_broke ? "{c=gold}{wave}Crack!{/wave}{/c} The boulder splits." : "{shake}Clang!{/shake} It holds.");
+    ui_set_text(e, g.aim, "result", g.aim_broke ? "{*c=gold}{*wave}Crack!{/wave}{/c} The boulder splits." : "{*shake}Clang!{/shake} It holds.");
     play_sound(ctx, g, g.aim_broke ? SND_BREAK : SND_HIT);
     KV_INFO("arcanum", "strike: needle %.3f, near %.3f, roll %.3f: %s", x, close, roll, g.aim_broke ? "breaks" : "holds");
 }
@@ -914,7 +914,7 @@ void villagers(TickContext& ctx) {
             g.chased = true;
             g.provoked = Handle{};
             sprite[i].tint = color_rgba(1.0f, 0.55f, 0.55f, 1.0f);
-            shout(ctx, g, "{shake}How DARE you!{/shake}");
+            shout(ctx, g, "{*shake}How DARE you!{/shake}");
             KV_INFO("arcanum", "hostile: %s at tick %llu", engine_entity_name(*ctx.engine, table.handle_at(i)), (unsigned long long)ctx.tick);
         }
         if (a.hostile && player_at && map) {

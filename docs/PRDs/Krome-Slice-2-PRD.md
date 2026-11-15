@@ -327,3 +327,60 @@ Each leaves the tree building and every example running.
 - **`kimc format` waits**, and how comments reach it is left to whoever builds it.
 - **Handlers are named by `script` lines** in the `.kim`, any number of them, merged in
   order; one event handled twice is an error.
+
+## As built
+
+Nov 15, 2026, on branch tool-stuff: `c0e078e` (1), `cf7c79d` (2), `c88918e` (3), `73710ce`
+(4), and the commit with this section (5). Every done-when holds on Linux; Metal and D3D12
+still draw no UI.
+
+- **The document** (1). `JsonBuilder` in core lays a hand-built tree out as a parse
+  does, so it walks and writes like one. `kim` parses in one pass into a tree of its own
+  and emits the document through it in canonical order; colors take `#rgb` and `#rgba`
+  too, as the kernel does. `kimc compile`.
+- **`kimb`, a module this PRD did not have** (2). The check (`kim_check` here) and the
+  loader had to share their rules, and Krome may not link the parser: the document's
+  reading, its scope, the lookups, the kernel's vocabulary and the check are `kimb` (core
+  only), which `kim`, `kimc`, goldberg and Krome all link. `KimErrors` lives there. The
+  check is `kimb_check`.
+- **goldberg's converter came in milestone 2**, not 5, since the Krome tests and the
+  demo needed `.kim` cooked as any asset is. A converter registered with `"builtin":
+  "kim"` (in `conventions.berg`) runs in process in place of a child, through the same
+  run, work-directory and commit machinery as a script; its version is in the step's key.
+  In milestone 5 it also checks each file against its preludes when their roots are in
+  the cook. A prelude's change does not re-check its users (no discovered edges yet).
+- **The one builder** (2, 3). A script's tables are made a document (`JsonBuilder`) and
+  built by the same code as a `.kimb`'s. Lua's `s` is styles (`style = "a b"` in the
+  helpers), state looks are `looks`. `kim(file, screen)` returns a placeholder the builder
+  expands in that file's scope, rather than tables, so a theme switch restyles it too.
+  A `.kimb` screen is named `"<file>#<screen>"`. `krome_provide` gives a file's bytes from
+  memory (tests write documents as JSON); `krome_errors` reads back what was found.
+- **Definitions and regions** (3). Expansion keeps frames (a definition's parameters and
+  use, an each's element) in an arena per screen, so a region is built again in the frame
+  it was first built in. A region is the nodes after a hidden anchor: hidden nodes take
+  no space and no gap, so the markup form, one anchor larger than the Lua form, draws the
+  same pixels. Rebuilt nodes are marked dead in place and the tree is built whole past
+  as many dead as live.
+- **Lists from C++** go into a queue the pump applies, not a `KromeSetDoc` event: an
+  event is fixed-size and a document is not.
+- **The demo** (4). The slice-1 form is `form_lua.lua` (`--lua`); its button now says its
+  ink (`#e6e9ef`) as std's does, where it had inherited white inside an overlay and
+  `#e6e9ef` on the screen. `krome_settled` lets `--shots` wait for fonts and paint, and
+  `--shots` holds the tick count, so two runs' pictures compare. Overlays are trees of
+  their own, so std's raised styles say their ink.
+- **`ui`'s rich text** (5) reads `{key}` as a model value and `{*tag}` as a tag;
+  arcfire's and arcanum's documents and code moved (31 values and 31 tags).
+
+**Numbers** (Linux, AMD 780M, debug build):
+
+| what | measured |
+|---|---|
+| kromedemo, `--lua` against markup: form, menu, About | largest channel difference 0 |
+| an each over 1000 elements, set from C++ and built, with a frame | 1.8 ms |
+| an if beside it changing; the list untouched | 0.08 ms, 1 node rebuilt |
+| arcfire's recorded replays after the `ui` change | matched, 236 and 255 hashes |
+| tests | core 6477, kim 45, kimb 27, kimc 28, krome 193, goldberg 284, ui 52 checks |
+
+**Open:** `kimc format`; discovered edges for a prelude's users; a widget's behaviour in a
+prelude's own scripts (slice 4); Metal and D3D12 drawing the UI primitive.
+

@@ -168,7 +168,7 @@ void scores_show(Engine& e, Game& g) {
     format(head, sizeof head, g.demo ? "%s" : "<  %s  >", pos);
     ui_model_set_str(e, "scores_table", head);
     char text[2048];
-    usize n = (usize)format(text, sizeof text, "{c=dim}    NAME          SCORE  STAGE         RESTARTS{/c}\n");
+    usize n = (usize)format(text, sizeof text, "{*c=dim}    NAME          SCORE  STAGE         RESTARTS{/c}\n");
     const ScoreTable& table = g.scores[t];
     for (u32 i = 0; i < kScoreRows && n < sizeof text; ++i) {
         bool lit = (i32)i == g.new_row && t == g.lit_table;
@@ -176,10 +176,10 @@ void scores_show(Engine& e, Game& g) {
             const ScoreRow& r = table.rows[i];
             char stage[24];
             format(stage, sizeof stage, "%.10s %u", r.stage, r.round);
-            n += (usize)format(text + n, sizeof text - n, "%s%2u  %-8s %10lld  %-12s %3u%s\n", lit ? "{c=gold}" : "", i + 1, r.name,
+            n += (usize)format(text + n, sizeof text - n, "%s%2u  %-8s %10lld  %-12s %3u%s\n", lit ? "{*c=gold}" : "", i + 1, r.name,
                                  (long long)r.score, stage, r.restarts, lit ? "{/c}" : "");
         } else {
-            n += (usize)format(text + n, sizeof text - n, "{c=dim}%2u  --------          -{/c}\n", i + 1);
+            n += (usize)format(text + n, sizeof text - n, "{*c=dim}%2u  --------          -{/c}\n", i + 1);
         }
     }
     ui_set_text(e, g.scores_screen, "rows", text);
@@ -219,13 +219,13 @@ void results_open(Engine& e, Game& g, const RunResult& r) {
     caps(pos);
     char text[1024];
     format(text, sizeof text,
-             "SCORE          %12lld\n{pause=0.3}"
-             "STAGE          %12s\n{pause=0.2}"
-             "ROUND          %12u\n{pause=0.2}"
-             "DIFFICULTY     %12s\n{pause=0.2}"
-             "RESTARTS       %12u\n{pause=0.2}"
-             "EGGS LOST      %12u\n{pause=0.2}"
-             "BOMBS USED     %12u\n{pause=0.2}"
+             "SCORE          %12lld\n{*pause=0.3}"
+             "STAGE          %12s\n{*pause=0.2}"
+             "ROUND          %12u\n{*pause=0.2}"
+             "DIFFICULTY     %12s\n{*pause=0.2}"
+             "RESTARTS       %12u\n{*pause=0.2}"
+             "EGGS LOST      %12u\n{*pause=0.2}"
+             "BOMBS USED     %12u\n{*pause=0.2}"
              "LONGEST CHAIN  %12u",
              (long long)r.score, r.stage, r.round, pos, r.restarts, r.deaths, r.bombs_used, r.chain_best);
     g.results_screen = open_screen(e, g, "results", 116);

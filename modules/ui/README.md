@@ -34,8 +34,8 @@ number with `pixel: true` so pixel art and pixel fonts stay crisp. The font is l
 pixel size it is drawn at, so glyphs are never scaled. Layout runs every draw; a tree of a
 few hundred nodes costs nothing worth measuring.
 
-**Rich text.** `{c=gold}`…`{/c}` (a style color or `#rrggbb[aa]`), `{wave}`…`{/wave}`,
-`{shake}`…`{/shake}`, `{pause=0.4}` (the reveal waits), `{=key}` (a model value), `{{` for a
+**Rich text.** `{*c=gold}`…`{/c}` (a style color or `#rrggbb[aa]`), `{*wave}`…`{/wave}`,
+`{*shake}`…`{/shake}`, `{*pause=0.4}` (the reveal waits), `{key}` (a model value), `{{` for a
 brace, `\n` for a line. A label with `reveal` (characters per second) types itself out,
 plays the style's `tick` sound every other character, and emits `revealed`; a confirm
 while it reveals finishes it instead of reaching the screen. The style's `shadow` color
@@ -66,7 +66,7 @@ handler, where nobody sees it. The iris is a disc of clear in a generated textur
 black quads.
 
 **The model.** `ui_model_set_int(e, "hp", 3)` and the float and string forms; labels say
-`{=hp}`, meters `"value": "=hp", "max": "=hp_max"`. A HUD is a document and two calls a tick.
+`{hp}`, meters `"value": "=hp", "max": "=hp_max"`. A HUD is a document and two calls a tick.
 
 **Drawing.** `ui.draw` (the Frame cycle, once before each frame drawn) lays out every open screen by layer and turns
 it into quads: frames as nine slices, images, meters, glyphs. A scroll's children are

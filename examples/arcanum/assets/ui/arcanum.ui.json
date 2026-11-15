@@ -50,7 +50,7 @@
               "children": [
                 { "type": "label", "name": "title", "text": "Paused", "color": "gold", "font_scale": 2 },
                 { "type": "list", "name": "items", "gap": 3, "items": ["Resume", "Save", "Load", "Level", "Credits", "Quit"] },
-                { "type": "label", "name": "note", "text": "{=note}", "color": "dim" } ] } ] } ] },
+                { "type": "label", "name": "note", "text": "{note}", "color": "dim" } ] } ] } ] },
     "levels": {
       "type": "box", "name": "shade", "size": ["fill", "fill"],
       "children": [
@@ -79,14 +79,14 @@
         { "type": "panel", "name": "fill", "fill": "night", "size": ["fill", "fill"] },
         { "type": "stack", "name": "column", "anchor": "center", "gap": 18, "align": "center",
           "children": [
-            { "type": "label", "name": "logo", "text": "{wave}Arcanum{/wave}", "color": "gold", "font_scale": 4 },
-            { "type": "label", "name": "tag", "text": "a small tale of {c=red}hammers{/c} and boulders", "color": "dim" },
+            { "type": "label", "name": "logo", "text": "{*wave}Arcanum{/wave}", "color": "gold", "font_scale": 4 },
+            { "type": "label", "name": "tag", "text": "a small tale of {*c=red}hammers{/c} and boulders", "color": "dim" },
             { "type": "list", "name": "items", "gap": 4, "items": [
               { "type": "label", "name": "new", "text": "New game" },
               { "type": "label", "name": "continue", "text": "Continue" },
               { "type": "label", "name": "credits", "text": "Credits" },
               { "type": "label", "name": "quit", "text": "Quit" } ] },
-            { "type": "label", "name": "note", "text": "{=note}", "color": "dim" } ] },
+            { "type": "label", "name": "note", "text": "{note}", "color": "dim" } ] },
         { "type": "label", "name": "footer", "anchor": "bottom", "offset": [0, -8], "text": "Built with Korvid Engine", "color": "dim" } ] },
     "name": {
       "type": "box", "name": "shade", "size": ["fill", "fill"],
@@ -110,14 +110,14 @@
               "children": [
                 { "type": "label", "name": "who", "text": "", "color": "brown" },
                 { "type": "label", "name": "text", "text": "", "color": "ink", "shadow": "#00000000", "wrap": true, "size": ["fill", "fit"], "reveal": 30 } ] } ] },
-        { "type": "label", "name": "more", "anchor": "bottomright", "offset": [0, 2], "text": "{wave}...{/wave}", "color": "brown", "shadow": "#00000000" } ] },
+        { "type": "label", "name": "more", "anchor": "bottomright", "offset": [0, 2], "text": "{*wave}...{/wave}", "color": "brown", "shadow": "#00000000" } ] },
     "aim": {
       "type": "box", "name": "aim", "size": ["fill", "fill"],
       "children": [
         { "type": "panel", "name": "fill", "fill": "night", "size": ["fill", "fill"] },
         { "type": "stack", "name": "column", "anchor": "center", "gap": 16, "align": "center",
           "children": [
-            { "type": "label", "name": "title", "text": "{wave}Strike true!{/wave}", "color": "gold", "font_scale": 2 },
+            { "type": "label", "name": "title", "text": "{*wave}Strike true!{/wave}", "color": "gold", "font_scale": 2 },
             { "type": "box", "name": "track", "size": [200, 24],
               "children": [
                 { "type": "panel", "name": "bar", "fill": "well", "anchor": "center", "size": [200, 6] },
@@ -132,8 +132,8 @@
         { "type": "panel", "name": "fill", "fill": "blood", "size": ["fill", "fill"] },
         { "type": "stack", "name": "column", "anchor": "center", "gap": 14, "align": "center",
           "children": [
-            { "type": "label", "name": "title", "text": "{shake}You have fallen{/shake}", "color": "red", "font_scale": 3 },
-            { "type": "label", "name": "epitaph", "text": "{=hero} lies still in the grass.", "color": "dim" },
+            { "type": "label", "name": "title", "text": "{*shake}You have fallen{/shake}", "color": "red", "font_scale": 3 },
+            { "type": "label", "name": "epitaph", "text": "{hero} lies still in the grass.", "color": "dim" },
             { "type": "list", "name": "items", "gap": 4, "items": [
               { "type": "label", "name": "continue", "text": "Continue from the save" },
               { "type": "label", "name": "title", "text": "Back to the title" } ] } ] } ] },

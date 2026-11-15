@@ -44,18 +44,23 @@ void parse_rich(UiState_& s, const UiDoc* d, const char* text, color base, Array
             memcpy(tag, p + 1, n);
             tag[n] = 0;
             p = end + 1;
-            if (!strncmp(tag, "c=", 2)) {
-                if (depth < KV_COUNTOF(stack_c)) stack_c[depth++] = cur;
-                ui_color_parse(d, tag + 2, &cur);
-            } else if (!strcmp(tag, "/c")) { if (depth) cur = stack_c[--depth]; }
-            else if (!strcmp(tag, "wave")) fx |= FX_WAVE;
-            else if (!strcmp(tag, "/wave")) fx &= (u8)~FX_WAVE;
-            else if (!strcmp(tag, "shake")) fx |= FX_SHAKE;
-            else if (!strcmp(tag, "/shake")) fx &= (u8)~FX_SHAKE;
-            else if (!strncmp(tag, "pause=", 6)) { if (out.len) out.last().pause += (f32)atof(tag + 6); }
-            else if (tag[0] == '=') {
+            // {*tag} opens a look or a pause, {/tag} closes it, anything else is a model
+            // value: one way to write each, as Krome's texts have it.
+            if (tag[0] == '*') {
+                const char* t = tag + 1;
+                if (!strncmp(t, "c=", 2)) {
+                    if (depth < KV_COUNTOF(stack_c)) stack_c[depth++] = cur;
+                    ui_color_parse(d, t + 2, &cur);
+                } else if (!strcmp(t, "wave")) fx |= FX_WAVE;
+                else if (!strcmp(t, "shake")) fx |= FX_SHAKE;
+                else if (!strncmp(t, "pause=", 6)) { if (out.len) out.last().pause += (f32)atof(t + 6); }
+            } else if (tag[0] == '/') {
+                if (!strcmp(tag, "/c")) { if (depth) cur = stack_c[--depth]; }
+                else if (!strcmp(tag, "/wave")) fx &= (u8)~FX_WAVE;
+                else if (!strcmp(tag, "/shake")) fx &= (u8)~FX_SHAKE;
+            } else if (tag[0]) {
                 char v[128];
-                ui_model_text(s, tag + 1, v, sizeof v);
+                ui_model_text(s, tag, v, sizeof v);
                 const char* q = v;
                 while (u32 cp = utf8_next(q)) out.push(RChar{cp, cur, fx, 0.0f});
             }
