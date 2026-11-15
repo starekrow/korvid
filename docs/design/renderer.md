@@ -215,7 +215,11 @@ gradient, a shadow as an erf of the distance, an image or a glyph's coverage, a 
 discard, colors decoded from sRGB, output premultiplied.
 
 On Vulkan the buffer is set 0's binding 8. Metal and D3D12 have stubs for now: they
-answer that they have no buffer, and the core draws no UI there.
+answer that they have no buffer, and the core draws no UI there; their `KV_RB_UI` is 0, so
+`renderer_caps(r).ui` is false (the gallery leaves its `ui` scene out, Krome warns once),
+and `ui.slang` compiles to placeholder entry points under `KV_TARGET_METAL` and
+`KV_TARGET_D3D12`. A backend that takes the primitive up defines `KV_RB_UI 1`, makes its
+`rb_ui_buffer` and `rb_ui_draw` real, and drops the placeholder branch.
 
 ## The core and the backends
 

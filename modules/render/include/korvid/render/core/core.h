@@ -78,6 +78,11 @@
 #ifndef KV_RB_SURFACE
 #error "the backend's renderer_internal.h defines KV_RB_SURFACE"
 #endif
+// KV_RB_UI, 1 when the backend draws the UI primitive (its rb_ui_* are real), 0 when they are
+// stubs: renderer_caps says so, so a caller can leave the UI out. 0 unless the backend says.
+#ifndef KV_RB_UI
+#define KV_RB_UI 0
+#endif
 #ifndef KV_RB_FRAME_SCOPE
 #error "the backend's renderer_internal.h defines KV_RB_FRAME_SCOPE (empty, or @autoreleasepool)"
 #endif

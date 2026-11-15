@@ -448,6 +448,10 @@ void krome_view_frame(KromeModule& s) {
     // The lists, a layer at a time: rebuilt where a screen on it changed, cleared where no
     // screen is left.
     Renderer* r = renderer_get(*s.e);
+    if (r && !s.warned_no_ui && !renderer_caps(r).ui) {
+        KV_WARN("krome", "the %s renderer does not draw the UI primitive yet: Krome's screens run but show nothing", renderer_caps(r).backend);
+        s.warned_no_ui = true;
+    }
     i32 layers[k_max_screens];
     u32 nl = 0;
     for (KromeScreen* sc : s.screens) {

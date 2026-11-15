@@ -28,6 +28,7 @@
 #define KV_RB_SHADER_EXT ".spv"
 #define KV_RB_SURFACE    RendererSurface::Vulkan
 #define KV_RB_FRAME_SCOPE 
+#define KV_RB_UI          1
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"

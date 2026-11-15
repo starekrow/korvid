@@ -83,6 +83,7 @@ struct KromeModule {
     UiList              list;
     u64                 paints = 0, layouts = 0, submits = 0;
     u32                 input_id = 0; // input.state's resource id in this engine
+    bool                warned_no_ui = false;
 };
 
 KromeModule*  krome_state(Engine& e);

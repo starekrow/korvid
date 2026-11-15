@@ -39,6 +39,7 @@ struct RenderCaps {
     u32         max_materials    = 0;
     u32         frames_in_flight = 0;
     bool        srgb_output      = false; // the swapchain encodes linear to sRGB in hardware
+    bool        ui               = false; // the UI primitive is drawn (korvid/render/ui.h); else its lists are kept and not drawn
     bool        texture_formats[(u32)TextureFormat::Count] = {};
 };
 

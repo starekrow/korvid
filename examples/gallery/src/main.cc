@@ -521,7 +521,8 @@ int run(int argc, char** argv) {
             shoot(g, "shaders", view_of(0.0f));
             renderer_post_layer(g.r, 0, nullptr);
         }
-        if (want("ui")) {
+        // The UI primitive, where the backend draws it (Metal and D3D12 do not yet).
+        if (want("ui") && renderer_caps(g.r).ui) {
             UiList l;
             l.init(mem_general());
             clear(g); tick(g); scene_ui(g, l); flush(g);
