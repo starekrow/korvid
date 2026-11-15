@@ -21,6 +21,9 @@
 // Engine flags come before the command: --threads N, --verbose (INFO lines; a tool logs
 // warnings and errors only by default), --max-ticks N (stop with 2 if not finished).
 // --cli-port N opens the CLI's listener on loopback for the length of the run.
+// --profile FILE writes the engine's profiler's trace of the run (Chrome's JSON events, as
+// the frame loop's), a tick a frame; --prof-report prints every zone's total over the run,
+// wall and CPU, on stderr at the end. Dev builds only: the profiler is compiled out of ship.
 //
 // A tool with a command that stays up (goldberg watch) names it in ToolConfig::session:
 // while that command runs, stdin is a CLI session too, terminal or not, and the CLI's
