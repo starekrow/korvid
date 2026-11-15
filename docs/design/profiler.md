@@ -33,7 +33,9 @@ things worth a zone, so a zone can hold them.
 - **Outputs**: `prof_log_summary` (top zones per frame since the last call, with the worst
   frame of each), `prof_log_frame` (the kept frame as a tree per thread), and a Chrome
   JSON trace (`--profile FILE`) that Perfetto or the browser opens, threads as tracks,
-  frames and ticks on a track of their own, waits in their own category.
+  frames and ticks on a track of their own, waits in their own category. Tools
+  (`modules/tool`) take the same `--profile FILE`, and `--prof-report`, which prints the
+  zones by total time when the tool exits: `goldberg --prof-report cook ...`.
 
 ## What is instrumented for free
 
