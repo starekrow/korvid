@@ -416,7 +416,7 @@ Nov 15, 2026, in review of the first draft.
       `platform_hid` to open more than one.
 - [ ] Native text input per platform and the accessibility tree: the design of their own
       (K25, K26), and whether SDL3 can be kept on the desktops or has to be gone around.
-- [ ] String interpolation: `{name}` here, `{=key}` in `ui`'s rich text. One spelling?
+- [x] String interpolation: `{key}` for a model value and `{*tag}` for a tag, in Krome and `ui` alike (Slice 2 PRD).
 - [ ] Grid areas for screen shells.
 - [ ] Templating beyond parameters and one slot.
 - [ ] `.kshape` for the shape asset's extension.

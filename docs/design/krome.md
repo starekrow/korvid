@@ -281,7 +281,7 @@ One way only. From memory of Figma's API; check its documentation before buildin
 - [ ] The shape filler. stb_truetype exposes its rasterizer for arbitrary outlines, which
       may do for a first version (nonzero winding only); otherwise our own.
 - [ ] Grid areas for screen shells.
-- [ ] String interpolation: `{name}` here, `{=key}` in `ui`'s rich text. One spelling?
+- [x] String interpolation: `{key}` for a model value and `{*tag}` for a tag, in Krome and `ui` alike (Slice 2 PRD).
 - [ ] Does `ui` ever move onto Krome's layout or documents?
 - [ ] Where Krome's update and draw sit in the schedule, and whether a tool window with
       no simulation runs the same phases.
