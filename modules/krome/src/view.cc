@@ -156,6 +156,7 @@ struct Paint {
 color faded(color c, f32 o) { c.a *= o; return c; }
 
 KromeState state_of(const Paint& p, u32 node) {
+    if (krome_is_focused(p.s, p.sc.id, p.overlay, node)) return KromeState::Focused;
     if (node == p.pressed) return KromeState::Pressed;
     for (u32 i = 0; i < p.hovered_n; ++i) if (p.hovered[i] == node) return KromeState::Hover;
     return KromeState::Base;
@@ -176,10 +177,13 @@ void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
     // has a `\n`; then the paragraph's lines are aligned in that width. One line is placed as
     // it always was, whole.
     f32 one = font_measure(*fa, str);
-    bool multi = strchr(str, '\n') || (!(n.flags & KROME_NOWRAP) && one > in.w + 0.5f) || l.line_height > 0.0f;
+    // Whether it fits is layout's width, not the pixel rect's: rounding each edge to a whole
+    // pixel can take most of a pixel off a text that was given exactly its one line.
+    f32 room = (n.rect.w - n.pad[0] - n.pad[2]) * scale;
+    bool multi = strchr(str, '\n') || (!(n.flags & KROME_NOWRAP) && one > room + 0.5f) || l.line_height > 0.0f;
     if (multi) {
         TypesetParams tp;
-        tp.width = (n.flags & KROME_NOWRAP) ? 0.0f : in.w;
+        tp.width = (n.flags & KROME_NOWRAP) ? 0.0f : room + 0.5f;
         tp.align = n.align_x == KromeAlign::Center ? TypesetAlign::Center : n.align_x == KromeAlign::End ? TypesetAlign::Right : TypesetAlign::Left;
         tp.line_height = l.line_height > 0.0f ? floor(l.line_height * l.size * scale + 0.5f) : 0.0f;
         tp.subpixel = (n.flags & KROME_SUBPIXEL) != 0;
@@ -244,6 +248,8 @@ void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
     }
 }
 
+void paint_edit(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect2 r, rect2 clip_rect);
+
 void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u32 clip) {
     const KromeNode& n = p.tree.nodes[node];
     if (n.flags & KROME_HIDDEN) return;
@@ -280,12 +286,169 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
         p.list.box(b);
     }
     if (n.type == KromeType::Text) paint_text(p, n, node, l, r, clip);
+    if (n.type == KromeType::Edit) paint_edit(p, n, node, l, r, clip_rect);
     if (n.first == KROME_NONE) return;
     if (n.flags & (KROME_CLIP | KROME_SCROLL)) {
         clip_rect = intersect(clip_rect, r);
         clip = p.list.clip(clip_rect);
     }
     for (u32 ch = n.first; ch != KROME_NONE; ch = p.tree.nodes[ch].next) paint_node(p, ch, &l, clip_rect, clip);
+}
+
+// An edit: its text (the buffer while it has the focus, an input method's composition at
+// the caret, the placeholder faded while it is empty), the selection under it, the caret
+// over it, all clipped to its inside and moved to keep the caret in view. A press or a drag
+// waiting on its layout is resolved here.
+void paint_edit(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect2 r, rect2 clip_rect) {
+    KromeModule& s = p.s;
+    const FontAsset* fa = ready_font(s, font_for(s, l.font, l.size));
+    if (!fa) return;
+    f32 scale = s.scale;
+    rect2 in{r.x + n.pad[0] * scale, r.y + n.pad[1] * scale, r.w - (n.pad[0] + n.pad[2]) * scale, r.h - (n.pad[1] + n.pad[3]) * scale};
+    if (in.w <= 0 || in.h <= 0) return;
+    u32 clip = p.list.clip(intersect(clip_rect, in));
+    bool focused = krome_is_focused(s, p.sc.id, p.overlay, node);
+    KromeFocus& f = s.focus;
+    bool multi = (n.flags & KROME_MULTILINE) != 0;
+    const char* text = focused ? f.buf.c_str() : p.tree.text(node);
+    u32 len = focused ? f.buf.len : (u32)strlen(text);
+    // The composition goes into what is drawn, at the caret, and nowhere else.
+    MemScope scope;
+    u32 comp = focused ? (u32)strlen(f.composing) : 0;
+    u32 caret = focused ? f.buf.caret : 0;
+    if (comp) {
+        char* shown = (char*)alloc_in(mem_scratch(), len + comp + 1, 1);
+        memcpy(shown, text, caret);
+        memcpy(shown + caret, f.composing, comp);
+        memcpy(shown + caret + comp, text + caret, len - caret);
+        len += comp;
+        shown[len] = 0;
+        text = shown;
+    }
+    bool placeholder = len == 0 && n.placeholder != KROME_NONE;
+    const char* drawn = placeholder ? p.tree.strings.data + n.placeholder : text;
+    u32 drawn_len = placeholder ? (u32)strlen(drawn) : len;
+
+    TypesetParams tp;
+    tp.width = multi ? in.w : 0.0f;
+    tp.align = n.align_x == KromeAlign::Center ? TypesetAlign::Center : n.align_x == KromeAlign::End ? TypesetAlign::Right : TypesetAlign::Left;
+    tp.line_height = l.line_height > 0.0f ? floor(l.line_height * l.size * scale + 0.5f) : 0.0f;
+    tp.subpixel = (n.flags & KROME_SUBPIXEL) != 0;
+    Typeset t;
+    t.lines.alloc = t.glyphs.alloc = mem_scratch();
+    typeset_paragraph(*fa, drawn, drawn_len, tp, t);
+    // One line sits in the middle of the inside; many start at its top.
+    f32 top = multi ? in.y : in.y + floor((in.h - t.line_height) * 0.5f + 0.5f);
+    vec2 scroll = focused ? f.scroll : vec2{0, 0};
+
+    if (focused) {
+        f.font = fa;
+        f.params = tp;
+        f.view_h = in.h;
+        // What the pointer did, now that the text is laid out (the buffer's own: no composition).
+        if (f.pending) {
+            f.pending = false;
+            Typeset bt;
+            bt.lines.alloc = bt.glyphs.alloc = mem_scratch();
+            typeset_paragraph(*fa, f.buf.c_str(), f.buf.len, tp, bt);
+            f32 lx = f.pending_at.x - in.x + f.scroll.x, ly = f.pending_at.y - top + f.scroll.y;
+            u32 at = typeset_hit(bt, lx, ly);
+            if (f.pending_clicks == 2) {
+                typeset_word_at(f.buf.c_str(), f.buf.len, at, &f.word_begin, &f.word_end);
+                f.buf.anchor = f.word_begin;
+                f.buf.move(f.word_end, true);
+            } else if (f.pending_clicks == 3) {
+                const TypesetLine& ln = bt.lines[typeset_line_of(bt, at)];
+                f.word_begin = ln.begin;
+                f.word_end = ln.next;
+                f.buf.anchor = ln.begin;
+                f.buf.move(ln.next, true);
+            } else if (f.pending_clicks == 0 && f.clicks >= 2 && f.word_end > f.word_begin) {
+                // A drag after a double or triple press keeps whole words (lines).
+                if (at < f.word_begin) { f.buf.anchor = f.word_end; u32 b0 = 0, b1 = 0; typeset_word_at(f.buf.c_str(), f.buf.len, at, &b0, &b1); f.buf.move(b0, true); }
+                else if (at > f.word_end) { f.buf.anchor = f.word_begin; u32 b0 = 0, b1 = 0; typeset_word_at(f.buf.c_str(), f.buf.len, at, &b0, &b1); f.buf.move(b1, true); }
+            } else {
+                f.buf.move(at, f.pending_extend);
+            }
+            f.want_x = -1.0f;
+            caret = f.buf.caret;
+            if (comp == 0) { t.free(); typeset_paragraph(*fa, f.buf.c_str(), f.buf.len, tp, t); }
+        }
+        // Keep the caret in view: across in one line, down in many.
+        rect2 cr = typeset_caret(t, caret + f.compose_caret * (comp ? 1 : 0));
+        if (!multi) {
+            if (cr.x - f.scroll.x > in.w - 2.0f) f.scroll.x = cr.x - in.w + 2.0f;
+            if (cr.x - f.scroll.x < 0.0f) f.scroll.x = cr.x;
+            f32 most = t.width + 2.0f - in.w;
+            if (f.scroll.x > most) f.scroll.x = most > 0.0f ? most : 0.0f;
+            if (f.scroll.x < 0.0f) f.scroll.x = 0.0f;
+        } else {
+            if (cr.y + cr.h - f.scroll.y > in.h) f.scroll.y = cr.y + cr.h - in.h;
+            if (cr.y - f.scroll.y < 0.0f) f.scroll.y = cr.y;
+            f32 most = t.height - in.h;
+            if (f.scroll.y > most) f.scroll.y = most > 0.0f ? most : 0.0f;
+            if (f.scroll.y < 0.0f) f.scroll.y = 0.0f;
+        }
+        scroll = f.scroll;
+    }
+    f32 ox = floor(in.x + 0.5f) - floor(scroll.x + 0.5f), oy = top - floor(scroll.y + 0.5f);
+    if (focused) f.origin = vec2{ox, oy};
+
+    // The selection, under the text.
+    if (focused && f.buf.selected() && !comp) {
+        rect2 sel[64];
+        u32 ns = typeset_selection(t, f.buf.sel_begin(), f.buf.sel_end(), sel, 64);
+        color sc = faded((l.set & KROME_LOOK_SELECTION_COLOR) ? l.selection_color : KromeLook{}.selection_color, l.opacity);
+        for (u32 i = 0; i < ns; ++i) {
+            UiBox b;
+            b.rect = rect2{floor(ox + sel[i].x), oy + sel[i].y, floor(sel[i].w + 0.5f), sel[i].h};
+            b.fill = sc;
+            b.clip = clip;
+            p.list.box(b);
+        }
+    }
+    // The text.
+    u32 slot = p.r ? renderer_texture_slot(p.r, fa->texture) : 0;
+    color c = faded(l.text_color, l.opacity * (placeholder ? 0.45f : 1.0f));
+    for (const TypesetGlyph& tg : t.glyphs) {
+        const Glyph* g = tg.glyph;
+        if (!g || g->size.x <= 0 || g->size.y <= 0) continue;
+        f32 pen = ox + (tp.subpixel ? floor(tg.x) : tg.x);
+        UiGlyph gl;
+        f32 cx = pen + g->offset.x, cy = oy + t.lines[tg.line].baseline - g->offset.y;
+        gl.rect = rect2{floor(cx - g->size.x * 0.5f + 0.5f), floor(cy - g->size.y * 0.5f + 0.5f), g->size.x, g->size.y};
+        gl.uv = g->uv;
+        gl.texture = g->texture.is_null() ? slot : renderer_texture_slot(p.r, g->texture);
+        gl.tint = c;
+        gl.clip = clip;
+        p.list.glyph(gl);
+    }
+    if (!focused) return;
+    f32 px1 = scale >= 1.0f ? floor(scale + 0.5f) : 1.0f;
+    // The composition, underlined.
+    if (comp) {
+        rect2 a = typeset_caret(t, caret), z = typeset_caret(t, caret + comp);
+        UiBox u;
+        u.rect = rect2{floor(ox + a.x), oy + a.y + a.h - px1 - 1.0f, floor(z.x - a.x + 0.5f), px1};
+        u.fill = c;
+        u.clip = clip;
+        p.list.box(u);
+    }
+    // The caret, while the blink has it on.
+    rect2 cr = typeset_caret(t, caret + (comp ? f.compose_caret : 0));
+    if (f.blink_on && !(n.flags & KROME_READONLY)) {
+        UiBox k;
+        k.rect = rect2{floor(ox + cr.x), oy + cr.y, px1, cr.h};
+        k.fill = faded((l.set & KROME_LOOK_CARET_COLOR) ? l.caret_color : l.text_color, l.opacity);
+        k.clip = clip;
+        p.list.box(k);
+    }
+    // The input method opens beside the caret, where a composition began (not its own caret,
+    // which it moves itself): told when that moves, not every frame, since an input method
+    // answers each telling with its state.
+    rect2 at = typeset_caret(t, caret);
+    rect2 area{floor(ox + at.x), oy + at.y, in.w, at.h};
+    if (area.x != f.told.x || area.y != f.told.y || area.h != f.told.h) { f.told = area; platform_text_area(*s.e, area, 0.0f); }
 }
 
 // The nodes the pointer is over (the deepest and its ancestors), and the one being pressed,
@@ -371,7 +534,7 @@ KromeTarget pressable(KromeModule& s, KromeTarget t) {
     for (u32 n = t.node; n != KROME_NONE; n = tree->nodes[n].parent) {
         const KromeNode& node = tree->nodes[n];
         if (node.flags & KROME_DISABLED) return KromeTarget{};
-        if (found == KROME_NONE && (!node.event.is_null() || !node.binding.is_null() || node.type == KromeType::Hit)) found = n;
+        if (found == KROME_NONE && (!node.event.is_null() || !node.binding.is_null() || node.type == KromeType::Hit || node.type == KromeType::Edit)) found = n;
     }
     t.node = found;
     return found == KROME_NONE ? KromeTarget{} : t;
@@ -424,7 +587,8 @@ void krome_close_overlay(KromeModule& s, KromeScreen& sc, u32 id) {
     KromeOverlay* o = sc.overlays[at];
     for (u32 i = at + 1; i < sc.overlays.len; ++i) sc.overlays[i - 1] = sc.overlays[i];
     --sc.overlays.len;
-    // What the pointer was on in it is gone.
+    // What the pointer was on in it is gone, and the keyboard if an edit in it had it.
+    if (s.focus.node != KROME_NONE && s.focus.screen == sc.id && s.focus.overlay == o->id) krome_edit_blur(s);
     if (s.under.screen == sc.id && s.under.overlay == o->id) s.under = KromeTarget{};
     if (s.captured.screen == sc.id && s.captured.overlay == o->id) s.captured = KromeTarget{};
     o->tree.free();
@@ -578,21 +742,49 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
         } else {
             s.captured = pressable(s, under);
         }
+        // A press on an edit gives it the keyboard; a press anywhere else takes it away.
+        KromeScreen* psc = nullptr;
+        KromeTree* pt = s.captured.node != KROME_NONE ? krome_target_tree(s, s.captured, &psc) : nullptr;
+        if (pt && psc && pt->nodes[s.captured.node].type == KromeType::Edit) {
+            Input* in = platform_input(*s.e);
+            bool shift = in && (in->raw.down(Key::LShift) || in->raw.down(Key::RShift));
+            krome_edit_press(s, *psc, s.captured.overlay, s.captured.node, x, y, shift);
+        } else {
+            krome_edit_blur(s);
+        }
         repaint(s, s.captured);
     } else if (!down && s.down) {
         KromeTarget was = s.captured;
         s.captured = KromeTarget{};
         repaint(s, was);
-        if (was.node != KROME_NONE && pressable(s, under) == was) {
+        KromeScreen* wsc = nullptr;
+        KromeTree* wt = was.node != KROME_NONE ? krome_target_tree(s, was, &wsc) : nullptr;
+        bool was_edit = wt && wt->nodes[was.node].type == KromeType::Edit;
+        if (was.node != KROME_NONE && !was_edit && pressable(s, under) == was) {
             KromeScreen* sc = nullptr;
             KromeTree* tree = krome_target_tree(s, was, &sc);
             if (tree && sc) krome_fire(s, *sc, *tree, was.node, 1.0); // may close what it was in: nothing after
         }
     } else if (down && s.captured.node != KROME_NONE) {
-        // Pressed only while the pointer is over what took the press.
+        // Pressed only while the pointer is over what took the press; an edit's drag selects.
         repaint(s, s.captured);
+        if (krome_is_focused(s, s.captured.screen, s.captured.overlay, s.captured.node)) krome_edit_drag(s, x, y);
     }
     s.down = down;
+
+    // The pointer's shape: the nearest node under it that says one, an edit's I-beam.
+    {
+        CursorShape shape = CursorShape::Arrow;
+        KromeScreen* usc = nullptr;
+        KromeTree* ut = under.node != KROME_NONE ? krome_target_tree(s, under, &usc) : nullptr;
+        for (u32 c = ut ? under.node : KROME_NONE; c != KROME_NONE; c = ut->nodes[c].parent) {
+            const KromeNode& cn = ut->nodes[c];
+            if (cn.cursor != KromeCursor::Unset) { shape = (CursorShape)((u8)cn.cursor - 1); break; }
+            if (cn.type == KromeType::Edit) { shape = CursorShape::IBeam; break; }
+        }
+        if (s.down && krome_is_focused(s, s.captured.screen, s.captured.overlay, s.captured.node)) shape = CursorShape::IBeam;
+        if ((u8)shape + 1 != s.cursor) { s.cursor = (u8)shape + 1; platform_cursor(*s.e, shape); }
+    }
 
     if (wheel != 0.0f && under.node != KROME_NONE) {
         KromeScreen* sc = nullptr;

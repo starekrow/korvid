@@ -43,6 +43,8 @@ const KeyMap g_map[] = {
     {Key::LShift, AKEYCODE_SHIFT_LEFT}, {Key::RShift, AKEYCODE_SHIFT_RIGHT}, {Key::LCtrl, AKEYCODE_CTRL_LEFT}, {Key::RCtrl, AKEYCODE_CTRL_RIGHT},
     {Key::LAlt, AKEYCODE_ALT_LEFT}, {Key::RAlt, AKEYCODE_ALT_RIGHT},
     {Key::LGui, AKEYCODE_META_LEFT}, {Key::RGui, AKEYCODE_META_RIGHT},
+    {Key::Delete, AKEYCODE_FORWARD_DEL}, {Key::Home, AKEYCODE_MOVE_HOME}, {Key::End, AKEYCODE_MOVE_END},
+    {Key::PageUp, AKEYCODE_PAGE_UP}, {Key::PageDown, AKEYCODE_PAGE_DOWN},
 };
 
 static_assert(KV_COUNTOF(g_map) == (u32)Key::Count - 1, "every Key except Unknown has a key code");

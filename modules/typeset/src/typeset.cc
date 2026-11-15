@@ -309,3 +309,178 @@ void typeset_word_at(const char* text, u32 len, u32 at, u32* begin, u32* end) {
 }
 
 } // namespace kv
+
+namespace kv {
+
+namespace {
+
+constexpr f64 kGroupPause = 1.0; // seconds of no typing that end a group
+
+void replace_raw(TypesetEdit& e, u32 at, u32 remove, const char* s, u32 n) {
+    if (at > e.len) at = e.len;
+    if (at + remove > e.len) remove = e.len - at;
+    u32 grow = n > remove ? n - remove : 0;
+    e.text.reserve(e.len + grow + 1);
+    if (e.text.len < e.len + 1) e.text.resize_fill(e.len + 1, 0);
+    if (grow) e.text.resize_fill(e.len + grow + 1, 0);
+    memmove(e.text.data + at + n, e.text.data + at + remove, e.len - at - remove);
+    if (n) memcpy(e.text.data + at, s, n);
+    e.len = e.len + n - remove;
+    e.text.data[e.len] = 0;
+}
+
+u32 pool_put(Array<char>& pool, const char* s, u32 n) {
+    u32 off = pool.len;
+    if (n) memcpy(pool.push_n(n), s, n);
+    return off;
+}
+
+// One change, recorded for undo in the current group (or a new one).
+void change(TypesetEdit& e, u32 at, u32 remove, const char* s, u32 n, TypesetEdit::Kind kind, bool joins) {
+    if (!joins || e.open != kind) { ++e.group; e.open = kind; }
+    TypesetEdit::Step st{};
+    st.at = at;
+    st.removed = pool_put(e.undo_pool, e.text.data ? e.text.data + at : "", remove);
+    st.removed_len = remove;
+    st.inserted = pool_put(e.undo_pool, s, n);
+    st.inserted_len = n;
+    st.caret_before = e.caret;
+    st.anchor_before = e.anchor;
+    st.group = e.group;
+    e.undo.push(st);
+    e.redo.clear();
+    e.redo_pool.clear();
+    replace_raw(e, at, remove, s, n);
+    e.caret = e.anchor = at + n;
+    if (kind == TypesetEdit::Kind::Other) e.open = TypesetEdit::Kind::None;
+    // Past the cap the oldest group goes, and the pool is made again from what is kept.
+    if (e.undo.len > e.max_steps) {
+        u32 drop = 0, g = e.undo[0].group;
+        while (drop < e.undo.len && e.undo[drop].group == g) ++drop;
+        Array<char> pool{};
+        for (u32 i = drop; i < e.undo.len; ++i) {
+            TypesetEdit::Step s2 = e.undo[i];
+            s2.removed = pool_put(pool, e.undo_pool.data + e.undo[i].removed, e.undo[i].removed_len);
+            s2.inserted = pool_put(pool, e.undo_pool.data + e.undo[i].inserted, e.undo[i].inserted_len);
+            e.undo[i - drop] = s2;
+        }
+        e.undo.len -= drop;
+        e.undo_pool.free();
+        e.undo_pool = pool;
+    }
+}
+
+bool is_space_byte(char c) { return c == ' ' || c == '\t'; }
+
+} // namespace
+
+void TypesetEdit::set(const char* s, u32 n) {
+    len = 0;
+    text.clear();
+    replace_raw(*this, 0, 0, s ? s : "", n);
+    caret = anchor = len;
+    undo.clear(); redo.clear(); undo_pool.clear(); redo_pool.clear();
+    open = Kind::None;
+}
+
+void TypesetEdit::insert(const char* s, u32 n, f64 now) {
+    bool newline = memchr(s, '\n', n) != nullptr;
+    u32 at = sel_begin(), remove = sel_end() - at;
+    // Typing continues a group: at the caret, soon after the last, and not a word begun after
+    // a space.
+    bool joins = !remove && !newline && now - last < kGroupPause && n > 0 && undo.len;
+    if (joins && at > 0 && is_space_byte(text.data[at - 1]) && !is_space_byte(s[0])) joins = false;
+    if (joins) {
+        const Step& p = undo.last();
+        if (p.at + p.inserted_len != at) joins = false;
+    }
+    change(*this, at, remove, s, n, remove || newline ? Kind::Other : Kind::Type, joins);
+    last = now;
+}
+
+void TypesetEdit::paste(const char* s, u32 n) {
+    u32 at = sel_begin();
+    change(*this, at, sel_end() - at, s, n, Kind::Other, false);
+}
+
+void TypesetEdit::erase_selection() {
+    if (!selected()) return;
+    u32 at = sel_begin();
+    change(*this, at, sel_end() - at, "", 0, Kind::Other, false);
+}
+
+void TypesetEdit::erase_back(bool word, f64 now) {
+    if (selected()) { erase_selection(); return; }
+    if (caret == 0) return;
+    u32 from = word ? typeset_prev_word(c_str(), len, caret) : typeset_prev_char(c_str(), len, caret);
+    bool joins = !word && now - last < kGroupPause && undo.len && undo.last().at == caret;
+    change(*this, from, caret - from, "", 0, word ? Kind::Other : Kind::Delete, joins);
+    last = now;
+}
+
+void TypesetEdit::erase_forward(bool word, f64 now) {
+    if (selected()) { erase_selection(); return; }
+    if (caret >= len) return;
+    u32 to = word ? typeset_next_word(c_str(), len, caret) : typeset_next_char(c_str(), len, caret);
+    bool joins = !word && now - last < kGroupPause && undo.len && undo.last().at == caret;
+    change(*this, caret, to - caret, "", 0, word ? Kind::Other : Kind::Delete, joins);
+    last = now;
+}
+
+void TypesetEdit::move(u32 at, bool extend) {
+    if (at > len) at = len;
+    while (at > 0 && at < len && ((u8)text.data[at] & 0xC0) == 0x80) --at;
+    caret = at;
+    if (!extend) anchor = at;
+    open = Kind::None;
+}
+
+bool TypesetEdit::undo_step() {
+    if (!undo.len) return false;
+    u32 g = undo.last().group;
+    while (undo.len && undo.last().group == g) {
+        Step st = undo.pop();
+        // The inverse: what was inserted goes, what was removed comes back. Kept for redo.
+        Step back{};
+        back.at = st.at;
+        back.removed = pool_put(redo_pool, text.data + st.at, st.inserted_len);
+        back.removed_len = st.inserted_len;
+        back.inserted = pool_put(redo_pool, undo_pool.data + st.removed, st.removed_len);
+        back.inserted_len = st.removed_len;
+        back.caret_before = caret;
+        back.anchor_before = anchor;
+        back.group = g;
+        redo.push(back);
+        replace_raw(*this, st.at, st.inserted_len, undo_pool.data + st.removed, st.removed_len);
+        caret = st.caret_before;
+        anchor = st.anchor_before;
+        undo_pool.len = st.removed; // the pool's tail was this step's
+    }
+    open = Kind::None;
+    return true;
+}
+
+bool TypesetEdit::redo_step() {
+    if (!redo.len) return false;
+    u32 g = redo.last().group;
+    while (redo.len && redo.last().group == g) {
+        Step st = redo.pop();
+        Step fwd{};
+        fwd.at = st.at;
+        fwd.removed = pool_put(undo_pool, text.data + st.at, st.inserted_len);
+        fwd.removed_len = st.inserted_len;
+        fwd.inserted = pool_put(undo_pool, redo_pool.data + st.removed, st.removed_len);
+        fwd.inserted_len = st.removed_len;
+        fwd.caret_before = caret;
+        fwd.anchor_before = anchor;
+        fwd.group = g;
+        undo.push(fwd);
+        replace_raw(*this, st.at, st.inserted_len, redo_pool.data + st.removed, st.removed_len);
+        caret = anchor = st.at + st.removed_len;
+        redo_pool.len = st.removed;
+    }
+    open = Kind::None;
+    return true;
+}
+
+} // namespace kv

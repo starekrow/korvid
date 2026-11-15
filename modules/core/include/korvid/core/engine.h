@@ -115,6 +115,7 @@ struct Engine {
     u64                   frame_count      = 0;
     bool                  quit_requested   = false;
     bool                  frame_wanted     = false; // engine_want_frame: a loop that paces on demand draws another frame
+    f64                   frame_due        = 0.0;   // engine_want_frame_at: the earliest time one is wanted; 0 none
     // The Work cycle (engine_work): whether a unit of the running cycle said more, whether
     // the last cycle ended with more to do, and when the running budget ends.
     bool                  work_more        = false;
@@ -274,5 +275,7 @@ inline bool engine_work_pending(const Engine& e) { return e.work_pending; }
 // For whatever changed what is on screen without input to show it (a UI's new list, a load
 // that landed).
 inline void engine_want_frame(Engine& e) { e.frame_wanted = true; }
+// A frame at a time (time_now's clock): a caret's next blink. The earliest asked for stands.
+inline void engine_want_frame_at(Engine& e, f64 when) { if (e.frame_due <= 0.0 || when < e.frame_due) e.frame_due = when; }
 
 } // namespace kv

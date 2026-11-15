@@ -37,6 +37,7 @@ void krome_emit(KromeModule& s, const KromeEvent& ev) {
 namespace {
 
 void free_screen(KromeModule& s, KromeScreen* sc) {
+    if (s.focus.node != KROME_NONE && s.focus.screen == sc->id) krome_edit_blur(s);
     krome_free_overlays(s, *sc);
     if (s.under.screen == sc->id) s.under = KromeTarget{};
     if (s.captured.screen == sc->id) s.captured = KromeTarget{};
@@ -200,10 +201,27 @@ void krome_input(TickContext& ctx) {
     }
     f32 wheel = 0.0f;
     for (const MouseWheel& w : ctx.received<MouseWheel>()) wheel += w.dy;
+    for (const FocusChanged& f : ctx.received<FocusChanged>()) s.window_focused = f.focused;
+    // Keys go to the edit with the keyboard first; what it does not take (Escape with none)
+    // is the screens'.
     bool escape = false;
-    for (const KeyDown& k : ctx.received<KeyDown>()) if (k.key == Key::Escape && !k.repeat) escape = true;
+    bool shift = in && (in->raw.down(Key::LShift) || in->raw.down(Key::RShift));
+    bool ctrl = in && (in->raw.down(Key::LCtrl) || in->raw.down(Key::RCtrl));
+    bool alt = in && (in->raw.down(Key::LAlt) || in->raw.down(Key::RAlt));
+    bool gui = in && (in->raw.down(Key::LGui) || in->raw.down(Key::RGui));
+    for (const KeyDown& k : ctx.received<KeyDown>()) {
+        if (krome_edit_key(s, k.key, shift || k.key == Key::LShift, ctrl, alt, gui)) continue;
+        if (k.key == Key::Escape && !k.repeat) escape = true;
+    }
+    for (const TextComposing& c : ctx.received<TextComposing>()) krome_edit_compose(s, c.text, c.caret);
+    for (const TextTyped& t : ctx.received<TextTyped>()) {
+        // A commit ends the composition it came from.
+        s.focus.composing[0] = 0;
+        krome_edit_typed(s, t.text);
+    }
     f32 x = in ? in->raw.mouse.x : s.px, y = in ? in->raw.mouse.y : s.py;
     krome_pointer(s, x, y, s.down, wheel, escape);
+    krome_edit_frame(s);
     s.ctx = nullptr;
 }
 
@@ -238,6 +256,7 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     if (!s) return;
     for (KromeScreen* sc : s->screens) free_screen(*s, sc);
     s->screens.free();
+    s->focus.buf.free();
     krome_free_docs(*s);
     for (KromeModule::SetDoc& d : s->set_docs) free_in(s->general, d.data, d.size ? d.size : 1);
     s->set_docs.free();
@@ -401,7 +420,7 @@ constinit const SystemDesc k_systems[] = {
     // The Frame cycle (docs/design/cycles.md): once before each frame drawn, never in a tick.
     {.name = ".pump", .phase = Phase::Frame, .fn = krome_pump, .reads = "KromeSet", .emits = "KromeEvent", .main_thread = true},
     {.name = ".input", .phase = Phase::Frame, .fn = krome_input,
-     .reads = "input.state, MouseButtonDown, MouseButtonUp, MouseWheel, KeyDown", .emits = "KromeEvent",
+     .reads = "input.state, MouseButtonDown, MouseButtonUp, MouseWheel, KeyDown, TextTyped, TextComposing, FocusChanged", .emits = "KromeEvent",
      .after = ".pump", .main_thread = true},
     {.name = ".paint", .phase = Phase::Frame, .fn = krome_paint, .after = ".input", .main_thread = true},
 };

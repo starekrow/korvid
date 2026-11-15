@@ -389,6 +389,7 @@ bool demand_frame(Engine& engine, FrameLoopState& s) {
     if (engine_holds(engine) & HoldLoading) want = true;
     f64 now = time_now();
     if (now - s.demand_last >= k_demand_heartbeat) want = true;
+    if (engine.frame_due > 0.0 && now >= engine.frame_due) { want = true; engine.frame_due = 0.0; }
     if (!want) return false;
     // A few frames after anything, so what a tick changed reaches the screen.
     s.demand_tail = engine.frame_wanted || (in && memcmp(&before, &in->raw, sizeof before) != 0) ? 3 : s.demand_tail ? s.demand_tail - 1 : 0;

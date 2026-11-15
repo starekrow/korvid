@@ -7,7 +7,7 @@ for i = 1, 40 do assets[i] = { id = "item" .. i, name = "asset_" .. i .. ".png" 
 
 return {
   model = { name = "Rowan", level = 3, saves = 0, picked = "nothing", ticks = 0, choice = "none", abouts = 0,
-            assets = assets },
+            assets = assets, notes = "", noted = 0 },
 
   on = {
     up         = function() model.level = model.level + 1 end,
@@ -21,5 +21,6 @@ return {
     about      = function() open_overlay(kim("kromedemo/form.kimb", "about"), { modal = true, dim = "#00000088" }) end,
     ok         = function() model.abouts = model.abouts + 1; close_overlay() end,
     quit       = function() emit("quit") end,
+    noted      = function() model.noted = model.noted + 1 end,
   },
 }

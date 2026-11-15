@@ -118,7 +118,7 @@ void test_kim_check(kv::TestCtx& c) {
         "    slot\n"                               // 13
         "  }\n"
         "}\n"),
-        "t.kim:4: 'buton' is neither a kernel node (box, text, image, hit) nor a definition\n"
+        "t.kim:4: 'buton' is neither a kernel node (box, text, image, hit, edit) nor a definition\n"
         "t.kim:5: no style 'buttn'\n"
         "t.kim:5: bg: 'panl' is not a color, nor a token of every theme\n"
         "t.kim:6: 'frobbed' is not a flag\n"

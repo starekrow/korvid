@@ -138,6 +138,8 @@ bool look_prop(KromeLook& l, const char* prop, const KromeValue& v, const char**
     if (!strcmp(prop, "border"))       { if (v.kind != KromeValue::Number || v.n < 0) *why = "border takes a number, 0 or more"; else { l.border = v.n; l.set |= KROME_LOOK_BORDER; } return true; }
     if (!strcmp(prop, "opacity"))      { if (v.kind != KromeValue::Number || v.n < 0 || v.n > 1) *why = "opacity takes a number from 0 to 1"; else { l.opacity = v.n; l.set |= KROME_LOOK_OPACITY; } return true; }
     if (!strcmp(prop, "size"))         { if (v.kind != KromeValue::Number || v.n <= 0) *why = "size takes a number above 0"; else { l.size = v.n; l.set |= KROME_LOOK_SIZE; } return true; }
+    if (!strcmp(prop, "caret-color"))  { if (!color_value(v, &l.caret_color)) *why = "caret-color takes a color"; else l.set |= KROME_LOOK_CARET_COLOR; return true; }
+    if (!strcmp(prop, "selection-color")) { if (!color_value(v, &l.selection_color)) *why = "selection-color takes a color"; else l.set |= KROME_LOOK_SELECTION_COLOR; return true; }
     if (!strcmp(prop, "line-height"))  { if (v.kind != KromeValue::Number || v.n <= 0) *why = "line-height takes a number above 0, times the size"; else { l.line_height = v.n; l.set |= KROME_LOOK_LINE_HEIGHT; } return true; }
     if (!strcmp(prop, "font"))         { if (v.kind != KromeValue::String) *why = "font takes an asset path"; else { l.font = name_intern(v.s); l.set |= KROME_LOOK_FONT; } return true; }
     if (!strcmp(prop, "image"))        { if (v.kind != KromeValue::String) *why = "image takes an asset path"; else { l.image = name_intern(v.s); l.set |= KROME_LOOK_IMAGE; } return true; }
@@ -178,6 +180,8 @@ void overlay(KromeLook& to, const KromeLook& from) {
     if (s & KROME_LOOK_IMAGE) to.image = from.image;
     if (s & KROME_LOOK_TINT) to.tint = from.tint;
     if (s & KROME_LOOK_LINE_HEIGHT) to.line_height = from.line_height;
+    if (s & KROME_LOOK_CARET_COLOR) to.caret_color = from.caret_color;
+    if (s & KROME_LOOK_SELECTION_COLOR) to.selection_color = from.selection_color;
     to.set |= s;
 }
 
@@ -228,6 +232,23 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
             n.event = name_intern(v.s);
             return nullptr;
         }
+        if (!strcmp(prop, "change") || !strcmp(prop, "blur")) {
+            if (v.kind != KromeValue::String) return "an event takes a name";
+            (prop[0] == 'c' ? n.change : n.blur) = name_intern(v.s);
+            return nullptr;
+        }
+        if (!strcmp(prop, "placeholder")) {
+            if (v.kind != KromeValue::String) return "placeholder takes a string";
+            n.placeholder = string(v.s, (u32)strlen(v.s));
+            dirty = true;
+            return nullptr;
+        }
+        if (!strcmp(prop, "cursor")) {
+            static const char* const names[] = {"", "arrow", "ibeam", "hand", "move", "resize-ew", "resize-ns", "forbidden"};
+            for (u8 i = 1; i < 8; ++i)
+                if (v.kind == KromeValue::String && !strcmp(v.s, names[i])) { n.cursor = (KromeCursor)i; return nullptr; }
+            return "cursor takes arrow, ibeam, hand, move, resize-ew, resize-ns or forbidden";
+        }
     }
     // A look's property, in the state's look (made on first use).
     u32* slot = state == KromeState::Base ? &n.look : &n.states[(u32)state];
@@ -248,7 +269,8 @@ const char* KromeTree::flag(u32 node, const char* w) {
     struct Bit { const char* word; u16 bit; };
     static const Bit bits[] = {{"fill", KROME_FILL}, {"clip", KROME_CLIP}, {"scroll", KROME_SCROLL},
                                {"disabled", KROME_DISABLED}, {"selected", KROME_SELECTED}, {"hidden", KROME_HIDDEN},
-                               {"subpixel", KROME_SUBPIXEL}, {"nowrap", KROME_NOWRAP}};
+                               {"subpixel", KROME_SUBPIXEL}, {"nowrap", KROME_NOWRAP},
+                               {"multiline", KROME_MULTILINE}, {"readonly", KROME_READONLY}};
     for (const Bit& b : bits) if (!strcmp(w, b.word)) { n.flags |= b.bit; dirty = true; return nullptr; }
     if (!strcmp(w, "left"))   { n.align_x = KromeAlign::Start; dirty = true; return nullptr; }
     if (!strcmp(w, "center")) { n.align_x = KromeAlign::Center; dirty = true; return nullptr; }
@@ -298,6 +320,7 @@ const char* krome_type_name(KromeType t) {
     case KromeType::Text: return "text";
     case KromeType::Image: return "image";
     case KromeType::Hit: return "hit";
+    case KromeType::Edit: return "edit";
     }
     return "?";
 }

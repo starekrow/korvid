@@ -23,6 +23,7 @@ screen form {
                 field "Saved" "{saves} times"
                 field "Picked" "{picked}"
                 field "Menu" "{choice}"
+                textarea id=notes @notes placeholder="Notes" change=noted
                 spacer
                 row gap=8 {
                     button "Save" id=save -> save

@@ -57,6 +57,7 @@ local function make(w, dir, defaults)
           end
         elseif k == "style" or k == "styles" then n.s = words(v)
         elseif k == "id" then n.id = tostring(v)
+        elseif k == "bind" then n.b = tostring(v)
         elseif k == "event" then n.e = tostring(v)
         elseif states[k] and type(v) == "table" then n.looks = n.looks or {}; n.looks[k] = v
         elseif v == true then n.f[#n.f + 1] = k
@@ -74,6 +75,7 @@ hit    = make("hit")
 text   = make("text")
 image  = make("image")
 spacer = make("box", nil, { fill = true })
+edit   = make("edit")
 -- A screen of a .kimb as a piece of this tree, built in that file's scope.
 function kim(file, screen)
   local info = getinfo(2, "l")
@@ -679,6 +681,15 @@ void krome_model_changed(KromeModule& s, KromeScreen& sc, u64 key) {
         if (d.key != key) continue;
         if (!d.binding) { krome_fill_node(s, sc, sc.tree, d.node); continue; }
         KromeNode& n = sc.tree.nodes[d.node];
+        if (n.type == KromeType::Edit) {
+            // An edit shows the model's text, unless it is the one being typed in.
+            if (!krome_is_focused(s, sc.id, 0, d.node)) {
+                char val[1024];
+                sc.tree.set_text(d.node, krome_model_path_text(s, sc, name_str(n.binding), val, sizeof val));
+                sc.repaint = true;
+            }
+            continue;
+        }
         u16 was = n.flags;
         if (krome_model_truthy(s, sc, name_str(n.binding))) n.flags |= KROME_SELECTED;
         else n.flags &= (u16)~KROME_SELECTED;
@@ -707,6 +718,56 @@ void krome_model_set_string(KromeModule& s, KromeScreen& sc, const char* key, co
     lua_setfield(L, -2, key);
     lua_pop(L, 1);
     krome_model_changed(s, sc, name_intern(key).hash);
+}
+
+void krome_fire_named(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, Name event, f64 value) {
+    if (node >= tree.nodes.len || event.is_null()) return;
+    Name id = tree.nodes[node].id;
+    lua_State* L = s.L;
+    if (L && sc.on != LUA_NOREF) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, sc.on);
+        lua_getfield(L, -1, name_str(event));
+        lua_remove(L, -2);
+        if (lua_isfunction(L, -1)) {
+            if (id.is_null()) lua_pushnil(L);
+            else lua_pushstring(L, name_str(id));
+            lua_pushnumber(L, (lua_Number)value);
+            if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
+                KV_ERROR("krome", "%s", lua_tostring(L, -1));
+                lua_pop(L, 1);
+                ++s.script_errors;
+            }
+        } else {
+            lua_pop(L, 1);
+        }
+    }
+    ++s.fired;
+    krome_emit(s, KromeEvent{sc.name.hash, id.hash, event.hash, value});
+}
+
+void krome_model_write_string(KromeModule& s, KromeScreen& sc, const char* path, const char* value) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) return;
+    const char* last = strrchr(path, '.');
+    if (last) {
+        char parent[300];
+        format(parent, sizeof parent, "%.*s", (int)(last - path), path);
+        push_path(L, sc.store, parent);
+        ++last;
+    } else {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store);
+        last = path;
+    }
+    if (lua_istable(L, -1)) {
+        lua_pushstring(L, value);
+        bool digits = *last != 0;
+        for (const char* q = last; *q; ++q) if (*q < '0' || *q > '9') digits = false;
+        if (digits) lua_rawseti(L, -2, (lua_Integer)strtoll(last, nullptr, 10));
+        else lua_setfield(L, -2, last);
+    }
+    lua_pop(L, 1);
+    usize head = strcspn(path, ".");
+    krome_model_changed(s, sc, name_intern(path, head).hash);
 }
 
 bool krome_fire(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, f64 value) {

@@ -5,6 +5,8 @@
 #include "korvid/core/array.h"
 #include "korvid/core/handle.h"
 #include "korvid/kimb/kimb.h"
+#include "korvid/typeset/typeset.h"
+#include "korvid/platform_hid/input.h"
 #include "korvid/render/ui.h"
 
 struct lua_State;
@@ -124,6 +126,36 @@ struct KromeScreen {
 struct KromeFont { Name path; u32 px; Handle asset; bool ready; };
 struct KromeImage { Name path; Handle asset; bool ready; };
 
+// The edit that has the keyboard (docs/PRDs/Krome-Slice-3-PRD.md, "Krome"): one across
+// every screen. Its text is the buffer here while it has the focus, written back to the
+// tree and the model as it changes.
+struct KromeFocus {
+    u32         screen = 0, overlay = 0, node = KROME_NONE; // node KROME_NONE: no edit has it
+    Name        id;              // the edit's id, to find it again when its tree is built again
+    TypesetEdit buf;
+    vec2        scroll{0, 0};    // physical pixels its text is moved by, to keep the caret in view
+    f32         want_x = -1.0f;  // the column Up and Down keep to; < 0: the caret's
+    f64         blink_from = 0.0;
+    bool        blink_on = true; // as last painted
+    bool        changed = false; // since the frame's change event
+    // A press or a drag on it, resolved when its text is next laid out (paint).
+    bool        pending = false, pending_extend = false;
+    u32         pending_clicks = 0;
+    vec2        pending_at{0, 0};
+    u32         clicks = 0;
+    f64         click_time = 0.0;
+    vec2        click_at{0, 0};
+    u32         word_begin = 0, word_end = 0; // what a double or triple press selected, for a drag from it
+    char        composing[64] = {};
+    u32         compose_caret = 0;
+    // What its text was last laid out with, for the keys that need lines (Up, Down, Home).
+    const FontAsset* font = nullptr;
+    TypesetParams params;
+    vec2        origin{0, 0};    // where the laid-out text's (0, 0) was drawn, physical pixels
+    f32         view_h = 0.0f;   // its inside's height, for Page Up and Down
+    rect2       told{0, 0, 0, 0}; // where the input method was last told the caret is
+};
+
 struct KromeModule {
     Engine*             e = nullptr;
     Allocator*          general = nullptr;
@@ -160,6 +192,9 @@ struct KromeModule {
     UiList              list;
     u64                 paints = 0, layouts = 0, submits = 0;
     u32                 input_id = 0; // input.state's resource id in this engine
+    KromeFocus          focus;
+    bool                window_focused = true;
+    u8                  cursor = 0;   // the shape last set (CursorShape + 1; 0 none yet)
     bool                warned_no_ui = false;
 };
 
@@ -220,6 +255,30 @@ void krome_model_changed(KromeModule& s, KromeScreen& sc, u64 key);
 const char* krome_model_value_text(KromeModule& s, KromeScreen& sc, const char* key, char* out, usize cap);
 // A node's event: its handler, then KromeEvent. False when it has none.
 bool krome_fire(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, f64 value);
+// A named event of a node's (an edit's change or blur, its submit): its handler, then KromeEvent.
+void krome_fire_named(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, Name event, f64 value);
+// The model at a dotted path set to a string, and what reads it told.
+void krome_model_write_string(KromeModule& s, KromeScreen& sc, const char* path, const char* value);
+
+// ---- editing (edit.cc) ----------------------------------------------------------------------------
+
+bool krome_is_focused(const KromeModule& s, u32 screen, u32 overlay, u32 node);
+// A press on an edit: it takes the focus (if it had not), and the caret goes where the press
+// was (a double press a word, a triple a line), once its text is laid out.
+void krome_edit_press(KromeModule& s, KromeScreen& sc, u32 overlay, u32 node, f32 x, f32 y, bool shift);
+void krome_edit_drag(KromeModule& s, f32 x, f32 y);
+// The focus leaves the edit: what it holds is written back, its blur event fires.
+void krome_edit_blur(KromeModule& s);
+// What the frame brought: keys, typed text, composition. True when it took the key.
+bool krome_edit_key(KromeModule& s, Key key, bool shift, bool ctrl, bool alt, bool gui);
+void krome_edit_typed(KromeModule& s, const char* utf8);
+void krome_edit_compose(KromeModule& s, const char* text, u32 caret);
+// The end of the frame's input: the change event, the blink's next frame.
+void krome_edit_frame(KromeModule& s);
+// A screen's tree was built again: the focused edit found again by its id, or blurred.
+void krome_edit_rebuilt(KromeModule& s, KromeScreen& sc);
+// The node the focus is on, in its tree, or null.
+KromeTree* krome_focus_tree(KromeModule& s, KromeScreen** sc);
 void krome_emit(KromeModule& s, const KromeEvent& ev);
 // The model at a dotted path ("assets.3.name": a key, then an element, then a field), as
 // `if` (truthy), `each` (a list's length) and text read it.

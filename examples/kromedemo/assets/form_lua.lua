@@ -5,7 +5,7 @@
 local muted, accent = "#8b95a7", "#2f6fed"
 
 local function button(label, t)
-  local b = { pad = { 14, 8 }, radius = 6, bg = accent, color = "#e6e9ef", border = 1, ["border-color"] = "#ffffff22",
+  local b = { pad = { 14, 8 }, radius = 6, bg = accent, color = "#e6e9ef", border = 1, ["border-color"] = "#ffffff22", cursor = "hand",
               looks = { hover = { bg = "#4a84f5" }, pressed = { bg = "#245ad0" },
                         disabled = { bg = "#2a3140", color = "#5b6475", ["border-color"] = "#ffffff0d" } },
               center = true, middle = true,
@@ -33,7 +33,7 @@ for i = 1, 40 do
 end
 
 return {
-  model = { name = "Rowan", level = 3, saves = 0, picked = "nothing", ticks = 0, choice = "none", abouts = 0 },
+  model = { name = "Rowan", level = 3, saves = 0, picked = "nothing", ticks = 0, choice = "none", abouts = 0, notes = "", noted = 0 },
 
   on = {
     up     = function() model.level = model.level + 1 end,
@@ -60,6 +60,7 @@ return {
     end,
     ok     = function() model.abouts = model.abouts + 1; close_overlay() end,
     quit   = function() emit("quit") end,
+    noted  = function() model.noted = model.noted + 1 end,
   },
 
   root = col { bg = "#10131a", color = "#e6e9ef",
@@ -79,6 +80,9 @@ return {
         field("Saved", "{saves} times"),
         field("Picked", "{picked}"),
         field("Menu", "{choice}"),
+        edit { id = "notes", bind = "notes", multiline = true, placeholder = "Notes", change = "noted", w = "fill", h = 80,
+               pad = { 6, 4 }, radius = 4, bg = "#151922", border = 1, ["border-color"] = "#ffffff22",
+               focused = { ["border-color"] = "#2f6fed" } },
         spacer {},
         row { gap = 8,
           button("Save", { id = "save", event = "save" }),

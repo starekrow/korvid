@@ -25,7 +25,19 @@ KromeSize mode_of(const KromeNode& n, bool horizontal, KromeDir parent_dir) {
 
 bool visible(const KromeNode& n) { return !(n.flags & KROME_HIDDEN); }
 
-bool wraps(const KromeNode& n) { return n.type == KromeType::Text && !(n.flags & KROME_NOWRAP); }
+bool wraps(const KromeNode& n) {
+    if (n.type == KromeType::Edit) return (n.flags & KROME_MULTILINE) != 0;
+    return n.type == KromeType::Text && !(n.flags & KROME_NOWRAP);
+}
+
+// What an edit is measured by: its text, its placeholder while it has none, and never less
+// than a space (a caret needs a line).
+const char* measured_text(const KromeTree& t, u32 i) {
+    const KromeNode& n = t.nodes[i];
+    const char* s = t.text(i);
+    if (n.type == KromeType::Edit && !*s) s = n.placeholder != KROME_NONE ? t.strings.data + n.placeholder : " ";
+    return *s ? s : " ";
+}
 
 struct Layout {
     KromeTree&          t;
@@ -42,8 +54,8 @@ struct Layout {
         if (l.set & KROME_LOOK_LINE_HEIGHT) lh = l.line_height;
         vec2 c{0, 0};
         f32 narrow = 0.0f;  // the content's least width
-        if (n.type == KromeType::Text) {
-            const char* s = t.text(i);
+        if (n.type == KromeType::Text || n.type == KromeType::Edit) {
+            const char* s = n.type == KromeType::Edit ? measured_text(t, i) : t.text(i);
             if (m.paragraph) {
                 f32 nw = 0.0f;
                 c = m.paragraph(m.user, s, (u32)strlen(s), font, size, lh, 0.0f, &nw);
@@ -108,8 +120,8 @@ struct Layout {
         if (l.set & KROME_LOOK_SIZE) size = l.size;
         if (l.set & KROME_LOOK_LINE_HEIGHT) lh = l.line_height;
         f32 c = 0.0f;
-        if (n.type == KromeType::Text && m.paragraph) {
-            const char* s = t.text(i);
+        if ((n.type == KromeType::Text || n.type == KromeType::Edit) && m.paragraph) {
+            const char* s = n.type == KromeType::Edit ? measured_text(t, i) : t.text(i);
             f32 inner = n.rect.w - n.pad[0] - n.pad[2];
             f32 nw = 0.0f;
             c = m.paragraph(m.user, s, (u32)strlen(s), font, size, lh, wraps(n) ? inner : 0.0f, &nw).y;

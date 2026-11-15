@@ -123,7 +123,7 @@ void test_check(TestCtx& c) {
     KV_CHECK(c, kimc("check", path("good.kim"), "--root", root, "--as", "g/good.kim") == 0 && has(g_out.data, "g/good.kim: no mistakes (2 files)"));
     KV_CHECK(c, kimc("check", path("bad.kim"), "--root", root, "--as", "g/bad.kim") == 1);
     KV_CHECK(c, has(g_err.data, "g/bad.kim:3: bg: 'panl' is not a color, nor a token of every theme\n"));
-    KV_CHECK(c, has(g_err.data, "g/bad.kim:4: 'buton' is neither a kernel node (box, text, image, hit) nor a definition\n"));
+    KV_CHECK(c, has(g_err.data, "g/bad.kim:4: 'buton' is neither a kernel node (box, text, image, hit, edit) nor a definition\n"));
     // Without the root the use is not found; a cooked tree is found by the whole path.
     KV_CHECK(c, kimc("check", path("good.kim"), "--as", "g/good.kim") == 1 && has(g_err.data, "g/good.kim:1: use \"krome/std\": no such prelude"));
     io_make_dirs(path("tree/krome"));

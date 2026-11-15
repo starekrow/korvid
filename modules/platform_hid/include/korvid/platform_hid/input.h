@@ -19,6 +19,7 @@ enum class Key : u16 {
     Left, Right, Up, Down,
     LShift, RShift, LCtrl, RCtrl, LAlt, RAlt, // Alt is Option on a Mac
     LGui, RGui, // Command on a Mac, the Windows key on a PC (SDL's name); appended, so the numbers above hold
+    Delete, Home, End, PageUp, PageDown, // a text field's (Krome slice 3); appended likewise
     Count
 };
 

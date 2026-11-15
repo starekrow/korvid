@@ -16,6 +16,7 @@ static const char* const g_key_names[(u32)Key::Count] = {
     "Left", "Right", "Up", "Down",
     "LShift", "RShift", "LCtrl", "RCtrl", "LAlt", "RAlt",
     "LGui", "RGui",
+    "Delete", "Home", "End", "PageUp", "PageDown",
 };
 
 const char* key_name(Key k) {

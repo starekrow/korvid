@@ -218,7 +218,11 @@ constinit const KimbKernelProp k_props[] = {
     {"bg2", KimbType::Color, false},
     {"border", KimbType::Number, false},
     {"border-color", KimbType::Color, false},
+    {"blur", KimbType::String, true},
+    {"caret-color", KimbType::Color, false},
+    {"change", KimbType::String, true},
     {"color", KimbType::Color, false},
+    {"cursor", KimbType::String, true},
     {"dir", KimbType::Dir, true},
     {"font", KimbType::String, false},
     {"gap", KimbType::Number, true},
@@ -227,7 +231,9 @@ constinit const KimbKernelProp k_props[] = {
     {"line-height", KimbType::Number, false},
     {"opacity", KimbType::Number, false},
     {"pad", KimbType::Box4, true},
+    {"placeholder", KimbType::String, true},
     {"radius", KimbType::Box4, false},
+    {"selection-color", KimbType::Color, false},
     {"shadow", KimbType::Shadow, false},
     {"shadow-color", KimbType::Color, false},
     {"size", KimbType::Number, false},
@@ -235,9 +241,9 @@ constinit const KimbKernelProp k_props[] = {
     {"w", KimbType::Size, true},
 };
 
-const char* const k_nodes[] = {"box", "text", "image", "hit"};
+const char* const k_nodes[] = {"box", "text", "image", "hit", "edit"};
 const char* const k_flags[] = {"fill", "clip", "scroll", "disabled", "selected", "hidden", "left", "center", "right", "top", "middle", "bottom",
-                               "subpixel", "nowrap"};
+                               "subpixel", "nowrap", "multiline", "readonly"};
 const char* const k_states[] = {"hover", "pressed", "focused", "disabled", "selected"};
 
 bool in(const char* w, const char* const* list, u32 n) {
@@ -290,7 +296,7 @@ const KimbKernelProp* kimb_kernel_prop(const char* name) {
     for (const KimbKernelProp& p : k_props) if (!strcmp(p.name, name)) return &p;
     return nullptr;
 }
-bool kimb_kernel_node(const char* w) { return in(w, k_nodes, 4); }
+bool kimb_kernel_node(const char* w) { return in(w, k_nodes, 5); }
 bool kimb_kernel_flag(const char* w) { return in(w, k_flags, sizeof k_flags / sizeof k_flags[0]); }
 bool kimb_state(const char* w) { return in(w, k_states, 5); }
 
@@ -467,7 +473,7 @@ struct Checker {
         const JsonValue* a = json_get(f.doc, n, "a");
         if (kimb_kernel_node(w)) {
             kernel_props(line, "", p, false);
-            bool takes_text = !strcmp(w, "text");
+            bool takes_text = !strcmp(w, "text") || !strcmp(w, "edit");
             if (t && !takes_text) err(line, "a %s takes no content: put a text in it", w);
             if (a) err(line, "a %s takes one content string", w);
             if (json_get(f.doc, n, "r")) err(line, "a %s takes no range", w);
@@ -476,7 +482,7 @@ struct Checker {
             return;
         }
         KimbFound d;
-        if (!kimb_find_def(s, w, &d)) { err(line, "'%s' is neither a kernel node (box, text, image, hit) nor a definition", w); walk_kids(); return; }
+        if (!kimb_find_def(s, w, &d)) { err(line, "'%s' is neither a kernel node (box, text, image, hit, edit) nor a definition", w); walk_kids(); return; }
         const JsonDoc& dd = d.file->doc;
         const JsonValue* params = json_get(dd, *d.value, "params");
         u32 nparams = params ? params->count() : 0;

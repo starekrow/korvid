@@ -51,7 +51,7 @@ struct Demo {
 
 
 // A step of the pilot: where the pointer goes and what it does there.
-enum class Act : u8 { Move, Click, Wheel, Shot, Check, Theme, Quit };
+enum class Act : u8 { Move, Click, Wheel, Shot, Check, Theme, Type, Key, Compose, Quit };
 struct Step { Act act; const char* id; f32 value; const char* expect; };
 
 // Positions are found when the step runs, so a reflow or a scroll is followed.
@@ -79,6 +79,26 @@ constinit const Step k_steps[] = {
     {Act::Check, "abouts", 0, "1"},
     {Act::Click, "later", 0, nullptr}, // disabled
     {Act::Check, "saves", 0, "2"},
+    // The notes: typed, a line broken, everything copied and pasted after itself, the paste
+    // undone, a character composed through an input method and committed; then Escape.
+    {Act::Click, "notes", 0, nullptr},
+    {Act::Type, "first line", 0, nullptr},
+    {Act::Key, "enter", 0, ""},
+    {Act::Type, "second", 0, nullptr},
+    {Act::Check, "notes", 0, "first line\nsecond"},
+    {Act::Shot, "edit", 0, nullptr},
+    {Act::Key, "a", 0, "ctrl"},
+    {Act::Key, "c", 0, "ctrl"},
+    {Act::Key, "right", 0, ""},
+    {Act::Key, "v", 0, "ctrl"},
+    {Act::Check, "notes", 0, "first line\nsecondfirst line\nsecond"},
+    {Act::Key, "z", 0, "ctrl"},
+    {Act::Check, "notes", 0, "first line\nsecond"},
+    {Act::Compose, "\xe3\x81\x8b", 0, nullptr},
+    {Act::Shot, "compose", 0, nullptr},
+    {Act::Type, "\xe3\x81\x8b", 0, nullptr},
+    {Act::Check, "notes", 0, "first line\nsecond\xe3\x81\x8b"},
+    {Act::Key, "escape", 0, ""},
     // The other theme: every screen and overlay restyled from the documents Krome keeps.
     {Act::Theme, "light", 0, nullptr},
     {Act::Shot, "light", 0, nullptr},
@@ -166,6 +186,28 @@ void kromedemo_tick(TickContext& ctx) {
     case Act::Theme:
         krome_theme(e, s.id);
         break;
+    case Act::Type:
+        input_text_override(e, s.id);
+        break;
+    case Act::Compose:
+        input_compose_override(e, s.id, (u32)strlen(s.id));
+        break;
+    case Act::Key: {
+        // Three ticks a key: its modifier down, the key down and up, the modifier up.
+        static u32 phase = 0;
+        struct Named { const char* name; Key key; };
+        static const Named keys[] = {{"enter", Key::Enter}, {"escape", Key::Escape}, {"right", Key::Right}, {"left", Key::Left},
+                                     {"a", Key::A}, {"c", Key::C}, {"v", Key::V}, {"x", Key::X}, {"z", Key::Z}, {"backspace", Key::Backspace}};
+        Key k = Key::Unknown;
+        for (const Named& n : keys) if (!strcmp(n.name, s.id)) k = n.key;
+        bool ctrl = s.expect && !strcmp(s.expect, "ctrl");
+        if (phase == 0 && ctrl) input_key_override(e, Key::LCtrl, true);
+        if (phase == 1) { input_key_override(e, k, true); input_key_override(e, k, false); }
+        if (phase == 2 && ctrl) input_key_override(e, Key::LCtrl, false);
+        if (++phase < 3) { d.wait = 1; return; }
+        phase = 0;
+        break;
+    }
     case Act::Quit:
         if (d.failures) KV_ERROR("kromedemo", "demo: %u checks failed", d.failures);
         else KV_INFO("kromedemo", "demo passed");

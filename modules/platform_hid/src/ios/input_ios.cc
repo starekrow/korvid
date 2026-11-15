@@ -24,6 +24,7 @@ const KeyMap g_map[] = {
     {Key::LShift, 225}, {Key::RShift, 229}, {Key::LCtrl, 224}, {Key::RCtrl, 228},
     {Key::LAlt, 226}, {Key::RAlt, 230},
     {Key::LGui, 227}, {Key::RGui, 231},
+    {Key::Delete, 76}, {Key::Home, 74}, {Key::End, 77}, {Key::PageUp, 75}, {Key::PageDown, 78}, // HID usages
 };
 
 static_assert(KV_COUNTOF(g_map) == (u32)Key::Count - 1, "every Key except Unknown has a usage");

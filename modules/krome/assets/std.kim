@@ -92,7 +92,7 @@ def badge label {
 // ---- controls -----------------------------------------------------------------------------
 
 style button {
-    pad=14,8 radius=6 bg=accent color=on-accent border=1 border-color=edge center middle
+    pad=14,8 radius=6 bg=accent color=on-accent border=1 border-color=edge center middle cursor=hand
     hover { bg=accent-hover }
     pressed { bg=accent-down }
     disabled { bg=off-bg color=off-ink border-color=off-edge }
@@ -125,6 +125,21 @@ def checkbox label {
         box [check-box]
         text "{label}"
     }
+}
+
+// Text fields: one line, and many. The text is what @name binds; placeholder= shows while
+// it is empty; -> fires on Enter (Ctrl+Enter in many lines), change= and blur= as they say.
+style input {
+    pad=6,4 radius=4 bg=well border=1 border-color=edge
+    focused { border-color=accent }
+}
+
+def input {
+    edit [input] w=fill
+}
+
+def textarea {
+    edit [input] multiline w=fill h=80
 }
 
 style menu-item {

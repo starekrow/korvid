@@ -85,3 +85,54 @@ u32  typeset_prev_word(const char* text, u32 len, u32 at); // to the start of th
 void typeset_word_at(const char* text, u32 len, u32 at, u32* begin, u32* end);
 
 } // namespace kv
+
+namespace kv {
+
+// ---- the edit buffer ------------------------------------------------------------------------------
+// What an editor holds: UTF-8 text (NUL-terminated after `len`), a caret and an anchor (the
+// selection is between them), and undo and redo. Offsets are bytes on code point
+// boundaries. Every change replaces the selection; undo takes back a group of changes:
+// typing until the caret moves, a pause, or a word begun after a space; deleting, likewise;
+// a paste, a cut, a line break and a deletion of a selection, alone.
+struct TypesetEdit {
+    struct Step {
+        u32 at;
+        u32 removed, removed_len;   // into the pool
+        u32 inserted, inserted_len;
+        u32 caret_before, anchor_before;
+        u32 group;
+    };
+    enum class Kind : u8 { None, Type, Delete, Other };
+
+    Array<char> text{};
+    u32         len = 0;
+    u32         caret = 0, anchor = 0;
+    Array<Step> undo{}, redo{};
+    Array<char> undo_pool{}, redo_pool{};
+    u32         group = 0;
+    Kind        open = Kind::None; // the kind of the group still taking changes
+    f64         last = 0.0;        // when it last took one
+    u32         max_steps = 4096;
+
+    void        set(const char* s, u32 n);      // all of it, undo forgotten
+    const char* c_str() const { return text.data ? text.data : ""; }
+    bool        selected() const { return caret != anchor; }
+    u32         sel_begin() const { return caret < anchor ? caret : anchor; }
+    u32         sel_end() const { return caret < anchor ? anchor : caret; }
+
+    // Changes, at time `now` (seconds) for grouping.
+    void insert(const char* s, u32 n, f64 now);  // typing, or a paste (`paste` true: a step of its own)
+    void paste(const char* s, u32 n);
+    void erase_back(bool word, f64 now);         // Backspace: the selection, or a code point or word before
+    void erase_forward(bool word, f64 now);      // Delete
+    void erase_selection();                      // a cut
+    // The caret to `at` (clamped to a boundary); `extend` keeps the anchor. Ends a group.
+    void move(u32 at, bool extend);
+    void select_all() { anchor = 0; caret = len; open = Kind::None; }
+    bool undo_step();
+    bool redo_step();
+    void end_group() { open = Kind::None; }
+    void free() { text.free(); undo.free(); redo.free(); undo_pool.free(); redo_pool.free(); len = caret = anchor = 0; }
+};
+
+} // namespace kv

@@ -27,7 +27,7 @@ namespace kv {
 constexpr u32 KROME_NONE      = 0xFFFFFFFFu;
 constexpr u32 KROME_MAX_DEPTH = 64;
 
-enum class KromeType  : u8 { Box, Text, Image, Hit };
+enum class KromeType  : u8 { Box, Text, Image, Hit, Edit };
 enum class KromeDir   : u8 { Row, Col, Stack };
 enum class KromeSize  : u8 { Hug, Fill, Fixed };
 enum class KromeAlign : u8 { Start, Center, End };
@@ -63,6 +63,8 @@ struct KromeLook {
     Name  image;                           // an image node's texture, by asset path
     color tint{1, 1, 1, 1};
     f32   line_height = 0.0f;              // a text's lines, times its size; 0: the font's own
+    color caret_color{0, 0, 0, 0};         // an edit's caret; unset: its text's color
+    color selection_color{0.18f, 0.44f, 0.93f, 0.40f}; // what an edit's selection is drawn in
     u32   set = 0;
 };
 
@@ -81,6 +83,8 @@ constexpr u32 KROME_LOOK_SIZE     = 1u << 11;
 constexpr u32 KROME_LOOK_IMAGE    = 1u << 12;
 constexpr u32 KROME_LOOK_TINT     = 1u << 13;
 constexpr u32 KROME_LOOK_LINE_HEIGHT = 1u << 14;
+constexpr u32 KROME_LOOK_CARET_COLOR = 1u << 15;
+constexpr u32 KROME_LOOK_SELECTION_COLOR = 1u << 16;
 constexpr u32 KROME_LOOK_INHERITED = KROME_LOOK_COLOR | KROME_LOOK_FONT | KROME_LOOK_SIZE | KROME_LOOK_LINE_HEIGHT;
 
 // Node flags.
@@ -93,6 +97,11 @@ constexpr u16 KROME_HIDDEN   = 1u << 5; // takes no space and draws nothing
 constexpr u16 KROME_DEAD     = 1u << 6; // rebuilt away: in no list, kept until the tree is built again
 constexpr u16 KROME_SUBPIXEL = 1u << 7; // its text's pen is kept to a quarter pixel, not snapped to whole ones
 constexpr u16 KROME_NOWRAP   = 1u << 8; // its text stays on one line whatever width it gets
+constexpr u16 KROME_MULTILINE = 1u << 9; // an edit of many lines (Enter breaks one; Ctrl+Enter submits)
+constexpr u16 KROME_READONLY  = 1u << 10; // an edit that selects and copies, and takes nothing
+
+// The pointer's shape over a node (`cursor`): unset is the arrow, an edit's the I-beam.
+enum class KromeCursor : u8 { Unset, Arrow, IBeam, Hand, Move, ResizeEW, ResizeNS, Forbidden };
 
 struct KromeNode {
     KromeType  type = KromeType::Box;
@@ -107,7 +116,10 @@ struct KromeNode {
     u32        text = KROME_NONE;  // content: an offset into KromeTree::strings, as written
     u32        shown = KROME_NONE; // the content with {name} filled in, when someone filled it
     Name       id, event;
-    Name       binding;        // @name: its selected state is the model's value there, a press flips it
+    Name       binding;        // @name: its selected state is the model's value there, a press flips it (an edit: its text)
+    Name       change, blur;   // an edit's other events: its text changed, it lost the focus
+    u32        placeholder = KROME_NONE; // an edit's, shown while it is empty: an offset into strings
+    KromeCursor cursor = KromeCursor::Unset;
     u32        look = 0;           // the base look: an index into KromeTree::looks
     u32        states[(u32)KromeState::Count] = {}; // for each state, 1 + an index into looks; 0: none
     u32        line = 0;           // where it was written, for errors (0: unknown)

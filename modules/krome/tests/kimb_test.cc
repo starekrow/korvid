@@ -141,7 +141,7 @@ void test_kimb(kv::TestCtx& c) {
     KV_CHECK(c, has_error(e, "t/bad.kim:5: no style 'lound'"));
     KV_CHECK(c, has_error(e, "t/bad.kim:6: bg: 'panl' is not a color, nor a token of theme dark"));
     KV_CHECK(c, has_error(e, "t/bad.kim:7: 'colour' is not a property"));
-    KV_CHECK(c, has_error(e, "t/bad.kim:8: 'buton' is neither a kernel node (box, text, image, hit) nor a definition"));
+    KV_CHECK(c, has_error(e, "t/bad.kim:8: 'buton' is neither a kernel node (box, text, image, hit, edit) nor a definition"));
 
     // A use that is not there fails the screen; one event handled in two scripts is said.
     krome_clear_errors(e);

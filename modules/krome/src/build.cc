@@ -83,6 +83,7 @@ KromeType type_of(const char* w, bool* ok) {
     if (!strcmp(w, "text")) return KromeType::Text;
     if (!strcmp(w, "image")) return KromeType::Image;
     if (!strcmp(w, "hit")) return KromeType::Hit;
+    if (!strcmp(w, "edit")) return KromeType::Edit;
     *ok = false;
     return KromeType::Box;
 }
@@ -280,7 +281,11 @@ void binding(Build& b, const KromeFrame* fr, u32 node, const KimbFile& f, const 
     const char* path = model_path(b, fr, w);
     KromeNode& n = b.tree.nodes[node];
     n.binding = name_intern(path);
-    if (krome_model_truthy(b.s, b.sc, path)) n.flags |= KROME_SELECTED;
+    if (n.type == KromeType::Edit) {
+        // An edit's binding is its text, both ways.
+        char val[1024];
+        b.tree.set_text(node, krome_model_path_text(b.s, b.sc, path, val, sizeof val));
+    } else if (krome_model_truthy(b.s, b.sc, path)) n.flags |= KROME_SELECTED;
     else n.flags &= (u16)~KROME_SELECTED;
     if (b.deps) b.deps->push(KromeDep{node, head_key(path), true});
     (void)f;
@@ -454,7 +459,7 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
     if (!ok) {
         KimbFound d;
         if (kimb_find_def(*b.scope, w, &d)) { expand_def(b, f, n, parent, fr, over, d); return; }
-        error(b, fr, f.file, line, "'%s' is neither a kernel node (box, text, image, hit) nor a definition", w);
+        error(b, fr, f.file, line, "'%s' is neither a kernel node (box, text, image, hit, edit) nor a definition", w);
         return;
     }
     u32 id = t.add(type, parent);
@@ -562,6 +567,7 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc) {
     sc.tree.dirty = true;
     sc.repaint = true;
     for (KromeOverlay* o : sc.overlays) krome_build_overlay(s, sc, *o);
+    krome_edit_rebuilt(s, sc);
     return sc.tree.root != KROME_NONE;
 }
 
