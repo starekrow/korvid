@@ -1,4 +1,6 @@
 #include "korvid/save/save.h"
+#include "korvid/core/arena.h"
+#include "korvid/core/base64.h"
 #include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -261,6 +263,14 @@ void save_json(SaveWriter& w, const JsonDoc& doc, const JsonValue& v) {
     case JsonType::Null:   w.null_value(); return;
     case JsonType::Bool:   w.bool_value(v.number() != 0.0); return;
     case JsonType::String: w.string_value(v.str(), v.len()); return;
+    case JsonType::Bytes: { // from KBOR: base64, as JSON has it
+        MemScope scope;
+        usize n = base64_encoded_len(v.len());
+        char* text = (char*)alloc_in(mem_scratch(), n + 1, 1);
+        base64_encode(v.bytes(), v.len(), text);
+        w.string_value(text, (u32)n);
+        return;
+    }
     case JsonType::Number:
         if (v.integer()) { if ((i64)v.bits() < 0 && v.number() < 0.0) w.int_value((i64)v.bits()); else w.uint_value(v.bits()); }
         else w.f64_value(v.number());

@@ -3,19 +3,23 @@
 // a file's structure can be walked and copied out without any allocation of its own.
 // Strings are unescaped and NUL-terminated; numbers are doubles; every error names its
 // byte offset and line, and every node knows the line it began on, so whoever gives the
-// values meaning can say where a mistake is. Nothing is written: the engine reads formats, tools write them.
+// values meaning can say where a mistake is. The same tree comes from KBOR (kbor.h), which
+// adds one type JSON cannot say: Bytes. json_write renders a tree as text again, for the
+// tools that convert; the engine itself reads formats and does not write them.
 //
 //   JsonDoc doc;
 //   if (!json_parse(text, len, mem_scratch(), doc)) KV_ERROR("...", "%s at %u", doc.error, doc.error_at);
 //   const JsonValue* tint = json_get(doc, doc.root(), "tint");
 //   for (const JsonValue* v = json_first(doc, *tint); v; v = json_next(doc, *v)) ...
 #pragma once
+#include "korvid/core/array.h"
 #include "korvid/core/memory.h"
 #include <string.h>
 
 namespace kv {
 
-enum class JsonType : u8 { Null, Bool, Number, String, Array, Object };
+// Bytes comes only from KBOR: a byte string, which JSON writes as base64 text.
+enum class JsonType : u8 { Null, Bool, Number, String, Array, Object, Bytes };
 
 // 24 bytes. What a value holds depends on its type, so it is read through the accessors
 // below, each of which answers for any type (0, null or false when it does not apply).
@@ -23,7 +27,7 @@ struct JsonValue {
     union {
         f64         num;                 // Number that is not an exact integer; Bool as 0 or 1
         u64         bits;                // an integer literal (two's complement when negative)
-        const char* text;                // String: unescaped, its u32 length just before it
+        const char* text;                // String, Bytes: unescaped, NUL after it, its u32 length just before it
         struct { u32 first, count; } kids; // Array, Object: the children, side by side in doc.nodes
     } as = {0.0};
     const char* key   = nullptr; // an object member's name
@@ -37,6 +41,7 @@ struct JsonValue {
     bool is_string() const { return type == JsonType::String; }
     bool is_array()  const { return type == JsonType::Array; }
     bool is_object() const { return type == JsonType::Object; }
+    bool is_bytes()  const { return type == JsonType::Bytes; }
 
     // The Number was written without fraction or exponent and fits 64 bits.
     bool        integer() const;
@@ -46,6 +51,8 @@ struct JsonValue {
     u64         bits() const { return integer() ? as.bits : 0; }
     // String: the unescaped text, and its length in bytes.
     const char* str() const { return type == JsonType::String ? as.text : nullptr; }
+    // Bytes: the bytes. len() is their count, for Bytes as for String.
+    const u8*   bytes() const { return type == JsonType::Bytes ? (const u8*)as.text : nullptr; }
     u32         len() const;
     // Children of an array or object.
     u32         count() const { return type == JsonType::Array || type == JsonType::Object ? as.kids.count : 0; }
@@ -63,7 +70,7 @@ inline f64 JsonValue::number() const {
     return flags & KV_JSON_VALUE_NEGATIVE ? -(f64)((u64)0 - as.bits) : (f64)as.bits;
 }
 inline u32 JsonValue::len() const {
-    if (type != JsonType::String) return 0;
+    if (type != JsonType::String && type != JsonType::Bytes) return 0;
     u32 n;
     memcpy(&n, as.text - sizeof n, sizeof n);
     return n;
@@ -112,5 +119,18 @@ const char* json_string(const JsonValue* v, const char* dflt);
 u32         json_numbers(const JsonDoc& doc, const JsonValue* array, f32* out, u32 cap);
 
 const char* json_type_name(JsonType t);
+
+// Writes the tree as JSON text, appended to `out` (no NUL). What KBOR holds that JSON
+// cannot say goes as docs/design/kbor.md ("JSON and back") has it: an integer as its
+// digits; any other number with a fraction or an exponent always (1.0, not 1), in the
+// fewest digits that read back to the same double; NaN and the infinities as the strings
+// "nan", "inf" and "-inf"; Bytes as standard, padded base64. So text this writes reads
+// back (json_parse) to a tree with the same numbers, integers and floats kept apart.
+//
+// KV_JSON_WRITE_PRETTY: a member or element per line, two spaces a level, and an array
+// of nothing but scalars that are not strings on one line. Without it, no white space.
+// A pretty text ends with a newline.
+constexpr u32 KV_JSON_WRITE_PRETTY = 1u << 0;
+void json_write(const JsonDoc& doc, Array<u8>& out, u32 flags = KV_JSON_WRITE_PRETTY);
 
 } // namespace kv

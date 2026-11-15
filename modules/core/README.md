@@ -109,7 +109,8 @@ Names (`name.h`): interned strings compared as integers. Hashing (`hash.h`): one
 64-bit hash, never seeded. UTF-8 (`utf8.h`), the engine's one text encoding: total
 decoding (malformed bytes are U+FFFD, one at a time), encoding, validation and copies
 that truncate at a character boundary. A JSON reader (`json.h`) whose nodes and errors
-carry their line, glob matching for paths (`glob.h`: `*`, `?`, classes, `**`), SHA-256 for
+carry their line, and KBOR (`kbor.h`), the binary form of the same tree, with JSON text
+written back from either, glob matching for paths (`glob.h`: `*`, `?`, classes, `**`), SHA-256 for
 content identity (`sha256.h`, apart from the table hash), the CLI registry (`cli.h`), a
 seeded PCG32 and a Mersenne Twister that draws Python's and std::mt19937's numbers
 (`random.h`), a test harness (`test.h`), a leveled log (`log.h`), and
@@ -301,13 +302,17 @@ Header `korvid/core/profile.h`:
 | `prof_trace_open(path)`, `prof_trace_close()`, `prof_shutdown()` | functions | a Chrome JSON trace |
 | `prof_track(name)`, `prof_track_begin(track, name, ticks)`, `prof_track_end(track, ticks)`, `prof_track_counter(track, name, value, ticks)` | functions | a track: spans timed on another clock (the GPU's), shown like a thread |
 
-Header `korvid/core/utf8.h`, `json.h`, `cli.h`, `random.h`, `log.h`, `test.h`, `format.h`:
+Header `korvid/core/utf8.h`, `json.h`, `kbor.h`, `base64.h`, `cli.h`, `random.h`, `log.h`, `test.h`, `format.h`:
 
 | name | kind | what |
 |---|---|---|
 | `utf8_decode`, `utf8_next`, `utf8_encode`, `utf8_valid`, `utf8_count`, `utf8_prefix`, `utf8_copy`, `utf8_trim` | functions | UTF-8 without allocation; `utf8_copy` zeroes the rest of a fixed field |
 | `json_parse(text, len, alloc, doc)`, `JsonDoc`, `JsonValue`, `JsonType` | function, records | a flat tree in the allocator given; strings are UTF-8 (`\u` escapes and surrogate pairs decoded, lone surrogates rejected); errors with byte offsets |
 | `json_get`, `json_at`, `json_first`, `json_next`, `json_number`, `json_bool`, `json_string`, `json_numbers` | functions | walking and typed reads with defaults |
+| `json_write(doc, out, flags)` | function | a tree as JSON text, pretty or compact; floats always with a fraction or an exponent, NaN and the infinities as strings, `Bytes` as base64 |
+| `kbor_parse(data, size, alloc, doc, info)`, `KborInfo`, `KborSummary` | function, records | KBOR (`docs/design/kbor.md`) into the same tree as `json_parse`; one pass for a file with the summary, a count first for any other; `JsonType::Bytes` for byte strings |
+| `kbor_write(doc, out, summary)` | function | a tree as normalized KBOR: definite lengths, an index for every repeated key, the summary in front |
+| `base64_encode`, `base64_decode`, `base64_encoded_len`, `base64_decoded_max` | functions | RFC 4648; writes standard and padded, reads standard or URL-safe, padded or not |
 | `CliCommandDesc`, `CliContext`, `cli_arg_f32`, `cli_arg_u32` | records, functions | a command as module data; `print`, `fail`; argument parsing |
 | `Rng` | record | PCG32: `seeded(seed, stream)`, `next`, `unit`, `range`, `below`, `chance` |
 | `Mt19937` | record | MT19937: `seeded(seed)` as Python's `random.Random(seed)`, `seeded_std(seed)` as `std::mt19937`; `next`, `unit`, `below`, `range` as `getrandbits(32)`, `random()`, `randrange(n)`, `randint(lo, hi)`; 2.5 KB, for matching another program's numbers, not for the sim |

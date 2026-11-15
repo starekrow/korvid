@@ -1,8 +1,13 @@
 # KBOR
 
 Nov 14, 2026. The engine's binary data format: CBOR holding what JSON can say, with one
-convention that removes the repeated key names. Written first; nothing is built. The
-schema half is a sketch for much later.
+convention that removes the repeated key names. The schema half is a sketch for much
+later.
+
+Nov 15, 2026: built, without schemas. The reader, the writer and JSON text from a tree are
+core's (`korvid/core/kbor.h`, `json_write` in `json.h`), with the tests in
+`modules/core/tests/kbor_test.cc`; the tool is `tools/kbor` (`kbor encode`, `decode`,
+`normalize`, `info`). See "What is built" at the end.
 
 ## Why
 
@@ -94,8 +99,10 @@ or a length.
 - **The summary may grow.** Later counts are added at the end; a reader takes the ones it
   knows and ignores the rest. The first four do not change meaning.
 
-The tag's number is not chosen yet. It will be one from the first-come range that takes
-three bytes, so the smallest summary costs nine bytes.
+The tag's number is 51979 (`0xCB0B`), from IANA's first-come range that takes three bytes,
+so the smallest summary costs nine bytes: `D9 CB 0B 82 84` and four counts. It was
+unassigned when chosen (Nov 2026) and is not registered yet; until it is, it is one
+constant (`KV_KBOR_SUMMARY_TAG`).
 
 The extension is `.kbor`. There is no magic number; the summary tag, when a file has one,
 is its first three bytes.
@@ -323,4 +330,29 @@ extends them, or stands apart is the first question when this gets built.
 ## Open questions
 
 - [ ] Schemas against the engine's field tables. Later.
-- [ ] Is KBOR a core facility next to `json.h`, or a module?
+- [x] Is KBOR a core facility next to `json.h`, or a module? Core: the reader builds
+  `JsonDoc`, and everything that walks one should be able to load either.
+- [ ] Register the summary tag with IANA.
+
+## What is built
+
+- **The tree.** `JsonType` gained `Bytes`, which only KBOR makes: `bytes()` and `len()`,
+  the same layout as a string's. The save module writes it as base64 and the Lua module
+  as a string. Nodes from KBOR have no line (0); errors give a byte offset.
+- **Reading** is as "Reading" says: with the summary, the nodes, the key table and one
+  block of strings are allocated once at the size it gives and checked as they fill; no
+  hash is used, since a normalized file has no repeated text key. Without one, a walk over
+  the heads counts the same four numbers and each indefinite container's length, and then
+  the same parse runs, keeping one copy of each name through a hash. Text is checked for
+  UTF-8, a key for a NUL (the tree's keys are NUL-terminated), nesting stops at 64 as
+  JSON's does, and a summary count larger than the bytes left is refused before anything
+  is allocated for it.
+- **Writing** is always normalized: a writer working from a tree. The streaming writer
+  for saves (`SaveFormat::Kbor` behind `SaveWriter`, indefinite lengths, no summary) is
+  not built.
+- **JSON text** follows "JSON and back". A float is written in the fewest of 15 to 17
+  significant digits that read back to the same double, which is the slowest part of
+  KBOR to JSON; a shortest-digits algorithm would be the cure if it matters.
+- **Not built:** schemas, the reader's mode that interns keys as names, base64 back to
+  bytes in a conversion (nothing declares a field as bytes until schemas do; the decoder
+  is there).

@@ -157,6 +157,7 @@ void decode_value(Decode& d, const JsonValue& v) {
     case JsonType::Null:   lua_getfield(L, d.json, "null"); return;
     case JsonType::Bool:   lua_pushboolean(L, v.number() != 0.0); return;
     case JsonType::String: lua_pushlstring(L, v.str(), v.len()); return;
+    case JsonType::Bytes:  lua_pushlstring(L, (const char*)v.bytes(), v.len()); return; // KBOR's: a Lua string holds bytes
     case JsonType::Number:
         // An integer as written stays one when Lua can hold it.
         if (v.integer() && (v.number() < 0.0 || v.bits() <= 0x7FFFFFFFFFFFFFFFull)) lua_pushinteger(L, (lua_Integer)v.bits());

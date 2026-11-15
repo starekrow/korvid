@@ -1,4 +1,6 @@
 #include "korvid/core/json.h"
+#include "korvid/core/base64.h"
+#include "korvid/core/format.h"
 #include "korvid/core/utf8.h"
 #include <stdlib.h>
 #include <string.h>
@@ -357,8 +359,135 @@ const char* json_type_name(JsonType t) {
     case JsonType::String: return "string";
     case JsonType::Array:  return "array";
     case JsonType::Object: return "object";
+    case JsonType::Bytes:  return "bytes";
     }
     return "?";
+}
+
+// ---- writing ------------------------------------------------------------------------------
+
+namespace {
+
+struct Writer {
+    const JsonDoc& doc;
+    Array<u8>&     out;
+    bool           pretty;
+
+    void put(const char* s, usize n) {
+        if (!n) return;
+        memcpy(out.push_n((u32)n), s, n);
+    }
+    void put(const char* s) { put(s, strlen(s)); }
+    void newline(u32 depth) {
+        u8* p = out.push_n(1 + depth * 2);
+        p[0] = '\n';
+        memset(p + 1, ' ', depth * 2);
+    }
+
+    // Quoted and escaped; UTF-8 passes through as it is.
+    void string(const char* s, usize n) {
+        put("\"", 1);
+        usize run = 0;
+        for (usize i = 0; i < n; ++i) {
+            u8 c = (u8)s[i];
+            const char* esc = nullptr;
+            char hex[8];
+            switch (c) {
+            case '"':  esc = "\\\""; break;
+            case '\\': esc = "\\\\"; break;
+            case '\n': esc = "\\n"; break;
+            case '\r': esc = "\\r"; break;
+            case '\t': esc = "\\t"; break;
+            case '\b': esc = "\\b"; break;
+            case '\f': esc = "\\f"; break;
+            default:
+                if (c < 0x20) { format(hex, sizeof hex, "\\u%04x", c); esc = hex; }
+            }
+            if (!esc) { ++run; continue; }
+            put(s + i - run, run);
+            run = 0;
+            put(esc);
+        }
+        put(s + n - run, run);
+        put("\"", 1);
+    }
+
+    void number(const JsonValue& v) {
+        char b[48];
+        if (v.integer()) {
+            if (v.flags & KV_JSON_VALUE_NEGATIVE) format(b, sizeof b, "%lld", (long long)(i64)v.as.bits);
+            else format(b, sizeof b, "%llu", (unsigned long long)v.as.bits);
+            put(b);
+            return;
+        }
+        f64 d = v.as.num;
+        if (d != d) { put("\"nan\""); return; }
+        if (d > 1.7976931348623157e308 || d < -1.7976931348623157e308) { put(d < 0 ? "\"-inf\"" : "\"inf\""); return; }
+        for (int p = 15; p <= 17; ++p) { // the fewest digits that read back the same
+            format(b, sizeof b, "%.*g", p, d);
+            if (strtod(b, nullptr) == d) break;
+        }
+        // A float says so: 1.0, never 1, which would read back as an integer.
+        if (!strpbrk(b, ".eE")) { usize n = strlen(b); b[n] = '.'; b[n + 1] = '0'; b[n + 2] = 0; }
+        put(b);
+    }
+
+    void bytes(const JsonValue& v) {
+        usize n = base64_encoded_len(v.len());
+        u8* p = out.push_n((u32)(n + 2));
+        p[0] = '"';
+        base64_encode(v.bytes(), v.len(), (char*)p + 1);
+        p[n + 1] = '"';
+    }
+
+    // An array of numbers, bools and nulls stays on one line.
+    static bool flat(const JsonDoc& doc, const JsonValue& v) {
+        if (!v.is_array()) return false;
+        for (const JsonValue* c = json_first(doc, v); c; c = json_next(doc, *c))
+            if (!(c->is_number() || c->is_bool() || c->is_null())) return false;
+        return true;
+    }
+
+    void value(const JsonValue& v, u32 depth) {
+        switch (v.type) {
+        case JsonType::Null:   put("null", 4); return;
+        case JsonType::Bool:   v.as.num != 0.0 ? put("true", 4) : put("false", 5); return;
+        case JsonType::Number: number(v); return;
+        case JsonType::String: string(v.as.text, v.len()); return;
+        case JsonType::Bytes:  bytes(v); return;
+        case JsonType::Array:
+        case JsonType::Object: {
+            bool object = v.is_object();
+            if (!v.count()) { put(object ? "{}" : "[]", 2); return; }
+            bool one_line = !pretty || flat(doc, v);
+            put(object ? "{" : "[", 1);
+            bool first = true;
+            for (const JsonValue* c = json_first(doc, v); c; c = json_next(doc, *c)) {
+                if (!first) put(",", 1);
+                if (!one_line) newline(depth + 1);
+                else if (pretty && !first) put(" ", 1);
+                first = false;
+                if (object) {
+                    string(c->key ? c->key : "", c->key ? strlen(c->key) : 0);
+                    put(pretty ? ": " : ":");
+                }
+                value(*c, depth + 1);
+            }
+            if (!one_line) newline(depth);
+            put(object ? "}" : "]", 1);
+            return;
+        }
+        }
+    }
+};
+
+} // namespace
+
+void json_write(const JsonDoc& doc, Array<u8>& out, u32 flags) {
+    if (!doc.nodes || !doc.count) return;
+    Writer w{doc, out, (flags & KV_JSON_WRITE_PRETTY) != 0};
+    w.value(doc.root(), 0);
+    if (w.pretty) w.put("\n", 1);
 }
 
 } // namespace kv
