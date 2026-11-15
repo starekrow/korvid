@@ -54,18 +54,72 @@ integer keys for a small pass to resolve.
 | arrays and maps | yes, definite or indefinite length |
 | `false`, `true`, `null` | yes |
 | `undefined`, other simple values | no |
-| tags | no |
+| tags | one, around the whole file: the summary (below) |
 
 Indefinite-length arrays and maps stay because the save writer streams (`begin_object`,
 `key`, value, `end_object`) and cannot count ahead; they change nothing about the key
 table. A consumer that cannot take them gets a normalized file instead (see
 "Normalizing").
 
-The extension is `.kbor`. There is no magic number or marker for now.
+**The summary.** A file may say up front how big it is. The whole file is then one tagged
+item, a pair: the summary, then the document.
+
+```
+tag([[7, 2, 2, 8], [{"name": "a", "hp": 1}, {0: "b", 1: 2}]])
+```
+
+The summary is an array of unsigned integers, in this order:
+
+| | counts |
+|---|---|
+| nodes | every value in the document: each array, each map, each scalar. A map's values count, its keys do not. The document itself is one. |
+| keys | the text-string map keys, which is the length the key table reaches |
+| strings | the text strings and byte strings that are values |
+| bytes | the bytes of every string, keys and values together, as stored in the file |
+
+A reader allocates three things, the tree, the key table and the strings, and these four
+numbers size all of them exactly, whatever the reader adds per string for a terminator
+or a length.
+
+- **The tag means normalized.** A file that carries it has definite lengths throughout
+  and an index for every repeated key. An indefinite length inside one is an error.
+- **A summary that is wrong is an error**, in either direction. The reader allocates what
+  it says and checks as it goes: the parse fails at the first value, key or byte past
+  what was promised, and fails at the end if anything promised never came. Nothing is
+  resized and nothing is recounted to work out which side was right.
+- **It is optional.** A file without it is the plain item, as before: whatever a stock
+  encoder or a streaming writer made is still KBOR.
+- **A stock decoder still reads it.** It sees a tag it does not know around a pair, and
+  the document is the pair's second entry.
+- **The summary may grow.** Later counts are added at the end; a reader takes the ones it
+  knows and ignores the rest. The first four do not change meaning.
+
+The tag's number is not chosen yet. It will be one from the first-come range that takes
+three bytes, so the smallest summary costs nine bytes.
+
+The extension is `.kbor`. There is no magic number; the summary tag, when a file has one,
+is its first three bytes.
 
 ## Reading
 
 One pass, front to back. The table is an array of names, indexed by integer keys.
+
+There are two ways in, and the summary tag picks between them.
+
+- **Normalized: nothing is guessed and nothing is scanned twice.** The reader takes the
+  four counts, makes its three allocations at their final size, and fills them in the one
+  pass. A container's length is in front of it, so its children are given their run of
+  consecutive nodes the moment it opens, and there is no stack of pending children, no
+  array that grows and no pass to count first. This is the path a shipped game is on: the
+  tool that built the file already walked it, and the game does not walk it again to learn
+  what the tool knew. Everything a game ships is normalized, and "normalized" is a promise
+  that this path is the one taken.
+- **Anything else still loads, in every build.** A file with no summary, or with
+  indefinite lengths, is counted first (one walk over the item heads, skipping string
+  bytes by their lengths) and then read. That is the save a streaming writer left, a file
+  from a foreign encoder, a message off the wire. It costs the extra walk and is
+  otherwise the same reader and the same tree. Ship builds do not refuse it: a save
+  written by the game an hour ago is one of these.
 
 - **Names are stored once.** Korvid's reader keeps one copy of each distinct key however
   many times it appears as text; each table entry only points at it. Someone will convert
@@ -76,8 +130,9 @@ One pass, front to back. The table is an array of names, indexed by integer keys
   that is tossed after the parse. The in-engine reader may also have a mode that interns
   keys as names instead, for data such as kinds whose keys are about to be interned
   anyway.
-- **The table itself still grows** by one small entry per text key, so that naive file
-  builds a transient table of a few hundred kilobytes. If it ever matters, the rule
+- **The table itself still grows** by one small entry per text key (in a file without a
+  summary; with one its length is known), so that naive file builds a transient table of
+  a few hundred kilobytes. If it ever matters, the rule
   changes to "append only a name not yet in the table", and every reader then needs a
   hash.
 - **An integer the reader cannot hold is an error.** Integers run from -2^63 to 2^64-1,
@@ -97,6 +152,9 @@ reader does that: everything that loads from JSON loads from KBOR unchanged.
 - **Indices are the writer's choice.** A writer that remembers names writes an index for
   every repeat. One that does not want the bookkeeping writes the text again and is
   still correct; compaction is then a pass somebody runs later, or never.
+- **A streaming writer writes no summary.** It cannot count ahead, for the same reason it
+  writes indefinite lengths. The summary is written by something that holds the whole
+  document: the normalizer, or a writer working from a tree.
 - **A pure function of its input.** Keys go out in the order they came in, so the same
   source gives the same bytes. KBOR has no canonical ordering of its own and needs none.
 - **Floats** as a single when that holds the value exactly, a double otherwise. Readers
@@ -105,10 +163,18 @@ reader does that: everything that loads from JSON loads from KBOR unchanged.
 ## Normalizing
 
 A tool that takes JSON or KBOR, and a schema when there is one, and writes KBOR in its
-tightest form: an index for every repeated key, definite lengths, and with a schema the
-typed form of every field. It is a goldberg converter like any other, so it goes
-wherever a pipeline needs it: after a streaming writer, in front of a consumer that
-cannot take indefinite lengths, or on the way into a pack.
+tightest form: an index for every repeated key, definite lengths, the summary in front,
+and with a schema the typed form of every field. It is a goldberg converter like any
+other, so it goes wherever a pipeline needs it: after a streaming writer, in front of a
+consumer that cannot take indefinite lengths, or on the way into a pack.
+
+Normalized means optimal to load, not only small: a normalized file is the one a reader
+gets through in a single pass with every allocation made once at its final size (see
+"Reading"). Whatever goes into a pack goes through the normalizer, so nothing a shipped
+game loads from its own data takes the counting path.
+
+The summary is the normalizer's to write and belongs to the bytes it describes. It does
+not survive a trip through JSON, and it is made again on the way back.
 
 ## JSON and back
 
