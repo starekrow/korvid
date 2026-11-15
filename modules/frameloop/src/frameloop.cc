@@ -510,7 +510,7 @@ void run(Engine& engine, FrameLoopState& s) {
                 format(line, sizeof line, "%u fps  tick %llu  %u sprites  %u deltas", frames_in_window,
                          (unsigned long long)engine.clock.tick_count, renderer_sprite_count(s.renderer), s.deltas_last_frame);
                 overlay_set(engine, s, 0, line);
-                format(line, sizeof line, "%llu KB live  idle %.1f ms%s", (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
+                format(line, sizeof line, "%llu KB live  work %.1f ms%s", (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
                          s.work_frames ? s.work_total / (f64)s.work_frames * 1e3 : 0.0, engine.clock.paused ? "  PAUSED" : "");
                 overlay_set(engine, s, 1, line);
                 u32 shown = 0;

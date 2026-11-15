@@ -91,7 +91,7 @@ void test_ui(kv::TestCtx& c) {
     io_make_dirs(root);
     format(path, sizeof path, "%s/test.ui.json", root);
     KV_CHECK(c, put(path, k_doc));
-    auto frames = [&](u32 n) { for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); } };
+    auto frames = [&](u32 n) { for (u32 i = 0; i < n; ++i) { platform_pump(e); engine_frame(e, 1.0 / 60.0); engine_frame_cycle(e, 1.0 / 60.0); } };
 
     Handle doc = ui_load(e, "ui_test/test.ui.json", Handle{});
     asset_ref(e, doc);

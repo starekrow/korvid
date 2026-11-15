@@ -181,6 +181,37 @@ void merge_for_level(PhaseList& pl, EventBus& events, u32 phase, u32 i, u32 j) {
 
 } // namespace
 
+namespace {
+
+// Dev builds: a stream that grows past this because one consumer has not run to take it
+// (a Frame unit in a program that never runs the Frame cycle, a Work unit never given a
+// cycle) is named once, with the unit. Nothing else would say why memory climbs.
+constexpr u32 k_held_warn = 65536;
+void warn_held(EventBus& events, const PhaseList& pl, Span<const u64> keep) {
+#if KV_DEV
+    for (u32 t = 1; t < events.streams.len && t < keep.len; ++t) {
+        const EventStream& st = events.streams[t];
+        if (st.events.count() < k_held_warn) continue;
+        if (t < events.held_warned.len && events.held_warned[t]) continue;
+        events.held_warned.resize_fill(t + 1, 0);
+        events.held_warned[t] = 1;
+        const ScheduledSystem* who = nullptr;
+        for (const ScheduledSystem* u : pl.by_unit)
+            for (const ScheduledSystem::Cursor& c : u->cursors)
+                if (c.type == t && c.at == keep[t]) who = u;
+        Phase ph = who ? (who->desc ? who->desc->phase : who->handler ? who->handler->phase : Phase::Count) : Phase::Count;
+        const char* type = t < events.types.len && events.types[t] ? events.types[t]->name : "?";
+        KV_WARN("event", "'%s' holds %u events for '%s' (%s), which has not run to take them%s", type, st.events.count(),
+                who ? who->name() : "?", ph < Phase::Count ? phase_name(ph) : "?",
+                (u32)ph >= KV_SIM_PHASES && ph < Phase::Count ? ": a loop that never runs that cycle should not have it (engine_frame_cycle, engine_work)" : "");
+    }
+#else
+    (void)events; (void)pl; (void)keep;
+#endif
+}
+
+} // namespace
+
 void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, bool paused) {
     TickContext ctx;
     ctx.engine = &engine;
@@ -275,6 +306,7 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
             for (const ScheduledSystem::Cursor& c : u->cursors)
                 if (c.type < keep.len && c.at < keep[c.type]) keep[c.type] = c.at;
         events.end_tick(Span<const u64>(keep.data, keep.len));
+        warn_held(events, *this, Span<const u64>(keep.data, keep.len));
     }
     if ((engine.hash_ticks || engine.hash_systems) && !paused) {
         KV_ZONE("hash");
@@ -286,7 +318,9 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
 void TickContext::more() const { if (engine) engine->work_more = true; }
 f64  TickContext::time_left() const {
     if (!engine || engine->work_deadline <= 0.0) return 0.0;
-    f64 left = engine->work_deadline - time_now();
+    f64 until = engine->work_deadline;
+    if (system && system->work_deadline > 0.0 && system->work_deadline < until) until = system->work_deadline;
+    f64 left = until - time_now();
     return left > 0.0 ? left : 0.0;
 }
 
@@ -307,13 +341,23 @@ void PhaseList::run_cycle(Engine& engine, EventBus& events, Phase phase, f64 dt)
     events.begin_phase();
     usize snapshot_bytes = take_snapshots(*this, p);
     Array<ScheduledSystem>& units = systems[p];
+    // Work: each unit's share of what is left, the time split evenly among the units still to
+    // run, so a unit that uses all of its share leaves the others theirs.
+    bool work = phase == Phase::Work && engine.work_deadline > 0.0;
+    auto share = [&](u32 k) {
+        if (!work) return;
+        f64 now = time_now(), left = engine.work_deadline - now;
+        units[k].work_deadline = now + (left > 0.0 ? left / (f64)(units.len - k) : 0.0);
+    };
     for (u32 i = 0; i < units.len;) {
         u32 j = i + 1;
         while (j < units.len && units[j].level == units[i].level) ++j;
         merge_for_level(*this, events, p, i, j);
         if (j - i == 1 || jobs_worker_count() == 0) {
-            for (u32 k = i; k < j; ++k) run_unit(ctx, events, units[k]);
+            for (u32 k = i; k < j; ++k) { share(k); run_unit(ctx, events, units[k]); }
         } else {
+            share(i); // a level runs at once: one share each, from its start
+            for (u32 k = i + 1; k < j; ++k) units[k].work_deadline = units[i].work_deadline;
             MemScope scope;
             Array<ScheduledSystem*> pooled = array_in<ScheduledSystem*>(mem_scratch());
             for (u32 k = i; k < j; ++k) {
@@ -340,6 +384,7 @@ void PhaseList::run_cycle(Engine& engine, EventBus& events, Phase phase, f64 dt)
         for (const ScheduledSystem::Cursor& c : u->cursors)
             if (c.type < keep.len && c.at < keep[c.type]) keep[c.type] = c.at;
     events.trim(Span<const u64>(keep.data, keep.len));
+    warn_held(events, *this, Span<const u64>(keep.data, keep.len));
 }
 
 void PhaseList::free() {

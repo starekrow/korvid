@@ -95,6 +95,7 @@ void text_layout_system(TickContext& ctx) {
         LabelTable& lt = st.tables[k.table->index];
         lt.marks.resize_fill(k.rows(), LabelMark{});
         Span<const Text> texts = k.col<const Text>();
+        Span<const Transform2> where = k.col<const Transform2>(); // the labels', as the tick's compose left them
         for (u32 i = 0; i < k.rows(); ++i) {
             LabelMark& mark = lt.marks[i];
             if (!k.alive(i)) { mark = LabelMark{}; continue; } // its glyphs are orphans: the scene module removes them
@@ -132,7 +133,12 @@ void text_layout_system(TickContext& ctx) {
                     spr.anchor   = t.anchor;
                     if (shadowed) { spr.sort = SpriteSort::Key; spr.order = (f32)pass; }
                     point2 at{p.center.x + (pass ? 0.0f : t.shadow_offset.x), p.center.y + (pass ? 0.0f : t.shadow_offset.y)};
-                    Handle gh = glyphs->spawn(Transform2{}, spr, local2_at(at), Parent{label});
+                    // Placed now, as the scene would compose it: the frame that shows a new
+                    // glyph shows it in place; the scene keeps it with its label from the
+                    // next tick on.
+                    Local2 local = local2_at(at);
+                    Transform2 placed = i < where.len ? placement_compose(where[i], local) : Transform2{};
+                    Handle gh = glyphs->spawn(placed, spr, local, Parent{label});
                     if (gh.is_null()) { KV_WARN("text", "glyph kind is full (%u rows)", glyphs->rows()); break; }
                     ++s.glyphs;
                 }
@@ -168,8 +174,8 @@ constinit const KindDesc k_kinds[] = {
 };
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".layout", .phase = Phase::PostSim, .fn = text_layout_system, .reads = "*.Text",
-     .writes = ".glyph", .runs = RunWhen::Always},
+    // The Frame cycle (docs/design/cycles.md): glyphs are presentation.
+    {.name = ".layout", .phase = Phase::Frame, .fn = text_layout_system, .reads = "*.Text, *.Transform2", .writes = ".glyph"},
 };
 
 } // namespace

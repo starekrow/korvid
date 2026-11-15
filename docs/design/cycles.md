@@ -68,9 +68,9 @@ and when there is no work the window paces on demand.
 
 A Work unit does a slice and returns. If it has more, it calls `ctx.more()`; the cycle then
 runs again, every Work unit once more in schedule order, until a cycle where none said so or
-the budget is spent. `ctx.time_left()` is what remains of the budget, for a unit that sizes
-its slice. A unit with nothing to do returns at once. There is no per-unit budget: a unit
-that hogs a cycle delays the next frame, and the profiler shows it (`work` zone).
+the budget is spent. `ctx.time_left()` is the unit's share: what the cycle has left, split
+evenly among the units still to run in it, so a unit that spends all of its share leaves
+the others theirs. A unit with nothing to do returns at once and its time passes on.
 
 ### The Frame cycle draws
 
@@ -92,8 +92,8 @@ hover. Its `dt` is the frame's: what a transition animates by.
   it checks a phase. Across cycles there is nothing to race.
 - **Commands** (spawns, destroys, appends) apply at the cycle's boundary.
 - **Order across cycles** is the loop's, not the solver's: `after` and `before` naming a
-  system in another cycle say nothing about order and are accepted as now (the phase
-  order); a dependency between cycles is an event or a resource.
+  system in another cycle say nothing about order and are accepted; a dependency between
+  cycles is an event or a resource.
 
 ### Determinism
 
@@ -146,7 +146,7 @@ cycle is the piece they leave to threads or coroutines.
 ## Open questions
 
 - [x] The extract: moved to the Frame cycle (As built).
-- [ ] A per-unit budget in Work, if one greedy unit starving the rest shows up.
+- [x] A per-unit budget in Work: even shares (As built).
 - [x] Refusing sim writes from Frame and Work: both (As built).
 
 ## As built
@@ -193,3 +193,17 @@ Nov 15, 2026, on branch tool-stuff.
   half-written is left). Always on, not only in dev builds: they are cheap, and a replay
   that drifts is not. Nothing in the tree tripped them; `core_tests` covers both halves. Arcfire's recorded replay matches (236 hashes): the Sim cycle
   is unchanged.
+- **Presentation moved, and the follow-ups** (last of the day). `text.layout`, `ui.draw`
+  and `touchpad.draw` are in the Frame cycle; `ui.update` stays in the tick, since reveals
+  and UI events feed the game. Text places new glyphs itself (`placement_compose`), so the
+  frame that shows them shows them in place. Moving layout took away an order nothing had
+  declared: rocks' hit and spawn handlers and `anim.play` and `scene.compose` had been
+  ordered only through `text.layout`, so the handlers now say `before` (the hashes are
+  unchanged), and `anim.play` no longer names `text.layout`. Cross-cycle `after`/`before`
+  are accepted, as this note always said; the code refused one before. Work units get
+  even shares of the cycle (`ctx.time_left`). Layers keep their offsets as each tick
+  begins (`sprite.layers_tick`) and the extract catches them up as it does sprites.
+  Dev builds name a stream held past 65536 events by a unit that has not run, with its
+  cycle; a program that never runs the Frame cycle at all is otherwise silent, since a
+  headless test of a game legitimately never draws.
+

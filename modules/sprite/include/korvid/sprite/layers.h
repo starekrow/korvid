@@ -20,6 +20,8 @@ constexpr i32 KV_SPRITE_LAYER_MIN = -128, KV_SPRITE_LAYER_MAX = 127;
 struct SpriteLayers {
     vec2 offset[256]; // by layer - KV_SPRITE_LAYER_MIN
     u8   snap[256];   // set with the offset; the extract sends it and clears it
+    vec2 tick_start[256]; // the offsets as the last tick began (sprite.layers_tick): what a frame
+                          // holding several ticks interpolates the last one from
 
     void set(i32 layer, vec2 o, bool snap_to = false) {
         if (layer < KV_SPRITE_LAYER_MIN || layer > KV_SPRITE_LAYER_MAX) return;

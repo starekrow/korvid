@@ -114,6 +114,7 @@ void EventBus::free() {
     streams.free();
     held.free();
     stale_warned.free();
+    held_warned.free();
 }
 
 void EventBus::check_outside() const {

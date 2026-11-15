@@ -41,8 +41,7 @@ frame lasts as long as the others.
 
 **Players** (`player.h`). `AnimPlayer { clip, time, rate, clock, state, loops }`;
 `anim_player(clip, rate, clock, start)` makes one for a spawn, `anim_play(p, clip, rate)`
-restarts one. `anim.play` (PostSim, every tick, after `text.layout` and before
-`scene.compose` when those exist) advances each playing player by `dt * rate`, segment
+restarts one. `anim.play` (PostSim, every tick, before `scene.compose` when it exists) advances each playing player by `dt * rate`, segment
 by segment across the clip's ends, firing event keys as it crosses them, then samples
 every value track at the new time and writes the channel. The rules:
 
@@ -148,7 +147,7 @@ What the module registers with the engine:
 | `AnimEvent`, `AnimFinished` | event types | with schemas: a dead entity's event is dropped |
 | `anim.clips` | resource | the clip table |
 | `anim.pump` | system, phase PreSim, main thread, `Always` | writes `anim.clips` |
-| `anim.play` | system, phase PostSim, `Always`, after `?text.layout`, before `?scene.compose` | reads `anim.clips`; writes `*.AnimPlayer`, `*.Sprite`, `*.Local2`, `*.Transform2` |
+| `anim.play` | system, phase PostSim, `Always`, before `?scene.compose` | reads `anim.clips`; writes `*.AnimPlayer`, `*.Sprite`, `*.Local2`, `*.Transform2` |
 
 Depends on: core, math, render, platform, asset, sprite, scene.
 

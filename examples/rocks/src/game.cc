@@ -722,9 +722,11 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_exit",     KV_ON(ExitRequested, on_exit), .phase = Phase::Sim},
     {.name = ".on_asset_failed", KV_ON(AssetFailed, on_asset_failed), .phase = Phase::Sim},
     {.name = ".on_overlap",  KV_ON(OverlapBegin, on_overlap), .phase = Phase::PostSim, .emits = "RockHit, ShipHit"},
-    {.name = ".on_spawned",  KV_ON(Spawned, on_spawned), .phase = Phase::PostSim, .writes = ".flame", .appends = "audio.commands"},
+    {.name = ".on_spawned",  KV_ON(Spawned, on_spawned), .phase = Phase::PostSim, .writes = ".flame", .appends = "audio.commands",
+     .before = "anim.play"}, // a new flame set up before it animates (this too was ordered only by way of text.layout)
     {.name = ".on_anim_finished", KV_ON(AnimFinished, on_anim_finished), .phase = Phase::Input},
-    {.name = ".on_rock_hit", KV_ON(RockHit, on_rock_hit), .phase = Phase::PostSim, .writes = ".rock, .score", .appends = "audio.commands", .emits = "ScoreChanged"},
+    {.name = ".on_rock_hit", KV_ON(RockHit, on_rock_hit), .phase = Phase::PostSim, .writes = ".rock, .score", .appends = "audio.commands", .emits = "ScoreChanged",
+     .before = "anim.play, scene.compose"}, // the split rocks set up before they animate and compose (ordered only by way of text.layout before it moved to Frame)
     {.name = ".on_ship_hit", KV_ON(ShipHit, on_ship_hit), .phase = Phase::PostSim, .reads = ".ship.Transform2", .writes = ".ship.Health"},
     {.name = ".on_score",    KV_ON(ScoreChanged, on_score), .phase = Phase::Input},
     {.name = ".on_expire",   KV_ON(Expire, on_expire), .phase = Phase::Input},

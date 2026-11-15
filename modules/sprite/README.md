@@ -58,7 +58,9 @@ frame loop applies and clears them before the render.
 for a system that declares the write) holds an offset per layer, world units, zero by
 default. The renderer draws every world sprite on that layer moved by it, interpolated
 from the last tick's offset like a placement; `set(layer, offset, true)` snaps instead
-(a wrap, a restart). A parallax plane or a scrolling map is one value a tick however many
+(a wrap, a restart). `sprite.layers_tick` (PreSim, every tick) keeps each offset as the
+tick began (`tick_start`), so a frame holding several ticks sends the layer there first
+and interpolates only the last tick's scroll, as for sprites. A parallax plane or a scrolling map is one value a tick however many
 rows it has; the rows themselves stay where they were spawned. Screen sprites ignore it.
 
 **Interpolation** is the renderer's, from the previous and current placement of each
@@ -163,6 +165,7 @@ What the module registers with the engine:
 | `sprite.entity` | kind | `Transform2`, `Sprite`; 1 M slots of address space |
 | `sprite.deltas` | resource | the delta array; the extract writes it |
 | `sprite.layers` | resource | the layer offsets; a game's scroll writes it, the extract reads what changed |
+| `sprite.layers_tick` | system, phase PreSim, `Always` | writes `sprite.layers`: the offsets as each tick begins |
 | `sprite.extract` | system, phase Frame | reads `*.Transform2`, `*.Sprite`; writes `sprite.deltas`, `sprite.layers` |
 
 ## Behaviour worth knowing

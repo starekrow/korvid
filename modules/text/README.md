@@ -24,15 +24,17 @@ label's `Transform2` is the pen's start on the baseline; `Left` puts the first g
 there, `Center` and `Right` shift the line. Strings are UTF-8, one line, 64 bytes with
 the NUL; `text_set` truncates at a character boundary.
 
-**The system.** `text.layout` runs in PostSim on every tick, paused or not, reading
-`*.Text` and writing `text.glyph`. Per label slot it keeps the entity and a hash of
+**The system.** `text.layout` runs in the Frame cycle (`docs/design/cycles.md`), once
+before each frame drawn whatever the sim does, reading `*.Text` and `*.Transform2` and
+writing `text.glyph`. Per label slot it keeps the entity and a hash of
 everything that shapes the glyphs (the string, the font and whether it is ready, scale,
 tint, layer, space, alignment). When the hash changes it destroys the label's glyphs
 (every glyph whose `Parent` is the label) and spawns new ones from `text_layout`, each
 with the font's material, the glyph's uv and size times scale, and the label's tint,
-layer and space, placed by `Local2` relative to the label. The scene module composes
-them after (`scene.compose` reads `*.Local2`, which the layout's kind write covers) and
-the extract draws them. A label that dies leaves its glyphs as orphans, which the scene
+layer and space, placed by `Local2` relative to the label and placed in the world at once
+(the label's transform composed with it, as the scene would), so the frame that shows new
+text shows it in place. From the next tick on the scene module keeps the glyphs with their
+label (`scene.compose` reads `*.Local2`), and the extract draws them. A label that dies leaves its glyphs as orphans, which the scene
 module destroys at the end of the same tick.
 
 `text.glyph` is a **cosmetic kind**: never part of the state hash. The frame loop's
@@ -92,7 +94,7 @@ What the module registers with the engine:
 | `Text` | component | sim state |
 | `text.label` | kind | `Transform2`, `Text`; 4096 slots |
 | `text.glyph` | kind, cosmetic | `Transform2`, `Sprite`, `Local2`, `Parent`; 65536 slots; never hashed |
-| `text.layout` | system, phase PostSim, `Always` | reads `*.Text`; writes `text.glyph` |
+| `text.layout` | system, phase Frame | reads `*.Text`, `*.Transform2`; writes `text.glyph` |
 
 Depends on: core, math, render, platform, asset, sprite, scene.
 

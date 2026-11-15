@@ -103,7 +103,8 @@ buffer, merged in chunk order, so results never depend on which thread ran what.
 **Cycles** (`engine.h`, `phase.h`). Beside the tick, two cycles a loop runs when it
 wants: `Phase::Frame` once before each frame drawn (`engine_frame_cycle`), and
 `Phase::Work` over and over while a unit says `ctx.more()` and the budget lasts
-(`engine_work`; a unit sizes its slice by `ctx.time_left()`). The frame loop gives Work its
+(`engine_work`; a unit sizes its slice by `ctx.time_left()`, its even share of what the
+cycle has left). The frame loop gives Work its
 slack, background work such as the platform's idle reads is a Work unit, and nothing in
 either cycle is in a replay, so neither writes the simulation: a declared write to a sim
 kind fails init, and a spawn, destroy or timer into one is refused. `docs/design/cycles.md`.

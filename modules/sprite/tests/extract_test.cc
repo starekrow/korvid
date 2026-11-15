@@ -155,6 +155,26 @@ void test_extract(kv::TestCtx& c) {
     KV_CHECK(c, count_kind(out, SpriteDeltaKind::Layer) == 1 && out[1].state.snap && layers.snap[-14 - KV_SPRITE_LAYER_MIN] == 0);
     KV_CHECK(c, layers.get(300) == vec2{0, 0} && sprite_layers(e) != nullptr);
 
+    // Two ticks in one frame: a layer that scrolled in both goes first to where the last tick
+    // began, then the marker (which makes that its previous offset), then to where it is.
+    layers.tick_start[-14 - KV_SPRITE_LAYER_MIN] = vec2{0, -45};
+    layers.set(-14, vec2{0, -50});
+    out.clear();
+    extract_sprites(e, st, &layers, out, 2);
+    u32 at_tick = 0;
+    for (u32 i = 0; i < out.len; ++i) if (out[i].kind == SpriteDeltaKind::Tick) at_tick = i;
+    bool before = false, after = false;
+    for (u32 i = 0; i < out.len; ++i) {
+        if (out[i].kind != SpriteDeltaKind::Layer || out[i].state.layer != -14) continue;
+        if (i < at_tick && out[i].state.placement.position == point2{0, -45}) before = true;
+        if (i > at_tick && out[i].state.placement.position == point2{0, -50}) after = true;
+    }
+    KV_CHECK(c, before && after);
+    // Through the schedule: the PreSim copy keeps tick_start with the offsets.
+    sprite_layers(e)->set(3, vec2{7, 0});
+    engine_frame(e, e.clock.tick_dt);
+    KV_CHECK(c, sprite_layers(e)->tick_start[3 - KV_SPRITE_LAYER_MIN] == vec2{7, 0});
+
     out.free();
     st.free();
     engine_shutdown(e);

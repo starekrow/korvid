@@ -7,6 +7,7 @@
 #include "korvid/sprite/world.h"
 #include "korvid/core/engine.h"
 #include "korvid/math/fields.h"
+#include <string.h>
 
 namespace kv {
 
@@ -52,6 +53,13 @@ void sprite_extract(TickContext& ctx) {
     KV_MARK_V("extract deltas", s.deltas.len - before);
 }
 
+// Phase PreSim, every tick, paused or not: the layers' offsets as the tick begins, the
+// layers' previous copy (the extract's catch-up when a frame holds several ticks).
+void sprite_layers_tick(TickContext& ctx) {
+    SpriteState& s = ctx.state_as<SpriteState>();
+    memcpy(s.layers.tick_start, s.layers.offset, sizeof s.layers.offset);
+}
+
 // The schemas. Transform2 keeps a previous-tick copy for interpolation; Sprite does not.
 constinit const FieldDesc k_transform2_fields[] = {KV_FIELDS(Transform2, position, rotation, scale)};
 constinit const FieldDesc k_sprite_fields[]     = {KV_FIELDS(Sprite, material, uv, size, tint, layer, space, anchor, sort, order)};
@@ -67,6 +75,7 @@ constinit const KindDesc    k_kinds[] = {
 
 constinit const ResourceDesc k_resources[] = {{".deltas"}, {".camera"}, {".layers"}};
 constinit const SystemDesc   k_systems[]   = {
+    {.name = ".layers_tick", .phase = Phase::PreSim, .fn = sprite_layers_tick, .writes = ".layers", .runs = RunWhen::Always},
     {.name = ".extract", .phase = Phase::Frame, .fn = sprite_extract, .reads = "*.Transform2, *.Sprite", .writes = ".deltas, .layers"},
 };
 

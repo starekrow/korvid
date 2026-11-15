@@ -27,6 +27,8 @@ void test_json_count(kv::TestCtx&);
 void test_kbor(kv::TestCtx&);
 void test_cycles(kv::TestCtx&);
 void test_cycles_leave_the_sim(kv::TestCtx&);
+void test_cycles_fair(kv::TestCtx&);
+void test_cycles_held(kv::TestCtx&);
 void test_glob(kv::TestCtx&);
 void test_sha256(kv::TestCtx&);
 void test_pause(kv::TestCtx&);
@@ -67,6 +69,8 @@ int main() {
     test_kbor(c);
     test_cycles(c);
     test_cycles_leave_the_sim(c);
+    test_cycles_fair(c);
+    test_cycles_held(c);
     test_glob(c);
     test_sha256(c);
     test_utf8(c);

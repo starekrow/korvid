@@ -68,7 +68,7 @@ black quads.
 **The model.** `ui_model_set_int(e, "hp", 3)` and the float and string forms; labels say
 `{=hp}`, meters `"value": "=hp", "max": "=hp_max"`. A HUD is a document and two calls a tick.
 
-**Drawing.** `ui.draw` (PostSim, every tick) lays out every open screen by layer and turns
+**Drawing.** `ui.draw` (the Frame cycle, once before each frame drawn) lays out every open screen by layer and turns
 it into quads: frames as nine slices, images, meters, glyphs. A scroll's children are
 cropped to it on the CPU, uv and all, so the renderer needs no clip rects. The quads go into
 `ui.sprite` rows (cosmetic, screen space, anchored top-left, sorted by key within the layer),
@@ -145,8 +145,8 @@ Header `korvid/ui/ui.h`:
 
 What the module registers: the handle kinds `ui.doc` (an asset kind) and `ui.screen`; the
 kind `ui.sprite` (cosmetic); the events `UiEvent`, `UiCovered`, `UiUncovered`; the systems `ui.update` (PreSim, main
-thread, every tick; writes `audio.commands`) and `ui.draw` (PostSim, main thread, every
-tick, after `anim.play`); the command `ui reload`; the mount `/ui` (`print /ui/pause` lists
+thread, every tick; writes `audio.commands`) and `ui.draw` (the Frame cycle, main thread;
+drawing only: reveals, focus and events stay in `ui.update`, in the tick); the command `ui reload`; the mount `/ui` (`print /ui/pause` lists
 a screen's nodes with their rects).
 
 ## Behaviour worth knowing

@@ -685,6 +685,9 @@ bool declared_edges(const Engine& e, const Array<Pending>& pend, Phase phase, Ar
                     KV_ERROR("engine", "'%s' is %s unknown system or handler '%s'", me, after ? "after" : "before", other);
                     return false;
                 }
+                // Between cycles there is no order to declare: the loop runs them
+                // (docs/design/cycles.md), so naming a unit of another cycle says nothing.
+                if (op != phase && ((u32)op >= KV_SIM_PHASES || (u32)phase >= KV_SIM_PHASES)) continue;
                 if (after ? (u32)op > (u32)phase : (u32)op < (u32)phase) {
                     KV_ERROR("engine", "system '%s' (phase %s) cannot run %s '%s', which is in %s phase", me, what, after ? "after" : "before", other,
                              after ? "a later" : "an earlier");

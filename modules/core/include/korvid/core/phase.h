@@ -318,7 +318,9 @@ struct TickContext {
     // ---- the Work cycle ---------------------------------------------------------------
     // A Work unit with more to do says so, and the cycle runs again while time remains.
     void more() const;
-    // Seconds left of what engine_work was given; 0 outside the Work cycle.
+    // Seconds left of the running unit's share of what engine_work was given: the cycle's
+    // time split evenly among the units still to run in it, so one that takes all its share
+    // leaves the rest theirs. 0 outside the Work cycle.
     f64  time_left() const;
 
     // The module state as the type startup stored, verified by a pointer compare. T const
@@ -573,6 +575,7 @@ struct ScheduledSystem {
     u32                level   = 0; // 1 + the longest chain of edges before it; equal levels run concurrently
     u32                rank    = 0; // module order then declaration order
     CommandBuffer      commands;
+    f64                work_deadline = 0.0; // a Work unit's share of the cycle's time: when it should stop (ctx.time_left)
     u32                spawn_tickets = 0; // the unit's own ticket counters (see phase.cc)
     u32                timer_tickets = 0;
     Array<Table>       early;    // the snapshot kinds it reads early, as the phase found them

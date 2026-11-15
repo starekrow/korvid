@@ -105,6 +105,7 @@ struct EventBus {
     u64                delivered_total = 0; // merged, ever
     u64                dropped_stale   = 0; // dropped from a batch for a stale handle, ever
     Array<u8>          stale_warned;        // by type: dev builds warn the first time a type is dropped
+    Array<u8>              held_warned;  // dev: by type, a consumer that does not run was named for holding it
     u32                main_thread     = 0; // the thread that may write the engine's writer during a tick
 
     void init(u32 writer_count = 1);

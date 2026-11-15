@@ -540,7 +540,8 @@ constinit const KindDesc k_kinds[] = {{.name = ".sprite", .components = "Transfo
 constinit const SystemDesc k_systems[] = {
     {.name = ".update", .phase = Phase::PreSim, .fn = ui_update, .reads = "input.actions, input.state", .appends = "audio.commands",
      .emits = "UiEvent, UiCovered, UiUncovered", .after = "?asset.pump_scopes, ?asset.pump, ?asset.pump_blobs, ?asset.pump_sounds", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".draw", .phase = Phase::PostSim, .fn = ui_draw, .writes = ".sprite", .after = "?anim.play", .before = "?scene.compose", .main_thread = true, .runs = RunWhen::Always},
+    // The Frame cycle: drawing only. Reveals, focus and events stay in .update, in the tick.
+    {.name = ".draw", .phase = Phase::Frame, .fn = ui_draw, .writes = ".sprite", .main_thread = true},
 };
 
 } // namespace

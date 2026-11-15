@@ -51,8 +51,25 @@ void catch_up(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
 
 } // namespace
 
+// The same for the layers: each whose offset as the last tick began is not what the renderer
+// was told goes there first, so the marker makes it the previous offset.
+static void catch_up_layers(ExtractState& st, SpriteLayers& layers, Array<SpriteDelta>& out) {
+    for (u32 i = 0; i < 256; ++i) {
+        if (layers.tick_start[i] == st.sent_layers[i]) continue;
+        SpriteDelta d{};
+        d.kind = SpriteDeltaKind::Layer;
+        d.state.layer = (i32)i + KV_SPRITE_LAYER_MIN;
+        d.state.placement.position = point2{layers.tick_start[i].x, layers.tick_start[i].y};
+        out.push(d);
+        st.sent_layers[i] = layers.tick_start[i];
+    }
+}
+
 void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<SpriteDelta>& out, u32 ticks) {
-    if (ticks >= 2) catch_up(e, st, out);
+    if (ticks >= 2) {
+        catch_up(e, st, out);
+        if (layers) catch_up_layers(st, *layers, out);
+    }
     if (ticks >= 1) {
         SpriteDelta tick{};
         tick.kind = SpriteDeltaKind::Tick;

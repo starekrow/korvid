@@ -86,7 +86,7 @@ void test_cycles(kv::TestCtx& c) {
     g.work_left = 5;
     g.work_runs = 0;
     engine_work(e, 1.0);
-    KV_CHECK(c, g.work_runs == 5 && g.other_runs == 6 && !engine_work_pending(e) && g.left_seen > 0.5 && g.left_seen <= 1.0);
+    KV_CHECK(c, g.work_runs == 5 && g.other_runs == 6 && !engine_work_pending(e) && g.left_seen > 0.4 && g.left_seen <= 0.5); // its share: half, two units to run
     // A spent budget stops it with work pending.
     g.work_left = 1000;
     g.work_runs = 0;
@@ -198,5 +198,76 @@ void test_cycles_leave_the_sim(kv::TestCtx& c) {
     KV_CHECK(c, engine_table(e, "rt.fx")->live() == 1);
     engine_frame(e, e.clock.tick_dt * 5);
     KV_CHECK(c, e.timers.fired == timers);
+    engine_shutdown(e);
+}
+
+namespace {
+
+using namespace kv;
+
+// Fair shares: a greedy unit spins until its share is gone; the unit after it still has time.
+struct Fair { f64 greedy_spent, polite_left; u32 polite_runs; };
+constinit Fair g_fair = {};
+void sys_greedy(TickContext& ctx) {
+    f64 t0 = time_now();
+    while (ctx.time_left() > 0.0) {}
+    g_fair.greedy_spent += time_now() - t0;
+}
+void sys_polite(TickContext& ctx) { g_fair.polite_left = ctx.time_left(); ++g_fair.polite_runs; }
+constinit const SystemDesc k_fair_systems[] = {
+    {.name = ".greedy", .phase = Phase::Work, .fn = sys_greedy, .main_thread = true},
+    {.name = ".polite", .phase = Phase::Work, .fn = sys_polite, .main_thread = true},
+};
+KV_MODULE_DEFINE(k_fair) = {.name = "fair", .systems = k_fair_systems};
+
+} // namespace
+
+void test_cycles_fair(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("cycles fair");
+    g_fair = Fair{};
+    const ModuleDesc* const list[] = {&k_fair};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    engine_work(e, 0.02);
+    // The greedy one had half (two units to run); the polite one found the rest waiting.
+    KV_CHECK(c, g_fair.greedy_spent >= 0.009 && g_fair.greedy_spent < 0.015);
+    KV_CHECK(c, g_fair.polite_runs == 1 && g_fair.polite_left > 0.005);
+    engine_shutdown(e);
+}
+
+namespace {
+
+using namespace kv;
+
+// A stream that only a Frame unit reads, fed every tick, in a program that never runs the
+// Frame cycle: held for that unit, and named once (dev builds).
+struct Flood { u32 n; };
+constinit const EventTypeDesc k_flood_events[] = {KV_EVENT(Flood)};
+void sys_flood(TickContext& ctx) { for (u32 i = 0; i < 1000; ++i) ctx.emit(Flood{i}); }
+void sys_drain(TickContext& ctx) { (void)ctx.received<Flood>(); }
+constinit const SystemDesc k_flood_systems[] = {
+    {.name = ".flood", .phase = Phase::Sim, .fn = sys_flood, .emits = "Flood"},
+    {.name = ".drain", .phase = Phase::Frame, .fn = sys_drain, .reads = "Flood"},
+};
+KV_MODULE_DEFINE(k_flood) = {.name = "flood", .events = k_flood_events, .systems = k_flood_systems};
+
+} // namespace
+
+void test_cycles_held(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("cycles held");
+    const ModuleDesc* const list[] = {&k_flood};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    for (u32 i = 0; i < 70; ++i) engine_frame(e, e.clock.tick_dt);
+    u32 t = EventType<Flood>::id;
+    KV_CHECK(c, e.events.streams[t].events.count() == 70000); // held for the drain, which has not run
+#if KV_DEV
+    KV_CHECK(c, t < e.events.held_warned.len && e.events.held_warned[t] == 1);
+#endif
+    engine_frame_cycle(e, 0.016);
+    engine_frame(e, e.clock.tick_dt);
+    KV_CHECK(c, e.events.streams[t].events.count() <= 1000); // taken, and dropped
     engine_shutdown(e);
 }

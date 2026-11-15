@@ -109,8 +109,8 @@ void test_text(kv::TestCtx& c) {
     ff.f.state = AssetState::Pending;
     KV_CHECK(c, text_layout(ff.f, t, out, &width) == 0 && width == 0.0f);
 
-    // The system, with no asset module: a label with a null font makes no glyphs and is
-    // counted; destroying it leaves nothing behind for the scene module to orphan.
+    // The system (the Frame cycle), with no asset module: a label with a null font makes no
+    // glyphs and is counted; destroying it leaves nothing behind for the scene module to orphan.
     const ModuleDesc* const list[] = {&sprite_module, &scene_module, &text_module};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
@@ -121,14 +121,18 @@ void test_text(kv::TestCtx& c) {
     text_set(hud, "SCORE 0");
     Handle label = labels->spawn(transform2_at(point2{0, 0}), hud);
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 0);
+    engine_frame_cycle(e, 1.0 / 60.0);
     KV_CHECK(c, text_stats(e)->labels == 1 && text_stats(e)->relaid == 1 && glyphs->live() == 0);
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 1);
+    engine_frame_cycle(e, 1.0 / 60.0);
     KV_CHECK(c, text_stats(e)->relaid == 0); // nothing changed, nothing redone
     labels->get<Text>(label)->str[6] = '1';
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 2);
+    engine_frame_cycle(e, 1.0 / 60.0);
     KV_CHECK(c, text_stats(e)->relaid == 1);
     labels->destroy(label);
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 3);
+    engine_frame_cycle(e, 1.0 / 60.0);
     KV_CHECK(c, text_stats(e)->labels == 0 && glyphs->live() == 0);
     u64 h = engine_hash_state(e);
     glyphs->spawn(Transform2{}, Sprite{}, Local2{}, Parent{});
