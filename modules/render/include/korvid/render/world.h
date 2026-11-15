@@ -12,8 +12,19 @@
 #include "korvid/core/array.h"
 #include "korvid/core/map.h"
 #include "korvid/core/pool.h"
+#include "korvid/render/ui.h"
 
 namespace kv {
+
+// One layer's UI list, as staged: a header (items, clips, where the clips start, 0), the
+// items' byte offsets from the region's start, the clips (float4 each), the items' words.
+// `base` is where the region sits in a frame's UI buffer.
+struct RwUiLayer {
+    i32       layer = 0;
+    Array<u8> bytes;
+    u32       items = 0;
+    u64       base = 0;
+};
 
 struct RenderWorld {
     // The outer engine's entity handle maps to a slot here, and the slot is the GPU row.
@@ -31,6 +42,13 @@ struct RenderWorld {
     f32                  layer_cur[kLayerCount][2]  = {};
     u32                  tick = 0;         // Tick deltas seen; the stamp of the newest rows
     u64                  deltas_applied = 0;
+    // The UI lists (renderer_ui_set), by layer ascending, each in the bytes the GPU reads
+    // (rw_ui_set says how). `ui_version` moves on every change, so a frame slot whose copy
+    // is older stages them all again; `ui_bytes` is their total, each region 16-aligned.
+    Array<RwUiLayer>     ui;
+    u64                  ui_version = 1;
+    u64                  ui_bytes = 0;
+    u64                  ui_sets = 0, ui_stages = 0;
 };
 
 // The pools, the maps and the bitmaps, from `general`. A backend that registers a handle
@@ -41,6 +59,15 @@ void rw_free(RenderWorld& w);
 // A tick's worth (or a frame's worth) of sprite deltas: renderer_apply.
 void rw_apply(RenderWorld& w, Span<const SpriteDelta> deltas);
 
+// The UI lists: replace or remove a layer's, keeping the layers in order and their bases
+// packed. Bytes come from the world's allocator.
+void rw_ui_set(RenderWorld& w, i32 layer, const UiList& list);
+void rw_ui_clear(RenderWorld& w, i32 layer);
+// Every region into `dst` (w.ui_bytes long), at its base.
+void rw_ui_stage(const RenderWorld& w, u8* dst);
+// The bucket after a UI layer's sprites: a list at `layer` is drawn when the walk of the
+// buckets reaches it.
+u32  rw_ui_bucket_end(i32 layer);
 // The sort bucket of a layer and a pipeline slot: layer major, so ascending bucket order is
 // draw order.
 u32  rw_bucket_of(i32 layer, u32 slot);

@@ -152,6 +152,12 @@ struct FrameCore {
     bool             submitted  = false;
     bool             have_image = false; // rb_frame_acquire's answer: there is an image to draw into,
     u32              width = 0, height = 0; // and its size in pixels (0 when there is none)
+    // The UI lists as this slot's frames read them: host-visible, rewritten only when the
+    // world's lists moved past `ui_version` (korvid/render/ui.h).
+    RbBuffer         ui{};
+    u64              ui_capacity = 0;
+    u64              ui_version  = 0;
+    bool             ui_failed   = false; // the backend could not make it: no UI from this slot
 };
 
 // The two passes of a frame that draw sprites: the world's, into the post pass's target
@@ -335,6 +341,13 @@ u32  rb_draw_run(Renderer* r, FrameInFlight& f, const DrawRun& run);
 void rb_pass_end(Renderer* r, FrameInFlight& f, RcPass pass);
 // The window's image copied where rc_write_screenshot will read it (sets shot_recorded).
 void rb_read_window(Renderer* r, FrameInFlight& f);
+// The UI lists. rb_ui_buffer makes f.ui at least `bytes` long (host-visible, mapped, read by
+// the UI shader as its list buffer) and points this slot's bindings at it; the old one
+// retires with the frame. False when it cannot: that slot draws no UI. rb_ui_draw draws one
+// layer's list, `push.ui_base` its region and `push.ui_count` its items, inside a pass whose
+// sprite bindings are made (rb_bind_sprites).
+bool rb_ui_buffer(Renderer* r, FrameInFlight& f, u64 bytes);
+void rb_ui_draw(Renderer* r, FrameInFlight& f, const PushData& push);
 bool rb_record_end(Renderer* r, FrameInFlight& f);
 
 } // namespace kv

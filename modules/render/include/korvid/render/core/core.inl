@@ -369,6 +369,26 @@ void renderer_post_params(Renderer* r, const f32* params, u32 count) {
     r->post.param_count = count;
 }
 
+// ---- the UI primitive's lists ------------------------------------------------------------------
+
+void renderer_ui_set(Renderer* r, i32 layer, const UiList& list) {
+    if (r) rw_ui_set(r->world, layer, list);
+}
+
+void renderer_ui_clear(Renderer* r, i32 layer) {
+    if (r) rw_ui_clear(r->world, layer);
+}
+
+RendererUiStats renderer_ui_stats(const Renderer* r) {
+    RendererUiStats s;
+    if (!r) return s;
+    s.sets = r->world.ui_sets;
+    s.stages = r->world.ui_stages;
+    s.layers = r->world.ui.len;
+    s.bytes = r->world.ui_bytes;
+    return s;
+}
+
 // ---- deferred destruction -------------------------------------------------------------------
 
 void rc_defer(Renderer* r, RbGarbage g) { r->frames[r->frame_index].garbage.push(g); }

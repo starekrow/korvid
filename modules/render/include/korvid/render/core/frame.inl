@@ -60,7 +60,54 @@ u32 draw_runs(Renderer* r, FrameInFlight& f, u32 first_bucket, u32 end_bucket) {
     return draws;
 }
 
-bool record_frame(Renderer* r, FrameInFlight& f, const RenderView& view) {
+// This slot's copy of the UI lists, brought up to the world's: rewritten whole when anything
+// changed since the slot last wrote it, untouched otherwise. False: the slot has none, and
+// draws no UI (logged once).
+bool stage_ui(Renderer* r, FrameInFlight& f) {
+    if (f.ui_failed) return false;
+    if (!r->world.ui.len) return true;
+    if (f.ui_version == r->world.ui_version) return true;
+    u64 bytes = r->world.ui_bytes;
+    if (bytes > f.ui_capacity) {
+        u64 want = bytes + bytes / 2;
+        if (want < 64 * 1024) want = 64 * 1024;
+        if (!rb_ui_buffer(r, f, want)) {
+            f.ui_failed = true;
+            KV_ERROR(KV_RB_NAME, "the UI lists have no buffer: UI is not drawn");
+            return false;
+        }
+        f.ui_capacity = want;
+    }
+    rw_ui_stage(r->world, (u8*)rb_buffer_ptr(f.ui));
+    f.ui_version = r->world.ui_version;
+    ++r->world.ui_stages;
+    return true;
+}
+
+// The buckets [*from, end) of a pass, with the UI lists whose layers end in it drawn after
+// their layers' sprites. `*ui` walks the lists in order across the frame's passes.
+u32 draw_with_ui(Renderer* r, FrameInFlight& f, const PushData& push, bool sprites, bool ui_ok, u32 from, u32 end, u32* ui) {
+    u32 draws = 0;
+    while (*ui < r->world.ui.len) {
+        const RwUiLayer& l = r->world.ui[*ui];
+        u32 at = rw_ui_bucket_end(l.layer);
+        if (at > end) break;
+        if (sprites && at > from) { draws += draw_runs(r, f, from, at); }
+        if (at > from) from = at;
+        if (ui_ok && l.items) {
+            PushData p = push;
+            p.ui_base = (u32)l.base;
+            p.ui_count = l.items;
+            rb_ui_draw(r, f, p);
+            ++draws;
+        }
+        ++*ui;
+    }
+    if (sprites && end > from) draws += draw_runs(r, f, from, end);
+    return draws;
+}
+
+bool record_frame(Renderer* r, FrameInFlight& f, const RenderView& view, bool ui_ok) {
     KV_ZONE("record");
     if (!rb_record_begin(r, f)) return false;
 
@@ -82,18 +129,22 @@ bool record_frame(Renderer* r, FrameInFlight& f, const RenderView& view) {
     if (f.have_image) {
         // With a post shader, the world (the layers below the post layer) goes into the
         // target first, and the window's pass begins with the post shader; the layers at and
-        // above the post layer draw over it there.
+        // above the post layer draw over it there. A UI list draws after its layer's sprites,
+        // in whichever pass its layer is.
+        bool ui    = r->world.ui.len && ui_ok;
+        bool bind  = draw || ui;
         bool post  = rb_post_prepare(r, f.width, f.height);
         u32  split = post ? rw_bucket_of(r->post.layer, 0) : 0;
         u32  draws = 0;
+        u32  ui_at = 0;
         if (post) {
             rb_pass_begin(r, f, RcPass::World, view);
-            if (draw) { rb_bind_sprites(r, f, push); draws += draw_runs(r, f, 0, split); }
+            if (bind) { rb_bind_sprites(r, f, push); draws += draw_with_ui(r, f, push, draw, ui, 0, split, &ui_at); }
             rb_pass_end(r, f, RcPass::World);
         }
         rb_pass_begin(r, f, RcPass::Window, view);
         if (post) rb_pass_post(r, f, view);
-        if (draw) { rb_bind_sprites(r, f, push); draws += draw_runs(r, f, split, kBucketCount); }
+        if (bind) { rb_bind_sprites(r, f, push); draws += draw_with_ui(r, f, push, draw, ui, split, kBucketCount, &ui_at); }
         KV_COUNTER("indirect draws", draws);
         rb_pass_end(r, f, RcPass::Window);
         if (r->shot_pending) rb_read_window(r, f);
@@ -129,8 +180,11 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         for (u32 slot : f.dirty_slots) rb_frame_slot(r, f, slot);
         f.dirty_slots.clear();
 
+        // The UI lists before anything is recorded: a new buffer rewrites this slot's bindings.
+        bool ui_ok = rc::stage_ui(r, f);
+
         if (!rb_frame_acquire(r, f, &waited)) return false;
-        if (!rc::record_frame(r, f, view)) return false;
+        if (!rc::record_frame(r, f, view, ui_ok)) return false;
         if (!rb_frame_submit(r, f)) return false;
         f.submitted = true;
         f.garbage_owned = f.garbage.len; // destroyed when the frame is done; anything queued later waits for the next

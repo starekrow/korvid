@@ -260,7 +260,7 @@ bool rb_create_static_buffers(Renderer* r) {
 // of its set.
 
 void rb_write_tables_set(Renderer* r, FrameInFlight& f) {
-    VkDescriptorBufferInfo infos[8] = {
+    VkDescriptorBufferInfo infos[9] = {
         {r->tables.sprites.buffer, 0, VK_WHOLE_SIZE},
         {r->material_table.buffer, 0, VK_WHOLE_SIZE},
         {r->tables.sorted.buffer, 0, VK_WHOLE_SIZE},
@@ -269,9 +269,11 @@ void rb_write_tables_set(Renderer* r, FrameInFlight& f) {
         {r->sort_meta.buffer, 0, VK_WHOLE_SIZE},
         {r->indirect.buffer, 0, VK_WHOLE_SIZE},
         {f.layers.buffer, 0, VK_WHOLE_SIZE},
+        // The UI lists; until a slot has its own buffer, a stand-in that is never read.
+        {f.ui.buffer ? f.ui.buffer : f.layers.buffer, 0, VK_WHOLE_SIZE},
     };
-    VkWriteDescriptorSet writes[8]{};
-    for (u32 i = 0; i < 8; ++i) {
+    VkWriteDescriptorSet writes[9]{};
+    for (u32 i = 0; i < 9; ++i) {
         writes[i].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet          = f.tables;
         writes[i].dstBinding      = i;
@@ -279,14 +281,14 @@ void rb_write_tables_set(Renderer* r, FrameInFlight& f) {
         writes[i].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[i].pBufferInfo     = &infos[i];
     }
-    vkUpdateDescriptorSets(r->device, 8, writes, 0, nullptr);
+    vkUpdateDescriptorSets(r->device, 9, writes, 0, nullptr);
     f.tables_dirty = false;
 }
 
 bool rb_create_descriptors(Renderer* r) {
     // Set 0.
-    VkDescriptorSetLayoutBinding tb[8]{};
-    for (u32 i = 0; i < 8; ++i) {
+    VkDescriptorSetLayoutBinding tb[9]{};
+    for (u32 i = 0; i < 9; ++i) {
         tb[i].binding         = i;
         tb[i].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         tb[i].descriptorCount = 1;
@@ -294,7 +296,7 @@ bool rb_create_descriptors(Renderer* r) {
     }
     VkDescriptorSetLayoutCreateInfo tlci{};
     tlci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    tlci.bindingCount = 8;
+    tlci.bindingCount = 9;
     tlci.pBindings    = tb;
     VK_CHECK(vkCreateDescriptorSetLayout(r->device, &tlci, nullptr, &r->tables_layout));
 
@@ -326,7 +328,7 @@ bool rb_create_descriptors(Renderer* r) {
     VK_CHECK(vkCreateDescriptorSetLayout(r->device, &xlci, nullptr, &r->textures_layout));
 
     VkDescriptorPoolSize sizes[3] = {
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8 * kFramesInFlight},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 9 * kFramesInFlight},
         {VK_DESCRIPTOR_TYPE_SAMPLER, 2 * kFramesInFlight},
         {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kMaxTextures * kFramesInFlight},
     };

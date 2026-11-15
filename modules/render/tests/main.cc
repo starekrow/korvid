@@ -5,6 +5,7 @@ void test_world_materials(kv::TestCtx&);
 void test_world_runs(kv::TestCtx&);
 void test_world_push(kv::TestCtx&);
 void test_world_sort_check(kv::TestCtx&);
+void test_ui_lists(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
@@ -13,5 +14,6 @@ int main() {
     test_world_runs(c);
     test_world_push(c);
     test_world_sort_check(c);
+    test_ui_lists(c);
     return kv::test_report(c, "render_tests");
 }

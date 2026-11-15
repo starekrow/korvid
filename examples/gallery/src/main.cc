@@ -22,6 +22,7 @@
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/module.h"
 #include "korvid/render/renderer.h"
+#include "korvid/render/ui.h"
 #include <string.h>
 
 namespace kv {
@@ -357,6 +358,97 @@ void scene_shaders(Gallery& g) {
     renderer_post_params(g.r, params, 1);
 }
 
+// The UI primitive (korvid/render/ui.h): boxes with every corner, border, gradient and
+// shadow it has, an image in a box, glyphs, and clips nested in clips, over a sprite
+// background, with a sprite on the layer above the list drawn over it.
+UiBox ui_box(f32 x, f32 y, f32 w, f32 h, color fill, f32 radius = 0.0f) {
+    UiBox b;
+    b.rect = rect2{x, y, w, h};
+    b.fill = fill;
+    for (f32& r : b.radius) r = radius;
+    return b;
+}
+
+void scene_ui(Gallery& g, UiList& l) {
+    Sprite bg = at(0, 0, g.opaque_checker);
+    bg.size = vec2{960, 512}; bg.uv = rect2{0, 0, 15, 8}; bg.layer = -10;
+    add(g, bg);
+    Sprite over = at(380, -200, g.alpha_glyph, 64);
+    over.layer = 1; // above the list's layer
+    add(g, over);
+
+    const color panel = color_rgba(0.13f, 0.15f, 0.19f, 1.0f), accent = color_rgba(0.35f, 0.63f, 1.0f, 1.0f);
+    const color white = color_white();
+    // A panel with a soft shadow, a border and rounded corners.
+    UiBox card = ui_box(40, 40, 400, 220, panel, 12);
+    card.border = 1; card.border_color = color_rgba(1, 1, 1, 0.18f);
+    card.shadow_color = color_rgba(0, 0, 0, 0.6f); card.shadow_blur = 18; card.shadow_offset = vec2{0, 8};
+    l.box(card);
+    // Corners: none, small, pill, one each, and a circle.
+    f32 x = 64;
+    const f32 radii[] = {0, 4, 14};
+    for (f32 r : radii) { l.box(ui_box(x, 64, 80, 28, accent, r)); x += 96; }
+    UiBox odd = ui_box(x, 64, 64, 28, accent);
+    odd.radius[0] = 14; odd.radius[1] = 0; odd.radius[2] = 14; odd.radius[3] = 0;
+    l.box(odd);
+    l.box(ui_box(64, 108, 40, 40, color_rgba(1.0f, 0.55f, 0.2f, 1.0f), 20));
+    // Borders of one and two pixels, with and without a fill.
+    UiBox b1 = ui_box(120, 108, 120, 40, color_rgba(0, 0, 0, 0), 6);
+    b1.border = 1; b1.border_color = white;
+    l.box(b1);
+    UiBox b2 = ui_box(256, 108, 160, 40, color_rgba(0.2f, 0.22f, 0.28f, 1.0f), 6);
+    b2.border = 2; b2.border_color = accent;
+    l.box(b2);
+    // Gradients: down, across, and on the diagonal.
+    const f32 angles[] = {90, 0, 45};
+    x = 64;
+    for (f32 a : angles) {
+        UiBox gr = ui_box(x, 168, 112, 72, color_rgba(0.95f, 0.3f, 0.45f, 1.0f), 8);
+        gr.gradient = true; gr.fill2 = color_rgba(0.25f, 0.2f, 0.9f, 1.0f); gr.angle = a;
+        l.box(gr);
+        x += 124;
+    }
+    // An image in a rounded box, and the glyph as text would be drawn, in two colors.
+    UiBox img = ui_box(480, 40, 160, 120, white, 16);
+    img.textured = true; img.texture = renderer_texture_slot(g.r, g.checker); img.uv = rect2{0, 0, 2, 1.5f};
+    l.box(img);
+    for (u32 i = 0; i < 6; ++i) {
+        UiGlyph gl;
+        gl.rect = rect2{480.0f + 24.0f * (f32)i, 180, 16, 16};
+        gl.uv = rect2{0, 0, 1, 1};
+        gl.texture = renderer_texture_slot(g.r, g.glyph);
+        gl.tint = i & 1 ? accent : white;
+        l.glyph(gl);
+    }
+    // Clips: a box clipped by a rect that cuts its corner, and inside a clipped rect, glyphs
+    // and a box that run past both edges of a second, smaller one.
+    u32 outer = l.clip(rect2{680, 40, 240, 200});
+    UiBox frame = ui_box(670, 30, 140, 100, accent, 20);
+    frame.clip = outer;
+    l.box(frame);
+    u32 inner = l.clip(rect2{700, 150, 160, 60});
+    UiBox under = ui_box(690, 140, 200, 40, color_rgba(0.9f, 0.9f, 0.3f, 1.0f), 10);
+    under.clip = inner;
+    l.box(under);
+    for (u32 i = 0; i < 10; ++i) {
+        UiGlyph gl;
+        gl.rect = rect2{684.0f + 20.0f * (f32)i, 186, 24, 24};
+        gl.uv = rect2{0, 0, 1, 1};
+        gl.texture = renderer_texture_slot(g.r, g.glyph);
+        gl.tint = color_rgba(0.1f, 0.1f, 0.1f, 1.0f);
+        gl.clip = inner;
+        l.glyph(gl);
+    }
+    // A translucent box over the card's edge, and a shadow spread wider than its box.
+    UiBox glass = ui_box(360, 220, 200, 120, color_rgba(1, 1, 1, 0.25f), 18);
+    glass.border = 1; glass.border_color = color_rgba(1, 1, 1, 0.5f);
+    l.box(glass);
+    UiBox lifted = ui_box(120, 340, 240, 120, panel, 10);
+    lifted.shadow_color = color_rgba(0.35f, 0.63f, 1.0f, 0.8f); lifted.shadow_blur = 24; lifted.shadow_spread = 6;
+    l.box(lifted);
+    renderer_ui_set(g.r, 0, l);
+}
+
 // ---- the run ---------------------------------------------------------------------------------
 
 // A window whose framebuffer is kWidth x kHeight pixels on this display.
@@ -428,6 +520,14 @@ int run(int argc, char** argv) {
             clear(g); tick(g); scene_shaders(g); flush(g);
             shoot(g, "shaders", view_of(0.0f));
             renderer_post_layer(g.r, 0, nullptr);
+        }
+        if (want("ui")) {
+            UiList l;
+            l.init(mem_general());
+            clear(g); tick(g); scene_ui(g, l); flush(g);
+            shoot(g, "ui", view_of(0.0f));
+            renderer_ui_clear(g.r, 0);
+            l.free();
         }
         KV_INFO("gallery", "%u pictures written to %s, %u failed", g.written, g.out, g.failed);
         if (g.failed) rc = 1;

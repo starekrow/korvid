@@ -182,6 +182,8 @@ struct Renderer : RenderCore {
     VkShaderModule        sprite_shader   = VK_NULL_HANDLE;
     VkShaderModule        sort_shader     = VK_NULL_HANDLE;
     VkPipeline            pipelines[kBlendCount] = {};
+    VkShaderModule        ui_shader       = VK_NULL_HANDLE; // the UI primitive (ui.slang)
+    VkPipeline            ui_pipeline     = VK_NULL_HANDLE;
     GamePipe              game_pipes[kGameSlots];
     PostPass              post;
     VkPipeline            cs_count = VK_NULL_HANDLE, cs_scan = VK_NULL_HANDLE,

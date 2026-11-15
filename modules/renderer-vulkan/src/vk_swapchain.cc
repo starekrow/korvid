@@ -212,6 +212,7 @@ void rb_destroy_frames(Renderer* r) {
         if (f.fence)   vkDestroyFence(r->device, f.fence, nullptr);
         if (f.pool)    vkDestroyCommandPool(r->device, f.pool, nullptr); // frees the command buffer
         rb_destroy_buffer(r, f.layers);
+        rb_destroy_buffer(r, f.ui);
         f = FrameInFlight{};
     }
 }

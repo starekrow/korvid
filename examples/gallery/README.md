@@ -13,7 +13,7 @@ whatever size in window units gives a framebuffer of exactly 960x540 pixels on t
 (480x270 on a 2x Retina Mac, 960x540 on a 1x desktop), so every backend draws the same
 pixels.
 
-    build/macos-dev/bin/gallery --out DIR      # nine PPMs into DIR (a dev or debug build: ship cannot screenshot)
+    build/macos-dev/bin/gallery --out DIR      # ten PPMs into DIR (a dev or debug build: ship cannot screenshot)
     build/macos-dev/bin/gallery --scene sort   # one scene
     build/macos-dev/bin/picture compare DIR examples/gallery/references/metal    # against the committed references
     build/macos-dev/bin/picture png DIR OUT            # a set of PNGs, to keep as references
@@ -27,6 +27,7 @@ pixels.
 | `interpolate_0`, `_50`, `_90` | glyphs moved, turned and doubled between two ticks, drawn at alpha 0, 0.5 and 0.9; a disc set only before, unmoved |
 | `camera` | the view zoomed 2x and turned a sixth of a turn; screen sprites in the four corners and the center, untouched by it |
 | `shaders` | a game's sprite shader (`gallery_rings`) and a post shader (`gallery_post`: the right half's channels rotated, a line at the middle, a mark in the top left corner) under a glyph at the post layer |
+| `ui` | the UI primitive (`korvid/render/ui.h`): rounded boxes with every corner, 1 and 2 px borders, gradients down, across and diagonal, soft shadows, an image in a box, glyphs, a clip cutting a box's corner and glyphs inside a nested clip, over a sprite background. Vulkan's reference only: Metal and D3D12 do not draw it yet |
 
 `references/metal/` holds the pictures renderer-metal draws on an M3 Max (macOS 26.7), as
 PNGs; `references/vulkan/` those renderer-vulkan draws on Linux (a Radeon 780M, RADV 26.0.8,

@@ -290,7 +290,8 @@ u32 rb_draw_run(Renderer* r, FrameInFlight& f, const DrawRun& run) {
 // ---- shaders and pipelines --------------------------------------------------------------------
 
 bool rb_load_shaders(Renderer* r) {
-    return rb_load_shader(r, "sprite.spv", &r->sprite_shader) && rb_load_shader(r, "sprite_sort.spv", &r->sort_shader);
+    return rb_load_shader(r, "sprite.spv", &r->sprite_shader) && rb_load_shader(r, "sprite_sort.spv", &r->sort_shader) &&
+           rb_load_shader(r, "ui.spv", &r->ui_shader);
 }
 
 bool rb_create_compute_pipelines(Renderer* r) {
@@ -299,18 +300,20 @@ bool rb_create_compute_pipelines(Renderer* r) {
            create_compute(r, "cs_key_sort", &r->cs_key_sort);
 }
 
-// A sprite pipeline: the engine's vertex shader, a fragment shader (the engine's or a
-// game's, entry point fs_main), a blend. Needs the swapchain format. Null on failure.
-VkPipeline make_sprite_pipeline(Renderer* r, VkShaderModule fragment, BlendMode mode, const char* label) {
+// A graphics pipeline over the sprites' layout, drawing quads from no vertex buffers: a
+// vertex and a fragment entry point, an attachment's blend. Needs the swapchain format.
+// Null on failure.
+VkPipeline make_pipeline(Renderer* r, VkShaderModule vertex, const char* vs, VkShaderModule fragment, const char* fs,
+                         const VkPipelineColorBlendAttachmentState& attachment, const char* label) {
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = r->sprite_shader;
-    stages[0].pName  = "vs_main";
+    stages[0].module = vertex;
+    stages[0].pName  = vs;
     stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
     stages[1].module = fragment;
-    stages[1].pName  = "fs_main";
+    stages[1].pName  = fs;
     VkPipelineVertexInputStateCreateInfo vertex_input{}; // no vertex buffers at all
     vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
@@ -345,7 +348,6 @@ VkPipeline make_sprite_pipeline(Renderer* r, VkShaderModule fragment, BlendMode 
     rendering.colorAttachmentCount    = 1;
     rendering.pColorAttachmentFormats = &r->swapchain.format;
 
-    VkPipelineColorBlendAttachmentState attachment = blend_state(mode);
     VkPipelineColorBlendStateCreateInfo blend{};
     blend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     blend.attachmentCount = 1;
@@ -371,13 +373,35 @@ VkPipeline make_sprite_pipeline(Renderer* r, VkShaderModule fragment, BlendMode 
     return out;
 }
 
-// One graphics pipeline per blend mode with the engine's fragment shader, and one per game
-// pipe in use; everything else is shared. Needs the swapchain format.
+// A sprite pipeline: the engine's vertex shader, a fragment shader (the engine's or a
+// game's, entry point fs_main), a blend.
+VkPipeline make_sprite_pipeline(Renderer* r, VkShaderModule fragment, BlendMode mode, const char* label) {
+    return make_pipeline(r, r->sprite_shader, "vs_main", fragment, "fs_main", blend_state(mode), label);
+}
+
+// The UI primitive's: its output is premultiplied.
+VkPipeline make_ui_pipeline(Renderer* r) {
+    VkPipelineColorBlendAttachmentState s{};
+    s.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    s.blendEnable         = VK_TRUE;
+    s.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    s.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    s.colorBlendOp        = VK_BLEND_OP_ADD;
+    s.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    s.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    s.alphaBlendOp        = VK_BLEND_OP_ADD;
+    return make_pipeline(r, r->ui_shader, "vs_ui", r->ui_shader, "fs_ui", s, "ui");
+}
+
+// One graphics pipeline per blend mode with the engine's fragment shader, one per game
+// pipe in use, and the UI's; everything else is shared. Needs the swapchain format.
 bool rb_create_pipelines(Renderer* r) {
     for (u32 i = 0; i < kBlendCount; ++i) {
         r->pipelines[i] = make_sprite_pipeline(r, r->sprite_shader, (BlendMode)i, blend_mode_name((BlendMode)i));
         if (!r->pipelines[i]) return false;
     }
+    r->ui_pipeline = make_ui_pipeline(r);
+    if (!r->ui_pipeline) return false;
     for (GamePipe& gp : r->game_pipes)
         if (gp.used && !gp.failed) rb_create_game_pipeline(r, gp);
     rb_post_create_pipeline(r);
@@ -415,6 +439,8 @@ void rb_defer_destroy_pipelines(Renderer* r) {
         if (gp.pipeline) rb_defer_destroy(r, Garbage::PipelineKind, (u64)gp.pipeline);
         gp.pipeline = VK_NULL_HANDLE;
     }
+    if (r->ui_pipeline) rb_defer_destroy(r, Garbage::PipelineKind, (u64)r->ui_pipeline);
+    r->ui_pipeline = VK_NULL_HANDLE;
     rb_post_defer_destroy_pipeline(r);
 }
 
@@ -430,6 +456,10 @@ void rb_destroy_pipelines_now(Renderer* r) {
         if (gp.module) vkDestroyShaderModule(r->device, gp.module, nullptr);
         gp = GamePipe{};
     }
+    if (r->ui_pipeline) vkDestroyPipeline(r->device, r->ui_pipeline, nullptr);
+    if (r->ui_shader) vkDestroyShaderModule(r->device, r->ui_shader, nullptr);
+    r->ui_pipeline = VK_NULL_HANDLE;
+    r->ui_shader = VK_NULL_HANDLE;
     if (r->sprite_shader) vkDestroyShaderModule(r->device, r->sprite_shader, nullptr);
     if (r->sort_shader)   vkDestroyShaderModule(r->device, r->sort_shader, nullptr);
     r->sprite_shader = r->sort_shader = VK_NULL_HANDLE;
@@ -577,6 +607,26 @@ void rb_pass_end(Renderer* r, FrameInFlight& f, RcPass pass) {
     if (pass == RcPass::World) rb_post_end_world(r, f.cmd);
     else vkCmdEndRendering(f.cmd);
     rb_label_end(r, f.cmd);
+}
+
+// The UI lists' buffer for this slot: host-visible, coherent, mapped, a storage buffer at
+// set 0 binding 8. The slot's fence has passed (the core stages after rb_frame_wait), so its
+// set can be rewritten now.
+bool rb_ui_buffer(Renderer* r, FrameInFlight& f, u64 bytes) {
+    if (f.ui.buffer) rb_defer_destroy_buffer(r, f.ui);
+    if (!rb_create_host_buffer(r, bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, f.ui)) return false;
+    rb_name(r, VK_OBJECT_TYPE_BUFFER, (u64)f.ui.buffer, "ui lists");
+    rb_write_tables_set(r, f);
+    return true;
+}
+
+void rb_ui_draw(Renderer* r, FrameInFlight& f, const PushData& push) {
+    if (!r->ui_pipeline) return;
+    if (r->debug_utils) rb_label_begin(r, f.cmd, "ui");
+    vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, r->ui_pipeline);
+    vkCmdPushConstants(f.cmd, r->pipe_layout, k_push_stages, 0, sizeof push, &push);
+    vkCmdDraw(f.cmd, 6, push.ui_count, 0, 0);
+    if (r->debug_utils) rb_label_end(r, f.cmd);
 }
 
 void rb_read_window(Renderer* r, FrameInFlight& f) { record_screenshot(r, f.cmd, r->swapchain.images[f.image], r->swapchain.extent); }

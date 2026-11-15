@@ -83,7 +83,9 @@ struct PushData {
     u32 key_bucket;      // cs_key_sort: the bucket this dispatch sorts
     f32 screen_cull[4];  // screen rows: the window rect in pixels, x, y, w, h
     f32 time;            // the render time in seconds, for game shaders
-    u32 pad_t[3];
+    u32 ui_base;         // a UI draw: its layer's region in the frame's UI buffer, in bytes (pad_t0 in the shaders)
+    u32 ui_count;        // and its items (pad_t1)
+    u32 pad_t0;
 };
 static_assert(sizeof(PushData) == 112, "PushData must match sprite_common.slangh");
 

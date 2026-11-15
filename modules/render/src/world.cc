@@ -30,6 +30,7 @@ bool rw_init(RenderWorld& w, Allocator* general) {
     w.sprite_of_entity.init(general);
     w.material_by_name.init(general);
     w.sprite_dirty.alloc = w.material_dirty.alloc = general;
+    w.ui.alloc = general;
     w.material_dirty.resize_fill((kMaxMaterials + 63) / 64, 0);
     return w.materials.init(kMaxMaterials, general->tag) && w.sprites.init(kMaxSprites, general->tag);
 }
@@ -41,6 +42,9 @@ void rw_free(RenderWorld& w) {
     w.sprite_of_entity.free();
     w.sprite_dirty.free();
     w.material_dirty.free();
+    for (RwUiLayer& l : w.ui) l.bytes.free();
+    w.ui.free();
+    w.ui_bytes = 0;
 }
 
 u32 rw_bucket_of(i32 layer, u32 slot) {

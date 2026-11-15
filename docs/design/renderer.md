@@ -193,6 +193,30 @@ to the window as it did before, and none of the pass's objects exist until a sha
 Its cost on a Radeon 780M at 1280 x 720: about 0.1 ms of GPU a frame and one more layer of
 overdraw.
 
+## The UI primitive
+
+Krome slice 1 (docs/PRDs/Krome-Slice-1-PRD.md). A path beside the sprites for what they do
+badly: thousands of small rectangles with a look each, in painter's order, clipped, in the
+window's pixels (`korvid/render/ui.h`). A `UiList` is built on the CPU in the words the
+shader reads (a box of 22, a glyph of 9, the clips they name) and handed over for a layer
+with `renderer_ui_set`; the render world keeps each layer's region, packed and in order,
+with a version that moves on every change (`rw_ui_*`, tested in `render_tests`).
+
+Each frame slot holds the lists in one host-visible buffer of its own, which the core
+rewrites only when the world's version has moved past the slot's, before anything is
+recorded (a bigger buffer rewrites the slot's bindings, which a recording command buffer
+must not see). A still list costs a draw call and nothing else. The draw is one instanced
+call per layer, after that layer's sprite buckets and before the next layer's, in
+whichever pass the layer is; it reuses the sprites' bindings, and the push block's spare
+words carry the list's region and count (`ui_base`, `ui_count`; `pad_t0`, `pad_t1` in the
+shaders, so the sprite shaders compile to the same bytes). `shaders/ui.slang` does the
+rest: rounded corners per corner by signed distance, a border inside the edge, a two-stop
+gradient, a shadow as an erf of the distance, an image or a glyph's coverage, a clip by
+discard, colors decoded from sRGB, output premultiplied.
+
+On Vulkan the buffer is set 0's binding 8. Metal and D3D12 have stubs for now: they
+answer that they have no buffer, and the core draws no UI there.
+
 ## The core and the backends
 
 Slice 9 (docs/PRDs/Engine-Slice-9-PRD.md). Three backends draw this renderer: `renderer-vulkan` (Linux, Windows,

@@ -434,4 +434,9 @@ bool rb_record_end(Renderer* r, FrameInFlight& f) {
     return true;
 }
 
+// The UI primitive (korvid/render/ui.h) is not drawn by this backend yet: no buffer, so the
+// core draws no UI here (docs/PRDs/Krome-Slice-1-PRD.md, milestone 2).
+bool rb_ui_buffer(Renderer*, FrameInFlight&, u64) { return false; }
+void rb_ui_draw(Renderer*, FrameInFlight&, const PushData&) {}
+
 } // namespace kv

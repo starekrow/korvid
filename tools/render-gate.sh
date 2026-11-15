@@ -64,12 +64,15 @@ else fail "kormake test dev (see $out/test.log)"; tail -20 "$out/test.log"; fi
 step "shaders: unchanged"
 # The sources against main, which holds on any machine; the compiled files against the
 # baseline taken on this one.
-if git diff --quiet main -- modules/render/shaders examples/*/shaders 2>/dev/null; then pass "no shader source differs from main"
-else fail "shader sources differ from main"; git diff --stat main -- modules/render/shaders examples/*/shaders; fi
+# A shader added since main (the UI primitive's, Krome slice 1) is new, not a change: only
+# the sources and compiled shaders main has are held to it.
+if git diff --quiet --diff-filter=MDR main -- modules/render/shaders examples/*/shaders 2>/dev/null; then pass "no shader source main has differs from it"
+else fail "shader sources differ from main"; git diff --stat --diff-filter=MDR main -- modules/render/shaders examples/*/shaders; fi
 sums "$dev/shaders" >"$out/shaders.sum"
 if [ $baseline -eq 1 ]; then cp "$out/shaders.sum" "$keep/shaders.sum"; pass "baseline kept: $(wc -l <"$keep/shaders.sum") compiled shaders"
 elif [ ! -f "$keep/shaders.sum" ]; then fail "no baseline ($keep/shaders.sum): run with --baseline at main first"
-elif cmp -s "$out/shaders.sum" "$keep/shaders.sum"; then pass "compiled shaders byte-identical to the baseline"
+elif awk 'NR == FNR { known[$3] = 1; next } known[$3]' "$keep/shaders.sum" "$out/shaders.sum" | cmp -s - "$keep/shaders.sum"; then
+    pass "compiled shaders byte-identical to the baseline ($(( $(wc -l <"$out/shaders.sum") - $(wc -l <"$keep/shaders.sum") )) new)"
 else fail "compiled shaders differ from the baseline"; diff "$keep/shaders.sum" "$out/shaders.sum"; fi
 
 step "gallery: exact against references/$backend"
