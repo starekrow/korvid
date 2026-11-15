@@ -301,8 +301,8 @@ build untested.
   fuller), and the glyphs keep stb_truetype's coverage. Metrics round to whole pixels and a
   glyph's box sits on whole pixels from the pen. Beside FreeType's hinted DejaVu (Pillow's,
   standing in for the platform's) the weight now matches; the stems are a little softer,
-  since FreeType grid-fits them. **Whether that is crisp enough is yours to judge**
-  (`kromedemo --type --shots DIR`). The game's sprite path (`text`) does not have the
+  since FreeType grid-fits them. Judged good enough as it is, without hinting
+  (review, Nov 15; `kromedemo --type --shots DIR`). The game's sprite path (`text`) does not have the
   correction yet.
 - **Fallback** (1) is shown with arcfire's PublicPixel behind DejaVu in `asset_tests` (CJK
   that DejaVu lacks: 元, 円). kromedemo does not ship a fallback: PublicPixel's license is not
@@ -344,7 +344,7 @@ build untested.
 | render-gate, Linux | passes, with the gallery's UI reference made again |
 | tests | core, kim, kimb, kimc, typeset 43, asset 40, text 31, platform_hid 251, krome 228, goldberg, ui all pass |
 
-**Open:** hinting, if the pictures say so; laying out only the lines a keystroke touches in a
+**Open:** laying out only the lines a keystroke touches in a
 long `edit`; `ui` on `typeset`; the hosts' text input, clipboard and cursor; the text input
 protocol beyond composition (K25).
 
