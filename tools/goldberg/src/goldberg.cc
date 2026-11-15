@@ -235,7 +235,7 @@ struct GoldbergState {
     bool            io_ready = false;
     Array<TaskHead*> live;               // handed to the queue, not yet finished
     u32             runs = 0;            // of those, converter runs
-    u32             max_procs = 8;
+    u32             max_procs = 8;       // converters running at once (startup: one a CPU, at least 8)
     // The session's share of a tick (1/60 s) for its events: 1 is all of them every tick
     // (a cook, or a watch asked to cook); less leaves the rest for the next tick, and a
     // headless session sleeps out the remainder.
@@ -311,6 +311,7 @@ bool sum_piece(void* user, const u8* data, usize n) { Sum& m = *(Sum*)user; m.h.
 
 i32 hash_task(void* arg, const IoTaskCtl&) {
     HashReq& r = *(HashReq*)arg;
+    KV_ZONE("task.hash");
     // The modification time is read before the bytes: a write in between leaves a time
     // that is older than the content, and the next event for the file asks again.
     IoStat st;
@@ -346,6 +347,7 @@ void hash_done(GoldbergState& s, HashReq& r) {
 
 i32 copy_task(void* arg, const IoTaskCtl&) {
     CopyReq& r = *(CopyReq*)arg;
+    KV_ZONE("task.copy");
     char dir[900];
     i32 err = 0;
     parent_dir(r.to, dir, sizeof dir);
@@ -612,6 +614,7 @@ void drain(Proc& pr) {
 i32 run_task(void* arg, const IoTaskCtl& ctl) {
     Proc& pr = *(Proc*)arg;
     if (!pr.scan) {
+        KV_ZONE("run.fresh dir");
         io_remove_tree(pr.run_dir); // a fresh directory for every run
         io_make_dirs(pr.run_dir);
     }
@@ -623,15 +626,19 @@ i32 run_task(void* arg, const IoTaskCtl& ctl) {
     d.argv = Span<const char* const>(argv.data, argv.len);
     d.env  = Span<const char* const>(env.data, env.len);
     d.cwd  = pr.run_dir;
-    bool ok = pr.p.spawn(d);
+    bool ok;
+    { KV_ZONE("run.spawn"); ok = pr.p.spawn(d); }
     argv.free();
     env.free();
     if (!ok) { pr.spawn_failed = true; return 0; }
-    for (;;) {
-        pr.p.wait(0.05);
-        drain(pr);
-        if (ctl.cancelled()) pr.p.kill();
-        if (!pr.p.running()) { drain(pr); break; }
+    {
+        KV_ZONE_WAIT("run.running");
+        for (;;) {
+            pr.p.wait(0.05);
+            drain(pr);
+            if (ctl.cancelled()) pr.p.kill();
+            if (!pr.p.running()) { drain(pr); break; }
+        }
     }
     if (!pr.scan && pr.settle > 0) {
         f64 end = time_now() + pr.settle;
@@ -639,6 +646,7 @@ i32 run_task(void* arg, const IoTaskCtl& ctl) {
     }
     pr.code = pr.p.code;
     if (!pr.scan) {
+        KV_ZONE("run.commit");
         if (pr.code == 0) commit_files(pr);
         else io_remove_tree(pr.run_dir); // a failed run contributes nothing
     }
@@ -1412,6 +1420,11 @@ bool goldberg_startup(Engine&, ModuleInstance& self) {
     s->general = &self.general;
     // The queue: no reads of its own (goldberg's are tasks), workers for every lane at once.
     u32 cpus = os_cpu_count() ? os_cpu_count() : 1;
+    // Converters at once: one a CPU, and no fewer than 8 however few there are. A small
+    // file's run is mostly the OS starting a process, which is waiting more than working:
+    // on Windows starts go on scaling to about two a CPU, and 8 on a 16-CPU machine left a
+    // fifth of a small-file cook on the table.
+    s->max_procs = cpus > 8 ? cpus : 8;
     if (s->io.init(&self.general, 1u << 18, IoBackend::Sync) && s->io.start_tasks(s->max_procs + cpus)) {
         s->io.set_lane(LaneRun, s->max_procs);
         s->io.set_lane(LaneHash, cpus);

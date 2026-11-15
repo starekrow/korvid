@@ -25,10 +25,10 @@ is treated the same way in its turn. What a file is comes from `.berg` files, la
 from goldberg's own conventions down to one file's sidecar.
 
 Hashing, copying and converter runs are I/O: tasks on goldberg's own I/O queue, run on
-worker threads in three lanes (eight converters at once; hashes and copies by the number
-of cores), each started the moment a worker is free. The main thread only turns what
-finished into events for the session, so the converters stay busy however often it
-ticks. A converter's outputs are hashed as they are moved into the work tree and arrive
+worker threads in three lanes (a converter a core at once, and at least eight; hashes
+and copies by the number of cores), each started the moment a worker is free. The main
+thread only turns what finished into events for the session, so the converters stay
+busy however often it ticks. A converter's outputs are hashed as they are moved into the work tree and arrive
 as one event each.
 
 A cook and a watch are one program on one path. Both scan, both run the watchers, both

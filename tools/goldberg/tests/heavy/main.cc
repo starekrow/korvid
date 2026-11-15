@@ -56,7 +56,8 @@ const char* kExe = ".exe";
 #else
 const char* kExe = "";
 #endif
-const u32 kSteps = 8; // goldberg runs this many converters at once (GoldbergState::max_procs)
+// goldberg runs this many converters at once (goldberg_startup: one a CPU, at least 8).
+u32 steps_at_once() { u32 n = os_cpu_count(); return n > 8 ? n : 8; }
 
 // ---- the bytes --------------------------------------------------------------------------------
 
@@ -967,7 +968,7 @@ int bench(Options& o) {
     if (ran) {
         f64 window = last - first;
         printf("    %-24s %9.2f s   start, scan, hash the sources, solve\n", "before the first run", first - cold.start);
-        printf("    %-24s %9.2f s   %u runs; %.0f%% of %u at once\n", "converters running", window, ran, window > 0 ? 100 * busy / (window * kSteps) : 0, kSteps);
+        printf("    %-24s %9.2f s   %u runs; %.0f%% of %u at once\n", "converters running", window, ran, window > 0 ? 100 * busy / (window * steps_at_once()) : 0, steps_at_once());
         printf("    %-24s %9.2f s   the last outputs landed, the state written\n", "after the last run", cold.start + cold.seconds - last);
         if (cold.cpu > 0)
             printf("    %-24s %9.2f s   converters %.2f s, goldberg and the shell %.2f s\n", "cpu", cold.cpu, conv_cpu, cold.cpu - conv_cpu);

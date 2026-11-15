@@ -221,29 +221,33 @@ files in two classes), NTFS on NVMe, 16 cpus, dev, the repository excluded from 
 from the second column on. Digests `5df3639838e0a3e6` (64M) and `9e24a0808df2b717` (1M)
 throughout. Nov 15, 2026.
 
-| What | First run | `exec`, no shell | No console a child | A fresh converter |
-|---|---|---|---|---|
-| Cold cook, 1M | 7.8 s | 5.4 s | 3.3 to 4.5 s | 1.9 s |
-| Cold cook, 64M | 270 s | | 150 to 252 s | 75.6 s (72.6 s of converters) |
-| Nothing changed, 64M | 14.3 s | | 5.9 s | 6.0 s |
-| Six changed, 64M | | | 6.1 s | 6.5 s |
-| A watch, one save | | | 36 to 41 ms | 28 ms (1M) |
+| What | First run | `exec`, no shell | No console a child | A fresh converter | Delay-loaded DLLs | A converter a CPU |
+|---|---|---|---|---|---|---|
+| Cold cook, 1M | 7.8 s | 5.4 s | 3.3 to 4.5 s | 1.9 s | 1.44 to 1.50 s | 1.19 to 1.23 s |
+| Cold cook, 64M | 270 s | | 150 to 252 s | 75.6 s (72.6 s of converters) | | 51.6 s (48.6 s of converters) |
+| Nothing changed, 64M | 14.3 s | | 5.9 s | 6.0 s | | 6.1 s |
+| Six changed, 64M | | | 6.1 s | 6.5 s | | 6.5 s |
+| A watch, one save | | | 36 to 41 ms | 28 ms (1M) | 25 ms (1M) | 28 ms |
 
 At the end, the default 1.06 GiB (18,357 files, `kormake test --heavy goldberg windows-dev`)
 beside Linux's last column, the same tree and the same digest, `1fccef70833884e2`:
 
-| What | Windows | Linux |
-|---|---|---|
-| Cold cook | 78.2 s (2.4 s before the first converter, 75.0 s of converters, 0.9 s after) | 12.5 s |
-| The 16,667 files of 10 KB | 66.7 s, 870 us a run (p50) | 5.3 s |
-| The 21 files of 10 MB to 200 MB | 84 to 102 MB/s a run | 90 to 110 MB/s a run |
-| Nothing changed | 5.9 s | 4.6 s |
-| One file per class changed | 10.5 s | 7.6 s |
-| A watch, one save | 27 ms | |
+| What | Windows, a fresh converter | Windows, delay-loaded, a converter a CPU | Linux |
+|---|---|---|---|
+| Cold cook | 78.2 s (2.4 s before the first converter, 75.0 s of converters, 0.9 s after) | 54.1 s (2.5 s, 50.7 s, 0.8 s) | 12.5 s |
+| The 16,667 files of 10 KB | 66.7 s, 870 us a run (p50) | 45.1 s, 1.0 ms a run | 5.3 s |
+| The 21 files of 10 MB to 200 MB | 84 to 102 MB/s a run | 54 to 72 MB/s a run (sixteen at once now, beside the small ones) | 90 to 110 MB/s a run |
+| Nothing changed | 5.9 s | 5.9 s | 4.6 s |
+| One file per class changed | 10.5 s | 10.4 s | 7.6 s |
+| A watch, one save | 27 ms | 23 ms | |
 
-The large files cook as fast as on Linux; the gap is all in the small ones. A 10 KB
-run's own time is under a millisecond, and eight lanes finish 250 a second: about 30 ms of
-each lane's time a run is starting a process and making its file, not the run itself.
+The large files cook about as fast as on Linux; the gap is all in the small ones. A 10 KB
+run's own time is about a millisecond, and the lanes finish 370 a second (250 with eight
+and the shell DLLs): the rest of each lane's time a run, 40 ms of it at sixteen lanes, is
+the OS starting and ending a process and goldberg moving its output, not the run itself.
+Windows starts a process in milliseconds where Linux takes well under one; what is left
+is that, which no change to goldberg removes. A converter that cooks many files a process
+would.
 
 Where it went, in the order it was found:
 
@@ -281,11 +285,33 @@ Where it went, in the order it was found:
   list of known directories was searched by name; it has an index by hash.
 - **What is left** of nothing changed, 18,000 files: 0.7 s in all, of it Lua's settle
   0.3 s, handing events to Lua 0.2 s, making the session 0.17 s.
+- **The DLLs a program loads.** Every korvid program imported shell32 and ole32 (for the
+  one call that finds the preference directory) and ws2_32 (sockets), and shell32 brings
+  user32, gdi32 and much of the shell in with it. A program that does nothing took 6 ms
+  to start and exit; with those three imported, 10 ms; delay-loaded (opened at the
+  first call), 6.7 ms. The Windows toolchain delay-loads them for every program
+  (`modules/toolchain-windows/module.lua`), and goldberg's converter went from 13.5 ms
+  of child's life a run to 7.8.
+- **Eight at a time.** Process starts go on scaling past eight here (a launcher on its
+  own: 650 a second with 8 threads, 820 with 12, 950 with 24), and a small file's run is
+  mostly waiting on that. goldberg now runs a converter a CPU, at least 8.
+- **What a start costs now**, measured from goldberg's run task (`run.spawn`,
+  `run.running`, `run.commit` zones): CreateProcess 8.5 ms in the parent (2.7 ms of it
+  CPU, the rest waiting, with the other lanes starting theirs), the child's life 7.8 ms, moving its output into the work tree 2 ms. A
+  native launcher with nothing else to do gets 4.5 to 5 ms for the same CreateProcess at
+  8 threads: the rest is the machine (it drifted between 4.8 and 8.4 ms over the session
+  with nothing of ours changed).
+- **Not worth it: a new directory each run.** A launcher showed that CreateProcess costs
+  3 ms more when its command line names a directory made a moment ago, which a run's
+  `{work}` does. Reusing one directory a worker took 2.5 ms off that CreateProcess in the
+  launcher and nothing measurable in goldberg (four rounds each way, inside the noise),
+  so it was taken out again.
 
 The profile came from the engine's profiler, which every tool now has: `--profile FILE`
 writes a trace (Chrome's format), `--prof-report` prints the zones by total time at the
-end. goldberg has zones around its scan, events and Lua's tick, and Lua can add its own
-(`host.zone(name)` ... `host.zone_end()`).
+end. goldberg has zones around its scan, events, Lua's tick and each part of a run
+(`run.spawn`, `run.running`, `run.commit`, `task.hash`, `task.copy`), and Lua can add its
+own (`host.zone(name)` ... `host.zone_end()`).
 
 ## Not run
 
