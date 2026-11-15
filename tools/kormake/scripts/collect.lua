@@ -49,6 +49,10 @@ function M.discover(start)
   end
 end
 
+-- The cook when nothing names one: goldberg, built for the host, over every asset root
+-- of the program at once.
+M.DEFAULT_COOK = "goldberg cook --roots {roots} --stamp {stamp} --quiet"
+
 -- found: what discover returned.
 function M.run(found)
   local root_dir = found.root
@@ -150,8 +154,13 @@ function M.run(found)
            -- Where a regeneration starts: the config's directory when the config changes the
            -- build (its paths, its build directory), else the root, so a build file written
            -- from examples/ is the one written from the root.
-           regen_dir = (added or decl.build) and found.anchor or root_dir,
-           regen_config = (added or decl.build) and found.config or nil }
+           regen_dir = (added or decl.build or decl.cook) and found.anchor or root_dir,
+           regen_config = (added or decl.build or decl.cook) and found.config or nil,
+           -- What cooks a program's assets: the config's cook, the master file's, or goldberg.
+           -- `dir` is where a script it names is looked for.
+           cook = decl.cook and { text = decl.cook, dir = found.anchor, file = found.config }
+             or master.cook and { text = master.cook, dir = root_dir, file = master_path }
+             or { text = M.DEFAULT_COOK, dir = root_dir, file = "kormake's default" } }
 end
 
 return M

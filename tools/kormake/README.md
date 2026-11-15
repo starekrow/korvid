@@ -7,7 +7,7 @@ kormake — build Korvid modules and the programs and tools made from them
 ## SYNOPSIS
 
     kormake [build] [NAME...] [TARGET] [OPTIONS]
-    kormake test    [NAME...] [TARGET] [OPTIONS]
+    kormake test    [NAME...] [TARGET] [OPTIONS] [--heavy [-- ARGS]]
     kormake package NAME      [TARGET] [OPTIONS]
     kormake gen     [TARGET] [OPTIONS]
     kormake check   [TARGET] [OPTIONS]
@@ -51,6 +51,14 @@ in any order, except that the command has to be the first word.
   its executable, or a file staged for it (an asset, a shader), changes. Naming a module that has no tests is an error. When the modules
   come from a directory, the ones without tests are skipped. With nothing selected,
   kormake runs `check`: every test that the roots ask for.
+
+  `--heavy` runs the modules' heavy tests instead: `bin/<module>_heavy`, built from
+  `tests/heavy/*.cc` like the tests are (and built wherever they are, so it keeps
+  compiling). They are for what takes minutes and gigabytes, and for measurements, so
+  Ninja never runs them: kormake builds `heavy/<module>` (the executable and what it
+  runs), then runs each one itself, in turn, on this machine, every time, with no stamp.
+  The words after `--` are passed to each: `kormake test --heavy goldberg -- --size 2G`.
+  A target whose tests run under a runner (a device) has no heavy tests.
 
 **package**
 : Builds one executable and puts it in `dist/<exe>/` together with what it needs at run
@@ -202,6 +210,7 @@ as the master file, and its paths are relative to the file's own directory.
     modulepath { "." }         -- module paths to add; the default is this directory
     build "build"              -- the directory that holds <target>/ (see below)
     target "linux-dev"         -- the default TARGET
+    cook "copy_assets {in} {out}"   -- what cooks assets (see Assets); the default is goldberg
 
 It is best to write `engine` relative to your development directory, so the file works in
 any checkout that has the same layout. `examples/korvid.config` and `tools/korvid.config`
@@ -245,6 +254,7 @@ The master file, at the engine root. It runs top to bottom in a sandbox (only `s
     override "audio" { path = "../audio-fork" }   -- this copy wins over any other of that name
     root "examples" { paths = "examples", platforms = { "linux" } }
     root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
+    cook "goldberg cook --roots {roots} --stamp {stamp} --quiet"   -- what cooks assets (see Assets); this is the default
 
 A module path is a directory of module directories. A module is any directory directly
 under a path entry that has a `module.lua`. kormake does not search deeper, and directories
@@ -276,6 +286,7 @@ The module's name comes from this line, not from its directory's name.
     src/*.mm, src/<dir>/*.mm Objective-C++, picked up where a toolchain lists the directory
     tests/*.cc               the module's test executable, with the module and its closure linked (an executable's tests
                              link its closure only and run after the executable is built: they start it, they do not contain it)
+    tests/heavy/*.cc         the module's heavy test executable, linked the same way; run only by `kormake test --heavy`
     shaders/                 inputs for the tool rules the module uses (the shader rule takes shaders/*.slang)
     assets/                  cooked by goldberg into the output tree of every program that links the module (see Assets)
 
@@ -353,17 +364,40 @@ binary is an implicit input to every edge it runs.
 ### Assets
 
 Nothing in kormake copies an asset. For every program (an executable, or a module's
-tests) with an `assets/` directory in its closure, the graph has one edge that runs
-`goldberg cook` (tools/goldberg, built for the host) over those directories and into that
-program's output tree. The edge runs at every build: goldberg's own state decides what
-is out of date, and a cook with nothing to do costs a scan. Its stamp changes only when
-the tree did, so nothing reruns for it.
+tests) with an `assets/` directory in its closure, the graph has one edge that runs the
+cook over those directories and into that program's output tree. By default the cook is
+`goldberg cook` (tools/goldberg, built for the host). The edge runs at every build:
+goldberg's own state decides what is out of date, and a cook with nothing to do costs a
+scan. Its stamp changes only when the tree did, so nothing reruns for it.
+
+`cook "..."` in `korvid.config` or the master file (the config's wins) names another, as one
+command line. Its first word is the program: an executable module, built for the host and
+built before the cook runs (`goldberg`); a script beside the file that names it, without
+its extension (`copy_assets` is `copy_assets.bat` on Windows, `copy_assets.sh`, run with
+`sh`, elsewhere); or a program on `PATH`. In the rest, these are filled in:
+
+| Word | Is |
+|---|---|
+| `{roots}` | the roots file (below): the program, its tree, the state, every asset root |
+| `{stamp}` | a file to rewrite only when the tree changed |
+| `{tree}` | the program's output tree |
+| `{program}` | the program's name |
+| `{in}`, `{name}`, `{out}` | one asset root, its module's name, and `{tree}/{name}` |
+
+A cook with `{in}`, `{name}` or `{out}` runs once per asset root. One that runs per root,
+or names no `{stamp}`, is run by kormake (`kormake _cook`), which touches the stamp after
+every run, so what reads the tree (a pack) is rebuilt every time. kormake's own test
+fixture cooks with a tree copy, `cook "copy_assets {in} {out}"`, since it has no
+goldberg: `tools/kormake/tests/fixture/copy_assets.sh` and `.bat` are a starting point.
+Changing the cook of a built tree wants `kormake clean`: goldberg takes only a tree it
+made.
 
     build/assets/<program>/<module>/...        every config but ship (dev and debug share it)
     dist/<program>/assets/<module>/...         ship, for a game that packages as a plain directory: cooked in place
     build/assets-ship/<program>/<module>/...   ship, for anything else: a test, a game packaged as a bundle or an .apk
     build/goldberg/<program>/<dev|ship>/       goldberg's state for that tree
     <target>/goldberg/<program>.roots          what the cook is told: the program, the tree, the state, each module's assets/
+    <target>/goldberg/<program>.cook           the command lines kormake runs, for a cook it runs itself
     <target>/bin/<program>.assets              one line, the tree's path: how the program finds it (the platform module reads it)
 
 A packaged program has no `.assets` file and reads `assets/` beside itself, which
@@ -378,6 +412,7 @@ it). Ninja runs there.
     compile_commands.json     every compile; build/compile_commands.json, beside the targets, is the last one written (where clangd looks)
     bin/<exe>                 executables, and the files they need beside them (SDL3.dll on Windows)
     bin/<module>_tests        test executables
+    bin/<module>_heavy        heavy test executables (tests/heavy/), run only by kormake test --heavy
     bin/<program>.assets      where that program's cooked assets are (see Assets)
     goldberg/<program>.roots  what its cook is told; goldberg/<program>.cooked, the cook's stamp
     bin/shaders/              compiled shaders
@@ -389,8 +424,9 @@ it). Ninja runs there.
     host/...                  the same layout, for host instances that the target does not share
 
 Ninja targets: `all` (the default: the roots, plus `tests`), `tests` (the roots' test
-executables), `check` (the roots' test stamps), and one phony per module, named for the
-module (`ninja -C build/linux-dev arcfire`).
+executables, heavy ones too), `check` (the roots' test stamps), `heavy/<module>` (a heavy
+test and what it runs, built, not run), and one phony per module, named for the module
+(`ninja -C build/linux-dev arcfire`).
 
 ## ENVIRONMENT
 

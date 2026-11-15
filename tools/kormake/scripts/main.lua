@@ -24,7 +24,7 @@ local function usage()
 usage: kormake [COMMAND] [NAME...] [TARGET] [OPTIONS]
 
   build    build the named modules, or what the current directory means (the default)
-  test     build and run their tests
+  test     build and run their tests; --heavy: their heavy tests (tests/heavy/), -- ARGS for those
   package  dist/<exe>/: one executable, its pack, shaders and licenses (an .app on Apple)
   run      kormake run SCRIPT.lua [ARGS...]: the script with kvscript, built for the host
   gen      write build.ninja and compile_commands.json only
@@ -39,7 +39,7 @@ in, the modules under the directory you are in, or at the root the master file's
 TARGET is <platform>-<config>, a config alone (the host platform), host or host-<config>.
 Without one: the korvid.config's target, else the host platform in the first config.
 
-options: -C DIR (start in DIR), --no-unity, --cxx PATH, --dot, --why MODULE, --version
+options: -C DIR (start in DIR), --no-unity, --cxx PATH, --dot, --why MODULE, --heavy, --version
 See tools/kormake/README.md.
 ]])
 end
@@ -61,6 +61,11 @@ local function parse(args)
     elseif a == "--why" then opts.why = value(a)
     elseif a == "--cxx" then opts.cxx = value(a)
     elseif a == "-C" then opts.dir = value(a)
+    elseif a == "--heavy" then opts.heavy = true
+    elseif a == "--" then -- the rest is a heavy test's
+      opts.rest = {}
+      for j = i + 1, #args do opts.rest[#opts.rest + 1] = args[j] end
+      break
     elseif a == "--help" or a == "-h" then cmd = "help"
     elseif a == "--version" or a == "-v" then cmd = "--version"
     elseif a:match("^%-") then util.fail("unknown option '%s'", a)
@@ -194,6 +199,8 @@ end
 local function run(cmd, words, opts)
   if cmd == "--version" or cmd == "-v" then print("kormake " .. KORMAKE_VERSION .. " (" .. _VERSION .. ")"); return 0 end
   if cmd == "help" or cmd == "--help" then usage(); return 0 end
+  if opts.heavy and cmd ~= "test" then util.fail("--heavy is for test: kormake test --heavy [NAME...] [-- ARGS]") end
+  if opts.rest and not opts.heavy then util.fail("the words after -- are a heavy test's: kormake test --heavy NAME -- ARGS") end
   local c = collect.run(collect.discover(opts.dir or kfs.cwd()))
   local root = c.root_dir
   stale_check(root)
@@ -351,6 +358,42 @@ local function run(cmd, words, opts)
     if not selected or #selected ~= 1 then util.fail("package makes one executable: name it (kormake package NAME [TARGET])") end
     return kormake.load("package").run(c, build, selected[1], ninja, target)
   end
+  if cmd == "test" and opts.heavy then
+    -- The selection's heavy tests (a directory's modules without any skip), or every one
+    -- a root asks for: built by Ninja, then run here, one at a time, on this machine.
+    local list = {}
+    if not selected then
+      for _, inst in ipairs(g.order) do if inst.heavy and inst.tests then list[#list + 1] = inst end end
+    else
+      for _, inst in ipairs(selected) do
+        if inst.heavy then list[#list + 1] = inst
+        elseif not from_dir[inst.module] then util.fail("%s has no heavy tests (tests/heavy/*.cc)", inst.module.name) end
+      end
+    end
+    if #list == 0 then print("kormake: no heavy tests there"); return 0 end
+    local targets = {}
+    for _, inst in ipairs(list) do
+      if not inst.heavy.host and g.toolchain.fields.test_runner then
+        util.fail("%s: heavy tests run on this machine, and %s runs its tests under a runner", inst.module.name, target)
+      end
+      targets[#targets + 1] = util.shell_quote(inst.heavy.target)
+    end
+    local rc = kfs.exec(string.format("%s -C %s %s", ninja, util.shell_quote(build), table.concat(targets, " ")))
+    if rc ~= 0 then return rc end
+    local args = {}
+    for _, a in ipairs(opts.rest or {}) do args[#args + 1] = util.shell_quote(a) end
+    local worst = 0
+    for _, inst in ipairs(list) do
+      local exe = util.native(util.join(build, inst.heavy.exe))
+      print("kormake: heavy test " .. inst.module.name .. ": " .. exe)
+      rc = kfs.exec(util.shell_quote(exe) .. (#args > 0 and (" " .. table.concat(args, " ")) or ""))
+      if rc ~= 0 then
+        io.stderr:write(string.format("kormake: heavy test %s failed (%d)\n", inst.module.name, rc))
+        worst = rc ~= -1 and rc or 1
+      end
+    end
+    return worst
+  end
   if cmd == "test" then
     -- The selection's test stamps (a directory's modules without tests skip), or `check`:
     -- every test a root asks for.
@@ -390,11 +433,21 @@ local function run_script(args)
 end
 
 -- What the Ninja file runs for the host's own steps, so no rule needs a shell: _copy IN OUT
--- copies a file; _test EXE STAMP runs a test executable in the build directory and, if it
--- passes, writes the stamp. Neither reads the master file.
+-- copies a file; _cook runs a cook's commands; _test EXE STAMP runs a test executable in
+-- the build directory and, if it passes, writes the stamp. None reads the master file.
 local function internal(args)
   if args[1] == "_copy" and #args == 3 then
     kfs.copy(args[2], args[3])
+    return 0
+  end
+  -- _cook LIST STAMP [--stamped]: a cook's command lines (emit.lua), one a line, in turn;
+  -- the first to fail ends it. Then the stamp is touched, unless the cook writes it itself.
+  if args[1] == "_cook" and (#args == 3 or (#args == 4 and args[4] == "--stamped")) then
+    for line in (kfs.read(args[2]) or ""):gmatch("[^\n]+") do
+      local rc = kfs.exec(line)
+      if rc ~= 0 then return rc ~= -1 and rc or 1 end
+    end
+    if not args[4] then kfs.write(args[3], "cooked\n", true) end
     return 0
   end
   -- _ios_test EXE: a test executable run on the connected iOS device (ios.lua), the ios

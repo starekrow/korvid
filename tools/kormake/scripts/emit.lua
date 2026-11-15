@@ -414,23 +414,85 @@ function M.run(c, g, opts)
   -- in ship, dist/<program>/assets/ for a game that packages as a plain directory, where
   -- the tree is the shipped one, and build/assets-ship/<program>/ for everything else (a
   -- test, a program that packages as a bundle or an .apk, which copies it in).
-  local goldberg_tool, cook_rule = nil, false
+  --
+  -- What runs is the cook (collect.lua): kormake.lua's or korvid.config's `cook "..."`,
+  -- by default goldberg. Its first word is a program: an executable module, built for the
+  -- host (goldberg), or a script beside the file that names it (`copy_assets` is
+  -- copy_assets.sh, run with sh, or copy_assets.bat on Windows), or anything on PATH.
+  -- The rest are its words, with {roots} (the roots file), {stamp} (a file it rewrites only
+  -- when the tree changed), {tree} (the program's output tree) and {program} filled in.
+  -- A cook that uses {in} (an asset root), {name} (its module) or {out} ({tree}/{name})
+  -- runs once per root. One that does not write {stamp}, or runs per root, is run by
+  -- kormake (_cook), which writes the stamp after it, every time.
+  local spec, cook_rule = nil, false
   local function json_string(v) return '"' .. v:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"' end
+  local function cook_spec(for_module)
+    if spec then return spec end
+    local ck = c.cook
+    local words = {}
+    for word in ck.text:gmatch("%S+") do words[#words + 1] = word end
+    local known = { roots = true, stamp = true, tree = true, program = true, ["in"] = true, name = true, out = true }
+    for _, word in ipairs(words) do
+      for v in word:gmatch("{([^}]*)}") do
+        if not known[v] then util.fail("%s: cook: {%s} is not {roots}, {stamp}, {tree}, {program}, {in}, {name} or {out}", ck.file, v) end
+      end
+    end
+    spec = { args = {}, implicit = {} }
+    for i = 2, #words do spec.args[#spec.args + 1] = words[i] end
+    spec.per_root = ck.text:find("{in}", 1, true) or ck.text:find("{name}", 1, true) or ck.text:find("{out}", 1, true)
+    spec.stamps = ck.text:find("{stamp}", 1, true) ~= nil
+    local first = words[1]
+    for _, i in ipairs(g.instances) do
+      if i.module.name == first and i.module.fields.output == "exe" and not i.dropped then
+        local tool = g.tool_path(i)
+        spec.program = { util.native(tool) }
+        spec.implicit[#spec.implicit + 1] = tool
+      end
+    end
+    if not spec.program then
+      if c.by_name[first] then
+        util.fail("'%s' has assets, and its cook (%s) runs %s, which cannot build for this host", for_module, ck.file, first)
+      end
+      local function script(path)
+        if path:match("%.bat$") then
+          if KORMAKE_HOST ~= "windows" then util.fail("%s: cook: %s is a Windows script; name it without the extension to have %s.sh run elsewhere", ck.file, first, first:gsub("%.bat$", "")) end
+          return { "cmd", "/c", util.native(path) }
+        elseif path:match("%.sh$") then return { KORMAKE_HOST == "windows" and "sh" or "/bin/sh", util.native(path) } end
+        return { util.native(path) }
+      end
+      local base = util.is_abs(first) and first or util.join(ck.dir, first)
+      if not first:match("%.%w+$") and KORMAKE_HOST == "windows" and kfs.isfile(base .. ".bat") then
+        spec.program = script(base .. ".bat"); spec.implicit[#spec.implicit + 1] = base .. ".bat"
+      elseif not first:match("%.%w+$") and kfs.isfile(base .. ".sh") then
+        spec.program = script(base .. ".sh"); spec.implicit[#spec.implicit + 1] = base .. ".sh"
+      elseif kfs.isfile(base) then
+        spec.program = script(base); spec.implicit[#spec.implicit + 1] = base
+      elseif first == "goldberg" then
+        util.fail("'%s' has assets, and nothing here cooks them: the goldberg module (the engine's tools/goldberg) is not on a module path, or cannot build for this host. A cook \"...\" in kormake.lua or korvid.config names another",
+          for_module)
+      else
+        spec.program = { first } -- on PATH
+      end
+    end
+    return spec
+  end
+  -- One command line of the cook, its words filled in from vars.
+  local function cook_line(sp, vars)
+    local out = {}
+    for _, word in ipairs(sp.program) do out[#out + 1] = program(word) end
+    for _, word in ipairs(sp.args) do
+      local filled = word:gsub("{([^}]*)}", function(v) return vars[v] end)
+      out[#out + 1] = filled:find("[%s'\"$]") and q(filled) or filled
+    end
+    return table.concat(out, " ")
+  end
   local function cook(inst, program_name, is_game)
     local roots, seen = {}, {}
     local function add(m) if m.assets_dir and not seen[m.name] then seen[m.name] = true; roots[#roots + 1] = m end end
     for _, d in ipairs(inst.closure) do add(d.module) end
     add(inst.module)
     if #roots == 0 then return nil end
-    if goldberg_tool == nil then
-      for _, i in ipairs(g.instances) do
-        if i.module.name == "goldberg" and i.module.fields.output == "exe" and not i.dropped then goldberg_tool = g.tool_path(i) end
-      end
-      if not goldberg_tool then
-        util.fail("'%s' has assets, and nothing here cooks them: the goldberg module (the engine's tools/goldberg) is not on a module path, or cannot build for this host",
-          inst.module.name)
-      end
-    end
+    local sp = cook_spec(inst.module.name)
     local pre = inst.prefix
     local ship = g.config == "ship"
     local tree
@@ -441,6 +503,7 @@ function M.run(c, g, opts)
     local lines = {}
     for _, m in ipairs(roots) do lines[#lines + 1] = string.format('    { "name": %s, "dir": %s }', json_string(m.name), json_string(m.assets_dir)) end
     local roots_rel = pre .. "goldberg/" .. program_name .. ".roots"
+    local stamp = pre .. "goldberg/" .. program_name .. ".cooked"
     kfs.mkdirp(util.join(build, pre .. "goldberg"))
     kfs.mkdirp(util.join(build, pre .. "bin"))
     kfs.write(util.join(build, roots_rel), string.format('{\n  "game": %s,\n  "out": %s,\n  "state": %s,\n  "project": %s,\n  "roots": [\n%s\n  ]\n}\n',
@@ -448,13 +511,29 @@ function M.run(c, g, opts)
     kfs.write(util.join(build, pre .. "bin/" .. program_name .. ".assets"), tree .. "\n", true)
     if not cook_rule then
       cook_rule = true
-      w("rule goldberg_cook\n  command = " .. util.ninja_escape(program(util.native(goldberg_tool))) ..
-        " cook --roots $in --stamp $out --quiet\n  restat = 1\n  description = COOK $in")
+      -- The command is the edge's own ($cmd); kormake's _cook runs a list of them.
+      w("rule cook\n  command = $cmd\n  restat = 1\n  description = COOK $in")
       -- Never a file, so always out of date: what makes the cook edges run every time.
       w("build always-cook: phony")
     end
-    local stamp = pre .. "goldberg/" .. program_name .. ".cooked"
-    w(string.format("build %s: goldberg_cook %s | %s always-cook", util.ninja_escape(stamp), util.ninja_escape(roots_rel), util.ninja_escape(goldberg_tool)))
+    local vars = { roots = util.native(roots_rel), stamp = util.native(stamp), tree = util.native(tree), program = program_name }
+    local cmd
+    if not sp.per_root and sp.stamps then
+      cmd = cook_line(sp, vars)
+    else
+      local runs = {}
+      for _, m in ipairs(sp.per_root and roots or { false }) do
+        if m then vars["in"], vars.name, vars.out = util.native(m.assets_dir), m.name, util.native(util.join(tree, m.name)) end
+        runs[#runs + 1] = cook_line(sp, vars)
+      end
+      local list = pre .. "goldberg/" .. program_name .. ".cook"
+      kfs.write(util.join(build, list), table.concat(runs, "\n") .. "\n", true)
+      cmd = program(util.native(kfs.self() or "kormake")) .. " _cook " .. q(list) .. " " .. q(stamp) .. (sp.stamps and " --stamped" or "")
+    end
+    local implicit = { "always-cook" }
+    for _, p in ipairs(sp.implicit) do implicit[#implicit + 1] = util.ninja_escape(p) end
+    w(string.format("build %s: cook %s | %s\n  cmd = %s", util.ninja_escape(stamp), util.ninja_escape(roots_rel), table.concat(implicit, " "),
+      (cmd:gsub("%$", "$$"))))
     return stamp, tree
   end
 
@@ -661,6 +740,40 @@ function M.run(c, g, opts)
       inst.test_stamp = pre .. "test/" .. sym .. ".ok"
     end
     ::skip::
+  end
+
+  -- Heavy tests: one more executable per module with a tests/heavy/ directory, linked as
+  -- its tests are. Built with the tests, so they keep compiling, and never run by Ninja:
+  -- `kormake test --heavy` builds the phony heavy/<module> (the executable and what it
+  -- runs) and runs it itself, every time, with no stamp. They are for what takes minutes
+  -- and gigabytes, and for measurements, which have no pass to remember.
+  for _, inst in ipairs(g.order) do
+    local hdir = inst.selectable and inst.module.tests_dir and util.join(inst.module.tests_dir, "heavy")
+    if not (hdir and kfs.isdir(hdir)) then goto next_heavy end
+    do
+      local m = inst.module
+      local sym = util.symbol(m.name)
+      local pre = inst.prefix
+      local srcs = util.sorted_files(hdir, "cc")
+      if #srcs == 0 then goto next_heavy end
+      local includes = include_flags(inst, { m.tests_dir, hdir })
+      local objs = {}
+      for _, n in ipairs(srcs) do
+        local obj = pre .. "obj/" .. sym .. "/heavy/" .. n:gsub("%.cc$", "") .. flags(inst).tc.fields.obj_suffix
+        compile(inst, util.join(hdir, n), obj, includes, define_flags(inst))
+        objs[#objs + 1] = obj
+      end
+      local li = link_inputs(inst)
+      local exe = pre .. "bin/" .. sym .. "_heavy" .. flags(inst).tc.fields.exe_suffix
+      link(inst, exe, objs, li)
+      local needs = { exe }
+      for _, p in ipairs(li.staged) do needs[#needs + 1] = p end
+      if m.fields.output == "exe" and outputs_by_key[inst.key] then needs[#needs + 1] = outputs_by_key[inst.key][1] end
+      w(string.format("build %s: phony %s", util.ninja_escape(pre .. "heavy/" .. sym), util.ninja_paths(needs)))
+      if inst.tests then tests[#tests + 1] = exe end
+      inst.heavy = { target = pre .. "heavy/" .. sym, exe = exe, host = pre ~= "" }
+    end
+    ::next_heavy::
   end
 
   w("")

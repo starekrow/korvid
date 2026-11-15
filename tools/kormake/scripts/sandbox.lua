@@ -153,6 +153,7 @@ function M.eval_master(path, text)
   env.bind = function(iface) return function(t) m.binds[iface] = copy_data(t) end end
   env.root = function(name) return function(t) m.roots[#m.roots + 1] = { name = name, fields = copy_data(t or {}) } end end
   env.override = function(name) return function(t) m.overrides[name] = copy_data(t) end end
+  env.cook = function(v) if type(v) ~= "string" or v == "" then util.fail("%s: cook takes a command line", path) end m.cook = v end
   local chunk, err = load(text, "=" .. path, "t", env)
   if not chunk then util.fail("%s", err) end
   local ok, perr = pcall(chunk)
@@ -170,7 +171,7 @@ function M.eval_config(path, text)
       m[what] = v
     end
   end
-  env.engine, env.build, env.target = str("engine"), str("build"), str("target")
+  env.engine, env.build, env.target, env.cook = str("engine"), str("build"), str("target"), str("cook")
   env.modulepath = function(t)
     m.modulepaths = m.modulepaths or {}
     for _, p in ipairs(util.as_list(t)) do m.modulepaths[#m.modulepaths + 1] = p end
