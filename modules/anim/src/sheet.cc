@@ -78,12 +78,12 @@ bool anim_sheet_parse(const char* text, usize len, u32 image_w, u32 image_h, All
             const JsonValue* rows = json_get(doc, *cv, "rows");
             if (!col->is_number() || !rows || !rows->is_array()) { *error = "a column clip has rows"; return false; }
             for (const JsonValue* r = json_first(doc, *rows); r; r = json_next(doc, *r))
-                if (!r->is_number() || !add(col->number, r->number)) { *error = "a row is outside the sheet"; return false; }
+                if (!r->is_number() || !add(col->number(), r->number())) { *error = "a row is outside the sheet"; return false; }
         } else if (const JsonValue* row = json_get(doc, *cv, "row")) {
             const JsonValue* cols = json_get(doc, *cv, "columns");
             if (!row->is_number() || !cols || !cols->is_array()) { *error = "a row clip has columns"; return false; }
             for (const JsonValue* c = json_first(doc, *cols); c; c = json_next(doc, *c))
-                if (!c->is_number() || !add(c->number, row->number)) { *error = "a column is outside the sheet"; return false; }
+                if (!c->is_number() || !add(c->number(), row->number())) { *error = "a column is outside the sheet"; return false; }
         } else { *error = "a clip has cells, a column and rows, or a row and columns"; return false; }
         u32 frames = cells.len / 2;
         if (!frames) { *error = "a clip has at least one frame"; return false; }
@@ -101,12 +101,12 @@ bool anim_sheet_parse(const char* text, usize len, u32 image_w, u32 image_h, All
         }
         d.duration = (f32)frames / fps;
         if (const JsonValue* dur = json_get(doc, *cv, "duration")) {
-            if (!dur->is_number() || dur->number <= 0) { *error = "duration must be positive"; return false; }
-            d.duration = (f32)dur->number;
+            if (!dur->is_number() || dur->number() <= 0) { *error = "duration must be positive"; return false; }
+            d.duration = (f32)dur->number();
         }
         // The frames over the duration, as uv step keys; then any event keys.
         const JsonValue* evs = json_get(doc, *cv, "events");
-        u32 nev = evs && evs->is_array() ? evs->count : 0;
+        u32 nev = evs && evs->is_array() ? evs->count() : 0;
         AnimKey* keys = alloc_items<AnimKey>(alloc, frames + nev);
         for (u32 i = 0; i < frames; ++i) {
             AnimKey& k = keys[i];
@@ -118,11 +118,11 @@ bool anim_sheet_parse(const char* text, usize len, u32 image_w, u32 image_h, All
         for (const JsonValue* ev = nev ? json_first(doc, *evs) : nullptr; ev; ev = json_next(doc, *ev), ++e) {
             const JsonValue* t = ev->is_array() ? json_at(doc, *ev, 0) : nullptr;
             const JsonValue* n = ev->is_array() ? json_at(doc, *ev, 1) : nullptr;
-            if (!t || !n || !t->is_number() || !n->is_string() || !n->len) { *error = "an event is [time, name]"; return false; }
+            if (!t || !n || !t->is_number() || !n->is_string() || !n->len()) { *error = "an event is [time, name]"; return false; }
             AnimKey& k = keys[frames + e];
             k = AnimKey{};
-            k.time = (f32)t->number;
-            k.event = name_intern(n->str);
+            k.time = (f32)t->number();
+            k.event = name_intern(n->str());
         }
         AnimTrackDesc* tracks = alloc_items<AnimTrackDesc>(alloc, nev ? 2 : 1);
         tracks[0] = AnimTrackDesc{};

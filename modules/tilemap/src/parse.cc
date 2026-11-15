@@ -146,7 +146,7 @@ bool parse_tile_data(Parse& p, const JsonValue& layer, MapLayer& l) {
     if (json_get(*p.doc, layer, "chunks")) return p.fail("layer '%s': infinite maps (chunks) are not supported", l.name);
     if (!data) return p.fail("layer '%s' has no data", l.name);
     if (data->is_array()) {
-        if (data->count != cells) return p.fail("layer '%s': %u cells, the layer is %ux%u", l.name, data->count, l.width, l.height);
+        if (data->count() != cells) return p.fail("layer '%s': %u cells, the layer is %ux%u", l.name, data->count(), l.width, l.height);
         u32 i = 0;
         for (const JsonValue* v = json_first(*p.doc, *data); v; v = json_next(*p.doc, *v)) gids[i++] = (u32)json_number(v, 0);
         return true;
@@ -158,7 +158,7 @@ bool parse_tile_data(Parse& p, const JsonValue& layer, MapLayer& l) {
     MemScope scope;
     u8* raw = nullptr;
     usize raw_len = 0;
-    if (!base64_decode(mem_scratch(), data->str, data->len, &raw, &raw_len)) return p.fail("layer '%s': bad base64", l.name);
+    if (!base64_decode(mem_scratch(), data->str(), data->len(), &raw, &raw_len)) return p.fail("layer '%s': bad base64", l.name);
     const u8* bytes = raw;
     usize len = raw_len;
     if (comp[0]) {

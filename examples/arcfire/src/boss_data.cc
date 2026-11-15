@@ -133,7 +133,7 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
         p.core = json_bool(json_get(doc, *v, "core"), false);
         has_core = has_core || p.core;
         if (const JsonValue* pat = json_get(doc, *v, "pattern")) {
-            if (pat->is_string()) format(p.patterns[p.pattern_count++], kPatternName, "%s", pat->str);
+            if (pat->is_string()) format(p.patterns[p.pattern_count++], kPatternName, "%s", pat->str());
             else
                 for (const JsonValue* x = json_first(doc, *pat); x && p.pattern_count < kMaxPartPatterns; x = json_next(doc, *x))
                     format(p.patterns[p.pattern_count++], kPatternName, "%s", json_string(x, ""));

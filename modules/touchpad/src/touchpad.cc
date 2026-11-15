@@ -111,7 +111,7 @@ bool touchpad_parse(const char* json, usize len, TouchpadConfig& out, const char
     }
     if (const JsonValue* buttons = json_get(doc, root, "buttons")) {
         if (!buttons->is_array()) { *why = "buttons is not an array"; return false; }
-        if (buttons->count > KV_TOUCHPAD_BUTTONS) { *why = "more than 8 buttons"; return false; }
+        if (buttons->count() > KV_TOUCHPAD_BUTTONS) { *why = "more than 8 buttons"; return false; }
         c.button_count = 0;
         for (const JsonValue* b = json_first(doc, *buttons); b; b = json_next(doc, *b)) {
             TouchpadButton& tb = c.buttons[c.button_count];

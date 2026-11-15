@@ -155,17 +155,17 @@ void decode_value(Decode& d, const JsonValue& v) {
     luaL_checkstack(L, 8, "json: nested too deep");
     switch (v.type) {
     case JsonType::Null:   lua_getfield(L, d.json, "null"); return;
-    case JsonType::Bool:   lua_pushboolean(L, v.number != 0.0); return;
-    case JsonType::String: lua_pushlstring(L, v.str, v.len); return;
+    case JsonType::Bool:   lua_pushboolean(L, v.number() != 0.0); return;
+    case JsonType::String: lua_pushlstring(L, v.str(), v.len()); return;
     case JsonType::Number:
         // An integer as written stays one when Lua can hold it.
-        if (v.integer && (v.number < 0.0 || v.bits <= 0x7FFFFFFFFFFFFFFFull)) lua_pushinteger(L, (lua_Integer)v.bits);
-        else lua_pushnumber(L, v.number);
+        if (v.integer() && (v.number() < 0.0 || v.bits() <= 0x7FFFFFFFFFFFFFFFull)) lua_pushinteger(L, (lua_Integer)v.bits());
+        else lua_pushnumber(L, v.number());
         return;
     case JsonType::Array: {
-        lua_createtable(L, (int)v.count, 0);
+        lua_createtable(L, (int)v.count(), 0);
         int arr = lua_gettop(L);
-        lua_createtable(L, (int)v.count, 0);
+        lua_createtable(L, (int)v.count(), 0);
         int lines = lua_gettop(L);
         lua_Integer i = 0;
         for (const JsonValue* c = json_first(*d.doc, v); c; c = json_next(*d.doc, *c)) {
@@ -186,7 +186,7 @@ void decode_value(Decode& d, const JsonValue& v) {
         lua_getfield(L, d.json, "object");
         lua_call(L, 0, 1);
         int obj = lua_gettop(L);
-        lua_createtable(L, 0, (int)v.count);
+        lua_createtable(L, 0, (int)v.count());
         int lines = lua_gettop(L);
         for (const JsonValue* c = json_first(*d.doc, v); c; c = json_next(*d.doc, *c)) {
             if (d.drop && strcmp(c->key, d.drop) == 0) continue;

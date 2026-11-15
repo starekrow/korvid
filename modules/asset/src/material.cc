@@ -26,10 +26,10 @@ bool material_parse(const char* text, usize len, MaterialDesc& desc, char* textu
     for (const JsonValue* m = json_first(doc, root); m; m = json_next(doc, *m)) {
         if (strcmp(m->key, "texture") == 0) {
             if (!m->is_string()) { *error = "texture must be a path string"; *error_at = 0; return false; }
-            if (m->len >= cap) { *error = "texture path too long"; *error_at = 0; return false; }
-            memcpy(texture_path, m->str, m->len + 1);
+            if (m->len() >= cap) { *error = "texture path too long"; *error_at = 0; return false; }
+            memcpy(texture_path, m->str(), m->len() + 1);
         } else if (strcmp(m->key, "blend") == 0) {
-            if (!m->is_string() || !blend_mode_parse(m->str, &desc.blend)) { *error = "blend must be opaque, alpha or additive"; *error_at = 0; return false; }
+            if (!m->is_string() || !blend_mode_parse(m->str(), &desc.blend)) { *error = "blend must be opaque, alpha or additive"; *error_at = 0; return false; }
         } else if (strcmp(m->key, "tint") == 0) {
             f32 t[4] = {desc.tint.r, desc.tint.g, desc.tint.b, desc.tint.a};
             u32 n = json_numbers(doc, m, t, 4);
@@ -41,8 +41,8 @@ bool material_parse(const char* text, usize len, MaterialDesc& desc, char* textu
             else if (!strcmp(f, "linear")) desc.filter = TextureFilter::Linear;
             else { *error = "filter must be nearest or linear"; *error_at = 0; return false; }
         } else if (strcmp(m->key, "shader") == 0) {
-            if (!m->is_string() || !m->len) { *error = "shader must be a game shader's name"; *error_at = 0; return false; }
-            desc.shader = name_str(name_intern(m->str)); // interned: it outlives the document
+            if (!m->is_string() || !m->len()) { *error = "shader must be a game shader's name"; *error_at = 0; return false; }
+            desc.shader = name_str(name_intern(m->str())); // interned: it outlives the document
         } else if (strcmp(m->key, "params") == 0) {
             u32 n = json_numbers(doc, m, desc.params, KV_MATERIAL_PARAMS);
             if (!m->is_array() || n > KV_MATERIAL_PARAMS) { *error = "params must be an array of up to 8 numbers"; *error_at = 0; return false; }

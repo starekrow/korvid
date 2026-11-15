@@ -178,15 +178,15 @@ bool point_parse(const char* s, UiPoint* out) {
 // One size: a number (fixed), "fit" or "fill".
 void size_parse(const JsonValue* v, UiSize* mode, f32* size) {
     if (!v) return;
-    if (v->is_number()) { *mode = UiSize::Fixed; *size = (f32)v->number; }
-    else if (v->is_string() && !strcmp(v->str, "fill")) *mode = UiSize::Fill;
-    else if (v->is_string() && !strcmp(v->str, "fit")) *mode = UiSize::Fit;
+    if (v->is_number()) { *mode = UiSize::Fixed; *size = (f32)v->number(); }
+    else if (v->is_string() && !strcmp(v->str(), "fill")) *mode = UiSize::Fill;
+    else if (v->is_string() && !strcmp(v->str(), "fit")) *mode = UiSize::Fit;
 }
 
 const char* str_or(const JsonDoc& doc, const JsonValue& n, const char* key, const char* dflt) {
     const JsonValue* v = json_get(doc, n, key);
     if (!v) return dflt;
-    if (v->is_string()) return v->str;
+    if (v->is_string()) return v->str();
     return dflt;
 }
 
@@ -207,7 +207,7 @@ bool build(Engine& e, UiState_& s, UiScreen& sc, const JsonDoc& doc, const JsonV
         size_parse(json_at(doc, *sz, 1), &d.h_mode, &d.size.y);
     }
     if (const JsonValue* p = json_get(doc, n, "padding")) {
-        if (p->is_number()) for (f32& x : d.padding) x = (f32)p->number;
+        if (p->is_number()) for (f32& x : d.padding) x = (f32)p->number();
         else if (json_numbers(doc, p, v, 4) == 4) memcpy(d.padding, v, sizeof d.padding);
         else if (json_numbers(doc, p, v, 2) == 2) { d.padding[0] = d.padding[2] = v[0]; d.padding[1] = d.padding[3] = v[1]; }
     }
@@ -229,8 +229,8 @@ bool build(Engine& e, UiState_& s, UiScreen& sc, const JsonDoc& doc, const JsonV
     char value[24] = {}, max[24] = {};
     auto num_or_key = [&](const char* key, char* out) {
         const JsonValue* x = json_get(doc, n, key);
-        if (x && x->is_string()) utf8_copy(out, 24, x->str);
-        else if (x && x->is_number()) format(out, 24, "%g", x->number);
+        if (x && x->is_string()) utf8_copy(out, 24, x->str());
+        else if (x && x->is_number()) format(out, 24, "%g", x->number());
     };
     num_or_key("value", value);
     num_or_key("max", max);
@@ -247,9 +247,9 @@ bool build(Engine& e, UiState_& s, UiScreen& sc, const JsonDoc& doc, const JsonV
             item.type = UiType::Label;
             char lower[32];
             if (it->is_string()) {
-                item.text = it->str;
+                item.text = it->str();
                 u32 k = 0;
-                for (const char* c = it->str; *c && k + 1 < sizeof lower; ++c) lower[k++] = *c >= 'A' && *c <= 'Z' ? (char)(*c - 'A' + 'a') : *c == ' ' ? '_' : *c;
+                for (const char* c = it->str(); *c && k + 1 < sizeof lower; ++c) lower[k++] = *c >= 'A' && *c <= 'Z' ? (char)(*c - 'A' + 'a') : *c == ' ' ? '_' : *c;
                 lower[k] = 0;
                 item.name = lower;
                 ui_node_add(s, sc, me, item);

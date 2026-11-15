@@ -74,10 +74,10 @@ bool anim_parse(const char* text, usize len, Allocator* alloc, AnimClip& out, co
     Array<u32>           starts = array_in<u32>(mem_scratch());
     for (const JsonValue* m = json_first(doc, root); m; m = json_next(doc, *m)) {
         if (strcmp(m->key, "duration") == 0) {
-            if (!m->is_number() || m->number < 0.0) { *error = "duration must be a non-negative number"; return false; }
-            desc.duration = (f32)m->number;
+            if (!m->is_number() || m->number() < 0.0) { *error = "duration must be a non-negative number"; return false; }
+            desc.duration = (f32)m->number();
         } else if (strcmp(m->key, "loop") == 0) {
-            if (!m->is_string() || !anim_loop_parse(m->str, &desc.loop)) { *error = "loop must be once, loop or pingpong"; return false; }
+            if (!m->is_string() || !anim_loop_parse(m->str(), &desc.loop)) { *error = "loop must be once, loop or pingpong"; return false; }
         } else if (strcmp(m->key, "tracks") == 0) {
             if (!m->is_array()) { *error = "tracks must be an array"; return false; }
             for (const JsonValue* tv = json_first(doc, *m); tv; tv = json_next(doc, *tv)) {
@@ -99,11 +99,11 @@ bool anim_parse(const char* text, usize len, Allocator* alloc, AnimClip& out, co
                     f32 fps = (f32)json_number(json_get(doc, *tv, "fps"), 0.0);
                     if (!(fps > 0.0f)) { *error = "a grid track needs fps > 0"; return false; }
                     const JsonValue* frames = json_get(doc, *tv, "frames");
-                    if (!frames || !frames->is_array() || frames->count == 0) { *error = "a grid track needs frames"; return false; }
+                    if (!frames || !frames->is_array() || frames->count() == 0) { *error = "a grid track needs frames"; return false; }
                     u32 cols = (u32)dims[0], rows = (u32)dims[1], i = 0;
                     for (const JsonValue* fv = json_first(doc, *frames); fv; fv = json_next(doc, *fv), ++i) {
-                        if (!fv->is_number() || fv->number < 0 || fv->number >= cols * rows) { *error = "a frame index is outside the grid"; return false; }
-                        u32 f = (u32)fv->number;
+                        if (!fv->is_number() || fv->number() < 0 || fv->number() >= cols * rows) { *error = "a frame index is outside the grid"; return false; }
+                        u32 f = (u32)fv->number();
                         AnimKey k;
                         k.time = (f32)i / fps;
                         k.v[0] = (f32)(f % cols) / (f32)cols; k.v[1] = (f32)(f / cols) / (f32)rows;
@@ -117,17 +117,17 @@ bool anim_parse(const char* text, usize len, Allocator* alloc, AnimClip& out, co
                     const JsonValue* kv_ = json_get(doc, *tv, "keys");
                     if (!kv_ || !kv_->is_array()) { *error = "a track needs keys or a grid"; return false; }
                     for (const JsonValue* k2 = json_first(doc, *kv_); k2; k2 = json_next(doc, *k2)) {
-                        if (!k2->is_array() || k2->count != 2) { *error = "a key is [time, value]"; return false; }
+                        if (!k2->is_array() || k2->count() != 2) { *error = "a key is [time, value]"; return false; }
                         const JsonValue* tval = json_at(doc, *k2, 0);
                         const JsonValue* vval = json_at(doc, *k2, 1);
                         if (!tval->is_number()) { *error = "a key time is a number"; return false; }
                         AnimKey k;
-                        k.time = (f32)tval->number;
+                        k.time = (f32)tval->number();
                         if (td.channel == AnimChannel::Event) {
-                            if (!vval->is_string() || !vval->len) { *error = "an event key's value is a name"; return false; }
-                            k.event = name_intern(vval->str);
+                            if (!vval->is_string() || !vval->len()) { *error = "an event key's value is a name"; return false; }
+                            k.event = name_intern(vval->str());
                         } else if (vval->is_number() && lanes == 1) {
-                            k.v[0] = (f32)vval->number;
+                            k.v[0] = (f32)vval->number();
                         } else {
                             u32 n = json_numbers(doc, vval, k.v, 4);
                             if (!vval->is_array() || n != lanes) { *error = "a key value has the wrong number of lanes for its channel"; return false; }

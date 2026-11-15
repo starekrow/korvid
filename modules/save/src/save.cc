@@ -32,11 +32,11 @@ void scalar_out(SaveWriter& w, FieldType t, const u8* p) {
 
 // A float from a number, or from the strings the writer uses for what JSON cannot say.
 bool float_of(const JsonValue& v, f64* out) {
-    if (v.is_number()) { *out = v.number; return true; }
+    if (v.is_number()) { *out = v.number(); return true; }
     if (!v.is_string()) return false;
-    if (!strcmp(v.str, "nan"))  { *out = (f64)kv::KV_NAN; return true; }
-    if (!strcmp(v.str, "inf"))  { *out = (f64)kv::KV_INF; return true; }
-    if (!strcmp(v.str, "-inf")) { *out = -(f64)kv::KV_INF; return true; }
+    if (!strcmp(v.str(), "nan"))  { *out = (f64)kv::KV_NAN; return true; }
+    if (!strcmp(v.str(), "inf"))  { *out = (f64)kv::KV_INF; return true; }
+    if (!strcmp(v.str(), "-inf")) { *out = -(f64)kv::KV_INF; return true; }
     return false;
 }
 
@@ -48,7 +48,7 @@ bool scalar_in(FieldType t, u8* p, const JsonValue& v, const SaveRemap& remap) {
     switch (t) {
     case FieldType::Bool:
         if (!v.is_bool() && !v.is_number()) return false;
-        *p = v.number != 0.0;
+        *p = v.number() != 0.0;
         return true;
     case FieldType::U8: case FieldType::U16: case FieldType::U32: case FieldType::U64: {
         if (!v.is_number()) return false;
@@ -145,8 +145,8 @@ Handle load_handle(const JsonValue* v, const SaveRemap& remap) {
     if (!v || v->is_null()) return Handle{};
     char kind[KV_KIND_NAME_MAX];
     SavedHandle saved;
-    if (!v->is_string() || !parse_handle(v->str, &saved, kind, sizeof kind)) {
-        KV_WARN("save", "'%s' is not a handle; read as null", v->is_string() ? v->str : json_type_name(v->type));
+    if (!v->is_string() || !parse_handle(v->str(), &saved, kind, sizeof kind)) {
+        KV_WARN("save", "'%s' is not a handle; read as null", v->is_string() ? v->str() : json_type_name(v->type));
         return Handle{};
     }
     u16 id = kv_handle_kind_find(kind);
@@ -154,8 +154,8 @@ Handle load_handle(const JsonValue* v, const SaveRemap& remap) {
     if (saved.name) remade = id ? handle_find(id, saved.name) : Handle{};
     else remade = id ? Handle::make(id, saved.gen, saved.index) : Handle{};
     if (remap.fn) return remap.fn(saved, remade, remap.user);
-    if (!id) KV_WARN("save", "no kind '%s' now; '%s' read as null", kind, v->str);
-    else if (remade.is_null()) KV_WARN("save", "nothing is called '%s' now; read as null", v->str);
+    if (!id) KV_WARN("save", "no kind '%s' now; '%s' read as null", kind, v->str());
+    else if (remade.is_null()) KV_WARN("save", "nothing is called '%s' now; read as null", v->str());
     return remade;
 }
 
@@ -193,7 +193,7 @@ u32 load_fields(const JsonDoc& doc, const JsonValue& obj, Span<const FieldDesc> 
         u8* p = base + f.offset;
         bool ok = true;
         if (f.type == FieldType::Char) {
-            ok = v->is_string() && schema_field_set_string(f, row, v->str);
+            ok = v->is_string() && schema_field_set_string(f, row, v->str());
         } else if (f.count == 1) {
             ok = scalar_in(f.type, p, *v, remap);
         } else if (!v->is_array()) {
@@ -259,11 +259,11 @@ void save_row(SaveWriter& w, const Table& t, Handle h) {
 void save_json(SaveWriter& w, const JsonDoc& doc, const JsonValue& v) {
     switch (v.type) {
     case JsonType::Null:   w.null_value(); return;
-    case JsonType::Bool:   w.bool_value(v.number != 0.0); return;
-    case JsonType::String: w.string_value(v.str, v.len); return;
+    case JsonType::Bool:   w.bool_value(v.number() != 0.0); return;
+    case JsonType::String: w.string_value(v.str(), v.len()); return;
     case JsonType::Number:
-        if (v.integer) { if ((i64)v.bits < 0 && v.number < 0.0) w.int_value((i64)v.bits); else w.uint_value(v.bits); }
-        else w.f64_value(v.number);
+        if (v.integer()) { if ((i64)v.bits() < 0 && v.number() < 0.0) w.int_value((i64)v.bits()); else w.uint_value(v.bits()); }
+        else w.f64_value(v.number());
         return;
     case JsonType::Array:
         w.begin_array();
@@ -324,7 +324,7 @@ bool restore_kind_slots(const JsonDoc& doc, const JsonValue& v, Table& t, Engine
 
     // The slots first: how many, which are live with what generation, the free order.
     u32 n = 0;
-    auto slot_of = [](const JsonValue* s) { return s && s->is_number() && s->number >= 0.0 ? json_u64(s, 0) : ~0ull; };
+    auto slot_of = [](const JsonValue* s) { return s && s->is_number() && s->number() >= 0.0 ? json_u64(s, 0) : ~0ull; };
     for (const JsonValue* r = rows ? json_first(doc, *rows) : nullptr; r; r = json_next(doc, *r)) {
         u64 s = slot_of(json_get(doc, *r, "slot"));
         if (s >= t.capacity) return fail("a row's slot is missing or past the capacity");
@@ -394,7 +394,7 @@ void fill_row(const JsonDoc& doc, const JsonValue& obj, Table& t, u32 slot, cons
         PropValue v;
         if (pv->is_bool()) { v.type = PropType::Bool; v.i = json_bool(pv, false) ? 1 : 0; }
         else if (pv->is_number()) { v.type = PropType::Int; v.i = json_i64(pv, 0); }
-        else if (pv->is_string()) { v.type = PropType::String; v.bits = name_intern(pv->str).hash; }
+        else if (pv->is_string()) { v.type = PropType::String; v.bits = name_intern(pv->str()).hash; }
         else if (const JsonValue* f = pv->is_object() ? json_get(doc, *pv, "f") : nullptr) { v.type = PropType::Float; float_of(*f, &v.f); }
         else if (const JsonValue* hv = pv->is_object() ? json_get(doc, *pv, "h") : nullptr) { v.type = PropType::Handle; v.bits = load_handle(hv, remap).bits; }
         else { KV_WARN("save", "kind '%s': bag value '%s' is a %s; skipped", t.name, pv->key, json_type_name(pv->type)); continue; }
@@ -405,7 +405,7 @@ void fill_row(const JsonDoc& doc, const JsonValue& obj, Table& t, u32 slot, cons
 // The second half: the rows, component by component; a component the file lacks stays zero.
 void fill_kind_rows(const JsonDoc& doc, const JsonValue& v, Table& t, const SaveRemap& remap) {
     const JsonValue* rows = json_get(doc, v, "rows");
-    auto slot_of = [](const JsonValue* s) { return s && s->is_number() && s->number >= 0.0 ? json_u64(s, 0) : ~0ull; };
+    auto slot_of = [](const JsonValue* s) { return s && s->is_number() && s->number() >= 0.0 ? json_u64(s, 0) : ~0ull; };
     for (const JsonValue* r = rows ? json_first(doc, *rows) : nullptr; r; r = json_next(doc, *r)) {
         u32 s = (u32)slot_of(json_get(doc, *r, "slot"));
         fill_row(doc, *r, t, s, remap);
