@@ -70,7 +70,12 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     ok = ok && cpu_alloc(r, sizeof(GpuMaterial) * kMaxMaterials, r->material_table);
     ok = ok && cpu_alloc(r, sizeof(u32) * (2 * kBucketCount + 4), r->sort_meta); // totals, starts, visible: the GPU's layout
     r->quads.alloc = r->bin_counts.alloc = r->bin_items.alloc = ga;
+    r->ui.alloc = r->draws.alloc = ga;
+    r->tile_hash.alloc = ga;
     r->quantize8 = getenv("KV_CPU_TARGET8") != nullptr;
+    const char* cache = getenv("KV_CPU_TILE_CACHE");
+    r->tile_cache = !(cache && cache[0] == '0');
+    r->stats = getenv("KV_CPU_STATS") != nullptr;
     for (FrameInFlight& f : r->frames) ok = ok && cpu_alloc(r, sizeof(f32) * 4 * kLayerCount, f.layers);
     ok = ok && rc_ring_init(r, kInitialRingBytes);
     ok = ok && rc_create_defaults(r);
@@ -103,6 +108,9 @@ void renderer_destroy(Renderer* r) {
     cpu_free(r, r->tables.bucket_of);
     cpu_free(r, r->sort_meta);
     r->quads.free();
+    r->ui.free();
+    r->draws.free();
+    r->tile_hash.free();
     r->bin_counts.free();
     r->bin_items.free();
     cpu_free(r, r->material_table);
@@ -161,24 +169,27 @@ void rb_garbage_destroy(Renderer* r, const RbGarbage& g) {
 bool rb_texture_create(Renderer* r, Texture& t) {
     rb_buffer_retire(r, t.pixels);
     t.resident = false;
+    t.version = ++r->texture_version;
     return cpu_alloc(r, (u64)t.width * t.height * 4, t.pixels);
 }
 
 // A frame never runs while the API is called, so a texture's pixels are copied at once.
-bool rb_stage_texture(Renderer*, u32, Texture& t, const u8* pixels) {
+bool rb_stage_texture(Renderer* r, u32, Texture& t, const u8* pixels) {
     if (!t.pixels.data) return false;
     memcpy(t.pixels.data, pixels, (usize)t.width * t.height * 4);
     t.resident = true;
+    t.version = ++r->texture_version;
     return true;
 }
 
-bool rb_stage_texture_region(Renderer*, u32, Texture& t, const u8* pixels, u32 x, u32 y, u32 w, u32 h) {
+bool rb_stage_texture_region(Renderer* r, u32, Texture& t, const u8* pixels, u32 x, u32 y, u32 w, u32 h) {
     if (!t.pixels.data || x + w > t.width || y + h > t.height) return false;
     for (u32 row = y; row < y + h; ++row) {
         usize at = ((usize)row * t.width + x) * 4;
         memcpy(t.pixels.data + at, pixels + at, (usize)w * 4);
     }
     t.resident = true;
+    t.version = ++r->texture_version;
     return true;
 }
 
@@ -286,15 +297,7 @@ void rb_read_window(Renderer* r, FrameInFlight&) {
     r->shot_recorded = true;
 }
 
-bool rb_ui_buffer(Renderer* r, FrameInFlight& f, u64 bytes) {
-    Buffer b;
-    if (!cpu_alloc(r, bytes, b)) return false;
-    rb_buffer_retire(r, f.ui);
-    f.ui = b;
-    return true;
-}
 
-void rb_ui_draw(Renderer*, FrameInFlight&, const PushData&) {} // milestone 3
 bool rb_record_end(Renderer*, FrameInFlight&) { return true; }
 
 } } // namespace kv::KV_RB_NS

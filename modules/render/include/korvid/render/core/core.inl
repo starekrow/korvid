@@ -39,6 +39,7 @@ RenderCaps renderer_caps(const Renderer*) {
     c.frames_in_flight = kFramesInFlight;
     c.srgb_output      = true;
     c.ui               = KV_RB_UI != 0;
+    c.paced            = KV_RB_PACED != 0;
     c.texture_formats[(u32)TextureFormat::RGBA8_SRGB]  = true;
     c.texture_formats[(u32)TextureFormat::RGBA8_UNORM] = true;
     return c;

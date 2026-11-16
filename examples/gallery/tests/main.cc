@@ -84,10 +84,10 @@ int main() {
     char* argv[] = {a0, a1, a2, dir, nullptr};
     KV_CHECK(c, run(4, argv) == 0);
     // Every scene the CPU draws, exactly as before.
-    const char* const all[] = {"blends", "transform", "filter", "sort", "interpolate_0", "interpolate_50", "interpolate_90", "camera", "shaders"};
+    const char* const all[] = {"blends", "transform", "filter", "sort", "interpolate_0", "interpolate_50", "interpolate_90", "camera", "shaders", "ui"};
     for (const char* s : all) KV_CHECK(c, compare(dir, "cpu", s, 0, 0.0));
-    // The sprite scenes against the GPU's (the game shaders and the UI are later milestones').
-    const char* const sprites[] = {"blends", "transform", "filter", "sort", "interpolate_0", "interpolate_50", "interpolate_90", "camera"};
+    // The sprite scenes and the UI against the GPU's (the game shaders are a later milestone's).
+    const char* const sprites[] = {"blends", "transform", "filter", "sort", "interpolate_0", "interpolate_50", "interpolate_90", "camera", "ui"};
     for (const char* s : sprites) KV_CHECK(c, compare(dir, "vulkan", s, 8, 0.005));
     io_remove_tree(dir);
     names_shutdown();

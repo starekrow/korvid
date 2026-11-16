@@ -14,7 +14,9 @@
 // theme, the form and the menu again. --theme light starts in it. It paces on demand: still, it draws nothing and
 // ticks four times a second (--pacing continuous for every vsync). --bench opens a screen of
 // two thousand nodes instead and lays it out and paints it every tick: run it with
-// --prof-report for the cost.
+// --prof-report for the cost. --hover moves the pointer onto the Save button and off it every
+// tick for ten seconds, then quits: the cost of a frame where one button changes (run it with
+// KV_CPU_STATS=1 under --renderer cpu for the backend's side).
 #include "korvid/kromedemo/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/format.h"
@@ -48,6 +50,8 @@ struct Demo {
     u32  step = 0, wait = 0;
     u32  failures = 0;
     u32  settled = 0;
+    bool hover = false;    // --hover: on and off a button every tick, ten seconds
+    u32  hovers = 0;
     bool type = false;     // --type: the small-text specimen; with --shots, its picture, then quit
     u32  type_done = 0;
     // --work: a tool's work in the Work cycle, behind the window (docs/design/cycles.md).
@@ -205,6 +209,16 @@ void kromedemo_tick(TickContext& ctx) {
         } else if (d.type_done > 6) engine_request_quit(e);
         return;
     }
+    if (d.hover) {
+        if (!krome_ready(e, d.form)) return;
+        engine_want_frame(e);
+        if (d.hovers == 0 && !krome_settled(e)) return;
+        f32 x = 4.0f, y = 4.0f;
+        if ((d.hovers & 1) && !aim(e, d, "save", &x, &y)) { KV_ERROR("kromedemo", "hover: no 'save' on screen"); engine_request_quit(e); return; }
+        input_pointer_override(e, x, y, 0);
+        if (++d.hovers > 600) { KV_INFO("kromedemo", "hover: %u frames, on and off 'save'", d.hovers - 1); engine_request_quit(e); }
+        return;
+    }
     if (!d.demo || !krome_ready(e, d.form)) return;
     engine_want_frame(e); // the pilot is input the window does not see: keep the loop awake for it
     if (d.wait) { --d.wait; return; }
@@ -333,6 +347,7 @@ bool kromedemo_startup(Engine& e, ModuleInstance& self) {
     *d = Demo{};
     d->demo = frameloop_flag(e, "--demo");
     d->work = frameloop_flag(e, "--work");
+    d->hover = frameloop_flag(e, "--hover");
     d->shots = frameloop_option(e, "--shots");
     if (frameloop_flag(e, "--bench")) d->bench = krome_open(e, "kromedemo/bench.lua");
     else if (frameloop_flag(e, "--type")) { d->form = krome_open(e, "kromedemo/type.kimb", "type"); d->type = true; }
@@ -365,7 +380,7 @@ KV_MODULE_DEFINE(kromedemo_module) = {
 } // namespace kv
 
 namespace {
-constinit const char* const k_flags[] = {"--demo", "--bench", "--work", "--lua", "--type"};
+constinit const char* const k_flags[] = {"--demo", "--bench", "--work", "--lua", "--type", "--hover"};
 constinit const char* const k_options[] = {"--shots", "--theme"};
 constinit const kv::FrameLoopConfig k_config = {
     .title          = "korvid krome demo",

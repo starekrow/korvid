@@ -1,9 +1,11 @@
 // renderer-cpu without a window (docs/PRDs/CPU-Renderer-PRD.md, milestone 1): made headless,
 // a frame clears its target to the view's color as sRGB bytes, a screenshot reads it, and
-// it ends cleanly. Called through the backend's namespace: render's dispatcher is the
+// it ends cleanly; the tile hashes leave a tile undrawn exactly when its draws are as they
+// were (milestone 3). Called through the backend's namespace: render's dispatcher is the
 // program's, and this test links no other backend.
 #include "../src/renderer_internal.h"
 #include "korvid/renderer-cpu/module.h"
+#include "korvid/render/ui.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/name.h"
@@ -62,11 +64,64 @@ void test_headless(TestCtx& c) {
     engine_shutdown(e);
 }
 
+// A box in one tile of a 200 x 130 target (4 x 3 tiles): a frame like the last draws no tile,
+// a change draws the tiles it touches, and what they draw is what drawing every tile does.
+void test_tile_cache(TestCtx& c) {
+    c.begin("renderer-cpu tile hashes");
+    const ModuleDesc* const list[] = {&platform_module, &renderer_cpu_module};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    RendererDesc d;
+    d.backend = RendererBackend::Cpu;
+    d.width = 200;
+    d.height = 130;
+    rb_cpu::Renderer* r = rb_cpu::renderer_create(e, d);
+    KV_CHECK(c, r != nullptr);
+    if (!r) { engine_shutdown(e); return; }
+    KV_CHECK(c, rb_cpu::renderer_caps(r).ui && !rb_cpu::renderer_caps(r).paced);
+    r->tile_cache = true;
+    RenderView v;
+    UiList ui;
+    ui.init(mem_general());
+    UiBox b;
+    b.rect = rect2{70, 70, 40, 30}; // inside tile (1, 1): x 64-127, y 64-127, its grown quad too
+    b.radius[0] = b.radius[1] = b.radius[2] = b.radius[3] = 6.0f;
+    b.fill = color{0.9f, 0.2f, 0.1f, 1.0f};
+    ui.box(b);
+    rb_cpu::renderer_ui_set(r, 0, ui);
+    KV_CHECK(c, rb_cpu::renderer_render(r, v) && r->tiles_drawn == 12 && r->tiles_skipped == 0);
+    KV_CHECK(c, rb_cpu::renderer_render(r, v) && r->tiles_drawn == 0 && r->tiles_skipped == 12);
+    // The box's color changes: its tile only.
+    ui.clear();
+    b.fill = color{0.1f, 0.3f, 0.9f, 0.8f};
+    ui.box(b);
+    rb_cpu::renderer_ui_set(r, 0, ui);
+    KV_CHECK(c, rb_cpu::renderer_render(r, v) && r->tiles_drawn == 1 && r->tiles_skipped == 11);
+    usize bytes = (usize)200 * 130 * 4;
+    u8* cached = (u8*)alloc_in(mem_general(), bytes);
+    memcpy(cached, r->headless.data, bytes);
+    // Every tile drawn again: the same bytes.
+    r->tile_cache = false;
+    memset(r->headless.data, 0, bytes);
+    KV_CHECK(c, rb_cpu::renderer_render(r, v) && r->tiles_drawn == 12);
+    KV_CHECK(c, memcmp(cached, r->headless.data, bytes) == 0);
+    // The clear color changes: every tile.
+    r->tile_cache = true;
+    KV_CHECK(c, rb_cpu::renderer_render(r, v) && r->tiles_drawn == 12); // the cache starts over
+    v.clear_color = color{0.2f, 0.2f, 0.2f, 1.0f};
+    KV_CHECK(c, rb_cpu::renderer_render(r, v) && r->tiles_drawn == 12);
+    free_in(mem_general(), cached, bytes);
+    ui.free();
+    rb_cpu::renderer_destroy(r);
+    engine_shutdown(e);
+}
+
 } // namespace
 
 int main() {
     kv::TestCtx c;
     test_headless(c);
+    test_tile_cache(c);
     kv::names_shutdown();
     kv::mem_shutdown();
     return kv::test_report(c, "renderer_cpu_tests");

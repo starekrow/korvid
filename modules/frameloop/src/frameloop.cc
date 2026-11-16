@@ -81,6 +81,7 @@ struct FrameLoopState {
     // CPU besides its wait, both smoothed.
     f64             period = 1.0 / 60.0, render_cpu = 0.0, last_frame_start = 0.0;
     f64             demand_last = 0.0;
+    bool            self_paced = false; // the renderer does not wait for the display: run() does
     u64             demand_sleeps = 0;
     // The GPU's frames over the report window (renderer_gpu_stats, a frame late), when measured.
     u32             gpu_frames = 0;
@@ -260,6 +261,9 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     rd.sprite_rows   = s->config.sprite_rows;
     s->renderer = renderer_create(engine, rd);
     if (!s->renderer) return false;
+    // A present that never waits for the display (a software surface): the loop spaces the
+    // frames itself, as vsync would, unless it was asked not to.
+    s->self_paced = rd.vsync && !renderer_caps(s->renderer).paced;
     // Where the OS takes the window's surface while the game runs (Android), the renderer
     // lets go of it and takes the next one from inside the pump.
     platform_surface_hook(engine, [](void* user, void* native) {
@@ -382,6 +386,8 @@ void modal_frame(void* user) {
 // pumped here; what it delivered, the window's size, I/O under way, a load being held for,
 // a frame someone asked for, or a quarter second gone by, says yes.
 constexpr f64 k_demand_heartbeat = 0.25, k_demand_poll = 0.004, k_demand_work = 0.008;
+// A self-paced renderer's frames: a 60 Hz display's.
+constexpr f64 k_self_pace_period = 1.0 / 60.0;
 bool demand_frame(Engine& engine, FrameLoopState& s) {
     Input* in = platform_input(engine);
     InputState before;
@@ -431,6 +437,20 @@ void run(Engine& engine, FrameLoopState& s) {
             ++s.demand_sleeps;
             slept = true;
             continue;
+        }
+        // Self-paced: not before a display period since the last frame began, the time
+        // till then given to the Work cycle if it has any, else slept.
+        if (s.self_paced && s.last_frame_start > 0.0) {
+            f64 due = s.last_frame_start + k_self_pace_period;
+            if (engine_work_pending(engine) && due - time_now() > g_idle_margin) {
+                f64 used = engine_work(engine, due - time_now() - g_idle_margin);
+                if (used > 0.0) { s.work_total += used; ++s.work_frames; }
+            }
+            f64 left = due - time_now();
+            if (left > 0.0) {
+                KV_ZONE_WAIT("pace");
+                time_sleep(left);
+            }
         }
         f64 now = time_now();
         f64 dt  = now - s.prev;

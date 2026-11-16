@@ -47,6 +47,7 @@ struct RenderCaps {
     u32         frames_in_flight = 0;
     bool        srgb_output      = false; // the swapchain encodes linear to sRGB in hardware
     bool        ui               = false; // the UI primitive is drawn (korvid/render/ui.h); else its lists are kept and not drawn
+    bool        paced            = true;  // its present can wait for the display (vsync); false: a frame ends when it is drawn, and the caller paces
     bool        texture_formats[(u32)TextureFormat::Count] = {};
 };
 

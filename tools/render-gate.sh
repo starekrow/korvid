@@ -48,7 +48,9 @@ failed=0
 step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'FAIL %s\n' "$*"; failed=$((failed + 1)); }
 pass() { printf 'ok   %s\n' "$*"; }
-sums() { (cd "$1" && for f in *; do [ -f "$f" ] && cksum "$f"; done) }
+# By name in byte order: the glob's order follows the locale, and a baseline taken under
+# another one must still compare.
+sums() { (cd "$1" && for f in *; do [ -f "$f" ] && cksum "$f"; done) | LC_ALL=C sort -k3; }
 
 step "build: debug, dev, ship"
 for config in debug dev ship; do
@@ -71,9 +73,10 @@ else fail "shader sources differ from main"; git diff --stat --diff-filter=MDR m
 sums "$dev/shaders" >"$out/shaders.sum"
 if [ $baseline -eq 1 ]; then cp "$out/shaders.sum" "$keep/shaders.sum"; pass "baseline kept: $(wc -l <"$keep/shaders.sum") compiled shaders"
 elif [ ! -f "$keep/shaders.sum" ]; then fail "no baseline ($keep/shaders.sum): run with --baseline at main first"
-elif awk 'NR == FNR { known[$3] = 1; next } known[$3]' "$keep/shaders.sum" "$out/shaders.sum" | cmp -s - "$keep/shaders.sum"; then
+elif LC_ALL=C sort -k3 "$keep/shaders.sum" >"$out/baseline.sum" &&
+     awk 'NR == FNR { known[$3] = 1; next } known[$3]' "$keep/shaders.sum" "$out/shaders.sum" | cmp -s - "$out/baseline.sum"; then
     pass "compiled shaders byte-identical to the baseline ($(( $(wc -l <"$out/shaders.sum") - $(wc -l <"$keep/shaders.sum") )) new)"
-else fail "compiled shaders differ from the baseline"; diff "$keep/shaders.sum" "$out/shaders.sum"; fi
+else fail "compiled shaders differ from the baseline"; diff "$out/baseline.sum" "$out/shaders.sum"; fi
 
 step "gallery: exact against references/$backend"
 (cd "$dev" && ./gallery$exe --out "$native_out" >"$OLDPWD/$out/gallery.log" 2>&1) || fail "gallery did not run (see $out/gallery.log)"

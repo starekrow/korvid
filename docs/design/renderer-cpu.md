@@ -74,3 +74,60 @@ wrapper and host are in `modules/renderer-cpu/notes/` (`spike_rings_cpu.slang.tx
 - **Inline math stays out of the sim.** `tools/check-fast-objects.sh` lists the weak symbols of the objects meant
   for the fast profile (`raster.o`: none) against every other object's. arcfire's normal replay matches its 236
   hashes with the CPU renderer linked and drawing, and with Vulkan drawing.
+
+## Milestone 3: the UI and Krome
+
+- **The UI primitive** is `ui.slang`'s `fs_ui` line for line, in float, per pixel (`raster.cc`, `draw_ui`):
+  - `rb_ui_draw` decodes a layer's list (`frame.cc`, `prepare_ui`) into `CpuUi` items: colors linear and
+    premultiplied, the quad cut by its clip.
+  - The items go into the pass's one draw list, in order with the sprites' quads (`kCpuDrawUi` marks them), so a
+    list draws after its layer's sprites as on the GPU.
+  - The UI's own pixels are reached from the window's through the inverse of the push block's screen view, so a
+    screen camera that scales or turns the UI is followed.
+  - Two tables, made with the engine's math in `luts.cc`:
+    - the shadow's `0.5 (1 - erf(x))`, the shader's own approximation, in 128ths of x;
+    - a glyph's coverage curve, 64 curves by the ink's luminance, interpolated.
+  - A box's inside, where its result is exactly its fill (past the radii and the border, no gradient or image, a
+    shadow only under an opaque fill), is one store. It gives the same bytes as the general path.
+  - The blend is premultiplied over, in 16 bits.
+- **Against Vulkan:**
+  - The gallery's `ui` scene: largest difference 5 levels, no pixel past 8. It is exact against `references/cpu`
+    (now in the gallery's test).
+  - kromedemo's 13 shots: no pixel past 8; the largest difference is 8 (`gallery_dialog`), most are 5.
+  - kromescreens' 9 shots: no pixel past 8; the largest difference is 4.
+  - Two CPU runs give the same bytes.
+- **Tile hashes** (SR17):
+  - A draw's hash is its prepared bytes, the texture's version among them. A texture's version moves on every
+    create and every upload.
+  - A tile's hash is its draws' hashes in order, over the clear.
+  - In the window pass, a tile that hashes as last frame, into the same target, is not drawn, and gets no job.
+  - `KV_CPU_TILE_CACHE=0` draws every tile.
+  - Every kromedemo and kromescreens shot is byte-identical with the cache on and off. `renderer-cpu`'s test
+    checks the cache too:
+    - an unchanged frame draws no tile;
+    - a box's change draws its one tile, and the bytes match drawing every tile.
+- **Pacing.** The PRD said pacing is frameloop's, but frameloop had none: it leaned on vsync.
+  - On the CPU a frame ended in about a millisecond. Under on-demand pacing the frames a tick asked for, and the
+    three after input, all ran before the next tick was due. The loop then slept to its quarter-second
+    heartbeat: a hover could take 250 ms to show, and kromedemo ran 5 ticks a second.
+  - `RenderCaps::paced` now says whether a backend's present waits for the display (`KV_RB_PACED`, 0 for the
+    CPU's).
+  - When it does not and vsync is wanted, frameloop starts frames no closer than a 60 Hz period. It gives the
+    gap to the Work cycle when that has work, and sleeps otherwise.
+  - kromedemo is at 60 frames and 60 ticks a second, as on Vulkan.
+  - The display's real refresh rate is not asked for yet.
+- **The hover number.** kromedemo's form at 1000 x 640, dev build, 16 threads: `--hover` moves the pointer onto
+  Save and off it every tick for ten seconds. `KV_CPU_STATS=1` prints the backend's means every 300 frames;
+  `--prof-report` gives the zones.
+
+  | | `render` per frame | Tiles drawn of 160 | Tile work, summed over threads |
+  | --- | --- | --- | --- |
+  | Tile hashes on | 1.12 ms | 2 | 0.46 ms |
+  | Tile hashes off | 2.29 ms | 160 | 23.7 ms |
+
+  - With the hashes on, what is left is the UI lists' decoding (0.10 ms), the binning and hashing of 249 draws,
+    and the present.
+  - Vulkan's `render` on the same run is 13 to 16 ms of mostly vsync wait.
+  - The 1280 x 720 and 1920 x 1080 numbers are milestone 5's table: frameloop has no size option yet.
+- **Not done here:** D3D12 and Metal need nothing new for this milestone; Win32's software present is still
+  unrun.

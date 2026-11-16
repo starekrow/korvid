@@ -15,6 +15,8 @@
 #define KV_RB_FRAME_SCOPE
 #define KV_RB_NS         rb_cpu
 #define KV_RB_ID         KV_RENDER_ID_CPU
+#define KV_RB_UI         1
+#define KV_RB_PACED      0 // a software surface has no vsync: frameloop spaces the frames
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/pool.h"
@@ -43,6 +45,7 @@ namespace kv { namespace KV_RB_NS {
 // A texture's pixels as uploaded: RGBA8, sRGB or not as its format says.
 struct Texture : TextureCore {
     Buffer pixels;
+    u32    version = 0; // the renderer's count when its pixels were last written (tile hashes)
 };
 
 // A game shader on the CPU: milestone 4's (none yet: the material draws in its blend's
@@ -81,11 +84,32 @@ struct Renderer : RenderCore {
     // rb_bind_sprites); the sort's totals and starts are in sort_meta, as the GPU's are.
     PushData   push{};
     const f32* layers = nullptr;
-    // A pass: its clear, and its draws in order as quads; binned into tiles at its end.
-    u16           clear[3] = {};
+    // A pass: its clear, and its draws in order (a quad's index, or a UI item's with
+    // kCpuDrawUi); binned into tiles at its end.
+    RcPass         pass = RcPass::Window;
+    u16            clear[3] = {};
     Array<CpuQuad> quads;
-    Array<u32>    bin_counts, bin_items;
-    bool          quantize8 = false; // KV_CPU_TARGET8: round each draw through 8-bit sRGB, as the GPU's target does
+    Array<CpuUi>   ui;
+    Array<u32>     draws;
+    Array<u32>     bin_counts, bin_items;
+    bool           quantize8 = false; // KV_CPU_TARGET8: round each draw through 8-bit sRGB, as the GPU's target does
+    u32            texture_version = 0;
+
+    // The window pass's tiles as last drawn: a tile whose draws hash as they did, into the
+    // same target, is left as it is (KV_CPU_TILE_CACHE=0 draws every tile).
+    Array<u64> tile_hash;
+    const u8*  hashed_target = nullptr;
+    u32        hashed_width = 0, hashed_height = 0, hashed_pitch = 0;
+    bool       hashed_rgba = false;
+    bool       tile_cache = true;
+    u32        tiles_drawn = 0, tiles_skipped = 0; // the last window pass's
+
+    // KV_CPU_STATS: a line every 300 window passes, their means: the UI lists' decoding, the
+    // pass's end (binning, hashing, the tiles), the tiles drawn and skipped.
+    bool stats = false;
+    u32  stat_passes = 0;
+    f64  stat_ui = 0.0, stat_end = 0.0, stat_end_worst = 0.0;
+    u64  stat_drawn = 0, stat_skipped = 0, stat_items = 0;
 };
 
 // A buffer of `bytes`, zeroed; false when there is no memory.

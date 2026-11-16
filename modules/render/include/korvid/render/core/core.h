@@ -87,6 +87,11 @@
 #ifndef KV_RB_UI
 #define KV_RB_UI 0
 #endif
+// KV_RB_PACED, 0 when the backend's present never waits for the display (the CPU's): the
+// frame loop paces it. 1 unless the backend says.
+#ifndef KV_RB_PACED
+#define KV_RB_PACED 1
+#endif
 #ifndef KV_RB_FRAME_SCOPE
 #error "the backend's renderer_internal.h defines KV_RB_FRAME_SCOPE (empty, or @autoreleasepool)"
 #endif
