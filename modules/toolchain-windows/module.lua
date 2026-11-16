@@ -48,6 +48,13 @@ module "toolchain.windows" {
   obj_suffix   = ".obj",
   exe_suffix   = ".exe",
   lib_file     = "%s.lib",
+  -- Code-generation profiles a module asks for by name (`codegen`): fast is the CPU renderer's
+  -- kernels and the games' generated shaders. Not /fp:fast, which reassociates and would change
+  -- the pictures (docs/design/renderer-cpu.md).
+  codegen_profiles = { fast = { "/O2", "/Ob3" } },
+  -- Instruction sets a module's isa_sources are built again for, chosen at start-up. cl does
+  -- not contract multiply-adds under /fp:precise, so the bytes are the baseline's.
+  isa = { avx2 = { "/arch:AVX2" } },
   flags_generated = { "/w" }, -- code another program wrote (a shader's C++): its warnings are not ours
   flag_include = "/I%s",
   flag_define  = "/D%s",

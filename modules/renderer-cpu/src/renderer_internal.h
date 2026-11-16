@@ -20,7 +20,7 @@
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/pool.h"
-#include "raster.h"
+#include "luts.h"
 
 namespace kv {
 
@@ -121,11 +121,15 @@ struct Renderer : RenderCore {
     bool       tile_cache = true;
     u32        tiles_drawn = 0, tiles_skipped = 0; // the last window pass's
 
-    // KV_CPU_STATS: a line every 300 window passes, their means: the UI lists' decoding, the
-    // pass's end (binning, hashing, the tiles), the tiles drawn and skipped.
+    // KV_CPU_STATS[=N]: a line every N window passes (300), their means: the frame's record
+    // (the sort, the passes, every tile), the UI lists' decoding, the passes' ends (binning,
+    // hashing, the tiles; the world's and the window's), the present (with any wait for the display), the tiles drawn
+    // and skipped.
     bool stats = false;
+    u32  stat_every = 300;
     u32  stat_passes = 0;
     f64  stat_ui = 0.0, stat_end = 0.0, stat_end_worst = 0.0;
+    f64  stat_record = 0.0, stat_present = 0.0, record_start = 0.0, stat_frame_end = 0.0;
     u64  stat_drawn = 0, stat_skipped = 0, stat_items = 0;
 };
 

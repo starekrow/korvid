@@ -192,3 +192,113 @@ wrapper and host are in `modules/renderer-cpu/notes/` (`spike_rings_cpu.slang.tx
     present has none.
   - On this machine (Wayland, 120 Hz) kromedemo runs at 120 fps with 60 ticks a second. arcfire with the shimmer
     runs at 91 to 103 fps: a frame that misses a vblank waits for the next.
+
+## Milestone 5: fast, and close
+
+- **Code-generation profiles** (SR14). A module names one (`codegen = "fast"`) and each toolchain spells it
+  (`codegen_profiles`); a tool rule can name one for the code it writes (slang's `shader_cpu`: the games' shaders).
+  The module's tests are not built with it.
+  - The fast profile is `-O3 -fno-trapping-math` (with the engine's `-fno-math-errno`) on gcc and clang, and
+    `/O2 /Ob3` on cl.
+  - **Not as the PRD drafted it, on purpose:** no `-ffp-contract=fast` and no `/fp:fast`. arm64 always has FMA,
+    so contraction would make the pictures differ by platform, and `/fp:fast` reassociates. Either would break the
+    exact references that every platform's gallery test holds (`references/cpu`). The pixel math that decides a
+    picture is integer, so what contraction would buy is in the float geometry, which is a small share.
+  - Never `-ffast-math` anywhere: its `crtfastmath.o` would flush denormals for the whole process.
+- **The kernels are a module of their own**, `renderer-cpu-raster`.
+  - Profiles are chosen per module (decided). renderer-cpu's frame code uses the engine's inline math (`kv::cos`,
+    `kv::floor`), which must never be compiled fast, so the kernels moved out.
+  - They include nothing of the engine's but `core/types.h`. They take the sRGB tables as arguments, since
+    renderer-cpu makes those with `kv::pow`.
+  - `korvid/renderer-cpu-raster/shader_call.h` holds a game shader's call, which the kernels fill.
+- **Instruction sets** (SR16). kormake builds a module's `isa_sources` again for each set the toolchain names
+  (`isa = { avx2 = { "-mavx2", "-mno-fma" } }` on Linux, `/arch:AVX2` on Windows), with `KV_ISA_<SET>=1`. Each copy
+  of the kernels lives in its own namespace (`rb_cpu::base`, `rb_cpu::avx2`).
+  - `select.cc` (built for the baseline) chooses the widest set the CPU runs (`cpuid`, and that the OS saves the
+    YMM registers), or the one `KV_CPU_ISA` names.
+  - No FMA in the AVX2 copy, so it draws the bytes the baseline does. The gallery's test draws all ten scenes
+    with every set the machine runs and compares each exactly against `references/cpu`.
+- **The rule's check** (SR15): `tools/check-fast-objects.sh` now covers every object of `renderer-cpu-raster` (both
+  copies) and every generated shader's. None of their weak symbols is defined anywhere else.
+- **The gate** (SR19): `tools/render-gate.sh linux cpu` (and `windows cpu`). In order:
+  - the three configs build, and the tests pass;
+  - the fast objects' check;
+  - the gallery headless, exact against `references/cpu` and within tolerance of Vulkan's;
+  - testbed's sort check and arcfire's demo with `--check-sort`, under `--renderer cpu`;
+  - arcfire's normal replay with the CPU renderer drawing (its game shaders running);
+  - the bench.
+- **The numbers** (SR20): `tools/cpu-numbers.sh` runs each workload under `--renderer cpu` at 1280 x 720 and
+  1920 x 1080, on every core and on one (`--threads 1`), with the widest kernels, then at 1920 x 1080 with the
+  baseline ones. frameloop's new `--size WxH` sets the window. The backend's `KV_CPU_STATS` line gives the means of
+  300 frames:
+  - record: the sort, the passes, every tile;
+  - the UI lists' decoding, and the pass's end (binning, hashing, the tiles);
+  - present, which includes the wait for the display.
+
+  Linux, 8 cores and 16 threads, a dev build, Wayland, the display at 60 Hz when these ran. Record is the renderer's
+  cost. Present includes the wait for vblank, so a frame that finishes early shows about 16 ms there. Tiles are the
+  means of a frame, both passes counted where a post shader makes two.
+
+  | Workload | Size | Threads | Kernels | fps | Record ms | UI lists ms | Pass end ms | Present ms | Tiles drawn / skipped |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | kromedemo hover | 1280x720 | all | avx2 | 59 | 0.304 | 0.090 | 0.210 | 15.986 | 3.9 / 236.1 |
+  | kromedemo hover | 1280x720 | 1 | avx2 | 60 | 0.365 | 0.093 | 0.268 | 16.011 | 4.0 / 236.0 |
+  | kromedemo hover | 1920x1080 | all | avx2 | 59 | 0.313 | 0.095 | 0.213 | 15.885 | 4.0 / 455.0 |
+  | kromedemo hover | 1920x1080 | 1 | avx2 | 58 | 0.416 | 0.109 | 0.301 | 15.899 | 3.8 / 455.2 |
+  | kromedemo hover | 1920x1080 | all | base | 60 | 0.322 | 0.100 | 0.218 | 16.032 | 3.8 / 455.2 |
+  | kromedemo bench (2,000 nodes a tick) | 1280x720 | all | avx2 | 60 | 0.630 | 0.503 | 0.124 | 13.898 | 1.0 / 239.0 |
+  | kromedemo bench (2,000 nodes a tick) | 1280x720 | 1 | avx2 | 60 | 0.722 | 0.512 | 0.208 | 13.759 | 3.4 / 236.6 |
+  | kromedemo bench (2,000 nodes a tick) | 1920x1080 | all | avx2 | 60 | 0.685 | 0.502 | 0.182 | 14.013 | 7.6 / 452.2 |
+  | kromedemo bench (2,000 nodes a tick) | 1920x1080 | 1 | avx2 | 60 | 0.803 | 0.502 | 0.300 | 13.972 | 5.9 / 453.6 |
+  | kromedemo bench (2,000 nodes a tick) | 1920x1080 | all | base | 60 | 0.699 | 0.516 | 0.182 | 14.113 | 7.6 / 452.2 |
+  | kromescreens bench (10,000 steps a tick) | 1280x720 | all | avx2 | 59 | 0.056 | 0.027 | 0.027 | 6.535 | 2.0 / 238.0 |
+  | kromescreens bench (10,000 steps a tick) | 1280x720 | 1 | avx2 | 60 | 0.036 | 0.027 | 0.006 | 6.426 | 0.0 / 240.0 |
+  | kromescreens bench (10,000 steps a tick) | 1920x1080 | all | avx2 | 60 | 0.076 | 0.028 | 0.046 | 6.854 | 5.3 / 454.5 |
+  | kromescreens bench (10,000 steps a tick) | 1920x1080 | 1 | avx2 | 60 | 0.122 | 0.028 | 0.092 | 7.018 | 5.3 / 454.5 |
+  | kromescreens bench (10,000 steps a tick) | 1920x1080 | all | base | 60 | 0.077 | 0.028 | 0.048 | 6.816 | 5.3 / 454.5 |
+  | arcfire demo, shimmer | 1280x720 | all | avx2 | 60 | 8.399 | 0.000 | 7.999 | 7.461 | 240.0 / 0.0 |
+  | arcfire demo, shimmer | 1280x720 | 1 | avx2 | 12 | 71.999 | 0.000 | 70.786 | 0.476 | 240.0 / 0.0 |
+  | arcfire demo, shimmer | 1920x1080 | all | avx2 | 50 | 18.365 | 0.000 | 17.940 | 1.196 | 459.0 / 0.0 |
+  | arcfire demo, shimmer | 1920x1080 | 1 | avx2 | 7 | 131.374 | 0.000 | 132.393 | 1.966 | 453.1 / 8.5 |
+  | arcfire demo, shimmer | 1920x1080 | all | base | 50 | 18.325 | 0.000 | 17.914 | 1.145 | 459.0 / 0.0 |
+  | arcfire demo, --cpu-shaders none | 1280x720 | all | avx2 | 57 | 6.479 | 0.000 | 5.987 | 10.989 | 226.8 / 13.2 |
+  | arcfire demo, --cpu-shaders none | 1280x720 | 1 | avx2 | 20 | 51.780 | 0.000 | 50.254 | 0.416 | 226.0 / 14.0 |
+  | arcfire demo, --cpu-shaders none | 1920x1080 | all | avx2 | 60 | 12.026 | 0.000 | 11.575 | 3.753 | 442.0 / 17.0 |
+  | arcfire demo, --cpu-shaders none | 1920x1080 | 1 | avx2 | 10 | 101.971 | 0.000 | 100.601 | 0.882 | 442.0 / 17.0 |
+  | arcfire demo, --cpu-shaders none | 1920x1080 | all | base | 58 | 12.246 | 0.000 | 11.833 | 4.106 | 442.0 / 17.0 |
+  | arcfire --bench ring rank=56 | 1280x720 | all | avx2 | 20 | 42.613 | 0.000 | 41.154 | 0.720 | 240.0 / 0.0 |
+  | arcfire --bench ring rank=56 | 1280x720 | 1 | avx2 | 4 | (no stats line) | | | | |
+  | arcfire --bench ring rank=56 | 1920x1080 | all | avx2 | 11 | 85.311 | 0.000 | 83.426 | 1.356 | 459.0 / 0.0 |
+  | arcfire --bench ring rank=56 | 1920x1080 | 1 | avx2 | 2 | (no stats line) | | | | |
+  | arcfire --bench ring rank=56 | 1920x1080 | all | base | 12 | 85.650 | 0.000 | 83.778 | 1.165 | 459.0 / 0.0 |
+
+  The ring bench on one core draws fewer than 60 frames in its ten seconds (4 and 2 fps), so it has no line.
+
+- **What the numbers say, and the outliers** (decided: each is written down, and whether any needs work is the
+  user's call):
+  - **A tool's frame costs its change, not its window.** A hover in kromedemo records in 0.3 ms at both sizes
+    (4 tiles of 240 or 459 drawn). kromedemo's 2,000-node bench costs 0.6 to 0.8 ms, most of it decoding its UI
+    lists. kromescreens' 10,000 steps a tick cost under 0.1 ms. One core does as well as many for all of these.
+  - **arcfire holds 60 fps at 1280 x 720 on every core**: 8.4 ms with nebula and shimmer, 6.5 ms without game
+    shaders. At 1920 x 1080 it records in 18.4 ms with them (50 fps) and 12.0 ms without (60 fps).
+    - Game shaders and the post pass cost about 6 ms of the 18 at 1080p. With the post pass on, every tile of the
+      window is drawn each frame: the cache cannot follow a shader that reads the world anywhere.
+  - **One core is 8 to 9 times slower than sixteen threads** on arcfire (102 ms against 12 ms at 1080p without
+    shaders): the tiles spread well.
+  - **Outlier: AVX2 buys nothing.** The AVX2 copy is within 1 to 3% of the baseline everywhere, and its object
+    holds 4 instructions on the 256-bit registers. The kernels are scalar per pixel (edge tests, table lookups, a
+    branch per blend), and the compiler finds nothing to widen. A gain would take hand-written span kernels (8
+    pixels of a quad at once: edges, nearest sampling, the blends, the encode), with a test that they draw the
+    baseline's bytes. The selection, the build and the test are in place for them.
+  - **Outlier: the ring bench** (`--bench ring --dial rank=56`, 11,800 sprites, most of them additive glows) runs
+    at 20 fps at 720p and 11 at 1080p. The engine's profiler puts nearly all of it in the world pass's tiles
+    (418 ms summed over threads, about 26 ms of wall time at 720p). It is overdraw, not the sort or the binning.
+    The PRD expects nothing of it; it is the ceiling. Vulkan draws it in about 1 ms.
+  - **Not measured here:**
+    - the gallery's ten scenes one by one (the gallery draws each once, and its test holds their pixels);
+    - the testbed swarm beyond milestone 2's numbers;
+    - every port but Linux. Windows reports when its build runs `tools/cpu-numbers.sh` (it needs a POSIX shell:
+      Git Bash).
+- **The profiler's zones** are `cpu.sort`, `cpu.raster` and `cpu.tiles`, beside the core's `record` and `render`.
+  `renderer_gpu_stats` is not filled in: the CPU's stats line has its numbers, and frameloop prints no GPU line
+  when there is no GPU.

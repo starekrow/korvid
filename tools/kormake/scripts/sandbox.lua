@@ -37,6 +37,10 @@ local module_fields = {
   output = true, deps = true, provides = true, platforms = true, external = true, tools = true,
   exports = true, sources = true, defines = true, prebuilt = true, system = true,
   unity = true, engine_module = true, module_list = true, licenses = true, exe = true, private_includes = true,
+  -- codegen: a code-generation profile by name (the toolchain's codegen_profiles spell it),
+  -- for the module's own sources, not its tests. isa_sources: sources built again for each
+  -- instruction set the toolchain names in `isa` ({ avx2 = { "src/raster.cc" } }).
+  codegen = true, isa_sources = true,
 }
 -- What only a toolchain (provides = "toolchain") may set, at its top or in a per_platform
 -- section: its tag and source directories, the compiler, archiver and linker with their
@@ -46,7 +50,7 @@ local module_fields = {
 local toolchain_fields = {
   tag = true, srcdirs = true, cxx = true, ar = true, link = true, cxxflags = true, ldflags = true, configs = true,
   externals = true, bindings = true, rules = true, obj_suffix = true, exe_suffix = true, lib_file = true,
-  flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, flags_generated = true, probe = true,
+  flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, flags_generated = true, codegen_profiles = true, isa = true, probe = true,
   sdk = true, -- the Apple SDK the xcode probe asks xcrun for ("macosx")
   flag_framework = true, -- how a toolchain links an external's frameworks ("-framework %s")
   package = true, -- "app" or "iosapp": kormake package writes an application bundle (package_app.lua); "apk": an Android package (package_apk.lua)
@@ -77,7 +81,7 @@ local toolchain_fields = {
 -- bound, wrap, glue and engine_module: a rule whose output is compiled into the module
 -- (emit.lua's generated_sources).
 local rule_fields = { inputs = true, outputs = true, command = true, deps = true, per = true, configs = true, platforms = true,
-                      bound = true, wrap = true, glue = true, engine_module = true }
+                      bound = true, wrap = true, glue = true, engine_module = true, codegen = true }
 
 -- module "name" { fields } or module "name" (defaults). One per file.
 function M.eval_module(path, text)

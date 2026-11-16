@@ -379,6 +379,7 @@ struct TileJob {
     u32        across, tiles;
     const u32* starts;
     const u32* todo; // the tiles to draw, when not every one is
+    const CpuRasterPath* path;
 };
 
 void draw_tiles(u32, u32 begin, u32 end, void* user) {
@@ -386,6 +387,7 @@ void draw_tiles(u32, u32 begin, u32 end, void* user) {
     Renderer* r = j.r;
     u16 pixels[kTile * kTile * 4];
     CpuFrame fr;
+    fr.luts = &cpu_luts();
     fr.quads = r->quads.data;
     fr.ui = r->ui.data;
     memcpy(fr.clear, r->clear, sizeof fr.clear);
@@ -398,13 +400,13 @@ void draw_tiles(u32, u32 begin, u32 end, void* user) {
         u32 tx = (t % j.across) * kTile, ty = (t / j.across) * kTile;
         u32 tw = r->target_width - tx < kTile ? r->target_width - tx : kTile;
         u32 th = r->target_height - ty < kTile ? r->target_height - ty : kTile;
-        cpu_raster_tile(fr, r->bin_items.data + j.starts[t], j.starts[t + 1] - j.starts[t], pixels, tx, ty, tw, th);
+        j.path->raster_tile(fr, r->bin_items.data + j.starts[t], j.starts[t + 1] - j.starts[t], pixels, tx, ty, tw, th);
         if (world) {
             // The world pass: into the post pass's image, as it is (16-bit linear).
             u16* dst = (u16*)r->post.world.data;
             for (u32 y = 0; y < th; ++y) memcpy(dst + ((usize)(ty + y) * r->post.world_width + tx) * 4, pixels + (usize)y * kTile * 4, (usize)tw * 4 * sizeof(u16));
         } else {
-            cpu_encode_tile(pixels, tw, th, r->target + (usize)ty * r->target_pitch + (usize)tx * 4, r->target_pitch, r->target_rgba);
+            j.path->encode_tile(*fr.luts, pixels, tw, th, r->target + (usize)ty * r->target_pitch + (usize)tx * 4, r->target_pitch, r->target_rgba);
         }
     }
 }
@@ -633,22 +635,29 @@ void rb_pass_end(Renderer* r, FrameInFlight&, RcPass) {
     if (r->pass == RcPass::Window) { r->tiles_skipped = skipped; r->tiles_drawn = count; }
 
     cpu_luts(); // made here, on this thread, before the jobs read them
-    TileJob j{r, across, tiles, r->bin_counts.data, todo};
+    TileJob j{r, across, tiles, r->bin_counts.data, todo, &cpu_raster_path()};
     if (count) jobs_run(count, 1, draw_tiles, &j, "cpu.tiles");
-    if (r->stats && r->pass == RcPass::Window) {
+    // The pass ends of a frame are summed (the world's and the window's, with a post shader);
+    // the line counts window passes, one a frame.
+    if (r->stats) {
         f64 dt = time_now() - t0;
         r->stat_end += dt;
-        r->stat_end_worst = dt > r->stat_end_worst ? dt : r->stat_end_worst;
+        r->stat_frame_end += dt;
+    }
+    if (r->stats && r->pass == RcPass::Window) {
+        r->stat_end_worst = r->stat_frame_end > r->stat_end_worst ? r->stat_frame_end : r->stat_end_worst;
+        r->stat_frame_end = 0.0;
         r->stat_drawn += tiles - skipped;
         r->stat_skipped += skipped;
         r->stat_items += r->draws.len;
-        if (++r->stat_passes == 300) {
+        if (++r->stat_passes == r->stat_every) {
             f64 n = r->stat_passes;
-            KV_INFO(KV_RB_NAME, "stats: %ux%u, %.0f draws; UI lists %.3f ms, pass end %.3f ms (worst %.3f); tiles %.1f drawn, %.1f skipped",
-                    r->target_width, r->target_height, (f64)r->stat_items / n, r->stat_ui * 1000.0 / n, r->stat_end * 1000.0 / n,
-                    r->stat_end_worst * 1000.0, (f64)r->stat_drawn / n, (f64)r->stat_skipped / n);
+            KV_INFO(KV_RB_NAME, "stats: %ux%u, %s kernels, %.0f draws; record %.3f ms (UI lists %.3f, pass end %.3f, worst %.3f), present %.3f ms; tiles %.1f drawn, %.1f skipped",
+                    r->target_width, r->target_height, cpu_raster_path().name, (f64)r->stat_items / n, r->stat_record * 1000.0 / n,
+                    r->stat_ui * 1000.0 / n, r->stat_end * 1000.0 / n, r->stat_end_worst * 1000.0, r->stat_present * 1000.0 / n,
+                    (f64)r->stat_drawn / n, (f64)r->stat_skipped / n);
             r->stat_passes = 0;
-            r->stat_ui = r->stat_end = r->stat_end_worst = 0.0;
+            r->stat_ui = r->stat_end = r->stat_end_worst = r->stat_record = r->stat_present = 0.0;
             r->stat_drawn = r->stat_skipped = r->stat_items = 0;
         }
     }

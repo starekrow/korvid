@@ -1,6 +1,6 @@
-// The sRGB tables the pixel kernels read (raster.h), made once with the engine's math: this
+// The sRGB tables the pixel kernels read (luts.h), made once with the engine's math: this
 // file is built as the rest of the engine is, so raster.cc needs no math of its own.
-#include "raster.h"
+#include "luts.h"
 #include "korvid/math/scalar.h"
 
 namespace kv { namespace rb_cpu {

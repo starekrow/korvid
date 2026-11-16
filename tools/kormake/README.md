@@ -308,6 +308,8 @@ the build directory, never in the source tree.
 | `defines` | Preprocessor definitions for the module's own sources and tests |
 | `private_includes` | Directories under the module that are on the include path of its own sources and tests but not of the modules that link it (a vendored library that includes its own headers by `<name>`) |
 | `unity` | `false` compiles each source on its own; this overrides `--no-unity` and `--unity` |
+| `codegen` | A code-generation profile by name (`"fast"`), as the toolchain's `codegen_profiles` spell it, for the module's own sources (not its tests). Code built so must share no inline function with the rest of the program (`tools/check-fast-objects.sh`) |
+| `isa_sources` | Sources built again for an instruction set the toolchain names in `isa`: `{ avx2 = { "src/raster.cc" } }`. A copy is compiled with the set's flags and `KV_ISA_<SET>=1`; the module's other sources see `KV_HAS_ISA_<SET>=1` where the copy exists, and choose at run time |
 | `engine_module` | The module registers a `ModuleDesc`. Each executable gets a generated `gen/<exe>/modules.gen.cc` listing every engine module in its closure, in dependency order |
 | `module_list` | `false`: the executable writes its own module list |
 | `exe` | The executable's file name, when it differs from the module's (`exe = "mygame"` for a module called `mygame.core`) |
@@ -320,7 +322,9 @@ A toolchain module (`provides = "toolchain"`, one per platform) has fields of it
 config), `rules` (`cxx`, `ar` and `link`, as Ninja commands), `obj_suffix`, `exe_suffix`,
 `lib_file`, `flag_include`, `flag_include_system`, `flag_define`, `flag_lib`,
 `flag_libdir`, `flag_framework`, `flags_generated` (added when compiling code another
-program wrote: `-w`), `externals`, `bindings` (the default backend for each
+program wrote: `-w`), `codegen_profiles` (the flags of each profile a module's `codegen`
+names), `isa` (the flags of each instruction set a module's `isa_sources` may be built for),
+`externals`, `bindings` (the default backend for each
 interface), and `probe` (`"msvc"` or `"xcode"`: a script that finds the compiler, the SDK
 and Ninja). For a toolchain that serves several platforms there are also `per_platform`,
 `triple`, `arch` (for platforms that differ in it: `"aarch64"`, `"x86_64"`), `family`, `sdk`,
@@ -375,6 +379,7 @@ module's and the stem's symbols, joined):
   link these objects too.
 - `engine_module`: the engine module the glue defines (`kv::<it>`), listed in each
   executable's generated module list after the module that owns it.
+- `codegen`: the profile the glue is compiled with, as a module's `codegen`.
 
 A rule with any other field is an error, as is a per-exe rule whose inputs are not
 `"assets"`. The tool's

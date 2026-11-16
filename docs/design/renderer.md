@@ -292,6 +292,17 @@ the command buffer, the drawable and the open encoder) lives in its `FrameInFlig
    either, it is in the wrong one.
 5. Names: `rw_` the linked half, `rc_` the compiled-in half, `rb_` a backend.
 
+**The CPU backend** (`renderer-cpu`, `docs/design/renderer-cpu.md`) meets the same contract with memory:
+- A buffer is an allocation, a copy is `memcpy`, and a frame runs to its end inside `renderer_render`.
+- The sort and the cull are the compute kernels' steps in C++.
+- The draws are made into quads and UI items, binned into 64-pixel tiles and drawn as a job batch in 16-bit linear
+  light. Its pixel kernels are a module of their own (`renderer-cpu-raster`), built with the `fast` code-generation
+  profile and again for AVX2.
+- Game shaders run as Slang's C++, compiled into the game by slang's `shader_cpu` rule, or as the game's own CPU
+  form.
+- `RenderCaps::paced` says whether its present waits for the display (the window surface's vsync), so the frame
+  loop paces it where nothing else does.
+
 **What it came to** (`tools/render-overlap.sh`, main at the slice's start against its end):
 
 | | Before | After |

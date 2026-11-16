@@ -50,6 +50,11 @@ module "toolchain.apple" {
   obj_suffix   = ".o",
   exe_suffix   = "",
   lib_file     = "lib%s.a",
+  -- Code-generation profiles a module asks for by name (`codegen`). fast: the CPU renderer's
+  -- kernels and the games' generated shaders. No -ffp-contract=fast (arm64 always has FMA, and
+  -- contraction would make the pictures differ by platform) and never -ffast-math (its
+  -- crtfastmath.o flushes denormals for the whole process): docs/design/renderer-cpu.md.
+  codegen_profiles = { fast = { "-O3", "-fno-trapping-math" } },
   flags_generated = { "-w" }, -- code another program wrote (a shader's C++): its warnings are not ours
   flag_include = "-I%s",
   flag_define  = "-D%s",

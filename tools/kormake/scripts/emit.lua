@@ -359,19 +359,28 @@ function M.run(c, g, opts)
     return list
   end
 
+  -- A code-generation profile's flags (a module's `codegen`, a rule's): the toolchain's
+  -- codegen_profiles[name]. "" for none.
+  local function profile_flags(inst, name, who)
+    if not name then return "" end
+    local p = (flags(inst).tc.fields.codegen_profiles or {})[name]
+    if not p then util.fail("%s asks for codegen profile '%s', which toolchain '%s' does not have", who, name, flags(inst).tc.rec.name) end
+    return table.concat(p, " ")
+  end
   -- extra: `implicit`, a file the compile waits for (a generated source's include);
-  -- `generated`, code another program wrote: compiled with the toolchain's flags_generated
-  -- (no warnings) after its own.
+  -- `flags`, added to the toolchain's (code another program wrote: flags_generated; a
+  -- codegen profile; an instruction set's).
   local function compile(inst, src, obj, includes, defines, extra)
     local fl = flags(inst)
     local cxxflags = fl.cxxflags
     local more = ""
-    if extra and extra.generated then
-      cxxflags = cxxflags .. " " .. table.concat(fl.tc.fields.flags_generated or {}, " ")
+    local add = extra and extra.flags and util.trim(extra.flags) or ""
+    if add ~= "" then
+      cxxflags = cxxflags .. " " .. add
       if inst.prefix == "" then more = "\n  cxxflags = " .. cxxflags end
     end
     local ov = overrides(inst)
-    if extra and extra.generated and inst.prefix ~= "" then ov = ov:gsub("\n  cxxflags = [^\n]*", function() return "\n  cxxflags = " .. cxxflags end) end
+    if add ~= "" and inst.prefix ~= "" then ov = ov:gsub("\n  cxxflags = [^\n]*", function() return "\n  cxxflags = " .. cxxflags end) end
     w(string.format("build %s: %s %s%s\n  includes = %s\n  defines = %s%s%s", util.ninja_escape(obj), rule(inst, "cxx"), util.ninja_escape(src),
       extra and extra.implicit and (" | " .. util.ninja_escape(extra.implicit)) or "", includes, defines, ov, more))
     -- The command the toolchain's cxx rule runs, with this file's values in it. clangd takes
@@ -430,7 +439,7 @@ function M.run(c, g, opts)
               tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""))
             local glue = util.join(build, gen .. "/" .. stem .. "." .. r.name .. ".cc")
             kfs.write(glue, fill(r.glue, util.join(build, outpath):gsub("\\", "/")))
-            list[#list + 1] = { src = glue, implicit = outpath, name = stem .. "." .. r.name }
+            list[#list + 1] = { src = glue, implicit = outpath, name = stem .. "." .. r.name, codegen = r.codegen }
             if r.engine_module then inst.generated_modules[#inst.generated_modules + 1] = fill(r.engine_module, "") end
           end
         end
@@ -702,14 +711,27 @@ function M.run(c, g, opts)
       kfs.mkdirp(util.join(build, gen))
       local includes = include_flags(inst, { util.join(build, gen) })
       local defines = define_flags(inst)
+      -- The module's codegen profile, for its own sources; the instruction sets its
+      -- isa_sources are built again for (where the toolchain names them), each said to the
+      -- module's sources as KV_HAS_ISA_<SET>=1 and to its copies as KV_ISA_<SET>=1.
+      local own = { flags = profile_flags(inst, f.codegen, m.name) }
+      local isa_sets = {}
+      for _, set in ipairs(util.sorted_keys(f.isa_sources or {})) do
+        local isa_flags = (flags(inst).tc.fields.isa or {})[set]
+        if isa_flags then
+          isa_sets[#isa_sets + 1] = { name = set, flags = table.concat(isa_flags, " "), sources = util.as_list(f.isa_sources[set]) }
+          defines = defines .. " " .. flags(inst).tc.fields.flag_define:format("KV_HAS_ISA_" .. set:upper() .. "=1")
+        end
+      end
       local objs = {}
       local unity = f.unity
       if unity == nil then unity = not opts.no_unity end
       -- Code a tool writes (generated_sources): each file alone, after its tool has run.
       inst.generated_objs = {}
+      local quiet = table.concat(flags(inst).tc.fields.flags_generated or {}, " ")
       for _, gs in ipairs(generated_sources(inst, gen)) do
         local obj = pre .. "obj/" .. sym .. "/gen_" .. gs.name:gsub("[^%w_]", "_") .. naming.obj_suffix
-        compile(inst, gs.src, obj, includes, defines, { implicit = gs.implicit, generated = true })
+        compile(inst, gs.src, obj, includes, defines, { implicit = gs.implicit, flags = quiet .. " " .. profile_flags(inst, gs.codegen, "rule of " .. m.name) })
         objs[#objs + 1] = obj
         inst.generated_objs[#inst.generated_objs + 1] = obj
       end
@@ -730,14 +752,14 @@ function M.run(c, g, opts)
           local path = util.join(build, gen .. "/unity." .. ext)
           kfs.write(path, table.concat(lines, "\n") .. "\n")
           local obj = pre .. "obj/" .. sym .. "/unity" .. tail .. naming.obj_suffix
-          compile(inst, path, obj, includes, defines)
+          compile(inst, path, obj, includes, defines, own)
           objs[#objs + 1] = obj
         else
           for _, s in ipairs(group) do
             local rel = s:sub(#m.dir + 2):gsub("^src/", "")
             if s:sub(1, #build) == build then rel = "gen_" .. util.basename(s) end
             local obj = pre .. "obj/" .. sym .. "/" .. rel:gsub("%." .. ext .. "$", "") .. tail .. naming.obj_suffix
-            compile(inst, s, obj, includes, defines)
+            compile(inst, s, obj, includes, defines, own)
             objs[#objs + 1] = obj
           end
         end
@@ -747,7 +769,18 @@ function M.run(c, g, opts)
         if not util.contains(source_exts, util.ext(s)) then
           local rel = s:sub(#m.dir + 2):gsub("^src/", "")
           local obj = pre .. "obj/" .. sym .. "/" .. rel:gsub("%.[^%./]*$", "") .. naming.obj_suffix
-          compile(inst, s, obj, includes, defines)
+          compile(inst, s, obj, includes, defines, own)
+          objs[#objs + 1] = obj
+        end
+      end
+      -- The instruction sets' copies: each listed source again, alone.
+      for _, set in ipairs(isa_sets) do
+        for _, rel0 in ipairs(set.sources) do
+          local s = abs(m.dir, rel0)
+          local rel = s:sub(#m.dir + 2):gsub("^src/", "")
+          local obj = pre .. "obj/" .. sym .. "/" .. rel:gsub("%.[^%./]*$", "") .. "_" .. set.name .. naming.obj_suffix
+          compile(inst, s, obj, includes, defines .. " " .. flags(inst).tc.fields.flag_define:format("KV_ISA_" .. set.name:upper() .. "=1"),
+            { flags = own.flags .. " " .. set.flags })
           objs[#objs + 1] = obj
         end
       end

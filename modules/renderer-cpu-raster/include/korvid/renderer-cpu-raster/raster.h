@@ -1,11 +1,11 @@
-// renderer-cpu's pixels (docs/PRDs/CPU-Renderer-PRD.md, "The CPU backend"): quads prepared
-// in the window's pixels, drawn a 64 x 64 tile at a time into 16-bit linear light, encoded to
-// 8-bit sRGB when the tile is written out. This header and raster.cc include nothing of the
-// engine's but its types: they are the code that will be built fast (the PRD's "Fast code
-// where it pays"), and must share no inline function with the sim.
+// renderer-cpu-raster: the CPU renderer's pixels (docs/PRDs/CPU-Renderer-PRD.md, "The CPU
+// backend"): quads prepared in the window's pixels, drawn a 64 x 64 tile at a time into 16-bit
+// linear light, encoded to 8-bit sRGB when the tile is written out. This header and the
+// module's sources include nothing of the engine's but its types: they are built with the
+// fast profile (the PRD's "Fast code where it pays"), and share no inline function with the sim.
 #pragma once
 #include "korvid/core/types.h"
-#include "korvid/renderer-cpu/shader.h"
+#include "korvid/renderer-cpu-raster/shader_call.h"
 
 namespace kv { namespace rb_cpu {
 
@@ -77,18 +77,14 @@ struct CpuUi {
     u64 hash;
 };
 
-// sRGB byte to 16-bit linear, and 16-bit linear to the sRGB byte (correctly rounded).
+// sRGB byte to 16-bit linear, and 16-bit linear to the sRGB byte (correctly rounded), and the
+// UI's curves. renderer-cpu makes them with the engine's math (luts.cc) and hands them in.
 struct CpuLuts {
     u16 decode[256];
     u8  encode[65536];
     f32 shade[1025];      // 0.5 (1 - erf(x)) for x from -4 to 4 in 128ths: ui.slang's approximation
     u16 cover[64][257];   // a glyph's coverage c / 256 raised to 0.75 + 0.7 g / 63, 16-bit
 };
-const CpuLuts& cpu_luts();
-
-// A linear channel (0 to 1, clamped) as 16-bit fixed point.
-u16 cpu_linear16(f32 c);
-
 // A tile's draws name a quad, or with this bit a UI item.
 constexpr u32 kCpuDrawUi = 1u << 31;
 
@@ -96,6 +92,7 @@ constexpr u32 kCpuDrawUi = 1u << 31;
 // (`shaders`: push block, layers, materials, textures, the world image) and the post shader
 // that makes a tile's ground instead of the clear.
 struct CpuFrame {
+    const CpuLuts*       luts = nullptr;
     const CpuQuad*       quads = nullptr;
     const CpuUi*         ui = nullptr;
     u16                  clear[3] = {};
@@ -104,17 +101,32 @@ struct CpuFrame {
     CpuShaderFn          post = nullptr;
 };
 
-// One tile: the draws `items` names, in order, over the clear (or the post shader's
-// picture), into `pixels` (kTile x kTile of R, G, B, pad, 16 bits each); (tx, ty) is its
-// top-left pixel, tw x th its size.
-void cpu_raster_tile(const CpuFrame& frame, const u32* items, u32 count, u16* pixels, u32 tx, u32 ty, u32 tw, u32 th);
+// The kernels, one set an instruction set (cpu_sample_world reads linear and clamped; the
+// rest are described where their types are): `base` (the platform's baseline: SSE2 on x86-64,
+// NEON on arm64) everywhere, and `avx2` where the toolchain builds it (KV_HAS_ISA_AVX2).
+// cpu_raster_path() chooses at start-up; every set draws the same bytes.
+#define KV_CPU_RASTER_API \
+void cpu_raster_tile(const CpuFrame& frame, const u32* items, u32 count, u16* pixels, u32 tx, u32 ty, u32 tw, u32 th); \
+void cpu_sample_texture(const CpuLuts& luts, const CpuTexture& t, u32 sampler, f32 u, f32 v, f32 out[4]); \
+void cpu_sample_world(const CpuWorld& w, f32 u, f32 v, f32 out[4]); \
+void cpu_encode_tile(const CpuLuts& luts, const u16* pixels, u32 tw, u32 th, u8* target, u32 pitch, bool rgba);
 
-// A texture read for a game shader: linear RGBA. `sampler` 0 nearest and repeat, 1 linear
-// and repeat, 2 linear and clamped.
-void cpu_sample_texture(const CpuTexture& t, u32 sampler, f32 u, f32 v, f32 out[4]);
-void cpu_sample_world(const CpuWorld& w, f32 u, f32 v, f32 out[4]); // linear, clamped
-// The tile encoded into the target at its place: four bytes a pixel, B, G, R, 255 (R, G, B,
-// 255 when `rgba`).
-void cpu_encode_tile(const u16* pixels, u32 tw, u32 th, u8* target, u32 pitch, bool rgba);
+namespace base { KV_CPU_RASTER_API }
+#if defined(KV_HAS_ISA_AVX2)
+namespace avx2 { KV_CPU_RASTER_API }
+#endif
+
+// The path the program draws with, chosen once: the widest set the CPU runs, or the one
+// KV_CPU_ISA names (base, avx2), for tests and measurements.
+struct CpuRasterPath {
+    const char* name;
+    void (*raster_tile)(const CpuFrame& frame, const u32* items, u32 count, u16* pixels, u32 tx, u32 ty, u32 tw, u32 th);
+    void (*encode_tile)(const CpuLuts& luts, const u16* pixels, u32 tw, u32 th, u8* target, u32 pitch, bool rgba);
+};
+const CpuRasterPath& cpu_raster_path();
+// Draw with this path from now on (a test that draws with each).
+void cpu_raster_use(const CpuRasterPath& path);
+// Every path this build has, and this CPU runs, for a test that draws with each.
+u32 cpu_raster_paths(const CpuRasterPath** out, u32 cap);
 
 } } // namespace kv::rb_cpu

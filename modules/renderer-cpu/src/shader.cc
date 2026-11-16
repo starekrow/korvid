@@ -2,7 +2,7 @@
 // The registry is the program's: a shader's CPU forms are code linked into it, registered once
 // at start-up (the game's own, and the generated modules' Slang forms).
 #include "korvid/renderer-cpu/shader.h"
-#include "raster.h"
+#include "luts.h"
 #include "korvid/core/log.h"
 #include <string.h>
 
@@ -69,9 +69,9 @@ CpuShaderFn cpu_shader_find(const char* name, bool* skipped) {
 
 void cpu_shader_sample(const CpuShaderCall& c, u32 slot, bool world, u32 sampler, f32 u, f32 v, f32 out[4]) {
     if (world) {
-        if (c.world) { rb_cpu::cpu_sample_world(*(const rb_cpu::CpuWorld*)c.world, u, v, out); return; }
+        if (c.world) { rb_cpu::base::cpu_sample_world(*(const rb_cpu::CpuWorld*)c.world, u, v, out); return; }
     } else if (const rb_cpu::CpuTexture* t = texture_at(c, slot)) {
-        rb_cpu::cpu_sample_texture(*t, sampler, u, v, out);
+        rb_cpu::base::cpu_sample_texture(rb_cpu::cpu_luts(), *t, sampler, u, v, out);
         return;
     }
     out[0] = out[1] = out[2] = 0.0f;

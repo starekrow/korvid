@@ -73,6 +73,7 @@ namespace kv_cpu_%{symbol} {
 KV_CPU_SHADER_MODULE(%{symbol}_cpu, "%{stem}", kv_cpu_%{symbol}::kv_cpu_entry)
 ]],
       engine_module = "%{symbol}_cpu_module",
+      codegen = "fast", -- the glue and the shader: presentation code, in a namespace of its own
     },
   },
 }

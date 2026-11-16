@@ -10,6 +10,7 @@
 #undef main
 #include "korvid/core/test.h"
 #include "korvid/renderer-cpu/module.h"
+#include "korvid/renderer-cpu-raster/raster.h"
 #include "korvid/image/png.h"
 #include "korvid/image/ppm.h"
 #include "korvid/platform/io.h"
@@ -96,6 +97,20 @@ int main() {
     for (const char* s : all) KV_CHECK(c, compare(dir, "cpu", s, 0, 0.0));
     for (const char* s : all) KV_CHECK(c, compare(dir, "vulkan", s, 8, 0.005));
     io_remove_tree(dir);
+    // Every other set of kernels this build has and this CPU runs: the same bytes.
+    const rb_cpu::CpuRasterPath* paths[4];
+    u32 npaths = rb_cpu::cpu_raster_paths(paths, 4);
+    const rb_cpu::CpuRasterPath& first = rb_cpu::cpu_raster_path();
+    for (u32 p = 0; p < npaths; ++p) {
+        if (paths[p] == &first) continue;
+        rb_cpu::cpu_raster_use(*paths[p]);
+        KV_INFO("test", "the gallery on the %s kernels", paths[p]->name);
+        KV_CHECK(c, io_make_temp_dir("kv-gallery-cpu-path", dir, sizeof dir));
+        KV_CHECK(c, run(4, argv) == 0);
+        for (const char* s : all) KV_CHECK(c, compare(dir, "cpu", s, 0, 0.0));
+        io_remove_tree(dir);
+    }
+    rb_cpu::cpu_raster_use(first);
     // The fast path: no game shader runs.
     KV_CHECK(c, io_make_temp_dir("kv-gallery-cpu-none", dir, sizeof dir));
     char* argv_none[] = {a0, a1, a3, a4, a2, dir, nullptr};

@@ -1,11 +1,18 @@
-// renderer-cpu's pixel kernels (raster.h). What decides a picture is integer arithmetic:
+// renderer-cpu-raster's kernels (raster.h). What decides a picture is integer arithmetic:
 // coverage by edge functions in 1/256 pixel with the top-left rule, sampling weights in 8
 // bits, blends on 16-bit linear light, the sRGB tables. Float is for the quads' local
 // coordinates only. No engine header but types: this file is to be built fast.
-#include "raster.h"
+#include "korvid/renderer-cpu-raster/raster.h"
 #include <string.h>
 
-namespace kv { namespace rb_cpu {
+// Built once for each instruction set (isa_sources): the namespace says which.
+#if defined(KV_ISA_AVX2)
+#define KV_RASTER_SET avx2
+#else
+#define KV_RASTER_SET base
+#endif
+
+namespace kv { namespace rb_cpu { namespace KV_RASTER_SET {
 
 namespace {
 
@@ -279,7 +286,7 @@ void draw_ui(const CpuUi& u, const CpuLuts& lut, u16* pixels, u32 tx, u32 ty, u3
 } // namespace
 
 void cpu_raster_tile(const CpuFrame& fr, const u32* items, u32 count, u16* pixels, u32 tx, u32 ty, u32 tw, u32 th) {
-    const CpuLuts& lut = cpu_luts();
+    const CpuLuts& lut = *fr.luts;
     if (fr.post && fr.shaders) {
         // The post shader's picture: a row of the tile a call; written, not blended.
         f32 out[kTile][4];
@@ -316,9 +323,9 @@ void cpu_raster_tile(const CpuFrame& fr, const u32* items, u32 count, u16* pixel
     }
 }
 
-void cpu_sample_texture(const CpuTexture& t, u32 sampler, f32 u, f32 v, f32 out[4]) {
+void cpu_sample_texture(const CpuLuts& luts, const CpuTexture& t, u32 sampler, f32 u, f32 v, f32 out[4]) {
     u32 c[4];
-    sample(t, sampler == 0 ? 0 : 1, cpu_luts(), u, v, c, sampler == 2);
+    sample(t, sampler == 0 ? 0 : 1, luts, u, v, c, sampler == 2);
     for (u32 k = 0; k < 4; ++k) out[k] = (f32)c[k] / 65535.0f;
 }
 
@@ -340,8 +347,7 @@ void cpu_sample_world(const CpuWorld& w, f32 u, f32 v, f32 out[4]) {
     out[3] = 1.0f;
 }
 
-void cpu_encode_tile(const u16* pixels, u32 tw, u32 th, u8* target, u32 pitch, bool rgba) {
-    const CpuLuts& lut = cpu_luts();
+void cpu_encode_tile(const CpuLuts& lut, const u16* pixels, u32 tw, u32 th, u8* target, u32 pitch, bool rgba) {
     for (u32 y = 0; y < th; ++y) {
         const u16* p = pixels + (usize)y * kTile * 4;
         u8* o = target + (usize)y * pitch;
@@ -353,4 +359,4 @@ void cpu_encode_tile(const u16* pixels, u32 tw, u32 th, u8* target, u32 pitch, b
     }
 }
 
-} } // namespace kv::rb_cpu
+} } } // namespace kv::rb_cpu::KV_RASTER_SET

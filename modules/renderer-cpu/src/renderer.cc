@@ -77,7 +77,11 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->quantize8 = getenv("KV_CPU_TARGET8") != nullptr;
     const char* cache = getenv("KV_CPU_TILE_CACHE");
     r->tile_cache = !(cache && cache[0] == '0');
-    r->stats = getenv("KV_CPU_STATS") != nullptr;
+    if (const char* st = getenv("KV_CPU_STATS")) {
+        r->stats = true;
+        int every = atoi(st);
+        if (every > 1) r->stat_every = (u32)every;
+    }
     for (FrameInFlight& f : r->frames) ok = ok && cpu_alloc(r, sizeof(f32) * 4 * kLayerCount, f.layers);
     ok = ok && rc_ring_init(r, kInitialRingBytes);
     ok = ok && rc_create_defaults(r);
@@ -128,6 +132,7 @@ void renderer_destroy(Renderer* r) {
     KV_INFO(KV_RB_NAME, "renderer down after %llu frames, %llu deltas, %llu rows uploaded, ring peak %llu KB (%u grows)",
             (unsigned long long)r->frame_count, (unsigned long long)r->world.deltas_applied, (unsigned long long)r->rows_uploaded,
             (unsigned long long)(r->ring.peak / 1024), r->ring.grows);
+    if (r->checks_passed || r->checks_failed) KV_INFO(KV_RB_NAME, "sort checks: %u passed, %u failed", r->checks_passed, r->checks_failed);
     if (r->owner_slot) *r->owner_slot = nullptr;
     Allocator* ga = r->general;
     ga->free(ga, r, sizeof(Renderer));
@@ -302,14 +307,19 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64*) {
 bool rb_frame_submit(Renderer*, FrameInFlight&) { return true; } // it ran as it was recorded
 
 bool rb_frame_present(Renderer* r, FrameInFlight&, f64*) {
+    f64 t0 = r->stats ? time_now() : 0.0;
     if (r->presenting && r->window) r->window->present_software();
+    if (r->stats) r->stat_present += time_now() - t0;
     r->presenting = false;
     return true;
 }
 
 bool rb_frame_finish(Renderer*, FrameInFlight&) { return true; }
 
-bool rb_record_begin(Renderer*, FrameInFlight&) { return true; }
+bool rb_record_begin(Renderer* r, FrameInFlight&) {
+    if (r->stats) r->record_start = time_now();
+    return true;
+}
 void rb_upload_begin(Renderer*, FrameInFlight&) {}
 
 void rb_copy_rows(Renderer*, FrameInFlight&, RbBuffer& table, const RingSpan& span, u64 offset, u64 bytes) {
@@ -350,6 +360,9 @@ void rb_read_window(Renderer* r, FrameInFlight&) {
 }
 
 
-bool rb_record_end(Renderer*, FrameInFlight&) { return true; }
+bool rb_record_end(Renderer* r, FrameInFlight&) {
+    if (r->stats) r->stat_record += time_now() - r->record_start;
+    return true;
+}
 
 } } // namespace kv::KV_RB_NS

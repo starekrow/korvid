@@ -10,10 +10,10 @@
 set -e
 export LC_ALL=C # sort and comm agree on the order
 build=${1:-build/linux-dev}
-# The fast objects: renderer-cpu's kernels, and every game shader's generated C++ (slang's
-# shader_cpu rule: gen_<shader>_shader_cpu.o), which is full of the Slang prelude's inline
-# math (more join as modules take the profile).
-fast="$build/obj/renderer_cpu/raster.o $(find "$build/obj" -name 'gen_*_shader_cpu.o' | sort | tr '\n' ' ')"
+# The fast objects: renderer-cpu-raster's (the kernels, every instruction set's copy), and
+# every game shader's generated C++ (slang's shader_cpu rule: gen_<shader>_shader_cpu.o),
+# which is full of the Slang prelude's inline math.
+fast="$(find "$build/obj/renderer_cpu_raster" -name '*.o' | sort | tr '\n' ' ') $(find "$build/obj" -name 'gen_*_shader_cpu.o' | sort | tr '\n' ' ')"
 for f in $fast; do [ -f "$f" ] || { echo "check-fast-objects: no $f (build first)"; exit 2; }; done
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

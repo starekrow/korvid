@@ -21,6 +21,7 @@
 #include "korvid/sprite/transform2.h"
 #include "korvid/text/text.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -159,6 +160,12 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--hash-systems") == 0) g_hash_systems = true;
         else if (strcmp(argv[i], "--trace-events") == 0) g_trace_events = true;
         else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) g_threads = (u32)atoi(argv[++i]);
+        else if (strcmp(argv[i], "--size") == 0 && i + 1 < argc) {
+            unsigned w = 0, h = 0;
+            if (sscanf(argv[++i], "%ux%u", &w, &h) != 2 || !w || !h) { KV_ERROR("frameloop", "--size takes WxH, not '%s'", argv[i]); return false; }
+            cfg.width = w;
+            cfg.height = h;
+        }
         else if (strcmp(argv[i], "--rate") == 0 && i + 1 < argc) {
             g_rate = atof(argv[++i]);
             if (!(g_rate > 0.0)) { KV_ERROR("frameloop", "--rate X: X must be positive (the CLI's rate, from the start)"); return false; }
@@ -218,7 +225,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         }
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
-                                  "[--no-vsync] [--renderer auto|gpu|cpu] [--cpu-shaders all|none] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] [--rate X] [--early-reads order|snapshot|kind] "
+                                  "[--no-vsync] [--renderer auto|gpu|cpu] [--cpu-shaders all|none] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] [--size WxH] [--rate X] [--early-reads order|snapshot|kind] "
                                   "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|ring] [--idle-margin-ms N] [--no-idle] [--overlay] [--touchpad] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE]", argv[0]);
             return false;
         }
