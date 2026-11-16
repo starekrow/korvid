@@ -50,6 +50,7 @@ mkdir -p "$out"
 # The run directory as the executables read a path: native on Windows (C:/...; Git Bash's
 # /c/... means nothing to them), the same path elsewhere. Redirects are the shell's and take either.
 native_out=$(cd "$out" && { pwd -W 2>/dev/null || pwd; })
+native_root=$({ pwd -W 2>/dev/null || pwd; }) # the repository, likewise
 rm -f "$out"/*.ppm "$out"/*.log
 
 failed=0
@@ -137,7 +138,7 @@ grep -E "^\[(ERROR|FATAL)" "$out/arcfire.log" "$out/testbed.log" && fail "errors
 if [ $cpu -eq 1 ]; then
     grep -q "the cpu renderer draws" "$out/arcfire.log" && pass "the CPU renderer drew" || fail "the CPU renderer did not draw (see $out/arcfire.log)"
     step "arcfire's normal replay (dev, the CPU renderer drawing, its game shaders running)"
-    (cd "$dev" && ./arcfire$exe $rflag --replay "$OLDPWD/examples/arcfire/tests/replays/normal.kvr" >"$OLDPWD/$out/replay.log" 2>&1) || fail "the replay exited with an error"
+    (cd "$dev" && ./arcfire$exe $rflag --replay "$native_root/examples/arcfire/tests/replays/normal.kvr" >"$OLDPWD/$out/replay.log" 2>&1) || fail "the replay exited with an error"
     grep -E "replay: ended" "$out/replay.log"
     grep -q "replay: ended at tick [0-9]*, matched" "$out/replay.log" && pass "replay matched" || fail "replay did not match (see $out/replay.log)"
 fi

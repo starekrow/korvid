@@ -130,7 +130,7 @@ wrapper and host are in `modules/renderer-cpu/notes/` (`spike_rings_cpu.slang.tx
   - Vulkan's `render` on the same run is 13 to 16 ms of mostly vsync wait.
   - The 1280 x 720 and 1920 x 1080 numbers are milestone 5's table: frameloop has no size option yet.
 - **Not done here:** D3D12 and Metal need nothing new for this milestone; Win32's software present is still
-  unrun.
+  unrun (run since: "Windows", below).
 
 ## Milestone 4: game shaders and the post pass
 
@@ -297,7 +297,7 @@ wrapper and host are in `modules/renderer-cpu/notes/` (`spike_rings_cpu.slang.tx
     - the gallery's ten scenes one by one (the gallery draws each once, and its test holds their pixels);
     - the testbed swarm beyond milestone 2's numbers;
     - every port but Linux. Windows reports when its build runs `tools/cpu-numbers.sh` (it needs a POSIX shell:
-      Git Bash).
+      Git Bash). Done since: "Windows", below.
 - **The profiler's zones** are `cpu.sort`, `cpu.raster` and `cpu.tiles`, beside the core's `record` and `render`.
   `renderer_gpu_stats` is not filled in: the CPU's stats line has its numbers, and frameloop prints no GPU line
   when there is no GPU.
@@ -364,3 +364,87 @@ Asked for after milestone 5, when its numbers showed the AVX2 copy buying nothin
     texture reads. A hand-written CPU form of the nebula (`renderer_cpu_shader`) would be the next step, if wanted.
   - The baseline gained a little from solving the runs: 13.3 ms against the committed kernels' 13.75 on the same
     machine the same day (arcfire without game shaders, 1080p).
+
+## Windows
+
+Nov 15, 2026: the first build and run on Windows. A Ryzen 7 7840U (8 cores, 16 threads), Windows 11, MSVC 14.51, a
+dev build, the display at 60 Hz and scaled by 1.5.
+
+- **It builds and draws the same bytes.** The branch built clean with cl at the first try (with kormake rebuilt
+  from the branch's scripts: `isa_sources` and `codegen` are new fields). The gallery's test draws all ten scenes
+  exactly as `references/cpu` has them, on the baseline kernels and on AVX2: cl's build makes gcc's bytes.
+- **The gate passes:** `tools/render-gate.sh windows cpu`, every check. Two of them were Linux's until now:
+  - arcfire's replay was handed Git Bash's `/c/...` path, which a Windows program cannot open; the gate passes the
+    native one (`native_root`). Its 236 hashes match with the CPU renderer and its game shaders drawing.
+  - `tools/check-fast-objects.sh` read gcc's weak symbols with `nm`. On cl an inline function is a COMDAT, and the
+    linker keeps the first copy it meets, which is the same hazard. The script reads cl's objects with `dumpbin`
+    (the one beside the build's `link.exe`): the fast objects' functions, against every other object's. cl's
+    `/O2` makes every function a COMDAT, so being one says nothing; sharing one does. What it lets pass, and why:
+    string literals and a CRT header's statics (data, and the same bytes), cl's array constructor and destructor
+    loops, and the UCRT's stdio functions, which its `<stdio.h>` defines inline (`select.cc`'s `fprintf`). None
+    does arithmetic, and cl's fast profile keeps `/fp:precise` anyway. 69 functions, none shared. The module's
+    test is no longer counted as fast, here or on Linux: it is built as the rest are.
+- **Win32's software present** (a DIB, `SetDIBitsToDevice`) works: kromedemo under `--renderer cpu`, captured from
+  the screen while it ran, is the picture its screenshot is. It is paced by the frame loop (no vsync on a DIB).
+- **The D3D12 gate on this branch:** the gallery is exact, the sort checks pass and the GPU frame is as before, but
+  "compiled shaders differ from the baseline". The DXIL in every `.dxil.zip` is the same. What changed is the
+  Slang IR module each zip also carries (`children/<n>/<n>.slang-module`, which `d3d_shader.cc` never reads): it
+  records the compiler's search paths, and the shader rule now passes one more, `renderer-cpu/shaders`. The gate
+  hashes whole zips; hashing their DXIL alone would say what it means to. Not done here.
+
+`tools/cpu-numbers.sh` on this machine:
+
+| Workload | Size | Threads | Kernels | fps | Record ms | UI lists ms | Pass end ms | Present ms | Tiles drawn / skipped |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| kromedemo hover | 1280x720 | all | avx2 | 59 | 0.476 | 0.063 | 0.407 | 0.431 | 7.5 / 232.5 |
+| kromedemo hover | 1280x720 | 1 | avx2 | 58 | 1.104 | 0.057 | 1.040 | 0.380 | 9.4 / 230.6 |
+| kromedemo hover | 1920x1080 | all | avx2 | 59 | 0.472 | 0.060 | 0.407 | 0.785 | 9.5 / 500.5 |
+| kromedemo hover | 1920x1080 | 1 | avx2 | 59 | 1.161 | 0.060 | 1.004 | 0.707 | 9.5 / 500.5 |
+| kromedemo hover | 1920x1080 | all | base | 59 | 0.529 | 0.060 | 0.463 | 0.842 | 9.5 / 500.5 |
+| kromedemo bench (2,000 nodes a tick) | 1280x720 | all | avx2 | 59 | 0.584 | 0.397 | 0.181 | 0.401 | 3.1 / 236.8 |
+| kromedemo bench (2,000 nodes a tick) | 1280x720 | 1 | avx2 | 59 | 0.746 | 0.328 | 0.415 | 0.371 | 3.1 / 236.8 |
+| kromedemo bench (2,000 nodes a tick) | 1920x1080 | all | avx2 | 59 | 0.564 | 0.354 | 0.205 | 0.746 | 4.2 / 505.9 |
+| kromedemo bench (2,000 nodes a tick) | 1920x1080 | 1 | avx2 | 59 | 0.927 | 0.333 | 0.593 | 0.726 | 4.2 / 505.9 |
+| kromedemo bench (2,000 nodes a tick) | 1920x1080 | all | base | 59 | 0.601 | 0.351 | 0.224 | 0.858 | 4.2 / 505.9 |
+| kromescreens bench (10,000 steps a tick) | 1280x720 | all | avx2 | 58 | 0.042 | 0.031 | 0.006 | 0.425 | 0.0 / 240.0 |
+| kromescreens bench (10,000 steps a tick) | 1280x720 | 1 | avx2 | 58 | 0.040 | 0.031 | 0.007 | 0.349 | 0.0 / 240.0 |
+| kromescreens bench (10,000 steps a tick) | 1920x1080 | all | avx2 | 56 | 0.042 | 0.029 | 0.008 | 0.762 | 0.0 / 510.0 |
+| kromescreens bench (10,000 steps a tick) | 1920x1080 | 1 | avx2 | 58 | 0.042 | 0.030 | 0.008 | 0.696 | 0.0 / 510.0 |
+| kromescreens bench (10,000 steps a tick) | 1920x1080 | all | base | 59 | 0.042 | 0.030 | 0.009 | 0.741 | 0.0 / 510.0 |
+| arcfire demo, shimmer | 1280x720 | all | avx2 | 59 | 6.479 | 0.000 | 6.018 | 0.562 | 240.0 / 0.0 |
+| arcfire demo, shimmer | 1280x720 | 1 | avx2 | 18 | 53.465 | 0.000 | 53.141 | 0.331 | 240.0 / 0.0 |
+| arcfire demo, shimmer | 1920x1080 | all | avx2 | 59 | 14.699 | 0.000 | 14.255 | 0.719 | 510.0 / 0.0 |
+| arcfire demo, shimmer | 1920x1080 | 1 | avx2 | 9 | 106.144 | 0.000 | 107.737 | 0.616 | 494.0 / 16.0 |
+| arcfire demo, shimmer | 1920x1080 | all | base | 34 | 27.921 | 0.000 | 27.532 | 0.647 | 510.0 / 0.0 |
+| arcfire demo, --cpu-shaders none | 1280x720 | all | avx2 | 59 | 2.972 | 0.000 | 2.507 | 0.519 | 226.6 / 13.4 |
+| arcfire demo, --cpu-shaders none | 1280x720 | 1 | avx2 | 47 | 20.753 | 0.000 | 20.493 | 0.320 | 227.4 / 12.6 |
+| arcfire demo, --cpu-shaders none | 1920x1080 | all | avx2 | 59 | 5.052 | 0.000 | 4.599 | 0.808 | 474.0 / 36.0 |
+| arcfire demo, --cpu-shaders none | 1920x1080 | 1 | avx2 | 22 | 44.784 | 0.000 | 44.495 | 0.553 | 475.1 / 34.9 |
+| arcfire demo, --cpu-shaders none | 1920x1080 | all | base | 48 | 19.172 | 0.000 | 18.691 | 0.990 | 474.6 / 35.4 |
+| arcfire --bench ring rank=56 | 1280x720 | all | avx2 | 38 | 26.113 | 0.000 | 24.386 | 0.395 | 240.0 / 0.0 |
+| arcfire --bench ring rank=56 | 1280x720 | 1 | avx2 | 6 | 137.605 | 0.000 | 139.796 | 0.326 | 236.0 / 4.0 |
+| arcfire --bench ring rank=56 | 1920x1080 | all | avx2 | 20 | 43.668 | 0.000 | 41.831 | 0.808 | 510.0 / 0.0 |
+| arcfire --bench ring rank=56 | 1920x1080 | 1 | avx2 | 4 | (no stats line) | | | | |
+| arcfire --bench ring rank=56 | 1920x1080 | all | base | 8 | 94.937 | 0.000 | 96.153 | 0.890 | 501.5 / 8.5 |
+
+Beside Linux's AVX2 table above (1920 x 1080, every core; both machines have 8 cores and 16 threads):
+
+| Workload | Windows, baseline | Windows, AVX2 | Linux, baseline | Linux, AVX2 |
+| --- | --- | --- | --- | --- |
+| arcfire without game shaders | 19.2 ms | 5.1 ms | 13.1 ms | 4.3 ms |
+| arcfire with nebula and shimmer | 27.9 ms | 14.7 ms | 19.8 ms | 10.4 ms |
+| the ring bench | 94.9 ms | 43.7 ms | 83.9 ms | 33.2 ms |
+
+- **What the numbers say, and the outliers:**
+  - **Krome is cheap here as there.** A hover records in about 0.5 ms at either size, kromedemo's 2,000-node bench
+    in 0.6 ms, kromescreens' 10,000 steps in 0.04 ms. A hover draws about 9 tiles where Linux drew 4: the window is
+    scaled by 1.5, so a button covers more of them.
+  - **arcfire holds 60 fps at 1080p on every core**, with its game shaders (14.7 ms) and without (5.1 ms).
+  - **Present is under a millisecond** (0.3 to 0.9): a DIB blit, with no wait for the display in it.
+  - **Outlier: cl's code is slower where the compiler writes the loops.** The baseline kernels take 1.5 times
+    gcc's (19.2 ms against 13.1), and Slang's C++ for the game shaders is slower too (their share of a frame: about
+    9.6 ms against 6.1). The hand-written AVX2 spans close most of it (5.1 against 4.3). Not looked into here:
+    whether it is the code cl makes (`/O2 /Ob3` against `-O3`) or the two machines; one machine's two compilers
+    would say.
+  - **One core is 9 times slower than sixteen threads** on arcfire (44.8 ms against 5.1 at 1080p without
+    shaders), as on Linux.
