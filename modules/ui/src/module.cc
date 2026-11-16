@@ -418,7 +418,7 @@ void ui_draw(TickContext& ctx) {
             disc.x = x0; disc.y = y0; disc.w = d; disc.h = d;
             s.quads.push(disc);
         }
-        auto rect = [&](f32 x, f32 y, f32 w, f32 h) { if (w <= 0.0f || h <= 0.0f) return; UiQuad b = q; b.x = x; b.y = y; b.w = w; b.h = h; s.quads.push(b); };
+        auto rect = [&](f32 rx, f32 ry, f32 rw, f32 rh) { if (rw <= 0.0f || rh <= 0.0f) return; UiQuad b = q; b.x = rx; b.y = ry; b.w = rw; b.h = rh; s.quads.push(b); };
         if (d < 1.0f) { x0 = cx; y0 = cy; d = 0.0f; }
         rect(0, 0, s.win_w, y0);                         // above
         rect(0, y0 + d, s.win_w, s.win_h - y0 - d);      // below
