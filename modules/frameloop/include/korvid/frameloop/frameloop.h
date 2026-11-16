@@ -49,7 +49,11 @@ struct FrameLoopConfig {
     bool        validation = KV_DEBUG != 0;
     RendererBackend renderer = RendererBackend::Auto; // --renderer auto|gpu|cpu: which bound backend draws
     bool        cpu_shaders = true; // --cpu-shaders all|none: the CPU renderer runs game shaders (RendererDesc::cpu_shaders)
-    u32         cpu_scale   = 0;    // --cpu-scale auto|N: the CPU renderer's pixels per its own, each way (RendererDesc::cpu_scale)
+    // The CPU renderer's window pixels per pixel it draws, each way (RendererDesc::cpu_scale);
+    // --cpu-scale auto|N overrides it. 0 (auto): the window's units on a 2x or 3x display, a
+    // game's choice: its frames redraw most of the window. 1: every pixel, a tool's: sharp
+    // text, and its frames cost only what changed.
+    u32         cpu_scale   = 0;
     bool        exit_on_close  = true;  // CloseRequested -> ExitRequested
     bool        exit_on_escape = true;  // Escape held    -> ExitRequested
     f64         run_seconds    = -1.0;  // >= 0: ExitRequested after this long (smoke tests)

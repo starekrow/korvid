@@ -463,21 +463,30 @@ Beside Linux's AVX2 table above (1920 x 1080, every core; the same machine):
   Apple2, so games there draw on the CPU; a phone draws with Metal unless `--renderer cpu` says otherwise.
 - **The iOS window's software frames** (`host_window_ios.mm`): three buffers of ours; a present wraps one in a
   CGImage and makes it the contents of a plain layer over the Metal one, without an animation. The image's release
-  hands the buffer back, so a frame never draws into pixels on screen. The frame loop paces the presents. The tile
-  cache does not help there yet: the target changes buffer every frame, so every tile is drawn.
+  hands the buffer back, so a frame never draws into pixels on screen. The frame loop paces the presents. Its
+  frames say they rotate (`SoftwareFrame::rotates`): last frame's pixels are not in this one, so the renderer
+  draws into a target of its own and copies it in at the present, and the tile cache works as on the desktop
+  (kromedemo's hover in the Simulator at 2622 x 1206: 11 tiles of 779 drawn, 0.2 ms; the copy and the present
+  3 ms).
 - **The render scale.** A Retina Mac's window has 4 pixels for each of its units, a phone's 9, and the CPU drew
   every one: arcfire on the CPU at 52 fps on an M3 Max's 2560 x 1440, 13 fps on an iPhone 15 Pro Max. Now the CPU
   draws one pixel for N x N of the window's (`RendererDesc::cpu_scale`, `--cpu-scale auto|N`, `KV_CPU_SCALE`).
-  - auto (the default) is the window's `pixel_scale`, rounded down: the window's units on a display at 2x or 3x.
-    1 below 2x (Linux and Windows at 100%, Windows at 150% as measured above, headless), so nothing changes there.
+  - The program chooses (`FrameLoopConfig::cpu_scale`); the command line and `KV_CPU_SCALE` override it.
+  - auto (0, a game's choice) is the window's `pixel_scale`, rounded down: the window's units on a display at 2x
+    or 3x. 1 below 2x (Linux and Windows at 100%, Windows at 150% as measured above, headless), so nothing
+    changes there.
+  - Krome's programs (kromedemo, kromescreens) choose 1: a tool's frame costs only what changed (the tile cache),
+    so dividing saves little, and it would soften text, which is most of what a tool draws.
   - The game and the core still see the window's size: the push block is built for it, and sprites, the HUD's
     screen-space layers and the UI lists reach the smaller target through clip space. Input, layout and cameras
     are untouched. The post shader's `size` is the target's (its uv is the pixel over it), as a GPU's would be at
     that density.
   - A window that can scale a frame up as it shows it is asked for a smaller one (`HostWindow::software_size`):
-    iOS's layer does it on the GPU, nearest-neighbour. Elsewhere the frame draws into a buffer of the renderer's and
-    the present scales it into the window's frame, nearest-neighbour, on the job threads (about 1.6 ms at
+    iOS's layer does it on the GPU, nearest-neighbour. Elsewhere the frame draws into a target of the renderer's
+    and the present scales it into the window's frame, nearest-neighbour, on the job threads (about 1.6 ms at
     2560 x 1440 on the M3 Max).
+  - Next, if wanted: the world below the UI layers at the scale and the UI and screen-space layers at every
+    pixel, through the post pass's two passes, so a game's HUD stays sharp too.
   - Screenshots are the target's size.
   - `tools/cpu-numbers.sh` passes `--cpu-scale 1`, so its sizes stay pixels drawn.
 

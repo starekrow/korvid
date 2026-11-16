@@ -349,7 +349,7 @@ bool HostWindow::software_frame(SoftwareFrame* out) {
     b->held = 1;
     g_soft.drawing = b;
     software_ = b;
-    *out = SoftwareFrame{b->pixels, b->width, b->height, b->pitch, false};
+    *out = SoftwareFrame{b->pixels, b->width, b->height, b->pitch, false, true};
     return true;
 }
 

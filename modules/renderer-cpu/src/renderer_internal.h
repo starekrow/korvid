@@ -91,16 +91,18 @@ struct Renderer : RenderCore {
     // core see the window's size (logical_*): the push block, the post shader's size; the
     // target is that size divided, and everything reaches it through clip space. A window
     // that scales frames up as it shows them (HostWindow::software_size) gives a target that
-    // size; else the frame draws into `scaled` and the present scales it up into the
-    // window's frame (window_*), nearest-neighbour, on the job threads.
+    // size; else the frame draws into `own` and the present scales it up into the window's
+    // frame (window_*), nearest-neighbour, on the job threads. A window whose frames rotate
+    // (iOS) also gets `own`, copied at the present: the tile cache needs last frame's pixels.
     u32  scale_setting = 0;     // RendererDesc::cpu_scale or KV_CPU_SCALE; 0: the window's pixel_scale
     u32  scale = 1, logged_scale = 0, logged_width = 0; // this frame's, and what was last logged
     u32  logical_width = 0, logical_height = 0;
-    bool upscale = false;       // this frame scales `scaled` into window_frame at its present
-    Buffer scaled;
+    bool copy_out = false;      // this frame draws into `own`, copied (scaled) into the window's at its present
+    bool told_rotates = false;
+    Buffer own;
     u8*  window_pixels = nullptr;
     u32  window_width = 0, window_height = 0, window_pitch = 0;
-    Buffer xmap;                // a window column's source column, for the upscale
+    Buffer xmap;                // a window column's source column, for the copy
     u32  xmap_from = 0, xmap_to = 0;
 
     // The frame being drawn (frame.cc): its push block and layer offsets (rb_sort,

@@ -386,6 +386,7 @@ constinit const kv::FrameLoopConfig k_config = {
     .title          = "korvid krome demo",
     .width          = 1000,
     .height         = 640,
+    .cpu_scale      = 1, // a tool's window: sharp text on the CPU renderer, and a frame costs only what changed
     .exit_on_escape = false, // Escape closes Krome's overlays
     .flags          = k_flags,
     .options        = k_options,

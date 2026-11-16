@@ -95,7 +95,9 @@ struct HostWindow {
     // bytes apart; R, G, B then the fourth (ignored) in memory when `rgba`, else B, G, R. The
     // size is the window's now. False when there is no window, it is not a software one, or
     // the system will not give its pixels.
-    struct SoftwareFrame { u8* pixels = nullptr; u32 width = 0, height = 0, pitch = 0; bool rgba = false; };
+    // `rotates`: each frame is a different buffer (iOS's ring), so last frame's pixels are not
+    // in it; a caller that redraws only what changed keeps its own and copies it in.
+    struct SoftwareFrame { u8* pixels = nullptr; u32 width = 0, height = 0, pitch = 0; bool rgba = false; bool rotates = false; };
     bool software_frame(SoftwareFrame* out);
     // The size the next software_frame() is asked to be, smaller than the window's: a host
     // that can scale a frame up to the window as it shows it (iOS: Core Animation does) gives

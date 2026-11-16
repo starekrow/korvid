@@ -130,7 +130,7 @@ void renderer_destroy(Renderer* r) {
     cpu_free(r, r->material_table);
     cpu_free(r, r->ring.buf);
     cpu_free(r, r->headless);
-    cpu_free(r, r->scaled);
+    cpu_free(r, r->own);
     cpu_free(r, r->xmap);
     cpu_free(r, r->shot_buffer);
     cpu_free(r, r->check_buffer);
@@ -291,7 +291,7 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64*) {
     f.have_image = false;
     f.width = f.height = 0;
     r->target = nullptr;
-    r->upscale = false;
+    r->copy_out = false;
     if (r->window) {
         u32 W = r->window->width(), H = r->window->height();
         u32 s = frame_scale(r);
@@ -302,45 +302,42 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64*) {
         if (!r->window->software_frame(&sf) || !sf.width || !sf.height) return true; // no image: the frame still takes its uploads
         r->presenting = true;
         r->scale = s;
-        if (s > 1 && sf.width == tw && sf.height == th) { // the window scales it up
-            r->target         = sf.pixels;
-            r->target_width   = sf.width;
-            r->target_height  = sf.height;
-            r->target_pitch   = sf.pitch;
-            r->logical_width  = W;
-            r->logical_height = H;
-        } else if (s > 1) { // the window's size: drawn smaller here, scaled up at the present
+        bool scaled_by_window = s > 1 && sf.width == tw && sf.height == th;
+        r->logical_width  = scaled_by_window ? W : sf.width;
+        r->logical_height = scaled_by_window ? H : sf.height;
+        if (s > 1 && !scaled_by_window) { // the window's size: drawn smaller here, scaled up at the present
             tw = (sf.width + s - 1) / s;
             th = (sf.height + s - 1) / s;
+        } else {
+            tw = sf.width;
+            th = sf.height;
+        }
+        r->copy_out = (s > 1 && !scaled_by_window) || sf.rotates;
+        if (r->copy_out) {
             u64 bytes = (u64)tw * th * 4;
-            if (r->scaled.size < bytes) {
-                cpu_free(r, r->scaled);
-                if (!cpu_alloc(r, bytes, r->scaled)) { r->window->present_software(); r->presenting = false; return false; }
+            if (r->own.size < bytes) {
+                cpu_free(r, r->own);
+                if (!cpu_alloc(r, bytes, r->own)) { r->window->present_software(); r->presenting = r->copy_out = false; return false; }
             }
-            r->upscale        = true;
+            if (sf.rotates && !r->told_rotates) KV_INFO(KV_RB_NAME, "the window's frames rotate: drawn into a target of the renderer's, copied at each present");
+            r->told_rotates   = r->told_rotates || sf.rotates;
             r->window_pixels  = sf.pixels;
             r->window_width   = sf.width;
             r->window_height  = sf.height;
             r->window_pitch   = sf.pitch;
-            r->target         = r->scaled.data;
-            r->target_width   = tw;
-            r->target_height  = th;
+            r->target         = r->own.data;
             r->target_pitch   = tw * 4;
-            r->logical_width  = sf.width;
-            r->logical_height = sf.height;
         } else {
             r->target         = sf.pixels;
-            r->target_width   = sf.width;
-            r->target_height  = sf.height;
             r->target_pitch   = sf.pitch;
-            r->logical_width  = sf.width;
-            r->logical_height = sf.height;
         }
+        r->target_width  = tw;
+        r->target_height = th;
         r->target_rgba = sf.rgba;
         if (r->scale != r->logged_scale || r->logical_width != r->logged_width) {
             if (r->scale > 1)
                 KV_INFO(KV_RB_NAME, "drawing at 1/%u of the window's pixels: %ux%u for %ux%u, scaled up %s", r->scale, r->target_width,
-                        r->target_height, r->logical_width, r->logical_height, r->upscale ? "here" : "by the window");
+                        r->target_height, r->logical_width, r->logical_height, scaled_by_window ? "by the window" : "here");
             else if (r->logged_scale > 1)
                 KV_INFO(KV_RB_NAME, "drawing at the window's pixels: %ux%u", r->target_width, r->target_height);
             r->logged_scale = r->scale;
@@ -375,8 +372,9 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64*) {
 
 bool rb_frame_submit(Renderer*, FrameInFlight&) { return true; } // it ran as it was recorded
 
-// The drawn frame scaled up into the window's, nearest-neighbour: a window row from its
-// source row, or a copy of the row above when they share one.
+// The drawn frame into the window's: row by row at the same size, else scaled up,
+// nearest-neighbour (a window row from its source row, or a copy of the row above when they
+// share one).
 struct UpscaleJob {
     const u8* src;
     u32       src_width, src_height, src_pitch;
@@ -393,14 +391,16 @@ static void upscale_rows(u32, u32 begin, u32 end, void* user) {
         u32* d = (u32*)(j.dst + (usize)y * j.dst_pitch);
         if (sy == prev) { memcpy(d, j.dst + (usize)(y - 1) * j.dst_pitch, (usize)j.dst_width * 4); continue; }
         const u32* s = (const u32*)(j.src + (usize)sy * j.src_pitch);
-        for (u32 x = 0; x < j.dst_width; ++x) d[x] = s[j.xmap[x]];
+        if (!j.xmap) memcpy(d, s, (usize)j.dst_width * 4);
+        else for (u32 x = 0; x < j.dst_width; ++x) d[x] = s[j.xmap[x]];
         prev = sy;
     }
 }
 
-static void upscale(Renderer* r) {
+static void copy_out(Renderer* r) {
     u32 ww = r->window_width;
-    if (r->xmap_from != r->target_width || r->xmap_to != ww) {
+    bool same = ww == r->target_width && r->window_height == r->target_height;
+    if (!same && (r->xmap_from != r->target_width || r->xmap_to != ww)) {
         cpu_free(r, r->xmap);
         if (!cpu_alloc(r, (u64)ww * sizeof(u32), r->xmap)) { r->xmap_from = r->xmap_to = 0; return; }
         u32* m = (u32*)r->xmap.data;
@@ -409,13 +409,13 @@ static void upscale(Renderer* r) {
         r->xmap_to   = ww;
     }
     UpscaleJob j{r->target, r->target_width, r->target_height, r->target_pitch,
-                 r->window_pixels, ww, r->window_height, r->window_pitch, (const u32*)r->xmap.data};
-    jobs_run(r->window_height, 64, upscale_rows, &j, "cpu.upscale");
+                 r->window_pixels, ww, r->window_height, r->window_pitch, same ? nullptr : (const u32*)r->xmap.data};
+    jobs_run(r->window_height, 64, upscale_rows, &j, "cpu.copy_out");
 }
 
 bool rb_frame_present(Renderer* r, FrameInFlight&, f64*) {
     f64 t0 = r->stats ? time_now() : 0.0;
-    if (r->presenting && r->upscale) upscale(r);
+    if (r->presenting && r->copy_out) copy_out(r);
     if (r->presenting && r->window) r->window->present_software();
     if (r->stats) r->stat_present += time_now() - t0;
     r->presenting = false;

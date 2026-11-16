@@ -333,6 +333,7 @@ constinit const kv::FrameLoopConfig k_config = {
     .title          = "korvid krome: goldberg's screens",
     .width          = 1100,
     .height         = 700,
+    .cpu_scale      = 1, // a tool's window: sharp text on the CPU renderer, and a frame costs only what changed
     .exit_on_escape = false,
     .flags          = k_flags,
     .options        = k_options,
