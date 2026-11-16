@@ -19,7 +19,7 @@ configs   { "debug", "dev", "ship" }
 -- shaders follow the binding, slang's rule). On both, the CPU renderer is linked beside the
 -- GPU backend as its fallback (docs/PRDs/CPU-Renderer-PRD.md): render's dispatcher takes
 -- the first in the list that can draw here, so the GPU comes first.
-bind "render" { linux = { "renderer-vulkan", "renderer-cpu" }, windows = { "renderer-d3d12", "renderer-cpu" } }
+bind "render" { linux = { "renderer-vulkan", "renderer-cpu" }, windows = { "renderer-d3d12", "renderer-cpu" }, macos = { "renderer-metal", "renderer-cpu" } }
 
 root "examples" { paths = "examples", platforms = { "linux" } }
 root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
@@ -43,7 +43,7 @@ root "windows" {
 root "macos" {
   modules   = { "lua", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "tool", "kpack", "picture", "kbor", "kimb", "kim", "kimc", "save",
                 "bulletml", "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
-                "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal",
+                "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal", "renderer-cpu", "renderer-cpu-raster",
                 "sockit2m", "window", "testbed", "stones", "cpukiller",
                 "rocks", "arcanum", "arcfire", "gallery", "script", "truetype", "typeset", "krome", "goldberg", "kromedemo", "kromescreens" },
   tests     = true,

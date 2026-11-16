@@ -6,7 +6,7 @@
 -- renderer-cpu-raster, built with the fast profile.
 module "renderer-cpu" {
   provides  = "render",
-  platforms = { "linux", "windows" },
+  platforms = { "linux", "windows", "macos" },
   deps      = { "core", "math", "render", "platform", "platform_hid", "renderer-cpu-raster" },
   engine_module = true,
   unity     = false,
