@@ -4,4 +4,5 @@
 module "krome" {
   deps          = { "core", "math", "platform", "platform_hid", "cli", "render", "asset", "lua", "kimb", "typeset" },
   engine_module = true,
+  licenses      = { "icons/LICENSE" }, -- std's icons: Material Symbols (Apache 2.0), icons/README.md
 }

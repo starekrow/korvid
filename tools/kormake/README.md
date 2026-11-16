@@ -308,6 +308,7 @@ the build directory, never in the source tree.
 | `defines` | Preprocessor definitions for the module's own sources and tests |
 | `private_includes` | Directories under the module that are on the include path of its own sources and tests but not of the modules that link it (a vendored library that includes its own headers by `<name>`) |
 | `unity` | `false` compiles each source on its own; this overrides `--no-unity` and `--unity` |
+| `test_deps` | Modules the module's tests use and the module does not (`{ "image" }` to read reference pictures): their headers and libraries reach the test executable only. Each must be in the build for the platform |
 | `codegen` | A code-generation profile by name (`"fast"`), as the toolchain's `codegen_profiles` spell it, for the module's own sources (not its tests). Code built so must share no inline function with the rest of the program (`tools/check-fast-objects.sh`) |
 | `isa_sources` | Sources built again for an instruction set the toolchain names in `isa`: `{ avx2 = { "src/raster.cc" } }`. A copy is compiled with the set's flags and `KV_ISA_<SET>=1`; the module's other sources see `KV_HAS_ISA_<SET>=1` where the copy exists, and choose at run time |
 | `engine_module` | The module registers a `ModuleDesc`. Each executable gets a generated `gen/<exe>/modules.gen.cc` listing every engine module in its closure, in dependency order |

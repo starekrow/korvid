@@ -853,7 +853,20 @@ function M.run(c, g, opts)
       local srcs = {}
       for _, n in ipairs(util.sorted_files(m.tests_dir, "cc")) do srcs[#srcs + 1] = util.join(m.tests_dir, n) end
       if #srcs == 0 then goto skip end
-      local includes = include_flags(inst, { m.tests_dir })
+      -- test_deps: modules the tests use and the module does not (a picture decoder to read
+      -- reference pictures), each with its closure: their headers and their libraries.
+      local extra_dirs, extra = { m.tests_dir }, {}
+      for _, name in ipairs(util.as_list(m.fields.test_deps or {})) do
+        local found
+        for _, i in ipairs(g.instances) do
+          if i.module.name == name and i.platform == inst.platform and i.prefix == inst.prefix and not i.dropped then found = i end
+        end
+        if not found then util.fail("%s: test_deps names '%s', which this build does not have for %s", m.name, name, inst.platform) end
+        for _, d in ipairs(found.closure) do extra[#extra + 1] = d end
+        extra[#extra + 1] = found
+      end
+      for _, d in ipairs(extra) do if d.module.include then extra_dirs[#extra_dirs + 1] = d.module.include end end
+      local includes = include_flags(inst, extra_dirs)
       local objs = {}
       for _, s in ipairs(srcs) do
         local obj = pre .. "obj/" .. sym .. "/tests/" .. util.basename(s):gsub("%.cc$", "") .. flags(inst).tc.fields.obj_suffix
@@ -868,6 +881,12 @@ function M.run(c, g, opts)
       -- Linked as an executable is. The stamp takes what is staged as implicit inputs, so
       -- a changed asset reruns the test without relinking it.
       local li = link_inputs(inst)
+      local have = {}
+      for _, l in ipairs(li.libs) do have[l] = true end
+      for i = #extra, 1, -1 do
+        local l = libs_by_key[extra[i].key]
+        if l and not have[l] then li.libs[#li.libs + 1] = l; have[l] = true end
+      end
       local exe = pre .. "bin/" .. sym .. "_tests" .. flags(inst).tc.fields.exe_suffix
       link(inst, exe, objs, li)
       -- An executable's tests do not link it (it has a main of its own): they run it, so

@@ -12,7 +12,8 @@
     "text":     { "runtime": true },
     "script":   { "runtime": true },
     "kim":      { "runtime": false },
-    "kimb":     { "runtime": true }
+    "kimb":     { "runtime": true },
+    "svg":      { "runtime": false }
   },
 
   "converters": {
@@ -40,6 +41,7 @@
     { "match": "*.lua",           "meta": { "type": "script" } },
     { "match": "*.kim",           "meta": { "type": "kim" } },
     { "match": "*.kimb",          "meta": { "type": "kimb" } },
+    { "match": "*.svg",           "meta": { "type": "svg", "cook": false } },
 
     { "match": "*.berg",          "meta": { "cook": false } },
     { "match": "*.sh",            "meta": { "cook": false } },

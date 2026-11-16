@@ -116,7 +116,7 @@ must be widened before the transform, as SVG does.
 
 Drawing a shape at `w x h` pixels:
 
-1. **Flatten.** Each curve is cut into lines in device space. The tolerance is 0.1 pixel,
+1. **Flatten.** Each curve is cut into lines in device space. The tolerance is 0.02 pixel,
    chosen from the curve's control points under the full transform. A 16 px icon gets a
    few segments a curve, a 1000 px one many.
 2. **Stroke.** A stroke is expanded to a fill outline in the path's own space, then
@@ -273,7 +273,7 @@ package ships it.
 
 | ID | Requirement | Priority |
 |---|---|---|
-| KP1 | `patherizer`: paths of lines and quadratic and cubic curves, flattened to 0.1 pixel under the full transform | P0 |
+| KP1 | `patherizer`: paths of lines and quadratic and cubic curves, flattened to 0.02 pixel under the full transform | P0 |
 | KP2 | Fills: nonzero and even-odd, integer cell coverage, exact for edges that do not overlap within a pixel | P0 |
 | KP3 | Strokes expanded to fills: miter (with limit), round and bevel joins; butt, round and square caps; dashes with offset; widened before a non-uniform transform | P0 |
 | KP4 | Paint: solid, linear and radial gradients (pad, reflect, repeat), opacity per fill and stroke; sRGB interpolation, linearRGB on request | P0 |

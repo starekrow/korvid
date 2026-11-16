@@ -41,6 +41,7 @@ local module_fields = {
   -- for the module's own sources, not its tests. isa_sources: sources built again for each
   -- instruction set the toolchain names in `isa` ({ avx2 = { "src/raster.cc" } }).
   codegen = true, isa_sources = true,
+  test_deps = true, -- modules the module's tests use and it does not, linked into its test only
 }
 -- What only a toolchain (provides = "toolchain") may set, at its top or in a per_platform
 -- section: its tag and source directories, the compiler, archiver and linker with their
