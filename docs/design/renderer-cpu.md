@@ -285,11 +285,10 @@ wrapper and host are in `modules/renderer-cpu/notes/` (`spike_rings_cpu.slang.tx
       window is drawn each frame: the cache cannot follow a shader that reads the world anywhere.
   - **One core is 8 to 9 times slower than sixteen threads** on arcfire (102 ms against 12 ms at 1080p without
     shaders): the tiles spread well.
-  - **Outlier: AVX2 buys nothing.** The AVX2 copy is within 1 to 3% of the baseline everywhere, and its object
-    holds 4 instructions on the 256-bit registers. The kernels are scalar per pixel (edge tests, table lookups, a
-    branch per blend), and the compiler finds nothing to widen. A gain would take hand-written span kernels (8
-    pixels of a quad at once: edges, nearest sampling, the blends, the encode), with a test that they draw the
-    baseline's bytes. The selection, the build and the test are in place for them.
+  - **Outlier: AVX2 bought nothing**, as first built. The AVX2 copy was within 1 to 3% of the baseline everywhere,
+    and its object held 4 instructions on the 256-bit registers: the kernels were scalar per pixel, and the
+    compiler found nothing to widen. The user asked for hand-written span kernels for sprites; see "The AVX2 sprite
+    spans" below.
   - **Outlier: the ring bench** (`--bench ring --dial rank=56`, 11,800 sprites, most of them additive glows) runs
     at 20 fps at 720p and 11 at 1080p. The engine's profiler puts nearly all of it in the world pass's tiles
     (418 ms summed over threads, about 26 ms of wall time at 720p). It is overdraw, not the sort or the binning.
@@ -302,3 +301,66 @@ wrapper and host are in `modules/renderer-cpu/notes/` (`spike_rings_cpu.slang.tx
 - **The profiler's zones** are `cpu.sort`, `cpu.raster` and `cpu.tiles`, beside the core's `record` and `render`.
   `renderer_gpu_stats` is not filled in: the CPU's stats line has its numbers, and frameloop prints no GPU line
   when there is no GPU.
+
+## The AVX2 sprite spans
+
+Asked for after milestone 5, when its numbers showed the AVX2 copy buying nothing.
+
+- **A quad's row is one run.** A quad is convex, so its covered pixels in a row are one run. `draw_quad` now solves
+  the run's ends from the four integer edge functions (one division an edge a row) instead of testing pixel by
+  pixel. The coverage is exactly the same, and the gallery's pictures did not move for it.
+- **The baseline's coordinates are per pixel.** A sprite pixel's local coordinates are now `l0 + x ldx + y ldy` at
+  each pixel, not a sum stepped across the row: eight lanes cannot reproduce a running sum bit for bit.
+  - This moved 27 pixels of the gallery's `transform` scene, where nearest sampling sits exactly on a texel's edge.
+    `references/cpu/gallery_transform.png` is redrawn. It is still within tolerance of Vulkan's: 250 pixels past
+    8, against 233 before, all on those edges.
+- **The AVX2 span** (`raster.cc`, `sprite_span` under `KV_ISA_AVX2`) draws eight pixels at once: the coordinates,
+  the uv, nearest or linear sampling with gathers (the texels, then the sRGB table), the tint, and the three
+  blends. The blends work on pixel pairs, after a transpose.
+  - It is the scalar arithmetic lane by lane: the same float operations in the same order (no FMA in this copy),
+    `floor` and truncation as `floor_i` and the casts, the integer sampling weights.
+  - `x / 65535` is `(x * 0x80008001) >> 47`, which holds for every 32-bit value (checked over all of them).
+  - A texture whose size is a power of two wraps by a mask.
+  - Group by group it falls back to the scalar pixel: a texture of another size read past its edge, a tint
+    above 1, an 8-bit target (`KV_CPU_TARGET8`), and a run's last pixels short of eight.
+- **Proof of the same bytes:**
+  - renderer-cpu-raster's test draws 3,000 tiles of random quads with every kernel set and compares them byte for
+    byte: turned and axis-aligned quads, both filters, every blend, tints above and below 1, textures of
+    power-of-two sizes and not, uvs that wrap.
+  - The gallery's test draws its ten scenes with each set, exactly against `references/cpu`.
+- **Numbers.** The arcfire rows of `tools/cpu-numbers.sh` again, the display at 120 Hz this time. 1920 x 1080 has
+  510 tiles here (30 x 17). The earlier table's 459 (27 x 17) mean that window was no wider than 1728: the display
+  it opened on probably cut it.
+
+  | Workload | Size | Threads | Kernels | fps | Record ms | UI lists ms | Pass end ms | Present ms | Tiles drawn / skipped |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | arcfire demo, shimmer | 1280x720 | all | avx2 | 120 | 4.596 | 0.000 | 4.125 | 3.120 | 240.0 / 0.0 |
+  | arcfire demo, shimmer | 1280x720 | 1 | avx2 | 25 | 41.158 | 0.000 | 40.734 | 0.492 | 240.0 / 0.0 |
+  | arcfire demo, shimmer | 1920x1080 | all | avx2 | 84 | 10.370 | 0.000 | 9.916 | 1.186 | 510.0 / 0.0 |
+  | arcfire demo, shimmer | 1920x1080 | 1 | avx2 | 12 | 84.313 | 0.000 | 83.202 | 0.942 | 510.0 / 0.0 |
+  | arcfire demo, shimmer | 1920x1080 | all | base | 48 | 19.773 | 0.000 | 19.393 | 1.048 | 510.0 / 0.0 |
+  | arcfire demo, --cpu-shaders none | 1280x720 | all | avx2 | 120 | 2.665 | 0.000 | 2.124 | 5.123 | 228.0 / 12.0 |
+  | arcfire demo, --cpu-shaders none | 1280x720 | 1 | avx2 | 56 | 17.373 | 0.000 | 17.068 | 0.340 | 227.2 / 12.8 |
+  | arcfire demo, --cpu-shaders none | 1920x1080 | all | avx2 | 120 | 4.311 | 0.000 | 3.824 | 3.277 | 459.0 / 51.0 |
+  | arcfire demo, --cpu-shaders none | 1920x1080 | 1 | avx2 | 26 | 36.818 | 0.000 | 36.503 | 0.840 | 459.0 / 51.0 |
+  | arcfire demo, --cpu-shaders none | 1920x1080 | all | base | 67 | 13.075 | 0.000 | 12.643 | 1.032 | 459.0 / 51.0 |
+  | arcfire --bench ring rank=56 | 1280x720 | all | avx2 | 46 | 19.404 | 0.000 | 17.917 | 0.630 | 240.0 / 0.0 |
+  | arcfire --bench ring rank=56 | 1280x720 | 1 | avx2 | 8 | 102.353 | 0.000 | 103.654 | 0.554 | 236.0 / 4.0 |
+  | arcfire --bench ring rank=56 | 1920x1080 | all | avx2 | 26 | 33.241 | 0.000 | 31.238 | 0.934 | 510.0 / 0.0 |
+  | arcfire --bench ring rank=56 | 1920x1080 | 1 | avx2 | 4 | (no stats line) | | | | |
+  | arcfire --bench ring rank=56 | 1920x1080 | all | base | 12 | 83.895 | 0.000 | 82.027 | 1.142 | 459.0 / 0.0 |
+
+  At 1920 x 1080 on every core:
+
+  | Workload | Baseline | AVX2 | |
+  | --- | --- | --- | --- |
+  | arcfire without game shaders | 13.1 ms | 4.3 ms | 3.0x |
+  | arcfire with nebula and shimmer | 19.8 ms | 10.4 ms | 1.9x |
+  | the ring bench | 83.9 ms | 33.2 ms | 2.5x |
+
+  arcfire now holds 120 fps at 1080p without game shaders, and 84 fps with them. The ring bench runs at 46 fps at
+  720p (20 before). On one core, arcfire without game shaders runs at 56 fps at 720p.
+  - What is left with shaders on is the shaders: Slang's C++ is scalar, a call a run of pixels, through virtual
+    texture reads. A hand-written CPU form of the nebula (`renderer_cpu_shader`) would be the next step, if wanted.
+  - The baseline gained a little from solving the runs: 13.3 ms against the committed kernels' 13.75 on the same
+    machine the same day (arcfire without game shaders, 1080p).

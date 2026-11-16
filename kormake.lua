@@ -32,7 +32,7 @@ root "windows" {
                 "platform_audio", "audio", "renderer-vulkan", "renderer-d3d12", "touchpad", "frameloop", "save", "ui", "xml", "bulletml", "image", "picture", "kbor", "kimb", "kim", "kimc",
                 "window", "testbed", "stones", "rocks", "arcanum",
                 "cpukiller", "arcfire", "gallery", "sockit2m", "lua", "script", "goldberg",
-                "truetype", "typeset", "krome", "kromedemo", "kromescreens", "renderer-cpu" },
+                "truetype", "typeset", "krome", "kromedemo", "kromescreens", "renderer-cpu", "renderer-cpu-raster" },
   tests     = true,
   platforms = { "windows" },
 }

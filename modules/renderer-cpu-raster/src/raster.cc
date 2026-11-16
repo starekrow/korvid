@@ -4,6 +4,9 @@
 // coordinates only. No engine header but types: this file is to be built fast.
 #include "korvid/renderer-cpu-raster/raster.h"
 #include <string.h>
+#if defined(KV_ISA_AVX2)
+#include <immintrin.h>
+#endif
 
 // Built once for each instruction set (isa_sources): the namespace says which.
 #if defined(KV_ISA_AVX2)
@@ -123,6 +126,24 @@ void shade_run(const CpuQuad& q, const CpuShaderCall& base, const CpuLuts& lut, 
     }
 }
 
+// One pixel of a sprite quad without a game shader: its local coordinates at the pixel's
+// centre (l0 + x ldx + y ldy, in that order: the AVX2 span computes them lane by lane the same
+// way), the texture's texel, the tint, the blend. `ylx`, `yly` are y ldy.
+inline void sprite_pixel(const CpuQuad& q, const CpuLuts& lut, u16* d, i32 x, f32 ylx, f32 yly, bool quantize8) {
+    f32 fx = (f32)x;
+    f32 lx = q.l0x + fx * q.ldx_x + ylx, ly = q.l0y + fx * q.ldx_y + yly;
+    f32 u = q.uvx + lx * q.uvw, v = q.uvy + (1.0f - ly) * q.uvh;
+    u32 t[4];
+    sample(q.tex, q.filter, lut, u, v, t);
+    u32 src[4] = {(u32)(((u64)t[0] * q.tint[0]) >> 16), (u32)(((u64)t[1] * q.tint[1]) >> 16),
+                  (u32)(((u64)t[2] * q.tint[2]) >> 16), (u32)(((u64)t[3] * q.tint[3]) >> 16)};
+    blend(d, src, q.blend);
+    if (quantize8) quantize(d, lut);
+}
+
+// A run of a row's covered pixels, `count` of them from x0, into `row` (x0's pixel).
+void sprite_span(const CpuQuad& q, const CpuLuts& lut, u16* row, i32 x0, i32 count, i32 y, bool quantize8);
+
 void draw_quad(const CpuQuad& q, const CpuShaderCall* shaders, const CpuLuts& lut, u16* pixels, u32 tx, u32 ty, u32 tw, u32 th, bool quantize8) {
     i32 x0 = q.x0 > (i32)tx ? q.x0 : (i32)tx, x1 = q.x1 < (i32)(tx + tw) ? q.x1 : (i32)(tx + tw);
     i32 y0 = q.y0 > (i32)ty ? q.y0 : (i32)ty, y1 = q.y1 < (i32)(ty + th) ? q.y1 : (i32)(ty + th);
@@ -139,43 +160,178 @@ void draw_quad(const CpuQuad& q, const CpuShaderCall* shaders, const CpuLuts& lu
         e_dx[k] = -dy * 256;
         e_dy[k] = dx * 256;
     }
+    bool shaded = q.shader && shaders;
     for (i32 y = y0; y < y1; ++y) {
-        i64 e[4] = {e_row[0], e_row[1], e_row[2], e_row[3]};
-        f32 lx = q.l0x + (f32)x0 * q.ldx_x + (f32)y * q.ldy_x;
-        f32 ly = q.l0y + (f32)x0 * q.ldx_y + (f32)y * q.ldy_y;
-        u16* row = pixels + ((usize)(y - (i32)ty) * kTile + (u32)(x0 - (i32)tx)) * 4;
-        if (q.shader && shaders) {
-            // The row's runs of covered pixels, each a call of the shader.
-            i32 run = -1;
-            for (i32 x = x0; x <= x1; ++x) {
-                bool in = x < x1 && (e[0] | e[1] | e[2] | e[3]) >= 0;
-                if (in && run < 0) run = x;
-                if (!in && run >= 0) {
-                    shade_run(q, *shaders, lut, pixels + ((usize)(y - (i32)ty) * kTile + (u32)(run - (i32)tx)) * 4, run, x - run, y, quantize8);
-                    run = -1;
-                }
-                if (x < x1) { e[0] += e_dx[0]; e[1] += e_dx[1]; e[2] += e_dx[2]; e[3] += e_dx[3]; }
-            }
-            for (u32 k = 0; k < 4; ++k) e_row[k] += e_dy[k];
-            continue;
+        // The row's covered pixels: a quad is convex, so they are one run, [lo, hi). Each
+        // edge bounds it on one side, solved exactly from its function at x0 and its step:
+        // pixel x0 + n is inside the edge when e + n de >= 0.
+        i64 lo = x0, hi = x1;
+        for (u32 k = 0; k < 4 && lo < hi; ++k) {
+            i64 e = e_row[k], de = e_dx[k];
+            if (de == 0) { if (e < 0) hi = lo; }
+            else if (de > 0) { if (e < 0) { i64 n = (-e + de - 1) / de; if (x0 + n > lo) lo = x0 + n; } }
+            else if (e < 0) hi = lo;
+            else { i64 n = e / -de; if (x0 + n + 1 < hi) hi = x0 + n + 1; }
         }
-        for (i32 x = x0; x < x1; ++x, row += 4) {
-            if ((e[0] | e[1] | e[2] | e[3]) >= 0) {
-                f32 u = q.uvx + lx * q.uvw, v = q.uvy + (1.0f - ly) * q.uvh;
-                u32 t[4];
-                sample(q.tex, q.filter, lut, u, v, t);
-                u32 src[4] = {(u32)(((u64)t[0] * q.tint[0]) >> 16), (u32)(((u64)t[1] * q.tint[1]) >> 16),
-                              (u32)(((u64)t[2] * q.tint[2]) >> 16), (u32)(((u64)t[3] * q.tint[3]) >> 16)};
-                blend(row, src, q.blend);
-                if (quantize8) quantize(row, lut);
-            }
-            e[0] += e_dx[0]; e[1] += e_dx[1]; e[2] += e_dx[2]; e[3] += e_dx[3];
-            lx += q.ldx_x;
-            ly += q.ldx_y;
+        if (lo < hi) {
+            u16* at = pixels + ((usize)(y - (i32)ty) * kTile + (u32)((i32)lo - (i32)tx)) * 4;
+            if (shaded) shade_run(q, *shaders, lut, at, (i32)lo, (i32)(hi - lo), y, quantize8);
+            else sprite_span(q, lut, at, (i32)lo, (i32)(hi - lo), y, quantize8);
         }
         for (u32 k = 0; k < 4; ++k) e_row[k] += e_dy[k];
     }
 }
+
+void sprite_span_scalar(const CpuQuad& q, const CpuLuts& lut, u16* row, i32 x0, i32 count, i32 y, bool quantize8) {
+    f32 ylx = (f32)y * q.ldy_x, yly = (f32)y * q.ldy_y;
+    for (i32 i = 0; i < count; ++i, row += 4) sprite_pixel(q, lut, row, x0 + i, ylx, yly, quantize8);
+}
+
+#if !defined(KV_ISA_AVX2)
+void sprite_span(const CpuQuad& q, const CpuLuts& lut, u16* row, i32 x0, i32 count, i32 y, bool quantize8) {
+    sprite_span_scalar(q, lut, row, x0, count, y, quantize8);
+}
+#else
+// ---- the AVX2 span: eight pixels at once, the scalar path's arithmetic lane by lane ---------
+// Every step is the scalar's: the float coordinates in the same order (no FMA in this copy),
+// floor and truncation as floor_i and the casts do them, the integer sampling, tint and
+// blends exactly (x / 65535 as (x * 0x80008001) >> 47, which holds for every u32). What it
+// cannot do at once (a texture whose width or height is not a power of two, read past its
+// edge; an 8-bit target; a tint above 1) goes to sprite_pixel. The gallery's test draws
+// with both paths and compares them exactly.
+
+inline __m256i div65535(__m256i x) {
+    const __m256i m = _mm256_set1_epi64x(0x80008001);
+    __m256i even = _mm256_srli_epi64(_mm256_mul_epu32(x, m), 47);
+    __m256i odd = _mm256_srli_epi64(_mm256_mul_epu32(_mm256_srli_epi64(x, 32), m), 47);
+    return _mm256_or_si256(even, _mm256_slli_epi64(odd, 32));
+}
+
+// A coordinate's texel index along an axis of n texels: wrapped by mask for a power of two;
+// else false when any lane is outside [0, n - 1 - extra] (the caller draws those pixels one by one).
+inline bool wrap8(__m256i& i, u32 n, bool pow2, i32 extra) {
+    if (pow2) { i = _mm256_and_si256(i, _mm256_set1_epi32((i32)n - 1)); return true; }
+    __m256i bad = _mm256_or_si256(_mm256_cmpgt_epi32(_mm256_setzero_si256(), i), _mm256_cmpgt_epi32(i, _mm256_set1_epi32((i32)n - 1 - extra)));
+    return _mm256_testz_si256(bad, bad) != 0;
+}
+
+// Eight texels as 16-bit linear R, G, B and alpha.
+inline void texel8(const CpuTexture& t, const CpuLuts& lut, __m256i ix, __m256i iy, __m256i out[4]) {
+    __m256i idx = _mm256_add_epi32(_mm256_mullo_epi32(iy, _mm256_set1_epi32((i32)t.width)), ix);
+    __m256i p = _mm256_i32gather_epi32((const int*)t.pixels, idx, 4);
+    const __m256i byte = _mm256_set1_epi32(255);
+    __m256i c[3] = {_mm256_and_si256(p, byte), _mm256_and_si256(_mm256_srli_epi32(p, 8), byte), _mm256_and_si256(_mm256_srli_epi32(p, 16), byte)};
+    for (u32 k = 0; k < 3; ++k) {
+        if (t.srgb) out[k] = _mm256_and_si256(_mm256_i32gather_epi32((const int*)lut.decode, c[k], 2), _mm256_set1_epi32(0xFFFF));
+        else out[k] = _mm256_mullo_epi32(c[k], _mm256_set1_epi32(257));
+    }
+    out[3] = _mm256_mullo_epi32(_mm256_srli_epi32(p, 24), _mm256_set1_epi32(257));
+}
+
+// Eight pixels' source colors (tinted, clamped), or false: draw them one by one.
+inline bool source8(const CpuQuad& q, const CpuLuts& lut, i32 x, f32 ylx, f32 yly, __m256i src[4]) {
+    const CpuTexture& t = q.tex;
+    __m256 fx = _mm256_cvtepi32_ps(_mm256_add_epi32(_mm256_set1_epi32(x), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7)));
+    __m256 lx = _mm256_add_ps(_mm256_add_ps(_mm256_set1_ps(q.l0x), _mm256_mul_ps(fx, _mm256_set1_ps(q.ldx_x))), _mm256_set1_ps(ylx));
+    __m256 ly = _mm256_add_ps(_mm256_add_ps(_mm256_set1_ps(q.l0y), _mm256_mul_ps(fx, _mm256_set1_ps(q.ldx_y))), _mm256_set1_ps(yly));
+    __m256 u = _mm256_add_ps(_mm256_set1_ps(q.uvx), _mm256_mul_ps(lx, _mm256_set1_ps(q.uvw)));
+    __m256 v = _mm256_add_ps(_mm256_set1_ps(q.uvy), _mm256_mul_ps(_mm256_sub_ps(_mm256_set1_ps(1.0f), ly), _mm256_set1_ps(q.uvh)));
+    __m256 fu = _mm256_mul_ps(u, _mm256_set1_ps((f32)t.width)), fv = _mm256_mul_ps(v, _mm256_set1_ps((f32)t.height));
+    const __m256 lo = _mm256_set1_ps(-1e9f), hi = _mm256_set1_ps(1e9f);
+    __m256 ok = _mm256_and_ps(_mm256_and_ps(_mm256_cmp_ps(fu, lo, _CMP_GT_OQ), _mm256_cmp_ps(fu, hi, _CMP_LT_OQ)),
+                              _mm256_and_ps(_mm256_cmp_ps(fv, lo, _CMP_GT_OQ), _mm256_cmp_ps(fv, hi, _CMP_LT_OQ)));
+    fu = _mm256_and_ps(fu, ok);
+    fv = _mm256_and_ps(fv, ok);
+    bool pw = (t.width & (t.width - 1)) == 0, ph = (t.height & (t.height - 1)) == 0;
+    __m256i tc[4];
+    if (q.filter == 0) {
+        __m256i ix = _mm256_cvttps_epi32(_mm256_floor_ps(fu)), iy = _mm256_cvttps_epi32(_mm256_floor_ps(fv));
+        if (!wrap8(ix, t.width, pw, 0) || !wrap8(iy, t.height, ph, 0)) return false;
+        texel8(t, lut, ix, iy, tc);
+    } else {
+        fu = _mm256_sub_ps(fu, _mm256_set1_ps(0.5f));
+        fv = _mm256_sub_ps(fv, _mm256_set1_ps(0.5f));
+        __m256i ix = _mm256_cvttps_epi32(_mm256_floor_ps(fu)), iy = _mm256_cvttps_epi32(_mm256_floor_ps(fv));
+        const __m256 k256 = _mm256_set1_ps(256.0f), half = _mm256_set1_ps(0.5f);
+        __m256i wx = _mm256_cvttps_epi32(_mm256_add_ps(_mm256_mul_ps(_mm256_sub_ps(fu, _mm256_cvtepi32_ps(ix)), k256), half));
+        __m256i wy = _mm256_cvttps_epi32(_mm256_add_ps(_mm256_mul_ps(_mm256_sub_ps(fv, _mm256_cvtepi32_ps(iy)), k256), half));
+        __m256i ix1 = _mm256_add_epi32(ix, _mm256_set1_epi32(1)), iy1 = _mm256_add_epi32(iy, _mm256_set1_epi32(1));
+        if (pw) { wrap8(ix, t.width, true, 0); wrap8(ix1, t.width, true, 0); }
+        else if (!wrap8(ix, t.width, false, 1)) return false;
+        if (ph) { wrap8(iy, t.height, true, 0); wrap8(iy1, t.height, true, 0); }
+        else if (!wrap8(iy, t.height, false, 1)) return false;
+        __m256i a[4], b[4], c[4], d[4];
+        texel8(t, lut, ix, iy, a);
+        texel8(t, lut, ix1, iy, b);
+        texel8(t, lut, ix, iy1, c);
+        texel8(t, lut, ix1, iy1, d);
+        const __m256i k = _mm256_set1_epi32(256);
+        __m256i iwx = _mm256_sub_epi32(k, wx), iwy = _mm256_sub_epi32(k, wy);
+        for (u32 ch = 0; ch < 4; ++ch) {
+            __m256i top = _mm256_add_epi32(_mm256_mullo_epi32(a[ch], iwx), _mm256_mullo_epi32(b[ch], wx));
+            __m256i bottom = _mm256_add_epi32(_mm256_mullo_epi32(c[ch], iwx), _mm256_mullo_epi32(d[ch], wx));
+            __m256i sum = _mm256_add_epi32(_mm256_add_epi32(_mm256_mullo_epi32(top, iwy), _mm256_mullo_epi32(bottom, wy)), _mm256_set1_epi32(32768));
+            tc[ch] = _mm256_srli_epi32(sum, 16);
+        }
+    }
+    const __m256i max = _mm256_set1_epi32(65535);
+    for (u32 ch = 0; ch < 4; ++ch)
+        src[ch] = _mm256_min_epu32(_mm256_srli_epi32(_mm256_mullo_epi32(tc[ch], _mm256_set1_epi32((i32)q.tint[ch])), 16), max);
+    return true;
+}
+
+// Two pixels (one in each 128-bit half, R, G, B, A in 32-bit lanes) over two destination pixels.
+inline __m256i blend2(__m256i s, __m256i d, u8 mode) {
+    __m256i res;
+    if (mode == kCpuOpaque) res = s;
+    else {
+        __m256i a = _mm256_shuffle_epi32(s, 0xFF);
+        __m256i sa = _mm256_mullo_epi32(s, a);
+        if (mode == kCpuAlpha) {
+            __m256i ia = _mm256_sub_epi32(_mm256_set1_epi32(65535), a);
+            res = div65535(_mm256_add_epi32(_mm256_add_epi32(sa, _mm256_mullo_epi32(d, ia)), _mm256_set1_epi32(32767)));
+        } else {
+            res = _mm256_min_epu32(_mm256_add_epi32(d, div65535(_mm256_add_epi32(sa, _mm256_set1_epi32(32767)))), _mm256_set1_epi32(65535));
+        }
+    }
+    return _mm256_blend_epi32(res, d, 0x88); // the fourth channel stays the target's
+}
+
+// Eight pixels' sources over the row's eight pixels at `row`.
+inline void blend8(u16* row, const __m256i src[4], u8 mode) {
+    // The sources by pixel: {0, 4}, {1, 5}, {2, 6}, {3, 7}, a pixel to each 128-bit half.
+    __m256i rg_lo = _mm256_unpacklo_epi32(src[0], src[1]), rg_hi = _mm256_unpackhi_epi32(src[0], src[1]);
+    __m256i ba_lo = _mm256_unpacklo_epi32(src[2], src[3]), ba_hi = _mm256_unpackhi_epi32(src[2], src[3]);
+    __m256i s04 = _mm256_unpacklo_epi64(rg_lo, ba_lo), s15 = _mm256_unpackhi_epi64(rg_lo, ba_lo);
+    __m256i s26 = _mm256_unpacklo_epi64(rg_hi, ba_hi), s37 = _mm256_unpackhi_epi64(rg_hi, ba_hi);
+    // The targets the same way: pixels 0, 1 and 4, 5; then 2, 3 and 6, 7.
+    const __m256i z = _mm256_setzero_si256();
+    __m256i d0 = _mm256_set_m128i(_mm_loadu_si128((const __m128i*)(row + 16)), _mm_loadu_si128((const __m128i*)row));
+    __m256i d1 = _mm256_set_m128i(_mm_loadu_si128((const __m128i*)(row + 24)), _mm_loadu_si128((const __m128i*)(row + 8)));
+    __m256i r04 = blend2(s04, _mm256_unpacklo_epi16(d0, z), mode), r15 = blend2(s15, _mm256_unpackhi_epi16(d0, z), mode);
+    __m256i r26 = blend2(s26, _mm256_unpacklo_epi16(d1, z), mode), r37 = blend2(s37, _mm256_unpackhi_epi16(d1, z), mode);
+    __m256i o0 = _mm256_packus_epi32(r04, r15), o1 = _mm256_packus_epi32(r26, r37);
+    _mm_storeu_si128((__m128i*)row, _mm256_castsi256_si128(o0));
+    _mm_storeu_si128((__m128i*)(row + 16), _mm256_extracti128_si256(o0, 1));
+    _mm_storeu_si128((__m128i*)(row + 8), _mm256_castsi256_si128(o1));
+    _mm_storeu_si128((__m128i*)(row + 24), _mm256_extracti128_si256(o1, 1));
+}
+
+void sprite_span(const CpuQuad& q, const CpuLuts& lut, u16* row, i32 x0, i32 count, i32 y, bool quantize8) {
+    const CpuTexture& t = q.tex;
+    bool wide = !quantize8 && t.pixels && t.width && t.height && (u64)t.width * t.height < (1ull << 31) && q.blend <= kCpuAdditive &&
+                q.tint[0] <= 65536 && q.tint[1] <= 65536 && q.tint[2] <= 65536 && q.tint[3] <= 65536;
+    if (!wide) { sprite_span_scalar(q, lut, row, x0, count, y, quantize8); return; }
+    f32 ylx = (f32)y * q.ldy_x, yly = (f32)y * q.ldy_y;
+    i32 i = 0;
+    for (; i + 8 <= count; i += 8, row += 32) {
+        __m256i src[4];
+        if (source8(q, lut, x0 + i, ylx, yly, src)) blend8(row, src, q.blend);
+        else for (i32 k = 0; k < 8; ++k) sprite_pixel(q, lut, row + 4 * k, x0 + i + k, ylx, yly, false);
+    }
+    for (; i < count; ++i, row += 4) sprite_pixel(q, lut, row, x0 + i, ylx, yly, false);
+}
+#endif
 
 // ---- the UI primitive (ui.slang's fs_ui, line for line in float; the blend in 16 bits) ----
 
