@@ -182,12 +182,22 @@ void HostWindow::cursor(CursorShape shape) {
     if (c) SDL_SetCursor(c);
 }
 
+// A drag that leaves the window: SDL counts motion outside a window that holds no capture
+// as the pointer leaving, and lets go of its buttons, so a press is cut at the edge. Where
+// SDL cannot capture (Wayland), the pointer is confined to the window instead while the
+// button is down: the drag goes on, the cursor held at the edge, until the release.
 bool HostWindow::capture_mouse(bool on) {
     if (!native_) return false;
-    bool ok = SDL_CaptureMouse(on);
-    static bool told = false;
-    if (!ok && on && !told) { KV_INFO("input", "mouse capture: %s (a drag outside the window rests on the platform)", SDL_GetError()); told = true; }
-    return ok;
+    static int capture = -1; // -1 not tried; 1 SDL captures; 0 it cannot: confine instead
+    if (capture != 0) {
+        bool ok = SDL_CaptureMouse(on);
+        if (capture < 0 && on) {
+            capture = ok ? 1 : 0;
+            if (!ok) KV_INFO("input", "mouse capture: %s; a press confines the pointer to the window instead", SDL_GetError());
+        }
+        if (capture == 1) return ok;
+    }
+    return SDL_SetWindowMouseGrab((SDL_Window*)native_, on);
 }
 
 // Framebuffer pixels per window unit (2 on a scaled desktop); 1 when SDL has no answer.
