@@ -87,7 +87,9 @@ void test_io_tasks(TestCtx& c) {
         KV_CHECK(c, s.ran == 10 && s.most == 2);
         KV_CHECK(c, took < 0.5); // five rounds of 20 ms, not ten, and no pump between them
         KV_CHECK(c, q.completions().len == 0); // nothing completes before the pump
-        q.pump();
+        // A worker counts its job as run before it posts the completion, so the last may land
+        // a moment after `ran` says ten: pumped until it has (it was one pump, and a race).
+        for (f64 t1 = time_now(); q.completions().len < 10 && time_now() - t1 < 1.0;) { q.pump(); if (q.completions().len < 10) time_sleep(0.001); }
         KV_CHECK(c, q.completions().len == 10 && q.tasks_done == 10 && q.pending() == 0);
         for (u32 i = 0; i < 10; ++i) {
             const IoCompletion* done = by_user(q, i + 1);
