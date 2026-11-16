@@ -265,20 +265,19 @@ widgets exist (K25, K26).
 
 ### Vector shapes
 
-As the design has it: a shape asset of paths, fills and strokes; SVG converted by a Lua
-asset tool, never read at runtime; rasterized on the CPU at the exact pixel size and
+As the design has it: a shape asset of paths, fills and strokes; SVG converted by the `svg`
+module (C++, run by goldberg in process; decided in the slice 5 PRD), never read at runtime; rasterized on the CPU at the exact pixel size and
 cached by shape and size; the stated subset (cubics and arcs flattened, both fill rules,
 strokes with joins, caps and dashes expanded to fills, solid, linear and radial paint,
-transforms, clip paths, group opacity). The shape asset is KBOR too (`.kshape` by
-convention; open).
+transforms, clip paths, group opacity). The shape asset is KBOR too (`.kshape`).
 
-**The rasterizer is the engine's own**, a module of its own (`vector`, name to settle)
+**The rasterizer is the engine's own**, a module of its own (`patherizer`)
 that depends on `core` and `math` only, and is not Krome's. stb_truetype is left alone:
-its rasterizer is shaped for glyph outlines, and SVG needs more of one anyway. `vector`
+its rasterizer is shaped for glyph outlines, and SVG needs more of one anyway. `patherizer`
 fills paths with both rules at analytic coverage, expands strokes to fills, and paints
 solid, linear and radial fills into a caller's buffer, with the engine's math so a shape
 rasterizes to the same pixels everywhere. Krome caches its output per shape and size; the
-SVG tool, kvscript (`kv.vector`, for asset scripts) and a game can call it directly.
+SVG tool, kvscript (`kv.patherizer`, for asset scripts) and a game can call it directly.
 
 ### Assets and reload
 
@@ -308,7 +307,7 @@ the model, a definition used with the wrong arguments: each names the line writt
 | IME composition events and the candidate window's position | `platform_hid` | 3 |
 | Paragraph text for every customer: wrapping, measure, caret geometry, glyph cache on demand, fallback fonts | `text`, `asset` (fonts) | 3 |
 | Subpixel positioning, opt-in | `text`, `asset` (fonts) | 3 |
-| A general-purpose vector rasterizer: fills with both rules, strokes, gradients | `vector` (new) | 5 |
+| A general-purpose vector rasterizer: fills with both rules, strokes, gradients | `patherizer` (new) | 5 |
 | The platforms' text input protocols, and an accessibility tree | `platform_hid`, the platform ports | later |
 | Reload by path and handle rebind | `asset` (goldberg's Live) | 6 |
 
@@ -381,7 +380,7 @@ the model, a definition used with the wrong arguments: each names the line writt
    `selected` reaching its descendants' looks, Enter in an edit with nothing to submit,
    dotted paths in texts, braces in model values). After those, the five screens
    (`examples/kromescreens`) needed nothing more.
-5. **Shapes.** The `vector` module, the shape asset, the SVG tool, Krome's shape cache; icons in the
+5. **Shapes.** The `patherizer` module, the shape asset, the SVG tool, Krome's shape cache; icons in the
    standard prelude.
 6. **Live.** Hot reload of screens, preludes, themes and shapes through goldberg and the
    asset module's rebind.
