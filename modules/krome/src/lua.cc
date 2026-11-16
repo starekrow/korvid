@@ -743,6 +743,10 @@ void krome_model_changed(KromeModule& s, KromeScreen& sc, u64 key) {
         const KromeDep d = sc.deps[i];
         if (d.key != key) continue;
         if (d.kind == KromeDep::Text) { krome_fill_node(s, sc, sc.tree, d.node); continue; }
+        if (d.kind == KromeDep::Behave) {
+            krome_behave(s, KromeTarget{sc.id, 0, d.node}, KromeCall::Update, KromeCallArgs{});
+            continue;
+        }
         if (d.kind == KromeDep::Prop) {
             if (const char* bad = krome_apply_bound(s, sc, sc.tree, d))
                 krome_error(s, name_str(sc.name), 0, nullptr, 0, "%s=@%s: %s", name_str(d.prop), name_str(d.path), bad);
@@ -870,6 +874,8 @@ void krome_model_write_string(KromeModule& s, KromeScreen& sc, const char* path,
 
 bool krome_fire(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, f64 value) {
     if (node >= tree.nodes.len) return false;
+    // In what a behaviour opened (a dropdown's list): its pick first.
+    if (krome_pick(s, sc, tree, node)) { ++s.fired; return true; }
     const KromeNode& n = tree.nodes[node];
     if (n.event.is_null() && n.binding.is_null()) return false;
     Name id = n.id, event = n.event, bound = n.binding;
@@ -942,7 +948,8 @@ int widget_set(lua_State* L) {
     format(path, sizeof path, "%s", name_str(t->nodes[node].binding));
     lua_pushvalue(L, 2);
     lua_setfield(L, 1, "value");
-    if (lua_type(L, 2) == LUA_TNUMBER) krome_model_write_number(*s, *sc, path, (f64)lua_tonumber(L, 2));
+    if (lua_type(L, 2) == LUA_TTABLE) krome_model_write_value(*s, *sc, path, 2);
+    else if (lua_type(L, 2) == LUA_TNUMBER) krome_model_write_number(*s, *sc, path, (f64)lua_tonumber(L, 2));
     else if (lua_type(L, 2) == LUA_TBOOLEAN) {
         // A boolean through the same path as a flip: the store, then what reads it.
         bool want = lua_toboolean(L, 2) != 0;
@@ -973,7 +980,74 @@ int widget_open(lua_State* L) {
     u32 overlay, node;
     KromeTree* t = widget_of(L, 1, &s, &sc, &overlay, &node);
     if (!t) return 0;
-    return open_overlay_at(L, s, sc, 2, lua_istable(L, 3) ? 3 : 0, t->nodes[node].id);
+    Name id = t->nodes[node].id;
+    open_overlay_at(L, s, sc, 2, lua_istable(L, 3) ? 3 : 0, id);
+    if (KromeOverlay* o = krome_overlay(*sc, (u32)lua_tointeger(L, -1))) {
+        o->owner = KromeTarget{sc->id, overlay, node};
+        if (id.is_null() && !overlay) o->anchor_node = node;
+    }
+    return 1;
+}
+
+// w:part(name, prop, value): a part under the node (`part=fill`) given a property, or a flag
+// (a boolean value: set or cleared).
+int widget_part(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    const char* part = luaL_checkstring(L, 2);
+    const char* prop = luaL_checkstring(L, 3);
+    KromeModule* s;
+    KromeScreen* sc;
+    u32 overlay, node;
+    if (!widget_of(L, 1, &s, &sc, &overlay, &node)) return 0;
+    KromeTarget t{sc->id, overlay, node};
+    if (lua_type(L, 4) == LUA_TBOOLEAN) { krome_set_part(*s, t, part, prop, nullptr, lua_toboolean(L, 4) ? 1 : 0); return 0; }
+    KromeValue v;
+    char buf[256];
+    if (lua_type(L, 4) == LUA_TNUMBER) v = KromeValue::num((f32)lua_tonumber(L, 4));
+    else { format(buf, sizeof buf, "%s", luaL_tolstring(L, 4, nullptr)); lua_pop(L, 1); krome_string_value(buf, &v); }
+    krome_set_part(*s, t, part, prop, &v, -1);
+    return 0;
+}
+
+// w:open_slot([style]): the use's children opened below the node; their presses its pick.
+int widget_open_slot(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    KromeModule* s;
+    KromeScreen* sc;
+    u32 overlay, node;
+    if (!widget_of(L, 1, &s, &sc, &overlay, &node)) return 0;
+    lua_pushinteger(L, (lua_Integer)krome_open_slot(*s, KromeTarget{sc->id, overlay, node}, luaL_optstring(L, 2, nullptr)));
+    return 1;
+}
+
+// w:close(): what it opened, closed.
+int widget_close(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    KromeModule* s;
+    KromeScreen* sc;
+    u32 overlay, node;
+    if (widget_of(L, 1, &s, &sc, &overlay, &node)) krome_close_owned(*s, KromeTarget{sc->id, overlay, node});
+    return 0;
+}
+
+// w:focus_next(delta): the focus through what is focusable in what it opened.
+int widget_focus_next(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    KromeModule* s;
+    KromeScreen* sc;
+    u32 overlay, node;
+    if (widget_of(L, 1, &s, &sc, &overlay, &node)) krome_focus_owned(*s, KromeTarget{sc->id, overlay, node}, (i32)luaL_checkinteger(L, 2));
+    return 0;
+}
+
+// w:focus(): the focus to the node itself (after what it opened closed).
+int widget_focus(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    KromeModule* s;
+    KromeScreen* sc;
+    u32 overlay, node;
+    if (widget_of(L, 1, &s, &sc, &overlay, &node)) krome_focus_take(*s, *sc, overlay, node, lua_toboolean(L, 2) != 0);
+    return 0;
 }
 
 void ensure_behaviour_tables(KromeModule& s) {
@@ -985,7 +1059,8 @@ void ensure_behaviour_tables(KromeModule& s) {
     s.lua_states = luaL_ref(L, LUA_REGISTRYINDEX);
     lua_newtable(L);                     // the instance's metatable
     lua_newtable(L);                     // its methods
-    const struct { const char* name; lua_CFunction fn; } fns[] = {{"set", widget_set}, {"emit", widget_emit}, {"open", widget_open}};
+    const struct { const char* name; lua_CFunction fn; } fns[] = {{"set", widget_set}, {"emit", widget_emit}, {"open", widget_open}, {"part", widget_part},
+                                                                  {"open_slot", widget_open_slot}, {"close", widget_close}, {"focus_next", widget_focus_next}, {"focus", widget_focus}};
     for (const auto& f : fns) {
         lua_pushlightuserdata(L, &s);
         lua_pushcclosure(L, f.fn, 1);
@@ -1108,7 +1183,7 @@ bool krome_lua_behave(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 over
     lua_State* L = s.L;
     *taken = false;
     if (!L || s.lua_behaviours == LUA_NOREF) return false;
-    static const char* const calls[] = {"press", "drag", "release", "wheel", "key", "focus", "hover"};
+    static const char* const calls[] = {"press", "drag", "release", "wheel", "key", "focus", "hover", "update", "pick"};
     lua_rawgeti(L, LUA_REGISTRYINDEX, s.lua_behaviours);
     if (lua_getfield(L, -1, name_str(tree.nodes[node].behave)) != LUA_TTABLE) { lua_pop(L, 2); return false; }
     if (lua_getfield(L, -1, calls[(u32)call]) != LUA_TFUNCTION) { lua_pop(L, 3); return false; }
@@ -1139,6 +1214,10 @@ bool krome_lua_behave(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 over
     case KromeCall::Focus:
     case KromeCall::Hover:
         lua_pushboolean(L, a.on); nargs = 2; break;
+    case KromeCall::Update:
+        break;
+    case KromeCall::Pick:
+        lua_pushstring(L, a.id ? a.id : ""); lua_pushstring(L, a.text ? a.text : ""); nargs = 3; break;
     }
     if (lua_pcall(L, nargs, 1, 0) != LUA_OK) {
         KV_ERROR("krome", "%s", lua_tostring(L, -1));
@@ -1146,9 +1225,35 @@ bool krome_lua_behave(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 over
         ++s.script_errors;
         return true;
     }
-    *taken = (call == KromeCall::Key || call == KromeCall::Wheel) ? lua_toboolean(L, -1) != 0 : true;
+    *taken = (call == KromeCall::Key || call == KromeCall::Wheel || call == KromeCall::Pick) ? lua_toboolean(L, -1) != 0 : true;
     lua_pop(L, 1);
     return true;
+}
+
+void krome_model_write_value(KromeModule& s, KromeScreen& sc, const char* path, int idx) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) return;
+    idx = lua_absindex(L, idx);
+    const char* last = strrchr(path, '.');
+    if (last) {
+        char parent[300];
+        format(parent, sizeof parent, "%.*s", (int)(last - path), path);
+        push_path(L, sc.store, parent);
+        ++last;
+    } else {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store);
+        last = path;
+    }
+    if (lua_istable(L, -1)) {
+        lua_pushvalue(L, idx);
+        bool digits = *last != 0;
+        for (const char* q = last; *q; ++q) if (*q < '0' || *q > '9') digits = false;
+        if (digits) lua_rawseti(L, -2, (lua_Integer)strtoll(last, nullptr, 10));
+        else lua_setfield(L, -2, last);
+    }
+    lua_pop(L, 1);
+    usize head = strcspn(path, ".");
+    krome_model_changed(s, sc, name_intern(path, head).hash);
 }
 
 bool krome_model_number(KromeModule& s, KromeScreen& sc, const char* path, f64* out) {

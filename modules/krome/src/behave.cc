@@ -81,6 +81,114 @@ void KromeWidget::emit(const char* event, f64 value) {
     if (t && event && *event) krome_fire_named(*s, *sc, *t, node, name_intern(event), value);
 }
 
+void KromeWidget::part(const char* p, const char* prop, f64 v) {
+    KromeModule* s = e ? krome_state(*e) : nullptr;
+    KromeValue kv = KromeValue::num((f32)v);
+    if (s) krome_set_part(*s, KromeTarget{screen_id, overlay, node}, p, prop, &kv, -1);
+}
+
+void KromeWidget::part(const char* p, const char* prop, const char* v) {
+    KromeModule* s = e ? krome_state(*e) : nullptr;
+    KromeValue kv;
+    krome_string_value(v ? v : "", &kv);
+    if (s) krome_set_part(*s, KromeTarget{screen_id, overlay, node}, p, prop, &kv, -1);
+}
+
+void KromeWidget::part_flag(const char* p, const char* flag, bool on) {
+    KromeModule* s = e ? krome_state(*e) : nullptr;
+    if (s) krome_set_part(*s, KromeTarget{screen_id, overlay, node}, p, flag, nullptr, on ? 1 : 0);
+}
+
+void KromeWidget::open_slot(const char* style) {
+    KromeModule* s = e ? krome_state(*e) : nullptr;
+    if (s) krome_open_slot(*s, KromeTarget{screen_id, overlay, node}, style);
+}
+
+void KromeWidget::close() {
+    KromeModule* s = e ? krome_state(*e) : nullptr;
+    if (s) krome_close_owned(*s, KromeTarget{screen_id, overlay, node});
+}
+
+void KromeWidget::focus_next(i32 delta) {
+    KromeModule* s = e ? krome_state(*e) : nullptr;
+    if (s) krome_focus_owned(*s, KromeTarget{screen_id, overlay, node}, delta);
+}
+
+// ---- parts, slots, picks ------------------------------------------------------------------------------
+
+u32 krome_find_part(const KromeTree& t, u32 node, Name part) {
+    for (u32 c = t.nodes[node].first; c != KROME_NONE; c = t.nodes[c].next) {
+        if (t.nodes[c].flags & KROME_DEAD) continue;
+        if (t.nodes[c].part == part) return c;
+        u32 in = krome_find_part(t, c, part);
+        if (in != KROME_NONE) return in;
+    }
+    return KROME_NONE;
+}
+
+void krome_set_part(KromeModule& s, const KromeTarget& t, const char* part, const char* prop, const KromeValue* v, i32 flag) {
+    KromeScreen* sc = nullptr;
+    KromeTree* tree = krome_target_tree(s, t, &sc);
+    if (!tree || !sc || t.node >= tree->nodes.len || !part || !prop) return;
+    u32 n = krome_find_part(*tree, t.node, name_intern(part));
+    if (n == KROME_NONE) { krome_error(s, name_str(sc->name), tree->nodes[t.node].line, nullptr, 0, "no part '%s' under the node", part); return; }
+    const char* bad = flag >= 0 ? tree->set_flag(n, prop, flag != 0) : tree->set(n, prop, *v, KromeState::Base);
+    if (bad) { krome_error(s, name_str(sc->name), tree->nodes[n].line, nullptr, 0, "part %s: %s: %s", part, prop, bad); return; }
+    sc->repaint = true;
+    if (t.overlay) if (KromeOverlay* o = krome_overlay(*sc, t.overlay)) o->placed = false;
+}
+
+u32 krome_open_slot(KromeModule& s, const KromeTarget& t, const char* style) {
+    KromeScreen* sc = t.overlay ? nullptr : krome_screen_by_id(s, t.screen);
+    if (!sc) return 0;
+    const KromeSlot* slot = nullptr;
+    for (const KromeSlot& k : sc->slots) if (k.node == t.node) slot = &k;
+    if (!slot) return 0;
+    KromeSlot copy = *slot; // opening may grow the screen's arrays
+    u32 id = krome_open_overlay(s, *sc);
+    KromeOverlay* o = krome_overlay(*sc, id);
+    o->owner = t;
+    o->anchor_node = t.node;
+    o->side = KromeSide::Below;
+    if (!krome_build_slot(s, *sc, *o, copy, style)) { krome_close_overlay(s, *sc, id); return 0; }
+    // At least as wide as what opened it.
+    if (o->tree.root != KROME_NONE) {
+        f32 w = sc->tree.nodes[t.node].rect.w;
+        const KromeAxis& a = o->tree.nodes[o->tree.root].w;
+        if (a.lo < w) o->tree.set(o->tree.root, "w", KromeValue::range(w, a.hi));
+    }
+    return id;
+}
+
+void krome_close_owned(KromeModule& s, const KromeTarget& t) {
+    KromeScreen* sc = krome_screen_by_id(s, t.screen);
+    if (!sc) return;
+    for (u32 i = sc->overlays.len; i > 0; --i)
+        if (i <= sc->overlays.len && sc->overlays[i - 1]->owner == t) krome_close_overlay(s, *sc, sc->overlays[i - 1]->id);
+}
+
+bool krome_pick(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node) {
+    KromeOverlay* o = krome_overlay_of(sc, tree);
+    if (!o || o->owner.node == KROME_NONE || node >= tree.nodes.len) return false;
+    const KromeNode& n = tree.nodes[node];
+    char id[128], value[256];
+    format(id, sizeof id, "%s", n.id.is_null() ? "" : name_str(n.id));
+    if (n.bind_value != KROME_NONE) format(value, sizeof value, "%s", tree.strings.data + n.bind_value);
+    else if (!n.id.is_null()) format(value, sizeof value, "%s", name_str(n.id));
+    else {
+        // A node with no value of its own: the first text under it (an option's label).
+        value[0] = 0;
+        for (u32 c = node; c != KROME_NONE && !value[0];) {
+            if (tree.nodes[c].type == KromeType::Text) { format(value, sizeof value, "%s", tree.text(c)); break; }
+            c = tree.nodes[c].first;
+        }
+    }
+    KromeCallArgs a;
+    a.id = id;
+    a.text = value;
+    return krome_behave(s, o->owner, KromeCall::Pick, a);
+}
+
 // ---- registering, and calling ------------------------------------------------------------------------
 
 bool krome_behaviour(Engine& e, const char* name, const KromeBehaviourDesc& desc) {
@@ -153,6 +261,8 @@ bool krome_behave(KromeModule& s, const KromeTarget& t, KromeCall call, const Kr
         }
         case KromeCall::Focus:   if (!d->focus) return false; d->focus(w, a.on); return true;
         case KromeCall::Hover:   if (!d->hover) return false; d->hover(w, a.on); return true;
+        case KromeCall::Update:  if (!d->update) return false; d->update(w); return true;
+        case KromeCall::Pick:    return d->pick && d->pick(w, a.id ? a.id : "", a.text ? a.text : "");
         }
         return false;
     }

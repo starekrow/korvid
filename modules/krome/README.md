@@ -74,6 +74,9 @@ script's tables made into one, and builds the kernel's tree:
   parent's gap); scrolling builds the newly visible and lets the gone go, as a region is
   built again. Every row is the height given. Outside a scroll box, or in an overlay, it
   builds every row.
+- **`if tab=rules`** is built while the model's value there is that (a tab's page).
+- **In a definition's body**, `{@}` in a text is its use's binding as the model shows it,
+  and `@@` as a property's value binds the property to it (`def progress { box w=@@ }`).
 - **`@name`** binds a node's `selected` state to the model; a press flips the value before
   the event's handler runs. **`@name=value`** binds by equality (radio buttons, tabs): the
   node is selected while the model's text there is `value`, and a press writes `value`. Lua
@@ -132,6 +135,16 @@ built; what they return is a table of behaviours by name. C++ registers one with
 `krome_behaviour(e, "name", KromeBehaviourDesc{...})`: the same calls on a `KromeWidget&`,
 with a `state` blob of `state_size` bytes. A name registered both ways is an error at the
 second. A behaviour's node takes its own presses: its release fires no event of its own.
+Two more calls draw and choose: `update(w)` when the node is built and whenever its bound
+key changes, to draw its parts (`w:part(name, prop, value)` on a descendant marked
+`part=name`, a boolean value setting or clearing a flag; it never writes the model); and
+`pick(w, id, value)` when a node in an overlay it opened is fired (true: taken), with the
+node's `@key=value` value, else its id, else its first text. `w:open_slot([style])` opens
+the children its definition's use was given (a dropdown's options; a body whose root has a
+behaviour needs no slot for them) below it, at least as wide; `w:close()` closes what it
+opened; `w:focus_next(delta)` moves the focus through what is focusable there, and the keys
+the focused node there does not take come to the behaviour; `w:focus([keyboard])` takes the
+focus back. `w:set` writes tables too (a tree's open set).
 
 **The keyboard.** Any focusable node can have the focus: an edit, a `hit`, anything with an
 event, a binding or a behaviour, or `focusable`; never `nofocus`, nor what is disabled or

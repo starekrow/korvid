@@ -102,6 +102,10 @@ const rect2 k_everywhere{-1e9f, -1e9f, 2e9f, 2e9f};
 // ---- placing overlays ----------------------------------------------------------------------------------
 
 bool anchor_rect(KromeScreen& sc, const KromeOverlay& o, rect2* out) {
+    if (o.anchor_node != KROME_NONE && o.anchor_node < sc.tree.nodes.len && !(sc.tree.nodes[o.anchor_node].flags & KROME_DEAD)) {
+        *out = sc.tree.nodes[o.anchor_node].rect;
+        return true;
+    }
     if (o.anchor.is_null()) return false;
     u32 n = krome_find(sc.tree, o.anchor);
     if (n != KROME_NONE) { *out = sc.tree.nodes[n].rect; return true; }
@@ -811,6 +815,11 @@ void follow_tip(KromeModule& s, const KromeTarget& under, bool press) {
 
 KromeOverlay* krome_overlay(KromeScreen& sc, u32 id) {
     for (KromeOverlay* o : sc.overlays) if (o->id == id) return o;
+    return nullptr;
+}
+
+KromeOverlay* krome_overlay_of(KromeScreen& sc, const KromeTree& t) {
+    for (KromeOverlay* o : sc.overlays) if (&o->tree == &t) return o;
     return nullptr;
 }
 

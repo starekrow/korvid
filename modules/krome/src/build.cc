@@ -45,6 +45,8 @@ struct Build {
     u32                 errors = 0;
     bool                waiting = false; // a kim() piece's file is not in yet
     u64                 nodes = 0;
+    u32                 overlay = 0;     // the overlay being built (0: the screen's tree)
+    Array<KromeSlot>*   slots = nullptr; // uses' children kept for w:open_slot; null: not kept
 };
 
 const KromeFrame* def_frame(const KromeFrame* f) {
@@ -114,6 +116,19 @@ u64 head_key(const char* path) {
 
 // A text with its definition's parameters and its eaches' elements filled in as they are
 // now; {key} of the model, {{ and {*tag} left for the fill.
+// The binding the nearest definition's use gave (`slider @level`), as a model path where
+// that use was written; null when there is none.
+const char* use_binding(Build& b, const KromeFrame* fr) {
+    const KromeFrame* d = def_frame(fr);
+    if (!d || !d->use || !d->use_file) return nullptr;
+    const char* w = json_string(json_get(d->use_file->doc, *d->use, "b"), nullptr);
+    if (!w) return nullptr;
+    char key[256];
+    if (const char* is = strchr(w, '=')) { format(key, sizeof key, "%.*s", (int)(is - w), w); w = key; }
+    const char* path = model_path(b, d->outer, w);
+    return path == key ? keep(b, key, strlen(key)) : path;
+}
+
 const char* expand(Build& b, const KromeFrame* fr, const char* text) {
     if (!fr || !strchr(text, '{')) return text;
     char out[2048];
@@ -130,6 +145,10 @@ const char* expand(Build& b, const KromeFrame* fr, const char* text) {
         const char* value = nullptr;
         char val[256];
         usize head = strcspn(key, ".");
+        // {@}: the binding the definition's use was given, as the model shows it.
+        if (!strcmp(key, "@")) {
+            if (const char* bp = use_binding(b, fr)) { format(val, sizeof val, "{%s}", bp); value = val; }
+        }
         for (const KromeFrame* f = fr; f && !value; f = f->outer) {
             if (f->var && strlen(f->var) == head && !strncmp(f->var, key, head)) {
                 char path[300];
@@ -217,7 +236,8 @@ void prop(Build& b, const KromeFrame* fr, u32 node, const KimbFile& f, u32 line,
     if (state != KromeState::Base && k->layout) { error(b, fr, f.file, line, "%s.%s is layout, which a look cannot set", krome_state_name(state), name); return; }
     // Bound to the model (`w=@key`): set from it now, and again whenever the key changes.
     if (const char* at = v.str(); at && at[0] == '@') {
-        const char* path = model_path(b, fr, at + 1);
+        const char* path = at[1] == '@' ? use_binding(b, fr) : model_path(b, fr, at + 1);
+        if (!path) { error(b, fr, f.file, line, "%s=@@: only in a definition's body, used with a binding", name); return; }
         KromeDep d{node, head_key(path), KromeDep::Prop, (u8)state, name_intern(name), name_intern(path)};
         if (const char* bad = krome_apply_bound(b.s, b.sc, b.tree, d)) error(b, fr, f.file, line, "%s=%s: %s", name, at, bad);
         if (b.deps) b.deps->push(d);
@@ -389,7 +409,13 @@ u32 region_body(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, con
     } else {
         const char* on = json_string(json_get(f.doc, n, "on"), nullptr);
         if (!on) { error(b, fr, f.file, n.line, "if is written 'if name { ... }'"); return 0; }
-        if (krome_model_truthy(b.s, b.sc, model_path(b, fr, on)))
+        const char* ov = json_string(json_get(f.doc, n, "ov"), nullptr);
+        bool yes;
+        if (ov) {
+            char val[256];
+            yes = !strcmp(krome_model_path_text(b.s, b.sc, model_path(b, fr, on), val, sizeof val), ov);
+        } else yes = krome_model_truthy(b.s, b.sc, model_path(b, fr, on));
+        if (yes)
             if (kids) for (const JsonValue* k = json_first(f.doc, *kids); k; k = json_next(f.doc, *k)) node(b, f, *k, parent, fr, nullptr);
     }
     u32 count = 0;
@@ -481,7 +507,10 @@ void expand_def(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, con
     if (given > nparams) error(b, fr, f.file, n.line, "%s takes %u parameter%s, and is given %u string%s", w, nparams, nparams == 1 ? "" : "s", given, given == 1 ? "" : "s");
     const JsonValue* body = json_get(dd, *d.value, "body");
     if (!body) { error(b, fr, d.file->file, d.value->line, "def %s has no body", w); return; }
-    if (json_get(f.doc, n, "c") && !has_slot(dd, *body)) error(b, fr, f.file, n.line, "%s takes no children: its body has no slot", w);
+    // Children with no slot to go in are a behaviour's to open (w:open_slot: a dropdown's options).
+    const JsonValue* bp = json_get(dd, *body, "p");
+    if (json_get(f.doc, n, "c") && !has_slot(dd, *body) && !(bp && json_get(dd, *bp, "behave")))
+        error(b, fr, f.file, n.line, "%s takes no children: its body has no slot", w);
     Over o{&f, &n, fr, df, over};
     node(b, *d.file, *body, parent, df, &o);
 }
@@ -570,6 +599,15 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
         error(b, fr, f.file, line, "no behaviour '%s': a prelude's script returns it, or a module registers it", name_str(t.nodes[id].behave));
     if (const JsonValue* c = json_get(f.doc, n, "c"))
         for (const JsonValue* k = json_first(f.doc, *c); k; k = json_next(f.doc, *k)) node(b, f, *k, id, fr, nullptr);
+    if (t.nodes[id].behave.is_null()) return;
+    // A behaviour's node: the children its use was given, kept for w:open_slot (a
+    // dropdown's options); its update now that its parts are built, and whenever its bound
+    // key changes.
+    if (b.slots)
+        for (const Over* o = over; o; o = o->next)
+            if (json_get(o->file->doc, *o->use, "c")) { b.slots->push(KromeSlot{id, o->file, o->use, o->frame}); break; }
+    if (b.deps && !t.nodes[id].binding.is_null()) b.deps->push(KromeDep{id, head_key(name_str(t.nodes[id].binding)), KromeDep::Behave});
+    krome_behave(b.s, KromeTarget{b.sc.id, b.overlay, id}, KromeCall::Update, KromeCallArgs{});
 }
 
 // ---- rebuilding ---------------------------------------------------------------------------------
@@ -618,6 +656,10 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc) {
     const char* screen = sc.doc ? name_str(sc.screen) : nullptr;
     const JsonValue* root = root_of(*f, screen);
     krome_drop_anims(s, sc.id, 0); // its nodes are new: none eases from what was there
+    // What was opened from its uses' children was built from what is about to go.
+    for (u32 i = sc.overlays.len; i > 0; --i) if (sc.overlays[i - 1]->slot) krome_close_overlay(s, sc, sc.overlays[i - 1]->id);
+    sc.slots.alloc = s.general;
+    sc.slots.clear();
     if (!root) { krome_error(s, f->file, 0, nullptr, 0, "no screen '%s'", screen ? screen : "?"); return false; }
     Array<Kept> kept{};
     keep_scroll(sc.tree, kept);
@@ -631,6 +673,7 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc) {
     if (s.under.screen == sc.id) s.under = KromeTarget{};
     if (s.captured.screen == sc.id) s.captured = KromeTarget{};
     Build b{s, sc, sc.tree, &sc.deps, &sc.regions, &sc.frames, &sc.scope, krome_theme_of(s, sc.scope)};
+    b.slots = &sc.slots;
     node(b, *f, *root, KROME_NONE, nullptr, nullptr);
     sc.waiting = b.waiting;
     restore(sc.tree, kept);
@@ -648,6 +691,7 @@ bool krome_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o) {
     if (!root) return false;
     o.tree.clear();
     Build b{s, sc, o.tree, nullptr, nullptr, &o.arena, &sc.scope, krome_theme_of(s, sc.scope)};
+    b.overlay = o.id;
     node(b, o.file, *root, KROME_NONE, nullptr, nullptr);
     o.placed = false;
     return o.tree.root != KROME_NONE;
@@ -716,6 +760,7 @@ bool rebuild_one(KromeModule& s, KromeScreen& sc, u32 i) {
         // Built again at the end of the parent's list, then moved after the anchor.
         u32 tail = t.nodes[parent].last;
         Build b{s, sc, t, &sc.deps, &sc.regions, &sc.frames, r.scope, krome_theme_of(s, sc.scope)};
+        b.slots = &sc.slots;
         u32 deps_before = sc.deps.len;
         u32 count = region_body(b, *r.file, *r.src, parent, r.frame, r.height > 0.0f ? &r : nullptr);
         s.rebuilt_nodes += b.nodes;
@@ -740,6 +785,11 @@ void rebuilt(KromeModule& s, KromeScreen& sc) {
     KromeTree& t = sc.tree;
     // Regions inside what went, and what read the model there.
     for (KromeRegion& r : sc.regions) if (r.alive && (t.nodes[r.anchor].flags & KROME_DEAD)) r.alive = false;
+    {
+        u32 w = 0;
+        for (u32 i = 0; i < sc.slots.len; ++i) if (!(t.nodes[sc.slots[i].node].flags & KROME_DEAD)) sc.slots[w++] = sc.slots[i];
+        sc.slots.len = w;
+    }
     u32 w = 0;
     for (u32 i = 0; i < sc.deps.len; ++i) if (!(t.nodes[sc.deps[i].node].flags & KROME_DEAD)) sc.deps[w++] = sc.deps[i];
     sc.deps.len = w;
@@ -753,6 +803,22 @@ void rebuilt(KromeModule& s, KromeScreen& sc) {
 }
 
 } // namespace
+
+bool krome_build_slot(KromeModule& s, KromeScreen& sc, KromeOverlay& o, const KromeSlot& slot, const char* style_name) {
+    o.tree.clear();
+    if (o.arena.base) arena_destroy(o.arena);
+    if (!arena_create(o.arena, 1u << 20, "krome.slot", MemTag{})) return false;
+    Build b{s, sc, o.tree, nullptr, nullptr, &o.arena, &sc.scope, krome_theme_of(s, sc.scope)};
+    b.overlay = o.id;
+    u32 root = o.tree.add(KromeType::Box, KROME_NONE);
+    if (root == KROME_NONE) return false;
+    if (style_name && *style_name) style(b, nullptr, root, style_name, slot.file->file, slot.use->line, 0);
+    if (const JsonValue* c = json_get(slot.file->doc, *slot.use, "c"))
+        for (const JsonValue* k = json_first(slot.file->doc, *c); k; k = json_next(slot.file->doc, *k)) node(b, *slot.file, *k, root, slot.frame, nullptr);
+    o.slot = true;
+    o.placed = false;
+    return true;
+}
 
 void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key) {
     bool any = false;

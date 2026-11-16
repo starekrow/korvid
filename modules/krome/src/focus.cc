@@ -180,9 +180,22 @@ bool krome_focus_key(KromeModule& s, Key key, u32 mods) {
     }
     const KromeNode& n = t->nodes[at.node];
     bool plain = !(mods & (KROME_MOD_CTRL | KROME_MOD_ALT | KROME_MOD_CMD));
-    if ((key == Key::Space || key == Key::Enter) && plain && (!n.event.is_null() || !n.binding.is_null())) {
+    KromeOverlay* owned = at.overlay ? krome_overlay(*sc, at.overlay) : nullptr;
+    if (owned && owned->owner.node == KROME_NONE) owned = nullptr;
+    if ((key == Key::Space || key == Key::Enter) && plain && (!n.event.is_null() || !n.binding.is_null() || owned)) {
         if (!hidden_or_disabled(*t, at.node)) krome_fire(s, *sc, *t, at.node, 1.0);
         return true;
+    }
+    // In what a behaviour opened: the keys its node does not take are the behaviour's (a
+    // dropdown's arrows).
+    if (owned) {
+        KromeCallArgs a;
+        a.key = key;
+        a.mods = mods;
+        KromeTarget owner = owned->owner;
+        if (krome_behave(s, owner, KromeCall::Key, a)) return true;
+        t = krome_focused_tree(s, &sc);
+        if (!t) return false;
     }
     if (key == Key::PageUp || key == Key::PageDown || key == Key::Home || key == Key::End) {
         for (u32 p = at.node; p != KROME_NONE; p = t->nodes[p].parent) {
@@ -198,6 +211,28 @@ bool krome_focus_key(KromeModule& s, Key key, u32 mods) {
         }
     }
     return false;
+}
+
+void krome_focus_owned(KromeModule& s, const KromeTarget& owner, i32 delta) {
+    KromeScreen* sc = krome_screen_by_id(s, owner.screen);
+    if (!sc) return;
+    KromeOverlay* o = nullptr;
+    for (u32 k = sc->overlays.len; k > 0 && !o; --k) if (sc->overlays[k - 1]->owner == owner) o = sc->overlays[k - 1];
+    if (!o || o->tree.root == KROME_NONE) return;
+    MemScope scope;
+    u32* list = (u32*)alloc_in(mem_scratch(), sizeof(u32) * k_max_focusable, alignof(u32));
+    u32 n = 0;
+    collect(o->tree, o->tree.root, list, &n);
+    if (!n) return;
+    i32 at = -1;
+    if (s.focus.node != KROME_NONE && s.focus.screen == sc->id && s.focus.overlay == o->id)
+        for (u32 i = 0; i < n; ++i) if (list[i] == s.focus.node) at = (i32)i;
+    i32 next = at < 0 ? (delta >= 0 ? 0 : (i32)n - 1) : at + delta;
+    if (next < 0) next = 0;
+    if (next >= (i32)n) next = (i32)n - 1;
+    krome_focus_take(s, *sc, o->id, list[next], true);
+    if (KromeTree* t2 = krome_focused_tree(s, nullptr)) reveal(*t2, s.focus.node);
+    o->placed = false;
 }
 
 bool krome_shortcut(KromeModule& s, Key key, u32 mods) {

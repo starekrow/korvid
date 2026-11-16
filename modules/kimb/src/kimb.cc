@@ -234,6 +234,7 @@ constinit const KimbKernelProp k_props[] = {
     {"line-height", KimbType::Number, false},
     {"opacity", KimbType::Number, false},
     {"pad", KimbType::Box4, true},
+    {"part", KimbType::String, true},
     {"placeholder", KimbType::String, true},
     {"radius", KimbType::Box4, false},
     {"range", KimbType::Size, true},
@@ -526,7 +527,7 @@ struct Checker {
         const JsonValue* bp = body ? json_get(dd, *body, "p") : nullptr;
         if (json_get(f.doc, n, "r") && !(p && json_get(f.doc, *p, "behave")) && !(bp && json_get(dd, *bp, "behave")))
             err(line, "%s takes no range: only one with a behaviour does", w);
-        if (kids && (!body || !has_slot(dd, *body))) err(line, "%s takes no children: its body has no slot", w);
+        if (kids && (!body || !has_slot(dd, *body)) && !(bp && json_get(dd, *bp, "behave"))) err(line, "%s takes no children: its body has no slot", w);
         walk_kids();
     }
 

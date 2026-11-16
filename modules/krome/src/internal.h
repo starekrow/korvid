@@ -18,7 +18,7 @@ struct TickContext;
 // A node that reads a model key: its shown text, its selected state (a binding), or one of
 // its properties (`w=@key`: `prop` in look `state`, read from `path`).
 struct KromeDep {
-    enum Kind : u8 { Text, Binding, Prop };
+    enum Kind : u8 { Text, Binding, Prop, Behave }; // Behave: a behaviour's update, when its bound key changes
     u32  node;
     u64  key;
     Kind kind = Text;
@@ -80,6 +80,14 @@ enum class KromeStage : u8 { Read, Scripts, Uses, Built, Failed };
 // Where an overlay goes against its anchor.
 enum class KromeSide : u8 { Below, Above, Right, Left, Pointer };
 
+// What the pointer is on: a screen's node in its tree (overlay 0) or in an overlay's.
+struct KromeTarget {
+    u32 screen = 0;   // the screen's id; 0 none
+    u32 overlay = 0;  // the overlay's id; 0 the screen's own tree
+    u32 node = KROME_NONE;
+    bool operator==(const KromeTarget& o) const { return screen == o.screen && overlay == o.overlay && node == o.node; }
+};
+
 // A subtree opened above a screen (docs/PRDs/Krome-Slice-1-PRD.md, "Input and overlays").
 struct KromeOverlay {
     u32       id = 0;
@@ -93,15 +101,15 @@ struct KromeOverlay {
     color     dim{0, 0, 0, 0};   // drawn over the whole window under it
     vec2      at;                // the pointer when it opened, logical pixels
     bool      placed = false;    // laid out since it opened or the screen changed
+    KromeTarget owner;           // the node whose behaviour opened it (w:open): its picks go there
+    u32       anchor_node = KROME_NONE; // a node of the screen's tree it opens at, when it has no id
+    bool      slot = false;      // built from a use's children (w:open_slot): closed when the screen is built again
 };
 
-// What the pointer is on: a screen's node in its tree (overlay 0) or in an overlay's.
-struct KromeTarget {
-    u32 screen = 0;   // the screen's id; 0 none
-    u32 overlay = 0;  // the overlay's id; 0 the screen's own tree
-    u32 node = KROME_NONE;
-    bool operator==(const KromeTarget& o) const { return screen == o.screen && overlay == o.overlay && node == o.node; }
-};
+
+// A definition's use with children whose body's root has a behaviour: those children, where
+// they were written, for w:open_slot (a dropdown's options).
+struct KromeSlot { u32 node; const KimbFile* file; const JsonValue* use; const KromeFrame* frame; };
 
 struct KromeScreen {
     u32        id = 0;          // what Lua's closures name it by
@@ -122,6 +130,7 @@ struct KromeScreen {
     KimbScope  scope;           // the file, then its uses: built once they are all in
     Arena      frames;          // the KromeFrames its tree was built in, until it is built again
     Array<KromeRegion> regions;
+    Array<KromeSlot> slots;
     u32        dead = 0;        // nodes rebuilt away since the tree was last built whole
     bool       waiting = false; // a kim() piece's file has not landed: built again when it does
     int        env = -2, store = -2, on = -2; // registry refs (LUA_NOREF is -2)
@@ -274,6 +283,8 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc);
 bool krome_tooltip_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o, const char* text);
 // An overlay's tree, from its document, in the screen's scope.
 bool krome_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o);
+// A use's children into an overlay's tree, under a column box of `style`.
+bool krome_build_slot(KromeModule& s, KromeScreen& sc, KromeOverlay& o, const KromeSlot& slot, const char* style);
 const char* krome_theme_of(KromeModule& s, const KimbScope& scope);
 // Each node that reads the model shows its text with the values filled in.
 void krome_fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node);
@@ -358,7 +369,7 @@ bool krome_model_set_doc(KromeModule& s, KromeScreen& sc, const char* key, const
 
 // ---- behaviours (behave.cc) ------------------------------------------------------------------------
 
-enum class KromeCall : u8 { Press, Drag, Release, Wheel, Key, Focus, Hover };
+enum class KromeCall : u8 { Press, Drag, Release, Wheel, Key, Focus, Hover, Update, Pick };
 struct KromeCallArgs {
     f32 x = 0.0f, y = 0.0f;       // physical pixels in the window (made the node's own logical ones)
     u32 button = 1;
@@ -366,11 +377,27 @@ struct KromeCallArgs {
     Key key = Key::Unknown;
     u32 mods = 0;
     bool on = false;
+    const char* id = nullptr;   // a pick's: the node picked, and its value
+    const char* text = nullptr;
 };
 // The node's behaviour called. False when it has none, or no such call; a key's or the
 // wheel's, when it did not take it.
 bool krome_behave(KromeModule& s, const KromeTarget& t, KromeCall call, const KromeCallArgs& a);
 bool krome_behaviour_known(KromeModule& s, Name name);
+// A node fired in an overlay a behaviour opened: its pick, with the node's id and value (its
+// @key=value's value, else its id, else its text). True when the pick took it.
+bool krome_pick(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node);
+// The descendant of a node named `part`, or KROME_NONE.
+u32  krome_find_part(const KromeTree& t, u32 node, Name part);
+// A part's property (or flag, given a boolean) set by a behaviour; repaint and layout follow.
+void krome_set_part(KromeModule& s, const KromeTarget& t, const char* part, const char* prop, const KromeValue* v, i32 flag);
+// The use's children (KromeSlot) opened as an overlay below the node, in a box of `style`
+// (null: none). Its id, 0 when the node has none.
+u32  krome_open_slot(KromeModule& s, const KromeTarget& t, const char* style);
+// The overlays a node's behaviour opened, closed.
+void krome_close_owned(KromeModule& s, const KromeTarget& t);
+// The focus moved by `delta` through what is focusable in the top overlay the node opened.
+void krome_focus_owned(KromeModule& s, const KromeTarget& t, i32 delta);
 // The scripts of the preludes in a scope, each run once per state: true when all have run,
 // false while one is still loading.
 bool krome_prelude_scripts(KromeModule& s, const KimbScope& scope);
@@ -384,6 +411,7 @@ const char* krome_key_name(Key k, char* out, usize cap);
 // The model at a path as a number; a Lua value written there (the top of the stack, popped).
 bool krome_model_number(KromeModule& s, KromeScreen& sc, const char* path, f64* out);
 void krome_model_write_number(KromeModule& s, KromeScreen& sc, const char* path, f64 v);
+void krome_model_write_value(KromeModule& s, KromeScreen& sc, const char* path, int idx); // the Lua value at idx
 
 // ---- keyboard focus (focus.cc) ----------------------------------------------------------------------
 
@@ -406,6 +434,8 @@ KromeTree* krome_focused_tree(KromeModule& s, KromeScreen** sc);
 // ---- the view (view.cc) --------------------------------------------------------------------------
 
 KromeOverlay* krome_overlay(KromeScreen& sc, u32 id);
+// The overlay whose tree this is, or null (the screen's own).
+KromeOverlay* krome_overlay_of(KromeScreen& sc, const KromeTree& t);
 // The transitions of a screen's tree (overlay 0) or an overlay's dropped: built again, or gone.
 void krome_drop_anims(KromeModule& s, u32 screen, u32 overlay);
 // The screen on top (a higher layer, then the later opened); null when none is ready.

@@ -120,6 +120,15 @@ struct KromeWidget {
     void        set(f64 v);                   // the bound value written, and what reads it told
     void        set(const char* v);
     void        emit(const char* event, f64 value = 0.0); // as the screen's own event: its handler, then KromeEvent
+    // A part under the node (`part=fill`) given a property, or a flag set or cleared.
+    void        part(const char* part, const char* prop, f64 v);
+    void        part(const char* part, const char* prop, const char* v);
+    void        part_flag(const char* part, const char* flag, bool on);
+    // The children its definition's use was given, opened as an overlay below it in a box of
+    // `style`; their presses come to pick. close() closes what it opened.
+    void        open_slot(const char* style = nullptr);
+    void        close();
+    void        focus_next(i32 delta); // the focus through what is focusable in what it opened
 };
 
 struct KromeBehaviourDesc {
@@ -130,6 +139,8 @@ struct KromeBehaviourDesc {
     bool (*key)(KromeWidget& w, const char* name, u32 mods) = nullptr; // while it has the focus; true: taken. name: "left", "enter", "a"; mods: KROME_MOD_
     void (*focus)(KromeWidget& w, bool on) = nullptr;
     void (*hover)(KromeWidget& w, bool on) = nullptr;
+    void (*update)(KromeWidget& w) = nullptr;   // built, or its bound key changed: draw its parts (w.part); never set the model here
+    bool (*pick)(KromeWidget& w, const char* id, const char* value) = nullptr; // a node in what it opened was fired; true: taken
     u32  state_size = 0;
 };
 

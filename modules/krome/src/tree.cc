@@ -256,6 +256,11 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
             n.tooltip = string(v.s, (u32)strlen(v.s));
             return nullptr;
         }
+        if (!strcmp(prop, "part")) {
+            if (v.kind != KromeValue::String) return "part takes a name";
+            n.part = name_intern(v.s);
+            return nullptr;
+        }
         if (!strcmp(prop, "behave")) {
             if (v.kind != KromeValue::String) return "behave takes a behaviour's name";
             n.behave = name_intern(v.s);
@@ -356,6 +361,19 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
     else looks[at] = l;
     if (!strcmp(prop, "font") || !strcmp(prop, "size") || !strcmp(prop, "image") || !strcmp(prop, "line-height")) dirty = true;
     return nullptr;
+}
+
+const char* KromeTree::set_flag(u32 node, const char* w, bool on) {
+    if (node >= nodes.len) return "no such node";
+    if (on) return flag(node, w);
+    u32 was = nodes[node].flags;
+    // Cleared: the bit the word sets, found by setting it on a copy.
+    nodes[node].flags = 0;
+    const char* bad = flag(node, w);
+    u32 bit = nodes[node].flags;
+    nodes[node].flags = was & ~bit;
+    dirty = true;
+    return bad;
 }
 
 const char* KromeTree::flag(u32 node, const char* w) {

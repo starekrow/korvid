@@ -142,6 +142,7 @@ struct KromeNode {
     u32        bind_value = KROME_NONE; // @key=value: the value, an offset into strings
     u32        tooltip = KROME_NONE;    // shown at the pointer after it rests here
     Name       behave;         // the behaviour the pointer and the keys go to (`behave=slider`)
+    Name       part;           // `part=fill`: what a behaviour's w:part names it by, under its node
     f32        lo = 0.0f, hi = 0.0f, step = 0.0f; // a behaviour's range (`slider @v 1..99`) and step; hi <= lo: none
     i16        taborder = 0;   // Tab goes through lower first, then document order
     u16        shortcut = 0;   // `key="mod+s"`: a Key (0 none), with shortcut_mods
@@ -210,6 +211,8 @@ struct KromeTree {
     // A bare word: fill, clip, scroll, disabled, selected, hidden, and the alignments
     // left, center, right, top, middle, bottom. Null when it took.
     const char* flag(u32 node, const char* word);
+    // A flag set or cleared by its word (a behaviour's w:part(name, "hidden", true)).
+    const char* set_flag(u32 node, const char* word, bool on);
     void set_text(u32 node, const char* text, u32 len);
     void set_text(u32 node, const char* text);
     void set_shown(u32 node, const char* text, u32 len); // the content as displayed

@@ -30,6 +30,7 @@ struct Node {
     const char*        in = nullptr;  // each
     JsonRef            height = KV_JSON_NO_REF; // each ... height=24: a virtualized each's rows
     const char*        on = nullptr;  // if
+    const char*        on_value = nullptr; // if key=value
     JsonRef            range = KV_JSON_NO_REF;
     Array<const char*> flags{};
     Array<Prop>        props{};
@@ -320,6 +321,8 @@ struct Parser {
             // again when the path's key changes.
             u32 c0 = col();
             usize start = at++;
+            // @@: in a definition's body, the binding its use was given (`slider @level`).
+            if (peek() == '@') { ++at; if (word_char(peek())) { err(c0, "@@ stands alone: the use's binding"); skip_token(); return KV_JSON_NO_REF; } return b.string("@@"); }
             const char* w = word();
             if (!w) { err(c0, "a bound value is @name"); skip_token(); return KV_JSON_NO_REF; }
             return b.string(text + start, (u32)(at - start));
@@ -420,6 +423,18 @@ struct Parser {
             blanks();
             n->on = word();
             if (!n->on) { err(c0, "if is written 'if name { ... }'"); skip_line(); }
+            // if key=value: built while the model's value there is that (a tab's page).
+            else if (peek() == '=') {
+                ++at;
+                u32 c1 = col();
+                if (peek() == '"') { const char* sv = nullptr; u32 sn = 0; if (string(&sv, &sn)) n->on_value = sv; }
+                else {
+                    usize vs = at;
+                    while (!end() && (word_char(peek()) || peek() == '-')) ++at;
+                    if (at > vs) n->on_value = copy(text + vs, at - vs);
+                }
+                if (!n->on_value) { err(c1, "if key=value takes a word or a string"); skip_line(); }
+            }
             blanks();
             if (peek() == '{') children(n);
             else err(c0, "if needs a block");
@@ -754,6 +769,7 @@ struct Parser {
         if (n->in) b.set(o, "in", b.string(n->in));
         if (n->height != KV_JSON_NO_REF) b.set(o, "height", n->height);
         if (n->on) b.set(o, "on", b.string(n->on));
+        if (n->on_value) b.set(o, "ov", b.string(n->on_value));
         if (n->kids.len) {
             JsonRef c = b.array();
             for (Node* k : n->kids) b.push(c, emit_node(k));
