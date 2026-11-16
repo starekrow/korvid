@@ -507,6 +507,8 @@ void rb_pass_post(Renderer* r, FrameInFlight&, const RenderView& view) {
     r->world_view = CpuWorld{(const u16*)p.world.data, p.world_width, p.world_height};
     CpuPostPush& pp = r->post_push;
     pp = CpuPostPush{};
+    // The target's size (post_fragment.slangh): the shader's uv is the pixel over it. At a
+    // render scale that is the smaller target's, as a GPU's would be at that density.
     pp.size[0] = (f32)p.world_width;
     pp.size[1] = (f32)p.world_height;
     pp.time = (f32)(time_now() - r->start_time);

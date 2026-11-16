@@ -7,6 +7,7 @@
 #include "korvid/renderer-cpu/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/format.h"
+#include "korvid/core/job.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/module.h"
@@ -73,6 +74,9 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->ui.alloc = r->draws.alloc = ga;
     r->shader_textures.alloc = ga;
     r->game_shaders = desc.cpu_shaders;
+    r->scale_setting = desc.cpu_scale;
+    if (const char* sc = getenv("KV_CPU_SCALE")) r->scale_setting = !strcmp(sc, "auto") ? 0u : (u32)atoi(sc);
+    if (r->scale_setting > 8) r->scale_setting = 8;
     r->tile_hash.alloc = ga;
     r->quantize8 = getenv("KV_CPU_TARGET8") != nullptr;
     const char* cache = getenv("KV_CPU_TILE_CACHE");
@@ -126,6 +130,8 @@ void renderer_destroy(Renderer* r) {
     cpu_free(r, r->material_table);
     cpu_free(r, r->ring.buf);
     cpu_free(r, r->headless);
+    cpu_free(r, r->scaled);
+    cpu_free(r, r->xmap);
     cpu_free(r, r->shot_buffer);
     cpu_free(r, r->check_buffer);
     rc_free_pools(r);
@@ -271,19 +277,79 @@ bool rb_create_tables(Renderer* r, u32 rows) {
 bool rb_frame_wait(Renderer*, FrameInFlight&, f64*) { return true; } // the last frame ended inside its own renderer_render
 void rb_frame_slot(Renderer*, FrameInFlight&, u32) {}               // textures are read where they are
 
+// The window's pixels per drawn pixel, each way, for this frame.
+static u32 frame_scale(const Renderer* r) {
+    u32 s = r->scale_setting;
+    if (!s) {
+        f32 ps = r->window ? r->window->pixel_scale() : 1.0f;
+        s = ps >= 2.0f ? (u32)ps : 1u; // rounded down: a display at 1.5x draws every pixel, at 2x or 3x its units
+    }
+    return s < 1 ? 1 : s > 8 ? 8 : s;
+}
+
 bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64*) {
     f.have_image = false;
     f.width = f.height = 0;
     r->target = nullptr;
+    r->upscale = false;
     if (r->window) {
+        u32 W = r->window->width(), H = r->window->height();
+        u32 s = frame_scale(r);
+        u32 tw = s > 1 ? (W + s - 1) / s : 0, th = s > 1 ? (H + s - 1) / s : 0;
+        if (s > 1 && (tw < 16 || th < 16)) { s = 1; tw = th = 0; } // a window too small to divide
+        r->window->software_size(tw, th);
         HostWindow::SoftwareFrame sf;
         if (!r->window->software_frame(&sf) || !sf.width || !sf.height) return true; // no image: the frame still takes its uploads
-        r->presenting    = true;
-        r->target        = sf.pixels;
-        r->target_width  = sf.width;
-        r->target_height = sf.height;
-        r->target_pitch  = sf.pitch;
-        r->target_rgba   = sf.rgba;
+        r->presenting = true;
+        r->scale = s;
+        if (s > 1 && sf.width == tw && sf.height == th) { // the window scales it up
+            r->target         = sf.pixels;
+            r->target_width   = sf.width;
+            r->target_height  = sf.height;
+            r->target_pitch   = sf.pitch;
+            r->logical_width  = W;
+            r->logical_height = H;
+        } else if (s > 1) { // the window's size: drawn smaller here, scaled up at the present
+            tw = (sf.width + s - 1) / s;
+            th = (sf.height + s - 1) / s;
+            u64 bytes = (u64)tw * th * 4;
+            if (r->scaled.size < bytes) {
+                cpu_free(r, r->scaled);
+                if (!cpu_alloc(r, bytes, r->scaled)) { r->window->present_software(); r->presenting = false; return false; }
+            }
+            r->upscale        = true;
+            r->window_pixels  = sf.pixels;
+            r->window_width   = sf.width;
+            r->window_height  = sf.height;
+            r->window_pitch   = sf.pitch;
+            r->target         = r->scaled.data;
+            r->target_width   = tw;
+            r->target_height  = th;
+            r->target_pitch   = tw * 4;
+            r->logical_width  = sf.width;
+            r->logical_height = sf.height;
+        } else {
+            r->target         = sf.pixels;
+            r->target_width   = sf.width;
+            r->target_height  = sf.height;
+            r->target_pitch   = sf.pitch;
+            r->logical_width  = sf.width;
+            r->logical_height = sf.height;
+        }
+        r->target_rgba = sf.rgba;
+        if (r->scale != r->logged_scale || r->logical_width != r->logged_width) {
+            if (r->scale > 1)
+                KV_INFO(KV_RB_NAME, "drawing at 1/%u of the window's pixels: %ux%u for %ux%u, scaled up %s", r->scale, r->target_width,
+                        r->target_height, r->logical_width, r->logical_height, r->upscale ? "here" : "by the window");
+            else if (r->logged_scale > 1)
+                KV_INFO(KV_RB_NAME, "drawing at the window's pixels: %ux%u", r->target_width, r->target_height);
+            r->logged_scale = r->scale;
+            r->logged_width = r->logical_width;
+        }
+        f.have_image = true;
+        f.width  = r->logical_width;
+        f.height = r->logical_height;
+        return true;
     } else {
         u32 w = r->want_width, h = r->want_height;
         if (!w || !h) return true;
@@ -297,6 +363,9 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64*) {
         r->target_height = h;
         r->target_pitch  = w * 4;
         r->target_rgba   = false;
+        r->scale = 1;
+        r->logical_width  = w;
+        r->logical_height = h;
     }
     f.have_image = true;
     f.width  = r->target_width;
@@ -306,8 +375,47 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64*) {
 
 bool rb_frame_submit(Renderer*, FrameInFlight&) { return true; } // it ran as it was recorded
 
+// The drawn frame scaled up into the window's, nearest-neighbour: a window row from its
+// source row, or a copy of the row above when they share one.
+struct UpscaleJob {
+    const u8* src;
+    u32       src_width, src_height, src_pitch;
+    u8*       dst;
+    u32       dst_width, dst_height, dst_pitch;
+    const u32* xmap;
+};
+
+static void upscale_rows(u32, u32 begin, u32 end, void* user) {
+    const UpscaleJob& j = *(const UpscaleJob*)user;
+    u32 prev = ~0u;
+    for (u32 y = begin; y < end; ++y) {
+        u32 sy = (u32)((u64)y * j.src_height / j.dst_height);
+        u32* d = (u32*)(j.dst + (usize)y * j.dst_pitch);
+        if (sy == prev) { memcpy(d, j.dst + (usize)(y - 1) * j.dst_pitch, (usize)j.dst_width * 4); continue; }
+        const u32* s = (const u32*)(j.src + (usize)sy * j.src_pitch);
+        for (u32 x = 0; x < j.dst_width; ++x) d[x] = s[j.xmap[x]];
+        prev = sy;
+    }
+}
+
+static void upscale(Renderer* r) {
+    u32 ww = r->window_width;
+    if (r->xmap_from != r->target_width || r->xmap_to != ww) {
+        cpu_free(r, r->xmap);
+        if (!cpu_alloc(r, (u64)ww * sizeof(u32), r->xmap)) { r->xmap_from = r->xmap_to = 0; return; }
+        u32* m = (u32*)r->xmap.data;
+        for (u32 x = 0; x < ww; ++x) m[x] = (u32)((u64)x * r->target_width / ww);
+        r->xmap_from = r->target_width;
+        r->xmap_to   = ww;
+    }
+    UpscaleJob j{r->target, r->target_width, r->target_height, r->target_pitch,
+                 r->window_pixels, ww, r->window_height, r->window_pitch, (const u32*)r->xmap.data};
+    jobs_run(r->window_height, 64, upscale_rows, &j, "cpu.upscale");
+}
+
 bool rb_frame_present(Renderer* r, FrameInFlight&, f64*) {
     f64 t0 = r->stats ? time_now() : 0.0;
+    if (r->presenting && r->upscale) upscale(r);
     if (r->presenting && r->window) r->window->present_software();
     if (r->stats) r->stat_present += time_now() - t0;
     r->presenting = false;
@@ -331,6 +439,9 @@ void rb_upload_end(Renderer*, FrameInFlight&) {}
 // The world image for a frame of this size, when the post shader is on.
 bool rb_post_prepare(Renderer* r, u32 width, u32 height) {
     PostPass& p = r->post;
+    // The world image is the target's size: smaller than the window's (`width`, `height`)
+    // at a render scale.
+    if (r->target) { width = r->target_width; height = r->target_height; }
     if (p.shader.is_null() || p.failed || !p.fn || !width || !height) return false;
     if (p.world_width != width || p.world_height != height) {
         cpu_free(r, p.world);

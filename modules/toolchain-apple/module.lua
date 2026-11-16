@@ -109,7 +109,7 @@ module "toolchain.apple" {
       test_jobs   = 1,
       externals = {
         -- The window, its view and the lifecycle; the audio unit. The SDK's, nothing to install.
-        uikit     = { frameworks = { "UIKit", "QuartzCore", "Foundation" } },
+        uikit     = { frameworks = { "UIKit", "QuartzCore", "CoreGraphics", "Foundation" } },
         coreaudio = { frameworks = { "AudioToolbox", "AVFAudio" } },
       },
       package = "iosapp",
@@ -123,7 +123,7 @@ module "toolchain.apple" {
       srcdirs = { "ios" },
       externals = {
         -- The window, its view and the lifecycle; the audio unit. The SDK's, nothing to install.
-        uikit     = { frameworks = { "UIKit", "QuartzCore", "Foundation" } },
+        uikit     = { frameworks = { "UIKit", "QuartzCore", "CoreGraphics", "Foundation" } },
         coreaudio = { frameworks = { "AudioToolbox", "AVFAudio" } },
       },
       package = "iosapp",

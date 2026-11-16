@@ -13,11 +13,19 @@
 // usages (input_ios.cc). Touches go to Input's touch list, with the safe area's insets on the
 // window (the touchpad module turns them into a pad). Gamepads and text input are slice 8's.
 //
+// A software window (the CPU renderer's, where Metal cannot draw: the Simulator) draws into
+// one of three buffers of ours; each present wraps it in a CGImage and makes it the contents
+// of a plain layer over the Metal one. Core Animation holds the image until it has shown it,
+// and the image's release hands the buffer back, so a frame never writes pixels on screen.
+// A frame may be smaller than the window (software_size): the layer scales it up on the GPU,
+// nearest-neighbour. The presents do not wait for the display: the frame loop paces them.
+//
 // Objective-C without ARC, as renderer-metal: the few objects here live as long as the
 // window, made and released explicitly. UIKit calls arrive on the main thread, which is the
 // engine's, so the message ring needs no lock.
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/events.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"
 #include "../hid_backend.h"
@@ -59,6 +67,27 @@ struct IosApp {
 };
 
 IosApp g_app; // one application per process
+
+// A software window's pixels: B, G, R, X in memory, rows `pitch` bytes apart. `held` while a
+// frame draws into it or Core Animation shows it (the image's release clears it, on any
+// thread).
+struct SoftBuffer {
+    u8* pixels = nullptr;
+    u32 width = 0, height = 0, pitch = 0;
+    u32 held = 0;
+};
+
+struct SoftSurface {
+    SoftBuffer buf[3];
+    SoftBuffer* drawing = nullptr; // software_frame's, until present_software
+    CALayer* layer = nil;          // over the view's Metal layer, made by the first present
+    CGColorSpaceRef space = nullptr;
+    bool told = false;             // the "every buffer is held" warning, once
+};
+
+SoftSurface g_soft;
+
+void soft_release(void* info, const void*, size_t) { atomic_store(&((SoftBuffer*)info)->held, 0u, MO_RELEASE); }
 
 void post(const IosMsg& m) {
     if (g_app.tail - g_app.head >= kRing) { ++g_app.dropped; return; }
@@ -294,9 +323,66 @@ void HostWindow::close() {
 }
 
 void HostWindow::present_blank() {} // UIKit shows the view's background; nothing to attach
-bool HostWindow::software_frame(SoftwareFrame*) { return false; } // not yet on this host (the CPU renderer PRD's SR21)
-void HostWindow::present_software() {}
-bool HostWindow::software_vsync(bool) { return false; }
+bool HostWindow::software_frame(SoftwareFrame* out) {
+    if (!native_ || surface_ != WindowSurface::Software || !width_ || !height_) return false;
+    u32 w = width_, h = height_;
+    if (software_want_[0] && software_want_[1] && software_want_[0] <= w && software_want_[1] <= h) {
+        w = software_want_[0];
+        h = software_want_[1];
+    }
+    SoftBuffer* b = nullptr;
+    for (SoftBuffer& c : g_soft.buf)
+        if (!atomic_load(&c.held, MO_ACQUIRE)) { b = &c; break; }
+    if (!b) { // the display has all three: this frame is not drawn
+        if (!g_soft.told) KV_WARN("window", "every software buffer is still on screen: a frame skipped");
+        g_soft.told = true;
+        return false;
+    }
+    if (b->width != w || b->height != h) {
+        free(b->pixels);
+        b->pitch  = (w * 4 + 63) & ~63u; // rows on 64 bytes, as Core Animation likes them
+        b->pixels = (u8*)malloc((size_t)b->pitch * h);
+        if (!b->pixels) { b->width = b->height = 0; return false; }
+        b->width  = w;
+        b->height = h;
+    }
+    b->held = 1;
+    g_soft.drawing = b;
+    software_ = b;
+    *out = SoftwareFrame{b->pixels, b->width, b->height, b->pitch, false};
+    return true;
+}
+
+void HostWindow::present_software() {
+    SoftBuffer* b = g_soft.drawing;
+    if (!b) return;
+    g_soft.drawing = nullptr;
+    software_ = nullptr;
+    UIView* v = (UIView*)native_;
+    if (!v) { atomic_store(&b->held, 0u, MO_RELEASE); return; }
+    if (!g_soft.space) g_soft.space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGDataProviderRef data = CGDataProviderCreateWithData(b, b->pixels, (size_t)b->pitch * b->height, soft_release);
+    CGImageRef image = CGImageCreate(b->width, b->height, 8, 32, b->pitch, g_soft.space,
+                                     kCGBitmapByteOrder32Little | (CGBitmapInfo)kCGImageAlphaNoneSkipFirst, data, nullptr, false,
+                                     kCGRenderingIntentDefault);
+    CGDataProviderRelease(data); // the image holds it; its last release frees the buffer
+    if (!image) { atomic_store(&b->held, 0u, MO_RELEASE); return; }
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES]; // no fade between frames
+    if (!g_soft.layer) {
+        g_soft.layer = [[CALayer alloc] init];
+        g_soft.layer.opaque = YES;
+        g_soft.layer.contentsGravity = kCAGravityResize;
+        g_soft.layer.magnificationFilter = kCAFilterNearest; // a smaller frame's pixels stay square
+        [v.layer addSublayer:g_soft.layer];
+    }
+    g_soft.layer.frame = v.layer.bounds;
+    g_soft.layer.contents = (id)image;
+    [CATransaction commit];
+    CGImageRelease(image);
+}
+
+bool HostWindow::software_vsync(bool) { return false; } // the frame loop paces: see the top
 void HostWindow::text_input(bool) {} // slice 8: the on-screen keyboard
 
 // Not yet on this host (Krome slice 3): the input method's area is not told, the clipboard is

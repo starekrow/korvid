@@ -16,10 +16,11 @@ configs   { "debug", "dev", "ship" }
 -- bind "render" { linux = "renderer-vulkan" }
 
 -- Windows draws with Direct3D 12 (renderer-vulkan for the toolchain's default, Vulkan; the
--- shaders follow the binding, slang's rule). On both, the CPU renderer is linked beside the
--- GPU backend as its fallback (docs/PRDs/CPU-Renderer-PRD.md): render's dispatcher takes
+-- shaders follow the binding, slang's rule). On every platform, the CPU renderer is linked
+-- beside the GPU backend as its fallback (on iOS, it is what the Simulator's GPU draws with) (docs/PRDs/CPU-Renderer-PRD.md): render's dispatcher takes
 -- the first in the list that can draw here, so the GPU comes first.
-bind "render" { linux = { "renderer-vulkan", "renderer-cpu" }, windows = { "renderer-d3d12", "renderer-cpu" }, macos = { "renderer-metal", "renderer-cpu" } }
+bind "render" { linux = { "renderer-vulkan", "renderer-cpu" }, windows = { "renderer-d3d12", "renderer-cpu" }, macos = { "renderer-metal", "renderer-cpu" },
+                ios = { "renderer-metal", "renderer-cpu" }, iossim = { "renderer-metal", "renderer-cpu" } }
 
 root "examples" { paths = "examples", platforms = { "linux" } }
 root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
@@ -57,7 +58,7 @@ root "macos" {
 root "ios" {
   modules   = { "lua", "tool", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
                 "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
-                "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal",
+                "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal", "renderer-cpu", "renderer-cpu-raster",
                 "window", "testbed", "stones", "rocks", "arcanum",
                 "arcfire", "gallery", "script", "truetype", "typeset", "kim", "kimb", "krome", "kromedemo", "kromescreens" },
   tests     = true,

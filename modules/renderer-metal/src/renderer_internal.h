@@ -53,6 +53,11 @@
 #include "korvid/core/pool.h"
 #include "korvid/core/profile.h"
 
+namespace kv {
+// Startup found a device that can draw (module.mm); renderer_probe says no without one.
+extern bool g_metal_ready;
+} // namespace kv
+
 namespace kv { namespace KV_RB_NS {
 
 // What the render core holds of this backend's (korvid/render/core/core.h): a buffer is the

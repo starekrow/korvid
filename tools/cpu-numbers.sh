@@ -54,7 +54,7 @@ run() { # name, command, size, threads, isa
   [ "$4" = "1" ] && threads="--threads 1"
   units=$(echo "$3" | awk -F x -v s="$scale" '{ printf "%dx%d", $1 / s + 0.5, $2 / s + 0.5 }')
   # shellcheck disable=SC2086
-  (cd "$bin" && KV_CPU_STATS=60 KV_CPU_ISA="$5" limit 60 ./$2 --renderer cpu --size "$units" $threads </dev/null >"$log" 2>&1) || true
+  (cd "$bin" && KV_CPU_STATS=60 KV_CPU_ISA="$5" limit 60 ./$2 --renderer cpu --cpu-scale 1 --size "$units" $threads </dev/null >"$log" 2>&1) || true
   got=$(sed -nE 's/.*window: opened .* ([0-9]+x[0-9]+) px.*/\1/p' "$log" | head -1)
   [ -z "$got" ] || [ "$got" = "$3" ] || echo "cpu-numbers: $1 at $3 opened at $got px" >&2
   fps=$(grep -E 'frameloop: [0-9]+ fps' "$log" | tail -1 | sed -E 's/.*frameloop: ([0-9]+) fps.*/\1/')

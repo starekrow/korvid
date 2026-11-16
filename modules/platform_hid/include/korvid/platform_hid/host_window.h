@@ -97,6 +97,11 @@ struct HostWindow {
     // the system will not give its pixels.
     struct SoftwareFrame { u8* pixels = nullptr; u32 width = 0, height = 0, pitch = 0; bool rgba = false; };
     bool software_frame(SoftwareFrame* out);
+    // The size the next software_frame() is asked to be, smaller than the window's: a host
+    // that can scale a frame up to the window as it shows it (iOS: Core Animation does) gives
+    // a frame this size, nearest-neighbour scaled. Others give the window's size as always,
+    // and the caller scales. 0 x 0: the window's size.
+    void software_size(u32 w, u32 h) { software_want_[0] = w; software_want_[1] = h; }
     void present_software();
     // present_software() waiting for the display (vsync), kept across the surface's
     // re-creation on a resize. True when the system does it: the presents then pace the
@@ -146,6 +151,7 @@ struct HostWindow {
     void* software_    = nullptr; // the backend's: the surface software_frame() locked, until present_software()
     void* software_vsynced_ = nullptr; // SDL: the surface software_vsync() was last applied to
     bool  software_vsync_   = false;   // what software_vsync() asked for
+    u32   software_want_[2] = {};      // software_size()'s
 };
 
 } // namespace kv

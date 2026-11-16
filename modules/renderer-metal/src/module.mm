@@ -9,15 +9,30 @@
 #include "korvid/platform_hid/module.h"
 #import <Metal/Metal.h>
 
+#ifndef KV_BIND_RENDER_COUNT
+#define KV_BIND_RENDER_COUNT 1
+#endif
+
 namespace kv {
 
+bool g_metal_ready = false;
+
 namespace {
+
+// Without a Metal device that can draw, the module fails, and the engine with it, unless the
+// build binds another backend to fall back on (renderer-cpu): then it starts, empty, and
+// renderer_probe says no. The iOS Simulator is the case: its GPU is an Apple2.
+bool unavailable(const char* why) {
+    if (KV_BIND_RENDER_COUNT < 2) return false;
+    KV_INFO("metal", "unavailable (%s): another renderer will draw", why);
+    return true;
+}
 
 bool renderer_metal_startup(Engine& e, ModuleInstance& self) {
     if (!platform_video_up(e)) return false;
     @autoreleasepool {
         id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
-        if (!dev) { KV_ERROR("metal", "no Metal device"); return false; }
+        if (!dev) { KV_ERROR("metal", "no Metal device"); return unavailable("no Metal device"); }
         bool ok = [dev supportsFamily:MTLGPUFamilyApple7] && dev.argumentBuffersSupport == MTLArgumentBuffersTier2;
         // The iOS Simulator's GPU is an Apple2: no indirect draws or dispatches, which the GPU
         // sort and the draws are; it is refused here, as an A13 is.
@@ -28,12 +43,13 @@ bool renderer_metal_startup(Engine& e, ModuleInstance& self) {
                 [dev supportsFamily:MTLGPUFamilyMetal3] ? "yes" : "no", dev.argumentBuffersSupport == MTLArgumentBuffersTier2 ? 2 : 1,
                 ok ? "" : "; the renderer needs Apple7 with tier 2");
         [dev release];
-        if (!ok) return false;
+        if (!ok) return unavailable("the GPU is older than Apple7 with tier 2 argument buffers");
     }
     RendererMetalState* s = arena_push<RendererMetalState>(self.arena);
     if (!s) return false;
     s->general = &self.general;
     self.set_state(s);
+    g_metal_ready = true;
     return true;
 }
 

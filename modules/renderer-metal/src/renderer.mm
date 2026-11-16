@@ -162,6 +162,7 @@ Renderer* renderer_get(Engine& engine) {
 // renderer_create; one that will not do fails there, and render's dispatcher falls back to
 // the next bound backend.
 bool renderer_probe(const char** why) {
+    if (!g_metal_ready) { *why = "no Metal device that can draw (Apple7, tier 2 argument buffers)"; return false; }
     *why = "";
     return true;
 }

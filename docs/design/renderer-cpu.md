@@ -448,3 +448,41 @@ Beside Linux's AVX2 table above (1920 x 1080, every core; both machines have 8 c
     would say.
   - **One core is 9 times slower than sixteen threads** on arcfire (44.8 ms against 5.1 at 1080p without
     shaders), as on Linux.
+
+## Apple, and the render scale
+
+- **macOS and iOS bind it too**, after Metal (`kormake.lua`). On the Mac it is the fallback, and the gallery's test
+  draws every scene exactly as `references/cpu` has it on arm64's baseline (NEON) kernels.
+- **Metal stands aside** where it cannot draw, as Vulkan does: with a second backend bound, a GPU short of Apple7
+  with tier 2 argument buffers starts the module empty and `renderer_probe` says no. The iOS Simulator's GPU is an
+  Apple2, so games there draw on the CPU; a phone draws with Metal unless `--renderer cpu` says otherwise.
+- **The iOS window's software frames** (`host_window_ios.mm`): three buffers of ours; a present wraps one in a
+  CGImage and makes it the contents of a plain layer over the Metal one, without an animation. The image's release
+  hands the buffer back, so a frame never draws into pixels on screen. The frame loop paces the presents. The tile
+  cache does not help there yet: the target changes buffer every frame, so every tile is drawn.
+- **The render scale.** A Retina Mac's window has 4 pixels for each of its units, a phone's 9, and the CPU drew
+  every one: arcfire on the CPU at 52 fps on an M3 Max's 2560 x 1440, 13 fps on an iPhone 15 Pro Max. Now the CPU
+  draws one pixel for N x N of the window's (`RendererDesc::cpu_scale`, `--cpu-scale auto|N`, `KV_CPU_SCALE`).
+  - auto (the default) is the window's `pixel_scale`, rounded down: the window's units on a display at 2x or 3x.
+    1 below 2x (Linux and Windows at 100%, Windows at 150% as measured above, headless), so nothing changes there.
+  - The game and the core still see the window's size: the push block is built for it, and sprites, the HUD's
+    screen-space layers and the UI lists reach the smaller target through clip space. Input, layout and cameras
+    are untouched. The post shader's `size` is the target's (its uv is the pixel over it), as a GPU's would be at
+    that density.
+  - A window that can scale a frame up as it shows it is asked for a smaller one (`HostWindow::software_size`):
+    iOS's layer does it on the GPU, nearest-neighbour. Elsewhere the frame draws into a buffer of the renderer's and
+    the present scales it into the window's frame, nearest-neighbour, on the job threads (about 1.6 ms at
+    2560 x 1440 on the M3 Max).
+  - Screenshots are the target's size.
+  - `tools/cpu-numbers.sh` passes `--cpu-scale 1`, so its sizes stay pixels drawn.
+
+  arcfire's demo with nebula and shimmer, base kernels, `--renderer cpu`:
+
+  | Machine | Window | Drawn | Record ms | fps |
+  | --- | --- | --- | --- | --- |
+  | M3 Max | 2560x1440 | 2560x1440 (scale 1) | 16.4 | 52 |
+  | M3 Max | 2560x1440 | 1280x720 (auto, 2) | 4.5 | 120 (the display's) |
+  | iOS Simulator on the M3 Max | 2622x1206 | 874x402 (auto, 3) | 3.2 | 54 (the Simulator's pacing) |
+  | iPhone 15 Pro Max | 2796x1290 | 2796x1290 (scale 1) | 69 | 12 |
+  | iPhone 15 Pro Max | 2796x1290 | 1398x645 (scale 2) | 20 | 47 |
+  | iPhone 15 Pro Max | 2796x1290 | 932x430 (auto, 3) | 8.5 | 56 |

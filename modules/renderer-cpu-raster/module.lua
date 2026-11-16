@@ -6,7 +6,7 @@
 -- raster.cc is built again for AVX2 where the toolchain names it (isa_sources), and select.cc
 -- chooses a path at start-up; every path draws the same bytes.
 module "renderer-cpu-raster" {
-  platforms   = { "linux", "windows", "macos" },
+  platforms   = { "linux", "windows", "macos", "ios", "iossim" },
   deps        = { "core" },
   codegen     = "fast",
   unity       = false,

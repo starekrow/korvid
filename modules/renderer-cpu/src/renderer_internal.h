@@ -87,6 +87,22 @@ struct Renderer : RenderCore {
     bool presenting  = false;  // the window's frame is held: present_software() is owed
     bool display_paced = false; // the window's present waits for the display (HostWindow::software_vsync)
 
+    // The render scale: one pixel drawn for scale x scale of the window's. The game and the
+    // core see the window's size (logical_*): the push block, the post shader's size; the
+    // target is that size divided, and everything reaches it through clip space. A window
+    // that scales frames up as it shows them (HostWindow::software_size) gives a target that
+    // size; else the frame draws into `scaled` and the present scales it up into the
+    // window's frame (window_*), nearest-neighbour, on the job threads.
+    u32  scale_setting = 0;     // RendererDesc::cpu_scale or KV_CPU_SCALE; 0: the window's pixel_scale
+    u32  scale = 1, logged_scale = 0, logged_width = 0; // this frame's, and what was last logged
+    u32  logical_width = 0, logical_height = 0;
+    bool upscale = false;       // this frame scales `scaled` into window_frame at its present
+    Buffer scaled;
+    u8*  window_pixels = nullptr;
+    u32  window_width = 0, window_height = 0, window_pitch = 0;
+    Buffer xmap;                // a window column's source column, for the upscale
+    u32  xmap_from = 0, xmap_to = 0;
+
     // The frame being drawn (frame.cc): its push block and layer offsets (rb_sort,
     // rb_bind_sprites); the sort's totals and starts are in sort_meta, as the GPU's are.
     PushData   push{};
