@@ -94,6 +94,48 @@ const char* krome_model_text(Engine& e, Name screen, const char* key);
 // physical pixels and the scale they are of logical ones. Once set, the window is not read.
 void krome_viewport(Engine& e, f32 width, f32 height, f32 scale);
 
+// ---- behaviours from C++ (docs/PRDs/Krome-Slice-4-PRD.md, "Behaviour, in Lua or in C++") ----
+//
+// A node names its behaviour (`behave=slider`); the pointer and the keys go to it as calls.
+// Lua preludes return theirs from their scripts; a module registers one here. One name
+// registered both ways is an error at the second. x and y are the node's own logical pixels.
+//
+//   KromeBehaviourDesc d;
+//   d.press = [](KromeWidget& w, f32 x, f32, u32) { w.set(w.lo + (w.hi - w.lo) * x / w.rect.w); };
+//   d.drag  = [](KromeWidget& w, f32 x, f32)      { w.set(w.lo + (w.hi - w.lo) * x / w.rect.w); };
+//   krome_behaviour(e, "slider", d);
+
+// The node a call is for: where it is, its range, its state, and its model value where it is bound.
+struct KromeWidget {
+    Engine* e = nullptr;
+    Name    screen, id;      // the screen's name; the node's id (null when it has none)
+    rect2   rect;            // logical pixels in the window
+    f32     lo = 0.0f, hi = 0.0f, step = 0.0f; // its range (`1..99`; hi <= lo: none) and `step=`
+    void*   state = nullptr; // the descriptor's state_size bytes, zero at first, kept while its id lasts
+    bool    focused = false;
+    u32     screen_id = 0, overlay = 0, node = 0; // where Krome finds it again
+
+    f64         number() const;               // the bound value as a number (0 when it is not one)
+    const char* text() const;                 // as text, as {key} shows it; valid until the next call
+    void        set(f64 v);                   // the bound value written, and what reads it told
+    void        set(const char* v);
+    void        emit(const char* event, f64 value = 0.0); // as the screen's own event: its handler, then KromeEvent
+};
+
+struct KromeBehaviourDesc {
+    void (*press)(KromeWidget& w, f32 x, f32 y, u32 button) = nullptr; // button 1 the left
+    void (*drag)(KromeWidget& w, f32 x, f32 y) = nullptr;   // the pointer moved while the press is held
+    void (*release)(KromeWidget& w, f32 x, f32 y) = nullptr;
+    bool (*wheel)(KromeWidget& w, f32 dy) = nullptr;        // true: taken (a scroll box under it does not move)
+    bool (*key)(KromeWidget& w, const char* name, u32 mods) = nullptr; // while it has the focus; true: taken. name: "left", "enter", "a"; mods: KROME_MOD_
+    void (*focus)(KromeWidget& w, bool on) = nullptr;
+    void (*hover)(KromeWidget& w, bool on) = nullptr;
+    u32  state_size = 0;
+};
+
+// False (logged) when the name is taken already, here or by a prelude.
+bool krome_behaviour(Engine& e, const char* name, const KromeBehaviourDesc& desc);
+
 // What the view has done over the run: layouts, lists painted, lists handed to the renderer.
 struct KromeStats { u64 layouts = 0, paints = 0, submits = 0, fired = 0, script_errors = 0, rebuilt_regions = 0, rebuilt_nodes = 0; };
 KromeStats krome_stats(Engine& e);

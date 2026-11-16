@@ -17,6 +17,9 @@ lines greedily, and places each line's glyphs with kerning, aligned against the 
   pixel, centered in its line when the height is the caller's.
 - **Pens** are where each glyph starts; a drawer snaps each glyph's box to whole pixels, or,
   with `subpixel`, draws the quarter-pixel copy the glyph table holds (`font_glyph_at`).
+- **A mask** (`mask`, a code point) lays out that glyph for every character but `\n`, a
+  password's bullets, with every offset still the text's: carets, hits and selections work
+  on the real bytes.
 
 `typeset_measure` is the same without keeping the glyphs: the widest line unwrapped, the
 narrowest width the text can take (its longest unbreakable run), and its height at a width.

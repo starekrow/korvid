@@ -196,7 +196,9 @@ struct Paint {
 color faded(color c, f32 o) { c.a *= o; return c; }
 
 KromeState state_of(const Paint& p, u32 node) {
-    if (krome_is_focused(p.s, p.sc.id, p.overlay, node)) return KromeState::Focused;
+    // An edit shows the focus however it came; anything else only when Tab brought it (a
+    // pressed button grows no ring).
+    if (krome_is_focused(p.s, p.sc.id, p.overlay, node) && (p.s.focus.keyboard || p.tree.nodes[node].type == KromeType::Edit)) return KromeState::Focused;
     if (node == p.pressed) return KromeState::Pressed;
     for (u32 i = 0; i < p.hovered_n; ++i) if (p.hovered[i] == node) return KromeState::Hover;
     return KromeState::Base;
@@ -402,6 +404,7 @@ void paint_edit(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
     tp.align = n.align_x == KromeAlign::Center ? TypesetAlign::Center : n.align_x == KromeAlign::End ? TypesetAlign::Right : TypesetAlign::Left;
     tp.line_height = l.line_height > 0.0f ? floor(l.line_height * l.size * scale + 0.5f) : 0.0f;
     tp.subpixel = (n.flags & KROME_SUBPIXEL) != 0;
+    if ((n.flags & KROME_SECRET) && !placeholder) tp.mask = 0x2022; // a bullet for each character
     Typeset t;
     t.lines.alloc = t.glyphs.alloc = mem_scratch();
     typeset_paragraph(*fa, drawn, drawn_len, tp, t);
@@ -421,6 +424,8 @@ void paint_edit(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
             typeset_paragraph(*fa, f.buf.c_str(), f.buf.len, tp, bt);
             f32 lx = f.pending_at.x - in.x + f.scroll.x, ly = f.pending_at.y - top + f.scroll.y;
             u32 at = typeset_hit(bt, lx, ly);
+            // A secret's words are not told apart: a double press takes it all.
+            if (f.pending_clicks == 2 && (n.flags & KROME_SECRET)) f.pending_clicks = 3;
             if (f.pending_clicks == 2) {
                 typeset_word_at(f.buf.c_str(), f.buf.len, at, &f.word_begin, &f.word_end);
                 f.buf.anchor = f.word_begin;
@@ -571,6 +576,17 @@ void screens_top_first(KromeModule& s, KromeScreen** out, u32* n) {
 
 constexpr u32 k_max_screens = 64;
 
+} // namespace
+
+KromeScreen* krome_top_screen(KromeModule& s) {
+    KromeScreen* order[k_max_screens];
+    u32 n = 0;
+    screens_top_first(s, order, &n);
+    return n ? order[0] : nullptr;
+}
+
+namespace {
+
 // What the pointer is over, top first. A modal overlay hides everything under it: over
 // anything else the answer is the modal itself with no node.
 KromeTarget hit(KromeModule& s, f32 x, f32 y) {
@@ -603,7 +619,7 @@ KromeTarget pressable(KromeModule& s, KromeTarget t) {
     for (u32 n = t.node; n != KROME_NONE; n = tree->nodes[n].parent) {
         const KromeNode& node = tree->nodes[n];
         if (node.flags & KROME_DISABLED) return KromeTarget{};
-        if (found == KROME_NONE && (!node.event.is_null() || !node.binding.is_null() || node.type == KromeType::Hit || node.type == KromeType::Edit)) found = n;
+        if (found == KROME_NONE && (!node.event.is_null() || !node.binding.is_null() || !node.behave.is_null() || node.type == KromeType::Hit || node.type == KromeType::Edit)) found = n;
     }
     t.node = found;
     return found == KROME_NONE ? KromeTarget{} : t;
@@ -679,6 +695,22 @@ void bar_drag(KromeModule& s, f32 x, f32 y) {
     sc->repaint = true;
 }
 
+// The node with a behaviour the pointer is over hears it come and go.
+void follow_hover(KromeModule& s, const KromeTarget& under) {
+    KromeTarget h;
+    KromeTree* t = under.node != KROME_NONE ? krome_target_tree(s, under, nullptr) : nullptr;
+    for (u32 c = t ? under.node : KROME_NONE; c != KROME_NONE; c = t->nodes[c].parent)
+        if (!t->nodes[c].behave.is_null()) { h = KromeTarget{under.screen, under.overlay, c}; break; }
+    if (h == s.hover_behave) return;
+    KromeTarget was = s.hover_behave;
+    s.hover_behave = h;
+    KromeCallArgs a;
+    a.on = false;
+    if (was.node != KROME_NONE) krome_behave(s, was, KromeCall::Hover, a);
+    a.on = true;
+    if (h.node != KROME_NONE) krome_behave(s, h, KromeCall::Hover, a);
+}
+
 void close_tip(KromeModule& s) {
     if (!s.tip_overlay) return;
     u32 id = s.tip_overlay;
@@ -749,6 +781,7 @@ void krome_close_overlay(KromeModule& s, KromeScreen& sc, u32 id) {
     KromeOverlay* o = sc.overlays[at];
     if (s.tip_overlay == o->id && s.tip.screen == sc.id) s.tip_overlay = 0;
     if (s.bar.box.screen == sc.id && s.bar.box.overlay == o->id) s.bar = KromeModule::Bar{};
+    if (s.hover_behave.screen == sc.id && s.hover_behave.overlay == o->id) s.hover_behave = KromeTarget{};
     for (u32 i = at + 1; i < sc.overlays.len; ++i) sc.overlays[i - 1] = sc.overlays[i];
     --sc.overlays.len;
     // What the pointer was on in it is gone, and the keyboard if an edit in it had it.
@@ -899,6 +932,7 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
         s.under = under;
     }
     follow_tip(s, under, down && !s.down);
+    follow_hover(s, under);
 
     if (down && !s.down) {
         // A press outside the light overlays closes them, and goes no further.
@@ -913,15 +947,26 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
         } else {
             s.captured = pressable(s, under);
         }
-        // A press on an edit gives it the keyboard; a press anywhere else takes it away.
+        // A press on an edit gives it the keyboard, on anything else focusable the focus; a
+        // press anywhere else takes it away.
         KromeScreen* psc = nullptr;
         KromeTree* pt = s.captured.node != KROME_NONE ? krome_target_tree(s, s.captured, &psc) : nullptr;
         if (pt && psc && pt->nodes[s.captured.node].type == KromeType::Edit) {
             Input* in = platform_input(*s.e);
             bool shift = in && (in->raw.down(Key::LShift) || in->raw.down(Key::RShift));
             krome_edit_press(s, *psc, s.captured.overlay, s.captured.node, x, y, shift);
+        } else if (pt && psc && krome_focusable(*pt, s.captured.node)) {
+            krome_focus_take(s, *psc, s.captured.overlay, s.captured.node, false);
         } else if (!on_bar) {
             krome_edit_blur(s);
+        }
+        // A behaviour hears the press, in its own pixels.
+        if (s.captured.node != KROME_NONE) {
+            KromeCallArgs a;
+            a.x = x;
+            a.y = y;
+            krome_behave(s, s.captured, KromeCall::Press, a);
+            s.drag_at = vec2{x, y};
         }
         repaint(s, s.captured);
     } else if (!down && s.down && s.bar.active) {
@@ -936,7 +981,13 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
         KromeScreen* wsc = nullptr;
         KromeTree* wt = was.node != KROME_NONE ? krome_target_tree(s, was, &wsc) : nullptr;
         bool was_edit = wt && wt->nodes[was.node].type == KromeType::Edit;
-        if (was.node != KROME_NONE && !was_edit && pressable(s, under) == was) {
+        // A behaviour's node: the release is its, and it says what a click is.
+        if (wt && !wt->nodes[was.node].behave.is_null()) {
+            KromeCallArgs a;
+            a.x = x;
+            a.y = y;
+            krome_behave(s, was, KromeCall::Release, a);
+        } else if (was.node != KROME_NONE && !was_edit && pressable(s, under) == was) {
             KromeScreen* sc = nullptr;
             KromeTree* tree = krome_target_tree(s, was, &sc);
             if (tree && sc) krome_fire(s, *sc, *tree, was.node, 1.0); // may close what it was in: nothing after
@@ -944,7 +995,16 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
     } else if (down && s.captured.node != KROME_NONE) {
         // Pressed only while the pointer is over what took the press; an edit's drag selects.
         repaint(s, s.captured);
-        if (krome_is_focused(s, s.captured.screen, s.captured.overlay, s.captured.node)) krome_edit_drag(s, x, y);
+        KromeTree* ct = krome_target_tree(s, s.captured, nullptr);
+        bool edit = ct && ct->nodes[s.captured.node].type == KromeType::Edit;
+        if (edit && krome_is_focused(s, s.captured.screen, s.captured.overlay, s.captured.node)) krome_edit_drag(s, x, y);
+        else if (ct && !ct->nodes[s.captured.node].behave.is_null() && (x != s.drag_at.x || y != s.drag_at.y)) {
+            s.drag_at = vec2{x, y};
+            KromeCallArgs a;
+            a.x = x;
+            a.y = y;
+            krome_behave(s, s.captured, KromeCall::Drag, a);
+        }
     }
     s.down = down;
 
@@ -958,7 +1018,8 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
             if (cn.cursor != KromeCursor::Unset) { shape = (CursorShape)((u8)cn.cursor - 1); break; }
             if (cn.type == KromeType::Edit) { shape = CursorShape::IBeam; break; }
         }
-        if (s.down && krome_is_focused(s, s.captured.screen, s.captured.overlay, s.captured.node)) shape = CursorShape::IBeam;
+        KromeTree* ct = s.down ? krome_target_tree(s, s.captured, nullptr) : nullptr;
+        if (ct && s.captured.node < ct->nodes.len && ct->nodes[s.captured.node].type == KromeType::Edit && krome_is_focused(s, s.captured.screen, s.captured.overlay, s.captured.node)) shape = CursorShape::IBeam;
         if ((u8)shape + 1 != s.cursor) { s.cursor = (u8)shape + 1; platform_cursor(*s.e, shape); }
     }
 
@@ -971,6 +1032,13 @@ void krome_wheel(KromeModule& s, f32 dx, f32 dy) {
     KromeScreen* sc = nullptr;
     KromeTree* tree = krome_target_tree(s, under, &sc);
     for (u32 n = under.node; tree && n != KROME_NONE; n = tree->nodes[n].parent) {
+        if (!tree->nodes[n].behave.is_null() && dy != 0.0f) {
+            KromeCallArgs a;
+            a.dy = dy;
+            if (krome_behave(s, KromeTarget{under.screen, under.overlay, n}, KromeCall::Wheel, a)) break;
+            tree = krome_target_tree(s, under, &sc);
+            if (!tree || n >= tree->nodes.len) break;
+        }
         KromeNode& node = tree->nodes[n];
         bool sx = krome_scrolls_x(node), sy = krome_scrolls_y(node);
         bool moved = false;

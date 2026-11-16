@@ -114,6 +114,34 @@ goes when the pointer leaves or presses. The right button fires the nearest `con
 under it, to the handler as `(id, x, y)` (logical pixels) and in `KromeEvent`'s `x` and `y`. An overlay is a
 tree of its own and inherits nothing from the screen under it.
 
+**Behaviours.** A node names one (`behave=slider`), and the pointer and the keys go to it as
+calls: `press(w, x, y, button)`, `drag(w, x, y)`, `release(w, x, y)`, `wheel(w, dy)` and
+`key(w, name, mods)` (true when taken), `focus(w, on)`, `hover(w, on)`; x and y in the node's
+own logical pixels, `name` a key's lowercased (`"left"`, `"enter"`, `"a"`), `mods` like
+`"ctrl+shift"`. `w` is the instance: `id`, `rect`, `lo`/`hi` (a range written on the node or
+its use, `slider @v 1..99`), `step`, `path` and `value` where it is bound, `focused`,
+`state` (a table kept for the node while its id lasts), and `w:set(v)`, `w:emit(event,
+value)`, `w:open(tree, opts)` (an overlay anchored to it). A prelude's `script` lines run
+once per Lua state, in an environment of their own, before any screen that uses it is
+built; what they return is a table of behaviours by name. C++ registers one with
+`krome_behaviour(e, "name", KromeBehaviourDesc{...})`: the same calls on a `KromeWidget&`,
+with a `state` blob of `state_size` bytes. A name registered both ways is an error at the
+second. A behaviour's node takes its own presses: its release fires no event of its own.
+
+**The keyboard.** Any focusable node can have the focus: an edit, a `hit`, anything with an
+event, a binding or a behaviour, or `focusable`; never `nofocus`, nor what is disabled or
+hidden. A press gives it; Tab and Shift+Tab move it in document order (`taborder=N` sorts
+first, lower first), through the focus's screen (or the top one), a modal's only while one
+is open; an edit with `tabs` keeps Tab. What has the focus takes its `focused` look: an edit
+always, anything else only when Tab brought it (a pressed button grows no ring). Space and
+Enter fire what has the focus, unless its behaviour takes the key; Page Up and Down, Home and
+End move the scroll box it is in. A modal opening takes the focus from what is under it.
+**Shortcuts**: `key="mod+s"` (`mod` is Command on a Mac, else Ctrl; `ctrl`, `shift`, `alt`,
+`cmd`, then a key by its name) fires the node's event from anywhere in the top screen, a
+modal's only while one is open, unless an edit has the keyboard and the key has no modifier
+(it is typing). A disabled node's shortcut does nothing. An edit with `secret` is drawn as
+bullets, never copied or cut, and a double press in it takes it all.
+
 **The Frame cycle.** Krome's systems run in `Phase::Frame` (docs/design/cycles.md): once
 before each frame drawn, never in a tick, so nothing Krome does is in a replay. Presses,
 releases, the wheel and Escape arrive as events, so a click between two frames is kept.
@@ -196,13 +224,14 @@ In Lua: the helpers (and `edit`, with `bind = "key"`), `model`, `emit(name, valu
 `open_overlay(tree, opts)`, `close_overlay([id])`, `theme(name)`, `changed(key)`, `kim(file, screen)`.
 
 Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `pad`, `gap`,
-`dir`, `anchor`, `scroll` (`x`, `y` or `xy`), `tooltip`, `context`; an edit's `placeholder`,
+`dir`, `anchor`, `scroll` (`x`, `y` or `xy`), `tooltip`, `context`, `behave`, `taborder`,
+`key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`); an edit's `placeholder`,
 `change`, `blur`; `cursor`; any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
 `opacity`, `font`, `size`, `line-height`, `image`, `tint`, `caret-color`, `selection-color`,
 `scrollbar-color`, `scrollbar-track`, `scrollbar-size`.
 Flags: `fill`, `clip`, `scroll`, `disabled`, `selected`, `hidden`, the alignments,
-`subpixel`, `nowrap`, `multiline`, `readonly`. The
+`subpixel`, `nowrap`, `multiline`, `readonly`, `focusable`, `nofocus`, `secret`, `tabs`. The
 vocabulary is fixed (`modules/kimb`); `prop name type` in a prelude types a definition's
 parameter.
 
@@ -231,8 +260,7 @@ of the same name wins, and its `theme dark` overrides the tokens it names.
   the tree is built whole again. Scroll offsets survive a rebuild by id.
 - **`return col { ... }` is a tail call**, which Lua gives no line: such a node takes its
   first child's.
-- **One edit has the keyboard** across every screen. Tab order and keyboard focus without a
-  pointer are slice 4's.
+- **One node has the keyboard** across every screen: an edit, or anything focusable.
 - **No shaping** beyond kerning, left to right only.
 - **Screen scripts cannot `require`** another file; a `.kimb` screen takes several scripts.
 - **Metal and D3D12 draw no UI yet**: their backends have stubs for the primitive.

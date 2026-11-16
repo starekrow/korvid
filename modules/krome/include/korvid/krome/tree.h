@@ -94,19 +94,29 @@ constexpr u32 KROME_LOOK_SCROLLBAR_SIZE = 1u << 19;
 constexpr u32 KROME_LOOK_INHERITED = KROME_LOOK_COLOR | KROME_LOOK_FONT | KROME_LOOK_SIZE | KROME_LOOK_LINE_HEIGHT;
 
 // Node flags.
-constexpr u16 KROME_FILL     = 1u << 0; // a bare `fill`: fill along the parent's direction
-constexpr u16 KROME_CLIP     = 1u << 1; // children are clipped to this node's rect
-constexpr u16 KROME_SCROLL   = 1u << 2; // clips, and moves its content along its direction
-constexpr u16 KROME_DISABLED = 1u << 3;
-constexpr u16 KROME_SELECTED = 1u << 4;
-constexpr u16 KROME_HIDDEN   = 1u << 5; // takes no space and draws nothing
-constexpr u16 KROME_DEAD     = 1u << 6; // rebuilt away: in no list, kept until the tree is built again
-constexpr u16 KROME_SUBPIXEL = 1u << 7; // its text's pen is kept to a quarter pixel, not snapped to whole ones
-constexpr u16 KROME_NOWRAP   = 1u << 8; // its text stays on one line whatever width it gets
-constexpr u16 KROME_MULTILINE = 1u << 9; // an edit of many lines (Enter breaks one; Ctrl+Enter submits)
-constexpr u16 KROME_READONLY  = 1u << 10; // an edit that selects and copies, and takes nothing
-constexpr u16 KROME_SCROLL_X  = 1u << 11; // scroll=x (or xy): its content scrolls across
-constexpr u16 KROME_SCROLL_Y  = 1u << 12; // scroll=y (or xy): and down
+constexpr u32 KROME_FILL     = 1u << 0; // a bare `fill`: fill along the parent's direction
+constexpr u32 KROME_CLIP     = 1u << 1; // children are clipped to this node's rect
+constexpr u32 KROME_SCROLL   = 1u << 2; // clips, and moves its content along its direction
+constexpr u32 KROME_DISABLED = 1u << 3;
+constexpr u32 KROME_SELECTED = 1u << 4;
+constexpr u32 KROME_HIDDEN   = 1u << 5; // takes no space and draws nothing
+constexpr u32 KROME_DEAD     = 1u << 6; // rebuilt away: in no list, kept until the tree is built again
+constexpr u32 KROME_SUBPIXEL = 1u << 7; // its text's pen is kept to a quarter pixel, not snapped to whole ones
+constexpr u32 KROME_NOWRAP   = 1u << 8; // its text stays on one line whatever width it gets
+constexpr u32 KROME_MULTILINE = 1u << 9; // an edit of many lines (Enter breaks one; Ctrl+Enter submits)
+constexpr u32 KROME_READONLY  = 1u << 10; // an edit that selects and copies, and takes nothing
+constexpr u32 KROME_SCROLL_X  = 1u << 11; // scroll=x (or xy): its content scrolls across
+constexpr u32 KROME_SCROLL_Y  = 1u << 12; // scroll=y (or xy): and down
+constexpr u32 KROME_FOCUSABLE = 1u << 13; // takes the keyboard focus though it has no event or behaviour
+constexpr u32 KROME_NOFOCUS   = 1u << 14; // never takes it, though it has one
+constexpr u32 KROME_SECRET    = 1u << 15; // an edit drawn as bullets, never copied
+constexpr u32 KROME_TABS      = 1u << 16; // an edit that keeps Tab (a code editor's) rather than leaving on it
+
+// Modifier keys, as a shortcut and a behaviour's key call see them.
+constexpr u32 KROME_MOD_SHIFT = 1u << 0;
+constexpr u32 KROME_MOD_CTRL  = 1u << 1;
+constexpr u32 KROME_MOD_ALT   = 1u << 2; // Option on a Mac
+constexpr u32 KROME_MOD_CMD   = 1u << 3; // Command on a Mac, the Windows key on a PC
 
 // The pointer's shape over a node (`cursor`): unset is the arrow, an edit's the I-beam.
 enum class KromeCursor : u8 { Unset, Arrow, IBeam, Hand, Move, ResizeEW, ResizeNS, Forbidden };
@@ -116,7 +126,7 @@ struct KromeNode {
     KromeDir   dir = KromeDir::Col;
     KromeAlign align_x = KromeAlign::Start, align_y = KromeAlign::Start; // where children go
     i8         anchor_x = -1, anchor_y = -1; // in a stack: this node's own place (a KromeAlign), or -1 for the stack's
-    u16        flags = 0;
+    u32        flags = 0;
     KromeAxis  w, h;
     f32        pad[4] = {}; // left, top, right, bottom
     f32        gap = 0.0f;
@@ -129,6 +139,11 @@ struct KromeNode {
     Name       context;        // fired by the right button, with where it was pressed
     u32        bind_value = KROME_NONE; // @key=value: the value, an offset into strings
     u32        tooltip = KROME_NONE;    // shown at the pointer after it rests here
+    Name       behave;         // the behaviour the pointer and the keys go to (`behave=slider`)
+    f32        lo = 0.0f, hi = 0.0f, step = 0.0f; // a behaviour's range (`slider @v 1..99`) and step; hi <= lo: none
+    i16        taborder = 0;   // Tab goes through lower first, then document order
+    u16        shortcut = 0;   // `key="mod+s"`: a Key (0 none), with shortcut_mods
+    u8         shortcut_mods = 0;
     u32        placeholder = KROME_NONE; // an edit's, shown while it is empty: an offset into strings
     KromeCursor cursor = KromeCursor::Unset;
     u32        look = 0;           // the base look: an index into KromeTree::looks
@@ -168,6 +183,10 @@ struct KromeValue {
 // says which.
 inline bool krome_scrolls_x(const KromeNode& n) { return (n.flags & KROME_SCROLL_X) || ((n.flags & KROME_SCROLL) && n.dir == KromeDir::Row); }
 inline bool krome_scrolls_y(const KromeNode& n) { return (n.flags & KROME_SCROLL_Y) || ((n.flags & KROME_SCROLL) && n.dir != KromeDir::Row); }
+
+// A shortcut as `key=` writes it ("mod+s", "ctrl+shift+z", "f5"; `mod` is Command on a Mac,
+// else Ctrl): a Key and KROME_MOD_ bits. False when it is not one.
+bool krome_parse_shortcut(const char* text, u32* key, u32* mods);
 
 struct KromeTree {
     Array<KromeNode> nodes;

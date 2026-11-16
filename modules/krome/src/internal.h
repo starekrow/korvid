@@ -139,7 +139,8 @@ struct KromeImage { Name path; Handle asset; bool ready; };
 // every screen. Its text is the buffer here while it has the focus, written back to the
 // tree and the model as it changes.
 struct KromeFocus {
-    u32         screen = 0, overlay = 0, node = KROME_NONE; // node KROME_NONE: no edit has it
+    u32         screen = 0, overlay = 0, node = KROME_NONE; // node KROME_NONE: nothing has it (any focusable node, not only an edit)
+    bool        keyboard = false; // it came by Tab: a node that is not an edit shows its focused look only then
     Name        id;              // the edit's id, to find it again when its tree is built again
     TypesetEdit buf;
     vec2        scroll{0, 0};    // physical pixels its text is moved by, to keep the caret in view
@@ -213,6 +214,16 @@ struct KromeModule {
     bool                tip_shut = false;
     f64                 tip_delay = 0.6;  // seconds at rest before it shows (tests shorten it)
     KromeFocus          focus;
+    // Behaviours: those registered from C++, the state each keeps for a node, and the Lua
+    // side's (registry refs: name to its table of calls; a node's key to its state table).
+    struct Behaviour { Name name; KromeBehaviourDesc desc; };
+    Array<Behaviour>    behaviours;
+    struct Blob { u32 screen, overlay, node; Name id, behave; void* data; u32 size; };
+    Array<Blob>         blobs;
+    int                 lua_behaviours = -2, lua_states = -2, lua_widget_meta = -2;
+    Array<Name>         ran_scripts;  // preludes' scripts run, by asset path: once per state
+    KromeTarget         hover_behave; // the node with a behaviour the pointer is over
+    vec2                drag_at{-1.0f, -1.0f}; // where a behaviour's drag was last told
     bool                window_focused = true;
     u8                  cursor = 0;   // the shape last set (CursorShape + 1; 0 none yet)
     bool                warned_no_ui = false;
@@ -288,11 +299,14 @@ void krome_model_write_string(KromeModule& s, KromeScreen& sc, const char* path,
 // ---- editing (edit.cc) ----------------------------------------------------------------------------
 
 bool krome_is_focused(const KromeModule& s, u32 screen, u32 overlay, u32 node);
+// An edit takes the focus: its text into the buffer, the caret at the end.
+void krome_edit_take(KromeModule& s, KromeScreen& sc, u32 overlay, u32 node);
 // A press on an edit: it takes the focus (if it had not), and the caret goes where the press
 // was (a double press a word, a triple a line), once its text is laid out.
 void krome_edit_press(KromeModule& s, KromeScreen& sc, u32 overlay, u32 node, f32 x, f32 y, bool shift);
 void krome_edit_drag(KromeModule& s, f32 x, f32 y);
-// The focus leaves the edit: what it holds is written back, its blur event fires.
+// The focus leaves what has it: an edit's text written back, its change and blur events
+// fired, a behaviour's focus(false) called.
 void krome_edit_blur(KromeModule& s);
 // What the frame brought: keys, typed text, composition. True when it took the key.
 bool krome_edit_key(KromeModule& s, Key key, bool shift, bool ctrl, bool alt, bool gui);
@@ -328,9 +342,58 @@ void krome_model_flip(KromeModule& s, KromeScreen& sc, const char* path);
 // A KBOR document as a Lua value at a model key (krome_set_doc).
 bool krome_model_set_doc(KromeModule& s, KromeScreen& sc, const char* key, const void* data, usize size);
 
+// ---- behaviours (behave.cc) ------------------------------------------------------------------------
+
+enum class KromeCall : u8 { Press, Drag, Release, Wheel, Key, Focus, Hover };
+struct KromeCallArgs {
+    f32 x = 0.0f, y = 0.0f;       // physical pixels in the window (made the node's own logical ones)
+    u32 button = 1;
+    f32 dy = 0.0f;
+    Key key = Key::Unknown;
+    u32 mods = 0;
+    bool on = false;
+};
+// The node's behaviour called. False when it has none, or no such call; a key's or the
+// wheel's, when it did not take it.
+bool krome_behave(KromeModule& s, const KromeTarget& t, KromeCall call, const KromeCallArgs& a);
+bool krome_behaviour_known(KromeModule& s, Name name);
+// The scripts of the preludes in a scope, each run once per state: true when all have run,
+// false while one is still loading.
+bool krome_prelude_scripts(KromeModule& s, const KimbScope& scope);
+void krome_free_behaviours(KromeModule& s);
+// The Lua side (lua.cc): a prelude's script run, its behaviours into the registry; the call.
+bool krome_lua_prelude(KromeModule& s, const char* source, usize len, const char* chunk);
+bool krome_lua_has_behaviour(KromeModule& s, Name name);
+bool krome_lua_behave(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 overlay, u32 node, KromeCall call, f32 x, f32 y, const KromeCallArgs& a, bool* taken);
+// A key as a behaviour sees it: "left", "enter", "a".
+const char* krome_key_name(Key k, char* out, usize cap);
+// The model at a path as a number; a Lua value written there (the top of the stack, popped).
+bool krome_model_number(KromeModule& s, KromeScreen& sc, const char* path, f64* out);
+void krome_model_write_number(KromeModule& s, KromeScreen& sc, const char* path, f64 v);
+
+// ---- keyboard focus (focus.cc) ----------------------------------------------------------------------
+
+// Whether Tab and a press give the node the focus: an edit, a hit, anything with an event, a
+// binding or a behaviour, or `focusable`; not `nofocus`, nor what is disabled or hidden.
+bool krome_focusable(const KromeTree& t, u32 node);
+// The focus to the node (an edit's through krome_edit_take); `keyboard` when Tab brought it.
+void krome_focus_take(KromeModule& s, KromeScreen& sc, u32 overlay, u32 node, bool keyboard);
+// Tab (back with Shift): the next focusable node of the focus's screen, or of the top one; a
+// modal's only while one is open. False when an edit keeps Tab (`tabs`).
+bool krome_focus_tab(KromeModule& s, bool back);
+// A key to what has the focus when it is not an edit: its behaviour, else Space and Enter
+// fire it; Page Up and Down, Home and End move the scroll box it is in. True when taken.
+bool krome_focus_key(KromeModule& s, Key key, u32 mods);
+// A shortcut (`key="mod+s"`) of the top screen's: its node fired. True when one matched.
+bool krome_shortcut(KromeModule& s, Key key, u32 mods);
+// The tree the focused node is in, whatever it is; null when nothing has the focus.
+KromeTree* krome_focused_tree(KromeModule& s, KromeScreen** sc);
+
 // ---- the view (view.cc) --------------------------------------------------------------------------
 
 KromeOverlay* krome_overlay(KromeScreen& sc, u32 id);
+// The screen on top (a higher layer, then the later opened); null when none is ready.
+KromeScreen* krome_top_screen(KromeModule& s);
 u32  krome_open_overlay(KromeModule& s, KromeScreen& sc); // a new, empty overlay on top; its id
 void krome_close_overlay(KromeModule& s, KromeScreen& sc, u32 id); // 0: the top one
 void krome_free_overlays(KromeModule& s, KromeScreen& sc);

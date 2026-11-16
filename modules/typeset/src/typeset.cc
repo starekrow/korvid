@@ -29,12 +29,13 @@ bool word_char(u32 cp) {
 
 f32 snap(f32 v) { return floor(v + 0.5f); }
 
-void decode(const FontAsset& f, const char* text, u32 len, Array<Item>& items) {
+void decode(const FontAsset& f, const char* text, u32 len, Array<Item>& items, u32 mask = 0) {
     u32 at = 0;
     while (at < len) {
         u32 step = 0;
         u32 cp = utf8_decode(text + at, len - at, &step);
         if (!step) step = 1;
+        if (mask && cp != '\n') cp = mask;
         const Glyph* g = cp == '\n' ? nullptr : font_glyph_or_replacement(f, cp);
         items.push(Item{cp, at, g ? g->advance : 0.0f, g});
         at += step;
@@ -102,7 +103,7 @@ void typeset_paragraph(const FontAsset& font, const char* text, u32 len, const T
     // Its own working arrays, not the scratch arena's: the caller's output may be there, and
     // a scope opened here would give it back.
     Array<Item> items{};
-    decode(font, text ? text : "", len, items);
+    decode(font, text ? text : "", len, items, p.mask);
     Array<Span3> spans{};
     break_lines(font, items, p.width, spans);
 
@@ -146,7 +147,7 @@ void typeset_paragraph(const FontAsset& font, const char* text, u32 len, const T
             if (q) {
                 // The copy at that quarter: the same code point, found again by its byte.
                 u32 step = 0;
-                u32 cp = utf8_decode(text + g.byte, len - g.byte, &step);
+                u32 cp = p.mask ? p.mask : utf8_decode(text + g.byte, len - g.byte, &step);
                 g.glyph = font_glyph_at(font, cp, q);
             }
         }

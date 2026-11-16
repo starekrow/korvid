@@ -110,23 +110,31 @@ bool krome_is_focused(const KromeModule& s, u32 screen, u32 overlay, u32 node) {
     return s.focus.node != KROME_NONE && s.focus.screen == screen && s.focus.overlay == overlay && s.focus.node == node;
 }
 
+void krome_edit_take(KromeModule& s, KromeScreen& sc, u32 overlay, u32 node) {
+    krome_edit_blur(s);
+    KromeTree* t = &sc.tree;
+    if (overlay) { KromeOverlay* o = krome_overlay(sc, overlay); if (!o) return; t = &o->tree; }
+    if (node >= t->nodes.len || (t->nodes[node].flags & KROME_DEAD)) return;
+    s.focus.screen = sc.id;
+    s.focus.overlay = overlay;
+    s.focus.node = node;
+    s.focus.id = t->nodes[node].id;
+    s.focus.keyboard = false;
+    s.focus.buf.set(t->text(node), (u32)strlen(t->text(node)));
+    s.focus.scroll = vec2{0, 0};
+    s.focus.want_x = -1.0f;
+    s.focus.changed = false;
+    s.focus.composing[0] = 0;
+    s.focus.font = nullptr;
+    platform_text_input(*s.e, true);
+    touch(s);
+}
+
 void krome_edit_press(KromeModule& s, KromeScreen& sc, u32 overlay, u32 node, f32 x, f32 y, bool shift) {
     if (!krome_is_focused(s, sc.id, overlay, node)) {
-        krome_edit_blur(s);
-        KromeTree* t = &sc.tree;
-        if (overlay) { KromeOverlay* o = krome_overlay(sc, overlay); if (!o) return; t = &o->tree; }
-        s.focus.screen = sc.id;
-        s.focus.overlay = overlay;
-        s.focus.node = node;
-        s.focus.id = t->nodes[node].id;
-        s.focus.buf.set(t->text(node), (u32)strlen(t->text(node)));
-        s.focus.scroll = vec2{0, 0};
-        s.focus.want_x = -1.0f;
-        s.focus.changed = false;
-        s.focus.composing[0] = 0;
-        s.focus.font = nullptr;
+        krome_edit_take(s, sc, overlay, node);
+        if (!krome_is_focused(s, sc.id, overlay, node)) return;
         shift = false;
-        platform_text_input(*s.e, true);
     }
     // A double press: a word; a triple: a line. Near in time and place to the last.
     f64 now = time_now();
@@ -156,19 +164,29 @@ void krome_edit_drag(KromeModule& s, f32 x, f32 y) {
 void krome_edit_blur(KromeModule& s) {
     if (s.focus.node == KROME_NONE) return;
     KromeScreen* sc = nullptr;
-    KromeTree* t = krome_focus_tree(s, &sc);
+    KromeTree* t = krome_focused_tree(s, &sc);
     u32 node = s.focus.node;
+    KromeTarget was{s.focus.screen, s.focus.overlay, node};
+    bool edit = t && t->nodes[node].type == KromeType::Edit;
     if (t && sc) {
-        if (s.focus.changed && !t->nodes[node].change.is_null()) krome_fire_named(s, *sc, *t, node, t->nodes[node].change, 0.0);
+        if (edit && s.focus.changed && !t->nodes[node].change.is_null()) krome_fire_named(s, *sc, *t, node, t->nodes[node].change, 0.0);
         sc->repaint = true;
     }
     s.focus.node = KROME_NONE;
+    s.focus.keyboard = false;
     s.focus.changed = false;
     s.focus.composing[0] = 0;
     s.focus.buf.free();
-    platform_text_input(*s.e, false);
-    // The blur event last: its handler may open or close what it likes.
-    if (t && sc && node < t->nodes.len && !t->nodes[node].blur.is_null()) krome_fire_named(s, *sc, *t, node, t->nodes[node].blur, 0.0);
+    if (edit) platform_text_input(*s.e, false);
+    // A behaviour hears it lost the focus; then the blur event, last: its handler may open
+    // or close what it likes.
+    if (t && sc && !edit) {
+        KromeCallArgs a;
+        a.on = false;
+        krome_behave(s, was, KromeCall::Focus, a);
+        t = krome_target_tree(s, was, &sc);
+    }
+    if (t && sc && node < t->nodes.len && !(t->nodes[node].flags & KROME_DEAD) && !t->nodes[node].blur.is_null()) krome_fire_named(s, *sc, *t, node, t->nodes[node].blur, 0.0);
 }
 
 bool krome_edit_key(KromeModule& s, Key key, bool shift, bool ctrl, bool alt, bool gui) {
@@ -176,8 +194,9 @@ bool krome_edit_key(KromeModule& s, Key key, bool shift, bool ctrl, bool alt, bo
     TypesetEdit& b = s.focus.buf;
     const char* text = b.c_str();
     bool cmd = ctrl || gui;  // Ctrl, or Command on a Mac
-    bool word = ctrl || alt; // Ctrl, or Option on a Mac
     bool ro = readonly(s);
+    bool secret = (krome_focus_tree(s, nullptr)->nodes[s.focus.node].flags & KROME_SECRET) != 0;
+    bool word = (ctrl || alt) && !secret; // Ctrl, or Option on a Mac; a secret's words are not told apart
     f64 now = time_now();
     switch (key) {
     case Key::Left:
@@ -251,7 +270,7 @@ bool krome_edit_key(KromeModule& s, Key key, bool shift, bool ctrl, bool alt, bo
     case Key::C:
     case Key::X: {
         if (!cmd) return false;
-        if (!b.selected()) return true;
+        if (!b.selected() || secret) return true; // a secret is never copied
         char* sel = (char*)alloc_in(s.general, b.sel_end() - b.sel_begin() + 1, 1);
         memcpy(sel, text + b.sel_begin(), b.sel_end() - b.sel_begin());
         sel[b.sel_end() - b.sel_begin()] = 0;
@@ -320,8 +339,10 @@ void krome_edit_compose(KromeModule& s, const char* text, u32 caret) {
 void krome_edit_frame(KromeModule& s) {
     if (s.focus.node == KROME_NONE) return;
     KromeScreen* sc = nullptr;
+    KromeTree* any = krome_focused_tree(s, &sc);
+    if (!any || !sc) { s.focus.node = KROME_NONE; s.focus.buf.free(); platform_text_input(*s.e, false); return; }
     KromeTree* t = krome_focus_tree(s, &sc);
-    if (!t || !sc) { s.focus.node = KROME_NONE; s.focus.buf.free(); platform_text_input(*s.e, false); return; }
+    if (!t) return; // not an edit: nothing blinks
     if (s.focus.changed && !t->nodes[s.focus.node].change.is_null()) {
         krome_fire_named(s, *sc, *t, s.focus.node, t->nodes[s.focus.node].change, 0.0);
         s.focus.changed = false;
@@ -343,14 +364,15 @@ void krome_edit_rebuilt(KromeModule& s, KromeScreen& sc) {
     KromeOverlay* o = s.focus.overlay ? krome_overlay(sc, s.focus.overlay) : nullptr;
     KromeTree* t = s.focus.overlay ? (o ? &o->tree : nullptr) : &sc.tree;
     u32 n = s.focus.id.is_null() || !t ? KROME_NONE : krome_find(*t, s.focus.id);
-    if (n == KROME_NONE || !t || t->nodes[n].type != KromeType::Edit) {
+    bool edit = n != KROME_NONE && t->nodes[n].type == KromeType::Edit;
+    if (n == KROME_NONE || (!edit && s.focus.buf.len) || !krome_focusable(*t, n)) {
         s.focus.node = KROME_NONE;
         s.focus.buf.free();
         platform_text_input(*s.e, false);
         return;
     }
     s.focus.node = n;
-    t->set_text(n, s.focus.buf.c_str(), s.focus.buf.len); // what was being typed stays
+    if (edit) t->set_text(n, s.focus.buf.c_str(), s.focus.buf.len); // what was being typed stays
 }
 
 } // namespace kv

@@ -128,8 +128,8 @@ void test_edit(kv::TestCtx& c) {
     // Enter submits a line; change fired once a frame it changed in; a press elsewhere blurs.
     key(e, Key::Enter);
     KV_CHECK(c, text_is(e, sc, "submitted", "1") && atoi(krome_model_text(e, sc, "changes")) >= 3);
-    click_id(e, sc, "other");
-    KV_CHECK(c, s->focus.node == KROME_NONE && text_is(e, sc, "blurs", "1"));
+    click_id(e, sc, "other");  // a hit: it takes the focus (slice 4), the edit loses it
+    KV_CHECK(c, s->focus.node != KROME_NONE && !krome_focus_tree(*s, nullptr) && text_is(e, sc, "blurs", "1"));
     // The model in: an edit without the keyboard shows it.
     krome_set(e, sc, "name", "Eve");
     frames(e, 1);

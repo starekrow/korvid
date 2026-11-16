@@ -317,7 +317,7 @@ void binding(Build& b, const KromeFrame* fr, u32 node, const KimbFile& f, const 
         // An edit's binding is its text, both ways.
         krome_model_into_text(b.s, b.sc, path, b.tree, node);
     } else if (krome_bound_selected(b.s, b.sc, b.tree, node)) n.flags |= KROME_SELECTED;
-    else n.flags &= (u16)~KROME_SELECTED;
+    else n.flags &= ~KROME_SELECTED;
     if (b.deps) b.deps->push(KromeDep{node, head_key(path), KromeDep::Binding});
     (void)f;
 }
@@ -510,7 +510,8 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
         }
     }
     if (json_get(f.doc, n, "a")) error(b, fr, f.file, line, "a %s takes one content string", w);
-    if (json_get(f.doc, n, "r")) error(b, fr, f.file, line, "a %s takes no range", w);
+    const JsonValue* range = json_get(f.doc, n, "r");
+    const JsonDoc* range_doc = &f.doc;
     if (const char* i = json_string(json_get(f.doc, n, "id"), nullptr)) t.set(id, "id", KromeValue::str(expand(b, fr, i)));
     if (const char* e = json_string(json_get(f.doc, n, "e"), nullptr)) t.set(id, "event", KromeValue::str(e));
     binding(b, fr, id, f, json_get(f.doc, n, "b"), json_get(f.doc, n, "bv"));
@@ -526,8 +527,17 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
         if (const char* i = json_string(json_get(ud, *o->use, "id"), nullptr)) t.set(id, "id", KromeValue::str(expand(b, o->frame, i)));
         if (const char* e = json_string(json_get(ud, *o->use, "e"), nullptr)) t.set(id, "event", KromeValue::str(e));
         binding(b, o->frame, id, *o->file, json_get(ud, *o->use, "b"), json_get(ud, *o->use, "bv"));
-        if (json_get(ud, *o->use, "r")) error(b, o->frame, o->file->file, ul, "%s takes no range", json_string(json_get(ud, *o->use, "w"), "?"));
+        if (const JsonValue* r = json_get(ud, *o->use, "r")) { range = r; range_doc = &ud; }
     }
+    // A range is a behaviour's (`slider @v 1..99`): kept on the node for it.
+    if (range) {
+        const JsonValue* lo = json_first(*range_doc, *range);
+        const JsonValue* hi = lo ? json_next(*range_doc, *lo) : nullptr;
+        if (t.nodes[id].behave.is_null()) error(b, fr, f.file, line, "a %s takes no range: only one with a behaviour does", w);
+        else if (lo && hi && lo->is_number() && hi->is_number()) { t.nodes[id].lo = (f32)lo->number(); t.nodes[id].hi = (f32)hi->number(); }
+    }
+    if (!t.nodes[id].behave.is_null() && !krome_behaviour_known(b.s, t.nodes[id].behave))
+        error(b, fr, f.file, line, "no behaviour '%s': a prelude's script returns it, or a module registers it", name_str(t.nodes[id].behave));
     if (const JsonValue* c = json_get(f.doc, n, "c"))
         for (const JsonValue* k = json_first(f.doc, *c); k; k = json_next(f.doc, *k)) node(b, f, *k, id, fr, nullptr);
 }

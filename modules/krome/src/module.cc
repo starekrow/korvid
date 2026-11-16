@@ -139,6 +139,8 @@ void advance(KromeModule& s, KromeScreen& sc) {
     if (sc.stage == KromeStage::Uses) {
         bool failed = false;
         if (!krome_scope_ready(s, sc, &failed)) { if (failed) fail(sc); return; }
+        // Its preludes' scripts, once per state: their behaviours are there before it is built.
+        if (!krome_prelude_scripts(s, sc.scope)) return;
         built(s, sc);
     }
 }
@@ -211,8 +213,22 @@ void krome_input(TickContext& ctx) {
     bool ctrl = in && (in->raw.down(Key::LCtrl) || in->raw.down(Key::RCtrl));
     bool alt = in && (in->raw.down(Key::LAlt) || in->raw.down(Key::RAlt));
     bool gui = in && (in->raw.down(Key::LGui) || in->raw.down(Key::RGui));
+    u32 mods = (shift ? KROME_MOD_SHIFT : 0) | (ctrl ? KROME_MOD_CTRL : 0) | (alt ? KROME_MOD_ALT : 0) | (gui ? KROME_MOD_CMD : 0);
     for (const KeyDown& k : ctx.received<KeyDown>()) {
+        // Tab moves the focus (an edit with `tabs` keeps it, as a tab typed).
+        if (k.key == Key::Tab && !(mods & (KROME_MOD_CTRL | KROME_MOD_ALT | KROME_MOD_CMD))) {
+            if (krome_focus_tab(s, shift)) continue;
+            krome_edit_typed(s, "\t");
+            continue;
+        }
         if (krome_edit_key(s, k.key, shift || k.key == Key::LShift, ctrl, alt, gui)) continue;
+        if (krome_focus_key(s, k.key, mods)) continue;
+        // What an edit types is its own, though it took no key for it: a shortcut needs a
+        // modifier while one has the keyboard (or is a function key).
+        KromeTree* ft = krome_focused_tree(s, nullptr);
+        bool typing = ft && ft->nodes[s.focus.node].type == KromeType::Edit && !(mods & (KROME_MOD_CTRL | KROME_MOD_ALT | KROME_MOD_CMD))
+                   && !(k.key >= Key::F1 && k.key <= Key::F12) && k.key != Key::Escape;
+        if (!typing && !k.repeat && krome_shortcut(s, k.key, mods)) continue;
         if (k.key == Key::Escape && !k.repeat) escape = true;
     }
     for (const TextComposing& c : ctx.received<TextComposing>()) krome_edit_compose(s, c.text, c.caret);
@@ -267,6 +283,7 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     s->set_docs.free();
     krome_free_view(*s);
     krome_lua_close(*s);
+    krome_free_behaviours(*s);
 }
 
 // ---- /krome in the CLI --------------------------------------------------------------------------

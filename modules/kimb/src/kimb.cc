@@ -214,6 +214,7 @@ namespace {
 constinit const KimbKernelProp k_props[] = {
     {"anchor", KimbType::Anchor, true},
     {"angle", KimbType::Number, false},
+    {"behave", KimbType::String, true},
     {"bg", KimbType::Color, false},
     {"bg2", KimbType::Color, false},
     {"border", KimbType::Number, false},
@@ -229,11 +230,13 @@ constinit const KimbKernelProp k_props[] = {
     {"gap", KimbType::Number, true},
     {"h", KimbType::Size, true},
     {"image", KimbType::String, false},
+    {"key", KimbType::String, true},
     {"line-height", KimbType::Number, false},
     {"opacity", KimbType::Number, false},
     {"pad", KimbType::Box4, true},
     {"placeholder", KimbType::String, true},
     {"radius", KimbType::Box4, false},
+    {"range", KimbType::Size, true},
     {"scroll", KimbType::String, true},
     {"scrollbar-color", KimbType::Color, false},
     {"scrollbar-size", KimbType::Number, false},
@@ -242,6 +245,8 @@ constinit const KimbKernelProp k_props[] = {
     {"shadow", KimbType::Shadow, false},
     {"shadow-color", KimbType::Color, false},
     {"size", KimbType::Number, false},
+    {"step", KimbType::Number, true},
+    {"taborder", KimbType::Number, true},
     {"tint", KimbType::Color, false},
     {"tooltip", KimbType::String, true},
     {"w", KimbType::Size, true},
@@ -249,7 +254,7 @@ constinit const KimbKernelProp k_props[] = {
 
 const char* const k_nodes[] = {"box", "text", "image", "hit", "edit"};
 const char* const k_flags[] = {"fill", "clip", "scroll", "disabled", "selected", "hidden", "left", "center", "right", "top", "middle", "bottom",
-                               "subpixel", "nowrap", "multiline", "readonly"};
+                               "subpixel", "nowrap", "multiline", "readonly", "focusable", "nofocus", "secret", "tabs"};
 const char* const k_states[] = {"hover", "pressed", "focused", "disabled", "selected"};
 
 bool in(const char* w, const char* const* list, u32 n) {
@@ -488,7 +493,7 @@ struct Checker {
             bool takes_text = !strcmp(w, "text") || !strcmp(w, "edit");
             if (t && !takes_text) err(line, "a %s takes no content: put a text in it", w);
             if (a) err(line, "a %s takes one content string", w);
-            if (json_get(f.doc, n, "r")) err(line, "a %s takes no range", w);
+            if (json_get(f.doc, n, "r") && !(p && json_get(f.doc, *p, "behave"))) err(line, "a %s takes no range: only one with a behaviour does", w);
             if (kids && (takes_text || !strcmp(w, "image"))) err(line, "a %s takes no children", w);
             walk_kids();
             return;
@@ -515,8 +520,11 @@ struct Checker {
                 if (!k) { err(line, "%s takes no property '%s'", w, v->key); continue; }
                 value(line, "", v->key, k->type, *v);
             }
-        if (json_get(f.doc, n, "r")) err(line, "%s takes no range", w);
         const JsonValue* body = json_get(dd, *d.value, "body");
+        // A range is a behaviour's (a slider's 1..99): the use's or its body's root's.
+        const JsonValue* bp = body ? json_get(dd, *body, "p") : nullptr;
+        if (json_get(f.doc, n, "r") && !(p && json_get(f.doc, *p, "behave")) && !(bp && json_get(dd, *bp, "behave")))
+            err(line, "%s takes no range: only one with a behaviour does", w);
         if (kids && (!body || !has_slot(dd, *body))) err(line, "%s takes no children: its body has no slot", w);
         walk_kids();
     }

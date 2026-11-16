@@ -1,5 +1,6 @@
 // The tree's storage and its properties by name.
 #include "korvid/krome/tree.h"
+#include "korvid/platform_hid/input.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -200,6 +201,39 @@ void overlay(KromeLook& to, const KromeLook& from) {
 
 } // namespace
 
+bool krome_parse_shortcut(const char* text, u32* key, u32* mods) {
+    *key = 0;
+    *mods = 0;
+    char word[32];
+    for (const char* p = text; *p;) {
+        u32 n = 0;
+        while (*p && *p != '+' && n + 1 < sizeof word) word[n++] = (char)(*p >= 'A' && *p <= 'Z' ? *p + 32 : *p), ++p;
+        word[n] = 0;
+        if (*p == '+') ++p;
+        if (!n || *key) return false; // the key is last, and there is one
+        if (!strcmp(word, "mod")) {
+#if defined(__APPLE__)
+            *mods |= KROME_MOD_CMD;
+#else
+            *mods |= KROME_MOD_CTRL;
+#endif
+        } else if (!strcmp(word, "ctrl")) *mods |= KROME_MOD_CTRL;
+        else if (!strcmp(word, "shift")) *mods |= KROME_MOD_SHIFT;
+        else if (!strcmp(word, "alt") || !strcmp(word, "option")) *mods |= KROME_MOD_ALT;
+        else if (!strcmp(word, "cmd") || !strcmp(word, "command")) *mods |= KROME_MOD_CMD;
+        else {
+            for (u32 k = 1; k < (u32)Key::Count; ++k) {
+                const char* name = key_name((Key)k);
+                u32 i = 0;
+                while (name[i] && word[i] && (name[i] >= 'A' && name[i] <= 'Z' ? name[i] + 32 : name[i]) == word[i]) ++i;
+                if (!name[i] && !word[i]) { *key = k; break; }
+            }
+            if (!*key) return false;
+        }
+    }
+    return *key != 0;
+}
+
 const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, KromeState state) {
     if (node >= nodes.len) return "no such node";
     KromeNode& n = nodes[node];
@@ -209,7 +243,7 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
         if (!strcmp(prop, "h")) { dirty = true; return size_value(n.h, v) ? nullptr : "h takes a number, a percentage, hug, fill or a range"; }
         if (!strcmp(prop, "scroll")) {
             if (v.kind != KromeValue::String) return "scroll takes x, y or xy";
-            u16 f = !strcmp(v.s, "x") ? KROME_SCROLL_X : !strcmp(v.s, "y") ? KROME_SCROLL_Y : !strcmp(v.s, "xy") ? (u16)(KROME_SCROLL_X | KROME_SCROLL_Y) : 0;
+            u32 f = !strcmp(v.s, "x") ? KROME_SCROLL_X : !strcmp(v.s, "y") ? KROME_SCROLL_Y : !strcmp(v.s, "xy") ? (KROME_SCROLL_X | KROME_SCROLL_Y) : 0;
             if (!f) return "scroll takes x, y or xy";
             n.flags |= f | KROME_CLIP;
             dirty = true;
@@ -218,6 +252,34 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
         if (!strcmp(prop, "tooltip")) {
             if (v.kind != KromeValue::String) return "tooltip takes a string";
             n.tooltip = string(v.s, (u32)strlen(v.s));
+            return nullptr;
+        }
+        if (!strcmp(prop, "behave")) {
+            if (v.kind != KromeValue::String) return "behave takes a behaviour's name";
+            n.behave = name_intern(v.s);
+            return nullptr;
+        }
+        if (!strcmp(prop, "taborder")) {
+            if (v.kind != KromeValue::Number || v.n < -1000 || v.n > 1000) return "taborder takes a number from -1000 to 1000";
+            n.taborder = (i16)v.n;
+            return nullptr;
+        }
+        if (!strcmp(prop, "step")) {
+            if (v.kind != KromeValue::Number || v.n < 0) return "step takes a number, 0 or more";
+            n.step = v.n;
+            return nullptr;
+        }
+        if (!strcmp(prop, "range")) {
+            if (v.kind != KromeValue::Range) return "range takes lo..hi";
+            n.lo = v.lo;
+            n.hi = v.hi;
+            return nullptr;
+        }
+        if (!strcmp(prop, "key")) {
+            u32 key = 0, mods = 0;
+            if (v.kind != KromeValue::String || !krome_parse_shortcut(v.s, &key, &mods)) return "key takes a shortcut: mod+s, ctrl+shift+z, f5";
+            n.shortcut = (u16)key;
+            n.shortcut_mods = (u8)mods;
             return nullptr;
         }
         if (!strcmp(prop, "context")) {
@@ -297,11 +359,12 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
 const char* KromeTree::flag(u32 node, const char* w) {
     if (node >= nodes.len) return "no such node";
     KromeNode& n = nodes[node];
-    struct Bit { const char* word; u16 bit; };
+    struct Bit { const char* word; u32 bit; };
     static const Bit bits[] = {{"fill", KROME_FILL}, {"clip", KROME_CLIP}, {"scroll", KROME_SCROLL},
                                {"disabled", KROME_DISABLED}, {"selected", KROME_SELECTED}, {"hidden", KROME_HIDDEN},
                                {"subpixel", KROME_SUBPIXEL}, {"nowrap", KROME_NOWRAP},
-                               {"multiline", KROME_MULTILINE}, {"readonly", KROME_READONLY}};
+                               {"multiline", KROME_MULTILINE}, {"readonly", KROME_READONLY},
+                               {"focusable", KROME_FOCUSABLE}, {"nofocus", KROME_NOFOCUS}, {"secret", KROME_SECRET}, {"tabs", KROME_TABS}};
     for (const Bit& b : bits) if (!strcmp(w, b.word)) { n.flags |= b.bit; dirty = true; return nullptr; }
     if (!strcmp(w, "left"))   { n.align_x = KromeAlign::Start; dirty = true; return nullptr; }
     if (!strcmp(w, "center")) { n.align_x = KromeAlign::Center; dirty = true; return nullptr; }

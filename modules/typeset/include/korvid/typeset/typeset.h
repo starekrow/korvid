@@ -22,6 +22,7 @@ struct TypesetParams {
     TypesetAlign align = TypesetAlign::Left;
     f32          line_height = 0.0f; // a line's height in pixels; <= 0: the font's
     bool         subpixel = false;   // pens kept to a quarter pixel (else whole pixels for each glyph)
+    u32          mask = 0;           // a code point drawn for every one but `\n` (a password's bullet); offsets stay the text's
 };
 
 struct TypesetLine {
