@@ -313,7 +313,50 @@ end. goldberg has zones around its scan, events, Lua's tick and each part of a r
 (`run.spawn`, `run.running`, `run.commit`, `task.hash`, `task.copy`), and Lua can add its
 own (`host.zone(name)` ... `host.zone_end()`).
 
+## macOS
+
+goldberg builds and its tests pass on macOS (M3 Max, 16 cpus, APFS on its SSD), where it
+first found two things the Linux and Windows runs had not:
+
+- **No native watcher.** macOS polled. FSEvents is the native one now
+  (platform/src/macos/fs_watch_macos.cc): `watching with fsevents`. It reports about 11 ms
+  after a write, whatever is done to hurry it (FSEventStreamFlushSync made no difference
+  and cost 3.6 ms a call), so `FsWatcher::lateness()` says 0.05 s for it, and `learn`, which
+  judges at a converter's exit what it wrote outside its directory, hears the watcher out for
+  that long first (`host.watch_sync`). The polling watcher had missed those writes too.
+- **Clang's `-Wbitwise-instead-of-logical`** on the heavy test's two `step` calls joined by
+  `&`, kept so that both report: two statements now.
+
+### macOS at scale
+
+`kormake test --heavy goldberg dev` on macOS, the default 1.06 GiB (18,357 files), dev,
+the I/O queue on the dispatch ring. The digest is Linux's and Windows', `1fccef70833884e2`:
+the same work. macOS cannot drop one file's pages unprivileged, so 15.5% of the tree was
+still in memory for the "cold" cook. Nov 15, 2026.
+
+| What | macOS | Linux | Windows, a converter a CPU |
+|---|---|---|---|
+| Cold cook | 49.6 s (1.45 s before the first converter, 47.8 s of converters, 0.32 s after) | 12.5 s | 54.1 s |
+| Converters busy | 10% of 16 | 22% of eight | |
+| CPU, converters / goldberg | 12.8 s / 133.8 s | 13 s / 81 s | |
+| The 16,667 files of 10 KB | 44 s, 1.4 ms a run (p50; 3.7 ms mean, 14.1 ms p95) | 5.3 s, 187 us a run | 45.1 s, 1.0 ms a run |
+| The 1,667 files of 104 KB | 3.7 s, 2.6 ms a run (p50) | | |
+| The 21 files of 10 MB to 200 MB | 114 to 136 MB/s a run | 90 to 110 MB/s | 54 to 72 MB/s |
+| Nothing changed | 4.34 s | 4.6 s | 5.9 s |
+| One file per class changed | 6.97 s | 7.6 s | 10.4 s |
+| Watch, until stable | 8.33 s | | |
+| A watch, one save | 53 ms | | 23 to 28 ms |
+
+The large files cook faster than on Linux and the cooks with little to do a little faster;
+the cold cook's gap is all in the small files, as on Windows. A 10 KB run's own time is
+about a millisecond, yet goldberg keeps a tenth of its sixteen busy and spends ten times
+the converters' CPU: what is left is starting and finishing a process (`posix_spawn`, as
+on Linux) and moving its output, not the run. Not profiled yet: `--profile` on goldberg's
+main thread (the `run.spawn`, `run.running` and `run.commit` zones), as Windows was, is the
+next look.
+
 ## Not run
 
-macOS and iOS compile paths touched by the handover; the Android emulator test runner.
+iOS's own compile paths are built and its suites run in the Simulator (goldberg is not in
+the ios root: a tool for the desktop); the Android emulator test runner.
 The slice PRD lists each under the milestone that wrote it.
