@@ -443,6 +443,41 @@ pump against 199, worst pump 35 ms against 66. What is left on the main thread i
 open and the size of each file, which the queue does before it hands the read over; a
 worker could do both.
 
+## Krome on the Apple family
+
+The Krome branch (`tool-stuff`) brought the UI primitive, Krome and its apps, text, the
+clipboard, cursors and input methods. What the Apple family needed:
+
+- **The UI primitive on Metal.** `ui.slang`'s real entry points compile for Metal (the
+  placeholder branch is gone): Slang gives the item list buffer 4, after the sprite shader's
+  first four. `rb_ui_buffer` makes a shared buffer per frame slot; `rb_ui_draw` binds it at
+  4 for an instanced draw of six vertices an item (premultiplied: one, one minus source
+  alpha) and gives the sprite table its index back. `rb_stage_texture_region` stages a glyph
+  page's rectangle and blits it to its origin (Metal tracks the texture: nothing to move it
+  between). `KV_RB_UI` is 1. The gallery's `ui` scene is Vulkan's and D3D12's within one
+  step of one channel, and is Metal's own reference now.
+- **The roots.** krome, kim, kimb, typeset, truetype, script and the two apps join `macos`
+  and `ios`; goldberg joins `macos`. Clang found two things gcc and cl did not: a variable
+  set and never read in typeset's test, and a `&` between booleans in goldberg's heavy
+  test (both steps must report, so it is two statements now).
+- **Shortcuts.** Krome's `mod+` is Command on a Mac, so the demos' and the behaviour test's
+  shortcut presses hold the platform's key (`mod`), not Ctrl.
+- **A native file watcher for macOS** (`platform/src/macos/fs_watch_macos.cc`): FSEvents,
+  file events, a stream per root on a private queue, matched by each root's canonical path
+  (`/var` is `/private/var` to it); coalesced flags read against the path as it is now; what
+  has not changed since a root was added is history. FSEvents reports about 11 ms after a
+  write, and flushing does not shorten that (3.6 ms a call): `FsWatcher::lateness()` says
+  0.05 s for it, 0 elsewhere. goldberg's `learn` judges what a converter wrote outside its
+  directory at the converter's exit, so it hears the watcher out for that long first
+  (`host.watch_sync`); the polling backend missed those writes too. iOS has no FSEvents and
+  polls.
+- **No processes on iOS.** `process_supported()` is false there and `spawn` says why: an
+  iOS app may not start another program.
+
+All 35 suites pass on macOS (debug, ship), 32 in the iOS Simulator; the render gate passes
+with the gallery's 10 scenes; kromedemo and kromescreens run their demos under Metal's
+validation and pass.
+
 ### Still to come
 
 - One CPU side for both renderers (milestone 5, waiting on a decision).

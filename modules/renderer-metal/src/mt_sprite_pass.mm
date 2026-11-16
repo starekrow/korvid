@@ -92,6 +92,17 @@ bool rb_load_shaders(Renderer* r) {
                                     {"gBlockHist", kSortBlockHist}, {"gSortMeta", kSortMeta}, {"gIndirect", kSortIndirect}};
     if (!rb_check_bindings(r, "sprite", sprite, KV_COUNTOF(sprite)) || !rb_check_bindings(r, "sprite_sort", sort, KV_COUNTOF(sort))) return false;
 #endif
+    // The UI primitive's: an executable without ui.metallib draws no UI, and the rest as ever.
+    if (rb_load_library(r, "ui", &r->ui_lib)) {
+        r->vs_ui = [r->ui_lib newFunctionWithName:@"vs_ui"];
+        r->fs_ui = [r->ui_lib newFunctionWithName:@"fs_ui"];
+        if (!r->vs_ui || !r->fs_ui) KV_ERROR("metal", "ui.metallib has no vs_ui or fs_ui: no UI");
+#if KV_DEV || KV_DEBUG
+        static const MtExpected ui[] = {{"gPush", kUiPush}, {"gLayers", kUiLayers}, {"gMaterials", kUiMaterials},
+                                        {"gBindless", kUiBindless}, {"gUi", kUiList}};
+        if (r->vs_ui && !rb_check_bindings(r, "ui", ui, KV_COUNTOF(ui))) { [r->vs_ui release]; r->vs_ui = nil; }
+#endif
+    }
     return true;
 }
 
@@ -183,6 +194,28 @@ bool rb_create_pipelines(Renderer* r) {
         r->pipelines[i] = make_sprite_pipeline(r, r->fs_main, (BlendMode)i, blend_mode_name((BlendMode)i));
         if (!r->pipelines[i]) return false;
     }
+    // The UI's: its colors are premultiplied. Into the world's target or the drawable, which
+    // have the layer's format.
+    if (r->vs_ui && r->fs_ui) {
+        @autoreleasepool {
+            MTLRenderPipelineDescriptor* d = [[MTLRenderPipelineDescriptor new] autorelease];
+            d.label            = @"ui";
+            d.vertexFunction   = r->vs_ui;
+            d.fragmentFunction = r->fs_ui;
+            MTLRenderPipelineColorAttachmentDescriptor* c = d.colorAttachments[0];
+            c.pixelFormat                 = r->layer.pixelFormat;
+            c.blendingEnabled             = YES;
+            c.sourceRGBBlendFactor        = MTLBlendFactorOne;
+            c.destinationRGBBlendFactor   = MTLBlendFactorOneMinusSourceAlpha;
+            c.rgbBlendOperation           = MTLBlendOperationAdd;
+            c.sourceAlphaBlendFactor      = MTLBlendFactorOne;
+            c.destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+            c.alphaBlendOperation         = MTLBlendOperationAdd;
+            NSError* err = nil;
+            r->ui_pipeline = [r->device newRenderPipelineStateWithDescriptor:d error:&err];
+            if (!r->ui_pipeline) KV_ERROR("metal", "pipeline ui: %s: no UI", err ? err.localizedDescription.UTF8String : "?");
+        }
+    }
     for (GamePipe& gp : r->game_pipes)
         if (gp.used && !gp.failed) create_game_pipeline(r, gp);
     return true;
@@ -209,6 +242,10 @@ void rb_destroy_pipelines(Renderer* r) {
     [r->fs_main release];    r->fs_main = nil;
     [r->sprite_lib release]; r->sprite_lib = nil;
     [r->sort_lib release];   r->sort_lib = nil;
+    [r->ui_pipeline release]; r->ui_pipeline = nil;
+    [r->vs_ui release];       r->vs_ui = nil;
+    [r->fs_ui release];       r->fs_ui = nil;
+    [r->ui_lib release];      r->ui_lib = nil;
 }
 
 // The pipeline slot for a material, as renderer-vulkan's: its blend's, or a game shader's
@@ -230,7 +267,7 @@ void record_texture_uploads(Renderer* r, id<MTLBlitCommandEncoder> blit) {
         if (!r->textures.is_alive(up.slot) || r->textures.items[up.slot].tex != up.tex) continue;
         [blit copyFromBuffer:up.src sourceOffset:up.offset sourceBytesPerRow:up.width * 4 sourceBytesPerImage:(NSUInteger)up.width * up.height * 4
                   sourceSize:MTLSizeMake(up.width, up.height, 1) toTexture:up.tex destinationSlice:0 destinationLevel:0
-           destinationOrigin:MTLOriginMake(0, 0, 0)];
+           destinationOrigin:MTLOriginMake(up.x, up.y, 0)];
     }
     r->uploads.clear();
 }
@@ -394,9 +431,32 @@ void rb_pass_end(Renderer*, FrameInFlight& f, RcPass) {
 
 bool rb_record_end(Renderer*, FrameInFlight&) { return true; }
 
-// The UI primitive (korvid/render/ui.h) is not drawn by this backend yet: no buffer, so the
-// core draws no UI here (docs/PRDs/Krome-Slice-1-PRD.md, milestone 2).
-bool rb_ui_buffer(Renderer*, FrameInFlight&, u64) { return false; }
-void rb_ui_draw(Renderer*, FrameInFlight&, const PushData&) {}
+// The UI primitive (korvid/render/ui.h). The lists are a shared buffer per frame slot, which
+// the core writes when they change; the old one goes with the frame. No pipeline (ui.metallib
+// missing, or refused): no buffer, and the core draws no UI from this slot.
+bool rb_ui_buffer(Renderer* r, FrameInFlight& f, u64 bytes) {
+    if (!r->ui_pipeline) return false;
+    if (f.ui) rb_buffer_retire(r, f.ui);
+    f.ui = rb_buffer(r, (usize)bytes, MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined, "ui lists");
+    return f.ui != nil;
+}
+
+// One layer's list: an instance an item, six vertices a quad, inside a pass whose sprite
+// bindings are made. The list takes the sprite table's index for the draw and gives it back;
+// the sprite draws after it set their own pipeline.
+void rb_ui_draw(Renderer* r, FrameInFlight& f, const PushData& push) {
+    if (!r->ui_pipeline || !f.ui || !push.ui_count) return;
+    id<MTLRenderCommandEncoder> enc = f.enc;
+    [enc pushDebugGroup:@"ui"];
+    [enc setRenderPipelineState:r->ui_pipeline];
+    [enc setVertexBytes:&push length:sizeof push atIndex:kUiPush];
+    [enc setFragmentBytes:&push length:sizeof push atIndex:kUiPush];
+    [enc setVertexBuffer:f.ui offset:0 atIndex:kUiList];
+    [enc setFragmentBuffer:f.ui offset:0 atIndex:kUiList];
+    [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6 instanceCount:push.ui_count];
+    [enc setVertexBuffer:r->tables.sprites offset:0 atIndex:kBindSprites];
+    [enc setFragmentBuffer:r->tables.sprites offset:0 atIndex:kBindSprites];
+    [enc popDebugGroup];
+}
 
 } // namespace kv

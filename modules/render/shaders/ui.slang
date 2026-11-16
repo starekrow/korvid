@@ -11,24 +11,6 @@
 // Colors are RGBA8 sRGB with straight alpha; uvs two unorm16s. Pixels have their origin at
 // the window's top left, y down; the window's size is the push block's screen_cull.zw.
 // The output is premultiplied: the pipeline blends one, one minus source alpha.
-#if defined(KV_TARGET_METAL)
-// Metal does not draw the UI primitive yet: its backend's rb_ui_* are stubs and never load
-// this shader. These entry points only keep the build whole there; the real ones below are
-// for it to take up when it draws it (drop this branch then). D3D12 draws with them.
-struct UiVaryings {
-    float4 pos : SV_Position;
-};
-[shader("vertex")]
-UiVaryings vs_ui(uint vid : SV_VertexID) {
-    UiVaryings o;
-    o.pos = float4(0.0, 0.0, 0.0, 1.0);
-    return o;
-}
-[shader("fragment")]
-float4 fs_ui(UiVaryings i) : SV_Target {
-    return float4(0.0, 0.0, 0.0, 0.0);
-}
-#else
 #include "sprite_fragment.slangh"
 
 // The push block's spare words carry a UI draw's list (core/layout.h names them ui_base and
@@ -185,4 +167,3 @@ float4 fs_ui(UiVaryings i) : SV_Target {
     }
     return color;
 }
-#endif

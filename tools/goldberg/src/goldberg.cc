@@ -249,6 +249,7 @@ struct GoldbergState {
     Array<Held>     held;
     i64             lock = -1;           // the lock on the output tree's state, while held
     f64             watch_floor = 0;     // the least time a held file waits: over the polling watcher's interval
+    bool            watch_sync = false;  // host.watch_sync: the watcher heard out before a run's exit is delivered
     char            out_dir[600] = {};   // the output tree
     char            attic[700] = {};     // where what leaves it goes: <out>/.goldberg.attic/<stamp>
     u32             tmp_serial = 0;
@@ -794,8 +795,20 @@ i32 run_task(void* arg, const IoTaskCtl& ctl) {
     return 0;
 }
 
-// A run's task is over: its events, the last of them step-exit.
+void take_watcher(GoldbergState& s, bool now);
+
+// A run's task is over: its events, the last of them step-exit. With watch_sync (learn), the
+// watcher is asked first for everything it has, so what the run wrote outside its own
+// directory comes before its exit on every backend, not only where the OS reports at once.
 void run_done(GoldbergState& s, Proc& pr, IoStatus status) {
+    if (s.watch_sync && s.watcher.is_open()) {
+        f64 until = time_now() + s.watcher.lateness();
+        for (;;) {
+            take_watcher(s, true);
+            if (time_now() >= until) break;
+            time_sleep(0.002);
+        }
+    }
     if (pr.scan) drop_hold(s, pr);
     if (pr.spawn_failed || status != IoStatus::Done) {
         const char* why = pr.spawn_failed ? pr.p.error : "stopped";
@@ -838,6 +851,17 @@ bool take_fs_event(GoldbergState& s, u8 kind, u32 root, const char* path) {
     if (is_fs_event_held(s, kind, root, path)) return false;
     push_pending(s, kind, root, path);
     return true;
+}
+
+// Everything the watcher has, into the queue; with `now`, what the OS has not yet delivered
+// too (FsWatcher::poll).
+void take_watcher(GoldbergState& s, bool now) {
+    for (const FsEvent& ev : s.watcher.poll(now)) {
+        u32 root = ~0u;
+        for (u32 i = 0; i < s.roots.len; ++i) if (s.roots.data[i].watch == ev.root) root = i;
+        if (root == ~0u || strlen(ev.path) >= kGbPath) continue;
+        take_fs_event(s, fs_kind(ev.kind), root, ev.path);
+    }
 }
 
 void release_held(GoldbergState& s) {
@@ -994,6 +1018,12 @@ int host_scan(lua_State* L) {
     return 0;
 }
 
+// host.watch_sync(on): whether a run's exit waits for the watcher to be heard out (above).
+int host_watch_sync(lua_State* L) {
+    state_of(L)->watch_sync = lua_toboolean(L, 1) != 0;
+    return 0;
+}
+
 // host.watch(mode): "inotify", "poll", "native", "auto" or "none". Starts the watcher and
 // puts every root under it. Returns the backend's name.
 int host_watch(lua_State* L) {
@@ -1009,7 +1039,8 @@ int host_watch(lua_State* L) {
         return luaL_error(L, "--watch %s: this platform has no such watcher", mode);
     }
     for (Root& r : s.roots) if (r.watched) r.watch = s.watcher.add_root(r.dir); // a root that is not there yet is simply not watched
-    s.watch_floor = strcmp(s.watcher.backend_name(), "poll") == 0 ? 0.3 : 0.0;
+    // A held file waits at least past what the watcher can still be about to say.
+    s.watch_floor = strcmp(s.watcher.backend_name(), "poll") == 0 ? 0.3 : s.watcher.lateness() * 2.0;
     lua_pushstring(L, s.watcher.backend_name());
     return 1;
 }
@@ -1271,7 +1302,7 @@ int host_finish(lua_State* L) {
 }
 
 constexpr luaL_Reg k_host[] = {
-    {"add_root", host_add_root}, {"scan", host_scan}, {"watch", host_watch}, {"hash", host_hash},
+    {"add_root", host_add_root}, {"scan", host_scan}, {"watch", host_watch}, {"watch_sync", host_watch_sync}, {"hash", host_hash},
     {"set_out", host_set_out}, {"copy", host_copy}, {"remove_output", host_remove_output}, {"write_atomic", host_write_atomic},
     {"flush", host_flush}, {"lock", host_lock}, {"sleep", host_sleep}, {"stat", host_stat}, {"touch", host_touch},
     {"run", host_run}, {"clear_work", host_clear_work}, {"remove_work", host_remove_work},

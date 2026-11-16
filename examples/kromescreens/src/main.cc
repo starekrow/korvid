@@ -26,6 +26,13 @@
 #include "korvid/render/renderer.h"
 #include <string.h>
 
+// The key a script's "mod" holds: the one Krome's `mod+` shortcuts want here.
+#if defined(__APPLE__)
+#define KV_DEMO_MOD Key::LGui
+#else
+#define KV_DEMO_MOD Key::LCtrl
+#endif
+
 namespace kv {
 
 namespace {
@@ -159,7 +166,7 @@ constinit const Step k_pilot[] = {
     {Act::Key, "right", nullptr, nullptr},
     {Act::Key, "tab", nullptr, nullptr},             // mipmaps
     {Act::Key, "space", nullptr, nullptr},
-    {Act::Key, "s", "ctrl", nullptr},
+    {Act::Key, "s", "mod", nullptr},                 // the form's mod+s: Command on a Mac
     {Act::Check, "saves", nullptr, "1"},
     {Act::Check, "form_state", nullptr, "saved"},
     {Act::Shot, "forms", nullptr, nullptr},
@@ -252,10 +259,13 @@ void kromescreens_tick(TickContext& ctx) {
                                      {"right", Key::Right}, {"left", Key::Left}, {"a", Key::A}, {"s", Key::S}};
         Key k = Key::Unknown;
         for (const Named& n : keys) if (!strcmp(n.name, st.id)) k = n.key;
-        bool ctrl = st.mods && !strcmp(st.mods, "ctrl");
-        if (phase == 0 && ctrl) input_key_override(e, Key::LCtrl, true);
+        // "ctrl", or "mod": a shortcut's modifier as Krome reads `mod+`, Command on a Mac.
+        Key held = Key::Unknown;
+        if (st.mods && !strcmp(st.mods, "ctrl")) held = Key::LCtrl;
+        if (st.mods && !strcmp(st.mods, "mod")) held = KV_DEMO_MOD;
+        if (phase == 0 && held != Key::Unknown) input_key_override(e, held, true);
         if (phase == 1) { input_key_override(e, k, true); input_key_override(e, k, false); }
-        if (phase == 2 && ctrl) input_key_override(e, Key::LCtrl, false);
+        if (phase == 2 && held != Key::Unknown) input_key_override(e, held, false);
         if (++phase < 3) { s.wait = 1; return; }
         phase = 0;
         break;

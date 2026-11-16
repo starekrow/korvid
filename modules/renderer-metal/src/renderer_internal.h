@@ -42,6 +42,7 @@
 #define KV_RB_CLIP_Y_UP  1
 #define KV_RB_SHADER_EXT ".metallib"
 #define KV_RB_SURFACE    RendererSurface::Metal
+#define KV_RB_UI         1
 #define KV_RB_FRAME_SCOPE @autoreleasepool
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
@@ -71,6 +72,9 @@ namespace kv {
 // chain (docs/design/renderer-metal.md). A dev build checks these against the reflection
 // the build writes beside each library (<name>.metallib.json).
 enum SpriteBinding : u32 { kBindPush = 0, kBindLayers = 1, kBindMaterials = 2, kBindBindless = 3, kBindSprites = 4, kBindSorted = 5 };
+// The UI primitive's shader (ui.slang): the sprite shader's first four, then the item lists,
+// at the index the sprite range gives the sprite table (rb_ui_draw puts the table back).
+enum UiBinding : u32 { kUiPush = 0, kUiLayers = 1, kUiMaterials = 2, kUiBindless = 3, kUiList = 4 };
 enum SortBinding : u32 {
     kSortPush = 0, kSortLayers = 1, kSortSprites = 2, kSortMaterials = 3, kSortSorted = 4,
     kSortBucketOf = 5, kSortBlockHist = 6, kSortMeta = 7, kSortIndirect = 8,
@@ -99,6 +103,7 @@ struct PendingUpload {
     id<MTLBuffer>  src;    // the ring, or a one-off staging buffer already queued for release
     usize          offset;
     u32            width, height;
+    u32            x = 0, y = 0; // where in the texture: a glyph page's rectangle, or the whole at 0, 0
 };
 
 struct FrameInFlight : FrameCore {
@@ -162,6 +167,9 @@ struct Renderer : RenderCore {
     id<MTLRenderPipelineState> pipelines[kBlendCount] = {};
     GamePipe                   game_pipes[kGameSlots];
     id<MTLComputePipelineState> cs_count = nil, cs_scan = nil, cs_bucket_scan = nil, cs_scatter = nil, cs_key_sort = nil;
+    id<MTLLibrary>             ui_lib = nil;      // ui.metallib: without it, no UI (renderer_caps still says the backend can)
+    id<MTLFunction>            vs_ui = nil, fs_ui = nil;
+    id<MTLRenderPipelineState> ui_pipeline = nil; // premultiplied: one, one minus source alpha
 
     Pool<Texture>        textures;
     Array<PendingUpload> uploads;

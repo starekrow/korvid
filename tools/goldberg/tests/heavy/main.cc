@@ -956,7 +956,9 @@ int bench(Options& o) {
     u32 ran = read_times(b, false);
     printf("  %-26s %9.2f s   %.0f MB/s, %.0f files/s\n", "cold cook", cold.seconds, (f64)b.total / 1e6 / cold.seconds, b.files.len / cold.seconds);
     printf("    %s\n", cold.line);
-    bool ok = step(b, cold.code == 0, "the cold cook exited non-zero") & step(b, ran == b.files.len, "a converter run left no record");
+    // Both steps report, whatever the first says.
+    bool ok = step(b, cold.code == 0, "the cold cook exited non-zero");
+    ok = step(b, ran == b.files.len, "a converter run left no record") && ok;
     f64 first = 1e30, last = 0, busy = 0, conv_cpu = 0;
     for (const File& f : b.files) {
         if (!f.timed) continue;

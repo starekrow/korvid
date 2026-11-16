@@ -84,6 +84,9 @@ function Learn.start(loc, rules, o)
         t0 = host.now(),
     }, Learn)
     self.backend = host.watch(o.watch or "auto")
+    -- What the script wrote under the asset root must be heard before its exit is, on any
+    -- watcher (FSEvents and the polling one report a moment late): strays are judged at exit.
+    host.watch_sync(true)
     self.source_root = host.add_root(loc.name, loc.abs)
     self.work_root = host.add_root("(learn)", temp)
     -- It scans, whatever the converter declares: every file is reported as it is written.

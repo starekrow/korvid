@@ -254,6 +254,13 @@ void FsWatcher::free() {
     state = nullptr;
 }
 
+f64 FsWatcher::lateness() const {
+#if KV_FS_NATIVE
+    if (state && state->native) return KV_FS_NATIVE_LATENESS;
+#endif
+    return 0.0; // the polling backend walks when poll(true) asks
+}
+
 const char* FsWatcher::backend_name() const {
     if (!state) return "none";
 #if KV_FS_NATIVE

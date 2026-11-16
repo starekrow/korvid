@@ -94,8 +94,7 @@ void test_edit(kv::TestCtx& c) {
     TypesetEdit cap;
     cap.max_steps = 4;
     cap.set("", 0);
-    f64 ct = 0.0;
-    for (u32 i = 0; i < 10; ++i) { cap.paste("x", 1); ct += 2.0; }
+    for (u32 i = 0; i < 10; ++i) cap.paste("x", 1);
     KV_CHECK(c, cap.undo.len == 4 && cap.undo_step() && cap.len == 9 && cap.undo_step() && cap.undo_step() && cap.undo_step() && !cap.undo_step() && cap.len == 6);
     cap.free();
     e.free();

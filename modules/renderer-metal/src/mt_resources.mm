@@ -82,9 +82,30 @@ bool rb_texture_create(Renderer* r, Texture& t) {
     return true;
 }
 
-// A rectangle into the live texture: not yet here (Krome slice 3); the caller uploads the
-// whole image.
-bool rb_stage_texture_region(Renderer*, u32, Texture&, const u8*, u32, u32, u32, u32) { return false; }
+// A rectangle of `pixels` (the whole image, tightly packed) into the live texture: its rows
+// staged in the ring and copied by the next frame's blit to (x, y), the rest of the texture
+// as it was. A glyph page's new glyphs, not the page. Metal tracks the texture's hazards, so
+// there is nothing to move it between. False when there is no live image yet or the ring
+// will not hold it: the caller uploads the whole image.
+bool rb_stage_texture_region(Renderer* r, u32 slot, Texture& t, const u8* pixels, u32 x, u32 y, u32 w, u32 h) {
+    if (!t.resident || !t.tex || !w || !h) return false;
+    usize row = (usize)w * 4, bytes = row * h;
+    if (bytes > r->ring.size / 2) return false;
+    RingSpan span = rc_ring_alloc(r, bytes, 16);
+    if (!span.ptr) return false;
+    for (u32 i = 0; i < h; ++i) memcpy((u8*)span.ptr + i * row, pixels + ((usize)(y + i) * t.width + x) * 4, row);
+    PendingUpload up{};
+    up.slot   = slot;
+    up.tex    = t.tex;
+    up.src    = span.buffer;
+    up.offset = (usize)span.offset;
+    up.width  = w;
+    up.height = h;
+    up.x      = x;
+    up.y      = y;
+    r->uploads.push(up);
+    return true;
+}
 
 // Copies tightly packed pixels into the frame ring (or a one-off staging buffer when they
 // would not fit) and queues the copy for the next frame's blit, ahead of its draws.
@@ -203,6 +224,7 @@ void rb_destroy_resources(Renderer* r) {
     for (FrameInFlight& f : r->frames) {
         [f.bindless release]; f.bindless = nil;
         [f.layers release];   f.layers = nil;
+        [f.ui release];       f.ui = nil; f.ui_capacity = 0; f.ui_version = 0; f.ui_failed = false;
     }
     [r->sampler release];        r->sampler = nil;
     [r->sampler_linear release]; r->sampler_linear = nil;

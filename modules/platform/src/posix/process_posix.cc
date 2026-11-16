@@ -79,11 +79,20 @@ char** proc_env(Span<const char* const> extra) {
 
 } // namespace
 
-bool process_supported() { return true; }
+// An iOS app is sandboxed: it may not start another program (there is no shell to start,
+// and fork is refused on a device). Said, rather than tried.
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#define KV_PROC_NONE 1
+#else
+#define KV_PROC_NONE 0
+#endif
+
+bool process_supported() { return !KV_PROC_NONE; }
 
 bool Process::spawn(const ProcessDesc& desc) {
     free();
     error[0] = 0;
+    if (KV_PROC_NONE) { format(error, sizeof error, "an iOS app cannot start another program"); return false; }
     if (desc.argv.len == 0 || !desc.argv.data[0]) { format(error, sizeof error, "nothing to run"); return false; }
     int out[2] = {-1, -1}, err[2] = {-1, -1}, fail[2] = {-1, -1};
     // With fork, a third pipe carries the child's errno if its exec fails; posix_spawn

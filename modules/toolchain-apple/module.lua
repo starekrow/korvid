@@ -72,6 +72,8 @@ module "toolchain.apple" {
       sdk     = "macosx",
       triple  = "apple-macos" .. os_min,
       srcdirs = { "macos", "sdl3", "sdl3_pads", "sdl3_audio" },
+      -- CoreServices: FSEvents, the file watcher's native backend (platform's macos/).
+      ldflags = { "-framework", "CoreServices" },
       -- kormake package writes an .app: the executable, its resources, SDL3 bundled, signed.
       package = "app",
       externals = {

@@ -217,12 +217,14 @@ discard, colors decoded from sRGB, output premultiplied.
 On Vulkan the buffer is set 0's binding 8. On D3D12 it is an upload-heap buffer read
 through a root SRV at `t8` (a root descriptor is an address, so a new buffer is bound,
 not rewritten); the draw is `DrawInstanced(6, items)` with no vertex input, and its
-picture is Vulkan's to the pixel. Metal has stubs for now: it answers that it has no
-buffer, and the core draws no UI there; its `KV_RB_UI` is 0, so `renderer_caps(r).ui` is
-false (the gallery leaves its `ui` scene out, Krome warns once), and `ui.slang` compiles
-to placeholder entry points under `KV_TARGET_METAL`. A backend that takes the primitive
-up defines `KV_RB_UI 1`, makes its `rb_ui_buffer` and `rb_ui_draw` real, and drops the
-placeholder branch.
+picture is Vulkan's to the pixel. On Metal it is a shared buffer per frame slot at buffer
+index 4 (Slang numbers `gUi` after the sprite shader's first four, where the sprite range
+binds the sprite table: the draw takes the index and gives the table back), drawn with
+`drawPrimitives` six vertices an instance; its picture is Vulkan's and D3D12's within one
+step of one channel (3.6% of pixels off by one: rounding), and is Metal's own reference. A
+backend that draws the primitive defines `KV_RB_UI 1` and makes its `rb_ui_buffer` and
+`rb_ui_draw` real; one that does not leaves them stubs, `renderer_caps(r).ui` false, and
+the gallery and Krome leave the UI out there.
 
 ## The core and the backends
 

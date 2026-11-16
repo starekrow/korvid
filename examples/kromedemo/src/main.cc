@@ -28,6 +28,13 @@
 #include "korvid/render/renderer.h"
 #include <string.h>
 
+// The key a script's "mod" holds: the one Krome's `mod+` shortcuts want here.
+#if defined(__APPLE__)
+#define KV_DEMO_MOD Key::LGui
+#else
+#define KV_DEMO_MOD Key::LCtrl
+#endif
+
 namespace kv {
 
 namespace {
@@ -148,7 +155,7 @@ constinit const Step k_steps[] = {
     {Act::Click, "file", 0, nullptr},        // the menu bar: File opens its items below it
     {Act::Click, "save_all", 0, nullptr},
     {Act::Check, "last", 0, "file: save"},
-    {Act::Key, "r", 0, "ctrl"},              // the Rename button's shortcut
+    {Act::Key, "r", 0, "mod"},               // the Rename button's shortcut (mod+r: Command on a Mac)
     {Act::Key, "tab", 0, ""},                // into the dialog: its field first
     {Act::Type, "Ash", 0, nullptr},
     {Act::Shot, "gallery_dialog", 0, nullptr},
@@ -254,10 +261,13 @@ void kromedemo_tick(TickContext& ctx) {
                                      {"down", Key::Down}, {"up", Key::Up}, {"tab", Key::Tab}, {"space", Key::Space}, {"r", Key::R}};
         Key k = Key::Unknown;
         for (const Named& n : keys) if (!strcmp(n.name, s.id)) k = n.key;
-        bool ctrl = s.expect && !strcmp(s.expect, "ctrl");
-        if (phase == 0 && ctrl) input_key_override(e, Key::LCtrl, true);
+        // "ctrl", or "mod": a shortcut's modifier as Krome reads `mod+`, Command on a Mac.
+        Key held = Key::Unknown;
+        if (s.expect && !strcmp(s.expect, "ctrl")) held = Key::LCtrl;
+        if (s.expect && !strcmp(s.expect, "mod")) held = KV_DEMO_MOD;
+        if (phase == 0 && held != Key::Unknown) input_key_override(e, held, true);
         if (phase == 1) { input_key_override(e, k, true); input_key_override(e, k, false); }
-        if (phase == 2 && ctrl) input_key_override(e, Key::LCtrl, false);
+        if (phase == 2 && held != Key::Unknown) input_key_override(e, held, false);
         if (++phase < 3) { d.wait = 1; return; }
         phase = 0;
         break;

@@ -116,14 +116,22 @@ void frames(Engine& e, u32 n) {
 
 void pointer(Engine& e, f32 x, f32 y, u8 buttons, f32 wheel = 0.0f) { input_pointer_override(e, x, y, buttons, wheel); frames(e, 1); }
 
-void key(Engine& e, Key k, bool ctrl = false, bool shift = false) {
-    if (ctrl) input_key_override(e, Key::LCtrl, true);
+// `mod` holds the platform's shortcut key, as Krome reads `mod+` in a shortcut: Command on
+// the Apple family, Ctrl elsewhere. An edit takes either for its own commands.
+#if defined(__APPLE__)
+constexpr Key kModKey = Key::LGui;
+#else
+constexpr Key kModKey = Key::LCtrl;
+#endif
+
+void key(Engine& e, Key k, bool mod = false, bool shift = false) {
+    if (mod) input_key_override(e, kModKey, true);
     if (shift) input_key_override(e, Key::LShift, true);
     frames(e, 1);
     input_key_override(e, k, true);
     input_key_override(e, k, false);
     frames(e, 1);
-    if (ctrl) input_key_override(e, Key::LCtrl, false);
+    if (mod) input_key_override(e, kModKey, false);
     if (shift) input_key_override(e, Key::LShift, false);
     frames(e, 1);
 }

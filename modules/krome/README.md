@@ -304,7 +304,6 @@ Focus rings (`focused { border-color=ring }`) show when Tab brought the focus. S
 - **One node has the keyboard** across every screen: an edit, or anything focusable.
 - **No shaping** beyond kerning, left to right only.
 - **Screen scripts cannot `require`** another file; a `.kimb` screen takes several scripts.
-- **Metal draws no UI yet**: its backend has stubs for the primitive. Vulkan and D3D12 draw it.
 
 ## Not in this module
 

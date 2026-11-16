@@ -43,7 +43,7 @@ root "macos" {
                 "bulletml", "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
                 "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal",
                 "sockit2m", "window", "testbed", "stones", "cpukiller",
-                "rocks", "arcanum", "arcfire", "gallery" },
+                "rocks", "arcanum", "arcfire", "gallery", "script", "truetype", "typeset", "krome", "goldberg", "kromedemo", "kromescreens" },
   tests     = true,
   platforms = { "macos" },
 }
@@ -57,7 +57,7 @@ root "ios" {
                 "platform_hid", "platform_audio", "render", "asset", "sprite", "scene", "text", "anim",
                 "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal",
                 "window", "testbed", "stones", "rocks", "arcanum",
-                "arcfire", "gallery" },
+                "arcfire", "gallery", "script", "truetype", "typeset", "kim", "kimb", "krome", "kromedemo", "kromescreens" },
   tests     = true,
   platforms = { "ios", "iossim" },
 }
