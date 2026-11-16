@@ -453,8 +453,8 @@ void region(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const K
         r.want = (u32)(view * 3.0f / height) + 8;
         // Built whole again: where it was, so nothing is built twice to get back there.
         if (b.windows)
-            for (Build::Window& w : *b.windows)
-                if (!w.taken && w.src == &n) { r.first = w.first; r.want = w.want; w.taken = true; break; }
+            for (Build::Window& win : *b.windows)
+                if (!win.taken && win.src == &n) { r.first = win.first; r.want = win.want; win.taken = true; break; }
     }
     r.count = region_body(b, f, n, parent, fr, r.height > 0.0f ? &r : nullptr);
     if (!b.regions) return;

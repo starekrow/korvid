@@ -147,9 +147,33 @@ bool rb_texture_create(Renderer* r, Texture& t) {
     return true;
 }
 
-// A rectangle into the live texture: not yet here (Krome slice 3); the caller uploads the
-// whole image.
-bool rb_stage_texture_region(Renderer*, u32, Texture&, const u8*, u32, u32, u32, u32) { return false; }
+// A rectangle of the whole image, its rows at a footprint's pitch, into the live texture:
+// the copy keeps the rest. Only once the texture has had its whole upload recorded
+// (resident), so it is a shader resource the copy moves out of and back to.
+bool rb_stage_texture_region(Renderer* r, u32 slot, Texture& t, const u8* pixels, u32 x, u32 y, u32 w, u32 h) {
+    if (!t.resident || !t.resource || !w || !h) return false;
+    u32 row   = w * 4;
+    u32 pitch = (row + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1) & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1);
+    u64 bytes = (u64)pitch * h;
+    if (bytes > r->ring.size / 2) return false;
+    RingSpan span = rc_ring_alloc(r, bytes, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+    if (!span.ptr) return false;
+    for (u32 i = 0; i < h; ++i)
+        memcpy((u8*)span.ptr + (usize)i * pitch, pixels + ((usize)(y + i) * t.width + x) * 4, row);
+    PendingUpload up{};
+    up.slot     = slot;
+    up.resource = t.resource;
+    up.src      = span.buffer.resource;
+    up.offset   = span.offset;
+    up.width    = w;
+    up.height   = h;
+    up.pitch    = pitch;
+    up.x        = x;
+    up.y        = y;
+    up.keep     = true;
+    r->uploads.push(up);
+    return true;
+}
 
 // Copies tightly packed pixels into the ring (or a one-off staging buffer) at the pitch a
 // placed footprint needs, and queues the copy for the next frame's command list.
@@ -280,6 +304,7 @@ bool rb_create_heaps_and_root(Renderer* r) {
     root_view(kRootSprites, D3D12_ROOT_PARAMETER_TYPE_SRV, 0);
     root_view(kRootMaterials, D3D12_ROOT_PARAMETER_TYPE_SRV, 1);
     root_view(kRootLayers, D3D12_ROOT_PARAMETER_TYPE_SRV, 7);
+    root_view(kRootUi, D3D12_ROOT_PARAMETER_TYPE_SRV, 8);
     root_view(kRootSorted, D3D12_ROOT_PARAMETER_TYPE_UAV, 2);
     root_view(kRootBucketOf, D3D12_ROOT_PARAMETER_TYPE_UAV, 3);
     root_view(kRootBlockHist, D3D12_ROOT_PARAMETER_TYPE_UAV, 4);
@@ -354,7 +379,7 @@ void rb_destroy_resources(Renderer* r) {
     rb_destroy_buffer(r->ring.buf);
     rb_destroy_buffer(r->shot_buffer);
     rb_destroy_buffer(r->check_buffer);
-    for (FrameInFlight& f : r->frames) { rb_destroy_buffer(f.layers); rb_destroy_buffer(f.post_params); }
+    for (FrameInFlight& f : r->frames) { rb_destroy_buffer(f.layers); rb_destroy_buffer(f.post_params); rb_destroy_buffer(f.ui); }
     rb_release(r->draw_signature);
     rb_release(r->root);
     rb_release(r->heap);

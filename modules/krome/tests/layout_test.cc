@@ -8,6 +8,10 @@ namespace {
 
 using namespace kv;
 
+// A few numbers for one call, as a temporary array (C99's (const f32[]){...}, which C++
+// does not have and cl refuses).
+template <u32 N> struct Nums { f32 v[N]; };
+
 vec2 fake_text(void*, const char*, u32 len, Name, f32 size) { return vec2{(f32)len * size * 0.5f, size + 2.0f}; }
 vec2 fake_image(void*, Name) { return vec2{32, 24}; }
 const KromeMeasure k_measure{nullptr, fake_text, fake_image};
@@ -85,7 +89,7 @@ void test_tree(kv::TestCtx& c) {
     KV_CHECK(c, x.t.set(root, "bg", KromeValue::str("red")) != nullptr);
     KV_CHECK(c, x.t.set(root, "gap", KromeValue::str("8")) != nullptr);
     KV_CHECK(c, x.t.set(root, "w", KromeValue::str("wide")) != nullptr);
-    KV_CHECK(c, x.t.set(root, "pad", KromeValue::nums((const f32[]){1, 2, 3}, 3)) != nullptr);
+    KV_CHECK(c, x.t.set(root, "pad", KromeValue::nums(Nums<3>{{1, 2, 3}}.v, 3)) != nullptr);
     KV_CHECK(c, x.t.set(root, "w", KromeValue::num(10), KromeState::Hover) != nullptr); // a state sets looks only
     KV_CHECK(c, x.t.flag(root, "shiny") != nullptr);
     KV_CHECK(c, x.t.set(root, "anchor", KromeValue::str("bottom-left")) == nullptr && x.t.nodes[root].anchor_x == 0 && x.t.nodes[root].anchor_y == 2);
@@ -115,7 +119,7 @@ void test_tree(kv::TestCtx& c) {
     child = x.t.resolve_look(a, KromeState::Base, &hover);
     KV_CHECK(c, child.text_color.g == 1.0f && child.text_color.r == 0.0f);
     // Radii: two numbers are a diagonal pair.
-    KV_CHECK(c, x.t.set(a, "radius", KromeValue::nums((const f32[]){2, 6}, 2)) == nullptr);
+    KV_CHECK(c, x.t.set(a, "radius", KromeValue::nums(Nums<2>{{2, 6}}.v, 2)) == nullptr);
     child = x.t.resolve_look(a, KromeState::Base, nullptr);
     KV_CHECK(c, child.radius[0] == 2 && child.radius[1] == 6 && child.radius[2] == 2 && child.radius[3] == 6);
     // Selected and disabled are data: their looks apply whatever the pointer does.
@@ -206,7 +210,7 @@ void test_layout(kv::TestCtx& c) {
     {   // A stack: every child over the whole inside, each placed by its anchor or the stack's.
         T x;
         u32 root = x.box(KROME_NONE, "stack");
-        x.set(root, "pad", KromeValue::nums((const f32[]){10, 5}, 2));
+        x.set(root, "pad", KromeValue::nums(Nums<2>{{10, 5}}.v, 2));
         u32 a = x.box(root);
         x.set(a, "w", KromeValue::num(20));
         x.set(a, "h", KromeValue::num(20));

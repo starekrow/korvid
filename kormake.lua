@@ -29,7 +29,8 @@ root "windows" {
                 "render", "asset", "sprite", "scene", "text", "anim", "collision", "tilemap", "level",
                 "platform_audio", "audio", "renderer-vulkan", "renderer-d3d12", "touchpad", "frameloop", "save", "ui", "xml", "bulletml", "image", "picture", "kbor", "kimb", "kim", "kimc",
                 "window", "testbed", "stones", "rocks", "arcanum",
-                "cpukiller", "arcfire", "gallery", "sockit2m", "lua", "script", "goldberg" },
+                "cpukiller", "arcfire", "gallery", "sockit2m", "lua", "script", "goldberg",
+                "truetype", "typeset", "krome", "kromedemo", "kromescreens" },
   tests     = true,
   platforms = { "windows" },
 }

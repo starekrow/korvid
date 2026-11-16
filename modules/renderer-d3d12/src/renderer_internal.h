@@ -58,6 +58,7 @@
 #define KV_RB_CLIP_Y_UP  1
 #define KV_RB_SHADER_EXT ".dxil.zip"
 #define KV_RB_SURFACE    RendererSurface::D3D12
+#define KV_RB_UI         1 // the UI primitive: ui.slang's vs_ui and fs_ui, its lists a root SRV at t8
 #define KV_RB_FRAME_SCOPE 
 
 namespace kv {
@@ -110,6 +111,7 @@ enum RootParam : u32 {
     kRootSprites,   // t0
     kRootMaterials, // t1
     kRootLayers,    // t7
+    kRootUi,        // t8: the frame's UI lists (a raw buffer; the layers' offsets when it has none)
     kRootSorted,    // u2
     kRootBucketOf,  // u3
     kRootBlockHist, // u4
@@ -145,6 +147,8 @@ struct PendingUpload {
     ID3D12Resource* src;      // the ring, or a one-off staging buffer already queued as garbage
     u64             offset;   // 512-aligned
     u32             width, height, pitch; // pitch: 256-aligned, as a placed footprint needs
+    u32             x = 0, y = 0; // where in the image the rectangle goes
+    bool            keep = false; // into the live image (a region): it is read from, not new
 };
 
 struct FrameInFlight : FrameCore {
@@ -213,9 +217,10 @@ struct Renderer : RenderCore {
     u32                   heap_step = 0, rtv_step = 0;
     ID3D12RootSignature*  root = nullptr;     // the sort's and the sprites'
     ID3D12CommandSignature* draw_signature = nullptr; // ExecuteIndirect: one draw per command
-    ShaderBlob            vs_sprite, fs_sprite;
+    ShaderBlob            vs_sprite, fs_sprite, vs_ui, fs_ui;
     ShaderBlob            cs_blobs[5];
     ID3D12PipelineState*  pipelines[kBlendCount] = {};
+    ID3D12PipelineState*  ui_pipeline = nullptr; // the UI primitive's: premultiplied output
     GamePipe              game_pipes[kGameSlots];
     PostPass              post;
     ID3D12PipelineState*  cs_count = nullptr, *cs_scan = nullptr, *cs_bucket_scan = nullptr,

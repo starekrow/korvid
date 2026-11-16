@@ -86,7 +86,10 @@ void record_texture_uploads(Renderer* r, ID3D12GraphicsCommandList* cmd) {
         src.PlacedFootprint.Footprint.Height   = up.height;
         src.PlacedFootprint.Footprint.Depth    = 1;
         src.PlacedFootprint.Footprint.RowPitch = up.pitch;
-        cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr); // made in COPY_DEST
+        // A whole image goes into a texture made in COPY_DEST; a region into the live one,
+        // which shaders have been reading.
+        if (up.keep) rb_transition(cmd, up.resource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+        cmd->CopyTextureRegion(&dst, up.x, up.y, 0, &src, nullptr);
         rb_transition(cmd, up.resource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     }
     r->uploads.clear();
@@ -98,6 +101,9 @@ void bind_tables(Renderer* r, FrameInFlight& f, SetSrv srv, SetUav uav, bool wri
     srv(kRootSprites, r->tables.sprites.gpu());
     srv(kRootMaterials, r->material_table.gpu());
     srv(kRootLayers, f.layers.gpu());
+    // Every root parameter is set before a draw or a dispatch: a slot with no UI lists yet
+    // points the UI's at the layers' buffer, which nothing reads through it.
+    srv(kRootUi, f.ui.resource ? f.ui.gpu() : f.layers.gpu());
     if (!writes) return;
     uav(kRootSorted, r->tables.sorted.gpu());
     uav(kRootBucketOf, r->tables.bucket_of.gpu());
@@ -232,6 +238,11 @@ bool rb_load_shaders(Renderer* r) {
     if (!rb_load_shader_entries(r, "sprite.dxil.zip", sprite, sb, 2)) return false;
     r->vs_sprite = sb[0];
     r->fs_sprite = sb[1];
+    const char* ui[2] = {"vs_ui", "fs_ui"};
+    ShaderBlob ub[2];
+    if (!rb_load_shader_entries(r, "ui.dxil.zip", ui, ub, 2)) return false;
+    r->vs_ui = ub[0];
+    r->fs_ui = ub[1];
     return rb_load_shader_entries(r, "sprite_sort.dxil.zip", kComputeEntries, r->cs_blobs, 5);
 }
 
@@ -269,6 +280,33 @@ ID3D12PipelineState* make_sprite_pipeline(Renderer* r, const ShaderBlob& fragmen
     return out;
 }
 
+// The UI primitive's: no vertex input (the vertex and instance indices pick an item and a
+// corner in the list), and premultiplied output, blended one, one minus source alpha.
+ID3D12PipelineState* make_ui_pipeline(Renderer* r) {
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};
+    d.pRootSignature                  = r->root;
+    d.VS                              = r->vs_ui.code();
+    d.PS                              = r->fs_ui.code();
+    D3D12_RENDER_TARGET_BLEND_DESC& b = d.BlendState.RenderTarget[0];
+    b                                 = blend_state(BlendMode::Opaque);
+    b.BlendEnable                     = TRUE;
+    b.SrcBlend = b.SrcBlendAlpha      = D3D12_BLEND_ONE;
+    b.DestBlend = b.DestBlendAlpha    = D3D12_BLEND_INV_SRC_ALPHA;
+    d.SampleMask                      = UINT_MAX;
+    d.RasterizerState.FillMode        = D3D12_FILL_MODE_SOLID;
+    d.RasterizerState.CullMode        = D3D12_CULL_MODE_NONE;
+    d.RasterizerState.DepthClipEnable = TRUE;
+    d.PrimitiveTopologyType           = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    d.NumRenderTargets                = 1;
+    d.RTVFormats[0]                   = kTargetFormat;
+    d.SampleDesc.Count                = 1;
+    ID3D12PipelineState* out = nullptr;
+    HRESULT hr = r->device->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&out));
+    if (FAILED(hr)) { KV_ERROR("d3d12", "pipeline ui: %s", hr_name(hr)); rb_drain_messages(r); return nullptr; }
+    rb_name(out, "ui");
+    return out;
+}
+
 } // namespace
 
 bool rb_create_pipelines(Renderer* r) {
@@ -276,6 +314,8 @@ bool rb_create_pipelines(Renderer* r) {
         r->pipelines[i] = make_sprite_pipeline(r, r->fs_sprite, (BlendMode)i, blend_mode_name((BlendMode)i));
         if (!r->pipelines[i]) return false;
     }
+    r->ui_pipeline = make_ui_pipeline(r);
+    if (!r->ui_pipeline) return false;
     for (GamePipe& gp : r->game_pipes)
         if (gp.used && !gp.failed) rb_create_game_pipeline(r, gp);
     rb_post_create_pipeline(r);
@@ -306,6 +346,7 @@ bool rb_game_pipe_load(Renderer* r, GamePipe& gp) {
 
 void rb_destroy_pipelines(Renderer* r) {
     for (ID3D12PipelineState*& p : r->pipelines) rb_release(p);
+    rb_release(r->ui_pipeline);
     ID3D12PipelineState** cs[] = {&r->cs_count, &r->cs_scan, &r->cs_bucket_scan, &r->cs_scatter, &r->cs_key_sort};
     for (ID3D12PipelineState** p : cs) rb_release(*p);
     for (GamePipe& gp : r->game_pipes) {
@@ -315,6 +356,8 @@ void rb_destroy_pipelines(Renderer* r) {
     }
     rb_free_shader(r->vs_sprite);
     rb_free_shader(r->fs_sprite);
+    rb_free_shader(r->vs_ui);
+    rb_free_shader(r->fs_ui);
     for (ShaderBlob& b : r->cs_blobs) rb_free_shader(b);
 }
 
@@ -434,9 +477,26 @@ bool rb_record_end(Renderer* r, FrameInFlight& f) {
     return true;
 }
 
-// The UI primitive (korvid/render/ui.h) is not drawn by this backend yet: no buffer, so the
-// core draws no UI here (docs/PRDs/Krome-Slice-1-PRD.md, milestone 2).
-bool rb_ui_buffer(Renderer*, FrameInFlight&, u64) { return false; }
-void rb_ui_draw(Renderer*, FrameInFlight&, const PushData&) {}
+// The UI lists' buffer for this slot: the upload heap, mapped, read by the UI shader as a
+// raw buffer through the root SRV at t8. A root descriptor is an address, so nothing is
+// rewritten: the next rb_bind_sprites binds the new one. The old buffer retires with the
+// frame (the core stages after the slot's fence has passed).
+bool rb_ui_buffer(Renderer* r, FrameInFlight& f, u64 bytes) {
+    if (f.ui.resource) rb_defer_destroy_buffer(r, f.ui);
+    return rb_create_buffer(r, D3D12_HEAP_TYPE_UPLOAD, bytes, false, f.ui, "ui lists");
+}
+
+// One layer's list: an instance an item, six vertices a quad, inside a pass whose sprite
+// bindings are made. The sprite draws after it set their own pipeline.
+void rb_ui_draw(Renderer* r, FrameInFlight& f, const PushData& push) {
+    if (!r->ui_pipeline || !f.ui.resource) return;
+    ID3D12GraphicsCommandList* cmd = f.cmd;
+    if (r->markers) rb_label_begin(r, cmd, "ui");
+    cmd->SetPipelineState(r->ui_pipeline);
+    cmd->SetGraphicsRoot32BitConstants(kRootPush, sizeof push / 4, &push, 0);
+    cmd->SetGraphicsRootShaderResourceView(kRootUi, f.ui.gpu());
+    cmd->DrawInstanced(6, push.ui_count, 0, 0);
+    if (r->markers) rb_label_end(r, cmd);
+}
 
 } // namespace kv

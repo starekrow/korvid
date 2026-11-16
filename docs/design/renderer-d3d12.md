@@ -46,6 +46,14 @@ define path is untouched, but no Mac checked it.
   callback is Windows 11 only), counted like Vulkan's validation messages.
 - GPU timing: timestamp and pipeline-statistics queries resolved to a readback buffer; the
   queue's clock calibration pairs a timestamp with QPC, which is `os_ticks` on Windows.
+- The UI primitive (Krome's boxes and text): `ui.slang`'s `vs_ui` and `fs_ui`, its lists an
+  upload-heap buffer read as a raw buffer through one more root SRV (`t8`; a slot with no
+  lists yet binds the layers' buffer there, since every root parameter is set before a
+  draw). One `DrawInstanced(6, items)` a layer, no vertex input, blended one, one minus
+  source alpha. The gallery's `ui` picture is Vulkan's to the pixel, and `kromedemo --demo`
+  runs under the debug layer with no message.
+- Part of a texture (glyph pages): the rectangle staged at a footprint's pitch, and the
+  live texture moved from shader read to copy destination and back around its copy.
 
 ## Not done
 
