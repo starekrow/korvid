@@ -102,8 +102,10 @@ void test_font(kv::TestCtx& c) {
     d.fallback = Span<const char* const>(fallback, 1);
     Handle hf = asset_load_font(e, "text/DejaVuSans.ttf", d);
     KV_CHECK(c, hf != h16 && settle(e, hf));
-    for (u32 i = 0; i < 20; ++i) frame(e); // PublicPixel's read lands
+    // PublicPixel's read lands: as many frames as that takes (a loaded machine takes more
+    // than an idle one), within reason.
     const FontAsset& fb = *asset_font(e, hf);
+    for (u32 i = 0; i < 2000 && !font_glyph(fb, 0x5143); ++i) frame(e);
     const Glyph* yuan = font_glyph(fb, 0x5143);
     KV_CHECK(c, !font_glyph(f, 0x5143) && yuan && yuan->size.x > 0);
     KV_CHECK(c, font_glyph(fb, 'A')->advance == a->advance); // DejaVu's own still comes first
@@ -111,7 +113,7 @@ void test_font(kv::TestCtx& c) {
     asset_set_font_fallback(e, Span<const char* const>(fallback, 1));
     Handle hd = asset_load_font(e, "text/DejaVuSans.ttf", 18.0f);
     KV_CHECK(c, settle(e, hd));
-    for (u32 i = 0; i < 5; ++i) frame(e);
+    for (u32 i = 0; i < 2000 && !font_glyph(*asset_font(e, hd), 0x5186); ++i) frame(e);
     KV_CHECK(c, font_glyph(*asset_font(e, hd), 0x5186) != nullptr);
 
     // The numbers: a strike's glyphs made as asked (Latin, Greek, Cyrillic at 14 px).
