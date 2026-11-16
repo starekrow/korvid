@@ -87,8 +87,9 @@
 #ifndef KV_RB_UI
 #define KV_RB_UI 0
 #endif
-// KV_RB_PACED, 0 when the backend's present never waits for the display (the CPU's): the
-// frame loop paces it. 1 unless the backend says.
+// KV_RB_PACED, 0 when the backend's present does not wait for the display: the frame loop
+// paces it. An expression of the renderer `r` (the CPU's: whether its window's surface has
+// vsync). 1 unless the backend says.
 #ifndef KV_RB_PACED
 #define KV_RB_PACED 1
 #endif

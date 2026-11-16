@@ -1,7 +1,10 @@
-// The gallery drawn by the CPU renderer with no window (docs/PRDs/CPU-Renderer-PRD.md, SR11
-// and SR18): every scene exactly as references/cpu has it, and the sprite scenes within the
-// cross-backend tolerance of Vulkan's references (the picture tool's defaults: 8 levels, 0.5%
-// of the pixels). The scenes are the gallery's own: its source is built in here.
+// The gallery drawn by the CPU renderer with no window (docs/PRDs/CPU-Renderer-PRD.md, SR11,
+// SR13 and SR18): every scene exactly as references/cpu has it, and within the cross-backend
+// tolerance of Vulkan's references (the picture tool's defaults: 8 levels, 0.5% of the
+// pixels), the game shaders run as Slang's C++. Then with --cpu-shaders none: the shaders
+// scene exactly as references/cpu-none has it (its materials in their blends' pipelines, no
+// post pass), every other scene as before. The scenes are the gallery's own: its source is
+// built in here, and its shaders' generated modules are linked (kormake's shader_cpu rule).
 #define main gallery_main
 #include "../src/main.cc"
 #undef main
@@ -68,11 +71,16 @@ bool compare(const char* dir, const char* backend, const char* scene, u32 thresh
 
 } // namespace
 
-// A test program has no generated module list: the gallery's run needs the platform and the
-// CPU renderer, headless.
+// A test program has no generated module list: the gallery's run needs the platform, the
+// CPU renderer, headless, and its two shaders' CPU forms.
+namespace kv {
+extern const ModuleDesc gallery_gallery_rings_cpu_module;
+extern const ModuleDesc gallery_gallery_post_cpu_module;
+} // namespace kv
 kv::Span<const kv::ModuleDesc* const> kv_module_list() {
-    static const kv::ModuleDesc* const list[] = {&kv::platform_module, &kv::renderer_cpu_module};
-    return kv::Span<const kv::ModuleDesc* const>(list, 2);
+    static const kv::ModuleDesc* const list[] = {&kv::platform_module, &kv::renderer_cpu_module, &kv::gallery_gallery_rings_cpu_module,
+                                                 &kv::gallery_gallery_post_cpu_module};
+    return kv::Span<const kv::ModuleDesc* const>(list, KV_COUNTOF(list));
 }
 
 int main() {
@@ -80,15 +88,21 @@ int main() {
     c.begin("gallery on the CPU, headless");
     char dir[512];
     KV_CHECK(c, io_make_temp_dir("kv-gallery-cpu", dir, sizeof dir));
-    char a0[] = "gallery", a1[] = "--headless", a2[] = "--out";
+    char a0[] = "gallery", a1[] = "--headless", a2[] = "--out", a3[] = "--cpu-shaders", a4[] = "none";
     char* argv[] = {a0, a1, a2, dir, nullptr};
     KV_CHECK(c, run(4, argv) == 0);
-    // Every scene the CPU draws, exactly as before.
+    // Every scene the CPU draws, exactly as before, and within the tolerance of the GPU's.
     const char* const all[] = {"blends", "transform", "filter", "sort", "interpolate_0", "interpolate_50", "interpolate_90", "camera", "shaders", "ui"};
     for (const char* s : all) KV_CHECK(c, compare(dir, "cpu", s, 0, 0.0));
-    // The sprite scenes and the UI against the GPU's (the game shaders are a later milestone's).
-    const char* const sprites[] = {"blends", "transform", "filter", "sort", "interpolate_0", "interpolate_50", "interpolate_90", "camera", "ui"};
-    for (const char* s : sprites) KV_CHECK(c, compare(dir, "vulkan", s, 8, 0.005));
+    for (const char* s : all) KV_CHECK(c, compare(dir, "vulkan", s, 8, 0.005));
+    io_remove_tree(dir);
+    // The fast path: no game shader runs.
+    KV_CHECK(c, io_make_temp_dir("kv-gallery-cpu-none", dir, sizeof dir));
+    char* argv_none[] = {a0, a1, a3, a4, a2, dir, nullptr};
+    KV_CHECK(c, run(6, argv_none) == 0);
+    KV_CHECK(c, compare(dir, "cpu-none", "shaders", 0, 0.0));
+    for (const char* s : all)
+        if (strcmp(s, "shaders")) KV_CHECK(c, compare(dir, "cpu", s, 0, 0.0));
     io_remove_tree(dir);
     names_shutdown();
     mem_shutdown();

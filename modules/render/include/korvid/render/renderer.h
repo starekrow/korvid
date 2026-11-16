@@ -28,6 +28,7 @@ struct RendererDesc {
     bool  vsync         = true;
     bool  validation    = KV_DEBUG != 0; // request the validation layers when present
     u32   sprite_rows   = 0;       // the sprite tables' first size, a hint (0: the backend's default); they grow past it
+    bool  cpu_shaders   = true;    // the CPU renderer: game shaders run (false: their materials draw with their blend's pipeline, and no post pass)
 };
 
 // Pixel formats the outer engine may hand over. Cooked assets arrive in one of these;

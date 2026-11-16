@@ -5,6 +5,7 @@
 // where it pays"), and must share no inline function with the sim.
 #pragma once
 #include "korvid/core/types.h"
+#include "korvid/renderer-cpu/shader.h"
 
 namespace kv { namespace rb_cpu {
 
@@ -21,6 +22,12 @@ struct CpuTexture {
 
 enum CpuBlend : u8 { kCpuOpaque = 0, kCpuAlpha = 1, kCpuAdditive = 2 };
 
+// The post pass's world image: the layers below the post layer, R, G, B, pad, 16-bit linear.
+struct CpuWorld {
+    const u16* pixels;
+    u32        width, height;
+};
+
 // One quad, ready to rasterize, everything in the window's pixels.
 struct CpuQuad {
     i32 vx[4], vy[4];   // its corners in 1/256 pixel, wound so the inside is positive
@@ -33,6 +40,16 @@ struct CpuQuad {
     CpuTexture tex;
     u8  filter;             // 0 nearest, 1 linear
     u8  blend;              // CpuBlend
+    // A game shader's quad: the shader, and what its varyings need besides the above. World
+    // at local (0, 0) and its change across local x and y; the tint as floats; the
+    // material's texture slot and row; the frame's time and tick (in the hash: a shader may
+    // animate).
+    CpuShaderFn shader;
+    f32 w0x, w0y, wlx_x, wlx_y, wly_x, wly_y;
+    f32 tintf[4];
+    u32 tex_slot, material;
+    f32 time;
+    u32 tick;
     u64 hash;               // of everything above: a tile's hash is its items'
 };
 
@@ -75,10 +92,27 @@ u16 cpu_linear16(f32 c);
 // A tile's draws name a quad, or with this bit a UI item.
 constexpr u32 kCpuDrawUi = 1u << 31;
 
-// One tile: the draws `items` names, in order, over the clear, into `pixels` (kTile x kTile
-// of R, G, B, pad, 16 bits each); (tx, ty) is its top-left pixel, tw x th its size.
-void cpu_raster_tile(const CpuQuad* quads, const CpuUi* ui, const u32* items, u32 count, u16* pixels,
-                     u32 tx, u32 ty, u32 tw, u32 th, const u16 clear[3], bool quantize8);
+// What a pass's tiles share: its draws, its clear, and for game shaders the frame's inputs
+// (`shaders`: push block, layers, materials, textures, the world image) and the post shader
+// that makes a tile's ground instead of the clear.
+struct CpuFrame {
+    const CpuQuad*       quads = nullptr;
+    const CpuUi*         ui = nullptr;
+    u16                  clear[3] = {};
+    bool                 quantize8 = false;
+    const CpuShaderCall* shaders = nullptr;
+    CpuShaderFn          post = nullptr;
+};
+
+// One tile: the draws `items` names, in order, over the clear (or the post shader's
+// picture), into `pixels` (kTile x kTile of R, G, B, pad, 16 bits each); (tx, ty) is its
+// top-left pixel, tw x th its size.
+void cpu_raster_tile(const CpuFrame& frame, const u32* items, u32 count, u16* pixels, u32 tx, u32 ty, u32 tw, u32 th);
+
+// A texture read for a game shader: linear RGBA. `sampler` 0 nearest and repeat, 1 linear
+// and repeat, 2 linear and clamped.
+void cpu_sample_texture(const CpuTexture& t, u32 sampler, f32 u, f32 v, f32 out[4]);
+void cpu_sample_world(const CpuWorld& w, f32 u, f32 v, f32 out[4]); // linear, clamped
 // The tile encoded into the target at its place: four bytes a pixel, B, G, R, 255 (R, G, B,
 // 255 when `rgba`).
 void cpu_encode_tile(const u16* pixels, u32 tw, u32 th, u8* target, u32 pitch, bool rgba);

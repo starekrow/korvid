@@ -50,6 +50,7 @@ module "toolchain.apple" {
   obj_suffix   = ".o",
   exe_suffix   = "",
   lib_file     = "lib%s.a",
+  flags_generated = { "-w" }, -- code another program wrote (a shader's C++): its warnings are not ours
   flag_include = "-I%s",
   flag_define  = "-D%s",
   flag_lib     = "-l%s",

@@ -474,13 +474,14 @@ int run(int argc, char** argv) {
     const char* only = nullptr;
     Gallery g;
     RendererBackend backend = RendererBackend::Auto;
-    bool headless = false;
+    bool headless = false, cpu_shaders = true;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--out") == 0 && i + 1 < argc) g.out = argv[++i];
         else if (strcmp(argv[i], "--scene") == 0 && i + 1 < argc) only = argv[++i];
         else if (strcmp(argv[i], "--renderer") == 0 && i + 1 < argc && renderer_backend_parse(argv[i + 1], &backend)) ++i;
         else if (strcmp(argv[i], "--headless") == 0) { headless = true; backend = RendererBackend::Cpu; }
-        else { KV_ERROR("gallery", "unknown option '%s' (--out DIR, --scene NAME, --renderer auto|gpu|cpu, --headless)", argv[i]); return 2; }
+        else if (strcmp(argv[i], "--cpu-shaders") == 0 && i + 1 < argc && (!strcmp(argv[i + 1], "all") || !strcmp(argv[i + 1], "none"))) cpu_shaders = !strcmp(argv[++i], "all");
+        else { KV_ERROR("gallery", "unknown option '%s' (--out DIR, --scene NAME, --renderer auto|gpu|cpu, --cpu-shaders all|none, --headless)", argv[i]); return 2; }
     }
     Engine e;
     if (!engine_init(e, kv_module_list())) return 1;
@@ -497,6 +498,7 @@ int run(int argc, char** argv) {
         rd.width  = g.window ? g.window->width() : kWidth;
         rd.height = g.window ? g.window->height() : kHeight;
         rd.vsync  = false;
+        rd.cpu_shaders = cpu_shaders;
         g.r = renderer_create(e, rd);
     }
     if (!g.r) rc = 1;

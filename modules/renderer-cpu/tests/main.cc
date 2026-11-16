@@ -6,6 +6,7 @@
 #include "../src/renderer_internal.h"
 #include "korvid/renderer-cpu/module.h"
 #include "korvid/render/ui.h"
+#include "korvid/renderer-cpu/shader.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/name.h"
@@ -116,12 +117,34 @@ void test_tile_cache(TestCtx& c) {
     engine_shutdown(e);
 }
 
+// The game shaders' registry (shader.h): the game's own form before Slang's, a skipped
+// shader found as skipped, an unknown one not at all.
+void own_form(const CpuShaderCall&) {}
+void slang_form(const CpuShaderCall&) {}
+
+void test_shader_registry(TestCtx& c) {
+    c.begin("renderer-cpu shader registry");
+    bool skipped = true;
+    KV_CHECK(c, rb_cpu::cpu_shader_find("test_unknown", &skipped) == nullptr && !skipped);
+    renderer_cpu_shader_generated("test_rings", slang_form);
+    KV_CHECK(c, rb_cpu::cpu_shader_find("test_rings", &skipped) == slang_form && !skipped);
+    renderer_cpu_shader("test_rings", own_form);
+    KV_CHECK(c, rb_cpu::cpu_shader_find("test_rings", &skipped) == own_form);
+    renderer_cpu_shader("test_rings", nullptr);
+    KV_CHECK(c, rb_cpu::cpu_shader_find("test_rings", &skipped) == slang_form);
+    renderer_cpu_shader_skip("test_rings");
+    KV_CHECK(c, rb_cpu::cpu_shader_find("test_rings", &skipped) == nullptr && skipped);
+    renderer_cpu_shader_skip("test_rings", false);
+    KV_CHECK(c, rb_cpu::cpu_shader_find("test_rings", &skipped) == slang_form && !skipped);
+}
+
 } // namespace
 
 int main() {
     kv::TestCtx c;
     test_headless(c);
     test_tile_cache(c);
+    test_shader_registry(c);
     kv::names_shutdown();
     kv::mem_shutdown();
     return kv::test_report(c, "renderer_cpu_tests");

@@ -19,5 +19,7 @@
 module "render" {
   deps   = { "core", "math" },
   unity  = false,
-  tools  = { ["shader-compile"] = { install = "shaders" } },
+  -- The engine's own shaders draw through each backend's own code on the CPU renderer: not
+  -- through slang's shader_cpu rule, which is for the games' shaders.
+  tools  = { ["shader-compile"] = { install = "shaders", skip_rules = { "shader_cpu" } } },
 }

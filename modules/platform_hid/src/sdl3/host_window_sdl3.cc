@@ -165,6 +165,11 @@ bool HostWindow::software_frame(SoftwareFrame* out) {
         told = true;
         return false;
     }
+    // A new surface (the first, or one a resize made) starts with vsync off.
+    if (software_vsync_ && software_vsynced_ != s) {
+        SDL_SetWindowSurfaceVSync(w, 1);
+        software_vsynced_ = s;
+    }
     if (SDL_MUSTLOCK(s) && !SDL_LockSurface(s)) return false;
     software_ = s;
     *out = SoftwareFrame{(u8*)s->pixels, (u32)s->w, (u32)s->h, (u32)s->pitch, rgba};
@@ -178,6 +183,21 @@ void HostWindow::present_software() {
     if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
     software_ = nullptr;
     SDL_UpdateWindowSurface(w);
+}
+
+bool HostWindow::software_vsync(bool on) {
+    SDL_Window* w = (SDL_Window*)native_;
+    if (!w || surface_ != WindowSurface::Software) return false;
+    software_vsync_ = on;
+    software_vsynced_ = nullptr;
+    if (!SDL_GetWindowSurface(w)) return false;
+    if (!SDL_SetWindowSurfaceVSync(w, on ? 1 : SDL_WINDOW_SURFACE_VSYNC_DISABLED)) {
+        KV_INFO("window", "the window's surface has no vsync (%s): the frame loop paces it", SDL_GetError());
+        software_vsync_ = false;
+        return false;
+    }
+    software_vsynced_ = SDL_GetWindowSurface(w);
+    return on;
 }
 
 void HostWindow::text_input(bool on) {

@@ -48,6 +48,7 @@ module "toolchain.windows" {
   obj_suffix   = ".obj",
   exe_suffix   = ".exe",
   lib_file     = "%s.lib",
+  flags_generated = { "/w" }, -- code another program wrote (a shader's C++): its warnings are not ours
   flag_include = "/I%s",
   flag_define  = "/D%s",
   flag_lib     = "%s.lib",

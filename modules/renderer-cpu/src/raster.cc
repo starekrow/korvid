@@ -19,6 +19,8 @@ u32 wrap(i32 v, u32 n) {
     return (u32)(m < 0 ? m + (i32)n : m);
 }
 
+u32 clamp_to(i32 v, u32 n) { return v < 0 ? 0u : (u32)v >= n ? n - 1 : (u32)v; }
+
 // A texel as 16-bit linear R, G, B and alpha.
 inline void texel(const CpuTexture& t, const CpuLuts& lut, u32 x, u32 y, u32 out[4]) {
     const u8* p = t.pixels + ((usize)y * t.width + x) * 4;
@@ -27,12 +29,13 @@ inline void texel(const CpuTexture& t, const CpuLuts& lut, u32 x, u32 y, u32 out
     out[3] = p[3] * 257u;
 }
 
-inline void sample(const CpuTexture& t, u8 filter, const CpuLuts& lut, f32 u, f32 v, u32 out[4]) {
+inline void sample(const CpuTexture& t, u8 filter, const CpuLuts& lut, f32 u, f32 v, u32 out[4], bool clamp = false) {
     if (!t.pixels || !t.width || !t.height) { out[0] = out[1] = out[2] = out[3] = 65535; return; }
     f32 fu = u * (f32)t.width, fv = v * (f32)t.height;
     if (!(fu > -1e9f && fu < 1e9f && fv > -1e9f && fv < 1e9f)) { fu = 0.0f; fv = 0.0f; } // not a number, or past the ints
+    auto at = [&](i32 i, u32 n) { return clamp ? clamp_to(i, n) : wrap(i, n); };
     if (filter == 0) {
-        texel(t, lut, wrap(floor_i(fu), t.width), wrap(floor_i(fv), t.height), out);
+        texel(t, lut, at(floor_i(fu), t.width), at(floor_i(fv), t.height), out);
         return;
     }
     // Linear: the four texels around the point, weighted in 8 bits.
@@ -40,7 +43,7 @@ inline void sample(const CpuTexture& t, u8 filter, const CpuLuts& lut, f32 u, f3
     fv -= 0.5f;
     i32 ix = floor_i(fu), iy = floor_i(fv);
     u32 wx = (u32)((fu - (f32)ix) * 256.0f + 0.5f), wy = (u32)((fv - (f32)iy) * 256.0f + 0.5f);
-    u32 x0 = wrap(ix, t.width), x1 = wrap(ix + 1, t.width), y0 = wrap(iy, t.height), y1 = wrap(iy + 1, t.height);
+    u32 x0 = at(ix, t.width), x1 = at(ix + 1, t.width), y0 = at(iy, t.height), y1 = at(iy + 1, t.height);
     u32 a[4], b[4], c[4], d[4];
     texel(t, lut, x0, y0, a);
     texel(t, lut, x1, y0, b);
@@ -77,7 +80,43 @@ inline void quantize(u16* d, const CpuLuts& lut) {
     for (u32 k = 0; k < 3; ++k) d[k] = lut.decode[lut.encode[d[k]]];
 }
 
-void draw_quad(const CpuQuad& q, const CpuLuts& lut, u16* pixels, u32 tx, u32 ty, u32 tw, u32 th, bool quantize8) {
+// A game shader's colors over a run of a row's pixels, blended as the quad's blend says.
+void shade_run(const CpuQuad& q, const CpuShaderCall& base, const CpuLuts& lut, u16* row, i32 x0, i32 count, i32 y, bool quantize8) {
+    f32 out[kTile][4];
+    CpuShaderCall c = base;
+    c.kind = CpuShaderKind::Sprite;
+    c.count = (u32)count;
+    c.x0 = (f32)x0 + 0.5f;
+    c.y = (f32)y + 0.5f;
+    f32 lx = q.l0x + (f32)x0 * q.ldx_x + (f32)y * q.ldy_x, ly = q.l0y + (f32)x0 * q.ldx_y + (f32)y * q.ldy_y;
+    c.local0[0] = lx; c.local0[1] = ly;
+    c.dlocal[0] = q.ldx_x; c.dlocal[1] = q.ldx_y;
+    c.uv0[0] = q.uvx + lx * q.uvw; c.uv0[1] = q.uvy + (1.0f - ly) * q.uvh;
+    c.duv[0] = q.ldx_x * q.uvw; c.duv[1] = -q.ldx_y * q.uvh;
+    c.world0[0] = q.w0x + lx * q.wlx_x + ly * q.wly_x;
+    c.world0[1] = q.w0y + lx * q.wlx_y + ly * q.wly_y;
+    c.dworld[0] = q.ldx_x * q.wlx_x + q.ldx_y * q.wly_x;
+    c.dworld[1] = q.ldx_x * q.wlx_y + q.ldx_y * q.wly_y;
+    for (u32 k = 0; k < 4; ++k) c.tint[k] = q.tintf[k];
+    c.tex = q.tex_slot;
+    c.filter = q.filter;
+    c.material = q.material;
+    c.out = out;
+    memset(out, 0, sizeof(f32) * 4 * (usize)count);
+    q.shader(c);
+    for (i32 i = 0; i < count; ++i, row += 4) {
+        if (cpu_shader_discarded(out[i])) continue;
+        u32 src[4];
+        for (u32 k = 0; k < 4; ++k) {
+            f32 v = out[i][k];
+            src[k] = !(v > 0.0f) ? 0u : v >= 1.0f ? 65535u : (u32)(v * 65535.0f + 0.5f);
+        }
+        blend(row, src, q.blend);
+        if (quantize8) quantize(row, lut);
+    }
+}
+
+void draw_quad(const CpuQuad& q, const CpuShaderCall* shaders, const CpuLuts& lut, u16* pixels, u32 tx, u32 ty, u32 tw, u32 th, bool quantize8) {
     i32 x0 = q.x0 > (i32)tx ? q.x0 : (i32)tx, x1 = q.x1 < (i32)(tx + tw) ? q.x1 : (i32)(tx + tw);
     i32 y0 = q.y0 > (i32)ty ? q.y0 : (i32)ty, y1 = q.y1 < (i32)(ty + th) ? q.y1 : (i32)(ty + th);
     if (x0 >= x1 || y0 >= y1) return;
@@ -98,6 +137,21 @@ void draw_quad(const CpuQuad& q, const CpuLuts& lut, u16* pixels, u32 tx, u32 ty
         f32 lx = q.l0x + (f32)x0 * q.ldx_x + (f32)y * q.ldy_x;
         f32 ly = q.l0y + (f32)x0 * q.ldx_y + (f32)y * q.ldy_y;
         u16* row = pixels + ((usize)(y - (i32)ty) * kTile + (u32)(x0 - (i32)tx)) * 4;
+        if (q.shader && shaders) {
+            // The row's runs of covered pixels, each a call of the shader.
+            i32 run = -1;
+            for (i32 x = x0; x <= x1; ++x) {
+                bool in = x < x1 && (e[0] | e[1] | e[2] | e[3]) >= 0;
+                if (in && run < 0) run = x;
+                if (!in && run >= 0) {
+                    shade_run(q, *shaders, lut, pixels + ((usize)(y - (i32)ty) * kTile + (u32)(run - (i32)tx)) * 4, run, x - run, y, quantize8);
+                    run = -1;
+                }
+                if (x < x1) { e[0] += e_dx[0]; e[1] += e_dx[1]; e[2] += e_dx[2]; e[3] += e_dx[3]; }
+            }
+            for (u32 k = 0; k < 4; ++k) e_row[k] += e_dy[k];
+            continue;
+        }
         for (i32 x = x0; x < x1; ++x, row += 4) {
             if ((e[0] | e[1] | e[2] | e[3]) >= 0) {
                 f32 u = q.uvx + lx * q.uvw, v = q.uvy + (1.0f - ly) * q.uvh;
@@ -224,19 +278,66 @@ void draw_ui(const CpuUi& u, const CpuLuts& lut, u16* pixels, u32 tx, u32 ty, u3
 
 } // namespace
 
-void cpu_raster_tile(const CpuQuad* quads, const CpuUi* ui, const u32* items, u32 count, u16* pixels,
-                     u32 tx, u32 ty, u32 tw, u32 th, const u16 clear[3], bool quantize8) {
+void cpu_raster_tile(const CpuFrame& fr, const u32* items, u32 count, u16* pixels, u32 tx, u32 ty, u32 tw, u32 th) {
     const CpuLuts& lut = cpu_luts();
-    for (u32 y = 0; y < th; ++y)
-        for (u32 x = 0; x < tw; ++x) {
-            u16* p = pixels + ((usize)y * kTile + x) * 4;
-            p[0] = clear[0]; p[1] = clear[1]; p[2] = clear[2]; p[3] = 0;
+    if (fr.post && fr.shaders) {
+        // The post shader's picture: a row of the tile a call; written, not blended.
+        f32 out[kTile][4];
+        for (u32 y = 0; y < th; ++y) {
+            CpuShaderCall c = *fr.shaders;
+            c.kind = CpuShaderKind::Post;
+            c.count = tw;
+            c.x0 = (f32)tx + 0.5f;
+            c.y = (f32)(ty + y) + 0.5f;
+            c.out = out;
+            memset(out, 0, sizeof out);
+            fr.post(c);
+            u16* p = pixels + (usize)y * kTile * 4;
+            for (u32 x = 0; x < tw; ++x, p += 4) {
+                for (u32 k = 0; k < 3; ++k) {
+                    f32 v = out[x][k];
+                    p[k] = (u16)(!(v > 0.0f) ? 0u : v >= 1.0f ? 65535u : (u32)(v * 65535.0f + 0.5f));
+                }
+                p[3] = 0;
+                if (fr.quantize8) quantize(p, lut);
+            }
         }
+    } else {
+        for (u32 y = 0; y < th; ++y)
+            for (u32 x = 0; x < tw; ++x) {
+                u16* p = pixels + ((usize)y * kTile + x) * 4;
+                p[0] = fr.clear[0]; p[1] = fr.clear[1]; p[2] = fr.clear[2]; p[3] = 0;
+            }
+    }
     for (u32 i = 0; i < count; ++i) {
         u32 it = items[i];
-        if (it & kCpuDrawUi) draw_ui(ui[it & ~kCpuDrawUi], lut, pixels, tx, ty, tw, th, quantize8);
-        else draw_quad(quads[it], lut, pixels, tx, ty, tw, th, quantize8);
+        if (it & kCpuDrawUi) draw_ui(fr.ui[it & ~kCpuDrawUi], lut, pixels, tx, ty, tw, th, fr.quantize8);
+        else draw_quad(fr.quads[it], fr.shaders, lut, pixels, tx, ty, tw, th, fr.quantize8);
     }
+}
+
+void cpu_sample_texture(const CpuTexture& t, u32 sampler, f32 u, f32 v, f32 out[4]) {
+    u32 c[4];
+    sample(t, sampler == 0 ? 0 : 1, cpu_luts(), u, v, c, sampler == 2);
+    for (u32 k = 0; k < 4; ++k) out[k] = (f32)c[k] / 65535.0f;
+}
+
+void cpu_sample_world(const CpuWorld& w, f32 u, f32 v, f32 out[4]) {
+    if (!w.pixels || !w.width || !w.height) { out[0] = out[1] = out[2] = 0.0f; out[3] = 1.0f; return; }
+    f32 fu = u * (f32)w.width - 0.5f, fv = v * (f32)w.height - 0.5f;
+    if (!(fu > -1e9f && fu < 1e9f && fv > -1e9f && fv < 1e9f)) { fu = 0.0f; fv = 0.0f; }
+    i32 ix = floor_i(fu), iy = floor_i(fv);
+    u32 wx = (u32)((fu - (f32)ix) * 256.0f + 0.5f), wy = (u32)((fv - (f32)iy) * 256.0f + 0.5f);
+    u32 x0 = clamp_to(ix, w.width), x1 = clamp_to(ix + 1, w.width), y0 = clamp_to(iy, w.height), y1 = clamp_to(iy + 1, w.height);
+    const u16* a = w.pixels + ((usize)y0 * w.width + x0) * 4;
+    const u16* b = w.pixels + ((usize)y0 * w.width + x1) * 4;
+    const u16* c = w.pixels + ((usize)y1 * w.width + x0) * 4;
+    const u16* d = w.pixels + ((usize)y1 * w.width + x1) * 4;
+    for (u32 k = 0; k < 3; ++k) {
+        u32 top = a[k] * (256 - wx) + b[k] * wx, bottom = c[k] * (256 - wx) + d[k] * wx;
+        out[k] = (f32)(((u64)top * (256 - wy) + (u64)bottom * wy + 32768) >> 16) / 65535.0f;
+    }
+    out[3] = 1.0f;
 }
 
 void cpu_encode_tile(const u16* pixels, u32 tw, u32 th, u8* target, u32 pitch, bool rgba) {

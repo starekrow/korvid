@@ -1,0 +1,32 @@
+// renderer-cpu: the span kernel for a game's sprite shader (sprite_fragment.slangh), after it
+// in the wrapper. A span is a run of a quad's pixels in one row: the varyings at its first
+// pixel and their step a pixel, as the GPU interpolates them; fs_main's colors go to gOut
+// (an alpha of -1e30: discarded).
+struct CpuSpan {
+    float2 uv0, duv;
+    float2 world0, dworld;
+    float2 local0, dlocal;
+    float4 tint;
+    uint   tex, filter, material, count;
+    float  x0, y; // the first pixel's centre
+};
+ConstantBuffer<CpuSpan> gSpan;
+RWStructuredBuffer<float4> gOut;
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void cs_span(uint3 id : SV_DispatchThreadID) {
+    for (uint i = 0; i < gSpan.count; ++i) {
+        SpriteVaryings v;
+        float f = float(i);
+        v.pos = float4(gSpan.x0 + f, gSpan.y, 0.0, 1.0);
+        v.uv = gSpan.uv0 + gSpan.duv * f;
+        v.world = gSpan.world0 + gSpan.dworld * f;
+        v.local = gSpan.local0 + gSpan.dlocal * f;
+        v.tint = gSpan.tint;
+        v.tex = gSpan.tex;
+        v.filter = gSpan.filter;
+        v.material = gSpan.material;
+        gOut[i] = fs_main(v);
+    }
+}

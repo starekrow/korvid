@@ -98,6 +98,10 @@ struct HostWindow {
     struct SoftwareFrame { u8* pixels = nullptr; u32 width = 0, height = 0, pitch = 0; bool rgba = false; };
     bool software_frame(SoftwareFrame* out);
     void present_software();
+    // present_software() waiting for the display (vsync), kept across the surface's
+    // re-creation on a resize. True when the system does it: the presents then pace the
+    // frames, as a swapchain's do. False where it cannot (a Win32 DIB): the caller paces.
+    bool software_vsync(bool on);
     // Text input from the OS on or off (an input method's window, a phone's keyboard).
     void text_input(bool on);
     // Where the caret is, in framebuffer pixels: the input method's candidates open beside
@@ -140,6 +144,8 @@ struct HostWindow {
     void* surface_ctx_ = nullptr;
     void* modal_timer_ = nullptr; // the backend's: on macOS a CFRunLoopTimer in the event-tracking mode
     void* software_    = nullptr; // the backend's: the surface software_frame() locked, until present_software()
+    void* software_vsynced_ = nullptr; // SDL: the surface software_vsync() was last applied to
+    bool  software_vsync_   = false;   // what software_vsync() asked for
 };
 
 } // namespace kv

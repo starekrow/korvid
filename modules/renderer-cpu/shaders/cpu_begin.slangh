@@ -1,0 +1,12 @@
+// renderer-cpu: what a game shader needs to be compiled for the CPU (slangc -target cpp),
+// included before it by the wrapper kormake writes (slang's shader_cpu rule). The CPU target
+// has no fragment stage, so a game's fs_main becomes an ordinary function that the span
+// kernel after it (cpu_sprite.slangh, cpu_post.slangh) calls a pixel at a time.
+//
+// `discard` returns a color whose alpha no shader writes; the kernel reads it as "not kept".
+// The entry attribute is dropped: left on, Slang's C++ takes fs_main's varyings by pointer
+// while the kernel's call passes them by value.
+#pragma once
+float4 kv_discard() { return float4(0.0, 0.0, 0.0, -1.0e30); }
+#define discard return kv_discard()
+#define shader(stage) ForceInline

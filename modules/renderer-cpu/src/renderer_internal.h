@@ -16,7 +16,7 @@
 #define KV_RB_NS         rb_cpu
 #define KV_RB_ID         KV_RENDER_ID_CPU
 #define KV_RB_UI         1
-#define KV_RB_PACED      0 // a software surface has no vsync: frameloop spaces the frames
+#define KV_RB_PACED      (r && r->display_paced) // its present waits for the display only where the window's surface has vsync
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/pool.h"
@@ -48,12 +48,18 @@ struct Texture : TextureCore {
     u32    version = 0; // the renderer's count when its pixels were last written (tile hashes)
 };
 
-// A game shader on the CPU: milestone 4's (none yet: the material draws in its blend's
-// engine slot).
-struct GamePipe : GamePipeCore {};
+// A game shader on the CPU: its CPU form (korvid/renderer-cpu/shader.h), the game's or Slang's.
+struct GamePipe : GamePipeCore {
+    CpuShaderFn fn = nullptr;
+};
 
-// The post pass on the CPU: milestone 4's (off until then).
-struct PostPass : PostCore {};
+// The post pass on the CPU: the post shader's CPU form, and the world image the layers below
+// the post layer draw into (R, G, B, pad, 16-bit linear, the window's size).
+struct PostPass : PostCore {
+    CpuShaderFn fn = nullptr;
+    Buffer      world;
+    u32         world_width = 0, world_height = 0;
+};
 
 struct FrameInFlight : FrameCore {
     Buffer layers; // the layers' offsets for the frame (float4 each), as the core writes them
@@ -79,6 +85,7 @@ struct Renderer : RenderCore {
     u32  target_width = 0, target_height = 0, target_pitch = 0;
     bool target_rgba = false;  // R, G, B in memory; else B, G, R
     bool presenting  = false;  // the window's frame is held: present_software() is owed
+    bool display_paced = false; // the window's present waits for the display (HostWindow::software_vsync)
 
     // The frame being drawn (frame.cc): its push block and layer offsets (rb_sort,
     // rb_bind_sprites); the sort's totals and starts are in sort_meta, as the GPU's are.
@@ -93,6 +100,16 @@ struct Renderer : RenderCore {
     Array<u32>     draws;
     Array<u32>     bin_counts, bin_items;
     bool           quantize8 = false; // KV_CPU_TARGET8: round each draw through 8-bit sRGB, as the GPU's target does
+    // Game shaders: on unless RendererDesc::cpu_shaders said not (the fast path); what a
+    // pass's shaders read (shader.h's CpuShaderCall, its shared part), the texture slots as
+    // the rasterizer reads them, the world image, the post pass's push block; whether this
+    // window pass begins with the post shader.
+    bool               game_shaders = true;
+    CpuShaderCall      shader_base{};
+    Array<CpuTexture>  shader_textures;
+    CpuWorld           world_view{};
+    CpuPostPush        post_push{};
+    bool               post_on = false;
     u32            texture_version = 0;
 
     // The window pass's tiles as last drawn: a tile whose draws hash as they did, into the
@@ -114,5 +131,9 @@ struct Renderer : RenderCore {
 
 // A buffer of `bytes`, zeroed; false when there is no memory.
 bool cpu_alloc(Renderer* r, u64 bytes, Buffer& out);
+
+// The shader `name`'s CPU form: the game's, else Slang's; null when it has none, or is
+// skipped (*skipped then says so).
+CpuShaderFn cpu_shader_find(const char* name, bool* skipped);
 
 } } // namespace kv::KV_RB_NS

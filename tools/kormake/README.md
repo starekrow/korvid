@@ -319,7 +319,8 @@ A toolchain module (`provides = "toolchain"`, one per platform) has fields of it
 `tag`, `srcdirs`, `cxx`, `ar`, `link`, `cxxflags`, `ldflags`, `configs` (flags per
 config), `rules` (`cxx`, `ar` and `link`, as Ninja commands), `obj_suffix`, `exe_suffix`,
 `lib_file`, `flag_include`, `flag_include_system`, `flag_define`, `flag_lib`,
-`flag_libdir`, `flag_framework`, `externals`, `bindings` (the default backend for each
+`flag_libdir`, `flag_framework`, `flags_generated` (added when compiling code another
+program wrote: `-w`), `externals`, `bindings` (the default backend for each
 interface), and `probe` (`"msvc"` or `"xcode"`: a script that finds the compiler, the SDK
 and Ninja). For a toolchain that serves several platforms there are also `per_platform`,
 `triple`, `arch` (for platforms that differ in it: `"aarch64"`, `"x86_64"`), `family`, `sdk`,
@@ -357,6 +358,24 @@ This is how kpack's pack rule writes `bin/<exe>.kpak`. A per-exe rule's `configs
 the configs whose default build holds its outputs (kpack's names none: goldberg cooks
 loose, in ship too, until packs are made from its graph); in the others they are built by
 name (`ninja -C build/<target> bin/<exe>.kpak`).
+A rule with `bound = "<module>"` applies only where that module is bound to an interface
+on the consuming platform. A module declines a tool's rule by name with `skip_rules` in its
+`tools` entry (`tools = { ["shader-compile"] = { skip_rules = { "shader_cpu" } } }`).
+
+A rule can write code that is compiled into the module that has its inputs (slang's
+`shader_cpu`: a game shader as C++ for renderer-cpu). Three fields shape it, each a template
+with `%{in}` (the input's path), `%{out}` (the output's path), `%{stem}` and `%{symbol}` (the
+module's and the stem's symbols, joined):
+
+- `wrap`, a list of `{ match = "...", text = "..." }`: the file the tool reads instead of the
+  input, written into the module's gen directory. It is the first entry whose `match` the input
+  contains, or one without a `match`.
+- `glue`: a C++ file written beside the output, which includes it. It is compiled into the
+  module after the tool has run, with the toolchain's `flags_generated`. An executable's tests
+  link these objects too.
+- `engine_module`: the engine module the glue defines (`kv::<it>`), listed in each
+  executable's generated module list after the module that owns it.
+
 A rule with any other field is an error, as is a per-exe rule whose inputs are not
 `"assets"`. The tool's
 binary is an implicit input to every edge it runs.

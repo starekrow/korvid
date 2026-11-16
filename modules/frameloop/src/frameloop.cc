@@ -141,6 +141,12 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--renderer") == 0 && i + 1 < argc) {
             if (!renderer_backend_parse(argv[++i], &cfg.renderer)) { KV_ERROR("frameloop", "--renderer takes auto, gpu or cpu, not '%s'", argv[i]); return false; }
         }
+        else if (strcmp(argv[i], "--cpu-shaders") == 0 && i + 1 < argc) {
+            const char* v = argv[++i];
+            if (!strcmp(v, "all")) cfg.cpu_shaders = true;
+            else if (!strcmp(v, "none")) cfg.cpu_shaders = false;
+            else { KV_ERROR("frameloop", "--cpu-shaders takes all or none, not '%s'", v); return false; }
+        }
         else if (strcmp(argv[i], "--pacing") == 0 && i + 1 < argc) {
             const char* v = argv[++i];
             if (!strcmp(v, "demand")) cfg.pacing = Pacing::OnDemand;
@@ -212,7 +218,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         }
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
-                                  "[--no-vsync] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] [--rate X] [--early-reads order|snapshot|kind] "
+                                  "[--no-vsync] [--renderer auto|gpu|cpu] [--cpu-shaders all|none] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] [--rate X] [--early-reads order|snapshot|kind] "
                                   "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|ring] [--idle-margin-ms N] [--no-idle] [--overlay] [--touchpad] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE]", argv[0]);
             return false;
         }
@@ -253,6 +259,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
 
     RendererDesc rd;
     rd.backend       = s->config.renderer;
+    rd.cpu_shaders   = s->config.cpu_shaders;
     rd.native_window = s->window->native_handle();
     rd.width         = s->window->width();
     rd.height        = s->window->height();

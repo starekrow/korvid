@@ -31,7 +31,7 @@ u8 renderer_window_surface() {
     }
 }
 
-RenderCaps renderer_caps(const Renderer*) {
+RenderCaps renderer_caps([[maybe_unused]] const Renderer* r) {
     RenderCaps c;
     c.backend          = KV_RB_NAME;
     c.max_textures     = kMaxTextures;

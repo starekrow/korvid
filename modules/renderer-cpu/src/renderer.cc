@@ -71,6 +71,8 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     ok = ok && cpu_alloc(r, sizeof(u32) * (2 * kBucketCount + 4), r->sort_meta); // totals, starts, visible: the GPU's layout
     r->quads.alloc = r->bin_counts.alloc = r->bin_items.alloc = ga;
     r->ui.alloc = r->draws.alloc = ga;
+    r->shader_textures.alloc = ga;
+    r->game_shaders = desc.cpu_shaders;
     r->tile_hash.alloc = ga;
     r->quantize8 = getenv("KV_CPU_TARGET8") != nullptr;
     const char* cache = getenv("KV_CPU_TILE_CACHE");
@@ -83,7 +85,9 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
         renderer_destroy(r);
         return nullptr;
     }
-    if (r->window) KV_INFO(KV_RB_NAME, "renderer up: into the window's software surface");
+    // The surface's vsync, where the system has it: then the presents pace the frames.
+    r->display_paced = r->window && desc.vsync && r->window->software_vsync(true);
+    if (r->window) KV_INFO(KV_RB_NAME, "renderer up: into the window's software surface, %s", r->display_paced ? "vsync" : "paced by the frame loop");
     else KV_INFO(KV_RB_NAME, "renderer up: headless, %ux%u", r->want_width, r->want_height);
     return r;
 }
@@ -111,6 +115,8 @@ void renderer_destroy(Renderer* r) {
     r->ui.free();
     r->draws.free();
     r->tile_hash.free();
+    r->shader_textures.free();
+    cpu_free(r, r->post.world);
     r->bin_counts.free();
     r->bin_items.free();
     cpu_free(r, r->material_table);
@@ -198,8 +204,42 @@ void rb_defer_destroy_texture(Renderer* r, Texture& t) {
     t.resident = false;
 }
 
-bool rb_game_pipe_load(Renderer*, GamePipe&) { return false; } // milestone 4: its blend's engine slot until then
-bool rb_post_set(Renderer*, i32, Name) { return false; }        // milestone 4: the pass is off until then
+// A game shader's CPU form (shader.h's order: the game's, then Slang's). None: false, and the
+// core draws its materials with their blend's pipeline, as a GPU does with a shader that will
+// not load. Skipped on purpose (the fast path): the same, said once and not as an error.
+bool rb_game_pipe_load(Renderer* r, GamePipe& gp) {
+    bool skipped = !r->game_shaders;
+    gp.fn = skipped ? nullptr : cpu_shader_find(name_str(gp.shader), &skipped);
+    if (skipped) {
+        KV_INFO(KV_RB_NAME, "game shader '%s' skipped: its sprites draw with the engine's", name_str(gp.shader));
+        gp.failed = true;
+        return true;
+    }
+    return gp.fn != nullptr;
+}
+
+bool rb_post_set(Renderer* r, i32 layer, Name shader) {
+    PostPass& p = r->post;
+    p.layer = layer;
+    if (shader == p.shader) return !p.failed;
+    p.shader = shader;
+    p.failed = false;
+    p.fn = nullptr;
+    if (shader.is_null()) {
+        cpu_free(r, p.world);
+        p.world_width = p.world_height = 0;
+        return true;
+    }
+    bool skipped = !r->game_shaders;
+    p.fn = skipped ? nullptr : cpu_shader_find(name_str(shader), &skipped);
+    if (!p.fn) {
+        p.failed = true;
+        if (skipped) KV_INFO(KV_RB_NAME, "post shader '%s' skipped: the frame is drawn without it", name_str(shader));
+        else KV_ERROR(KV_RB_NAME, "post shader '%s' has no CPU form: the frame is drawn without it", name_str(shader));
+        return false;
+    }
+    return true;
+}
 
 bool rb_create_tables(Renderer* r, u32 rows) {
     u32 capacity = (rows + kBlockRows - 1) / kBlockRows * kBlockRows;
@@ -278,7 +318,19 @@ void rb_copy_rows(Renderer*, FrameInFlight&, RbBuffer& table, const RingSpan& sp
 
 void rb_upload_end(Renderer*, FrameInFlight&) {}
 
-bool rb_post_prepare(Renderer*, u32, u32) { return false; }       // milestone 4: straight to the window
+// The world image for a frame of this size, when the post shader is on.
+bool rb_post_prepare(Renderer* r, u32 width, u32 height) {
+    PostPass& p = r->post;
+    if (p.shader.is_null() || p.failed || !p.fn || !width || !height) return false;
+    if (p.world_width != width || p.world_height != height) {
+        cpu_free(r, p.world);
+        p.world_width = p.world_height = 0;
+        if (!cpu_alloc(r, (u64)width * height * 4 * sizeof(u16), p.world)) return false;
+        p.world_width = width;
+        p.world_height = height;
+    }
+    return true;
+}
 
 void rb_read_window(Renderer* r, FrameInFlight&) {
     if (!r->target) return;

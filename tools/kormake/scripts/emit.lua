@@ -246,12 +246,23 @@ function M.run(c, g, opts)
   end
   -- The rules an instance's tools export, as its platform sees them, each with the tool it
   -- came from and its Ninja rule's name: tool_<tool>_<rule>[_<platform>].
+  -- A rule with `bound = "<module>"` applies only where that module is bound to an
+  -- interface on the instance's platform (slang's shader_cpu, where renderer-cpu is).
+  local function is_bound(platform, name)
+    for _, list in pairs(g.platform_of(platform).bindings) do
+      for _, b in ipairs(list) do if b == name then return true end end
+    end
+    return false
+  end
   local function tool_rules_of(inst)
     local list = {}
     for _, t in ipairs(inst.tools) do
       for _, r0 in ipairs(t.instance.module.fields.exports or {}) do
         local r, variant = rule_variant(r0, inst.platform, flags(inst).tc.fields.family)
-        list[#list + 1] = { tool = t, rule = r, name = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant }
+        -- A module may decline a tool's rule by name (its tool spec's skip_rules).
+        if (not r.bound or is_bound(inst.platform, r.bound)) and not util.contains(t.spec.skip_rules or {}, r.name) then
+          list[#list + 1] = { tool = t, rule = r, name = "tool_" .. util.symbol(t.instance.module.name) .. "_" .. r.name .. variant }
+        end
       end
     end
     return list
@@ -348,16 +359,84 @@ function M.run(c, g, opts)
     return list
   end
 
-  local function compile(inst, src, obj, includes, defines)
-    w(string.format("build %s: %s %s\n  includes = %s\n  defines = %s%s", util.ninja_escape(obj), rule(inst, "cxx"), util.ninja_escape(src),
-      includes, defines, overrides(inst)))
+  -- extra: `implicit`, a file the compile waits for (a generated source's include);
+  -- `generated`, code another program wrote: compiled with the toolchain's flags_generated
+  -- (no warnings) after its own.
+  local function compile(inst, src, obj, includes, defines, extra)
+    local fl = flags(inst)
+    local cxxflags = fl.cxxflags
+    local more = ""
+    if extra and extra.generated then
+      cxxflags = cxxflags .. " " .. table.concat(fl.tc.fields.flags_generated or {}, " ")
+      if inst.prefix == "" then more = "\n  cxxflags = " .. cxxflags end
+    end
+    local ov = overrides(inst)
+    if extra and extra.generated and inst.prefix ~= "" then ov = ov:gsub("\n  cxxflags = [^\n]*", function() return "\n  cxxflags = " .. cxxflags end) end
+    w(string.format("build %s: %s %s%s\n  includes = %s\n  defines = %s%s%s", util.ninja_escape(obj), rule(inst, "cxx"), util.ninja_escape(src),
+      extra and extra.implicit and (" | " .. util.ninja_escape(extra.implicit)) or "", includes, defines, ov, more))
     -- The command the toolchain's cxx rule runs, with this file's values in it. clangd takes
     -- the first entry for a file: the target's, since the host's come later.
-    local fl = flags(inst)
-    local vars = { cxx = program(fl.cxx), cxxflags = fl.cxxflags, defines = defines, includes = includes, ["in"] = program(src), out = program(obj) }
+    local vars = { cxx = program(fl.cxx), cxxflags = cxxflags, defines = defines, includes = includes, ["in"] = program(src), out = program(obj) }
     local command = fl.tc.fields.rules.cxx.command:gsub("%$(%w+)", function(v) return vars[v] or "" end)
     cc[#cc + 1] = string.format("{\"directory\": %s, \"file\": %s, \"output\": %s, \"command\": %s}",
       util.json_string(build), util.json_string(src), util.json_string(obj), util.json_string(command))
+  end
+
+  -- A rule that writes code compiled into the module that has its inputs (slang's
+  -- shader_cpu: a game shader as C++ for the CPU renderer). Each input gets, in the
+  -- module's gen directory:
+  --   - with `wrap`, the file the rule's tool reads instead of the input: the first of the
+  --     rule's wrappers whose `match` the input contains (or that has none), %{in} the
+  --     input's path;
+  --   - the rule's output, %{stem} from the input;
+  --   - with `glue`, a C++ file compiled into the module, quietly (flags_generated): %{out}
+  --     the output's path, %{stem}, and %{symbol}, the module's and the stem's symbols;
+  --   - with `engine_module`, an engine module that glue defines (kv::<it>, %{symbol}
+  --     filled in), listed in each executable's module list after the module that owns it.
+  local function generated_sources(inst, gen)
+    local list = {}
+    inst.generated_modules = {}
+    for _, tr0 in ipairs(tool_rules_of(inst)) do
+      local t, r, rname = tr0.tool, tr0.rule, tr0.name
+      local dir = util.join(inst.module.dir, util.dirname(r.inputs))
+      if r.glue and r.per ~= "exe" and kfs.isdir(dir) then
+        local pat_glob = util.basename(r.inputs)
+        for _, n in ipairs(kfs.listdir(dir)) do
+          if util.matches(n, pat_glob) then
+            local stem = util.stem(n)
+            local input = util.join(dir, n):gsub("\\", "/")
+            local symbol = util.symbol(inst.module.name) .. "_" .. util.symbol(stem)
+            local function fill(text, out)
+              return (text:gsub("%%{(%w+)}", function(v)
+                if v == "in" then return input elseif v == "stem" then return stem elseif v == "symbol" then return symbol
+                elseif v == "out" then return out else util.fail("rule '%s': %%{%s} is not %%{in}, %%{out}, %%{stem} or %%{symbol}", r.name, v) end
+              end))
+            end
+            local src = util.join(dir, n)
+            if r.wrap then
+              local body = kfs.read(src) or ""
+              local chosen
+              for _, wr in ipairs(r.wrap) do
+                if not chosen and (not wr.match or body:find(wr.match, 1, true)) then chosen = wr end
+              end
+              if not chosen then util.fail("rule '%s': no wrapper for %s", r.name, src) end
+              src = util.join(build, gen .. "/" .. stem .. "." .. r.name .. "." .. util.ext(n))
+              kfs.write(src, fill(chosen.text, ""))
+            end
+            local outname = r.outputs:gsub("%%{stem}", stem)
+            local outpath = gen .. "/" .. outname
+            local tr = tool_rules[rname]
+            w(string.format("build %s: %s %s%s", util.ninja_escape(outpath), rname, util.ninja_escape(src),
+              tr.implicit and (" | " .. util.ninja_escape(tr.tool)) or ""))
+            local glue = util.join(build, gen .. "/" .. stem .. "." .. r.name .. ".cc")
+            kfs.write(glue, fill(r.glue, util.join(build, outpath):gsub("\\", "/")))
+            list[#list + 1] = { src = glue, implicit = outpath, name = stem .. "." .. r.name }
+            if r.engine_module then inst.generated_modules[#inst.generated_modules + 1] = fill(r.engine_module, "") end
+          end
+        end
+      end
+    end
+    return list
   end
 
   -- The generated module list for an executable: every engine module in its closure,
@@ -369,6 +448,10 @@ function M.run(c, g, opts)
       if i.module.fields.engine_module then
         lines[#lines + 1] = string.format('#include "korvid/%s/module.h"', i.module.name)
         names[#names + 1] = "&kv::" .. util.symbol(i.module.name) .. "_module"
+      end
+      for _, gm in ipairs(i.generated_modules or {}) do
+        lines[#lines + 1] = string.format("namespace kv { extern const ModuleDesc %s; }", gm)
+        names[#names + 1] = "&kv::" .. gm
       end
     end
     for _, d in ipairs(inst.closure) do consider(d) end
@@ -394,8 +477,9 @@ function M.run(c, g, opts)
     for _, tr0 in ipairs(tool_rules_of(inst)) do
       local t, r, rname = tr0.tool, tr0.rule, tr0.name
       local dir = util.join(m.dir, util.dirname(r.inputs))
-      -- A per-exe rule runs once per executable, below.
-      if r.per ~= "exe" and kfs.isdir(dir) then
+      -- A per-exe rule runs once per executable, below; a rule with glue is compiled into
+      -- the module (generated_sources), not staged.
+      if r.per ~= "exe" and not r.glue and kfs.isdir(dir) then
         local pat_glob = util.basename(r.inputs)
         for _, n in ipairs(kfs.listdir(dir)) do
           if util.matches(n, pat_glob) then
@@ -621,6 +705,14 @@ function M.run(c, g, opts)
       local objs = {}
       local unity = f.unity
       if unity == nil then unity = not opts.no_unity end
+      -- Code a tool writes (generated_sources): each file alone, after its tool has run.
+      inst.generated_objs = {}
+      for _, gs in ipairs(generated_sources(inst, gen)) do
+        local obj = pre .. "obj/" .. sym .. "/gen_" .. gs.name:gsub("[^%w_]", "_") .. naming.obj_suffix
+        compile(inst, gs.src, obj, includes, defines, { implicit = gs.implicit, generated = true })
+        objs[#objs + 1] = obj
+        inst.generated_objs[#inst.generated_objs + 1] = obj
+      end
       if output == "exe" and f.module_list ~= false then
         local path = util.join(build, gen .. "/modules.gen.cc")
         kfs.write(path, module_list_source(inst))
@@ -734,6 +826,11 @@ function M.run(c, g, opts)
         local obj = pre .. "obj/" .. sym .. "/tests/" .. util.basename(s):gsub("%.cc$", "") .. flags(inst).tc.fields.obj_suffix
         compile(inst, s, obj, includes, define_flags(inst))
         objs[#objs + 1] = obj
+      end
+      -- An executable's generated code (generated_sources) is not in a library: its tests
+      -- link the objects, so they can list the modules (a library's tests have them in it).
+      if m.fields.output == "exe" then
+        for _, o in ipairs(inst.generated_objs or {}) do objs[#objs + 1] = o end
       end
       -- Linked as an executable is. The stamp takes what is staged as implicit inputs, so
       -- a changed asset reruns the test without relinking it.

@@ -265,8 +265,10 @@ three share. What its `rb_` steps mean:
   - Apple platforms: out of scope (every supported Apple machine has Metal).
   - The tile buffers write straight into the window's pixels when its format is BGRA8 or RGBA8; otherwise through a
     converting copy.
-  - Pacing is frameloop's. There is no vsync to ask for: `RenderCaps::paced` is false, and frameloop starts frames
-    no closer than a display period apart, unless `--no-vsync` asks for every frame it can draw.
+  - Pacing: the window surface's vsync where the system gives it (SDL's `SDL_SetWindowSurfaceVSync`), so the
+    display paces the frames as a swapchain's do. Where it does not (Win32's DIB), `RenderCaps::paced` is false
+    and frameloop starts frames no closer than a display period apart, unless `--no-vsync` asks for every frame it
+    can draw.
 - **Headless:** with no window (`native_window` null and `backend = Cpu`), the frame draws into a buffer of
   `desc.width × desc.height`. `--screenshot` and `renderer_screenshot` read it as they read a swapchain. This is how
   tests take pictures with no GPU, no display and no driver.

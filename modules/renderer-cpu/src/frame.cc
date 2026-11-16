@@ -191,6 +191,20 @@ bool prepare(Renderer* r, u32 row, CpuQuad& q) {
     q.tex = texture_of(r, m.texture);
     q.filter = m.filter ? 1 : 0;
     q.blend = (u8)(m.blend < 3 ? m.blend : 1);
+    // A game shader's slot: its CPU form, and what its varyings need.
+    u32 gi = m.slot >= kBlendCount ? m.slot - kBlendCount : kGameSlots;
+    if (gi < kGameSlots && r->game_pipes[gi].fn && !r->game_pipes[gi].failed) {
+        q.shader = r->game_pipes[gi].fn;
+        q.w0x = pos[0] - 0.5f * (ma + mc);
+        q.w0y = pos[1] - 0.5f * (mb + md);
+        q.wlx_x = ma; q.wlx_y = mb;
+        q.wly_x = mc; q.wly_y = md;
+        for (u32 k = 0; k < 4; ++k) q.tintf[k] = s.tint[k] * m.tint[k];
+        q.tex_slot = m.texture;
+        q.material = s.material < kMaxMaterials ? s.material : 0;
+        q.time = p.time;
+        q.tick = p.tick;
+    }
     q.hash = hash_bytes(&q, offsetof(CpuQuad, hash));
     return true;
 }
@@ -371,13 +385,27 @@ void draw_tiles(u32, u32 begin, u32 end, void* user) {
     const TileJob& j = *(const TileJob*)user;
     Renderer* r = j.r;
     u16 pixels[kTile * kTile * 4];
+    CpuFrame fr;
+    fr.quads = r->quads.data;
+    fr.ui = r->ui.data;
+    memcpy(fr.clear, r->clear, sizeof fr.clear);
+    fr.quantize8 = r->quantize8;
+    fr.shaders = &r->shader_base;
+    fr.post = r->pass == RcPass::Window && r->post_on ? r->post.fn : nullptr;
+    bool world = r->pass == RcPass::World;
     for (u32 i = begin; i < end; ++i) {
         u32 t = j.todo ? j.todo[i] : i;
         u32 tx = (t % j.across) * kTile, ty = (t / j.across) * kTile;
         u32 tw = r->target_width - tx < kTile ? r->target_width - tx : kTile;
         u32 th = r->target_height - ty < kTile ? r->target_height - ty : kTile;
-        cpu_raster_tile(r->quads.data, r->ui.data, r->bin_items.data + j.starts[t], j.starts[t + 1] - j.starts[t], pixels, tx, ty, tw, th, r->clear, r->quantize8);
-        cpu_encode_tile(pixels, tw, th, r->target + (usize)ty * r->target_pitch + (usize)tx * 4, r->target_pitch, r->target_rgba);
+        cpu_raster_tile(fr, r->bin_items.data + j.starts[t], j.starts[t + 1] - j.starts[t], pixels, tx, ty, tw, th);
+        if (world) {
+            // The world pass: into the post pass's image, as it is (16-bit linear).
+            u16* dst = (u16*)r->post.world.data;
+            for (u32 y = 0; y < th; ++y) memcpy(dst + ((usize)(ty + y) * r->post.world_width + tx) * 4, pixels + (usize)y * kTile * 4, (usize)tw * 4 * sizeof(u16));
+        } else {
+            cpu_encode_tile(pixels, tw, th, r->target + (usize)ty * r->target_pitch + (usize)tx * 4, r->target_pitch, r->target_rgba);
+        }
     }
 }
 
@@ -441,6 +469,7 @@ void rb_sort_end(Renderer*, FrameInFlight&, bool) {}
 
 void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView& view) {
     r->pass = pass;
+    r->post_on = false;
     r->clear[0] = cpu_linear16(view.clear_color.r);
     r->clear[1] = cpu_linear16(view.clear_color.g);
     r->clear[2] = cpu_linear16(view.clear_color.b);
@@ -448,9 +477,42 @@ void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView&
     r->ui.clear();
     r->draws.clear();
     r->layers = (const f32*)f.layers.data;
+    // What a game shader reads this pass (shader.h): the push block (rb_bind_sprites sets
+    // it), the layers, the materials, every texture slot as the rasterizer reads it.
+    r->shader_textures.clear();
+    for (u32 i = 0; i < r->textures.len; ++i) r->shader_textures.push(texture_of(r, i));
+    CpuShaderCall& c = r->shader_base;
+    c = CpuShaderCall{};
+    c.push = &r->push;
+    c.layers = r->layers;
+    c.layer_count = kLayerCount;
+    c.materials = (const GpuMaterial*)r->material_table.data;
+    c.material_count = kMaxMaterials;
+    c.textures = r->shader_textures.data;
+    c.texture_count = r->shader_textures.len;
+    c.world = &r->world_view;
+    c.post = &r->post_push;
+    c.params = r->post.params;
+    c.param_count = r->post.param_count;
 }
 
-void rb_pass_post(Renderer*, FrameInFlight&, const RenderView&) {} // milestone 4
+// The window pass begins with the post shader over the world image: each tile's ground is the
+// shader's picture instead of the clear (raster.cc).
+void rb_pass_post(Renderer* r, FrameInFlight&, const RenderView& view) {
+    PostPass& p = r->post;
+    if (!p.fn || !p.world.data) return;
+    r->post_on = true;
+    r->world_view = CpuWorld{(const u16*)p.world.data, p.world_width, p.world_height};
+    CpuPostPush& pp = r->post_push;
+    pp = CpuPostPush{};
+    pp.size[0] = (f32)p.world_width;
+    pp.size[1] = (f32)p.world_height;
+    pp.time = (f32)(time_now() - r->start_time);
+    pp.tick = (u32)r->world.tick;
+    pp.count = p.param_count;
+    pp.alpha = view.alpha;
+    r->shader_base.param_count = p.param_count;
+}
 
 void rb_bind_sprites(Renderer* r, FrameInFlight&, const PushData& push) { r->push = push; }
 
@@ -528,8 +590,10 @@ void rb_pass_end(Renderer* r, FrameInFlight&, RcPass) {
     }
 
     // The tiles' hashes: their draws' in order, over the clear.
+    // A window pass over the post shader's picture reads the whole world image, wherever its
+    // shader looks: drawn whole.
     u8* skip = nullptr;
-    if (r->pass == RcPass::Window && r->tile_cache) {
+    if (r->pass == RcPass::Window && r->tile_cache && !r->post_on) {
         bool same_target = r->hashed_target == r->target && r->hashed_width == r->target_width && r->hashed_height == r->target_height &&
                            r->hashed_pitch == r->target_pitch && r->hashed_rgba == r->target_rgba && r->tile_hash.len == tiles;
         if (!same_target) {

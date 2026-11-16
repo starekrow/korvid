@@ -623,6 +623,9 @@ bool HostWindow::software_frame(SoftwareFrame* out) {
     return true;
 }
 
+// A DIB blitted with SetDIBitsToDevice: nothing waits for the display; the frame loop paces.
+bool HostWindow::software_vsync(bool) { return false; }
+
 void HostWindow::present_software() {
     HWND h = (HWND)native_;
     if (!h || !software_) return;

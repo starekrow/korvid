@@ -558,6 +558,7 @@ void HostWindow::close() {
 void HostWindow::present_blank() {} // the system shows the activity's background
 bool HostWindow::software_frame(SoftwareFrame*) { return false; } // not yet on this host (the CPU renderer PRD's SR21)
 void HostWindow::present_software() {}
+bool HostWindow::software_vsync(bool) { return false; }
 // The on-screen keyboard up or down, and typed text wanted or not: KorvidActivity's
 // textInput, which does its work on the UI thread. A package without the class (built
 // without a JDK) has keys and no text.

@@ -131,3 +131,64 @@ wrapper and host are in `modules/renderer-cpu/notes/` (`spike_rings_cpu.slang.tx
   - The 1280 x 720 and 1920 x 1080 numbers are milestone 5's table: frameloop has no size option yet.
 - **Not done here:** D3D12 and Metal need nothing new for this milestone; Win32's software present is still
   unrun.
+
+## Milestone 4: game shaders and the post pass
+
+- **Slang's C++, built by kormake.** slang has a second rule, `shader_cpu`. It applies only where renderer-cpu is
+  bound (a rule's new `bound` field). kormake got four generic rule fields for code a tool writes into a module:
+  - `wrap` writes the file the tool reads instead of the input. The wrapper is the first one whose `match` the
+    input contains: `cpu_post.slangh` for a shader that includes `post_fragment.slangh`, else `cpu_sprite.slangh`.
+  - `glue` writes a C++ file compiled into the module that owns the shader, quietly (a toolchain's new
+    `flags_generated`).
+  - `engine_module` lists the module the glue defines in each executable's module list, after its owner.
+  - A module declines a tool's rule by name (`skip_rules`): render's own shaders are not CPU shaders.
+
+  An executable's tests link its generated objects, so the gallery's test lists its shaders' modules.
+- **The glue** (`korvid/renderer-cpu/shader_glue.h`, `.inl`):
+  - Slang pastes its CPU prelude into every file, the host's C headers expanded in it. The glue includes those
+    headers first, so their guards keep the pasted copies out. Then it wraps the generated code in a namespace of
+    the shader's own and renames its three `extern "C"` entries. No two shaders' code meets, and none of it meets
+    the sim's: `check-fast-objects.sh` now lists the generated objects with the fast ones (60 weak symbols, none
+    shared).
+  - Slang suffixes a struct's fields differently from shader to shader (`tint_2`, `tint_3`). So the span and the
+    engine's tables cross by layout, checked by `static_assert`, and the globals are found by name with C++20
+    `requires`.
+  - Textures are `ITexture` objects, one per slot per thread, that call back into the renderer
+    (`cpu_shader_sample`). The sampler is told apart by its state's value: nearest-repeat, linear-repeat or
+    linear-clamp.
+- **Registration.** Each generated module's startup calls `renderer_cpu_shader_generated(stem, fn)`. The game's own
+  form comes through `renderer_cpu_shader(name, fn)` and wins over Slang's. The registry is the program's (code
+  linked in), so neither needs the engine. When a material first names a shader, `rb_game_pipe_load` looks it up.
+  With no CPU form, its sprites draw with the engine's pipeline and an error is logged, as on a GPU.
+- **Drawing.**
+  - A game shader's quad is drawn in runs: each row's covered pixels are one call, with the varyings at the first
+    pixel and their step (uv, world, local, tint, the material).
+  - The outputs blend by the material's blend, and an alpha of -1e30 is a `discard`.
+  - Its tile hash takes the frame's time and tick, since a shader may animate.
+- **The post pass.**
+  - The world pass draws its tiles into a 16-bit linear image of the window's size.
+  - In the window pass, each tile's ground is the post shader's picture (a row a call, written as is) instead of
+    the clear; the layers above draw over it.
+  - The tile cache is off in such a pass: the shader may read the world anywhere.
+- **The fast path.** `RendererDesc::cpu_shaders = false` (frameloop's and the gallery's `--cpu-shaders none`)
+  draws game-shader materials with their blend's pipeline and leaves the post pass out. Each skip is logged once,
+  not as an error. `renderer_cpu_shader_skip(name)` does it for one shader.
+- **Against Vulkan:**
+  - The gallery's `shaders` scene (rings with `discard`, the post shader): largest difference 1 level.
+  - `references/cpu/gallery_shaders.png` is now the Slang path's; the engine-pipeline picture moved to
+    `references/cpu-none/`. The gallery's test draws both ways (34 checks).
+  - arcfire's nebula, dissolve and shimmer draw as Vulkan's do. Its frames cannot be compared exactly: the nebula
+    follows the render time.
+  - arcfire's normal replay matches its 236 hashes with the shaders running.
+- **Numbers** (arcfire's demo at 1280 x 720, shimmer on, dev build, 16 threads): the raster takes 9.3 ms of wall
+  time a frame over its two passes, 63 ms of tile work summed over threads. With `--cpu-shaders none`: 5.8 ms and
+  42 ms.
+- **Vsync, found when the user saw tearing.** The SDL window surface's present does not wait for vblank by
+  default, and milestone 3's 60 Hz timer ran against a 120 Hz display.
+  - `HostWindow::software_vsync` asks SDL for the surface's vsync (`SDL_SetWindowSurfaceVSync`). It applies it
+    again to a surface a resize makes.
+  - Where it is granted, `RenderCaps::paced` is true (`KV_RB_PACED` is now an expression of the renderer) and the
+    display paces the CPU renderer as it paces a swapchain. The frame loop's timer is the fallback; Win32's DIB
+    present has none.
+  - On this machine (Wayland, 120 Hz) kromedemo runs at 120 fps with 60 ticks a second. arcfire with the shimmer
+    runs at 91 to 103 fps: a frame that misses a vblank waits for the next.

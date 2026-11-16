@@ -1,0 +1,20 @@
+// renderer-cpu: the span kernel for a game's post shader (post_fragment.slangh), after it in
+// the wrapper. A span is a run of the window's pixels in one row; fs_main's colors go to gOut.
+struct CpuPostSpan {
+    float  x0, y; // the first pixel's centre
+    uint   count, pad;
+};
+ConstantBuffer<CpuPostSpan> gSpan;
+RWStructuredBuffer<float4> gOut;
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void cs_span(uint3 id : SV_DispatchThreadID) {
+    for (uint i = 0; i < gSpan.count; ++i) {
+        PostVaryings v;
+        float x = gSpan.x0 + float(i);
+        v.pos = float4(x, gSpan.y, 0.0, 1.0);
+        v.uv = float2(x, gSpan.y) / gPost.size;
+        gOut[i] = fs_main(v);
+    }
+}

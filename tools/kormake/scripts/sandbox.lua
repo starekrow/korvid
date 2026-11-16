@@ -46,7 +46,7 @@ local module_fields = {
 local toolchain_fields = {
   tag = true, srcdirs = true, cxx = true, ar = true, link = true, cxxflags = true, ldflags = true, configs = true,
   externals = true, bindings = true, rules = true, obj_suffix = true, exe_suffix = true, lib_file = true,
-  flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, probe = true,
+  flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, flags_generated = true, probe = true,
   sdk = true, -- the Apple SDK the xcode probe asks xcrun for ("macosx")
   flag_framework = true, -- how a toolchain links an external's frameworks ("-framework %s")
   package = true, -- "app" or "iosapp": kormake package writes an application bundle (package_app.lua); "apk": an Android package (package_apk.lua)
@@ -74,7 +74,10 @@ local toolchain_fields = {
 
 -- What a rule "name" { ... } in exports may set. configs: the configs whose default build
 -- holds a per-exe rule's outputs (kpack's pack: ship); they are built by name in the rest.
-local rule_fields = { inputs = true, outputs = true, command = true, deps = true, per = true, configs = true, platforms = true }
+-- bound, wrap, glue and engine_module: a rule whose output is compiled into the module
+-- (emit.lua's generated_sources).
+local rule_fields = { inputs = true, outputs = true, command = true, deps = true, per = true, configs = true, platforms = true,
+                      bound = true, wrap = true, glue = true, engine_module = true }
 
 -- module "name" { fields } or module "name" (defaults). One per file.
 function M.eval_module(path, text)
@@ -107,7 +110,8 @@ function M.eval_module(path, text)
       end
     end
   end
-  -- rule "name" { inputs, outputs, command, deps, per, configs, platforms } inside exports.
+  -- rule "name" { inputs, outputs, command, deps, per, configs, platforms, bound, wrap, glue,
+  -- engine_module } inside exports.
   -- A per-exe rule (per = "exe") runs over an executable's staged assets, so its inputs
   -- are "assets", in each platform variant too.
   env.rule = function(name)
