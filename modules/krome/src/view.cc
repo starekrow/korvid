@@ -583,7 +583,7 @@ void paint_edit(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
 // in this tree.
 void pointer_states(Paint& p) {
     const KromeTarget& u = p.s.under;
-    if (u.screen == p.sc.id && u.overlay == p.overlay && u.node != KROME_NONE)
+    if (u.screen == p.sc.id && u.overlay == p.overlay && u.node < p.tree.nodes.len)
         for (u32 n = u.node; n != KROME_NONE && p.hovered_n <= KROME_MAX_DEPTH; n = p.tree.nodes[n].parent) p.hovered[p.hovered_n++] = n;
     const KromeTarget& c = p.s.captured;
     if (p.s.down && c.screen == p.sc.id && c.overlay == p.overlay && c.node != KROME_NONE)
@@ -936,8 +936,9 @@ void krome_view_frame(KromeModule& s) {
         if (sc->tree.dirty && sc->tree.root != KROME_NONE) {
             krome_layout(sc->tree, sc->tree.root, rect2{0, 0, W, H}, m, true);
             ++s.layouts;
-            // A virtualized each whose view left what it built is built again, and laid out.
-            if (krome_virtual_regions(s, *sc) && sc->tree.root != KROME_NONE) {
+            // A virtualized each whose view left what it built is built again, and laid out
+            // (again, should the rows now in view move what is in view: a few rounds at most).
+            for (u32 round = 0; round < 3 && sc->tree.root != KROME_NONE && krome_virtual_regions(s, *sc); ++round) {
                 krome_layout(sc->tree, sc->tree.root, rect2{0, 0, W, H}, m, true);
                 ++s.layouts;
             }
@@ -1091,8 +1092,9 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
     {
         CursorShape shape = CursorShape::Arrow;
         KromeScreen* usc = nullptr;
-        KromeTree* ut = under.node != KROME_NONE ? krome_target_tree(s, under, &usc) : nullptr;
-        for (u32 c = ut ? under.node : KROME_NONE; c != KROME_NONE; c = ut->nodes[c].parent) {
+        // s.under, not `under`: a handler fired above may have built the tree again.
+        KromeTree* ut = s.under.node != KROME_NONE ? krome_target_tree(s, s.under, &usc) : nullptr;
+        for (u32 c = ut ? s.under.node : KROME_NONE; c != KROME_NONE && c < ut->nodes.len; c = ut->nodes[c].parent) {
             const KromeNode& cn = ut->nodes[c];
             if (cn.cursor != KromeCursor::Unset) { shape = (CursorShape)((u8)cn.cursor - 1); break; }
             if (cn.type == KromeType::Edit) { shape = CursorShape::IBeam; break; }

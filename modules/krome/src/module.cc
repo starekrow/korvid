@@ -241,6 +241,9 @@ void krome_input(TickContext& ctx) {
         krome_edit_typed(s, t.text);
     }
     f32 x = in ? in->raw.mouse.x : s.px, y = in ? in->raw.mouse.y : s.py;
+    // A press whose release never came (the window lost the focus, or the pointer left it
+    // where the platform keeps no hold on it) ends where the pointer is.
+    if (s.down && in && !in->raw.mouse.down(MouseButton::Left)) krome_pointer(s, x, y, false, 0.0f, false);
     // Shift turns the wheel across.
     if (shift && wheel != 0.0f) { wheel_x -= wheel; wheel = 0.0f; }
     krome_pointer(s, x, y, s.down, wheel, escape);

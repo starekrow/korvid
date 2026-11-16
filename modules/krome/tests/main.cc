@@ -13,6 +13,7 @@ void test_bound(kv::TestCtx&);
 void test_behave(kv::TestCtx&);
 void test_virtual(kv::TestCtx&);
 void test_hooks(kv::TestCtx&);
+void test_rebuild(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
@@ -27,6 +28,7 @@ int main() {
     test_behave(c);
     test_virtual(c);
     test_hooks(c);
+    test_rebuild(c);
     kv::names_shutdown();
     kv::mem_shutdown();
     return kv::test_report(c, "krome_tests");

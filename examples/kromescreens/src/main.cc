@@ -123,14 +123,16 @@ constinit const Step k_pilot[] = {
     {Act::Click, "page_diff", nullptr, nullptr},
     {Act::Click, "accept_1", nullptr, nullptr},
     {Act::Click, "reject_2", nullptr, nullptr},
-    {Act::Check, "accepted", nullptr, "1"},
+    {Act::Click, "accept_3", nullptr, nullptr},      // a third rebuild of the list under the pointer
+    {Act::Click, "accept_4", nullptr, nullptr},
+    {Act::Check, "accepted", nullptr, "3"},
     {Act::Check, "rejected", nullptr, "1"},
     {Act::Shot, "diff", nullptr, nullptr},
     {Act::Click, "accept_all", nullptr, nullptr},
     {Act::Shot, "diff_confirm", nullptr, nullptr},
     {Act::Key, "enter", nullptr, nullptr},           // the dialog's OK
     {Act::Check, "reroutes_left", nullptr, "0"},
-    {Act::Check, "accepted", nullptr, "23"},
+    {Act::Check, "accepted", nullptr, "23"},  // 3 by hand, the other 20 by "all"
     // Live status: the cook as it runs.
     {Act::Click, "page_status", nullptr, nullptr},
     {Act::Wait, nullptr, nullptr, nullptr},

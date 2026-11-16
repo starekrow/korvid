@@ -617,18 +617,34 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
 
 // ---- rebuilding ---------------------------------------------------------------------------------
 
-// What a rebuild keeps: where each scroll box with an id was scrolled to.
-struct Kept { Name id; vec2 scroll; };
+// What a rebuild keeps: where each scroll box was scrolled to, by its id, or for one with
+// none, by its place among the scroll boxes in document order.
+struct Kept { Name id; u32 nth; vec2 scroll; u32 node; u32 now; }; // node: its index before; now: after (KROME_NONE: gone)
 
-void keep_scroll(const KromeTree& t, Array<Kept>& out) {
-    for (const KromeNode& n : t.nodes)
-        if (!n.id.is_null() && (n.flags & KROME_SCROLL) && !(n.flags & KROME_DEAD)) out.push(Kept{n.id, n.scroll});
+bool scrolls(const KromeNode& n) { return (n.flags & (KROME_SCROLL | KROME_SCROLL_X | KROME_SCROLL_Y)) != 0; }
+
+void keep_walk(const KromeTree& t, u32 i, u32* nth, Array<Kept>& out) {
+    const KromeNode& n = t.nodes[i];
+    if (n.flags & KROME_DEAD) return;
+    if (scrolls(n)) out.push(Kept{n.id, (*nth)++, n.scroll, i, KROME_NONE});
+    for (u32 c = n.first; c != KROME_NONE; c = t.nodes[c].next) keep_walk(t, c, nth, out);
 }
-void restore(KromeTree& t, const Array<Kept>& kept) {
-    for (const Kept& k : kept) {
-        u32 i = krome_find(t, k.id);
-        if (i != KROME_NONE) t.nodes[i].scroll = k.scroll;
+void keep_scroll(const KromeTree& t, Array<Kept>& out) {
+    u32 nth = 0;
+    if (t.root != KROME_NONE) keep_walk(t, t.root, &nth, out);
+}
+void restore_walk(KromeTree& t, u32 i, u32* nth, Array<Kept>& kept) {
+    KromeNode& n = t.nodes[i];
+    if (scrolls(n)) {
+        u32 at = (*nth)++;
+        for (Kept& k : kept)
+            if (!n.id.is_null() ? k.id == n.id : (k.id.is_null() && k.nth == at)) { n.scroll = k.scroll; k.now = i; break; }
     }
+    for (u32 c = n.first; c != KROME_NONE; c = t.nodes[c].next) restore_walk(t, c, nth, kept);
+}
+void restore(KromeTree& t, Array<Kept>& kept) {
+    u32 nth = 0;
+    if (t.root != KROME_NONE) restore_walk(t, t.root, &nth, kept);
 }
 
 const JsonValue* root_of(const KimbFile& f, const char* screen) {
@@ -675,13 +691,22 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc) {
     sc.dead = 0;
     if (!sc.frames.base) arena_create(sc.frames, 256u << 20, "krome.frames", MemTag{});
     else arena_reset(sc.frames);
-    if (s.under.screen == sc.id) s.under = KromeTarget{};
-    if (s.captured.screen == sc.id) s.captured = KromeTarget{};
+    // What the pointer held of the old tree, by index, is gone with it.
+    if (s.under.screen == sc.id && !s.under.overlay) s.under = KromeTarget{};
+    if (s.captured.screen == sc.id && !s.captured.overlay) s.captured = KromeTarget{};
+    if (s.hover_behave.screen == sc.id && !s.hover_behave.overlay) s.hover_behave = KromeTarget{};
+    // A scrollbar being dragged goes on, on the same box in the new tree (below).
+    bool held = s.bar.active && s.bar.box.screen == sc.id && !s.bar.box.overlay;
+    u32 held_node = held ? s.bar.box.node : KROME_NONE;
+    if (s.bar.box.screen == sc.id && !s.bar.box.overlay) s.bar.active = false;
+    if (s.tip.screen == sc.id && !s.tip.overlay) s.tip = KromeTarget{};
     Build b{s, sc, sc.tree, &sc.deps, &sc.regions, &sc.frames, &sc.scope, krome_theme_of(s, sc.scope)};
     b.slots = &sc.slots;
     node(b, *f, *root, KROME_NONE, nullptr, nullptr);
     sc.waiting = b.waiting;
     restore(sc.tree, kept);
+    for (const Kept& k : kept)
+        if (held && k.node == held_node && k.now != KROME_NONE) { s.bar.box.node = k.now; s.bar.active = true; }
     kept.free();
     for (const KromeDep& d : sc.deps) if (d.kind == KromeDep::Text) krome_fill_node(s, sc, sc.tree, d.node);
     sc.tree.dirty = true;
@@ -786,7 +811,7 @@ bool rebuild_one(KromeModule& s, KromeScreen& sc, u32 i) {
 }
 
 // After regions were built again: what went inside them dropped, and the tree to lay out.
-void rebuilt(KromeModule& s, KromeScreen& sc) {
+void rebuilt(KromeModule&, KromeScreen& sc) {
     KromeTree& t = sc.tree;
     // Regions inside what went, and what read the model there.
     for (KromeRegion& r : sc.regions) if (r.alive && (t.nodes[r.anchor].flags & KROME_DEAD)) r.alive = false;
@@ -803,8 +828,10 @@ void rebuilt(KromeModule& s, KromeScreen& sc) {
     sc.regions.len = rw;
     t.dirty = true;
     sc.repaint = true;
-    // Past as many dead nodes as live ones, the tree is built whole again, which drops them.
-    if (sc.dead > 1024 && sc.dead > t.nodes.len - sc.dead) krome_build_screen(s, sc);
+    // Past as many dead nodes as live ones, the tree is built whole again, which drops them:
+    // in the next frame's pump, never here, where a handler or the pointer may be in the
+    // middle of using the tree's nodes by index.
+    if (sc.dead > 1024 && sc.dead > t.nodes.len - sc.dead) sc.rebuild = true;
 }
 
 } // namespace
