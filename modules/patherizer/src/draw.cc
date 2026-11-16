@@ -11,6 +11,7 @@
 // same on every platform. Float is the flattening, the transforms and the gradients, on the
 // engine's math with contraction off.
 #include "korvid/patherizer/patherizer.h"
+#include "stroke.h"
 #include "korvid/core/memory.h"
 #include "korvid/math/scalar.h"
 #include <string.h>
@@ -33,10 +34,24 @@ struct Draw {
     Allocator* a;
     u32 w, h;
     u16* canvas;          // w x h x 4, premultiplied, sRGB-encoded values times 257
-    Array<f32> poly;      // a subpath's points, device pixels
+    Array<f32> poly;      // the subpaths' points, flattened
+    Array<u32> starts;    // where each subpath starts in poly (floats)
+    Array<u8>  closed;    // whether each was closed
     Array<Segment> segs;
+    StrokeOutlines outlines;
+    Array<u16> mask;      // a clip's coverage, w x h, while one is being made
+    bool       to_mask = false;
     Array<i32> cover, area;
     Array<u16> cov;       // a band's coverage, 0 to 65535 (bw x kBand)
+    Draw(const PathShape& shape, const PathOptions& options, Allocator* al, u32 width, u32 height)
+        : s(shape), o(options), a(al), w(width), h(height), canvas(nullptr) {
+        poly.alloc = starts.alloc = segs.alloc = al;
+        closed.alloc = al;
+        outlines.points.alloc = outlines.starts.alloc = al;
+        mask.alloc = al;
+        cover.alloc = area.alloc = al;
+        cov.alloc = al;
+    }
 };
 
 i32 fixed(f32 v) { return (i32)kv::floor(v * (f32)kSub + 0.5f); }
@@ -50,27 +65,30 @@ void add_line(Draw& d, f32 x0, f32 y0, f32 x1, f32 y1) {
     if (sg.y0 != sg.y1) d.segs.push(sg);
 }
 
-// A subpath's points as lines, closed: a fill is.
-void close_poly(Draw& d) {
-    u32 n = d.poly.len / 2;
-    for (u32 i = 0; i + 1 < n; ++i) add_line(d, d.poly[i * 2], d.poly[i * 2 + 1], d.poly[i * 2 + 2], d.poly[i * 2 + 3]);
-    if (n >= 2) add_line(d, d.poly[(n - 1) * 2], d.poly[(n - 1) * 2 + 1], d.poly[0], d.poly[1]);
-    d.poly.clear();
-}
-
 void point(Draw& d, f32 x, f32 y) { d.poly.push(x); d.poly.push(y); }
 
+void begin_sub(Draw& d) {
+    // An empty or one-point subpath is replaced by the next.
+    if (d.starts.len && d.poly.len - d.starts.last() <= 2) {
+        d.poly.len = d.starts.last();
+        d.starts.pop();
+        d.closed.pop();
+    }
+    d.starts.push(d.poly.len);
+    d.closed.push(0);
+}
+
 // Segments a curve is cut into for the tolerance (Wang's bound on the second differences).
-u32 pieces(f32 dd) {
+u32 pieces(f32 dd, f32 tol) {
     if (!(dd > 0.0f)) return 1;
-    f32 n = kv::ceil(kv::sqrt(dd / kTolerance));
+    f32 n = kv::ceil(kv::sqrt(dd / tol));
     if (!(n < 4096.0f)) return 4096;
     return n < 1.0f ? 1 : (u32)n;
 }
 
-void flatten_quad(Draw& d, f32 x0, f32 y0, f32 x1, f32 y1, f32 x2, f32 y2) {
+void flatten_quad(Draw& d, f32 tol, f32 x0, f32 y0, f32 x1, f32 y1, f32 x2, f32 y2) {
     f32 ddx = x0 - 2.0f * x1 + x2, ddy = y0 - 2.0f * y1 + y2;
-    u32 n = pieces(0.25f * kv::sqrt(ddx * ddx + ddy * ddy));
+    u32 n = pieces(0.25f * kv::sqrt(ddx * ddx + ddy * ddy), tol);
     for (u32 i = 1; i <= n; ++i) {
         f32 t = (f32)i / (f32)n, u = 1.0f - t;
         if (i == n) { point(d, x2, y2); break; }
@@ -78,11 +96,11 @@ void flatten_quad(Draw& d, f32 x0, f32 y0, f32 x1, f32 y1, f32 x2, f32 y2) {
     }
 }
 
-void flatten_cubic(Draw& d, f32 x0, f32 y0, f32 x1, f32 y1, f32 x2, f32 y2, f32 x3, f32 y3) {
+void flatten_cubic(Draw& d, f32 tol, f32 x0, f32 y0, f32 x1, f32 y1, f32 x2, f32 y2, f32 x3, f32 y3) {
     f32 ax = x0 - 2.0f * x1 + x2, ay = y0 - 2.0f * y1 + y2;
     f32 bx = x1 - 2.0f * x2 + x3, by = y1 - 2.0f * y2 + y3;
     f32 la = kv::sqrt(ax * ax + ay * ay), lb = kv::sqrt(bx * bx + by * by);
-    u32 n = pieces(0.75f * (la > lb ? la : lb));
+    u32 n = pieces(0.75f * (la > lb ? la : lb), tol);
     for (u32 i = 1; i <= n; ++i) {
         f32 t = (f32)i / (f32)n, u = 1.0f - t;
         if (i == n) { point(d, x3, y3); break; }
@@ -91,33 +109,90 @@ void flatten_cubic(Draw& d, f32 x0, f32 y0, f32 x1, f32 y1, f32 x2, f32 y2, f32 
     }
 }
 
-// A path's verbs as segments in the target's pixels, through `t`.
-void flatten_path(Draw& d, const PathNode& n, const PathTransform& t) {
-    d.segs.clear();
+// A path's subpaths as polylines (poly, starts, closed), through `t`, to `tol` in the
+// units `t` gives.
+void flatten_path(Draw& d, const PathNode& n, const PathTransform& t, f32 tol) {
     d.poly.clear();
+    d.starts.clear();
+    d.closed.clear();
     const f32* p = d.s.points.data + n.first_point;
-    f32 cx = 0, cy = 0;
+    f32 cx = 0, cy = 0, sx = 0, sy = 0;
+    bool open = false;
     for (u32 i = 0; i < n.verb_count; ++i) {
         PathVerb v = d.s.verbs[n.first_verb + i];
         f32 q[6];
         u32 k = v == PathVerb::Move || v == PathVerb::Line ? 1 : v == PathVerb::Quad ? 2 : v == PathVerb::Cubic ? 3 : 0;
         for (u32 j = 0; j < k; ++j) t.apply(p[j * 2], p[j * 2 + 1], &q[j * 2], &q[j * 2 + 1]);
         p += k * 2;
+        if (v != PathVerb::Move && v != PathVerb::Close && !open) {
+            // A drawing command with no subpath open starts one where the last ended.
+            begin_sub(d);
+            point(d, cx, cy);
+            open = true;
+        }
         switch (v) {
-        case PathVerb::Move: close_poly(d); point(d, q[0], q[1]); cx = q[0]; cy = q[1]; break;
+        case PathVerb::Move: begin_sub(d); point(d, q[0], q[1]); cx = sx = q[0]; cy = sy = q[1]; open = true; break;
         case PathVerb::Line: point(d, q[0], q[1]); cx = q[0]; cy = q[1]; break;
-        case PathVerb::Quad: flatten_quad(d, cx, cy, q[0], q[1], q[2], q[3]); cx = q[2]; cy = q[3]; break;
-        case PathVerb::Cubic: flatten_cubic(d, cx, cy, q[0], q[1], q[2], q[3], q[4], q[5]); cx = q[4]; cy = q[5]; break;
-        case PathVerb::Close: {
-            f32 sx = d.poly.len ? d.poly[0] : cx, sy = d.poly.len ? d.poly[1] : cy;
-            close_poly(d);
-            point(d, sx, sy); // a command after a close starts from the subpath's start
-            cx = sx; cy = sy;
+        case PathVerb::Quad: flatten_quad(d, tol, cx, cy, q[0], q[1], q[2], q[3]); cx = q[2]; cy = q[3]; break;
+        case PathVerb::Cubic: flatten_cubic(d, tol, cx, cy, q[0], q[1], q[2], q[3], q[4], q[5]); cx = q[4]; cy = q[5]; break;
+        case PathVerb::Close:
+            if (open) d.closed.last() = 1;
+            open = false;
+            cx = sx; cy = sy; // a command after a close starts from the subpath's start
             break;
         }
-        }
     }
-    close_poly(d);
+    if (d.starts.len && d.poly.len - d.starts.last() < 2) { d.poly.len = d.starts.last(); d.starts.pop(); d.closed.pop(); }
+}
+
+// Every subpath as a closed outline's lines: a fill closes what is open.
+void fill_lines(Draw& d) {
+    d.segs.clear();
+    for (u32 k = 0; k < d.starts.len; ++k) {
+        u32 a = d.starts[k], b = k + 1 < d.starts.len ? d.starts[k + 1] : d.poly.len;
+        u32 n = (b - a) / 2;
+        const f32* q = d.poly.data + a;
+        for (u32 i = 0; i + 1 < n; ++i) add_line(d, q[i * 2], q[i * 2 + 1], q[i * 2 + 2], q[i * 2 + 3]);
+        if (n >= 2) add_line(d, q[(n - 1) * 2], q[(n - 1) * 2 + 1], q[0], q[1]);
+    }
+}
+
+// How far `t` stretches a length at most: the tolerance in the path's own units is the
+// target's divided by it.
+f32 stretch(const PathTransform& t) {
+    f32 a = kv::sqrt(t.m[0] * t.m[0] + t.m[1] * t.m[1]), b = kv::sqrt(t.m[2] * t.m[2] + t.m[3] * t.m[3]);
+    f32 k = a > b ? a : b;
+    return k > 1e-12f ? k : 1e-12f;
+}
+
+// A path's stroke, widened in its own space, as lines in the target's pixels.
+void stroke_lines(Draw& d, const PathNode& n, const PathTransform& t) {
+    f32 tol = kTolerance / stretch(t);
+    flatten_path(d, n, PathTransform{}, tol);
+    const PathStroke& st = d.s.strokes[n.stroke_style < d.s.strokes.len ? n.stroke_style : 0];
+    d.outlines.points.clear();
+    d.outlines.starts.clear();
+    for (u32 k = 0; k < d.starts.len; ++k) {
+        u32 a = d.starts[k], b = k + 1 < d.starts.len ? d.starts[k + 1] : d.poly.len;
+        stroke_polyline(d.outlines, d.poly.data + a, (b - a) / 2, d.closed[k] != 0, st, d.s.dashes.data + st.first_dash, tol);
+    }
+    d.segs.clear();
+    const StrokeOutlines& o = d.outlines;
+    for (u32 k = 0; k < o.starts.len; ++k) {
+        u32 a = o.starts[k], b = k + 1 < o.starts.len ? o.starts[k + 1] : o.points.len;
+        u32 m = (b - a) / 2;
+        if (m < 2) continue;
+        f32 fx, fy, px, py;
+        t.apply(o.points[a], o.points[a + 1], &fx, &fy);
+        px = fx; py = fy;
+        for (u32 i = 1; i < m; ++i) {
+            f32 x, y;
+            t.apply(o.points[a + i * 2], o.points[a + i * 2 + 1], &x, &y);
+            add_line(d, px, py, x, y);
+            px = x; py = y;
+        }
+        add_line(d, px, py, fx, fy);
+    }
 }
 
 // ---- coverage -------------------------------------------------------------------------------------
@@ -289,8 +364,20 @@ inline void paint_at(const Painter& pt, f32 x, f32 y, u32 out[4]) {
     out[3] = (u32)(((u64)a * pt.solid[3] + 32767) / 65535);
 }
 
-// Coverage times the paint, over the canvas.
+// Coverage times the paint, over the canvas; or, making a clip, coverage into the mask
+// (their union: each path's coverage over what is there).
 void composite(Draw& d, const Band& b, const Painter& pt) {
+    if (d.to_mask) {
+        for (i32 row = 0; row < b.rows; ++row) {
+            const u16* cv = d.cov.data + (usize)row * b.bw;
+            u16* m = d.mask.data + (usize)(b.y0 + row) * d.w + (usize)b.x0;
+            for (i32 x = 0; x < b.bw; ++x) {
+                u32 c = cv[x], v = m[x];
+                m[x] = (u16)(v + c - (v * c + 32767) / 65535);
+            }
+        }
+        return;
+    }
     for (i32 row = 0; row < b.rows; ++row) {
         const u16* cv = d.cov.data + (usize)row * b.bw;
         i32 y = b.y0 + row;
@@ -368,21 +455,103 @@ bool is_clip(const PathShape& s, u32 node) {
     return false;
 }
 
+void draw_nodes(Draw& d, u32 first, u32 end, const PathTransform& parent);
+
+// The clip group `clip`'s outlines, in the user space `t` of what it clips, as the mask.
+bool make_mask(Draw& d, u32 clip, const PathTransform& t) {
+    usize px = (usize)d.w * d.h;
+    d.mask.clear();
+    u16* m = d.mask.push_n((u32)px);
+    if (!m) return false;
+    memset(m, 0, px * sizeof(u16));
+    const PathNode& g = d.s.nodes[clip];
+    bool was = d.to_mask;
+    d.to_mask = true;
+    draw_nodes(d, clip + 1, clip + 1 + g.count, g.transform.then(t));
+    d.to_mask = was;
+    return true;
+}
+
+// A layer (a group with opacity or a clip) over the canvas under it: each pixel times the
+// opacity, and the clip's coverage.
+void composite_layer(Draw& d, const u16* layer, u16* under, f32 opacity, const u16* mask) {
+    u32 op = opacity >= 1.0f ? 65535u : !(opacity > 0.0f) ? 0u : (u32)(opacity * 65535.0f + 0.5f);
+    usize n = (usize)d.w * d.h;
+    for (usize i = 0; i < n; ++i) {
+        const u16* l = layer + i * 4;
+        if (!l[3]) continue;
+        u32 k = mask ? (u32)(((u64)op * mask[i] + 32767) / 65535) : op;
+        if (!k) continue;
+        u16* u = under + i * 4;
+        u32 sa = (l[3] * k + 32767) / 65535, ia = 65535 - sa;
+        for (u32 c = 0; c < 3; ++c) {
+            u32 s = (l[c] * k + 32767) / 65535;
+            u32 v = s + (u[c] * ia + 32767) / 65535;
+            u[c] = (u16)(v > 65535 ? 65535 : v);
+        }
+        u[3] = (u16)(sa + (u[3] * ia + 32767) / 65535);
+    }
+}
+
 // The nodes [first, end) under `parent`, in order.
 void draw_nodes(Draw& d, u32 first, u32 end, const PathTransform& parent) {
     for (u32 i = first; i < end; ++i) {
         const PathNode& n = d.s.nodes[i];
         PathTransform t = n.transform.then(parent);
         if (n.kind == PathNode::Group) {
-            if (!is_clip(d.s, i)) draw_nodes(d, i + 1, i + 1 + n.count, t);
+            if (is_clip(d.s, i)) { i += n.count; continue; }
+            u32 clip = n.clip && n.clip - 1 < d.s.nodes.len && d.s.nodes[n.clip - 1].kind == PathNode::Group ? n.clip - 1 : ~0u;
+            bool layer = !d.to_mask && (n.opacity < 1.0f || clip != ~0u);
+            if (!layer) {
+                draw_nodes(d, i + 1, i + 1 + n.count, t);
+                i += n.count;
+                continue;
+            }
+            if (!(n.opacity > 0.0f)) { i += n.count; continue; }
+            // Its own canvas, clear; the children into it; then over the one under it.
+            usize bytes = (usize)d.w * d.h * 4 * sizeof(u16);
+            u16* under = d.canvas;
+            u16* mine = (u16*)alloc_in(d.a, bytes, 16);
+            if (!mine) { i += n.count; continue; }
+            memset(mine, 0, bytes);
+            d.canvas = mine;
+            draw_nodes(d, i + 1, i + 1 + n.count, t);
+            d.canvas = under;
+            const u16* mask = nullptr;
+            Array<u16> keep;
+            keep.alloc = d.a;
+            if (clip != ~0u && make_mask(d, clip, t)) {
+                // The mask is the Draw's, and a clip inside the clip's own content would
+                // write it again: kept aside while it is used.
+                keep.push_n(d.mask.len);
+                memcpy(keep.data, d.mask.data, (usize)d.mask.len * sizeof(u16));
+                mask = keep.data;
+            }
+            composite_layer(d, mine, under, n.opacity, mask);
+            keep.free();
+            free_in(d.a, mine, bytes);
             i += n.count;
             continue;
         }
-        if (n.fill && n.fill < d.s.paints.len && d.s.paints[n.fill].kind != PathPaint::None) {
+        if (n.fill && n.fill < d.s.paints.len && (d.to_mask || d.s.paints[n.fill].kind != PathPaint::None)) {
             Painter pt{d.s, d.s.paints[n.fill], {}, {}, false};
-            if (make_painter(d, n.fill, t, n.fill_opacity, &pt)) {
-                flatten_path(d, n, t);
+            if (d.to_mask || make_painter(d, n.fill, t, n.fill_opacity, &pt)) {
+                flatten_path(d, n, t, kTolerance);
+                fill_lines(d);
                 fill_segments(d, n.rule, pt);
+            }
+        } else if (d.to_mask && !n.stroke) {
+            // A clip's path counts by its outline, whatever it is painted with.
+            Painter pt{d.s, d.s.paints[0], {}, {}, false};
+            flatten_path(d, n, t, kTolerance);
+            fill_lines(d);
+            fill_segments(d, n.rule, pt);
+        }
+        if (!d.to_mask && n.stroke && n.stroke < d.s.paints.len && d.s.paints[n.stroke].kind != PathPaint::None) {
+            Painter pt{d.s, d.s.paints[n.stroke], {}, {}, false};
+            if (make_painter(d, n.stroke, t, n.stroke_opacity, &pt)) {
+                stroke_lines(d, n, t);
+                fill_segments(d, FillRule::NonZero, pt);
             }
         }
     }
@@ -393,10 +562,7 @@ void draw_nodes(Draw& d, u32 first, u32 end, const PathTransform& parent) {
 bool patherizer_draw(const PathShape& shape, const PathTarget& target, const PathOptions& options) {
     if (!target.pixels || !target.width || !target.height) return true;
     Allocator* a = options.scratch ? options.scratch : mem_general();
-    Draw d{shape, options, a, target.width, target.height, nullptr, {}, {}, {}, {}, {}};
-    d.poly.alloc = d.segs.alloc = a;
-    d.cover.alloc = d.area.alloc = a;
-    d.cov.alloc = a;
+    Draw d(shape, options, a, target.width, target.height);
     usize px = (usize)d.w * d.h;
     d.canvas = (u16*)alloc_in(a, px * 4 * sizeof(u16), 16);
     if (!d.canvas) return false;
@@ -427,6 +593,7 @@ bool patherizer_draw(const PathShape& shape, const PathTarget& target, const Pat
     }
     free_in(a, d.canvas, px * 4 * sizeof(u16));
     d.poly.free(); d.segs.free(); d.cover.free(); d.area.free(); d.cov.free();
+    d.starts.free(); d.closed.free(); d.outlines.points.free(); d.outlines.starts.free(); d.mask.free();
     return true;
 }
 

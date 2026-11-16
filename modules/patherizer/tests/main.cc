@@ -14,6 +14,7 @@
 #include "korvid/image/png.h"
 #include "korvid/math/scalar.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace {
@@ -139,6 +140,102 @@ const Case kCases[] = {
         b.end_group(g);
     }},
     {"needle", [](PathShape& s) { PathBuilder b(s); b.move_to(2, 50); b.line_to(98, 47); b.line_to(98, 53.5f); b.close(); b.fill(s.add_solid(0, 0, 0, 255)); }},
+    {"stroke_zigzag", [](PathShape& s) {
+        PathBuilder b(s); b.move_to(10, 70); b.line_to(30, 30); b.line_to(50, 70); b.line_to(70, 30); b.line_to(90, 70);
+        PathStroke st; st.width = 8; b.stroke(s.add_solid(30, 30, 160, 255), st);
+    }},
+    {"stroke_joins", [](PathShape& s) {
+        LineJoin joins[3] = {LineJoin::Miter, LineJoin::Round, LineJoin::Bevel};
+        for (u32 k = 0; k < 3; ++k) {
+            PathBuilder b(s); f32 x = 18.0f + 32.0f * (f32)k;
+            b.move_to(x - 10, 80); b.line_to(x, 25); b.line_to(x + 10, 80);
+            PathStroke st; st.width = 9; st.join = joins[k]; st.miter_limit = 10; b.stroke(s.add_solid(150, 40, 40, 255), st);
+        }
+    }},
+    {"stroke_caps", [](PathShape& s) {
+        LineCap caps[3] = {LineCap::Butt, LineCap::Round, LineCap::Square};
+        for (u32 k = 0; k < 3; ++k) {
+            PathBuilder b(s); f32 y = 22.0f + 28.0f * (f32)k;
+            b.move_to(20, y); b.line_to(80, y);
+            PathStroke st; st.width = 14; st.cap = caps[k]; b.stroke(s.add_solid(20, 120, 60, 255), st);
+        }
+    }},
+    {"stroke_closed", [](PathShape& s) {
+        PathBuilder b(s); circle(b, 50, 50, 34);
+        PathStroke st; st.width = 7; b.stroke(s.add_solid(200, 100, 0, 255), st);
+        // Clear of the circle's stroke by more than a pixel at 16 px: two paths sharing a
+        // pixel combine their partial coverages as a + b (1 - a), where a supersampled
+        // picture has a + b (conflation, which every analytic rasterizer has). Here the
+        // stroke is under test, not that.
+        rect(b, 38, 38, 24, 24);
+        PathStroke sq; sq.width = 4; sq.join = LineJoin::Round; b.stroke(s.add_solid(0, 100, 200, 255), sq);
+    }},
+    {"stroke_curve", [](PathShape& s) {
+        PathBuilder b(s); b.move_to(10, 80); b.cubic_to(30, -10, 70, 110, 90, 20);
+        PathStroke st; st.width = 6; st.cap = LineCap::Round; b.stroke(s.add_solid(90, 20, 120, 255), st);
+    }},
+    {"stroke_dash", [](PathShape& s) {
+        PathBuilder b(s); b.move_to(10, 20); b.line_to(90, 20);
+        f32 dashes[2] = {10, 6};
+        PathStroke st; st.width = 6; st.dash_offset = 3; b.stroke(s.add_solid(0, 0, 0, 255), st, 1.0f, dashes, 2);
+        circle(b, 50, 62, 28);
+        // Gaps wider than the round caps: overlapping pieces of one path count their overlap
+        // twice inside a pixel (the cell method's accumulation, as at a pentagram's points).
+        // (An even list: an odd one repeats, and its gaps become dashes the second time.)
+        f32 d2[4] = {12, 7, 3, 7};
+        PathStroke st2; st2.width = 5; st2.cap = LineCap::Round; b.stroke(s.add_solid(180, 0, 90, 255), st2, 1.0f, d2, 4);
+    }},
+    {"stroke_miter_limit", [](PathShape& s) {
+        for (u32 k = 0; k < 2; ++k) {
+            PathBuilder b(s); f32 x = 30.0f + 40.0f * (f32)k;
+            b.move_to(x - 6, 90); b.line_to(x, 20); b.line_to(x + 6, 90);
+            PathStroke st; st.width = 6; st.miter_limit = k ? 20.0f : 4.0f; b.stroke(s.add_solid(60, 60, 60, 255), st);
+        }
+    }},
+    {"stroke_scaled", [](PathShape& s) {
+        PathBuilder b(s);
+        u32 g = b.begin_group();
+        s.nodes[g].transform.m[0] = 3.0f; s.nodes[g].transform.m[4] = -100.0f;
+        circle(b, 50, 50, 14);
+        PathStroke st; st.width = 4; b.stroke(s.add_solid(0, 90, 90, 255), st);
+        b.end_group(g);
+    }},
+    {"stroke_thin", [](PathShape& s) {
+        PathBuilder b(s);
+        b.move_to(10, 10.5f); b.line_to(90, 10.5f);
+        PathStroke one; one.width = 1; b.stroke(s.add_solid(0, 0, 0, 255), one);
+        b.move_to(10, 30); b.line_to(90, 60); b.line_to(30, 90);
+        PathStroke ish; ish.width = 1.5f; ish.join = LineJoin::Round; ish.cap = LineCap::Round; b.stroke(s.add_solid(0, 0, 0, 255), ish);
+    }},
+    {"group_opacity", [](PathShape& s) {
+        PathBuilder b(s);
+        u32 g = b.begin_group(0.5f);
+        circle(b, 38, 50, 28); b.fill(s.add_solid(200, 0, 0, 255));
+        circle(b, 62, 50, 28); b.fill(s.add_solid(0, 0, 200, 255));
+        b.end_group(g);
+    }},
+    {"clip_circle", [](PathShape& s) {
+        PathBuilder b(s);
+        u32 c = b.begin_group();
+        circle(b, 50, 50, 36); b.fill(s.add_solid(0, 0, 0, 255));
+        b.end_group(c);
+        s.clips.push(c);
+        u32 g = b.begin_group(1.0f, c + 1);
+        rect(b, 0, 0, 100, 100);
+        PathStop st[2] = {{0.0f, {255, 120, 0, 255}}, {1.0f, {80, 0, 160, 255}}};
+        b.fill(s.add_gradient(linear(0, 0, 100, 100), st, 2));
+        b.end_group(g);
+    }},
+    {"clip_evenodd", [](PathShape& s) {
+        PathBuilder b(s);
+        u32 c = b.begin_group();
+        circle(b, 50, 50, 42); circle(b, 50, 50, 20); b.fill(s.add_solid(0, 0, 0, 255), FillRule::EvenOdd);
+        b.end_group(c);
+        s.clips.push(c);
+        u32 g = b.begin_group(0.8f, c + 1);
+        rect(b, 0, 0, 100, 100); b.fill(s.add_solid(10, 140, 60, 255));
+        b.end_group(g);
+    }},
     {"arcs", [](PathShape& s) {
         PathBuilder b(s);
         b.svg_path("M 20 50 A 30 20 0 0 1 80 50 A 30 30 0 1 1 20 50 Z m 30 -10 a 10 10 0 1 0 0.01 0 z");
@@ -173,18 +270,27 @@ bool write_svg(const PathShape& s, const char* path) {
         fprintf(f, p.kind == PathPaint::Linear ? "</linearGradient>\n" : "</radialGradient>\n");
     }
     fprintf(f, "</defs>\n");
-    Array<u32> open;
-    open.alloc = mem_general();
+    Array<u32> open, closers;
+    open.alloc = closers.alloc = mem_general();
     for (u32 i = 0; i < s.nodes.len; ++i) {
-        while (open.len && i > open.last()) { fprintf(f, "</g>\n"); open.pop(); }
+        while (open.len && i > open.last()) { fprintf(f, closers.last() ? "</clipPath>\n" : "</g>\n"); open.pop(); closers.pop(); }
         const PathNode& n = s.nodes[i];
         const f32* m = n.transform.m;
         if (n.kind == PathNode::Group) {
-            fprintf(f, "<g transform=\"matrix(%g %g %g %g %g %g)\">\n", m[0], m[1], m[2], m[3], m[4], m[5]);
+            bool is_clip = false;
+            for (u32 cl : s.clips) is_clip |= cl == i;
+            if (is_clip) fprintf(f, "<clipPath id=\"c%u\" transform=\"matrix(%g %g %g %g %g %g)\">\n", i, m[0], m[1], m[2], m[3], m[4], m[5]);
+            else {
+                fprintf(f, "<g transform=\"matrix(%g %g %g %g %g %g)\" opacity=\"%g\"", m[0], m[1], m[2], m[3], m[4], m[5], n.opacity);
+                if (n.clip) fprintf(f, " clip-path=\"url(#c%u)\"", n.clip - 1);
+                fprintf(f, ">\n");
+            }
             open.push(i + n.count);
+            closers.push(is_clip ? 1 : 0);
             continue;
         }
-        fprintf(f, "<path transform=\"matrix(%g %g %g %g %g %g)\" fill-rule=\"%s\" d=\"", m[0], m[1], m[2], m[3], m[4], m[5], n.rule == FillRule::EvenOdd ? "evenodd" : "nonzero");
+        const char* rule = n.rule == FillRule::EvenOdd ? "evenodd" : "nonzero";
+        fprintf(f, "<path transform=\"matrix(%g %g %g %g %g %g)\" fill-rule=\"%s\" clip-rule=\"%s\" d=\"", m[0], m[1], m[2], m[3], m[4], m[5], rule, rule);
         const f32* p = s.points.data + n.first_point;
         for (u32 k = 0; k < n.verb_count; ++k) {
             switch (s.verbs[n.first_verb + k]) {
@@ -197,12 +303,29 @@ bool write_svg(const PathShape& s, const char* path) {
         }
         const PathPaint& fp = s.paints[n.fill];
         char col[96];
-        if (fp.kind == PathPaint::Solid) svg_color(col, sizeof col, fp.rgba);
+        if (!n.fill) format(col, sizeof col, "none");
+        else if (fp.kind == PathPaint::Solid) svg_color(col, sizeof col, fp.rgba);
         else format(col, sizeof col, "url(#p%u)", n.fill);
-        fprintf(f, "\" fill=\"%s\" opacity=\"%g\"/>\n", col, n.fill_opacity);
+        fprintf(f, "\" fill=\"%s\"", col);
+        if (n.stroke) {
+            const PathPaint& sp = s.paints[n.stroke];
+            const PathStroke& st = s.strokes[n.stroke_style];
+            if (sp.kind == PathPaint::Solid) fprintf(f, " stroke=\"rgb(%u,%u,%u)\" stroke-opacity=\"%g\"", sp.rgba[0], sp.rgba[1], sp.rgba[2], sp.rgba[3] / 255.0 * n.stroke_opacity);
+            else fprintf(f, " stroke=\"url(#p%u)\"", n.stroke);
+            const char* joins[3] = {"miter", "round", "bevel"};
+            const char* caps[3] = {"butt", "round", "square"};
+            fprintf(f, " stroke-width=\"%g\" stroke-linejoin=\"%s\" stroke-linecap=\"%s\" stroke-miterlimit=\"%g\"", st.width, joins[(u32)st.join], caps[(u32)st.cap], st.miter_limit);
+            if (st.dash_count) {
+                fprintf(f, " stroke-dasharray=\"");
+                for (u32 k = 0; k < st.dash_count; ++k) fprintf(f, "%s%g", k ? " " : "", s.dashes[st.first_dash + k]);
+                fprintf(f, "\" stroke-dashoffset=\"%g\"", st.dash_offset);
+            }
+        }
+        fprintf(f, " opacity=\"%g\"/>\n", n.fill_opacity);
     }
-    while (open.len) { fprintf(f, "</g>\n"); open.pop(); }
+    while (open.len) { fprintf(f, closers.last() ? "</clipPath>\n" : "</g>\n"); open.pop(); closers.pop(); }
     open.free();
+    closers.free();
     fprintf(f, "</svg>\n");
     fclose(f);
     return true;
@@ -322,6 +445,18 @@ bool against_reference(TestCtx& c, const char* name, u32 size, const Picture& go
     free_in(mem_general(), ref.rgba, (usize)size * size * 4);
     *worst_out = worst;
     f64 frac = (f64)off / (size * size);
+    // KV_PATHERIZER_DUMP=DIR: a picture that differs is written there beside resvg's.
+    if (const char* dump = getenv("KV_PATHERIZER_DUMP"); dump && off) {
+        Array<u8> png;
+        png.alloc = mem_general();
+        const char* e = "";
+        if (png_encode(got.px.data, size, size, 4, png, &e)) {
+            char out[700];
+            format(out, sizeof out, "%s/%s_%u.ours.png", dump, name, size);
+            if (FILE* w = fopen(out, "wb")) { fwrite(png.data, 1, png.len, w); fclose(w); }
+        }
+        png.free();
+    }
     if (frac > 0.005) KV_ERROR("test", "%s at %u: %u pixels past 8 (%.2f%%), largest %u", name, size, off, frac * 100.0, worst);
     (void)c;
     return frac <= 0.005;
@@ -465,6 +600,112 @@ void test_gradients(TestCtx& c) {
     s.free();
 }
 
+// Alpha summed over the picture, in pixels.
+f64 area_of(const Picture& p) {
+    f64 sum = 0;
+    for (u32 i = 0; i < p.size * p.size; ++i) sum += p.px[i * 4 + 3] / 255.0;
+    return sum;
+}
+
+void test_strokes(TestCtx& c) {
+    c.begin("strokes against geometry");
+    PathShape s;
+    s.init(mem_general());
+    s.view[2] = s.view[3] = 100;
+    Picture p;
+    u32 white = 0;
+    auto line = [&](LineCap cap, const f32* dashes, u32 dash_count) {
+        s.clear();
+        white = s.add_solid(255, 255, 255, 255);
+        PathBuilder b(s);
+        b.move_to(10, 50); b.line_to(90, 50);
+        PathStroke st; st.width = 10; st.cap = cap;
+        b.stroke(white, st, 1.0f, dashes, dash_count);
+        draw(s, 100, p);
+    };
+    // A butt-capped line on pixel edges: exactly its rectangle.
+    line(LineCap::Butt, nullptr, 0);
+    u32 bad = 0;
+    for (u32 y = 0; y < 100; ++y)
+        for (u32 x = 0; x < 100; ++x) {
+            u8 a = p.px[(y * 100 + x) * 4 + 3];
+            bool in = x >= 10 && x < 90 && y >= 45 && y < 55;
+            if (a != (in ? 255 : 0)) ++bad;
+        }
+    KV_CHECK(c, bad == 0);
+    // A square cap adds half the width at each end; a round one a half disc at each.
+    line(LineCap::Square, nullptr, 0);
+    KV_CHECK(c, kv::fabs((f32)area_of(p) - 90.0f * 10.0f) < 1.0f);
+    line(LineCap::Round, nullptr, 0);
+    f64 want = 80.0 * 10.0 + 3.14159265358979 * 25.0;
+    KV_CHECK(c, area_of(p) > want * 0.995 && area_of(p) < want * 1.005);
+    // Dashes of 10 on, 10 off along 80: four dashes, 400 pixels.
+    f32 d[2] = {10, 10};
+    line(LineCap::Butt, d, 2);
+    KV_CHECK(c, kv::fabs((f32)area_of(p) - 400.0f) < 0.5f);
+    // A square outline stroked 10 wide: the ring between 50 and 30 on a side.
+    s.clear();
+    white = s.add_solid(255, 255, 255, 255);
+    PathBuilder b(s);
+    rect(b, 25, 25, 40, 40);
+    PathStroke st; st.width = 10;
+    b.stroke(white, st);
+    draw(s, 100, p);
+    KV_CHECK(c, kv::fabs((f32)area_of(p) - (50.0f * 50.0f - 30.0f * 30.0f)) < 1.0f);
+    KV_CHECK(c, p.px[(45 * 100 + 45) * 4 + 3] == 0 && p.px[(25 * 100 + 45) * 4 + 3] == 255);
+    // Widened before the transform: a circle stroked 4 wide under a stretch of 3 across is
+    // 12 wide at its sides and 4 at its top.
+    s.clear();
+    white = s.add_solid(255, 255, 255, 255);
+    PathBuilder b2(s);
+    u32 g = b2.begin_group();
+    s.nodes[g].transform.m[0] = 3.0f; s.nodes[g].transform.m[4] = -100.0f;
+    circle(b2, 50, 50, 14);
+    st.width = 4;
+    b2.stroke(white, st);
+    b2.end_group(g);
+    draw(s, 100, p);
+    u32 side = 0, top = 0;
+    for (u32 x = 0; x < 100; ++x) side += p.px[(50 * 100 + x) * 4 + 3] > 127;
+    for (u32 y = 0; y < 100; ++y) top += p.px[(y * 100 + 50) * 4 + 3] > 127;
+    KV_CHECK(c, side == 24 && top == 8); // both sides' widths; top and bottom
+    p.px.free();
+    s.free();
+}
+
+void test_groups(TestCtx& c) {
+    c.begin("group opacity and clips");
+    PathShape s;
+    s.init(mem_general());
+    s.view[2] = s.view[3] = 100;
+    Picture p;
+    // Two overlapping squares in a group at half opacity: the overlap is no darker than the
+    // rest, as the group is composited once.
+    PathBuilder b(s);
+    u32 g = b.begin_group(0.5f);
+    rect(b, 10, 10, 50, 50); b.fill(s.add_solid(255, 255, 255, 255));
+    rect(b, 40, 40, 50, 50); b.fill(s.add_solid(255, 255, 255, 255));
+    b.end_group(g);
+    draw(s, 100, p);
+    u8 one = p.px[(20 * 100 + 20) * 4 + 3], both = p.px[(50 * 100 + 50) * 4 + 3];
+    KV_CHECK(c, one == 128 && both == 128);
+    // A square clipped by a circle: the circle's area.
+    s.clear();
+    PathBuilder b2(s);
+    u32 clip = b2.begin_group();
+    circle(b2, 50, 50, 30); b2.fill(s.add_solid(0, 0, 0, 255));
+    b2.end_group(clip);
+    s.clips.push(clip);
+    u32 g2 = b2.begin_group(1.0f, clip + 1);
+    rect(b2, 0, 0, 100, 100); b2.fill(s.add_solid(255, 255, 255, 255));
+    b2.end_group(g2);
+    draw(s, 100, p);
+    f64 want = 3.14159265358979 * 900.0;
+    KV_CHECK(c, area_of(p) > want * 0.995 && area_of(p) < want * 1.005);
+    p.px.free();
+    s.free();
+}
+
 // The corpus and the icons at each size: against resvg's pictures, and hashed.
 void test_corpus(TestCtx& c) {
     c.begin("the corpus against resvg's pictures, and its hash");
@@ -520,7 +761,7 @@ void test_corpus(TestCtx& c) {
     KV_INFO("test", "%u pictures against resvg's, largest difference %u (%s); corpus hash %016llx", compared, worst, worst_at, (unsigned long long)h);
     // The same bytes everywhere: this is Linux's hash (dev and debug alike). Another
     // platform that gets another has drawn a pixel differently.
-    const u64 kHash = 0x75ec614d43dcf830ull;
+    const u64 kHash = 0x866c2af2152dfe1bull;
     if (kHash) KV_CHECK(c, h == kHash);
     p.px.free();
     s.free();
@@ -542,14 +783,56 @@ int write_corpus(const char* dir) {
     return 0;
 }
 
+// --truth NAME SIZE: where ours and resvg's picture of a corpus shape differ by more than 8
+// in alpha, the two beside a truth (the shape drawn at 16 times the size and averaged), to
+// say which of the two is off.
+int truth(const char* name, u32 size) {
+    const Case* k = nullptr;
+    for (const Case& c : kCases) if (!strcmp(c.name, name)) k = &c;
+    if (!k) { fprintf(stderr, "no case %s\n", name); return 1; }
+    PathShape s;
+    s.init(mem_general());
+    s.view[2] = s.view[3] = 100;
+    k->make(s);
+    Picture small, big;
+    draw(s, size, small);
+    draw(s, size * 16, big);
+    char dir[512], path[700];
+    refs_dir(dir, sizeof dir);
+    format(path, sizeof path, "%s/%s_%u.png", dir, name, size);
+    FILE* f = fopen(path, "rb");
+    if (!f) return 1;
+    Array<u8> bytes;
+    bytes.alloc = mem_general();
+    u8 buf[65536];
+    for (usize n; (n = fread(buf, 1, sizeof buf, f)) > 0;) memcpy(bytes.push_n((u32)n), buf, n);
+    fclose(f);
+    PngImage ref;
+    const char* why = "";
+    if (!png_decode(bytes.data, bytes.len, mem_general(), ref, &why)) return 1;
+    for (u32 y = 0; y < size; ++y)
+        for (u32 x = 0; x < size; ++x) {
+            i32 ours = small.px[(y * size + x) * 4 + 3], theirs = ref.rgba[(y * size + x) * 4 + 3];
+            if (ours - theirs <= 8 && theirs - ours <= 8) continue;
+            f64 sum = 0;
+            for (u32 j = 0; j < 16; ++j)
+                for (u32 i = 0; i < 16; ++i) sum += big.px[((usize)(y * 16 + j) * size * 16 + x * 16 + i) * 4 + 3];
+            printf("(%u,%u) ours %d resvg %d truth %.1f\n", x, y, ours, theirs, sum / 256.0);
+        }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc == 3 && !strcmp(argv[1], "--write-svg")) return write_corpus(argv[2]);
+    if (argc == 4 && !strcmp(argv[1], "--truth")) return truth(argv[2], (u32)atoi(argv[3]));
     TestCtx c;
     test_coverage(c);
     test_rules(c);
     test_gradients(c);
+    test_strokes(c);
+    test_groups(c);
     test_corpus(c);
     kv::mem_shutdown();
     return test_report(c, "patherizer_tests");

@@ -65,3 +65,58 @@ Nov 16, 2026. Notes on `patherizer`, the engine's path rasterizer, as Krome slic
 - **kormake: `test_deps`.** A module's tests may use modules the module does not:
   patherizer's read resvg's PNGs with `image`, while patherizer itself depends on `core`
   and `math` only.
+
+## Milestone 2: strokes, clips and groups
+
+- **Strokes** (`stroke.cc`) are widened in the path's own space and then transformed, as
+  SVG does: a circle stroked 4 wide under a stretch of 3 across is 12 wide at its sides and
+  4 at its top (a test). The flattening tolerance there is the target's divided by how far
+  the transform stretches. The outlines are filled nonzero:
+  - an open piece is one outline: the left side, the end cap, the right side back, the
+    start cap;
+  - a closed subpath is two outlines wound opposite ways;
+  - joins miter (with its limit, falling back to bevel), round and bevel; caps butt, round
+    and square; dashes with their offset;
+  - a zero-length piece draws a round cap's dot or a square cap's square.
+- **The inner side of a turn, and why it matters here.** The cell method adds the coverage
+  of everything a path draws, so an outline that overlaps itself counts the overlap twice
+  inside a pixel. That is fine where the overlap fills whole pixels, and not at an edge.
+  The first strokes pivoted through the vertex on every inner turn, as many strokers do.
+  On a flattened curve that is every vertex, and each pivot's small loop overlapped the
+  stroke: a stroked circle's inner edge came out a tenth of a pixel too heavy. Now:
+  - the inner side turns where the two offset edges cross, for every gentle turn (a curve's)
+    and for a sharp one whose crossing falls within both segments; it pivots only at a sharp
+    turn between short segments;
+  - an open piece whose end segment is shorter than the join's reach at its far vertex (a
+    dash that cut a chord just short of its end) drops that vertex, which moves the outline
+    by less than the flattening's tolerance;
+  - a dash on at both the end and the start of a closed subpath is one piece across the
+    seam, not two capped ones that overlap there, as resvg draws it.
+- **Clips and group opacity.**
+  - A group with opacity below 1, or a clip, draws into a canvas of its own, then over the
+    one under it, times the opacity and the clip's coverage.
+  - A clip is a group listed in `PathShape::clips`, drawn only as a clip. Its paths'
+    outlines, in the clipped group's user space after the clip's own transform, make a
+    coverage mask: the union of each path's coverage, by its rule, whatever it is painted
+    with.
+- **The references at 8 times, not 4.** At 4 times, resvg's own stroker was the error.
+  - The test learned `--truth NAME SIZE`: for each pixel where ours and resvg's differ, it
+    prints a third value, the shape drawn by patherizer at 16 times the size and averaged.
+  - On the stroked circle at 48 px the truth sided with ours (within 3 levels) against
+    resvg's (10 to 15 off). Its stroker approximates the offset curves with curves of its
+    own, to a tolerance that is still about 0.06 of a final pixel at 4 times.
+  - At 8 times that error halves, and the references are drawn so (32 x 32 samples a pixel).
+    The rings' areas are exact either way: ours within 0.03% at 48, 200 and 800 px, resvg's
+    within 0.003%.
+- **Conflation, and where the corpus avoids it.** Two paths that share a pixel without
+  overlapping combine their partial coverages as a + b (1 - a), where a supersampled
+  picture has a + b. Every analytic rasterizer does this: browsers, and Skia at 1x.
+  - The corpus keeps its shapes more than a pixel apart at 16 px, so it tests strokes and
+    not that.
+  - Its round-capped dashes have gaps wider than the caps. The dash list is even, since an
+    odd one repeats with its dashes and gaps swapped.
+  - Overlapping pieces of one path are the cell method's known approximation, as at a
+    pentagram's points.
+- **Numbers so far.** 197 pictures (the corpus's 31 shapes and the 21 icons, at their sizes)
+  agree with resvg's. The largest difference is 89, one pixel of the even-odd pentagram at
+  48 px. The corpus hashes to `866c2af2152dfe1b` in debug, dev and ship.
