@@ -545,7 +545,7 @@ struct Parser {
 
     // name=value pairs to the end of the line (a style's or a theme's), and in a style, flags.
     // Stops at the line's end or a closing brace. A word followed by a block is handed back.
-    const char* pairs(Array<Prop>& out, Array<const char*>* flags, Array<u32>* lines) {
+    const char* pairs(Array<Prop>& out, Array<const char*>* flags, Array<u32>* line_at) {
         for (;;) {
             blanks();
             char c = peek();
@@ -558,7 +558,7 @@ struct Parser {
                 JsonRef v = value();
                 if (v != KV_JSON_NO_REF) {
                     out.push(Prop{w, v, order++});
-                    if (lines) lines->push(line);
+                    if (line_at) line_at->push(line);
                 }
                 continue;
             }

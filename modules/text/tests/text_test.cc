@@ -111,8 +111,8 @@ void test_text(kv::TestCtx& c) {
         Text w;
         w.wrap = 30.0f;
         Array<GlyphPlacement> lines{};
-        u32 n = text_layout_paragraph(ff.f, w, "ab cd ef", ~0u, lines);
-        KV_CHECK(c, n == 6 && near(lines[0].center.x, 5) && near(lines[0].center.y, 6) && near(lines[2].center.y, 6 - 14) && near(lines[4].center.y, 6 - 28));
+        u32 placed = text_layout_paragraph(ff.f, w, "ab cd ef", ~0u, lines);
+        KV_CHECK(c, placed == 6 && near(lines[0].center.x, 5) && near(lines[0].center.y, 6) && near(lines[2].center.y, 6 - 14) && near(lines[4].center.y, 6 - 28));
         w.align = TextAlign::Center;
         lines.clear();
         text_layout_paragraph(ff.f, w, "ab cd ef", ~0u, lines);

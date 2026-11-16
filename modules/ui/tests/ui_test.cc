@@ -143,11 +143,11 @@ void test_ui(kv::TestCtx& c) {
     ui_close(e, hud);
     // Rich text: {key} is a model value, {*tag} a look or a pause, {/tag} its end, {{ a
     // brace; the old spellings ({=key}, a bare {wave}) are model keys no one set.
-    if (UiState_* st = ui_state(e)) {
+    if (UiState_* ust = ui_state(e)) {
         f32 secs = 0.0f;
-        KV_CHECK(c, ui_text_chars(*st, "HP {hp}/{hp_max} {*c=gold}ok{/c}{*wave}!{/wave}{{x", 10.0f, nullptr) == 12);
-        KV_CHECK(c, ui_text_chars(*st, "a{*pause=0.5}b", 10.0f, &secs) == 2 && secs > 0.69f && secs < 0.71f);
-        KV_CHECK(c, ui_text_chars(*st, "{=hp}{wave}{c=gold}", 10.0f, nullptr) == 0);
+        KV_CHECK(c, ui_text_chars(*ust, "HP {hp}/{hp_max} {*c=gold}ok{/c}{*wave}!{/wave}{{x", 10.0f, nullptr) == 12);
+        KV_CHECK(c, ui_text_chars(*ust, "a{*pause=0.5}b", 10.0f, &secs) == 2 && secs > 0.69f && secs < 0.71f);
+        KV_CHECK(c, ui_text_chars(*ust, "{=hp}{wave}{c=gold}", 10.0f, nullptr) == 0);
     }
 
     // ---- a list: focus, repeat, select by name and event, cancel ---------------------------
