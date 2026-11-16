@@ -120,6 +120,28 @@ void test_rebuild(kv::TestCtx& c) {
     input_pointer_override(e, bx, thumb_y + 200.0f, 0);
     frames(e, 1);
     KV_CHECK(c, !s.bar.active);
+    // Still, nothing more happens: no rebuild asks for another (the loop that held the mouse).
+    {
+        u32 dead = sc.dead;
+        frames(e, 30);
+        KV_CHECK(c, sc.dead == dead && !sc.rebuild);
+    }
+    // Built whole deep in the list: its rows come back where they were, built once.
+    box = scroll_box(t);
+    t.nodes[box].scroll.y = 40000.0f;
+    t.dirty = true;
+    frames(e, 2);
+    sc.rebuild = true;
+    frames(e, 1);
+    u32 after = sc.dead;
+    frames(e, 10);
+    box = scroll_box(t);
+    KV_CHECK(c, after == 0 && sc.dead == 0 && !sc.rebuild && t.nodes[box].scroll.y == 40000.0f);
+    {
+        const KromeRegion* vr = nullptr;
+        for (const KromeRegion& r : sc.regions) if (r.alive && r.height > 0.0f) vr = &r;
+        KV_CHECK(c, vr && vr->first > 1600 && vr->first <= 40000 / 24);
+    }
     KV_INFO("test", "rebuild: %u whole rebuilds under 20 presses, %u under a 40-step drag", rebuilds_seen, full_after);
     engine_shutdown(e);
 }

@@ -46,6 +46,10 @@ struct Build {
     bool                waiting = false; // a kim() piece's file is not in yet
     u64                 nodes = 0;
     u32                 overlay = 0;     // the overlay being built (0: the screen's tree)
+    // A whole rebuild's virtualized eaches' windows, in the old tree's document order: each
+    // region built again takes the first not yet taken that was built from the same markup.
+    struct Window { const JsonValue* src; u32 first, want; bool taken; };
+    Array<Window>*      windows = nullptr;
     Array<KromeSlot>*   slots = nullptr; // uses' children kept for w:open_slot; null: not kept
 };
 
@@ -447,6 +451,10 @@ void region(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const K
         r.height = height;
         f32 view = b.s.win_h > 0.0f ? b.s.win_h / b.s.scale : 1000.0f;
         r.want = (u32)(view * 3.0f / height) + 8;
+        // Built whole again: where it was, so nothing is built twice to get back there.
+        if (b.windows)
+            for (Build::Window& w : *b.windows)
+                if (!w.taken && w.src == &n) { r.first = w.first; r.want = w.want; w.taken = true; break; }
     }
     r.count = region_body(b, f, n, parent, fr, r.height > 0.0f ? &r : nullptr);
     if (!b.regions) return;
@@ -642,6 +650,19 @@ void restore_walk(KromeTree& t, u32 i, u32* nth, Array<Kept>& kept) {
     }
     for (u32 c = n.first; c != KROME_NONE; c = t.nodes[c].next) restore_walk(t, c, nth, kept);
 }
+// The virtualized eaches' windows, in document order (by their anchors in the tree).
+void keep_windows_walk(const KromeScreen& sc, u32 i, Array<Build::Window>& out) {
+    const KromeNode& n = sc.tree.nodes[i];
+    if (n.flags & KROME_DEAD) return;
+    if (n.flags & KROME_HIDDEN)
+        for (const KromeRegion& r : sc.regions)
+            if (r.alive && r.anchor == i && r.height > 0.0f) out.push(Build::Window{r.src, r.first, r.want, false});
+    for (u32 c = n.first; c != KROME_NONE; c = sc.tree.nodes[c].next) keep_windows_walk(sc, c, out);
+}
+void keep_windows(const KromeScreen& sc, Array<Build::Window>& out) {
+    if (sc.tree.root != KROME_NONE) keep_windows_walk(sc, sc.tree.root, out);
+}
+
 void restore(KromeTree& t, Array<Kept>& kept) {
     u32 nth = 0;
     if (t.root != KROME_NONE) restore_walk(t, t.root, &nth, kept);
@@ -684,6 +705,8 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc) {
     if (!root) { krome_error(s, f->file, 0, nullptr, 0, "no screen '%s'", screen ? screen : "?"); return false; }
     Array<Kept> kept{};
     keep_scroll(sc.tree, kept);
+    Array<Build::Window> windows{};
+    keep_windows(sc, windows);
     sc.tree.clear();
     sc.deps.clear();
     sc.regions.alloc = s.general;
@@ -702,7 +725,9 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc) {
     if (s.tip.screen == sc.id && !s.tip.overlay) s.tip = KromeTarget{};
     Build b{s, sc, sc.tree, &sc.deps, &sc.regions, &sc.frames, &sc.scope, krome_theme_of(s, sc.scope)};
     b.slots = &sc.slots;
+    b.windows = &windows;
     node(b, *f, *root, KROME_NONE, nullptr, nullptr);
+    windows.free();
     sc.waiting = b.waiting;
     restore(sc.tree, kept);
     for (const Kept& k : kept)

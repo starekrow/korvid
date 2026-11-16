@@ -182,6 +182,14 @@ void HostWindow::cursor(CursorShape shape) {
     if (c) SDL_SetCursor(c);
 }
 
+bool HostWindow::capture_mouse(bool on) {
+    if (!native_) return false;
+    bool ok = SDL_CaptureMouse(on);
+    static bool told = false;
+    if (!ok && on && !told) { KV_INFO("input", "mouse capture: %s (a drag outside the window rests on the platform)", SDL_GetError()); told = true; }
+    return ok;
+}
+
 // Framebuffer pixels per window unit (2 on a scaled desktop); 1 when SDL has no answer.
 f32 HostWindow::pixel_scale() const {
     int ww = 0, wh = 0;
@@ -191,8 +199,37 @@ f32 HostWindow::pixel_scale() const {
 
 namespace {
 
+// KV_TRACE_MOUSE=1 in the environment: what SDL says of the pointer at the window's edge
+// (entering and leaving, buttons, motion outside it), for a drag that stops there.
+bool trace_mouse() {
+    static int on = -1;
+    if (on < 0) { const char* v = SDL_getenv("KV_TRACE_MOUSE"); on = v && *v && *v != '0'; }
+    return on != 0;
+}
+
 // One OS event into bus events and raw input: pump's and drain's.
 void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
+        if (trace_mouse()) {
+            switch (e.type) {
+            case SDL_EVENT_WINDOW_MOUSE_ENTER: KV_INFO("input", "trace: the pointer entered the window"); break;
+            case SDL_EVENT_WINDOW_MOUSE_LEAVE: KV_INFO("input", "trace: the pointer left the window"); break;
+            case SDL_EVENT_WINDOW_FOCUS_LOST: KV_INFO("input", "trace: the window lost the focus"); break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+                KV_INFO("input", "trace: button %u %s at (%.0f, %.0f)", e.button.button, e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? "down" : "up", e.button.x, e.button.y);
+                break;
+            case SDL_EVENT_MOUSE_MOTION: {
+                int ww = 0, wh = 0;
+                SDL_GetWindowSize((SDL_Window*)w.native_, &ww, &wh);
+                if (e.motion.x < 0 || e.motion.y < 0 || e.motion.x >= ww || e.motion.y >= wh)
+                    KV_INFO("input", "trace: motion outside the window at (%.0f, %.0f), buttons %x", e.motion.x, e.motion.y, e.motion.state);
+                else if (e.motion.x == 0 || e.motion.y == 0 || e.motion.x == ww - 1 || e.motion.y == wh - 1)
+                    KV_INFO("input", "trace: motion at the window's edge (%.0f, %.0f), buttons %x", e.motion.x, e.motion.y, e.motion.state);
+                break;
+            }
+            default: break;
+            }
+        }
         switch (e.type) {
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:

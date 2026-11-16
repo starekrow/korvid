@@ -100,6 +100,9 @@ struct HostWindow {
     bool clipboard_get(Array<char>& out);
     bool clipboard_set(const char* utf8);
     void cursor(CursorShape shape);
+    // While on, the pointer keeps reporting to this window outside it (a drag); false where
+    // the platform cannot.
+    bool capture_mouse(bool on);
 
     // Some OSes take the window's surface away while the program runs and give another
     // later (Android, whenever the app leaves the screen). fn(ctx, null) is called from

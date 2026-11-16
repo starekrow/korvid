@@ -86,6 +86,8 @@ bool platform_clipboard_get(Engine& e, Array<char>& out);
 void platform_clipboard_set(Engine& e, const char* utf8);
 // The pointer's shape over the window.
 void platform_cursor(Engine& e, CursorShape shape);
+// The pointer held to the window while on, so a drag goes on outside it (Krome's presses).
+void platform_capture_mouse(Engine& e, bool on);
 // Puts the pointer at (x, y) (framebuffer pixels, top-left origin) with these buttons held
 // (MouseButton bits) and this much wheel, as if from the mouse, into the next sample; it
 // stays there until the mouse or another override moves it. For demo scripts and tests.

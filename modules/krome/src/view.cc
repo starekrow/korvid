@@ -1014,6 +1014,8 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
     follow_tip(s, under, down && !s.down);
     follow_hover(s, under);
 
+    // The pointer held to the window while the button is: a drag goes on outside it.
+    if (down != s.down) platform_capture_mouse(*s.e, down);
     if (down && !s.down) {
         // A press outside the light overlays closes them, and goes no further.
         KromeScreen* light = light_overlays_screen(s);

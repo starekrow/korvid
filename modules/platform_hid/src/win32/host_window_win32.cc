@@ -335,6 +335,7 @@ void HostWindow::text_area(rect2, f32) {}
 bool HostWindow::clipboard_get(Array<char>&) { return false; }
 bool HostWindow::clipboard_set(const char*) { return false; }
 void HostWindow::cursor(CursorShape) {}
+bool HostWindow::capture_mouse(bool) { return false; }
 
 
 void HostWindow::close() {

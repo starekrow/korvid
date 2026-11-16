@@ -295,6 +295,11 @@ void platform_cursor(Engine& e, CursorShape shape) {
     if (s && s->window.is_open()) s->window.cursor(shape);
 }
 
+void platform_capture_mouse(Engine& e, bool on) {
+    HidState* s = state(e);
+    if (s && s->window.is_open()) s->window.capture_mouse(on);
+}
+
 void InputState::type(const char* utf8) {
     const char* p = utf8 ? utf8 : "";
     while (*p) {
