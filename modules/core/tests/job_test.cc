@@ -62,9 +62,10 @@ void test_job(kv::TestCtx& c) {
         for (u32 h : hits) all_once = all_once && h == 1;
         KV_CHECK(c, all_once);
         // Over many small batches some chunk lands on a worker; one batch could finish on
-        // the caller before a worker wakes.
+        // the caller before a worker wakes, and on a machine busy with other tests (all of
+        // kormake test at once) twenty did not always.
         u32 threads = 1;
-        for (u32 rep = 0; rep < 20 && threads < 2; ++rep) { jobs_run(1000, 64, mark, &s); threads = distinct_threads(s); }
+        for (u32 rep = 0; rep < 200 && threads < 2; ++rep) { jobs_run(1000, 64, mark, &s); threads = distinct_threads(s); }
         KV_CHECK(c, workers == 0 ? threads == 1 : threads >= 2); // the caller plus at least one worker
         // Nested: 8 outer chunks each running a 100-element batch.
         u32 inner[800];

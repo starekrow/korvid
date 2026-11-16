@@ -146,7 +146,8 @@ void test_normalize(TestCtx& c) {
     IoStat before{}, after{};
     KV_CHECK(c, io_stat(path("stock.kbor"), &before));
     KV_CHECK(c, kbor("normalize", path("stock.kbor")) == 0 && has(g_out.data, "already normalized"));
-    KV_CHECK(c, io_stat(path("stock.kbor"), &after) && memcmp(&before, &after, sizeof before) == 0);
+    // Field by field: the struct's padding is not part of what a stat says.
+    KV_CHECK(c, io_stat(path("stock.kbor"), &after) && after.size == before.size && after.mtime_ns == before.mtime_ns);
 }
 
 void test_failures(TestCtx& c) {

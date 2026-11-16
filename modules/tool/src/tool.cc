@@ -9,9 +9,14 @@
 #include "korvid/core/profile.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "korvid/core/time.h"
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 namespace kv {
 
@@ -85,6 +90,13 @@ bool tool_running(Engine& e) {
 constexpr f64 k_work_slice = 0.005;
 
 int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const ToolConfig& config) {
+#if defined(_WIN32)
+    // A tool's output is read by programs (tests, scripts, another tool) as often as by
+    // people: the bytes it writes, `\n` and all. The C runtime's text mode would make each
+    // `\n` a `\r\n`, so a tool's output would differ by platform.
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+#endif
     u32 threads = 0;
     u64 max_ticks = 0;
     bool verbose = false;
