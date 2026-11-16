@@ -367,8 +367,9 @@ Asked for after milestone 5, when its numbers showed the AVX2 copy buying nothin
 
 ## Windows
 
-Nov 15, 2026: the first build and run on Windows. A Ryzen 7 7840U (8 cores, 16 threads), Windows 11, MSVC 14.51, a
-dev build, the display at 60 Hz and scaled by 1.5.
+Nov 15, 2026: the first build and run on Windows. The Linux machine itself, dual-booted: a Ryzen 7 7840U (8 cores,
+16 threads), Windows 11, MSVC 14.51, a dev build, the display at 60 Hz and scaled by 1.5. What differs from the
+Linux numbers is the OS and the compiler, not the hardware.
 
 - **It builds and draws the same bytes.** The branch built clean with cl at the first try (with kormake rebuilt
   from the branch's scripts: `isa_sources` and `codegen` are new fields). The gallery's test draws all ten scenes
@@ -427,7 +428,7 @@ dev build, the display at 60 Hz and scaled by 1.5.
 | arcfire --bench ring rank=56 | 1920x1080 | 1 | avx2 | 4 | (no stats line) | | | | |
 | arcfire --bench ring rank=56 | 1920x1080 | all | base | 8 | 94.937 | 0.000 | 96.153 | 0.890 | 501.5 / 8.5 |
 
-Beside Linux's AVX2 table above (1920 x 1080, every core; both machines have 8 cores and 16 threads):
+Beside Linux's AVX2 table above (1920 x 1080, every core; the same machine):
 
 | Workload | Windows, baseline | Windows, AVX2 | Linux, baseline | Linux, AVX2 |
 | --- | --- | --- | --- | --- |
@@ -441,11 +442,15 @@ Beside Linux's AVX2 table above (1920 x 1080, every core; both machines have 8 c
     scaled by 1.5, so a button covers more of them.
   - **arcfire holds 60 fps at 1080p on every core**, with its game shaders (14.7 ms) and without (5.1 ms).
   - **Present is under a millisecond** (0.3 to 0.9): a DIB blit, with no wait for the display in it.
-  - **Outlier: cl's code is slower where the compiler writes the loops.** The baseline kernels take 1.5 times
-    gcc's (19.2 ms against 13.1), and Slang's C++ for the game shaders is slower too (their share of a frame: about
-    9.6 ms against 6.1). The hand-written AVX2 spans close most of it (5.1 against 4.3). Not looked into here:
-    whether it is the code cl makes (`/O2 /Ob3` against `-O3`) or the two machines; one machine's two compilers
-    would say.
+  - **Outlier: Windows is slower on the same hardware, and cl's loops slower still.** Two parts, read from the
+    same machine's two runs:
+    - About 1.2 times everywhere, even where the code is hand-written: the AVX2 spans take 5.1 ms against Linux's
+      4.3 on every core, and 44.8 against 36.8 on one. That share is the OS (its power plan and clocks, its
+      scheduler), not the code.
+    - About 1.25 times more where the compiler writes the loops: the baseline kernels take 1.47 times gcc's (19.2 ms
+      against 13.1), and Slang's C++ for the game shaders is slower by as much (their share of a frame: about 9.6 ms
+      against 6.1). That is cl's code (`/O2 /Ob3` against `-O3`), the likeliest thing to look at, and not looked
+      at here.
   - **One core is 9 times slower than sixteen threads** on arcfire (44.8 ms against 5.1 at 1080p without
     shaders), as on Linux.
 

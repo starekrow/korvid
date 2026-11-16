@@ -230,7 +230,7 @@ throughout. Nov 15, 2026.
 | A watch, one save | | | 36 to 41 ms | 28 ms (1M) | 25 ms (1M) | 28 ms |
 
 At the end, the default 1.06 GiB (18,357 files, `kormake test --heavy goldberg windows-dev`)
-beside Linux's last column, the same tree and the same digest, `1fccef70833884e2`:
+beside Linux's last column: the same machine, the same tree and the same digest, `1fccef70833884e2`:
 
 | What | Windows, a fresh converter | Windows, delay-loaded, a converter a CPU | Linux |
 |---|---|---|---|

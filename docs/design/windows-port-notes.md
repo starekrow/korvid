@@ -3,8 +3,9 @@
 What Windows does differently from Linux and macOS, as the engine and its tools found it,
 and what each one costs: most of it is about starting processes and making files, which
 Windows does in milliseconds where Linux takes microseconds. Measured on Windows 11
-(26200), 16 cpus, NTFS on NVMe, Defender on with the repository excluded, MSVC 14.51, Nov
-14 and 15, 2026. The renderer is `renderer-d3d12.md`'s; goldberg's cook at scale, with the
+(26200) on the Linux machine itself, dual-booted (a Ryzen 7 7840U, 16 threads, NVMe), so
+a difference from Linux's numbers is the OS's: NTFS, Defender on with the repository
+excluded, MSVC 14.51, Nov 14 and 15, 2026. The renderer is `renderer-d3d12.md`'s; goldberg's cook at scale, with the
 numbers before and after each change, is `goldberg-notes.md` ("Windows" and "Windows at
 scale").
 
