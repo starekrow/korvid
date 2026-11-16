@@ -29,7 +29,9 @@ struct Engine;
 
 // Out: a node's event fired (a press, or the script's emit). Name hashes; node is the id, 0
 // when the node has none or the script emitted it.
-struct KromeEvent { u64 screen; u64 node; u64 event; f64 value; };
+// x and y: where the pointer was, logical pixels in the window, for a right-button `context`
+// event (0 for the rest).
+struct KromeEvent { u64 screen; u64 node; u64 event; f64 value; f32 x = 0.0f, y = 0.0f; };
 
 // In: a model value from outside. kind: 0 a number, 1 a boolean (number 0 or 1), 2 a string.
 constexpr u32 KROME_SET_TEXT = 56;

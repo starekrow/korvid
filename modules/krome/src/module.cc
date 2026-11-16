@@ -199,8 +199,10 @@ void krome_input(TickContext& ctx) {
         if (s.down && u < ups.len) { krome_pointer(s, ups[u].x, ups[u].y, false, 0.0f, false); ++u; continue; }
         break;
     }
-    f32 wheel = 0.0f;
-    for (const MouseWheel& w : ctx.received<MouseWheel>()) wheel += w.dy;
+    // The right button presses for a node's context event.
+    for (const MouseButtonDown& b : downs) if (b.button == MouseButton::Right) krome_context_press(s, b.x, b.y);
+    f32 wheel = 0.0f, wheel_x = 0.0f;
+    for (const MouseWheel& w : ctx.received<MouseWheel>()) { wheel += w.dy; wheel_x += w.dx; }
     for (const FocusChanged& f : ctx.received<FocusChanged>()) s.window_focused = f.focused;
     // Keys go to the edit with the keyboard first; what it does not take (Escape with none)
     // is the screens'.
@@ -220,7 +222,10 @@ void krome_input(TickContext& ctx) {
         krome_edit_typed(s, t.text);
     }
     f32 x = in ? in->raw.mouse.x : s.px, y = in ? in->raw.mouse.y : s.py;
+    // Shift turns the wheel across.
+    if (shift && wheel != 0.0f) { wheel_x -= wheel; wheel = 0.0f; }
     krome_pointer(s, x, y, s.down, wheel, escape);
+    if (wheel_x != 0.0f) krome_wheel(s, wheel_x, 0.0f);
     krome_edit_frame(s);
     s.ctx = nullptr;
 }

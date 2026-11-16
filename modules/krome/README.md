@@ -70,7 +70,16 @@ script's tables made into one, and builds the kernel's tree:
   sits after a hidden anchor; when the model key its path starts with changes, what follows
   the anchor is built again and nothing else.
 - **`@name`** binds a node's `selected` state to the model; a press flips the value before
-  the event's handler runs.
+  the event's handler runs. **`@name=value`** binds by equality (radio buttons, tabs): the
+  node is selected while the model's text there is `value`, and a press writes `value`. Lua
+  writes it in one string, `bind = "mode=fast"`.
+- **A property bound to the model**: `w=@left`, `bg=@item.tint`, `opacity=@fade` (Lua
+  writes `w = "@left"`). Set from the model when built and again when the key changes, with
+  no rebuild. A number is a number, a boolean 0 or 1, a string read as markup's values are
+  (`"40%"`, `"10..90"`, a color), a list of up to four numbers; a value the property does not
+  take is its error. Tokens are not looked up in model values.
+- **Percent sizes**: `w=40%`, `h=100%`, of the parent's inside. In a parent that hugs, a
+  percentage hugs its content (the parent's size would depend on it).
 
 **Lua.** Krome holds a Lua state of its own (the engine's allocator and math; no files).
 A screen is a script returning its tree, or `{ root, model, on, uses }`; or a `.kimb`
@@ -98,7 +107,11 @@ are traced (`--trace-events`).
 color })` opens a subtree over the screen (a table, or `kim(...)`), anchored to a node
 (below, above, right, left, at the pointer), flipped and held inside the window. Input goes
 top first. A light overlay closes on a press outside it, and the press goes no further; a
-modal takes all input until `close_overlay()`; Escape closes the top one. An overlay is a
+modal takes all input until `close_overlay()`; Escape closes the top one. A tooltip
+(`tooltip="..."`, shown 0.6 s after the pointer rests on the node, in std's `tooltip` style)
+is an overlay the pointer goes through, which neither Escape nor `close_overlay()` closes; it
+goes when the pointer leaves or presses. The right button fires the nearest `context=event`
+under it, to the handler as `(id, x, y)` (logical pixels) and in `KromeEvent`'s `x` and `y`. An overlay is a
 tree of its own and inherits nothing from the screen under it.
 
 **The Frame cycle.** Krome's systems run in `Phase::Frame` (docs/design/cycles.md): once
@@ -108,7 +121,10 @@ releases, the wheel and Escape arrive as events, so a click between two frames i
 **Drawing.** `krome.paint` lays out what changed and paints the screens of each
 layer into one `UiList` (`korvid/render/ui.h`): a box per node with a background, border,
 shadow or image, a glyph per character from the asset font at the size times the scale,
-clips for `clip` and `scroll`. A layer whose screens did not change is not painted and
+clips for `clip` and `scroll`. A scroll box draws its bars over its content while the
+content is longer than it is (the look's `scrollbar-color`, `scrollbar-track`,
+`scrollbar-size`; std's `scrollbar` style); a press on the thumb drags it, on the track
+pages, and the box keeps the keyboard where it was. A layer whose screens did not change is not painted and
 not handed over; a still screen costs nothing. A new list asks the loop for a frame
 (`engine_want_frame`), so a window paced on demand shows it.
 
@@ -179,10 +195,12 @@ Header `korvid/krome/krome.h`:
 In Lua: the helpers (and `edit`, with `bind = "key"`), `model`, `emit(name, value)`,
 `open_overlay(tree, opts)`, `close_overlay([id])`, `theme(name)`, `changed(key)`, `kim(file, screen)`.
 
-Properties: layout `w`, `h`, `pad`, `gap`, `dir`, `anchor`; an edit's `placeholder`,
-`change`, `blur`; `cursor`; look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
+Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `pad`, `gap`,
+`dir`, `anchor`, `scroll` (`x`, `y` or `xy`), `tooltip`, `context`; an edit's `placeholder`,
+`change`, `blur`; `cursor`; any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
-`opacity`, `font`, `size`, `line-height`, `image`, `tint`, `caret-color`, `selection-color`.
+`opacity`, `font`, `size`, `line-height`, `image`, `tint`, `caret-color`, `selection-color`,
+`scrollbar-color`, `scrollbar-track`, `scrollbar-size`.
 Flags: `fill`, `clip`, `scroll`, `disabled`, `selected`, `hidden`, the alignments,
 `subpixel`, `nowrap`, `multiline`, `readonly`. The
 vocabulary is fixed (`modules/kimb`); `prop name type` in a prelude types a definition's
@@ -191,7 +209,7 @@ parameter.
 **`krome/std`** (`assets/std.kim`): themes `dark` (first, so a screen starts in it) and
 `light`; `row`, `col`, `stack`, `spacer`, `separator`, `label`, `heading`, `field`, `badge`,
 `button` (and `[danger]`), `checkbox` (bind it: `checkbox "Wrap" @wrap`), `input` and
-`textarea` (bind them: `textarea @notes placeholder="Notes"`), `menu-item`, `panel`; styles `page`, `menu`, `panel`, `list`, `list-row`. A game's own `def` or `style`
+`textarea` (bind them: `textarea @notes placeholder="Notes"`), `menu-item`, `panel`; styles `page`, `menu`, `panel`, `list`, `list-row`, `scrollbar`, `tooltip`. A game's own `def` or `style`
 of the same name wins, and its `theme dark` overrides the tokens it names.
 
 ## Behaviour worth knowing
@@ -203,6 +221,9 @@ of the same name wins, and its `theme dark` overrides the tokens it names.
   error naming the theme.
 - **Definitions are expanded at load**, every time a screen is built: a prelude swapped
   since the screen was cooked is the one used.
+- **`scroll` alone scrolls along the box's direction**; `scroll=x`, `y` or `xy` say which. The
+  wheel moves the nearest box under the pointer that goes its way (a row's takes it across),
+  Shift+wheel and a horizontal wheel across. A stack does not scroll.
 - **A list changed in place is not seen**: assign it again, or `changed("key")`.
 - **Overlay texts are filled once**, when the overlay opens; the model does not refill them,
   and an each or if in one is built once.

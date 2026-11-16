@@ -222,6 +222,7 @@ constinit const KimbKernelProp k_props[] = {
     {"caret-color", KimbType::Color, false},
     {"change", KimbType::String, true},
     {"color", KimbType::Color, false},
+    {"context", KimbType::String, true},
     {"cursor", KimbType::String, true},
     {"dir", KimbType::Dir, true},
     {"font", KimbType::String, false},
@@ -233,11 +234,16 @@ constinit const KimbKernelProp k_props[] = {
     {"pad", KimbType::Box4, true},
     {"placeholder", KimbType::String, true},
     {"radius", KimbType::Box4, false},
+    {"scroll", KimbType::String, true},
+    {"scrollbar-color", KimbType::Color, false},
+    {"scrollbar-size", KimbType::Number, false},
+    {"scrollbar-track", KimbType::Color, false},
     {"selection-color", KimbType::Color, false},
     {"shadow", KimbType::Shadow, false},
     {"shadow-color", KimbType::Color, false},
     {"size", KimbType::Number, false},
     {"tint", KimbType::Color, false},
+    {"tooltip", KimbType::String, true},
     {"w", KimbType::Size, true},
 };
 
@@ -284,6 +290,11 @@ bool range_text(const char* s) {
     return lo_ok && hi_ok && (dots != s || *hi);
 }
 
+bool percent_text(const char* s) {
+    usize n = strlen(s);
+    return n > 1 && s[n - 1] == '%' && number_text(s, s + n - 1);
+}
+
 bool anchor_word(const char* s) {
     static const char* const ok[] = {"center", "top", "middle", "bottom", "left", "right", "top-left", "top-center", "top-right",
                                      "middle-left", "middle-center", "middle-right", "bottom-left", "bottom-center", "bottom-right"};
@@ -313,7 +324,7 @@ const char* kimb_type_name(KimbType t) {
     case KimbType::Number: return "a number";
     case KimbType::Color: return "a color";
     case KimbType::String: return "a string";
-    case KimbType::Size: return "a number, hug, fill or a range";
+    case KimbType::Size: return "a number, a percentage, hug, fill or a range";
     case KimbType::Box4: return "one, two or four numbers";
     case KimbType::Shadow: return "x, y, blur and an optional spread";
     case KimbType::Dir: return "row, col or stack";
@@ -329,7 +340,7 @@ bool kimb_literal(KimbType t, const JsonValue& v) {
     case KimbType::Number: return v.is_number();
     case KimbType::Color: return s && hex_color(s);
     case KimbType::String: return s != nullptr;
-    case KimbType::Size: return v.is_number() || (s && (!strcmp(s, "hug") || !strcmp(s, "fill") || range_text(s)));
+    case KimbType::Size: return v.is_number() || (s && (!strcmp(s, "hug") || !strcmp(s, "fill") || range_text(s) || percent_text(s)));
     case KimbType::Box4:
     case KimbType::Shadow: {
         if (t == KimbType::Box4 && v.is_number()) return true;
@@ -398,6 +409,7 @@ struct Checker {
     void value(u32 line, const char* what, const char* name, KimbType t, const JsonValue& v) {
         if (t == KimbType::Any) return;
         const char* word = v.str();
+        if (word && word[0] == '@') return; // bound to the model: what it reads is known only when it runs
         if (word && theme_count) {
             bool somewhere = false;
             for (u32 i = 0; i < theme_count; ++i) if (kimb_find_token(s, themes[i], word, nullptr)) somewhere = true;

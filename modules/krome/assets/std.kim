@@ -24,6 +24,7 @@ theme dark {
     danger=#3a2430 danger-hover=#4d2f3d danger-down=#2c1b25
     shade=#00000099 deep-shade=#000000aa
     on-accent=#e6e9ef raised-ink=#ffffff
+    thumb=#ffffff38 tip=#2a3142 tip-ink=#e6e9ef
 }
 
 theme light {
@@ -35,6 +36,7 @@ theme light {
     danger=#c2405a danger-hover=#d25570 danger-down=#a8344c
     shade=#00000033 deep-shade=#00000044
     on-accent=#ffffff raised-ink=#1a1d24
+    thumb=#00000038 tip=#1a1d24 tip-ink=#f4f5f8
 }
 
 // ---- layout -------------------------------------------------------------------------------
@@ -155,6 +157,16 @@ def menu-item label {
 
 style menu {
     bg=raised color=raised-ink radius=8 pad=4 w=160 shadow=0,6,16 shadow-color=shade border=1 border-color=raised-edge
+}
+
+// What the kernel draws: a scroll box's bar (on any box with `scroll`), and the tooltip it
+// opens at the pointer for `tooltip="..."`.
+style scrollbar {
+    scrollbar-color=thumb scrollbar-size=6
+}
+
+style tooltip {
+    bg=tip color=tip-ink radius=4 pad=8,4 size=12 shadow=0,4,10 shadow-color=shade
 }
 
 style panel {

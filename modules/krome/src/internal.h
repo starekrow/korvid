@@ -15,8 +15,16 @@ namespace kv {
 
 struct TickContext;
 
-// A node that reads a model key: its shown text, or its selected state (a binding).
-struct KromeDep { u32 node; u64 key; bool binding = false; };
+// A node that reads a model key: its shown text, its selected state (a binding), or one of
+// its properties (`w=@key`: `prop` in look `state`, read from `path`).
+struct KromeDep {
+    enum Kind : u8 { Text, Binding, Prop };
+    u32  node;
+    u64  key;
+    Kind kind = Text;
+    u8   state = 0;
+    Name prop{}, path{};
+};
 
 // Where a definition's body or an each's block is being built: what its texts and
 // paths see (docs/PRDs/Krome-Slice-2-PRD.md, "Definitions", "Control flow and the model").
@@ -77,6 +85,7 @@ struct KromeOverlay {
     Name      anchor;            // the node it opens at, by id; null: the pointer or the window's center
     KromeSide side = KromeSide::Below;
     bool      modal = false;     // takes all input until closed; else it closes on a press outside
+    bool      passive = false;   // a tooltip: the pointer goes through it, and nothing closes it but its owner
     color     dim{0, 0, 0, 0};   // drawn over the whole window under it
     vec2      at;                // the pointer when it opened, logical pixels
     bool      placed = false;    // laid out since it opened or the screen changed
@@ -192,6 +201,17 @@ struct KromeModule {
     UiList              list;
     u64                 paints = 0, layouts = 0, submits = 0;
     u32                 input_id = 0; // input.state's resource id in this engine
+    // A scrollbar the pointer pressed: its box, which way, where on the thumb it was taken
+    // (logical pixels from the thumb's start; < 0 a press on the track, which pages).
+    struct Bar { KromeTarget box; bool horizontal = false; f32 grab = 0.0f; bool active = false; };
+    Bar                 bar;
+    // A tooltip: the node the pointer rests on that has one, since when, and the overlay
+    // showing it (0 none yet). After a press it stays shut until the pointer leaves.
+    KromeTarget         tip;
+    f64                 tip_since = 0.0;
+    u32                 tip_overlay = 0;
+    bool                tip_shut = false;
+    f64                 tip_delay = 0.6;  // seconds at rest before it shows (tests shorten it)
     KromeFocus          focus;
     bool                window_focused = true;
     u8                  cursor = 0;   // the shape last set (CursorShape + 1; 0 none yet)
@@ -227,6 +247,9 @@ bool krome_file_scope(KromeModule& s, const KimbFile& f, KimbScope& scope, bool*
 // The screen's tree, from its document, in its scope and the module's theme. Overlays too.
 // What was scrolled stays scrolled, by id.
 bool krome_build_screen(KromeModule& s, KromeScreen& sc);
+// A tooltip's tree into an overlay: its text in std's `tooltip` style where the scope has
+// one, else a plain dark box.
+bool krome_tooltip_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o, const char* text);
 // An overlay's tree, from its document, in the screen's scope.
 bool krome_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o);
 const char* krome_theme_of(KromeModule& s, const KimbScope& scope);
@@ -257,6 +280,8 @@ const char* krome_model_value_text(KromeModule& s, KromeScreen& sc, const char* 
 bool krome_fire(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, f64 value);
 // A named event of a node's (an edit's change or blur, its submit): its handler, then KromeEvent.
 void krome_fire_named(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, Name event, f64 value);
+// A right-button press's event: the handler gets (id, x, y), KromeEvent the place.
+void krome_fire_at(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, Name event, f32 x, f32 y);
 // The model at a dotted path set to a string, and what reads it told.
 void krome_model_write_string(KromeModule& s, KromeScreen& sc, const char* path, const char* value);
 
@@ -285,8 +310,19 @@ void krome_emit(KromeModule& s, const KromeEvent& ev);
 bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* path);
 u32  krome_model_length(KromeModule& s, KromeScreen& sc, const char* path);
 const char* krome_model_path_text(KromeModule& s, KromeScreen& sc, const char* path, char* out, usize cap);
+// The model's value at a path as a property takes it: a number, a boolean as 0 or 1, a
+// string parsed as markup's are ("40%", "10..90", "#ff0000"), a list of up to four numbers.
+// A string lands in `buf`. False when there is none (nil, a table that is not numbers).
+bool krome_model_value(KromeModule& s, KromeScreen& sc, const char* path, KromeValue* out, char* buf, usize cap);
+// A bound property set from the model as it is now (build.cc); the property's complaint, or null.
+const char* krome_apply_bound(KromeModule& s, KromeScreen& sc, KromeTree& tree, const KromeDep& d);
+// A string as markup's values are read: a number, a range, or the string itself.
+void krome_string_value(const char* s, KromeValue* out);
 // The model's text at a path into a tree node's text, whatever its length (an edit's).
 void krome_model_into_text(KromeModule& s, KromeScreen& sc, const char* path, KromeTree& tree, u32 node);
+// Whether a bound node is selected: its path truthy, or for `@key=value` the model's text
+// there equal to the value.
+bool krome_bound_selected(KromeModule& s, KromeScreen& sc, const KromeTree& tree, u32 node);
 // A binding's press: the value at the path flipped, and what reads it told.
 void krome_model_flip(KromeModule& s, KromeScreen& sc, const char* path);
 // A KBOR document as a Lua value at a model key (krome_set_doc).
@@ -307,6 +343,12 @@ void krome_view_frame(KromeModule& s);
 void krome_paint_screen(KromeModule& s, KromeScreen& sc, UiList& list);
 // The pointer and the keys as one sample sees them: hover, press, release, wheel, Escape.
 void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool escape);
+// The wheel at the pointer: the nearest scroll box under it that goes that way (dy on a
+// box that scrolls only across moves it across).
+void krome_wheel(KromeModule& s, f32 dx, f32 dy);
+// A right-button press at (x, y), physical pixels: light overlays it is outside close, and
+// the nearest node under it with a `context` event fires it.
+void krome_context_press(KromeModule& s, f32 x, f32 y);
 void krome_free_view(KromeModule& s);
 
 } // namespace kv

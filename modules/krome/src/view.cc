@@ -9,6 +9,8 @@
 #include "korvid/asset/texture.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
+#include "korvid/core/time.h"
+#include "korvid/core/format.h"
 #include "korvid/core/utf8.h"
 #include "korvid/math/scalar.h"
 #include "korvid/platform_hid/host_window.h"
@@ -137,6 +139,44 @@ void place_overlay(KromeScreen& sc, KromeOverlay& o, const KromeMeasure& m, f32 
     krome_layout(o.tree, o.tree.root, rect2{x, y, w, h}, m, true);
     o.placed = true;
     sc.repaint = true;
+}
+
+// ---- scrollbars ----------------------------------------------------------------------------------------
+
+constexpr f32 k_min_thumb = 20.0f; // logical pixels, or the track's length when that is less
+
+// What a scroll box shows one way and how much there is (logical pixels); false when it
+// does not scroll that way or it all fits.
+bool overflows(const KromeNode& n, bool horizontal, f32* view, f32* extent) {
+    if (n.dir == KromeDir::Stack || n.first == KROME_NONE) return false;
+    if (horizontal ? !krome_scrolls_x(n) : !krome_scrolls_y(n)) return false;
+    *view = horizontal ? n.rect.w - n.pad[0] - n.pad[2] : n.rect.h - n.pad[1] - n.pad[3];
+    *extent = horizontal ? n.content.x : n.content.y;
+    return *view > 0.0f && *extent > *view + 0.5f;
+}
+
+// A scroll box's bar one way, logical pixels: the track along the box's far edge (short of
+// the corner when there is a bar the other way too) and the thumb in it.
+struct BarShape { rect2 track, thumb; f32 view, extent, room; };
+
+bool bar_of(const KromeTree& t, u32 node, bool horizontal, BarShape* b) {
+    const KromeNode& n = t.nodes[node];
+    if (!overflows(n, horizontal, &b->view, &b->extent)) return false;
+    f32 v2, e2;
+    bool other = overflows(n, !horizontal, &v2, &e2);
+    f32 size = t.looks[n.look].scrollbar_size;
+    rect2 r = n.rect;
+    f32 corner = other ? size : 0.0f;
+    b->track = horizontal ? rect2{r.x, r.y + r.h - size, r.w - corner, size} : rect2{r.x + r.w - size, r.y, size, r.h - corner};
+    f32 len = horizontal ? b->track.w : b->track.h;
+    f32 thumb = len * b->view / b->extent;
+    f32 least = k_min_thumb < len ? k_min_thumb : len;
+    if (thumb < least) thumb = least;
+    b->room = len - thumb;
+    f32 most = b->extent - b->view;
+    f32 at = (horizontal ? n.scroll.x : n.scroll.y) / most * b->room;
+    b->thumb = horizontal ? rect2{b->track.x + at, b->track.y, thumb, size} : rect2{b->track.x, b->track.y + at, size, thumb};
+    return true;
 }
 
 // ---- paint ---------------------------------------------------------------------------------------------
@@ -293,6 +333,34 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
         clip = p.list.clip(clip_rect);
     }
     for (u32 ch = n.first; ch != KROME_NONE; ch = p.tree.nodes[ch].next) paint_node(p, ch, &l, clip_rect, clip);
+    // A scroll box's bars, over its content.
+    if (!(n.flags & (KROME_SCROLL | KROME_SCROLL_X | KROME_SCROLL_Y))) return;
+    const KromeLook& bl = p.tree.looks[n.look];
+    for (u32 h = 0; h < 2; ++h) {
+        BarShape bs;
+        if (!bar_of(p.tree, node, h == 1, &bs)) continue;
+        if (bl.scrollbar_track.a > 0.0f) {
+            UiBox b;
+            b.rect = krome_pixel_rect(bs.track, scale);
+            b.fill = faded(bl.scrollbar_track, l.opacity);
+            b.clip = clip;
+            p.list.box(b);
+        }
+        // Inset from the edges by a pixel, rounded; brighter while it is being dragged.
+        const KromeModule::Bar& drag = p.s.bar;
+        bool held = drag.active && drag.box.screen == p.sc.id && drag.box.overlay == p.overlay && drag.box.node == node && drag.horizontal == (h == 1);
+        color c = bl.scrollbar_color;
+        if (held) { c.a *= 1.6f; if (c.a > 1.0f) c.a = 1.0f; }
+        rect2 th = bs.thumb;
+        if (h == 1) { th.y += 1.0f; th.h -= 2.0f; } else { th.x += 1.0f; th.w -= 2.0f; }
+        UiBox b;
+        b.rect = krome_pixel_rect(th, scale);
+        f32 rr = (h == 1 ? b.rect.h : b.rect.w) * 0.5f;
+        for (u32 i = 0; i < 4; ++i) b.radius[i] = rr;
+        b.fill = faded(c, l.opacity);
+        b.clip = clip;
+        p.list.box(b);
+    }
 }
 
 // An edit: its text (the buffer while it has the focus, an input method's composition at
@@ -513,6 +581,7 @@ KromeTarget hit(KromeModule& s, f32 x, f32 y) {
         KromeScreen& sc = *order[i];
         for (u32 k = sc.overlays.len; k > 0; --k) {
             KromeOverlay& o = *sc.overlays[k - 1];
+            if (o.passive) continue; // a tooltip: the pointer goes through it
             u32 h = o.tree.root != KROME_NONE ? hit_node(o.tree, o.tree.root, x, y, s.scale, k_everywhere) : KROME_NONE;
             if (h != KROME_NONE) return KromeTarget{sc.id, o.id, h};
             if (o.modal) return KromeTarget{sc.id, o.id, KROME_NONE};
@@ -551,8 +620,99 @@ KromeScreen* light_overlays_screen(KromeModule& s) {
     u32 n = 0;
     screens_top_first(s, order, &n);
     for (u32 i = 0; i < n; ++i)
-        if (order[i]->overlays.len) return order[i]->overlays.last()->modal ? nullptr : order[i];
+        for (u32 k = order[i]->overlays.len; k > 0; --k) {
+            const KromeOverlay& o = *order[i]->overlays[k - 1];
+            if (o.passive) continue;
+            return o.modal ? nullptr : order[i];
+        }
     return nullptr;
+}
+
+// ---- the pointer on scrollbars, the wheel, tooltips -------------------------------------------------
+
+// A press on a scrollbar under the pointer: on the thumb it takes it for a drag, on the
+// track it pages toward the press. True when it was on one.
+bool bar_press(KromeModule& s, const KromeTarget& under, f32 x, f32 y) {
+    KromeScreen* sc = nullptr;
+    KromeTree* t = under.node != KROME_NONE ? krome_target_tree(s, under, &sc) : nullptr;
+    f32 lx = x / s.scale, ly = y / s.scale;
+    for (u32 c = t ? under.node : KROME_NONE; c != KROME_NONE; c = t->nodes[c].parent) {
+        for (u32 h = 0; h < 2; ++h) {
+            BarShape bs;
+            if (!bar_of(*t, c, h == 1, &bs) || !inside(bs.track, lx, ly)) continue;
+            KromeNode& n = t->nodes[c];
+            s.bar = KromeModule::Bar{KromeTarget{under.screen, under.overlay, c}, h == 1, -1.0f, true};
+            if (inside(bs.thumb, lx, ly)) {
+                s.bar.grab = h == 1 ? lx - bs.thumb.x : ly - bs.thumb.y;
+            } else {
+                f32 along = h == 1 ? lx : ly, start = h == 1 ? bs.thumb.x : bs.thumb.y;
+                f32& sv = h == 1 ? n.scroll.x : n.scroll.y;
+                sv += along < start ? -bs.view : bs.view;
+            }
+            t->dirty = true;
+            if (under.overlay) if (KromeOverlay* o = krome_overlay(*sc, under.overlay)) o->placed = false;
+            sc->repaint = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+// A held thumb follows the pointer.
+void bar_drag(KromeModule& s, f32 x, f32 y) {
+    KromeScreen* sc = nullptr;
+    KromeTree* t = krome_target_tree(s, s.bar.box, &sc);
+    if (!t || s.bar.box.node >= t->nodes.len || s.bar.grab < 0.0f) return;
+    BarShape bs;
+    bool h = s.bar.horizontal;
+    if (!bar_of(*t, s.bar.box.node, h, &bs) || bs.room <= 0.0f) return;
+    f32 along = (h ? x / s.scale - bs.track.x : y / s.scale - bs.track.y) - s.bar.grab;
+    f32 k = along / bs.room;
+    k = k < 0.0f ? 0.0f : k > 1.0f ? 1.0f : k;
+    KromeNode& n = t->nodes[s.bar.box.node];
+    f32 v = k * (bs.extent - bs.view);
+    f32& sv = h ? n.scroll.x : n.scroll.y;
+    if (sv == v) return;
+    sv = v;
+    t->dirty = true;
+    if (s.bar.box.overlay) if (KromeOverlay* o = krome_overlay(*sc, s.bar.box.overlay)) o->placed = false;
+    sc->repaint = true;
+}
+
+void close_tip(KromeModule& s) {
+    if (!s.tip_overlay) return;
+    u32 id = s.tip_overlay;
+    s.tip_overlay = 0;
+    if (KromeScreen* sc = krome_screen_by_id(s, s.tip.screen)) krome_close_overlay(s, *sc, id);
+}
+
+// The node with a tooltip the pointer rests on: shown once it has rested long enough, shut
+// when it leaves or presses.
+void follow_tip(KromeModule& s, const KromeTarget& under, bool press) {
+    KromeTarget tip;
+    KromeScreen* sc = nullptr;
+    KromeTree* t = under.node != KROME_NONE ? krome_target_tree(s, under, &sc) : nullptr;
+    for (u32 c = t ? under.node : KROME_NONE; c != KROME_NONE; c = t->nodes[c].parent)
+        if (t->nodes[c].tooltip != KROME_NONE) { tip = KromeTarget{under.screen, under.overlay, c}; break; }
+    f64 now = time_now();
+    if (!(tip == s.tip)) {
+        close_tip(s);
+        s.tip = tip;
+        s.tip_since = now;
+        s.tip_shut = false;
+        if (tip.node != KROME_NONE) engine_want_frame_at(*s.e, now + s.tip_delay);
+    }
+    if (press) { close_tip(s); s.tip_shut = true; }
+    if (tip.node == KROME_NONE || s.tip_overlay || s.tip_shut || now - s.tip_since < s.tip_delay || !sc) return;
+    char text[512];
+    format(text, sizeof text, "%s", t->strings.data + t->nodes[tip.node].tooltip);
+    u32 id = krome_open_overlay(s, *sc);
+    KromeOverlay* o = krome_overlay(*sc, id);
+    o->passive = true;
+    o->side = KromeSide::Pointer;
+    o->at = vec2{s.px / s.scale + 12.0f, s.py / s.scale + 18.0f}; // below and right of the arrow
+    if (!krome_tooltip_overlay(s, *sc, *o, text)) { krome_close_overlay(s, *sc, id); s.tip_shut = true; return; }
+    s.tip_overlay = id;
 }
 
 } // namespace
@@ -579,12 +739,16 @@ u32 krome_open_overlay(KromeModule& s, KromeScreen& sc) {
 void krome_close_overlay(KromeModule& s, KromeScreen& sc, u32 id) {
     if (!sc.overlays.len) return;
     u32 at = sc.overlays.len - 1;
+    while (!id && at > 0 && sc.overlays[at]->passive) --at; // "the top one" is never a tooltip
+    if (!id && sc.overlays[at]->passive) return;
     if (id) {
         at = KROME_NONE;
         for (u32 i = 0; i < sc.overlays.len; ++i) if (sc.overlays[i]->id == id) at = i;
         if (at == KROME_NONE) return;
     }
     KromeOverlay* o = sc.overlays[at];
+    if (s.tip_overlay == o->id && s.tip.screen == sc.id) s.tip_overlay = 0;
+    if (s.bar.box.screen == sc.id && s.bar.box.overlay == o->id) s.bar = KromeModule::Bar{};
     for (u32 i = at + 1; i < sc.overlays.len; ++i) sc.overlays[i - 1] = sc.overlays[i];
     --sc.overlays.len;
     // What the pointer was on in it is gone, and the keyboard if an edit in it had it.
@@ -721,8 +885,11 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
         KromeScreen* order[k_max_screens];
         u32 n = 0;
         screens_top_first(s, order, &n);
-        for (u32 i = 0; i < n; ++i)
-            if (order[i]->overlays.len) { krome_close_overlay(s, *order[i], 0); break; }
+        for (u32 i = 0; i < n; ++i) {
+            bool any = false;
+            for (KromeOverlay* o : order[i]->overlays) if (!o->passive) any = true;
+            if (any) { krome_close_overlay(s, *order[i], 0); break; }
+        }
     }
 
     KromeTarget under = hit(s, x, y);
@@ -731,14 +898,18 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
         repaint(s, under);
         s.under = under;
     }
+    follow_tip(s, under, down && !s.down);
 
     if (down && !s.down) {
         // A press outside the light overlays closes them, and goes no further.
         KromeScreen* light = light_overlays_screen(s);
+        bool on_bar = false;
         if (light && !(under.screen == light->id && under.overlay)) {
             while (light->overlays.len && !light->overlays.last()->modal) krome_close_overlay(s, *light, 0);
             s.captured = KromeTarget{};
             s.under = hit(s, x, y);
+        } else if ((on_bar = bar_press(s, under, x, y))) {
+            s.captured = KromeTarget{}; // a scrollbar's: the keyboard stays where it was
         } else {
             s.captured = pressable(s, under);
         }
@@ -749,10 +920,15 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
             Input* in = platform_input(*s.e);
             bool shift = in && (in->raw.down(Key::LShift) || in->raw.down(Key::RShift));
             krome_edit_press(s, *psc, s.captured.overlay, s.captured.node, x, y, shift);
-        } else {
+        } else if (!on_bar) {
             krome_edit_blur(s);
         }
         repaint(s, s.captured);
+    } else if (!down && s.down && s.bar.active) {
+        repaint(s, s.bar.box);
+        s.bar = KromeModule::Bar{};
+    } else if (down && s.bar.active) {
+        bar_drag(s, x, y);
     } else if (!down && s.down) {
         KromeTarget was = s.captured;
         s.captured = KromeTarget{};
@@ -786,18 +962,47 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
         if ((u8)shape + 1 != s.cursor) { s.cursor = (u8)shape + 1; platform_cursor(*s.e, shape); }
     }
 
-    if (wheel != 0.0f && under.node != KROME_NONE) {
-        KromeScreen* sc = nullptr;
-        KromeTree* tree = krome_target_tree(s, under, &sc);
-        for (u32 n = under.node; tree && n != KROME_NONE; n = tree->nodes[n].parent) {
-            KromeNode& node = tree->nodes[n];
-            if (!(node.flags & KROME_SCROLL)) continue;
-            if (node.dir == KromeDir::Row) node.scroll.x -= wheel * k_wheel_step;
-            else node.scroll.y -= wheel * k_wheel_step;
-            tree->dirty = true;
-            if (KromeOverlay* o = under.overlay ? krome_overlay(*sc, under.overlay) : nullptr) o->placed = false;
-            break;
-        }
+    if (wheel != 0.0f) krome_wheel(s, 0.0f, wheel);
+}
+
+void krome_wheel(KromeModule& s, f32 dx, f32 dy) {
+    const KromeTarget under = s.under;
+    if (under.node == KROME_NONE || (dx == 0.0f && dy == 0.0f)) return;
+    KromeScreen* sc = nullptr;
+    KromeTree* tree = krome_target_tree(s, under, &sc);
+    for (u32 n = under.node; tree && n != KROME_NONE; n = tree->nodes[n].parent) {
+        KromeNode& node = tree->nodes[n];
+        bool sx = krome_scrolls_x(node), sy = krome_scrolls_y(node);
+        bool moved = false;
+        if (dy != 0.0f && sy) { node.scroll.y -= dy * k_wheel_step; moved = true; }
+        else if (dy != 0.0f && sx) { node.scroll.x -= dy * k_wheel_step; moved = true; } // a row: the wheel goes across
+        if (dx != 0.0f && sx) { node.scroll.x += dx * k_wheel_step; moved = true; }
+        if (!moved) continue;
+        tree->dirty = true;
+        if (KromeOverlay* o = under.overlay ? krome_overlay(*sc, under.overlay) : nullptr) o->placed = false;
+        break;
+    }
+}
+
+void krome_context_press(KromeModule& s, f32 x, f32 y) {
+    s.px = x;
+    s.py = y;
+    KromeTarget under = hit(s, x, y);
+    follow_tip(s, under, true);
+    KromeScreen* light = light_overlays_screen(s);
+    if (light && !(under.screen == light->id && under.overlay)) {
+        while (light->overlays.len && !light->overlays.last()->modal) krome_close_overlay(s, *light, 0);
+        under = hit(s, x, y);
+        s.under = under;
+    }
+    KromeScreen* sc = nullptr;
+    KromeTree* t = under.node != KROME_NONE ? krome_target_tree(s, under, &sc) : nullptr;
+    for (u32 c = t ? under.node : KROME_NONE; c != KROME_NONE; c = t->nodes[c].parent) {
+        const KromeNode& n = t->nodes[c];
+        if (n.flags & KROME_DISABLED) return;
+        if (n.context.is_null()) continue;
+        krome_fire_at(s, *sc, *t, c, n.context, x / s.scale, y / s.scale);
+        return;
     }
 }
 

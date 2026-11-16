@@ -552,6 +552,44 @@ void push_path(lua_State* L, int store, const char* path) {
 
 } // namespace
 
+bool krome_bound_selected(KromeModule& s, KromeScreen& sc, const KromeTree& tree, u32 node) {
+    const KromeNode& n = tree.nodes[node];
+    if (n.binding.is_null()) return false;
+    if (n.bind_value == KROME_NONE) return krome_model_truthy(s, sc, name_str(n.binding));
+    char v[256];
+    krome_model_path_text(s, sc, name_str(n.binding), v, sizeof v);
+    return !strcmp(v, tree.strings.data + n.bind_value);
+}
+
+bool krome_model_value(KromeModule& s, KromeScreen& sc, const char* path, KromeValue* out, char* buf, usize cap) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) return false;
+    push_path(L, sc.store, path);
+    bool ok = true;
+    switch (lua_type(L, -1)) {
+    case LUA_TNUMBER: *out = KromeValue::num((f32)lua_tonumber(L, -1)); break;
+    case LUA_TBOOLEAN: *out = KromeValue::num(lua_toboolean(L, -1) ? 1.0f : 0.0f); break;
+    case LUA_TSTRING: format(buf, cap, "%s", lua_tostring(L, -1)); krome_string_value(buf, out); break;
+    case LUA_TTABLE: {
+        f32 n[4];
+        u32 c = 0;
+        for (; c < 4; ++c) {
+            lua_rawgeti(L, -1, (lua_Integer)c + 1);
+            bool num = lua_type(L, -1) == LUA_TNUMBER;
+            if (num) n[c] = (f32)lua_tonumber(L, -1);
+            lua_pop(L, 1);
+            if (!num) break;
+        }
+        ok = c > 0;
+        if (ok) *out = KromeValue::nums(n, c);
+        break;
+    }
+    default: ok = false;
+    }
+    lua_pop(L, 1);
+    return ok;
+}
+
 bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* path) {
     lua_State* L = s.L;
     if (!L || sc.store == LUA_NOREF) return false;
@@ -695,7 +733,13 @@ void krome_model_changed(KromeModule& s, KromeScreen& sc, u64 key) {
     for (u32 i = 0; i < sc.deps.len; ++i) {
         const KromeDep d = sc.deps[i];
         if (d.key != key) continue;
-        if (!d.binding) { krome_fill_node(s, sc, sc.tree, d.node); continue; }
+        if (d.kind == KromeDep::Text) { krome_fill_node(s, sc, sc.tree, d.node); continue; }
+        if (d.kind == KromeDep::Prop) {
+            if (const char* bad = krome_apply_bound(s, sc, sc.tree, d))
+                krome_error(s, name_str(sc.name), 0, nullptr, 0, "%s=@%s: %s", name_str(d.prop), name_str(d.path), bad);
+            sc.repaint = true;
+            continue;
+        }
         KromeNode& n = sc.tree.nodes[d.node];
         if (n.type == KromeType::Edit) {
             // An edit shows the model's text, unless it is the one being typed in.
@@ -707,7 +751,7 @@ void krome_model_changed(KromeModule& s, KromeScreen& sc, u64 key) {
             continue;
         }
         u16 was = n.flags;
-        if (krome_model_truthy(s, sc, name_str(n.binding))) n.flags |= KROME_SELECTED;
+        if (krome_bound_selected(s, sc, sc.tree, d.node)) n.flags |= KROME_SELECTED;
         else n.flags &= (u16)~KROME_SELECTED;
         if (n.flags != was) sc.repaint = true;
     }
@@ -761,6 +805,35 @@ void krome_fire_named(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node
     krome_emit(s, KromeEvent{sc.name.hash, id.hash, event.hash, value});
 }
 
+void krome_fire_at(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, Name event, f32 x, f32 y) {
+    if (node >= tree.nodes.len || event.is_null()) return;
+    Name id = tree.nodes[node].id;
+    lua_State* L = s.L;
+    if (L && sc.on != LUA_NOREF) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, sc.on);
+        lua_getfield(L, -1, name_str(event));
+        lua_remove(L, -2);
+        if (lua_isfunction(L, -1)) {
+            if (id.is_null()) lua_pushnil(L);
+            else lua_pushstring(L, name_str(id));
+            lua_pushnumber(L, (lua_Number)x);
+            lua_pushnumber(L, (lua_Number)y);
+            if (lua_pcall(L, 3, 0, 0) != LUA_OK) {
+                KV_ERROR("krome", "%s", lua_tostring(L, -1));
+                lua_pop(L, 1);
+                ++s.script_errors;
+            }
+        } else {
+            lua_pop(L, 1);
+        }
+    }
+    ++s.fired;
+    KromeEvent ev{sc.name.hash, id.hash, event.hash, 0.0};
+    ev.x = x;
+    ev.y = y;
+    krome_emit(s, ev);
+}
+
 void krome_model_write_string(KromeModule& s, KromeScreen& sc, const char* path, const char* value) {
     lua_State* L = s.L;
     if (!L || sc.store == LUA_NOREF) return;
@@ -791,8 +864,17 @@ bool krome_fire(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, f64 
     const KromeNode& n = tree.nodes[node];
     if (n.event.is_null() && n.binding.is_null()) return false;
     Name id = n.id, event = n.event, bound = n.binding;
-    // A binding first: the value flipped, so the handler sees it as the press left it.
-    if (!bound.is_null()) krome_model_flip(s, sc, name_str(bound));
+    // A binding first: the value flipped (or for `@key=value`, the value written), so the
+    // handler sees it as the press left it.
+    if (!bound.is_null()) {
+        if (n.bind_value != KROME_NONE) {
+            char v[256];
+            format(v, sizeof v, "%s", tree.strings.data + n.bind_value); // the write may rebuild the tree
+            krome_model_write_string(s, sc, name_str(bound), v);
+        } else {
+            krome_model_flip(s, sc, name_str(bound));
+        }
+    }
     if (event.is_null()) { ++s.fired; return true; }
     lua_State* L = s.L;
     if (L && sc.on != LUA_NOREF) {

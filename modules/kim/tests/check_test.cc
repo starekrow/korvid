@@ -128,7 +128,7 @@ void test_kim_check(kv::TestCtx& c) {
         "t.kim:10: a text takes no children\n"
         "t.kim:11: a box takes no content: put a text in it\n"
         "t.kim:12: pad takes one, two or four numbers\n"
-        "t.kim:12: w takes a number, hug, fill or a range\n"
+        "t.kim:12: w takes a number, a percentage, hug, fill or a range\n"
         "t.kim:13: slot is only in a definition's body\n"));
 
     // A token must be in every theme: game/extra's dark has accent, light has none.

@@ -1,5 +1,6 @@
 // The tree's storage and its properties by name.
 #include "korvid/krome/tree.h"
+#include <stdlib.h>
 #include <string.h>
 
 namespace kv {
@@ -92,7 +93,13 @@ bool size_value(KromeAxis& a, const KromeValue& v) {
     if (v.kind == KromeValue::Number) { a.mode = KromeSize::Fixed; a.value = v.n; }
     else if (v.kind == KromeValue::String && !strcmp(v.s, "hug")) a.mode = KromeSize::Hug;
     else if (v.kind == KromeValue::String && !strcmp(v.s, "fill")) a.mode = KromeSize::Fill;
-    else return false;
+    else if (v.kind == KromeValue::String && *v.s && v.s[strlen(v.s) - 1] == '%') {
+        char* end = nullptr;
+        f64 pct = strtod(v.s, &end);
+        if (end != v.s + strlen(v.s) - 1 || pct < 0) return false;
+        a.mode = KromeSize::Percent;
+        a.value = (f32)pct;
+    } else return false;
     a.set = true;
     return true;
 }
@@ -138,6 +145,9 @@ bool look_prop(KromeLook& l, const char* prop, const KromeValue& v, const char**
     if (!strcmp(prop, "border"))       { if (v.kind != KromeValue::Number || v.n < 0) *why = "border takes a number, 0 or more"; else { l.border = v.n; l.set |= KROME_LOOK_BORDER; } return true; }
     if (!strcmp(prop, "opacity"))      { if (v.kind != KromeValue::Number || v.n < 0 || v.n > 1) *why = "opacity takes a number from 0 to 1"; else { l.opacity = v.n; l.set |= KROME_LOOK_OPACITY; } return true; }
     if (!strcmp(prop, "size"))         { if (v.kind != KromeValue::Number || v.n <= 0) *why = "size takes a number above 0"; else { l.size = v.n; l.set |= KROME_LOOK_SIZE; } return true; }
+    if (!strcmp(prop, "scrollbar-color")) { if (!color_value(v, &l.scrollbar_color)) *why = "scrollbar-color takes a color"; else l.set |= KROME_LOOK_SCROLLBAR_COLOR; return true; }
+    if (!strcmp(prop, "scrollbar-track")) { if (!color_value(v, &l.scrollbar_track)) *why = "scrollbar-track takes a color"; else l.set |= KROME_LOOK_SCROLLBAR_TRACK; return true; }
+    if (!strcmp(prop, "scrollbar-size")) { if (v.kind != KromeValue::Number || v.n <= 0) *why = "scrollbar-size takes a number above 0"; else { l.scrollbar_size = v.n; l.set |= KROME_LOOK_SCROLLBAR_SIZE; } return true; }
     if (!strcmp(prop, "caret-color"))  { if (!color_value(v, &l.caret_color)) *why = "caret-color takes a color"; else l.set |= KROME_LOOK_CARET_COLOR; return true; }
     if (!strcmp(prop, "selection-color")) { if (!color_value(v, &l.selection_color)) *why = "selection-color takes a color"; else l.set |= KROME_LOOK_SELECTION_COLOR; return true; }
     if (!strcmp(prop, "line-height"))  { if (v.kind != KromeValue::Number || v.n <= 0) *why = "line-height takes a number above 0, times the size"; else { l.line_height = v.n; l.set |= KROME_LOOK_LINE_HEIGHT; } return true; }
@@ -181,6 +191,9 @@ void overlay(KromeLook& to, const KromeLook& from) {
     if (s & KROME_LOOK_TINT) to.tint = from.tint;
     if (s & KROME_LOOK_LINE_HEIGHT) to.line_height = from.line_height;
     if (s & KROME_LOOK_CARET_COLOR) to.caret_color = from.caret_color;
+    if (s & KROME_LOOK_SCROLLBAR_COLOR) to.scrollbar_color = from.scrollbar_color;
+    if (s & KROME_LOOK_SCROLLBAR_TRACK) to.scrollbar_track = from.scrollbar_track;
+    if (s & KROME_LOOK_SCROLLBAR_SIZE) to.scrollbar_size = from.scrollbar_size;
     if (s & KROME_LOOK_SELECTION_COLOR) to.selection_color = from.selection_color;
     to.set |= s;
 }
@@ -192,8 +205,26 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
     KromeNode& n = nodes[node];
     if (state == KromeState::Base) {
         // Layout's properties.
-        if (!strcmp(prop, "w")) { dirty = true; return size_value(n.w, v) ? nullptr : "w takes a number, hug, fill or a range"; }
-        if (!strcmp(prop, "h")) { dirty = true; return size_value(n.h, v) ? nullptr : "h takes a number, hug, fill or a range"; }
+        if (!strcmp(prop, "w")) { dirty = true; return size_value(n.w, v) ? nullptr : "w takes a number, a percentage, hug, fill or a range"; }
+        if (!strcmp(prop, "h")) { dirty = true; return size_value(n.h, v) ? nullptr : "h takes a number, a percentage, hug, fill or a range"; }
+        if (!strcmp(prop, "scroll")) {
+            if (v.kind != KromeValue::String) return "scroll takes x, y or xy";
+            u16 f = !strcmp(v.s, "x") ? KROME_SCROLL_X : !strcmp(v.s, "y") ? KROME_SCROLL_Y : !strcmp(v.s, "xy") ? (u16)(KROME_SCROLL_X | KROME_SCROLL_Y) : 0;
+            if (!f) return "scroll takes x, y or xy";
+            n.flags |= f | KROME_CLIP;
+            dirty = true;
+            return nullptr;
+        }
+        if (!strcmp(prop, "tooltip")) {
+            if (v.kind != KromeValue::String) return "tooltip takes a string";
+            n.tooltip = string(v.s, (u32)strlen(v.s));
+            return nullptr;
+        }
+        if (!strcmp(prop, "context")) {
+            if (v.kind != KromeValue::String) return "an event takes a name";
+            n.context = name_intern(v.s);
+            return nullptr;
+        }
         if (!strcmp(prop, "gap")) {
             if (v.kind != KromeValue::Number) return "gap takes a number";
             n.gap = v.n; dirty = true; return nullptr;

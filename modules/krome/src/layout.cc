@@ -25,6 +25,9 @@ KromeSize mode_of(const KromeNode& n, bool horizontal, KromeDir parent_dir) {
 
 bool visible(const KromeNode& n) { return !(n.flags & KROME_HIDDEN); }
 
+bool scrolls_x(const KromeNode& n) { return krome_scrolls_x(n); }
+bool scrolls_y(const KromeNode& n) { return krome_scrolls_y(n); }
+
 bool wraps(const KromeNode& n) {
     if (n.type == KromeType::Edit) return (n.flags & KROME_MULTILINE) != 0;
     return n.type == KromeType::Text && !(n.flags & KROME_NOWRAP);
@@ -151,11 +154,20 @@ struct Layout {
         const KromeAxis& a = horizontal ? c.w : c.h;
         f32 want = horizontal ? c.want.x : c.want.y;
         if (mode == KromeSize::Fill) return clampr(room, a);
+        if (mode == KromeSize::Percent) return clampr(room * a.value * 0.01f, a);
         // Hugging across: no wider than the room, unless it cannot be narrower (a text wraps
         // to fit; one line, an image or a fixed size does not).
         if (horizontal && mode == KromeSize::Hug && want > room && c.narrowest < want)
             return room > c.narrowest ? room : c.narrowest;
         return want; // hug and fixed are already clamped
+    }
+
+    // The length a child takes along its parent's direction: what it wants, or its share of
+    // the parent's inside when it is a percentage.
+    static f32 along_of(const KromeNode& c, bool row, KromeSize mode, f32 room) {
+        if (mode != KromeSize::Percent) return row ? c.want.x : c.want.y;
+        const KromeAxis& a = row ? c.w : c.h;
+        return clampr(room * a.value * 0.01f, a);
     }
 
     static f32 aligned(KromeAlign a, f32 room, f32 size) {
@@ -187,7 +199,8 @@ struct Layout {
         }
 
         bool row = n.dir == KromeDir::Row;
-        bool scrolls = (n.flags & KROME_SCROLL) != 0;
+        bool scrolls = row ? scrolls_x(n) : scrolls_y(n);
+        bool scrolls_across = row ? scrolls_y(n) : scrolls_x(n);
         f32 room = row ? in.w : in.h, across = row ? in.h : in.w;
 
         // Sizes along: fixed and hugging children take what they want; fills share the rest
@@ -202,7 +215,7 @@ struct Layout {
             ++count;
             KromeSize mode = mode_of(c, row, n.dir);
             if (mode == KromeSize::Fill && !scrolls && fills < k_max_fills) { fill_at[fills++] = ch; continue; }
-            taken += row ? c.want.x : c.want.y;
+            taken += along_of(c, row, mode, room);
         }
         if (count > 1) taken += n.gap * (f32)(count - 1);
         f32 share[k_max_fills];
@@ -238,24 +251,38 @@ struct Layout {
         if (!scrolls) s = 0;
         if (s > max_scroll) s = max_scroll;
         if (s < 0) s = 0;
-        (row ? sc.y : sc.x) = 0;
+        f32& cs = row ? sc.y : sc.x;
+        if (!scrolls_across || cs < 0) cs = 0;
+        f32 cross_scroll = cs;
         n.scroll = sc;
         at -= s;
 
+        f32 wide = 0.0f;
         u32 j = 0;
         for (u32 ch = n.first; ch != KROME_NONE; ch = t.nodes[ch].next) {
             KromeNode& c = t.nodes[ch];
             if (!visible(c)) continue;
             f32 len;
             if (j < fills && fill_at[j] == ch) len = share[j++];
-            else len = row ? c.want.x : c.want.y;
+            else len = along_of(c, row, mode_of(c, row, n.dir), room);
             f32 x = cross_size(c, !row, n.dir, across);
-            f32 off = aligned(row ? n.align_y : n.align_x, across, x);
+            // Scrolling across, a child is as wide as it wants: the box shows part of it.
+            if (scrolls_across) { f32 w = row ? c.want.y : c.want.x; if (w > x) x = w; }
+            if (x > wide) wide = x;
+            f32 off = scrolls_across ? -cross_scroll : aligned(row ? n.align_y : n.align_x, across, x);
             rect2 cr = row ? rect2{in.x + at, in.y + off, len, x} : rect2{in.x + off, in.y + at, x, len};
             place(ch, cr);
             at += len + n.gap;
         }
-        n.content = row ? vec2{extent, n.content.y} : vec2{n.content.x, extent};
+        // Across, the offset is held inside the widest child; it was used before it was known,
+        // so a box whose content shrank under it is placed again.
+        f32 most_across = wide > across ? wide - across : 0.0f;
+        if (scrolls_across && cross_scroll > most_across) {
+            (row ? n.scroll.y : n.scroll.x) = most_across;
+            place(i, r);
+            return;
+        }
+        n.content = row ? vec2{extent, scrolls_across ? wide : n.content.y} : vec2{scrolls_across ? wide : n.content.x, extent};
     }
 };
 

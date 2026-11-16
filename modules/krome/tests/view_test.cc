@@ -150,7 +150,7 @@ void test_view(kv::TestCtx& c) {
         krome_paint_screen(s, sc, l);
         u32 clipped = 0;
         for (u32 i = 0; i < l.count(); ++i) if ((l.words[l.offsets[i]] >> 2 & 0xFFFF) == 1) ++clipped;
-        KV_CHECK(c, l.clips.len == 8 && clipped == 3 && l.clips[4] == 10.0f && l.clips[5] == 50.0f);
+        KV_CHECK(c, l.clips.len == 8 && clipped == 4 && l.clips[4] == 10.0f && l.clips[5] == 50.0f);
         l.free();
     }
 

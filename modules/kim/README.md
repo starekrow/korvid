@@ -46,6 +46,8 @@ the command line; goldberg compiles `.kim` in process (its built-in `kim` conver
   goes on a line of its own.
 - **A property's range is text.** `w=120..400` is the string `"120..400"`, as a Lua table
   writes it; a node's bare range (`slider 1..99`) is `"r": [1, 99]`.
+- **A percentage and a bound value are text too.** `w=40%` is `"40%"` and `w=@left` is
+  `"@left"` (no token starts with `@`); a node's `@mode=fast` is `"b": "mode", "bv": "fast"`.
 - **A bare word as a value is a string.** Whether `bg=panel2` is a theme token and
   `w=fill` a keyword is Krome's to say.
 - **`id=` is not a property.** It is the node's `"id"`.

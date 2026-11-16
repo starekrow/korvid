@@ -24,6 +24,7 @@ struct Node {
     u32                line = 0;
     const char*        id = nullptr;
     const char*        binding = nullptr;
+    const char*        bind_value = nullptr; // @key=value
     const char*        event = nullptr;
     const char*        var = nullptr; // each
     const char*        in = nullptr;  // each
@@ -302,13 +303,25 @@ struct Parser {
         }
         if (digit(c) || c == '-' || c == '.') {
             u32 c0 = col();
+            usize start = at;
             JsonRef r = range_or_number(false);
+            // A percentage is kept as written, "40%", as a Lua table writes it.
+            if (r != KV_JSON_NO_REF && peek() == '%') { ++at; r = b.string(text + start, (u32)(at - start)); }
             if (r == KV_JSON_NO_REF || word_char(peek())) {
                 skip_token();
-                err(c0, "not a number or a range");
+                err(c0, "not a number, a percentage or a range");
                 return KV_JSON_NO_REF;
             }
             return r;
+        }
+        if (c == '@') {
+            // A property bound to the model: "@path", read when the node is built and set
+            // again when the path's key changes.
+            u32 c0 = col();
+            usize start = at++;
+            const char* w = word();
+            if (!w) { err(c0, "a bound value is @name"); skip_token(); return KV_JSON_NO_REF; }
+            return b.string(text + start, (u32)(at - start));
         }
         if (word_start(c)) {
             const char* w = word();
@@ -423,6 +436,20 @@ struct Parser {
                 if (!bw) { err(ci, "a binding is @name"); skip_token(); continue; }
                 if (n->binding) err(ci, "one binding to a node");
                 n->binding = bw;
+                // @key=value: selected while the model holds that value; a press writes it.
+                if (peek() == '=') {
+                    ++at;
+                    const char* v = nullptr;
+                    u32 vn = 0;
+                    if (peek() == '"') { if (!string(&v, &vn)) { skip_token(); continue; } }
+                    else {
+                        usize vs = at;
+                        while (!end() && (word_char(peek()) || peek() == '-')) ++at;
+                        if (at > vs) v = copy(text + vs, at - vs);
+                    }
+                    if (!v) { err(ci, "a binding's value is @name=value"); skip_token(); continue; }
+                    n->bind_value = v;
+                }
                 continue;
             }
             if (c == '-' && peek(1) == '>') {
@@ -711,6 +738,7 @@ struct Parser {
         }
         if (n->range != KV_JSON_NO_REF) b.set(o, "r", n->range);
         if (n->binding) b.set(o, "b", b.string(n->binding));
+        if (n->bind_value) b.set(o, "bv", b.string(n->bind_value));
         if (n->event) b.set(o, "e", b.string(n->event));
         if (n->var) b.set(o, "v", b.string(n->var));
         if (n->in) b.set(o, "in", b.string(n->in));

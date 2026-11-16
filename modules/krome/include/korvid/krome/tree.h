@@ -29,7 +29,7 @@ constexpr u32 KROME_MAX_DEPTH = 64;
 
 enum class KromeType  : u8 { Box, Text, Image, Hit, Edit };
 enum class KromeDir   : u8 { Row, Col, Stack };
-enum class KromeSize  : u8 { Hug, Fill, Fixed };
+enum class KromeSize  : u8 { Hug, Fill, Fixed, Percent }; // Percent: `value` percent of the parent's inside
 enum class KromeAlign : u8 { Start, Center, End };
 
 // The states a look may differ in. Base is the node's own look.
@@ -65,6 +65,9 @@ struct KromeLook {
     f32   line_height = 0.0f;              // a text's lines, times its size; 0: the font's own
     color caret_color{0, 0, 0, 0};         // an edit's caret; unset: its text's color
     color selection_color{0.18f, 0.44f, 0.93f, 0.40f}; // what an edit's selection is drawn in
+    color scrollbar_color{0.5f, 0.5f, 0.5f, 0.5f}; // a scroll box's thumb
+    color scrollbar_track{0, 0, 0, 0};     // and the track under it
+    f32   scrollbar_size = 6.0f;           // its width, logical pixels
     u32   set = 0;
 };
 
@@ -85,6 +88,9 @@ constexpr u32 KROME_LOOK_TINT     = 1u << 13;
 constexpr u32 KROME_LOOK_LINE_HEIGHT = 1u << 14;
 constexpr u32 KROME_LOOK_CARET_COLOR = 1u << 15;
 constexpr u32 KROME_LOOK_SELECTION_COLOR = 1u << 16;
+constexpr u32 KROME_LOOK_SCROLLBAR_COLOR = 1u << 17;
+constexpr u32 KROME_LOOK_SCROLLBAR_TRACK = 1u << 18;
+constexpr u32 KROME_LOOK_SCROLLBAR_SIZE = 1u << 19;
 constexpr u32 KROME_LOOK_INHERITED = KROME_LOOK_COLOR | KROME_LOOK_FONT | KROME_LOOK_SIZE | KROME_LOOK_LINE_HEIGHT;
 
 // Node flags.
@@ -99,6 +105,8 @@ constexpr u16 KROME_SUBPIXEL = 1u << 7; // its text's pen is kept to a quarter p
 constexpr u16 KROME_NOWRAP   = 1u << 8; // its text stays on one line whatever width it gets
 constexpr u16 KROME_MULTILINE = 1u << 9; // an edit of many lines (Enter breaks one; Ctrl+Enter submits)
 constexpr u16 KROME_READONLY  = 1u << 10; // an edit that selects and copies, and takes nothing
+constexpr u16 KROME_SCROLL_X  = 1u << 11; // scroll=x (or xy): its content scrolls across
+constexpr u16 KROME_SCROLL_Y  = 1u << 12; // scroll=y (or xy): and down
 
 // The pointer's shape over a node (`cursor`): unset is the arrow, an edit's the I-beam.
 enum class KromeCursor : u8 { Unset, Arrow, IBeam, Hand, Move, ResizeEW, ResizeNS, Forbidden };
@@ -118,6 +126,9 @@ struct KromeNode {
     Name       id, event;
     Name       binding;        // @name: its selected state is the model's value there, a press flips it (an edit: its text)
     Name       change, blur;   // an edit's other events: its text changed, it lost the focus
+    Name       context;        // fired by the right button, with where it was pressed
+    u32        bind_value = KROME_NONE; // @key=value: the value, an offset into strings
+    u32        tooltip = KROME_NONE;    // shown at the pointer after it rests here
     u32        placeholder = KROME_NONE; // an edit's, shown while it is empty: an offset into strings
     KromeCursor cursor = KromeCursor::Unset;
     u32        look = 0;           // the base look: an index into KromeTree::looks
@@ -152,6 +163,11 @@ struct KromeValue {
         return x;
     }
 };
+
+// Which ways a node's content scrolls: `scroll` alone is along its direction, `scroll=x|y|xy`
+// says which.
+inline bool krome_scrolls_x(const KromeNode& n) { return (n.flags & KROME_SCROLL_X) || ((n.flags & KROME_SCROLL) && n.dir == KromeDir::Row); }
+inline bool krome_scrolls_y(const KromeNode& n) { return (n.flags & KROME_SCROLL_Y) || ((n.flags & KROME_SCROLL) && n.dir != KromeDir::Row); }
 
 struct KromeTree {
     Array<KromeNode> nodes;

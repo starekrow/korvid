@@ -18,7 +18,8 @@
 // then an optional block of children. `each item in list { }` and `if name { }` are nodes
 // too. `//` comments to the end of a line wherever white space may stand.
 //
-// Values: numbers (8, -2, 1.5), strings ("..."), colors (#rrggbb, #rrggbbaa, #rgb, #rgba), ranges
+// Values: numbers (8, -2, 1.5), percentages (40%, kept as the string "40%"), a value bound
+// to the model (@name, kept as "@name"), strings ("..."), colors (#rrggbb, #rrggbbaa, #rgb, #rgba), ranges
 // (120..400, ..400, 120..), lists (4,8 with no spaces) and bare words (a token or a
 // keyword: Krome decides which).
 //
@@ -30,7 +31,8 @@
 //     "screens": {NAME: node}, "lines": [..] }
 //
 //   node: { "w", "id", "f": [flags], "p": {props}, "s": [styles], "t": text, "a": [more
-//           strings], "r": [min, max] (null for an open end), "b": binding, "e": event,
+//           strings], "r": [min, max] (null for an open end), "b": binding, "bv": the value of
+//           @key=value, "e": event,
 //           "v" and "in" (each), "on" (if), "c": [children] }, each key only when present.
 //
 // Canonical: maps in name order (properties, styles, themes, definitions, screens, a

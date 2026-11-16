@@ -136,7 +136,7 @@ void test_failures(TestCtx& c) {
     c.begin("kimc failures");
     KV_CHECK(c, put("bad.kim", "screen s {\n  box bg=#12 w=1x\n}\n"));
     KV_CHECK(c, kimc("compile", path("bad.kim"), path("bad.kimb"), "--as", "ui/bad.kim") == 1);
-    KV_CHECK(c, has(g_err.data, "ui/bad.kim:2:10: a color is #rrggbb or #rrggbbaa (or #rgb, #rgba)\n") && has(g_err.data, "ui/bad.kim:2:16: not a number or a range\n"));
+    KV_CHECK(c, has(g_err.data, "ui/bad.kim:2:10: a color is #rrggbb or #rrggbbaa (or #rgb, #rgba)\n") && has(g_err.data, "ui/bad.kim:2:16: not a number, a percentage or a range\n"));
     KV_CHECK(c, !io_is_file(path("bad.kimb")) && !io_is_file(path("bad.kimb.kimc-tmp")));
     KV_CHECK(c, kimc("compile", path("missing.kim"), path("m.kimb")) == 1 && has(g_err.data, "cannot read"));
     KV_CHECK(c, kimc("compile", path("form.kim")) == 2);

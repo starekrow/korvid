@@ -152,29 +152,7 @@ const char* expand(Build& b, const KromeFrame* fr, const char* text) {
 // Lua script may write them), or up to four numbers.
 bool to_value(const JsonDoc& doc, const JsonValue& v, KromeValue* out) {
     if (v.is_number()) { *out = KromeValue::num((f32)v.number()); return true; }
-    if (const char* s = v.str()) {
-        const char* dots = strstr(s, "..");
-        if (dots && dots - s < 32) {
-            char lo_text[32];
-            memcpy(lo_text, s, (usize)(dots - s));
-            lo_text[dots - s] = 0;
-            char* end = nullptr;
-            f64 lo = dots == s ? 0.0 : strtod(lo_text, &end);
-            if (dots == s || *end == 0) {
-                f64 hi = 1e30;
-                if (dots[2]) { hi = strtod(dots + 2, &end); if (*end != 0) { *out = KromeValue::str(s); return true; } }
-                *out = KromeValue::range((f32)lo, (f32)hi);
-                return true;
-            }
-        }
-        if (*s) {
-            char* end = nullptr;
-            f64 n = strtod(s, &end);
-            if (*end == 0) { *out = KromeValue::num((f32)n); return true; }
-        }
-        *out = KromeValue::str(s);
-        return true;
-    }
+    if (const char* s = v.str()) { krome_string_value(s, out); return true; }
     if (v.is_array()) {
         f32 n[4];
         u32 c = 0;
@@ -189,6 +167,40 @@ bool to_value(const JsonDoc& doc, const JsonValue& v, KromeValue* out) {
     return false;
 }
 
+} // namespace
+
+void krome_string_value(const char* s, KromeValue* out) {
+    const char* dots = strstr(s, "..");
+    if (dots && dots - s < 32) {
+        char lo_text[32];
+        memcpy(lo_text, s, (usize)(dots - s));
+        lo_text[dots - s] = 0;
+        char* end = nullptr;
+        f64 lo = dots == s ? 0.0 : strtod(lo_text, &end);
+        if (dots == s || *end == 0) {
+            f64 hi = 1e30;
+            if (dots[2]) { hi = strtod(dots + 2, &end); if (*end != 0) { *out = KromeValue::str(s); return; } }
+            *out = KromeValue::range((f32)lo, (f32)hi);
+            return;
+        }
+    }
+    if (*s) {
+        char* end = nullptr;
+        f64 n = strtod(s, &end);
+        if (*end == 0) { *out = KromeValue::num((f32)n); return; }
+    }
+    *out = KromeValue::str(s);
+}
+
+const char* krome_apply_bound(KromeModule& s, KromeScreen& sc, KromeTree& tree, const KromeDep& d) {
+    char buf[256];
+    KromeValue v;
+    if (!krome_model_value(s, sc, name_str(d.path), &v, buf, sizeof buf)) return nullptr; // nothing there: left as it was
+    return tree.set(d.node, name_str(d.prop), v, (KromeState)d.state);
+}
+
+namespace {
+
 bool numeric_string(const JsonValue& v) {
     const char* s = v.str();
     if (!s || !*s) return false;
@@ -202,6 +214,14 @@ void prop(Build& b, const KromeFrame* fr, u32 node, const KimbFile& f, u32 line,
     const KimbKernelProp* k = kimb_kernel_prop(name);
     if (!k) { error(b, fr, f.file, line, "'%s' is not a property", name); return; }
     if (state != KromeState::Base && k->layout) { error(b, fr, f.file, line, "%s.%s is layout, which a look cannot set", krome_state_name(state), name); return; }
+    // Bound to the model (`w=@key`): set from it now, and again whenever the key changes.
+    if (const char* at = v.str(); at && at[0] == '@') {
+        const char* path = model_path(b, fr, at + 1);
+        KromeDep d{node, head_key(path), KromeDep::Prop, (u8)state, name_intern(name), name_intern(path)};
+        if (const char* bad = krome_apply_bound(b.s, b.sc, b.tree, d)) error(b, fr, f.file, line, "%s=%s: %s", name, at, bad);
+        if (b.deps) b.deps->push(d);
+        return;
+    }
     const char* why = nullptr;
     const JsonValue* r = kimb_resolve_value(*b.scope, b.theme, k->type, v, &why);
     const JsonDoc* rdoc = &f.doc;
@@ -275,18 +295,30 @@ void styles(Build& b, const KromeFrame* fr, u32 node, const KimbFile& f, u32 lin
     } else if (st->str()) style(b, fr, node, st->str(), f.file, line, 0);
 }
 
-void binding(Build& b, const KromeFrame* fr, u32 node, const KimbFile& f, const JsonValue* bv) {
+void binding(Build& b, const KromeFrame* fr, u32 node, const KimbFile& f, const JsonValue* bv, const JsonValue* eq) {
     const char* w = bv ? bv->str() : nullptr;
     if (!w) return;
+    // `@key=value` is a binding by equality: markup gives the value apart ("bv"), a Lua
+    // table writes it in the one string (bind = "tab=rules").
+    const char* value = eq ? eq->str() : nullptr;
+    char key[256];
+    if (!value) {
+        if (const char* is = strchr(w, '=')) {
+            format(key, sizeof key, "%.*s", (int)(is - w), w);
+            value = is + 1;
+            w = key;
+        }
+    }
     const char* path = model_path(b, fr, w);
     KromeNode& n = b.tree.nodes[node];
     n.binding = name_intern(path);
+    n.bind_value = value ? b.tree.string(value, (u32)strlen(value)) : KROME_NONE;
     if (n.type == KromeType::Edit) {
         // An edit's binding is its text, both ways.
         krome_model_into_text(b.s, b.sc, path, b.tree, node);
-    } else if (krome_model_truthy(b.s, b.sc, path)) n.flags |= KROME_SELECTED;
+    } else if (krome_bound_selected(b.s, b.sc, b.tree, node)) n.flags |= KROME_SELECTED;
     else n.flags &= (u16)~KROME_SELECTED;
-    if (b.deps) b.deps->push(KromeDep{node, head_key(path), true});
+    if (b.deps) b.deps->push(KromeDep{node, head_key(path), KromeDep::Binding});
     (void)f;
 }
 
@@ -481,7 +513,7 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
     if (json_get(f.doc, n, "r")) error(b, fr, f.file, line, "a %s takes no range", w);
     if (const char* i = json_string(json_get(f.doc, n, "id"), nullptr)) t.set(id, "id", KromeValue::str(expand(b, fr, i)));
     if (const char* e = json_string(json_get(f.doc, n, "e"), nullptr)) t.set(id, "event", KromeValue::str(e));
-    binding(b, fr, id, f, json_get(f.doc, n, "b"));
+    binding(b, fr, id, f, json_get(f.doc, n, "b"), json_get(f.doc, n, "bv"));
     // The use lines over the body's root, innermost first: what each says that is not a
     // parameter of its definition.
     for (const Over* o = over; o; o = o->next) {
@@ -493,7 +525,7 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
         looks(b, o->frame, id, *o->file, ul, json_get(ud, *o->use, "looks"));
         if (const char* i = json_string(json_get(ud, *o->use, "id"), nullptr)) t.set(id, "id", KromeValue::str(expand(b, o->frame, i)));
         if (const char* e = json_string(json_get(ud, *o->use, "e"), nullptr)) t.set(id, "event", KromeValue::str(e));
-        binding(b, o->frame, id, *o->file, json_get(ud, *o->use, "b"));
+        binding(b, o->frame, id, *o->file, json_get(ud, *o->use, "b"), json_get(ud, *o->use, "bv"));
         if (json_get(ud, *o->use, "r")) error(b, o->frame, o->file->file, ul, "%s takes no range", json_string(json_get(ud, *o->use, "w"), "?"));
     }
     if (const JsonValue* c = json_get(f.doc, n, "c"))
@@ -562,7 +594,7 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc) {
     sc.waiting = b.waiting;
     restore(sc.tree, kept);
     kept.free();
-    for (const KromeDep& d : sc.deps) if (!d.binding) krome_fill_node(s, sc, sc.tree, d.node);
+    for (const KromeDep& d : sc.deps) if (d.kind == KromeDep::Text) krome_fill_node(s, sc, sc.tree, d.node);
     sc.tree.dirty = true;
     sc.repaint = true;
     for (KromeOverlay* o : sc.overlays) krome_build_overlay(s, sc, *o);
@@ -578,6 +610,48 @@ bool krome_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o) {
     node(b, o.file, *root, KROME_NONE, nullptr, nullptr);
     o.placed = false;
     return o.tree.root != KROME_NONE;
+}
+
+bool krome_tooltip_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o, const char* text) {
+    if (o.arena.base) arena_destroy(o.arena);
+    if (!arena_create(o.arena, 1u << 20, "krome.tooltip", MemTag{})) return false;
+    JsonBuilder jb(&o.arena.a);
+    JsonRef root = jb.object();
+    jb.set(root, "kim", jb.integer(1));
+    jb.set(root, "file", jb.string(name_str(sc.name)));
+    JsonRef box = jb.object();
+    jb.set(box, "w", jb.string("box"));
+    KimbFound st;
+    if (kimb_find_style(sc.scope, "tooltip", &st)) {
+        JsonRef styles = jb.array();
+        jb.push(styles, jb.string("tooltip"));
+        jb.set(box, "s", styles);
+    } else {
+        JsonRef p = jb.object();
+        jb.set(p, "bg", jb.string("#1f2533"));
+        jb.set(p, "color", jb.string("#e6e9ef"));
+        JsonRef pad = jb.array();
+        jb.push(pad, jb.integer(8));
+        jb.push(pad, jb.integer(4));
+        jb.set(p, "pad", pad);
+        jb.set(p, "radius", jb.integer(4));
+        jb.set(box, "p", p);
+    }
+    JsonRef kids = jb.array();
+    JsonRef t = jb.object();
+    jb.set(t, "w", jb.string("text"));
+    jb.set(t, "t", jb.string(text));
+    jb.push(kids, t);
+    jb.set(box, "c", kids);
+    JsonRef screens = jb.object();
+    jb.set(screens, "root", box);
+    jb.set(root, "screens", screens);
+    JsonDoc doc;
+    bool ok = jb.finish(root, doc);
+    jb.free();
+    KimErrors quiet;
+    if (!ok || !kimb_from_doc(doc, o.file, quiet, name_str(sc.name))) return false;
+    return krome_build_overlay(s, sc, o);
 }
 
 void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key) {
@@ -614,7 +688,7 @@ void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key) {
             if (t.nodes[last].next == KROME_NONE) t.nodes[parent].last = last;
         }
         sc.regions[i].count = count;
-        for (u32 d = deps_before; d < sc.deps.len; ++d) if (!sc.deps[d].binding) krome_fill_node(s, sc, t, sc.deps[d].node);
+        for (u32 d = deps_before; d < sc.deps.len; ++d) if (sc.deps[d].kind == KromeDep::Text) krome_fill_node(s, sc, t, sc.deps[d].node);
         ++s.rebuilt_regions;
     }
     if (!any) return;
