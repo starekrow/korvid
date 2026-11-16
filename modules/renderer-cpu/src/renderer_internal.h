@@ -18,6 +18,7 @@
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/pool.h"
+#include "raster.h"
 
 namespace kv {
 
@@ -75,6 +76,16 @@ struct Renderer : RenderCore {
     u32  target_width = 0, target_height = 0, target_pitch = 0;
     bool target_rgba = false;  // R, G, B in memory; else B, G, R
     bool presenting  = false;  // the window's frame is held: present_software() is owed
+
+    // The frame being drawn (frame.cc): its push block and layer offsets (rb_sort,
+    // rb_bind_sprites); the sort's totals and starts are in sort_meta, as the GPU's are.
+    PushData   push{};
+    const f32* layers = nullptr;
+    // A pass: its clear, and its draws in order as quads; binned into tiles at its end.
+    u16           clear[3] = {};
+    Array<CpuQuad> quads;
+    Array<u32>    bin_counts, bin_items;
+    bool          quantize8 = false; // KV_CPU_TARGET8: round each draw through 8-bit sRGB, as the GPU's target does
 };
 
 // A buffer of `bytes`, zeroed; false when there is no memory.

@@ -38,3 +38,39 @@ wrapper and host are in `modules/renderer-cpu/notes/` (`spike_rings_cpu.slang.tx
   boundary; the seam's no-virtuals rule stays the renderer's own.
 - **Names carry Slang's suffixes** (`_0`), deterministically. The glue the shader rule will append to each generated
   file fills `GlobalParams_0` by those names, and a test will hold them.
+
+## Milestone 2: sprites
+
+- **The sort** is the GPU's on one thread (`frame.cc`): every live row placed as `row_placement` places it, culled by
+  its bounding circle, bucketed, counted, scattered in row order into `tables.sorted`. Each keyed bucket's first
+  2,048 rows are then merge-sorted by (orderable key, row). It fills the same `sorted`, `bucket_of` and `sort_meta`
+  the GPU's does, so `--check-sort` verifies it with the GPU's verifier: the testbed's swarm (42,005 rows, 40,005
+  visible, 513 buckets) checks clean.
+- **The draws.** Each run's rows become quads in the window's pixels (`prepare`): corners in 1/256 pixel, wound so
+  the inside is positive, the inverse of the corner-to-pixel map for the local coordinates, the uv rect and tint in
+  fixed point. At the pass's end they are binned into 64 x 64 tiles in order, and the tiles drawn as a job batch.
+  A tile's picture depends only on its list, so the result is the same on any number of threads.
+- **The pixels** (`raster.cc`, which includes nothing of the engine's but its types):
+  - Coverage: edge functions in 1/256 pixel, the top-left rule.
+  - Sampling: nearest; linear with 8-bit weights; repeat addressing; sRGB textures decoded through a table before
+    filtering.
+  - Tint and blends: integer arithmetic on 16-bit linear light.
+  - Encoding: through a 64K-entry table when the tile is written out.
+- **Against Vulkan** (`examples/gallery/tests`, headless in `kormake test`):
+  - The eight sprite scenes are within the cross-backend tolerance; five are within one level everywhere.
+  - What differs is edges that run exactly through pixel centres: lines of pixels along 45-degree edges in
+    `transform` (233 pixels) and `camera` (19). There `kv::sin` and the GPU's `sin` differ in the last bit and
+    decide a whole line; the rule is the same.
+  - The CPU's own references (`references/cpu`) are exact.
+- **The pixel format, measured.** The testbed's swarm (42,005 sprites at 960 x 540, a dev build, 16 threads,
+  `--prof-report`):
+
+  | Target | Tile work, summed over threads | Raster wall time per frame | fps |
+  | --- | --- | --- | --- |
+  | 16-bit linear tiles | 145.7 ms | 10.0 ms | 49 |
+  | 8-bit sRGB per draw, as the GPU's (`KV_CPU_TARGET8`) | 161.1 ms | 11.1 ms | 46 |
+
+  Linear is the faster, by about 10%, and is kept.
+- **Inline math stays out of the sim.** `tools/check-fast-objects.sh` lists the weak symbols of the objects meant
+  for the fast profile (`raster.o`: none) against every other object's. arcfire's normal replay matches its 236
+  hashes with the CPU renderer linked and drawing, and with Vulkan drawing.

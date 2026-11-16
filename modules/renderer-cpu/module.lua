@@ -8,4 +8,5 @@ module "renderer-cpu" {
   platforms = { "linux", "windows" },
   deps      = { "core", "math", "render", "platform", "platform_hid" },
   engine_module = true,
+  unity     = false, -- raster.cc is an object of its own: the code a fast build profile will take
 }

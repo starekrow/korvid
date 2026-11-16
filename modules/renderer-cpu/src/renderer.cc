@@ -9,10 +9,10 @@
 #include "korvid/core/format.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/time.h"
-#include "korvid/math/scalar.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/module.h"
+#include <stdlib.h>
 #include <string.h>
 
 namespace kv { namespace KV_RB_NS {
@@ -22,15 +22,6 @@ namespace {
 void cpu_free(Renderer* r, Buffer& b) {
     if (b.data) free_in(r->general, b.data, b.size);
     b = Buffer{};
-}
-
-// A linear color's channel as an sRGB byte, correctly rounded. Not on a hot path yet: the
-// clear, once a frame.
-u8 srgb_byte(f32 c) {
-    if (!(c > 0.0f)) return 0;
-    if (c >= 1.0f) return 255;
-    f32 s = c <= 0.0031308f ? c * 12.92f : 1.055f * kv::pow(c, 1.0f / 2.4f) - 0.055f;
-    return (u8)(s * 255.0f + 0.5f);
 }
 
 } // namespace
@@ -77,6 +68,9 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     bool ok = rc_create_pools(r);
     ok = ok && rb_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
     ok = ok && cpu_alloc(r, sizeof(GpuMaterial) * kMaxMaterials, r->material_table);
+    ok = ok && cpu_alloc(r, sizeof(u32) * (2 * kBucketCount + 4), r->sort_meta); // totals, starts, visible: the GPU's layout
+    r->quads.alloc = r->bin_counts.alloc = r->bin_items.alloc = ga;
+    r->quantize8 = getenv("KV_CPU_TARGET8") != nullptr;
     for (FrameInFlight& f : r->frames) ok = ok && cpu_alloc(r, sizeof(f32) * 4 * kLayerCount, f.layers);
     ok = ok && rc_ring_init(r, kInitialRingBytes);
     ok = ok && rc_create_defaults(r);
@@ -106,6 +100,11 @@ void renderer_destroy(Renderer* r) {
         if (r->textures.is_alive(i)) cpu_free(r, r->textures.items[i].pixels);
     cpu_free(r, r->tables.sprites);
     cpu_free(r, r->tables.sorted);
+    cpu_free(r, r->tables.bucket_of);
+    cpu_free(r, r->sort_meta);
+    r->quads.free();
+    r->bin_counts.free();
+    r->bin_items.free();
     cpu_free(r, r->material_table);
     cpu_free(r, r->ring.buf);
     cpu_free(r, r->headless);
@@ -193,16 +192,21 @@ bool rb_post_set(Renderer*, i32, Name) { return false; }        // milestone 4: 
 
 bool rb_create_tables(Renderer* r, u32 rows) {
     u32 capacity = (rows + kBlockRows - 1) / kBlockRows * kBlockRows;
-    Buffer sprites, sorted;
-    if (!cpu_alloc(r, (u64)capacity * sizeof(GpuSprite), sprites) || !cpu_alloc(r, (u64)capacity * sizeof(u32), sorted)) {
+    Buffer sprites, sorted, bucket_of;
+    if (!cpu_alloc(r, (u64)capacity * sizeof(GpuSprite), sprites) || !cpu_alloc(r, (u64)capacity * sizeof(u32), sorted) ||
+        !cpu_alloc(r, (u64)capacity * sizeof(u32), bucket_of)) {
         cpu_free(r, sprites);
+        cpu_free(r, sorted);
         return false;
     }
+    // The rows come over whole: the core marks every row dirty when the tables grow.
     rb_buffer_retire(r, r->tables.sprites);
     rb_buffer_retire(r, r->tables.sorted);
-    r->tables.capacity = capacity;
-    r->tables.sprites  = sprites;
-    r->tables.sorted   = sorted;
+    rb_buffer_retire(r, r->tables.bucket_of);
+    r->tables.capacity  = capacity;
+    r->tables.sprites   = sprites;
+    r->tables.sorted    = sorted;
+    r->tables.bucket_of = bucket_of;
     return true;
 }
 
@@ -263,26 +267,7 @@ void rb_copy_rows(Renderer*, FrameInFlight&, RbBuffer& table, const RingSpan& sp
 
 void rb_upload_end(Renderer*, FrameInFlight&) {}
 
-void rb_sort(Renderer*, FrameInFlight&, const PushData&) {}       // milestone 2
-void rb_read_sort(Renderer*, FrameInFlight&) {}
-void rb_sort_end(Renderer*, FrameInFlight&, bool) {}
 bool rb_post_prepare(Renderer*, u32, u32) { return false; }       // milestone 4: straight to the window
-
-// A pass clears the target to the view's color (linear, written as sRGB bytes).
-void rb_pass_begin(Renderer* r, FrameInFlight&, RcPass, const RenderView& view) {
-    if (!r->target) return;
-    u8 cr = srgb_byte(view.clear_color.r), cg = srgb_byte(view.clear_color.g), cb = srgb_byte(view.clear_color.b);
-    u32 px = r->target_rgba ? (u32)cr | (u32)cg << 8 | (u32)cb << 16 | 0xFF000000u : (u32)cb | (u32)cg << 8 | (u32)cr << 16 | 0xFF000000u;
-    for (u32 y = 0; y < r->target_height; ++y) {
-        u32* row = (u32*)(r->target + (usize)y * r->target_pitch);
-        for (u32 x = 0; x < r->target_width; ++x) row[x] = px;
-    }
-}
-
-void rb_pass_post(Renderer*, FrameInFlight&, const RenderView&) {}
-void rb_bind_sprites(Renderer*, FrameInFlight&, const PushData&) {}
-u32  rb_draw_run(Renderer*, FrameInFlight&, const DrawRun&) { return 0; } // milestone 2
-void rb_pass_end(Renderer*, FrameInFlight&, RcPass) {}
 
 void rb_read_window(Renderer* r, FrameInFlight&) {
     if (!r->target) return;
