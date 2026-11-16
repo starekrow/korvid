@@ -23,6 +23,8 @@
 #include "korvid/platform_hid/module.h"
 #include "korvid/render/renderer.h"
 #include "korvid/render/ui.h"
+#include "korvid/patherizer/patherizer.h"
+#include "korvid/core/memory.h"
 #include <string.h>
 
 namespace kv {
@@ -39,6 +41,7 @@ struct Gallery {
     Renderer*   r = nullptr;
     const char* out = ".";
     Handle checker, disc, glyph;         // textures
+    Handle gear[3], badge;               // shapes, rasterized by patherizer (the ui scene)
     Handle opaque_checker, linear_checker, alpha_disc, add_disc, alpha_glyph, tinted_disc, rings; // materials
     Array<SpriteDelta> deltas;
     Array<Handle>      live;             // the entities in the render world now
@@ -55,6 +58,86 @@ Handle make_texture(Gallery& g, const char* name, u32 w, u32 h, const u8* rgba, 
     Handle t = renderer_texture_create(g.r, d);
     renderer_texture_upload(g.r, t, w, h, rgba, (usize)w * h * 4);
     return t;
+}
+
+// Shapes as Krome draws them (docs/PRDs/Krome-Slice-5-PRD.md): rasterized by patherizer at the
+// size they are drawn, into sRGB with straight alpha, and drawn as textured UI boxes. A
+// one-colour shape (Material's settings icon, every paint currentColor) is rasterized white
+// and the box tints it; a coloured one (gradients, a dashed stroke, a clip, group opacity) is
+// drawn as it is.
+Handle shape_texture(Gallery& g, const char* name, const PathShape& s, u32 w, u32 h) {
+    Array<u8> px;
+    px.alloc = mem_general();
+    u8* p = px.push_n((usize)w * h * 4);
+    memset(p, 0, (usize)w * h * 4);
+    patherizer_draw(s, PathTarget{p, w, h, w * 4, false}, PathOptions{});
+    Handle t = make_texture(g, name, w, h, p);
+    px.free();
+    return t;
+}
+
+void make_shapes(Gallery& g) {
+    PathShape s;
+    s.init(mem_general());
+    // Material Symbols' settings, 20 px grid (modules/krome/assets/icons/settings.svg).
+    s.view[0] = 0; s.view[1] = -960; s.view[2] = 960; s.view[3] = 960;
+    {
+        PathBuilder b(s);
+        b.svg_path("m403-96-22-114q-23-9-44.5-21T296-259l-110 37-77-133 87-76q-2-12-3-24t-1-25q0-13 1-25t3-24l-87-76 77-133 110 37q19-16 40.5-28t44.5-21l22-114h154l22 114q23 9 44.5 21t40.5 28l110-37 77 133-87 76q2 12 3 24t1 25q0 13-1 25t-3 24l87 76-77 133-110-37q-19 16-40.5 28T579-210L557-96H403Zm59-72h36l19-99q38-7 71-26t57-48l96 32 18-30-76-67q6-17 9.5-35.5T696-480q0-20-3.5-38.5T683-554l76-67-18-30-96 32q-24-29-57-48t-71-26l-19-99h-36l-19 99q-38 7-71 26t-57 48l-96-32-18 30 76 67q-6 17-9.5 35.5T264-480q0 20 3.5 38.5T277-406l-76 67 18 30 96-32q24 29 57 48t71 26l19 99Zm18-168q60 0 102-42t42-102q0-60-42-102t-102-42q-60 0-102 42t-42 102q0 60 42 102t102 42Zm0-144Z");
+        b.fill(s.add_current());
+    }
+    const u32 sizes[3] = {20, 40, 80};
+    const char* names[3] = {"gallery.gear20", "gallery.gear40", "gallery.gear80"};
+    for (u32 i = 0; i < 3; ++i) g.gear[i] = shape_texture(g, names[i], s, sizes[i], sizes[i]);
+
+    // A badge: a radial gradient disc (focal, off centre) with a dashed round-capped ring, a
+    // star stroked with mitred joins over a linear gradient, clipped to the disc, at 80% opacity.
+    s.clear();
+    s.view[0] = 0; s.view[1] = 0; s.view[2] = 100; s.view[3] = 100;
+    {
+        PathBuilder b(s);
+        const PathStop warm[3] = {{0.0f, {255, 236, 160, 255}}, {0.6f, {245, 120, 60, 255}}, {1.0f, {150, 30, 80, 255}}};
+        PathPaint radial;
+        radial.kind = PathPaint::Radial;
+        radial.g[0] = 50; radial.g[1] = 50; radial.g[2] = 46; radial.g[3] = 36; radial.g[4] = 34;
+        auto circle = [&](f32 cx, f32 cy, f32 r) { // four cubics
+            const f32 k = 0.5522847f * r;
+            b.move_to(cx + r, cy);
+            b.cubic_to(cx + r, cy + k, cx + k, cy + r, cx, cy + r);
+            b.cubic_to(cx - k, cy + r, cx - r, cy + k, cx - r, cy);
+            b.cubic_to(cx - r, cy - k, cx - k, cy - r, cx, cy - r);
+            b.cubic_to(cx + k, cy - r, cx + r, cy - k, cx + r, cy);
+            b.close();
+        };
+        circle(50, 50, 46);
+        b.fill(s.add_gradient(radial, warm, 3));
+        u32 clip = b.begin_group();
+        circle(50, 50, 40);
+        b.fill(s.add_solid(255, 255, 255, 255));
+        b.end_group(clip);
+        s.clips.push(clip);
+        u32 group = b.begin_group(0.8f, 1 + clip);
+        const PathStop cool[2] = {{0.0f, {120, 220, 255, 255}}, {1.0f, {40, 70, 200, 255}}};
+        PathPaint linear;
+        linear.kind = PathPaint::Linear;
+        linear.g[0] = 20; linear.g[1] = 20; linear.g[2] = 80; linear.g[3] = 80;
+        // A five-pointed star, its points precomputed (no libm in the picture).
+        const f32 star[10][2] = {{50, 8}, {60.6f, 35.4f}, {90, 37}, {67, 55.6f}, {74.7f, 84}, {50, 68}, {25.3f, 84}, {33, 55.6f}, {10, 37}, {39.4f, 35.4f}};
+        b.move_to(star[0][0], star[0][1]);
+        for (u32 i = 1; i < 10; ++i) b.line_to(star[i][0], star[i][1]);
+        b.close();
+        PathStroke st;
+        st.width = 4; st.join = LineJoin::Miter; st.miter_limit = 4;
+        b.fill_and_stroke(s.add_gradient(linear, cool, 2), FillRule::NonZero, s.add_solid(255, 255, 255, 255), st);
+        b.end_group(group);
+        PathStroke ring;
+        ring.width = 3; ring.cap = LineCap::Round;
+        const f32 dash[2] = {6, 6};
+        circle(50, 50, 46);
+        b.stroke(s.add_solid(255, 250, 240, 255), ring, 1.0f, dash, 2);
+    }
+    g.badge = shape_texture(g, "gallery.badge", s, 120, 120);
+    s.free();
 }
 
 void make_textures(Gallery& g) {
@@ -91,6 +174,7 @@ void make_textures(Gallery& g) {
             p[0] = on ? 255 : 0; p[1] = on ? 255 : 0; p[2] = on ? 255 : 0; p[3] = on ? 255 : 0;
         }
     g.glyph = make_texture(g, "gallery.glyph", 16, 16, glyph);
+    make_shapes(g);
 }
 
 Handle make_material(Gallery& g, const char* name, Handle tex, BlendMode blend, TextureFilter filter, color tint,
@@ -446,6 +530,21 @@ void scene_ui(Gallery& g, UiList& l) {
     UiBox lifted = ui_box(120, 340, 240, 120, panel, 10);
     lifted.shadow_color = color_rgba(0.35f, 0.63f, 1.0f, 0.8f); lifted.shadow_blur = 24; lifted.shadow_spread = 6;
     l.box(lifted);
+    // Shapes (patherizer): a one-colour icon at 20, 40 and 80 px, white and tinted, and a
+    // coloured badge, each drawn at the size it was rasterized.
+    f32 gx = 600;
+    for (u32 i = 0; i < 3; ++i) {
+        f32 sz = (f32)(20u << i);
+        for (u32 k = 0; k < 2; ++k) {
+            UiBox ic = ui_box(gx, 280.0f + (f32)k * 100.0f, sz, sz, k ? accent : white);
+            ic.textured = true; ic.texture = renderer_texture_slot(g.r, g.gear[i]); ic.uv = rect2{0, 0, 1, 1};
+            l.box(ic);
+        }
+        gx += sz + 24.0f;
+    }
+    UiBox badge = ui_box(800, 280, 120, 120, white);
+    badge.textured = true; badge.texture = renderer_texture_slot(g.r, g.badge); badge.uv = rect2{0, 0, 1, 1};
+    l.box(badge);
     renderer_ui_set(g.r, 0, l);
 }
 

@@ -9,6 +9,7 @@
 #include "korvid/core/format.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/test.h"
+#include "korvid/core/time.h"
 #include "korvid/image/png.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -246,7 +247,77 @@ void test_kshape(TestCtx& c) {
 
 } // namespace
 
-int main() {
+// --bench: the slice's numbers (docs/PRDs/Krome-Slice-5-PRD.md, KP17), on this machine, in
+// this build. Each time is the best of five runs of a batch, divided by the batch.
+f64 best_of(const PathShape& s, u32 size, u32 batch) {
+    Array<u8> px;
+    px.alloc = mem_general();
+    u8* p = px.push_n(size * size * 4);
+    f64 best = 1e9;
+    for (u32 run = 0; run < 5; ++run) {
+        f64 t0 = time_now();
+        for (u32 i = 0; i < batch; ++i) {
+            memset(p, 0, (usize)size * size * 4);
+            patherizer_draw(s, PathTarget{p, size, size, size * 4, false}, PathOptions{});
+        }
+        f64 t = (time_now() - t0) / batch;
+        if (t < best) best = t;
+    }
+    px.free();
+    return best;
+}
+
+int bench() {
+    const char* names[] = {"check", "remove", "expand_more", "expand_less", "chevron_left", "chevron_right",
+                           "arrow_drop_down", "arrow_right", "close", "add", "search", "menu", "arrow_upward",
+                           "arrow_downward", "info", "warning", "error", "folder", "draft", "settings", "refresh"};
+    const u32 n = sizeof names / sizeof names[0];
+    PathShape icons[n];
+    for (u32 i = 0; i < n; ++i) {
+        icons[i].init(mem_general());
+        char path[600], rel[128];
+        format(rel, sizeof rel, "../../krome/assets/icons/%s.svg", names[i]);
+        here(path, sizeof path, rel);
+        if (!convert(path, icons[i])) return 1;
+    }
+    // An icon at 16, 32 and 64: the mean over the 21 icons, and the slowest.
+    const u32 sizes[3] = {16, 32, 64};
+    for (u32 size : sizes) {
+        f64 sum = 0, worst = 0;
+        const char* slow = "";
+        for (u32 i = 0; i < n; ++i) {
+            f64 t = best_of(icons[i], size, 200);
+            sum += t;
+            if (t > worst) { worst = t; slow = names[i]; }
+        }
+        printf("icon %2u px: mean %6.1f us, slowest %6.1f us (%s)\n", size, sum / n * 1e6, worst * 1e6, slow);
+    }
+    // The first frame of a screen of 50 icons at 20 logical pixels: 50 rasterizations (the 21
+    // icons, then again at 21 and 22 px so each is its own entry), at a scale of 1 and of 2.
+    const u32 scales[2] = {1, 2};
+    for (u32 scale : scales) {
+        f64 total = 0;
+        for (u32 k = 0; k < 50; ++k) total += best_of(icons[k % n], (20 + k / n) * scale, 20);
+        printf("50 icons at 20 px, scale %u: %.2f ms\n", scale, total * 1e3);
+    }
+    // An illustration at 1000 px: the test files.
+    const char* files[3] = {"shapes", "structure", "paint"};
+    for (const char* f : files) {
+        char path[600], rel[128];
+        format(rel, sizeof rel, "files/%s.svg", f);
+        here(path, sizeof path, rel);
+        PathShape s;
+        s.init(mem_general());
+        if (!convert(path, s)) return 1;
+        printf("%s.svg at 1000 px: %.2f ms (%u nodes)\n", f, best_of(s, 1000, 2) * 1e3, s.nodes.len);
+        s.free();
+    }
+    for (PathShape& s : icons) s.free();
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    if (argc == 2 && !strcmp(argv[1], "--bench")) return bench();
     TestCtx c;
     test_files(c);
     test_icons(c);

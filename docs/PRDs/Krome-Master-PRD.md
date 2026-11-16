@@ -276,15 +276,20 @@ that depends on `core` and `math` only, and is not Krome's. stb_truetype is left
 its rasterizer is shaped for glyph outlines, and SVG needs more of one anyway. `patherizer`
 fills paths with both rules at analytic coverage, expands strokes to fills, and paints
 solid, linear and radial fills into a caller's buffer, with the engine's math so a shape
-rasterizes to the same pixels everywhere. Krome caches its output per shape and size; the
-SVG tool, kvscript (`kv.patherizer`, for asset scripts) and a game can call it directly.
+rasterizes to the same pixels everywhere. Krome caches its output per shape and size, and
+per colour for a shape with colours of its own; a shape painted only `currentColor` (std's
+icons) is rasterized once, white, and tinted, so a hover, a theme or a transition costs no
+rasterization (slice 5). The SVG tool, kvscript (`kv.patherizer`, for asset scripts) and a
+game can call it directly.
 
 ### Assets and reload
 
 `.kimb` screens, preludes and themes, and shapes, are asset records in the asset module,
 loaded into scopes like any other. goldberg cooks `.kim` to `.kimb` with the `kim`
-module, and reports each file's `use`s and shape references as discovered edges, so
-saving a prelude re-cooks exactly the screens that use it. Reload needs the asset
+module, and reports each file's `use`s as discovered edges, so saving a prelude re-cooks
+exactly the screens that use it. Shape references are not edges (slice 5): every `.svg`
+under a root cooks by convention, and a screen naming a shape that is not there finds out
+at load (logged, drawn as nothing). Reload needs the asset
 module's rebind (goldberg's "Live" slice); until then a screen changes on the next run.
 
 ### Errors
@@ -381,7 +386,11 @@ the model, a definition used with the wrong arguments: each names the line writt
    dotted paths in texts, braces in model values). After those, the five screens
    (`examples/kromescreens`) needed nothing more.
 5. **Shapes.** The `patherizer` module, the shape asset, the SVG tool, Krome's shape cache; icons in the
-   standard prelude.
+   standard prelude. Built (Krome-Slice-5-PRD.md; docs/design/patherizer.md has what each
+   milestone found). The SVG tool is C++ (the `svg` module, in process in goldberg), not
+   Lua; std's icons are Material Symbols. An icon rasterizes in microseconds; a 1000 px
+   illustration takes 14 to 48 ms, so large shapes need the job the slice PRD gives them
+   (not built at the slice's close; patherizer's README has the numbers).
 6. **Live.** Hot reload of screens, preludes, themes and shapes through goldberg and the
    asset module's rebind.
 
@@ -428,5 +437,5 @@ Nov 15, 2026, in review of the first draft.
 - [x] String interpolation: `{key}` for a model value and `{*tag}` for a tag, in Krome and `ui` alike (Slice 2 PRD).
 - [ ] Grid areas for screen shells.
 - [ ] Templating beyond parameters and one slot.
-- [ ] `.kshape` for the shape asset's extension.
+- [x] `.kshape` for the shape asset's extension (slice 5).
 - [ ] Does `ui` ever move onto Krome's layout or documents, or its UI primitive?

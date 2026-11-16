@@ -27,7 +27,7 @@ pixels.
 | `interpolate_0`, `_50`, `_90` | glyphs moved, turned and doubled between two ticks, drawn at alpha 0, 0.5 and 0.9; a disc set only before, unmoved |
 | `camera` | the view zoomed 2x and turned a sixth of a turn; screen sprites in the four corners and the center, untouched by it |
 | `shaders` | a game's sprite shader (`gallery_rings`) and a post shader (`gallery_post`: the right half's channels rotated, a line at the middle, a mark in the top left corner) under a glyph at the post layer |
-| `ui` | the UI primitive (`korvid/render/ui.h`): rounded boxes with every corner, 1 and 2 px borders, gradients down, across and diagonal, soft shadows, an image in a box, glyphs, a clip cutting a box's corner and glyphs inside a nested clip, over a sprite background. Vulkan's and D3D12's references are the same picture; Metal's is within one step of one channel of it (rounding). The gallery leaves the scene out where `renderer_caps(r).ui` is false |
+| `ui` | the UI primitive (`korvid/render/ui.h`): rounded boxes with every corner, 1 and 2 px borders, gradients down, across and diagonal, soft shadows, an image in a box, glyphs, a clip cutting a box's corner and glyphs inside a nested clip, shapes rasterized by patherizer as Krome draws them (an icon at 20, 40 and 80 px, white and tinted, and a coloured badge with gradients, a clip, group opacity and dashes), over a sprite background. Vulkan's and D3D12's references are the same picture; Metal's is within one step of one channel of it (rounding). The gallery leaves the scene out where `renderer_caps(r).ui` is false |
 
 `references/metal/` holds the pictures renderer-metal draws on an M3 Max (macOS 26.7), as
 PNGs; `references/vulkan/` those renderer-vulkan draws on Linux (a Radeon 780M, RADV 26.0.8,

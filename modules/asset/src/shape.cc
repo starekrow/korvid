@@ -112,7 +112,7 @@ Handle shape_load(Engine& e, AssetState_& s, const char* source) {
     Name name = name_intern(path);
     if (const Handle* existing = s.shape_by_path.find(name)) return *existing;
     ShapeAsset b{};
-    strncpy(b.path, path, sizeof b.path - 1);
+    memcpy(b.path, path, strlen(path) + 1); // checked shorter than KV_ASSET_PATH_MAX above
     Handle h = s.shapes.create(b);
     if (h.is_null()) return Handle{};
     s.shape_by_path.set(name, h);

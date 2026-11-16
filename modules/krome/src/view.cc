@@ -416,7 +416,6 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
     KromeImage* ki = n.type == KromeType::Image && (l.set & KROME_LOOK_IMAGE) ? image_for(p.s, l.image) : nullptr;
     const TextureAsset* img = ready_texture(p.s, ki);
     const ShapeAsset* shp = ready_shape(p.s, ki);
-    if (shp && r.w >= 1.0f && r.h >= 1.0f) { paint_shape(p, node, n, l, r, *ki, *shp, clip); shp = nullptr; }
     bool fill = l.bg.a > 0.0f || ((l.set & KROME_LOOK_BG2) && l.bg2.a > 0.0f);
     bool edge = l.border > 0.0f && l.border_color.a > 0.0f;
     bool shade = l.shadow_color.a > 0.0f;
@@ -445,6 +444,8 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
         b.clip = clip;
         p.list.box(b);
     }
+    // A shape over the node's own box (its background, border and shadow).
+    if (shp && r.w >= 1.0f && r.h >= 1.0f) paint_shape(p, node, n, l, r, *ki, *shp, clip);
     if (n.type == KromeType::Text) paint_text(p, n, node, l, r, clip);
     if (n.type == KromeType::Edit) paint_edit(p, n, node, l, r, clip_rect);
     if (n.first == KROME_NONE) return;

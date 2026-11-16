@@ -4,7 +4,7 @@
 -- nothing that depends on a platform's libm, so the pictures differ only where the GPUs do.
 module "gallery" {
   output        = "exe",
-  deps          = { "core", "math", "platform", "platform_hid", "render", "image" }, -- image: its tests read the pictures back
+  deps          = { "core", "math", "platform", "platform_hid", "render", "image", "patherizer" }, -- image: its tests read the pictures back
   tools         = { ["shader-compile"] = { install = "shaders" } },
   engine_module = true,
 }

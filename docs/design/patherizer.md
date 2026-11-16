@@ -180,8 +180,7 @@ Nov 16, 2026. Notes on `patherizer`, the engine's path rasterizer, as Krome slic
   (`renderer_texture_update`); without a renderer (the tests) the pages are kept in memory
   all the same, so the cache can be tested by its pixels.
 - **When it rasterizes.** At paint, on the engine's thread, every size. The PRD puts a shape
-  over 256 x 256 on a job; that is left for M5's numbers to decide (an icon at 20 px is
-  microseconds; a large illustration is the case to measure).
+  over 256 x 256 on a job; M5's numbers say it is needed (below).
 - **Colour transitions.** A coloured shape whose text colour is easing draws two boxes: the
   start colour's picture fading out and the end colour's fading in, smoothstep as the
   colours ease. Two pictures, not one per frame.
@@ -200,3 +199,26 @@ Nov 16, 2026. Notes on `patherizer`, the engine's path rasterizer, as Krome slic
   badges with icons. Each is a widget change more than an icon change.
 - **The gallery** has an Icons page: every icon at 16, 20 and 32, and at 32 in the accent;
   `--demo --shots` takes it in both themes (`gallery_icons`, `gallery_icons_light`).
+
+## Milestone 5: the close
+
+- **The gallery's `ui` scene** draws shapes as Krome does: Material's `settings` at 20, 40
+  and 80 px, white and tinted, and a coloured badge (a focal radial gradient, a star filled
+  with a linear gradient and stroked with mitred joins, clipped to a disc inside an 80%
+  group, a dashed round-capped ring). The rest of the scene is unchanged; its references are
+  remade for Vulkan and the CPU renderer, which agree within the gate's tolerance (13
+  levels on 21 pixels). Metal's and D3D12's `gallery_ui` references are now stale: their
+  machines remake them (`picture png`) and run their gates.
+- **The render gate** passes on Linux, Vulkan and CPU. It found one thing the debug tests
+  could not: the asset module's shape loader copied its path with `strncpy`, which `-O2`
+  (dev, ship) refuses as a possible truncation under `-Werror`.
+- **The numbers** (`svg_tests --bench`, Linux, dev build) are in patherizer's README. An
+  icon is 3 to 45 us depending on size; 50 icons' first frame is 0.2 ms at 1x and 0.65 ms
+  at 2x; a 1000 px illustration is 14 to 48 ms, the most in `paint.svg`'s gradients and
+  opacity layers. So the job for large shapes is needed: until it is built, a large shape
+  stalls the frame it first appears in.
+- **Paint order.** A shape is drawn over its node's own box (background, border, shadow),
+  not under it: an icon with a `bg` showed only the background.
+- **Left open:** the job for large shapes (KP12); goldberg's `lenient` switch for the svg
+  cook; icons for widgets std does not have yet (closable tabs and dialogs, sort arrows,
+  badges with icons); reload, which is slice 6's rebind.
