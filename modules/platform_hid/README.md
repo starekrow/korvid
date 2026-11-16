@@ -87,7 +87,8 @@ points into 31-byte pieces), and what an input method is composing, before it co
 `TextComposing` (its text, caret and selection in bytes; empty when it ends), so a reader in
 the Frame cycle sees each once however frames and ticks fall. Every host types through
 `input_typed`, which keeps `InputState::text` too. SDL3 turns `TEXT_EDITING` into
-`TextComposing`. `input_key_override(e, key, down)` and `input_compose_override(e, text,
+`TextComposing`, and Win32 its IME's `WM_IME_COMPOSITION` (the result string arrives as
+typed characters). `input_key_override(e, key, down)` and `input_compose_override(e, text,
 caret)` drive keys and an input method as the text override drives typing.
 
 **What a text field asks of the platform.** `platform_text_area(e, rect, caret)` tells the
@@ -95,7 +96,9 @@ input method where the caret is (its candidates open there; tell it only when it
 input method answers each telling with its state). `platform_clipboard_get` and `_set` read
 and write the system clipboard, and keep the process's own, which is what a headless run or
 a host not yet filled in gets back. `platform_cursor(e, CursorShape)` sets the pointer's
-shape. SDL3 (Linux, macOS) does all of it; Win32, iOS and Android have stubs.
+shape. SDL3 (Linux, macOS) and Win32 do all of it (Win32 reads and writes the clipboard's
+CRLFs as LFs, and gives the window its IME only while text input is on); iOS and Android
+have stubs.
 
 ## Quick reference
 
