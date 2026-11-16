@@ -120,3 +120,47 @@ Nov 16, 2026. Notes on `patherizer`, the engine's path rasterizer, as Krome slic
 - **Numbers so far.** 197 pictures (the corpus's 31 shapes and the 21 icons, at their sizes)
   agree with resvg's. The largest difference is 89, one pixel of the even-odd pentagram at
   48 px. The corpus hashes to `866c2af2152dfe1b` in debug, dev and ship.
+
+## Milestone 3: SVG and the asset
+
+- **`.kshape`** (`patherizer/src/kshape.cc`). The asset module reads it and `svg` writes it,
+  so it lives with the shape:
+  - KBOR, one map, its large arrays packed as little-endian bytes field by field: verbs,
+    points, paints, stops, strokes, dashes, nodes, clips;
+  - the nodes' source lines in a sidecar that can be left out;
+  - every index checked on the way in, so drawing checks nothing.
+
+  The 21 icons cook to about 500 bytes each.
+- **`svg`** (a module: core, math, xml, patherizer) reads what icon sets and editors write:
+  - every shape element, `path` (through patherizer's path data), `g`, `a` and `use`;
+  - transform lists; presentation attributes and `style="..."` with SVG's inheritance;
+    every colour syntax and the CSS keywords;
+  - gradients in both unit systems, with `href` chains, `gradientTransform` and the spreads,
+    `objectBoundingBox` measured from the curves' extremes, not their control points;
+  - clip paths in user space; opacity; `visibility`, `display`; `url(#id) fallback`.
+- **What it refuses.** Text, images, filters, masks, patterns, markers, `<style>`,
+  animation, nested `<svg>`, and `clipPathUnits="objectBoundingBox"` are refused with the
+  file and the line. `lenient` makes them warnings and leaves them out. Editors' namespaced
+  elements and attributes, titles and metadata are skipped without a word.
+- **Its tests:**
+  - three hand-written files against resvg's pictures, at 200 px;
+  - the icons, converted, drawing the bytes their path data drew through the builder;
+  - refusals with their lines, and lenient;
+  - a `.kshape` round trip.
+
+  At 200 px because what is under test is what SVG means. At small sizes the pictures also
+  differ by patherizer's known limits (conflation where a fill's edge and a thin stroke
+  share pixels; coincident edges under a clip, c x c where the truth is c), which its own
+  tests hold at every size. One finding: resvg does not know `rebeccapurple` and leaves
+  that stroke undrawn, so the test file uses `purple`.
+- **goldberg** runs `svg` in process (`builtin: "svg"`, version `KV_SVG_VERSION`):
+  - `*.svg` cooks to `<name>.kshape`, and its refusals fail the cook with their lines;
+  - the conventions know both types.
+
+  std's icons are cooked into every program that uses krome.
+- **The asset module** has a shape kind (`asset_load_shape`, `ShapeAsset`, `one_colour`)
+  beside blobs. A path naming the source (`icons/check.svg`) loads its cook.
+  - Nothing in the asset module reloads a changed file yet, shapes or any other kind. That
+    is slice 6's rebind, so the PRD's "reloads when its file changes" waits for it.
+- **kvscript**: `kv.svg.load` and `parse`, `kv.patherizer.read`, and a shape's `draw` into a
+  kv.image, `encode`, `view` and `one_colour`.

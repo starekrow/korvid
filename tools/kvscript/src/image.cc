@@ -620,4 +620,6 @@ void kvscript_open_image(lua_State* L) {
     luaL_setfuncs(L, k_functions, 0);
 }
 
+Image* kvscript_push_image(lua_State* L, i32 w, i32 h) { return push_image(L, w, h); }
+
 } // namespace kv

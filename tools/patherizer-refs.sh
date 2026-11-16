@@ -1,7 +1,9 @@
 #!/bin/sh
-# patherizer's reference pictures (docs/PRDs/Krome-Slice-5-PRD.md, KP6a): resvg's drawings of
-# the test corpus (written as SVG by patherizer_tests --write-svg) and of std's icons, at
-# 16, 24, 48 and 200 pixels, into modules/patherizer/tests/references/. Run it when the corpus
+# patherizer's and svg's reference pictures (docs/PRDs/Krome-Slice-5-PRD.md, KP6a): resvg's
+# drawings of patherizer's test corpus (written as SVG by patherizer_tests --write-svg) and of
+# std's icons, into modules/patherizer/tests/references/, and of svg's test files
+# (modules/svg/tests/files/), into modules/svg/tests/references/, at 16, 24, 48 and 200
+# pixels. Run it when the corpus
 # or the icons change, and commit what it writes. Needs resvg on PATH.
 #
 # resvg (tiny-skia) anti-aliases with 4 x 4 samples, so its edges are good to about an eighth
@@ -27,15 +29,19 @@ rm -f "$refs"/*.png
 # Each picture at 8x, listed with its final size, then all of them reduced in one run.
 list="$tmp/list.txt"
 : > "$list"
-draw() { # svg, name
+draw() { # svg, name[, directory]
     for size in 16 24 48 200; do
         big=$((size * 8))
         resvg -w $big -h $big "$1" "$tmp/$2_$size.big.png"
-        echo "$tmp/$2_$size.big.png $refs/$2_$size.png $size" >> "$list"
+        echo "$tmp/$2_$size.big.png ${3:-$refs}/$2_$size.png $size" >> "$list"
     done
 }
 for svg in "$tmp"/*.svg; do draw "$svg" "$(basename "$svg" .svg)"; done
 for name in $(grep -v '^#' modules/krome/icons/NAMES); do draw "$icons/$name.svg" "icon_$name"; done
+svgrefs=modules/svg/tests/references
+mkdir -p "$svgrefs"
+rm -f "$svgrefs"/*.png
+for svg in modules/svg/tests/files/*.svg; do draw "$svg" "$(basename "$svg" .svg)" "$svgrefs"; done
 cat > "$tmp/reduce.lua" <<'LUA'
 local n = 0
 for line in io.lines(arg[1]) do

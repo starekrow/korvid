@@ -13,11 +13,13 @@
     "script":   { "runtime": true },
     "kim":      { "runtime": false },
     "kimb":     { "runtime": true },
-    "svg":      { "runtime": false }
+    "svg":      { "runtime": false },
+    "kshape":   { "runtime": true }
   },
 
   "converters": {
-    "kim": { "from": "kim", "to": "kimb", "builtin": "kim", "outputs": ["*.kimb"] }
+    "kim": { "from": "kim", "to": "kimb", "builtin": "kim", "outputs": ["*.kimb"] },
+    "svg": { "from": "svg", "to": "kshape", "builtin": "svg", "outputs": ["*.kshape"] }
   },
 
   "rules": [
@@ -41,7 +43,8 @@
     { "match": "*.lua",           "meta": { "type": "script" } },
     { "match": "*.kim",           "meta": { "type": "kim" } },
     { "match": "*.kimb",          "meta": { "type": "kimb" } },
-    { "match": "*.svg",           "meta": { "type": "svg", "cook": false } },
+    { "match": "*.svg",           "meta": { "type": "svg" } },
+    { "match": "*.kshape",        "meta": { "type": "kshape" } },
 
     { "match": "*.berg",          "meta": { "cook": false } },
     { "match": "*.sh",            "meta": { "cook": false } },

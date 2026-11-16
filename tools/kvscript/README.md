@@ -31,6 +31,9 @@ Lua's own libraries, all of them, and `kv`:
 | `img:key(r, g, b)`, `img:scale(kr, kg, kb [, ka])` | new pictures: that color made clear; each channel times its factor, truncated |
 | `img:save(path)`, `img:encode()` | PNG, to a file or as a string |
 | `kv.font.load(path, px)`, `font:draw(img, text, x, y, r, g, b, a [, anchor])`, `font:measure(text)` | TrueType (stb_truetype) at px to the em; anchor `l`/`m`/`r` then `a`/`m`/`s`/`d` |
+| `kv.svg.load(path [, {lenient = true}])`, `kv.svg.parse(text [, opts])` | an SVG file read into a shape (modules/svg): the shape, or nil, and a list of messages (`"name:line: text"`); `lenient` makes refusals (text, filters, masks, ...) warnings |
+| `kv.patherizer.read(bytes)` | a `.kshape` read into a shape, or nil and why |
+| `shape:draw(w, h [, {r, g, b, a}])`, `shape:encode([lines])`, `shape:view()`, `shape:one_colour()` | a kv.image of the shape at w x h (straight alpha; the table is currentColor), the shape as `.kshape` bytes, its view box, whether every paint is currentColor |
 | `kv.zip.open(path)`, `z:names()`, `z:read(name)`, `z:has(name)` | a zip read whole; names in the archive's order; entries stored or deflated, CRCs checked |
 | `kv.json.encode(value [, {indent = n, separators = {item, key}}])`, `kv.json.object(k, v, ...)`, `kv.json.null` | JSON as Python's `json.dump` writes it: objects keep the order their keys were set, floats as Python's `repr`, ASCII escapes; a plain table is an array |
 | `kv.json.decode(text [, {comments = true, drop = "//"}])`, `kv.json.line(t [, key])`, `kv.json.keys(obj)`, `kv.json.is_object(v)` | JSON read into the same values `encode` writes: objects as `kv.json.object` with their keys in the order written, arrays as tables, null as `kv.json.null`. A mistake returns nil, a message and its line. `line` is where a decoded object or array began, or where one of its members did. `comments` allows `//` to the end of a line; `drop` leaves out every member of that name |

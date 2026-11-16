@@ -94,6 +94,7 @@ bool asset_startup(Engine& e, ModuleInstance& self) {
     if (!asset_fonts_init(e, *s, self)) return false;
     if (!asset_sounds_init(e, *s, self)) return false;
     if (!asset_blobs_init(e, *s, self)) return false;
+    if (!asset_shapes_init(e, *s, self)) return false;
     if (!asset_streams_init(e, *s, self)) return false;
     if (!asset_scopes_init(e, *s, self)) return false;
     self.set_state(s);
@@ -106,7 +107,7 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
     // Reads still out (a load cut short by the exit) are the module's to collect: cancel
     // what has not started, let the rest finish, and free what any of them brought.
     if (IoQueue* io = platform_io(e)) {
-        const u16 kinds[] = {s->kind, s->material_kind, s->font_kind, s->sound_kind, s->blob_kind, s->stream_kind};
+        const u16 kinds[] = {s->kind, s->material_kind, s->font_kind, s->sound_kind, s->blob_kind, s->stream_kind, s->shape_kind};
         auto ours = [&](u64 user) { for (u16 k : kinds) if (asset_is_kind(*s, user, k)) return true; return false; };
         for (u32 round = 0; round < 1000; ++round) {
             for (u32 i = 0; i < io->completions().len;) {
@@ -121,6 +122,7 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
     }
     asset_scopes_shutdown(e, *s);
     asset_streams_shutdown(e, *s);
+    asset_shapes_shutdown(e, *s);
     asset_blobs_shutdown(e, *s);
     asset_sounds_shutdown(e, *s);
     asset_fonts_shutdown(e, *s);
@@ -136,10 +138,10 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
 }
 
 constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(AssetFailed), KV_EVENT(AssetScopeReady)};
-constinit const ResourceDesc  k_resources[] = {{".textures"}, {".materials"}, {".fonts"}, {".sounds"}, {".blobs"}, {".streams"}};
+constinit const ResourceDesc  k_resources[] = {{".textures"}, {".materials"}, {".fonts"}, {".sounds"}, {".blobs"}, {".streams"}, {".shapes"}};
 constinit const SystemDesc    k_systems[]   = {
     // Retiring first: it writes every table, and the other pumps then see this tick's state.
-    {.name = ".pump_scopes", .phase = Phase::PreSim, .fn = asset_scopes_pump, .writes = ".textures, .materials, .fonts, .sounds, .blobs, .streams",
+    {.name = ".pump_scopes", .phase = Phase::PreSim, .fn = asset_scopes_pump, .writes = ".textures, .materials, .fonts, .sounds, .blobs, .streams, .shapes",
      .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump", .phase = Phase::PreSim, .fn = asset_pump, .writes = ".textures", .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump_materials", .phase = Phase::PreSim, .fn = asset_materials_pump, .reads = ".textures",
@@ -154,6 +156,8 @@ constinit const SystemDesc    k_systems[]   = {
     {.name = ".pump_blobs", .phase = Phase::PreSim, .fn = asset_blobs_pump, .writes = ".blobs",
      .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump_streams", .phase = Phase::PreSim, .fn = asset_streams_pump, .writes = ".streams",
+     .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".pump_shapes", .phase = Phase::PreSim, .fn = asset_shapes_pump, .writes = ".shapes",
      .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
 };
 

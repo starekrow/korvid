@@ -699,7 +699,7 @@ void test_kim(TestCtx& c) {
     // A built-in converter is goldberg's: a name it does not have, or args, are refused.
     t.put("assets/goldberg.berg", R"({ "types": { "low": { "runtime": false } },
   "converters": { "up": { "from": "low", "to": "text", "builtin": "nope" } } })");
-    KV_CHECK(c, COOK() == 1 && has(g_err.data, "\"builtin\" names one goldberg has (kim)"));
+    KV_CHECK(c, COOK() == 1 && has(g_err.data, "\"builtin\" names one goldberg has (kim, svg)"));
 #undef COOK
     t.free();
 }

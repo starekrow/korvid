@@ -36,6 +36,10 @@ int run_script(const char* path, Span<const char* const> args) {
     lua_setfield(L, -2, "image");
     kvscript_open_font(L);
     lua_setfield(L, -2, "font");
+    kvscript_open_svg(L);
+    lua_setfield(L, -2, "svg");
+    kvscript_open_patherizer(L);
+    lua_setfield(L, -2, "patherizer");
     lua_setglobal(L, "kv");
     lua_createtable(L, (int)args.len, 1);
     lua_pushstring(L, path);

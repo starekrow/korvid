@@ -181,6 +181,50 @@ void PathBuilder::end_group(u32 group) {
 
 // ---- SVG path data ---------------------------------------------------------------------------------
 
+bool patherizer_number(const char** at, f32* out) {
+    const char* p = *at;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ',') ++p;
+    const char* q = p;
+    if (*q == '+' || *q == '-') ++q;
+    bool digits = false;
+    while (*q >= '0' && *q <= '9') { ++q; digits = true; }
+    if (*q == '.') { ++q; while (*q >= '0' && *q <= '9') { ++q; digits = true; } }
+    if (!digits) return false;
+    if (*q == 'e' || *q == 'E') {
+        const char* e = q + 1;
+        if (*e == '+' || *e == '-') ++e;
+        if (*e >= '0' && *e <= '9') { q = e; while (*q >= '0' && *q <= '9') ++q; }
+    }
+    // By hand, as decimal digits and an exponent, so every platform reads the same float: a
+    // mantissa of up to 18 digits, then one scale by a power of ten in double.
+    const char* r = p;
+    bool neg = false;
+    if (*r == '+' || *r == '-') neg = *r++ == '-';
+    u64 mant = 0;
+    i32 exp10 = 0, kept = 0;
+    while (*r >= '0' && *r <= '9') { if (kept < 18) { mant = mant * 10 + (u64)(*r - '0'); if (mant) ++kept; } else ++exp10; ++r; }
+    if (*r == '.') {
+        ++r;
+        while (*r >= '0' && *r <= '9') { if (kept < 18) { mant = mant * 10 + (u64)(*r - '0'); if (mant) ++kept; --exp10; } ++r; }
+    }
+    if (*r == 'e' || *r == 'E') {
+        ++r;
+        bool eneg = false;
+        if (*r == '+' || *r == '-') eneg = *r++ == '-';
+        i32 e = 0;
+        while (*r >= '0' && *r <= '9') { if (e < 10000) e = e * 10 + (*r - '0'); ++r; }
+        exp10 += eneg ? -e : e;
+    }
+    f64 v = (f64)mant, scale = 1.0, ten = 10.0;
+    i32 ae = exp10 < 0 ? -exp10 : exp10;
+    if (ae > 300) ae = 300;
+    for (i32 k = ae; k; k >>= 1, ten *= ten) if (k & 1) scale *= ten;
+    v = exp10 < 0 ? v / scale : v * scale;
+    *out = (f32)(neg ? -v : v);
+    *at = q;
+    return true;
+}
+
 namespace {
 
 struct Reader {
@@ -189,46 +233,9 @@ struct Reader {
     void space() { while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ',') ++p; }
     bool number(f32* out) {
         space();
-        const char* q = p;
-        if (*q == '+' || *q == '-') ++q;
-        bool digits = false;
-        while (*q >= '0' && *q <= '9') { ++q; digits = true; }
-        if (*q == '.') { ++q; while (*q >= '0' && *q <= '9') { ++q; digits = true; } }
-        if (!digits) return false;
-        if (*q == 'e' || *q == 'E') {
-            const char* e = q + 1;
-            if (*e == '+' || *e == '-') ++e;
-            if (*e >= '0' && *e <= '9') { q = e; while (*q >= '0' && *q <= '9') ++q; }
-        }
-        // Parsed by hand, as decimal digits and an exponent, so every platform reads the
-        // same float: a mantissa of up to 18 digits, then one correctly rounded scale.
-        const char* r = p;
-        bool neg = false;
-        if (*r == '+' || *r == '-') neg = *r++ == '-';
-        u64 mant = 0;
-        i32 exp10 = 0, kept = 0;
-        while (*r >= '0' && *r <= '9') { if (kept < 18) { mant = mant * 10 + (u64)(*r - '0'); if (mant) ++kept; } else ++exp10; ++r; }
-        if (*r == '.') {
-            ++r;
-            while (*r >= '0' && *r <= '9') { if (kept < 18) { mant = mant * 10 + (u64)(*r - '0'); if (mant) ++kept; --exp10; } ++r; }
-        }
-        if (*r == 'e' || *r == 'E') {
-            ++r;
-            bool eneg = false;
-            if (*r == '+' || *r == '-') eneg = *r++ == '-';
-            i32 e = 0;
-            while (*r >= '0' && *r <= '9') { if (e < 10000) e = e * 10 + (*r - '0'); ++r; }
-            exp10 += eneg ? -e : e;
-        }
-        f64 v = (f64)mant;
-        f64 scale = 1.0;
-        i32 ae = exp10 < 0 ? -exp10 : exp10;
-        if (ae > 300) ae = 300;
-        f64 ten = 10.0;
-        for (i32 k = ae; k; k >>= 1, ten *= ten) if (k & 1) scale *= ten;
-        v = exp10 < 0 ? v / scale : v * scale;
-        *out = (f32)(neg ? -v : v);
-        p = q;
+        const char* q0 = p;
+        if (!patherizer_number(&q0, out)) return false;
+        p = q0;
         return true;
     }
     bool flag(bool* out) {

@@ -13,9 +13,13 @@ struct Image {
 inline u8* image_px(Image* m) { return (u8*)(m + 1); }
 
 Image* kvscript_check_image(lua_State* L, int index);
+// A new picture, clear, pushed.
+Image* kvscript_push_image(lua_State* L, i32 w, i32 h);
 
 // Each pushes its library's table.
 void kvscript_open_image(lua_State* L);
 void kvscript_open_font(lua_State* L);
+void kvscript_open_svg(lua_State* L);        // kv.svg
+void kvscript_open_patherizer(lua_State* L); // kv.patherizer
 
 } // namespace kv

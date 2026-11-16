@@ -281,7 +281,7 @@ package ships it.
 | KP6 | The same bytes on every platform: a hashed corpus agrees on Linux, Windows, macOS and iOS | P0 |
 | KP6a | Within tolerance of resvg's pictures, committed, over the corpus and the icons at 16, 24, 48 and 200 px | P0 |
 | KP7 | `patherizer` depends on `core` and `math` only, and has no Krome in it | P0 |
-| KP8 | The shape asset `.kshape` (KBOR), with the source's lines; `asset_load_shape` and `ShapeAsset`; reload on change | P0 |
+| KP8 | The shape asset `.kshape` (KBOR), with the source's lines; `asset_load_shape` and `ShapeAsset`; reload on change (as built: with slice 6's rebind, since nothing in the asset module reloads yet) | P0 |
 | KP9 | `svg`: the subset above to a shape; every refusal names its file, line and element; `--lenient` | P0 |
 | KP10 | goldberg's `svg` built-in converter and `*.svg` in the conventions | P0 |
 | KP11 | Krome: `image=` takes a shape, measured by its view box, rasterized at the node's pixel size and the window's scale | P0 |

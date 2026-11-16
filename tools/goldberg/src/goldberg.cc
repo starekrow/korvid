@@ -32,6 +32,7 @@
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 #include "korvid/kim/kim.h"
+#include "korvid/svg/svg.h"
 #include "korvid/kimb/kimb.h"
 #include "korvid/core/arena.h"
 #include "korvid/platform/fs_watch.h"
@@ -703,11 +704,16 @@ bool check_kim(const Proc& pr, const char*, const char* in, const char* asset, S
 // It writes into run_dir as a script would, and its errors go where a script's stderr
 // goes. 0, or 1 when it failed.
 //   kim  a .kim compiled to <name>.kimb (kim_compile): the source's name, ".kim" made ".kimb"
+//   svg  an .svg read into a shape and written as <name>.kshape (svg_to_shape): ".svg" made
+//        ".kshape"; every refusal with its line, and warnings printed without failing
+i32 run_svg(Proc& pr, const Array<const char*>& argv);
+
 i32 run_builtin(Proc& pr, const Array<const char*>& argv) {
     auto say = [&](const char* text) {
         u32 n = (u32)strlen(text);
         memcpy(pr.err.push_n(n), text, n);
     };
+    if (!strcmp(pr.builtin, "svg") && argv.len >= 3) return run_svg(pr, argv);
     if (strcmp(pr.builtin, "kim") || argv.len < 3) { say("no such built-in converter\n"); return 1; }
     const char* in = argv[1];
     const char* asset = argv[2];
@@ -739,6 +745,44 @@ i32 run_builtin(Proc& pr, const Array<const char*>& argv) {
     bool wrote = io_write_now(target, out.data, out.len);
     out.free();
     if (!wrote) { say("cannot write the .kimb\n"); return 1; }
+    return 0;
+}
+
+i32 run_svg(Proc& pr, const Array<const char*>& argv) {
+    auto say = [&](const char* text) {
+        u32 n = (u32)strlen(text);
+        memcpy(pr.err.push_n(n), text, n);
+    };
+    const char* in = argv[1];
+    const char* asset = argv[2];
+    IoBytes src;
+    if (!io_read_now(in, &src)) { say("cannot read the source\n"); return 1; }
+    PathShape shape;
+    shape.init(mem_general());
+    SvgMessages msgs;
+    bool ok = svg_to_shape((const char*)src.data, src.size, SvgOptions{}, shape, msgs);
+    src.free();
+    for (u32 i = 0; i < msgs.items.len; ++i) {
+        char line[512];
+        msgs.format_one(i, asset, line, sizeof line);
+        say(line);
+        say("\n");
+    }
+    msgs.free();
+    Array<u8> out{};
+    out.alloc = mem_general();
+    if (ok) ok = patherizer_write_kshape(shape, out);
+    shape.free();
+    if (!ok) { out.free(); return 1; }
+    const char* name = strrchr(in, '/');
+    name = name ? name + 1 : in;
+    char target[1100];
+    usize nl = strlen(name);
+    if (nl > 4 && !strcmp(name + nl - 4, ".svg")) format(target, sizeof target, "%s/%.*s.kshape", pr.run_dir, (int)(nl - 4), name);
+    else format(target, sizeof target, "%s/%s.kshape", pr.run_dir, name);
+    bool wrote = io_write_now(target, out.data, out.len);
+    out.free();
+    if (!wrote) { say("cannot write the .kshape\n"); return 1; }
     return 0;
 }
 
@@ -1361,6 +1405,8 @@ bool load_app(GoldbergState& s, Engine& e) {
     lua_newtable(L);
     lua_pushfstring(L, "%d", (int)KV_KIM_VERSION);
     lua_setfield(L, -2, "kim");
+    lua_pushfstring(L, "%d", (int)KV_SVG_VERSION);
+    lua_setfield(L, -2, "svg");
     lua_setfield(L, -2, "builtins");
     lua_newtable(L);
     for (u32 i = 0; i < EvCount; ++i) { lua_pushstring(L, kEvNames[i]); lua_rawseti(L, -2, (lua_Integer)i); }

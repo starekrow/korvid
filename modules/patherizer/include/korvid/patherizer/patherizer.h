@@ -153,4 +153,14 @@ struct PathOptions {
 // False when it cannot (no memory).
 bool patherizer_draw(const PathShape& shape, const PathTarget& target, const PathOptions& options);
 
+// One number as SVG writes them (after any spaces and commas): read by hand, so every
+// platform reads the same float. False when there is none; *at moves past it.
+bool patherizer_number(const char** at, f32* out);
+
+// The .kshape file (KBOR; kshape.cc has its layout): a shape out, with each node's source
+// line in a sidecar unless `lines` is false; and a shape back in, every index checked. False
+// (and *why) when it is not one.
+bool patherizer_write_kshape(const PathShape& shape, Array<u8>& out, bool lines = true);
+bool patherizer_read_kshape(const void* data, usize size, PathShape& out, const char** why);
+
 } // namespace kv
