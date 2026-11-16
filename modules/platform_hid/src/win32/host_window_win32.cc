@@ -7,6 +7,13 @@
 // and a move to a display of another DPI resizes the window as Windows suggests. Alt and
 // F10 do not open the window menu (another modal loop); Alt+F4 still asks to close.
 // Gamepads come from SDL3 alone (src/sdl3_pads/): its gamepad subsystem, polled here.
+//
+// Text: typed characters are WM_CHAR. An input method's composition is the IMM messages:
+// the system's composition window is turned off (the text field draws the composition
+// inline, from TextComposing), the candidate list is kept and placed by text_area, and the
+// result string arrives as typed characters. The IME context, the cursor and the window
+// belong to the window's thread, so the engine's thread asks for them with a message; the
+// clipboard is opened from the engine's thread itself.
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/core/utf8.h"
 #include "korvid/platform_hid/events.h"
@@ -21,14 +28,17 @@
 #define NOMINMAX
 #include <windows.h>
 #include <windowsx.h>
+#include <imm.h>
+#include <string.h>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "imm32.lib") // delay-loaded (toolchain-windows): opened at the first composition
 
 namespace kv {
 
 namespace {
 
-enum class WinMsgType : u8 { Close, Size, Focus, Key, Move, Button, Wheel, Char };
+enum class WinMsgType : u8 { Close, Size, Focus, Key, Move, Button, Wheel, Char, Compose };
 
 // What the window thread saw, in the order it saw it.
 struct WinMsg {
@@ -36,26 +46,38 @@ struct WinMsg {
     bool       on;      // Focus: focused; Key, Button: down
     bool       repeat;  // Key: auto-repeat
     u8         button;  // Button: a MouseButton
-    u32        a, b;    // Size: width, height in pixels; Key: scancode; Char: a code point
+    u32        a, b;    // Size: width, height in pixels; Key: scancode; Char: a code point;
+                        // Compose: its UTF-8 in the texts queue, at a, b bytes long
+    u32        c, d;    // Compose: the caret and the selection's length, in bytes
     f32        x, y;    // Move, Button: position in pixels; Wheel: dx, dy in notches
 };
 
-constexpr UINT WM_KV_DESTROY = WM_APP + 1; // close() asks the window thread to destroy it
+constexpr UINT WM_KV_DESTROY  = WM_APP + 1; // close() asks the window thread to destroy it
+constexpr UINT WM_KV_CURSOR   = WM_APP + 2; // cursor(): the shape changed, show it now
+constexpr UINT WM_KV_IME_AREA = WM_APP + 3; // text_area(): place the input method's windows
+constexpr UINT WM_KV_IME_ON   = WM_APP + 4; // text_input(): wParam 1 gives the window its IME, 0 takes it away
 
 struct Win32Window {
     HWND          hwnd = nullptr;
     OsThread      thread;
-    OsMutex       mu;               // guards queue, ready and failed
+    OsMutex       mu;               // guards queue, texts, ready, failed and the area
     OsCond        cv;               // open() waits on it for the window to exist
     bool          ready  = false;
     bool          failed = false;
     Array<WinMsg> queue;            // the window thread appends
     Array<WinMsg> taken;            // pump's side of the swap, the engine thread's alone
+    Array<char>   texts;            // compositions' UTF-8, which Compose messages point into
+    Array<char>   texts_taken;
     WindowDesc    desc;
     wchar_t       title[256] = {};
     u32           width = 0, height = 0; // the client size at creation, before ready
     u32           dpi = 96;              // written by the window thread, read atomically
     u8            buttons = 0;           // the window thread's: mouse buttons held, for capture
+    u32           cursor = 0;            // a CursorShape: the engine's thread writes, the window's reads
+    RECT          area = {};             // the text field's caret area, client pixels (under mu)
+    i32           area_caret = 0;        // the caret's x within it
+    bool          area_set = false;
+    bool          composing = false;     // the window thread's: a composition was posted and not ended
 };
 
 Win32Window g_win; // one window per process
@@ -64,6 +86,113 @@ void post(const WinMsg& m) {
     os_mutex_lock(&g_win.mu);
     g_win.queue.push(m);
     os_mutex_unlock(&g_win.mu);
+}
+
+// ---- the input method -------------------------------------------------------------------------------
+
+// A composition's text (UTF-16, n units) to the engine: its UTF-8, the caret and the
+// selection (the clause being converted) at their byte offsets. Empty: it ended.
+void post_compose(const wchar_t* s, int n, int caret, int sel_from, int sel_len) {
+    auto bytes = [&](int units) { return units > 0 ? WideCharToMultiByte(CP_UTF8, 0, s, units, nullptr, 0, nullptr, nullptr) : 0; };
+    int len = bytes(n);
+    WinMsg m{};
+    m.type = WinMsgType::Compose;
+    os_mutex_lock(&g_win.mu);
+    m.a = g_win.texts.len;
+    m.b = (u32)len;
+    if (len) WideCharToMultiByte(CP_UTF8, 0, s, n, g_win.texts.push_n((u32)len), len, nullptr, nullptr);
+    m.c = (u32)bytes(sel_len > 0 ? sel_from : caret);
+    m.d = sel_len > 0 ? (u32)bytes(sel_from + sel_len) - m.c : 0;
+    g_win.queue.push(m);
+    os_mutex_unlock(&g_win.mu);
+    g_win.composing = n > 0;
+}
+
+void post_char(u32 u) {
+    WinMsg m{};
+    m.type = WinMsgType::Char;
+    m.a = u;
+    post(m);
+}
+
+// The IME's composition string, its caret and the clause it is converting (the target
+// attributes), posted; the result string, if one came, posted first as typed characters.
+void ime_composition(HWND h, LPARAM lp) {
+    HIMC imc = ImmGetContext(h);
+    if (!imc) return;
+    wchar_t text[256];
+    if (lp & GCS_RESULTSTR) {
+        LONG got = ImmGetCompositionStringW(imc, GCS_RESULTSTR, text, sizeof text);
+        int n = got > 0 ? (int)(got / sizeof(wchar_t)) : 0;
+        if (g_win.composing) post_compose(L"", 0, 0, 0, 0); // what was composing is replaced by the result
+        for (int i = 0; i < n; ++i) {
+            u32 u = text[i];
+            if (u >= 0xD800 && u < 0xDC00 && i + 1 < n) { u = 0x10000 + ((u - 0xD800) << 10) + ((u32)text[i + 1] - 0xDC00); ++i; }
+            if (u >= 0x20 && u != 0x7F) post_char(u);
+        }
+    }
+    if (lp & GCS_COMPSTR) {
+        LONG got = ImmGetCompositionStringW(imc, GCS_COMPSTR, text, sizeof text);
+        int n = got > 0 ? (int)(got / sizeof(wchar_t)) : 0;
+        int caret = (lp & GCS_CURSORPOS) ? (int)(ImmGetCompositionStringW(imc, GCS_CURSORPOS, nullptr, 0) & 0xFFFF) : n;
+        if (caret > n) caret = n;
+        int sel_from = 0, sel_len = 0;
+        u8 attr[256];
+        LONG na = (lp & GCS_COMPATTR) ? ImmGetCompositionStringW(imc, GCS_COMPATTR, attr, sizeof attr) : 0;
+        for (int i = 0; i < na && i < n; ++i) {
+            bool target = attr[i] == ATTR_TARGET_CONVERTED || attr[i] == ATTR_TARGET_NOTCONVERTED;
+            if (target && !sel_len) sel_from = i;
+            if (target) ++sel_len;
+            else if (sel_len) break;
+        }
+        if (n || g_win.composing) post_compose(text, n, caret, sel_from, sel_len);
+    }
+    ImmReleaseContext(h, imc);
+}
+
+// The candidate list beside the caret, kept off the text field's line; the composition
+// window (not shown) at the caret, which some IMEs place their candidates by.
+void ime_place(HWND h) {
+    os_mutex_lock(&g_win.mu);
+    bool set = g_win.area_set;
+    RECT r = g_win.area;
+    LONG caret = g_win.area_caret;
+    os_mutex_unlock(&g_win.mu);
+    if (!set) return;
+    HIMC imc = ImmGetContext(h);
+    if (!imc) return;
+    COMPOSITIONFORM cf{};
+    cf.dwStyle = CFS_POINT;
+    cf.ptCurrentPos = POINT{r.left + caret, r.top};
+    ImmSetCompositionWindow(imc, &cf);
+    CANDIDATEFORM cand{};
+    cand.dwIndex = 0;
+    cand.dwStyle = CFS_EXCLUDE;
+    cand.ptCurrentPos = POINT{r.left + caret, r.bottom};
+    cand.rcArea = r;
+    ImmSetCandidateWindow(imc, &cand);
+    ImmReleaseContext(h, imc);
+}
+
+// ---- the cursor ------------------------------------------------------------------------------------
+
+void show_cursor() {
+    static const LPCWSTR ids[(u32)CursorShape::Count] = {IDC_ARROW, IDC_IBEAM, IDC_HAND, IDC_SIZEALL, IDC_SIZEWE, IDC_SIZENS, IDC_NO};
+    static HCURSOR made[(u32)CursorShape::Count] = {};
+    u32 i = atomic_load(&g_win.cursor, MO_ACQUIRE);
+    if (i >= (u32)CursorShape::Count) i = 0;
+    if (!made[i]) made[i] = LoadCursorW(nullptr, ids[i]);
+    SetCursor(made[i]);
+}
+
+// Whether the pointer is over the window's client area now.
+bool pointer_inside(HWND h) {
+    POINT p;
+    if (!GetCursorPos(&p) || WindowFromPoint(p) != h) return false;
+    ScreenToClient(h, &p);
+    RECT c;
+    GetClientRect(h, &c);
+    return PtInRect(&c, p) != 0;
 }
 
 void post_button(HWND h, MouseButton b, bool down, LPARAM lp) {
@@ -145,12 +274,28 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         if (u >= 0xD800 && u < 0xDC00) { high = u; return 0; }
         if (u >= 0xDC00 && u < 0xE000) { u = high ? 0x10000 + ((high - 0xD800) << 10) + (u - 0xDC00) : 0xFFFD; high = 0; }
         if (u < 0x20 || u == 0x7F) return 0;
-        WinMsg m{};
-        m.type = WinMsgType::Char;
-        m.a = u;
-        post(m);
+        post_char(u);
         return 0;
     }
+
+    // The input method. The system's composition window stays hidden: the field draws the
+    // composition. Its result comes through ime_composition, not as WM_IME_CHAR.
+    case WM_IME_SETCONTEXT: return DefWindowProcW(h, msg, wp, lp & ~(LPARAM)ISC_SHOWUICOMPOSITIONWINDOW);
+    case WM_IME_STARTCOMPOSITION: ime_place(h); return 0;
+    case WM_IME_COMPOSITION: ime_composition(h, lp); return 0;
+    case WM_IME_ENDCOMPOSITION:
+        if (g_win.composing) post_compose(L"", 0, 0, 0, 0);
+        return 0;
+    case WM_KV_IME_AREA: ime_place(h); return 0;
+    case WM_KV_IME_ON: ImmAssociateContextEx(h, nullptr, wp ? IACE_DEFAULT : 0); return 0;
+
+    // The cursor: the engine's shape over the client area, the system's over the frame.
+    case WM_SETCURSOR:
+        if (LOWORD(lp) == HTCLIENT) { show_cursor(); return TRUE; }
+        break;
+    case WM_KV_CURSOR:
+        if (pointer_inside(h)) show_cursor();
+        return 0;
     case WM_SYSCOMMAND:
         if ((wp & 0xFFF0) == SC_KEYMENU) return 0;
         break;
@@ -297,6 +442,11 @@ bool HostWindow::open(const WindowDesc& desc) {
     w.width = w.height = 0;
     w.queue.clear();
     w.taken.clear();
+    w.texts.clear();
+    w.texts_taken.clear();
+    w.cursor = 0;
+    w.area_set = false;
+    w.composing = false;
     os_mutex_init(&w.mu);
     os_cond_init(&w.cv);
     w.thread = OsThread();
@@ -326,16 +476,101 @@ bool HostWindow::open(const WindowDesc& desc) {
     return true;
 }
 
-// Windows sends WM_CHAR whenever the window has the keyboard; nothing to switch.
-void HostWindow::text_input(bool) {}
+// Windows sends WM_CHAR whenever the window has the keyboard, so typed text needs nothing
+// switched on. The input method does: with text input off, the window has no IME context,
+// so composing keys are keys (a game's WASD is not an IME's first syllable). A window
+// starts with its IME, as Windows makes it.
+void HostWindow::text_input(bool on) {
+    if (!native_) return;
+    PostMessageW(g_win.hwnd, WM_KV_IME_ON, on ? 1 : 0, 0);
+}
 
-// Not yet on this host (Krome slice 3): the input method's area is not told, the clipboard is
-// the platform module's own (inside this process only), the cursor keeps its shape.
-void HostWindow::text_area(rect2, f32) {}
-bool HostWindow::clipboard_get(Array<char>&) { return false; }
-bool HostWindow::clipboard_set(const char*) { return false; }
-void HostWindow::cursor(CursorShape) {}
-bool HostWindow::capture_mouse(bool) { return false; }
+// The caret's area in framebuffer pixels, which on this host are the client area's.
+void HostWindow::text_area(rect2 r, f32 caret) {
+    if (!native_) return;
+    os_mutex_lock(&g_win.mu);
+    g_win.area = RECT{(LONG)r.x, (LONG)r.y, (LONG)(r.x + r.w), (LONG)(r.y + r.h)};
+    g_win.area_caret = (i32)caret;
+    g_win.area_set = true;
+    os_mutex_unlock(&g_win.mu);
+    PostMessageW(g_win.hwnd, WM_KV_IME_AREA, 0, 0);
+}
+
+namespace {
+
+// Another program may hold the clipboard for a moment.
+bool open_clipboard(HWND h) {
+    for (u32 i = 0; i < 10; ++i) {
+        if (OpenClipboard(h)) return true;
+        Sleep(1);
+    }
+    return false;
+}
+
+} // namespace
+
+// CF_UNICODETEXT, its CRLFs read as the engine's LFs.
+bool HostWindow::clipboard_get(Array<char>& out) {
+    if (!native_ || !IsClipboardFormatAvailable(CF_UNICODETEXT) || !open_clipboard(g_win.hwnd)) return false;
+    bool got = false;
+    if (HANDLE d = GetClipboardData(CF_UNICODETEXT)) {
+        if (const wchar_t* w = (const wchar_t*)GlobalLock(d)) {
+            int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr); // with the terminator
+            if (n > 1) {
+                u32 at = out.len;
+                char* p = out.push_n((u32)n);
+                WideCharToMultiByte(CP_UTF8, 0, w, -1, p, n, nullptr, nullptr);
+                u32 k = 0;
+                for (u32 i = 0; i + 1 < (u32)n; ++i)
+                    if (!(p[i] == '\r' && p[i + 1] == '\n')) p[k++] = p[i];
+                out.len = at + k;
+                got = k > 0;
+            }
+            GlobalUnlock(d);
+        }
+    }
+    CloseClipboard();
+    return got;
+}
+
+// The text as CF_UNICODETEXT, its LFs written as CRLFs, which Windows programs expect.
+bool HostWindow::clipboard_set(const char* utf8) {
+    if (!native_) return false;
+    if (!utf8) utf8 = "";
+    int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0); // with the terminator
+    if (n <= 0) return false;
+    u32 lfs = 0;
+    for (const char* c = utf8; *c; ++c) lfs += *c == '\n' && (c == utf8 || c[-1] != '\r');
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, ((usize)n + lfs) * sizeof(wchar_t));
+    if (!mem) return false;
+    wchar_t* dst = (wchar_t*)GlobalLock(mem);
+    if (!dst) { GlobalFree(mem); return false; }
+    wchar_t* src = dst + lfs; // converted at the end, spread forward with the CRs
+    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, src, n);
+    wchar_t* o = dst;
+    for (int i = 0; i < n; ++i) {
+        if (src[i] == L'\n' && (o == dst || o[-1] != L'\r')) *o++ = L'\r';
+        *o++ = src[i];
+    }
+    GlobalUnlock(mem);
+    bool ok = open_clipboard(g_win.hwnd);
+    if (ok) {
+        EmptyClipboard();
+        ok = SetClipboardData(CF_UNICODETEXT, mem) != nullptr; // the system's from here
+        CloseClipboard();
+    }
+    if (!ok) GlobalFree(mem);
+    return ok;
+}
+
+void HostWindow::cursor(CursorShape shape) {
+    if (!native_ || (u32)shape >= (u32)CursorShape::Count) return;
+    if (atomic_exchange(&g_win.cursor, (u32)shape, MO_ACQ_REL) != (u32)shape) PostMessageW(g_win.hwnd, WM_KV_CURSOR, 0, 0);
+}
+
+// The window keeps the mouse whenever a button is held (post_button), which is what a drag
+// asks for.
+bool HostWindow::capture_mouse(bool) { return native_ != nullptr; }
 
 
 void HostWindow::close() {
@@ -347,6 +582,8 @@ void HostWindow::close() {
     os_mutex_destroy(&w.mu);
     w.queue.free();
     w.taken.free();
+    w.texts.free();
+    w.texts_taken.free();
     w.hwnd = nullptr;
     native_ = nullptr;
     width_ = height_ = 0;
@@ -370,6 +607,9 @@ void HostWindow::pump(EventBus& bus, Input& input) {
     Array<WinMsg> swap = w.queue;
     w.queue = w.taken;
     w.taken = swap;
+    Array<char> swap_texts = w.texts;
+    w.texts = w.texts_taken;
+    w.texts_taken = swap_texts;
     os_mutex_unlock(&w.mu);
     MouseState& mouse = input.raw.mouse;
     for (const WinMsg& m : w.taken) {
@@ -394,6 +634,17 @@ void HostWindow::pump(EventBus& bus, Input& input) {
             char utf8[5] = {};
             utf8_encode(m.a, utf8);
             input_typed(bus, input, utf8);
+            break;
+        }
+        case WinMsgType::Compose: {
+            // As much of the composition as the event holds, at a code point's edge.
+            TextComposing tc{};
+            const char* src = w.texts_taken.data + m.a;
+            usize n = utf8_prefix(src, m.b < sizeof tc.text - 1 ? m.b : sizeof tc.text - 1);
+            memcpy(tc.text, src, n);
+            tc.caret = m.c < n ? m.c : (u32)n;
+            tc.selection = tc.caret + m.d <= n ? m.d : (u32)n - tc.caret;
+            bus.emit(tc);
             break;
         }
         case WinMsgType::Key: {
@@ -427,6 +678,7 @@ void HostWindow::pump(EventBus& bus, Input& input) {
         }
     }
     w.taken.clear();
+    w.texts_taken.clear();
     sdl_pads_pump(bus, input);
 }
 
