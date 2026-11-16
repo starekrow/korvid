@@ -9,12 +9,20 @@ About box are screens of the same file, opened as overlays by those handlers. Th
 form as slice 1 wrote it, in Lua tables, is `assets/form_lua.lua`; `--lua` opens it, and the
 two draw the same pixels.
 
+The second page is the widget gallery (`assets/gallery.kim`, its model and handlers in
+`assets/gallery.lua`): every widget `krome/std` has (slider, progress, radio, checkbox,
+dropdown, input and password, buttons with a shortcut and a tooltip, a menu bar, tabs over a
+tree, a 10,000-row table with sortable, resizable columns and a context menu, a splitter
+between scroll views, a modal dialog). The header's navigation (in both forms, and the
+gallery) fires `nav`; the game opens the page it names in place of the one shown.
+
     build/linux-dev/bin/kromedemo                    # the form
     build/linux-dev/bin/kromedemo --theme light      # in std's light theme
     build/linux-dev/bin/kromedemo --lua              # the slice-1 form, in Lua
     build/linux-dev/bin/kromedemo --demo             # clicks through it, checks the model, quits: "demo passed"
     build/linux-dev/bin/kromedemo --demo --shots DIR # and keeps pictures of the form, the menu and the modal,
-                                                     # then the form and the menu in the light theme
+                                                     # the form and the menu in the light theme, then the
+                                                     # gallery: its dropdown, table, split, dialog, light
     build/linux-dev/bin/kromedemo --bench --pacing continuous --prof-report   # 2,000 nodes laid out and painted every tick
 
 The pictures are taken once Krome has settled (`krome_settled`: fonts in, changes painted),
@@ -23,7 +31,8 @@ with the tick count held at 0, so two runs compare:
     kromedemo --demo --lua --shots /tmp/lua && kromedemo --demo --shots /tmp/kim
     picture compare /tmp/lua /tmp/kim     # form, menu and about: largest channel difference 0
 
-(the light pictures differ, since the Lua form has no themes).
+(the light pictures differ, since the Lua form has no themes; the gallery's are the same
+screen in both runs, and match).
 
 The C++ side is small: it opens the screen, sets the tick count in its model now and
 then, switches the theme in the demo, and quits on the screen's `quit` event.

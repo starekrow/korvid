@@ -46,6 +46,7 @@ void free_screen(KromeModule& s, KromeScreen* sc) {
     if (sc->arena.base) arena_destroy(sc->arena);
     if (sc->frames.base) arena_destroy(sc->frames);
     sc->regions.free();
+    sc->slots.free();
     sc->uses.free();
     sc->tree.free();
     sc->deps.free();
@@ -227,7 +228,7 @@ void krome_input(TickContext& ctx) {
         // modifier while one has the keyboard (or is a function key).
         KromeTree* ft = krome_focused_tree(s, nullptr);
         bool typing = ft && ft->nodes[s.focus.node].type == KromeType::Edit && !(mods & (KROME_MOD_CTRL | KROME_MOD_ALT | KROME_MOD_CMD))
-                   && !(k.key >= Key::F1 && k.key <= Key::F12) && k.key != Key::Escape;
+                   && !(k.key >= Key::F1 && k.key <= Key::F12) && k.key != Key::Escape && k.key != Key::Enter;
         if (!typing && !k.repeat && krome_shortcut(s, k.key, mods)) continue;
         if (k.key == Key::Escape && !k.repeat) escape = true;
     }

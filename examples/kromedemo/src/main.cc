@@ -33,7 +33,8 @@ namespace kv {
 namespace {
 
 struct Demo {
-    Name form;
+    Name form;              // the page shown: the form, or the widget gallery
+    bool lua = false;       // --lua: the form is form_lua.lua
     Name bench;
     bool demo = false;
     const char* shots = nullptr;
@@ -106,6 +107,58 @@ constinit const Step k_steps[] = {
     {Act::Shot, "light_menu", 0, nullptr},
     {Act::Click, "close_menu", 0, nullptr},
     {Act::Check, "saves", 0, "2"},
+    // The second page: every widget, by pointer and by keys, in both themes.
+    {Act::Theme, "dark", 0, nullptr},
+    {Act::Click, "nav_gallery", 0, nullptr},
+    {Act::Shot, "gallery", 0, nullptr},
+    {Act::Click, "careful", 0, nullptr},
+    {Act::Check, "mode", 0, "careful"},
+    {Act::Click, "wrap", 0, nullptr},
+    {Act::Check, "wrap", 0, "false"},
+    {Act::Click, "level", 0, nullptr},       // the middle of 0..100
+    {Act::Check, "level", 0, "50"},
+    {Act::Key, "right", 0, ""},
+    {Act::Check, "level", 0, "55"},
+    {Act::Click, "more", 0, nullptr},
+    {Act::Check, "done", 0, "50%"},
+    {Act::Click, "kind", 0, nullptr},
+    {Act::Shot, "gallery_dropdown", 0, nullptr},
+    {Act::Click, "font", 0, nullptr},
+    {Act::Check, "kind", 0, "font"},
+    {Act::Key, "enter", 0, ""},              // the dropdown has the focus: Enter opens it on its first
+    {Act::Key, "down", 0, ""},
+    {Act::Key, "enter", 0, ""},
+    {Act::Check, "kind", 0, "sound"},
+    {Act::Key, "tab", 0, ""},                // on to the name, by the keyboard
+    {Act::Type, "Rowan", 0, nullptr},
+    {Act::Check, "name", 0, "Rowan"},
+    {Act::Click, "textures", 0, nullptr},  // closes the textures folder
+    {Act::Click, "tab_table", 0, nullptr},
+    {Act::Shot, "gallery_table", 0, nullptr},
+    {Act::Click, "r1", 0, nullptr},
+    {Act::Check, "picked_row", 0, "r1"},
+    {Act::Click, "col_size", 0, nullptr},    // sorts by size: the smallest first
+    {Act::Click, "r4096", 0, nullptr},
+    {Act::Check, "picked_row", 0, "r4096"},
+    {Act::Click, "tab_split", 0, nullptr},
+    {Act::Shot, "gallery_split", 0, nullptr},
+    {Act::Click, "split", 0, nullptr},       // the splitter takes the focus; the arrows move it
+    {Act::Key, "right", 0, ""},
+    {Act::Check, "split", 0, "256"},
+    {Act::Click, "file", 0, nullptr},        // the menu bar: File opens its items below it
+    {Act::Click, "save_all", 0, nullptr},
+    {Act::Check, "last", 0, "file: save"},
+    {Act::Key, "r", 0, "ctrl"},              // the Rename button's shortcut
+    {Act::Key, "tab", 0, ""},                // into the dialog: its field first
+    {Act::Type, "Ash", 0, nullptr},
+    {Act::Shot, "gallery_dialog", 0, nullptr},
+    {Act::Key, "enter", 0, ""},              // the dialog's OK
+    {Act::Check, "renamed", 0, "renamed to Ash"},
+    {Act::Theme, "light", 0, nullptr},
+    {Act::Click, "tab_tree", 0, nullptr},
+    {Act::Shot, "gallery_light", 0, nullptr},
+    {Act::Click, "nav_form", 0, nullptr},
+    {Act::Check, "saves", 0, "0"},           // the form again, as it opens
     {Act::Quit, nullptr, 0, nullptr},
     {Act::Click, "quit", 0, nullptr},  // its event ends the run
 };
@@ -180,7 +233,7 @@ void kromedemo_tick(TickContext& ctx) {
         break;
     case Act::Check: {
         const char* got = krome_model_text(e, d.form, s.id);
-        if (strcmp(got, s.expect) != 0) { KV_ERROR("kromedemo", "demo: %s is '%s', wanted '%s'", s.id, got, s.expect); ++d.failures; }
+        if (strcmp(got, s.expect) != 0) { KV_ERROR("kromedemo", "demo: %s is '%s', wanted '%s' (on %s)", s.id, got, s.expect, name_str(d.form)); ++d.failures; }
         break;
     }
     case Act::Theme:
@@ -197,7 +250,8 @@ void kromedemo_tick(TickContext& ctx) {
         static u32 phase = 0;
         struct Named { const char* name; Key key; };
         static const Named keys[] = {{"enter", Key::Enter}, {"escape", Key::Escape}, {"right", Key::Right}, {"left", Key::Left},
-                                     {"a", Key::A}, {"c", Key::C}, {"v", Key::V}, {"x", Key::X}, {"z", Key::Z}, {"backspace", Key::Backspace}};
+                                     {"a", Key::A}, {"c", Key::C}, {"v", Key::V}, {"x", Key::X}, {"z", Key::Z}, {"backspace", Key::Backspace},
+                                     {"down", Key::Down}, {"up", Key::Up}, {"tab", Key::Tab}, {"space", Key::Space}, {"r", Key::R}};
         Key k = Key::Unknown;
         for (const Named& n : keys) if (!strcmp(n.name, s.id)) k = n.key;
         bool ctrl = s.expect && !strcmp(s.expect, "ctrl");
@@ -245,9 +299,19 @@ void kromedemo_work(TickContext& ctx) {
 }
 
 void kromedemo_events(TickContext& ctx) {
+    Engine& e = *ctx.engine;
+    Demo& d = ctx.state_as<Demo>();
     for (const KromeEvent& ev : ctx.received<KromeEvent>()) {
         KV_INFO("kromedemo", "event %s from %s, %g", name_str(Name{ev.event}), ev.node ? name_str(Name{ev.node}) : "the script", ev.value);
-        if (ev.event == name_intern("quit").hash) engine_request_quit(*ctx.engine);
+        if (ev.event == name_intern("quit").hash) engine_request_quit(e);
+        // The header's navigation: the page it names, in place of the one shown.
+        if (ev.event == name_intern("nav").hash) {
+            bool gallery = ev.node == name_intern("nav_gallery").hash;
+            Name want = gallery ? name_intern("kromedemo/gallery.kimb#gallery") : d.lua ? name_intern("kromedemo/form_lua.lua") : name_intern("kromedemo/form.kimb#form");
+            if (want == d.form) continue;
+            krome_close(e, d.form);
+            d.form = gallery ? krome_open(e, "kromedemo/gallery.kimb", "gallery") : d.lua ? krome_open(e, "kromedemo/form_lua.lua") : krome_open(e, "kromedemo/form.kimb", "form");
+        }
     }
 }
 
@@ -262,7 +326,7 @@ bool kromedemo_startup(Engine& e, ModuleInstance& self) {
     d->shots = frameloop_option(e, "--shots");
     if (frameloop_flag(e, "--bench")) d->bench = krome_open(e, "kromedemo/bench.lua");
     else if (frameloop_flag(e, "--type")) { d->form = krome_open(e, "kromedemo/type.kimb", "type"); d->type = true; }
-    else if (frameloop_flag(e, "--lua")) d->form = krome_open(e, "kromedemo/form_lua.lua");
+    else if (frameloop_flag(e, "--lua")) { d->form = krome_open(e, "kromedemo/form_lua.lua"); d->lua = true; }
     else d->form = krome_open(e, "kromedemo/form.kimb", "form");
     if (const char* theme = frameloop_option(e, "--theme")) krome_theme(e, theme);
     self.set_state(d);

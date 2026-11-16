@@ -5,10 +5,22 @@
 use "krome/std"
 script "kromedemo/form.lua"
 
+// The pages' navigation: the game opens the page a press names (main.cc).
+style nav-item {
+    pad=10,4 radius=4 color=muted cursor=hand border=1 border-color=clear
+    hover { color=ink }
+    selected { bg=item-hover color=ink }
+    focused { border-color=ring }
+}
+
 screen form {
     col [page] {
-        row pad=16,10 bg=bar middle w=fill {
+        row pad=16,10 bg=bar middle w=fill gap=16 {
             heading "Krome demo"
+            row gap=4 {
+                hit [nav-item] selected id=nav_form -> nav { text "Form" }
+                hit [nav-item] id=nav_gallery -> nav { text "Widgets" }
+            }
             spacer
             text "{ticks} ticks" color=muted
         }

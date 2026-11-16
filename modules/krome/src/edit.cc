@@ -256,10 +256,14 @@ bool krome_edit_key(KromeModule& s, Key key, bool shift, bool ctrl, bool alt, bo
         b.erase_forward(word, now);
         changed(s);
         return true;
-    case Key::Enter:
+    case Key::Enter: {
         if (multiline(s) && !cmd) { insert(s, "\n", 1); return true; }
+        // With nothing to submit, Enter is not the edit's: a dialog's OK (`key=enter`) hears it.
+        KromeTree* ft = krome_focus_tree(s, nullptr);
+        if (!ft || ft->nodes[s.focus.node].event.is_null()) return false;
         submit(s);
         return true;
+    }
     case Key::Escape:
         krome_edit_blur(s);
         return true;

@@ -1,0 +1,144 @@
+// The demo's second page (docs/PRDs/Krome-Slice-4-PRD.md, KW15a): every widget krome/std
+// has, on a small model (gallery.lua). The header's navigation is the form's; the game
+// opens the page a press names.
+
+use "krome/std"
+script "kromedemo/gallery.lua"
+
+style nav-item {
+    pad=10,4 radius=4 color=muted cursor=hand border=1 border-color=clear
+    hover { color=ink }
+    selected { bg=item-hover color=ink }
+    focused { border-color=ring }
+}
+
+def labeled label {
+    row gap=12 middle w=fill {
+        text "{label}" w=70 color=muted
+        slot
+    }
+}
+
+screen gallery {
+    col [page] {
+        row pad=16,10 bg=bar middle w=fill gap=16 {
+            heading "Krome demo"
+            row gap=4 {
+                hit [nav-item] id=nav_form -> nav { text "Form" }
+                hit [nav-item] selected id=nav_gallery -> nav { text "Widgets" }
+            }
+            spacer
+            text "{last}" color=muted
+        }
+        menu-bar {
+            menu-title "File" id=file {
+                menu-item "Open" id=open
+                menu-item "Save" id=save_all
+                menu-item "Close" id=close_all
+            }
+            menu-title "View" id=view {
+                menu-item "Dark" id=dark
+                menu-item "Light" id=light
+            }
+        }
+        row pad=16 gap=16 w=fill h=fill {
+            col gap=12 w=300 {
+                labeled "Level" {
+                    slider id=level @level 0..100 step=5 tooltip="Drag, or the arrows"
+                    text "{level}" w=30
+                }
+                labeled "Done" {
+                    progress @done
+                    button "+10%" id=more -> more pad=6,2
+                }
+                labeled "Mode" {
+                    radio "Fast" id=fast @mode=fast
+                    radio "Careful" id=careful @mode=careful
+                }
+                labeled "Wrap" {
+                    checkbox "Wrap lines" id=wrap @wrap
+                }
+                labeled "Kind" {
+                    dropdown id=kind @kind {
+                        option "texture" id=texture
+                        option "sound" id=sound
+                        option "font" id=font
+                        option "shader" id=shader
+                    }
+                }
+                labeled "Name" {
+                    input id=name_input @name placeholder="A name"
+                }
+                labeled "Secret" {
+                    password id=secret @secret placeholder="Password"
+                }
+                row gap=8 {
+                    button "Rename..." id=open_dialog -> open_dialog key="mod+r" tooltip="Ctrl+R"
+                    button "Later" id=later -> open_dialog disabled
+                }
+                text "{renamed}" color=muted
+            }
+            col gap=8 w=fill h=fill {
+                tabs {
+                    tab "Tree" id=tab_tree @tab=tree
+                    tab "Table" id=tab_table @tab=table
+                    tab "Split" id=tab_split @tab=split
+                }
+                if tab=tree {
+                    tree h=fill {
+                        each n in nodes height=22 {
+                            hit [tree-row] id="{n.id}" -> toggle dir=row {
+                                box w=@n.indent h=1
+                                text "{n.arrow}" w=14 color=muted
+                                text "{n.name}"
+                            }
+                        }
+                    }
+                }
+                if tab=table {
+                    table h=fill {
+                        table-head {
+                            column "Name" id=col_name @widths.name
+                            column "Size" id=col_size @widths.size
+                            column "Kind" id=col_kind @widths.kind
+                        }
+                        scroll-view h=fill pad=0 {
+                            each r in rows height=24 {
+                                hit [table-row] dir=row id="{r.id}" -> pick_row context=row_menu {
+                                    cell w=@widths.name { text "{r.name}" nowrap }
+                                    cell w=@widths.size { text "{r.size}" nowrap }
+                                    cell w=@widths.kind { text "{r.kind}" color=muted nowrap }
+                                }
+                            }
+                        }
+                    }
+                    text "{rows_count} rows; {picked_row}" color=muted
+                }
+                if tab=split {
+                    row w=fill h=fill {
+                        scroll-view w=@split h=fill {
+                            text "The left pane: drag the bar between the panes, or Tab to it and use the arrows." w=fill
+                        }
+                        splitter id=split @split
+                        scroll-view w=fill h=fill {
+                            text "The right pane takes the rest." w=fill
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+screen dialog {
+    dialog "Rename" {
+        input id=rename @rename placeholder="A new name"
+    }
+}
+
+screen row_menu {
+    col [context-menu] {
+        menu-item "Inspect" id=inspect -> inspect
+        menu-item "Copy path" id=copy_path -> copy_path
+    }
+}

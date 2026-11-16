@@ -400,9 +400,12 @@ KromeLook KromeTree::resolve_look(u32 node, KromeState state, const KromeLook* p
     KromeLook l = looks[n.look];
     if (state != KromeState::Base && n.states[(u32)state]) overlay(l, looks[n.states[(u32)state] - 1]);
     // Disabled and selected are also a node's data: their looks apply on top of the state
-    // the pointer gives it.
-    if ((n.flags & KROME_SELECTED) && state != KromeState::Selected && n.states[(u32)KromeState::Selected]) overlay(l, looks[n.states[(u32)KromeState::Selected] - 1]);
-    if ((n.flags & KROME_DISABLED) && state != KromeState::Disabled && n.states[(u32)KromeState::Disabled]) overlay(l, looks[n.states[(u32)KromeState::Disabled] - 1]);
+    // the pointer gives it, the node's own or an ancestor's (a checkbox's box is selected
+    // when the hit around it is).
+    u32 flags = n.flags;
+    for (u32 p = n.parent; p != KROME_NONE && p < nodes.len; p = nodes[p].parent) flags |= nodes[p].flags & (KROME_SELECTED | KROME_DISABLED);
+    if ((flags & KROME_SELECTED) && state != KromeState::Selected && n.states[(u32)KromeState::Selected]) overlay(l, looks[n.states[(u32)KromeState::Selected] - 1]);
+    if ((flags & KROME_DISABLED) && state != KromeState::Disabled && n.states[(u32)KromeState::Disabled]) overlay(l, looks[n.states[(u32)KromeState::Disabled] - 1]);
     if (!(l.set & KROME_LOOK_COLOR)) l.text_color = parent ? parent->text_color : color{1, 1, 1, 1};
     if (!(l.set & KROME_LOOK_FONT)) l.font = parent ? parent->font : name_intern(KROME_DEFAULT_FONT);
     if (!(l.set & KROME_LOOK_SIZE)) l.size = parent ? parent->size : KROME_DEFAULT_SIZE;

@@ -14,6 +14,14 @@ local function button(label, t)
   return hit(b)
 end
 
+-- The pages' navigation, as form.kim's nav-item draws it.
+local function nav(label, id, selected)
+  return hit { id = id, event = "nav", pad = { 10, 4 }, radius = 4, color = muted, cursor = "hand",
+               border = 1, ["border-color"] = "#00000000", selected = selected,
+               looks = { hover = { color = "#e6e9ef" }, selected = { bg = "#2f3a52", color = "#e6e9ef" } },
+               text { label } }
+end
+
 local function field(label, value)
   return row { gap = 8, middle = true,
     text { label, w = 90, color = muted },
@@ -64,8 +72,12 @@ return {
   },
 
   root = col { bg = "#10131a", color = "#e6e9ef",
-    row { pad = { 16, 10 }, bg = "#1b2030", middle = true, w = "fill",
+    row { pad = { 16, 10 }, bg = "#1b2030", middle = true, w = "fill", gap = 16,
       text { "Krome demo", size = 18 },
+      row { gap = 4,
+        nav("Form", "nav_form", true),
+        nav("Widgets", "nav_gallery", false),
+      },
       spacer {},
       text { "{ticks} ticks", color = muted },
     },

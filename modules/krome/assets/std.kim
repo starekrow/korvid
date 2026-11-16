@@ -15,6 +15,8 @@ prop title string
 // overlay is a tree of its own and inherits nothing from the screen under it: the raised
 // styles (menu, panel) say their own ink.
 
+script "krome/std.lua"
+
 theme dark {
     page=#10131a ink=#e6e9ef muted=#8b95a7 bar=#1b2030
     accent=#2f6fed accent-hover=#4a84f5 accent-down=#245ad0 violet=#8a3ffc glow=#2f6fed66
@@ -25,6 +27,7 @@ theme dark {
     shade=#00000099 deep-shade=#000000aa
     on-accent=#e6e9ef raised-ink=#ffffff
     thumb=#ffffff38 tip=#2a3142 tip-ink=#e6e9ef
+    ring=#7aa7ff clear=#00000000 knob=#e6e9ef
 }
 
 theme light {
@@ -37,6 +40,7 @@ theme light {
     shade=#00000033 deep-shade=#00000044
     on-accent=#ffffff raised-ink=#1a1d24
     thumb=#00000038 tip=#1a1d24 tip-ink=#f4f5f8
+    ring=#2f6fed clear=#00000000 knob=#ffffff
 }
 
 // ---- layout -------------------------------------------------------------------------------
@@ -98,6 +102,7 @@ style button {
     hover { bg=accent-hover }
     pressed { bg=accent-down }
     disabled { bg=off-bg color=off-ink border-color=off-edge }
+    focused { border-color=ring }
 }
 
 // A dangerous button: written [danger] on a button.
@@ -115,11 +120,14 @@ def button label {
 
 // Bound with @name: the box shows the value, a press flips it.
 style checkbox {
-    gap=8 middle
+    gap=8 middle pad=2 radius=4 border=1 border-color=clear cursor=hand
+    focused { border-color=ring }
+    disabled { color=off-ink }
 }
 style check-box {
     w=14 h=14 radius=3 border=1 border-color=edge bg=well
     selected { bg=accent border-color=accent }
+    disabled { bg=off-bg border-color=off-edge }
 }
 
 def checkbox label {
@@ -147,6 +155,7 @@ def textarea {
 style menu-item {
     w=fill pad=12,6 radius=4
     hover { bg=item-hover }
+    focused { bg=item-hover }
 }
 
 def menu-item label {
@@ -195,4 +204,248 @@ style list {
 style list-row {
     w=fill pad=10,5 radius=4
     hover { bg=row-hover }
+    focused { bg=row-hover }
+}
+
+// ---- slice 4's widgets ---------------------------------------------------------------------
+// Each is a definition, styles in both themes, and where it needs one a behaviour in
+// std.lua. Focus rings show only when Tab brought the focus.
+
+// A radio button: bound by equality, `radio "Fast" @mode=fast`.
+style radio-dot {
+    w=14 h=14 radius=7 border=1 border-color=edge bg=well
+    selected { bg=accent border-color=accent border=4 }
+    disabled { bg=off-bg border-color=off-edge }
+}
+
+def radio label {
+    hit dir=row [checkbox] {
+        box [radio-dot]
+        text "{label}"
+    }
+}
+
+// `slider @level 1..99 step=1`: drag, press, the arrows (Page Up and Down by a tenth, Home
+// and End) and the wheel set the value; its fill and knob are drawn by its update.
+style slider {
+    w=160 h=20 radius=4 pad=2 border=1 border-color=clear cursor=hand
+    focused { border-color=ring }
+}
+style slider-track {
+    w=fill h=4 radius=2 bg=off-bg
+}
+style slider-fill {
+    w=0 h=4 radius=2 bg=accent
+}
+style slider-knob {
+    w=14 h=14 radius=7 bg=knob border=1 border-color=edge shadow=0,1,3 shadow-color=shade
+}
+
+def slider {
+    box [slider] behave=slider dir=stack {
+        box [slider-track] middle {
+            box [slider-fill] part=fill
+        }
+        box dir=row w=fill middle pad=0,0,14,0 {
+            box part=lead w=0 h=1
+            box [slider-knob]
+        }
+    }
+}
+
+// `progress @done`: a bar `done` wide, a percentage ("40%").
+style progress {
+    w=fill h=6 radius=3 bg=off-bg
+}
+style progress-fill {
+    h=6 radius=3 bg=accent
+}
+
+def progress {
+    box [progress] {
+        box [progress-fill] w=@@
+    }
+}
+
+// `dropdown @kind { option "texture" ... }`: a press, Enter or Space opens the options below
+// it; the pointer or the arrows and Enter pick one, which is the value; Escape closes.
+style dropdown {
+    w=160 pad=10,5 radius=4 bg=well border=1 border-color=edge gap=8 middle cursor=hand
+    hover { border-color=accent }
+    focused { border-color=ring }
+}
+
+def dropdown {
+    hit [dropdown] behave=dropdown dir=row {
+        text "{@}" w=fill
+        text "▾" color=muted
+    }
+}
+
+style option {
+    w=fill pad=10,5 radius=4 cursor=hand
+    hover { bg=item-hover }
+    focused { bg=item-hover }
+}
+
+def option label {
+    hit [option] {
+        text "{label}"
+    }
+}
+
+// Tabs: `tabs { tab "Rules" @tab=rules ... }`, each tab bound by equality; a page is
+// `if tab=rules { ... }`.
+style tabs {
+    gap=2 w=fill border-color=edge
+}
+style tab {
+    pad=12,6 radius=6 color=muted cursor=hand border=1 border-color=clear
+    hover { color=ink }
+    selected { bg=raised color=raised-ink }
+    focused { border-color=ring }
+}
+
+def tabs {
+    row [tabs] {
+        slot
+    }
+}
+
+def tab label {
+    hit [tab] {
+        text "{label}"
+    }
+}
+
+// A tree: a scroll box of rows, each `tree-row` a hit with an indent bound to the model, an
+// arrow and a label; the screen's handler opens and closes (its model's open set and rows).
+style tree {
+    w=fill bg=well radius=6 pad=4 scrollbar-color=thumb
+}
+style tree-row {
+    w=fill h=22 pad=6,0 radius=4 gap=4 middle cursor=hand
+    hover { bg=row-hover }
+    selected { bg=item-hover }
+    focused { bg=row-hover }
+}
+
+def tree {
+    col [tree] scroll {
+        slot
+    }
+}
+
+// A table: a header of columns (a press sorts: its `sort` event with the column's id; a
+// drag of its right edge sets its width, its binding) over rows of cells.
+style table {
+    w=fill bg=well radius=6 pad=4 gap=0
+}
+style table-head {
+    w=fill gap=0 pad=0,0,0,4
+}
+style column {
+    pad=8,4 color=muted size=12 cursor=hand border=1 border-color=clear
+    hover { color=ink }
+    focused { border-color=ring }
+}
+style table-row {
+    w=fill h=24 radius=4 middle
+    hover { bg=row-hover }
+    selected { bg=item-hover }
+}
+style cell {
+    pad=8,0 middle
+}
+
+def table {
+    col [table] {
+        slot
+    }
+}
+
+def table-head {
+    row [table-head] {
+        slot
+    }
+}
+
+def column label {
+    hit [column] behave=column w=@@ {
+        text "{label}" nowrap
+    }
+}
+
+def cell {
+    box [cell] dir=row {
+        slot
+    }
+}
+
+// A splitter between two panes: `row { col w=@split { } splitter @split col w=fill { } }`; a
+// drag sets the first pane's width.
+style splitter {
+    w=6 h=fill radius=3 cursor=resize-ew
+    hover { bg=edge }
+}
+
+def splitter {
+    box [splitter] behave=splitter
+}
+
+// Menus: a bar of titles, each opening its items (menu-item, written as its children)
+// below it; an item's id is the event it fires. A context menu is a `menu` opened at the
+// pointer from a handler: open_overlay(kim(...), { side = "pointer" }).
+style menu-bar {
+    w=fill gap=2 pad=4
+}
+style menu-title {
+    pad=10,4 radius=4 cursor=hand border=1 border-color=clear
+    hover { bg=item-hover }
+    focused { border-color=ring }
+}
+
+def menu-bar {
+    row [menu-bar] {
+        slot
+    }
+}
+
+def menu-title label {
+    hit [menu-title] behave=menu {
+        text "{label}"
+    }
+}
+
+style context-menu {
+    bg=raised color=raised-ink radius=8 pad=4 w=180 shadow=0,6,16 shadow-color=shade border=1 border-color=raised-edge
+}
+
+// A dialog, opened modal: its content, then Cancel (Escape) and OK (Enter), firing `cancel`
+// and `ok`.
+def dialog title {
+    col [panel] w=360 {
+        heading "{title}"
+        slot
+        row right gap=8 w=fill {
+            button "Cancel" id=cancel -> cancel key=escape
+            button "OK" id=ok -> ok key=enter
+        }
+    }
+}
+
+// A scroll box with the kernel's bars in std's look.
+style scroll-view {
+    w=fill bg=well radius=6 pad=4 scrollbar-color=thumb
+}
+
+def scroll-view {
+    col [scroll-view] scroll {
+        slot
+    }
+}
+
+// A password field: an edit drawn as bullets, never copied.
+def password {
+    edit [input] secret w=fill
 }

@@ -259,8 +259,28 @@ parameter.
 **`krome/std`** (`assets/std.kim`): themes `dark` (first, so a screen starts in it) and
 `light`; `row`, `col`, `stack`, `spacer`, `separator`, `label`, `heading`, `field`, `badge`,
 `button` (and `[danger]`), `checkbox` (bind it: `checkbox "Wrap" @wrap`), `input` and
-`textarea` (bind them: `textarea @notes placeholder="Notes"`), `menu-item`, `panel`; styles `page`, `menu`, `panel`, `list`, `list-row`, `scrollbar`, `tooltip`. A game's own `def` or `style`
-of the same name wins, and its `theme dark` overrides the tokens it names.
+`textarea` (bind them: `textarea @notes placeholder="Notes"`), `password` (a `secret`
+input), `menu-item`, `panel`; and slice 4's, their behaviours in `assets/std.lua` (std.kim's
+`script` line):
+
+| widget | written | does |
+|---|---|---|
+| `slider` | `slider @level 0..100 step=5` | press, drag, arrows, Page Up/Down, Home/End, wheel; update draws fill and knob |
+| `progress` | `progress @done` | a bar `done` wide (`"40%"`) |
+| `radio` | `radio "Fast" @mode=fast` | `@key=value` |
+| `dropdown`, `option` | `dropdown @kind { option "sound" id=sound ... }` | opens its options below it; the pointer, or the arrows and Enter, pick one (its id, else its label) |
+| `tabs`, `tab` | `tabs { tab "Rules" @tab=rules ... }`, pages `if tab=rules { }` | `@key=value` |
+| `tree`, `tree-row` | `tree { each n in nodes height=22 { hit [tree-row] -> toggle { box w=@n.indent ... } } }` | the screen's handler opens and closes |
+| `table`, `table-head`, `column`, `cell` | `column "Name" id=col_name @widths.name`, `cell w=@widths.name { ... }` | a press fires `sort` (the column's id), a drag of its edge sets its width |
+| `splitter` | `row { scroll-view w=@split ... splitter @split ... }` | a drag (or the arrows) sets the first pane's width |
+| `menu-bar`, `menu-title` | `menu-bar { menu-title "File" { menu-item "Open" id=open } }` | opens its items; an item's id is the event it fires |
+| `context-menu` | a style: `open_overlay(kim(...), { side = "pointer" })` from a `context=` handler | |
+| `dialog` | `dialog "Rename" { ... }`, opened modal | Cancel (Escape) fires `cancel`, OK (Enter) `ok` |
+| `scroll-view` | `scroll-view { ... }` | the kernel's bars in std's look |
+
+Focus rings (`focused { border-color=ring }`) show when Tab brought the focus. Styles `page`,
+`menu`, `context-menu`, `panel`, `list`, `list-row`, `scrollbar`, `tooltip`. A game's own
+`def` or `style` of the same name wins, and its `theme dark` overrides the tokens it names.
 
 ## Behaviour worth knowing
 
