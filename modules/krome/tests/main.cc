@@ -11,6 +11,7 @@ void test_defs(kv::TestCtx&);
 void test_edit(kv::TestCtx&);
 void test_bound(kv::TestCtx&);
 void test_behave(kv::TestCtx&);
+void test_virtual(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
@@ -23,6 +24,7 @@ int main() {
     test_edit(c);
     test_bound(c);
     test_behave(c);
+    test_virtual(c);
     kv::names_shutdown();
     kv::mem_shutdown();
     return kv::test_report(c, "krome_tests");

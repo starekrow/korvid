@@ -204,6 +204,56 @@ KromeState state_of(const Paint& p, u32 node) {
     return KromeState::Base;
 }
 
+// ---- transitions ----------------------------------------------------------------------------------------
+
+KromeModule::Colors colors_of(const KromeLook& l) { return KromeModule::Colors{l.bg, l.bg2, l.border_color, l.shadow_color, l.text_color, l.opacity}; }
+
+bool same(const KromeModule::Colors& a, const KromeModule::Colors& b) { return !memcmp(&a, &b, sizeof a); }
+
+color mix(color a, color b, f32 k) { return color{a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k, a.a + (b.a - a.a) * k}; }
+
+KromeModule::Colors mix(const KromeModule::Colors& a, const KromeModule::Colors& b, f32 k) {
+    return KromeModule::Colors{mix(a.bg, b.bg, k), mix(a.bg2, b.bg2, k), mix(a.border, b.border, k), mix(a.shadow, b.shadow, k), mix(a.text, b.text, k), a.opacity + (b.opacity - a.opacity) * k};
+}
+
+// Where a transition is at a time: eased in and out.
+KromeModule::Colors at_time(const KromeModule::Anim& a, f64 now) {
+    f32 k = a.dur > 0.0f ? (f32)((now - a.start) / a.dur) : 1.0f;
+    if (k >= 1.0f) return a.to;
+    if (k < 0.0f) k = 0.0f;
+    return mix(a.from, a.to, k * k * (3.0f - 2.0f * k));
+}
+
+// A node with a transition: when the colors its look resolves to change, it eases there from
+// where it was (mid-way, if a transition was running), and is painted where it is now.
+void ease(Paint& p, u32 node, const KromeNode& n, KromeLook& l) {
+    KromeModule& s = p.s;
+    KromeModule::Colors target = colors_of(l);
+    KromeModule::Anim* a = nullptr;
+    for (KromeModule::Anim& x : s.anims) if (x.screen == p.sc.id && x.overlay == p.overlay && x.node == node) { a = &x; break; }
+    if (!a || a->id != n.id) {
+        // First seen (or another node at its index since a rebuild): where it is, at once.
+        if (!a) { s.anims.alloc = s.general; s.anims.push(KromeModule::Anim{}); a = &s.anims.last(); }
+        *a = KromeModule::Anim{p.sc.id, p.overlay, node, n.id, target, target, s.clock, l.transition};
+        return;
+    }
+    if (!same(a->to, target)) {
+        a->from = at_time(*a, s.clock);
+        a->to = target;
+        a->start = s.clock;
+        a->dur = l.transition;
+    }
+    if (s.clock - a->start >= a->dur) return;
+    KromeModule::Colors c = at_time(*a, s.clock);
+    l.bg = c.bg;
+    l.bg2 = c.bg2;
+    l.border_color = c.border;
+    l.shadow_color = c.shadow;
+    l.text_color = c.text;
+    l.opacity = c.opacity;
+    s.animating = true;
+}
+
 void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect2 r, u32 clip) {
     const char* str = p.tree.text(node);
     if (!*str) return;
@@ -296,6 +346,7 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
     const KromeNode& n = p.tree.nodes[node];
     if (n.flags & KROME_HIDDEN) return;
     KromeLook l = p.tree.resolve_look(node, state_of(p, node), parent);
+    if (l.transition > 0.0f) ease(p, node, n, l);
     f32 scale = p.s.scale;
     rect2 r = krome_pixel_rect(n.rect, scale);
     const TextureAsset* img = n.type == KromeType::Image && (l.set & KROME_LOOK_IMAGE) ? ready_image(p.s, image_for(p.s, l.image)) : nullptr;
@@ -578,6 +629,13 @@ constexpr u32 k_max_screens = 64;
 
 } // namespace
 
+void krome_drop_anims(KromeModule& s, u32 screen, u32 overlay) {
+    u32 w = 0;
+    for (u32 i = 0; i < s.anims.len; ++i)
+        if (!(s.anims[i].screen == screen && s.anims[i].overlay == overlay)) s.anims[w++] = s.anims[i];
+    s.anims.len = w;
+}
+
 KromeScreen* krome_top_screen(KromeModule& s) {
     KromeScreen* order[k_max_screens];
     u32 n = 0;
@@ -782,6 +840,7 @@ void krome_close_overlay(KromeModule& s, KromeScreen& sc, u32 id) {
     if (s.tip_overlay == o->id && s.tip.screen == sc.id) s.tip_overlay = 0;
     if (s.bar.box.screen == sc.id && s.bar.box.overlay == o->id) s.bar = KromeModule::Bar{};
     if (s.hover_behave.screen == sc.id && s.hover_behave.overlay == o->id) s.hover_behave = KromeTarget{};
+    krome_drop_anims(s, sc.id, o->id);
     for (u32 i = at + 1; i < sc.overlays.len; ++i) sc.overlays[i - 1] = sc.overlays[i];
     --sc.overlays.len;
     // What the pointer was on in it is gone, and the keyboard if an edit in it had it.
@@ -842,6 +901,12 @@ void krome_paint_screen(KromeModule& s, KromeScreen& sc, UiList& list) {
 void krome_view_frame(KromeModule& s) {
     krome_update_viewport(s);
     if (!(s.win_w > 0.0f && s.win_h > 0.0f)) return;
+    // A transition mid-way paints again, and asks for the frame to.
+    if (s.animating) {
+        s.animating = false;
+        for (KromeScreen* sc : s.screens) sc->repaint = true;
+        engine_want_frame(*s.e);
+    }
     // A font or an image that has landed changes what text and images measure.
     bool landed = false;
     for (KromeFont& f : s.fonts)
@@ -862,6 +927,11 @@ void krome_view_frame(KromeModule& s) {
         if (sc->tree.dirty && sc->tree.root != KROME_NONE) {
             krome_layout(sc->tree, sc->tree.root, rect2{0, 0, W, H}, m, true);
             ++s.layouts;
+            // A virtualized each whose view left what it built is built again, and laid out.
+            if (krome_virtual_regions(s, *sc) && sc->tree.root != KROME_NONE) {
+                krome_layout(sc->tree, sc->tree.root, rect2{0, 0, W, H}, m, true);
+                ++s.layouts;
+            }
             sc->repaint = true;
             for (KromeOverlay* o : sc->overlays) o->placed = false;
         }
@@ -907,7 +977,7 @@ void krome_view_frame(KromeModule& s) {
         if (r) renderer_ui_clear(r, s.layers[i]);
         s.layers[i] = s.layers.last();
         --s.layers.len;
-    }
+    }    if (s.animating) engine_want_frame(*s.e);
 }
 
 void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool escape) {

@@ -250,6 +250,7 @@ void krome_input(TickContext& ctx) {
 void krome_paint(TickContext& ctx) {
     KV_ZONE("krome.paint");
     KromeModule& s = ctx.state_as<KromeModule>();
+    s.clock += ctx.dt;
     krome_view_frame(s);
 }
 
@@ -284,6 +285,7 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     krome_free_view(*s);
     krome_lua_close(*s);
     krome_free_behaviours(*s);
+    s->anims.free();
 }
 
 // ---- /krome in the CLI --------------------------------------------------------------------------

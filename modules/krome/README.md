@@ -69,6 +69,11 @@ script's tables made into one, and builds the kernel's tree:
   `{item.field}` reads it; **`if name`** builds its block when the value is truthy. Each
   sits after a hidden anchor; when the model key its path starts with changes, what follows
   the anchor is built again and nothing else.
+- **`each row in rows height=24`** is virtualized: inside a scroll box only the rows in view
+  and a screenful each side are built, with spacers the height of the rest (rows and the
+  parent's gap); scrolling builds the newly visible and lets the gone go, as a region is
+  built again. Every row is the height given. Outside a scroll box, or in an overlay, it
+  builds every row.
 - **`@name`** binds a node's `selected` state to the model; a press flips the value before
   the event's handler runs. **`@name=value`** binds by equality (radio buttons, tabs): the
   node is selected while the model's text there is `value`, and a press writes `value`. Lua
@@ -229,7 +234,10 @@ Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `p
 `change`, `blur`; `cursor`; any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
 `opacity`, `font`, `size`, `line-height`, `image`, `tint`, `caret-color`, `selection-color`,
-`scrollbar-color`, `scrollbar-track`, `scrollbar-size`.
+`scrollbar-color`, `scrollbar-track`, `scrollbar-size`, `transition` (seconds: the node's
+colors and opacity ease to what its look resolves to whenever that changes, by state,
+selection, theme or a bound value, on the Frame cycle's clock, turning around from where they
+are when interrupted; sizes and positions do not move).
 Flags: `fill`, `clip`, `scroll`, `disabled`, `selected`, `hidden`, the alignments,
 `subpixel`, `nowrap`, `multiline`, `readonly`, `focusable`, `nofocus`, `secret`, `tabs`. The
 vocabulary is fixed (`modules/kimb`); `prop name type` in a prelude types a definition's

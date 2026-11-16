@@ -54,6 +54,10 @@ struct KromeRegion {
     const KromeFrame* frame;
     bool              alive;
     const KimbScope*  scope = nullptr; // a kim() piece's own, or the screen's
+    // A virtualized each (`height=24`): its elements [first, first + want) are built, those
+    // before and after stood in for by spacers; len the list's length when it was built.
+    f32               height = 0.0f;
+    u32               first = 0, want = 0, len = 0;
 };
 
 // A file Krome reads: a .kimb (a screen's, or a prelude a `use` names) or a script a
@@ -223,6 +227,13 @@ struct KromeModule {
     int                 lua_behaviours = -2, lua_states = -2, lua_widget_meta = -2;
     Array<Name>         ran_scripts;  // preludes' scripts run, by asset path: once per state
     KromeTarget         hover_behave; // the node with a behaviour the pointer is over
+    // Transitions (`transition=0.15`): for each node that has one, the colors it eases from
+    // and to, and since when, on the Frame cycle's clock.
+    struct Colors { color bg, bg2, border, shadow, text; f32 opacity; };
+    struct Anim { u32 screen, overlay, node; Name id; Colors from, to; f64 start; f32 dur; };
+    Array<Anim>         anims;
+    f64                 clock = 0.0;      // the Frame cycle's dt summed
+    bool                animating = false; // a transition was mid-way when last painted
     vec2                drag_at{-1.0f, -1.0f}; // where a behaviour's drag was last told
     bool                window_focused = true;
     u8                  cursor = 0;   // the shape last set (CursorShape + 1; 0 none yet)
@@ -269,6 +280,9 @@ void krome_fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node)
 // A model key changed: the texts and bindings that read it follow, the regions that read
 // it are built again.
 void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key);
+// The virtualized eaches of a laid-out screen built again where what is in view has left
+// what was built. True when one was: lay it out again.
+bool krome_virtual_regions(KromeModule& s, KromeScreen& sc);
 
 // ---- the Lua side (lua.cc) ----------------------------------------------------------------------
 
@@ -392,6 +406,8 @@ KromeTree* krome_focused_tree(KromeModule& s, KromeScreen** sc);
 // ---- the view (view.cc) --------------------------------------------------------------------------
 
 KromeOverlay* krome_overlay(KromeScreen& sc, u32 id);
+// The transitions of a screen's tree (overlay 0) or an overlay's dropped: built again, or gone.
+void krome_drop_anims(KromeModule& s, u32 screen, u32 overlay);
 // The screen on top (a higher layer, then the later opened); null when none is ready.
 KromeScreen* krome_top_screen(KromeModule& s);
 u32  krome_open_overlay(KromeModule& s, KromeScreen& sc); // a new, empty overlay on top; its id

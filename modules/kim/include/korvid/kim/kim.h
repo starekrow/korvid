@@ -15,7 +15,8 @@
 //
 // A node: a word; then in any order flags (bare words), properties (name=value), content
 // strings, a bare range (1..99), a binding (@name), an event (-> name) and styles ([a b]);
-// then an optional block of children. `each item in list { }` and `if name { }` are nodes
+// then an optional block of children. `each item in list { }` (`each row in rows height=24 { }`:
+// fixed-height rows, "height", only those in view built) and `if name { }` are nodes
 // too. `//` comments to the end of a line wherever white space may stand.
 //
 // Values: numbers (8, -2, 1.5), percentages (40%, kept as the string "40%"), a value bound

@@ -28,6 +28,7 @@ struct Node {
     const char*        event = nullptr;
     const char*        var = nullptr; // each
     const char*        in = nullptr;  // each
+    JsonRef            height = KV_JSON_NO_REF; // each ... height=24: a virtualized each's rows
     const char*        on = nullptr;  // if
     JsonRef            range = KV_JSON_NO_REF;
     Array<const char*> flags{};
@@ -402,6 +403,15 @@ struct Parser {
             n->in = word();
             if (!n->var || !kw || strcmp(kw, "in") || !n->in) { err(c0, "each is written 'each item in list { ... }'"); skip_line(); }
             blanks();
+            // A fixed height for every element: only those in view are built.
+            if (!strncmp(text + at, "height=", 7)) {
+                at += 7;
+                u32 c1 = col();
+                JsonRef h = scalar();
+                if (h == KV_JSON_NO_REF || b.type(h) != JsonType::Number) err(c1, "height takes a number of pixels");
+                else n->height = h;
+                blanks();
+            }
             if (peek() == '{') children(n);
             else err(c0, "each needs a block");
             return n;
@@ -742,6 +752,7 @@ struct Parser {
         if (n->event) b.set(o, "e", b.string(n->event));
         if (n->var) b.set(o, "v", b.string(n->var));
         if (n->in) b.set(o, "in", b.string(n->in));
+        if (n->height != KV_JSON_NO_REF) b.set(o, "height", n->height);
         if (n->on) b.set(o, "on", b.string(n->on));
         if (n->kids.len) {
             JsonRef c = b.array();

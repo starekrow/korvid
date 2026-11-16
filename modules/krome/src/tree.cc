@@ -146,6 +146,7 @@ bool look_prop(KromeLook& l, const char* prop, const KromeValue& v, const char**
     if (!strcmp(prop, "border"))       { if (v.kind != KromeValue::Number || v.n < 0) *why = "border takes a number, 0 or more"; else { l.border = v.n; l.set |= KROME_LOOK_BORDER; } return true; }
     if (!strcmp(prop, "opacity"))      { if (v.kind != KromeValue::Number || v.n < 0 || v.n > 1) *why = "opacity takes a number from 0 to 1"; else { l.opacity = v.n; l.set |= KROME_LOOK_OPACITY; } return true; }
     if (!strcmp(prop, "size"))         { if (v.kind != KromeValue::Number || v.n <= 0) *why = "size takes a number above 0"; else { l.size = v.n; l.set |= KROME_LOOK_SIZE; } return true; }
+    if (!strcmp(prop, "transition")) { if (v.kind != KromeValue::Number || v.n < 0 || v.n > 10) *why = "transition takes seconds, 0 to 10"; else { l.transition = v.n; l.set |= KROME_LOOK_TRANSITION; } return true; }
     if (!strcmp(prop, "scrollbar-color")) { if (!color_value(v, &l.scrollbar_color)) *why = "scrollbar-color takes a color"; else l.set |= KROME_LOOK_SCROLLBAR_COLOR; return true; }
     if (!strcmp(prop, "scrollbar-track")) { if (!color_value(v, &l.scrollbar_track)) *why = "scrollbar-track takes a color"; else l.set |= KROME_LOOK_SCROLLBAR_TRACK; return true; }
     if (!strcmp(prop, "scrollbar-size")) { if (v.kind != KromeValue::Number || v.n <= 0) *why = "scrollbar-size takes a number above 0"; else { l.scrollbar_size = v.n; l.set |= KROME_LOOK_SCROLLBAR_SIZE; } return true; }
@@ -195,6 +196,7 @@ void overlay(KromeLook& to, const KromeLook& from) {
     if (s & KROME_LOOK_SCROLLBAR_COLOR) to.scrollbar_color = from.scrollbar_color;
     if (s & KROME_LOOK_SCROLLBAR_TRACK) to.scrollbar_track = from.scrollbar_track;
     if (s & KROME_LOOK_SCROLLBAR_SIZE) to.scrollbar_size = from.scrollbar_size;
+    if (s & KROME_LOOK_TRANSITION) to.transition = from.transition;
     if (s & KROME_LOOK_SELECTION_COLOR) to.selection_color = from.selection_color;
     to.set |= s;
 }

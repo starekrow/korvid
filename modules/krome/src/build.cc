@@ -13,6 +13,7 @@
 #include "internal.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
+#include "korvid/math/scalar.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -342,7 +343,18 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
 
 // The nodes a region holds, built after `parent`'s last child: an each's block once for
 // each element, an if's when its value is truthy. How many top-level nodes it made.
-u32 region_body(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const KromeFrame* fr) {
+// A spacer in a virtualized each: the height of `rows` elements not built, less the gap
+// after the last of them (the parent puts one after the spacer).
+void spacer(Build& b, u32 parent, u32 rows, f32 height) {
+    if (!rows) return;
+    u32 id = b.tree.add(KromeType::Box, parent);
+    if (id == KROME_NONE) return;
+    f32 gap = b.tree.nodes[parent].gap;
+    f32 h = (f32)rows * (height + gap) - gap;
+    b.tree.set(id, "h", KromeValue::num(h > 0.0f ? h : 0.0f));
+}
+
+u32 region_body(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const KromeFrame* fr, KromeRegion* virt = nullptr) {
     KromeTree& t = b.tree;
     u32 before = t.nodes[parent].last;
     const char* w = json_string(json_get(f.doc, n, "w"), "");
@@ -353,7 +365,16 @@ u32 region_body(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, con
         if (!var || !in) { error(b, fr, f.file, n.line, "each is written 'each item in list { ... }'"); return 0; }
         const char* path = model_path(b, fr, in);
         u32 len = krome_model_length(b.s, b.sc, path);
-        for (u32 i = 0; i < len; ++i) {
+        u32 from = 0, to = len;
+        if (virt) {
+            // Only the window, held inside the list as it is now.
+            if (virt->first + virt->want > len) virt->first = len > virt->want ? len - virt->want : 0;
+            from = virt->first;
+            to = from + virt->want < len ? from + virt->want : len;
+            virt->len = len;
+            spacer(b, parent, from, virt->height);
+        }
+        for (u32 i = from; i < to; ++i) {
             KromeFrame* e = (KromeFrame*)arena_alloc(*b.frames, sizeof(KromeFrame), alignof(KromeFrame));
             if (!e) break;
             *e = KromeFrame{};
@@ -364,6 +385,7 @@ u32 region_body(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, con
             e->path = keep(b, p, (usize)pn);
             if (kids) for (const JsonValue* k = json_first(f.doc, *kids); k; k = json_next(f.doc, *k)) node(b, f, *k, parent, e, nullptr);
         }
+        if (virt) spacer(b, parent, len - to, virt->height);
     } else {
         const char* on = json_string(json_get(f.doc, n, "on"), nullptr);
         if (!on) { error(b, fr, f.file, n.line, "if is written 'if name { ... }'"); return 0; }
@@ -383,12 +405,20 @@ void region(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const K
     if (anchor == KROME_NONE) return;
     b.tree.nodes[anchor].flags |= KROME_HIDDEN;
     b.tree.nodes[anchor].line = n.line;
-    u32 count = region_body(b, f, n, parent, fr);
-    if (!b.regions) return;
     const char* w = json_string(json_get(f.doc, n, "w"), "");
     const char* expr = json_string(json_get(f.doc, n, !strcmp(w, "each") ? "in" : "on"), "");
-    KromeRegion r{head_key(model_path(b, fr, expr)), anchor, count, &f, &n, fr, true};
+    KromeRegion r{head_key(model_path(b, fr, expr)), anchor, 0, &f, &n, fr, true};
     r.scope = b.scope;
+    // A virtualized each (only where it can be built again, so not in an overlay): at first
+    // what three windows' heights of rows fill; the view's first layout corrects it.
+    f32 height = (f32)json_number(json_get(f.doc, n, "height"), 0.0);
+    if (height > 0.0f && b.regions) {
+        r.height = height;
+        f32 view = b.s.win_h > 0.0f ? b.s.win_h / b.s.scale : 1000.0f;
+        r.want = (u32)(view * 3.0f / height) + 8;
+    }
+    r.count = region_body(b, f, n, parent, fr, r.height > 0.0f ? &r : nullptr);
+    if (!b.regions) return;
     b.regions->push(r);
 }
 
@@ -587,6 +617,7 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc) {
     if (!f) return false;
     const char* screen = sc.doc ? name_str(sc.screen) : nullptr;
     const JsonValue* root = root_of(*f, screen);
+    krome_drop_anims(s, sc.id, 0); // its nodes are new: none eases from what was there
     if (!root) { krome_error(s, f->file, 0, nullptr, 0, "no screen '%s'", screen ? screen : "?"); return false; }
     Array<Kept> kept{};
     keep_scroll(sc.tree, kept);
@@ -664,15 +695,14 @@ bool krome_tooltip_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o, con
     return krome_build_overlay(s, sc, o);
 }
 
-void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key) {
+namespace {
+
+// One region built again in place. False when it is gone (its anchor rebuilt away).
+bool rebuild_one(KromeModule& s, KromeScreen& sc, u32 i) {
     KromeTree& t = sc.tree;
-    bool any = false;
-    u32 n = sc.regions.len;
-    for (u32 i = 0; i < n; ++i) {
-        if (!sc.regions[i].alive || sc.regions[i].key != key) continue;
+    {
         KromeRegion r = sc.regions[i];
-        if (t.nodes[r.anchor].flags & KROME_DEAD) { sc.regions[i].alive = false; continue; }
-        any = true;
+        if (t.nodes[r.anchor].flags & KROME_DEAD) { sc.regions[i].alive = false; return false; }
         u32 parent = t.nodes[r.anchor].parent;
         // What it built goes: out of the list, and dead.
         u32 c = t.nodes[r.anchor].next;
@@ -687,7 +717,7 @@ void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key) {
         u32 tail = t.nodes[parent].last;
         Build b{s, sc, t, &sc.deps, &sc.regions, &sc.frames, r.scope, krome_theme_of(s, sc.scope)};
         u32 deps_before = sc.deps.len;
-        u32 count = region_body(b, *r.file, *r.src, parent, r.frame);
+        u32 count = region_body(b, *r.file, *r.src, parent, r.frame, r.height > 0.0f ? &r : nullptr);
         s.rebuilt_nodes += b.nodes;
         if (count && tail != r.anchor) {
             u32 first = t.nodes[tail].next, last = t.nodes[parent].last;
@@ -697,11 +727,17 @@ void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key) {
             t.nodes[r.anchor].next = first;
             if (t.nodes[last].next == KROME_NONE) t.nodes[parent].last = last;
         }
-        sc.regions[i].count = count;
+        r.count = count;
+        sc.regions[i] = r;
         for (u32 d = deps_before; d < sc.deps.len; ++d) if (sc.deps[d].kind == KromeDep::Text) krome_fill_node(s, sc, t, sc.deps[d].node);
         ++s.rebuilt_regions;
     }
-    if (!any) return;
+    return true;
+}
+
+// After regions were built again: what went inside them dropped, and the tree to lay out.
+void rebuilt(KromeModule& s, KromeScreen& sc) {
+    KromeTree& t = sc.tree;
     // Regions inside what went, and what read the model there.
     for (KromeRegion& r : sc.regions) if (r.alive && (t.nodes[r.anchor].flags & KROME_DEAD)) r.alive = false;
     u32 w = 0;
@@ -714,6 +750,54 @@ void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key) {
     sc.repaint = true;
     // Past as many dead nodes as live ones, the tree is built whole again, which drops them.
     if (sc.dead > 1024 && sc.dead > t.nodes.len - sc.dead) krome_build_screen(s, sc);
+}
+
+} // namespace
+
+void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key) {
+    bool any = false;
+    u32 n = sc.regions.len;
+    for (u32 i = 0; i < n; ++i)
+        if (sc.regions[i].alive && sc.regions[i].key == key && rebuild_one(s, sc, i)) any = true;
+    if (any) rebuilt(s, sc);
+}
+
+bool krome_virtual_regions(KromeModule& s, KromeScreen& sc) {
+    KromeTree& t = sc.tree;
+    bool any = false;
+    u32 n = sc.regions.len;
+    for (u32 i = 0; i < n; ++i) {
+        KromeRegion& r = sc.regions[i];
+        if (!r.alive || r.height <= 0.0f || !r.count || (t.nodes[r.anchor].flags & KROME_DEAD)) continue;
+        u32 parent = t.nodes[r.anchor].parent;
+        u32 box = parent;
+        while (box != KROME_NONE && !krome_scrolls_y(t.nodes[box])) box = t.nodes[box].parent;
+        if (box == KROME_NONE) continue; // in no scroll box: what was built stays
+        const KromeNode& bx = t.nodes[box];
+        f32 view = bx.rect.h - bx.pad[1] - bx.pad[3];
+        if (view <= 0.0f) continue;
+        // The region's top in the box's content: its first node, the spacer or the first row.
+        u32 head = t.nodes[r.anchor].next;
+        if (head == KROME_NONE) continue;
+        f32 top = t.nodes[head].rect.y - (bx.rect.y + bx.pad[1]) + bx.scroll.y;
+        f32 pitch = r.height + t.nodes[parent].gap;
+        f32 a = (bx.scroll.y - top) / pitch, z = (bx.scroll.y + view - top) / pitch;
+        i64 vf = (i64)floor(a), vl = (i64)ceil(z);
+        if (vf < 0) vf = 0;
+        if (vl > (i64)r.len) vl = (i64)r.len;
+        if (vl < vf) vl = vf;
+        u32 built_to = r.first + r.want < r.len ? r.first + r.want : r.len;
+        u32 page = (u32)ceil(view / pitch) + 1;
+        u32 need = (u32)(vl - vf) + 2 * page;
+        bool covered = (u32)vf >= r.first && (u32)vl <= built_to;
+        if (covered && r.want >= need - page && r.want <= 3 * need) continue;
+        // A screenful each side of what is in view.
+        r.first = (u32)vf > page ? (u32)vf - page : 0;
+        r.want = need;
+        if (rebuild_one(s, sc, i)) any = true;
+    }
+    if (any) rebuilt(s, sc);
+    return any;
 }
 
 } // namespace kv

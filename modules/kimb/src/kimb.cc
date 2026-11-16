@@ -248,6 +248,7 @@ constinit const KimbKernelProp k_props[] = {
     {"step", KimbType::Number, true},
     {"taborder", KimbType::Number, true},
     {"tint", KimbType::Color, false},
+    {"transition", KimbType::Number, false},
     {"tooltip", KimbType::String, true},
     {"w", KimbType::Size, true},
 };

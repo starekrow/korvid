@@ -115,6 +115,10 @@ void test_kim(kv::TestCtx& c) {
         R"("themes":{"dark":{"accent":"#2f6fed","panel2":"#202430","space":8}},)"
         R"("lines":[2,3,5,4,23,24,25,26,27,27,29,29,17,18,19,20,10,13,12,6,7,7,8]})"));
 
+    // A virtualized each, slice 4: the rows' height beside the list.
+    KV_CHECK(c, same(doc_of("screen s { col scroll { each r in rows height=24 { text \"{r.name}\" } } }", KV_KIM_NO_LINES),
+        R"({"kim":1,"file":"t.kim","screens":{"s":{"w":"col","f":["scroll"],"c":[{"w":"each","v":"r","in":"rows","height":24,"c":[{"w":"text","t":"{r.name}"}]}]}}})"));
+
     // Canonical: comments, spacing, property order and a repeated property change nothing.
     {
         Array<u8> a = bytes_of("screen s {\n  row gap=8 pad=4 {\n    text \"a\"\n  }\n}\n");
@@ -186,6 +190,7 @@ void test_kim_errors(kv::TestCtx& c) {
     KV_CHECK(c, first("screen s { box 8 }", 1, 16, "bare range"));
     KV_CHECK(c, first("screen s {\n  each item assets { text \"x\" }\n}", 2, 3, "each item in list"));
     KV_CHECK(c, first("screen s {\n  if { text \"x\" }\n}", 2, 3, "if name"));
+    KV_CHECK(c, first("screen s {\n  each r in rows height=x { text \"x\" }\n}", 2, 25, "height takes a number"));
     KV_CHECK(c, first("screen s { row\n}\nscreen s { col }", 3, 0, "screen s is defined twice (first at line 1)"));
     KV_CHECK(c, first("style a { x=1 }\nstyle a { y=1 }", 2, 0, "style a is defined twice"));
     KV_CHECK(c, first("screen s { }", 1, 0, "holds one node, not 0"));

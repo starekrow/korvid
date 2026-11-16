@@ -68,6 +68,7 @@ struct KromeLook {
     color scrollbar_color{0.5f, 0.5f, 0.5f, 0.5f}; // a scroll box's thumb
     color scrollbar_track{0, 0, 0, 0};     // and the track under it
     f32   scrollbar_size = 6.0f;           // its width, logical pixels
+    f32   transition = 0.0f;               // seconds its colors and opacity ease over when they change; 0 at once
     u32   set = 0;
 };
 
@@ -91,6 +92,7 @@ constexpr u32 KROME_LOOK_SELECTION_COLOR = 1u << 16;
 constexpr u32 KROME_LOOK_SCROLLBAR_COLOR = 1u << 17;
 constexpr u32 KROME_LOOK_SCROLLBAR_TRACK = 1u << 18;
 constexpr u32 KROME_LOOK_SCROLLBAR_SIZE = 1u << 19;
+constexpr u32 KROME_LOOK_TRANSITION = 1u << 20;
 constexpr u32 KROME_LOOK_INHERITED = KROME_LOOK_COLOR | KROME_LOOK_FONT | KROME_LOOK_SIZE | KROME_LOOK_LINE_HEIGHT;
 
 // Node flags.
