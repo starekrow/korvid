@@ -6,6 +6,7 @@ void test_tree(kv::TestCtx&);
 void test_layout(kv::TestCtx&);
 void test_lua(kv::TestCtx&);
 void test_view(kv::TestCtx&);
+void test_shapes(kv::TestCtx&);
 void test_kimb(kv::TestCtx&);
 void test_defs(kv::TestCtx&);
 void test_edit(kv::TestCtx&);
@@ -21,6 +22,7 @@ int main() {
     test_layout(c);
     test_lua(c);
     test_view(c);
+    test_shapes(c);
     test_kimb(c);
     test_defs(c);
     test_edit(c);

@@ -146,7 +146,28 @@ struct KromeScreen {
 
 // A font at one pixel size, as text at a size and a scale asks for it.
 struct KromeFont { Name path; u32 px; Handle asset; bool ready; };
-struct KromeImage { Name path; Handle asset; bool ready; };
+// An image node's asset: a texture, or a shape (a path to an .svg or a .kshape), which is
+// rasterized at the size it is drawn (shapes.cc).
+struct KromeImage { Name path; Handle asset; bool ready; bool shape = false; };
+
+// The shapes' pages (shapes.cc): rasterized shapes packed as glyphs are, a texture each.
+struct KromeShapePage {
+    Handle texture;
+    u8*    rgba = nullptr;     // w x h, sRGB, straight alpha
+    u32    w = 0, h = 0;
+    u32    x = 0, shelf_y = 0, shelf_h = 0;
+    bool   own = false;        // one large shape's alone
+    bool   dirty = false;
+    u32    d0x = 0, d0y = 0, d1x = 0, d1y = 0;
+    u64    used = 0;
+};
+struct KromeShapeEntry {
+    Handle asset;
+    u32    w = 0, h = 0;
+    u32    colour = 0;         // currentColor's RGBA8, or all ones for a one-colour shape (drawn white)
+    u32    page = 0, x = 0, y = 0;
+    u64    used = 0;
+};
 
 // The edit that has the keyboard (docs/PRDs/Krome-Slice-3-PRD.md, "Krome"): one across
 // every screen. Its text is the buffer here while it has the focus, written back to the
@@ -205,6 +226,10 @@ struct KromeModule {
     bool                viewport_fixed = false;
     Array<KromeFont>    fonts;
     Array<KromeImage>   images;
+    Array<KromeShapePage>  shape_pages;
+    Array<KromeShapeEntry> shape_entries;
+    u64                 shape_clock = 0;
+    u32                 shape_pages_made = 0, shapes_drawn = 0; // shapes_drawn: rasterizations, for the tests and the notes
     // The pointer: where, what is under it, what took the press, what the buttons were.
     f32                 px = -1.0f, py = -1.0f;
     KromeTarget         under;    // the deepest node under the pointer
@@ -459,5 +484,15 @@ void krome_wheel(KromeModule& s, f32 dx, f32 dy);
 // the nearest node under it with a `context` event fires it.
 void krome_context_press(KromeModule& s, f32 x, f32 y);
 void krome_free_view(KromeModule& s);
+
+// ---- shapes (shapes.cc) ----
+struct ShapeAsset;
+struct UiBox;
+// The box made to draw a shape at w x h pixels (the page, the uv): rasterized now if it is not
+// in a page yet. `current` is currentColor for a shape with colours of its own; a one-colour
+// shape is drawn white and the caller tints the box. False when it cannot.
+bool krome_shape_box(KromeModule& s, Renderer* r, const ShapeAsset& shape, Handle asset, u32 w, u32 h, color current, UiBox& box);
+void krome_shapes_flush(KromeModule& s, Renderer* r); // the pages' changed rectangles, to the renderer
+void krome_shapes_free(KromeModule& s, Renderer* r);
 
 } // namespace kv

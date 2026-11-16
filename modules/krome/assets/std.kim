@@ -125,14 +125,23 @@ style checkbox {
     disabled { color=off-ink }
 }
 style check-box {
-    w=14 h=14 radius=3 border=1 border-color=edge bg=well
+    w=16 h=16 radius=3 border=1 border-color=edge bg=well
     selected { bg=accent border-color=accent }
     disabled { bg=off-bg border-color=off-edge }
 }
 
+// The check: Material's, white on the accent, shown when selected.
+style check-mark {
+    w=14 h=14 color=on-accent opacity=0
+    selected { opacity=1 }
+    disabled { color=off-ink }
+}
+
 def checkbox label {
     hit dir=row [checkbox] {
-        box [check-box]
+        box [check-box] center middle {
+            image [check-mark] image="krome/icons/check.svg"
+        }
         text "{label}"
     }
 }
@@ -213,7 +222,7 @@ style list-row {
 
 // A radio button: bound by equality, `radio "Fast" @mode=fast`.
 style radio-dot {
-    w=14 h=14 radius=7 border=1 border-color=edge bg=well
+    w=16 h=16 radius=8 border=1 border-color=edge bg=well
     selected { bg=accent border-color=accent border=4 }
     disabled { bg=off-bg border-color=off-edge }
 }
@@ -278,7 +287,7 @@ style dropdown {
 def dropdown {
     hit [dropdown] behave=dropdown dir=row {
         text "{@}" w=fill
-        text "▾" color=muted
+        image image="krome/icons/arrow_drop_down.svg" w=20 h=20 color=muted
     }
 }
 
@@ -319,7 +328,8 @@ def tab label {
 }
 
 // A tree: a scroll box of rows, each `tree-row` a hit with an indent bound to the model, an
-// arrow and a label; the screen's handler opens and closes (its model's open set and rows).
+// arrow (`image=@n.arrow w=20 h=20`, the model naming krome/icons/arrow_right.svg or
+// arrow_drop_down.svg, or "" for a leaf) and a label; the screen's handler opens and closes (its model's open set and rows).
 style tree {
     w=fill bg=well radius=6 pad=4 scrollbar-color=thumb
 }

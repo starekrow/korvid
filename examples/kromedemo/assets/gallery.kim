@@ -83,13 +83,14 @@ screen gallery {
                     tab "Tree" id=tab_tree @tab=tree
                     tab "Table" id=tab_table @tab=table
                     tab "Split" id=tab_split @tab=split
+                    tab "Icons" id=tab_icons @tab=icons
                 }
                 if tab=tree {
                     tree h=fill {
                         each n in nodes height=22 {
                             hit [tree-row] id="{n.id}" -> toggle dir=row {
                                 box w=@n.indent h=1
-                                text "{n.arrow}" w=14 color=muted
+                                image image=@n.arrow w=20 h=20 color=muted
                                 text "{n.name}"
                             }
                         }
@@ -113,6 +114,21 @@ screen gallery {
                         }
                     }
                     text "{rows_count} rows; {picked_row}" color=muted
+                }
+                if tab=icons {
+                    // std's icons (krome/icons, Material Symbols): at 16, 20 and 32 pixels,
+                    // tinted by the text colour, then the accent.
+                    scroll-view h=fill {
+                        each i in icons height=36 {
+                            row gap=12 middle w=fill {
+                                image image=@i.path w=16 h=16
+                                image image=@i.path w=20 h=20
+                                image image=@i.path w=32 h=32
+                                image image=@i.path w=32 h=32 color=accent
+                                text "{i.name}" color=muted
+                            }
+                        }
+                    }
                 }
                 if tab=split {
                     row w=fill h=fill {

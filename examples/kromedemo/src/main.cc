@@ -151,6 +151,8 @@ constinit const Step k_steps[] = {
     {Act::Click, "col_size", 0, nullptr},    // sorts by size: the smallest first
     {Act::Click, "r4096", 0, nullptr},
     {Act::Check, "picked_row", 0, "r4096"},
+    {Act::Click, "tab_icons", 0, nullptr},
+    {Act::Shot, "gallery_icons", 0, nullptr},
     {Act::Click, "tab_split", 0, nullptr},
     {Act::Shot, "gallery_split", 0, nullptr},
     {Act::Click, "split", 0, nullptr},       // the splitter takes the focus; the arrows move it
@@ -166,6 +168,8 @@ constinit const Step k_steps[] = {
     {Act::Key, "enter", 0, ""},              // the dialog's OK
     {Act::Check, "renamed", 0, "renamed to Ash"},
     {Act::Theme, "light", 0, nullptr},
+    {Act::Click, "tab_icons", 0, nullptr},
+    {Act::Shot, "gallery_icons_light", 0, nullptr},
     {Act::Click, "tab_tree", 0, nullptr},
     {Act::Shot, "gallery_light", 0, nullptr},
     {Act::Click, "nav_form", 0, nullptr},

@@ -164,3 +164,39 @@ Nov 16, 2026. Notes on `patherizer`, the engine's path rasterizer, as Krome slic
     is slice 6's rebind, so the PRD's "reloads when its file changes" waits for it.
 - **kvscript**: `kv.svg.load` and `parse`, `kv.patherizer.read`, and a shape's `draw` into a
   kv.image, `encode`, `view` and `one_colour`.
+
+## Milestone 4: Krome draws shapes
+
+- **Where it is.** `modules/krome/src/shapes.cc`: a cache of pictures beside the view. An
+  image node whose path ends `.svg` or `.kshape` loads a shape (`asset_load_shape`); layout
+  measures it at its view box; paint asks the cache for a box at the node's pixel rectangle.
+- **The key** is the asset, the pixel size, and the colour: all ones for a one-colour shape
+  (drawn white, the box tinted by `color` times `tint`), currentColor's RGBA8 for a coloured
+  one. A hover or a theme switch over std's icons rasterizes nothing.
+- **Pages.** 1024 x 1024 RGBA8 sRGB, straight alpha, shelves with a pixel between pictures.
+  A shape past 512 pixels on either side has a page of its own, its size. Past 8 shared
+  pages, the one used longest ago is cleared and reused. A page's texture is made the first
+  time it is drawn with a renderer, and after each paint only its changed rectangle goes up
+  (`renderer_texture_update`); without a renderer (the tests) the pages are kept in memory
+  all the same, so the cache can be tested by its pixels.
+- **When it rasterizes.** At paint, on the engine's thread, every size. The PRD puts a shape
+  over 256 x 256 on a job; that is left for M5's numbers to decide (an icon at 20 px is
+  microseconds; a large illustration is the case to measure).
+- **Colour transitions.** A coloured shape whose text colour is easing draws two boxes: the
+  start colour's picture fading out and the end colour's fading in, smoothstep as the
+  colours ease. Two pictures, not one per frame.
+- **Failed images.** A missing or broken image used to keep `krome_settled` false for ever
+  (and so a `--shots` run waited for ever): it now counts as done, draws nothing and
+  measures nothing. Found by writing `image="krome/icons/{i.name}.svg"`: a property is not
+  interpolated (only text is), so the path is bound from the model instead (`image=@i.path`).
+- **std.** The checkbox draws `check` (14 px in a 16 px box, white on the accent, shown when
+  selected); the box and the radio dot went from 14 to 16 to hold it. The dropdown's arrow
+  is `arrow_drop_down` at 20. A tree's arrows are its model's: kromedemo's gallery and
+  kromescreens name `arrow_right` and `arrow_drop_down` and draw `image=@n.arrow` at 20,
+  where they wrote ▸ and ▾ as text. Material draws on a 20 px grid with wide margins, so at
+  12 or 16 the marks are small; 20 is their size.
+- **Not in std yet**, so not given icons: closable tabs and dialogs (no close button exists),
+  a table header's sort arrow (the sort's direction is the screen's, not the column's), and
+  badges with icons. Each is a widget change more than an icon change.
+- **The gallery** has an Icons page: every icon at 16, 20 and 32, and at 32 in the accent;
+  `--demo --shots` takes it in both themes (`gallery_icons`, `gallery_icons_light`).

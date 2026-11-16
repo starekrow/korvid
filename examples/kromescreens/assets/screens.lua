@@ -30,7 +30,7 @@ local function flatten()
     for _, n in ipairs(list) do
       local a = assets[n.id]
       out[#out + 1] = { id = n.id, name = a and a.name or n.label, path = a and a.path or "", edge = n.edge or "",
-                        indent = depth * 16, arrow = n.kids and (open[n.id] and "\u{25BE}" or "\u{25B8}") or "" }
+                        indent = depth * 16, arrow = n.kids and (open[n.id] and "krome/icons/arrow_drop_down.svg" or "krome/icons/arrow_right.svg") or "" }
       if n.kids and open[n.id] then walk(n.kids, depth + 1) end
     end
   end

@@ -3,6 +3,7 @@
 // changed, and the pointer routed top first through overlays and screens
 // (docs/PRDs/Krome-Slice-1-PRD.md, "Paint and the display list", "Input and overlays").
 #include "internal.h"
+#include "korvid/asset/shape.h"
 #include "korvid/typeset/typeset.h"
 #include "korvid/core/arena.h"
 #include "korvid/asset/font.h"
@@ -42,17 +43,41 @@ const FontAsset* ready_font(KromeModule& s, KromeFont* f) {
     return fa && fa->state == AssetState::Ready ? fa : nullptr;
 }
 
+bool shape_path(const char* p) {
+    usize n = strlen(p);
+    return (n > 4 && !strcmp(p + n - 4, ".svg")) || (n > 7 && !strcmp(p + n - 7, ".kshape"));
+}
+
 KromeImage* image_for(KromeModule& s, Name path) {
+    if (!name_str(path)[0]) return nullptr; // "": no image (a tree's leaf has no arrow)
     for (KromeImage& i : s.images) if (i.path == path) return &i;
-    KromeImage i{path, asset_load_texture(*s.e, name_str(path)), false};
+    bool shape = shape_path(name_str(path));
+    KromeImage i{path, shape ? asset_load_shape(*s.e, name_str(path)) : asset_load_texture(*s.e, name_str(path)), false, shape};
     s.images.push(i);
     return &s.images.last();
 }
 
-const TextureAsset* ready_image(KromeModule& s, KromeImage* i) {
-    if (!i || i->asset.is_null()) return nullptr;
+const TextureAsset* ready_texture(KromeModule& s, KromeImage* i) {
+    if (!i || i->asset.is_null() || i->shape) return nullptr;
     const TextureAsset* t = asset_texture(*s.e, i->asset);
     return t && t->state == AssetState::Ready ? t : nullptr;
+}
+
+const ShapeAsset* ready_shape(KromeModule& s, KromeImage* i) {
+    if (!i || i->asset.is_null() || !i->shape) return nullptr;
+    const ShapeAsset* t = asset_shape(*s.e, i->asset);
+    return t && t->state == AssetState::Ready ? t : nullptr;
+}
+
+bool ready_image(KromeModule& s, KromeImage* i) { return ready_texture(s, i) || ready_shape(s, i); }
+
+// Ready, or failed (the asset module has said why): either way nothing more is coming, so a
+// screen waiting on it is settled. A failed image measures nothing and draws nothing.
+bool image_done(KromeModule& s, KromeImage* i) {
+    if (ready_image(s, i)) return true;
+    if (i->shape) { const ShapeAsset* t = asset_shape(*s.e, i->asset); return t && t->state == AssetState::Failed; }
+    const TextureAsset* t = asset_texture(*s.e, i->asset);
+    return t && t->state == AssetState::Failed;
 }
 
 // Layout's measures, in logical pixels: the font at the size it is drawn, a guess until it
@@ -81,10 +106,13 @@ vec2 measure_paragraph(void* user, const char* str, u32 len, Name font, f32 size
     return vec2{(width > 0.0f ? m.widest : m.widest) / s.scale, m.height / s.scale};
 }
 
+// An image's natural size, logical pixels: a texture's, or a shape's view box.
 vec2 measure_image(void* user, Name path) {
     KromeModule& s = *(KromeModule*)user;
-    const TextureAsset* t = ready_image(s, image_for(s, path));
-    return t ? vec2{(f32)t->width, (f32)t->height} : vec2{0, 0};
+    KromeImage* i = image_for(s, path);
+    if (const TextureAsset* t = ready_texture(s, i)) return vec2{(f32)t->width, (f32)t->height};
+    if (const ShapeAsset* sh = ready_shape(s, i)) return vec2{sh->shape.view[2], sh->shape.view[3]};
+    return vec2{0, 0};
 }
 
 // ---- rects -------------------------------------------------------------------------------------------
@@ -346,6 +374,38 @@ void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
 
 void paint_edit(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect2 r, rect2 clip_rect);
 
+color times(color a, color b) { return color{a.r * b.r, a.g * b.g, a.b * b.b, a.a * b.a}; }
+
+// A shape image: rasterized at the box's pixels (shapes.cc). One colour: drawn white, the box
+// tinted by the text colour and the tint. Coloured: rasterized in the text colour; while its
+// colour eases, the rasterizations of the two ends cross-faded.
+void paint_shape(Paint& p, u32 node, const KromeNode& n, const KromeLook& l, rect2 r, KromeImage& ki, const ShapeAsset& shape, u32 clip) {
+    UiBox b;
+    b.rect = r;
+    b.clip = clip;
+    u32 w = (u32)r.w, h = (u32)r.h;
+    if (shape.one_colour) {
+        if (!krome_shape_box(p.s, p.r, shape, ki.asset, w, h, color{1, 1, 1, 1}, b)) return;
+        b.fill = faded(times(l.text_color, l.tint), l.opacity);
+        p.list.box(b);
+        return;
+    }
+    // Coloured: an easing colour is two rasterizations, cross-faded.
+    for (const KromeModule::Anim& a : p.s.anims) {
+        if (a.screen != p.sc.id || a.overlay != p.overlay || a.node != node || a.id != n.id) continue;
+        f32 k = a.dur > 0.0f ? (f32)((p.s.clock - a.start) / a.dur) : 1.0f;
+        if (k <= 0.0f || k >= 1.0f || (a.from.text.r == a.to.text.r && a.from.text.g == a.to.text.g && a.from.text.b == a.to.text.b && a.from.text.a == a.to.text.a)) break;
+        k = k * k * (3.0f - 2.0f * k);
+        UiBox from = b;
+        if (krome_shape_box(p.s, p.r, shape, ki.asset, w, h, a.from.text, from)) { from.fill = faded(l.tint, l.opacity * (1.0f - k)); p.list.box(from); }
+        if (krome_shape_box(p.s, p.r, shape, ki.asset, w, h, a.to.text, b)) { b.fill = faded(l.tint, l.opacity * k); p.list.box(b); }
+        return;
+    }
+    if (!krome_shape_box(p.s, p.r, shape, ki.asset, w, h, l.text_color, b)) return;
+    b.fill = faded(l.tint, l.opacity);
+    p.list.box(b);
+}
+
 void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u32 clip) {
     const KromeNode& n = p.tree.nodes[node];
     if (n.flags & KROME_HIDDEN) return;
@@ -353,7 +413,10 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
     if (l.transition > 0.0f) ease(p, node, n, l);
     f32 scale = p.s.scale;
     rect2 r = krome_pixel_rect(n.rect, scale);
-    const TextureAsset* img = n.type == KromeType::Image && (l.set & KROME_LOOK_IMAGE) ? ready_image(p.s, image_for(p.s, l.image)) : nullptr;
+    KromeImage* ki = n.type == KromeType::Image && (l.set & KROME_LOOK_IMAGE) ? image_for(p.s, l.image) : nullptr;
+    const TextureAsset* img = ready_texture(p.s, ki);
+    const ShapeAsset* shp = ready_shape(p.s, ki);
+    if (shp && r.w >= 1.0f && r.h >= 1.0f) { paint_shape(p, node, n, l, r, *ki, *shp, clip); shp = nullptr; }
     bool fill = l.bg.a > 0.0f || ((l.set & KROME_LOOK_BG2) && l.bg2.a > 0.0f);
     bool edge = l.border > 0.0f && l.border_color.a > 0.0f;
     bool shade = l.shadow_color.a > 0.0f;
@@ -921,7 +984,7 @@ void krome_view_frame(KromeModule& s) {
     for (KromeFont& f : s.fonts)
         if (!f.ready && ready_font(s, &f)) { f.ready = true; landed = true; }
     for (KromeImage& i : s.images)
-        if (!i.ready && ready_image(s, &i)) { i.ready = true; landed = true; }
+        if (!i.ready && image_done(s, &i)) { i.ready = true; landed = true; }
     // Something still on its way keeps a loop that paces on demand ticking until it lands.
     bool waiting = false;
     for (KromeFont& f : s.fonts) if (!f.ready && !f.asset.is_null()) waiting = true;
@@ -977,7 +1040,7 @@ void krome_view_frame(KromeModule& s) {
             sc->repaint = false;
         }
         ++s.paints;
-        if (r) { renderer_ui_set(r, layer, s.list); ++s.submits; engine_want_frame(*s.e); }
+        if (r) { krome_shapes_flush(s, r); renderer_ui_set(r, layer, s.list); ++s.submits; engine_want_frame(*s.e); }
         if (!known) s.layers.push(layer);
     }
     for (u32 i = 0; i < s.layers.len;) {
@@ -1158,6 +1221,7 @@ void krome_context_press(KromeModule& s, f32 x, f32 y) {
 }
 
 void krome_free_view(KromeModule& s) {
+    krome_shapes_free(s, s.e ? renderer_get(*s.e) : nullptr);
     s.fonts.free();
     s.images.free();
     s.layers.free();

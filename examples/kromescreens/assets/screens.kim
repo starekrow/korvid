@@ -48,7 +48,7 @@ screen screens {
                     each n in graph height=22 {
                         hit [tree-row] id="{n.id}" -> inspect_node dir=row tooltip="{n.path}" {
                             box w=@n.indent h=1
-                            text "{n.arrow}" w=14 color=muted
+                            image image=@n.arrow w=20 h=20 color=muted
                             text "{n.name}"
                             text "{n.edge}" color=muted size=11
                         }

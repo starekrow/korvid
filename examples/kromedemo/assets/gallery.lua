@@ -18,7 +18,7 @@ local function flatten()
   local out = {}
   local function walk(list, depth)
     for _, n in ipairs(list) do
-      local arrow = n.kids and (open[n.id] and "\u{25BE}" or "\u{25B8}") or ""
+      local arrow = n.kids and (open[n.id] and "krome/icons/arrow_drop_down.svg" or "krome/icons/arrow_right.svg") or ""
       out[#out + 1] = { id = n.id, name = n.name, indent = depth * 16, arrow = arrow }
       if n.kids and open[n.id] then walk(n.kids, depth + 1) end
     end
@@ -35,11 +35,19 @@ for i = 1, 10000 do
 end
 local order = { name = true }
 
+-- std's icons, as modules/krome/icons/NAMES lists them.
+local icons = {}
+for _, n in ipairs({ "check", "remove", "expand_more", "expand_less", "chevron_left", "chevron_right",
+                     "arrow_drop_down", "arrow_right", "close", "add", "search", "menu", "arrow_upward",
+                     "arrow_downward", "info", "warning", "error", "folder", "draft", "settings", "refresh" }) do
+  icons[#icons + 1] = { name = n, path = "krome/icons/" .. n .. ".svg" }
+end
+
 return {
   model = { level = 40, done = "40%", mode = "fast", wrap = true, kind = "texture", name = "", secret = "",
             tab = "tree", nodes = flatten(), rows = rows, rows_count = #rows, picked_row = "none picked",
             widths = { name = 200, size = 90, kind = 110 }, split = 240, rename = "", renamed = "not renamed",
-            last = "" },
+            last = "", icons = icons },
 
   on = {
     nav = function() end, -- the game opens the page

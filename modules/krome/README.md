@@ -251,6 +251,26 @@ or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`
 colors and opacity ease to what its look resolves to whenever that changes, by state,
 selection, theme or a bound value, on the Frame cycle's clock, turning around from where they
 are when interrupted; sizes and positions do not move).
+**Images and shapes.** `image="hero.png"` draws a texture. A path ending `.svg` (or
+`.kshape`) draws a shape: the svg module's cook of it, rasterized by patherizer at the node's
+pixel size (logical size times the scale), measured at its view box unless `w` or `h` says
+otherwise. A one-colour shape (every paint `currentColor`, as std's icons are) is rasterized
+once, white, and tinted by the node's `color` times its `tint`, so hover, themes and
+transitions recolour it without drawing it again. A shape with colours of its own is
+rasterized with `currentColor` as the node's `color`; while that colour eases, the two ends'
+pictures cross-fade. Pictures are kept in 1024 x 1024 pages by shape, size and colour (a
+shape past 512 pixels has its own texture; past 8 pages the one used longest ago is
+cleared). A path bound to the model (`image=@n.arrow`) may be `""`: no image. An image that
+fails to load draws nothing and does not hold a screen unsettled.
+
+**Icons** (`krome/icons/<name>.svg`): Material Symbols, Outlined, weight 400, 20 px (Apache
+2.0, `icons/LICENSE`; the list and the pinned commit in `icons/README.md`): `check`,
+`remove`, `expand_more`, `expand_less`, `chevron_left`, `chevron_right`, `arrow_drop_down`,
+`arrow_right`, `close`, `add`, `search`, `menu`, `arrow_upward`, `arrow_downward`, `info`,
+`warning`, `error`, `folder`, `draft`, `settings`, `refresh`. std draws the checkbox's check
+and the dropdown's arrow with them; a tree's model names its arrows (kromedemo's gallery and
+kromescreens do). They are drawn on a 20 px grid: 20 is their size, and smaller is scaled.
+
 Flags: `fill`, `clip`, `scroll`, `disabled`, `selected`, `hidden`, the alignments,
 `subpixel`, `nowrap`, `multiline`, `readonly`, `focusable`, `nofocus`, `secret`, `tabs`. The
 vocabulary is fixed (`modules/kimb`); `prop name type` in a prelude types a definition's
@@ -270,7 +290,7 @@ input), `menu-item`, `panel`; and slice 4's, their behaviours in `assets/std.lua
 | `radio` | `radio "Fast" @mode=fast` | `@key=value` |
 | `dropdown`, `option` | `dropdown @kind { option "sound" id=sound ... }` | opens its options below it; the pointer, or the arrows and Enter, pick one (its id, else its label) |
 | `tabs`, `tab` | `tabs { tab "Rules" @tab=rules ... }`, pages `if tab=rules { }` | `@key=value` |
-| `tree`, `tree-row` | `tree { each n in nodes height=22 { hit [tree-row] -> toggle { box w=@n.indent ... } } }` | the screen's handler opens and closes |
+| `tree`, `tree-row` | `tree { each n in nodes height=22 { hit [tree-row] -> toggle { box w=@n.indent image=@n.arrow ... } } }` | the screen's handler opens and closes, and names the arrow icon |
 | `table`, `table-head`, `column`, `cell` | `column "Name" id=col_name @widths.name`, `cell w=@widths.name { ... }` | a press fires `sort` (the column's id), a drag of its edge sets its width |
 | `splitter` | `row { scroll-view w=@split ... splitter @split ... }` | a drag (or the arrows) sets the first pane's width |
 | `menu-bar`, `menu-title` | `menu-bar { menu-title "File" { menu-item "Open" id=open } }` | opens its items; an item's id is the event it fires |
