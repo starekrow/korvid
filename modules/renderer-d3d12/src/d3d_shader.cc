@@ -11,7 +11,7 @@
 #include "korvid/platform/io.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 namespace {
 
@@ -118,4 +118,4 @@ bool rb_load_shader(Renderer* r, const char* file, const char* entry, ShaderBlob
     return rb_load_shader_entries(r, file, &entry, out, 1);
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

@@ -2,7 +2,7 @@
 #include "renderer_internal.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 namespace {
 
@@ -372,4 +372,4 @@ bool rb_create_device(Renderer* r) {
     return true;
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

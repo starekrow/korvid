@@ -312,6 +312,16 @@ function M.run(c, g, opts)
     local spell = flags(inst).tc.fields.flag_define
     local ds = {}
     for _, d in ipairs(inst.module.fields.defines or {}) do ds[#ds + 1] = spell:format(d) end
+    -- The modules bound to each interface on the instance's platform, by their place in the
+    -- binding's list (its order of preference): KV_BIND_<INTERFACE>_<MODULE>=<1-based place>,
+    -- and KV_BIND_<INTERFACE>_COUNT. Where two backends share a build, render's dispatcher
+    -- compiles a case for each, and a backend knows it is not alone.
+    local function up(s) return (s:upper():gsub("[^%w]", "_")) end
+    local bound = g.platform_of(inst.platform).bindings
+    for _, iface in ipairs(util.sorted_keys(bound)) do
+      for i, b in ipairs(bound[iface]) do ds[#ds + 1] = spell:format(("KV_BIND_%s_%s=%d"):format(up(iface), up(b), i)) end
+      ds[#ds + 1] = spell:format(("KV_BIND_%s_COUNT=%d"):format(up(iface), #bound[iface]))
+    end
     return table.concat(ds, " ")
   end
 

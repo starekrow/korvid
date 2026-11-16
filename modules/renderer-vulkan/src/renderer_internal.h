@@ -29,6 +29,8 @@
 #define KV_RB_SURFACE    RendererSurface::Vulkan
 #define KV_RB_FRAME_SCOPE 
 #define KV_RB_UI          1
+#define KV_RB_NS          rb_vk
+#define KV_RB_ID          KV_RENDER_ID_VULKAN
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"
@@ -38,7 +40,7 @@
 #include "vk_funcs.h"
 #include "vk_platform.h"
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 struct Buffer {
     VkBuffer       buffer = VK_NULL_HANDLE;
@@ -57,11 +59,11 @@ struct Garbage {
 using RbBuffer  = Buffer;
 using RbGarbage = Garbage;
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS
 
 #include "korvid/render/core/core.h"
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // ---- CPU-side records ---------------------------------------------------------------------
 
@@ -296,4 +298,4 @@ void rb_gpu_collect(Renderer* r, FrameInFlight& f); // after its fence
 // module loaded and its pipeline made once the swapchain's format is known).
 bool rb_create_game_pipeline(Renderer* r, GamePipe& gp);
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

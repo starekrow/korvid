@@ -18,7 +18,7 @@
 #include "korvid/platform_hid/host_window.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 RendererSurface renderer_surface() { return KV_RB_SURFACE; }
 
@@ -26,6 +26,7 @@ u8 renderer_window_surface() {
     switch (KV_RB_SURFACE) {
     case RendererSurface::Metal: return (u8)WindowSurface::Metal;
     case RendererSurface::D3D12: return (u8)WindowSurface::D3D12;
+    case RendererSurface::Software: return (u8)WindowSurface::Software;
     default:                     return (u8)WindowSurface::Vulkan;
     }
 }
@@ -564,6 +565,6 @@ bool rc_write_screenshot(Renderer* r) {
     return true;
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS
 
 #include "korvid/render/core/frame.inl"

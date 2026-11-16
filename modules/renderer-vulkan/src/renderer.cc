@@ -17,7 +17,7 @@
 #include "korvid/platform/module.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // ---- shared helpers ----------------------------------------------------------------------
 
@@ -39,7 +39,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     *r = Renderer{}; // plain data: default member values, no constructor to run
     r->general      = ga;
     r->owner_slot   = &owner->renderer;
-    owner->renderer = r;
+    owner->renderer = reinterpret_cast<kv::Renderer*>(r); // the public, opaque type: render's dispatcher reads its first byte
     for (FrameInFlight& f : r->frames) { f.garbage.alloc = ga; f.dirty_slots.alloc = ga; }
     r->uploads.alloc = ga;
     r->window      = desc.native_window;
@@ -107,7 +107,16 @@ void renderer_destroy(Renderer* r) {
 
 Renderer* renderer_get(Engine& engine) {
     RendererVulkanState* s = engine_module_state_as<RendererVulkanState>(engine, "renderer-vulkan");
-    return s ? s->renderer : nullptr;
+    return s ? reinterpret_cast<Renderer*>(s->renderer) : nullptr;
+}
+
+// Whether Vulkan can draw here at all, before a window exists: the module found a 1.3 loader.
+// A device that will not do is found by renderer_create, and render's dispatcher then falls
+// back to the next bound backend.
+bool renderer_probe(const char** why) {
+    if (!g_vulkan_ready) { *why = "no Vulkan 1.3 loader"; return false; }
+    *why = "";
+    return true;
 }
 
 // ---- textures -------------------------------------------------------------------------------
@@ -250,4 +259,4 @@ bool rb_frame_finish(Renderer* r, FrameInFlight& f) {
     return true;
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

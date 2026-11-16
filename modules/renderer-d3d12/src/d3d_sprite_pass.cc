@@ -12,7 +12,7 @@
 #include "korvid/math/scalar.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 namespace {
 
@@ -499,4 +499,4 @@ void rb_ui_draw(Renderer* r, FrameInFlight& f, const PushData& push) {
     if (r->markers) rb_label_end(r, cmd);
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

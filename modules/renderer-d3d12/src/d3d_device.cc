@@ -4,7 +4,7 @@
 #include "renderer_internal.h"
 #include "korvid/core/format.h"
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 const char* hr_name(HRESULT hr) {
     switch (hr) {
@@ -191,4 +191,4 @@ bool rb_wait_idle(Renderer* r) {
     return rb_wait_fence(r, v);
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

@@ -90,6 +90,14 @@ struct HostWindow {
     // window only after a buffer is attached to its surface, so a window nobody draws to
     // never appears. A no-op on a Vulkan window, where the renderer presents.
     void present_blank();
+    // For WindowSurface::Software: the window's pixels to draw into (a CPU renderer's,
+    // renderer-cpu), until present_software() shows them. Four bytes a pixel, rows `pitch`
+    // bytes apart; R, G, B then the fourth (ignored) in memory when `rgba`, else B, G, R. The
+    // size is the window's now. False when there is no window, it is not a software one, or
+    // the system will not give its pixels.
+    struct SoftwareFrame { u8* pixels = nullptr; u32 width = 0, height = 0, pitch = 0; bool rgba = false; };
+    bool software_frame(SoftwareFrame* out);
+    void present_software();
     // Text input from the OS on or off (an input method's window, a phone's keyboard).
     void text_input(bool on);
     // Where the caret is, in framebuffer pixels: the input method's candidates open beside
@@ -131,6 +139,7 @@ struct HostWindow {
     void (*surface_fn_)(void*, void*) = nullptr;
     void* surface_ctx_ = nullptr;
     void* modal_timer_ = nullptr; // the backend's: on macOS a CFRunLoopTimer in the event-tracking mode
+    void* software_    = nullptr; // the backend's: the surface software_frame() locked, until present_software()
 };
 
 } // namespace kv

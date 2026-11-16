@@ -50,7 +50,10 @@
 //
 // The rules of the seam:
 //   1. No templates over the backend, no virtual functions, no tables of function pointers.
-//      Plain structs and plain functions: a name has one definition in a build.
+//      Plain structs and plain functions: a name has one definition per backend namespace.
+//      Each backend compiles this core in kv::KV_RB_NS; render's dispatcher (render/src/
+//      dispatch.cc) defines renderer.h's functions once, as a switch over the backends bound
+//      (docs/PRDs/CPU-Renderer-PRD.md, "Two backends in one build").
 //   2. A function is the core's when its bodies in the backends are the same once the names
 //      are normalised. If they are only alike, it stays in the backends.
 //   3. The core does not reach into a backend's own state. The backends read and write the
@@ -64,6 +67,7 @@
 // Names: rw_ is the linked half's, rc_ this half's, rb_ a backend's.
 #pragma once
 #include "korvid/render/core/layout.h"
+#include "korvid/render/core/api.h"
 #include "korvid/render/world.h"
 
 #ifndef KV_RB_NAME
@@ -86,13 +90,29 @@
 #ifndef KV_RB_FRAME_SCOPE
 #error "the backend's renderer_internal.h defines KV_RB_FRAME_SCOPE (empty, or @autoreleasepool)"
 #endif
+// KV_RB_NS, the namespace the backend's code and this core live in (kv::rb_vk), and KV_RB_ID,
+// the byte its renderers start with, which render's dispatcher switches on
+// (korvid/render/core/api.h names them).
+#ifndef KV_RB_NS
+#error "the backend's renderer_internal.h defines KV_RB_NS (its namespace in kv)"
+#endif
+#ifndef KV_RB_ID
+#error "the backend's renderer_internal.h defines KV_RB_ID (a KV_RENDER_ID_ value of korvid/render/core/api.h)"
+#endif
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 struct Renderer;
 struct Texture;
 struct GamePipe;
 struct FrameInFlight;
+
+// The API in this backend's namespace, declared before the core's code calls any of it (so
+// a call from in here is to the backend's own, not to the public kv:: dispatcher's).
+#define KV_RB_DECLARE(ret, name, params, args) ret name params;
+KV_RENDER_BACKEND_API
+KV_RENDER_API(KV_RB_DECLARE)
+#undef KV_RB_DECLARE
 
 // ---- the records the backends complete -------------------------------------------------------
 
@@ -187,7 +207,8 @@ struct SpriteTables {
 };
 
 struct RenderCore {
-    Renderer**  owner_slot = nullptr; // the module state's pointer to this; nulled on destroy
+    u8          backend_id = KV_RB_ID; // first: the byte render's dispatcher reads through the public, opaque kv::Renderer
+    kv::Renderer** owner_slot = nullptr; // the module state's pointer to this (the public type); nulled on destroy
     Allocator*  general    = nullptr; // the owning module's attributed general allocator
     char        base_path[512] = {};  // the executable's directory, where shaders/ is
     bool        validation = false;
@@ -359,4 +380,4 @@ bool rb_ui_buffer(Renderer* r, FrameInFlight& f, u64 bytes);
 void rb_ui_draw(Renderer* r, FrameInFlight& f, const PushData& push);
 bool rb_record_end(Renderer* r, FrameInFlight& f);
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

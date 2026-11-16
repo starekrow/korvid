@@ -1,5 +1,7 @@
-// Korvid render: the renderer as the game sees it. Link-time dispatch: the bound backend
-// module defines these. No graphics API type appears here; the window is an opaque handle.
+// Korvid render: the renderer as the game sees it. render's dispatcher defines these, as a
+// switch over the backends the build binds (one, or a GPU backend and renderer-cpu: see
+// korvid/render/core/api.h); each backend defines them in a namespace of its own. No
+// graphics API type appears here; the window is an opaque handle.
 //
 // Resources are renderer-issued handles wrapping GPU indices: a texture handle's index
 // is its bindless slot, a material handle's index is its row. The outer engine keeps
@@ -14,8 +16,13 @@ namespace kv {
 struct Engine;
 struct Renderer; // opaque; owned by the backend module, which destroys it at its shutdown
 
+// Which backend draws (docs/PRDs/CPU-Renderer-PRD.md). Auto: the first GPU backend the build
+// binds that can draw here, else the CPU renderer. Gpu and Cpu insist on that kind.
+enum class RendererBackend : u8 { Auto, Gpu, Cpu };
+
 struct RendererDesc {
-    void* native_window = nullptr; // HostWindow::native_handle()
+    RendererBackend backend = RendererBackend::Auto; // as renderer_choose takes it, when nothing has chosen yet
+    void* native_window = nullptr; // HostWindow::native_handle(); null for the CPU renderer is headless
     u32   width         = 0;       // current framebuffer size in pixels
     u32   height        = 0;
     bool  vsync         = true;
@@ -55,7 +62,16 @@ struct RenderView {
 // What kind of window surface the bound backend draws into, for whoever opens the window
 // before a renderer exists (the frame loop maps it to platform_hid's WindowSurface). Known
 // at link time: the binding decides it.
-enum class RendererSurface : u8 { Vulkan, Metal, D3D12 };
+enum class RendererSurface : u8 { Vulkan, Metal, D3D12, Software };
+// The backend renderer_create will make, decided once a process and before the window
+// opens, so the window is made for it: `want` if not Auto; else KV_RENDERER in the
+// environment ("gpu", "cpu", or a backend's name); else the first bound backend, in the
+// binding's order, whose probe says it can draw here (a GPU backend's loader, its device).
+// Each refusal is logged with its reason. Its name: "vulkan", "cpu"; "" when none can.
+// renderer_surface and renderer_window_surface choose with Auto if nothing has yet.
+const char* renderer_choose(RendererBackend want);
+// "auto", "gpu", "cpu" (a --renderer flag's word) into `out`; false for anything else.
+bool renderer_backend_parse(const char* word, RendererBackend* out);
 RendererSurface renderer_surface();
 // The same answer as platform_hid's WindowSurface (korvid/platform_hid/host_window.h), by
 // value, since render cannot name that type: whoever opens the window writes
@@ -63,7 +79,9 @@ RendererSurface renderer_surface();
 // meet is the render core, which every backend builds with both in sight.
 u8 renderer_window_surface();
 
-// One renderer per process in slice 1. Null if one exists already or creation failed.
+// One renderer per process in slice 1. Null if one exists already or creation failed. The
+// backend is renderer_choose's (desc.backend's, when nothing chose before); under Auto, a
+// GPU backend that fails here gives way to the next bound one, the CPU renderer last.
 Renderer*  renderer_create(Engine& engine, const RendererDesc& desc);
 // Early teardown only; the backend module's shutdown destroys whatever is still alive.
 void       renderer_destroy(Renderer* r);

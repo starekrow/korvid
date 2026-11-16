@@ -7,6 +7,9 @@
 
 namespace kv {
 
+// Set by the module's start-up once it has a Vulkan 1.3 loader (renderer_probe reads it).
+extern bool g_vulkan_ready;
+
 // Finds and loads the Vulkan loader; its vkGetInstanceProcAddr, or null (logged).
 PFN_vkGetInstanceProcAddr vk_platform_load();
 void vk_platform_unload();

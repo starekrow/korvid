@@ -137,6 +137,9 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else if (strcmp(argv[i], "--no-validation") == 0) cfg.validation = false;
         else if (strcmp(argv[i], "--validation") == 0) cfg.validation = true;
         else if (strcmp(argv[i], "--no-vsync") == 0) cfg.vsync = false;
+        else if (strcmp(argv[i], "--renderer") == 0 && i + 1 < argc) {
+            if (!renderer_backend_parse(argv[++i], &cfg.renderer)) { KV_ERROR("frameloop", "--renderer takes auto, gpu or cpu, not '%s'", argv[i]); return false; }
+        }
         else if (strcmp(argv[i], "--pacing") == 0 && i + 1 < argc) {
             const char* v = argv[++i];
             if (!strcmp(v, "demand")) cfg.pacing = Pacing::OnDemand;
@@ -240,13 +243,15 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     desc.title      = s->config.title;
     desc.width      = s->config.width;
     desc.height     = s->config.height;
-    desc.surface    = (WindowSurface)renderer_window_surface(); // what the bound backend draws into
+    renderer_choose(s->config.renderer); // before the window: it is made for the backend that will draw
+    desc.surface    = (WindowSurface)renderer_window_surface();
     desc.vsync      = s->config.vsync;
     desc.borderless = s->config.borderless;
     s->window = platform_open_window(engine, desc);
     if (!s->window) return false;
 
     RendererDesc rd;
+    rd.backend       = s->config.renderer;
     rd.native_window = s->window->native_handle();
     rd.width         = s->window->width();
     rd.height        = s->window->height();

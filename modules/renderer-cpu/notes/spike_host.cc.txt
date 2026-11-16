@@ -1,0 +1,49 @@
+// The spike's host: the generated rings shader called on one span across its quad.
+#include "rings_cpu.cpp"
+#include <stdio.h>
+#include <time.h>
+
+struct Tex : ITexture {
+    TextureDimensions GetDimensions(int) override { TextureDimensions d{}; d.width = 4; d.height = 4; return d; }
+    void Load(const int32_t*, void* out, size_t n) override { float v[4] = {1, 1, 1, 0.25f}; memcpy(out, v, n); }
+    void Sample(SamplerState, const float*, void* out, size_t n) override { float v[4] = {1, 1, 1, 0.25f}; memcpy(out, v, n); }
+    void SampleLevel(SamplerState, const float*, float, void* out, size_t n) override { float v[4] = {1, 1, 1, 0.25f}; memcpy(out, v, n); }
+};
+
+int main() {
+    static Tex tex;
+    static Texture2D<Vector<float, 4>> textures[1];
+    textures[0].texture = &tex;
+    static GpuMaterial_0 materials[1] = {};
+    materials[0].params1_0 = Vector<float, 4>{0.0f, 0.0f, 1.0f, 1.0f}; // blue bands
+    static PushData_0 push = {};
+    static Vector<float, 4> layers[256] = {};
+    static CpuSpan_0 span = {};
+    span.local0_0 = Vector<float, 2>{0.0f, 0.0f}; // the bottom edge: its ends outside the disc
+    span.dlocal_0 = Vector<float, 2>{1.0f / 16.0f, 0.0f};
+    span.tint_2 = Vector<float, 4>{1.0f, 0.0f, 0.0f, 1.0f}; // red
+    span.count_0 = 16;
+    static Vector<float, 4> out[16];
+    GlobalParams_0 g = {};
+    g.gPush_0 = &push;
+    g.gLayers_0.data = layers; g.gLayers_0.count = 256;
+    g.gMaterials_0.data = materials; g.gMaterials_0.count = 1;
+    g.gTextures_0.data = textures; g.gTextures_0.count = 1;
+    g.gSpan_0 = &span;
+    g.gOut_0.data = out; g.gOut_0.count = 16;
+    ComputeVaryingInput in = {};
+    in.endGroupID = uint3{1, 1, 1};
+    cs_span(&in, nullptr, &g);
+    int kept = 0;
+    for (int i = 0; i < 16; ++i) kept += out[i].w > -1e29f;
+    printf("bottom edge: %d of 16 kept (the disc touches it at its middle only)\n", kept);
+    // Speed: a 1,000,000-pixel run of spans of 16.
+    timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    span.local0_0 = Vector<float, 2>{0.0f, 0.5f};
+    for (int k = 0; k < 62500; ++k) { span.y_0 = (float)k; cs_span(&in, nullptr, &g); }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double ns = (t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec);
+    printf("%.2f ns a pixel through the generated shader\n", ns / 1e6);
+    if (0) for (int i = 0; i < 16; ++i) printf("%2d: %s %.2f %.2f %.2f %.2f\n", i, out[i].w < -1e29f ? "discard" : "kept   ", out[i].x, out[i].y, out[i].z, out[i].w);
+}

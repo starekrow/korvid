@@ -5,7 +5,7 @@
 // calls engine_request_quit.
 //
 // Command line, overriding the config: --run-seconds N, --quiet, --validation,
-// --no-validation, --no-vsync, --borderless, --hitch-ms N, --hash (log the state hash
+// --no-validation, --no-vsync, --renderer auto|gpu|cpu, --borderless, --hitch-ms N, --hash (log the state hash
 // after every tick), --hash-systems (and after every system), --trace-events (print every
 // delivered event with its emitter; dev builds), --threads N (main thread included; 1 is
 // serial; the default is every core), --rate X (the developer's rate from the start, as the
@@ -28,6 +28,7 @@
 #pragma once
 #include "korvid/core/engine.h"
 #include "korvid/math/color.h"
+#include "korvid/render/renderer.h"
 
 namespace kv {
 
@@ -46,6 +47,7 @@ struct FrameLoopConfig {
     bool        vsync      = true;
     bool        borderless = false;
     bool        validation = KV_DEBUG != 0;
+    RendererBackend renderer = RendererBackend::Auto; // --renderer auto|gpu|cpu: which bound backend draws
     bool        exit_on_close  = true;  // CloseRequested -> ExitRequested
     bool        exit_on_escape = true;  // Escape held    -> ExitRequested
     f64         run_seconds    = -1.0;  // >= 0: ExitRequested after this long (smoke tests)

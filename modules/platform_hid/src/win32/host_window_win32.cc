@@ -59,6 +59,11 @@ constexpr UINT WM_KV_IME_ON   = WM_APP + 4; // text_input(): wParam 1 gives the 
 
 struct Win32Window {
     HWND          hwnd = nullptr;
+    // A software window's pixels (software_frame), B, G, R, X top-down, the engine thread's;
+    // present_software() blits them to the window's DC.
+    u8*           soft = nullptr;
+    u32           soft_w = 0, soft_h = 0;
+    usize         soft_bytes = 0;
     OsThread      thread;
     OsMutex       mu;               // guards queue, texts, ready, failed and the area
     OsCond        cv;               // open() waits on it for the window to exist
@@ -584,6 +589,9 @@ void HostWindow::close() {
     w.taken.free();
     w.texts.free();
     w.texts_taken.free();
+    if (w.soft) free_in(mem_general(), w.soft, w.soft_bytes);
+    w.soft = nullptr;
+    w.soft_bytes = 0;
     w.hwnd = nullptr;
     native_ = nullptr;
     width_ = height_ = 0;
@@ -593,6 +601,44 @@ void HostWindow::close() {
 
 // The window class's brush paints a software window; nothing to do here.
 void HostWindow::present_blank() {}
+
+bool HostWindow::software_frame(SoftwareFrame* out) {
+    HWND h = (HWND)native_;
+    if (!h || surface_ != WindowSurface::Software) return false;
+    RECT rc;
+    if (!GetClientRect(h, &rc)) return false;
+    u32 w = (u32)(rc.right - rc.left), hh = (u32)(rc.bottom - rc.top);
+    if (!w || !hh) return false;
+    usize bytes = (usize)w * hh * 4;
+    if (bytes > g_win.soft_bytes) {
+        if (g_win.soft) free_in(mem_general(), g_win.soft, g_win.soft_bytes);
+        g_win.soft = (u8*)alloc_in(mem_general(), bytes, 16);
+        g_win.soft_bytes = g_win.soft ? bytes : 0;
+        if (!g_win.soft) return false;
+    }
+    g_win.soft_w = w;
+    g_win.soft_h = hh;
+    software_ = g_win.soft;
+    *out = SoftwareFrame{g_win.soft, w, hh, w * 4, false};
+    return true;
+}
+
+void HostWindow::present_software() {
+    HWND h = (HWND)native_;
+    if (!h || !software_) return;
+    software_ = nullptr;
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = (LONG)g_win.soft_w;
+    bi.bmiHeader.biHeight = -(LONG)g_win.soft_h; // top-down
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    HDC dc = GetDC(h); // GDI on another thread's window: allowed with its DC
+    if (!dc) return;
+    SetDIBitsToDevice(dc, 0, 0, g_win.soft_w, g_win.soft_h, 0, 0, 0, g_win.soft_h, g_win.soft, &bi, DIB_RGB_COLORS);
+    ReleaseDC(h, dc);
+}
 
 // Physical pixels per logical unit: the window's DPI over 96.
 f32 HostWindow::pixel_scale() const {

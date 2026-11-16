@@ -4,7 +4,7 @@
 #include "korvid/core/format.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // ---- memory and buffers -------------------------------------------------------------------
 
@@ -478,4 +478,4 @@ void rb_garbage_destroy(Renderer* r, const RbGarbage& g) {
     }
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

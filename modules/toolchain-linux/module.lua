@@ -26,7 +26,7 @@ module "toolchain.linux" {
   rules     = {
     cxx  = { command = '$cxx $cxxflags $defines $includes -MMD -MF $out.d -c $in -o $out', depfile = "$out.d", deps = "gcc" },
     ar   = { command = "rm -f $out && $ar crs $out $in" },
-    link = { command = "$cxx $in -o $out $libs $ldflags" },
+    link = { command = "$cxx -o $out -Wl,--start-group $in $libs -Wl,--end-group $ldflags" }, -- a group: render's dispatcher calls the backends that depend on it,
   },
   obj_suffix   = ".o",
   exe_suffix   = "",

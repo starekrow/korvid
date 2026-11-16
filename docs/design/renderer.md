@@ -276,8 +276,12 @@ the command buffer, the drawable and the open encoder) lives in its `FrameInFlig
 
 **The rules of the seam**, which are what keep it from growing into the thing it replaced:
 
-1. No templates over the backend, no virtual functions, no tables of function pointers. A name has one definition in
-   a build.
+1. No templates over the backend, no virtual functions, no tables of function pointers. A name has one definition per
+   backend namespace: each backend compiles the core in `kv::<its KV_RB_NS>` (`rb_vk`, `rb_mt`, `rb_d3d`, `rb_cpu`), and
+   `render/src/dispatch.cc` defines `renderer.h`'s functions once, as a switch over the backends the build binds, on
+   the byte a renderer starts with (`RenderCore::backend_id`). With one bound the switch has one case; with two (a GPU
+   backend and `renderer-cpu`, `docs/PRDs/CPU-Renderer-PRD.md`) it chooses at start-up. `korvid/render/core/api.h`
+   lists the API once, for both sides.
 2. A function is the core's when its bodies in the backends are the same once the names are normalised. If they are
    only alike, it stays in the backends (the post pass's objects, the profiler, the swapchain, the binding model,
    barriers and resource states).

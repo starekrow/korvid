@@ -294,6 +294,8 @@ void HostWindow::close() {
 }
 
 void HostWindow::present_blank() {} // UIKit shows the view's background; nothing to attach
+bool HostWindow::software_frame(SoftwareFrame*) { return false; } // not yet on this host (the CPU renderer PRD's SR21)
+void HostWindow::present_software() {}
 void HostWindow::text_input(bool) {} // slice 8: the on-screen keyboard
 
 // Not yet on this host (Krome slice 3): the input method's area is not told, the clipboard is

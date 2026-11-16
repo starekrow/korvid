@@ -14,7 +14,7 @@
 //   5. Submit and present. Uploads are submitted even when nothing is presented.
 //   6. A requested screenshot or sort check waits for the frame and is written or verified.
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 void rc_sort_steps(const Renderer* r, SortStep out[kSortSteps]) {
     u32 blocks = (r->world.sprites.len + kBlockRows - 1) / kBlockRows;
@@ -203,4 +203,4 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     return f.have_image;
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

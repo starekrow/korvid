@@ -1,0 +1,36 @@
+// The engine's CPU wrapper around a game's fragment shader: a span of pixels, the varyings
+// stepped across it, fs_main called for each.
+// On the CPU there is no fragment stage: `discard` returns a colour whose alpha no shader
+// writes, which the wrapper reads as "this pixel kept".
+float4 kv_discard() { return float4(0.0, 0.0, 0.0, -1.0e30); }
+#define discard return kv_discard()
+// fs_main is the game's entry point on a GPU; here an ordinary function the span calls (as
+// an entry, Slang's C++ would take its varyings by pointer).
+#define shader(stage) ForceInline
+#include "gallery_rings.slang"
+
+struct CpuSpan {
+    float2 uv0, duv;        // the uv at the span's first pixel, and its step a pixel
+    float2 world0, dworld;
+    float2 local0, dlocal;
+    float4 tint;
+    uint   tex, filter, material, count;
+    float  x0, y;
+};
+ConstantBuffer<CpuSpan> gSpan;
+RWStructuredBuffer<float4> gOut;
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void cs_span(uint3 id : SV_DispatchThreadID) {
+    for (uint i = 0; i < gSpan.count; ++i) {
+        SpriteVaryings v;
+        v.pos = float4(gSpan.x0 + float(i) + 0.5, gSpan.y + 0.5, 0.0, 1.0);
+        v.uv = gSpan.uv0 + gSpan.duv * float(i);
+        v.world = gSpan.world0 + gSpan.dworld * float(i);
+        v.local = gSpan.local0 + gSpan.dlocal * float(i);
+        v.tint = gSpan.tint;
+        v.tex = gSpan.tex; v.filter = gSpan.filter; v.material = gSpan.material;
+        gOut[i] = fs_main(v);
+    }
+}

@@ -60,8 +60,10 @@
 #define KV_RB_SURFACE    RendererSurface::D3D12
 #define KV_RB_UI         1 // the UI primitive: ui.slang's vs_ui and fs_ui, its lists a root SRV at t8
 #define KV_RB_FRAME_SCOPE 
+#define KV_RB_NS          rb_d3d
+#define KV_RB_ID          KV_RENDER_ID_D3D12
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // A buffer: a committed resource, its heap's kind and the state it was last left in.
 // Upload and readback buffers stay mapped and in the one state their heap allows.
@@ -81,11 +83,11 @@ struct Garbage { IUnknown* object; };
 using RbBuffer  = Buffer;
 using RbGarbage = Garbage;
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS
 
 #include "korvid/render/core/core.h"
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // The constants and the GPU-side layouts are render's (korvid/render/core/layout.h).
 constexpr u32 kBackBuffers    = 3;    // flip model: one on screen, one queued, one drawing
@@ -326,4 +328,4 @@ void rb_gpu_collect(Renderer* r, FrameInFlight& f);
 
 // ---- renderer.cc --------------------------------------------------------------------------
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

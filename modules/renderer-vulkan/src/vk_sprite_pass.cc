@@ -13,7 +13,7 @@
 #include "korvid/math/scalar.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // Reads shaders/<name> from the program's own files: beside the executable, or inside an
 // Android package. SPIR-V is precompiled by the build; nothing compiles here.
@@ -645,4 +645,4 @@ bool rb_record_end(Renderer* r, FrameInFlight& f) {
     return true;
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

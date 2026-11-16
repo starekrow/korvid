@@ -8,7 +8,7 @@
 #include "korvid/core/format.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 namespace {
 
@@ -171,4 +171,4 @@ void rb_post_destroy(Renderer* r) {
     p = PostPass{};
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

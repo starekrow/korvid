@@ -3,7 +3,7 @@
 #include "../renderer_internal.h"
 #import <UIKit/UIKit.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 CAMetalLayer* mt_platform_layer(void* native_window, void** view_out) {
     *view_out = nullptr;
@@ -17,4 +17,4 @@ CAMetalLayer* mt_platform_layer(void* native_window, void** view_out) {
 
 void mt_platform_release(void*) {}
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

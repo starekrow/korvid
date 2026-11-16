@@ -473,22 +473,29 @@ HostWindow* open_window(Engine& e) {
 int run(int argc, char** argv) {
     const char* only = nullptr;
     Gallery g;
+    RendererBackend backend = RendererBackend::Auto;
+    bool headless = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--out") == 0 && i + 1 < argc) g.out = argv[++i];
         else if (strcmp(argv[i], "--scene") == 0 && i + 1 < argc) only = argv[++i];
-        else { KV_ERROR("gallery", "unknown option '%s' (--out DIR, --scene NAME)", argv[i]); return 2; }
+        else if (strcmp(argv[i], "--renderer") == 0 && i + 1 < argc && renderer_backend_parse(argv[i + 1], &backend)) ++i;
+        else if (strcmp(argv[i], "--headless") == 0) { headless = true; backend = RendererBackend::Cpu; }
+        else { KV_ERROR("gallery", "unknown option '%s' (--out DIR, --scene NAME, --renderer auto|gpu|cpu, --headless)", argv[i]); return 2; }
     }
     Engine e;
     if (!engine_init(e, kv_module_list())) return 1;
+    renderer_choose(backend); // after the backends' modules start (their probes read them), before the window
     g.e = &e;
     g.deltas.alloc = g.live.alloc = mem_general();
     int rc = 0;
-    g.window = open_window(e);
-    if (g.window) {
+    // Headless: the CPU renderer draws the frame's kWidth x kHeight pixels with no window.
+    g.window = headless ? nullptr : open_window(e);
+    if (g.window || headless) {
         RendererDesc rd;
-        rd.native_window = g.window->native_handle();
-        rd.width  = g.window->width();
-        rd.height = g.window->height();
+        rd.backend = backend;
+        rd.native_window = g.window ? g.window->native_handle() : nullptr;
+        rd.width  = g.window ? g.window->width() : kWidth;
+        rd.height = g.window ? g.window->height() : kHeight;
         rd.vsync  = false;
         g.r = renderer_create(e, rd);
     }

@@ -15,9 +15,11 @@ configs   { "debug", "dev", "ship" }
 -- a line here would override them for one platform.
 -- bind "render" { linux = "renderer-vulkan" }
 
--- The d3d12 branch: Windows draws with Direct3D 12. Drop this line (or name renderer-vulkan)
--- for the toolchain's default, Vulkan; the shaders follow the binding (slang's rule).
-bind "render" { windows = "renderer-d3d12" }
+-- Windows draws with Direct3D 12 (renderer-vulkan for the toolchain's default, Vulkan; the
+-- shaders follow the binding, slang's rule). On both, the CPU renderer is linked beside the
+-- GPU backend as its fallback (docs/PRDs/CPU-Renderer-PRD.md): render's dispatcher takes
+-- the first in the list that can draw here, so the GPU comes first.
+bind "render" { linux = { "renderer-vulkan", "renderer-cpu" }, windows = { "renderer-d3d12", "renderer-cpu" } }
 
 root "examples" { paths = "examples", platforms = { "linux" } }
 root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
@@ -30,7 +32,7 @@ root "windows" {
                 "platform_audio", "audio", "renderer-vulkan", "renderer-d3d12", "touchpad", "frameloop", "save", "ui", "xml", "bulletml", "image", "picture", "kbor", "kimb", "kim", "kimc",
                 "window", "testbed", "stones", "rocks", "arcanum",
                 "cpukiller", "arcfire", "gallery", "sockit2m", "lua", "script", "goldberg",
-                "truetype", "typeset", "krome", "kromedemo", "kromescreens" },
+                "truetype", "typeset", "krome", "kromedemo", "kromescreens", "renderer-cpu" },
   tests     = true,
   platforms = { "windows" },
 }

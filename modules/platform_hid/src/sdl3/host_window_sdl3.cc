@@ -146,6 +146,40 @@ void HostWindow::present_blank() {
     SDL_UpdateWindowSurface(w);
 }
 
+bool HostWindow::software_frame(SoftwareFrame* out) {
+    SDL_Window* w = (SDL_Window*)native_;
+    if (!w || surface_ != WindowSurface::Software) return false;
+    SDL_Surface* s = SDL_GetWindowSurface(w);
+    static bool told = false;
+    if (!s) {
+        if (!told) KV_WARN("window", "SDL_GetWindowSurface failed: %s", SDL_GetError());
+        told = true;
+        return false;
+    }
+    bool rgba;
+    switch (s->format) {
+    case SDL_PIXELFORMAT_XRGB8888: case SDL_PIXELFORMAT_ARGB8888: rgba = false; break; // B, G, R, X in memory
+    case SDL_PIXELFORMAT_XBGR8888: case SDL_PIXELFORMAT_ABGR8888: rgba = true; break;  // R, G, B, X
+    default:
+        if (!told) KV_WARN("window", "the window's surface is %s, not 32 bits a pixel: nothing drawn", SDL_GetPixelFormatName(s->format));
+        told = true;
+        return false;
+    }
+    if (SDL_MUSTLOCK(s) && !SDL_LockSurface(s)) return false;
+    software_ = s;
+    *out = SoftwareFrame{(u8*)s->pixels, (u32)s->w, (u32)s->h, (u32)s->pitch, rgba};
+    return true;
+}
+
+void HostWindow::present_software() {
+    SDL_Window* w = (SDL_Window*)native_;
+    SDL_Surface* s = (SDL_Surface*)software_;
+    if (!w || !s) return;
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+    software_ = nullptr;
+    SDL_UpdateWindowSurface(w);
+}
+
 void HostWindow::text_input(bool on) {
     if (!native_) return;
     if (on) SDL_StartTextInput((SDL_Window*)native_);

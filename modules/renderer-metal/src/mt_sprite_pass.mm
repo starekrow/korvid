@@ -20,7 +20,7 @@
 #include "korvid/math/scalar.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // ---- shaders --------------------------------------------------------------------------------
 
@@ -459,4 +459,4 @@ void rb_ui_draw(Renderer* r, FrameInFlight& f, const PushData& push) {
     [enc popDebugGroup];
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

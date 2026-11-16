@@ -20,7 +20,7 @@
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 bool rb_gpu_profile_create(Renderer* r) {
 #if KV_PROFILE
@@ -148,4 +148,4 @@ void rb_gpu_collect(Renderer* r, FrameInFlight& f) {
     g.last = st;
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

@@ -44,6 +44,8 @@
 #define KV_RB_SURFACE    RendererSurface::Metal
 #define KV_RB_UI         1
 #define KV_RB_FRAME_SCOPE @autoreleasepool
+#define KV_RB_NS          rb_mt
+#define KV_RB_ID          KV_RENDER_ID_METAL
 #include "korvid/core/array.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"
@@ -51,18 +53,18 @@
 #include "korvid/core/pool.h"
 #include "korvid/core/profile.h"
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // What the render core holds of this backend's (korvid/render/core/core.h): a buffer is the
 // object itself, and so is a piece of garbage (released, whatever it is).
 using RbBuffer  = id<MTLBuffer>;
 using RbGarbage = id;
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS
 
 #include "korvid/render/core/core.h"
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // The constants and the GPU-side layouts are render's (korvid/render/core/layout.h).
 // kMaxTextures is also the length of sprite_fragment.slangh's BindlessSet; every dispatch
@@ -237,4 +239,4 @@ void          mt_platform_release(void* view);
 
 // ---- renderer.mm ----------------------------------------------------------------------------
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

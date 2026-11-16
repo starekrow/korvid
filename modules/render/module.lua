@@ -11,7 +11,13 @@
 -- backend and is tested here without one. include/korvid/render/core/ is the compiled-in
 -- half: sources (.inl) that each backend builds against its own types, through its
 -- src/render_core.cc.
+--
+-- src/dispatch.cc defines renderer.h's functions: a switch over the backends the build binds
+-- (two may share one: a GPU backend and renderer-cpu, docs/PRDs/CPU-Renderer-PRD.md). It is
+-- built as an object of its own (no unity file), so a program that never calls the renderer,
+-- render's own tests among them, does not pull it in and need a backend.
 module "render" {
   deps   = { "core", "math" },
+  unity  = false,
   tools  = { ["shader-compile"] = { install = "shaders" } },
 }

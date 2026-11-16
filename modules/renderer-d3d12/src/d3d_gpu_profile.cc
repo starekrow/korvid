@@ -9,7 +9,7 @@
 #include "korvid/core/time.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 namespace {
 
@@ -146,4 +146,4 @@ void rb_gpu_collect(Renderer* r, FrameInFlight& f) {
     g.last = st;
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

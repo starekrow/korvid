@@ -18,7 +18,7 @@
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 constexpr u32 kGpuStatCount = 3; // vertex, fragment, compute invocations, in the flags' bit order
 
@@ -187,4 +187,4 @@ void rb_gpu_collect(Renderer* r, FrameInFlight& f) {
     if (st.valid) g.last = st;
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

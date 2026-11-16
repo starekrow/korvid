@@ -6,7 +6,7 @@
 // where Vulkan's fenced recreation retires the old chain with the frame. Resizes are rare.
 #include "renderer_internal.h"
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 bool rb_create_frames(Renderer* r) {
     for (u32 i = 0; i < kFramesInFlight; ++i) {
@@ -117,4 +117,4 @@ bool rb_recreate_swapchain(Renderer* r) {
     return true;
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

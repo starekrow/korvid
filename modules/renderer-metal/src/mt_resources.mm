@@ -7,7 +7,7 @@
 #include "korvid/core/format.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // ---- buffers and deferred release -----------------------------------------------------------
 
@@ -245,4 +245,4 @@ bool rb_ring_buffer(Renderer* r, u64 bytes, RbBuffer& out) {
 
 void rb_garbage_destroy(Renderer*, const RbGarbage& g) { [g release]; }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

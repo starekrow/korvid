@@ -17,7 +17,7 @@
 #include "korvid/platform/module.h"
 #include <string.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 // ---- shared helpers ----------------------------------------------------------------------
 
@@ -77,7 +77,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     *r = Renderer{}; // plain data: Metal objects are plain pointers here (no ARC)
     r->general      = ga;
     r->owner_slot   = &owner->renderer;
-    owner->renderer = r;
+    owner->renderer = reinterpret_cast<kv::Renderer*>(r); // the public, opaque type: render's dispatcher reads its first byte
     for (FrameInFlight& f : r->frames) { f.garbage.alloc = ga; f.dirty_slots.alloc = ga; }
     r->uploads.alloc = ga;
     r->window      = desc.native_window;
@@ -155,7 +155,15 @@ void renderer_destroy(Renderer* r) {
 
 Renderer* renderer_get(Engine& engine) {
     RendererMetalState* s = engine_module_state_as<RendererMetalState>(engine, "renderer-metal");
-    return s ? s->renderer : nullptr;
+    return s ? reinterpret_cast<Renderer*>(s->renderer) : nullptr;
+}
+
+// Whether this backend can draw here before a window exists. The device is found by
+// renderer_create; one that will not do fails there, and render's dispatcher falls back to
+// the next bound backend.
+bool renderer_probe(const char** why) {
+    *why = "";
+    return true;
 }
 
 // ---- textures -------------------------------------------------------------------------------
@@ -241,4 +249,4 @@ bool rb_frame_finish(Renderer*, FrameInFlight& f) {
     return true;
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

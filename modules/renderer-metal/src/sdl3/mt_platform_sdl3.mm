@@ -5,7 +5,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_metal.h>
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 CAMetalLayer* mt_platform_layer(void* native_window, void** view_out) {
     *view_out = nullptr;
@@ -25,4 +25,4 @@ void mt_platform_release(void* view) {
     if (view) SDL_Metal_DestroyView((SDL_MetalView)view);
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS

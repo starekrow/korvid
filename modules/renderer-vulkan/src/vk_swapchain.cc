@@ -5,7 +5,7 @@
 // to idle except renderer_destroy.
 #include "renderer_internal.h"
 
-namespace kv {
+namespace kv { namespace KV_RB_NS {
 
 namespace {
 
@@ -217,4 +217,4 @@ void rb_destroy_frames(Renderer* r) {
     }
 }
 
-} // namespace kv
+} } // namespace kv::KV_RB_NS
