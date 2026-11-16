@@ -28,6 +28,7 @@
 #pragma warning(push, 0)
 #else
 #pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wunused-parameter"

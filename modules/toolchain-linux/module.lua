@@ -5,7 +5,10 @@
 -- multiply is fused into an add (-ffp-contract=off: gcc's default in ISO mode, clang's
 -- not) and nothing reads errno after a math function (-fno-math-errno, so the sqrt
 -- builtin is the instruction alone): kv's math (modules/math) gives every platform the
--- same bits on those terms.
+-- same bits on those terms. -Wshadow (a name that hides another: a local, a parameter, a
+-- member, a global) is what cl's /W4 already reports (C4456 to C4459), so a name that
+-- breaks the Windows build breaks this one first; vendored sources turn it off with the
+-- rest of their warnings.
 module "toolchain.linux" {
   provides  = "toolchain",
   platforms = { "linux" },
@@ -13,7 +16,7 @@ module "toolchain.linux" {
   srcdirs   = { "posix", "linux", "sdl3", "sdl3_pads", "sdl3_audio" }, -- src/<dir>/ picked up on this platform, in this order
   cxx       = "g++",
   ar        = "ar",
-  cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-ffp-contract=off", "-fno-math-errno", "-Wall", "-Wextra", "-Werror" },
+  cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-ffp-contract=off", "-fno-math-errno", "-Wall", "-Wextra", "-Wshadow", "-Werror" },
   configs   = {
     debug = { cxxflags = { "-g", "-O0", "-DKV_DEBUG=1" } },
     dev   = { cxxflags = { "-g", "-O2", "-DKV_DEV=1" } },

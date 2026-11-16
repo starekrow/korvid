@@ -10,6 +10,7 @@
 #pragma warning(push, 0)
 #else
 #pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wunused-function"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
