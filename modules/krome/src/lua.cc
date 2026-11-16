@@ -258,7 +258,8 @@ void krome_fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node)
         memcpy(key, p + 1, klen);
         key[klen] = 0;
         if (key[0] != '*') { // {*tag}: a span's look (slice 3), nothing to show
-            const char* v = krome_model_value_text(s, sc, key, val, sizeof val);
+            // A dotted key is a path into the model ("sel.type": a field of a table).
+            const char* v = strchr(key, '.') ? krome_model_path_text(s, sc, key, val, sizeof val) : krome_model_value_text(s, sc, key, val, sizeof val);
             for (; *v && n + 1 < sizeof out; ++v) out[n++] = *v;
         }
         p = end + 1;

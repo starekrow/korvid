@@ -260,3 +260,42 @@ Each leaves the tree building and every example running.
 - **Transitions start with colors and opacity**, to set the conventions.
 - **Shortcuts reach the top screen** only, for now.
 - **kromedemo gets a second page**, a widget gallery, with navigation between the pages.
+
+## As built
+
+All five milestones are committed (Linux; the other platforms build the same code untried).
+What differs from the plan above, and why:
+
+- **The kernel grew before it froze.** Writing std's widgets needed general hooks that
+  M3's second commit added: a behaviour's `update(w)` (built, or its bound key changed) and
+  `w:part(name, prop, value)` on descendants marked `part=`; `pick(w, id, value)` for a
+  node fired in an overlay the behaviour opened, `w:open_slot` (the use's children as that
+  overlay), `w:close`, `w:focus_next`, `w:focus`; `if key=value`; `{@}` and `@@` in a
+  definition's body for its use's binding; `w:set` of tables.
+- **Kernel fixes after the freeze**, each a bug the widgets or the screens found:
+  - an ancestor's `selected` and `disabled` reach its descendants' looks (std's checkbox
+    box never showed checked);
+  - an edit with nothing to submit leaves Enter to shortcuts (a dialog's OK);
+  - texts read dotted model paths (`{sel.type}`);
+  - a model value put into a text inside an `each` has its braces escaped;
+  - a screen's slots are freed;
+  - zones for `krome.pump` and `krome.input`.
+- **Tabs and pages**: `tabs { tab "Rules" @tab=rules }` (each tab bound by equality, since a
+  child cannot see its parent's binding) and pages as `if tab=rules { }`; no `page` node.
+  The arrows do not move between tabs (Tab and Space do).
+- **Menus in a menu bar** fire the event named by an item's id (the title's behaviour picks
+  it); a context menu is a `menu`-styled overlay opened at the pointer from a `context=`
+  handler.
+- **The tree** is the screen's to flatten: std draws rows (`tree-row`, an indent bound to
+  the model); the handler opens and closes them.
+- **Focus rings** show only when Tab brought the focus, so a pressed button grows none (and
+  the form page still matches the Lua form pixel for pixel).
+- **A virtualized `each`** keeps up to three times the rows it needs before it trims; its
+  first build guesses from the window's height.
+- **Transitions** run on the Frame cycle's clock, keyed by node; a rebuilt tree starts its
+  nodes where they are.
+
+Numbers (Linux, dev build): a virtualized table of 10,000 rows sent whole every tick costs
+Krome 2.2 ms a frame (decode, the rows in view built again, layout); the game's side spends
+6.4 ms making the 437 KB document. Pictures in both themes: `kromedemo --demo --shots` and
+`kromescreens --demo --shots`.

@@ -66,7 +66,8 @@ typed at it).
   can sit in goldberg, a tool or a game without bringing Krome. `krome` links `kimb`, so a
   mistake is found by the same rules everywhere, and does not depend on `kim`.
 - **Lua for behaviour.** A prelude is markup and Lua; a screen's logic is a Lua function
-  that returns a tree. Lua is `modules/lua`, with the engine's math, so a handler's
+  that returns a tree. A widget's behaviour may also be C++, registered by a module
+  (`krome_behaviour`), with the same calls (slice 4). Lua is `modules/lua`, with the engine's math, so a handler's
   arithmetic is the same on every platform.
 - **Its own Lua.** Krome holds a Lua state of its own, separate from any other in the
   process. It talks to the rest of the engine, and to other Lua states, through events.
@@ -373,6 +374,13 @@ the model, a definition used with the wrong arguments: each names the line writt
    tabs, tree view, table with columns, scroll view, splitter, progress, badge, tooltip,
    menus, context menus, modal, on slice 1's overlays; virtualized `each`; focus order and shortcuts; transitions.
    *Done when* goldberg's five screens (below) can be written without a kernel change.
+   *As built*: they could not, quite. Writing std's widgets asked the kernel for a few
+   general hooks first (a behaviour's `update` drawing its `part`s, `pick` from what it
+   opened, `w:open_slot`; `if key=value`; `{@}` and `@@` for a definition's use's binding),
+   and the widgets and the five screens then found four kernel bugs (an ancestor's
+   `selected` reaching its descendants' looks, Enter in an edit with nothing to submit,
+   dotted paths in texts, braces in model values). After those, the five screens
+   (`examples/kromescreens`) needed nothing more.
 5. **Shapes.** The `vector` module, the shape asset, the SVG tool, Krome's shape cache; icons in the
    standard prelude.
 6. **Live.** Hot reload of screens, preludes, themes and shapes through goldberg and the

@@ -143,6 +143,7 @@ const char* expand(Build& b, const KromeFrame* fr, const char* text) {
         memcpy(key, p + 1, klen);
         key[klen] = 0;
         const char* value = nullptr;
+        bool from_model = false;
         char val[256];
         usize head = strcspn(key, ".");
         // {@}: the binding the definition's use was given, as the model shows it.
@@ -154,12 +155,16 @@ const char* expand(Build& b, const KromeFrame* fr, const char* text) {
                 char path[300];
                 format(path, sizeof path, "%s%s", f->path, key + head);
                 value = krome_model_path_text(b.s, b.sc, path, val, sizeof val);
+                from_model = true;
             } else if (f->def_file) {
                 for (u32 i = 0; i < f->params; ++i) if (!strcmp(f->names[i], key)) value = f->values[i];
                 break;
             }
         }
-        if (value) { for (; *value && n + 1 < sizeof out; ++value) out[n++] = *value; }
+        // A model value is text as it is: its braces doubled, so the fill shows them rather
+        // than reading them as keys. A parameter is markup, passed on as written.
+        if (value && from_model) { for (; *value && n + 2 < sizeof out; ++value) { if (*value == '{') out[n++] = '{'; out[n++] = *value; } }
+        else if (value) { for (; *value && n + 1 < sizeof out; ++value) out[n++] = *value; }
         else { for (const char* q = p; q <= end && n + 1 < sizeof out; ++q) out[n++] = *q; }
         p = end + 1;
     }
@@ -565,7 +570,7 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
             const char* text = expand(b, fr, raw);
             t.set_text(id, text);
             if (b.deps) deps_of(*b.deps, id, text);
-            else if (strchr(text, '{')) krome_fill_node(b.s, b.sc, t, id);
+            if (strchr(text, '{')) krome_fill_node(b.s, b.sc, t, id); // shown now: an escaped brace reads no key
         }
     }
     if (json_get(f.doc, n, "a")) error(b, fr, f.file, line, "a %s takes one content string", w);

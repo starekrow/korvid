@@ -1,0 +1,267 @@
+// goldberg's five screens (docs/PRDs/Krome-Slice-4-PRD.md, "The five screens"), on sample
+// models in the shapes goldberg has (screens.lua), out of krome/std. One screen, a page a
+// tab; the game (main.cc) plays a cook into the live status.
+
+use "krome/std"
+script "kromescreens/screens.lua"
+
+style link {
+    color=ring cursor=hand radius=3 pad=2,0 border=1 border-color=clear
+    hover { bg=item-hover }
+    focused { border-color=ring }
+}
+
+style state {
+    pad=6,1 radius=8 size=11 bg=off-bg
+}
+
+style section {
+    color=muted size=12
+}
+
+def kv label value {
+    row gap=8 w=fill {
+        text "{label}" w=110 color=muted
+        text "{value}" w=fill
+    }
+}
+
+screen screens {
+    col [page] {
+        row pad=16,8 bg=bar middle w=fill gap=16 {
+            heading "goldberg"
+            tabs {
+                tab "Inspect" id=page_inspect @page=inspect
+                tab "Diff" id=page_diff @page=diff
+                tab "Status" id=page_status @page=status
+                tab "Reports" id=page_reports @page=reports
+                tab "Rules" id=page_forms @page=forms
+            }
+            spacer
+            text "{note}" color=muted
+        }
+
+        // ---- inspection: an asset's upstream and downstream, and what governed it ----
+        if page=inspect {
+            row pad=16 w=fill h=fill {
+                tree w=@split h=fill {
+                    each n in graph height=22 {
+                        hit [tree-row] id="{n.id}" -> inspect_node dir=row tooltip="{n.path}" {
+                            box w=@n.indent h=1
+                            text "{n.arrow}" w=14 color=muted
+                            text "{n.name}"
+                            text "{n.edge}" color=muted size=11
+                        }
+                    }
+                }
+                splitter id=split @split
+                col gap=10 w=fill h=fill pad=8,0 {
+                    heading "{sel.name}"
+                    kv "Type" "{sel.type}"
+                    kv "Resolved" "{sel.path}"
+                    kv "Converter" "{sel.converter}"
+                    text "Parameters" [section]
+                    table {
+                        table-head {
+                            column "Parameter" id=col_param @pw.param
+                            column "Value" id=col_value @pw.value
+                            column "Rule" id=col_rule @pw.rule
+                        }
+                        each p in sel.params {
+                            row [table-row] {
+                                cell w=@pw.param { text "{p.name}" nowrap }
+                                cell w=@pw.value { text "{p.value}" nowrap }
+                                cell w=@pw.rule {
+                                    hit [link] id="rule_{p.n}" -> open_berg { text "{p.rule}" nowrap }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- diff review: the lockfile's re-routes, accepted or rejected ----
+        if page=diff {
+            col pad=16 gap=10 w=fill h=fill {
+                row gap=8 middle w=fill {
+                    text "{reroutes_left} re-routes to review; {accepted} accepted, {rejected} rejected" w=fill
+                    button "Accept all" id=accept_all -> ask_accept_all
+                    button "Reject all" id=reject_all -> ask_reject_all [danger]
+                }
+                table h=fill {
+                    table-head {
+                        column "Asset" id=col_asset @dw.asset
+                        column "Old route" id=col_old @dw.old
+                        column "New route" id=col_new @dw.new
+                        column "" id=col_act @dw.act
+                    }
+                    scroll-view h=fill pad=0 {
+                        each r in reroutes height=30 {
+                            row [table-row] h=30 {
+                                cell w=@dw.asset { text "{r.asset}" nowrap }
+                                cell w=@dw.old { text "{r.old}" color=muted nowrap }
+                                cell w=@dw.new { text "{r.new}" nowrap }
+                                cell w=@dw.act gap=6 {
+                                    if r.open {
+                                        button "Accept" id="accept_{r.n}" -> accept pad=8,2
+                                        button "Reject" id="reject_{r.n}" -> reject pad=8,2 [danger]
+                                    }
+                                    text "{r.verdict}" color=muted
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- live status: every step of a cook, as it runs ----
+        if page=status {
+            row pad=16 gap=16 w=fill h=fill {
+                col gap=10 w=fill h=fill {
+                    row gap=12 middle w=fill {
+                        text "{done} of {total} steps; {running} running; {failed} failed" w=fill
+                        text "{elapsed}" color=muted
+                    }
+                    progress @overall
+                    table h=fill {
+                        table-head {
+                            column "Step" id=col_step @sw.step
+                            column "Converter" id=col_conv @sw.conv
+                            column "State" id=col_state @sw.state
+                            column "Progress" id=col_prog @sw.prog
+                        }
+                        scroll-view h=fill pad=0 {
+                            each s in steps height=24 {
+                                row [table-row] {
+                                    cell w=@sw.step { text "{s.name}" nowrap }
+                                    cell w=@sw.conv { text "{s.conv}" color=muted nowrap }
+                                    cell w=@sw.state { box [state] { text "{s.state}" } }
+                                    cell w=@sw.prog { progress @s.pct }
+                                }
+                            }
+                        }
+                    }
+                }
+                col gap=8 w=220 {
+                    text "Connected" [section]
+                    col [list] gap=2 {
+                        each t in targets {
+                            row [list-row] gap=8 middle {
+                                text "{t.name}" w=fill
+                                text "{t.state}" color=muted size=12
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- reports: warnings in tabs, each a sortable, filterable table ----
+        if page=reports {
+            col pad=16 gap=10 w=fill h=fill {
+                row gap=12 middle w=fill {
+                    tabs {
+                        tab "Fallback matches" id=rep_fallback @report=fallback -> show_report
+                        tab "Out of pack" id=rep_outside @report=outside -> show_report
+                        tab "Budgets" id=rep_budgets @report=budgets -> show_report
+                    }
+                    spacer
+                    input id=filter @filter placeholder="Filter" change=filtered w=200
+                }
+                table h=fill {
+                    table-head {
+                        column "Asset" id=col_rasset @rw.asset
+                        column "Detail" id=col_rdetail @rw.detail
+                        column "Size" id=col_rsize @rw.size
+                    }
+                    scroll-view h=fill pad=0 {
+                        each w in shown height=24 {
+                            hit [table-row] dir=row id="{w.id}" -> pick_warning context=warning_menu {
+                                cell w=@rw.asset { text "{w.asset}" nowrap }
+                                cell w=@rw.detail { text "{w.detail}" color=muted nowrap }
+                                cell w=@rw.size { text "{w.size}" nowrap }
+                            }
+                        }
+                    }
+                }
+                text "{shown_count} of {report_count}; {picked_warning}" color=muted
+            }
+        }
+
+        // ---- forms: a .berg file's rules, the picked one edited ----
+        if page=forms {
+            row pad=16 gap=16 w=fill h=fill {
+                col gap=8 w=240 h=fill {
+                    text "{berg}" [section]
+                    col [list] gap=2 h=fill scroll {
+                        each r in rules {
+                            hit [list-row] id="{r.id}" -> pick_rule dir=row gap=8 {
+                                text "{r.match}" w=fill nowrap
+                                text "{r.type}" color=muted size=12
+                            }
+                        }
+                    }
+                }
+                col gap=12 w=fill {
+                    heading "Rule {form.n}"
+                    labeled "Pattern" { input id=f_match @form.match placeholder="*.png" }
+                    labeled "Type" {
+                        dropdown id=f_type @form.type {
+                            option "texture" id=texture
+                            option "sound" id=sound
+                            option "font" id=font
+                            option "script" id=script
+                            option "blob" id=blob
+                        }
+                    }
+                    labeled "Quality" {
+                        slider id=f_quality @form.quality 0..100 step=5
+                        text "{form.quality}" w=30
+                    }
+                    labeled "Options" {
+                        checkbox "Mipmaps" id=f_mips @form.mips
+                        checkbox "Runtime" id=f_runtime @form.runtime
+                    }
+                    labeled "Meta" { textarea id=f_meta @form.meta placeholder="Free text" }
+                    row gap=8 {
+                        button "Save" id=save -> save key="mod+s" tooltip="Ctrl+S"
+                        button "Revert" id=revert -> revert
+                        text "{form_state}" color=muted
+                    }
+                }
+            }
+        }
+    }
+}
+
+def labeled label {
+    row gap=12 middle w=fill {
+        text "{label}" w=80 color=muted
+        slot
+    }
+}
+
+screen berg {
+    dialog "{berg_shown}" {
+        col [list] w=fill pad=10 gap=2 {
+            each l in berg_lines {
+                text "{l.text}" nowrap size=12
+            }
+        }
+    }
+}
+
+screen confirm {
+    dialog "{confirm_title}" {
+        text "{confirm_text}" color=muted w=fill
+    }
+}
+
+screen warning_menu {
+    col [context-menu] {
+        menu-item "Inspect" id=inspect_warning -> inspect_warning
+        menu-item "Copy path" id=copy_warning -> copy_warning
+    }
+}

@@ -149,6 +149,7 @@ void advance(KromeModule& s, KromeScreen& sc) {
 // Phase Frame, main thread: documents that have landed, screens that can go a step
 // further, rebuilds asked for (a theme switch), and model values from outside.
 void krome_pump(TickContext& ctx) {
+    KV_ZONE("krome.pump");
     KromeModule& s = ctx.state_as<KromeModule>();
     s.ctx = &ctx;
     krome_pump_docs(s);
@@ -187,6 +188,7 @@ void krome_pump(TickContext& ctx) {
 // Presses, releases, the wheel and Escape come as events, so none is lost or counted twice
 // however frames and ticks fall; where the pointer is now comes from the raw state.
 void krome_input(TickContext& ctx) {
+    KV_ZONE("krome.input");
     KromeModule& s = ctx.state_as<KromeModule>();
     if (!s.input_id) s.input_id = ctx.resource_id("input.state"); // per engine: a static would outlive it
     const Input* in = ctx.resource<const Input>(s.input_id);
