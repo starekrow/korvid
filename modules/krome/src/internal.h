@@ -168,6 +168,9 @@ struct KromeShapeEntry {
     u32    page = 0, x = 0, y = 0;
     u64    used = 0;
 };
+// A large shape being rasterized on a task worker (shapes.cc): what it is, and the pixels it
+// is drawn into until it lands in a page.
+struct KromeShapeJob;
 
 // The edit that has the keyboard (docs/PRDs/Krome-Slice-3-PRD.md, "Krome"): one across
 // every screen. Its text is the buffer here while it has the focus, written back to the
@@ -230,6 +233,10 @@ struct KromeModule {
     Array<KromeShapeEntry> shape_entries;
     u64                 shape_clock = 0;
     u32                 shape_pages_made = 0, shapes_drawn = 0; // shapes_drawn: rasterizations, for the tests and the notes
+    Array<KromeShapeJob*>  shape_jobs;       // large shapes on their way, landed by krome_shapes_land
+    u32                 shape_jobs_run = 0, shapes_stood_in = 0; // jobs started; draws by another size or colour while one ran
+    usize               shape_own_budget = 64u << 20; // the bytes the large shapes' own pages may keep
+    u64                 shape_frame = 0;  // shape_clock when this frame began: a page used since is not freed
     // The pointer: where, what is under it, what took the press, what the buttons were.
     f32                 px = -1.0f, py = -1.0f;
     KromeTarget         under;    // the deepest node under the pointer
@@ -492,6 +499,11 @@ struct UiBox;
 // in a page yet. `current` is currentColor for a shape with colours of its own; a one-colour
 // shape is drawn white and the caller tints the box. False when it cannot.
 bool krome_shape_box(KromeModule& s, Renderer* r, const ShapeAsset& shape, Handle asset, u32 w, u32 h, color current, UiBox& box);
+// A shape of more than 256 x 256 pixels goes to a task worker of the platform's queue instead,
+// and the box is false (or another size or colour of the same shape, stretched, while it runs).
+// Once a frame, before the paint: the jobs that have finished, into their pages; true when one
+// landed.
+bool krome_shapes_land(KromeModule& s, Renderer* r);
 void krome_shapes_flush(KromeModule& s, Renderer* r); // the pages' changed rectangles, to the renderer
 void krome_shapes_free(KromeModule& s, Renderer* r);
 

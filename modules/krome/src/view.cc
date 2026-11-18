@@ -986,11 +986,15 @@ void krome_view_frame(KromeModule& s) {
         if (!f.ready && ready_font(s, &f)) { f.ready = true; landed = true; }
     for (KromeImage& i : s.images)
         if (!i.ready && image_done(s, &i)) { i.ready = true; landed = true; }
+    // A large shape a job has finished: its node draws now (its size was known all along).
+    if (krome_shapes_land(s, renderer_get(*s.e)))
+        for (KromeScreen* sc : s.screens) sc->repaint = true;
     // Something still on its way keeps a loop that paces on demand ticking until it lands.
     bool waiting = false;
     for (KromeFont& f : s.fonts) if (!f.ready && !f.asset.is_null()) waiting = true;
     for (KromeImage& i : s.images) if (!i.ready && !i.asset.is_null()) waiting = true;
     for (KromeScreen* sc : s.screens) if (sc->loading) waiting = true;
+    if (s.shape_jobs.len) waiting = true;
     if (waiting) engine_want_frame(*s.e);
     f32 W = s.win_w / s.scale, H = s.win_h / s.scale;
     KromeMeasure m{&s, measure_text, measure_image, measure_paragraph};

@@ -180,7 +180,8 @@ Nov 16, 2026. Notes on `patherizer`, the engine's path rasterizer, as Krome slic
   (`renderer_texture_update`); without a renderer (the tests) the pages are kept in memory
   all the same, so the cache can be tested by its pixels.
 - **When it rasterizes.** At paint, on the engine's thread, every size. The PRD puts a shape
-  over 256 x 256 on a job; M5's numbers say it is needed (below).
+  over 256 x 256 on a job; M5's numbers say it is needed (below), and it was built after
+  the close ("The job for large shapes").
 - **Colour transitions.** A coloured shape whose text colour is easing draws two boxes: the
   start colour's picture fading out and the end colour's fading in, smoothstep as the
   colours ease. Two pictures, not one per frame.
@@ -219,6 +220,34 @@ Nov 16, 2026. Notes on `patherizer`, the engine's path rasterizer, as Krome slic
   stalls the frame it first appears in.
 - **Paint order.** A shape is drawn over its node's own box (background, border, shadow),
   not under it: an icon with a `bg` showed only the background.
-- **Left open:** the job for large shapes (KP12); goldberg's `lenient` switch for the svg
+- **Left open:** the job for large shapes (KP12, built after: below); goldberg's `lenient` switch for the svg
   cook; icons for widgets std does not have yet (closable tabs and dialogs, sort arrows,
   badges with icons); reload, which is slice 6's rebind.
+
+## After the close: the job for large shapes
+
+KP12's job, built once M5's numbers said it was needed.
+
+- **Where it runs.** Core's jobs are a batch the caller waits for, so the job is a task on
+  the platform's I/O queue (`IoQueue::run_task`), whose workers Krome starts the first time
+  (two, lane 0). A loop that paces on demand already ticks while that queue has work pending
+  or completions unreaped, so nothing else keeps it awake, and the frame after a job
+  finishes, Krome reaps it (`krome_shapes_land`), copies its pixels into a page and paints
+  again.
+- **What it owns.** A shape of more than 256 x 256 pixels (by area) is copied for the job
+  (the asset may be reloaded or freed while it runs) and drawn into the job's own pixels;
+  nothing on the page is touched until it lands, so the pages stay the engine thread's.
+  Without task workers it is rasterized at paint as before.
+- **While it runs.** The node draws nothing the first time; when the same shape is already
+  drawn at another size or in this colour (a window being resized, a theme changed), that
+  picture is drawn stretched instead. A newer size in the same colour cancels the job on
+  its way (a resize asks for a size a frame), so at most the one running and the newest
+  are drawn. `krome_settled` waits for the jobs, so `--shots` pictures have them.
+- **Large pages are freed.** A shape past 512 pixels has a texture of its own; those were
+  never freed, which a resize would have made a page per size. They are kept to 64 MB
+  (`shape_own_budget`), the ones used longest ago freed first, their slots reused.
+- **Freeing** cancels what is under way and waits for it: a job's pixels are its worker's
+  until the completion is reaped.
+- **Tests and the demo.** krome_tests checks the deferred draw, one job per size, the
+  stand-in, a superseded size never kept, the budget, and a free with a job running.
+  kromedemo's Icons page has `settings` at 280 px, and `--demo` fails unless a job drew it.

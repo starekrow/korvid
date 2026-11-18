@@ -259,8 +259,11 @@ once, white, and tinted by the node's `color` times its `tint`, so hover, themes
 transitions recolour it without drawing it again. A shape with colours of its own is
 rasterized with `currentColor` as the node's `color`; while that colour eases, the two ends'
 pictures cross-fade. Pictures are kept in 1024 x 1024 pages by shape, size and colour (a
-shape past 512 pixels has its own texture; past 8 pages the one used longest ago is
-cleared). A path bound to the model (`image=@n.arrow`) may be `""`: no image. An image that
+shape past 512 pixels has its own texture, and those are kept to 64 MB; past 8 pages the one
+used longest ago is cleared). A shape of more than 256 x 256 pixels is rasterized on a task
+worker of the platform's I/O queue: its node draws nothing until it lands, or, when the same
+shape is already drawn at another size or colour (a window being resized), that picture
+stretched; `krome_stats` counts the jobs. A path bound to the model (`image=@n.arrow`) may be `""`: no image. An image that
 fails to load draws nothing and does not hold a screen unsettled.
 
 **Icons** (`krome/icons/<name>.svg`): Material Symbols, Outlined, weight 400, 20 px (Apache

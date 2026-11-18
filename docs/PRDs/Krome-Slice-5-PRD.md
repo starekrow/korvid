@@ -285,7 +285,7 @@ package ships it.
 | KP9 | `svg`: the subset above to a shape; every refusal names its file, line and element; `--lenient` | P0 |
 | KP10 | goldberg's `svg` built-in converter and `*.svg` in the conventions | P0 |
 | KP11 | Krome: `image=` takes a shape, measured by its view box, rasterized at the node's pixel size and the window's scale | P0 |
-| KP12 | Krome's shape cache: pages by shape, size and colour; large shapes on a job; still screens rasterize nothing; scale changes rasterize once | P0 |
+| KP12 | Krome's shape cache: pages by shape, size and colour; large shapes on a job; still screens rasterize nothing; scale changes rasterize once (as built: the job is a task on the platform's I/O queue, built after M5) | P0 |
 | KP13 | One-colour shapes rasterized once and tinted by `color`; coloured shapes keyed by colour, their transitions cross-faded | P0 |
 | KP14 | std's icons, Material Symbols vendored with their licence; std's definitions and kromescreens' tree use them | P1 |
 | KP15 | kvscript `kv.patherizer` and `kv.svg` | P2 |

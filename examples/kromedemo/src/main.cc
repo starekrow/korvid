@@ -291,6 +291,8 @@ void kromedemo_tick(TickContext& ctx) {
         break;
     }
     case Act::Quit:
+        // The Icons page's 280 px icon is rasterized on a job.
+        if (krome_stats(e).shape_jobs == 0) { KV_ERROR("kromedemo", "demo: no shape was rasterized on a job"); ++d.failures; }
         if (d.failures) KV_ERROR("kromedemo", "demo: %u checks failed", d.failures);
         else KV_INFO("kromedemo", "demo passed");
         break;

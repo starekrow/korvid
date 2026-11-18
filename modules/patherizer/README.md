@@ -90,7 +90,6 @@ On the Linux machine (dev build, -O2), `svg_tests --bench` (KP17):
 | `structure.svg` at 1000 x 1000 (17 nodes: groups, `use`, clips) | 15 ms |
 | `paint.svg` at 1000 x 1000 (12 nodes: gradients, opacity) | 48 ms |
 
-Icons cost nothing worth a job. A large illustration is one to three frames: rasterized on
-the engine's thread, as Krome does now, it stalls the frame it first appears in. The PRD's
-answer (a shape over 256 x 256 rasterized on a job, its node empty until it lands) is not
-built yet.
+Icons cost nothing worth a job. A large illustration is one to three frames, so Krome
+rasterizes a shape over 256 x 256 on a task worker, its node empty (or its last size
+stretched) until it lands, and the frame it first appears in is not stalled.

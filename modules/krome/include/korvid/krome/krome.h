@@ -148,7 +148,8 @@ struct KromeBehaviourDesc {
 bool krome_behaviour(Engine& e, const char* name, const KromeBehaviourDesc& desc);
 
 // What the view has done over the run: layouts, lists painted, lists handed to the renderer.
-struct KromeStats { u64 layouts = 0, paints = 0, submits = 0, fired = 0, script_errors = 0, rebuilt_regions = 0, rebuilt_nodes = 0; };
+// shapes: rasterizations of shape images; shape_jobs: of those, the large ones sent to a task worker.
+struct KromeStats { u64 layouts = 0, paints = 0, submits = 0, fired = 0, script_errors = 0, rebuilt_regions = 0, rebuilt_nodes = 0, shapes = 0, shape_jobs = 0; };
 KromeStats krome_stats(Engine& e);
 
 } // namespace kv

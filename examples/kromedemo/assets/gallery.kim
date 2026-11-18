@@ -117,17 +117,21 @@ screen gallery {
                 }
                 if tab=icons {
                     // std's icons (krome/icons, Material Symbols): at 16, 20 and 32 pixels,
-                    // tinted by the text colour, then the accent.
-                    scroll-view h=fill {
-                        each i in icons height=36 {
-                            row gap=12 middle w=fill {
-                                image image=@i.path w=16 h=16
-                                image image=@i.path w=20 h=20
-                                image image=@i.path w=32 h=32
-                                image image=@i.path w=32 h=32 color=accent
-                                text "{i.name}" color=muted
+                    // tinted by the text colour, then the accent. Beside them one at 280,
+                    // large enough to be rasterized on a job.
+                    row w=fill h=fill gap=12 {
+                        scroll-view w=fill h=fill {
+                            each i in icons height=36 {
+                                row gap=12 middle w=fill {
+                                    image image=@i.path w=16 h=16
+                                    image image=@i.path w=20 h=20
+                                    image image=@i.path w=32 h=32
+                                    image image=@i.path w=32 h=32 color=accent
+                                    text "{i.name}" color=muted
+                                }
                             }
                         }
+                        image image="krome/icons/settings.svg" w=280 h=280 color=accent
                     }
                 }
                 if tab=split {

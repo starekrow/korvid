@@ -2,7 +2,7 @@
 // are kept in memory all the same, so what is rasterized, when, and in which colour can be
 // read back. A shape is rasterized once per size; a one-colour shape once for every colour (in
 // white); a coloured one once per colour, with currentColor resolved to it; a large one has a
-// page of its own.
+// page of its own, and is rasterized on a task worker of the platform's queue.
 #include "../src/internal.h"
 #include "korvid/asset/module.h"
 #include "korvid/asset/shape.h"
@@ -10,7 +10,9 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/test.h"
+#include "korvid/core/time.h"
 #include "korvid/krome/krome.h"
+#include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/module.h"
 
@@ -39,6 +41,22 @@ const u8* pixel(KromeModule& s, u32 x, u32 y) {
     const KromeShapeEntry& e = s.shape_entries.last();
     const KromeShapePage& p = s.shape_pages[e.page];
     return p.rgba + ((usize)(e.y + y) * p.w + e.x + x) * 4;
+}
+
+// The jobs under way, landed: the platform's queue pumped as a frame would.
+bool land_all(KromeModule& s, Engine& e) {
+    for (f64 until = time_now() + 10.0; s.shape_jobs.len && time_now() < until;) {
+        platform_io(e)->pump();
+        krome_shapes_land(s, nullptr);
+        if (s.shape_jobs.len) time_sleep(0.001);
+    }
+    return s.shape_jobs.len == 0;
+}
+
+u32 entries_at(const KromeModule& s, u32 w, u32 h) {
+    u32 n = 0;
+    for (const KromeShapeEntry& e : s.shape_entries) if (e.w == w && e.h == h) ++n;
+    return n;
 }
 
 bool is(const u8* px, u8 r, u8 g, u8 b, u8 a) { return px[0] == r && px[1] == g && px[2] == b && px[3] == a; }
@@ -83,16 +101,45 @@ void test_shapes(kv::TestCtx& c) {
     const KromeShapeEntry& b = s.shape_entries[1];
     KV_CHECK(c, a.page == b.page && (a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y));
 
-    // Past 512 pixels a shape has a page of its own, its size.
-    krome_shape_box(s, nullptr, big, hb, 600, 300, color{1, 1, 1, 1}, box);
+    // Past 256 x 256 pixels a shape goes to a job: nothing drawn now, nothing to stand in for
+    // it, and asked for again while it runs, the same job.
+    u32 drawn = s.shapes_drawn;
+    color white{1, 1, 1, 1};
+    KV_CHECK(c, !krome_shape_box(s, nullptr, big, hb, 600, 300, white, box));
+    KV_CHECK(c, s.shape_jobs.len == 1 && s.shape_jobs_run == 1 && s.shapes_drawn == drawn && s.shapes_stood_in == 0);
+    krome_shape_box(s, nullptr, big, hb, 600, 300, white, box);
+    KV_CHECK(c, s.shape_jobs.len == 1 && s.shape_jobs_run == 1);
+    // Landed: past 512 pixels a page of its own, its size.
+    KV_CHECK(c, land_all(s, e) && s.shapes_drawn == drawn + 1);
     KV_CHECK(c, s.shape_pages.len == 2 && s.shape_pages[1].own && s.shape_pages[1].w == 600 && s.shape_pages[1].h == 300);
     KV_CHECK(c, is(pixel(s, 300, 150), 255, 255, 255, 255) && is(pixel(s, 10, 150), 0, 0, 0, 0)); // xMidYMid: a square, centred
+    krome_shape_box(s, nullptr, big, hb, 600, 300, white, box);
+    KV_CHECK(c, s.shape_jobs.len == 0 && s.shapes_drawn == drawn + 1);
+
+    // A new size while the old one is drawn: the old one stands in; a newer size still drops
+    // the one on its way, whose pixels are never kept.
+    krome_shape_box(s, nullptr, big, hb, 640, 320, white, box);
+    KV_CHECK(c, s.shape_jobs.len == 1 && s.shapes_stood_in == 1);
+    krome_shape_box(s, nullptr, big, hb, 700, 350, white, box);
+    KV_CHECK(c, s.shape_jobs.len == 2 && s.shape_jobs_run == 3 && s.shapes_stood_in == 2);
+    KV_CHECK(c, land_all(s, e) && entries_at(s, 640, 320) == 0 && entries_at(s, 700, 350) == 1);
+    KV_CHECK(c, s.shape_pages.len == 3 && s.shape_pages[2].w == 700);
+
+    // Past the large shapes' budget, the page used longest ago is freed and its slot reused.
+    s.shape_own_budget = 700 * 350 * 4 + 520 * 520 * 4;
+    krome_shape_box(s, nullptr, big, hb, 520, 520, white, box);
+    KV_CHECK(c, land_all(s, e) && entries_at(s, 600, 300) == 0 && entries_at(s, 700, 350) == 1 && entries_at(s, 520, 520) == 1);
+    KV_CHECK(c, s.shape_pages.len == 3 && s.shape_pages[1].w == 520 && s.shape_pages[1].own);
+
     // Without a renderer nothing is drawn, and nothing is a texture yet.
     KV_CHECK(c, !krome_shape_box(s, nullptr, mono, hm, 16, 16, color{1, 1, 1, 1}, box) && !box.textured);
     KV_CHECK(c, s.shape_pages[0].texture.is_null() && s.shape_pages[0].dirty);
 
+    // Freed with a job under way: it is waited for (the leak check at the end says it was freed).
+    krome_shape_box(s, nullptr, big, hb, 800, 400, white, box);
+    KV_CHECK(c, s.shape_jobs.len == 1);
     krome_shapes_free(s, nullptr);
-    KV_CHECK(c, s.shape_pages.len == 0 && s.shape_entries.len == 0);
+    KV_CHECK(c, s.shape_pages.len == 0 && s.shape_entries.len == 0 && s.shape_jobs.len == 0);
     mono.shape.free();
     coloured.shape.free();
     big.shape.free();

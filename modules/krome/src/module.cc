@@ -531,6 +531,7 @@ bool krome_settled(Engine& e) {
     }
     for (const KromeFont& f : s->fonts) if (!f.ready && !f.asset.is_null()) return false;
     for (const KromeImage& i : s->images) if (!i.ready && !i.asset.is_null()) return false;
+    if (s->shape_jobs.len) return false;
     return true;
 }
 
@@ -655,6 +656,7 @@ KromeStats krome_stats(Engine& e) {
         st.layouts = s->layouts; st.paints = s->paints; st.submits = s->submits;
         st.fired = s->fired; st.script_errors = s->script_errors;
         st.rebuilt_regions = s->rebuilt_regions; st.rebuilt_nodes = s->rebuilt_nodes;
+        st.shapes = s->shapes_drawn; st.shape_jobs = s->shape_jobs_run;
     }
     return st;
 }

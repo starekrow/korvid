@@ -389,8 +389,8 @@ the model, a definition used with the wrong arguments: each names the line writt
    standard prelude. Built (Krome-Slice-5-PRD.md; docs/design/patherizer.md has what each
    milestone found). The SVG tool is C++ (the `svg` module, in process in goldberg), not
    Lua; std's icons are Material Symbols. An icon rasterizes in microseconds; a 1000 px
-   illustration takes 14 to 48 ms, so large shapes need the job the slice PRD gives them
-   (not built at the slice's close; patherizer's README has the numbers).
+   illustration takes 14 to 48 ms, so a shape over 256 x 256 is rasterized on a task worker
+   of the platform's I/O queue (patherizer's README has the numbers).
 6. **Live.** Hot reload of screens, preludes, themes and shapes through goldberg and the
    asset module's rebind.
 
