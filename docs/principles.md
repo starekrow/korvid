@@ -1,10 +1,5 @@
 # Principles
 
-> **Draft.** These are read out of the code, the design records and the commit history,
-> not written by the project's author. They are here to be rewritten, reordered, merged
-> or struck out. Until the author has been through them, treat them as a description of
-> what the code does, not a statement of intent.
-
 These are the ideas Korvid is built on: why the engine looks the way it does. Every other
 document describes how something works. This one describes what the parts have in
 common, so that someone extending the engine (or deciding where to bend it) can make the
@@ -15,7 +10,7 @@ holds code to it. A principle with no cost isn't a choice. The costs, and the
 [tie-breaks](#when-principles-pull-apart) at the end, are what let you apply these to a
 case they don't mention.
 
-## 1. Same input, same game
+## 1. Deterministic behavior
 
 A run is a function of its starting state and its input. The same seed and the same
 input give the same state, tick for tick, on every platform, build and thread count.
@@ -43,7 +38,7 @@ Runs at `--threads 1` and `--threads 16` must agree. `--early-reads order` and
 and Work units can't write the sim: init refuses the declaration, and the context
 refuses the spawn ([cycles](concepts/cycles.md#the-rule-only-the-sim-writes-the-sim)).
 
-## 2. Declare, don't do
+## 2. Declarative stomps immediate
 
 A module says what it brings as data (its components, kinds, systems, events, resources,
 commands) in one `constinit` record. The engine reads every record once, at
@@ -68,7 +63,7 @@ module list.
 name in any table fails `engine_init` and names it. A component with an unknown field
 type fails to compile.
 
-## 3. The declaration is the contract
+## 3. Your declarations are a contract
 
 What a system says it reads and writes is the whole of what it may touch. The engine
 derives the order from those sets and refuses at startup anything that would race or
@@ -178,7 +173,7 @@ in dev.
 **How it is held.** Measurement. The scheduler's checks were timed in both builds before
 they were kept: ship paid nothing measurable ([docs/design/scheduler.md](design/scheduler.md)).
 
-## 8. Measure before believing
+## 8. Numbers or it didn't happen
 
 A design decision that claims to be fast, or cheap, or free comes with the numbers.
 Design records carry their measurements; commits say what was measured or found.
@@ -196,25 +191,40 @@ as standing benches.
 **How it is held.** By review and by habit: a performance claim without a number is a
 question, not a result.
 
-## 9. Few dependencies, owned
+## 9. Minimize dependencies, especially from outside
 
 The engine depends on a C++ compiler, the platform's graphics and windowing, and little
 else. What it needs beyond that (inflate, a Vorbis decoder, TrueType, XML, Lua) is
 vendored, pinned and compiled into the engine under its allocator and its math.
 
+Engine modules are selective in their dependencies, and an effort is made to arrange
+them in a natural hierarchy that will minimize rather than maximize dependency creep.
+If you just want to read and write images and work on the bytes yourself, you shouldn't
+end up with the entire rendering core attached to your little tool.
+
 **Why.** Builds that take seconds, run anywhere the compiler does, and never break
 because something upstream changed. Vendored code also obeys the other principles: its
-allocations are owned, and its math is deterministic.
+allocations are owned, and its math is deterministic. Inside the engine, a tool or a
+small game links only the modules it uses, so it builds fast and stays small, and a
+module can be understood with only its dependencies in view.
 
 **What it costs.** Upgrading a vendored library is a deliberate job (`vendor/UPGRADE.md`
-in the lua module). Some things are written here that a package would have provided.
+in the lua module). Some things are written here that a package would have provided. A
+module that wants a convenience from a higher layer does without it, or the piece moves
+down a layer; sometimes one idea becomes two modules, as `kimb` was split from `kim` so
+Krome's loader and the checker share its rules without either pulling in the other.
 
 **Where it shows.** `src/vendor/` in the [inflate](../modules/inflate/README.md),
 [xml](../modules/xml/README.md) and [lua](../modules/lua/README.md) modules. The
-[project README](../README.md#minimal-dependencies). kormake itself.
+[project README](../README.md#minimal-dependencies). kormake itself. Inside: `core`
+depends on nothing; [image](../modules/image/README.md) depends on `core` and `inflate`
+alone, so the `picture` tool handles images without the rendering core;
+[platform](../modules/platform/README.md) links no external library, so `kpack` needs
+nothing installed.
 
 **How it is held.** Review: a new external dependency is a design decision with its own
-record.
+record. Every `module.lua` lists its dependencies explicitly, an executable links only
+their closure, and kormake refuses cycles and missing modules.
 
 ## 10. Say it once
 

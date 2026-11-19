@@ -5,7 +5,7 @@ that would race or contradict itself at startup, and runs whatever is independen
 same time. This page covers the rules as they stand. The reasoning and the measurements
 behind them are in the design record, [docs/design/scheduler.md](../design/scheduler.md).
 
-**Principles:** [3. The declaration is the contract](../principles.md#3-the-declaration-is-the-contract), [1. Same input, same game](../principles.md#1-same-input-same-game), [5. Fail loudly, with names](../principles.md#5-fail-loudly-with-names)
+**Principles:** [3. Your declarations are a contract](../principles.md#3-your-declarations-are-a-contract), [1. Deterministic behavior](../principles.md#1-deterministic-behavior), [5. Fail loudly, with names](../principles.md#5-fail-loudly-with-names)
 
 ## Units and their sets
 

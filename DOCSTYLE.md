@@ -54,8 +54,8 @@ the why is never more than a link away.
   paragraph:
 
   ```
-  **Principles:** [3. The declaration is the contract](../principles.md#3-the-declaration-is-the-contract),
-  [1. Same input, same game](../principles.md#1-same-input-same-game)
+  **Principles:** [3. Your declarations are a contract](../principles.md#3-your-declarations-are-a-contract),
+  [1. Deterministic behavior](../principles.md#1-deterministic-behavior)
   ```
 
 - **Header file comments** say why in a sentence when a principle is the reason for the

@@ -6,7 +6,7 @@ three are scheduled by the same rules ([scheduling](scheduling.md)); they differ
 when they run and what they may change. The design record is
 [docs/design/cycles.md](../design/cycles.md).
 
-**Principles:** [1. Same input, same game](../principles.md#1-same-input-same-game), [3. The declaration is the contract](../principles.md#3-the-declaration-is-the-contract)
+**Principles:** [1. Deterministic behavior](../principles.md#1-deterministic-behavior), [3. Your declarations are a contract](../principles.md#3-your-declarations-are-a-contract)
 
 | cycle | phases | runs | for | in a replay |
 |---|---|---|---|---|
