@@ -12,8 +12,8 @@
 // Systems with no path between them share a level and run concurrently on the job pool.
 // How an early read gets its value is chosen per kind (EarlyReads): by running the reader
 // before the writers, or from a copy taken at the phase start. The values are the same
-// either way, so a game means the same whatever the choice. docs/design/scheduler.md has
-// the whole model.
+// either way, so a game means the same whatever the choice. docs/concepts/scheduling.md
+// has the rules; docs/design/scheduler.md has the design and its measurements.
 //
 // Every system and handler (a "unit") owns an event writer and a command buffer, and
 // each chunk of a parallel_for owns a pair of its own, merged into the unit's in chunk
@@ -36,7 +36,7 @@ struct TickContext;
 
 // Fixed order. Add phases here, never at runtime. The first four are the Sim cycle, a
 // tick; Frame and Work are cycles of their own, run when the loop asks
-// (docs/design/cycles.md): Frame once before each frame drawn, Work while there is work.
+// (docs/concepts/cycles.md): Frame once before each frame drawn, Work while there is work.
 enum class Phase : u8 {
     Input,   // sample devices into per-tick input state
     PreSim,  // snapshot previous state, advance timers
@@ -168,7 +168,7 @@ void command_append(CommandBuffer& cb, u32 resource_id, const void* record, u32 
 template <class T> struct RemoveConst          { typedef T type; static constexpr bool is_const = false; };
 template <class T> struct RemoveConst<const T> { typedef T type; static constexpr bool is_const = true; };
 
-// ---- the pieces behind the templates below; plain functions in phase.cc -------------
+// ---- internal: the pieces behind the templates below; plain functions in phase.cc ---
 // Each returns null (or false) after logging and, in dev builds, asserting, when the
 // system did not declare the access or the type does not match the schema.
 Table*  ctx_kind(TickContext& ctx, const char* kind, bool write);
@@ -214,6 +214,8 @@ struct ParallelBuffers {
 ParallelBuffers ctx_parallel_begin(TickContext& ctx, u32 chunks);
 const char*     ctx_unit_name(TickContext& ctx); // the running unit's name, for the profiler
 void            ctx_parallel_end(TickContext& ctx, ParallelBuffers& pb);
+
+// ---- the context: what a system or handler reaches the engine through ------------------
 
 // One kind's rows for a view: the live mask and every column the view named.
 struct KindRows {

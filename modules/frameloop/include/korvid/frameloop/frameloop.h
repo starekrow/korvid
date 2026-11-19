@@ -4,27 +4,15 @@
 // ExitRequested event and decides what to do about it; the loop ends when something
 // calls engine_request_quit.
 //
-// Command line, overriding the config: --run-seconds N, --quiet, --validation,
-// --no-validation, --no-vsync, --renderer auto|gpu|cpu, --borderless, --hitch-ms N, --hash (log the state hash
-// after every tick), --hash-systems (and after every system), --trace-events (print every
-// delivered event with its emitter; dev builds), --threads N (main thread included; 1 is
-// serial; the default is every core), --rate X (the developer's rate from the start, as the
-// CLI's `rate X`: a recorded run or a demo four times faster where nothing can type to the
-// CLI, an app on a phone), --early-reads order|snapshot|kind (every kind's
-// early reads ordered, every kind's from a snapshot, or as each kind says, the default:
-// the game is the same, the schedule is not), --profile FILE (a Chrome trace of every zone, mark
-// and counter), --prof-report (the top zones with every fps line); --hitch-ms also dumps
-// the hitching frame's zone tree. --screenshot FILE writes one presented frame as a binary
-// PPM, frame 90 unless --screenshot-frame N says otherwise; --check-sort reads the GPU
-// sort back every 30th frame and verifies it. --cli-port N listens for CLI sessions on
-// loopback; --cli-stdin reads commands from stdin even when it is a terminal (it always
-// does when stdin is not one). The Work cycle (engine_work, docs/design/cycles.md) gets the
-// time the renderer blocked for last frame less --idle-margin-ms (1.5 by default), or with
-// work pending until the frame's deadline; --no-idle gives it one cycle a frame and no more.
-// --capacity KIND=N (repeatable) sets a kind's capacity over the game's (EngineConfig);
-// --sprite-rows N the renderer's first sprite table size over the config's. The touchpad
-// (an on-screen gamepad) is on where the screen is touched; --touchpad turns it on with
-// the mouse as a finger, for trying a layout on the desktop.
+// One frame: platform_pump, engine_frame (the Sim ticks owed at 60 Hz, at most four),
+// engine_work (the Work cycle, in the slack the renderer measured, or until the frame's
+// deadline while work is pending), engine_frame_cycle, then the render, interpolated by
+// the clock's alpha. Pacing (below) decides whether a frame is drawn at all.
+//
+// The command line overrides the config: --size, --no-vsync, --renderer, --pacing,
+// --threads, --rate, --early-reads, --hash, --record, --replay, --profile, --screenshot,
+// the CLI's transports, the mounts and the rest. modules/frameloop/README.md has every
+// option; docs/guides/frame-loop-and-scheduling.md walks through a frame and a tick.
 #pragma once
 #include "korvid/core/engine.h"
 #include "korvid/math/color.h"
@@ -40,6 +28,8 @@ struct Engine;
 // woken at least four times a second (timers, the CLI). For a tool's window.
 enum class Pacing : u8 { Continuous, OnDemand };
 
+// The game's declaration: what frameloop_main opens and how it runs. Every field has a
+// default, so a config names only what it changes; the command line overrides some.
 struct FrameLoopConfig {
     const char* title      = "korvid";
     u32         width      = 1280;
@@ -68,10 +58,19 @@ struct FrameLoopConfig {
     Pacing      pacing = Pacing::Continuous;  // --pacing demand|continuous
 };
 
-enum class ExitReason : u8 { WindowClosed, Escape, Timer };
+// Why someone wants out. frameloop.exit (PreSim, Always) emits one ExitRequested per
+// reason per tick, paused or not; the game quits with engine_request_quit when it is
+// ready, or ignores it. Handle it in a handler or an Always system, so a pause cannot
+// hold it.
+enum class ExitReason : u8 {
+    WindowClosed, // CloseRequested arrived and exit_on_close is set
+    Escape,       // Escape is held and exit_on_escape is set
+    Timer,        // --run-seconds (or run_seconds) elapsed; once
+};
 struct ExitRequested { ExitReason reason; };
 
-// Parses argv over `config`, runs the engine and the loop, returns the process exit code.
+// Parses argv over `config`, runs the engine and the loop, returns the process exit code:
+// 0, 2 for a bad option, 1 for a failed engine_init. Call it once, from main.
 int frameloop_main(int argc, char** argv, const FrameLoopConfig& config);
 
 // The configuration in effect (config plus command line), once the module is up.

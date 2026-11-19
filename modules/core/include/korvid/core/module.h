@@ -5,11 +5,13 @@
 // Rules, stated once:
 //   1. Nothing runs before main. Every ModuleDesc and every table it points at is
 //      constinit; the compiler rejects anything that would need a dynamic initializer.
-//   2. The build generates the module list (testbed/src/modules.gen.cc stands in by hand),
-//      in dependency order. engine_init is the only thing that reads it.
+//   2. The build generates the module list (kormake, from module.lua's deps), in
+//      dependency order. engine_init is the only thing that reads it.
 //   3. Order is list order, then declaration order. Modules start in list order and stop
-//      in reverse. Event, component and kind ids are assigned in that order. Within a tick phase, systems run
-//      in module order, then in the order written in the module's table.
+//      in reverse. Event, component and kind ids are assigned in that order. Within a
+//      phase, the order of systems is solved from what they read and write
+//      (docs/concepts/scheduling.md); list order, then declaration order, breaks ties and
+//      numbers the units, which is the order their commands and events come out in.
 //   4. Ids live in zero-initialized slots that engine_init fills and engine_shutdown
 //      clears. Id 0 is invalid, so use before init or after shutdown asserts.
 //   5. Module state is engine-owned: it lives in the module's arena, which engine_init
@@ -73,8 +75,8 @@ struct ModuleDesc {
     Span<const ComponentDesc> components = {}; // schemas; the engine lays out storage from them
     Span<const KindDesc>      kinds      = {}; // entity tables the engine creates from those schemas
     Span<const ResourceDesc>  resources  = {};
-    Span<const SystemDesc>    systems    = {};
-    Span<const HandlerDesc>   handlers   = {}; // run at phase boundaries, on the events they subscribe to
+    Span<const SystemDesc>    systems    = {}; // code in a phase, with what it reads, writes, appends and emits
+    Span<const HandlerDesc>   handlers   = {}; // systems on one event type, scheduled in their phase, handed their batch
     Span<const TriggerDesc>   triggers   = {}; // state edges on component fields, as StateEdge events
     Span<const CliCommandDesc> commands  = {}; // what the CLI can be told; the cli module collects them
     Span<const CliMountDesc>   mounts    = {}; // the module's pieces of the CLI's filesystem

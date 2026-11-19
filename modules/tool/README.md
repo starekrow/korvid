@@ -21,9 +21,10 @@ the `main` such a tool needs and the rule for when it is done.
    The CLI never reads stdin in a tool: a build's pipes are not a session.
 4. Runs the request. Its lines go to stdout; a failure goes to stderr and the exit status
    is 2.
-5. Ticks the engine as fast as the work allows, with the Work cycle (`engine_work`,
-   `docs/design/cycles.md`) given 5 ms after each tick; a tool's work may be either (a tick waiting only on the disk sleeps
-   100 microseconds) until a system calls `tool_finish(e, code)`, or until `--max-ticks`.
+5. Ticks the engine as fast as the work allows, and gives the Work cycle (`engine_work`,
+   [cycles](../../docs/concepts/cycles.md)) 5 ms after each tick, until a system calls
+   `tool_finish(e, code)` or `--max-ticks` is reached. A tool's work may be in either
+   cycle. A tick waiting only on the disk sleeps 100 microseconds.
 6. Shuts the engine down. In debug and dev builds, memory still live after shutdown makes
    the exit status 3. kormake builds tools for the host in the host config (dev by
    default), so a tool a build runs makes the check too.
@@ -92,3 +93,17 @@ What the module registers with the engine: its state, nothing else.
 
 Argument parsing beyond the engine's flags (a command gets its words and parses them),
 progress bars, a daemon mode that keeps the engine up between requests.
+
+## Seen in
+
+Every tool in `tools/` except kormake: [kpack](../../tools/kpack/README.md) (I/O through
+the queue, one verb per command), [goldberg](../../tools/goldberg/README.md),
+[kbor](../../tools/kbor/README.md), [kimc](../../tools/kimc/README.md),
+[picture](../../tools/picture/README.md) and [kvscript](../../tools/kvscript/README.md).
+
+## See also
+
+- [Cycles](../../docs/concepts/cycles.md): the Sim and Work cycles a tool runs.
+- [frameloop](../frameloop/README.md): the loop for a program with a window, which a tool
+  with a window uses instead.
+- [platform](../platform/README.md): the I/O queue a tool reads and writes through.

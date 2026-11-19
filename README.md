@@ -1,5 +1,7 @@
 # Korvid
 
+**[Documentation: start here](docs/README.md)**
+
 Korvid is a multi-platform game engine with support for 2D accelerated graphics,
 audio, keyboard/mouse/gamepad inputs, resource packs, collision, a built-in CLI,
 and other niceties. It runs on Linux, Windows, macOS, iOS, and Android. Dependencies are

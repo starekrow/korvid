@@ -1,9 +1,10 @@
 # Modules, and how code flows through a tick
 
-The long version of two paragraphs in the README: what a module is and why the engine is
-built out of them, how to write one, and what the engine does with each thing a module
-declares when a tick runs. Read it once before writing a module; keep the README's quick
-reference open while typing.
+What a module is and why the engine is built out of them, how to write one, and what the
+engine does with each thing a module declares when a tick runs. Read it once before
+writing a module; keep [core's quick reference](../../modules/core/README.md#quick-reference)
+open while typing. [Scheduling](scheduling.md) and [cycles](cycles.md) are the short
+versions of the ordering rules and of when each phase runs.
 
 ## What a module is
 
@@ -84,7 +85,7 @@ never keep one across two engines in one process.
 ### The files
 
 A game lives in a directory of its own (`examples/<name>/` in this repository, or anywhere
-with a `korvid.config` above it naming the engine root: `tools/kormake/README.md`):
+with a `korvid.config` above it naming the engine root: [kormake's manual](../../tools/kormake/README.md)):
 
 ```
 mygame/
@@ -224,7 +225,7 @@ phase found them names the parts, `.npc.@alive, .npc.Actor, ^.npc.Transform2`
 (`kind.@alive` is the kind's liveness: `ctx.alive(h)` and `ctx.rows(kind)` read it). A
 system cannot read early what it writes itself, and one that reads early from a writer and also reads, as it stands, something
 that writer writes is refused unless the kind is a snapshot (below). The whole model is
-in `docs/design/scheduler.md`.
+in [scheduling](scheduling.md); the design record is [docs/design/scheduler.md](../design/scheduler.md).
 
 **Early reads, per kind.** `KindDesc::early_reads` says how a `^` read of the kind gets
 the phase's starting value. `EarlyReads::Order`, the default and nearly free, runs the
@@ -253,7 +254,7 @@ A module that has things worth looking at mounts them in the CLI's filesystem: a
 children of one directory), `describe` (one node) and `patch` (optional: set one). The
 asset module mounts `/materials`, `/textures`, `/fonts` and `/sounds`; the engine's own
 `/kinds`, `/systems`, `/clock` and the rest come with the cli module. See
-`docs/design/cli.md`. A command is for an action; a mount is for state.
+[docs/design/cli.md](../design/cli.md). A command is for an action; a mount is for state.
 
 ### Append resources
 
@@ -302,7 +303,7 @@ boundary: at the end of the phase that emits its event when its writes are the n
 phase's start (arcanum's level build), or at the start of the next phase, reading early
 (`^`) what that phase writes, when systems earlier in the emitting phase read what it
 writes (arcfire's hits, in PostSim). The scheduler refuses the wrong one by name.
-`docs/design/events.md` has the model.
+[docs/design/events.md](../design/events.md) has the model.
 
 ```cpp
 void on_hit(TickContext& ctx, Span<const RockHit> hits) {
@@ -451,7 +452,7 @@ which chunk. A worker's bare `mem_alloc` is charged to the module.
 **Between ticks.** `engine_frame` returns; the frame loop spends the frame's slack on
 the Work cycle (`engine_work`), runs the Frame cycle (`engine_frame_cycle`), then renders
 the world as of the last tick interpolated by the clock's alpha. Several ticks in one
-frame run back to back, each a full tick. `docs/design/cycles.md`.
+frame run back to back, each a full tick. [Cycles](cycles.md).
 
 ## What the rules buy
 

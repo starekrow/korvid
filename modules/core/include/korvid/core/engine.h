@@ -263,7 +263,7 @@ Table* engine_table_of(Engine& e, Handle h);
 Table* engine_table_now(Engine& e, u32 kind_id);
 Table* engine_table_of_now(Engine& e, Handle h);
 
-// The cycles outside the tick (docs/design/cycles.md). engine_frame_cycle runs the Frame
+// The cycles outside the tick (docs/concepts/cycles.md). engine_frame_cycle runs the Frame
 // phase once, `dt` the time since its last run: a loop calls it before each frame it
 // draws. engine_work runs Work cycles back to back while a unit of the last one said
 // ctx.more() and `budget` seconds last (at least one cycle), and returns the seconds it

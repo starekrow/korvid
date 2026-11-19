@@ -521,5 +521,5 @@ The 1.0 forms still work: `kormake build linux-debug`, `kormake test linux-dev c
 ## SEE ALSO
 
 `BUILDING.md` (bootstrap, internals, diagnosing a build), `docs/PRDs/Kormake-v1-Dev-PRD.md`,
-`docs/PRDs/Kormake-1.1-Dev-PRD.md`, `modules/core/MODULES.md` (writing an engine module),
+`docs/PRDs/Kormake-1.1-Dev-PRD.md`, `docs/concepts/modules.md` (writing an engine module),
 the root `README.md` (platform prerequisites), ninja(1).

@@ -93,7 +93,7 @@ Header `korvid/tilemap/tilemap.h`:
 | `MapObject` | record | `id`, `name`, `cls`, `x`, `y`, `width`, `height`, `rotation`, `gid`, `point`, `ellipse`, `layer`, `props` |
 | `MapTileset`, `MapTile`, `MapFrame` | records | tileset geometry, image path, `texture`, `material`; per-tile properties, collision rects, animation frames |
 | `MapProperty`, `MapPropType` | record, enum | `String`, `Int`, `Float`, `Bool`, `Color` (linear), `File`, `Object` |
-| `KV_TILE_FLIP_H`, `_V`, `_D`, `KV_TILE_GID_MASK` | constants | Tiled's flag bits |
+| `KV_TILE_FLIP_H`, `KV_TILE_FLIP_V`, `KV_TILE_FLIP_D`, `KV_TILE_GID_MASK` | constants | Tiled's flag bits |
 | `tilemap_load(e, path, scope)`, `tilemap_get(e, h)` | functions | the asset |
 | `TilemapPlace`, `tilemap_spawn(ctx, map, place)`, `tilemap_despawn`, `tilemap_instance_rows` | record, functions | instances |
 | `tilemap_layer_find`, `tilemap_object_find`, `tilemap_gid_at`, `tilemap_tileset_of`, `tilemap_tile_info` | functions | lookups |
