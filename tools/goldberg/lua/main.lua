@@ -10,6 +10,7 @@ local Session = require("session")
 local Rules = require("rules")
 local solve = require("solve")
 local explain = require("explain")
+local window = require("window")
 local Learn = require("learn")
 
 local json = kv.json
@@ -427,6 +428,10 @@ end
 
 function goldberg.tick(quiet)
     if not run then return end
+    if host.window() then
+        if not run.window then run.window = true; window.start(run) end
+        window.tick(run)
+    end
     poll_project()
     state_slice()
     local s = run.session
@@ -590,6 +595,19 @@ local function explain_now(words)
 end
 
 -- ---- commands -----------------------------------------------------------------------------------
+
+window.ask = function(words) return goldberg.ask(words) end
+
+-- The window's demo (goldberg --window --demo): the pilot in goldberg.cc asks, by this name.
+function goldberg_demo(what)
+    if not run then return "no session is running" end
+    return window.demo(run, what)
+end
+
+-- The window's presses (goldberg --window): window.lua turns them into the session's commands.
+function goldberg.ui_event(event, id, value)
+    window.event(run, event, id, value)
+end
 
 function goldberg.command(words)
     local verb = words[1]

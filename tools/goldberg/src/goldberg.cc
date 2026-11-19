@@ -38,6 +38,16 @@
 #include "korvid/platform/fs_watch.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/net.h"
+#include "korvid/core/json.h"
+#include "korvid/core/kbor.h"
+#include "korvid/core/phase.h"
+#include "korvid/frameloop/frameloop.h"
+#include "korvid/krome/krome.h"
+#include "korvid/platform_hid/events.h"
+#include "korvid/platform_hid/module.h"
+#include "korvid/platform_hid/host_window.h"
+#include "korvid/render/renderer.h"
+#include "korvid/cli/module.h"
 #include "korvid/platform/process.h"
 #include "korvid/script/script.h"
 #include "korvid/tool/tool.h"
@@ -224,7 +234,7 @@ struct Proc {
 struct Hold { u32 root; char prefix[kGbPath]; f64 settle; };
 struct Held { u8 kind; u32 root; char path[kGbPath]; f64 due; };
 
-struct Text { char* data; u32 len; };
+struct GbText { char* data; u32 len; };
 
 struct GoldbergState {
     Allocator*      general = nullptr;
@@ -262,7 +272,7 @@ struct GoldbergState {
     // The queue.
     Array<Pending>  pending;
     Array<char>     pending_text;
-    Array<Text>     texts;               // texts of the events now in rows
+    Array<GbText>   texts;               // texts of the events now in rows
     u32             seq = 0;
     Table*          events = nullptr;
     // Programs connected to a watch (docs/PRDs/Krome-Slice-6-PRD.md, "A program's connection to
@@ -278,7 +288,32 @@ struct GoldbergState {
     Array<Program*> programs;
     char            port_file[700] = {}; // <out>/.goldberg-port, while the listener is open
     u32             told = 0;            // lines sent to programs
+    // The window (--window): the session in the Work cycle, a Krome screen over it.
+    bool            window = false;
+    bool            quiet = true;        // the last pump found nothing left to do
+    f64             next_wake = 0.0;     // when the waker next says so anyway, while not quiet
+    Name            screen;              // the window's Krome screen
+    u64             ui_sets = 0;         // models sent to it
+    // goldberg's own UI, watched while the window is up (a headless child watch on goldberg's
+    // roots, unless the window's own session is that watch): saving window.kim reloads it.
+    Process         ui_child;
+    bool            ui_child_on = false;
+    char            ui_tree[600] = {};   // goldberg's own output tree (<exe>.assets)
+    bool            ui_checked = false;
 };
+
+// The watch of goldberg's own UI (below, with the window's systems).
+void drain_ui_child(GoldbergState& s);
+void stop_own_ui(GoldbergState& s);
+
+// The command line of a windowed run, as one CLI request; set by goldberg_window_main.
+char g_window_line[2048] = {};
+bool g_window_mode = false;
+// --demo: the pilot drives each page by pointer and keys and goldberg's Lua checks what each
+// shows against the session; --shots DIR keeps a picture of each page.
+bool        g_demo = false;
+const char* g_shots = nullptr;
+u32         g_demo_failures = 0;
 
 // Every program that said hello hears the line.
 void tell_programs(GoldbergState& s, const char* verb, const char* output) {
@@ -1066,7 +1101,7 @@ void fill_rows(GoldbergState& s) {
         e->size  = p.size;
         e->mtime = p.mtime;
         memcpy(e->hash, p.hash, 32);
-        if (p.text) { s.texts.push(Text{p.text, p.text_len}); e->text = s.texts.len; }
+        if (p.text) { s.texts.push(GbText{p.text, p.text_len}); e->text = s.texts.len; }
     }
     if (taken == s.pending.len) { s.pending.len = 0; s.pending_text.len = 0; }
     else {
@@ -1455,6 +1490,69 @@ int host_finish(lua_State* L) {
     Engine* e = (Engine*)lua_touserdata(L, -1);
     print_flush();
     tool_finish(*e, (int)luaL_optinteger(L, 1, 0));
+    if (s.window) engine_request_quit(*e); // the window closes with the session
+    return 0;
+}
+
+// host.ui_get(key): the window's model value at `key` as text (what a person typed or picked),
+// or nil.
+int host_ui_get(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    if (!s.window) return 0;
+    lua_getfield(L, LUA_REGISTRYINDEX, "goldberg.engine");
+    Engine& e = *(Engine*)lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    const char* v = krome_model_text(e, s.screen, luaL_checkstring(L, 1));
+    if (!v) return 0;
+    lua_pushstring(L, v);
+    return 1;
+}
+
+// host.clipboard(text): the system's clipboard, from the window.
+int host_clipboard(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    if (!s.window) return 0;
+    lua_getfield(L, LUA_REGISTRYINDEX, "goldberg.engine");
+    Engine& e = *(Engine*)lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    platform_clipboard_set(e, luaL_checkstring(L, 1));
+    return 0;
+}
+
+// host.window(): whether there is one to keep up to date. host.ui_ready(): whether its screen is
+// built, so that what is sent to it is kept (Krome drops a value for a screen still loading).
+int host_window(lua_State* L) { lua_pushboolean(L, state_of(L)->window); return 1; }
+int host_ui_ready(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    lua_getfield(L, LUA_REGISTRYINDEX, "goldberg.engine");
+    Engine& e = *(Engine*)lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    lua_pushboolean(L, s.window && krome_ready(e, s.screen));
+    return 1;
+}
+
+// host.ui_set(key, json): a model value of the window's screen, as JSON text: a table or a
+// list is sent as KBOR (krome_set_doc), a string or a number as itself.
+int host_ui_set(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    if (!s.window) return 0;
+    const char* key = luaL_checkstring(L, 1);
+    lua_getfield(L, LUA_REGISTRYINDEX, "goldberg.engine");
+    Engine& e = *(Engine*)lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    if (lua_type(L, 2) == LUA_TNUMBER) { krome_set(e, s.screen, key, (f64)lua_tonumber(L, 2)); ++s.ui_sets; return 0; }
+    if (lua_type(L, 2) == LUA_TBOOLEAN) { krome_set_bool(e, s.screen, key, lua_toboolean(L, 2)); ++s.ui_sets; return 0; }
+    size_t len = 0;
+    const char* text = luaL_checklstring(L, 2, &len);
+    if (!lua_toboolean(L, 3)) { krome_set(e, s.screen, key, text); ++s.ui_sets; return 0; } // a plain string
+    MemScope scope;
+    JsonDoc doc;
+    if (!json_parse(text, len, mem_scratch(), doc)) return luaL_error(L, "ui_set %s: %s", key, doc.error);
+    Array<u8> k{};
+    kbor_write(doc, k);
+    krome_set_doc(e, s.screen, key, k.data, k.len);
+    k.free();
+    ++s.ui_sets;
     return 0;
 }
 
@@ -1465,7 +1563,8 @@ constexpr luaL_Reg k_host[] = {
     {"run", host_run}, {"clear_work", host_clear_work}, {"remove_work", host_remove_work},
     {"glob", host_glob}, {"glob_path", host_glob_path}, {"print", host_print}, {"warn", host_warn},
     {"now", host_now}, {"zone", host_zone}, {"zone_end", host_zone_end}, {"cwd", host_cwd}, {"active", host_active}, {"share", host_share}, {"finish", host_finish},
-    {"listen", host_listen}, {"programs", host_programs}, {nullptr, nullptr},
+    {"listen", host_listen}, {"programs", host_programs}, {"window", host_window}, {"ui_ready", host_ui_ready}, {"ui_set", host_ui_set}, {"ui_get", host_ui_get},
+    {"clipboard", host_clipboard}, {nullptr, nullptr},
 };
 
 // The application's directory: tools/goldberg/lua beside this source, unless told
@@ -1581,7 +1680,7 @@ void push_event(lua_State* L, GoldbergState& s, const GbEvent& ev) {
         lua_setfield(L, -2, "code");
     }
     if ((ev.kind == EvCookFailed || ev.kind == EvStepExit) && ev.text) {
-        const Text& t = s.texts.data[ev.text - 1];
+        const GbText& t = s.texts.data[ev.text - 1];
         lua_pushlstring(L, t.data, t.len);
         lua_setfield(L, -2, "text");
     }
@@ -1597,14 +1696,17 @@ void push_event(lua_State* L, GoldbergState& s, const GbEvent& ev) {
         lua_pushlstring(L, hex, 64);
         lua_setfield(L, -2, "hash");
         if (ev.text) {
-            const Text& t = s.texts.data[ev.text - 1];
+            const GbText& t = s.texts.data[ev.text - 1];
             lua_pushlstring(L, t.data, t.len);
             lua_setfield(L, -2, "text");
         }
     }
 }
 
-void pump(TickContext& ctx) {
+// One pass of the session. `work`: in the window's Work cycle, where the frame loop paces and
+// nothing here sleeps; it says ctx.more() while it found something to do, and the waker
+// (goldberg_wake) brings the cycle back when the sources have more.
+void pump_body(TickContext& ctx, bool work) {
     Engine& e = *ctx.engine;
     GoldbergState& s = ctx.state_as<GoldbergState>();
     if (s.failed) return;
@@ -1673,13 +1775,14 @@ void pump(TickContext& ctx) {
         sort(order.data, order.len, sizeof(Handle), seq_cmp, &cmp);
         KV_ZONE("goldberg.events to lua");
         for (Handle h : order) {
-            if (budget > 0 && delivered && time_now() - tick_start >= budget) break;
+            if (!work && budget > 0 && delivered && time_now() - tick_start >= budget) break;
+            if (work && delivered && ctx.time_left() <= 0.0) break;
             GbEvent* ev = s.events->get<GbEvent>(h);
             if (!s.failed) {
                 push_event(L, s, *ev);
                 if (call_app(s, e, "event", 1, 0)) ++delivered;
             }
-            if (ev->text) { Text& t = s.texts.data[ev->text - 1]; mem_free(t.data); t.data = nullptr; }
+            if (ev->text) { GbText& t = s.texts.data[ev->text - 1]; mem_free(t.data); t.data = nullptr; }
             s.events->destroy(h);
         }
         order.free();
@@ -1699,8 +1802,13 @@ void pump(TickContext& ctx) {
     }
     // A converter still running, or a file of its still settling, is something left.
     bool quiet = idle && !s.runs && !s.held.len;
+    s.quiet = quiet;
     lua_pushboolean(L, quiet);
     { KV_ZONE("goldberg.lua tick"); call_app(s, e, "tick", 1, 0); }
+    if (work) {
+        if (!idle || s.events->live() || s.pending.len) ctx.more();
+        return;
+    }
     if (s.active && idle) time_sleep(0.002); // nothing to do this tick: do not spin
     else if (s.active && s.share < 1.0) {
         // Headless, nothing paces the ticks: a session with less than all of each sleeps
@@ -1766,7 +1874,31 @@ void cmd_replay(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, ar
 void cmd_touch(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "touch"); }
 void cmd_learn(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "learn"); }
 
-bool goldberg_startup(Engine&, ModuleInstance& self) {
+// The window's waker (engine_add_waker), asked at each of the frame loop's polls while it is
+// idle: the watcher's news taken, programs served, and true (with the Work cycle asked for)
+// when anything came, a run finished, or, while the session is not quiet, every 50 ms (a file
+// settling, a step held).
+bool goldberg_wake(Engine& e, void* user) {
+    GoldbergState& s = *(GoldbergState*)user;
+    if (!s.active || s.failed) return false;
+    bool any = false;
+    if (s.watcher.is_open())
+        for (const FsEvent& ev : s.watcher.poll()) {
+            u32 root = ~0u;
+            for (u32 i = 0; i < s.roots.len; ++i) if (s.roots.data[i].watch == ev.root) root = i;
+            if (root == ~0u || strlen(ev.path) >= kGbPath) continue;
+            if (take_fs_event(s, fs_kind(ev.kind), root, ev.path)) any = true;
+        }
+    serve_programs(s);
+    drain_ui_child(s);
+    if (s.pending.len || s.io.completions().len || (s.events && s.events->live())) any = true;
+    f64 now = time_now();
+    if (!s.quiet && now >= s.next_wake) { s.next_wake = now + 0.05; any = true; }
+    if (any) e.work_pending = true;
+    return any;
+}
+
+bool goldberg_startup(Engine& e, ModuleInstance& self) {
     GoldbergState* s = arena_push<GoldbergState>(self.arena);
     if (!s) return false;
     s->general = &self.general;
@@ -1788,12 +1920,25 @@ bool goldberg_startup(Engine&, ModuleInstance& self) {
     }
     find_lua_dir(*s);
     self.set_state(s);
+    if (g_window_mode) {
+        // The window: its screen, then the session the command line asked for, in Work.
+        s->window = true;
+        s->screen = krome_open(e, "goldberg/ui/window.kimb", "window");
+        engine_add_waker(e, goldberg_wake, s);
+        e.work_pending = true; // the request runs in the first Work cycle, once the module is up
+    }
     return true;
 }
 
-void goldberg_shutdown(Engine&, ModuleInstance& self) {
+void goldberg_shutdown(Engine& e, ModuleInstance& self) {
     GoldbergState* s = self.state_as<GoldbergState>();
     if (!s) return;
+    if (s->window) {
+        engine_remove_waker(e, goldberg_wake, s);
+        stop_own_ui(*s);
+        // Ended some other way than by its close (the CLI's quit, a signal): the state saved.
+        if (s->active && s->L && !s->failed) call_app(*s, e, "quit", 0, 0);
+    }
     // The queue first: running converters are killed, the rest never start, and then
     // what was handed to it can go.
     if (s->io_ready) s->io.free();
@@ -1810,7 +1955,7 @@ void goldberg_shutdown(Engine&, ModuleInstance& self) {
     s->holds.free();
     s->held.free();
     for (Pending& p : s->pending) if (p.text) mem_free(p.text);
-    for (Text& t : s->texts) mem_free(t.data);
+    for (GbText& t : s->texts) mem_free(t.data);
     s->command.free();
     s->roots.free();
     s->scan.free();
@@ -1835,8 +1980,234 @@ constinit const CliCommandDesc k_commands[] = {
     {.name = "cook", .help = "cook: look at every file again, with the whole of each tick, until stable", .fn = cmd_cook},
     {.name = "goldberg replay", .help = "goldberg replay LOG [--dump FILE]: feed a recorded event log to a fresh session, with no file system under it", .fn = cmd_replay},
 };
+void pump(TickContext& ctx) { if (!ctx.state_as<GoldbergState>().window) pump_body(ctx, false); }
+
+void sink_line(void*, const char* line) { print("%s\n", line); print_flush(); }
+
+// The UI watch's output, passed on a line at a time (and its pipes kept from filling).
+void drain_ui_child(GoldbergState& s) {
+    if (!s.ui_child_on) return;
+    char buf[2048];
+    for (i32 n; (n = s.ui_child.read_out(buf, sizeof buf - 1)) > 0;) { buf[n] = 0; print("%s", buf); print_flush(); }
+    for (i32 n; (n = s.ui_child.read_err(buf, sizeof buf - 1)) > 0;) { buf[n] = 0; print_err("%s", buf); }
+}
+
+// goldberg's own UI watched, so that a save of window.kim reloads the window (asset_live, which
+// goldberg links, reads <its tree>/.goldberg-port). The window's session is that watch when its
+// output tree is goldberg's own; else a headless child watch on goldberg's roots is started.
+void watch_own_ui(GoldbergState& s) {
+    char exe_dir[600], path[700];
+    if (!platform_exe_dir(exe_dir, sizeof exe_dir)) return;
+    format(path, sizeof path, "%sgoldberg.assets", exe_dir);
+    IoBytes b;
+    if (!io_read_now(path, &b)) return;
+    usize n = 0;
+    while (n < b.size && n + 1 < sizeof s.ui_tree && b.data[n] != '\n' && b.data[n] != '\r') { s.ui_tree[n] = (char)b.data[n]; ++n; }
+    s.ui_tree[n] = 0;
+    b.free();
+    while (n && s.ui_tree[n - 1] == '/') s.ui_tree[--n] = 0;
+    char out[600];
+    format(out, sizeof out, "%s", s.out_dir);
+    usize o = strlen(out);
+    while (o && out[o - 1] == '/') out[--o] = 0;
+    if (!strcmp(out, s.ui_tree)) return; // this session cooks goldberg's UI already
+    static char roots[700], exe[700];
+    format(roots, sizeof roots, "%s../goldberg/goldberg.roots", exe_dir);
+    if (!io_is_file(roots)) { print_err("goldberg: no %s: the window will not reload its own screens\n", roots); return; }
+    format(exe, sizeof exe, "%sgoldberg", exe_dir);
+    static const char* argv[] = {exe, "watch", "--roots", roots, "--quiet"};
+    ProcessDesc d;
+    d.argv = Span<const char* const>(argv, KV_COUNTOF(argv));
+    if (!s.ui_child.spawn(d)) { print_err("goldberg: could not start the watch of its own UI\n"); return; }
+    s.ui_child_on = true;
+}
+
+void stop_own_ui(GoldbergState& s) {
+    if (!s.ui_child_on) return;
+    drain_ui_child(s);
+    s.ui_child.kill();
+    s.ui_child.free();
+    s.ui_child_on = false;
+    char port[700];
+    format(port, sizeof port, "%s/.goldberg-port", s.ui_tree);
+    io_remove(port); // the child could not take it away itself
+}
+void work(TickContext& ctx) {
+    GoldbergState& s = ctx.state_as<GoldbergState>();
+    if (!s.window) return;
+    if (g_window_line[0]) {
+        // The command line's request, as tool_main runs it: once, now that the module is up.
+        char line[sizeof g_window_line];
+        memcpy(line, g_window_line, sizeof line);
+        g_window_line[0] = 0;
+        if (!cli_run(*ctx.engine, line, sink_line, nullptr)) { s.failed = true; engine_request_quit(*ctx.engine); return; }
+        ctx.more();
+        return;
+    }
+    drain_ui_child(s);
+    pump_body(ctx, true);
+    if (s.active && !s.ui_checked) { s.ui_checked = true; watch_own_ui(s); } // the session is up: its tree is known
+}
+
+// The window's presses, to the Lua: goldberg.ui_event(event, node id, value).
+void ui_events(TickContext& ctx) {
+    GoldbergState& s = ctx.state_as<GoldbergState>();
+    if (!s.window || !s.L || s.failed) return;
+    for (const KromeEvent& ev : ctx.received<KromeEvent>()) {
+        if (ev.screen != s.screen.hash) continue;
+        lua_pushstring(s.L, name_str(Name{ev.event}));
+        const char* node = ev.node ? name_str(Name{ev.node}) : nullptr;
+        if (node) lua_pushstring(s.L, node);
+        else lua_pushnil(s.L);
+        lua_pushnumber(s.L, ev.value);
+        call_app(s, *ctx.engine, "ui_event", 3, 0);
+    }
+}
+
+// ---- the pilot (--demo) ---------------------------------------------------------------------------
+
+enum class Act : u8 { Stable, Click, ClickLua, Type, TypeLua, Check, Shot, Theme, Wait, Quit };
+struct Step { Act act; const char* arg; };
+
+// Each page in turn. A Check is goldberg's Lua comparing what the window was sent with what the
+// session says (window.lua, M.demo); a ClickLua presses the node the Lua names.
+constinit const Step k_pilot[] = {
+    {Act::Stable, nullptr},
+    {Act::Check, "status"},
+    {Act::Shot, "status"},
+    {Act::Click, "page_inspect"},
+    {Act::Click, "files_filter"},
+    {Act::TypeLua, "query"},
+    {Act::Wait, nullptr},
+    {Act::Check, "files"},
+    {Act::ClickLua, "first_file"},
+    {Act::Wait, nullptr},
+    {Act::Check, "inspect"},
+    {Act::Shot, "inspect"},
+    {Act::Click, "page_reports"},
+    {Act::Wait, nullptr},
+    {Act::Check, "reports"},
+    {Act::Shot, "reports"},
+    {Act::Theme, "light"},
+    {Act::Click, "page_status"},
+    {Act::Wait, nullptr},
+    {Act::Shot, "status_light"},
+    {Act::Quit, nullptr},
+};
+
+struct Pilot { u32 step = 0, wait = 0, phase = 0, settled = 0; f64 since = 0; };
+Pilot g_pilot;
+
+bool aim(Engine& e, Name screen, const char* id, f32* x, f32* y) {
+    rect2 r;
+    if (!krome_find_rect(e, screen, id, &r)) return false;
+    HostWindow* w = platform_window(e);
+    f32 k = w && w->pixel_scale() > 0.0f ? w->pixel_scale() : 1.0f;
+    *x = (r.x + r.w * 0.5f) * k;
+    *y = (r.y + r.h * 0.5f) * k;
+    return true;
+}
+
+// goldberg.demo(what) in the Lua: "" when it holds, else what did not.
+const char* ask_demo(GoldbergState& s, Engine& e, const char* what) {
+    static char answer[400];
+    answer[0] = 0;
+    lua_getglobal(s.L, "goldberg_demo");
+    if (!lua_isfunction(s.L, -1)) { lua_pop(s.L, 1); return "no goldberg_demo in the Lua"; }
+    lua_pushstring(s.L, what);
+    if (lua_pcall(s.L, 1, 1, 0) != LUA_OK) { format(answer, sizeof answer, "%s", lua_tostring(s.L, -1)); lua_pop(s.L, 1); return answer; }
+    format(answer, sizeof answer, "%s", lua_isstring(s.L, -1) ? lua_tostring(s.L, -1) : "");
+    lua_pop(s.L, 1);
+    (void)e;
+    return answer;
+}
+
+void fail_demo(const char* step, const char* why) {
+    ++g_demo_failures;
+    print_err("goldberg: demo: %s: %s\n", step, why);
+}
+
+// Phase PreSim, main thread, with --demo: a step every few ticks, once the screen is built.
+void pilot(TickContext& ctx) {
+    Engine& e = *ctx.engine;
+    GoldbergState& s = ctx.state_as<GoldbergState>();
+    if (!g_demo || !s.window || !s.L || !krome_ready(e, s.screen)) return;
+    engine_want_frame(e);
+    Pilot& p = g_pilot;
+    if (p.wait) { --p.wait; return; }
+    if (p.step >= KV_COUNTOF(k_pilot)) return;
+    const Step& st = k_pilot[p.step];
+    f32 x = 0, y = 0;
+    switch (st.act) {
+    case Act::Stable: {
+        if (p.since == 0) p.since = time_now();
+        const char* state = krome_model_text(e, s.screen, "state");
+        if (!(s.quiet && state && !strcmp(state, "stable"))) {
+            if (time_now() - p.since > 60.0) { fail_demo("stable", "the session did not go stable in a minute"); break; }
+            return;
+        }
+        break;
+    }
+    case Act::Click:
+    case Act::ClickLua: {
+        char id[400];
+        if (st.act == Act::ClickLua) format(id, sizeof id, "%s", ask_demo(s, e, st.arg));
+        else format(id, sizeof id, "%s", st.arg);
+        if (!id[0] || !aim(e, s.screen, id, &x, &y)) { fail_demo(st.arg, "nothing to press on the screen"); break; }
+        input_pointer_override(e, x, y, p.phase == 1 ? 1 : 0);
+        if (++p.phase < 3) { p.wait = 1; return; }
+        p.phase = 0;
+        break;
+    }
+    case Act::Type: input_text_override(e, st.arg); break;
+    case Act::TypeLua: input_text_override(e, ask_demo(s, e, st.arg)); break;
+    case Act::Wait: p.wait = 30; break;
+    case Act::Check: {
+        const char* why = ask_demo(s, e, st.arg);
+        if (why[0]) fail_demo(st.arg, why);
+        break;
+    }
+    case Act::Shot:
+        if (g_shots) {
+            if (!krome_settled(e)) { p.settled = 0; return; }
+            if (p.settled++ < 3) return;
+            p.settled = 0;
+            char path[700];
+            format(path, sizeof path, "%s/goldberg_%s.ppm", g_shots, st.arg);
+            if (Renderer* r = renderer_get(e)) renderer_screenshot(r, path);
+        }
+        break;
+    case Act::Theme: krome_theme(e, st.arg); break;
+    case Act::Quit:
+        if (g_demo_failures) print_err("goldberg: demo: %u checks failed\n", g_demo_failures);
+        else { print("goldberg: window demo passed\n"); print_flush(); }
+        if (s.active) call_app(s, e, "quit", 0, 0);
+        engine_request_quit(e);
+        break;
+    }
+    ++p.step;
+    p.wait = 6;
+}
+
+// The window closed: the session saves its state and the run ends, as `quit` does.
+void window_closed(TickContext& ctx, Span<const ExitRequested>) {
+    GoldbergState& s = ctx.state_as<GoldbergState>();
+    if (s.active && s.L) call_app(s, *ctx.engine, "quit", 0, 0);
+    engine_request_quit(*ctx.engine);
+}
+
 constinit const SystemDesc k_systems[] = {
     {.name = ".pump", .phase = Phase::PreSim, .fn = pump, .writes = "goldberg.event, goldberg.file, goldberg.berg, goldberg.step", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".work", .phase = Phase::Work, .fn = work, .writes = "goldberg.event, goldberg.file, goldberg.berg, goldberg.step", .main_thread = true},
+    {.name = ".ui", .phase = Phase::Sim, .fn = ui_events, .reads = "KromeEvent", .main_thread = true},
+    {.name = ".pilot", .phase = Phase::PreSim, .fn = pilot, .before = "krome.input", .main_thread = true, .runs = RunWhen::Always},
+};
+// Headless (a cook, a watch with no window): no Krome, so nothing reads its events.
+constinit const SystemDesc k_headless_systems[] = {
+    {.name = ".pump", .phase = Phase::PreSim, .fn = pump, .writes = "goldberg.event, goldberg.file, goldberg.berg, goldberg.step", .main_thread = true, .runs = RunWhen::Always},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".exit", KV_ON(ExitRequested, window_closed), .phase = Phase::PreSim},
 };
 
 } // namespace
@@ -1846,10 +2217,77 @@ KV_MODULE_DEFINE(goldberg_module) = {
     .components = k_components,
     .kinds      = k_kinds,
     .systems    = k_systems,
+    .handlers   = k_handlers,
     .commands   = k_commands,
     .startup    = goldberg_startup,
     .shutdown   = goldberg_shutdown,
     .memory     = {.reserve = 256 * 1024},
 };
+
+constinit const ModuleDesc goldberg_headless_module = {
+    .name       = "goldberg",
+    .components = k_components,
+    .kinds      = k_kinds,
+    .systems    = k_headless_systems,
+    .commands   = k_commands,
+    .startup    = goldberg_startup,
+    .shutdown   = goldberg_shutdown,
+    .memory     = {.reserve = 256 * 1024},
+};
+
+// ---- the window's program -----------------------------------------------------------------------
+
+bool goldberg_wants_window(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) if (!strcmp(argv[i], "--window")) return true;
+    return false;
+}
+
+namespace {
+constinit const FrameLoopConfig k_window_config = {
+    .title          = "goldberg",
+    .width          = 1200,
+    .height         = 760,
+    .cpu_scale      = 1,       // a tool's window: sharp text on the CPU renderer
+    .exit_on_escape = false,   // Escape closes Krome's overlays
+    .pacing         = Pacing::OnDemand,
+};
+} // namespace
+
+// The frame loop under goldberg: the command line (less --window, and goldberg's own options
+// before the command, which become the frame loop's where it has them) is one CLI request,
+// run when the goldberg module starts, as tool_main runs it.
+int goldberg_window_main(int argc, char** argv) {
+    const char* loop_argv[16] = {argv[0]};
+    int loop_argc = 1;
+    int first = 1;
+    for (; first < argc && !strncmp(argv[first], "--", 2); ++first) {
+        if (!strcmp(argv[first], "--window")) continue;
+        if (!strcmp(argv[first], "--cli-port") && first + 1 < argc && loop_argc + 2 < 16) { loop_argv[loop_argc++] = argv[first]; loop_argv[loop_argc++] = argv[++first]; continue; }
+        if ((!strcmp(argv[first], "--threads") || !strcmp(argv[first], "--max-ticks")) && first + 1 < argc) { ++first; continue; }
+        if (!strcmp(argv[first], "--verbose")) continue; // the tool's, with nothing to do in a window
+        if (!strcmp(argv[first], "--demo")) { g_demo = true; continue; }
+        if (!strcmp(argv[first], "--shots") && first + 1 < argc) { g_shots = argv[++first]; continue; }
+        // The rest are the frame loop's (--screenshot FILE, --size WxH, --renderer cpu, ...).
+        static const char* const valued[] = {"--screenshot", "--screenshot-frame", "--screenshot-tick", "--renderer", "--size", "--run-seconds",
+                                             "--pacing", "--profile", "--cpu-scale", "--cpu-shaders"};
+        bool takes = false;
+        for (const char* v : valued) if (!strcmp(argv[first], v)) takes = true;
+        if (loop_argc + 2 < 16) {
+            loop_argv[loop_argc++] = argv[first];
+            if (takes && first + 1 < argc) loop_argv[loop_argc++] = argv[++first];
+        }
+    }
+    if (loop_argc + 1 < 16) loop_argv[loop_argc++] = "--cli-stdin"; // `status`, `explain` and the rest typed at it
+    usize at = (usize)format(g_window_line, sizeof g_window_line, "goldberg");
+    for (int i = first; i < argc && at < sizeof g_window_line; ++i) {
+        if (!strcmp(argv[i], "--window")) continue;
+        bool quote = strchr(argv[i], ' ') || strchr(argv[i], '\t') || !argv[i][0];
+        at += (usize)format(g_window_line + at, sizeof g_window_line - at, " %s%s%s", quote ? "\"" : "", argv[i], quote ? "\"" : "");
+    }
+    g_window_mode = true;
+    if (g_shots) io_make_dirs(g_shots);
+    int code = frameloop_main(loop_argc, (char**)loop_argv, k_window_config);
+    return code ? code : g_demo_failures ? 1 : 0;
+}
 
 } // namespace kv

@@ -14,6 +14,7 @@ goldberg clean   --out DIR [--state FILE]
 goldberg clean attic --out DIR
 goldberg replay  LOG [--dump FILE]
 goldberg [--cli-port N] [--threads N] [--verbose] <command> ...
+goldberg [--demo] [--shots DIR] watch ... --window
 ```
 
 ## Description
@@ -77,6 +78,35 @@ at exit). A dev build that links `asset_live` finds it there, says `hello NAME C
 then told `changed PATH` after each output lands in the tree (renamed into place whole) and
 `removed PATH` after one leaves it; it reloads what it holds (`asset_reload`). `status` lists
 them, one `program` line each.
+
+**watch --window** is the same watch with a window over it (Krome; `docs/PRDs/Krome-Slice-6-PRD.md`,
+"goldberg's window"). The session runs in the frame loop's Work cycle, between frames, and a
+still window over a stable session sleeps. Its pages:
+
+- **Status**: stable or working, the counts, every step with its converter, state and output
+  (a file a converter made is named by its source), the programs connected, Cook again.
+- **Inspect**: any file, found by typing; its answer as `explain` gives it, each value with the
+  rule that set it; what made it (and the preludes a screen uses), what it makes, where it lands.
+- **Reports**: failures and soft warnings, filtered and sorted; a right press on one inspects it,
+  looks at it again, or copies its key.
+
+A press on a file anywhere inspects it. `status`, `explain` and the rest still answer on stdin
+and on `--cli-port`. The window's screens are goldberg's own assets (`assets/ui/window.kim`,
+out of `krome/std`), which kormake cooks after goldberg is built. While the window is up a
+headless `goldberg watch` on goldberg's own roots runs beside it (unless the window's session
+is that watch), and the window reloads them (`asset_live`): saving `window.kim` changes the
+open window. Options before the command go to the frame loop (`--screenshot FILE`,
+`--size WxH`, `--renderer cpu`); `--demo` drives every page by pointer and keys and checks
+each against the session ("goldberg: window demo passed", exit 1 otherwise), and `--shots DIR`
+keeps a picture of each:
+
+```
+goldberg watch --roots build/linux-dev/goldberg/arcfire.roots --window
+goldberg --demo --shots /tmp/shots watch --roots build/linux-dev/goldberg/arcfire.roots --window
+```
+
+Without `--window` none of the window's modules (platform_hid, the renderers, Krome, the frame
+loop) is started, so a cook runs where there is no display.
 
 **explain** solves files on the spot and says, for each, its type, the metadata a
 converter would be given, the path of converters, whether it lands and where, and for

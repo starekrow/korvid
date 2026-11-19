@@ -684,6 +684,8 @@ const char* krome_model_text(Engine& e, Name screen, const char* key) {
     KromeModule* s = krome_state(e);
     KromeScreen* sc = s ? krome_screen(*s, screen) : nullptr;
     if (!sc) return "";
+    // A dotted path ("sel.key") as a screen's texts read one.
+    if (key && strchr(key, '.')) return krome_model_path_text(*s, *sc, key, s->text, sizeof s->text);
     return krome_model_value_text(*s, *sc, key, s->text, sizeof s->text);
 }
 

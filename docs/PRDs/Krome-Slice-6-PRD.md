@@ -439,3 +439,34 @@ the renderers (Open, above).
   (a session reads no files itself, so they arrive as the run's event), kept in the state with
   the step, and the preludes' hashes are in the screen's step key.
 
+**Milestone 4, The window** (Nov 18). `goldberg watch --window`, Status, Inspect and Reports
+over the live session, the window editing itself, and `--demo` (KL21's first part) passing on
+arcfire's, kromedemo's, kromescreens' and goldberg's own trees. Different from the shape, or
+found on the way:
+
+- **goldberg cooks its own UI with a child, not a second session.** The host holds one session's
+  roots, output tree and watcher; two sessions in it was a rewrite of the host. When the
+  window's session is not on goldberg's own tree, a headless `goldberg watch` on goldberg's roots
+  runs beside it, and goldberg links `asset_live` and reloads through it like any program (on
+  goldberg's own tree, the window's session is that watch, and it connects to itself). A save of
+  `window.kim` reached the open window in 10.6 ms. kormake cooks goldberg's UI at build, which is
+  the "cooks its own UI first".
+- **kormake had a cycle**: a program's link waits for its cook, and goldberg is what cooks. The
+  cook tool's own cook now follows its build (`tools/kormake/BUILDING.md`).
+- **Two descriptions of the goldberg module.** Headless, the tool loop starts `platform`, `cli`,
+  `tool` and `goldberg_headless_module`, which has no system reading `KromeEvent` (a type that
+  does not exist without Krome); the window starts every module and the full one. A cook with no
+  display works.
+- **The session in Work, woken by a waker.** In the window, goldberg's pump is a Work unit that
+  says more while it has events; `engine_add_waker` (milestone 3's) brings the cycle back when
+  the watcher, a run or a program has something, and every 50 ms while the session is not quiet.
+- **The CLI request runs in the first Work cycle**, since a module's command cannot run in its
+  own startup (it is not up yet).
+- **Models go as JSON made into KBOR**, each sent only when its text changed; Krome drops a
+  value sent to a screen still loading, so nothing goes until it is built; a string longer than
+  `KromeSet`'s 56 bytes goes as a document. What a person typed is read back from Krome's model
+  (`krome_model_text`, which now reads dotted paths too).
+- **Diff and Rules are milestone 5's.**
+- kormake's own tests (`tools/kormake/tests/run.sh`) fail on binding defines in their expected
+  output, the same with and without this slice: not looked at here.
+

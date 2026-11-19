@@ -246,6 +246,9 @@ or `FAILED:` come from Ninja and the compiler.
   does not link the library. Check `kormake graph NAME`.
 - *An include not found*: a module sees only its own `include/` and those of its closure.
   Add the dependency; do not add a path.
+- *The cook tool's own assets.* A program's link waits for its cooked assets, and the cook
+  edge runs the cook tool, so the cook tool (goldberg, whose window has screens) would wait for
+  itself. Its cook is built after it instead, as part of the default build.
 - *Host instances.* In `linux-debug`, `linux-ship` and cross builds, tools build a second
   time under `host/`, with the host toolchain's flags. An error in `host/obj/...` is that
   build. `kormake` prints the host tools it will run, together with the system libraries

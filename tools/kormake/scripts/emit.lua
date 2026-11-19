@@ -540,7 +540,7 @@ function M.run(c, g, opts)
         if not known[v] then util.fail("%s: cook: {%s} is not {roots}, {stamp}, {tree}, {program}, {in}, {name} or {out}", ck.file, v) end
       end
     end
-    spec = { args = {}, implicit = {} }
+    spec = { args = {}, implicit = {}, tool = words[1] }
     for i = 2, #words do spec.args[#spec.args + 1] = words[i] end
     spec.per_root = ck.text:find("{in}", 1, true) or ck.text:find("{name}", 1, true) or ck.text:find("{out}", 1, true)
     spec.stamps = ck.text:find("{stamp}", 1, true) ~= nil
@@ -800,10 +800,15 @@ function M.run(c, g, opts)
       elseif output == "exe" then
         local li = link_inputs(inst)
         inst.extlibs = li.extlibs
-        -- Its assets, cooked: building the program builds what it reads.
+        -- Its assets, cooked: building the program builds what it reads. The cook tool's own
+        -- (goldberg's window) cook after it is built, with it: its cook edge runs it, so the
+        -- program cannot wait for that cook as every other does.
         local cook_stamp, tree = cook(inst, exe_name(inst), true)
         inst.assets_tree = tree
-        if cook_stamp then li.staged[#li.staged + 1] = cook_stamp end
+        local cooks_itself = cook_stamp and spec and spec.tool == inst.module.name
+        if cooks_itself then
+          if inst.in_roots then all[#all + 1] = cook_stamp end
+        elseif cook_stamp then li.staged[#li.staged + 1] = cook_stamp end
         local file, app_ldflags = exe_file(inst)
         local exe = pre .. "bin/" .. file
         link(inst, exe, objs, li, app_ldflags)

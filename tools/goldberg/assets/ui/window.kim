@@ -1,0 +1,159 @@
+// goldberg's window (docs/PRDs/Krome-Slice-6-PRD.md, "goldberg's window"), out of krome/std: the
+// running session's status, a file's answer, its failures and warnings. goldberg's Lua
+// (tools/goldberg/lua/window.lua) sends every model and takes every press; window.lua beside
+// this file holds only what the look starts with. Saved while `goldberg watch --window` runs,
+// this file is cooked and reloaded like any other.
+
+use "krome/std"
+script "goldberg/ui/window.lua"
+
+style section {
+    color=muted size=12
+}
+
+style state {
+    pad=8,2 radius=9 size=11 bg=off-bg
+}
+
+style link {
+    color=ring cursor=hand radius=3 pad=2,0 border=1 border-color=clear
+    hover { bg=item-hover }
+    focused { border-color=ring }
+}
+
+screen window {
+    col [page] {
+        row pad=16,8 bg=bar middle w=fill gap=16 {
+            heading "goldberg"
+            text "{game}" color=muted
+            tabs {
+                tab "Status" id=page_status @page=status
+                tab "Inspect" id=page_inspect @page=inspect
+                tab "Reports" id=page_reports @page=reports
+            }
+            spacer
+            box [state] { text "{state}" }
+        }
+
+        // ---- Status: the session as it runs, every step, the programs reloading from it ----
+        if page=status {
+            row pad=16 gap=16 w=fill h=fill {
+                col gap=10 w=fill h=fill {
+                    row gap=12 middle w=fill {
+                        text "{summary}" w=fill
+                        text "{steps_count}" color=muted
+                    }
+                    table h=fill {
+                        table-head {
+                            column "File" id=col_skey @sw.key
+                            column "Converter" id=col_sconv @sw.conv
+                            column "State" id=col_sstate @sw.state
+                            column "Output" id=col_sout @sw.out
+                        }
+                        scroll-view h=fill pad=0 {
+                            each s in steps height=24 {
+                                hit [table-row] dir=row id="{s.key}" -> inspect tooltip="{s.err}" {
+                                    cell w=@sw.key { text "{s.name}" nowrap }
+                                    cell w=@sw.conv { text "{s.conv}" color=muted nowrap }
+                                    cell w=@sw.state { box [state] { text "{s.state}" } }
+                                    cell w=@sw.out { text "{s.output}" color=muted nowrap }
+                                }
+                            }
+                        }
+                    }
+                }
+                col gap=8 w=260 {
+                    text "Programs" [section]
+                    col [list] gap=2 {
+                        each p in programs {
+                            row [list-row] gap=8 middle { text "{p.name}" w=fill }
+                        }
+                    }
+                    text "{programs_none}" color=muted size=12 w=fill
+                    spacer
+                    button "Cook again" id=cook -> cook tooltip="Every file looked at again, as a cook would"
+                }
+            }
+        }
+
+        // ---- Inspect: any file's answer, what made it and what it makes ----
+        if page=inspect {
+            row pad=16 w=fill h=fill {
+                col gap=8 w=@split h=fill {
+                    input id=files_filter @files_filter placeholder="Find a file" change=files_filter
+                    scroll-view h=fill pad=0 {
+                        each f in files height=22 {
+                            hit [list-row] dir=row id="{f.key}" -> inspect { text "{f.key}" nowrap }
+                        }
+                    }
+                    text "{files_count}" color=muted size=12
+                }
+                splitter id=split @split
+                col gap=10 w=fill h=fill pad=8,0 {
+                    heading "{sel.key}"
+                    text "{sel.state}" color=muted
+                    text "{sel.none}" color=muted
+                    col gap=4 w=fill {
+                        each r in sel.rows {
+                            row gap=8 w=fill {
+                                text "{r.label}" w=80 color=muted
+                                text "{r.value}" w=fill
+                                text "{r.why}" color=muted size=12 w=fill
+                            }
+                        }
+                    }
+                    text "Made from, and uses" [section]
+                    col gap=2 {
+                        each u in sel.up { hit [link] id="{u.key}" -> inspect { text "{u.key}" nowrap } }
+                    }
+                    text "Makes" [section]
+                    col gap=2 {
+                        each d in sel.down { hit [link] id="{d.key}" -> inspect { text "{d.key}" nowrap } }
+                        text "{sel.lands}" color=muted
+                    }
+                    row gap=8 {
+                        button "Look again" id=touch -> touch tooltip="As if the file had been saved"
+                    }
+                }
+            }
+        }
+
+        // ---- Reports: the session's failures and soft warnings ----
+        if page=reports {
+            col pad=16 gap=10 w=fill h=fill {
+                row gap=12 middle w=fill {
+                    tabs {
+                        tab "Failures" id=rep_failed @report=failed -> report
+                        tab "Warnings" id=rep_warned @report=warned -> report
+                    }
+                    text "{failed_count} failed, {warned_count} warned" color=muted
+                    spacer
+                    input id=report_filter @report_filter placeholder="Filter" change=report_filter w=220
+                }
+                table h=fill {
+                    table-head {
+                        column "File" id=col_file @rw.file
+                        column "What" id=col_what @rw.what
+                    }
+                    scroll-view h=fill pad=0 {
+                        each w in shown height=24 {
+                            hit [table-row] dir=row id="{w.key}" -> inspect context=report_menu tooltip="{w.what}" {
+                                cell w=@rw.file { text "{w.key}" nowrap }
+                                cell w=@rw.what { text "{w.what}" color=muted nowrap }
+                            }
+                        }
+                    }
+                }
+                text "{shown_count}" color=muted
+            }
+        }
+    }
+}
+
+screen report_menu {
+    col [context-menu] {
+        menu-item "Inspect" id=menu_inspect -> menu_inspect
+        menu-item "Look again" id=menu_touch -> menu_touch
+        menu-item "Copy the key" id=menu_copy -> menu_copy
+    }
+}

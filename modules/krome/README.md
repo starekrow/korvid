@@ -250,7 +250,7 @@ Header `korvid/krome/krome.h`:
 | `krome_open(e, script, layer)`, `krome_open_source(e, name, source, layer)` | functions | a screen from a script; its name |
 | `krome_close`, `krome_ready`, `krome_tree`, `krome_find`, `krome_find_rect` | functions | the screen and its nodes |
 | `krome_set(e, screen, key, value)`, `krome_set_bool`, `krome_set_doc(e, screen, key, kbor, size)` | functions | a model value from C++; a list or table as KBOR |
-| `krome_model_text(e, screen, key)` | function | a model value as text shows it |
+| `krome_model_text(e, screen, key)` | function | a model value as text shows it; a dotted path (`sel.key`) as a text reads one |
 | `krome_press(e, screen, id)` | function | a node's binding and event, as a press would fire them |
 | `krome_theme(e, name)`, `krome_current_theme(e, screen)` | functions | every screen in a theme; the one a screen is in |
 | `krome_provide(e, path, data, size)` | function | a file's bytes from memory, in place of reading it; given again, a reload |
