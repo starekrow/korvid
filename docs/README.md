@@ -17,7 +17,8 @@ is this" to the exact function you need. Every page links one level deeper.
    uses everything once. [rocks](../examples/rocks/README.md) is a whole game written the
    way the engine likes.
 
-After that, look up what you want to do in [tasks](tasks.md).
+After that, look up what you want to do in [tasks](tasks.md). When you want to know why
+the engine is built the way it is, read the [principles](principles.md).
 
 ## Find your way
 
@@ -29,7 +30,8 @@ After that, look up what you want to do in [tasks](tasks.md).
 | one module in depth | its page in the [catalog](#modules) below; its headers have the detail |
 | working code | [Examples](#examples) |
 | a command-line tool | [Tools](#tools) |
-| why something is the way it is | [Design records](design/) (dated) and [plans](PRDs/) |
+| why the engine is built this way | [Principles](principles.md) |
+| why one part is the way it is | [Design records](design/) (dated) and [plans](PRDs/) |
 | to write or fix these docs | [DOCSTYLE.md](../DOCSTYLE.md) |
 
 ## Modules

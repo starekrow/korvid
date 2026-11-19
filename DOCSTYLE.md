@@ -15,6 +15,7 @@ Each kind of document answers one kind of question and lives in one place.
 
 | layer | answers | where | tense and shape |
 |---|---|---|---|
+| Principles | why is it built this way? | [docs/principles.md](docs/principles.md) | the author's: each principle with its reason, its cost, where it shows, how it is held |
 | Landing page | where do I start? | [docs/README.md](docs/README.md) | a reading path, then a map of everything |
 | Tasks | how do I…? | [docs/tasks.md](docs/tasks.md) | one line per task, linking to a guide, a module and a symbol |
 | Guides | walk me through doing X | `docs/guides/` | second person, built around one real example, ends with where to go next |
@@ -40,6 +41,39 @@ reader can always go one level deeper from where they are.
 by the project's author. Docs work leaves it alone, except for its platform build
 instructions. It links once to [docs/README.md](docs/README.md), and everything else
 hangs from there.
+
+## Principles
+
+[docs/principles.md](docs/principles.md) states what the engine is built on: each
+principle with its reason, what it costs, where it shows up and how the engine holds
+code to it, and the order they win in when two pull apart. Everything else in the docs
+describes how; the principles say why, and the rest of the docs point back to them so
+the why is never more than a link away.
+
+- **Concept pages** name the principles they serve, on one line after the opening
+  paragraph:
+
+  ```
+  **Principles:** [3. The declaration is the contract](../principles.md#3-the-declaration-is-the-contract),
+  [1. Same input, same game](../principles.md#1-same-input-same-game)
+  ```
+
+- **Header file comments** say why in a sentence when a principle is the reason for the
+  design, and cite it by number and name: `(docs/principles.md, 6: plain data at every
+  boundary)`. Not every header needs one. Cite it where a reader would otherwise ask "why
+  not just...?".
+- **Module pages** cite a principle in "How it works" or "Behaviour worth knowing" where
+  it explains a surprise (why `audio_play` returns a reservation, why a cosmetic kind
+  can't be read by a sim system).
+- **Design records** say near the top which principle they defend or trade off, and when a
+  trade-off is made, what was measured.
+- **A change that breaks a principle** gets a design record first, saying which one, why,
+  and what it costs. Then either the change or the principle changes, on purpose.
+
+The principles page is the author's, like the top-level README. Others propose changes
+to it (a principle missing, a cost understated, a tie-break that has stopped holding),
+and the author decides. AI assistants never edit its wording unless asked to; they cite
+it, and say so when a change they are asked for would break it.
 
 ## Hints
 
@@ -241,7 +275,8 @@ reference. Match it:
   tools/doccheck.sh --module frameloop   # also: public names missing from the quick reference
   ```
 
-- **For AI assistants:** read this file and the page you are changing before you edit.
+- **For AI assistants:** read this file, [docs/principles.md](docs/principles.md), and the
+  page you are changing before you edit.
   Build a quick reference from the header as it is now, not from memory or from another
   page. Never edit the top-level `README.md` beyond its platform build instructions. When
   a fact has a home elsewhere, link to it.

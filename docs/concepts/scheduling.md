@@ -5,6 +5,8 @@ that would race or contradict itself at startup, and runs whatever is independen
 same time. This page covers the rules as they stand. The reasoning and the measurements
 behind them are in the design record, [docs/design/scheduler.md](../design/scheduler.md).
 
+**Principles:** [3. The declaration is the contract](../principles.md#3-the-declaration-is-the-contract), [1. Same input, same game](../principles.md#1-same-input-same-game), [5. Fail loudly, with names](../principles.md#5-fail-loudly-with-names)
+
 ## Units and their sets
 
 A **unit** is a system (`SystemDesc`) or a handler (`HandlerDesc`). Each one lives in one

@@ -6,6 +6,8 @@ three are scheduled by the same rules ([scheduling](scheduling.md)); they differ
 when they run and what they may change. The design record is
 [docs/design/cycles.md](../design/cycles.md).
 
+**Principles:** [1. Same input, same game](../principles.md#1-same-input-same-game), [3. The declaration is the contract](../principles.md#3-the-declaration-is-the-contract)
+
 | cycle | phases | runs | for | in a replay |
 |---|---|---|---|---|
 | **Sim** | `Input`, `PreSim`, `Sim`, `PostSim` | 0 to 4 times a frame, at a fixed 60 Hz | the simulation: gameplay, physics, rules | yes: recorded, hashed, held by a pause |

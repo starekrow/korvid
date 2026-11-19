@@ -6,6 +6,8 @@ writing a module; keep [core's quick reference](../../modules/core/README.md#qui
 open while typing. [Scheduling](scheduling.md) and [cycles](cycles.md) are the short
 versions of the ordering rules and of when each phase runs.
 
+**Principles:** [2. Declare, don't do](../principles.md#2-declare-dont-do), [3. The declaration is the contract](../principles.md#3-the-declaration-is-the-contract), [4. Every byte has an owner](../principles.md#4-every-byte-has-an-owner), [6. Plain data at every boundary](../principles.md#6-plain-data-at-every-boundary)
+
 ## What a module is
 
 Modules are the top-level structure of the code. Everything above core is one: the
