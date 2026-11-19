@@ -60,16 +60,31 @@ struct KromeRegion {
     u32               first = 0, want = 0, len = 0;
 };
 
+// One reading of a .kimb: its nodes and strings, and the file over them. A reload makes a
+// new one; the one it replaces is kept (KromeModule::retired) until no screen built from it
+// is left, since trees, regions and scopes point into it (docs/PRDs/Krome-Slice-6-PRD.md).
+struct KromeDocVersion {
+    Arena    arena;
+    KimbFile file;
+    u64      retired_at = 0;  // KromeModule::epoch when a newer one took its place
+    u32      owner = 0;       // the one screen whose tree can point into it (a Lua screen's own); 0: any
+};
+
 // A file Krome reads: a .kimb (a screen's, or a prelude a `use` names) or a script a
-// `script` line names. Read once through the I/O queue, or taken from what krome_provide
-// gave, and kept: a theme switch rebuilds from the documents, never from the disk.
+// `script` line names. Read as a blob asset (so it reloads when its file does), or taken
+// from what krome_provide gave, and kept: a theme switch rebuilds from the documents, never
+// from the disk.
 struct KromeDoc {
     Name     path;            // the asset path read ("kromedemo/form.kimb", "kromedemo/form.lua")
     bool     script = false;  // a Lua source, not a .kimb
-    Handle   io;
+    Handle   blob;            // the asset its bytes come from; null while given from memory
+    u32      generation = 0;  // the blob's generation taken
+    u32      provided = 0;    // the krome_provide generation taken (0: not given)
     bool     loading = true, ready = false, failed = false;
-    Arena    arena;           // the document's nodes and strings
-    KimbFile file;
+    bool     changed = false; // a script's text taken again, not yet seen by the reload pass
+    KromeDocVersion* cur = nullptr;  // a .kimb's reading in force
+    KromeDocVersion* next = nullptr; // a reload's, waiting for its uses before it is checked
+    KimbFile* file = nullptr; // &cur->file, or null before it is read
     char*    source = nullptr; // a script's text
     usize    source_len = 0;
 };
@@ -78,7 +93,7 @@ struct KromeDoc {
 enum class KromeStage : u8 { Read, Scripts, Uses, Built, Failed };
 
 // Where an overlay goes against its anchor.
-enum class KromeSide : u8 { Below, Above, Right, Left, Pointer };
+enum class KromeSide : u8 { Below, Above, Right, Left, Pointer, Strip }; // Strip: across the window's top
 
 // What the pointer is on: a screen's node in its tree (overlay 0) or in an overlay's.
 struct KromeTarget {
@@ -142,6 +157,12 @@ struct KromeScreen {
     u32        next_overlay = 1;
     bool       repaint = true;      // its look changed (a hover, an overlay) since it was painted
     bool       rebuild = false;     // its tree is to be built again from its document (a theme switch)
+    // Reload (docs/PRDs/Krome-Slice-6-PRD.md, "Krome on a rebind").
+    const KimbFile* file = nullptr; // the reading of its .kimb it was last built from
+    u64        built_epoch = 0;     // KromeModule::epoch when its tree was built from what was current
+    bool       recheck = false;     // a document changed: its scope checked again, then its tree built
+    bool       rescript = false;    // a script of its changed: run again, the model kept
+    bool       held = false;        // its last reload did not check: it keeps the tree it had
 };
 
 // A font at one pixel size, as text at a size and a scale asks for it.
@@ -210,8 +231,16 @@ struct KromeModule {
     Array<KromeScreen*> screens;
     Array<KromeDoc*>    docs;
     // Files given from memory (krome_provide), by asset path: taken in place of a read.
-    struct Provided { Name path; char* data; usize size; };
+    struct Provided { Name path; char* data; usize size; u32 generation; };
     Array<Provided>     provided;
+    // Reload: the readings replaced and not yet freed; a count of replacements; the latest
+    // reload's mistakes for the strip, and the strip's overlay (screen id, overlay id).
+    Array<KromeDocVersion*> retired;
+    u64                 epoch = 0;
+    char                reload_error[512] = {};
+    u32                 strip_screen = 0, strip_overlay = 0;
+    char                strip_shown[512] = {};
+    u32                 reloads = 0;  // documents taken again
     Name                theme;    // the theme every screen is in; null: each scope's first
     KimErrors           errors;   // the latest mistakes found loading and building (krome_errors)
     // Lists and tables from C++ (krome_set_doc), applied by the pump in order.
@@ -294,8 +323,16 @@ void krome_error(KromeModule& s, const char* file, u32 line, const char* used_fi
 // The document at an asset path, asked for if it is not yet (and read in the pump).
 KromeDoc* krome_doc(KromeModule& s, Name path, bool script);
 KromeDoc* krome_doc_loaded(KromeModule& s, Name path);
-// Reads and reaps what the queue finished for documents; requests what is wanted.
-void krome_pump_docs(KromeModule& s);
+// Takes what has landed for documents (and what reloaded); asks for what is wanted. True when
+// a document already in use changed.
+bool krome_pump_docs(KromeModule& s);
+// What a document's change means for the screens: checked, scripts run again, built again;
+// the readings no screen needs any more freed (reload.cc).
+void krome_reload(KromeModule& s);
+bool krome_reload_pending(const KromeModule& s); // a reading waiting for its uses, a screen not yet checked
+void krome_free_retired(KromeModule& s, bool all);
+// The dev build's strip of reload mistakes over the top screen (reload.cc).
+void krome_reload_strip(KromeModule& s);
 void krome_free_docs(KromeModule& s);
 // A use's file: "krome/std" is "krome/std.kimb".
 Name krome_use_path(const char* use);
@@ -313,6 +350,8 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc);
 // A tooltip's tree into an overlay: its text in std's `tooltip` style where the scope has
 // one, else a plain dark box.
 bool krome_tooltip_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o, const char* text);
+// The dev build's reload strip into an overlay: the mistake on a red bar, in no prelude's look.
+bool krome_strip_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o, const char* text);
 // An overlay's tree, from its document, in the screen's scope.
 bool krome_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o);
 // A use's children into an overlay's tree, under a column box of `style`.
@@ -333,11 +372,13 @@ bool krome_lua_open(KromeModule& s);
 void krome_lua_close(KromeModule& s);
 // Runs a screen's script: its model, its handlers, its uses, and its root made a document
 // (sc.lua_file). False (logged) when it did not run.
-bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize len, const char* chunk);
+// `again`: a reload's run. The model the screen has is kept (keys it does not have are added);
+// when the run fails, the handlers it had are kept too.
+bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize len, const char* chunk, bool again = false);
 // A .kimb screen's scripts, in order, in one environment: their models merged, their
 // handlers merged (one event handled twice is an error). False when one failed; what the
 // others gave stands.
-bool krome_lua_scripts(KromeModule& s, KromeScreen& sc, KromeDoc* const* scripts, u32 count);
+bool krome_lua_scripts(KromeModule& s, KromeScreen& sc, KromeDoc* const* scripts, u32 count, bool again = false);
 void krome_lua_release(KromeModule& s, KromeScreen& sc); // its refs
 // A model value, from Lua or from outside: the store, then every text that reads it.
 void krome_model_set_number(KromeModule& s, KromeScreen& sc, const char* key, f64 v, bool boolean);
@@ -435,7 +476,8 @@ void krome_focus_owned(KromeModule& s, const KromeTarget& t, i32 delta);
 bool krome_prelude_scripts(KromeModule& s, const KimbScope& scope);
 void krome_free_behaviours(KromeModule& s);
 // The Lua side (lua.cc): a prelude's script run, its behaviours into the registry; the call.
-bool krome_lua_prelude(KromeModule& s, const char* source, usize len, const char* chunk);
+// `again`: a reload's run, whose behaviours replace those of the same names.
+bool krome_lua_prelude(KromeModule& s, const char* source, usize len, const char* chunk, bool again = false);
 bool krome_lua_has_behaviour(KromeModule& s, Name name);
 bool krome_lua_behave(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 overlay, u32 node, KromeCall call, f32 x, f32 y, const KromeCallArgs& a, bool* taken);
 // A key as a behaviour sees it: "left", "enter", "a".

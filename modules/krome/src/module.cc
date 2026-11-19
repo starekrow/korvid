@@ -9,6 +9,7 @@
 #include "korvid/core/log.h"
 #include "korvid/core/phase.h"
 #include "korvid/platform/io.h"
+#include "korvid/asset/texture.h"
 #include "korvid/core/profile.h"
 #include "korvid/platform_hid/input.h"
 #include "korvid/platform_hid/events.h"
@@ -84,7 +85,10 @@ void fail(KromeScreen& sc) {
 void built(KromeModule& s, KromeScreen& sc) {
     krome_free_overlays(s, sc);
     sc.repaint = true;
+    sc.file = sc.doc ? sc.doc->file : nullptr;
+    sc.held = false;
     bool ok = krome_build_screen(s, sc);
+    sc.built_epoch = s.epoch;
     if (sc.waiting) return; // a kim() piece's file is on its way: built again when it lands
     if (!ok) { fail(sc); return; }
     sc.loading = false;
@@ -110,8 +114,8 @@ void advance(KromeModule& s, KromeScreen& sc) {
             if (sc.doc->failed) { fail(sc); return; }
             if (!sc.doc->ready) return;
             // Its scripts are asked for now, and run once all are in.
-            if (const JsonValue* list = sc.doc->file.scripts)
-                for (const JsonValue* v = json_first(sc.doc->file.doc, *list); v; v = json_next(sc.doc->file.doc, *v))
+            if (const JsonValue* list = sc.doc->file->scripts)
+                for (const JsonValue* v = json_first(sc.doc->file->doc, *list); v; v = json_next(sc.doc->file->doc, *v))
                     if (v->str()) krome_doc(s, name_intern(v->str()), true);
             sc.stage = KromeStage::Scripts;
         } else {
@@ -125,12 +129,12 @@ void advance(KromeModule& s, KromeScreen& sc) {
     if (sc.stage == KromeStage::Scripts) {
         KromeDoc* list[64];
         u32 n = 0;
-        if (const JsonValue* scripts = sc.doc->file.scripts)
-            for (const JsonValue* v = json_first(sc.doc->file.doc, *scripts); v && n < 64; v = json_next(sc.doc->file.doc, *v)) {
+        if (const JsonValue* scripts = sc.doc->file->scripts)
+            for (const JsonValue* v = json_first(sc.doc->file->doc, *scripts); v && n < 64; v = json_next(sc.doc->file->doc, *v)) {
                 if (!v->str()) continue;
                 KromeDoc* d = krome_doc(s, name_intern(v->str()), true);
                 if (d->loading) return;
-                if (d->failed) { krome_error(s, sc.doc->file.file, v->line, nullptr, 0, "script \"%s\": cannot read it", v->str()); continue; }
+                if (d->failed) { krome_error(s, sc.doc->file->file, v->line, nullptr, 0, "script \"%s\": cannot read it", v->str()); continue; }
                 list[n++] = d;
             }
         // A script that fails names itself, and the screen opens with what the others gave.
@@ -152,7 +156,9 @@ void krome_pump(TickContext& ctx) {
     KV_ZONE("krome.pump");
     KromeModule& s = ctx.state_as<KromeModule>();
     s.ctx = &ctx;
-    krome_pump_docs(s);
+    bool changed = krome_pump_docs(s);
+    if (changed || krome_reload_pending(s)) krome_reload(s);
+    krome_reload_strip(s);
     for (u32 i = 0; i < s.screens.len; ++i) {
         KromeScreen& sc = *s.screens[i];
         if (sc.loading) advance(s, sc);
@@ -446,6 +452,15 @@ constinit const CliMountDesc k_mounts[] = {{.path = "/krome", .list = krome_cli_
 constinit const FieldDesc k_event_fields[] = {KV_FIELDS(KromeEvent, screen, node, event, value)};
 constinit const FieldDesc k_set_fields[] = {KV_FIELDS(KromeSet, screen, key, number, kind, pad, text)};
 constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(KromeEvent, k_event_fields, 0), KV_EVENT_EX(KromeSet, k_set_fields, 0)};
+// A document's blob landed or reloaded (in PreSim): a frame, so the pump takes it.
+void on_asset_ready(TickContext& ctx, Span<const AssetReady>) { engine_want_frame(*ctx.engine); }
+void on_asset_reloaded(TickContext& ctx, Span<const AssetReloaded>) { engine_want_frame(*ctx.engine); }
+void on_asset_failed(TickContext& ctx, Span<const AssetFailed>) { engine_want_frame(*ctx.engine); }
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_asset_ready", KV_ON(AssetReady, on_asset_ready), .phase = Phase::PostSim},
+    {.name = ".on_asset_reloaded", KV_ON(AssetReloaded, on_asset_reloaded), .phase = Phase::PostSim},
+    {.name = ".on_asset_failed", KV_ON(AssetFailed, on_asset_failed), .phase = Phase::PostSim},
+};
 constinit const SystemDesc k_systems[] = {
     // The Frame cycle (docs/design/cycles.md): once before each frame drawn, never in a tick.
     {.name = ".pump", .phase = Phase::Frame, .fn = krome_pump, .reads = "KromeSet", .emits = "KromeEvent", .main_thread = true},
@@ -461,6 +476,7 @@ KV_MODULE_DEFINE(krome_module) = {
     .name     = "krome",
     .events   = k_events,
     .systems  = k_systems,
+    .handlers = k_handlers,
     .mounts   = k_mounts,
     .startup  = krome_startup,
     .shutdown = krome_shutdown,
@@ -494,14 +510,17 @@ void krome_provide(Engine& e, const char* path, const void* data, usize size) {
     KromeModule* s = krome_state(e);
     if (!s || !path) return;
     Name n = name_intern(path);
+    u32 generation = 1; // given again: a document already taken takes it as a reload
     for (u32 i = 0; i < s->provided.len; ++i)
         if (s->provided[i].path == n) {
+            generation = s->provided[i].generation + 1;
             free_in(s->general, s->provided[i].data, s->provided[i].size ? s->provided[i].size : 1);
             s->provided[i] = s->provided[s->provided.len - 1];
             --s->provided.len;
             break;
         }
-    KromeModule::Provided p{n, (char*)alloc_in(s->general, size ? size : 1, 16), size};
+    engine_want_frame(e);
+    KromeModule::Provided p{n, (char*)alloc_in(s->general, size ? size : 1, 16), size, generation};
     if (size) memcpy(p.data, data, size);
     s->provided.push(p);
 }
@@ -541,7 +560,7 @@ const KimErrors* krome_errors(Engine& e) {
 }
 
 void krome_clear_errors(Engine& e) {
-    if (KromeModule* s = krome_state(e)) s->errors = KimErrors{};
+    if (KromeModule* s = krome_state(e)) { s->errors = KimErrors{}; s->reload_error[0] = 0; engine_want_frame(e); }
 }
 
 Name krome_open_source(Engine& e, const char* name, const char* source, i32 layer) {

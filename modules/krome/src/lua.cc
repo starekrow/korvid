@@ -380,18 +380,24 @@ void krome_lua_release(KromeModule& s, KromeScreen& sc) {
 namespace {
 
 // A fresh environment for the screen: its own globals over the shared ones, the model and
-// its store, emit, the overlays, theme. Left in sc.env and sc.store.
-void make_env(KromeModule& s, KromeScreen& sc) {
+// its store, emit, the overlays, theme. Left in sc.env and sc.store. `keep`: a reload's, over
+// the store the screen has (its env and handlers are the caller's to keep or let go).
+void make_env(KromeModule& s, KromeScreen& sc, bool keep = false) {
     lua_State* L = s.L;
-    krome_lua_release(s, sc);
+    if (!keep) krome_lua_release(s, sc);
+    else sc.env = sc.on = LUA_NOREF;
     lua_newtable(L);                     // env
     lua_newtable(L);                     // env meta
     lua_pushglobaltable(L);
     lua_setfield(L, -2, "__index");
     lua_setmetatable(L, -2);
-    lua_newtable(L);                     // env store
-    lua_pushvalue(L, -1);
-    sc.store = luaL_ref(L, LUA_REGISTRYINDEX);
+    if (keep && sc.store != LUA_NOREF) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store); // env store
+    } else {
+        lua_newtable(L);                 // env store
+        lua_pushvalue(L, -1);
+        sc.store = luaL_ref(L, LUA_REGISTRYINDEX);
+    }
     lua_newtable(L);                     // env store proxy
     lua_newtable(L);                     // ... proxy meta
     lua_pushvalue(L, -3);
@@ -439,11 +445,18 @@ bool run_chunk(KromeModule& s, KromeScreen& sc, const char* source, usize len, c
 }
 
 // The table at the top of the stack's model into the store, a later key over an earlier.
-void merge_model(lua_State* L, KromeScreen& sc) {
+// `only_new`: a reload's, which adds the keys the store does not have and keeps the rest.
+void merge_model(lua_State* L, KromeScreen& sc, bool only_new = false) {
     if (lua_getfield(L, -1, "model") == LUA_TTABLE) {
         lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store);
         lua_pushnil(L);
-        while (lua_next(L, -3)) {
+        while (lua_next(L, -3)) {        // model store key value
+            if (only_new) {
+                lua_pushvalue(L, -2);
+                bool has = lua_rawget(L, -4) != LUA_TNIL;
+                lua_pop(L, 1);
+                if (has) { lua_pop(L, 1); continue; }
+            }
             lua_pushvalue(L, -2);
             lua_insert(L, -2);
             lua_rawset(L, -4);
@@ -453,17 +466,31 @@ void merge_model(lua_State* L, KromeScreen& sc) {
     lua_pop(L, 1);
 }
 
+// A reload's run that failed: what it made let go, what the screen had back.
+void restore_env(KromeModule& s, KromeScreen& sc, int env, int on) {
+    luaL_unref(s.L, LUA_REGISTRYINDEX, sc.env);
+    luaL_unref(s.L, LUA_REGISTRYINDEX, sc.on);
+    sc.env = env;
+    sc.on = on;
+}
+void drop_env(KromeModule& s, int env, int on) {
+    luaL_unref(s.L, LUA_REGISTRYINDEX, env);
+    luaL_unref(s.L, LUA_REGISTRYINDEX, on);
+}
+
 } // namespace
 
-bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize len, const char* chunk) {
+bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize len, const char* chunk, bool again) {
     lua_State* L = s.L;
-    make_env(s, sc);
-    sc.uses.clear();
-    if (!run_chunk(s, sc, source, len, chunk)) return false;
+    int old_env = sc.env, old_on = sc.on;
+    make_env(s, sc, again);
+    if (!again) sc.uses.clear();
+    auto fail = [&] { if (again) restore_env(s, sc, old_env, old_on); return false; };
+    if (!run_chunk(s, sc, source, len, chunk)) return fail();
     if (!lua_istable(L, -1)) {
         krome_error(s, chunk, 0, nullptr, 0, "the script returned no tree");
         lua_pop(L, 1);
-        return false;
+        return fail();
     }
     // A node, or a screen table: root, model, on, uses.
     lua_getfield(L, -1, "w");
@@ -471,7 +498,7 @@ bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize le
     lua_pop(L, 1);
     int uses = 0;
     if (!node) {
-        merge_model(L, sc);
+        merge_model(L, sc, again);
         if (lua_getfield(L, -1, "on") == LUA_TTABLE) sc.on = luaL_ref(L, LUA_REGISTRYINDEX);
         else lua_pop(L, 1);
         lua_getfield(L, -1, "uses");     // screen uses
@@ -479,23 +506,47 @@ bool krome_lua_run(KromeModule& s, KromeScreen& sc, const char* source, usize le
         if (!lua_istable(L, -1)) {
             krome_error(s, chunk, 0, nullptr, 0, "the screen table has no root");
             lua_pop(L, 3);
-            return false;
+            return fail();
         }
         lua_insert(L, -3);               // root screen uses
         lua_remove(L, -2);               // root uses
         lua_insert(L, -2);               // uses root
         uses = -2;
     }
-    bool ok = table_file(L, -1, uses, sc.arena, sc.lua_file, chunk, s);
+    // A reload's tree into a document of its own: the tree built from the old one points into
+    // it until the screen is built again, so the old one is retired, not destroyed.
+    Arena fresh{};
+    KimbFile fresh_file;
+    bool ok = again ? table_file(L, -1, uses, fresh, fresh_file, chunk, s) : table_file(L, -1, uses, sc.arena, sc.lua_file, chunk, s);
     lua_pop(L, node ? 1 : 2);
-    if (!ok) { krome_error(s, chunk, 0, nullptr, 0, "its tree would not make a document"); return false; }
+    if (!ok) {
+        if (fresh.base) arena_destroy(fresh);
+        krome_error(s, chunk, 0, nullptr, 0, "its tree would not make a document");
+        return fail();
+    }
+    if (again) {
+        drop_env(s, old_env, old_on);
+        if (sc.arena.base) {
+            KromeDocVersion* v = alloc_items<KromeDocVersion>(s.general, 1);
+            *v = KromeDocVersion{};
+            v->arena = sc.arena;
+            v->file = sc.lua_file;
+            v->retired_at = ++s.epoch;
+            v->owner = sc.id;
+            s.retired.alloc = s.general;
+            s.retired.push(v);
+        }
+        sc.arena = fresh;
+        sc.lua_file = fresh_file;
+    }
     sc.has_lua_file = true;
     return true;
 }
 
-bool krome_lua_scripts(KromeModule& s, KromeScreen& sc, KromeDoc* const* scripts, u32 count) {
+bool krome_lua_scripts(KromeModule& s, KromeScreen& sc, KromeDoc* const* scripts, u32 count, bool again) {
     lua_State* L = s.L;
-    make_env(s, sc);
+    int old_env = sc.env, old_on = sc.on;
+    make_env(s, sc, again);
     lua_newtable(L);                     // on
     lua_newtable(L);                     // on, where each handler came from
     bool ok = true;
@@ -509,7 +560,7 @@ bool krome_lua_scripts(KromeModule& s, KromeScreen& sc, KromeDoc* const* scripts
             ok = false;
             continue;
         }
-        merge_model(L, sc);
+        merge_model(L, sc, again);
         if (lua_getfield(L, -1, "on") == LUA_TTABLE) {
             lua_pushnil(L);
             while (lua_next(L, -2)) {    // on from script key fn
@@ -536,6 +587,10 @@ bool krome_lua_scripts(KromeModule& s, KromeScreen& sc, KromeDoc* const* scripts
     }
     lua_pop(L, 1);                       // on
     sc.on = luaL_ref(L, LUA_REGISTRYINDEX);
+    // A reload whose script failed keeps the handlers the screen had: what the others gave
+    // would be half of them.
+    if (again && !ok) { restore_env(s, sc, old_env, old_on); return false; }
+    if (again) drop_env(s, old_env, old_on);
     return ok;
 }
 
@@ -1115,7 +1170,7 @@ void push_widget(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 overlay, 
 
 } // namespace
 
-bool krome_lua_prelude(KromeModule& s, const char* source, usize len, const char* chunk) {
+bool krome_lua_prelude(KromeModule& s, const char* source, usize len, const char* chunk, bool again) {
     lua_State* L = s.L;
     if (!L) return false;
     ensure_behaviour_tables(s);
@@ -1156,7 +1211,7 @@ bool krome_lua_prelude(KromeModule& s, const char* source, usize len, const char
             lua_getfield(L, -3, bname);
             bool twice = !lua_isnil(L, -1);
             lua_pop(L, 1);
-            if (cc || twice) {
+            if (cc || (twice && !again)) {
                 krome_error(s, chunk, 0, nullptr, 0, "the behaviour '%s' is registered already%s", bname, cc ? " (from C++)" : "");
                 ok = false;
             } else {

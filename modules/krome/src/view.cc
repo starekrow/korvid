@@ -152,6 +152,12 @@ void place_overlay(KromeScreen& sc, KromeOverlay& o, const KromeMeasure& m, f32 
     f32 w = root.rect.w, h = root.rect.h;
     rect2 a;
     f32 x, y;
+    if (o.side == KromeSide::Strip) { // across the window's top, whatever its own width
+        krome_layout(o.tree, o.tree.root, rect2{0, 0, W, h}, m, true);
+        o.placed = true;
+        sc.repaint = true;
+        return;
+    }
     if (o.side == KromeSide::Pointer || !anchor_rect(sc, o, &a)) {
         if (o.side == KromeSide::Pointer) { x = o.at.x; y = o.at.y; }
         else { x = (W - w) * 0.5f; y = (H - h) * 0.5f; } // no anchor: the window's center

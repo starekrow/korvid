@@ -540,12 +540,12 @@ void splice(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const K
     KimbScope* scope = (KimbScope*)arena_alloc(*b.frames, sizeof(KimbScope), alignof(KimbScope));
     if (!scope) return;
     bool failed = false;
-    if (!krome_file_scope(b.s, d->file, *scope, &failed)) { if (failed) error(b, fr, f.file, n.line, "kim(\"%s\"): a prelude it uses would not load", file); else b.waiting = true; return; }
-    const JsonValue* root = d->file.screens ? json_get(d->file.doc, *d->file.screens, screen) : nullptr;
+    if (!krome_file_scope(b.s, *d->file, *scope, &failed)) { if (failed) error(b, fr, f.file, n.line, "kim(\"%s\"): a prelude it uses would not load", file); else b.waiting = true; return; }
+    const JsonValue* root = d->file->screens ? json_get(d->file->doc, *d->file->screens, screen) : nullptr;
     if (!root) { error(b, fr, f.file, n.line, "kim(\"%s\"): no screen '%s'", file, screen); return; }
     const KimbScope* was = b.scope;
     b.scope = scope;
-    node(b, d->file, *root, parent, nullptr, nullptr);
+    node(b, *d->file, *root, parent, nullptr, nullptr);
     b.scope = was;
 }
 
@@ -693,7 +693,7 @@ const char* krome_theme_of(KromeModule& s, const KimbScope& scope) {
 }
 
 bool krome_build_screen(KromeModule& s, KromeScreen& sc) {
-    const KimbFile* f = sc.doc ? &sc.doc->file : sc.has_lua_file ? &sc.lua_file : nullptr;
+    const KimbFile* f = sc.doc ? (sc.file ? sc.file : sc.doc->file) : sc.has_lua_file ? &sc.lua_file : nullptr;
     if (!f) return false;
     const char* screen = sc.doc ? name_str(sc.screen) : nullptr;
     const JsonValue* root = root_of(*f, screen);
@@ -750,6 +750,41 @@ bool krome_build_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o) {
     node(b, o.file, *root, KROME_NONE, nullptr, nullptr);
     o.placed = false;
     return o.tree.root != KROME_NONE;
+}
+
+bool krome_strip_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o, const char* text) {
+    if (o.arena.base) arena_destroy(o.arena);
+    if (!arena_create(o.arena, 1u << 20, "krome.strip", MemTag{})) return false;
+    JsonBuilder jb(&o.arena.a);
+    JsonRef root = jb.object();
+    jb.set(root, "kim", jb.integer(1));
+    jb.set(root, "file", jb.string("krome:reload"));
+    JsonRef box = jb.object();
+    jb.set(box, "w", jb.string("box"));
+    JsonRef p = jb.object();
+    jb.set(p, "bg", jb.string("#8f1d1d"));
+    jb.set(p, "color", jb.string("#ffffff"));
+    jb.set(p, "size", jb.integer(13));
+    JsonRef pad = jb.array();
+    jb.push(pad, jb.integer(10));
+    jb.push(pad, jb.integer(6));
+    jb.set(p, "pad", pad);
+    jb.set(box, "p", p);
+    JsonRef kids = jb.array();
+    JsonRef t = jb.object();
+    jb.set(t, "w", jb.string("text"));
+    jb.set(t, "t", jb.string(text));
+    jb.push(kids, t);
+    jb.set(box, "c", kids);
+    JsonRef screens = jb.object();
+    jb.set(screens, "root", box);
+    jb.set(root, "screens", screens);
+    JsonDoc doc;
+    bool ok = jb.finish(root, doc);
+    jb.free();
+    KimErrors quiet;
+    if (!ok || !kimb_from_doc(doc, o.file, quiet, "krome:reload")) return false;
+    return krome_build_overlay(s, sc, o);
 }
 
 bool krome_tooltip_overlay(KromeModule& s, KromeScreen& sc, KromeOverlay& o, const char* text) {

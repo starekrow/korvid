@@ -47,10 +47,34 @@ on-demand window at each turn (`engine_want_frame_at`). The focus is found again
 its tree is built again. `cursor=` sets the pointer's shape (an edit's is the I-beam).
 
 **Documents.** A `.kimb` (`modules/kim` compiles it from `.kim`; goldberg does that as it
-cooks) is read once, through the I/O queue or from what `krome_provide` gave, and kept:
-`modules/kimb` reads it, with each node's line from the sidecar. A screen's names resolve
-in its file, then each `use` in order (and theirs), then the kernel; `krome_open(e, file,
-screen)` waits until the file, its preludes and its scripts are all in.
+cooks) is read as a blob asset (`asset_load_blob`), or taken from what `krome_provide` gave,
+and kept: `modules/kimb` reads it, with each node's line from the sidecar. A screen's names
+resolve in its file, then each `use` in order (and theirs), then the kernel; `krome_open(e,
+file, screen)` waits until the file, its preludes and its scripts are all in.
+
+**Reload** (slice 6). When a document's blob reloads (`asset_reload`, which goldberg's
+connection and the CLI's `reload` call), or `krome_provide` gives a path again, Krome takes
+the new bytes:
+
+- a `.kimb`'s new reading is checked on its own (`kimb_check`, in its scope as it is now);
+  one that does not check is dropped and the screens keep what they had. One that checks
+  is put in force, and every screen is checked against it and built again, its overlays
+  too, as a theme switch builds them;
+- a screen that does not check against it is **held**: it keeps the tree it had, on the old
+  reading, which is kept alive for it (and freed once nothing built before it is left);
+- a screen's script (a `script` line's, or a Lua screen's) runs again in a fresh
+  environment over the same model: its handlers are replaced, the keys its `model` table
+  adds that the running model lacks are added, and the rest keep their running values. A
+  script that fails keeps the handlers the screen had;
+- a prelude's script runs again, its behaviours replacing those of the same names, and
+  every screen is built again over them;
+- a screen that failed to open (a file not there) is tried again when a document lands.
+
+What survives a rebuild is what survives a theme switch: the model, the focus and the
+scrolls by id, the theme, the overlays (a dropdown's slot overlay closes). In dev and debug
+builds a reload's mistake (the file, the line, the message) is drawn in a red strip across
+the top of the window, an overlay the pointer goes through, until a good reload or
+`krome_clear_errors`. Upvalues of a script's old run are not carried over.
 
 **The one builder** (`src/build.cc`) takes a node of a document, a `.kimb`'s or a Lua
 script's tables made into one, and builds the kernel's tree:
@@ -229,7 +253,7 @@ Header `korvid/krome/krome.h`:
 | `krome_model_text(e, screen, key)` | function | a model value as text shows it |
 | `krome_press(e, screen, id)` | function | a node's binding and event, as a press would fire them |
 | `krome_theme(e, name)`, `krome_current_theme(e, screen)` | functions | every screen in a theme; the one a screen is in |
-| `krome_provide(e, path, data, size)` | function | a file's bytes from memory, in place of reading it |
+| `krome_provide(e, path, data, size)` | function | a file's bytes from memory, in place of reading it; given again, a reload |
 | `krome_errors(e)`, `krome_clear_errors(e)` | functions | the latest mistakes, with files and lines |
 | `krome_settled(e)` | function | nothing loading, fonts in, every change painted |
 | `krome_viewport(e, w, h, scale)` | function | the view's size without a window |
@@ -333,6 +357,7 @@ Focus rings (`focused { border-color=ring }`) show when Tab brought the focus. S
 The parser (`modules/kim`) and the document's meaning (`modules/kimb`), which this links;
 paragraphs and the edit buffer (`modules/typeset`); fonts and their pages (`modules/asset`);
 typed text, composition, the clipboard and the cursor (`modules/platform_hid`). The widget
-set and focus order (slice 4), vector shapes (5), reload (6).
+set and focus order (slice 4), vector shapes (5). Noticing that a file changed is
+goldberg's (slice 6): Krome reloads what the asset module rebinds.
 A tool with a window is the frame loop with the tool's work in the Work cycle
 (`kromedemo --work`).
