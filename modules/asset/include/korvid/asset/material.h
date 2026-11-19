@@ -33,6 +33,9 @@ struct MaterialAsset {
     MaterialDesc desc;          // what the renderer row holds now (texture is the renderer's handle)
     char         texture_path[KV_ASSET_PATH_MAX]; // the file's "texture", or empty for the default
     u32          refs = 0;      // scopes and assets holding it; it holds its texture_asset
+    u64          hash = 0;      // the file's bytes it was made from
+    u32          generation = 0; // times made again from a changed file (korvid/asset/reload.h)
+    bool         reread = false, again = false; // the module's
 };
 
 // Starts loading <exe dir>/assets/<path> as a material file. Returns the asset handle at

@@ -3,6 +3,7 @@
 #include "korvid/asset/module.h"
 #include "korvid/image/png.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/hash.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"
 #include "korvid/render/renderer.h"
@@ -39,6 +40,47 @@ void fail_asset(Engine& e, AssetState_& s, Handle h, TextureAsset& t, AssetError
     e.events.emit(AssetFailed{h, err});
 }
 
+// A read of the file has landed (reaped): the first load's, or a reload's. A reload that
+// cannot be used keeps the texture as it was; one whose bytes are the same does nothing.
+void land(Engine& e, AssetState_& s, Renderer* r, Handle h, TextureAsset& t, const IoCompletion& c) {
+    bool re = t.reread;
+    t.reread = false;
+    if (c.status != IoStatus::Done) {
+        AssetError err = c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read;
+        if (re) asset_reload_failed(e, h, t.path, err, nullptr);
+        else fail_asset(e, s, h, t, err, nullptr);
+        return;
+    }
+    u64 hash = hash_bytes(c.data, c.size);
+    if (re && hash == t.hash) { free_in(s.general, c.data, c.size); asset_reload_unchanged(t.path); return; }
+    PngImage img;
+    const char* why = nullptr;
+    bool ok = png_decode(c.data, c.size, s.general, img, &why);
+    free_in(s.general, c.data, c.size);
+    if (!ok) {
+        if (re) asset_reload_failed(e, h, t.path, AssetError::Decode, why);
+        else fail_asset(e, s, h, t, AssetError::Decode, why);
+        return;
+    }
+    // The same renderer texture, new pixels: a new size makes a new image behind the handle,
+    // the old one destroyed once the frames in flight are done with it.
+    bool uploaded = r && renderer_texture_upload(r, t.texture, img.width, img.height, img.rgba, (usize)img.width * img.height * 4);
+    free_in(s.general, img.rgba, (usize)img.width * img.height * 4);
+    if (!uploaded) {
+        if (re) asset_reload_failed(e, h, t.path, AssetError::Upload, nullptr);
+        else fail_asset(e, s, h, t, AssetError::Upload, nullptr);
+        return;
+    }
+    t.width  = img.width;
+    t.height = img.height;
+    t.hash   = hash;
+    if (re) { asset_reloaded(e, h, t.path, t.generation); return; }
+    t.state = AssetState::Ready;
+    ++s.loaded;
+    KV_INFO("asset", "'%s' ready: %ux%u in slot %u", t.path, t.width, t.height, renderer_texture_slot(r, t.texture));
+    e.events.emit(AssetReady{h});
+}
+
 // Phase PreSim: completions reaped by the last platform pump become textures and events.
 void asset_pump(TickContext& ctx) {
     AssetState_& s = ctx.state_as<AssetState_>();
@@ -56,25 +98,9 @@ void asset_pump(TickContext& ctx) {
         TextureAsset* t = s.textures.get(h);
         if (!t || t->io != c.request) { ++i; continue; } // retired (reaped below), or no longer awaited
         io->reap(c.request);
-        if (c.status != IoStatus::Done) {
-            fail_asset(e, s, h, *t, c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read, nullptr);
-            continue;
-        }
-        PngImage img;
-        const char* why = nullptr;
-        bool ok = png_decode(c.data, c.size, s.general, img, &why);
-        free_in(s.general, c.data, c.size);
-        if (!ok) { fail_asset(e, s, h, *t, AssetError::Decode, why); continue; }
-        t->width  = img.width;
-        t->height = img.height;
-        bool uploaded = r && renderer_texture_upload(r, t->texture, img.width, img.height, img.rgba, (usize)img.width * img.height * 4);
-        free_in(s.general, img.rgba, (usize)img.width * img.height * 4);
-        if (!uploaded) { fail_asset(e, s, h, *t, AssetError::Upload, nullptr); continue; }
-        t->state = AssetState::Ready;
-        t->io    = Handle{};
-        ++s.loaded;
-        KV_INFO("asset", "'%s' ready: %ux%u in slot %u", t->path, t->width, t->height, renderer_texture_slot(r, t->texture));
-        e.events.emit(AssetReady{h});
+        t->io = Handle{};
+        land(e, s, r, h, *t, c);
+        if (TextureAsset* again = s.textures.get(h)) asset_reread_after(e, s, h, reread_ref(*again));
     }
 }
 
@@ -137,7 +163,7 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
     s->textures.free();
 }
 
-constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(AssetFailed), KV_EVENT(AssetScopeReady)};
+constinit const EventTypeDesc k_events[]    = {KV_EVENT(AssetReady), KV_EVENT(AssetFailed), KV_EVENT(AssetScopeReady), KV_EVENT(AssetReloaded)};
 constinit const ResourceDesc  k_resources[] = {{".textures"}, {".materials"}, {".fonts"}, {".sounds"}, {".blobs"}, {".streams"}, {".shapes"}};
 constinit const SystemDesc    k_systems[]   = {
     // Retiring first: it writes every table, and the other pumps then see this tick's state.

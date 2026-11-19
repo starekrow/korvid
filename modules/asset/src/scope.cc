@@ -385,10 +385,11 @@ void cmd_scope_release(CliContext& ctx, Span<const char* const> args) {
 
 } // namespace
 
-constinit const CliCommandDesc k_asset_commands[3] = {
+constinit const CliCommandDesc k_asset_commands[4] = {
     {.name = "scope create", .help = "scope create <name>: a new asset scope", .fn = cmd_scope_create},
     {.name = "scope load", .help = "scope load <scope> <path>: load an asset into a scope (global for the global one)", .fn = cmd_scope_load},
     {.name = "scope release", .help = "scope release <name>: release a scope; what nobody holds retires at the next pump", .fn = cmd_scope_release},
+    {.name = "reload", .help = "reload [PATH...]: read these assets' files again (all of them with none) and rebind what changed", .fn = asset_cmd_reload},
 };
 
 // ---- the CLI: /scopes ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 #include "korvid/asset/shape.h"
 #include "korvid/core/format.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/hash.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"
 #include "asset_internal.h"
@@ -32,6 +33,43 @@ void fail_shape(Engine& e, AssetState_& s, Handle h, ShapeAsset& b, AssetError e
     ++s.shapes_failed;
     KV_WARN("asset", "'%s': %s", b.path, asset_error_name(err));
     e.events.emit(AssetFailed{h, err});
+}
+
+// A read has landed (reaped): the first load's, or a reload's, which is read into a shape of
+// its own and swapped in only when it reads, so a bad file keeps the shape that was drawn.
+void land(Engine& e, AssetState_& s, Handle h, ShapeAsset& b, const IoCompletion& c) {
+    bool re = b.reread;
+    b.reread = false;
+    if (c.status != IoStatus::Done) {
+        AssetError err = c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read;
+        if (re) asset_reload_failed(e, h, b.path, err, nullptr);
+        else fail_shape(e, s, h, b, err);
+        return;
+    }
+    u64 hash = hash_bytes(c.data, c.size);
+    if (re && hash == b.hash) { free_in(s.general, c.data, c.size ? c.size : 1); asset_reload_unchanged(b.path); return; }
+    // The file read into a shape; the read's buffer goes back at once.
+    PathShape fresh;
+    fresh.init(s.general);
+    const char* why = "";
+    bool ok = patherizer_read_kshape(c.data, c.size, fresh, &why);
+    free_in(s.general, c.data, c.size ? c.size : 1);
+    if (!ok) {
+        fresh.free();
+        if (re) { asset_reload_failed(e, h, b.path, AssetError::Decode, why); return; }
+        KV_WARN("asset", "'%s': %s", b.path, why);
+        fail_shape(e, s, h, b, AssetError::Decode);
+        return;
+    }
+    b.shape.free(); // a reload's old paths (Krome's jobs draw from copies of their own)
+    b.shape = fresh;
+    b.one_colour = b.shape.one_colour();
+    b.hash = hash;
+    if (re) { asset_reloaded(e, h, b.path, b.generation); return; }
+    b.state = AssetState::Ready;
+    ++s.shapes_loaded;
+    KV_INFO("asset", "'%s' ready: %u nodes%s", b.path, b.shape.nodes.len, b.one_colour ? ", one colour" : "");
+    e.events.emit(AssetReady{h});
 }
 
 } // namespace
@@ -76,26 +114,8 @@ void asset_shapes_pump(TickContext& ctx) {
         if (!b || b->io != c.request) { ++i; continue; }
         io->reap(c.request);
         b->io = Handle{};
-        if (c.status != IoStatus::Done) {
-            fail_shape(e, s, h, *b, c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read);
-            continue;
-        }
-        // The file read into the shape; the read's buffer goes back at once.
-        b->shape.init(s.general);
-        const char* why = "";
-        bool ok = patherizer_read_kshape(c.data, c.size, b->shape, &why);
-        free_in(s.general, c.data, c.size ? c.size : 1);
-        if (!ok) {
-            KV_WARN("asset", "'%s': %s", b->path, why);
-            b->shape.free();
-            fail_shape(e, s, h, *b, AssetError::Decode);
-            continue;
-        }
-        b->one_colour = b->shape.one_colour();
-        b->state = AssetState::Ready;
-        ++s.shapes_loaded;
-        KV_INFO("asset", "'%s' ready: %u nodes%s", b->path, b->shape.nodes.len, b->one_colour ? ", one colour" : "");
-        e.events.emit(AssetReady{h});
+        land(e, s, h, *b, c);
+        asset_reread_after(e, s, h, reread_ref(*b));
     }
 }
 

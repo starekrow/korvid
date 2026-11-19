@@ -4,6 +4,7 @@
 #include "korvid/core/cli.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/json.h"
+#include "korvid/core/hash.h"
 #include "korvid/core/log.h"
 #include "korvid/core/name.h"
 #include "korvid/core/utf8.h"
@@ -143,8 +144,20 @@ void asset_materials_pump(TickContext& ctx) {
         if (!m || m->io != c.request) { ++i; continue; }
         io->reap(c.request);
         m->io = Handle{};
+        bool re = m->reread;
+        m->reread = false;
         if (c.status != IoStatus::Done) {
-            fail_material(e, s, h, *m, c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read, nullptr);
+            AssetError err = c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read;
+            if (re) asset_reload_failed(e, h, m->path, err, nullptr);
+            else fail_material(e, s, h, *m, err, nullptr);
+            asset_reread_after(e, s, h, reread_ref(*m));
+            continue;
+        }
+        u64 hash = hash_bytes(c.data, c.size);
+        if (re && hash == m->hash) {
+            free_in(s.general, c.data, c.size);
+            asset_reload_unchanged(m->path);
+            asset_reread_after(e, s, h, reread_ref(*m));
             continue;
         }
         MaterialDesc desc;
@@ -156,11 +169,18 @@ void asset_materials_pump(TickContext& ctx) {
         if (!ok) {
             char detail[160];
             format(detail, sizeof detail, "%s (byte %u)", why, at);
-            fail_material(e, s, h, *m, AssetError::Parse, detail);
+            if (re) asset_reload_failed(e, h, m->path, AssetError::Parse, detail);
+            else fail_material(e, s, h, *m, AssetError::Parse, detail);
+            asset_reread_after(e, s, h, reread_ref(*m));
             continue;
         }
         m->desc = desc;
-        bind_texture(e, s, *m, texture_path); // sets the row; Ready follows the texture below
+        m->hash = hash;
+        // Sets the row. A first load is Ready when its texture is (below); a reload's row is
+        // the new look at once, its texture's placeholder until a new path's file lands.
+        bind_texture(e, s, *m, texture_path);
+        if (re) asset_reloaded(e, h, m->path, m->generation);
+        asset_reread_after(e, s, h, reread_ref(*m));
     }
     // Parsed and waiting: Ready when the texture is, or at once without one.
     for (u32 i = 0; i < s.materials.len; ++i) {

@@ -1,6 +1,7 @@
 #include "korvid/asset/blob.h"
 #include "korvid/core/format.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/hash.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"
 #include "asset_internal.h"
@@ -30,6 +31,39 @@ void fail_blob(Engine& e, AssetState_& s, Handle h, BlobAsset& b, AssetError err
     ++s.blobs_failed;
     KV_WARN("asset", "'%s': %s", b.path, asset_error_name(err));
     e.events.emit(AssetFailed{h, err});
+}
+
+// A read has landed (reaped): the first load's, or a reload's, which replaces the bytes when
+// they changed and keeps them when the read failed.
+void land(Engine& e, AssetState_& s, Handle h, BlobAsset& b, const IoCompletion& c) {
+    bool re = b.reread;
+    b.reread = false;
+    if (c.status != IoStatus::Done) {
+        AssetError err = c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read;
+        if (re) asset_reload_failed(e, h, b.path, err, nullptr);
+        else fail_blob(e, s, h, b, err);
+        return;
+    }
+    u64 hash = hash_bytes(c.data, c.size);
+    if (re && hash == b.hash) { free_in(s.general, c.data, c.size ? c.size : 1); asset_reload_unchanged(b.path); return; }
+    // The read's buffer is exactly the file; the blob wants one byte more for the NUL.
+    u8* data = (u8*)alloc_in(s.general, c.size + 1);
+    if (data) { memcpy(data, c.data, c.size); data[c.size] = 0; }
+    free_in(s.general, c.data, c.size ? c.size : 1);
+    if (!data) {
+        if (re) asset_reload_failed(e, h, b.path, AssetError::Read, "out of memory");
+        else fail_blob(e, s, h, b, AssetError::Read);
+        return;
+    }
+    free_in(s.general, b.data, b.size + 1); // a reload's old bytes; nothing on a first load
+    b.data = data;
+    b.size = c.size;
+    b.hash = hash;
+    if (re) { asset_reloaded(e, h, b.path, b.generation); return; }
+    b.state = AssetState::Ready;
+    ++s.blobs_loaded;
+    KV_INFO("asset", "'%s' ready: %llu bytes", b.path, (unsigned long long)b.size);
+    e.events.emit(AssetReady{h});
 }
 
 } // namespace
@@ -74,21 +108,8 @@ void asset_blobs_pump(TickContext& ctx) {
         if (!b || b->io != c.request) { ++i; continue; }
         io->reap(c.request);
         b->io = Handle{};
-        if (c.status != IoStatus::Done) {
-            fail_blob(e, s, h, *b, c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read);
-            continue;
-        }
-        // The read's buffer is exactly the file; the blob wants one byte more for the NUL.
-        u8* data = (u8*)alloc_in(s.general, c.size + 1);
-        if (data) { memcpy(data, c.data, c.size); data[c.size] = 0; }
-        free_in(s.general, c.data, c.size ? c.size : 1);
-        if (!data) { fail_blob(e, s, h, *b, AssetError::Read); continue; }
-        b->data  = data;
-        b->size  = c.size;
-        b->state = AssetState::Ready;
-        ++s.blobs_loaded;
-        KV_INFO("asset", "'%s' ready: %llu bytes", b->path, (unsigned long long)b->size);
-        e.events.emit(AssetReady{h});
+        land(e, s, h, *b, c);
+        asset_reread_after(e, s, h, reread_ref(*b));
     }
 }
 

@@ -35,6 +35,9 @@ struct TextureAsset {
     Handle     io;                 // the pending read's request handle while Pending; null otherwise
     u32        width = 0, height = 0; // the image's size once Ready; 0 before
     u32        refs = 0;           // scopes and assets holding it; at 0 it is retired at the next pump
+    u64        hash = 0;           // the file's bytes it was made from (hash_bytes)
+    u32        generation = 0;     // times made again from a changed file (korvid/asset/reload.h)
+    bool       reread = false, again = false; // the module's: a reload's read is out; read once more when it lands
 };
 
 // Events, declared by the asset module and emitted by the pumps. `asset` is the handle
@@ -42,7 +45,13 @@ struct TextureAsset {
 // (asset.material). Handlers subscribe with KV_ON like any event; a system reads the
 // batch with ctx.events->read<AssetReady>().
 struct AssetReady  { Handle asset; };
-struct AssetFailed { Handle asset; AssetError error; };
+// `reload`: the file was read again (asset_reload) and could not be used; the asset keeps what
+// it had and stays Ready.
+struct AssetFailed { Handle asset; AssetError error; bool reload = false; };
+// The asset was made again from its file, which changed (korvid/asset/reload.h): the same
+// handle, new contents. Sent for a record that was Ready; one that failed and now loads sends
+// AssetReady.
+struct AssetReloaded { Handle asset; };
 
 // Starts loading <exe dir>/assets/<path> as a PNG (8-bit samples, any color type, no
 // interlace). Returns the asset handle at once, or null if the renderer, the platform or

@@ -50,6 +50,29 @@ coverage is stb_truetype's, unhinted, and how heavy it reads is corrected where 
 (the UI shader, by the ink's luminance). `font_glyph_at` makes quarter-pixel copies for
 subpixel positioning. `asset.fonts_flush` uploads what changed before the frame draws.
 Kerning is read for the Latin set.
+## Reload
+
+A file already loaded can be read again (`korvid/asset/reload.h`): `asset_reload(e, path)`, or
+`reload PATH` from the CLI. When its bytes changed, the same handle is made of the new ones, in
+the kind's pump, where loads land:
+
+- a **texture**'s renderer texture takes the new pixels, at a new size if it has one (every
+  backend makes a new image behind the handle and destroys the old one past the frames in
+  flight);
+- a **material**'s row takes the new look, and a new texture path loads that texture and lets
+  the old one go;
+- a **shape** gets the new paths (Krome's jobs draw from copies of their own);
+- a **blob** gets the new bytes, and the old ones are freed: a pointer to `data` kept past
+  `AssetReloaded` is a pointer to freed memory.
+
+Each sends `AssetReloaded{asset}` and counts one more `generation`. Bytes that hash the same as
+before (`hash`) change nothing and send nothing. A file that no longer reads, decodes or parses
+keeps what the record had: `AssetFailed{asset, error, reload = true}`, and the record stays
+Ready. A record whose first read is still out is read once more when it lands; a record that
+failed is loaded again from the start (`AssetReady` when it works). Fonts, sounds and streams do
+not reload yet. Who calls `asset_reload` is not the module's business: goldberg's connection
+(Krome slice 6), the CLI and tests all do.
+
 ## Lifetimes
 
 An asset lives while something holds it. The holders are **scopes**
@@ -179,7 +202,8 @@ Header `korvid/asset/texture.h`:
 | `AssetError` | enum | `None`, `NotFound`, `Read`, `Decode`, `Upload`, `Parse` |
 | `TextureAsset` | record | `path`, `state`, `error`, `texture` (render.texture), `io`, `width`, `height` |
 | `AssetReady{asset}` | event | the asset turned Ready; `asset.kind()` says texture or material |
-| `AssetFailed{asset, error}` | event | the asset failed; it keeps its placeholder |
+| `AssetFailed{asset, error, reload}` | event | the asset failed; it keeps its placeholder. `reload`: a reload's read could not be used, and it keeps what it had |
+| `AssetReloaded{asset}` | event | the asset was made again from its changed file: the same handle, new contents |
 | `asset_load_texture(e, path[, scope])` | function | handle at once; null if the stack is not up or the path is too long |
 | `asset_texture(e, h)` | function | the record, or null if stale |
 | `asset_error_name(err)` | function | `"not found"`, `"decode error"`, ... |
@@ -256,6 +280,16 @@ Header `korvid/asset/stream.h`:
 PNG decoding is the image module's (`korvid/image/png.h`, `modules/image`); textures go
 through it.
 
+Header `korvid/asset/reload.h`:
+
+| name | kind | what |
+|---|---|---|
+| `asset_reload(e, path)` | function | every record loaded from `path` (a shape by its `.svg` too) reads its file again; how many were asked |
+| `asset_reload_all(e)` | function | every texture, material, shape and blob read again and compared |
+
+Each texture, material, shape and blob record has `hash` (the bytes it was made from) and
+`generation` (how many times it was made again).
+
 Header `korvid/asset/module.h`: `asset_module`, the record; kormake puts it in the list.
 
 What the module registers with the engine:
@@ -263,7 +297,7 @@ What the module registers with the engine:
 | name | kind | notes |
 |---|---|---|
 | `asset.texture`, `asset.material`, `asset.font`, `asset.sound`, `asset.blob`, `asset.stream`, `asset.scope` | handle kinds | `kv_handle_describe` prints path, state and size, blend, atlas or length; a scope's name and counts |
-| `AssetReady`, `AssetFailed`, `AssetScopeReady` | event types | no schema: the handle is an asset's, not an entity's, so it is never dropped as stale |
+| `AssetReady`, `AssetFailed`, `AssetScopeReady`, `AssetReloaded` | event types | no schema: the handle is an asset's, not an entity's, so it is never dropped as stale |
 | `asset.textures`, `asset.materials`, `asset.fonts`, `asset.sounds` | resources | the tables; the pumps write them |
 | `asset.pump_scopes` | system, phase PreSim, main thread, first | retires what nobody holds, then sends `AssetScopeReady`; writes every table |
 | `asset.pump` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.textures` |
@@ -275,6 +309,7 @@ What the module registers with the engine:
 | `asset.pump_streams` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.streams`: checks each file opens, reads its length and loop points |
 | `/materials` (patchable), `/textures`, `/fonts`, `/sounds`, `/scopes` | CLI mounts | the records by path; scopes by `<slot>-<name>` |
 | `scope create`, `scope load`, `scope release` | CLI commands | lifetimes by hand |
+| `reload [PATH...]` | CLI command | these files read again, every one loaded without a path |
 
 Resources a system of yours might name: none. Reach the records through the functions;
 they read the module's tables, which only the pumps write.
@@ -308,7 +343,8 @@ they read the module's tables, which only the pumps write.
 
 Eviction under a memory budget (a scope is released by the game, never by the module),
 cooked texture formats and pack files, mipmaps, texture
-atlases, hot reload of files that changed on disk, formats other than PNG and the
+atlases, noticing by itself that a file changed on disk (something calls `asset_reload`),
+reloading fonts, sounds and streams, formats other than PNG and the
 material JSON, and any asset that is not a texture or a material (meshes, sounds,
 levels). The I/O queue and its budgets are the platform module's; the pixels' home on
 the GPU is the renderer's.

@@ -130,10 +130,33 @@ void asset_reap_orphans(Engine& e, AssetState_& s, u16 kind);
 // The module's CLI tables (mounts.cc, scope.cc); declared here so their definitions have
 // external linkage whatever order the unity build puts the files in.
 extern const CliMountDesc   k_asset_mounts[5];
-extern const CliCommandDesc k_asset_commands[3];
+extern const CliCommandDesc k_asset_commands[4];
 // The /scopes mount.
 void asset_scopes_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user);
 bool asset_scopes_describe(CliContext& ctx, const char* rel);
+
+// ---- reload (reload.cc) ----
+// The fields of a record that reading it again touches, whatever its kind.
+struct RereadRef {
+    const char* path;
+    AssetState* state;
+    Handle*     io;
+    bool*       reread;
+    bool*       again;
+};
+template <class R> RereadRef reread_ref(R& r) { return RereadRef{r.path, &r.state, &r.io, &r.reread, &r.again}; }
+// Reads the record's file again, `h` as the read's user word. A read already out sets `again`;
+// a Ready record's read is a reload (`reread`), compared when it lands; any other is a load
+// from the start (a Failed record goes back to Pending). False if nothing could be submitted.
+bool asset_reread(Engine& e, AssetState_& s, Handle h, RereadRef r);
+// After a kind's pump took a read: the read asked for while it was out, if any.
+void asset_reread_after(Engine& e, AssetState_& s, Handle h, RereadRef r);
+// A reload that could not be used: logged, AssetFailed{h, err, reload}, the record untouched.
+void asset_reload_failed(Engine& e, Handle h, const char* path, AssetError err, const char* detail);
+// A reload that changed the record: its generation, the log, AssetReloaded.
+void asset_reloaded(Engine& e, Handle h, const char* path, u32& generation);
+void asset_reload_unchanged(const char* path);
+void asset_cmd_reload(CliContext& ctx, Span<const char* const> args); // the CLI's `reload [PATH...]`
 
 // ---- the kinds: load without a scope (refs untouched), retire at zero ----
 Handle texture_load(Engine& e, AssetState_& s, const char* path);

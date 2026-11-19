@@ -147,7 +147,7 @@ nothing) and submits a read. When the bytes land:
 
 | type | what a rebind does |
 |---|---|
-| texture | the same renderer texture handle, new pixels; a new size recreates the GPU texture behind the handle (renderer work, see Open) |
+| texture | the same renderer texture handle, new pixels; a new size recreates the GPU texture behind the handle, as every backend's whole upload already does |
 | material | the row patched in place, as `asset_material_patch` does; a new texture path loads and rebinds |
 | shape | a new `PathShape`; Krome drops its cached pictures of that shape |
 | blob | new bytes and a generation; whoever parses it hears `AssetReloaded` (Krome's documents, a game's own formats) |
@@ -396,8 +396,9 @@ In review of the first draft (Nov 18):
 
 ## Open
 
-The first draft's questions were settled in review (Nov 18; see Decided). Two are left:
+The first draft's questions were settled in review (Nov 18; see Decided). What was left:
 
-- [ ] **A texture that changes size**: the renderer recreating the GPU texture behind a
-      handle on Vulkan, Metal, D3D12 and the CPU renderer. To be found out in milestone 1.
+- [x] **A texture that changes size** (milestone 1): nothing to build. Every backend's
+      whole upload (`renderer_texture_upload`) already makes a new image behind the handle
+      and destroys the old one past the frames in flight.
 - [ ] **The name `asset_live`** is this draft's, and can change before milestone 3.

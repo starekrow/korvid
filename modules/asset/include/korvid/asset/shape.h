@@ -19,6 +19,9 @@ struct ShapeAsset {
     PathShape  shape;          // once Ready
     bool       one_colour = false; // every paint currentColor: draw it once, white, and tint it
     u32        refs = 0;
+    u64        hash = 0;           // the file's bytes it was made from
+    u32        generation = 0;     // times made again from a changed file (korvid/asset/reload.h)
+    bool       reread = false, again = false; // the module's
 };
 
 // The scope takes a reference; without one, the global scope does. The same path is the same

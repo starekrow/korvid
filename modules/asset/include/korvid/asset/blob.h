@@ -24,6 +24,10 @@ struct BlobAsset {
     u8*        data = nullptr; // size bytes and a NUL, once Ready
     usize      size = 0;
     u32        refs = 0;       // scopes and assets holding it
+    u64        hash = 0;       // hash_bytes of data
+    u32        generation = 0; // times made again from a changed file (korvid/asset/reload.h):
+                               // `data` is then new, and the old bytes are freed
+    bool       reread = false, again = false; // the module's
 };
 
 // The scope takes a reference; without one, the global scope does. The same path is the
