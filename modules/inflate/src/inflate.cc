@@ -3,6 +3,7 @@
 // knows zip archives is configured out, so nothing of miniz reaches the rest of the engine
 // but this file.
 #include "korvid/inflate/inflate.h"
+#include "korvid/core/bytes.h"
 #include <string.h>
 
 // miniz is vendored, not ours: its warnings are silenced for its own lines only.
@@ -73,8 +74,6 @@ bool zlib_header_ok(const u8* p, usize n) {
     return (cmf & 0x0F) == 8 && (cmf >> 4) <= 7 && ((cmf << 8) | flg) % 31 == 0 && !(flg & 0x20); // deflate, window <= 32K, no preset dictionary
 }
 
-u32 le32(const u8* p) { return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
-
 } // namespace
 
 InflateOut inflate_raw(const void* src, usize src_len, void* dst, usize dst_cap) {
@@ -110,7 +109,7 @@ InflateOut inflate_gzip(const void* src, usize src_len, void* dst, usize dst_cap
     if (r.result != InflateResult::Ok) return r;
     if (r.consumed + 8 > src_len) { r.result = InflateResult::Truncated; return r; }
     const u8* trailer = p + r.consumed;
-    if (le32(trailer) != crc32(0, dst, r.produced) || le32(trailer + 4) != (u32)r.produced) r.result = InflateResult::BadChecksum;
+    if (load_le32(trailer) != crc32(0, dst, r.produced) || load_le32(trailer + 4) != (u32)r.produced) r.result = InflateResult::BadChecksum;
     r.consumed += 8;
     return r;
 }

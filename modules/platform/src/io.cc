@@ -610,19 +610,26 @@ bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc, i32* err)
     Allocator* a = alloc ? alloc : mem_general();
     u8* data = (u8*)a->alloc(a, (usize)pe->size + 1, 16);
     if (!data) { *err = ENOMEM; return false; }
-    bool ok = false;
+    // Each failure is logged here, by the entry's name; *err says which kind it was.
+    *err = 0;
     if (pe->method == ZipStored) {
-        ok = pe->csize == pe->size && pread_all(m->fd, data, (usize)pe->size, at);
+        if (pe->csize != pe->size) { KV_WARN("io", "bundled '%s': stored, but %llu bytes packed for %llu unpacked", name, (unsigned long long)pe->csize, (unsigned long long)pe->size); *err = EILSEQ; }
+        else if (!pread_all(m->fd, data, (usize)pe->size, at)) { KV_WARN("io", "bundled '%s': the archive ends inside its %llu bytes", name, (unsigned long long)pe->size); *err = EIO; }
     } else {
         u8* packed = (u8*)alloc_in(mem_general(), (usize)pe->csize + 1);
-        if (packed && pread_all(m->fd, packed, (usize)pe->csize, at)) {
+        if (!packed) *err = ENOMEM;
+        else if (!pread_all(m->fd, packed, (usize)pe->csize, at)) { KV_WARN("io", "bundled '%s': the archive ends inside its %llu packed bytes", name, (unsigned long long)pe->csize); *err = EIO; }
+        else {
             InflateOut r = inflate_raw(packed, (usize)pe->csize, data, (usize)pe->size);
-            ok = r.result == InflateResult::Ok && r.produced == pe->size;
+            if (r.result != InflateResult::Ok || r.produced != pe->size) {
+                KV_WARN("io", "bundled '%s': inflating gave %llu of %llu bytes (%s)", name, (unsigned long long)r.produced, (unsigned long long)pe->size, inflate_result_name(r.result));
+                *err = EILSEQ;
+            }
         }
         free_in(mem_general(), packed, (usize)pe->csize + 1);
     }
-    if (ok && crc32(0, data, (usize)pe->size) != pe->crc) ok = false;
-    if (!ok) { a->free(a, data, (usize)pe->size + 1); *err = EIO; return false; }
+    if (!*err && crc32(0, data, (usize)pe->size) != pe->crc) { KV_WARN("io", "bundled '%s': CRC-32 mismatch", name); *err = EILSEQ; }
+    if (*err) { a->free(a, data, (usize)pe->size + 1); return false; }
     data[pe->size] = 0;
     out->data = data;
     out->size = (usize)pe->size;

@@ -278,7 +278,9 @@ struct IoFileWriter {
 // ("shaders/sprite.spv"): beside the executable on the desktop, in an Apple bundle's
 // resources, inside the package on Android (a stored or deflated entry under "assets/").
 // What must be read before the mounts exist, or by something that has no queue. Blocking,
-// as io_read_now, which it is everywhere but Android.
+// as io_read_now, which it is everywhere but Android. False with *err set if given; from a
+// package, ENOENT for no such entry and, each logged with the entry's name, EIO for an
+// archive that ends inside it and EILSEQ for data that does not inflate or fails its CRC-32.
 bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc = nullptr, i32* err = nullptr);
 // Where a stored (uncompressed) entry's bytes are inside a zip archive, for mount_pack_at.
 // False if the archive cannot be read, has no such entry, or holds it deflated.

@@ -6,6 +6,7 @@
 #include "korvid/core/sort.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/array.h"
+#include "korvid/core/bytes.h"
 #include "korvid/core/json.h"
 #include "korvid/core/memory.h"
 #include "korvid/inflate/inflate.h"
@@ -172,7 +173,7 @@ bool parse_tile_data(Parse& p, const JsonValue& layer, MapLayer& l) {
         len = r.produced;
     }
     if (len != cells * 4) return p.fail("layer '%s': %llu bytes of cells, the layer needs %llu", l.name, (unsigned long long)len, (unsigned long long)(cells * 4));
-    for (usize i = 0; i < cells; ++i) gids[i] = (u32)bytes[i * 4] | (u32)bytes[i * 4 + 1] << 8 | (u32)bytes[i * 4 + 2] << 16 | (u32)bytes[i * 4 + 3] << 24;
+    for (usize i = 0; i < cells; ++i) gids[i] = load_le32(bytes + i * 4);
     return true;
 }
 

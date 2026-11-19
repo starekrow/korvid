@@ -20,6 +20,9 @@ namespace kv {
 struct StreamDecoder {
     stb_vorbis* v;
     u32         channels;
+    u64         at, frames;    // the next frame decoded; the stream's length, from the probe
+    bool        warned;        // a stop before the end is logged once per decoder
+    char        path[KV_ASSET_PATH_MAX];
     f32         scratch[4096]; // a decoded block before it is made stereo
 };
 
@@ -62,6 +65,10 @@ StreamDecoder* stream_decoder_open(const StreamAsset& st, void* memory, usize me
     d->v = stb_vorbis_open_memory(st.bytes, (int)st.size, &err, &work);
     if (!d->v) return nullptr;
     d->channels = (u32)stb_vorbis_get_info(d->v).channels;
+    d->at = 0;
+    d->frames = st.frames;
+    d->warned = false;
+    memcpy(d->path, st.path, sizeof d->path);
     return d;
 }
 
@@ -73,18 +80,30 @@ u32 stream_decoder_read(StreamDecoder* d, f32* out, u32 frames) {
         u32 room = (u32)(sizeof d->scratch / sizeof(f32)) / ch;
         if (want > room) want = room;
         int n = stb_vorbis_get_samples_float_interleaved(d->v, (int)ch, d->scratch, (int)(want * ch));
-        if (n <= 0) break;
+        if (n <= 0) {
+            if (d->at < d->frames && !d->warned) { // short of the length the probe found
+                KV_WARN("asset", "stream '%s': Ogg Vorbis stops decoding at frame %llu of %llu: the file is corrupt or cut short; it ends there",
+                        d->path, (unsigned long long)d->at, (unsigned long long)d->frames);
+                d->warned = true;
+            }
+            break;
+        }
         for (int i = 0; i < n; ++i) {
             f32 l = d->scratch[i * ch], r = ch > 1 ? d->scratch[i * ch + 1] : l;
             out[(done + (u32)i) * 2] = l;
             out[(done + (u32)i) * 2 + 1] = r;
         }
         done += (u32)n;
+        d->at += (u32)n;
     }
     return done;
 }
 
-bool stream_decoder_seek(StreamDecoder* d, u64 frame) { return stb_vorbis_seek(d->v, (unsigned)frame) != 0; }
+bool stream_decoder_seek(StreamDecoder* d, u64 frame) {
+    if (!stb_vorbis_seek(d->v, (unsigned)frame)) return false;
+    d->at = frame;
+    return true;
+}
 
 void stream_decoder_close(StreamDecoder* d) {
     if (d && d->v) stb_vorbis_close(d->v); // frees nothing of ours: its memory was the caller's
@@ -127,10 +146,12 @@ bool probe(StreamAsset& st, const char** why) {
     stb_vorbis_info info = stb_vorbis_get_info(v);
     st.rate = (u32)info.sample_rate;
     st.channels = (u32)info.channels;
-    st.frames = stb_vorbis_stream_length_in_samples(v);
+    st.frames = stb_vorbis_stream_length_in_samples(v); // the last page's position
+    bool no_last_page = !st.frames && stb_vorbis_get_error(v) == VORBIS_cant_find_last_page;
     stb_vorbis_comment com = stb_vorbis_get_comment(v);
     st.loop_tagged = stream_loop_from_comments(com.comment_list, (u32)com.comment_list_length, st.frames, &st.loop_start, &st.loop_end);
     stb_vorbis_close(v);
+    if (no_last_page) { *why = "no Ogg page is marked last: the file is cut short or corrupt"; return false; }
     if (!st.frames || !st.rate) { *why = "an empty stream"; return false; }
     return true;
 }

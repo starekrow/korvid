@@ -33,7 +33,10 @@ const SoundAsset* asset_sound(Engine& e, Handle asset);
 
 // The decoders on their own, for tools and tests. Both allocate `out.samples` from
 // `alloc` (frames * channels * 4 bytes) and fill rate, channels and frames; false with
-// the reason on a file they cannot read. sound_decode picks by the bytes' magic.
+// the reason on a file they cannot read. An Ogg file cut short or corrupt partway
+// decodes to the length its pages give, silent past damage, with a warning naming `out.path`;
+// one with no page marked last, and so no length, is refused.
+// sound_decode picks by the bytes' magic.
 bool sound_decode_wav(const void* bytes, usize size, Allocator* alloc, SoundAsset& out, const char** error);
 bool sound_decode_ogg(const void* bytes, usize size, Allocator* alloc, SoundAsset& out, const char** error);
 bool sound_decode(const void* bytes, usize size, Allocator* alloc, SoundAsset& out, const char** error);

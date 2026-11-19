@@ -73,11 +73,8 @@ void test_sound(kv::TestCtx& c) {
     for (const char* path : candidates) {
         IoBytes file;
         if (!io_read_now(path, &file)) continue;
-        usize len = file.size < sizeof buf ? file.size : sizeof buf; // as much as the buffer holds
-        memcpy(buf, file.data, len);
-        file.free();
         SoundAsset o{};
-        bool ok = sound_decode(buf, len, mem_general(), o, &why);
+        bool ok = sound_decode(file.data, file.size, mem_general(), o, &why);
         KV_CHECK(c, ok && o.rate >= 8000 && o.channels >= 1 && o.frames > 1000);
         if (ok) {
             f32 peak = 0.0f;
@@ -85,7 +82,19 @@ void test_sound(kv::TestCtx& c) {
             KV_CHECK(c, peak > 0.01f && peak <= 1.0f);
             KV_INFO("test", "decoded %s: %u Hz x%u, %u frames, peak %.2f", path, o.rate, o.channels, o.frames, peak);
             free_in(mem_general(), o.samples, (usize)o.frames * o.channels * 4);
+            // Cut short, it is refused (no page is marked last) or decodes shorter, with a
+            // warning: never its whole length as if nothing were missing.
+            const usize cuts[] = {file.size / 2, file.size - 3};
+            for (usize cut : cuts) {
+                SoundAsset t{};
+                strcpy(t.path, "cut.ogg");
+                why = nullptr;
+                bool cut_ok = sound_decode(file.data, cut, mem_general(), t, &why);
+                KV_CHECK(c, cut_ok ? t.frames < o.frames : why != nullptr);
+                if (cut_ok) free_in(mem_general(), t.samples, (usize)t.frames * t.channels * 4);
+            }
         }
+        file.free();
         break;
     }
 }

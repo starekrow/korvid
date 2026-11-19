@@ -183,6 +183,12 @@ Header `korvid/core/types.h`: `u8`..`u64`, `i8`..`i64`, `f32`, `f64`, `usize`; `
 (a view: `data`, `len`, iteration, `const` conversion); `KV_ASSERT` (debug), `KV_VERIFY`
 (debug and dev), `KV_COUNTOF`, `KV_UNUSED`; `KV_DEBUG`, `KV_DEV` configuration macros.
 
+Header `korvid/core/bytes.h`:
+
+| name | kind | what |
+|---|---|---|
+| `load_le16(p)`, `load_le32(p)`, `load_le64(p)` | functions | a little-endian integer read from bytes at any alignment, on any host: the one reader for file formats |
+
 Header `korvid/core/memory.h`:
 
 | name | kind | what |

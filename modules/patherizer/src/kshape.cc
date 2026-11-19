@@ -22,6 +22,7 @@
 #include "korvid/core/json.h"
 #include "korvid/core/kbor.h"
 #include "korvid/core/arena.h"
+#include "korvid/core/bytes.h"
 #include "korvid/core/memory.h"
 #include <string.h>
 
@@ -41,7 +42,7 @@ struct Get {
     const u8* end;
     bool ok = true;
     u8  u8_() { if (p + 1 > end) { ok = false; return 0; } return *p++; }
-    u32 u32_() { if (p + 4 > end) { ok = false; return 0; } u32 v = (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; p += 4; return v; }
+    u32 u32_() { if (p + 4 > end) { ok = false; return 0; } u32 v = load_le32(p); p += 4; return v; }
     f32 f32_() { u32 u = u32_(); f32 v; memcpy(&v, &u, 4); return v; }
 };
 

@@ -5,6 +5,7 @@
 // which its PSV0 part (pipeline state validation, version 3 and up) carries in its string
 // table. Nothing compiles at run time.
 #include "renderer_internal.h"
+#include "korvid/core/bytes.h"
 #include "korvid/core/format.h"
 #include "korvid/inflate/inflate.h"
 #include "korvid/pack/zip.h"
@@ -15,34 +16,32 @@ namespace kv { namespace KV_RB_NS {
 
 namespace {
 
-u32 rd32(const u8* p) { u32 v; memcpy(&v, p, 4); return v; }
-
 // The entry point a DXIL container was compiled for, from its PSV0 part; null when the
 // container has none (a validator older than 1.8 writes PSV0 without the name).
 const char* dxil_entry_name(const u8* blob, usize size) {
     if (size < 32 || memcmp(blob, "DXBC", 4) != 0) return nullptr;
-    u32 parts = rd32(blob + 28);
+    u32 parts = load_le32(blob + 28);
     if (32 + (u64)parts * 4 > size) return nullptr;
     for (u32 i = 0; i < parts; ++i) {
-        u32 off = rd32(blob + 32 + i * 4);
+        u32 off = load_le32(blob + 32 + i * 4);
         if ((u64)off + 8 > size) return nullptr;
-        u32 part_size = rd32(blob + off + 4);
+        u32 part_size = load_le32(blob + off + 4);
         if (memcmp(blob + off, "PSV0", 4) != 0) continue;
         const u8* p = blob + off + 8;
         const u8* end = p + part_size;
         if (end > blob + size || p + 4 > end) return nullptr;
-        u32 info = rd32(p);           // sizeof(PSVRuntimeInfo<version>)
+        u32 info = load_le32(p);           // sizeof(PSVRuntimeInfo<version>)
         if (info < 52 || p + 4 + info + 4 > end) return nullptr; // version 3 is 52 bytes
-        u32 name_off = rd32(p + 4 + 48); // PSVRuntimeInfo3::EntryFunctionName
+        u32 name_off = load_le32(p + 4 + 48); // PSVRuntimeInfo3::EntryFunctionName
         const u8* q = p + 4 + info;
-        u32 resources = rd32(q); q += 4;
+        u32 resources = load_le32(q); q += 4;
         if (resources) {
             if (q + 4 > end) return nullptr;
-            u32 bind_size = rd32(q); q += 4;
+            u32 bind_size = load_le32(q); q += 4;
             q += (u64)resources * bind_size;
         }
         if (q + 4 > end) return nullptr;
-        u32 strings = rd32(q); q += 4;
+        u32 strings = load_le32(q); q += 4;
         if (q + strings > end || name_off >= strings) return nullptr;
         const char* s = (const char*)q + name_off;
         if (!memchr(s, 0, strings - name_off)) return nullptr;
@@ -63,7 +62,8 @@ bool rb_load_shader_entries(Renderer* r, const char* file, const char* const* en
     char path[1024];
     format(path, sizeof path, "%sshaders/%s", r->base_path, file);
     IoBytes zip;
-    if (!io_read_now(path, &zip)) { KV_ERROR("d3d12", "cannot read shader '%s'", path); return false; }
+    i32 read_err = 0;
+    if (!io_read_now(path, &zip, nullptr, &read_err)) { KV_ERROR("d3d12", "cannot read shader '%s': %s", path, strerror(read_err)); return false; }
     const char* err = "";
     usize tail_len = zip.size < KV_ZIP_TAIL_MAX ? zip.size : KV_ZIP_TAIL_MAX;
     ZipTail tail;

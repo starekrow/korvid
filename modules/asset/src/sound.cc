@@ -1,6 +1,7 @@
 #include "korvid/asset/sound.h"
 #include "korvid/core/format.h"
 #include "korvid/asset/module.h"
+#include "korvid/core/bytes.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
@@ -20,13 +21,6 @@ namespace kv {
 
 // ---- WAV ---------------------------------------------------------------------------------------
 
-namespace {
-
-u16 rd16(const u8* p) { return (u16)(p[0] | (p[1] << 8)); }
-u32 rd32(const u8* p) { return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24); }
-
-} // namespace
-
 bool sound_decode_wav(const void* bytes, usize size, Allocator* alloc, SoundAsset& out, const char** error) {
     const u8* p = (const u8*)bytes;
     if (size < 12 || memcmp(p, "RIFF", 4) != 0 || memcmp(p + 8, "WAVE", 4) != 0) { *error = "not a RIFF WAVE file"; return false; }
@@ -37,17 +31,17 @@ bool sound_decode_wav(const void* bytes, usize size, Allocator* alloc, SoundAsse
     usize at = 12;
     while (at + 8 <= size) {
         const u8* chunk = p + at;
-        u32 len = rd32(chunk + 4);
+        u32 len = load_le32(chunk + 4);
         const u8* body = chunk + 8;
         usize avail = size - (at + 8);
         if (len > avail) len = (u32)avail; // a truncated last chunk: take what is there
         if (memcmp(chunk, "fmt ", 4) == 0) {
             if (len < 16) { *error = "fmt chunk too short"; return false; }
-            format   = rd16(body);
-            channels = rd16(body + 2);
-            rate     = rd32(body + 4);
-            bits     = rd16(body + 14);
-            if (format == 0xFFFE && len >= 26) format = rd16(body + 24); // WAVE_FORMAT_EXTENSIBLE: the sub-format's first word
+            format   = load_le16(body);
+            channels = load_le16(body + 2);
+            rate     = load_le32(body + 4);
+            bits     = load_le16(body + 14);
+            if (format == 0xFFFE && len >= 26) format = load_le16(body + 24); // WAVE_FORMAT_EXTENSIBLE: the sub-format's first word
         } else if (memcmp(chunk, "data", 4) == 0) {
             data = body;
             data_size = len;
@@ -68,11 +62,11 @@ bool sound_decode_wav(const void* bytes, usize size, Allocator* alloc, SoundAsse
         f32 v;
         switch (bits) {
         case 8:  v = ((f32)s[0] - 128.0f) / 128.0f; break;
-        case 16: v = (f32)(i16)rd16(s) / 32768.0f; break;
+        case 16: v = (f32)(i16)load_le16(s) / 32768.0f; break;
         case 24: v = (f32)((i32)(((u32)s[0] << 8) | ((u32)s[1] << 16) | ((u32)s[2] << 24)) >> 8) / 8388608.0f; break;
         default:
-            if (is_float) { u32 u = rd32(s); memcpy(&v, &u, 4); }
-            else v = (f32)(i32)rd32(s) / 2147483648.0f;
+            if (is_float) { u32 u = load_le32(s); memcpy(&v, &u, 4); }
+            else v = (f32)(i32)load_le32(s) / 2147483648.0f;
             break;
         }
         samples[i] = v;
@@ -94,7 +88,10 @@ bool sound_decode_ogg(const void* bytes, usize size, Allocator* alloc, SoundAsse
     if (!v) { *error = err == VORBIS_outofmem ? "vorbis decoder needs more working memory" : "not an Ogg Vorbis file"; return false; }
     stb_vorbis_info info = stb_vorbis_get_info(v);
     u32 channels = (u32)info.channels;
+    // The length is the last page's position. A file cut short, or with its last page
+    // damaged, has no page marked last: no length at all, or an earlier page's.
     u32 total = stb_vorbis_stream_length_in_samples(v); // frames
+    if (!total && stb_vorbis_get_error(v) == VORBIS_cant_find_last_page) { stb_vorbis_close(v); *error = "no Ogg page is marked last: the file is cut short or corrupt"; return false; }
     f32* samples = (f32*)alloc_in(alloc, (usize)total * channels * sizeof(f32));
     if (!samples && total) { stb_vorbis_close(v); *error = "out of memory"; return false; }
     u32 got = 0;
@@ -103,8 +100,17 @@ bool sound_decode_ogg(const void* bytes, usize size, Allocator* alloc, SoundAsse
         if (n <= 0) break;
         got += (u32)n;
     }
+    f32 more[256];
+    bool past_end = got == total && stb_vorbis_get_samples_float_interleaved(v, (int)channels, more, (int)KV_COUNTOF(more)) > 0;
     stb_vorbis_close(v);
-    out.rate = (u32)info.sample_rate; out.channels = channels; out.frames = got; out.samples = samples;
+    const char* name = out.path[0] ? out.path : "(unnamed)";
+    if (got < total) { // the samples were allocated for `total` frames, as they are freed: silence the rest
+        memset(samples + (usize)got * channels, 0, (usize)(total - got) * channels * sizeof(f32));
+        KV_WARN("asset", "sound '%s': Ogg Vorbis stops decoding at frame %u of %u: the file is corrupt or cut short; the rest is silence", name, got, total);
+    } else if (past_end) {
+        KV_WARN("asset", "sound '%s': Ogg Vorbis decodes past its length, %u frames: the file is cut short or corrupt; the sound ends there", name, total);
+    }
+    out.rate = (u32)info.sample_rate; out.channels = channels; out.frames = total; out.samples = samples;
     return true;
 }
 

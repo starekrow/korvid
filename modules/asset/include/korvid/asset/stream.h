@@ -34,7 +34,8 @@ const StreamAsset* asset_stream(Engine& e, Handle asset);
 constexpr usize KV_STREAM_DECODER_MEMORY = 512 * 1024;
 struct StreamDecoder;
 StreamDecoder* stream_decoder_open(const StreamAsset& s, void* memory, usize memory_size);
-// Up to `frames` frames as interleaved stereo (a mono stream duplicated); 0 at the end.
+// Up to `frames` frames as interleaved stereo (a mono stream duplicated); 0 at the end,
+// or where a file cut short or corrupt stops decoding, which warns once, naming the stream.
 u32            stream_decoder_read(StreamDecoder* d, f32* stereo, u32 frames);
 bool           stream_decoder_seek(StreamDecoder* d, u64 frame);
 void           stream_decoder_close(StreamDecoder* d);

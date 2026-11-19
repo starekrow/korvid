@@ -21,7 +21,8 @@ bool rb_load_shader(Renderer* r, const char* name, VkShaderModule* out) {
     char path[1024];
     format(path, sizeof path, "shaders/%s", name);
     IoBytes file; // needed only until the module is created
-    if (!io_read_bundled(path, &file)) { KV_ERROR("vulkan", "cannot read shader '%s'", path); return false; }
+    i32 err = 0;
+    if (!io_read_bundled(path, &file, nullptr, &err)) { KV_ERROR("vulkan", "cannot read shader '%s': %s", path, strerror(err)); return false; }
     if (file.size == 0 || (file.size % 4) != 0) { file.free(); KV_ERROR("vulkan", "bad SPIR-V size in '%s'", path); return false; }
     const u32* words = (const u32*)file.data;
     usize len = file.size;

@@ -1,6 +1,7 @@
 #include "korvid/pack/zip.h"
 #include "korvid/core/sort.h"
 #include "korvid/core/array.h"
+#include "korvid/core/bytes.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/utf8.h"
 #include "korvid/inflate/inflate.h"
@@ -24,10 +25,6 @@ constexpr u16 kFlagUtf8   = 1u << 11;
 constexpr u16 kDosDate    = (0 << 9) | (1 << 5) | 1; // 1980-01-01, the zip epoch
 constexpr u32 kIndexMagic = 0x5849504B; // "KPIX"
 constexpr usize kIndexHeader = 32, kIndexEntry = 48;
-
-u16 rd16(const u8* p) { return (u16)(p[0] | p[1] << 8); }
-u32 rd32(const u8* p) { return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
-u64 rd64(const u8* p) { return (u64)rd32(p) | (u64)rd32(p + 4) << 32; }
 
 bool fail(const char** error, const char* why) { if (error) *error = why; return false; }
 
@@ -107,17 +104,17 @@ bool zip_find_end(const u8* tail, usize tail_len, u64 tail_offset, ZipTail* out,
     // for a signature whose comment length lands exactly on the end.
     for (usize at = tail_len - 22 + 1; at-- > 0;) {
         const u8* p = tail + at;
-        if (rd32(p) != kSigEnd) continue;
-        u16 comment = rd16(p + 20);
+        if (load_le32(p) != kSigEnd) continue;
+        u16 comment = load_le16(p + 20);
         if (at + 22 + comment != tail_len) continue;
-        if (rd16(p + 4) != 0 || rd16(p + 6) != 0) return fail(error, "split archives are not supported");
-        out->count     = rd16(p + 10);
-        out->cd_size   = rd32(p + 12);
-        out->cd_offset = rd32(p + 16);
+        if (load_le16(p + 4) != 0 || load_le16(p + 6) != 0) return fail(error, "split archives are not supported");
+        out->count     = load_le16(p + 10);
+        out->cd_size   = load_le32(p + 12);
+        out->cd_offset = load_le32(p + 16);
         bool overflow = out->count == 0xFFFF || out->cd_size == 0xFFFFFFFFu || out->cd_offset == 0xFFFFFFFFu;
-        if (at >= 20 && rd32(p - 20) == kSigLoc64) {
+        if (at >= 20 && load_le32(p - 20) == kSigLoc64) {
             out->needs_zip64 = true;
-            out->zip64_end   = rd64(p - 20 + 8);
+            out->zip64_end   = load_le64(p - 20 + 8);
         } else if (overflow) {
             return fail(error, "Zip64 sizes without a Zip64 locator");
         }
@@ -128,11 +125,11 @@ bool zip_find_end(const u8* tail, usize tail_len, u64 tail_offset, ZipTail* out,
 }
 
 bool zip_read_zip64_end(const u8* rec, usize len, ZipTail* tail, const char** error) {
-    if (len < 56 || rd32(rec) != kSigEnd64) return fail(error, "bad Zip64 end record");
-    if (rd32(rec + 16) != 0 || rd32(rec + 20) != 0) return fail(error, "split archives are not supported");
-    tail->count       = rd64(rec + 32);
-    tail->cd_size     = rd64(rec + 40);
-    tail->cd_offset   = rd64(rec + 48);
+    if (len < 56 || load_le32(rec) != kSigEnd64) return fail(error, "bad Zip64 end record");
+    if (load_le32(rec + 16) != 0 || load_le32(rec + 20) != 0) return fail(error, "split archives are not supported");
+    tail->count       = load_le64(rec + 32);
+    tail->cd_size     = load_le64(rec + 40);
+    tail->cd_offset   = load_le64(rec + 48);
     tail->zip64       = true;
     tail->needs_zip64 = false;
     return true;
@@ -149,26 +146,26 @@ bool zip_read_central(const u8* cd, usize cd_len, const ZipTail& tail, Allocator
     usize at = 0, names_len = 0;
     u32 n = 0, skipped = 0;
     for (u32 i = 0; i < count; ++i) {
-        if (at + 46 > cd_len || rd32(cd + at) != kSigCentral) { free_in(a, entries, sizeof(PackEntry) * (count ? count : 1)); free_in(a, names, cd_len + count + 1); return fail(error, "bad central directory entry"); }
+        if (at + 46 > cd_len || load_le32(cd + at) != kSigCentral) { free_in(a, entries, sizeof(PackEntry) * (count ? count : 1)); free_in(a, names, cd_len + count + 1); return fail(error, "bad central directory entry"); }
         const u8* h = cd + at;
-        u16 gp = rd16(h + 8), method = rd16(h + 10);
-        u32 crc = rd32(h + 16);
-        u64 csize = rd32(h + 20), size = rd32(h + 24);
-        u16 name_len = rd16(h + 28), extra_len = rd16(h + 30), comment_len = rd16(h + 32);
-        u64 offset = rd32(h + 42);
+        u16 gp = load_le16(h + 8), method = load_le16(h + 10);
+        u32 crc = load_le32(h + 16);
+        u64 csize = load_le32(h + 20), size = load_le32(h + 24);
+        u16 name_len = load_le16(h + 28), extra_len = load_le16(h + 30), comment_len = load_le16(h + 32);
+        u64 offset = load_le32(h + 42);
         usize next = at + 46 + name_len + extra_len + comment_len;
         if (next > cd_len) { free_in(a, entries, sizeof(PackEntry) * (count ? count : 1)); free_in(a, names, cd_len + count + 1); return fail(error, "central directory entry runs past the directory"); }
         // Zip64 values, in order, for the fields that overflowed.
         const u8* x = h + 46 + name_len;
         for (usize xa = 0; xa + 4 <= extra_len;) {
-            u16 id = rd16(x + xa), sz = rd16(x + xa + 2);
+            u16 id = load_le16(x + xa), sz = load_le16(x + xa + 2);
             if (xa + 4 + sz > extra_len) break;
             if (id == kExtraZip64) {
                 const u8* v = x + xa + 4;
                 usize vi = 0;
-                if (size == 0xFFFFFFFFu && vi + 8 <= sz) { size = rd64(v + vi); vi += 8; }
-                if (csize == 0xFFFFFFFFu && vi + 8 <= sz) { csize = rd64(v + vi); vi += 8; }
-                if (offset == 0xFFFFFFFFu && vi + 8 <= sz) { offset = rd64(v + vi); vi += 8; }
+                if (size == 0xFFFFFFFFu && vi + 8 <= sz) { size = load_le64(v + vi); vi += 8; }
+                if (csize == 0xFFFFFFFFu && vi + 8 <= sz) { csize = load_le64(v + vi); vi += 8; }
+                if (offset == 0xFFFFFFFFu && vi + 8 <= sz) { offset = load_le64(v + vi); vi += 8; }
             }
             xa += 4 + sz;
         }
@@ -204,10 +201,10 @@ bool zip_read_central(const u8* cd, usize cd_len, const ZipTail& tail, Allocator
 
 bool kpak_read_index(const u8* d, usize len, const ZipTail& tail, Allocator* a, PackTable* out, const char** error) {
     *out = PackTable{};
-    if (len < kIndexHeader || rd32(d) != kIndexMagic) return fail(error, "not a kpak index");
-    if (rd32(d + 4) != 1) return fail(error, "unknown kpak index version");
-    u32 count = rd32(d + 8);
-    if (rd64(d + 16) != tail.cd_offset || rd64(d + 24) != tail.cd_size) return fail(error, "the archive changed after packing");
+    if (len < kIndexHeader || load_le32(d) != kIndexMagic) return fail(error, "not a kpak index");
+    if (load_le32(d + 4) != 1) return fail(error, "unknown kpak index version");
+    u32 count = load_le32(d + 8);
+    if (load_le64(d + 16) != tail.cd_offset || load_le64(d + 24) != tail.cd_size) return fail(error, "the archive changed after packing");
     if ((len - kIndexHeader) / kIndexEntry < count) return fail(error, "index entries run past the index");
     usize names_at = kIndexHeader + (usize)count * kIndexEntry, names_len = len - names_at;
     PackEntry* entries = (PackEntry*)alloc_in(a, sizeof(PackEntry) * (count ? count : 1));
@@ -218,9 +215,9 @@ bool kpak_read_index(const u8* d, usize len, const ZipTail& tail, Allocator* a, 
     for (u32 i = 0; i < count; ++i) {
         const u8* p = d + kIndexHeader + (usize)i * kIndexEntry;
         PackEntry& e = entries[i];
-        e.hash = rd64(p); e.data_offset = rd64(p + 8); e.size = rd64(p + 16); e.csize = rd64(p + 24);
-        e.crc = rd32(p + 32); e.method = rd16(p + 36); e.flags = rd16(p + 38);
-        e.name_off = rd32(p + 40); e.name_len = rd32(p + 44);
+        e.hash = load_le64(p); e.data_offset = load_le64(p + 8); e.size = load_le64(p + 16); e.csize = load_le64(p + 24);
+        e.crc = load_le32(p + 32); e.method = load_le16(p + 36); e.flags = load_le16(p + 38);
+        e.name_off = load_le32(p + 40); e.name_len = load_le32(p + 44);
         e.header_offset = 0;
         bool sorted = i == 0 || entries[i - 1].hash <= e.hash;
         bool named = (usize)e.name_off + e.name_len < names_len + 1 && e.name_off + e.name_len <= names_len &&
@@ -240,8 +237,8 @@ bool kpak_read_index(const u8* d, usize len, const ZipTail& tail, Allocator* a, 
 bool zip_local_data_offset(const u8* h, usize len, u64 header_offset, u64* data_offset, usize* need) {
     *need = 30;
     if (len < 30) return false;
-    if (rd32(h) != kSigLocal) { *need = 0; return false; }
-    usize total = 30 + (usize)rd16(h + 26) + rd16(h + 28);
+    if (load_le32(h) != kSigLocal) { *need = 0; return false; }
+    usize total = 30 + (usize)load_le16(h + 26) + load_le16(h + 28);
     *need = total;
     if (len < total) return false;
     *data_offset = header_offset + total;
