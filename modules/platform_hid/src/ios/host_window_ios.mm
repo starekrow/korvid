@@ -27,6 +27,7 @@
 #include "korvid/platform_hid/events.h"
 #include "korvid/core/atomic.h"
 #include "korvid/core/log.h"
+#include "korvid/core/memory.h"
 #include "korvid/core/time.h"
 #include "../hid_backend.h"
 #import <UIKit/UIKit.h>
@@ -339,10 +340,14 @@ bool HostWindow::software_frame(SoftwareFrame* out) {
         return false;
     }
     if (b->width != w || b->height != h) {
-        free(b->pixels);
+        mem_free(b->pixels);
         b->pitch  = (w * 4 + 63) & ~63u; // rows on 64 bytes, as Core Animation likes them
-        b->pixels = (u8*)malloc((size_t)b->pitch * h);
-        if (!b->pixels) { b->width = b->height = 0; return false; }
+        b->pixels = (u8*)mem_alloc((usize)b->pitch * h); // counted, the platform's
+        if (!b->pixels) {
+            KV_ERROR("window", "no memory for a %ux%u software buffer: the frame is not drawn", w, h);
+            b->width = b->height = 0;
+            return false;
+        }
         b->width  = w;
         b->height = h;
     }

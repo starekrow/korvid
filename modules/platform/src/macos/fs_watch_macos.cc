@@ -27,6 +27,7 @@
 #include "../os_file.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
+#include "korvid/core/memory.h"
 #include "korvid/platform/module.h"
 #include <CoreServices/CoreServices.h>
 #include <dispatch/dispatch.h>
@@ -43,24 +44,41 @@ namespace kv {
 
 namespace {
 
-// What a callback heard, queued for poll. malloc'd: the callback is on GCD's thread.
+// What a callback heard, queued for poll. From the general allocator, which is
+// thread-safe: the callback is on GCD's thread. Out of memory, the change is dropped and
+// said once; the next poll still sees what was queued.
 struct FsevHeard { u32 root; u32 flags; u32 text; };
 struct FsevQueue {
     FsevHeard* list = nullptr;
     u32    len = 0, cap = 0;
     char*  text = nullptr;
     u32    text_len = 0, text_cap = 0;
+    bool   told = false;
 
     void push(u32 root, u32 flags, const char* path) {
         u32 n = (u32)strlen(path) + 1;
-        if (len == cap) { cap = cap ? cap * 2 : 64; list = (FsevHeard*)realloc(list, sizeof(FsevHeard) * cap); }
-        while (text_len + n > text_cap) { text_cap = text_cap ? text_cap * 2 : 4096; text = (char*)realloc(text, text_cap); }
+        if (len == cap) {
+            u32 c = cap ? cap * 2 : 64;
+            FsevHeard* l = (FsevHeard*)mem_realloc(list, sizeof(FsevHeard) * c);
+            if (!l) { dropped(path); return; }
+            list = l; cap = c;
+        }
+        while (text_len + n > text_cap) {
+            u32 c = text_cap ? text_cap * 2 : 4096;
+            char* t = (char*)mem_realloc(text, c);
+            if (!t) { dropped(path); return; }
+            text = t; text_cap = c;
+        }
         memcpy(text + text_len, path, n);
         list[len++] = FsevHeard{root, flags, text_len};
         text_len += n;
     }
     void clear() { len = 0; text_len = 0; }
-    void release() { ::free(list); ::free(text); *this = FsevQueue{}; }
+    void release() { mem_free(list); mem_free(text); *this = FsevQueue{}; }
+    void dropped(const char* path) {
+        if (!told) KV_WARN("fs_watch", "out of memory: a change to '%s' (and any after it) not queued", path);
+        told = true;
+    }
 };
 
 } // namespace
