@@ -107,8 +107,8 @@ debris are additive dots.
   (rewritten every tick by `hud`, an `Always` system, from the published score; the text
   module relays out only when the string changes), the pause banner (spawned and
   destroyed by `pause`) and the game-over banner (spawned by `on_edge`, cleared by
-  `on_restart` with everything else). The font is DejaVu Sans at 28 px from the text
-  module's assets.
+  `on_restart` with everything else). The font is DejaVu Sans at 28 px, from the dejavu
+  module.
 - **Exit is a handler.** `on_exit` quits on `ExitRequested` whether or not the game is
   paused; a Sim system would not run while paused and a `--run-seconds` that lands
   inside the demo's pause would be lost.

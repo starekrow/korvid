@@ -3,13 +3,12 @@
 Words on screen, in the engine's own shape. A `Text` component on any kind with a
 `Transform2` is laid out as glyph sprites: rows of the kind `sprite_text.glyph`, children of the
 label through the scene module, one per visible character, drawn from a font asset's
-atlas by the same GPU path as everything else. The module ships DejaVu Sans as a default
-font. Changing the string is one write; the layout notices and redoes the glyphs.
+atlas by the same GPU path as everything else. Changing the string is one write; the layout notices and redoes the glyphs.
 
 ## How it works
 
 **Fonts are assets** (`korvid/asset/font.h`, in the asset module). `asset_load_font(e,
-"sprite_text/DejaVuSans.ttf", 28)` returns a handle at once; the record owns a renderer texture
+"dejavu/DejaVuSans.ttf", 28)` returns a handle at once; the record owns a renderer texture
 (the atlas) and a material for it (alpha blend, white, so the tint is the color). The
 file reads through the I/O queue and `asset.pump_fonts` rasterizes the font's character
 set (by default ASCII, the Latin-1 and Latin Extended-A blocks, common punctuation and
@@ -60,7 +59,7 @@ is sim state like any other kind, so a game's labels are hashed with the rest.
 ```cpp
 // A kind of your own with a Text, or the module's sprite_text.label:
 Text t;
-t.font  = g.font;                       // asset_load_font(engine, "sprite_text/DejaVuSans.ttf", 28) at startup
+t.font  = g.font;                       // asset_load_font(engine, KV_DEJAVU_SANS, 28) at startup
 t.space  = SpriteSpace::Screen;         // window pixels, +y up, from the anchor
 t.anchor = ScreenAnchor::Top;           // the top edge's middle, on any window
 t.align  = TextAlign::Center;
@@ -73,8 +72,8 @@ sptext_set(texts[i], "SCORE %d", score); // the layout relays out only if the st
 ```
 
 Add `"sprite_text"` to your module's `deps`; it brings `asset` and `scene`. Put your own
-`.ttf` under your module's `assets/` and load it by `<module>/<file>`; the default is
-`sprite_text/DejaVuSans.ttf` (Bitstream Vera license, in `assets/DejaVuSans-LICENSE.txt`).
+`.ttf` under your module's `assets/` and load it by `<module>/<file>`, or depend on
+`dejavu` and load `KV_DEJAVU_SANS` (DejaVu Sans, the engine's default font: `modules/dejavu`).
 
 `sptext_layout(font, text, out, &width)` is the layout as a function, for a game placing
 its own things around a line of text; `font_measure(font, str, scale)` is its width.

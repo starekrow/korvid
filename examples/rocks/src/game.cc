@@ -10,6 +10,7 @@
 // so the run is the same on any window or display.
 #include "korvid/rocks/module.h"
 #include "korvid/core/format.h"
+#include "korvid/dejavu/dejavu.h"
 #include "korvid/anim/module.h"
 #include "korvid/asset/font.h"
 #include "korvid/asset_render/material.h"
@@ -657,7 +658,7 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     if (!engine_publish(engine, self, ".score", &g->score)) return false;
 
     if (!renderer_get(engine)) return false;
-    g->font = asset_load_font(engine, "sprite_text/DejaVuSans.ttf", 28.0f);
+    g->font = asset_load_font(engine, KV_DEJAVU_SANS, 28.0f);
     if (g->font.is_null()) return false;
     // Two clips, two ways: the flame's flipbook is a file; the fade is built here, one
     // second of alpha from one to zero, played at 1 / lifetime by each piece of debris.

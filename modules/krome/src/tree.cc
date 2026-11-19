@@ -1,12 +1,13 @@
 // The tree's storage and its properties by name.
 #include "korvid/krome/tree.h"
 #include "korvid/platform_hid/input.h"
+#include "korvid/dejavu/dejavu.h"
 #include <stdlib.h>
 #include <string.h>
 
 namespace kv {
 
-const char* const KROME_DEFAULT_FONT = "sprite_text/DejaVuSans.ttf";
+const char* const KROME_DEFAULT_FONT = KV_DEJAVU_SANS;
 
 void KromeTree::init(Allocator* a) {
     nodes.alloc = looks.alloc = strings.alloc = a;

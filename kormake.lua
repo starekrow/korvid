@@ -33,7 +33,7 @@ root "windows" {
                 "platform_audio", "audio", "renderer-vulkan", "renderer-d3d12", "touchpad", "frameloop", "save", "sprite_ui", "xml", "bulletml", "image", "picture", "kbor", "kimb", "kim", "kimc",
                 "window", "testbed", "stones", "rocks", "arcanum",
                 "cpukiller", "arcfire", "gallery", "sockit2m", "lua", "script", "goldberg",
-                "truetype", "typeset", "krome", "kromedemo", "kromescreens", "renderer-cpu", "renderer-cpu-raster", "patherizer" },
+                "truetype", "dejavu", "typeset", "krome", "kromedemo", "kromescreens", "renderer-cpu", "renderer-cpu-raster", "patherizer" },
   tests     = true,
   platforms = { "windows" },
 }
@@ -46,7 +46,7 @@ root "macos" {
                 "bulletml", "platform_hid", "platform_audio", "render", "asset", "asset_render", "sprite", "scene", "sprite_text", "anim",
                 "collision", "tilemap", "level", "audio", "sprite_ui", "touchpad", "frameloop", "renderer-metal", "renderer-cpu", "renderer-cpu-raster",
                 "sockit2m", "window", "testbed", "stones", "cpukiller",
-                "rocks", "arcanum", "arcfire", "gallery", "script", "truetype", "typeset", "krome", "goldberg", "kromedemo", "kromescreens", "patherizer" },
+                "rocks", "arcanum", "arcfire", "gallery", "script", "truetype", "dejavu", "typeset", "krome", "goldberg", "kromedemo", "kromescreens", "patherizer" },
   tests     = true,
   platforms = { "macos" },
 }
@@ -60,7 +60,7 @@ root "ios" {
                 "platform_hid", "platform_audio", "render", "asset", "asset_render", "sprite", "scene", "sprite_text", "anim",
                 "collision", "tilemap", "level", "audio", "sprite_ui", "touchpad", "frameloop", "renderer-metal", "renderer-cpu", "renderer-cpu-raster",
                 "window", "testbed", "stones", "rocks", "arcanum",
-                "arcfire", "gallery", "script", "truetype", "typeset", "kim", "kimb", "krome", "kromedemo", "kromescreens" },
+                "arcfire", "gallery", "script", "truetype", "dejavu", "typeset", "kim", "kimb", "krome", "kromedemo", "kromescreens" },
   tests     = true,
   platforms = { "ios", "iossim" },
 }

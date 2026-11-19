@@ -29,7 +29,7 @@ return {
     ch = function() model.changes = model.changes + 1 end,
     bl = function() model.blurs = model.blurs + 1 end,
   },
-  root = col { pad = 10, gap = 10, font = "sprite_text/DejaVuSans.ttf",
+  root = col { pad = 10, gap = 10, font = "dejavu/DejaVuSans.ttf",
     edit { id = "name", bind = "name", event = "go", change = "ch", blur = "bl", w = 200, h = 24, pad = 4 },
     edit { id = "notes", bind = "notes", multiline = true, w = 200, h = 60, pad = 4 },
     edit { id = "ro", readonly = true, w = 200, h = 24, pad = 4, "fixed text" },
@@ -92,10 +92,10 @@ void test_edit(kv::TestCtx& c) {
     format(root, sizeof root, "%s", __FILE__);
     for (int up = 0; up < 4; ++up) if (char* slash = strrchr(root, '/')) *slash = 0;
     KV_CHECK(c, io_make_temp_dir("kv-krome-edit", dir, sizeof dir));
-    format(src, sizeof src, "%s/modules/sprite_text/assets/DejaVuSans.ttf", root);
-    format(dst, sizeof dst, "%s/sprite_text", dir);
+    format(src, sizeof src, "%s/modules/dejavu/assets/DejaVuSans.ttf", root);
+    format(dst, sizeof dst, "%s/dejavu", dir);
     io_make_dirs(dst);
-    format(dst, sizeof dst, "%s/sprite_text/DejaVuSans.ttf", dir);
+    format(dst, sizeof dst, "%s/dejavu/DejaVuSans.ttf", dir);
     KV_CHECK(c, io_copy_now(src, dst));
     const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &asset_module, &krome_module};
     Engine e;

@@ -1,5 +1,5 @@
 // Korvid asset: fonts as assets (docs/PRDs/Krome-Slice-3-PRD.md, "Glyphs on demand").
-// asset_load_font(e, "sprite_text/DejaVuSans.ttf", 32) returns a handle at once: a strike, the
+// asset_load_font(e, "dejavu/DejaVuSans.ttf", 32) returns a handle at once: a strike, the
 // font at one pixel size. The .ttf (and each fallback's) reads through the I/O queue, once
 // per file however many sizes use it; "asset.pump_fonts" (phase PreSim, main thread) makes
 // the strike Ready when its first face is in, with its metrics and kerning, and

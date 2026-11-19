@@ -56,7 +56,7 @@ void test_font(kv::TestCtx& c) {
     char root[600], dir[400];
     repo_root(root, sizeof root);
     KV_CHECK(c, io_make_temp_dir("kv-font-test", dir, sizeof dir));
-    KV_CHECK(c, copy_in(root, "modules/sprite_text/assets/DejaVuSans.ttf", dir, "sprite_text/DejaVuSans.ttf"));
+    KV_CHECK(c, copy_in(root, "modules/dejavu/assets/DejaVuSans.ttf", dir, "dejavu/DejaVuSans.ttf"));
     KV_CHECK(c, copy_in(root, "examples/arcfire/assets/font/PublicPixel.ttf", dir, "pixel/PublicPixel.ttf"));
     const ModuleDesc* const list[] = {&platform_module, &asset_module};
     Engine e;
@@ -64,7 +64,7 @@ void test_font(kv::TestCtx& c) {
     KV_CHECK(c, platform_io(e)->mount_dir(dir));
 
     // Nothing is made until asked; asked, made once, and the same glyph after.
-    Handle h16 = asset_load_font(e, "sprite_text/DejaVuSans.ttf", 16.0f);
+    Handle h16 = asset_load_font(e, "dejavu/DejaVuSans.ttf", 16.0f);
     KV_CHECK(c, settle(e, h16));
     const FontAsset& f = *asset_font(e, h16);
     KV_CHECK(c, glyphs_of(f) == 0 && pages_of(f) == 1 && f.line_height >= 16 && f.ascent == (f32)(i32)f.ascent && f.kern_count > 1000);
@@ -85,12 +85,12 @@ void test_font(kv::TestCtx& c) {
     KV_CHECK(c, i2 && i2 != i0 && i2->advance == i0->advance && font_glyph_at(f, 'i', 2) == i2 && font_glyph_at(f, 'i', 0) == i0);
 
     // Another size of the same file reads nothing more and is ready at the next pump.
-    Handle h20 = asset_load_font(e, "sprite_text/DejaVuSans.ttf", 20.0f);
+    Handle h20 = asset_load_font(e, "dejavu/DejaVuSans.ttf", 20.0f);
     frame(e);
     KV_CHECK(c, asset_font(e, h20)->state == AssetState::Ready);
 
     // Pages: big glyphs fill one and take another.
-    Handle h120 = asset_load_font(e, "sprite_text/DejaVuSans.ttf", 120.0f);
+    Handle h120 = asset_load_font(e, "dejavu/DejaVuSans.ttf", 120.0f);
     KV_CHECK(c, settle(e, h120));
     const FontAsset& big = *asset_font(e, h120);
     for (u32 cp = 'A'; cp <= 'Z'; ++cp) font_glyph(big, cp);
@@ -102,7 +102,7 @@ void test_font(kv::TestCtx& c) {
     FontDesc d;
     d.px = 16.0f;
     d.fallback = Span<const char* const>(fallback, 1);
-    Handle hf = asset_load_font(e, "sprite_text/DejaVuSans.ttf", d);
+    Handle hf = asset_load_font(e, "dejavu/DejaVuSans.ttf", d);
     KV_CHECK(c, hf != h16 && settle(e, hf));
     // PublicPixel's read lands: as many frames as that takes (a loaded machine takes more
     // than an idle one), within reason.
@@ -113,14 +113,14 @@ void test_font(kv::TestCtx& c) {
     KV_CHECK(c, font_glyph(fb, 'A')->advance == a->advance); // DejaVu's own still comes first
     // The engine's list, for fonts loaded after it is set.
     asset_set_font_fallback(e, Span<const char* const>(fallback, 1));
-    Handle hd = asset_load_font(e, "sprite_text/DejaVuSans.ttf", 18.0f);
+    Handle hd = asset_load_font(e, "dejavu/DejaVuSans.ttf", 18.0f);
     KV_CHECK(c, settle(e, hd));
     for (u32 i = 0; i < 2000 && !font_glyph(*asset_font(e, hd), 0x5186); ++i) frame(e);
     KV_CHECK(c, font_glyph(*asset_font(e, hd), 0x5186) != nullptr);
 
     // The numbers: a strike's glyphs made as asked (Latin, Greek, Cyrillic at 14 px).
     {
-        Handle h14 = asset_load_font(e, "sprite_text/DejaVuSans.ttf", 14.0f);
+        Handle h14 = asset_load_font(e, "dejavu/DejaVuSans.ttf", 14.0f);
         KV_CHECK(c, settle(e, h14));
         const FontAsset& f14 = *asset_font(e, h14);
         f64 t0 = time_now();
@@ -136,7 +136,7 @@ void test_font(kv::TestCtx& c) {
     }
 
     // Small sizes: whole-pixel metrics.
-    Handle h9 = asset_load_font(e, "sprite_text/DejaVuSans.ttf", 9.0f);
+    Handle h9 = asset_load_font(e, "dejavu/DejaVuSans.ttf", 9.0f);
     KV_CHECK(c, settle(e, h9));
     const FontAsset& f9 = *asset_font(e, h9);
     KV_CHECK(c, f9.ascent == (f32)(i32)f9.ascent && f9.line_height == (f32)(i32)f9.line_height && font_glyph(f9, 'm'));

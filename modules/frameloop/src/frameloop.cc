@@ -10,6 +10,7 @@
 #include "korvid/core/name.h"
 #include "korvid/core/profile.h"
 #include "korvid/core/time.h"
+#include "korvid/dejavu/dejavu.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform/io.h"
@@ -316,7 +317,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     if (g_touchpad) touchpad_enable(engine, true); // a touch screen turns it on by itself
 
     if (g_overlay) {
-        s->overlay_font = asset_load_font(engine, "sprite_text/DejaVuSans.ttf", kOverlayPx);
+        s->overlay_font = asset_load_font(engine, KV_DEJAVU_SANS, kOverlayPx);
         Table* labels = engine_table(engine, g_overlay_kind);
         for (u32 i = 0; i < kOverlayLines; ++i) {
             Text t;

@@ -47,7 +47,7 @@ constinit const InputActionDesc k_actions[] = {
 
 const char* const k_doc = R"({
   "design": [320, 180], "pixel": true,
-  "style": { "font": "sprite_text/DejaVuSans.ttf", "size": 8, "colors": { "text": "#ffffff", "gold": "#ffc840" } },
+  "style": { "font": "dejavu/DejaVuSans.ttf", "size": 8, "colors": { "text": "#ffffff", "gold": "#ffc840" } },
   "screens": {
     "menu": { "type": "panel", "name": "box", "anchor": "center", "size": [100, "fit"], "padding": [4, 6, 4, 6], "fill": "gold",
       "children": [

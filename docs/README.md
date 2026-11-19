@@ -78,6 +78,7 @@ most.
 | [krome](../modules/krome/README.md) | UI for tools and dialogs: screens in markup or Lua, laid out with rows, columns and stacks. |
 | [typeset](../modules/typeset/README.md) | Paragraphs of text in a font, for everyone who draws text. |
 | [truetype](../modules/truetype/README.md) | TrueType fonts through stb_truetype, compiled once for the engine. |
+| [dejavu](../modules/dejavu/README.md) | DejaVu Sans, the engine's default font, and the path to load it by. |
 | [patherizer](../modules/patherizer/README.md) | Paths, filled and stroked, rasterized on the CPU at the size they are drawn. |
 | [svg](../modules/svg/README.md) | SVG files read into patherizer's shapes, at cook time. |
 | [image](../modules/image/README.md) | PNG and PPM, both ways, as plain functions over bytes. |
