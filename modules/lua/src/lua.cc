@@ -3,7 +3,8 @@
 // errors are longjmp, not exceptions (the engine has none), so the bindings keep nothing
 // with a destructor alive across a call that can raise. Its math library and its
 // arithmetic (%, ^, //) are kv's (scalar.h), so a script computes the same on every
-// platform, as the engine does.
+// platform, as the engine does. Its seed is a constant, so every state runs the same way
+// every time.
 #if defined(_MSC_VER) && !defined(__clang__)
 // C4701 (a variable maybe used uninitialized: lvm.c's and lobject.c's n1 and n2, which Lua's
 // number macros always set) comes from cl's optimizer, which does not honour the push below
@@ -13,6 +14,11 @@
 #endif
 #include "korvid/math/scalar.h"
 #define LUA_USE_LONGJMP
+// luai_makeseed is lauxlib's "random" seed (the time and an address): math.random starts
+// from it, as do math.randomseed() with no argument, table.sort's pivots and, through
+// luaL_newstate and kv_lua_newstate, the strings' hash and so pairs' order. A constant
+// makes all of them the same on every run.
+#define luai_makeseed() 0u
 #if !defined(_WIN32)
 #define LUA_USE_POSIX
 #endif
@@ -109,3 +115,32 @@
 #else
 #pragma GCC diagnostic pop
 #endif
+
+// kv_lua_newstate: luaL_newstate (the seed, lauxlib's panic and warnings) on an engine
+// allocator. Lua's allocator contract on the engine's: nsize 0 frees, anything else is a
+// new block with what fits of the old one copied in.
+#include "korvid/lua/lua.h"
+namespace {
+void* kv_lua_alloc(void* ud, void* ptr, size_t osize, size_t nsize) {
+    kv::Allocator* a = (kv::Allocator*)ud;
+    if (nsize == 0) {
+        kv::free_in(a, ptr, osize);
+        return nullptr;
+    }
+    void* n = kv::alloc_in(a, nsize);
+    if (n && ptr) {
+        memcpy(n, ptr, osize < nsize ? osize : nsize);
+        kv::free_in(a, ptr, osize);
+    }
+    return n;
+}
+} // namespace
+
+lua_State* kv_lua_newstate(kv::Allocator* a) {
+    lua_State* L = lua_newstate(kv_lua_alloc, a, luaL_makeseed(nullptr));
+    if (L) {
+        lua_atpanic(L, &panic);
+        lua_setwarnf(L, warnfon, L);
+    }
+    return L;
+}

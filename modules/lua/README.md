@@ -9,7 +9,7 @@ language next.
 ## How the engine builds it
 
 `src/lua.cc` is all of Lua in one translation unit, in the order Lua's own `onelua.c`
-uses, compiled as C++. Three things differ from a stock build, none of them in Lua's
+uses, compiled as C++. Four things differ from a stock build, none of them in Lua's
 files:
 
 - **Errors are `longjmp`** (`LUA_USE_LONGJMP`): the engine has no exceptions. A Lua error
@@ -21,6 +21,12 @@ files:
   `<math.h>` read first, each name is defined to kv's function (`modules/math`) for Lua's
   lines. `math.sin`, `math.exp`, `x ^ y`, `x % y`, `x // y` are bit for bit the engine's,
   the same on every platform; the tests check it.
+- **The seed is fixed.** Lua seeds `math.random` from the time and an address
+  (`luai_makeseed`, lauxlib's hook); here it is a constant, so every state draws the same
+  numbers on every run, and so do `math.randomseed()` with no argument, `table.sort`'s
+  pivots and the strings' hash (and with it `pairs`' order over string keys). A script
+  that wants a varying seed calls `math.randomseed` itself, with one of its own
+  (`math.randomseed(os.time())`). The tests check the first draw.
 - **C++ linkage.** The API has no `extern "C"`: everything that uses it is C++ too.
 
 The module is not a unity build: Lua's sources define short macros (`cast`, `G`) that
@@ -31,7 +37,7 @@ must stay in their file.
 ```cpp
 #include "korvid/lua/lua.h"   // lua.h, lauxlib.h and lualib.h
 
-lua_State* L = luaL_newstate();
+lua_State* L = kv_lua_newstate(mem_general());   // or a module's own allocator
 luaL_openlibs(L);
 if (luaL_dostring(L, "return 6 * 7") == LUA_OK) KV_INFO("game", "%g", lua_tonumber(L, -1));
 lua_close(L);
@@ -40,8 +46,9 @@ lua_close(L);
 The API is Lua's own; the reference manual is at https://www.lua.org/manual/5.5/. Lua's
 `io` and `os` libraries are the C library's: on Windows `io.open` does not take UTF-8
 paths, so engine code hands a script the platform's files instead (kvscript's `kv.fs`).
-Lua allocates with `realloc` (`luaL_newstate`); a game that wants it on an engine
-allocator calls `lua_newstate` with its own.
+`kv_lua_newstate` is `luaL_newstate` (its seed, panic and warning handlers) on an engine
+allocator, so Lua's memory is in the engine's accounting; Krome, goldberg and kvscript
+make their states with it. `luaL_newstate` is still there, on `realloc`.
 
 ## Upgrading
 

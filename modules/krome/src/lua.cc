@@ -83,20 +83,6 @@ function kim(file, screen)
 end
 )lua";
 
-void* lua_alloc(void* ud, void* ptr, size_t osize, size_t nsize) {
-    Allocator* a = (Allocator*)ud;
-    if (nsize == 0) {
-        if (ptr) free_in(a, ptr, osize);
-        return nullptr;
-    }
-    void* n = alloc_in(a, nsize, 16);
-    if (n && ptr) {
-        memcpy(n, ptr, osize < nsize ? osize : nsize);
-        free_in(a, ptr, osize);
-    }
-    return n;
-}
-
 KromeModule* state_of(lua_State* L, int upvalue) { return (KromeModule*)lua_touserdata(L, lua_upvalueindex(upvalue)); }
 
 // model's __newindex: the store, then whatever reads the key. Upvalues: the store, the state,
@@ -337,7 +323,7 @@ int script_close_overlay(lua_State* L) {
 } // namespace
 
 bool krome_lua_open(KromeModule& s) {
-    lua_State* L = lua_newstate(lua_alloc, s.general, 0);
+    lua_State* L = kv_lua_newstate(s.general);
     if (!L) return false;
     s.L = L;
     luaL_requiref(L, LUA_GNAME, luaopen_base, 1);

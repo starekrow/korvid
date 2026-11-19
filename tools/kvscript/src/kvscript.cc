@@ -28,7 +28,7 @@ int run_script(const char* path, Span<const char* const> args) {
     IoBytes source;
     i32 err = 0;
     if (!io_read_now(path, &source, nullptr, &err)) { print_err("kvscript: cannot read '%s' (errno %d)\n", path, err); return 1; }
-    lua_State* L = luaL_newstate();
+    lua_State* L = kv_lua_newstate(mem_general());
     if (!L) { source.free(); print_err("kvscript: no memory for Lua\n"); return 1; }
     luaL_openlibs(L);
     script_open_kv(L); // fs, zip, json, sha256, random

@@ -4,9 +4,10 @@
 // anchor is two letters (l m r, then a m s d), and the ink is blended in by the coverage
 // as Pillow blends it into an RGBA picture.
 #include "kvscript.h"
+#include "korvid/core/memory.h"
+#include "korvid/core/utf8.h"
 #include "korvid/math/scalar.h"
 #include "korvid/platform/io.h"
-#include <stdlib.h>
 #include <string.h>
 
 #include "korvid/truetype/truetype.h"
@@ -41,6 +42,8 @@ int font_load(lua_State* L) {
     luaL_setmetatable(L, kFontMeta);
     if (!stbtt_InitFont(&f->info, font_bytes(f), stbtt_GetFontOffsetForIndex(font_bytes(f), 0)))
         return luaL_error(L, "font: '%s' is not a TrueType font", path);
+    // The em in pixels, as Pillow sizes a font: asset's fonts size by height
+    // (ScaleForPixelHeight), which is why this is a path to stb_truetype of its own.
     f->scale = stbtt_ScaleForMappingEmToPixels(&f->info, (f32)px);
     int asc = 0, desc = 0, gap = 0;
     stbtt_GetFontVMetrics(&f->info, &asc, &desc, &gap);
@@ -52,11 +55,13 @@ int font_load(lua_State* L) {
 // The text's advance in pixels, kerning included.
 f32 advance(Font* f, const char* text) {
     f32 x = 0;
-    for (const unsigned char* p = (const unsigned char*)text; *p; ++p) {
+    const char* p = text;
+    for (u32 cp = utf8_next(p), next = 0; cp; cp = next) {
+        next = utf8_next(p);
         int adv = 0, lsb = 0;
-        stbtt_GetCodepointHMetrics(&f->info, *p, &adv, &lsb);
+        stbtt_GetCodepointHMetrics(&f->info, (int)cp, &adv, &lsb);
         x += (f32)adv * f->scale;
-        if (p[1]) x += (f32)stbtt_GetCodepointKernAdvance(&f->info, *p, p[1]) * f->scale;
+        if (next) x += (f32)stbtt_GetCodepointKernAdvance(&f->info, (int)cp, (int)next) * f->scale;
     }
     return x;
 }
@@ -68,7 +73,7 @@ int l_measure(lua_State* L) {
     return 2;
 }
 
-// font:draw(image, text, x, y, r, g, b, a, anchor): one line of ASCII (or Latin-1 bytes).
+// font:draw(image, text, x, y, r, g, b, a, anchor): one line of UTF-8.
 int l_draw(lua_State* L) {
     Font* f = check_font(L, 1);
     Image* m = kvscript_check_image(L, 2);
@@ -88,15 +93,18 @@ int l_draw(lua_State* L) {
     f64 pen = left;
     i32 by = (i32)kv::floor(base);
     f32 shift_y = (f32)(base - by);
-    for (const unsigned char* p = (const unsigned char*)text; *p; ++p) {
+    const char* p = text;
+    for (u32 cp = utf8_next(p), next = 0; cp; cp = next) {
+        next = utf8_next(p);
         i32 px = (i32)kv::floor(pen);
         f32 shift_x = (f32)(pen - px);
         int x0, y0, x1, y1;
-        stbtt_GetCodepointBitmapBoxSubpixel(&f->info, *p, f->scale, f->scale, shift_x, shift_y, &x0, &y0, &x1, &y1);
+        stbtt_GetCodepointBitmapBoxSubpixel(&f->info, (int)cp, f->scale, f->scale, shift_x, shift_y, &x0, &y0, &x1, &y1);
         i32 gw = x1 - x0, gh = y1 - y0;
         if (gw > 0 && gh > 0 && gw * gh <= 1 << 20) {
-            u8* cov = (u8*)malloc((usize)gw * gh);
-            stbtt_MakeCodepointBitmapSubpixel(&f->info, cov, gw, gh, gw, f->scale, f->scale, shift_x, shift_y, *p);
+            u8* cov = (u8*)mem_alloc((usize)gw * gh);
+            if (!cov) return luaL_error(L, "font: no memory for a %dx%d glyph", gw, gh);
+            stbtt_MakeCodepointBitmapSubpixel(&f->info, cov, gw, gh, gw, f->scale, f->scale, shift_x, shift_y, (int)cp);
             for (i32 j = 0; j < gh; ++j)
                 for (i32 i = 0; i < gw; ++i) {
                     i32 dx = px + x0 + i, dy = by + y0 + j;
@@ -112,12 +120,12 @@ int l_draw(lua_State* L) {
                         o[b] = (u8)(((t >> 8) + t) >> 8);
                     }
                 }
-            free(cov);
+            mem_free(cov);
         }
         int adv = 0, lsb = 0;
-        stbtt_GetCodepointHMetrics(&f->info, *p, &adv, &lsb);
+        stbtt_GetCodepointHMetrics(&f->info, (int)cp, &adv, &lsb);
         pen += (f64)adv * f->scale;
-        if (p[1]) pen += (f64)stbtt_GetCodepointKernAdvance(&f->info, *p, p[1]) * f->scale;
+        if (next) pen += (f64)stbtt_GetCodepointKernAdvance(&f->info, (int)cp, (int)next) * f->scale;
     }
     return 0;
 }

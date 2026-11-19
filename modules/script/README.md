@@ -7,7 +7,7 @@ it has no systems and nothing to register; a tool opens it onto its own Lua stat
 ```cpp
 #include "korvid/script/script.h"
 
-lua_State* L = luaL_newstate();
+lua_State* L = kv_lua_newstate(mem_general());
 luaL_openlibs(L);
 script_open_kv(L);                 // pushes kv: fs, zip, json, sha256, random
 lua_setglobal(L, "kv");

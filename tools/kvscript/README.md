@@ -30,7 +30,7 @@ Lua's own libraries, all of them, and `kv`:
 | `img:bbox([threshold])` | x0, y0, x1, y1 of the pixels whose alpha is over threshold (0), or nil |
 | `img:key(r, g, b)`, `img:scale(kr, kg, kb [, ka])` | new pictures: that color made clear; each channel times its factor, truncated |
 | `img:save(path)`, `img:encode()` | PNG, to a file or as a string |
-| `kv.font.load(path, px)`, `font:draw(img, text, x, y, r, g, b, a [, anchor])`, `font:measure(text)` | TrueType (stb_truetype) at px to the em; anchor `l`/`m`/`r` then `a`/`m`/`s`/`d` |
+| `kv.font.load(path, px)`, `font:draw(img, text, x, y, r, g, b, a [, anchor])`, `font:measure(text)` | TrueType (stb_truetype) at px to the em, text in UTF-8; anchor `l`/`m`/`r` then `a`/`m`/`s`/`d` |
 | `kv.svg.load(path [, {lenient = true}])`, `kv.svg.parse(text [, opts])` | an SVG file read into a shape (modules/svg): the shape, or nil, and a list of messages (`"name:line: text"`); `lenient` makes refusals (text, filters, masks, ...) warnings |
 | `kv.patherizer.read(bytes)` | a `.kshape` read into a shape, or nil and why |
 | `shape:draw(w, h [, {r, g, b, a}])`, `shape:encode([lines])`, `shape:view()`, `shape:one_colour()` | a kv.image of the shape at w x h (straight alpha; the table is currentColor), the shape as `.kshape` bytes, its view box, whether every paint is currentColor |

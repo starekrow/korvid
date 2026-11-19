@@ -4,7 +4,8 @@
 #include <string.h>
 
 // The engine's Lua: a chunk runs, an error comes back through pcall (by longjmp, past the
-// C++ that called it), the standard libraries are there, and the math is kv's to the bit.
+// C++ that called it), the standard libraries are there, the math is kv's to the bit, and
+// math.random starts from the same seed every time.
 
 namespace {
 using namespace kv;
@@ -22,7 +23,7 @@ f64 run_number(lua_State* L, const char* chunk) {
 
 void test_lua(TestCtx& c) {
     c.begin("lua");
-    lua_State* L = luaL_newstate();
+    lua_State* L = kv_lua_newstate(mem_general());
     KV_CHECK(c, L != nullptr);
     luaL_openlibs(L);
     KV_CHECK(c, run_number(L, "return 6 * 7") == 42.0);
@@ -51,6 +52,12 @@ void test_lua(TestCtx& c) {
         KV_CHECK(c, same(run_number(L, "return x % 0.7"), m) && same(run_number(L, "return x // 0.3"), kv::floor(x / 0.3)));
     }
     KV_CHECK(c, run_number(L, "return math.log(8, 2)") == 3.0 && run_number(L, "return math.floor(-2.5)") == -3.0);
+    lua_close(L);
+
+    // The seed is fixed: a new state's first draw is the same on every run and platform.
+    L = kv_lua_newstate(mem_general());
+    luaL_openlibs(L);
+    KV_CHECK(c, luaL_dostring(L, "return math.random(0)") == LUA_OK && lua_tointeger(L, -1) == 4554719557422691265);
     lua_close(L);
 }
 

@@ -1581,7 +1581,7 @@ void find_lua_dir(GoldbergState& s) {
 
 bool load_app(GoldbergState& s, Engine& e) {
     if (s.loaded) return true;
-    lua_State* L = luaL_newstate();
+    lua_State* L = kv_lua_newstate(s.general);
     if (!L) { print_err("goldberg: no memory for Lua\n"); return false; }
     s.L = L;
     luaL_openlibs(L);
