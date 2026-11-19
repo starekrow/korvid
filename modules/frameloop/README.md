@@ -200,7 +200,7 @@ touchpad. A game that depends on frameloop has all of them.
   wait for the resume.
 - **`--overlay` puts the report on screen**: the fps line and the memory line at the
   top-left, in the module's own cosmetic kind, and with `--prof-report` the top zones
-  under them, refreshed with every report. It loads `text/DejaVuSans.ttf` at 16 px.
+  under them, refreshed with every report. It loads `sprite_text/DejaVuSans.ttf` at 16 px.
 - **`--run-seconds` is cooperative.** It emits `ExitRequested{Timer}` once; a game that
   ignores it runs on.
 - **Everything mechanical is logged once**: the schedule at init, the device and the

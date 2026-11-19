@@ -6,7 +6,7 @@
 //   resources    anim.clips
 //   systems      anim.pump   PreSim, main thread, Always: clip files that arrived are parsed,
 //                            sheets whose texture arrived get their clips
-//                anim.play   PostSim, Always, after text.layout and before scene.compose when
+//                anim.play   PostSim, Always, after sprite_text.layout and before scene.compose when
 //                            present: reads *.AnimPlayer; writes *.AnimPlayer, *.Sprite,
 //                            *.Local2, *.Transform2
 //

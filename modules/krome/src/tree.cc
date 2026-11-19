@@ -6,7 +6,7 @@
 
 namespace kv {
 
-const char* const KROME_DEFAULT_FONT = "text/DejaVuSans.ttf";
+const char* const KROME_DEFAULT_FONT = "sprite_text/DejaVuSans.ttf";
 
 void KromeTree::init(Allocator* a) {
     nodes.alloc = looks.alloc = strings.alloc = a;

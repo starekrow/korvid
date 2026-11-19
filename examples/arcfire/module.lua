@@ -6,7 +6,7 @@
 module "arcfire" {
   output        = "exe",
   engine_module = true,
-  deps  = { "core", "platform", "platform_hid", "math", "render", "asset", "asset_render", "asset_live", "sprite", "scene", "text", "audio",
+  deps  = { "core", "platform", "platform_hid", "math", "render", "asset", "asset_render", "asset_live", "sprite", "scene", "sprite_text", "audio",
             "collision", "sprite_ui", "cli", "frameloop", "xml", "bulletml", "anim", "tilemap", "save" },
   -- kpack packs the staged assets into bin/arcfire.kpak in the ship build; the shader
   -- rule compiles shaders/*.slang into bin/shaders/ (the game's fragment shaders).

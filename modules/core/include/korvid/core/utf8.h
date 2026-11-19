@@ -31,7 +31,7 @@ u32 utf8_decode(const char* s, usize len, u32* advance);
 
 // The next code point of a NUL-terminated string, advancing `p` past it. At the NUL it
 // returns 0 and leaves `p` on it. A sequence cut short by the NUL is malformed. The form
-// for a NUL-terminated string (from modules/text/src/module.cc):
+// for a NUL-terminated string (from modules/sprite_text/src/module.cc):
 //
 //   const char* p = text.str;
 //   while (u32 cp = utf8_next(p)) {

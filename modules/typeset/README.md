@@ -1,7 +1,7 @@
 # typeset
 
 Paragraphs of text in a font, for everyone who draws text: Krome's `text` and `edit`, the
-text module's labels and `Paragraph`, and in time `sprite_ui`'s labels. It depends on fonts
+sprite_text module's labels and `Paragraph`, and in time `sprite_ui`'s labels. It depends on fonts
 (`asset`) and nothing that draws (`docs/PRDs/Krome-Slice-3-PRD.md`, "Paragraphs").
 
 ## How it works

@@ -205,7 +205,7 @@ One shader's worth of primitives: a rounded rectangle by signed distance, with b
 soft shadow, gradient fill and a clip rect. Images and glyphs are textured quads as they
 are today.
 
-**Text is the hard part** and the largest piece of work. Today's `text` module is one
+**Text is the hard part** and the largest piece of work. Today's `sprite_text` module is one
 line of up to 64 bytes, drawn as glyph sprites from a `truetype` (stb_truetype) atlas.
 Krome needs paragraphs, wrapping, shaping, font fallback, and small sizes that stay
 crisp. Homemade UI looks homemade mostly here.

@@ -47,7 +47,7 @@ the [module catalog](README.md#modules) has everything.
 - **Draw a sprite:** [sprite](../modules/sprite/README.md), `Transform2`, `Sprite`
 - **Move, zoom or follow with the camera:** [sprite](../modules/sprite/README.md#quick-reference), `Camera2`, the resource `sprite.camera`
 - **Make one thing follow another:** [scene](../modules/scene/README.md), `Parent`, `Local2`
-- **Put text on screen:** [text](../modules/text/README.md), `Text`, `text_set`
+- **Put text on screen:** [text](../modules/sprite_text/README.md), `Text`, `sptext_set`
 - **Animate a sprite: flipbook, fade, motion:** [anim](../modules/anim/README.md), `anim_load`, `AnimPlayer`
 - **Draw a Tiled map:** [tilemap](../modules/tilemap/README.md), `tilemap_load`, `tilemap_spawn`
 - **Build a menu, a HUD or a dialogue box:** [ui](../modules/sprite_ui/README.md), `spui_load`, `spui_open`

@@ -73,7 +73,7 @@ most.
 
 | module | what it is |
 |---|---|
-| [text](../modules/text/README.md) | Words on screen: a `Text` component laid out as glyph sprites. |
+| [sprite_text](../modules/sprite_text/README.md) | Words on screen: a `Text` component laid out as glyph sprites. |
 | [sprite_ui](../modules/sprite_ui/README.md) | Menus, HUDs, dialogue boxes and whole screens, as trees of named nodes. |
 | [krome](../modules/krome/README.md) | UI for tools and dialogs: screens in markup or Lua, laid out with rows, columns and stacks. |
 | [typeset](../modules/typeset/README.md) | Paragraphs of text in a font, for everyone who draws text. |

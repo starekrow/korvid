@@ -241,7 +241,7 @@ struct KromeMeasure {
     vec2 (*paragraph)(void* user, const char* s, u32 len, Name font, f32 size, f32 line_height, f32 width, f32* narrowest) = nullptr;
 };
 
-// The default font and size where nothing says (DejaVu Sans, which the text module ships).
+// The default font and size where nothing says (DejaVu Sans, which the sprite_text module ships).
 extern const char* const KROME_DEFAULT_FONT;
 constexpr f32 KROME_DEFAULT_SIZE = 14.0f;
 

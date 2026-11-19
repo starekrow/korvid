@@ -265,7 +265,7 @@ down by running fewer ticks per second, never shorter ones.
 ## Frame and Work units
 
 Presentation code that has to run once per drawn frame goes in `Phase::Frame`, as
-`text.layout` and `sprite_ui.draw` do. Background work that should soak up spare time goes in
+`sprite_text.layout` and `sprite_ui.draw` do. Background work that should soak up spare time goes in
 `Phase::Work`. Such a unit does a slice, calls `ctx.more()` if there is more to do, and
 sizes its slice by `ctx.time_left()`. The frame loop gives Work whatever time is left
 before the next frame is due. Neither cycle may write sim state, and `engine_init` fails

@@ -66,7 +66,7 @@ constinit const SystemDesc    k_systems[]   = {
      .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
     // The Frame cycle: glyph pages the frame's text added to, uploaded before it draws.
     {.name = ".fonts_flush", .phase = Phase::Frame, .fn = asset_fonts_flush,
-     .after = "?krome.paint, ?text.layout, ?sprite_ui.draw", .main_thread = true, .runs = RunWhen::Always},
+     .after = "?krome.paint, ?sprite_text.layout, ?sprite_ui.draw", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump_sounds", .phase = Phase::PreSim, .fn = asset_sounds_pump, .writes = ".sounds",
      .after = ".pump_scopes", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pump_blobs", .phase = Phase::PreSim, .fn = asset_blobs_pump, .writes = ".blobs",

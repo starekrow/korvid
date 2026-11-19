@@ -31,7 +31,7 @@
 #include "korvid/sprite/camera.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
-#include "korvid/text/text.h"
+#include "korvid/sprite_text/sprite_text.h"
 #include <stdlib.h>
 
 namespace kv {
@@ -175,7 +175,7 @@ void spawn_label(Table& labels, const Game& g, Role role, const char* str, point
     t.space  = SpriteSpace::Screen;
     t.anchor = anchor;
     t.align  = align;
-    text_set(t, "%s", str);
+    sptext_set(t, "%s", str);
     labels.spawn(transform2_at(at), t, Label{role});
 }
 
@@ -266,7 +266,7 @@ void pause(TickContext& ctx) {
 }
 
 // Phase PostSim, every tick: the HUD label says what the score says. One write per tick;
-// the text module relays out only when the string changes.
+// the sprite_text module relays out only when the string changes.
 void hud(TickContext& ctx) {
     static const u32 k_score = ctx.resource_id(".score");
     const Score* score = ctx.resource<const Score>(k_score);
@@ -274,7 +274,7 @@ void hud(TickContext& ctx) {
         Span<Text>        texts = k.col<Text>();
         Span<const Label> roles = k.col<const Label>();
         for (u32 i = 0; i < k.rows(); ++i)
-            if (k.alive(i) && roles[i].role == ROLE_HUD) text_set(texts[i], "SCORE %d   WAVE %u   HIGH %d", score->total, score->wave, score->high);
+            if (k.alive(i) && roles[i].role == ROLE_HUD) sptext_set(texts[i], "SCORE %d   WAVE %u   HIGH %d", score->total, score->wave, score->high);
     }
 }
 
@@ -657,7 +657,7 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     if (!engine_publish(engine, self, ".score", &g->score)) return false;
 
     if (!renderer_get(engine)) return false;
-    g->font = asset_load_font(engine, "text/DejaVuSans.ttf", 28.0f);
+    g->font = asset_load_font(engine, "sprite_text/DejaVuSans.ttf", 28.0f);
     if (g->font.is_null()) return false;
     // Two clips, two ways: the flame's flipbook is a file; the fade is built here, one
     // second of alpha from one to zero, played at 1 / lifetime by each piece of debris.
@@ -723,10 +723,10 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_asset_failed", KV_ON(AssetFailed, on_asset_failed), .phase = Phase::Sim},
     {.name = ".on_overlap",  KV_ON(OverlapBegin, on_overlap), .phase = Phase::PostSim, .emits = "RockHit, ShipHit"},
     {.name = ".on_spawned",  KV_ON(Spawned, on_spawned), .phase = Phase::PostSim, .writes = ".flame", .appends = "audio.commands",
-     .before = "anim.play"}, // a new flame set up before it animates (this too was ordered only by way of text.layout)
+     .before = "anim.play"}, // a new flame set up before it animates (this too was ordered only by way of sprite_text.layout)
     {.name = ".on_anim_finished", KV_ON(AnimFinished, on_anim_finished), .phase = Phase::Input},
     {.name = ".on_rock_hit", KV_ON(RockHit, on_rock_hit), .phase = Phase::PostSim, .writes = ".rock, .score", .appends = "audio.commands", .emits = "ScoreChanged",
-     .before = "anim.play, scene.compose"}, // the split rocks set up before they animate and compose (ordered only by way of text.layout before it moved to Frame)
+     .before = "anim.play, scene.compose"}, // the split rocks set up before they animate and compose (ordered only by way of sprite_text.layout before it moved to Frame)
     {.name = ".on_ship_hit", KV_ON(ShipHit, on_ship_hit), .phase = Phase::PostSim, .reads = ".ship.Transform2", .writes = ".ship.Health"},
     {.name = ".on_score",    KV_ON(ScoreChanged, on_score), .phase = Phase::Input},
     {.name = ".on_expire",   KV_ON(Expire, on_expire), .phase = Phase::Input},

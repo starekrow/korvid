@@ -36,7 +36,7 @@
 #include "korvid/sprite/camera.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
-#include "korvid/text/text.h"
+#include "korvid/sprite_text/sprite_text.h"
 #include "korvid/tilemap/tilemap.h"
 #include "korvid/sprite_ui/sprite_ui.h"
 #include <stdlib.h>

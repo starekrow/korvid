@@ -1,4 +1,4 @@
-#include "korvid/text/module.h"
+#include "korvid/sprite_text/module.h"
 #include "korvid/typeset/typeset.h"
 #include "korvid/math/scalar.h"
 #include "korvid/core/format.h"
@@ -17,7 +17,7 @@
 
 namespace kv {
 
-int text_set(Text& t, const char* fmt, ...) {
+int sptext_set(Text& t, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     int n = vformat(t.str, sizeof t.str, fmt, args);
@@ -26,7 +26,7 @@ int text_set(Text& t, const char* fmt, ...) {
     return n;
 }
 
-u32 text_layout(const FontAsset& font, const Text& text, Span<GlyphPlacement> out, f32* width) {
+u32 sptext_layout(const FontAsset& font, const Text& text, Span<GlyphPlacement> out, f32* width) {
     if (font.state != AssetState::Ready) { if (width) *width = 0.0f; return 0; }
     f32 advance = font_measure(font, text.str, 1.0f);
     f32 x = text.align == TextAlign::Center ? -advance * 0.5f : text.align == TextAlign::Right ? -advance : 0.0f;
@@ -71,7 +71,7 @@ TypesetParams params_of(const Text& t) {
 // about it). Only the first `shown` glyphs.
 } // namespace
 
-u32 text_layout_paragraph(const FontAsset& font, const Text& t, const char* str, u32 shown, Array<GlyphPlacement>& out) {
+u32 sptext_layout_paragraph(const FontAsset& font, const Text& t, const char* str, u32 shown, Array<GlyphPlacement>& out) {
     if (font.state != AssetState::Ready) return 0;
     f32 scale = t.scale > 0.0f ? t.scale : 1.0f;
     TypesetParams p = params_of(t);
@@ -105,9 +105,9 @@ namespace {
 struct LabelMark { Handle entity; u64 built; };
 struct LabelTable { Array<LabelMark> marks; };
 
-struct TextState {
+struct SptextState {
     Array<LabelTable> tables; // by engine table index
-    TextStats         stats;
+    SptextStats         stats;
     u32               glyph_kind = 0;
     Array<char*>      strings;  // paragraphs' strings, by Paragraph::string - 1; null: free
     Array<u32>        free_ids;
@@ -135,12 +135,12 @@ u64 label_hash(const Text& t, const FontAsset* f, const char* str, u32 shown) {
 
 // Phase PostSim, every tick, before scene.compose: labels whose text or look changed (or
 // whose font arrived) lose their glyphs and get new ones as children.
-void text_layout_system(TickContext& ctx) {
-    KV_ZONE("text.layout");
-    TextState& st = ctx.state_as<TextState>();
+void sptext_layout_system(TickContext& ctx) {
+    KV_ZONE("sprite_text.layout");
+    SptextState& st = ctx.state_as<SptextState>();
     Engine& e = *ctx.engine;
     Table* glyphs = ctx.write_kind(st.glyph_kind);
-    TextStats s;
+    SptextStats s;
 
     Allocator* alloc = st.tables.alloc;
     while (st.tables.len < e.tables.len) { LabelTable lt; lt.marks.alloc = alloc; st.tables.push(lt); }
@@ -182,11 +182,11 @@ void text_layout_system(TickContext& ctx) {
             u32 n = 0;
             if (str == t.str && t.wrap <= 0.0f && !t.subpixel && t.line_height <= 0.0f && !strchr(str, '\n')) {
                 // One line: as it always was.
-                places.resize_fill(KV_TEXT_MAX, GlyphPlacement{});
-                n = text_layout(*font, t, places.span());
+                places.resize_fill(KV_SPTEXT_MAX, GlyphPlacement{});
+                n = sptext_layout(*font, t, places.span());
             } else {
                 places.clear();
-                n = text_layout_paragraph(*font, t, str, shown, places);
+                n = sptext_layout_paragraph(*font, t, str, shown, places);
             }
             // With a shadow, every glyph twice: the shadow keyed under the glyph in the same
             // layer, so all of a layer's shadows draw before its glyphs.
@@ -210,7 +210,7 @@ void text_layout_system(TickContext& ctx) {
                     Local2 local = local2_at(at);
                     Transform2 placed = i < where.len ? placement_compose(where[i], local) : Transform2{};
                     Handle gh = glyphs->spawn(placed, spr, local, Parent{label});
-                    if (gh.is_null()) { KV_WARN("text", "glyph kind is full (%u rows)", glyphs->rows()); break; }
+                    if (gh.is_null()) { KV_WARN("sprite_text", "glyph kind is full (%u rows)", glyphs->rows()); break; }
                     ++s.glyphs;
                 }
         }
@@ -218,21 +218,21 @@ void text_layout_system(TickContext& ctx) {
     st.stats = s;
 }
 
-bool text_startup(Engine& e, ModuleInstance& self) {
-    TextState* s = arena_push<TextState>(self.arena);
+bool sptext_startup(Engine& e, ModuleInstance& self) {
+    SptextState* s = arena_push<SptextState>(self.arena);
     if (!s) return false;
     s->tables.alloc = &self.general;
     s->strings.alloc = s->free_ids.alloc = &self.general;
     s->alloc = &self.general;
-    Table* glyphs = engine_table(e, "text.glyph");
+    Table* glyphs = engine_table(e, "sprite_text.glyph");
     if (!glyphs) return false;
     s->glyph_kind = glyphs->index + 1;
     self.set_state(s);
     return true;
 }
 
-void text_shutdown(Engine&, ModuleInstance& self) {
-    TextState* s = self.state_as<TextState>();
+void sptext_shutdown(Engine&, ModuleInstance& self) {
+    SptextState* s = self.state_as<SptextState>();
     if (!s) return;
     for (LabelTable& lt : s->tables) lt.marks.free();
     s->tables.free();
@@ -252,27 +252,27 @@ constinit const KindDesc k_kinds[] = {
 
 constinit const SystemDesc k_systems[] = {
     // The Frame cycle (docs/design/cycles.md): glyphs are presentation.
-    {.name = ".layout", .phase = Phase::Frame, .fn = text_layout_system, .reads = "*.Text, *.Paragraph, *.Transform2", .writes = ".glyph"},
+    {.name = ".layout", .phase = Phase::Frame, .fn = sptext_layout_system, .reads = "*.Text, *.Paragraph, *.Transform2", .writes = ".glyph"},
 };
 
 } // namespace
 
-KV_MODULE_DEFINE(text_module) = {
-    .name       = "text",
+KV_MODULE_DEFINE(sprite_text_module) = {
+    .name       = "sprite_text",
     .components = k_components,
     .kinds      = k_kinds,
     .systems    = k_systems,
-    .startup    = text_startup,
-    .shutdown   = text_shutdown,
+    .startup    = sptext_startup,
+    .shutdown   = sptext_shutdown,
     .memory     = {.reserve = 64 * 1024},
 };
 
 namespace {
-TextState* text_state(Engine& e) { return engine_module_state_as<TextState>(e, "text"); }
+SptextState* sptext_state(Engine& e) { return engine_module_state_as<SptextState>(e, "sprite_text"); }
 }
 
-void text_paragraph_set(Engine& e, Paragraph& p, const char* utf8) {
-    TextState* s = text_state(e);
+void sptext_paragraph_set(Engine& e, Paragraph& p, const char* utf8) {
+    SptextState* s = sptext_state(e);
     if (!s || !utf8) return;
     if (!p.string || p.string > s->strings.len) {
         if (s->free_ids.len) p.string = s->free_ids.pop();
@@ -285,27 +285,27 @@ void text_paragraph_set(Engine& e, Paragraph& p, const char* utf8) {
     memcpy(slot, utf8, n);
 }
 
-const char* text_paragraph_get(Engine& e, const Paragraph& p) {
-    TextState* s = text_state(e);
+const char* sptext_paragraph_get(Engine& e, const Paragraph& p) {
+    SptextState* s = sptext_state(e);
     if (!s || !p.string || p.string > s->strings.len) return "";
     const char* str = s->strings[p.string - 1];
     return str ? str : "";
 }
 
-void text_paragraph_free(Engine& e, Paragraph& p) {
-    TextState* s = text_state(e);
+void sptext_paragraph_free(Engine& e, Paragraph& p) {
+    SptextState* s = sptext_state(e);
     if (!s || !p.string || p.string > s->strings.len) return;
     char*& slot = s->strings[p.string - 1];
     if (slot) { free_in(s->alloc, slot, strlen(slot) + 1); slot = nullptr; s->free_ids.push(p.string); }
     p.string = 0;
 }
 
-u32 text_paragraph_length(Engine& e, const Paragraph& p) { return (u32)utf8_count(text_paragraph_get(e, p)); }
+u32 sptext_paragraph_length(Engine& e, const Paragraph& p) { return (u32)utf8_count(sptext_paragraph_get(e, p)); }
 
-u32 text_paragraph_fit(Engine& e, const Text& t, const Paragraph& p, f32 height) {
+u32 sptext_paragraph_fit(Engine& e, const Text& t, const Paragraph& p, f32 height) {
     const FontAsset* font = asset_font(e, t.font);
     if (!font || font->state != AssetState::Ready) return 0;
-    const char* str = text_paragraph_get(e, p);
+    const char* str = sptext_paragraph_get(e, p);
     f32 scale = t.scale > 0.0f ? t.scale : 1.0f;
     MemScope scope;
     Typeset ts;
@@ -317,8 +317,8 @@ u32 text_paragraph_fit(Engine& e, const Text& t, const Paragraph& p, f32 height)
     return count;
 }
 
-const TextStats* text_stats(Engine& e) {
-    TextState* s = engine_module_state_as<TextState>(e, "text");
+const SptextStats* sptext_stats(Engine& e) {
+    SptextState* s = engine_module_state_as<SptextState>(e, "sprite_text");
     return s ? &s->stats : nullptr;
 }
 

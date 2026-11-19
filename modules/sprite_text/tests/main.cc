@@ -9,5 +9,5 @@ int main() {
     test_text(c);
     kv::names_shutdown();
     kv::mem_shutdown();
-    return kv::test_report(c, "text_tests");
+    return kv::test_report(c, "sprite_text_tests");
 }

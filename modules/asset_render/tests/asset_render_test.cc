@@ -102,7 +102,7 @@ void test_asset_render(TestCtx& c) {
     KV_CHECK(c, write_text("m.material.json", "{ \"texture\": \"a.png\", \"blend\": \"alpha\" }"));
     char root[600], from[700], to[700];
     repo_root(root, sizeof root);
-    format(from, sizeof from, "%s/modules/text/assets/DejaVuSans.ttf", root);
+    format(from, sizeof from, "%s/modules/sprite_text/assets/DejaVuSans.ttf", root);
     format(to, sizeof to, "%s/DejaVuSans.ttf", g_dir);
     KV_CHECK(c, io_copy_now(from, to));
 

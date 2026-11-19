@@ -193,13 +193,13 @@ Nov 15, 2026, on branch tool-stuff.
   half-written is left). Always on, not only in dev builds: they are cheap, and a replay
   that drifts is not. Nothing in the tree tripped them; `core_tests` covers both halves. Arcfire's recorded replay matches (236 hashes): the Sim cycle
   is unchanged.
-- **Presentation moved, and the follow-ups** (last of the day). `text.layout`, `sprite_ui.draw`
+- **Presentation moved, and the follow-ups** (last of the day). `sprite_text.layout`, `sprite_ui.draw`
   and `touchpad.draw` are in the Frame cycle; `sprite_ui.update` stays in the tick, since reveals
   and UI events feed the game. Text places new glyphs itself (`placement_compose`), so the
   frame that shows them shows them in place. Moving layout took away an order nothing had
   declared: rocks' hit and spawn handlers and `anim.play` and `scene.compose` had been
-  ordered only through `text.layout`, so the handlers now say `before` (the hashes are
-  unchanged), and `anim.play` no longer names `text.layout`. Cross-cycle `after`/`before`
+  ordered only through `sprite_text.layout`, so the handlers now say `before` (the hashes are
+  unchanged), and `anim.play` no longer names `sprite_text.layout`. Cross-cycle `after`/`before`
   are accepted, as this note always said; the code refused one before. Work units get
   even shares of the cycle (`ctx.time_left`). Layers keep their offsets as each tick
   begins (`sprite.layers_tick`) and the extract catches them up as it does sprites.

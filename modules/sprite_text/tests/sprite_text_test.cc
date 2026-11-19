@@ -2,7 +2,7 @@
 // kern pair, a space with no ink), alignment, scale, truncation; and the system on an
 // engine with no asset module up, where a label with a null font lays out as nothing and
 // a dead label's glyphs are left to the scene module.
-#include "korvid/text/module.h"
+#include "korvid/sprite_text/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
 #include "korvid/core/utf8.h"
@@ -56,16 +56,16 @@ struct FakeFont {
 
 void test_text(kv::TestCtx& c) {
     using namespace kv;
-    c.begin("text");
+    c.begin("sprite_text");
 
     FakeFont ff;
     Text t;
-    text_set(t, "AV %d", 7);
+    sptext_set(t, "AV %d", 7);
     KV_CHECK(c, strcmp(t.str, "AV 7") == 0);
     KV_CHECK(c, near(font_measure(ff.f, "AV 7"), 4 * 11 - 2));
     GlyphPlacement out[8];
     f32 width = 0;
-    u32 n = text_layout(ff.f, t, out, &width);
+    u32 n = sptext_layout(ff.f, t, out, &width);
     KV_CHECK(c, n == 3 && near(width, 42)); // the space has no quad
     KV_CHECK(c, near(out[0].center.x, 5) && near(out[0].center.y, 6));
     KV_CHECK(c, near(out[1].center.x, 11 - 2 + 5));      // kerned
@@ -74,25 +74,25 @@ void test_text(kv::TestCtx& c) {
 
     // Center and Right move the whole line; scale multiplies everything.
     t.align = TextAlign::Center;
-    text_layout(ff.f, t, out);
+    sptext_layout(ff.f, t, out);
     KV_CHECK(c, near(out[0].center.x, -21 + 5));
     t.align = TextAlign::Right;
     t.scale = 2.0f;
-    text_layout(ff.f, t, out, &width);
+    sptext_layout(ff.f, t, out, &width);
     KV_CHECK(c, near(out[0].center.x, (-42 + 5) * 2) && near(out[0].size.x, 20) && near(width, 84));
 
     // More glyphs than room: the count is the truth, nothing past the span is written.
-    text_set(t, "ABCDEFGHIJ");
+    sptext_set(t, "ABCDEFGHIJ");
     GlyphPlacement two[2] = {};
-    KV_CHECK(c, text_layout(ff.f, t, two) == 10 && two[1].size.x == 20);
-    KV_CHECK(c, text_set(t, "%s", "a string longer than the sixty-four bytes a Text keeps, which is truncated") > (int)KV_TEXT_MAX);
-    KV_CHECK(c, strlen(t.str) == KV_TEXT_MAX - 1);
+    KV_CHECK(c, sptext_layout(ff.f, t, two) == 10 && two[1].size.x == 20);
+    KV_CHECK(c, sptext_set(t, "%s", "a string longer than the sixty-four bytes a Text keeps, which is truncated") > (int)KV_SPTEXT_MAX);
+    KV_CHECK(c, strlen(t.str) == KV_SPTEXT_MAX - 1);
 
     // UTF-8: two-byte and three-byte characters are one glyph each; what the font lacks
     // draws as U+FFFD; a malformed byte is U+FFFD too and never loses the rest.
     t = Text{};
-    text_set(t, "\xc3\xa9\xe2\x80\x94\xe4\xb8\xad\xff" "A");
-    KV_CHECK(c, text_layout(ff.f, t, out, &width) == 5 && near(width, 55));
+    sptext_set(t, "\xc3\xa9\xe2\x80\x94\xe4\xb8\xad\xff" "A");
+    KV_CHECK(c, sptext_layout(ff.f, t, out, &width) == 5 && near(width, 55));
     KV_CHECK(c, near(out[0].uv.x, 95 / 256.0f) && near(out[1].uv.x, 96 / 256.0f));
     KV_CHECK(c, near(out[2].uv.x, 97 / 256.0f) && near(out[3].uv.x, 97 / 256.0f)); // the CJK and the stray byte
     KV_CHECK(c, near(out[4].uv.x, ('A' - 32) / 256.0f) && ff.f.misses == 2);
@@ -102,7 +102,7 @@ void test_text(kv::TestCtx& c) {
     // and the 32nd would be cut, so it goes.
     char many[80] = {};
     for (u32 i = 0; i < 32; ++i) { many[i * 2] = '\xC3'; many[i * 2 + 1] = '\xA9'; } // é
-    text_set(t, "%s", many);
+    sptext_set(t, "%s", many);
     KV_CHECK(c, strlen(t.str) == 62 && utf8_valid(t.str, strlen(t.str)));
 
     // Over several lines (slice 3): wrapped at 30 (two glyphs of 11 and a space fit, the
@@ -111,54 +111,54 @@ void test_text(kv::TestCtx& c) {
         Text w;
         w.wrap = 30.0f;
         Array<GlyphPlacement> lines{};
-        u32 placed = text_layout_paragraph(ff.f, w, "ab cd ef", ~0u, lines);
+        u32 placed = sptext_layout_paragraph(ff.f, w, "ab cd ef", ~0u, lines);
         KV_CHECK(c, placed == 6 && near(lines[0].center.x, 5) && near(lines[0].center.y, 6) && near(lines[2].center.y, 6 - 14) && near(lines[4].center.y, 6 - 28));
         w.align = TextAlign::Center;
         lines.clear();
-        text_layout_paragraph(ff.f, w, "ab cd ef", ~0u, lines);
+        sptext_layout_paragraph(ff.f, w, "ab cd ef", ~0u, lines);
         // The frame is the wrap (30): a 22-wide line starts 4 in, from -15.
         KV_CHECK(c, near(lines[0].center.x, -15 + 4 + 5));
         // Shown: the first glyphs only, the layout unchanged.
         lines.clear();
-        KV_CHECK(c, text_layout_paragraph(ff.f, w, "ab cd ef", 3, lines) == 2); // a, b, and the space (no ink)
+        KV_CHECK(c, sptext_layout_paragraph(ff.f, w, "ab cd ef", 3, lines) == 2); // a, b, and the space (no ink)
         // A line height of its own, and `\n`; a scale.
         Text h;
         h.line_height = 40.0f;
         h.scale = 2.0f;
         lines.clear();
-        KV_CHECK(c, text_layout_paragraph(ff.f, h, "a\nb", ~0u, lines) == 2 && near(lines[1].center.y - lines[0].center.y, -40) && near(lines[0].size.x, 20));
+        KV_CHECK(c, sptext_layout_paragraph(ff.f, h, "a\nb", ~0u, lines) == 2 && near(lines[1].center.y - lines[0].center.y, -40) && near(lines[0].size.x, 20));
         lines.free();
     }
 
     // A font that is not ready lays out as nothing.
     ff.f.state = AssetState::Pending;
-    KV_CHECK(c, text_layout(ff.f, t, out, &width) == 0 && width == 0.0f);
+    KV_CHECK(c, sptext_layout(ff.f, t, out, &width) == 0 && width == 0.0f);
 
     // The system (the Frame cycle), with no asset module: a label with a null font makes no
     // glyphs and is counted; destroying it leaves nothing behind for the scene module to orphan.
-    const ModuleDesc* const list[] = {&sprite_module, &scene_module, &text_module};
+    const ModuleDesc* const list[] = {&sprite_module, &scene_module, &sprite_text_module};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* labels = engine_table(e, "text.label");
-    Table* glyphs = engine_table(e, "text.glyph");
+    Table* labels = engine_table(e, "sprite_text.label");
+    Table* glyphs = engine_table(e, "sprite_text.glyph");
     KV_CHECK(c, labels && glyphs && glyphs->desc->cosmetic && !labels->desc->cosmetic);
     Text hud;
-    text_set(hud, "SCORE 0");
+    sptext_set(hud, "SCORE 0");
     Handle label = labels->spawn(transform2_at(point2{0, 0}), hud);
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 0);
     engine_frame_cycle(e, 1.0 / 60.0);
-    KV_CHECK(c, text_stats(e)->labels == 1 && text_stats(e)->relaid == 1 && glyphs->live() == 0);
+    KV_CHECK(c, sptext_stats(e)->labels == 1 && sptext_stats(e)->relaid == 1 && glyphs->live() == 0);
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 1);
     engine_frame_cycle(e, 1.0 / 60.0);
-    KV_CHECK(c, text_stats(e)->relaid == 0); // nothing changed, nothing redone
+    KV_CHECK(c, sptext_stats(e)->relaid == 0); // nothing changed, nothing redone
     labels->get<Text>(label)->str[6] = '1';
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 2);
     engine_frame_cycle(e, 1.0 / 60.0);
-    KV_CHECK(c, text_stats(e)->relaid == 1);
+    KV_CHECK(c, sptext_stats(e)->relaid == 1);
     labels->destroy(label);
     e.phases.run_tick(e, e.events, 1.0 / 60.0, 3);
     engine_frame_cycle(e, 1.0 / 60.0);
-    KV_CHECK(c, text_stats(e)->labels == 0 && glyphs->live() == 0);
+    KV_CHECK(c, sptext_stats(e)->labels == 0 && glyphs->live() == 0);
     u64 h = engine_hash_state(e);
     glyphs->spawn(Transform2{}, Sprite{}, Local2{}, Parent{});
     KV_CHECK(c, engine_hash_state(e) == h); // cosmetic kinds never hash

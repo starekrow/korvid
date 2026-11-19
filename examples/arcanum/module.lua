@@ -5,7 +5,7 @@
 module "arcanum" {
   output        = "exe",
   engine_module = true,
-  deps  = { "core", "platform", "platform_hid", "math", "render", "asset", "asset_render", "sprite", "scene", "text", "audio",
+  deps  = { "core", "platform", "platform_hid", "math", "render", "asset", "asset_render", "sprite", "scene", "sprite_text", "audio",
             "anim", "collision", "level", "tilemap", "save", "sprite_ui", "cli", "frameloop" },
   tools = { "kpack" }, -- the ship build packs the staged assets into bin/arcanum.kpak
   licenses = { "assets/LICENSE-NinjaAdventure.txt", "assets/CREDITS.md" },

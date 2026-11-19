@@ -57,7 +57,7 @@ is, so a script counted in ticks plays out the same.
 The Frame cycle runs just before each render and never for a frame that is not drawn
 (on-demand pacing with nothing to show, a minimized window). It sees input as the frame
 has it: the raw pointer and keys, not the tick's sample, so a hover between two ticks
-still shows. Its `dt` is the frame's, for transitions. `text.layout`, `sprite_ui.draw`,
+still shows. Its `dt` is the frame's, for transitions. `sprite_text.layout`, `sprite_ui.draw`,
 `touchpad.draw` and `sprite.extract` live here.
 
 ## The Work cycle: while there is work

@@ -19,7 +19,7 @@
 #include "korvid/sprite/camera.h"
 #include "korvid/sprite/module.h"
 #include "korvid/sprite/transform2.h"
-#include "korvid/text/text.h"
+#include "korvid/sprite_text/sprite_text.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -316,7 +316,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     if (g_touchpad) touchpad_enable(engine, true); // a touch screen turns it on by itself
 
     if (g_overlay) {
-        s->overlay_font = asset_load_font(engine, "text/DejaVuSans.ttf", kOverlayPx);
+        s->overlay_font = asset_load_font(engine, "sprite_text/DejaVuSans.ttf", kOverlayPx);
         Table* labels = engine_table(engine, g_overlay_kind);
         for (u32 i = 0; i < kOverlayLines; ++i) {
             Text t;
@@ -338,7 +338,7 @@ void overlay_set(Engine& engine, FrameLoopState& s, u32 line, const char* text) 
     Table* labels = engine_table(engine, g_overlay_kind);
     Text* t = labels->get<Text>(s.overlay_lines[line]);
     if (!t) return;
-    text_set(*t, "%s", text);
+    sptext_set(*t, "%s", text);
 }
 
 constinit const EventTypeDesc k_events[]  = {KV_EVENT(ExitRequested)};

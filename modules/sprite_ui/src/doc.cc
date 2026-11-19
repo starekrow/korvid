@@ -78,7 +78,7 @@ bool parse_style(Engine& e, SpuiDoc& d, const JsonDoc& doc, const char** why) {
     for (u32 i = 0; i < 3; ++i) utf8_copy(d.actions[i], sizeof d.actions[i], json_string(actions ? json_get(doc, *actions, names[i]) : nullptr, names[i]));
     const JsonValue* style = json_get(doc, root, "style");
     if (!style || !style->is_object()) { *why = "a document has a style"; return false; }
-    const char* font = json_string(json_get(doc, *style, "font"), "text/DejaVuSans.ttf");
+    const char* font = json_string(json_get(doc, *style, "font"), "sprite_text/DejaVuSans.ttf");
     utf8_copy(d.font_path, sizeof d.font_path, font);
     d.font_px = (f32)json_number(json_get(doc, *style, "size"), 16.0);
     d.line = (f32)json_number(json_get(doc, *style, "line"), 0.0);
