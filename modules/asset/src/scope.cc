@@ -21,9 +21,7 @@ const AssetKindDesc* external_kind(AssetState_& s, u16 kind) {
 AssetState read_state(AssetState_& s, Handle h, bool* alive) {
     *alive = true;
     u16 k = h.kind();
-    if (k == s.kind)          { if (TextureAsset* t = s.textures.get(h))   return t->state; }
-    else if (k == s.material_kind) { if (MaterialAsset* m = s.materials.get(h)) return m->state; }
-    else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))      return f->state; }
+    if (k == s.font_kind)          { if (FontAsset* f = s.fonts.get(h))      return f->state; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))    return d->state; }
     else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))      return b->state; }
     else if (k == s.shape_kind)    { if (ShapeAsset* b = s.shapes.get(h))    return b->state; }
@@ -35,8 +33,7 @@ AssetState read_state(AssetState_& s, Handle h, bool* alive) {
 
 u64 bytes_of(AssetState_& s, Handle h) {
     u16 k = h.kind();
-    if (k == s.kind) { if (TextureAsset* t = s.textures.get(h)) return (u64)t->width * t->height * 4; }
-    else if (k == s.font_kind) {
+    if (k == s.font_kind) {
         if (FontAsset* f = s.fonts.get(h)) {
             u32 glyphs = 0, pages = 0;
             font_counts(*f, &glyphs, &pages);
@@ -55,9 +52,7 @@ u64 bytes_of(AssetState_& s, Handle h) {
 
 const char* path_of(AssetState_& s, Handle h) {
     u16 k = h.kind();
-    if (k == s.kind)               { if (TextureAsset* t = s.textures.get(h))   return t->path; }
-    else if (k == s.material_kind) { if (MaterialAsset* m = s.materials.get(h)) return m->path; }
-    else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))         return f->path; }
+    if (k == s.font_kind)          { if (FontAsset* f = s.fonts.get(h))         return f->path; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))       return d->path; }
     else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))         return b->path; }
     else if (k == s.shape_kind)    { if (ShapeAsset* b = s.shapes.get(h))       return b->path; }
@@ -98,9 +93,7 @@ int scope_describe(kv_handle h, void* ctx, char* out, size_t cap) {
 
 void retire(Engine& e, AssetState_& s, Handle h) {
     u16 k = h.kind();
-    if (k == s.kind) texture_retire(e, s, h);
-    else if (k == s.material_kind) material_retire(e, s, h);
-    else if (k == s.font_kind) font_retire(e, s, h);
+    if (k == s.font_kind) font_retire(e, s, h);
     else if (k == s.sound_kind) sound_retire(e, s, h);
     else if (k == s.blob_kind) blob_retire(e, s, h);
     else if (k == s.shape_kind) shape_retire(e, s, h);
@@ -148,9 +141,7 @@ void asset_scopes_shutdown(Engine&, AssetState_& s) {
 
 u32* asset_refs_of(AssetState_& s, Handle h) {
     u16 k = h.kind();
-    if (k == s.kind)               { if (TextureAsset* t = s.textures.get(h))   return &t->refs; }
-    else if (k == s.material_kind) { if (MaterialAsset* m = s.materials.get(h)) return &m->refs; }
-    else if (k == s.font_kind)     { if (FontAsset* f = s.fonts.get(h))         return &f->refs; }
+    if (k == s.font_kind)          { if (FontAsset* f = s.fonts.get(h))         return &f->refs; }
     else if (k == s.sound_kind)    { if (SoundAsset* d = s.sounds.get(h))       return &d->refs; }
     else if (k == s.blob_kind)     { if (BlobAsset* b = s.blobs.get(h))         return &b->refs; }
     else if (k == s.shape_kind)    { if (ShapeAsset* b = s.shapes.get(h))       return &b->refs; }
@@ -300,6 +291,11 @@ void asset_kind_unregister(Engine& e, u16 kind) {
         if (s->external[i].kind == kind) { s->external[i] = s->external[--s->external_count]; return; }
 }
 
+Handle asset_hold(Engine& e, Handle scope, Handle asset) {
+    AssetState_* s = asset_state(e);
+    return s ? asset_hold(*s, scope, asset) : Handle{};
+}
+
 void asset_ref(Engine& e, Handle asset) {
     if (AssetState_* s = asset_state(e)) asset_ref(*s, asset);
 }
@@ -357,7 +353,8 @@ void cmd_scope_create(CliContext& ctx, Span<const char* const> args) {
     ctx.print("scope '%s' created", args[0]);
 }
 
-// The kind comes from the extension: .png, .material.json, .ttf (at 32 px), .wav or .ogg.
+// The kind comes from the extension: .ttf (at 32 px), .wav or .ogg, or the suffix another
+// module's kind registered (asset_render's .png and .material.json).
 void cmd_scope_load(CliContext& ctx, Span<const char* const> args) {
     Engine& e = *ctx.engine;
     AssetState_* s = asset_state(e);
@@ -366,10 +363,12 @@ void cmd_scope_load(CliContext& ctx, Span<const char* const> args) {
     if (sc.is_null()) { ctx.fail("no scope named '%s'", args[0]); return; }
     const char* path = args[1];
     Handle h;
-    if (ends_with(path, ".png")) h = asset_load_texture(e, path, sc);
-    else if (ends_with(path, ".material.json")) h = asset_load_material(e, path, sc);
-    else if (ends_with(path, ".ttf")) h = asset_load_font(e, path, FontDesc{}, sc);
+    const AssetKindDesc* x = nullptr;
+    for (u32 i = 0; i < s->external_count && !x; ++i)
+        if (s->external[i].load && s->external[i].suffix && ends_with(path, s->external[i].suffix)) x = &s->external[i];
+    if (ends_with(path, ".ttf")) h = asset_load_font(e, path, FontDesc{}, sc);
     else if (ends_with(path, ".wav") || ends_with(path, ".ogg")) h = asset_load_sound(e, path, sc);
+    else if (x) h = x->load(e, x->user, path, sc);
     else { ctx.fail("unknown kind of asset: %s", path); return; }
     if (h.is_null()) { ctx.fail("could not load '%s'", path); return; }
     ctx.print("%s in '%s', %u refs", path, args[0], asset_refs(e, h));

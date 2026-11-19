@@ -310,7 +310,7 @@ constinit const KindDesc k_kinds[] = {
 };
 constinit const SystemDesc k_systems[] = {
     {.name = ".pump", .phase = Phase::PreSim, .fn = tilemap_pump, .writes = ".tile, .animtile",
-     .after = "asset.pump_scopes, asset.pump, asset.pump_blobs", .main_thread = true, .runs = RunWhen::Always},
+     .after = "asset.pump_scopes, ?asset_render.pump, asset.pump_blobs", .main_thread = true, .runs = RunWhen::Always},
 };
 
 } // namespace

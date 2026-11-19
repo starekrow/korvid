@@ -1,24 +1,19 @@
-// Reload (korvid/asset/reload.h), on the CPU renderer made headless: a texture, a material, a
-// shape and a blob each read again by path. Changed, they rebind under the same handle and say
-// so; unchanged, nothing happens; broken, they keep what they were; a texture may change size;
-// a material may name another texture; a failed load loads when its file appears.
+// Reload (korvid/asset/reload.h), with no renderer: a shape and a blob each read again by path.
+// Changed, they rebind under the same handle and say so; unchanged, nothing happens; broken,
+// they keep what they were; a failed load loads when its file appears. Textures and materials
+// reload in asset_render's tests.
 #include "korvid/asset/blob.h"
-#include "korvid/asset/material.h"
 #include "korvid/asset/module.h"
 #include "korvid/asset/reload.h"
 #include "korvid/asset/shape.h"
-#include "korvid/asset/texture.h"
 #include "korvid/core/array.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/format.h"
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
-#include "korvid/image/png.h"
 #include "korvid/patherizer/patherizer.h"
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
-#include "korvid/render/renderer.h"
-#include "korvid/renderer-cpu/module.h"
 #include <string.h>
 
 namespace {
@@ -54,17 +49,6 @@ bool write_file(const char* rel, const void* data, usize size) {
 }
 bool write_text(const char* rel, const char* text) { return write_file(rel, text, strlen(text)); }
 
-bool write_png(const char* rel, u32 w, u32 h, u8 r, u8 g, u8 b) {
-    Array<u8> px, out;
-    px.resize_fill((u32)(w * h * 4), 0);
-    for (u32 i = 0; i < w * h; ++i) { px[i * 4] = r; px[i * 4 + 1] = g; px[i * 4 + 2] = b; px[i * 4 + 3] = 255; }
-    const char* why = nullptr;
-    bool ok = png_encode(px.data, w, h, 4, out, &why) && write_file(rel, out.data, out.len);
-    px.free();
-    out.free();
-    return ok;
-}
-
 bool write_shape(const char* rel, f32 size) {
     PathShape s;
     s.init(mem_general());
@@ -99,36 +83,21 @@ void quiet(Engine& e) { for (u32 i = 0; i < 20; ++i) { frame(e); time_sleep(0.00
 void test_reload(TestCtx& c) {
     c.begin("reload");
     KV_CHECK(c, io_make_temp_dir("kv-reload-test", g_dir, sizeof g_dir));
-    KV_CHECK(c, write_png("a.png", 2, 2, 255, 0, 0));
-    KV_CHECK(c, write_png("b.png", 4, 4, 0, 255, 0));
-    KV_CHECK(c, write_text("m.material.json", "{ \"texture\": \"a.png\", \"blend\": \"alpha\" }"));
     KV_CHECK(c, write_text("doc.txt", "one"));
     KV_CHECK(c, write_shape("tri.kshape", 10));
 
-    const ModuleDesc* const list[] = {&platform_module, &renderer_cpu_module, &asset_module, &k_listener};
+    const ModuleDesc* const list[] = {&platform_module, &asset_module, &k_listener};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     KV_CHECK(c, platform_io(e)->mount_dir(g_dir));
-    RendererDesc rd;
-    rd.backend = RendererBackend::Cpu;
-    rd.width = 16;
-    rd.height = 16;
-    KV_CHECK(c, renderer_create(e, rd) != nullptr);
 
-    Handle tex = asset_load_texture(e, "a.png");
-    Handle mat = asset_load_material(e, "m.material.json");
     Handle blob = asset_load_blob(e, "doc.txt");
     Handle shape = asset_load_shape(e, "tri.svg");
-    KV_CHECK(c, until(e, [&] { return g_heard.ready >= 4; }));
-    const TextureAsset* t = asset_texture(e, tex);
-    const MaterialAsset* m = asset_material(e, mat);
+    KV_CHECK(c, until(e, [&] { return g_heard.ready >= 2; }));
     const BlobAsset* b = asset_blob(e, blob);
     const ShapeAsset* sh = asset_shape(e, shape);
-    KV_CHECK(c, t && t->state == AssetState::Ready && t->width == 2 && t->generation == 0 && t->hash != 0);
-    KV_CHECK(c, m && m->state == AssetState::Ready && m->texture_asset == tex);
-    KV_CHECK(c, b && b->state == AssetState::Ready && b->size == 3 && !strcmp((const char*)b->data, "one"));
+    KV_CHECK(c, b && b->state == AssetState::Ready && b->size == 3 && !strcmp((const char*)b->data, "one") && b->generation == 0 && b->hash != 0);
     KV_CHECK(c, sh && sh->state == AssetState::Ready);
-    Handle renderer_texture = t->texture;
     u32 shape_points = sh->shape.points.len;
 
     // Nothing loaded from a path: nothing asked.
@@ -136,19 +105,11 @@ void test_reload(TestCtx& c) {
 
     // Unchanged: read, compared, nothing said, nothing changed.
     g_heard = Heard{};
-    KV_CHECK(c, asset_reload(e, "a.png") == 1);
     KV_CHECK(c, asset_reload(e, "doc.txt") == 1);
+    KV_CHECK(c, asset_reload(e, "tri.svg") == 1);
     quiet(e);
     KV_CHECK(c, g_heard.reloaded == 0 && g_heard.ready == 0 && g_heard.failed == 0 && g_heard.failed_reload == 0);
-    KV_CHECK(c, t->generation == 0 && b->generation == 0 && t->io.is_null());
-
-    // A texture that changed, and grew: the same handle and renderer texture, the new size.
-    KV_CHECK(c, write_png("a.png", 8, 4, 0, 0, 255));
-    KV_CHECK(c, asset_reload(e, "a.png") == 1);
-    KV_CHECK(c, until(e, [&] { return g_heard.reloaded == 1; }));
-    KV_CHECK(c, g_heard.last == tex && asset_texture(e, tex) == t && t->texture == renderer_texture);
-    KV_CHECK(c, t->state == AssetState::Ready && t->width == 8 && t->height == 4 && t->generation == 1);
-    KV_CHECK(c, m->state == AssetState::Ready && m->generation == 0); // the material draws it; it did not change
+    KV_CHECK(c, b->generation == 0 && sh->generation == 0 && b->io.is_null());
 
     // A blob: new bytes, the old ones gone.
     g_heard = Heard{};
@@ -171,35 +132,14 @@ void test_reload(TestCtx& c) {
     KV_CHECK(c, until(e, [&] { return g_heard.failed_reload == 1; }));
     KV_CHECK(c, g_heard.reloaded == 0 && sh->state == AssetState::Ready && sh->generation == 1 && sh->shape.points[2] == 16.0f);
 
-    // A texture whose file broke, then went: kept each time, Ready throughout.
+    // A blob whose file went: kept, Ready throughout.
     g_heard = Heard{};
-    KV_CHECK(c, write_text("a.png", "not a png"));
-    KV_CHECK(c, asset_reload(e, "a.png") == 1);
-    KV_CHECK(c, until(e, [&] { return g_heard.failed_reload == 1; }));
     char gone[700];
-    format(gone, sizeof gone, "%s/a.png", g_dir);
+    format(gone, sizeof gone, "%s/doc.txt", g_dir);
     KV_CHECK(c, io_remove(gone));
-    KV_CHECK(c, asset_reload(e, "a.png") == 1);
-    KV_CHECK(c, until(e, [&] { return g_heard.failed_reload == 2; }));
-    KV_CHECK(c, t->state == AssetState::Ready && t->width == 8 && t->generation == 1);
-
-    // A material that names another texture: the row looks at it, the old texture is let go.
-    g_heard = Heard{};
-    KV_CHECK(c, write_text("m.material.json", "{ \"texture\": \"b.png\", \"blend\": \"additive\" }"));
-    KV_CHECK(c, asset_reload(e, "m.material.json") == 1);
-    KV_CHECK(c, until(e, [&] { return g_heard.reloaded == 1 && g_heard.ready == 1; })); // the material, then b.png
-    KV_CHECK(c, m->generation == 1 && m->desc.blend == BlendMode::Additive && !strcmp(m->texture_path, "b.png"));
-    const TextureAsset* tb = asset_texture(e, m->texture_asset);
-    KV_CHECK(c, tb && tb->state == AssetState::Ready && tb->width == 4 && m->desc.texture == tb->texture);
-    // a.png is still held by the global scope (it was loaded on its own): not retired.
-    KV_CHECK(c, asset_texture(e, tex) == t);
-
-    // A material file that does not parse keeps its look.
-    g_heard = Heard{};
-    KV_CHECK(c, write_text("m.material.json", "{ \"texture\": "));
-    KV_CHECK(c, asset_reload(e, "m.material.json") == 1);
+    KV_CHECK(c, asset_reload(e, "doc.txt") == 1);
     KV_CHECK(c, until(e, [&] { return g_heard.failed_reload == 1; }));
-    KV_CHECK(c, m->state == AssetState::Ready && m->generation == 1 && m->desc.blend == BlendMode::Additive);
+    KV_CHECK(c, b->state == AssetState::Ready && b->size == 13 && b->generation == 1);
 
     // A load that failed (no file), asked again once the file is there: it loads.
     g_heard = Heard{};
@@ -224,7 +164,7 @@ void test_reload(TestCtx& c) {
     // Every asset at once: all read, nothing changed since.
     g_heard = Heard{};
     u32 asked = asset_reload_all(e);
-    KV_CHECK(c, asked >= 6);
+    KV_CHECK(c, asked >= 4); // doc.txt, the shape, late.txt, race.txt
     quiet(e);
     KV_CHECK(c, g_heard.reloaded == 0);
 

@@ -393,9 +393,9 @@ struct Game {
     Handle   boss_blobs[kMaxBosses];
     Handle   boss_tex[kMaxBosses][2];      // hull, parts sheet
     Handle   boss_alpha[kMaxBosses][2], boss_additive[kMaxBosses][2];
-    Handle   boss_dissolve[kMaxBosses];        // asset.material: the hull burning away (shaders/arcfire_dissolve.slang)
-    Handle   nebula;                           // asset.material: the nebula plane's (shaders/arcfire_nebula.slang)
-    Handle   capital_dissolve;                 // asset.material: the capital ship's sections burning away
+    Handle   boss_dissolve[kMaxBosses];        // asset_render.material: the hull burning away (shaders/arcfire_dissolve.slang)
+    Handle   nebula;                           // asset_render.material: the nebula plane's (shaders/arcfire_nebula.slang)
+    Handle   capital_dissolve;                 // asset_render.material: the capital ship's sections burning away
     Handle   nebula_row;                       // its plane row, when the stage has one
     f32      gas_scrolled = 0.0f;              // how far its field has come down
     bool     gas_test = false;                 // --gas: the nebula shader's plane under any stage (a check)

@@ -7,7 +7,7 @@
 #include "korvid/typeset/typeset.h"
 #include "korvid/core/arena.h"
 #include "korvid/asset/font.h"
-#include "korvid/asset/texture.h"
+#include "korvid/asset_render/texture.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"

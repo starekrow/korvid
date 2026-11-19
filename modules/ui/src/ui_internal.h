@@ -6,7 +6,7 @@
 #include "korvid/core/json.h"
 #include "korvid/core/map.h"
 #include "korvid/core/pool.h"
-#include "korvid/asset/texture.h"
+#include "korvid/asset_render/texture.h"
 
 namespace kv {
 

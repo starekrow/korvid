@@ -6,7 +6,7 @@
 // LOOPSTART and LOOPLENGTH (or LOOPEND), in frames; without them the whole track loops.
 // A voice playing a stream holds a reference on it, so a stream never retires under one.
 #pragma once
-#include "korvid/asset/texture.h"
+#include "korvid/asset/asset.h"
 
 namespace kv {
 

@@ -8,7 +8,7 @@
 // the mixer's thread reads them without a lock. A voice started before Ready waits. Nothing resamples at load: the mixer reads at the
 // ratio of the file's rate to the device's.
 #pragma once
-#include "korvid/asset/texture.h"
+#include "korvid/asset/asset.h"
 #include "korvid/core/memory.h"
 
 namespace kv {

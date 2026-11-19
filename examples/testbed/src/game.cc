@@ -7,7 +7,7 @@
 // (INIT -> RUN -> EXIT) spawns and destroys by command, so it holds no handles and no
 // writes. No window, renderer, loop or options here: those are the frameloop module's.
 #include "korvid/testbed/module.h"
-#include "korvid/asset/material.h"
+#include "korvid/asset_render/material.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -74,8 +74,8 @@ const char* state_name(GameState s) {
 }
 
 struct Game {
-    Handle    looks[LOOK_COUNT];     // asset.material, one file per look
-    Handle    bg_look;               // asset.material: the default checkerboard, tinted dark
+    Handle    looks[LOOK_COUNT];     // asset_render.material, one file per look
+    Handle    bg_look;               // asset_render.material: the default checkerboard, tinted dark
     Handle    materials[LOOK_COUNT]; // render.material: the rows those files fill
     Handle    bg_material;           // render.material
     GameState state          = ST_INIT;

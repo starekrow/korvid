@@ -3,11 +3,10 @@
 #include "korvid/asset/blob.h"
 #include "korvid/asset/shape.h"
 #include "korvid/asset/font.h"
-#include "korvid/asset/material.h"
 #include "korvid/asset/scope.h"
 #include "korvid/asset/sound.h"
 #include "korvid/asset/stream.h"
-#include "korvid/asset/texture.h"
+#include "korvid/asset/reload.h"
 #include "korvid/core/array.h"
 #include "korvid/core/cli.h"
 #include "korvid/core/map.h"
@@ -18,7 +17,6 @@
 namespace kv {
 
 struct Engine;
-struct Renderer;
 struct IoQueue;
 struct TickContext;
 struct ModuleInstance;
@@ -63,7 +61,7 @@ struct FontStrike {
     Array<FontPage> pages;
     u32            generation = 0;
     Allocator*     alloc = nullptr;
-    Renderer*      renderer = nullptr; // null without one: glyphs are made, nothing is uploaded
+    const AssetFontPages* drawn = nullptr; // the module's hook (AssetState_::font_pages); its create null: CPU only
 };
 
 // Memory whose owner has gone but which another thread may still read: freed when the
@@ -71,10 +69,6 @@ struct FontStrike {
 struct AssetGrave { u64 ticket; void* ptr; usize bytes; };
 
 struct AssetState_ {
-    Pool<TextureAsset>  textures;
-    Map<Name, Handle>   by_path;          // interned path -> texture asset
-    Pool<MaterialAsset> materials;
-    Map<Name, Handle>   material_by_path; // interned path -> material asset
     Pool<FontAsset>     fonts;
     Map<Name, Handle>   font_by_key;      // interned "path@px" -> font asset
     Array<FontFace*>    faces;            // every font file read, by path
@@ -94,13 +88,12 @@ struct AssetState_ {
     u64                 next_ticket = 1;
     AssetKindDesc       external[KV_ASSET_EXTERNAL_KINDS];
     u32                 external_count = 0;
+    AssetFontPages      font_pages;       // asset_font_pages: how pages are drawn, if they are
     AssetSamplesRetireFn samples_hook = nullptr;
     void*               samples_hook_user = nullptr;
     Allocator*          general = nullptr;
-    u16                 kind = 0, material_kind = 0, font_kind = 0, sound_kind = 0, blob_kind = 0, stream_kind = 0, scope_kind = 0, shape_kind = 0;
+    u16                 font_kind = 0, sound_kind = 0, blob_kind = 0, stream_kind = 0, scope_kind = 0, shape_kind = 0;
     u32                 retired = 0, deferred = 0;
-    u32                 loaded = 0, failed = 0;
-    u32                 materials_loaded = 0, materials_failed = 0;
     u32                 fonts_loaded = 0, fonts_failed = 0;
     u32                 sounds_loaded = 0, sounds_failed = 0;
     u32                 blobs_loaded = 0, blobs_failed = 0;
@@ -129,54 +122,26 @@ void asset_bury_samples(AssetState_& s, f32* samples, usize bytes);
 void asset_reap_orphans(Engine& e, AssetState_& s, u16 kind);
 // The module's CLI tables (mounts.cc, scope.cc); declared here so their definitions have
 // external linkage whatever order the unity build puts the files in.
-extern const CliMountDesc   k_asset_mounts[5];
+extern const CliMountDesc   k_asset_mounts[3];
 extern const CliCommandDesc k_asset_commands[4];
 // The /scopes mount.
 void asset_scopes_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user);
 bool asset_scopes_describe(CliContext& ctx, const char* rel);
 
-// ---- reload (reload.cc) ----
-// The fields of a record that reading it again touches, whatever its kind.
-struct RereadRef {
-    const char* path;
-    AssetState* state;
-    Handle*     io;
-    bool*       reread;
-    bool*       again;
-};
-template <class R> RereadRef reread_ref(R& r) { return RereadRef{r.path, &r.state, &r.io, &r.reread, &r.again}; }
-// Reads the record's file again, `h` as the read's user word. A read already out sets `again`;
-// a Ready record's read is a reload (`reread`), compared when it lands; any other is a load
-// from the start (a Failed record goes back to Pending). False if nothing could be submitted.
-bool asset_reread(Engine& e, AssetState_& s, Handle h, RereadRef r);
-// After a kind's pump took a read: the read asked for while it was out, if any.
-void asset_reread_after(Engine& e, AssetState_& s, Handle h, RereadRef r);
-// A reload that could not be used: logged, AssetFailed{h, err, reload}, the record untouched.
-void asset_reload_failed(Engine& e, Handle h, const char* path, AssetError err, const char* detail);
-// A reload that changed the record: its generation, the log, AssetReloaded.
-void asset_reloaded(Engine& e, Handle h, const char* path, u32& generation);
-void asset_reload_unchanged(const char* path);
+// ---- reload (reload.cc; the helpers are korvid/asset/reload.h's) ----
 void asset_cmd_reload(CliContext& ctx, Span<const char* const> args); // the CLI's `reload [PATH...]`
 
 // ---- the kinds: load without a scope (refs untouched), retire at zero ----
-Handle texture_load(Engine& e, AssetState_& s, const char* path);
-Handle material_load(Engine& e, AssetState_& s, const char* path);
 Handle font_load(Engine& e, AssetState_& s, const char* path, const FontDesc& desc);
 Handle sound_load(Engine& e, AssetState_& s, const char* path);
 Handle blob_load(Engine& e, AssetState_& s, const char* path);
 Handle shape_load(Engine& e, AssetState_& s, const char* path);
 Handle stream_load(Engine& e, AssetState_& s, const char* path);
-void   texture_retire(Engine& e, AssetState_& s, Handle h);
-void   material_retire(Engine& e, AssetState_& s, Handle h);
 void   font_retire(Engine& e, AssetState_& s, Handle h);
 void   sound_retire(Engine& e, AssetState_& s, Handle h);
 void   blob_retire(Engine& e, AssetState_& s, Handle h);
 void   shape_retire(Engine& e, AssetState_& s, Handle h);
 void   stream_retire(Engine& e, AssetState_& s, Handle h);
-
-bool asset_materials_init(Engine& e, AssetState_& s, ModuleInstance& self);
-void asset_materials_shutdown(Engine& e, AssetState_& s);
-void asset_materials_pump(TickContext& ctx); // the "asset.pump_materials" system
 
 bool asset_fonts_init(Engine& e, AssetState_& s, ModuleInstance& self);
 void asset_fonts_shutdown(Engine& e, AssetState_& s);

@@ -10,13 +10,13 @@
 
 namespace kv {
 
-bool asset_reread(Engine& e, AssetState_& s, Handle h, RereadRef r) {
+bool asset_reread(Engine& e, Allocator* alloc, Handle h, const AssetReread& r) {
     if (!r.io->is_null()) { *r.again = true; return true; } // once what is out lands
     IoQueue* io = platform_io(e);
     if (!io) return false;
     IoRequest req;
     req.path  = r.path;
-    req.alloc = s.general;
+    req.alloc = alloc;
     req.user  = h.bits;
     Handle q = io->read_asset(req);
     if (q.is_null()) { KV_WARN("asset", "'%s': could not read it again", r.path); return false; }
@@ -26,10 +26,10 @@ bool asset_reread(Engine& e, AssetState_& s, Handle h, RereadRef r) {
     return true;
 }
 
-void asset_reread_after(Engine& e, AssetState_& s, Handle h, RereadRef r) {
+void asset_reread_after(Engine& e, Allocator* alloc, Handle h, const AssetReread& r) {
     if (!*r.again) return;
     *r.again = false;
-    asset_reread(e, s, h, r);
+    asset_reread(e, alloc, h, r);
 }
 
 void asset_reload_failed(Engine& e, Handle h, const char* path, AssetError err, const char* detail) {
@@ -53,14 +53,14 @@ u32 reread_by_path(Engine& e, AssetState_& s, Pool<R>& pool, Map<Name, Handle>& 
     if (n.hash == 0) return 0;
     const Handle* h = by_path.find(n);
     R* r = h ? pool.get(*h) : nullptr;
-    return r && asset_reread(e, s, *h, reread_ref(*r)) ? 1 : 0;
+    return r && asset_reread(e, s.general, *h, asset_reread_of(*r)) ? 1 : 0;
 }
 
 template <class R>
 u32 reread_every(Engine& e, AssetState_& s, Pool<R>& pool) {
     u32 n = 0;
     for (u32 i = 0; i < pool.len; ++i)
-        if (pool.is_alive(i) && asset_reread(e, s, pool.handle_at(i), reread_ref(pool.items[i]))) ++n;
+        if (pool.is_alive(i) && asset_reread(e, s.general, pool.handle_at(i), asset_reread_of(pool.items[i]))) ++n;
     return n;
 }
 
@@ -69,9 +69,7 @@ u32 reread_every(Engine& e, AssetState_& s, Pool<R>& pool) {
 u32 asset_reload(Engine& e, const char* path) {
     AssetState_* s = asset_state(e);
     if (!s || !path || !path[0]) return 0;
-    u32 n = reread_by_path(e, *s, s->textures, s->by_path, path)
-          + reread_by_path(e, *s, s->materials, s->material_by_path, path)
-          + reread_by_path(e, *s, s->blobs, s->blob_by_path, path)
+    u32 n = reread_by_path(e, *s, s->blobs, s->blob_by_path, path)
           + reread_by_path(e, *s, s->shapes, s->shape_by_path, path);
     // A shape is loaded by its source's name and kept by its cook's: x.svg is x.kshape.
     usize len = strlen(path);
@@ -80,14 +78,18 @@ u32 asset_reload(Engine& e, const char* path) {
         format(cooked, sizeof cooked, "%.*s.kshape", (int)(len - 4), path);
         n += reread_by_path(e, *s, s->shapes, s->shape_by_path, cooked);
     }
+    for (u32 i = 0; i < s->external_count; ++i)
+        if (s->external[i].reload) n += s->external[i].reload(e, s->external[i].user, path);
     return n;
 }
 
 u32 asset_reload_all(Engine& e) {
     AssetState_* s = asset_state(e);
     if (!s) return 0;
-    return reread_every(e, *s, s->textures) + reread_every(e, *s, s->materials)
-         + reread_every(e, *s, s->blobs) + reread_every(e, *s, s->shapes);
+    u32 n = reread_every(e, *s, s->blobs) + reread_every(e, *s, s->shapes);
+    for (u32 i = 0; i < s->external_count; ++i)
+        if (s->external[i].reload) n += s->external[i].reload(e, s->external[i].user, nullptr);
+    return n;
 }
 
 void asset_cmd_reload(CliContext& ctx, Span<const char* const> args) {

@@ -1,35 +1,33 @@
 # asset
 
-Files that become engine resources: PNG textures, JSON materials, TrueType fonts and WAV
-or Ogg sounds. You ask for a path
-and get a handle back at once; what the handle names already works (a texture slot that
-shows the placeholder checkerboard, a material row with the default look), the file
-loads in the background through the platform's I/O queue, and an event tells you when
-it is real. Nothing in a game waits for a file.
+Files that become engine resources: TrueType fonts, WAV or Ogg sounds and streams, cooked
+SVG shapes, and blobs (a file's bytes, for a module that parses a format of its own). You
+ask for a path and get a handle back at once, the file loads in the background through the
+platform's I/O queue, and an event tells you when it is real. Nothing in a game waits for a
+file.
+
+The module draws nothing and links no renderer, so a tool can have assets. Textures and
+materials, which are the renderer's, are **asset_render**'s (`modules/asset_render`): asset
+kinds registered here like any other module's, so scopes, reload and the events treat them
+as this module's own. A program that draws links both.
 
 ## How it works
 
 Every load has the same shape:
 
-1. **The call returns a handle.** `asset_load_texture` creates a renderer texture slot
-   (`renderer_texture_create`), `asset_load_material` creates a renderer material row.
-   Both are usable immediately: a `Sprite` can carry the material, a `MaterialDesc` can
-   name the texture. The record is `Pending`.
+1. **The call returns a handle** to a record that is `Pending`. (asset_render's kinds make
+   their renderer objects here, so a texture's slot or a material's row is usable at once.)
 2. **A read is submitted** to the platform's `IoQueue` for `<exe dir>/assets/<path>`,
    with the asset handle as the request's user word. The platform pumps the queue once
    per frame (io_uring on Linux; `fopen` elsewhere) and the completion sits on the
    queue's list until someone reaps it.
-3. **The pump reaps it.** In phase `PreSim`, on the main thread, `asset.pump` scans the
-   completions for texture handles, decodes the PNG into the module's allocator and hands
-   the pixels to `renderer_texture_upload`; the upload rides the next frame's command
-   buffer. `asset.pump_materials` runs after it, parses material files, loads the texture
-   each names (step 1 again, deduplicated by path) and writes the renderer row.
+3. **The kind's pump reaps it.** In phase `PreSim`, on the main thread, after
+   `asset.pump_scopes`, `asset.pump_<kind>` scans the completions for its handles and makes
+   the record: decodes the sound, parses the font, reads the shape, keeps the blob's bytes.
 4. **An event says so.** `AssetReady{asset}` at the next phase boundary when the record
-   turns `Ready`; `AssetFailed{asset, error}` when it fails. A material is `Ready` only
-   when its texture is resident, so a sprite never sees a tinted checkerboard turn into
-   the real image two frames apart.
+   turns `Ready`; `AssetFailed{asset, error}` when it fails (`korvid/asset/asset.h`).
 
-A failed load keeps its handle and its placeholder: the game logs it and goes on. The
+A failed load keeps its handle: the game logs it and goes on. The
 same path loaded twice is the same handle, found through the name table, so modules can
 load what they need without coordinating.
 
@@ -48,19 +46,16 @@ font's own, or the engine's) that has it, at the same pixel size on the same bas
 metrics are rounded to whole pixels; a glyph's box sits on whole pixels from the pen; the
 coverage is stb_truetype's, unhinted, and how heavy it reads is corrected where it is drawn
 (the UI shader, by the ink's luminance). `font_glyph_at` makes quarter-pixel copies for
-subpixel positioning. `asset.fonts_flush` uploads what changed before the frame draws.
-Kerning is read for the Latin set.
+subpixel positioning. Kerning is read for the Latin set. The pages are drawn through
+`AssetFontPages` (`korvid/asset/font.h`), which asset_render sets: with it each page has a
+renderer texture and material and `asset.fonts_flush` uploads what changed before the frame
+draws; without it (a tool) the pages stay in memory and the handles are null.
 ## Reload
 
 A file already loaded can be read again (`korvid/asset/reload.h`): `asset_reload(e, path)`, or
 `reload PATH` from the CLI. When its bytes changed, the same handle is made of the new ones, in
 the kind's pump, where loads land:
 
-- a **texture**'s renderer texture takes the new pixels, at a new size if it has one (every
-  backend makes a new image behind the handle and destroys the old one past the frames in
-  flight);
-- a **material**'s row takes the new look, and a new texture path loads that texture and lets
-  the old one go;
 - a **shape** gets the new paths (Krome's jobs draw from copies of their own);
 - a **blob** gets the new bytes, and the old ones are freed: a pointer to `data` kept past
   `AssetReloaded` is a pointer to freed memory.
@@ -70,7 +65,9 @@ before (`hash`) change nothing and send nothing. A file that no longer reads, de
 keeps what the record had: `AssetFailed{asset, error, reload = true}`, and the record stays
 Ready. A record whose first read is still out is read once more when it lands; a record that
 failed is loaded again from the start (`AssetReady` when it works). Fonts, sounds and streams do
-not reload yet. Who calls `asset_reload` is not the module's business: goldberg's connection
+not reload yet. Another module's kind reloads when it registers `AssetKindDesc::reload`, and
+does it with the same helpers (`asset_reread`, `asset_reloaded`, ... in `reload.h`):
+asset_render's textures and materials do. Who calls `asset_reload` is not the module's business: goldberg's connection
 (Krome slice 6), the CLI and tests all do.
 
 ## Lifetimes
@@ -83,7 +80,7 @@ thinks about lifetimes keeps everything for the run, as before.
 
 ```cpp
 Handle town = asset_scope_create(e, "town");
-g.grass = asset_load_material(e, "mygame/grass.material.json", town);
+g.grass = asset_load_material(e, "mygame/grass.material.json", town); // asset_render's
 g.theme = asset_load_sound(e, "mygame/town.ogg", town);
 // ... on AssetScopeReady{town}: everything it holds is Ready or Failed
 asset_scope_release(e, town);   // what nobody else holds goes at the next pump
@@ -95,7 +92,8 @@ draws with it. A count that reaches zero does not retire at once but at the next
 (`asset.pump_scopes`, the first thing in PreSim): load the next level's scope **before**
 releasing the last one, and what the two share never leaves memory.
 
-Retiring destroys the renderer's texture and material past the frames in flight, cancels
+Retiring destroys what the record made (asset_render's renderer textures and materials
+go past the frames in flight), cancels
 a read still in the queue (its completion is reaped and dropped), forgets the path (the
 next load reads the file again) and makes the handle stale: every accessor answers null.
 A sound's samples are the exception to "at once": the audio module may still be mixing
@@ -105,122 +103,67 @@ voice on them has stopped.
 ## Names
 
 Every record is named, so a save or a tool can say what it means: a file's record by its
-path, a font by `path@px`, a scope by its name. The renderer objects the module makes
-carry the same names: a texture asset's renderer texture is called its path, a material
-file's row its path, a font's page materials `font:<path>@<px>:page<N>`.
-`asset_material_for_texture(e, texture, blend, filter, scope)` makes the material a sprite
-needs for a texture asset without a file, named `<path>:<blend>` (`:linear` added for that
-filter), held by the scope and holding the texture; the same texture and look is the
-same record. A renderer material made by hand with no `MaterialDesc::name` is named by its
-content (`material:<hash>`), the same for the same content in any order.
+path, a font by `path@px`, a scope by its name. A font's pages are named `<path>@<px>:page<N>`
+(asset_render's renderer textures for them, and `font:` that for their materials).
 
 From the CLI: `ls /scopes`, `print /scopes/<n>-<name>` (members, state, references),
-`scope create <name>`, `scope load <scope> <path>` and `scope release <name>`.
+`scope create <name>`, `scope load <scope> <path>` and `scope release <name>`. `scope load`
+knows its kinds by extension (`.ttf`, `.wav`, `.ogg`) and another module's by the suffix it
+registered (`AssetKindDesc::suffix`: asset_render's `.png` and `.material.json`).
 
 ## Using it
 
-**Declare the dependency.** In your `module.lua`:
+**Declare the dependency.** In your `module.lua`; add `asset_render` for textures and
+materials (`modules/asset_render/README.md` walks through those):
 
 ```lua
-module "mygame" {
-  deps = { "core", "platform", "math", "render", "asset", "sprite", ... },
+module "mytool" {
+  deps = { "core", "platform", "asset", ... },
 }
 ```
 
-**Load at startup, keep the handles.** The renderer and the platform must be up, which
-they are in any module's startup since the module list is in dependency order:
+**Load, keep the handles, read the record when it is Ready.** The platform must be up, which
+it is in any module's startup since the module list is in dependency order:
 
 ```cpp
-struct Game {
-    Handle rock_look;     // asset.material
-    Handle rock_material; // render.material: the row the file fills
-};
-
-bool mygame_startup(Engine& engine, ModuleInstance& self) {
-    Game* g = arena_push<Game>(self.arena);
-    self.set_state(g);
-    g->rock_look = asset_load_material(engine, "mygame/rock.material.json");
-    const MaterialAsset* m = asset_material(engine, g->rock_look);
-    if (!m) return false;
-    g->rock_material = m->material; // usable now; the look arrives
-    return true;
-}
+g->level_text = asset_load_blob(engine, "mygame/town.tmj");
+// later, or on its AssetReady:
+if (const BlobAsset* b = asset_blob(engine, g->level_text); b && b->state == AssetState::Ready)
+    parse(b->data, b->size);
 ```
 
-A sprite then carries `g.rock_material` in its `Sprite::material`. For a texture alone,
-`asset_load_texture` and `asset_texture(engine, h)->texture` give the renderer's texture
-handle to put in a `MaterialDesc` of your own.
-
-**Write the material file.** `assets/rock.material.json` in your module's directory;
-kormake copies it to `bin/assets/<module>/`:
-
-```json
-{ "texture": "mygame/rock.png", "blend": "alpha", "tint": [1, 1, 1, 1] }
-```
-
-`blend` is `opaque`, `alpha` or `additive`; `filter` is `nearest` (the default: pixel art) or
-`linear`; `tint` is `[r, g, b]` or `[r, g, b, a]`,
-linear; `params` is up to eight numbers (the sprite shader uses the first two as a UV
-offset). Leave out what you do not need.
-
-**React to arrival, if you care.** Most games do not; the placeholder is fine for a few
-frames. A handler or a system can:
+**React to arrival, if you care.** A handler or a system can:
 
 ```cpp
 void on_ready(TickContext& ctx, Span<const AssetReady> ready) {
     Game& g = ctx.state_as<Game>();
     for (const AssetReady& r : ready)
-        if (r.asset == g.rock_look) ...                      // the one you kept
-        else if (r.asset.kind() == g.rock_look.kind()) ...   // any material; a texture's kind differs
+        if (r.asset == g.level_text) ...                     // the one you kept
+        else if (r.asset.kind() == g.level_text.kind()) ...  // any blob; each kind has its own
 }
 ```
 
 or in a system, `for (const AssetFailed& f : ctx.events->read<AssetFailed>())`, with
 `asset_error_name(f.error)` for the log.
 
-**Poke it from the CLI** while the game runs (`--cli-stdin` or `--cli-port N`). The
-assets are mounted in the CLI's filesystem:
-
-```
-ls /materials/mygame
-print /materials/mygame/rock.material.json
-patch /materials/mygame/rock.material.json tint 1 0.5 0.5
-patch /materials/mygame/rock.material.json blend additive
-patch /materials/mygame/rock.material.json texture mygame/rock2.png
-ls /textures /fonts /sounds
-```
-
-A patch changes the renderer row before the next frame and nothing on disk.
+**Look from the CLI** while the program runs (`--cli-stdin` or `--cli-port N`):
+`ls /fonts /sounds /scopes`, `print` a record.
 
 ## Quick reference
 
-Header `korvid/asset/texture.h`:
+Header `korvid/asset/asset.h` (every kind's header includes it):
 
 | name | kind | what |
 |---|---|---|
 | `AssetState` | enum | `Pending`, `Ready`, `Failed` |
 | `AssetError` | enum | `None`, `NotFound`, `Read`, `Decode`, `Upload`, `Parse` |
-| `TextureAsset` | record | `path`, `state`, `error`, `texture` (render.texture), `io`, `width`, `height` |
-| `AssetReady{asset}` | event | the asset turned Ready; `asset.kind()` says texture or material |
-| `AssetFailed{asset, error, reload}` | event | the asset failed; it keeps its placeholder. `reload`: a reload's read could not be used, and it keeps what it had |
+| `AssetReady{asset}` | event | the asset turned Ready; `asset.kind()` says which kind |
+| `AssetFailed{asset, error, reload}` | event | the asset failed. `reload`: a reload's read could not be used, and it keeps what it had |
 | `AssetReloaded{asset}` | event | the asset was made again from its changed file: the same handle, new contents |
-| `asset_load_texture(e, path[, scope])` | function | handle at once; null if the stack is not up or the path is too long |
-| `asset_texture(e, h)` | function | the record, or null if stale |
 | `asset_error_name(err)` | function | `"not found"`, `"decode error"`, ... |
+| `KV_ASSET_PATH_MAX` | constant | 128 bytes, NUL included |
 
-Header `korvid/asset/material.h`:
-
-| name | kind | what |
-|---|---|---|
-| `MaterialAsset` | record | `path`, `state`, `error`, `material` (render.material), `texture_asset`, `io`, `desc`, `texture_path` |
-| `asset_load_material(e, path[, scope])` | function | handle at once, row alive; holds its texture |
-| `asset_material(e, h)` | function | the record, or null if stale |
-| `asset_material_find(e, path)` | function | the handle a path was loaded as, or null |
-| `asset_material_count(e)`, `asset_material_at(e, slot)`, `asset_material_handle_at(e, slot)` | functions | records by slot, for tools |
-| `asset_material_patch(e, h, desc)` | function | record and row together; the texture follows the path |
-| `asset_material_set_texture(e, h, path)` | function | loads the path and points the row at it |
-| `material_parse(text, len, desc, texture_path, cap, &error, &at)` | function | the file format |
-| `material_format(desc, texture_path, out, cap)` | function | the record as a file's text |
+Textures and materials (`korvid/asset_render/texture.h`, `material.h`) are asset_render's.
 
 Header `korvid/asset/font.h`:
 
@@ -236,6 +179,7 @@ Header `korvid/asset/font.h`:
 | `font_kern(font, a, b)`, `font_measure(font, utf8, scale)` | functions | kerning (the Latin set), a line's width |
 | `font_generation(font)`, `font_counts(font, &glyphs, &pages)` | functions | grows when a fallback lands (lay text out again); what has been made |
 | `font_index(font)` | function | fills the ASCII index and U+FFFD from `codepoints`, for a table built by hand |
+| `AssetFontPages`, `asset_font_pages(e, pages)` | record, function | how pages are drawn: `create`, `upload`, `destroy`; asset_render sets it |
 
 Header `korvid/asset/sound.h`:
 
@@ -255,10 +199,12 @@ Header `korvid/asset/scope.h`:
 | `AssetScopeReady{scope, failed}` | event | every member settled |
 | `asset_scope_name`, `asset_refs(e, asset)`, `asset_lifetime_stats(e)` | functions | for tools: names, counts, `retired`, `samples_out`, `samples_deferred`, `dying`, `scopes` |
 | `asset_samples_retire_hook(e, fn, user)`, `asset_retire_done(e, ticket)` | functions | the audio module's half of retiring a sound |
+| `AssetKindDesc`, `asset_kind_register(e, desc)`, `asset_kind_unregister(e, kind)` | record, functions | another module's kind: `refs`, `state`, `retire`; optional `bytes`, `path`, `reload`, `suffix` and `load` |
+| `asset_hold(e, scope, asset)`, `asset_ref(e, asset)`, `asset_unref(e, asset)` | functions | for a kind's own loads: what a load does with its scope; references between assets |
 | `KV_ASSET_SCOPES`, `KV_ASSET_SCOPE_NAME_MAX` | constants | 256 live scopes, 32-byte names |
 
-Every load function takes a scope as its last argument (`asset_load_texture(e, path, scope)`,
-`asset_load_material`, `asset_load_font(e, path, desc, scope)`, `asset_load_sound`); the
+Every load function takes a scope as its last argument (`asset_load_blob(e, path, scope)`,
+`asset_load_font(e, path, desc, scope)`, `asset_load_sound`, asset_render's `asset_load_texture`); the
 forms without one use the global scope. Each record has `refs`.
 
 Header `korvid/asset/blob.h`:
@@ -277,18 +223,16 @@ Header `korvid/asset/stream.h`:
 | `StreamDecoder`, `stream_decoder_open/read/seek/close`, `KV_STREAM_DECODER_MEMORY` | record, functions | decoding into the caller's memory, stereo out |
 | `stream_loop_from_comments` | function | LOOPSTART with LOOPLENGTH or LOOPEND, in frames |
 
-PNG decoding is the image module's (`korvid/image/png.h`, `modules/image`); textures go
-through it.
-
 Header `korvid/asset/reload.h`:
 
 | name | kind | what |
 |---|---|---|
 | `asset_reload(e, path)` | function | every record loaded from `path` (a shape by its `.svg` too) reads its file again; how many were asked |
-| `asset_reload_all(e)` | function | every texture, material, shape and blob read again and compared |
+| `asset_reload_all(e)` | function | every shape and blob, and every record of a kind with `AssetKindDesc::reload`, read again and compared |
+| `AssetReread`, `asset_reread_of(record)`, `asset_reread`, `asset_reread_after`, `asset_reloaded`, `asset_reload_failed`, `asset_reload_unchanged` | record, functions | for another module's kind: reading its records again the way this module's kinds do |
 
-Each texture, material, shape and blob record has `hash` (the bytes it was made from) and
-`generation` (how many times it was made again).
+Each shape and blob record (and asset_render's textures and materials) has `hash` (the bytes
+it was made from) and `generation` (how many times it was made again).
 
 Header `korvid/asset/module.h`: `asset_module`, the record; kormake puts it in the list.
 
@@ -296,18 +240,16 @@ What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
-| `asset.texture`, `asset.material`, `asset.font`, `asset.sound`, `asset.blob`, `asset.stream`, `asset.scope` | handle kinds | `kv_handle_describe` prints path, state and size, blend, atlas or length; a scope's name and counts |
+| `asset.font`, `asset.sound`, `asset.blob`, `asset.shape`, `asset.stream`, `asset.scope` | handle kinds | `kv_handle_describe` prints path, state and size, atlas or length; a scope's name and counts |
 | `AssetReady`, `AssetFailed`, `AssetScopeReady`, `AssetReloaded` | event types | no schema: the handle is an asset's, not an entity's, so it is never dropped as stale |
-| `asset.textures`, `asset.materials`, `asset.fonts`, `asset.sounds` | resources | the tables; the pumps write them |
-| `asset.pump_scopes` | system, phase PreSim, main thread, first | retires what nobody holds, then sends `AssetScopeReady`; writes every table |
-| `asset.pump` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.textures` |
-| `asset.pump_materials` | system, phase PreSim, main thread, after `asset.pump` | reads `asset.textures`, writes `asset.materials` |
-| `asset.pump_fonts` | system, phase PreSim, main thread, after `asset.pump_materials` | writes `asset.fonts` |
-| `asset.fonts_flush` | system, phase Frame, main thread, after the text drawers | uploads the glyph pages that changed: the rectangle where the backend can (`renderer_texture_update`), the page elsewhere |
+| `asset.fonts`, `asset.sounds`, `asset.blobs`, `asset.streams`, `asset.shapes` | resources | the tables; the pumps write them |
+| `asset.pump_scopes` | system, phase PreSim, main thread, first | retires what nobody holds (another module's kinds through their `retire`), then sends `AssetScopeReady`; writes every table |
+| `asset.pump_fonts` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.fonts` |
+| `asset.fonts_flush` | system, phase Frame, main thread, after the text drawers | the glyph pages that changed, through `AssetFontPages::upload`; nothing without it |
 | `asset.pump_sounds` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.sounds` |
 | `asset.pump_blobs` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.blobs` |
 | `asset.pump_streams` | system, phase PreSim, main thread, after `asset.pump_scopes` | writes `asset.streams`: checks each file opens, reads its length and loop points |
-| `/materials` (patchable), `/textures`, `/fonts`, `/sounds`, `/scopes` | CLI mounts | the records by path; scopes by `<slot>-<name>` |
+| `/fonts`, `/sounds`, `/scopes` | CLI mounts | the records by path; scopes by `<slot>-<name>` |
 | `scope create`, `scope load`, `scope release` | CLI commands | lifetimes by hand |
 | `reload [PATH...]` | CLI command | these files read again, every one loaded without a path |
 
@@ -317,34 +259,19 @@ they read the module's tables, which only the pumps write.
 ## Behaviour worth knowing
 
 - **A released asset's handle goes stale at the next pump.** Keep handles per scope and
-  drop them with it. A sprite still naming a retired material draws with the default
-  look, and the dev build's renderer says so once per material.
+  drop them with it.
 - **Readiness is a tick late.** `AssetScopeReady` comes from the first pump after the
   last member settled, so a level that waits for it starts one tick after its last file.
 - **A scope still alive at shutdown is logged** by name with its member count, as the
   leak report does for memory.
-- **The placeholder is visible.** A texture that is not resident draws as the red and
-  white checkerboard, tinted by the material. That is on purpose: a missing file shows
-  itself. A game that wants a black frame instead waits for its `AssetReady` events.
-- **Order of arrival is the disk's.** Texture reads complete in whatever order the queue
-  and the kernel finish them, within a priority. A material is reported after its texture
-  by construction.
-- **Decode is on the main thread.** A 4096x4096 PNG costs milliseconds in `asset.pump`.
-  The pump decodes everything that arrived this frame; a burst of large textures shows up
-  as a long tick. Cooked formats (BC, ASTC) are the fix and are a later slice.
 - **Paths are names.** `rocks/rock.png` and `rocks//rock.png` are two
   assets to the name table even though they are one file.
-- **Material edits do not touch the file.** `patch` changes the row; what you keep is
-  what `dump` prints.
-- **Limits.** 4096 texture records and 4096 material records per run; paths of 127
-  characters.
+- **Limits.** Paths of 127 characters; 16 kinds of other modules.
 
 ## Not in this module
 
-Eviction under a memory budget (a scope is released by the game, never by the module),
-cooked texture formats and pack files, mipmaps, texture
-atlases, noticing by itself that a file changed on disk (something calls `asset_reload`),
-reloading fonts, sounds and streams, formats other than PNG and the
-material JSON, and any asset that is not a texture or a material (meshes, sounds,
-levels). The I/O queue and its budgets are the platform module's; the pixels' home on
-the GPU is the renderer's.
+Textures and materials (asset_render), eviction under a memory budget (a scope is released
+by the game, never by the module), pack files, noticing by itself that a file changed on
+disk (something calls `asset_reload`), reloading fonts, sounds and streams, and meshes. The
+I/O queue and its budgets are the platform module's; anything on the GPU is the renderer's,
+through asset_render.

@@ -115,7 +115,7 @@ void asset_shapes_pump(TickContext& ctx) {
         io->reap(c.request);
         b->io = Handle{};
         land(e, s, h, *b, c);
-        asset_reread_after(e, s, h, reread_ref(*b));
+        asset_reread_after(e, s.general, h, asset_reread_of(*b));
     }
 }
 

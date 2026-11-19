@@ -1,7 +1,9 @@
--- Outer engine: assets. load_texture returns a handle at once; the file read goes
--- through the platform I/O queue, the decode and upload happen in "asset.pump" (phase
--- PreSim), and completion arrives as AssetReady or AssetFailed on the bus, never inline.
+-- Outer engine: assets. A load returns a handle at once; the file read goes through the
+-- platform I/O queue, each kind's pump (phase PreSim) makes the record, and completion
+-- arrives as AssetReady or AssetFailed on the bus, never inline. Blobs, shapes, fonts,
+-- sounds and streams are here, with the scopes that hold every kind; nothing here draws, so
+-- a tool links it without a renderer. Textures and materials are asset_render's.
 module "asset" {
-  deps     = { "core", "platform", "math", "render", "inflate", "image", "truetype", "patherizer" },
+  deps     = { "core", "platform", "math", "truetype", "patherizer" },
   engine_module = true,
 }

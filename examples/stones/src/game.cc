@@ -7,7 +7,7 @@
 // The engine gives me a window, the keys, sprites to draw with, and a way to print my
 // structs. That's all I asked it for.
 #include "korvid/stones/module.h"
-#include "korvid/asset/material.h"
+#include "korvid/asset_render/material.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/log.h"
@@ -45,7 +45,7 @@ struct Game {
     Array<Stone> stones;     // stones[0] is the player
     Handle       material;
     Handle       player_material;
-    Handle       stone_look, player_look; // asset.material
+    Handle       stone_look, player_look; // asset_render.material
     Rng          rng;
     u32          ticks   = 0;
     u32          log_in  = 60;

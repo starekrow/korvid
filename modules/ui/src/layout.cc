@@ -3,7 +3,7 @@
 #include "ui_internal.h"
 #include "korvid/asset/font.h"
 #include "korvid/core/format.h"
-#include "korvid/asset/material.h"
+#include "korvid/asset_render/material.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/memory.h"

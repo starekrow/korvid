@@ -193,9 +193,11 @@ you are in; at the root it builds everything. `tools/kormake/README.md` is the m
                      schema field traits (fields.h)
     render           header-only interface: the SpriteDelta stream, renderer API
                      (textures, materials, caps, apply, render), MaterialDesc
-    asset            load_texture returns a handle at once; the read rides the I/O queue,
-                     decode (PNG on zlib) and upload happen in asset.pump, completion is
-                     AssetReady/AssetFailed on the bus
+    asset            a load returns a handle at once; the read rides the I/O queue, the
+                     kind's pump makes the record, completion is AssetReady/AssetFailed on
+                     the bus; fonts, sounds, shapes, blobs and scopes, and no renderer
+    asset_render     textures and materials as asset kinds: PNG decode (on zlib) and upload
+                     in asset_render.pump; the renderer textures of the fonts' glyph pages
     sprite           Transform2 + Sprite schemas, the kind "sprite.entity" with the
                      SpriteWorld convenience surface over its table, and the extract: each
                      tick, for every kind with both components, a Tick marker plus a Set

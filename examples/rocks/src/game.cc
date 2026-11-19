@@ -12,7 +12,7 @@
 #include "korvid/core/format.h"
 #include "korvid/anim/module.h"
 #include "korvid/asset/font.h"
-#include "korvid/asset/material.h"
+#include "korvid/asset_render/material.h"
 #include "korvid/asset/sound.h"
 #include "korvid/audio/module.h"
 #include "korvid/collision/module.h"
@@ -114,7 +114,7 @@ enum Snd : u8 { SND_SHOT, SND_BREAK, SND_BOOM, SND_THRUST, SND_COUNT };
 
 struct Game {
     Score  score;
-    Handle looks[LOOK_COUNT];     // asset.material, one file per look
+    Handle looks[LOOK_COUNT];     // asset_render.material, one file per look
     Handle materials[LOOK_COUNT]; // render.material: the rows those files fill
     Handle font;                  // asset.font: DejaVu Sans at 28 px
     Handle flame_clip;            // anim.clip from a file: the flame's flipbook

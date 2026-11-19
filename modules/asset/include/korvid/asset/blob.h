@@ -12,7 +12,7 @@
 // The bytes are followed by a NUL that `size` does not count, so a text format can be
 // parsed in place. They live as long as the record.
 #pragma once
-#include "korvid/asset/texture.h"
+#include "korvid/asset/asset.h"
 
 namespace kv {
 

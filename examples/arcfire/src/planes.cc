@@ -12,7 +12,7 @@
 // notebook's comparison: a Set delta per tile per tick. (The map's tiles are a still kind,
 // which the extract does not look at once sent: they scroll by layer either way.)
 #include "arcfire.h"
-#include "korvid/asset/material.h"
+#include "korvid/asset_render/material.h"
 #include "korvid/core/log.h"
 #include "korvid/sprite/layers.h"
 #include "korvid/math/scalar.h"

@@ -35,8 +35,8 @@ struct AnimSheet {
     AssetError error = AssetError::None;
     u32        refs  = 0;
     Handle     blob;            // the file, held until the clips are built
-    Handle     texture;         // asset.texture, held
-    Handle     material_asset;  // asset.material for the texture (alpha, nearest), held
+    Handle     texture;         // asset_render.texture, held
+    Handle     material_asset;  // asset_render.material for the texture (alpha, nearest), held
     Handle     material;        // its renderer material: what a Sprite of this sheet uses
     vec2       cell_size;       // pixels: what a Sprite's size is at scale 1, once Ready
     u32        cols = 0, rows = 0;

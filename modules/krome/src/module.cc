@@ -9,7 +9,7 @@
 #include "korvid/core/log.h"
 #include "korvid/core/phase.h"
 #include "korvid/platform/io.h"
-#include "korvid/asset/texture.h"
+#include "korvid/asset_render/texture.h"
 #include "korvid/core/profile.h"
 #include "korvid/platform_hid/input.h"
 #include "korvid/platform_hid/events.h"

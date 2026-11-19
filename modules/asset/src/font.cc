@@ -15,7 +15,6 @@
 #include "korvid/core/name.h"
 #include "korvid/math/scalar.h"
 #include "korvid/platform/io.h"
-#include "korvid/render/renderer.h"
 #include "asset_internal.h"
 #include "korvid/truetype/truetype.h"
 #include <stdlib.h>
@@ -115,21 +114,10 @@ FontPage* new_page(FontStrike& st, const char* name) {
     if (!p.rgba) return nullptr;
     // White everywhere and clear: a glyph's edge blends toward white, never black.
     for (usize i = 0; i < bytes; i += 4) { p.rgba[i] = p.rgba[i + 1] = p.rgba[i + 2] = 255; p.rgba[i + 3] = 0; }
-    if (st.renderer) {
+    if (st.drawn && st.drawn->create) {
         char tname[KV_ASSET_PATH_MAX + 48];
         format(tname, sizeof tname, "%s:page%u", name, st.pages.len);
-        TextureDesc td;
-        td.format = TextureFormat::RGBA8_UNORM;
-        td.name   = tname;
-        p.texture = renderer_texture_create(st.renderer, td);
-        MaterialDesc md;
-        md.texture = p.texture;
-        md.blend   = BlendMode::Alpha;
-        md.filter  = TextureFilter::Linear; // glyphs are drawn at any scale
-        char mname[KV_ASSET_PATH_MAX + 56];
-        format(mname, sizeof mname, "font:%s", tname);
-        md.name    = mname;
-        p.material = renderer_material_create(st.renderer, md);
+        if (!st.drawn->create(st.drawn->user, tname, &p.texture, &p.material)) p.texture = p.material = Handle{};
     }
     p.dirty_x0 = p.dirty_y0 = 0;
     p.dirty_x1 = p.dirty_y1 = KV_FONT_PAGE; // the first upload is the whole page
@@ -329,9 +317,8 @@ bool build_strike(AssetState_& s, FontAsset& f, const char** why) {
 void free_strike(Engine& e, AssetState_& s, FontAsset& f) {
     FontStrike* st = f.strike;
     if (!st) return;
-    Renderer* r = renderer_get(e);
     for (FontPage& p : st->pages) {
-        if (r) { renderer_material_destroy(r, p.material); renderer_texture_destroy(r, p.texture); }
+        if (s.font_pages.destroy && !p.texture.is_null()) s.font_pages.destroy(s.font_pages.user, p.texture, p.material);
         free_in(st->alloc, p.rgba, (usize)KV_FONT_PAGE * KV_FONT_PAGE * 4);
     }
     st->pages.free();
@@ -457,21 +444,20 @@ void asset_fonts_pump(TickContext& ctx) {
 }
 
 // Phase Frame, main thread, after the systems that draw text: the pages that changed go to
-// the renderer, by the rectangle that changed.
+// the renderer (AssetFontPages::upload), by the rectangle that changed.
 void asset_fonts_flush(TickContext& ctx) {
     AssetState_& s = ctx.state_as<AssetState_>();
-    Renderer* r = renderer_get(*ctx.engine);
-    if (!r) return;
+    const AssetFontPages& up = s.font_pages;
+    if (!up.upload) return;
     for (u32 i = 0; i < s.fonts.len; ++i) {
         if (!s.fonts.is_alive(i)) continue;
         FontStrike* st = s.fonts.items[i].strike;
         if (!st) continue;
         os_mutex_lock(&st->lock);
         for (FontPage& p : st->pages) {
-            if (p.dirty_x1 <= p.dirty_x0 || p.dirty_y1 <= p.dirty_y0) continue;
-            usize bytes = (usize)KV_FONT_PAGE * KV_FONT_PAGE * 4;
-            if (!p.uploaded) p.uploaded = renderer_texture_upload(r, p.texture, KV_FONT_PAGE, KV_FONT_PAGE, p.rgba, bytes);
-            else renderer_texture_update(r, p.texture, p.rgba, KV_FONT_PAGE, KV_FONT_PAGE, p.dirty_x0, p.dirty_y0, p.dirty_x1 - p.dirty_x0, p.dirty_y1 - p.dirty_y0);
+            if (p.dirty_x1 <= p.dirty_x0 || p.dirty_y1 <= p.dirty_y0 || p.texture.is_null()) continue;
+            if (!p.uploaded) p.uploaded = up.upload(up.user, p.texture, p.rgba, KV_FONT_PAGE, true, 0, 0, KV_FONT_PAGE, KV_FONT_PAGE);
+            else up.upload(up.user, p.texture, p.rgba, KV_FONT_PAGE, false, p.dirty_x0, p.dirty_y0, p.dirty_x1 - p.dirty_x0, p.dirty_y1 - p.dirty_y0);
             p.dirty_x0 = p.dirty_y0 = ~0u;
             p.dirty_x1 = p.dirty_y1 = 0;
         }
@@ -480,6 +466,12 @@ void asset_fonts_flush(TickContext& ctx) {
 }
 
 Span<const FontRange> font_default_ranges() { return Span<const FontRange>(k_default_ranges, KV_COUNTOF(k_default_ranges)); }
+
+void asset_font_pages(Engine& e, const AssetFontPages* pages) {
+    AssetState_* s = asset_state(e);
+    if (!s) return;
+    s->font_pages = pages ? *pages : AssetFontPages{};
+}
 
 void asset_set_font_fallback(Engine& e, Span<const char* const> paths) {
     AssetState_* s = asset_state(e);
@@ -579,7 +571,7 @@ Handle font_load(Engine& e, AssetState_& st, const char* path, const FontDesc& d
     FontStrike* strike = alloc_items<FontStrike>(s->general, 1);
     *strike = FontStrike{};
     strike->alloc = s->general;
-    strike->renderer = renderer_get(e);
+    strike->drawn = &s->font_pages;
     strike->px = px;
     strike->index.init(s->general);
     strike->blocks.alloc = s->general;

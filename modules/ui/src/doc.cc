@@ -3,7 +3,7 @@
 #include "korvid/asset/blob.h"
 #include "korvid/core/format.h"
 #include "korvid/asset/font.h"
-#include "korvid/asset/material.h"
+#include "korvid/asset_render/material.h"
 #include "korvid/asset/scope.h"
 #include "korvid/asset/sound.h"
 #include "korvid/core/engine.h"

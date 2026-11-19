@@ -6,7 +6,7 @@
 //   Handle h = asset_load_shape(e, "icons/check.svg");
 //   if (const ShapeAsset* s = asset_shape(e, h); s && s->state == AssetState::Ready) patherizer_draw(s->shape, ...);
 #pragma once
-#include "korvid/asset/texture.h"
+#include "korvid/asset/asset.h"
 #include "korvid/patherizer/patherizer.h"
 
 namespace kv {

@@ -11,7 +11,9 @@
 // page when one fills), and kept. A Glyph pointer stays valid for the strike's life. Asking
 // is safe from any thread. The pages changed in a frame are uploaded by "asset.fonts_flush"
 // (the Frame cycle, after the systems that draw text), by the rectangles that changed where
-// the backend can, so a glyph made while a frame is laid out is drawn in that frame.
+// the backend can, so a glyph made while a frame is laid out is drawn in that frame. The
+// pages are drawn through asset_render (AssetFontPages, below): a program without it, a tool,
+// gets glyphs, metrics and the pages' pixels, and null texture and material handles.
 //
 // A code point the first face lacks is looked for down the fallback list (FontDesc, or the
 // engine's, asset_set_font_fallback), drawn from the first face that has it, scaled to
@@ -22,7 +24,7 @@
 //
 // Strings are UTF-8. FontDesc::ranges, when given, are made at load rather than on demand.
 #pragma once
-#include "korvid/asset/texture.h"
+#include "korvid/asset/asset.h"
 #include "korvid/math/rect2.h"
 
 namespace kv {
@@ -60,13 +62,33 @@ struct FontDesc {
 // copied. Fonts already loaded keep theirs.
 void asset_set_font_fallback(Engine& e, Span<const char* const> paths);
 
+// How a font's pages are drawn, set by a module that draws (asset_render). From then on each
+// new page gets a texture and a material (Glyph::texture, ::material, FontAsset's), and
+// "asset.fonts_flush" sends what changed in a page through `upload`. Without it the handles
+// are null and nothing is uploaded; glyphs, metrics and layout are the same. Every callback
+// is optional; `create` may run on any thread that asks for a glyph, under the strike's lock.
+struct AssetFontPages {
+    // A new page called `name`: its texture and its material, alpha-blended and linearly
+    // sampled. False for none (no renderer up), and the page stays CPU-only.
+    bool  (*create)(void* user, const char* name, Handle* texture, Handle* material) = nullptr;
+    // A page's pixels (size x size, RGBA8) to its texture: all of it when `first`, else the
+    // rectangle x, y, w, h that changed. False if the first upload did not take.
+    bool  (*upload)(void* user, Handle texture, const u8* rgba, u32 size, bool first, u32 x, u32 y, u32 w, u32 h) = nullptr;
+    // The page's texture and material, at the strike's retirement.
+    void  (*destroy)(void* user, Handle texture, Handle material) = nullptr;
+    void* user = nullptr;
+};
+// One hook, copied; a second call replaces the first, null removes it (pages made since keep
+// their handles, and the renderer's go with the renderer).
+void asset_font_pages(Engine& e, const AssetFontPages* pages);
+
 struct FontStrike; // the glyph cache of a font read from a file (the asset module's)
 
 struct FontAsset {
     char       path[KV_ASSET_PATH_MAX];      // as given to asset_load_font
     AssetState state = AssetState::Pending;
     AssetError error = AssetError::None;     // Decode for a file stb_truetype rejects
-    Handle     texture;                      // render.texture: the first page, valid from load on
+    Handle     texture;                      // render.texture: the first page, valid from load on (null without AssetFontPages)
     Handle     material;                     // render.material: the first page with alpha blend and white tint
     Handle     io;                           // the pending read while reading; null otherwise
     f32        px = 0.0f;                    // the pixel size asked for
@@ -91,8 +113,9 @@ struct FontAsset {
     f64        build_seconds = 0.0;          // what the rasterization cost, for the log
 };
 
-// Starts loading <exe dir>/assets/<path> as a TrueType font. Null under the same
-// conditions as asset_load_texture, for px outside [4, 256], or for an empty set. The
+// Starts loading <exe dir>/assets/<path> as a TrueType font. Null if the module or the
+// platform is not up, the path is too long, the tables are full, for px outside [4, 256], or
+// for an empty set. The
 // scope takes a reference; without one, the global scope does.
 Handle           asset_load_font(Engine& e, const char* path, const FontDesc& desc, Handle scope);
 Handle           asset_load_font(Engine& e, const char* path, const FontDesc& desc);

@@ -1,29 +1,22 @@
-// Korvid asset: textures as assets. asset_load_texture returns a handle immediately; the
+// Korvid asset_render: textures as assets. asset_load_texture returns a handle at once; the
 // texture it names already has a renderer slot showing the placeholder (the default
 // checkerboard), so materials can be built from it at once and sprites drawn with it
 // before the file has arrived. The file read is submitted to the platform I/O queue, the
-// decode and upload happen in "asset.pump" (phase PreSim, main thread), and completion is
-// an AssetReady or AssetFailed event at the next phase boundary. Paths are relative to
+// decode and upload happen in "asset_render.pump" (phase PreSim, main thread), and completion
+// is an AssetReady or AssetFailed event at the next phase boundary. Paths are relative to
 // <exe dir>/assets/ (kormake copies a module's assets/ there under the module's name).
 // Loading a path twice returns the same handle; the record lives while a scope or another
 // asset holds it (korvid/asset/scope.h), and the scope-less load holds it for the run.
+//
+// The kind is asset_render's, registered with the asset module like any other module's
+// (AssetKindDesc): scopes, reload and the CLI's `scope load` reach it there. The asset module
+// itself draws nothing; this one needs the renderer up to load.
 #pragma once
-#include "korvid/core/handle.h"
+#include "korvid/asset/asset.h"
 
 namespace kv {
 
 struct Engine;
-
-// Where a load is. Pending from the call until the pump decides; then one of the others,
-// for good.
-enum class AssetState : u8 { Pending, Ready, Failed };
-
-constexpr u32 KV_ASSET_PATH_MAX = 128; // bytes, NUL included, for asset and texture paths
-
-// Why a load failed. NotFound and Read come from the I/O queue (ENOENT, anything else);
-// Decode is the PNG decoder; Upload the renderer; Parse a material file's text. A failed
-// asset keeps its handle and its placeholder look, so nothing downstream has to care.
-enum class AssetError : u8 { None, NotFound, Read, Decode, Upload, Parse, Count };
 
 // A texture asset's record, read through asset_texture. Owned by the module; copy what
 // you keep, the pointer is valid until the next load or shutdown.
@@ -40,29 +33,14 @@ struct TextureAsset {
     bool       reread = false, again = false; // the module's: a reload's read is out; read once more when it lands
 };
 
-// Events, declared by the asset module and emitted by the pumps. `asset` is the handle
-// the load returned; its kind() tells a texture (asset.texture) from a material
-// (asset.material). Handlers subscribe with KV_ON like any event; a system reads the
-// batch with ctx.events->read<AssetReady>().
-struct AssetReady  { Handle asset; };
-// `reload`: the file was read again (asset_reload) and could not be used; the asset keeps what
-// it had and stays Ready.
-struct AssetFailed { Handle asset; AssetError error; bool reload = false; };
-// The asset was made again from its file, which changed (korvid/asset/reload.h): the same
-// handle, new contents. Sent for a record that was Ready; one that failed and now loads sends
-// AssetReady.
-struct AssetReloaded { Handle asset; };
-
 // Starts loading <exe dir>/assets/<path> as a PNG (8-bit samples, any color type, no
 // interlace). Returns the asset handle at once, or null if the renderer, the platform or
-// the module is not up, the path is too long (127 characters), or the tables are full.
+// asset_render is not up, the path is too long (127 characters), or the tables are full.
 // The same path returns the same handle; a second call never starts a second read. The
 // scope (asset.scope) takes a reference; without one, the global scope does.
 Handle              asset_load_texture(Engine& e, const char* path, Handle scope);
 Handle              asset_load_texture(Engine& e, const char* path);
 // The record for a handle, or null if the handle is stale or not a texture asset.
 const TextureAsset* asset_texture(Engine& e, Handle asset);
-// "not found", "decode error", ...; "none" for AssetError::None.
-const char*         asset_error_name(AssetError err);
 
 } // namespace kv

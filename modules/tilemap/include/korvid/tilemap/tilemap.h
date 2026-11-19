@@ -15,7 +15,7 @@
 // tiles and objects. Coordinates: a Tiled pixel (x, y) with y down is the world point
 // origin + (x, -y), one world unit per pixel.
 #pragma once
-#include "korvid/asset/texture.h"
+#include "korvid/asset_render/texture.h"
 #include "korvid/math/color.h"
 #include "korvid/core/array.h"
 #include "korvid/core/memory.h"
@@ -84,7 +84,7 @@ struct MapTileset {
     u32         tile_w, tile_h, margin, spacing, image_w, image_h;
     MapRange    tiles;       // into the map's tiles, ascending by local id
     MapRange    props;
-    Handle      texture;     // asset.texture
+    Handle      texture;     // asset_render.texture
     Handle      material;    // render.material: the image, alpha blend; made when the texture settles
 };
 

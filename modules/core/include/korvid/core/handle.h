@@ -53,7 +53,7 @@ const void* type_key() { return &TypeKey<T>::key; }
 // For issuers: registers a kind of handle (kv_handle.h has the descriptor). The C call
 // takes a pointer; this one takes the struct you just filled in. Copied either way.
 inline u16 handle_kind_register(const kv_handle_kind_desc& desc) { return kv_handle_kind_register(&desc); }
-// The issuer's name for the handle's kind ("rocks.rock", "asset.texture"); "" for unknown.
+// The issuer's name for the handle's kind ("rocks.rock", "asset.font"); "" for unknown.
 inline const char* kind_name(Handle h) { return kv_handle_kind_name(h.kind()); }
 // What the issuer calls a live handle (an entity's name, an asset's path; null for none),
 // and the live handle of a kind it calls `name` (null for none). Names outlast runs where

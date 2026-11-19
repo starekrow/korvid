@@ -3,7 +3,7 @@
 // reference does.
 //
 //   Handle level = asset_scope_create(e, "town");
-//   Handle look  = asset_load_material(e, "game/grass.material.json", level);
+//   Handle look  = asset_load_material(e, "game/grass.material.json", level); // asset_render's
 //   ...
 //   asset_scope_release(e, level); // the material, and its texture unless someone else holds it
 //
@@ -15,13 +15,14 @@
 //
 // A count that reaches zero retires the record at the next asset pump, not at once: a
 // load of the same path in between (the next level's scope taking what this one let go)
-// keeps it. Retiring destroys the renderer's texture and material (past the frames in
-// flight; sprites still naming a destroyed material fall back to the default look),
+// keeps it. Retiring destroys what the record made (asset_render's renderer texture and
+// material, past the frames in flight; sprites still naming a destroyed material fall back
+// to the default look),
 // cancels a read still in the queue, takes the path out of the name table so the next
 // load reads the file again, and makes the handle stale. A sound's samples are freed only
 // once the audio module says the mixer has let go of them.
 #pragma once
-#include "korvid/asset/texture.h"
+#include "korvid/asset/asset.h"
 #include "korvid/core/handle.h"
 
 namespace kv {
@@ -60,11 +61,12 @@ const char*        asset_scope_name(Engine& e, Handle scope);
 // References on an asset (scopes and dependents); 0 for a stale handle.
 u32                asset_refs(Engine& e, Handle asset);
 
-// Asset kinds of other modules. A module that keeps records of its own (tile maps, clips)
-// registers their handle kind here, and from then on scopes hold them, counts reach them,
-// readiness waits for them and retirement calls back, exactly as for the asset module's
-// own kinds. The callbacks run on the main thread; retire runs at the asset pump once a
-// record's count is zero, and must destroy the record (its handle then goes stale).
+// Asset kinds of other modules. A module that keeps records of its own (textures and
+// materials in asset_render, tile maps, clips) registers their handle kind here, and from then
+// on scopes hold them, counts reach them, readiness waits for them and retirement calls back,
+// exactly as for the asset module's own kinds. The callbacks run on the main thread; retire
+// runs at the asset pump ("asset.pump_scopes") once a record's count is zero, and must
+// destroy the record (its handle then goes stale). A kind's own pump runs after that one.
 struct AssetKindDesc {
     u16         kind = 0;                                    // the handle kind the records use
     u32*        (*refs)(void* user, Handle h)   = nullptr;   // the record's count, null if stale
@@ -72,11 +74,23 @@ struct AssetKindDesc {
     u64         (*bytes)(void* user, Handle h)  = nullptr;   // optional: for progress
     const char* (*path)(void* user, Handle h)   = nullptr;   // optional: for logs and the CLI
     void        (*retire)(Engine& e, void* user, Handle h) = nullptr;
+    // Optional: asset_reload and asset_reload_all reach the kind through this. Read again
+    // every record loaded from `path` (every record, for null); how many were asked. The
+    // helpers in korvid/asset/reload.h do it the way the asset module's kinds do.
+    u32         (*reload)(Engine& e, void* user, const char* path) = nullptr;
+    // Optional: the CLI's `scope load <scope> <path>` loads paths ending in `suffix`
+    // (".png") through this, into `scope`.
+    const char* suffix = nullptr;
+    Handle      (*load)(Engine& e, void* user, const char* path, Handle scope) = nullptr;
     void*       user = nullptr;
 };
 constexpr u32 KV_ASSET_EXTERNAL_KINDS = 16;
 bool asset_kind_register(Engine& e, const AssetKindDesc& desc);
 void asset_kind_unregister(Engine& e, u16 kind);
+// What a load does with its scope, for a kind's own load function: the scope takes a
+// reference on the asset (once); a null scope takes none, and a record nobody holds then
+// retires at the next pump. Returns the asset; null for a stale scope or a null asset.
+Handle asset_hold(Engine& e, Handle scope, Handle asset);
 // References for dependencies between assets: a record that needs another (a map its
 // tilesets' textures) loads it with a null scope, which takes no reference, then holds one
 // with asset_ref and drops it with asset_unref when it no longer needs it (at its

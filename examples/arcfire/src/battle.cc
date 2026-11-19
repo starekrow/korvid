@@ -14,7 +14,7 @@
 // sim in it. The capital ship's state is the stage's clock (each section's break is a
 // distance), so a restart puts it back whole.
 #include "arcfire.h"
-#include "korvid/asset/material.h"
+#include "korvid/asset_render/material.h"
 #include "korvid/core/log.h"
 #include "korvid/math/scalar.h"
 

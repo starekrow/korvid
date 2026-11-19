@@ -68,8 +68,10 @@ void test_font(kv::TestCtx& c) {
     KV_CHECK(c, settle(e, h16));
     const FontAsset& f = *asset_font(e, h16);
     KV_CHECK(c, glyphs_of(f) == 0 && pages_of(f) == 1 && f.line_height >= 16 && f.ascent == (f32)(i32)f.ascent && f.kern_count > 1000);
+    // Nothing draws here (no asset_render): the pages are the CPU's, with no texture or material.
+    KV_CHECK(c, f.texture.is_null() && f.material.is_null());
     const Glyph* a = font_glyph(f, 'A');
-    KV_CHECK(c, a && a->size.x > 0 && a->advance > 8 && glyphs_of(f) == 1 && font_glyph(f, 'A') == a);
+    KV_CHECK(c, a && a->size.x > 0 && a->advance > 8 && glyphs_of(f) == 1 && font_glyph(f, 'A') == a && a->texture.is_null());
     font_measure(f, "Hello");
     KV_CHECK(c, glyphs_of(f) == 5); // H, e, l, o, and A before: l once
     // Outside the old fixed set, with nothing declared: Greek, Cyrillic, box drawing.

@@ -21,9 +21,9 @@
 #include "arcfire.h"
 #include "korvid/asset/blob.h"
 #include "korvid/core/format.h"
-#include "korvid/asset/material.h"
+#include "korvid/asset_render/material.h"
 #include "korvid/asset/scope.h"
-#include "korvid/asset/texture.h"
+#include "korvid/asset_render/texture.h"
 #include "korvid/core/log.h"
 #include "korvid/math/scalar.h"
 #include <string.h>

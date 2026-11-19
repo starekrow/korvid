@@ -1,4 +1,4 @@
-// Korvid asset: materials as files. A material file is JSON next to the textures under the
+// Korvid asset_render: materials as files. A material file is JSON next to the textures under the
 // module's assets/:
 //
 //   { "texture": "rocks/rock.png", "blend": "alpha", "tint": [1, 1, 1, 1],
@@ -9,13 +9,13 @@
 // engine's fragment shader. "shader" names a game's (MaterialDesc::shader). asset_load_material returns a
 // handle at once; the renderer row it names exists from then on (showing the placeholder
 // look) so sprites can use it immediately. The file read goes through the I/O queue, the
-// parse happens in "asset.pump_materials" (phase PreSim, main thread, after "asset.pump"),
+// parse happens in "asset_render.pump_materials" (phase PreSim, main thread, after "asset_render.pump"),
 // the texture it names is loaded through asset_load_texture, and AssetReady arrives once
 // that texture is resident (or at once if the file names none). Loading a path twice
 // returns the same handle. Tools reach the records by slot and patch them; a patch
 // reaches the renderer before the next frame.
 #pragma once
-#include "korvid/asset/texture.h"
+#include "korvid/asset_render/texture.h"
 #include "korvid/render/material.h"
 
 namespace kv {
@@ -28,7 +28,7 @@ struct MaterialAsset {
     AssetState   state = AssetState::Pending; // Ready once the file is parsed and its texture resident
     AssetError   error = AssetError::None;    // Parse for a bad file; a texture's error is passed through
     Handle       material;      // the renderer's row handle: valid from load on; put it in a Sprite
-    Handle       texture_asset; // the asset.texture the file named, once parsed; null for none or before
+    Handle       texture_asset; // the asset_render.texture the file named, once parsed; null for none or before
     Handle       io;            // the pending read's request handle while reading; null otherwise
     MaterialDesc desc;          // what the renderer row holds now (texture is the renderer's handle)
     char         texture_path[KV_ASSET_PATH_MAX]; // the file's "texture", or empty for the default

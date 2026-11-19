@@ -3,7 +3,7 @@
 #include "anim_internal.h"
 #include "korvid/asset/blob.h"
 #include "korvid/core/format.h"
-#include "korvid/asset/material.h"
+#include "korvid/asset_render/material.h"
 #include "korvid/asset/scope.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/json.h"

@@ -1,6 +1,6 @@
 // The ui module: screens, input and events, the model, and the sprites it draws.
 #include "ui_internal.h"
-#include "korvid/asset/material.h"
+#include "korvid/asset_render/material.h"
 #include "korvid/core/format.h"
 #include "korvid/asset/scope.h"
 #include "korvid/core/sort.h"
@@ -542,7 +542,7 @@ constinit const EventTypeDesc k_events[] = {
 constinit const KindDesc k_kinds[] = {{.name = ".sprite", .components = "Transform2, Sprite", .capacity = 16384, .cosmetic = true}};
 constinit const SystemDesc k_systems[] = {
     {.name = ".update", .phase = Phase::PreSim, .fn = ui_update, .reads = "input.actions, input.state", .appends = "audio.commands",
-     .emits = "UiEvent, UiCovered, UiUncovered", .after = "?asset.pump_scopes, ?asset.pump, ?asset.pump_blobs, ?asset.pump_sounds", .main_thread = true, .runs = RunWhen::Always},
+     .emits = "UiEvent, UiCovered, UiUncovered", .after = "?asset.pump_scopes, ?asset_render.pump, ?asset.pump_blobs, ?asset.pump_sounds", .main_thread = true, .runs = RunWhen::Always},
     // The Frame cycle: drawing only. Reveals, focus and events stay in .update, in the tick.
     {.name = ".draw", .phase = Phase::Frame, .fn = ui_draw, .writes = ".sprite", .main_thread = true},
 };

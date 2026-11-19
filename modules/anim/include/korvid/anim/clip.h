@@ -28,7 +28,7 @@
 //
 // The channel list has room; a skeleton later is more channels and a target per track.
 #pragma once
-#include "korvid/asset/texture.h"
+#include "korvid/asset_render/texture.h"
 #include "korvid/core/array.h"
 #include "korvid/core/component.h"
 #include "korvid/core/name.h"
