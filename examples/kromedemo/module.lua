@@ -5,5 +5,5 @@
 module "kromedemo" {
   output        = "exe",
   engine_module = true,
-  deps          = { "core", "platform", "platform_hid", "math", "render", "asset", "krome", "frameloop" },
+  deps          = { "core", "platform", "platform_hid", "math", "render", "asset", "asset_live", "krome", "frameloop" },
 }

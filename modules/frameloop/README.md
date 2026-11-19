@@ -93,7 +93,7 @@ renders once.
 | `--quiet` | log at Warn and above |
 | `--validation`, `--no-validation` | the Vulkan validation layers (on in debug builds) |
 | `--no-vsync` | mailbox or immediate presentation; no slack, so no idle work |
-| `--pacing demand\|continuous` | `FrameLoopConfig::pacing`: continuous draws every vsync; demand draws when something happened (input, the window, I/O, a load, sprite deltas, `engine_want_frame`), polls the platform every 4 ms between and wakes four times a second: for a tool's window |
+| `--pacing demand\|continuous` | `FrameLoopConfig::pacing`: continuous draws every vsync; demand draws when something happened (input, the window, I/O, a load, sprite deltas, `engine_want_frame`, a waker that had something: `engine_add_waker`), polls the platform and asks the wakers every 4 ms between and wakes four times a second: for a tool's window |
 | `--borderless` | no title bar; sidesteps the GNOME Wayland resize stall |
 | `--hitch-ms N` | log a frame longer than N ms with its pump, tick and render split, and its zone tree |
 | `--hash`, `--hash-systems` | the state hash after every tick; after every system |
@@ -105,6 +105,7 @@ renders once.
 | `--io sync`, `--io uring` | the I/O queue's backend (the default picks io_uring where the kernel has it) |
 | `--pack FILE` (repeatable), `--assets DIR` | mounts over `<exe dir>/assets/` and `<exe dir>/<exe>.kpak`, later ones winning |
 | `--cli-port N`, `--cli-stdin`, `--cli-ascii` | the CLI's transports; ASCII-only escapes non-ASCII as `\u{XXXX}` both ways |
+| `--goldberg PORT`, `--no-goldberg` | for a program that links `asset_live`: the running goldberg watch to reload from, on this port; or none this run (they set `KV_GOLDBERG`) |
 | `--idle-margin-ms N`, `--no-idle` | slack kept back from idle work (1.5); none at all |
 | `--capacity KIND=N` (repeatable) | a kind's capacity over the game's, by its full name (`arcfire.bullet=131072`) |
 | `--spike-hunt` | a dev build without the work that is not checking: no memory fills or poison, no guard pages, no event emitters for the trace (`dev_spike_hunt`); its timings near a ship build's, its asserts, access checks, counters and profiler kept |

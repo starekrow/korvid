@@ -132,9 +132,21 @@ bool apply_game_arg(const char* arg, const char* value) {
     return false;
 }
 
+// --goldberg PORT and --no-goldberg, for asset_live (which reads KV_GOLDBERG, and is not this
+// module's to call): a dev build's connection to a running goldberg watch.
+void set_goldberg(const char* value) {
+#if defined(_WIN32)
+    _putenv_s("KV_GOLDBERG", value);
+#else
+    setenv("KV_GOLDBERG", value, 1);
+#endif
+}
+
 bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--run-seconds") == 0 && i + 1 < argc) cfg.run_seconds = atof(argv[++i]);
+        else if (strcmp(argv[i], "--goldberg") == 0 && i + 1 < argc) set_goldberg(argv[++i]);
+        else if (strcmp(argv[i], "--no-goldberg") == 0) set_goldberg("off");
         else if (strcmp(argv[i], "--quiet") == 0) log_set_level(LogLevel::Warn);
         else if (strcmp(argv[i], "--no-validation") == 0) cfg.validation = false;
         else if (strcmp(argv[i], "--validation") == 0) cfg.validation = true;
@@ -233,7 +245,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
                                   "[--no-vsync] [--renderer auto|gpu|cpu] [--cpu-shaders all|none] [--cpu-scale auto|N] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] [--size WxH] [--rate X] [--early-reads order|snapshot|kind] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|ring] [--idle-margin-ms N] [--no-idle] [--overlay] [--touchpad] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE]", argv[0]);
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|ring] [--idle-margin-ms N] [--no-idle] [--overlay] [--touchpad] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE] [--goldberg PORT] [--no-goldberg]", argv[0]);
             return false;
         }
     }
@@ -420,6 +432,7 @@ bool demand_frame(Engine& engine, FrameLoopState& s) {
     if (s.window && (s.window->width() != s.presented_w || s.window->height() != s.presented_h)) want = true;
     if (IoQueue* io = platform_io(engine)) if (io->pending() || io->completions().len) want = true;
     if (engine_holds(engine) & HoldLoading) want = true;
+    if (engine_wake(engine)) want = true; // a module's socket had something (engine_add_waker)
     f64 now = time_now();
     if (now - s.demand_last >= k_demand_heartbeat) want = true;
     if (engine.frame_due > 0.0 && now >= engine.frame_due) { want = true; engine.frame_due = 0.0; }

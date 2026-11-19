@@ -1858,4 +1858,21 @@ bool name_list_next(const char*& cursor, char* out, usize cap) {
     }
 }
 
+bool engine_add_waker(Engine& e, bool (*fn)(Engine&, void*), void* user) {
+    if (!fn || e.waker_count >= KV_COUNTOF(e.wakers)) return false;
+    e.wakers[e.waker_count++] = Engine::Waker{fn, user};
+    return true;
+}
+
+void engine_remove_waker(Engine& e, bool (*fn)(Engine&, void*), void* user) {
+    for (u32 i = 0; i < e.waker_count; ++i)
+        if (e.wakers[i].fn == fn && e.wakers[i].user == user) { e.wakers[i] = e.wakers[--e.waker_count]; return; }
+}
+
+bool engine_wake(Engine& e) {
+    bool any = false;
+    for (u32 i = 0; i < e.waker_count; ++i) any |= e.wakers[i].fn(e, e.wakers[i].user);
+    return any;
+}
+
 } // namespace kv

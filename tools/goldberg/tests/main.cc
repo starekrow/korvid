@@ -12,6 +12,7 @@
 #include "korvid/platform/process.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #if !defined(_WIN32)
 #include <sys/stat.h>
@@ -965,6 +966,104 @@ void test_watch(TestCtx& c) {
     }
 }
 
+// A program's connection (docs/PRDs/Krome-Slice-6-PRD.md, "A program's connection to goldberg"):
+// a watch writes its port into the output tree, a program that says hello is told `changed PATH`
+// for each output that lands and `removed PATH` for each that leaves, status names it, and the
+// port file goes when the watch does.
+void test_programs(TestCtx& c) {
+    c.begin("goldberg programs");
+    if (!process_supported()) return;
+    Tree t;
+    KV_CHECK(c, t.make("kv-goldberg-programs"));
+    char root[600], out[600], cli[16];
+    snprintf(root, sizeof root, "g=%s/assets", t.dir);
+    snprintf(out, sizeof out, "%s/out", t.dir);
+    u16 cli_port = (u16)(41000 + (u32)(os_ticks() % 20000));
+    snprintf(cli, sizeof cli, "%u", cli_port);
+    t.put("assets/a.png", "a1");
+    t.put("assets/b.png", "b1");
+    Running w;
+    KV_CHECK(c, w.start("--cli-port", cli, "watch", "game", "--root", root, "--project", t.dir, "--out", out));
+    KV_CHECK(c, eventually(w, [&] { return has(w.text(), ", watching with ") && io_is_file(t.path("out/.goldberg-port")); }));
+    u16 port = (u16)atoi(t.read("out/.goldberg-port"));
+    KV_CHECK(c, port > 0);
+    NetSocket sock;
+    KV_CHECK(c, net_connect_local(port, sock));
+    sock.write_str("hello testprog dev\n");
+    Array<char> heard{};
+    auto listen = [&](const char* want) {
+        return eventually(w, [&] {
+            sock.flush();
+            char buf[1024];
+            for (i32 n; (n = sock.read(buf, sizeof buf)) > 0;) { if (heard.len) --heard.len; memcpy(heard.push_n((u32)n), buf, (usize)n); heard.push(0); }
+            return heard.len && has(heard.data, want);
+        });
+    };
+    KV_CHECK(c, listen("welcome\n"));
+    KV_CHECK(c, eventually(w, [&] { return has(w.text(), "testprog (dev) connected"); }));
+    KV_CHECK(c, eventually(w, [&] { return ask(w, cli_port, "status") && has(g_out.data, "  program  testprog (dev)"); }));
+    // A save lands, and the program hears it once it is in place.
+    t.put("assets/a.png", "a2");
+    KV_CHECK(c, listen("changed g/a.png\n"));
+    KV_CHECK(c, file_is(t, "out/g/a.png", "a2"));
+    KV_CHECK(c, !has(heard.data, "g/b.png")); // nothing else was cooked
+    // A source gone: its output leaves, and the program hears that.
+    io_remove(t.path("assets/b.png"));
+    KV_CHECK(c, listen("removed g/b.png\n"));
+    // The program goes; the watch says so and carries on.
+    sock.close();
+    sock.out.free();
+    KV_CHECK(c, eventually(w, [&] { return has(w.text(), "testprog went away"); }));
+    KV_CHECK(c, eventually(w, [&] { return ask(w, cli_port, "status") && !has(g_out.data, "  program  "); }));
+    KV_CHECK(c, ask(w, cli_port, "quit"));
+    KV_CHECK(c, w.wait(10.0) == 0);
+    KV_CHECK(c, !io_is_file(t.path("out/.goldberg-port")));
+    heard.free();
+    w.free();
+    t.free();
+}
+
+// kim's preludes as edges (docs/PRDs/Krome-Slice-6-PRD.md, "Discovered edges, for kim only"): a
+// prelude saved checks again the screens that use it, so a screen it breaks fails in the cook
+// with its line, and the fix lands it again; a cook of the unchanged tree after runs no step.
+void test_kim_edges(TestCtx& c) {
+    c.begin("goldberg kim edges");
+    if (!process_supported()) return;
+    Tree t;
+    KV_CHECK(c, t.make("kv-goldberg-kim-edges"));
+    char root[600], std_root[600], out[600], cli[16], dump[600];
+    snprintf(root, sizeof root, "g=%s/assets", t.dir);
+    snprintf(std_root, sizeof std_root, "krome=%s/std", t.dir);
+    snprintf(out, sizeof out, "%s/out", t.dir);
+    snprintf(dump, sizeof dump, "%s/dump.txt", t.dir);
+    u16 cli_port = (u16)(41000 + (u32)(os_ticks() % 20000));
+    snprintf(cli, sizeof cli, "%u", cli_port);
+    t.put("std/std.kim", "style card { bg=#202430 }\n");
+    t.put("assets/ui/a.kim", "use \"krome/std\"\nscreen s {\n  box [card]\n}\n");
+    t.put("assets/ui/b.kim", "screen s { box }\n"); // uses nothing
+    Running w;
+    KV_CHECK(c, w.start("--cli-port", cli, "watch", "game", "--root", root, "--root", std_root, "--project", t.dir, "--out", out));
+    KV_CHECK(c, eventually(w, [&] { return has(w.text(), ", watching with ") && io_is_file(t.path("out/g/ui/a.kimb")); }));
+    // The prelude loses the style: a.kim fails, at its line; b.kim is not looked at.
+    t.put("std/std.kim", "style other { bg=#202430 }\n");
+    KV_CHECK(c, eventually(w, [&] { return ask(w, cli_port, "status") && has(g_out.data, "g/ui/a.kim:3: no style 'card'"); }));
+    KV_CHECK(c, has(g_out.data, "1 failed"));
+    // Back: it checks again and lands.
+    t.put("std/std.kim", "style card { bg=#303440 }\n");
+    KV_CHECK(c, eventually(w, [&] { return ask(w, cli_port, "status") && has(g_out.data, "stable") && has(g_out.data, "0 failed"); }));
+    KV_CHECK(c, ask(w, cli_port, "quit"));
+    KV_CHECK(c, w.wait(10.0) == 0);
+    w.free();
+    // The edges are in the state: a cook after it runs no step, and still checks against them.
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--root", std_root, "--project", t.dir, "--out", out, "--watch", "none", "--dump", dump) == 0);
+    KV_CHECK(c, !has(t.read("dump.txt"), "request run"));
+    t.put("std/std.kim", "style nothing { bg=#303440 }\n");
+    KV_CHECK(c, gb("cook", "game", "--root", root, "--root", std_root, "--project", t.dir, "--out", out, "--watch", "none") == 1);
+    KV_CHECK(c, has(g_err.data, "g/ui/a.kim:3: no style 'card'"));
+    t.free();
+}
+
+
 // Two cooks of one tree: the second waits for the first, then finds nothing to do.
 // A watch with a small share takes its events a few a tick and writes its state a slice a
 // tick. Started on a tree a cook left up to date, it cooks nothing; a change made while it
@@ -1061,6 +1160,8 @@ int main(int argc, char** argv) {
     test_kim(c);
     test_learn(c);
     test_watch(c);
+    test_programs(c);
+    test_kim_edges(c);
     test_state_slices(c);
     test_lock(c);
     g_out.free();

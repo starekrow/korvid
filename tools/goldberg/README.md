@@ -71,6 +71,13 @@ stdin, and on a TCP port with `--cli-port N` (loopback; one line in, lines out, 
 | `quit` | saves the state and exits |
 | `ls /kinds/goldberg`, `help`, ... | the engine's own CLI: goldberg's records are pools like any other |
 
+A watch also listens for **programs** that run from its output tree (loopback, a port the OS
+picks unless `--listen-port N` says; the port is written to `<out>/.goldberg-port` and removed
+at exit). A dev build that links `asset_live` finds it there, says `hello NAME CONFIG`, and is
+then told `changed PATH` after each output lands in the tree (renamed into place whole) and
+`removed PATH` after one leaves it; it reloads what it holds (`asset_reload`). `status` lists
+them, one `program` line each.
+
 **explain** solves files on the spot and says, for each, its type, the metadata a
 converter would be given, the path of converters, whether it lands and where, and for
 each of those the file and the rule that decided. It finds the asset root by itself:
@@ -113,6 +120,7 @@ processes under it, and can dump what it decided. The same log gives the same du
 | `--dump FILE` | every file, its answer, every step and everything asked of the host, as text |
 | `--quiet` | say nothing when there was nothing to do |
 | `-v` | print soft warnings |
+| `--listen-port N` | a watch's port for programs (`<out>/.goldberg-port`). Default: one the OS picks |
 | `--cli-port N` | before the command: listen for CLI sessions on 127.0.0.1:N |
 
 ## .berg files
@@ -203,9 +211,11 @@ checked against the preludes it uses (`kimb_check`, `modules/kimb`) when their r
 this cook: a `use "krome/std"` is the `std.kim` source under the root named `krome`, as
 kormake's cook of a game has it. A misspelled style, a token no theme has, a word that is
 neither the kernel's nor a definition fails the cook with its line, as it would fail at
-load. A use whose root is not in the cook is not checked against. A prelude's change does
-not cook again the screens that use it: their bytes do not depend on it (a `.kimb` is
-syntax; Krome resolves names at load), and the check waits for discovered edges.
+load. A use whose root is not in the cook is not checked against. Every use the check asked for
+(whose root is in the cook) is an edge from the screen to that prelude's source, and the
+prelude's hash is in the screen's step key: a prelude saved checks again every screen that
+uses it (a screen it breaks fails with its line), and the edges are kept in the state, so a
+cook after a restart runs no step for them. Only `kim` reports edges so far.
 
 `goldberg learn FILE` writes `outputs` for you. It turns the source's stem into
 `{stem}` and names that differ only in a number into one pattern. `--dry-run` shows the
@@ -225,6 +235,7 @@ the asset root changed while the script ran.
 | `<state>.work/` | what converters made, a directory per step. Scratch |
 | `<state>.run/` | where a converter with declared outputs writes until it ends |
 | `<state>.lock` | held by the goldberg that has the tree |
+| `<out>/.goldberg-port` | a watch's port for programs, while it runs |
 
 Under kormake: the tree is `build/assets/<program>/` (ship: `dist/<program>/assets/`,
 or `build/assets-ship/<program>/` for a test or a bundle), and the state is

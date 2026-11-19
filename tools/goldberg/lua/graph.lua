@@ -37,6 +37,7 @@ function Graph.new(session, state)
         claim = {},       -- output -> the file key whose copy writes it
         by_work = {},     -- a step's directory in the work root -> the shell step
         by_script = {},   -- a script's file key -> { [file key] = true }: the steps that run it
+        by_use = {},      -- a prelude's file key -> { [file key] = true }: the kim steps whose screens use it
         present = {},     -- output -> { size, mtime }: what is in the output tree
         built = {},       -- output -> { key, size, mtime, source }: what made it
         ran = {},         -- file key -> { key, outputs = { name -> hash } }: a shell step's last good run
@@ -60,7 +61,9 @@ function Graph.new(session, state)
             local r = state.ran[key]
             local outputs = {}
             if json.is_object(r.outputs) then for _, name in ipairs(json.keys(r.outputs)) do outputs[name] = r.outputs[name] end end
-            g.ran[key] = { key = r.key, outputs = outputs }
+            local uses = nil
+            if type(r.uses) == "table" then uses = {}; for i = 1, #r.uses do uses[i] = r.uses[i] end end
+            g.ran[key] = { key = r.key, outputs = outputs, uses = uses }
         end
     end
     return g
@@ -100,9 +103,63 @@ local function unlink_script(g, step)
     step.script = nil
 end
 
+-- A kim step's preludes (docs/PRDs/Krome-Slice-6-PRD.md, "Discovered edges, for kim only"):
+-- the uses its check asked for, by their sources' keys. Edges, so a prelude saved checks again
+-- every screen that uses it; and inputs, so their hashes are in the step's key.
+local function unlink_uses(g, step)
+    for _, k in ipairs(step.uses or {}) do
+        local users = g.by_use[k]
+        if users then
+            users[step.file] = nil
+            if next(users) == nil then g.by_use[k] = nil end
+        end
+    end
+    step.uses = nil
+end
+
+local function link_uses(g, step, keys)
+    unlink_uses(g, step)
+    step.uses = {}
+    for _, k in ipairs(keys) do
+        step.uses[#step.uses + 1] = k
+        g.by_use[k] = g.by_use[k] or {}
+        g.by_use[k][step.file] = true
+    end
+    table.sort(step.uses)
+end
+
+-- "goldberg:use krome/std" lines out of what a kim run said: the uses as file keys (a use's
+-- first part is the root's name, the rest its path with .kim), and the rest of the text.
+local function take_uses(s, text)
+    local keys, rest = {}, {}
+    for line in (text or ""):gmatch("[^\n]+") do
+        local use = line:match("^goldberg:use (.+)$")
+        if use then
+            local root, path = use:match("^([^/]+)/(.+)$")
+            for i, r in ipairs(s.roots) do
+                if root and r.name == root then keys[#keys + 1] = s:key(i, path .. ".kim") break end
+            end
+        else
+            rest[#rest + 1] = line
+        end
+    end
+    return keys, table.concat(rest, "\n")
+end
+
+-- The uses' part of a key: each prelude's key and hash ("-" while it is not there).
+local function uses_text(g, uses)
+    local parts = {}
+    for _, k in ipairs(uses or {}) do
+        local f = g.s.files[k]
+        parts[#parts + 1] = k .. "=" .. (f and f.hash or "-")
+    end
+    return table.concat(parts, " ")
+end
+
 local function drop_step(g, key, why)
     local step = g.steps[key]
     if not step then return end
+    unlink_uses(g, step)
     local was_running = step.state == "running"
     set_state(g, step, "clean") -- out of the counts
     if step.h then host.kinds.step:destroy(step.h) end
@@ -125,15 +182,17 @@ end
 
 -- A file's answer or content changed: make, change, or drop its step.
 function Graph:file_changed(key)
-    -- A script is an input of every step that runs it.
-    if self.by_script[key] then
-        local users = {}
-        for user in pairs(self.by_script[key]) do users[#users + 1] = user end
-        table.sort(users)
-        for _, user in ipairs(users) do
-            local step = self.steps[user]
-            if step and step.state == "running" then step.again = true
-            elseif step then set_state(self, step, "unchecked") end
+    -- A script is an input of every step that runs it; a prelude, of every screen that uses it.
+    for _, by in ipairs({ self.by_script, self.by_use }) do
+        if by[key] then
+            local users = {}
+            for user in pairs(by[key]) do users[#users + 1] = user end
+            table.sort(users)
+            for _, user in ipairs(users) do
+                local step = self.steps[user]
+                if step and step.state == "running" then step.again = true
+                elseif step then set_state(self, step, "unchecked") end
+            end
         end
     end
     local f = self.s.files[key]
@@ -271,8 +330,21 @@ local function check_shell(g, step, f)
     local patterns, bad = convert.patterns(conv, vars, step.params)
     if bad then return fail(g, step, bad) end
     local _, place = s:place(f)
-    local key = kv.sha256(table.concat({ "shell", SHELL_VERSION, convert.signature(conv), script_hash, f.hash, params_text(step.params), place }, "\0"))
+    local base = table.concat({ "shell", SHELL_VERSION, convert.signature(conv), script_hash, f.hash, params_text(step.params), place }, "\0")
     local saved = g.ran[step.file]
+    -- A kim step's preludes, as its last run found them: edges again (after a restart), and in
+    -- its key. One being read is waited for, as a script is.
+    local kim = kind == "builtin" and conv.builtin == "kim"
+    if kim and not step.uses and saved and saved.uses then link_uses(g, step, saved.uses) end
+    if kim then
+        for _, k in ipairs(step.uses or {}) do
+            local uf = s.files[k]
+            if uf and not uf.hash then return end
+        end
+    end
+    step.key_base, step.kim = base, kim
+    local uses = kim and step.uses and #step.uses > 0 and uses_text(g, step.uses) or nil
+    local key = kv.sha256(uses and (base .. "\0" .. uses) or base)
     if saved and saved.key == key then
         local all = true
         for name, hash in pairs(saved.outputs) do
@@ -315,7 +387,7 @@ local function finish_shell(g, step)
         g.notes[#g.notes + 1] = string.format('%s: the converter "%s" wrote %s, which it does not declare. Taken in; declare it in %s, or run `goldberg learn` on this file',
             step.file, conv.name, table.concat(undeclared, ", "), conv.file)
     end
-    g.ran[step.file] = { key = step.run_key, outputs = outputs }
+    g.ran[step.file] = { key = step.run_key, outputs = outputs, uses = step.kim and step.uses or nil }
     s.state_dirty = true
     if step.h then host.kinds.step:set(step.h, "key", (step.run_key:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))) end
     g.cooked = g.cooked + 1
@@ -413,8 +485,20 @@ function Graph:step_exit(ev)
         if dir then self.orphan_runs[key] = nil; self.s:clear_work(dir) end
         return
     end
+    -- A kim run names the preludes it used, checked or not: the edges, and the key made again
+    -- over them, so the next look at the step finds it clean.
+    local said = ev.text
+    if step.kim then
+        local keys
+        keys, said = take_uses(self.s, ev.text)
+        link_uses(self, step, keys)
+        if ev.code == 0 and step.key_base then
+            local uses = #step.uses > 0 and uses_text(self, step.uses) or nil
+            step.run_key = kv.sha256(uses and (step.key_base .. "\0" .. uses) or step.key_base)
+        end
+    end
     if ev.code ~= 0 then
-        local text = (ev.text or ""):gsub("%s+$", ""):gsub("\n", " | ")
+        local text = (said or ""):gsub("%s+$", ""):gsub("\n", " | ")
         local how = ev.code < 0 and "could not be started" or string.format("failed (exit %d)", ev.code)
         local again = step.again
         fail(self, step, string.format('the converter "%s" %s%s', step.conv.name, how, text ~= "" and (": " .. text) or ""))
@@ -530,7 +614,13 @@ function Graph:state_writer()
             if not r then return nil end
             local o = {}
             for name, hash in pairs(r.outputs) do o[#o + 1] = jstr(name) .. ':"' .. hash .. '"' end
-            return string.format('%s:{"key":"%s","outputs":{%s}}', jstr(key), r.key, table.concat(o, ","))
+            local uses = ""
+            if r.uses then
+                local u = {}
+                for i, k in ipairs(r.uses) do u[i] = jstr(k) end
+                uses = ',"uses":[' .. table.concat(u, ",") .. "]"
+            end
+            return string.format('%s:{"key":"%s","outputs":{%s}%s}', jstr(key), r.key, table.concat(o, ","), uses)
         end)
         parts[#parts + 1] = "}}\n"
     end)

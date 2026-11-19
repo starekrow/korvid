@@ -116,6 +116,10 @@ struct Engine {
     bool                  quit_requested   = false;
     bool                  frame_wanted     = false; // engine_want_frame: a loop that paces on demand draws another frame
     f64                   frame_due        = 0.0;   // engine_want_frame_at: the earliest time one is wanted; 0 none
+    // engine_add_waker: what a loop pacing on demand asks each time it polls the platform.
+    struct Waker { bool (*fn)(Engine&, void*); void* user; };
+    Waker                 wakers[8]        = {};
+    u32                   waker_count      = 0;
     // The Work cycle (engine_work): whether a unit of the running cycle said more, whether
     // the last cycle ended with more to do, and when the running budget ends.
     bool                  work_more        = false;
@@ -277,5 +281,15 @@ inline bool engine_work_pending(const Engine& e) { return e.work_pending; }
 inline void engine_want_frame(Engine& e) { e.frame_wanted = true; }
 // A frame at a time (time_now's clock): a caret's next blink. The earliest asked for stands.
 inline void engine_want_frame_at(Engine& e, f64 when) { if (e.frame_due <= 0.0 || when < e.frame_due) e.frame_due = when; }
+
+// Something the engine's events do not see, that a loop pacing on demand looks at each time it
+// polls the platform (every few milliseconds while idle): a socket a module reads (asset_live's
+// connection to goldberg). `fn` does what it does with what arrived and says true when anything
+// did; the loop then draws a frame. It must be cheap and never block. Eight at most; false when
+// full. Remove it before the state `user` names goes.
+bool engine_add_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
+void engine_remove_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
+// Asks each waker; true when one had something. The frame loop calls it; a loop of its own may.
+bool engine_wake(Engine& e);
 
 } // namespace kv

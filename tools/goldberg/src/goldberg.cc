@@ -37,9 +37,11 @@
 #include "korvid/core/arena.h"
 #include "korvid/platform/fs_watch.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/net.h"
 #include "korvid/platform/process.h"
 #include "korvid/script/script.h"
 #include "korvid/tool/tool.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -263,7 +265,78 @@ struct GoldbergState {
     Array<Text>     texts;               // texts of the events now in rows
     u32             seq = 0;
     Table*          events = nullptr;
+    // Programs connected to a watch (docs/PRDs/Krome-Slice-6-PRD.md, "A program's connection to
+    // goldberg"): told `changed PATH` after each output lands, `removed PATH` after one leaves.
+    struct Program {
+        NetSocket sock;
+        char      name[64] = "?", config[16] = "";
+        char      line[256] = {};
+        u32       line_len = 0;
+        bool      hello = false;
+    };
+    NetListener     listener;
+    Array<Program*> programs;
+    char            port_file[700] = {}; // <out>/.goldberg-port, while the listener is open
+    u32             told = 0;            // lines sent to programs
 };
+
+// Every program that said hello hears the line.
+void tell_programs(GoldbergState& s, const char* verb, const char* output) {
+    if (!s.programs.len) return;
+    char line[700];
+    format(line, sizeof line, "%s %s\n", verb, output);
+    for (GoldbergState::Program* p : s.programs)
+        if (p->hello && p->sock.is_open()) { p->sock.write_str(line); ++s.told; }
+}
+
+// New connections taken, hellos read, what was told sent, the gone let go.
+void serve_programs(GoldbergState& s) {
+    if (!s.listener.is_open()) return;
+    for (NetFd fd = s.listener.accept(); fd >= 0; fd = s.listener.accept()) {
+        GoldbergState::Program* p = (GoldbergState::Program*)mem_alloc(sizeof(GoldbergState::Program));
+        *p = GoldbergState::Program{};
+        p->sock.adopt(fd);
+        s.programs.alloc = s.general;
+        s.programs.push(p);
+    }
+    for (u32 i = 0; i < s.programs.len;) {
+        GoldbergState::Program& p = *s.programs[i];
+        char buf[512];
+        for (i32 n; (n = p.sock.read(buf, sizeof buf)) > 0;)
+            for (i32 k = 0; k < n; ++k) {
+                if (buf[k] != '\n') { if (p.line_len + 1 < sizeof p.line) p.line[p.line_len++] = buf[k]; continue; }
+                p.line[p.line_len] = 0;
+                if (p.line_len && p.line[p.line_len - 1] == '\r') p.line[p.line_len - 1] = 0;
+                p.line_len = 0;
+                char name[64] = {}, config[16] = {};
+                if (sscanf(p.line, "hello %63s %15s", name, config) >= 1) {
+                    format(p.name, sizeof p.name, "%s", name);
+                    format(p.config, sizeof p.config, "%s", config);
+                    if (!p.hello) { print("goldberg: %s (%s) connected: it reloads what lands\n", p.name, p.config[0] ? p.config : "?"); print_flush(); }
+                    p.hello = true;
+                    p.sock.write_str("welcome\n");
+                }
+            }
+        p.sock.flush();
+        if (!p.sock.is_open()) {
+            if (p.hello) { print("goldberg: %s went away\n", p.name); print_flush(); }
+            p.sock.close();
+            p.sock.out.free();
+            mem_free(&p);
+            s.programs[i] = s.programs[s.programs.len - 1];
+            --s.programs.len;
+            continue;
+        }
+        ++i;
+    }
+}
+
+void close_programs(GoldbergState& s) {
+    for (GoldbergState::Program* p : s.programs) { p->sock.close(); p->sock.out.free(); mem_free(p); }
+    s.programs.free();
+    s.listener.close();
+    if (s.port_file[0]) { io_remove(s.port_file); s.port_file[0] = 0; }
+}
 
 GoldbergState* state_of(Engine& e) { return engine_module_state_as<GoldbergState>(e, "goldberg"); }
 GoldbergState* state_of(lua_State* L) { return (GoldbergState*)lua_touserdata(L, lua_upvalueindex(1)); }
@@ -373,6 +446,7 @@ i32 copy_task(void* arg, const IoTaskCtl&) {
 }
 
 void copy_done(GoldbergState& s, CopyReq& r) {
+    if (r.ok) tell_programs(s, "changed", r.output); // in place, renamed whole
     if (r.ok) push_pending(s, EvCookDone, r.root, r.output, r.size, r.mtime, r.hash);
     else {
         u32 n = (u32)strlen(r.error);
@@ -626,6 +700,10 @@ struct KimCheck {
     char        names[KV_KIMB_MAX_SCOPE][160] = {};
     u32         count = 0;
     bool        outside = false; // a use whose root is not in this cook: nothing to check against
+    // Every use asked for whose root is in this cook, read or not: the screen's step depends on
+    // each (reported as `goldberg:use NAME` lines; graph.lua makes them edges).
+    char        tried[KV_KIMB_MAX_SCOPE][160] = {};
+    u32         tried_count = 0;
 };
 
 // A use ("krome/std") as the source under the root of its first part: that root's std.kim.
@@ -642,6 +720,9 @@ const KimbFile* kim_find_use(void* user, const char* use) {
         r = d + strlen(d) + 1;
     }
     if (!dir) { c.outside = true; return nullptr; }
+    bool seen = false;
+    for (u32 i = 0; i < c.tried_count; ++i) if (!strcmp(c.tried[i], use)) seen = true;
+    if (!seen && c.tried_count < KV_KIMB_MAX_SCOPE) format(c.tried[c.tried_count++], sizeof c.tried[0], "%s", use);
     if (c.count == KV_KIMB_MAX_SCOPE) return nullptr;
     char path[1200], file[200];
     format(path, sizeof path, "%s/%s.kim", dir, slash + 1);
@@ -685,6 +766,8 @@ bool check_kim(const Proc& pr, const char*, const char* in, const char* asset, S
             if (scoped) kimb_check(scope, errors);
         }
     }
+    // The preludes it depends on, whether it checked or not: a prelude saved checks it again.
+    for (u32 i = 0; i < c.tried_count; ++i) { say("goldberg:use "); say(c.tried[i]); say("\n"); }
     if (errors.total) {
         ok = false;
         for (u32 i = 0; i < errors.count; ++i) {
@@ -1155,6 +1238,7 @@ int host_remove_output(lua_State* L) {
         format(to, sizeof to, "%s/%s", s.attic, output);
         parent_dir(to, dir, sizeof dir);
         if (!io_make_dirs(dir) || !io_rename(path, to)) { lua_pushboolean(L, 0); return 1; }
+        tell_programs(s, "removed", output);
     }
     usize floor = strlen(s.out_dir);
     for (;;) {
@@ -1335,9 +1419,38 @@ int host_share(lua_State* L) {
 // host.active(on): whether the pump should keep ticking a session.
 int host_active(lua_State* L) { state_of(L)->active = lua_toboolean(L, 1); return 0; }
 
+// host.listen(port): a watch's listener for programs, on loopback; the port it got written to
+// <out>/.goldberg-port, where a dev build's asset_live finds it. The port, or nil.
+int host_listen(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    u16 want = (u16)luaL_optinteger(L, 1, 0);
+    if (!s.out_dir[0]) return 0;
+    if (!s.listener.is_open() && !s.listener.open(want, true)) return 0;
+    format(s.port_file, sizeof s.port_file, "%s/.goldberg-port", s.out_dir);
+    char text[16];
+    int n = format(text, sizeof text, "%u\n", (u32)s.listener.port);
+    if (!io_write_now(s.port_file, text, (usize)n)) s.port_file[0] = 0;
+    lua_pushinteger(L, s.listener.port);
+    return 1;
+}
+
+// host.programs(): { "name (config)", ... } for each program that said hello.
+int host_programs(lua_State* L) {
+    GoldbergState& s = *state_of(L);
+    lua_newtable(L);
+    int i = 0;
+    for (GoldbergState::Program* p : s.programs) {
+        if (!p->hello) continue;
+        lua_pushfstring(L, "%s (%s)", p->name, p->config[0] ? p->config : "?");
+        lua_rawseti(L, -2, ++i);
+    }
+    return 1;
+}
+
 int host_finish(lua_State* L) {
     GoldbergState& s = *state_of(L);
     s.active = false;
+    close_programs(s);
     lua_getfield(L, LUA_REGISTRYINDEX, "goldberg.engine");
     Engine* e = (Engine*)lua_touserdata(L, -1);
     print_flush();
@@ -1351,7 +1464,8 @@ constexpr luaL_Reg k_host[] = {
     {"flush", host_flush}, {"lock", host_lock}, {"sleep", host_sleep}, {"stat", host_stat}, {"touch", host_touch},
     {"run", host_run}, {"clear_work", host_clear_work}, {"remove_work", host_remove_work},
     {"glob", host_glob}, {"glob_path", host_glob_path}, {"print", host_print}, {"warn", host_warn},
-    {"now", host_now}, {"zone", host_zone}, {"zone_end", host_zone_end}, {"cwd", host_cwd}, {"active", host_active}, {"share", host_share}, {"finish", host_finish}, {nullptr, nullptr},
+    {"now", host_now}, {"zone", host_zone}, {"zone_end", host_zone_end}, {"cwd", host_cwd}, {"active", host_active}, {"share", host_share}, {"finish", host_finish},
+    {"listen", host_listen}, {"programs", host_programs}, {nullptr, nullptr},
 };
 
 // The application's directory: tools/goldberg/lua beside this source, unless told
@@ -1500,6 +1614,7 @@ void pump(TickContext& ctx) {
     ctx_kind(ctx, "goldberg.berg", true);
     ctx_kind(ctx, "goldberg.step", true);
 
+    serve_programs(s);
     // 1. A command.
     if (s.command_words) {
         KV_ZONE("goldberg.command");
@@ -1688,6 +1803,7 @@ void goldberg_shutdown(Engine&, ModuleInstance& self) {
         else proc_free((Proc*)h);
     }
     s->live.free();
+    close_programs(*s);
     if (s->L) lua_close(s->L);
     s->watcher.free();
     goldberg_unlock(s->lock);

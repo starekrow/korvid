@@ -402,3 +402,40 @@ The first draft's questions were settled in review (Nov 18; see Decided). What w
       whole upload (`renderer_texture_upload`) already makes a new image behind the handle
       and destroys the old one past the frames in flight.
 - [ ] **The name `asset_live`** is this draft's, and can change before milestone 3.
+
+## As built
+
+**Milestone 1, Rebind** (Nov 18). `asset_reload`, `asset_reload_all`, `AssetReloaded`, the CLI's
+`reload`, for textures, materials, shapes and blobs. A texture of a new size needed nothing of
+the renderers (Open, above).
+
+**Milestone 2, Krome reloads** (Nov 18). As the shape says, with these found on the way:
+
+- **Readings, not documents.** A screen's tree, its regions and its scope point into the
+  `.kimb` it was built from, so a reload cannot write over it. Each reload is a new reading
+  (`KromeDocVersion`); the one it replaces is kept until no ready screen built before it is
+  left, and a held screen keeps its own alive.
+- **"A failed rebuild" is a check, before the build.** Building records its mistakes and goes
+  on, so the new reading is checked first with `kimb_check` (what goldberg's cook runs): on its
+  own, then by each screen against its scope. A screen that fails is held on the old reading;
+  a theme switch while it is held rebuilds it from that reading too.
+- **`krome_provide` given again is a reload**, which the tests use.
+- **A screen that failed on a missing file opens** when the file lands.
+
+**Milestone 3, The connection** (Nov 18). Different from the shape:
+
+- **The port file is in the output tree**, `<out>/.goldberg-port`, not beside the state: a
+  program knows its tree (`<exe>.assets`), not goldberg's state directory.
+- **`KV_GOLDBERG`** (`off`, or a port) is what `asset_live` reads; frameloop's `--goldberg PORT`
+  and `--no-goldberg` set it. A module cannot add flags to frameloop's command line, and
+  `asset_live` does not depend on frameloop.
+- **The idle window heard a save late.** A window paced on demand ticks four times a second
+  when nothing happens, so a line on the socket waited up to 250 ms (the median save was 72 ms,
+  with 270 ms tails). Core gained `engine_add_waker`: something the frame loop asks each 4 ms
+  poll. `asset_live` reads its socket there. After: a screen's `.kim` 9.6 ms median from the
+  write to the screen rebuilt, the prelude 9.3, an icon 7.7 (`asset_live`'s README).
+- **The watch answers a hello** with `welcome`, so a program knows the connection is up.
+- **`kim`'s edges** are reported by the check as `goldberg:use NAME` lines in the run's output
+  (a session reads no files itself, so they arrive as the run's event), kept in the state with
+  the step, and the preludes' hashes are in the screen's step key.
+

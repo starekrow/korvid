@@ -28,7 +28,7 @@ end
 
 -- ---- arguments ------------------------------------------------------------------------
 
-local VALUE = { ["--lock-wait"] = true, ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--state"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true, ["--stamp"] = true, ["--share"] = true }
+local VALUE = { ["--lock-wait"] = true, ["--root"] = true, ["--roots"] = true, ["--out"] = true, ["--state"] = true, ["--project"] = true, ["--log"] = true, ["--dump"] = true, ["--watch"] = true, ["--stamp"] = true, ["--share"] = true, ["--listen-port"] = true }
 local FLAG = { ["-v"] = "verbose", ["--quiet"] = "quiet", ["-q"] = "quiet", ["--dry-run"] = "dry_run", ["--scan"] = "scan", ["--keep"] = "keep" }
 
 local function parse(words)
@@ -254,6 +254,12 @@ local function start(mode, words)
     -- whatever else the machine is doing, 40%, until it is asked to cook.
     run.share = (tonumber(o.share) or (mode == "cook" and 100 or 40)) / 100
     host.share(run.share)
+    -- A watch listens for the programs that run from its tree: each is told what changed in it,
+    -- and reloads it (asset_live). Its port is in <out>/.goldberg-port, where they look.
+    if mode == "watch" and run.session.graph then
+        run.port = host.listen(tonumber(o["listen-port"]) or 0)
+        if not run.port then complain("cannot listen for programs: they will not reload what this watch cooks") end
+    end
 end
 
 local function report(final)
@@ -367,6 +373,7 @@ function goldberg.ask(words)
         out[#out + 1] = string.format("goldberg: %s: %s: %d files, %d cooked, %d clean, %d failed, %d warned, %d running, %d waiting (%s, watching with %s)",
             run.cfg.game, state, t.files, t.cooked or 0, t.clean or 0, t.failed, t.warned, #busy.running, busy.waiting + s.hashing, run.mode, run.backend)
         for _, r in ipairs(busy.running) do out[#out + 1] = "  running  " .. r end
+        for _, p in ipairs(host.programs()) do out[#out + 1] = "  program  " .. p end
         for _, e in ipairs(t.errors) do out[#out + 1] = "  failed   " .. e end
         for _, w in ipairs(t.warnings) do out[#out + 1] = "  warned   " .. w end
         return out
