@@ -61,14 +61,22 @@ typedef void (*AppendFn)(Engine& e, const void* record, u32 size);
 // engine_publish (usually in startup); other modules name it in their sets ("rocks.score")
 // and reach it with ctx.resource<T>(name).
 //
+// With `fields`, a field table for the published object (component.h), the resource is
+// sim state like a kind's column: part of the state hash, so a score kept here is checked
+// by --hash, thread counts and replays. The object must then be plain data, which
+// engine_publish checks.
+//   constinit const FieldDesc k_score_fields[] = {KV_FIELDS(Score, total, wave, rocks_shot)};
+//   constinit const ResourceDesc k_resources[] = {{.name = ".score", .fields = k_score_fields}};
+//
 // With `apply` it is an append resource, for many writers that need no order between
 // them: only the owner's systems write it, everyone else declares `appends` and hands it
 // records with ctx.append, which reach `apply` at the boundary. audio.commands is one: any
 // system may play a sound without being ordered against every other that does.
 //   constinit const ResourceDesc k_resources[] = {{".score"}, {".commands", audio_apply}};
 struct ResourceDesc {
-    const char* name;            // ".score" is "<module>.score"
-    AppendFn    apply = nullptr; // set: an append resource
+    const char*           name;            // ".score" is "<module>.score"
+    AppendFn              apply  = nullptr; // set: an append resource
+    Span<const FieldDesc> fields = {};      // set: part of the state hash; the object is plain data (checked at publish)
 };
 
 // What a module needs from the memory system, declared rather than requested at runtime.
@@ -97,6 +105,7 @@ struct ModuleInstance {
     u32               index      = 0;       // position in the module list
     bool              started    = false;
     u32               state_resource = 0;   // id of "<module>.state": declared with SystemDesc::state, never by name
+    Rng               rng;                  // the module's sim stream (ctx.rng()), seeded by engine_init
     char              state_name[64];        // that resource's name
 
     // Records the state and its type, so systems and shutdown get it back checked: a

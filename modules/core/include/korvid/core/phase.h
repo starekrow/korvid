@@ -39,6 +39,7 @@
 #include "korvid/core/job.h"
 #include "korvid/core/kind.h"
 #include "korvid/core/arena.h"
+#include "korvid/core/random.h"
 
 namespace kv {
 
@@ -372,6 +373,20 @@ struct TickContext {
     CommandBuffer*         commands = nullptr; // the unit's; null: the engine's
     bool                   paused   = false;   // a paused tick: the sim stands still, only RunWhen::Always systems run
 
+    // ---- the module's random stream -----------------------------------------------------
+    // The module's own Rng, owned by the engine: seeded from the module's name and the
+    // engine's seed (EngineConfig::seed, --seed N), part of the state hash, and seeded
+    // again by engine_sim_reset. It belongs to the module's state, so the scheduler already
+    // orders every unit that draws from it; a system with `.state = StateUse::Read` or
+    // `None` may not draw (dev builds stop it). Draw the sim's randomness from here and it
+    // is seeded, hashed and replayed with nothing more to do:
+    //   Velocity v{dir * speed, ctx.rng().range(-1.5f, 1.5f)};
+    // Randomness that is only for show (sparks, a shake) keeps an Rng of its own in the
+    // module's state, so drawing it never shifts the sim's. Not from a parallel_for chunk,
+    // whose order across threads is not fixed: draw before the loop, or per chunk from a
+    // stream seeded by the chunk's index.
+    Rng& rng() const;
+
     // ---- the Work cycle ---------------------------------------------------------------
     // A Work unit with more to do says so, and the cycle runs again while time remains.
     //   void crunch(TickContext& ctx) {
@@ -690,6 +705,7 @@ struct ScheduledSystem {
     f64                work_deadline = 0.0; // a Work unit's share of the cycle's time: when it should stop (ctx.time_left)
     u32                spawn_tickets = 0; // the unit's own ticket counters (see phase.cc)
     u32                timer_tickets = 0;
+    mutable u32        in_parallel   = 0; // inside a parallel_for: chunks may not draw from ctx.rng()
     Array<Table>       early;    // the snapshot kinds it reads early, as the phase found them
     // A stream it consumes: where its last batch ended, and this run's.
     struct Cursor { u32 type; bool early; u64 at, from, to; };

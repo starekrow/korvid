@@ -253,8 +253,19 @@ bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
                 return false;
             }
             ResourceEntry entry{name, i};
-            entry.cls   = r.apply ? ResourceClass::Append : ResourceClass::Published;
-            entry.apply = r.apply;
+            entry.cls    = r.apply ? ResourceClass::Append : ResourceClass::Published;
+            entry.apply  = r.apply;
+            entry.fields = r.fields;
+            const char* field = nullptr;
+            if (r.fields.len) {
+                if (r.apply) { KV_ERROR("engine", "resource '%s' has a field table and an apply function: an append resource holds no state", name); return false; }
+                u32 end = 0;
+                for (const FieldDesc& f : r.fields) end = f.offset + field_type_size(f.type) * f.count > end ? f.offset + field_type_size(f.type) * f.count : end;
+                if (const char* why = schema_check(end, r.fields, &field)) {
+                    KV_ERROR("engine", "resource '%s': field table %s%s%s", name, why, field ? ": " : "", field ? field : "");
+                    return false;
+                }
+            }
             e.resources.push(entry);
         }
     }
@@ -687,7 +698,10 @@ bool declared_edges(const Engine& e, const Array<Pending>& pend, Phase phase, Ar
                 }
                 // Between cycles there is no order to declare: the loop runs them
                 // (docs/design/cycles.md), so naming a unit of another cycle says nothing.
-                if (op != phase && ((u32)op >= KV_SIM_PHASES || (u32)phase >= KV_SIM_PHASES)) continue;
+                if (op != phase && ((u32)op >= KV_SIM_PHASES || (u32)phase >= KV_SIM_PHASES)) {
+                    KV_INFO("engine", "  %s %s %s: another cycle, no order (the loop runs the cycles)", me, after ? "after" : "before", other);
+                    continue;
+                }
                 if (after ? (u32)op > (u32)phase : (u32)op < (u32)phase) {
                     KV_ERROR("engine", "system '%s' (phase %s) cannot run %s '%s', which is in %s phase", me, what, after ? "after" : "before", other,
                              after ? "a later" : "an earlier");
@@ -1172,10 +1186,12 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineC
         mem_set_module_names(names, modules.len);
     }
 
+    e.seed = config.seed;
     for (u32 i = 0; i < modules.len; ++i) {
         ModuleInstance inst;
         inst.desc  = modules[i];
         inst.index = i;
+        inst.rng   = Rng::seeded(config.seed, hash_str(modules[i]->name)); // a stream per module, by name
         format(inst.state_name, sizeof inst.state_name, "%s.state", modules[i]->name);
         e.modules.push(inst);
     }
@@ -1361,6 +1377,7 @@ void engine_sim_reset(Engine& e) {
     e.commands.next_ticket = 1;
     for (Array<ScheduledSystem>& phase : e.phases.systems)
         for (ScheduledSystem& s : phase) { drop_commands(s.commands); s.spawn_tickets = s.timer_tickets = 0; }
+    for (ModuleInstance& inst : e.modules) inst.rng = Rng::seeded(e.seed, hash_str(inst.desc->name)); // as engine_init left them
     e.last_hash = 0;
     ++e.sim_resets;
     e.events.emit(SimReset{e.sim_resets, 0});
@@ -1753,8 +1770,31 @@ Table* engine_table_of(Engine& e, Handle h) { return checked_direct(engine_table
 // something is in it.
 u64 engine_hash_state(const Engine& e) {
     u64 h = 0x6b6f72766964ull; // "korvid"
+    // Each part is mixed with its name and summed, so the order kinds, modules and
+    // resources registered in never counts.
     for (const Table& t : e.tables)
         if (!t.desc->cosmetic && t.live()) h += hash_mix(table_hash(t));
+    for (const ModuleInstance& m : e.modules) {
+        // A stream counts once it has been drawn from: a module that never draws adds
+        // nothing, as an empty kind adds nothing.
+        if (m.rng.state == Rng::seeded(e.seed, hash_str(m.desc->name)).state) continue;
+        h += hash_mix(hash_str(m.desc->name) ^ hash_mix(m.rng.state) ^ (m.rng.inc * 0x9E3779B97F4A7C15ull));
+    }
+    for (const ResourceEntry& r : e.resources)
+        if (r.fields.len && r.ptr) h += hash_mix(hash_str(r.name) ^ schema_hash(r.fields, r.ptr));
+    Span<const EventTypeDesc* const> types(e.event_types.data, e.event_types.len);
+    h += hash_mix(0x74696d657273ull ^ e.timers.hash(types));          // "timers"
+    for (u32 t = 1; t < e.events.held.by_type.len; ++t) {           // next-tick events not yet delivered
+        const EventBuffer& b = e.events.held.by_type[t];
+        u32 n = b.count();
+        if (!n) continue;
+        const EventTypeDesc* d = t < e.event_types.len ? e.event_types[t] : nullptr;
+        u64 eh = hash_str(d ? d->name : "?") ^ n;
+        if (d && d->fields.len)
+            for (u32 i = 0; i < n; ++i) eh = hash_mix(eh ^ schema_hash(d->fields, b.bytes.data + (usize)i * b.elem_size));
+        h += hash_mix(eh);
+    }
+    h += hash_mix(0x7469636bull ^ e.clock.tick_count);                // "tick"
     return hash_mix(h);
 }
 
@@ -1782,6 +1822,10 @@ u32 engine_resource_id(const Engine& e, const char* name) {
 }
 
 bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, void* ptr, const void* type) {
+    return engine_publish_sized(e, self, name, ptr, type, 0, true);
+}
+
+bool engine_publish_sized(Engine& e, const ModuleInstance& self, const char* name, void* ptr, const void* type, usize size, bool plain) {
     name = engine_qualify(self.desc->name, name);
     u32 id = engine_resource_id(e, name);
     if (!id) { KV_ERROR("engine", "module '%s' publishes unknown resource '%s'", self.desc->name, name); return false; }
@@ -1789,6 +1833,17 @@ bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, voi
     if (r.module != self.index) {
         KV_ERROR("engine", "module '%s' publishes resource '%s', which belongs to '%s'", self.desc->name, name, e.modules[r.module].desc->name);
         return false;
+    }
+    if (r.fields.len) {
+        // Sim state, hashed through its field table: plain data the table fits.
+        const char* field = nullptr;
+        const char* why = !plain ? "is not plain data (trivially copyable)"
+                        : size ? schema_check((u32)size, r.fields, &field) : nullptr;
+        if (why) {
+            KV_ERROR("engine", "module '%s' publishes '%s', which has a field table, but the object %s%s%s", self.desc->name, name, why,
+                     field ? ": " : "", field ? field : "");
+            return false;
+        }
     }
     r.ptr  = ptr;
     r.type = type;

@@ -3,6 +3,7 @@
 #include "korvid/core/event.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/log.h"
+#include "korvid/core/hash.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -159,6 +160,27 @@ void TimerWheel::free() {
     next_tick = 0;
     if (ready) os_mutex_destroy(&mu);
     ready = false;
+}
+
+u64 TimerWheel::hash(Span<const EventTypeDesc* const> types) const {
+    // Summed over records, so where a record sits (its slot, the far list, which lap) never
+    // counts; the emitter, a pointer, never does either.
+    u64 h = 0;
+    auto add = [&](const Array<u8>& list) {
+        const u8* p = list.data;
+        const u8* end = p + list.len;
+        while (p < end) {
+            const TimerRecord* r = (const TimerRecord*)p;
+            u64 rh = hash_mix(r->tick ^ ((u64)r->type << 32) ^ ((u64)r->ticket * 0x9E3779B97F4A7C15ull));
+            const EventTypeDesc* d = r->type < types.len ? types[r->type] : nullptr;
+            if (d && d->fields.len) rh = hash_mix(rh ^ schema_hash(d->fields, p + sizeof *r));
+            h += rh;
+            p += record_bytes(r->size);
+        }
+    };
+    for (const Array<u8>& slot : slots) add(slot);
+    add(far);
+    return h;
 }
 
 } // namespace kv

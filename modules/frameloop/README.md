@@ -121,6 +121,7 @@ renders once.
 | `--cpu-scale auto\|N` | the CPU renderer's window pixels per drawn pixel, 1 to 8 |
 | `--borderless` | no title bar; sidesteps the GNOME Wayland resize stall |
 | `--threads N` | the job pool's size, main thread included; 1 is serial; the default is every core |
+| `--seed N` | the engine's seed (`EngineConfig::seed`): every module's `ctx.rng()` starts from it and its name; a recording keeps it |
 | `--rate X` | the developer's rate from the start, as the CLI's `rate X`: a recorded run or a demo four times faster |
 | `--early-reads order\|snapshot\|kind` | every kind's early reads ordered, every kind's from a snapshot, or as each kind says (the default); the game must hash the same ([scheduling](../../docs/concepts/scheduling.md#early-reads-order-or-snapshot)) |
 | `--hash`, `--hash-systems` | log the state hash after every tick; after every system |

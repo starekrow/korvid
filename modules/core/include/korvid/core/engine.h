@@ -58,6 +58,7 @@ struct EngineConfig {
     Span<const HeapDesc>       heaps        = {};
     Span<const ModuleHeapDesc> module_heaps = {};
     Span<const KindCapacity>   capacities   = {};
+    u64                        seed         = 0; // every module's ctx.rng() is seeded from this and its name; --seed N
 };
 
 // ---- internal: the engine's records of what was registered -------------------------
@@ -78,6 +79,7 @@ struct ResourceEntry {
     u32           table    = 0;     // a kind's resources: its kind id
     bool          cosmetic = false; // a column or attachment of a cosmetic component: never feeds the sim
     AppendFn      apply    = nullptr;
+    Span<const FieldDesc> fields = {}; // a published resource that is sim state: hashed through these
     u32           event    = 0;     // a stream: its event type id
 };
 
@@ -135,6 +137,7 @@ struct Engine {
     TimerWheel            timers;     // scheduled events (ctx.schedule_in)
     EventTrace            trace;      // --trace-events
     u32                   threads      = 0; // threads the schedule may use, main included; 0: every core
+    u64                   seed         = 0; // EngineConfig::seed, kept for engine_sim_reset
     EarlyReadsChoice      early_reads  = EarlyReadsChoice::PerKind; // set before init: as each kind says, or one way for all
     u32                   serial       = 0; // this engine among the process's, 1..255: tags the ids the context hands out
     u32                   units        = 0; // systems and handlers
@@ -257,10 +260,13 @@ void engine_sim_reset(Engine& e);
 // module's own. False, logged, for an unknown name or one another module declared.
 //   if (!engine_publish(engine, self, ".score", &g->score)) return false;
 //   // elsewhere: .reads = "rocks.score"; ctx.resource<const Score>("rocks.score")
+// A resource declared with a field table must be plain data whose size the table fits:
+// the typed form checks both, false and logged if not.
 bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, void* ptr, const void* type);
+bool engine_publish_sized(Engine& e, const ModuleInstance& self, const char* name, void* ptr, const void* type, usize size, bool plain);
 template <class T>
 bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, T* ptr) {
-    return engine_publish(e, self, name, (void*)ptr, type_key<T>());
+    return engine_publish_sized(e, self, name, (void*)ptr, type_key<T>(), sizeof(T), __is_trivially_copyable(T));
 }
 
 // The started instance of a module, by name; null if absent or not started. For code
@@ -325,9 +331,12 @@ const char* engine_entity_name(Engine& e, Handle entity);
 void        engine_entity_names_each(Engine& e, bool (*fn)(Handle entity, Name name, void* user), void* user);
 
 // ---- checking and describing ----------------------------------------------------------
-// The hash of every sim column of every live entity, fixed across runs and platforms and
-// whatever order the kinds registered in (tables by name, handles in fields by kind name).
-// Two runs with the same input hash the same every tick; --hash logs it.
+// The hash of the sim: every sim column of every live entity, each module's ctx.rng()
+// stream, every published resource with a field table, the timers and the next-tick
+// events still waiting, and the sim tick. Fixed across runs and platforms and whatever
+// order the kinds registered in (tables by name, handles in fields by kind name). Two runs
+// with the same input hash the same every tick; --hash logs it. Module state outside the
+// stream is not in it: keep sim state in kinds, or in a resource with a field table.
 u64   engine_hash_state(const Engine& e);
 // Describes one event through its schema: "Type{...}", or just the name without one.
 // Returns what snprintf would.

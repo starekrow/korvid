@@ -127,7 +127,6 @@ struct Game {
     bool   started = false;
     bool   demo    = false;
     u32    next_wave = 0;        // the pending wave's ticket, cancelled at game over
-    Rng    rng;
     f32    shake = 0.0f;         // camera shake amplitude in pixels, decaying
     u32    paused_ticks = 0;     // the demo's pause: how long it has held
     bool   demo_paused_once = false;
@@ -188,9 +187,9 @@ void destroy_labels(Table& labels, Role role) {
 }
 
 // A rock of `size` at `at`, drifting in a random direction. Direct: the caller holds the write.
-void spawn_rock(Table& rocks, Game& g, point2 at, u8 size, vec2 drift) {
-    Velocity v{drift, g.rng.range(-1.5f, 1.5f)};
-    rocks.spawn(transform2_at(at, g.rng.range(0.0f, 2.0f * KV_PI)), sprite_of(g, LOOK_ROCK, kRockSprite[size], 1),
+void spawn_rock(Table& rocks, Game& g, Rng& rng, point2 at, u8 size, vec2 drift) {
+    Velocity v{drift, rng.range(-1.5f, 1.5f)};
+    rocks.spawn(transform2_at(at, rng.range(0.0f, 2.0f * KV_PI)), sprite_of(g, LOOK_ROCK, kRockSprite[size], 1),
                 v, collider_circle(kRockRadius[size], L_ROCK, L_SHIP | L_BULLET), RockSize{size});
 }
 
@@ -201,10 +200,10 @@ void spawn_debris(TickContext& ctx, Game& g, point2 at, u32 count, color tint) {
         // One draw a statement, here and below: C++ leaves the order of a product's operands
         // and of a call's arguments to the compiler, and gcc and clang choose differently,
         // which made the same seed two games. The order written is the one gcc had.
-        f32 speed = g.rng.range(60.0f, 220.0f);
-        f32 dir   = g.rng.range(0.0f, 2.0f * KV_PI);
+        f32 speed = ctx.rng().range(60.0f, 220.0f);
+        f32 dir   = ctx.rng().range(0.0f, 2.0f * KV_PI);
         vec2 v = heading(dir) * speed;
-        f32 life = g.rng.range(0.3f, 0.8f);
+        f32 life = ctx.rng().range(0.3f, 0.8f);
         ctx.spawn_later(g_debris_kind, transform2_at(at), sprite_of(g, LOOK_DEBRIS, 6.0f, 0, tint), Velocity{v, 0.0f},
                         anim_player(g.fade_clip, 1.0f / life));
     }
@@ -388,7 +387,7 @@ void control(TickContext& ctx) {
                 SoundPlay shot;
                 shot.sound  = g.sounds[SND_SHOT];
                 shot.volume = 0.45f;
-                shot.pitch  = g.rng.range(0.9f, 1.15f);
+                shot.pitch  = ctx.rng().range(0.9f, 1.15f);
                 shot.pan    = at.x / 900.0f;
                 audio_play(ctx, shot);
             }
@@ -439,7 +438,6 @@ void game(TickContext& ctx) {
     if (!g.started) {
         g.started = true;
         g.demo    = frameloop_flag(*ctx.engine, "--demo");
-        g.rng     = Rng::seeded(0x70c45, 7);
         KV_INFO("rocks", "%s. Arrows turn and thrust, space fires, Escape pauses, Q quits; on a pad the left stick turns, South thrusts, West fires, Start pauses.", g.demo ? "Demo: the ship flies itself" : "Your ship");
         ctx.emit(Restart{});
     }
@@ -497,11 +495,11 @@ void on_rock_hit(TickContext& ctx, Span<const RockHit> hits) {
         rocks->destroy(h.rock);
         ctx.destroy(h.bullet);
         if (size < 2) {
-            f32 a = g.rng.range(0.5f, 1.1f);
+            f32 a = ctx.rng().range(0.5f, 1.1f);
             vec2 d1{drift.x * kv::cos(a) - drift.y * kv::sin(a), drift.x * kv::sin(a) + drift.y * kv::cos(a)};
             vec2 d2{drift.x * kv::cos(-a) - drift.y * kv::sin(-a), drift.x * kv::sin(-a) + drift.y * kv::cos(-a)};
-            spawn_rock(*rocks, g, at, (u8)(size + 1), d1 * 1.4f);
-            spawn_rock(*rocks, g, at, (u8)(size + 1), d2 * 1.4f);
+            spawn_rock(*rocks, g, ctx.rng(), at, (u8)(size + 1), d1 * 1.4f);
+            spawn_rock(*rocks, g, ctx.rng(), at, (u8)(size + 1), d2 * 1.4f);
         }
         spawn_debris(ctx, g, at, 6, color_rgba(1.0f, 0.7f, 0.3f));
         SoundPlay crack;
@@ -576,15 +574,15 @@ void on_wave(TickContext& ctx, Span<const SpawnWave> waves) {
         score->wave += 1;
         for (u32 i = 0; i < wave.count; ++i) {
             // A point on the frame, aimed roughly at the middle.
-            f32 u = g.rng.unit();
-            point2 at = g.rng.chance(0.5f) ? point2{(u - 0.5f) * 2.0f * hw, g.rng.chance(0.5f) ? hh : -hh}
-                                            : point2{g.rng.chance(0.5f) ? hw : -hw, (u - 0.5f) * 2.0f * hh};
-            f32 speed = g.rng.range(40.0f, 110.0f);
-            f32 aim_x = g.rng.range(-200.0f, 200.0f);
-            f32 aim_y = g.rng.range(-120.0f, 120.0f);
+            f32 u = ctx.rng().unit();
+            point2 at = ctx.rng().chance(0.5f) ? point2{(u - 0.5f) * 2.0f * hw, ctx.rng().chance(0.5f) ? hh : -hh}
+                                            : point2{ctx.rng().chance(0.5f) ? hw : -hw, (u - 0.5f) * 2.0f * hh};
+            f32 speed = ctx.rng().range(40.0f, 110.0f);
+            f32 aim_x = ctx.rng().range(-200.0f, 200.0f);
+            f32 aim_y = ctx.rng().range(-120.0f, 120.0f);
             vec2 toward = normalize(point2{aim_x, aim_y} - at) * speed;
-            f32 spin  = g.rng.range(-1.0f, 1.0f);
-            f32 angle = g.rng.range(0.0f, 2.0f * KV_PI);
+            f32 spin  = ctx.rng().range(-1.0f, 1.0f);
+            f32 angle = ctx.rng().range(0.0f, 2.0f * KV_PI);
             ctx.spawn_later(g_rock_kind, transform2_at(at, angle), sprite_of(g, LOOK_ROCK, kRockSprite[0], 1),
                             Velocity{toward, spin}, collider_circle(kRockRadius[0], L_ROCK, L_SHIP | L_BULLET), RockSize{0});
         }

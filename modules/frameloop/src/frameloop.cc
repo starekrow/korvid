@@ -123,6 +123,7 @@ u32 game_option(const FrameLoopConfig& cfg, const char* arg) {
 // A replay's game argument, as the command line's would be: a flag (false), or an option
 // and its value (true: it took the value).
 bool apply_game_arg(const char* arg, const char* value) {
+    if (strcmp(arg, "--seed") == 0 && value) { g_config.engine.seed = strtoull(value, nullptr, 0); return true; }
     if (u32 f = game_flag(g_config, arg)) { g_flags_given |= (u64)1 << (f - 1); return false; }
     if (u32 o = game_option(g_config, arg); o && value) {
         if (g_option_count < KV_COUNTOF(g_options)) g_options[g_option_count++] = GivenOption{o - 1, value};
@@ -184,6 +185,11 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
             if (sscanf(argv[++i], "%ux%u", &w, &h) != 2 || !w || !h) { KV_ERROR("frameloop", "--size takes WxH, not '%s'", argv[i]); return false; }
             cfg.width = w;
             cfg.height = h;
+        }
+        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+            cfg.engine.seed = strtoull(argv[++i], nullptr, 0); // every module's ctx.rng(); a recording keeps it
+            replay_keep_arg("--seed");
+            replay_keep_arg(argv[i]);
         }
         else if (strcmp(argv[i], "--rate") == 0 && i + 1 < argc) {
             g_rate = atof(argv[++i]);

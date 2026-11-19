@@ -16,6 +16,7 @@
 #include "korvid/math/fields.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/platform_hid/host_window.h"
+#include "korvid/sprite/camera.h"
 #include "korvid/render/renderer.h"
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
@@ -80,7 +81,6 @@ struct Game {
     GameState state          = ST_INIT;
     bool      exit_requested = false;
     u32       blink_ticket   = 0;   // the blinker's pending spawn, until Spawned answers
-    Rng       rng;
     u64       key_edges      = 0;
 };
 
@@ -122,11 +122,13 @@ bool bounce(Transform2& t, vec2& v, f32 half_size, f32 half_w, f32 half_h, f32 d
 
 // ---- systems -------------------------------------------------------------------------
 
-// Phase Sim: every ball moves and bounces. World units are pixels, origin at the center.
+// The field the balls bounce in, in world units. Fixed, so the sim never reads the window
+// (whose size is not input a replay knows); the camera scales the field to the window.
+constexpr f32 kFieldW = 1280.0f, kFieldH = 720.0f;
+
+// Phase Sim: every ball moves and bounces. Origin at the center of the field.
 void testbed_move(TickContext& ctx) {
-    static const u32 k_window = ctx.resource_id("platform_hid.window"); // looked up once
-    const HostWindow* window = ctx.resource<const HostWindow>(k_window);
-    f32 half_w = (f32)window->width() * 0.5f, half_h = (f32)window->height() * 0.5f;
+    f32 half_w = kFieldW * 0.5f, half_h = kFieldH * 0.5f;
     f32 dt = (f32)ctx.dt;
     for (KindRows k : ctx.view<Transform2, Motion, const Sprite>()) {
         Span<Transform2>   t = k.col<Transform2>();
@@ -170,9 +172,8 @@ void testbed_sim(TickContext& ctx) {
 
     switch (g.state) {
     case ST_INIT: {
-        const HostWindow* window = ctx.resource<const HostWindow>("platform_hid.window");
-        f32 w = (f32)window->width(), h = (f32)window->height();
-        // A background covering the window, tiling the checkerboard at 16-pixel cells.
+        f32 w = kFieldW, h = kFieldH;
+        // A background covering the field, tiling the checkerboard at 16-pixel cells.
         Sprite bg;
         bg.material = g.bg_material;
         bg.size     = vec2{w, h};
@@ -180,18 +181,17 @@ void testbed_sim(TickContext& ctx) {
         bg.layer    = -1;
         ctx.spawn_later("sprite.entity", transform2_at(point2{0.0f, 0.0f}), bg);
 
-        g.rng = Rng::seeded(0x5eed, 1);
         spawn_ball(ctx, g, point2{0.0f, 0.0f},      vec2{420.0f, 0.0f},                 false, 96.0f, 2, LOOK_WHITE);
         spawn_ball(ctx, g, point2{-200.0f, 0.0f},   vec2{0.0f, 300.0f},                 false, 72.0f, 1, LOOK_BLUE_ADD);
-        spawn_ball(ctx, g, point2{200.0f, 100.0f},  random_direction(g.rng, 360.0f),    true,  56.0f, 3, LOOK_GREEN);
+        spawn_ball(ctx, g, point2{200.0f, 100.0f},  random_direction(ctx.rng(), 360.0f),    true,  56.0f, 3, LOOK_GREEN);
         g.blink_ticket = spawn_ball(ctx, g, point2{0.0f, -120.0f}, vec2{}, false, 120.0f, 0, LOOK_MAGENTA);
         if (frameloop_flag(*ctx.engine, "--swarm")) {
             // Many small balls on random layers (beyond the renderer's clamp on purpose), every
             // look, and a crowd of sprites parked far outside the view that the cull must drop.
             for (u32 i = 0; i < kSwarmBalls; ++i) {
-                point2 at{g.rng.range(-w * 0.5f, w * 0.5f), g.rng.range(-h * 0.5f, h * 0.5f)};
-                i32 layer = (i32)g.rng.range(-300.0f, 300.0f);
-                spawn_ball(ctx, g, at, random_direction(g.rng, g.rng.range(40.0f, 200.0f)), false, 12.0f, layer, (Look)(i % LOOK_COUNT));
+                point2 at{ctx.rng().range(-w * 0.5f, w * 0.5f), ctx.rng().range(-h * 0.5f, h * 0.5f)};
+                i32 layer = (i32)ctx.rng().range(-300.0f, 300.0f);
+                spawn_ball(ctx, g, at, random_direction(ctx.rng(), ctx.rng().range(40.0f, 200.0f)), false, 12.0f, layer, (Look)(i % LOOK_COUNT));
             }
             Sprite far_away;
             far_away.material = g.materials[LOOK_GREEN];
@@ -233,13 +233,12 @@ void testbed_sim(TickContext& ctx) {
 void on_bounced(TickContext& ctx, Span<const Bounced> hits) {
     static const u32 k_bounces = ctx.column_id(".ball.Bounces");
     static const u32 k_motion  = ctx.column_id(".ball.Motion");
-    Game& g = ctx.state_as<Game>();
     Span<Bounces> bounces = ctx.write<Bounces>(k_bounces);
     Span<Motion>  motion  = ctx.write<Motion>(k_motion);
     for (const Bounced& hit : hits) {
         u32 i = hit.ball.index();
         ++bounces[i].count;
-        if (motion[i].random) motion[i].velocity = random_direction(g.rng, g.rng.range(240.0f, 520.0f));
+        if (motion[i].random) motion[i].velocity = random_direction(ctx.rng(), ctx.rng().range(240.0f, 520.0f));
     }
 }
 
@@ -264,13 +263,23 @@ void on_blink_off(TickContext& ctx, Span<const BlinkOff> offs) {
     }
 }
 
+// Phase PostSim, paused or not: the whole field in the window, as large as it fits.
+void testbed_camera(TickContext& ctx) {
+    static const u32 k_camera = ctx.resource_id("sprite.camera");
+    static const u32 k_window = ctx.resource_id("platform_hid.window");
+    Camera2* cam = ctx.resource<Camera2>(k_camera);
+    const HostWindow* w = ctx.resource<const HostWindow>(k_window);
+    if (!cam || !w || !w->width() || !w->height()) return;
+    f32 zx = (f32)w->width() / kFieldW, zy = (f32)w->height() / kFieldH;
+    cam->zoom = zx < zy ? zx : zy;
+}
+
 void on_blink_on(TickContext& ctx, Span<const BlinkOn> ons) {
     Game& g = ctx.state_as<Game>();
     if (g.state != ST_RUN) return;
-    const HostWindow* window = ctx.resource<const HostWindow>("platform_hid.window");
-    f32 quarter_w = (f32)window->width() * 0.25f;
+    f32 quarter_w = kFieldW * 0.25f;
     for (u32 i = 0; i < ons.len; ++i)
-        g.blink_ticket = spawn_ball(ctx, g, point2{g.rng.range(-quarter_w, quarter_w), -120.0f}, vec2{}, false, 120.0f, 0, LOOK_MAGENTA);
+        g.blink_ticket = spawn_ball(ctx, g, point2{ctx.rng().range(-quarter_w, quarter_w), -120.0f}, vec2{}, false, 120.0f, 0, LOOK_MAGENTA);
 }
 
 void on_state_edge(TickContext&, Span<const StateEdge> edges) {
@@ -316,14 +325,15 @@ void testbed_shutdown(Engine&, ModuleInstance& self) {
 }
 
 constinit const SystemDesc k_systems[] = {
-    {.name = ".move", .phase = Phase::Sim, .fn = testbed_move, .reads = ".ball.Sprite, platform_hid.window", .writes = ".ball.Transform2, .ball.Motion", .emits = "Bounced"},
-    {.name = ".sim",  .phase = Phase::Sim, .fn = testbed_sim,  .reads = "platform_hid.window, .ball, sprite.entity, KeyDown, KeyUp, AssetReady, AssetFailed, ExitRequested"}, // after move: it reads what move writes
+    {.name = ".move", .phase = Phase::Sim, .fn = testbed_move, .reads = ".ball.Sprite", .writes = ".ball.Transform2, .ball.Motion", .emits = "Bounced"},
+    {.name = ".sim",  .phase = Phase::Sim, .fn = testbed_sim,  .reads = ".ball, sprite.entity, KeyDown, KeyUp, AssetReady, AssetFailed, ExitRequested"}, // after move: it reads what move writes
+    {.name = ".camera", .phase = Phase::PostSim, .fn = testbed_camera, .reads = "platform_hid.window", .writes = "sprite.camera", .state = StateUse::None, .runs = RunWhen::Always},
 };
 constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_bounced",   KV_ON(Bounced, on_bounced), .phase = Phase::PostSim, .writes = ".ball.Bounces, .ball.Motion"},
     {.name = ".on_spawned",   KV_ON(Spawned, on_spawned), .phase = Phase::PostSim},
     {.name = ".on_blink_off", KV_ON(BlinkOff, on_blink_off), .phase = Phase::Input},
-    {.name = ".on_blink_on",  KV_ON(BlinkOn, on_blink_on), .phase = Phase::Input, .reads = "platform_hid.window"},
+    {.name = ".on_blink_on",  KV_ON(BlinkOn, on_blink_on), .phase = Phase::Input},
     {.name = ".on_edge",      KV_ON(StateEdge, on_state_edge), .phase = Phase::Input},
 };
 

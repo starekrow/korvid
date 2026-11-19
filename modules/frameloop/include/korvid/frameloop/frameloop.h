@@ -10,7 +10,7 @@
 // the clock's alpha. Pacing (below) decides whether a frame is drawn at all.
 //
 // The command line overrides the config: --size, --no-vsync, --renderer, --pacing,
-// --threads, --rate, --early-reads, --hash, --record, --replay, --profile, --screenshot,
+// --threads, --seed, --rate, --early-reads, --hash, --record, --replay, --profile, --screenshot,
 // the CLI's transports, the mounts and the rest. modules/frameloop/README.md has every
 // option; docs/guides/frame-loop-and-scheduling.md walks through a frame and a tick.
 #pragma once

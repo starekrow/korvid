@@ -316,6 +316,20 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
 }
 
 void TickContext::more() const { if (engine) engine->work_more = true; }
+
+Rng& TickContext::rng() const {
+    static Rng s_outside; // code outside the schedule has no module: a stream nobody hashes
+    if (!system || !system->module) {
+        KV_ERROR("engine", "ctx.rng() outside a system or handler: the stream is a module's");
+        return s_outside;
+    }
+    ctx_state_allowed(*this, true);
+    if (system->in_parallel) {
+        KV_ERROR("engine", "'%s' draws from ctx.rng() inside a parallel_for: chunks run in no fixed order", system->name());
+        KV_VERIFY(!"ctx.rng() in a parallel chunk: see the log");
+    }
+    return system->module->rng;
+}
 f64  TickContext::time_left() const {
     if (!engine || engine->work_deadline <= 0.0) return 0.0;
     f64 until = engine->work_deadline;
@@ -824,6 +838,7 @@ u32 ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64
 const char* ctx_unit_name(TickContext& ctx) { return ctx.system ? ctx.system->name() : "parallel_for"; }
 
 ParallelBuffers ctx_parallel_begin(TickContext& ctx, u32 chunks) {
+    if (ctx.system) ++ctx.system->in_parallel;
     ParallelBuffers pb;
     pb.chunks   = chunks;
     pb.writers  = alloc_items<EventWriter>(mem_scratch(), chunks);
@@ -840,6 +855,7 @@ ParallelBuffers ctx_parallel_begin(TickContext& ctx, u32 chunks) {
 
 // Chunk order, whatever ran where. The inner arrays go back to the general allocator.
 void ctx_parallel_end(TickContext& ctx, ParallelBuffers& pb) {
+    if (ctx.system) --ctx.system->in_parallel;
     EventWriter& w = ctx.writer ? *ctx.writer : ctx.events->writer(0);
     CommandBuffer& c = buffer_of(ctx, ctx.commands);
     for (u32 i = 0; i < pb.chunks; ++i) {

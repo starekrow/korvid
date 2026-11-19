@@ -342,7 +342,7 @@ constinit const TriggerDesc k_triggers[] = {
 ### Startup, shutdown, the record
 
 ```cpp
-struct Game { Score score; Handle rock_look; Rng rng; };
+struct Game { Score score; Handle rock_look; };
 
 bool mygame_startup(Engine& engine, ModuleInstance& self) {
     Game* g = arena_push<Game>(self.arena);
@@ -350,7 +350,6 @@ bool mygame_startup(Engine& engine, ModuleInstance& self) {
     self.set_state(g);
     if (!engine_publish(engine, self, ".score", &g->score)) return false; // others read it as a resource
     g->rock_look = asset_load_material(engine, "mygame/rock.material.json");
-    g->rng = Rng::seeded(0x5eed);
     return true;
 }
 
@@ -375,6 +374,9 @@ KV_MODULE_DEFINE(mygame_module) = {
     .memory     = {.reserve = 64 * 1024},
 };
 ```
+
+A module needs no `Rng` of its own for the sim: `ctx.rng()` is the module's stream,
+seeded by the engine from the module's name and `--seed`, and part of the state hash.
 
 Startup runs in list order, so everything a module depends on is up: the renderer for
 materials, the platform for its queue. A startup that returns false stops `engine_init`,

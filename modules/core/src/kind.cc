@@ -287,7 +287,12 @@ u64 Table::hash() const {
     }
     for (const PropEntry& p : props) {
         if (!is_alive(p.slot) || handle_at(p.slot).gen() != p.gen) continue;
-        u64 v = hash_mix(p.key.hash ^ (u64)p.value.type ^ (u64)p.value.i * 31 ^ p.value.bits * 131);
+        // A handle's kind is a number that depends on what registered first; its name is what
+        // the kind is, as for a column's handle fields.
+        u64 bits = p.value.bits;
+        if (p.value.type == PropType::Handle && bits)
+            bits = (bits & 0x000FFFFFFFFFFFFFull) ^ kv_handle_kind_name_hash(Handle{bits}.kind());
+        u64 v = hash_mix(p.key.hash ^ (u64)p.value.type ^ (u64)p.value.i * 31 ^ bits * 131);
         h = hash_mix(h ^ ((u64)p.slot << 24) ^ v ^ hash_bytes(&p.value.f, sizeof p.value.f));
     }
     return h;

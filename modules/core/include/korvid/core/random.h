@@ -9,19 +9,18 @@
 // data, fast, that you own, seed and advance yourself; the same seed gives the same
 // numbers on every platform.
 //
-// The usual shape is one Rng in the module's state, seeded once and drawn from by its
-// systems in their fixed order (examples/rocks/src/game.cc):
+// A game's systems draw from the stream the engine keeps for their module, ctx.rng()
+// (phase.h): seeded from the module's name and the engine's seed (--seed N), part of the
+// state hash, seeded again by a fresh sim. Nothing to set up (examples/rocks/src/game.cc):
 //
-//   struct Game { ...; Rng rng; };                  // the module's state
-//   g.rng = Rng::seeded(0x70c45, 7);                // in `game`, on the first tick
-//   Velocity v{drift, g.rng.range(-1.5f, 1.5f)};    // in `spawn_rock`: a new rock's spin
+//   Velocity v{drift, ctx.rng().range(-1.5f, 1.5f)};   // a new rock's spin
 //
-// For determinism, the sim draws only from its own seeded streams: never rand(), the
-// clock, or anything else that differs between runs. A stream that cosmetic code also
-// draws from shifts with it, so effects get a stream of their own (examples/arcfire keeps
-// `fx` for its sparks and debris). An Rng's state in a sim component is hashed with the
-// rest of the sim (arcfire's `Chance`); in module state, as rocks keeps it, it is not.
-// One stream belongs to one thread at a time.
+// For determinism, the sim draws only from seeded streams: never rand(), the clock, or
+// anything else that differs between runs. A stream that cosmetic code also draws from
+// shifts with it, so effects keep an Rng of their own in the module's state, seeded once,
+// unhashed (examples/arcfire keeps `fx` for its sparks and debris). An Rng kept in a sim
+// component is hashed with its row (arcfire's `Chance`). One stream belongs to one thread
+// at a time.
 //
 // Mt19937 is the Mersenne Twister, for reproducing numbers another program draws:
 // Python's random module (seeded), std::mt19937 and the reference C code (seeded_std).

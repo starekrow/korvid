@@ -2,7 +2,7 @@
 
 The smallest game that uses everything once: a kind, a view system, a handler, timers,
 a command spawn with a ticket, a trigger, assets from files, and a state machine that
-never holds a handle. Four balls bounce in a window over a tiled checkerboard; one of
+never holds a handle. Four balls bounce in a field over a tiled checkerboard; one of
 them blinks out of existence and back on a schedule; a log line marks a ball's third
 bounce. It is the smoke test and the place to try a feature before a real game needs
 it. `--swarm` turns it into a renderer stress.
@@ -35,10 +35,11 @@ every module and example and `kormake test` runs every suite.
 `CompPrev` so a trigger can watch it).
 
 **A view system.** `testbed.move` (Sim) iterates every kind with `Transform2`,
-`Motion` and `Sprite` through `ctx.view`, moves each ball, keeps it inside the window
-(read from the `platform_hid.window` resource), and emits `Bounced{ball}` at an edge. It
-declares exactly what it touches; the scheduler puts `testbed.sim` after it because `sim`
-reads the kind `move` writes.
+`Motion` and `Sprite` through `ctx.view`, moves each ball, keeps it inside a fixed
+1280×720 field, and emits `Bounced{ball}` at an edge. It declares exactly what it touches;
+the scheduler puts `testbed.sim` after it because `sim` reads the kind `move` writes. The
+sim never reads the window, whose size a replay doesn't know: `testbed.camera` (PostSim)
+scales the field to fit the window instead.
 
 **A state machine as a system.** `testbed.sim` (Sim) reads keys, asset events and
 `ExitRequested` from the bus, then runs INIT (spawn the background and the balls by

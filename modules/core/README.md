@@ -254,8 +254,8 @@ Header `korvid/core/module.h`:
 | name | kind | what |
 |---|---|---|
 | `ModuleDesc` | record | `name`, `events`, `components`, `kinds`, `resources`, `systems`, `handlers`, `triggers`, `commands`, `mounts`, `startup`, `shutdown`, `memory` |
-| `ModuleInstance` | record | the engine's record of a started module: `arena`, `general`, `state`, `set_state<T>`, `state_as<T>()`, `index` |
-| `ResourceDesc{name, apply}` | record | something systems read or write that is not a column; with `apply`, an append resource whose owner takes records at the boundary |
+| `ModuleInstance` | record | the engine's record of a started module: `arena`, `general`, `state`, `set_state<T>`, `state_as<T>()`, `index`, `rng` (what `ctx.rng()` draws from) |
+| `ResourceDesc{name, apply, fields}` | record | something systems read or write that is not a column; with `apply`, an append resource whose owner takes records at the boundary; with `fields`, sim state in the state hash |
 | `AppendFn` | function type | an append resource's owner taking one record |
 | `ModuleMemoryDesc{reserve}` | record | the module arena's address space |
 | `KV_MODULE_DECLARE(sym)`, `KV_MODULE_DEFINE(sym)` | macros | the record in a header and its constinit definition |
@@ -268,7 +268,7 @@ Header `korvid/core/engine.h`:
 | `Engine` | record | `events`, `phases`, `clock`, `modules`, `resources`, `components`, `tables`, `event_types`, `triggers`, `commands`, `timers`, `trace`, `threads`, `early_reads`, `hash_ticks`, `hash_systems`, `quit_requested`, `frame_wanted`, `work_pending` |
 | `engine_frame_cycle(e, dt)`, `engine_work(e, budget)`, `engine_work_pending(e)` | functions | the Frame and Work cycles outside the tick ([cycles](../../docs/concepts/cycles.md)): `Phase::Frame` once per frame drawn, `Phase::Work` while a unit says `ctx.more()` |
 | `engine_want_frame(e)`, `engine_want_frame_at(e, when)` | functions | another frame from a loop that paces on demand (Krome's new list, a load that landed); one no later than `when` |
-| `EngineConfig`, `HeapDesc`, `ModuleHeapDesc`, `KindCapacity` | records | the heap table, which module lives in which, and kinds' capacities over their KindDesc's (`Table::capacity`; a full kind logs once and counts `Table::refused`) |
+| `EngineConfig` (`heaps`, `module_heaps`, `capacities`, `seed`), `HeapDesc`, `ModuleHeapDesc`, `KindCapacity` | records | the heap table, which module lives in which, and kinds' capacities over their KindDesc's (`Table::capacity`; a full kind logs once and counts `Table::refused`) |
 | `engine_init(e, modules, config)`, `engine_shutdown(e)` | functions | register and start everything in order; undo it in reverse |
 | `engine_frame(e, dt)` | function | advance the clock, run the ticks it owes; returns how many |
 | `engine_pause(e, on)`, `engine_step(e, n)`, `engine_rate(e, x)` | functions | sim control: hold the sim (paused ticks run `RunWhen::Always` systems and handlers only), let `n` sim ticks through, scale time (the developer's rate: the CLI's `rate`) |
@@ -279,7 +279,7 @@ Header `korvid/core/engine.h`:
 | `engine_module(e, name)`, `engine_module_state_as<T>(e, name)` | functions | a started module and its state, for code outside the schedule |
 | `engine_module_state(e, name)` | function | the same, untyped |
 | `engine_entity_name_set(e, h, name)`, `engine_entity_find(e, name)`, `engine_entity_name(e, h)`, `engine_entity_names_each(e, fn, user)` | functions | entity names: set now (outside the schedule), find from anywhere, read, walk |
-| `engine_publish(e, self, name, ptr)` | function | the object behind a declared resource, for `ctx.resource<T>` |
+| `engine_publish(e, self, name, ptr)`, `engine_publish_sized` | functions | the object behind a declared resource, for `ctx.resource<T>`; one with a field table must be plain data the table fits |
 | `engine_resource_id`, `engine_component_id`, `engine_kind_id`, `engine_trigger_id`, `engine_system_phase` | functions | names to ids |
 | `engine_table(e, name or id)`, `engine_table_of(e, handle)`, `engine_component(e, id)` | functions | a kind's table, by full name, id or an entity handle; a schema |
 | `engine_table_now`, `engine_table_of_now`, `engine_early_reads(e, resource)` | functions | the table as it is now, for what never changes (a kind's handle kind) or the engine's own lookups, unrefused under a snapshot; how early reads of a resource get their value |
@@ -302,7 +302,7 @@ Header `korvid/core/cli.h`, the filesystem side:
 | `cli_resolve(ctx, arg, out, cap)` | function | a path against the session's working directory, normalized |
 | `cli_dots_to_slashes`, `cli_slashes_to_dots` | functions | engine names in the tree |
 | `schema_field_lane(f, row, lane, &v)`, `schema_field_set(f, row, lane, v)` | functions | (component.h) a field's lane as a double, and back |
-| `engine_hash_state(e)` | function | the hash of every sim column of every live entity |
+| `engine_hash_state(e)` | function | the hash of the sim: kinds, each module's drawn `ctx.rng()` stream, resources with field tables, waiting timers and next-tick events, the sim tick |
 | `engine_describe_event(e, type, event, out, cap)` | function | an event through its schema |
 | `EventTrace`, `TraceRecord` | records | the dev ring of delivered events with their emitters (`--trace-events`) |
 
@@ -316,7 +316,7 @@ Header `korvid/core/phase.h`:
 | `HandlerDesc`, `KV_ON(E, fn)` (through `handler_thunk`) | record, macro | a handler on one event type: `name`, the event, `phase`, `reads`, `writes`, `appends`, `emits`, `after`, `before` |
 | `TriggerDesc`, `TriggerEdge` | record, enum | `kind.Component.field` with `Changed`, `CrossedBelow(value)`, `CrossedAbove(value)` |
 | `Spawned{ticket, kind, entity}`, `StateEdge{entity, trigger, value}`, `SimReset{resets}` | events | the engine's own, delivered to anyone |
-| `TickContext` | record | `engine`, `events`, `dt`, `tick`, `paused`; `state_as<T>()`; events: `emit`, `received<E>()`; data: `write_kind`, `read_kind`, `read<T>`, `write<T>`, `view<C...>()`, `rows`, `alive`, `resource<T>`, `append`, `resource_id`, `column_id`, `kind_id`; per entity: `attached<T>`, `attach`, `detach`, `attached_all<T>`, `prop_set_int` and the other `prop_*`; commands: `spawn_later`, `spawn_named_later`, `name_later`, `destroy`, `destroy_all`; timers: `schedule`, `schedule_in`, `cancel`; the Work cycle: `more()`, `time_left()` |
+| `TickContext` | record | `engine`, `events`, `dt`, `tick`, `paused`; `state_as<T>()`; events: `emit`, `received<E>()`; data: `write_kind`, `read_kind`, `read<T>`, `write<T>`, `view<C...>()`, `rows`, `alive`, `resource<T>`, `append`, `resource_id`, `column_id`, `kind_id`; per entity: `attached<T>`, `attach`, `detach`, `attached_all<T>`, `prop_set_int` and the other `prop_*`; commands: `spawn_later`, `spawn_named_later`, `name_later`, `destroy`, `destroy_all`; timers: `schedule`, `schedule_in`, `cancel`; randomness: `rng()`, the module's engine-owned stream; the Work cycle: `more()`, `time_left()` |
 | `KindRows`, `KindRange<C...>` | records | one kind's rows in a view: `rows()`, `alive(i)`, `handle_at(i)`, `col<T>()`, `prev<T>()` (T const reads, T writes; writing the previous copy marks a teleport the renderer will not interpolate) |
 | `Attached<T>`, `AttachedRange<T>` | records | what `ctx.attached_all<T>(kind)` walks: `entity`, `value` |
 | `ChunkContext` | record | what a parallel chunk may do: `emit`, `spawn_later` (no ticket), `destroy` |
@@ -348,7 +348,7 @@ Header `korvid/core/event.h`, `timer.h`:
 | `EventType<E>::id` | record | the id slot |
 | `EventBus` | record | `emit`, `read<E>()`, `read_new<E>()`, `deliver`, `end_tick`, `dropped_stale`, `pending_count` |
 | `EventWriter`, `EventBuffer` | records | one unit's pending events; a type's batch |
-| `TimerWheel` | record | `schedule`, `cancel`, `fire`; 1024-slot ring plus a far list |
+| `TimerWheel` | record | `schedule`, `cancel`, `fire`, `hash`; 1024-slot ring plus a far list |
 
 Header `korvid/core/job.h`, `thread.h`, `time.h`, `os_thread.h`, `atomic.h`:
 
