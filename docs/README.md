@@ -94,6 +94,7 @@ most.
 | module | what it is |
 |---|---|
 | [asset](../modules/asset/README.md) | Files that become engine resources: textures, materials, fonts, sounds. You get a handle back at once. |
+| [asset_live](../modules/asset_live/README.md) | A dev build's link to a running `goldberg watch`: save a file and the running program reloads it. |
 | [pack](../modules/pack/README.md) | The zip format as Korvid's `.kpak` packs use it. |
 | [inflate](../modules/inflate/README.md) | Deflate both ways, and CRC-32. |
 | [xml](../modules/xml/README.md) | XML reading, as a tree in the JSON reader's shape. |

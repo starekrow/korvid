@@ -206,6 +206,16 @@ inline void engine_want_frame(Engine& e) { e.frame_wanted = true; }
 // A frame at a time (time_now's clock): a caret's next blink. The earliest asked for stands.
 inline void engine_want_frame_at(Engine& e, f64 when) { if (e.frame_due <= 0.0 || when < e.frame_due) e.frame_due = when; }
 
+// Something the engine's events do not see, that a loop pacing on demand looks at each time it
+// polls the platform (every few milliseconds while idle): a socket a module reads (asset_live's
+// connection to goldberg). `fn` does what it does with what arrived and says true when anything
+// did; the loop then draws a frame. It must be cheap and never block. Eight at most; false when
+// full. Remove it before the state `user` names goes.
+bool engine_add_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
+void engine_remove_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
+// Asks each waker; true when one had something. The frame loop calls it; a loop of its own may.
+bool engine_wake(Engine& e);
+
 // ---- sim control ----------------------------------------------------------------------
 // From anywhere on the main thread: a system, a handler, a CLI command, the loop. A change
 // applies from the next tick.
@@ -364,15 +374,5 @@ void engine_apply_commands(Engine& e);
 void engine_fire_triggers(Engine& e, u64 tick);
 // Records (and prints, if asked) what the streams took since the last call. Dev builds only.
 void engine_trace_delivery(Engine& e, u64 tick, u32 phase);
-
-// Something the engine's events do not see, that a loop pacing on demand looks at each time it
-// polls the platform (every few milliseconds while idle): a socket a module reads (asset_live's
-// connection to goldberg). `fn` does what it does with what arrived and says true when anything
-// did; the loop then draws a frame. It must be cheap and never block. Eight at most; false when
-// full. Remove it before the state `user` names goes.
-bool engine_add_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
-void engine_remove_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
-// Asks each waker; true when one had something. The frame loop calls it; a loop of its own may.
-bool engine_wake(Engine& e);
 
 } // namespace kv
