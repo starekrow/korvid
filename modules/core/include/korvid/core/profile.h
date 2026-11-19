@@ -94,6 +94,8 @@ void prof_end();
 // and KV_COUNTER call once they have checked prof_enabled().
 void prof_mark(const char* name, u64 value = 0);
 void prof_counter(const char* name, u64 value);
+// The frame and tick boundaries the summaries and the trace are cut at: nothing while
+// the profiler is off.
 void prof_frame(u64 frame); // the frame loop, once per frame, before prof_collect
 void prof_tick(u64 tick);   // the tick runner, at the start of every tick
 

@@ -3,5 +3,5 @@
 -- A library, not an engine module: kvscript and goldberg each open it onto their own Lua
 -- state and add what is theirs (kvscript: kv.image and kv.font).
 module "script" {
-  deps = { "core", "platform", "pack", "inflate", "lua", "math" },
+  deps = { "core", "platform", "pack", "inflate", "lua" },
 }

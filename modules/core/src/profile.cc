@@ -268,8 +268,8 @@ void prof_wait_begin(const char* name) { put(ProfKind::WaitBegin, name, g_cpu_ti
 void prof_end()                        { put(ProfKind::ZoneEnd, nullptr, g_cpu_time ? os_thread_cpu_ticks() : 0); }
 void prof_mark(const char* name, u64 value) { put(ProfKind::Mark, name, value); }
 void prof_counter(const char* name, u64 value) { put(ProfKind::Counter, name, value); }
-void prof_frame(u64 frame) { put(ProfKind::Frame, "frame", frame); }
-void prof_tick(u64 tick)   { put(ProfKind::Tick, "tick", tick); }
+void prof_frame(u64 frame) { if (prof_enabled()) put(ProfKind::Frame, "frame", frame); }
+void prof_tick(u64 tick)   { if (prof_enabled()) put(ProfKind::Tick, "tick", tick); }
 
 // ---- tracks ---------------------------------------------------------------------------------
 namespace {

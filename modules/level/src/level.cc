@@ -340,9 +340,9 @@ constinit const SystemDesc k_systems[] = {
      .main_thread = true, .runs = RunWhen::Always},
 };
 constinit const CliCommandDesc k_commands[] = {
-    {.name = "level list", .help = "level list: the catalog, the current level marked", .fn = cmd_list},
-    {.name = "level load", .help = "level load <name>: go there", .fn = cmd_load},
-    {.name = "level reload", .help = "level reload: read the current level's files again and rebuild it", .fn = cmd_reload},
+    {.name = "level list", .help = "the catalog, the current level marked", .fn = cmd_list},
+    {.name = "level load", .help = "<name>: go there", .fn = cmd_load},
+    {.name = "level reload", .help = "read the current level's files again and rebuild it", .fn = cmd_reload},
 };
 
 } // namespace
