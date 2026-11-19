@@ -19,8 +19,8 @@ struct Task {
 };
 
 struct JobPool {
-    OsMutex         mu;
-    OsCond          cv;        // broadcast when tasks arrive, when one finishes, and on quit
+    OsMutex         mu{};
+    OsCond          cv{};      // broadcast when tasks arrive, when one finishes, and on quit
     Array<Task>     queue;     // FIFO from head
     u32             head = 0;
     OsThread*       threads = nullptr;
@@ -29,8 +29,8 @@ struct JobPool {
     bool            up      = false;
 };
 
-JobPool g_pool;
-JobStats g_stats;
+constinit JobPool g_pool;
+constinit JobStats g_stats;
 thread_local u32 t_depth = 0; // batches this thread is waiting on, nested
 
 void bump(u64* counter) { kv::atomic_add_fetch(counter, 1, kv::MO_RELAXED); }

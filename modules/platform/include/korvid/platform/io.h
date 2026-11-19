@@ -131,8 +131,8 @@ struct IoEntry {
 
 // Where read_asset looks: a directory, or a pack (a zip) whose table was read at mount.
 struct IoMount {
-    char      path[256];   // the directory (with a trailing '/') or the pack file
-    bool      is_pack;
+    char      path[256] = {}; // the directory (with a trailing '/') or the pack file
+    bool      is_pack = false;
     OsFile    fd = -1;     // the pack's file, open for the queue's life
     u64       base = 0;    // where the archive starts in that file (a pack inside another archive)
     char      prefix[64] = {}; // only the archive's entries under this are seen, without it ("assets/")

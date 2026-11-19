@@ -568,8 +568,8 @@ bool entry_data_at(const IoMount& m, const PackEntry& pe, u64* at) {
 
 // The program's own archive (os_bundle_archive), opened at its first use and kept for the
 // process's life.
-IoMount g_bundle;
-int     g_bundle_state = 0; // 0 not tried, 1 open, -1 failed
+constinit IoMount g_bundle;
+constinit int     g_bundle_state = 0; // 0 not tried, 1 open, -1 failed
 
 IoMount* bundle_mount() {
     if (g_bundle_state == 0) {

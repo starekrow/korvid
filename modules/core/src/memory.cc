@@ -382,7 +382,7 @@ struct Cache {
     Page*   full[kClasses];
     Notify* notify;
 };
-thread_local Cache t_cache;
+constinit thread_local Cache t_cache;
 
 void list_push(Page*& head, Page* p) { p->prev = nullptr; p->next = head; if (head) head->prev = p; head = p; }
 void list_remove(Page*& head, Page* p) {
@@ -458,7 +458,7 @@ struct CacheGuard {
         t_cache.notify = nullptr;
     }
 };
-thread_local CacheGuard t_cache_guard;
+constinit thread_local CacheGuard t_cache_guard;
 
 // A page for class `cls`, owned by this thread: an orphan, a freed page, or a fresh one.
 Page* page_new(u8 cls) {

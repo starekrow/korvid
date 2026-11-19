@@ -125,11 +125,11 @@ struct Collector {
     Array<ProfRecord> kept_next;
     Array<u8>         kept_next_ring;
     FILE*           trace = nullptr;
-    bool            trace_named[KV_PROF_MAX_RINGS];
-    u32             seen_claims[KV_PROF_MAX_RINGS]; // a ring's claims when last collected: changed, its state is another thread's
+    bool            trace_named[KV_PROF_MAX_RINGS] = {};
+    u32             seen_claims[KV_PROF_MAX_RINGS] = {}; // a ring's claims when last collected: changed, its state is another thread's
     u64             trace_origin = 0;
 };
-Collector g_c;
+constinit Collector g_c;
 
 void collector_init() {
     if (g_c.ready) return;
