@@ -25,11 +25,11 @@ void test_writer(kv::TestCtx& c) {
     w.begin_object();
     w.key("a"); w.int_value(-3);
     w.key("b"); w.begin_array(); w.bool_value(true); w.null_value(); w.uint_value(18446744073709551615ull); w.end_array();
-    w.key("s"); w.string_value("q\"\\\n\x01 \xc3\xa9");
+    w.key("s"); w.string_value("q\"\\\n\x01\b \xc3\xa9");
     w.key("e"); w.begin_object(); w.end_object();
     w.end_object();
     KV_CHECK(c, w.finish());
-    KV_CHECK(c, text_is(w, "{\"a\":-3,\"b\":[true,null,18446744073709551615],\"s\":\"q\\\"\\\\\\n\\u0001 \xc3\xa9\",\"e\":{}}"));
+    KV_CHECK(c, text_is(w, "{\"a\":-3,\"b\":[true,null,18446744073709551615],\"s\":\"q\\\"\\\\\\n\\u0001\\b \xc3\xa9\",\"e\":{}}"));
 
     // Pretty: a member per line, compact containers on one line.
     w.init(mem_general());
@@ -38,15 +38,18 @@ void test_writer(kv::TestCtx& c) {
     w.key("rows"); w.begin_array(); w.begin_object(); w.key("x"); w.int_value(1); w.end_object(); w.end_array();
     w.end_object();
     KV_CHECK(c, w.finish());
-    KV_CHECK(c, text_is(w, "{\n  \"p\": [1.5, -2],\n  \"rows\": [\n    {\n      \"x\": 1\n    }\n  ]\n}\n"));
+    KV_CHECK(c, text_is(w, "{\n  \"p\": [1.5, -2.0],\n  \"rows\": [\n    {\n      \"x\": 1\n    }\n  ]\n}\n"));
 
     // Floats: short where short reads back, every bit where it does not; JSON-less values as strings.
-    const f32 f32s[] = {0.15f, 1.0f / 3.0f, 3.4028235e38f, 1.0e-45f, -0.0f, 16777217.0f};
+    // 7.038531e-26 is the one f32 whose shortest digits strtof reads back and strtod-then-narrow,
+    // as the loaders read, does not.
+    const f32 f32s[] = {0.15f, 1.0f / 3.0f, 3.4028235e38f, 1.0e-45f, -0.0f, 16777217.0f, 7.0385307e-26f};
     const f64 f64s[] = {0.1, 1.0 / 3.0, 1.7976931348623157e308, 5e-324, 9007199254740993.0};
     for (f32 v : f32s) {
         w.reset(); w.f32_value(v); KV_CHECK(c, w.finish());
         w.out.push(0);
-        KV_CHECK(c, strtof((const char*)w.out.data, nullptr) == v && kv::signbit(strtof((const char*)w.out.data, nullptr)) == kv::signbit(v));
+        f32 back = (f32)strtod((const char*)w.out.data, nullptr);
+        KV_CHECK(c, back == v && kv::signbit(back) == kv::signbit(v));
     }
     w.reset(); w.f32_value(0.15f); KV_CHECK(c, w.finish() && text_is(w, "0.15\n"));
     for (f64 v : f64s) {

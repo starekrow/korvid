@@ -1,9 +1,10 @@
 // Korvid save: the writer. Objects, arrays and scalars, written in order into a byte
 // array, in one of the formats a save can take. The calls are the data model, not the
 // syntax: a JSON object and a CBOR map are both begin_object, key, value, ..., end_object,
-// so code that writes a save never knows which it is making. JSON is the one built;
-// CBOR (indefinite-length maps and arrays, which stream from these same calls) is the
-// one planned.
+// so code that writes a save never knows which it is making. JSON is the only one built.
+// The binary one would be KBOR, core's CBOR (korvid/core/kbor.h), which core already
+// reads into the tree save_parse gives and writes from one; what is missing is this writer
+// streaming it (indefinite-length maps and arrays, from these same calls).
 //
 //   SaveWriter w;
 //   w.init(mem_general());
@@ -14,9 +15,11 @@
 //   if (w.finish()) write w.out.data, w.out.len
 //   w.free();
 //
-// Floats are written so they read back to the same bits: the fewest digits that do. Not
-// a number and the infinities, which JSON cannot say, are the strings "nan", "inf" and
-// "-inf"; the loaders read them back. Integers are exact to 64 bits either way.
+// Strings and floats are written as core's JSON writer writes them (json_write_string,
+// json_write_f64, json_write_f32): a float in the fewest digits that read back to the
+// same bits, always with a fraction or an exponent (4.0, not 4). Not a number and the
+// infinities, which JSON cannot say, are the strings "nan", "inf" and "-inf"; the loaders
+// read them back. Integers are exact to 64 bits either way.
 //
 // Mistakes (a value where a key belongs, an end with nothing open, nesting past
 // KV_SAVE_MAX_DEPTH) set `failed`, log once, and are otherwise ignored, so a save can be
@@ -75,12 +78,10 @@ private:
     void begin(bool array, bool compact);
     void end(bool array);
     void fail(const char* why);
-    void number_text(const char* text);
-    void put_string(const char* s, u32 len);
 };
 
-// Reads a save's bytes into the document tree the loaders walk (the JSON reader's tree:
-// a CBOR reader would build the same one). False with doc.error set when they do not parse.
+// Reads a save's bytes into the document tree the loaders walk (the JSON reader's tree,
+// which core's KBOR reader builds too). False with doc.error set when they do not parse.
 bool save_parse(SaveFormat f, const void* data, usize size, Allocator* alloc, JsonDoc& doc);
 
 } // namespace kv

@@ -368,15 +368,71 @@ const char* json_type_name(JsonType t) {
 
 namespace {
 
+void put(Array<u8>& out, const char* s, usize n) {
+    if (!n) return;
+    memcpy(out.push_n((u32)n), s, n);
+}
+
+// A float in the fewest digits that read back to the same double (or, `single`, the same
+// f32), with a fraction if it has none: 1.0, never 1, which would read back as an integer.
+// NaN and the infinities as the strings JSON can say. An f32 is checked as json_parse
+// reads it, strtod and then narrowed, not with strtof: the two differ for one finite f32,
+// 0x15ae43fd, whose 7 digits (7.038531e-26) strtof reads back and the double rounds away.
+void put_float(Array<u8>& out, f64 d, bool single) {
+    if (d != d) { put(out, "\"nan\"", 5); return; }
+    if (d > 1.7976931348623157e308) { put(out, "\"inf\"", 5); return; }
+    if (d < -1.7976931348623157e308) { put(out, "\"-inf\"", 6); return; }
+    char b[48];
+    for (int p = single ? 6 : 15; p <= (single ? 9 : 17); ++p) {
+        format(b, sizeof b, "%.*g", p, d);
+        f64 back = strtod(b, nullptr);
+        if (single ? (f32)back == (f32)d : back == d) break;
+    }
+    usize n = strlen(b);
+    if (!strpbrk(b, ".eE")) { b[n++] = '.'; b[n++] = '0'; }
+    put(out, b, n);
+}
+
+} // namespace
+
+void json_write_string(Array<u8>& out, const char* s, usize len) {
+    put(out, "\"", 1);
+    usize run = 0; // bytes passed through unescaped, written in one go
+    for (usize i = 0; i < len; ++i) {
+        u8 c = (u8)s[i];
+        const char* esc = nullptr;
+        char hex[8];
+        switch (c) {
+        case '"':  esc = "\\\""; break;
+        case '\\': esc = "\\\\"; break;
+        case '\n': esc = "\\n"; break;
+        case '\r': esc = "\\r"; break;
+        case '\t': esc = "\\t"; break;
+        case '\b': esc = "\\b"; break;
+        case '\f': esc = "\\f"; break;
+        default:
+            if (c < 0x20) { format(hex, sizeof hex, "\\u%04x", c); esc = hex; }
+        }
+        if (!esc) { ++run; continue; }
+        put(out, s + i - run, run);
+        run = 0;
+        put(out, esc, strlen(esc));
+    }
+    put(out, s + len - run, run);
+    put(out, "\"", 1);
+}
+
+void json_write_f64(Array<u8>& out, f64 v) { put_float(out, v, false); }
+void json_write_f32(Array<u8>& out, f32 v) { put_float(out, v, true); }
+
+namespace {
+
 struct Writer {
     const JsonDoc& doc;
     Array<u8>&     out;
     bool           pretty;
 
-    void put(const char* s, usize n) {
-        if (!n) return;
-        memcpy(out.push_n((u32)n), s, n);
-    }
+    void put(const char* s, usize n) { kv::put(out, s, n); }
     void put(const char* s) { put(s, strlen(s)); }
     void newline(u32 depth) {
         u8* p = out.push_n(1 + depth * 2);
@@ -384,51 +440,13 @@ struct Writer {
         memset(p + 1, ' ', depth * 2);
     }
 
-    // Quoted and escaped; UTF-8 passes through as it is.
-    void string(const char* s, usize n) {
-        put("\"", 1);
-        usize run = 0;
-        for (usize i = 0; i < n; ++i) {
-            u8 c = (u8)s[i];
-            const char* esc = nullptr;
-            char hex[8];
-            switch (c) {
-            case '"':  esc = "\\\""; break;
-            case '\\': esc = "\\\\"; break;
-            case '\n': esc = "\\n"; break;
-            case '\r': esc = "\\r"; break;
-            case '\t': esc = "\\t"; break;
-            case '\b': esc = "\\b"; break;
-            case '\f': esc = "\\f"; break;
-            default:
-                if (c < 0x20) { format(hex, sizeof hex, "\\u%04x", c); esc = hex; }
-            }
-            if (!esc) { ++run; continue; }
-            put(s + i - run, run);
-            run = 0;
-            put(esc);
-        }
-        put(s + n - run, run);
-        put("\"", 1);
-    }
+    void string(const char* s, usize n) { json_write_string(out, s, n); }
 
     void number(const JsonValue& v) {
-        char b[48];
-        if (v.integer()) {
-            if (v.flags & KV_JSON_VALUE_NEGATIVE) format(b, sizeof b, "%lld", (long long)(i64)v.as.bits);
-            else format(b, sizeof b, "%llu", (unsigned long long)v.as.bits);
-            put(b);
-            return;
-        }
-        f64 d = v.as.num;
-        if (d != d) { put("\"nan\""); return; }
-        if (d > 1.7976931348623157e308 || d < -1.7976931348623157e308) { put(d < 0 ? "\"-inf\"" : "\"inf\""); return; }
-        for (int p = 15; p <= 17; ++p) { // the fewest digits that read back the same
-            format(b, sizeof b, "%.*g", p, d);
-            if (strtod(b, nullptr) == d) break;
-        }
-        // A float says so: 1.0, never 1, which would read back as an integer.
-        if (!strpbrk(b, ".eE")) { usize n = strlen(b); b[n] = '.'; b[n + 1] = '0'; b[n + 2] = 0; }
+        if (!v.integer()) { json_write_f64(out, v.as.num); return; }
+        char b[32];
+        if (v.flags & KV_JSON_VALUE_NEGATIVE) format(b, sizeof b, "%lld", (long long)(i64)v.as.bits);
+        else format(b, sizeof b, "%llu", (unsigned long long)v.as.bits);
         put(b);
     }
 

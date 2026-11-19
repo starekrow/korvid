@@ -4,7 +4,7 @@ Game state to bytes and back. Three layers, each usable without the next:
 
 1. **The writer** (`writer.h`): objects, arrays and scalars written in order. The calls are
    the data model, not a syntax, so the code that writes a save never knows the format.
-   JSON is built; CBOR is planned behind the same calls (see below).
+   JSON is built; KBOR, core's CBOR, is planned behind the same calls (see below).
 2. **Fields** (`save.h`): any struct with a field table (every component, every event) as
    an object of its fields by name, and back. A field the file lacks keeps its value, a
    key the struct lacks is ignored, so saves outlive fields being added and removed.
@@ -38,13 +38,16 @@ open or nesting past 32 all set `failed` (logged once) and make it false.
 
 Numbers are exact. Integers are written in full to 64 bits and the JSON reader keeps
 integer literals exact (`JsonValue::integer`, `json_u64`, `json_i64`). Floats get the
-fewest digits that read back to the same bits (`0.15`, not `0.150000006`). Not a number
-and the infinities are the strings `"nan"`, `"inf"` and `"-inf"`.
+fewest digits that read back to the same bits (`0.15`, not `0.150000006`), always with a
+fraction or an exponent (`4.0`, not `4`), so they read back as floats. Not a number and
+the infinities are the strings `"nan"`, `"inf"` and `"-inf"`. The text is core's JSON
+writer's (`json_write_string`, `json_write_f64`, `json_write_f32` in `korvid/core/json.h`),
+so a save and a tool's `json_write` spell the same value the same way.
 
 ## Fields
 
 ```cpp
-save_component(w, my_desc, &row);                     // {"hp": 3, "pos": [4, 5.5], "owner": "game.player#0:1"}
+save_component(w, my_desc, &row);                     // {"hp": 3, "pos": [4.0, 5.5], "owner": "game.player#0:1"}
 load_component(doc, *obj, my_desc, &row, remap);      // the fields obj names, into row
 ```
 
@@ -104,7 +107,9 @@ finds an entity of another restored by the same load.
 ## CBOR, later
 
 The format this becomes is KBOR (`docs/design/kbor.md`): CBOR with a key table, so a
-repeated key costs a byte. The plan below stands as written.
+repeated key costs a byte. Core reads and writes it already (`korvid/core/kbor.h`:
+`kbor_parse` builds the same tree as `json_parse`, `kbor_write` writes one); what save
+lacks is a `SaveWriter` that streams it. The plan below stands as written.
 
 A second `SaveFormat` needs two pieces and nothing else changes:
 
@@ -115,8 +120,9 @@ A second `SaveFormat` needs two pieces and nothing else changes:
   double (`0xFB`, or a single when it is exact), and NaN and the infinities become real
   floats instead of strings. A handle could become a tagged array; the string form works
   as it is.
-- **Reading**: `save_parse` decodes into the same tree the JSON reader builds (`JsonDoc`).
-  The loaders only walk that tree, so fields and kinds load from either format.
+- **Reading**: `save_parse` calls `kbor_parse`, which decodes into the same tree the JSON
+  reader builds (`JsonDoc`). The loaders only walk that tree, so fields and kinds load
+  from either format.
 
 The format is the caller's choice per save, so a game could write CBOR and keep JSON for
 debugging.

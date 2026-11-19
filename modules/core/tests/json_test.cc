@@ -156,4 +156,32 @@ void test_json(kv::TestCtx& c) {
     KV_CHECK(c, json_parse(commented, strlen(commented), mem_scratch(), doc, KV_JSON_LINE_COMMENTS) && doc.root().count() == 2);
     KV_CHECK(c, strcmp(json_string(json_get(doc, doc.root(), "url"), ""), "http://x") == 0 && json_get(doc, doc.root(), "n")->line == 5);
     KV_CHECK(c, !json_parse("[1, / 2]", 8, mem_scratch(), doc, KV_JSON_LINE_COMMENTS) && !json_parse("[1] /", 5, mem_scratch(), doc, KV_JSON_LINE_COMMENTS));
+
+    // json_write's leaves on their own: the escapes, a float's spelling, and an f32 that
+    // reads back through json_parse (strtod, then narrowed) to the same bits.
+    Array<u8> out{};
+    auto wrote = [&](const char* expect) {
+        bool ok = out.len == strlen(expect) && memcmp(out.data, expect, out.len) == 0;
+        out.clear();
+        return ok;
+    };
+    const char* raw = "q\"\\\n\r\t\b\f\x01 \xc3\xa9";
+    json_write_string(out, raw, strlen(raw));
+    KV_CHECK(c, wrote("\"q\\\"\\\\\\n\\r\\t\\b\\f\\u0001 \xc3\xa9\""));
+    json_write_f64(out, 1.0);    KV_CHECK(c, wrote("1.0"));
+    json_write_f64(out, 0.1);    KV_CHECK(c, wrote("0.1"));
+    json_write_f64(out, -0.0);   KV_CHECK(c, wrote("-0.0"));
+    u64 inf_bits = 0x7ff0000000000000ull;
+    f64 inf;
+    memcpy(&inf, &inf_bits, 8);
+    json_write_f64(out, -inf);   KV_CHECK(c, wrote("\"-inf\""));
+    json_write_f32(out, 0.15f);  KV_CHECK(c, wrote("0.15"));
+    json_write_f32(out, -2.0f);  KV_CHECK(c, wrote("-2.0"));
+    json_write_f64(out, 0.15f);  KV_CHECK(c, wrote("0.15000000596046448"));
+    u32 bits = 0x15ae43fd; // 7.038531e-26 reads back as this f32 by strtof, not by strtod
+    f32 narrowing;
+    memcpy(&narrowing, &bits, 4);
+    json_write_f32(out, narrowing);
+    KV_CHECK(c, json_parse((const char*)out.data, out.len, mem_scratch(), doc) && (f32)doc.root().number() == narrowing);
+    out.free();
 }

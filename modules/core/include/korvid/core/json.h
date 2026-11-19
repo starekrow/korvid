@@ -199,6 +199,22 @@ constexpr u32 KV_JSON_WRITE_PRETTY = 1u << 0;
 // floats kept apart.
 void json_write(const JsonDoc& doc, Array<u8>& out, u32 flags = KV_JSON_WRITE_PRETTY);
 
+// The leaves as json_write spells them, for a writer that lays out its own structure
+// (save's SaveWriter) and so writes the same text. Each appends to `out` (no NUL).
+//
+// `len` bytes as a JSON string: quoted, with `"`, `\` and the control bytes escaped (\n,
+// \r, \t, \b and \f by name, the rest as \u00XX). Other bytes, UTF-8 included, pass
+// through unchanged.
+void json_write_string(Array<u8>& out, const char* s, usize len);
+// A float as json_write writes one: the fewest of 15 to 17 digits that read back to the
+// same double, always with a fraction or an exponent (1.0, not 1), so it reads back as a
+// float and not an integer; NaN and the infinities as "nan", "inf" and "-inf".
+void json_write_f64(Array<u8>& out, f64 v);
+// The same for an f32, in the fewest of 6 to 9 digits that read back to the same f32:
+// 0.15, where json_write_f64 of the same value takes 0.15000000596046448. json_parse reads
+// that as the nearest double, which narrows to `v` again for every finite f32.
+void json_write_f32(Array<u8>& out, f32 v);
+
 // ---- building a tree -------------------------------------------------------------------
 // A JsonDoc made by hand, for whatever writes a format (kim's compiler, a tool) rather than
 // reading one. Values are made first and attached after, in any order; finish() lays them

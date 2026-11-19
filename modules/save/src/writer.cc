@@ -1,8 +1,6 @@
 #include "korvid/save/writer.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
-#include "korvid/math/scalar.h"
-#include <stdlib.h>
 #include <string.h>
 
 namespace kv {
@@ -25,10 +23,7 @@ void SaveWriter::reset() {
 }
 
 void SaveWriter::put(const char* s, u32 n) {
-    if (!n) return;
-    u8* p = out.push_n(n);
-    if (!p) { fail("out of memory"); return; }
-    memcpy(p, s, n);
+    if (n) memcpy(out.push_n(n), s, n);
 }
 
 void SaveWriter::put(const char* s) { put(s, (u32)strlen(s)); }
@@ -90,7 +85,7 @@ void SaveWriter::key(const char* k) {
     Frame& f = frames[depth - 1];
     if (f.count) put(",", 1);
     if (pretty) { if (f.compact) { if (f.count) put(" ", 1); } else newline(depth); }
-    put_string(k ? k : "", k ? (u32)strlen(k) : 0);
+    json_write_string(out, k ? k : "", k ? strlen(k) : 0);
     put(pretty ? ": " : ":");
     after_key = true;
 }
@@ -98,72 +93,25 @@ void SaveWriter::key(const char* k) {
 void SaveWriter::null_value() { if (before_value()) put("null"); }
 void SaveWriter::bool_value(bool v) { if (before_value()) put(v ? "true" : "false"); }
 
-void SaveWriter::number_text(const char* text) { if (before_value()) put(text); }
-
 void SaveWriter::int_value(i64 v) {
     char b[32];
     kv::format(b, sizeof b, "%lld", (long long)v);
-    number_text(b);
+    if (before_value()) put(b);
 }
 
 void SaveWriter::uint_value(u64 v) {
     char b[32];
     kv::format(b, sizeof b, "%llu", (unsigned long long)v);
-    number_text(b);
+    if (before_value()) put(b);
 }
 
-void SaveWriter::f64_value(f64 v) {
-    if (v != v) { string_value("nan"); return; }
-    if (kv::isinf(v)) { string_value(v < 0 ? "-inf" : "inf"); return; }
-    char b[40];
-    for (int p = 15; p <= 17; ++p) { // the fewest digits that read back the same
-        kv::format(b, sizeof b, "%.*g", p, v);
-        if (strtod(b, nullptr) == v) break;
-    }
-    number_text(b);
-}
-
-void SaveWriter::f32_value(f32 v) {
-    if (v != v) { string_value("nan"); return; }
-    if (kv::isinf(v)) { string_value(v < 0 ? "-inf" : "inf"); return; }
-    char b[32];
-    for (int p = 6; p <= 9; ++p) {
-        kv::format(b, sizeof b, "%.*g", p, (double)v);
-        if (strtof(b, nullptr) == v) break;
-    }
-    number_text(b);
-}
+void SaveWriter::f64_value(f64 v) { if (before_value()) json_write_f64(out, v); }
+void SaveWriter::f32_value(f32 v) { if (before_value()) json_write_f32(out, v); }
 
 void SaveWriter::string_value(const char* s) { string_value(s ? s : "", s ? (u32)strlen(s) : 0); }
 
 void SaveWriter::string_value(const char* s, u32 len) {
-    if (before_value()) put_string(s, len);
-}
-
-// Quoted and escaped: UTF-8 passes through, control bytes become \u00XX.
-void SaveWriter::put_string(const char* s, u32 len) {
-    put("\"", 1);
-    u32 run = 0; // bytes passed through unescaped, written in one go
-    for (u32 i = 0; i < len; ++i) {
-        u8 c = (u8)s[i];
-        const char* esc = nullptr;
-        char hex[8];
-        switch (c) {
-        case '"':  esc = "\\\""; break;
-        case '\\': esc = "\\\\"; break;
-        case '\n': esc = "\\n"; break;
-        case '\r': esc = "\\r"; break;
-        case '\t': esc = "\\t"; break;
-        default:
-            if (c < 0x20) { kv::format(hex, sizeof hex, "\\u%04x", c); esc = hex; }
-        }
-        if (!esc) { ++run; continue; }
-        put(s + i - run, run);
-        run = 0;
-        put(esc);
-    }
-    put(s + len - run, run);
-    put("\"", 1);
+    if (before_value()) json_write_string(out, s, len);
 }
 
 bool SaveWriter::finish() {

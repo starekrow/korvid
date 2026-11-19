@@ -22,9 +22,12 @@ u32* starts_of(Renderer* r) { return (u32*)r->sort_meta.data + kBucketCount; }
 
 f32 lerp(f32 a, f32 b, f32 t) { return a + (b - a) * t; }
 
-// A 64-bit hash of `n` bytes (a tile's draws are compared by theirs).
-u64 hash_bytes(const void* p, usize n, u64 h = 0x9E3779B97F4A7C15ull) {
+// A 64-bit hash of `n` bytes (a tile's draws are compared by theirs). Not core's hash_bytes:
+// it runs on every quad and UI item every frame, is never stored, and is 4x faster (18 ns a
+// CpuQuad against 77).
+u64 frame_hash(const void* p, usize n) {
     const u8* b = (const u8*)p;
+    u64 h = 0x9E3779B97F4A7C15ull;
     for (; n >= 8; n -= 8, b += 8) {
         u64 w;
         memcpy(&w, b, 8);
@@ -36,7 +39,8 @@ u64 hash_bytes(const void* p, usize n, u64 h = 0x9E3779B97F4A7C15ull) {
     return h * 0xC4CEB9FE1A85EC53ull;
 }
 
-u64 hash_mix(u64 h, u64 v) {
+// Folds `v` into `h`: a tile's draws' hashes, in order.
+u64 frame_hash_mix(u64 h, u64 v) {
     h = (h ^ v) * 0xFF51AFD7ED558CCDull;
     return h ^ (h >> 31);
 }
@@ -205,7 +209,7 @@ bool prepare(Renderer* r, u32 row, CpuQuad& q) {
         q.time = p.time;
         q.tick = p.tick;
     }
-    q.hash = hash_bytes(&q, offsetof(CpuQuad, hash));
+    q.hash = frame_hash(&q, offsetof(CpuQuad, hash));
     return true;
 }
 
@@ -370,7 +374,7 @@ bool prepare_ui(Renderer* r, const UiView& v, const u8* region, const u8* item, 
     if (u.y1 > (i32)r->target_height) u.y1 = (i32)r->target_height;
     if (u.x0 >= u.x1 || u.y0 >= u.y1) return false;
     u.l0x = v.l0x; u.l0y = v.l0y; u.ldx_x = v.ldx_x; u.ldx_y = v.ldx_y; u.ldy_x = v.ldy_x; u.ldy_y = v.ldy_y;
-    u.hash = hash_bytes(&u, offsetof(CpuUi, hash));
+    u.hash = frame_hash(&u, offsetof(CpuUi, hash));
     return true;
 }
 
@@ -605,12 +609,12 @@ void rb_pass_end(Renderer* r, FrameInFlight&, RcPass) {
             for (u32 t = 0; t < tiles; ++t) r->tile_hash.push(0);
         }
         skip = arena_push_n<u8>(*scope.arena, tiles);
-        u64 base = hash_mix(hash_mix(0x2545F4914F6CDD1Dull, (u64)r->clear[0] | (u64)r->clear[1] << 16 | (u64)r->clear[2] << 32), r->quantize8);
+        u64 base = frame_hash_mix(frame_hash_mix(0x2545F4914F6CDD1Dull, (u64)r->clear[0] | (u64)r->clear[1] << 16 | (u64)r->clear[2] << 32), r->quantize8);
         for (u32 t = 0; t < tiles; ++t) {
             u64 h = base;
             for (u32 i = r->bin_counts[t]; i < r->bin_counts[t + 1]; ++i) {
                 u32 d = r->bin_items[i];
-                h = hash_mix(h, (d & kCpuDrawUi) ? r->ui[d & ~kCpuDrawUi].hash : r->quads[d].hash);
+                h = frame_hash_mix(h, (d & kCpuDrawUi) ? r->ui[d & ~kCpuDrawUi].hash : r->quads[d].hash);
             }
             h |= 1; // never 0: 0 is a tile never drawn
             skip[t] = same_target && r->tile_hash[t] == h;

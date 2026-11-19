@@ -391,6 +391,7 @@ Header `korvid/core/utf8.h`, `json.h`, `kbor.h`, `base64.h`, `cli.h`, `random.h`
 | `json_i64`, `json_u64`, `json_type_name` | functions | an integer literal's exact value, with a default; a type's name |
 | `JsonBuilder`, `JsonRef` | record | a tree made from code: makers, `push`, `set`, `finish(root, doc)` |
 | `json_write(doc, out, flags)` | function | a tree as JSON text, pretty or compact; floats always with a fraction or an exponent, NaN and the infinities as strings, `Bytes` as base64 |
+| `json_write_string(out, s, len)`, `json_write_f64(out, v)`, `json_write_f32(out, v)` | functions | the leaves as `json_write` spells them, for a writer with its own structure (save's); f32 in the fewest digits that read back |
 | `kbor_parse(data, size, alloc, doc, info)`, `KborInfo`, `KborSummary` | function, records | KBOR ([docs/design/kbor.md](../../docs/design/kbor.md)) into the same tree as `json_parse`; one pass for a file with the summary, a count first for any other; `JsonType::Bytes` for byte strings |
 | `kbor_write(doc, out, summary)` | function | a tree as normalized KBOR: definite lengths, an index for every repeated key, the summary in front |
 | `base64_encode`, `base64_decode`, `base64_encoded_len`, `base64_decoded_max` | functions | RFC 4648; writes standard and padded, reads standard or URL-safe, padded or not |
