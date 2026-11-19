@@ -50,7 +50,7 @@ the [module catalog](README.md#modules) has everything.
 - **Put text on screen:** [text](../modules/text/README.md), `Text`, `text_set`
 - **Animate a sprite: flipbook, fade, motion:** [anim](../modules/anim/README.md), `anim_load`, `AnimPlayer`
 - **Draw a Tiled map:** [tilemap](../modules/tilemap/README.md), `tilemap_load`, `tilemap_spawn`
-- **Build a menu, a HUD or a dialogue box:** [ui](../modules/ui/README.md), `ui_load`, `ui_open`
+- **Build a menu, a HUD or a dialogue box:** [ui](../modules/sprite_ui/README.md), `spui_load`, `spui_open`
 - **Build a tool's interface:** [krome](../modules/krome/README.md)
 - **Write a custom shader for a material:** [render](../modules/render/README.md)
 - **Take a screenshot from the command line:** [frameloop](../modules/frameloop/README.md#using-it), `--screenshot`

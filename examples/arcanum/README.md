@@ -83,10 +83,10 @@ from an older version".
 - **Hearts**: the player's `Vitals` (five hearts, a second of blinking after each, and the
   hammer's dice, all sim state). The last heart fades to red and the `gameover` screen:
   continue from the save, or back to the title.
-- **Screens** are one UI document, `assets/ui/arcanum.ui.json`: title, name, pause, level
+- **Screens** are one UI document, `assets/ui/arcanum.spui.json`: title, name, pause, level
   select, credits, dialogue, aim, shout, game over and the HUD's hearts (model values). The
-  game opens and closes them and answers their `UiEvent`s by node name; modes change behind
-  covers (`ui_cover`).
+  game opens and closes them and answers their `SpuiEvent`s by node name; modes change behind
+  covers (`spui_cover`).
 - **Save and load** (the `save` module). Saving writes the level's name, the hero's name,
   the boulders broken, the `.player`, `.npc` and `.rock` kinds slot for slot, and every
   level's record (`level_save`). Loading holds the sim while the file is read, gives the
@@ -109,7 +109,7 @@ from an older version".
 | file | what |
 |---|---|
 | `src/game.cc` | the module: kinds, the menus and screens, saving and loading, walking, talking and the hammer, villagers and the chase, the hearts, the camera, the level handlers, the demo |
-| `assets/ui/arcanum.ui.json` | every screen and the HUD |
+| `assets/ui/arcanum.spui.json` | every screen and the HUD |
 | `assets/actors/*.sheet.json` | the characters' walk, idle and attack clips |
 | `src/main.cc` | the frame loop's config |
 | `assets/maps/` | `village.tmj`, `field.tmj` and the four tilesets (`.tsj`) |

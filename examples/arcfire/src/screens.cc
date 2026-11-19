@@ -22,7 +22,7 @@
 #include "korvid/core/name.h"
 #include "korvid/platform_hid/actions.h"
 #include "korvid/platform_hid/module.h"
-#include "korvid/ui/ui.h"
+#include "korvid/sprite_ui/sprite_ui.h"
 #include <string.h>
 #include "korvid/math/scalar.h"
 #include <time.h>
@@ -38,15 +38,15 @@ constexpr u64 kNameSettle = 20;     // ticks name entry takes no submit after it
 constexpr Position k_table_positions[kScoreTables] = {Position::Easy, Position::Normal, Position::Hard};
 
 Handle open_screen(Engine& e, Game& g, const char* screen, i32 layer, bool hold = true) {
-    UiOpen o;
+    SpuiOpen o;
     o.layer = layer;
     o.hold = hold;
-    o.enter.fx = UiFx::Fade;
-    return ui_open(e, g.ui, screen, o);
+    o.enter.fx = SpuiFx::Fade;
+    return spui_open(e, g.ui, screen, o);
 }
 
 void close_screen(Engine& e, Handle& h) {
-    if (!h.is_null()) ui_close(e, h);
+    if (!h.is_null()) spui_close(e, h);
     h = Handle{};
 }
 
@@ -61,22 +61,22 @@ const char* ordinal(u32 n) { return n == 1 ? "ST" : n == 2 ? "ND" : n == 3 ? "RD
 void options_show(Engine& e, Game& g) {
     char line[48], pos[16];
     format(line, sizeof line, "MASTER VOLUME   < %2u >", g.options.master);
-    ui_set_text(e, g.options_screen, "master", line);
+    spui_set_text(e, g.options_screen, "master", line);
     format(line, sizeof line, "MUSIC           < %2u >", g.options.music);
-    ui_set_text(e, g.options_screen, "music", line);
+    spui_set_text(e, g.options_screen, "music", line);
     format(line, sizeof line, "EFFECTS         < %2u >", g.options.effects);
-    ui_set_text(e, g.options_screen, "effects", line);
+    spui_set_text(e, g.options_screen, "effects", line);
     format(pos, sizeof pos, "%s", position_name(g.options.start));
     caps(pos);
     format(line, sizeof line, "ARCADE STARTS  < %s >", pos);
-    ui_set_text(e, g.options_screen, "start", line);
+    spui_set_text(e, g.options_screen, "start", line);
     format(line, sizeof line, "DEV COUNTERS   < %s >", g.options.dev ? "ON" : "OFF");
-    ui_set_text(e, g.options_screen, "dev", line);
+    spui_set_text(e, g.options_screen, "dev", line);
 }
 
 // Left or right on the focused item.
 void options_change(Engine& e, Game& g, i32 by) {
-    const char* item = ui_focused(e, g.options_screen, "items");
+    const char* item = spui_focused(e, g.options_screen, "items");
     if (!item) return;
     auto step = [by](u32& v) { v = by < 0 ? (v ? v - 1 : 0) : (v < 10 ? v + 1 : 10); };
     if (!strcmp(item, "master")) step(g.options.master);
@@ -103,10 +103,10 @@ void options_close(Engine& e, Game& g) {
         format(pos, sizeof pos, "%s", position_name((u32)g.start));
         caps(pos);
         format(note, sizeof note, "ARCADE STARTS AT %s", pos);
-        ui_model_set_str(e, "title_note", note);
-        ui_set_visible(e, g.title_screen, "column", true);
+        spui_model_set_str(e, "title_note", note);
+        spui_set_visible(e, g.title_screen, "column", true);
     }
-    if (!g.pause_screen.is_null()) ui_set_visible(e, g.pause_screen, "column", true);
+    if (!g.pause_screen.is_null()) spui_set_visible(e, g.pause_screen, "column", true);
 }
 
 // ---- results and the tables ------------------------------------------------------------------
@@ -123,15 +123,15 @@ void name_open(Engine& e, Game& g, u32 table, i32 row) {
     format(pos, sizeof pos, "%s", g.demo ? "THE DEMO" : position_name((u32)k_table_positions[table]));
     caps(pos);
     format(line, sizeof line, "%u%s ON %s", (u32)row + 1, ordinal((u32)row + 1), pos);
-    ui_model_set_str(e, "name_rank", line);
+    spui_model_set_str(e, "name_rank", line);
     g.name_screen = open_screen(e, g, "name", 116);
-    ui_set_text(e, g.name_screen, "entry", g.demo ? "" : g.last_name);
+    spui_set_text(e, g.name_screen, "entry", g.demo ? "" : g.last_name);
     g.name_opened = e.clock.tick_total;
 }
 
 void name_submit(Engine& e, Game& g) {
     char name[kNameMax + 1];
-    format(name, sizeof name, "%s", ui_field_text(e, g.name_screen, "entry"));
+    format(name, sizeof name, "%s", spui_field_text(e, g.name_screen, "entry"));
     caps(name);
     close_screen(e, g.name_screen);
     u32 table = 1;
@@ -166,7 +166,7 @@ void scores_show(Engine& e, Game& g) {
     format(pos, sizeof pos, "%s", g.demo ? "THE DEMO" : position_name((u32)k_table_positions[t]));
     caps(pos);
     format(head, sizeof head, g.demo ? "%s" : "<  %s  >", pos);
-    ui_model_set_str(e, "scores_table", head);
+    spui_model_set_str(e, "scores_table", head);
     char text[2048];
     usize n = (usize)format(text, sizeof text, "{*c=dim}    NAME          SCORE  STAGE         RESTARTS{/c}\n");
     const ScoreTable& table = g.scores[t];
@@ -182,31 +182,31 @@ void scores_show(Engine& e, Game& g) {
             n += (usize)format(text + n, sizeof text - n, "{*c=dim}%2u  --------          -{/c}\n", i + 1);
         }
     }
-    ui_set_text(e, g.scores_screen, "rows", text);
+    spui_set_text(e, g.scores_screen, "rows", text);
 }
 
 } // namespace
 
 void options_open(Engine& e, Game& g, i32 layer) {
     g.options_screen = open_screen(e, g, "options", layer);
-    ui_focus(e, g.options_screen, "items", "master");
+    spui_focus(e, g.options_screen, "items", "master");
     options_show(e, g);
-    if (!g.title_screen.is_null()) ui_set_visible(e, g.title_screen, "column", false);
-    if (!g.pause_screen.is_null()) ui_set_visible(e, g.pause_screen, "column", false);
+    if (!g.title_screen.is_null()) spui_set_visible(e, g.title_screen, "column", false);
+    if (!g.pause_screen.is_null()) spui_set_visible(e, g.pause_screen, "column", false);
 }
 
 void gameover_open(Engine& e, Game& g, i64 score) {
     char line[48];
     format(line, sizeof line, "SCORE %lld", (long long)score);
-    ui_model_set_str(e, "gameover_score", line);
-    ui_model_set_int(e, "gameover_count", kGameOverTicks / 60);
+    spui_model_set_str(e, "gameover_score", line);
+    spui_model_set_int(e, "gameover_count", kGameOverTicks / 60);
     g.gameover_score = score;
     g.gameover_ticks = kGameOverTicks;
     hud_cover(e, g, false); // the restart's cover counts sim ticks, which this screen holds
     card_close(e, g);
     g.card_ticks = 0;
     g.gameover_screen = open_screen(e, g, "gameover", 118);
-    ui_focus(e, g.gameover_screen, "items", "continue");
+    spui_focus(e, g.gameover_screen, "items", "continue");
     KV_INFO("arcfire", "game over: score %lld", (long long)score);
 }
 
@@ -229,7 +229,7 @@ void results_open(Engine& e, Game& g, const RunResult& r) {
              "LONGEST CHAIN  %12u",
              (long long)r.score, r.stage, r.round, pos, r.restarts, r.deaths, r.bombs_used, r.chain_best);
     g.results_screen = open_screen(e, g, "results", 116);
-    ui_set_text(e, g.results_screen, "lines", text);
+    spui_set_text(e, g.results_screen, "lines", text);
     g.screen_ticks = 0;
 }
 
@@ -239,37 +239,37 @@ void scores_open(Engine& e, Game& g, u32 table, i32 lit) {
     g.new_row = lit;
     g.scores_screen = open_screen(e, g, "scores", 116);
     scores_show(e, g);
-    if (!g.title_screen.is_null()) ui_set_visible(e, g.title_screen, "column", false);
+    if (!g.title_screen.is_null()) spui_set_visible(e, g.title_screen, "column", false);
     g.screen_ticks = 0;
 }
 
 void card_close(Engine& e, Game& g) {
     if (g.card_screen.is_null()) return;
-    UiMotion out;
-    out.fx = UiFx::Slide;
-    out.from = UiPoint::Right;
-    ui_close_with(e, g.card_screen, out);
+    SpuiMotion out;
+    out.fx = SpuiFx::Slide;
+    out.from = SpuiPoint::Right;
+    spui_close_with(e, g.card_screen, out);
     g.card_screen = Handle{};
 }
 
 void card_open(Engine& e, Game& g, u32 round, u32 position) {
     char line[48], pos[16];
-    ui_model_set_str(e, "card_stage", g.stage.name);
+    spui_model_set_str(e, "card_stage", g.stage.name);
     char number[16];
     format(number, sizeof number, "STAGE %u", g.stage_at + 1);
-    ui_model_set_str(e, "card_number", number);
+    spui_model_set_str(e, "card_number", number);
     format(pos, sizeof pos, "%s", position_name(position));
     caps(pos);
     if (round > 1) format(line, sizeof line, "ROUND %u  %s", round, pos);
     else format(line, sizeof line, "%s", pos);
-    ui_model_set_str(e, "card_round", line);
+    spui_model_set_str(e, "card_round", line);
     if (g.card_screen.is_null()) {
-        UiOpen o;
+        SpuiOpen o;
         o.layer = 94;
         o.input = false;
-        o.enter.fx = UiFx::Slide;
-        o.enter.from = UiPoint::Left;
-        g.card_screen = ui_open(e, g.ui, "card", o);
+        o.enter.fx = SpuiFx::Slide;
+        o.enter.from = SpuiPoint::Left;
+        g.card_screen = spui_open(e, g.ui, "card", o);
     }
     g.card_ticks = kCardTicks;
 }
@@ -296,7 +296,7 @@ RunResult run_result(Engine& e, const Game& g, i64 score) {
 }
 
 // What the screens say. True when the event was one of theirs.
-bool screens_ui(TickContext& ctx, Game& g, const UiEvent& ev) {
+bool screens_ui(TickContext& ctx, Game& g, const SpuiEvent& ev) {
     Engine& e = *ctx.engine;
     static const u64 k_select = name_intern("select").hash, k_cancel = name_intern("cancel").hash, k_confirm = name_intern("confirm").hash,
                      k_back = name_intern("back").hash, k_submit = name_intern("submit").hash;
@@ -320,7 +320,7 @@ bool screens_ui(TickContext& ctx, Game& g, const UiEvent& ev) {
     }
     if (ev.screen == g.results_screen) {
         if (ev.event != k_confirm && ev.event != k_cancel) return true;
-        if (ui_revealing(e, g.results_screen, "lines")) return true; // the confirm finished the reveal
+        if (spui_revealing(e, g.results_screen, "lines")) return true; // the confirm finished the reveal
         close_screen(e, g.results_screen);
         u32 table = 1;
         i32 row = result_row(g, &table);
@@ -332,14 +332,14 @@ bool screens_ui(TickContext& ctx, Game& g, const UiEvent& ev) {
     if (ev.screen == g.name_screen) {
         // Not the Enter that confirmed the results, still landing as the field opens; and
         // not an empty name: the screen waits for one.
-        const char* typed = ui_field_text(e, g.name_screen, "entry");
+        const char* typed = spui_field_text(e, g.name_screen, "entry");
         if (ev.event == k_submit && e.clock.tick_total - g.name_opened >= kNameSettle && typed && typed[0]) name_submit(e, g);
         return true;
     }
     if (ev.screen == g.scores_screen) {
         if (ev.event == k_confirm || ev.event == k_cancel) {
             close_screen(e, g.scores_screen);
-            if (g.scores_from_title) ui_set_visible(e, g.title_screen, "column", true);
+            if (g.scores_from_title) spui_set_visible(e, g.title_screen, "column", true);
             else run_finished(ctx, g);
             g.scores_from_title = false;
         }
@@ -358,15 +358,15 @@ void screens(TickContext& ctx) {
     const InputActions& a = *ctx.resource<const InputActions>(k_actions_id);
     vec2 move = action_axis(a, g.act_move);
     bool sideways = action_repeat(a, g.act_move, 18, 6) && kv::fabs(move.x) > kv::fabs(move.y);
-    if (sideways && !g.options_screen.is_null() && ui_top(e) == g.options_screen) options_change(e, g, move.x < 0.0f ? -1 : 1);
-    if (sideways && !g.scores_screen.is_null() && ui_top(e) == g.scores_screen && !g.demo) {
+    if (sideways && !g.options_screen.is_null() && spui_top(e) == g.options_screen) options_change(e, g, move.x < 0.0f ? -1 : 1);
+    if (sideways && !g.scores_screen.is_null() && spui_top(e) == g.scores_screen && !g.demo) {
         g.table_shown = (g.table_shown + (move.x < 0.0f ? kScoreTables - 1 : 1)) % kScoreTables;
         scores_show(e, g);
     }
     if (!g.gameover_screen.is_null() && g.gameover_ticks) {
-        if (--g.gameover_ticks % 60 == 0) ui_model_set_int(e, "gameover_count", g.gameover_ticks / 60);
+        if (--g.gameover_ticks % 60 == 0) spui_model_set_int(e, "gameover_count", g.gameover_ticks / 60);
         if (g.gameover_ticks == 0) { // the count ran out: the run ends
-            ui_focus(e, g.gameover_screen, "items", "end");
+            spui_focus(e, g.gameover_screen, "items", "end");
             input_action_override(e, "confirm", true);
         }
     }

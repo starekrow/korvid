@@ -231,7 +231,7 @@ void tp_shutdown(Engine& e, ModuleInstance& self) {
 
 constinit const KindDesc k_kinds[] = {{.name = ".sprite", .components = "Transform2, Sprite", .capacity = 64, .cosmetic = true}};
 constinit const SystemDesc k_systems[] = {
-    {.name = ".draw", .phase = Phase::Frame, .fn = tp_draw, .writes = ".sprite", .after = "?ui.draw", .main_thread = true},
+    {.name = ".draw", .phase = Phase::Frame, .fn = tp_draw, .writes = ".sprite", .after = "?sprite_ui.draw", .main_thread = true},
 };
 
 } // namespace

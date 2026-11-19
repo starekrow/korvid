@@ -24,7 +24,7 @@
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/platform_hid/actions.h"
 #include "korvid/platform_hid/input.h"
-#include "korvid/ui/ui.h"
+#include "korvid/sprite_ui/sprite_ui.h"
 #include <string.h>
 
 namespace kv::arcfire {
@@ -37,17 +37,17 @@ constexpr f32 kCoverSeconds = 0.35f;
 constexpr u32 kHoldTitle = (u32)HoldGame << 1;
 
 Handle open_menu(Engine& e, Game& g, const char* screen, i32 layer, const char* focus = nullptr) {
-    UiOpen o;
+    SpuiOpen o;
     o.layer = layer;
     o.hold = true;
-    o.enter.fx = UiFx::Fade;
-    Handle h = ui_open(e, g.ui, screen, o);
-    if (focus) ui_focus(e, h, "items", focus);
+    o.enter.fx = SpuiFx::Fade;
+    Handle h = spui_open(e, g.ui, screen, o);
+    if (focus) spui_focus(e, h, "items", focus);
     return h;
 }
 
 void close_menu(Engine& e, Handle& h) {
-    if (!h.is_null()) ui_close(e, h);
+    if (!h.is_null()) spui_close(e, h);
     h = Handle{};
 }
 
@@ -68,7 +68,7 @@ void open_title(Engine& e, Game& g) {
     format(note, sizeof note, "ARCADE STARTS AT %s", position_name((u32)g.start));
     g.scores_from_title = false;
     for (char* c = note; *c; ++c) *c = (char)(*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
-    ui_model_set_str(e, "title_note", note);
+    spui_model_set_str(e, "title_note", note);
     hud_shown(e, g, false);
     g.title_screen = open_menu(e, g, "title", 110, "arcade");
     g.mode = Mode::Title;
@@ -88,7 +88,7 @@ void clear_run(TickContext& ctx, Game& g) {
     hud_boss(e, g, nullptr, 0, 0);
     card_close(e, g);
     g.card_ticks = 0;
-    if (!g.clear_label.is_null()) { ui_close(e, g.clear_label); g.clear_label = Handle{}; }
+    if (!g.clear_label.is_null()) { spui_close(e, g.clear_label); g.clear_label = Handle{}; }
     g.clear_ticks = 0;
     engine_time_scale(e, 1.0f);
     g.world = g.ship = g.ring = g.mark = Handle{};
@@ -100,10 +100,10 @@ void flow_request(Engine& e, Game& g, Next next, bool cover) {
     if (g.next != Next::None) return; // one at a time
     g.next = next;
     if (cover) {
-        UiCover c;
+        SpuiCover c;
         c.seconds = kCoverSeconds;
-        g.flow_cover = ui_cover(e, c);
-        ui_cover_wait(e, g.flow_cover, true);
+        g.flow_cover = spui_cover(e, c);
+        spui_cover_wait(e, g.flow_cover, true);
         g.next_ready = false;
     } else {
         engine_hold(e, HoldGame, true); // no cover: the switch on the next tick, held
@@ -154,10 +154,10 @@ void run_begin(TickContext& ctx, Game& g) {
     hud_shown(e, g, true);
     if (!g.attract) card_open(e, g, 1, d.position);
     else { // the attract's PRESS START, over the field's middle
-        UiOpen o;
+        SpuiOpen o;
         o.layer = 96;
         o.input = false;
-        g.attract_screen = ui_open(e, g.ui, "attract", o);
+        g.attract_screen = spui_open(e, g.ui, "attract", o);
         g.blink = 0;
     }
     g.result = RunResult{};
@@ -193,7 +193,7 @@ void flow_step(TickContext& ctx, Game& g) {
         KV_INFO("arcfire", "the title");
     }
     music(ctx, g, false);
-    if (g.flow_cover) ui_cover_wait(e, g.flow_cover, false);
+    if (g.flow_cover) spui_cover_wait(e, g.flow_cover, false);
     engine_hold(e, HoldGame, false); // run_over's, or the switch's own
     g.flow_cover = 0;
 }
@@ -239,7 +239,7 @@ void pause(TickContext& ctx) {
     for (const GamepadState& p : in.sampled.pads) touched = touched || p.buttons;
     if (g.attract) {
         // On every tick, the demo's slow motion included: half a second on, half off.
-        if (!g.attract_screen.is_null()) ui_set_visible(e, g.attract_screen, "press", (g.blink++ / 30) % 2 == 0);
+        if (!g.attract_screen.is_null()) spui_set_visible(e, g.attract_screen, "press", (g.blink++ / 30) % 2 == 0);
         if (touched && g.next == Next::None) flow_request(e, g, Next::Title, true);
         return;
     }
@@ -260,22 +260,22 @@ void pause(TickContext& ctx) {
     if (!g.options_screen.is_null()) { input_action_override(e, "cancel", true); return; } // as the options' own cancel
     if (!g.confirm_screen.is_null()) { close_menu(e, g.confirm_screen); return; }
     if (!g.pause_screen.is_null()) { close_pause(e, g); return; }
-    UiOpen o;
+    SpuiOpen o;
     o.layer = 110;
-    o.enter.fx = UiFx::Fade;
-    g.pause_screen = ui_open(e, g.ui, "pause", o);
-    ui_set_text(e, g.pause_screen, "quit", g.front_door ? "QUIT TO TITLE" : "QUIT");
-    ui_focus(e, g.pause_screen, "items", "resume");
+    o.enter.fx = SpuiFx::Fade;
+    g.pause_screen = spui_open(e, g.ui, "pause", o);
+    spui_set_text(e, g.pause_screen, "quit", g.front_door ? "QUIT TO TITLE" : "QUIT");
+    spui_focus(e, g.pause_screen, "items", "resume");
     engine_pause(e, true);
     KV_INFO("arcfire", "paused at tick %llu", (unsigned long long)e.clock.tick_count);
 }
 
 // What the menus say: an item chosen, a cancel.
-void on_ui(TickContext& ctx, Span<const UiEvent> events) {
+void on_ui(TickContext& ctx, Span<const SpuiEvent> events) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     static const u64 k_select = name_intern("select").hash, k_cancel = name_intern("cancel").hash, k_back = name_intern("back").hash;
-    for (const UiEvent& ev : events) {
+    for (const SpuiEvent& ev : events) {
         if (screens_ui(ctx, g, ev)) continue;
         bool chose = ev.event == k_select, back = ev.event == k_cancel || ev.event == k_back;
         const char* item = chose ? name_str(Name{ev.node}) : "";
@@ -286,7 +286,7 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
                 flow_request(e, g, Next::Run, true);
             } else if (!strcmp(item, "select")) {
                 g.select_screen = open_menu(e, g, "select", 112, "shoreline");
-                ui_set_visible(e, g.title_screen, "column", false); // one menu at a time shows
+                spui_set_visible(e, g.title_screen, "column", false); // one menu at a time shows
             } else if (!strcmp(item, "scores")) {
                 g.scores_from_title = true;
                 scores_open(e, g, score_table_of(g.start), -1);
@@ -298,20 +298,20 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
         } else if (ev.screen == g.select_screen) {
             if (back) {
                 close_menu(e, g.select_screen);
-                ui_set_visible(e, g.title_screen, "column", true);
+                spui_set_visible(e, g.title_screen, "column", true);
             } else if (chose) {
                 u32 picked = stage_named(item);
                 g.select_stage = picked < kStageCount ? picked : 0;
                 char upper_name[32];
                 format(upper_name, sizeof upper_name, "%s", g.stages[g.select_stage].name);
-                ui_model_set_str(e, "select_stage", upper_name);
+                spui_model_set_str(e, "select_stage", upper_name);
                 g.difficulty_screen = open_menu(e, g, "difficulty", 114, position_name((u32)g.start));
-                ui_set_visible(e, g.select_screen, "column", false);
+                spui_set_visible(e, g.select_screen, "column", false);
             }
         } else if (ev.screen == g.difficulty_screen) {
             if (back) {
                 close_menu(e, g.difficulty_screen);
-                ui_set_visible(e, g.select_screen, "column", true);
+                spui_set_visible(e, g.select_screen, "column", true);
             }
             else if (chose) {
                 Position p = !strcmp(item, "easy") ? Position::Easy : !strcmp(item, "hard") ? Position::Hard : Position::Normal;
@@ -324,7 +324,7 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
             else if (chose && !strcmp(item, "quit")) {
                 if (!g.front_door) engine_request_quit(e);
                 else {
-                    ui_model_set_str(e, "confirm", "QUIT TO THE TITLE? THE RUN ENDS.");
+                    spui_model_set_str(e, "confirm", "QUIT TO THE TITLE? THE RUN ENDS.");
                     g.confirm_screen = open_menu(e, g, "confirm", 112, "no");
                 }
             }
@@ -336,9 +336,9 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
 }
 
 // A switch's cover has closed: the switch may happen (flow_step, on the next held tick).
-void on_covered(TickContext& ctx, Span<const UiCovered> covers) {
+void on_covered(TickContext& ctx, Span<const SpuiCovered> covers) {
     Game& g = ctx.state_as<Game>();
-    for (const UiCovered& c : covers)
+    for (const SpuiCovered& c : covers)
         if (c.cover == g.flow_cover) g.next_ready = true;
 }
 

@@ -77,7 +77,7 @@ wrapper and host are in `modules/renderer-cpu/notes/` (`spike_rings_cpu.slang.tx
 
 ## Milestone 3: the UI and Krome
 
-- **The UI primitive** is `ui.slang`'s `fs_ui` line for line, in float, per pixel (`raster.cc`, `draw_ui`):
+- **The UI primitive** is `sprite_ui.slang`'s `fs_ui` line for line, in float, per pixel (`raster.cc`, `draw_ui`):
   - `rb_ui_draw` decodes a layer's list (`frame.cc`, `prepare_ui`) into `CpuUi` items: colors linear and
     premultiplied, the quad cut by its clip.
   - The items go into the pass's one draw list, in order with the sprites' quads (`kCpuDrawUi` marks them), so a

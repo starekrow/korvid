@@ -38,7 +38,7 @@
 #include "korvid/sprite/transform2.h"
 #include "korvid/text/text.h"
 #include "korvid/tilemap/tilemap.h"
-#include "korvid/ui/ui.h"
+#include "korvid/sprite_ui/sprite_ui.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -140,7 +140,7 @@ struct Game {
     Handle sheets[kSheets];      // anim.sheet: the walk and idle clips, loaded into each level's scope
     Handle walk_clip[kSheets][4], idle_clip[kSheets][4]; // by facing, once the sheet is Ready
     Handle nature_texture, rock_material; // a rock is a 32 px cell of the nature sheet
-    Handle ui;                   // ui.doc: arcanum.ui.json, every screen the game shows
+    Handle ui;                   // ui.doc: arcanum.spui.json, every screen the game shows
     Handle hud;                  // ui.screen: the hearts, always up
     Handle screen;               // ui.screen: the menu screen up now, if any
     Handle sounds[SND_COUNT];
@@ -302,10 +302,10 @@ u64 saved_state_hash(Engine& e) {
 }
 
 // ---- the menu ------------------------------------------------------------------------------------
-// Screens of the UI document; what they do comes back as UiEvents (on_ui).
+// Screens of the UI document; what they do comes back as SpuiEvents (on_ui).
 
 // Under the menu: what saving or loading did.
-void note(Engine& e, const char* text) { ui_model_set_str(e, "note", text); }
+void note(Engine& e, const char* text) { spui_model_set_str(e, "note", text); }
 
 const char* k_menu_names[] = {"closed", "main", "levels", "credits"};
 
@@ -327,25 +327,25 @@ void fill_credits(Engine& e, Game& g) {
         add("\n");
     }
     text.push(0);
-    ui_set_text(e, g.screen, "text", text.data);
+    spui_set_text(e, g.screen, "text", text.data);
 }
 
 // Shows a menu screen (or none), replacing the one up; the first holds the sim.
 void open_menu(Engine& e, Game& g, Menu m, const char* focus = nullptr) {
-    if (!g.screen.is_null()) ui_close(e, g.screen);
+    if (!g.screen.is_null()) spui_close(e, g.screen);
     g.screen = Handle{};
     if (g.menu == Menu::Closed && m != Menu::Closed) note(e, "");
     g.menu = m;
     // Where a screen opens, for --screenshot-frame and the like.
     KV_INFO("arcanum", "menu: %s at frame %llu, tick %llu", k_menu_names[(u32)m], (unsigned long long)e.frame_count, (unsigned long long)e.clock.tick_total);
     if (m == Menu::Closed) return;
-    UiOpen o;
+    SpuiOpen o;
     o.layer = g.mode == Mode::Title ? 125 : 100; // over the title, when it is up
     o.hold = true;
     static const char* const k_screens[] = {"", "pause", "levels", "credits"};
-    g.screen = ui_open(e, g.ui, k_screens[(u32)m], o);
+    g.screen = spui_open(e, g.ui, k_screens[(u32)m], o);
     if (m == Menu::Credits) fill_credits(e, g);
-    if (focus) ui_focus(e, g.screen, "items", focus);
+    if (focus) spui_focus(e, g.screen, "items", focus);
 }
 
 void close_menu(Engine& e, Game& g) { open_menu(e, g, Menu::Closed); }
@@ -363,12 +363,12 @@ void shout(TickContext& ctx, Game& g, const char* text);
 void title_choice(TickContext& ctx, Game& g, const char* item) {
     Engine& e = *ctx.engine;
     if (!strcmp(item, "new")) {
-        UiOpen o;
+        SpuiOpen o;
         o.layer = 120;
         o.hold = true;
-        o.enter.fx = UiFx::Slide;
-        o.enter.from = UiPoint::Bottom;
-        g.naming = ui_open(e, g.ui, "name", o);
+        o.enter.fx = SpuiFx::Slide;
+        o.enter.from = SpuiPoint::Bottom;
+        g.naming = spui_open(e, g.ui, "name", o);
     } else if (!strcmp(item, "continue")) {
         note(e, "");
         load_game(ctx, g); // the title goes when the level it names is built
@@ -378,14 +378,14 @@ void title_choice(TickContext& ctx, Game& g, const char* item) {
 
 // The name is given: an iris closes on it, and opens on the village.
 void begin_play(Engine& e, Game& g) {
-    const char* typed = ui_field_text(e, g.naming, "entry");
+    const char* typed = spui_field_text(e, g.naming, "entry");
     utf8_copy(g.hero, sizeof g.hero, typed[0] ? typed : "Rowan");
-    ui_model_set_str(e, "hero", g.hero);
-    UiCover c;
-    c.fx = UiFx::Iris;
+    spui_model_set_str(e, "hero", g.hero);
+    SpuiCover c;
+    c.fx = SpuiFx::Iris;
     c.seconds = 0.6f;
     c.user = COVER_START;
-    ui_cover(e, c);
+    spui_cover(e, c);
 }
 
 // ---- dialogue -------------------------------------------------------------------------------------
@@ -400,16 +400,16 @@ void show_page(Engine& e, Game& g) {
     if (n >= sizeof page) n = sizeof page - 1;
     if (p) memcpy(page, p, n);
     page[n] = 0;
-    ui_set_text(e, g.dialogue, "text", page);
-    ui_set_visible(e, g.dialogue, "more", g.page + 1 < g.page_count);
+    spui_set_text(e, g.dialogue, "text", page);
+    spui_set_visible(e, g.dialogue, "more", g.page + 1 < g.page_count);
 }
 
 void next_page(Engine& e, Game& g) {
     if (++g.page < g.page_count) { show_page(e, g); return; }
-    UiMotion out;
-    out.fx = UiFx::Slide;
+    SpuiMotion out;
+    out.fx = SpuiFx::Slide;
     out.seconds = 0.15f;
-    ui_close_with(e, g.dialogue, out);
+    spui_close_with(e, g.dialogue, out);
     g.dialogue = Handle{};
 }
 
@@ -425,16 +425,16 @@ void talk(TickContext& ctx, Game& g, Handle npc) {
     g.page_count = 1;
     for (const char* c = g.pages; *c; ++c) g.page_count += *c == '|';
     g.page = 0;
-    UiOpen o;
+    SpuiOpen o;
     o.layer = 105;
     o.hold = true;
-    o.enter.fx = UiFx::Slide;
+    o.enter.fx = SpuiFx::Slide;
     o.enter.seconds = 0.15f;
-    g.dialogue = ui_open(e, g.ui, "dialogue", o);
+    g.dialogue = spui_open(e, g.ui, "dialogue", o);
     char face[96];
     format(face, sizeof face, "arcanum/faces/%s.png", k_sheet_names[a ? a->sheet % kSheets : 0]);
-    ui_set_texture(e, g.dialogue, "face", face, rect2{0, 0, 38, 38});
-    ui_set_text(e, g.dialogue, "who", ctx.prop_str(npc, "display", "Villager"));
+    spui_set_texture(e, g.dialogue, "face", face, rect2{0, 0, 38, 38});
+    spui_set_text(e, g.dialogue, "who", ctx.prop_str(npc, "display", "Villager"));
     show_page(e, g);
     KV_INFO("arcanum", "talk: %s, %u pages", ctx.prop_str(npc, "display", "?"), g.page_count);
 }
@@ -592,11 +592,11 @@ void menu(TickContext& ctx) {
 }
 
 // What the menu screens say: an item chosen, a cancel.
-void on_ui(TickContext& ctx, Span<const UiEvent> events) {
+void on_ui(TickContext& ctx, Span<const SpuiEvent> events) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     static const u64 k_select = name_intern("select").hash, k_cancel = name_intern("cancel").hash, k_confirm = name_intern("confirm").hash;
-    for (const UiEvent& ev : events) {
+    for (const SpuiEvent& ev : events) {
         if (ev.screen != g.screen) continue;
         const char* item = name_str(Name{ev.node});
         if (g.menu == Menu::Main) {
@@ -620,17 +620,17 @@ void on_ui(TickContext& ctx, Span<const UiEvent> events) {
             else open_menu(e, g, Menu::Main, "credits");
         }
     }
-    for (const UiEvent& ev : events) {
+    for (const SpuiEvent& ev : events) {
         const char* item = name_str(Name{ev.node});
         if (ev.screen == g.title && g.menu == Menu::Closed && g.naming.is_null() && ev.event == k_select) title_choice(ctx, g, item);
         else if (ev.screen == g.naming) {
             static const u64 k_submit = name_intern("submit").hash;
             if (ev.event == k_submit) begin_play(e, g);
-            else if (ev.event == k_cancel) { ui_close(e, g.naming); g.naming = Handle{}; }
+            else if (ev.event == k_cancel) { spui_close(e, g.naming); g.naming = Handle{}; }
         } else if (ev.screen == g.dialogue && ev.event == k_confirm) next_page(e, g);
         else if (ev.screen == g.aim && ev.event == k_confirm && !g.aim_struck) strike(ctx, g);
         else if (ev.screen == g.gameover && ev.event == k_select) {
-            ui_close(e, g.gameover);
+            spui_close(e, g.gameover);
             g.gameover = Handle{};
             if (!strcmp(item, "continue")) { load_game(ctx, g); if (g.load_read.is_null()) restart(e, g, false); }
             else restart(e, g, true);
@@ -652,31 +652,31 @@ void restart(Engine& e, Game& g, bool to_title) {
     level_request(e, "village", t);
     g.mode = to_title ? Mode::Title : Mode::Play;
     if (to_title) {
-        UiOpen o;
+        SpuiOpen o;
         o.layer = 110;
         o.hold = true;
-        g.title = ui_open(e, g.ui, "title", o);
-        ui_set_visible(e, g.hud, "", false);
-    } else ui_set_visible(e, g.hud, "", true);
+        g.title = spui_open(e, g.ui, "title", o);
+        spui_set_visible(e, g.hud, "", false);
+    } else spui_set_visible(e, g.hud, "", true);
 }
 
 // The iris has closed on the name screen: the title goes, the village shows as it opens.
-void on_covered(TickContext& ctx, Span<const UiCovered> covers) {
+void on_covered(TickContext& ctx, Span<const SpuiCovered> covers) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
-    for (const UiCovered& c : covers) {
+    for (const SpuiCovered& c : covers) {
         if (c.user == COVER_AIM_IN) { // the minigame, where the world was
-            UiOpen o;
+            SpuiOpen o;
             o.layer = 106;
             o.hold = true;
-            g.aim = ui_open(e, g.ui, "aim", o);
-            ui_set_visible(e, g.hud, "", false);
+            g.aim = spui_open(e, g.ui, "aim", o);
+            spui_set_visible(e, g.hud, "", false);
             continue;
         }
         if (c.user == COVER_AIM_OUT) { // the world again; the rock gone if it broke
-            ui_close(e, g.aim);
+            spui_close(e, g.aim);
             g.aim = Handle{};
-            ui_set_visible(e, g.hud, "", true);
+            spui_set_visible(e, g.hud, "", true);
             if (g.aim_broke) {
                 if (Table* rocks = ctx.write_kind("arcanum.rock")) rocks->destroy(g.aim_rock);
                 ++g.rocks_broken;
@@ -687,19 +687,19 @@ void on_covered(TickContext& ctx, Span<const UiCovered> covers) {
             continue;
         }
         if (c.user == COVER_DEAD) { // the game-over screen
-            UiOpen o;
+            SpuiOpen o;
             o.layer = 130;
             o.hold = true;
-            g.gameover = ui_open(e, g.ui, "gameover", o);
-            ui_set_visible(e, g.hud, "", false);
+            g.gameover = spui_open(e, g.ui, "gameover", o);
+            spui_set_visible(e, g.hud, "", false);
             continue;
         }
         if (c.user != COVER_START) continue;
-        if (!g.naming.is_null()) ui_close(e, g.naming);
-        if (!g.title.is_null()) ui_close(e, g.title);
+        if (!g.naming.is_null()) spui_close(e, g.naming);
+        if (!g.title.is_null()) spui_close(e, g.title);
         g.naming = g.title = Handle{};
         g.mode = Mode::Play;
-        ui_set_visible(e, g.hud, "", true);
+        spui_set_visible(e, g.hud, "", true);
         KV_INFO("arcanum", "play: %s sets out", g.hero);
     }
 }
@@ -717,11 +717,11 @@ void start_aim(Engine& e, Game& g, Handle rock) {
     g.aim_done = 0.0f;
     g.aim_struck = g.aim_broke = false;
     g.mode = Mode::Aim;
-    UiCover c;
-    c.fx = UiFx::Iris;
+    SpuiCover c;
+    c.fx = SpuiFx::Iris;
     c.seconds = 0.4f;
     c.user = COVER_AIM_IN;
-    ui_cover(e, c);
+    spui_cover(e, c);
     KV_INFO("arcanum", "aim: at %s", engine_entity_name(e, rock));
 }
 
@@ -729,12 +729,12 @@ void start_aim(Engine& e, Game& g, Handle rock) {
 void shout(TickContext& ctx, Game& g, const char* text) {
     Engine& e = *ctx.engine;
     if (g.shout.is_null()) {
-        UiOpen o;
+        SpuiOpen o;
         o.layer = 108;
         o.input = false;
-        g.shout = ui_open(e, g.ui, "shout", o);
+        g.shout = spui_open(e, g.ui, "shout", o);
     }
-    ui_set_text(e, g.shout, "", text);
+    spui_set_text(e, g.shout, "", text);
     g.shout_t = 1.5f;
     play_sound(ctx, g, SND_ALERT);
 }
@@ -745,20 +745,20 @@ void modes(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     f32 dt = (f32)ctx.dt;
-    if (!g.shout.is_null() && (g.shout_t -= dt) <= 0.0f) { ui_close(e, g.shout); g.shout = Handle{}; }
-    if (g.aim.is_null() || ui_covering(e)) return;
+    if (!g.shout.is_null() && (g.shout_t -= dt) <= 0.0f) { spui_close(e, g.shout); g.shout = Handle{}; }
+    if (g.aim.is_null() || spui_covering(e)) return;
     if (!g.aim_struck) {
         g.aim_t += dt;
         f32 x = 0.5f - 0.5f * kv::cos(g.aim_t * kAimSpeed); // 0 to 1 and back, from the left
-        ui_set_offset(e, g.aim, "needle", vec2{(x - 0.5f) * 200.0f, 0.0f});
+        spui_set_offset(e, g.aim, "needle", vec2{(x - 0.5f) * 200.0f, 0.0f});
         return;
     }
-    if ((g.aim_done += dt) < 0.9f || ui_covering(e)) return;
-    UiCover c;
-    c.fx = UiFx::Iris;
+    if ((g.aim_done += dt) < 0.9f || spui_covering(e)) return;
+    SpuiCover c;
+    c.fx = SpuiFx::Iris;
     c.seconds = 0.4f;
     c.user = COVER_AIM_OUT;
-    ui_cover(e, c);
+    spui_cover(e, c);
     g.aim_done = -1e6f; // once
 }
 
@@ -777,7 +777,7 @@ void strike(TickContext& ctx, Game& g) {
     v->luck = r.state;
     g.aim_struck = true;
     g.aim_broke = close >= 0.9f || roll < close * close; // the gold mark always breaks it
-    ui_set_text(e, g.aim, "result", g.aim_broke ? "{*c=gold}{*wave}Crack!{/wave}{/c} The boulder splits." : "{*shake}Clang!{/shake} It holds.");
+    spui_set_text(e, g.aim, "result", g.aim_broke ? "{*c=gold}{*wave}Crack!{/wave}{/c} The boulder splits." : "{*shake}Clang!{/shake} It holds.");
     play_sound(ctx, g, g.aim_broke ? SND_BREAK : SND_HIT);
     KV_INFO("arcanum", "strike: needle %.3f, near %.3f, roll %.3f: %s", x, close, roll, g.aim_broke ? "breaks" : "holds");
 }
@@ -861,12 +861,12 @@ void react(TickContext& ctx) {
         KV_INFO("arcanum", "hurt: %d of %d hearts at tick %llu", v->hp, v->hp_max, (unsigned long long)ctx.tick);
         if (v->hp == 0 && g.mode == Mode::Play) { // the last heart: the game-over screen, behind a red fade
             g.mode = Mode::Dead;
-            UiCover c;
-            c.fx = UiFx::Fade;
+            SpuiCover c;
+            c.fx = SpuiFx::Fade;
             c.seconds = 0.8f;
             c.tint = color_rgba(0.12f, 0.0f, 0.01f, 1.0f);
             c.user = COVER_DEAD;
-            ui_cover(e, c);
+            spui_cover(e, c);
             KV_INFO("arcanum", "dead: at tick %llu", (unsigned long long)ctx.tick);
         }
     }
@@ -983,8 +983,8 @@ void hud(TickContext& ctx) {
     Span<const Vitals> vitals = ctx.read<Vitals>(k_vitals);
     const Vitals* v = g.player.index() < vitals.len ? &vitals[g.player.index()] : nullptr;
     if (!v) return;
-    ui_model_set_int(*ctx.engine, "hp", v->hp);
-    ui_model_set_int(*ctx.engine, "hp_max", v->hp_max);
+    spui_model_set_int(*ctx.engine, "hp", v->hp);
+    spui_model_set_int(*ctx.engine, "hp_max", v->hp_max);
 }
 
 // ---- levels -------------------------------------------------------------------------------------
@@ -1007,13 +1007,13 @@ void restore(TickContext& ctx, Game& g, const LevelBuild& b) {
     if (!player.is_null()) g.player = player;
     g.exit_armed = json_bool(json_get(doc, doc.root(), "exit_armed"), true);
     utf8_copy(g.hero, sizeof g.hero, json_string(json_get(doc, doc.root(), "hero"), g.hero));
-    ui_model_set_str(e, "hero", g.hero);
-    if (g.mode == Mode::Dead) { g.mode = Mode::Play; ui_set_visible(e, g.hud, "", true); }
+    spui_model_set_str(e, "hero", g.hero);
+    if (g.mode == Mode::Dead) { g.mode = Mode::Play; spui_set_visible(e, g.hud, "", true); }
     if (g.mode == Mode::Title) { // continued from the title: it goes
-        if (!g.title.is_null()) ui_close(e, g.title);
+        if (!g.title.is_null()) spui_close(e, g.title);
         g.title = Handle{};
         g.mode = Mode::Play;
-        ui_set_visible(e, g.hud, "", true);
+        spui_set_visible(e, g.hud, "", true);
     }
     KV_INFO("arcanum", "load: %u kinds, state %016llx, saved at tick %llu", n, (unsigned long long)saved_state_hash(e),
             (unsigned long long)json_u64(json_get(doc, doc.root(), "tick"), 0));
@@ -1215,17 +1215,17 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     g->nature_texture = asset_load_texture(e, "arcanum/tiles/TilesetNature.png");
     g->rock_material = material_of(g->nature_texture);
 
-    g->ui = ui_load(e, "arcanum/ui/arcanum.ui.json", asset_scope_global(e));
-    UiOpen hud_open;
+    g->ui = spui_load(e, "arcanum/ui/arcanum.spui.json", asset_scope_global(e));
+    SpuiOpen hud_open;
     hud_open.layer = 90;
     hud_open.input = false;
-    g->hud = ui_open(e, g->ui, "hud", hud_open);
-    ui_set_visible(e, g->hud, "", false); // until the hero sets out
-    ui_model_set_str(e, "hero", g->hero);
-    UiOpen title_open;
+    g->hud = spui_open(e, g->ui, "hud", hud_open);
+    spui_set_visible(e, g->hud, "", false); // until the hero sets out
+    spui_model_set_str(e, "hero", g->hero);
+    SpuiOpen title_open;
     title_open.layer = 110;
     title_open.hold = true;
-    g->title = ui_open(e, g->ui, "title", title_open);
+    g->title = spui_open(e, g->ui, "title", title_open);
     g->sounds[SND_MOVE]   = asset_load_sound(e, "arcanum/sounds/move.wav");
     g->sounds[SND_ACCEPT] = asset_load_sound(e, "arcanum/sounds/accept.wav");
     g->sounds[SND_CANCEL] = asset_load_sound(e, "arcanum/sounds/cancel.wav");
@@ -1261,8 +1261,8 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_build",   KV_ON(LevelBuild, on_build), .phase = Phase::PreSim, .writes = ".player, .npc, .rock, tilemap.tile, tilemap.animtile", .appends = "audio.commands", .after = "tilemap.pump"},
     {.name = ".on_exit",    KV_ON(ExitRequested, on_exit), .phase = Phase::PreSim},
     {.name = ".on_loading", KV_ON(LevelLoading, on_loading), .phase = Phase::PreSim},
-    {.name = ".on_ui",      KV_ON(UiEvent, on_ui), .phase = Phase::PreSim, .writes = ".player.Vitals", .appends = "audio.commands", .after = ".on_build"},
-    {.name = ".on_covered", KV_ON(UiCovered, on_covered), .phase = Phase::PreSim, .writes = ".rock", .after = ".on_build"},
+    {.name = ".on_ui",      KV_ON(SpuiEvent, on_ui), .phase = Phase::PreSim, .writes = ".player.Vitals", .appends = "audio.commands", .after = ".on_build"},
+    {.name = ".on_covered", KV_ON(SpuiCovered, on_covered), .phase = Phase::PreSim, .writes = ".rock", .after = ".on_build"},
 };
 constinit const SystemDesc k_systems[] = {
     {.name = ".files", .phase = Phase::PreSim, .fn = files, .after = "level.run", .before = ".menu", .main_thread = true, .runs = RunWhen::Always},
@@ -1277,7 +1277,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".react", .phase = Phase::Sim, .fn = react, .reads = ".player, .npc.MoveResult2",
      .writes = ".player.Vitals, .player.Sprite, .player.AnimPlayer", .appends = "audio.commands", .main_thread = true},
     {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".player.Vitals", .before = "ui.draw", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".player.Vitals", .before = "sprite_ui.draw", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".demo", .phase = Phase::PostSim, .fn = demo, .main_thread = true, .runs = RunWhen::Always},
 };
 

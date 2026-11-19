@@ -303,7 +303,7 @@ state.
   for two seconds that eats bullets. Out of eggs, the stage starts over behind a cover:
   everything it made is gone, the distance is 0, the score is what it was when the stage
   began, the eggs are 3 again and the restart is counted.
-- **The HUD** (`hud.cc`) is `assets/ui/arcfire.ui.json`: the side panels, the score, the
+- **The HUD** (`hud.cc`) is `assets/ui/arcfire.spui.json`: the side panels, the score, the
   eggs and the bombs as pips, the restarts, the grazes, the stage and its distance, the dev counters,
   a boss's name and health bar while one is up, and the pause, cover and stage-clear screens. The HUD system writes the model each tick.
 - **Pilots** (`pilot.cc`): the demo's script and the bot share one steering rule, which
@@ -376,7 +376,7 @@ state.
 | `src/main.cc` | the frame loop's config and the game's flags |
 | `shaders/`, `assets/materials/` | the game's shaders (the nebula, the dissolve, their noise; the shimmer, a post shader); the materials that name the first two |
 | `assets/stages/shoreline.stage.json`, `assets/stages/orbit.stage.json`, `assets/maps/` | the stages; Shoreline's ground map and tileset |
-| `assets/ui/arcfire.ui.json` | the HUD and every screen |
+| `assets/ui/arcfire.spui.json` | the HUD and every screen |
 | `assets/CREDITS.md`, `assets/LICENSE-*.txt` | who made what |
 | `tools/make_art.lua`, `tools/cut_art.lua`, `tools/make_maps.lua`, `tools/make_sounds.lua` (`kormake run`) | copies the vendored art in and makes `assets/made/`'s cuts and plain shapes; cuts the bosses, Orbit's segments, debris and capital ship, the egg, the items, the beam and the clouds from the CC0 packs; writes the maps; copies the sounds in and resamples the music |
 | `tests/` | paths; the stage file, the boss files and the parsers' rules |

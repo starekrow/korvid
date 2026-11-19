@@ -137,7 +137,7 @@ struct SimReset {
 // ticks included). If the event type has a schema (KV_EVENT_EX), handles in the batch are
 // live: an event naming an entity destroyed since it was emitted is dropped first.
 // Handlers run on the main thread unless they say `.any_thread = true`, so a handler may
-// call main-thread-only functions (the ui's) without thinking about it.
+// call main-thread-only functions (sprite_ui's) without thinking about it.
 //
 //   void on_expire(TickContext& ctx, Span<const Expire> expiries) {
 //       for (const Expire& e : expiries) ctx.destroy(e.bullet);

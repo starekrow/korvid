@@ -204,7 +204,7 @@ constinit const SystemDesc k_systems[] = {
 at init. A name that starts with `.` is the module's own: in module `mygame`, `.rock` is
 `mygame.rock`, `.move` is `mygame.move`, `.rock.Velocity` is that kind's column. A set
 (`reads`, `writes`, `after`, `before`, a kind's `components`) is one string of
-comma-separated names; spaces around the commas are ignored. `?ui.layout` is an order
+comma-separated names; spaces around the commas are ignored. `?sprite_ui.layout` is an order
 that holds only if that system exists (`?` then the name): its module may be missing from
 the build, but if the module is there the system has to be, so a typo fails init. The same shorthand works at
 runtime where the engine knows the module: `ctx.resource_id(".score")`,

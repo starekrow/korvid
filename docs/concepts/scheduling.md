@@ -18,7 +18,7 @@ phase and declares its access as strings in the [name language](modules.md#syste
 | `writes` | resources changed | `".ship.Transform2, .bullet"` |
 | `appends` | append resources: records handed to the owner at the boundary | `"audio.commands"` |
 | `emits` | event types emitted | `"RockHit, ShipHit"` |
-| `after`, `before` | systems this one must follow or precede; `?name` holds only if that module is in the build | `".move"`, `"?ui.layout"` |
+| `after`, `before` | systems this one must follow or precede; `?name` holds only if that module is in the build | `".move"`, `"?sprite_ui.layout"` |
 | `state` | the module's own state: `Write` (the default), `Read`, `None` | `StateUse::None` |
 
 These sets are the whole contract. The scheduler orders units by them, runs units in

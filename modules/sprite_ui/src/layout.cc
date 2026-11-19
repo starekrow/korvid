@@ -1,6 +1,6 @@
 // UI layout: sizes up the tree, places down it, and turns each node into quads: frames as
 // nine slices, images, meters, and rich text glyph by glyph with its effects.
-#include "ui_internal.h"
+#include "sprite_ui_internal.h"
 #include "korvid/asset/font.h"
 #include "korvid/core/format.h"
 #include "korvid/asset_render/material.h"
@@ -28,7 +28,7 @@ struct RChar {
 };
 
 // Parses a label's text into characters with their look. Model values are spliced in.
-void parse_rich(UiState_& s, const UiDoc* d, const char* text, color base, Array<RChar>& out) {
+void parse_rich(SpuiState_& s, const SpuiDoc* d, const char* text, color base, Array<RChar>& out) {
     color stack_c[8];
     u32 depth = 0;
     color cur = base;
@@ -50,7 +50,7 @@ void parse_rich(UiState_& s, const UiDoc* d, const char* text, color base, Array
                 const char* t = tag + 1;
                 if (!strncmp(t, "c=", 2)) {
                     if (depth < KV_COUNTOF(stack_c)) stack_c[depth++] = cur;
-                    ui_color_parse(d, t + 2, &cur);
+                    spui_color_parse(d, t + 2, &cur);
                 } else if (!strcmp(t, "wave")) fx |= FX_WAVE;
                 else if (!strcmp(t, "shake")) fx |= FX_SHAKE;
                 else if (!strncmp(t, "pause=", 6)) { if (out.len) out.last().pause += (f32)atof(t + 6); }
@@ -60,7 +60,7 @@ void parse_rich(UiState_& s, const UiDoc* d, const char* text, color base, Array
                 else if (!strcmp(tag, "/shake")) fx &= (u8)~FX_SHAKE;
             } else if (tag[0]) {
                 char v[128];
-                ui_model_text(s, tag, v, sizeof v);
+                spui_model_text(s, tag, v, sizeof v);
                 const char* q = v;
                 while (u32 cp = utf8_next(q)) out.push(RChar{cp, cur, fx, 0.0f});
             }
@@ -122,7 +122,7 @@ void lay_text(const FontAsset& f, Span<const RChar> cs, f32 wrap, f32 line_h, f3
 
 // ---- helpers -------------------------------------------------------------------------------------
 
-void point_frac(UiPoint p, f32* fx, f32* fy) {
+void point_frac(SpuiPoint p, f32* fx, f32* fy) {
     static const i8 k_x[] = {1, 0, 1, 2, 0, 2, 0, 1, 2};
     static const i8 k_y[] = {1, 0, 0, 0, 1, 1, 2, 2, 2};
     u32 i = (u32)p < 9 ? (u32)p : 0;
@@ -132,37 +132,37 @@ void point_frac(UiPoint p, f32* fx, f32* fy) {
 
 struct Ctx {
     Engine&   e;
-    UiState_& s;
-    UiScreen& sc;
-    UiDoc*    doc;
+    SpuiState_& s;
+    SpuiScreen& sc;
+    SpuiDoc*    doc;
     f32       k;     // px per unit
 };
 
 color node_color(const Ctx& c, Name n, color dflt) {
     if (n.is_null() || !c.doc) return dflt;
     color out = dflt;
-    if (!ui_doc_color(*c.doc, n, &out)) ui_color_parse(c.doc, name_str(n), &out);
+    if (!spui_doc_color(*c.doc, n, &out)) spui_color_parse(c.doc, name_str(n), &out);
     return out;
 }
 
 const FontAsset* font_for(Ctx& c, f32 font_scale) {
     if (!c.doc) return nullptr;
     u32 px = (u32)(c.doc->font_px * font_scale * c.k + 0.5f);
-    const FontAsset* f = ui_doc_font(c.e, c.s, *c.doc, px);
+    const FontAsset* f = spui_doc_font(c.e, c.s, *c.doc, px);
     return f && f->state == AssetState::Ready ? f : nullptr;
 }
 
-f32 line_px(Ctx& c, const UiNode& n, const FontAsset& f) {
+f32 line_px(Ctx& c, const SpuiNode& n, const FontAsset& f) {
     f32 l = c.doc && c.doc->line > 0.0f ? c.doc->line * n.font_scale * c.k : f.line_height;
     return l > 0.0f ? l : f.ascent - f.descent;
 }
 
 // A label's text laid out at its width (units; <= 0: unwrapped).
-bool text_block(Ctx& c, const UiNode& n, f32 wrap_units, Array<RChar>& rich, Block& b) {
+bool text_block(Ctx& c, const SpuiNode& n, f32 wrap_units, Array<RChar>& rich, Block& b) {
     const FontAsset* f = font_for(c, n.font_scale);
     if (!f) return false;
     color base = node_color(c, n.color, c.doc ? node_color(c, name_lookup("text"), color_white()) : color_white());
-    if (n.type == UiType::Field) { // typed text is itself: no tags
+    if (n.type == SpuiType::Field) { // typed text is itself: no tags
         const char* p = n.text ? n.text : "";
         while (u32 cp = utf8_next(p)) rich.push(RChar{cp, base, 0, 0.0f});
     } else parse_rich(c.s, c.doc, n.text, base, rich);
@@ -175,60 +175,60 @@ bool text_block(Ctx& c, const UiNode& n, f32 wrap_units, Array<RChar>& rich, Blo
 
 void measure(Ctx& c, u32 i, f32 avail_w, f32 avail_h);
 
-void natural(Ctx& c, UiNode& n, f32 inner_w, f32 inner_h, f32* cw, f32* ch) {
+void natural(Ctx& c, SpuiNode& n, f32 inner_w, f32 inner_h, f32* cw, f32* ch) {
     *cw = *ch = 0.0f;
     switch (n.type) {
-    case UiType::Label: case UiType::Field: {
+    case SpuiType::Label: case SpuiType::Field: {
         MemScope scope;
         Array<RChar> rich = array_in<RChar>(mem_scratch());
         Block b;
         b.chars = array_in<Laid>(mem_scratch());
         b.line_w = array_in<f32>(mem_scratch());
-        if (text_block(c, n, n.w_mode == UiSize::Fit ? 0.0f : inner_w, rich, b)) { *cw = b.w / c.k; *ch = b.h / c.k; }
-        if (n.type == UiType::Field && *ch == 0.0f && c.doc) *ch = (c.doc->line > 0.0f ? c.doc->line : c.doc->font_px) * n.font_scale;
+        if (text_block(c, n, n.w_mode == SpuiSize::Fit ? 0.0f : inner_w, rich, b)) { *cw = b.w / c.k; *ch = b.h / c.k; }
+        if (n.type == SpuiType::Field && *ch == 0.0f && c.doc) *ch = (c.doc->line > 0.0f ? c.doc->line : c.doc->font_px) * n.font_scale;
         return;
     }
-    case UiType::Image: {
+    case SpuiType::Image: {
         if (!n.texture.is_null()) { *cw = n.tex_rect.w; *ch = n.tex_rect.h; }
-        else if (const UiImage* im = c.doc ? ui_doc_image(*c.doc, n.image) : nullptr) { *cw = im->rect.w * im->scale; *ch = im->rect.h * im->scale; }
+        else if (const SpuiImage* im = c.doc ? spui_doc_image(*c.doc, n.image) : nullptr) { *cw = im->rect.w * im->scale; *ch = im->rect.h * im->scale; }
         return;
     }
-    case UiType::Meter: {
-        f32 mx = ui_number(c.s, n.max, 1.0f);
+    case SpuiType::Meter: {
+        f32 mx = spui_number(c.s, n.max, 1.0f);
         if (n.bar) { *cw = 60.0f; *ch = 6.0f; return; }
-        const UiImage* im = c.doc ? ui_doc_image(*c.doc, n.image) : nullptr;
+        const SpuiImage* im = c.doc ? spui_doc_image(*c.doc, n.image) : nullptr;
         u32 count = mx > 0.0f ? (u32)kv::ceil(mx) : 0;
         if (im && count) { *cw = im->rect.w * im->scale * (f32)count + n.gap * (f32)(count - 1); *ch = im->rect.h * im->scale; }
         return;
     }
-    case UiType::Stack: case UiType::List: {
-        bool row = n.type == UiType::Stack && n.dir == UiDir::Row;
+    case SpuiType::Stack: case SpuiType::List: {
+        bool row = n.type == SpuiType::Stack && n.dir == SpuiDir::Row;
         u32 count = 0;
-        for (u32 k = n.first; k != KV_UI_NONE; k = c.sc.nodes[k].next) {
+        for (u32 k = n.first; k != KV_SPUI_NONE; k = c.sc.nodes[k].next) {
             measure(c, k, inner_w, inner_h);
-            const UiNode& ch_ = c.sc.nodes[k];
+            const SpuiNode& ch_ = c.sc.nodes[k];
             if (!ch_.visible) continue;
             if (row) { *cw += ch_.w; *ch = ch_.h > *ch ? ch_.h : *ch; }
             else { *ch += ch_.h; *cw = ch_.w > *cw ? ch_.w : *cw; }
             ++count;
         }
         if (count > 1) { if (row) *cw += n.gap * (f32)(count - 1); else *ch += n.gap * (f32)(count - 1); }
-        if (n.type == UiType::List && c.doc) if (const UiImage* cur = ui_doc_image(*c.doc, name_lookup("cursor"))) *cw += cur->rect.w * cur->scale + 2.0f;
+        if (n.type == SpuiType::List && c.doc) if (const SpuiImage* cur = spui_doc_image(*c.doc, name_lookup("cursor"))) *cw += cur->rect.w * cur->scale + 2.0f;
         return;
     }
-    case UiType::Scroll: {
-        for (u32 k = n.first; k != KV_UI_NONE; k = c.sc.nodes[k].next) {
+    case SpuiType::Scroll: {
+        for (u32 k = n.first; k != KV_SPUI_NONE; k = c.sc.nodes[k].next) {
             measure(c, k, inner_w, 1e6f);
-            const UiNode& ch_ = c.sc.nodes[k];
+            const SpuiNode& ch_ = c.sc.nodes[k];
             if (ch_.w > *cw) *cw = ch_.w;
             if (ch_.h > *ch) *ch = ch_.h;
         }
         return;
     }
     default: {
-        for (u32 k = n.first; k != KV_UI_NONE; k = c.sc.nodes[k].next) {
+        for (u32 k = n.first; k != KV_SPUI_NONE; k = c.sc.nodes[k].next) {
             measure(c, k, inner_w, inner_h);
-            const UiNode& ch_ = c.sc.nodes[k];
+            const SpuiNode& ch_ = c.sc.nodes[k];
             if (!ch_.visible) continue;
             f32 w = ch_.w + kv::fabs(ch_.offset.x), h = ch_.h + kv::fabs(ch_.offset.y);
             if (w > *cw) *cw = w;
@@ -240,16 +240,16 @@ void natural(Ctx& c, UiNode& n, f32 inner_w, f32 inner_h, f32* cw, f32* ch) {
 }
 
 void measure(Ctx& c, u32 i, f32 avail_w, f32 avail_h) {
-    UiNode& n = c.sc.nodes[i];
+    SpuiNode& n = c.sc.nodes[i];
     f32 padw = n.padding[0] + n.padding[2], padh = n.padding[1] + n.padding[3];
-    n.w = n.w_mode == UiSize::Fixed ? n.size.x : n.w_mode == UiSize::Fill ? avail_w : 0.0f;
-    n.h = n.h_mode == UiSize::Fixed ? n.size.y : n.h_mode == UiSize::Fill ? avail_h : 0.0f;
-    f32 inner_w = (n.w_mode == UiSize::Fit ? avail_w : n.w) - padw;
-    f32 inner_h = (n.h_mode == UiSize::Fit ? avail_h : n.h) - padh;
+    n.w = n.w_mode == SpuiSize::Fixed ? n.size.x : n.w_mode == SpuiSize::Fill ? avail_w : 0.0f;
+    n.h = n.h_mode == SpuiSize::Fixed ? n.size.y : n.h_mode == SpuiSize::Fill ? avail_h : 0.0f;
+    f32 inner_w = (n.w_mode == SpuiSize::Fit ? avail_w : n.w) - padw;
+    f32 inner_h = (n.h_mode == SpuiSize::Fit ? avail_h : n.h) - padh;
     f32 cw, ch;
     natural(c, n, inner_w, inner_h, &cw, &ch);
-    if (n.w_mode == UiSize::Fit) n.w = cw + padw;
-    if (n.h_mode == UiSize::Fit) n.h = ch + padh;
+    if (n.w_mode == SpuiSize::Fit) n.w = cw + padw;
+    if (n.h_mode == SpuiSize::Fit) n.h = ch + padh;
 }
 
 // ---- placing ------------------------------------------------------------------------------------
@@ -261,20 +261,20 @@ rect2 intersect(rect2 a, rect2 b) {
 }
 
 void place(Ctx& c, u32 i, f32 x, f32 y, rect2 clip) {
-    UiNode& n = c.sc.nodes[i];
+    SpuiNode& n = c.sc.nodes[i];
     n.x = x; n.y = y; n.clip = clip;
     f32 ix = x + n.padding[0], iy = y + n.padding[1];
     f32 iw = n.w - n.padding[0] - n.padding[2], ih = n.h - n.padding[1] - n.padding[3];
-    if (n.type == UiType::Stack || n.type == UiType::List) {
-        bool row = n.type == UiType::Stack && n.dir == UiDir::Row;
+    if (n.type == SpuiType::Stack || n.type == SpuiType::List) {
+        bool row = n.type == SpuiType::Stack && n.dir == SpuiDir::Row;
         f32 lead = 0.0f;
-        if (n.type == UiType::List && c.doc) if (const UiImage* cur = ui_doc_image(*c.doc, name_lookup("cursor"))) lead = cur->rect.w * cur->scale + 2.0f;
+        if (n.type == SpuiType::List && c.doc) if (const SpuiImage* cur = spui_doc_image(*c.doc, name_lookup("cursor"))) lead = cur->rect.w * cur->scale + 2.0f;
         f32 at = row ? ix : iy;
-        for (u32 k = n.first; k != KV_UI_NONE; k = c.sc.nodes[k].next) {
-            UiNode& ch_ = c.sc.nodes[k];
+        for (u32 k = n.first; k != KV_SPUI_NONE; k = c.sc.nodes[k].next) {
+            SpuiNode& ch_ = c.sc.nodes[k];
             if (!ch_.visible) continue;
             f32 cross = row ? ih - ch_.h : iw - lead - ch_.w;
-            f32 off = n.align == UiAlign::Center ? cross * 0.5f : n.align == UiAlign::End ? cross : 0.0f;
+            f32 off = n.align == SpuiAlign::Center ? cross * 0.5f : n.align == SpuiAlign::End ? cross : 0.0f;
             if (row) place(c, k, at + ch_.offset.x, iy + off + ch_.offset.y, clip);
             else place(c, k, ix + lead + off + ch_.offset.x, at + ch_.offset.y, clip);
             at += (row ? ch_.w : ch_.h) + n.gap;
@@ -283,22 +283,22 @@ void place(Ctx& c, u32 i, f32 x, f32 y, rect2 clip) {
     }
     rect2 inner_clip = clip;
     f32 scroll = 0.0f;
-    if (n.type == UiType::Scroll) {
+    if (n.type == SpuiType::Scroll) {
         inner_clip = intersect(clip, rect2{ix, iy, iw, ih});
         f32 content = 0.0f;
-        for (u32 k = n.first; k != KV_UI_NONE; k = c.sc.nodes[k].next) content = c.sc.nodes[k].h > content ? c.sc.nodes[k].h : content;
+        for (u32 k = n.first; k != KV_SPUI_NONE; k = c.sc.nodes[k].next) content = c.sc.nodes[k].h > content ? c.sc.nodes[k].h : content;
         f32 most = content - ih > 0.0f ? content - ih : 0.0f;
         if (n.scroll > most) n.scroll = most;
         if (n.scroll < 0.0f) n.scroll = 0.0f;
         scroll = n.scroll;
     }
-    for (u32 k = n.first; k != KV_UI_NONE; k = c.sc.nodes[k].next) {
-        UiNode& ch_ = c.sc.nodes[k];
+    for (u32 k = n.first; k != KV_SPUI_NONE; k = c.sc.nodes[k].next) {
+        SpuiNode& ch_ = c.sc.nodes[k];
         f32 ax, ay, px, py;
         point_frac(ch_.anchor, &ax, &ay);
         point_frac(ch_.pivot, &px, &py);
         // A scroll's content hangs from its top, whatever its vertical anchor.
-        f32 cy = n.type == UiType::Scroll ? iy + ch_.offset.y - scroll : iy + ay * ih - py * ch_.h + ch_.offset.y;
+        f32 cy = n.type == SpuiType::Scroll ? iy + ch_.offset.y - scroll : iy + ay * ih - py * ch_.h + ch_.offset.y;
         place(c, k, ix + ax * iw - px * ch_.w + ch_.offset.x, cy, inner_clip);
     }
 }
@@ -312,7 +312,7 @@ void quad(Ctx& c, Handle material, rect2 uv, f32 x, f32 y, f32 w, f32 h, color t
     if (r.w <= 0.0f || r.h <= 0.0f) return;
     // The uv follows the crop.
     f32 u0 = (r.x - x) / w, v0 = (r.y - y) / h, u1 = (r.x + r.w - x) / w, v1 = (r.y + r.h - y) / h;
-    UiQuad q;
+    SpuiQuad q;
     q.material = material;
     q.uv = rect2{uv.x + uv.w * u0, uv.y + uv.h * v0, uv.w * (u1 - u0), uv.h * (v1 - v0)};
     q.x = r.x * c.k; q.y = r.y * c.k; q.w = r.w * c.k; q.h = r.h * c.k;
@@ -326,11 +326,11 @@ void quad(Ctx& c, Handle material, rect2 uv, f32 x, f32 y, f32 w, f32 h, color t
 void quad_px(Ctx& c, Handle material, rect2 uv, f32 x, f32 y, f32 w, f32 h, color tint, rect2 clip) {
     quad(c, material, uv, x / c.k, y / c.k, w / c.k, h / c.k, tint, clip, false);
     if (!c.s.quads.len) return;
-    UiQuad& q = c.s.quads.last();
+    SpuiQuad& q = c.s.quads.last();
     q.x = kv::floor(q.x + 0.5f); q.y = kv::floor(q.y + 0.5f);
 }
 
-void nine(Ctx& c, const UiFrame& f, const UiNode& n, color tint) {
+void nine(Ctx& c, const SpuiFrame& f, const SpuiNode& n, color tint) {
     const TextureAsset* t = asset_texture(c.e, f.texture);
     const MaterialAsset* m = asset_material(c.e, f.material);
     if (!t || !m || !t->width || !t->height) return;
@@ -345,7 +345,7 @@ void nine(Ctx& c, const UiFrame& f, const UiNode& n, color tint) {
             quad(c, m->material, rect2{us[xi], vs[yi], us[xi + 1] - us[xi], vs[yi + 1] - vs[yi]}, xs[xi], ys[yi], xs[xi + 1] - xs[xi], ys[yi + 1] - ys[yi], tint, n.clip);
 }
 
-void image(Ctx& c, const UiImage& im, u32 frame, f32 x, f32 y, f32 w, f32 h, color tint, rect2 clip) {
+void image(Ctx& c, const SpuiImage& im, u32 frame, f32 x, f32 y, f32 w, f32 h, color tint, rect2 clip) {
     const TextureAsset* t = asset_texture(c.e, im.texture);
     const MaterialAsset* m = asset_material(c.e, im.material);
     if (!t || !m || !t->width) return;
@@ -355,7 +355,7 @@ void image(Ctx& c, const UiImage& im, u32 frame, f32 x, f32 y, f32 w, f32 h, col
     quad(c, m->material, rect2{r.x / tw, r.y / th, r.w / tw, r.h / th}, x, y, w, h, tint, clip);
 }
 
-void text(Ctx& c, const UiNode& n, bool caret) {
+void text(Ctx& c, const SpuiNode& n, bool caret) {
     MemScope scope;
     Array<RChar> rich = array_in<RChar>(mem_scratch());
     Block b;
@@ -382,7 +382,7 @@ void text(Ctx& c, const UiNode& n, bool caret) {
             if (!l.g || l.g->size.x <= 0.0f) continue;
             const RChar& rc = rich[l.index];
             f32 lw = b.line_w[l.line];
-            f32 ax = n.align == UiAlign::Center ? (iw * c.k - lw) * 0.5f : n.align == UiAlign::End ? iw * c.k - lw : 0.0f;
+            f32 ax = n.align == SpuiAlign::Center ? (iw * c.k - lw) * 0.5f : n.align == SpuiAlign::End ? iw * c.k - lw : 0.0f;
             f32 dx = 0.0f, dy = 0.0f;
             if (rc.fx & FX_WAVE) dy = kv::sin(t * 6.0f - (f32)l.index * 0.6f) * 1.5f * c.k;
             if (rc.fx & FX_SHAKE) {
@@ -406,30 +406,30 @@ void text(Ctx& c, const UiNode& n, bool caret) {
 }
 
 void emit_node(Ctx& c, u32 i) {
-    UiNode& n = c.sc.nodes[i];
+    SpuiNode& n = c.sc.nodes[i];
     if (!n.visible) return;
     color white = color_white();
     switch (n.type) {
-    case UiType::Panel: {
-        const UiFrame* f = c.doc ? ui_doc_frame(*c.doc, n.frame) : nullptr;
+    case SpuiType::Panel: {
+        const SpuiFrame* f = c.doc ? spui_doc_frame(*c.doc, n.frame) : nullptr;
         if (f) nine(c, *f, n, node_color(c, n.color, white));
         else if (!n.fill.is_null() && !c.s.white_material.is_null()) quad(c, c.s.white_material, rect2_unit(), n.x, n.y, n.w, n.h, node_color(c, n.fill, white), n.clip);
         break;
     }
-    case UiType::Image: {
+    case SpuiType::Image: {
         if (!n.texture.is_null()) {
             const TextureAsset* t = asset_texture(c.e, n.texture);
             const MaterialAsset* m = asset_material(c.e, n.material);
             if (t && m && t->width) quad(c, m->material, rect2{n.tex_rect.x / (f32)t->width, n.tex_rect.y / (f32)t->height, n.tex_rect.w / (f32)t->width, n.tex_rect.h / (f32)t->height}, n.x, n.y, n.w, n.h, node_color(c, n.color, white), n.clip);
-        } else if (const UiImage* im = c.doc ? ui_doc_image(*c.doc, n.image) : nullptr) {
+        } else if (const SpuiImage* im = c.doc ? spui_doc_image(*c.doc, n.image) : nullptr) {
             image(c, *im, n.frame_index, n.x, n.y, n.w, n.h, node_color(c, n.color, white), n.clip);
         }
         break;
     }
-    case UiType::Label: text(c, n, false); break;
-    case UiType::Field: text(c, n, true); break;
-    case UiType::Meter: {
-        f32 v = ui_number(c.s, n.value, 0.0f), mx = ui_number(c.s, n.max, 1.0f);
+    case SpuiType::Label: text(c, n, false); break;
+    case SpuiType::Field: text(c, n, true); break;
+    case SpuiType::Meter: {
+        f32 v = spui_number(c.s, n.value, 0.0f), mx = spui_number(c.s, n.max, 1.0f);
         if (n.bar) {
             if (!c.s.white_material.is_null()) {
                 quad(c, c.s.white_material, rect2_unit(), n.x, n.y, n.w, n.h, color{0.02f, 0.02f, 0.03f, 0.8f}, n.clip);
@@ -437,7 +437,7 @@ void emit_node(Ctx& c, u32 i) {
                 frac = frac < 0.0f ? 0.0f : frac > 1.0f ? 1.0f : frac;
                 quad(c, c.s.white_material, rect2_unit(), n.x + 1, n.y + 1, (n.w - 2) * frac, n.h - 2, node_color(c, n.fill, color_rgba(0.9f, 0.6f, 0.1f)), n.clip);
             }
-        } else if (const UiImage* im = c.doc ? ui_doc_image(*c.doc, n.image) : nullptr) {
+        } else if (const SpuiImage* im = c.doc ? spui_doc_image(*c.doc, n.image) : nullptr) {
             u32 count = mx > 0.0f ? (u32)kv::ceil(mx) : 0;
             for (u32 k = 0; k < count; ++k) {
                 f32 part = v - (f32)k;
@@ -448,14 +448,14 @@ void emit_node(Ctx& c, u32 i) {
         }
         break;
     }
-    case UiType::List: {
+    case SpuiType::List: {
         // The focused item: the cursor beside it and the focus color on it.
         u32 idx = 0;
-        for (u32 k = n.first; k != KV_UI_NONE; k = c.sc.nodes[k].next, ++idx) {
-            UiNode& item = c.sc.nodes[k];
+        for (u32 k = n.first; k != KV_SPUI_NONE; k = c.sc.nodes[k].next, ++idx) {
+            SpuiNode& item = c.sc.nodes[k];
             bool focused = idx == n.focus;
             Name want = focused ? name_lookup("focus") : item.color;
-            if (focused && c.doc) if (const UiImage* cur = ui_doc_image(*c.doc, name_lookup("cursor"))) {
+            if (focused && c.doc) if (const SpuiImage* cur = spui_doc_image(*c.doc, name_lookup("cursor"))) {
                 f32 bob = kv::floor(kv::sin(c.sc.time * 6.0f) * 1.5f + 0.5f);
                 f32 cw_ = cur->rect.w * cur->scale, ch_ = cur->rect.h * cur->scale;
                 image(c, *cur, 0, item.x - cw_ - 2.0f + bob, item.y + (item.h - ch_) * 0.5f, cw_, ch_, white, n.clip);
@@ -469,30 +469,30 @@ void emit_node(Ctx& c, u32 i) {
     }
     default: break;
     }
-    for (u32 k = n.first; k != KV_UI_NONE; k = c.sc.nodes[k].next) emit_node(c, k);
+    for (u32 k = n.first; k != KV_SPUI_NONE; k = c.sc.nodes[k].next) emit_node(c, k);
 }
 
 } // namespace
 
-void ui_model_text(UiState_& s, const char* key, char* out, usize cap) {
-    const UiModelValue* v = s.model.find(name_lookup(key).hash);
+void spui_model_text(SpuiState_& s, const char* key, char* out, usize cap) {
+    const SpuiModelValue* v = s.model.find(name_lookup(key).hash);
     if (!v) { out[0] = 0; return; }
     if (v->type == 0) format(out, cap, "%lld", (long long)v->i);
     else if (v->type == 1) format(out, cap, "%g", v->f);
     else utf8_copy(out, cap, name_str(v->s));
 }
 
-f32 ui_number(UiState_& s, const char* value, f32 dflt) {
+f32 spui_number(SpuiState_& s, const char* value, f32 dflt) {
     if (!value || !value[0]) return dflt;
     if (value[0] == '=') {
-        const UiModelValue* v = s.model.find(name_lookup(value + 1).hash);
+        const SpuiModelValue* v = s.model.find(name_lookup(value + 1).hash);
         if (!v) return dflt;
         return v->type == 0 ? (f32)v->i : v->type == 1 ? (f32)v->f : dflt;
     }
     return (f32)atof(value);
 }
 
-u32 ui_text_chars(UiState_& s, const char* t, f32 rate, f32* seconds) {
+u32 spui_text_chars(SpuiState_& s, const char* t, f32 rate, f32* seconds) {
     MemScope scope;
     Array<RChar> rich = array_in<RChar>(mem_scratch());
     parse_rich(s, nullptr, t, color_white(), rich);
@@ -502,7 +502,7 @@ u32 ui_text_chars(UiState_& s, const char* t, f32 rate, f32* seconds) {
     return rich.len;
 }
 
-u32 ui_text_shown(UiState_& s, const char* t, f32 rate, f32 at) {
+u32 spui_text_shown(SpuiState_& s, const char* t, f32 rate, f32 at) {
     MemScope scope;
     Array<RChar> rich = array_in<RChar>(mem_scratch());
     parse_rich(s, nullptr, t, color_white(), rich);
@@ -515,19 +515,19 @@ u32 ui_text_shown(UiState_& s, const char* t, f32 rate, f32 at) {
     return rich.len;
 }
 
-void ui_layout(Engine& e, UiState_& s, UiScreen& sc) {
+void spui_layout(Engine& e, SpuiState_& s, SpuiScreen& sc) {
     if (!sc.nodes.len) return;
     Ctx c{e, s, sc, s.docs.get(sc.doc), s.scale};
     f32 W = s.win_w / s.scale, H = s.win_h / s.scale;
     measure(c, 0, W, H);
-    UiNode& root = sc.nodes[0];
+    SpuiNode& root = sc.nodes[0];
     f32 ax, ay, px, py;
     point_frac(root.anchor, &ax, &ay);
     point_frac(root.pivot, &px, &py);
     place(c, 0, ax * W - px * root.w + root.offset.x, ay * H - py * root.h + root.offset.y, rect2{0, 0, W, H});
 }
 
-void ui_emit(Engine& e, UiState_& s, UiScreen& sc) {
+void spui_emit(Engine& e, SpuiState_& s, SpuiScreen& sc) {
     if (!sc.nodes.len) return;
     Ctx c{e, s, sc, s.docs.get(sc.doc), s.scale};
     emit_node(c, 0);

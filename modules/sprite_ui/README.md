@@ -1,19 +1,19 @@
-# ui
+# sprite_ui
 
 Menus, HUDs, dialogue boxes and whole screens, as trees of named nodes the module owns.
-A screen comes from a document (`.ui.json`) or is built in code; the module lays it out
+A screen comes from a document (`.spui.json`) or is built in code; the module lays it out
 against the window, draws it as screen-space sprites, reads the action map for the topmost
-screen that takes input, and tells the game what happened with `UiEvent`s by node name.
+screen that takes input, and tells the game what happened with `SpuiEvent`s by node name.
 Game code never positions a label.
 
 ## How it works
 
-**Documents** (`ui_load`) are assets of the asset module's scopes (`ui.doc`): a style
+**Documents** (`spui_load`) are assets of the asset module's scopes (`sprite_ui.doc`): a style
 (the font, colors by name, 9-slice frames, images and strips of them, sounds) and named
 screens. The document holds its textures, materials, sounds and fonts and turns `Ready`
 when they have settled.
 
-**Screens** (`ui_open`, `ui_open_empty` + `ui_add`) are trees of nodes:
+**Screens** (`spui_open`, `spui_open_empty` + `spui_add`) are trees of nodes:
 
 | type | what it is |
 |---|---|
@@ -42,9 +42,9 @@ while it reveals finishes it instead of reaching the screen. The style's `shadow
 draws every glyph again a unit down and right; `shadow_offset` (units, 1 to 8, times a
 label's `font_scale`) carries it further, drawn at every unit out to it, a solid drop.
 
-**Input and events.** `ui.update` (PreSim, every tick) gives the action map to the topmost
+**Input and events.** `sprite_ui.update` (PreSim, every tick) gives the action map to the topmost
 open screen that takes input (layer, then opening order). A list moves its focus with
-repeat; confirm emits `UiEvent{screen, item, select}` (or the item's `event`), cancel emits
+repeat; confirm emits `SpuiEvent{screen, item, select}` (or the item's `event`), cancel emits
 `cancel`. Without a list, confirm and cancel are emitted as themselves, which is how a
 dialogue pages. Events reach handlers before that tick's Sim. A screen opened with `hold`
 holds the sim (`HoldUi`) while it is open.
@@ -56,57 +56,57 @@ and confirms nothing. Backspace erases (with the OS's repeat), Enter or a typed 
 submits (`submit`, the length as the value), Escape cancels, and every edit says `changed`.
 A demo types with `input_text_override(e, "Rowan\n")`.
 
-**Motions and covers.** A screen opens with `UiOpen::enter` (`Fade` or `Slide` from an edge)
-and leaves with `ui_close_with(e, screen, motion)`, taking no input on the way out. A cover
-(`ui_cover(e, UiCover{Fade or Iris, seconds, tint, focus})`) closes over the whole window,
-says `UiCovered` when nothing shows, stays while `ui_cover_wait` holds it, and opens again
-saying `UiUncovered`; it holds the sim meanwhile unless told not to. Switching from one mode
-to another (the title to the village, the world to a minigame) happens in the `UiCovered`
+**Motions and covers.** A screen opens with `SpuiOpen::enter` (`Fade` or `Slide` from an edge)
+and leaves with `spui_close_with(e, screen, motion)`, taking no input on the way out. A cover
+(`spui_cover(e, SpuiCover{Fade or Iris, seconds, tint, focus})`) closes over the whole window,
+says `SpuiCovered` when nothing shows, stays while `spui_cover_wait` holds it, and opens again
+saying `SpuiUncovered`; it holds the sim meanwhile unless told not to. Switching from one mode
+to another (the title to the village, the world to a minigame) happens in the `SpuiCovered`
 handler, where nobody sees it. The iris is a disc of clear in a generated texture, ringed by
 black quads.
 
-**The model.** `ui_model_set_int(e, "hp", 3)` and the float and string forms; labels say
+**The model.** `spui_model_set_int(e, "hp", 3)` and the float and string forms; labels say
 `{hp}`, meters `"value": "=hp", "max": "=hp_max"`. A HUD is a document and two calls a tick.
 
-**Drawing.** `ui.draw` (the Frame cycle, once before each frame drawn) lays out every open screen by layer and turns
+**Drawing.** `sprite_ui.draw` (the Frame cycle, once before each frame drawn) lays out every open screen by layer and turns
 it into quads: frames as nine slices, images, meters, glyphs. A scroll's children are
 cropped to it on the CPU, uv and all, so the renderer needs no clip rects. The quads go into
-`ui.sprite` rows (cosmetic, screen space, anchored top-left, sorted by key within the layer),
+`sprite_ui.sprite` rows (cosmetic, screen space, anchored top-left, sorted by key within the layer),
 reused in order, so a still menu sends the renderer nothing.
 
 ## Using it
 
 ```cpp
 // startup
-g.ui = ui_load(e, "mygame/ui/game.ui.json", asset_scope_global(e));
-UiOpen hud;
+g.ui = spui_load(e, "mygame/ui/game.spui.json", asset_scope_global(e));
+SpuiOpen hud;
 hud.layer = 90;
 hud.input = false;
-g.hud = ui_open(e, g.ui, "hud", hud);
+g.hud = spui_open(e, g.ui, "hud", hud);
 
 // open a menu that holds the sim, sliding up, focused on an item
-UiOpen menu;
+SpuiOpen menu;
 menu.hold = true;
-menu.enter.fx = UiFx::Slide;
-g.menu = ui_open(e, g.ui, "pause", menu);
-ui_focus(e, g.menu, "items", "save");
+menu.enter.fx = SpuiFx::Slide;
+g.menu = spui_open(e, g.ui, "pause", menu);
+spui_focus(e, g.menu, "items", "save");
 
 // into a minigame, behind an iris
-UiCover c;
-c.fx = UiFx::Iris;
-ui_cover(e, c); // ... and in the UiCovered handler: close the world's screens, open the game's
+SpuiCover c;
+c.fx = SpuiFx::Iris;
+spui_cover(e, c); // ... and in the SpuiCovered handler: close the world's screens, open the game's
 
 // what it says
-void on_ui(TickContext& ctx, Span<const UiEvent> evs) {
-    for (const UiEvent& ev : evs) {
+void on_ui(TickContext& ctx, Span<const SpuiEvent> evs) {
+    for (const SpuiEvent& ev : evs) {
         if (ev.screen != g.menu) continue;
-        if (ev.event == name_intern("cancel").hash) { ui_close(*ctx.engine, g.menu); continue; }
+        if (ev.event == name_intern("cancel").hash) { spui_close(*ctx.engine, g.menu); continue; }
         if (!strcmp(name_str(Name{ev.node}), "quit")) engine_request_quit(*ctx.engine);
     }
 }
 
 // the HUD's numbers
-ui_model_set_int(e, "hp", v.hp);
+spui_model_set_int(e, "hp", v.hp);
 ```
 
 The document:
@@ -125,28 +125,28 @@ The document:
 
 A list's `items` may be strings (the name is the text, lower-cased, spaces as `_`) or nodes.
 Paths name nodes from the root (`box/items/save`), and a last part that is not a child is
-looked for anywhere below, so `ui_set_text(e, s, "note", ...)` finds a deep node by name.
+looked for anywhere below, so `spui_set_text(e, s, "note", ...)` finds a deep node by name.
 
 ## Quick reference
 
-Header `korvid/ui/ui.h`:
+Header `korvid/sprite_ui/sprite_ui.h`:
 
 | name | what |
 |---|---|
-| `ui_load(e, path, scope)`, `ui_ready`, `ui_reload` | documents |
-| `ui_open(e, doc, screen, UiOpen{layer, input, hold})`, `ui_open_empty`, `ui_add`, `ui_close`, `ui_is_open`, `ui_top` | screens |
-| `ui_find`, `ui_set_text`, `ui_set_visible`, `ui_set_offset`, `ui_set_color`, `ui_set_image`, `ui_set_texture`, `ui_set_value`, `ui_focus`, `ui_focused`, `ui_scroll`, `ui_revealing`, `ui_reveal_all`, `ui_rect` | nodes, by path |
-| `ui_model_set_int`, `ui_model_set_float`, `ui_model_set_str` | the model |
-| `UiOpen::enter`, `ui_close_with`, `UiMotion{fx, seconds, from}` | screens coming and going |
-| `ui_cover`, `ui_cover_wait`, `ui_covering`, `UiCover`, `UiCovered`, `UiUncovered` | switching modes |
-| `ui_field_text` | a field's text |
-| `UiEvent{screen, node, event, value}` | event; `node` and `event` are `Name` hashes |
-| `ui_stats(e)` | screens, nodes, sprites, scale |
+| `spui_load(e, path, scope)`, `spui_ready`, `spui_reload` | documents |
+| `spui_open(e, doc, screen, SpuiOpen{layer, input, hold})`, `spui_open_empty`, `spui_add`, `spui_close`, `spui_is_open`, `spui_top` | screens |
+| `spui_find`, `spui_set_text`, `spui_set_visible`, `spui_set_offset`, `spui_set_color`, `spui_set_image`, `spui_set_texture`, `spui_set_value`, `spui_focus`, `spui_focused`, `spui_scroll`, `spui_revealing`, `spui_reveal_all`, `spui_rect` | nodes, by path |
+| `spui_model_set_int`, `spui_model_set_float`, `spui_model_set_str` | the model |
+| `SpuiOpen::enter`, `spui_close_with`, `SpuiMotion{fx, seconds, from}` | screens coming and going |
+| `spui_cover`, `spui_cover_wait`, `spui_covering`, `SpuiCover`, `SpuiCovered`, `SpuiUncovered` | switching modes |
+| `spui_field_text` | a field's text |
+| `SpuiEvent{screen, node, event, value}` | event; `node` and `event` are `Name` hashes |
+| `spui_stats(e)` | screens, nodes, sprites, scale |
 
-What the module registers: the handle kinds `ui.doc` (an asset kind) and `ui.screen`; the
-kind `ui.sprite` (cosmetic); the events `UiEvent`, `UiCovered`, `UiUncovered`; the systems `ui.update` (PreSim, main
-thread, every tick; writes `audio.commands`) and `ui.draw` (the Frame cycle, main thread;
-drawing only: reveals, focus and events stay in `ui.update`, in the tick); the command `ui reload`; the mount `/ui` (`print /ui/pause` lists
+What the module registers: the handle kinds `sprite_ui.doc` (an asset kind) and `sprite_ui.screen`; the
+kind `sprite_ui.sprite` (cosmetic); the events `SpuiEvent`, `SpuiCovered`, `SpuiUncovered`; the systems `sprite_ui.update` (PreSim, main
+thread, every tick; writes `audio.commands`) and `sprite_ui.draw` (the Frame cycle, main thread;
+drawing only: reveals, focus and events stay in `sprite_ui.update`, in the tick); the command `spui reload`; the mount `/spui` (`print /spui/pause` lists
 a screen's nodes with their rects).
 
 ## Behaviour worth knowing

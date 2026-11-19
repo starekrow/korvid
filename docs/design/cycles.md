@@ -193,8 +193,8 @@ Nov 15, 2026, on branch tool-stuff.
   half-written is left). Always on, not only in dev builds: they are cheap, and a replay
   that drifts is not. Nothing in the tree tripped them; `core_tests` covers both halves. Arcfire's recorded replay matches (236 hashes): the Sim cycle
   is unchanged.
-- **Presentation moved, and the follow-ups** (last of the day). `text.layout`, `ui.draw`
-  and `touchpad.draw` are in the Frame cycle; `ui.update` stays in the tick, since reveals
+- **Presentation moved, and the follow-ups** (last of the day). `text.layout`, `sprite_ui.draw`
+  and `touchpad.draw` are in the Frame cycle; `sprite_ui.update` stays in the tick, since reveals
   and UI events feed the game. Text places new glyphs itself (`placement_compose`), so the
   frame that shows them shows them in place. Moving layout took away an order nothing had
   declared: rocks' hit and spawn handlers and `anim.play` and `scene.compose` had been

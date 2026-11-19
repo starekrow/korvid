@@ -14,7 +14,7 @@
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"
 #include "korvid/save/writer.h"
-#include "korvid/ui/ui.h"
+#include "korvid/sprite_ui/sprite_ui.h"
 #include <string.h>
 
 namespace kv::arcfire {

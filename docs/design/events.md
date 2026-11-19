@@ -158,7 +158,7 @@ A system that reads a stream outside a handler reads its batch through the conte
 | StateEdge, timers, next-tick types | end of tick, tick start | Input (the tick after, as before) |
 | Spawned | the commands, every boundary | PostSim |
 | AnimFinished | anim.play, PostSim | Input of the tick after (as before) |
-| LevelBuild, LevelLoading, UiEvent, UiCovered | level.run, ui.update, PreSim | arcanum: PreSim, after them; arcfire's flow: Sim |
+| LevelBuild, LevelLoading, SpuiEvent, SpuiCovered | level.run, sprite_ui.update, PreSim | arcanum: PreSim, after them; arcfire's flow: Sim |
 | ExitRequested | frameloop.exit, PreSim | Sim |
 | input events | the engine's writer | Input |
 

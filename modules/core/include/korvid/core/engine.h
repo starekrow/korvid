@@ -282,7 +282,7 @@ bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, T* 
 // For a module whose functions are main-thread only (ui): call it where they all pass, and
 // a unit that calls one from a job worker is stopped in dev builds, named, rather than
 // racing. Startup, shutdown and code outside the schedule are on the main thread.
-//   UiState* ui_state(Engine& e) { engine_check_main_thread(e, "ui"); return ...; }
+//   SpuiState* spui_state(Engine& e) { engine_check_main_thread(e, "sprite_ui"); return ...; }
 void engine_check_main_thread(const Engine& e, const char* api);
 
 // The started instance of a module, by name; null if absent or not started. For code

@@ -12,7 +12,7 @@
 #include "korvid/core/log.h"
 #include "korvid/frameloop/frameloop.h"
 #include "korvid/platform_hid/actions.h"
-#include "korvid/ui/ui.h"
+#include "korvid/sprite_ui/sprite_ui.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,8 +67,8 @@ void on_kill(TickContext&, Span<const Kill>);
 void records(TickContext&);      // records.cc
 void screens(TickContext&);      // screens.cc
 void pause(TickContext&);        // flow.cc
-void on_ui(TickContext&, Span<const UiEvent>);
-void on_covered(TickContext&, Span<const UiCovered>);
+void on_ui(TickContext&, Span<const SpuiEvent>);
+void on_covered(TickContext&, Span<const SpuiCovered>);
 void camera(TickContext&);
 void shimmer(TickContext&);
 void battle(TickContext&);
@@ -284,7 +284,7 @@ constinit const SystemDesc k_systems[] = {
      .runs = RunWhen::Always},
     {.name = ".shimmer", .phase = Phase::PostSim, .fn = shimmer, .reads = ".world.Dials, platform_hid.window, sprite.camera", .after = ".camera",
      .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".world.Run, .world.Stage, .world.Dials, .boss.Boss, .part.Health, .part.Part, .ship.Ship, .option.Option", .before = "ui.draw", .main_thread = true,
+    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".world.Run, .world.Stage, .world.Dials, .boss.Boss, .part.Health, .part.Part, .ship.Ship, .option.Option", .before = "sprite_ui.draw", .main_thread = true,
      .runs = RunWhen::Always},
     {.name = ".stats_deltas", .phase = Phase::Frame, .fn = stats_deltas, .reads = "sprite.deltas", .writes = ".stats", .after = "sprite.extract", .main_thread = true},
     {.name = ".stats", .phase = Phase::PostSim, .fn = stats, .writes = ".stats", .after = ".hud", .main_thread = true,
@@ -320,8 +320,8 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_stage_next", KV_ON(StageNext, on_stage_next), .phase = Phase::Input},
     {.name = ".on_run_over", KV_ON(RunOver, on_run_over), .phase = Phase::Input},
     {.name = ".on_exit", KV_ON(ExitRequested, on_exit), .phase = Phase::Sim},
-    {.name = ".on_ui", KV_ON(UiEvent, on_ui), .phase = Phase::Sim},
-    {.name = ".on_covered", KV_ON(UiCovered, on_covered), .phase = Phase::Sim},
+    {.name = ".on_ui", KV_ON(SpuiEvent, on_ui), .phase = Phase::Sim},
+    {.name = ".on_covered", KV_ON(SpuiCovered, on_covered), .phase = Phase::Sim},
     {.name = ".on_spawned", KV_ON(Spawned, on_spawned), .phase = Phase::PostSim, .reads = "^.air.Transform2, ^.air.Sprite"},
 };
 

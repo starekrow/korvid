@@ -30,7 +30,7 @@ root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
 root "windows" {
   modules   = { "core", "math", "inflate", "pack", "platform", "platform_hid", "cli", "tool", "kpack",
                 "render", "asset", "asset_render", "sprite", "scene", "text", "anim", "collision", "tilemap", "level",
-                "platform_audio", "audio", "renderer-vulkan", "renderer-d3d12", "touchpad", "frameloop", "save", "ui", "xml", "bulletml", "image", "picture", "kbor", "kimb", "kim", "kimc",
+                "platform_audio", "audio", "renderer-vulkan", "renderer-d3d12", "touchpad", "frameloop", "save", "sprite_ui", "xml", "bulletml", "image", "picture", "kbor", "kimb", "kim", "kimc",
                 "window", "testbed", "stones", "rocks", "arcanum",
                 "cpukiller", "arcfire", "gallery", "sockit2m", "lua", "script", "goldberg",
                 "truetype", "typeset", "krome", "kromedemo", "kromescreens", "renderer-cpu", "renderer-cpu-raster", "patherizer" },
@@ -44,7 +44,7 @@ root "windows" {
 root "macos" {
   modules   = { "lua", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "tool", "kpack", "picture", "kbor", "kimb", "kim", "kimc", "save",
                 "bulletml", "platform_hid", "platform_audio", "render", "asset", "asset_render", "sprite", "scene", "text", "anim",
-                "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal", "renderer-cpu", "renderer-cpu-raster",
+                "collision", "tilemap", "level", "audio", "sprite_ui", "touchpad", "frameloop", "renderer-metal", "renderer-cpu", "renderer-cpu-raster",
                 "sockit2m", "window", "testbed", "stones", "cpukiller",
                 "rocks", "arcanum", "arcfire", "gallery", "script", "truetype", "typeset", "krome", "goldberg", "kromedemo", "kromescreens", "patherizer" },
   tests     = true,
@@ -58,7 +58,7 @@ root "macos" {
 root "ios" {
   modules   = { "lua", "tool", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
                 "platform_hid", "platform_audio", "render", "asset", "asset_render", "sprite", "scene", "text", "anim",
-                "collision", "tilemap", "level", "audio", "ui", "touchpad", "frameloop", "renderer-metal", "renderer-cpu", "renderer-cpu-raster",
+                "collision", "tilemap", "level", "audio", "sprite_ui", "touchpad", "frameloop", "renderer-metal", "renderer-cpu", "renderer-cpu-raster",
                 "window", "testbed", "stones", "rocks", "arcanum",
                 "arcfire", "gallery", "script", "truetype", "typeset", "kim", "kimb", "krome", "kromedemo", "kromescreens" },
   tests     = true,
@@ -73,7 +73,7 @@ root "android" {
   modules   = { "lua", "tool", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
                 "platform_hid", "window",
                 "render", "asset", "asset_render", "sprite", "scene", "text", "touchpad", "frameloop", "renderer-vulkan",
-                "platform_audio", "audio", "anim", "collision", "tilemap", "level", "ui",
+                "platform_audio", "audio", "anim", "collision", "tilemap", "level", "sprite_ui",
                 "testbed", "gallery", "stones", "rocks", "arcanum", "arcfire", "cpukiller", "sockit2m" },
   tests     = true,
   platforms = { "android", "androidemu" },

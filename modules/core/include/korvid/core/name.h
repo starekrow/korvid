@@ -15,7 +15,7 @@
 // examples/arcanum/src/game.cc, which handles UI events):
 //
 //   static const u64 k_select = name_intern("select").hash;
-//   for (const UiEvent& ev : events) {
+//   for (const SpuiEvent& ev : events) {
 //       if (ev.event != k_select) continue;
 //       const char* item = name_str(Name{ev.node}); // printable again
 //       ...

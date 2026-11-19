@@ -27,7 +27,7 @@ them and nothing else.
 
 - **A module, `krome`.** General engine UI. A tool or a game takes it like any other
   module; it draws through the renderer like anything else.
-- **Not `ui`.** The `ui` module is game screens: menus, HUDs and dialogue as screen-space
+- **Not `sprite_ui`.** The `sprite_ui` module is game screens: menus, HUDs and dialogue as screen-space
   sprites, pixel-crisp, with 9-slices, typewriter reveals and focus lists driven by the
   action map. Krome is the pointer-and-keyboard kind: dense, resizable, text-heavy. The
   two stay separate for now; whether they ever share a layout pass or a document format
@@ -271,7 +271,7 @@ One way only. From memory of Figma's API; check its documentation before buildin
 - Animation beyond transitions between style states.
 - Accessibility, right-to-left text and IME beyond what `edit` needs. Each needs its own
   design before a tool ships to anyone but us.
-- Replacing `ui`.
+- Replacing `sprite_ui`.
 
 ## Open questions
 
@@ -281,8 +281,8 @@ One way only. From memory of Figma's API; check its documentation before buildin
 - [ ] The shape filler. stb_truetype exposes its rasterizer for arbitrary outlines, which
       may do for a first version (nonzero winding only); otherwise our own.
 - [ ] Grid areas for screen shells.
-- [x] String interpolation: `{key}` for a model value and `{*tag}` for a tag, in Krome and `ui` alike (Slice 2 PRD).
-- [ ] Does `ui` ever move onto Krome's layout or documents?
+- [x] String interpolation: `{key}` for a model value and `{*tag}` for a tag, in Krome and `sprite_ui` alike (Slice 2 PRD).
+- [ ] Does `sprite_ui` ever move onto Krome's layout or documents?
 - [ ] Where Krome's update and draw sit in the schedule, and whether a tool window with
       no simulation runs the same phases.
 - [ ] Multiple windows.

@@ -9,5 +9,5 @@ int main() {
     test_ui(c);
     kv::names_shutdown();
     kv::mem_shutdown();
-    return kv::test_report(c, "ui_tests");
+    return kv::test_report(c, "sprite_ui_tests");
 }

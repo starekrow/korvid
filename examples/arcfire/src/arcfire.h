@@ -22,7 +22,7 @@
 #include "korvid/sprite/sprite.h"
 #include "korvid/sprite/transform2.h"
 
-namespace kv { struct UiEvent; }
+namespace kv { struct SpuiEvent; }
 
 namespace kv::arcfire {
 
@@ -598,7 +598,7 @@ void   results_open(Engine& e, Game& g, const RunResult& r);
 void   scores_open(Engine& e, Game& g, u32 table, i32 lit);
 void   card_open(Engine& e, Game& g, u32 round, u32 position);
 void   card_close(Engine& e, Game& g);
-bool   screens_ui(TickContext& ctx, Game& g, const UiEvent& ev); // true: the event was a screen's here
+bool   screens_ui(TickContext& ctx, Game& g, const SpuiEvent& ev); // true: the event was a screen's here
 RunResult run_result(Engine& e, const Game& g, i64 score);       // the world row's run, as it stands
 void   run_finished(TickContext& ctx, Game& g);                  // the screens after a run are done: the next thing
 
