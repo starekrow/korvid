@@ -1,6 +1,6 @@
 # Krome Slice 6 — Live
 
-Nov 18, 2026 · @starekrow · draft, first review folded in
+Nov 18, 2026 · @starekrow · built (see As built)
 
 ## Goal and exit criteria
 
@@ -469,4 +469,29 @@ found on the way:
 - **Diff and Rules are milestone 5's.**
 - kormake's own tests (`tools/kormake/tests/run.sh`) fail on binding defines in their expected
   output, the same with and without this slice: not looked at here.
+
+**Milestone 5, Forms, diff and close** (Nov 18).
+
+- **Rules and Diff** as the shape has them. The core is `lua/bergform.lua`: a rule file read as
+  entries (values as JSON, from the last version that parsed, which `Rules` now keeps), edits
+  made by `bergedit` (which now steps into lists: `rules 1 meta filter`), and the preview, which
+  solves every file the rule file speaks for with the edit's document in place and puts the
+  session's back. The CLI's `berg`, `berg-preview` and `berg-set` are the same calls; the CLI's
+  words lose their quotes, so there a value that is not JSON is a string.
+- **The demo's last part** edits a value, previews it by its shortcut, compares the Diff with
+  what `berg-preview` says, accepts, and waits for the cook. It runs where the session has a rule
+  file; no example has one (zero rules on day one), so `tools/goldberg/tests/window` is a fixture
+  with something on every page, and `run.sh` drives the window over a copy of it.
+- **The pilot steps in the Frame cycle**, one step a Krome frame: a step a tick let Ctrl go up
+  before the frame that read the A (one failure in three).
+- **The window's cost** (KL22), the heavy test's tree at 64 MB, 36,718 steps: a cold cook to
+  stable 17 s with the window against 19 s headless, 15% more CPU. As first built it was 42.6 s
+  and a still window used a whole core; the window now sends only what moved, and at most 2,000
+  steps (`docs/design/goldberg-notes.md`).
+- **Save to frame** (KL22): a screen 9.2 ms median, a prelude 8.9, an icon 7.2, a texture in
+  arcfire 49.9 (18.6 of it the PNG's encode). arcfire links `asset_live` for it; its replays hash
+  as before. `docs/design/krome-notes.md` has the run.
+
+**Requirements.** KL1 to KL23 are built, with the differences above. Not done: KL22's numbers
+are Linux's only; the other machines have not run the window or the live numbers.
 

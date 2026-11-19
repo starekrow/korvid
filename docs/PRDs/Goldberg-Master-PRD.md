@@ -409,9 +409,9 @@ goldberg asks for these, and they belong to the engine:
 | JSON with line numbers for errors, key order kept | `core` (today in kvscript only for writing) | 1 |
 | Glob matching | `core` | 1 |
 | Child processes (spawn, exit status, stderr) on the I/O queue | `platform` | 1 |
-| Reload by path and handle rebind | `asset` | later (Live) |
-| Outbound TCP from a game | `platform` (the CLI listens today) | later (Live) |
-| Krome | `docs/design/krome.md` | later (The window) |
+| Reload by path and handle rebind | `asset` | built (Krome slice 6) |
+| Outbound TCP from a game | `platform` (`net_connect_local`) | built |
+| Krome | `docs/design/krome.md` | built (Krome slices 1 to 6) |
 
 ## Requirements
 
@@ -437,8 +437,8 @@ goldberg asks for these, and they belong to the engine:
 | G14c | `goldberg learn`: a converter's `outputs` declared from a watched run, written into its `.berg` file in place | P1 |
 | G14a | Whether a file lands in the output tree is a solver answer, from its type and `land`, and is explained | P0 |
 | G14b | Lua converters in process; protocol converters; discovered edges; fan-in | P1 |
-| G15 | The game's connection: changed outputs down, loads up, reload in the asset module | P1 |
-| G16 | goldberg's window on Krome over the same commands | P2 |
+| G15 | The game's connection: changed outputs down, loads up, reload in the asset module (down and reload built, Krome slice 6) | P1 |
+| G16 | goldberg's window on Krome over the same commands (built, Krome slice 6) | P2 |
 | G17 | Profiles, the lockfile, tag closures and packs | P2 |
 
 ## Slices
@@ -463,9 +463,13 @@ goldberg asks for these, and they belong to the engine:
 slice 3 when the time comes.
 
 - **Live.** The game's connection, reload and rebind in the asset module, load reports.
-  Save a PNG, see it in the running game. Watchers on Windows and macOS.
+  Save a PNG, see it in the running game. Watchers on Windows and macOS. *Mostly built*, by
+  Krome slice 6 and the platform's ports: the down half of the connection (`asset_live`, the
+  watch's port in `<out>/.goldberg-port`), `asset_reload`, the native watchers. Load reports
+  (the up half) are not.
 - **The window.** goldberg's UI on Krome: inspection, status, reports, forms that write
-  `.berg` files.
+  `.berg` files. *Built* by Krome slice 6: `goldberg watch --window`, with the forms' edits
+  previewed as a diff before they are saved.
 - **Shipping.** Profiles, the lockfile and re-route diffs, tags, pack closures, budgets;
   kpack becomes a sink of the graph.
 - **From the design:** tool monitors, capabilities and write-back, background refinement

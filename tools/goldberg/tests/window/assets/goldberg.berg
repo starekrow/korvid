@@ -1,0 +1,9 @@
+{
+  // The window's fixture (tools/goldberg/tests/window): a rule file for the Rules and Diff
+  // pages to edit. goldberg --demo changes it in its own copy, never here.
+  "meta": { "tags": ["fixture"] },
+  "rules": [
+    { "match": "art/*.png", "meta": { "filter": "nearest" } },
+    { "match": "notes/**",  "meta": { "cook": false } }
+  ]
+}

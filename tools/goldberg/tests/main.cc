@@ -1023,6 +1023,51 @@ void test_programs(TestCtx& c) {
     t.free();
 }
 
+// A rule file as the window's Rules and Diff pages have it, through the CLI (berg, berg-preview,
+// berg-set): its values with their paths; what an edit would change, with nothing saved; the edit
+// saved with every other byte as it was, and cooked.
+void test_berg_cli(TestCtx& c) {
+    c.begin("goldberg berg cli");
+    if (!process_supported()) return;
+    Tree t;
+    KV_CHECK(c, t.make("kv-goldberg-berg-cli"));
+    char root[600], out[600], cli[16];
+    snprintf(root, sizeof root, "g=%s/assets", t.dir);
+    snprintf(out, sizeof out, "%s/out", t.dir);
+    u16 cli_port = (u16)(41000 + (u32)(os_ticks() % 20000));
+    snprintf(cli, sizeof cli, "%u", cli_port);
+    const char* berg = "{\n  // art, sharp\n  \"rules\": [\n    { \"match\": \"art/*.png\", \"meta\": { \"filter\": \"nearest\" } }\n  ]\n}\n";
+    t.put("assets/goldberg.berg", berg);
+    t.put("assets/art/a.png", "a");
+    t.put("assets/art/b.png", "b");
+    t.put("assets/c.png", "c");
+    Running w;
+    KV_CHECK(c, w.start("--cli-port", cli, "watch", "game", "--root", root, "--project", t.dir, "--out", out));
+    KV_CHECK(c, eventually(w, [&] { return has(w.text(), ", watching with "); }));
+    KV_CHECK(c, ask(w, cli_port, "berg g:goldberg.berg") && has(g_out.data, "rules 1 match") && has(g_out.data, "\"art/*.png\"")
+                && has(g_out.data, "rules 1 meta filter") && has(g_out.data, "\"nearest\""));
+    // A preview: the two files under art/, not c.png; nothing written.
+    KV_CHECK(c, ask(w, cli_port, "berg-preview g:goldberg.berg rules 1 meta filter linear"));
+    KV_CHECK(c, has(g_out.data, "g:art/a.png") && has(g_out.data, "g:art/b.png") && !has(g_out.data, "g:c.png") && has(g_out.data, "filter=\"linear\""));
+    KV_CHECK(c, strcmp(t.read("assets/goldberg.berg"), berg) == 0);
+    // Nothing changes: said so.
+    KV_CHECK(c, ask(w, cli_port, "berg-preview g:goldberg.berg rules 1 meta filter nearest") && has(g_out.data, "no file's answer changes"));
+    // Not a value a rule file takes: refused, with why.
+    KV_CHECK(c, !ask(w, cli_port, "berg-preview g:goldberg.berg rules 3 meta filter linear") && has(g_out.data, "no element 3"));
+    // Set: the value changed and every other byte as it was; the watch sees it and solves again.
+    KV_CHECK(c, ask(w, cli_port, "berg-set g:goldberg.berg rules 1 meta filter linear") && has(g_out.data, "saved g:goldberg.berg"));
+    const char* want = "{\n  // art, sharp\n  \"rules\": [\n    { \"match\": \"art/*.png\", \"meta\": { \"filter\": \"linear\" } }\n  ]\n}\n";
+    KV_CHECK(c, strcmp(t.read("assets/goldberg.berg"), want) == 0);
+    KV_CHECK(c, eventually(w, [&] { return ask(w, cli_port, "explain g:art/a.png") && has(g_out.data, "\"linear\""); }));
+    // A key a rule did not have is added to its meta.
+    KV_CHECK(c, ask(w, cli_port, "berg-set g:goldberg.berg rules 1 meta tags [\"art\"]"));
+    KV_CHECK(c, has(t.read("assets/goldberg.berg"), "\"tags\": [\"art\"]") && has(t.read("assets/goldberg.berg"), "// art, sharp"));
+    KV_CHECK(c, ask(w, cli_port, "quit"));
+    KV_CHECK(c, w.wait(10.0) == 0);
+    w.free();
+    t.free();
+}
+
 // kim's preludes as edges (docs/PRDs/Krome-Slice-6-PRD.md, "Discovered edges, for kim only"): a
 // prelude saved checks again the screens that use it, so a screen it breaks fails in the cook
 // with its line, and the fix lands it again; a cook of the unchanged tree after runs no step.
@@ -1162,6 +1207,7 @@ int main(int argc, char** argv) {
     test_watch(c);
     test_programs(c);
     test_kim_edges(c);
+    test_berg_cli(c);
     test_state_slices(c);
     test_lock(c);
     g_out.free();

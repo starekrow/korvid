@@ -31,3 +31,20 @@ button), checks the model after each, and quits: 5 s, 0 validation messages.
 them into physical ones, and each font is rasterized at size times scale, so text at 2x is
 drawn from twice the pixels, not stretched. Worth a look on a 4K panel with the desktop's
 scale at 2: `kromedemo --shots DIR` and compare the glyph edges with the 1x pictures.
+
+## Slice 6 (Nov 18, 2026)
+
+**Save to frame, live.** `goldberg watch` on a program's roots, the program connected to it by
+itself (`asset_live`), each save timed from the write to the program having it
+(`tools/goldberg/tests/live_numbers.py`, ten saves each): kromescreens' screen `.kim` 9.2 ms
+median (17.0 at most), the prelude `krome/std.kim` 8.9 to 12.8 (a save now and then near 200: a
+watcher's or a frame's timing, not repeatable), an icon's `.svg` 7.2 to 9.0; a 512 x 512 texture
+in arcfire 49.9, of which 18.6 is the script's own PNG encode. Before the engine's waker an idle
+on-demand window heard a save only at its quarter-second heartbeat: the screen's median was 72 ms
+with tails of 270.
+
+**What a reload costs Krome**: one reading of the `.kimb` (KBOR to a document), `kimb_check` of it
+on its own and of each screen against it, and a rebuild of each screen as a theme switch does;
+the old reading is kept until no screen built before it is left. The rebuild is the same work as
+opening the screen; nothing is measured apart from the numbers above.
+

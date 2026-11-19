@@ -7,6 +7,7 @@
 -- whole every tick. What the window says comes back as goldberg.ui_event(event, id, value);
 -- what a person typed is read back from Krome's model (host.ui_get).
 local explain = require("explain")
+local bergform = require("bergform")
 
 local M = {}
 
@@ -100,6 +101,10 @@ local function status(run, t)
     put("programs_none", #programs == 0 and "No program is connected. One that links asset_live connects by itself." or "")
 end
 
+-- The step table holds the first of them, in state order (running, failed, waiting, then
+-- clean): a cook of tens of thousands of steps is not sent whole. Inspect finds any file.
+local MAX_STEPS = 2000
+
 local function steps(run)
     local g = run.session.graph
     local rows = {}
@@ -118,8 +123,10 @@ local function steps(run)
         if x ~= y then return x < y end
         return a.name < b.name
     end)
+    local total = #rows
+    for i = #rows, MAX_STEPS + 1, -1 do rows[i] = nil end
     put("steps", rows)
-    put("steps_count", string.format("%d steps", #rows))
+    put("steps_count", total > #rows and string.format("%d steps, the first %d shown", total, #rows) or string.format("%d steps", total))
 end
 
 -- ---- Inspect -------------------------------------------------------------------------------------
@@ -200,6 +207,82 @@ local function reports(run, t)
     put("shown_count", string.format("%d of %d", #shown, #list))
 end
 
+-- ---- Rules and Diff ------------------------------------------------------------------------------
+
+local form          -- bergform.read's, with what was typed into it kept (entries[i].value)
+local form_version  -- its rule file's version when it was read
+local add_scope = { scope = "meta", label = "meta" }
+local pending       -- the edited text the Diff page shows, until accepted or rejected
+
+local function bergs(run)
+    local keys = {}
+    for key, f in pairs(run.session.files) do if f.is_berg and run.session.rules:get(key) then keys[#keys + 1] = key end end
+    table.sort(keys)
+    local rows = {}
+    for i, k in ipairs(keys) do rows[i] = { key = k } end
+    put("bergs", rows)
+    put("bergs_none", #rows == 0 and "No rule file in this session: everything here cooks by the conventions." or "")
+end
+
+local function send_form(force)
+    if not form then return end
+    if force then sent.form = nil end
+    local entries = {}
+    for i, e in ipairs(form.entries) do entries[i] = { id = e.id, label = e.label, key = e.key, value = e.value } end
+    put("form", { key = form.key, broken = form.broken and ("broken on disk, its last good version shown: " .. form.broken) or "", entries = entries })
+    put("add_scope_label", add_scope.label)
+end
+
+-- What was typed into the form's values, kept in it (so that sending it again loses nothing).
+local function take_typed()
+    if not form then return end
+    for i, e in ipairs(form.entries) do
+        local v = host.ui_get("form.entries." .. i .. ".value")
+        if v then e.value = v end
+    end
+end
+
+local function open_form(run, key)
+    local f, why = bergform.read(run.session, key)
+    form, pending = f, nil
+    if not f then put("form_state", why) return end
+    for _, e in ipairs(f.entries) do e.was = e.value end
+    form_version = run.session.rules:get(key).version
+    add_scope = { scope = "meta", label = "meta" }
+    put("form_state", "")
+    send_form(true)
+end
+
+-- The form's edits: each value that differs from the file, and each key added.
+local function edits()
+    local list = {}
+    for _, e in ipairs(form.entries) do
+        if e.value ~= e.was then list[#list + 1] = { path = e.path, value = e.value } end
+    end
+    return list
+end
+
+local function preview(run)
+    if not form then return end
+    take_typed()
+    local list = edits()
+    put("diff_error", "")
+    if #list == 0 then put("form_state", "nothing edited") return end
+    local text, why = bergform.apply(form, list)
+    if not text then put("form_state", why) put("diff_error", why) return end
+    local rows, perr = bergform.preview(run.session, form.key, text)
+    if not rows then put("form_state", perr) return end
+    pending = text
+    local files = {}
+    for _, r in ipairs(rows) do files[r.key] = true end
+    local n = 0
+    for _ in pairs(files) do n = n + 1 end
+    put("diff", rows)
+    put("diff_summary", n == 0 and string.format("%s, edited: no file's answer changes. Accept saves it.", form.key)
+        or string.format("%s, edited: %d %s change%s.", form.key, n, n == 1 and "file's answer" or "files' answers", n == 1 and "s" or ""))
+    host.ui_set("page", "diff")
+end
+
 -- ---- the loop's side -----------------------------------------------------------------------------
 
 function M.start(run)
@@ -208,21 +291,48 @@ end
 
 -- Every tick of the session: the small models when they change, the big ones every quarter
 -- second while it works and once more when it goes still.
+-- What the session has been through, cheaply: when it is the same, nothing it shows changed.
+local function mark(run)
+    local s, g = run.session, run.session.graph
+    return string.format("%d/%d/%d/%d/%d/%s/%d", s.solves or 0, g and g.cooked or 0, g and g.running or 0, g and g.unchecked or 0,
+        s.hashing or 0, tostring(s:stable()), #host.programs())
+end
+
+local next_small = 0   -- the counts and the state: ten times a second at most
+local last_mark
+
 function M.tick(run, now)
     -- Nothing is kept by a screen still loading: everything is sent once it is built.
     if not host.ui_ready() then sent, M.ready = {}, false return end
     if not M.ready then M.ready, now = true, true; host.ui_set("page", host.ui_get("page") or "status") end
     local s = run.session
+    local m = mark(run)
+    local t_now = host.now()
+    if not now and m == last_mark then return end -- nothing moved since the last look
+    if not now and t_now < next_small then return end
+    next_small = t_now + 0.1
     local t = s:totals()
     status(run, t)
     local stable = s:stable()
-    local due = host.now() >= next_big
+    local due = t_now >= next_big
     if now or due or (stable and not M.was_stable) then
-        next_big = host.now() + 0.25
+        last_mark = m
+        -- The big models: every half second while the session works, and once when it stops.
+        next_big = t_now + 0.5
         steps(run)
         files(run)
         reports(run, t)
+        bergs(run)
         if inspected then put("sel", inspect_model(run, inspected)) end
+        -- The rule file shown changed on disk (a save, the Diff's accept): read again.
+        if form and not pending then
+            local rec = s.rules:get(form.key)
+            if rec and rec.version ~= form_version then
+                local was_state = host.ui_get("form_state")
+                open_form(run, form.key)
+                if was_state == "saved, cooking" then put("form_state", "saved") end
+            end
+        end
     end
     M.was_stable = stable
 end
@@ -256,6 +366,37 @@ function M.event(run, event, id, value)
         files(run)
     elseif event == "report" or event == "report_filter" then
         reports(run, s:totals())
+    elseif event == "pick_berg" and id then
+        open_form(run, id)
+    elseif event == "scope" and id and form then
+        for _, e in ipairs(form.entries) do
+            if e.id == id then add_scope = { scope = e.scope, label = e.label } end
+        end
+        put("add_scope_label", add_scope.label)
+    elseif event == "add_entry" and form then
+        take_typed()
+        local k, v = host.ui_get("add_key") or "", host.ui_get("add_value") or ""
+        if k == "" then put("form_state", "a key to add, first") return end
+        local path = add_scope.scope == "meta" and { "meta", k } or { "rules", math.tointeger(tonumber(add_scope.scope)), "meta", k }
+        form.entries[#form.entries + 1] = { id = "e" .. (#form.entries + 1), scope = add_scope.scope, label = add_scope.label, key = k, value = v, was = nil, path = path }
+        host.ui_set("add_key", "")
+        host.ui_set("add_value", "")
+        send_form(true)
+    elseif event == "preview" then
+        preview(run)
+    elseif event == "revert" and form then
+        open_form(run, form.key)
+        put("form_state", "reverted")
+    elseif event == "accept" and form and pending then
+        local ok, why = bergform.save(s, form.key, pending)
+        pending = nil
+        put("form_state", ok and "saved, cooking" or why)
+        host.ui_set("page", "rules")
+    elseif event == "reject" and form then
+        pending = nil
+        open_form(run, form.key)
+        put("form_state", "the edit was rejected")
+        host.ui_set("page", "rules")
     elseif event == "sort" and id then
         local field = id == "col_what" and "what" or "file"
         if sort.report == field then sort.up = not sort.up else sort.report, sort.up = field, true end
@@ -268,7 +409,7 @@ function M.sent(key) return sent[key] end
 
 -- goldberg --window --demo: each page checked against the session (the pilot in goldberg.cc
 -- presses, then asks). "" when it holds, else what did not; "first_file" answers a key.
-local demo_key
+local demo_key, demo_edit
 function M.demo(run, what)
     local s = run.session
     local t = s:totals()
@@ -281,7 +422,7 @@ function M.demo(run, what)
         local n = 0
         for _ in pairs(s.graph and s.graph.steps or {}) do n = n + 1 end
         local busy = s.graph and s.graph:busy() or { running = {}, waiting = 0 }
-        local why = same("steps_count", string.format("%d steps", n))
+        local why = same("steps_count", n > MAX_STEPS and string.format("%d steps, the first %d shown", n, MAX_STEPS) or string.format("%d steps", n))
         if why ~= "" then return why end
         why = same("state", s:stable() and "stable" or "working")
         if why ~= "" then return why end
@@ -317,6 +458,45 @@ function M.demo(run, what)
         if why ~= "" then return why end
         if sent.sel ~= json_of(inspect_model(run, demo_key)) then return "what Inspect was sent is not the session's answer for " .. demo_key end
         return ""
+    elseif what == "has_bergs" then
+        for _, f in pairs(s.files) do if f.is_berg and s.rules:get(f.key) then return "" end end
+        return "none"
+    elseif what == "first_berg" then
+        local keys = {}
+        for key, f in pairs(s.files) do if f.is_berg and s.rules:get(key) then keys[#keys + 1] = key end end
+        table.sort(keys)
+        return keys[1] or ""
+    elseif what == "rules" then
+        if not form then return "no rule file was picked" end
+        local why = same("form.key", form.key)
+        if why ~= "" then return why end
+        local fresh = bergform.read(s, form.key)
+        if #fresh.entries ~= #form.entries then return string.format("the form has %d values, the file %d", #form.entries, #fresh.entries) end
+        return ""
+    elseif what == "rules_input" then
+        -- The value of the first rule's first meta key: the one the demo edits.
+        if not form then return "" end
+        for _, e in ipairs(form.entries) do
+            if e.path[1] == "rules" and e.path[3] == "meta" then demo_edit = e return e.id .. "_v" end
+        end
+        return ""
+    elseif what == "rules_value" then
+        -- What the demo types there: a string value the conventions do not give.
+        return '"demo-value"'
+    elseif what == "diff" then
+        if not demo_edit then return "nothing was edited" end
+        local why = same("page", "diff")
+        if why ~= "" then return why end
+        local text = bergform.apply(bergform.read(s, form.key), { { path = demo_edit.path, value = '"demo-value"' } })
+        if not text then return "the demo's edit does not apply" end
+        local rows = bergform.preview(s, form.key, text)
+        if sent.diff ~= json_of(rows) then return "the Diff page was not sent what berg-preview says" end
+        if #rows == 0 then return "the demo's edit changed nothing" end
+        return ""
+    elseif what == "saved" then
+        local rec = s.rules:get(form and form.key or "")
+        if not rec or not rec.text or not rec.text:find('"demo-value"', 1, true) then return "the rule file was not saved with the edit" end
+        return same("form_state", "saved")
     elseif what == "reports" then
         local why = same("failed_count", tostring(#t.errors))
         if why ~= "" then return why end

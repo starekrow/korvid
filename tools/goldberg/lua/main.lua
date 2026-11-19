@@ -11,6 +11,7 @@ local Rules = require("rules")
 local solve = require("solve")
 local explain = require("explain")
 local window = require("window")
+local bergform = require("bergform")
 local Learn = require("learn")
 
 local json = kv.json
@@ -421,6 +422,48 @@ function goldberg.ask(words)
                 if step then out[#out + 1] = string.format("  %-8s%s%s", "step", step.state, step.error and (": " .. step.error) or "") end
             end
         end
+        return out
+    elseif verb == "berg" or verb == "berg-preview" or verb == "berg-set" then
+        -- A rule file's values; what setting one would change; setting it (bergform.lua). The
+        -- window's Rules and Diff pages do the same.
+        if #words < 2 or (verb ~= "berg" and #words < 4) then return out, verb == "berg" and "berg FILE" or (verb .. " FILE PATH... VALUE") end
+        local f = s.files[words[2]]
+        if not f then
+            local full = absolute(words[2]):gsub("/%./", "/")
+            for n, r in ipairs(s.roots) do
+                local dir = (r.abs or r.dir):gsub("/+$", "")
+                if n ~= s.out_root and full:sub(1, #dir + 1) == dir .. "/" then f = s.files[s:key(n, full:sub(#dir + 2))] end
+            end
+        end
+        if not f then return out, words[2] .. ": not a file this session knows (give its path, or its key as `root:path`)" end
+        local form, why = bergform.read(s, f.key)
+        if not form then return out, why end
+        if verb == "berg" then
+            out[#out + 1] = form.key .. (form.broken and ("  (broken on disk: " .. form.broken .. "; its last good version)") or "")
+            for _, e in ipairs(form.entries) do
+                local p = {}
+                for i, k in ipairs(e.path) do p[i] = tostring(k) end
+                out[#out + 1] = string.format("  %-28s %s", table.concat(p, " "), e.value)
+            end
+            return out
+        end
+        local path = bergform.path_of(words, 3)
+        local value = tostring(table.remove(path))
+        -- The CLI's words lose their quotes: a value that is not JSON is a string.
+        local okj, decoded = pcall(kv.json.decode, value)
+        if not okj or (decoded == nil and value ~= "null") then value = kv.json.encode(value) end
+        local text, err = bergform.apply(form, { { path = path, value = value } })
+        if not text then return out, err end
+        if verb == "berg-preview" then
+            local rows, perr = bergform.preview(s, f.key, text)
+            if not rows then return out, perr end
+            if #rows == 0 then out[#out + 1] = "no file's answer changes" end
+            for _, r in ipairs(rows) do out[#out + 1] = string.format("  %-40s %-7s %s  ->  %s", r.key, r.field, r.old, r.new) end
+            return out
+        end
+        local ok, serr = bergform.save(s, f.key, text)
+        if not ok then return out, serr end
+        out[#out + 1] = "saved " .. f.key
         return out
     end
     return out, "not something a running session answers: " .. tostring(verb)

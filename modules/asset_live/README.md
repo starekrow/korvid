@@ -24,12 +24,13 @@ engine waker (`engine_add_waker`), which the frame loop asks each time it polls 
 while a window paced on demand is idle (every 4 ms). A save reaches an idle tool's window in a
 poll, not at its next quarter-second heartbeat. Linux, dev build, `kromescreens` under
 `goldberg watch` (`tools/goldberg/tests/live_numbers.py`, 10 saves each): from the write to the
-screen built again, a screen's `.kim` 9.6 ms median (20 at most), the prelude `krome/std.kim`
-9.3 (10.8), an icon's `.svg` to its shape read again 7.7 (16.8).
+screen built again, a screen's `.kim` 9.2 ms median, the prelude `krome/std.kim` 8.9, an icon's
+`.svg` to its shape read again 7.2; and a 512 x 512 texture in arcfire 49.9, of which 18.6 is the
+script's PNG encode (`docs/design/krome-notes.md`, slice 6).
 
 ## Using it
 
-Put `"asset_live"` in a program's `deps` (kromedemo and kromescreens have it), build, start
+Put `"asset_live"` in a program's `deps` (kromedemo, kromescreens, arcfire and goldberg have it), build, start
 `goldberg watch` on the program's roots (`--roots build/<target>/goldberg/<program>.roots`), and
 run the program.
 

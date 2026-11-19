@@ -289,8 +289,8 @@ loaded into scopes like any other. goldberg cooks `.kim` to `.kimb` with the `ki
 module, and reports each file's `use`s as discovered edges, so saving a prelude re-cooks
 exactly the screens that use it. Shape references are not edges (slice 5): every `.svg`
 under a root cooks by convention, and a screen naming a shape that is not there finds out
-at load (logged, drawn as nothing). Reload needs the asset
-module's rebind (goldberg's "Live" slice); until then a screen changes on the next run.
+at load (logged, drawn as nothing). Reload is the asset module's rebind (slice 6): a screen,
+a prelude, a script or a shape saved under a running watch changes the running program.
 
 ### Errors
 
@@ -314,7 +314,8 @@ the model, a definition used with the wrong arguments: each names the line writt
 | Subpixel positioning, opt-in | `text`, `asset` (fonts) | 3 |
 | A general-purpose vector rasterizer: fills with both rules, strokes, gradients | `patherizer` (new) | 5 |
 | The platforms' text input protocols, and an accessibility tree | `platform_hid`, the platform ports | later |
-| Reload by path and handle rebind | `asset` (goldberg's Live) | 6 |
+| Reload by path and handle rebind | `asset` (`asset_reload`), `asset_live` (goldberg's connection) | 6 |
+| A check a loop pacing on demand makes at each poll (a socket's) | `core` (`engine_add_waker`) | 6 |
 
 ## Requirements
 
@@ -344,8 +345,8 @@ the model, a definition used with the wrong arguments: each names the line writt
 | K20 | Transitions between style states | P2 |
 | K21 | Vector shapes, from SVG, rasterized on demand at the drawn size | P1 |
 | K21a | The rasterizer is a module of its own, for any caller, not stb_truetype's | P1 |
-| K22 | goldberg cooks `.kim` with discovered edges; a prelude save re-cooks its screens | P1 |
-| K23 | Hot reload through rebind | P2 |
+| K22 | goldberg cooks `.kim` with discovered edges; a prelude save re-cooks its screens (slice 6: re-checks them) | P1 |
+| K23 | Hot reload through rebind (slice 6) | P2 |
 | K24 | Grid areas for screen shells | P2 |
 | K25 | `edit` speaks each platform's text input protocol: dictation, autocorrect, accent menus, soft keyboards | P2 |
 | K26 | An accessibility tree from Krome's nodes, for each platform's screen readers | P2 |
@@ -392,11 +393,18 @@ the model, a definition used with the wrong arguments: each names the line writt
    illustration takes 14 to 48 ms, so a shape over 256 x 256 is rasterized on a task worker
    of the platform's I/O queue (patherizer's README has the numbers).
 6. **Live.** Hot reload of screens, preludes, themes and shapes through goldberg and the
-   asset module's rebind.
+   asset module's rebind. Built (Krome-Slice-6-PRD.md): `asset_reload` rebinds a texture, a
+   material, a shape or a blob under its handle; Krome reads its documents as blobs and, on a
+   reload, checks the new reading (`kimb_check`) before it builds anything, holding a screen
+   that does not check on the reading it had; a dev build that links `asset_live` hears a
+   `goldberg watch` say what changed, a save reaching the window in about 9 ms; and goldberg's
+   window (`goldberg watch --window`) shows status, inspection, reports, rule forms and their
+   diffs over the live session, and edits itself.
 
 **Done, for the whole of it:** goldberg's window shows the five things its design asks for
 (`docs/design/asset-toolchain-design.md`, "Dialog UI library"): inspection, diff review,
-live status, reports and forms, over the same commands as its CLI.
+live status, reports and forms, over the same commands as its CLI. *As built*: all five, with
+diff review as a rule edit's preview, since goldberg has no lockfile yet (slice 6).
 
 ## Decided
 

@@ -1823,7 +1823,10 @@ void pump_body(TickContext& ctx, bool work) {
 
 // What a running session answers at once, in the CLI's own turn: it reads the session and
 // changes no pool.
-bool session_verb(const char* v) { return strcmp(v, "status") == 0 || strcmp(v, "explain") == 0 || strcmp(v, "touch") == 0 || strcmp(v, "cook") == 0; }
+bool session_verb(const char* v) {
+    return strcmp(v, "status") == 0 || strcmp(v, "explain") == 0 || strcmp(v, "touch") == 0 || strcmp(v, "cook") == 0 ||
+           strcmp(v, "berg") == 0 || strcmp(v, "berg-preview") == 0 || strcmp(v, "berg-set") == 0;
+}
 
 // Every other verb is one command: it leaves its words for the pump.
 void cmd_any(CliContext& ctx, Span<const char* const> args, const char* verb) {
@@ -1873,6 +1876,9 @@ void cmd_clean(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, arg
 void cmd_replay(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "replay"); }
 void cmd_touch(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "touch"); }
 void cmd_learn(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "learn"); }
+void cmd_berg(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "berg"); }
+void cmd_berg_preview(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "berg-preview"); }
+void cmd_berg_set(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "berg-set"); }
 
 // The window's waker (engine_add_waker), asked at each of the frame loop's polls while it is
 // idle: the watcher's news taken, programs served, and true (with the Work cycle asked for)
@@ -1978,6 +1984,9 @@ constinit const CliCommandDesc k_commands[] = {
     {.name = "explain", .help = "explain PATH: what this file is, what happens to it, and why", .fn = cmd_explain},
     {.name = "touch", .help = "touch PATH: look at this file again as if it had been saved", .fn = cmd_touch},
     {.name = "cook", .help = "cook: look at every file again, with the whole of each tick, until stable", .fn = cmd_cook},
+    {.name = "berg", .help = "berg FILE: a rule file's values, each with its path (as berg-set takes it)", .fn = cmd_berg},
+    {.name = "berg-preview", .help = "berg-preview FILE PATH... VALUE: what setting the value would change, file by file, before anything is saved", .fn = cmd_berg_preview},
+    {.name = "berg-set", .help = "berg-set FILE PATH... VALUE: set a rule file's value (JSON) in place, its comments and order kept", .fn = cmd_berg_set},
     {.name = "goldberg replay", .help = "goldberg replay LOG [--dump FILE]: feed a recorded event log to a fresh session, with no file system under it", .fn = cmd_replay},
 };
 void pump(TickContext& ctx) { if (!ctx.state_as<GoldbergState>().window) pump_body(ctx, false); }
@@ -2066,7 +2075,7 @@ void ui_events(TickContext& ctx) {
 
 // ---- the pilot (--demo) ---------------------------------------------------------------------------
 
-enum class Act : u8 { Stable, Click, ClickLua, Type, TypeLua, Check, Shot, Theme, Wait, Quit };
+enum class Act : u8 { Stable, Click, ClickLua, Type, TypeLua, Key, Check, Shot, Theme, Wait, Section, EndSection, Quit };
 struct Step { Act act; const char* arg; };
 
 // Each page in turn. A Check is goldberg's Lua comparing what the window was sent with what the
@@ -2088,6 +2097,28 @@ constinit const Step k_pilot[] = {
     {Act::Wait, nullptr},
     {Act::Check, "reports"},
     {Act::Shot, "reports"},
+    // Rules and Diff, where the session has a rule file: a value edited, previewed by its
+    // shortcut, the preview checked against berg-preview, accepted, cooked.
+    {Act::Section, "has_bergs"},
+    {Act::Click, "page_rules"},
+    {Act::ClickLua, "first_berg"},
+    {Act::Wait, nullptr},
+    {Act::Check, "rules"},
+    {Act::ClickLua, "rules_input"},
+    {Act::Key, "ctrl+a"},
+    {Act::TypeLua, "rules_value"},
+    {Act::Wait, nullptr},
+    {Act::Shot, "rules"},
+    {Act::Key, "mod+s"},
+    {Act::Wait, nullptr},
+    {Act::Check, "diff"},
+    {Act::Shot, "diff"},
+    {Act::Click, "accept"},
+    {Act::Wait, nullptr},
+    {Act::Stable, nullptr},
+    {Act::Wait, nullptr},
+    {Act::Check, "saved"},
+    {Act::EndSection, nullptr},
     {Act::Theme, "light"},
     {Act::Click, "page_status"},
     {Act::Wait, nullptr},
@@ -2096,6 +2127,11 @@ constinit const Step k_pilot[] = {
 };
 
 struct Pilot { u32 step = 0, wait = 0, phase = 0, settled = 0; f64 since = 0; };
+#if defined(__APPLE__)
+constexpr Key KV_PLATFORM_MOD_KEY = Key::LGui;
+#else
+constexpr Key KV_PLATFORM_MOD_KEY = Key::LCtrl;
+#endif
 Pilot g_pilot;
 
 bool aim(Engine& e, Name screen, const char* id, f32* x, f32* y) {
@@ -2127,7 +2163,7 @@ void fail_demo(const char* step, const char* why) {
     print_err("goldberg: demo: %s: %s\n", step, why);
 }
 
-// Phase PreSim, main thread, with --demo: a step every few ticks, once the screen is built.
+// Phase Frame, main thread, with --demo: a step every few frames, once the screen is built.
 void pilot(TickContext& ctx) {
     Engine& e = *ctx.engine;
     GoldbergState& s = ctx.state_as<GoldbergState>();
@@ -2143,9 +2179,10 @@ void pilot(TickContext& ctx) {
         if (p.since == 0) p.since = time_now();
         const char* state = krome_model_text(e, s.screen, "state");
         if (!(s.quiet && state && !strcmp(state, "stable"))) {
-            if (time_now() - p.since > 60.0) { fail_demo("stable", "the session did not go stable in a minute"); break; }
+            if (time_now() - p.since > 60.0) { fail_demo("stable", "the session did not go stable in a minute"); p.since = 0; break; }
             return;
         }
+        p.since = 0;
         break;
     }
     case Act::Click:
@@ -2161,6 +2198,32 @@ void pilot(TickContext& ctx) {
     }
     case Act::Type: input_text_override(e, st.arg); break;
     case Act::TypeLua: input_text_override(e, ask_demo(s, e, st.arg)); break;
+    case Act::Key: {
+        // "ctrl+a", "mod+s" (mod: Command on a Mac, else Ctrl), "enter": held, pressed, let go.
+        Key held = Key::Unknown, k = Key::Unknown;
+        const char* name = st.arg;
+        if (!strncmp(name, "ctrl+", 5)) { held = Key::LCtrl; name += 5; }
+        else if (!strncmp(name, "mod+", 4)) { held = KV_PLATFORM_MOD_KEY; name += 4; }
+        if (!strcmp(name, "a")) k = Key::A;
+        else if (!strcmp(name, "s")) k = Key::S;
+        else if (!strcmp(name, "enter")) k = Key::Enter;
+        else if (!strcmp(name, "escape")) k = Key::Escape;
+        if (p.phase == 0 && held != Key::Unknown) input_key_override(e, held, true);
+        if (p.phase == 1) { input_key_override(e, k, true); input_key_override(e, k, false); }
+        if (p.phase == 2 && held != Key::Unknown) input_key_override(e, held, false);
+        if (++p.phase < 3) { p.wait = 1; return; }
+        p.phase = 0;
+        break;
+    }
+    case Act::Section:
+        // Its steps only where the Lua says so; else on past its EndSection.
+        if (ask_demo(s, e, st.arg)[0]) {
+            while (p.step + 1 < KV_COUNTOF(k_pilot) && k_pilot[p.step + 1].act != Act::EndSection) ++p.step;
+            print("goldberg: demo: %s: no, so that part is not driven\n", st.arg);
+            print_flush();
+        }
+        break;
+    case Act::EndSection: break;
     case Act::Wait: p.wait = 30; break;
     case Act::Check: {
         const char* why = ask_demo(s, e, st.arg);
@@ -2200,7 +2263,9 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".pump", .phase = Phase::PreSim, .fn = pump, .writes = "goldberg.event, goldberg.file, goldberg.berg, goldberg.step", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".work", .phase = Phase::Work, .fn = work, .writes = "goldberg.event, goldberg.file, goldberg.berg, goldberg.step", .main_thread = true},
     {.name = ".ui", .phase = Phase::Sim, .fn = ui_events, .reads = "KromeEvent", .main_thread = true},
-    {.name = ".pilot", .phase = Phase::PreSim, .fn = pilot, .before = "krome.input", .main_thread = true, .runs = RunWhen::Always},
+    // The Frame cycle, before Krome reads input: one step a frame, so a key held across a press
+    // is held in the frame that sees the press (a pass of the loop may run several ticks).
+    {.name = ".pilot", .phase = Phase::Frame, .fn = pilot, .before = "krome.pump", .main_thread = true},
 };
 // Headless (a cook, a watch with no window): no Krome, so nothing reads its events.
 constinit const SystemDesc k_headless_systems[] = {

@@ -1,0 +1,3 @@
+screen broken {
+    box bg=#12 { text "a colour that is not one" }
+}

@@ -11,6 +11,9 @@ return {
     sel = { key = "", state = "", none = "Pick a file on the left.", lands = "", rows = {}, up = {}, down = {} },
     sw = { key = 360, conv = 110, state = 110, out = 320 },
     rw = { file = 360, what = 600 },
+    dw = { key = 300, field = 90, old = 300, new = 300 },
+    bergs = {}, bergs_none = "", form = { key = "", broken = "", entries = {} }, add_scope_label = "meta",
+    add_key = "", add_value = "", form_state = "", diff = {}, diff_summary = "", diff_error = "",
   },
   on = {
     report_menu = function(id, x, y)

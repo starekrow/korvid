@@ -360,3 +360,27 @@ next look.
 iOS's own compile paths are built and its suites run in the Simulator (goldberg is not in
 the ios root: a tool for the desktop); the Android emulator test runner.
 The slice PRD lists each under the milestone that wrote it.
+
+## The window (Krome slice 6)
+
+Nov 18, 2026, Linux, Radeon 780M, dev build.
+
+**A cold cook with the window up** (`goldberg watch --window` over the heavy test's tree at
+`--size 64M`: 18,359 files, 36,718 steps through a shell converter, to the first stable line),
+two runs each: headless 19.9 and 18.8 s, 48.1 and 47.0 s of CPU; with the window 17.3 and 16.7 s,
+55.0 and 54.2 s of CPU. The window's session is a Work unit between frames and sleeps out no
+share, so it finishes first; drawing and the models cost about 15% more CPU. As first built it
+took 42.6 s and twice the CPU, and a still window over the stable tree used a whole core: the
+window rebuilt its step table (36,718 rows, as JSON) four times a second whether or not anything
+had changed. Now the counts go out ten times a second at most and only when the session moved,
+the large models twice a second while it works, and the step table holds the first 2,000 steps
+in state order. Idle over the stable tree, warm: 0.17 s of CPU in 10 s.
+
+**The window editing itself**: a save of `assets/ui/window.kim` to the window rebuilt, through
+the child watch of goldberg's own roots and `asset_live`: 10.6 ms (one in five 111 ms).
+
+**`--demo`** passes on arcfire's, kromedemo's, kromescreens' and goldberg's own trees, and on
+`tests/window` (Rules and Diff too). The pilot steps once a Krome frame: stepped once a tick, a
+key held for a shortcut could be let go before the frame that read the press, since a pass of
+the frame loop may run more than one tick.
+

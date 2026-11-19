@@ -2,7 +2,8 @@
 -- of the file left as its author wrote it: the comments, the spacing, the order.
 --
 -- set(text, path, value) returns the new text. `path` is a list of keys from the top
--- object down; `value` is JSON text. A key that is there has its value replaced. One
+-- object down, a number where the step is into a list (1 its first element, which must be
+-- there); `value` is JSON text. A key that is there has its value replaced. One
 -- that is not is added after the last member of its object, on a line of its own where
 -- that object's members have lines of their own, and with any objects on the way down
 -- that are missing too. Raises a string if the text is not the JSON it expects; a caller
@@ -81,17 +82,42 @@ local function members(text, i)
     return out, j
 end
 
+-- i at "[": where each element's value starts and ends.
+local function elements(text, i)
+    local out = {}
+    local j = skip(text, i + 1)
+    while text:sub(j, j) ~= "]" do
+        local to = value_end(text, j)
+        out[#out + 1] = { from = j, to = to }
+        j = skip(text, to)
+        if text:sub(j, j) == "," then j = skip(text, j + 1) end
+        if j > #text then error("a list that does not end", 0) end
+    end
+    return out
+end
+
 function M.set(text, path, value)
     local i = skip(text, 1)
     if text:sub(i, i) ~= "{" then error("not an object", 0) end
     for n, key in ipairs(path) do
+        if type(key) == "number" then
+            if text:sub(i, i) ~= "[" then error("not a list where element " .. key .. " was wanted", 0) end
+            local el = elements(text, i)[key]
+            if not el then error("there is no element " .. key, 0) end
+            if n == #path then return text:sub(1, el.from - 1) .. value .. text:sub(el.to) end
+            i = el.from
+            goto next_step
+        end
+        if text:sub(i, i) ~= "{" then error('not an object where "' .. key .. '" was wanted', 0) end
+        do
         local ms = members(text, i)
         local found
         for _, m in ipairs(ms) do if m.key == key then found = m end end
         if found and n == #path then
             return text:sub(1, found.from - 1) .. value .. text:sub(found.to)
         elseif found then
-            if text:sub(found.from, found.from) ~= "{" then error('"' .. key .. '" is not an object', 0) end
+            local opens = type(path[n + 1]) == "number" and "[" or "{"
+            if text:sub(found.from, found.from) ~= opens then error('"' .. key .. '" is not ' .. (opens == "[" and "a list" or "an object"), 0) end
             i = found.from
         else
             local v = value
@@ -108,6 +134,8 @@ function M.set(text, path, value)
             local sep = indent:match("^[ \t]*$") and (",\n" .. indent) or ", "
             return text:sub(1, last.to - 1) .. sep .. member .. text:sub(last.to)
         end
+        end
+        ::next_step::
     end
     error("an empty path", 0)
 end

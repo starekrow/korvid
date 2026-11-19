@@ -30,6 +30,8 @@ screen window {
                 tab "Status" id=page_status @page=status
                 tab "Inspect" id=page_inspect @page=inspect
                 tab "Reports" id=page_reports @page=reports
+                tab "Rules" id=page_rules @page=rules
+                tab "Diff" id=page_diff @page=diff
             }
             spacer
             box [state] { text "{state}" }
@@ -118,6 +120,10 @@ screen window {
             }
         }
 
+        // ---- Rules: a rule file as a form; Diff: what its edit would change, before it is saved ----
+        if page=rules { rules-page }
+        if page=diff { diff-page }
+
         // ---- Reports: the session's failures and soft warnings ----
         if page=reports {
             col pad=16 gap=10 w=fill h=fill {
@@ -145,6 +151,75 @@ screen window {
                     }
                 }
                 text "{shown_count}" color=muted
+            }
+        }
+    }
+}
+
+def rules-page {
+    row pad=16 gap=16 w=fill h=fill {
+        col gap=8 w=260 h=fill {
+            text "Rule files" [section]
+            col [list] gap=2 h=fill scroll {
+                each b in bergs {
+                    hit [list-row] dir=row id="{b.key}" -> pick_berg { text "{b.key}" nowrap }
+                }
+            }
+            text "{bergs_none}" color=muted size=12 w=fill
+        }
+        col gap=8 w=fill h=fill {
+            heading "{form.key}"
+            text "{form.broken}" color=muted
+            scroll-view h=fill pad=0 {
+                col gap=4 w=fill {
+                    each e in form.entries {
+                        row gap=8 middle w=fill {
+                            hit [link] id="{e.id}" -> scope w=230 tooltip="Add new keys here" { text "{e.label}" nowrap }
+                            text "{e.key}" w=120 color=muted nowrap
+                            input id="{e.id}_v" @e.value w=fill
+                        }
+                    }
+                }
+            }
+            row gap=8 middle w=fill {
+                text "Add to {add_scope_label}" color=muted
+                input id=add_key @add_key placeholder="key" w=140
+                input id=add_value @add_value placeholder="value, as JSON" w=fill
+                button "Add" id=add_entry -> add_entry
+            }
+            row gap=8 middle {
+                button "Preview" id=preview -> preview key="mod+s" tooltip="What the edit would change, before it is saved (Ctrl+S)"
+                button "Revert" id=revert -> revert
+                text "{form_state}" color=muted
+            }
+        }
+    }
+}
+
+def diff-page {
+    col pad=16 gap=10 w=fill h=fill {
+        row gap=8 middle w=fill {
+            text "{diff_summary}" w=fill
+            button "Accept" id=accept -> accept tooltip="Save the rule file; the watch cooks what it changes"
+            button "Reject" id=reject -> reject [danger]
+        }
+        text "{diff_error}" color=muted
+        table h=fill {
+            table-head {
+                column "File" id=col_dkey @dw.key
+                column "What" id=col_dfield @dw.field
+                column "Now" id=col_dold @dw.old
+                column "With the edit" id=col_dnew @dw.new
+            }
+            scroll-view h=fill pad=0 {
+                each d in diff height=24 {
+                    hit [table-row] dir=row id="{d.key}" -> inspect {
+                        cell w=@dw.key { text "{d.key}" nowrap }
+                        cell w=@dw.field { text "{d.field}" color=muted nowrap }
+                        cell w=@dw.old { text "{d.old}" nowrap }
+                        cell w=@dw.new { text "{d.new}" nowrap }
+                    }
+                }
             }
         }
     }

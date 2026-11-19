@@ -1,0 +1,3 @@
+screen hud {
+    box pad=8 { text "Score" }
+}

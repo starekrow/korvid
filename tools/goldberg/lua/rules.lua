@@ -21,7 +21,7 @@ function Rules:set(key, text, display)
     rec.version = rec.version + 1
     local doc, err = berg.parse(text, display)
     local before = rec.doc
-    if doc then rec.doc, rec.err = doc, nil else rec.err = err end
+    if doc then rec.doc, rec.err, rec.text = doc, nil, text else rec.err = err end -- text: the good version's, for the Rules page
     rec.ok = doc ~= nil
     return doc ~= nil or before == nil
 end

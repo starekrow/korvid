@@ -69,6 +69,9 @@ stdin, and on a TCP port with `--cli-port N` (loopback; one line in, lines out, 
 | `explain PATH` | as below, from the session, with the step's state. `PATH` is a path on disk or a key (`arcfire:ships/ship.png`) |
 | `touch PATH` | looks at the file again as if it had been saved |
 | `cook` | looks at every file again (every root scanned, every step checked against the output tree, what nothing accounts for taken out) with the whole of each tick until stable, then says `cooked again` |
+| `berg FILE` | a rule file's values, each with its path |
+| `berg-preview FILE PATH... VALUE` | what setting the value at `PATH` (`rules 1 meta filter`) would change, file by file; nothing saved. A `VALUE` that is not JSON is a string |
+| `berg-set FILE PATH... VALUE` | sets it in the file, every other byte as it was; the watch cooks what that changes |
 | `quit` | saves the state and exits |
 | `ls /kinds/goldberg`, `help`, ... | the engine's own CLI: goldberg's records are pools like any other |
 
@@ -90,6 +93,13 @@ still window over a stable session sleeps. Its pages:
 - **Reports**: failures and soft warnings, filtered and sorted; a right press on one inspects it,
   looks at it again, or copies its key.
 
+- **Rules**: a rule file (`.berg`) as a form: its `meta` and each rule's `match` and `meta`, a
+  value each, as JSON; a key added to the scope picked; Preview (Ctrl+S) or Revert.
+- **Diff**: what the edit would change before it is saved: every file the rule file speaks for
+  solved again with the edit in place, each answer that changes (its type, path, lands, output,
+  parameters) old beside new. Accept saves the file, its comments, spacing and order kept, and
+  the watch cooks what it changes; Reject drops the edit.
+
 A press on a file anywhere inspects it. `status`, `explain` and the rest still answer on stdin
 and on `--cli-port`. The window's screens are goldberg's own assets (`assets/ui/window.kim`,
 out of `krome/std`), which kormake cooks after goldberg is built. While the window is up a
@@ -104,6 +114,11 @@ keeps a picture of each:
 goldberg watch --roots build/linux-dev/goldberg/arcfire.roots --window
 goldberg --demo --shots /tmp/shots watch --roots build/linux-dev/goldberg/arcfire.roots --window
 ```
+
+`tools/goldberg/tests/window/run.sh` runs the demo over a small fixture that has something on
+every page (a rule file, a failure, a warning), in a copy of its own, since the demo edits and
+saves the rule file. The demo opens a real window that takes the keyboard: keys typed elsewhere
+while it runs can land in it.
 
 Without `--window` none of the window's modules (platform_hid, the renderers, Krome, the frame
 loop) is started, so a cook runs where there is no display.
