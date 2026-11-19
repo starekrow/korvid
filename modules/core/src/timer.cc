@@ -164,14 +164,16 @@ void TimerWheel::free() {
 
 u64 TimerWheel::hash(Span<const EventTypeDesc* const> types) const {
     // Summed over records, so where a record sits (its slot, the far list, which lap) never
-    // counts; the emitter, a pointer, never does either.
+    // counts; the emitter, a pointer, never does either; nor the ticket (below).
     u64 h = 0;
     auto add = [&](const Array<u8>& list) {
         const u8* p = list.data;
         const u8* end = p + list.len;
         while (p < end) {
             const TimerRecord* r = (const TimerRecord*)p;
-            u64 rh = hash_mix(r->tick ^ ((u64)r->type << 32) ^ ((u64)r->ticket * 0x9E3779B97F4A7C15ull));
+            // Not the ticket: it carries the issuing unit's number, which moves whenever a system
+            // is added anywhere, and the game would hash differently for a diagnostic.
+            u64 rh = hash_mix(r->tick ^ ((u64)r->type << 32));
             const EventTypeDesc* d = r->type < types.len ? types[r->type] : nullptr;
             if (d && d->fields.len) rh = hash_mix(rh ^ schema_hash(d->fields, p + sizeof *r));
             h += rh;

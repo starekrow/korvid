@@ -42,7 +42,7 @@ The system `frameloop.exit` (phase PreSim, `Always`) emits `ExitRequested` with 
 
 - `WindowClosed` when `CloseRequested` arrived and the config allows it;
 - `Escape` when the key is held and the config allows it;
-- `Timer` once, when `--run-seconds` has elapsed.
+- `Timer` once, when `--run-seconds` has elapsed or `--run-ticks` is reached.
 
 The game's handler or system reads it and quits when it is ready (after a fade, a save,
 a goodbye), or ignores it.
@@ -111,6 +111,7 @@ renders once.
 | option | what |
 |---|---|
 | `--run-seconds N` | `ExitRequested{Timer}` after N seconds; for smoke tests and captures |
+| `--run-ticks N` | `ExitRequested{Timer}` at sim tick N: a run the same length on any machine, however its frames are paced |
 | `--size WxH` | the window's size over the config's |
 | `--quiet` | log at Warn and above |
 | `--validation`, `--no-validation` | the Vulkan validation layers (on in debug builds) |
@@ -148,7 +149,7 @@ Header `korvid/frameloop/frameloop.h`:
 
 | name | kind | what |
 |---|---|---|
-| `FrameLoopConfig` | record | `title`, `width`, `height`, `vsync`, `borderless`, `validation`, `renderer`, `cpu_shaders`, `cpu_scale`, `exit_on_close`, `exit_on_escape`, `run_seconds`, `clear_color`, `report_every_seconds`, `sprite_rows` (the first size of the renderer's sprite table and the extract's: a game that draws many asks, so the tables never grow mid-run), `touchpad_layout`, `flags`, `options`, `recorded_actions`, `engine` (an `EngineConfig`), `pacing` |
+| `FrameLoopConfig` | record | `title`, `width`, `height`, `vsync`, `borderless`, `validation`, `renderer`, `cpu_shaders`, `cpu_scale`, `exit_on_close`, `exit_on_escape`, `run_seconds`, `run_ticks`, `clear_color`, `report_every_seconds`, `sprite_rows` (the first size of the renderer's sprite table and the extract's: a game that draws many asks, so the tables never grow mid-run), `touchpad_layout`, `flags`, `options`, `recorded_actions`, `engine` (an `EngineConfig`), `pacing` |
 | `Pacing` | enum | `Continuous`, `OnDemand` |
 | `ExitReason`, `ExitRequested{reason}` | enum, event | `WindowClosed`, `Escape`, `Timer` |
 | `frameloop_main(argc, argv, config)` | function | the whole run; returns the process exit code (2 for a bad option, 1 for a failed init) |

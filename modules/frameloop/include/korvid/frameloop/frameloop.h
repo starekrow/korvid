@@ -47,6 +47,7 @@ struct FrameLoopConfig {
     bool        exit_on_close  = true;  // CloseRequested -> ExitRequested
     bool        exit_on_escape = true;  // Escape held    -> ExitRequested
     f64         run_seconds    = -1.0;  // >= 0: ExitRequested after this long (smoke tests)
+    u64         run_ticks      = 0;     // > 0: ExitRequested at this sim tick: the same length on any machine
     color       clear_color{0.09f, 0.09f, 0.11f, 1.0f};
     u32         report_every_seconds = 1; // fps line; 0 is silent
     u32         sprite_rows = 0;          // the renderer's sprite tables' first size (0: its default); a game that knows it draws many asks
@@ -65,7 +66,7 @@ struct FrameLoopConfig {
 enum class ExitReason : u8 {
     WindowClosed, // CloseRequested arrived and exit_on_close is set
     Escape,       // Escape is held and exit_on_escape is set
-    Timer,        // --run-seconds (or run_seconds) elapsed; once
+    Timer,        // --run-seconds or --run-ticks (run_seconds, run_ticks) reached; once
 };
 struct ExitRequested { ExitReason reason; };
 

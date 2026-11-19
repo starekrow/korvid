@@ -72,8 +72,10 @@ a cycle's bookkeeping. `platform.io_idle`, the I/O queue's idle reads, is a Work
 ## The rule: only the Sim writes the sim
 
 Frame and Work run as often as the machine allows, so nothing they do can appear in a
-replay. They may read any kind, and write cosmetic kinds, cosmetic components and their
-own module's state. Beyond that:
+replay. They may read any kind, and write cosmetic kinds, cosmetic components, their own
+module's state and its resources. A module whose Frame or Work units feed its sim units
+through that state owns keeping it deterministic; events are the way in that the engine
+keeps straight. Beyond that:
 
 - a declared write that covers a sim kind (the kind, its liveness, a column, an
   attachment, its bags) fails `engine_init`, naming the unit, its cycle and the resource;
@@ -81,8 +83,9 @@ own module's state. Beyond that:
   and logged. These checks are always on, ship builds included.
 
 To affect the sim, a Frame or Work unit emits an event. To the simulation that event is
-input from outside, and a game that lets a UI drive its sim records those events as it
-records input.
+input from outside. The recorder (`--record`) keeps named actions only, so a game whose
+UI drives its sim doesn't replay those events yet
+([principles review, 4](../design/principles-review.md)).
 
 ## Events across cycles
 

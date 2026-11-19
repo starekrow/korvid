@@ -136,6 +136,8 @@ struct SimReset {
 // emitter of its event there, and is called only when its batch isn't empty (paused
 // ticks included). If the event type has a schema (KV_EVENT_EX), handles in the batch are
 // live: an event naming an entity destroyed since it was emitted is dropped first.
+// Handlers run on the main thread unless they say `.any_thread = true`, so a handler may
+// call main-thread-only functions (the ui's) without thinking about it.
 //
 //   void on_expire(TickContext& ctx, Span<const Expire> expiries) {
 //       for (const Expire& e : expiries) ctx.destroy(e.bullet);
@@ -169,6 +171,7 @@ struct HandlerDesc {
     const char* emits      = nullptr; // event types it emits
     const char* after      = nullptr; // system or handler names, as for a system
     const char* before     = nullptr;
+    bool        any_thread = false;   // false: on the main thread, where main-thread APIs (ui) are safe; true: any worker, for a heavy one
 };
 
 // A state trigger: the engine watches one scalar field across ticks, for every live row

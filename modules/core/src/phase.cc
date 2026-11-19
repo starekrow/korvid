@@ -226,7 +226,7 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
     usize snapshot_bytes = 0;
     // Handlers run whenever they have events; a system on a paused tick only if Always.
     auto runs = [&](const ScheduledSystem& s) { return !paused || !s.desc || s.desc->runs == RunWhen::Always; };
-    auto main_thread = [](const ScheduledSystem& s) { return s.desc && s.desc->main_thread; };
+    auto main_thread = [](const ScheduledSystem& s) { return s.desc ? s.desc->main_thread : !s.handler->any_thread; };
     // The tick start: the timers, then what came from outside the schedule and what was
     // held for this tick.
     {
@@ -349,7 +349,7 @@ void PhaseList::run_cycle(Engine& engine, EventBus& events, Phase phase, f64 dt)
     ctx.paused = false;
     ctx.state  = nullptr;
     ctx.state_type = nullptr;
-    auto main_thread = [](const ScheduledSystem& s) { return s.desc && s.desc->main_thread; };
+    auto main_thread = [](const ScheduledSystem& s) { return s.desc ? s.desc->main_thread : !s.handler->any_thread; };
     // What came from outside the schedule since the last boundary.
     events.merge_outside(false);
     events.begin_phase();

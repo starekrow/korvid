@@ -41,7 +41,7 @@ struct TimerWheel {
     u32  schedule(u64 tick, u32 type_id, u32 size, const void* data, const char* emitter, u32 ticket = 0);
     // Withdraws a scheduled event. False if it already fired, was cancelled, or never was.
     bool cancel(u32 ticket);
-    // Every waiting record, for the state hash: its tick, type and ticket, and the event
+    // Every waiting record, for the state hash: its tick and type, and the event
     // through its schema when `types` has one (by type id), so padding and pointers never
     // count. Independent of how the records sit in the ring.
     u64  hash(Span<const EventTypeDesc* const> types) const;

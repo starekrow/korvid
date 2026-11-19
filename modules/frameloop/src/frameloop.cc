@@ -146,6 +146,7 @@ void set_goldberg(const char* value) {
 bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--run-seconds") == 0 && i + 1 < argc) cfg.run_seconds = atof(argv[++i]);
+        else if (strcmp(argv[i], "--run-ticks") == 0 && i + 1 < argc) cfg.run_ticks = strtoull(argv[++i], nullptr, 10);
         else if (strcmp(argv[i], "--goldberg") == 0 && i + 1 < argc) set_goldberg(argv[++i]);
         else if (strcmp(argv[i], "--no-goldberg") == 0) set_goldberg("off");
         else if (strcmp(argv[i], "--quiet") == 0) log_set_level(LogLevel::Warn);
@@ -266,6 +267,7 @@ void frameloop_exit(TickContext& ctx) {
         ctx.emit(ExitRequested{ExitReason::WindowClosed});
     if (s.config.exit_on_escape && input && input->sampled.down(Key::Escape))
         ctx.emit(ExitRequested{ExitReason::Escape});
+    if (s.config.run_ticks && ctx.tick >= s.config.run_ticks) s.timer_fired = true; // sim ticks, whatever the clock did
     if (s.timer_fired && !s.timer_sent) {
         s.timer_sent = true;
         ctx.emit(ExitRequested{ExitReason::Timer});

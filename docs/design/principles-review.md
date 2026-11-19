@@ -288,7 +288,84 @@ Grouped so each batch is one coherent change, and the ones that move hashes are 
 
 ## Open questions
 
-- [ ] `ctx.rng()`: one stream per module, or named streams for the sim too?
-- [ ] Handlers on the main thread by default: does arcfire's stress show the cost?
+- [x] `ctx.rng()`: one stream per module (As built). Named sim streams wait for a game that
+  wants one; cosmetic streams stay in module state.
+- [x] Handlers on the main thread by default: no cost shows (As built).
 - [ ] Record cross-cycle events in the existing `.kvr` format, or bump it to `KVR2`?
 - [ ] Narrow principle 8 to "a number, or by construction": agreed?
+
+## As built
+
+Nov 19, 2026, on `docs-foundation`, rebased onto Krome slice 6. Item by item:
+
+- **1. Done, a little narrower.** `ctx.rng()` is in `phase.h`: a stream per module seeded
+  from its name and `EngineConfig::seed` (`--seed N`, kept in recordings), seeded again by
+  `engine_sim_reset`, refused in dev to `StateUse::Read`/`None` units and parallel
+  chunks. A stream counts in the hash once drawn from, so a module that never draws (or
+  an empty one) adds nothing, as an empty kind adds nothing (the hash test pins that).
+  `ResourceDesc::fields` hashes a published resource; `engine_publish` checks it is plain
+  data the table fits. The timer wheel (each record's tick, type and event through its
+  schema; never the emitter pointer, nor the ticket, which carries the issuing unit's
+  number and so moved the hash whenever any system was added), held next-tick events and
+  the sim tick are hashed. rocks and testbed draw from `ctx.rng()`
+  and lost their seeding. rocks' score was not given a field table: its high score comes
+  from a file at a time the disk decides, which is input, not state.
+- **2. Narrowed**, in cycles.md.
+- **3. Done:** `luai_makeseed` is a constant in the lua module's build; nothing under
+  `vendor/` changed.
+- **4. Not done.** It wants the design record the sketch asked for; cycles.md says the
+  recorder keeps actions only.
+- **5. Half.** Props hash a handle by its kind's name. Collision's pair order is left: "a
+  has the lower handle bits" is a contract games read, and two differently built games
+  are not promised one hash.
+- **6. Done.** scheduling.md and modules.md say what is checked (accesses through the
+  context). `ctx.live(kind)`. `engine_check_main_thread`, called where every `ui_`
+  function passes. arcanum's `react` goes through the context instead of a const-cast
+  table and three writes made to please the checker (its demo hashes the same tick for
+  tick, 1,073 ticks compared). arcfire's `.stats` stays a
+  main-thread diagnostic in PostSim: moved to the Frame cycle its per-tick counts would
+  mean per frame. Found on the way: since the extract moved to the Frame cycle its
+  "deltas" read 0 every tick; a Frame unit after the extract adds them up and
+  `stats_mark` is gone. The frame loop's fps line had the same trouble at 120 Hz (a frame
+  with no tick reporting 0) and reports a mean over its frames now.
+- **7. Done, measured.** Handlers run on the main thread unless `.any_thread = true`.
+  arcfire `--stress`, dev, the profiler's tick zone per frame, six pairs alternated:
+  main thread 0.537 ms mean, any thread 0.595 ms; main faster in four of six. The runs
+  spread 0.15 to 0.75 ms on this machine (a laptop's clocks), wider than any difference:
+  no cost shows.
+- **8. Narrowed** in the docs; principles.md's wording is the author's (21).
+- **9. Done.** The warning found one table, Krome's event; fixed. `KV_FIELD_SKIP` was not
+  added: nothing needs to leave a member out on purpose yet.
+- **10. Done, without the clang flag.** Five globals are `constinit` with their members
+  initialized; `tools/check-static-init.sh` fails a build with a dynamic initializer.
+  `-Wglobal-constructors` was not added: no clang here to try it on, and slang's CPU
+  shader prelude has one (harmless) that `-Werror` would turn into a broken macOS build.
+- **11, 12. Done:** `kv_lua_newstate` in the lua module, used by Krome, goldberg and
+  kvscript; kvscript draws UTF-8, allocates checked.
+- **13. Done, not built here** (no Apple toolchain).
+- **14. The claim corrected**, and the split named as the fix for when it is wanted.
+- **15. Done**, more than sketched: a cut Ogg usually has no length at all, so that is
+  refused; one that stops early warns and keeps its length in silence. Bundled reads
+  log which of four things went wrong.
+- **16. Done:** `json_write_string`, `json_write_f64`, `json_write_f32` in core; save's
+  copies deleted. A save f32 that did not round-trip (`0x15ae43fd`) does now.
+- **17. Renamed, measured:** `frame_hash` is 4x core's on the CPU renderer's records, and
+  is never stored.
+- **18. Done:** `korvid/core/bytes.h`; seven copies replaced.
+- **19. Not measured.** Timing ship with its per-call checks off needs a build that turns
+  them off; until then principle 7's wording stays the author's question (21).
+- **20. Done:** `tools/determinism-check.sh` does what this review did by hand. Its first
+  run found the ticket in the timer hash (1, above): adding a diagnostic system had
+  moved arcfire's hashes. It runs rocks in debug, dev and ship, at 1 and 16 threads, in
+  both early-read modes and on the CPU renderer, and replays both arcfire recordings.
+  Runs by wall time came out a few hundred ticks long on a busy machine (a hidden window's
+  frames are throttled, and a frame runs at most four ticks), so frameloop has
+  `--run-ticks N`, a run that ends at sim tick N on any machine, and the check runs
+  each configuration to tick 1,500. The render gate is unchanged.
+- **21. The concept pages are done; principles.md is proposed above, for the author.**
+- **22. Done** but for `JsonBuilder::finish()`'s message, which still names two causes.
+
+arcfire's recordings were made again twice: once when the hash grew (the game unchanged:
+Normal still ends at tick 14,122, Hard at 15,264), and once after the rebase onto Krome
+slice 6, where `asset_live` joined arcfire and moved the hash at tick 120 (`main` replays
+its own recordings matched). Both replay matched at 16 threads.

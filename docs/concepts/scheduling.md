@@ -22,8 +22,12 @@ phase and declares its access as strings in the [name language](modules.md#syste
 | `state` | the module's own state: `Write` (the default), `Read`, `None` | `StateUse::None` |
 
 These sets are the whole contract. The scheduler orders units by them, runs units in
-parallel when their sets allow it, and in dev builds asserts on any access a unit did not
-declare, naming the unit and the resource.
+parallel when their sets allow it, and in dev builds asserts on any access through the
+context that a unit did not declare, naming the unit and the resource. What a unit
+reaches around the context (`ctx.engine`, the table directly, another module's functions)
+the scheduler can't see: keep that to main-thread units, things that never change, and
+functions that say they are safe. A main-thread-only API says so itself, by stopping a
+dev build when a worker calls it (`engine_check_main_thread`).
 
 ## Resources form a tree
 

@@ -173,7 +173,10 @@ same boundary. `KV_EVENT(E)` without a schema is for events that carry no entity
 
 A system is a function in a phase with the resources it reads and writes. The sets are
 the whole contract: the scheduler orders systems by them, runs the independent ones
-concurrently, and in dev builds asserts on any access outside them.
+concurrently, and in dev builds asserts on any access through the context that they don't
+cover. What a system reaches around the context (`ctx.engine`, another module's
+functions) is its own business: keep that to main-thread systems, what never changes,
+and functions that say they are safe from a system.
 
 ```cpp
 void move(TickContext& ctx) {
@@ -469,8 +472,8 @@ frame run back to back, each a full tick. [Cycles](cycles.md).
   once are never on the same level; the only shared mutable state inside a level is the
   general allocator, which is thread-safe.
 - **Every access is a declaration.** The sets are documentation the scheduler enforces:
-  the schedule log says what runs after what and why, and a system cannot quietly read
-  something it did not say it would.
+  the schedule log says what runs after what and why, and a system cannot quietly read,
+  through its context, something it did not say it would.
 
 ## Common mistakes
 
@@ -479,9 +482,11 @@ frame run back to back, each a full tick. [Cycles](cycles.md).
 - **A cycle.** A reads what B writes and B reads what A writes in one phase. The
   message prints the loop. Split one of them across phases, or let one read the previous
   tick's copy (`CompPrev`) instead.
-- **Keeping a handle to something that may die.** Hold handles on events and in your
-  own state, never in sim columns a trigger or a hash reads, and check `valid` or expect
-  null from `get`. Delivered events have already been checked.
+- **Using a handle to something that may have died.** A handle anywhere (an event, your
+  state, a sim column: the engine's own `Parent` and `MoveResult2` keep them there) may
+  name an entity that has since gone; it is generational, so it stops resolving rather
+  than pointing at whatever took the slot. Check `valid`, or expect null from `get`.
+  Delivered events with a schema have already been checked.
 - **Reading a resource outside the sets.** Dev builds assert with the system and the
   resource named; ship builds trust you. Declare it.
 - **An id across engines.** A tool that inits two engines in a row must look ids up

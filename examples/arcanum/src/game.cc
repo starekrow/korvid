@@ -830,20 +830,26 @@ void walk(TickContext& ctx) {
 void react(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
-    // The player's columns this system writes, through its table (they are declared one by
-    // one: the whole kind would include the intent the resolve reads, a cycle).
-    Table* players = (Table*)ctx.read_kind("arcanum.player");
-    ctx.write<Vitals>("arcanum.player.Vitals"); ctx.write<Sprite>("arcanum.player.Sprite"); ctx.write<AnimPlayer>("arcanum.player.AnimPlayer");
-    Span<const MoveResult2> npc_moves = ctx.read<MoveResult2>("arcanum.npc.MoveResult2");
+    // The player's columns, by its row: read as the kind is declared, and the three it
+    // writes declared one by one (the whole kind would include the intent the resolve
+    // reads, a cycle).
+    Span<const Transform2>  transforms = ctx.read<Transform2>(".player.Transform2");
+    Span<const MoveResult2> results    = ctx.read<MoveResult2>(".player.MoveResult2");
+    Span<const Actor>       actors     = ctx.read<Actor>(".player.Actor");
+    Span<Vitals>            vitals     = ctx.write<Vitals>(".player.Vitals");
+    Span<Sprite>            sprites    = ctx.write<Sprite>(".player.Sprite");
+    Span<AnimPlayer>        anims      = ctx.write<AnimPlayer>(".player.AnimPlayer");
+    Span<const MoveResult2> npc_moves  = ctx.read<MoveResult2>(".npc.MoveResult2");
     const TilemapAsset* m = tilemap_get(e, g.map);
-    Transform2* t = players->get<Transform2>(g.player);
-    if (!t || !m || m->state != AssetState::Ready || level_state(e) == LevelState::Loading) return;
+    if (!ctx.alive(g.player) || !m || m->state != AssetState::Ready || level_state(e) == LevelState::Loading) return;
+    const u32 me = g.player.index();
+    const Transform2* t = &transforms[me];
     static const u32 k_npc_kind = ctx.kind_id(".npc");
     const u16 npc_handles = engine_table(e, k_npc_kind)->kind;
-    const MoveResult2& mine = *players->get<MoveResult2>(g.player);
+    const MoveResult2& mine = results[me];
     bool bumped = !mine.blocker.is_null() && mine.blocker.kind() == npc_handles;
     for (u32 i = 0; i < npc_moves.len && !bumped; ++i) bumped = npc_moves[i].blocker == g.player;
-    Vitals* v = players->get<Vitals>(g.player);
+    Vitals* v = &vitals[me];
     f32 dt = (f32)ctx.dt;
     v->hurt = v->hurt > dt ? v->hurt - dt : 0.0f;
     // Walking into a villager costs a heart, then a second of blinking that nothing hurts
@@ -864,8 +870,8 @@ void react(TickContext& ctx) {
             KV_INFO("arcanum", "dead: at tick %llu", (unsigned long long)ctx.tick);
         }
     }
-    animate(e, g, *players->get<Actor>(g.player), *players->get<AnimPlayer>(g.player));
-    Sprite* s = players->get<Sprite>(g.player);
+    animate(e, g, actors[me], anims[me]);
+    Sprite* s = &sprites[me];
     s->tint = v->hurt > 0.0f && (u32)(v->hurt * 10.0f) % 2 ? kHurtTint : color_white();
 
     // Exits: armed once the player has stood clear of them since arriving.
