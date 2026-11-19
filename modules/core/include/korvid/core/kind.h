@@ -1,20 +1,29 @@
-// Korvid core: entity kinds. A kind is a named, fixed set of components plus a capacity,
-// declared by a module as data; the engine turns each one into a Table: a generational
-// slot pool for liveness plus one SoA column per component, on reserved pages committed
-// as rows are used. Every entity of a kind has every component of the kind. Each table
-// is a handle issuer (its kind name is the handle kind's name) and a set of resources:
-// "kind" for all of it (a write: spawn, destroy, every column), "kind.@alive" for which
-// slots are alive, "kind.Component" for each column, "*.Component" in a system's sets for
-// that column in every kind.
+// Korvid core: entity kinds, and the tables that store them.
 //
-//   constinit const KindDesc k_kinds[] = {{.name = ".bullet", .components = "Transform2, Sprite, Velocity", .capacity = 4096}};
+// An entity is a row in a table, and its handle says which. A kind is a named, fixed set
+// of components with a capacity, declared by a module as data; engine_init makes one
+// Table for each. Every entity of a kind has every component of the kind, and there is
+// no adding or removing one at runtime. That's what lets a system walk a kind as columns
+// (one array per component, indexed by slot), and what lets any module act on any kind
+// that has its components: a kind with Transform2 and Sprite is drawn, one with
+// Transform2 and Collider2 collides, whoever declared it.
 //
-// A kind's name may start with '.' for "<module>."; the component list is one string.
+//   constinit u32 g_rock_kind = 0;
+//   constinit const KindDesc k_kinds[] = {
+//       {.name = ".rock", .components = "Transform2, Sprite, Velocity, Collider2", .capacity = 1024, .id = &g_rock_kind},
+//   };
 //
-// Rows are zero when spawned unless spawn() is handed the components to write. Iteration
-// is by slot in [0, rows()), skipping dead slots, so it is fixed run to run. Destroy is
-// immediate here; the phase-boundary deferral and the command path arrive with the
-// scheduler.
+// Component names resolve across modules (Transform2 is the sprite module's). Capacity
+// is address space: pages commit as rows are used, so a generous capacity costs nothing
+// until it fills. A full kind refuses the spawn with a null handle, logged once.
+//
+// In a system's sets, a kind is a tree of resources: ".rock" is all of it (a write on it
+// covers spawning, destroying and every column), ".rock.@alive" which slots are alive,
+// ".rock.Velocity" one column, and "*.Velocity" that column in every kind that has it.
+// Systems reach a kind through the context (ctx.view, ctx.write_kind); the Table methods
+// below act at once, and are for code that holds the kind's write or runs outside the
+// schedule. Iteration is by slot in [0, rows()), dead slots included and skipped with
+// is_alive, so the order is the same every run.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/component.h"
@@ -30,27 +39,32 @@ namespace kv {
 // edges would make is not there. The reader sees the same values either way.
 enum class EarlyReads : u8 { Order, Snapshot };
 
+// One row of a module's kind table (example at the top). name, components and capacity
+// are required.
 struct KindDesc {
-    const char*             name       = nullptr; // also the handle kind and the resource name; '.' prefix: the module's
-    const char*             components = nullptr; // component names, comma-separated, resolved at init
-    u32                     capacity   = 0;       // slots of address space; pages commit as used
+    const char*             name       = nullptr; // ".rock": the module's own; also the handle kind and the resource name
+    const char*             components = nullptr; // "Transform2, Sprite, Velocity": component names, from any module
+    u32                     capacity   = 0;       // most entities alive at once; address space, committed as used
     u32*                    id         = nullptr; // optional: filled with the kind id at init, 0 after shutdown
     bool                    cosmetic   = false;   // presentation only: never part of the state hash (glyphs, an overlay)
     // Rows that never change once spawned (a map's tiles): the engine copies their previous
     // values and the sprite extract looks at them only when the kind has spawned or lost a
     // row since it last did. A change to a living row of a still kind is not seen.
     bool                    still      = false;
-    // Per entity, not per kind. Components an entity of this kind may carry one of on its
+    // Per entity, not per kind: components an entity of this kind may carry one of on its
     // own ("Talk, Quest"), stored sparsely as resources "kind.@Talk"; and a property bag of
-    // named values per entity ("kind.@props"). Engine systems never see either: views are
-    // built from columns. See ctx.attach and ctx.prop_set.
+    // named values per entity ("kind.@props"). For what one villager or one chest has and
+    // the rest don't. Engine systems never see either, since views are built from columns:
+    // an attached Sprite draws nothing. See ctx.attach and ctx.prop_set_int.
     const char*             attachable = nullptr;
     bool                    props      = false;
     EarlyReads              early_reads = EarlyReads::Order; // how early reads of it get the phase start (see EarlyReads)
 };
 
-constexpr u32 KV_KIND_NAME_MAX = 48;
+constexpr u32 KV_KIND_NAME_MAX = 48; // bytes of a kind's full name, NUL included
 
+// ---- internal: how a table stores its rows -----------------------------------------
+// One component's storage in a table: a column of rows by slot.
 struct Column {
     const ComponentDesc* desc   = nullptr;
     u32                  stride = 0;       // size rounded up to the component's alignment
@@ -92,8 +106,10 @@ struct Attachment {
     char                 resource_name[2 * KV_KIND_NAME_MAX + 3];
 };
 
+// ---- property bag values -------------------------------------------------------------
 // A property bag's values: named, typed, few. Strings are interned names; handles are
-// written by name in saves like any other.
+// written by name in saves like any other. Systems use the context's typed forms
+// (ctx.prop_int, ctx.prop_set_str); these are the raw values Table::prop hands out.
 enum class PropType : u8 { None, Int, Float, Bool, String, Handle };
 const char* prop_type_name(PropType t);
 struct PropValue {
@@ -108,6 +124,17 @@ struct PropEntry {
     PropValue value;
 };
 
+// ---- the table ------------------------------------------------------------------------
+// One kind's storage, made by engine_init: liveness and generations (a Pool of slots),
+// one column per component, and the sparse rows for names, attachments and bags. Each
+// table is also a handle issuer: its handles print as "rocks.rock#12:3" and resolve to it.
+//
+// Its methods act at once. Spawning and destroying here is what ctx.write_kind gives a
+// system that holds the kind's write; everyone else uses the commands (ctx.spawn_later,
+// ctx.destroy), which wait for the phase boundary.
+//   Table* rocks = ctx.write_kind(g_rock_kind);
+//   Handle h = rocks->spawn(transform2_at(at), Velocity{v, 0.0f});   // the rest zero
+//   if (Velocity* vel = rocks->get<Velocity>(h)) vel->v *= 0.5f;
 struct Table {
     const KindDesc* desc     = nullptr;
     const char*     name     = nullptr; // the kind's full name: desc->name with the module prefix expanded
@@ -132,23 +159,30 @@ struct Table {
     u32             restores = 0;  // +1 at every restore_slots: a restored row may reuse a handle with new values
     u32             refused  = 0;  // spawns refused because the kind was full; the first is logged
 
-    // Reserves the columns and registers the handle kind. `comps` is in declared order;
-    // `full_name` is the kind's name with its module prefix expanded (interned, stable).
+    // Reserves the columns and registers the handle kind: engine_init's. `comps` is in
+    // declared order; `full_name` is the kind's name with its module prefix expanded.
     bool init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t,
               Span<const ComponentDesc* const> attachable = {}, u32 capacity_override = 0);
     void free();
 
-    Handle spawn(); // every component zero, prev included; null if the kind is full
+    // A new entity, every component zero (previous copies included) except the ones
+    // given, which are written to both: a new entity has no history to interpolate from.
+    // Null if the kind is full. Components may be given in any order; one the kind lacks
+    // asserts in debug builds.
+    Handle spawn();
     template <class... C>
     Handle spawn(const C&... c) {
         Handle h = spawn();
         if (!h.is_null()) (set_row(h, c), ...);
         return h;
     }
+    // Destroys an entity now: its slot's generation moves on, so its handle and every copy
+    // of it stop resolving. False if it was already dead. Dev builds poison its rows.
     bool destroy(Handle h);
     // Every live entity, at once. Returns how many went.
     u32  destroy_all();
 
+    // Whether the handle names a living entity of this table.
     bool   valid(Handle h) const { return slots.valid(h); }
     // Whether entry i of `s` belongs to the entity living in its slot now.
     bool   sparse_live(const SparseRows& s, u32 i) const { return is_alive(s.slots[i]) && handle_at(s.slots[i]).gen() == s.gens[i]; }
@@ -177,18 +211,24 @@ struct Table {
     bool   prop_set(Handle h, Name key, const PropValue& v);
     bool   prop_remove(Handle h, Name key);
     u32    props_of(Handle h, u32* first) const;
+    // Rows and slots: live() entities are alive, somewhere in [0, rows()). rows() is the
+    // high-water slot count, so a loop over it checks is_alive(i); handle_at(i) is slot
+    // i's current entity, and a live handle's index() is its slot.
     u32    live() const { return slots.live; }
-    u32    rows() const { return slots.capacity(); } // high-water slot count; iterate with is_alive
+    u32    rows() const { return slots.capacity(); }
     bool   is_alive(u32 i) const { return slots.is_alive(i); }
     Handle handle_at(u32 i) const { return slots.handle_at(i); }
 
+    // A component's column, or null if the kind lacks it; has() says which.
     const Column* column(u32 component_id) const;
     Column*       column(u32 component_id) { return (Column*)((const Table*)this)->column(component_id); }
     template <class T> Column*       column()       { return column(ComponentType<T>::id); }
     template <class T> const Column* column() const { return column(ComponentType<T>::id); }
     bool has(u32 component_id) const { return column(component_id) != nullptr; }
 
-    // Typed access. Null for a stale handle or a component the kind lacks.
+    // One entity's component, and its previous-tick copy (components with CompPrev only).
+    // Null for a stale handle or a component the kind lacks. Writing the previous copy
+    // marks a teleport: the renderer won't interpolate across it.
     template <class T>
     T* get(Handle h) {
         Column* c = column<T>();
@@ -223,13 +263,15 @@ struct Table {
         return c && c->prev ? Span<const T>((const T*)c->prev, rows()) : Span<const T>();
     }
 
-    // A load: every entity goes and the slots become exactly these (Pool::restore_slots):
+    // The save module's load: every entity goes and the slots become exactly these
+    // (Pool::restore_slots):
     // the live ones zeroed, prev included, for the caller to fill. Spawns after it hand out
     // the handles the saved table would have. False, and the table empty, if the slots do
     // not fit the capacity or disagree with themselves.
     bool restore_slots(Span<const u32> gen_words, Span<const u32> free_order);
 
-    // Top of PreSim: the current rows become the previous ones, for every prev column.
+    // Top of PreSim: the current rows become the previous ones, for every prev column. The
+    // engine's.
     void begin_tick();
 
     // "Transform2{...} Sprite{...}" for a live entity; the slot's state otherwise.

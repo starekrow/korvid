@@ -1,6 +1,21 @@
-// Korvid core: a growable array of plain data. Explicit free(), no destructor.
-// Allocates through an Allocator*; null means the general allocator. array_in(alloc)
-// makes one that lives in an arena or a scratch, where free() costs nothing.
+// Korvid core: Array, the growable array of plain data.
+//
+// Like a vector of trivially copyable T, without the constructors: copying an Array
+// copies the pointer, not the elements, and nothing frees it but free(). It allocates
+// through an Allocator*: null means the general allocator, and array_in(alloc) makes one
+// that lives in an arena or the scratch, where free() costs nothing. Growth doubles and
+// moves the elements, so a pointer or Span into an Array lasts until the next push.
+//
+//   Array<Handle> targets = array_in<Handle>(mem_scratch());   // a frame's worth
+//   targets.push(h);
+//   for (Handle t : targets) ...
+//
+//   g->trail.alloc = &self.general;   // in module state: charged to the module
+//   g->trail.free();                  // in shutdown
+//
+// push stops the program if the allocator refuses (a heap at its hard limit), so a
+// caller never writes through null; try_push and try_push_n return null instead, for a
+// caller that can do without the element.
 #pragma once
 #include "korvid/core/memory.h"
 #include <string.h>
@@ -16,6 +31,8 @@ namespace kv {
 template <class T>
 struct Array {
     static_assert(__is_trivially_copyable(T), "Array holds plain data only");
+
+    // The fields are public: data[0, len) are the elements, cap what is allocated.
 
     T*         data  = nullptr;
     u32        len   = 0;
@@ -72,6 +89,7 @@ struct Array {
         return p;
     }
 
+    // Removes and returns the last element; the array must not be empty.
     T pop() {
         KV_VERIFY(len > 0);
         return data[--len];
@@ -85,8 +103,11 @@ struct Array {
         len = n;
     }
 
+    // Empties the array and keeps its memory, for refilling.
     void clear() { len = 0; }
 
+    // Gives the memory back to the allocator. Call it when the owner is done (a module's
+    // shutdown); in an arena it costs nothing, since the arena frees it all at once.
     void free() {
         if (data) {
             Allocator* a = allocator();
@@ -98,17 +119,19 @@ struct Array {
 
     T&       operator[](u32 i)       { KV_VERIFY(i < len); return data[i]; }
     const T& operator[](u32 i) const { KV_VERIFY(i < len); return data[i]; }
-    T&       last()                  { KV_VERIFY(len > 0); return data[len - 1]; }
+    T&       last()                  { KV_VERIFY(len > 0); return data[len - 1]; } // the array must not be empty
     T*       begin()       { return data; }
     T*       end()         { return data + len; }
     const T* begin() const { return data; }
     const T* end()   const { return data + len; }
     bool     empty() const { return len == 0; }
 
+    // The elements as a Span, to pass where a view is wanted. Valid until the array grows.
     Span<T>       span()       { return Span<T>(data, len); }
     Span<const T> span() const { return Span<const T>(data, len); }
 };
 
+// An empty array that allocates from `a`: an arena, mem_scratch(), a module's general.
 template <class T>
 Array<T> array_in(Allocator* a) {
     Array<T> arr;

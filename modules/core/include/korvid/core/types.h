@@ -1,11 +1,19 @@
-// Korvid core: fundamental types, assert, compiler macros.
-// Runtime rules: no exceptions, no RTTI, no STL. C headers only.
+// Korvid core: the fundamental types every other header uses: sized integers and floats
+// (u32, f32, ...), Span, the two asserts and the build configuration.
+//
+// Engine code is written without exceptions, RTTI or the STL, and includes C headers
+// only. A failure is a return value (null, false, a null handle), usually logged where
+// it happens; an assert is for what can't happen in correct code.
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
 
-// Three configs. KV_DEBUG: everything checked. KV_DEV: the build people run all day;
-// cheap invariants (ownership, alignment, canaries, poison) stay on. Ship: neither.
+// The three build configurations kormake builds (`kormake debug`, `dev`, `ship`):
+//   KV_DEBUG  -O0, everything checked
+//   KV_DEV    optimized, the build people run all day: cheap invariants stay on
+//             (ownership, alignment, canaries, poison, the scheduler's access checks)
+//   ship      neither: the checks compile away
+// KV_DEBUG implies KV_DEV. Test them with #if, never #ifdef.
 #ifndef KV_DEBUG
 #define KV_DEBUG 0
 #endif
@@ -13,7 +21,10 @@
 #define KV_DEV KV_DEBUG
 #endif
 
-// KV_ASSERT: debug only. KV_VERIFY: debug and dev; only ship drops it.
+// Asserts print the expression, file and line, then abort. KV_ASSERT is checked in debug
+// builds only, for checks too costly to run all day; KV_VERIFY in debug and dev, so it
+// is the usual choice. Neither may have side effects the program relies on: ship drops
+// both.
 namespace kv { [[noreturn]] void assert_fail(const char* expr, const char* file, int line); }
 
 #if KV_DEBUG
@@ -41,7 +52,12 @@ typedef float    f32;
 typedef double   f64;
 typedef size_t   usize;
 
-// A view over contiguous plain data. Never owns.
+// A view over contiguous data: a pointer and a count. It never owns or frees what it
+// points at, so it is valid as long as the storage is. Indexing is bounds-checked in
+// debug and dev. A Span<T> converts to a Span<const T>, and a C array converts to a
+// Span of its length, so tables declared as arrays pass straight into a Span parameter:
+//   constinit const SystemDesc k_systems[] = {...};   // .systems = k_systems
+//   for (const RockHit& h : hits) ...                  // hits: Span<const RockHit>
 template <class T>
 struct Span {
     T*  data = nullptr;
@@ -66,7 +82,9 @@ struct Span {
 
 } // namespace kv
 
+// The element count of a C array, as a u32. Not for pointers.
 #define KV_COUNTOF(a) ((::kv::u32)(sizeof(a) / sizeof((a)[0])))
+// Marks a parameter or variable as deliberately unused, for -Werror builds.
 #define KV_UNUSED(x) ((void)(x))
 
 // Compiler specifics, in one place; code elsewhere names these, never a compiler's own.

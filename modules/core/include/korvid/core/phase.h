@@ -1,24 +1,37 @@
-// Korvid core: the update schedule. A fixed, ordered list of tick phases; modules place
-// systems in them. Systems declare what they touch by resource name, each in one mode:
-// read (the value after every writer in the phase), read early ("^x": the value the
-// phase started with), write, or append (records handed to the resource's owner at the
-// boundary). At init the names become ids, expanded once over the resource tree (a kind
-// covers its liveness, columns, attachments and bags; an early read of a kind covers its
-// liveness and columns), and that one expansion is what both the schedule and the dev
-// checks at access time use. Within a phase the order is solved from the declarations:
-// readers after writers, `after` and `before`, and a module's systems that share its
-// state in declaration order unless something else orders them; writers of one resource
-// need an order, cycles are refused, ties break by module then declaration order.
-// Systems with no path between them share a level and run concurrently on the job pool.
-// How an early read gets its value is chosen per kind (EarlyReads): by running the reader
-// before the writers, or from a copy taken at the phase start. The values are the same
-// either way, so a game means the same whatever the choice. docs/concepts/scheduling.md
-// has the rules; docs/design/scheduler.md has the design and its measurements.
+// Korvid core: systems and handlers, and the TickContext they run with.
 //
-// Every system and handler (a "unit") owns an event writer and a command buffer, and
-// each chunk of a parallel_for owns a pair of its own, merged into the unit's in chunk
-// order. Units are numbered by declaration rank, not by where the schedule puts them, so
-// what a tick emits, spawns and appends comes out in the same order however it ran.
+// A system is a function the engine calls every tick in one phase, and a row in the
+// module's table saying what it touches:
+//
+//   void move(TickContext& ctx) {
+//       for (KindRows k : ctx.view<Transform2, const Velocity>()) { ... }
+//   }
+//   constinit const SystemDesc k_systems[] = {
+//       {.name = ".move", .phase = Phase::Sim, .fn = move, .reads = "*.Velocity", .writes = "*.Transform2"},
+//   };
+//
+// `reads` and `writes` name resources: a kind's column (".rock.Velocity"), the same
+// column in every kind that has it ("*.Velocity"), a whole kind (".rock"), a published
+// resource ("input.state"), an event type ("RockHit"). The sets are the contract.
+// The engine orders the systems of a phase from them (a reader after every writer of
+// what it reads; two writers of one thing need an `after` or `before`), refuses at
+// engine_init anything that would race, runs the systems with no order between them at
+// the same time on the job pool, and in dev builds stops on any access through the
+// context that the sets don't cover. A handler is a system on one event type, handed its
+// batch (HandlerDesc).
+//
+// Everything a system does goes through its TickContext: rows and resources (view, read,
+// write, resource), events (emit, received), commands that take effect at the end of
+// the phase (spawn_later, destroy), and timers (schedule_in).
+//
+// The results don't depend on the schedule. Every unit (system or handler) has its own
+// event writer and command buffer, and each chunk of a parallel_for has its own, merged
+// in chunk order. Units are numbered by where they are declared, not by when they ran,
+// and commands and events come out in that order. So --threads 1 and --threads 16 make
+// the same game.
+//
+// docs/concepts/scheduling.md has the ordering rules in full;
+// docs/guides/frame-loop-and-scheduling.md walks through them with a game.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/event.h"
@@ -34,61 +47,75 @@ struct ModuleInstance;
 struct ScheduledSystem;
 struct TickContext;
 
-// Fixed order. Add phases here, never at runtime. The first four are the Sim cycle, a
-// tick; Frame and Work are cycles of their own, run when the loop asks
-// (docs/concepts/cycles.md): Frame once before each frame drawn, Work while there is work.
+// Where a system runs. The first four are a tick, in this order, with a boundary after
+// each where commands apply and events merge; Frame and Work are cycles of their own,
+// run when the loop asks (docs/concepts/cycles.md). Game code goes in the first four.
 enum class Phase : u8 {
-    Input,   // sample devices into per-tick input state
-    PreSim,  // snapshot previous state, advance timers
-    Sim,     // gameplay
-    PostSim, // reactions to this tick's results
+    Input,   // devices sampled into the tick's input; handlers for what the last tick sent on
+    PreSim,  // CompPrev copies are taken as it starts; housekeeping before gameplay (asset pumps, pause)
+    Sim,     // gameplay: control, movement, collision
+    PostSim, // reactions to this tick's results: hits, scoring, the HUD
     Frame,   // presentation: once per frame drawn (engine_frame_cycle); never in a replay
     Work,    // throughput: over and over while a unit says ctx.more() (engine_work)
     Count
 };
 constexpr u32 KV_SIM_PHASES = 4; // Input..PostSim: what a tick runs
+// "Input", "PreSim", ...: for logs.
 const char* phase_name(Phase p);
 
-// What a system does with its module's state (ModuleInstance::state), which is a resource
-// like any other ("<module>.state"). Write, the default, reaches it as state_as<T>(); Read
-// as state_as<const T>() only, beside the module's other readers; None not at all.
-// Handlers run one at a time and always have it.
+// What a system does with its module's state (what startup stored with set_state), which
+// is a resource like any other, "<module>.state". Write, the default, reaches it as
+// ctx.state_as<T>(), and so is ordered against every other user of it in the module, in
+// declaration order. Read reaches it as state_as<const T>() only, and runs beside the
+// other readers. None doesn't reach it at all: a system that works only on columns (a
+// mover) says None, and is then free to run beside the module's other systems.
+// Handlers always have the state.
 enum class StateUse : u8 { Write, Read, None };
 
-// How a unit touches one resource. A unit has one mode per resource; a write includes
-// reading it as it stands.
+// How a unit touches one resource, as the schedule records it. A unit has one mode per
+// resource; a write includes reading it as it stands.
 enum class Access : u8 {
     Read,   // as it stands after every writer in the phase
     Early,  // as the phase found it ('^' in the reads)
     Write,
     Append, // records for the owner, applied at the boundary (ResourceDesc::apply)
 };
-const char* access_name(Access a);
+const char* access_name(Access a); // "read", "early", ...: for logs
 struct UnitAccess {
     u32    resource;
     Access mode;
 };
 
 // How early reads get their value: as each kind says (KindDesc::early_reads), or one way
-// for every kind, to compare the two. The game is the same either way.
+// for every kind (Engine::early_reads, --early-reads), to check that the game hashes the
+// same either way.
 enum class EarlyReadsChoice : u8 { PerKind, Order, Snapshot };
 const char* early_reads_name(EarlyReadsChoice m);
 
-// When a system runs. Unpaused, the default, is gameplay: skipped on a paused tick along
-// with the timer wheel and the triggers. Always is for what keeps a paused game alive:
-// input sampling, asset pumps, the hierarchy, text, animation on the real clock, audio,
-// the extract, the CLI. Handlers always run: events come only from systems that ran.
+// Whether a system runs on a paused tick (engine_pause, or any hold). Unpaused, the
+// default, is gameplay: skipped while paused, along with the timers and the triggers.
+// Always is for what keeps a paused game alive: input sampling, asset pumps, the
+// hierarchy, text, animation on the real clock, audio, the CLI, and a game's pause menu.
+// Handlers run whenever they have events, paused or not.
 enum class RunWhen : u8 { Unpaused, Always };
 
-// Emitted by the engine when a command spawn is applied, so the issuer learns the handle.
+// Emitted by the engine when a spawn_later is applied, so the system that asked learns
+// the handle. Keep the ticket spawn_later returned and match it in a handler on Spawned:
+//   g.blink_ticket = ctx.spawn_later(g_blinker_kind, transform2_at(p), look);
+//   void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
+//       for (const Spawned& s : spawns) if (s.ticket == g.blink_ticket) g.blinker = s.entity;
+//   }
+// Tickets are unique across units. A spawn by a unit that holds the kind's write
+// (ctx.write_kind(k)->spawn(...)) has its handle at once and needs none of this.
 struct Spawned {
     u32    ticket; // what spawn_later returned; 0 for a spawn issued from a parallel chunk
     u32    kind;   // kind id
     Handle entity; // null if the kind was full
 };
 
-// Emitted by the engine at the end of a tick for every state trigger that fired,
-// delivered at the start of the next.
+// Emitted by the engine at the end of a tick for every state trigger (TriggerDesc) that
+// fired, delivered at the start of the next. Compare `trigger` with the id the
+// TriggerDesc's `id` slot received to tell triggers apart.
 struct StateEdge {
     Handle entity;
     u32    trigger; // trigger id
@@ -103,25 +130,35 @@ struct SimReset {
     u32 pad;
 };
 
-// A handler: a system that consumes one event type and is handed its batch, the events
-// emitted since it last ran (see SystemDesc on streams). It runs in its phase, in the
-// order the schedule gives it like any system, when its batch is not empty: paused ticks
-// included, since events come only from what ran. Referenced by its id in the table,
-// never by function pointer in sim state.
-//   void on_hit(TickContext& ctx, Span<const RockHit> hits);
-//   {.name = "rocks.on_hit", KV_ON(RockHit, on_hit), .phase = Phase::Sim, .reads = ..., .writes = ...}
+// A handler: a system on one event type, called with its batch, the events of that type
+// emitted since it last ran. It is scheduled in its phase like any system, after every
+// emitter of its event there, and is called only when its batch isn't empty (paused
+// ticks included). If the event type has a schema (KV_EVENT_EX), handles in the batch are
+// live: an event naming an entity destroyed since it was emitted is dropped first.
+//
+//   void on_expire(TickContext& ctx, Span<const Expire> expiries) {
+//       for (const Expire& e : expiries) ctx.destroy(e.bullet);
+//   }
+//   constinit const HandlerDesc k_handlers[] = {
+//       {.name = ".on_expire", KV_ON(Expire, on_expire), .phase = Phase::Input},
+//   };
+//
+// Put a handler in the phase that emits its event, or the one after. When the choice
+// matters (what the handler writes is read earlier in the emitting phase), init fails
+// and says so; docs/concepts/modules.md#handlers has the rule.
 typedef void (*HandlerFn)(TickContext& ctx, const void* events, u32 count);
 template <class E, void (*F)(TickContext&, Span<const E>)>
 void handler_thunk(TickContext& ctx, const void* events, u32 count) { F(ctx, Span<const E>((const E*)events, count)); }
 
-// Names in these tables are strings in the engine's name language: a name may start with
-// '.' for "<module>." (".on_hit" in module "rocks" is "rocks.on_hit"; "?.foo" is an
-// optional order on "<module>.foo"), and a set is one string of comma-separated names
-// (".ship, .bullet.Transform2, *.Velocity, input.state"). The engine expands them at
-// init; an unknown name fails it with a message, as before.
+// Names in these tables are strings in the engine's name language. A name that starts
+// with '.' is the module's own: in module "rocks", ".on_hit" is "rocks.on_hit" and
+// ".rock.Health" that kind's column; "?name" in `after`/`before` is an order that holds
+// only if that module is in the build. A set is one string of comma-separated names
+// (".ship, .bullet.Transform2, *.Velocity, input.state"). The engine expands them at init;
+// an unknown name fails engine_init, naming the unit and the name.
 struct HandlerDesc {
     const char* name       = nullptr;
-    u32*        event      = nullptr; // &EventType<E>::id
+    u32*        event      = nullptr; // KV_ON fills these three
     const char* event_name = nullptr;
     HandlerFn   fn         = nullptr;
     Phase       phase      = Phase::Count; // required
@@ -133,8 +170,15 @@ struct HandlerDesc {
     const char* before     = nullptr;
 };
 
-// A state trigger: an edge on one scalar field of a component that keeps a previous
-// copy, evaluated at the end of every tick over every live row, emitting StateEdge.
+// A state trigger: the engine watches one scalar field across ticks, for every live row
+// of a kind, and emits StateEdge when it changes or crosses a value. The component must
+// keep a previous copy (CompPrev), since the edge is between last tick and this one.
+// Evaluated at the end of every unpaused tick.
+//   constinit u32 g_death = 0;
+//   constinit const TriggerDesc k_triggers[] = {
+//       {.name = ".death", .field = ".ship.Health.hp", .edge = TriggerEdge::CrossedBelow, .value = 1.0, .id = &g_death},
+//   };
+//   // a handler on StateEdge: if (e.trigger == g_death) ...
 enum class TriggerEdge : u8 {
     Changed,      // the field differs from the previous tick
     CrossedBelow, // previous >= value, current < value
@@ -142,13 +186,15 @@ enum class TriggerEdge : u8 {
 };
 struct TriggerDesc {
     const char* name  = nullptr;
-    const char* field = nullptr; // "kind.Component.field"
+    const char* field = nullptr; // "kind.Component.field"; ".ship.Health.hp" for the module's own kind
     TriggerEdge edge  = TriggerEdge::Changed;
     f64         value = 0.0;
     u32*        id    = nullptr; // optional: filled with the trigger id at init
 };
 
-// Spawns and destroys issued through a context, applied at phase boundaries in issue
+// ---- internal: command buffers, and the pieces behind the templates below -----------
+// Systems issue commands through the TickContext (spawn_later, destroy, ...); these are
+// what it writes them into. Spawns and destroys are applied at phase boundaries in issue
 // order: the engine's own buffer first (code outside the schedule), then every unit's
 // in unit order.
 struct CommandBuffer {
@@ -168,9 +214,9 @@ void command_append(CommandBuffer& cb, u32 resource_id, const void* record, u32 
 template <class T> struct RemoveConst          { typedef T type; static constexpr bool is_const = false; };
 template <class T> struct RemoveConst<const T> { typedef T type; static constexpr bool is_const = true; };
 
-// ---- internal: the pieces behind the templates below; plain functions in phase.cc ---
-// Each returns null (or false) after logging and, in dev builds, asserting, when the
-// system did not declare the access or the type does not match the schema.
+// The functions behind TickContext's templates, in phase.cc. Each returns null (or false)
+// after logging and, in dev builds, asserting, when the system did not declare the access
+// or the type does not match the schema.
 Table*  ctx_kind(TickContext& ctx, const char* kind, bool write);
 Table*  ctx_kind(TickContext& ctx, u32 kind_id, bool write);
 Column* ctx_column(TickContext& ctx, const char* column, const void* type, bool write, u32* rows);
@@ -217,7 +263,9 @@ void            ctx_parallel_end(TickContext& ctx, ParallelBuffers& pb);
 
 // ---- the context: what a system or handler reaches the engine through ------------------
 
-// One kind's rows for a view: the live mask and every column the view named.
+// One kind's rows, from ctx.view or ctx.rows. Rows are slots: [0, rows()) includes dead
+// ones, so a loop checks alive(i). A column's index i is the entity at handle_at(i), and a
+// live handle's index() is its row.
 struct KindRows {
     TickContext* ctx;
     Table*       table;
@@ -227,7 +275,8 @@ struct KindRows {
     Handle handle_at(u32 i) const { return table->handle_at(i); }
     const KindDesc& kind() const { return *table->desc; }
 
-    // T const is a read, T is a write; checked against the system's sets in dev builds.
+    // One column over every row. T const is a read, T is a write; checked against the
+    // system's sets in dev builds. Empty if the kind has no T.
     template <class T>
     Span<T> col() const {
         typedef typename RemoveConst<T>::type U;
@@ -245,7 +294,7 @@ struct KindRows {
     }
 };
 
-// Every kind that has all of C...: for (KindRows k : ctx.view<Transform2, const Velocity>()).
+// What ctx.view returns: every kind that has all of C..., one KindRows each.
 template <class... C>
 struct KindRange {
     TickContext* ctx;
@@ -267,9 +316,10 @@ struct KindRange {
     Iter end() const { return Iter{ctx, ctx_table_count(*ctx), ctx_table_count(*ctx)}; }
 };
 
-// What one chunk of a parallel_for may do besides read and write rows: emit and issue
-// commands, into its own buffers. A chunk's spawn has no ticket. Scheduling is not
-// available here: do it from the system body, or emit an event and let a handler.
+// What one chunk of a parallel_for may do besides read and write rows: emit events and
+// issue spawns and destroys, into the chunk's own buffers. A chunk's spawn has no ticket,
+// and timers are not available here: schedule from the system body, or emit an event and
+// let a handler do it.
 struct ChunkContext {
     TickContext*   ctx;
     EventWriter*   writer;
@@ -286,7 +336,8 @@ struct ChunkContext {
     void destroy(Handle h) { ctx_destroy(*ctx, commands, h); }
 };
 
-// One kind's attachments of a component, live ones only, in slot order:
+// One kind's attachments of a component, live entities only, in slot order (from
+// ctx.attached_all):
 //   for (Attached<Talk> a : ctx.attached_all<Talk>(".npc")) use(a.entity, *a.value);
 template <class T>
 struct Attached { Handle entity; T* value; };
@@ -305,11 +356,15 @@ struct AttachedRange {
     Iter end() const { return Iter{table, store, store ? store->rows.count() : 0}; }
 };
 
+// ---- the TickContext ---------------------------------------------------------------
+// What every system and handler is called with: its way to the engine's data, events,
+// commands and timers, checked against what it declared. A context is valid for the call
+// it was passed to; don't keep one.
 struct TickContext {
     Engine*                engine;
     EventBus*              events;
-    f64                    dt;
-    u64                    tick;
+    f64                    dt;   // seconds: the clock's tick_dt (1/60) in a tick, the time since the last run in Frame
+    u64                    tick; // the sim tick: advances only on unpaused ticks
     void*                  state;      // the running system's module state (ModuleInstance::state)
     const void*            state_type; // its type key, recorded when startup stored it
     const ScheduledSystem* system   = nullptr; // the running system or handler, whose sets gate the accessors; null: anything goes
@@ -319,14 +374,20 @@ struct TickContext {
 
     // ---- the Work cycle ---------------------------------------------------------------
     // A Work unit with more to do says so, and the cycle runs again while time remains.
+    //   void crunch(TickContext& ctx) {
+    //       Job& j = ctx.state_as<Job>();
+    //       while (j.next < j.count && ctx.time_left() > 0.0) step(j);
+    //       if (j.next < j.count) ctx.more();
+    //   }
     void more() const;
     // Seconds left of the running unit's share of what engine_work was given: the cycle's
     // time split evenly among the units still to run in it, so one that takes all its share
     // leaves the rest theirs. 0 outside the Work cycle.
     f64  time_left() const;
 
-    // The module state as the type startup stored, verified by a pointer compare. T const
-    // is a read; T is a write. Checked against the system's `state` in dev builds.
+    // The module's state, as the type startup stored with set_state (checked).
+    // state_as<const Game>() is a read and state_as<Game>() a write, checked against the
+    // system's `state` in dev builds.
     template <class T>
     T& state_as() const {
         typedef typename RemoveConst<T>::type U;
@@ -337,15 +398,17 @@ struct TickContext {
     }
 
     // ---- events -----------------------------------------------------------------------
-    // Into this unit's writer, declared in `emits`: its consumers in the phase run after it.
+    // Emits an event, declared in the unit's `emits`. Units in this phase that read the type
+    // run after this one and see it; later phases and ticks see it too, each consumer once.
     template <class E>
     void emit(const E& e) {
         if (!writer) { events->emit(e); return; }
         ctx_emit_check(*this, EventType<E>::id);
         writer->emit(e);
     }
-    // The events of a type this unit consumes (declared in `reads`) that were emitted
-    // since it last ran: a handler's own are its span.
+    // The events of a type this unit reads (named in `reads`, as "RockHit") that were
+    // emitted since it last ran. A handler gets its own type as its argument instead.
+    //   for (const OverlapBegin& o : ctx.received<OverlapBegin>()) ...
     template <class E>
     Span<const E> received() {
         u32 n = 0;
@@ -354,16 +417,21 @@ struct TickContext {
     }
 
     // ---- data access ---------------------------------------------------------------
-    // A kind by name, or by the id its KindDesc::id slot received. Write access (declared
-    // write on "kind") is the table itself: spawn, destroy and every column. Read access
-    // is the const view.
+    // A kind's table, by name (".rock") or by the id its KindDesc::id slot received. Write
+    // access (a declared write on the kind) is the table itself: spawn and destroy now,
+    // with the handle at once, and every column. Read access is the const view. Null if
+    // not declared.
+    //   Handle b = ctx.write_kind(g_bullet_kind)->spawn(transform2_at(at), look, Velocity{v});
     Table*       write_kind(const char* kind) { return ctx_kind(*this, kind, true); }
     Table*       write_kind(u32 kind_id) { return ctx_kind(*this, kind_id, true); }
     const Table* read_kind(const char* kind) { return ctx_kind(*this, kind, false); }
     const Table* read_kind(u32 kind_id) { return ctx_kind(*this, kind_id, false); }
 
-    // One column by resource name, "kind.Component" (or its resource id), over
-    // [0, rows()) by slot. A handle from a delivered event is live, so its index is valid.
+    // One kind's column by name, ".rock.Health" (or its id), over every row by slot. A
+    // handle from a delivered event is live, so its index() is a valid row:
+    //   static const u32 k_hp = ctx.column_id(".rock.Health");
+    //   Span<Health> hp = ctx.write<Health>(k_hp);
+    //   hp[hit.rock.index()].hp -= 1;
     template <class T, class K>
     Span<const T> read(K column) {
         u32 n = 0;
@@ -376,7 +444,13 @@ struct TickContext {
         Column* c = ctx_column(*this, column, &TypeKey<T>::key, true, &n);
         return c ? Span<T>((T*)c->data, n) : Span<T>();
     }
-    // Every kind that has all of C...; the constness of each C is the access mode.
+    // Every kind that has all of C..., one KindRows each; a const C is read, the others
+    // written. The usual way a system walks entities, whichever module declared the kinds:
+    //   for (KindRows k : ctx.view<Transform2, const Velocity>()) {
+    //       Span<Transform2> t = k.col<Transform2>();
+    //       Span<const Velocity> v = k.col<const Velocity>();
+    //       for (u32 i = 0; i < k.rows(); ++i) if (k.alive(i)) t[i].position += v[i].v * (f32)ctx.dt;
+    //   }
     template <class... C>
     KindRange<C...> view() { return KindRange<C...>{this}; }
     // Whether an entity is alive: a read of its kind's liveness ("kind.@alive", or the kind).
@@ -388,34 +462,46 @@ struct TickContext {
 
     // A published resource (engine_publish), by name or id; T const is a read, T a write.
     // Null, with a log line, if nothing is published under that name yet.
+    //   const Input* in = ctx.resource<const Input>("input.state");
     template <class T, class K>
     T* resource(K name) {
         typedef typename RemoveConst<T>::type U;
         return (T*)ctx_resource(*this, id_of(name), &TypeKey<U>::key, !RemoveConst<T>::is_const);
     }
 
-    // A record for an append resource (declared in `appends`), handed to its owner at
-    // the phase boundary in unit order. By name or id; false if not declared.
+    // A record for an append resource (declared in `appends`), handed to its owner at the
+    // phase boundary in unit order. By name or id; false if not declared. Modules with an
+    // append resource usually wrap this (audio_play).
     template <class T, class K>
     bool append(K resource, const T& record) {
         static_assert(__is_trivially_copyable(T), "append plain data");
         return ctx_append(*this, id_of(resource), &record, (u32)sizeof(T));
     }
+    // Whether this unit may append to the resource: for a wrapper that checks first.
     template <class K>
     bool may_append(K resource) { return ctx_may_append(*this, id_of(resource)); }
 
     // Names to ids, for code that would rather not look a name up every call:
-    //   static const u32 k_bounces = ctx.column_id("hello.ball.Bounces");
+    //   static const u32 k_bounces = ctx.column_id(".ball.Bounces");
     // Ids are stable for the life of the engine and carry it: one kept across into
     // another engine is caught (dev builds) rather than reaching the wrong resource.
+    // A program that runs one engine can keep them in statics, as above.
     u32 resource_id(const char* name) { return ctx_resource_id(*this, name, false); }
     u32 column_id(const char* name) { return ctx_resource_id(*this, name, true); } // asserts if not a column
     u32 kind_id(const char* name);
 
     // ---- per entity: attachments and property bags -------------------------------------
-    // Under "kind.@Component" and "kind.@props" (or "*.@Component", "*.@props") in the sets;
-    // a write on the whole kind covers them. Immediate, like a direct spawn: the writer owns
-    // them for the phase. A kind attaches only what its KindDesc::attachable lists.
+    // For data one entity of a kind has and the rest don't (a quest on one villager, what
+    // a designer typed on one map object). An attachment is one component stored beside
+    // the kind's columns, for the kinds whose KindDesc::attachable lists it; a bag is named
+    // values, for kinds with KindDesc::props. Both are declared in the sets as
+    // "kind.@Component" and "kind.@props" (or "*.@..."), and a write on the whole kind
+    // covers them. Changes are immediate, not commands. Both are slower than a column:
+    // what every entity has belongs in the kind.
+    //   if (Talk* t = ctx.attached<Talk>(npc)) start_dialogue(t->line);
+    //   ctx.attach(npc, Quest{.stage = 1});
+    //   ctx.prop_set_int(chest, "gold", 30);
+    //   i64 gold = ctx.prop_int(chest, "gold");      // 0 if unset
     template <class T>
     T* attached(Handle h) {
         typedef typename RemoveConst<T>::type U;
@@ -433,8 +519,10 @@ struct TickContext {
         r.store = r.table ? r.table->attachment(ComponentType<U>::id) : nullptr;
         return r;
     }
-    // The bag. Getters convert between int and float and answer `dflt` for a missing key or
-    // another type; prop_str answers "" for none.
+    // The bag. Setters return false if the entity is dead, its kind has no bags, or the
+    // unit didn't declare them. Getters
+    // convert between int and float and answer `dflt` for a missing key or another type;
+    // prop_handle answers a null handle.
     bool        prop_set_int(Handle h, const char* key, i64 v);
     bool        prop_set_float(Handle h, const char* key, f64 v);
     bool        prop_set_bool(Handle h, const char* key, bool v);
@@ -448,9 +536,14 @@ struct TickContext {
     const char* prop_str(Handle h, const char* key, const char* dflt = "");
     Handle      prop_handle(Handle h, const char* key);
 
-    // ---- commands: applied at the phase boundary, in issue order ---------------------
-    // Spawn without holding the write: the entity exists after this phase, and a Spawned
-    // event with this ticket carries its handle. Components not given stay zero.
+    // ---- commands: applied at the phase boundary, in unit order ----------------------
+    // Commands need no declaration: they take effect at the end of the phase, when nothing
+    // runs, so they can't race.
+    //
+    // Spawns an entity of a kind (name or id) without holding the kind's write. It exists
+    // after this phase; the Spawned event with the returned ticket carries its handle.
+    // Components not given are zeroed. Returns 0 if the kind is unknown.
+    //   ctx.spawn_later(g_debris_kind, transform2_at(p), sprite_of(look), Velocity{v, spin});
     template <class K, class... C>
     u32 spawn_later(K kind, const C&... c) {
         u32 ticket = ctx_spawn_begin(*this, commands, kind, sizeof...(C), true);
@@ -466,14 +559,19 @@ struct TickContext {
     }
     // Names an entity at the phase boundary, in unit order; empty takes its name away.
     void name_later(Handle h, const char* name) { if (!h.is_null()) ctx_name(*this, commands, h, name); }
-    // Destroy at the phase boundary: readers in this phase still see the entity.
+    // Destroys an entity at the phase boundary. Readers in this phase still see it;
+    // events naming it are dropped from batches after it. A dead or null handle is ignored.
     void destroy(Handle h) { ctx_destroy(*this, commands, h); }
     // Every entity of a kind, at the phase boundary. Takes a name or a kind id.
     template <class K>
     void destroy_all(K kind) { ctx_destroy_all(*this, commands, kind_of(kind)); }
 
-    // ---- scheduled events: delivered at the first boundary of `tick` -------------------
-    // A tick at or before the current one means the next tick. Returns a ticket.
+    // ---- timers: events delivered at a later tick --------------------------------------
+    // Emits `e` at the start of sim tick `at_tick`; a tick at or before the current one
+    // means the next. schedule_in counts from now. Returns a ticket for cancel. Paused
+    // ticks don't count. Like any event, one with a schema that names an entity that died
+    // in the meantime is dropped rather than delivered.
+    //   ctx.schedule_in(Expire{bullet}, 72);                    // 1.2 s at 60 Hz
     template <class E>
     u32 schedule(const E& e, u64 at_tick) { return ctx_schedule(*this, EventType<E>::id, (u32)sizeof(E), &e, at_tick); }
     template <class E>
@@ -489,9 +587,15 @@ private:
 };
 
 // ---- parallel loops ----------------------------------------------------------------------
-// fn(ChunkContext& cc, u32 begin, u32 end) over [0, count) in chunks of grain, on the job
-// pool, back when every chunk has run. Chunks emit and issue commands through cc; the
-// buffers merge in chunk order, so the result does not depend on which thread ran what.
+// Runs fn(ChunkContext& cc, u32 begin, u32 end) over [0, count) in chunks of `grain`, on
+// the job pool, and returns when every chunk has run (the calling thread works too).
+// Chunks may write the rows the system declared, each its own range, and emit and issue
+// commands through cc; the buffers merge in chunk order, so the result does not depend on
+// which thread ran what. Pick a grain of a few hundred to a few thousand rows: a chunk
+// should be worth a few microseconds.
+//   parallel_for(ctx, k.rows(), 512, [&](ChunkContext&, u32 begin, u32 end) {
+//       for (u32 i = begin; i < end; ++i) if (k.alive(i)) t[i].position += v[i].v * dt;
+//   });
 template <class F>
 void parallel_for(TickContext& ctx, u32 count, u32 grain, F fn) {
     u32 chunks = jobs_chunks(count, grain);
@@ -510,7 +614,11 @@ void parallel_for(TickContext& ctx, u32 count, u32 grain, F fn) {
 }
 
 // Like parallel_for, where each chunk returns a T and `combine(acc, t)` folds them in
-// chunk order starting from `init`. T is plain data.
+// chunk order starting from `init`, so a float sum is the same on any thread count. T is
+// plain data.
+//   u32 alive = parallel_reduce(ctx, k.rows(), 4096, 0u,
+//       [&](ChunkContext&, u32 b, u32 e) { u32 n = 0; for (u32 i = b; i < e; ++i) n += k.alive(i); return n; },
+//       [](u32 a, u32 b) { return a + b; });
 template <class T, class F, class R>
 T parallel_reduce(TickContext& ctx, u32 count, u32 grain, T init, F fn, R combine) {
     static_assert(__is_trivially_copyable(T), "reduce over plain data");
@@ -535,10 +643,11 @@ T parallel_reduce(TickContext& ctx, u32 count, u32 grain, T init, F fn, R combin
 
 typedef void (*SystemFn)(TickContext& ctx);
 
-// One entry in a module's system table. Plain data; constinit-able; named fields.
+// One entry in a module's system table (example at the top of this file). Plain data,
+// written with designated initializers; only name, phase and fn are required.
 struct SystemDesc {
-    const char* name   = nullptr;
-    Phase       phase  = Phase::Count;
+    const char* name   = nullptr;       // ".move": the module's own, in the name language (HandlerDesc)
+    Phase       phase  = Phase::Count;  // required
     SystemFn    fn     = nullptr;
     // Resource names, comma-separated; see HandlerDesc. A reader runs after every writer of
     // what it reads in the phase. A read marked '^' ("^.npc.Local2") is of the value the
@@ -564,6 +673,7 @@ struct SystemDesc {
     RunWhen                 runs   = RunWhen::Unpaused; // whether a paused tick runs it
 };
 
+// ---- internal: the schedule as built --------------------------------------------------
 // A system or handler placed in the schedule, with the module it came from and its sets
 // as ids. Exactly one of desc and handler is set.
 struct ScheduledSystem {
@@ -627,6 +737,7 @@ struct PhaseList {
 
 } // namespace kv
 
-// The event and function of a handler, inside its designated initializer:
-//   {.name = "rocks.on_hit", KV_ON(RockHit, on_hit), .phase = Phase::Sim, .reads = ...}
+// The event and function of a handler, inside its designated initializer; fn has the
+// signature void(TickContext&, Span<const E>):
+//   {.name = ".on_hit", KV_ON(RockHit, on_hit), .phase = Phase::PostSim, .writes = ".rock.Health"}
 #define KV_ON(E, FN) .event = &::kv::EventType<E>::id, .event_name = #E, .fn = &::kv::handler_thunk<E, FN>

@@ -1,8 +1,16 @@
-// Korvid core: atomic operations on plain variables, with explicit memory orders. Shared
-// data stays an ordinary integer, pointer or enum of 1, 2, 4 or 8 bytes; every access that
-// can race goes through one of these. gcc and clang map them to their __atomic builtins;
-// MSVC to its interlocked intrinsics (x64 only, so far: its loads and stores are ordered
-// by the hardware, and the compiler barriers keep cl from moving them).
+// Korvid core: atomic operations on plain variables, with explicit memory orders.
+//
+// Shared data stays an ordinary integer, pointer or enum of 1, 2, 4 or 8 bytes; there is
+// no atomic type. Every access to it that can race goes through one of these functions,
+// and every call names its memory order, so the reader sees what each access promises:
+//
+//   static u32 g_next_thread_id = 0; // atomic
+//   u32 id = atomic_add_fetch(&g_next_thread_id, 1, MO_RELAXED);   // src/thread.cc
+//
+// A plain read or write of the same variable alongside them is a data race. gcc and clang
+// map the functions to their __atomic builtins; MSVC to its interlocked intrinsics (x64
+// only, so far: its loads and stores are ordered by the hardware, and the compiler
+// barriers keep cl from moving them).
 #pragma once
 #include "korvid/core/types.h"
 #if KV_COMPILER_MSVC
@@ -15,14 +23,22 @@
 
 namespace kv {
 
+// ---- memory orders --------------------------------------------------------------------
+// The C++ memory orders. MO_RELAXED: atomic, orders nothing else (a counter). MO_ACQUIRE,
+// on a load: what the thread does after it stays after it. MO_RELEASE, on a store: what
+// the thread did before it stays before it, so an acquire load that reads the value sees
+// all of that. MO_ACQ_REL: both, for a read-modify-write. MO_SEQ_CST: acquire and release,
+// plus one order of all such operations that every thread agrees on.
 enum MemOrder { MO_RELAXED, MO_ACQUIRE, MO_RELEASE, MO_ACQ_REL, MO_SEQ_CST };
 
+// ---- internal: the value argument's type ----------------------------------------------
 // The value argument takes the variable's type rather than deducing one of its own, so
 // atomic_add_fetch(&count_u64, 1, ...) is fine.
 template <class T> struct AtomicArg { typedef T type; };
 
 #if !KV_COMPILER_MSVC
 
+// ---- internal: gcc and clang ----------------------------------------------------------
 namespace atomic_detail {
 constexpr int order(MemOrder o) {
     return o == MO_RELAXED ? __ATOMIC_RELAXED : o == MO_ACQUIRE ? __ATOMIC_ACQUIRE : o == MO_RELEASE ? __ATOMIC_RELEASE
@@ -30,13 +46,26 @@ constexpr int order(MemOrder o) {
 }
 } // namespace atomic_detail
 
+// ---- operations -----------------------------------------------------------------------
+// Each takes the variable's address, `p`, which must be aligned to its size (any variable
+// of that type is), and is atomic on that variable alone.
+
+// Reads *p. Orders: relaxed, acquire or seq_cst.
 template <class T> inline T atomic_load(const T* p, MemOrder o) { return __atomic_load_n(p, atomic_detail::order(o)); }
+// Writes `v` to *p. Orders: relaxed, release or seq_cst.
 template <class T> inline void atomic_store(T* p, typename AtomicArg<T>::type v, MemOrder o) { __atomic_store_n(p, v, atomic_detail::order(o)); }
+// Writes `v` to *p and returns what was there.
 template <class T> inline T atomic_exchange(T* p, typename AtomicArg<T>::type v, MemOrder o) { return __atomic_exchange_n(p, v, atomic_detail::order(o)); }
+// If *p equals *expected, writes `desired` to it and returns true (with order `success`);
+// otherwise copies the value it found into *expected and returns false (with order
+// `failure`: relaxed, acquire or seq_cst). A `weak` exchange may fail even when the
+// values are equal, and is the one to use in a retry loop.
 template <class T> inline bool atomic_compare_exchange(T* p, T* expected, typename AtomicArg<T>::type desired, bool weak,
                                                        MemOrder success, MemOrder failure) {
     return __atomic_compare_exchange_n(p, expected, desired, weak, atomic_detail::order(success), atomic_detail::order(failure));
 }
+// Arithmetic, for integers only, wrapping as unsigned arithmetic does. fetch_add and
+// fetch_sub return the value before; add_fetch and sub_fetch the value after.
 template <class T> inline T atomic_fetch_add(T* p, typename AtomicArg<T>::type v, MemOrder o) { return __atomic_fetch_add(p, v, atomic_detail::order(o)); }
 template <class T> inline T atomic_fetch_sub(T* p, typename AtomicArg<T>::type v, MemOrder o) { return __atomic_fetch_sub(p, v, atomic_detail::order(o)); }
 template <class T> inline T atomic_add_fetch(T* p, typename AtomicArg<T>::type v, MemOrder o) { return __atomic_add_fetch(p, v, atomic_detail::order(o)); }
@@ -51,6 +80,7 @@ inline void atomic_fence(MemOrder o) { __atomic_thread_fence(atomic_detail::orde
 
 #else
 
+// ---- internal: MSVC -------------------------------------------------------------------
 namespace atomic_detail {
 template <usize N> struct Int;
 template <> struct Int<1> { typedef char type; };
@@ -78,6 +108,9 @@ inline long    add(volatile long* p, long v)       { return _InterlockedExchange
 inline __int64 add(volatile __int64* p, __int64 v) { return _InterlockedExchangeAdd64(p, v); }
 } // namespace atomic_detail
 
+// ---- operations, MSVC x64 -------------------------------------------------------------
+// The same contract as the gcc and clang versions above; the comments say how x64 meets it.
+
 // On x64 a plain load already acquires and a plain store already releases; the compiler
 // barriers stop cl reordering around them. A sequentially consistent store is an exchange.
 template <class T> inline T atomic_load(const T* p, MemOrder) {
@@ -85,15 +118,18 @@ template <class T> inline T atomic_load(const T* p, MemOrder) {
     _ReadWriteBarrier();
     return atomic_detail::value<T>(b);
 }
+// A plain store between compiler barriers, or an exchange for MO_SEQ_CST.
 template <class T> inline void atomic_store(T* p, typename AtomicArg<T>::type v, MemOrder o) {
     if (o == MO_SEQ_CST) { atomic_detail::exchange(atomic_detail::at(p), atomic_detail::bits<T>(v)); return; }
     _ReadWriteBarrier();
     *atomic_detail::at(p) = atomic_detail::bits<T>(v);
     _ReadWriteBarrier();
 }
+// An interlocked exchange: a full barrier, whatever the order.
 template <class T> inline T atomic_exchange(T* p, typename AtomicArg<T>::type v, MemOrder) {
     return atomic_detail::value<T>(atomic_detail::exchange(atomic_detail::at(p), atomic_detail::bits<T>(v)));
 }
+// An interlocked compare-exchange: always strong (`weak` is ignored), a full barrier.
 template <class T> inline bool atomic_compare_exchange(T* p, T* expected, typename AtomicArg<T>::type desired, bool,
                                                        MemOrder, MemOrder) {
     atomic_detail::Bits<T> want = atomic_detail::bits<T>(*expected);
@@ -102,7 +138,8 @@ template <class T> inline bool atomic_compare_exchange(T* p, T* expected, typena
     *expected = atomic_detail::value<T>(old);
     return false;
 }
-// Arithmetic is for integers; it wraps as unsigned arithmetic does.
+// Arithmetic is for integers; it wraps as unsigned arithmetic does. An interlocked add,
+// with the other three built on it.
 template <class T> inline T atomic_fetch_add(T* p, typename AtomicArg<T>::type v, MemOrder) {
     return (T)atomic_detail::add(atomic_detail::at(p), (atomic_detail::Bits<T>)v);
 }

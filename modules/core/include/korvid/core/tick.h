@@ -1,6 +1,13 @@
-// Korvid core: fixed-tick clock driven by an accumulator.
-// Ticks per frame are capped; past the cap the leftover is dropped and the game slows.
-// alpha() is the interpolation point for rendering between the previous and current tick.
+// Korvid core: the fixed-step clock that turns frame time into ticks.
+//
+// The simulation runs in ticks of a fixed length (tick_dt, 1/60 s), whatever the frame
+// rate. Each frame the loop hands the clock the real time that passed; the clock adds it
+// to an accumulator and pays it out as whole ticks, keeping the remainder for the next
+// frame. alpha() is how far that remainder is toward the next tick: the renderer draws
+// each sprite between its last two positions by alpha, so motion is smooth at any frame
+// rate while the sim only ever sees tick_dt. Ticks per frame are capped
+// (max_ticks_per_frame); past the cap the leftover is dropped and the game slows, rather
+// than falling further behind.
 //
 // Sim control: `paused` holds the simulation, and is true while any of `holds` is set
 // (the engine keeps the two in step: engine_hold). The clock still produces ticks at its rate
@@ -28,6 +35,9 @@ enum HoldReason : u32 {
     HoldGame    = 1u << 8, // the first bit a game may use for its own reasons
 };
 
+// The engine's clock (Engine::clock). Read it for where the run is: e.clock.tick_count,
+// e.clock.alpha(), e.clock.paused. Change it through the engine (engine_pause,
+// engine_hold, engine_rate, engine_time_scale), not by writing the fields.
 struct TickClock {
     f64 tick_dt             = 1.0 / 60.0;
     u32 max_ticks_per_frame = 4;

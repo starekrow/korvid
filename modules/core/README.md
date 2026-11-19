@@ -1,11 +1,30 @@
 # core
 
-The engine's floor: memory, handles, the module registry, the tick and its phases, the
-scheduler, events, entity kinds, the job pool, timers, the profiler, and the small
-libraries everything else is written with. Core knows nothing about windows, files,
-graphics or games; it holds state in pools it owns and runs systems that modules declare
-as data. A game never calls most of it directly: it declares components, kinds, systems
-and handlers in a `ModuleDesc`, and core stores, schedules, delivers and accounts.
+The engine's floor: modules, the tick and its scheduler, entities and their components,
+events, handles, memory, and the small libraries everything else is written with. Core
+knows nothing about windows, files, graphics or games. A game doesn't call most of it
+directly: it declares components, kinds, systems and handlers in a `ModuleDesc`, and core
+stores them, schedules them, delivers events between them and accounts for their memory.
+
+**Where a newcomer starts.** Writing a game touches these headers first, roughly in this
+order. Each one's file comment explains its idea, with an example.
+
+| header | for |
+|---|---|
+| `korvid/core/module.h` | `ModuleDesc`: declaring a module and its tables; startup and shutdown |
+| `korvid/core/phase.h` | `SystemDesc`, `HandlerDesc`, and the `TickContext` a system works through |
+| `korvid/core/component.h` | components: plain structs with a field table |
+| `korvid/core/kind.h` | kinds of entity: a fixed set of components, stored as columns |
+| `korvid/core/event.h` | event types: facts one module tells others |
+| `korvid/core/handle.h` | handles: how anything the engine hands out is named |
+| `korvid/core/engine.h` | the `Engine`: publishing resources, pausing, quitting, lookups |
+| `korvid/core/memory.h`, `arena.h` | which allocator for what; the scratch arena |
+| `korvid/core/array.h`, `map.h` | the containers |
+| `korvid/core/log.h`, `random.h`, `test.h` | logging, seeded randomness for the sim, a module's tests |
+
+[Modules](../../docs/concepts/modules.md) puts the first five together in one worked
+module, and [frame loops and scheduling](../../docs/guides/frame-loop-and-scheduling.md)
+shows them running in a game.
 
 Rules core enforces, stated once: no exceptions, no RTTI, no STL in the runtime; nothing
 runs before `main`; every id is assigned at `engine_init` and cleared at shutdown; every
@@ -133,9 +152,25 @@ kind, a system, a handler, timers, triggers and parallel work, and what happens 
 when the tick runs.
 
 **Memory in a game**: the module arena for what lives as long as the module
-(`arena_push<T>(self.arena)`), `self.general` for anything growable (`Array`, `Map`
-with `alloc` set), `mem_scratch()` with a `MemScope` for temporaries inside a call, and
-kind tables for entities, which the game never allocates.
+(`arena_push<T>(self.arena)`), `self.general` for anything growable (an `Array` with
+`alloc` set, a `Map` after `init(&self.general)`), `mem_scratch()` with a `MemScope` for
+temporaries inside a call, and kind tables for entities, which the game never allocates.
+
+**Data from a file**: parse JSON (or KBOR) into the scratch arena, read what you know with
+defaults, copy out what you keep:
+
+```cpp
+MemScope scope;
+JsonDoc doc;
+if (!json_parse(text, len, mem_scratch(), doc)) {
+    KV_ERROR("mygame", "%s: %s at line %u", path, doc.error, doc.error_line);
+    return false;
+}
+f32 speed = (f32)json_number(json_get(doc, doc.root(), "speed"), 120.0);
+```
+
+**Strings that are compared often** (event names, ids from a file) are interned once with
+`name_intern` and compared as `Name`s from then on.
 
 **Driving the engine yourself** (a tool, a test): `engine_init(e, modules, config)`,
 `engine_frame(e, dt)` per frame, `engine_shutdown(e)`, then `names_shutdown()` and
@@ -162,6 +197,10 @@ Header `korvid/core/memory.h`:
 | `mem_stats()`, `mem_stats_heap`, `mem_stats_module`, `mem_stats_category`, `mem_report` | functions | accounting rollups; the leak report at exit |
 | `mem_sample(frame)`, `mem_last_sample()` | functions | the per-frame sample; a fast read of memory pressure |
 | `mem_set_owner`, `mem_owner`, `mem_set_module_heap` | functions | attribution the scheduler sets around module code |
+| `MemMode`, `MemStats`, `MemSample` | enum, records | `SingleOwner`, `ThreadLocal`, `Shared`; the rollups' counts; the per-frame sample |
+| `mem_live_allocations`, `mem_category_name`, `mem_heap_name`, `mem_heap_budget`, `mem_heap_hard`, `mem_heap_used` | functions | counts and names for reports |
+| `mem_set_module_names`, `mem_module_names`, `mem_module_name_count` | functions | the report's module names; the engine sets them |
+| `dev_spike_hunt(on)`, `dev_spike_hunting()` | functions | a dev build without its fills, poison, guard pages and trace emitters (`--spike-hunt`) |
 | `mem_thread_exit()`, `mem_shutdown()` | functions | a worker gives its scratch back; the last call of the process |
 
 Header `korvid/core/arena.h`:
@@ -180,6 +219,7 @@ Header `korvid/core/pool.h`:
 | `Pool<T>` | record | generational slots on reserved pages: `init(max, tag)`, `create(v)`, `get(h)`, `valid(h)`, `destroy(h)`, `handle_at(i)`, `is_alive(i)`, `len`, `live`, `free()` |
 | `Pool::use_kind(k)` | method | stamps issued handles with a registered kind |
 | `Pool::snapshot`, `Pool::restore`, `Pool::snapshot_size` | methods | relocatable copies of the used prefix |
+| `PoolSnapshotHeader` | record | the front of a snapshot: `len`, `live`, the free list's ends, `item_size` |
 | `KV_POOL_DEFAULT_MAX`, `KV_POOL_NONE` | constants | 1 M slots of address space; no slot |
 
 Header `korvid/core/array.h`, `map.h`, `hash.h`, `name.h`:
@@ -187,6 +227,7 @@ Header `korvid/core/array.h`, `map.h`, `hash.h`, `name.h`:
 | name | kind | what |
 |---|---|---|
 | `Array<T>` | record | growable plain data: `push`, `push_n`, `pop`, `resize_fill`, `reserve`, `clear`, `free`, `span()`, `alloc` (null: general) |
+| `array_grow_failed(a, bytes)` | function | where `push` stops when the allocator refuses; `try_push`, `try_push_n` return null instead |
 | `array_in<T>(alloc)` | function | an array that lives in an arena or scratch |
 | `Map<K, V>` | record | dense entries plus an index past 16: `init(alloc)`, `find`, `has`, `set`, `get_or_insert`, `remove`, `clear`, `free`, `len()` |
 | `hash_mix`, `hash_bytes`, `hash_str`, `hash_key(k)` | functions | one fixed 64-bit hash; overload `hash_key` for your key type |
@@ -203,6 +244,9 @@ Header `korvid/core/handle.h` and `kv_handle.h`:
 | `handle_kind_register(desc)`, `kv_handle_kind_unregister(kind)` | functions | an issuer registers its resolve and describe functions |
 | `resolve(h)`, `resolve<T>(h)` | functions | pointer or null; the typed one checks the issuer's type key |
 | `kv_handle_describe(h, out, cap)`, `kind_name(h)` | functions | `"name#index:gen"` plus the issuer's text |
+| `kv_handle_make`, `kv_handle_kind`, `kv_handle_gen`, `kv_handle_index` | functions | the C side's packing, for issuers |
+| `kv_handle_kind_register`, `kv_handle_kind_find`, `kv_handle_kind_is_live`, `kv_handle_kind_name`, `kv_handle_kind_name_hash`, `kv_handle_kind_names`, `kv_handle_type_key` | functions | the C side's kind registry |
+| `kv_handle_resolve`, `kv_handle_resolve_as`, `kv_handle_name`, `kv_handle_find` | functions | the C side of `resolve`, `handle_name`, `handle_find` |
 | `kv_handle_kind_set_ctx`, `kv_handle_kind_desc_get`, `kv_handle_kind_count` | functions | an issuer that moved; the registry for tools |
 
 Header `korvid/core/module.h`:
@@ -233,6 +277,8 @@ Header `korvid/core/engine.h`:
 | `engine_request_quit(e)` | function | the loop ends |
 | `engine_sim_reset(e)`, `SimReset` | function, event | a fresh sim, from a handler on a held tick: every kind but the cosmetic ones emptied with its slots and generations as at startup, the sim tick back to 0, the timer wheel, undelivered events, unapplied commands and the units' ticket counters dropped; then `SimReset` for the modules whose state follows the sim. A game's second run is then the same run as its first in a new process. Cosmetic rows parented to a sim entity are their owner's to clear (the handle will be issued again) |
 | `engine_module(e, name)`, `engine_module_state_as<T>(e, name)` | functions | a started module and its state, for code outside the schedule |
+| `engine_module_state(e, name)` | function | the same, untyped |
+| `engine_entity_name_set(e, h, name)`, `engine_entity_find(e, name)`, `engine_entity_name(e, h)`, `engine_entity_names_each(e, fn, user)` | functions | entity names: set now (outside the schedule), find from anywhere, read, walk |
 | `engine_publish(e, self, name, ptr)` | function | the object behind a declared resource, for `ctx.resource<T>` |
 | `engine_resource_id`, `engine_component_id`, `engine_kind_id`, `engine_trigger_id`, `engine_system_phase` | functions | names to ids |
 | `engine_table(e, name or id)`, `engine_table_of(e, handle)`, `engine_component(e, id)` | functions | a kind's table, by full name, id or an entity handle; a schema |
@@ -265,17 +311,16 @@ Header `korvid/core/phase.h`:
 | name | kind | what |
 |---|---|---|
 | `Phase` | enum | `Input`, `PreSim`, `Sim`, `PostSim` (the Sim cycle, `KV_SIM_PHASES`), `Frame`, `Work`; `phase_name` |
-| `StateUse`, `RunWhen`, `Access`, `EarlyReadsChoice` | enums | `Write`, `Read`, `None` (a unit's use of its module's state); `Unpaused`, `Always`; `Read`, `Early`, `Write`, `Append`; `PerKind`, `Order`, `Snapshot` (`--early-reads`); `access_name`, `early_reads_name` |
+| `StateUse`, `RunWhen`, `Access` (with `UnitAccess`), `EarlyReadsChoice` | enums | `Write`, `Read`, `None` (a unit's use of its module's state); `Unpaused`, `Always`; `Read`, `Early`, `Write`, `Append`; `PerKind`, `Order`, `Snapshot` (`--early-reads`); `access_name`, `early_reads_name` |
 | `SystemDesc` | record | `name`, `phase`, `fn`, `reads` (`^x`: early), `writes`, `appends`, `emits`, `after`, `before` (strings in the name language: `.x` is the module's own, lists are comma-separated), `state` (`StateUse`), `main_thread`, `runs` (`RunWhen`: `Unpaused` or `Always`) |
-| `HandlerDesc`, `KV_ON(E, fn)` | record, macro | a handler on one event type: `name`, the event, `phase`, `reads`, `writes`, `appends`, `emits`, `after`, `before` |
+| `HandlerDesc`, `KV_ON(E, fn)` (through `handler_thunk`) | record, macro | a handler on one event type: `name`, the event, `phase`, `reads`, `writes`, `appends`, `emits`, `after`, `before` |
 | `TriggerDesc`, `TriggerEdge` | record, enum | `kind.Component.field` with `Changed`, `CrossedBelow(value)`, `CrossedAbove(value)` |
 | `Spawned{ticket, kind, entity}`, `StateEdge{entity, trigger, value}`, `SimReset{resets}` | events | the engine's own, delivered to anyone |
 | `TickContext` | record | `engine`, `events`, `dt`, `tick`, `paused`; `state_as<T>()`; events: `emit`, `received<E>()`; data: `write_kind`, `read_kind`, `read<T>`, `write<T>`, `view<C...>()`, `rows`, `alive`, `resource<T>`, `append`, `resource_id`, `column_id`, `kind_id`; per entity: `attached<T>`, `attach`, `detach`, `attached_all<T>`, `prop_set_int` and the other `prop_*`; commands: `spawn_later`, `spawn_named_later`, `name_later`, `destroy`, `destroy_all`; timers: `schedule`, `schedule_in`, `cancel`; the Work cycle: `more()`, `time_left()` |
 | `KindRows`, `KindRange<C...>` | records | one kind's rows in a view: `rows()`, `alive(i)`, `handle_at(i)`, `col<T>()`, `prev<T>()` (T const reads, T writes; writing the previous copy marks a teleport the renderer will not interpolate) |
+| `Attached<T>`, `AttachedRange<T>` | records | what `ctx.attached_all<T>(kind)` walks: `entity`, `value` |
 | `ChunkContext` | record | what a parallel chunk may do: `emit`, `spawn_later` (no ticket), `destroy` |
 | `parallel_for(ctx, count, grain, fn)`, `parallel_reduce(ctx, count, grain, init, fn, combine)` | functions | chunks on the pool, buffers merged in chunk order |
-| `CommandBuffer`, `command_spawn_begin`, `command_spawn_component`, `command_destroy`, `command_destroy_all` | record, functions | the deferred spawn and destroy stream |
-| `ScheduledSystem`, `PhaseList` | records | the schedule as built: sets as ids, level, rank; `run_tick`, `run_cycle` |
 
 Header `korvid/core/component.h`, `kind.h`:
 
@@ -284,10 +329,14 @@ Header `korvid/core/component.h`, `kind.h`:
 | `FieldDesc`, `FieldType` | record, enum | one field: scalar type, count, offset; `Char` is a byte of UTF-8, so a `char[N]` field is a string |
 | `schema_field_string`, `schema_field_set_string` | functions | a `char[N]` field as a quoted string, and set from one with truncation at a character boundary |
 | `ComponentDesc`, `ComponentFlags` | record, enum | name, size, align, fields, `CompSim`, `CompCosmetic`, `CompPrev`, the id slot |
+| `field_type_size`, `field_type_name`, `schema_has_handles` | functions | a scalar type's size and name; whether a table has handles |
+| `component_check`, `component_field`, `component_hash`, `component_equal`, `component_describe`, `component_each_handle` | functions | the schema operations on a `ComponentDesc` |
 | `KV_FIELD(T, m)`, `KV_FIELDS(T, ...)`, `KV_COMPONENT(T, fields, flags...)`, `KV_FIELD_TRAITS(M, T, N)` | macros | the tables, from member names; traits for your own aggregates |
 | `ComponentType<T>::id` | record | the id slot, filled at init |
 | `schema_check`, `schema_field`, `schema_hash`, `schema_equal`, `schema_describe`, `schema_each_handle`, `schema_field_as_f64` | functions | every operation on a field table; `component_*` wrappers |
 | `KindDesc` | record | `name` (`.x` for the module's own), `components` (one comma-separated string), `capacity`, `id` slot, `cosmetic` (never hashed), `still` (rows never change once spawned: their previous copies are not retaken and the sprite extract looks at them only when the kind has spawned, lost or restored a row; `Table::churn` and `Table::restores` count those), `early_reads` (`EarlyReads`: `Order`, the default, or `Snapshot`: how a `^` read of it gets the phase's starting value) |
+| `PropType`, `PropValue`, `PropEntry`, `prop_type_name` | enum, records, function | a property bag's values, as `Table::prop` hands them out |
+| `table_hash(t)` | function | a table's hash: every sim column of every live row |
 | `Table`, `Column` | records | a kind's storage: `spawn(...)`, `destroy`, `destroy_all`, `valid`, `live()`, `rows()`, `is_alive(i)`, `handle_at(i)`, `get<T>(h)`, `prev<T>(h)`, `rows_of<T>()`, `prev_rows_of<T>()`, `column`, `has`, `describe`, `hash` |
 
 Header `korvid/core/event.h`, `timer.h`:
@@ -295,12 +344,13 @@ Header `korvid/core/event.h`, `timer.h`:
 | name | kind | what |
 |---|---|---|
 | `EventTypeDesc`, `EventFlags`, `KV_EVENT(E)`, `KV_EVENT_EX(E, fields, flags)` | record, enum, macros | an event type with an optional schema; `EvNextTick`; `EvStaleOk` (dropped for a stale handle as a matter of course: dev builds otherwise warn once a type) |
+| `event_types_register(types, first_id)`, `event_types_unregister(types)` | functions | ids for a table of types: engine_init's, or a test of the bus without an engine |
 | `EventType<E>::id` | record | the id slot |
 | `EventBus` | record | `emit`, `read<E>()`, `read_new<E>()`, `deliver`, `end_tick`, `dropped_stale`, `pending_count` |
 | `EventWriter`, `EventBuffer` | records | one unit's pending events; a type's batch |
 | `TimerWheel` | record | `schedule`, `cancel`, `fire`; 1024-slot ring plus a far list |
 
-Header `korvid/core/job.h`, `thread.h`, `time.h`:
+Header `korvid/core/job.h`, `thread.h`, `time.h`, `os_thread.h`, `atomic.h`:
 
 | name | kind | what |
 |---|---|---|
@@ -308,6 +358,9 @@ Header `korvid/core/job.h`, `thread.h`, `time.h`:
 | `jobs_run(count, grain, fn, user, name)`, `jobs_chunks` | functions | a batch; the caller works too |
 | `jobs_stats()`, `jobs_stats_reset()`, `JobStats` | functions, record | batches, tasks, waits |
 | `thread_id()`, `os_cpu_count()`, `thread_set_realtime`, `thread_is_realtime` | functions | identity; a real-time thread never allocates |
+| `OsMutex`, `OsCond`, `os_mutex_init`, `os_mutex_destroy`, `os_mutex_lock`, `os_mutex_unlock`, `os_cond_init`, `os_cond_destroy`, `os_cond_wait`, `os_cond_signal`, `os_cond_broadcast` | records, functions | (os_thread.h) a mutex and a condition variable, not recursive, not movable once initialized |
+| `OsThread`, `os_thread_start(t, fn, arg)`, `os_thread_join(t)` | record, functions | (os_thread.h) a thread of your own; join each once |
+| `MemOrder`, `atomic_load`, `atomic_store`, `atomic_add_fetch`, `atomic_fence` and the rest of atomic.h | enum, functions | (atomic.h) atomics with an explicit order: `MO_RELAXED`, `MO_ACQUIRE`, `MO_RELEASE`, `MO_ACQ_REL`, `MO_SEQ_CST` |
 | `time_now()`, `time_sleep(s)`, `os_ticks()`, `os_ticks_per_second()`, `os_thread_cpu_ticks()` | functions | monotonic seconds; the raw clock the profiler records |
 
 Header `korvid/core/profile.h`:
@@ -315,8 +368,10 @@ Header `korvid/core/profile.h`:
 | name | kind | what |
 |---|---|---|
 | `KV_ZONE(name)`, `KV_ZONE_WAIT(name)`, `KV_MARK(name)`, `KV_MARK_V(name, v)`, `KV_COUNTER(name, v)` | macros | the hot path; nothing in ship builds |
+| `prof_enabled()`, `prof_begin`, `prof_wait_begin`, `prof_end`, `prof_mark`, `prof_counter`, `prof_frame`, `prof_tick` | functions | what the macros call, for a zone whose name is made at run time; check `prof_enabled()` first |
 | `prof_enable`, `prof_thread_name`, `prof_cpu_time` | functions | on, named threads, CPU time at zone edges |
 | `prof_collect()`, `prof_frame_stats()`, `prof_thread_stats()`, `prof_log_summary(top)`, `prof_top(out, &frames)`, `prof_keep_frame`, `prof_log_frame` | functions | the collector, between frames on main |
+| `ProfStat`, `ProfThreadStat`, `prof_ms(ticks)`, `prof_ticks_from_ms(ms)` | records, functions | a zone's and a thread's summary; the profiler's clock to milliseconds and back |
 | `prof_trace_open(path)`, `prof_trace_close()`, `prof_shutdown()` | functions | a Chrome JSON trace |
 | `prof_track(name)`, `prof_track_begin(track, name, ticks)`, `prof_track_end(track, ticks)`, `prof_track_counter(track, name, value, ticks)` | functions | a track: spans timed on another clock (the GPU's), shown like a thread |
 
@@ -325,18 +380,24 @@ Header `korvid/core/utf8.h`, `json.h`, `kbor.h`, `base64.h`, `cli.h`, `random.h`
 | name | kind | what |
 |---|---|---|
 | `utf8_decode`, `utf8_next`, `utf8_encode`, `utf8_valid`, `utf8_count`, `utf8_prefix`, `utf8_copy`, `utf8_trim` | functions | UTF-8 without allocation; `utf8_copy` zeroes the rest of a fixed field |
-| `json_parse(text, len, alloc, doc)`, `JsonDoc`, `JsonValue`, `JsonType` | function, records | a flat tree in the allocator given; strings are UTF-8 (`\u` escapes and surrogate pairs decoded, lone surrogates rejected); errors with byte offsets |
+| `json_parse(text, len, alloc, doc)`, `JsonDoc`, `JsonValue`, `JsonType` | function, records | a flat tree in the allocator given; strings are UTF-8 (`\u` escapes and surrogate pairs decoded, lone surrogates rejected); an error with its byte offset and line |
 | `json_get`, `json_at`, `json_first`, `json_next`, `json_number`, `json_bool`, `json_string`, `json_numbers` | functions | walking and typed reads with defaults |
+| `json_i64`, `json_u64`, `json_type_name` | functions | an integer literal's exact value, with a default; a type's name |
+| `JsonBuilder`, `JsonRef` | record | a tree made from code: makers, `push`, `set`, `finish(root, doc)` |
 | `json_write(doc, out, flags)` | function | a tree as JSON text, pretty or compact; floats always with a fraction or an exponent, NaN and the infinities as strings, `Bytes` as base64 |
 | `kbor_parse(data, size, alloc, doc, info)`, `KborInfo`, `KborSummary` | function, records | KBOR ([docs/design/kbor.md](../../docs/design/kbor.md)) into the same tree as `json_parse`; one pass for a file with the summary, a count first for any other; `JsonType::Bytes` for byte strings |
 | `kbor_write(doc, out, summary)` | function | a tree as normalized KBOR: definite lengths, an index for every repeated key, the summary in front |
 | `base64_encode`, `base64_decode`, `base64_encoded_len`, `base64_decoded_max` | functions | RFC 4648; writes standard and padded, reads standard or URL-safe, padded or not |
+| `glob_match(pattern, path)`, `glob_match_path`, `glob_is_literal` | functions | `*`, `?`, `[...]`, `**` over paths; as a rule file means a pattern; no glob characters |
+| `Sha256`, `sha256(data, size, out)`, `sha256_hex(digest, out)` | record, functions | content identity, in pieces or at once; the digest as 64 hex characters |
+| `sort(base, count, size, compare[, ctx])` | function | a deterministic in-place sort: insertion for 16 or fewer, heapsort above |
 | `CliCommandDesc`, `CliContext`, `cli_arg_f32`, `cli_arg_u32` | records, functions | a command as module data; `print`, `fail`; argument parsing |
 | `Rng` | record | PCG32: `seeded(seed, stream)`, `next`, `unit`, `range`, `below`, `chance` |
 | `Mt19937` | record | MT19937: `seeded(seed)` as Python's `random.Random(seed)`, `seeded_std(seed)` as `std::mt19937`; `next`, `unit`, `below`, `range` as `getrandbits(32)`, `random()`, `randrange(n)`, `randint(lo, hi)`; 2.5 KB, for matching another program's numbers, not for the sim |
-| `KV_TRACE`..`KV_ERROR`, `log_set_level`, `log_level`, `log_write` | macros, functions | leveled log to stdout |
+| `KV_TRACE`, `KV_DEBUG_LOG`, `KV_INFO`, `KV_WARN`, `KV_ERROR`, `LogLevel`, `log_set_level`, `log_level`, `log_write` | macros, enum, functions | one line per call, `[ INFO] tag: text`; Warn and Error to stderr, the rest to stdout |
 | `TestCtx`, `KV_CHECK(ctx, expr)`, `test_report(ctx, exe)` | record, macro, function | one test executable per module, no registration |
 | `format`, `vformat` | functions | snprintf's contract and language |
+| `output_set_sink`, `output_write` | functions | where the standard streams go, for a platform that has none |
 | `print`, `vprint`, `print_err`, `vprint_err`, `print_flush` | functions | to stdout (buffered) and stderr |
 
 Header `korvid/core/os_memory.h`: `os_page_size`, `os_reserve`, `os_commit`, `os_decommit`,

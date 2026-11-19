@@ -1,13 +1,27 @@
-// Korvid core: memory. See docs/design/allocators.md. Allocation is ownership: every
-// allocator has one owner (a thread, a system, the engine). This header is the baked
-// surface: the general allocator, attribution, accounting, and the one interface every
-// container uses. Arenas and pools are in arena.h and pool.h.
+// Korvid core: memory: the general allocator, the Allocator interface every container
+// takes, and the accounting that says where the bytes went.
+//
+// Every allocation has an owner, and the engine always knows whose code is running, so
+// memory is charged to the module that asked for it: mem_report and the leak report at
+// exit name the module and category, and a heap's limit applies to the modules the
+// executable put in it (EngineConfig::heaps). Which allocator to use:
+//
+//   what lives as long as the module      self.arena (arena_push<T>), in startup
+//   what grows: arrays, maps              self.general, set as the container's `alloc`;
+//                                         free it in shutdown
+//   temporaries inside a call or a frame  mem_scratch() under a MemScope (arena.h)
+//   entities                              kinds' tables: the engine allocates them
+//   anything else                         mem_alloc / mem_free, charged to the running module
+//
+// Nothing here throws: an allocation that can't be had returns null, logged once.
+// Arenas and pools are in arena.h and pool.h; docs/design/allocators.md has the design.
 #pragma once
 #include "korvid/core/types.h"
 
 namespace kv {
 
-// Attribution. All zero by default, and zero means nothing: no registration, no lookup.
+// Who an allocation is charged to. All zero by default, and zero means nothing: no
+// registration, no lookup.
 //   module:   the registry's module index + 1 (0: the engine itself)
 //   category: a name somebody registered with mem_category_register (0: none)
 //   heap:     a budget boundary registered with mem_heap_register (0: the default heap)
@@ -18,13 +32,17 @@ struct MemTag {
     u8  heap     = 0;
 };
 
+// Which threads may use an allocator; checked in debug builds.
 enum class MemMode : u8 {
     SingleOwner, // one thread, recorded at creation, asserted in debug
     ThreadLocal, // one per thread by construction, never shared
     Shared,      // safe from any thread
 };
 
-// The one interface containers see. A fat pointer, not a virtual class.
+// The one interface containers see: two functions and a tag, not a virtual class. Every
+// arena, pool view and general-allocator view is one, so an Array or a JSON parse takes an
+// Allocator* and doesn't care which. Frees pass the size, so arenas and pools need no
+// per-block header.
 struct Allocator {
     void* (*alloc)(Allocator* a, usize size, u32 align) = nullptr;
     void  (*free)(Allocator* a, void* p, usize size)    = nullptr; // size as allocated; pools and arenas need no header
@@ -57,17 +75,21 @@ void free_items(Allocator* a, T* p, u32 count = 1) { if (p) a->free(a, p, sizeof
 // blocks sit on malloc; in dev builds, blocks of 64 KB and up sit on their own pages
 // with a guard page after them. Dev builds fill new blocks with 0xCD and freed ones
 // with 0xDD.
+//
+// malloc and free, the engine's: null on failure (out of memory, or past a heap's hard
+// limit, logged). Charged to whichever module's code is running. mem_free(null) is fine.
 void*      mem_alloc(usize size);
 void*      mem_alloc_aligned(usize size, u32 align);
 void*      mem_realloc(void* p, usize size);
 void       mem_free(void* p);
+// The general allocator as an Allocator*, untagged: what a container with no alloc uses.
 Allocator* mem_general();
 // A view of the general allocator with a fixed tag, for containers a module owns:
 // their growth is then attributed to the owner, whichever system triggers it. The tag
 // is used as written; module 0 in a view means the engine itself.
 void       mem_general_tagged(Allocator& out, MemTag tag, const char* name);
 
-// ---- attribution ---------------------------------------------------------------------
+// ---- internal: attribution ----------------------------------------------------------
 // The scheduler sets the current owner (module index + 1) around a module's startup,
 // shutdown and each system run; allocations made meanwhile are tagged with it, and with
 // the heap the engine assigned to that module.
@@ -76,6 +98,7 @@ u16  mem_owner();
 void mem_set_module_heap(u16 module, u8 heap);
 u8   mem_module_heap(u16 module);
 
+// ---- categories and heaps -------------------------------------------------------------
 // Categories and heaps are registered by name, at startup, by whoever cares to see them
 // apart in reports. Registering a name twice returns the same id. The name is copied
 // (31 characters kept), so it may come from any buffer. Not thread-safe: register during
@@ -139,6 +162,7 @@ struct MemSample {
 void             mem_sample(u64 frame);
 const MemSample& mem_last_sample();
 
+// ---- internal: hooks for the other allocators -----------------------------------------
 // Accounting hooks for the other allocator kinds (arena, pool): pages committed, after
 // mem_heap_admit said yes; decommit also releases the heap's count.
 void mem_account_commit(MemTag tag, usize bytes);
@@ -146,11 +170,13 @@ void mem_account_decommit(MemTag tag, usize bytes);
 // The size-class allocator's pages: how many 64 KB pages it has carved, for reports.
 u64  mem_small_pages();
 
+// ---- shutdown -------------------------------------------------------------------------
 // Frees the calling thread's scratch, then reports anything still live: the last call
-// of the process, after every table that outlives the engine is gone.
+// of the process, after engine_shutdown and names_shutdown. A leak is reported with its
+// module, category and, in dev builds, its call site.
 void mem_shutdown();
 
-// ---- spike hunting ------------------------------------------------------------------------
+// ---- spike hunting --------------------------------------------------------------------
 // Dev builds do work that is not checking: they fill memory as it is handed out and given
 // back, poison what is destroyed (a kind's row, a pool's item, an arena's released range),
 // give each large allocation pages of its own behind a guard page, and note every event's

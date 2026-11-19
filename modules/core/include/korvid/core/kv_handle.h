@@ -11,6 +11,9 @@
  * registration order and never reused within a run. Registration is startup work;
  * resolution is lock-free from any thread; unregister only when nothing can still hold
  * the kind in flight (module shutdown).
+ *
+ * Most code uses the C++ side (handle.h) and never registers a kind: entity kinds and the
+ * asset tables register their own. This header is for writing an issuer, and for the C ABI.
  */
 #pragma once
 #include <stddef.h>
@@ -34,6 +37,7 @@ enum {
     KV_HANDLE_GENERATIONAL = 1, /* generation 0 means null; the issuer bumps it on reuse */
 };
 
+/* What an issuer registers: how to turn its handles into pointers, and how to show them. */
 typedef struct kv_handle_kind_desc {
     const char* name;     /* for humans; copied, 31 characters kept */
     const void* type_key; /* unique per pointee type; identity only, never dereferenced */
@@ -48,6 +52,7 @@ typedef struct kv_handle_kind_desc {
     kv_handle   (*find_name)(const char* name, void* ctx);
 } kv_handle_kind_desc;
 
+/* Packing and unpacking: for issuers. */
 static inline kv_handle kv_handle_make(uint16_t kind, uint32_t gen, uint32_t index) {
     return ((kv_handle)(kind & KV_HANDLE_MAX_KIND) << 52) | ((kv_handle)(gen & KV_HANDLE_MAX_GEN) << 32) | index;
 }
@@ -58,6 +63,7 @@ static inline uint32_t kv_handle_index(kv_handle h) { return (uint32_t)h; }
 /* Copies the descriptor (name included); the caller's struct may be a temporary. 0 on
  * failure (table full, no resolve function). Warns when three quarters of the kinds are gone. */
 uint16_t    kv_handle_kind_register(const kv_handle_kind_desc* desc);
+/* Retires a kind: its handles stop resolving, and its id is not reused this run. */
 void        kv_handle_kind_unregister(uint16_t kind);
 /* The registered copy, valid for the rest of the run; NULL for an unknown kind. */
 const kv_handle_kind_desc* kv_handle_kind_desc_get(uint16_t kind);
@@ -80,8 +86,9 @@ const void* kv_handle_type_key(kv_handle h);    /* NULL for unknown */
 const char* kv_handle_name(kv_handle h);
 /* The live handle of `kind` its issuer calls `name`; 0 for none. */
 kv_handle   kv_handle_find(uint16_t kind, const char* name);
-/* Whether the kind's issuer names its handles. */
+/* Whether the kind's issuer names its handles (it registered name_of). */
 int         kv_handle_kind_names(uint16_t kind);
+/* Whether the kind is registered and not retired. */
 int         kv_handle_kind_is_live(uint16_t kind);
 uint32_t    kv_handle_kind_count(void);         /* highest id ever assigned + 1 */
 /* "name#index:gen" plus the issuer's text; returns chars written, 0 if cap is 0. */

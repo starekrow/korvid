@@ -1,15 +1,35 @@
-// Korvid core: component schemas. A component is a plain struct a module declares as
-// data: name, size, alignment, a field table and flags. The schema is the reflection
-// everything else reads: the engine lays out columns from it, hashes and compares rows
-// by field (padding never counts), prints any row for a tool, and knows which fields are
-// handles. Declaring is one table per type and one row per field:
+// Korvid core: components, and the field tables that describe them.
 //
-//   constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, linear, angular)};
-//   constinit const ComponentDesc k_components[]  = {KV_COMPONENT(Velocity, k_velocity_fields)};
+// A component is one piece of data an entity has: a position, a velocity, a health. In
+// code it is a plain struct (no constructors that matter, no pointers to own, no virtual
+// functions). Kinds are made of components (kind.h): a kind of entity is a fixed set of
+// them, stored as one column per component.
 //
-// A field's scalar type and count come from FieldTraits<M>: core covers the scalars,
-// Handle and fixed arrays; math/fields.h covers vec2, point2, rect2 and color. A struct
-// with an unknown field type fails to compile, never to describe.
+// The engine can't see inside a struct on its own, so each component comes with a field
+// table: one row per member, made by a macro from the member names. That table is the
+// reflection everything else reads. The engine lays columns out from it, hashes and
+// compares rows field by field (padding never counts), saves and restores them, prints
+// any row in the CLI and the logs, and knows which fields are handles, so it can drop
+// events about entities that died.
+//
+//   struct Velocity { vec2 v; f32 spin; };   // pixels per second, radians per second
+//   struct Health   { i32 hp; };
+//
+//   constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, v, spin)};
+//   constinit const FieldDesc k_health_fields[]   = {KV_FIELDS(Health, hp)};
+//   constinit const ComponentDesc k_components[] = {
+//       KV_COMPONENT(Velocity, k_velocity_fields),
+//       KV_COMPONENT(Health, k_health_fields, CompPrev),  // keep last tick's copy: a trigger watches it
+//   };
+//   // ModuleDesc{.components = k_components, ...}; a KindDesc then lists "Velocity, Health"
+//
+// List every member. A member left out of the table is stored and copied with the row,
+// but not hashed, compared, saved or shown.
+//
+// A field's scalar type and count come from FieldTraits<M>: core covers the integers,
+// floats, bool, Handle, enums and fixed arrays (char[N] is a string); math/fields.h covers
+// vec2, point2, rect2 and color. A member of any other type fails to compile, with
+// FieldTraits named; KV_FIELD_TRAITS teaches it a plain aggregate of your own.
 #pragma once
 #include "korvid/core/handle.h"
 
@@ -19,38 +39,46 @@ namespace kv {
 // bytes, hashed and compared as bytes, printed and patched as a string.
 enum class FieldType : u8 { Bool, U8, U16, U32, U64, I8, I16, I32, I64, F32, F64, Handle, Char, Count };
 
-u32         field_type_size(FieldType t);
-const char* field_type_name(FieldType t);
+u32         field_type_size(FieldType t); // bytes of one scalar: 4 for F32, 8 for Handle
+const char* field_type_name(FieldType t); // "f32", "handle", ...
 
-// One field: `count` scalars of `type`, contiguous at `offset`. vec2 is two F32.
+// One field: `count` scalars of `type`, contiguous at `offset`. vec2 is two F32. Made by
+// KV_FIELD and KV_FIELDS, never by hand.
 struct FieldDesc {
-    const char* name;
+    const char* name;   // the member's name, as the CLI and saves spell it
     FieldType   type;
-    u16         count;
-    u16         offset;
+    u16         count;  // scalars: 1 for an f32, 2 for a vec2, N for a char[N]
+    u16         offset; // bytes from the start of the struct
 };
 
-// Flags OR together. A component is sim state unless it says otherwise.
+// What the engine does with a component's columns; the third argument of KV_COMPONENT,
+// ORed together. A component is sim state unless it says otherwise.
 enum ComponentFlags : u8 {
-    CompSim      = 0, // authoritative: hashed, snapshotted, visible to triggers
-    CompCosmetic = 1, // presentation only: never hashed, never read by a sim system
-    CompPrev     = 2, // the engine keeps a previous-tick copy
+    CompSim      = 0, // the default: simulation state, hashed, saved, visible to triggers
+    CompCosmetic = 1, // presentation only (a flash timer, a glyph's look): never hashed;
+                      // a sim system reading it fails engine_init: it can't steer the game
+    CompPrev     = 2, // keep last tick's copy, taken at the start of PreSim: for triggers, for
+                      // KindRows::prev<T>(), and for interpolation (Transform2 has it)
 };
 
-// The id slot is ComponentType<T>::id, filled at init like events.
+// One component as the engine knows it: a row of a module's component table, made by
+// KV_COMPONENT. Its name is the type's, and every module refers to it by that name.
 struct ComponentDesc {
-    const char*           name;
+    const char*           name;  // "Velocity": global, not prefixed by the module
     u32                   size;
     u32                   align;
     Span<const FieldDesc> fields;
-    u8                    flags;
-    u32*                  id;
+    u8                    flags; // ComponentFlags
+    u32*                  id;    // &ComponentType<T>::id
     const void*           type; // TypeKey<T>, so a typed access can be checked against the schema
 
     bool is_sim()   const { return (flags & CompCosmetic) == 0; }
     bool has_prev() const { return (flags & CompPrev) != 0; }
 };
 
+// The id engine_init gives component T, for code that would rather not look it up by
+// name: ctx.write<T>, views and spawns use it. 0 before init and after shutdown. T must be
+// plain data with a standard layout.
 template <class T>
 struct ComponentType {
     static_assert(__is_trivially_copyable(T), "components are plain data");
@@ -58,7 +86,11 @@ struct ComponentType {
     static inline u32 id = 0;
 };
 
-// Scalar type and count of a member type. Specialize for your own plain aggregates.
+// Scalar type and count of a member type. For a plain aggregate of your own that is a run
+// of one scalar type, say so with KV_FIELD_TRAITS (at namespace kv scope), and it can be a
+// field:
+//   struct Rgb8 { u8 r, g, b; };
+//   namespace kv { KV_FIELD_TRAITS(Rgb8, U8, 3); }
 template <class M> struct FieldTraits;
 #define KV_FIELD_TRAITS(M, T, N) \
     template <> struct FieldTraits<M> { static constexpr FieldType type = FieldType::T; static constexpr u16 count = N; }
@@ -85,12 +117,15 @@ template <class E> requires __is_enum(E)
 struct FieldTraits<E> : FieldTraits<__underlying_type(E)> {};
 
 // ---- schema operations: every one reads only the field table ----------------------
-// A field table describes any plain struct: components and events share these.
+// A field table describes any plain struct: components and events share these. Tools,
+// saves and the CLI use them to work on rows they know nothing else about.
 
 // Null if the table is consistent for a struct of `size` bytes; otherwise a static string
 // naming what is wrong, with the offending field's name in `field` if there is one.
 const char*      schema_check(u32 size, Span<const FieldDesc> fields, const char** field);
+// The field with that name, or null.
 const FieldDesc* schema_field(Span<const FieldDesc> fields, const char* name);
+// Whether any field is a Handle.
 bool             schema_has_handles(Span<const FieldDesc> fields);
 // Field by field, so padding never matters. The hash is the fixed engine hash over the
 // scalars' bit patterns in declaration order: identical across runs and platforms.
@@ -116,6 +151,8 @@ int  schema_field_string(const FieldDesc& f, const void* row, char* out, usize c
 // with its NUL, the rest zeroed. False for a field that is not Char.
 bool schema_field_set_string(const FieldDesc& f, void* row, const char* str);
 
+// The schema operations on a ComponentDesc: component_check adds the checks engine_init
+// makes on a component (a name, a size, a power-of-two alignment, made by KV_COMPONENT).
 inline const char*      component_check(const ComponentDesc& c, const char** field) {
     *field = nullptr;
     if (!c.name || !c.name[0]) return "has no name";
@@ -132,14 +169,16 @@ inline bool component_each_handle(const ComponentDesc& c, void* row, bool (*fn)(
 
 } // namespace kv
 
-// Table entries are braced lists, not FieldDesc{...}: cl will not constant-initialize a
-// constinit object from a typed prvalue (T{...}), though the standard makes the two the
-// same. KV_COMPONENT and KV_EVENT are written the same way.
+// One field of struct T, from the member's name. KV_FIELDS is the usual way to write a
+// table; KV_FIELD is for listing members one by one.
+// (Entries are braced lists, not FieldDesc{...}: cl will not constant-initialize a
+// constinit object from a typed prvalue, though the standard makes the two the same.
+// KV_COMPONENT and KV_EVENT are written the same way.)
 #define KV_FIELD(T, m) \
     {#m, ::kv::FieldTraits<decltype(T::m)>::type, ::kv::FieldTraits<decltype(T::m)>::count, (::kv::u16)offsetof(T, m)}
 
-// The whole table from the member names, up to sixteen:
-//   constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, linear, angular)};
+// The whole table from the member names, up to sixteen (KV_FIELD for more):
+//   constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, v, spin)};
 #define KV_FIELDS(T, ...) KV_CAT_(KV_FIELDS_, KV_NARGS_(__VA_ARGS__, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))(T, __VA_ARGS__)
 #define KV_NARGS_(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, N, ...) N
 #define KV_CAT_(a, b) KV_CAT__(a, b)
@@ -161,7 +200,10 @@ inline bool component_each_handle(const ComponentDesc& c, void* row, bool (*fn)(
 #define KV_FIELDS_15(T, a, ...) KV_FIELD(T, a), KV_FIELDS_14(T, __VA_ARGS__)
 #define KV_FIELDS_16(T, a, ...) KV_FIELD(T, a), KV_FIELDS_15(T, __VA_ARGS__)
 
-// KV_COMPONENT(Velocity, k_velocity_fields) or KV_COMPONENT(Transform2, k_fields, CompPrev).
+// One row of a module's component table: the type, its field table, and optional
+// ComponentFlags.
+//   KV_COMPONENT(Velocity, k_velocity_fields)
+//   KV_COMPONENT(Transform2, k_fields, CompPrev)
 #define KV_COMPONENT(T, fields, ...)                                                               \
     {#T, (::kv::u32)sizeof(T), (::kv::u32)alignof(T), fields,                   \
                         (::kv::u8)(0 __VA_OPT__(| (__VA_ARGS__))), &::kv::ComponentType<T>::id, \

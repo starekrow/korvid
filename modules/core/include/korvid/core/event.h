@@ -1,31 +1,48 @@
-// Korvid core: events are plain-data facts in typed streams. Emitting is an append into
-// a writer: each unit (system or handler) has its own, and writer 0 is the engine's, for
-// what happens outside the schedule. Writers merge into one stream per type in segments:
-// the tick start (held next-tick events, then the engine's writer), each phase (its units
-// in unit order, which is rank order, whatever ran where), and the boundary after it (the
-// engine's writer again: the commands' Spawned, the pumps' results). A phase's units of
-// one type merge as soon as its consumers there need them, which the schedule makes
-// after its last emitter there; the rest at the phase's end. A consumer (a unit reading
-// the type) has a cursor: its batch is what was merged after its last run and before
-// this one, or for an early read, before its phase began. So every consumer sees every
-// event once, in the same order, however the levels fell. docs/design/events.md.
+// Korvid core: events, the way modules tell each other that something happened.
 //
-// An event type may carry a field table (KV_EVENT_EX). Then the bus knows which fields
-// are handles and drops, when a batch is made, any event whose handle no longer
-// resolves, counted. The table is also what the trace prints. A type declared
-// `next_tick` is held to the next tick's start.
+// An event is a plain struct: a fact ("this bullet hit this rock"), with no behaviour.
+// A module declares its event types in its ModuleDesc; any unit that declares it emits
+// one can, and any unit that reads the type gets it.
+//
+//   struct RockHit { Handle rock, bullet; };
+//   constinit const FieldDesc k_rock_hit_fields[] = {KV_FIELDS(RockHit, rock, bullet)};
+//   constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(RockHit, k_rock_hit_fields, 0)};
+//
+//   ctx.emit(RockHit{rock, bullet});                     // a unit with .emits = "RockHit"
+//   void on_rock_hit(TickContext& ctx, Span<const RockHit> hits);   // a handler on it
+//   for (const RockHit& h : ctx.received<RockHit>()) ...  // or a system with .reads = "RockHit"
+//
+// Delivery is part of the schedule. A unit that reads a type runs after every unit that
+// emits it in the same phase, and sees everything emitted since it last ran: this
+// phase's events, and those of the phases and ticks since. Every consumer sees every
+// event once, in the same order, however the schedule ran. A read marked '^' takes only
+// what was there when its phase began, and needs no order: that's how a loop of events
+// between two systems goes round, once a phase.
+//
+// Give an event type a field table (KV_EVENT_EX) whenever it carries a handle. The bus
+// then checks each batch and drops any event whose handle no longer resolves, so a
+// consumer never sees an entity that died since. The table also lets the trace and the
+// CLI print the event. KV_EVENT, with no table, is for events that name no entity.
+//
+// How it works underneath: each unit has its own writer, merged into one stream per type
+// in unit order, and each consumer keeps a cursor into the stream. Writer 0 is the
+// engine's, for code outside the schedule; what it gets lands at the next boundary.
+// docs/design/events.md has the model.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/component.h"
 
 namespace kv {
 
+// ---- declaring event types ------------------------------------------------------------
+// Flags for KV_EVENT_EX, ORed together.
 enum EventFlags : u8 {
     EvNextTick = 1, // delivered at the first boundary of the next tick, never the same tick
     EvStaleOk  = 2, // dropped for a stale handle as a matter of course (an overlap ending with a death): no dev warning
 };
 
-// A plain-data event type. The id slot is EventType<E>::id, filled at init.
+// One row of a module's event table, made by KV_EVENT or KV_EVENT_EX. The type's name is
+// global, like a component's: "RockHit" in every module's sets.
 struct EventTypeDesc {
     const char*           name;
     u32                   size;
@@ -37,8 +54,8 @@ struct EventTypeDesc {
     bool next_tick() const { return (flags & EvNextTick) != 0; }
 };
 
-// Per-type id slot. Zero-initialized (constant initialization), never set by user code;
-// a module's table entry points at it.
+// The id engine_init gives event type E. Zero before init; the table entry points at it,
+// and no other code sets it.
 template <class E>
 struct EventType {
     static_assert(__is_trivially_copyable(E), "events are plain data");
@@ -47,10 +64,12 @@ struct EventType {
 
 // Assigns ids first_id, first_id + 1, ... to the table in order. Returns the next free
 // id. Fails (returns 0) on a duplicate name or a type registered twice. engine_init
-// calls this; tests and tools may call it directly.
+// calls this; a test of the bus without an engine may call it directly.
 u32  event_types_register(Span<const EventTypeDesc> types, u32 first_id);
 void event_types_unregister(Span<const EventTypeDesc> types);
 
+// ---- internal: writers and streams ------------------------------------------------------
+// One type's events in one writer, packed.
 struct EventBuffer {
     u32       elem_size = 0;
     Array<u8> bytes;
@@ -63,6 +82,7 @@ struct EventBuffer {
     void free();
 };
 
+// One unit's pending events, by type, until its phase merges them.
 struct EventWriter {
     Array<EventBuffer> by_type; // indexed by event id; slot 0 is never used
     const char*        emitter = ""; // stamped on each emit in dev builds
@@ -97,6 +117,10 @@ struct EventStream {
     u64 end() const { return base + events.count(); }
 };
 
+// ---- the bus ------------------------------------------------------------------------------
+// Every writer and stream, owned by the Engine (Engine::events). Units never touch it:
+// they emit and read through the context. Code outside the schedule (startup, a CLI
+// command, a test) uses emit and read below.
 struct EventBus {
     Array<EventWriter> writers;   // 0: the engine's; unit u: writers[u]
     Array<EventStream> streams;   // by type id
@@ -114,9 +138,11 @@ struct EventBus {
     EventWriter& writer(u32 i) { return writers[i]; }
     void set_emitter(const char* name) { writers[0].emitter = name; }
 
-    // Into the engine's writer: outside the schedule, or from a unit on the main thread
-    // for a fact that is not the unit's to order (a library reporting as it goes). Lands
-    // in the next segment, where no consumer of the same phase sees it.
+    // Emits from outside the schedule, into the engine's writer: startup, a CLI command,
+    // a platform callback. Also allowed from a unit on the main thread, for a fact that is
+    // not the unit's to order (a library reporting as it goes). It lands at the next
+    // boundary, so no consumer in the current phase sees it.
+    //   e.events.emit(PadButtonDown{b, slot});   // the touchpad, from its platform callback
     template <class E>
     void emit(const E& e) { check_outside(); writers[0].emit(e); }
     void check_outside() const;
@@ -143,8 +169,11 @@ struct EventBus {
     // from it.
     void drop_all();
 
-    // This tick's events of a type, for code outside the schedule (tools, tests); a unit
-    // reads its batch through the context.
+    // The events of a type merged so far in the running tick, for engine code between
+    // phases and tests that drive the bus by hand. The window starts over at each tick's
+    // end, so after engine_frame returns it is empty: to watch a type from a test, give
+    // the test a module with a handler on it. Dev builds refuse it from inside a unit,
+    // which reads its batch through the context.
     template <class E>
     Span<const E> read() const {
         check_read();
@@ -161,8 +190,10 @@ struct EventBus {
 
 } // namespace kv
 
-// Table entries for event types: KV_EVENT(WindowResized), or with a schema and flags:
-// KV_EVENT_EX(RockHit, k_rock_hit_fields, 0), KV_EVENT_EX(ScoreChanged, k_fields, EvNextTick).
+// Rows of a module's event table: KV_EVENT(WindowResized) for an event with no handles,
+// or with a field table and EventFlags:
+//   KV_EVENT_EX(RockHit, k_rock_hit_fields, 0)
+//   KV_EVENT_EX(ScoreChanged, k_score_fields, EvNextTick)
 #define KV_EVENT(E) {#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id}
 #define KV_EVENT_EX(E, fields, flags) \
     {#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id, fields, (::kv::u8)(flags)}

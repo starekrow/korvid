@@ -1,4 +1,18 @@
-// Korvid core: a generational slot pool. Backs entity pools and component storage.
+// Korvid core: Pool, a generational slot pool: records handed out by handle.
+//
+// The storage behind every handle-issuing table: entity kinds' liveness, the asset
+// module's textures and materials. Reach for one when a module hands other code handles
+// to records it owns. create() returns a handle; get() turns it back into a pointer, or
+// null once the record is destroyed, never another record's data, because each reuse of a
+// slot bumps its generation. Slot addresses never move, so a pointer from get() stays put
+// while the record lives.
+//
+//   Pool<Voice> voices;
+//   voices.init(256, tag);                     // address space for 256; commits as used
+//   Handle h = voices.create(Voice{.sound = s});
+//   if (Voice* v = voices.get(h)) v->volume = 0.5f;
+//   voices.destroy(h);                         // get(h) is null from here on
+//
 // A stale handle returns null, never another slot's data; a handle from another pool
 // fails the kind check for the same cost.
 //
@@ -78,6 +92,8 @@ struct Pool {
         return true;
     }
 
+    // A new record holding v, and its handle; null if the pool is full (logged) or its
+    // pages can't be committed. Reuses the oldest freed slot first.
     Handle create(const T& v) {
         if (!base && !init()) return Handle{};
         KV_VERIFY(owner == thread_id());
@@ -117,14 +133,18 @@ struct Pool {
     Handle handle_at(u32 i) const { return Handle::make(kind, gens[i] & ~ALIVE_BIT, i); }
     bool   is_alive(u32 i) const { return i < len && (gens[i] & ALIVE_BIT); }
 
+    // Whether the handle names a live record of this pool (its kind, slot and generation).
     bool valid(Handle h) const {
         u32 i = h.index();
         return h.kind() == kind && h.gen() != 0 && i < len && gens[i] == (h.gen() | ALIVE_BIT);
     }
 
+    // The record, or null for a stale, foreign or null handle.
     T*       get(Handle h)       { return valid(h) ? &items[h.index()] : nullptr; }
     const T* get(Handle h) const { return valid(h) ? &items[h.index()] : nullptr; }
 
+    // Ends a record: its slot's generation moves on, so every copy of the handle goes
+    // stale. False if it already was. The owner thread only.
     bool destroy(Handle h) {
         if (!valid(h)) return false;
         KV_VERIFY(owner == thread_id());
@@ -197,6 +217,7 @@ struct Pool {
     // Slot count including dead slots; iterate with is_alive() to skip them.
     u32 capacity() const { return len; }
 
+    // Gives the address space back; every handle and pointer is dead.
     void free() {
         if (base) {
             mem_account_decommit(tag, committed_bytes());

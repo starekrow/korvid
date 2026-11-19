@@ -381,8 +381,9 @@ which shuts down what already started and returns false.
 ### Memory in a module
 
 The module arena (`self.arena`) for what lives as long as the module; `self.general`, the
-general allocator attributed to the module, for anything growable (set an `Array`'s or
-`Map`'s `alloc` to `&self.general`, free in shutdown); `mem_scratch()` with a `MemScope`
+general allocator attributed to the module, for anything growable (set an `Array`'s
+`alloc` to `&self.general`, or call a `Map`'s `init(&self.general)`; free in shutdown);
+`mem_scratch()` with a `MemScope`
 for temporaries inside a call; kind tables for entities, which the module never
 allocates. Whatever runs under a module's name (its startup, systems, handlers, jobs)
 is charged to it, so `mem_report` and the leak report at exit name the

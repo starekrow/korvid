@@ -1,8 +1,14 @@
-// Korvid core: the timer wheel. Scheduled events carry a target tick and wait here;
-// at the first boundary of that tick they are emitted, pending, and delivered with
-// everything else. A ring of slots indexed by tick covers the next 1024 ticks; anything
-// further sits in an overflow list and is filed into the ring each time the ring wraps.
-// Cost per tick is the slot's records plus, once per lap, a pass over the far list.
+// Korvid core: the timer wheel, where scheduled events wait for their tick.
+//
+// Systems don't use this directly: ctx.schedule_in(event, ticks), ctx.schedule(event,
+// at_tick) and ctx.cancel(ticket) file and withdraw events here, and the engine fires
+// them. A scheduled event is emitted at the first boundary of its target sim tick, in
+// ticket order, and delivered like any other event, so a handler on its type receives
+// it. Paused ticks don't advance the sim tick, so timers wait through a pause.
+//
+// Inside: a ring of slots indexed by tick covers the next 1024 ticks; anything further
+// sits in an overflow list and is filed into the ring each time the ring wraps. Cost per
+// tick is the slot's records plus, once per lap, a pass over the far list.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/map.h"
@@ -12,6 +18,7 @@ namespace kv {
 
 struct EventBus;
 
+// The engine's (Engine::timers): systems schedule through the context.
 struct TimerWheel {
     static constexpr u32 SLOTS = 1024;
 
