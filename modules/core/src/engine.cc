@@ -55,11 +55,42 @@ bool check_module_names(Span<const ModuleDesc* const> modules) {
 }
 
 // Event ids: module order, then declaration order, starting at 1.
+// Dev builds: a field table that leaves a gap no padding explains has missed a member.
+// Padding before a field is always less than the struct's alignment, so a gap of that or
+// more, at the start, between two fields or at the end, is bytes nothing describes: not
+// hashed, compared, saved or shown. Said once, at init, with the struct and the bytes.
+void check_field_coverage(const char* what, const char* name, const char* module, u32 size, u32 align, Span<const FieldDesc> fields) {
+#if KV_DEV
+    if (!fields.len || !align) return;
+    u32 order[64];
+    u32 n = fields.len < 64 ? fields.len : 64;
+    for (u32 i = 0; i < n; ++i) order[i] = i;
+    for (u32 i = 1; i < n; ++i)                              // a few fields: insertion by offset
+        for (u32 j = i; j > 0 && fields[order[j]].offset < fields[order[j - 1]].offset; --j) { u32 t = order[j]; order[j] = order[j - 1]; order[j - 1] = t; }
+    u32 at = 0;
+    for (u32 k = 0; k <= n; ++k) {
+        u32 next = k < n ? fields[order[k]].offset : size;
+        if (next >= at + align) {
+            KV_WARN("engine", "%s '%s' in module '%s': bytes %u to %u are in no field of its table: a member left out?",
+                    what, name, module, at, next);
+            return;
+        }
+        if (k < n) {
+            u32 end = next + field_type_size(fields[order[k]].type) * fields[order[k]].count;
+            if (end > at) at = end;
+        }
+    }
+#else
+    KV_UNUSED(what); KV_UNUSED(name); KV_UNUSED(module); KV_UNUSED(size); KV_UNUSED(align); KV_UNUSED(fields);
+#endif
+}
+
 bool register_events(Engine& e, Span<const ModuleDesc* const> modules) {
     u32 next = 1;
     for (u32 i = 0; i < modules.len; ++i) {
         const ModuleDesc& m = *modules[i];
         for (const EventTypeDesc& t : m.events) {
+            check_field_coverage("event type", t.name, m.name, t.size, t.align, t.fields);
             for (u32 j = 0; j < i; ++j) {
                 for (const EventTypeDesc& o : modules[j]->events) {
                     if (names_equal(o.name, t.name)) {
@@ -107,6 +138,7 @@ bool register_components(Engine& e, Span<const ModuleDesc* const> modules) {
                 else       KV_ERROR("engine", "component '%s' in module '%s' %s", c.name ? c.name : "?", m.name, problem);
                 return false;
             }
+            check_field_coverage("component", c.name, m.name, c.size, c.align, c.fields);
             if (u32 id = engine_component_id(e, c.name)) {
                 KV_ERROR("engine", "component '%s' declared by both '%s' and '%s'", c.name,
                          modules[e.components[id - 1].module]->name, m.name);
@@ -1819,6 +1851,18 @@ u32 engine_resource_id(const Engine& e, const char* name) {
     for (u32 i = 0; i < e.resources.len; ++i)
         if (names_equal(e.resources[i].name, name)) return i + 1;
     return 0;
+}
+
+void engine_check_main_thread(const Engine& e, const char* api) {
+#if KV_DEV
+    const ScheduledSystem* u = ctx_running();
+    if (!u || thread_id() == e.events.main_thread) return;
+    KV_ERROR("engine", "'%s' calls %s from a job worker; %s is main-thread only: give the system .main_thread = true",
+             u->name(), api, api);
+    KV_VERIFY(!"a main-thread API called from a worker: see the log");
+#else
+    KV_UNUSED(e); KV_UNUSED(api);
+#endif
 }
 
 bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, void* ptr, const void* type) {

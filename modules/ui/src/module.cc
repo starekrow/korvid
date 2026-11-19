@@ -21,7 +21,10 @@
 
 namespace kv {
 
-UiState_* ui_state(Engine& e) { return engine_module_state_as<UiState_>(e, "ui"); }
+UiState_* ui_state(Engine& e) {
+    engine_check_main_thread(e, "the ui"); // every ui_ function passes here
+    return engine_module_state_as<UiState_>(e, "ui");
+}
 
 namespace {
 

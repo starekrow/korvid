@@ -475,6 +475,12 @@ struct TickContext {
     template <class K>
     KindRows rows(K kind) { Table* t = ctx_rows(*this, kind_of(kind)); return KindRows{this, t}; }
 
+    // How many entities of a kind (name or id) are alive: a read of its liveness
+    // ("kind.@alive", or the kind), checked like any read. For counts and stats without
+    // reaching around the context to the table.
+    template <class K>
+    u32 live(K kind) { Table* t = ctx_rows(*this, kind_of(kind)); return t ? t->live() : 0; }
+
     // A published resource (engine_publish), by name or id; T const is a read, T a write.
     // Null, with a log line, if nothing is published under that name yet.
     //   const Input* in = ctx.resource<const Input>("input.state");

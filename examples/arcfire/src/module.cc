@@ -73,7 +73,7 @@ void camera(TickContext&);
 void shimmer(TickContext&);
 void battle(TickContext&);
 void hud(TickContext&);
-void stats_mark(TickContext&);   // stats.cc
+void stats_deltas(TickContext&); // stats.cc
 void stats(TickContext&);
 void on_exit(TickContext&, Span<const ExitRequested>);
 
@@ -286,8 +286,8 @@ constinit const SystemDesc k_systems[] = {
      .main_thread = true, .runs = RunWhen::Always},
     {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".world.Run, .world.Stage, .world.Dials, .boss.Boss, .part.Health, .part.Part, .ship.Ship, .option.Option", .before = "ui.draw", .main_thread = true,
      .runs = RunWhen::Always},
-    {.name = ".stats_mark", .phase = Phase::PostSim, .fn = stats_mark, .before = "sprite.extract", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".stats", .phase = Phase::PostSim, .fn = stats, .reads = "sprite.deltas", .writes = ".stats", .after = ".hud", .main_thread = true,
+    {.name = ".stats_deltas", .phase = Phase::Frame, .fn = stats_deltas, .reads = "sprite.deltas", .writes = ".stats", .after = "sprite.extract", .main_thread = true},
+    {.name = ".stats", .phase = Phase::PostSim, .fn = stats, .writes = ".stats", .after = ".hud", .main_thread = true,
      .runs = RunWhen::Always},
 };
 

@@ -1,5 +1,5 @@
 // arcfire: what the game reports. Every tick it counts what the stress runs read
-// (bullets, sprites, the extract's deltas, the pairs the broadphase tested) into the
+// (bullets, sprites, the pairs the broadphase tested; the extract's deltas once a frame) into the
 // resource `arcfire.stats`, which the HUD's dev counters show; every report
 // interval it logs them beside the frame loop's fps line; at the exit, the peaks and the
 // means. The notebook (docs/performance-notes.md) is written from these lines.
@@ -26,15 +26,18 @@ u32 live_sprites(Engine& e) {
 
 } // namespace
 
-// Phase PostSim, every tick, just before the extract: where its deltas for this tick will
-// start (they pile up over the ticks of a frame until the frame loop takes them).
-void stats_mark(TickContext& ctx) {
+// The Frame cycle, after the extract: the Set deltas it sent this frame (a sprite created
+// or changed), added up until the next tick's stats take them. The extract runs once a
+// frame, and a frame between two ticks sends none, so a count per frame would be mostly 0.
+void stats_deltas(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
-    Array<SpriteDelta>* d = sprite_deltas(*ctx.engine);
-    g.last_delta_len = d ? d->len : 0;
+    if (Array<SpriteDelta>* d = sprite_deltas(*ctx.engine))
+        for (const SpriteDelta& x : *d) g.frame_deltas += x.kind == SpriteDeltaKind::Set;
 }
 
-// Phase PostSim, every tick, after the extract (it reads what the extract wrote).
+// Phase PostSim, every tick: the counts of the tick, the peaks and means of the run.
+// Diagnostics, on the main thread: it reads the tables, collision's and audio's figures
+// around its declarations, which the schedule cannot order and need not.
 void stats(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
@@ -48,12 +51,10 @@ void stats(TickContext& ctx) {
     AudioStats as = audio_stats(e);
     if (as.live_voices > g.voices_peak) g.voices_peak = as.live_voices;
     s.sprites = live_sprites(e);
+    s.deltas = g.frame_deltas; // the frames' since the last tick (stats_deltas)
+    g.frame_deltas = 0;
     s.bullets_spawned = ctx.paused ? 0 : g.bullets_spawned;
     s.bullets_destroyed = bullets_before + s.bullets_spawned > s.bullets ? bullets_before + s.bullets_spawned - s.bullets : 0;
-    // This tick's Set deltas: a sprite created or changed.
-    s.deltas = 0;
-    if (Array<SpriteDelta>* d = sprite_deltas(e))
-        for (u32 i = g.last_delta_len; i < d->len; ++i) s.deltas += (*d)[i].kind == SpriteDeltaKind::Set;
     if (const CollisionStats* cs = collision_stats(e)) { s.pairs_tested = cs->tested; s.colliders = cs->colliders; s.groups = cs->groups; }
     for (u32 k = 0; k < KV_COUNTOF(s.rows) && k < e.tables.len; ++k) s.rows[k] = e.tables[k].live();
     if (ctx.paused || !g.stage_ready) return;

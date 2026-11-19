@@ -449,7 +449,7 @@ bool krome_cli_patch(CliContext& ctx, const char* rel, Span<const char* const> v
 
 constinit const CliMountDesc k_mounts[] = {{.path = "/krome", .list = krome_cli_list, .describe = krome_cli_describe, .patch = krome_cli_patch}};
 
-constinit const FieldDesc k_event_fields[] = {KV_FIELDS(KromeEvent, screen, node, event, value)};
+constinit const FieldDesc k_event_fields[] = {KV_FIELDS(KromeEvent, screen, node, event, value, x, y)};
 constinit const FieldDesc k_set_fields[] = {KV_FIELDS(KromeSet, screen, key, number, kind, pad, text)};
 constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(KromeEvent, k_event_fields, 0), KV_EVENT_EX(KromeSet, k_set_fields, 0)};
 // A document's blob landed or reloaded (in PreSim): a frame, so the pump takes it.

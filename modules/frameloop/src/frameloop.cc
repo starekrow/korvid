@@ -74,7 +74,7 @@ struct FrameLoopState {
     f64             prev     = 0.0;     // when the last frame began, the loop's or a modal one's
     u64             modal_frames = 0;   // frames run inside an OS modal loop (a live resize)
     u32             presented_w = 0, presented_h = 0;
-    u32             deltas_last_frame = 0;
+    u64             deltas_in_window = 0; // deltas the frames since the last report applied
     // Pacing::OnDemand: frames still owed after the last activity, when the last frame was,
     // and the polls that found nothing to do.
     u32             demand_tail = 0;
@@ -380,7 +380,7 @@ void render_frame(Engine& engine, FrameLoopState& s) {
     Array<SpriteDelta>* deltas = sprite_deltas(engine);
     if (deltas) {
         renderer_apply(s.renderer, deltas->span());
-        s.deltas_last_frame = deltas->len;
+        s.deltas_in_window += deltas->len;
         deltas->clear();
     }
 
@@ -456,6 +456,9 @@ void run(Engine& engine, FrameLoopState& s) {
     s.prev   = start;
     f64 next_report = start + (f64)s.config.report_every_seconds;
     u32 frames_in_window = 0;
+    // The report's deltas are a mean over its frames: one frame's count is 0 whenever no
+    // tick ran in it, which at 120 Hz is every other frame.
+    auto deltas_per_frame = [&]() { return frames_in_window ? (u32)(s.deltas_in_window / frames_in_window) : 0u; };
     bool collecting = prof_enabled();
     platform_modal_frame(engine, modal_frame, &s);
 
@@ -557,7 +560,7 @@ void run(Engine& engine, FrameLoopState& s) {
             if (engine.clock.scale != 1.0) format(scaled, sizeof scaled, " (time scale %.2f)", engine.clock.scale);
             KV_INFO("frameloop", "%u fps, tick %llu%s, alpha %.2f, %u sprites, %u deltas/frame, %ux%u, %s, %llu KB live, work %.1f ms/frame on %llu",
                     frames_in_window, (unsigned long long)engine.clock.tick_count, scaled, engine.clock.alpha(),
-                    renderer_sprite_count(s.renderer), s.deltas_last_frame, s.window->width(), s.window->height(),
+                    renderer_sprite_count(s.renderer), deltas_per_frame(), s.window->width(), s.window->height(),
                     s.window->focused() ? "focused" : "unfocused",
                     (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
                     s.work_frames ? s.work_total / (f64)s.work_frames * 1e3 : 0.0, (unsigned long long)s.work_frames);
@@ -575,7 +578,7 @@ void run(Engine& engine, FrameLoopState& s) {
             if (g_overlay) {
                 char line[96];
                 format(line, sizeof line, "%u fps  tick %llu  %u sprites  %u deltas", frames_in_window,
-                         (unsigned long long)engine.clock.tick_count, renderer_sprite_count(s.renderer), s.deltas_last_frame);
+                         (unsigned long long)engine.clock.tick_count, renderer_sprite_count(s.renderer), deltas_per_frame());
                 overlay_set(engine, s, 0, line);
                 format(line, sizeof line, "%llu KB live  work %.1f ms%s", (unsigned long long)((mem.live_bytes + mem.committed_bytes) / 1024),
                          s.work_frames ? s.work_total / (f64)s.work_frames * 1e3 : 0.0, engine.clock.paused ? "  PAUSED" : "");
@@ -596,6 +599,7 @@ void run(Engine& engine, FrameLoopState& s) {
             s.work_frames = 0;
             if (g_prof_report) prof_log_summary(10);
             frames_in_window = 0;
+            s.deltas_in_window = 0;
             next_report += (f64)s.config.report_every_seconds;
         }
         if (s.config.run_seconds >= 0.0 && now - start >= s.config.run_seconds && !s.timer_fired) {

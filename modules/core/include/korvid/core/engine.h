@@ -279,6 +279,12 @@ bool engine_publish(Engine& e, const ModuleInstance& self, const char* name, T* 
     return engine_publish_sized(e, self, name, (void*)ptr, type_key<T>(), sizeof(T), __is_trivially_copyable(T));
 }
 
+// For a module whose functions are main-thread only (ui): call it where they all pass, and
+// a unit that calls one from a job worker is stopped in dev builds, named, rather than
+// racing. Startup, shutdown and code outside the schedule are on the main thread.
+//   UiState* ui_state(Engine& e) { engine_check_main_thread(e, "ui"); return ...; }
+void engine_check_main_thread(const Engine& e, const char* api);
+
 // The started instance of a module, by name; null if absent or not started. For code
 // outside the schedule (a tool's command, a test) that needs a module's state; systems
 // use ctx.state_as and published resources instead.

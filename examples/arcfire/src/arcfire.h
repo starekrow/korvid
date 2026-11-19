@@ -473,12 +473,12 @@ struct Game {
     u32      bullets_spawned = 0; // this tick, by the runners (patterns.cc)
     u32      runners_stepped = 0;
     Stats    stats;
+    u32      frame_deltas = 0; // Set deltas the frames sent since the last tick's stats
     // Reporting (stats.cc): peaks and sums over the run, the wall clock of the last line.
     Stats    peak;
     f64      sum_bullets = 0.0, sum_deltas = 0.0, sum_pairs = 0.0, sum_sprites = 0.0;
     u64      sampled = 0;
     f64      next_report = 0.0;
-    u32      last_delta_len = 0;
 };
 
 // ---- across files --------------------------------------------------------------------------
