@@ -4,7 +4,7 @@
 // restart follows two seconds later. Escape (or Start on a pad) pauses: the sim holds, a
 // screen-space dimmer covers the field, Q quits. A hit shakes the camera. Shots, breaks
 // and the ship's end make sounds, with a looping thruster whose volume follows the
-// thrust. Everything the game knows is in kinds and one published Score; the only handles
+// thrust. Everything the game knows is in ktables and one published Score; the only handles
 // kept are the thruster voice and the assets. The field is a fixed 1280 x 720 world
 // units; the camera fits it to the window, and the HUD is anchored to the window's corner,
 // so the run is the same on any window or display.
@@ -61,19 +61,19 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Label, k_label_fields),
 };
 
-// ---- kinds -----------------------------------------------------------------------------
-constinit u32 g_ship_kind = 0, g_bullet_kind = 0, g_rock_kind = 0, g_debris_kind = 0, g_overlay_kind = 0, g_flame_kind = 0, g_label_kind = 0;
-constinit const KindDesc k_kinds[] = {
-    {.name = ".ship",    .components = "Transform2, Sprite, Velocity, Health, Collider2, Ship",    .capacity = 1,    .id = &g_ship_kind},
-    {.name = ".bullet",  .components = "Transform2, Sprite, Velocity, Collider2",  .capacity = 4096, .id = &g_bullet_kind},
-    {.name = ".rock",    .components = "Transform2, Sprite, Velocity, Collider2, RockSize",    .capacity = 1024, .id = &g_rock_kind},
-    {.name = ".debris",  .components = "Transform2, Sprite, Velocity, AnimPlayer",  .capacity = 8192, .id = &g_debris_kind},
-    {.name = ".overlay", .components = "Transform2, Sprite", .capacity = 8,    .id = &g_overlay_kind},
+// ---- ktables ---------------------------------------------------------------------------
+constinit u32 g_ship_ktable = 0, g_bullet_ktable = 0, g_rock_ktable = 0, g_debris_ktable = 0, g_overlay_ktable = 0, g_flame_ktable = 0, g_label_ktable = 0;
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".ship",    .components = "Transform2, Sprite, Velocity, Health, Collider2, Ship",    .capacity = 1,    .id = &g_ship_ktable},
+    {.name = ".bullet",  .components = "Transform2, Sprite, Velocity, Collider2",  .capacity = 4096, .id = &g_bullet_ktable},
+    {.name = ".rock",    .components = "Transform2, Sprite, Velocity, Collider2, RockSize",    .capacity = 1024, .id = &g_rock_ktable},
+    {.name = ".debris",  .components = "Transform2, Sprite, Velocity, AnimPlayer",  .capacity = 8192, .id = &g_debris_ktable},
+    {.name = ".overlay", .components = "Transform2, Sprite", .capacity = 8,    .id = &g_overlay_ktable},
     // The flame is cosmetic: its flipbook comes from a file and starts when the file
     // arrives, which is not a tick the sim may depend on.
-    {.name = ".flame",   .components = "Transform2, Sprite, Local2, Parent, AnimPlayer",   .capacity = 4,    .id = &g_flame_kind, .cosmetic = true},
+    {.name = ".flame",   .components = "Transform2, Sprite, Local2, Parent, AnimPlayer",   .capacity = 4,    .id = &g_flame_ktable, .cosmetic = true},
     // Labels are cosmetic too: the HUD shows the high score, which comes from a file.
-    {.name = ".label",   .components = "Transform2, Text, Label",   .capacity = 8,    .id = &g_label_kind, .cosmetic = true},
+    {.name = ".label",   .components = "Transform2, Text, Label",   .capacity = 8,    .id = &g_label_ktable, .cosmetic = true},
 };
 
 // ---- events ----------------------------------------------------------------------------
@@ -165,7 +165,7 @@ vec2 heading(f32 rotation) { return vec2{kv::cos(rotation), kv::sin(rotation)}; 
 // A label in screen space, at `at` from its anchor: banners from the middle, over the
 // dimmer; the HUD from the window's top-right corner. The anchor puts it there on any
 // window, so its position, which is sim state, never depends on the window's size.
-void spawn_label(Table& labels, const Game& g, Role role, const char* str, point2 at, TextAlign align, f32 scale, i32 layer, color tint,
+void spawn_label(KTable& labels, const Game& g, Role role, const char* str, point2 at, TextAlign align, f32 scale, i32 layer, color tint,
                  ScreenAnchor anchor = ScreenAnchor::Center, f32 wrap = 0.0f) {
     Text t;
     t.wrap  = wrap;
@@ -181,14 +181,14 @@ void spawn_label(Table& labels, const Game& g, Role role, const char* str, point
 }
 
 // Every label of one role goes.
-void destroy_labels(Table& labels, Role role) {
+void destroy_labels(KTable& labels, Role role) {
     Span<const Label> roles = labels.rows_of<Label>();
     for (u32 i = 0; i < labels.rows(); ++i)
         if (labels.is_alive(i) && roles[i].role == role) labels.destroy(labels.handle_at(i));
 }
 
 // A rock of `size` at `at`, drifting in a random direction. Direct: the caller holds the write.
-void spawn_rock(Table& rocks, Game& g, Rng& rng, point2 at, u8 size, vec2 drift) {
+void spawn_rock(KTable& rocks, Game& g, Rng& rng, point2 at, u8 size, vec2 drift) {
     Velocity v{drift, rng.range(-1.5f, 1.5f)};
     rocks.spawn(transform2_at(at, rng.range(0.0f, 2.0f * KV_PI)), sprite_of(g, LOOK_ROCK, kRockSprite[size], 1),
                 v, collider_circle(kRockRadius[size], L_ROCK, L_SHIP | L_BULLET), RockSize{size});
@@ -205,13 +205,13 @@ void spawn_debris(TickContext& ctx, Game& g, point2 at, u32 count, color tint) {
         f32 dir   = ctx.rng().range(0.0f, 2.0f * KV_PI);
         vec2 v = heading(dir) * speed;
         f32 life = ctx.rng().range(0.3f, 0.8f);
-        ctx.spawn_later(g_debris_kind, transform2_at(at), sprite_of(g, LOOK_DEBRIS, 6.0f, 0, tint), Velocity{v, 0.0f},
+        ctx.spawn_later(g_debris_ktable, transform2_at(at), sprite_of(g, LOOK_DEBRIS, 6.0f, 0, tint), Velocity{v, 0.0f},
                         anim_player(g.fade_clip, 1.0f / life));
     }
 }
 
 void spawn_ship(TickContext& ctx, Game& g) {
-    ctx.spawn_later(g_ship_kind, transform2_at(point2{0, 0}, KV_PI * 0.5f), sprite_of(g, LOOK_SHIP, 48.0f, 2),
+    ctx.spawn_later(g_ship_ktable, transform2_at(point2{0, 0}, KV_PI * 0.5f), sprite_of(g, LOOK_SHIP, 48.0f, 2),
                     Velocity{}, Health{3}, collider_circle(kShipRadius, L_SHIP, L_ROCK), Ship{0.0f, 0});
 }
 
@@ -238,8 +238,8 @@ void pause(TickContext& ctx) {
             if (b.button == PadButton::Start) toggle = true;
     }
     if (!toggle) return;
-    Table* overlay = ctx.write_kind(g_overlay_kind);
-    Table* labels  = ctx.write_kind(g_label_kind);
+    KTable* overlay = ctx.write_ktable(g_overlay_ktable);
+    KTable* labels  = ctx.write_ktable(g_label_ktable);
     if (!e.clock.paused) {
         Sprite dim = sprite_of(g, LOOK_WHITE, 1.0f, 100, color_rgba(0.0f, 0.0f, 0.02f, 0.55f));
         dim.size  = vec2{16384.0f, 16384.0f}; // past any window: its size is sim state, the window's is not
@@ -271,7 +271,7 @@ void pause(TickContext& ctx) {
 void hud(TickContext& ctx) {
     static const u32 k_score = ctx.resource_id(".score");
     const Score* score = ctx.resource<const Score>(k_score);
-    for (KindRows k : ctx.view<Text, const Label>()) {
+    for (KTableRows k : ctx.view<Text, const Label>()) {
         Span<Text>        texts = k.col<Text>();
         Span<const Label> roles = k.col<const Label>();
         for (u32 i = 0; i < k.rows(); ++i)
@@ -358,7 +358,7 @@ void control(TickContext& ctx) {
             fire   |= pad->down(PadButton::West) || pad->down(PadButton::RShoulder);
         }
     }
-    for (KindRows k : ctx.view<Transform2, Velocity, Ship>()) {
+    for (KTableRows k : ctx.view<Transform2, Velocity, Ship>()) {
         Span<Transform2> t = k.col<Transform2>();
         Span<Velocity>   v = k.col<Velocity>();
         Span<Ship>       s = k.col<Ship>();
@@ -370,7 +370,7 @@ void control(TickContext& ctx) {
             v[i].v *= 1.0f - 1.2f * dt; // drag
             s[i].thrusting = thrust;
             // The flame is the ship's child: it follows by itself, the game only lights it.
-            Table* flames = ctx.write_kind(g_flame_kind);
+            KTable* flames = ctx.write_ktable(g_flame_ktable);
             Span<Sprite> fs = flames->rows_of<Sprite>();
             for (u32 f = 0; f < flames->rows(); ++f)
                 if (flames->is_alive(f)) fs[f].tint.a = thrust ? 1.0f : 0.0f;
@@ -379,7 +379,7 @@ void control(TickContext& ctx) {
             s[i].cooldown -= dt;
             if (fire && s[i].cooldown <= 0.0f) {
                 s[i].cooldown = kFireCooldown;
-                Table* bullets = ctx.write_kind(g_bullet_kind);
+                KTable* bullets = ctx.write_ktable(g_bullet_ktable);
                 vec2 dir = heading(t[i].rotation);
                 point2 at = t[i].position + dir * 26.0f;
                 Handle b = bullets->spawn(transform2_at(at), sprite_of(g, LOOK_BULLET, 12.0f, 3, color_rgba(1.0f, 0.95f, 0.5f)),
@@ -400,7 +400,7 @@ void control(TickContext& ctx) {
 // them go to the pool and the result is the same whatever ran where.
 void move(TickContext& ctx) {
     f32 dt = (f32)ctx.dt;
-    for (KindRows k : ctx.view<Transform2, const Velocity>()) {
+    for (KTableRows k : ctx.view<Transform2, const Velocity>()) {
         Span<Transform2>     t = k.col<Transform2>();
         Span<const Velocity> v = k.col<const Velocity>();
         parallel_for(ctx, k.rows(), 512, [&](ChunkContext&, u32 begin, u32 end) {
@@ -418,7 +418,7 @@ void move(TickContext& ctx) {
 // shows the sprite on the far side at once instead of interpolating it across the screen.
 void wrap(TickContext& ctx) {
     const f32 hw = kFieldW * 0.5f + 32.0f, hh = kFieldH * 0.5f + 32.0f;
-    for (KindRows k : ctx.view<Transform2, const Velocity>()) {
+    for (KTableRows k : ctx.view<Transform2, const Velocity>()) {
         Span<Transform2> t    = k.col<Transform2>();
         Span<Transform2> prev = k.prev<Transform2>();
         for (u32 i = 0; i < k.rows(); ++i) {
@@ -483,7 +483,7 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
 void on_rock_hit(TickContext& ctx, Span<const RockHit> hits) {
     static const u32 k_score = ctx.resource_id(".score");
     Game& g = ctx.state_as<Game>();
-    Table* rocks = ctx.write_kind(g_rock_kind);
+    KTable* rocks = ctx.write_ktable(g_rock_ktable);
     Score* score = ctx.resource<Score>(k_score);
     for (const RockHit& h : hits) {
         const Transform2* t  = rocks->get<Transform2>(h.rock);
@@ -532,12 +532,12 @@ void on_ship_hit(TickContext& ctx, Span<const ShipHit> hits) {
 }
 
 // The ship arrived (spawned by command at the restart): give it a flame, a child in its
-// own kind that follows through Parent and Local2 and dies with the ship.
+// own ktable that follows through Parent and Local2 and dies with the ship.
 void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
     Game& g = ctx.state_as<Game>();
     for (const Spawned& s : spawns) {
-        if (s.kind != g_ship_kind || s.entity.is_null()) continue;
-        Table* flames = ctx.write_kind(g_flame_kind);
+        if (s.ktable != g_ship_ktable || s.entity.is_null()) continue;
+        KTable* flames = ctx.write_ktable(g_flame_ktable);
         Sprite flame = sprite_of(g, LOOK_FLAME, 32.0f, 1, color_rgba(1.0f, 1.0f, 1.0f, 0.0f));
         flame.uv = rect2{0.0f, 0.0f, 0.5f, 1.0f}; // frame 0 of the two-frame sheet, until the clip says otherwise
         flames->spawn(Transform2{}, flame, local2_at(point2{-30.0f, 0.0f}), Parent{s.entity}, anim_player(g.flame_clip));
@@ -584,7 +584,7 @@ void on_wave(TickContext& ctx, Span<const SpawnWave> waves) {
             vec2 toward = normalize(point2{aim_x, aim_y} - at) * speed;
             f32 spin  = ctx.rng().range(-1.0f, 1.0f);
             f32 angle = ctx.rng().range(0.0f, 2.0f * KV_PI);
-            ctx.spawn_later(g_rock_kind, transform2_at(at, angle), sprite_of(g, LOOK_ROCK, kRockSprite[0], 1),
+            ctx.spawn_later(g_rock_ktable, transform2_at(at, angle), sprite_of(g, LOOK_ROCK, kRockSprite[0], 1),
                             Velocity{toward, spin}, collider_circle(kRockRadius[0], L_ROCK, L_SHIP | L_BULLET), RockSize{0});
         }
         KV_INFO("rocks", "wave %u: %u rocks", score->wave, wave.count);
@@ -597,7 +597,7 @@ void on_edge(TickContext& ctx, Span<const StateEdge> edges) {
     static const u32 k_score = ctx.resource_id(".score");
     Game& g = ctx.state_as<Game>();
     const Score* score = ctx.resource<const Score>(k_score);
-    Table* labels = ctx.write_kind(g_label_kind);
+    KTable* labels = ctx.write_ktable(g_label_ktable);
     for (const StateEdge& e : edges) {
         if (e.trigger != g_death) continue;
         ctx.destroy(e.entity);
@@ -632,15 +632,15 @@ void on_restart(TickContext& ctx, Span<const Restart>) {
     static const u32 k_score  = ctx.resource_id(".score");
     Game& g = ctx.state_as<Game>();
     Score* score = ctx.resource<Score>(k_score);
-    const u32 kinds[] = {g_rock_kind, g_bullet_kind, g_debris_kind, g_ship_kind};
-    for (u32 kid : kinds) ctx.destroy_all(kid);
+    const u32 ktables[] = {g_rock_ktable, g_bullet_ktable, g_debris_ktable, g_ship_ktable};
+    for (u32 ktable : ktables) ctx.destroy_all(ktable);
     score->games += 1;
     score->total = 0;
     score->rocks_shot = 0;
     score->wave = 0;
     // The labels are rewritten directly: the banner goes, the HUD comes back at the
     // window's top-right (the top-left is the frame loop's overlay).
-    Table* labels = ctx.write_kind(g_label_kind);
+    KTable* labels = ctx.write_ktable(g_label_ktable);
     labels->destroy_all();
     spawn_label(*labels, g, ROLE_HUD, "", point2{-16.0f, -16.0f - 28.0f}, TextAlign::Right, 1.0f, 50,
                 color_rgba(1.0f, 1.0f, 1.0f, 0.85f), ScreenAnchor::TopRight);
@@ -695,10 +695,10 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
         req.path = g->high_path;
         g->high_read = platform_io(engine)->read_file(req);
     }
-    g->ship_hk   = engine_table(engine, g_ship_kind)->kind;
-    g->bullet_hk = engine_table(engine, g_bullet_kind)->kind;
-    g->rock_hk   = engine_table(engine, g_rock_kind)->kind;
-    g->debris_hk = engine_table(engine, g_debris_kind)->kind;
+    g->ship_hk   = engine_ktable(engine, g_ship_ktable)->handle_kind;
+    g->bullet_hk = engine_ktable(engine, g_bullet_ktable)->handle_kind;
+    g->rock_hk   = engine_ktable(engine, g_rock_ktable)->handle_kind;
+    g->debris_hk = engine_ktable(engine, g_debris_ktable)->handle_kind;
     return true;
 }
 
@@ -743,7 +743,7 @@ KV_MODULE_DEFINE(rocks_module) = {
     .name       = "rocks",
     .events     = k_events,
     .components = k_components,
-    .kinds      = k_kinds,
+    .ktables    = k_ktables,
     .resources  = k_resources,
     .systems    = k_systems,
     .handlers   = k_handlers,

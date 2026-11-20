@@ -276,7 +276,7 @@ void card_open(Engine& e, Game& g, u32 round, u32 position) {
 
 RunResult run_result(Engine& e, const Game& g, i64 score) {
     RunResult r{};
-    const Table* world = engine_table(e, g_world_kind);
+    const KTable* world = engine_ktable(e, g_world_ktable);
     const Run* run = world->get<Run>(g.world);
     const Stage* st = world->get<Stage>(g.world);
     const Dials* d = world->get<Dials>(g.world);

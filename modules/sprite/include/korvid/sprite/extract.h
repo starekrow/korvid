@@ -1,10 +1,10 @@
 // Korvid sprite: the extract. Once a frame (the Frame cycle, docs/design/cycles.md), what
-// changed in every kind that has Transform2 and Sprite becomes a run of deltas for the
+// changed in every ktable that has Transform2 and Sprite becomes a run of deltas for the
 // renderer's persistent world: a Tick marker when ticks ran since the last extract,
 // a Remove for every entity the renderer knew that is gone, and a Set for every entity
 // the renderer has not seen or whose transform or sprite differs from what it was last
 // told. Nothing is copied twice. The record of what the renderer knows lives here, per
-// table, by slot, so no table needs a destroy hook: a slot whose handle changed or died
+// ktable, by slot, so no ktable needs a destroy hook: a slot whose handle changed or died
 // since the last extract is a Remove.
 //
 // Teleports. A transform that differs from what the renderer was told is a move, and the
@@ -30,8 +30,8 @@ namespace kv {
 
 struct Engine;
 
-struct ExtractTable {
-    u64               seen_churn = ~0ull; // a still kind's churn at the last extract: unchanged, the table is skipped
+struct ExtractKTable {
+    u64               seen_churn = ~0ull; // a still ktable's churn at the last extract: unchanged, the ktable is skipped
     u32               seen_restores = 0;  // its restores then: a restore since means one full compare
     Array<Handle>     sent;            // by slot: the handle the renderer knows there, or null
     Array<Sprite>     sent_sprites;    // by slot: the Sprite it was last told
@@ -39,9 +39,9 @@ struct ExtractTable {
 };
 
 struct ExtractState {
-    Array<ExtractTable> tables; // by engine table index
+    Array<ExtractKTable> ktables; // by engine ktable index
     // How many sprite rows the game expects (FrameLoopConfig::sprite_rows; 0: none said).
-    // A kind's side tables are sized at its first growth to that or its capacity, the
+    // A ktable's side tables are sized at its first growth to that or its capacity, the
     // smaller, and the delta list to twice it at the first extract, so neither grows (a
     // copy of megabytes in one tick) in the middle of a run.
     u32 rows_hint = 0;

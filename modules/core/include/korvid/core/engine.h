@@ -1,7 +1,7 @@
 // Korvid core: the Engine, and the calls that run it, control it and look things up in it.
 //
 // One Engine holds everything a running program has: the modules and their state, the
-// kinds' tables, the schedule, the event streams, the timers and the clock.
+// ktables, the schedule, the event streams, the timers and the clock.
 // engine_init reads the module list once, assigns every id, builds the schedule and
 // starts the modules in order; engine_shutdown stops them in reverse.
 //
@@ -31,7 +31,7 @@
 namespace kv {
 
 // ---- configuration: what the executable decides, not a module -------------------------
-// Memory budgets and kind sizes. Heaps are named budgets; each module's allocations count
+// Memory budgets and ktable sizes. Heaps are named budgets; each module's allocations count
 // against the heap it is assigned to. A heap's soft limit warns once per run at the frame
 // sample; its hard limit fails the allocation that would pass it, with the heap, module
 // and category named. Modules not assigned live in the default heap, which has no limits.
@@ -47,26 +47,26 @@ struct ModuleHeapDesc {
     const char* module; // a module's name, "rocks"
     const char* heap;   // a HeapDesc's name
 };
-// A kind's capacity, set by the root over what its KindDesc says: a stress run that wants
-// more of a kind than the game ships with. Capacity is address space; rows commit as used.
-struct KindCapacity {
-    const char* kind;     // the full name, "arcfire.bullet"
+// A ktable's capacity, set by the root over what its KTableDesc says: a stress run that
+// wants more of a ktable than the game ships with. Capacity is address space; rows commit as used.
+struct KTableCapacity {
+    const char* name;     // the ktable's full name, "arcfire.bullet"
     u32         capacity;
 };
 // Everything engine_init takes besides the module list. FrameLoopConfig::engine is one.
 struct EngineConfig {
     Span<const HeapDesc>       heaps        = {};
     Span<const ModuleHeapDesc> module_heaps = {};
-    Span<const KindCapacity>   capacities   = {};
+    Span<const KTableCapacity> capacities   = {};
     u64                        seed         = 0; // every module's ctx.rng() is seeded from this and its name; --seed N
 };
 
 // ---- internal: the engine's records of what was registered -------------------------
-// What a resource is. A kind's resources sit together: the kind, then its liveness, its
-// columns, its attachments and its bags, so the kind covers the `children` ids after its
-// own, and an early read of it the first `early` of them (liveness and columns).
+// What a resource is. A ktable's resources sit together: the ktable, then its liveness,
+// its columns, its attachments and its bags, so the ktable covers the `children` ids
+// after its own, and an early read of it the first `early` of them (liveness and columns).
 // An event type is a stream: emitted into (appended), consumed (read).
-enum class ResourceClass : u8 { State, Published, Append, Stream, Kind, Liveness, Column, Attachment, Bags };
+enum class ResourceClass : u8 { State, Published, Append, Stream, KTable, Liveness, Column, Attachment, Bags };
 
 struct ResourceEntry {
     const char*   name;
@@ -74,9 +74,9 @@ struct ResourceEntry {
     ResourceClass cls      = ResourceClass::Published;
     void*         ptr      = nullptr; // what the owner published for systems to reach through the context
     const void*   type     = nullptr; // its type key
-    u32           children = 0;     // a kind: the resources after it that it covers
-    u32           early    = 0;     // a kind: how many of those an early read covers: its liveness and columns
-    u32           table    = 0;     // a kind's resources: its kind id
+    u32           children = 0;     // a ktable: the resources after it that it covers
+    u32           early    = 0;     // a ktable: how many of those an early read covers: its liveness and columns
+    u32           ktable   = 0;     // a ktable's resources: its ktable id
     bool          cosmetic = false; // a column or attachment of a cosmetic component: never feeds the sim
     AppendFn      apply    = nullptr;
     Span<const FieldDesc> fields = {}; // a published resource that is sim state: hashed through these
@@ -91,7 +91,7 @@ struct ComponentEntry {
 // A state trigger resolved to its column and field.
 struct Trigger {
     const TriggerDesc* desc;
-    Table*             table;
+    KTable*            ktable;
     const Column*      column;
     const FieldDesc*   field;
     u32                module;
@@ -130,7 +130,7 @@ struct Engine {
     Array<ModuleInstance> modules;   // module-list order
     Array<ResourceEntry>  resources; // id = index + 1; 0 is invalid
     Array<ComponentEntry> components; // id = index + 1 = ComponentType<T>::id; 0 is invalid
-    Array<Table>          tables;     // kind id = index + 1; addresses stable after init
+    Array<KTable>         ktables;   // ktable id = index + 1; addresses stable after init
     Array<const EventTypeDesc*> event_types; // by id; slot 0 unused
     Array<Trigger>        triggers;   // trigger id = index + 1
     CommandBuffer         commands;   // the engine's own: commands from code outside the schedule
@@ -138,7 +138,7 @@ struct Engine {
     EventTrace            trace;      // --trace-events
     u32                   threads      = 0; // threads the schedule may use, main included; 0: every core
     u64                   seed         = 0; // EngineConfig::seed, kept for engine_sim_reset
-    EarlyReadsChoice      early_reads  = EarlyReadsChoice::PerKind; // set before init: as each kind says, or one way for all
+    EarlyReadsChoice      early_reads  = EarlyReadsChoice::PerKTable; // set before init: as each ktable says, or one way for all
     u32                   serial       = 0; // this engine among the process's, 1..255: tags the ids the context hands out
     u32                   units        = 0; // systems and handlers
     Array<u32>            streams;            // by event type id: its stream's resource id
@@ -162,13 +162,13 @@ struct Engine {
     bool                  hash_systems     = false; // and after every system, to locate drift
     u64                   last_hash        = 0;     // the state hash after the last tick, when hashing
     u32                   sim_resets       = 0;     // engine_sim_reset calls
-    Map<u64, Handle>      entity_names;              // Name::hash -> the entity that has it (or had: checked against the table)
+    Map<u64, Handle>      entity_names;              // Name::hash -> the entity that has it (or had: checked against the ktable)
     u32                   entity_names_lock = 0;     // a spin lock: names change outside the schedule and at boundaries
 };
 
 // ---- running it -----------------------------------------------------------------------
-// Registers and starts every module, in list order: assigns every id, builds every kind's
-// table and the schedule (logging it), then runs each startup. Any failure (an unknown
+// Registers and starts every module, in list order: assigns every id, builds every ktable
+// and the schedule (logging it), then runs each startup. Any failure (an unknown
 // name in a set, two writers with no order, a startup that returns false) is logged with
 // the names involved; everything already started is shut down in reverse and false is
 // returned. The engine is then safe to shut down again.
@@ -250,12 +250,12 @@ bool engine_time_scale(Engine& e, f32 scale);
 f32  engine_time_scale_get(const Engine& e);
 
 // A fresh sim: the sim as it stood when the engine started, for a game's second run to be
-// the same run as its first in a new process. Every kind that is not cosmetic is emptied
+// the same run as its first in a new process. Every ktable that is not cosmetic is emptied
 // with its slots and generations as at startup (the next spawn gets the handle a fresh
 // engine would give), the sim tick goes back to 0, and the timer wheel, the events not yet
 // delivered, the commands not yet applied and every unit's ticket counters are dropped.
 // Then SimReset is emitted, pending, for the modules whose own state follows the sim.
-// Cosmetic kinds, assets, module state and the clock's holds are left alone: a cosmetic
+// Cosmetic ktables, assets, module state and the clock's holds are left alone: a cosmetic
 // row parented to a sim entity is its owner's to clear, since the handle will be reused.
 // Main thread, on a held tick (a cover, a menu), from the system or handler that decides
 // it: the units after it in the tick see the fresh sim, and every stream starts over (no
@@ -298,7 +298,7 @@ T* engine_module_state_as(Engine& e, const char* name) {
 
 // ---- lookups by name ------------------------------------------------------------------
 // Names to ids, for code outside the schedule. 0 (or null, or Phase::Count) for unknown.
-// Inside a system, the context's own (ctx.resource_id, ctx.column_id, ctx.kind_id) also
+// Inside a system, the context's own (ctx.resource_id, ctx.column_id, ctx.ktable_id) also
 // expand '.' names.
 u32 engine_resource_id(const Engine& e, const char* name);
 u32                  engine_component_id(const Engine& e, const char* name);
@@ -309,29 +309,29 @@ u32   engine_trigger_id(const Engine& e, const char* name);
 // The phase a system was declared in.
 Phase engine_system_phase(const Engine& e, const char* name);
 
-// Entity kinds, by name or id. Null for unknown. A table reached this way is the table as
-// it is now, beside every declared check: inside a system that reads the kind early from a
+// A ktable, by name or id. Null for unknown. One reached this way is the KTable as it is
+// now, beside every declared check: inside a system that reads the ktable early from a
 // snapshot, that is a read the schedule never saw, so dev builds refuse it there (reach the
-// kind through the context). Elsewhere these are for code outside the schedule (startup,
-// the first spawns, a tool), and for a system that only wants what never changes (a kind's
-// handle kind, its name).
-//   Handle h = engine_table(e, "rocks.ship")->spawn(transform2_at({0, 0}), look);
-u32    engine_kind_id(const Engine& e, const char* name);
-Table* engine_table(Engine& e, u32 kind_id);
-Table* engine_table(Engine& e, const char* name);
-// The table an entity handle was issued by, or null if the handle's kind is not one of
-// this engine's tables. Says nothing about whether the handle is still live: ask the table.
-Table* engine_table_of(Engine& e, Handle h);
+// ktable through the context). Elsewhere these are for code outside the schedule (startup,
+// the first spawns, a tool), and for a system that only wants what never changes (a
+// ktable's handle kind, its name).
+//   Handle h = engine_ktable(e, "rocks.ship")->spawn(transform2_at({0, 0}), look);
+u32    engine_ktable_id(const Engine& e, const char* name);
+KTable* engine_ktable(Engine& e, u32 ktable_id);
+KTable* engine_ktable(Engine& e, const char* name);
+// The ktable an entity handle was issued by, or null if the handle's kind is not one of
+// this engine's ktables. Says nothing about whether the handle is still live: ask the ktable.
+KTable* engine_ktable_of(Engine& e, Handle h);
 // The same without the snapshot check: the engine's own, on behalf of a system whose
 // access the context has already checked, or for what never changes.
-Table* engine_table_now(Engine& e, u32 kind_id);
-Table* engine_table_of_now(Engine& e, Handle h);
+KTable* engine_ktable_now(Engine& e, u32 ktable_id);
+KTable* engine_ktable_of_now(Engine& e, Handle h);
 
 // ---- entity names ---------------------------------------------------------------------
-// Any entity may have a name, unique among living entities across every kind. The name
-// belongs to its entity: hashed with its kind, saved and restored with it, gone when it
-// dies. Names are for scripts, tools, saves and designers (the CLI shows them as @name), a
-// few lookups a tick: the map is behind a lock, so don't look one up per entity per tick.
+// Any entity may have a name, unique among living entities across every ktable. The
+// name belongs to its entity: hashed with its ktable, saved and restored with it, gone when
+// it dies. Names are for scripts, tools, saves and designers (the CLI shows them as @name),
+// a few lookups a tick: the map is behind a lock, so don't look one up per entity per tick.
 //   engine_entity_name_set   names an entity now. For code outside the schedule (startup,
 //                            the CLI, a load) or a main-thread unit; a system names with
 //                            ctx.name_later, which lands at the boundary in unit order.
@@ -350,9 +350,9 @@ void        engine_entity_names_each(Engine& e, bool (*fn)(Handle entity, Name n
 // The hash of the sim: every sim column of every live entity, each module's ctx.rng()
 // stream, every published resource with a field table, the timers and the next-tick
 // events still waiting, and the sim tick. Fixed across runs and platforms and whatever
-// order the kinds registered in (tables by name, handles in fields by kind name). Two runs
+// order the ktables registered in (ktables by name, handles in fields by kind name). Two runs
 // with the same input hash the same every tick; --hash logs it. Module state outside the
-// stream is not in it: keep sim state in kinds, or in a resource with a field table.
+// stream is not in it: keep sim state in ktables, or in a resource with a field table.
 u64   engine_hash_state(const Engine& e);
 // Describes one event through its schema: "Type{...}", or just the name without one.
 // Returns what snprintf would.
@@ -367,7 +367,7 @@ int  engine_describe_event(const Engine& e, u32 type_id, const void* event, char
 const char* engine_qualify(const char* module, const char* name);
 bool        name_list_next(const char*& cursor, char* out, usize cap);
 
-// How early reads of a kind's resource get their value, the engine's choice applied.
+// How early reads of a ktable's resource get their value, the engine's choice applied.
 EarlyReads engine_early_reads(const Engine& e, u32 resource_id);
 
 // ---- internal: the tick runner's ------------------------------------------------------

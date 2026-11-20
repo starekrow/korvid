@@ -13,17 +13,17 @@ using namespace kv;
 struct Pos { f32 x; };
 constinit const FieldDesc k_pos_fields[] = {KV_FIELDS(Pos, x)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Pos, k_pos_fields)};
-constinit const KindDesc k_kinds[] = {{.name = ".thing", .components = " Pos ", .capacity = 16}};
+constinit const KTableDesc k_ktables[] = {{.name = ".thing", .components = " Pos ", .capacity = 16}};
 constinit const ResourceDesc k_resources[] = {{".score"}};
 void noop(TickContext&) {}
 constinit const SystemDesc k_systems[] = {
     {.name = ".a", .phase = Phase::Sim, .fn = noop, .writes = ".thing.Pos, .score"},
     {.name = ".b", .phase = Phase::Sim, .fn = noop, .reads = ".thing.Pos", .after = "?.a, ?absent.nobody"},
 };
-KV_MODULE_DEFINE(k_q) = {.name = "q", .components = k_components, .kinds = k_kinds, .resources = k_resources, .systems = k_systems};
+KV_MODULE_DEFINE(k_q) = {.name = "q", .components = k_components, .ktables = k_ktables, .resources = k_resources, .systems = k_systems};
 
 constinit const SystemDesc k_bad_systems[] = {{.name = ".c", .phase = Phase::Sim, .fn = noop, .reads = ".nothing"}};
-KV_MODULE_DEFINE(k_bad) = {.name = "q", .components = k_components, .kinds = k_kinds, .systems = k_bad_systems};
+KV_MODULE_DEFINE(k_bad) = {.name = "q", .components = k_components, .ktables = k_ktables, .systems = k_bad_systems};
 
 // "?name" in a module that is there: the system has to be too, so a typo is an error.
 constinit const SystemDesc k_typo_systems[] = {
@@ -59,7 +59,7 @@ void test_qualify(kv::TestCtx& c) {
     const ModuleDesc* const list1[] = {&k_q};
     Engine e;
     KV_CHECK(c, engine_init(e, list1));
-    KV_CHECK(c, engine_table(e, "q.thing") && strcmp(engine_table(e, "q.thing")->name, "q.thing") == 0);
+    KV_CHECK(c, engine_ktable(e, "q.thing") && strcmp(engine_ktable(e, "q.thing")->name, "q.thing") == 0);
     KV_CHECK(c, engine_resource_id(e, "q.score") && engine_resource_id(e, "q.thing.Pos"));
     KV_CHECK(c, engine_system_phase(e, "q.a") == Phase::Sim && engine_system_phase(e, ".a") == Phase::Count);
     KV_CHECK(c, e.phases.systems[(u32)Phase::Sim].len == 2 && strcmp(e.phases.systems[(u32)Phase::Sim][1].name(), "q.b") == 0);

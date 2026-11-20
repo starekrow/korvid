@@ -1,6 +1,6 @@
 # testbed
 
-The smallest game that uses everything once: a kind, a view system, a handler, timers,
+The smallest game that uses everything once: a ktable, a view system, a handler, timers,
 a command spawn with a ticket, a trigger, assets from files, and a state machine that
 never holds a handle. Four balls bounce in a field over a tiled checkerboard; one of
 them blinks out of existence and back on a schedule; a log line marks a ball's third
@@ -30,14 +30,14 @@ every module and example and `kormake test` runs every suite.
 
 ## What it shows
 
-**A kind with the game's own components.** `testbed.ball` is `Transform2`,
+**A ktable with the game's own components.** `testbed.ball` is `Transform2`,
 `Sprite`, `Motion` (velocity and a "re-aim on bounce" flag) and `Bounces` (a count, with
 `CompPrev` so a trigger can watch it).
 
-**A view system.** `testbed.move` (Sim) iterates every kind with `Transform2`,
+**A view system.** `testbed.move` (Sim) iterates every ktable with `Transform2`,
 `Motion` and `Sprite` through `ctx.view`, moves each ball, keeps it inside a fixed
 1280×720 field, and emits `Bounced{ball}` at an edge. It declares exactly what it touches;
-the scheduler puts `testbed.sim` after it because `sim` reads the kind `move` writes. The
+the scheduler puts `testbed.sim` after it because `sim` reads the ktable `move` writes. The
 sim never reads the window, whose size a replay doesn't know: `testbed.camera` (PostSim)
 scales the field to fit the window instead.
 
@@ -71,10 +71,10 @@ its sort back and verifies it; the log reports rows, visible rows and buckets in
 | file | what |
 |---|---|
 | `src/main.cc` | the `FrameLoopConfig` (960x540, the `--swarm` flag) and one call to `frameloop_main` |
-| `src/game.cc` | everything above: components, the kind, events, the trigger, the systems, the handlers, startup |
+| `src/game.cc` | everything above: components, the ktable, events, the trigger, the systems, the handlers, startup |
 | `assets/ball.png`, `assets/*.material.json` | the ball and its five looks |
 
-What the module registers: components `Motion`, `Bounces`; kind `testbed.ball`
+What the module registers: components `Motion`, `Bounces`; ktable `testbed.ball`
 (65,536 slots, for the swarm); events `Bounced`, `BlinkOn`, `BlinkOff`; systems
 `testbed.move`, `testbed.sim` (Sim); handlers `on_bounced`, `on_spawned`,
 `on_blink_off`, `on_blink_on`, `on_edge`; trigger `testbed.third_bounce`.
@@ -83,8 +83,8 @@ What the module registers: components `Motion`, `Bounces`; kind `testbed.ball`
 
 - The blinker's ticket dance (spawn by command, learn the handle from `Spawned`, then
   schedule against it) is the honest way to schedule something against an entity that
-  does not exist yet. A system holding the kind's write could spawn directly and skip it.
-- The background is a `sprite.entity`, the sprite module's own kind: a sprite that is
-  nothing else needs no kind of the game's.
+  does not exist yet. A system holding the ktable's write could spawn directly and skip it.
+- The background is a `sprite.entity`, the sprite module's own ktable: a sprite that
+  is nothing else needs no ktable of the game's.
 - Keys are logged as they arrive, as a check that the input path is alive; the balls do
   not react to them.

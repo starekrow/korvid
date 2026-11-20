@@ -161,10 +161,10 @@ spikes are its own), and to run a long mode faster, `--cli-stdin` with `rate 4` 
 ## How it is built
 
 The game is one module whose files are its parts. `src/arcfire.h` is what they share: the
-components, the events, the kinds' ids, the stage as its file says it, and the module's
+components, the events, the ktables' ids, the stage as its file says it, and the module's
 state.
 
-- **The world row.** One row of the kind `.world` holds the dials, the stage's clock
+- **The world row.** One row of the ktable `.world` holds the dials, the stage's clock
   (`Stage`: distance, speed, the cursor over the marks, the round), the run (`Run`: score,
   eggs, bombs, restarts, the chain, the next extend), the egg sequence and the sim's random stream, so the state hash covers all of
   it. The module's own state holds only what is not the sim's: asset handles, the stage
@@ -182,7 +182,7 @@ state.
   the distance has passed. A formation mark schedules its members as events on the ticks
   their spacing gives; each member's event carries the run's epoch, so members scheduled
   before a restart never arrive. The sim holds (`HoldLoading`) until the file is in.
-- **Planes** (`planes.cc`): grids of tiles of a seamless texture in a cosmetic kind, each
+- **Planes** (`planes.cc`): grids of tiles of a seamless texture in a cosmetic ktable, each
   on a layer of its own, which a stage names: space's three (stars, a nebula, a faint
   cloud: the bench's), the sky's (Shoreline's), or Orbit's: the gas (one full-field sprite
   drawn by the nebula shader, its uv scrolled), the stars added over it, the faint cloud. The sky is the parallax over the map: the
@@ -194,7 +194,7 @@ state.
 - **The ground** (`ground.cc`, `assets/maps/`): a stage may name a Tiled map, here
   Shoreline's sea and islands, written by `tools/make_maps.lua` from Kenney's terrain tiles
   and drawn at twice their size. Its 15,000 tiles are spawned once into the tilemap
-  module's still kind and scrolled by layer with the stage's distance, so they cost the
+  module's still ktable and scrolled by layer with the stage's distance, so they cost the
   extract nothing a tick. The map's `enemies` layer places the ground rows: turrets, tanks
   that drive their road, bunkers that launch popcorn up a stage path. Each comes into view
   where its place on the map crosses the field's top, and rides the scroll from there.
@@ -267,11 +267,11 @@ state.
   fire spawns by the chunk's commands, and each runner's `$rand` is its own stream seeded
   from its entity and the tick, so the result is the same on any thread count. The `rank`
   dial is BulletML's `$rank`.
-- **Bullets** (`bullets.cc`): two kinds, `bullet` (plain) and `active` (a bullet whose
+- **Bullets** (`bullets.cc`): two ktables, `bullet` (plain) and `active` (a bullet whose
   definition has actions: it carries a `Runner` and steers, fires and vanishes by its
   program), flown and aged in a `parallel_for`; they meet the hitbox, the ring and the
   shell, never each other.
-- **Hits** (`hits.cc`): `on_overlap` sorts the collision module's pairs by kind into
+- **Hits** (`hits.cc`): `on_overlap` sorts the collision module's pairs by ktable into
   `ShotHit`, `BulletHit`, `Rammed`, `Graze` and `ShellHit`. The handlers that change the
   run are chained so a bullet that hits the hitbox takes back its own graze first.
 - **The bomb** (`bomb.cc`): with one in hand, every bullet on the field is cancelled into
@@ -309,7 +309,7 @@ state.
 - **Pilots** (`pilot.cc`): the demo's script and the bot share one steering rule, which
   takes a boss's open parts as targets and keeps off its hull. Both
   drive the action map with `input_action_override`.
-- **Effects** (`fx.cc`): sparks and debris are particles in a cosmetic kind, drawn from
+- **Effects** (`fx.cc`): sparks and debris are particles in a cosmetic ktable, drawn from
   the module's own random stream, so the particle dial changes nothing the sim draws.
   Every air row gets a shadow on the ground's layer, a cosmetic child down and to the
   right that dies with it, born where it belongs. Explosions are Kenney's burst tiles as a
@@ -317,8 +317,8 @@ state.
   in three sizes (`fx_blast`): popcorn's pop; a ground row's or a part's two bursts; a
   boss's big one, four more around it, a ring of sparks and the screen white for a moment.
   Each enemy bullet has a halo, a dark soft disc in its color under it (a pale sea washes
-  out anything that adds light), in two cosmetic kinds kept slot for slot with the bullet
-  kinds: a second sprite a bullet, so the `glows` dial, off under `--stress`. A vignette
+  out anything that adds light), in two cosmetic ktables kept slot for slot with the bullet
+  ktables: a second sprite a bullet, so the `glows` dial, off under `--stress`. A vignette
   darkens the field's edges (the HUD's first image).
 - **Shaders** (`shaders/`, `assets/materials/`): fragment shaders of the game's own, built
   by the shader rule into `bin/shaders/` and named by a material file's `"shader"`. The
@@ -332,7 +332,7 @@ state.
   ring of bent air (`fx_shimmer`, up to sixteen), and `hud.cc`'s `shimmer` hands the
   renderer each ring's place in window pixels, radius and strength every tick. A shader
   that will not load leaves its sprites drawn plainly, or the frame drawn without the pass.
-- **The battle** (`battle.cc`): Orbit's background, all cosmetic (three kinds the hash
+- **The battle** (`battle.cc`): Orbit's background, all cosmetic (three ktables the hash
   never sees, the module's own random stream). The capital ship, four sections of
   `generated/capital.png`, drifts down the stage; its sections break away at fractions of
   the stage's distance, each burning away under the dissolve shader with bursts and a ring

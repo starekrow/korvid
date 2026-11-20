@@ -1,7 +1,7 @@
 // Korvid collision: the Collider2 component, bodies that move by intent, and the overlap
 // events.
 //
-// Give an entity kind a Collider2 next to its Transform2 and it takes part. What it does
+// Give a ktable a Collider2 next to its Transform2 and it takes part. What it does
 // depends on its body:
 //
 //   Sensor     (the default) reports overlaps as events and blocks nothing:
@@ -13,13 +13,13 @@
 //              the static world (a tile map; see collision_static), and blocks other
 //              kinematic bodies
 //
-// A body that may move (kinematic, or a pushable solid) needs Move2 in its kind; a kind
+// A body that may move (kinematic, or a pushable solid) needs Move2 in its ktable; a ktable
 // that reads where it went adds MoveResult2. The game writes Move2::delta in Sim; the
 // system "collision.resolve" (Sim, after every writer of Move2) moves every intent in a
-// fixed order, kinds by name and then slots, each one swept along x and then y against
+// fixed order, ktables by name and then slots, each one swept along x and then y against
 // everything as it stands at that moment, so the second mover sees where the first one
 // ended this tick. Then it writes Transform2 (and Local2 by the same delta for a child
-// kind, which is right for a child of an unrotated, unscaled parent, a level's root) and
+// ktable, which is right for a child of an unrotated, unscaled parent, a level's root) and
 // MoveResult2, before any system that reads them: intent, resolve, react, in one tick.
 // "collision.clear" (PostSim) zeroes the intents, so an intent lasts one tick.
 //
@@ -51,7 +51,7 @@ enum class ColliderShape : u8 {
 enum class BodyKind : u8 { Sensor, Solid, Kinematic };
 
 enum ColliderFlags : u8 {
-    ColliderPushable = 1, // a Solid that a pusher moves out of its way (it needs Move2 in its kind)
+    ColliderPushable = 1, // a Solid that a pusher moves out of its way (it needs Move2 in its ktable)
     ColliderPusher   = 2, // a Kinematic that pushes pushable solids instead of stopping at them
 };
 
@@ -94,7 +94,7 @@ inline Collider2 collider_body(BodyKind body, vec2 half, vec2 offset, u32 layer,
 // consumed by collision.resolve, zeroed in PostSim.
 struct Move2 { vec2 delta; };
 
-// What the resolve did with this tick's intent, on a kind that has it.
+// What the resolve did with this tick's intent, on a ktable that has it.
 struct MoveResult2 {
     vec2   asked;       // the intent
     vec2   moved;       // what the body moved, its own and pushed together

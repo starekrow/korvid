@@ -1,4 +1,4 @@
-// Korvid anim: the AnimPlayer component. Put it on any kind; the system "anim.play"
+// Korvid anim: the AnimPlayer component. Put it on any ktable; the system "anim.play"
 // (phase PostSim, every tick) advances every playing one by dt * rate, applies the loop
 // mode, writes each track's channel on the same row and fires the event keys crossed.
 //

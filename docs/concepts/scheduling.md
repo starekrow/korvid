@@ -24,7 +24,7 @@ phase and declares its access as strings in the [name language](modules.md#syste
 These sets are the whole contract. The scheduler orders units by them, runs units in
 parallel when their sets allow it, and in dev builds asserts on any access through the
 context that a unit did not declare, naming the unit and the resource. What a unit
-reaches around the context (`ctx.engine`, the table directly, another module's functions)
+reaches around the context (`ctx.engine`, a ktable directly, another module's functions)
 the scheduler can't see: keep that to main-thread units, things that never change, and
 functions that say they are safe. A main-thread-only API says so itself, by stopping a
 dev build when a worker calls it (`engine_check_main_thread`).
@@ -35,7 +35,7 @@ Every name a unit can declare is a resource, and declaring a resource declares
 everything under it:
 
 ```
-kind ".npc"               the whole kind: spawn, destroy, every column
+ktable ".npc"             the whole ktable: spawn, destroy, every column
 ├── ".npc.@alive"         which slots are alive
 ├── ".npc.Transform2"     one column
 ├── ".npc.@Quest"         an attachment store
@@ -45,8 +45,8 @@ kind ".npc"               the whole kind: spawn, destroy, every column
 "audio.commands"          an append resource
 ```
 
-Wildcards spread over kinds. `*.Velocity` means that column in every kind that has it.
-`*[Collider2].Transform2` means only the kinds that also have `Collider2`, and
+Wildcards spread over ktables. `*.Velocity` means that column in every ktable that has it.
+`*[Collider2].Transform2` means only the ktables that also have `Collider2`, and
 `*[Collider2-Parent].Transform2` means those of them without `Parent`.
 
 ## One mode per resource
@@ -60,7 +60,7 @@ Wildcards spread over kinds. `*.Velocity` means that column in every kind that h
 
 A unit has one mode per resource, however it reaches it. If two of its names cover the
 same resource in two modes (`*.T` with `^*[A].T`, or `.npc` with `^.npc.Transform2`), the
-unit is refused with both spellings named. A unit that wants some of a kind as it stands
+unit is refused with both spellings named. A unit that wants some of a ktable as it stands
 and some of it early names the parts: `.npc.@alive, .npc.Actor, ^.npc.Transform2`.
 
 ## How the order is solved
@@ -80,7 +80,7 @@ Then it checks the whole table:
   phase, read the previous tick's copy (`CompPrev`), or read early.
 - **No torn reads.** A unit that reads one thing early from a writer and another thing
   as it stands from the same writer would have to run both before and after it. The
-  error names both resources. The fix is to say which value it means, or to make the kind
+  error names both resources. The fix is to say which value it means, or to make the ktable
   a snapshot.
 
 Units with no path between them share a **level**. A level's units run at once on the
@@ -90,7 +90,7 @@ the next level waits for all of them. Ties keep module order, then declaration o
 ## Early reads: order or snapshot
 
 What an early read sees is fixed: the phase's starting value. How the engine delivers it
-is chosen per kind, with `KindDesc::early_reads`:
+is chosen per ktable, with `KTableDesc::early_reads`:
 
 - **`EarlyReads::Order`** (the default) runs the reader before every writer. It costs
   almost nothing, but it adds edges, which narrow levels and can close a cycle.
@@ -99,11 +99,12 @@ is chosen per kind, with `KindDesc::early_reads`:
   the writers. The copy costs something every phase it is needed; the profiler shows it
   as the `snapshot` zone and the `snapshot KB` counter.
 
-The game is the same either way. `--early-reads order|snapshot` forces one choice for
-every kind, and the state hash must not change; a difference means an undeclared access
-or a missing edge. A snapshot reader must reach the kind through the context (`ctx.view`,
-`ctx.read`, `ctx.rows`, `ctx.read_kind`). Dev builds refuse `engine_table` there, because
-it hands out the table as it is now.
+The game is the same either way. `--early-reads order|snapshot|ktable` forces one choice
+for every ktable, or with `ktable` (the default) leaves each its own, and the state hash
+must not change; a difference means an undeclared access or a missing edge. A snapshot
+reader must reach the ktable through the context (`ctx.view`, `ctx.read`, `ctx.rows`,
+`ctx.read_ktable`). Dev builds refuse `engine_ktable` there, because it hands out the
+ktable as it is now.
 
 ## Results don't depend on the schedule
 
@@ -111,7 +112,7 @@ Units are numbered by declaration rank, not by schedule position. Commands apply
 deliver, appends reach their owner and tickets are numbered in unit order, and
 `parallel_for` chunks merge in chunk order. The schedule only decides *when* a unit runs,
 never what comes out. As a result, `--threads 1` and `--threads 16` hash the same, and
-adding an edge or flipping a kind to a snapshot moves no hash.
+adding an edge or flipping a ktable to a snapshot moves no hash.
 
 ## Reading the schedule
 

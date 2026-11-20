@@ -1,6 +1,6 @@
 // Korvid core: Pool, a generational slot pool: records handed out by handle.
 //
-// The storage behind every handle-issuing table: entity kinds' liveness, the asset
+// The storage behind every handle-issuing table: a ktable's liveness, the asset
 // module's textures and materials. Reach for one when a module hands other code handles
 // to records it owns. create() returns a handle; get() turns it back into a pointer, or
 // null once the record is destroyed, never another record's data, because each reuse of a

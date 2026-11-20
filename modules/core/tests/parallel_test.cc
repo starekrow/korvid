@@ -1,4 +1,4 @@
-// Determinism across thread counts: two independent systems on different kinds, each a
+// Determinism across thread counts: two independent systems on different ktables, each a
 // parallel_for that moves rows, emits an event per row and spawns by command from the
 // chunks, plus a stateless pair of the same module that must share a level. The state
 // hash, the delivered event order and the spawn results must be identical with one
@@ -18,7 +18,7 @@ struct Seq { u32 n; };
 constinit const FieldDesc k_pos_fields[] = {KV_FIELDS(Pos, x, y)};
 constinit const FieldDesc k_seq_fields[] = {KV_FIELDS(Seq, n)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Pos, k_pos_fields, CompPrev), KV_COMPONENT(Seq, k_seq_fields)};
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = ".a", .components = "Pos, Seq", .capacity = 8192},
     {.name = ".b", .components = "Pos", .capacity = 8192},
     {.name = ".c", .components = "Seq", .capacity = 65536},
@@ -30,7 +30,7 @@ constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(Moved, k_moved_fields, 0
 
 // Stateless: run beside each other. Each row moves, emits Moved, and every fourth spawns a c.
 void sys_move_a(TickContext& ctx) {
-    for (KindRows k : ctx.view<Pos, const Seq>()) {
+    for (KTableRows k : ctx.view<Pos, const Seq>()) {
         Span<Pos> pos = k.col<Pos>();
         Span<const Seq> seq = k.col<const Seq>();
         parallel_for(ctx, k.rows(), 37, [&](ChunkContext& cc, u32 b, u32 e) {
@@ -44,7 +44,7 @@ void sys_move_a(TickContext& ctx) {
     }
 }
 void sys_move_b(TickContext& ctx) {
-    const Table* b = ctx.read_kind(".b");
+    const KTable* b = ctx.read_ktable(".b");
     Span<Pos> pos = ctx.write<Pos>("p.b.Pos");
     f32 total = parallel_reduce(ctx, b->rows(), 50, 0.0f, [&](ChunkContext& cc, u32 lo, u32 hi) {
         f32 t = 0;
@@ -70,7 +70,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".s2",     .phase = Phase::Sim, .fn = sys_s2},
     {.name = ".move_b", .phase = Phase::Sim, .fn = sys_move_b, .reads = ".b", .writes = ".b.Pos", .emits = "Moved", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_p) = {.name = "p", .events = k_events, .components = k_components, .kinds = k_kinds,
+KV_MODULE_DEFINE(k_p) = {.name = "p", .events = k_events, .components = k_components, .ktables = k_ktables,
                          .systems = k_systems, .startup = p_startup, .memory = {.reserve = 4096}};
 
 struct Run { u64 hash; u64 events_hash; u32 c_live; u32 spawned_null; u32 order[8]; u32 levels[4]; u64 tables[3]; f32 a0x, a0y, b0x; u32 c0; };
@@ -82,8 +82,8 @@ Run run_with(TestCtx& c, u32 threads) {
     const ModuleDesc* const list[] = {&k_p};
     KV_CHECK(c, engine_init(e, list));
     for (u32 i = 0; i < 4; ++i) r.levels[i] = e.phases.systems[(u32)Phase::Sim][i].level;
-    Table* a = engine_table(e, "p.a");
-    Table* b = engine_table(e, "p.b");
+    KTable* a = engine_ktable(e, "p.a");
+    KTable* b = engine_ktable(e, "p.b");
     for (u32 i = 0; i < 3000; ++i) a->spawn(Pos{(f32)i, 0}, Seq{i % 7});
     for (u32 i = 0; i < 2000; ++i) b->spawn(Pos{0, (f32)i});
     u64 eh = 0;
@@ -97,10 +97,10 @@ Run run_with(TestCtx& c, u32 threads) {
     // One more tick to deliver the last emissions, then look at the batch inside a PostSim read.
     r.hash = engine_hash_state(e);
     r.events_hash = eh;
-    r.c_live = engine_table(e, "p.c")->live();
-    for (u32 i = 0; i < 3; ++i) r.tables[i] = e.tables[i].hash();
+    r.c_live = engine_ktable(e, "p.c")->live();
+    for (u32 i = 0; i < 3; ++i) r.tables[i] = e.ktables[i].hash();
     r.a0x = a->rows_of<Pos>()[1].x; r.a0y = a->rows_of<Pos>()[1].y; r.b0x = b->rows_of<Pos>()[1].x;
-    r.c0 = engine_table(e, "p.c")->rows_of<Seq>()[1].n;
+    r.c0 = engine_ktable(e, "p.c")->rows_of<Seq>()[1].n;
     PState* st = engine_module_state_as<PState>(e, "p");
     memcpy(r.order, st->order, sizeof r.order);
     engine_shutdown(e);

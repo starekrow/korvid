@@ -12,8 +12,8 @@
  * resolution is lock-free from any thread; unregister only when nothing can still hold
  * the kind in flight (module shutdown).
  *
- * Most code uses the C++ side (handle.h) and never registers a kind: entity kinds and the
- * asset tables register their own. This header is for writing an issuer, and for the C ABI.
+ * Most code uses the C++ side (handle.h) and never registers a kind: ktables and the asset
+ * tables register their own. This header is for writing an issuer, and for the C ABI.
  */
 #pragma once
 #include <stddef.h>

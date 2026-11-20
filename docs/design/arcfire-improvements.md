@@ -16,7 +16,7 @@ that finds an engine limit adds a line here.
 - **Beams: a segment cast.** `collision_cast` sweeps a box; a beam wants the ordered list
   of bodies along a segment from the ship to the top of the field, by mask, each tick.
   Slice 4.
-- **Many Sets per tick.** The extract compares every row of every moving sprite kind
+- **Many Sets per tick.** The extract compares every row of every moving sprite ktable
   against what it last sent and writes a whole state per change: about 65 ns a delta in a
   dev build, 3 ms a tick at rank 56's 50,000. Its spikes are fixed (below); the compare
   itself is what is left, and a dirty bit from the writers is the design that would
@@ -37,12 +37,12 @@ that finds an engine limit adds a line here.
 ## Found in slice 3
 
 - **A pass that reads `*.Transform2` orders everything around it.** `collision.compose`
-  reads every kind's transform (a child's parent may be anything) and writes the children
+  reads every ktable's transform (a child's parent may be anything) and writes the children
   with colliders; so it comes after every Sim writer of any transform, and a system that
   reads a composed child cannot come before any of them. Arcfire's patterns system read
   the parts and wrote the active bullets' transforms, which made a cycle; it is split in
-  two (`actives` before, `patterns` after). A narrower read (the parents' kinds, which a
-  kind could declare) would loosen it; nothing else has asked yet.
+  two (`actives` before, `patterns` after). A narrower read (the parents' ktables, which a
+  ktable could declare) would loosen it; nothing else has asked yet.
 - **Handlers cannot read a value before a later handler writes it.** Systems mark such a
   read `^`; handlers refuse it. A handler that needed the run as it stood before the
   death's handler (to let the demo die once) went to a field on the ship instead. Worth
@@ -62,10 +62,10 @@ that finds an engine limit adds a line here.
   fill doing its job. Release builds would have read stale data quietly. A `destroy` that
   returns nothing to read is the way it is; the note is for the next system that counts
   as it culls.
-- **Cosmetic kinds outlive a fresh sim.** `engine_sim_reset` empties the sim's kinds; the
+- **Cosmetic ktables outlive a fresh sim.** `engine_sim_reset` empties the sim's ktables; the
   planes, the map's tiles, Orbit's battle and the segments' pictures are the game's to
   clear (arcfire does it when a stage is entered). Right for scenery a title shows across
-  runs; a `KindDesc` flag saying "cleared with the sim" would save a game the list.
+  runs; a `KTableDesc` flag saying "cleared with the sim" would save a game the list.
 
 ## On macOS (slice 7)
 
@@ -155,10 +155,10 @@ for a drawable.
   (it opens a window), and typed text is not recorded (arcfire takes none on a sim tick).
 
 - **A fresh sim** (slice 5, asked for by the title). A second run in one process began at a
-  later sim tick with every table's slots and generations where the first left them, and
+  later sim tick with every ktable's slots and generations where the first left them, and
   patterns seed from `(handle, tick)`: a different run from the same input.
-  `engine_sim_reset` (core) puts every kind that is not cosmetic back to its startup slots
-  (`Table::restore_slots` with none), the sim tick to 0, and drops the timer wheel,
+  `engine_sim_reset` (core) puts every ktable that is not cosmetic back to its startup slots
+  (`KTable::restore_slots` with none), the sim tick to 0, and drops the timer wheel,
   undelivered events, unapplied commands and the units' ticket counters, then emits
   `SimReset` for module state that follows the sim (the collision module forgets its last
   pairs, whose handles the new run is issued again). A paused tick's units after the call
@@ -166,9 +166,9 @@ for a drawable.
   event against a fresh engine); in the game, `--demo --again --hash`. Cosmetic rows
   parented to a sim entity stay their owner's to clear. Alongside, two dev conveniences:
   the CLI's `press ACTION [TICKS] [X Y]` and `type TEXT` (platform_hid), and `screenshot FILE` (frameloop).
-- **The sprite extract's removes past a table's rows** (slice 5). A table restored to fewer
+- **The sprite extract's removes past a ktable's rows** (slice 5). A ktable restored to fewer
   slots (a load, a fresh sim's none) left the sprites it had sent above its new row count
-  drawn: the remove pass walked the table's rows, not what it had sent. It walks every
+  drawn: the remove pass walked the ktable's rows, not what it had sent. It walks every
   slot it sent now.
 
 - **What the GPU does** (after slice 3; asked for by starekrow). Timestamps around the
@@ -188,11 +188,11 @@ for a drawable.
   sprites are 24 units with most of the square transparent, so a tighter quad (or the
   bullets as points) is the draw's lever.
 - **The extract's worst windows** (slice 3, M5). Traced tick by tick: every outlier was a
-  table growing, the delta list (12.4 ms at rank 56, 7.8 at stress) or a kind's side
+  table growing, the delta list (12.4 ms at rank 56, 7.8 at stress) or a ktable's side
   tables (2 ms); without growth the extract is linear in its deltas. `sprite_rows_hint`
   (passed by the frame loop from `FrameLoopConfig::sprite_rows`) sizes them once: in a dev
   build the worst extract under load went from 14.0 ms to 3.3 at rank 56 and from 8.8 to
-  2.0 at stress, the cost moved to the first extract (10 ms, once) and a kind's first rows
+  2.0 at stress, the cost moved to the first extract (10 ms, once) and a ktable's first rows
   (3 to 4 ms). Then **spike hunting** (below) showed what the growth was: with the dev
   build's fills and guard pages off, growing the delta list costs 0.01 ms with or without
   the hint, and the worst extract is 1.9 ms at stress and 2.9 at rank 56 either way,
@@ -232,12 +232,12 @@ for a drawable.
   larger than its pixels. Slice 1's measurement, for the record: the deltas followed the
   tiles one for one (6 tiles: 42 deltas a tick; 105: 141; 1,224: 1,259), and the extract
   went from under 0.04 ms to 0.22 ms a frame at 1,224 tiles.
-- **Still kinds** (slice 3, M1). `KindDesc::still`: rows that never change once spawned.
-  A table counts its spawns, destroys and restores (`Table::churn`, `Table::restores`);
-  `begin_tick` does not retake a still kind's previous copies unless that count moved, and
-  the sprite extract skips a still table whose count has not moved since it last looked,
+- **Still ktables** (slice 3, M1). `KTableDesc::still`: rows that never change once spawned.
+  A ktable counts its spawns, destroys and restores (`KTable::churn`, `KTable::restores`);
+  `begin_tick` does not retake a still ktable's previous copies unless that count moved, and
+  the sprite extract skips a still ktable whose count has not moved since it last looked,
   and otherwise sends only its births and deaths (a restore: one full compare). A write to
-  a living row of a still kind is not drawn: the contract, in the core and sprite READMEs.
+  a living row of a still ktable is not drawn: the contract, in the core and sprite READMEs.
   `tilemap.tile` is still. Shoreline's 15,000-tile map: extract 1.05 ms a frame before,
   0.002 after; hashes unchanged.
 - **Broadphase cell size and masked pairs** (slice 2, M4). `collision.broadphase` groups
@@ -246,12 +246,12 @@ for a drawable.
   (`collision/src/pairs.cc`). At rank 4 of the stress dials: 643,172 pairs tested at peak
   before, 256 after; 4.5 ms worst before, 1.0 ms after. A test holds it against a pass over
   every pair on sixty random scenes; rocks' and arcanum's demos hash as they did.
-- **Kind capacity from outside** (slice 2, M4). Capacity turned out to be address space
-  only (a table reserves it, rows commit as used, the extract's side tables follow the
-  high-water mark), so the bullet kinds are simply large (65,536 plain, 8,192 active).
-  `EngineConfig::capacities` and the frame loop's `--capacity KIND=N` set any kind's past
-  its KindDesc's; a full kind logs once and counts `Table::refused`. Growable tables were
-  not built: nothing measured asks for them.
+- **KTable capacity from outside** (slice 2, M4). Capacity turned out to be address space
+  only (a ktable reserves it, rows commit as used, the extract's side tables follow the
+  high-water mark), so the bullet ktables are simply large (65,536 plain, 8,192 active).
+  `EngineConfig::capacities` and the frame loop's `--capacity KTABLE=N` set any ktable's
+  past its KTableDesc's; a full ktable logs once and counts `KTable::refused`. Growable
+  ktables were not built: nothing measured asks for them.
 - **Renderer table growth** (slice 2, M4). `RendererDesc::sprite_rows` and
   `FrameLoopConfig::sprite_rows` (or `--sprite-rows N`) size the sprite tables and the
   frame ring at startup; a growth logs its frame. With a small hint the tables grew three

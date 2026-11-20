@@ -1,6 +1,6 @@
 // The derived schedule: readers after writers whatever the declaration order, `after`
-// and `before` edges, kind writes covering their columns and attachments, early reads
-// both ways (ordered, and from a snapshot kind), one mode per resource, module state as
+// and `before` edges, ktable writes covering their columns and attachments, early reads
+// both ways (ordered, and from a snapshot ktable), one mode per resource, module state as
 // a resource, append resources, units numbered by rank, the rejections (unordered double
 // writers, cycles, contradictions) with names in the message, the sim-to-cosmetic flow
 // rule, and the state hash: same operations, same hash; dead rows and padding invisible.
@@ -23,7 +23,7 @@ constinit const FieldDesc k_glow_fields[] = {KV_FIELD(Glow, a)};
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Pos, k_pos_fields, CompPrev), KV_COMPONENT(Vel, k_vel_fields), KV_COMPONENT(Glow, k_glow_fields, CompCosmetic),
 };
-constinit const KindDesc k_kinds[] = {{.name = "s.body", .components = "Pos, Vel, Glow", .capacity = 64}};
+constinit const KTableDesc k_ktables[] = {{.name = "s.body", .components = "Pos, Vel, Glow", .capacity = 64}};
 
 char g_trace[256];
 void trace(const char* s) { strncat(g_trace, s, sizeof g_trace - strlen(g_trace) - 1); }
@@ -44,9 +44,9 @@ constinit const SystemDesc k_a_systems[] = {
     {.name = "s.steer", .phase = Phase::Sim, .fn = sys_steer, .writes = "s.body.Vel"},
     {.name = "s.glow",  .phase = Phase::Sim, .fn = sys_glow,  .reads = "*.Pos", .writes = "*.Glow"},
 };
-KV_MODULE_DEFINE(k_a) = {.name = "a", .components = k_components, .kinds = k_kinds, .systems = k_a_systems};
+KV_MODULE_DEFINE(k_a) = {.name = "a", .components = k_components, .ktables = k_ktables, .systems = k_a_systems};
 
-// A kind writer covers every column, so spawn (writes s.body) is a second writer of Vel
+// A ktable writer covers every column, so spawn (writes s.body) is a second writer of Vel
 // and Glow and must be ordered against steer and glow by hand; move and wrap follow from
 // the reads. Before move it goes by the path through steer.
 constinit const SystemDesc k_b_systems[] = {
@@ -62,11 +62,11 @@ constinit const SystemDesc k_cycle_systems[] = {
     {.name = "c.a", .phase = Phase::PostSim, .fn = sys_other, .reads = "*.Vel", .writes = "*.Glow"},
     {.name = "c.b", .phase = Phase::PostSim, .fn = sys_other, .reads = "*.Glow", .writes = "s.body.Vel"},
 };
-KV_MODULE_DEFINE(k_cycle) = {.name = "cycle", .components = k_components, .kinds = k_kinds, .systems = k_cycle_systems};
+KV_MODULE_DEFINE(k_cycle) = {.name = "cycle", .components = k_components, .ktables = k_ktables, .systems = k_cycle_systems};
 
 // Reads cosmetic Glow and writes sim Vel: the flow rule.
 constinit const SystemDesc k_flow_systems[] = {{.name = "f.back", .phase = Phase::Sim, .fn = sys_other, .reads = "*.Glow", .writes = "s.body.Vel"}};
-KV_MODULE_DEFINE(k_flow) = {.name = "flow", .components = k_components, .kinds = k_kinds, .systems = k_flow_systems};
+KV_MODULE_DEFINE(k_flow) = {.name = "flow", .components = k_components, .ktables = k_ktables, .systems = k_flow_systems};
 
 constinit const SystemDesc k_unknown_systems[] = {{.name = "u.sys", .phase = Phase::Sim, .fn = sys_other, .after = "s.nowhere"}};
 KV_MODULE_DEFINE(k_unknown) = {.name = "unknown", .systems = k_unknown_systems};
@@ -83,19 +83,19 @@ constinit const SystemDesc k_early_systems[] = {
     {.name = "e.move",  .phase = Phase::Sim, .fn = sys_move,  .reads = "*.Vel", .writes = "*.Pos"},
     {.name = "e.think", .phase = Phase::Sim, .fn = sys_steer, .reads = "^*.Pos", .writes = "*.Vel"},
 };
-KV_MODULE_DEFINE(k_early) = {.name = "early", .components = k_components, .kinds = k_kinds, .systems = k_early_systems};
+KV_MODULE_DEFINE(k_early) = {.name = "early", .components = k_components, .ktables = k_ktables, .systems = k_early_systems};
 constinit const SystemDesc k_late_read_systems[] = {
     {.name = "l.move",  .phase = Phase::Sim, .fn = sys_move,  .reads = "*.Vel", .writes = "*.Pos"},
     {.name = "l.think", .phase = Phase::Sim, .fn = sys_steer, .reads = "*.Pos", .writes = "*.Vel"},
 };
-KV_MODULE_DEFINE(k_late_read) = {.name = "lateread", .components = k_components, .kinds = k_kinds, .systems = k_late_read_systems};
+KV_MODULE_DEFINE(k_late_read) = {.name = "lateread", .components = k_components, .ktables = k_ktables, .systems = k_late_read_systems};
 constinit const SystemDesc k_early_write_systems[] = {{.name = "w.bad", .phase = Phase::Sim, .fn = sys_other, .writes = "^*.Pos"}};
-KV_MODULE_DEFINE(k_early_write) = {.name = "earlywrite", .components = k_components, .kinds = k_kinds, .systems = k_early_write_systems};
+KV_MODULE_DEFINE(k_early_write) = {.name = "earlywrite", .components = k_components, .ktables = k_ktables, .systems = k_early_write_systems};
 
-// A set form with a joined filter: "*[Vel+Glow].Pos" is Pos in the kinds with both, so
-// it shares nothing with a writer of a kind that has Vel only (no order needed) and
+// A set form with a joined filter: "*[Vel+Glow].Pos" is Pos in the ktables with both, so
+// it shares nothing with a writer of a ktable that has Vel only (no order needed) and
 // collides with an unordered writer of one that has both.
-constinit const KindDesc k_filter_kinds[] = {
+constinit const KTableDesc k_filter_ktables[] = {
     {.name = "j.plain", .components = "Pos, Vel", .capacity = 8},
     {.name = "j.glowing", .components = "Pos, Vel, Glow", .capacity = 8},
 };
@@ -104,18 +104,18 @@ constinit const SystemDesc k_joined_systems[] = {
     {.name = "j.plain_mover", .phase = Phase::Sim, .fn = sys_move, .writes = "j.plain.Pos", .state = StateUse::None},
     {.name = "j.reader", .phase = Phase::Sim, .fn = sys_steer, .reads = "j.glowing.Pos", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_joined) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_joined_systems};
+KV_MODULE_DEFINE(k_joined) = {.name = "j", .components = k_components, .ktables = k_filter_ktables, .systems = k_joined_systems};
 constinit const SystemDesc k_joined_clash_systems[] = {
     {.name = "j.both", .phase = Phase::Sim, .fn = sys_other, .writes = "*[Vel+Glow].Pos", .state = StateUse::None},
     {.name = "j.glow_mover", .phase = Phase::Sim, .fn = sys_move, .writes = "j.glowing.Pos", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_joined_clash) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_joined_clash_systems};
+KV_MODULE_DEFINE(k_joined_clash) = {.name = "j", .components = k_components, .ktables = k_filter_ktables, .systems = k_joined_clash_systems};
 constinit const SystemDesc k_joined_unknown_systems[] = {{.name = "j.what", .phase = Phase::Sim, .fn = sys_other, .writes = "*[Vel+Nope].Pos"}};
-KV_MODULE_DEFINE(k_joined_unknown) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_joined_unknown_systems};
+KV_MODULE_DEFINE(k_joined_unknown) = {.name = "j", .components = k_components, .ktables = k_filter_ktables, .systems = k_joined_unknown_systems};
 
 // An append resource: its appenders need no order, and their records reach the owner in
 // unit order; a real resource two systems also both write still does. Only the owner
-// writes it; anyone else declares `appends`. Module resources number after the kinds'
+// writes it; anyone else declares `appends`. Module resources number after the ktables'
 // columns, so the queue comes first here by id and by list: the case a check by id order
 // would pass over.
 char g_applied[64];
@@ -127,71 +127,71 @@ constinit const SystemDesc k_sink_ok_systems[] = {
     {.name = "q.one", .phase = Phase::Sim, .fn = sys_append_a, .appends = "q.queue", .state = StateUse::None},
     {.name = "q.two", .phase = Phase::Sim, .fn = sys_append_b, .appends = "q.queue", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_sink_ok) = {.name = "q", .components = k_components, .kinds = k_kinds, .resources = k_queue_res, .systems = k_sink_ok_systems};
+KV_MODULE_DEFINE(k_sink_ok) = {.name = "q", .components = k_components, .ktables = k_ktables, .resources = k_queue_res, .systems = k_sink_ok_systems};
 constinit const SystemDesc k_sink_clash_systems[] = {
     {.name = "q.one", .phase = Phase::Sim, .fn = sys_other, .writes = "s.body.Vel", .appends = "q.queue", .state = StateUse::None},
     {.name = "q.two", .phase = Phase::Sim, .fn = sys_other, .writes = "s.body.Vel", .appends = "q.queue", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_sink_clash) = {.name = "q", .components = k_components, .kinds = k_kinds, .resources = k_queue_res, .systems = k_sink_clash_systems};
+KV_MODULE_DEFINE(k_sink_clash) = {.name = "q", .components = k_components, .ktables = k_ktables, .resources = k_queue_res, .systems = k_sink_clash_systems};
 constinit const SystemDesc k_sink_writer_systems[] = {{.name = "o.writes", .phase = Phase::Sim, .fn = sys_other, .writes = "q.queue"}};
 KV_MODULE_DEFINE(k_sink_writer) = {.name = "o", .systems = k_sink_writer_systems};
 constinit const SystemDesc k_not_append_systems[] = {{.name = "o.appends", .phase = Phase::Sim, .fn = sys_other, .appends = "s.body.Vel"}};
 KV_MODULE_DEFINE(k_not_append) = {.name = "o", .systems = k_not_append_systems};
 
 // A reader of two things one writer writes, one of them early (^) and one as it stands:
-// with the kind's early reads ordered it would have to run both before and after the
+// with the ktable's early reads ordered it would have to run both before and after the
 // writer, and an order declared one way contradicts one of the reads, so both are refused.
-// With the kind a snapshot, the pair is fine: the reader runs after and sees Pos from the
+// With the ktable a snapshot, the pair is fine: the reader runs after and sees Pos from the
 // copy, as the phase found it, and Vel as the writer left it.
 constinit const SystemDesc k_mixed_read_systems[] = {
     {.name = "m.write", .phase = Phase::Sim, .fn = sys_move, .writes = "*.Pos, *.Vel", .state = StateUse::None},
     {.name = "m.read",  .phase = Phase::Sim, .fn = sys_steer, .reads = "^*.Pos, *.Vel", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_mixed_read) = {.name = "m", .components = k_components, .kinds = k_kinds, .systems = k_mixed_read_systems};
+KV_MODULE_DEFINE(k_mixed_read) = {.name = "m", .components = k_components, .ktables = k_ktables, .systems = k_mixed_read_systems};
 constinit const SystemDesc k_mixed_ordered_systems[] = {
     {.name = "m.write", .phase = Phase::Sim, .fn = sys_move, .writes = "*.Pos, *.Vel", .state = StateUse::None},
     {.name = "m.read",  .phase = Phase::Sim, .fn = sys_steer, .reads = "^*.Pos, *.Vel", .before = "m.write", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_mixed_ordered) = {.name = "m", .components = k_components, .kinds = k_kinds, .systems = k_mixed_ordered_systems};
+KV_MODULE_DEFINE(k_mixed_ordered) = {.name = "m", .components = k_components, .ktables = k_ktables, .systems = k_mixed_ordered_systems};
 // Within one module, sharing its state: refused all the same, not settled by declaration order.
 constinit const SystemDesc k_mixed_module_systems[] = {
     {.name = "m.write", .phase = Phase::Sim, .fn = sys_move, .writes = "*.Pos, *.Vel"},
     {.name = "m.read",  .phase = Phase::Sim, .fn = sys_steer, .reads = "^*.Pos, *.Vel"},
 };
-KV_MODULE_DEFINE(k_mixed_module) = {.name = "m", .components = k_components, .kinds = k_kinds, .systems = k_mixed_module_systems};
+KV_MODULE_DEFINE(k_mixed_module) = {.name = "m", .components = k_components, .ktables = k_ktables, .systems = k_mixed_module_systems};
 
 f32 g_seen_pos = -1, g_seen_vel = -1;
 void sys_set_both(TickContext& ctx) {
-    for (KindRows k : ctx.view<Pos, Vel>()) for (u32 i = 0; i < k.rows(); ++i) if (k.alive(i)) { k.col<Pos>()[i].x += 1; k.col<Vel>()[i].dx += 2; }
+    for (KTableRows k : ctx.view<Pos, Vel>()) for (u32 i = 0; i < k.rows(); ++i) if (k.alive(i)) { k.col<Pos>()[i].x += 1; k.col<Vel>()[i].dx += 2; }
 }
 void sys_see_both(TickContext& ctx) {
-    for (KindRows k : ctx.view<const Pos, const Vel>()) for (u32 i = 0; i < k.rows(); ++i) if (k.alive(i)) { g_seen_pos = k.col<const Pos>()[i].x; g_seen_vel = k.col<const Vel>()[i].dx; }
+    for (KTableRows k : ctx.view<const Pos, const Vel>()) for (u32 i = 0; i < k.rows(); ++i) if (k.alive(i)) { g_seen_pos = k.col<const Pos>()[i].x; g_seen_vel = k.col<const Vel>()[i].dx; }
 }
-constinit const KindDesc k_snap_kinds[] = {{.name = "n.body", .components = "Pos, Vel", .capacity = 8, .early_reads = EarlyReads::Snapshot}};
+constinit const KTableDesc k_snap_ktables[] = {{.name = "n.body", .components = "Pos, Vel", .capacity = 8, .early_reads = EarlyReads::Snapshot}};
 constinit const SystemDesc k_mixed_snap_systems[] = {
     {.name = "n.read",  .phase = Phase::Sim, .fn = sys_see_both, .reads = "^*.Pos, *.Vel", .state = StateUse::None},
     {.name = "n.write", .phase = Phase::Sim, .fn = sys_set_both, .writes = "*.Pos, *.Vel", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_mixed_snap) = {.name = "n", .components = k_components, .kinds = k_snap_kinds, .systems = k_mixed_snap_systems};
+KV_MODULE_DEFINE(k_mixed_snap) = {.name = "n", .components = k_components, .ktables = k_snap_ktables, .systems = k_mixed_snap_systems};
 
-// One covers relation for the schedule and the checks: a write on a kind covers its
+// One covers relation for the schedule and the checks: a write on a ktable covers its
 // attachments too, so it and a writer of one of them need an order (they once shared a
 // level and could attach on one store at once); a cosmetic attachment read into a sim
 // write is the flow rule's, like a column.
-constinit const KindDesc k_attach_kinds[] = {{.name = "t.npc", .components = "Pos, Vel", .capacity = 8, .attachable = "Glow"}};
+constinit const KTableDesc k_attach_ktables[] = {{.name = "t.npc", .components = "Pos, Vel", .capacity = 8, .attachable = "Glow"}};
 constinit const SystemDesc k_attach_race_systems[] = {
     {.name = "t.spawn", .phase = Phase::Sim, .fn = sys_other, .writes = "t.npc", .state = StateUse::None},
     {.name = "t.tag",   .phase = Phase::Sim, .fn = sys_other, .writes = "t.npc.@Glow", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_attach_race) = {.name = "t", .components = k_components, .kinds = k_attach_kinds, .systems = k_attach_race_systems};
+KV_MODULE_DEFINE(k_attach_race) = {.name = "t", .components = k_components, .ktables = k_attach_ktables, .systems = k_attach_race_systems};
 constinit const SystemDesc k_attach_flow_systems[] = {{.name = "t.leak", .phase = Phase::Sim, .fn = sys_other, .reads = "t.npc.@Glow", .writes = "t.npc.Vel"}};
-KV_MODULE_DEFINE(k_attach_flow) = {.name = "t", .components = k_components, .kinds = k_attach_kinds, .systems = k_attach_flow_systems};
+KV_MODULE_DEFINE(k_attach_flow) = {.name = "t", .components = k_components, .ktables = k_attach_ktables, .systems = k_attach_flow_systems};
 
 // One mode per resource: two names covering Pos as read and read early are refused, as is
-// an early read of what the system writes, and the whole kind as it stands with one of its
-// columns early; a unit that wants that names the parts (the kind's liveness is
-// "kind.@alive"); a filter can leave a component out; module state is not named, and an
-// early read is of a kind, its liveness or a column only.
+// an early read of what the system writes, and the whole ktable as it stands with one of its
+// columns early; a unit that wants that names the parts (the ktable's liveness is
+// "ktable.@alive"); a filter can leave a component out; module state is not named, and an
+// early read is of a ktable, its liveness or a column only.
 constinit const SystemDesc k_two_modes_systems[] = {{.name = "o.two", .phase = Phase::Sim, .fn = sys_other, .reads = "*.Pos, ^s.body.Pos"}};
 KV_MODULE_DEFINE(k_two_modes) = {.name = "o", .systems = k_two_modes_systems};
 constinit const SystemDesc k_early_own_systems[] = {{.name = "o.own", .phase = Phase::Sim, .fn = sys_other, .reads = "^s.body.Pos", .writes = "s.body.Pos"}};
@@ -199,21 +199,21 @@ KV_MODULE_DEFINE(k_early_own) = {.name = "o", .systems = k_early_own_systems};
 Handle g_look_at;
 bool g_look_alive = false;
 void sys_look(TickContext& ctx) { g_look_alive = ctx.alive(g_look_at); }
-constinit const KindDesc k_o_kinds[] = {{.name = "o.thing", .components = "Pos, Vel", .capacity = 8}};
-constinit const SystemDesc k_kind_default_systems[] = {
+constinit const KTableDesc k_o_ktables[] = {{.name = "o.thing", .components = "Pos, Vel", .capacity = 8}};
+constinit const SystemDesc k_ktable_default_systems[] = {
     {.name = "o.vel",  .phase = Phase::Sim, .fn = sys_other, .writes = "o.thing.Vel", .state = StateUse::None},
     {.name = "o.move", .phase = Phase::Sim, .fn = sys_other, .reads = "o.thing.Vel", .writes = "o.thing.Pos", .state = StateUse::None},
     {.name = "o.look", .phase = Phase::Sim, .fn = sys_look, .reads = "o.thing.@alive, o.thing.Vel, ^o.thing.Pos", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_kind_default) = {.name = "o", .components = k_components, .kinds = k_o_kinds, .systems = k_kind_default_systems};
-// The whole kind as it stands and one column early: two modes on one column, refused; a
-// kind's liveness is written only with the kind.
-constinit const SystemDesc k_kind_mixed_systems[] = {{.name = "o.look", .phase = Phase::Sim, .fn = sys_other, .reads = "o.thing, ^o.thing.Pos", .state = StateUse::None}};
-KV_MODULE_DEFINE(k_kind_mixed) = {.name = "o", .components = k_components, .kinds = k_o_kinds, .systems = k_kind_mixed_systems};
+KV_MODULE_DEFINE(k_ktable_default) = {.name = "o", .components = k_components, .ktables = k_o_ktables, .systems = k_ktable_default_systems};
+// The whole ktable as it stands and one column early: two modes on one column, refused; a
+// ktable's liveness is written only with the ktable.
+constinit const SystemDesc k_ktable_mixed_systems[] = {{.name = "o.look", .phase = Phase::Sim, .fn = sys_other, .reads = "o.thing, ^o.thing.Pos", .state = StateUse::None}};
+KV_MODULE_DEFINE(k_ktable_mixed) = {.name = "o", .components = k_components, .ktables = k_o_ktables, .systems = k_ktable_mixed_systems};
 constinit const SystemDesc k_alive_write_systems[] = {{.name = "o.kill", .phase = Phase::Sim, .fn = sys_other, .writes = "o.thing.@alive", .state = StateUse::None}};
-KV_MODULE_DEFINE(k_alive_write) = {.name = "o", .components = k_components, .kinds = k_o_kinds, .systems = k_alive_write_systems};
+KV_MODULE_DEFINE(k_alive_write) = {.name = "o", .components = k_components, .ktables = k_o_ktables, .systems = k_alive_write_systems};
 constinit const SystemDesc k_excluded_systems[] = {{.name = "j.split", .phase = Phase::Sim, .fn = sys_other, .reads = "*[Vel-Glow].Pos, ^*[Glow].Pos"}};
-KV_MODULE_DEFINE(k_excluded) = {.name = "j", .components = k_components, .kinds = k_filter_kinds, .systems = k_excluded_systems};
+KV_MODULE_DEFINE(k_excluded) = {.name = "j", .components = k_components, .ktables = k_filter_ktables, .systems = k_excluded_systems};
 constinit const SystemDesc k_named_state_systems[] = {{.name = "o.peek", .phase = Phase::Sim, .fn = sys_other, .reads = "a.state"}};
 KV_MODULE_DEFINE(k_named_state) = {.name = "o", .systems = k_named_state_systems};
 constinit const SystemDesc k_early_queue_systems[] = {{.name = "o.peek", .phase = Phase::Sim, .fn = sys_other, .reads = "^q.queue"}};
@@ -228,28 +228,28 @@ constinit const SystemDesc k_state_systems[] = {
 };
 KV_MODULE_DEFINE(k_state) = {.name = "st", .systems = k_state_systems};
 
-// A snapshot kind's liveness: grow spawns one at once, and count, after it (it also reads
+// A snapshot ktable's liveness: grow spawns one at once, and count, after it (it also reads
 // what grow publishes as it stands), still sees the bodies the phase began with.
 struct Tally { u32 n; };
 Tally g_tally;
 u32 g_counted = 0, g_tally_seen = 0;
 void sys_grow(TickContext& ctx) {
-    ctx.write_kind("ns.body")->spawn(Pos{1, 1}, Vel{0, 0});
+    ctx.write_ktable("ns.body")->spawn(Pos{1, 1}, Vel{0, 0});
     ++ctx.resource<Tally>("ns.tally")->n;
 }
 void sys_count(TickContext& ctx) {
     g_counted = 0;
-    for (KindRows k : ctx.view<const Pos>()) for (u32 i = 0; i < k.rows(); ++i) g_counted += k.alive(i);
+    for (KTableRows k : ctx.view<const Pos>()) for (u32 i = 0; i < k.rows(); ++i) g_counted += k.alive(i);
     g_tally_seen = ctx.resource<const Tally>("ns.tally")->n;
 }
 bool ns_startup(Engine& e, ModuleInstance& self) { return engine_publish(e, self, ".tally", &g_tally); }
-constinit const KindDesc k_ns_kinds[] = {{.name = "ns.body", .components = "Pos, Vel", .capacity = 8, .early_reads = EarlyReads::Snapshot}};
+constinit const KTableDesc k_ns_ktables[] = {{.name = "ns.body", .components = "Pos, Vel", .capacity = 8, .early_reads = EarlyReads::Snapshot}};
 constinit const ResourceDesc k_ns_res[] = {{".tally"}};
 constinit const SystemDesc k_ns_systems[] = {
     {.name = "ns.count", .phase = Phase::Sim, .fn = sys_count, .reads = "^ns.body, ns.tally", .state = StateUse::None},
     {.name = "ns.grow",  .phase = Phase::Sim, .fn = sys_grow,  .writes = "ns.body, ns.tally", .state = StateUse::None},
 };
-KV_MODULE_DEFINE(k_ns) = {.name = "ns", .components = k_components, .kinds = k_ns_kinds, .resources = k_ns_res, .systems = k_ns_systems, .startup = ns_startup};
+KV_MODULE_DEFINE(k_ns) = {.name = "ns", .components = k_components, .ktables = k_ns_ktables, .resources = k_ns_res, .systems = k_ns_systems, .startup = ns_startup};
 
 const char* order(const Engine& e, Phase p, char* buf, usize cap) {
     buf[0] = 0;
@@ -304,7 +304,7 @@ void test_schedule(kv::TestCtx& c) {
     }
 
     // A reader both before (^) and after one writer cannot be placed, nor settled by an
-    // order declared or by its module's; from a snapshot kind it is fine.
+    // order declared or by its module's; from a snapshot ktable it is fine.
     {
         const ModuleDesc* const mixed[] = {&k_mixed_read};
         KV_CHECK(c, init_fails(c, mixed));
@@ -316,18 +316,18 @@ void test_schedule(kv::TestCtx& c) {
         Engine x;
         KV_CHECK(c, engine_init(x, snap));
         KV_CHECK(c, strcmp(order(x, Phase::Sim, buf, sizeof buf), "n.write n.read ") == 0);
-        engine_table(x, "n.body")->spawn(Pos{10, 0}, Vel{20, 0});
+        engine_ktable(x, "n.body")->spawn(Pos{10, 0}, Vel{20, 0});
         x.phases.run_tick(x, x.events, 1.0 / 60.0, 0);
         KV_CHECK(c, g_seen_pos == 10 && g_seen_vel == 22); // Pos as the phase found it, Vel as written
         engine_shutdown(x);
-        // Forced ordered, the snapshot kind's pair is a contradiction again.
+        // Forced ordered, the snapshot ktable's pair is a contradiction again.
         Engine y;
         y.early_reads = EarlyReadsChoice::Order;
         KV_CHECK(c, !engine_init(y, snap));
         engine_shutdown(y);
     }
 
-    // Attachments are covered by their kind, for the order and the flow rule.
+    // Attachments are covered by their ktable, for the order and the flow rule.
     {
         const ModuleDesc* const race[] = {&k_attach_race};
         KV_CHECK(c, init_fails(c, race));
@@ -345,9 +345,9 @@ void test_schedule(kv::TestCtx& c) {
         KV_CHECK(c, init_fails(c, named_state));
         const ModuleDesc* const early_queue[] = {&k_sink_ok, &k_early_queue};
         KV_CHECK(c, init_fails(c, early_queue));
-        const ModuleDesc* const kind_default[] = {&k_kind_default};
+        const ModuleDesc* const ktable_default[] = {&k_ktable_default};
         Engine x;
-        KV_CHECK(c, engine_init(x, kind_default));
+        KV_CHECK(c, engine_init(x, ktable_default));
         KV_CHECK(c, strcmp(order(x, Phase::Sim, buf, sizeof buf), "o.vel o.look o.move ") == 0); // Vel as it stands, Pos before the move
         const ScheduledSystem* look = nullptr;
         for (const ScheduledSystem& u : x.phases.systems[(u32)Phase::Sim]) if (!strcmp(u.name(), "o.look")) look = &u;
@@ -357,10 +357,10 @@ void test_schedule(kv::TestCtx& c) {
         // Units by rank, wherever they run: o.look is declared last and runs second.
         KV_CHECK(c, look && look->level == 2 && look->unit == 3);
         // ctx.alive: a declared read of the liveness.
-        g_look_at = engine_table(x, "o.thing")->spawn(Pos{0, 0}, Vel{0, 0});
+        g_look_at = engine_ktable(x, "o.thing")->spawn(Pos{0, 0}, Vel{0, 0});
         x.phases.run_tick(x, x.events, 1.0 / 60.0, 0);
         KV_CHECK(c, g_look_alive);
-        engine_table(x, "o.thing")->destroy(g_look_at);
+        engine_ktable(x, "o.thing")->destroy(g_look_at);
         x.phases.run_tick(x, x.events, 1.0 / 60.0, 1);
         KV_CHECK(c, !g_look_alive);
         // Ids from the context carry their engine.
@@ -371,8 +371,8 @@ void test_schedule(kv::TestCtx& c) {
         u32 rows = 0;
         KV_CHECK(c, ctx_column(ctx, id, &TypeKey<Pos>::key, false, &rows) != nullptr);
         engine_shutdown(x);
-        const ModuleDesc* const kind_mixed[] = {&k_kind_mixed};
-        KV_CHECK(c, init_fails(c, kind_mixed));
+        const ModuleDesc* const ktable_mixed[] = {&k_ktable_mixed};
+        KV_CHECK(c, init_fails(c, ktable_mixed));
         const ModuleDesc* const alive_write[] = {&k_alive_write};
         KV_CHECK(c, init_fails(c, alive_write));
         const ModuleDesc* const excluded[] = {&k_excluded};
@@ -391,18 +391,18 @@ void test_schedule(kv::TestCtx& c) {
         engine_shutdown(x);
     }
 
-    // A snapshot kind's early reader sees the liveness the phase began with; forced to
+    // A snapshot ktable's early reader sees the liveness the phase began with; forced to
     // order, the same declarations are a contradiction.
     {
         const ModuleDesc* const ns[] = {&k_ns};
         Engine x;
         KV_CHECK(c, engine_init(x, ns));
         KV_CHECK(c, strcmp(order(x, Phase::Sim, buf, sizeof buf), "ns.grow ns.count ") == 0);
-        engine_table(x, "ns.body")->spawn(Pos{0, 0}, Vel{0, 0});
+        engine_ktable(x, "ns.body")->spawn(Pos{0, 0}, Vel{0, 0});
         x.phases.run_tick(x, x.events, 1.0 / 60.0, 0);
-        KV_CHECK(c, g_counted == 1 && engine_table(x, "ns.body")->live() == 2 && g_tally_seen == 1); // the tally as grow left it
+        KV_CHECK(c, g_counted == 1 && engine_ktable(x, "ns.body")->live() == 2 && g_tally_seen == 1); // the tally as grow left it
         x.phases.run_tick(x, x.events, 1.0 / 60.0, 1);
-        KV_CHECK(c, g_counted == 2 && engine_table(x, "ns.body")->live() == 3);
+        KV_CHECK(c, g_counted == 2 && engine_ktable(x, "ns.body")->live() == 3);
         engine_shutdown(x);
         Engine y;
         y.early_reads = EarlyReadsChoice::Order;
@@ -424,7 +424,7 @@ void test_schedule(kv::TestCtx& c) {
         KV_CHECK(c, init_fails(c, unknown));
     }
 
-    // Derived order: writers before readers, the declared edge honored, the kind writer first.
+    // Derived order: writers before readers, the declared edge honored, the ktable writer first.
     const ModuleDesc* const list[] = {&k_a, &k_b};
     Engine e;
     e.threads = 1; // the trace is a global string
@@ -435,7 +435,7 @@ void test_schedule(kv::TestCtx& c) {
     KV_CHECK(c, strcmp(g_trace, "spawn steer move wrap glow ") == 0);
 
     // The hash: deterministic, sensitive to sim fields, blind to cosmetic ones and dead rows.
-    Table* body = engine_table(e, "s.body");
+    KTable* body = engine_ktable(e, "s.body");
     u64 empty = engine_hash_state(e);
     Handle h0 = body->spawn(Pos{1, 2}, Vel{3, 4}, Glow{0.5f});
     Handle h1 = body->spawn(Pos{5, 6}, Vel{7, 8}, Glow{0.5f});

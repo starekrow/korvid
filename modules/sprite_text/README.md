@@ -1,7 +1,7 @@
 # sprite_text
 
-Words on screen, in the engine's own shape. A `Text` component on any kind with a
-`Transform2` is laid out as glyph sprites: rows of the kind `sprite_text.glyph`, children of the
+Words on screen, in the engine's own shape. A `Text` component on any ktable with a
+`Transform2` is laid out as glyph sprites: rows of the ktable `sprite_text.glyph`, children of the
 label through the scene module, one per visible character, drawn from a font asset's
 atlas by the same GPU path as everything else. Changing the string is one write; the layout notices and redoes the glyphs.
 
@@ -50,14 +50,14 @@ text shows it in place. From the next tick on the scene module keeps the glyphs 
 label (`scene.compose` reads `*.Local2`), and the extract draws them. A label that dies leaves its glyphs as orphans, which the scene
 module destroys at the end of the same tick.
 
-`sprite_text.glyph` is a **cosmetic kind**: never part of the state hash. The frame loop's
+`sprite_text.glyph` is a **cosmetic ktable**: never part of the state hash. The frame loop's
 overlay and a game's HUD can show anything without touching determinism. `sprite_text.label`
-is sim state like any other kind, so a game's labels are hashed with the rest.
+is sim state like any other ktable, so a game's labels are hashed with the rest.
 
 ## Using it
 
 ```cpp
-// A kind of your own with a Text, or the module's sprite_text.label:
+// A ktable of your own with a Text, or the module's sprite_text.label:
 Text t;
 t.font  = g.font;                       // asset_load_font(engine, KV_DEJAVU_SANS, 28) at startup
 t.space  = SpriteSpace::Screen;         // window pixels, +y up, from the anchor
@@ -105,8 +105,8 @@ What the module registers with the engine:
 | name | kind | notes |
 |---|---|---|
 | `Text` | component | sim state |
-| `sprite_text.label` | kind | `Transform2`, `Text`; 4096 slots |
-| `sprite_text.glyph` | kind, cosmetic | `Transform2`, `Sprite`, `Local2`, `Parent`; 65536 slots; never hashed |
+| `sprite_text.label` | ktable | `Transform2`, `Text`; 4096 slots |
+| `sprite_text.glyph` | ktable, cosmetic | `Transform2`, `Sprite`, `Local2`, `Parent`; 65536 slots; never hashed |
 | `sprite_text.layout` | system, phase Frame | reads `*.Text`, `*.Transform2`; writes `sprite_text.glyph` |
 
 Depends on: core, math, render, platform, asset, sprite, scene.

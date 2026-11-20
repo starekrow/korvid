@@ -13,8 +13,8 @@ namespace {
 using namespace kv;
 bool near(f32 a, f32 b) { return kv::fabs(a - b) < 1e-4f; }
 
-constinit const KindDesc k_kinds[] = {{.name = ".mover", .components = "Transform2", .capacity = 4}};
-KV_MODULE_DEFINE(k_ct) = {.name = "ct", .kinds = k_kinds};
+constinit const KTableDesc k_ktables[] = {{.name = ".mover", .components = "Transform2", .capacity = 4}};
+KV_MODULE_DEFINE(k_ct) = {.name = "ct", .ktables = k_ktables};
 
 } // namespace
 
@@ -24,7 +24,7 @@ void test_camera(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&sprite_module, &k_ct};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* t = engine_table(e, "ct.mover");
+    KTable* t = engine_ktable(e, "ct.mover");
     Handle h = t->spawn(transform2_at(point2{100, 40}));
     *t->prev<Transform2>(h) = transform2_at(point2{90, 40});
 

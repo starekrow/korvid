@@ -24,9 +24,9 @@ struct SpriteState {
 bool sprite_startup(Engine& engine, ModuleInstance& self) {
     SpriteState* s = arena_push<SpriteState>(self.arena);
     if (!s) return false;
-    s->deltas.alloc = s->extract.tables.alloc = &self.general;
-    s->world.table = engine_table(engine, "sprite.entity"); // the engine built it from the kind table
-    if (!s->world.table) return false;
+    s->deltas.alloc = s->extract.ktables.alloc = &self.general;
+    s->world.ktable = engine_ktable(engine, "sprite.entity"); // the engine built it from the ktable list
+    if (!s->world.ktable) return false;
     if (!engine_publish(engine, self, ".camera", &s->camera)) return false;
     if (!engine_publish(engine, self, ".layers", &s->layers)) return false;
     self.set_state(s);
@@ -40,7 +40,7 @@ void sprite_shutdown(Engine&, ModuleInstance& self) {
     s->deltas.free();
 }
 
-// The Frame cycle: what the ticks since the last frame changed, in every kind with
+// The Frame cycle: what the ticks since the last frame changed, in every ktable with
 // Transform2 and Sprite, appended for the renderer. The engine copied current into previous
 // at each tick's PreSim.
 void sprite_extract(TickContext& ctx) {
@@ -68,8 +68,8 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Sprite, k_sprite_fields),
 };
 
-// The kind. Any kind with these two components is a sprite to the extract.
-constinit const KindDesc    k_kinds[] = {
+// The ktable. Any ktable with these two components is a sprite to the extract.
+constinit const KTableDesc    k_ktables[] = {
     {.name = ".entity", .components = "Transform2, Sprite", .capacity = KV_POOL_DEFAULT_MAX},
 };
 
@@ -84,7 +84,7 @@ constinit const SystemDesc   k_systems[]   = {
 KV_MODULE_DEFINE(sprite_module) = {
     .name       = "sprite",
     .components = k_components,
-    .kinds      = k_kinds,
+    .ktables    = k_ktables,
     .resources  = k_resources,
     .systems    = k_systems,
     .startup    = sprite_startup,
@@ -135,7 +135,7 @@ f32 clamp_axis(f32 c, f32 half, f32 lo, f32 len) {
 Camera2 camera_resolve(Engine& e, const Camera2& cam, u32 width, u32 height, f32 alpha) {
     Camera2 out = cam;
     if (!cam.follow.is_null()) {
-        Table* t = engine_table_of(e, cam.follow);
+        KTable* t = engine_ktable_of(e, cam.follow);
         const Transform2* now = t && t->valid(cam.follow) ? t->get<Transform2>(cam.follow) : nullptr;
         if (now) {
             const Transform2* was = t->prev<Transform2>(cam.follow);

@@ -73,7 +73,7 @@ stdin, and on a TCP port with `--cli-port N` (loopback; one line in, lines out, 
 | `berg-preview FILE PATH... VALUE` | what setting the value at `PATH` (`rules 1 meta filter`) would change, file by file; nothing saved. A `VALUE` that is not JSON is a string |
 | `berg-set FILE PATH... VALUE` | sets it in the file, every other byte as it was; the watch cooks what that changes |
 | `quit` | saves the state and exits |
-| `ls /kinds/goldberg`, `help`, ... | the engine's own CLI: goldberg's records are pools like any other |
+| `ls /ktables/goldberg`, `help`, ... | the engine's own CLI: goldberg's records are pools like any other |
 
 A watch also listens for **programs** that run from its output tree (loopback, a port the OS
 picks unless `--listen-port N` says; the port is written to `<out>/.goldberg-port` and removed

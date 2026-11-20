@@ -69,7 +69,7 @@ S, M, L: effort. "Author" is what a game writer has to do differently.
 
 ## 1. Deterministic behavior
 
-**1. Module state isn't hashed.** `engine_hash_state` hashes kind tables only; module
+**1. Module state isn't hashed.** `engine_hash_state` hashes ktables only; module
 state, published resources, pending timers, held events and the sim tick are outside it.
 rocks keeps its `Rng`, score and next wave in its state, so the hash, the thread
 comparison and replays can't see a divergence there until it reaches a column.
@@ -100,14 +100,14 @@ engine already owns:
 - **The engine's own pending state is hashed:** the timer wheel's records, held next-tick
   events, the sim tick. Nothing for the author to do.
 
-The statement narrows to what is true: the hash covers kinds, engine-owned randomness,
+The statement narrows to what is true: the hash covers ktables, engine-owned randomness,
 resources with field tables and the engine's pending state; other module state is the
 module's. Hashes move: re-record the replays.
 
 **2. Frame and Work may write module state the sim reads.** `check_cycle_writes` refuses
-writes to sim kinds only. Refusing writes to module state would split every module that
+writes to sim ktables only. Refusing writes to module state would split every module that
 has a presentation half (ui, krome, text) into two modules, which is all cost. Narrow the
-statement: Frame and Work never write sim kinds; their module's state is the module's to
+statement: Frame and Work never write sim ktables; their module's state is the module's to
 keep straight, and events are the way into the sim. cycles.md says so with an example.
 
 **3. Lua's `math.random` is seeded from the clock.** `luaopen_math` seeds from
@@ -125,7 +125,7 @@ in `frameloop/src/replay.cc` and the event bus; its own short design record firs
 
 **5. Prop handles and collision pairs depend on registration order.** Props hash handle
 bits with the kind id in them; columns already use the kind's name hash. Collision sorts
-pairs by raw handle bits while its resolve sorts tables by name. Both use the kind's name
+pairs by raw handle bits while its resolve sorts ktables by name. Both use the kind's name
 hash. Invisible to authors; moves hashes.
 
 ## 3. Your declarations are a contract
@@ -143,9 +143,9 @@ reasons people go around:
 - **Main-thread APIs check the thread.** ui, krome and the other main-thread-only
   functions get a dev check that the caller is on the main thread. That is the real
   hazard (a race), it costs a compare, and nobody declares anything.
-- **The context grows what people go around it for.** `ctx.live(kind)` (a read of the
-  kind's liveness) covers most of the reads arcfire does by hand. arcanum's const-cast
-  around `read_kind` goes once the context can do what it wanted.
+- **The context grows what people go around it for.** `ctx.live(ktable)` (a read of the
+  ktable's liveness) covers most of the reads arcfire does by hand. arcanum's const-cast
+  around `read_ktable` goes once the context can do what it wanted.
 - **Diagnostics move to the Frame cycle**, which may read anything and runs when nothing
   else does: arcfire's `.stats` and `.stats_mark` lose their undeclared reads by moving,
   with no declarations added.
@@ -249,7 +249,7 @@ To match the decisions above, once they're made:
 - `asset/texture.h` stops recommending `ctx.events->read`, which dev builds refuse;
   arcfire's `stats.cc` comment stops saying it runs after the extract.
 - principles.md, the author's to change; proposed:
-  - 1: the hash covers kinds, engine-owned randomness, resources with field tables and the
+  - 1: the hash covers ktables, engine-owned randomness, resources with field tables and the
     engine's pending state.
   - 2: "declared, or registered in `engine_init`"; constinit guards the tables, the
     toolchain guards the rest (10).
@@ -302,7 +302,7 @@ Nov 19, 2026, on `docs-foundation`, rebased onto Krome slice 6. Item by item:
   from its name and `EngineConfig::seed` (`--seed N`, kept in recordings), seeded again by
   `engine_sim_reset`, refused in dev to `StateUse::Read`/`None` units and parallel
   chunks. A stream counts in the hash once drawn from, so a module that never draws (or
-  an empty one) adds nothing, as an empty kind adds nothing (the hash test pins that).
+  an empty one) adds nothing, as an empty ktable adds nothing (the hash test pins that).
   `ResourceDesc::fields` hashes a published resource; `engine_publish` checks it is plain
   data the table fits. The timer wheel (each record's tick, type and event through its
   schema; never the emitter pointer, nor the ticket, which carries the issuing unit's
@@ -319,7 +319,7 @@ Nov 19, 2026, on `docs-foundation`, rebased onto Krome slice 6. Item by item:
   has the lower handle bits" is a contract games read, and two differently built games
   are not promised one hash.
 - **6. Done.** scheduling.md and modules.md say what is checked (accesses through the
-  context). `ctx.live(kind)`. `engine_check_main_thread`, called where every `ui_`
+  context). `ctx.live(ktable)`. `engine_check_main_thread`, called where every `ui_`
   function passes. arcanum's `react` goes through the context instead of a const-cast
   table and three writes made to please the checker (its demo hashes the same tick for
   tick, 1,073 ticks compared). arcfire's `.stats` stays a

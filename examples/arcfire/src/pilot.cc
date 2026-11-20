@@ -88,7 +88,7 @@ struct Plan { vec2 move{0, 0}; bool focus = false; bool trapped = false; };
 // ring grazes it. `want` is the weapons the pilot would switch to (bits).
 Plan steer_rule(TickContext& ctx, const Game& g, f32 clear, u32 want) {
     Plan plan;
-    const Table* ships = ctx.read_kind(g_ship_kind);
+    const KTable* ships = ctx.read_ktable(g_ship_ktable);
     const Transform2* sx = ships->get<Transform2>(g.ship);
     const Ship* ship = ships->get<Ship>(g.ship);
     if (!sx || !ship) return plan;
@@ -101,9 +101,9 @@ Plan steer_rule(TickContext& ctx, const Game& g, f32 clear, u32 want) {
     // cannot outrun, or several from sides that cancel, is a trap.
     vec2 threat_sum{0, 0};
     u32 threats = 0;
-    const u32 kinds[] = {g_bullet_kind, g_active_kind};
-    for (u32 kind : kinds) {
-        const Table* bullets_table = ctx.read_kind(kind);
+    const u32 ktables[] = {g_bullet_ktable, g_active_ktable};
+    for (u32 ktable : ktables) {
+        const KTable* bullets_table = ctx.read_ktable(ktable);
         Span<const Transform2> bt = bullets_table->rows_of<Transform2>();
         Span<const Velocity> bv = bullets_table->rows_of<Velocity>();
         for (u32 i = 0; i < bullets_table->rows(); ++i) {
@@ -131,7 +131,7 @@ Plan steer_rule(TickContext& ctx, const Game& g, f32 clear, u32 want) {
     }
     if (threats >= 3 && length(threat_sum) < 0.5f * (f32)threats) plan.trapped = true;
     // Items: the nearest worth having that has not fallen past; an unwanted weapon kept off.
-    const Table* items_table = ctx.read_kind(g_item_kind);
+    const KTable* items_table = ctx.read_ktable(g_item_ktable);
     Span<const Transform2> ix = items_table->rows_of<Transform2>();
     Span<const Item> iv = items_table->rows_of<Item>();
     f32 item_d = 1e9f;
@@ -155,7 +155,7 @@ Plan steer_rule(TickContext& ctx, const Game& g, f32 clear, u32 want) {
         f32 rank = iv[i].kind == ItemWeapon ? dist * 0.5f : prized ? dist * 0.75f : dist; // a weapon, then the prized
         if (d.y > -10.0f && (prized || dist < kSeek) && rank < item_d) { item_d = rank; item_at = ix[i].position; item_prized = prized; }
     }
-    const Table* air = ctx.read_kind(g_air_kind);
+    const KTable* air = ctx.read_ktable(g_air_ktable);
     Span<const Transform2> at = air->rows_of<Transform2>();
     f32 nearest = 1e9f, aim_x = 0.0f;
     for (u32 i = 0; i < air->rows(); ++i) {
@@ -165,7 +165,7 @@ Plan steer_rule(TickContext& ctx, const Game& g, f32 clear, u32 want) {
         if (dist < 90.0f && dist > 0.01f) push += d * ((1.0f - dist / 90.0f) / dist);
         if (at[i].position.y > p.y + 60.0f && in_field(at[i].position, -20.0f) && kv::fabs(d.x) < nearest) { nearest = kv::fabs(d.x); aim_x = at[i].position.x; }
     }
-    const Table* ground = ctx.read_kind(g_ground_kind);
+    const KTable* ground = ctx.read_ktable(g_ground_ktable);
     Span<const Transform2> gt = ground->rows_of<Transform2>();
     for (u32 i = 0; i < ground->rows(); ++i)
         if (ground->is_alive(i) && gt[i].position.y > p.y + 60.0f && kv::fabs(gt[i].position.x - p.x) < nearest) {
@@ -175,8 +175,8 @@ Plan steer_rule(TickContext& ctx, const Game& g, f32 clear, u32 want) {
     // A boss: the lowest of its open parts that end its phase is the target, ahead of
     // anything else (the lowest open part, if none of those can be reached); its hull is to
     // be kept off.
-    const Table* boss_table = ctx.read_kind(g_boss_kind);
-    const Table* parts = ctx.read_kind(g_part_kind);
+    const KTable* boss_table = ctx.read_ktable(g_boss_ktable);
+    const KTable* parts = ctx.read_ktable(g_part_ktable);
     Span<const Transform2> px = parts->rows_of<Transform2>();
     Span<const Part> pp = parts->rows_of<Part>();
     Span<const Health> ph = parts->rows_of<Health>();
@@ -248,7 +248,7 @@ Plan steer(TickContext& ctx, Game& g, f32 clear, u32 want) {
 // Whether a boss is up; `keep`, whether one is in its last ticks before the stomp (a bomb
 // is kept back for it).
 bool boss_up(TickContext& ctx, const Game& g, bool* keep) {
-    const Table* bt = ctx.read_kind(g_boss_kind);
+    const KTable* bt = ctx.read_ktable(g_boss_ktable);
     Span<const Boss> bb = bt->rows_of<Boss>();
     bool up = false;
     *keep = false;
@@ -286,7 +286,7 @@ void demo(TickContext& ctx) {
     if (g.stage_at != 0) { // Orbit's demo: no script, the rule throughout, a bomb when the core opens
         input_action_override(e, "shot", true);
         if (!g.demo_core_bomb) {
-            const Table* bt = ctx.read_kind(g_boss_kind);
+            const KTable* bt = ctx.read_ktable(g_boss_ktable);
             Span<const Boss> bb = bt->rows_of<Boss>();
             for (u32 i = 0; i < bt->rows(); ++i)
                 if (bt->is_alive(i) && !strcmp(g.bosses[bb[i].def].name, "station") && bb[i].phase + 1 == g.bosses[bb[i].def].phase_count &&
@@ -295,20 +295,20 @@ void demo(TickContext& ctx) {
                     g.demo_core_bomb = true;
                 }
         }
-        const Stage* os = ctx.read_kind(g_world_kind)->get<Stage>(g.world);
+        const Stage* os = ctx.read_ktable(g_world_ktable)->get<Stage>(g.world);
         u32 want = bit(WeaponSpread);
         for (const Want& w : k_orbit_wants)
             if (os && stage_clock(*os) >= w.from) want = w.weapons;
         fly(e, steer(ctx, g, kClear, want));
         return;
     }
-    const Run* r = ctx.read_kind(g_world_kind)->get<Run>(g.world);
+    const Run* r = ctx.read_ktable(g_world_ktable)->get<Run>(g.world);
     bool standing = t >= kStandFrom && r && r->deaths == 0; // holding fire, so the enemies live to shoot
     if (!standing) input_action_override(e, "shot", true);
     for (const Step& s : k_script)
         if (t >= s.from && t < s.to) input_action_override(e, s.action, true, vec2{s.x, s.y});
     if (!g.demo_core_bomb) { // the carrier's core open: a bomb, once
-        const Table* bt = ctx.read_kind(g_boss_kind);
+        const KTable* bt = ctx.read_ktable(g_boss_ktable);
         Span<const Boss> bb = bt->rows_of<Boss>();
         for (u32 i = 0; i < bt->rows(); ++i) {
             if (!bt->is_alive(i)) continue;
@@ -319,7 +319,7 @@ void demo(TickContext& ctx) {
             }
         }
     }
-    const Table* world = ctx.read_kind(g_world_kind);
+    const KTable* world = ctx.read_ktable(g_world_ktable);
     const Stage* st = world->get<Stage>(g.world);
     u32 want = bit(WeaponSpread);
     for (const Want& w : k_demo_wants)
@@ -347,8 +347,8 @@ void bot(TickContext& ctx) {
     // A bomb, to live: when the hitbox is about to be hit whatever the stick does, or the
     // bullets crowd in; one kept back for a stomp to come (not under stress: the ship
     // cannot die there, and the stress wants the bullets).
-    const Run* r = ctx.read_kind(g_world_kind)->get<Run>(g.world);
-    const Table* ships = ctx.read_kind(g_ship_kind);
+    const Run* r = ctx.read_ktable(g_world_ktable)->get<Run>(g.world);
+    const KTable* ships = ctx.read_ktable(g_ship_ktable);
     const Ship* s = ships->get<Ship>(g.ship);
     const Transform2* sx = ships->get<Transform2>(g.ship);
     if (dials[0].invulnerable == 1 || !r || r->bombs <= (keep ? 1 : 0) || !s || !s->live || s->guard || !sx) return;
@@ -357,9 +357,9 @@ void bot(TickContext& ctx) {
         return;
     }
     u32 close = 0;
-    const u32 kinds[] = {g_bullet_kind, g_active_kind};
-    for (u32 kind : kinds) {
-        const Table* t = ctx.read_kind(kind);
+    const u32 ktables[] = {g_bullet_ktable, g_active_ktable};
+    for (u32 ktable : ktables) {
+        const KTable* t = ctx.read_ktable(ktable);
         Span<const Transform2> bt = t->rows_of<Transform2>();
         Span<const Velocity> bv = t->rows_of<Velocity>();
         for (u32 i = 0; i < t->rows() && close <= kCrowd; ++i) { // past kCrowd is past either
@@ -368,7 +368,7 @@ void bot(TickContext& ctx) {
             if (length_sq(d) < 80.0f * 80.0f && dot(bv[i].v, d) > 0.0f) ++close;
         }
     }
-    if (close > (ctx.read_kind(g_boss_kind)->live() ? kBossCrowd : kCrowd)) input_action_override(e, "bomb", true);
+    if (close > (ctx.read_ktable(g_boss_ktable)->live() ? kBossCrowd : kCrowd)) input_action_override(e, "bomb", true);
 }
 
 } // namespace kv::arcfire

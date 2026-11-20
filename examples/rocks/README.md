@@ -1,6 +1,6 @@
 # rocks
 
-An asteroids-like, written the way the engine would like a game written: seven kinds, seven
+An asteroids-like, written the way the engine would like a game written: seven ktables, seven
 systems with declared sets, twelve handlers, scheduled events for bullet expiry and waves,
 a trigger for the ship's death, a published score, and no handle kept anywhere except on
 the events that carry them. The ship flies from the keyboard or the first gamepad, or
@@ -32,17 +32,17 @@ every module and example and `kormake test` runs every suite.
 
 ## How the game is built
 
-**Kinds.** `ship` (1: `Transform2`, `Sprite`, `Velocity`, `Health`, `Collider2`, `Ship`),
+**KTables.** `ship` (1: `Transform2`, `Sprite`, `Velocity`, `Health`, `Collider2`, `Ship`),
 `bullet` (4096), `rock` (1024, three sizes by `RockSize`), `debris` (8192, with an
 `AnimPlayer` that fades it), `flame` (a child of the ship, cosmetic), `overlay` (the
-pause dimmer) and `label` (the HUD and the banners). Every kind but `label` has
+pause dimmer) and `label` (the HUD and the banners). Every ktable but `label` has
 `Transform2` and `Sprite`, so the sprite module draws them; the first three have
 `Collider2`, so the collision module tests them, on layers `ship`, `bullet` and `rock`
 with masks that give ship-rock and bullet-rock pairs and nothing else.
 
 **Systems.** In Sim: `control` reads `input.state` and writes the ship, the flame and the
-bullet kind (it fires by direct spawn, holding the write, and schedules each bullet's
-`Expire` 72 ticks out); it says `before = move`. `move` integrates every kind with
+bullet ktable (it fires by direct spawn, holding the write, and schedules each bullet's
+`Expire` 72 ticks out); it says `before = move`. `move` integrates every ktable with
 `Velocity` in a `parallel_for`; `wrap` keeps everything on the field, `after = move`, since
 both write `*.Transform2`; `game` starts the first game. `move` and `wrap` declare
 `StateUse::None`, so they share levels instead of serializing on the module's state.
@@ -58,8 +58,8 @@ Around it: `pause` (PreSim, `Always`) toggles the pause, `camera` (PostSim) shak
 camera, `hud` (PostSim, `Always`) rewrites the HUD label.
 
 **The cascade.** `OverlapBegin` from the collision module arrives at a boundary;
-`on_overlap` sorts the pair by kind into `RockHit` or `ShipHit`. `on_rock_hit` (writes the
-rock kind and the score) destroys the bullet, splits the rock into two smaller ones by
+`on_overlap` sorts the pair by ktable into `RockHit` or `ShipHit`. `on_rock_hit` (writes the
+rock ktable and the score) destroys the bullet, splits the rock into two smaller ones by
 direct spawn, spawns debris by command, and emits `ScoreChanged`, which is a next-tick
 event so nobody reacts to it within the tick. That is three waves in one tick, and a
 bullet that hit two rocks is destroyed once: the second `RockHit` names a dead bullet and
@@ -71,7 +71,7 @@ ticket the game cancels at game over so a wave does not land on a dead ship; the
 
 **The trigger.** `rocks.death` watches `rocks.ship.Health.hp` crossing
 below 1; `on_edge` turns the `StateEdge` into `GameOver` handling: cancel the wave,
-schedule the restart, log the score. `on_restart` clears the kinds with `destroy_all` and
+schedule the restart, log the score. `on_restart` clears the ktables with `destroy_all` and
 starts over.
 
 **The score** is a struct the module publishes (`engine_publish`) as
@@ -86,7 +86,7 @@ debris are additive dots.
 | file | what |
 |---|---|
 | `src/main.cc` | the `FrameLoopConfig` (1280x720, the `--demo` flag, a `game` heap of 16/64 MB) |
-| `src/game.cc` | components, kinds, events, the trigger, the score, systems, handlers, startup, the tables |
+| `src/game.cc` | components, ktables, events, the trigger, the score, systems, handlers, startup, the tables |
 | `assets/ship.png`, `rock.png`, `dot.png`, `white.png`, `flame.png`, `*.material.json` | the art (generated) and the looks |
 | `assets/flame.anim.json` | the flame's clip: a two-frame flipbook and a scale wobble |
 | `assets/*.wav` | the sounds (generated: a saw sweep, two noise bursts, a loop with its ends cross-faded) |
@@ -100,10 +100,10 @@ debris are additive dots.
   print the same sequence.
 - **Pause is a system, not a flag.** `rocks.pause` runs on every tick
   (`RunWhen::Always`, phase PreSim): it watches `KeyDown` and `PadButtonDown`, spawns a
-  screen-space dimmer in the `overlay` kind and calls `engine_pause`. Nothing else in the
+  screen-space dimmer in the `overlay` ktable and calls `engine_pause`. Nothing else in the
   game knows about pausing: the sim systems simply do not run, the timers hold, and the
   extract keeps drawing.
-- **Text is a kind of its own.** `label` rows carry a `Text` and a `Label` role: the HUD
+- **Text has a ktable of its own.** `label` rows carry a `Text` and a `Label` role: the HUD
   (rewritten every tick by `hud`, an `Always` system, from the published score; the text
   module relays out only when the string changes), the pause banner (spawned and
   destroyed by `pause`) and the game-over banner (spawned by `on_edge`, cleared by
@@ -116,7 +116,7 @@ debris are additive dots.
   directory (`platform_pref_path(engine, "korvid", "rocks")`) and queues a read of
   `highscore.txt` there (`highscore-demo.txt` under `--demo`, so a scripted run never
   touches a player's record); `files` (PreSim, main thread, `Always`) reaps it when it
-  arrives, and `on_edge` queues a write when a game ends above it. The `label` kind is
+  arrives, and `on_edge` queues a write when a game ends above it. The `label` ktable is
   cosmetic, so the HIGH figure on the HUD cannot move the hash.
 - **Sounds.** Four generated WAVs at 22 kHz (`shot`, `break`, `boom`, `thrust`), loaded
   at startup. `control` plays a shot per bullet with a random pitch and a pan from the
@@ -126,11 +126,11 @@ debris are additive dots.
   pause with the sim, so the resume is heard too. Every caller declares `appends` on
   `audio.commands`: the calls are requests applied at the boundary in unit order, and need
   no order between callers.
-- **The flame is a child with a flipbook.** The `flame` kind has `Local2`, `Parent` and
+- **The flame is a child with a flipbook.** The `flame` ktable has `Local2`, `Parent` and
   an `AnimPlayer`; `on_spawned` gives each new ship one, 30 units behind it, playing
   `flame.anim.json` (two frames of a sheet at 12 fps and a scale wobble on its `Local2`),
   and the scene module keeps it there and destroys it with the ship. `control` only sets
-  its alpha from the thrust. The kind is cosmetic: the clip comes from a file and starts
+  its alpha from the thrust. The ktable is cosmetic: the clip comes from a file and starts
   when the file arrives, which is not a tick the hash may depend on.
 - **Debris fades by clip.** There is no `Lifetime` and no fade system any more: each
   piece plays `rocks.fade`, a one-second alpha ramp built at startup with
@@ -144,6 +144,6 @@ debris are additive dots.
   module and category and the game keeps running.
 - **Debris is sim state here**, so its fading is hashed: the `AnimPlayer` time advances
   on the tick and the clip is built at startup, so two runs agree. The flame, whose clip
-  arrives from a file, is a cosmetic kind for exactly that reason.
+  arrives from a file, is a cosmetic ktable for exactly that reason.
 - **Rendering artifacts seen in slice 2** (sprites of the same layer swapping order)
   were the old CPU sort; the slice 3 renderer draws equal layers in slot order.

@@ -34,7 +34,7 @@ goldberg is a Lua application running on a thin layer of C++ primitives. C++ app
 
 **C++ layer**
 
-- A pool type exposed to Lua. Kinds are declared in C++, which owns the kind layout (field types, offsets, packing); Lua owns everything else that the pool holds and does.
+- A pool type exposed to Lua. Its ktables are declared in C++, which owns their layout (field types, offsets, packing); Lua owns everything else that the pool holds and does.
 - Engine I/O: async, event-driven, one abstraction across files, sockets, and processes.
 - Engine UI and rendering, for goldberg's own windows and previews.
 - Hashing, process spawning, filesystem watch.
@@ -157,7 +157,7 @@ Start order: the solver and the converters need no UI, so goldberg starts headle
 ## Open questions
 
 - [ ] Game-supplied converters: decided, separate converter processes over the monitor protocol.
-- [ ] Pool kinds: decided, declared in C++ and exposed to Lua.
+- [ ] Pool ktables: decided, declared in C++ and exposed to Lua.
 - [ ] Declaration format: Lua tables, a data format, or both?
 - [ ] Tag precedence: does an explicit tag override inherited tags, or add to them?
 - [ ] Purity policy for external tools: which nondeterminism gets normalized, and which just invalidates?

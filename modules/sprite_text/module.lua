@@ -1,4 +1,4 @@
--- Outer engine: text drawn as sprites. A Text component on any kind with a Transform2 is
+-- Outer engine: text drawn as sprites. A Text component on any ktable with a Transform2 is
 -- laid out as glyph sprites, children of the label through the scene module, from a font
 -- asset's atlas.
 module "sprite_text" {

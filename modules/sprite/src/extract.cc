@@ -7,22 +7,22 @@
 namespace kv {
 
 void ExtractState::free() {
-    for (ExtractTable& t : tables) { t.sent.free(); t.sent_sprites.free(); t.sent_placements.free(); }
-    tables.free();
+    for (ExtractKTable& t : ktables) { t.sent.free(); t.sent_sprites.free(); t.sent_placements.free(); }
+    ktables.free();
 }
 
 namespace {
 
-bool is_sprite_table(const Table& t) { return t.has(ComponentType<Transform2>::id) && t.has(ComponentType<Sprite>::id); }
+bool is_sprite_ktable(const KTable& t) { return t.has(ComponentType<Transform2>::id) && t.has(ComponentType<Sprite>::id); }
 
 // More than one tick since the last extract: every sprite the renderer knows whose previous
 // copy (where it was when the last tick began) is not what the renderer was told goes
 // there first, at once, so the last tick's motion is all that is interpolated.
 void catch_up(Engine& e, ExtractState& st, Array<SpriteDelta>& out) {
-    for (Table& table : e.tables) {
-        if (!is_sprite_table(table) || table.index >= st.tables.len) continue;
+    for (KTable& table : e.ktables) {
+        if (!is_sprite_ktable(table) || table.index >= st.ktables.len) continue;
         if (table.desc && table.desc->still) continue; // its rows do not move
-        ExtractTable& et = st.tables[table.index];
+        ExtractKTable& et = st.ktables[table.index];
         Span<const Transform2> prev = table.prev_rows_of<Transform2>();
         u32 n = et.sent.len < table.rows() ? et.sent.len : table.rows();
         for (u32 i = 0; i < n; ++i) {
@@ -94,17 +94,17 @@ void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<Sp
         out.reserve(st.rows_hint * 2);
     }
 
-    Allocator* alloc = st.tables.alloc;
-    while (st.tables.len < e.tables.len) {
-        ExtractTable et;
+    Allocator* alloc = st.ktables.alloc;
+    while (st.ktables.len < e.ktables.len) {
+        ExtractKTable et;
         et.sent.alloc = et.sent_sprites.alloc = et.sent_placements.alloc = alloc;
-        st.tables.push(et);
+        st.ktables.push(et);
     }
 
-    for (Table& table : e.tables) {
-        if (!is_sprite_table(table)) continue;
-        ExtractTable& et = st.tables[table.index];
-        // A still kind (a map's tiles): nothing to look at unless rows came or went.
+    for (KTable& table : e.ktables) {
+        if (!is_sprite_ktable(table)) continue;
+        ExtractKTable& et = st.ktables[table.index];
+        // A still ktable (a map's tiles): nothing to look at unless rows came or went.
         bool still = table.desc && table.desc->still;
         if (still && table.churn == et.seen_churn) continue;
         et.seen_churn = table.churn;
@@ -129,7 +129,7 @@ void extract_sprites(Engine& e, ExtractState& st, SpriteLayers* layers, Array<Sp
         Span<const Sprite>     spr  = table.rows_of<Sprite>();
 
         // Removes first: a slot the renderer knows whose entity died or was replaced, past
-        // the table's rows too (a table restored to fewer slots, a fresh sim's to none).
+        // the ktable's rows too (a ktable restored to fewer slots, a fresh sim's to none).
         for (u32 i = 0; i < et.sent.len; ++i) {
             Handle sent = et.sent[i];
             if (sent.is_null()) continue;

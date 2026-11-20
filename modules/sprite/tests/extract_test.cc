@@ -6,9 +6,9 @@
 
 namespace {
 using namespace kv;
-// A still kind: rows that never change once spawned (a map's tiles).
-constinit const KindDesc k_still_kinds[] = {{.name = ".tile", .components = "Transform2, Sprite", .capacity = 64, .still = true}};
-KV_MODULE_DEFINE(k_still) = {.name = "still", .kinds = k_still_kinds};
+// A still ktable: rows that never change once spawned (a map's tiles).
+constinit const KTableDesc k_still_ktables[] = {{.name = ".tile", .components = "Transform2, Sprite", .capacity = 64, .still = true}};
+KV_MODULE_DEFINE(k_still) = {.name = "still", .ktables = k_still_ktables};
 } // namespace
 
 static kv::u32 count_kind(const kv::Array<kv::SpriteDelta>& d, kv::SpriteDeltaKind k) {
@@ -25,7 +25,7 @@ void test_extract(kv::TestCtx& c) {
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     SpriteWorld& w = *sprite_world(e);
-    Table& t = *w.table;
+    KTable& t = *w.ktable;
     ExtractState st;
 
     Sprite s0; s0.layer = 1; s0.tint = color_red(); s0.size = vec2{32, 16};
@@ -187,7 +187,7 @@ void test_extract_still(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&sprite_module, &k_still};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table& t = *engine_table(e, "still.tile");
+    KTable& t = *engine_ktable(e, "still.tile");
     ExtractState st;
     Array<SpriteDelta> out;
     Sprite s0; s0.layer = -16;
@@ -198,8 +198,8 @@ void test_extract_still(kv::TestCtx& c) {
     extract_sprites(e, st, nullptr, out);
     KV_CHECK(c, count_kind(out, SpriteDeltaKind::Set) == 2);
 
-    // A still kind's rows are not looked at again: a change to a living row is not seen
-    // (the contract), and with nothing born or dead the table is skipped whole.
+    // A still ktable's rows are not looked at again: a change to a living row is not seen
+    // (the contract), and with nothing born or dead the ktable is skipped whole.
     t.get<Transform2>(a)->position = point2{99, 99};
     out.clear();
     extract_sprites(e, st, nullptr, out);
@@ -220,7 +220,7 @@ void test_extract_still(kv::TestCtx& c) {
     KV_CHECK(c, t.prev<Transform2>(d)->position == point2{32, 0});
 
     // A restore (a save loaded) gives back the same handles with values that may differ:
-    // the next extract compares every row once, as for any kind.
+    // the next extract compares every row once, as for any ktable.
     u32 gens[8], unused[8], nf = 0, n = t.rows();
     for (u32 i = 0; i < n; ++i) gens[i] = t.slots.gens[i];
     t.slots.each_free([&](u32 i) { unused[nf++] = i; });

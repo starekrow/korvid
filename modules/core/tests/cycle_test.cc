@@ -4,7 +4,7 @@
 // while the sim is paused, every Work unit once a cycle with the time left, streams
 // trimmed without ticks.
 #include "korvid/core/engine.h"
-#include "korvid/core/kind.h"
+#include "korvid/core/ktable.h"
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
 
@@ -15,7 +15,7 @@ using namespace kv;
 struct Spark { i32 n; };
 constinit const FieldDesc k_spark_fields[] = {KV_FIELDS(Spark, n)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Spark, k_spark_fields, 0)};
-constinit const KindDesc k_kinds[] = {{.name = ".spark", .components = "Spark", .capacity = 64, .cosmetic = true}};
+constinit const KTableDesc k_ktables[] = {{.name = ".spark", .components = "Spark", .capacity = 64, .cosmetic = true}};
 
 struct Ticked { u64 tick; };
 struct Drawn { u32 frame; };
@@ -53,7 +53,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".work", .phase = Phase::Work, .fn = sys_work, .main_thread = true},
     {.name = ".other", .phase = Phase::Work, .fn = sys_other, .main_thread = true},
 };
-KV_MODULE_DEFINE(k_cy) = {.name = "cy", .events = k_events, .components = k_components, .kinds = k_kinds, .systems = k_systems};
+KV_MODULE_DEFINE(k_cy) = {.name = "cy", .events = k_events, .components = k_components, .ktables = k_ktables, .systems = k_systems};
 
 } // namespace
 
@@ -73,7 +73,7 @@ void test_cycles(kv::TestCtx& c) {
     engine_frame_cycle(e, 0.016);
     KV_CHECK(c, g.frames == 1 && g.frame_got_ticks == 3 && g.last_frame_dt == 0.016);
     // Its spawn applied at its boundary; its event reaches the Sim at the next tick.
-    KV_CHECK(c, engine_table(e, "cy.spark")->live() == 1);
+    KV_CHECK(c, engine_ktable(e, "cy.spark")->live() == 1);
     engine_frame(e, dt);
     KV_CHECK(c, g.sim_got_draws == 1 && g.ticks == 4);
     engine_frame_cycle(e, 0.016);
@@ -126,34 +126,34 @@ namespace {
 
 using namespace kv;
 
-// A sim kind and a cosmetic one, and units in the Frame and Work cycles that reach for them.
+// A sim ktable and a cosmetic one, and units in the Frame and Work cycles that reach for them.
 struct Hp { i32 n; };
 struct Glow { i32 n; };
 constinit const FieldDesc k_hp_fields[] = {KV_FIELDS(Hp, n)};
 constinit const FieldDesc k_glow_fields[] = {KV_FIELDS(Glow, n)};
 constinit const ComponentDesc k_sim_components[] = {KV_COMPONENT(Hp, k_hp_fields, 0), KV_COMPONENT(Glow, k_glow_fields, 0)};
-constinit const KindDesc k_sim_kinds[] = {
+constinit const KTableDesc k_sim_ktables[] = {
     {.name = ".unit", .components = "Hp", .capacity = 16},
     {.name = ".fx", .components = "Glow", .capacity = 16, .cosmetic = true},
 };
 void sys_nothing(TickContext&) {}
 
 constinit const SystemDesc k_frame_writes_column[] = {{.name = ".bad", .phase = Phase::Frame, .fn = sys_nothing, .writes = ".unit.Hp"}};
-constinit const SystemDesc k_work_writes_kind[] = {{.name = ".bad", .phase = Phase::Work, .fn = sys_nothing, .writes = ".unit"}};
+constinit const SystemDesc k_work_writes_ktable[] = {{.name = ".bad", .phase = Phase::Work, .fn = sys_nothing, .writes = ".unit"}};
 constinit const SystemDesc k_frame_writes_fx[] = {{.name = ".fine", .phase = Phase::Frame, .fn = sys_nothing, .writes = ".fx"}};
 constinit const SystemDesc k_sim_writes_unit[] = {{.name = ".fine", .phase = Phase::Sim, .fn = sys_nothing, .writes = ".unit"}};
-KV_MODULE_DEFINE(k_m1) = {.name = "m1", .components = k_sim_components, .kinds = k_sim_kinds, .systems = k_frame_writes_column};
-KV_MODULE_DEFINE(k_m2) = {.name = "m2", .components = k_sim_components, .kinds = k_sim_kinds, .systems = k_work_writes_kind};
-KV_MODULE_DEFINE(k_m3) = {.name = "m3", .components = k_sim_components, .kinds = k_sim_kinds, .systems = k_frame_writes_fx};
-KV_MODULE_DEFINE(k_m4) = {.name = "m4", .components = k_sim_components, .kinds = k_sim_kinds, .systems = k_sim_writes_unit};
+KV_MODULE_DEFINE(k_m1) = {.name = "m1", .components = k_sim_components, .ktables = k_sim_ktables, .systems = k_frame_writes_column};
+KV_MODULE_DEFINE(k_m2) = {.name = "m2", .components = k_sim_components, .ktables = k_sim_ktables, .systems = k_work_writes_ktable};
+KV_MODULE_DEFINE(k_m3) = {.name = "m3", .components = k_sim_components, .ktables = k_sim_ktables, .systems = k_frame_writes_fx};
+KV_MODULE_DEFINE(k_m4) = {.name = "m4", .components = k_sim_components, .ktables = k_sim_ktables, .systems = k_sim_writes_unit};
 
 struct Ping2 { u32 n; };
 constinit const EventTypeDesc k_ping_events[] = {KV_EVENT(Ping2)};
 void on_ping_frame(TickContext&, Span<const Ping2>) {}
 constinit const HandlerDesc k_frame_handler[] = {{.name = ".on", KV_ON(Ping2, on_ping_frame), .phase = Phase::Frame, .writes = ".unit.Hp"}};
-KV_MODULE_DEFINE(k_m5) = {.name = "m5", .events = k_ping_events, .components = k_sim_components, .kinds = k_sim_kinds, .handlers = k_frame_handler};
+KV_MODULE_DEFINE(k_m5) = {.name = "m5", .events = k_ping_events, .components = k_sim_components, .ktables = k_sim_ktables, .handlers = k_frame_handler};
 
-// At run time: what a Frame unit may not do by command, and may do to a cosmetic kind.
+// At run time: what a Frame unit may not do by command, and may do to a cosmetic ktable.
 struct Tried { Handle unit; bool done; };
 constinit Tried g_try = {};
 void sys_frame_commands(TickContext& ctx) {
@@ -166,7 +166,7 @@ void sys_frame_commands(TickContext& ctx) {
     ctx.schedule(Ping2{1}, ctx.tick + 3);
 }
 constinit const SystemDesc k_rt_systems[] = {{.name = ".cmds", .phase = Phase::Frame, .fn = sys_frame_commands, .main_thread = true}};
-KV_MODULE_DEFINE(k_rt) = {.name = "rt", .events = k_ping_events, .components = k_sim_components, .kinds = k_sim_kinds, .systems = k_rt_systems};
+KV_MODULE_DEFINE(k_rt) = {.name = "rt", .events = k_ping_events, .components = k_sim_components, .ktables = k_sim_ktables, .systems = k_rt_systems};
 
 bool starts(const ModuleDesc* m) {
     const ModuleDesc* const list[] = {m};
@@ -181,21 +181,21 @@ bool starts(const ModuleDesc* m) {
 void test_cycles_leave_the_sim(kv::TestCtx& c) {
     using namespace kv;
     c.begin("cycles leave the sim");
-    // Refused at startup: a column of a sim kind, a sim kind whole, from a handler too.
+    // Refused at startup: a column of a sim ktable, a sim ktable whole, from a handler too.
     KV_CHECK(c, !starts(&k_m1) && !starts(&k_m2) && !starts(&k_m5));
-    // Allowed: a cosmetic kind from Frame; a sim kind from the Sim.
+    // Allowed: a cosmetic ktable from Frame; a sim ktable from the Sim.
     KV_CHECK(c, starts(&k_m3) && starts(&k_m4));
 
     g_try = Tried{};
     const ModuleDesc* const list[] = {&k_rt};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    g_try.unit = engine_table(e, "rt.unit")->spawn(Hp{5});
+    g_try.unit = engine_ktable(e, "rt.unit")->spawn(Hp{5});
     u64 timers = e.timers.fired;
     engine_frame_cycle(e, 0.016);
-    // The sim's kind untouched (no spawn, no destroy), the cosmetic spawn through, no timer.
-    KV_CHECK(c, engine_table(e, "rt.unit")->live() == 1 && engine_table(e, "rt.unit")->valid(g_try.unit));
-    KV_CHECK(c, engine_table(e, "rt.fx")->live() == 1);
+    // The sim's ktable untouched (no spawn, no destroy), the cosmetic spawn through, no timer.
+    KV_CHECK(c, engine_ktable(e, "rt.unit")->live() == 1 && engine_ktable(e, "rt.unit")->valid(g_try.unit));
+    KV_CHECK(c, engine_ktable(e, "rt.fx")->live() == 1);
     engine_frame(e, e.clock.tick_dt * 5);
     KV_CHECK(c, e.timers.fired == timers);
     engine_shutdown(e);

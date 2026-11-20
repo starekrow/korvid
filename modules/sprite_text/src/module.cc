@@ -100,15 +100,15 @@ u32 sptext_layout_paragraph(const FontAsset& font, const Text& t, const char* st
 
 namespace {
 
-// What a label's glyphs were last built from, by table and slot: the entity and a hash
+// What a label's glyphs were last built from, by ktable and slot: the entity and a hash
 // of everything that shapes the glyphs. A label whose hash changed is rebuilt.
 struct LabelMark { Handle entity; u64 built; };
 struct LabelTable { Array<LabelMark> marks; };
 
 struct SptextState {
-    Array<LabelTable> tables; // by engine table index
+    Array<LabelTable> tables; // by engine ktable index
     SptextStats         stats;
-    u32               glyph_kind = 0;
+    u32               glyph_ktable = 0;
     Array<char*>      strings;  // paragraphs' strings, by Paragraph::string - 1; null: free
     Array<u32>        free_ids;
     Allocator*        alloc = nullptr;
@@ -139,17 +139,17 @@ void sptext_layout_system(TickContext& ctx) {
     KV_ZONE("sprite_text.layout");
     SptextState& st = ctx.state_as<SptextState>();
     Engine& e = *ctx.engine;
-    Table* glyphs = ctx.write_kind(st.glyph_kind);
+    KTable* glyphs = ctx.write_ktable(st.glyph_ktable);
     SptextStats s;
 
     Allocator* alloc = st.tables.alloc;
-    while (st.tables.len < e.tables.len) { LabelTable lt; lt.marks.alloc = alloc; st.tables.push(lt); }
+    while (st.tables.len < e.ktables.len) { LabelTable lt; lt.marks.alloc = alloc; st.tables.push(lt); }
 
     MemScope scope;
     Array<GlyphPlacement> places = array_in<GlyphPlacement>(mem_scratch());
-    for (KindRows k : ctx.view<const Text>()) {
-        if (k.table == glyphs) continue;
-        LabelTable& lt = st.tables[k.table->index];
+    for (KTableRows k : ctx.view<const Text>()) {
+        if (k.ktable == glyphs) continue;
+        LabelTable& lt = st.tables[k.ktable->index];
         lt.marks.resize_fill(k.rows(), LabelMark{});
         Span<const Text> texts = k.col<const Text>();
         Span<const Paragraph> paras = k.col<const Paragraph>();
@@ -210,7 +210,7 @@ void sptext_layout_system(TickContext& ctx) {
                     Local2 local = local2_at(at);
                     Transform2 placed = i < where.len ? placement_compose(where[i], local) : Transform2{};
                     Handle gh = glyphs->spawn(placed, spr, local, Parent{label});
-                    if (gh.is_null()) { KV_WARN("sprite_text", "glyph kind is full (%u rows)", glyphs->rows()); break; }
+                    if (gh.is_null()) { KV_WARN("sprite_text", "glyph ktable is full (%u rows)", glyphs->rows()); break; }
                     ++s.glyphs;
                 }
         }
@@ -224,9 +224,9 @@ bool sptext_startup(Engine& e, ModuleInstance& self) {
     s->tables.alloc = &self.general;
     s->strings.alloc = s->free_ids.alloc = &self.general;
     s->alloc = &self.general;
-    Table* glyphs = engine_table(e, "sprite_text.glyph");
+    KTable* glyphs = engine_ktable(e, "sprite_text.glyph");
     if (!glyphs) return false;
-    s->glyph_kind = glyphs->index + 1;
+    s->glyph_ktable = glyphs->index + 1;
     self.set_state(s);
     return true;
 }
@@ -245,7 +245,7 @@ constinit const FieldDesc k_text_fields[] = {KV_FIELDS(Text, font, str, scale, t
 constinit const FieldDesc k_paragraph_fields[] = {KV_FIELDS(Paragraph, string, shown)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Text, k_text_fields), KV_COMPONENT(Paragraph, k_paragraph_fields)};
 
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = ".label", .components = "Transform2, Text, Paragraph", .capacity = 4096},
     {.name = ".glyph", .components = "Transform2, Sprite, Local2, Parent", .capacity = 65536, .cosmetic = true},
 };
@@ -260,7 +260,7 @@ constinit const SystemDesc k_systems[] = {
 KV_MODULE_DEFINE(sprite_text_module) = {
     .name       = "sprite_text",
     .components = k_components,
-    .kinds      = k_kinds,
+    .ktables    = k_ktables,
     .systems    = k_systems,
     .startup    = sptext_startup,
     .shutdown   = sptext_shutdown,

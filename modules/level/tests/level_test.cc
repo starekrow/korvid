@@ -51,7 +51,7 @@ void on_build(TickContext& ctx, Span<const LevelBuild> es) {
         format(g.entry, sizeof g.entry, "%s", b.entry);
         g.built_at = ctx.engine->clock.tick_count;
         g.sim_while_loading += g.built_at - g.loading_at; // the sim stood still from the load to the build
-        Table* things = ctx.write_kind("lt.thing");
+        KTable* things = ctx.write_ktable("lt.thing");
         Parent p; p.parent = b.root;
         g.child = things->spawn(transform2_at(point2{0, 0}), local2_at(point2{1, 2}), p);
         if (b.level == 0) { // the town's two named stones, as a map would make them
@@ -63,7 +63,7 @@ void on_build(TickContext& ctx, Span<const LevelBuild> es) {
 void on_entered(TickContext&, Span<const LevelEntered> es) { g.entered += es.len; }
 void sim_count(TickContext&) { ++g.sim_ticks; }
 
-constinit const KindDesc k_kinds[] = {{.name = ".thing", .components = "Transform2, Local2, Parent", .capacity = 8}};
+constinit const KTableDesc k_ktables[] = {{.name = ".thing", .components = "Transform2, Local2, Parent", .capacity = 8}};
 constinit const HandlerDesc k_handlers[] = {
     {.name = ".leaving", KV_ON(LevelLeaving, on_leaving), .phase = Phase::Sim},
     {.name = ".loading", KV_ON(LevelLoading, on_loading), .phase = Phase::Sim},
@@ -71,7 +71,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".entered", KV_ON(LevelEntered, on_entered), .phase = Phase::Sim},
 };
 constinit const SystemDesc k_systems[] = {{.name = ".count", .phase = Phase::Sim, .fn = sim_count}};
-KV_MODULE_DEFINE(k_lt) = {.name = "lt", .kinds = k_kinds, .systems = k_systems, .handlers = k_handlers};
+KV_MODULE_DEFINE(k_lt) = {.name = "lt", .ktables = k_ktables, .systems = k_systems, .handlers = k_handlers};
 
 bool write(const char* dir, const char* name, const char* text) {
     char path[600];
@@ -126,7 +126,7 @@ void test_level(kv::TestCtx& c) {
     KV_CHECK(c, asset_scope_progress(e, level_scope(e)).members == 2 && level_root(e) == g.root);
     KV_CHECK(c, g.sim_while_loading == 0 && !e.clock.paused);
     Handle town_map = g.map, town_child = g.child, shared = g.shared;
-    KV_CHECK(c, engine_table_of(e, town_child) && engine_table_of(e, town_child)->is_alive(town_child.index()));
+    KV_CHECK(c, engine_ktable_of(e, town_child) && engine_ktable_of(e, town_child)->is_alive(town_child.index()));
 
     // A switch: the shared blob is one asset across both levels; the town's map retires;
     // the town's child goes with its root. No sim tick runs while held.
@@ -137,7 +137,7 @@ void test_level(kv::TestCtx& c) {
     until_active();
     KV_CHECK(c, level_current(e) == 1 && g.built == 2 && g.entered == 2 && strcmp(g.entry, "east gate") == 0);
     KV_CHECK(c, g.shared == shared && asset_refs(e, shared) == 1 && asset_blob(e, town_map) == nullptr);
-    KV_CHECK(c, !engine_table(e, "lt.thing")->valid(town_child) && engine_table(e, "lt.thing")->live() == 1);
+    KV_CHECK(c, !engine_ktable(e, "lt.thing")->valid(town_child) && engine_ktable(e, "lt.thing")->live() == 1);
     KV_CHECK(c, g.sim_while_loading == 0 && g.sim_ticks > sim_before);
 
     // Reload: the files are read again (a new map handle, the new text), the entry says so.
@@ -174,7 +174,7 @@ void test_level(kv::TestCtx& c) {
     KV_CHECK(c, level_persist(e, kept));
     KV_CHECK(c, level_request(e, "town", quick));
     until_active();
-    Table* things = engine_table(e, "lt.thing");
+    KTable* things = engine_ktable(e, "lt.thing");
     Handle a = engine_entity_find(e, "town#a"), b = engine_entity_find(e, "town#b");
     KV_CHECK(c, !a.is_null() && !b.is_null() && things->get<Local2>(a)->position.x == 10);
     things->get<Local2>(a)->position.x = 55;   // pushed

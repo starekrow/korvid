@@ -72,14 +72,14 @@ a cycle's bookkeeping. `platform.io_idle`, the I/O queue's idle reads, is a Work
 ## The rule: only the Sim writes the sim
 
 Frame and Work run as often as the machine allows, so nothing they do can appear in a
-replay. They may read any kind, and write cosmetic kinds, cosmetic components, their own
+replay. They may read any ktable, and write cosmetic ktables, cosmetic components, their own
 module's state and its resources. A module whose Frame or Work units feed its sim units
 through that state owns keeping it deterministic; events are the way in that the engine
 keeps straight. Beyond that:
 
-- a declared write that covers a sim kind (the kind, its liveness, a column, an
+- a declared write that covers a sim ktable (the ktable, its liveness, a column, an
   attachment, its bags) fails `engine_init`, naming the unit, its cycle and the resource;
-- a spawn, destroy or `destroy_all` into a sim kind, or any timer, is refused when issued
+- a spawn, destroy or `destroy_all` into a sim ktable, or any timer, is refused when issued
   and logged. These checks are always on, ship builds included.
 
 To affect the sim, a Frame or Work unit emits an event. To the simulation that event is

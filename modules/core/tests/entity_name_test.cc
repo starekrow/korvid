@@ -1,4 +1,4 @@
-// Entity names: unique among the living across kinds, set now from outside the schedule or
+// Entity names: unique among the living across ktables, set now from outside the schedule or
 // at the boundary by command, found by name and by handle, part of the hash, gone with the
 // entity, and answered through the handle registry (kv_handle_name, kv_handle_find).
 #include "korvid/core/engine.h"
@@ -13,7 +13,7 @@ using namespace kv;
 struct Spot { f32 x; };
 constinit const FieldDesc k_spot_fields[] = {KV_FIELD(Spot, x)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Spot, k_spot_fields)};
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = "n.villager", .components = "Spot", .capacity = 8},
     {.name = "n.rock",     .components = "Spot", .capacity = 8},
 };
@@ -23,7 +23,7 @@ u32    g_ticket = 0;
 
 // Sim: names one villager by command and spawns a named rock; the names land at the boundary.
 void sys_name(TickContext& ctx) {
-    const Table* v = ctx.read_kind("n.villager");
+    const KTable* v = ctx.read_ktable("n.villager");
     for (u32 i = 0; i < v->rows(); ++i)
         if (v->is_alive(i) && !engine_entity_name(*ctx.engine, v->handle_at(i))) { ctx.name_later(v->handle_at(i), "baker"); break; }
     g_named_by_command = engine_entity_find(*ctx.engine, "baker"); // not yet
@@ -33,7 +33,7 @@ void sys_name(TickContext& ctx) {
 constinit const SystemDesc k_systems[] = {
     {.name = "n.name", .phase = Phase::Sim, .fn = sys_name, .reads = "n.villager", .writes = "n.rock"},
 };
-KV_MODULE_DEFINE(k_n) = {.name = "n", .components = k_components, .kinds = k_kinds, .systems = k_systems};
+KV_MODULE_DEFINE(k_n) = {.name = "n", .components = k_components, .ktables = k_ktables, .systems = k_systems};
 
 } // namespace
 
@@ -43,8 +43,8 @@ void test_entity_name(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&k_n};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* villagers = engine_table(e, "n.villager");
-    Table* rocks = engine_table(e, "n.rock");
+    KTable* villagers = engine_ktable(e, "n.villager");
+    KTable* rocks = engine_ktable(e, "n.rock");
     Handle old_man = villagers->spawn(Spot{1.0f});
     Handle smith = villagers->spawn(Spot{2.0f});
     Handle pebble = rocks->spawn(Spot{0.0f});
@@ -53,14 +53,14 @@ void test_entity_name(kv::TestCtx& c) {
     KV_CHECK(c, engine_entity_name_set(e, old_man, "old_man"));
     KV_CHECK(c, engine_entity_find(e, "old_man") == old_man);
     KV_CHECK(c, strcmp(engine_entity_name(e, old_man), "old_man") == 0 && engine_entity_name(e, smith) == nullptr);
-    // Unique across kinds: a rock cannot take a villager's name; the villager keeps it.
+    // Unique across ktables: a rock cannot take a villager's name; the villager keeps it.
     KV_CHECK(c, !engine_entity_name_set(e, pebble, "old_man"));
     KV_CHECK(c, engine_entity_find(e, "old_man") == old_man && engine_entity_name(e, pebble) == nullptr);
     // Through the registry, by kind.
     KV_CHECK(c, strcmp(handle_name(old_man), "old_man") == 0 && handle_name(smith) == nullptr);
     KV_CHECK(c, handle_find(old_man.kind(), "old_man") == old_man && handle_find(pebble.kind(), "old_man").is_null());
     KV_CHECK(c, kv_handle_kind_names(old_man.kind()) != 0);
-    // A rename frees the old name; the hash of a kind follows its names.
+    // A rename frees the old name; the hash of a ktable follows its names.
     KV_CHECK(c, engine_entity_name_set(e, pebble, "pebble") && rocks->hash() != before);
     KV_CHECK(c, engine_entity_name_set(e, pebble, "stone") && engine_entity_find(e, "pebble").is_null() && engine_entity_find(e, "stone") == pebble);
     KV_CHECK(c, engine_entity_name_set(e, pebble, "") && engine_entity_name(e, pebble) == nullptr && rocks->hash() == before);

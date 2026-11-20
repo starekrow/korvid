@@ -10,7 +10,7 @@ void test_map(kv::TestCtx&);
 void test_name(kv::TestCtx&);
 void test_random(kv::TestCtx&);
 void test_component(kv::TestCtx&);
-void test_kind(kv::TestCtx&);
+void test_ktable(kv::TestCtx&);
 void test_context(kv::TestCtx&);
 void test_schedule(kv::TestCtx&);
 void test_reset(kv::TestCtx&);
@@ -50,7 +50,7 @@ int main() {
     test_name(c);
     test_random(c);
     test_component(c);
-    test_kind(c);
+    test_ktable(c);
     test_hash(c);
     test_context(c);
     test_entity_name(c);

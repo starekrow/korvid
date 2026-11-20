@@ -1,4 +1,4 @@
-#include "korvid/core/kind.h"
+#include "korvid/core/ktable.h"
 #include "korvid/core/format.h"
 #include "korvid/core/hash.h"
 #include "korvid/core/memory.h"
@@ -9,25 +9,25 @@ namespace kv {
 
 namespace {
 
-void* table_resolve(kv_handle h, void* ctx) {
-    Table& t = *(Table*)ctx;
+void* ktable_resolve(kv_handle h, void* ctx) {
+    KTable& t = *(KTable*)ctx;
     Handle hh{h};
     if (!t.valid(hh) || t.columns.len == 0) return nullptr;
     const Column& c = t.columns[0];
     return c.data + (usize)hh.index() * c.stride;
 }
 
-int table_describe(kv_handle h, void* ctx, char* out, size_t cap) {
-    return ((const Table*)ctx)->describe(Handle{h}, out, cap);
+int ktable_describe(kv_handle h, void* ctx, char* out, size_t cap) {
+    return ((const KTable*)ctx)->describe(Handle{h}, out, cap);
 }
 
-const char* table_name_of(kv_handle h, void* ctx) {
-    Name n = ((const Table*)ctx)->name_of(Handle{h});
+const char* ktable_name_of(kv_handle h, void* ctx) {
+    Name n = ((const KTable*)ctx)->name_of(Handle{h});
     return n.is_null() ? nullptr : name_str(n);
 }
 
-kv_handle table_find_name(const char* name, void* ctx) {
-    const Table& t = *(const Table*)ctx;
+kv_handle ktable_find_name(const char* name, void* ctx) {
+    const KTable& t = *(const KTable*)ctx;
     Name n = name_lookup(name);
     if (n.is_null()) return 0;
     for (u32 i = 0; i < t.names.count(); ++i)
@@ -79,13 +79,13 @@ const char* prop_type_name(PropType t) {
     return (u32)t < KV_COUNTOF(k_names) ? k_names[(u32)t] : "?";
 }
 
-bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 table_index, u32 module_index, MemTag t,
+bool KTable::init(const KTableDesc& d, const char* full_name, Span<const ComponentDesc* const> comps, u32 ktable_index, u32 module_index, MemTag t,
                  Span<const ComponentDesc* const> attachable, u32 capacity_override) {
     KV_ASSERT(!desc);
     desc   = &d;
     capacity = capacity_override ? capacity_override : d.capacity;
     name   = full_name;
-    index  = table_index;
+    index  = ktable_index;
     module = module_index;
     tag    = t;
     columns.alloc = mem_general();
@@ -106,10 +106,10 @@ bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentD
         c.stride = (cd->size + cd->align - 1) / cd->align * cd->align;
         usize bytes = os_page_align((usize)capacity * c.stride);
         c.data = (u8*)os_reserve(bytes);
-        if (!c.data) { KV_ERROR("kind", "'%s': cannot reserve %llu bytes for %s", name, (unsigned long long)bytes, cd->name); return false; }
+        if (!c.data) { KV_ERROR("ktable", "'%s': cannot reserve %llu bytes for %s", name, (unsigned long long)bytes, cd->name); return false; }
         if (cd->has_prev()) {
             c.prev = (u8*)os_reserve(bytes);
-            if (!c.prev) { KV_ERROR("kind", "'%s': cannot reserve %llu bytes for %s (prev)", name, (unsigned long long)bytes, cd->name); return false; }
+            if (!c.prev) { KV_ERROR("ktable", "'%s': cannot reserve %llu bytes for %s (prev)", name, (unsigned long long)bytes, cd->name); return false; }
         }
         format(c.resource_name, sizeof c.resource_name, "%s.%s", name, cd->name);
         columns.push(c);
@@ -118,19 +118,19 @@ bool Table::init(const KindDesc& d, const char* full_name, Span<const ComponentD
     kd.name     = name;
     kd.type_key = comps.len ? comps[0]->type : nullptr; // a blind resolve is the first component's row
     kd.ctx      = this;
-    kd.resolve  = table_resolve;
-    kd.describe = table_describe;
-    kd.name_of  = table_name_of;
-    kd.find_name = table_find_name;
+    kd.resolve  = ktable_resolve;
+    kd.describe = ktable_describe;
+    kd.name_of  = ktable_name_of;
+    kd.find_name = ktable_find_name;
     kd.flags    = KV_HANDLE_GENERATIONAL;
-    kind = handle_kind_register(kd);
-    if (!kind) return false;
-    slots.use_kind(kind);
+    handle_kind = handle_kind_register(kd);
+    if (!handle_kind) return false;
+    slots.use_kind(handle_kind);
     return slots.init(capacity, t);
 }
 
-void Table::free() {
-    if (kind) kv_handle_kind_unregister(kind);
+void KTable::free() {
+    if (handle_kind) kv_handle_kind_unregister(handle_kind);
     for (Column& c : columns) {
         usize bytes = os_page_align((usize)capacity * c.stride);
         usize committed = os_page_align((usize)committed_rows * c.stride);
@@ -143,10 +143,10 @@ void Table::free() {
     attachments.free();
     props.free();
     slots.free();
-    *this = Table{};
+    *this = KTable{};
 }
 
-const Column* Table::column(u32 component_id) const {
+const Column* KTable::column(u32 component_id) const {
     if (!component_id) return nullptr;
     for (const Column& c : columns)
         if (*c.desc->id == component_id) return &c;
@@ -154,7 +154,7 @@ const Column* Table::column(u32 component_id) const {
 }
 
 // Commits the pool's growth steps for every column: 1024 rows, then doubling.
-bool Table::ensure_rows(u32 n) {
+bool KTable::ensure_rows(u32 n) {
     while (committed_rows < n) {
         u32 grow = committed_rows ? committed_rows : 1024;
         if (committed_rows + grow > capacity) grow = capacity - committed_rows;
@@ -171,10 +171,10 @@ bool Table::ensure_rows(u32 n) {
             usize have = os_page_align((usize)committed_rows * c.stride);
             usize need = os_page_align((usize)to * c.stride);
             if (need <= have) continue;
-            if (!os_commit(c.data + have, need - have)) { KV_ERROR("kind", "'%s': commit failed", name); return false; }
+            if (!os_commit(c.data + have, need - have)) { KV_ERROR("ktable", "'%s': commit failed", name); return false; }
             total += need - have;
             if (c.prev) {
-                if (!os_commit(c.prev + have, need - have)) { KV_ERROR("kind", "'%s': commit failed", name); return false; }
+                if (!os_commit(c.prev + have, need - have)) { KV_ERROR("ktable", "'%s': commit failed", name); return false; }
                 total += need - have;
             }
         }
@@ -184,13 +184,13 @@ bool Table::ensure_rows(u32 n) {
     return true;
 }
 
-Handle Table::spawn() {
+Handle KTable::spawn() {
     slots.owner = thread_id(); // the schedule made this thread the writer for now
     slots.tag   = tag;
     if (slots.live >= capacity) {
-        // Logged once: a kind that fills under load would otherwise log every spawn it refuses.
-        KV_MARK("kind full");
-        if (refused++ == 0) KV_ERROR("kind", "'%s' is full (%u entities); refusals are counted from here", name, capacity);
+        // Logged once: a ktable that fills under load would otherwise log every spawn it refuses.
+        KV_MARK("ktable full");
+        if (refused++ == 0) KV_ERROR("ktable", "'%s' is full (%u entities); refusals are counted from here", name, capacity);
         return Handle{};
     }
     // The rows for the slot about to be handed out must exist first: a slot taken and
@@ -209,7 +209,7 @@ Handle Table::spawn() {
     return h;
 }
 
-bool Table::destroy(Handle h) {
+bool KTable::destroy(Handle h) {
     slots.owner = thread_id();
     if (!slots.destroy(h)) return false;
     ++churn;
@@ -226,12 +226,12 @@ bool Table::destroy(Handle h) {
     return true;
 }
 
-bool Table::restore_slots(Span<const u32> gen_words, Span<const u32> free_order) {
+bool KTable::restore_slots(Span<const u32> gen_words, Span<const u32> free_order) {
     slots.owner = thread_id();
     slots.tag   = tag;
     destroy_all();
     if (gen_words.len > capacity || !ensure_rows(gen_words.len)) {
-        KV_ERROR("kind", "'%s': cannot restore %u slots (capacity %u)", name, gen_words.len, capacity);
+        KV_ERROR("ktable", "'%s': cannot restore %u slots (capacity %u)", name, gen_words.len, capacity);
         slots.restore_slots(Span<const u32>(), Span<const u32>());
         return false;
     }
@@ -247,15 +247,15 @@ bool Table::restore_slots(Span<const u32> gen_words, Span<const u32> free_order)
     return slots.restore_slots(gen_words, free_order);
 }
 
-u32 Table::destroy_all() {
+u32 KTable::destroy_all() {
     u32 n = rows(), gone = 0;
     for (u32 i = 0; i < n; ++i)
         if (is_alive(i) && destroy(handle_at(i))) ++gone;
     return gone;
 }
 
-void Table::begin_tick() {
-    // A still kind's rows equal their previous copies unless it spawned since the last copy.
+void KTable::begin_tick() {
+    // A still ktable's rows equal their previous copies unless it spawned since the last copy.
     if (desc && desc->still) {
         if (churn == churn_copied) return;
         churn_copied = churn;
@@ -265,18 +265,18 @@ void Table::begin_tick() {
         if (c.prev) memcpy(c.prev, c.data, (usize)n * c.stride);
 }
 
-u64 Table::hash() const {
+u64 KTable::hash() const {
     u64 h = hash_str(name);
     u32 n = rows();
     for (u32 i = 0; i < n; ++i) {
         if (!is_alive(i)) continue;
         // Generation and index only: the handle kind is a process-wide number that depends
-        // on what else registered, and the table's name already stands for the kind.
+        // on what else registered, and the ktable's name already stands for the kind.
         h = hash_mix(h ^ (handle_at(i).bits & 0x000FFFFFFFFFFFFFull));
         for (const Column& c : columns)
             if (c.desc->is_sim()) h = hash_mix(h ^ component_hash(*c.desc, row(c, i)));
     }
-    // Names, attachments and bags are the entity's: a kind with none hashes as it always did.
+    // Names, attachments and bags are the entity's: a ktable with none hashes as it always did.
     for (u32 i = 0; i < names.count(); ++i)
         if (sparse_live(names, i)) h = hash_mix(h ^ ((u64)names.slots[i] * 0x9E3779B97F4A7C15ull) ^ ((const Name*)names.at(i))->hash);
     for (const Attachment& a : attachments) {
@@ -298,13 +298,13 @@ u64 Table::hash() const {
     return h;
 }
 
-Name Table::name_of(Handle h) const {
+Name KTable::name_of(Handle h) const {
     if (!valid(h)) return Name{};
     u32 i = names.find(h.index());
     return i != KV_POOL_NONE && names.gens[i] == h.gen() ? *(const Name*)names.at(i) : Name{};
 }
 
-void Table::sweep_sparse(Array<Name>* gone) {
+void KTable::sweep_sparse(Array<Name>* gone) {
     sparse_dirty = false;
     for (u32 i = names.count(); i-- > 0;) {
         if (sparse_live(names, i)) continue;
@@ -322,20 +322,20 @@ void Table::sweep_sparse(Array<Name>* gone) {
 
 // ---- attachments ------------------------------------------------------------------------------
 
-Attachment* Table::attachment(u32 component_id) {
+Attachment* KTable::attachment(u32 component_id) {
     for (Attachment& a : attachments)
         if (*a.desc->id == component_id) return &a;
     return nullptr;
 }
 
-void* Table::attached(Handle h, u32 component_id) {
+void* KTable::attached(Handle h, u32 component_id) {
     Attachment* a = attachment(component_id);
     if (!a || !valid(h)) return nullptr;
     u32 i = a->rows.find(h.index());
     return i != KV_POOL_NONE && a->rows.gens[i] == h.gen() ? a->rows.at(i) : nullptr;
 }
 
-void* Table::attach(Handle h, u32 component_id, const void* data) {
+void* KTable::attach(Handle h, u32 component_id, const void* data) {
     Attachment* a = attachment(component_id);
     if (!a || !valid(h)) return nullptr;
     u8* row = a->rows.insert(h.index(), h.gen());
@@ -343,7 +343,7 @@ void* Table::attach(Handle h, u32 component_id, const void* data) {
     return row;
 }
 
-bool Table::detach(Handle h, u32 component_id) {
+bool KTable::detach(Handle h, u32 component_id) {
     Attachment* a = attachment(component_id);
     if (!a || !valid(h)) return false;
     u32 i = a->rows.find(h.index());
@@ -369,14 +369,14 @@ u32 prop_lower(const Array<PropEntry>& ps, u32 slot, u64 key) {
 
 } // namespace
 
-const PropValue* Table::prop(Handle h, Name key) const {
+const PropValue* KTable::prop(Handle h, Name key) const {
     if (!desc->props || !valid(h)) return nullptr;
     u32 i = prop_lower(props, h.index(), key.hash);
     if (i < props.len && props[i].slot == h.index() && props[i].key == key && props[i].gen == h.gen()) return &props[i].value;
     return nullptr;
 }
 
-bool Table::prop_set(Handle h, Name key, const PropValue& v) {
+bool KTable::prop_set(Handle h, Name key, const PropValue& v) {
     if (!desc->props || !valid(h) || key.is_null()) return false;
     // A stale bag left in the slot by a dead entity goes first.
     u32 at = prop_lower(props, h.index(), 0), kept = at;
@@ -399,7 +399,7 @@ bool Table::prop_set(Handle h, Name key, const PropValue& v) {
     return true;
 }
 
-bool Table::prop_remove(Handle h, Name key) {
+bool KTable::prop_remove(Handle h, Name key) {
     if (!desc->props || !valid(h)) return false;
     u32 i = prop_lower(props, h.index(), key.hash);
     if (i >= props.len || props[i].slot != h.index() || props[i].key != key || props[i].gen != h.gen()) return false;
@@ -408,7 +408,7 @@ bool Table::prop_remove(Handle h, Name key) {
     return true;
 }
 
-u32 Table::props_of(Handle h, u32* first) const {
+u32 KTable::props_of(Handle h, u32* first) const {
     u32 i = prop_lower(props, h.index(), 0), n = 0;
     *first = i;
     while (i + n < props.len && props[i + n].slot == h.index()) ++n;
@@ -416,7 +416,7 @@ u32 Table::props_of(Handle h, u32* first) const {
     return n;
 }
 
-int Table::describe(Handle h, char* out, usize cap) const {
+int KTable::describe(Handle h, char* out, usize cap) const {
     if (!valid(h))
         return format(out, cap, "%s (%u live)", h.index() < rows() ? "stale" : "out of range", live());
     usize at = 0;

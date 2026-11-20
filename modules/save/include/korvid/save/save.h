@@ -1,7 +1,7 @@
 // Korvid save: game state as named fields. Any plain struct with a field table (every
 // component, every event) is written as an object of its fields by name, and read back
 // the same way: a field the file lacks keeps the value it had, a key the struct lacks is
-// ignored, so a save outlives fields being added and removed. A kind is written slot by
+// ignored, so a save outlives fields being added and removed. A ktable is written slot by
 // slot, generations and the free list included, and restored exactly: the handles that
 // pointed into it before the save point to the same entities after the load, and the
 // next spawn hands out the handle it would have.
@@ -11,19 +11,19 @@
 // ("render.material@arcanum/hero.png:alpha", "level.root@level.root"), or by slot
 // and generation ("game.npc#3:1"). A named handle is found by name on load, so it means
 // the same thing in a run that made things in another order; one by slot is remade with
-// today's kind id, which is right for kinds the save restores. For anything else the game
+// today's kind id, which is right for ktables the save restores. For anything else the game
 // passes a SaveRemap and answers itself.
 //
 //   SaveWriter w; w.init(mem_general());
 //   w.begin_object();
 //   w.key("level"); w.string_value("village");
-//   w.key("kinds"); save_kinds(w, e, kinds);       // {"game.player": {...}, "game.npc": {...}}
+//   w.key("ktables"); save_ktables(w, e, ktables);   // {"game.player": {...}, "game.npc": {...}}
 //   w.end_object();
 //   ...
 //   JsonDoc doc; save_parse(SaveFormat::Json, bytes, size, mem_scratch(), doc);
-//   load_kinds(doc, *json_get(doc, doc.root(), "kinds"), e, remap);
+//   load_ktables(doc, *json_get(doc, doc.root(), "ktables"), e, remap);
 #pragma once
-#include "korvid/core/kind.h"
+#include "korvid/core/ktable.h"
 #include "korvid/save/writer.h"
 
 namespace kv {
@@ -65,34 +65,35 @@ inline u32  load_component(const JsonDoc& doc, const JsonValue& obj, const Compo
     return load_fields(doc, obj, c.fields, row, remap);
 }
 
-// A whole kind:
+// A whole ktable:
 //   {"free": [[slot, gen], ...],                    the dead slots, in reuse order
 //    "rows": [{"slot": 0, "gen": 1, "Transform2": {...}, ...}, ...]}
 // One entity's row: every column, its attachments ("@Talk") and its bag ("@props"), as an
-// object. load_row fills a live entity from one, as load_kind does a row; what the object
+// object. load_row fills a live entity from one, as load_ktable does a row; what the object
 // lacks keeps its value. Per-level state (the level module) is rows by name.
-void save_row(SaveWriter& w, const Table& t, Handle h);
-bool load_row(const JsonDoc& doc, const JsonValue& obj, Table& t, Handle h, const SaveRemap& remap = SaveRemap{});
+void save_row(SaveWriter& w, const KTable& t, Handle h);
+bool load_row(const JsonDoc& doc, const JsonValue& obj, KTable& t, Handle h, const SaveRemap& remap = SaveRemap{});
 
 // Any part of a parsed document written again: a record kept as a tree carried into a save.
 void save_json(SaveWriter& w, const JsonDoc& doc, const JsonValue& v);
 
-// Every component is written, cosmetic ones too: a kind is saved because it is wanted back.
+// Every component is written, cosmetic ones too: a ktable is saved because it is wanted back.
 // A named entity's row has "name".
-void save_kind(SaveWriter& w, const Table& t);
-// Replaces the table's contents with the saved ones. Components the file lacks are zero;
+void save_ktable(SaveWriter& w, const KTable& t);
+// Replaces the ktable's contents with the saved ones. Components the file lacks are zero;
 // previous-tick copies equal the loaded rows (a loaded entity has no history, as a spawned
 // one has none). With an engine, the entities get their names back (outside the schedule
-// or from a main-thread unit, as engine_entity_name_set). False, with the table left
+// or from a main-thread unit, as engine_entity_name_set). False, with the ktable left
 // empty, if the slots do not fit or disagree.
-bool load_kind(const JsonDoc& doc, const JsonValue& v, Table& t, const SaveRemap& remap = SaveRemap{}, Engine* e = nullptr);
+bool load_ktable(const JsonDoc& doc, const JsonValue& v, KTable& t, const SaveRemap& remap = SaveRemap{}, Engine* e = nullptr);
 
-// Several kinds as one object keyed by the kinds' full names. Names that are not kinds
+// Several ktables as one object keyed by their full names. Names that are not ktables
 // are skipped with a warning.
-void save_kinds(SaveWriter& w, Engine& e, Span<const char* const> kinds);
-// Every kind `obj` names, each with load_kind and its names: first every kind's slots and
-// names, then every kind's rows, so a handle saved by name into one kind finds an entity of
-// another restored by the same load. A name with no table is skipped with a warning. Returns the kinds loaded; false-y (0) is also what an empty object gives.
-u32  load_kinds(const JsonDoc& doc, const JsonValue& obj, Engine& e, const SaveRemap& remap = SaveRemap{});
+void save_ktables(SaveWriter& w, Engine& e, Span<const char* const> ktables);
+// Every ktable `obj` names, each with load_ktable and its names: first every ktable's slots
+// and names, then every ktable's rows, so a handle saved by name into one ktable finds an
+// entity of another restored by the same load. A name with no ktable is skipped with a
+// warning. Returns the ktables loaded; false-y (0) is also what an empty object gives.
+u32  load_ktables(const JsonDoc& doc, const JsonValue& obj, Engine& e, const SaveRemap& remap = SaveRemap{});
 
 } // namespace kv

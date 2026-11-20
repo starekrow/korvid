@@ -11,7 +11,7 @@
 //   Storm   bolts that turn toward the nearest enemy, more a volley with power
 //   Lance   a heavy, slow shot that passes through what it kills and stops at what it does not
 //
-// The level is the ship's, kept when the type changes. Shots are one kind (`shot`); a bolt
+// The level is the ship's, kept when the type changes. Shots are one ktable (`shot`); a bolt
 // steers in `shots`, a lance pierces in the hit (hits.cc). The beam is a child row of the
 // ship (`beam`), shown while the shot is held with the Beam in hand; `beams` casts it.
 #include "arcfire.h"
@@ -60,7 +60,7 @@ constinit const LanceLevel k_lance[kMaxPower] = {{20, 16, 9, 5}, {24, 15, 9, 7},
 u32 level(u32 power) { return (power < 1 ? 1 : power > kMaxPower ? kMaxPower : power) - 1; }
 
 // A shot going `ang` radians clockwise from up at `speed`, its sprite turned to match.
-void shot_spawn(Table& shots, const Sprite& s, point2 at, f32 ang, f32 speed, f32 radius, const Shot& shot) {
+void shot_spawn(KTable& shots, const Sprite& s, point2 at, f32 ang, f32 speed, f32 radius, const Shot& shot) {
     vec2 v{kv::sin(ang) * speed, kv::cos(ang) * speed};
     shots.spawn(transform2_at(at, -ang), s, Velocity{v}, collider_circle(radius, L_SHOT, L_AIR | L_GROUND), shot);
 }
@@ -87,7 +87,7 @@ void spread_inner(u32 power, bool focus, f32* muzzle_x, f32* angle) {
     *muzzle_x = f * 2.0f * kMuzzle;
 }
 
-u32 weapon_fire(Game& g, Table& shots, point2 at, u32 weapon, u32 power, bool focus) {
+u32 weapon_fire(Game& g, KTable& shots, point2 at, u32 weapon, u32 power, bool focus) {
     u32 lv = level(power);
     switch (weapon) {
     case WeaponSpread: {
@@ -123,7 +123,7 @@ u32 weapon_fire(Game& g, Table& shots, point2 at, u32 weapon, u32 power, bool fo
 void beam_spawn(Engine& e, Game& g, Handle owner) {
     // Blended, not added: added, it washes out to white over the sea.
     Sprite s = sprite_of(g, TEX_BEAM, rect2_unit(), vec2{0, 0}, Z_SHOT, color{1.0f, 1.0f, 1.0f, 0.95f});
-    Table* beams_table = engine_table(e, g_beam_kind);
+    KTable* beams_table = engine_ktable(e, g_beam_ktable);
     for (u32 k = 0; k < kBeamSegments; ++k)
         beams_table->spawn(transform2_at(point2{0, 0}), local2_at(point2{0, kMuzzleUp}), Parent{owner}, s, Beam{0, 0.0f, 0.0f, k});
 }
@@ -135,23 +135,23 @@ void shots(TickContext& ctx) {
     const Game& g = ctx.state_as<const Game>();
     MemScope scope;
     Array<point2> targets = array_in<point2>(mem_scratch());
-    Table* st = ctx.write_kind(g_shot_kind);
+    KTable* st = ctx.write_ktable(g_shot_ktable);
     Span<Transform2> t = st->rows_of<Transform2>();
     Span<Velocity> v = st->rows_of<Velocity>();
     Span<const Shot> sh = st->rows_of<Shot>();
     bool bolts = false;
     for (u32 i = 0; i < st->rows() && !bolts; ++i) bolts = st->is_alive(i) && sh[i].kind == ShotBolt;
     if (bolts) {
-        const u32 kinds[] = {g_air_kind, g_ground_kind};
-        for (u32 kind : kinds) {
-            KindRows k = ctx.rows(kind);
+        const u32 ktables[] = {g_air_ktable, g_ground_ktable};
+        for (u32 ktable : ktables) {
+            KTableRows k = ctx.rows(ktable);
             Span<const Transform2> kx = k.col<const Transform2>();
             Span<const Health> kh = k.col<const Health>();
             for (u32 i = 0; i < k.rows(); ++i)
                 if (k.alive(i) && kh[i].hp > 0 && in_field(kx[i].position, 0.0f)) targets.push(kx[i].position);
         }
-        KindRows parts = ctx.rows(g_part_kind);
-        Span<const Boss> bb = ctx.rows(g_boss_kind).col<const Boss>();
+        KTableRows parts = ctx.rows(g_part_ktable);
+        Span<const Boss> bb = ctx.rows(g_boss_ktable).col<const Boss>();
         Span<const Transform2> px = parts.col<const Transform2>();
         Span<const Part> pp = parts.col<const Part>();
         Span<const Health> ph = parts.col<const Health>();
@@ -186,22 +186,22 @@ void shots(TickContext& ctx) {
 
 // Phase Sim, after the collision module has placed everything this tick: each beam whose
 // owner holds the Beam and the shot shows, segment by segment in its level's shape (a
-// segment after its parent, which comes first in the table), each cut at the first body on
+// segment after its parent, which comes first in the ktable), each cut at the first body on
 // the enemies' layers it meets but a boss's hull, which it passes over, and damaging it every
 // few ticks by event (BeamHit, whose handler is the shots' hit). A split exists only if its
 // parent reached it. Hidden otherwise.
 void beams(TickContext& ctx) {
     Engine& e = *ctx.engine;
-    // The columns it writes (not the kind: a beam's transform is the compose's, which this
-    // follows); the table for liveness and the parents.
-    const Table* bt = engine_table(e, g_beam_kind);
+    // The columns it writes (not the ktable: a beam's transform is the compose's, which this
+    // follows); the ktable for liveness and the parents.
+    const KTable* bt = engine_ktable(e, g_beam_ktable);
     Span<Local2> bl = ctx.write<Local2>("arcfire.beam.Local2");
     Span<Sprite> bs = ctx.write<Sprite>("arcfire.beam.Sprite");
     Span<Beam> bb = ctx.write<Beam>("arcfire.beam.Beam");
     Span<const Parent> bp = ctx.read<Parent>("arcfire.beam.Parent");
-    const Table* ships = engine_table(e, g_ship_kind);
-    const Table* options = engine_table(e, g_option_kind);
-    const u16 hull_kind = engine_table_now(e, g_boss_kind)->kind;
+    const KTable* ships = engine_ktable(e, g_ship_ktable);
+    const KTable* options = engine_ktable(e, g_option_ktable);
+    const u16 hull_kind = engine_ktable_now(e, g_boss_ktable)->handle_kind;
     Span<const Parent> op = ctx.read<Parent>("arcfire.option.Parent");
     Span<const Transform2> ox = ctx.read<Transform2>("arcfire.option.Transform2");
     Span<const Option> oo = ctx.read<Option>("arcfire.option.Option");

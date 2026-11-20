@@ -33,14 +33,14 @@ in any toolchain (`-ffp-contract=off`; `/fp:precise` with cl). A fixed, never-se
 order (`korvid/core/map.h`).
 
 **How it is held.** The state hash: `--hash` every tick, `--hash-systems` every system.
-Runs at `--threads 1` and `--threads 16` must agree. `--early-reads order` and
-`snapshot` must agree. `--replay` compares the hashes in a recording as it plays. Frame
+Runs at `--threads 1` and `--threads 16` must agree. `--early-reads order`,
+`snapshot` and `ktable` must agree. `--replay` compares the hashes in a recording as it plays. Frame
 and Work units can't write the sim: init refuses the declaration, and the context
 refuses the spawn ([cycles](concepts/cycles.md#the-rule-only-the-sim-writes-the-sim)).
 
 ## 2. Declarative stomps immediate
 
-A module says what it brings as data (its components, kinds, systems, events, resources,
+A module says what it brings as data (its components, ktables, systems, events, resources,
 commands) in one `constinit` record. The engine reads every record once, at
 `engine_init`, and from then on knows each type by name.
 
@@ -50,7 +50,7 @@ static initializer order to reason about, no registration that depends on link o
 and a module's whole surface is in one place.
 
 **What it costs.** Tables to write: a field table per component, a row per system.
-Nothing can be added at runtime: no new kinds or systems after init (runtime module
+Nothing can be added at runtime: no new ktables or systems after init (runtime module
 loading is designed for, not built). Some things that would be one line of code elsewhere are a declaration and a
 lookup here.
 
@@ -77,7 +77,7 @@ name `Transform2`.
 
 **What it costs.** Every access is declared, including ones that feel obvious. Some
 designs are refused outright, and the fix is to restructure (split a phase, read early,
-make a kind a snapshot) rather than to override. Dev builds pay for the checks.
+make a ktable a snapshot) rather than to override. Dev builds pay for the checks.
 
 **Where it shows.** `SystemDesc` and `TickContext` (`korvid/core/phase.h`). The resource
 tree and the modes ([scheduling](concepts/scheduling.md)). Appends for writers that need
@@ -92,7 +92,7 @@ reads a cosmetic component fails init.
 
 Every allocation is charged to someone: the module whose code was running, a category,
 a heap with limits the executable chose. Lifetimes are explicit: a module's arena, a
-frame's scratch, a kind's table.
+frame's scratch, a ktable.
 
 **Why.** "Where did the memory go" has an answer, per module. A budget can be enforced
 before it is blown, rather than discovered on a console. Leaks are found at the exit of
@@ -127,8 +127,8 @@ accurate as the code changes. Nothing is caught and handled far from where it we
 wrong.
 
 **Where it shows.** `engine_init`'s refusals ("`rocks.move` and `rocks.wrap` both write
-... add `after` or `before`"). A full kind's spawn, logged once and counted in
-`Table::refused`. Asset failures as `AssetFailed` events with a placeholder in their
+... add `after` or `before`"). A full ktable's spawn, logged once and counted in
+`KTable::refused`. Asset failures as `AssetFailed` events with a placeholder in their
 place. Asserts that print the expression and the line.
 
 **How it is held.** Exceptions and RTTI are off in every toolchain (`-fno-exceptions

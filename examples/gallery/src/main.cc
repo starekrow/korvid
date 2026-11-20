@@ -242,7 +242,7 @@ RenderSpriteState state_of(const Sprite& s, bool snap) {
 
 // A new sprite, set in the current tick: where it is is where it was.
 Handle add(Gallery& g, const Sprite& s) {
-    Handle h = Handle::make(0, 1, (u32)g.next_entity++); // an entity the renderer keys by; no table behind it
+    Handle h = Handle::make(0, 1, (u32)g.next_entity++); // an entity the renderer keys by; no ktable behind it
     g.deltas.push(SpriteDelta{SpriteDeltaKind::Set, h, state_of(s, true)});
     g.live.push(h);
     return h;

@@ -63,7 +63,7 @@ the why is never more than a link away.
   boundary)`. Not every header needs one. Cite it where a reader would otherwise ask "why
   not just...?".
 - **Module pages** cite a principle in "How it works" or "Behaviour worth knowing" where
-  it explains a surprise (why `audio_play` returns a reservation, why a cosmetic kind
+  it explains a surprise (why `audio_play` returns a reservation, why a cosmetic ktable
   can't be read by a sim system).
 - **Design records** say near the top which principle they defend or trade off, and when a
   trade-off is made, what was measured.
@@ -151,11 +151,11 @@ Header `korvid/<m>/<file>.h`:
 - **`name`**: the name in backticks, with its arguments' names (no types) for a function.
   Names that belong together share a row, separated by commas.
 - **`kind`**, from this vocabulary: `record`, `enum`, `function(s)`, `method(s)`,
-  `macro(s)`, `constant(s)`, `component`, `event`, `event type`, `kind`, `resource`,
+  `macro(s)`, `constant(s)`, `component`, `event`, `event type`, `ktable`, `resource`,
   `system, phase X`, `handler, phase X`, `ModuleDesc`. Combine with commas when a row
   mixes kinds.
 - **`what`**: under a line; for a record, its fields.
-- **Then "What the module registers with the engine"**: its components, kinds, event
+- **Then "What the module registers with the engine"**: its components, ktables, event
   types, resources, systems and handlers with their phases and sets, as the module's
   `ModuleDesc` declares them.
 

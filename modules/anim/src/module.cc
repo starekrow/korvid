@@ -188,8 +188,8 @@ void anim_play_system(TickContext& ctx) {
     f32 dt = (f32)ctx.dt;
     for (u32 i = 0; i < st.clips.len; ++i) if (st.clips.is_alive(i)) st.clips.items[i].players = 0;
 
-    for (KindRows k : ctx.view<AnimPlayer>()) {
-        Table& table = *k.table;
+    for (KTableRows k : ctx.view<AnimPlayer>()) {
+        KTable& table = *k.ktable;
         Span<AnimPlayer> players = k.col<AnimPlayer>();
         bool has_sprite = table.has(ComponentType<Sprite>::id);
         bool has_local  = table.has(ComponentType<Local2>::id) && table.has(ComponentType<Parent>::id);

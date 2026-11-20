@@ -36,7 +36,7 @@ struct Stone {
 };
 
 // I described the struct so the engine can print it. The engine logs it at startup as a
-// component, which it is, sort of; nothing of mine lives in an engine table though, so
+// component, which it is, sort of; nothing of mine lives in a ktable though, so
 // it'll know the shape of a Stone and never see one.
 constinit const FieldDesc k_stone_fields[] = {KV_FIELDS(Stone, pos, vel, radius, mass, bumps, sprite)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Stone, k_stone_fields)};
@@ -58,8 +58,8 @@ constexpr f32 kPush         = 900.0f; // pixels per second^2
 constexpr f32 kDrag         = 0.4f;
 
 // Make a stone, and a sprite to show it with. Direct, because I hold the write on the
-// sprite kind (I had to declare that, see the bottom of the file).
-Stone& add_stone(Game& g, Table& sprites, point2 at, vec2 vel, f32 radius, Handle material, i32 layer) {
+// sprite ktable (I had to declare that, see the bottom of the file).
+Stone& add_stone(Game& g, KTable& sprites, point2 at, vec2 vel, f32 radius, Handle material, i32 layer) {
     Stone s{};
     s.pos = at; s.vel = vel; s.radius = radius; s.mass = radius * radius;
     Sprite sp;
@@ -97,7 +97,7 @@ void stones_tick(TickContext& ctx) {
     f32 dt = (f32)ctx.dt;
     const Input*      input  = ctx.resource<const Input>("input.state");
     const HostWindow* window = ctx.resource<const HostWindow>("platform_hid.window");
-    Table& sprites = *ctx.write_kind("sprite.entity");
+    KTable& sprites = *ctx.write_ktable("sprite.entity");
     g.w = (f32)window->width();
     g.h = (f32)window->height();
 

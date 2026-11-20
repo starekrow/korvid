@@ -2,8 +2,8 @@
 //
 // A component is one piece of data an entity has: a position, a velocity, a health. In
 // code it is a plain struct (no constructors that matter, no pointers to own, no virtual
-// functions). Kinds are made of components (kind.h): a kind of entity is a fixed set of
-// them, stored as one column per component.
+// functions). Entities live in ktables (ktable.h), each a fixed set of components stored
+// as one column per component.
 //
 // The engine can't see inside a struct on its own, so each component comes with a field
 // table: one row per member, made by a macro from the member names. That table is the
@@ -21,7 +21,7 @@
 //       KV_COMPONENT(Velocity, k_velocity_fields),
 //       KV_COMPONENT(Health, k_health_fields, CompPrev),  // keep last tick's copy: a trigger watches it
 //   };
-//   // ModuleDesc{.components = k_components, ...}; a KindDesc then lists "Velocity, Health"
+//   // ModuleDesc{.components = k_components, ...}; a KTableDesc then lists "Velocity, Health"
 //
 // List every member. A member left out of the table is stored and copied with the row,
 // but not hashed, compared, saved or shown.
@@ -58,7 +58,7 @@ enum ComponentFlags : u8 {
     CompCosmetic = 1, // presentation only (a flash timer, a glyph's look): never hashed;
                       // a sim system reading it fails engine_init: it can't steer the game
     CompPrev     = 2, // keep last tick's copy, taken at the start of PreSim: for triggers, for
-                      // KindRows::prev<T>(), and for interpolation (Transform2 has it)
+                      // KTableRows::prev<T>(), and for interpolation (Transform2 has it)
 };
 
 // One component as the engine knows it: a row of a module's component table, made by

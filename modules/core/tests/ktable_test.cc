@@ -1,4 +1,4 @@
-// Kinds: the engine builds a table per declared kind, registers its resources and handle
+// KTables: the engine builds one per declaration, registers its resources and handle
 // kind, zeroes spawned rows, keeps previous copies, rejects bad declarations, and tears
 // everything down at shutdown.
 #include "korvid/core/engine.h"
@@ -24,7 +24,7 @@ constinit const ComponentDesc k_components[] = {
 };
 
 constinit u32 g_mover_id = 0;
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = "t.mover",  .components = "Pos, Vel",  .capacity = 3000, .id = &g_mover_id},
     {.name = "t.marker", .components = "Pos, Tag", .capacity = 2},
 };
@@ -33,54 +33,54 @@ void sys_move(TickContext&) {}
 constinit const SystemDesc k_systems[] = {
     {.name = "t.move", .phase = Phase::Sim, .fn = sys_move, .reads = "*.Vel", .writes = "*.Pos, t.mover"},
 };
-KV_MODULE_DEFINE(k_t) = {.name = "t", .components = k_components, .kinds = k_kinds, .systems = k_systems};
+KV_MODULE_DEFINE(k_t) = {.name = "t", .components = k_components, .ktables = k_ktables, .systems = k_systems};
 
 // Rejections.
-constinit const KindDesc k_unknown_kinds[] = {{.name = "u.k", .components = "Pos, Nope", .capacity = 8}};
-KV_MODULE_DEFINE(k_unknown) = {.name = "u", .kinds = k_unknown_kinds};
+constinit const KTableDesc k_unknown_ktables[] = {{.name = "u.k", .components = "Pos, Nope", .capacity = 8}};
+KV_MODULE_DEFINE(k_unknown) = {.name = "u", .ktables = k_unknown_ktables};
 
-constinit const KindDesc k_dup_kinds[] = {{.name = "t.mover", .components = "Pos, Vel", .capacity = 8}};
-KV_MODULE_DEFINE(k_dup) = {.name = "d", .kinds = k_dup_kinds};
+constinit const KTableDesc k_dup_ktables[] = {{.name = "t.mover", .components = "Pos, Vel", .capacity = 8}};
+KV_MODULE_DEFINE(k_dup) = {.name = "d", .ktables = k_dup_ktables};
 
-constinit const KindDesc k_twice_kinds[] = {{.name = "w.k", .components = "Pos, Pos", .capacity = 8}};
-KV_MODULE_DEFINE(k_twice) = {.name = "w", .kinds = k_twice_kinds};
+constinit const KTableDesc k_twice_ktables[] = {{.name = "w.k", .components = "Pos, Pos", .capacity = 8}};
+KV_MODULE_DEFINE(k_twice) = {.name = "w", .ktables = k_twice_ktables};
 
 constinit const SystemDesc k_nowhere_systems[] = {{.name = "n.sys", .phase = Phase::Sim, .fn = sys_move, .reads = "*.Tag, *.Nope"}};
 KV_MODULE_DEFINE(k_nowhere) = {.name = "n", .systems = k_nowhere_systems};
 
 } // namespace
 
-void test_kind(kv::TestCtx& c) {
+void test_ktable(kv::TestCtx& c) {
     using namespace kv;
-    c.begin("kind");
+    c.begin("ktable");
 
     const ModuleDesc* const list[] = {&k_t};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
 
     // Tables, ids and resources in declaration order; wildcard references accepted.
-    KV_CHECK(c, e.tables.len == 2 && g_mover_id == 1 && engine_kind_id(e, "t.marker") == 2);
-    Table* mover  = engine_table(e, "t.mover");
-    Table* marker = engine_table(e, g_mover_id + 1);
-    KV_CHECK(c, mover && marker && mover->index == 0 && engine_table(e, "t.nope") == nullptr && engine_table(e, 3u) == nullptr);
+    KV_CHECK(c, e.ktables.len == 2 && g_mover_id == 1 && engine_ktable_id(e, "t.marker") == 2);
+    KTable* mover  = engine_ktable(e, "t.mover");
+    KTable* marker = engine_ktable(e, g_mover_id + 1);
+    KV_CHECK(c, mover && marker && mover->index == 0 && engine_ktable(e, "t.nope") == nullptr && engine_ktable(e, 3u) == nullptr);
     KV_CHECK(c, engine_resource_id(e, "t.mover") == mover->resource);
     KV_CHECK(c, engine_resource_id(e, "t.mover.Pos") == mover->columns[0].resource);
     KV_CHECK(c, engine_resource_id(e, "t.mover.Vel") == mover->columns[1].resource);
     KV_CHECK(c, engine_resource_id(e, "t.marker.Tag") != 0 && engine_resource_id(e, "t.marker.Vel") == 0);
     KV_CHECK(c, mover->has(ComponentType<Pos>::id) && mover->has(ComponentType<Vel>::id) && !mover->has(ComponentType<Tag>::id));
     KV_CHECK(c, mover->column<Pos>()->prev != nullptr && mover->column<Vel>()->prev == nullptr);
-    KV_CHECK(c, mover->kind != 0 && marker->kind != 0 && mover->kind != marker->kind);
-    KV_CHECK(c, strcmp(kv_handle_kind_name(mover->kind), "t.mover") == 0);
+    KV_CHECK(c, mover->handle_kind != 0 && marker->handle_kind != 0 && mover->handle_kind != marker->handle_kind);
+    KV_CHECK(c, strcmp(kv_handle_kind_name(mover->handle_kind), "t.mover") == 0);
 
     // Spawn: zero rows, or the components handed in; prev starts equal to current.
     Handle a = mover->spawn();
     Handle b = mover->spawn(Pos{1, 2}, Vel{3, 4});
-    KV_CHECK(c, mover->live() == 2 && mover->rows() == 2 && a.kind() == mover->kind);
+    KV_CHECK(c, mover->live() == 2 && mover->rows() == 2 && a.kind() == mover->handle_kind);
     KV_CHECK(c, mover->get<Pos>(a)->x == 0 && mover->get<Vel>(a)->dy == 0);
     KV_CHECK(c, mover->get<Pos>(b)->y == 2 && mover->get<Vel>(b)->dx == 3);
     KV_CHECK(c, mover->prev<Pos>(b)->y == 2 && mover->prev<Vel>(b) == nullptr);
-    KV_CHECK(c, mover->get<Tag>(b) == nullptr); // not a component of this kind
-    KV_CHECK(c, marker->get<Pos>(b) == nullptr); // wrong table: handle kind mismatch
+    KV_CHECK(c, mover->get<Tag>(b) == nullptr); // not a component of this ktable
+    KV_CHECK(c, marker->get<Pos>(b) == nullptr); // wrong ktable: handle kind mismatch
 
     // begin_tick copies current into previous, for prev columns only.
     mover->get<Pos>(b)->x = 10;
@@ -139,15 +139,15 @@ void test_kind(kv::TestCtx& c) {
     KV_CHECK(c, mem_stats_module(1).committed_bytes > 0);
 #endif
 
-    // Shutdown frees the tables, unregisters the handle kinds and clears the id slot.
-    u16 kind = mover->kind;
+    // Shutdown frees the ktables, unregisters the handle kinds and clears the id slot.
+    u16 kind = mover->handle_kind;
     engine_shutdown(e);
-    KV_CHECK(c, e.tables.len == 0 && g_mover_id == 0 && !kv_handle_kind_is_live(kind));
+    KV_CHECK(c, e.ktables.len == 0 && g_mover_id == 0 && !kv_handle_kind_is_live(kind));
 #if KV_DEV
     KV_CHECK(c, mem_stats_module(1).committed_bytes == 0);
 #endif
 
-    // Rejections: unknown component, duplicate kind, a component twice, a wildcard nobody has.
+    // Rejections: unknown component, duplicate ktable, a component twice, a wildcard nobody has.
     const ModuleDesc* const unknown[] = {&k_t, &k_unknown};
     const ModuleDesc* const dup[]     = {&k_t, &k_dup};
     const ModuleDesc* const twice[]   = {&k_t, &k_twice};
@@ -156,18 +156,18 @@ void test_kind(kv::TestCtx& c) {
     for (Span<const ModuleDesc* const> l : rejected) {
         Engine f;
         KV_CHECK(c, !engine_init(f, l));
-        KV_CHECK(c, f.tables.len == 0 && g_mover_id == 0);
+        KV_CHECK(c, f.ktables.len == 0 && g_mover_id == 0);
     }
 
-    // The root sets a capacity over the KindDesc's; past it a spawn is refused, and counted.
+    // The root sets a capacity over the KTableDesc's; past it a spawn is refused, and counted.
     {
-        const KindCapacity caps[] = {{"t.marker", 5}, {"t.nothing", 9}};
+        const KTableCapacity caps[] = {{"t.marker", 5}, {"t.nothing", 9}};
         EngineConfig cfg;
         cfg.capacities = caps;
         Engine f;
         KV_CHECK(c, engine_init(f, list, cfg));
-        Table* m = engine_table(f, "t.marker");
-        KV_CHECK(c, m && m->capacity == 5 && engine_table(f, "t.mover")->capacity == 3000);
+        KTable* m = engine_ktable(f, "t.marker");
+        KV_CHECK(c, m && m->capacity == 5 && engine_ktable(f, "t.mover")->capacity == 3000);
         for (u32 i = 0; i < 7; ++i) m->spawn(Pos{}, Tag{});
         KV_CHECK(c, m->live() == 5 && m->refused == 2);
         engine_shutdown(f);

@@ -122,7 +122,7 @@ void ground_spawn(TickContext& ctx, const Game& g, const Dials& d, const GroundD
     Ground gr{bench ? 0.0f : 1.0f, bench ? 1u : 0u, (u32)gd.kind, gd.launch, gd.kind == GroundBunker ? kBunkerFirst : 0u,
               gd.kind == GroundTank ? kTankSpeed : 0.0f, at.x, gd.route * 0.5f, gd.drop, 0};
     Collider2 col = collider_circle(14.0f, L_GROUND, bench ? 0u : L_SHOT); // nothing hits the bench
-    ctx.spawn_later(g_ground_kind, transform2_at(at), enemy_sprite(g, look), col, h, em, gr, Runner{});
+    ctx.spawn_later(g_ground_ktable, transform2_at(at), enemy_sprite(g, look), col, h, em, gr, Runner{});
 }
 
 } // namespace kv::arcfire

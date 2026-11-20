@@ -100,11 +100,11 @@ hover. Its `dt` is the frame's: what a transition animates by.
 The Sim cycle is the only one in a replay. The other two run as often as the machine
 allows, so:
 
-- **They do not write the simulation.** A Frame or Work unit may read any kind and write
-  cosmetic kinds, cosmetic components and its own state. A declared write that covers a
-  sim kind (the kind, its liveness, a column, an attachment, its bags) is refused at
+- **They do not write the simulation.** A Frame or Work unit may read any ktable and write
+  cosmetic ktables, cosmetic components and its own state. A declared write that covers a
+  sim ktable (the ktable, its liveness, a column, an attachment, its bags) is refused at
   startup, naming the unit and the resource; a spawn, a destroy or a `destroy_all` into a
-  sim kind, and any timer (`schedule`), is refused when issued. Events are the way in.
+  sim ktable, and any timer (`schedule`), is refused when issued. Events are the way in.
 - **What they emit to the Sim is input from outside**, as an event from code outside the
   schedule is today: a game that lets a UI drive its simulation records those events, as
   it records input. That is the replay question Krome deferred, now in one place.
@@ -186,9 +186,9 @@ Nov 15, 2026, on branch tool-stuff.
   interpolated. Arcfire's ring bench: the ticks 0.5 ms a frame cheaper, the Frame cycle
   0.48 ms, the extract itself the same; the replay matches.
 - **Frame and Work leave the sim alone** (last). At startup, on each unit's expanded
-  access: a write reaching a resource of a non-cosmetic kind that is not itself a cosmetic
+  access: a write reaching a resource of a non-cosmetic ktable that is not itself a cosmetic
   component fails init with the unit, its cycle and the resource named. At run time, in
-  the context: spawns, destroys and `destroy_all` into a sim kind, and every `schedule`,
+  the context: spawns, destroys and `destroy_all` into a sim ktable, and every `schedule`,
   are refused and logged (a spawn before anything reaches the command buffer, so nothing
   half-written is left). Always on, not only in dev builds: they are cheap, and a replay
   that drifts is not. Nothing in the tree tripped them; `core_tests` covers both halves. Arcfire's recorded replay matches (236 hashes): the Sim cycle

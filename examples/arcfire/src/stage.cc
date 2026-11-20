@@ -87,7 +87,7 @@ void segment_spawn(TickContext& ctx, const Game& g, const Dials& d, const Segmen
     f32 shown_y = kFieldTop + 24.0f + kSegmentSize.y * 0.5f;
     f32 clock = stage_row.len ? map_clock(stage_row[0]) : 0.0f;
     Sprite s = sprite_of(g, TEX_SEGMENTS, rect2{0.0f, sd.cell ? 0.5f : 0.0f, 1.0f, 0.5f}, kSegmentSize, Z_MAP);
-    ctx.spawn_later(g_plane_kind, transform2_at(point2{sd.x, shown_y + clock}), s, Plane{-1.0f, 0.0f, 0, 0});
+    ctx.spawn_later(g_plane_ktable, transform2_at(point2{sd.x, shown_y + clock}), s, Plane{-1.0f, 0.0f, 0, 0});
     for (u32 i = 0; i < 2; ++i) {
         GroundDef gd{};
         gd.x = sd.x + k_segment_pads[sd.cell][i].x;
@@ -133,13 +133,13 @@ void stage_enter(TickContext& ctx, Game& g, u32 index, const Dials& d) {
 // of an epoch that no longer spawns. A restart in the new stage goes back to its start.
 void stage_change(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
-    Table* world = ctx.write_kind(g_world_kind);
+    KTable* world = ctx.write_ktable(g_world_ktable);
     Stage* s = world->get<Stage>(g.world);
     Dials* d = world->get<Dials>(g.world);
     Run* r = world->get<Run>(g.world);
     if (!s || !d || !r) return;
-    const u32 kinds[] = {g_air_kind, g_ground_kind, g_bullet_kind, g_active_kind, g_shot_kind, g_item_kind, g_formation_kind, g_boss_kind, g_part_kind};
-    for (u32 k : kinds) ctx.destroy_all(k);
+    const u32 ktables[] = {g_air_ktable, g_ground_ktable, g_bullet_ktable, g_active_ktable, g_shot_ktable, g_item_ktable, g_formation_ktable, g_boss_ktable, g_part_ktable};
+    for (u32 k : ktables) ctx.destroy_all(k);
     u32 loops = s->loops + (g.next_stage <= s->index ? 1u : 0u); // back to the first: a round up
     if ((u32)g.next_position != d->position) {
         *d = dials_start(e, g, g.next_position);
@@ -249,7 +249,7 @@ void stage(TickContext& ctx) {
     }
     // A boss mark holds the marks' clock until its boss has died or left; the scroll goes on.
     if (s.waiting) {
-        if (ctx.write_kind(g_boss_kind)->live() == 0) { s.waiting = 0; music(ctx, g, false); }
+        if (ctx.write_ktable(g_boss_ktable)->live() == 0) { s.waiting = 0; music(ctx, g, false); }
         else s.held += s.speed;
     }
     while (!s.ended && !s.round_up && !s.waiting && s.cursor < def.mark_count && stage_clock(s) >= def.marks[s.cursor].at) {
@@ -263,7 +263,7 @@ void stage(TickContext& ctx) {
             u32 spacing = (u32)kv::lround((f32)f.spacing * d.formation_spacing);
             if (count == 0) count = 1;
             // Its row first, which counts its members down; then the members, by event.
-            Handle group = ctx.write_kind(g_formation_kind)->spawn(Formation{count, 0, 0, f.drop});
+            Handle group = ctx.write_ktable(g_formation_ktable)->spawn(Formation{count, 0, 0, f.drop});
             for (u32 i = 0; i < count; ++i) ctx.schedule(SpawnMember{m.index, i, run_row[0].epoch, 0, group, point2{0, 0}}, ctx.tick + (u64)i * spacing);
             break;
         }
@@ -316,7 +316,7 @@ void on_member(TickContext& ctx, Span<const SpawnMember> members) {
         f32 radius = f.look == Look::Boat ? 34.0f : f.look == Look::Heavy ? 26.0f : 18.0f; // the boat, the big ship, the rest
         Sprite s = enemy_sprite(g, f.look);
         if (f.look == Look::Debris) s.uv.x = (f32)(m.member % 3) / 3.0f; // the three pieces in turn
-        ctx.spawn_later(g_air_kind, transform2_at(at, KV_PI), s, collider_circle(radius, L_AIR, L_SHOT | L_SHIP), h, mv, em, Runner{});
+        ctx.spawn_later(g_air_ktable, transform2_at(at, KV_PI), s, collider_circle(radius, L_AIR, L_SHOT | L_SHIP), h, mv, em, Runner{});
     }
 }
 

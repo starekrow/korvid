@@ -44,7 +44,7 @@ previous-column copy, triggers and the hash; the tick runner marks every tick. T
 zones every chunk by its batch's name (a `parallel_for` is named after its unit, a level
 batch "level") and marks its waits as waits: a worker's idle and a caller's wait for its
 batch. The frame loop zones pump, ticks and render and marks every frame; memory counters
-come from the frame sample. The engine marks module startup, kind full, heap refused,
+come from the frame sample. The engine marks module startup, ktable full, heap refused,
 wave capped, stale events dropped and timers fired. A module adds zones only for what it
 wants to see inside its own systems. The renderer writes the GPU's spans (below).
 

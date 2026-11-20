@@ -53,7 +53,7 @@ namespace kv {
 
 bool cli_resolve(CliContext& ctx, const char* arg, char* out, usize cap) {
     if (cap < 2) return false;
-    // "@name[/rest]": the named entity's row under /kinds.
+    // "@name[/rest]": the named entity's row under /ktables.
     char named[KV_CLI_PATH_MAX];
     if (arg && arg[0] == '@') {
         const char* slash = strchr(arg, '/');
@@ -63,13 +63,13 @@ bool cli_resolve(CliContext& ctx, const char* arg, char* out, usize cap) {
         memcpy(name, arg + 1, nl);
         name[nl] = 0;
         Handle h = engine_entity_find(*ctx.engine, name);
-        Table* t = h.is_null() ? nullptr : engine_table_of(*ctx.engine, h);
+        KTable* t = h.is_null() ? nullptr : engine_ktable_of(*ctx.engine, h);
         if (!t) { ctx.fail("nothing is called '%s'", name); return false; }
-        char kind[KV_KIND_NAME_MAX];
+        char ktable[KV_KTABLE_NAME_MAX];
         usize i = 0;
-        for (; t->name[i] && i + 1 < sizeof kind; ++i) kind[i] = t->name[i] == '.' ? '/' : t->name[i];
-        kind[i] = 0;
-        format(named, sizeof named, "/kinds/%s/%u%s", kind, h.index(), slash ? slash : "");
+        for (; t->name[i] && i + 1 < sizeof ktable; ++i) ktable[i] = t->name[i] == '.' ? '/' : t->name[i];
+        ktable[i] = 0;
+        format(named, sizeof named, "/ktables/%s/%u%s", ktable, h.index(), slash ? slash : "");
         arg = named;
     }
     const char* base = arg && arg[0] == '/' ? "" : (ctx.cwd ? ctx.cwd : "/");

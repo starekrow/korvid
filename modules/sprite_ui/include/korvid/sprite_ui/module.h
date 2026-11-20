@@ -1,7 +1,7 @@
 // Korvid sprite_ui: the module record.
 //
 //   handle kinds sprite_ui.doc (an asset kind, in the asset module's scopes), sprite_ui.screen
-//   kind         sprite_ui.sprite (Transform2, Sprite; cosmetic): what the screens draw
+//   ktable       sprite_ui.sprite (Transform2, Sprite; cosmetic): what the screens draw
 //   events       SpuiEvent{screen, node, event, value}
 //   systems      sprite_ui.update  PreSim, main thread, Always: documents advance, reveals run,
 //                                  input reaches the topmost screen, events go out

@@ -24,7 +24,7 @@ namespace {
 
 using namespace kv;
 
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = ".thing", .components = "Transform2, Sprite, AnimPlayer", .capacity = 64},
     {.name = ".child", .components = "Transform2, Sprite, Local2, Parent, AnimPlayer", .capacity = 64},
 };
@@ -37,7 +37,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_event", KV_ON(AnimEvent, on_event), .phase = Phase::Input},
     {.name = ".on_finished", KV_ON(AnimFinished, on_finished), .phase = Phase::Input},
 };
-KV_MODULE_DEFINE(k_a) = {.name = "a", .kinds = k_kinds, .handlers = k_handlers};
+KV_MODULE_DEFINE(k_a) = {.name = "a", .ktables = k_ktables, .handlers = k_handlers};
 
 bool near(f32 a, f32 b, f32 eps = 1e-4f) { return kv::fabs(a - b) < eps; }
 
@@ -66,8 +66,8 @@ void test_anim(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&sprite_module, &scene_module, &asset_module, &anim_module, &k_a};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* things = engine_table(e, "a.thing");
-    Table* kids   = engine_table(e, "a.child");
+    KTable* things = engine_ktable(e, "a.thing");
+    KTable* kids   = engine_ktable(e, "a.child");
     u64 tick = 0;
     auto run = [&](f64 dt = 0.1, bool paused = false) { e.phases.run_tick(e, e.events, dt, paused ? tick : tick++, paused); };
 

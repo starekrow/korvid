@@ -30,7 +30,7 @@ then `"reload"`.
 moment the level starts loading to the moment its build handlers have run, however long the
 disk takes. A demo that switches levels at a sim tick reaches the same state at the same
 sim tick on every run. The fade runs on every tick, held or not, at the tick's length; its
-quad lives in a cosmetic kind and never touches the hash.
+quad lives in a cosmetic ktable and never touches the hash.
 
 ## Using it
 
@@ -87,8 +87,8 @@ What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
-| `level.root` | kind | `Transform2`; one live at a time, plus one being replaced |
-| `level.fade` | kind, cosmetic | `Transform2`, `Sprite`: the quad, screen space, layer 127, only while fading |
+| `level.root` | ktable | `Transform2`; one live at a time, plus one being replaced |
+| `level.fade` | ktable, cosmetic | `Transform2`, `Sprite`: the quad, screen space, layer 127, only while fading |
 | `LevelLeaving`, `LevelLoading`, `LevelBuild`, `LevelEntered` | event types | `LevelBuild::root` has a schema, so a stale root drops the event |
 | `level.run` | system, PreSim, main thread, `Always`, after the asset pumps | writes `level.root`, `level.fade` |
 | `level list`, `level load`, `level reload` | CLI commands | |
@@ -110,14 +110,14 @@ What the module registers with the engine:
 
 ## Remembering
 
-`level_persist(e, {"game.rock"})` names the kinds whose named entities a level remembers.
+`level_persist(e, {"game.rock"})` names the ktables whose named entities a level remembers.
 Leaving a level writes each of them to the level's record by name (`save_row`: columns,
 attachments, bag) and notes the names its build made that are gone; building it again, the
 module waits for the game's `LevelBuild` handlers to spawn it from the map, then destroys the
 gone and gives the rest their rows back, on a held tick before the first sim tick. A
 boulder pushed and left, or broken, is where it was left. `level_save(w, e)` and
 `level_load(e, doc, v)` carry every level's record in a save (the live level's as it stands);
-`level_forget` drops one. Unnamed entities are not remembered, and a kind that is not
+`level_forget` drops one. Unnamed entities are not remembered, and a ktable that is not
 listed is rebuilt from the map every time (arcanum's villagers, so a chase is level-local).
 
 ## Not in this module

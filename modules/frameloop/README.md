@@ -124,7 +124,7 @@ renders once.
 | `--threads N` | the job pool's size, main thread included; 1 is serial; the default is every core |
 | `--seed N` | the engine's seed (`EngineConfig::seed`): every module's `ctx.rng()` starts from it and its name; a recording keeps it |
 | `--rate X` | the developer's rate from the start, as the CLI's `rate X`: a recorded run or a demo four times faster |
-| `--early-reads order\|snapshot\|kind` | every kind's early reads ordered, every kind's from a snapshot, or as each kind says (the default); the game must hash the same ([scheduling](../../docs/concepts/scheduling.md#early-reads-order-or-snapshot)) |
+| `--early-reads order\|snapshot\|ktable` | every ktable's early reads ordered, every ktable's from a snapshot, or as each ktable says (the default); the game must hash the same ([scheduling](../../docs/concepts/scheduling.md#early-reads-order-or-snapshot)) |
 | `--hash`, `--hash-systems` | log the state hash after every tick; after every system |
 | `--trace-events` | print every delivered event with its emitter (dev builds) |
 | `--record FILE`, `--replay FILE` | write a run's input to a file; play a file back and check its hashes (above) |
@@ -138,7 +138,7 @@ renders once.
 | `--cli-port N`, `--cli-stdin`, `--cli-ascii` | the CLI's transports: loopback TCP, stdin even on a terminal; ASCII-only escapes non-ASCII as `\u{XXXX}` both ways |
 | `--goldberg PORT`, `--no-goldberg` | for a program that links `asset_live`: the running goldberg watch to reload from, on this port; or none this run (they set `KV_GOLDBERG`) |
 | `--idle-margin-ms N`, `--no-idle` | the slack kept back from the Work cycle (1.5 ms); one Work cycle a frame and no more |
-| `--capacity KIND=N` (repeatable) | a kind's capacity over the game's, by its full name (`arcfire.bullet=131072`) |
+| `--capacity KTABLE=N` (repeatable) | a ktable's capacity over the game's, by its full name (`arcfire.bullet=131072`) |
 | `--sprite-rows N` | the first size of the renderer's sprite table and of the extract's, over the config's `sprite_rows` (0: the default) |
 | `--touchpad` | the on-screen gamepad with the mouse as a finger, to try a layout on the desktop; it is on by itself where the screen is touched |
 | `--spike-hunt` | a dev build without the work that does no checking: no memory fills or poison, no guard pages, no event emitters for the trace (`dev_spike_hunt`). Its timings are near a ship build's, and its asserts, access checks, counters and profiler stay |
@@ -171,7 +171,7 @@ What the module registers with the engine:
 | `frameloop.replay` | system, phase Input | main thread; before `input.sample`: the file's actions |
 | `frameloop.record` | system, phase Input | main thread; after `input.sample`; reads `input.actions` |
 | `frameloop.on_sim_reset` | handler, phase Sim | on `SimReset`: a recording starts again |
-| `frameloop.overlay` | kind | cosmetic; `Transform2`, `Text`: the `--overlay` lines; never hashed |
+| `frameloop.overlay` | ktable | cosmetic; `Transform2`, `Text`: the `--overlay` lines; never hashed |
 | `screenshot FILE` | CLI command | the next frame drawn, as a PPM |
 
 Depends on: core, platform, platform_hid, math, render, asset, sprite, scene, text, cli,
@@ -199,7 +199,7 @@ touchpad. A game that depends on frameloop has all of them.
   `Always` system), never in a Sim system: a quit requested during a pause would otherwise
   wait for the resume.
 - **`--overlay` puts the report on screen**: the fps line and the memory line at the
-  top-left, in the module's own cosmetic kind, and with `--prof-report` the top zones
+  top-left, in the module's own cosmetic ktable, and with `--prof-report` the top zones
   under them, refreshed with every report. It draws in DejaVu Sans (the dejavu module) at 16 px.
 - **`--run-seconds` is cooperative.** It emits `ExitRequested{Timer}` once; a game that
   ignores it runs on.

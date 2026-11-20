@@ -1,10 +1,10 @@
-// arcfire: effects. Sparks and debris are particles, a cosmetic kind: they drift,
+// arcfire: effects. Sparks and debris are particles, a cosmetic ktable: they drift,
 // spin, slow and fade over their life and are never part of the state. Their randomness
 // is the module's own stream, not the sim's, so a dial that changes how many sparks fly
 // changes nothing the sim draws. Explosions are a flipbook of Kenney's burst tiles on a
 // cosmetic row that goes when its clip ends, in three sizes (fx_blast), the bigger two
 // with a ring of bent air (fx_shimmer, drawn by hud.cc's shimmer through a post shader). The bullets' glows
-// (dark halos, which is what reads over a pale sea) are a cosmetic kind kept slot for slot
+// (dark halos, which is what reads over a pale sea) are a cosmetic ktable kept slot for slot
 // with the bullets (glows, below).
 #include "arcfire.h"
 #include "korvid/anim/clip.h"
@@ -28,7 +28,7 @@ void fx_piece_of(TickContext& ctx, Handle material, point2 at, rect2 uv, vec2 si
     s.uv = uv;
     s.size = size;
     s.layer = layer;
-    ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{v}, Particle{life, life, spin, 0.97f, 1.0f, fall});
+    ctx.spawn_later(g_particle_ktable, transform2_at(at), s, Velocity{v}, Particle{life, life, spin, 0.97f, 1.0f, fall});
 }
 
 // The burst: a small flash, the star, the ball, its bits, the smoke (tiles row 0), four
@@ -54,7 +54,7 @@ Handle fx_boom_clip(Engine& e) {
 
 void fx_boom(TickContext& ctx, Game& g, point2 at, f32 size, i32 layer) {
     Sprite s = sprite_of(g, TEX_TILES, tile_uv(6, 0), vec2{size, size}, layer);
-    ctx.spawn_later(g_boom_kind, transform2_at(at, g.fx.range(0.0f, 2.0f * KV_PI)), s, anim_player(g.boom_clip));
+    ctx.spawn_later(g_boom_ktable, transform2_at(at, g.fx.range(0.0f, 2.0f * KV_PI)), s, anim_player(g.boom_clip));
 }
 
 void fx_blast(TickContext& ctx, Game& g, point2 at, Blast b) {
@@ -81,7 +81,7 @@ void fx_blast(TickContext& ctx, Game& g, point2 at, Blast b) {
         for (u32 i = 0; i < ring; ++i) {
             f32 a = 2.0f * KV_PI * (f32)i / (f32)(ring ? ring : 1);
             Sprite s = sprite_of(g, TEX_SPARK, rect2_unit(), vec2{6, 6}, Z_FX, hot, true);
-            ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{vec2{kv::cos(a) * 7.0f, kv::sin(a) * 7.0f}}, Particle{28, 28, 0.0f, 0.95f, 1.0f, 0.0f});
+            ctx.spawn_later(g_particle_ktable, transform2_at(at), s, Velocity{vec2{kv::cos(a) * 7.0f, kv::sin(a) * 7.0f}}, Particle{28, 28, 0.0f, 0.95f, 1.0f, 0.0f});
         }
         hud_flash(*ctx.engine);
         fx_shimmer(g, at, 300.0f, 1.0f, 50);
@@ -94,7 +94,7 @@ void fx_blast(TickContext& ctx, Game& g, point2 at, Blast b) {
 // An explosion's clip has played: the row goes.
 void on_boom_done(TickContext& ctx, Span<const AnimFinished> done) {
     for (const AnimFinished& f : done)
-        if (f.entity.kind() == engine_table_now(*ctx.engine, g_boom_kind)->kind) ctx.destroy(f.entity);
+        if (f.entity.kind() == engine_ktable_now(*ctx.engine, g_boom_ktable)->handle_kind) ctx.destroy(f.entity);
 }
 
 void fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 speed) {
@@ -103,7 +103,7 @@ void fx_sparks(TickContext& ctx, Game& g, point2 at, u32 count, color tint, f32 
         f32 v = speed * g.fx.range(0.3f, 1.0f);
         u32 life = 10 + g.fx.below(14);
         Sprite s = sprite_of(g, TEX_SPARK, rect2_unit(), vec2{5, 5}, Z_FX, tint, true);
-        ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{vec2{kv::cos(a) * v, kv::sin(a) * v}}, Particle{life, life, 0.0f, 0.9f, 1.0f, 0.0f});
+        ctx.spawn_later(g_particle_ktable, transform2_at(at), s, Velocity{vec2{kv::cos(a) * v, kv::sin(a) * v}}, Particle{life, life, 0.0f, 0.9f, 1.0f, 0.0f});
     }
 }
 
@@ -117,7 +117,7 @@ void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
     Span<const Transform2> xf = ctx.read<Transform2>("arcfire.air.Transform2");
     Span<const Sprite> sp = ctx.read<Sprite>("arcfire.air.Sprite");
     for (const Spawned& s : spawns) {
-        if (s.kind != g_air_kind || s.entity.is_null() || s.entity.index() >= xf.len) continue;
+        if (s.ktable != g_air_ktable || s.entity.is_null() || s.entity.index() >= xf.len) continue;
         Sprite shadow = sp[s.entity.index()];
         shadow.tint = color{0.0f, 0.0f, 0.04f, 0.33f};
         shadow.layer = Z_SHADOW;
@@ -128,13 +128,13 @@ void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
         Local2 local = local2_at(point2{o.x * kv::cos(r) - o.y * kv::sin(r), o.x * kv::sin(r) + o.y * kv::cos(r)});
         // Born where the composition will put it, so its first frame is not drawn moving
         // there from the world's origin (a streak across the field, once an enemy).
-        ctx.spawn_later(g_shadow_kind, transform2_at(at.position + o, at.rotation), local, Parent{s.entity}, shadow);
+        ctx.spawn_later(g_shadow_ktable, transform2_at(at.position + o, at.rotation), local, Parent{s.entity}, shadow);
     }
 }
 
 // Phase Sim: every particle moves, slows, turns and fades; at the end of its life it goes.
 void particles(TickContext& ctx) {
-    for (KindRows k : ctx.view<Transform2, Sprite, Velocity, Particle>()) {
+    for (KTableRows k : ctx.view<Transform2, Sprite, Velocity, Particle>()) {
         Span<Transform2> t = k.col<Transform2>();
         Span<Sprite> s = k.col<Sprite>();
         Span<Velocity> v = k.col<Velocity>();
@@ -156,8 +156,8 @@ void particles(TickContext& ctx) {
 }
 
 // Phase Sim, after the bullets fly: a soft dark disc under every enemy bullet, so they read
-// against the islands and the clouds. Glow row i is bullet slot i's (the plain kind's
-// in `.glow`, the active kind's in `.aglow`), spawned as the bullet table's rows grow and
+// against the islands and the clouds. Glow row i is bullet slot i's (the plain ktable's
+// in `.glow`, the active ktable's in `.aglow`), spawned as the bullet ktable's rows grow and
 // never destroyed; it takes its bullet's transform, the previous one too, so it is drawn
 // moving exactly as the bullet is (but for its first tick under a bullet, which is a jump:
 // the renderer would otherwise draw it moving from wherever its last bullet died), and a
@@ -167,10 +167,10 @@ void glows(TickContext& ctx) {
     Engine& e = *ctx.engine;
     Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
     bool on = dials.len && dials[0].glows;
-    const u32 pairs[2][2] = {{g_bullet_kind, g_glow_kind}, {g_active_kind, g_aglow_kind}};
+    const u32 pairs[2][2] = {{g_bullet_ktable, g_glow_ktable}, {g_active_ktable, g_aglow_ktable}};
     for (const auto& pr : pairs) {
-        const Table* src = engine_table(e, pr[0]);
-        Table* dst = ctx.write_kind(pr[1]);
+        const KTable* src = engine_ktable(e, pr[0]);
+        KTable* dst = ctx.write_ktable(pr[1]);
         u32 n = src->rows();
         if (!on && dst->rows() == 0) continue;
         while (on && dst->rows() < n && !dst->spawn(transform2_at(point2{0, 0}), Sprite{}, Glow{}).is_null()) {}

@@ -129,7 +129,7 @@ struct SpuiState_ {
     Array<SpuiQuad>       quads;       // this tick's output
     Array<Handle>       rows;        // the sprite_ui.sprite rows, reused in order
     u16                 doc_kind = 0, screen_kind = 0;
-    u32                 sprite_kind = 0;
+    u32                 sprite_ktable = 0;
     u32                 next_order = 1;
     Handle              white_texture, white_material;
     f32                 scale = 1.0f;// pixels per unit, this tick

@@ -1,5 +1,5 @@
 // arcfire: hits. The collision module reports overlaps between colliders whose
-// masks meet; `on_overlap` sorts each pair by its kinds into what it means (a shot on an
+// masks meet; `on_overlap` sorts each pair by its ktables into what it means (a shot on an
 // enemy, a bullet on the hitbox, an enemy on the hitbox, a bullet through the graze ring,
 // a bullet on the shell), and a handler each does the rest. They write the run in a chain
 // (module.cc), so a bullet that hits the hitbox takes back its own graze before the
@@ -18,7 +18,7 @@ const color kSparkHit{1.0f, 0.85f, 0.5f, 1.0f};
 const color kSparkGraze{0.6f, 0.9f, 1.0f, 1.0f};
 const color kSparkKill{1.0f, 0.6f, 0.25f, 1.0f};
 
-u16 hk(Engine& e, u32 kind_id) { return engine_table_now(e, kind_id)->kind; } // a handle kind, which never changes
+u16 hk(Engine& e, u32 ktable_id) { return engine_ktable_now(e, ktable_id)->handle_kind; } // a handle kind, which never changes
 
 // Whether the ship can be hurt now: not by the dials (always, or after the first death),
 // not while the egg plays.
@@ -35,9 +35,9 @@ void ship_dies(TickContext& ctx, Ship& s, u32 cause) {
 
 void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
     Engine& e = *ctx.engine;
-    const u16 ship = hk(e, g_ship_kind), ring = hk(e, g_ring_kind), shell = hk(e, g_shell_kind), shot = hk(e, g_shot_kind),
-              air = hk(e, g_air_kind), ground = hk(e, g_ground_kind), plain = hk(e, g_bullet_kind), active = hk(e, g_active_kind),
-              item = hk(e, g_item_kind), boss = hk(e, g_boss_kind), part = hk(e, g_part_kind), option = hk(e, g_option_kind);
+    const u16 ship = hk(e, g_ship_ktable), ring = hk(e, g_ring_ktable), shell = hk(e, g_shell_ktable), shot = hk(e, g_shot_ktable),
+              air = hk(e, g_air_ktable), ground = hk(e, g_ground_ktable), plain = hk(e, g_bullet_ktable), active = hk(e, g_active_ktable),
+              item = hk(e, g_item_ktable), boss = hk(e, g_boss_ktable), part = hk(e, g_part_ktable), option = hk(e, g_option_ktable);
     for (const OverlapBegin& o : overlaps) {
         for (u32 swap = 0; swap < 2; ++swap) {
             Handle a = swap ? o.b : o.a, b = swap ? o.a : o.b;
@@ -56,7 +56,7 @@ void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
 bool hurt(TickContext& ctx, Game& g, Handle target, i32 damage, point2 at, bool* killed) {
     Engine& e = *ctx.engine;
     *killed = false;
-    const u16 k = target.kind(), air = hk(e, g_air_kind), ground = hk(e, g_ground_kind), part = hk(e, g_part_kind);
+    const u16 k = target.kind(), air = hk(e, g_air_ktable), ground = hk(e, g_ground_ktable), part = hk(e, g_part_ktable);
     if (k == part) {
         Health& hp = ctx.write<Health>("arcfire.part.Health")[target.index()];
         if (hp.hp <= 0) { *killed = true; return false; } // down already (its trigger takes it): through
@@ -180,7 +180,7 @@ void on_kill(TickContext& ctx, Span<const Kill> kills) {
     Game& g = ctx.state_as<Game>();
     Span<Run> run = ctx.write<Run>(ARC_WORLD(Run));
     Span<const Dials> dials = ctx.read<Dials>(ARC_WORLD(Dials));
-    Table* formations = ctx.write_kind(g_formation_kind);
+    KTable* formations = ctx.write_ktable(g_formation_ktable);
     if (!run.len) return;
     for (const Kill& k : kills) {
         if (k.flat) run[0].score += k.score;

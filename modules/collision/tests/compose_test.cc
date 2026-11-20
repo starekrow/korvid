@@ -13,7 +13,7 @@ namespace {
 
 using namespace kv;
 
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = ".boss", .components = "Transform2", .capacity = 4},
     {.name = ".part", .components = "Transform2, Local2, Parent, Collider2", .capacity = 4},
     {.name = ".turret", .components = "Transform2, Local2, Parent, Collider2", .capacity = 4}, // on a part
@@ -27,14 +27,14 @@ void sys_watch(TickContext& ctx) {
 }
 // The boss moves right 10 units a tick, in Sim, as a game's mover does.
 void sys_move(TickContext& ctx) {
-    Table* t = ctx.write_kind("k.boss");
+    KTable* t = ctx.write_ktable("k.boss");
     for (Transform2& x : t->rows_of<Transform2>()) x.position.x += 10.0f;
 }
 constinit const SystemDesc k_systems[] = {
     {.name = ".move", .phase = Phase::Sim, .fn = sys_move, .writes = ".boss"},
     {.name = ".watch", .phase = Phase::PostSim, .fn = sys_watch, .reads = "OverlapBegin"},
 };
-KV_MODULE_DEFINE(k_k) = {.name = "k", .kinds = k_kinds, .systems = k_systems};
+KV_MODULE_DEFINE(k_k) = {.name = "k", .ktables = k_ktables, .systems = k_systems};
 
 } // namespace
 
@@ -45,10 +45,10 @@ void test_compose(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&sprite_module, &scene_module, &collision_module, &k_k};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* boss = engine_table(e, "k.boss");
-    Table* part = engine_table(e, "k.part");
-    Table* turret = engine_table(e, "k.turret");
-    Table* shot = engine_table(e, "k.shot");
+    KTable* boss = engine_ktable(e, "k.boss");
+    KTable* part = engine_ktable(e, "k.part");
+    KTable* turret = engine_ktable(e, "k.turret");
+    KTable* shot = engine_ktable(e, "k.shot");
     auto tick = [&](u64 t) { e.phases.run_tick(e, e.events, 1.0 / 60.0, t); };
 
     // The boss at x 0; its part 20 to the right of it, a turret 10 right of the part. A shot

@@ -21,7 +21,7 @@
 //   uv         rect2 (x, y, w, h in texture space)   step            Sprite.uv
 //   tint       rgba                                   step or linear  Sprite.tint
 //   alpha      a                                      step or linear  Sprite.tint.a, the color kept
-//   position   x, y                                   step or linear  Local2 on a child kind, else Transform2
+//   position   x, y                                   step or linear  Local2 on a child ktable, else Transform2
 //   rotation   radians                                step or linear  likewise
 //   scale      x, y                                   step or linear  likewise
 //   event      a name                                 fires on crossing   AnimEvent{entity, clip, name}

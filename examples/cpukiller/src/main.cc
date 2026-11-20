@@ -339,7 +339,7 @@ EngineRun run_engine(u32 threads, u32 ticks, bool scenarios_inside) {
     r.ms = ms_since(t0);
     breakdown(r);
     r.hash = engine_hash_state(e);
-    r.live = engine_table(e, "cpukiller.body")->live();
+    r.live = engine_ktable(e, "cpukiller.body")->live();
     engine_shutdown(e);
     return r;
 }

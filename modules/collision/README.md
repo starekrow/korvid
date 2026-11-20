@@ -1,6 +1,6 @@
 # collision
 
-Bodies that move and stop in the same tick, and overlaps delivered as events. Give a kind
+Bodies that move and stop in the same tick, and overlaps delivered as events. Give a ktable
 a `Collider2` next to its `Transform2` and it takes part, as one of three bodies:
 
 - a **sensor** (the default) reports when it starts and stops overlapping things, and
@@ -19,15 +19,15 @@ Every tick, in phase `Sim`:
 
 1. **Intents.** The game writes `Move2::delta` on its kinematic bodies: how far each wants
    to go this tick. A body that may move (kinematic, or a pushable solid) has `Move2` in its
-   kind; a kind that wants to know what happened has `MoveResult2` too.
+   ktable; a ktable that wants to know what happened has `MoveResult2` too.
 2. **`collision.resolve`** runs after every system that writes a `Move2`, `Transform2` or
    `Collider2` (the scheduler derives that from its sets). It takes the intents in a fixed
-   order, kinds by name and then slots, and moves each one along x and then y, swept
+   order, ktables by name and then slots, and moves each one along x and then y, swept
    against the static world and against every solid and kinematic body *as it stands at
    that moment*: the second mover sees where the first ended this tick, so two bodies never
    end up in one place. A pusher that meets a pushable solid moves it, at the solid's
    `pace`, as far as the pusher goes past it, against everything but the pusher, one deep.
-   Then it writes `Transform2` (a child kind's `Local2` by the same delta) and
+   Then it writes `Transform2` (a child ktable's `Local2` by the same delta) and
    `MoveResult2`: what was asked, what moved, which axes stopped, what stopped it, what it
    pushed, who pushed it. `collision.moved` lists the bodies something else moved.
 3. **The game reacts** in a Sim system that reads `MoveResult2` or `collision.moved`: the
@@ -70,7 +70,7 @@ module "mygame" {
 
 kormake adds the collision module to your executable's module list from that.
 
-**Give a kind a collider.** `Collider2` goes next to `Transform2` in the kind's
+**Give a ktable a collider.** `Collider2` goes next to `Transform2` in the ktable's
 component list, and the spawn passes one:
 
 ```cpp
@@ -90,7 +90,7 @@ A box is `collider_box(vec2{20, 10}, layer, mask)`, half extents, axis aligned.
 void on_overlap(TickContext& ctx, Span<const OverlapBegin> overlaps) {
     Game& g = ctx.state_as<Game>();
     for (const OverlapBegin& o : overlaps) {
-        // Which kinds met? A handle's kind is the table it belongs to; note them at startup.
+        // Which ktables met? A handle's kind says which ktable issued it; note them at startup.
         u16 ka = o.a.kind(), kb = o.b.kind();
         if (ka == g.bullet_kind && kb == g.rock_kind) ctx.emit(RockHit{o.b, o.a});
         else if (ka == g.rock_kind && kb == g.bullet_kind) ctx.emit(RockHit{o.a, o.b});
@@ -102,17 +102,17 @@ constinit const HandlerDesc k_handlers[] = {
 };
 ```
 
-The handle kinds come from the tables once the engine is up, in your startup:
+The handle kinds come from the ktables once the engine is up, in your startup:
 
 ```cpp
-g->rock_kind   = engine_table(engine, g_rock_kind)->kind;
-g->bullet_kind = engine_table(engine, g_bullet_kind)->kind;
+g->rock_kind   = engine_ktable(engine, g_rock_ktable)->handle_kind;
+g->bullet_kind = engine_ktable(engine, g_bullet_ktable)->handle_kind;
 ```
 
 Because the handles in a delivered event are live, a handler that holds a write on a
 column may index it directly: `ctx.write<Health>(k_hp)[o.a.index()]`.
 
-**Make it a body.** A kind that moves by intent has `Collider2, Move2, MoveResult2`; a
+**Make it a body.** A ktable that moves by intent has `Collider2, Move2, MoveResult2`; a
 system writes the intent, another reads the result:
 
 ```cpp
@@ -128,7 +128,7 @@ if (res[i].blocker.kind() == g.villager_hk) lose_heart();
 ```
 
 A pushable boulder is `collider_body(BodyKind::Solid, ..., ColliderPushable)` with `pace`
-set and `Move2` in its kind (the resolve writes its position).
+set and `Move2` in its ktable (the resolve writes its position).
 
 **Pick layers deliberately.** A collider's `layer` is the set it is on; its `mask` is the
 set it will meet. Both directions must agree, so a bullet with `mask = L_ROCK` never
@@ -176,7 +176,7 @@ What the module registers with the engine:
 | `collision.broadphase` | system, phase Sim | after the compose; reads the same columns as the resolve |
 | `collision.clear` | system, phase PostSim | writes `*[Move2].Move2` |
 
-Kinds without `Move2` are only read, so a game that moves its own sensors (rocks) keeps
+A ktable without `Move2` is only read, so a game that moves its own sensors (rocks) keeps
 doing so and the broadphase reports them after its movers.
 
 ## Behaviour worth knowing
@@ -203,18 +203,18 @@ doing so and the broadphase reports them after its movers.
   mixed sizes, shapes and masks against a test of every pair (`tests/pairs_test.cc`).
 
 - **Order decides.** Two bodies walking into each other resolve by order: the first takes
-  the gap, the second stops at it. The order is the same in every run (kinds by name,
+  the gap, the second stops at it. The order is the same in every run (ktables by name,
   slots), not symmetric. A game that wants fairness alternates or slows both.
 - **Read your position early.** A system that reads where a body is to decide its intent
   reads a column the resolve writes. Mark the read `^` (`.reads = "^.npc.Local2"`): it is
   the value the phase started with, and the scheduler runs that system before the resolve
-  instead of after it (or, for a snapshot kind, hands it a copy).
+  instead of after it (or, for a snapshot ktable, hands it a copy).
 - **Children the game moves before the resolve are snapshots.** The resolve reads child
-  bodies (`Parent`, not moving themselves) early, where the last compose put them. A kind
-  of child body that a Sim system spawns or moves before the resolve would ask the
-  resolve to run both before that system and after it; make the kind a snapshot
+  bodies (`Parent`, not moving themselves) early, where the last compose put them. A ktable
+  of child bodies that a Sim system spawns or moves before the resolve would ask the
+  resolve to run both before that system and after it; make the ktable a snapshot
   (`.early_reads = EarlyReads::Snapshot`), as arcfire's boss parts and egg shell are, and
-  the resolve sees them as the phase found them. Init names the kind when it is needed.
+  the resolve sees them as the phase found them. Init names the ktable when it is needed.
 - **Teleport before the resolve.** A system that writes a body's `Transform2` after the
   resolve (in a reaction) is a cycle: the resolve reads it. Teleport in the system that
   writes the intent, before.

@@ -80,7 +80,7 @@ local function set_state(g, step, state)
     if state == "unchecked" then g.unchecked = g.unchecked + 1 end
     if state == "running" then g.running = g.running + 1 end
     g.replan = true
-    if step.h then host.kinds.step:set(step.h, "state", STATE[state]) end
+    if step.h then host.ktables.step:set(step.h, "state", STATE[state]) end
 end
 
 local function remove_output(g, output, why)
@@ -162,7 +162,7 @@ local function drop_step(g, key, why)
     unlink_uses(g, step)
     local was_running = step.state == "running"
     set_state(g, step, "clean") -- out of the counts
-    if step.h then host.kinds.step:destroy(step.h) end
+    if step.h then host.ktables.step:destroy(step.h) end
     g.steps[key] = nil
     g.todo[key] = nil
     if step.kind == "copy" then
@@ -220,14 +220,14 @@ function Graph:file_changed(key)
         f.collision = nil
         if not step then
             step = { kind = "copy", output = out, file = key, root = f.root, source = f.path, state = "clean" }
-            step.h = host.kinds.step:spawn{ output = out, source = f.path, root = f.root }
+            step.h = host.ktables.step:spawn{ output = out, source = f.path, root = f.root }
             self.steps[key] = step
             self.claim[out] = key
         end
     else
         if not step then
             step = { kind = "shell", file = key, root = f.root, source = f.path, state = "clean", work = convert.work_dir(key, a.conv.name) }
-            step.h = host.kinds.step:spawn{ output = "(work)/" .. step.work, source = f.path, root = f.root }
+            step.h = host.ktables.step:spawn{ output = "(work)/" .. step.work, source = f.path, root = f.root }
             self.steps[key] = step
             self.by_work[step.work] = step
         end
@@ -389,7 +389,7 @@ local function finish_shell(g, step)
     end
     g.ran[step.file] = { key = step.run_key, outputs = outputs, uses = step.kim and step.uses or nil }
     s.state_dirty = true
-    if step.h then host.kinds.step:set(step.h, "key", (step.run_key:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))) end
+    if step.h then host.ktables.step:set(step.h, "key", (step.run_key:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))) end
     g.cooked = g.cooked + 1
     step.cooked = true
     step.exited = false
@@ -454,7 +454,7 @@ function Graph:cook_done(ev)
     self.present[ev.path] = { size = ev.size, mtime = ev.mtime }
     self.built[ev.path] = { key = copy_key(ev.hash, ev.path), size = ev.size, mtime = ev.mtime, source = step.file }
     self.s.state_dirty = true
-    if step.h then host.kinds.step:set(step.h, "key", (self.built[ev.path].key:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))) end
+    if step.h then host.ktables.step:set(step.h, "key", (self.built[ev.path].key:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end))) end
     self.cooked = self.cooked + 1
     step.cooked = true
     if step.again or (f and f.hash ~= ev.hash) then
@@ -583,7 +583,7 @@ function Graph:state_writer()
     for key, f in pairs(s.files) do if not f.is_berg and f.hash then files[#files + 1] = key end end
     for out in pairs(g.built) do outs[#outs + 1] = out end
     for key in pairs(g.ran) do rans[#rans + 1] = key end
-    local rows = host.kinds.file
+    local rows = host.ktables.file
     local parts, deadline = { '{"version":1,"files":{' }, nil
     local function each(list, piece)
         local first = true

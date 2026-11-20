@@ -63,12 +63,12 @@ void bomb(TickContext& ctx) {
 void on_bomb(TickContext& ctx, Span<const Bombed> blasts) {
     Game& g = ctx.state_as<Game>();
     for (u32 n = 0; n < blasts.len; ++n) {
-        const u32 kinds[] = {g_air_kind, g_ground_kind};
-        for (u32 kind : kinds) {
-            bool air = kind == g_air_kind;
+        const u32 ktables[] = {g_air_ktable, g_ground_ktable};
+        for (u32 ktable : ktables) {
+            bool air = ktable == g_air_ktable;
             Span<const Health> hp = ctx.read<Health>(air ? "arcfire.air.Health" : "arcfire.ground.Health");
             Span<const Transform2> xf = ctx.read<Transform2>(air ? "arcfire.air.Transform2" : "arcfire.ground.Transform2");
-            KindRows t = ctx.rows(kind); // liveness and handles, declared with the columns
+            KTableRows t = ctx.rows(ktable); // liveness and handles, declared with the columns
             for (u32 i = 0; i < t.rows(); ++i) {
                 if (!t.alive(i) || hp[i].hp <= 0 || !in_field(xf[i].position, 0.0f)) continue;
                 fx_sparks(ctx, g, xf[i].position, 3, kSparkBlast, 3.0f);
@@ -78,7 +78,7 @@ void on_bomb(TickContext& ctx, Span<const Bombed> blasts) {
         }
         Span<Health> php = ctx.write<Health>("arcfire.part.Health");
         Span<const Transform2> pxf = ctx.read<Transform2>("arcfire.part.Transform2");
-        KindRows parts = ctx.rows(g_part_kind);
+        KTableRows parts = ctx.rows(g_part_ktable);
         for (u32 i = 0; i < parts.rows(); ++i) {
             if (!parts.alive(i) || php[i].hp <= 0 || !in_field(pxf[i].position, 0.0f) || part_absorbs(g, ctx, parts.handle_at(i))) continue;
             php[i].hp -= kBlastDamage;

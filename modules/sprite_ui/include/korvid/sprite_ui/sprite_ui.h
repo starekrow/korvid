@@ -2,7 +2,7 @@
 //
 // A screen is a tree of named nodes, built from a document (.spui.json) or in code, laid
 // out in UI units against a design height and drawn as cosmetic screen-space sprites
-// (the kind "sprite_ui.sprite"): output for the renderer and the CLI, never input. Nodes:
+// (the ktable "sprite_ui.sprite"): output for the renderer and the CLI, never input. Nodes:
 //
 //   box     a plain container: children placed by anchor, pivot and offset
 //   panel   a box with a frame behind it: a 9-slice from the style, or a flat color

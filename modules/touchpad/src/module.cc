@@ -39,7 +39,7 @@ struct TouchpadModule {
     char   layout_path[128] = "touchpad/default.json";
     bool   layout_wanted = true;
     Handle ring_texture, disc_texture, ring_material, disc_material;
-    u32    sprite_kind = 0;
+    u32    sprite_ktable = 0;
     Array<Handle> rows;
 };
 
@@ -180,7 +180,7 @@ void tp_draw(TickContext& ctx) {
         quads[n++] = Quad{s.ring_material, s.state.center.x, s.state.center.y, r * 2.0f, a};
         quads[n++] = Quad{s.disc_material, s.state.knob.x, s.state.knob.y, r * 0.9f, a * 1.6f > 1.0f ? 1.0f : a * 1.6f};
     }
-    Table* rows = ctx.write_kind(s.sprite_kind);
+    KTable* rows = ctx.write_ktable(s.sprite_ktable);
     for (u32 i = 0; i < n; ++i) {
         const Quad& q = quads[i];
         Sprite sp;
@@ -211,7 +211,7 @@ bool tp_startup(Engine& e, ModuleInstance& self) {
     if (!s) return false;
     s->config = touchpad_default();
     s->rows.alloc = &self.general;
-    s->sprite_kind = engine_kind_id(e, "touchpad.sprite");
+    s->sprite_ktable = engine_ktable_id(e, "touchpad.sprite");
     self.set_state(s);
     return platform_pump_add(e, tp_pump, s);
 }
@@ -229,7 +229,7 @@ void tp_shutdown(Engine& e, ModuleInstance& self) {
     s->rows.free();
 }
 
-constinit const KindDesc k_kinds[] = {{.name = ".sprite", .components = "Transform2, Sprite", .capacity = 64, .cosmetic = true}};
+constinit const KTableDesc k_ktables[] = {{.name = ".sprite", .components = "Transform2, Sprite", .capacity = 64, .cosmetic = true}};
 constinit const SystemDesc k_systems[] = {
     {.name = ".draw", .phase = Phase::Frame, .fn = tp_draw, .writes = ".sprite", .after = "?sprite_ui.draw", .main_thread = true},
 };
@@ -238,7 +238,7 @@ constinit const SystemDesc k_systems[] = {
 
 KV_MODULE_DEFINE(touchpad_module) = {
     .name     = "touchpad",
-    .kinds    = k_kinds,
+    .ktables  = k_ktables,
     .systems  = k_systems,
     .startup  = tp_startup,
     .shutdown = tp_shutdown,

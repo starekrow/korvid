@@ -1,7 +1,7 @@
-// The engine's own mounts: what core knows, as paths. Kinds down to a field, the
+// The engine's own mounts: what core knows, as paths. The ktables down to a field, the
 // schedule, the resources, event types, triggers, the clock, the modules, memory and the
 // profiler's zones. Everything here reads engine records that exist anyway; the only
-// writes are a kind's fields (through the schema) and the clock.
+// writes are a ktable's fields (through the schema) and the clock.
 #include "cli_internal.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/format.h"
@@ -18,17 +18,17 @@ namespace {
 
 const char* yes_no(bool b) { return b ? "yes" : "no"; }
 
-// ---- /kinds -----------------------------------------------------------------------------------
-// /kinds/<module>/<kind>/            the kind: live count, columns
-// /kinds/<module>/<kind>/<slot>      a live row: its describe
-// /kinds/<module>/<kind>/<slot>/<Component>[/<field>]   a component, a field (patchable)
+// ---- /ktables ---------------------------------------------------------------------------------
+// /ktables/<module>/<ktable>/            the ktable: live count, columns
+// /ktables/<module>/<ktable>/<slot>      a live row: its describe
+// /ktables/<module>/<ktable>/<slot>/<Component>[/<field>]   a component, a field (patchable)
 
-// The table whose slashed name is the longest prefix of `rel`, and what follows it.
-Table* kind_of(Engine& e, const char* rel, const char** rest) {
-    Table* best = nullptr;
+// The ktable whose slashed name is the longest prefix of `rel`, and what follows it.
+KTable* ktable_of(Engine& e, const char* rel, const char** rest) {
+    KTable* best = nullptr;
     usize best_len = 0;
-    for (Table& t : e.tables) {
-        char slashed[KV_KIND_NAME_MAX];
+    for (KTable& t : e.ktables) {
+        char slashed[KV_KTABLE_NAME_MAX];
         cli_dots_to_slashes(t.name, slashed, sizeof slashed);
         usize n = strlen(slashed);
         if (strncmp(rel, slashed, n) == 0 && (rel[n] == 0 || rel[n] == '/') && n > best_len) { best = &t; best_len = n; }
@@ -45,9 +45,9 @@ bool parse_slot(const char* s, u32* out) {
     return true;
 }
 
-// A row's describe without its handle: "kind#slot:gen Transform2{...} ..." from the first
+// A row's describe without its handle: "ktable#slot:gen Transform2{...} ..." from the first
 // component on. The handle ends at the space before the first brace.
-int row_summary(const Table& t, u32 slot, char* out, usize cap) {
+int row_summary(const KTable& t, u32 slot, char* out, usize cap) {
     char full[512];
     t.describe(t.handle_at(slot), full, sizeof full);
     const char* body = full;
@@ -59,21 +59,21 @@ int row_summary(const Table& t, u32 slot, char* out, usize cap) {
     return format(out, cap, "%.120s", body);
 }
 
-void kinds_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
+void ktables_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
     Engine& e = *ctx.engine;
     const char* rest = nullptr;
-    Table* t = dir[0] ? kind_of(e, dir, &rest) : nullptr;
-    if (!t) { // a module directory, or the root: the kinds as a tree
+    KTable* t = dir[0] ? ktable_of(e, dir, &rest) : nullptr;
+    if (!t) { // a module directory, or the root: the ktables as a tree
         CliTree tree{dir, emit, user};
-        for (Table& tab : e.tables) {
-            char slashed[KV_KIND_NAME_MAX], summary[96];
+        for (KTable& tab : e.ktables) {
+            char slashed[KV_KTABLE_NAME_MAX], summary[96];
             cli_dots_to_slashes(tab.name, slashed, sizeof slashed);
             format(summary, sizeof summary, "%u live of %u%s", tab.live(), tab.capacity, tab.desc->cosmetic ? ", cosmetic" : "");
             if (!tree.add(slashed, true, summary)) return;
         }
         return;
     }
-    // Inside a kind: rest is "" (rows), "<slot>/" (components) or "<slot>/<Component>/" (fields).
+    // Inside a ktable: rest is "" (rows), "<slot>/" (components) or "<slot>/<Component>/" (fields).
     char rbuf[128];
     strncpy(rbuf, rest, sizeof rbuf - 1); rbuf[sizeof rbuf - 1] = 0;
     usize rl = strlen(rbuf);
@@ -121,12 +121,12 @@ void kinds_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
     }
 }
 
-// Resolves rel to table, slot, column and field (null where the path stops); false if
+// Resolves rel to ktable, slot, column and field (null where the path stops); false if
 // any present component is not there.
-bool kind_node(Engine& e, const char* rel, Table** table, i64* slot, const Column** column, const FieldDesc** field) {
+bool ktable_node(Engine& e, const char* rel, KTable** table, i64* slot, const Column** column, const FieldDesc** field) {
     *table = nullptr; *slot = -1; *column = nullptr; *field = nullptr;
     const char* rest = nullptr;
-    Table* t = kind_of(e, rel, &rest);
+    KTable* t = ktable_of(e, rel, &rest);
     if (!t) return false;
     *table = t;
     if (!rest[0]) return true;
@@ -147,16 +147,16 @@ bool kind_node(Engine& e, const char* rel, Table** table, i64* slot, const Colum
     return *field != nullptr;
 }
 
-bool kinds_describe(CliContext& ctx, const char* rel) {
+bool ktables_describe(CliContext& ctx, const char* rel) {
     Engine& e = *ctx.engine;
-    Table* t; i64 slot; const Column* col; const FieldDesc* f;
-    if (!rel[0] || !kind_node(e, rel, &t, &slot, &col, &f)) return false;
+    KTable* t; i64 slot; const Column* col; const FieldDesc* f;
+    if (!rel[0] || !ktable_node(e, rel, &t, &slot, &col, &f)) return false;
     if (slot < 0) {
         char line[512];
         usize at = 0;
         for (const Column& c : t->columns)
             at += (usize)format(line + at, sizeof line - at, "%s%s%s%s", at ? ", " : "", c.desc->name, c.desc->has_prev() ? " (prev)" : "", c.desc->is_sim() ? "" : " (cosmetic)");
-        ctx.print("%s: %u live of %u, module %s%s", t->name, t->live(), t->capacity, e.modules[t->module].desc->name, t->desc->cosmetic ? ", cosmetic kind" : "");
+        ctx.print("%s: %u live of %u, module %s%s", t->name, t->live(), t->capacity, e.modules[t->module].desc->name, t->desc->cosmetic ? ", cosmetic ktable" : "");
         ctx.print("columns: %s", line);
         return true;
     }
@@ -186,11 +186,11 @@ bool kinds_describe(CliContext& ctx, const char* rel) {
     return true;
 }
 
-bool kinds_patch(CliContext& ctx, const char* rel, Span<const char* const> values) {
+bool ktables_patch(CliContext& ctx, const char* rel, Span<const char* const> values) {
     Engine& e = *ctx.engine;
-    Table* t; i64 slot; const Column* col; const FieldDesc* f;
-    if (!rel[0] || !kind_node(e, rel, &t, &slot, &col, &f)) { ctx.fail("no such path under /kinds: %s", rel); return false; }
-    if (!f) { ctx.fail("patch a field: /kinds/<module>/<kind>/<slot>/<Component>/<field> value..."); return false; }
+    KTable* t; i64 slot; const Column* col; const FieldDesc* f;
+    if (!rel[0] || !ktable_node(e, rel, &t, &slot, &col, &f)) { ctx.fail("no such path under /ktables: %s", rel); return false; }
+    if (!f) { ctx.fail("patch a field: /ktables/<module>/<ktable>/<slot>/<Component>/<field> value..."); return false; }
     if (f->type == FieldType::Handle) { ctx.fail("a handle field cannot be patched"); return false; }
     if (f->type == FieldType::Char) {
         // A string: the values joined by single spaces (quote it to keep runs of spaces).
@@ -202,7 +202,7 @@ bool kinds_patch(CliContext& ctx, const char* rel, Span<const char* const> value
         utf8_trim(str);
         u8* srow = const_cast<Column*>(col)->data + (usize)slot * col->stride;
         schema_field_set_string(*f, srow, str);
-        return kinds_describe(ctx, rel);
+        return ktables_describe(ctx, rel);
     }
     if (values.len != f->count) { ctx.fail("field '%s' takes %u value%s", f->name, f->count, f->count == 1 ? "" : "s"); return false; }
     u8* row = const_cast<Column*>(col)->data + (usize)slot * col->stride;
@@ -211,7 +211,7 @@ bool kinds_patch(CliContext& ctx, const char* rel, Span<const char* const> value
         if (!cli_arg_f32(ctx, values[l], f->name, &v)) return false;
         schema_field_set(*f, row, l, (f64)v);
     }
-    return kinds_describe(ctx, rel);
+    return ktables_describe(ctx, rel);
 }
 
 // ---- /systems and /handlers -----------------------------------------------------------------------
@@ -325,7 +325,7 @@ bool resources_describe(CliContext& ctx, const char* rel) {
     if (!id) return false;
     const ResourceEntry& r = e.resources[id - 1];
     ctx.print("%s: id %u, module %s, %s%s", r.name, id, e.modules[r.module].desc->name,
-              r.ptr ? "published (a column or a struct; see /kinds for columns)" : "declared, nothing published", r.cls == ResourceClass::Append ? ", takes appends" : "");
+              r.ptr ? "published (a column or a struct; see /ktables for columns)" : "declared, nothing published", r.cls == ResourceClass::Append ? ", takes appends" : "");
     return true;
 }
 
@@ -468,8 +468,8 @@ bool modules_describe(CliContext& ctx, const char* rel) {
     for (const ModuleInstance& m : e.modules) {
         if (strcmp(m.desc->name, rel) != 0) continue;
         const ModuleDesc& d = *m.desc;
-        ctx.print("%s: %s, index %u; %u events, %u components, %u kinds, %u resources, %u systems, %u handlers, %u triggers, %u commands, %u mounts",
-                  d.name, m.started ? "up" : "down", m.index, d.events.len, d.components.len, d.kinds.len, d.resources.len, d.systems.len, d.handlers.len, d.triggers.len, d.commands.len, d.mounts.len);
+        ctx.print("%s: %s, index %u; %u events, %u components, %u ktables, %u resources, %u systems, %u handlers, %u triggers, %u commands, %u mounts",
+                  d.name, m.started ? "up" : "down", m.index, d.events.len, d.components.len, d.ktables.len, d.resources.len, d.systems.len, d.handlers.len, d.triggers.len, d.commands.len, d.mounts.len);
         ctx.print("arena: %llu bytes used, %llu peak, %llu committed", (unsigned long long)m.arena.used, (unsigned long long)m.arena.peak, (unsigned long long)m.arena.committed);
         return true;
     }
@@ -531,7 +531,7 @@ bool perf_describe(CliContext& ctx, const char* rel) {
 }
 
 // ---- /names --------------------------------------------------------------------------------
-// /names/<name>   a named entity: where it is under /kinds, and its describe.
+// /names/<name>   a named entity: where it is under /ktables, and its describe.
 
 struct NameList { CliEmitFn emit; void* user; Engine* e; bool more; };
 
@@ -540,7 +540,7 @@ void names_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
     NameList nl{emit, user, ctx.engine, true};
     engine_entity_names_each(*ctx.engine, [](Handle h, Name n, void* u) {
         NameList& l = *(NameList*)u;
-        Table* t = engine_table_of(*l.e, h);
+        KTable* t = engine_ktable_of(*l.e, h);
         char summary[96];
         format(summary, sizeof summary, "%s/%u", t ? t->name : "?", h.index());
         l.more = l.emit(l.user, name_str(n), summary);
@@ -551,13 +551,13 @@ void names_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
 bool names_describe(CliContext& ctx, const char* rel) {
     if (!rel[0]) return false;
     Handle h = engine_entity_find(*ctx.engine, rel);
-    Table* t = h.is_null() ? nullptr : engine_table_of(*ctx.engine, h);
+    KTable* t = h.is_null() ? nullptr : engine_ktable_of(*ctx.engine, h);
     if (!t) return false;
     char text[512];
     t->describe(h, text, sizeof text);
-    char kind[KV_KIND_NAME_MAX];
-    cli_dots_to_slashes(t->name, kind, sizeof kind);
-    ctx.print("@%s: /kinds/%s/%u %s", rel, kind, h.index(), text);
+    char slashed[KV_KTABLE_NAME_MAX];
+    cli_dots_to_slashes(t->name, slashed, sizeof slashed);
+    ctx.print("@%s: /ktables/%s/%u %s", rel, slashed, h.index(), text);
     return true;
 }
 
@@ -565,7 +565,7 @@ bool names_describe(CliContext& ctx, const char* rel) {
 
 const CliMountDesc k_engine_mounts[11] = {
     {.path = "/names",     .list = names_list,     .describe = names_describe},
-    {.path = "/kinds",     .list = kinds_list,     .describe = kinds_describe, .patch = kinds_patch},
+    {.path = "/ktables",   .list = ktables_list,   .describe = ktables_describe, .patch = ktables_patch},
     {.path = "/systems",   .list = systems_list,   .describe = systems_describe},
     {.path = "/handlers",  .list = handlers_list,  .describe = handlers_describe},
     {.path = "/resources", .list = resources_list, .describe = resources_describe},

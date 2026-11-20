@@ -67,9 +67,9 @@ void egg(TickContext& ctx) {
     EggState& es = es_row[0];
     if (es.restart && --es.restart == 0) hud_cover(e, g, false);
 
-    Table* ships = ctx.write_kind(g_ship_kind);
-    Table* eggs = ctx.write_kind(g_egg_kind);
-    Table* shells = ctx.write_kind(g_shell_kind);
+    KTable* ships = ctx.write_ktable(g_ship_ktable);
+    KTable* eggs = ctx.write_ktable(g_egg_ktable);
+    KTable* shells = ctx.write_ktable(g_shell_ktable);
     Span<Collider2> ring_col = ctx.write<Collider2>("arcfire.ring.Collider2");
     Collider2* ring = g.ring.index() < ring_col.len ? &ring_col[g.ring.index()] : nullptr;
     Transform2* xf = ships->get<Transform2>(g.ship);
@@ -166,13 +166,13 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     Span<const Dials> dials_row = ctx.read<Dials>(ARC_WORLD(Dials));
     if (!run.len || !deaths.len) return;
     const ShipDied& d = deaths[0]; // one death a tick: the hit handlers make sure
-    Table* ships = ctx.write_kind(g_ship_kind);
+    KTable* ships = ctx.write_ktable(g_ship_ktable);
     const Transform2* died_at = ships->get<Transform2>(g.ship);
     Run& r = run[0];
     EggState& es = es_row[0];
     ++r.deaths;
     chain_break(r);
-    ctx.destroy_all(g_option_kind); // a death costs the options (their beams go with them, children)
+    ctx.destroy_all(g_option_ktable); // a death costs the options (their beams go with them, children)
     if (Ship* ship = ships->get<Ship>(g.ship); ship && ship->power > 1) --ship->power; // and a level of the weapon's power
     if (r.eggs > 0) {
         --r.eggs;
@@ -185,9 +185,9 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     }
     // Out of eggs: everything the stage made goes, the stage's clock goes back to its
     // start, and anything it had scheduled is of an epoch that no longer spawns.
-    const u32 kinds[] = {g_air_kind, g_ground_kind, g_bullet_kind, g_active_kind, g_shot_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind,
-                         g_boss_kind, g_part_kind};
-    for (u32 k : kinds) ctx.destroy_all(k);
+    const u32 ktables[] = {g_air_ktable, g_ground_ktable, g_bullet_ktable, g_active_ktable, g_shot_ktable, g_egg_ktable, g_shell_ktable, g_item_ktable, g_formation_ktable,
+                           g_boss_ktable, g_part_ktable};
+    for (u32 k : ktables) ctx.destroy_all(k);
     stage_reset(stage_row[0], g.stage);
     i64 at_death = r.score;
     r.score = r.stage_score;

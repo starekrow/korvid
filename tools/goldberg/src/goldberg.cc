@@ -123,9 +123,9 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(GbBerg, k_berg_fields),
     KV_COMPONENT(GbStep, k_step_fields),
 };
-// Tools have no simulation to hash: the pools are for inspection (ls /kinds/goldberg) and
+// Tools have no simulation to hash: the pools are for inspection (ls /ktables/goldberg) and
 // for memory that is laid out, not for determinism.
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = ".event", .components = "GbEvent", .capacity = 16384, .cosmetic = true},
     {.name = ".file",  .components = "GbFile",  .capacity = 262144, .cosmetic = true},
     {.name = ".berg",  .components = "GbBerg",  .capacity = 16384, .cosmetic = true},
@@ -274,7 +274,7 @@ struct GoldbergState {
     Array<char>     pending_text;
     Array<GbText>   texts;               // texts of the events now in rows
     u32             seq = 0;
-    Table*          events = nullptr;
+    KTable*         events = nullptr;
     // Programs connected to a watch (docs/PRDs/Krome-Slice-6-PRD.md, "A program's connection to
     // goldberg"): told `changed PATH` after each output lands, `removed PATH` after one leaves.
     struct Program {
@@ -1111,9 +1111,9 @@ void fill_rows(GoldbergState& s) {
     }
 }
 
-struct SeqCmp { Table* events; };
+struct SeqCmp { KTable* events; };
 int seq_cmp(const void* a, const void* b, void* ctx) {
-    Table* t = ((SeqCmp*)ctx)->events;
+    KTable* t = ((SeqCmp*)ctx)->events;
     u32 x = t->get<GbEvent>(*(const Handle*)a)->seq, y = t->get<GbEvent>(*(const Handle*)b)->seq;
     return x < y ? -1 : x > y ? 1 : 0;
 }
@@ -1594,15 +1594,15 @@ bool load_app(GoldbergState& s, Engine& e) {
     lua_pushlightuserdata(L, &s);
     luaL_setfuncs(L, k_host, 1);
     lua_newtable(L);
-    script_push_kind(L, engine_table(e, "goldberg.event"));
+    script_push_ktable(L, engine_ktable(e, "goldberg.event"));
     lua_setfield(L, -2, "event");
-    script_push_kind(L, engine_table(e, "goldberg.file"));
+    script_push_ktable(L, engine_ktable(e, "goldberg.file"));
     lua_setfield(L, -2, "file");
-    script_push_kind(L, engine_table(e, "goldberg.berg"));
+    script_push_ktable(L, engine_ktable(e, "goldberg.berg"));
     lua_setfield(L, -2, "berg");
-    script_push_kind(L, engine_table(e, "goldberg.step"));
+    script_push_ktable(L, engine_ktable(e, "goldberg.step"));
     lua_setfield(L, -2, "step");
-    lua_setfield(L, -2, "kinds");
+    lua_setfield(L, -2, "ktables");
     lua_pushstring(L, s.lua_dir);
     lua_setfield(L, -2, "lua_dir");
     lua_pushboolean(L, fs_watch_has_native());
@@ -1711,10 +1711,10 @@ void pump_body(TickContext& ctx, bool work) {
     GoldbergState& s = ctx.state_as<GoldbergState>();
     if (s.failed) return;
     f64 tick_start = time_now();
-    s.events = ctx_kind(ctx, "goldberg.event", true);
-    ctx_kind(ctx, "goldberg.file", true);
-    ctx_kind(ctx, "goldberg.berg", true);
-    ctx_kind(ctx, "goldberg.step", true);
+    s.events = ctx_ktable(ctx, "goldberg.event", true);
+    ctx_ktable(ctx, "goldberg.file", true);
+    ctx_ktable(ctx, "goldberg.berg", true);
+    ctx_ktable(ctx, "goldberg.step", true);
 
     serve_programs(s);
     // 1. A command.
@@ -2280,7 +2280,7 @@ constinit const HandlerDesc k_handlers[] = {
 KV_MODULE_DEFINE(goldberg_module) = {
     .name       = "goldberg",
     .components = k_components,
-    .kinds      = k_kinds,
+    .ktables    = k_ktables,
     .systems    = k_systems,
     .handlers   = k_handlers,
     .commands   = k_commands,
@@ -2292,7 +2292,7 @@ KV_MODULE_DEFINE(goldberg_module) = {
 constinit const ModuleDesc goldberg_headless_module = {
     .name       = "goldberg",
     .components = k_components,
-    .kinds      = k_kinds,
+    .ktables    = k_ktables,
     .systems    = k_headless_systems,
     .commands   = k_commands,
     .startup    = goldberg_startup,

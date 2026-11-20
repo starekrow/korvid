@@ -1,6 +1,6 @@
 // Korvid sprite: module record. The module declares the Transform2 and Sprite schemas
-// and the kind "sprite.entity" (resources "sprite.entity", "sprite.entity.Transform2",
-// "sprite.entity.Sprite"), and extracts what changed in every kind with those two
+// and the ktable "sprite.entity" (resources "sprite.entity", "sprite.entity.Transform2",
+// "sprite.entity.Sprite"), and extracts what changed in every ktable with those two
 // components once before each frame drawn (system "sprite.extract", the Frame cycle) into
 // a delta stream the frame loop hands to the renderer.
 #pragma once

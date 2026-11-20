@@ -145,7 +145,7 @@ bool parse_handle(const char* text, SavedHandle* out, char* kind, u32 cap) {
 
 Handle load_handle(const JsonValue* v, const SaveRemap& remap) {
     if (!v || v->is_null()) return Handle{};
-    char kind[KV_KIND_NAME_MAX];
+    char kind[KV_KTABLE_NAME_MAX];
     SavedHandle saved;
     if (!v->is_string() || !parse_handle(v->str(), &saved, kind, sizeof kind)) {
         KV_WARN("save", "'%s' is not a handle; read as null", v->is_string() ? v->str() : json_type_name(v->type));
@@ -212,18 +212,18 @@ u32 load_fields(const JsonDoc& doc, const JsonValue& obj, Span<const FieldDesc> 
     return read;
 }
 
-// ---- kinds ------------------------------------------------------------------------------------
+// ---- ktables ----------------------------------------------------------------------------------
 
 namespace {
 
 // A row's members, inside an object the caller opened.
-void row_members(SaveWriter& w, const Table& t, Handle h, u32 i) {
+void row_members(SaveWriter& w, const KTable& t, Handle h, u32 i) {
     for (const Column& c : t.columns) {
         w.key(c.desc->name);
         save_fields(w, c.desc->fields, c.data + (usize)i * c.stride);
     }
     // What this entity carries on its own: "@Talk": {...}, and its bag.
-    char key[KV_KIND_NAME_MAX + 2];
+    char key[KV_KTABLE_NAME_MAX + 2];
     for (const Attachment& a : t.attachments) {
         const void* row = t.attached(h, *a.desc->id);
         if (!row) continue;
@@ -252,7 +252,7 @@ void row_members(SaveWriter& w, const Table& t, Handle h, u32 i) {
 
 } // namespace
 
-void save_row(SaveWriter& w, const Table& t, Handle h) {
+void save_row(SaveWriter& w, const KTable& t, Handle h) {
     w.begin_object();
     if (t.valid(h)) row_members(w, t, h, h.index());
     w.end_object();
@@ -288,7 +288,7 @@ void save_json(SaveWriter& w, const JsonDoc& doc, const JsonValue& v) {
     }
 }
 
-void save_kind(SaveWriter& w, const Table& t) {
+void save_ktable(SaveWriter& w, const KTable& t) {
     w.begin_object();
     w.key("free");
     w.begin_array();
@@ -319,11 +319,11 @@ void save_kind(SaveWriter& w, const Table& t) {
 namespace {
 
 // A load's first half: the slots exactly as saved, and their names (with an engine to name
-// them in). Every kind of a load gets this before any row is read, so a handle written by
-// name into one kind's row finds an entity of another.
-bool restore_kind_slots(const JsonDoc& doc, const JsonValue& v, Table& t, Engine* e) {
+// them in). Every ktable of a load gets this before any row is read, so a handle written by
+// name into one ktable's row finds an entity of another.
+bool restore_ktable_slots(const JsonDoc& doc, const JsonValue& v, KTable& t, Engine* e) {
     auto fail = [&](const char* why) {
-        KV_ERROR("save", "kind '%s': %s", t.name, why);
+        KV_ERROR("save", "ktable '%s': %s", t.name, why);
         t.restore_slots(Span<const u32>(), Span<const u32>());
         return false;
     };
@@ -377,18 +377,18 @@ bool restore_kind_slots(const JsonDoc& doc, const JsonValue& v, Table& t, Engine
 }
 
 // One row's columns, attachments and bag from its object.
-void fill_row(const JsonDoc& doc, const JsonValue& obj, Table& t, u32 slot, const SaveRemap& remap) {
+void fill_row(const JsonDoc& doc, const JsonValue& obj, KTable& t, u32 slot, const SaveRemap& remap) {
     for (Column& c : t.columns) {
         u8* row = c.data + (usize)slot * c.stride;
         if (const JsonValue* col = json_get(doc, obj, c.desc->name)) {
             if (col->is_object()) load_fields(doc, *col, c.desc->fields, row, remap);
-            else KV_WARN("save", "kind '%s': %s is a %s, not an object; left zero", t.name, c.desc->name, json_type_name(col->type));
+            else KV_WARN("save", "ktable '%s': %s is a %s, not an object; left zero", t.name, c.desc->name, json_type_name(col->type));
         }
         if (c.prev) memcpy(c.prev + (usize)slot * c.stride, row, c.stride);
     }
     Handle h = t.handle_at(slot);
     for (const Attachment& a : t.attachments) {
-        char key[KV_KIND_NAME_MAX + 2];
+        char key[KV_KTABLE_NAME_MAX + 2];
         format(key, sizeof key, "@%s", a.desc->name);
         const JsonValue* att = json_get(doc, obj, key);
         if (!att || !att->is_object()) continue;
@@ -407,13 +407,13 @@ void fill_row(const JsonDoc& doc, const JsonValue& obj, Table& t, u32 slot, cons
         else if (pv->is_string()) { v.type = PropType::String; v.bits = name_intern(pv->str()).hash; }
         else if (const JsonValue* f = pv->is_object() ? json_get(doc, *pv, "f") : nullptr) { v.type = PropType::Float; float_of(*f, &v.f); }
         else if (const JsonValue* hv = pv->is_object() ? json_get(doc, *pv, "h") : nullptr) { v.type = PropType::Handle; v.bits = load_handle(hv, remap).bits; }
-        else { KV_WARN("save", "kind '%s': bag value '%s' is a %s; skipped", t.name, pv->key, json_type_name(pv->type)); continue; }
+        else { KV_WARN("save", "ktable '%s': bag value '%s' is a %s; skipped", t.name, pv->key, json_type_name(pv->type)); continue; }
         t.prop_set(h, name_intern(pv->key), v);
     }
 }
 
 // The second half: the rows, component by component; a component the file lacks stays zero.
-void fill_kind_rows(const JsonDoc& doc, const JsonValue& v, Table& t, const SaveRemap& remap) {
+void fill_ktable_rows(const JsonDoc& doc, const JsonValue& v, KTable& t, const SaveRemap& remap) {
     const JsonValue* rows = json_get(doc, v, "rows");
     auto slot_of = [](const JsonValue* s) { return s && s->is_number() && s->number() >= 0.0 ? json_u64(s, 0) : ~0ull; };
     for (const JsonValue* r = rows ? json_first(doc, *rows) : nullptr; r; r = json_next(doc, *r)) {
@@ -424,41 +424,41 @@ void fill_kind_rows(const JsonDoc& doc, const JsonValue& v, Table& t, const Save
 
 } // namespace
 
-bool load_row(const JsonDoc& doc, const JsonValue& obj, Table& t, Handle h, const SaveRemap& remap) {
+bool load_row(const JsonDoc& doc, const JsonValue& obj, KTable& t, Handle h, const SaveRemap& remap) {
     if (!t.valid(h) || !obj.is_object()) return false;
     fill_row(doc, obj, t, h.index(), remap);
     return true;
 }
 
-bool load_kind(const JsonDoc& doc, const JsonValue& v, Table& t, const SaveRemap& remap, Engine* e) {
-    if (!restore_kind_slots(doc, v, t, e)) return false;
-    fill_kind_rows(doc, v, t, remap);
+bool load_ktable(const JsonDoc& doc, const JsonValue& v, KTable& t, const SaveRemap& remap, Engine* e) {
+    if (!restore_ktable_slots(doc, v, t, e)) return false;
+    fill_ktable_rows(doc, v, t, remap);
     return true;
 }
 
-void save_kinds(SaveWriter& w, Engine& e, Span<const char* const> kinds) {
+void save_ktables(SaveWriter& w, Engine& e, Span<const char* const> ktables) {
     w.begin_object();
-    for (const char* name : kinds) {
-        const Table* t = engine_table(e, name);
-        if (!t) { KV_WARN("save", "no kind '%s' to save", name); continue; }
+    for (const char* name : ktables) {
+        const KTable* t = engine_ktable(e, name);
+        if (!t) { KV_WARN("save", "no ktable '%s' to save", name); continue; }
         w.key(t->name);
-        save_kind(w, *t);
+        save_ktable(w, *t);
     }
     w.end_object();
 }
 
-u32 load_kinds(const JsonDoc& doc, const JsonValue& obj, Engine& e, const SaveRemap& remap) {
+u32 load_ktables(const JsonDoc& doc, const JsonValue& obj, Engine& e, const SaveRemap& remap) {
     if (!obj.is_object()) return 0;
     u32 loaded = 0;
     MemScope scope;
-    Array<Table*> ok = array_in<Table*>(mem_scratch());
+    Array<KTable*> ok = array_in<KTable*>(mem_scratch());
     Array<const JsonValue*> vals = array_in<const JsonValue*>(mem_scratch());
     for (const JsonValue* k = json_first(doc, obj); k; k = json_next(doc, *k)) {
-        Table* t = engine_table(e, k->key);
-        if (!t) { KV_WARN("save", "the save has a kind '%s' this build does not; skipped", k->key); continue; }
-        if (restore_kind_slots(doc, *k, *t, &e)) { ok.push(t); vals.push(k); }
+        KTable* t = engine_ktable(e, k->key);
+        if (!t) { KV_WARN("save", "the save has a ktable '%s' this build does not; skipped", k->key); continue; }
+        if (restore_ktable_slots(doc, *k, *t, &e)) { ok.push(t); vals.push(k); }
     }
-    for (u32 i = 0; i < ok.len; ++i) { fill_kind_rows(doc, *vals[i], *ok[i], remap); ++loaded; }
+    for (u32 i = 0; i < ok.len; ++i) { fill_ktable_rows(doc, *vals[i], *ok[i], remap); ++loaded; }
     return loaded;
 }
 

@@ -138,8 +138,8 @@ bool bosses_ready(Engine& e, Game& g, char* why, usize why_cap) {
 // riders, as the file lists them), and its shadow.
 Handle boss_spawn(TickContext& ctx, Game& g, const Dials& d, u32 di) {
     const BossDef& b = g.bosses[di];
-    Table* boss_table = ctx.write_kind(g_boss_kind);
-    Table* parts = ctx.write_kind(g_part_kind);
+    KTable* boss_table = ctx.write_ktable(g_boss_ktable);
+    KTable* parts = ctx.write_ktable(g_part_ktable);
     point2 at = path_at(b.entry, 0.0f);
     Sprite hull;
     hull.material = g.boss_alpha[di][0];
@@ -169,7 +169,7 @@ Handle boss_spawn(TickContext& ctx, Game& g, const Dials& d, u32 di) {
         Sprite shadow = hull;
         shadow.tint = color{0.0f, 0.0f, 0.04f, kBossShadowAlpha};
         shadow.layer = Z_SHADOW;
-        ctx.spawn_later(g_shadow_kind, Transform2{}, local2_at(point2{kBossShadow.x, kBossShadow.y}), Parent{h}, shadow);
+        ctx.spawn_later(g_shadow_ktable, Transform2{}, local2_at(point2{kBossShadow.x, kBossShadow.y}), Parent{h}, shadow);
     }
     sfx(ctx, g, SFX_WARNING);
     music(ctx, g, true);
@@ -201,8 +201,8 @@ void bosses(TickContext& ctx) {
     // The egg's slow time is the egg's: a kill takes the clock only while no egg plays.
     EggStep step = egg_row.len ? (EggStep)egg_row[0].step : EggStep::None;
     bool clock_free = step == EggStep::None || step == EggStep::Shelled;
-    Table* bt = ctx.write_kind(g_boss_kind);
-    Table* pt = ctx.write_kind(g_part_kind);
+    KTable* bt = ctx.write_ktable(g_boss_ktable);
+    KTable* pt = ctx.write_ktable(g_part_ktable);
     Span<Transform2> bx = bt->rows_of<Transform2>();
     Span<Boss> bb = bt->rows_of<Boss>();
     Span<Transform2> px = pt->rows_of<Transform2>();
@@ -281,7 +281,7 @@ void bosses(TickContext& ctx) {
                 f32 rest = (f32)(kBurstEvery * left) + (f32)(b.clock < settle ? settle - b.clock : 0u);
                 hull->tint.a = 0.9f * (f32)b.clock / ((f32)b.clock + rest + 1.0f);
                 // Its shadow (a cosmetic child) fades as it goes.
-                Table* st = ctx.write_kind(g_shadow_kind);
+                KTable* st = ctx.write_ktable(g_shadow_ktable);
                 Span<const Parent> sp = st->rows_of<Parent>();
                 Span<Sprite> ss = st->rows_of<Sprite>();
                 for (u32 k = 0; k < st->rows(); ++k)
@@ -311,7 +311,7 @@ void bosses(TickContext& ctx) {
     Span<Sprite> ps = pt->rows_of<Sprite>();
     Span<Health> ph = pt->rows_of<Health>();
     Span<Runner> pr = pt->rows_of<Runner>();
-    Table* formations = ctx.write_kind(g_formation_kind);
+    KTable* formations = ctx.write_ktable(g_formation_ktable);
     for (u32 i = 0; i < pt->rows(); ++i) {
         if (!pt->is_alive(i)) continue;
         Part& part = pp[i];
@@ -367,10 +367,10 @@ void bosses(TickContext& ctx) {
 // dies (in `bosses`, over the next ticks).
 void on_part_down(TickContext& ctx, Span<const StateEdge> edges) {
     Game& g = ctx.state_as<Game>();
-    // The tables for liveness and handles; the columns through the declared sets. The rows
+    // The ktables for liveness and handles; the columns through the declared sets. The rows
     // go by command.
-    const Table* pt = engine_table(*ctx.engine, g_part_kind);
-    const Table* bt = engine_table(*ctx.engine, g_boss_kind);
+    const KTable* pt = engine_ktable(*ctx.engine, g_part_ktable);
+    const KTable* bt = engine_ktable(*ctx.engine, g_boss_ktable);
     Span<const Part> parts = ctx.read<Part>("arcfire.part.Part");
     Span<const Transform2> part_xf = ctx.read<Transform2>("arcfire.part.Transform2");
     Span<Boss> boss_rows = ctx.write<Boss>("arcfire.boss.Boss");

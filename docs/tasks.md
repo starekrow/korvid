@@ -33,9 +33,9 @@ the [module catalog](README.md#modules) has everything.
 ## Entities and data
 
 - **Define a component:** [Modules](concepts/modules.md#components), `KV_FIELDS`, `KV_COMPONENT`
-- **Define a kind of entity:** [Modules](concepts/modules.md#kinds), `KindDesc`
-- **Spawn and destroy entities:** [Modules](concepts/modules.md#how-code-flows-through-a-tick), `ctx.spawn_later`, `ctx.destroy`, `ctx.write_kind`
-- **Give one entity data the rest of its kind doesn't have:** [core](../modules/core/README.md#how-it-works), `ctx.attach`, `ctx.prop_set_int`
+- **Define a ktable:** [Modules](concepts/modules.md#ktables), `KTableDesc`
+- **Spawn and destroy entities:** [Modules](concepts/modules.md#how-code-flows-through-a-tick), `ctx.spawn_later`, `ctx.destroy`, `ctx.write_ktable`
+- **Give one entity data the rest of its ktable doesn't have:** [core](../modules/core/README.md#how-it-works), `ctx.attach`, `ctx.prop_set_int`
 - **Name an entity and find it again:** [core](../modules/core/README.md#how-it-works), `ctx.name_later`, `engine_entity_find`
 - **Send a message from one module to another:** [Modules](concepts/modules.md#events), `ctx.emit`, `HandlerDesc`
 - **Share a module's data with other modules:** [Modules](concepts/modules.md#startup-shutdown-the-record), `engine_publish`, `ctx.resource<T>`
@@ -75,7 +75,7 @@ the [module catalog](README.md#modules) has everything.
 - **Ship assets in a pack:** [kpack](../tools/kpack/README.md)
 - **Cook assets from sources:** [goldberg](../tools/goldberg/README.md)
 - **Go from one level to another:** [level](../modules/level/README.md), `level_request`, `LevelBuild`
-- **Save and load a game:** [save](../modules/save/README.md), `save_kinds`, `save_fields`
+- **Save and load a game:** [save](../modules/save/README.md), `save_ktables`, `save_fields`
 
 ## Debugging and measuring
 

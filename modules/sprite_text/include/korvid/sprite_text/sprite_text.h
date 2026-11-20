@@ -1,13 +1,14 @@
-// Korvid sprite_text: the Text component. Put it on any kind with a Transform2 (the module's own
-// kind "sprite_text.label" has exactly those two) and the system "sprite_text.layout" (phase PostSim,
-// every tick) turns the string into glyph sprites: rows of the kind "sprite_text.glyph", children
-// of the label through Parent and Local2, one per visible character, each with the font's
-// atlas material, the glyph's uv and size times `scale`, and the label's tint, layer and
-// space. The scene module moves them with the label; a label that dies loses its glyphs
-// as orphans. Changing the string, the look or the font is one row write: the layout
-// notices and redoes the glyphs. Strings are UTF-8, one line, up to KV_SPTEXT_MAX bytes
-// (not characters) including the NUL. A code point the font lacks draws as U+FFFD if the
-// font has that, and as nothing otherwise; a malformed byte is U+FFFD too.
+// Korvid sprite_text: the Text component. Put it on any ktable with a Transform2 (the
+// module's own ktable "sprite_text.label" has exactly those two) and the system
+// "sprite_text.layout" (phase PostSim, every tick) turns the string into glyph sprites:
+// rows of the ktable "sprite_text.glyph", children of the label through Parent and Local2,
+// one per visible character, each with the font's atlas material, the glyph's uv and size
+// times `scale`, and the label's tint, layer and space. The scene module moves them with
+// the label; a label that dies loses its glyphs as orphans. Changing the string, the look
+// or the font is one row write: the layout notices and redoes the glyphs. Strings are
+// UTF-8, one line, up to KV_SPTEXT_MAX bytes (not characters) including the NUL. A code
+// point the font lacks draws as U+FFFD if the font has that, and as nothing otherwise; a
+// malformed byte is U+FFFD too.
 //
 // The label's Transform2 is the pen's start on the baseline: Left puts the first glyph
 // there, Center and Right shift the line so that point is its middle or its end. The

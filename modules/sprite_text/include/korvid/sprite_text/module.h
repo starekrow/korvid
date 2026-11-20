@@ -1,7 +1,7 @@
-// Korvid sprite_text: module record, the layout as a function, and the kinds.
+// Korvid sprite_text: module record, the layout as a function, and the ktables.
 //
 //   components  Text
-//   kinds       sprite_text.label  (Transform2, Text)                       a label and nothing else
+//   ktables     sprite_text.label  (Transform2, Text)                       a label and nothing else
 //               sprite_text.glyph  (Transform2, Sprite, Local2, Parent)     cosmetic: never hashed
 //   systems     sprite_text.layout  phase PostSim, Always: reads *.Text, writes sprite_text.glyph
 //

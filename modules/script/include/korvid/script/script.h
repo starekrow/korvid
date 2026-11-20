@@ -24,12 +24,12 @@ void script_open_json(lua_State* L);
 void script_open_sha256(lua_State* L);
 void script_open_random(lua_State* L);
 
-// Pushes an engine kind (a table of rows) as a Lua object, its rows read and written by
-// field name from the kind's own field tables. See kind.cc for what the object answers.
+// Pushes an engine ktable as a Lua ktable object, its rows read and written by field name
+// from the ktable's own field tables. See ktable.cc for what the object answers.
 // The caller answers for access: whoever runs the Lua (a system, usually) has declared
-// what it writes, and the table must outlive the Lua state's use of the object.
-struct Table;
-void script_push_kind(lua_State* L, Table* table);
+// what it writes, and the ktable must outlive the Lua state's use of the object.
+struct KTable;
+void script_push_ktable(lua_State* L, KTable* table);
 
 // A message handler for lua_pcall: the error with a traceback.
 int script_traceback(lua_State* L);

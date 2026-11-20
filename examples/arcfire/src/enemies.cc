@@ -29,8 +29,8 @@ void enemies(TickContext& ctx) {
     if (!stage_row.len || g.ship.index() >= ship_xf.len) return;
     point2 target = ship_xf[g.ship.index()].position;
 
-    Table* air = ctx.write_kind(g_air_kind);
-    Table* formations = ctx.write_kind(g_formation_kind);
+    KTable* air = ctx.write_ktable(g_air_ktable);
+    KTable* formations = ctx.write_ktable(g_formation_ktable);
     Span<Transform2> at = air->rows_of<Transform2>();
     Span<Mover> mv = air->rows_of<Mover>();
     Span<Emitter> em = air->rows_of<Emitter>();
@@ -57,7 +57,7 @@ void enemies(TickContext& ctx) {
         flash(g, hp[i], sp[i], look == Look::Turret ? TEX_TILES : look == Look::Boat ? TEX_BOAT : look == Look::Debris ? TEX_DEBRIS : TEX_SHIPS);
     }
 
-    Table* ground = ctx.write_kind(g_ground_kind);
+    KTable* ground = ctx.write_ktable(g_ground_ktable);
     Span<Transform2> gt = ground->rows_of<Transform2>();
     Span<Emitter> ge = ground->rows_of<Emitter>();
     Span<Runner> gr = ground->rows_of<Runner>();

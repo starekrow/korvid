@@ -31,14 +31,14 @@ struct ChildRef { u32 table; u32 row; };
 // child. 0 for a cycle or a chain past the cap. Stops counting at a parent that does not
 // resolve: that one is an orphan handled on its own, and this child composes against
 // whatever it reads.
-u32 depth_of(Engine& e, Table* child_table, u32 row) {
+u32 depth_of(Engine& e, KTable* child_ktable, u32 row) {
     u32 d = 1;
-    Table* t = child_table;
+    KTable* t = child_ktable;
     Handle h = t->handle_at(row);
     for (;;) {
         const Parent* p = t->get<Parent>(h);
         if (!p || p->parent.is_null()) return d;
-        Table* pt = engine_table_of(e, p->parent);
+        KTable* pt = engine_ktable_of(e, p->parent);
         if (!pt || !pt->valid(p->parent) || !pt->has(ComponentType<Parent>::id)) return d;
         if (++d > KV_SCENE_MAX_DEPTH) return 0;
         t = pt;
@@ -51,9 +51,9 @@ u32 compose_by_depth(Engine& e, Array<ChildRef>* by_depth, u32 max_depth) {
     u32 n = 0;
     for (u32 d = 1; d <= max_depth; ++d) {
         for (ChildRef r : by_depth[d]) {
-            Table& t = e.tables[r.table];
+            KTable& t = e.ktables[r.table];
             const Parent& p = *(const Parent*)(t.column<Parent>()->data + (usize)r.row * t.column<Parent>()->stride);
-            Table* pt = engine_table_of(e, p.parent);
+            KTable* pt = engine_ktable_of(e, p.parent);
             const Transform2* pw = pt->get<Transform2>(p.parent);
             const Local2& local  = *(const Local2*)(t.column<Local2>()->data + (usize)r.row * t.column<Local2>()->stride);
             Transform2& w        = *(Transform2*)(t.column<Transform2>()->data + (usize)r.row * t.column<Transform2>()->stride);
@@ -76,20 +76,20 @@ void scene_compose(TickContext& ctx) {
     for (Array<ChildRef>& a : by_depth) a = array_in<ChildRef>(mem_scratch());
     SceneStats s;
 
-    for (KindRows k : ctx.view<Transform2, const Local2, Parent>()) {
+    for (KTableRows k : ctx.view<Transform2, const Local2, Parent>()) {
         Span<Parent> parents = k.col<Parent>();
         for (u32 i = 0; i < k.rows(); ++i) {
             if (!k.alive(i)) continue;
             Parent& p = parents[i];
             if (p.parent.is_null()) continue;
-            Table* pt = engine_table_of(e, p.parent);
+            KTable* pt = engine_ktable_of(e, p.parent);
             if (!pt || !pt->valid(p.parent) || !pt->has(ComponentType<Transform2>::id)) {
                 ++s.orphaned;
                 if (p.orphan == OrphanPolicy::Detach) p.parent = Handle{};
                 else ctx.destroy(k.handle_at(i));
                 continue;
             }
-            u32 d = depth_of(e, k.table, i);
+            u32 d = depth_of(e, k.ktable, i);
             if (d == 0) {
                 ++s.cycles;
                 if (!st.cycle_logged) {
@@ -101,7 +101,7 @@ void scene_compose(TickContext& ctx) {
                 continue;
             }
             if (d > s.max_depth) s.max_depth = d;
-            by_depth[d].push(ChildRef{k.table->index, i});
+            by_depth[d].push(ChildRef{k.ktable->index, i});
         }
     }
 
@@ -118,14 +118,14 @@ u32 scene_compose_with(Engine& e, u32 component) {
     Array<ChildRef> by_depth[KV_SCENE_MAX_DEPTH + 1];
     for (Array<ChildRef>& a : by_depth) a = array_in<ChildRef>(mem_scratch());
     u32 max_depth = 0;
-    for (Table& t : e.tables) {
+    for (KTable& t : e.ktables) {
         if (!t.has(component) || !t.has(ComponentType<Parent>::id) || !t.has(ComponentType<Local2>::id) || !t.has(ComponentType<Transform2>::id)) continue;
         const Column* pc = t.column<Parent>();
         for (u32 i = 0; i < t.rows(); ++i) {
             if (!t.is_alive(i)) continue;
             const Parent& p = *(const Parent*)(pc->data + (usize)i * pc->stride);
             if (p.parent.is_null()) continue;
-            Table* pt = engine_table_of(e, p.parent);
+            KTable* pt = engine_ktable_of(e, p.parent);
             if (!pt || !pt->valid(p.parent) || !pt->has(ComponentType<Transform2>::id)) continue; // an orphan: scene.compose's
             u32 d = depth_of(e, &t, i);
             if (d == 0) continue; // a cycle: likewise
@@ -167,7 +167,7 @@ KV_MODULE_DEFINE(scene_module) = {
     .memory     = {.reserve = 16 * 1024},
 };
 
-bool scene_attach(Table& table, Handle child, Handle parent, const Local2& local, OrphanPolicy orphan) {
+bool scene_attach(KTable& table, Handle child, Handle parent, const Local2& local, OrphanPolicy orphan) {
     Parent* p = table.get<Parent>(child);
     Local2* l = table.get<Local2>(child);
     if (!p || !l) return false;
@@ -177,7 +177,7 @@ bool scene_attach(Table& table, Handle child, Handle parent, const Local2& local
     return true;
 }
 
-bool scene_detach(Table& table, Handle child) {
+bool scene_detach(KTable& table, Handle child) {
     Parent* p = table.get<Parent>(child);
     if (!p) return false;
     p->parent = Handle{};

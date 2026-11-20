@@ -7,8 +7,8 @@
 // pointing at whatever reuses the slot. Handles are plain data, so they go in components,
 // events, saves and logs, and they stay valid when the storage behind them moves.
 //
-// What to do with one depends on who issued it. For an entity, ask its kind:
-// ctx.alive(h), table->valid(h), table->get<T>(h) (null when dead). For an asset, ask the
+// What to do with one depends on who issued it. For an entity, ask its ktable:
+// ctx.alive(h), ktable->valid(h), ktable->get<T>(h) (null when dead). For an asset, ask the
 // asset module. A handle from a delivered event with a schema is already checked live.
 // To print any handle, kv_handle_describe(h.bits, buf, sizeof buf) gives
 // "rocks.rock#12:3" plus what the issuer adds.
@@ -29,9 +29,9 @@ struct Handle {
 
     static Handle make(u16 kind, u32 gen, u32 index) { return Handle{kv_handle_make(kind, gen, index)}; }
 
-    u16  kind()    const { return kv_handle_kind(bits); }  // which issuer: an entity kind, the texture table, ...
+    u16  kind()    const { return kv_handle_kind(bits); }  // which issuer: a ktable, the texture table, ...
     u32  gen()     const { return kv_handle_gen(bits); }   // which use of the slot: changes when it is reused
-    u32  index()   const { return kv_handle_index(bits); } // the slot: for an entity, its row in its kind's columns
+    u32  index()   const { return kv_handle_index(bits); } // the slot: for an entity, its row in its ktable
     bool is_null() const { return bits == 0; }
 
     bool operator==(const Handle& o) const { return bits == o.bits; }

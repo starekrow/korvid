@@ -932,7 +932,7 @@ void test_watch(TestCtx& c) {
         KV_CHECK(c, !ask(w, port, "explain /no/such/file") && has(g_out.data, "not a file this session knows"));
         t.put("assets/odd.xyz", "?");
         KV_CHECK(c, eventually(w, [&] { return ask(w, port, "status") && has(g_out.data, "1 warned") && has(g_out.data, "  warned   g:odd.xyz: no type"); }));
-        KV_CHECK(c, ask(w, port, "ls /kinds/goldberg") && has(g_out.data, "file") && has(g_out.data, "step"));
+        KV_CHECK(c, ask(w, port, "ls /ktables/goldberg") && has(g_out.data, "file") && has(g_out.data, "step"));
 
         // Asked to cook: what a watch does not watch (its output tree) is checked as a cook
         // would. An output changed behind its back is made again, a stray goes to the attic.

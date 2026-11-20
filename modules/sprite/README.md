@@ -1,11 +1,11 @@
 # sprite
 
 What a drawable thing is, on the game's side of the render boundary. The module declares
-two components, `Transform2` and `Sprite`; any kind that has both is drawn, whoever
-declared it. Before each frame is drawn the extract looks at every such kind, finds what
+two components, `Transform2` and `Sprite`; any ktable that has both is drawn, whoever
+declared it. Before each frame is drawn the extract looks at every such ktable, finds what
 is new, moved, changed or gone since it last looked, and writes a delta stream the frame
 loop hands to the renderer. The renderer keeps a persistent world keyed by entity handle
-and never sees an entity, a component or a kind. The module never includes a graphics
+and never sees an entity, a component or a ktable. The module never includes a graphics
 API.
 
 ## How it works
@@ -16,20 +16,20 @@ counter-clockwise) and scale, with `CompPrev` so the engine keeps last tick's co
 and a layer. Both carry field tables, so they hash, compare, print and trace like any
 component.
 
-**The kind.** `sprite.entity` is a kind with exactly those two components, a million
+**The ktable.** `sprite.entity` is a ktable with exactly those two components, a million
 slots of address space, for things that are only sprites: a background, a particle, a
 stone in a game that keeps its own structs. `SpriteWorld` is the convenience surface over
-that table (`create`, `destroy`, typed lookups). A game's own kinds add whatever else they
+that ktable (`create`, `destroy`, typed lookups). A game's own ktables add whatever else they
 want next to the two components and are drawn the same way.
 
 **The extract.** The system `sprite.extract` runs in the Frame cycle
 (`docs/design/cycles.md`): once before each frame drawn, after every tick that frame
 holds and after every Frame-cycle writer of a `Transform2` or `Sprite` column, reading
-`*.Transform2` and `*.Sprite`. Per kind, it
+`*.Transform2` and `*.Sprite`. Per ktable, it
 keeps the handle it last sent for each slot and the `Sprite` it last described. Then:
 
 1. A slot whose handle changed or died since the last extract becomes a `Remove` for the
-   handle the renderer knows there. No table needs a destroy hook.
+   handle the renderer knows there. No ktable needs a destroy hook.
 2. A live slot the renderer has not seen, or whose `Transform2` or `Sprite` differs from
    what was last sent, becomes a `Set` with the whole `RenderSpriteState`. A transform
    that differs from what was sent but equals the engine's previous copy is a teleport:
@@ -45,7 +45,7 @@ keeps the handle it last sent for each slot and the `Sprite` it last described. 
 4. After the `Tick` marker, a `Layer` delta for each layer whose scroll offset changed
    (the resource `sprite.layers`): see layer scroll below.
 
-A kind declared `still` (`KindDesc::still`: a map's tiles) is looked at only when it has
+A ktable declared `still` (`KTableDesc::still`: a map's tiles) is looked at only when it has
 spawned, lost or restored a row since the last extract, and then only for its births and
 deaths (a restore: one full compare), so a map of any size costs nothing a tick once
 sent.
@@ -69,10 +69,10 @@ sending a `Set` whenever the transform moved, which the `CompPrev` copy detects.
 
 ## Using it
 
-**A kind that is drawn:**
+**A ktable that is drawn:**
 
 ```cpp
-constinit const KindDesc k_kinds[] = {{.name = ".rock", .components = "Transform2, Sprite, Velocity", .capacity = 1024}};
+constinit const KTableDesc k_ktables[] = {{.name = ".rock", .components = "Transform2, Sprite, Velocity", .capacity = 1024}};
 
 Sprite s;
 s.material = g.rock_material;      // from a material asset
@@ -126,13 +126,13 @@ Header `korvid/sprite/world.h`:
 
 | name | kind | what |
 |---|---|---|
-| `SpriteWorld` | record | over the `sprite.entity` table: `create(t, s)`, `destroy(h)`, `valid(h)`, `live()`, `kind()`, `transform(h)`, `prev_transform(h)`, `sprite(h)` |
+| `SpriteWorld` | record | over the `sprite.entity` ktable: `create(t, s)`, `destroy(h)`, `valid(h)`, `live()`, `kind()`, `transform(h)`, `prev_transform(h)`, `sprite(h)` |
 
 Header `korvid/sprite/extract.h`:
 
 | name | kind | what |
 |---|---|---|
-| `ExtractState`, `ExtractTable` | records | per table: the handle and the `Sprite` last sent, by slot |
+| `ExtractState`, `ExtractKTable` | records | per ktable: the handle and the `Sprite` last sent, by slot |
 | `extract_sprites(engine, state, layers, out, ticks)` | function | the deltas `ticks` ticks after the last extract appended to `out` (catch-up Sets with two or more, a `Tick` with one or more); `layers` may be null |
 
 Header `korvid/sprite/layers.h`:
@@ -162,7 +162,7 @@ What the module registers with the engine:
 |---|---|---|
 | `Transform2` | component | 20 bytes, 3 fields, `CompPrev`, sim |
 | `Sprite` | component | 64 bytes, 8 fields, sim |
-| `sprite.entity` | kind | `Transform2`, `Sprite`; 1 M slots of address space |
+| `sprite.entity` | ktable | `Transform2`, `Sprite`; 1 M slots of address space |
 | `sprite.deltas` | resource | the delta array; the extract writes it |
 | `sprite.layers` | resource | the layer offsets; a game's scroll writes it, the extract reads what changed |
 | `sprite.layers_tick` | system, phase PreSim, `Always` | writes `sprite.layers`: the offsets as each tick begins |
@@ -172,7 +172,7 @@ What the module registers with the engine:
 
 - **Both components are sim state.** They are hashed; a game whose sprites are cosmetic
   only still hashes their placement. Debris that must not affect the hash goes in a
-  kind with its own cosmetic components and the two sim ones.
+  ktable with its own cosmetic components and the two sim ones.
 - **A `Set` is the whole state.** The renderer does not merge fields; the extract sends
   everything when anything changed. Changing a tint every tick costs the same as moving.
 - **The previous copy is the engine's, taken at the top of PreSim.** A transform written
@@ -206,19 +206,19 @@ What the module registers with the engine:
 - **The extract runs whatever the sim does.** It is in the Frame cycle, so menus and
   overlays drawn while the sim holds still reach the renderer, and a frame that held no
   tick costs it only the compare.
-- **The extract is one thread** and linear in the rows of every drawable kind, dead
-  slots included; a kind with a huge capacity and few live rows still costs its
-  high-water mark. A `still` kind is the exception: nothing, until it spawns or loses a row.
+- **The extract is one thread** and linear in the rows of every drawable ktable, dead
+  slots included; a ktable with a huge capacity and few live rows still costs its
+  high-water mark. A `still` ktable is the exception: nothing, until it spawns or loses a row.
   Its cost is about 50 to 100 ns a delta in a dev build, linear.
 - **Its tables grow, unless told the size.** The side tables (by slot: the handle, the
-  `Sprite` and the `Transform2` last sent) and the delta list grow as a kind's high-water
+  `Sprite` and the `Transform2` last sent) and the delta list grow as a ktable's high-water
   mark and a frame's deltas climb; each growth copies the table, megabytes in one tick at
   stress (12 ms in a dev build, which fills new memory). `sprite_rows_hint(e, rows)` (the
-  frame loop passes `FrameLoopConfig::sprite_rows`) sizes a kind's side tables at its first
+  frame loop passes `FrameLoopConfig::sprite_rows`) sizes a ktable's side tables at its first
   growth to its capacity or `rows`, the smaller, and the delta list to twice `rows` at the
   first extract, so they do not grow mid-run.
-- **A still kind's rows cannot move.** The extract does not look at a living row of a
-  still kind, so a write to one is never drawn (and its previous copy is not retaken).
+- **A still ktable's rows cannot move.** The extract does not look at a living row of a
+  still ktable, so a write to one is never drawn (and its previous copy is not retaken).
   Scroll it by layer; to change one tile, destroy it and spawn another.
 - **A layer's offset is per frame, not per sprite.** Everything on the layer moves
   together, sprites spawned this tick included, and the camera applies on top.

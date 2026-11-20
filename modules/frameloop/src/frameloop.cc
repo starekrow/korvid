@@ -40,13 +40,13 @@ u64             g_flags_given  = 0; // bit i: config.flags[i] was on the command
 struct GivenOption { u32 option; const char* value; }; // config.options[option], and what followed it
 GivenOption     g_options[32];
 u32             g_option_count = 0;
-// --capacity kind=N, repeatable: over the game's config, which keeps its own as well.
+// --capacity ktable=N, repeatable: over the game's config, which keeps its own as well.
 char            g_capacity_names[16][64];
-KindCapacity    g_capacities[32];
+KTableCapacity  g_capacities[32];
 u32             g_capacity_count = 0;
 u32             g_threads      = 0; // 0: every core
 f64             g_rate         = 0.0; // --rate X: the developer's rate from the start (0: the engine's, 1)
-EarlyReadsChoice g_early_reads = EarlyReadsChoice::PerKind;
+EarlyReadsChoice g_early_reads = EarlyReadsChoice::PerKTable;
 const char*     g_trace_path   = nullptr; // --profile FILE
 bool            g_prof_report  = false;   // --prof-report: the top zones with the fps line
 const char*     g_shot_path    = nullptr; // --screenshot FILE: one frame as a PPM
@@ -65,7 +65,7 @@ bool            g_touchpad     = false;   // --touchpad: the on-screen pad, the 
 
 constexpr u32 kOverlayLines = 8;
 constexpr f32 kOverlayPx    = 16.0f;
-constinit u32 g_overlay_kind = 0;
+constinit u32 g_overlay_ktable = 0;
 
 struct FrameLoopState {
     FrameLoopConfig config;
@@ -201,8 +201,8 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
             const char* v = argv[++i];
             if (!strcmp(v, "order")) g_early_reads = EarlyReadsChoice::Order;
             else if (!strcmp(v, "snapshot")) g_early_reads = EarlyReadsChoice::Snapshot;
-            else if (!strcmp(v, "kind")) g_early_reads = EarlyReadsChoice::PerKind;
-            else { KV_ERROR("frameloop", "--early-reads takes order, snapshot or kind, not '%s'", v); return false; }
+            else if (!strcmp(v, "ktable")) g_early_reads = EarlyReadsChoice::PerKTable;
+            else { KV_ERROR("frameloop", "--early-reads takes order, snapshot or ktable, not '%s'", v); return false; }
         }
         else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) g_trace_path = argv[++i];
         else if (strcmp(argv[i], "--prof-report") == 0) g_prof_report = true;
@@ -235,12 +235,12 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
             const char* eq = strchr(arg, '=');
             u32 n = g_capacity_count;
             if (!eq || eq == arg || (usize)(eq - arg) >= sizeof g_capacity_names[0] || n >= KV_COUNTOF(g_capacity_names)) {
-                KV_ERROR("frameloop", "--capacity kind=N (a kind's full name, at most %u of them)", (u32)KV_COUNTOF(g_capacity_names));
+                KV_ERROR("frameloop", "--capacity KTABLE=N (a ktable's full name, at most %u of them)", (u32)KV_COUNTOF(g_capacity_names));
                 return false;
             }
             memcpy(g_capacity_names[n], arg, (usize)(eq - arg));
             g_capacity_names[n][eq - arg] = 0;
-            g_capacities[g_capacity_count++] = KindCapacity{g_capacity_names[n], (u32)strtoul(eq + 1, nullptr, 10)};
+            g_capacities[g_capacity_count++] = KTableCapacity{g_capacity_names[n], (u32)strtoul(eq + 1, nullptr, 10)};
         }
         else if (replay_arg(i, argc, argv)) {}
         else if (u32 f = game_flag(cfg, argv[i])) { g_flags_given |= (u64)1 << (f - 1); replay_keep_arg(argv[i]); }
@@ -252,8 +252,8 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         }
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
-                                  "[--no-vsync] [--renderer auto|gpu|cpu] [--cpu-shaders all|none] [--cpu-scale auto|N] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] [--size WxH] [--rate X] [--early-reads order|snapshot|kind] "
-                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|ring] [--idle-margin-ms N] [--no-idle] [--overlay] [--touchpad] [--capacity KIND=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE] [--goldberg PORT] [--no-goldberg]", argv[0]);
+                                  "[--no-vsync] [--renderer auto|gpu|cpu] [--cpu-shaders all|none] [--cpu-scale auto|N] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] [--size WxH] [--rate X] [--early-reads order|snapshot|ktable] "
+                                  "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|ring] [--idle-margin-ms N] [--no-idle] [--overlay] [--touchpad] [--capacity KTABLE=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE] [--goldberg PORT] [--no-goldberg]", argv[0]);
             return false;
         }
     }
@@ -318,7 +318,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
 
     if (g_overlay) {
         s->overlay_font = asset_load_font(engine, KV_DEJAVU_SANS, kOverlayPx);
-        Table* labels = engine_table(engine, g_overlay_kind);
+        KTable* labels = engine_ktable(engine, g_overlay_ktable);
         for (u32 i = 0; i < kOverlayLines; ++i) {
             Text t;
             t.font   = s->overlay_font;
@@ -336,15 +336,15 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
 // The overlay's line i, given `text`. Called at every report.
 void overlay_set(Engine& engine, FrameLoopState& s, u32 line, const char* text) {
     if (!g_overlay || line >= kOverlayLines) return;
-    Table* labels = engine_table(engine, g_overlay_kind);
+    KTable* labels = engine_ktable(engine, g_overlay_ktable);
     Text* t = labels->get<Text>(s.overlay_lines[line]);
     if (!t) return;
     sptext_set(*t, "%s", text);
 }
 
 constinit const EventTypeDesc k_events[]  = {KV_EVENT(ExitRequested)};
-constinit const KindDesc      k_kinds[] = {
-    {.name = ".overlay", .components = "Transform2, Text", .capacity = kOverlayLines, .id = &g_overlay_kind, .cosmetic = true},
+constinit const KTableDesc    k_ktables[] = {
+    {.name = ".overlay", .components = "Transform2, Text", .capacity = kOverlayLines, .id = &g_overlay_ktable, .cosmetic = true},
 };
 constinit const SystemDesc    k_systems[] = {
     {.name = ".exit", .phase = Phase::PreSim, .fn = frameloop_exit, .reads = "input.state, CloseRequested", .emits = "ExitRequested", .runs = RunWhen::Always},
@@ -632,7 +632,7 @@ constinit const CliCommandDesc k_commands[] = {
 KV_MODULE_DEFINE(frameloop_module) = {
     .name    = "frameloop",
     .events  = k_events,
-    .kinds   = k_kinds,
+    .ktables  = k_ktables,
     .systems = k_systems,
     .handlers = k_handlers,
     .commands = k_commands,
@@ -702,16 +702,16 @@ int frameloop_run(int argc, char** argv, void*) {
     engine.threads      = g_threads;
     engine.early_reads  = g_early_reads;
     if (g_trace_events && !KV_DEV) KV_WARN("frameloop", "--trace-events: the event trace exists in dev builds only");
-    // The game's capacities, then the command line's (a later entry for a kind wins).
+    // The game's capacities, then the command line's (a later entry for a ktable wins).
     EngineConfig engine_config = g_config.engine;
     if (g_capacity_count) {
-        for (const KindCapacity& kc : g_config.engine.capacities)
+        for (const KTableCapacity& kc : g_config.engine.capacities)
             if (g_capacity_count < KV_COUNTOF(g_capacities)) {
-                memmove(g_capacities + 1, g_capacities, sizeof(KindCapacity) * g_capacity_count);
+                memmove(g_capacities + 1, g_capacities, sizeof(KTableCapacity) * g_capacity_count);
                 g_capacities[0] = kc;
                 ++g_capacity_count;
             }
-        engine_config.capacities = Span<const KindCapacity>(g_capacities, g_capacity_count);
+        engine_config.capacities = Span<const KTableCapacity>(g_capacities, g_capacity_count);
     }
 #if KV_DEV
     if (dev_spike_hunting())

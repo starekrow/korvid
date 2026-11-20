@@ -4,7 +4,7 @@ Animation clips and the players that run them. A clip is tracks over a duration 
 loop mode: a uv track is a flipbook, a tint or alpha track a fade, a position, rotation
 or scale track moves a child (or a root), an event track fires named events at times.
 Clips are assets, loaded from JSON files or built at runtime from a descriptor exactly
-like materials, and shared by every player. An `AnimPlayer` component on any kind plays
+like materials, and shared by every player. An `AnimPlayer` component on any ktable plays
 one; the system `anim.play` advances it every tick and writes the channels onto the same
 row. The fence posts are the point: the module's tests pin every one of them.
 
@@ -36,7 +36,7 @@ frame lasts as long as the others.
 | `uv` | `[x, y, w, h]` | step | `Sprite.uv` |
 | `tint` | `[r, g, b, a]` | step, linear | `Sprite.tint` |
 | `alpha` | `a` | step, linear | `Sprite.tint.a`, the color kept |
-| `position`, `rotation`, `scale` | `[x, y]`, `r`, `[x, y]` | step, linear | `Local2` on a child kind, `Transform2` otherwise |
+| `position`, `rotation`, `scale` | `[x, y]`, `r`, `[x, y]` | step, linear | `Local2` on a child ktable, `Transform2` otherwise |
 | `event` | `"name"` | fires | `AnimEvent{entity, clip, name}` |
 
 **Players** (`player.h`). `AnimPlayer { clip, time, rate, clock, state, loops }`;
@@ -96,8 +96,8 @@ AnimClipDesc fade;
 fade.name = ".fade"; fade.loop = AnimLoop::Once; fade.tracks = k_fade_tracks;
 g->fade_clip = anim_create(engine, fade);
 
-// A kind with an AnimPlayer; spawn with the player, at a rate that fits the moment.
-ctx.spawn_later(g_debris_kind, transform2_at(at), sprite, Velocity{v}, anim_player(g.fade_clip, 1.0f / life));
+// A ktable with an AnimPlayer; spawn with the player, at a rate that fits the moment.
+ctx.spawn_later(g_debris_ktable, transform2_at(at), sprite, Velocity{v}, anim_player(g.fade_clip, 1.0f / life));
 
 // React to the end, or to a named key.
 void on_anim_finished(TickContext& ctx, Span<const AnimFinished> done) {
@@ -109,7 +109,7 @@ void on_anim_event(TickContext& ctx, Span<const AnimEvent> evs) {
 }
 ```
 
-Add `"anim"` to the module's `deps`. A kind that plays a placement track and is a child
+Add `"anim"` to the module's `deps`. A ktable that plays a placement track and is a child
 (`Local2`, `Parent`) animates its `Local2`; otherwise its `Transform2`.
 
 ## Quick reference
@@ -159,7 +159,7 @@ Depends on: core, math, render, platform, asset, sprite, scene.
   player's write lands after theirs within the tick.
 - **A file clip starts when the file arrives.** A player's time is sim state; a player on
   a `Pending` clip keeps time 0 until the parse lands, on a tick that depends on I/O.
-  Keep such entities in a cosmetic kind (the rocks flame) or build the clip with
+  Keep such entities in a cosmetic ktable (the rocks flame) or build the clip with
   `anim_create`, which is Ready at once (the rocks debris).
 - **Rate is a knob.** A one-second clip at `rate = 1 / life` lasts `life`; a negative rate
   plays backward from `start`.

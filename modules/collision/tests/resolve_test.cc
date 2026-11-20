@@ -1,6 +1,6 @@
 // The resolve's fence posts: touching is not overlapping; a stopped box ends exactly on the
 // edge it met; a box slides along a row of boxes without stopping at the seams; nothing
-// tunnels; a box inside another may only leave it; two movers resolve in kind and slot
+// tunnels; a box inside another may only leave it; two movers resolve in ktable and slot
 // order; a push moves the pushed body by what the pusher gains, at its pace, and stops
 // against what is behind it; the static world stops a box like a wall; a Sim system that
 // reads MoveResult2 sees this tick's result; a child moves its Local2; intents last a
@@ -18,7 +18,7 @@ namespace {
 
 using namespace kv;
 
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = ".walker", .components = "Transform2, Collider2, Move2, MoveResult2", .capacity = 64},
     {.name = ".wall",   .components = "Transform2, Collider2", .capacity = 256},
     {.name = ".crate",  .components = "Transform2, Collider2, Move2, MoveResult2", .capacity = 16},
@@ -31,7 +31,7 @@ constinit Seen g = {};
 
 // Sim, after the resolve because it reads what the resolve writes.
 void sys_react(TickContext& ctx) {
-    for (KindRows k : ctx.view<const MoveResult2>()) {
+    for (KTableRows k : ctx.view<const MoveResult2>()) {
         Span<const MoveResult2> r = k.col<const MoveResult2>();
         for (u32 i = 0; i < k.rows(); ++i)
             if (k.alive(i) && r[i].hit_x) { ++g.hits_x; g.blocker = r[i].blocker; }
@@ -52,7 +52,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".query", .phase = Phase::PostSim, .fn = sys_query, .reads = "*[Collider2].Transform2, *[Collider2].Collider2"},
 };
 constinit const HandlerDesc k_handlers[] = {{.name = ".on_begin", KV_ON(OverlapBegin, on_begin), .phase = Phase::PostSim}};
-KV_MODULE_DEFINE(k_r) = {.name = "r", .kinds = k_kinds, .systems = k_systems, .handlers = k_handlers};
+KV_MODULE_DEFINE(k_r) = {.name = "r", .ktables = k_ktables, .systems = k_systems, .handlers = k_handlers};
 
 constexpr u32 L_BODY = 0x2, L_ZONE = 0x4;
 
@@ -73,14 +73,14 @@ void test_resolve(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&sprite_module, &scene_module, &collision_module, &k_r};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* walkers = engine_table(e, "r.walker");
-    Table* walls = engine_table(e, "r.wall");
-    Table* crates = engine_table(e, "r.crate");
+    KTable* walkers = engine_ktable(e, "r.walker");
+    KTable* walls = engine_ktable(e, "r.wall");
+    KTable* crates = engine_ktable(e, "r.crate");
     u64 tick = 0;
     auto run = [&]() { e.phases.run_tick(e, e.events, 1.0 / 60.0, tick++); };
-    auto go = [&](Table* t, Handle h, f32 dx, f32 dy) { t->get<Move2>(h)->delta = vec2{dx, dy}; };
-    auto x_of = [&](Table* t, Handle h) { return t->get<Transform2>(h)->position.x; };
-    auto clear = [&](Table* t) { t->destroy_all(); };
+    auto go = [&](KTable* t, Handle h, f32 dx, f32 dy) { t->get<Move2>(h)->delta = vec2{dx, dy}; };
+    auto x_of = [&](KTable* t, Handle h) { return t->get<Transform2>(h)->position.x; };
+    auto clear = [&](KTable* t) { t->destroy_all(); };
 
     // ---- touching is not overlapping; exact stops -----------------------------------------
     Handle w = walkers->spawn(transform2_at(point2{0, 0}), body(BodyKind::Kinematic, 5, 5), Move2{}, MoveResult2{});
@@ -130,7 +130,7 @@ void test_resolve(kv::TestCtx& c) {
     KV_CHECK(c, x_of(walkers, w) == 94);
     clear(walkers); clear(walls); engine_apply_commands(e);
 
-    // ---- two movers: kind and slot order; the second sees where the first ended -------------
+    // ---- two movers: ktable and slot order; the second sees where the first ended -----------
     Handle a = walkers->spawn(transform2_at(point2{0, 0}), body(BodyKind::Kinematic, 5, 5), Move2{}, MoveResult2{});
     Handle b = walkers->spawn(transform2_at(point2{20, 0}), body(BodyKind::Kinematic, 5, 5), Move2{}, MoveResult2{});
     go(walkers, a, 10, 0); go(walkers, b, -10, 0); run();
@@ -172,14 +172,14 @@ void test_resolve(kv::TestCtx& c) {
     // ---- a child moves its Local2 by the same delta -------------------------------------------
     SpriteWorld& roots = *sprite_world(e);
     Handle root = roots.create(transform2_at(point2{100, 0}), Sprite{});
-    Table* kids = engine_table(e, "r.kid");
+    KTable* kids = engine_ktable(e, "r.kid");
     Handle kid = kids->spawn(transform2_at(point2{100, 0}), local2_at(point2{0, 0}), Parent{root}, body(BodyKind::Kinematic, 2, 2), Move2{});
     go(kids, kid, 5, 0); run();
     KV_CHECK(c, kids->get<Local2>(kid)->position.x == 5 && kids->get<Transform2>(kid)->position.x == 105);
     kids->destroy(kid);
 
     // ---- a sensor hears the move the tick it happens; queries and casts see it ---------------
-    Table* zones = engine_table(e, "r.zone");
+    KTable* zones = engine_ktable(e, "r.zone");
     zones->spawn(transform2_at(point2{30, 0}), collider_box(vec2{5, 5}, L_ZONE, L_BODY));
     w = walkers->spawn(transform2_at(point2{0, 0}), body(BodyKind::Kinematic, 5, 5), Move2{}, MoveResult2{});
     walls->spawn(transform2_at(point2{-100, 0}), body(BodyKind::Solid, 5, 5));

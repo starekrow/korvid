@@ -1,5 +1,5 @@
 // testbed: the example game, written the way a game is meant to be written here. Balls are
-// a kind (Transform2, Sprite, Motion, Bounces). One system moves every ball and emits
+// a ktable (Transform2, Sprite, Motion, Bounces). One system moves every ball and emits
 // Bounced at the edges; a handler counts bounces and re-aims the random ball. The blinker
 // lives by scheduled events: BlinkOff destroys it and schedules BlinkOn, BlinkOn spawns
 // a new one by command, and the Spawned event's ticket says which ball to schedule
@@ -36,9 +36,9 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Bounces, k_bounces_fields, CompPrev), // prev: the trigger below watches it
 };
 
-constinit u32 g_ball_kind = 0;
-constinit const KindDesc k_kinds[] = {
-    {.name = ".ball", .components = "Transform2, Sprite, Motion, Bounces", .capacity = 1 << 16, .id = &g_ball_kind}, // room for --swarm
+constinit u32 g_ball_ktable = 0;
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".ball", .components = "Transform2, Sprite, Motion, Bounces", .capacity = 1 << 16, .id = &g_ball_ktable}, // room for --swarm
 };
 
 // ---- what happens --------------------------------------------------------------------
@@ -105,7 +105,7 @@ u32 spawn_ball(TickContext& ctx, const Game& g, point2 at, vec2 velocity, bool r
     s.material = g.materials[look];
     s.size     = vec2{size, size};
     s.layer    = layer;
-    return ctx.spawn_later(g_ball_kind, transform2_at(at), s, Motion{velocity, (u8)random}, Bounces{0});
+    return ctx.spawn_later(g_ball_ktable, transform2_at(at), s, Motion{velocity, (u8)random}, Bounces{0});
 }
 
 // Keeps the whole sprite inside the window; reverses the velocity on the edge it hit.
@@ -130,7 +130,7 @@ constexpr f32 kFieldW = 1280.0f, kFieldH = 720.0f;
 void testbed_move(TickContext& ctx) {
     f32 half_w = kFieldW * 0.5f, half_h = kFieldH * 0.5f;
     f32 dt = (f32)ctx.dt;
-    for (KindRows k : ctx.view<Transform2, Motion, const Sprite>()) {
+    for (KTableRows k : ctx.view<Transform2, Motion, const Sprite>()) {
         Span<Transform2>   t = k.col<Transform2>();
         Span<Motion>       m = k.col<Motion>();
         Span<const Sprite> s = k.col<const Sprite>();
@@ -211,14 +211,14 @@ void testbed_sim(TickContext& ctx) {
     case ST_EXIT: {
         // Say goodbye to every ball, then take everything down by command and quit.
         static const u32 k_bounces = ctx.column_id(".ball.Bounces");
-        const Table* balls = ctx.read_kind(g_ball_kind);
+        const KTable* balls = ctx.read_ktable(g_ball_ktable);
         Span<const Bounces> bounces = ctx.read<Bounces>(k_bounces);
         for (u32 i = 0; i < balls->rows(); ++i) {
             if (!balls->is_alive(i)) continue;
             KV_INFO("game", "ball %u destroyed after %u bounces", i, bounces[i].count);
             ctx.destroy(balls->handle_at(i));
         }
-        const Table* sprites = ctx.read_kind("sprite.entity");
+        const KTable* sprites = ctx.read_ktable("sprite.entity");
         for (u32 i = 0; i < sprites->rows(); ++i)
             if (sprites->is_alive(i)) ctx.destroy(sprites->handle_at(i));
         engine_request_quit(*ctx.engine);
@@ -248,7 +248,7 @@ void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
     for (const Spawned& s : spawns) {
         if (s.ticket != g.blink_ticket) continue;
         g.blink_ticket = 0;
-        if (s.entity.is_null()) { KV_WARN("game", "the blinker did not spawn: kind full"); continue; }
+        if (s.entity.is_null()) { KV_WARN("game", "the blinker did not spawn: ktable full"); continue; }
         char text[256];
         kv_handle_describe(s.entity.bits, text, sizeof text);
         KV_INFO("game", "blinker is %s", text);
@@ -343,7 +343,7 @@ KV_MODULE_DEFINE(testbed_module) = {
     .name       = "testbed",
     .events     = k_events,
     .components = k_components,
-    .kinds      = k_kinds,
+    .ktables    = k_ktables,
     .systems    = k_systems,
     .handlers   = k_handlers,
     .triggers   = k_triggers,

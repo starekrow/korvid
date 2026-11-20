@@ -43,7 +43,7 @@ const char* access_name(Access a) {
 }
 
 const char* early_reads_name(EarlyReadsChoice m) {
-    return m == EarlyReadsChoice::Snapshot ? "every kind a snapshot" : m == EarlyReadsChoice::Order ? "every kind ordered" : "as each kind says";
+    return m == EarlyReadsChoice::Snapshot ? "every ktable a snapshot" : m == EarlyReadsChoice::Order ? "every ktable ordered" : "as each ktable says";
 }
 
 bool ScheduledSystem::mode(u32 resource, Access* out) const {
@@ -62,7 +62,7 @@ void ScheduledSystem::free_buffers() {
     declared.free();
     access.free();
     commands.bytes.free();
-    for (Table& t : early) t.columns.free();
+    for (KTable& t : early) t.columns.free();
     early.free();
     cursors.free();
 }
@@ -122,15 +122,15 @@ void level_job(u32 chunk, u32, u32, void* user) {
     run_unit(*lj.ctx, *lj.events, *lj.list[chunk]);
 }
 
-// The phase start of its snapshot kinds, copied, and every early reader's view of them
-// made over again from the tables as they are now, with the copies where it reads
+// The phase start of its snapshot ktables, copied, and every early reader's view of them
+// made over again from the ktables as they are now, with the copies where it reads
 // early. Nothing else runs.
 usize take_snapshots(PhaseList& pl, u32 phase) {
     if (!pl.snapshots[phase].len) return 0;
     KV_ZONE("snapshot");
     usize copied = 0;
-    for (KindSnapshot& ks : pl.snapshots[phase]) {
-        const Table& t = *ks.table;
+    for (KTableSnapshot& ks : pl.snapshots[phase]) {
+        const KTable& t = *ks.ktable;
         if (ks.liveness) {
             ks.len  = t.slots.len;
             ks.live = t.slots.live;
@@ -138,7 +138,7 @@ usize take_snapshots(PhaseList& pl, u32 phase) {
             if (ks.len) memcpy(ks.gens.data, t.slots.gens, (usize)ks.len * sizeof(u32));
             copied += (usize)ks.len * sizeof(u32);
         }
-        for (KindSnapshot::Rows& r : ks.columns) {
+        for (KTableSnapshot::Rows& r : ks.columns) {
             usize bytes = (usize)t.rows() * r.column->stride;
             r.bytes.resize_fill((u32)bytes, 0);
             if (bytes) memcpy(r.bytes.data, r.column->data, bytes);
@@ -146,10 +146,10 @@ usize take_snapshots(PhaseList& pl, u32 phase) {
         }
     }
     for (ScheduledSystem& s : pl.systems[phase]) {
-        for (Table& view : s.early) {
-            const KindSnapshot* ks = nullptr;
-            for (const KindSnapshot& k : pl.snapshots[phase]) if (k.table->index == view.index) ks = &k;
-            const Table& t = *ks->table;
+        for (KTable& view : s.early) {
+            const KTableSnapshot* ks = nullptr;
+            for (const KTableSnapshot& k : pl.snapshots[phase]) if (k.ktable->index == view.index) ks = &k;
+            const KTable& t = *ks->ktable;
             Array<Column> cols = view.columns;
             view = t;
             view.columns = cols;
@@ -159,7 +159,7 @@ usize take_snapshots(PhaseList& pl, u32 phase) {
                 view.slots.len  = ks->len;
                 view.slots.live = ks->live;
             }
-            for (const KindSnapshot::Rows& r : ks->columns) {
+            for (const KTableSnapshot::Rows& r : ks->columns) {
                 Access m;
                 if (s.mode(r.column->resource, &m) && m == Access::Early)
                     view.columns[(u32)(r.column - t.columns.data)].data = (u8*)r.bytes.data;
@@ -248,10 +248,10 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
             // the Always systems write is then detected as motion by the extract, and the
             // sim columns do not change, so no edge is lost.
             KV_ZONE("prev copy");
-            for (Table& t : engine.tables) t.begin_tick();
+            for (KTable& t : engine.ktables) t.begin_tick();
         }
         events.begin_phase();
-        snapshot_bytes += take_snapshots(*this, p); // the snapshot kinds' starting values, if this phase reads any early
+        snapshot_bytes += take_snapshots(*this, p); // the snapshot ktables' starting values, if this phase reads any early
         // Level by level: the units of a level have no path between them and run at once
         // on the pool; each level waits for the last.
         Array<ScheduledSystem>& phase = systems[p];
@@ -406,10 +406,10 @@ void PhaseList::free() {
         for (ScheduledSystem& s : p) s.free_buffers();
         p.free();
     }
-    for (Array<KindSnapshot>& p : snapshots) {
-        for (KindSnapshot& k : p) {
+    for (Array<KTableSnapshot>& p : snapshots) {
+        for (KTableSnapshot& k : p) {
             k.gens.free();
-            for (KindSnapshot::Rows& r : k.columns) r.bytes.free();
+            for (KTableSnapshot::Rows& r : k.columns) r.bytes.free();
             k.columns.free();
         }
         p.free();
@@ -444,12 +444,12 @@ void deny(const TickContext& ctx, const char* what, const char* name, bool write
     KV_VERIFY(!"undeclared access: see the log");
 }
 
-// The unit's view of a kind: for a snapshot kind it reads early, the kind as the phase
-// found it (liveness, and the columns it reads early); the table itself
+// The unit's view of a ktable: for a snapshot ktable it reads early, the ktable as the
+// phase found it (liveness, and the columns it reads early); the ktable itself
 // otherwise.
-Table* view_of(const TickContext& ctx, Table* t) {
+KTable* view_of(const TickContext& ctx, KTable* t) {
     if (!t || !ctx.system || !ctx.system->early.len) return t;
-    for (Table& v : ((ScheduledSystem*)ctx.system)->early)
+    for (KTable& v : ((ScheduledSystem*)ctx.system)->early)
         if (v.index == t->index) return &v;
     return t;
 }
@@ -465,7 +465,7 @@ Column* checked_column(TickContext& ctx, Column* c, const void* type, bool write
 }
 
 // Ids from the context carry the engine's serial in their top byte; ids from anywhere
-// else (a table's own) have none. One from another engine is refused.
+// else (a ktable's own) have none. One from another engine is refused.
 constexpr u32 k_id_bits = 24;
 
 u32 tag_id(const TickContext& ctx, u32 id) { return id ? id | ctx.engine->serial << k_id_bits : 0; }
@@ -484,18 +484,18 @@ u32 untag_id(const TickContext& ctx, u32 id) {
 
 const char* ctx_qualify(TickContext& ctx, const char* name);
 
-Table* ctx_kind(TickContext& ctx, const char* kind, bool write) {
-    kind = ctx_qualify(ctx, kind);
-    Table* t = engine_table_now(*ctx.engine, engine_kind_id(*ctx.engine, kind));
-    if (!t) { KV_ERROR("engine", "system '%s': unknown kind '%s'", system_name(ctx), kind); KV_VERIFY(!"unknown kind"); return nullptr; }
-    if (!allowed(ctx, t->resource, write)) { deny(ctx, "kind", kind, write); return nullptr; }
+KTable* ctx_ktable(TickContext& ctx, const char* ktable, bool write) {
+    ktable = ctx_qualify(ctx, ktable);
+    KTable* t = engine_ktable_now(*ctx.engine, engine_ktable_id(*ctx.engine, ktable));
+    if (!t) { KV_ERROR("engine", "system '%s': unknown ktable '%s'", system_name(ctx), ktable); KV_VERIFY(!"unknown ktable"); return nullptr; }
+    if (!allowed(ctx, t->resource, write)) { deny(ctx, "ktable", ktable, write); return nullptr; }
     return write ? t : view_of(ctx, t);
 }
 
-Table* ctx_kind(TickContext& ctx, u32 kind_id, bool write) {
-    Table* t = engine_table_now(*ctx.engine, kind_id);
-    if (!t) { KV_ERROR("engine", "system '%s': unknown kind id %u", system_name(ctx), kind_id); KV_VERIFY(!"unknown kind"); return nullptr; }
-    if (!allowed(ctx, t->resource, write)) { deny(ctx, "kind", t->name, write); return nullptr; }
+KTable* ctx_ktable(TickContext& ctx, u32 ktable_id, bool write) {
+    KTable* t = engine_ktable_now(*ctx.engine, ktable_id);
+    if (!t) { KV_ERROR("engine", "system '%s': unknown ktable id %u", system_name(ctx), ktable_id); KV_VERIFY(!"unknown ktable"); return nullptr; }
+    if (!allowed(ctx, t->resource, write)) { deny(ctx, "ktable", t->name, write); return nullptr; }
     return write ? t : view_of(ctx, t);
 }
 
@@ -503,7 +503,7 @@ Column* ctx_column(TickContext& ctx, u32 resource_id, const void* type, bool wri
     resource_id = untag_id(ctx, resource_id);
     const ResourceEntry* r = resource_id && resource_id <= ctx.engine->resources.len ? &ctx.engine->resources[resource_id - 1] : nullptr;
     if (r && r->cls == ResourceClass::Column) {
-        Table* t = view_of(ctx, &ctx.engine->tables[r->table - 1]);
+        KTable* t = view_of(ctx, &ctx.engine->ktables[r->ktable - 1]);
         for (Column& c : t->columns)
             if (c.resource == resource_id) {
                 *rows = t->rows();
@@ -522,9 +522,9 @@ Column* ctx_column(TickContext& ctx, const char* column, const void* type, bool 
     return ctx_column(ctx, id, type, write, rows);
 }
 
-Column* ctx_column_in(TickContext& ctx, Table& table, u32 component_id, const void* type, bool write) {
+Column* ctx_column_in(TickContext& ctx, KTable& table, u32 component_id, const void* type, bool write) {
     Column* c = table.column(component_id);
-    if (!c) return nullptr; // the view said the kind has it; a stray call just gets nothing
+    if (!c) return nullptr; // the view said the ktable has it; a stray call just gets nothing
     return checked_column(ctx, c, type, write);
 }
 
@@ -553,7 +553,7 @@ bool ctx_state_allowed(const TickContext& ctx, bool write) {
 }
 
 bool ctx_alive(TickContext& ctx, Handle h) {
-    Table* t = engine_table_of_now(*ctx.engine, h);
+    KTable* t = engine_ktable_of_now(*ctx.engine, h);
     if (!t) return false;
     if (!allowed(ctx, t->alive_resource, false)) { deny(ctx, "liveness", t->name, false); return false; }
     return view_of(ctx, t)->valid(h);
@@ -583,9 +583,9 @@ const void* ctx_received(TickContext& ctx, u32 type_id, u32* count) {
     return nullptr;
 }
 
-Table* ctx_rows(TickContext& ctx, u32 kind_id) {
-    Table* t = engine_table_now(*ctx.engine, kind_id);
-    if (!t) { KV_ERROR("engine", "system '%s': unknown kind id %u", system_name(ctx), kind_id); KV_VERIFY(!"unknown kind"); return nullptr; }
+KTable* ctx_rows(TickContext& ctx, u32 ktable_id) {
+    KTable* t = engine_ktable_now(*ctx.engine, ktable_id);
+    if (!t) { KV_ERROR("engine", "system '%s': unknown ktable id %u", system_name(ctx), ktable_id); KV_VERIFY(!"unknown ktable"); return nullptr; }
     if (!allowed(ctx, t->alive_resource, false)) { deny(ctx, "liveness", t->name, false); return nullptr; }
     return view_of(ctx, t);
 }
@@ -633,15 +633,15 @@ u32 ctx_resource_id(TickContext& ctx, const char* name, bool column) {
     return tag_id(ctx, id);
 }
 
-u32 TickContext::kind_id(const char* name) {
+u32 TickContext::ktable_id(const char* name) {
     name = ctx_qualify(*this, name);
-    u32 id = engine_kind_id(*engine, name);
-    if (!id) { KV_ERROR("engine", "system '%s': unknown kind '%s'", system_name(*this), name); KV_VERIFY(!"unknown kind"); }
+    u32 id = engine_ktable_id(*engine, name);
+    if (!id) { KV_ERROR("engine", "system '%s': unknown ktable '%s'", system_name(*this), name); KV_VERIFY(!"unknown ktable"); }
     return id;
 }
 
-u32    ctx_table_count(TickContext& ctx) { return ctx.engine->tables.len; }
-Table* ctx_table_at(TickContext& ctx, u32 i) { return view_of(ctx, &ctx.engine->tables[i]); }
+u32    ctx_ktable_count(TickContext& ctx) { return ctx.engine->ktables.len; }
+KTable* ctx_ktable_at(TickContext& ctx, u32 i) { return view_of(ctx, &ctx.engine->ktables[i]); }
 
 // Tickets: a unit's are (unit << 20) | its own counter, unique and the same run to run
 // whatever thread the unit was on; the engine's buffer and wheel number their own.
@@ -667,29 +667,29 @@ const char* outside_sim(const TickContext& ctx) {
     return (u32)p >= KV_SIM_PHASES && p != Phase::Count ? phase_name(p) : nullptr;
 }
 
-bool sim_kind(const Table* t) { return t && !(t->desc && t->desc->cosmetic); }
+bool sim_ktable(const KTable* t) { return t && !(t->desc && t->desc->cosmetic); }
 
 } // namespace
 
-u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, const char* kind, u32 component_count, bool ticketed) {
-    kind = ctx_qualify(ctx, kind);
-    u32 id = engine_kind_id(*ctx.engine, kind);
-    if (!id) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind '%s'", system_name(ctx), kind); return 0; }
+u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, const char* ktable, u32 component_count, bool ticketed) {
+    ktable = ctx_qualify(ctx, ktable);
+    u32 id = engine_ktable_id(*ctx.engine, ktable);
+    if (!id) { KV_ERROR("engine", "system '%s': spawn_later of unknown ktable '%s'", system_name(ctx), ktable); return 0; }
     return ctx_spawn_begin(ctx, cb, id, component_count, ticketed);
 }
 
-u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, u32 kind_id, u32 component_count, bool ticketed) {
-    Table* table = engine_table_now(*ctx.engine, kind_id);
-    if (!table) { KV_ERROR("engine", "system '%s': spawn_later of unknown kind id %u", system_name(ctx), kind_id); return 0; }
-    if (const char* cycle = outside_sim(ctx); cycle && sim_kind(table)) {
-        KV_ERROR("engine", "system '%s' runs in the %s cycle and spawns into '%s', a kind the simulation owns: refused", system_name(ctx), cycle, table->name);
+u32 ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, u32 ktable_id, u32 component_count, bool ticketed) {
+    KTable* table = engine_ktable_now(*ctx.engine, ktable_id);
+    if (!table) { KV_ERROR("engine", "system '%s': spawn_later of unknown ktable id %u", system_name(ctx), ktable_id); return 0; }
+    if (const char* cycle = outside_sim(ctx); cycle && sim_ktable(table)) {
+        KV_ERROR("engine", "system '%s' runs in the %s cycle and spawns into '%s', a ktable the simulation owns: refused", system_name(ctx), cycle, table->name);
         return 0;
     }
     CommandBuffer& b = buffer_of(ctx, cb);
     u32 ticket = 0;
     if (ticketed) ticket = ctx.system ? unit_ticket(ctx, &((ScheduledSystem*)ctx.system)->spawn_tickets) : 0;
     else b.next_ticket = 0; // a chunk buffer: never numbers its own
-    u32 got = command_spawn_begin(b, kind_id, component_count, ticket);
+    u32 got = command_spawn_begin(b, ktable_id, component_count, ticket);
     return ticketed ? got : 1; // the chunk path only needs "written"
 }
 
@@ -700,9 +700,9 @@ void ctx_spawn_component(CommandBuffer* cb, u32 component_id, const void* data, 
 
 void ctx_destroy(TickContext& ctx, CommandBuffer* cb, Handle h) {
     if (const char* cycle = outside_sim(ctx)) {
-        Table* table = engine_table_of_now(*ctx.engine, h);
-        if (sim_kind(table)) {
-            KV_ERROR("engine", "system '%s' runs in the %s cycle and destroys an entity of '%s', a kind the simulation owns: refused", system_name(ctx), cycle, table->name);
+        KTable* table = engine_ktable_of_now(*ctx.engine, h);
+        if (sim_ktable(table)) {
+            KV_ERROR("engine", "system '%s' runs in the %s cycle and destroys an entity of '%s', a ktable the simulation owns: refused", system_name(ctx), cycle, table->name);
             return;
         }
     }
@@ -713,11 +713,11 @@ void ctx_destroy(TickContext& ctx, CommandBuffer* cb, Handle h) {
 
 namespace {
 
-Attachment* checked_store(TickContext& ctx, Table* t, u32 component_id, bool write) {
+Attachment* checked_store(TickContext& ctx, KTable* t, u32 component_id, bool write) {
     Attachment* a = t ? t->attachment(component_id) : nullptr;
     if (!a) {
         const ComponentDesc* cd = engine_component(*ctx.engine, component_id);
-        KV_ERROR("engine", "system '%s': kind '%s' does not attach '%s'", system_name(ctx), t ? t->name : "?", cd ? cd->name : "?");
+        KV_ERROR("engine", "system '%s': ktable '%s' does not attach '%s'", system_name(ctx), t ? t->name : "?", cd ? cd->name : "?");
         return nullptr;
     }
     if (!allowed(ctx, a->resource, write)) { deny(ctx, "attachments", a->resource_name, write); return nullptr; }
@@ -727,7 +727,7 @@ Attachment* checked_store(TickContext& ctx, Table* t, u32 component_id, bool wri
 } // namespace
 
 void* ctx_attached(TickContext& ctx, Handle h, u32 component_id, const void* type, bool write) {
-    Table* t = engine_table_of_now(*ctx.engine, h);
+    KTable* t = engine_ktable_of_now(*ctx.engine, h);
     if (!t || !t->valid(h)) return nullptr;
     Attachment* a = checked_store(ctx, t, component_id, write);
     if (!a || a->desc->type != type) return nullptr;
@@ -735,7 +735,7 @@ void* ctx_attached(TickContext& ctx, Handle h, u32 component_id, const void* typ
 }
 
 void* ctx_attach(TickContext& ctx, Handle h, u32 component_id, const void* type, const void* data) {
-    Table* t = engine_table_of_now(*ctx.engine, h);
+    KTable* t = engine_ktable_of_now(*ctx.engine, h);
     if (!t || !t->valid(h)) return nullptr;
     Attachment* a = checked_store(ctx, t, component_id, true);
     if (!a || a->desc->type != type) return nullptr;
@@ -743,20 +743,20 @@ void* ctx_attach(TickContext& ctx, Handle h, u32 component_id, const void* type,
 }
 
 bool ctx_detach(TickContext& ctx, Handle h, u32 component_id) {
-    Table* t = engine_table_of_now(*ctx.engine, h);
+    KTable* t = engine_ktable_of_now(*ctx.engine, h);
     if (!t || !t->valid(h)) return false;
     return checked_store(ctx, t, component_id, true) && t->detach(h, component_id);
 }
 
-Table* ctx_attachments(TickContext& ctx, u32 kind_id, u32 component_id, bool write) {
-    Table* t = engine_table_now(*ctx.engine, kind_id);
+KTable* ctx_attachments(TickContext& ctx, u32 ktable_id, u32 component_id, bool write) {
+    KTable* t = engine_ktable_now(*ctx.engine, ktable_id);
     return checked_store(ctx, t, component_id, write) ? t : nullptr;
 }
 
-Table* ctx_props(TickContext& ctx, Handle h, bool write) {
-    Table* t = engine_table_of_now(*ctx.engine, h);
+KTable* ctx_props(TickContext& ctx, Handle h, bool write) {
+    KTable* t = engine_ktable_of_now(*ctx.engine, h);
     if (!t || !t->valid(h)) return nullptr;
-    if (!t->props_resource) { KV_ERROR("engine", "system '%s': kind '%s' has no property bags", system_name(ctx), t->name); return nullptr; }
+    if (!t->props_resource) { KV_ERROR("engine", "system '%s': ktable '%s' has no property bags", system_name(ctx), t->name); return nullptr; }
     if (!allowed(ctx, t->props_resource, write)) { deny(ctx, "bags", t->props_resource_name, write); return nullptr; }
     return t;
 }
@@ -764,12 +764,12 @@ Table* ctx_props(TickContext& ctx, Handle h, bool write) {
 namespace {
 
 bool set_prop(TickContext& ctx, Handle h, const char* key, const PropValue& v) {
-    Table* t = ctx_props(ctx, h, true);
+    KTable* t = ctx_props(ctx, h, true);
     return t && key && key[0] && t->prop_set(h, name_intern(key), v);
 }
 
 const PropValue* get_prop(TickContext& ctx, Handle h, const char* key) {
-    Table* t = ctx_props(ctx, h, false);
+    KTable* t = ctx_props(ctx, h, false);
     Name n = key ? name_lookup(key) : Name{};
     return t && !n.is_null() ? t->prop(h, n) : nullptr;
 }
@@ -782,7 +782,7 @@ bool TickContext::prop_set_bool(Handle h, const char* key, bool v) { PropValue p
 bool TickContext::prop_set_str(Handle h, const char* key, const char* v) { PropValue p; p.type = PropType::String; p.bits = name_intern(v ? v : "").hash; return set_prop(*this, h, key, p); }
 bool TickContext::prop_set_handle(Handle h, const char* key, Handle v) { PropValue p; p.type = PropType::Handle; p.bits = v.bits; return set_prop(*this, h, key, p); }
 bool TickContext::prop_remove(Handle h, const char* key) {
-    Table* t = ctx_props(*this, h, true);
+    KTable* t = ctx_props(*this, h, true);
     Name n = key ? name_lookup(key) : Name{};
     return t && !n.is_null() && t->prop_remove(h, n);
 }
@@ -814,14 +814,14 @@ void ctx_name(TickContext& ctx, CommandBuffer* cb, Handle h, const char* name) {
 
 bool ctx_cancel(TickContext& ctx, u32 ticket) { return ctx.engine->timers.cancel(ticket); }
 
-void ctx_destroy_all(TickContext& ctx, CommandBuffer* cb, u32 kind_id) {
-    Table* table = engine_table_now(*ctx.engine, kind_id);
-    if (!table) { KV_ERROR("engine", "system '%s': destroy_all of unknown kind id %u", system_name(ctx), kind_id); return; }
-    if (const char* cycle = outside_sim(ctx); cycle && sim_kind(table)) {
-        KV_ERROR("engine", "system '%s' runs in the %s cycle and destroys all of '%s', a kind the simulation owns: refused", system_name(ctx), cycle, table->name);
+void ctx_destroy_all(TickContext& ctx, CommandBuffer* cb, u32 ktable_id) {
+    KTable* table = engine_ktable_now(*ctx.engine, ktable_id);
+    if (!table) { KV_ERROR("engine", "system '%s': destroy_all of unknown ktable id %u", system_name(ctx), ktable_id); return; }
+    if (const char* cycle = outside_sim(ctx); cycle && sim_ktable(table)) {
+        KV_ERROR("engine", "system '%s' runs in the %s cycle and destroys all of '%s', a ktable the simulation owns: refused", system_name(ctx), cycle, table->name);
         return;
     }
-    command_destroy_all(buffer_of(ctx, cb), kind_id);
+    command_destroy_all(buffer_of(ctx, cb), ktable_id);
 }
 
 u32 ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick) {

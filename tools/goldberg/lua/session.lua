@@ -5,7 +5,7 @@
 -- clock of its own, so the same events in the same order make the same session: that is
 -- what `goldberg replay` runs, with an `io` that does nothing.
 --
--- The records live in the engine's pools (host.kinds.file, host.kinds.berg): a row per
+-- The records live in the engine's pools (host.ktables.file, host.ktables.berg): a row per
 -- file with its path, size, time and hash. What a row cannot hold stays here: the
 -- answer, and who is waiting for what.
 local Rules = require("rules")
@@ -142,7 +142,7 @@ local function touch(self, ev)
     if hidden(ev.path) then return end
     local key = self:key(ev.root, ev.path)
     local f = self.files[key]
-    local files = host.kinds.file
+    local files = host.ktables.file
     if not f then
         local work, rel
         if ev.root == self.work_root then
@@ -186,7 +186,7 @@ local function forget(self, key)
     local f = self.files[key]
     if not f then return end
     if f.hash and not f.is_berg then self.state_dirty = true end
-    host.kinds.file:destroy(f.h)
+    host.ktables.file:destroy(f.h)
     self.files[key] = nil
     self.unsolved[key] = nil
     self.count = self.count - 1
@@ -200,7 +200,7 @@ local function forget(self, key)
         if f.is_berg then self.berg_hashing = self.berg_hashing - 1 end
     end
     if f.is_berg then
-        if f.berg_h then host.kinds.berg:destroy(f.berg_h) end
+        if f.berg_h then host.ktables.berg:destroy(f.berg_h) end
         self.rules:remove(key)
         mark_affected(self, f.root, f.path)
     end
@@ -215,7 +215,7 @@ local function hashed(self, ev)
     f.hashing = false
     self.hashing = self.hashing - 1
     if f.is_berg then self.berg_hashing = self.berg_hashing - 1 end
-    local files = host.kinds.file
+    local files = host.ktables.file
     local was = f.hash
     if not f.is_berg then self.state_dirty = true end -- its size and time, at least, are new
     f.hash = ev.hash
@@ -229,7 +229,7 @@ local function hashed(self, ev)
         local root = self.roots[f.root]
         self.rules:set(key, ev.text or "", root.dir .. "/" .. f.path)
         local rec = self.rules:get(key)
-        local bergs = host.kinds.berg
+        local bergs = host.ktables.berg
         if not f.berg_h then f.berg_h = bergs:spawn{ path = f.path, root = f.root } end
         if f.berg_h then bergs:set(f.berg_h, "version", rec.version); bergs:set(f.berg_h, "ok", rec.ok) end
         mark_affected(self, f.root, f.path)
@@ -329,7 +329,7 @@ function Session:event(ev)
         -- What this scan did not see is gone: it went while nobody was watching.
         local gen, gone = self.gen[ev.root], {}
         for key, f in pairs(self.files) do
-            if f.root == ev.root and host.kinds.file:get(f.h, "scan") ~= gen then gone[#gone + 1] = key end
+            if f.root == ev.root and host.ktables.file:get(f.h, "scan") ~= gen then gone[#gone + 1] = key end
         end
         table.sort(gone)
         for _, key in ipairs(gone) do forget(self, key) end

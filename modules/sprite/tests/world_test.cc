@@ -1,4 +1,4 @@
-// The sprite world is the engine's "sprite.entity" table: create and typed lookups,
+// The sprite world is the engine's "sprite.entity" ktable: create and typed lookups,
 // previous transforms kept by the engine, stale handles, slot reuse, and the entity as a
 // handle the registry can resolve and describe.
 #include "korvid/sprite/world.h"
@@ -15,7 +15,7 @@ void test_sprite_world(kv::TestCtx& c) {
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     SpriteWorld& w = *sprite_world(e);
-    KV_CHECK(c, w.table && w.kind() != 0 && engine_table(e, "sprite.entity") == w.table);
+    KV_CHECK(c, w.ktable && w.kind() != 0 && engine_ktable(e, "sprite.entity") == w.ktable);
     KV_CHECK(c, engine_resource_id(e, "sprite.entity") && engine_resource_id(e, "sprite.entity.Transform2") &&
                 engine_resource_id(e, "sprite.entity.Sprite"));
 
@@ -51,7 +51,7 @@ void test_sprite_world(kv::TestCtx& c) {
     KV_CHECK(c, w.transform(d)->position == point2{7, 7});
     KV_CHECK(c, w.prev_transform(d)->position == point2{7, 7});
 
-    // A blind resolve of an entity is its transform (the kind's first component), the
+    // A blind resolve of an entity is its transform (the ktable's first component), the
     // type key says so, and the description is every component through its schema.
     Sprite sp; sp.layer = 4;
     Handle f = w.create(transform2_at(point2{3, 4}), sp);

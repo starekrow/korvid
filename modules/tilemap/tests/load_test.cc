@@ -41,13 +41,13 @@ void sys_spawn(TickContext& ctx) {
     if (g_want.despawn) { tilemap_despawn(ctx, g_want.instance); g_want.despawn = false; }
 }
 
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = ".owner", .components = "Transform2", .capacity = 4},
     {.name = ".child", .components = "Transform2, Local2, Parent", .capacity = 1}, // what the scene and anim modules need to see
     {.name = ".body", .components = "Transform2, Collider2, Move2", .capacity = 1},
 };
 constinit const SystemDesc k_systems[] = {{.name = ".spawn", .phase = Phase::Sim, .fn = sys_spawn, .writes = "tilemap.tile, tilemap.animtile", .main_thread = true}};
-KV_MODULE_DEFINE(k_tt) = {.name = "tt", .kinds = k_kinds, .systems = k_systems};
+KV_MODULE_DEFINE(k_tt) = {.name = "tt", .ktables = k_ktables, .systems = k_systems};
 
 bool put(const char* path, const char* text) {
     return io_write_now(path, text, strlen(text));
@@ -92,7 +92,7 @@ void test_tilemap_load(kv::TestCtx& c) {
     // The map as the collision module's static world: a body walking west into the solid
     // cell (0, 1), world x [0, 16), y [-32, -16), stops on its edge.
     tilemap_collide(e, map, point2{0, 0});
-    Table* bodies = engine_table(e, "tt.body");
+    KTable* bodies = engine_ktable(e, "tt.body");
     Handle body = bodies->spawn(transform2_at(point2{40, -24}), collider_body(BodyKind::Kinematic, vec2{4, 4}, vec2{0, 0}, 1, 1), Move2{vec2{-60, 0}});
     frames(1);
     KV_CHECK(c, bodies->get<Transform2>(body)->position.x == 20.0f);
@@ -104,14 +104,14 @@ void test_tilemap_load(kv::TestCtx& c) {
 
     // An instance: one row per non-empty cell of the visible tile layers (ground 12, detail
     // 2, walls 3; gz is hidden) and one per tile object (the tree).
-    Table* owners = engine_table(e, "tt.owner");
+    KTable* owners = engine_ktable(e, "tt.owner");
     g_want.map = map;
     g_want.owner = owners->spawn(transform2_at(point2{0, 0}));
     g_want.spawn = true;
     frames(1);
     KV_CHECK(c, !g_want.instance.is_null() && tilemap_instance_rows(e, g_want.instance) == 18);
-    Table* tiles = engine_table(e, "tilemap.tile");
-    Table* anims = engine_table(e, "tilemap.animtile");
+    KTable* tiles = engine_ktable(e, "tilemap.tile");
+    KTable* anims = engine_ktable(e, "tilemap.animtile");
     u32 animated = anims->live();
     KV_CHECK(c, tiles && animated > 0 && tiles->live() + animated == 18);
     // The animated tile (local 10, frames 10 and 11 at 250 ms) plays its map's clip.

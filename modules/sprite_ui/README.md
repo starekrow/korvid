@@ -144,7 +144,7 @@ Header `korvid/sprite_ui/sprite_ui.h`:
 | `spui_stats(e)` | screens, nodes, sprites, scale |
 
 What the module registers: the handle kinds `sprite_ui.doc` (an asset kind) and `sprite_ui.screen`; the
-kind `sprite_ui.sprite` (cosmetic); the events `SpuiEvent`, `SpuiCovered`, `SpuiUncovered`; the systems `sprite_ui.update` (PreSim, main
+ktable `sprite_ui.sprite` (cosmetic); the events `SpuiEvent`, `SpuiCovered`, `SpuiUncovered`; the systems `sprite_ui.update` (PreSim, main
 thread, every tick; writes `audio.commands`) and `sprite_ui.draw` (the Frame cycle, main thread;
 drawing only: reveals, focus and events stay in `sprite_ui.update`, in the tick); the command `spui reload`; the mount `/spui` (`print /spui/pause` lists
 a screen's nodes with their rects).

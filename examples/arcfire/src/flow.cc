@@ -81,8 +81,8 @@ void clear_run(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
     engine_sim_reset(e);
     ctx.tick = e.clock.tick_count; // this tick's units after this one see the new sim tick
-    const u32 cosmetic[] = {g_particle_kind, g_shadow_kind, g_boom_kind};
-    for (u32 k : cosmetic) ctx.write_kind(k)->destroy_all();
+    const u32 cosmetic[] = {g_particle_ktable, g_shadow_ktable, g_boom_ktable};
+    for (u32 k : cosmetic) ctx.write_ktable(k)->destroy_all();
     hud_cover(e, g, false);
     hud_stomp(e, g, false);
     hud_boss(e, g, nullptr, 0, 0);
@@ -147,7 +147,7 @@ void run_begin(TickContext& ctx, Game& g) {
     run.next_extend = kFirstExtend;
     run.bombs = kBaseBombs;
     Rng r = Rng::seeded(0xa2cf1e5eedull, 1); // the sim's stream: patterns and drift, the same every run
-    g.world = ctx.write_kind(g_world_kind)->spawn(d, s, run, EggState{}, Chance{r.state, r.inc});
+    g.world = ctx.write_ktable(g_world_ktable)->spawn(d, s, run, EggState{}, Chance{r.state, r.inc});
     g.ship = ship_spawn(e, g, d);
     for (u32 i = 0; i < d.options && i < kMaxOptions; ++i) option_add(ctx, g);
     if (g.bench[0]) bench_spawn(ctx, g, d);

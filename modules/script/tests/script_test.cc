@@ -24,7 +24,7 @@ bool lua_true(TestCtx& c, lua_State* L, const char* chunk) {
     return ok;
 }
 
-// A kind with one component of every shape a field takes, and one with two components
+// A ktable with one component of every shape a field takes, and one with two components
 // that share a field name.
 struct Asset {
     char   path[24];
@@ -43,11 +43,11 @@ struct Extra { u32 size; u8 small; };
 constinit const FieldDesc k_asset_fields[] = {KV_FIELDS(Asset, path, size, line, flags, dirty, weight, when, source, digest, pivot)};
 constinit const FieldDesc k_extra_fields[] = {KV_FIELDS(Extra, size, small)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Asset, k_asset_fields), KV_COMPONENT(Extra, k_extra_fields)};
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = "st.asset", .components = "Asset", .capacity = 4},
     {.name = "st.both",  .components = "Asset, Extra", .capacity = 4},
 };
-KV_MODULE_DEFINE(k_st) = {.name = "st", .components = k_components, .kinds = k_kinds};
+KV_MODULE_DEFINE(k_st) = {.name = "st", .components = k_components, .ktables = k_ktables};
 
 } // namespace
 
@@ -117,20 +117,20 @@ void test_script(TestCtx& c) {
     io_remove_tree(dir);
 }
 
-void test_script_kind(TestCtx& c) {
-    c.begin("script kind");
+void test_script_ktable(TestCtx& c) {
+    c.begin("script ktable");
     const ModuleDesc* const list[] = {&k_st};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* assets = engine_table(e, "st.asset");
-    Table* both   = engine_table(e, "st.both");
+    KTable* assets = engine_ktable(e, "st.asset");
+    KTable* both   = engine_ktable(e, "st.both");
     KV_CHECK(c, assets && both);
 
     lua_State* L = luaL_newstate();
     luaL_openlibs(L);
-    script_push_kind(L, assets);
+    script_push_ktable(L, assets);
     lua_setglobal(L, "assets");
-    script_push_kind(L, both);
+    script_push_ktable(L, both);
     lua_setglobal(L, "both");
 
     LUA_CHECK(c, L, "return assets:name() == 'st.asset' and assets:capacity() == 4 and assets:live() == 0 and #assets:fields() == 10 and assets:fields()[1] == 'Asset.path'");
@@ -156,7 +156,7 @@ void test_script_kind(TestCtx& c) {
     LUA_CHECK(c, L, "local r = assets:row(H) r.size = 43 r.path = 'b.png' r.dirty = false return assets:get(H, 'size') == 43 and r.path == 'b.png' and r.dirty == false");
     KV_CHECK(c, assets->get<Asset>(h)->size == 43 && strcmp(assets->get<Asset>(h)->path, "b.png") == 0 && assets->get<Asset>(h)->path[6] == 0);
 
-    // Spawn with fields; iteration in slot order; a full kind says nil.
+    // Spawn with fields; iteration in slot order; a full ktable says nil.
     LUA_CHECK(c, L, "local h2 = assets:spawn{ path = 'c.png', size = 9, pivot = {1, 2} } return assets:get(h2, 'size') == 9 and assets:get(h2, 'pivot')[2] == 2 and assets:live() == 2");
     LUA_CHECK(c, L, "local seen = {} for h in assets:each() do seen[#seen + 1] = assets:get(h, 'path') end return table.concat(seen, ',') == 'b.png,c.png'");
     LUA_CHECK(c, L, "local a, b, x = assets:spawn(), assets:spawn(), assets:spawn() local full = a and b and x == nil assets:destroy(a) assets:destroy(b) return full and assets:live() == 2");
@@ -186,7 +186,7 @@ void test_script_kind(TestCtx& c) {
 int main() {
     TestCtx c;
     test_script(c);
-    test_script_kind(c);
+    test_script_ktable(c);
     names_shutdown();
     mem_shutdown();
     return test_report(c, "script_tests");

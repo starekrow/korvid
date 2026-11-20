@@ -50,7 +50,7 @@ a moment of it.
 
 The save is `~/.local/share/korvid/arcanum/save.json` (the demo's is `save-demo.json`,
 so a scripted run never overwrites a game). It carries a `version`, which is 2 since the
-module lost its `example_` prefix and its kinds were renamed with it. A save from a newer
+module lost its `example_` prefix and its ktables were renamed with it. A save from a newer
 version is refused, and so is an older one unless `upgrade_save` (src/game.cc) can bring
 it up. For now that is a stub that brings up nothing, so version 1 saves say "The save is
 from an older version".
@@ -88,10 +88,10 @@ from an older version".
   game opens and closes them and answers their `SpuiEvent`s by node name; modes change behind
   covers (`spui_cover`).
 - **Save and load** (the `save` module). Saving writes the level's name, the hero's name,
-  the boulders broken, the `.player`, `.npc` and `.rock` kinds slot for slot, and every
+  the boulders broken, the `.player`, `.npc` and `.rock` ktables slot for slot, and every
   level's record (`level_save`). Loading holds the sim while the file is read, gives the
   levels their records back, then asks for the saved level, and on `LevelBuild` restores
-  the kinds instead of spawning the map's. Handles go by name: materials by their
+  the ktables instead of spawning the map's. Handles go by name: materials by their
   textures, clips by their sheets, the `Parent` links by `level.root`.
 - **Drawing order**: the `objects` layer has `ysort`, so its trees and houses sort by their
   feet. The player and the villagers draw in that layer's sprite layer with
@@ -108,7 +108,7 @@ from an older version".
 
 | file | what |
 |---|---|
-| `src/game.cc` | the module: kinds, the menus and screens, saving and loading, walking, talking and the hammer, villagers and the chase, the hearts, the camera, the level handlers, the demo |
+| `src/game.cc` | the module: ktables, the menus and screens, saving and loading, walking, talking and the hammer, villagers and the chase, the hearts, the camera, the level handlers, the demo |
 | `assets/ui/arcanum.spui.json` | every screen and the HUD |
 | `assets/actors/*.sheet.json` | the characters' walk, idle and attack clips |
 | `src/main.cc` | the frame loop's config |

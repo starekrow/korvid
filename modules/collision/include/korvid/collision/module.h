@@ -5,20 +5,20 @@
 //   components Collider2, Move2, MoveResult2
 //   events     OverlapBegin, OverlapEnd  with schemas, so a stale handle drops the event
 //   resource   collision.moved          Array<Handle>: the bodies something else moved this tick
-//   systems    collision.resolve        Sim; reads the Transform2 and Collider2 of every kind
+//   systems    collision.resolve        Sim; reads the Transform2 and Collider2 of every ktable
 //                                       with a collider and every Move2; writes Transform2,
-//                                       Local2 and MoveResult2 of the kinds that have Move2
+//                                       Local2 and MoveResult2 of the ktables that have Move2
 //                                       (and MoveResult2), and collision.moved
 //              collision.broadphase     Sim, after the resolve; reads the same columns
 //              collision.clear          PostSim; zeroes every Move2
 //
 // The scheduler runs the resolve after every Sim system that writes a Move2, a Transform2
 // or a Collider2, and before every Sim system that reads a MoveResult2 or collision.moved,
-// so a game's tick goes intent, resolve, react. Kinds without Move2 are only read: a game
-// that moves its own sensors (rocks) keeps doing so, and the broadphase reports them.
+// so a game's tick goes intent, resolve, react. A ktable without Move2 is only read: a
+// game that moves its own sensors (rocks) keeps doing so, and the broadphase reports them.
 //
 // To use it: add "collision" to your module's deps and the module to the executable's
-// list (kormake does that from the deps), give a kind "Collider2" next to "Transform2",
+// list (kormake does that from the deps), give a ktable "Collider2" next to "Transform2",
 // and subscribe a handler to OverlapBegin or OverlapEnd. See the module's README.
 #pragma once
 #include "korvid/core/module.h"
@@ -62,13 +62,13 @@ void collision_static(Engine& e, CollisionStaticFn fn, void* user);
 // see this tick's positions). Read the columns through the context: a system that calls
 // them declares "*[Collider2].Transform2, *[Collider2].Collider2" in its reads.
 //   collision_query  the colliders on any of `layers` whose box overlaps `area`, appended
-//                    to `out` in kind and slot order; returns how many
+//                    to `out` in ktable and slot order; returns how many
 //   collision_cast   the first collider on any of `layers` a box moving by `delta` would
 //                    enter (not `ignore`), and the fraction of the move at which it would
 //                    (1 and null when it meets none)
 //   collision_cast_all  every collider on any of `layers` the moving box meets, with the
 //                    fraction at which it enters (0 for one it starts inside), appended to
-//                    `out` nearest first, ties in kind and slot order; returns how many.
+//                    `out` nearest first, ties in ktable and slot order; returns how many.
 //                    A beam's: what it passes through, in order, to cut it at the first
 //                    that stops it
 struct CollisionHit { Handle entity; f32 t = 1.0f; };

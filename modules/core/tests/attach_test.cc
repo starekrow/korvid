@@ -1,8 +1,8 @@
-// Attachments and property bags: a component carried by one entity of a kind that lists it
-// as attachable, stored sparsely, reached by systems that declare "kind.@Component" and by
+// Attachments and property bags: a component carried by one entity of a ktable that lists it
+// as attachable, stored sparsely, reached by systems that declare "ktable.@Component" and by
 // iteration in slot order; never part of a view, so engine systems ignore it; hashed;
 // stale when its entity dies and swept at the boundary. Bags of typed named values the
-// same way. A kind may not attach what it has as a column, nor something unknown.
+// same way. A ktable may not attach what it has as a column, nor something unknown.
 #include "korvid/core/engine.h"
 #include "korvid/core/module.h"
 #include "korvid/core/test.h"
@@ -21,7 +21,7 @@ constinit const FieldDesc k_glow_fields[] = {KV_FIELD(Glowing, a)};
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(APos, k_apos_fields), KV_COMPONENT(Talk, k_talk_fields), KV_COMPONENT(Glowing, k_glow_fields),
 };
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = "x.npc",   .components = "APos", .capacity = 16, .attachable = "Talk, Glowing", .props = true},
     {.name = "x.lamp",  .components = "APos, Glowing", .capacity = 4},
 };
@@ -29,17 +29,17 @@ constinit const KindDesc k_kinds[] = {
 struct Seen { u32 glowing_rows; u32 talkers; u32 lines; i64 gold; f64 speed; const char* who; bool flag; };
 constinit Seen g = {};
 
-// Sim: a view of every kind with Glowing sees the lamp's column and nothing attached.
+// Sim: a view of every ktable with Glowing sees the lamp's column and nothing attached.
 void sys_glow(TickContext& ctx) {
     g.glowing_rows = 0;
-    for (KindRows k : ctx.view<const Glowing>())
+    for (KTableRows k : ctx.view<const Glowing>())
         for (u32 i = 0; i < k.rows(); ++i) g.glowing_rows += k.alive(i);
 }
 // Sim: the talkers, through the attachments and the bags.
 void sys_talk(TickContext& ctx) {
     g.talkers = 0; g.lines = 0;
     for (Attached<Talk> a : ctx.attached_all<Talk>("x.npc")) { ++g.talkers; g.lines += a.value->line; a.value->mood += 1.0f; }
-    const Table* npcs = ctx.read_kind("x.npc");
+    const KTable* npcs = ctx.read_ktable("x.npc");
     for (u32 i = 0; i < npcs->rows(); ++i) {
         if (!npcs->is_alive(i)) continue;
         Handle h = npcs->handle_at(i);
@@ -55,12 +55,12 @@ constinit const SystemDesc k_systems[] = {
     {.name = "x.glow", .phase = Phase::Sim, .fn = sys_glow, .reads = "*.Glowing"},
     {.name = "x.talk", .phase = Phase::Sim, .fn = sys_talk, .reads = "x.npc, x.npc.@props", .writes = "x.npc.@Talk"},
 };
-KV_MODULE_DEFINE(k_x) = {.name = "x", .components = k_components, .kinds = k_kinds, .systems = k_systems};
+KV_MODULE_DEFINE(k_x) = {.name = "x", .components = k_components, .ktables = k_ktables, .systems = k_systems};
 
-constinit const KindDesc k_bad_kinds[] = {{.name = "y.both", .components = "APos", .capacity = 4, .attachable = "APos"}};
-KV_MODULE_DEFINE(k_y) = {.name = "y", .kinds = k_bad_kinds};
-constinit const KindDesc k_unknown_kinds[] = {{.name = "z.thing", .components = "APos", .capacity = 4, .attachable = "Nope"}};
-KV_MODULE_DEFINE(k_z) = {.name = "z", .kinds = k_unknown_kinds};
+constinit const KTableDesc k_bad_ktables[] = {{.name = "y.both", .components = "APos", .capacity = 4, .attachable = "APos"}};
+KV_MODULE_DEFINE(k_y) = {.name = "y", .ktables = k_bad_ktables};
+constinit const KTableDesc k_unknown_ktables[] = {{.name = "z.thing", .components = "APos", .capacity = 4, .attachable = "Nope"}};
+KV_MODULE_DEFINE(k_z) = {.name = "z", .ktables = k_unknown_ktables};
 
 } // namespace
 
@@ -71,13 +71,13 @@ void test_attach(kv::TestCtx& c) {
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     KV_CHECK(c, engine_resource_id(e, "x.npc.@Talk") && engine_resource_id(e, "x.npc.@props") && !engine_resource_id(e, "x.lamp.@props"));
-    Table* npcs = engine_table(e, "x.npc");
-    Table* lamps = engine_table(e, "x.lamp");
+    KTable* npcs = engine_ktable(e, "x.npc");
+    KTable* lamps = engine_ktable(e, "x.lamp");
     Handle a = npcs->spawn(APos{1}), b = npcs->spawn(APos{2}), cc = npcs->spawn(APos{3});
     lamps->spawn(APos{0}, Glowing{1});
     u64 bare = npcs->hash();
 
-    // Attach: the entity has it, its neighbours do not; the kind's hash follows.
+    // Attach: the entity has it, its neighbours do not; the ktable's hash follows.
     KV_CHECK(c, npcs->attach(b, Talk{7, 0.5f}) && npcs->attached<Talk>(b)->line == 7 && !npcs->attached<Talk>(a));
     KV_CHECK(c, npcs->attach(a, Glowing{0.25f}) && npcs->hash() != bare);
     KV_CHECK(c, !lamps->attach(lamps->handle_at(0), ComponentType<Talk>::id, &a)); // not attachable there
@@ -111,7 +111,7 @@ void test_attach(kv::TestCtx& c) {
     KV_CHECK(c, npcs->attachment(ComponentType<Glowing>::id)->rows.count() == 1); // a's
     engine_shutdown(e);
 
-    // A kind may not attach its own column, nor an unknown component.
+    // A ktable may not attach its own column, nor an unknown component.
     const ModuleDesc* const both[] = {&k_x, &k_y};
     Engine f;
     KV_CHECK(c, !engine_init(f, both));

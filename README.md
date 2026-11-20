@@ -184,7 +184,7 @@ you are in; at the root it builds everything. `tools/kormake/README.md` is the m
                      remote frees, arenas, scratch, pools on reserved pages, heaps with soft
                      and hard limits from the root's EngineConfig; see docs/design/allocators.md), handles with a kind registry and C API
                      (docs/design/handles.md), component schemas (field tables that hash,
-                     compare and print rows), entity kinds (engine-owned tables),
+                     compare and print rows), ktables (entity storage the engine owns),
                      Map<K, V> (dense entries, index past 16),
                      Name interning, Rng (PCG32), events, phases, tick clock, log
     platform         SDL3 window and keyboard input (events on the bus); the I/O queue
@@ -198,9 +198,9 @@ you are in; at the root it builds everything. `tools/kormake/README.md` is the m
                      the bus; fonts, sounds, shapes, blobs and scopes, and no renderer
     asset_render     textures and materials as asset kinds: PNG decode (on zlib) and upload
                      in asset_render.pump; the renderer textures of the fonts' glyph pages
-    sprite           Transform2 + Sprite schemas, the kind "sprite.entity" with the
-                     SpriteWorld convenience surface over its table, and the extract: each
-                     tick, for every kind with both components, a Tick marker plus a Set
+    sprite           Transform2 + Sprite schemas, the ktable "sprite.entity" with the
+                     SpriteWorld convenience surface over it, and the extract: each
+                     tick, for every ktable with both components, a Tick marker plus a Set
                      for every entity that is new or changed and a Remove for every one
                      destroyed (sprite.extract, PostSim)
     renderer-vulkan  provides "render": a persistent sprite world keyed by entity handle
@@ -208,7 +208,7 @@ you are in; at the root it builds everything. `tools/kormake/README.md` is the m
                      bindless textures, Slang shader compiled to SPIR-V by the build; the
                      only Vulkan user
     collision        Collider2 (circle or box, layer and mask) and the broadphase: a uniform
-                     grid over every kind with Transform2 and Collider2, overlap pairs diffed
+                     grid over every ktable with Transform2 and Collider2, overlap pairs diffed
                      tick to tick into OverlapBegin and OverlapEnd (collision.broadphase, Sim)
     toolchain-linux  the Linux platform as a module: compiler, flags per config, what each
                      external means here, and the default bindings (render, shader-compile)
@@ -221,9 +221,9 @@ you are in; at the root it builds everything. `tools/kormake/README.md` is the m
     frameloop        what every game needs and no game decides: options, window and
                      renderer from a FrameLoopConfig, the loop (pump, ticks, extract,
                      render), resize, reporting, ExitRequested on the bus
-    testbed          the testbed: balls as a kind, one move system over a view, a bounce
+    testbed          the testbed: balls as a ktable, one move system over a view, a bounce
                      handler, a blinker on scheduled events, a trigger at the third bounce
-    rocks            an asteroids-like: ship, bullets, rocks and debris as kinds; control,
+    rocks            an asteroids-like: ship, bullets, rocks and debris as ktables; control,
                      move, wrap and fade systems; overlaps become hits in handlers, rocks
                      split, bullets expire by timer, waves arrive by timer, the ship's death
                      is a trigger on its Health column, a restart follows; --demo scripts

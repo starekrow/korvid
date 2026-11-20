@@ -83,7 +83,7 @@ constinit const FieldDesc k_vitals_fields[] = {KV_FIELDS(Vitals, hp, hp_max, hur
 constinit const FieldDesc k_quest_fields[] = {KV_FIELDS(Quest, rocks_wanted, done)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Actor, k_actor_fields), KV_COMPONENT(Vitals, k_vitals_fields), KV_COMPONENT(Quest, k_quest_fields)};
 
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     // Bodies: the player and the villagers walk by intent (Move2), the rocks are pushed.
     {.name = ".player", .components = "Transform2, Sprite, Actor, Vitals, AnimPlayer, Collider2, Move2, MoveResult2", .capacity = 1},
     {.name = ".npc",    .components = "Transform2, Local2, Parent, Sprite, Actor, AnimPlayer, Collider2, Move2, MoveResult2", .capacity = 32,
@@ -92,7 +92,7 @@ constinit const KindDesc k_kinds[] = {
     {.name = ".rock",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Move2", .capacity = 32},
 };
 // What a save holds: the player, and what lives in the level and can change.
-constinit const char* const k_saved_kinds[] = {"arcanum.player", "arcanum.npc", "arcanum.rock"};
+constinit const char* const k_saved_ktables[] = {"arcanum.player", "arcanum.npc", "arcanum.rock"};
 
 constexpr f32 kWalkSpeed   = 64.0f;   // px per second
 constexpr f32 kNpcSpeed    = 24.0f;
@@ -268,7 +268,7 @@ void play_hurt(TickContext& ctx, Game& g) {
     audio_play(ctx, p);
 }
 
-// The saved kinds' state, less their Parent links (a load parents them to the level's new
+// The saved ktables' state, less their Parent links (a load parents them to the level's new
 // root): logged at a save and after a load, so a run shows the load gave back what was
 // saved. A handle counts by its name where it has one (a clip of a sheet the load made
 // again is a new handle with the old name).
@@ -289,8 +289,8 @@ u64 row_hash(const ComponentDesc& c, const u8* row) {
 
 u64 saved_state_hash(Engine& e) {
     u64 h = 0;
-    for (const char* name : k_saved_kinds) {
-        const Table* t = engine_table(e, name);
+    for (const char* name : k_saved_ktables) {
+        const KTable* t = engine_ktable(e, name);
         for (u32 i = 0; t && i < t->rows(); ++i) {
             if (!t->is_alive(i)) continue;
             h = hash_mix(h ^ (t->handle_at(i).bits & 0x000FFFFFFFFFFFFFull));
@@ -441,17 +441,22 @@ void talk(TickContext& ctx, Game& g, Handle npc) {
 
 // ---- saving and loading --------------------------------------------------------------------------
 
-// The save's format, written as "version". 1: kinds named "example_arcanum.*" and the game
+// The save's format, written as "version". 1: ktables named "example_arcanum.*" and the game
 // "example_arcanum", from when the module was named so. 2: the module is "arcanum", and so
-// are its kinds and the game.
-constexpr i64 kSaveVersion = 2;
+// are its ktables and the game.
+constexpr i64 kSaveVersion = 3;
 
-// An older save brought up to kSaveVersion in place, or false when it cannot be. None can
-// yet: a version 1 save names kinds that are not there any more, so it is refused.
+// An older save brought up to kSaveVersion in place, or false when it cannot be. Version 2
+// kept its ktables under "kinds", from before they were ktables: the member is renamed. A
+// version 1 save names ktables that are not there any more, so it is refused.
 bool upgrade_save(JsonDoc& doc, i64 version) {
-    (void)doc;
-    (void)version;
-    return false;
+    if (version != 2 || !doc.count || !doc.nodes[0].is_object()) return false;
+    const JsonValue& root = doc.nodes[0];
+    for (u32 i = 0; i < root.as.kids.count; ++i) {
+        JsonValue& m = doc.nodes[root.as.kids.first + i];
+        if (m.key && !strcmp(m.key, "kinds")) m.key = "ktables";
+    }
+    return true;
 }
 
 // The save read back: parsed, arcanum's, and at kSaveVersion (upgraded when older). Null
@@ -479,7 +484,7 @@ const char* read_save(const u8* data, usize size, JsonDoc& doc) {
     return nullptr;
 }
 
-// The save: what level, which entity the player is, and the kinds that change. The bytes
+// The save: what level, which entity the player is, and the ktables that change. The bytes
 // are copied into the write at submission; the menu says "Saved" when the disk has them.
 void save_game(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
@@ -497,7 +502,7 @@ void save_game(TickContext& ctx, Game& g) {
     w.key("hero");       w.string_value(g.hero);
     w.key("broken");     w.uint_value(g.rocks_broken);
     w.key("levels");     level_save(w, e); // what each level remembers: the rocks
-    w.key("kinds");      save_kinds(w, e, k_saved_kinds);
+    w.key("ktables");    save_ktables(w, e, k_saved_ktables);
     w.end_object();
     if (w.finish()) {
         IoWriteRequest req;
@@ -512,7 +517,7 @@ void save_game(TickContext& ctx, Game& g) {
 
 // The load: the menu closes and the sim holds while the file comes in, so how long the
 // disk takes never reaches the state; then the level it names loads (a reload, if it is
-// this one) and on_build restores the kinds instead of spawning the map's.
+// this one) and on_build restores the ktables instead of spawning the map's.
 void load_game(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
     if (!g.save_path[0] || !g.load_read.is_null() || g.load_data || level_state(e) != LevelState::Active) { note(e, "Not now"); return; }
@@ -641,7 +646,7 @@ void on_ui(TickContext& ctx, Span<const SpuiEvent> events) {
 // Back to the village as the map has it, the hero whole: from the game-over screen when
 // there is no save, or to the title.
 void restart(Engine& e, Game& g, bool to_title) {
-    Table* players = engine_table(e, "arcanum.player");
+    KTable* players = engine_ktable(e, "arcanum.player");
     Vitals* v = players->get<Vitals>(g.player);
     v->hp = v->hp_max;
     v->hurt = 0.0f;
@@ -678,7 +683,7 @@ void on_covered(TickContext& ctx, Span<const SpuiCovered> covers) {
             g.aim = Handle{};
             spui_set_visible(e, g.hud, "", true);
             if (g.aim_broke) {
-                if (Table* rocks = ctx.write_kind("arcanum.rock")) rocks->destroy(g.aim_rock);
+                if (KTable* rocks = ctx.write_ktable("arcanum.rock")) rocks->destroy(g.aim_rock);
                 ++g.rocks_broken;
                 KV_INFO("arcanum", "broken: %u rocks", g.rocks_broken);
             }
@@ -767,7 +772,7 @@ void modes(TickContext& ctx) {
 // player's, sim state, so a demo breaks the same rock in every run.
 void strike(TickContext& ctx, Game& g) {
     Engine& e = *ctx.engine;
-    Table* players = engine_table(e, "arcanum.player");
+    KTable* players = engine_ktable(e, "arcanum.player");
     Vitals* v = players->get<Vitals>(g.player);
     f32 x = 0.5f - 0.5f * kv::cos(g.aim_t * kAimSpeed);
     f32 close = 1.0f - kv::fabs(x - 0.5f) * 2.0f;
@@ -805,9 +810,9 @@ void walk(TickContext& ctx) {
         MemScope scope;
         Array<Handle> nearby = array_in<Handle>(mem_scratch());
         collision_query(ctx, rect2{at.x + ahead.x - 8.0f, at.y - 9.0f + ahead.y, 16.0f, 10.0f}, L_ACTOR, nearby);
-        static const u32 k_npc = ctx.kind_id(".npc");
-        static const u32 k_rock = ctx.kind_id(".rock");
-        u16 npc_hk = engine_table_now(e, k_npc)->kind, rock_hk = engine_table_now(e, k_rock)->kind; // handle kinds, which never change
+        static const u32 k_npc = ctx.ktable_id(".npc");
+        static const u32 k_rock = ctx.ktable_id(".rock");
+        u16 npc_hk = engine_ktable_now(e, k_npc)->handle_kind, rock_hk = engine_ktable_now(e, k_rock)->handle_kind; // handle kinds, which never change
         if (hammering) {
             actor[i].swing = 0.3f;
             play_sound(ctx, g, SND_HIT);
@@ -830,8 +835,8 @@ void walk(TickContext& ctx) {
 void react(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
-    // The player's columns, by its row: read as the kind is declared, and the three it
-    // writes declared one by one (the whole kind would include the intent the resolve
+    // The player's columns, by its row: read as the ktable is declared, and the three it
+    // writes declared one by one (the whole ktable would include the intent the resolve
     // reads, a cycle).
     Span<const Transform2>  transforms = ctx.read<Transform2>(".player.Transform2");
     Span<const MoveResult2> results    = ctx.read<MoveResult2>(".player.MoveResult2");
@@ -844,8 +849,8 @@ void react(TickContext& ctx) {
     if (!ctx.alive(g.player) || !m || m->state != AssetState::Ready || level_state(e) == LevelState::Loading) return;
     const u32 me = g.player.index();
     const Transform2* t = &transforms[me];
-    static const u32 k_npc_kind = ctx.kind_id(".npc");
-    const u16 npc_handles = engine_table(e, k_npc_kind)->kind;
+    static const u32 k_npc_ktable = ctx.ktable_id(".npc");
+    const u16 npc_handles = engine_ktable(e, k_npc_ktable)->handle_kind;
     const MoveResult2& mine = results[me];
     bool bumped = !mine.blocker.is_null() && mine.blocker.kind() == npc_handles;
     for (u32 i = 0; i < npc_moves.len && !bumped; ++i) bumped = npc_moves[i].blocker == g.player;
@@ -902,8 +907,8 @@ void villagers(TickContext& ctx) {
     const point2* player_at = g.player.index() < pxf.len ? &pxf[g.player.index()].position : nullptr;
     const TilemapAsset* map = tilemap_get(*ctx.engine, g.map);
     if (map && map->state != AssetState::Ready) map = nullptr;
-    static const u32 k_npc = ctx.kind_id(".npc");
-    KindRows table = ctx.rows(k_npc);
+    static const u32 k_npc = ctx.ktable_id(".npc");
+    KTableRows table = ctx.rows(k_npc);
     f32 step = kNpcSpeed * (f32)ctx.dt;
     for (u32 i = 0; i < move.len; ++i) {
         if (!table.alive(i)) continue;
@@ -989,9 +994,9 @@ void hud(TickContext& ctx) {
 
 // ---- levels -------------------------------------------------------------------------------------
 
-// The saved kinds back, in place of the map's villagers and rocks. Parent links name the
+// The saved ktables back, in place of the map's villagers and rocks. Parent links name the
 // level's root ("level.root@level.root"), so they find the new one; materials name their
-// textures; the rest comes back by kind name and slot.
+// textures; the rest comes back by ktable name and slot.
 void restore(TickContext& ctx, Game& g, const LevelBuild& b) {
     Engine& e = *ctx.engine;
     MemScope scope;
@@ -1001,8 +1006,8 @@ void restore(TickContext& ctx, Game& g, const LevelBuild& b) {
         return;
     }
     (void)b;
-    const JsonValue* kinds = json_get(doc, doc.root(), "kinds");
-    u32 n = kinds ? load_kinds(doc, *kinds, e) : 0;
+    const JsonValue* ktables = json_get(doc, doc.root(), "ktables");
+    u32 n = ktables ? load_ktables(doc, *ktables, e) : 0;
     Handle player = load_handle(json_get(doc, doc.root(), "player"));
     if (!player.is_null()) g.player = player;
     g.exit_armed = json_bool(json_get(doc, doc.root(), "exit_armed"), true);
@@ -1015,7 +1020,7 @@ void restore(TickContext& ctx, Game& g, const LevelBuild& b) {
         g.mode = Mode::Play;
         spui_set_visible(e, g.hud, "", true);
     }
-    KV_INFO("arcanum", "load: %u kinds, state %016llx, saved at tick %llu", n, (unsigned long long)saved_state_hash(e),
+    KV_INFO("arcanum", "load: %u ktables, state %016llx, saved at tick %llu", n, (unsigned long long)saved_state_hash(e),
             (unsigned long long)json_u64(json_get(doc, doc.root(), "tick"), 0));
 }
 
@@ -1031,7 +1036,7 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
         if (b.entry[0] && !strcmp(o.name, b.entry)) at = &o;
     }
     if (!at) at = tilemap_object_find(m, "player_start");
-    Table* players = ctx.write_kind("arcanum.player");
+    KTable* players = ctx.write_ktable("arcanum.player");
     if (Transform2* t = players->get<Transform2>(g.player)) {
         if (at && strcmp(b.entry, "reload") != 0) {
             *t = transform2_at(tilemap_to_world(point2{0, 0}, at->x, at->y));
@@ -1040,8 +1045,8 @@ void spawn_level(TickContext& ctx, Game& g, const LevelBuild& b, const TilemapAs
         players->get<Sprite>(g.player)->layer = (i32)objects_layer;
         g.exit_armed = exit_at(m, feet_of(t->position)) == nullptr;
     }
-    Table* npcs = ctx.write_kind("arcanum.npc");
-    Table* rocks = ctx.write_kind("arcanum.rock");
+    KTable* npcs = ctx.write_ktable("arcanum.npc");
+    KTable* rocks = ctx.write_ktable("arcanum.rock");
     const MapLayer* objs = tilemap_layer_find(m, "objects");
     for (u32 i = 0; objs && i < objs->objects.count; ++i) {
         const MapObject& o = m.objects[objs->objects.first + i];
@@ -1237,7 +1242,7 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     // overwrites a player's game.
     const char* pref = platform_pref_path(e, "korvid", "arcanum");
     if (pref[0]) format(g->save_path, sizeof g->save_path, "%ssave%s.json", pref, g->demo ? "-demo" : "");
-    Table* players = engine_table(e, "arcanum.player");
+    KTable* players = engine_ktable(e, "arcanum.player");
     Actor pa{};
     g->player = players->spawn(transform2_at(point2{0, 0}), actor_sprite(*g, 0, 2), pa, Vitals{kHpMax, kHpMax, 0.0f, 0, Rng::seeded(0x4152434e).state}, AnimPlayer{}, feet_body(ColliderPusher), Move2{}, MoveResult2{});
     engine_entity_name_set(e, g->player, "player");
@@ -1286,7 +1291,7 @@ constinit const SystemDesc k_systems[] = {
 KV_MODULE_DEFINE(arcanum_module) = {
     .name       = "arcanum",
     .components = k_components,
-    .kinds      = k_kinds,
+    .ktables    = k_ktables,
     .systems    = k_systems,
     .handlers   = k_handlers,
     .startup    = arcanum_startup,

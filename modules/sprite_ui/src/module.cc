@@ -429,7 +429,7 @@ void spui_draw(TickContext& ctx) {
         rect(x0 + d, y0, s.win_w - x0 - d, d);           // right
     }
 
-    Table* rows = ctx.write_kind(s.sprite_kind);
+    KTable* rows = ctx.write_ktable(s.sprite_ktable);
     u32 n = s.quads.len;
     for (u32 i = 0; i < n; ++i) {
         const SpuiQuad& q = s.quads[i];
@@ -475,7 +475,7 @@ bool spui_startup(Engine& e, ModuleInstance& self) {
     s->screens.use_kind(s->screen_kind);
     if (!s->screens.init(256, self.general.tag)) return false;
     if (!spui_docs_init(e, *s, &self.general, self.general.tag)) return false;
-    s->sprite_kind = engine_kind_id(e, "sprite_ui.sprite");
+    s->sprite_ktable = engine_ktable_id(e, "sprite_ui.sprite");
     self.set_state(s);
     return true;
 }
@@ -539,7 +539,7 @@ constinit const FieldDesc k_uncovered_fields[] = {KV_FIELDS(SpuiUncovered, cover
 constinit const EventTypeDesc k_events[] = {
     KV_EVENT_EX(SpuiEvent, k_event_fields, 0), KV_EVENT_EX(SpuiCovered, k_covered_fields, 0), KV_EVENT_EX(SpuiUncovered, k_uncovered_fields, 0),
 };
-constinit const KindDesc k_kinds[] = {{.name = ".sprite", .components = "Transform2, Sprite", .capacity = 16384, .cosmetic = true}};
+constinit const KTableDesc k_ktables[] = {{.name = ".sprite", .components = "Transform2, Sprite", .capacity = 16384, .cosmetic = true}};
 constinit const SystemDesc k_systems[] = {
     {.name = ".update", .phase = Phase::PreSim, .fn = spui_update, .reads = "input.actions, input.state", .appends = "audio.commands",
      .emits = "SpuiEvent, SpuiCovered, SpuiUncovered", .after = "?asset.pump_scopes, ?asset_render.pump, ?asset.pump_blobs, ?asset.pump_sounds", .main_thread = true, .runs = RunWhen::Always},
@@ -552,7 +552,7 @@ constinit const SystemDesc k_systems[] = {
 KV_MODULE_DEFINE(sprite_ui_module) = {
     .name     = "sprite_ui",
     .events   = k_events,
-    .kinds    = k_kinds,
+    .ktables  = k_ktables,
     .systems  = k_systems,
     .commands = k_commands,
     .mounts   = k_mounts,

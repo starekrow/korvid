@@ -27,11 +27,11 @@ void free_neighbor(u32 chunk, u32, u32, void* user) {
     for (u32 k = 0; k < s.per_chunk; ++k) { mem_free(s.p[v * s.per_chunk + k]); s.p[v * s.per_chunk + k] = nullptr; }
 }
 
-// A module that spawns into a kind and allocates from its general view, in a limited heap.
+// A module that spawns into a ktable and allocates from its general view, in a limited heap.
 struct Blob { u8 bytes[48]; };
 constinit const FieldDesc k_blob_fields[] = {KV_FIELDS(Blob, bytes)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Blob, k_blob_fields)};
-constinit const KindDesc k_kinds[] = {{.name = ".blob", .components = "Blob", .capacity = 1u << 20}};
+constinit const KTableDesc k_ktables[] = {{.name = ".blob", .components = "Blob", .capacity = 1u << 20}};
 struct LimState { void* block; };
 bool lim_startup(Engine&, ModuleInstance& self) {
     LimState* s = arena_push<LimState>(self.arena);
@@ -40,7 +40,7 @@ bool lim_startup(Engine&, ModuleInstance& self) {
     return s->block != nullptr;
 }
 void lim_shutdown(Engine&, ModuleInstance& self) { free_in(&self.general, self.state_as<LimState>()->block, 1000); }
-KV_MODULE_DEFINE(k_lim) = {.name = "lim", .components = k_components, .kinds = k_kinds, .startup = lim_startup, .shutdown = lim_shutdown, .memory = {.reserve = 1u << 20}};
+KV_MODULE_DEFINE(k_lim) = {.name = "lim", .components = k_components, .ktables = k_ktables, .startup = lim_startup, .shutdown = lim_shutdown, .memory = {.reserve = 1u << 20}};
 
 constinit const HeapDesc       k_heaps[]  = {{"small", 0, 512 * 1024}};
 constinit const ModuleHeapDesc k_assign[] = {{"lim", "small"}};
@@ -154,7 +154,7 @@ void test_heap(kv::TestCtx& c) {
     arena_destroy(ar);
     KV_CHECK(c, mem_heap_used(heap) == 0);
 
-    // The engine config: the module's general view, arena and kinds carry the heap; a
+    // The engine config: the module's general view, arena and ktables carry the heap; a
     // spawn storm hits the hard limit, fails with the message, and the engine goes on.
     EngineConfig cfg;
     cfg.heaps = k_heaps;
@@ -167,8 +167,8 @@ void test_heap(kv::TestCtx& c) {
     ModuleInstance* lim = engine_module(e, "lim");
     KV_CHECK(c, lim && lim->general.tag.heap == small && lim->arena.a.tag.heap == small);
     KV_CHECK(c, mem_module_heap((u16)(lim->index + 1)) == small);
-    Table* blobs = engine_table(e, "lim.blob");
-    KV_CHECK(c, blobs->tag.heap == small && strcmp(mem_category_name(blobs->tag.category), "kinds") == 0);
+    KTable* blobs = engine_ktable(e, "lim.blob");
+    KV_CHECK(c, blobs->tag.heap == small && strcmp(mem_category_name(blobs->tag.category), "ktables") == 0);
     u64 used_at_start = mem_heap_used(small);
     KV_CHECK(c, used_at_start > 0); // the arena's first commit and the startup block
     u32 spawned = 0;

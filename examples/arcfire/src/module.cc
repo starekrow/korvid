@@ -1,5 +1,5 @@
 // arcfire: the module record. What the game declares to the engine (components,
-// kinds, events, the systems and handlers of every file), the startup that loads its art
+// ktables, events, the systems and handlers of every file), the startup that loads its art
 // and its stage, and the sprite helpers every file draws with. The game itself is in the
 // files the tables below name.
 #include "arcfire.h"
@@ -19,9 +19,9 @@
 
 namespace kv::arcfire {
 
-constinit u32 g_world_kind = 0, g_plane_kind = 0, g_ship_kind = 0, g_ring_kind = 0, g_mark_kind = 0, g_shot_kind = 0, g_air_kind = 0,
-              g_ground_kind = 0, g_bullet_kind = 0, g_active_kind = 0, g_particle_kind = 0, g_egg_kind = 0, g_shell_kind = 0,
-              g_item_kind = 0, g_formation_kind = 0, g_shadow_kind = 0, g_boss_kind = 0, g_part_kind = 0, g_boom_kind = 0, g_beam_kind = 0, g_option_kind = 0, g_glow_kind = 0, g_aglow_kind = 0, g_fleet_kind = 0, g_tracer_kind = 0, g_capital_kind = 0;
+constinit u32 g_world_ktable = 0, g_plane_ktable = 0, g_ship_ktable = 0, g_ring_ktable = 0, g_mark_ktable = 0, g_shot_ktable = 0, g_air_ktable = 0,
+              g_ground_ktable = 0, g_bullet_ktable = 0, g_active_ktable = 0, g_particle_ktable = 0, g_egg_ktable = 0, g_shell_ktable = 0,
+              g_item_ktable = 0, g_formation_ktable = 0, g_shadow_ktable = 0, g_boss_ktable = 0, g_part_ktable = 0, g_boom_ktable = 0, g_beam_ktable = 0, g_option_ktable = 0, g_glow_ktable = 0, g_aglow_ktable = 0, g_fleet_ktable = 0, g_tracer_ktable = 0, g_capital_ktable = 0;
 constinit u32 g_part_down = 0;
 
 // The systems and handlers, each in the file of its part.
@@ -134,50 +134,50 @@ constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Fleet, k_fleet_fields),       KV_COMPONENT(Tracer, k_tracer_fields), KV_COMPONENT(Capital, k_capital_fields),
 };
 
-// ---- kinds ---------------------------------------------------------------------------------------
-// Capacity is address space (rows commit as they are used), so the bullet kinds are sized
-// for the stress dial; --capacity KIND=N goes past them for a measurement.
-constinit const KindDesc k_kinds[] = {
-    {.name = ".world",    .components = "Dials, Stage, Run, EggState, Chance", .capacity = 1, .id = &g_world_kind},
-    {.name = ".plane",    .components = "Transform2, Sprite, Plane", .capacity = 4096, .id = &g_plane_kind, .cosmetic = true},
-    {.name = ".ship",     .components = "Transform2, Sprite, Collider2, Ship", .capacity = 1, .id = &g_ship_kind},
+// ---- ktables -------------------------------------------------------------------------------------
+// Capacity is address space (rows commit as they are used), so the bullet ktables are sized
+// for the stress dial; --capacity KTABLE=N goes past them for a measurement.
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".world",    .components = "Dials, Stage, Run, EggState, Chance", .capacity = 1, .id = &g_world_ktable},
+    {.name = ".plane",    .components = "Transform2, Sprite, Plane", .capacity = 4096, .id = &g_plane_ktable, .cosmetic = true},
+    {.name = ".ship",     .components = "Transform2, Sprite, Collider2, Ship", .capacity = 1, .id = &g_ship_ktable},
     // The graze ring and the hitbox's dot: children of the ship.
-    {.name = ".ring",     .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_ring_kind},
-    {.name = ".mark",     .components = "Transform2, Local2, Parent, Sprite", .capacity = 1, .id = &g_mark_kind},
-    {.name = ".shot",     .components = "Transform2, Sprite, Velocity, Collider2, Shot", .capacity = 2048, .id = &g_shot_kind},
-    {.name = ".air",      .components = "Transform2, Sprite, Collider2, Health, Mover, Emitter, Runner", .capacity = 256, .id = &g_air_kind},
-    {.name = ".ground",   .components = "Transform2, Sprite, Collider2, Health, Emitter, Ground, Runner", .capacity = 256, .id = &g_ground_kind},
-    {.name = ".bullet",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet", .capacity = 65536, .id = &g_bullet_kind},
+    {.name = ".ring",     .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_ring_ktable},
+    {.name = ".mark",     .components = "Transform2, Local2, Parent, Sprite", .capacity = 1, .id = &g_mark_ktable},
+    {.name = ".shot",     .components = "Transform2, Sprite, Velocity, Collider2, Shot", .capacity = 2048, .id = &g_shot_ktable},
+    {.name = ".air",      .components = "Transform2, Sprite, Collider2, Health, Mover, Emitter, Runner", .capacity = 256, .id = &g_air_ktable},
+    {.name = ".ground",   .components = "Transform2, Sprite, Collider2, Health, Emitter, Ground, Runner", .capacity = 256, .id = &g_ground_ktable},
+    {.name = ".bullet",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet", .capacity = 65536, .id = &g_bullet_ktable},
     // Bullets that run a program of their own (a needle that waits, a seed that bursts).
-    {.name = ".active",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet, Runner", .capacity = 8192, .id = &g_active_kind},
-    {.name = ".particle", .components = "Transform2, Sprite, Velocity, Particle", .capacity = 32768, .id = &g_particle_kind, .cosmetic = true},
-    {.name = ".egg",      .components = "Transform2, Sprite, EggBody", .capacity = 1, .id = &g_egg_kind},
-    {.name = ".shell",    .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_shell_kind,
+    {.name = ".active",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet, Runner", .capacity = 8192, .id = &g_active_ktable},
+    {.name = ".particle", .components = "Transform2, Sprite, Velocity, Particle", .capacity = 32768, .id = &g_particle_ktable, .cosmetic = true},
+    {.name = ".egg",      .components = "Transform2, Sprite, EggBody", .capacity = 1, .id = &g_egg_ktable},
+    {.name = ".shell",    .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_shell_ktable,
      .early_reads = EarlyReads::Snapshot}, // as the part, with the egg for the stage
     // Chips and pickups; a formation's count of its members.
-    {.name = ".item",     .components = "Transform2, Sprite, Velocity, Collider2, Item", .capacity = 4096, .id = &g_item_kind},
-    {.name = ".formation", .components = "Formation", .capacity = 64, .id = &g_formation_kind},
+    {.name = ".item",     .components = "Transform2, Sprite, Velocity, Collider2, Item", .capacity = 4096, .id = &g_item_ktable},
+    {.name = ".formation", .components = "Formation", .capacity = 64, .id = &g_formation_ktable},
     // Shadows on the ground under what flies: cosmetic children.
-    {.name = ".shadow",   .components = "Transform2, Local2, Parent, Sprite", .capacity = 512, .id = &g_shadow_kind, .cosmetic = true},
+    {.name = ".shadow",   .components = "Transform2, Local2, Parent, Sprite", .capacity = 512, .id = &g_shadow_ktable, .cosmetic = true},
     // A boss's hull, and its parts: children of the hull or of each other (boss.cc).
-    {.name = ".boss",     .components = "Transform2, Sprite, Collider2, Boss", .capacity = 2, .id = &g_boss_kind},
+    {.name = ".boss",     .components = "Transform2, Sprite, Collider2, Boss", .capacity = 2, .id = &g_boss_ktable},
     // A snapshot: the stage spawns and moves parts before the resolve, which reads them
     // early (where the last compose put them) and the bosses as the stage left them.
-    {.name = ".part",     .components = "Transform2, Local2, Parent, Sprite, Collider2, Health, Emitter, Runner, Part", .capacity = 256, .id = &g_part_kind,
+    {.name = ".part",     .components = "Transform2, Local2, Parent, Sprite, Collider2, Health, Emitter, Runner, Part", .capacity = 256, .id = &g_part_ktable,
      .early_reads = EarlyReads::Snapshot},
     // Explosions: a flipbook each, gone when it has played (fx.cc).
     // The beams: one on the ship (and one on each option), cut each tick at what it meets.
     // Options: children of the ship, bodies that eat bullets (options.cc).
-    {.name = ".option",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Option", .capacity = kMaxOptions, .id = &g_option_kind},
-    {.name = ".beam",     .components = "Transform2, Local2, Parent, Sprite, Beam", .capacity = 4 * kBeamSegments, .id = &g_beam_kind},
-    {.name = ".boom",     .components = "Transform2, Sprite, AnimPlayer", .capacity = 512, .id = &g_boom_kind, .cosmetic = true},
-    // The bullets' glows, slot for slot with the two bullet kinds (fx.cc).
-    {.name = ".glow",     .components = "Transform2, Sprite, Glow", .capacity = 65536, .id = &g_glow_kind, .cosmetic = true},
-    {.name = ".aglow",    .components = "Transform2, Sprite, Glow", .capacity = 8192, .id = &g_aglow_kind, .cosmetic = true},
+    {.name = ".option",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Option", .capacity = kMaxOptions, .id = &g_option_ktable},
+    {.name = ".beam",     .components = "Transform2, Local2, Parent, Sprite, Beam", .capacity = 4 * kBeamSegments, .id = &g_beam_ktable},
+    {.name = ".boom",     .components = "Transform2, Sprite, AnimPlayer", .capacity = 512, .id = &g_boom_ktable, .cosmetic = true},
+    // The bullets' glows, slot for slot with the two bullet ktables (fx.cc).
+    {.name = ".glow",     .components = "Transform2, Sprite, Glow", .capacity = 65536, .id = &g_glow_ktable, .cosmetic = true},
+    {.name = ".aglow",    .components = "Transform2, Sprite, Glow", .capacity = 8192, .id = &g_aglow_ktable, .cosmetic = true},
     // Orbit's battle (battle.cc): never the sim's.
-    {.name = ".fleet",    .components = "Transform2, Sprite, Velocity, Fleet", .capacity = 16384, .id = &g_fleet_kind, .cosmetic = true},
-    {.name = ".tracer",   .components = "Transform2, Sprite, Velocity, Tracer", .capacity = 16384, .id = &g_tracer_kind, .cosmetic = true},
-    {.name = ".capital",  .components = "Transform2, Sprite, Capital", .capacity = 8, .id = &g_capital_kind, .cosmetic = true},
+    {.name = ".fleet",    .components = "Transform2, Sprite, Velocity, Fleet", .capacity = 16384, .id = &g_fleet_ktable, .cosmetic = true},
+    {.name = ".tracer",   .components = "Transform2, Sprite, Velocity, Tracer", .capacity = 16384, .id = &g_tracer_ktable, .cosmetic = true},
+    {.name = ".capital",  .components = "Transform2, Sprite, Capital", .capacity = 8, .id = &g_capital_ktable, .cosmetic = true},
 };
 
 // A part's death is its health crossing below one: delivered as a StateEdge the next tick.
@@ -238,7 +238,7 @@ constinit const SystemDesc k_systems[] = {
     {.name = ".records", .phase = Phase::PreSim, .fn = records, .main_thread = true, .runs = RunWhen::Always},
     {.name = ".screens", .phase = Phase::PreSim, .fn = screens, .reads = "input.actions", .after = ".pause", .main_thread = true, .runs = RunWhen::Always},
     {.name = ".pause", .phase = Phase::PreSim, .fn = pause, .reads = "input.actions, input.state", .after = ".boot", .main_thread = true, .runs = RunWhen::Always},
-    // The pilots read the field whole, through ctx.read_kind: the bot where everything stood
+    // The pilots read the field whole, through ctx.read_ktable: the bot where everything stood
     // as the tick began, the demo before anything in Input could move it.
     {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet, ^.active, ^.ship, ^.air, ^.ground, ^.part, ^.boss, ^.item, ^.world",
      .main_thread = true},
@@ -450,7 +450,7 @@ KV_MODULE_DEFINE(arcfire_module) = {
     .name       = "arcfire",
     .events     = arcfire::k_events,
     .components = arcfire::k_components,
-    .kinds      = arcfire::k_kinds,
+    .ktables    = arcfire::k_ktables,
     .resources  = arcfire::k_resources,
     .systems    = arcfire::k_systems,
     .handlers   = arcfire::k_handlers,

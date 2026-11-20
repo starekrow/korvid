@@ -10,7 +10,7 @@
 //   what grows: arrays, maps              self.general, set as the container's `alloc`;
 //                                         free it in shutdown
 //   temporaries inside a call or a frame  mem_scratch() under a MemScope (arena.h)
-//   entities                              kinds' tables: the engine allocates them
+//   entities                              ktables: the engine allocates them
 //   anything else                         mem_alloc / mem_free, charged to the running module
 //
 // Nothing here throws: an allocation that can't be had returns null, logged once.
@@ -178,7 +178,7 @@ void mem_shutdown();
 
 // ---- spike hunting --------------------------------------------------------------------
 // Dev builds do work that is not checking: they fill memory as it is handed out and given
-// back, poison what is destroyed (a kind's row, a pool's item, an arena's released range),
+// back, poison what is destroyed (a ktable's row, a pool's item, an arena's released range),
 // give each large allocation pages of its own behind a guard page, and note every event's
 // emitter for the trace. It catches stale pointers and overruns; it also writes megabytes
 // nobody reads and maps pages per allocation, so a dev build's timings carry spikes a ship

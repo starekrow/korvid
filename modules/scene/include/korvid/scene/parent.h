@@ -1,8 +1,8 @@
-// Korvid scene: the two components that make an entity a child. A kind that has
-// Transform2, Local2 and Parent is a child kind: each tick the system "scene.compose"
+// Korvid scene: the two components that make an entity a child. A ktable that has
+// Transform2, Local2 and Parent is a child ktable: each tick the system "scene.compose"
 // (phase PostSim, on paused ticks too) writes every child's Transform2 as the parent's
 // world placement composed with the child's Local2. Parents are any entity with a
-// Transform2, in any kind, children included; depth is walked up the chain, so a parent's
+// Transform2, in any ktable, children included; depth is walked up the chain, so a parent's
 // world placement is final before its children read it.
 //
 // A child's Transform2 is written at the end of the tick: a Sim system that reads it

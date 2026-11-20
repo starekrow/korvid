@@ -39,12 +39,12 @@ struct LevelState_ {
     Handle         new_scope, new_map;  // the level being loaded
     u32            ticks_in_state = 0;
     f32            fade = 0.0f;         // 0 clear, 1 covered
-    u32            root_kind = 0, fade_kind = 0;
+    u32            root_ktable = 0, fade_ktable = 0;
     Handle         fade_entity;
     Handle         white_texture, white_material;
-    // Per-level state: the kinds whose named entities a level remembers, and per level what
+    // Per-level state: the ktables whose named entities a level remembers, and per level what
     // it remembers ({"rows": {name: row}, "gone": [name]}, JSON) and the names its build made.
-    char           persist[8][KV_KIND_NAME_MAX] = {};
+    char           persist[8][KV_KTABLE_NAME_MAX] = {};
     u32            persist_count = 0;
     Array<char>    record[KV_LEVELS];
     Array<u64>     built[KV_LEVELS];
@@ -81,7 +81,7 @@ void ensure_white(Engine& e, LevelState_& s) {
 // The fade quad: one screen-space sprite at the top layer, far larger than any window.
 void set_fade(TickContext& ctx, LevelState_& s) {
     ensure_white(*ctx.engine, s);
-    Table* t = ctx.write_kind(s.fade_kind);
+    KTable* t = ctx.write_ktable(s.fade_ktable);
     if (!t) return;
     if (s.fade_entity.is_null() && s.fade > 0.0f && !s.white_material.is_null()) {
         Sprite sp;
@@ -102,12 +102,12 @@ void set_fade(TickContext& ctx, LevelState_& s) {
 // Seconds to a fraction per tick; 0 seconds is all at once.
 // ---- per-level state -------------------------------------------------------------------------------
 
-bool persisted(const LevelState_& s, const Table& t) {
+bool persisted(const LevelState_& s, const KTable& t) {
     for (u32 i = 0; i < s.persist_count; ++i) if (!strcmp(s.persist[i], t.name)) return true;
     return false;
 }
 
-// What the level is now, into its record: every named entity of the persisted kinds, and the
+// What the level is now, into its record: every named entity of the persisted ktables, and the
 // names it once had and has no longer (its build's, and those the record already said).
 void snapshot(Engine& e, LevelState_& s, u32 level) {
     if (level >= s.count || !s.persist_count) return;
@@ -132,7 +132,7 @@ void snapshot(Engine& e, LevelState_& s, u32 level) {
     w.begin_object();
     w.key("rows");
     w.begin_object();
-    for (Table& t : e.tables) {
+    for (KTable& t : e.ktables) {
         if (!persisted(s, t)) continue;
         for (u32 i = 0; i < t.names.count(); ++i) {
             if (!t.sparse_live(t.names, i)) continue;
@@ -157,7 +157,7 @@ void snapshot(Engine& e, LevelState_& s, u32 level) {
 void apply(Engine& e, LevelState_& s, u32 level) {
     if (level >= s.count || !s.persist_count) return;
     s.built[level].clear();
-    for (Table& t : e.tables) {
+    for (KTable& t : e.ktables) {
         if (!persisted(s, t)) continue;
         for (u32 i = 0; i < t.names.count(); ++i)
             if (t.sparse_live(t.names, i)) s.built[level].push(((const Name*)t.names.at(i))->hash);
@@ -170,13 +170,13 @@ void apply(Engine& e, LevelState_& s, u32 level) {
     const JsonValue* gone = json_get(doc, doc.root(), "gone");
     for (const JsonValue* g = gone ? json_first(doc, *gone) : nullptr; g; g = json_next(doc, *g)) {
         Handle h = engine_entity_find(e, json_string(g, ""));
-        Table* t = h.is_null() ? nullptr : engine_table_of(e, h);
+        KTable* t = h.is_null() ? nullptr : engine_ktable_of(e, h);
         if (t && persisted(s, *t) && t->destroy(h)) ++destroyed;
     }
     const JsonValue* rows = json_get(doc, doc.root(), "rows");
     for (const JsonValue* r = rows ? json_first(doc, *rows) : nullptr; r; r = json_next(doc, *r)) {
         Handle h = engine_entity_find(e, r->key);
-        Table* t = h.is_null() ? nullptr : engine_table_of(e, h);
+        KTable* t = h.is_null() ? nullptr : engine_ktable_of(e, h);
         if (t && persisted(s, *t) && load_row(doc, *r, *t, h)) ++restored;
     }
     KV_INFO("level", "'%s' remembers: %u restored, %u gone", s.levels[level].name, restored, destroyed);
@@ -223,7 +223,7 @@ void level_run(TickContext& ctx) {
         if (s.reload) {
             // Everything of the level goes first, so the files are read again; the new
             // scope is made on the next tick, after the asset pump has retired them.
-            if (Table* roots = ctx.write_kind(s.root_kind)) roots->destroy(s.root);
+            if (KTable* roots = ctx.write_ktable(s.root_ktable)) roots->destroy(s.root);
             asset_scope_release(e, s.scope);
             s.root = s.scope = s.map = Handle{};
         }
@@ -243,7 +243,7 @@ void level_run(TickContext& ctx) {
         enter_state(s, LevelState::Building);
         [[fallthrough]];
     case LevelState::Building: {
-        Table* roots = ctx.write_kind(s.root_kind);
+        KTable* roots = ctx.write_ktable(s.root_ktable);
         // Two ticks. The first takes the old level down: its root (the scene module takes
         // the children at the end of this tick, the tilemap its tiles at its next pump) and
         // its scope (after the new scope holds what both use). The second builds the new
@@ -310,10 +310,10 @@ void cmd_reload(CliContext& ctx, Span<const char* const>) {
 bool level_startup(Engine& e, ModuleInstance& self) {
     LevelState_* s = arena_push<LevelState_>(self.arena);
     if (!s) return false;
-    s->root_kind = engine_kind_id(e, "level.root");
+    s->root_ktable = engine_ktable_id(e, "level.root");
     s->general = &self.general;
     for (u32 i = 0; i < KV_LEVELS; ++i) { s->record[i].alloc = s->built[i].alloc = &self.general; }
-    s->fade_kind = engine_kind_id(e, "level.fade");
+    s->fade_ktable = engine_ktable_id(e, "level.fade");
     self.set_state(s);
     return true;
 }
@@ -326,7 +326,7 @@ void level_shutdown(Engine& e, ModuleInstance& self) {
     if (!s->scope.is_null()) asset_scope_release(e, s->scope);
 }
 
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = ".root", .components = "Transform2", .capacity = 4},
     // The fade is cosmetic: its alpha follows wall-clock ticks, held ones included.
     {.name = ".fade", .components = "Transform2, Sprite", .capacity = 2, .cosmetic = true},
@@ -350,7 +350,7 @@ constinit const CliCommandDesc k_commands[] = {
 KV_MODULE_DEFINE(level_module) = {
     .name     = "level",
     .events   = k_events,
-    .kinds    = k_kinds,
+    .ktables  = k_ktables,
     .systems  = k_systems,
     .commands = k_commands,
     .startup  = level_startup,
@@ -398,13 +398,13 @@ bool level_reload(Engine& e, const LevelTransition& t) {
     return level_request(e, s->levels[s->current].name, t);
 }
 
-bool level_persist(Engine& e, Span<const char* const> kinds) {
+bool level_persist(Engine& e, Span<const char* const> ktables) {
     LevelState_* s = state(e);
-    if (!s || kinds.len > KV_COUNTOF(s->persist)) return false;
+    if (!s || ktables.len > KV_COUNTOF(s->persist)) return false;
     s->persist_count = 0;
-    for (const char* k : kinds) {
-        if (!engine_table(e, k)) { KV_ERROR("level", "no kind '%s' to remember", k); return false; }
-        utf8_copy(s->persist[s->persist_count++], KV_KIND_NAME_MAX, k);
+    for (const char* k : ktables) {
+        if (!engine_ktable(e, k)) { KV_ERROR("level", "no ktable '%s' to remember", k); return false; }
+        utf8_copy(s->persist[s->persist_count++], KV_KTABLE_NAME_MAX, k);
     }
     return true;
 }

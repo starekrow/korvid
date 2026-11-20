@@ -3,7 +3,7 @@
 // tick, an event scheduled before the reset never firing; cosmetic rows stay.
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
-#include "korvid/core/kind.h"
+#include "korvid/core/ktable.h"
 
 namespace {
 
@@ -12,7 +12,7 @@ using namespace kv;
 struct Count { i32 n; };
 constinit const FieldDesc k_count_fields[] = {KV_FIELDS(Count, n)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Count, k_count_fields, 0)};
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = ".thing", .components = "Count", .capacity = 64},
     {.name = ".spark", .components = "Count", .capacity = 64, .cosmetic = true},
 };
@@ -36,7 +36,7 @@ void on_reset(TickContext&, Span<const SimReset> resets) { g.resets += resets.le
 // The game's "new run": a fresh sim, then the run's first row, as the startup made it.
 void on_again(TickContext& ctx, Span<const Again>) {
     engine_sim_reset(*ctx.engine);
-    ctx.write_kind("r.thing")->spawn(Count{0});
+    ctx.write_ktable("r.thing")->spawn(Count{0});
 }
 
 constinit const SystemDesc k_systems[] = {{.name = ".run", .phase = Phase::Sim, .fn = sys_run, .writes = ".thing.Count"}};
@@ -45,7 +45,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_reset", KV_ON(SimReset, on_reset), .phase = Phase::Sim},
     {.name = ".on_again", KV_ON(Again, on_again), .phase = Phase::PreSim, .writes = ".thing"},
 };
-KV_MODULE_DEFINE(k_r) = {.name = "r", .events = k_events, .components = k_components, .kinds = k_kinds,
+KV_MODULE_DEFINE(k_r) = {.name = "r", .events = k_events, .components = k_components, .ktables = k_ktables,
                          .systems = k_systems, .handlers = k_handlers};
 
 constexpr f64 kDt = 1.0 / 60.0;
@@ -61,10 +61,10 @@ void test_reset(kv::TestCtx& c) {
     g = Seen{};
     Engine f;
     KV_CHECK(c, engine_init(f, list));
-    engine_table(f, "r.thing")->spawn(Count{0});
+    engine_ktable(f, "r.thing")->spawn(Count{0});
     u64 fresh[8];
     for (u32 i = 0; i < 8; ++i) { engine_frame(f, kDt); fresh[i] = engine_hash_state(f); }
-    Table* ft = engine_table(f, "r.thing");
+    KTable* ft = engine_ktable(f, "r.thing");
     Handle fresh_a = ft->handle_at(0), fresh_b = ft->handle_at(1);
     KV_CHECK(c, g.pings == 1 && ft->live() == 2 && f.clock.tick_count == 8);
     engine_shutdown(f);
@@ -74,10 +74,10 @@ void test_reset(kv::TestCtx& c) {
     g = Seen{};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* things = engine_table(e, "r.thing");
+    KTable* things = engine_ktable(e, "r.thing");
     things->spawn(Count{0});
     for (u32 i = 0; i < 3; ++i) engine_frame(e, kDt);
-    Handle spark = engine_table(e, "r.spark")->spawn(Count{7});
+    Handle spark = engine_ktable(e, "r.spark")->spawn(Count{7});
     things->destroy(things->handle_at(0)); // generations moved on: the reset must put them back
     KV_CHECK(c, things->live() == 1 && e.clock.tick_count == 3);
     engine_hold(e, HoldUi, true);
@@ -89,10 +89,10 @@ void test_reset(kv::TestCtx& c) {
     for (u32 i = 0; i < 8; ++i) { engine_frame(e, kDt); same = same && engine_hash_state(e) == fresh[i]; }
     KV_CHECK(c, same);
     // The same slots and generations (a second engine in a process numbers its handle
-    // kinds anew, so the kind bits differ; the hash names kinds, so it does not).
+    // kinds anew, so the kind bits differ; the hash names ktables, so it does not).
     auto same_slot = [](Handle x, Handle y) { return x.index() == y.index() && x.gen() == y.gen(); };
     KV_CHECK(c, same_slot(things->handle_at(0), fresh_a) && same_slot(things->handle_at(1), fresh_b));
     KV_CHECK(c, g.pings == 1); // the new run's; the old one's went with the reset
-    KV_CHECK(c, engine_table(e, "r.spark")->valid(spark));
+    KV_CHECK(c, engine_ktable(e, "r.spark")->valid(spark));
     engine_shutdown(e);
 }

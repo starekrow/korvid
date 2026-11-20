@@ -30,9 +30,9 @@ working directory, the path rules and the verbs. Engine names map their dots to 
 on the way in, so a module is a directory wherever its things appear.
 
     > ls /
-    buses/  clips/  clock/  events/  fonts/  handlers/  kinds/  materials/  mem/
+    buses/  clips/  clock/  events/  fonts/  handlers/  ktables/  materials/  mem/
     modules/  perf/  resources/  sounds/  systems/  textures/  triggers/  voices/
-    > cd /kinds/rocks
+    > cd /ktables/rocks
     > ls
     bullet/   14 live of 4096
     rock/     9 live of 1024
@@ -44,7 +44,7 @@ on the way in, so a module is a directory wherever its things appear.
     > patch rock.material.json tint 1 0.5 0.5
     > patch /clock/rate 0.25
 
-Mounts today: `/kinds` (a kind, its live rows, a row's components, a component's fields;
+Mounts today: `/ktables` (a ktable, its live rows, a row's components, a component's fields;
 fields patch through the schema), `/systems` and `/handlers` (the schedule with sets and
 levels), `/resources`, `/events`, `/triggers`, `/clock` (patch `paused`, `rate`, `step`),
 `/modules`, `/mem`, `/perf` (the profiler's zones when it is on), and from the modules
@@ -54,7 +54,7 @@ that own the formats `/materials` (patch `texture`, `blend`, `tint`, `params`),
 `ls` lists 200 entries and says how many more; `ls -n N` for more. A `print` on a
 directory lists it; an `ls` on a leaf prints it. Writes are direct, as material patches
 always were: a `patch` lands before the next tick and is not part of the input log.
-`list` walks one directory at a time and may stop early, so a kind with a million slots
+`list` walks one directory at a time and may stop early, so a ktable with a million slots
 costs a `ls` only what it shows.
 
 ## Transports

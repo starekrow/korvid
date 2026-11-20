@@ -194,11 +194,11 @@ void hud(TickContext& ctx) {
         upper(name);
         spui_model_set_str(e, "difficulty", name);
     }
-    if (const Ship* s = engine_table(e, g_ship_kind)->get<Ship>(g.ship)) {
+    if (const Ship* s = engine_ktable(e, g_ship_ktable)->get<Ship>(g.ship)) {
         spui_model_set_str(e, "weapon", weapon_name(s->weapon));
         spui_model_set_int(e, "power", s->power);
     }
-    spui_model_set_int(e, "options", engine_table(e, g_option_kind)->live());
+    spui_model_set_int(e, "options", engine_ktable(e, g_option_ktable)->live());
     spui_model_set_str(e, "stage", g.stage.name);
     char text[48];
     format(text, sizeof text, "%.0f / %.0f", (f64)stage_clock(stage_row[0]), (f64)g.stage.length);
@@ -212,8 +212,8 @@ void hud(TickContext& ctx) {
     Span<const Boss> boss_rows = ctx.read<Boss>("arcfire.boss.Boss");
     Span<const Health> part_hp = ctx.read<Health>("arcfire.part.Health");
     Span<const Part> parts = ctx.read<Part>("arcfire.part.Part");
-    const Table* bt = engine_table(e, g_boss_kind);
-    const Table* pt = engine_table(e, g_part_kind);
+    const KTable* bt = engine_ktable(e, g_boss_ktable);
+    const KTable* pt = engine_ktable(e, g_part_ktable);
     // Bosses that come together (Orbit's gunships) share it: every live one's parts, over
     // the full of all that came (it keeps the full of one gone down).
     const BossDef* up = nullptr;

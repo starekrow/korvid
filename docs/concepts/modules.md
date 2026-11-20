@@ -17,12 +17,12 @@ game links only the modules it names in `module.lua`, and the build generates th
 Core is the host that runs what the list declares. When you ask where some behaviour
 lives, the answer is a module; when you add behaviour, you add a module or extend one.
 
-A module **owns the types the engine can see**. Component schemas, entity kinds and event
+A module **owns the types the engine can see**. Component schemas, ktables and event
 types are declared once, by the module they belong to, and from then on the engine knows
 them by name: how to lay them out, hash them, compare them, print them, which of their
 fields are handles. Other modules refer to them by that name and nothing else. The
-sprite module declares `Transform2` and `Sprite`; a game kind that lists both is drawn;
-the collision module declares `Collider2`; a kind that lists it is tested. No module
+sprite module declares `Transform2` and `Sprite`; a game ktable that lists both is drawn;
+the collision module declares `Collider2`; a ktable that lists it is tested. No module
 includes another's internals to make that happen, and the types are reflected, so tools,
 the hash, the trace and the CLI read any module's data without that module's help.
 
@@ -54,7 +54,7 @@ struct ModuleDesc {
     const char*                name;
     Span<const EventTypeDesc>  events;     // plain-data event types
     Span<const ComponentDesc>  components; // schemas the engine lays columns out from
-    Span<const KindDesc>       kinds;      // entity tables made of those components
+    Span<const KTableDesc>     ktables;    // entity tables made of those components
     Span<const ResourceDesc>   resources;  // things systems read or write that are not columns
     Span<const SystemDesc>     systems;    // code in a phase, with its read and write sets
     Span<const HandlerDesc>    handlers;   // systems on one event type, handed its batch
@@ -77,7 +77,7 @@ an implicit resource named `<module>.state`, which every system of the module wr
 unless its `SystemDesc` says `.state = StateUse::Read` or `None`; that is how two systems
 of one module never race on it without anyone declaring anything.
 
-**Ids.** `ComponentType<T>::id`, `EventType<E>::id`, the `id` slot of a `KindDesc` or
+**Ids.** `ComponentType<T>::id`, `EventType<E>::id`, the `id` slot of a `KTableDesc` or
 `TriggerDesc`, resource ids: all zero before `engine_init`, filled by it, zeroed by
 shutdown. Look them up once through the context and cache them in a `static const u32`;
 never keep one across two engines in one process.
@@ -132,24 +132,24 @@ Flags: `CompSim` (the default: hashed, snapshotted, visible to triggers), `CompC
 (presentation only; a sim system may not read it, checked at init), `CompPrev` (the
 engine copies current into previous at the top of PreSim).
 
-### Kinds
+### KTables
 
-A kind is a named, fixed set of components and a capacity. There is no runtime add or
-remove: every entity of the kind has every component. The engine makes it a table of
-SoA columns on reserved pages (committed as rows are used), a handle kind named after
-it, and resources `kind` (spawn and destroy) and `kind.Component` (each column).
+A ktable is a named, fixed set of components and a capacity. There is no runtime add or
+remove: every entity of the ktable has every component. The engine lays it out as SoA
+columns on reserved pages (committed as rows are used), and makes a handle kind named
+after it and resources `ktable` (spawn and destroy) and `ktable.Component` (each column).
 
 ```cpp
-constinit u32 g_rock_kind = 0;
-constinit const KindDesc k_kinds[] = {
-    {.name = ".rock", .components = "Transform2, Sprite, Velocity, Collider2, Health", .capacity = 1024, .id = &g_rock_kind},
+constinit u32 g_rock_ktable = 0;
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".rock", .components = "Transform2, Sprite, Velocity, Collider2, Health", .capacity = 1024, .id = &g_rock_ktable},
 };
 ```
 
 Component names resolve across modules: `Transform2` and `Sprite` are the sprite
-module's, `Collider2` the collision module's. A kind that has `Transform2` and `Sprite`
+module's, `Collider2` the collision module's. A ktable that has `Transform2` and `Sprite`
 is drawn; one that has `Transform2` and `Collider2` takes part in the broadphase; neither
-module needs to know your kind exists.
+module needs to know your ktable exists.
 
 ### Events
 
@@ -181,7 +181,7 @@ and functions that say they are safe from a system.
 ```cpp
 void move(TickContext& ctx) {
     f32 dt = (f32)ctx.dt;
-    for (KindRows k : ctx.view<Transform2, const Velocity>()) {   // every kind with both
+    for (KTableRows k : ctx.view<Transform2, const Velocity>()) {   // every ktable with both
         Span<Transform2>     t = k.col<Transform2>();
         Span<const Velocity> v = k.col<const Velocity>();
         parallel_for(ctx, k.rows(), 2048, [&](ChunkContext&, u32 b, u32 e) {
@@ -202,21 +202,21 @@ constinit const SystemDesc k_systems[] = {
 
 **The name language.** Every name in a registration table is a string the engine reads
 at init. A name that starts with `.` is the module's own: in module `mygame`, `.rock` is
-`mygame.rock`, `.move` is `mygame.move`, `.rock.Velocity` is that kind's column. A set
-(`reads`, `writes`, `after`, `before`, a kind's `components`) is one string of
+`mygame.rock`, `.move` is `mygame.move`, `.rock.Velocity` is that ktable's column. A set
+(`reads`, `writes`, `after`, `before`, a ktable's `components`) is one string of
 comma-separated names; spaces around the commas are ignored. `?sprite_ui.layout` is an order
 that holds only if that system exists (`?` then the name): its module may be missing from
 the build, but if the module is there the system has to be, so a typo fails init. The same shorthand works at
 runtime where the engine knows the module: `ctx.resource_id(".score")`,
-`ctx.write_kind(".rock")`, `engine_publish(engine, self, ".score", ...)`. Names of other
+`ctx.write_ktable(".rock")`, `engine_publish(engine, self, ".score", ...)`. Names of other
 modules' things are written in full (`input.state`, `scene.compose`), as are names the
 engine does not expand: an event type, a component, a handle kind, a clip's label.
 
-Naming resources: `.rock` is the kind (a write on it covers spawn, destroy, every column,
+Naming resources: `.rock` is the ktable (a write on it covers spawn, destroy, every column,
 its attachments and its bags); `.rock.Velocity` is one column; `*.Velocity` is that column
-in every kind that has one; `*[Collider2].Transform2` is it in every kind that also has
+in every ktable that has one; `*[Collider2].Transform2` is it in every ktable that also has
 `Collider2`, `*[Collider2-Parent].Transform2` in those without `Parent`; `.npc.@Quest` and
-`.npc.@props` are a kind's attachments and bags; `input.state` and `platform_hid.window`
+`.npc.@props` are a ktable's attachments and bags; `input.state` and `platform_hid.window`
 are published resources reached with `ctx.resource<const Input>(...)`. `move` and `wrap`
 both write `*.Transform2`, so one of them must say `after` the other or init fails with
 both names; `move` reads what nobody in Sim writes, so it needs no edge of its own. An
@@ -224,24 +224,24 @@ unknown name fails init with the system, the module and the name, as before.
 
 Each name has one mode for a system: read (after every writer in the phase), read early
 (`^`, the value the phase started with), write, or append (`appends`, see below). A
-system whose names cover one resource two ways is refused, the whole kind and one of its
+system whose names cover one resource two ways is refused, the whole ktable and one of its
 columns included: one that wants the villagers as they stand but their positions as the
 phase found them names the parts, `.npc.@alive, .npc.Actor, ^.npc.Transform2`
-(`kind.@alive` is the kind's liveness: `ctx.alive(h)` and `ctx.rows(kind)` read it). A
+(`ktable.@alive` is the ktable's liveness: `ctx.alive(h)` and `ctx.rows(ktable)` read it). A
 system cannot read early what it writes itself, and one that reads early from a writer and also reads, as it stands, something
-that writer writes is refused unless the kind is a snapshot (below). The whole model is
+that writer writes is refused unless the ktable is a snapshot (below). The whole model is
 in [scheduling](scheduling.md); the design record is [docs/design/scheduler.md](../design/scheduler.md).
 
-**Early reads, per kind.** `KindDesc::early_reads` says how a `^` read of the kind gets
+**Early reads, per ktable.** `KTableDesc::early_reads` says how a `^` read of the ktable gets
 the phase's starting value. `EarlyReads::Order`, the default and nearly free, runs the
 reader before the writers. `EarlyReads::Snapshot` copies what is read early and written
 at the phase start and hands the reader the copy: the reader runs beside the writers, or
 after them, and a cycle the order would make is not there; the copy costs every phase it
 is needed (the `snapshot` zone, the `snapshot KB` counter). The game is the same either
-way: `--early-reads order|snapshot` forces one for every kind, and the hashes must not
-move. The startup log shows each phase's levels as declared, all ordered and all
-snapshots. A snapshot reader must reach the kind through the context (`ctx.view`,
-`ctx.read`, `ctx.rows`, `ctx.read_kind`): `engine_table` hands out the table as it is now,
+way: `--early-reads order|snapshot|ktable` forces one for every ktable (`ktable`, the
+default, leaves each its own), and the hashes must not move. The startup log shows each phase's levels as declared, all ordered and all
+snapshots. A snapshot reader must reach the ktable through the context (`ctx.view`,
+`ctx.read`, `ctx.rows`, `ctx.read_ktable`): `engine_ktable` hands out the ktable as it is now,
 and dev builds refuse it there. Run with `--early-reads snapshot` in a dev build to find
 any such read.
 
@@ -258,7 +258,7 @@ A module that has things worth looking at mounts them in the CLI's filesystem: a
 `CliMountDesc` in `ModuleDesc::mounts` with a `path` and three functions, `list` (the
 children of one directory), `describe` (one node) and `patch` (optional: set one). The
 asset module mounts `/materials`, `/textures`, `/fonts` and `/sounds`; the engine's own
-`/kinds`, `/systems`, `/clock` and the rest come with the cli module. See
+`/ktables`, `/systems`, `/clock` and the rest come with the cli module. See
 [docs/design/cli.md](../design/cli.md). A command is for an action; a mount is for state.
 
 ### Append resources
@@ -274,14 +274,14 @@ write on it is told to append.
 
 Commands (`spawn_later`, `destroy`, `destroy_all`, `name_later`) need no declaration at
 all: they land at the boundary when nothing runs. Spawning or destroying at once takes
-`write_kind`, which needs the write on the kind.
+`write_ktable`, which needs the write on the ktable.
 
-### Cosmetic kinds
+### Cosmetic ktables
 
-`KindDesc::cosmetic = true` keeps a kind out of the state hash altogether: glyphs, an
+`KTableDesc::cosmetic = true` keeps a ktable out of the state hash altogether: glyphs, an
 overlay, anything that exists only to be drawn and whose rows may differ between two
 runs that are otherwise the same. The flow rule still applies per component, so a sim
-system that reads such a kind's sim columns while writing sim state is a leak the
+system that reads such a ktable's sim columns while writing sim state is a leak the
 scheduler will not catch; do not do that.
 
 ### Pause
@@ -320,7 +320,7 @@ void on_hit(TickContext& ctx, Span<const RockHit> hits) {
         if (--hp[h.rock.index()].hp > 0) continue;
         ctx.destroy(h.rock);
         ctx.emit(ScoreChanged{20, g.score.total += 20});         // delivered next tick (EvNextTick)
-        ctx.spawn_later(g_debris_kind, transform2_at(...), ...);  // a command: exists after the boundary
+        ctx.spawn_later(g_debris_ktable, transform2_at(...), ...);  // a command: exists after the boundary
     }
 }
 
@@ -367,7 +367,7 @@ KV_MODULE_DEFINE(mygame_module) = {
     .name       = "mygame",
     .events     = k_events,
     .components = k_components,
-    .kinds      = k_kinds,
+    .ktables    = k_ktables,
     .resources  = k_resources,
     .systems    = k_systems,
     .handlers   = k_handlers,
@@ -391,7 +391,7 @@ The module arena (`self.arena`) for what lives as long as the module; `self.gene
 general allocator attributed to the module, for anything growable (set an `Array`'s
 `alloc` to `&self.general`, or call a `Map`'s `init(&self.general)`; free in shutdown);
 `mem_scratch()` with a `MemScope`
-for temporaries inside a call; kind tables for entities, which the module never
+for temporaries inside a call; ktables for entities, which the module never
 allocates. Whatever runs under a module's name (its startup, systems, handlers, jobs)
 is charged to it, so `mem_report` and the leak report at exit name the
 module, and a heap limit the root set for it applies.
@@ -440,8 +440,8 @@ after every phase, in unit order: the engine's own buffer first, then each unit'
 destroyed entity is still there for the rest of its phase; readers and consumers in the
 same phase see it, batches after it drop events naming it. A command
 spawn has no handle until it is applied; if `spawn_later` was asked for a ticket, a
-`Spawned{ticket, kind, entity}` event carries the handle, from the boundary after the phase. A system
-that holds the write on a kind spawns directly instead (`ctx.write_kind(k)->spawn(...)`)
+`Spawned{ticket, ktable, entity}` event carries the handle, from the boundary after the phase. A system
+that holds the write on a ktable spawns directly instead (`ctx.write_ktable(k)->spawn(...)`)
 and has the handle at once.
 
 **Previous and current.** A `CompPrev` column is copied at the top of PreSim, so a Sim
@@ -493,4 +493,4 @@ frame run back to back, each a full tick. [Cycles](cycles.md).
   again; the `static const u32` idiom is for one engine per process.
 - **Work in startup that needs the tick.** Startup runs before any tick: no context, no
   events delivered, no commands applied. Spawn in the first tick (a state machine's INIT
-  state, as the testbed does) or directly through `engine_table(e, kind)->spawn(...)`.
+  state, as the testbed does) or directly through `engine_ktable(e, name)->spawn(...)`.

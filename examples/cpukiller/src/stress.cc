@@ -1,4 +1,4 @@
-// The engine-level scenario: one kind of a few hundred thousand bodies, four stateless
+// The engine-level scenario: one ktable of a few hundred thousand bodies, four stateless
 // systems that integrate in parallel, bounce and emit, churn entities by chunk commands,
 // and sum a reduction, plus a handler that eats the events. Run at one thread and at
 // many, the state hash must agree and the tick rate is the number worth having.
@@ -20,8 +20,8 @@ constinit const FieldDesc k_age_fields[] = {KV_FIELDS(Age, ticks)};
 constinit const ComponentDesc k_components[] = {
     KV_COMPONENT(Pos, k_pos_fields, CompPrev), KV_COMPONENT(Vel, k_vel_fields), KV_COMPONENT(Age, k_age_fields),
 };
-constinit u32 g_body_kind = 0;
-constinit const KindDesc k_kinds[] = {{.name = ".body", .components = "Pos, Vel, Age", .capacity = 1u << 20, .id = &g_body_kind}};
+constinit u32 g_body_ktable = 0;
+constinit const KTableDesc k_ktables[] = {{.name = ".body", .components = "Pos, Vel, Age", .capacity = 1u << 20, .id = &g_body_ktable}};
 
 struct Bounced { Handle who; };
 constinit const FieldDesc k_bounced_fields[] = {KV_FIELDS(Bounced, who)};
@@ -32,10 +32,10 @@ u32 g_bodies = 200000;
 
 constexpr f32 kBox = 1000.0f;
 
-// Views, not kind reads: a kind read would cover every column and drag Pos into
+// Views, not ktable reads: a ktable read would cover every column and drag Pos into
 // integrate's read set, which bounce writes, and the two would form a cycle.
 void integrate(TickContext& ctx) {
-    for (KindRows k : ctx.view<Pos, const Vel>()) {
+    for (KTableRows k : ctx.view<Pos, const Vel>()) {
         Span<Pos> pos = k.col<Pos>();
         Span<const Vel> vel = k.col<const Vel>();
         parallel_for(ctx, k.rows(), 2048, [&](ChunkContext&, u32 b, u32 e) {
@@ -52,7 +52,7 @@ void integrate(TickContext& ctx) {
 // it before integrate; a declared `after` the other way would be a cycle, since within a
 // phase "reads what you wrote last tick" cannot be said. Bounce, then integrate, is fine.
 void bounce(TickContext& ctx) {
-    for (KindRows k : ctx.view<Pos, Vel>()) {
+    for (KTableRows k : ctx.view<Pos, Vel>()) {
         Span<Pos> pos = k.col<Pos>();
         Span<Vel> vel = k.col<Vel>();
         parallel_for(ctx, k.rows(), 2048, [&](ChunkContext& cc, u32 b, u32 e) {
@@ -72,7 +72,7 @@ void bounce(TickContext& ctx) {
 // Ages everything; every 600th row is destroyed by chunk command and a fresh one spawned.
 void churn(TickContext& ctx) {
     u64 tick = ctx.tick;
-    for (KindRows k : ctx.view<Age, const Pos>()) {
+    for (KTableRows k : ctx.view<Age, const Pos>()) {
         Span<Age> age = k.col<Age>();
         Span<const Pos> pos = k.col<const Pos>();
         parallel_for(ctx, k.rows(), 4096, [&](ChunkContext& cc, u32 b, u32 e) {
@@ -80,7 +80,7 @@ void churn(TickContext& ctx) {
                 if (!k.alive(i)) continue;
                 if (++age[i].ticks % 600 == (tick % 600)) {
                     cc.destroy(k.handle_at(i));
-                    cc.spawn_later(g_body_kind, Pos{-pos[i].x, -pos[i].y}, Vel{(f32)((i * 7) % 200) - 100.0f, (f32)((i * 13) % 200) - 100.0f}, Age{0});
+                    cc.spawn_later(g_body_ktable, Pos{-pos[i].x, -pos[i].y}, Vel{(f32)((i * 7) % 200) - 100.0f, (f32)((i * 13) % 200) - 100.0f}, Age{0});
                 }
             }
         });
@@ -90,7 +90,7 @@ void churn(TickContext& ctx) {
 // A reduction over every body: kinetic energy, folded in chunk order.
 void energy(TickContext& ctx) {
     Stress& s = ctx.state_as<Stress>();
-    for (KindRows k : ctx.view<const Vel>()) {
+    for (KTableRows k : ctx.view<const Vel>()) {
         Span<const Vel> vel = k.col<const Vel>();
         s.energy = parallel_reduce(ctx, k.rows(), 4096, 0.0, [&](ChunkContext&, u32 b, u32 e) {
             f64 sum = 0.0;
@@ -107,7 +107,7 @@ bool stress_startup(Engine& engine, ModuleInstance& self) {
     if (!s) return false;
     self.set_state(s);
     s->bodies = g_bodies;
-    Table* t = engine_table(engine, g_body_kind);
+    KTable* t = engine_ktable(engine, g_body_ktable);
     Rng rng = Rng::seeded(99, 3);
     for (u32 i = 0; i < g_bodies; ++i)
         t->spawn(Pos{rng.range(-kBox, kBox), rng.range(-kBox, kBox)}, Vel{rng.range(-300, 300), rng.range(-300, 300)}, Age{rng.below(600)});
@@ -128,7 +128,7 @@ KV_MODULE_DEFINE(cpukiller_module) = {
     .name       = "cpukiller",
     .events     = k_events,
     .components = k_components,
-    .kinds      = k_kinds,
+    .ktables    = k_ktables,
     .systems    = k_systems,
     .handlers   = k_handlers,
     .startup    = stress_startup,

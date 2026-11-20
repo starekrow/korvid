@@ -1,5 +1,5 @@
 // The hierarchy: a child follows its parent through position, rotation and scale; a
-// grandchild in a kind declared before its parent's kind still composes after it; the
+// grandchild in a ktable declared before its parent's ktable still composes after it; the
 // previous copy makes interpolation right; orphans are destroyed or detached by policy;
 // a cycle is skipped and logged; a paused tick composes too.
 #include "korvid/scene/module.h"
@@ -14,12 +14,12 @@ namespace {
 
 using namespace kv;
 
-// Grandchildren first on purpose: table order must not be composition order.
-constinit const KindDesc k_kinds[] = {
+// Grandchildren first on purpose: ktable order must not be composition order.
+constinit const KTableDesc k_ktables[] = {
     {.name = ".grandchild", .components = "Transform2, Sprite, Local2, Parent", .capacity = 64},
     {.name = ".child",      .components = "Transform2, Sprite, Local2, Parent", .capacity = 64},
 };
-KV_MODULE_DEFINE(k_s) = {.name = "s", .kinds = k_kinds};
+KV_MODULE_DEFINE(k_s) = {.name = "s", .ktables = k_ktables};
 
 bool near(point2 a, point2 b, f32 eps = 1e-3f) { return kv::fabs(a.x - b.x) < eps && kv::fabs(a.y - b.y) < eps; }
 bool near(f32 a, f32 b, f32 eps = 1e-4f) { return kv::fabs(a - b) < eps; }
@@ -34,8 +34,8 @@ void test_scene(kv::TestCtx& c) {
     Engine e;
     KV_CHECK(c, engine_init(e, list));
     SpriteWorld& roots = *sprite_world(e);
-    Table* children    = engine_table(e, "s.child");
-    Table* grand       = engine_table(e, "s.grandchild");
+    KTable* children    = engine_ktable(e, "s.child");
+    KTable* grand       = engine_ktable(e, "s.grandchild");
     u64 tick = 0;
     auto run = [&](bool paused = false) { e.phases.run_tick(e, e.events, 1.0 / 60.0, paused ? tick : tick++, paused); };
 
@@ -59,7 +59,7 @@ void test_scene(kv::TestCtx& c) {
     KV_CHECK(c, near(ct->position, point2{100, 120}) && near(ct->rotation, KV_PI * 0.5f) && near(ct->scale.y, 2.0f));
     KV_CHECK(c, near(children->prev<Transform2>(child)->position, point2{110, 100}));
 
-    // A grandchild in the kind declared first: composed after its parent all the same.
+    // A grandchild in the ktable declared first: composed after its parent all the same.
     Handle gc = grand->spawn(Transform2{}, Sprite{}, local2_at(point2{5, 0}), Parent{child});
     run();
     KV_CHECK(c, near(grand->get<Transform2>(gc)->position, point2{100, 130})); // child's frame is rotated and scaled
@@ -74,7 +74,7 @@ void test_scene(kv::TestCtx& c) {
     roots.transform(other)->position = point2{50, 50};
     run();
     KV_CHECK(c, near(grand->get<Transform2>(gc)->position, point2{1, 2})); // stays where it was
-    KV_CHECK(c, !scene_attach(*roots.table, root, other, Local2{}));        // roots have no Parent column
+    KV_CHECK(c, !scene_attach(*roots.ktable, root, other, Local2{}));       // roots have no Parent column
 
     // Orphans. The child's policy is Destroy: when the root dies the child is destroyed
     // at the end of the tick. A Detach child stays, as a root, where it last was.

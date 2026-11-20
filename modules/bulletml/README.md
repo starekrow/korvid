@@ -3,7 +3,7 @@
 BulletML patterns for any shooter on the engine: documents (Kenta Cho's format, read
 through the `xml` module) compiled once into a library of ops and expressions, and
 plain-data runners a game steps every tick. A library, not an engine module: it registers
-no kinds, systems or events. The game owns the bullets, the runners' place in its kinds,
+no ktables, systems or events. The game owns the bullets, the runners' place in its ktables,
 and the systems that step them.
 
 ## How it works
@@ -18,7 +18,7 @@ or a track nested deeper than `KV_BML_DEPTH`, is an error. Errors name the eleme
 line, and a document that fails leaves the library as it was. The document becomes an
 entry: its actions labelled `top...`, at most `KV_BML_TRACKS` of them.
 
-**Running.** A `BmlRunner` is plain data (no pointers; a component in the game's kinds,
+**Running.** A `BmlRunner` is plain data (no pointers; a component in the game's ktables,
 hashed like any other): per track a stack of frames (action, op offset, repeats left, its
 parameters' place on the track's stack), a wait, the last fire's direction and speed; the
 pending changes; a PCG32 state for `$rand`; and the motion it drives (direction, speed,

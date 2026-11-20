@@ -4,14 +4,14 @@
 // module's table saying what it touches:
 //
 //   void move(TickContext& ctx) {
-//       for (KindRows k : ctx.view<Transform2, const Velocity>()) { ... }
+//       for (KTableRows k : ctx.view<Transform2, const Velocity>()) { ... }
 //   }
 //   constinit const SystemDesc k_systems[] = {
 //       {.name = ".move", .phase = Phase::Sim, .fn = move, .reads = "*.Velocity", .writes = "*.Transform2"},
 //   };
 //
-// `reads` and `writes` name resources: a kind's column (".rock.Velocity"), the same
-// column in every kind that has it ("*.Velocity"), a whole kind (".rock"), a published
+// `reads` and `writes` name resources: a ktable's column (".rock.Velocity"), the same
+// column in every ktable that has it ("*.Velocity"), a whole ktable (".rock"), a published
 // resource ("input.state"), an event type ("RockHit"). The sets are the contract.
 // The engine orders the systems of a phase from them (a reader after every writer of
 // what it reads; two writers of one thing need an `after` or `before`), refuses at
@@ -37,7 +37,7 @@
 #include "korvid/core/event.h"
 #include "korvid/core/handle.h"
 #include "korvid/core/job.h"
-#include "korvid/core/kind.h"
+#include "korvid/core/ktable.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/random.h"
 
@@ -87,10 +87,10 @@ struct UnitAccess {
     Access mode;
 };
 
-// How early reads get their value: as each kind says (KindDesc::early_reads), or one way
-// for every kind (Engine::early_reads, --early-reads), to check that the game hashes the
-// same either way.
-enum class EarlyReadsChoice : u8 { PerKind, Order, Snapshot };
+// How early reads get their value: as each ktable says (KTableDesc::early_reads), or one
+// way for every ktable (Engine::early_reads, --early-reads), to check that the game
+// hashes the same either way.
+enum class EarlyReadsChoice : u8 { PerKTable, Order, Snapshot };
 const char* early_reads_name(EarlyReadsChoice m);
 
 // Whether a system runs on a paused tick (engine_pause, or any hold). Unpaused, the
@@ -102,16 +102,16 @@ enum class RunWhen : u8 { Unpaused, Always };
 
 // Emitted by the engine when a spawn_later is applied, so the system that asked learns
 // the handle. Keep the ticket spawn_later returned and match it in a handler on Spawned:
-//   g.blink_ticket = ctx.spawn_later(g_blinker_kind, transform2_at(p), look);
+//   g.blink_ticket = ctx.spawn_later(g_blinker_ktable, transform2_at(p), look);
 //   void on_spawned(TickContext& ctx, Span<const Spawned> spawns) {
 //       for (const Spawned& s : spawns) if (s.ticket == g.blink_ticket) g.blinker = s.entity;
 //   }
-// Tickets are unique across units. A spawn by a unit that holds the kind's write
-// (ctx.write_kind(k)->spawn(...)) has its handle at once and needs none of this.
+// Tickets are unique across units. A spawn by a unit that holds the ktable's write
+// (ctx.write_ktable(k)->spawn(...)) has its handle at once and needs none of this.
 struct Spawned {
     u32    ticket; // what spawn_later returned; 0 for a spawn issued from a parallel chunk
-    u32    kind;   // kind id
-    Handle entity; // null if the kind was full
+    u32    ktable; // ktable id
+    Handle entity; // null if the ktable was full
 };
 
 // Emitted by the engine at the end of a tick for every state trigger (TriggerDesc) that
@@ -155,7 +155,7 @@ void handler_thunk(TickContext& ctx, const void* events, u32 count) { F(ctx, Spa
 
 // Names in these tables are strings in the engine's name language. A name that starts
 // with '.' is the module's own: in module "rocks", ".on_hit" is "rocks.on_hit" and
-// ".rock.Health" that kind's column; "?name" in `after`/`before` is an order that holds
+// ".rock.Health" that ktable's column; "?name" in `after`/`before` is an order that holds
 // only if that module is in the build. A set is one string of comma-separated names
 // (".ship, .bullet.Transform2, *.Velocity, input.state"). The engine expands them at init;
 // an unknown name fails engine_init, naming the unit and the name.
@@ -175,7 +175,7 @@ struct HandlerDesc {
 };
 
 // A state trigger: the engine watches one scalar field across ticks, for every live row
-// of a kind, and emits StateEdge when it changes or crosses a value. The component must
+// of a ktable, and emits StateEdge when it changes or crosses a value. The component must
 // keep a previous copy (CompPrev), since the edge is between last tick and this one.
 // Evaluated at the end of every unpaused tick.
 //   constinit u32 g_death = 0;
@@ -190,7 +190,7 @@ enum class TriggerEdge : u8 {
 };
 struct TriggerDesc {
     const char* name  = nullptr;
-    const char* field = nullptr; // "kind.Component.field"; ".ship.Health.hp" for the module's own kind
+    const char* field = nullptr; // "ktable.Component.field"; ".ship.Health.hp" for the module's own ktable
     TriggerEdge edge  = TriggerEdge::Changed;
     f64         value = 0.0;
     u32*        id    = nullptr; // optional: filled with the trigger id at init
@@ -206,10 +206,10 @@ struct CommandBuffer {
     u32       count       = 0;
     u32       next_ticket = 1; // for the engine's own buffer; units bring their own tickets
 };
-u32  command_spawn_begin(CommandBuffer& cb, u32 kind_id, u32 component_count, u32 ticket); // ticket 0: the buffer assigns
+u32  command_spawn_begin(CommandBuffer& cb, u32 ktable_id, u32 component_count, u32 ticket); // ticket 0: the buffer assigns
 void command_spawn_component(CommandBuffer& cb, u32 component_id, const void* data, u32 size);
 void command_destroy(CommandBuffer& cb, Handle h);
-void command_destroy_all(CommandBuffer& cb, u32 kind_id);
+void command_destroy_all(CommandBuffer& cb, u32 ktable_id);
 // Names an entity at the boundary; a null entity names the last one this buffer spawned.
 void command_name(CommandBuffer& cb, Handle h, u64 name_hash);
 // A record for an append resource's owner, handed to its apply function at the boundary.
@@ -221,34 +221,34 @@ template <class T> struct RemoveConst<const T> { typedef T type; static constexp
 // The functions behind TickContext's templates, in phase.cc. Each returns null (or false)
 // after logging and, in dev builds, asserting, when the system did not declare the access
 // or the type does not match the schema.
-Table*  ctx_kind(TickContext& ctx, const char* kind, bool write);
-Table*  ctx_kind(TickContext& ctx, u32 kind_id, bool write);
+KTable* ctx_ktable(TickContext& ctx, const char* name, bool write);
+KTable* ctx_ktable(TickContext& ctx, u32 ktable_id, bool write);
 Column* ctx_column(TickContext& ctx, const char* column, const void* type, bool write, u32* rows);
 Column* ctx_column(TickContext& ctx, u32 resource_id, const void* type, bool write, u32* rows);
-Column* ctx_column_in(TickContext& ctx, Table& table, u32 component_id, const void* type, bool write);
+Column* ctx_column_in(TickContext& ctx, KTable& table, u32 component_id, const void* type, bool write);
 void*   ctx_resource(TickContext& ctx, u32 resource_id, const void* type, bool write);
 u32     ctx_resource_id(TickContext& ctx, const char* name, bool column);
-u32     ctx_table_count(TickContext& ctx);
-Table*  ctx_table_at(TickContext& ctx, u32 i);
-u32     ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, const char* kind, u32 component_count, bool ticketed); // ticket; 0 if unknown or unticketed
-u32     ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, u32 kind_id, u32 component_count, bool ticketed);
+u32     ctx_ktable_count(TickContext& ctx);
+KTable* ctx_ktable_at(TickContext& ctx, u32 i);
+u32     ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, const char* name, u32 component_count, bool ticketed); // ticket; 0 if unknown or unticketed
+u32     ctx_spawn_begin(TickContext& ctx, CommandBuffer* cb, u32 ktable_id, u32 component_count, bool ticketed);
 void    ctx_spawn_component(CommandBuffer* cb, u32 component_id, const void* data, u32 size);
 void    ctx_destroy(TickContext& ctx, CommandBuffer* cb, Handle h);
-void    ctx_destroy_all(TickContext& ctx, CommandBuffer* cb, u32 kind_id);
+void    ctx_destroy_all(TickContext& ctx, CommandBuffer* cb, u32 ktable_id);
 void    ctx_name(TickContext& ctx, CommandBuffer* cb, Handle h, const char* name);
 u32     ctx_schedule(TickContext& ctx, u32 type_id, u32 size, const void* event, u64 tick);
 void*   ctx_attached(TickContext& ctx, Handle h, u32 component_id, const void* type, bool write);
 void*   ctx_attach(TickContext& ctx, Handle h, u32 component_id, const void* type, const void* data);
 bool    ctx_detach(TickContext& ctx, Handle h, u32 component_id);
-Table*  ctx_attachments(TickContext& ctx, u32 kind_id, u32 component_id, bool write); // the table, its store's access checked
-Table*  ctx_props(TickContext& ctx, Handle h, bool write);                          // the entity's table, its bags' access checked
+KTable* ctx_attachments(TickContext& ctx, u32 ktable_id, u32 component_id, bool write); // the ktable, its store's access checked
+KTable* ctx_props(TickContext& ctx, Handle h, bool write);                            // the entity's ktable, its bags' access checked
 bool    ctx_cancel(TickContext& ctx, u32 ticket);
 bool    ctx_state_allowed(const TickContext& ctx, bool write); // logs and asserts when not
 bool    ctx_may_append(TickContext& ctx, u32 resource_id); // declared in `appends` (or the owner's write); logs and asserts when not
-bool    ctx_alive(TickContext& ctx, Handle h);             // a read of the kind's liveness (kind.@alive), checked
+bool    ctx_alive(TickContext& ctx, Handle h);             // a read of the ktable's liveness (ktable.@alive), checked
 void    ctx_emit_check(const TickContext& ctx, u32 type_id);  // dev builds: declared in `emits`
 const void* ctx_received(TickContext& ctx, u32 type_id, u32* count); // the unit's batch of a type it consumes
-Table*  ctx_rows(TickContext& ctx, u32 kind_id);           // likewise: the unit's view of the kind, for its rows
+KTable* ctx_rows(TickContext& ctx, u32 ktable_id);         // likewise: the unit's view of the ktable, for its rows
 // The unit running on this thread (a system or handler, or a parallel_for chunk of one);
 // null outside the schedule. Returns the one it replaces.
 const ScheduledSystem* ctx_running(const ScheduledSystem* unit);
@@ -267,25 +267,25 @@ void            ctx_parallel_end(TickContext& ctx, ParallelBuffers& pb);
 
 // ---- the context: what a system or handler reaches the engine through ------------------
 
-// One kind's rows, from ctx.view or ctx.rows. Rows are slots: [0, rows()) includes dead
+// One ktable's rows, from ctx.view or ctx.rows. Rows are slots: [0, rows()) includes dead
 // ones, so a loop checks alive(i). A column's index i is the entity at handle_at(i), and a
 // live handle's index() is its row.
-struct KindRows {
+struct KTableRows {
     TickContext* ctx;
-    Table*       table;
+    KTable*      ktable;
 
-    u32    rows() const { return table->rows(); }
-    bool   alive(u32 i) const { return table->is_alive(i); }
-    Handle handle_at(u32 i) const { return table->handle_at(i); }
-    const KindDesc& kind() const { return *table->desc; }
+    u32    rows() const { return ktable->rows(); }
+    bool   alive(u32 i) const { return ktable->is_alive(i); }
+    Handle handle_at(u32 i) const { return ktable->handle_at(i); }
+    const KTableDesc& desc() const { return *ktable->desc; }
 
     // One column over every row. T const is a read, T is a write; checked against the
-    // system's sets in dev builds. Empty if the kind has no T.
+    // system's sets in dev builds. Empty if the ktable has no T.
     template <class T>
     Span<T> col() const {
         typedef typename RemoveConst<T>::type U;
-        Column* c = ctx_column_in(*ctx, *table, ComponentType<U>::id, &TypeKey<U>::key, !RemoveConst<T>::is_const);
-        return c ? Span<T>((T*)c->data, table->rows()) : Span<T>();
+        Column* c = ctx_column_in(*ctx, *ktable, ComponentType<U>::id, &TypeKey<U>::key, !RemoveConst<T>::is_const);
+        return c ? Span<T>((T*)c->data, ktable->rows()) : Span<T>();
     }
     // The previous-tick rows, for components that keep them. T const is a read; T is a
     // write (checked against the write set): a system writes the previous copy to say an
@@ -293,14 +293,14 @@ struct KindRows {
     template <class T>
     Span<T> prev() const {
         typedef typename RemoveConst<T>::type U;
-        Column* c = ctx_column_in(*ctx, *table, ComponentType<U>::id, &TypeKey<U>::key, !RemoveConst<T>::is_const);
-        return c && c->prev ? Span<T>((T*)c->prev, table->rows()) : Span<T>();
+        Column* c = ctx_column_in(*ctx, *ktable, ComponentType<U>::id, &TypeKey<U>::key, !RemoveConst<T>::is_const);
+        return c && c->prev ? Span<T>((T*)c->prev, ktable->rows()) : Span<T>();
     }
 };
 
-// What ctx.view returns: every kind that has all of C..., one KindRows each.
+// What ctx.view returns: every ktable that has all of C..., one KTableRows each.
 template <class... C>
-struct KindRange {
+struct KTableRange {
     TickContext* ctx;
 
     struct Iter {
@@ -308,16 +308,16 @@ struct KindRange {
         u32          i, n;
         void settle() {
             for (; i < n; ++i) {
-                Table* t = ctx_table_at(*ctx, i);
+                KTable* t = ctx_ktable_at(*ctx, i);
                 if ((t->has(ComponentType<typename RemoveConst<C>::type>::id) && ...)) return;
             }
         }
-        KindRows operator*() const { return KindRows{ctx, ctx_table_at(*ctx, i)}; }
+        KTableRows operator*() const { return KTableRows{ctx, ctx_ktable_at(*ctx, i)}; }
         Iter&    operator++() { ++i; settle(); return *this; }
         bool     operator!=(const Iter& o) const { return i != o.i; }
     };
-    Iter begin() const { Iter it{ctx, 0, ctx_table_count(*ctx)}; it.settle(); return it; }
-    Iter end() const { return Iter{ctx, ctx_table_count(*ctx), ctx_table_count(*ctx)}; }
+    Iter begin() const { Iter it{ctx, 0, ctx_ktable_count(*ctx)}; it.settle(); return it; }
+    Iter end() const { return Iter{ctx, ctx_ktable_count(*ctx), ctx_ktable_count(*ctx)}; }
 };
 
 // What one chunk of a parallel_for may do besides read and write rows: emit events and
@@ -333,31 +333,31 @@ struct ChunkContext {
     template <class E>
     void emit(const E& e) { ctx_emit_check(*ctx, EventType<E>::id); writer->emit(e); }
     template <class K, class... C>
-    void spawn_later(K kind, const C&... c) {
-        if (ctx_spawn_begin(*ctx, commands, kind, sizeof...(C), false) || sizeof...(C) == 0)
+    void spawn_later(K ktable, const C&... c) {
+        if (ctx_spawn_begin(*ctx, commands, ktable, sizeof...(C), false) || sizeof...(C) == 0)
             (ctx_spawn_component(commands, ComponentType<C>::id, &c, (u32)sizeof(C)), ...);
     }
     void destroy(Handle h) { ctx_destroy(*ctx, commands, h); }
 };
 
-// One kind's attachments of a component, live entities only, in slot order (from
+// One ktable's attachments of a component, live entities only, in slot order (from
 // ctx.attached_all):
 //   for (Attached<Talk> a : ctx.attached_all<Talk>(".npc")) use(a.entity, *a.value);
 template <class T>
 struct Attached { Handle entity; T* value; };
 template <class T>
 struct AttachedRange {
-    Table*       table = nullptr;
+    KTable*      ktable = nullptr;
     Attachment*  store = nullptr;
     struct Iter {
-        Table* t; Attachment* a; u32 i;
+        KTable* t; Attachment* a; u32 i;
         void settle() { while (a && i < a->rows.count() && !t->sparse_live(a->rows, i)) ++i; }
         Attached<T> operator*() const { return Attached<T>{t->handle_at(a->rows.slots[i]), (T*)a->rows.at(i)}; }
         Iter& operator++() { ++i; settle(); return *this; }
         bool  operator!=(const Iter& o) const { return i != o.i; }
     };
-    Iter begin() const { Iter it{table, store, 0}; it.settle(); return it; }
-    Iter end() const { return Iter{table, store, store ? store->rows.count() : 0}; }
+    Iter begin() const { Iter it{ktable, store, 0}; it.settle(); return it; }
+    Iter end() const { return Iter{ktable, store, store ? store->rows.count() : 0}; }
 };
 
 // ---- the TickContext ---------------------------------------------------------------
@@ -435,17 +435,17 @@ struct TickContext {
     }
 
     // ---- data access ---------------------------------------------------------------
-    // A kind's table, by name (".rock") or by the id its KindDesc::id slot received. Write
-    // access (a declared write on the kind) is the table itself: spawn and destroy now,
+    // A ktable, by name (".rock") or by the id its KTableDesc::id slot received. Write
+    // access (a declared write on the ktable) is the KTable itself: spawn and destroy now,
     // with the handle at once, and every column. Read access is the const view. Null if
     // not declared.
-    //   Handle b = ctx.write_kind(g_bullet_kind)->spawn(transform2_at(at), look, Velocity{v});
-    Table*       write_kind(const char* kind) { return ctx_kind(*this, kind, true); }
-    Table*       write_kind(u32 kind_id) { return ctx_kind(*this, kind_id, true); }
-    const Table* read_kind(const char* kind) { return ctx_kind(*this, kind, false); }
-    const Table* read_kind(u32 kind_id) { return ctx_kind(*this, kind_id, false); }
+    //   Handle b = ctx.write_ktable(g_bullet_ktable)->spawn(transform2_at(at), look, Velocity{v});
+    KTable*       write_ktable(const char* name) { return ctx_ktable(*this, name, true); }
+    KTable*       write_ktable(u32 ktable_id) { return ctx_ktable(*this, ktable_id, true); }
+    const KTable* read_ktable(const char* name) { return ctx_ktable(*this, name, false); }
+    const KTable* read_ktable(u32 ktable_id) { return ctx_ktable(*this, ktable_id, false); }
 
-    // One kind's column by name, ".rock.Health" (or its id), over every row by slot. A
+    // One ktable's column by name, ".rock.Health" (or its id), over every row by slot. A
     // handle from a delivered event is live, so its index() is a valid row:
     //   static const u32 k_hp = ctx.column_id(".rock.Health");
     //   Span<Health> hp = ctx.write<Health>(k_hp);
@@ -462,27 +462,29 @@ struct TickContext {
         Column* c = ctx_column(*this, column, &TypeKey<T>::key, true, &n);
         return c ? Span<T>((T*)c->data, n) : Span<T>();
     }
-    // Every kind that has all of C..., one KindRows each; a const C is read, the others
-    // written. The usual way a system walks entities, whichever module declared the kinds:
-    //   for (KindRows k : ctx.view<Transform2, const Velocity>()) {
+    // Every ktable that has all of C..., one KTableRows each; a const C is read, the others
+    // written. The usual way a system walks entities, whichever module declared the ktables:
+    //   for (KTableRows k : ctx.view<Transform2, const Velocity>()) {
     //       Span<Transform2> t = k.col<Transform2>();
     //       Span<const Velocity> v = k.col<const Velocity>();
     //       for (u32 i = 0; i < k.rows(); ++i) if (k.alive(i)) t[i].position += v[i].v * (f32)ctx.dt;
     //   }
     template <class... C>
-    KindRange<C...> view() { return KindRange<C...>{this}; }
-    // Whether an entity is alive: a read of its kind's liveness ("kind.@alive", or the kind).
+    KTableRange<C...> view() { return KTableRange<C...>{this}; }
+    // Whether an entity is alive: a read of its ktable's liveness ("ktable.@alive", or the
+    // ktable).
     bool alive(Handle h) { return ctx_alive(*this, h); }
-    // One kind's rows, as a view would give them: its liveness read here, each column as it
-    // is taken (k.col<const T>()). For a snapshot kind read early, the rows the phase began with.
+    // One ktable's rows, as a view would give them: its liveness read here, each column as
+    // it is taken (k.col<const T>()). For a snapshot ktable read early, the rows the phase
+    // began with.
     template <class K>
-    KindRows rows(K kind) { Table* t = ctx_rows(*this, kind_of(kind)); return KindRows{this, t}; }
+    KTableRows rows(K ktable) { KTable* t = ctx_rows(*this, ktable_of(ktable)); return KTableRows{this, t}; }
 
-    // How many entities of a kind (name or id) are alive: a read of its liveness
-    // ("kind.@alive", or the kind), checked like any read. For counts and stats without
-    // reaching around the context to the table.
+    // How many entities of a ktable (name or id) are alive: a read of its liveness
+    // ("ktable.@alive", or the ktable), checked like any read. For counts and stats without
+    // reaching around the context to the KTable.
     template <class K>
-    u32 live(K kind) { Table* t = ctx_rows(*this, kind_of(kind)); return t ? t->live() : 0; }
+    u32 live(K ktable) { KTable* t = ctx_rows(*this, ktable_of(ktable)); return t ? t->live() : 0; }
 
     // A published resource (engine_publish), by name or id; T const is a read, T a write.
     // Null, with a log line, if nothing is published under that name yet.
@@ -512,16 +514,16 @@ struct TickContext {
     // A program that runs one engine can keep them in statics, as above.
     u32 resource_id(const char* name) { return ctx_resource_id(*this, name, false); }
     u32 column_id(const char* name) { return ctx_resource_id(*this, name, true); } // asserts if not a column
-    u32 kind_id(const char* name);
+    u32 ktable_id(const char* name);
 
     // ---- per entity: attachments and property bags -------------------------------------
-    // For data one entity of a kind has and the rest don't (a quest on one villager, what
+    // For data one entity of a ktable has and the rest don't (a quest on one villager, what
     // a designer typed on one map object). An attachment is one component stored beside
-    // the kind's columns, for the kinds whose KindDesc::attachable lists it; a bag is named
-    // values, for kinds with KindDesc::props. Both are declared in the sets as
-    // "kind.@Component" and "kind.@props" (or "*.@..."), and a write on the whole kind
+    // the ktable's columns, for the ktables whose KTableDesc::attachable lists it; a bag is
+    // named values, for ktables with KTableDesc::props. Both are declared in the sets as
+    // "ktable.@Component" and "ktable.@props" (or "*.@..."), and a write on the whole ktable
     // covers them. Changes are immediate, not commands. Both are slower than a column:
-    // what every entity has belongs in the kind.
+    // what every entity has belongs in the ktable.
     //   if (Talk* t = ctx.attached<Talk>(npc)) start_dialogue(t->line);
     //   ctx.attach(npc, Quest{.stage = 1});
     //   ctx.prop_set_int(chest, "gold", 30);
@@ -536,14 +538,14 @@ struct TickContext {
     template <class T>
     bool detach(Handle h) { return ctx_detach(*this, h, ComponentType<T>::id); }
     template <class T, class K>
-    AttachedRange<T> attached_all(K kind) {
+    AttachedRange<T> attached_all(K ktable) {
         typedef typename RemoveConst<T>::type U;
         AttachedRange<T> r;
-        r.table = ctx_attachments(*this, kind_of(kind), ComponentType<U>::id, !RemoveConst<T>::is_const);
-        r.store = r.table ? r.table->attachment(ComponentType<U>::id) : nullptr;
+        r.ktable = ctx_attachments(*this, ktable_of(ktable), ComponentType<U>::id, !RemoveConst<T>::is_const);
+        r.store = r.ktable ? r.ktable->attachment(ComponentType<U>::id) : nullptr;
         return r;
     }
-    // The bag. Setters return false if the entity is dead, its kind has no bags, or the
+    // The bag. Setters return false if the entity is dead, its ktable has no bags, or the
     // unit didn't declare them. Getters
     // convert between int and float and answer `dflt` for a missing key or another type;
     // prop_handle answers a null handle.
@@ -564,20 +566,20 @@ struct TickContext {
     // Commands need no declaration: they take effect at the end of the phase, when nothing
     // runs, so they can't race.
     //
-    // Spawns an entity of a kind (name or id) without holding the kind's write. It exists
-    // after this phase; the Spawned event with the returned ticket carries its handle.
-    // Components not given are zeroed. Returns 0 if the kind is unknown.
-    //   ctx.spawn_later(g_debris_kind, transform2_at(p), sprite_of(look), Velocity{v, spin});
+    // Spawns an entity of a ktable (name or id) without holding the ktable's write. It
+    // exists after this phase; the Spawned event with the returned ticket carries its handle.
+    // Components not given are zeroed. Returns 0 if the ktable is unknown.
+    //   ctx.spawn_later(g_debris_ktable, transform2_at(p), sprite_of(look), Velocity{v, spin});
     template <class K, class... C>
-    u32 spawn_later(K kind, const C&... c) {
-        u32 ticket = ctx_spawn_begin(*this, commands, kind, sizeof...(C), true);
+    u32 spawn_later(K ktable, const C&... c) {
+        u32 ticket = ctx_spawn_begin(*this, commands, ktable, sizeof...(C), true);
         if (ticket) (ctx_spawn_component(commands, ComponentType<C>::id, &c, (u32)sizeof(C)), ...);
         return ticket;
     }
     // Spawn and name: the name lands with the entity (see engine_entity_name_set).
     template <class K, class... C>
-    u32 spawn_named_later(K kind, const char* name, const C&... c) {
-        u32 ticket = spawn_later(kind, c...);
+    u32 spawn_named_later(K ktable, const char* name, const C&... c) {
+        u32 ticket = spawn_later(ktable, c...);
         if (ticket) ctx_name(*this, commands, Handle{}, name);
         return ticket;
     }
@@ -586,9 +588,9 @@ struct TickContext {
     // Destroys an entity at the phase boundary. Readers in this phase still see it;
     // events naming it are dropped from batches after it. A dead or null handle is ignored.
     void destroy(Handle h) { ctx_destroy(*this, commands, h); }
-    // Every entity of a kind, at the phase boundary. Takes a name or a kind id.
+    // Every entity of a ktable, at the phase boundary. Takes a name or a ktable id.
     template <class K>
-    void destroy_all(K kind) { ctx_destroy_all(*this, commands, kind_of(kind)); }
+    void destroy_all(K ktable) { ctx_destroy_all(*this, commands, ktable_of(ktable)); }
 
     // ---- timers: events delivered at a later tick --------------------------------------
     // Emits `e` at the start of sim tick `at_tick`; a tick at or before the current one
@@ -606,8 +608,8 @@ struct TickContext {
 private:
     u32 id_of(u32 id) { return id; }
     u32 id_of(const char* name) { return ctx_resource_id(*this, name, false); }
-    u32 kind_of(u32 id) { return id; }
-    u32 kind_of(const char* name) { return kind_id(name); }
+    u32 ktable_of(u32 id) { return id; }
+    u32 ktable_of(const char* name) { return ktable_id(name); }
 };
 
 // ---- parallel loops ----------------------------------------------------------------------
@@ -676,7 +678,7 @@ struct SystemDesc {
     // Resource names, comma-separated; see HandlerDesc. A reader runs after every writer of
     // what it reads in the phase. A read marked '^' ("^.npc.Local2") is of the value the
     // phase started with: an AI that reads where things stand to write the intent a later
-    // system moves them by reads their positions that way. It may be of a kind or its
+    // system moves them by reads their positions that way. It may be of a ktable or its
     // columns, never of something the unit writes itself. A filter may leave a component
     // out ("*[Collider2-Parent].Transform2"). One resource, one mode: two spellings that
     // cover it differently are refused, as is a reader that wants one thing early and
@@ -715,7 +717,7 @@ struct ScheduledSystem {
     u32                spawn_tickets = 0; // the unit's own ticket counters (see phase.cc)
     u32                timer_tickets = 0;
     mutable u32        in_parallel   = 0; // inside a parallel_for: chunks may not draw from ctx.rng()
-    Array<Table>       early;    // the snapshot kinds it reads early, as the phase found them
+    Array<KTable>      early;    // the snapshot ktables it reads early, as the phase found them
     // A stream it consumes: where its last batch ended, and this run's.
     struct Cursor { u32 type; bool early; u64 at, from, to; };
     Array<Cursor>      cursors;
@@ -726,11 +728,11 @@ struct ScheduledSystem {
     void        free_buffers();
 };
 
-// A snapshot kind's copy at a phase start, of what that phase reads early and writes.
+// A snapshot ktable's copy at a phase start, of what that phase reads early and writes.
 // Liveness only when a unit spawns or destroys there.
-struct KindSnapshot {
+struct KTableSnapshot {
     struct Rows { Column* column; Array<u8> bytes; };
-    Table*     table    = nullptr;
+    KTable*    ktable   = nullptr;
     bool       liveness = false;
     Array<u32> gens;       // the slots' generations and alive bits
     u32        len = 0, live = 0;
@@ -739,7 +741,7 @@ struct KindSnapshot {
 
 struct PhaseList {
     Array<ScheduledSystem> systems[(u32)Phase::Count];   // in run order: by level, then rank
-    Array<KindSnapshot>    snapshots[(u32)Phase::Count]; // taken at each phase start
+    Array<KTableSnapshot>  snapshots[(u32)Phase::Count]; // taken at each phase start
     Array<ScheduledSystem*> by_unit;                      // every unit, at unit - 1: phase by phase, by rank
     u32                    first_unit[(u32)Phase::Count] = {}; // each phase's units are [first, last]
     u32                    last_unit[(u32)Phase::Count]  = {};

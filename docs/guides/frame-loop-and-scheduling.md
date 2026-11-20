@@ -35,7 +35,7 @@ int main(int argc, char** argv) { return kv::frameloop_main(argc, argv, k_config
 
 `frameloop_main` parses the command line over the config, then calls `engine_init` with
 the module list kormake generated from `module.lua`'s deps. `engine_init` reads every
-module's `ModuleDesc`, gives every component, kind, event and system its id, builds the
+module's `ModuleDesc`, gives every component, ktable, event and system its id, builds the
 schedule, and starts the modules in dependency order. Then the loop runs until something
 calls `engine_request_quit`. After that, `engine_shutdown` stops everything in reverse
 order. The game itself is a module, `rocks`, that declares tables. It never runs a loop
@@ -114,8 +114,8 @@ constinit const SystemDesc k_systems[] = {
 };
 ```
 
-`reads` and `writes` name **resources**. `.ship.Velocity` is one column of one kind, and
-`*.Velocity` is that column in every kind that has one. `input.state` is a resource
+`reads` and `writes` name **resources**. `.ship.Velocity` is one column of one ktable, and
+`*.Velocity` is that column in every ktable that has one. `input.state` is a resource
 another module published. A name that starts with `.` is this module's own, so `.move` is
 `rocks.move`. `.state = StateUse::None` says the system doesn't touch the module's own
 state, which leaves it free to run beside the module's other systems.
@@ -132,7 +132,7 @@ The sets also limit what the code may touch. This is `move`:
 ```cpp
 void move(TickContext& ctx) {
     f32 dt = (f32)ctx.dt;
-    for (KindRows k : ctx.view<Transform2, const Velocity>()) {   // every kind with both
+    for (KTableRows k : ctx.view<Transform2, const Velocity>()) {   // every ktable with both
         Span<Transform2>     t = k.col<Transform2>();
         Span<const Velocity> v = k.col<const Velocity>();
         parallel_for(ctx, k.rows(), 512, [&](ChunkContext&, u32 begin, u32 end) {
@@ -147,7 +147,7 @@ void move(TickContext& ctx) {
 ```
 
 `ctx.view<Transform2, const Velocity>()` asks for a write on one column and a read on the
-other, in every kind that has both. In a dev build, any access that is not in the sets
+other, in every ktable that has both. In a dev build, any access that is not in the sets
 stops the program at once. Take `*.Velocity` out of `move`'s reads and rocks prints:
 
 ```
@@ -207,14 +207,14 @@ The three refusals you will meet:
 |---|---|---|
 | two writers with no order | two units write one resource and nothing orders them | `after` or `before` on one of them |
 | a cycle | A must run after B and B after A, through what they read and write | move one to another phase, read last tick's copy (`CompPrev`), or read early (below) |
-| a torn read | one unit reads one thing early and another as it stands from the same writer | say which value it means, or make the kind a snapshot |
+| a torn read | one unit reads one thing early and another as it stands from the same writer | say which value it means, or make the ktable a snapshot |
 
 ## Reading early
 
 Sometimes a system wants a value **as the phase found it**, before this phase's writers
 change it. An AI deciding where to go reads where everything stands, and then a later
 system moves things. A `^` in front of the name says so: `.reads = "^.npc.Transform2"`. The
-reader then runs *before* the writers, or, for a kind declared with
+reader then runs *before* the writers, or, for a ktable declared with
 `EarlyReads::Snapshot`, from a copy taken at the start of the phase. Either way it sees
 the same values. [Scheduling](../concepts/scheduling.md#early-reads-order-or-snapshot)
 covers when to pick which.
@@ -290,8 +290,9 @@ build/linux-debug/bin/rocks --demo --run-seconds 30 --hash --threads 8
 
 The two runs print the same hash every tick. When a change you expected to be harmless
 changes the hashes, `--hash-systems` prints the hash after every system, which points at
-the system that made the difference. `--early-reads order` and `--early-reads snapshot`
-are another check: they change how the schedule is built, and must not change a hash.
+the system that made the difference. `--early-reads order|snapshot|ktable` is
+another check: `order` and `snapshot` force one way for every ktable, `ktable` (the default)
+leaves each its own; they change how the schedule is built, and must not change a hash.
 `--record FILE` and `--replay FILE` ([frameloop](../../modules/frameloop/README.md#using-it))
 save a run's input and play it back, comparing hashes as they go.
 
@@ -310,7 +311,7 @@ save a run's input and play it back, comparing hashes as they go.
 ## Where next
 
 - [Modules](../concepts/modules.md): every table a module can declare, with components,
-  kinds, triggers and memory.
+  ktables, triggers and memory.
 - [Scheduling](../concepts/scheduling.md): the resource tree, the modes, and the solver's
   rules in full.
 - [frameloop](../../modules/frameloop/README.md): every config field and command-line

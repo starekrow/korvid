@@ -4,7 +4,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
 #include "korvid/core/log.h"
-#include "korvid/core/kind.h"
+#include "korvid/core/ktable.h"
 
 namespace {
 
@@ -13,7 +13,7 @@ using namespace kv;
 struct Counter { i32 n; };
 constinit const FieldDesc k_counter_fields[] = {KV_FIELDS(Counter, n)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Counter, k_counter_fields, CompPrev)};
-constinit const KindDesc k_kinds[] = {{.name = ".thing", .components = "Counter", .capacity = 64}};
+constinit const KTableDesc k_ktables[] = {{.name = ".thing", .components = "Counter", .capacity = 64}};
 
 struct Ping { u32 n; };
 constinit const EventTypeDesc k_events[] = {KV_EVENT(Ping)};
@@ -46,7 +46,7 @@ constinit const HandlerDesc k_handlers[] = {
 constinit const TriggerDesc k_triggers[] = {
     {.name = ".three", .field = ".thing.Counter.n", .edge = TriggerEdge::CrossedAbove, .value = 2.5},
 };
-KV_MODULE_DEFINE(k_p) = {.name = "p", .events = k_events, .components = k_components, .kinds = k_kinds,
+KV_MODULE_DEFINE(k_p) = {.name = "p", .events = k_events, .components = k_components, .ktables = k_ktables,
                          .systems = k_systems, .handlers = k_handlers, .triggers = k_triggers};
 
 } // namespace
@@ -58,7 +58,7 @@ void test_pause(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&k_p};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* things = engine_table(e, "p.thing");
+    KTable* things = engine_ktable(e, "p.thing");
     things->spawn(Counter{0});
     g = Seen{};
 
@@ -103,7 +103,7 @@ void test_pause(kv::TestCtx& c) {
     // The same four sim ticks with no pause anywhere hash the same.
     Engine f;
     KV_CHECK(c, engine_init(f, list));
-    engine_table(f, "p.thing")->spawn(Counter{0});
+    engine_ktable(f, "p.thing")->spawn(Counter{0});
     g = Seen{};
     for (u32 i = 0; i < 4; ++i) engine_frame(f, 1.0 / 60.0);
     KV_CHECK(c, engine_hash_state(f) == hash_a && g.pings == 1 && g.edges == 1);

@@ -9,7 +9,7 @@
 // snaps back when the distance does (a loop, a restart).
 //
 // The dial `scroll_rows` moves every plane tile instead, the way slice 1 did, for the
-// notebook's comparison: a Set delta per tile per tick. (The map's tiles are a still kind,
+// notebook's comparison: a Set delta per tile per tick. (The map's tiles are a still ktable,
 // which the extract does not look at once sent: they scroll by layer either way.)
 #include "arcfire.h"
 #include "korvid/asset_render/material.h"
@@ -48,7 +48,7 @@ f32 plane_tile(const Dials& d, u32 p) { return k_planes[p].full / (f32)plane_cut
 } // namespace
 
 void planes_spawn(Engine& e, Game& g, const Dials& d) {
-    Table* planes = engine_table(e, g_plane_kind);
+    KTable* planes = engine_ktable(e, g_plane_ktable);
     planes->destroy_all(); // the last stage's, its segments with them
     u32 made = 0, shown = 0;
     for (u32 p = 0; p < KV_COUNTOF(k_planes); ++p) {
@@ -114,7 +114,7 @@ void planes(TickContext& ctx) {
     if (!title && dials_row[0].scroll_rows) {
         const Stage& st = stage_row[0];
         // Slice 1's way, for measuring: every tile written every tick.
-        Table* planes_table = ctx.write_kind(g_plane_kind);
+        KTable* planes_table = ctx.write_ktable(g_plane_ktable);
         Span<Transform2> t = planes_table->rows_of<Transform2>();
         Span<const Plane> p = planes_table->rows_of<Plane>();
         for (u32 i = 0; i < planes_table->rows(); ++i) {
@@ -125,7 +125,7 @@ void planes(TickContext& ctx) {
                 *planes_table->prev<Transform2>(planes_table->handle_at(i)) = t[i];
             }
         }
-        // The map's tiles are a still kind and cannot be moved: it scrolls by layer either way.
+        // The map's tiles are a still ktable and cannot be moved: it scrolls by layer either way.
         for (u32 l = 0; l < kMapLayers; ++l) layers->set(Z_MAP + (i32)l, vec2{0.0f, ground}, ground > g.ground_offset);
         g.ground_offset = ground;
         return;
@@ -139,7 +139,7 @@ void planes(TickContext& ctx) {
         layers->set(k_planes[p].layer, vec2{0.0f, -now}, now < before); // wrapped: the same picture, no sweep
     }
     // The gas comes down with the stage at the deep plane's rate: its uv moves, the sprite does not.
-    if (Sprite* gas = ctx.write_kind(g_plane_kind)->get<Sprite>(g.nebula_row)) {
+    if (Sprite* gas = ctx.write_ktable(g_plane_ktable)->get<Sprite>(g.nebula_row)) {
         g.gas_scrolled += speed * kGasRate;
         gas->uv.y = -g.gas_scrolled / kFieldW;
     }
@@ -149,7 +149,7 @@ void planes(TickContext& ctx) {
     // A station segment (rate -1, on the ground's layer) is placed by the distance; when it
     // goes back, the segments shown go (their turrets went with the restart), and so does
     // one that has scrolled past the field's bottom.
-    Table* pt = ctx.write_kind(g_plane_kind);
+    KTable* pt = ctx.write_ktable(g_plane_ktable);
     Span<const Plane> pl = pt->rows_of<Plane>();
     Span<const Transform2> px = pt->rows_of<Transform2>();
     for (u32 i = 0; i < pt->rows(); ++i)

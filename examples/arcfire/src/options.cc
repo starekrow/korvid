@@ -24,7 +24,7 @@ Collider2 option_collider() { return collider_circle(10.0f, L_SHELL, L_BULLET); 
 } // namespace
 
 bool option_add(TickContext& ctx, Game& g) {
-    Table* options = ctx.write_kind(g_option_kind);
+    KTable* options = ctx.write_ktable(g_option_ktable);
     Span<const Option> oo = options->rows_of<Option>();
     bool taken[kMaxOptions] = {};
     u32 have = 0;
@@ -34,7 +34,7 @@ bool option_add(TickContext& ctx, Game& g) {
     u32 index = taken[0] ? 1 : 0;
     // A small spherical machine, as the egg is, tinted to the shots' cyan.
     Sprite s = sprite_of(g, TEX_EGG, rect2_unit(), vec2{22, 22}, Z_SHIP - 1, color{0.75f, 0.95f, 1.0f, 1.0f});
-    point2 at = engine_table(*ctx.engine, g_ship_kind)->get<Transform2>(g.ship)->position;
+    point2 at = engine_ktable(*ctx.engine, g_ship_ktable)->get<Transform2>(g.ship)->position;
     Handle h = options->spawn(transform2_at(at), local2_at(point2{0, 0}), Parent{g.ship}, s, option_collider(), Option{index, 0.0f});
     if (!h.is_null()) beam_spawn(*ctx.engine, g, h);
     return !h.is_null();
@@ -45,7 +45,7 @@ bool option_add(TickContext& ctx, Game& g) {
 // the ship's sideways movement this tick, so they sweep the way it goes.
 void options(TickContext& ctx) {
     const Game& g = ctx.state_as<const Game>();
-    const Table* ships = engine_table(*ctx.engine, g_ship_kind);
+    const KTable* ships = engine_ktable(*ctx.engine, g_ship_ktable);
     const Ship* s = ships->get<Ship>(g.ship);
     const Transform2* sx = ships->get<Transform2>(g.ship);
     const Transform2* sp = ships->prev<Transform2>(g.ship);
@@ -53,7 +53,7 @@ void options(TickContext& ctx) {
     f32 sideways = clampf((sx->position.x - sp->position.x) / kShipSpeed, -1.0f, 1.0f);
     Span<Local2> ol = ctx.write<Local2>("arcfire.option.Local2");
     Span<Option> oo = ctx.write<Option>("arcfire.option.Option");
-    const Table* options = engine_table(*ctx.engine, g_option_kind);
+    const KTable* options = engine_ktable(*ctx.engine, g_option_ktable);
     f32 turn = (f32)ctx.tick * (2.0f * KV_PI / kOrbitTicks);
     for (u32 i = 0; i < options->rows(); ++i) {
         if (!options->is_alive(i)) continue;

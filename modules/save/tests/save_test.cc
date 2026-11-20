@@ -1,7 +1,7 @@
-// Fields and kinds: every field type through a save and back to the same bits; files
-// that lack fields, have extra ones or the wrong shapes; a kind restored slot for slot,
+// Fields and ktables: every field type through a save and back to the same bits; files
+// that lack fields, have extra ones or the wrong shapes; a ktable restored slot for slot,
 // so the handles into it, the next spawns and the state hash are what they were, in an
-// engine whose kinds have other ids; handles remapped by the game.
+// engine whose ktables have other ids; handles remapped by the game.
 #include "korvid/save/save.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/module.h"
@@ -36,15 +36,15 @@ struct SLink { Handle to; u32 n; };
 constinit const FieldDesc k_pos_fields[] = {KV_FIELDS(SPos, x, y)};
 constinit const FieldDesc k_link_fields[] = {KV_FIELDS(SLink, to, n)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(SPos, k_pos_fields, CompPrev), KV_COMPONENT(SLink, k_link_fields)};
-constinit const KindDesc k_kinds[] = {
+constinit const KTableDesc k_ktables[] = {
     {.name = "sv.node", .components = "SPos, SLink", .capacity = 16},
     {.name = "sv.anchor", .components = "SPos", .capacity = 4},
 };
-constinit const KindDesc k_extra_kinds[] = {{.name = "sx.first", .components = "SPos", .capacity = 4}};
-constinit const KindDesc k_bag_kinds[] = {{.name = "sb.npc", .components = "SPos", .capacity = 8, .attachable = "SLink", .props = true}};
-KV_MODULE_DEFINE(k_sb) = {.name = "sb", .kinds = k_bag_kinds};
-KV_MODULE_DEFINE(k_sv) = {.name = "sv", .components = k_components, .kinds = k_kinds};
-KV_MODULE_DEFINE(k_sx) = {.name = "sx", .kinds = k_extra_kinds};
+constinit const KTableDesc k_extra_ktables[] = {{.name = "sx.first", .components = "SPos", .capacity = 4}};
+constinit const KTableDesc k_bag_ktables[] = {{.name = "sb.npc", .components = "SPos", .capacity = 8, .attachable = "SLink", .props = true}};
+KV_MODULE_DEFINE(k_sb) = {.name = "sb", .ktables = k_bag_ktables};
+KV_MODULE_DEFINE(k_sv) = {.name = "sv", .components = k_components, .ktables = k_ktables};
+KV_MODULE_DEFINE(k_sx) = {.name = "sx", .ktables = k_extra_ktables};
 
 bool same_bits(const Every& a, const Every& b) { return schema_equal(Span<const FieldDesc>(k_every_fields), &a, &b); }
 
@@ -64,7 +64,7 @@ void test_fields(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&k_sv};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Handle node = engine_table(e, "sv.node")->spawn();
+    Handle node = engine_ktable(e, "sv.node")->spawn();
 
     Every a{};
     a.b = true; a.u8v = 250; a.u16v = 65000; a.u32v = 4000000000u; a.u64v = 18446744073709551615ull;
@@ -103,18 +103,18 @@ void test_fields(kv::TestCtx& c) {
     engine_shutdown(e);
 }
 
-void test_kinds(kv::TestCtx& c) {
+void test_ktables(kv::TestCtx& c) {
     using namespace kv;
-    c.begin("kinds");
+    c.begin("ktables");
     const ModuleDesc* const list[] = {&k_sv};
-    const ModuleDesc* const other[] = {&k_sx, &k_sv}; // another kind first: every id moves
+    const ModuleDesc* const other[] = {&k_sx, &k_sv}; // another ktable first: every id moves
 
-    // A world with history: slots freed in an order, a link into the other kind and
+    // A world with history: slots freed in an order, a link into the other ktable and
     // one inside its own.
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* nodes = engine_table(e, "sv.node");
-    Table* anchors = engine_table(e, "sv.anchor");
+    KTable* nodes = engine_ktable(e, "sv.node");
+    KTable* anchors = engine_ktable(e, "sv.anchor");
     Handle anchor = anchors->spawn(SPos{100, 200});
     Handle n[6];
     for (u32 i = 0; i < 6; ++i) n[i] = nodes->spawn(SPos{(f32)i, (f32)i * 0.5f}, SLink{anchor, i});
@@ -127,8 +127,8 @@ void test_kinds(kv::TestCtx& c) {
 
     SaveWriter w;
     w.init(mem_general());
-    const char* const kinds[] = {"sv.node", "sv.anchor"};
-    save_kinds(w, e, kinds);
+    const char* const ktables[] = {"sv.node", "sv.anchor"};
+    save_ktables(w, e, ktables);
     KV_CHECK(c, w.finish());
     // What the next two spawns would have been.
     Handle next0 = nodes->spawn(), next1 = nodes->spawn();
@@ -137,20 +137,20 @@ void test_kinds(kv::TestCtx& c) {
     // A new engine, other ids, the same world back.
     Engine f;
     KV_CHECK(c, engine_init(f, other));
-    nodes = engine_table(f, "sv.node");
-    anchors = engine_table(f, "sv.anchor");
-    KV_CHECK(c, nodes->kind != next0.kind());
+    nodes = engine_ktable(f, "sv.node");
+    anchors = engine_ktable(f, "sv.anchor");
+    KV_CHECK(c, nodes->handle_kind != next0.kind());
     nodes->spawn(SPos{9, 9}); // something to replace
     JsonDoc doc;
     KV_CHECK(c, save_parse(SaveFormat::Json, w.out.data, w.out.len, mem_scratch(), doc));
-    KV_CHECK(c, load_kinds(doc, doc.root(), f) == 2);
+    KV_CHECK(c, load_ktables(doc, doc.root(), f) == 2);
     KV_CHECK(c, engine_hash_state(f) == hash_before);
     KV_CHECK(c, nodes->live() == 4 && anchors->live() == 1 && nodes->rows() == 6);
-    Handle m1 = Handle::make(nodes->kind, n[1].gen(), n[1].index());
-    Handle m5 = Handle::make(nodes->kind, n[5].gen(), n[5].index());
+    Handle m1 = Handle::make(nodes->handle_kind, n[1].gen(), n[1].index());
+    Handle m5 = Handle::make(nodes->handle_kind, n[5].gen(), n[5].index());
     KV_CHECK(c, nodes->valid(m1) && nodes->get<SLink>(m1)->n == 77 && nodes->get<SPos>(m1)->x == -1);
     KV_CHECK(c, nodes->get<SLink>(m5)->to == m1);
-    KV_CHECK(c, anchors->valid(nodes->get<SLink>(Handle::make(nodes->kind, 1, 0))->to));
+    KV_CHECK(c, anchors->valid(nodes->get<SLink>(Handle::make(nodes->handle_kind, 1, 0))->to));
     KV_CHECK(c, nodes->prev<SPos>(m1)->x == -1); // prev equals the loaded row
     Handle again0 = nodes->spawn(), again1 = nodes->spawn();
     KV_CHECK(c, again0.index() == next0.index() && again0.gen() == next0.gen() && again1.index() == next1.index() && again1.gen() == next1.gen());
@@ -160,20 +160,20 @@ void test_kinds(kv::TestCtx& c) {
     SaveRemap remap;
     remap.fn = to_anchor;
     remap.user = &fresh;
-    KV_CHECK(c, load_kind(doc, *json_get(doc, doc.root(), "sv.node"), *nodes, remap));
-    KV_CHECK(c, nodes->get<SLink>(Handle::make(nodes->kind, 1, 0))->to == fresh);
-    KV_CHECK(c, nodes->get<SLink>(m5)->to == m1); // links within the kind are untouched
+    KV_CHECK(c, load_ktable(doc, *json_get(doc, doc.root(), "sv.node"), *nodes, remap));
+    KV_CHECK(c, nodes->get<SLink>(Handle::make(nodes->handle_kind, 1, 0))->to == fresh);
+    KV_CHECK(c, nodes->get<SLink>(m5)->to == m1); // links within the ktable are untouched
 
-    // Bad files leave the kind empty and say so: a slot twice, a slot past the capacity.
+    // Bad files leave the ktable empty and say so: a slot twice, a slot past the capacity.
     const char* twice = "{\"rows\": [{\"slot\": 1, \"gen\": 1}], \"free\": [[1, 2]]}";
-    KV_CHECK(c, json_parse(twice, strlen(twice), mem_scratch(), doc) && !load_kind(doc, doc.root(), *nodes) && nodes->live() == 0);
+    KV_CHECK(c, json_parse(twice, strlen(twice), mem_scratch(), doc) && !load_ktable(doc, doc.root(), *nodes) && nodes->live() == 0);
     const char* past = "{\"rows\": [{\"slot\": 16, \"gen\": 1}]}";
-    KV_CHECK(c, json_parse(past, strlen(past), mem_scratch(), doc) && !load_kind(doc, doc.root(), *nodes) && nodes->live() == 0);
+    KV_CHECK(c, json_parse(past, strlen(past), mem_scratch(), doc) && !load_ktable(doc, doc.root(), *nodes) && nodes->live() == 0);
     KV_CHECK(c, !nodes->spawn().is_null()); // and usable after
     // Slots the file never names are dead and reused last.
     const char* gap = "{\"rows\": [{\"slot\": 2, \"gen\": 5, \"SPos\": {\"x\": 3}}], \"free\": [[1, 4]]}";
-    KV_CHECK(c, json_parse(gap, strlen(gap), mem_scratch(), doc) && load_kind(doc, doc.root(), *nodes));
-    KV_CHECK(c, nodes->live() == 1 && nodes->rows() == 3 && nodes->get<SPos>(Handle::make(nodes->kind, 5, 2))->x == 3);
+    KV_CHECK(c, json_parse(gap, strlen(gap), mem_scratch(), doc) && load_ktable(doc, doc.root(), *nodes));
+    KV_CHECK(c, nodes->live() == 1 && nodes->rows() == 3 && nodes->get<SPos>(Handle::make(nodes->handle_kind, 5, 2))->x == 3);
     Handle g1 = nodes->spawn(), g0 = nodes->spawn();
     KV_CHECK(c, g1.index() == 1 && g1.gen() == 4 && g0.index() == 0 && g0.gen() == 1);
     w.free();
@@ -183,8 +183,8 @@ void test_kinds(kv::TestCtx& c) {
     // the nodes' own names back with them.
     Engine g;
     KV_CHECK(c, engine_init(g, list));
-    nodes = engine_table(g, "sv.node");
-    anchors = engine_table(g, "sv.anchor");
+    nodes = engine_ktable(g, "sv.node");
+    anchors = engine_ktable(g, "sv.anchor");
     anchors->spawn(SPos{0, 0});
     Handle home = anchors->spawn(SPos{5, 5}); // slot 1
     KV_CHECK(c, engine_entity_name_set(g, home, "home"));
@@ -194,11 +194,11 @@ void test_kinds(kv::TestCtx& c) {
     SaveWriter w2;
     w2.init(mem_general());
     const char* const just_nodes[] = {"sv.node"};
-    save_kinds(w2, g, just_nodes);
+    save_ktables(w2, g, just_nodes);
     KV_CHECK(c, w2.finish());
     KV_CHECK(c, strstr((const char*)w2.out.data, "\"sv.anchor@home\"") && strstr((const char*)w2.out.data, "\"sv.node@first\""));
     KV_CHECK(c, strstr((const char*)w2.out.data, "\"name\": \"first\"") != nullptr);
-    // Elsewhere now: the anchor is in slot 0 of a fresh table; the nodes come back by load.
+    // Elsewhere now: the anchor is in slot 0 of a fresh ktable; the nodes come back by load.
     anchors->destroy_all();
     nodes->destroy_all();
     engine_apply_commands(g);
@@ -206,10 +206,10 @@ void test_kinds(kv::TestCtx& c) {
     KV_CHECK(c, home2.index() != home.index() || home2.gen() != home.gen());
     KV_CHECK(c, engine_entity_name_set(g, home2, "home"));
     KV_CHECK(c, save_parse(SaveFormat::Json, w2.out.data, w2.out.len, mem_scratch(), doc));
-    KV_CHECK(c, load_kinds(doc, doc.root(), g) == 1);
+    KV_CHECK(c, load_ktables(doc, doc.root(), g) == 1);
     Handle a2 = engine_entity_find(g, "first");
     KV_CHECK(c, a2 == a && nodes->get<SLink>(a2)->to == home2);
-    KV_CHECK(c, nodes->get<SLink>(b)->to == a2); // by name within the kind too
+    KV_CHECK(c, nodes->get<SLink>(b)->to == a2); // by name within the ktable too
     SavedHandle sh;
     char kind[48];
     KV_CHECK(c, parse_handle("render.material@game/hero.png:alpha", &sh, kind, sizeof kind) && !strcmp(sh.kind, "render.material") && !strcmp(sh.name, "game/hero.png:alpha"));
@@ -221,7 +221,7 @@ void test_kinds(kv::TestCtx& c) {
     const ModuleDesc* const bags[] = {&k_sv, &k_sb};
     Engine eb;
     KV_CHECK(c, engine_init(eb, bags));
-    Table* npcs = engine_table(eb, "sb.npc");
+    KTable* npcs = engine_ktable(eb, "sb.npc");
     Handle n0 = npcs->spawn(SPos{1, 1}), n1 = npcs->spawn(SPos{2, 2});
     npcs->attach(n1, SLink{n0, 9});
     TickContext ctx{};
@@ -231,12 +231,12 @@ void test_kinds(kv::TestCtx& c) {
     u64 bag_hash = npcs->hash();
     SaveWriter w3;
     w3.init(mem_general());
-    const char* const bag_kinds[] = {"sb.npc"};
-    save_kinds(w3, eb, bag_kinds);
+    const char* const bag_ktables[] = {"sb.npc"};
+    save_ktables(w3, eb, bag_ktables);
     KV_CHECK(c, w3.finish());
     npcs->destroy_all();
     engine_apply_commands(eb);
-    KV_CHECK(c, save_parse(SaveFormat::Json, w3.out.data, w3.out.len, mem_scratch(), doc) && load_kinds(doc, doc.root(), eb) == 1);
+    KV_CHECK(c, save_parse(SaveFormat::Json, w3.out.data, w3.out.len, mem_scratch(), doc) && load_ktables(doc, doc.root(), eb) == 1);
     KV_CHECK(c, npcs->hash() == bag_hash);
     KV_CHECK(c, npcs->attached<SLink>(n1) && npcs->attached<SLink>(n1)->to == n0 && npcs->attached<SLink>(n1)->n == 9 && !npcs->attached<SLink>(n0));
     KV_CHECK(c, ctx.prop_int(n0, "gold") == 12 && ctx.prop_float(n0, "speed") == 2.0 && !strcmp(ctx.prop_str(n0, "line"), "hello"));

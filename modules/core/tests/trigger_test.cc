@@ -16,7 +16,7 @@ struct Pos { f32 x, y; };
 constinit const FieldDesc k_hp_fields[]  = {KV_FIELD(Hp, hp)};
 constinit const FieldDesc k_pos_fields[] = {KV_FIELD(Pos, x), KV_FIELD(Pos, y)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Hp, k_hp_fields, CompPrev), KV_COMPONENT(Pos, k_pos_fields)};
-constinit const KindDesc k_kinds[] = {{.name = "t.ship", .components = "Hp, Pos", .capacity = 8}};
+constinit const KTableDesc k_ktables[] = {{.name = "t.ship", .components = "Hp, Pos", .capacity = 8}};
 
 struct Alarm { u32 n; };
 constinit const FieldDesc k_alarm_fields[] = {KV_FIELD(Alarm, n)};
@@ -39,15 +39,15 @@ void sys_input(TickContext& ctx) {
     }
 }
 constinit const SystemDesc k_systems[] = {{.name = "t.input", .phase = Phase::Input, .fn = sys_input, .reads = "Alarm, StateEdge"}};
-KV_MODULE_DEFINE(k_t) = {.name = "t", .events = k_events, .components = k_components, .kinds = k_kinds,
+KV_MODULE_DEFINE(k_t) = {.name = "t", .events = k_events, .components = k_components, .ktables = k_ktables,
                          .systems = k_systems, .triggers = k_triggers};
 
 constinit const TriggerDesc k_noprev_triggers[] = {{.name = "b.noprev", .field = "t.ship.Pos.x"}};
 KV_MODULE_DEFINE(k_noprev) = {.name = "noprev", .triggers = k_noprev_triggers};
 constinit const TriggerDesc k_nofield_triggers[] = {{.name = "b.nofield", .field = "t.ship.Hp.mana"}};
 KV_MODULE_DEFINE(k_nofield) = {.name = "nofield", .triggers = k_nofield_triggers};
-constinit const TriggerDesc k_nokind_triggers[] = {{.name = "b.nokind", .field = "t.boat.Hp.hp"}};
-KV_MODULE_DEFINE(k_nokind) = {.name = "nokind", .triggers = k_nokind_triggers};
+constinit const TriggerDesc k_noktable_triggers[] = {{.name = "b.noktable", .field = "t.boat.Hp.hp"}};
+KV_MODULE_DEFINE(k_noktable) = {.name = "noktable", .triggers = k_noktable_triggers};
 
 } // namespace
 
@@ -93,7 +93,7 @@ void test_trigger(kv::TestCtx& c) {
     KV_CHECK(c, !ctx.cancel(keep));
 
     // Triggers. Spawning is not an edge. Then hp 3 -> 2 is a change; 2 -> 0 is a change and a death.
-    Table* ships = engine_table(e, "t.ship");
+    KTable* ships = engine_ktable(e, "t.ship");
     g = Trace{};
     Handle s0 = ships->spawn(Hp{3}, Pos{});
     u64 tick = 5004;
@@ -136,11 +136,11 @@ void test_trigger(kv::TestCtx& c) {
     engine_shutdown(e);
     KV_CHECK(c, g_dead_id == 0 && e.triggers.len == 0);
 
-    // Rejections: no previous copy, unknown field, unknown kind.
-    const ModuleDesc* const noprev[]  = {&k_t, &k_noprev};
-    const ModuleDesc* const nofield[] = {&k_t, &k_nofield};
-    const ModuleDesc* const nokind[]  = {&k_t, &k_nokind};
-    const Span<const ModuleDesc* const> rejected[] = {noprev, nofield, nokind};
+    // Rejections: no previous copy, unknown field, unknown ktable.
+    const ModuleDesc* const noprev[]   = {&k_t, &k_noprev};
+    const ModuleDesc* const nofield[]  = {&k_t, &k_nofield};
+    const ModuleDesc* const noktable[] = {&k_t, &k_noktable};
+    const Span<const ModuleDesc* const> rejected[] = {noprev, nofield, noktable};
     for (Span<const ModuleDesc* const> l : rejected) {
         Engine f;
         KV_CHECK(c, !engine_init(f, l));

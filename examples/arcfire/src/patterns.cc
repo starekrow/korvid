@@ -2,7 +2,7 @@
 // (assets/patterns/: patterns.json names the documents, each one pattern), compiled once
 // at load by the bulletml module. An enemy's Runner runs its pattern; a bullet whose
 // definition has actions of its own is an `active` bullet with a Runner too. The
-// `patterns` system steps every runner of every kind in a parallel_for: a fire spawns by
+// `patterns` system steps every runner of every ktable in a parallel_for: a fire spawns by
 // the chunk's commands, so bullets arrive in chunk order whatever ran where, and every
 // runner's randomness is its own stream, seeded from its entity and the tick.
 #include "arcfire.h"
@@ -119,7 +119,7 @@ void patterns(TickContext& ctx) {
     Counts total{0, 0};
 
     // The enemies' runners: a pattern runs while the emitter says so.
-    for (KindRows k : ctx.view<const Transform2, Emitter, Runner>()) {
+    for (KTableRows k : ctx.view<const Transform2, Emitter, Runner>()) {
         Span<const Transform2> t = k.col<const Transform2>();
         Span<Emitter> em = k.col<Emitter>();
         Span<Runner> run = k.col<Runner>();
@@ -155,7 +155,7 @@ void actives(TickContext& ctx) {
     struct Counts { u32 fires, stepped; };
     auto add = [](Counts a, Counts b) { return Counts{a.fires + b.fires, a.stepped + b.stepped}; };
     Counts total{0, 0};
-    Table* actives = ctx.write_kind(g_active_kind);
+    KTable* actives = ctx.write_ktable(g_active_ktable);
     Span<Transform2> at = actives->rows_of<Transform2>();
     Span<Velocity> v = actives->rows_of<Velocity>();
     Span<Runner> run = actives->rows_of<Runner>();

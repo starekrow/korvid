@@ -40,7 +40,7 @@ The debug build runs too, but it measures its own checks: use dev for numbers.
 4. **Memory under load.** Same-thread allocate and free, remote free (allocated on one
    thread, freed on another), scratch arenas and arrays, each against a warm-pool
    baseline; the size-class allocator's cross-thread paths are what this exercises.
-5. **The engine.** The `cpukiller.body` kind (`Pos` with `CompPrev`, `Vel`, `Age`) at
+5. **The engine.** The `cpukiller.body` ktable (`Pos` with `CompPrev`, `Vel`, `Age`) at
    `--bodies` entities, four systems (integrate in a `parallel_for`, bounce with an event
    per bounce, churn by chunk commands, a reduction) and a handler that eats the events,
    run for `--ticks` ticks at one thread and at `--threads`; the hashes must be equal.
@@ -66,7 +66,7 @@ time at level barriers and in the serial residue, which is the number to beat.
 | file | what |
 |---|---|
 | `src/main.cc` | the scenarios, the report, the window mode, `main` |
-| `src/stress.cc` | the engine scenario as a module: the kind, the systems, the handler, `cpukiller_core_modules()` |
+| `src/stress.cc` | the engine scenario as a module: the ktable, the systems, the handler, `cpukiller_core_modules()` |
 | `include/korvid/cpukiller/module.h` | the record, `cpukiller_set_bodies`, the headless module list |
 
 The module keeps two module lists of its own (`module_list = false` in `module.lua`): the

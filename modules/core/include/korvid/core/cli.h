@@ -83,13 +83,13 @@ bool cli_arg_f32(CliContext& ctx, const char* arg, const char* what, f32* out);
 bool cli_arg_u32(CliContext& ctx, const char* arg, const char* what, u32* out);
 
 // ---- the filesystem -------------------------------------------------------------------
-// What the game has, as paths: `ls /` names the top level, `cd /kinds/rocks` and
-// `ls` names that module's kinds, `print rock/3` describes an entity, `patch
+// What the game has, as paths: `ls /` names the top level, `cd /ktables/rocks` and
+// `ls` names that module's ktables, `print rock/3` describes an entity, `patch
 // rock/3/Health/hp 1` writes a field. The tree is virtual: a module mounts a piece of it
 // by declaring a CliMountDesc in its ModuleDesc::mounts, and answers for the names under
 // it; the cli module owns the working directory, the path rules and the verbs. Names use
 // '/' between components; engine names map their dots to slashes on the way in, so a
-// module is a directory (`rocks.rock` is `/kinds/rocks/rock`).
+// module is a directory (`rocks.rock` is `/ktables/rocks/rock`).
 //
 // A mount answers three questions. list(dir) emits the children of one directory: `dir`
 // is "" for the mount's own root, otherwise the relative directory with a trailing slash
@@ -131,7 +131,7 @@ struct CliMountDesc {
 
 // Resolves `arg` against the context's working directory into a normalized absolute path
 // ("." and ".." applied, repeated slashes folded, no trailing slash but for the root).
-// "@name" and "@name/rest" start at the named entity's row under /kinds. False, with ctx
+// "@name" and "@name/rest" start at the named entity's row under /ktables. False, with ctx
 // failed, if the result would not fit `cap` bytes (pass KV_CLI_PATH_MAX) or no entity has
 // the name.
 bool cli_resolve(CliContext& ctx, const char* arg, char* out, usize cap);
@@ -139,7 +139,7 @@ bool cli_resolve(CliContext& ctx, const char* arg, char* out, usize cap);
 // Help for a mount that keeps flat names with slashes in them (assets by path, engine
 // names with dots turned to slashes): feeds every full name through and emits the unique
 // children of `dir`, directories once. `container` says a full name that equals a child
-// is itself a directory (a kind, whose rows are under it).
+// is itself a directory (a ktable, whose rows are under it).
 struct CliTree {
     const char* dir;   // as list() received it
     CliEmitFn   emit;  // list()'s, passed through

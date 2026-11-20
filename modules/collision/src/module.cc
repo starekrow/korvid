@@ -70,7 +70,7 @@ void broadphase(TickContext& ctx) {
     CollisionState& st = ctx.state_as<CollisionState>();
     MemScope scope;
     Array<CollItem> items = array_in<CollItem>(mem_scratch());
-    for (KindRows k : ctx.view<const Transform2, const Collider2>()) {
+    for (KTableRows k : ctx.view<const Transform2, const Collider2>()) {
         Span<const Transform2> t = k.col<const Transform2>();
         Span<const Collider2>  c = k.col<const Collider2>();
         for (u32 i = 0; i < k.rows(); ++i) {
@@ -106,7 +106,7 @@ void broadphase(TickContext& ctx) {
 // position is, and what it may do.
 struct Body {
     Handle h;
-    Table* table;
+    KTable* table;
     u32    slot;
     f32    b[4];       // x0, y0, x1, y1
     point2 pos;
@@ -114,7 +114,7 @@ struct Body {
     u32    layer, mask;
     f32    pace;
     u8     kind, flags;
-    bool   can_move;   // its kind has Move2
+    bool   can_move;   // its ktable has Move2
     bool   displaced;
     Handle pushed, pushed_by, blocker;
     u8     hit[2];
@@ -225,7 +225,7 @@ void place(Array<Body>& bs, Grid& grid, u32 i, u32 a, f32 new_lo) {
     grid.insert(bs, i);
 }
 
-int compare_tables(const void* x, const void* y) { return strcmp((*(Table* const*)x)->name, (*(Table* const*)y)->name); }
+int compare_ktables(const void* x, const void* y) { return strcmp((*(KTable* const*)x)->name, (*(KTable* const*)y)->name); }
 
 // Phase Sim, after every writer of Move2: every intent, in order, swept against the world
 // and the bodies as they stand, pushing one deep; then the columns.
@@ -234,18 +234,18 @@ void resolve(TickContext& ctx) {
     CollisionState& st = ctx.state_as<CollisionState>();
     st.moved_by_others.clear();
     MemScope scope;
-    // The kinds with bodies, by name, so the order of the moves is the same whatever order
-    // the kinds registered in.
-    Array<Table*> tables = array_in<Table*>(mem_scratch());
-    for (KindRows k : ctx.view<const Transform2, const Collider2>()) tables.push(k.table);
-    if (tables.len > 1) kv::sort(tables.data, tables.len, sizeof(Table*), compare_tables);
+    // The ktables with bodies, by name, so the order of the moves is the same whatever
+    // order the ktables registered in.
+    Array<KTable*> tables = array_in<KTable*>(mem_scratch());
+    for (KTableRows k : ctx.view<const Transform2, const Collider2>()) tables.push(k.ktable);
+    if (tables.len > 1) kv::sort(tables.data, tables.len, sizeof(KTable*), compare_ktables);
 
     Array<Body> bs = array_in<Body>(mem_scratch());
     Array<u32> movers = array_in<u32>(mem_scratch());
     Array<vec2> intents = array_in<vec2>(mem_scratch());
     f32 largest = 1.0f;
-    for (Table* t : tables) {
-        KindRows k{&ctx, t};
+    for (KTable* t : tables) {
+        KTableRows k{&ctx, t};
         Span<const Transform2> xf = k.col<const Transform2>();
         Span<const Collider2> co = k.col<const Collider2>();
         bool can_move = t->has(ComponentType<Move2>::id);
@@ -321,9 +321,9 @@ void resolve(TickContext& ctx) {
 
     // Back into the columns: positions, a child's Local2 by the same delta, the results.
     u32 bi = 0;
-    for (Table* t : tables) {
+    for (KTable* t : tables) {
         if (!t->has(ComponentType<Move2>::id)) { while (bi < bs.len && bs[bi].table == t) ++bi; continue; }
-        KindRows k{&ctx, t};
+        KTableRows k{&ctx, t};
         Span<Transform2> xf = k.col<Transform2>();
         Span<const Move2> mv = k.col<const Move2>();
         bool child = t->has(ComponentType<Local2>::id) && t->has(ComponentType<Parent>::id);
@@ -354,7 +354,7 @@ void resolve(TickContext& ctx) {
 
 // Phase PostSim: an intent lasts one tick.
 void clear_intents(TickContext& ctx) {
-    for (KindRows k : ctx.view<Move2>()) {
+    for (KTableRows k : ctx.view<Move2>()) {
         Span<Move2> mv = k.col<Move2>();
         for (u32 i = 0; i < mv.len; ++i) mv[i] = Move2{};
     }
@@ -444,7 +444,7 @@ void collision_static(Engine& e, CollisionStaticFn fn, void* user) {
 
 u32 collision_query(TickContext& ctx, rect2 area, u32 layers, Array<Handle>& out) {
     u32 n = 0;
-    for (KindRows k : ctx.view<const Transform2, const Collider2>()) {
+    for (KTableRows k : ctx.view<const Transform2, const Collider2>()) {
         Span<const Transform2> xf = k.col<const Transform2>();
         Span<const Collider2> co = k.col<const Collider2>();
         for (u32 i = 0; i < k.rows(); ++i) {
@@ -484,7 +484,7 @@ bool sweep_enter(rect2 box, vec2 delta, const f32 b[4], f32* enter_out) {
 CollisionHit collision_cast(TickContext& ctx, rect2 box, vec2 delta, u32 layers, Handle ignore) {
     CollisionHit best;
     best.t = 1.0f;
-    for (KindRows k : ctx.view<const Transform2, const Collider2>()) {
+    for (KTableRows k : ctx.view<const Transform2, const Collider2>()) {
         Span<const Transform2> xf = k.col<const Transform2>();
         Span<const Collider2> co = k.col<const Collider2>();
         for (u32 i = 0; i < k.rows(); ++i) {
@@ -502,7 +502,7 @@ CollisionHit collision_cast(TickContext& ctx, rect2 box, vec2 delta, u32 layers,
 
 u32 collision_cast_all(TickContext& ctx, rect2 box, vec2 delta, u32 layers, Array<CollisionHit>& out) {
     u32 first = out.len;
-    for (KindRows k : ctx.view<const Transform2, const Collider2>()) {
+    for (KTableRows k : ctx.view<const Transform2, const Collider2>()) {
         Span<const Transform2> xf = k.col<const Transform2>();
         Span<const Collider2> co = k.col<const Collider2>();
         for (u32 i = 0; i < k.rows(); ++i) {
@@ -511,7 +511,7 @@ u32 collision_cast_all(TickContext& ctx, rect2 box, vec2 delta, u32 layers, Arra
             box_of(co[i], xf[i].position, &b[0], &b[1], &b[2], &b[3]);
             if (!sweep_enter(box, delta, b, &enter)) continue;
             // Nearest first, kept stable: an equal fraction goes after those already in, so
-            // ties stay in the walk's kind and slot order.
+            // ties stay in the walk's ktable and slot order.
             CollisionHit h{k.handle_at(i), enter};
             out.push(h);
             u32 j = out.len - 1;

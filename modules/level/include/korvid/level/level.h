@@ -91,7 +91,7 @@ Handle      level_map(Engine& e);
 // The catalog's user word.
 u64         level_user(Engine& e, u32 level);
 
-// Per-level state. A level remembers the named entities of these kinds (each a full name,
+// Per-level state. A level remembers the named entities of these ktables (each a full name,
 // "game.rock"): when it is left, every one of them is written to its record by name (its
 // columns, attachments and bag), and the names its build made that are gone are noted;
 // when it is built again, after the game's LevelBuild handlers have spawned it from its
@@ -99,7 +99,7 @@ u64         level_user(Engine& e, u32 level);
 // So a boulder pushed and left, or broken, is where it was left, or gone. Entities are
 // matched by name (tilemap_object_name gives map objects stable ones); an unnamed one is
 // not remembered. A reload keeps the record.
-bool level_persist(Engine& e, Span<const char* const> kinds);
+bool level_persist(Engine& e, Span<const char* const> ktables);
 // Every level's record, into a save (an object by level name; the live level's as it is
 // now) and back out of one, replacing what the levels remembered. The game loads the
 // records before it requests the level the save names.

@@ -11,7 +11,7 @@ lua_State* L = kv_lua_newstate(mem_general());
 luaL_openlibs(L);
 script_open_kv(L);                 // pushes kv: fs, zip, json, sha256, random
 lua_setglobal(L, "kv");
-script_push_kind(L, engine_table(e, "goldberg.file"));
+script_push_ktable(L, engine_ktable(e, "goldberg.file"));
 lua_setglobal(L, "files");
 ```
 
@@ -26,21 +26,21 @@ lua_setglobal(L, "files");
 What each function takes and returns is in `tools/kvscript/README.md`, where a script's
 author looks.
 
-## Kinds in Lua
+## KTables in Lua
 
-`script_push_kind` pushes an engine kind as an object whose rows are read and written by
-field name, from the kind's own field tables. The layout stays in C++ (the component
+`script_push_ktable` pushes an engine ktable as a ktable object whose rows are read and
+written by field name, from the ktable's own field tables. The layout stays in C++ (the component
 structs); Lua holds whatever a row cannot.
 
 ```lua
-local h = files:spawn{ path = "ships/big.png", size = 3 }   -- a handle, an integer; nil if the kind is full
+local h = files:spawn{ path = "ships/big.png", size = 3 }   -- a handle, an integer; nil if the ktable is full
 files:set(h, "size", 4)        files:get(h, "size")          -- get: nil for a stale handle
 local r = files:row(h)         r.size = 5   print(r.path, r.handle, r.alive)
 for h in files:each() do ... end                             -- live rows, slot order
 files:destroy(h)  files:valid(h)  files:live()  files:capacity()  files:name()  files:fields()
 ```
 
-- A field is `"field"` when one component of the kind has it, and always `"Component.field"`.
+- A field is `"field"` when one component of the ktable has it, and always `"Component.field"`.
 - bool is a boolean; integers are integers; floats are numbers; a handle is its 64 bits,
   0 for none; `char[N]` is a string; `u8[N]` is a string of exactly N bytes; any other
   array is a list.

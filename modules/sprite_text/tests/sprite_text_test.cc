@@ -139,8 +139,8 @@ void test_text(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&sprite_module, &scene_module, &sprite_text_module};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* labels = engine_table(e, "sprite_text.label");
-    Table* glyphs = engine_table(e, "sprite_text.glyph");
+    KTable* labels = engine_ktable(e, "sprite_text.label");
+    KTable* glyphs = engine_ktable(e, "sprite_text.glyph");
     KV_CHECK(c, labels && glyphs && glyphs->desc->cosmetic && !labels->desc->cosmetic);
     Text hud;
     sptext_set(hud, "SCORE 0");
@@ -161,6 +161,6 @@ void test_text(kv::TestCtx& c) {
     KV_CHECK(c, sptext_stats(e)->labels == 0 && glyphs->live() == 0);
     u64 h = engine_hash_state(e);
     glyphs->spawn(Transform2{}, Sprite{}, Local2{}, Parent{});
-    KV_CHECK(c, engine_hash_state(e) == h); // cosmetic kinds never hash
+    KV_CHECK(c, engine_hash_state(e) == h); // cosmetic ktables never hash
     engine_shutdown(e);
 }

@@ -129,12 +129,12 @@ A system that reads a stream outside a handler reads its batch through the conte
   and use `ctx.received<E>()`; `ctx.events->read<E>()` (the whole tick's batch) is for code outside the schedule only.
 - A chain within a phase is resolved in that phase, and its commands land together at
   the phase's end. A hit handler that destroys an enemy and emits `Kill` for it: the kill
-  handler, later in the phase, sees the event, the enemy still in its table (the destroy
+  handler, later in the phase, sees the event, the enemy still in its ktable (the destroy
   is pending). Today the commands apply between waves, so the `Kill` names a dead handle
   and is dropped: arcfire's "the bus drops events whose handles are stale" lesson is this.
 - Timing moves a little. A chain's commands land at its phase's end, not between its
   steps; `Spawned` for a spawn made in a chain comes a phase later. Hashes and recordings
-  change; the demos must still hash alike at 1 and 16 threads and with every kind a
+  change; the demos must still hash alike at 1 and 16 threads and with every ktable a
   snapshot.
 
 ## Decisions taken from the inventory
@@ -227,20 +227,20 @@ and two handlers got phases. Games: every handler a phase, every emitter `emits`
 reader of the tick's events a declared read. Two things in the scheduler itself turned up
 on the way:
 
-- Module state skipped a pair that only an ordered kind's early read put in order, and
-  the writers check (rightly) wanted an order that holds with every kind a snapshot. State
+- Module state skipped a pair that only an ordered ktable's early read put in order, and
+  the writers check (rightly) wanted an order that holds with every ktable a snapshot. State
   edges are now judged against the mode-independent graph and oriented along the order
-  that includes the kinds' early edges, so they never contradict one.
+  that includes the ktables' early edges, so they never contradict one.
 - Handler-to-handler `after`s that never applied (above).
 
-**What the checks found.** The guard sweep (dev, every kind a snapshot) caught the hit
-handlers reaching tables directly once they read early: `hurt`'s handle kinds,
-`bullet_row`, `on_bomb`'s liveness walk. Handle kinds now come from `engine_table_now`
+**What the checks found.** The guard sweep (dev, every ktable a snapshot) caught the hit
+handlers reaching ktables directly once they read early: `hurt`'s handle kinds,
+`bullet_row`, `on_bomb`'s liveness walk. Handle kinds now come from `engine_ktable_now`
 (they never change), liveness from `ctx.rows` with `@alive` declared.
 
 **The same game, still.** Tick for tick, at rate 4:
 
-| run | ticks | hash | every kind a snapshot | 1 thread |
+| run | ticks | hash | every ktable a snapshot | 1 thread |
 |---|---|---|---|---|
 | arcanum `--demo` | 1,865 | 9224de52db9aac0c (main's) | the same | the same |
 | arcfire Shoreline `--demo` | 14,172 | a85e2f7fa02412e5 | the same | the same |
@@ -251,7 +251,7 @@ Arcanum's hash did not move at all. Arcfire's and rocks' did: the chains now set
 one phase with their commands at its end (where the waves applied them between handlers),
 `Spawned` arrives a phase later for spawns made in a chain, and the handler `after`s that
 never applied are gone. Both arcfire recordings were made again (14,648 and 14,769 ticks;
-the stage ends where it did) and replay matching at 1 and 16 threads, per kind and as
+the stage ends where it did) and replay matching at 1 and 16 threads, per ktable and as
 snapshots. 25 suites pass in dev, debug and ship.
 
 **What it costs.** Dev build, `--stress`, 25 s traced twice each, the same game (the

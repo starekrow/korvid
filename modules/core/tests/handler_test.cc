@@ -15,7 +15,7 @@ using namespace kv;
 struct Hp { i32 hp; };
 constinit const FieldDesc k_hp_fields[] = {KV_FIELD(Hp, hp)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Hp, k_hp_fields)};
-constinit const KindDesc k_kinds[] = {{.name = "h.rock", .components = "Hp", .capacity = 64}};
+constinit const KTableDesc k_ktables[] = {{.name = "h.rock", .components = "Hp", .capacity = 64}};
 
 struct Hit     { Handle rock; i32 damage; };
 struct Split   { Handle rock; u32 depth; };
@@ -49,7 +49,7 @@ constinit Trace g = {};
 // Hit -> damage the rock, emit Split. Split -> emit a Tally and a Score. All in Sim: the
 // chain is over by the end of the phase.
 void on_hit(TickContext& ctx, Span<const Hit> hits) {
-    Table* rocks = ctx.write_kind("h.rock");
+    KTable* rocks = ctx.write_ktable("h.rock");
     for (const Hit& h : hits) {
         ++g.hits;
         if (Hp* hp = rocks->get<Hp>(h.rock)) hp->hp -= h.damage;
@@ -63,7 +63,7 @@ void on_tally(TickContext&, Span<const Tally> ts) { g.tallies += ts.len; }
 // Reads the rocks after damage: must be ordered after on_hit by the sets alone.
 void on_hit_audit(TickContext& ctx, Span<const Hit>) {
     g.hp_total_seen = 0;
-    const Table* rocks = ctx.read_kind("h.rock");
+    const KTable* rocks = ctx.read_ktable("h.rock");
     for (u32 i = 0; i < rocks->rows(); ++i) if (rocks->is_alive(i)) g.hp_total_seen += rocks->rows_of<Hp>()[i].hp;
 }
 void on_score(TickContext&, Span<const Score> s) { g.scores += s.len; }
@@ -96,7 +96,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = "h.chatter", KV_ON(Chatter, on_chatter), .phase = Phase::Sim, .reads = "^Chatter", .emits = "Chatter"},
     {.name = "h.ping",    KV_ON(Ping, on_ping),     .phase = Phase::PreSim},
 };
-KV_MODULE_DEFINE(k_h) = {.name = "h", .events = k_events, .components = k_components, .kinds = k_kinds,
+KV_MODULE_DEFINE(k_h) = {.name = "h", .events = k_events, .components = k_components, .ktables = k_ktables,
                          .systems = k_systems, .handlers = k_handlers};
 
 // An event type no module declares: the handler's function type checks, registration does not.
@@ -140,7 +140,7 @@ void test_handler(kv::TestCtx& c) {
     KV_CHECK(c, at_damage < at_split && at_split < at_tally);                // the chain, from the streams
     KV_CHECK(c, e.event_types.len == e.event_type_count + 1 && e.event_types[EventType<Hit>::id] == &k_events[0]);
 
-    Table* rocks = engine_table(e, "h.rock");
+    KTable* rocks = engine_ktable(e, "h.rock");
     Handle r0 = rocks->spawn(Hp{10});
     Handle r1 = rocks->spawn(Hp{10});
     rocks->destroy(r1);

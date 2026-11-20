@@ -7,7 +7,7 @@
 // as the stage goes on, burning away under the dissolve shader with bursts and a ring of
 // bent air; with none left the battle is over and every ship flies off the field.
 //
-// All of it is cosmetic: three kinds the hash never sees, moved by the module's own random
+// All of it is cosmetic: three ktables the hash never sees, moved by the module's own random
 // stream. Every ship steers (a seek with a turn it cannot tighten past its acceleration) and
 // faces where it goes. The `fleet` dial is how many ships (300; 3,000 under --stress): every
 // one moves every tick, a stress of the extract, the sort and the GPU with nothing of the
@@ -81,23 +81,23 @@ point2 off_field(Game& g) {
 
 void ship_spawn(TickContext& ctx, Game& g, u32 side, point2 at, vec2 v, point2 aim) {
     Sprite s = sprite_of(g, TEX_SHIPS, ship_uv(side ? 2 : 1, side ? 1 : 0), vec2{kFleetSize, kFleetSize}, Z_FLEET, kSide[side]);
-    ctx.spawn_later(g_fleet_kind, transform2_at(at, kv::atan2(v.y, v.x) - 0.5f * KV_PI), s, Velocity{v},
+    ctx.spawn_later(g_fleet_ktable, transform2_at(at, kv::atan2(v.y, v.x) - 0.5f * KV_PI), s, Velocity{v},
                     Fleet{side, Inbound, 20u + g.fx.below(120), 0u, g.fx.range(0.0f, 6.28f), aim});
 }
 
 void tracer(TickContext& ctx, Game& g, u32 side, point2 at, vec2 dir, vec2 carry) {
     vec2 v = dir * kTracerSpeed + carry * 0.3f;
     Sprite s = sprite_of(g, TEX_SOFT, rect2_unit(), vec2{10.0f, 2.5f}, Z_TRACER, kTrace[side], true);
-    ctx.spawn_later(g_tracer_kind, transform2_at(at + dir * 8.0f, kv::atan2(v.y, v.x)), s, Velocity{v}, Tracer{side, 18u + g.fx.below(16)});
+    ctx.spawn_later(g_tracer_ktable, transform2_at(at + dir * 8.0f, kv::atan2(v.y, v.x)), s, Velocity{v}, Tracer{side, 18u + g.fx.below(16)});
 }
 
 } // namespace
 
 void battle_reset(Engine& e, Game& g) {
-    const u32 kinds[] = {g_fleet_kind, g_tracer_kind, g_capital_kind};
-    for (u32 k : kinds) engine_table(e, k)->destroy_all();
+    const u32 ktables[] = {g_fleet_ktable, g_tracer_ktable, g_capital_ktable};
+    for (u32 k : ktables) engine_ktable(e, k)->destroy_all();
     if (!g.stage.battle) return;
-    Table* caps = engine_table(e, g_capital_kind);
+    KTable* caps = engine_ktable(e, g_capital_ktable);
     point2 mid = capital_at(g.stage, 0.0f);
     for (u32 i = 0; i < kSections; ++i) {
         Sprite s = sprite_of(g, TEX_CAPITAL, rect2{(f32)i / (f32)kSections, 0.0f, 1.0f / (f32)kSections, 1.0f}, kSectionSize, Z_CAPITAL, kHaze);
@@ -117,7 +117,7 @@ void battle(TickContext& ctx) {
 
     // The capital ship: where the stage's clock puts it, each section whole, burning or gone.
     // A section's break begins with a ring of bent air; bursts go off along it while it burns.
-    Table* ct = ctx.write_kind(g_capital_kind);
+    KTable* ct = ctx.write_ktable(g_capital_ktable);
     Span<Transform2> cx = ct->rows_of<Transform2>();
     Span<Sprite> cs = ct->rows_of<Sprite>();
     Span<const Capital> cc = ct->rows_of<Capital>();
@@ -154,7 +154,7 @@ void battle(TickContext& ctx) {
     // The fleet.
     u32 want = dials_row[0].fleet;
     u32 want_defend = (u32)((f32)want * kDefenders), want_attack = want - want_defend;
-    Table* ft = ctx.write_kind(g_fleet_kind);
+    KTable* ft = ctx.write_ktable(g_fleet_ktable);
     Span<Transform2> fx = ft->rows_of<Transform2>();
     Span<Velocity> fv = ft->rows_of<Velocity>();
     Span<Fleet> fl = ft->rows_of<Fleet>();
@@ -243,7 +243,7 @@ void battle(TickContext& ctx) {
 
     // The tracers: straight on, then a flash where each ends (a hit, or a miss in the dark),
     // and one in twenty-five a burst.
-    Table* tt = ctx.write_kind(g_tracer_kind);
+    KTable* tt = ctx.write_ktable(g_tracer_ktable);
     Span<Transform2> tx = tt->rows_of<Transform2>();
     Span<const Velocity> tv = tt->rows_of<Velocity>();
     Span<Tracer> tr = tt->rows_of<Tracer>();
@@ -256,7 +256,7 @@ void battle(TickContext& ctx) {
         tt->destroy(tt->handle_at(i));
         if (g.fx.below(3) == 0) {
             Sprite s = sprite_of(g, TEX_SPARK, rect2_unit(), vec2{9.0f, 9.0f}, Z_TRACER, kTrace[1 - side], true);
-            ctx.spawn_later(g_particle_kind, transform2_at(at), s, Velocity{vec2{0.0f, 0.0f}}, Particle{10, 10, 0.0f, 1.0f, 1.0f, 0.0f});
+            ctx.spawn_later(g_particle_ktable, transform2_at(at), s, Velocity{vec2{0.0f, 0.0f}}, Particle{10, 10, 0.0f, 1.0f, 1.0f, 0.0f});
         }
         if (g.fx.below(25) == 0) fx_boom(ctx, g, at, 22.0f, Z_TRACER);
     }

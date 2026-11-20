@@ -19,7 +19,7 @@ void peak_of(u32& peak, u32 v) { if (v > peak) peak = v; }
 
 u32 live_sprites(Engine& e) {
     u32 n = 0;
-    for (const Table& t : e.tables)
+    for (const KTable& t : e.ktables)
         if (t.has(ComponentType<Sprite>::id)) n += t.live();
     return n;
 }
@@ -36,18 +36,18 @@ void stats_deltas(TickContext& ctx) {
 }
 
 // Phase PostSim, every tick: the counts of the tick, the peaks and means of the run.
-// Diagnostics, on the main thread: it reads the tables, collision's and audio's figures
+// Diagnostics, on the main thread: it reads the ktables, collision's and audio's figures
 // around its declarations, which the schedule cannot order and need not.
 void stats(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     Engine& e = *ctx.engine;
     Stats& s = g.stats;
     u32 bullets_before = s.bullets;
-    s.actives = engine_table(e, g_active_kind)->live();
-    s.bullets = engine_table(e, g_bullet_kind)->live() + s.actives;
+    s.actives = engine_ktable(e, g_active_ktable)->live();
+    s.bullets = engine_ktable(e, g_bullet_ktable)->live() + s.actives;
     s.runners = ctx.paused ? 0 : g.runners_stepped;
     s.fires = s.bullets_spawned;
-    s.items = engine_table(e, g_item_kind)->live();
+    s.items = engine_ktable(e, g_item_ktable)->live();
     AudioStats as = audio_stats(e);
     if (as.live_voices > g.voices_peak) g.voices_peak = as.live_voices;
     s.sprites = live_sprites(e);
@@ -56,7 +56,7 @@ void stats(TickContext& ctx) {
     s.bullets_spawned = ctx.paused ? 0 : g.bullets_spawned;
     s.bullets_destroyed = bullets_before + s.bullets_spawned > s.bullets ? bullets_before + s.bullets_spawned - s.bullets : 0;
     if (const CollisionStats* cs = collision_stats(e)) { s.pairs_tested = cs->tested; s.colliders = cs->colliders; s.groups = cs->groups; }
-    for (u32 k = 0; k < KV_COUNTOF(s.rows) && k < e.tables.len; ++k) s.rows[k] = e.tables[k].live();
+    for (u32 k = 0; k < KV_COUNTOF(s.rows) && k < e.ktables.len; ++k) s.rows[k] = e.ktables[k].live();
     if (ctx.paused || !g.stage_ready) return;
 
     peak_of(g.peak.bullets, s.bullets);
@@ -82,7 +82,7 @@ void stats(TickContext& ctx) {
     g.next_report += every;
     KV_INFO("arcfire", "tick %llu: %u bullets (%u active, +%u -%u), %u runners, %u sprites, %u deltas, %u colliders, %u pairs tested (%u groups), %u air, %u ground, %u particles",
             (unsigned long long)ctx.tick, s.bullets, s.actives, s.bullets_spawned, s.bullets_destroyed, s.runners, s.sprites, s.deltas, s.colliders, s.pairs_tested,
-            s.groups, engine_table(e, g_air_kind)->live(), engine_table(e, g_ground_kind)->live(), engine_table(e, g_particle_kind)->live());
+            s.groups, engine_ktable(e, g_air_ktable)->live(), engine_ktable(e, g_ground_ktable)->live(), engine_ktable(e, g_particle_ktable)->live());
 }
 
 void stats_summary(Engine& e, Game& g) {

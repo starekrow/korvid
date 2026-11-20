@@ -8,7 +8,7 @@ Game state to bytes and back. Three layers, each usable without the next:
 2. **Fields** (`save.h`): any struct with a field table (every component, every event) as
    an object of its fields by name, and back. A field the file lacks keeps its value, a
    key the struct lacks is ignored, so saves outlive fields being added and removed.
-3. **Kinds** (`save.h`): a whole table slot by slot, generations and free list included,
+3. **KTables** (`save.h`): a whole ktable slot by slot, generations and free list included,
    restored exactly. Handles into it mean the same entities after the load, and the next
    spawn hands out the handle it would have, so a run continued from a save hashes the
    same as the run that made it.
@@ -25,9 +25,9 @@ w.init(mem_general());                // JSON, pretty-printed
 w.begin_object();
 w.key("version"); w.int_value(1);
 w.key("level");   w.string_value(level_name(e, level_current(e)));
-w.key("kinds");
-const char* const kinds[] = {"game.player", "game.npc", "game.rock"};
-save_kinds(w, e, kinds);
+w.key("ktables");
+const char* const ktables[] = {"game.player", "game.npc", "game.rock"};
+save_ktables(w, e, ktables);
 w.end_object();
 if (w.finish()) { /* w.out.data, w.out.len */ }
 w.free();
@@ -55,7 +55,7 @@ A scalar is itself, a vector (`vec2`, `rect2`, `color`, an array) is an array of
 `char[N]` field is a string. A value of the wrong shape is skipped with a warning naming
 the field; integers out of a field's range clamp to it.
 
-## Kinds
+## KTables
 
 ```json
 "game.npc": {
@@ -67,12 +67,12 @@ the field; integers out of a field's range clamp to it.
 }
 ```
 
-`free` is the dead slots in the order the table will reuse them, each with its
-generation. `load_kind` replaces the table's contents (`Table::restore_slots` under it);
+`free` is the dead slots in the order the ktable will reuse them, each with its
+generation. `load_ktable` replaces the ktable's contents (`KTable::restore_slots` under it);
 previous-tick copies equal the loaded rows, as for a spawn. Every component is saved,
-cosmetic ones too: a kind is in a save because the game wants it back.
+cosmetic ones too: a ktable is in a save because the game wants it back.
 
-Which kinds to save is the game's call. Typically: what the player changed (their
+Which ktables to save is the game's call. Typically: what the player changed (their
 character, things they moved, what is left of a level's enemies). Not what the level
 builds again from its map (tiles), and not presentation (menus, labels).
 
@@ -87,7 +87,7 @@ registered in, which moves when a module is added), and then:
   order or built its level root afresh. A name nothing answers to now reads as null, with
   a warning.
 - **by slot**, otherwise: `"arcanum.npc#3:1"`, remade with today's kind id. That
-  is right for kinds the save restores, whose slots come back exactly.
+  is right for ktables the save restores, whose slots come back exactly.
 
 Every renderer texture and material, asset record and named entity has a name (see the
 core and asset READMEs), so a game rarely needs more. For what it does, it passes a
@@ -100,8 +100,8 @@ Handle remap(const SavedHandle& saved, Handle remade, void* user) {
 }
 ```
 
-Entity names travel with their rows (`"name": "old_man"`), and `load_kinds` restores every
-kind's slots and names before it reads any row, so a handle saved by name into one kind
+Entity names travel with their rows (`"name": "old_man"`), and `load_ktables` restores every
+ktable's slots and names before it reads any row, so a handle saved by name into one ktable
 finds an entity of another restored by the same load.
 
 ## CBOR, later
@@ -121,7 +121,7 @@ A second `SaveFormat` needs two pieces and nothing else changes:
   floats instead of strings. A handle could become a tagged array; the string form works
   as it is.
 - **Reading**: `save_parse` calls `kbor_parse`, which decodes into the same tree the JSON
-  reader builds (`JsonDoc`). The loaders only walk that tree, so fields and kinds load
+  reader builds (`JsonDoc`). The loaders only walk that tree, so fields and ktables load
   from either format.
 
 The format is the caller's choice per save, so a game could write CBOR and keep JSON for

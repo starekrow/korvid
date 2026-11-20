@@ -3,7 +3,7 @@
 // its part of the game (planes, ship, enemies, bullets, hits, egg, stage, hud, pilot,
 // stats), and this header is how they find each other.
 //
-// What is sim state: every kind but the cosmetic ones (planes, particles), and the one
+// What is sim state: every ktable but the cosmetic ones (planes, particles), and the one
 // row of `.world`, which holds the dials, the stage's clock, the run (score, eggs,
 // restarts), the egg sequence and the sim's random stream, so the hash covers them all.
 // The module's own state (Game, below) is presentation and bookkeeping: asset handles, the
@@ -108,7 +108,7 @@ bool drop_named(const char* name, u32* out);
 enum EmitState : u32 { EmitIdle, EmitRunning, EmitDone };
 struct Emitter  { u32 pattern; f32 at; u32 state; u32 timer; };
 // A BulletML runner (the bulletml module's plain data) as a component: on the enemies,
-// and on the bullets that run programs of their own (the `active` kind).
+// and on the bullets that run programs of their own (the `active` ktable).
 using Runner = BmlRunner;
 // A ground row: it rides the scroll at `rate` times its speed. A tank also drives back and
 // forth along its road (`vx`, within `range` of `home`); a bunker launches its formation
@@ -209,13 +209,13 @@ struct StageEnd   { u32 loops; u32 pad; };
 struct RunOver    { u32 loops; u32 pad; };   // scheduled at a run's end, after the banner: the game quits
 struct StageNext  { u32 stage; u32 position; }; // scheduled at a stage's end in arcade, after the banner: the next stage
 
-// ---- kinds, by id (filled at init) --------------------------------------------------------------
-extern u32 g_world_kind, g_plane_kind, g_ship_kind, g_ring_kind, g_mark_kind, g_shot_kind, g_air_kind, g_ground_kind,
-    g_bullet_kind, g_active_kind, g_particle_kind, g_egg_kind, g_shell_kind, g_item_kind, g_formation_kind, g_shadow_kind, g_boss_kind, g_part_kind,
-    g_boom_kind, g_beam_kind, g_option_kind, g_glow_kind, g_aglow_kind, g_fleet_kind, g_tracer_kind, g_capital_kind;
+// ---- ktables, by id (filled at init) ------------------------------------------------------------
+extern u32 g_world_ktable, g_plane_ktable, g_ship_ktable, g_ring_ktable, g_mark_ktable, g_shot_ktable, g_air_ktable, g_ground_ktable,
+    g_bullet_ktable, g_active_ktable, g_particle_ktable, g_egg_ktable, g_shell_ktable, g_item_ktable, g_formation_ktable, g_shadow_ktable, g_boss_ktable, g_part_ktable,
+    g_boom_ktable, g_beam_ktable, g_option_ktable, g_glow_ktable, g_aglow_ktable, g_fleet_ktable, g_tracer_ktable, g_capital_ktable;
 extern u32 g_part_down; // the trigger on a part's health
-// The two bullet kinds: plain bullets, and bullets that run a program (needles, seeds).
-inline bool is_bullet_kind(u32 kind_id) { return kind_id == g_bullet_kind || kind_id == g_active_kind; }
+// The two bullet ktables: plain bullets, and bullets that run a program (needles, seeds).
+inline bool is_bullet_ktable(u32 ktable_id) { return ktable_id == g_bullet_ktable || ktable_id == g_active_ktable; }
 
 // ---- the stage as its file says -------------------------------------------------------------
 constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 64, kMaxMarks = 128, kMaxBosses = 8, kMaxSegments = 24;
@@ -329,7 +329,7 @@ constexpr u32 kPlaneShader = 1u << 6; // a stage's planes bit: the nebula shader
 
 // What the game counts for its reports (stats.cc): this tick's numbers and the run's.
 struct Stats {
-    u32 rows[16];          // live rows per kind, by kind id (stats.cc fills the ones it reports)
+    u32 rows[16];          // live rows per ktable, by ktable id (stats.cc fills the ones it reports)
     u32 bullets, bullets_spawned, bullets_destroyed;
     u32 actives, runners, fires; // bullets that run programs; runners stepped; fires this tick
     u32 items, chips_made, chips_refused; // items alive; chips made, and bullets cancelled past a cancel's cap, this run
@@ -540,8 +540,8 @@ Handle fx_boom_clip(Engine& e);
 void   fx_shimmer(Game& g, point2 at, f32 reach, f32 strength, u32 life);
 
 // Weapons (weapons.cc): a volley of the weapon at its power from `at`, into the shot
-// kind; its next cooldown. The beam is fired by `beams`, not here.
-u32    weapon_fire(Game& g, Table& shots, point2 at, u32 weapon, u32 power, bool focus);
+// ktable; its next cooldown. The beam is fired by `beams`, not here.
+u32    weapon_fire(Game& g, KTable& shots, point2 at, u32 weapon, u32 power, bool focus);
 const char* weapon_name(u32 weapon);
 // The beam that rides on `owner` (the ship, an option): its kBeamSegments rows.
 void   beam_spawn(Engine& e, Game& g, Handle owner);
@@ -561,7 +561,7 @@ bool   hurt(TickContext& ctx, Game& g, Handle target, i32 damage, point2 at, boo
 // bullet, or an active one with its own runner when its definition has actions.
 void   bullet_fire(ChunkContext& cc, const Game& g, const Dials& d, point2 at, const BmlFire& f, Handle owner, u64 seed);
 Collider2 bullet_collider();
-// The Bullet row of a handle of either bullet kind, through the context's declared write.
+// The Bullet row of a handle of either bullet ktable, through the context's declared write.
 Bullet* bullet_row(TickContext& ctx, Handle h);
 const Transform2* bullet_xf(TickContext& ctx, Handle h);
 

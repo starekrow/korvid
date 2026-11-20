@@ -4,7 +4,7 @@
 #include "../src/internal.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/format.h"
-#include "korvid/core/kind.h"
+#include "korvid/core/ktable.h"
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/io.h"
@@ -21,7 +21,7 @@ using namespace kv;
 struct Count { i32 n; };
 constinit const FieldDesc k_count_fields[] = {KV_FIELDS(Count, n)};
 constinit const ComponentDesc k_components[] = {KV_COMPONENT(Count, k_count_fields, 0)};
-constinit const KindDesc k_kinds[] = {{.name = ".thing", .components = "Count", .capacity = 8}};
+constinit const KTableDesc k_ktables[] = {{.name = ".thing", .components = "Count", .capacity = 8}};
 
 struct Seen { u32 events; u64 save_node; f64 note_value; u32 notes, saves; };
 constinit Seen g_seen = {};
@@ -37,16 +37,16 @@ void sys_watch(TickContext& ctx) {
     }
 }
 bool kt_startup(Engine& e, ModuleInstance&) {
-    engine_table(e, "kt.thing")->spawn(Count{0});
+    engine_ktable(e, "kt.thing")->spawn(Count{0});
     return true;
 }
 constinit const SystemDesc k_systems[] = {
     {.name = ".count", .phase = Phase::Sim, .fn = sys_count, .writes = "kt.thing.Count"},
     {.name = ".watch", .phase = Phase::Sim, .fn = sys_watch, .reads = "KromeEvent"},
 };
-KV_MODULE_DEFINE(k_kt) = {.name = "kt", .components = k_components, .kinds = k_kinds, .systems = k_systems, .startup = kt_startup};
+KV_MODULE_DEFINE(k_kt) = {.name = "kt", .components = k_components, .ktables = k_ktables, .systems = k_systems, .startup = kt_startup};
 constinit const SystemDesc k_quiet_systems[] = {{.name = ".count", .phase = Phase::Sim, .fn = sys_count, .writes = "kt.thing.Count"}};
-KV_MODULE_DEFINE(k_kt_quiet) = {.name = "kt", .components = k_components, .kinds = k_kinds, .systems = k_quiet_systems, .startup = kt_startup};
+KV_MODULE_DEFINE(k_kt_quiet) = {.name = "kt", .components = k_components, .ktables = k_ktables, .systems = k_quiet_systems, .startup = kt_startup};
 
 const char* k_form = R"lua(
 return {

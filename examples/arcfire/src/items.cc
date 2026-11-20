@@ -48,7 +48,7 @@ Collider2 item_collider() { return collider_circle(8.0f, L_ITEM, L_GRAZE); }
 
 void item_drop(TickContext& ctx, const Game& g, ItemKind kind, point2 at, vec2 v, i32 value) {
     Item it{(u32)kind, kind == ItemChip ? kChipValue : value, kItemLife, 0};
-    ctx.spawn_later(g_item_kind, transform2_at(at), item_sprite(g, kind, value), Velocity{v}, item_collider(), it);
+    ctx.spawn_later(g_item_ktable, transform2_at(at), item_sprite(g, kind, value), Velocity{v}, item_collider(), it);
 }
 
 void drop_item(TickContext& ctx, const Game& g, u32 drop, point2 at) {
@@ -64,14 +64,14 @@ void drop_item(TickContext& ctx, const Game& g, u32 drop, point2 at) {
     else if (drop == DropEgg) item_drop(ctx, g, ItemEgg, at, vec2{0.0f, 1.8f});
 }
 
-// Every bullet of both kinds within `radius` of `at` (all of them for radius <= 0) goes; the
+// Every bullet of both ktables within `radius` of `at` (all of them for radius <= 0) goes; the
 // first kChipCap become chips, popping up and out from where they were, a spark with each
 // of the first few. Reads the bullets as the tick began (the callers declare it early).
 u32 cancel_bullets(TickContext& ctx, Game& g, point2 at, f32 radius, u32* overflow) {
     u32 cancelled = 0, chips = 0;
-    const u32 kinds[] = {g_bullet_kind, g_active_kind};
-    for (u32 kind : kinds) {
-        const Table* bullets_table = ctx.read_kind(kind);
+    const u32 ktables[] = {g_bullet_ktable, g_active_ktable};
+    for (u32 ktable : ktables) {
+        const KTable* bullets_table = ctx.read_ktable(ktable);
         Span<const Transform2> bt = bullets_table->rows_of<Transform2>();
         for (u32 i = 0; i < bullets_table->rows(); ++i) {
             if (!bullets_table->is_alive(i)) continue;
@@ -107,7 +107,7 @@ void items(TickContext& ctx) {
     point2 ship = ship_xf[g.ship.index()].position;
     bool live = ships[g.ship.index()].live != 0;
     bool magnet = live && ship.y > kMagnetY;
-    Table* items_table = ctx.write_kind(g_item_kind);
+    KTable* items_table = ctx.write_ktable(g_item_ktable);
     Span<Transform2> t = items_table->rows_of<Transform2>();
     Span<Velocity> v = items_table->rows_of<Velocity>();
     Span<Item> it = items_table->rows_of<Item>();

@@ -12,7 +12,7 @@ is this" to the exact function you need. Every page links one level deeper.
    between `main` and the screen, and how the engine decides when your code runs. Read
    this before writing a system.
 3. **[Modules](concepts/modules.md)**: what a module declares and how to write one: a
-   component, a kind, a system, a handler, timers and triggers.
+   component, a ktable, a system, a handler, timers and triggers.
 4. **Read a game.** [testbed](../examples/testbed/README.md) is the smallest one that
    uses everything once. [rocks](../examples/rocks/README.md) is a whole game written the
    way the engine likes.
@@ -54,7 +54,7 @@ most.
 
 | module | what it is |
 |---|---|
-| [core](../modules/core/README.md) | The engine's floor: memory, handles, modules, the tick and its phases, the scheduler, events, kinds, jobs, timers, the profiler. |
+| [core](../modules/core/README.md) | The engine's floor: memory, handles, modules, the tick and its phases, the scheduler, events, ktables, jobs, timers, the profiler. |
 | [math](../modules/math/README.md) | 2D math as plain structs: vectors, points, rectangles, colors, affine transforms, deterministic scalar functions. |
 
 **The world**
@@ -126,7 +126,7 @@ them for the target.
 
 | example | shows |
 |---|---|
-| [testbed](../examples/testbed/README.md) | the smallest game that uses everything once: a kind, a view system, a handler, timers, a ticketed spawn, a trigger, assets |
+| [testbed](../examples/testbed/README.md) | the smallest game that uses everything once: a ktable, a view system, a handler, timers, a ticketed spawn, a trigger, assets |
 | [rocks](../examples/rocks/README.md) | an asteroids-like written the way the engine likes: declared sets, handlers, timers, a trigger |
 | [stones](../examples/stones/README.md) | the same game written the other way round, as you might on another engine |
 | [arcanum](../examples/arcanum/README.md) | a small JRPG: Tiled maps, levels, dialogue, more than one screen |

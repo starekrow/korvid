@@ -1,7 +1,7 @@
 // Korvid core: modules, the unit everything in the engine is built from.
 //
 // A module is a directory with a module.lua, and in code one ModuleDesc: a record of
-// tables that say what the module brings. Its components and kinds (data), its systems
+// tables that say what the module brings. Its components and ktables (data), its systems
 // and handlers (code, and when it runs), its events, resources, triggers and CLI
 // commands, plus an optional startup and shutdown. The engine reads every module's
 // record once, in engine_init, and from then on knows its types by name, schedules its
@@ -13,7 +13,7 @@
 //   // src/game.cc
 //   KV_MODULE_DEFINE(mygame_module) = {
 //       .name     = "mygame",
-//       .kinds    = k_kinds,
+//       .ktables  = k_ktables,
 //       .systems  = k_systems,
 //       .handlers = k_handlers,
 //       .startup  = mygame_startup,
@@ -33,7 +33,7 @@
 //      solved from what they read and write (docs/concepts/scheduling.md); list and
 //      declaration order only break ties, and number the units, which is the order
 //      their commands and events come out in.
-//   3. Ids live in zero-initialized slots (ComponentType<T>::id, a KindDesc's `id`) that
+//   3. Ids live in zero-initialized slots (ComponentType<T>::id, a KTableDesc's `id`) that
 //      engine_init fills and engine_shutdown clears. Id 0 is invalid, so using one
 //      before init or after shutdown asserts.
 //   4. The engine owns module state. startup builds it in the module's arena and records
@@ -43,7 +43,7 @@
 #include "korvid/core/arena.h"
 #include "korvid/core/cli.h"
 #include "korvid/core/component.h"
-#include "korvid/core/kind.h"
+#include "korvid/core/ktable.h"
 #include "korvid/core/phase.h"
 
 namespace kv {
@@ -56,13 +56,13 @@ struct ModuleDesc;
 // unit runs.
 typedef void (*AppendFn)(Engine& e, const void* record, u32 size);
 
-// A named thing systems read or write that is not a column of a kind: an input state, a
+// A named thing systems read or write that is not a column of a ktable: an input state, a
 // score, a camera. The owner declares it here and points it at an object with
 // engine_publish (usually in startup); other modules name it in their sets ("rocks.score")
 // and reach it with ctx.resource<T>(name).
 //
 // With `fields`, a field table for the published object (component.h), the resource is
-// sim state like a kind's column: part of the state hash, so a score kept here is checked
+// sim state like a ktable's column: part of the state hash, so a score kept here is checked
 // by --hash, thread counts and replays. The object must then be plain data, which
 // engine_publish checks.
 //   constinit const FieldDesc k_score_fields[] = {KV_FIELDS(Score, total, wave, rocks_shot)};
@@ -123,7 +123,7 @@ struct ModuleDesc {
     const char*               name      = nullptr; // as in module.lua; ".x" in the tables means "<name>.x"
     Span<const EventTypeDesc> events     = {};      // event types: KV_EVENT, KV_EVENT_EX
     Span<const ComponentDesc> components = {}; // schemas; the engine lays out storage from them
-    Span<const KindDesc>      kinds      = {}; // entity tables the engine creates from those schemas
+    Span<const KTableDesc>    ktables    = {}; // the ktables the engine creates from those schemas
     Span<const ResourceDesc>  resources  = {}; // named things that are not columns (above)
     Span<const SystemDesc>    systems    = {}; // code in a phase, with what it reads, writes, appends and emits
     Span<const HandlerDesc>   handlers   = {}; // systems on one event type, scheduled in their phase, handed their batch

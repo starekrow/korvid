@@ -12,7 +12,7 @@ namespace {
 
 using namespace kv;
 
-constinit const KindDesc k_kinds[] = {{.name = ".thing", .components = "Transform2, Collider2", .capacity = 4096}};
+constinit const KTableDesc k_ktables[] = {{.name = ".thing", .components = "Transform2, Collider2", .capacity = 4096}};
 
 struct Seen { u32 begins, ends; Handle last_a, last_b; };
 constinit Seen g = {};
@@ -21,7 +21,7 @@ void sys_watch(TickContext& ctx) {
     g.ends += ctx.received<OverlapEnd>().len;
 }
 constinit const SystemDesc k_systems[] = {{.name = ".watch", .phase = Phase::PostSim, .fn = sys_watch, .reads = "OverlapBegin, OverlapEnd"}};
-KV_MODULE_DEFINE(k_c) = {.name = "c", .kinds = k_kinds, .systems = k_systems};
+KV_MODULE_DEFINE(k_c) = {.name = "c", .ktables = k_ktables, .systems = k_systems};
 
 } // namespace
 
@@ -32,7 +32,7 @@ void test_broadphase(kv::TestCtx& c) {
     const ModuleDesc* const list[] = {&sprite_module, &scene_module, &collision_module, &k_c};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
-    Table* things = engine_table(e, "c.thing");
+    KTable* things = engine_ktable(e, "c.thing");
     auto tick = [&](u64 t) { e.phases.run_tick(e, e.events, 1.0 / 60.0, t); };
 
     // Two circles 30 apart with radii 20 and 15: overlapping. Begin once, then nothing.

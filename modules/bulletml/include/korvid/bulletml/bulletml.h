@@ -1,6 +1,6 @@
-// Korvid bulletml: BulletML patterns, compiled and run. A library, with no kinds, systems or
+// Korvid bulletml: BulletML patterns, compiled and run. A library, with no ktables, systems or
 // engine state: a game compiles documents into a BmlLibrary at load, gives each thing
-// that runs a pattern a BmlRunner (plain data, a component in the game's kinds), and steps
+// that runs a pattern a BmlRunner (plain data, a component in the game's ktables), and steps
 // the runners every tick, answering where each one is and where the target is and taking
 // its fires as calls. The game owns the bullets.
 //
@@ -46,7 +46,7 @@ constexpr u32 KV_BML_NONE       = 0xFFFFFFFFu;
 
 // A runner: where each track is in its program, its parameters, its pending changes, its
 // random stream and the motion it drives. Plain data, no pointers, so it can be a
-// component of any kind and hash as one. Frames are [track][depth][field].
+// component of any ktable and hash as one. Frames are [track][depth][field].
 enum BmlFrame16 : u32 { BML_ACT, BML_PC, BML_LEFT, BML_F16 };    // action id, op offset in it, repeats left
 enum BmlFrame8 : u32 { BML_PBASE, BML_PCOUNT, BML_SPB, BML_F8 };  // its params on the track's stack, the stack before it
 enum BmlTrack8 : u32 { BML_DEPTH, BML_SP, BML_T8 };

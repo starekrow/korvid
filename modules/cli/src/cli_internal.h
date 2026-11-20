@@ -43,7 +43,7 @@ void cli_fs_pwd(CliContext& ctx, Span<const char* const> args);
 void cli_fs_print(CliContext& ctx, Span<const char* const> args);
 void cli_fs_patch(CliContext& ctx, Span<const char* const> args);
 
-// The engine's own mounts (mounts.cc): kinds, systems, handlers, resources, events,
+// The engine's own mounts (mounts.cc): ktables, systems, handlers, resources, events,
 // triggers, clock, modules, mem, perf.
 extern const CliMountDesc k_engine_mounts[11];
 
