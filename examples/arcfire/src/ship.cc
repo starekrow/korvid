@@ -71,4 +71,39 @@ void control(TickContext& ctx) {
     ++s.shots;
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace ship_part {
+constinit const FieldDesc k_ship_fields[] = {KV_FIELDS(Ship, cooldown, live, focus, shots, guard, died, weapon, power, firing, pad)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Ship, k_ship_fields),
+};
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".ship",     .components = "Transform2, Sprite, Collider2, Ship", .capacity = 1, .id = &g_ship_ktable},
+    // The graze ring and the hitbox's dot: children of the ship.
+    {.name = ".ring",     .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_ring_ktable},
+    {.name = ".mark",     .components = "Transform2, Local2, Parent, Sprite", .capacity = 1, .id = &g_mark_ktable},
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "^.option.@alive, ^.option.Transform2, input.actions, .world.Dials",
+     .writes = ".ship.Transform2, .ship.Ship, .ship.Sprite, .shot, .ring.Sprite, .mark.Sprite", .appends = "audio.commands"},
+};
+
+constinit const TexFile k_textures[] = {
+    {TEX_DOT, "arcfire/made/dot.png"},
+    {TEX_RING, "arcfire/made/ring.png"},
+};
+// The hitbox's dot and the graze ring.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    textures_load(e, g, k_textures);
+    return true;
+}
+} // namespace ship_part
+KV_MODULE_PART(arcfire_ship) = {
+    .components = ship_part::k_components,
+    .ktables    = ship_part::k_ktables,
+    .systems    = ship_part::k_systems,
+    .startup    = ship_part::startup,
+};
+
 } // namespace kv::arcfire

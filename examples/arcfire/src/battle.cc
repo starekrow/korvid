@@ -262,4 +262,42 @@ void battle(TickContext& ctx) {
     }
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace battle_part {
+constinit const FieldDesc k_fleet_fields[]   = {KV_FIELDS(Fleet, side, state, cooldown, passes, phase, aim)};
+constinit const FieldDesc k_tracer_fields[]  = {KV_FIELDS(Tracer, side, life)};
+constinit const FieldDesc k_capital_fields[] = {KV_FIELDS(Capital, section, pad)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Fleet, k_fleet_fields),
+    KV_COMPONENT(Tracer, k_tracer_fields),
+    KV_COMPONENT(Capital, k_capital_fields),
+};
+constinit const KTableDesc k_ktables[] = {
+    // Orbit's battle (battle.cc): never the sim's.
+    {.name = ".fleet",    .components = "Transform2, Sprite, Velocity, Fleet", .capacity = 16384, .id = &g_fleet_ktable, .cosmetic = true},
+    {.name = ".tracer",   .components = "Transform2, Sprite, Velocity, Tracer", .capacity = 16384, .id = &g_tracer_ktable, .cosmetic = true},
+    {.name = ".capital",  .components = "Transform2, Sprite, Capital", .capacity = 8, .id = &g_capital_ktable, .cosmetic = true},
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".battle", .phase = Phase::Sim, .fn = battle, .reads = ".world.Stage, .world.Dials", .writes = ".fleet, .tracer, .capital", .after = ".scroll"},
+};
+
+constinit const TexFile k_textures[] = {
+    {TEX_CAPITAL, "arcfire/generated/capital.png"},
+};
+// The capital ship, and its sections' burn (the dissolve shader's material).
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    textures_load(e, g, k_textures);
+    g.capital_dissolve = asset_load_material(e, "arcfire/materials/capital_dissolve.material.json");
+    return true;
+}
+} // namespace battle_part
+KV_MODULE_PART(arcfire_battle) = {
+    .components = battle_part::k_components,
+    .ktables    = battle_part::k_ktables,
+    .systems    = battle_part::k_systems,
+    .startup    = battle_part::startup,
+};
+
 } // namespace kv::arcfire

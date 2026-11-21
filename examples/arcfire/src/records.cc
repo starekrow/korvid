@@ -77,8 +77,6 @@ Handle write(Engine& e, const char* path, SaveWriter& w, const char* what) {
     return h;
 }
 
-} // namespace
-
 void records_load(Engine& e, Game& g) {
     const char* pref = platform_pref_path(e, "korvid", "arcfire");
     if (pref && pref[0]) {
@@ -89,6 +87,8 @@ void records_load(Engine& e, Game& g) {
     g.scores_read = read(e, g.scores_path);
     g.records_in = g.options_read.is_null() && g.scores_read.is_null();
 }
+
+} // namespace
 
 // Phase PreSim, main thread, every tick: the reads and the writes as they complete.
 void records(TickContext& ctx) {
@@ -192,5 +192,20 @@ void score_insert(ScoreTable& t, u32 row, const ScoreRow& r) {
     t.rows[row] = r;
     if (t.count < kScoreRows) ++t.count;
 }
+
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace records_part {
+constinit const SystemDesc k_systems[] = {
+    {.name = ".records", .phase = Phase::PreSim, .fn = records, .main_thread = true, .runs = RunWhen::Always},
+};
+
+// The options and the scores, asked for.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    records_load(e, g);
+    return true;
+}
+} // namespace records_part
+KV_MODULE_PART(arcfire_records) = {.systems = records_part::k_systems, .startup = records_part::startup};
 
 } // namespace kv::arcfire

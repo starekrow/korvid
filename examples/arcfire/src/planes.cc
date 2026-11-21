@@ -156,4 +156,40 @@ void planes(TickContext& ctx) {
         if (pt->is_alive(i) && pl[i].rate < 0.0f && (jumped || px[i].position.y + ground < kFieldBottom - 120.0f)) pt->destroy(pt->handle_at(i));
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace planes_part {
+constinit const FieldDesc k_plane_fields[] = {KV_FIELDS(Plane, rate, tile, row, rows)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Plane, k_plane_fields),
+};
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".plane",    .components = "Transform2, Sprite, Plane", .capacity = 4096, .id = &g_plane_ktable, .cosmetic = true},
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".planes", .phase = Phase::Sim, .fn = planes, .reads = ".world.Stage, .world.Dials, .plane.Plane, .plane.Sprite",
+     .writes = "sprite.layers, .plane", .runs = RunWhen::Always},
+};
+
+constinit const TexFile k_textures[] = {
+    {TEX_STARS, "arcfire/space/stars.png"},
+    {TEX_NEBULA, "arcfire/space/nebula.png"},
+    {TEX_CLOUD, "arcfire/space/cloud.png"},
+    {TEX_CLOUDS_LOW, "arcfire/made/clouds_low.png"},
+    {TEX_CLOUDS_HIGH, "arcfire/made/clouds_high.png"},
+};
+// The planes' art, and the nebula shader's material.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    textures_load(e, g, k_textures);
+    g.nebula = asset_load_material(e, "arcfire/materials/nebula.material.json");
+    return true;
+}
+} // namespace planes_part
+KV_MODULE_PART(arcfire_planes) = {
+    .components = planes_part::k_components,
+    .ktables    = planes_part::k_ktables,
+    .systems    = planes_part::k_systems,
+    .startup    = planes_part::startup,
+};
+
 } // namespace kv::arcfire

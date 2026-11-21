@@ -1,7 +1,8 @@
-// arcfire: what the game's files share. The components and events are declared
-// here and registered in module.cc; each system and handler lives in the file named for
-// its part of the game (planes, ship, enemies, bullets, hits, egg, stage, hud, pilot,
-// stats), and this header is how they find each other.
+// arcfire: what the game's files share. The components and events are declared here;
+// each file registers the ones it owns, with its ktables, systems and handlers, in the
+// module part at its end (planes, ship, enemies, bullets, hits, egg, stage, hud, pilot,
+// stats, ...), whose startup loads the file's textures and files. module.cc lists the
+// parts, and this header is how the files find each other.
 //
 // What is sim state: every ktable but the cosmetic ones (planes, particles), and the one
 // row of `.world`, which holds the dials, the stage's clock, the run (score, eggs,
@@ -217,6 +218,16 @@ extern u32 g_part_down; // the trigger on a part's health
 // The two bullet ktables: plain bullets, and bullets that run a program (needles, seeds).
 inline bool is_bullet_ktable(u32 ktable_id) { return ktable_id == g_bullet_ktable || ktable_id == g_active_ktable; }
 
+// ---- the module's parts: each file's tables, at its end; module.cc lists them -------------------
+KV_MODULE_PART_DECLARE(arcfire_hits);    KV_MODULE_PART_DECLARE(arcfire_pilot);    KV_MODULE_PART_DECLARE(arcfire_dials);
+KV_MODULE_PART_DECLARE(arcfire_stage);   KV_MODULE_PART_DECLARE(arcfire_scoring);  KV_MODULE_PART_DECLARE(arcfire_records);
+KV_MODULE_PART_DECLARE(arcfire_screens); KV_MODULE_PART_DECLARE(arcfire_flow);     KV_MODULE_PART_DECLARE(arcfire_planes);
+KV_MODULE_PART_DECLARE(arcfire_ship);    KV_MODULE_PART_DECLARE(arcfire_weapons);  KV_MODULE_PART_DECLARE(arcfire_options);
+KV_MODULE_PART_DECLARE(arcfire_enemies); KV_MODULE_PART_DECLARE(arcfire_boss);     KV_MODULE_PART_DECLARE(arcfire_patterns);
+KV_MODULE_PART_DECLARE(arcfire_bullets); KV_MODULE_PART_DECLARE(arcfire_egg);      KV_MODULE_PART_DECLARE(arcfire_bomb);
+KV_MODULE_PART_DECLARE(arcfire_items);   KV_MODULE_PART_DECLARE(arcfire_sound);    KV_MODULE_PART_DECLARE(arcfire_fx);
+KV_MODULE_PART_DECLARE(arcfire_battle);  KV_MODULE_PART_DECLARE(arcfire_hud);      KV_MODULE_PART_DECLARE(arcfire_stats);
+
 // ---- the stage as its file says -------------------------------------------------------------
 constexpr u32 kMaxPaths = 32, kMaxFormations = 64, kMaxGrounds = 64, kMaxMarks = 128, kMaxBosses = 8, kMaxSegments = 24;
 // The game's stages, in arcade's order (stage_data.cc): a run's Stage row says which it is in.
@@ -322,8 +333,12 @@ bool boss_parse(const char* text, usize len, const char* name, BossDef& out, Sta
 enum Sfx : u32 { SFX_SHOT, SFX_HIT, SFX_PING, SFX_KILL, SFX_KILL_BIG, SFX_BOSS_DOWN, SFX_RUMBLE, SFX_GRAZE, SFX_CHIP, SFX_BOMB,
                  SFX_EGG_BREAK, SFX_EGG_OPEN, SFX_EGG_BLOOM, SFX_WARNING, SFX_COUNT };
 
+// The textures, by name. Any file draws with any of them; each is loaded by the file that
+// owns it, in its part's startup (a TexFile table handed to textures_load): the ships and
+// the tiles by module.cc, the planes' by planes.cc, and so on.
 enum Tex : u32 { TEX_SHIPS, TEX_TILES, TEX_STARS, TEX_NEBULA, TEX_CLOUD, TEX_BULLETS, TEX_DOT, TEX_RING, TEX_SOFT, TEX_SPARK, TEX_EGG,
                  TEX_CLOUDS_LOW, TEX_CLOUDS_HIGH, TEX_BEAM, TEX_ITEMS, TEX_BOAT, TEX_DEBRIS, TEX_SEGMENTS, TEX_CAPITAL, TEX_COUNT };
+struct TexFile { Tex tex; const char* path; };
 constexpr u32 kPlaneCount = 6; // planes.cc's: stars, nebula, cloud, the low clouds' shadows, the low clouds, the high wisps
 constexpr u32 kPlaneShader = 1u << 6; // a stage's planes bit: the nebula shader's plane, under the stars
 
@@ -486,7 +501,10 @@ struct Game {
 // The world row's columns, by name, for ctx.read/ctx.write.
 #define ARC_WORLD(c) "arcfire.world." #c
 
-// Sprites (module.cc): a texture's material, a sprite of a cell of a sheet.
+// Textures and sprites (module.cc): a file's textures loaded with their materials, alpha
+// blended and added (each one once: a second load of a Tex fails a dev build's check); a
+// texture's material, a sprite of a cell of a sheet.
+void   textures_load(Engine& e, Game& g, Span<const TexFile> files);
 Sprite sprite_of(const Game& g, Tex tex, rect2 uv, vec2 size, i32 layer, color tint = color_white(), bool additive = false);
 rect2  ship_uv(u32 col, u32 row);   // a 32 px cell of the ship sheet
 rect2  tile_uv(u32 col, u32 row);   // a 16 px cell of the tile sheet
@@ -534,7 +552,6 @@ void   fx_boom(TickContext& ctx, Game& g, point2 at, f32 size, i32 layer = Z_FX)
 // ground row or a boss's part; a boss (its flash of the screen too, so main thread only).
 enum class Blast : u32 { Small, Medium, Large };
 void   fx_blast(TickContext& ctx, Game& g, point2 at, Blast b);
-Handle fx_boom_clip(Engine& e);
 // A ring of bent air spreading from `at` to `reach` world units over `life` ticks (the
 // shimmer, a full-frame pass); the oldest ring gives way when all sixteen are out.
 void   fx_shimmer(Game& g, point2 at, f32 reach, f32 strength, u32 life);
@@ -565,8 +582,7 @@ Collider2 bullet_collider();
 Bullet* bullet_row(TickContext& ctx, Handle h);
 const Transform2* bullet_xf(TickContext& ctx, Handle h);
 
-// Patterns (patterns.cc): the library's loading, an enemy's start.
-bool   patterns_load(Engine& e, Game& g);          // the index and the documents, asked for
+// Patterns (patterns.cc): the library, its index asked for at startup; an enemy's start.
 bool   patterns_ready(Engine& e, Game& g, bool& failed); // all in and compiled
 void   emitter_start(const Game& g, Emitter& em, Runner& r, Handle owner, u64 tick);
 u64    seed_of(Handle h, u64 tick, u32 salt);
@@ -584,7 +600,6 @@ void   bench_spawn(TickContext& ctx, Game& g, const Dials& d); // --bench: the o
 
 // The records (records.cc): asked for at startup, read as they come; written when they
 // change; the options applied to the audio and the HUD; where a score would go in its table.
-void   records_load(Engine& e, Game& g);
 void   options_save(Engine& e, Game& g);
 void   scores_save(Engine& e, Game& g);
 void   options_apply(Engine& e, const Game& g);
@@ -621,7 +636,6 @@ RunResult result_of(const Game& g, const Run& r, const Dials& d, u32 round); // 
 void   results_log(const Game& g, const RunResult& r);
 
 // Bosses (boss.cc): their files asked for at startup, parsed at boot; a mark's boss spawned.
-void   bosses_load(Engine& e, Game& g);
 bool   bosses_ready(Engine& e, Game& g, char* why, usize why_cap); // false while loading; `why` set for a failure
 Handle boss_spawn(TickContext& ctx, Game& g, const Dials& d, u32 def);
 // A shot on a part (hits.cc): absorbed by its armor (true) or hurt.
@@ -641,7 +655,6 @@ u32    weapon_shown(const Item& it); // the type a weapon item shows now (taking
 Collider2 item_collider();
 
 // The HUD (hud.cc).
-void   hud_open(Engine& e, Game& g);
 void   hud_cover(Engine& e, Game& g, bool on);
 void   hud_shown(Engine& e, Game& g, bool on); // the side panels' numbers, or the panels alone
 void   hud_stage_clear(Engine& e, Game& g, i64 bonus, const char* next); // next: what comes ("NEXT: STAGE 2"), or null: the run is over
@@ -651,11 +664,7 @@ void   hud_stomp(Engine& e, Game& g, bool on);                              // t
 
 // Sound (sound.cc): an effect, its volume, priority and pitch's wander from its table; the
 // music, the stage's or a boss's. From a system or handler that writes audio.commands.
-void   sounds_load(Engine& e, Game& g);
 void   sfx(TickContext& ctx, Game& g, Sfx which, f32 pitch = 1.0f);
 void   music(TickContext& ctx, Game& g, bool boss);
-
-// Reports (stats.cc).
-void   stats_summary(Engine& e, Game& g);
 
 } // namespace kv::arcfire

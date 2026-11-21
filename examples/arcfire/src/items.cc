@@ -174,4 +174,44 @@ void on_pickup(TickContext& ctx, Span<const Pickup> picks) {
     }
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace items_part {
+constinit const FieldDesc k_item_fields[]   = {KV_FIELDS(Item, kind, value, life, pad)};
+constinit const FieldDesc k_pickup_fields[] = {KV_FIELDS(Pickup, item)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Item, k_item_fields),
+};
+constinit const KTableDesc k_ktables[] = {
+    // Chips and pickups; a formation's count of its members.
+    {.name = ".item",     .components = "Transform2, Sprite, Velocity, Collider2, Item", .capacity = 4096, .id = &g_item_ktable},
+};
+constinit const EventTypeDesc k_events[] = {
+    KV_EVENT_EX(Pickup, k_pickup_fields, 0),
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".items", .phase = Phase::Sim, .fn = items, .reads = ".ship.Transform2, .ship.Ship", .writes = ".item"},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_pickup", KV_ON(Pickup, on_pickup), .phase = Phase::PostSim, .reads = "^.item.Item, ^.item.Transform2", .writes = ".world.Run, .ship.Ship, .option, .beam", .appends = "audio.commands", .before = "anim.play"},
+};
+
+constinit const TexFile k_textures[] = {
+    {TEX_ITEMS, "arcfire/made/items.png"},
+};
+// The items' sheet.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    textures_load(e, g, k_textures);
+    return true;
+}
+} // namespace items_part
+KV_MODULE_PART(arcfire_items) = {
+    .events     = items_part::k_events,
+    .components = items_part::k_components,
+    .ktables    = items_part::k_ktables,
+    .systems    = items_part::k_systems,
+    .handlers   = items_part::k_handlers,
+    .startup    = items_part::startup,
+};
+
 } // namespace kv::arcfire

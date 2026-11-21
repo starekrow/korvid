@@ -215,4 +215,49 @@ void on_ship_died(TickContext& ctx, Span<const ShipDied> deaths) {
     if (!dials_row[0].bot && !g.demo) gameover_open(e, g, at_death);
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace egg_part {
+constinit const FieldDesc k_eggbody_fields[] = {KV_FIELDS(EggBody, vy, drift)};
+constinit const FieldDesc k_died_fields[]    = {KV_FIELDS(ShipDied, at, cause, pad)};
+constinit const FieldDesc k_eggstate_fields[] = {KV_FIELDS(EggState, step, t, at, shell, restart)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(EggState, k_eggstate_fields),
+    KV_COMPONENT(EggBody, k_eggbody_fields),
+};
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".egg",      .components = "Transform2, Sprite, EggBody", .capacity = 1, .id = &g_egg_ktable},
+    {.name = ".shell",    .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_shell_ktable,
+     .early_reads = EarlyReads::Snapshot}, // as the part, with the egg for the stage
+};
+constinit const EventTypeDesc k_events[] = {
+    KV_EVENT_EX(ShipDied, k_died_fields, 0),
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".egg", .phase = Phase::Sim, .fn = egg, .reads = "^.bullet, ^.active", .writes = ".world.EggState, .world.Chance, .ship, .ring.Collider2, .egg, .shell", .appends = "audio.commands",
+     .after = ".control", .main_thread = true},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_ship_died", KV_ON(ShipDied, on_ship_died),
+     .phase = Phase::PostSim, .reads = "^.world.Dials", .writes = ".world.Run, .world.EggState, .world.Stage, .ship", .appends = "audio.commands", .before = "anim.play"},
+};
+
+constinit const TexFile k_textures[] = {
+    {TEX_EGG, "arcfire/made/egg.png"},
+};
+// The egg's art.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    textures_load(e, g, k_textures);
+    return true;
+}
+} // namespace egg_part
+KV_MODULE_PART(arcfire_egg) = {
+    .events     = egg_part::k_events,
+    .components = egg_part::k_components,
+    .ktables    = egg_part::k_ktables,
+    .systems    = egg_part::k_systems,
+    .handlers   = egg_part::k_handlers,
+    .startup    = egg_part::startup,
+};
+
 } // namespace kv::arcfire

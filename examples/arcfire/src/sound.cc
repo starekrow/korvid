@@ -37,8 +37,6 @@ constinit const SfxDesc k_sfx[SFX_COUNT] = {
 };
 constexpr f32 kMusicVolume = 0.55f;
 
-} // namespace
-
 void sounds_load(Engine& e, Game& g) {
     for (u32 i = 0; i < SFX_COUNT; ++i) {
         char path[96];
@@ -55,6 +53,8 @@ void sounds_load(Engine& e, Game& g) {
         g.music_boss[i] = asset_load_sound(e, path, asset_scope_global(e));
     }
 }
+
+} // namespace
 
 void sfx(TickContext& ctx, Game& g, Sfx which, f32 pitch) {
     const SfxDesc& d = k_sfx[which];
@@ -74,5 +74,16 @@ void music(TickContext& ctx, Game& g, bool boss) {
     m.volume = kMusicVolume;
     music_play(ctx, boss ? g.music_boss[g.stage_at] : g.music_stage[g.stage_at], m);
 }
+
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace sound_part {
+// The effects and the music.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    sounds_load(e, g);
+    return true;
+}
+} // namespace sound_part
+KV_MODULE_PART(arcfire_sound) = {.startup = sound_part::startup};
 
 } // namespace kv::arcfire

@@ -128,9 +128,16 @@ struct Engine {
     PhaseList             phases;    // the schedule as built
     TickClock             clock;     // the fixed-step clock: tick_count, alpha(), rate, holds
     Array<ModuleInstance> modules;   // module-list order
+    // The module records the engine works from: the list as given, except that a module
+    // with parts is a joined copy (its tables, then its parts'), which ModuleInstance::desc
+    // points at. Each joined table is a block of `joined_blocks`; freed at shutdown.
+    struct JoinedBlock { void* data; usize size; };
+    Array<const ModuleDesc*> module_list;
+    Array<ModuleDesc>     joined;
+    Array<JoinedBlock>    joined_blocks;
     Array<ResourceEntry>  resources; // id = index + 1; 0 is invalid
     Array<ComponentEntry> components; // id = index + 1 = ComponentType<T>::id; 0 is invalid
-    Array<KTable>         ktables;   // ktable id = index + 1; addresses stable after init
+    Array<KTable>         ktables;   // by full name; ktable id = index + 1; addresses stable after init
     Array<const EventTypeDesc*> event_types; // by id; slot 0 unused
     Array<Trigger>        triggers;   // trigger id = index + 1
     CommandBuffer         commands;   // the engine's own: commands from code outside the schedule

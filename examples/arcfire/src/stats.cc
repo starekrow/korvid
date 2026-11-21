@@ -85,6 +85,8 @@ void stats(TickContext& ctx) {
             s.groups, engine_ktable(e, g_air_ktable)->live(), engine_ktable(e, g_ground_ktable)->live(), engine_ktable(e, g_particle_ktable)->live());
 }
 
+namespace {
+
 void stats_summary(Engine& e, Game& g) {
     AudioStats as = audio_stats(e);
     KV_INFO("arcfire", "audio: voices peak %u (the mixer's %u), %u steals, %u starts merged, %u dropped", g.voices_peak, as.mixer.peak_active, as.steals,
@@ -96,11 +98,40 @@ void stats_summary(Engine& e, Game& g) {
             g.peak.pairs_tested, g.sum_pairs / n, g.peak.colliders, g.peak.bullets_spawned, g.peak.actives, g.peak.runners, g.peak.items, g.stats.chips_made, g.stats.chips_refused);
 }
 
+} // namespace
+
 // The way out. A handler, so a quit asked for while paused still happens; the summary is
 // the shutdown's, so the demo's own quit at the stage's end has one too.
 void on_exit(TickContext& ctx, Span<const ExitRequested> exits) {
     for (const ExitRequested& x : exits) KV_INFO("arcfire", "exit (%s) at tick %llu", x.reason == ExitReason::Timer ? "timer" : "player", (unsigned long long)ctx.tick);
     engine_request_quit(*ctx.engine);
 }
+
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace stats_part {
+constinit const ResourceDesc k_resources[] = {
+    {".stats"},
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".stats_deltas", .phase = Phase::Frame, .fn = stats_deltas, .reads = "sprite.deltas", .writes = ".stats", .after = "sprite.extract", .main_thread = true},
+    {.name = ".stats", .phase = Phase::PostSim, .fn = stats, .writes = ".stats", .after = ".hud", .main_thread = true,
+     .runs = RunWhen::Always},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_exit", KV_ON(ExitRequested, on_exit), .phase = Phase::Sim},
+};
+
+// The run's summary, at the way out.
+void shutdown(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    stats_summary(e, g);
+}
+} // namespace stats_part
+KV_MODULE_PART(arcfire_stats) = {
+    .resources = stats_part::k_resources,
+    .systems   = stats_part::k_systems,
+    .handlers  = stats_part::k_handlers,
+    .shutdown  = stats_part::shutdown,
+};
 
 } // namespace kv::arcfire

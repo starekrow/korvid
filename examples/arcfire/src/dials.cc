@@ -125,4 +125,15 @@ void dials_log(const Dials& d) {
     KV_INFO("arcfire", "%s", line);
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace dials_part {
+constinit const FieldDesc k_dials_fields[] = {KV_FIELDS(Dials, position, rank, bullet_speed, formation_count, formation_spacing, particles,
+                                                     plane_density, enemy_health, bot, invulnerable, loops, scroll_rows, weapon, power, options, chain_window),
+                                           KV_FIELD(Dials, glows), KV_FIELD(Dials, shimmer), KV_FIELD(Dials, fleet)}; // past KV_FIELDS' sixteen
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Dials, k_dials_fields),
+};
+} // namespace dials_part
+KV_MODULE_PART(arcfire_dials) = {.components = dials_part::k_components};
+
 } // namespace kv::arcfire

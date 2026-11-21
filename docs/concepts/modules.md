@@ -60,6 +60,7 @@ struct ModuleDesc {
     Span<const HandlerDesc>    handlers;   // systems on one event type, handed its batch
     Span<const TriggerDesc>    triggers;   // state edges watched for you
     Span<const CliCommandDesc> commands;   // what the CLI can be told
+    Span<const ModulePart* const> parts;   // more of the tables above (and startups), in other files
     bool (*startup)(Engine&, ModuleInstance&);
     void (*shutdown)(Engine&, ModuleInstance&);
     ModuleMemoryDesc           memory;     // the module arena's address space
@@ -67,8 +68,8 @@ struct ModuleDesc {
 ```
 
 Every table is optional. Order matters once: modules start in list order and stop in
-reverse; ids are assigned in that order; systems that the schedule cannot otherwise
-order keep module order then declaration order.
+reverse; ids are assigned in that order, except that ktables go by full name; systems
+that the schedule cannot otherwise order keep module order then declaration order.
 
 **State.** `startup` builds the module's state in the arena the engine made for it
 (`arena_push<T>(self.arena)`) and records it with `self.set_state(s)`. Every system and
@@ -384,6 +385,58 @@ seeded by the engine from the module's name and `--seed`, and part of the state 
 Startup runs in list order, so everything a module depends on is up: the renderer for
 materials, the platform for its queue. A startup that returns false stops `engine_init`,
 which shuts down what already started and returns false.
+
+### Parts: a module of many files
+
+One record gets unwieldy once a game has a few dozen systems: the ship's component, its
+ktables and its systems sit in the record's file, far from the ship's code, and every
+system function needs a prototype for the record to name it; and the startup loads every
+file's art. A `ModulePart` holds the same tables as the record (everything but the name and
+memory) and a startup and shutdown of its own, so each file declares what it brings at its
+end, next to the code, loads what it needs, and the record lists the parts:
+
+```cpp
+// ship.cc, after the ship's systems
+namespace ship_part {
+constinit const FieldDesc     k_ship_fields[] = {KV_FIELDS(Ship, cooldown, lives)};
+constinit const ComponentDesc k_components[]  = {KV_COMPONENT(Ship, k_ship_fields)};
+constinit const KTableDesc    k_ktables[]     = {{.name = ".ship", .components = "Transform2, Sprite, Ship", .capacity = 1, .id = &g_ship_ktable}};
+constinit const SystemDesc    k_systems[]     = {{.name = ".control", .phase = Phase::Sim, .fn = control, .writes = ".ship"}};
+bool startup(Engine& e, ModuleInstance& self) { // after mygame_startup: its Game is there
+    self.state_as<Game>()->ship_tex = asset_load_texture(e, "mygame/ship.png");
+    return true;
+}
+}
+KV_MODULE_PART(mygame_ship) = {.components = ship_part::k_components, .ktables = ship_part::k_ktables, .systems = ship_part::k_systems,
+                               .startup = ship_part::startup};
+
+// game.h:  KV_MODULE_PART_DECLARE(mygame_ship);  and the others
+// game.cc
+constinit const ModulePart* const k_parts[] = {&mygame_ship, &mygame_enemies, &mygame_hud};
+KV_MODULE_DEFINE(mygame_module) = {.name = "mygame", .components = k_shared_components, .parts = k_parts, .startup = mygame_startup};
+```
+
+`engine_init` joins them into one record, the module's own tables first and then each
+part's in list order, and everything after works on that: names are the module's (`.ship`
+is `mygame.ship` from any part), a part may use what another declared, a name declared in
+two parts is refused like one declared twice in the record. Each file's tables need names
+of their own (a namespace per file, as above): a unity build compiles every file of the
+module as one.
+
+A part's startup runs after the module's, the parts in list order, and gets the module's
+instance: the state the module's startup made is there for it to fill, and what it takes
+from `self.general` or the arena is the module's. One that returns false fails
+`engine_init` like the module's would, and what started before it is shut down. Shutdown is
+the reverse: the parts' shutdowns from the last part to the first, then the module's.
+
+The list's order is the declaration order the schedule falls back on, so it is worth
+writing in the order the game runs. Systems that write the module's state (the default)
+conflict on it, and two in one phase with nothing else between them run in that order.
+A ktable's place in the list does not matter: ktables get their ids by full name, so a
+view walks them in the same order wherever they are declared. arcfire is built this way:
+`module.cc` keeps Velocity (which every file moves by), the world ktable and the startup
+that makes the game's state, and each of its other files ends with its part: its
+components, its ktables, its code, and a startup that loads its textures and files.
 
 ### Memory in a module
 

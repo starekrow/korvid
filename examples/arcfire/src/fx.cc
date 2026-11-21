@@ -31,6 +31,8 @@ void fx_piece_of(TickContext& ctx, Handle material, point2 at, rect2 uv, vec2 si
     ctx.spawn_later(g_particle_ktable, transform2_at(at), s, Velocity{v}, Particle{life, life, spin, 0.97f, 1.0f, fall});
 }
 
+namespace {
+
 // The burst: a small flash, the star, the ball, its bits, the smoke (tiles row 0), four
 // ticks each.
 Handle fx_boom_clip(Engine& e) {
@@ -51,6 +53,8 @@ Handle fx_boom_clip(Engine& e) {
     desc.tracks = Span<const AnimTrackDesc>(&track, 1);
     return anim_create(e, desc);
 }
+
+} // namespace
 
 void fx_boom(TickContext& ctx, Game& g, point2 at, f32 size, i32 layer) {
     Sprite s = sprite_of(g, TEX_TILES, tile_uv(6, 0), vec2{size, size}, layer);
@@ -216,5 +220,52 @@ void fx_shimmer(Game& g, point2 at, f32 reach, f32 strength, u32 life) {
     }
     *slot = Game::Ring{at, 0, life ? life : 1, reach, strength};
 }
+
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace fx_part {
+constinit const FieldDesc k_particle_fields[] = {KV_FIELDS(Particle, life, max_life, spin, drag, alpha, fall)};
+constinit const FieldDesc k_glow_fields[]     = {KV_FIELDS(Glow, bullet)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Particle, k_particle_fields),
+    KV_COMPONENT(Glow, k_glow_fields),
+};
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".particle", .components = "Transform2, Sprite, Velocity, Particle", .capacity = 32768, .id = &g_particle_ktable, .cosmetic = true},
+    // Shadows on the ground under what flies: cosmetic children.
+    {.name = ".shadow",   .components = "Transform2, Local2, Parent, Sprite", .capacity = 512, .id = &g_shadow_ktable, .cosmetic = true},
+    {.name = ".boom",     .components = "Transform2, Sprite, AnimPlayer", .capacity = 512, .id = &g_boom_ktable, .cosmetic = true},
+    // The bullets' glows, slot for slot with the two bullet ktables (fx.cc).
+    {.name = ".glow",     .components = "Transform2, Sprite, Glow", .capacity = 65536, .id = &g_glow_ktable, .cosmetic = true},
+    {.name = ".aglow",    .components = "Transform2, Sprite, Glow", .capacity = 8192, .id = &g_aglow_ktable, .cosmetic = true},
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".glows", .phase = Phase::Sim, .fn = glows, .reads = ".world.Dials, .bullet.Transform2, .bullet.Sprite, .active.Transform2, .active.Sprite",
+     .writes = ".glow, .aglow", .after = ".bullets", .state = StateUse::Read},
+    {.name = ".particles", .phase = Phase::Sim, .fn = particles, .writes = ".particle", .state = StateUse::None},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_boom_done", KV_ON(AnimFinished, on_boom_done), .phase = Phase::Input},
+    {.name = ".on_spawned", KV_ON(Spawned, on_spawned), .phase = Phase::PostSim, .reads = "^.air.Transform2, ^.air.Sprite"},
+};
+
+constinit const TexFile k_textures[] = {
+    {TEX_SOFT, "arcfire/made/soft.png"},
+    {TEX_SPARK, "arcfire/made/spark.png"},
+};
+// The soft glow and the spark, and the burst's clip.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    textures_load(e, g, k_textures);
+    g.boom_clip = fx_boom_clip(e);
+    return true;
+}
+} // namespace fx_part
+KV_MODULE_PART(arcfire_fx) = {
+    .components = fx_part::k_components,
+    .ktables    = fx_part::k_ktables,
+    .systems    = fx_part::k_systems,
+    .handlers   = fx_part::k_handlers,
+    .startup    = fx_part::startup,
+};
 
 } // namespace kv::arcfire

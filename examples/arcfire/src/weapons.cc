@@ -276,4 +276,48 @@ void beams(TickContext& ctx) {
     }
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace weapons_part {
+constinit const FieldDesc k_shot_fields[]     = {KV_FIELDS(Shot, damage, spent, kind, turn)};
+constinit const FieldDesc k_beam_fields[]     = {KV_FIELDS(Beam, timer, length, scroll, seg)};
+constinit const FieldDesc k_beam_hit_fields[] = {KV_FIELDS(BeamHit, target, damage, pad, at)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Shot, k_shot_fields),
+    KV_COMPONENT(Beam, k_beam_fields),
+};
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".shot",     .components = "Transform2, Sprite, Velocity, Collider2, Shot", .capacity = 2048, .id = &g_shot_ktable},
+    {.name = ".beam",     .components = "Transform2, Local2, Parent, Sprite, Beam", .capacity = 4 * kBeamSegments, .id = &g_beam_ktable},
+};
+constinit const EventTypeDesc k_events[] = {
+    KV_EVENT_EX(BeamHit, k_beam_hit_fields, EvStaleOk),
+};
+constinit const SystemDesc k_systems[] = {
+    // Storm's bolts steer by the enemies as the tick began (^), before anything moves them.
+    {.name = ".shots", .phase = Phase::Sim, .fn = shots,
+     .reads = "^.air.@alive, ^.air.Transform2, ^.air.Health, ^.ground.@alive, ^.ground.Transform2, ^.ground.Health, "
+              "^.part.@alive, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss.@alive, ^.boss.Boss",
+     .writes = ".shot", .after = ".control", .state = StateUse::Read},
+    {.name = ".beams", .phase = Phase::Sim, .fn = beams, .reads = "*[Collider2].Transform2, *[Collider2].Collider2, .ship.Ship, .ship.Transform2, .beam.Parent, .option.Parent, .option.Option",
+     .writes = ".beam.Local2, .beam.Sprite, .beam.Beam", .emits = "BeamHit", .state = StateUse::None},
+};
+
+constinit const TexFile k_textures[] = {
+    {TEX_BEAM, "arcfire/made/beam.png"},
+};
+// The beam's art.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    textures_load(e, g, k_textures);
+    return true;
+}
+} // namespace weapons_part
+KV_MODULE_PART(arcfire_weapons) = {
+    .events     = weapons_part::k_events,
+    .components = weapons_part::k_components,
+    .ktables    = weapons_part::k_ktables,
+    .systems    = weapons_part::k_systems,
+    .startup    = weapons_part::startup,
+};
+
 } // namespace kv::arcfire

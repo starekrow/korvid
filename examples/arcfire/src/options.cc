@@ -65,4 +65,30 @@ void options(TickContext& ctx) {
     }
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace options_part {
+constinit const FieldDesc k_option_fields[] = {KV_FIELDS(Option, index, tilt)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Option, k_option_fields),
+};
+constinit const KTableDesc k_ktables[] = {
+    // Explosions: a flipbook each, gone when it has played (fx.cc).
+    // The beams: one on the ship (and one on each option), cut each tick at what it meets.
+    // Options: children of the ship, bodies that eat bullets (options.cc).
+    {.name = ".option",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Option", .capacity = kMaxOptions, .id = &g_option_ktable},
+};
+constinit const SystemDesc k_systems[] = {
+    // The beam is cut against everything where it is this tick: after every mover and the
+    // collision module's compose.
+    // Each option's place on the ship, before the collision module composes it.
+    {.name = ".options", .phase = Phase::Sim, .fn = options, .reads = ".ship.Ship, .ship.Transform2", .writes = ".option.Local2, .option.Option", .after = ".control",
+     .state = StateUse::Read},
+};
+} // namespace options_part
+KV_MODULE_PART(arcfire_options) = {
+    .components = options_part::k_components,
+    .ktables    = options_part::k_ktables,
+    .systems    = options_part::k_systems,
+};
+
 } // namespace kv::arcfire

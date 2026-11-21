@@ -84,4 +84,31 @@ void scoring(TickContext& ctx) {
 // A run's end, after the banner.
 void on_run_over(TickContext& ctx, Span<const RunOver>) { run_over(ctx, ctx.state_as<Game>()); }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace scoring_part {
+constinit const FieldDesc k_run_fields[] = {KV_FIELDS(Run, score, stage_score, next_extend, eggs, restarts, epoch, kills, grazes, deaths, bombs, chips, chain, chain_left, chain_best,
+                                                  bombs_used)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Run, k_run_fields),
+};
+constinit const FieldDesc k_over_fields[] = {KV_FIELDS(RunOver, loops, pad)};
+constinit const EventTypeDesc k_events[] = {
+    KV_EVENT_EX(RunOver, k_over_fields, 0),
+};
+constinit const SystemDesc k_systems[] = {
+    // The chain's clock, the extends, a new round's dials: before the sim moves anything.
+    {.name = ".scoring", .phase = Phase::PreSim, .fn = scoring, .writes = ".world.Run, .world.Stage, .world.Dials", .appends = "audio.commands", .after = ".boot",
+     .main_thread = true},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_run_over", KV_ON(RunOver, on_run_over), .phase = Phase::Input},
+};
+} // namespace scoring_part
+KV_MODULE_PART(arcfire_scoring) = {
+    .events     = scoring_part::k_events,
+    .components = scoring_part::k_components,
+    .systems    = scoring_part::k_systems,
+    .handlers   = scoring_part::k_handlers,
+};
+
 } // namespace kv::arcfire

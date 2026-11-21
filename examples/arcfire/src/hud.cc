@@ -24,8 +24,6 @@ void upper(char* s) {
     for (; *s; ++s) *s = (char)(*s >= 'a' && *s <= 'z' ? *s - 32 : *s);
 }
 
-} // namespace
-
 void hud_open(Engine& e, Game& g) {
     g.ui = spui_load(e, "arcfire/ui/arcfire.spui.json", asset_scope_global(e));
     SpuiOpen o;
@@ -36,6 +34,8 @@ void hud_open(Engine& e, Game& g) {
     spui_model_set_int(e, "bombs_max", kMaxBombs);
     spui_model_set_int(e, "power_max", kMaxPower);
 }
+
+} // namespace
 
 // The restart: a cut to black over the field, lifted after a moment (egg.cc counts it).
 void hud_cover(Engine& e, Game& g, bool on) {
@@ -239,5 +239,25 @@ void hud(TickContext& ctx) {
         g.clear_label = Handle{};
     }
 }
+
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace hud_part {
+constinit const SystemDesc k_systems[] = {
+    {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true,
+     .runs = RunWhen::Always},
+    {.name = ".shimmer", .phase = Phase::PostSim, .fn = shimmer, .reads = ".world.Dials, platform_hid.window, sprite.camera", .after = ".camera",
+     .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".world.Run, .world.Stage, .world.Dials, .boss.Boss, .part.Health, .part.Part, .ship.Ship, .option.Option", .before = "sprite_ui.draw", .main_thread = true,
+     .runs = RunWhen::Always},
+};
+
+// The HUD, open from the start.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    hud_open(e, g);
+    return true;
+}
+} // namespace hud_part
+KV_MODULE_PART(arcfire_hud) = {.systems = hud_part::k_systems, .startup = hud_part::startup};
 
 } // namespace kv::arcfire

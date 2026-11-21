@@ -88,4 +88,25 @@ void on_bomb(TickContext& ctx, Span<const Bombed> blasts) {
     }
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace bomb_part {
+constinit const FieldDesc k_bombed_fields[] = {KV_FIELDS(Bombed, at, cancelled, pad)};
+constinit const EventTypeDesc k_events[] = {
+    KV_EVENT_EX(Bombed, k_bombed_fields, 0),
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".bomb", .phase = Phase::Sim, .fn = bomb, .reads = "input.actions, ^.bullet, ^.active, .world.EggState, .ship.Transform2",
+     .writes = ".world.Run, .ship.Ship, .ship.Collider2", .appends = "audio.commands", .emits = "Bombed", .after = ".egg", .main_thread = true},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_bomb", KV_ON(Bombed, on_bomb), .phase = Phase::PostSim, .reads = "^.ground.Ground, ^.air.Transform2, ^.ground.Transform2, ^.air.Mover, ^.part.Transform2, ^.part.Part, ^.boss.Boss, ^.air.@alive, ^.ground.@alive, ^.part.@alive",
+     .writes = ".air.Health, .ground.Health, .part.Health", .appends = "audio.commands", .emits = "Kill"},
+};
+} // namespace bomb_part
+KV_MODULE_PART(arcfire_bomb) = {
+    .events   = bomb_part::k_events,
+    .systems  = bomb_part::k_systems,
+    .handlers = bomb_part::k_handlers,
+};
+
 } // namespace kv::arcfire

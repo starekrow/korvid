@@ -3,9 +3,11 @@
 // A module is a directory with a module.lua, and in code one ModuleDesc: a record of
 // tables that say what the module brings. Its components and ktables (data), its systems
 // and handlers (code, and when it runs), its events, resources, triggers and CLI
-// commands, plus an optional startup and shutdown. The engine reads every module's
-// record once, in engine_init, and from then on knows its types by name, schedules its
-// code and owns its state. A game is a module too.
+// commands, plus an optional startup and shutdown. A module of many files can spread its
+// tables, and what it loads at startup, over parts, each declared beside the code it
+// describes (ModulePart). The engine reads every module's record once, in engine_init,
+// and from then on knows its types by name, schedules its code and owns its state. A game
+// is a module too.
 //
 //   // include/korvid/mygame/module.h
 //   namespace kv { KV_MODULE_DECLARE(mygame_module); }
@@ -29,7 +31,10 @@
 //      so the compiler rejects anything that would need a dynamic initializer.
 //   2. Order is list order, then declaration order. Modules start in list order (so
 //      everything a module depends on is up before its startup runs) and stop in
-//      reverse. Ids are assigned in that order. Within a phase the order of systems is
+//      reverse. Ids are assigned in that order, a module's own tables before its parts'
+//      (ModulePart), the parts in the order it lists them; ktables alone go by full name,
+//      so moving one between files or modules never renumbers them or changes the order
+//      a view walks them in. Within a phase the order of systems is
 //      solved from what they read and write (docs/concepts/scheduling.md); list and
 //      declaration order only break ties, and number the units, which is the order
 //      their commands and events come out in.
@@ -50,6 +55,7 @@ namespace kv {
 
 struct Engine;
 struct ModuleDesc;
+struct ModulePart;
 
 // An append resource's owner taking one record that a unit handed to ctx.append. Called
 // at the phase boundary, on the main thread, record by record in unit order, while no
@@ -107,6 +113,8 @@ struct ModuleInstance {
     u32               state_resource = 0;   // id of "<module>.state": declared with SystemDesc::state, never by name
     Rng               rng;                  // the module's sim stream (ctx.rng()), seeded by engine_init
     char              state_name[64];        // that resource's name
+    Span<const ModulePart* const> parts = {}; // the module's parts, for their startups and shutdowns
+    u32               parts_up   = 0;       // how many of those have started
 
     // Records the state and its type, so systems and shutdown get it back checked: a
     // state_as<T> for any other T fails a dev build's check.
@@ -114,6 +122,45 @@ struct ModuleInstance {
     T* set_state(T* p) { state = p; state_type = type_key<T>(); return p; }
     template <class T>
     T* state_as() const { KV_VERIFY(!state || state_type == type_key<T>()); return (T*)state; }
+};
+
+// A piece of a module's tables, declared beside the code it describes: a source file's
+// components, ktables, systems and handlers, next to the systems and handlers themselves.
+// The module lists its parts (ModuleDesc::parts) and engine_init joins them to its own
+// tables, the module's first and then each part's in list order, as if one record had
+// declared them all: the same names (".x" is still "<module>.x"), the same checks, ids
+// in that order. A part has no name or memory of its own; those are the module's.
+//
+// It may have a startup and a shutdown: what its file loads and lets go of. A part's
+// startup runs after the module's, the parts in list order, and is handed the module's
+// instance, so the state the module's startup made is there to fill (self.state_as<T>()).
+// A false one fails engine_init, which shuts down what started before it. Shutdown is the
+// reverse: the parts' shutdowns, last part first, then the module's.
+//
+//   // ship.cc
+//   constinit const KTableDesc k_ktables[] = {{.name = ".ship", ...}};
+//   constinit const SystemDesc k_systems[] = {{.name = ".control", .fn = control, ...}};
+//   bool ship_startup(Engine& e, ModuleInstance& self) {
+//       self.state_as<Game>()->ship_tex = asset_load_texture(e, "mygame/ship.png");
+//       return true;
+//   }
+//   KV_MODULE_PART(mygame_ship) = {.ktables = k_ktables, .systems = k_systems, .startup = ship_startup};
+//
+//   // game.cc
+//   constinit const ModulePart* const k_parts[] = {&mygame_ship, &mygame_boss};
+//   KV_MODULE_DEFINE(mygame_module) = {.name = "mygame", .parts = k_parts, .startup = ...};
+struct ModulePart {
+    Span<const EventTypeDesc>  events     = {};
+    Span<const ComponentDesc>  components = {};
+    Span<const KTableDesc>     ktables    = {};
+    Span<const ResourceDesc>   resources  = {};
+    Span<const SystemDesc>     systems    = {};
+    Span<const HandlerDesc>    handlers   = {};
+    Span<const TriggerDesc>    triggers   = {};
+    Span<const CliCommandDesc> commands   = {};
+    Span<const CliMountDesc>   mounts     = {};
+    bool (*startup)(Engine& engine, ModuleInstance& self)  = nullptr; // after the module's; false fails engine_init
+    void (*shutdown)(Engine& engine, ModuleInstance& self) = nullptr; // before the module's
 };
 
 // Everything a module brings, as tables the engine reads in engine_init. Every member has a
@@ -130,6 +177,7 @@ struct ModuleDesc {
     Span<const TriggerDesc>   triggers   = {}; // state edges on component fields, as StateEdge events
     Span<const CliCommandDesc> commands  = {}; // what the CLI can be told; the cli module collects them
     Span<const CliMountDesc>   mounts    = {}; // the module's pieces of the CLI's filesystem
+    Span<const ModulePart* const> parts  = {}; // more of the tables above, and startups, from other files (ModulePart)
     bool (*startup)(Engine& engine, ModuleInstance& self)  = nullptr; // build state, publish resources; false fails engine_init
     void (*shutdown)(Engine& engine, ModuleInstance& self) = nullptr; // free what startup took from `general`
     ModuleMemoryDesc          memory     = {};
@@ -142,6 +190,10 @@ struct ModuleDesc {
 // The constinit in the definition is what holds rule 1.
 #define KV_MODULE_DECLARE(sym) extern const ::kv::ModuleDesc sym
 #define KV_MODULE_DEFINE(sym)  constinit const ::kv::ModuleDesc sym
+// The same for a part: declared where the module's list of parts can see it, defined in
+// the file whose code it describes.
+#define KV_MODULE_PART_DECLARE(sym) extern const ::kv::ModulePart sym
+#define KV_MODULE_PART(sym)         constinit const ::kv::ModulePart sym
 
 // The executable's module list, in startup order: generated by kormake into
 // gen/<exe>/modules.gen.cc from module.lua's deps. What frameloop_main and tool_main pass

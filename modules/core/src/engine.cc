@@ -54,6 +54,55 @@ bool check_module_names(Span<const ModuleDesc* const> modules) {
     return true;
 }
 
+// ---- parts ---------------------------------------------------------------------------
+// One table of a module joined with the same table of each of its parts, in list order,
+// into a block the engine owns. A table no part adds to stays the module's own.
+template <class T>
+bool join_table(Engine& e, Span<const T>& out, Span<const ModulePart* const> parts, Span<const T> ModulePart::*table) {
+    u32 n = out.len;
+    for (const ModulePart* p : parts) n += (p->*table).len;
+    if (n == out.len) return true;
+    T* block = alloc_items<T>(mem_general(), n);
+    if (!block) return false;
+    e.joined_blocks.push(Engine::JoinedBlock{block, sizeof(T) * n});
+    u32 at = 0;
+    for (const T& d : out) block[at++] = d;
+    for (const ModulePart* p : parts)
+        for (const T& d : p->*table) block[at++] = d;
+    out = Span<const T>(block, n);
+    return true;
+}
+
+// The list engine_init works from: each module as given, or, for one with parts, a copy
+// with every table joined. False for a null part or memory refused.
+bool join_parts(Engine& e, Span<const ModuleDesc* const> modules) {
+    u32 with_parts = 0;
+    for (const ModuleDesc* m : modules) with_parts += m->parts.len ? 1 : 0;
+    if (!e.joined.reserve(with_parts)) return false; // addresses stable: module_list points into it
+    for (const ModuleDesc* m : modules) {
+        if (!m->parts.len) { e.module_list.push(m); continue; }
+        for (u32 i = 0; i < m->parts.len; ++i)
+            if (!m->parts[i]) { KV_ERROR("engine", "module '%s': part %u is null", m->name, i); return false; }
+        ModuleDesc& j = e.joined.push(*m);
+        j.parts = {};
+        bool ok = join_table(e, j.events, m->parts, &ModulePart::events) && join_table(e, j.components, m->parts, &ModulePart::components) &&
+                  join_table(e, j.ktables, m->parts, &ModulePart::ktables) && join_table(e, j.resources, m->parts, &ModulePart::resources) &&
+                  join_table(e, j.systems, m->parts, &ModulePart::systems) && join_table(e, j.handlers, m->parts, &ModulePart::handlers) &&
+                  join_table(e, j.triggers, m->parts, &ModulePart::triggers) && join_table(e, j.commands, m->parts, &ModulePart::commands) &&
+                  join_table(e, j.mounts, m->parts, &ModulePart::mounts);
+        if (!ok) { KV_ERROR("engine", "module '%s': no memory to join its %u parts", m->name, m->parts.len); return false; }
+        e.module_list.push(&j);
+    }
+    return true;
+}
+
+void free_joined(Engine& e) {
+    for (const Engine::JoinedBlock& b : e.joined_blocks) free_in(mem_general(), b.data, b.size);
+    e.joined_blocks.free();
+    e.joined.free();
+    e.module_list.free();
+}
+
 // Event ids: module order, then declaration order, starting at 1.
 // Dev builds: a field table that leaves a gap no padding explains has missed a member.
 // Padding before a field is always less than the struct's alignment, so a gap of that or
@@ -164,18 +213,37 @@ void unregister_components(Engine& e) {
 // The ktables, in module then declaration order, created here so their resources exist
 // before any system references them. KTable addresses never move after
 // this: the handle registry holds them as contexts.
+// KTable ids: by full name, whichever module or part declared them and in whatever order,
+// so moving a declaration never renumbers the ktables or changes the order a view walks
+// them in. Equal names keep list order, so a duplicate is reported against the first.
+struct KTableDecl { const ModuleDesc* module; u32 index; const KTableDesc* desc; const char* name; };
+
 bool register_ktables(Engine& e, Span<const ModuleDesc* const> modules, const EngineConfig& config) {
-    u32 count = 0;
-    for (const ModuleDesc* m : modules) count += m->ktables.len;
-    e.ktables.reserve(count);
+    Array<KTableDecl> decls;
     for (u32 i = 0; i < modules.len; ++i) {
         const ModuleDesc& m = *modules[i];
         for (const KTableDesc& k : m.ktables) {
             const char* name = k.name ? engine_qualify(m.name, k.name) : nullptr;
             if (!name || !name[0] || name[0] == '.' || strlen(name) >= KV_KTABLE_NAME_MAX) {
                 KV_ERROR("engine", "module '%s' has a ktable with no name or a name over %u characters", m.name, KV_KTABLE_NAME_MAX - 1);
+                decls.free();
                 return false;
             }
+            KTableDecl d{&m, i, &k, name};
+            u32 at = decls.len;
+            decls.push(d);
+            for (; at > 0 && strcmp(decls[at - 1].name, name) > 0; --at) decls[at] = decls[at - 1]; // stable insertion
+            decls[at] = d;
+        }
+    }
+    e.ktables.reserve(decls.len);
+    bool ok = true;
+    for (const KTableDecl& decl : decls) {
+        u32 i = decl.index;
+        const ModuleDesc& m = *decl.module;
+        const KTableDesc& k = *decl.desc;
+        const char* name = decl.name;
+        ok = [&]() -> bool {
             if (k.capacity == 0) { KV_ERROR("engine", "ktable '%s' in module '%s' has zero capacity", name, m.name); return false; }
             if (u32 id = engine_ktable_id(e, name)) {
                 KV_ERROR("engine", "ktable '%s' declared by both '%s' and '%s'", name, modules[e.ktables[id - 1].module]->name, m.name);
@@ -217,10 +285,10 @@ bool register_ktables(Engine& e, Span<const ModuleDesc* const> modules, const En
                 if (kc.name && !strcmp(kc.name, name)) capacity = kc.capacity;
             if (capacity) KV_INFO("engine", "ktable '%s': capacity %u (the KTableDesc says %u)", name, capacity, k.capacity);
             KTable& t = e.ktables.push(KTable{});
-            bool ok = t.init(k, name, Span<const ComponentDesc* const>(comps, ncomps), e.ktables.len - 1, i, tag,
-                             Span<const ComponentDesc* const>(attach, nattach), capacity);
+            bool made = t.init(k, name, Span<const ComponentDesc* const>(comps, ncomps), e.ktables.len - 1, i, tag,
+                               Span<const ComponentDesc* const>(attach, nattach), capacity);
             mem_set_owner(0);
-            if (!ok) { KV_ERROR("engine", "ktable '%s' in module '%s': creation failed", name, m.name); return false; }
+            if (!made) { KV_ERROR("engine", "ktable '%s' in module '%s': creation failed", name, m.name); return false; }
             // The ktable, then what it covers, together: its liveness and columns first, which
             // is all an early read of it covers, then attachments and bags.
             u32 ktable_id = e.ktables.len;
@@ -244,9 +312,12 @@ bool register_ktables(Engine& e, Span<const ModuleDesc* const> modules, const En
             e.resources[t.resource - 1].children = e.resources.len - t.resource;
             e.resources[t.resource - 1].early    = 1 + t.columns.len;
             if (k.id) *k.id = e.ktables.len;
-        }
+            return true;
+        }();
+        if (!ok) break;
     }
-    return true;
+    decls.free();
+    return ok;
 }
 
 void free_ktables(Engine& e) {
@@ -1208,6 +1279,11 @@ bool assign_heaps(Engine& e, Span<const ModuleDesc* const> modules, const Engine
 bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineConfig& config) {
     KV_ASSERT(e.modules.len == 0);
     if (!check_module_names(modules)) return false;
+    // From here on, every module is one record with its parts' tables in it; the parts
+    // themselves are kept for their startups and shutdowns.
+    if (!join_parts(e, modules)) { free_joined(e); return false; }
+    const Span<const ModuleDesc* const> given = modules;
+    modules = Span<const ModuleDesc* const>(e.module_list.data, e.module_list.len);
     // 1..255, so an id the context hands out says which engine it came from.
     static u32 s_serials = 0;
     e.serial = atomic_add_fetch(&s_serials, 1u, MO_RELAXED) % 255 + 1;
@@ -1223,6 +1299,7 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineC
         ModuleInstance inst;
         inst.desc  = modules[i];
         inst.index = i;
+        inst.parts = given[i]->parts;
         inst.rng   = Rng::seeded(config.seed, hash_str(modules[i]->name)); // a stream per module, by name
         format(inst.state_name, sizeof inst.state_name, "%s.state", modules[i]->name);
         e.modules.push(inst);
@@ -1283,6 +1360,17 @@ bool engine_init(Engine& e, Span<const ModuleDesc* const> modules, const EngineC
                 break;
             }
             inst.started = true;
+            // Then its parts', in list order; a part that fails leaves the ones before it
+            // and the module to be shut down.
+            for (const ModulePart* p : inst.parts) {
+                if (p->startup && !p->startup(e, inst)) {
+                    KV_ERROR("engine", "module '%s': part %u failed to start", m.name, inst.parts_up);
+                    ok = false;
+                    break;
+                }
+                ++inst.parts_up;
+            }
+            if (!ok) break;
             KV_MARK(m.name);
             KV_INFO("engine", "module '%s' up", m.name);
         }
@@ -1296,6 +1384,10 @@ void engine_shutdown(Engine& e) {
     for (u32 i = e.modules.len; i-- > 0;) {
         ModuleInstance& inst = e.modules[i];
         mem_set_owner((u16)(inst.index + 1));
+        // The parts that started, in reverse, then the module.
+        for (u32 k = inst.parts_up; k-- > 0;)
+            if (inst.parts[k]->shutdown) inst.parts[k]->shutdown(e, inst);
+        inst.parts_up = 0;
         if (inst.started && inst.desc->shutdown) inst.desc->shutdown(e, inst);
         if (inst.started) KV_INFO("engine", "module '%s' down", inst.desc->name);
         if (inst.arena.base)
@@ -1335,6 +1427,7 @@ void engine_shutdown(Engine& e) {
     for (u32 i = 0; i < count; ++i) names[i] = e.modules[i].desc->name;
     mem_set_module_names(names, count);
     e.modules.free();
+    free_joined(e); // after everything that pointed into the joined tables is gone
     e.event_type_count = 0;
     KV_INFO("engine", "shutdown after %llu frames, %llu ticks",
             (unsigned long long)e.frame_count, (unsigned long long)e.clock.tick_count);

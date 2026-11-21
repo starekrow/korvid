@@ -382,4 +382,12 @@ void screens(TickContext& ctx) {
     }
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace screens_part {
+constinit const SystemDesc k_systems[] = {
+    {.name = ".screens", .phase = Phase::PreSim, .fn = screens, .reads = "input.actions", .after = ".pause", .main_thread = true, .runs = RunWhen::Always},
+};
+} // namespace screens_part
+KV_MODULE_PART(arcfire_screens) = {.systems = screens_part::k_systems};
+
 } // namespace kv::arcfire

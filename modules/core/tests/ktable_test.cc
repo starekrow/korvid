@@ -58,11 +58,13 @@ void test_ktable(kv::TestCtx& c) {
     Engine e;
     KV_CHECK(c, engine_init(e, list));
 
-    // Tables, ids and resources in declaration order; wildcard references accepted.
-    KV_CHECK(c, e.ktables.len == 2 && g_mover_id == 1 && engine_ktable_id(e, "t.marker") == 2);
+    // KTables and ids by full name, not declaration order ("t.marker" is declared second);
+    // wildcard references accepted.
+    KV_CHECK(c, e.ktables.len == 2 && engine_ktable_id(e, "t.marker") == 1 && g_mover_id == 2);
     KTable* mover  = engine_ktable(e, "t.mover");
-    KTable* marker = engine_ktable(e, g_mover_id + 1);
-    KV_CHECK(c, mover && marker && mover->index == 0 && engine_ktable(e, "t.nope") == nullptr && engine_ktable(e, 3u) == nullptr);
+    KTable* marker = engine_ktable(e, g_mover_id - 1);
+    KV_CHECK(c, mover && marker && mover->index == 1 && marker == engine_ktable(e, "t.marker"));
+    KV_CHECK(c, engine_ktable(e, "t.nope") == nullptr && engine_ktable(e, 3u) == nullptr);
     KV_CHECK(c, engine_resource_id(e, "t.mover") == mover->resource);
     KV_CHECK(c, engine_resource_id(e, "t.mover.Pos") == mover->columns[0].resource);
     KV_CHECK(c, engine_resource_id(e, "t.mover.Vel") == mover->columns[1].resource);

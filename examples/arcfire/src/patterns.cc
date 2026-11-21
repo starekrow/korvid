@@ -24,10 +24,14 @@ u64 seed_of(Handle h, u64 tick, u32 salt) {
     return hash_mix(stable ^ hash_mix(tick * 0x9E3779B97F4A7C15ull + salt));
 }
 
+namespace {
+
 bool patterns_load(Engine& e, Game& g) {
     g.pattern_index = asset_load_blob(e, "arcfire/patterns/patterns.json");
     return !g.pattern_index.is_null();
 }
+
+} // namespace
 
 // The index first, then its documents, then the library: true once it is built. A file
 // that does not load or compile is `failed`, with the reason logged.
@@ -177,5 +181,40 @@ void actives(TickContext& ctx) {
     g.bullets_spawned += total.fires;
     g.runners_stepped += total.stepped;
 }
+
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace patterns_part {
+constinit const FieldDesc k_emitter_fields[] = {KV_FIELDS(Emitter, pattern, at, state, timer)};
+constinit const FieldDesc k_runner_fields[]  = {KV_FIELDS(BmlRunner, rng, wait, frame16, frame8, track8, params, last, term, delta, dir, speed, mx, my, flags)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Emitter, k_emitter_fields),
+    KV_COMPONENT(Runner, k_runner_fields),
+};
+constinit const SystemDesc k_systems[] = {
+    // The active bullets steer before they fly; the enemies' patterns run after
+    // collision.compose, which places a boss's parts this tick and comes after every
+    // writer of a transform (the active bullets' among them).
+    {.name = ".actives", .phase = Phase::Sim, .fn = actives, .reads = ".ship.Transform2, .world.Dials", .writes = ".active", .after = ".enemies"},
+    {.name = ".patterns", .phase = Phase::Sim, .fn = patterns, .reads = ".ship.Transform2, .world.Dials, .air.Transform2, .ground.Transform2, .part.Transform2",
+     .writes = ".air.Emitter, .air.Runner, .ground.Emitter, .ground.Runner, .part.Emitter, .part.Runner", .after = ".enemies, .actives"},
+};
+
+// The index asked for (boot reads it, then its documents).
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    return patterns_load(e, g);
+}
+// The library, compiled at boot.
+void shutdown(Engine&, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    bml_free(g.lib);
+}
+} // namespace patterns_part
+KV_MODULE_PART(arcfire_patterns) = {
+    .components = patterns_part::k_components,
+    .systems    = patterns_part::k_systems,
+    .startup    = patterns_part::startup,
+    .shutdown   = patterns_part::shutdown,
+};
 
 } // namespace kv::arcfire

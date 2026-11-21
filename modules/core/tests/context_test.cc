@@ -127,9 +127,11 @@ void test_context(kv::TestCtx& c) {
     // expanded list has the write on g.rock covering its columns, Vel included.
     const ScheduledSystem& move = e.phases.systems[(u32)Phase::Sim][0];
     KV_CHECK(c, move.declared.len == 6); // Vel in ship and rock; Pos in three ktables, plus g.rock
-    KV_CHECK(c, move.declared[0].resource == engine_resource_id(e, "g.ship.Vel") && move.declared[0].mode == Access::Read &&
-                move.declared[1].resource == engine_resource_id(e, "g.rock.Vel"));
-    KV_CHECK(c, move.declared[4].resource == engine_resource_id(e, "g.decal.Pos") && move.declared[5].resource == engine_resource_id(e, "g.rock") &&
+    // A wildcard expands in ktable order, which is by name: decal, rock, ship.
+    KV_CHECK(c, move.declared[0].resource == engine_resource_id(e, "g.rock.Vel") && move.declared[0].mode == Access::Read &&
+                move.declared[1].resource == engine_resource_id(e, "g.ship.Vel"));
+    KV_CHECK(c, move.declared[2].resource == engine_resource_id(e, "g.decal.Pos") && move.declared[4].resource == engine_resource_id(e, "g.ship.Pos") &&
+                move.declared[5].resource == engine_resource_id(e, "g.rock") &&
                 move.declared[5].mode == Access::Write);
     Access rock_vel = Access::Read, ship_vel = Access::Write;
     KV_CHECK(c, move.mode(engine_resource_id(e, "g.rock.Vel"), &rock_vel) && rock_vel == Access::Write);

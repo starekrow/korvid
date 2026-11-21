@@ -84,8 +84,6 @@ void hull_breaks(TickContext& ctx, Game& g, const BossDef& def, Handle material,
         }
 }
 
-} // namespace
-
 void bosses_load(Engine& e, Game& g) {
     g.boss_count = KV_COUNTOF(k_boss_names);
     for (u32 i = 0; i < g.boss_count; ++i) {
@@ -103,6 +101,8 @@ void bosses_load(Engine& e, Game& g) {
         g.boss_dissolve[i] = asset_load_material(e, path);
     }
 }
+
+} // namespace
 
 // The files, once in, read into the definitions (their paths and bays' formations into
 // the stage), and the stage's boss marks matched to them. Once.
@@ -422,5 +422,49 @@ void on_part_down(TickContext& ctx, Span<const StateEdge> edges) {
 
 // A shot that struck an armored part: a spark off it, nothing more.
 void boss_ping(TickContext& ctx, Game& g, point2 at) { fx_sparks(ctx, g, at, 1, kSparkPing, 1.5f); }
+
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace boss_part {
+constinit const FieldDesc k_boss_fields[] = {KV_FIELDS(Boss, def, phase, state, clock, s, down, hold)};
+constinit const FieldDesc k_part_fields[] = {KV_FIELDS(Part, boss, index, cycle, timer, pad)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Boss, k_boss_fields),
+    KV_COMPONENT(Part, k_part_fields),
+};
+constinit const KTableDesc k_ktables[] = {
+    // A boss's hull, and its parts: children of the hull or of each other (boss.cc).
+    {.name = ".boss",     .components = "Transform2, Sprite, Collider2, Boss", .capacity = 2, .id = &g_boss_ktable},
+    // A snapshot: the stage spawns and moves parts before the resolve, which reads them
+    // early (where the last compose put them) and the bosses as the stage left them.
+    {.name = ".part",     .components = "Transform2, Local2, Parent, Sprite, Collider2, Health, Emitter, Runner, Part", .capacity = 256, .id = &g_part_ktable,
+     .early_reads = EarlyReads::Snapshot},
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".bosses", .phase = Phase::Sim, .fn = bosses, .reads = ".world.Run, .world.Dials, .world.EggState", .writes = ".boss, .part, .formation, .shadow", .appends = "audio.commands",
+     .after = ".stage, .enemies", .before = ".patterns", .main_thread = true},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_part_down", KV_ON(StateEdge, on_part_down), .phase = Phase::Input, .reads = ".world.Dials, .part.Part, .part.Transform2, .bullet, .active", .writes = ".boss.Boss", .appends = "audio.commands", .emits = "Kill"},
+};
+// A part's death is its health crossing below one: delivered as a StateEdge the next tick.
+constinit const TriggerDesc k_triggers[] = {
+    {.name = "arcfire.part_down", .field = "arcfire.part.Health.hp", .edge = TriggerEdge::CrossedBelow, .value = 1.0, .id = &g_part_down},
+};
+
+// The bosses' files and art.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    bosses_load(e, g);
+    return true;
+}
+} // namespace boss_part
+KV_MODULE_PART(arcfire_boss) = {
+    .components = boss_part::k_components,
+    .ktables    = boss_part::k_ktables,
+    .systems    = boss_part::k_systems,
+    .handlers   = boss_part::k_handlers,
+    .triggers   = boss_part::k_triggers,
+    .startup    = boss_part::startup,
+};
 
 } // namespace kv::arcfire

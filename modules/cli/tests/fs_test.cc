@@ -84,7 +84,7 @@ void test_cli_fs(kv::TestCtx& c) {
 
     // The engine's other mounts know this module.
     KV_CHECK(c, run("ls /systems/game") && o.has("move") && o.has("sim, level"));
-    KV_CHECK(c, run("print /systems/game/move") && o.has("writes: game.ship.Pos, game.rock.Pos"));
+    KV_CHECK(c, run("print /systems/game/move") && o.has("writes: game.rock.Pos, game.ship.Pos")); // ktables by name
     KV_CHECK(c, run("ls /triggers/game") && o.has("death") && o.has("game.ship.Health.hp crossed below 1"));
     KV_CHECK(c, run("print /resources/game/score") && o.has("declared, nothing published"));
     KV_CHECK(c, run("ls /events") && o.has("Spawned") && o.has("StateEdge"));

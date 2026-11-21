@@ -5,6 +5,7 @@ void test_handle(kv::TestCtx&);
 void test_event(kv::TestCtx&);
 void test_tick(kv::TestCtx&);
 void test_module(kv::TestCtx&);
+void test_parts(kv::TestCtx&);
 void test_memory(kv::TestCtx&);
 void test_map(kv::TestCtx&);
 void test_name(kv::TestCtx&);
@@ -51,6 +52,7 @@ int main() {
     test_random(c);
     test_component(c);
     test_ktable(c);
+    test_parts(c); // after test_component: that one names handle kind 7 and wants it never registered
     test_hash(c);
     test_context(c);
     test_entity_name(c);

@@ -2,9 +2,10 @@
 // masks meet; `on_overlap` sorts each pair by its ktables into what it means (a shot on an
 // enemy, a bullet on the hitbox, an enemy on the hitbox, a bullet through the graze ring,
 // a bullet on the shell), and a handler each does the rest. They write the run in a chain
-// (module.cc), so a bullet that hits the hitbox takes back its own graze before the
-// grazes are counted. A boss's armored parts take shots without harm; its open parts take
-// the damage and die by their trigger (boss.cc), not here. Shots fly over a boss's hull.
+// (the order of this file's handlers, first among the parts), so a bullet that hits the
+// hitbox takes back its own graze before the grazes are counted. A boss's armored parts
+// take shots without harm; its open parts take the damage and die by their trigger
+// (boss.cc), not here. Shots fly over a boss's hull.
 #include "arcfire.h"
 #include "korvid/core/log.h"
 
@@ -202,5 +203,45 @@ void on_kill(TickContext& ctx, Span<const Kill> kills) {
         if (!k.flat) fx_blast(ctx, g, k.at, k.score >= 400 ? Blast::Medium : Blast::Small);
     }
 }
+
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace hits_part {
+constinit const FieldDesc k_health_fields[] = {KV_FIELDS(Health, hp, flash, score, look)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Health, k_health_fields, CompPrev), // what can be shot: the enemies, the ground, a boss's parts
+};
+constinit const FieldDesc k_shot_hit_fields[]   = {KV_FIELDS(ShotHit, shot, target)};
+constinit const FieldDesc k_bullet_hit_fields[] = {KV_FIELDS(BulletHit, bullet)};
+constinit const FieldDesc k_rammed_fields[]     = {KV_FIELDS(Rammed, enemy)};
+constinit const FieldDesc k_graze_fields[]      = {KV_FIELDS(Graze, bullet)};
+constinit const FieldDesc k_shell_hit_fields[]  = {KV_FIELDS(ShellHit, bullet)};
+constinit const FieldDesc k_kill_fields[]       = {KV_FIELDS(Kill, at, score, flat, formation)};
+constinit const EventTypeDesc k_events[] = {
+    KV_EVENT_EX(ShotHit, k_shot_hit_fields, 0),
+    KV_EVENT_EX(BulletHit, k_bullet_hit_fields, 0),
+    KV_EVENT_EX(Rammed, k_rammed_fields, 0),
+    KV_EVENT_EX(Graze, k_graze_fields, 0),
+    KV_EVENT_EX(ShellHit, k_shell_hit_fields, 0),
+    KV_EVENT_EX(Kill, k_kill_fields, 0),
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_overlap", KV_ON(OverlapBegin, on_overlap), .phase = Phase::PostSim, .emits = "ShotHit, BulletHit, Rammed, Graze, ShellHit, Pickup"},
+    {.name = ".on_shot_hit", KV_ON(ShotHit, on_shot_hit), .phase = Phase::PostSim, .reads = "^.ground.Ground, ^.air.Transform2, ^.ground.Transform2, ^.air.Mover, ^.shot.Transform2, ^.part.Transform2, ^.part.Part, ^.boss.Boss",
+     .writes = ".air.Health, .ground.Health, .shot.Shot, .part.Health", .appends = "audio.commands", .emits = "Kill"},
+    {.name = ".on_bullet_hit", KV_ON(BulletHit, on_bullet_hit), .phase = Phase::PostSim, .reads = "^.world.Dials",
+     .writes = ".bullet.Bullet, .active.Bullet, .world.Run, .ship.Ship", .emits = "ShipDied"},
+    {.name = ".on_rammed", KV_ON(Rammed, on_rammed), .phase = Phase::PostSim, .reads = "^.world.Dials", .writes = ".ship.Ship", .emits = "ShipDied"},
+    {.name = ".on_graze", KV_ON(Graze, on_graze), .phase = Phase::PostSim, .reads = "^.world.Dials, ^.bullet.Transform2, ^.active.Transform2", .writes = ".bullet.Bullet, .active.Bullet, .world.Run", .appends = "audio.commands"},
+    {.name = ".on_shell_hit", KV_ON(ShellHit, on_shell_hit), .phase = Phase::PostSim, .reads = "^.bullet.Transform2, ^.active.Transform2"},
+    {.name = ".on_kill", KV_ON(Kill, on_kill), .phase = Phase::PostSim, .reads = "^.world.Dials", .writes = ".world.Run, .formation", .appends = "audio.commands"},
+    {.name = ".on_beam_hit", KV_ON(BeamHit, on_beam_hit), .phase = Phase::PostSim, .reads = "^.ground.Ground, ^.air.Transform2, ^.ground.Transform2, ^.air.Mover, ^.part.Transform2, ^.part.Part, ^.boss.Boss",
+     .writes = ".air.Health, .ground.Health, .part.Health", .appends = "audio.commands", .emits = "Kill"},
+};
+} // namespace hits_part
+KV_MODULE_PART(arcfire_hits) = {
+    .events     = hits_part::k_events,
+    .components = hits_part::k_components,
+    .handlers   = hits_part::k_handlers,
+};
 
 } // namespace kv::arcfire

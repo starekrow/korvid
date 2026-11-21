@@ -1,7 +1,8 @@
-// arcfire: the module record. What the game declares to the engine (components,
-// ktables, events, the systems and handlers of every file), the startup that loads its art
-// and its stage, and the sprite helpers every file draws with. The game itself is in the
-// files the tables below name.
+// arcfire: the module record. Velocity, which every file moves by, and the world ktable;
+// the list of the files' parts (each file declares its own components, ktables, events,
+// systems and handlers at its end, and loads its own art and files in its part's startup);
+// the startup that makes the game's state and reads the flags, before any part's; and the
+// textures and sprite helpers every file draws with.
 #include "arcfire.h"
 #include "korvid/anim/player.h"
 #include "korvid/core/format.h"
@@ -24,193 +25,45 @@ constinit u32 g_world_ktable = 0, g_plane_ktable = 0, g_ship_ktable = 0, g_ring_
               g_item_ktable = 0, g_formation_ktable = 0, g_shadow_ktable = 0, g_boss_ktable = 0, g_part_ktable = 0, g_boom_ktable = 0, g_beam_ktable = 0, g_option_ktable = 0, g_glow_ktable = 0, g_aglow_ktable = 0, g_fleet_ktable = 0, g_tracer_ktable = 0, g_capital_ktable = 0;
 constinit u32 g_part_down = 0;
 
-// The systems and handlers, each in the file of its part.
-void demo(TickContext&);         // pilot.cc
-void bot(TickContext&);
-void scoring(TickContext&);      // scoring.cc
-void on_run_over(TickContext&, Span<const RunOver>);
-void boot(TickContext&);         // stage.cc
-void scroll(TickContext&);
-void stage(TickContext&);
-void on_member(TickContext&, Span<const SpawnMember>);
-void on_stage_end(TickContext&, Span<const StageEnd>);
-void on_stage_next(TickContext&, Span<const StageNext>);
-void planes(TickContext&);       // planes.cc
-void control(TickContext&);      // ship.cc
-void shots(TickContext&);        // weapons.cc
-void beams(TickContext&);
-void options(TickContext&);      // options.cc
-void on_beam_hit(TickContext&, Span<const BeamHit>); // hits.cc
-void enemies(TickContext&);      // enemies.cc
-void bosses(TickContext&);       // boss.cc
-void on_part_down(TickContext&, Span<const StateEdge>);
-void patterns(TickContext&);     // patterns.cc
-void actives(TickContext&);
-void bullets(TickContext&);      // bullets.cc
-void particles(TickContext&);
-void glows(TickContext&);    // fx.cc
-void items(TickContext&);        // items.cc
-void on_pickup(TickContext&, Span<const Pickup>);
-void bomb(TickContext&);         // bomb.cc
-void on_bomb(TickContext&, Span<const Bombed>);
-void on_spawned(TickContext&, Span<const Spawned>); // fx.cc: shadows
-void on_boom_done(TickContext&, Span<const AnimFinished>);
-void egg(TickContext&);          // egg.cc
-void on_ship_died(TickContext&, Span<const ShipDied>);
-void on_overlap(TickContext&, Span<const OverlapBegin>); // hits.cc
-void on_shot_hit(TickContext&, Span<const ShotHit>);
-void on_bullet_hit(TickContext&, Span<const BulletHit>);
-void on_rammed(TickContext&, Span<const Rammed>);
-void on_graze(TickContext&, Span<const Graze>);
-void on_shell_hit(TickContext&, Span<const ShellHit>);
-void on_kill(TickContext&, Span<const Kill>);
-void records(TickContext&);      // records.cc
-void screens(TickContext&);      // screens.cc
-void pause(TickContext&);        // flow.cc
-void on_ui(TickContext&, Span<const SpuiEvent>);
-void on_covered(TickContext&, Span<const SpuiCovered>);
-void camera(TickContext&);
-void shimmer(TickContext&);
-void battle(TickContext&);
-void hud(TickContext&);
-void stats_deltas(TickContext&); // stats.cc
-void stats(TickContext&);
-void on_exit(TickContext&, Span<const ExitRequested>);
-
 namespace {
 
 // ---- schemas -------------------------------------------------------------------------------------
-
+// Velocity alone is the module's: eight files move rows by it. Every other component is
+// declared in the file that owns it (Health in hits.cc, the world row's in dials.cc,
+// stage.cc, scoring.cc, egg.cc and flow.cc, and so on).
 constinit const FieldDesc k_velocity_fields[] = {KV_FIELDS(Velocity, v)};
-constinit const FieldDesc k_plane_fields[]    = {KV_FIELDS(Plane, rate, tile, row, rows)};
-constinit const FieldDesc k_ship_fields[]     = {KV_FIELDS(Ship, cooldown, live, focus, shots, guard, died, weapon, power, firing, pad)};
-constinit const FieldDesc k_formation_fields[] = {KV_FIELDS(Formation, count, killed, gone, drop)};
-constinit const FieldDesc k_item_fields[]     = {KV_FIELDS(Item, kind, value, life, pad)};
-constinit const FieldDesc k_shot_fields[]     = {KV_FIELDS(Shot, damage, spent, kind, turn)};
-constinit const FieldDesc k_beam_fields[]     = {KV_FIELDS(Beam, timer, length, scroll, seg)};
-constinit const FieldDesc k_option_fields[]   = {KV_FIELDS(Option, index, tilt)};
-constinit const FieldDesc k_health_fields[]   = {KV_FIELDS(Health, hp, flash, score, look)};
-// The path is a struct of its own (path.h), so its fields are named by hand.
-constinit const FieldDesc k_mover_fields[] = {
-    {"pts", FieldType::F32, 2 * kPathPoints, (u16)offsetof(Mover, path.pts)},
-    {"seg", FieldType::F32, kPathPoints - 1, (u16)offsetof(Mover, path.seg)},
-    {"length", FieldType::F32, 1, (u16)offsetof(Mover, path.length)},
-    {"count", FieldType::U32, 1, (u16)offsetof(Mover, path.count)},
-    {"speed", FieldType::F32, 1, (u16)offsetof(Mover, speed)},
-    {"s", FieldType::F32, 1, (u16)offsetof(Mover, s)},
-    {"formation", FieldType::Handle, 1, (u16)offsetof(Mover, formation)},
-};
-constinit const FieldDesc k_emitter_fields[]  = {KV_FIELDS(Emitter, pattern, at, state, timer)};
-constinit const FieldDesc k_runner_fields[]   = {KV_FIELDS(BmlRunner, rng, wait, frame16, frame8, track8, params, last, term, delta, dir, speed, mx, my, flags)};
-constinit const FieldDesc k_ground_fields[]   = {KV_FIELDS(Ground, rate, bench, kind, launch, timer, vx, home, range, drop, pad)};
-constinit const FieldDesc k_bullet_fields[]   = {KV_FIELDS(Bullet, life, grazed, owner)};
-constinit const FieldDesc k_particle_fields[] = {KV_FIELDS(Particle, life, max_life, spin, drag, alpha, fall)};
-constinit const FieldDesc k_eggbody_fields[]  = {KV_FIELDS(EggBody, vy, drift)};
-constinit const FieldDesc k_glow_fields[]     = {KV_FIELDS(Glow, bullet)};
-constinit const FieldDesc k_dials_fields[]    = {KV_FIELDS(Dials, position, rank, bullet_speed, formation_count, formation_spacing, particles,
-                                                           plane_density, enemy_health, bot, invulnerable, loops, scroll_rows, weapon, power, options, chain_window),
-                                                 KV_FIELD(Dials, glows), KV_FIELD(Dials, shimmer), KV_FIELD(Dials, fleet)}; // past KV_FIELDS' sixteen
-constinit const FieldDesc k_stage_fields[]    = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, ground_cursor, base, held, waiting, round_up, index)};
-constinit const FieldDesc k_run_fields[]      = {KV_FIELDS(Run, score, stage_score, next_extend, eggs, restarts, epoch, kills, grazes, deaths, bombs, chips, chain, chain_left, chain_best,
-                                                           bombs_used)};
-constinit const FieldDesc k_eggstate_fields[] = {KV_FIELDS(EggState, step, t, at, shell, restart)};
-constinit const FieldDesc k_chance_fields[]   = {KV_FIELDS(Chance, state, inc)};
-constinit const FieldDesc k_boss_fields[]     = {KV_FIELDS(Boss, def, phase, state, clock, s, down, hold)};
-constinit const FieldDesc k_part_fields[]     = {KV_FIELDS(Part, boss, index, cycle, timer, pad)};
-constinit const FieldDesc k_fleet_fields[]    = {KV_FIELDS(Fleet, side, state, cooldown, passes, phase, aim)};
-constinit const FieldDesc k_tracer_fields[]   = {KV_FIELDS(Tracer, side, life)};
-constinit const FieldDesc k_capital_fields[]  = {KV_FIELDS(Capital, section, pad)};
-
 constinit const ComponentDesc k_components[] = {
-    KV_COMPONENT(Velocity, k_velocity_fields), KV_COMPONENT(Plane, k_plane_fields),   KV_COMPONENT(Ship, k_ship_fields),
-    // Health keeps its previous copy for the parts' trigger (a part's death is an edge).
-    KV_COMPONENT(Shot, k_shot_fields),         KV_COMPONENT(Health, k_health_fields, CompPrev), KV_COMPONENT(Mover, k_mover_fields),
-    KV_COMPONENT(Emitter, k_emitter_fields),   KV_COMPONENT(Ground, k_ground_fields), KV_COMPONENT(Bullet, k_bullet_fields),
-    KV_COMPONENT(Particle, k_particle_fields), KV_COMPONENT(EggBody, k_eggbody_fields), KV_COMPONENT(Glow, k_glow_fields), KV_COMPONENT(Dials, k_dials_fields),
-    KV_COMPONENT(Stage, k_stage_fields),       KV_COMPONENT(Run, k_run_fields),       KV_COMPONENT(EggState, k_eggstate_fields),
-    KV_COMPONENT(Chance, k_chance_fields),       KV_COMPONENT(Runner, k_runner_fields), KV_COMPONENT(Formation, k_formation_fields),
-    KV_COMPONENT(Item, k_item_fields),         KV_COMPONENT(Boss, k_boss_fields),     KV_COMPONENT(Part, k_part_fields),
-    KV_COMPONENT(Beam, k_beam_fields),         KV_COMPONENT(Option, k_option_fields),
-    KV_COMPONENT(Fleet, k_fleet_fields),       KV_COMPONENT(Tracer, k_tracer_fields), KV_COMPONENT(Capital, k_capital_fields),
+    KV_COMPONENT(Velocity, k_velocity_fields),
 };
 
 // ---- ktables -------------------------------------------------------------------------------------
-// Capacity is address space (rows commit as they are used), so the bullet ktables are sized
-// for the stress dial; --capacity KTABLE=N goes past them for a measurement.
+// The world: the run's one row of dials, stage, score and the egg's state, which every file
+// reads (its components are declared by the files that own them). Every other ktable is
+// declared beside its code, in its file's part.
 constinit const KTableDesc k_ktables[] = {
-    {.name = ".world",    .components = "Dials, Stage, Run, EggState, Chance", .capacity = 1, .id = &g_world_ktable},
-    {.name = ".plane",    .components = "Transform2, Sprite, Plane", .capacity = 4096, .id = &g_plane_ktable, .cosmetic = true},
-    {.name = ".ship",     .components = "Transform2, Sprite, Collider2, Ship", .capacity = 1, .id = &g_ship_ktable},
-    // The graze ring and the hitbox's dot: children of the ship.
-    {.name = ".ring",     .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_ring_ktable},
-    {.name = ".mark",     .components = "Transform2, Local2, Parent, Sprite", .capacity = 1, .id = &g_mark_ktable},
-    {.name = ".shot",     .components = "Transform2, Sprite, Velocity, Collider2, Shot", .capacity = 2048, .id = &g_shot_ktable},
-    {.name = ".air",      .components = "Transform2, Sprite, Collider2, Health, Mover, Emitter, Runner", .capacity = 256, .id = &g_air_ktable},
-    {.name = ".ground",   .components = "Transform2, Sprite, Collider2, Health, Emitter, Ground, Runner", .capacity = 256, .id = &g_ground_ktable},
-    {.name = ".bullet",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet", .capacity = 65536, .id = &g_bullet_ktable},
-    // Bullets that run a program of their own (a needle that waits, a seed that bursts).
-    {.name = ".active",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet, Runner", .capacity = 8192, .id = &g_active_ktable},
-    {.name = ".particle", .components = "Transform2, Sprite, Velocity, Particle", .capacity = 32768, .id = &g_particle_ktable, .cosmetic = true},
-    {.name = ".egg",      .components = "Transform2, Sprite, EggBody", .capacity = 1, .id = &g_egg_ktable},
-    {.name = ".shell",    .components = "Transform2, Local2, Parent, Sprite, Collider2", .capacity = 1, .id = &g_shell_ktable,
-     .early_reads = EarlyReads::Snapshot}, // as the part, with the egg for the stage
-    // Chips and pickups; a formation's count of its members.
-    {.name = ".item",     .components = "Transform2, Sprite, Velocity, Collider2, Item", .capacity = 4096, .id = &g_item_ktable},
-    {.name = ".formation", .components = "Formation", .capacity = 64, .id = &g_formation_ktable},
-    // Shadows on the ground under what flies: cosmetic children.
-    {.name = ".shadow",   .components = "Transform2, Local2, Parent, Sprite", .capacity = 512, .id = &g_shadow_ktable, .cosmetic = true},
-    // A boss's hull, and its parts: children of the hull or of each other (boss.cc).
-    {.name = ".boss",     .components = "Transform2, Sprite, Collider2, Boss", .capacity = 2, .id = &g_boss_ktable},
-    // A snapshot: the stage spawns and moves parts before the resolve, which reads them
-    // early (where the last compose put them) and the bosses as the stage left them.
-    {.name = ".part",     .components = "Transform2, Local2, Parent, Sprite, Collider2, Health, Emitter, Runner, Part", .capacity = 256, .id = &g_part_ktable,
-     .early_reads = EarlyReads::Snapshot},
-    // Explosions: a flipbook each, gone when it has played (fx.cc).
-    // The beams: one on the ship (and one on each option), cut each tick at what it meets.
-    // Options: children of the ship, bodies that eat bullets (options.cc).
-    {.name = ".option",   .components = "Transform2, Local2, Parent, Sprite, Collider2, Option", .capacity = kMaxOptions, .id = &g_option_ktable},
-    {.name = ".beam",     .components = "Transform2, Local2, Parent, Sprite, Beam", .capacity = 4 * kBeamSegments, .id = &g_beam_ktable},
-    {.name = ".boom",     .components = "Transform2, Sprite, AnimPlayer", .capacity = 512, .id = &g_boom_ktable, .cosmetic = true},
-    // The bullets' glows, slot for slot with the two bullet ktables (fx.cc).
-    {.name = ".glow",     .components = "Transform2, Sprite, Glow", .capacity = 65536, .id = &g_glow_ktable, .cosmetic = true},
-    {.name = ".aglow",    .components = "Transform2, Sprite, Glow", .capacity = 8192, .id = &g_aglow_ktable, .cosmetic = true},
-    // Orbit's battle (battle.cc): never the sim's.
-    {.name = ".fleet",    .components = "Transform2, Sprite, Velocity, Fleet", .capacity = 16384, .id = &g_fleet_ktable, .cosmetic = true},
-    {.name = ".tracer",   .components = "Transform2, Sprite, Velocity, Tracer", .capacity = 16384, .id = &g_tracer_ktable, .cosmetic = true},
-    {.name = ".capital",  .components = "Transform2, Sprite, Capital", .capacity = 8, .id = &g_capital_ktable, .cosmetic = true},
+    {.name = ".world", .components = "Dials, Stage, Run, EggState, Chance", .capacity = 1, .id = &g_world_ktable},
 };
 
-// A part's death is its health crossing below one: delivered as a StateEdge the next tick.
-constinit const TriggerDesc k_triggers[] = {
-    {.name = "arcfire.part_down", .field = "arcfire.part.Health.hp", .edge = TriggerEdge::CrossedBelow, .value = 1.0, .id = &g_part_down},
+// ---- the parts -----------------------------------------------------------------------------------
+// Each file declares what it brings at its end: its components and ktables, its events, its
+// systems and handlers. The engine reads them in this order, and nearly every system and
+// handler writes the game's state, so within a phase this order is the order they run in
+// wherever their sets leave it free. It follows the game. The hits come first: their handlers
+// run in PostSim before the tick's systems, a bullet on the hitbox before the grazes (it
+// cancels its own graze), then the kills. In Sim: the bot, the scroll and the stage's marks,
+// the planes, the ship, its shots, the enemies and their bullets, the egg, the particles;
+// then the collision module's broadphase, whose overlaps the hits' handlers sort into hits.
+// The parts' startups run in this order too, after the module's; their shutdowns in reverse
+// (the stats' summary, then the patterns' library). The dials and the sound bring no code
+// that runs in a phase: the world row's dials, the effects and the music.
+constinit const ModulePart* const k_parts[] = {
+    &arcfire_hits,     &arcfire_pilot,    &arcfire_dials,    &arcfire_stage,    &arcfire_scoring,  &arcfire_records,
+    &arcfire_screens,  &arcfire_flow,     &arcfire_planes,   &arcfire_ship,     &arcfire_weapons,  &arcfire_options,
+    &arcfire_enemies,  &arcfire_boss,     &arcfire_patterns, &arcfire_bullets,  &arcfire_egg,      &arcfire_bomb,
+    &arcfire_items,    &arcfire_sound,    &arcfire_fx,       &arcfire_battle,   &arcfire_hud,      &arcfire_stats,
 };
 
-// ---- events --------------------------------------------------------------------------------------
-
-constinit const FieldDesc k_shot_hit_fields[]  = {KV_FIELDS(ShotHit, shot, target)};
-constinit const FieldDesc k_beam_hit_fields[]  = {KV_FIELDS(BeamHit, target, damage, pad, at)};
-constinit const FieldDesc k_bullet_hit_fields[] = {KV_FIELDS(BulletHit, bullet)};
-constinit const FieldDesc k_rammed_fields[]    = {KV_FIELDS(Rammed, enemy)};
-constinit const FieldDesc k_graze_fields[]     = {KV_FIELDS(Graze, bullet)};
-constinit const FieldDesc k_shell_hit_fields[] = {KV_FIELDS(ShellHit, bullet)};
-constinit const FieldDesc k_kill_fields[]      = {KV_FIELDS(Kill, at, score, flat, formation)};
-constinit const FieldDesc k_bombed_fields[]    = {KV_FIELDS(Bombed, at, cancelled, pad)};
-constinit const FieldDesc k_pickup_fields[]    = {KV_FIELDS(Pickup, item)};
-constinit const FieldDesc k_died_fields[]      = {KV_FIELDS(ShipDied, at, cause, pad)};
-constinit const FieldDesc k_member_fields[]    = {KV_FIELDS(SpawnMember, formation, member, epoch, pad, group, offset)};
-constinit const FieldDesc k_end_fields[]       = {KV_FIELDS(StageEnd, loops, pad)};
-constinit const FieldDesc k_over_fields[]      = {KV_FIELDS(RunOver, loops, pad)};
-constinit const FieldDesc k_next_fields[]      = {KV_FIELDS(StageNext, stage, position)};
-constinit const EventTypeDesc k_events[] = {
-    KV_EVENT_EX(BeamHit, k_beam_hit_fields, EvStaleOk), // a target the beam met may be gone before it lands
-    KV_EVENT_EX(ShotHit, k_shot_hit_fields, 0),   KV_EVENT_EX(BulletHit, k_bullet_hit_fields, 0), KV_EVENT_EX(Rammed, k_rammed_fields, 0),
-    KV_EVENT_EX(Graze, k_graze_fields, 0),        KV_EVENT_EX(ShellHit, k_shell_hit_fields, 0),   KV_EVENT_EX(Kill, k_kill_fields, 0),
-    KV_EVENT_EX(Bombed, k_bombed_fields, 0),      KV_EVENT_EX(Pickup, k_pickup_fields, 0),
-    KV_EVENT_EX(ShipDied, k_died_fields, 0),      KV_EVENT_EX(SpawnMember, k_member_fields, EvStaleOk),   KV_EVENT_EX(StageEnd, k_end_fields, 0), KV_EVENT_EX(RunOver, k_over_fields, 0), KV_EVENT_EX(StageNext, k_next_fields, 0), // SpawnMember: a restart's formations go, their members' events with them
-};
-
-constinit const ResourceDesc k_resources[] = {{".stats"}};
-
+// The actions the game reads, by name (arcfire_startup hands them to platform_hid).
 constinit const InputActionDesc k_actions[] = {
     {"move",  ActionKind::Axis2,  "keys W S A D, keys Up Down Left Right, stick left, dpad"},
     {"shot",  ActionKind::Button, "key Z, key Space, pad South"},
@@ -223,118 +76,12 @@ constinit const InputActionDesc k_actions[] = {
     {"cancel",  ActionKind::Button, "key Backspace, pad East"},
 };
 
-// ---- the schedule -----------------------------------------------------------------------------
-// Sim goes: the bot, the scroll and the stage's marks, the planes, the ship, its shots,
-// the enemies and their bullets, the egg, the particles; then the collision module's
-// broadphase, whose overlaps the handlers sort into hits at the boundary.
-
-constinit const SystemDesc k_systems[] = {
-    {.name = ".demo", .phase = Phase::Input, .fn = demo, .reads = ".bullet, .active, .ship, .air, .ground, .part, .boss, .item, .world",
-     .before = "input.sample", .main_thread = true},
-    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, .particle, .shadow, .boom, .fleet, .tracer, .capital, .air, .ground, .bullet, .active, .shot, .item, .formation, .boss, .part, tilemap.tile, tilemap.animtile", .appends = "audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
-    // The chain's clock, the extends, a new round's dials: before the sim moves anything.
-    {.name = ".scoring", .phase = Phase::PreSim, .fn = scoring, .writes = ".world.Run, .world.Stage, .world.Dials", .appends = "audio.commands", .after = ".boot",
-     .main_thread = true},
-    {.name = ".records", .phase = Phase::PreSim, .fn = records, .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".screens", .phase = Phase::PreSim, .fn = screens, .reads = "input.actions", .after = ".pause", .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".pause", .phase = Phase::PreSim, .fn = pause, .reads = "input.actions, input.state", .after = ".boot", .main_thread = true, .runs = RunWhen::Always},
-    // The pilots read the field whole, through ctx.read_ktable: the bot where everything stood
-    // as the tick began, the demo before anything in Input could move it.
-    {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet, ^.active, ^.ship, ^.air, ^.ground, ^.part, ^.boss, ^.item, ^.world",
-     .main_thread = true},
-    {.name = ".scroll", .phase = Phase::Sim, .fn = scroll, .writes = ".world.Stage"},
-    {.name = ".stage", .phase = Phase::Sim, .fn = stage, .reads = ".world.Dials, .world.Run", .writes = ".world.Stage, .formation, .boss, .part", .appends = "audio.commands", .emits = "StageEnd", .after = ".scroll"},
-    {.name = ".planes", .phase = Phase::Sim, .fn = planes, .reads = ".world.Stage, .world.Dials, .plane.Plane, .plane.Sprite",
-     .writes = "sprite.layers, .plane", .runs = RunWhen::Always},
-    {.name = ".control", .phase = Phase::Sim, .fn = control, .reads = "^.option.@alive, ^.option.Transform2, input.actions, .world.Dials",
-     .writes = ".ship.Transform2, .ship.Ship, .ship.Sprite, .shot, .ring.Sprite, .mark.Sprite", .appends = "audio.commands"},
-    // Storm's bolts steer by the enemies as the tick began (^), before anything moves them.
-    {.name = ".shots", .phase = Phase::Sim, .fn = shots,
-     .reads = "^.air.@alive, ^.air.Transform2, ^.air.Health, ^.ground.@alive, ^.ground.Transform2, ^.ground.Health, "
-              "^.part.@alive, ^.part.Transform2, ^.part.Part, ^.part.Health, ^.boss.@alive, ^.boss.Boss",
-     .writes = ".shot", .after = ".control", .state = StateUse::Read},
-    // The beam is cut against everything where it is this tick: after every mover and the
-    // collision module's compose.
-    // Each option's place on the ship, before the collision module composes it.
-    {.name = ".options", .phase = Phase::Sim, .fn = options, .reads = ".ship.Ship, .ship.Transform2", .writes = ".option.Local2, .option.Option", .after = ".control",
-     .state = StateUse::Read},
-    {.name = ".beams", .phase = Phase::Sim, .fn = beams, .reads = "*[Collider2].Transform2, *[Collider2].Collider2, .ship.Ship, .ship.Transform2, .beam.Parent, .option.Parent, .option.Option",
-     .writes = ".beam.Local2, .beam.Sprite, .beam.Beam", .emits = "BeamHit", .state = StateUse::None},
-    {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage, .world.Run, .world.Dials", .writes = ".air, .ground, .formation", .state = StateUse::Read},
-    {.name = ".bosses", .phase = Phase::Sim, .fn = bosses, .reads = ".world.Run, .world.Dials, .world.EggState", .writes = ".boss, .part, .formation, .shadow", .appends = "audio.commands",
-     .after = ".stage, .enemies", .before = ".patterns", .main_thread = true},
-    // The active bullets steer before they fly; the enemies' patterns run after
-    // collision.compose, which places a boss's parts this tick and comes after every
-    // writer of a transform (the active bullets' among them).
-    {.name = ".actives", .phase = Phase::Sim, .fn = actives, .reads = ".ship.Transform2, .world.Dials", .writes = ".active", .after = ".enemies"},
-    {.name = ".patterns", .phase = Phase::Sim, .fn = patterns, .reads = ".ship.Transform2, .world.Dials, .air.Transform2, .ground.Transform2, .part.Transform2",
-     .writes = ".air.Emitter, .air.Runner, .ground.Emitter, .ground.Runner, .part.Emitter, .part.Runner", .after = ".enemies, .actives"},
-    {.name = ".bullets", .phase = Phase::Sim, .fn = bullets, .reads = ".bullet.Velocity, .active.Velocity",
-     .writes = ".bullet.Transform2, .bullet.Bullet, .active.Transform2, .active.Bullet", .after = ".actives", .state = StateUse::None},
-    {.name = ".egg", .phase = Phase::Sim, .fn = egg, .reads = "^.bullet, ^.active", .writes = ".world.EggState, .world.Chance, .ship, .ring.Collider2, .egg, .shell", .appends = "audio.commands",
-     .after = ".control", .main_thread = true},
-    {.name = ".bomb", .phase = Phase::Sim, .fn = bomb, .reads = "input.actions, ^.bullet, ^.active, .world.EggState, .ship.Transform2",
-     .writes = ".world.Run, .ship.Ship, .ship.Collider2", .appends = "audio.commands", .emits = "Bombed", .after = ".egg", .main_thread = true},
-    {.name = ".items", .phase = Phase::Sim, .fn = items, .reads = ".ship.Transform2, .ship.Ship", .writes = ".item"},
-    {.name = ".glows", .phase = Phase::Sim, .fn = glows, .reads = ".world.Dials, .bullet.Transform2, .bullet.Sprite, .active.Transform2, .active.Sprite",
-     .writes = ".glow, .aglow", .after = ".bullets", .state = StateUse::Read},
-    {.name = ".battle", .phase = Phase::Sim, .fn = battle, .reads = ".world.Stage, .world.Dials", .writes = ".fleet, .tracer, .capital", .after = ".scroll"},
-    {.name = ".particles", .phase = Phase::Sim, .fn = particles, .writes = ".particle", .state = StateUse::None},
-    {.name = ".camera", .phase = Phase::PostSim, .fn = camera, .reads = "platform_hid.window", .writes = "sprite.camera", .main_thread = true,
-     .runs = RunWhen::Always},
-    {.name = ".shimmer", .phase = Phase::PostSim, .fn = shimmer, .reads = ".world.Dials, platform_hid.window, sprite.camera", .after = ".camera",
-     .main_thread = true, .runs = RunWhen::Always},
-    {.name = ".hud", .phase = Phase::PostSim, .fn = hud, .reads = ".world.Run, .world.Stage, .world.Dials, .boss.Boss, .part.Health, .part.Part, .ship.Ship, .option.Option", .before = "sprite_ui.draw", .main_thread = true,
-     .runs = RunWhen::Always},
-    {.name = ".stats_deltas", .phase = Phase::Frame, .fn = stats_deltas, .reads = "sprite.deltas", .writes = ".stats", .after = "sprite.extract", .main_thread = true},
-    {.name = ".stats", .phase = Phase::PostSim, .fn = stats, .writes = ".stats", .after = ".hud", .main_thread = true,
-     .runs = RunWhen::Always},
-};
-
-// The handlers of a tick's results run in PostSim before its systems (as they did at the
-// boundary): what they read of the field is as PostSim found it (^). Their order is the
-// events' (a consumer after its emitters: overlaps, then hits, then kills and deaths) and,
-// where that leaves two free, this table's: a bullet on the hitbox before the grazes (it
-// cancels its own graze), the kills, the death, the stage's end.
-constinit const HandlerDesc k_handlers[] = {
-    {.name = ".on_overlap", KV_ON(OverlapBegin, on_overlap), .phase = Phase::PostSim, .emits = "ShotHit, BulletHit, Rammed, Graze, ShellHit, Pickup"},
-    {.name = ".on_shot_hit", KV_ON(ShotHit, on_shot_hit), .phase = Phase::PostSim, .reads = "^.ground.Ground, ^.air.Transform2, ^.ground.Transform2, ^.air.Mover, ^.shot.Transform2, ^.part.Transform2, ^.part.Part, ^.boss.Boss",
-     .writes = ".air.Health, .ground.Health, .shot.Shot, .part.Health", .appends = "audio.commands", .emits = "Kill"},
-    {.name = ".on_bomb", KV_ON(Bombed, on_bomb), .phase = Phase::PostSim, .reads = "^.ground.Ground, ^.air.Transform2, ^.ground.Transform2, ^.air.Mover, ^.part.Transform2, ^.part.Part, ^.boss.Boss, ^.air.@alive, ^.ground.@alive, ^.part.@alive",
-     .writes = ".air.Health, .ground.Health, .part.Health", .appends = "audio.commands", .emits = "Kill"},
-    {.name = ".on_part_down", KV_ON(StateEdge, on_part_down), .phase = Phase::Input, .reads = ".world.Dials, .part.Part, .part.Transform2, .bullet, .active", .writes = ".boss.Boss", .appends = "audio.commands", .emits = "Kill"},
-    {.name = ".on_boom_done", KV_ON(AnimFinished, on_boom_done), .phase = Phase::Input},
-    {.name = ".on_bullet_hit", KV_ON(BulletHit, on_bullet_hit), .phase = Phase::PostSim, .reads = "^.world.Dials",
-     .writes = ".bullet.Bullet, .active.Bullet, .world.Run, .ship.Ship", .emits = "ShipDied"},
-    {.name = ".on_rammed", KV_ON(Rammed, on_rammed), .phase = Phase::PostSim, .reads = "^.world.Dials", .writes = ".ship.Ship", .emits = "ShipDied"},
-    {.name = ".on_graze", KV_ON(Graze, on_graze), .phase = Phase::PostSim, .reads = "^.world.Dials, ^.bullet.Transform2, ^.active.Transform2", .writes = ".bullet.Bullet, .active.Bullet, .world.Run", .appends = "audio.commands"},
-    {.name = ".on_shell_hit", KV_ON(ShellHit, on_shell_hit), .phase = Phase::PostSim, .reads = "^.bullet.Transform2, ^.active.Transform2"},
-    {.name = ".on_kill", KV_ON(Kill, on_kill), .phase = Phase::PostSim, .reads = "^.world.Dials", .writes = ".world.Run, .formation", .appends = "audio.commands"},
-    {.name = ".on_beam_hit", KV_ON(BeamHit, on_beam_hit), .phase = Phase::PostSim, .reads = "^.ground.Ground, ^.air.Transform2, ^.ground.Transform2, ^.air.Mover, ^.part.Transform2, ^.part.Part, ^.boss.Boss",
-     .writes = ".air.Health, .ground.Health, .part.Health", .appends = "audio.commands", .emits = "Kill"},
-    {.name = ".on_pickup", KV_ON(Pickup, on_pickup), .phase = Phase::PostSim, .reads = "^.item.Item, ^.item.Transform2", .writes = ".world.Run, .ship.Ship, .option, .beam", .appends = "audio.commands", .before = "anim.play"},
-    {.name = ".on_ship_died", KV_ON(ShipDied, on_ship_died),
-     .phase = Phase::PostSim, .reads = "^.world.Dials", .writes = ".world.Run, .world.EggState, .world.Stage, .ship", .appends = "audio.commands", .before = "anim.play"},
-    {.name = ".on_member", KV_ON(SpawnMember, on_member), .phase = Phase::Input, .reads = ".world.Run, .world.Dials"},
-    {.name = ".on_stage_end", KV_ON(StageEnd, on_stage_end), .phase = Phase::PostSim, .reads = "^.world.Dials, ^.world.Stage", .writes = ".world.Run"},
-    {.name = ".on_stage_next", KV_ON(StageNext, on_stage_next), .phase = Phase::Input},
-    {.name = ".on_run_over", KV_ON(RunOver, on_run_over), .phase = Phase::Input},
-    {.name = ".on_exit", KV_ON(ExitRequested, on_exit), .phase = Phase::Sim},
-    {.name = ".on_ui", KV_ON(SpuiEvent, on_ui), .phase = Phase::Sim},
-    {.name = ".on_covered", KV_ON(SpuiCovered, on_covered), .phase = Phase::Sim},
-    {.name = ".on_spawned", KV_ON(Spawned, on_spawned), .phase = Phase::PostSim, .reads = "^.air.Transform2, ^.air.Sprite"},
-};
-
 // ---- startup -------------------------------------------------------------------------------------
 
-constinit const char* const k_texture_paths[TEX_COUNT] = {
-    "arcfire/kenney/ships.png", "arcfire/kenney/tiles.png", "arcfire/space/stars.png",
-    "arcfire/space/nebula.png", "arcfire/space/cloud.png",  "arcfire/made/bullets.png",
-    "arcfire/made/dot.png",     "arcfire/made/ring.png",    "arcfire/made/soft.png",
-    "arcfire/made/spark.png",   "arcfire/made/egg.png",     "arcfire/made/clouds_low.png",
-    "arcfire/made/clouds_high.png", "arcfire/made/beam.png",    "arcfire/made/items.png",
-    "arcfire/generated/boat.png", "arcfire/generated/debris.png", "arcfire/generated/segments.png",
-    "arcfire/generated/capital.png",
+// The sheets every file draws from; each file's part loads the rest of the art it owns.
+constinit const TexFile k_textures[] = {
+    {TEX_SHIPS, "arcfire/kenney/ships.png"},
+    {TEX_TILES, "arcfire/kenney/tiles.png"},
 };
 
 Handle material_of(Engine& e, Handle texture, BlendMode blend) {
@@ -377,44 +124,27 @@ bool arcfire_startup(Engine& e, ModuleInstance& self) {
         else if (strcmp(diff, "normal")) KV_WARN("arcfire", "--difficulty %s: easy, normal or hard; Normal it is", diff);
     }
     g->plan = RunPlan{!stage_named && !g->demo && !g->stress && !g->bench[0], stage_named, g->start, stage_index};
-    if (!patterns_load(e, *g)) return false;
-    for (u32 i = 0; i < TEX_COUNT; ++i) {
-        g->textures[i] = asset_load_texture(e, k_texture_paths[i]);
-        g->alpha[i] = material_of(e, g->textures[i], BlendMode::Alpha);
-        g->additive[i] = material_of(e, g->textures[i], BlendMode::Additive);
-    }
-    bosses_load(e, *g);
-    g->nebula = asset_load_material(e, "arcfire/materials/nebula.material.json");
-    g->capital_dissolve = asset_load_material(e, "arcfire/materials/capital_dissolve.material.json");
-    if (frameloop_flag(e, "--gas")) g->gas_test = true;
-    sounds_load(e, *g);
-    g->boom_clip = fx_boom_clip(e);
-    // The stage comes from its file; the sim holds until it has (stage.cc, boot), so how
-    // long the disk takes never reaches the state.
-    for (u32 i = 0; i < kStageCount; ++i) {
-        char stage_path[96];
-        format(stage_path, sizeof stage_path, "arcfire/stages/%s.stage.json", k_stage_names[i]);
-        g->stage_blobs[i] = asset_load_blob(e, stage_path);
-    }
+    textures_load(e, *g, k_textures);
     KV_INFO("arcfire", "%s: %s at %s", g->front_door ? "the title" : g->plan.arcade ? "arcade" : g->plan.stage_select ? "stage select" : "run",
             g->stage_name, position_name((u32)g->start));
-    records_load(e, *g);
-    engine_hold(e, HoldLoading, true);
-    hud_open(e, *g);
+    engine_hold(e, HoldLoading, true); // until boot has what the parts' startups asked for
     KV_INFO("arcfire", "Arrows or WASD (or a pad's stick) fly, Z or Space (South) fires, Shift (West) focuses, Escape (Start) pauses, Q quits.");
     return true;
 }
 
-void arcfire_shutdown(Engine& e, ModuleInstance& self) {
-    if (Game* g = (Game*)self.state) {
-        stats_summary(e, *g);
-        bml_free(g->lib);
+} // namespace
+
+// ---- textures and sprites ------------------------------------------------------------------------
+
+void textures_load(Engine& e, Game& g, Span<const TexFile> files) {
+    for (const TexFile& t : files) {
+        KV_VERIFY(g.textures[t.tex].is_null()); // one file loads each
+        g.textures[t.tex] = asset_load_texture(e, t.path);
+        g.alpha[t.tex] = material_of(e, g.textures[t.tex], BlendMode::Alpha);
+        g.additive[t.tex] = material_of(e, g.textures[t.tex], BlendMode::Additive);
     }
 }
 
-} // namespace
-
-// ---- sprites -------------------------------------------------------------------------------------
 
 Sprite sprite_of(const Game& g, Tex tex, rect2 uv, vec2 size, i32 layer, color tint, bool additive) {
     Sprite s;
@@ -448,15 +178,10 @@ Sprite enemy_sprite(const Game& g, Look look) {
 namespace kv {
 KV_MODULE_DEFINE(arcfire_module) = {
     .name       = "arcfire",
-    .events     = arcfire::k_events,
     .components = arcfire::k_components,
     .ktables    = arcfire::k_ktables,
-    .resources  = arcfire::k_resources,
-    .systems    = arcfire::k_systems,
-    .handlers   = arcfire::k_handlers,
-    .triggers   = arcfire::k_triggers,
+    .parts      = arcfire::k_parts,
     .startup    = arcfire::arcfire_startup,
-    .shutdown   = arcfire::arcfire_shutdown,
     .memory     = {.reserve = 1024 * 1024},
 };
 } // namespace kv

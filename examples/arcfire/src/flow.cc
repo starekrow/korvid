@@ -342,4 +342,24 @@ void on_covered(TickContext& ctx, Span<const SpuiCovered> covers) {
         if (c.cover == g.flow_cover) g.next_ready = true;
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace flow_part {
+constinit const FieldDesc k_chance_fields[] = {KV_FIELDS(Chance, state, inc)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Chance, k_chance_fields), // the sim's random stream, seeded with each run
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".pause", .phase = Phase::PreSim, .fn = pause, .reads = "input.actions, input.state", .after = ".boot", .main_thread = true, .runs = RunWhen::Always},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_ui", KV_ON(SpuiEvent, on_ui), .phase = Phase::Sim},
+    {.name = ".on_covered", KV_ON(SpuiCovered, on_covered), .phase = Phase::Sim},
+};
+} // namespace flow_part
+KV_MODULE_PART(arcfire_flow) = {
+    .components = flow_part::k_components,
+    .systems    = flow_part::k_systems,
+    .handlers   = flow_part::k_handlers,
+};
+
 } // namespace kv::arcfire

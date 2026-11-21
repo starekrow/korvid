@@ -90,7 +90,7 @@ hash every 60 ticks (the frame loop's; its README has the file). A run started f
 title records the arguments that start it, so its replay goes straight in. Two recorded bot
 runs, Shoreline at Normal and Hard, are in `tests/replays/`; replayed from the repository
 root, `build/linux-dev/bin/arcfire --replay
-examples/arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 14122,
+examples/arcfire/tests/replays/normal.kvr` must end `replay: ended at tick 14558,
 matched`. A change to the
 sim makes them diverge, and they are recorded again (`--autoplay --stage shoreline
 --difficulty normal --record ...`).
@@ -356,7 +356,7 @@ state.
 
 | file | what |
 |---|---|
-| `src/module.cc` | the registration tables, the schedule, startup, the sprite helpers |
+| `src/module.cc` | Velocity and the world ktable, the list of parts, the startup that makes the state and reads the flags, the textures' loading and the sprite helpers; each other file declares its own components, ktables, events, systems and handlers in the part at its end, and loads its own textures and files in the part's startup |
 | `src/arcfire.h`, `src/field.h` | what the files share; the field's bounds |
 | `src/stage.cc`, `src/stage_data.cc` | the boot, the scroll, the marks; reading a stage file |
 | `src/flow.cc` | the title, stage select, the pause menu; runs begun from a fresh sim and left, behind covers |

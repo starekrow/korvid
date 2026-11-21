@@ -68,4 +68,39 @@ void bullets(TickContext& ctx) {
     }
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace bullets_part {
+constinit const FieldDesc k_bullet_fields[] = {KV_FIELDS(Bullet, life, grazed, owner)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Bullet, k_bullet_fields),
+};
+// Capacity is address space (rows commit as they are used), so the bullet ktables are sized
+// for the stress dial; --capacity KTABLE=N goes past them for a measurement.
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".bullet",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet", .capacity = 65536, .id = &g_bullet_ktable},
+    // Bullets that run a program of their own (a needle that waits, a seed that bursts).
+    {.name = ".active",   .components = "Transform2, Sprite, Velocity, Collider2, Bullet, Runner", .capacity = 8192, .id = &g_active_ktable},
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".bullets", .phase = Phase::Sim, .fn = bullets, .reads = ".bullet.Velocity, .active.Velocity",
+     .writes = ".bullet.Transform2, .bullet.Bullet, .active.Transform2, .active.Bullet", .after = ".actives", .state = StateUse::None},
+};
+
+constinit const TexFile k_textures[] = {
+    {TEX_BULLETS, "arcfire/made/bullets.png"},
+};
+// The bullets' sheet.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    textures_load(e, g, k_textures);
+    return true;
+}
+} // namespace bullets_part
+KV_MODULE_PART(arcfire_bullets) = {
+    .components = bullets_part::k_components,
+    .ktables    = bullets_part::k_ktables,
+    .systems    = bullets_part::k_systems,
+    .startup    = bullets_part::startup,
+};
+
 } // namespace kv::arcfire

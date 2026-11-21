@@ -371,4 +371,17 @@ void bot(TickContext& ctx) {
     if (close > (ctx.read_ktable(g_boss_ktable)->live() ? kBossCrowd : kCrowd)) input_action_override(e, "bomb", true);
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace pilot_part {
+constinit const SystemDesc k_systems[] = {
+    {.name = ".demo", .phase = Phase::Input, .fn = demo, .reads = ".bullet, .active, .ship, .air, .ground, .part, .boss, .item, .world",
+     .before = "input.sample", .main_thread = true},
+    // The pilots read the field whole, through ctx.read_ktable: the bot where everything stood
+    // as the tick began, the demo before anything in Input could move it.
+    {.name = ".bot", .phase = Phase::Sim, .fn = bot, .reads = "^.bullet, ^.active, ^.ship, ^.air, ^.ground, ^.part, ^.boss, ^.item, ^.world",
+     .main_thread = true},
+};
+} // namespace pilot_part
+KV_MODULE_PART(arcfire_pilot) = {.systems = pilot_part::k_systems};
+
 } // namespace kv::arcfire

@@ -97,4 +97,50 @@ void enemies(TickContext& ctx) {
     }
 }
 
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace enemies_part {
+constinit const FieldDesc k_ground_fields[]    = {KV_FIELDS(Ground, rate, bench, kind, launch, timer, vx, home, range, drop, pad)};
+constinit const FieldDesc k_formation_fields[] = {KV_FIELDS(Formation, count, killed, gone, drop)};
+// The path is a struct of its own (path.h), so its fields are named by hand.
+constinit const FieldDesc k_mover_fields[] = {
+    {"pts", FieldType::F32, 2 * kPathPoints, (u16)offsetof(Mover, path.pts)},
+    {"seg", FieldType::F32, kPathPoints - 1, (u16)offsetof(Mover, path.seg)},
+    {"length", FieldType::F32, 1, (u16)offsetof(Mover, path.length)},
+    {"count", FieldType::U32, 1, (u16)offsetof(Mover, path.count)},
+    {"speed", FieldType::F32, 1, (u16)offsetof(Mover, speed)},
+    {"s", FieldType::F32, 1, (u16)offsetof(Mover, s)},
+    {"formation", FieldType::Handle, 1, (u16)offsetof(Mover, formation)},
+};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Mover, k_mover_fields),
+    KV_COMPONENT(Ground, k_ground_fields),
+    KV_COMPONENT(Formation, k_formation_fields),
+};
+constinit const KTableDesc k_ktables[] = {
+    {.name = ".air",      .components = "Transform2, Sprite, Collider2, Health, Mover, Emitter, Runner", .capacity = 256, .id = &g_air_ktable},
+    {.name = ".ground",   .components = "Transform2, Sprite, Collider2, Health, Emitter, Ground, Runner", .capacity = 256, .id = &g_ground_ktable},
+    {.name = ".formation", .components = "Formation", .capacity = 64, .id = &g_formation_ktable},
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".enemies", .phase = Phase::Sim, .fn = enemies, .reads = ".ship.Transform2, .world.Stage, .world.Run, .world.Dials", .writes = ".air, .ground, .formation", .state = StateUse::Read},
+};
+
+constinit const TexFile k_textures[] = {
+    {TEX_BOAT, "arcfire/generated/boat.png"},
+    {TEX_DEBRIS, "arcfire/generated/debris.png"},
+};
+// The boats' and the debris's art.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    textures_load(e, g, k_textures);
+    return true;
+}
+} // namespace enemies_part
+KV_MODULE_PART(arcfire_enemies) = {
+    .components = enemies_part::k_components,
+    .ktables    = enemies_part::k_ktables,
+    .systems    = enemies_part::k_systems,
+    .startup    = enemies_part::startup,
+};
+
 } // namespace kv::arcfire

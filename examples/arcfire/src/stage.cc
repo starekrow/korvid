@@ -175,6 +175,13 @@ void boot(TickContext& ctx) {
     }
     if (!patterns_in || !g.records_in) return; // the records too: the title shows them
     char why[128] = "the file did not load";
+    // Every texture is some file's to load (their parts' startups): one none loads draws nothing.
+    for (u32 i = 0; i < TEX_COUNT; ++i)
+        if (g.textures[i].is_null()) {
+            KV_ERROR("arcfire", "texture %u: no file's part loads it", i);
+            engine_request_quit(e);
+            return;
+        }
     // The stages, once; then the map (which adds its enemies, and a bunker's formations,
     // to the stage that names it), then every pattern any of them names.
     if (!g.stage_parsed) {
@@ -368,5 +375,55 @@ void on_stage_next(TickContext& ctx, Span<const StageNext> nexts) {
         flow_request(*ctx.engine, g, Next::Stage, true);
     }
 }
+
+// ---- what this file declares (its part of the module: module.cc lists it) -----------------------
+namespace stage_part {
+constinit const FieldDesc k_stage_fields[] = {KV_FIELDS(Stage, distance, speed, ramp_from, ramp_to, ramp_at, ramp_over, cursor, loops, ended, ground_cursor, base, held, waiting, round_up, index)};
+constinit const ComponentDesc k_components[] = {
+    KV_COMPONENT(Stage, k_stage_fields),
+};
+constinit const FieldDesc k_member_fields[] = {KV_FIELDS(SpawnMember, formation, member, epoch, pad, group, offset)};
+constinit const FieldDesc k_end_fields[]    = {KV_FIELDS(StageEnd, loops, pad)};
+constinit const FieldDesc k_next_fields[]   = {KV_FIELDS(StageNext, stage, position)};
+constinit const EventTypeDesc k_events[] = {
+    KV_EVENT_EX(SpawnMember, k_member_fields, EvStaleOk),
+    KV_EVENT_EX(StageEnd, k_end_fields, 0),
+    KV_EVENT_EX(StageNext, k_next_fields, 0),
+};
+constinit const SystemDesc k_systems[] = {
+    {.name = ".boot", .phase = Phase::PreSim, .fn = boot, .writes = ".world, .plane, .ship, .ring, .mark, .option, .beam, .particle, .shadow, .boom, .fleet, .tracer, .capital, .air, .ground, .bullet, .active, .shot, .item, .formation, .boss, .part, tilemap.tile, tilemap.animtile", .appends = "audio.commands", .after = "tilemap.pump", .main_thread = true, .runs = RunWhen::Always},
+    {.name = ".scroll", .phase = Phase::Sim, .fn = scroll, .writes = ".world.Stage"},
+    {.name = ".stage", .phase = Phase::Sim, .fn = stage, .reads = ".world.Dials, .world.Run", .writes = ".world.Stage, .formation, .boss, .part", .appends = "audio.commands", .emits = "StageEnd", .after = ".scroll"},
+};
+constinit const HandlerDesc k_handlers[] = {
+    {.name = ".on_member", KV_ON(SpawnMember, on_member), .phase = Phase::Input, .reads = ".world.Run, .world.Dials"},
+    {.name = ".on_stage_end", KV_ON(StageEnd, on_stage_end), .phase = Phase::PostSim, .reads = "^.world.Dials, ^.world.Stage", .writes = ".world.Run"},
+    {.name = ".on_stage_next", KV_ON(StageNext, on_stage_next), .phase = Phase::Input},
+};
+
+constinit const TexFile k_textures[] = {
+    {TEX_SEGMENTS, "arcfire/generated/segments.png"},
+};
+// The stages' files (the sim holds until boot has read them, so how long the disk takes
+// never reaches the state), and the segments' art.
+bool startup(Engine& e, ModuleInstance& self) {
+    Game& g = *self.state_as<Game>();
+    for (u32 i = 0; i < kStageCount; ++i) {
+        char stage_path[96];
+        format(stage_path, sizeof stage_path, "arcfire/stages/%s.stage.json", k_stage_names[i]);
+        g.stage_blobs[i] = asset_load_blob(e, stage_path);
+    }
+    g.gas_test = frameloop_flag(e, "--gas");
+    textures_load(e, g, k_textures);
+    return true;
+}
+} // namespace stage_part
+KV_MODULE_PART(arcfire_stage) = {
+    .events     = stage_part::k_events,
+    .components = stage_part::k_components,
+    .systems    = stage_part::k_systems,
+    .handlers   = stage_part::k_handlers,
+    .startup    = stage_part::startup,
+};
 
 } // namespace kv::arcfire
