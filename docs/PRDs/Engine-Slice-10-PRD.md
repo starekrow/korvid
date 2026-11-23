@@ -414,3 +414,13 @@ is 1.2. What the build added or settled beyond the text above:
   `blackwing_player`), and so do the same three under `--sanitize address,undefined` and
   `--sanitize thread`, with the engine's closure built so. The player's own `path[]` limit
   on a queued item (`player.cc`, "the path is too long") is Blackwing's and is left.
+
+**Verification, Nov 22, 2026.** `kormake test` passes on linux-debug and linux-dev, and on
+linux-ship but for `asset_live` (milestone 5 has it; it fails the same before this
+slice's code). `tools/kormake/tests/run.sh` passes. `tools/doccheck.sh` reports what it did
+before. The engine's `build/linux-dev/build.ninja` is what milestone 1 left. arcfire's and
+arcanum's `--demo --hash --threads 16` give the same hashes, tick for tick, as at
+`93d0e91` (arcfire 14,154 ticks, arcanum 1,865), at the default rate and at `--rate 4`;
+arcfire's two recordings replay matched. Not done: `hifi_platform` against the real
+PipeWire (no `libpipewire-0.3-dev` here), the changes to Blackwing's own tree (made and
+tested in a copy only), and anything on Windows or the Apple family.
