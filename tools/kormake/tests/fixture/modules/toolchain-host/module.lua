@@ -19,6 +19,7 @@ module "toolchain.host" {
   lib_file     = "lib%s.a",
   flag_include = "-I%s",
   flag_define  = "-D%s",
+  codegen_profiles = { fast = { "-O3" }, wrapv = { "-fwrapv" } },
   -- What --sanitize builds the target with; the cross toolchain has none, and refuses it.
   sanitizers = {
     address   = { cxxflags = { "-fsanitize=address", "-fno-omit-frame-pointer" }, ldflags = { "-fsanitize=address" } },

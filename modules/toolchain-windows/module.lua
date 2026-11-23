@@ -51,7 +51,14 @@ module "toolchain.windows" {
   -- Code-generation profiles a module asks for by name (`codegen`): fast is the CPU renderer's
   -- kernels and the games' generated shaders. Not /fp:fast, which reassociates and would change
   -- the pictures (docs/design/renderer-cpu.md).
-  codegen_profiles = { fast = { "/O2", "/Ob3" } },
+  -- wrapv: signed arithmetic that wraps, as -fwrapv makes it on the others. cl has no
+  -- documented switch: /d2UndefIntOverflow- is the one Microsoft's C++ team named when its
+  -- optimizer began to assume that signed overflow cannot happen, and it turns that off.
+  -- Not yet checked against what cl generates (docs/PRDs/Engine-Slice-10-PRD.md).
+  codegen_profiles = {
+    fast  = { "/O2", "/Ob3" },
+    wrapv = { "/d2UndefIntOverflow-" },
+  },
   -- Instruction sets a module's isa_sources are built again for, chosen at start-up. cl does
   -- not contract multiply-adds under /fp:precise, so the bytes are the baseline's.
   isa = { avx2 = { "/arch:AVX2" } },

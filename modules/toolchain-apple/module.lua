@@ -54,7 +54,10 @@ module "toolchain.apple" {
   -- kernels and the games' generated shaders. No -ffp-contract=fast (arm64 always has FMA, and
   -- contraction would make the pictures differ by platform) and never -ffast-math (its
   -- crtfastmath.o flushes denormals for the whole process): docs/design/renderer-cpu.md.
-  codegen_profiles = { fast = { "-O3", "-fno-trapping-math" } },
+  codegen_profiles = {
+    fast  = { "-O3", "-fno-trapping-math" },
+    wrapv = { "-fwrapv" }, -- signed arithmetic wraps, as a codec's bit tricks assume (codegen_sources)
+  },
   flags_generated = { "-w" }, -- code another program wrote (a shader's C++): its warnings are not ours
   flag_include = "-I%s",
   flag_define  = "-D%s",

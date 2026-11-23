@@ -37,10 +37,15 @@ rule tool_compiler_compile_{host}_gfx_soft
   command = 'bin/compiler' $in --soft -o $out
   description = COMPILE $out
 
-build obj/codec/codec.o: cxx_host {project}/modules/codec/src/codec.cc
+build obj/codec/unity.o: cxx_host {project}/build/{host}-dev/gen/codec/unity.cc
   includes = -I'{project}/build/{host}-dev/gen/codec' -isystem'/usr/include/sysaudio-1'
   defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
-build lib/libkv_codec.a: ar_host obj/codec/codec.o
+  cxxflags = -std=c++20 -O1 -O3
+build obj/codec/decode.o: cxx_host {project}/modules/codec/src/decode.cc
+  includes = -I'{project}/build/{host}-dev/gen/codec' -isystem'/usr/include/sysaudio-1'
+  defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
+  cxxflags = -std=c++20 -O1 -O3 -fwrapv
+build lib/libkv_codec.a: ar_host obj/codec/unity.o obj/codec/decode.o
 build obj/base/unity.o: cxx_host {project}/build/{host}-dev/gen/base/unity.cc
   includes = -I'{root}/modules/base/include' -I'{project}/build/{host}-dev/gen/base' -isystem'{root}/packages/pkg/include'
   defines = -DBASE=1 -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1

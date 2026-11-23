@@ -128,6 +128,12 @@ else
   echo >>"$out/$log.raw"
   # Not the host's platform: pkg-config is not asked, and the project defines nothing for it.
   run $fake check cross-dev
+  # codegen_sources naming a file the module does not have.
+  codec="$tmp/project/modules/codec/module.lua"
+  cp "$codec" "$tmp/codec.keep"
+  sed -e 's|src/decode.cc|src/nowhere.cc|' "$tmp/codec.keep" >"$codec"
+  run $fake gen host-dev
+  cp "$tmp/codec.keep" "$codec"
   normalize <"$out/$log.raw" >"$out/$log"
   rm "$out/$log.raw"
 fi

@@ -334,7 +334,8 @@ the build directory, never in the source tree.
 | `private_includes` | Directories under the module that are on the include path of its own sources and tests but not of the modules that link it (a vendored library that includes its own headers by `<name>`) |
 | `unity` | `false` compiles each source on its own; this overrides `--no-unity` and `--unity` |
 | `test_deps` | Modules the module's tests use and the module does not (`{ "image" }` to read reference pictures): their headers and libraries reach the test executable only. Each must be in the build for the platform |
-| `codegen` | A code-generation profile by name (`"fast"`), as the toolchain's `codegen_profiles` spell it, for the module's own sources (not its tests). Code built so must share no inline function with the rest of the program (`tools/check-fast-objects.sh`) |
+| `codegen` | A code-generation profile by name (`"fast"`), or a list of them (`{ "fast", "wrapv" }`), as the toolchain's `codegen_profiles` spell them, for the module's own sources (not its tests). Code built so must share no inline function with the rest of the program (`tools/check-fast-objects.sh`) |
+| `codegen_sources` | A profile for named sources only: `{ wrapv = { "src/flac.cc" } }`, paths from the module's directory. Each source named leaves the module's unity file and compiles alone, with the module's `codegen` and then the profile's flags; a name that is not one of the module's sources is an error. Every toolchain has `fast` and `wrapv` (signed arithmetic that wraps: `-fwrapv`, and on cl `/d2UndefIntOverflow-`) |
 | `isa_sources` | Sources built again for an instruction set the toolchain names in `isa`: `{ avx2 = { "src/raster.cc" } }`. A copy is compiled with the set's flags and `KV_ISA_<SET>=1`; the module's other sources see `KV_HAS_ISA_<SET>=1` where the copy exists, and choose at run time |
 | `engine_module` | The module registers a `ModuleDesc`. Each executable gets a generated `gen/<exe>/modules.gen.cc` listing every engine module in its closure, in dependency order |
 | `module_list` | `false`: the executable writes its own module list |
@@ -349,7 +350,7 @@ config), `rules` (`cxx`, `ar` and `link`, as Ninja commands), `obj_suffix`, `exe
 `lib_file`, `flag_include`, `flag_include_system`, `flag_define`, `flag_lib`,
 `flag_libdir`, `flag_framework`, `flags_generated` (added when compiling code another
 program wrote: `-w`), `codegen_profiles` (the flags of each profile a module's `codegen`
-names), `isa` (the flags of each instruction set a module's `isa_sources` may be built for),
+or `codegen_sources` names), `isa` (the flags of each instruction set a module's `isa_sources` may be built for),
 `sanitizers` (for each name `--sanitize` takes, its `cxxflags` and `ldflags`),
 `externals`, `bindings` (the default backend for each
 interface), and `probe` (`"msvc"` or `"xcode"`: a script that finds the compiler, the SDK

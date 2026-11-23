@@ -37,10 +37,12 @@ local module_fields = {
   output = true, deps = true, provides = true, platforms = true, external = true, tools = true,
   exports = true, sources = true, defines = true, prebuilt = true, system = true,
   unity = true, engine_module = true, module_list = true, licenses = true, exe = true, private_includes = true,
-  -- codegen: a code-generation profile by name (the toolchain's codegen_profiles spell it),
-  -- for the module's own sources, not its tests. isa_sources: sources built again for each
-  -- instruction set the toolchain names in `isa` ({ avx2 = { "src/raster.cc" } }).
-  codegen = true, isa_sources = true,
+  -- codegen: a code-generation profile by name, or a list of them (the toolchain's
+  -- codegen_profiles spell them), for the module's own sources, not its tests.
+  -- codegen_sources: a profile for named sources only, each compiled alone
+  -- ({ wrapv = { "src/flac.cc" } }). isa_sources: sources built again for each instruction
+  -- set the toolchain names in `isa` ({ avx2 = { "src/raster.cc" } }).
+  codegen = true, codegen_sources = true, isa_sources = true,
   test_deps = true, -- modules the module's tests use and it does not, linked into its test only
   -- externals: for a toolchain, what each external means on its platforms ({ sdl3 = {...} });
   -- for any other module, externals it defines itself, per platform

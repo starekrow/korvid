@@ -35,7 +35,10 @@ module "toolchain.linux" {
   -- kernels and the games' generated shaders. No -ffp-contract=fast (arm64 always has FMA, and
   -- contraction would make the pictures differ by platform) and never -ffast-math (its
   -- crtfastmath.o flushes denormals for the whole process): docs/design/renderer-cpu.md.
-  codegen_profiles = { fast = { "-O3", "-fno-trapping-math" } },
+  codegen_profiles = {
+    fast  = { "-O3", "-fno-trapping-math" },
+    wrapv = { "-fwrapv" }, -- signed arithmetic wraps, as a codec's bit tricks assume: what a source asks for by name (codegen_sources)
+  },
   -- Instruction sets a module's isa_sources are built again for, chosen at start-up. No FMA:
   -- a contracted multiply-add would change the bytes the baseline draws.
   isa = { avx2 = { "-mavx2", "-mno-fma" } },

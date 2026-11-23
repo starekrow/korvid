@@ -28,3 +28,7 @@ $ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake check cross-dev
 kormake: 'codec' needs external 'sysaudio', which toolchain 'toolchain.cross' does not know and no module or korvid.config defines for cross
 [exit 1]
 
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake gen host-dev
+kormake: codec: codegen_sources names 'src/nowhere.cc', which is not one of its sources
+[exit 1]
+

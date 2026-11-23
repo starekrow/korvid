@@ -387,4 +387,30 @@ is 1.2. What the build added or settled beyond the text above:
 - **Checked:** kormake's test; `kormake test` on linux-debug and linux-dev; linux-ship
   but for `asset_live`, above.
 
-Milestone 6: not started.
+**Milestone 6, `wrapv` (KR8): built Nov 22, 2026.**
+
+- **`codegen` takes a list**, its profiles' flags in list order; a generated source's
+  rule `codegen` takes one too, on the same path.
+- **`codegen_sources`**: each named source leaves the unity file and compiles alone, with
+  the module's `codegen` first and then the profile's flags; a source in two profiles gets
+  both, and an `isa_sources` copy of it gets them too. A name that is not one of the
+  module's sources is an error naming it. Paths are from the module's directory, as
+  `isa_sources`' are.
+- **`wrapv`** is `-fwrapv` in `toolchain-linux`, `toolchain-apple` and, beyond the text
+  above, `toolchain-android` (clang, the same flag, so a module that asks for it builds
+  there too). **For review, 3: picked, not settled.** `toolchain-windows` has
+  `/d2UndefIntOverflow-`. The milestone meant to settle it by reading what cl generates,
+  and there is no Windows machine here; its comment says it is not yet checked.
+- **kormake's test**: the project's `codec` now has `codegen = { "fast" }` and
+  `codegen_sources = { wrapv = { "src/decode.cc" } }` beside two other sources (the unity
+  file holds those two, `decode.o` gets `-O3 -fwrapv`), and a `gen` with a name it does
+  not have. The fixture's expected files do not change, and neither does the engine's
+  `build.ninja`.
+- **Blackwing, in a scratch copy** (its own checkout has work in progress, so nothing was
+  changed there): `flac.cc` without its `#pragma GCC optimize("wrapv")` block and
+  `hifi_codec` with `codegen_sources = { wrapv = { "src/flac.cc" } }`; `main.cc`'s no-op
+  sink replaced by `nullptr`; the player's "the path is too long for the I/O queue, or the
+  queue is full" now "the I/O queue is full". `kormake test` passes (`hifi_codec`, `hifi`,
+  `blackwing_player`), and so do the same three under `--sanitize address,undefined` and
+  `--sanitize thread`, with the engine's closure built so. The player's own `path[]` limit
+  on a queued item (`player.cc`, "the path is too long") is Blackwing's and is left.
