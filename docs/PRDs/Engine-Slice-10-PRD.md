@@ -330,6 +330,13 @@ slice unless a machine is to hand: the status says which.
    expressions.
 4. **Sanitizing by default.** Once `--sanitize` exists, should `kormake test` on the
    engine's own CI run once under address and undefined? Not in this slice.
+5. **Where a link points (KR11, 4).** Blackwing asks that a link say what it points at,
+   so a walk can refuse one that leaves its root or goes round a loop. `io_list_dir` says
+   it is a link and what kind of thing is at the far end, not where that is. A walk can
+   refuse every link today. The rest would be `io_real_path(path, out, cap)` (`realpath`,
+   `GetFinalPathNameByHandleW`), which a walk compares with its root; the loop check is
+   the same comparison against the directories above. Left for Blackwing to say whether
+   it is wanted before its milestone 3.
 
 ## Status
 
@@ -516,8 +523,9 @@ before. The engine's `build/linux-dev/build.ninja` is what milestone 1 left. arc
 arcanum's `--demo --hash --threads 16` give the same hashes, tick for tick, as at
 `93d0e91` (arcfire 14,154 ticks, arcanum 1,865), at the default rate and at `--rate 4`;
 arcfire's two recordings replay matched. Not done: `hifi_platform` against the real
-PipeWire (no `libpipewire-0.3-dev` here), the changes to Blackwing's own tree (made and
-tested in a copy only), and anything on Windows or the Apple family.
+PipeWire (no `libpipewire-0.3-dev` here), and anything on Windows or the Apple family.
+The changes to Blackwing's own tree, made and tested in a copy at the time, are since
+committed there (994a392) and pass in its own checkout.
 
 **Milestone 7, one directory (KR11): built Nov 23, 2026.**
 
@@ -604,3 +612,13 @@ tested in a copy only), and anything on Windows or the Apple family.
   compiled for Android with the NDK alone, since `core` for android-dev does not build
   (milestone 4 has why). Not checked: Windows, the Apple family. Blackwing's `hifi`
   still naps; changing it is Blackwing's.
+
+**Verification of milestones 7 to 10, Nov 23, 2026.** `kormake test` passes on
+linux-debug and linux-dev, and on linux-ship but for `asset_live`, the same 9 checks as
+before. `kormake test platform` and `kormake test core` pass under `address,undefined`
+and under `thread`. `tools/kormake/tests/run.sh` passes, and `tools/doccheck.sh` reports
+what it did before (`platform` names one fewer name missing from its page). arcfire's and
+arcanum's demo hashes are still `93d0e91`'s, tick for tick, at the default rate and at
+`--rate 4`. The engine's `build.ninja` gains `platform`'s new test source and nothing
+else. Not done: Windows and the Apple family, where all four have code written and not
+compiled; a real share; "For review", 5.
