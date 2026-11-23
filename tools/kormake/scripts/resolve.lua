@@ -106,7 +106,20 @@ function M.run(c, platform, config, opts)
         if not has_platform(rec, plat) then util.fail("'%s' is bound to '%s' on %s but does not support that platform", b, iface, plat) end
       end
     end
-    per_platform[plat] = { toolchain = tc, bindings = bindings }
+    -- What each external means here: the toolchain's, then the ones the project defines
+    -- for the platform (collect.lua), each a copy that remembers its file. The names are
+    -- one namespace, so a project cannot redefine the engine's.
+    local externals = {}
+    for k, v in pairs(tc.fields.externals or {}) do externals[k] = v end
+    for name, p in pairs((c.externals or {})[plat] or {}) do
+      if externals[name] then
+        util.fail("external '%s' is defined for %s in both %s (toolchain '%s') and %s", name, plat, tc.file, tc.name, p.file)
+      end
+      local e = { from = p.file, base = p.base }
+      for k, v in pairs(p.def) do e[k] = v end
+      externals[name] = e
+    end
+    per_platform[plat] = { toolchain = tc, bindings = bindings, externals = externals }
     return per_platform[plat]
   end
   local tc = platform_of(platform).toolchain
@@ -171,7 +184,9 @@ function M.run(c, platform, config, opts)
       end
     end
     for ext, spec in pairs(rec.fields.external or {}) do
-      if util.external_on(spec, plat) and not (pp.toolchain.fields.externals or {})[ext] then util.soft_fail("'%s' needs external '%s', which toolchain '%s' does not know", name, ext, pp.toolchain.name) end
+      if util.external_on(spec, plat) and not pp.externals[ext] then
+        util.soft_fail("'%s' needs external '%s', which toolchain '%s' does not know and no module or korvid.config defines for %s", name, ext, pp.toolchain.name, plat)
+      end
     end
     -- Tools: an interface or a tool module, instanced for the host. On a native build in
     -- the host config that is the target's own instance.
@@ -276,17 +291,92 @@ function M.run(c, platform, config, opts)
     inst.closure = list -- dependencies first, the instance itself excluded
   end
 
-  -- An external the toolchain keeps in a directory (a prebuilt package or an installed SDK)
-  -- is found wherever KORMAKE_<NAME>_DIR says, else where the variable its `env` names
-  -- says (an SDK's installer sets one), else at its `dir` under the project root. tc is the
-  -- toolchain as the platform sees it. A package that is not there is a soft failure, with
-  -- the toolchain's instructions.
+  -- What each external means on a platform: the toolchain's and the project's.
+  local function externals_of(plat) return platform_of(plat).externals end
+  g.externals_of = externals_of
+  -- Who defined an external, for messages: its toolchain, or the project's file.
+  local function definer(tc, e) return e.from or ("toolchain " .. tc.name) end
+
+  -- An external with pkg_config = "<package>" is asked of pkg-config (KORMAKE_PKG_CONFIG
+  -- names another program) when the platform is the machine kormake runs on: the include
+  -- directories, library directories and libraries it reports replace the external's own,
+  -- which are the fallback where there is no pkg-config or the target is another platform.
+  -- Only -I, -L and -l are taken. A package pkg-config does not find is a soft failure,
+  -- with the external's `fetch`. The package's .pc file becomes a regeneration input.
+  g.regen_inputs = {}
+  local pkg_program
+  local function pkg_config(args)
+    if pkg_program == nil then
+      local p = kfs.getenv("KORMAKE_PKG_CONFIG")
+      pkg_program = (p and p ~= "") and util.shell_quote(util.native(p)) or "pkg-config"
+    end
+    kfs.mkdirp(c.build_root)
+    local out = util.join(c.build_root, "pkg-config.txt")
+    local null = KORMAKE_HOST == "windows" and "NUL" or "/dev/null"
+    local rc = kfs.exec(pkg_program .. " " .. args .. " > " .. util.shell_quote(util.native(out)) .. " 2> " .. null)
+    return rc == 0, util.trim(kfs.read(out) or "")
+  end
+  local pkg_available
+  local function external_pkg(tc, ext, e, plat)
+    if not e.pkg_config or plat ~= host_platform or e.pkg_asked then return end
+    e.pkg_asked = true
+    if pkg_available == nil then pkg_available = pkg_config("--version") end
+    local hint = e.fetch or ("Install the development package that provides " .. e.pkg_config .. ".pc.")
+    if not pkg_available then
+      if e.libs or e.include or e.dir or e.env or e.frameworks then return end -- the explicit fields stand
+      e.pkg_failed = string.format("external '%s' (%s) is found with pkg-config, which is not on PATH (KORMAKE_PKG_CONFIG names another).\n%s",
+        ext, definer(tc, e), hint)
+      return
+    end
+    local name = util.shell_quote(e.pkg_config)
+    if not pkg_config("--exists " .. name) then
+      e.pkg_failed = string.format("external '%s' (%s): pkg-config does not find '%s'.\n%s", ext, definer(tc, e), e.pkg_config, hint)
+      return
+    end
+    local function words(flag, prefix)
+      local _, text = pkg_config(flag .. " " .. name)
+      local list = {}
+      for word in text:gmatch("%S+") do
+        if word:sub(1, #prefix) == prefix and #word > #prefix then list[#list + 1] = word:sub(#prefix + 1) end
+      end
+      return list
+    end
+    e.include, e.libdirs, e.libs = words("--cflags-only-I", "-I"), words("--libs-only-L", "-L"), words("--libs-only-l", "-l")
+    e.pkg_found = true
+    local _, pcdir = pkg_config("--variable=pcfiledir " .. name)
+    local pc = pcdir ~= "" and util.join((pcdir:gsub("\\", "/")), e.pkg_config .. ".pc") or nil
+    if pc and kfs.isfile(pc) then g.regen_inputs[#g.regen_inputs + 1] = pc end
+  end
+  -- The version a module asks of an external (pipewire = ">=0.3.60"), checked where
+  -- pkg-config found the package; anywhere else it is documentation.
+  local function external_version(inst, ext, e, spec)
+    local want = type(spec) == "table" and spec[1] or spec
+    if not e.pkg_found or type(want) ~= "string" then return end
+    local op, v = want:match("^%s*([<>=]*)%s*([%w%.%-_+~]+)%s*$")
+    local flag = ({ [">="] = "--atleast-version", ["=="] = "--exact-version", ["="] = "--exact-version", [""] = "--atleast-version",
+                    ["<="] = "--max-version" })[op or "?"]
+    if not flag then return end
+    local name = util.shell_quote(e.pkg_config)
+    if not pkg_config(flag .. "=" .. util.shell_quote(v) .. " " .. name) then
+      local _, have = pkg_config("--modversion " .. name)
+      util.soft_fail("'%s' needs external '%s' %s, and pkg-config finds %s %s.\n%s", inst.module.name, ext, want, e.pkg_config, have,
+        e.fetch or ("Install a newer " .. e.pkg_config .. "."))
+    end
+  end
+
+  -- An external kept in a directory (a prebuilt package or an installed SDK) is found
+  -- wherever KORMAKE_<NAME>_DIR says, else where the variable its `env` names says (an
+  -- SDK's installer sets one), else at its `dir`: under the engine root for a toolchain's,
+  -- beside the file that defined it for a project's. tc is the toolchain as the platform
+  -- sees it, e the external (the toolchain's own of that name by default). One pkg-config
+  -- found has no directory: its paths are absolute. A package that is not there is a soft
+  -- failure, with the definer's instructions.
   local external_dirs = {}
-  local function external_dir(tc, ext)
-    local e = tc.fields.externals[ext]
-    if not e.dir and not e.env then return nil end
-    local key = tc.name .. ":" .. ext
-    if external_dirs[key] then return external_dirs[key] end
+  local function external_dir(tc, ext, e)
+    e = e or tc.fields.externals[ext]
+    if e.pkg_failed then util.soft_fail("%s", e.pkg_failed) end
+    if e.pkg_found or (not e.dir and not e.env) then return nil end
+    if external_dirs[e] then return external_dirs[e] end
     local var = "KORMAKE_" .. ext:upper():gsub("[^%w]", "_") .. "_DIR"
     local env = kfs.getenv(var)
     if env == "" then env = nil end
@@ -296,16 +386,16 @@ function M.run(c, platform, config, opts)
       if env then var = e.env end
     end
     if not env and not e.dir then
-      util.soft_fail("external '%s' (toolchain %s): neither %s nor %s is set.\n%s", ext, tc.name, var, e.env,
+      util.soft_fail("external '%s' (%s): neither %s nor %s is set.\n%s", ext, definer(tc, e), var, e.env,
         e.fetch or ("Set " .. var .. " to the directory that holds it."))
     end
-    local dir = env and (env:gsub("\\", "/"):gsub("/$", "")) or (util.is_abs(e.dir) and e.dir or util.join(c.root_dir, e.dir))
+    local dir = env and (env:gsub("\\", "/"):gsub("/$", "")) or (util.is_abs(e.dir) and e.dir or util.join(e.base or c.root_dir, e.dir))
     local check = util.join(dir, e.check or (e.include and e.include[1]) or ".")
     if not (kfs.isdir(check) or kfs.isfile(check)) then
-      util.soft_fail("external '%s' (toolchain %s) is not at %s%s.\n%s", ext, tc.name, dir,
+      util.soft_fail("external '%s' (%s) is not at %s%s.\n%s", ext, definer(tc, e), dir,
         env and (", where " .. var .. " points") or "", e.fetch or ("Set " .. var .. " to the directory that holds it."))
     end
-    external_dirs[key] = dir
+    external_dirs[e] = dir
     return dir
   end
   g.external_dir = external_dir
@@ -340,7 +430,12 @@ function M.run(c, platform, config, opts)
       local ok, err = pcall(function()
         local f = inst.module.fields
         for _, ext in ipairs(util.sorted_keys(f.external or {})) do
-          if util.external_on(f.external[ext], inst.platform) then external_dir(inst.toolchain, ext) end
+          if util.external_on(f.external[ext], inst.platform) then
+            local e = externals_of(inst.platform)[ext]
+            external_pkg(inst.toolchain, ext, e, inst.platform)
+            external_dir(inst.toolchain, ext, e)
+            external_version(inst, ext, e, f.external[ext])
+          end
         end
         for _, pi in ipairs(f.private_includes or {}) do
           if not kfs.isdir(util.join(inst.module.dir, pi)) then util.soft_fail("private include '%s' is not a directory", pi) end

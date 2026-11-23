@@ -1,0 +1,30 @@
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake gen host-dev
+kormake: {project}/build/{host}-dev/build.ninja (9 instances)
+kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake graph host-dev
+codec@{host}-dev                          lib      deps:   externals: sysaudio ({project}/modules/codec/module.lua)
+base@{host}-dev                           lib      deps:   externals: pkg
+player@{host}-dev                         exe      deps: base, codec  externals: fakepw ({project}/modules/player/module.lua), shared ({project}/korvid.config)
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config FAKE_PKG_MISSING=libfakepw-0.3 kormake check host-dev
+kormake: left out of {host}-dev: extra: external 'missing' (toolchain toolchain.host) is not at {root}/packages/missing.
+Fetch it into packages/missing.
+kormake: cannot build player for {host}-dev: external 'fakepw' ({project}/modules/player/module.lua): pkg-config does not find 'libfakepw-0.3'.
+sudo apt install libfakepw-0.3-dev
+kormake: 11 modules, 9 instances for {host}-dev, 1 problem
+[exit 1]
+
+$ KORMAKE_PKG_CONFIG=pkgs/no-such-program kormake gen host-dev
+kormake: {project}/build/{host}-dev/build.ninja (9 instances)
+kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+[exit 0]
+
+  libs = -lsysaudio -lpkg -lfakepw-fallback -lshared -L'/usr/lib/sysaudio' -L'{root}/packages/pkg/lib' -L'{project}/vendor/shared/lib'
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake check cross-dev
+kormake: 'codec' needs external 'sysaudio', which toolchain 'toolchain.cross' does not know and no module or korvid.config defines for cross
+[exit 1]
+

@@ -31,8 +31,8 @@ It is done when:
   MSVC.
 - The events documentation says that order across event types is not kept, and what to
   do instead.
-- Korvid's own tree builds byte for byte as before: `tools/kormake/tests/run.sh` passes
-  with its existing expected files untouched, and the demos' hashes do not move.
+- Korvid's own tree builds as before: the build files kormake writes for it differ only
+  in the version on their first line, and the demos' hashes do not move.
 
 ## What the code has
 
@@ -94,8 +94,9 @@ external "sqlite" {
   from `kormake check` and before any compile.
 - **Regeneration.** The package's `.pc` file (`--variable=pcfiledir`) is a regeneration
   input, so upgrading the package regenerates.
-- **`kormake graph` and the host-tools line** list a project's externals beside the
-  engine's, each marked with the file that defined it.
+- **`kormake graph`** lists each instance's externals, a project's marked with the file
+  that defined it. The host-tools line already shows what a tool links, whoever defined
+  it.
 
 **Sanitizer builds (KR2).** `--sanitize <list>` on `build` and `test`, Linux first.
 
@@ -197,9 +198,9 @@ the first of these done by hand.
 
 ## Milestones
 
-1. **Externals** (KR1, R10). Collect, resolve and emit; the fixture gains a project
-   module with a `pkg_config` external and a fake `pkg-config`, with new expected files
-   beside the old ones. Then Blackwing's `hifi_platform` against the real PipeWire.
+1. **Externals** (KR1, R10). Collect, resolve and emit; a test project beside the
+   fixture with a `pkg_config` external and a fake `pkg-config`, with expected files of
+   its own. Then Blackwing's `hifi_platform` against the real PipeWire.
 2. **The small ones** (KR3, KR9). A `cli` test for the null sink; the three pieces of
    text.
 3. **The queue** (KR4, KR6, KR5, in that order: each is smaller once the one before is
@@ -212,7 +213,7 @@ the first of these done by hand.
 6. **`wrapv`** (KR8). Blackwing's `flac.cc` drops its GCC pragma.
 
 **Verification.** `kormake build` and `kormake test` for linux-debug, linux-dev and
-linux-ship. `tools/kormake/tests/run.sh` with the old expected files unchanged.
+linux-ship. `tools/kormake/tests/run.sh` passes.
 arcfire's and arcanum's demos hash as recorded. Blackwing builds and passes its tests
 against the result, with its no-op sink and its "path is too long" failure removed. The
 audio class is checked with `sched_getscheduler` where `RLIMIT_RTPRIO` allows, and by
@@ -238,4 +239,34 @@ slice unless a machine is to hand: the status says which.
 
 ## Status
 
-Not started.
+**Milestone 1, externals (KR1, R10): built Nov 22, 2026 on branch `slice-10`.** kormake
+is 1.2. What the build added or settled beyond the text above:
+
+- **`requires_kormake` in a `korvid.config`**, checked down to the minor version (the
+  master file's check is of the major only), so a project that uses `externals` says
+  "1.2" and an older binary says to run the bootstrap.
+- **A toolchain's external may use `pkg_config` too**: it is one code path.
+- **pkg-config's other flags are not taken**: only `-I`, `-L` and `-l`. PipeWire's
+  `-D_REENTRANT` is dropped, which is harmless beside `-lpthread`.
+- **Version operators**: `>=`, `==` (or `=`) and `<=`; a bare version means `>=`.
+- **An external a module uses on a platform nobody defines it for** is the soft failure
+  it was, with a longer message. In a project every module is a root, so there it stops
+  `check`: a module that uses PipeWire on Linux only says
+  `external = { pipewire = { ">=0.3.60", platforms = { "linux" } } }`.
+- **kormake's own test was failing on `main`** before this work: `tests/expected/` had
+  fallen behind (the `KV_BIND_*` defines, among others). The expected files are written
+  again here. Against a kormake built from `main`, this branch changes two things in
+  them: the version on each build file's first line, and `externals:` on `graph` lines.
+- **Checked on Linux:** the engine's `build/linux-dev/build.ninja` differs from `main`'s
+  in its first line only. A scratch project outside the engine built and ran a program
+  against `libdrm` found by the real pkg-config (2.5.1), its `.pc` file among the build
+  file's inputs; `">=99"` was refused with the version found; a module that redefined
+  `sdl3` was refused with both files named.
+- **Not done:** Blackwing's `hifi_platform` against PipeWire. This machine has no
+  `libpipewire-0.3-dev`: a module that asks for it gets "pkg-config does not find
+  'libpipewire-0.3'" and the `fetch` line from `kormake check`, which is the other half
+  of KR1's test. Nothing in Blackwing's tree was changed.
+- **Not verified:** Windows and macOS. The project half of kormake's test is not run on
+  Windows (the fake pkg-config is a shell script).
+
+Milestones 2 to 6: not started.

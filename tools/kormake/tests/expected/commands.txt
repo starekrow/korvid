@@ -20,8 +20,8 @@ kormake: 9 modules, 8 instances for cross-dev, no problems
 [exit 0]
 
 $ kormake graph cross-dev
-base@cross-dev                           lib      deps:   [tests]
-base@{host}-dev                           lib      deps: 
+base@cross-dev                           lib      deps:   externals: pkg, sys  [tests]
+base@{host}-dev                           lib      deps:   externals: pkg
 compiler@{host}-dev                       exe      deps: base
 gfx@cross-dev                            headers  deps: base  tools: compiler
 gfx-soft@cross-dev                       lib      deps: base
@@ -51,7 +51,7 @@ kormake: 9 modules, 7 instances for {host}-dev, 1 problem
 [exit 1]
 
 $ KORMAKE_PKG_DIR=nowhere kormake graph host-dev
-base@{host}-dev                           lib      deps:   [tests]  [cannot build: external 'pkg' (toolchain toolchain.host) is not at nowhere, where KORMAKE_PKG_DIR points.]
+base@{host}-dev                           lib      deps:   externals: pkg  [tests]  [cannot build: external 'pkg' (toolchain toolchain.host) is not at nowhere, where KORMAKE_PKG_DIR points.]
 compiler@{host}-dev                       exe      deps: base
 gfx@{host}-dev                            headers  deps: base  tools: compiler
 gfx-soft@{host}-dev                       lib      deps: base

@@ -30,7 +30,7 @@ Everything is a module: engine libraries, backends, games, build-time tools, and
 toolchains. A tool that a module uses at build time (a shader compiler, the packer) is
 built for the machine running the build, in the same Ninja graph, ahead of the module
 that uses it. The model is laid out in `docs/PRDs/Kormake-v1-Dev-PRD.md`, and this
-version's changes in `docs/PRDs/Kormake-1.1-Dev-PRD.md`. See `BUILDING.md` beside this
+version's changes in `docs/PRDs/Kormake-1.1-Dev-PRD.md` and, for 1.2, `docs/PRDs/Engine-Slice-10-PRD.md`. See `BUILDING.md` beside this
 file for how to bootstrap kormake and how it works inside.
 
 Each command line is made of a command, some module names, and one target. These can come
@@ -85,7 +85,8 @@ in any order, except that the command has to be the first word.
 
 **graph**
 : Prints the instance graph in dependency order: each instance's output, what it links,
-  the tools it uses, and whether a root asks for its tests. With NAMEs (or a current
+  the tools it uses, its externals (a project's with the file that defines it), and whether
+  a root asks for its tests. With NAMEs (or a current
   directory that selects modules), it prints only those modules and what they reach.
   Without them it prints what the roots reach. `--dot` prints Graphviz input instead, with tool edges drawn dashed. `--why MODULE`
   prints the chain of instances that pulled MODULE into the graph.
@@ -105,7 +106,7 @@ in any order, except that the command has to be the first word.
   empty. It removes nothing else it finds there, and never `dist/`. This command takes no NAMEs.
 
 **help**, **--version**
-: Print the usage summary, or the version (`kormake 1.1 (Lua 5.5)`).
+: Print the usage summary, or the version (`kormake 1.2 (Lua 5.5)`).
 
 ## TARGETS
 
@@ -211,6 +212,10 @@ as the master file, and its paths are relative to the file's own directory.
     build "build"              -- the directory that holds <target>/ (see below)
     target "linux-dev"         -- the default TARGET
     cook "copy_assets {in} {out}"   -- what cooks assets (see Assets); the default is goldberg
+    requires_kormake "1.2"     -- a kormake older than this, down to the minor version, is an error
+    external "sqlite" {        -- an external the project defines, per platform (see Externals)
+      linux = { pkg_config = "sqlite3", fetch = "sudo apt install libsqlite3-dev" },
+    }
 
 It is best to write `engine` relative to your development directory, so the file works in
 any checkout that has the same layout. `examples/korvid.config` and `tools/korvid.config`
@@ -303,7 +308,8 @@ the build directory, never in the source tree.
 | `platforms` | The platforms the module builds for; the default is all of them. `"host"` builds it only for the machine running the build, whoever asks for it (`kpack`). Linking such a module is an error; name it in `tools` |
 | `tools` | Tool modules or interfaces whose rules apply to this module's files. Each one is built for the host. `["shader-compile"] = { install = "shaders" }` writes the outputs to `bin/shaders/` instead of `gen/` |
 | `exports` | The rules the module offers as a tool: `rule "name" { inputs, outputs, command, deps, per, platforms }` (see Tool rules) |
-| `external` | System libraries by name and version: `{ sdl3 = ">=3.2" }`, or `{ sdl3 = { ">=3.2", platforms = { "linux" } } }`. The toolchain defines what each name means |
+| `external` | System libraries by name and version: `{ sdl3 = ">=3.2" }`, or `{ sdl3 = { ">=3.2", platforms = { "linux" } } }`. The toolchain defines what each name means, or the project does (`externals`, below). The version is checked where pkg-config found the package, and is documentation otherwise |
+| `externals` | Externals this module defines, per platform: `{ linux = { pipewire = { pkg_config = "libpipewire-0.3", fetch = "sudo apt install libpipewire-0.3-dev" } } }`. Any module may then name one in `external` (see Externals) |
 | `sources` | Replaces the convention with this list of files, relative to the module |
 | `defines` | Preprocessor definitions for the module's own sources and tests |
 | `private_includes` | Directories under the module that are on the include path of its own sources and tests but not of the modules that link it (a vendored library that includes its own headers by `<name>`) |
@@ -336,12 +342,33 @@ whose applications are libraries the OS loads (Android) says so with `app_module
 Another module that sets one of these is an error, as is a `per_platform` section that
 sets anything else.
 
-An external in a toolchain's `externals` lists `libs` to link, and Apple `frameworks`.
-For a package kept in a directory (an SDK, an unpacked download), it also lists `dir`
-(relative to the engine root) or `env` (a variable an installer sets), along with
-`include`, `libdirs`, `runtime` (files copied beside each executable that links it),
-`check` (the file that proves the package is there), and `fetch` (instructions printed
-when the package is missing).
+**Externals.** An external is a library from outside the build, by name. What a name
+means on a platform is defined in one of three places: the platform's toolchain
+(`externals = { sdl3 = {...} }`), a module (`externals = { linux = { pipewire = {...} } }`),
+or a `korvid.config` (`external "sqlite" { linux = {...} }`). The last two are how a
+project links a library the engine does not use, without editing a toolchain. The names
+are one namespace: one defined twice for a platform is an error that names both files,
+so a project cannot redefine the engine's `sdl3`. A module's definition is not private
+to it. `kormake graph` lists each instance's externals, a project's with its file.
+
+An external lists `libs` to link, and Apple `frameworks`. For a package kept in a
+directory (an SDK, an unpacked download), it also lists `dir` or `env` (a variable an
+installer sets), along with `include`, `libdirs`, `runtime` (files copied beside each
+executable that links it), `check` (the file that proves the package is there), and
+`fetch` (instructions printed when the package is missing). A toolchain's `dir` is
+relative to the engine root; a module's or a config's, to the directory of the file that
+wrote it. An `include` or `libdirs` entry may be an absolute path, with or without a
+`dir`, for a system package that has no directory of its own.
+
+`pkg_config = "<package>"` asks pkg-config instead, at generation time, when the target's
+platform is the machine kormake runs on. The `-I`, `-L` and `-l` it reports replace
+`include`, `libdirs` and `libs`; its other flags (`-D_REENTRANT`, `-pthread`) are not
+taken. The headers are system headers (`flag_include_system`), like a directory
+external's. The version a module asks for (`">=0.3.60"`, `"==2"`, `"<=5"`) is checked
+with it. A package it does not find is reported with the `fetch` line by `kormake check`
+and before any compile. The explicit fields beside `pkg_config` are what is used when
+there is no pkg-config on the machine or the target is another platform. The package's
+`.pc` file is an input of the build file, so upgrading the package regenerates.
 
 **Tool rules.** A tool exports `rule "name" { inputs, outputs, command, deps }`. A module
 that names the tool in `tools` gets one Ninja edge for each of its own files that matches
@@ -462,6 +489,10 @@ test and what it runs, built, not run), and one phony per module, named for the 
 **KORMAKE_<NAME>_DIR**
 : Where a toolchain's directory external is, for example `KORMAKE_SDL3_DIR` or
   `KORMAKE_VULKAN_DIR`. This takes priority over the external's `env` and `dir`.
+
+**KORMAKE_PKG_CONFIG**
+: The program asked about an external with `pkg_config`. The default is `pkg-config` on
+  `PATH`.
 
 **KORMAKE_SDKROOT**
 : The Apple SDK to use instead of the one `xcrun` reports.

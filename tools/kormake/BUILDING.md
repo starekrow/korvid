@@ -66,6 +66,7 @@ tools/kormake/
   scripts/package_app.lua                    ... and the .app bundle on Apple platforms
   tests/run.sh       kormake's own test (see Testing kormake)
   tests/fixture/     ... an engine root of its own that the test generates
+  tests/project/     ... a project beside it, with externals of its own and a fake pkg-config
   tests/expected/    ... and what it must generate
   (modules/lua/vendor/lua/   Lua 5.5.1, the lua module's, which the bootstrap compiles in)
 ```
@@ -198,6 +199,15 @@ the left-out module. It compares each `build.ninja` and the commands' output wit
 `tests/expected/`. Paths are written as `{root}` and `{kormake}`, and the host's
 platform as `{host}`, so the expected files are the same on Linux and macOS. When Ninja
 is on `PATH`, it also parses each file with a dry run.
+
+`tests/project/` is a project outside that engine root (`engine "../fixture"`), copied
+beside it: an external its `korvid.config` defines, one a module defines with absolute
+paths, and one asked of pkg-config. `KORMAKE_PKG_CONFIG` names `pkgs/fake-pkg-config`, a
+shell script that knows one package, so the result is the same on every machine. The
+script runs `gen`, `graph`, a `check` with the package missing, a `gen` with no
+pkg-config at all, and a `check` for a platform the project defines nothing for, into
+`expected/project-*` with the project's path written as `{project}`. On Windows this
+part is not run.
 
 Run it after any change to `scripts/`. A difference is either a bug or a change you
 meant; for the second, run it with `--update` and commit `tests/expected/` with the

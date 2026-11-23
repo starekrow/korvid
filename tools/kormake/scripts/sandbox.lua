@@ -42,7 +42,25 @@ local module_fields = {
   -- instruction set the toolchain names in `isa` ({ avx2 = { "src/raster.cc" } }).
   codegen = true, isa_sources = true,
   test_deps = true, -- modules the module's tests use and it does not, linked into its test only
+  -- externals: for a toolchain, what each external means on its platforms ({ sdl3 = {...} });
+  -- for any other module, externals it defines itself, per platform
+  -- ({ linux = { pipewire = { pkg_config = "libpipewire-0.3" } } }): collect.lua.
+  externals = true,
 }
+-- What an external a module or a korvid.config defines may set (a toolchain's take the
+-- same). pkg_config: the package pkg-config is asked for (resolve.lua).
+local external_fields = { libs = true, frameworks = true, dir = true, env = true, include = true, libdirs = true,
+                          runtime = true, check = true, fetch = true, pkg_config = true }
+-- One external's definition, checked: where names the file and the platform.
+function M.check_external(where, name, e)
+  if type(name) ~= "string" or name == "" or type(e) ~= "table" then util.fail("%s: an external is a name and a table", where) end
+  for k, v in pairs(e) do
+    if not external_fields[k] then util.fail("%s: external '%s' has an unknown field '%s'", where, name, tostring(k)) end
+    local list = k == "libs" or k == "frameworks" or k == "include" or k == "libdirs" or k == "runtime"
+    if list and type(v) ~= "table" then util.fail("%s: external '%s': %s takes a list", where, name, k) end
+    if not list and type(v) ~= "string" then util.fail("%s: external '%s': %s takes a string", where, name, k) end
+  end
+end
 -- What only a toolchain (provides = "toolchain") may set, at its top or in a per_platform
 -- section: its tag and source directories, the compiler, archiver and linker with their
 -- flags (configs: per config), what each external means (externals) and the default
@@ -100,7 +118,7 @@ function M.eval_module(path, text)
         if type(k) ~= "string" or not (module_fields[k] or toolchain_fields[k]) then
           util.fail("%s: module '%s' has an unknown field '%s'", path, name, tostring(k))
         end
-        if toolchain_fields[k] and not toolchain then
+        if toolchain_fields[k] and not module_fields[k] and not toolchain then
           util.fail("%s: module '%s' sets '%s', which only a toolchain (provides = \"toolchain\") may set", path, name, k)
         end
         result.fields[k] = copy_data(v)
@@ -170,7 +188,9 @@ function M.eval_master(path, text)
   return m
 end
 
--- A korvid.config: engine, modulepath, build, target. Paths are relative to the file.
+-- A korvid.config: engine, modulepath, build, target, and the externals the project
+-- defines (external "sqlite" { linux = { pkg_config = "sqlite3" } }: per platform, as a
+-- module's `externals`). Paths are relative to the file.
 function M.eval_config(path, text)
   local env = base_env()
   local m = {}
@@ -181,6 +201,15 @@ function M.eval_config(path, text)
     end
   end
   env.engine, env.build, env.target, env.cook = str("engine"), str("build"), str("target"), str("cook")
+  env.requires_kormake = str("requires")
+  env.external = function(name)
+    return function(t)
+      if type(name) ~= "string" or name == "" or type(t) ~= "table" then util.fail("%s: external takes a name and a table of platforms", path) end
+      m.externals = m.externals or {}
+      if m.externals[name] then util.fail("%s: external '%s' is defined twice", path, name) end
+      m.externals[name] = copy_data(t)
+    end
+  end
   env.modulepath = function(t)
     m.modulepaths = m.modulepaths or {}
     for _, p in ipairs(util.as_list(t)) do m.modulepaths[#m.modulepaths + 1] = p end

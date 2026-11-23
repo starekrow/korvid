@@ -66,6 +66,14 @@ function M.run(found)
     local have_major = tonumber(KORMAKE_VERSION:match("^(%d+)")) or 0
     if want_major > have_major then util.fail("%s requires kormake %s, this is %s", master_path, master.requires, KORMAKE_VERSION) end
   end
+  -- A project's config may ask for more than the engine's master file does, down to the
+  -- minor version: a field this binary does not know would otherwise be the first it hears.
+  if decl.requires then
+    local function parts(v) local a, b = v:match("^(%d+)%.?(%d*)"); return tonumber(a) or 0, tonumber(b) or 0 end
+    local wa, wb = parts(decl.requires)
+    local ha, hb = parts(KORMAKE_VERSION)
+    if wa > ha or (wa == ha and wb > hb) then util.fail("%s requires kormake %s, this is %s; run the engine's tools/kormake/bootstrap", found.config, decl.requires, KORMAKE_VERSION) end
+  end
 
   -- Module paths: the master file's (relative to the root), the config's (relative to it;
   -- its own directory unless it says otherwise), then KORMAKE_MODULE_PATH. Each directory
@@ -128,6 +136,33 @@ function M.run(found)
       end
     end
   end
+  -- Externals defined outside the toolchains: a korvid.config's (external "name" { <platform>
+  -- = {...} }) and a module's (externals = { <platform> = { name = {...} } }), per platform.
+  -- One namespace with the toolchain's: a name defined twice for a platform is an error
+  -- that names both files (here; against the toolchain's, in resolve.lua). `base` is where
+  -- a relative `dir` starts: the directory of the file that wrote it.
+  local externals = {}
+  local function define(plat, name, e, file, dir)
+    local where = file .. " (" .. tostring(plat) .. ")"
+    if not util.contains(master.platforms, plat) then util.fail("%s: external '%s' names '%s', which is not a platform of the master file", file, tostring(name), tostring(plat)) end
+    sandbox.check_external(where, name, e)
+    externals[plat] = externals[plat] or {}
+    local had = externals[plat][name]
+    if had then util.fail("external '%s' is defined for %s in both %s and %s", name, plat, had.file, file) end
+    externals[plat][name] = { def = e, file = file, base = dir }
+  end
+  for _, name in ipairs(util.sorted_keys(decl.externals or {})) do
+    for _, plat in ipairs(util.sorted_keys(decl.externals[name])) do define(plat, name, decl.externals[name][plat], found.config, found.anchor) end
+  end
+  for _, rec in ipairs(modules) do
+    if rec.fields.provides ~= "toolchain" and rec.fields.externals then
+      for _, plat in ipairs(util.sorted_keys(rec.fields.externals)) do
+        local per = rec.fields.externals[plat]
+        if type(per) ~= "table" then util.fail("%s: externals.%s takes a table of externals", rec.file, tostring(plat)) end
+        for _, name in ipairs(util.sorted_keys(per)) do define(plat, name, per[name], rec.file, rec.dir) end
+      end
+    end
+  end
   -- A project: a config whose paths bring in modules the master file's do not. A config
   -- that adds none (in examples/, or at the root to set a target) is the engine's.
   local added = false
@@ -150,7 +185,7 @@ function M.run(found)
   end
   return { master = master, modules = modules, by_name = by_name, root_dir = root_dir, base_dir = base,
            build_root = build_root, anchor = found.anchor, start = found.start, config = found.config,
-           default_target = decl.target, project = added,
+           default_target = decl.target, project = added, externals = externals,
            -- Where a regeneration starts: the config's directory when the config changes the
            -- build (its paths, its build directory), else the root, so a build file written
            -- from examples/ is the one written from the root.

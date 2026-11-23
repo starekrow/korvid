@@ -314,8 +314,19 @@ local function run(cmd, words, opts)
       for _, d in ipairs(inst.deps) do deps[#deps + 1] = d.module.name end
       local tools = {}
       for _, t in ipairs(inst.tools) do tools[#tools + 1] = t.instance.module.name end
-      print(string.format("%-40s %-8s deps: %s%s%s%s", inst.key, inst.module.fields.output or "lib", table.concat(deps, ", "),
-        #tools > 0 and ("  tools: " .. table.concat(tools, ", ")) or "", inst.tests and "  [tests]" or "",
+      -- What it links from outside: the toolchain's externals by name, a project's with the
+      -- file that defines it.
+      local exts = {}
+      local ext_fields = inst.module.fields.external or {}
+      for _, ext in ipairs(util.sorted_keys(ext_fields)) do
+        if util.external_on(ext_fields[ext], inst.platform) then
+          local e = g.externals_of(inst.platform)[ext]
+          exts[#exts + 1] = ext .. (e and e.from and (" (" .. e.from .. ")") or "")
+        end
+      end
+      print(string.format("%-40s %-8s deps: %s%s%s%s%s", inst.key, inst.module.fields.output or "lib", table.concat(deps, ", "),
+        #tools > 0 and ("  tools: " .. table.concat(tools, ", ")) or "", #exts > 0 and ("  externals: " .. table.concat(exts, ", ")) or "",
+        inst.tests and "  [tests]" or "",
         inst.problem and ("  [cannot build: " .. inst.problem:match("^[^\n]*") .. "]") or ""))
       ::next_inst::
     end

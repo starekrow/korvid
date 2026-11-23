@@ -51,7 +51,7 @@ function M.run(c, g, opts)
   -- What an instance compiles and links with: its platform's toolchain in its config, plus
   -- what the toolchain's probe found. The target's are the file's variables; a host
   -- instance overrides them on each build statement.
-  local function flags_of(tc, conf, cross)
+  local function flags_of(tc, conf, cross, plat)
     local t = toolchain(tc)
     local tcf, pr = t.fields, t.probed
     local cf = (tcf.configs or {})[conf]
@@ -63,14 +63,14 @@ function M.run(c, g, opts)
       cxxflags = util.trim(flag_list(tcf.cxxflags) .. " " .. flag_list(cf and cf.cxxflags) .. " " .. flag_list(pr.cxxflags)),
       ldflags = util.trim(flag_list(cf and cf.ldflags) .. " " .. flag_list(tcf.ldflags) .. " " .. flag_list(pr.ldflags)),
       srcdirs = tcf.srcdirs or {},
-      externals = tcf.externals or {},
+      externals = g.externals_of(plat), -- the toolchain's and the project's (resolve.lua)
     }
   end
-  local target_flags = flags_of(g.toolchain, g.config, false)
+  local target_flags = flags_of(g.toolchain, g.config, false, g.platform)
   g.ninja = target_flags.tc.probed.ninja
   local function flags(inst)
     if inst.prefix == "" then return target_flags end
-    inst.flags = inst.flags or flags_of(inst.toolchain, inst.config, inst.platform ~= g.platform)
+    inst.flags = inst.flags or flags_of(inst.toolchain, inst.config, inst.platform ~= g.platform, inst.platform)
     return inst.flags
   end
   local function rule(inst, name) return name .. "_" .. flags(inst).tc.tag end
@@ -87,7 +87,14 @@ function M.run(c, g, opts)
   local function w(s) out[#out + 1] = s end
 
   -- Where an external's package is (resolve found it, or it is not kept in a directory).
-  local function external_dir(fl, ext) return g.external_dir(fl.tc.rec, ext) end
+  local function external_dir(fl, ext) return g.external_dir(fl.tc.rec, ext, fl.externals[ext]) end
+  -- One of an external's include or library directories: under its package's directory,
+  -- or absolute as written (a system package's, or what pkg-config reported). nil for a
+  -- relative one with no directory to be under.
+  local function external_path(d, p)
+    if util.is_abs(p) then return p end
+    return d and util.join(d, p) or nil
+  end
   -- The externals of these modules that apply on the instance's platform, in name order.
   local function externals_used(inst, mods)
     local seen, list = {}, {}
@@ -117,9 +124,12 @@ function M.run(c, g, opts)
         if not util.contains(libs, flag) then libs[#libs + 1] = flag end
       end
       local d = external_dir(fl, ext)
-      for _, ld in ipairs(d and e.libdirs or {}) do
-        local spell = fl.tc.fields.flag_libdir or util.fail("toolchain '%s' does not set flag_libdir, which external '%s' needs", fl.tc.rec.name, ext)
-        dirs[#dirs + 1] = spell:format(q(util.join(d, ld)))
+      for _, ld in ipairs(e.libdirs or {}) do
+        local p = external_path(d, ld)
+        if p then
+          local spell = fl.tc.fields.flag_libdir or util.fail("toolchain '%s' does not set flag_libdir, which external '%s' needs", fl.tc.rec.name, ext)
+          dirs[#dirs + 1] = spell:format(q(p))
+        end
       end
     end
     return libs, dirs
@@ -314,7 +324,10 @@ function M.run(c, g, opts)
     local sys = fl.tc.fields.flag_include_system or spell
     for _, ext in ipairs(externals_used(inst, { inst.module })) do
       local d = external_dir(fl, ext)
-      for _, i in ipairs(d and fl.externals[ext].include or {}) do dirs[#dirs + 1] = sys:format(q(util.join(d, i))) end
+      for _, i in ipairs(fl.externals[ext].include or {}) do
+        local p = external_path(d, i)
+        if p then dirs[#dirs + 1] = sys:format(q(p)) end
+      end
     end
     return table.concat(dirs, " ")
   end
@@ -966,6 +979,8 @@ function M.run(c, g, opts)
   if c.regen_config then inputs[#inputs + 1] = c.regen_config end
   -- Every module file collected, built here or not: an edit may let a left-out one in.
   for _, rec in ipairs(c.modules) do inputs[#inputs + 1] = rec.file end
+  -- The .pc files pkg-config answered from: a package upgraded is a build regenerated.
+  for _, pc in ipairs(g.regen_inputs or {}) do inputs[#inputs + 1] = pc end
   w("build build.ninja: regen | " .. util.ninja_paths(inputs))
 
   kfs.mkdirp(util.join(build, "test"))

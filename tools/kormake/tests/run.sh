@@ -31,7 +31,9 @@ KORMAKE=$(native "$(cd "$(dirname "$KORMAKE")" && pwd)/$(basename "$KORMAKE")")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cp -R "$here/fixture" "$tmp/fixture"
+cp -R "$here/project" "$tmp/project"
 root=$(native "$(cd "$tmp/fixture" && pwd -P)")
+proj=$(native "$(cd "$tmp/project" && pwd -P)")
 out="$tmp/out"
 mkdir -p "$out"
 
@@ -57,20 +59,23 @@ host_spelling() {
 slashes() { if [ "$host" = windows ]; then sed -e 's|\\|/|g'; else cat; fi; }
 normalize() {
   slashes | sed -E -e "s|$(re "$(ninja_path "$root")")|{root}|g" -e "s|$(re "$root")|{root}|g" \
+         -e "s|$(re "$(ninja_path "$proj")")|{project}|g" -e "s|$(re "$proj")|{project}|g" \
          -e "s|$(re "$(ninja_path "$KORMAKE")")|{kormake}|g" -e "s|$(re "$KORMAKE")|{kormake}|g" \
          -e "s/(^|[^a-z])$host-(dev|ship)/\1{host}-\2/g" \
          -e "s/_${host}([ _]|\$)/_{host}\1/g" | host_spelling # a rule variant's name: tool_x_y_<platform>[_<module>]
 }
 # One command, its output and exit status, into commands.txt. With VAR=value words
-# first, the command runs with those set.
+# first, the command runs with those set. It runs in $cwd and is logged to $log.
+cwd=$root
+log=commands.txt
 run() {
   vars=
   while [ "${1#*=}" != "$1" ]; do vars="$vars $1"; shift; done
-  echo "\$${vars} kormake $*" >>"$out/commands.txt.raw"
+  echo "\$${vars} kormake $*" >>"$out/$log.raw"
   rc=0
-  (cd "$root" && env $vars "$KORMAKE" "$@") >>"$out/commands.txt.raw" 2>&1 || rc=$?
-  echo "[exit $rc]" >>"$out/commands.txt.raw"
-  echo >>"$out/commands.txt.raw"
+  (cd "$cwd" && env $vars "$KORMAKE" "$@") >>"$out/$log.raw" 2>&1 || rc=$?
+  echo "[exit $rc]" >>"$out/$log.raw"
+  echo >>"$out/$log.raw"
 }
 
 for t in host-dev host-ship cross-dev; do
@@ -92,6 +97,33 @@ run KORMAKE_PKG_DIR=nowhere graph host-dev
 run KORMAKE_PKG_DIR=nowhere gen host-dev
 normalize <"$out/commands.txt.raw" >"$out/commands.txt"
 rm "$out/commands.txt.raw"
+
+# The project beside the fixture (tests/project): externals a module and a korvid.config
+# define, one of them asked of pkg-config (a fake one, a shell script: on Windows this part
+# is not run, and the expected files stand in for it).
+if [ "$host" = windows ]; then
+  cp "$here"/expected/project-* "$out/"
+else
+  cwd=$proj
+  log=project-commands.txt
+  fake=KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config
+  run $fake gen host-dev
+  normalize <"$proj/build/$host-dev/build.ninja" >"$out/project-host-dev.ninja"
+  if command -v ninja >/dev/null 2>&1; then
+    ninja -n -C "$proj/build/$host-dev" >/dev/null 2>"$tmp/ninja.err" || { echo "kormake tests: ninja cannot read the project's file:" >&2; cat "$tmp/ninja.err" >&2; exit 1; }
+  fi
+  run $fake graph host-dev
+  # The package pkg-config does not have: check says who needs it and how to get it.
+  run $fake FAKE_PKG_MISSING=libfakepw-0.3 check host-dev
+  # No pkg-config at all: the external's own fields stand.
+  run KORMAKE_PKG_CONFIG=pkgs/no-such-program gen host-dev
+  grep -e '-lfakepw' "$proj/build/$host-dev/build.ninja" >>"$out/$log.raw"
+  echo >>"$out/$log.raw"
+  # Not the host's platform: pkg-config is not asked, and the project defines nothing for it.
+  run $fake check cross-dev
+  normalize <"$out/$log.raw" >"$out/$log"
+  rm "$out/$log.raw"
+fi
 
 if [ -n "$update" ]; then
   rm -rf "$here/expected"
