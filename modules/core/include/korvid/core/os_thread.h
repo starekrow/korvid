@@ -32,6 +32,11 @@ void os_cond_destroy(OsCond* c);
 // Releases m, waits for a signal or broadcast (or wakes spuriously), and retakes m. The
 // caller holds m, and checks its condition again in a loop around the wait.
 void os_cond_wait(OsCond* c, OsMutex* m);
+// The same with a deadline `seconds` from now: false when the time ran out first, true
+// for any wake before it (a spurious one too, so the caller's loop is the same). 0 or less
+// returns false at once, m still held. The deadline is on the monotonic clock: a change
+// to the wall clock moves it nowhere.
+bool os_cond_timed_wait(OsCond* c, OsMutex* m, f64 seconds);
 // Wakes one waiter, or every waiter.
 void os_cond_signal(OsCond* c);
 void os_cond_broadcast(OsCond* c);

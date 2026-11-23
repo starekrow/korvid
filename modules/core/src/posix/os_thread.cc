@@ -36,9 +36,40 @@ void os_mutex_destroy(OsMutex* m) { pthread_mutex_destroy(native(m)); }
 void os_mutex_lock(OsMutex* m)    { pthread_mutex_lock(native(m)); }
 void os_mutex_unlock(OsMutex* m)  { pthread_mutex_unlock(native(m)); }
 
-void os_cond_init(OsCond* c)                { pthread_cond_init(native(c), nullptr); }
+// On the monotonic clock, so that os_cond_timed_wait's deadline is: pthreads' default is
+// the wall clock. Apple has no clock attribute, and a relative wait instead.
+void os_cond_init(OsCond* c) {
+#if defined(__APPLE__)
+    pthread_cond_init(native(c), nullptr);
+#else
+    pthread_condattr_t a;
+    pthread_condattr_init(&a);
+    pthread_condattr_setclock(&a, CLOCK_MONOTONIC);
+    pthread_cond_init(native(c), &a);
+    pthread_condattr_destroy(&a);
+#endif
+}
 void os_cond_destroy(OsCond* c)             { pthread_cond_destroy(native(c)); }
 void os_cond_wait(OsCond* c, OsMutex* m)    { pthread_cond_wait(native(c), native(m)); }
+bool os_cond_timed_wait(OsCond* c, OsMutex* m, f64 seconds) {
+    if (!(seconds > 0)) return false;          // NaN too
+    if (seconds > 1e9) seconds = 1e9;          // thirty years: past any deadline worth the name
+    i64  whole = (i64)seconds;
+    long nanos = (long)((seconds - (f64)whole) * 1e9);
+    timespec ts;
+#if defined(__APPLE__)
+    ts.tv_sec  = (time_t)whole;
+    ts.tv_nsec = nanos;
+    return pthread_cond_timedwait_relative_np(native(c), native(m), &ts) != ETIMEDOUT;
+#else
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ts.tv_sec  += (time_t)whole;
+    ts.tv_nsec += nanos;
+    if (ts.tv_nsec >= 1000000000L) { ts.tv_sec += 1; ts.tv_nsec -= 1000000000L; }
+    return pthread_cond_timedwait(native(c), native(m), &ts) != ETIMEDOUT;
+#endif
+}
+
 void os_cond_signal(OsCond* c)              { pthread_cond_signal(native(c)); }
 void os_cond_broadcast(OsCond* c)           { pthread_cond_broadcast(native(c)); }
 

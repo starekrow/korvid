@@ -31,6 +31,16 @@ void os_mutex_unlock(OsMutex* m)  { ReleaseSRWLockExclusive(native(m)); }
 void os_cond_init(OsCond* c)             { InitializeConditionVariable(native(c)); }
 void os_cond_destroy(OsCond*)            {}
 void os_cond_wait(OsCond* c, OsMutex* m) { SleepConditionVariableSRW(native(c), native(m), INFINITE, 0); }
+// Milliseconds rounded up, so a wait is never shorter than asked; INFINITE is one past
+// the longest (49 days).
+bool os_cond_timed_wait(OsCond* c, OsMutex* m, f64 seconds) {
+    if (!(seconds > 0)) return false;
+    f64 ms = seconds * 1000.0;
+    DWORD wait = ms >= 4294967294.0 ? 4294967294u : (DWORD)ms;
+    if ((f64)wait < ms && wait < 4294967294u) ++wait;
+    if (SleepConditionVariableSRW(native(c), native(m), wait, 0)) return true;
+    return GetLastError() != ERROR_TIMEOUT;
+}
 void os_cond_signal(OsCond* c)           { WakeConditionVariable(native(c)); }
 void os_cond_broadcast(OsCond* c)        { WakeAllConditionVariable(native(c)); }
 

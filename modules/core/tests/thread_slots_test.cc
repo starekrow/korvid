@@ -70,6 +70,49 @@ void test_thread_audio_class(kv::TestCtx& c) {
     KV_CHECK(c, !thread_is_realtime()); // the caller's thread is untouched
 }
 
+namespace {
+struct Waited { kv::OsMutex m; kv::OsCond cv; bool ready = false; };
+void signal_later(void* arg) {
+    Waited* w = (Waited*)arg;
+    kv::time_sleep(0.01);
+    kv::os_mutex_lock(&w->m);
+    w->ready = true;
+    kv::os_cond_signal(&w->cv);
+    kv::os_mutex_unlock(&w->m);
+}
+} // namespace
+
+void test_cond_timed_wait(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("cond timed wait");
+    Waited w;
+    os_mutex_init(&w.m);
+    os_cond_init(&w.cv);
+    os_mutex_lock(&w.m);
+    // No time: false at once, the mutex still held (unlocking it below would fail otherwise).
+    f64 t0 = time_now();
+    KV_CHECK(c, !os_cond_timed_wait(&w.cv, &w.m, 0.0) && !os_cond_timed_wait(&w.cv, &w.m, -1.0));
+    KV_CHECK(c, time_now() - t0 < 0.005);
+    // Nothing signals: the time runs out, and not before it.
+    t0 = time_now();
+    bool woke = os_cond_timed_wait(&w.cv, &w.m, 0.02);
+    f64 waited = time_now() - t0;
+    // A spurious wake is allowed to say true; one that does so early is not a timeout.
+    KV_CHECK(c, woke ? waited < 0.02 : waited >= 0.0195);
+    KV_CHECK(c, waited < 1.0);
+    // A signal before the deadline: true, long before it.
+    OsThread t;
+    KV_CHECK(c, os_thread_start(&t, signal_later, &w));
+    t0 = time_now();
+    bool signalled = true;
+    while (!w.ready && signalled) signalled = os_cond_timed_wait(&w.cv, &w.m, 5.0);
+    KV_CHECK(c, w.ready && signalled && time_now() - t0 < 4.0);
+    os_mutex_unlock(&w.m);
+    os_thread_join(&t);
+    os_cond_destroy(&w.cv);
+    os_mutex_destroy(&w.m);
+}
+
 void test_thread_slots(kv::TestCtx& c) {
     using namespace kv;
     c.begin("thread slots");

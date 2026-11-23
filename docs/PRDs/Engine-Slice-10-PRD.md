@@ -586,3 +586,21 @@ tested in a copy only), and anything on Windows or the Apple family.
   a removed root reports nothing more. Run three times.
 - **Checked:** `kormake test platform` on linux-debug. Not checked: a real NFS or SMB
   mount (none here), Windows, the Apple family.
+
+**Milestone 10, the timed wait (KR10): built Nov 23, 2026.**
+
+- **`os_cond_timed_wait(c, m, seconds)`** in `os_thread.h`. POSIX: every condition
+  variable is now made on `CLOCK_MONOTONIC` (it changes nothing for `os_cond_wait`, which
+  has no deadline), and the deadline is now plus `seconds` on that clock. Apple:
+  `pthread_cond_timedwait_relative_np`. Windows: `SleepConditionVariableSRW` with the
+  milliseconds rounded up and held below `INFINITE`; a failure that is not
+  `ERROR_TIMEOUT` is a wake. A time over 10^9 seconds is cut to that; NaN, like 0, returns
+  false at once.
+- **Tests** (`cond timed wait`): 0 and -1 return false at once with the mutex held; a
+  20 ms wait with nothing to wake it takes its 20 ms (a spurious wake is allowed, and
+  must then be early); a wait that another thread signals after 10 ms returns true well
+  inside its 5 s. Plain and under `--sanitize thread`.
+- **Checked:** `kormake test core` on linux-debug, and under TSan; the POSIX source
+  compiled for Android with the NDK alone, since `core` for android-dev does not build
+  (milestone 4 has why). Not checked: Windows, the Apple family. Blackwing's `hifi`
+  still naps; changing it is Blackwing's.
