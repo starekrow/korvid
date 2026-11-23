@@ -622,3 +622,10 @@ arcanum's demo hashes are still `93d0e91`'s, tick for tick, at the default rate 
 `--rate 4`. The engine's `build.ninja` gains `platform`'s new test source and nothing
 else. Not done: Windows and the Apple family, where all four have code written and not
 compiled; a real share; "For review", 5.
+
+**`asset_live` in ship, Nov 23, 2026.** Its failure was the test's: `asset_live_startup`
+turns the module off without `KV_DEV`, as its README says, and the test, written with
+that guard (258a300), expected a connection in every config. In ship the test now checks
+the opposite, that a listener named by `KV_GOLDBERG` is never called. `kormake test
+asset_live` passes on linux-debug, linux-dev and linux-ship, so linux-ship's
+`kormake test` has no known failure left.

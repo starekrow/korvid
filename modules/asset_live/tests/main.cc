@@ -1,7 +1,8 @@
 // asset_live against a stand-in for goldberg: a listener in the test, named by KV_GOLDBERG. The
 // program connects and says hello; `changed PATH` reloads that asset, heard through the waker the
 // on-demand loop asks (engine_wake) as well as the Input phase's pump; the stand-in going away is
-// noticed, and a new one is found again. KV_GOLDBERG=off connects to nothing.
+// noticed, and a new one is found again. KV_GOLDBERG=off connects to nothing. A ship build
+// connects to nothing whatever KV_GOLDBERG says: asset_live is off there.
 #include "korvid/asset/blob.h"
 #include "korvid/asset/module.h"
 #include "korvid/asset_live/module.h"
@@ -74,6 +75,7 @@ int main() {
         Handle doc = asset_load_blob(e, "doc.txt");
         KV_CHECK(c, until(e, [&] { const BlobAsset* b = asset_blob(e, doc); return b && b->state == AssetState::Ready; }));
 
+#if KV_DEV
         // It connects and says who it is; told welcome, it counts itself connected.
         KV_CHECK(c, until(e, [&] { return g.take() && g.heard.len && strstr(g.heard.data, "hello "); }));
         g.say("welcome\n");
@@ -101,6 +103,11 @@ int main() {
         KV_CHECK(c, until(e, [&] { return g.take() && g.heard.len && strstr(g.heard.data, "hello "); }, 8.0));
         g.say("welcome\n");
         KV_CHECK(c, until(e, [&] { return asset_live_stats(e).connected && asset_live_stats(e).connects == 2; }));
+#else
+        // Ship: a listener named by KV_GOLDBERG is never called, and the asset loaded as ever.
+        for (u32 i = 0; i < 50; ++i) { frame(e); time_sleep(0.002); }
+        KV_CHECK(c, g.l.accept() < 0 && !asset_live_stats(e).connected && asset_live_stats(e).connects == 0);
+#endif
         engine_shutdown(e);
     }
 
