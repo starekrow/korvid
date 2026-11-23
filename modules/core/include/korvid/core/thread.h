@@ -15,7 +15,8 @@ u32  thread_id();
 // Logical processors online, at least 1. Per platform.
 u32  os_cpu_count();
 // Marks or clears the calling thread as real-time (audio). A real-time thread must never
-// touch the general allocator; debug and dev builds assert it.
+// touch the general allocator; debug and dev builds assert it. The flag only: the OS's
+// scheduling class is os_thread_enter_audio_class's (os_thread.h), which sets it too.
 void thread_set_realtime(bool rt);
 // Whether the calling thread is marked real-time.
 bool thread_is_realtime();

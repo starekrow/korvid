@@ -91,6 +91,9 @@ module "toolchain.windows" {
     -- which the msvc probe already puts on every compile, and its import libraries. The
     -- runtime is the system's d3d12.dll and dxgi.dll.
     d3d12 = { libs = { "d3d12", "dxgi", "dxguid" } },
+    -- MMCSS (core's os_thread_enter_audio_class): the Windows SDK's import library for
+    -- avrt.dll, which every Windows since Vista has.
+    avrt = { libs = { "avrt" } },
   },
   bindings  = {
     render             = "renderer-vulkan",

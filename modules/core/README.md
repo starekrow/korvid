@@ -370,6 +370,7 @@ Header `korvid/core/job.h`, `thread.h`, `time.h`, `os_thread.h`, `atomic.h`:
 | `thread_id()`, `os_cpu_count()`, `thread_set_realtime`, `thread_is_realtime` | functions | identity; a real-time thread never allocates |
 | `OsMutex`, `OsCond`, `os_mutex_init`, `os_mutex_destroy`, `os_mutex_lock`, `os_mutex_unlock`, `os_cond_init`, `os_cond_destroy`, `os_cond_wait`, `os_cond_signal`, `os_cond_broadcast` | records, functions | (os_thread.h) a mutex and a condition variable, not recursive, not movable once initialized |
 | `OsThread`, `os_thread_start(t, fn, arg)`, `os_thread_join(t)` | record, functions | (os_thread.h) a thread of your own; join each once |
+| `os_thread_enter_audio_class()` | function | (os_thread.h) the calling thread into the OS's realtime audio class (SCHED_FIFO, MMCSS "Pro Audio", the time constraint policy), marked real-time either way; false, logged once, when the OS refuses |
 | `MemOrder`, `atomic_load`, `atomic_store`, `atomic_add_fetch`, `atomic_fence` and the rest of atomic.h | enum, functions | (atomic.h) atomics with an explicit order: `MO_RELAXED`, `MO_ACQUIRE`, `MO_RELEASE`, `MO_ACQ_REL`, `MO_SEQ_CST` |
 | `time_now()`, `time_sleep(s)`, `os_ticks()`, `os_ticks_per_second()`, `os_thread_cpu_ticks()` | functions | monotonic seconds; the raw clock the profiler records |
 

@@ -316,4 +316,27 @@ is 1.2. What the build added or settled beyond the text above:
   whole of `kormake test linux-dev`; `platform` compiled for android-dev. Not checked:
   Windows and the Apple family.
 
-Milestones 4 to 6: not started.
+**Milestone 4, the audio class (KR7): built Nov 22, 2026.**
+
+- **`os_thread_enter_audio_class()`** in `os_thread.h`, in `src/posix/os_thread.cc` and
+  `src/win32/os_thread.cc`. The refusal is logged once a process, before the thread is
+  marked, since logging may allocate.
+- **Linux: priority 80**, or the soft `RLIMIT_RTPRIO` if it is lower (PipeWire's own
+  data thread asks rtkit for 88). A limit of 0 is still asked, since a process with
+  `CAP_SYS_NICE` is not held to it; `EPERM` with the limit at 0 is reported as "RLIMIT_RTPRIO
+  is 0 (ulimit -r; ... rtkit, which core does not ask)". rtkit stays out, as "For
+  review", 1 has it.
+- **Windows: `avrt`** is an external of `toolchain-windows`, and `core` uses it on
+  Windows only. Linux's `build.ninja` is byte for byte what it was; `kormake graph core
+  windows-dev` lists it.
+- **macOS:** a 2.9 ms period (128 frames at 44.1 kHz), 75% of it computation and 85%
+  constraint, preemptible. Written, not compiled.
+- **Checked:** `core`'s test starts a thread that enters the class twice. Here
+  `RLIMIT_RTPRIO` is 0 hard and soft, so it is the refusal: refused both times, logged
+  once, the thread marked, the caller's not; the check that the thread is `SCHED_FIFO`
+  exactly when the call says yes ran, but only on its "no" side. The posix source compiles
+  for Android with the NDK alone: `core` for android-dev does not build on `main` either
+  (`job.cc` and `memory.cc`, "variable does not have a constant initializer", NDK 30).
+  Not checked: the "yes" on Linux, Windows, macOS.
+
+Milestones 5 and 6: not started.

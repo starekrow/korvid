@@ -54,4 +54,18 @@ bool os_thread_start(OsThread* t, OsThreadFn fn, void* arg);
 // Waits for the thread to return and releases it. Once for each thread started.
 void os_thread_join(OsThread* t);
 
+// Asks the OS to put the calling thread in its class for realtime audio, for a thread of
+// the program's own that fills a device's buffer (a thread the audio device owns, as
+// platform_audio's backends' are, arrives in the class already). It marks the thread
+// real-time for the allocators (thread_set_realtime(true), thread.h) whether or not the OS
+// agrees, and returns whether it did; the first refusal in the process logs its reason.
+//
+// Linux: SCHED_FIFO with SCHED_RESET_ON_FORK, at priority 80 or the RLIMIT_RTPRIO limit
+// if that is lower. A desktop session's limit is usually 0, and its realtime comes from
+// rtkit over D-Bus, which core does not speak: refused, with `ulimit -r` named. Windows:
+// MMCSS's "Pro Audio" task (AvSetMmThreadCharacteristicsW, avrt). macOS: the time
+// constraint policy, for a period of 128 frames at 44.1 kHz. iOS and Android: false,
+// since the platform's audio thread is the one in the class.
+bool os_thread_enter_audio_class();
+
 } // namespace kv

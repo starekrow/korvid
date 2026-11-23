@@ -1,8 +1,12 @@
 #include "korvid/core/os_thread.h"
+#include "korvid/core/atomic.h"
+#include "korvid/core/format.h"
+#include "korvid/core/log.h"
 #include "korvid/core/thread.h"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <avrt.h> // MMCSS; avrt.lib, the toolchain's external "avrt"
 
 namespace kv {
 
@@ -51,6 +55,20 @@ void os_thread_join(OsThread* t) {
     WaitForSingleObject(h, INFINITE);
     CloseHandle(h);
     t->handle = 0;
+}
+
+// The Multimedia Class Scheduler's "Pro Audio" task: the thread is raised while it runs,
+// and the service keeps a share of each core for the rest. The task stays the thread's
+// until it ends.
+static u32 g_audio_refusal_logged = 0; // atomic
+
+bool os_thread_enter_audio_class() {
+    DWORD task = 0;
+    HANDLE h = AvSetMmThreadCharacteristicsW(L"Pro Audio", &task);
+    if (!h && atomic_exchange(&g_audio_refusal_logged, 1u, MO_RELAXED) == 0)
+        KV_WARN("thread", "realtime audio class refused: AvSetMmThreadCharacteristicsW(\"Pro Audio\"): error %lu", (unsigned long)GetLastError());
+    thread_set_realtime(true);
+    return h != nullptr;
 }
 
 } // namespace kv
