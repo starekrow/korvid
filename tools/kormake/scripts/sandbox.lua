@@ -74,6 +74,9 @@ local toolchain_fields = {
   flag_framework = true, -- how a toolchain links an external's frameworks ("-framework %s")
   package = true, -- "app" or "iosapp": kormake package writes an application bundle (package_app.lua); "apk": an Android package (package_apk.lua)
   os_min = true,  -- the oldest OS release the toolchain builds for ("26.0"), for what packaging writes
+  -- What --sanitize may name: { address = { cxxflags = {...}, ldflags = {...} }, ... }. A
+  -- toolchain without it refuses the option (emit.lua).
+  sanitizers = true,
   -- A toolchain that serves several platforms: per_platform[<platform>] is laid over its
   -- fields for that platform (resolve.lua says how); triple is the target's
   -- "<vendor>-<os>[-<env>]" without the architecture ("apple-ios26.0-simulator"), family

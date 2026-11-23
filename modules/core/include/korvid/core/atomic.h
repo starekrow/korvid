@@ -13,6 +13,21 @@
 // barriers keep cl from moving them).
 #pragma once
 #include "korvid/core/types.h"
+
+// A function ThreadSanitizer leaves out: a seqlock's writer or reader (the profiler's
+// rings), whose plain accesses race by design and are validated by re-reading an index,
+// and whose fences TSan cannot model (GCC refuses atomic_fence under -fsanitize=thread).
+// Nothing else is exempt. Empty in every other build.
+#if defined(__SANITIZE_THREAD__)
+#define KV_NO_SANITIZE_THREAD __attribute__((no_sanitize_thread))
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define KV_NO_SANITIZE_THREAD __attribute__((no_sanitize("thread")))
+#endif
+#endif
+#ifndef KV_NO_SANITIZE_THREAD
+#define KV_NO_SANITIZE_THREAD
+#endif
 #if KV_COMPILER_MSVC
 #include <intrin.h>
 #include <string.h>
@@ -75,8 +90,9 @@ template <class T> inline T atomic_sub_fetch(T* p, typename AtomicArg<T>::type v
 // The case that needs one: data read with plain loads and then validated by re-reading an
 // index (a seqlock, a ring that may lap its reader). An acquire load keeps later accesses
 // after it, not earlier ones; an acquire fence between the data and the re-read keeps the
-// data's loads before it. x64 never reorders loads with loads, arm64 does.
-inline void atomic_fence(MemOrder o) { __atomic_thread_fence(atomic_detail::order(o)); }
+// data's loads before it. x64 never reorders loads with loads, arm64 does. ThreadSanitizer
+// models no fence: under it, only KV_NO_SANITIZE_THREAD code may use one.
+KV_NO_SANITIZE_THREAD inline void atomic_fence(MemOrder o) { __atomic_thread_fence(atomic_detail::order(o)); }
 
 #else
 

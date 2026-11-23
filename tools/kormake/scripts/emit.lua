@@ -32,7 +32,28 @@ end
 function M.run(c, g, opts)
   local root = c.root_dir
   local target = g.platform .. "-" .. g.config
-  local build = util.join(c.build_root, target)
+  -- A sanitized build is a directory of its own, linux-dev+address+undefined, so the
+  -- plain target's objects and stamps are never touched.
+  local san = opts.sanitize
+  local build = util.join(c.build_root, target .. (san and ("+" .. table.concat(san, "+")) or ""))
+  -- What the names mean in the target's toolchain, with KV_SANITIZE_<NAME>=1 defined for
+  -- each; checked before anything is written.
+  local san_flags
+  if san then
+    local tcf = g.toolchain.fields
+    local have = tcf.sanitizers
+    if not have then util.fail("--sanitize: toolchain '%s' has no sanitizers", g.toolchain.name) end
+    local cx, ld, seen = {}, {}, {}
+    local function add(list, f) if not seen[list] then seen[list] = {} end; if not seen[list][f] then seen[list][f] = true; list[#list + 1] = f end end
+    for _, n in ipairs(san) do
+      local sz = have[n]
+      if not sz then util.fail("--sanitize: toolchain '%s' has no sanitizer '%s' (it has %s)", g.toolchain.name, n, table.concat(util.sorted_keys(have), ", ")) end
+      for _, f in ipairs(sz.cxxflags or {}) do add(cx, f) end
+      for _, f in ipairs(sz.ldflags or {}) do add(ld, f) end
+      add(cx, (tcf.flag_define or "-D%s"):format("KV_SANITIZE_" .. n:upper() .. "=1"))
+    end
+    san_flags = { cxxflags = table.concat(cx, " "), ldflags = table.concat(ld, " ") }
+  end
   local q = util.shell_quote
   kfs.mkdirp(build)
 
@@ -67,6 +88,14 @@ function M.run(c, g, opts)
     }
   end
   local target_flags = flags_of(g.toolchain, g.config, false, g.platform)
+  -- The sanitizers' flags, on every target instance: the module, its closure, the
+  -- engine's modules and the tests alike. A tool the build runs is one of them when the
+  -- target is the host in its tools' config (linux-dev), and runs sanitized; a host
+  -- instance of its own (linux-debug's tools, built dev) is built plain.
+  if san then
+    target_flags.cxxflags = util.trim(target_flags.cxxflags .. " " .. san_flags.cxxflags)
+    target_flags.ldflags = util.trim(target_flags.ldflags .. " " .. san_flags.ldflags)
+  end
   g.ninja = target_flags.tc.probed.ninja
   local function flags(inst)
     if inst.prefix == "" then return target_flags end
@@ -208,6 +237,7 @@ function M.run(c, g, opts)
   if runner ~= "" then w("rule run_test_host\n  command = " .. self .. ' _test $in $out\n  description = TEST $in') end
   -- From where the regeneration sees the same module paths (collect.lua's regen_dir).
   w("rule regen\n  command = " .. self .. " -C " .. util.ninja_escape(q(c.regen_dir)) .. " gen " .. target .. (opts.no_unity and " --no-unity" or "") ..
+    (san and (" --sanitize " .. table.concat(san, ",")) or "") ..
     (opts.cxx and (" --cxx " .. util.ninja_escape(q(opts.cxx))) or "") .. "\n  generator = 1\n  description = KORMAKE gen " .. target)
   w("")
 
@@ -987,8 +1017,8 @@ function M.run(c, g, opts)
   kfs.mkdirp(util.join(build, "host/test"))
   kfs.write(util.join(build, "build.ninja"), table.concat(out, "\n") .. "\n", true)
   kfs.write(util.join(build, "compile_commands.json"), "[\n" .. table.concat(cc, ",\n") .. "\n]\n")
-  -- Where clangd looks.
-  kfs.write(util.join(c.build_root, "compile_commands.json"), "[\n" .. table.concat(cc, ",\n") .. "\n]\n")
+  -- Where clangd looks: a plain target's flags, never a sanitized build's.
+  if not san then kfs.write(util.join(c.build_root, "compile_commands.json"), "[\n" .. table.concat(cc, ",\n") .. "\n]\n") end
   return build
 end
 

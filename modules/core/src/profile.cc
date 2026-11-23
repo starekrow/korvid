@@ -94,7 +94,7 @@ Ring* ring() {
 // release that published the previous index. Without it, on arm64, a record lapping the one
 // a collector is copying could land before the index that says so, and the copy would pass
 // the check half written. (On x64 it is a compiler barrier.)
-inline void put(ProfKind kind, const char* name, u64 value) {
+KV_NO_SANITIZE_THREAD inline void put(ProfKind kind, const char* name, u64 value) {
     Ring* r = ring();
     if (!r) return;
     kv::atomic_fence(kv::MO_RELEASE);
@@ -170,7 +170,7 @@ void trace_record(u32 ri, const Ring& r, const ProfRecord& rec, const Open* open
 // i + kRingCap the writer may be filling slot i % kRingCap with record i + kRingCap, before
 // it publishes the index that says so. So a ring kRingCap or more behind is read from one
 // past the oldest slot, and every record is checked again after it is read.
-void collect_ring(u32 ri, Ring& r) {
+KV_NO_SANITIZE_THREAD void collect_ring(u32 ri, Ring& r) {
     u64 w = kv::atomic_load(&r.write, kv::MO_ACQUIRE);
     if (w - r.read >= kRingCap) { r.dropped += w - r.read - (kRingCap - 1); r.read = w - (kRingCap - 1); }
     u64 from = r.read;
@@ -276,7 +276,7 @@ namespace {
 
 Ring* track_ring(u32 track) { return track && track <= KV_PROF_MAX_RINGS ? &g_rings[track - 1] : nullptr; }
 
-inline void put_at(Ring* r, ProfKind kind, const char* name, u64 value, u64 ticks) {
+KV_NO_SANITIZE_THREAD inline void put_at(Ring* r, ProfKind kind, const char* name, u64 value, u64 ticks) {
     if (!r) return;
     kv::atomic_fence(kv::MO_RELEASE); // as put's
     ProfRecord& rec = r->data[r->write % kRingCap];

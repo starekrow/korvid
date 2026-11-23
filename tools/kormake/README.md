@@ -8,6 +8,7 @@ kormake — build Korvid modules and the programs and tools made from them
 
     kormake [build] [NAME...] [TARGET] [OPTIONS]
     kormake test    [NAME...] [TARGET] [OPTIONS] [--heavy [-- ARGS]]
+    kormake build|test|gen ... --sanitize address,undefined|thread
     kormake package NAME      [TARGET] [OPTIONS]
     kormake gen     [TARGET] [OPTIONS]
     kormake check   [TARGET] [OPTIONS]
@@ -100,7 +101,7 @@ in any order, except that the command has to be the first word.
   the script's.
 
 **clean**
-: Removes the target's build directory. With no TARGET, it removes every target's
+: Removes the target's build directory, and its sanitized builds (`build/<target>+...`). With no TARGET, it removes every target's
   directory, `compile_commands.json`, and what goldberg cooked and remembers (`assets/`,
   `assets-ship/`, `goldberg/`), and then the build directory itself if that leaves it
   empty. It removes nothing else it finds there, and never `dist/`. This command takes no NAMEs.
@@ -184,6 +185,24 @@ collects the modules.
 
 **--dot**, **--why MODULE**
 : Options for `graph`.
+
+**--sanitize LIST**
+: For `build`, `test` and `gen`: builds every instance of the target with the sanitizers
+  named, a comma-separated list of the toolchain's `sanitizers` (`address`, `undefined`
+  and `thread` on Linux). The engine's modules are built so too, and every module's tests,
+  with `KV_SANITIZE_<NAME>=1` defined for each name. The build directory is its own,
+  `build/<target>+<names>/` with the names in order (`build/linux-dev+address+undefined/`),
+  so the plain target's objects and stamps are not touched; `compile_commands.json` at
+  the build root is left as the plain targets wrote it. A finding fails the test that
+  made it: the address and thread sanitizers stop at their first report, and Linux's
+  `undefined` is built with `-fno-sanitize-recover`. `address` with `thread` is refused,
+  as the compilers refuse it, and so is a toolchain without the table. A tool the build
+  runs (goldberg cooking, a shader compiler) is sanitized when it is one of the target's
+  instances, which it is when the target is the host in the tools' config (`linux-dev`);
+  `linux-debug`'s tools are built plain. `core`'s arenas are not poisoned: the address
+  sanitizer sees the general allocator's blocks and the stack, not a use after an arena's
+  reset. To keep going past a failing test, run Ninja yourself:
+  `ninja -C build/linux-dev+address+undefined -k 0 check`.
 
 Unknown options are an error. Ninja's own options (`-j`, `-k`, `-n`) are not passed through:
 run `ninja -C build/<target> ...` yourself, since every module is also a Ninja target (see
@@ -331,6 +350,7 @@ config), `rules` (`cxx`, `ar` and `link`, as Ninja commands), `obj_suffix`, `exe
 `flag_libdir`, `flag_framework`, `flags_generated` (added when compiling code another
 program wrote: `-w`), `codegen_profiles` (the flags of each profile a module's `codegen`
 names), `isa` (the flags of each instruction set a module's `isa_sources` may be built for),
+`sanitizers` (for each name `--sanitize` takes, its `cxxflags` and `ldflags`),
 `externals`, `bindings` (the default backend for each
 interface), and `probe` (`"msvc"` or `"xcode"`: a script that finds the compiler, the SDK
 and Ninja). For a toolchain that serves several platforms there are also `per_platform`,
@@ -529,6 +549,7 @@ error of kormake's own, which is printed as `kormake: <message>`.
     kormake kpack picture                # both tools, built for the host
     kormake test collision               # one module's tests
     kormake test linux-dev               # every test the roots ask for
+    kormake test hifi --sanitize address,undefined   # a module's tests, and its closure, under ASan and UBSan
     kormake package arcfire ship         # dist/arcfire/
     kormake graph --why renderer-vulkan  # who pulls in the Vulkan renderer
     kormake graph arcfire --dot | dot -Tsvg > arcfire.svg

@@ -39,6 +39,14 @@ module "toolchain.linux" {
   -- Instruction sets a module's isa_sources are built again for, chosen at start-up. No FMA:
   -- a contracted multiply-add would change the bytes the baseline draws.
   isa = { avx2 = { "-mavx2", "-mno-fma" } },
+  -- What `kormake build|test --sanitize <names>` builds every target instance with. A
+  -- finding fails the run: ASan and TSan stop at their first report, and UBSan is told to
+  -- (-fno-sanitize-recover). A frame pointer on each, for the reports' stacks.
+  sanitizers = {
+    address   = { cxxflags = { "-fsanitize=address", "-fno-omit-frame-pointer" }, ldflags = { "-fsanitize=address" } },
+    undefined = { cxxflags = { "-fsanitize=undefined", "-fno-sanitize-recover=undefined", "-fno-omit-frame-pointer" }, ldflags = { "-fsanitize=undefined" } },
+    thread    = { cxxflags = { "-fsanitize=thread", "-fno-omit-frame-pointer" }, ldflags = { "-fsanitize=thread" } },
+  },
   flags_generated = { "-w" }, -- code another program wrote (a shader's C++): its warnings are not ours
   flag_include = "-I%s",
   flag_define  = "-D%s",

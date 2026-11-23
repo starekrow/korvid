@@ -178,12 +178,13 @@ void test_heap(kv::TestCtx& c) {
     KV_CHECK(c, blobs->live() == spawned && !blobs->spawn(Blob{}).is_null() == false);
     blobs->destroy_all();
     KV_CHECK(c, blobs->live() == 0 && !blobs->spawn(Blob{}).is_null()); // room again: the pages stay committed
+    [[maybe_unused]] const u8 blob_category = blobs->tag.category; // the ktable goes with the engine; read in dev
     engine_shutdown(e);
     KV_CHECK(c, mem_heap_used(small) == 0);
     // What is live now includes the process's name table, which the engine's names grew.
     u64 live_after_engine = mem_stats().live_allocs;
 #if KV_DEV
-    KV_CHECK(c, mem_stats_category(blobs->tag.category).committed_bytes == 0);
+    KV_CHECK(c, mem_stats_category(blob_category).committed_bytes == 0);
 #endif
 
     // Bad configs are rejected before any module starts.

@@ -39,7 +39,8 @@ in, the modules under the directory you are in, or at the root the master file's
 TARGET is <platform>-<config>, a config alone (the host platform), host or host-<config>.
 Without one: the korvid.config's target, else the host platform in the first config.
 
-options: -C DIR (start in DIR), --no-unity, --cxx PATH, --dot, --why MODULE, --heavy, --version
+options: -C DIR (start in DIR), --no-unity, --cxx PATH, --dot, --why MODULE, --heavy,
+         --sanitize address,undefined|thread (build, test, gen: into <target>+<names>/), --version
 See tools/kormake/README.md.
 ]])
 end
@@ -62,6 +63,7 @@ local function parse(args)
     elseif a == "--cxx" then opts.cxx = value(a)
     elseif a == "-C" then opts.dir = value(a)
     elseif a == "--heavy" then opts.heavy = true
+    elseif a == "--sanitize" then opts.sanitize = value(a)
     elseif a == "--" then -- the rest is a heavy test's
       opts.rest = {}
       for j = i + 1, #args do opts.rest[#opts.rest + 1] = args[j] end
@@ -201,6 +203,17 @@ local function run(cmd, words, opts)
   if cmd == "help" or cmd == "--help" then usage(); return 0 end
   if opts.heavy and cmd ~= "test" then util.fail("--heavy is for test: kormake test --heavy [NAME...] [-- ARGS]") end
   if opts.rest and not opts.heavy then util.fail("the words after -- are a heavy test's: kormake test --heavy NAME -- ARGS") end
+  if opts.sanitize and cmd ~= "build" and cmd ~= "test" and cmd ~= "gen" then util.fail("--sanitize is for build, test and gen") end
+  if opts.sanitize then
+    -- The names, each once, in name order: the build directory's suffix and what the
+    -- regeneration passes on. The toolchain says which it has (emit.lua).
+    local list, seen = {}, {}
+    for n in opts.sanitize:gmatch("[^,%s]+") do if not seen[n] then seen[n] = true; list[#list + 1] = n end end
+    if #list == 0 then util.fail("--sanitize needs a list: address,undefined or thread") end
+    table.sort(list)
+    if seen.address and seen.thread then util.fail("--sanitize: address and thread cannot be in one build (the compilers refuse it); build each on its own") end
+    opts.sanitize = list
+  end
   local c = collect.run(collect.discover(opts.dir or kfs.cwd()))
   local root = c.root_dir
   stale_check(root)
@@ -231,6 +244,15 @@ local function run(cmd, words, opts)
       -- What goldberg cooked for the programs built here, and what it remembers of it.
       -- (A ship game's tree is dist/<game>/assets/: clean leaves dist/ alone, as it always has.)
       for _, d in ipairs({ "assets", "assets-ship", "goldberg" }) do dirs[#dirs + 1] = util.join(c.build_root, d) end
+    end
+    -- Each target's sanitized builds (linux-dev+address+undefined) go with it.
+    if kfs.isdir(c.build_root) then
+      local plain = {}
+      for _, d in ipairs(dirs) do plain[util.basename(d)] = true end
+      for _, n in ipairs(kfs.listdir(c.build_root)) do
+        local base = n:match("^([^+]+)%+")
+        if base and plain[base] then dirs[#dirs + 1] = util.join(c.build_root, n) end
+      end
     end
     for _, d in ipairs(dirs) do
       if kfs.isdir(d) or kfs.isfile(d) then kfs.rmtree(d); print("kormake: removed " .. d) end

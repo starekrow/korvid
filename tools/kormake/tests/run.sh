@@ -87,6 +87,13 @@ for t in host-dev host-ship cross-dev; do
     ninja -n -C "$root/build/$dir" >/dev/null 2>"$tmp/ninja.err" || { echo "kormake tests: ninja cannot read $t's file:" >&2; cat "$tmp/ninja.err" >&2; exit 1; }
   fi
 done
+# A sanitized build: a directory of its own, the flags on the target's instances only.
+run gen host-dev --sanitize undefined,address
+normalize <"$root/build/$host-dev+address+undefined/build.ninja" >"$out/host-dev-sanitize.ninja"
+run gen host-dev --sanitize address,thread
+run gen host-dev --sanitize memory
+run gen cross-dev --sanitize address
+run check host-dev --sanitize address
 run check cross-dev
 run graph cross-dev
 run graph --why base cross-dev

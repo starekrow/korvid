@@ -78,6 +78,7 @@ void with_backend(TestCtx& c, IoBackend backend, const char* dir, const char* pa
     KV_CHECK(c, KV_DEV ? (st == IoStatus::Failed && err == EILSEQ && b.crc_failures == 1) : st == IoStatus::Done);
     KV_CHECK(c, read_one(b, "x/a.txt", got, &err) == IoStatus::Done); // the rest still reads
     b.free();
+    got.free();
 }
 
 } // namespace

@@ -19,6 +19,12 @@ module "toolchain.host" {
   lib_file     = "lib%s.a",
   flag_include = "-I%s",
   flag_define  = "-D%s",
+  -- What --sanitize builds the target with; the cross toolchain has none, and refuses it.
+  sanitizers = {
+    address   = { cxxflags = { "-fsanitize=address", "-fno-omit-frame-pointer" }, ldflags = { "-fsanitize=address" } },
+    undefined = { cxxflags = { "-fsanitize=undefined", "-fno-omit-frame-pointer" }, ldflags = { "-fsanitize=undefined" } },
+    thread    = { cxxflags = { "-fsanitize=thread", "-fno-omit-frame-pointer" }, ldflags = { "-fsanitize=thread" } },
+  },
   flag_lib     = "-l%s",
   flag_libdir  = "-L%s",
   flag_include_system = "-isystem%s",

@@ -194,8 +194,10 @@ tests, a cross platform with a test runner, and a module left out for a missing 
 Its toolchains name compilers that do not exist, since nothing is compiled.
 
 The script copies the fixture to a temporary directory, runs `gen` for `host-dev`,
-`host-ship` and `cross-dev`, and then `check`, `graph`, `graph --why` and a `build` of
-the left-out module. It compares each `build.ninja` and the commands' output with
+`host-ship` and `cross-dev`, a `gen` of `host-dev` with `--sanitize undefined,address`
+(into `host-dev-sanitize.ninja`) and four that `--sanitize` refuses (address with
+thread, a name the host toolchain lacks, the cross toolchain, which has none, and
+`check`), and then `check`, `graph`, `graph --why` and a `build` of the left-out module. It compares each `build.ninja` and the commands' output with
 `tests/expected/`. Paths are written as `{root}` and `{kormake}`, and the host's
 platform as `{host}`, so the expected files are the same on Linux and macOS. When Ninja
 is on `PATH`, it also parses each file with a dry run.

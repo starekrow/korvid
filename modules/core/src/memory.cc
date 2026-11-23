@@ -149,8 +149,19 @@ struct ThreadBlockGuard {
         bool slot = t_block >= g_blocks && t_block < g_blocks + kMaxThreads;
         lock_retired();
         fold_into_retired_locked(*t_block);
-        *t_block = ThreadBlock{};
-        if (slot) kv::atomic_store(&t_block->in_use, 0u, kv::MO_RELEASE);
+        // Zeroed as atomics, all but in_use, which says the slot is still this thread's
+        // until the release below: a plain zeroing of the whole block would free it to a
+        // scan in claim_block before the rest was done, and the release would then free it
+        // again under its next owner.
+        ThreadBlock& b = *t_block;
+        i64* totals[] = {&b.live_allocs, &b.live_bytes, &b.total_allocs, &b.committed};
+        for (i64* v : totals) kv::atomic_store(v, (i64)0, kv::MO_RELAXED);
+        for (u32 h = 0; h < KV_MEM_MAX_HEAPS; ++h) {
+            kv::atomic_store(&b.heap_allocs[h], (i64)0, kv::MO_RELAXED);
+            kv::atomic_store(&b.heap_bytes[h], (i64)0, kv::MO_RELAXED);
+            kv::atomic_store(&b.heap_committed[h], (i64)0, kv::MO_RELAXED);
+        }
+        if (slot) kv::atomic_store(&b.in_use, 0u, kv::MO_RELEASE);
         unlock_retired();
         t_block = nullptr;
     }
@@ -309,7 +320,7 @@ constexpr u32   kPageMagic  = 0x70616765u; // "page"
 struct Notify;
 struct Page {
     u32     magic;
-    u32     owner;       // thread id; 0 while free or orphaned
+    u32     owner;       // atomic (relaxed: any thread compares it with its own id): thread id; 0 while free or orphaned
     u32     stride;      // header plus class size, a multiple of 16
     u32     capacity;
     u32     fresh;       // blocks never handed out yet start here
@@ -409,7 +420,7 @@ Notify* my_notify() {
 // generation.
 void page_init(Page* p, u8 cls) {
     u32 stride = (u32)((sizeof(Header) + kClassSize[cls] + 15) & ~15u);
-    p->magic = kPageMagic; p->owner = thread_id(); p->stride = stride;
+    p->magic = kPageMagic; kv::atomic_store(&p->owner, thread_id(), kv::MO_RELAXED); p->stride = stride;
     p->capacity = (u32)((kPageSize - kPageHeader) / stride);
     p->fresh = 0; p->used = 0; p->cls = cls; p->in_full = 0;
     p->local_free = p->remote_free = nullptr;
@@ -445,7 +456,7 @@ struct CacheGuard {
             for (Page* p : lists)
                 while (p) {
                     Page* n = p->next;
-                    p->owner = 0;
+                    kv::atomic_store(&p->owner, 0u, kv::MO_RELAXED);
                     kv::atomic_store(&p->notify, (Notify*)nullptr, kv::MO_RELEASE);
                     p->prev = nullptr; p->next = g_orphans[c]; g_orphans[c] = p;
                     p = n;
@@ -467,7 +478,7 @@ Page* page_new(u8 cls) {
     Page* p = g_orphans[cls];
     if (p) {
         g_orphans[cls] = p->next;
-        p->owner = thread_id(); p->next = p->prev = nullptr; p->in_full = 0;
+        kv::atomic_store(&p->owner, thread_id(), kv::MO_RELAXED); p->next = p->prev = nullptr; p->in_full = 0;
         unlock_pages();
         page_adopt(p); // outside the lock: it may wait on a push in flight
         return p;
@@ -534,7 +545,7 @@ bool collect_notified(Cache& c, u8 cls) {
         // step then finds the page idle and leaves it so). Nothing else is possible here.
         u32 s = kv::atomic_load(&p->nstate, kv::MO_RELAXED);
         kv::atomic_store(&p->nstate, nstate_with(s, kNotifyIdle), kv::MO_RELEASE);
-        if (p->owner == thread_id() && p->in_full) {
+        if (kv::atomic_load(&p->owner, kv::MO_RELAXED) == thread_id() && p->in_full) {
             drain_remote(p);
             if (p->local_free) { list_remove(c.full[cls], p); list_push(c.partial[cls], p); p->in_full = 0; found = true; }
         }
@@ -586,7 +597,8 @@ void notify_owner(Page* p) {
 void small_free(void* user) {
     Page* p = page_of(user);
     u8* b = (u8*)user - sizeof(Header);
-    if (p->owner == thread_id()) {
+    // Another thread's id, or 0, means a remote free; only this thread ever stores its own.
+    if (kv::atomic_load(&p->owner, kv::MO_RELAXED) == thread_id()) {
         *(void**)b = p->local_free;
         p->local_free = b;
         u32 left = kv::atomic_sub_fetch(&p->used, 1u, kv::MO_ACQ_REL);
@@ -600,7 +612,7 @@ void small_free(void* user) {
             (kv::atomic_load(&p->nstate, kv::MO_ACQUIRE) & kNotifyMask) == kNotifyIdle) {
             if (p->in_full) list_remove(c.full[p->cls], p); else list_remove(c.partial[p->cls], p);
             lock_pages();
-            p->owner = 0;
+            kv::atomic_store(&p->owner, 0u, kv::MO_RELAXED);
             kv::atomic_store(&p->notify, (Notify*)nullptr, kv::MO_RELAXED); // no pusher reads it at zero; atomic, as everywhere else
             p->next = g_free_pages; g_free_pages = p;
             unlock_pages();

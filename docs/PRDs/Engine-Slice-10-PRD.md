@@ -339,4 +339,52 @@ is 1.2. What the build added or settled beyond the text above:
   (`job.cc` and `memory.cc`, "variable does not have a constant initializer", NDK 30).
   Not checked: the "yes" on Linux, Windows, macOS.
 
-Milestones 5 and 6: not started.
+**Milestone 5, sanitizers (KR2): built Nov 22, 2026.**
+
+- **`--sanitize`** on `build`, `test` and `gen` (and refused by name elsewhere). The names
+  are sorted and deduplicated, so `undefined,address` and `address,undefined` are one
+  directory, `build/linux-dev+address+undefined/`, which the regeneration rule passes
+  on. `clean <target>` removes its sanitized directories too. The build root's
+  `compile_commands.json` is not written by a sanitized `gen`, so clangd keeps the plain
+  flags. Names are checked against the toolchain before anything is written.
+- **`toolchain-linux`'s `sanitizers`** as the text above has them. A toolchain without the
+  table, a name it lacks, and `address` with `thread` are each refused with a message;
+  kormake's test has all three and a sanitized `gen` of the fixture
+  (`expected/host-dev-sanitize.ninja`). The plain `build.ninja` is byte for byte what it
+  was.
+- **Settled here: which instances.** Every target instance. When the target is the host
+  in the host tools' config (`linux-dev`), the tools the build runs are those instances
+  and run sanitized (goldberg cooks under ASan); a separate host instance (`linux-debug`'s
+  tools, built dev) is plain.
+- **TSan and fences.** GCC refuses `atomic_thread_fence` under `-fsanitize=thread`, and
+  the profiler's rings, seqlocks that race by design and validate by re-reading their
+  index, use one. `KV_NO_SANITIZE_THREAD` (`atomic.h`) leaves exactly those three
+  functions and `atomic_fence` out of TSan's instrumentation.
+- **What the sanitizers found, fixed** (all in `core` and `platform`, in Blackwing's
+  closure):
+  - `core`, `memory.cc`: a thread's exit zeroed its accounting block with a plain struct
+    assignment, `in_use` included, before the release store that frees the slot, so a
+    new thread could claim the slot mid-reset and the exiting thread would then free it
+    again under its new owner. The block is now zeroed field by field with `in_use` left
+    for the release (TSan).
+  - `core`, `memory.cc`: `Page::owner` was written under the page lock and read by
+    `small_free` on any thread with plain accesses. Relaxed atomics now; the logic was
+    already right (TSan).
+  - `core`'s heap test read a ktable's tag after `engine_shutdown` freed it (ASan).
+  - `platform`'s mount test leaked its read buffer (ASan's leak check).
+- **Results.** Under `address,undefined` and under `thread`, every test of the engine's
+  modules in Blackwing's closure passes. Outside it, not fixed in this slice:
+  - `audio` (TSan): `audio_stats` copies `mixer.stats` while the device thread writes it
+    in `mixer_render`; the counters want relaxed atomics.
+  - `sprite_ui` (TSan): a lock-order inversion inside SDL3 and PipeWire's own libraries,
+    reached through `audio_startup`; not the engine's code.
+  - `goldberg` (both): "a watch with a small share" runs past its 30-second deadlines
+    under either sanitizer, with no report; under TSan one cook in "goldberg scripts"
+    also fails, with no report in the test's output (not looked into further).
+- **Not the sanitizers': `asset_live`'s test fails in linux-ship** (9 of 21 checks: the
+  listener never hears its client). It fails the same at `93d0e91`, before this
+  milestone and the two before it.
+- **Checked:** kormake's test; `kormake test` on linux-debug and linux-dev; linux-ship
+  but for `asset_live`, above.
+
+Milestone 6: not started.

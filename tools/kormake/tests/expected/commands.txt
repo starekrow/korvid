@@ -13,6 +13,27 @@ kormake: {root}/build/cross-dev/build.ninja (8 instances)
 kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
 [exit 0]
 
+$ kormake gen host-dev --sanitize undefined,address
+kormake: {root}/build/{host}-dev+address+undefined/build.ninja (7 instances)
+kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+[exit 0]
+
+$ kormake gen host-dev --sanitize address,thread
+kormake: --sanitize: address and thread cannot be in one build (the compilers refuse it); build each on its own
+[exit 1]
+
+$ kormake gen host-dev --sanitize memory
+kormake: --sanitize: toolchain 'toolchain.host' has no sanitizer 'memory' (it has address, thread, undefined)
+[exit 1]
+
+$ kormake gen cross-dev --sanitize address
+kormake: --sanitize: toolchain 'toolchain.cross' has no sanitizers
+[exit 1]
+
+$ kormake check host-dev --sanitize address
+kormake: --sanitize is for build, test and gen
+[exit 1]
+
 $ kormake check cross-dev
 kormake: left out of cross-dev: extra: external 'missing' (toolchain toolchain.cross) is not at {root}/packages/missing.
 Fetch it into packages/missing.
