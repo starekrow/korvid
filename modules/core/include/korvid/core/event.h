@@ -19,6 +19,13 @@
 // what was there when its phase began, and needs no order: that's how a loop of events
 // between two systems goes round, once a phase.
 //
+// That order is within one type. Across types there is none to keep: each type is its
+// own stream, a handler is handed its own type's batch, and a system that reads two
+// types gets two batches with nothing to say which of their events came first. When the
+// order between two facts matters, make them one event type with a field that says which
+// (`kind`: started, stopped), so they share a stream. Or keep the state in a resource,
+// written where it changes, and treat the events as "something changed: look".
+//
 // Give an event type a field table (KV_EVENT_EX) whenever it carries a handle. The bus
 // then checks each batch and drops any event whose handle no longer resolves, so a
 // consumer never sees an entity that died since. The table also lets the trace and the

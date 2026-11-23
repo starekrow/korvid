@@ -269,4 +269,15 @@ is 1.2. What the build added or settled beyond the text above:
 - **Not verified:** Windows and macOS. The project half of kormake's test is not run on
   Windows (the fake pkg-config is a shell script).
 
-Milestones 2 to 6: not started.
+**Milestone 2, the small ones (KR3, KR9): built Nov 22, 2026.**
+
+- **`cli_run` with a null sink** discards every line, the failure's included, and returns
+  what it did. Before, `respond` fell through to the session and dereferenced null: a
+  command that printed crashed. `cli`'s test runs four requests with no sink, two that
+  succeed and two that fail.
+- **Order across event types** is in `event.h`'s file comment, under "Behaviour worth
+  knowing" in `modules/core/README.md`, and in the events paragraph of
+  [Modules](../concepts/modules.md#how-code-flows-through-a-tick). `tools/doccheck.sh`
+  reports what it did before (one name in `asset_render`'s quick reference).
+
+Milestones 3 to 6: not started.

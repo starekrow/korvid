@@ -31,7 +31,8 @@ struct CliConfig {
 void cli_configure(const CliConfig& config);
 
 // Runs one line as a request and hands each response line to `sink`. For tools and
-// tests; the transports call it too. Returns false if the request failed.
+// tests; the transports call it too. A null `sink` discards the lines, failure's
+// included. Returns false if the request failed.
 bool cli_run(Engine& e, const char* line, void (*sink)(void* user, const char* line), void* user);
 
 // The ASCII-only form of a UTF-8 line: each non-ASCII code point as \u{XXXX} (and a

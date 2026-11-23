@@ -107,5 +107,11 @@ void test_cli_fs(kv::TestCtx& c) {
     KV_CHECK(c, run("print /ktables/game/ship") && o.has("1 live of 8") && o.has("Health (prev)"));
     KV_CHECK(c, run("help") && o.has("the filesystem"));
 
+    // No sink: the lines are discarded, and the result is still the request's.
+    KV_CHECK(c, cli_run(e, "print /ktables/game/ship", nullptr, nullptr));
+    KV_CHECK(c, cli_run(e, "help", nullptr, nullptr));
+    KV_CHECK(c, !cli_run(e, "ls /nowhere", nullptr, nullptr));
+    KV_CHECK(c, !cli_run(e, "no such command", nullptr, nullptr));
+
     engine_shutdown(e);
 }

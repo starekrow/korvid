@@ -485,7 +485,9 @@ the phase start and needs no order, which is how a loop goes round (once a phase
 is for what happens outside the schedule; its events land at the next boundary. An event
 naming a handle that no longer resolves is dropped from each batch it would be in. Code
 outside the schedule reads the tick's events with `e.events.read<E>()`; from inside a
-unit that is refused (dev builds).
+unit that is refused (dev builds). The order is a type's own: two types are two
+streams, and nothing records which of their events came first. Facts whose order matters
+go in one type with a field that says which, or into a resource the events only announce.
 
 **Commands.** `ctx.spawn_later`, `ctx.destroy` and `ctx.destroy_all` go into the running
 unit's command buffer (one per parallel chunk, merged in chunk order). They are applied

@@ -441,6 +441,11 @@ ktable. Core has no `ModuleDesc` of its own; the engine is the host.
 - **Handles in events are checked per batch**, not at emit: an event naming an entity
   destroyed since is dropped from that consumer's batch and `dropped_stale` counts it. In
   the emitting phase nothing has died yet (destroys are commands).
+- **Order is per event type.** Every consumer sees one type's events in the same order,
+  but two types are two streams: a handler on `Started` and one on `Stopped` cannot tell
+  which came first. When that order matters, make the two facts one type with a field
+  that says which, or keep the state in a resource and treat the events as "something
+  changed". `event.h` says so at the top.
 - **No waves.** A chain of events runs out in data order inside a phase; a loop reads
   early and goes round once a phase. Nothing is capped or carried.
 - **Heaps fail, never kill.** An allocation past a hard limit returns null with the heap,

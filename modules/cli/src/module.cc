@@ -84,6 +84,7 @@ struct Request {
 
 void respond(Request& rq, const char* line) {
     if (rq.sink) { rq.sink(rq.user, line); return; }
+    if (!rq.session) return; // cli_run with no sink: the line is discarded
     Session& s = *rq.session;
     char out[kLineMax + 48];
     int n = rq.id[0] ? format(out, sizeof out, "%s %s\n", rq.id, line) : format(out, sizeof out, "%s\n", line);
@@ -167,8 +168,8 @@ bool run_request(Engine& e, CliState& cli, Request& rq, const char* text) {
     }
     if (ctx.failed) ++cli.failed;
     char tail[256];
-    if (rq.sink && !rq.session) { // an external caller: the status line is the result
-        if (ctx.failed) { format(tail, sizeof tail, "err: %s", ctx.error); rq.sink(rq.user, tail); }
+    if (!rq.session) { // an external caller (cli_run): the status line is the result
+        if (ctx.failed && rq.sink) { format(tail, sizeof tail, "err: %s", ctx.error); rq.sink(rq.user, tail); }
         return !ctx.failed;
     }
     if (rq.id[0]) format(tail, sizeof tail, ctx.failed ? "err %s" : "ok", ctx.error);
