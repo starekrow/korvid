@@ -657,3 +657,10 @@ the C++ objects; a host instance's build statements override `cc` and `cflags` b
 `cxx` and `cxxflags`. `tools/kormake/tests/run.sh` passes. The engine builds as before.
 Linux built and used (Blackwing's sqlite); Apple, Android and Windows written, not
 compiled: no machine here.
+
+**Found with KR14: a test's test_deps, linked whole.** A module's heavy tests were built
+without its `test_deps`, though the manual says they are linked as its tests are, and a
+test's `test_deps` gave their libraries but not their externals (Blackwing's library tests
+take the player, which takes PipeWire). Both now link through `link_inputs` with the
+`test_deps` and their closures: libraries, externals and runtime files. The fixtures have
+no such case, and their expected files are unchanged.

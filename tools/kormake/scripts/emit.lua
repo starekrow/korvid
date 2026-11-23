@@ -462,6 +462,25 @@ function M.run(c, g, opts)
       util.json_string(build), util.json_string(src), util.json_string(obj), util.json_string(command))
   end
 
+  -- What a module's tests (and heavy tests) are built with beyond the module: each of its
+  -- test_deps and that one's closure, and their include directories after `dirs`.
+  local function test_extras(inst, dirs)
+    local m = inst.module
+    local extra_dirs, extra = {}, {}
+    for _, d in ipairs(dirs) do extra_dirs[#extra_dirs + 1] = d end
+    for _, name in ipairs(util.as_list(m.fields.test_deps or {})) do
+      local found
+      for _, i in ipairs(g.instances) do
+        if i.module.name == name and i.platform == inst.platform and i.prefix == inst.prefix and not i.dropped then found = i end
+      end
+      if not found then util.fail("%s: test_deps names '%s', which this build does not have for %s", m.name, name, inst.platform) end
+      for _, d in ipairs(found.closure) do extra[#extra + 1] = d end
+      extra[#extra + 1] = found
+    end
+    for _, d in ipairs(extra) do if d.module.include then extra_dirs[#extra_dirs + 1] = d.module.include end end
+    return extra_dirs, extra
+  end
+
   -- A rule that writes code compiled into the module that has its inputs (slang's
   -- shader_cpu: a game shader as C++ for the CPU renderer). Each input gets, in the
   -- module's gen directory:
@@ -723,14 +742,30 @@ function M.run(c, g, opts)
   -- the instance's own library (a test's module) and its closure's, last dependency first;
   -- every file the instance and its closure stage (assets, shaders) and a package's runtime
   -- files; and the externals' link flags.
-  local function link_inputs(inst)
+  -- What a program links: its module's library and its closure's, each module's
+  -- externals and runtime files; and for a module's tests, `extra` (its test_deps and
+  -- their closures, test_extras) the same way, after them.
+  local function link_inputs(inst, extra)
     local libs, mods, staged = {}, {}, {}
-    if libs_by_key[inst.key] then libs[#libs + 1] = libs_by_key[inst.key] end
+    local have, seen = {}, {}
+    local function add_lib(l) if l and not have[l] then have[l] = true; libs[#libs + 1] = l end end
+    add_lib(libs_by_key[inst.key])
     for i = #inst.closure, 1, -1 do
       local d = inst.closure[i]
-      if libs_by_key[d.key] then libs[#libs + 1] = libs_by_key[d.key] end
+      add_lib(libs_by_key[d.key])
       mods[#mods + 1] = d.module
+      seen[d.key] = true
       for _, r in ipairs(runtime_by_key[d.key] or {}) do staged[#staged + 1] = r end
+    end
+    seen[inst.key] = true
+    for i = #(extra or {}), 1, -1 do
+      local d = extra[i]
+      if not seen[d.key] then
+        seen[d.key] = true
+        add_lib(libs_by_key[d.key])
+        mods[#mods + 1] = d.module
+        for _, r in ipairs(runtime_by_key[d.key] or {}) do staged[#staged + 1] = r end
+      end
     end
     mods[#mods + 1] = inst.module
     for _, r in ipairs(runtime_by_key[inst.key] or {}) do staged[#staged + 1] = r end
@@ -952,17 +987,7 @@ function M.run(c, g, opts)
       if #srcs == 0 then goto skip end
       -- test_deps: modules the tests use and the module does not (a picture decoder to read
       -- reference pictures), each with its closure: their headers and their libraries.
-      local extra_dirs, extra = { m.tests_dir }, {}
-      for _, name in ipairs(util.as_list(m.fields.test_deps or {})) do
-        local found
-        for _, i in ipairs(g.instances) do
-          if i.module.name == name and i.platform == inst.platform and i.prefix == inst.prefix and not i.dropped then found = i end
-        end
-        if not found then util.fail("%s: test_deps names '%s', which this build does not have for %s", m.name, name, inst.platform) end
-        for _, d in ipairs(found.closure) do extra[#extra + 1] = d end
-        extra[#extra + 1] = found
-      end
-      for _, d in ipairs(extra) do if d.module.include then extra_dirs[#extra_dirs + 1] = d.module.include end end
+      local extra_dirs, extra = test_extras(inst, { m.tests_dir })
       local includes = include_flags(inst, extra_dirs)
       local objs = {}
       for _, s in ipairs(srcs) do
@@ -977,13 +1002,7 @@ function M.run(c, g, opts)
       end
       -- Linked as an executable is. The stamp takes what is staged as implicit inputs, so
       -- a changed asset reruns the test without relinking it.
-      local li = link_inputs(inst)
-      local have = {}
-      for _, l in ipairs(li.libs) do have[l] = true end
-      for i = #extra, 1, -1 do
-        local l = libs_by_key[extra[i].key]
-        if l and not have[l] then li.libs[#li.libs + 1] = l; have[l] = true end
-      end
+      local li = link_inputs(inst, extra)
       local exe = pre .. "bin/" .. sym .. "_tests" .. flags(inst).tc.fields.exe_suffix
       link(inst, exe, objs, li)
       -- An executable's tests do not link it (it has a main of its own): they run it, so
@@ -1020,14 +1039,15 @@ function M.run(c, g, opts)
       local pre = inst.prefix
       local srcs = util.sorted_files(hdir, "cc")
       if #srcs == 0 then goto next_heavy end
-      local includes = include_flags(inst, { m.tests_dir, hdir })
+      local extra_dirs, extra = test_extras(inst, { m.tests_dir, hdir })
+      local includes = include_flags(inst, extra_dirs)
       local objs = {}
       for _, n in ipairs(srcs) do
         local obj = pre .. "obj/" .. sym .. "/heavy/" .. n:gsub("%.cc$", "") .. flags(inst).tc.fields.obj_suffix
         compile(inst, util.join(hdir, n), obj, includes, define_flags(inst))
         objs[#objs + 1] = obj
       end
-      local li = link_inputs(inst)
+      local li = link_inputs(inst, extra) -- linked as the tests are: the test_deps too
       local exe = pre .. "bin/" .. sym .. "_heavy" .. flags(inst).tc.fields.exe_suffix
       link(inst, exe, objs, li)
       local needs = { exe }
