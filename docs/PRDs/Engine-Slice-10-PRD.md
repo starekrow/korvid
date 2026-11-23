@@ -11,6 +11,10 @@ all nine. None is a new subsystem: three are kormake's, three the I/O queue's, t
 `core`'s and one `cli`'s. Each keeps Blackwing's ID so the two documents read side by
 side.
 
+Four more came after this draft and are stacked on it: KR10, a timed wait, from
+Blackwing's slice 2, and KR11 to KR13 from planning its slice 3, the library. Three are
+the platform module's and one `core`'s. KR11 blocks the library's third milestone.
+
 KR1 goes first. Blackwing's next milestone is its PipeWire backend, and a project cannot
 link PipeWire today without editing `modules/toolchain-linux/module.lua`.
 
@@ -31,6 +35,12 @@ It is done when:
   MSVC.
 - The events documentation says that order across event types is not kept, and what to
   do instead.
+- A thread can wait on a condition variable until a signal or a deadline.
+- One directory lists without its subdirectories, links marked, hidden entries on
+  request, and without a stat an entry when only kinds are asked.
+- A path can be asked whether it is on a share, and a watcher made with `Auto` polls a
+  root that is.
+- A stat names the volume: a mount point's differs from its parent directory's.
 - Korvid's own tree builds as before: the build files kormake writes for it differ only
   in the version on their first line, and the demos' hashes do not move.
 
@@ -49,6 +59,12 @@ Checked Nov 22 on `main` (c55b475).
 | KR7 | `modules/core/src/thread.cc` | `thread_set_realtime` sets a thread-local flag that the allocators verify against. No scheduler call in `core` |
 | KR8 | `emit.lua`, the toolchains | `codegen` is one profile name per module; every toolchain has only `fast`. `isa_sources` shows the per-source shape: `{ avx2 = { "src/raster.cc" } }` |
 | KR9 | `modules/core/include/korvid/core/event.h` | The file comment says every consumer sees every event once in the same order. It does not say that this is per type |
+| KR10 | `os_thread.h` | `os_cond_wait` only. The conditions are made with default attributes, so a POSIX timed wait would be on the realtime clock |
+| KR11 | `io.h`, `os_file.h` | `io_list_files` and `io_list_files_stat` walk a whole tree, hidden entries skipped. Under them, `os_dir_each_stat` lists one directory, following links, with a `stat` an entry on POSIX and an error of no kind |
+| KR12 | `fs_watch.h` | `Auto` is the native backend wherever there is one, for every root. Nothing asks what a file system is |
+| KR13 | `io.h`, `os_file.h` | `IoStat` and `OsStat` have kind, size and time. `st_dev` and the ring's `stx_dev_*` are read and dropped |
+
+Checked Nov 23 on `slice-10` (3627a5a) for KR10 to KR13.
 
 ## kormake
 
@@ -180,6 +196,71 @@ two facts matters, make them one event type with a field that says which, or kee
 state in a resource and treat the events as "something changed". Blackwing's `seq` is
 the first of these done by hand.
 
+## Stacked on: the timed wait and slice 3's three
+
+**One directory (KR11).**
+
+```cpp
+enum IoListFlags : u32 { IoListHidden = 1u << 0, IoListSizes = 1u << 1 };
+struct IoDirEntry {
+    const char* name;    // the entry's own name, valid during the call
+    IoStat      st;      // what it is, following a link; size, time and volume with IoListSizes
+    bool        is_link; // a symbolic link (a junction too, on Windows); st is its target's, all false if it has none
+    bool        hidden;  // a leading '.', or Windows' hidden attribute
+    bool        utf8;    // false: not valid UTF-8; it still opens the file, and wants care to be shown
+};
+bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirEntry& e), void* user, i32* err = nullptr);
+```
+
+- **Blocking, on any thread**: a job, or a task through `IoQueue::run_task`. Never a
+  tick, as for `io_list_files`.
+- **Sorted by name**, bytewise, as `io_list_files` is, so a walk is the same every time.
+  The caller orders the directories.
+- **What it costs.** Without `IoListSizes`, kinds come from the listing (`d_type` on
+  POSIX), and only a link or an entry the file system does not type is asked of
+  (`fstatat` on the open directory, no path walked). With it, POSIX asks of each entry,
+  since `readdir` has no sizes; Windows' listing has them either way.
+- **Names that are not UTF-8.** On POSIX a name is bytes and is handed back as it came,
+  which `read_file` opens. On Windows a name is UTF-16 that may hold half a surrogate
+  pair; it is narrowed to WTF-8 (the surrogate encoded as UTF-8 would encode it), and
+  `wide.h` widens WTF-8 back, so the name opens the same file.
+- **Failure** is false with the errno: `ENOENT`, `ENOTDIR`, `EACCES`, `EIO` or what the
+  OS said. A stop from `fn` is not a failure.
+- `io_list_files` and `io_list_files_stat` stay as they are.
+
+**A share (KR12).** `bool io_path_is_remote(const char* path)`: whether the file system
+under it may change without this machine hearing.
+
+| platform | how |
+|---|---|
+| Linux, Android | `statfs`'s `f_type`: NFS, SMB and CIFS, FUSE (sshfs, rclone and the rest; `fuseblk`'s ntfs-3g too, which polls for nothing), 9p, AFS, Coda, Ceph |
+| Windows | a `\\server\share` path, or `GetDriveTypeW` of its volume (`GetVolumePathNameW`) is `DRIVE_REMOTE` |
+| macOS, iOS | `statfs` without `MNT_LOCAL`, or a macFUSE file system |
+
+`FsWatcher::add_root(dir, FsWatchBackend how = Auto)` chooses per root: `Auto` is the
+watcher's own backend, except that a watcher made with `Auto` polls a remote root.
+`Poll` polls this root whatever the watcher is, for a share the test misses; `Native`
+insists. `root_backend(id)` says which a root got. A remote root is walked every
+`remote_interval` seconds (a new argument to `init`, default 5): the watcher's
+`poll_interval`, 0.25 s, is for a local tree. The walk is on the thread that polls, as
+the polling backend's always was, so a library that watches a share polls from a thread
+of its own.
+
+**A volume (KR13).** `IoStat::volume`, a `u64` for equality only: `st_dev` on POSIX, the
+ring's `stx_dev_major` and `stx_dev_minor` joined as `makedev` joins them, the volume
+serial number on Windows. 0 is "not asked": `io_list_files_stat`'s walk leaves it so, as
+does `io_list_dir` without `IoListSizes`. On Windows a stat that opens no handle asks
+`GetVolumeInformationW` of the path's volume, one call more; a listing asks once for the
+directory.
+
+**The timed wait (KR10).** `bool os_cond_timed_wait(OsCond* c, OsMutex* m, f64 seconds)`:
+as `os_cond_wait`, false when the time ran out first. True is any wake, a spurious one
+included, so the caller's loop is the same. On POSIX the condition is made on
+`CLOCK_MONOTONIC` (`pthread_condattr_setclock`), so a change to the wall clock moves no
+deadline; Apple has no such attribute and waits with `pthread_cond_timedwait_relative_np`.
+Windows: `SleepConditionVariableSRW` with the milliseconds rounded up. A time of 0 or less
+does not wait.
+
 ## Requirements
 
 | ID | Requirement | Priority |
@@ -193,6 +274,10 @@ the first of these done by hand.
 | KR7 | `os_thread_enter_audio_class` on Linux, Windows and macOS | P1 |
 | KR8 | `codegen` as a list, `codegen_sources`, the `wrapv` profile | P2 |
 | KR9 | The events documentation says order across types is not kept | P2 |
+| KR10 | `os_cond_timed_wait` | P2 |
+| KR11 | `io_list_dir`: one directory, links marked, hidden on request, sizes on request, names that round-trip, a reason on failure | P0 |
+| KR12 | `io_path_is_remote`; `FsWatcher` polls a remote root under `Auto`, and a root can be polled by name | P2 |
+| KR13 | `IoStat::volume` | P2 |
 | R10 | kormake 1.2: `KORMAKE_VERSION`, the manual's `module.lua`, `korvid.config`, OPTIONS and ENVIRONMENT sections | P0 |
 | R11 | The module pages and quick references of `platform` and `core` change with their headers (`cli` has no page yet; its header comment changes); `tools/doccheck.sh` reports nothing new | P0 |
 
@@ -211,6 +296,15 @@ the first of these done by hand.
 5. **Sanitizers** (KR2). The toolchain table, the option, the build directory; then the
    engine's tests under each, and the fixes.
 6. **`wrapv`** (KR8). Blackwing's `flac.cc` drops its GCC pragma.
+7. **One directory** (KR11). Tests: a directory with files, a subdirectory, a hidden
+   entry, a link to each and a dangling one, and a name that is not UTF-8 read back
+   through the queue; each failure's errno.
+8. **The volume** (KR13). Tests: a file and its directory agree, under `io_stat`, the
+   ring's stat and the workers'; a mount point (here `/proc`, or a FUSE mount) differs
+   from its parent.
+9. **Shares** (KR12). Tests: a FUSE mount, where there is one, is remote and `/tmp` is
+   not; a root added with `Poll` to a native watcher reports a change.
+10. **The timed wait** (KR10). Tests: a wait that times out, one that is signalled, and 0.
 
 **Verification.** `kormake build` and `kormake test` for linux-debug, linux-dev and
 linux-ship. `tools/kormake/tests/run.sh` passes.
