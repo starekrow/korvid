@@ -13,8 +13,10 @@
 #if defined(__linux__) && !defined(__ANDROID__)
 
 #include <errno.h>
+#include <fcntl.h>
 #include <linux/io_uring.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -43,7 +45,25 @@ struct IoRing {
     u32*  cq_mask  = nullptr;
     io_uring_cqe* cqes = nullptr;
     bool  single_mmap = false;
+    bool  statx = false; // the kernel has IORING_OP_STATX (5.6 on)
 };
+
+namespace {
+
+// Whether the kernel has `op`, by IORING_REGISTER_PROBE (5.6 on: before it, nothing new).
+bool ring_has_op(int fd, u32 op) {
+    constexpr u32 kOps = 256;
+    usize bytes = sizeof(io_uring_probe) + kOps * sizeof(io_uring_probe_op);
+    io_uring_probe* p = (io_uring_probe*)mem_alloc(bytes);
+    if (!p) return false;
+    memset(p, 0, bytes);
+    bool has = syscall(__NR_io_uring_register, fd, IORING_REGISTER_PROBE, p, kOps) >= 0 && op <= p->last_op &&
+               (p->ops[op].flags & IO_URING_OP_SUPPORTED);
+    mem_free(p);
+    return has;
+}
+
+} // namespace
 
 IoRing* io_ring_create(u32 entries) {
     io_uring_params p{};
@@ -82,7 +102,8 @@ IoRing* io_ring_create(u32 entries) {
     r->cq_tail  = (u32*)(r->cq_ptr + p.cq_off.tail);
     r->cq_mask  = (u32*)(r->cq_ptr + p.cq_off.ring_mask);
     r->cqes     = (io_uring_cqe*)(r->cq_ptr + p.cq_off.cqes);
-    KV_INFO("io", "io_uring: %u submission entries, %u completion entries", p.sq_entries, p.cq_entries);
+    r->statx    = ring_has_op(fd, IORING_OP_STATX);
+    KV_INFO("io", "io_uring: %u submission entries, %u completion entries%s", p.sq_entries, p.cq_entries, r->statx ? "" : ", no statx");
     return r;
 }
 
@@ -132,6 +153,35 @@ void io_ring_push_read(IoRing* r, OsFile fd, void* buf, u32 len, u64 offset, u64
     ++r->pushed;
 }
 
+bool  io_ring_can_stat(const IoRing* r) { return r && r->statx; }
+usize io_ring_stat_size() { return sizeof(struct statx); }
+
+void io_ring_push_stat(IoRing* r, const char* path, void* buf, u64 user) {
+    u32 tail = *r->sq_tail;
+    u32 idx  = tail & *r->sq_mask;
+    io_uring_sqe& s = r->sqes[idx];
+    memset(&s, 0, sizeof s);
+    s.opcode      = IORING_OP_STATX;
+    s.fd          = AT_FDCWD;
+    s.addr        = (u64)(usize)path;
+    s.len         = STATX_TYPE | STATX_SIZE | STATX_MTIME;
+    s.off         = (u64)(usize)buf; // addr2: where the answer goes
+    s.statx_flags = 0;               // follows links, as io_stat does
+    s.user_data   = user;
+    r->sq_array[idx] = idx;
+    kv::atomic_store(r->sq_tail, tail + 1, kv::MO_RELEASE);
+    ++r->pushed;
+}
+
+void io_ring_stat_read(const void* buf, IoStat* out) {
+    const struct statx& x = *(const struct statx*)buf;
+    *out = IoStat{};
+    out->is_file  = S_ISREG(x.stx_mode);
+    out->is_dir   = S_ISDIR(x.stx_mode);
+    out->size     = x.stx_size;
+    out->mtime_ns = (i64)x.stx_mtime.tv_sec * 1000000000ll + x.stx_mtime.tv_nsec;
+}
+
 bool io_ring_enter(IoRing* r, u32 min_complete) {
     if (r->pushed == 0 && min_complete == 0) return true;
     u32 flags = min_complete ? IORING_ENTER_GETEVENTS : 0;
@@ -178,6 +228,20 @@ bool    io_ring_pop(IoRing*, u64*, i32*) { return false; }
 u32     io_ring_in_flight(const IoRing*) { return 0; }
 u32     io_ring_entries(const IoRing*) { return 0; }
 const char* io_ring_name(const IoRing*) { return "sync"; }
+
+} // namespace kv
+
+#endif
+
+// Every ring but io_uring has no stat of its own: the queue sends stats to its task workers.
+#if !defined(__linux__) || defined(__ANDROID__)
+
+namespace kv {
+
+bool  io_ring_can_stat(const IoRing*) { return false; }
+usize io_ring_stat_size() { return 0; }
+void  io_ring_push_stat(IoRing*, const char*, void*, u64) {}
+void  io_ring_stat_read(const void*, IoStat* out) { *out = IoStat{}; }
 
 } // namespace kv
 

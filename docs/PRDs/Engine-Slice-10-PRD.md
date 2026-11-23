@@ -280,4 +280,40 @@ is 1.2. What the build added or settled beyond the text above:
   [Modules](../concepts/modules.md#how-code-flows-through-a-tick). `tools/doccheck.sh`
   reports what it did before (one name in `asset_render`'s quick reference).
 
-Milestones 3 to 6: not started.
+**Milestone 3, the queue (KR4, KR6, KR5): built Nov 22, 2026.**
+
+- **Long paths.** `IoEntry` keeps `path[256]` and gains `long_path`: a path of 256 bytes
+  or more is copied whole into a block from the request's allocator (and cut inline, for
+  logs), freed at `reap` or `free()`. `read_asset`'s joined directory path is built in a
+  buffer of the mount path and `KV_PACK_PATH_MAX` and goes the same way. A 299-byte name
+  now fails at the pump with `ENAMETOOLONG` where it was refused at submission; a path of
+  5,000 bytes fails with the OS's error. A request with no path is still a null handle.
+- **Windows.** `WidePath` in `src/win32/wide.h` widens a path of any length, and past
+  `MAX_PATH - 12` (CreateDirectoryW's line) makes it absolute with `GetFullPathNameW`
+  under `\\?\` or `\\?\UNC\`. `os_file_open`, `os_path_kind` and `os_path_stat` use it.
+  Written, not compiled: no Windows machine here.
+- **Ranges.** `IoRequest::offset` and `length`. `length` 0 means to the end of the file
+  from `offset`, so the defaults are the whole file as before. A range is cut to the file
+  when it is opened (`clip`), so its buffer is the bytes that are there, a range past the
+  end is `Done` with those and an offset past the end `Done` with 0; the budget counts the
+  cut range. A pack entry's range still fails when the archive ends inside it.
+- **Stat.** `stat_file(req)` completes with `IoCompletion::stat`; `IoStat` moves up the
+  header to sit beside it. On io_uring it is one `IORING_OP_STATX`, asked for only when
+  `IORING_REGISTER_PROBE` says the kernel has it (5.6 on); its answer and a copy of the
+  path live in a block of their own while in flight, since the pool's entries move when
+  it grows. Elsewhere it runs on the task workers, in a lane past the callers' eight that
+  no limit applies to. **Settled here:** with no task workers started, or under
+  `--io sync`, the stat is done at the pump; the header says so. `os_path_stat` gains an
+  optional errno so that "nothing there" (`ENOENT`, `ENOTDIR`) is `Done` and anything else
+  `Failed`. `IoQueue::stat_on_tasks` sends stats to the workers on io_uring too, which is
+  how the workers' path is tested on Linux.
+- **Tests** (`io_long_ranged_stat`): a file under a 973-byte path written, read and
+  stat'ed; the first 64 KB of a 16 MB file and four other ranges, with the budget's count;
+  a stat of a file (its time equal to `io_stat`'s), a directory, a missing path and a
+  cancelled one; each under the synchronous backend, io_uring, and io_uring with the
+  stats on the workers.
+- **Checked:** `kormake test platform` on linux-debug, linux-dev and linux-ship; the
+  whole of `kormake test linux-dev`; `platform` compiled for android-dev. Not checked:
+  Windows and the Apple family.
+
+Milestones 4 to 6: not started.

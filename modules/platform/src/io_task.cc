@@ -14,7 +14,18 @@
 namespace kv {
 
 namespace {
-constexpr u32 kPriorities = 4; // IoPriority's
+constexpr u32 kPriorities = 4;            // IoPriority's
+constexpr u32 kStatLane   = kIoLanes;     // stat_file's, past the callers' lanes: never limited
+constexpr u32 kLanes      = kIoLanes + 1;
+
+// A stat on a worker: the path, copied (the entry may move while the worker runs), and the
+// answer.
+struct StatJob { IoStat st; char path[1]; };
+
+i32 stat_job(void* arg, const IoTaskCtl&) {
+    StatJob& j = *(StatJob*)arg;
+    return io_stat_now(j.path, &j.st);
+}
 } // namespace
 
 struct IoTask {
@@ -27,6 +38,7 @@ struct IoTask {
     IoTaskCtl ctl;
     i32       result;
     bool      ran;
+    bool      stat;    // a stat_file's: `arg` is its StatJob, the queue's to free
     IoTask*   next;
 };
 
@@ -39,10 +51,10 @@ struct IoWorker {
 struct IoTasks {
     OsMutex   lock;
     OsCond    work;                           // a task, a free lane slot, or stop
-    IoTask*   head[kIoLanes][kPriorities];    // waiting, oldest first
-    IoTask*   tail[kIoLanes][kPriorities];
-    u32       running[kIoLanes];
-    u32       limit[kIoLanes];                // 0: no limit but the workers
+    IoTask*   head[kLanes][kPriorities];      // waiting, oldest first
+    IoTask*   tail[kLanes][kPriorities];
+    u32       running[kLanes];
+    u32       limit[kLanes];                  // 0: no limit but the workers
     IoTask*   done_head;                      // finished, for the pump, oldest first
     IoTask*   done_tail;
     bool      stop;
@@ -57,7 +69,7 @@ namespace {
 IoTask* take(IoTasks& t) {
     IoTask* best = nullptr;
     u32 bl = 0, bp = 0;
-    for (u32 l = 0; l < kIoLanes; ++l) {
+    for (u32 l = 0; l < kLanes; ++l) {
         if (t.limit[l] && t.running[l] >= t.limit[l]) continue;
         for (u32 p = kPriorities; p-- > 0;) {
             IoTask* c = t.head[l][p];
@@ -102,6 +114,21 @@ void worker_main(void* arg) {
         os_cond_signal(&t.work);
     }
     os_mutex_unlock(&t.lock);
+}
+
+} // namespace
+
+namespace {
+
+// A node onto its lane's list, for the next worker free.
+void enqueue(IoQueue& q, IoTask* task) {
+    ++q.tasks_pending;
+    os_mutex_lock(&q.tasks->lock);
+    IoTask*& tl = q.tasks->tail[task->lane][task->prio];
+    if (tl) tl->next = task; else q.tasks->head[task->lane][task->prio] = task;
+    tl = task;
+    os_cond_signal(&q.tasks->work);
+    os_mutex_unlock(&q.tasks->lock);
 }
 
 } // namespace
@@ -159,14 +186,30 @@ Handle IoQueue::run_task(const IoTaskRequest& req) {
     task->lane = req.lane;
     task->prio = (u32)req.priority;
     task->seq = e.sequence;
-    ++tasks_pending;
-    os_mutex_lock(&tasks->lock);
-    IoTask*& tl = tasks->tail[task->lane][task->prio];
-    if (tl) tl->next = task; else tasks->head[task->lane][task->prio] = task;
-    tl = task;
-    os_cond_signal(&tasks->work);
-    os_mutex_unlock(&tasks->lock);
+    enqueue(*this, task);
     return h;
+}
+
+bool io_tasks_stat(IoQueue& q, Handle h, IoEntry& e) {
+    const char* path = e.long_path ? e.long_path : e.path;
+    usize n = strlen(path);
+    StatJob* job = (StatJob*)mem_alloc(sizeof(StatJob) + n);
+    IoTask* task = job ? (IoTask*)mem_alloc(sizeof(IoTask)) : nullptr;
+    if (!task) { mem_free(job); return false; }
+    *job = StatJob{};
+    memcpy(job->path, path, n + 1);
+    *task = IoTask{};
+    task->fn = stat_job;
+    task->arg = job;
+    task->h = h;
+    task->lane = kStatLane;
+    task->prio = (u32)e.priority;
+    task->seq = e.sequence;
+    task->stat = true;
+    e.task = task;
+    e.in_flight = true;
+    enqueue(q, task);
+    return true;
 }
 
 void io_tasks_complete(IoQueue& q) {
@@ -191,7 +234,13 @@ void io_tasks_complete(IoQueue& q) {
             e->task = nullptr;
             e->in_flight = false;
         }
-        if (c.status == IoStatus::Done) ++q.tasks_done;
+        if (task->stat) { // a stat_file's: its answer, and the stat counts
+            if (c.status == IoStatus::Done) { c.stat = ((StatJob*)task->arg)->st; ++q.stats_done; }
+            else if (c.status == IoStatus::Failed) ++q.stats_failed;
+            if (c.status == IoStatus::Cancelled) c.error = 0;
+            mem_free(task->arg);
+        }
+        else if (c.status == IoStatus::Done) ++q.tasks_done;
         else if (c.status == IoStatus::Failed) ++q.tasks_failed;
         --q.tasks_pending;
         q.completed.push(c);
@@ -215,10 +264,11 @@ void io_tasks_stop(IoQueue& q) {
     os_mutex_unlock(&t->lock);
     for (u32 i = 0; i < t->count; ++i) os_thread_join(&t->workers[i].thread);
     // Never started, or finished and never pumped: their completions will not be wanted.
-    for (u32 l = 0; l < kIoLanes; ++l)
+    auto drop = [](IoTask* task) { if (task->stat) mem_free(task->arg); mem_free(task); };
+    for (u32 l = 0; l < kLanes; ++l)
         for (u32 p = 0; p < kPriorities; ++p)
-            for (IoTask* task = t->head[l][p]; task;) { IoTask* n = task->next; mem_free(task); task = n; }
-    for (IoTask* task = t->done_head; task;) { IoTask* n = task->next; mem_free(task); task = n; }
+            for (IoTask* task = t->head[l][p]; task;) { IoTask* n = task->next; drop(task); task = n; }
+    for (IoTask* task = t->done_head; task;) { IoTask* n = task->next; drop(task); task = n; }
     os_cond_destroy(&t->work);
     os_mutex_destroy(&t->lock);
     mem_free(t->workers);

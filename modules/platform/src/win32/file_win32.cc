@@ -42,8 +42,9 @@ i64 overlapped_wait(HANDLE h, bool write, void* buf, DWORD want, u64 at, i32* er
 } // namespace
 
 OsFile os_file_open(const char* path, bool write, i32* err) {
-    wchar_t w[KV_WIDE_PATH_MAX];
-    if (!widen(path, w, KV_WIDE_PATH_MAX, err)) return -1;
+    WidePath wp;
+    if (!wp.set(path, err)) return -1;
+    const wchar_t* w = wp.w;
     // Readers let others read, write and delete meanwhile, as POSIX descriptors do.
     // Overlapped, for the ring: see the top of the file.
     HANDLE h = write ? CreateFileW(w, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr)
@@ -76,8 +77,9 @@ i64 os_file_write(OsFile f, const void* buf, usize n, i32* err) {
 }
 
 OsPathKind os_path_kind(const char* path) {
-    wchar_t w[KV_WIDE_PATH_MAX];
-    if (!widen(path, w, KV_WIDE_PATH_MAX)) return OsPathKind::None;
+    WidePath wp;
+    if (!wp.set(path)) return OsPathKind::None;
+    const wchar_t* w = wp.w;
     // Opening it follows links, as stat does; the attributes alone would describe the link.
     HANDLE h = CreateFileW(w, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
@@ -91,16 +93,17 @@ OsPathKind os_path_kind(const char* path) {
     return OsPathKind::File;
 }
 
-bool os_path_stat(const char* path, OsStat* out) {
+bool os_path_stat(const char* path, OsStat* out, i32* err) {
     *out = OsStat{};
-    wchar_t w[KV_WIDE_PATH_MAX];
-    if (!widen(path, w, KV_WIDE_PATH_MAX)) return false;
+    WidePath wp;
+    if (!wp.set(path, err)) return false;
+    const wchar_t* w = wp.w;
     // The attributes, the size and the time come with the directory's own record: no handle
     // is opened, which on Windows is the cost (every filter driver, the antivirus's among
     // them, sees an open). Not for a reparse point (a symbolic link, a junction), which
     // that record describes as itself: that is opened below, and followed, as before.
     WIN32_FILE_ATTRIBUTE_DATA fa;
-    if (!GetFileAttributesExW(w, GetFileExInfoStandard, &fa)) return false;
+    if (!GetFileAttributesExW(w, GetFileExInfoStandard, &fa)) { if (err) *err = fail_errno(); return false; }
     if (!(fa.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
         out->kind = (fa.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? OsPathKind::Dir
                   : (fa.dwFileAttributes & FILE_ATTRIBUTE_DEVICE) ? OsPathKind::Other : OsPathKind::File;
@@ -110,9 +113,10 @@ bool os_path_stat(const char* path, OsStat* out) {
     }
     HANDLE h = CreateFileW(w, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return false;
+    if (h == INVALID_HANDLE_VALUE) { if (err) *err = fail_errno(); return false; }
     BY_HANDLE_FILE_INFORMATION info;
     BOOL ok = GetFileInformationByHandle(h, &info);
+    if (!ok && err) *err = fail_errno();
     CloseHandle(h);
     if (!ok) return false;
     out->kind = (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? OsPathKind::Dir

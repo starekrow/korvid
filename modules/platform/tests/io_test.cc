@@ -64,10 +64,16 @@ void test_backend(kv::TestCtx& c, const Files& f, kv::IoBackend backend) {
     KV_CHECK(c, q.reap(ha) && !q.reap(ha) && q.completions().len == 3 && resolve(ha) == nullptr);
     KV_CHECK(c, q.reap(hb) && q.reap(hm) && q.reap(hc) && q.completions().len == 0);
 
-    // A path that does not fit is refused up front.
+    // The queue has no path limit of its own: a name the OS refuses (one of 299 bytes, past
+    // the file system's 255) fails at the pump with the OS's error; no path at all is
+    // refused up front.
     char too_long[300]; memset(too_long, 'x', sizeof too_long - 1); too_long[sizeof too_long - 1] = 0;
-    IoRequest rl; rl.path = too_long;
-    KV_CHECK(c, q.read_file(rl).is_null());
+    IoRequest rl; rl.path = too_long; rl.user = 7;
+    Handle hl = q.read_file(rl);
+    KV_CHECK(c, !hl.is_null() && wait_for(q, 1) == 1 && q.completions()[0].status == IoStatus::Failed && q.completions()[0].error != 0);
+    KV_CHECK(c, q.reap(hl));
+    IoRequest rn;
+    KV_CHECK(c, q.read_file(rn).is_null() && q.stat_file(rn).is_null());
 
     // A larger file comes back whole, and a cancel while in flight still completes.
     char big_path[256];
@@ -338,4 +344,153 @@ void test_io_now(kv::TestCtx& c) {
         free(big);
     }
     KV_CHECK(c, io_remove_tree(dir));
+}
+
+// Slice 10's queue: a path of 1,000 bytes read and written, the first 64 KB of a 16 MB file
+// and ranges past its end, and a stat of a file, a directory and a missing path; under the
+// synchronous backend, the ring, and (where the ring has its own stat) the task workers.
+void test_io_long_ranged_stat(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("io_long_ranged_stat");
+    char dir[200];
+    KV_CHECK(c, io_make_temp_dir("korvid-io10", dir, sizeof dir));
+
+    // Four directories of 230 bytes under the temporary one, and a file: about 1,000 bytes.
+    char deep[1100];
+    usize n = (usize)format(deep, sizeof deep, "%s", dir);
+    for (u32 level = 0; level < 4; ++level) {
+        deep[n++] = '/';
+        for (u32 i = 0; i < 230; ++i) deep[n++] = (char)('a' + (level + i) % 26);
+        deep[n] = 0;
+    }
+    KV_CHECK(c, io_make_dirs(deep));
+    char deep_dir[1100];
+    memcpy(deep_dir, deep, n + 1);
+    n += (usize)format(deep + n, sizeof deep - n, "/%s", "far.txt");
+    KV_CHECK(c, n >= 950 && n < 1024);
+
+    // 16 MB with a pattern a range can be checked against.
+    char big[300], missing[300];
+    format(big, sizeof big, "%s/big.bin", dir);
+    format(missing, sizeof missing, "%s/nothing/here.bin", dir);
+    const usize kBig = 16u << 20;
+    {
+        u8* buf = (u8*)mem_alloc(kBig);
+        for (usize i = 0; i < kBig; ++i) buf[i] = (u8)(i * 13 + (i >> 9));
+        KV_CHECK(c, io_write_now(big, buf, kBig));
+        mem_free(buf);
+    }
+    auto pattern_ok = [](const IoCompletion* cc, u64 from) {
+        if (!cc || !cc->data) return false;
+        for (usize i = 0; i < cc->size; i += 997) { usize at = (usize)from + i; if (((const u8*)cc->data)[i] != (u8)(at * 13 + (at >> 9))) return false; }
+        return true;
+    };
+
+    for (u32 pass = 0; pass < 3; ++pass) {
+        IoQueue q;
+        KV_CHECK(c, q.init(nullptr, 32, pass == 0 ? IoBackend::Sync : IoBackend::Auto));
+        if (pass == 2) { // the task workers' stat, which Windows, Apple and Android use
+            KV_CHECK(c, q.start_tasks(2));
+            q.stat_on_tasks = true;
+        }
+
+        // The long path: written, read back, and its stat.
+        char payload[32];
+        usize plen = (usize)format(payload, sizeof payload, "far away %u", pass);
+        IoWriteRequest w; w.path = deep; w.data = payload; w.size = plen; w.user = 1;
+        Handle hw = q.write_file(w);
+        KV_CHECK(c, !hw.is_null() && wait_for(q, 1) == 1);
+        const IoCompletion* cw = by_user(q, 1);
+        KV_CHECK(c, cw && cw->status == IoStatus::Done && cw->size == plen);
+        q.reap(hw);
+        IoRequest r; r.path = deep; r.user = 2;
+        Handle hr = q.read_file(r);
+        KV_CHECK(c, wait_for(q, 1) == 1);
+        const IoCompletion* cr = by_user(q, 2);
+        KV_CHECK(c, cr && cr->status == IoStatus::Done && cr->size == plen && memcmp(cr->data, payload, plen) == 0);
+        if (cr) mem_free(cr->data);
+        q.reap(hr);
+
+        // Ranges: the first 64 KB alone, one from the middle, one that runs past the end,
+        // one that starts past it, and an offset with no length (to the end).
+        IoRequest r1; r1.path = big; r1.length = 64u << 10; r1.user = 10;
+        IoRequest r2; r2.path = big; r2.offset = 5000001; r2.length = 12345; r2.user = 11;
+        IoRequest r3; r3.path = big; r3.offset = kBig - 100; r3.length = 4096; r3.user = 12;
+        IoRequest r4; r4.path = big; r4.offset = kBig + 1; r4.length = 10; r4.user = 13;
+        IoRequest r5; r5.path = big; r5.offset = kBig - 7; r5.user = 14;
+        IoRequest r6; r6.path = missing; r6.length = 10; r6.user = 15;
+        u64 before = q.bytes_submitted;
+        Handle h1 = q.read_file(r1), h2 = q.read_file(r2), h3 = q.read_file(r3), h4 = q.read_file(r4), h5 = q.read_file(r5), h6 = q.read_file(r6);
+        KV_CHECK(c, wait_for(q, 6) == 6);
+        const IoCompletion* c1 = by_user(q, 10);
+        const IoCompletion* c2 = by_user(q, 11);
+        const IoCompletion* c3 = by_user(q, 12);
+        const IoCompletion* c4 = by_user(q, 13);
+        const IoCompletion* c5 = by_user(q, 14);
+        const IoCompletion* c6 = by_user(q, 15);
+        KV_CHECK(c, c1 && c1->status == IoStatus::Done && c1->size == (64u << 10) && pattern_ok(c1, 0));
+        KV_CHECK(c, c2 && c2->status == IoStatus::Done && c2->size == 12345 && pattern_ok(c2, 5000001));
+        KV_CHECK(c, c3 && c3->status == IoStatus::Done && c3->size == 100 && pattern_ok(c3, kBig - 100));
+        KV_CHECK(c, c4 && c4->status == IoStatus::Done && c4->size == 0);
+        KV_CHECK(c, c5 && c5->status == IoStatus::Done && c5->size == 7 && pattern_ok(c5, kBig - 7));
+        KV_CHECK(c, c6 && c6->status == IoStatus::Failed && c6->error == ENOENT);
+        // The budget counted what the ranges read, not the file: 16 MB six times over would be 96.
+        KV_CHECK(c, q.bytes_submitted - before == (64u << 10) + 12345 + 100 + 7);
+        const IoCompletion* ranged[] = {c1, c2, c3, c4, c5};
+        for (const IoCompletion* cc : ranged) if (cc && cc->data) mem_free(cc->data);
+        q.reap(h1); q.reap(h2); q.reap(h3); q.reap(h4); q.reap(h5); q.reap(h6);
+
+        // Stats: a file, a directory, nothing (Done, all false), and the long path. Nothing
+        // is answered at submission.
+        IoRequest s1; s1.path = big; s1.user = 20;
+        IoRequest s2; s2.path = deep_dir; s2.user = 21;
+        IoRequest s3; s3.path = missing; s3.user = 22;
+        IoRequest s4; s4.path = deep; s4.user = 23; s4.priority = IoPriority::High;
+        IoRequest s5; s5.path = big; s5.user = 24;
+        Handle g1 = q.stat_file(s1), g2 = q.stat_file(s2), g3 = q.stat_file(s3), g4 = q.stat_file(s4), g5 = q.stat_file(s5);
+        KV_CHECK(c, !g1.is_null() && q.completions().len == 0 && q.pending() == 5);
+        KV_CHECK(c, q.cancel(g5));
+        KV_CHECK(c, wait_for(q, 5) == 5 && q.pending() == 0);
+        IoStat want;
+        KV_CHECK(c, io_stat(big, &want) && want.is_file && want.size == kBig);
+        const IoCompletion* t1 = by_user(q, 20);
+        const IoCompletion* t2 = by_user(q, 21);
+        const IoCompletion* t3 = by_user(q, 22);
+        const IoCompletion* t4 = by_user(q, 23);
+        const IoCompletion* t5 = by_user(q, 24);
+        KV_CHECK(c, t1 && t1->status == IoStatus::Done && t1->data == nullptr && t1->stat.is_file && !t1->stat.is_dir &&
+                    t1->stat.size == kBig && t1->stat.mtime_ns == want.mtime_ns);
+        KV_CHECK(c, t2 && t2->status == IoStatus::Done && t2->stat.is_dir && !t2->stat.is_file);
+        KV_CHECK(c, t3 && t3->status == IoStatus::Done && !t3->stat.is_file && !t3->stat.is_dir && t3->stat.size == 0);
+        KV_CHECK(c, t4 && t4->status == IoStatus::Done && t4->stat.is_file && t4->stat.size == plen);
+        KV_CHECK(c, t5 && t5->status == IoStatus::Cancelled);
+        KV_CHECK(c, q.stats_done == 4 && q.stats_failed == 0);
+        if (pass == 2) KV_CHECK(c, q.tasks_done == 0); // the stats are counted as stats
+        q.reap(g1); q.reap(g2); q.reap(g3); q.reap(g4); q.reap(g5);
+
+        // A stat still queued at free() is dropped with the queue.
+        IoRequest s6; s6.path = deep; s6.user = 30;
+        KV_CHECK(c, !q.stat_file(s6).is_null());
+        q.free();
+    }
+
+    // Past what the OS takes (4,096 bytes on Linux): Failed with the OS's error.
+    {
+        IoQueue q;
+        KV_CHECK(c, q.init(nullptr, 4));
+        char* huge = (char*)mem_alloc(5000);
+        memset(huge, 'y', 4999);
+        huge[0] = '/';
+        huge[4999] = 0;
+        IoRequest r; r.path = huge; r.user = 40;
+        Handle h = q.read_file(r);
+        mem_free(huge); // copied
+        KV_CHECK(c, !h.is_null() && wait_for(q, 1) == 1);
+        const IoCompletion* cc = by_user(q, 40);
+        KV_CHECK(c, cc && cc->status == IoStatus::Failed && cc->error != 0);
+        q.reap(h);
+        q.free();
+    }
+
+    io_remove_tree(dir);
 }

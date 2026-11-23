@@ -101,6 +101,25 @@ at the pump under the same priorities and budget as reads (`IORING_OP_WRITE` on 
 settings file is a write to `platform_pref_path(e, org, app)`, the per-user directory
 for the names given ($XDG_DATA_HOME, or ~/.local/share, then `<org>/<app>/`) (created on first use).
 
+**A part of a file** is the same request with `offset` and `length`: `read_file` reads
+`length` bytes from `offset` (0 for either: from the start, to the end), cut to the file
+at open, so a range past the end completes `Done` with what is there and an offset past
+it with 0 bytes. The budget counts the range, so the first 64 KB of a large file costs
+64 KB. `read_asset` reads whole files only.
+
+**Ask what a path is without waiting** with `stat_file(IoRequest{path})`: the completion's
+`stat` has `is_file`, `is_dir`, `size` and `mtime_ns`, as `io_stat` gives them, and no
+data. Nothing there is `Done` with both flags false; `Failed` is an error on the way. On
+io_uring it is one `IORING_OP_STATX`; where the ring has no stat (Windows, Apple, Android)
+it runs on the task workers, and under `--io sync`, or with no workers started, at the
+pump.
+
+**Paths have no limit of the queue's.** One of 256 bytes or more is copied into a block
+from the request's allocator and freed with the request; a path the OS refuses (past
+4,096 bytes on Linux, or a name past 255) fails at the pump with the OS's error. On
+Windows a path past `MAX_PATH` is opened under the `\\?\` prefix. Mounts are the
+exception: a mount's own path is at most 255 bytes.
+
 **Assets go through mounts.** `read_asset(IoRequest{path = "rocks/rock.png"})`
 takes a logical path, normalizes it (`a//b`, `./a` and backslashes are `a/b`; `..` and
 absolute paths fail with `EINVAL`) and looks it up in the queue's mounts, the last mounted
@@ -139,9 +158,10 @@ Header `korvid/platform/io.h`:
 | `IoStatus` | enum | `Pending`, `Done`, `Failed`, `Cancelled` |
 | `IoBackend` | enum | `Auto`, `Sync`, `Ring` (the async ring: io_uring, or Windows I/O rings): what `init` tries |
 | `IoBudget` | record | `bytes_per_pump` (8 MB), `bytes_in_flight` (64 MB), `idle_bytes_per_call` (4 MB); 0 is unlimited |
-| `IoRequest` | record | `path` (copied), `alloc` (the data's home; null: general), `priority`, `user` |
-| `IoCompletion` | record | `request`, `status`, `data`, `size`, `user`, `error` (errno) |
-| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`; counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes` |
+| `IoRequest` | record | `path` (copied, any length), `alloc` (the data's home; null: general), `priority`, `user`, `offset` and `length` (a part of the file, for `read_file`; 0: to the end) |
+| `IoStat` | record | `is_file`, `is_dir`, `size`, `mtime_ns`: what a path names, following links |
+| `IoCompletion` | record | `request`, `status`, `data`, `size`, `user`, `error` (errno), `stat` (a `stat_file`'s answer) |
+| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
 | `platform_io(engine)` | function | the module's queue |
 | `platform_pref_path(engine, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none |
 | `platform_base_path(engine)` | function | the executable's directory with a trailing separator; assets live beneath it |

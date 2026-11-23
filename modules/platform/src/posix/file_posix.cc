@@ -55,10 +55,10 @@ OsPathKind os_path_kind(const char* path) {
     return OsPathKind::Other;
 }
 
-bool os_path_stat(const char* path, OsStat* out) {
+bool os_path_stat(const char* path, OsStat* out, i32* err) {
     struct stat st;
     *out = OsStat{};
-    if (stat(path, &st) != 0) return false;
+    if (stat(path, &st) != 0) { if (err) *err = errno; return false; }
     out->kind = S_ISREG(st.st_mode) ? OsPathKind::File : S_ISDIR(st.st_mode) ? OsPathKind::Dir : OsPathKind::Other;
     out->size = (u64)st.st_size;
 #if defined(__APPLE__)

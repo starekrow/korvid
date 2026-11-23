@@ -15,6 +15,10 @@
 // never more than bytes_in_flight at once. The rest wait for the next pump. Requests at
 // IoPriority::Idle are never admitted by the pump at all: they wait for pump_idle, which
 // the platform module calls from its Work unit with the time the Work cycle has left.
+//
+// A path has no limit of the queue's: one of 256 bytes or more is copied into a block
+// from the request's allocator, and a path the OS refuses (past 4,096 bytes on Linux)
+// completes Failed with the OS's error. Mounts are the exception: IoMount::path is 256.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/atomic.h"
@@ -47,7 +51,17 @@ struct IoRequest {
     Allocator*  alloc    = nullptr;             // the completion's data comes from here; null: general
     IoPriority  priority = IoPriority::Normal;
     u64         user     = 0;                   // handed back untouched
+    // A part of the file, for read_file: `length` bytes from `offset`. 0: to the end of the
+    // file, so the defaults are the whole file. The file's end ends a range that runs past
+    // it (the completion's size says how many came), and an offset past the end is Done
+    // with 0 bytes. The budget counts what the range reads. read_asset ignores both.
+    u64         offset   = 0;
+    usize       length   = 0;
 };
+
+// What a path names, following links: io_stat's answer, and stat_file's in its completion.
+// mtime_ns is nanoseconds from the OS's epoch: for comparing with another, nothing else.
+struct IoStat { bool is_file = false, is_dir = false; u64 size = 0; i64 mtime_ns = 0; };
 
 // A whole-file write: the bytes are copied at submission, so the caller's buffer is free
 // to go at once. The file is created or truncated. The completion carries no data.
@@ -94,21 +108,24 @@ struct IoTasks; // the workers, their lists and the lanes
 struct IoCompletion {
     Handle   request;
     IoStatus status = IoStatus::Pending;
-    void*    data   = nullptr; // a read's file contents; the consumer frees it with request.alloc. Null for a write
+    void*    data   = nullptr; // a read's file contents; the consumer frees it with request.alloc. Null for a write or a stat
     usize    size   = 0;       // bytes read, or written
     u64      user   = 0;
     i32      error  = 0;       // errno on failure
+    IoStat   stat;             // a stat_file's answer: all false and zero for a path where nothing is
 };
 
 struct IoEntry {
-    char       path[256];     // the file, or "<pack>:<entry>" for a read from a pack
+    char       path[256];     // the file, or "<pack>:<entry>" for a read from a pack; a longer one cut, for logs
+    char*      long_path;     // a path of 256 bytes or more, whole, from the entry's allocator; null: `path` is it
     Allocator* alloc;
     IoPriority priority;
     IoStatus   status;
     u64        user;
     u64        sequence;  // submission order, for stable priority ordering
     bool       write;     // a write: `buf` holds the copy to write, `size` its length
-    IoTask*    task;      // a task: its node, until the pump completes it
+    bool       stat;      // a stat: on the ring, `buf` holds the kernel's answer and a copy of the path
+    IoTask*    task;      // a task, or a stat on the task workers: its node, until the pump completes it
     // The ring's bookkeeping while a request is in flight.
     OsFile     fd;
     u8*        buf;
@@ -117,8 +134,10 @@ struct IoEntry {
     bool       in_flight;
     // A ranged read: `length` bytes at `offset` (from a pack, on the pack's own descriptor,
     // which the entry borrows). Then, for a deflated entry, `unpacked` bytes inflated;
-    // `check` compares the CRC-32 of what is delivered with `crc`.
+    // `check` compares the CRC-32 of what is delivered with `crc`. `clip`: a read_file
+    // range, cut to the file at open, where the end of the file is not an error.
     bool       ranged;
+    bool       clip;
     bool       fd_borrowed;
     bool       check;
     u16        method;
@@ -152,6 +171,8 @@ struct IoQueue {
     u16                 kind = 0;
     u32                 reads_done = 0, reads_failed = 0, in_flight = 0;
     u32                 writes_done = 0, writes_failed = 0;
+    u32                 stats_done = 0, stats_failed = 0;
+    bool                stat_on_tasks = false; // stats go to the task workers even on a ring with its own (a test of that path)
     u32                 pack_reads = 0, inflated = 0, header_reads = 0, crc_failures = 0;
     usize               bytes_in_flight = 0;
     u64                 pumps = 0, pumps_capped = 0; // pumps that left admissible reads waiting on the budget
@@ -162,8 +183,18 @@ struct IoQueue {
     void free();
     const char* backend_name() const; // "io_uring", "ioring" (Windows), "dispatch" (Apple), "threads" (Android) or "sync"
 
-    // Submits a whole-file read. Null handle if the path is too long or the queue is full.
+    // Submits a read of a file, or of the part of it that `offset` and `length` say. Null
+    // handle with a log line if there is no path, no memory for a long one, or the queue
+    // is full.
     Handle read_file(const IoRequest& req);
+    // Submits a stat of `path`: what io_stat says, in the completion's `stat`, with no data.
+    // A path where nothing is completes Done with is_file and is_dir false; Failed is an
+    // error (no permission on a directory on the way). The queue's thread never waits on
+    // the OS: on io_uring it is one IORING_OP_STATX; on a ring without a stat (Windows,
+    // Apple, Android) it runs on the task workers. Under the synchronous backend, or with
+    // no task workers started, it is done at the pump, as reads are. Priorities order it
+    // with reads; the budget does not count it. offset, length and alloc are not used.
+    Handle stat_file(const IoRequest& req);
     // Submits a read of an asset by its logical path ("rocks/rock.png"): normalized
     // ("a//b", "./a", "a\b" are "a/b"; ".." and absolute paths fail), then looked up in the
     // mounts, the last mounted first. A pack hit is a ranged read of the pack's file (and
@@ -218,7 +249,6 @@ struct IoQueue {
 // tools and startup, never for a tick. Returns the count, or -1 if `dir` cannot be read;
 // `fn` returning false stops the walk.
 i32  io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user);
-struct IoStat;
 // The same walk with each file's size and modification time, as io_stat would give them,
 // from the listing itself: for a walk that would stat every file, at no cost a file more.
 i32  io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relative, const IoStat& st), void* user);
@@ -273,7 +303,6 @@ struct IoFileWriter {
     bool close();                                      // false if anything failed
 };
 
-// What a path names, following links.
 // A file that ships with the program, by its name under the program's own directory
 // ("shaders/sprite.spv"): beside the executable on the desktop, in an Apple bundle's
 // resources, inside the package on Android (a stored or deflated entry under "assets/").
@@ -290,9 +319,8 @@ bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* s
 // reader sees the old file or the new and never half of either. How a file is written
 // whole: to a temporary name beside it, then renamed.
 bool io_rename(const char* from, const char* to);
-// What a path names, with its size and modification time (nanoseconds from the OS's
-// epoch: for comparing with another, nothing else). False if nothing is there.
-struct IoStat { bool is_file = false, is_dir = false; u64 size = 0; i64 mtime_ns = 0; };
+// What a path names, with its size and modification time, now, on the calling thread: for
+// tools. A tick asks IoQueue::stat_file. False if nothing is there.
 bool io_stat(const char* path, IoStat* out);
 // The process's working directory, '/' separated, no trailing slash.
 bool io_current_dir(char* out, u32 cap);

@@ -23,6 +23,15 @@ void    io_ring_push_write(IoRing* ring, OsFile fd, const void* buf, u32 len, u6
 bool    io_ring_enter(IoRing* ring, u32 min_complete);
 // Takes one completion: `res` is bytes read or a negative errno. False when none is ready.
 bool    io_ring_pop(IoRing* ring, u64* user, i32* res);
+// A stat as one ring operation, where the ring has one (io_uring's IORING_OP_STATX; the
+// others answer false, and the queue sends stats to its task workers). `buf` is
+// io_ring_stat_size() bytes for the kernel's answer; it and `path` stay put until the
+// completion, whose `res` is 0 or a negative errno. io_ring_stat_read turns the answer
+// into an IoStat. All in io_uring.cc, the stubs for every other ring included.
+bool    io_ring_can_stat(const IoRing* ring);
+usize   io_ring_stat_size();
+void    io_ring_push_stat(IoRing* ring, const char* path, void* buf, u64 user);
+void    io_ring_stat_read(const void* buf, IoStat* out);
 u32     io_ring_in_flight(const IoRing* ring);
 u32     io_ring_entries(const IoRing* ring);
 // "io_uring", "ioring", "dispatch", "threads", or "sync" for none: what the queue logs and reports.

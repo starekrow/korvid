@@ -7,6 +7,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <errno.h>
+#include <string.h>
 
 namespace kv {
 
@@ -26,6 +27,54 @@ inline bool widen(const char* s, wchar_t* out, int cap, i32* err = nullptr) {
 inline bool narrow(const wchar_t* w, char* out, int cap) {
     return WideCharToMultiByte(CP_UTF8, 0, w, -1, out, cap, nullptr, nullptr) > 0;
 }
+
+// A path as Win32's file calls take it, of any length: widened, and past MAX_PATH made
+// absolute, with backslashes, under the \\?\ prefix (\\?\UNC\ for a share), which lifts
+// the limit and turns off the API's own parsing, so GetFullPathNameW resolves . and .. first.
+// A short path costs nothing new: it stays in `small`, as widen would leave it. On failure
+// `w` is null and *err (if given) says why: EILSEQ, ENOMEM, or the OS's error from
+// GetFullPathNameW. The I/O queue's paths come through here (os_file_open,
+// os_path_kind, os_path_stat).
+struct WidePath {
+    wchar_t        small[KV_WIDE_PATH_MAX];
+    wchar_t*       heap[2] = {nullptr, nullptr};
+    const wchar_t* w = nullptr;
+
+    WidePath() = default;
+    WidePath(const WidePath&) = delete;
+    WidePath& operator=(const WidePath&) = delete;
+    ~WidePath() { for (wchar_t* p : heap) if (p) HeapFree(GetProcessHeap(), 0, p); }
+
+    bool set(const char* s, i32* err = nullptr) {
+        w = nullptr;
+        int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, nullptr, 0);
+        if (n <= 0) { if (err) *err = EILSEQ; return false; }
+        wchar_t* buf = n <= KV_WIDE_PATH_MAX ? small : grab(0, (usize)n);
+        if (!buf) { if (err) *err = ENOMEM; return false; }
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, buf, n);
+        // CreateDirectoryW stops 12 short of MAX_PATH (room for an 8.3 name), so that is the line.
+        if (n - 1 < MAX_PATH - 12 || (buf[0] == L'\\' && buf[1] == L'\\' && (buf[2] == L'?' || buf[2] == L'.') && buf[3] == L'\\')) { w = buf; return true; }
+        for (wchar_t* p = buf; *p; ++p) if (*p == L'/') *p = L'\\';
+        DWORD need = GetFullPathNameW(buf, 0, nullptr, nullptr);
+        if (!need) { if (err) *err = errno_from_win32(GetLastError()); return false; }
+        // Room for "\\?\UNC" ahead of the full path: 7 characters.
+        wchar_t* full = grab(1, (usize)need + 8);
+        if (!full) { if (err) *err = ENOMEM; return false; }
+        DWORD got = GetFullPathNameW(buf, need, full + 7, nullptr);
+        if (!got || got >= need) { if (err) *err = errno_from_win32(GetLastError()); return false; }
+        if (full[7] == L'\\' && full[8] == L'\\') { // \\server\share: \\?\UNC\server\share
+            memcpy(full + 1, L"\\\\?\\UNC", 7 * sizeof(wchar_t));
+            w = full + 1;
+        } else {                                  // C:\dir: \\?\C:\dir
+            memcpy(full + 3, L"\\\\?\\", 4 * sizeof(wchar_t));
+            w = full + 3;
+        }
+        return true;
+    }
+
+private:
+    wchar_t* grab(int i, usize chars) { return heap[i] = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, chars * sizeof(wchar_t)); }
+};
 
 // Backslashes to the engine's '/'.
 inline void forward_slashes(char* s) { for (; *s; ++s) if (*s == '\\') *s = '/'; }

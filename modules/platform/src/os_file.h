@@ -21,9 +21,10 @@ enum class OsPathKind : u8 { None, File, Dir, Other };
 // What a path names, following links.
 OsPathKind os_path_kind(const char* path);
 // What a path names with its size and modification time (nanoseconds since the OS's
-// epoch: only ever compared with another), following links. False if nothing is there.
+// epoch: only ever compared with another), following links. False if nothing is there,
+// or it cannot be asked, with *err (if given) saying which: ENOENT or ENOTDIR for nothing.
 struct OsStat { OsPathKind kind = OsPathKind::None; u64 size = 0; i64 mtime_ns = 0; };
-bool os_path_stat(const char* path, OsStat* out);
+bool os_path_stat(const char* path, OsStat* out, i32* err = nullptr);
 // Renames a file over whatever is at `to`.
 bool os_rename(const char* from, const char* to);
 // The working directory, '/' separated.

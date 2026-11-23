@@ -8,6 +8,7 @@ void test_io_make_dirs(kv::TestCtx&);
 void test_io_remove_tree(kv::TestCtx&);
 void test_io_now(kv::TestCtx&);
 void test_io_tasks(kv::TestCtx&);
+void test_io_long_ranged_stat(kv::TestCtx&);
 void test_net(kv::TestCtx&);
 void test_fs_watch(kv::TestCtx&);
 void test_process(kv::TestCtx&);
@@ -22,6 +23,7 @@ int main() {
     test_io_remove_tree(c);
     test_io_now(c);
     test_io_tasks(c);
+    test_io_long_ranged_stat(c);
     test_net(c);
     test_fs_watch(c);
     test_process(c);
