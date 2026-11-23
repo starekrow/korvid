@@ -73,6 +73,10 @@ function M.run(build, tc)
   -- Headers the system provides are external: warnings in them are not ours.
   for _, d in ipairs(split(env.INCLUDE)) do r.cxxflags[#r.cxxflags + 1] = "/external:I" .. q(d) end
   for _, d in ipairs(split(env.LIB)) do r.ldflags[#r.ldflags + 1] = "/LIBPATH:" .. q(d) end
+  -- C is the same cl, told so (/TC, the toolchain's cflags), with the same system headers.
+  r.cc = r.cxx
+  r.cflags = {}
+  for _, f in ipairs(r.cxxflags) do r.cflags[#r.cflags + 1] = f end
   if env.VSINSTALLDIR then
     local ninja = (env.VSINSTALLDIR:gsub("\\", "/"):gsub("/$", "")) .. "/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe"
     if kfs.isfile(ninja) then r.ninja = ninja end

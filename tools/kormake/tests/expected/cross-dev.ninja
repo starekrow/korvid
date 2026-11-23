@@ -28,6 +28,11 @@ rule ar_host
 rule link_host
   command = $cxx $in -o $out $libs $ldflags
   description = LINK $out
+rule c_host
+  command = $cc $cflags $defines $includes -c $in -o $out
+  depfile = $out.d
+  deps = gcc
+  description = C $out
 rule copy
   command = '{kormake}' _copy $in $out
   description = COPY $out
@@ -66,12 +71,16 @@ build host/obj/base/unity.o: cxx_host {root}/build/cross-dev/host/gen/base/unity
   link = 
   cxxflags = -std=c++20 -O1
   ldflags = -lm
+  cc = fakec
+  cflags = -std=c11 -O1
 build host/lib/libkv_base.a: ar_host host/obj/base/unity.o
   cxx = fakecc
   ar = fakear
   link = 
   cxxflags = -std=c++20 -O1
   ldflags = -lm
+  cc = fakec
+  cflags = -std=c11 -O1
 build host/obj/compiler/unity.o: cxx_host {root}/build/cross-dev/host/gen/compiler/unity.cc
   includes = -I'{root}/modules/base/include' -I'{root}/build/cross-dev/host/gen/compiler'
   defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
@@ -80,6 +89,8 @@ build host/obj/compiler/unity.o: cxx_host {root}/build/cross-dev/host/gen/compil
   link = 
   cxxflags = -std=c++20 -O1
   ldflags = -lm
+  cc = fakec
+  cflags = -std=c11 -O1
 build host/bin/pkg.dll: copy {root}/packages/pkg/lib/pkg.dll
 rule cook
   command = $cmd
@@ -95,6 +106,8 @@ build host/bin/compiler: link_host host/obj/compiler/unity.o host/lib/libkv_base
   link = 
   cxxflags = -std=c++20 -O1
   ldflags = -lm
+  cc = fakec
+  cflags = -std=c11 -O1
 build bin/shaders/sprite.soft: tool_compiler_compile_cross_gfx_soft {root}/modules/gfx/shaders/sprite.shd | host/bin/compiler
 build obj/gfx_soft/soft.o: cxx_cross {root}/modules/gfx-soft/src/soft.cc
   includes = -I'{root}/modules/base/include' -I'{root}/build/cross-dev/gen/gfx_soft'
@@ -108,6 +121,8 @@ build host/obj/packer/unity.o: cxx_host {root}/build/cross-dev/host/gen/packer/u
   link = 
   cxxflags = -std=c++20 -O1
   ldflags = -lm
+  cc = fakec
+  cflags = -std=c11 -O1
 build host/bin/packer: link_host host/obj/packer/unity.o 
   libs = 
   cxx = fakecc
@@ -115,6 +130,8 @@ build host/bin/packer: link_host host/obj/packer/unity.o
   link = 
   cxxflags = -std=c++20 -O1
   ldflags = -lm
+  cc = fakec
+  cflags = -std=c11 -O1
 build obj/game/unity.o: cxx_cross {root}/build/cross-dev/gen/game/unity.cc
   includes = -I'{root}/modules/base/include' -I'{root}/build/cross-dev/gen/game'
   defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
@@ -141,6 +158,8 @@ build host/obj/compiler/tests/compiler_test.o: cxx_host {root}/modules/compiler/
   link = 
   cxxflags = -std=c++20 -O1
   ldflags = -lm
+  cc = fakec
+  cflags = -std=c11 -O1
 build host/bin/compiler_tests: link_host host/obj/compiler/tests/compiler_test.o host/lib/libkv_base.a || host/bin/pkg.dll
   libs = -lpkg -L'{root}/packages/pkg/lib'
   cxx = fakecc
@@ -148,6 +167,8 @@ build host/bin/compiler_tests: link_host host/obj/compiler/tests/compiler_test.o
   link = 
   cxxflags = -std=c++20 -O1
   ldflags = -lm
+  cc = fakec
+  cflags = -std=c11 -O1
 build host/goldberg/compiler_tests.cooked: cook host/goldberg/compiler_tests.roots | always-cook {root}/copy_assets.sh
   cmd = '{kormake}' _cook 'host/goldberg/compiler_tests.cook' 'host/goldberg/compiler_tests.cooked'
 build host/test/compiler.ok: run_test_host host/bin/compiler_tests | host/bin/pkg.dll host/goldberg/compiler_tests.cooked host/bin/compiler

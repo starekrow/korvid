@@ -48,7 +48,8 @@ function M.run(_, tc)
   if not kfs.isfile(cxx) then util.fail("android: %s has no compiler at %s", ndk, cxx) end
   if not f.arch or not f.triple then util.fail("toolchain '%s' needs arch and triple (\"aarch64\", \"linux-android33\")", tc.name) end
   local target = "--target=" .. f.arch .. "-" .. f.triple
-  return { cxx = cxx, ar = ar, cxxflags = { target }, ldflags = { target } }
+  return { cxx = cxx, ar = ar, cxxflags = { target }, ldflags = { target },
+           cc = util.join(bin, "clang" .. exe), cflags = { target } }
 end
 
 return M

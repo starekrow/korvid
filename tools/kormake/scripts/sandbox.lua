@@ -70,6 +70,7 @@ end
 -- outputs and spells flags, and a probe that finds the tools on the host.
 local toolchain_fields = {
   tag = true, srcdirs = true, cxx = true, ar = true, link = true, cxxflags = true, ldflags = true, configs = true,
+  cc = true, cflags = true, -- C, for vendored libraries in it
   externals = true, bindings = true, rules = true, obj_suffix = true, exe_suffix = true, lib_file = true,
   flag_include = true, flag_define = true, flag_lib = true, flag_libdir = true, flag_include_system = true, flags_generated = true, codegen_profiles = true, isa = true, probe = true,
   sdk = true, -- the Apple SDK the xcode probe asks xcrun for ("macosx")

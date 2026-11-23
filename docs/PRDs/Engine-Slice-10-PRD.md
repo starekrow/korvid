@@ -261,6 +261,25 @@ deadline; Apple has no such attribute and waits with `pthread_cond_timedwait_rel
 Windows: `SleepConditionVariableSRW` with the milliseconds rounded up. A time of 0 or less
 does not wait.
 
+**C sources (KR14).** Blackwing's slice 3 vendors sqlite's amalgamation, which is C and
+not C++ (`new` is a name in it; g++ stops at 740 errors), and kormake compiled only `.cc`
+and `.mm`. Now `.c` in `src/` (and the platform's source directories) is a third language
+beside them, with a unity file of its own:
+
+- **The toolchain says how**: `cc`, `cflags` (and `cflags` in each config), and a `c`
+  rule. Linux: `gcc -std=gnu11`, the C++ build's `-fno-strict-aliasing -ffp-contract=off
+  -fno-math-errno`, and `-w`, since only vendored code is C. Apple and Android: `clang`,
+  the same. Windows: `cl /TC /W0` with `/utf-8 /MD /fp:precise`. The probes give the C
+  compiler beside the C++ one, with the same system flags (the SDK and target from xcrun,
+  the NDK's `clang`, cl's external includes).
+- **A module's own flags apply**: its includes, defines and `codegen` profiles;
+  `codegen_sources` may name a `.c`. Sanitizer flags go on C as on C++.
+- **A toolchain with no C** cannot build a module with a `.c`: generation stops and names
+  the file.
+- **The convention**: a vendored C library is wrapped by a `.c` of the module's own in
+  `src/` that sets its options and includes it from `src/vendor/`, which is not looked in.
+  C that is also C++ (yxml) stays behind a `.cc`.
+
 ## Requirements
 
 | ID | Requirement | Priority |
@@ -278,6 +297,7 @@ does not wait.
 | KR11 | `io_list_dir`: one directory, links marked, hidden on request, sizes on request, names that round-trip, a reason on failure | P0 |
 | KR12 | `io_path_is_remote`; `FsWatcher` polls a remote root under `Auto`, and a root can be polled by name | P2 |
 | KR13 | `IoStat::volume` | P2 |
+| KR14 | `.c` sources compiled as C, with each toolchain's `cc`, `cflags` and `c` rule | P0, blocks Blackwing slice 3 milestone 3 |
 | R10 | kormake 1.2: `KORMAKE_VERSION`, the manual's `module.lua`, `korvid.config`, OPTIONS and ENVIRONMENT sections | P0 |
 | R11 | The module pages and quick references of `platform` and `core` change with their headers (`cli` has no page yet; its header comment changes); `tools/doccheck.sh` reports nothing new | P0 |
 
@@ -629,3 +649,11 @@ that guard (258a300), expected a connection in every config. In ship the test no
 the opposite, that a listener named by `KV_GOLDBERG` is never called. `kormake test
 asset_live` passes on linux-debug, linux-dev and linux-ship, so linux-ship's
 `kormake test` has no known failure left.
+
+**KR14, C sources: built Nov 23, 2026.** As above. kormake's fixture gains a C rule on its
+host toolchain and two `.c` files in the test project's codec, whose expected Ninja file
+shows the C unity file built with `c_host`, the module's profile on it, and archived with
+the C++ objects; a host instance's build statements override `cc` and `cflags` beside
+`cxx` and `cxxflags`. `tools/kormake/tests/run.sh` passes. The engine builds as before.
+Linux built and used (Blackwing's sqlite); Apple, Android and Windows written, not
+compiled: no machine here.

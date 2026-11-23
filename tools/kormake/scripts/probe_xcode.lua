@@ -36,7 +36,11 @@ function M.run(build, tc)
   local target = tc.fields.triple and { "-target", (tc.fields.arch or "arm64") .. "-" .. tc.fields.triple } or {}
   local cxxflags, ldflags = { "-isysroot", q(root) }, { "-isysroot", q(root) }
   for _, f in ipairs(target) do cxxflags[#cxxflags + 1] = f; ldflags[#ldflags + 1] = f end
-  return { cxx = cxx, ar = ar, cxxflags = cxxflags, ldflags = ldflags }
+  -- C beside it, for vendored libraries in C: the same SDK and target.
+  local cc = capture(build, "cc", "xcrun --sdk " .. sdk .. " -f clang") or "clang"
+  local cflags = {}
+  for _, f in ipairs(cxxflags) do cflags[#cflags + 1] = f end
+  return { cxx = cxx, ar = ar, cxxflags = cxxflags, ldflags = ldflags, cc = cc, cflags = cflags }
 end
 
 return M

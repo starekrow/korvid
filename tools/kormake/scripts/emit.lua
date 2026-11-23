@@ -18,6 +18,9 @@ local function exe_name(inst) return inst.module.fields.exe or inst.module.name 
 -- is assumed about the compiler family.
 local required_fields = { "obj_suffix", "exe_suffix", "lib_file", "flag_include", "flag_define", "flag_lib" }
 local required_rules = { "cxx", "ar", "link" }
+-- C, for vendored libraries written in it (sqlite): a toolchain that has a `c` rule and a
+-- `cc` compiles a module's .c sources with them, and one without cannot build such a module.
+local optional_rules = { "c" }
 
 local function check_toolchain(tc)
   local f = tc.fields
@@ -82,6 +85,8 @@ function M.run(c, g, opts)
       ar = pr.ar or tcf.ar or "",
       link = pr.link or tcf.link or "",
       cxxflags = util.trim(flag_list(tcf.cxxflags) .. " " .. flag_list(cf and cf.cxxflags) .. " " .. flag_list(pr.cxxflags)),
+      cc = pr.cc or tcf.cc,
+      cflags = util.trim(flag_list(tcf.cflags) .. " " .. flag_list(cf and cf.cflags) .. " " .. flag_list(pr.cflags)),
       ldflags = util.trim(flag_list(cf and cf.ldflags) .. " " .. flag_list(tcf.ldflags) .. " " .. flag_list(pr.ldflags)),
       srcdirs = tcf.srcdirs or {},
       externals = g.externals_of(plat), -- the toolchain's and the project's (resolve.lua)
@@ -94,6 +99,7 @@ function M.run(c, g, opts)
   -- instance of its own (linux-debug's tools, built dev) is built plain.
   if san then
     target_flags.cxxflags = util.trim(target_flags.cxxflags .. " " .. san_flags.cxxflags)
+    target_flags.cflags = util.trim(target_flags.cflags .. " " .. san_flags.cxxflags) -- the same words: -fsanitize is the driver's, not the language's
     target_flags.ldflags = util.trim(target_flags.ldflags .. " " .. san_flags.ldflags)
   end
   g.ninja = target_flags.tc.probed.ninja
@@ -110,7 +116,8 @@ function M.run(c, g, opts)
     if inst.prefix == "" then return "" end
     local fl = flags(inst)
     return "\n  cxx = " .. program(fl.cxx) .. "\n  ar = " .. program(fl.ar) .. "\n  link = " .. program(fl.link) ..
-      "\n  cxxflags = " .. fl.cxxflags .. "\n  ldflags = " .. fl.ldflags
+      "\n  cxxflags = " .. fl.cxxflags .. "\n  ldflags = " .. fl.ldflags ..
+      (fl.cc and ("\n  cc = " .. program(fl.cc) .. "\n  cflags = " .. fl.cflags) or "")
   end
   local out = {}
   local function w(s) out[#out + 1] = s end
@@ -196,13 +203,20 @@ function M.run(c, g, opts)
   w("ar = " .. program(target_flags.ar))
   w("link = " .. program(target_flags.link))
   w("cxxflags = " .. target_flags.cxxflags)
+  if target_flags.cc then
+    w("cc = " .. program(target_flags.cc))
+    w("cflags = " .. target_flags.cflags)
+  end
   w("ldflags = " .. target_flags.ldflags)
   w("")
   -- Compile, archive and link: each toolchain's own rules, named with its tag, for the
   -- target's toolchain and the host's when it differs.
   for _, inst in ipairs(g.instances) do if not inst.dropped then flags(inst) end end
   for _, t in ipairs(toolchains) do
-    for _, name in ipairs(required_rules) do
+    local names = {}
+    for _, name in ipairs(required_rules) do names[#names + 1] = name end
+    for _, name in ipairs(optional_rules) do if t.fields.rules[name] then names[#names + 1] = name end end
+    for _, name in ipairs(names) do
       local r = t.fields.rules[name]
       local extra = ""
       for _, k in ipairs({ "depfile", "deps", "msvc_deps_prefix" }) do
@@ -380,10 +394,13 @@ function M.run(c, g, opts)
   end
 
   -- A module's sources: C++ (.cc) from src/ and then each of the platform's source
-  -- directories, then Objective-C++ (.mm) the same way. .mm files live only where an Apple
-  -- toolchain picks them up; they get a unity file of their own (a .cc and a .mm cannot
-  -- share one), and the compiler takes the language from the extension.
-  local source_exts = { "cc", "mm" }
+  -- directories, then Objective-C++ (.mm) the same way, then C (.c). .mm files live only
+  -- where an Apple toolchain picks them up; each language gets a unity file of its own (a
+  -- .cc and a .mm cannot share one), and the compiler takes the language from the
+  -- extension. C is for a vendored library in that language, wrapped by a .c of the
+  -- module's own in src/ (src/vendor/ is not looked in), and compiles with the toolchain's
+  -- cc, cflags and c rule.
+  local source_exts = { "cc", "mm", "c" }
   local function sources_of(inst)
     local f = inst.module.fields
     local list = {}
@@ -418,21 +435,29 @@ function M.run(c, g, opts)
   -- codegen profile; an instruction set's).
   local function compile(inst, src, obj, includes, defines, extra)
     local fl = flags(inst)
-    local cxxflags = fl.cxxflags
+    -- C or C++, by the file's extension: each has its compiler, flags and rule.
+    local is_c = util.ext(src) == "c"
+    if is_c and not (fl.cc and fl.tc.fields.rules.c) then
+      util.fail("%s: %s is C, and toolchain '%s' compiles no C (it has no cc, or no c rule)", inst.module.name, src, fl.tc.rec.name)
+    end
+    local fvar = is_c and "cflags" or "cxxflags"
+    local cxxflags = is_c and fl.cflags or fl.cxxflags
     local more = ""
     local add = extra and extra.flags and util.trim(extra.flags) or ""
     if add ~= "" then
       cxxflags = cxxflags .. " " .. add
-      if inst.prefix == "" then more = "\n  cxxflags = " .. cxxflags end
+      if inst.prefix == "" then more = "\n  " .. fvar .. " = " .. cxxflags end
     end
     local ov = overrides(inst)
-    if add ~= "" and inst.prefix ~= "" then ov = ov:gsub("\n  cxxflags = [^\n]*", function() return "\n  cxxflags = " .. cxxflags end) end
-    w(string.format("build %s: %s %s%s\n  includes = %s\n  defines = %s%s%s", util.ninja_escape(obj), rule(inst, "cxx"), util.ninja_escape(src),
+    if add ~= "" and inst.prefix ~= "" then ov = ov:gsub("\n  " .. fvar .. " = [^\n]*", function() return "\n  " .. fvar .. " = " .. cxxflags end) end
+    local rname = is_c and "c" or "cxx"
+    w(string.format("build %s: %s %s%s\n  includes = %s\n  defines = %s%s%s", util.ninja_escape(obj), rule(inst, rname), util.ninja_escape(src),
       extra and extra.implicit and (" | " .. util.ninja_escape(extra.implicit)) or "", includes, defines, ov, more))
-    -- The command the toolchain's cxx rule runs, with this file's values in it. clangd takes
+    -- The command the toolchain's rule runs, with this file's values in it. clangd takes
     -- the first entry for a file: the target's, since the host's come later.
     local vars = { cxx = program(fl.cxx), cxxflags = cxxflags, defines = defines, includes = includes, ["in"] = program(src), out = program(obj) }
-    local command = fl.tc.fields.rules.cxx.command:gsub("%$(%w+)", function(v) return vars[v] or "" end)
+    if is_c then vars.cc = program(fl.cc); vars.cflags = cxxflags; vars.cxxflags = nil end
+    local command = fl.tc.fields.rules[rname].command:gsub("%$(%w+)", function(v) return vars[v] or "" end)
     cc[#cc + 1] = string.format("{\"directory\": %s, \"file\": %s, \"output\": %s, \"command\": %s}",
       util.json_string(build), util.json_string(src), util.json_string(obj), util.json_string(command))
   end
@@ -806,7 +831,7 @@ function M.run(c, g, opts)
             if by_source[s] then alone[#alone + 1] = s else group[#group + 1] = s end
           end
         end
-        local tail = ext == "cc" and "" or ("_" .. ext) -- a .mm's object never meets a .cc's of the same name
+        local tail = ext == "cc" and "" or ("_" .. ext) -- a .mm's or a .c's object never meets a .cc's of the same name
         if unity and #group > 1 then
           local lines = { "// generated by kormake: the unity build of " .. m.name .. (ext == "cc" and "" or (" (" .. ext .. ")")) }
           for _, s in ipairs(group) do lines[#lines + 1] = '#include "' .. s .. '"' end

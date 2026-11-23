@@ -5,12 +5,15 @@ module "toolchain.host" {
   tag       = "host",
   srcdirs   = { "host" },
   cxx       = "fakecc",
+  cc        = "fakec", -- C, for a vendored library in it
+  cflags    = { "-std=c11" },
   ar        = "fakear",
   cxxflags  = { "-std=c++20" },
-  configs   = { dev = { cxxflags = { "-O1" } }, ship = { cxxflags = { "-O2" } } },
+  configs   = { dev = { cxxflags = { "-O1" }, cflags = { "-O1" } }, ship = { cxxflags = { "-O2" }, cflags = { "-O2" } } },
   ldflags   = { "-lm" },
   rules     = {
     cxx  = { command = "$cxx $cxxflags $defines $includes -c $in -o $out", depfile = "$out.d", deps = "gcc" },
+    c    = { command = "$cc $cflags $defines $includes -c $in -o $out", depfile = "$out.d", deps = "gcc" },
     ar   = { command = "$ar $out $in" },
     link = { command = "$cxx $in -o $out $libs $ldflags" },
   },

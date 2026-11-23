@@ -31,19 +31,22 @@ module "toolchain.apple" {
   os_min    = os_min,
   srcdirs   = { "posix", "apple" }, -- src/<dir>/ picked up on these platforms, in this order
   cxx       = "clang++",
+  cc        = "clang", -- C, for vendored libraries in it: their warnings are not ours (-w)
+  cflags    = { "-std=gnu11", "-fno-strict-aliasing", "-ffp-contract=off", "-fno-math-errno", "-w" },
   ar        = "ar",
   cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-ffp-contract=off", "-fno-math-errno",
                 "-Wall", "-Wextra", "-Werror", "-Wno-nullability-completeness" },
   configs   = {
-    debug = { cxxflags = { "-g", "-O0", "-DKV_DEBUG=1" } },
-    dev   = { cxxflags = { "-g", "-O2", "-DKV_DEV=1" } },
-    ship  = { cxxflags = { "-O2", "-DNDEBUG" } },
+    debug = { cxxflags = { "-g", "-O0", "-DKV_DEBUG=1" }, cflags = { "-g", "-O0" } },
+    dev   = { cxxflags = { "-g", "-O2", "-DKV_DEV=1" }, cflags = { "-g", "-O2" } },
+    ship  = { cxxflags = { "-O2", "-DNDEBUG" }, cflags = { "-O2", "-DNDEBUG" } },
   },
   -- CoreFoundation: platform_hid's run-loop timer for live resize. Every process on an
   -- Apple platform loads it already; linking it names what the engine calls directly.
   ldflags   = { "-framework", "CoreFoundation" },
   rules     = {
     cxx  = { command = '$cxx $cxxflags $defines $includes -MMD -MF $out.d -c $in -o $out', depfile = "$out.d", deps = "gcc" },
+    c    = { command = '$cc $cflags $defines $includes -MMD -MF $out.d -c $in -o $out', depfile = "$out.d", deps = "gcc" },
     ar   = { command = "rm -f $out && $ar crs $out $in" },
     link = { command = "$cxx $in -o $out $libs $ldflags" },
   },

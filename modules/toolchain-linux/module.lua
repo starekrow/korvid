@@ -15,16 +15,19 @@ module "toolchain.linux" {
   tag       = "linux",
   srcdirs   = { "posix", "linux", "sdl3", "sdl3_pads", "sdl3_audio" }, -- src/<dir>/ picked up on this platform, in this order
   cxx       = "g++",
+  cc        = "gcc", -- C, for vendored libraries in it: their warnings are not ours (-w)
+  cflags    = { "-std=gnu11", "-fno-strict-aliasing", "-ffp-contract=off", "-fno-math-errno", "-w" },
   ar        = "ar",
   cxxflags  = { "-std=c++20", "-fno-exceptions", "-fno-rtti", "-fno-strict-aliasing", "-ffp-contract=off", "-fno-math-errno", "-Wall", "-Wextra", "-Wshadow", "-Werror" },
   configs   = {
-    debug = { cxxflags = { "-g", "-O0", "-DKV_DEBUG=1" } },
-    dev   = { cxxflags = { "-g", "-O2", "-DKV_DEV=1" } },
-    ship  = { cxxflags = { "-O2", "-DNDEBUG" } },
+    debug = { cxxflags = { "-g", "-O0", "-DKV_DEBUG=1" }, cflags = { "-g", "-O0" } },
+    dev   = { cxxflags = { "-g", "-O2", "-DKV_DEV=1" }, cflags = { "-g", "-O2" } },
+    ship  = { cxxflags = { "-O2", "-DNDEBUG" }, cflags = { "-O2", "-DNDEBUG" } },
   },
   ldflags   = { "-lm", "-lpthread" },
   rules     = {
     cxx  = { command = '$cxx $cxxflags $defines $includes -MMD -MF $out.d -c $in -o $out', depfile = "$out.d", deps = "gcc" },
+    c    = { command = '$cc $cflags $defines $includes -MMD -MF $out.d -c $in -o $out', depfile = "$out.d", deps = "gcc" },
     ar   = { command = "rm -f $out && $ar crs $out $in" },
     link = { command = "$cxx -o $out -Wl,--start-group $in $libs -Wl,--end-group $ldflags" }, -- a group: render's dispatcher calls the backends that depend on it,
   },

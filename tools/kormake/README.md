@@ -308,13 +308,19 @@ The module's name comes from this line, not from its directory's name.
     src/*.cc                 sources (only src/, not its subdirectories, except the ones below)
     src/<dir>/*.cc           sources for a platform: the toolchain's srcdirs, in its order (posix, linux, sdl3, ...)
     src/*.mm, src/<dir>/*.mm Objective-C++, picked up where a toolchain lists the directory
+    src/*.c, src/<dir>/*.c   C, for a vendored library written in it: a unity file of its own, the toolchain's cc and cflags
     tests/*.cc               the module's test executable, with the module and its closure linked (an executable's tests
                              link its closure only and run after the executable is built: they start it, they do not contain it)
     tests/heavy/*.cc         the module's heavy test executable, linked the same way; run only by `kormake test --heavy`
     shaders/                 inputs for the tool rules the module uses (the shader rule takes shaders/*.slang)
     assets/                  cooked by goldberg into the output tree of every program that links the module (see Assets)
 
-Vendored C code is compiled through a `.cc` file that includes it. Generated sources go in
+Vendored C code that is also C++ is compiled through a `.cc` file that includes it, as
+yxml is. C that is not C++ (sqlite: `new` is a name in it) is compiled as C, through a
+`.c` file of the module's own in `src/` that sets its options and includes it from
+`src/vendor/` (which is not looked in): the toolchain's `cc`, `cflags` (per config too)
+and `c` rule, and the module's `codegen` profiles, includes and defines. A toolchain
+without them cannot build such a module, and says which file. Generated sources go in
 the build directory, never in the source tree.
 
 **Fields.**
@@ -345,8 +351,9 @@ the build directory, never in the source tree.
 | `prebuilt` | A tool binary vendored per host: `{ linux = "bin/linux/slangc" }` |
 
 A toolchain module (`provides = "toolchain"`, one per platform) has fields of its own:
-`tag`, `srcdirs`, `cxx`, `ar`, `link`, `cxxflags`, `ldflags`, `configs` (flags per
-config), `rules` (`cxx`, `ar` and `link`, as Ninja commands), `obj_suffix`, `exe_suffix`,
+`tag`, `srcdirs`, `cxx`, `ar`, `link`, `cxxflags`, `ldflags`, `cc` and `cflags` (C, for
+vendored libraries in it; optional), `configs` (flags per config: `cxxflags`, `cflags`,
+`ldflags`), `rules` (`cxx`, `ar` and `link`, and `c` with `cc`, as Ninja commands), `obj_suffix`, `exe_suffix`,
 `lib_file`, `flag_include`, `flag_include_system`, `flag_define`, `flag_lib`,
 `flag_libdir`, `flag_framework`, `flags_generated` (added when compiling code another
 program wrote: `-w`), `codegen_profiles` (the flags of each profile a module's `codegen`

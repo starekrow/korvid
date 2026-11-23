@@ -4,6 +4,8 @@ cxx = fakecc
 ar = fakear
 link = 
 cxxflags = -std=c++20 -O1
+cc = fakec
+cflags = -std=c11 -O1
 ldflags = -lm
 
 rule cxx_host
@@ -17,6 +19,11 @@ rule ar_host
 rule link_host
   command = $cxx $in -o $out $libs $ldflags
   description = LINK $out
+rule c_host
+  command = $cc $cflags $defines $includes -c $in -o $out
+  depfile = $out.d
+  deps = gcc
+  description = C $out
 rule copy
   command = '{kormake}' _copy $in $out
   description = COPY $out
@@ -45,7 +52,11 @@ build obj/codec/decode.o: cxx_host {project}/modules/codec/src/decode.cc
   includes = -I'{project}/build/{host}-dev/gen/codec' -isystem'/usr/include/sysaudio-1'
   defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
   cxxflags = -std=c++20 -O1 -O3 -fwrapv
-build lib/libkv_codec.a: ar_host obj/codec/unity.o obj/codec/decode.o
+build obj/codec/unity_c.o: c_host {project}/build/{host}-dev/gen/codec/unity.c
+  includes = -I'{project}/build/{host}-dev/gen/codec' -isystem'/usr/include/sysaudio-1'
+  defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
+  cflags = -std=c11 -O1 -O3
+build lib/libkv_codec.a: ar_host obj/codec/unity.o obj/codec/decode.o obj/codec/unity_c.o
 build obj/base/unity.o: cxx_host {project}/build/{host}-dev/gen/base/unity.cc
   includes = -I'{root}/modules/base/include' -I'{project}/build/{host}-dev/gen/base' -isystem'{root}/packages/pkg/include'
   defines = -DBASE=1 -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
