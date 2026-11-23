@@ -545,3 +545,21 @@ tested in a copy only), and anything on Windows or the Apple family.
   `ENOENT`, `ENOTDIR`, and `EACCES` for a directory with no permissions.
 - **Checked:** `kormake test platform` on linux-debug; `platform` compiled for
   android-dev. Not checked: Windows, the Apple family.
+
+**Milestone 8, the volume (KR13): built Nov 23, 2026.**
+
+- **`IoStat::volume`**, and `OsStat::volume` under it: `st_dev` from `stat` and `fstatat`;
+  from the ring, `makedev(stx_dev_major, stx_dev_minor)`, which statx always fills
+  whatever the mask, so the ring's stat and `io_stat` agree. `io_list_dir` has it with
+  `IoListSizes`, from the entry's own stat on POSIX.
+- **Windows:** a stat that opens a handle (a link's) takes `dwVolumeSerialNumber`; one
+  that does not asks `GetVolumePathNameW` and then `GetVolumeInformationW`, two calls more
+  a stat, not measured. `os_dir_each_stat`, the walks' listing, does not ask, so a walk
+  costs what it did; `io_list_dir` with sizes asks once a directory. Written, not compiled.
+- **Tests:** in `io_long_ranged_stat`, under the synchronous backend, the ring and the
+  workers, a file, its directory and the long path have `io_stat`'s volume, nothing has 0,
+  and `/proc` (another file system) differs from `/`, through the queue as well;
+  in `io_list_dir`, a.txt's volume with sizes and 0 without.
+- **Checked:** `kormake test platform` on linux-debug. Not checked: Windows, the Apple
+  family, and an unplugged disk: no disk here to unplug, so `/proc` under `/` stands in
+  for a mount point with something on it.

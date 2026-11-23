@@ -60,8 +60,13 @@ struct IoRequest {
 };
 
 // What a path names, following links: io_stat's answer, and stat_file's in its completion.
+// `volume` is the file system it is on, for comparing with another stat's and nothing
+// else: equal while one volume is mounted there, different for another volume at the same
+// path (a disk unplugged leaves its mount point an empty directory on the parent's).
+// st_dev on POSIX, the volume serial number on Windows. 0 where it was not asked:
+// io_list_files_stat's walk, and io_list_dir without IoListSizes.
 // mtime_ns is nanoseconds from the OS's epoch: for comparing with another, nothing else.
-struct IoStat { bool is_file = false, is_dir = false; u64 size = 0; i64 mtime_ns = 0; };
+struct IoStat { bool is_file = false, is_dir = false; u64 size = 0; i64 mtime_ns = 0; u64 volume = 0; };
 
 // A whole-file write: the bytes are copied at submission, so the caller's buffer is free
 // to go at once. The file is created or truncated. The completion carries no data.
@@ -274,7 +279,7 @@ enum IoListFlags : u32 {
 };
 struct IoDirEntry {
     const char* name    = nullptr; // the entry's own name, valid during the call
-    IoStat      st;                // what it is, following a link; size and time with IoListSizes, else 0
+    IoStat      st;                // what it is, following a link; size, time and volume with IoListSizes, else 0
     bool        is_link = false;   // a symbolic link (or a junction): st is its target's, all false if there is none
     bool        hidden  = false;   // one IoListHidden lets through
     bool        utf8    = true;    // false: the name is not valid UTF-8

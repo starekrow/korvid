@@ -88,6 +88,7 @@ bool io_stat(const char* path, IoStat* out) {
     out->is_dir   = st.kind == OsPathKind::Dir;
     out->size     = st.size;
     out->mtime_ns = st.mtime_ns;
+    out->volume   = st.volume;
     return true;
 }
 

@@ -395,6 +395,7 @@ i32 io_stat_now(const char* path, IoStat* out) {
     out->is_dir   = st.kind == OsPathKind::Dir;
     out->size     = st.size;
     out->mtime_ns = st.mtime_ns;
+    out->volume   = st.volume;
     return 0;
 }
 
@@ -908,6 +909,7 @@ void dir_collect(void* user, const OsDirEntry& oe) {
     it.e.st.is_dir   = oe.st.kind == OsPathKind::Dir;
     it.e.st.size     = oe.st.size;
     it.e.st.mtime_ns = oe.st.mtime_ns;
+    it.e.st.volume   = oe.st.volume;
     it.e.is_link     = oe.is_link;
     it.e.hidden      = oe.hidden;
     it.e.utf8        = utf8_valid(oe.name, len);

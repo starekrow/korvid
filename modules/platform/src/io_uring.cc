@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <sys/sysmacros.h> // makedev
 #include <unistd.h>
 
 namespace kv {
@@ -180,6 +181,7 @@ void io_ring_stat_read(const void* buf, IoStat* out) {
     out->is_dir   = S_ISDIR(x.stx_mode);
     out->size     = x.stx_size;
     out->mtime_ns = (i64)x.stx_mtime.tv_sec * 1000000000ll + x.stx_mtime.tv_nsec;
+    out->volume   = (u64)makedev(x.stx_dev_major, x.stx_dev_minor); // st_dev, as stat(2) joins it; always filled
 }
 
 bool io_ring_enter(IoRing* r, u32 min_complete) {

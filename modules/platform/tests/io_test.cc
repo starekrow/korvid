@@ -447,10 +447,19 @@ void test_io_long_ranged_stat(kv::TestCtx& c) {
         IoRequest s3; s3.path = missing; s3.user = 22;
         IoRequest s4; s4.path = deep; s4.user = 23; s4.priority = IoPriority::High;
         IoRequest s5; s5.path = big; s5.user = 24;
+        // A mount point: another volume than the directory it is in (KR13).
+#if defined(__linux__)
+        const char* mount_point = "/proc";
+#else
+        const char* mount_point = nullptr;
+#endif
+        IoRequest s7; s7.path = mount_point; s7.user = 25;
         Handle g1 = q.stat_file(s1), g2 = q.stat_file(s2), g3 = q.stat_file(s3), g4 = q.stat_file(s4), g5 = q.stat_file(s5);
-        KV_CHECK(c, !g1.is_null() && q.completions().len == 0 && q.pending() == 5);
+        Handle g7 = mount_point ? q.stat_file(s7) : Handle{};
+        u32 stats = mount_point ? 6 : 5;
+        KV_CHECK(c, !g1.is_null() && q.completions().len == 0 && q.pending() == stats);
         KV_CHECK(c, q.cancel(g5));
-        KV_CHECK(c, wait_for(q, 5) == 5 && q.pending() == 0);
+        KV_CHECK(c, wait_for(q, stats) == stats && q.pending() == 0);
         IoStat want;
         KV_CHECK(c, io_stat(big, &want) && want.is_file && want.size == kBig);
         const IoCompletion* t1 = by_user(q, 20);
@@ -464,7 +473,18 @@ void test_io_long_ranged_stat(kv::TestCtx& c) {
         KV_CHECK(c, t3 && t3->status == IoStatus::Done && !t3->stat.is_file && !t3->stat.is_dir && t3->stat.size == 0);
         KV_CHECK(c, t4 && t4->status == IoStatus::Done && t4->stat.is_file && t4->stat.size == plen);
         KV_CHECK(c, t5 && t5->status == IoStatus::Cancelled);
-        KV_CHECK(c, q.stats_done == 4 && q.stats_failed == 0);
+        // The volume: io_stat's, the same for a file and the directories above it, 0 for nothing.
+        KV_CHECK(c, want.volume != 0 && t1 && t1->stat.volume == want.volume);
+        KV_CHECK(c, t2 && t2->stat.volume == want.volume && t4 && t4->stat.volume == want.volume);
+        KV_CHECK(c, t3 && t3->stat.volume == 0);
+        if (mount_point) {
+            IoStat mp, parent;
+            KV_CHECK(c, io_stat(mount_point, &mp) && io_stat("/", &parent) && mp.volume != parent.volume);
+            const IoCompletion* t7 = by_user(q, 25);
+            KV_CHECK(c, t7 && t7->status == IoStatus::Done && t7->stat.is_dir && t7->stat.volume == mp.volume);
+            q.reap(g7);
+        }
+        KV_CHECK(c, q.stats_done == stats - 1 && q.stats_failed == 0);
         if (pass == 2) KV_CHECK(c, q.tasks_done == 0); // the stats are counted as stats
         q.reap(g1); q.reap(g2); q.reap(g3); q.reap(g4); q.reap(g5);
 

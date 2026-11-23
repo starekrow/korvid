@@ -22,6 +22,7 @@ struct Seen {
     kv::u32   stop_after = ~0u;
     kv::u64   a_size     = ~0ull;
     kv::i64   a_mtime    = 0;
+    kv::u64   a_volume   = ~0ull;
 };
 
 bool seen_one(void* user, const kv::IoDirEntry& e) {
@@ -29,7 +30,7 @@ bool seen_one(void* user, const kv::IoDirEntry& e) {
     const char* kind = e.st.is_file ? "f" : e.st.is_dir ? "d" : "n";
     s->len += (kv::usize)kv::format(s->text + s->len, sizeof s->text - s->len, "%s:%s%s%s ",
                                     e.utf8 ? e.name : "?", e.is_link ? "l" : "", kind, e.hidden ? "h" : "");
-    if (strcmp(e.name, "a.txt") == 0) { s->a_size = e.st.size; s->a_mtime = e.st.mtime_ns; }
+    if (strcmp(e.name, "a.txt") == 0) { s->a_size = e.st.size; s->a_mtime = e.st.mtime_ns; s->a_volume = e.st.volume; }
     return ++s->count < s->stop_after;
 }
 
@@ -105,6 +106,7 @@ void test_io_list_dir(kv::TestCtx& c) {
     KV_CHECK(c, strncmp(s2.text, ".hidden:fh a.txt:f ", 19) == 0);
     IoStat st;
     KV_CHECK(c, io_stat(at("a.txt"), &st) && s2.a_size == 3 && s2.a_mtime == st.mtime_ns);
+    KV_CHECK(c, s2.a_volume == st.volume && st.volume != 0 && s1.a_volume == 0); // the volume with sizes only
 
     // The odd name, joined to the directory, opens the same file through the queue.
     struct Odd { char name[64] = {}; bool utf8 = true; } o;

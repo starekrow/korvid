@@ -58,6 +58,7 @@ OsPathKind os_path_kind(const char* path) {
 static void stat_to(const struct stat& st, OsStat* out) {
     out->kind = S_ISREG(st.st_mode) ? OsPathKind::File : S_ISDIR(st.st_mode) ? OsPathKind::Dir : OsPathKind::Other;
     out->size = (u64)st.st_size;
+    out->volume = (u64)st.st_dev;
 #if defined(__APPLE__)
     out->mtime_ns = (i64)st.st_mtimespec.tv_sec * 1000000000ll + st.st_mtimespec.tv_nsec;
 #else
@@ -143,7 +144,7 @@ bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDir
         } else {
             e.st.kind = t == DT_REG ? OsPathKind::File : t == DT_DIR ? OsPathKind::Dir : OsPathKind::Other;
         }
-        if (!sizes) { e.st.size = 0; e.st.mtime_ns = 0; }
+        if (!sizes) { e.st.size = 0; e.st.mtime_ns = 0; e.st.volume = 0; }
         fn(user, e);
     }
     i32 failed = errno;

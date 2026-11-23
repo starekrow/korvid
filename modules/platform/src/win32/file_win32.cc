@@ -93,6 +93,23 @@ OsPathKind os_path_kind(const char* path) {
     return OsPathKind::File;
 }
 
+namespace {
+// The serial number of the volume a path (a WidePath's) is on, as GetFileInformationByHandle
+// would give it, with no handle on the file: the path's volume (GetVolumePathNameW, which
+// sees a volume mounted on a folder), then that volume's information. 0 if either fails.
+u64 volume_serial(const wchar_t* w) {
+    usize cap = wcslen(w) + 2; // the volume's path is never longer than the path and a trailing backslash
+    wchar_t small[MAX_PATH + 2];
+    wchar_t* root = cap <= MAX_PATH + 2 ? small : (wchar_t*)HeapAlloc(GetProcessHeap(), 0, cap * sizeof(wchar_t));
+    if (!root) return 0;
+    DWORD serial = 0;
+    bool ok = GetVolumePathNameW(w, root, (DWORD)cap) &&
+              GetVolumeInformationW(root, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0);
+    if (root != small) HeapFree(GetProcessHeap(), 0, root);
+    return ok ? serial : 0;
+}
+} // namespace
+
 bool os_path_stat(const char* path, OsStat* out, i32* err) {
     *out = OsStat{};
     WidePath wp;
@@ -109,6 +126,7 @@ bool os_path_stat(const char* path, OsStat* out, i32* err) {
                   : (fa.dwFileAttributes & FILE_ATTRIBUTE_DEVICE) ? OsPathKind::Other : OsPathKind::File;
         out->size = ((u64)fa.nFileSizeHigh << 32) | fa.nFileSizeLow;
         out->mtime_ns = (i64)((((u64)fa.ftLastWriteTime.dwHighDateTime << 32) | fa.ftLastWriteTime.dwLowDateTime) * 100ull);
+        out->volume = volume_serial(w);
         return true;
     }
     HANDLE h = CreateFileW(w, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
@@ -124,6 +142,7 @@ bool os_path_stat(const char* path, OsStat* out, i32* err) {
     out->size = ((u64)info.nFileSizeHigh << 32) | info.nFileSizeLow;
     // FILETIME: 100 ns units. Only ever compared with another.
     out->mtime_ns = (i64)((((u64)info.ftLastWriteTime.dwHighDateTime << 32) | info.ftLastWriteTime.dwLowDateTime) * 100ull);
+    out->volume = info.dwVolumeSerialNumber; // the link's target's
     return true;
 }
 
@@ -220,6 +239,8 @@ bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDir
         if (err) *err = errno_from_win32(first);
         return false;
     }
+    // Every entry that is not a link is on the directory's volume: asked once.
+    u64 volume = sizes ? volume_serial(wp.w) : 0;
     DWORD failed = 0;
     do {
         if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
@@ -244,8 +265,9 @@ bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDir
                       : (fd.dwFileAttributes & FILE_ATTRIBUTE_DEVICE) ? OsPathKind::Other : OsPathKind::File;
             e.st.size = ((u64)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
             e.st.mtime_ns = (i64)((((u64)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime) * 100ull);
+            e.st.volume = volume;
         }
-        if (!sizes) { e.st.size = 0; e.st.mtime_ns = 0; }
+        if (!sizes) { e.st.size = 0; e.st.mtime_ns = 0; e.st.volume = 0; }
         fn(user, e);
     } while (FindNextFileW(h, &fd));
     if (GetLastError() != ERROR_NO_MORE_FILES) failed = GetLastError();

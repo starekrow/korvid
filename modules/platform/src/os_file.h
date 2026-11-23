@@ -21,9 +21,10 @@ enum class OsPathKind : u8 { None, File, Dir, Other };
 // What a path names, following links.
 OsPathKind os_path_kind(const char* path);
 // What a path names with its size and modification time (nanoseconds since the OS's
-// epoch: only ever compared with another), following links. False if nothing is there,
-// or it cannot be asked, with *err (if given) saying which: ENOENT or ENOTDIR for nothing.
-struct OsStat { OsPathKind kind = OsPathKind::None; u64 size = 0; i64 mtime_ns = 0; };
+// epoch: only ever compared with another) and the volume it is on (IoStat::volume),
+// following links. False if nothing is there, or it cannot be asked, with *err (if given)
+// saying which: ENOENT or ENOTDIR for nothing. os_dir_each_stat's volume is 0 on Windows.
+struct OsStat { OsPathKind kind = OsPathKind::None; u64 size = 0; i64 mtime_ns = 0; u64 volume = 0; };
 bool os_path_stat(const char* path, OsStat* out, i32* err = nullptr);
 // Renames a file over whatever is at `to`.
 bool os_rename(const char* from, const char* to);
@@ -37,7 +38,7 @@ bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void
 // symbolic link is still asked, so it is followed); elsewhere one stat an entry.
 bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user);
 // One entry of os_dir_list: its name (valid during the call), what it is, following a
-// link, and whether it is one. With `sizes`, st has the size and time too; without, only
+// link, and whether it is one. With `sizes`, st has the size, time and volume; without, only
 // the kind, and from the listing where the OS has it there. A link whose target is not
 // there has kind None. Hidden: a leading '.', or Windows' hidden attribute.
 struct OsDirEntry { const char* name; OsStat st; bool is_link = false; bool hidden = false; };
