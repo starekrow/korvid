@@ -891,6 +891,56 @@ i32 io_list_files(const char* dir, bool (*fn)(void* user, const char* relative),
     return io_list_files_stat(dir, name_only, &c);
 }
 
+namespace {
+
+// A listing gathered whole, then sorted: names in one block of text, by offset, since the
+// block moves as it grows.
+struct DirItem { u32 at; IoDirEntry e; };
+struct DirList { Array<char> text; Array<DirItem> items; u32 flags; };
+
+void dir_collect(void* user, const OsDirEntry& oe) {
+    DirList* l = (DirList*)user;
+    if (oe.hidden && !(l->flags & IoListHidden)) return;
+    u32 len = (u32)strlen(oe.name);
+    DirItem it{l->text.len, IoDirEntry{}};
+    memcpy(l->text.push_n(len + 1), oe.name, len + 1);
+    it.e.st.is_file  = oe.st.kind == OsPathKind::File;
+    it.e.st.is_dir   = oe.st.kind == OsPathKind::Dir;
+    it.e.st.size     = oe.st.size;
+    it.e.st.mtime_ns = oe.st.mtime_ns;
+    it.e.is_link     = oe.is_link;
+    it.e.hidden      = oe.hidden;
+    it.e.utf8        = utf8_valid(oe.name, len);
+    l->items.push(it);
+}
+
+int dir_item_cmp(const void* a, const void* b, void* ctx) {
+    const char* t = (const char*)ctx;
+    return strcmp(t + ((const DirItem*)a)->at, t + ((const DirItem*)b)->at);
+}
+
+} // namespace
+
+bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirEntry& e), void* user, i32* err) {
+    if (!dir || !dir[0]) { if (err) *err = ENOENT; return false; }
+    DirList l{};
+    l.flags = flags;
+    i32 e = 0;
+    bool ok = os_dir_list(dir, (flags & IoListSizes) != 0, dir_collect, &l, &e);
+    if (ok) {
+        if (l.items.len > 1) kv::sort(l.items.data, l.items.len, sizeof(DirItem), dir_item_cmp, l.text.data);
+        for (DirItem& it : l.items) {
+            it.e.name = l.text.data + it.at;
+            if (!fn(user, it.e)) break;
+        }
+    } else if (err) {
+        *err = e ? e : EIO;
+    }
+    l.text.free();
+    l.items.free();
+    return ok;
+}
+
 bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize n), void* user, i32* err, usize chunk) {
     i32 e = 0;
     OsFile f = os_file_open(path, false, &e);

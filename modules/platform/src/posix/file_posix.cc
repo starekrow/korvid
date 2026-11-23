@@ -55,10 +55,7 @@ OsPathKind os_path_kind(const char* path) {
     return OsPathKind::Other;
 }
 
-bool os_path_stat(const char* path, OsStat* out, i32* err) {
-    struct stat st;
-    *out = OsStat{};
-    if (stat(path, &st) != 0) { if (err) *err = errno; return false; }
+static void stat_to(const struct stat& st, OsStat* out) {
     out->kind = S_ISREG(st.st_mode) ? OsPathKind::File : S_ISDIR(st.st_mode) ? OsPathKind::Dir : OsPathKind::Other;
     out->size = (u64)st.st_size;
 #if defined(__APPLE__)
@@ -66,6 +63,13 @@ bool os_path_stat(const char* path, OsStat* out, i32* err) {
 #else
     out->mtime_ns = (i64)st.st_mtim.tv_sec * 1000000000ll + st.st_mtim.tv_nsec;
 #endif
+}
+
+bool os_path_stat(const char* path, OsStat* out, i32* err) {
+    struct stat st;
+    *out = OsStat{};
+    if (stat(path, &st) != 0) { if (err) *err = errno; return false; }
+    stat_to(st, out);
     return true;
 }
 
@@ -100,6 +104,52 @@ void each_stat_one(void* user, const char* name) {
 bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user) {
     EachStat c{dir, fn, user};
     return os_dir_each(dir, each_stat_one, &c);
+}
+
+// readdir's d_type is the kind, where the file system fills it in: a directory of files
+// lists with no stat at all unless sizes are asked. A link, or an entry typed
+// DT_UNKNOWN (some network and older file systems), is asked of with fstatat against the
+// open directory, which walks no path.
+bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDirEntry& e), void* user, i32* err) {
+    int fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) { if (err) *err = errno; return false; }
+    DIR* d = fdopendir(fd);
+    if (!d) { i32 e = errno; close(fd); if (err) *err = e; return false; }
+    for (;;) {
+        errno = 0;
+        dirent* de = readdir(d);
+        if (!de) break;
+        const char* name = de->d_name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+        OsDirEntry e;
+        e.name   = name;
+        e.hidden = name[0] == '.';
+        unsigned char t = de->d_type;
+        struct stat st;
+        bool have = false; // st holds the entry's own stat
+        if (t == DT_UNKNOWN) {
+            if (fstatat(fd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) continue; // gone since the listing
+            if (S_ISLNK(st.st_mode)) t = DT_LNK;
+            else have = true;
+        }
+        if (have) {
+            stat_to(st, &e.st);
+        } else if (t == DT_LNK) {
+            e.is_link = true;
+            if (fstatat(fd, name, &st, 0) == 0) stat_to(st, &e.st); // else nothing at the far end: None
+        } else if (sizes) {
+            if (fstatat(fd, name, &st, 0) != 0) continue;
+            stat_to(st, &e.st);
+        } else {
+            e.st.kind = t == DT_REG ? OsPathKind::File : t == DT_DIR ? OsPathKind::Dir : OsPathKind::Other;
+        }
+        if (!sizes) { e.st.size = 0; e.st.mtime_ns = 0; }
+        fn(user, e);
+    }
+    i32 failed = errno;
+    closedir(d);
+    if (failed) { if (err) *err = failed; return false; }
+    return true;
 }
 
 bool os_make_dir(const char* path) {

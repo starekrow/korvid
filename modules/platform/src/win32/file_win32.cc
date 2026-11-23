@@ -193,6 +193,67 @@ bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, 
     return true;
 }
 
+// FindFirstFileExW's records carry every entry's attributes, size and last write, so
+// `sizes` costs nothing here and the listing asks nothing of a file. A symbolic link or a
+// junction (a reparse point with either tag) is a link, asked by its path so that its
+// target is described; other reparse points (OneDrive's placeholders, deduplicated files)
+// are what their record says. The directory goes through WidePath, so it may be long.
+bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDirEntry& e), void* user, i32* err) {
+    WidePath wp;
+    if (!wp.set(dir, err)) return false;
+    usize n = wcslen(wp.w);
+    wchar_t* pattern = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, (n + 3) * sizeof(wchar_t));
+    if (!pattern) { if (err) *err = ENOMEM; return false; }
+    memcpy(pattern, wp.w, n * sizeof(wchar_t));
+    // The \\?\ form takes no '/': the separator is a backslash either way.
+    if (n && pattern[n - 1] != L'/' && pattern[n - 1] != L'\\') pattern[n++] = L'\\';
+    pattern[n++] = L'*';
+    pattern[n] = 0;
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
+    DWORD first = h == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+    HeapFree(GetProcessHeap(), 0, pattern);
+    if (h == INVALID_HANDLE_VALUE) {
+        if (first == ERROR_FILE_NOT_FOUND) return true; // a drive's root with nothing on it: not even . and ..
+        // A file named as the directory: "not a directory", as POSIX says it.
+        if (first == ERROR_DIRECTORY || (first == ERROR_PATH_NOT_FOUND && os_path_kind(dir) == OsPathKind::File)) first = ERROR_DIRECTORY;
+        if (err) *err = errno_from_win32(first);
+        return false;
+    }
+    DWORD failed = 0;
+    do {
+        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+        char name[MAX_PATH * 4];
+        if (!narrow(fd.cFileName, name, (int)sizeof name)) continue;
+        OsDirEntry e;
+        e.name   = name;
+        e.hidden = name[0] == '.' || (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
+        bool reparse = (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        e.is_link = reparse && (fd.dwReserved0 == IO_REPARSE_TAG_SYMLINK || fd.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT);
+        if (e.is_link) {
+            Array<char> path;
+            usize dl = strlen(dir), nl = strlen(name);
+            char* p = path.push_n((u32)(dl + nl + 2));
+            memcpy(p, dir, dl);
+            p[dl] = '/';
+            memcpy(p + dl + 1, name, nl + 1);
+            if (!os_path_stat(p, &e.st)) e.st = OsStat{}; // nothing at the far end: None
+            path.free();
+        } else {
+            e.st.kind = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? OsPathKind::Dir
+                      : (fd.dwFileAttributes & FILE_ATTRIBUTE_DEVICE) ? OsPathKind::Other : OsPathKind::File;
+            e.st.size = ((u64)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+            e.st.mtime_ns = (i64)((((u64)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime) * 100ull);
+        }
+        if (!sizes) { e.st.size = 0; e.st.mtime_ns = 0; }
+        fn(user, e);
+    } while (FindNextFileW(h, &fd));
+    if (GetLastError() != ERROR_NO_MORE_FILES) failed = GetLastError();
+    FindClose(h);
+    if (failed) { if (err) *err = errno_from_win32(failed); return false; }
+    return true;
+}
+
 bool os_make_dir(const char* path) {
     if (os_path_kind(path) == OsPathKind::Dir) return true; // also a drive, "C:"
     wchar_t w[KV_WIDE_PATH_MAX];

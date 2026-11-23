@@ -143,7 +143,11 @@ whole, and an `IoFileWriter` (`open`, `write`, `print`, `close`, a failure that 
 writes one in pieces. `io_is_file` and `io_is_dir` say what a path names. They stand on
 the queue's own OS layer, UTF-8 paths and all, so nothing in the engine needs `<stdio.h>`
 to touch a file. `io_list_files(dir, fn, user)` walks a directory (sorted, hidden entries
-skipped) and `io_make_dirs(path)` is `mkdir -p`.
+skipped) and `io_make_dirs(path)` is `mkdir -p`. `io_list_dir(dir, flags, fn, user, &err)`
+lists one directory without its subdirectories, for a walk that picks its own order:
+links marked, hidden entries with `IoListHidden`, sizes and times with `IoListSizes`
+(without them, POSIX asks nothing of a file), and a reason when it fails. A name comes
+back as the OS gave it, UTF-8 or not, and opens the same file.
 `io_make_temp_dir(prefix, ...)` makes a fresh directory under the OS's temporary one, and
 `io_remove_tree(path)` removes a directory and all under it (a link inside goes as a link,
 never followed): a test's scratch, made and cleaned up.
@@ -160,6 +164,8 @@ Header `korvid/platform/io.h`:
 | `IoBudget` | record | `bytes_per_pump` (8 MB), `bytes_in_flight` (64 MB), `idle_bytes_per_call` (4 MB); 0 is unlimited |
 | `IoRequest` | record | `path` (copied, any length), `alloc` (the data's home; null: general), `priority`, `user`, `offset` and `length` (a part of the file, for `read_file`; 0: to the end) |
 | `IoStat` | record | `is_file`, `is_dir`, `size`, `mtime_ns`: what a path names, following links |
+| `IoDirEntry` | record | `name`, `st`, `is_link`, `hidden`, `utf8`: one entry of `io_list_dir` |
+| `io_list_dir(dir, flags, fn, user, err)` | function | one directory's entries in name order; flags (`IoListFlags`) `IoListHidden`, `IoListSizes`; false with the errno |
 | `IoCompletion` | record | `request`, `status`, `data`, `size`, `user`, `error` (errno), `stat` (a `stat_file`'s answer) |
 | `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
 | `platform_io(engine)` | function | the module's queue |

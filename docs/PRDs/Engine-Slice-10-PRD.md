@@ -518,3 +518,30 @@ arcanum's `--demo --hash --threads 16` give the same hashes, tick for tick, as a
 arcfire's two recordings replay matched. Not done: `hifi_platform` against the real
 PipeWire (no `libpipewire-0.3-dev` here), the changes to Blackwing's own tree (made and
 tested in a copy only), and anything on Windows or the Apple family.
+
+**Milestone 7, one directory (KR11): built Nov 23, 2026.**
+
+- **`io_list_dir(dir, flags, fn, user, &err)`** and `IoDirEntry`, as the text above has
+  them, on `os_dir_list` in `os_file.h`, a listing that marks links and hidden entries and
+  says why it failed. `io_list_files` and `os_dir_each_stat` are untouched.
+- **POSIX** opens the directory once and asks `fstatat` against it: of a link (followed,
+  so a link to nothing is kind None), of an entry typed `DT_UNKNOWN`, and of every entry
+  with `IoListSizes`. Without the flag, sizes and times are 0 on every platform, Windows
+  included, though its listing has them, so a caller that forgets the flag finds out
+  everywhere.
+- **Windows.** `os_dir_list` goes through `WidePath`, so a directory may be long; a link
+  is a reparse point tagged symbolic link or mount point (a junction), and other reparse
+  points (cloud placeholders, deduplicated files) are files. `wide.h` now speaks WTF-8
+  both ways, in `src/wtf8.h`, which has nothing of Windows in it and is tested here; a
+  UTF-16 name with a lone surrogate narrows to WTF-8 and widens back to itself. Valid
+  names are as before. **Found on the way:** `WidePath::set` (milestone 3) called
+  `errno_from_win32` above its declaration, which cl would have refused; it is moved up.
+  Written, not compiled.
+- **Tests** (`wtf8`, `io_list_dir`): the coder's round trips, measuring, a short buffer
+  and four malformed inputs; a directory with a file, a hidden file, a subdirectory with
+  its own entries, links to a file, a directory and nothing, and a name of bytes that are
+  not UTF-8, listed in order without and with `IoListHidden | IoListSizes`, a.txt's time
+  equal to `io_stat`'s; the odd name read through the queue; a stop; an empty directory;
+  `ENOENT`, `ENOTDIR`, and `EACCES` for a directory with no permissions.
+- **Checked:** `kormake test platform` on linux-debug; `platform` compiled for
+  android-dev. Not checked: Windows, the Apple family.

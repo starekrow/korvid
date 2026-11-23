@@ -36,6 +36,14 @@ bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void
 // ask it of every one: on Windows the listing itself carries it, no query a file (a
 // symbolic link is still asked, so it is followed); elsewhere one stat an entry.
 bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user);
+// One entry of os_dir_list: its name (valid during the call), what it is, following a
+// link, and whether it is one. With `sizes`, st has the size and time too; without, only
+// the kind, and from the listing where the OS has it there. A link whose target is not
+// there has kind None. Hidden: a leading '.', or Windows' hidden attribute.
+struct OsDirEntry { const char* name; OsStat st; bool is_link = false; bool hidden = false; };
+// Calls fn with each of dir's entries, '.' and '..' left out, in no particular order.
+// False with *err set (errno) when dir cannot be read, or the listing fails part way.
+bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDirEntry& e), void* user, i32* err);
 // Creates one directory. True if it was made or a directory is already there.
 bool os_make_dir(const char* path);
 // Removes a file or an empty directory. True if it was removed.

@@ -252,6 +252,34 @@ i32  io_list_files(const char* dir, bool (*fn)(void* user, const char* relative)
 // The same walk with each file's size and modification time, as io_stat would give them,
 // from the listing itself: for a walk that would stat every file, at no cost a file more.
 i32  io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relative, const IoStat& st), void* user);
+// One directory's own entries, not its descendants, for a walk that chooses its own order
+// (breadth first, or the directory someone opened before the rest). Blocking and safe on
+// any thread: from a job or a queue task (run_task), never from a tick. Entries come in
+// name order, bytewise; `fn` returning false stops the listing, which is not a failure.
+// False with *err (if given) set when the directory cannot be listed: ENOENT, ENOTDIR,
+// EACCES, EIO or the OS's own errno.
+//
+// Without IoListSizes an entry's kind is the listing's own (d_type on POSIX), and only a
+// link, or an entry whose file system does not type it, is asked of: ten thousand files
+// list without ten thousand stats. With it, POSIX asks each entry for its size and time
+// (readdir has neither); Windows' listing has them either way.
+//
+// A name is handed back as the OS gave it and opens the same file when joined to `dir`
+// and passed to read_file: bytes on POSIX, which need not be UTF-8, and on Windows WTF-8,
+// UTF-8 that can also carry the half surrogate pair a UTF-16 name may hold. `utf8` says
+// whether it is valid UTF-8, for whoever shows it.
+enum IoListFlags : u32 {
+    IoListHidden = 1u << 0, // hidden entries too (a leading '.'; on Windows, the attribute as well)
+    IoListSizes  = 1u << 1, // each entry's size and modification time in st
+};
+struct IoDirEntry {
+    const char* name    = nullptr; // the entry's own name, valid during the call
+    IoStat      st;                // what it is, following a link; size and time with IoListSizes, else 0
+    bool        is_link = false;   // a symbolic link (or a junction): st is its target's, all false if there is none
+    bool        hidden  = false;   // one IoListHidden lets through
+    bool        utf8    = true;    // false: the name is not valid UTF-8
+};
+bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirEntry& e), void* user, i32* err = nullptr);
 // Creates a directory and its parents (mkdir -p). Synchronous; true if it exists after.
 bool io_make_dirs(const char* path);
 // Removes a file, or a directory that is empty. Synchronous; true if it is gone after.
