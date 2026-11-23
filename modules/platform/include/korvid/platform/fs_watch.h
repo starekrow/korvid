@@ -7,6 +7,13 @@
 // modification times with the walk before: slower to notice, correct everywhere, and all
 // there is on a platform with no native backend yet.
 //
+// The choice is a root's. On a share (io_path_is_remote: NFS, SMB, a FUSE mount) the
+// OS reports only what this machine wrote, so a watcher made with Auto polls a root that
+// is on one, every remote_interval seconds, and watches its other roots natively. A root
+// can also be polled by name, for a share the test does not know. A polled root is walked
+// on the thread that calls poll: whoever watches a large share polls from a thread of
+// their own.
+//
 // What a caller may rely on, with either backend:
 // - Paths are relative to their root, '/' separated, valid until the next poll.
 // - Nothing is reported for what a root holds when it is added: the caller scans.
@@ -40,11 +47,12 @@ struct FsWatcher {
     FsWatchState* state = nullptr;
 
     // Auto is the native backend where there is one. Asking for Native where there is
-    // none fails. poll_interval is the polling backend's time between walks.
-    bool init(FsWatchBackend backend = FsWatchBackend::Auto, f64 poll_interval = 0.25);
+    // none fails. poll_interval is the polling backend's time between walks of a root;
+    // remote_interval is the time between walks of a share's root that Auto chose to poll.
+    bool init(FsWatchBackend backend = FsWatchBackend::Auto, f64 poll_interval = 0.25, f64 remote_interval = 5.0);
     void free();
     bool is_open() const { return state != nullptr; }
-    const char* backend_name() const; // "inotify", "readdirectorychanges", "fsevents", "poll"
+    const char* backend_name() const; // "inotify", "readdirectorychanges", "fsevents", "poll": the watcher's; root_backend says a root's
     // How long after a change the backend may still be about to report it, in seconds,
     // even to poll(true): 0 where the OS reports at once (and for polling, whose poll(true)
     // walks), 0.05 for FSEvents, which gathers. A caller that must have heard everything a
@@ -52,9 +60,14 @@ struct FsWatcher {
     f64  lateness() const;
 
     // Watches dir and everything under it. The id, or ~0u if the directory cannot be
-    // read. Ids are not reused while the watcher lives.
-    u32  add_root(const char* dir);
+    // read. Ids are not reused while the watcher lives. `how`: Auto is the watcher's own
+    // backend, except that a watcher made with Auto polls a root on a share; Poll polls
+    // this root whatever the watcher is, at poll_interval; Native insists, and fails on a
+    // watcher that has none.
+    u32  add_root(const char* dir, FsWatchBackend how = FsWatchBackend::Auto);
     void remove_root(u32 id);
+    // What a root got: Native or Poll. Auto for an id that is not a root.
+    FsWatchBackend root_backend(u32 id) const;
 
     // What has happened since the last poll, with repeats of one (kind, path) folded.
     // With `now`, the polling backend walks at once instead of waiting out its

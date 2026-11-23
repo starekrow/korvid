@@ -9,6 +9,11 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <sys/mount.h>  // statfs, MNT_LOCAL
+#else
+#include <sys/vfs.h>    // statfs
+#endif
 
 namespace kv {
 
@@ -72,6 +77,43 @@ bool os_path_stat(const char* path, OsStat* out, i32* err) {
     if (stat(path, &st) != 0) { if (err) *err = errno; return false; }
     stat_to(st, out);
     return true;
+}
+
+// Linux and Android: the file system's magic number, from statfs. Those whose changes can
+// come from another machine (or, for FUSE, from a process the kernel never sees write):
+// the network file systems, and every FUSE mount, sshfs and rclone among them. fuseblk
+// (ntfs-3g on a local disk) has FUSE's number too and is counted: polled for nothing,
+// which is slow, never wrong. Apple: a volume the kernel does not call local, or macFUSE.
+bool os_path_is_remote(const char* path) {
+    struct statfs sf;
+    if (statfs(path, &sf) != 0) return false;
+#if defined(__APPLE__)
+    if (!(sf.f_flags & MNT_LOCAL)) return true;
+    return strncmp(sf.f_fstypename, "macfuse", 7) == 0 || strncmp(sf.f_fstypename, "osxfuse", 7) == 0 ||
+           strncmp(sf.f_fstypename, "fuse", 4) == 0;
+#else
+    // As u32: f_type is a signed 32-bit word on some ABIs, and SMB's numbers have the top bit.
+    switch ((u32)sf.f_type) {
+    case 0x6969u:     // NFS
+    case 0x517Bu:     // SMB (the old smbfs)
+    case 0xFF534D42u: // CIFS
+    case 0xFE534D42u: // SMB2 (the newer smb client)
+    case 0x65735546u: // FUSE and fuseblk
+    case 0x01021997u: // 9p (v9fs: WSL's drives, virtual machines' shares)
+    case 0x5346414Fu: // AFS (OpenAFS)
+    case 0x6B414653u: // kAFS
+    case 0x73757245u: // Coda
+    case 0x00C36400u: // Ceph
+    case 0x564Cu:     // NCP
+    case 0x0BD00BD0u: // Lustre
+    case 0x20030528u: // OrangeFS
+    case 0x01161970u: // GFS2, shared between machines
+    case 0x7461636Fu: // OCFS2, likewise
+        return true;
+    default:
+        return false;
+    }
+#endif
 }
 
 bool os_rename(const char* from, const char* to) { return rename(from, to) == 0; }

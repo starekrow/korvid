@@ -94,6 +94,8 @@ bool io_stat(const char* path, IoStat* out) {
 
 bool io_rename(const char* from, const char* to) { return os_rename(from, to); }
 
+bool io_path_is_remote(const char* path) { return path && path[0] && os_path_is_remote(path); }
+
 bool io_current_dir(char* out, u32 cap) { return os_current_dir(out, cap); }
 
 bool io_is_file(const char* path) { return os_path_kind(path) == OsPathKind::File; }

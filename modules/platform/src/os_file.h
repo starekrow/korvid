@@ -26,6 +26,9 @@ OsPathKind os_path_kind(const char* path);
 // saying which: ENOENT or ENOTDIR for nothing. os_dir_each_stat's volume is 0 on Windows.
 struct OsStat { OsPathKind kind = OsPathKind::None; u64 size = 0; i64 mtime_ns = 0; u64 volume = 0; };
 bool os_path_stat(const char* path, OsStat* out, i32* err = nullptr);
+// Whether the file system under path may change without this machine hearing of it (a
+// share, a FUSE mount): io_path_is_remote. False if it cannot be asked.
+bool os_path_is_remote(const char* path);
 // Renames a file over whatever is at `to`.
 bool os_rename(const char* from, const char* to);
 // The working directory, '/' separated.

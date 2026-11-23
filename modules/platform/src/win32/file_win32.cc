@@ -146,6 +146,26 @@ bool os_path_stat(const char* path, OsStat* out, i32* err) {
     return true;
 }
 
+// A share by its name (\\server\share, \\?\UNC\...), or a drive Windows calls remote: a
+// mapped network drive, WebDAV. The volume's path first (GetVolumePathNameW), so a share
+// mounted on a local folder is found too.
+bool os_path_is_remote(const char* path) {
+    WidePath wp;
+    if (!wp.set(path)) return false;
+    usize cap = wcslen(wp.w) + 2;
+    wchar_t small[MAX_PATH + 2];
+    wchar_t* root = cap <= MAX_PATH + 2 ? small : (wchar_t*)HeapAlloc(GetProcessHeap(), 0, cap * sizeof(wchar_t));
+    if (!root) return false;
+    bool remote = false;
+    if (GetVolumePathNameW(wp.w, root, (DWORD)cap)) {
+        bool unc = (root[0] == L'\\' && root[1] == L'\\' && root[2] != L'?' && root[2] != L'.') ||
+                   wcsncmp(root, L"\\\\?\\UNC\\", 8) == 0;
+        remote = unc || GetDriveTypeW(root) == DRIVE_REMOTE;
+    }
+    if (root != small) HeapFree(GetProcessHeap(), 0, root);
+    return remote;
+}
+
 bool os_rename(const char* from, const char* to) {
     wchar_t wf[KV_WIDE_PATH_MAX], wt[KV_WIDE_PATH_MAX];
     if (!widen(from, wf, KV_WIDE_PATH_MAX) || !widen(to, wt, KV_WIDE_PATH_MAX)) return false;

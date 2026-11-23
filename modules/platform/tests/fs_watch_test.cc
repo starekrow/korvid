@@ -5,6 +5,9 @@
 #include "korvid/core/time.h"
 #include <stdio.h>
 #include <string.h>
+#if defined(__linux__)
+#include <unistd.h> // getuid
+#endif
 
 namespace {
 
@@ -163,6 +166,59 @@ void run(TestCtx& c, FsWatchBackend backend, const char* expect_name) {
     io_remove_tree(elsewhere);
 }
 
+// KR12: what a share is, and a root polled under a native watcher.
+void run_shares(TestCtx& c) {
+    char dir[512], other[512];
+    KV_CHECK(c, io_make_temp_dir("kv-fswatch-share", dir, sizeof dir) && io_make_temp_dir("kv-fswatch-local", other, sizeof other));
+    KV_CHECK(c, !io_path_is_remote(dir) && !io_path_is_remote("") && !io_path_is_remote("/no/such/place/at/all"));
+#if defined(__linux__)
+    // The desktop's document portal, where there is one, is a FUSE mount: remote, and
+    // polled by an Auto watcher without being told.
+    char portal[64];
+    snprintf(portal, sizeof portal, "/run/user/%u/doc", (unsigned)getuid());
+    if (io_is_dir(portal)) {
+        KV_CHECK(c, io_path_is_remote(portal));
+        FsWatcher w;
+        KV_CHECK(c, w.init(FsWatchBackend::Auto, 0.25, 60.0));
+        u32 id = w.add_root(portal);
+        if (id != ~0u) KV_CHECK(c, w.root_backend(id) == FsWatchBackend::Poll);
+        FsWatcher p; // a watcher made with Native insists: no polling by itself
+        if (fs_watch_has_native() && p.init(FsWatchBackend::Native)) {
+            u32 pid = p.add_root(portal);
+            if (pid != ~0u) KV_CHECK(c, p.root_backend(pid) == FsWatchBackend::Native);
+        }
+        p.free();
+        w.free();
+    }
+#endif
+    // A root polled by name beside one watched natively: both report, each by its own means.
+    FsWatcher w;
+    KV_CHECK(c, w.init(FsWatchBackend::Auto, 0.01));
+    u32 polled = w.add_root(dir, FsWatchBackend::Poll);
+    u32 native = w.add_root(other);
+    KV_CHECK(c, polled != ~0u && native != ~0u && polled != native);
+    KV_CHECK(c, w.root_backend(polled) == FsWatchBackend::Poll);
+    KV_CHECK(c, w.root_backend(native) == (fs_watch_has_native() ? FsWatchBackend::Native : FsWatchBackend::Poll));
+    KV_CHECK(c, w.root_backend(9999) == FsWatchBackend::Auto);
+    u32 insisted = w.add_root(dir, FsWatchBackend::Native); // fails where there is no native backend
+    KV_CHECK(c, (insisted == ~0u) == !fs_watch_has_native());
+    if (insisted != ~0u) w.remove_root(insisted);
+    Heard h;
+    KV_CHECK(c, write_text(dir, "song.flac", "s") && write_text(other, "cover.jpg", "c"));
+    KV_CHECK(c, wait_for(w, h, "added song.flac") && wait_for(w, h, "added cover.jpg"));
+    w.remove_root(polled);
+    w.remove_root(native);
+    KV_CHECK(c, w.root_backend(polled) == FsWatchBackend::Auto && w.root_backend(native) == FsWatchBackend::Auto);
+    h.clear();
+    KV_CHECK(c, write_text(dir, "late.flac", "l"));
+    drain(w, h);
+    KV_CHECK(c, !h.has("added late.flac"));
+    h.free();
+    w.free();
+    io_remove_tree(dir);
+    io_remove_tree(other);
+}
+
 } // namespace
 
 void test_fs_watch(kv::TestCtx& c) {
@@ -181,4 +237,6 @@ void test_fs_watch(kv::TestCtx& c) {
         KV_CHECK(c, !w.init(FsWatchBackend::Native) && w.init(FsWatchBackend::Auto) && strcmp(w.backend_name(), "poll") == 0);
         w.free();
     }
+    c.begin("fs_watch shares");
+    run_shares(c);
 }

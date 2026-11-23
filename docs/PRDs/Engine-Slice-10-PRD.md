@@ -563,3 +563,26 @@ tested in a copy only), and anything on Windows or the Apple family.
 - **Checked:** `kormake test platform` on linux-debug. Not checked: Windows, the Apple
   family, and an unplugged disk: no disk here to unplug, so `/proc` under `/` stands in
   for a mount point with something on it.
+
+**Milestone 9, shares (KR12): built Nov 23, 2026.**
+
+- **`io_path_is_remote(path)`** on `os_path_is_remote`. Linux and Android: `statfs`'s
+  magic number against fifteen file systems, the table's and kAFS, Lustre, OrangeFS, and
+  the shared-disk GFS2 and OCFS2, compared as 32 bits since SMB's numbers have the top
+  bit and `f_type` is signed on some ABIs. Apple: no `MNT_LOCAL`, or a macFUSE type name.
+  Windows: the volume's path, then a UNC name or `DRIVE_REMOTE`. Written, not compiled,
+  for Apple and Windows.
+- **`FsWatcher`, per root.** `add_root(dir, how)` and `root_backend(id)` as the text above
+  has them; `init` takes `remote_interval`, default 5 s. Each polled root keeps its own
+  interval and last walk, so a share at 5 s and a root polled by name at 0.25 s go
+  together under one native watcher. **Settled here:** only a watcher made with `Auto`
+  polls a share by itself; one made with `Native` keeps it native, as asked. A watcher's
+  polled roots are now walked an interval after each was added, not after `init`.
+  `backend_name()` is still the watcher's.
+- **Tests** (`fs_watch shares`): a temporary directory, "" and a missing path are not
+  remote; this machine's document portal (`/run/user/<uid>/doc`, FUSE) is, an `Auto`
+  watcher polls it and a `Native` one does not; a root polled by name and a native one
+  under one watcher both report a new file, `Native` on a watcher without it fails, and
+  a removed root reports nothing more. Run three times.
+- **Checked:** `kormake test platform` on linux-debug. Not checked: a real NFS or SMB
+  mount (none here), Windows, the Apple family.

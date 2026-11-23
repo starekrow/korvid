@@ -112,6 +112,8 @@ struct FsPollEntry { u32 text; bool is_dir; u64 size; i64 mtime_ns; };
 struct FsPollRoot {
     u32                id;
     char*              dir;
+    f64                interval;  // between walks: the watcher's poll_interval, or remote_interval for a share
+    f64                last_walk;
     Array<FsPollEntry> entries; // sorted by path, a directory's contents right after it
     Array<char>        text;
 };
@@ -202,12 +204,14 @@ char* fsw_dup_str(const char* s) {
 
 struct FsWatchState {
     bool            native = false;
+    FsWatchBackend  asked = FsWatchBackend::Auto; // what init was given: only Auto polls a share by itself
+    f64             remote_interval = 5.0;
 #if KV_FS_NATIVE
     FsNative*       n = nullptr;
 #endif
-    Array<FsPollRoot> roots;
+    Array<FsPollRoot> roots;  // the polled roots, under either backend
+    Array<u32>      native_roots; // the ids the native backend has
     f64             interval = 0.25;
-    f64             last_walk = 0.0;
     u32             next_id = 0;
     FsSink          sink;
     Array<FsEvent>  out;
@@ -215,14 +219,15 @@ struct FsWatchState {
 
 bool fs_watch_has_native() { return KV_FS_NATIVE != 0; }
 
-bool FsWatcher::init(FsWatchBackend backend, f64 poll_interval) {
+bool FsWatcher::init(FsWatchBackend backend, f64 poll_interval, f64 remote_interval) {
     free();
     bool native = backend != FsWatchBackend::Poll && fs_watch_has_native();
     if (backend == FsWatchBackend::Native && !native) return false;
     FsWatchState* s = new (mem_alloc(sizeof(FsWatchState))) FsWatchState{};
     s->native   = native;
+    s->asked    = backend;
     s->interval = poll_interval;
-    s->last_walk = time_now();
+    s->remote_interval = remote_interval;
 #if KV_FS_NATIVE
     if (native) {
         s->n = fs_native_create();
@@ -248,6 +253,7 @@ void FsWatcher::free() {
         r.text.free();
     }
     state->roots.free();
+    state->native_roots.free();
     state->sink.free();
     state->out.free();
     mem_free(state);
@@ -269,28 +275,39 @@ const char* FsWatcher::backend_name() const {
     return "poll";
 }
 
-u32 FsWatcher::add_root(const char* dir) {
+u32 FsWatcher::add_root(const char* dir, FsWatchBackend how) {
     if (!state || !dir || os_path_kind(dir) != OsPathKind::Dir) return ~0u;
+    if (how == FsWatchBackend::Native && !state->native) return ~0u;
+    bool native = state->native && how != FsWatchBackend::Poll;
+    f64 interval = state->interval;
+    if (how == FsWatchBackend::Auto && state->asked == FsWatchBackend::Auto && os_path_is_remote(dir)) {
+        native   = false;
+        interval = state->remote_interval;
+        KV_INFO("platform", "fs_watch: %s is on a share; polled every %.1f s", dir, interval);
+    }
     u32 id = state->next_id++;
 #if KV_FS_NATIVE
-    if (state->native) return fs_native_add(state->n, id, dir) ? id : ~0u;
+    if (native) {
+        if (!fs_native_add(state->n, id, dir)) return ~0u;
+        state->native_roots.push(id);
+        return id;
+    }
 #endif
     FsPollRoot r{};
     r.id  = id;
     r.dir = fsw_dup_str(dir);
+    r.interval = interval;
     Snapshot s{};
     snapshot(dir, s);
     r.entries = s.entries;
     r.text    = s.text;
+    r.last_walk = time_now();
     state->roots.push(r);
     return id;
 }
 
 void FsWatcher::remove_root(u32 id) {
     if (!state) return;
-#if KV_FS_NATIVE
-    if (state->native) { fs_native_remove(state->n, id); return; }
-#endif
     for (u32 i = 0; i < state->roots.len; ++i) {
         FsPollRoot& r = state->roots.data[i];
         if (r.id != id) continue;
@@ -301,6 +318,21 @@ void FsWatcher::remove_root(u32 id) {
         --state->roots.len;
         return;
     }
+    for (u32 i = 0; i < state->native_roots.len; ++i) {
+        if (state->native_roots.data[i] != id) continue;
+#if KV_FS_NATIVE
+        fs_native_remove(state->n, id);
+#endif
+        state->native_roots.data[i] = state->native_roots.data[--state->native_roots.len];
+        return;
+    }
+}
+
+FsWatchBackend FsWatcher::root_backend(u32 id) const {
+    if (!state) return FsWatchBackend::Auto;
+    for (const FsPollRoot& r : state->roots) if (r.id == id) return FsWatchBackend::Poll;
+    for (u32 n : state->native_roots) if (n == id) return FsWatchBackend::Native;
+    return FsWatchBackend::Auto;
 }
 
 Span<const FsEvent> FsWatcher::poll(bool now) {
@@ -308,16 +340,14 @@ Span<const FsEvent> FsWatcher::poll(bool now) {
     FsWatchState& s = *state;
     s.sink.clear();
     s.out.len = 0;
-    bool walked = false;
 #if KV_FS_NATIVE
-    if (s.native) { fs_native_poll(s.n, s.sink); walked = true; }
+    if (s.native) fs_native_poll(s.n, s.sink);
 #endif
-    if (!walked) {
-        f64 t = time_now();
-        if (now || t - s.last_walk >= s.interval) {
-            for (FsPollRoot& r : s.roots) poll_root(r, s.sink);
-            s.last_walk = time_now();
-        }
+    f64 t = time_now();
+    for (FsPollRoot& r : s.roots) {
+        if (!now && t - r.last_walk < r.interval) continue;
+        poll_root(r, s.sink);
+        r.last_walk = time_now();
     }
     for (const FsSink::Ev& e : s.sink.evs) s.out.push(FsEvent{e.kind, e.root, s.sink.text.data + e.text});
     return Span<const FsEvent>(s.out.data, s.out.len);

@@ -38,7 +38,11 @@ socket: no thread, no blocking. inotify on Linux; everywhere, and as the only ba
 the other platforms for now, a polling backend that walks the trees at an interval and
 compares sizes and modification times. Events are hints (added, changed, removed, a
 directory come or gone, rescan): the reader compares content before believing one. The
-header says what holds on both backends.
+header says what holds on both backends. The backend is chosen per root: on a share
+(`io_path_is_remote`: NFS, SMB, any FUSE mount) the OS hears only this machine's writes,
+so a watcher made with `Auto` polls such a root every `remote_interval` seconds (5), and
+`add_root(dir, FsWatchBackend::Poll)` polls one the test misses; `root_backend(id)` says
+which a root got.
 
 **Processes** (`process.h`). `Process::spawn` takes an argument vector, a working
 directory and additions to the environment; `running`, `read_out`, `read_err` and `kill`
@@ -108,7 +112,7 @@ it with 0 bytes. The budget counts the range, so the first 64 KB of a large file
 64 KB. `read_asset` reads whole files only.
 
 **Ask what a path is without waiting** with `stat_file(IoRequest{path})`: the completion's
-`stat` has `is_file`, `is_dir`, `size` and `mtime_ns`, as `io_stat` gives them, and no
+`stat` has `is_file`, `is_dir`, `size`, `mtime_ns` and `volume`, as `io_stat` gives them, and no
 data. Nothing there is `Done` with both flags false; `Failed` is an error on the way. On
 io_uring it is one `IORING_OP_STATX`; where the ring has no stat (Windows, Apple, Android)
 it runs on the task workers, and under `--io sync`, or with no workers started, at the

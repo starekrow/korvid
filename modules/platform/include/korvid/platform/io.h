@@ -355,6 +355,13 @@ bool io_rename(const char* from, const char* to);
 // What a path names, with its size and modification time, now, on the calling thread: for
 // tools. A tick asks IoQueue::stat_file. False if nothing is there.
 bool io_stat(const char* path, IoStat* out);
+// Whether the file system under `path` may change without this machine hearing of it:
+// a network share (NFS, SMB; on Windows a mapped or \\server path; on Apple a volume
+// not local), or on Linux any FUSE mount (sshfs, rclone). An OS's change notifications
+// report only this machine's writes there, so FsWatcher polls such a root (fs_watch.h).
+// Blocking: one statfs, or on Windows two calls about the volume. False if the path
+// cannot be asked.
+bool io_path_is_remote(const char* path);
 // The process's working directory, '/' separated, no trailing slash.
 bool io_current_dir(char* out, u32 cap);
 bool io_is_file(const char* path);
