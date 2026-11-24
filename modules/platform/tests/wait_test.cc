@@ -60,8 +60,8 @@ void test_wait(kv::TestCtx& c) {
     PlatformWaits n = platform_waits(e);
     KV_CHECK(c, n.waits == 4 && n.woken == 3 && n.timed == 1 && n.window == 0);
 
-    // A socket given to watch (platform_wake_set): what arrives on it ends the wait.
-    if (platform_watches(e)) {
+    // A socket given to watch (PlatformWatch): what arrives on it ends the wait.
+    {
         NetListener l;
         NetSocket client, server;
         KV_CHECK(c, l.open(0) && net_connect_local(l.port, client));
@@ -71,7 +71,13 @@ void test_wait(kv::TestCtx& c) {
         }
         KV_CHECK(c, server.fd.is_open());
         int owner = 0;
-        KV_CHECK(c, platform_wake_set(e, &owner, &server.fd, 1));
+        {
+            PlatformWatch pw(e);
+            pw.add(l);
+            pw.add(server);
+            KV_CHECK(c, pw.count == 2 && pw.due == 0.0); // both watched, and no time asked for
+            platform_watch(e, &owner, pw);
+        }
         KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time); // nothing sent
         client.write_str("x");
         client.flush();
@@ -84,25 +90,73 @@ void test_wait(kv::TestCtx& c) {
         KV_CHECK(c, server.read(buf, sizeof buf) == 1);
         KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
         // Forgotten: what arrives wakes nothing.
-        KV_CHECK(c, platform_wake_set(e, &owner, nullptr, 0));
+        platform_unwatch(e, &owner);
         client.write_str("y");
         client.flush();
         KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
-        // A handle's kind travels with it. A file on a disk cannot be watched on any OS:
-        // it is refused by name (one error line), and the socket beside it is watched still.
+        // A handle's kind travels with it, and a watch takes each kind as this OS can.
         KHandle none;
         KHandle file = khandle_make(KHandleKind::File, 3);
+        KHandle pipe = khandle_make(KHandleKind::Pipe, 5);
         KV_CHECK(c, !none.is_open() && none.kind() == KHandleKind::None && none.os() == -1);
         KV_CHECK(c, file.is_open() && file.kind() == KHandleKind::File && file.os() == 3 && file != server.fd);
         KV_CHECK(c, !khandle_make(KHandleKind::Socket, -1).is_open());
-        KV_CHECK(c, server.fd.kind() == KHandleKind::Socket && platform_watches_kind(e, KHandleKind::Socket));
-        KV_CHECK(c, !platform_watches_kind(e, KHandleKind::File));
-        KHandle mixed[2] = {file, server.fd};
-        KV_CHECK(c, !platform_wake_set(e, &owner, mixed, 2));
+        KV_CHECK(c, server.fd.kind() == KHandleKind::Socket);
+        {
+            PlatformWatch pw(e);
+            pw.add(none);                                  // nothing: nothing asked
+            KV_CHECK(c, pw.count == 0 && pw.due == 0.0);
+            pw.add(file);                                  // a mistake on any OS: one error line, not watched
+            KV_CHECK(c, pw.count == 0 && pw.due == 0.0);
+            f64 before = time_now();
+            pw.add(pipe);                                  // watched (POSIX), or asked again soon (Windows): never both
+            KV_CHECK(c, (pw.count == 1) != (pw.due > 0.0));
+            KV_CHECK(c, pw.due == 0.0 || (pw.due >= before && pw.due <= time_now() + kPlatformSoon));
+            pw.at(100.0);
+            pw.at(50.0);
+            pw.at(75.0);
+            KV_CHECK(c, pw.due > 0.0 && pw.due <= 50.0);    // the earliest stands
+        }
+        // The socket beside what could not be watched is watched still.
+        {
+            PlatformWatch pw(e);
+            pw.add(file);
+            pw.add(server);
+            platform_watch(e, &owner, pw);
+        }
         client.write_str("z");
         client.flush();
         KV_CHECK(c, platform_wait(e, 5.0) == PlatformWoken::Wake);
-        KV_CHECK(c, platform_wake_set(e, &owner, nullptr, 0));
+        KV_CHECK(c, server.read(buf, sizeof buf) > 0);
+        // What is written and not yet sent is asked about soon: nothing readable would say.
+        server.write_str("queued");
+        {
+            PlatformWatch pw(e);
+            pw.add(server);
+            KV_CHECK(c, pw.count == 1 && pw.due > 0.0);
+        }
+        server.flush();
+        platform_unwatch(e, &owner);
+
+        // A queue's task wakes the loop as it finishes: no poll for it.
+        IoQueue q;
+        KV_CHECK(c, q.init(mem_general(), 16, IoBackend::Sync) && q.start_tasks(1));
+        {
+            PlatformWatch pw(e);
+            pw.add(q);
+            KV_CHECK(c, pw.count == 0 && pw.due == 0.0); // nothing queued for the pump: no time asked
+            platform_watch(e, &owner, pw);
+        }
+        IoTaskRequest tr;
+        tr.fn = [](void*, const IoTaskCtl&) -> i32 { time_sleep(0.02); return 0; };
+        Handle task = q.run_task(tr);
+        t0 = time_now();
+        KV_CHECK(c, !task.is_null() && platform_wait(e, 5.0) == PlatformWoken::Wake && time_now() - t0 < 2.0);
+        q.pump();
+        IoCompletion done;
+        KV_CHECK(c, q.take(task, &done) && done.status == IoStatus::Done);
+        q.free();
+        platform_unwatch(e, &owner);
         server.close();
         client.close();
         l.close();

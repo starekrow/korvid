@@ -174,6 +174,8 @@ struct IoMount {
 struct IoQueue {
     Pool<IoEntry>       entries;
     IoTasks*            tasks = nullptr; // start_tasks's workers; none until then
+    void              (*wake_fn)(void* user) = nullptr; // set_wake's
+    void*               wake_user = nullptr;
     u32                 tasks_pending = 0, tasks_done = 0, tasks_failed = 0;
     Array<IoMount>      mounts;    // searched last first
     Array<Handle>       queued;    // submitted, not yet performed or handed to the ring
@@ -237,6 +239,11 @@ struct IoQueue {
     // At most `limit` of the lane's tasks at once; 0: no limit but the workers. Any time:
     // a raised limit is taken up by the next worker free.
     void   set_lane(u32 lane, u32 limit);
+    // For a loop that waits: fn(user) is called, on a worker's thread, each time a task (or
+    // a stat on the workers) finishes, so the pump that collects it need not be polled for.
+    // Null clears it. A read queued or on the ring calls nothing: it is collected by the
+    // next pump, whenever that is. PlatformWatch::add(queue) sets this to wake its engine.
+    void   set_wake(void (*fn)(void* user), void* user);
     // Submits a task. Null handle without workers, with a bad lane, or a full queue.
     Handle run_task(const IoTaskRequest& req);
     // Cancels a request that has not completed yet; it completes as Cancelled.

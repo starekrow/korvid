@@ -258,7 +258,7 @@ inline void engine_want_frame_at(Engine& e, f64 when) { if (e.frame_due <= 0.0 |
 bool engine_add_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
 void engine_remove_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
 // A waker whose sources wake the loop themselves (KR26): its sockets stated to the platform
-// (platform_wake_set, with `user` as the owner), and any time it must be asked without one
+// (platform_watch, with `user` as the owner), and any time it must be asked without one
 // of them stirring given to engine_want_wake_at. An idle loop then waits for it as long as
 // for the window. A waker added with engine_add_waker makes every idle wait a 4 ms poll.
 bool engine_add_watched_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);

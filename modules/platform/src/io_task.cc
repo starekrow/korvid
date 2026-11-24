@@ -60,6 +60,8 @@ struct IoTasks {
     bool      stop;
     IoWorker* workers;
     u32       count;
+    void    (*wake)(void* user);              // IoQueue::set_wake's, called as each task finishes
+    void*     wake_user;
 };
 
 namespace {
@@ -112,6 +114,14 @@ void worker_main(void* arg) {
         finish(t, task);
         // A slot in that lane came free: a worker waiting on a full lane may go now.
         os_cond_signal(&t.work);
+        // Whoever waits for the completion (a loop asleep in platform_wait) is told, outside
+        // the lock: the pump it runs next takes this lock to collect what finished.
+        if (void (*wake)(void*) = t.wake) {
+            void* user = t.wake_user;
+            os_mutex_unlock(&t.lock);
+            wake(user);
+            os_mutex_lock(&t.lock);
+        }
     }
     os_mutex_unlock(&t.lock);
 }
@@ -142,6 +152,8 @@ bool IoQueue::start_tasks(u32 workers) {
     os_cond_init(&t->work);
     t->workers = (IoWorker*)mem_alloc(sizeof(IoWorker) * workers);
     for (u32 i = 0; i < workers; ++i) t->workers[i] = IoWorker{};
+    t->wake = wake_fn;
+    t->wake_user = wake_user;
     tasks = t;
     for (u32 i = 0; i < workers; ++i) {
         t->workers[i].owner = t;
@@ -153,6 +165,17 @@ bool IoQueue::start_tasks(u32 workers) {
     }
     if (!t->count) { io_tasks_stop(*this); return false; }
     return true;
+}
+
+void IoQueue::set_wake(void (*fn)(void* user), void* user) {
+    if (wake_fn == fn && wake_user == user) return;
+    wake_fn = fn;
+    wake_user = user;
+    if (!tasks) return;
+    os_mutex_lock(&tasks->lock);
+    tasks->wake = fn;
+    tasks->wake_user = user;
+    os_mutex_unlock(&tasks->lock);
 }
 
 void IoQueue::set_lane(u32 lane, u32 limit) {

@@ -20,11 +20,10 @@ No watch, or one that went away: it tries again every two seconds, and reads the
 again each time, so a watch started later (or restarted on another port) is found.
 
 **Heard at once.** The socket is read in the Input phase of every tick, and also from an
-engine waker that an idle frame loop asks each pass. Where the platform watches sockets
-(`platform_watches`) it is a watched one (`engine_add_watched_waker`): the
-connection is given to `platform_wake_set`, so a line from goldberg ends the loop's wait,
-and while there is no connection it asks to be woken for the next try
-(`engine_want_wake_at`). Elsewhere the loop polls for it every 4 ms. A save reaches an idle
+engine waker that an idle frame loop asks each pass. It is a watched one
+(`engine_add_watched_waker`): the connection is put in a `PlatformWatch`
+(`platform_watch`), so a line from goldberg ends the loop's wait, and while there is no
+connection the watch carries the time of the next try. A save reaches an idle
 tool's window at once, not at its next quarter-second heartbeat. Linux, dev build,
 `kromescreens` under `goldberg watch` (`tools/goldberg/tests/live_numbers.py`, 10 saves
 each), from the write to the screen built again: a screen's `.kim` 6.1 ms median, the

@@ -97,23 +97,60 @@ void platform_set_waiter(Engine& e, const PlatformWaiter* w);
 // What ended the waits so far: for a loop's last line, and a measurement.
 PlatformWaits platform_waits(Engine& e);
 
-// The sockets `owner` wants the loop woken by (KR26): a watched waker's (owner: the waker's
-// user, engine_add_watched_waker), the CLI's. The set replaces what the owner said before;
-// none (n 0) forgets it. The platform watches every owner's from one thread of its own,
-// blocked in poll (WSAPoll on Windows), started when the first socket is given, and calls
-// platform_wake when one can be read. A socket that woke it is watched again at the next
-// platform_wait (after the pass that should have read it), so one nobody drains does not
-// spin the thread. False where the platform cannot watch (platform_watches) or the sets
-// pass 64 sockets: the owner then asks to be woken soon (engine_want_wake_at), as a poll would.
-// A handle of a kind this OS cannot watch (platform_watches_kind: on Windows anything but a
-// socket, everywhere a file on a disk) is an error, logged with its kind: it is left out,
-// the rest are watched, and the answer is false.
-bool platform_wake_set(Engine& e, const void* owner, const KHandle* handles, u32 n);
-// Whether platform_wake_set watches here (every platform has the thread now). A waker
-// picks engine_add_watched_waker or engine_add_waker by it.
-bool platform_watches(Engine& e);
-// Whether a handle of this kind can be given to platform_wake_set here: a socket everywhere;
-// a pipe or a notify descriptor on POSIX only (Windows' watch is WSAPoll, which takes sockets).
-bool platform_watches_kind(Engine& e, KHandleKind kind);
+// ---- What a waiting loop is woken by ----------------------------------------------------
+// One way to say it, whatever the thing is and whatever the OS can do about it (KR26). An
+// owner (a module with a waker: engine_add_watched_waker, the owner its `user`) fills a
+// PlatformWatch with what it is waiting on each time its waker is asked, and hands it over:
+//
+//     PlatformWatch w(e);
+//     w.add(listener);  w.add(sock);  w.add(watcher);  w.add(child);  w.add(queue);
+//     w.at(next_retry);                      // and a time, if it has one
+//     platform_watch(e, &me, w);             // replaces what `me` said before
+//
+// and the loop sleeps until one of them has something. How each is watched is the
+// platform's business, not the owner's:
+//   a socket, a listener   the platform's watching thread (poll; WSAPoll on Windows)
+//   an FsWatcher           inotify's descriptor on that thread, or the OS's own call
+//                          (ReadDirectoryChangesW, FSEvents); a polled root, by its next walk
+//   a Process's pipes      that thread where a pipe can be polled (POSIX); elsewhere asked
+//                          again in kPlatformSoon seconds
+//   an IoQueue             its task workers wake the loop as each finishes; reads in
+//                          flight are asked for again soon (the pump collects them)
+//   a time                 engine_want_wake_at
+// What cannot be watched on an OS is asked again soon instead: the owner's code is the
+// same, and only how promptly it hears differs. The platform watches every owner's
+// handles from one thread, started when the first is given, at most 64 in all; past that,
+// soon. A handle that woke the loop is watched again at the next platform_wait (after
+// the pass that should have read it), so one nobody drains does not spin the thread.
+struct NetListener;
+struct NetSocket;
+struct FsWatcher;
+struct Process;
+constexpr f64 kPlatformSoon = 0.004; // how long "soon" is: one pass of a loop that polls
+
+struct PlatformWatch {
+    explicit PlatformWatch(Engine& e) : engine(&e) {}
+    void add(const NetListener& l);  // a connection waiting to be accepted
+    void add(const NetSocket& s);    // bytes to read; and soon, while what was written is still queued
+    void add(FsWatcher& w);          // news for its poll(): sets the watcher's wake, and takes its due()
+    void add(const Process& p);      // output to read on either pipe
+    void add(IoQueue& q);            // a completion to take: sets the queue's wake
+    // A handle of the owner's own. Watched where this OS can watch its kind; asked again
+    // soon where it cannot (a pipe on Windows). A file on a disk is always readable and
+    // wakes nothing anywhere: an error, logged.
+    void add(KHandle h);
+    void at(f64 when);               // no later than `when` (time_now's clock)
+    void soon();                     // no later than kPlatformSoon from now
+
+    Engine* engine;
+    KHandle handles[64];
+    u32     count = 0;
+    f64     due   = 0.0;             // the earliest time asked for; 0: none
+};
+// States what `owner` is waiting on, replacing what it said before. From the owner's
+// waker, on the loop's thread.
+void platform_watch(Engine& e, const void* owner, const PlatformWatch& w);
+// Forgets it: at the owner's shutdown, before what it watched is closed.
+void platform_unwatch(Engine& e, const void* owner);
 
 } // namespace kv

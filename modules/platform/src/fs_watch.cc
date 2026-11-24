@@ -213,6 +213,8 @@ struct FsWatchState {
 #if KV_FS_NATIVE
     FsNative*       n = nullptr;
     bool            wakes = false; // set_wake's fn is called by the native backend
+    void          (*wake_fn)(void*) = nullptr; // what set_wake was last given: the same again is no work
+    void*           wake_user = nullptr;
 #endif
     Array<FsPollRoot> roots;  // the polled roots, under either backend
     Array<u32>      native_roots; // the ids the native backend has
@@ -357,7 +359,7 @@ f64 FsWatcher::due() const {
     if (!state) return 0.0;
     f64 due = 0.0;
 #if KV_FS_NATIVE
-    if (state->native && fs_native_fd(state->n) < 0 && !state->wakes) due = time_now() + 0.004; // found only by asking
+    if (state->native && fs_native_fd(state->n) < 0 && !state->wakes) due = time_now() + kPlatformSoon; // found only by asking
 #endif
     for (const FsPollRoot& r : state->roots)
         if (due <= 0.0 || r.last_walk + r.interval < due) due = r.last_walk + r.interval;
@@ -368,6 +370,9 @@ bool FsWatcher::set_wake(void (*fn)(void* user), void* user) {
     if (!state) return false;
 #if KV_FS_NATIVE
     if (state->native) {
+        if (fn == state->wake_fn && user == state->wake_user) return state->wakes; // set already (a watch restated each pass)
+        state->wake_fn = fn;
+        state->wake_user = user;
         state->wakes = fs_native_set_wake(state->n, fn, user) && fn;
         return state->wakes;
     }

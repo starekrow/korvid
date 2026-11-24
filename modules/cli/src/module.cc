@@ -278,15 +278,14 @@ constinit const CliCommandDesc k_commands[] = {
 // The listener, the sessions and stdin, for an idle loop to wait on (KR26): what arrives
 // wakes it, and the tick after reads it here.
 void watch_sockets(Engine& e, CliState& cli) {
-    KHandle fds[kMaxSessions + 1];
-    u32 n = 0;
-    if (cli.listener.is_open()) fds[n++] = cli.listener.fd;
+    PlatformWatch w(e);
+    w.add(cli.listener);
     for (u32 i = 0; i < cli.session_count; ++i) {
         const Session& s = cli.sessions[i];
-        if (s.is_stdin) { if (!s.stdin_eof && os_stdin_fd().is_open() && n < KV_COUNTOF(fds)) fds[n++] = os_stdin_fd(); }
-        else if (s.sock.is_open() && n < KV_COUNTOF(fds)) fds[n++] = s.sock.fd;
+        if (s.is_stdin) { if (!s.stdin_eof) w.add(os_stdin_fd()); }
+        else w.add(s.sock.fd); // what it reads; what it writes is flushed by the tick, not waited for
     }
-    platform_wake_set(e, &cli, fds, n);
+    platform_watch(e, &cli, w);
 }
 
 bool cli_startup(Engine& e, ModuleInstance& self) {
@@ -319,7 +318,7 @@ bool cli_startup(Engine& e, ModuleInstance& self) {
 void cli_shutdown(Engine& e, ModuleInstance& self) {
     CliState* s = self.state_as<CliState>();
     if (!s) return;
-    platform_wake_set(e, s, nullptr, 0);
+    platform_unwatch(e, s);
     for (Session& sess : s->sessions) { sess.sock.flush(); sess.sock.close(); sess.sock.out.free(); }
     s->listener.close();
     KV_INFO("cli", "%llu requests, %llu failed, %llu lines dropped", (unsigned long long)s->requests,

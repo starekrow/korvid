@@ -83,15 +83,30 @@ called from any thread, not a signal handler, and a wake that arrives before the
 begins ends it at once. A frame loop with nothing to do waits here between passes
 (`frameloop`); `platform_waits(e)` counts what ended them.
 
-**Sockets that wake it.** `platform_wake_set(e, owner, fds, n)` states the sockets an owner
-wants the loop woken by, replacing what it said before (`n` 0 forgets them): a watched
-waker's (`engine_add_watched_waker`, the owner its `user`), the CLI's listener and
-sessions. One thread of the platform's, started at the first socket and blocked in
-`poll` (`WSAPoll` on Windows), calls `platform_wake` when one can be read, and leaves it
-out till the next `platform_wait`, by when the pass it woke has read it: a socket nobody
-drains wakes each wait, not the thread for ever. 64 sockets in all. `platform_watches(e)`
-says whether the platform has the thread (every one does now); where it does not, a waker
-registers with `engine_add_waker`, and the loop polls for it.
+**What wakes it.** One way to say it, whatever the thing is. An owner (a module with a
+waker: `engine_add_watched_waker`, the owner its `user`) fills a `PlatformWatch` each time
+its waker is asked and hands it over, replacing what it said before:
+
+```cpp
+PlatformWatch w(e);
+w.add(listener);  w.add(sock);  w.add(watcher);  w.add(child);  w.add(queue);
+w.at(next_retry);
+platform_watch(e, &me, w);        // platform_unwatch(e, &me) at shutdown
+```
+
+How each is heard is the platform's business. A socket or a listener goes to one thread
+of the platform's, started at the first handle and blocked in `poll` (`WSAPoll` on
+Windows), which calls `platform_wake` when one can be read and leaves it out till the next
+`platform_wait`, by when the pass it woke has read it: a socket nobody drains wakes each
+wait, not the thread for ever. An `FsWatcher` gives that thread inotify's descriptor, or
+has the OS call (`ReadDirectoryChangesW`, FSEvents), and a polled root gives the time of
+its next walk. A `Process`'s pipes go to the thread where a pipe can be polled (POSIX). An
+`IoQueue`'s task workers wake the loop as each task finishes. A socket with output still
+queued, a read on the ring, and whatever this OS cannot watch (a pipe on Windows, whose
+watch takes sockets only) are asked about again in `kPlatformSoon` (4 ms) instead: the
+owner's code is the same on every OS, and only how promptly it hears differs. 64 handles
+in all; past that, soon. A handle is a `KHandle`, which carries its kind, so the wrong one
+cannot be watched by mistake: a file's is refused with an error line.
 
 ## Using it
 
@@ -254,8 +269,7 @@ Header `korvid/platform/module.h`:
 | `platform_wake(engine)` | function | ends the wait under way or the next; any thread |
 | `platform_set_waiter(engine, w)`, `PlatformWaiter` | function, record | the window's `wait(user, seconds)` (1 early, 0 the time, -1 cannot now) and `wake(user)`; null clears |
 | `platform_waits(engine)`, `PlatformWaits` | function, record | `waits`, and of them ended by the `window`, `woken`, `timed` |
-| `platform_wake_set(engine, owner, fds, n)` | function | the owner's sockets (`KHandle`s) that wake a waiting loop, replacing what it said; false where not watched, past 64, or for a kind this OS cannot watch (logged) |
-| `platform_watches(engine)`, `platform_watches_kind(engine, kind)` | functions | whether `platform_wake_set` watches here, and whether it takes that kind of handle (a pipe: POSIX only) |
+| `PlatformWatch`, `platform_watch(engine, owner, w)`, `platform_unwatch(engine, owner)` | record, functions | what an owner's waiting loop is woken by: `add` a listener, a socket, an `FsWatcher`, a `Process`, an `IoQueue` or a `KHandle`, `at(when)`, `soon()`; replaces what the owner said; what this OS cannot watch is asked again in `kPlatformSoon` |
 
 What the module registers with the engine:
 

@@ -124,10 +124,10 @@ bool live_poll(LiveState& s) {
 // read would see).
 void live_watch(LiveState& s) {
     if (!s.watched) return;
-    KHandle fd = s.sock.is_open() ? s.sock.fd : KHandle{};
-    if (!platform_wake_set(*s.e, &s, &fd, fd.is_open() ? 1 : 0)) engine_want_wake_at(*s.e, time_now() + 0.004);
-    if (!s.sock.is_open()) engine_want_wake_at(*s.e, s.next_try);
-    else if (s.sock.out.len) engine_want_wake_at(*s.e, time_now() + 0.004);
+    PlatformWatch w(*s.e);
+    w.add(s.sock);
+    if (!s.sock.is_open()) w.at(s.next_try);
+    platform_watch(*s.e, &s, w);
 }
 
 bool live_wake(Engine&, void* user) {
@@ -163,12 +163,7 @@ bool live_startup(Engine& e, ModuleInstance& self) {
         format(s->name, sizeof s->name, "%s", slash ? slash + 1 : s->tree);
     }
 #endif
-    if (!s->off) {
-        // Watched where the platform can watch its socket; else asked at every poll.
-        s->watched = platform_watches(e);
-        if (s->watched) engine_add_watched_waker(e, live_wake, s);
-        else engine_add_waker(e, live_wake, s);
-    }
+    if (!s->off) { s->watched = true; engine_add_watched_waker(e, live_wake, s); } // what wakes it: live_watch
     return true;
 }
 
@@ -176,7 +171,7 @@ void live_shutdown(Engine& e, ModuleInstance& self) {
     LiveState* s = self.state_as<LiveState>();
     if (!s) return;
     engine_remove_waker(e, live_wake, s);
-    if (s->watched) platform_wake_set(e, s, nullptr, 0);
+    if (s->watched) platform_unwatch(e, s);
     if (s->sock.fd.is_open()) s->sock.close();
     s->sock.out.free();
 }

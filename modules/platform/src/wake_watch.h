@@ -8,6 +8,18 @@ namespace kv {
 // What the watching thread calls when a socket can be read: platform_wake, given the state.
 void platform_wake_state(PlatformState& s);
 
+// Under PlatformWatch (watch.cc): the handles `owner` wants the loop woken by, replacing
+// what it said before; none (n 0) forgets it. The platform watches every owner's from one
+// thread of its own, blocked in poll (WSAPoll on Windows), started when the first handle
+// is given, and calls platform_wake when one can be read. False where the sets pass 64
+// handles or the thread cannot be had. A handle of a kind this OS cannot watch
+// (platform_watches_kind) is an error, logged with its kind: left out, the rest watched,
+// and the answer false. PlatformWatch::add asks first, so it never gives one.
+bool platform_wake_set(Engine& e, const void* owner, const KHandle* handles, u32 n);
+// Whether a handle of this kind can be watched here: a socket everywhere; a pipe or a
+// notify descriptor on POSIX only (Windows' watch is WSAPoll, which takes sockets).
+bool platform_watches_kind(Engine& e, KHandleKind kind);
+
 bool       wake_watch_supported();
 // Whether a handle of this kind can be watched here: wake_watch_set is given only those.
 bool       wake_watch_takes(KHandleKind k);

@@ -196,7 +196,6 @@ const char* khandle_kind_name(KHandleKind k) {
     return "?";
 }
 
-bool platform_watches(Engine&) { return wake_watch_supported(); }
 bool platform_watches_kind(Engine&, KHandleKind kind) { return wake_watch_supported() && wake_watch_takes(kind); }
 
 bool platform_wake_set(Engine& e, const void* owner, const KHandle* handles, u32 n) {
