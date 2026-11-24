@@ -767,3 +767,12 @@ hook sees four notes in emission order and two blobs with every byte, each named
 its table, its emitter and `sim`; after `engine_set_event_hook(e, nullptr, ...)` it sees
 nothing. In ship the call is refused and nothing arrives. Checked on linux-dev,
 linux-debug and linux-ship.
+
+**Verification of milestones 11 to 14, Nov 23, 2026.** `kormake test` passes on
+linux-debug, linux-dev and linux-ship. `kormake test platform` and `kormake test core`
+pass under `address,undefined` and under `thread`. `tools/kormake/tests/run.sh` passes, and
+`tools/doccheck.sh` reports what it did before. arcfire's and arcanum's demo hashes are
+still `93d0e91`'s, tick for tick (14,154 and 1,865), at the default rate and at
+`--rate 4`. That was at 8d0e382, before the macOS catch-up after it, which checks KR15 and
+KR16 on macos-dev (milestones 11 and 12 say how). Not done: Windows and iOS, where they are
+written and not compiled.
