@@ -27,12 +27,12 @@ void test_net(kv::TestCtx& c) {
     {   // A port already listened on: refused, with the reason (and a log line).
         NetListener second;
         i32 err = 0;
-        KV_CHECK(c, !second.open(l.port, true, &err) && err == EADDRINUSE && !second.is_open());
+        KV_CHECK(c, !second.open(l.port, NetScope::Loopback, &err) && err == EADDRINUSE && !second.is_open());
     }
     KV_CHECK(c, !l.accept().is_open());                       // nobody yet, and no blocking
 
     NetSocket client;
-    KV_CHECK(c, net_connect_local(l.port, client));
+    KV_CHECK(c, net_connect_local(l.port, &client));
     KHandle fd;
     for (u32 i = 0; i < 2000 && !fd.is_open(); ++i) { fd = l.accept(); if (!fd.is_open()) time_sleep(0.001); }
     KV_CHECK(c, fd.is_open() && fd.kind() == KHandleKind::Socket);

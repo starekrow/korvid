@@ -1,5 +1,5 @@
 // Korvid platform: the module's state. The module's own: everything in it is reached
-// through a function in module.h or io.h (platform_io, platform_base_path, platform_wait).
+// through a function in module.h or io.h (platform_io, platform_base_dir, platform_wait).
 #pragma once
 #include "korvid/platform/module.h"
 

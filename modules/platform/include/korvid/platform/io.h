@@ -74,7 +74,17 @@ struct IoBytes {
 // st_dev on POSIX, the volume serial number on Windows. 0 where it was not asked:
 // io_list_files_stat's walk, and io_list_dir without IoListSizes.
 // mtime_ns is nanoseconds from the OS's epoch: for comparing with another, nothing else.
-struct IoStat { bool is_file = false, is_dir = false; u64 size = 0; i64 mtime_ns = 0; u64 volume = 0; };
+// `kind` is what is there: nothing, a file, a directory, or something else (a device, a
+// socket), which is neither is_file() nor is_dir().
+enum class IoKind : u8 { None, File, Dir, Other };
+struct IoStat {
+    IoKind kind     = IoKind::None;
+    u64    size     = 0;
+    i64    mtime_ns = 0;
+    u64    volume   = 0;
+    bool is_file() const { return kind == IoKind::File; }
+    bool is_dir() const { return kind == IoKind::Dir; }
+};
 
 // A whole-file write: the bytes are copied at submission, so the caller's buffer is free
 // to go at once. The file is created or truncated. The completion carries no data.
@@ -368,38 +378,5 @@ bool io_is_dir(const char* path);
 
 // The platform module's queue, or null if the module is not started.
 IoQueue* platform_io(Engine& e);
-// Directory of the running executable, with a trailing separator. Assets live beneath it.
-const char* platform_base_path(Engine& e);
-// The same, asked of the OS directly, for code with no engine (a test). False if the OS
-// will not say.
-bool        platform_exe_dir(char* out, u32 cap);
-// Where this program's loose assets are, with no trailing separator: the output tree
-// goldberg cooked for it, named by <exe>.assets beside the executable (one line, which
-// kormake writes), or assets/ beside the executable when there is no such file (a
-// packaged program). Without an engine: for tools, and tests that read a file directly.
-// False if neither is a directory.
-bool        platform_assets_dir(char* out, u32 cap);
-// The per-user directory for saves and settings, created if need be, with a trailing
-// separator: $XDG_DATA_HOME/<org>/<app>/, or ~/.local/share/<org>/<app>/, on Linux;
-// ~/Library/Application Support/<org>/<app>/ on macOS (where SDL puts it on each). The first
-// call fixes the names for the process; "" if the OS has none. platform_user_dir's Data.
-const char* platform_pref_path(Engine& e, const char* org, const char* app);
-
-// The three places a program keeps what is its user's (KR24), each under <org>/<app>/,
-// created if need be, with a trailing separator; "" if the OS has none.
-//   Settings: what the user chose (a session, the face, per-device choices).
-//   Data:     what the user made and must not lose (platform_pref_path).
-//   Cache:    what is rebuilt if it goes (an index), which backups leave out.
-//            Settings                 Data                            Cache
-//   Linux    $XDG_CONFIG_HOME         $XDG_DATA_HOME                  $XDG_CACHE_HOME
-//            (~/.config)              (~/.local/share)                (~/.cache)
-//   Windows  %APPDATA%                %APPDATA%                       %LOCALAPPDATA%\<org>\<app>\cache
-//   Apple    Library/Application Support (macOS and iOS: Preferences    Library/Caches
-//            is cfprefsd's, for the defaults system's plists only)
-//   Android  the app's files dir      the app's files dir             the app's cache dir
-// Where Settings and Data are one directory, the two kinds share it. The first call fixes
-// the names for the process.
-enum class UserDir : u8 { Settings, Data, Cache };
-const char* platform_user_dir(Engine& e, UserDir which, const char* org, const char* app);
 
 } // namespace kv

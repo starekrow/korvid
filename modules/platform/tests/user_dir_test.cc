@@ -42,7 +42,7 @@ void test_user_dirs(kv::TestCtx& c) {
         KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Settings, "Org", "App"), want) && io_is_dir(want));
         format(want, sizeof want, "%s/data/Org/App/", root);
         KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Data, "Org", "App"), want) && io_is_dir(want));
-        KV_CHECK(c, !strcmp(platform_pref_path(e, "Org", "App"), want)); // the data directory
+        KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Data, "Org", "App"), want)); // the data directory
         format(want, sizeof want, "%s/cache/Org/App/", root);
         KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Cache, "Org", "App"), want) && io_is_dir(want));
         engine_shutdown(e);
@@ -79,7 +79,7 @@ void test_user_dirs(kv::TestCtx& c) {
         format(want, sizeof want, "%s/Library/Application Support/Org/App/", root);
         KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Settings, "Org", "App"), want) && io_is_dir(want));
         KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Data, "Org", "App"), want));
-        KV_CHECK(c, !strcmp(platform_pref_path(e, "Org", "App"), want)); // the data directory
+        KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Data, "Org", "App"), want)); // the data directory
         format(want, sizeof want, "%s/Library/Caches/Org/App/", root);
         KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Cache, "Org", "App"), want) && io_is_dir(want));
         engine_shutdown(e);
@@ -106,7 +106,7 @@ void test_user_dirs(kv::TestCtx& c) {
         format(want, sizeof want, "%s/%s/App/", roaming, org);
         KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Settings, org, "App"), want) && io_is_dir(want));
         KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Data, org, "App"), want));
-        KV_CHECK(c, !strcmp(platform_pref_path(e, org, "App"), want)); // the data directory
+        KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Data, org, "App"), want)); // the data directory
         format(want, sizeof want, "%s/%s/App/cache/", local, org);
         KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Cache, org, "App"), want) && io_is_dir(want));
         engine_shutdown(e);

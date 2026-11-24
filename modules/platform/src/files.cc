@@ -84,11 +84,7 @@ bool io_stat_file(const char* path, IoStat* out, i32* err) {
     OsStat st;
     *out = IoStat{};
     if (!os_path_stat(path, &st, err)) return false;
-    out->is_file  = st.kind == OsPathKind::File;
-    out->is_dir   = st.kind == OsPathKind::Dir;
-    out->size     = st.size;
-    out->mtime_ns = st.mtime_ns;
-    out->volume   = st.volume;
+    *out = st;
     return true;
 }
 

@@ -379,7 +379,7 @@ void test_io_make_dirs_deep(kv::TestCtx& c) {
     KV_CHECK(c, io_make_dirs(deep));
     KV_CHECK(c, io_make_dirs(deep)); // already there
     IoStat st;
-    KV_CHECK(c, io_stat_file(deep, &st) && st.is_dir);
+    KV_CHECK(c, io_stat_file(deep, &st) && st.is_dir());
     format(deep + n, sizeof deep - n, "/x.txt");
     KV_CHECK(c, io_write_file(deep, "x", 1));
     KV_CHECK(c, !io_make_dirs(deep)); // a file is not a directory
@@ -506,17 +506,17 @@ void test_io_long_ranged_stat(kv::TestCtx& c) {
         KV_CHECK(c, q.cancel(g5));
         KV_CHECK(c, wait_for(q, stats) == stats && q.pending() == 0);
         IoStat want;
-        KV_CHECK(c, io_stat_file(big, &want) && want.is_file && want.size == kBig);
+        KV_CHECK(c, io_stat_file(big, &want) && want.is_file() && want.size == kBig);
         const IoCompletion* t1 = by_user(q, 20);
         const IoCompletion* t2 = by_user(q, 21);
         const IoCompletion* t3 = by_user(q, 22);
         const IoCompletion* t4 = by_user(q, 23);
         const IoCompletion* t5 = by_user(q, 24);
-        KV_CHECK(c, t1 && t1->status == IoStatus::Done && t1->bytes.data == nullptr && t1->stat.is_file && !t1->stat.is_dir &&
+        KV_CHECK(c, t1 && t1->status == IoStatus::Done && t1->bytes.data == nullptr && t1->stat.is_file() && !t1->stat.is_dir() &&
                     t1->stat.size == kBig && t1->stat.mtime_ns == want.mtime_ns);
-        KV_CHECK(c, t2 && t2->status == IoStatus::Done && t2->stat.is_dir && !t2->stat.is_file);
-        KV_CHECK(c, t3 && t3->status == IoStatus::Done && !t3->stat.is_file && !t3->stat.is_dir && t3->stat.size == 0);
-        KV_CHECK(c, t4 && t4->status == IoStatus::Done && t4->stat.is_file && t4->stat.size == plen);
+        KV_CHECK(c, t2 && t2->status == IoStatus::Done && t2->stat.is_dir() && !t2->stat.is_file());
+        KV_CHECK(c, t3 && t3->status == IoStatus::Done && !t3->stat.is_file() && !t3->stat.is_dir() && t3->stat.size == 0);
+        KV_CHECK(c, t4 && t4->status == IoStatus::Done && t4->stat.is_file() && t4->stat.size == plen);
         KV_CHECK(c, t5 && t5->status == IoStatus::Cancelled);
         // The volume: io_stat_file's, the same for a file and the directories above it, 0 for nothing.
         KV_CHECK(c, want.volume != 0 && t1 && t1->stat.volume == want.volume);
@@ -526,7 +526,7 @@ void test_io_long_ranged_stat(kv::TestCtx& c) {
             IoStat mp, parent;
             KV_CHECK(c, io_stat_file(mount_point, &mp) && io_stat_file("/", &parent) && mp.volume != parent.volume);
             const IoCompletion* t7 = by_user(q, 25);
-            KV_CHECK(c, t7 && t7->status == IoStatus::Done && t7->stat.is_dir && t7->stat.volume == mp.volume);
+            KV_CHECK(c, t7 && t7->status == IoStatus::Done && t7->stat.is_dir() && t7->stat.volume == mp.volume);
             q.reap(g7);
         }
         KV_CHECK(c, q.stats_done == stats - 1 && q.stats_failed == 0);
@@ -573,7 +573,7 @@ void test_io_errors(kv::TestCtx& c) {
     KV_CHECK(c, io_write_file(path, "x", 1, &err) && err == 0);
 
     IoStat st;
-    KV_CHECK(c, io_stat_file(path, &st, &err) && err == 0 && st.is_file);
+    KV_CHECK(c, io_stat_file(path, &st, &err) && err == 0 && st.is_file());
     KV_CHECK(c, !io_stat_file(missing, &st, &err) && (err == ENOENT || err == ENOTDIR));
     err = 0;
     KV_CHECK(c, !io_rename(missing, path, &err) && err == ENOENT);

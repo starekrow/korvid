@@ -565,7 +565,7 @@ bool list_one(void* user, const char* relative) {
 }
 
 void proc_free(Proc* pr) {
-    pr->p.free();
+    pr->p.close();
     pr->words.free();
     pr->err.free();
     pr->before.free();
@@ -1194,13 +1194,13 @@ int host_watch_sync(lua_State* L) {
 int host_watch(lua_State* L) {
     GoldbergState& s = *state_of(L);
     const char* mode = luaL_optstring(L, 1, "auto");
-    s.watcher.free();
+    s.watcher.close();
     for (Root& r : s.roots) r.watch = ~0u;
     if (strcmp(mode, "none") == 0) { lua_pushstring(L, "none"); return 1; }
     FsWatchBackend b = strcmp(mode, "poll") == 0 ? FsWatchBackend::Poll : strcmp(mode, "auto") == 0 ? FsWatchBackend::Auto : FsWatchBackend::Native;
-    if (!s.watcher.init(b)) return luaL_error(L, "--watch %s: this platform has no such watcher", mode);
+    if (!s.watcher.open(b)) return luaL_error(L, "--watch %s: this platform has no such watcher", mode);
     if (b == FsWatchBackend::Native && strcmp(mode, "native") != 0 && strcmp(mode, s.watcher.backend_name()) != 0) {
-        s.watcher.free();
+        s.watcher.close();
         return luaL_error(L, "--watch %s: this platform has no such watcher", mode);
     }
     for (Root& r : s.roots) if (r.watched) r.watch = s.watcher.add_root(r.dir); // a root that is not there yet is simply not watched
@@ -1464,7 +1464,7 @@ int host_listen(lua_State* L) {
     GoldbergState& s = *state_of(L);
     u16 want = (u16)luaL_optinteger(L, 1, 0);
     if (!s.out_dir[0]) return 0;
-    if (!s.listener.is_open() && !s.listener.open(want, true)) return 0;
+    if (!s.listener.is_open() && !s.listener.open(want)) return 0;
     format(s.port_file, sizeof s.port_file, "%s/.goldberg-port", s.out_dir);
     char text[16];
     int n = format(text, sizeof text, "%u\n", (u32)s.listener.port);
@@ -1982,7 +1982,7 @@ void goldberg_shutdown(Engine& e, ModuleInstance& self) {
     s->live.free();
     close_programs(*s);
     if (s->L) lua_close(s->L);
-    s->watcher.free();
+    s->watcher.close();
     goldberg_unlock(s->lock);
     s->holds.free();
     s->held.free();
@@ -2061,7 +2061,7 @@ void stop_own_ui(GoldbergState& s) {
     if (!s.ui_child_on) return;
     drain_ui_child(s);
     s.ui_child.kill();
-    s.ui_child.free();
+    s.ui_child.close();
     s.ui_child_on = false;
     char port[700];
     format(port, sizeof port, "%s/.goldberg-port", s.ui_tree);

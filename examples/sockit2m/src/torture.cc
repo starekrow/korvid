@@ -154,7 +154,7 @@ bool SockJob::begin(u32 conns, bool line_mode, f64 seconds, Allocator* a) {
         clients[i] = Client{};
         clients[i].sock.out.alloc = alloc;
         clients[i].sock.out_limit = kOutLimit;
-        if (!net_connect_local(listener.port, clients[i].sock)) return false;
+        if (!net_connect_local(listener.port, &clients[i].sock)) return false;
     }
     // Accept them all before the clock starts.
     f64 deadline = time_now() + 2.0;

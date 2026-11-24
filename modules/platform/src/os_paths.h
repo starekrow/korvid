@@ -1,6 +1,7 @@
 // Korvid platform: the directories the OS gives a process, one source per OS.
 #pragma once
 #include "korvid/core/types.h"
+#include "korvid/platform/paths.h"
 
 namespace kv {
 

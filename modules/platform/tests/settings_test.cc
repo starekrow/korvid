@@ -5,6 +5,7 @@
 // leaving the old value; two writing at once, neither losing the other's key.
 #include "korvid/platform/settings.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/paths.h"
 #include "korvid/platform/process.h"
 #include "korvid/core/format.h"
 #include "korvid/core/test.h"
@@ -160,7 +161,7 @@ void test_settings(TestCtx& c) {
             KV_CHECK(c, there && p.running());
             p.kill();
             finish(p, 5.0);
-            p.free();
+            p.close();
             KV_CHECK(c, number_in(dir, "volume") == 0.1);
         }
 #endif
@@ -168,7 +169,7 @@ void test_settings(TestCtx& c) {
         {
             Process p;
             KV_CHECK(c, start_child(p, dir, "volume", "0.9", "1", nullptr) && finish(p, 10.0));
-            p.free();
+            p.close();
             KV_CHECK(c, number_in(dir, "volume") == 0.9);
         }
         // Two at once, each setting its own key forty times: both keys, at their last values.
@@ -176,8 +177,8 @@ void test_settings(TestCtx& c) {
             Process a, b;
             KV_CHECK(c, start_child(a, dir, "left", "0", "40", nullptr) && start_child(b, dir, "right", "0", "40", nullptr));
             KV_CHECK(c, finish(a, 30.0) && finish(b, 30.0));
-            a.free();
-            b.free();
+            a.close();
+            b.close();
             KV_CHECK(c, number_in(dir, "left") == 40.0 && number_in(dir, "right") == 40.0 && number_in(dir, "volume") == 0.9);
         }
     }

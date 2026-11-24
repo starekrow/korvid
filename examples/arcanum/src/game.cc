@@ -27,6 +27,7 @@
 #include "korvid/level/level.h"
 #include "korvid/math/fields.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/paths.h"
 #include "korvid/platform_hid/actions.h"
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/module.h"
@@ -1240,7 +1241,7 @@ bool arcanum_startup(Engine& e, ModuleInstance& self) {
     g->credits = asset_load_blob(e, "arcanum/credits.json");
     // The save, in the per-user directory; the demo keeps its own so a scripted run never
     // overwrites a player's game.
-    const char* pref = platform_pref_path(e, "korvid", "arcanum");
+    const char* pref = platform_user_dir(e, UserDir::Data, "korvid", "arcanum");
     if (pref[0]) format(g->save_path, sizeof g->save_path, "%ssave%s.json", pref, g->demo ? "-demo" : "");
     KTable* players = engine_ktable(e, "arcanum.player");
     Actor pa{};

@@ -71,7 +71,7 @@ int run_words(const char* const* words, u32 n) {
     g_out.push(0);
     g_err.push(0);
     int code = p.exited ? p.code : -102;
-    p.free();
+    p.close();
     return code;
 }
 template <class... A>

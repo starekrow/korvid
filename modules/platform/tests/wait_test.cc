@@ -64,7 +64,7 @@ void test_wait(kv::TestCtx& c) {
     {
         NetListener l;
         NetSocket client, server;
-        KV_CHECK(c, l.open(0) && net_connect_local(l.port, client));
+        KV_CHECK(c, l.open(0) && net_connect_local(l.port, &client));
         for (u32 i = 0; i < 200 && !server.fd.is_open(); ++i) {
             KHandle fd = l.accept();
             if (fd.is_open()) server.adopt(fd); else time_sleep(0.005);

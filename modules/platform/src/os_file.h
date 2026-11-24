@@ -26,7 +26,8 @@ KHandle os_file_lock(const char* path, i32* err);
 // on Windows, whose MoveFileEx is asked to write through).
 void   os_dir_sync(const char* dir);
 
-enum class OsPathKind : u8 { None, File, Dir, Other };
+// The public record is the OS layer's too: one stat, one kind.
+using OsPathKind = IoKind;
 // What a path names, following links.
 OsPathKind os_path_kind(const char* path);
 // Whether path is itself a symbolic link (a junction too, on Windows) that reaches a
@@ -36,7 +37,7 @@ bool os_path_is_dir_link(const char* path);
 // epoch: only ever compared with another) and the volume it is on (IoStat::volume),
 // following links. False if nothing is there, or it cannot be asked, with *err (if given)
 // saying which: ENOENT or ENOTDIR for nothing. os_dir_each_stat's volume is 0 on Windows.
-struct OsStat { OsPathKind kind = OsPathKind::None; u64 size = 0; i64 mtime_ns = 0; u64 volume = 0; };
+using OsStat = IoStat;
 bool os_path_stat(const char* path, OsStat* out, i32* err = nullptr);
 // Whether the file system under path may change without this machine hearing of it (a
 // share, a FUSE mount): io_path_is_remote. False if it cannot be asked.

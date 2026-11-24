@@ -67,7 +67,7 @@ void run(TestCtx& c, FsWatchBackend backend, const char* expect_name) {
     KV_CHECK(c, io_make_dirs(path) && write_text(dir, "a.png", "a") && write_text(dir, "ships/big.png", "big"));
 
     FsWatcher w;
-    KV_CHECK(c, w.init(backend, 0.01) && w.is_open() && strcmp(w.backend_name(), expect_name) == 0);
+    KV_CHECK(c, w.open(backend, 0.01) && w.is_open() && strcmp(w.backend_name(), expect_name) == 0);
     u32 root = w.add_root(dir);
     KV_CHECK(c, root != ~0u && w.add_root("/no/such/directory/anywhere") == ~0u);
 
@@ -165,7 +165,7 @@ void run(TestCtx& c, FsWatchBackend backend, const char* expect_name) {
     KV_CHECK(c, right_root);
 
     h.free();
-    w.free();
+    w.close();
     KV_CHECK(c, !w.is_open() && w.poll().len == 0);
     io_remove_tree(dir);
     io_remove_tree(elsewhere);
@@ -184,21 +184,21 @@ void run_shares(TestCtx& c) {
     if (io_is_dir(portal)) {
         KV_CHECK(c, io_path_is_remote(portal));
         FsWatcher w;
-        KV_CHECK(c, w.init(FsWatchBackend::Auto, 0.25, 60.0));
+        KV_CHECK(c, w.open(FsWatchBackend::Auto, 0.25, 60.0));
         u32 id = w.add_root(portal);
         if (id != ~0u) KV_CHECK(c, w.root_backend(id) == FsWatchBackend::Poll);
         FsWatcher p; // a watcher made with Native insists: no polling by itself
-        if (fs_watch_has_native() && p.init(FsWatchBackend::Native)) {
+        if (fs_watch_has_native() && p.open(FsWatchBackend::Native)) {
             u32 pid = p.add_root(portal);
             if (pid != ~0u) KV_CHECK(c, p.root_backend(pid) == FsWatchBackend::Native);
         }
-        p.free();
-        w.free();
+        p.close();
+        w.close();
     }
 #endif
     // A root polled by name beside one watched natively: both report, each by its own means.
     FsWatcher w;
-    KV_CHECK(c, w.init(FsWatchBackend::Auto, 0.01));
+    KV_CHECK(c, w.open(FsWatchBackend::Auto, 0.01));
     u32 polled = w.add_root(dir, FsWatchBackend::Poll);
     u32 native = w.add_root(other);
     KV_CHECK(c, polled != ~0u && native != ~0u && polled != native);
@@ -219,7 +219,7 @@ void run_shares(TestCtx& c) {
     drain(w, h);
     KV_CHECK(c, !h.has("added late.flac"));
     h.free();
-    w.free();
+    w.close();
     io_remove_tree(dir);
     io_remove_tree(other);
 }
@@ -244,7 +244,7 @@ void run_links(TestCtx& c, FsWatchBackend backend) {
     KV_CHECK(c, symlink(target, path) == 0);
 
     FsWatcher w;
-    KV_CHECK(c, w.init(backend, 0.01));
+    KV_CHECK(c, w.open(backend, 0.01));
     KV_CHECK(c, w.add_root(dir) != ~0u);
     Heard h;
     drain(w, h);
@@ -257,7 +257,7 @@ void run_links(TestCtx& c, FsWatchBackend backend) {
     KV_CHECK(c, !h.mentions("loop") && !h.mentions("out") && !h.mentions("far.flac"));
     KV_CHECK(c, h.find("added growing.flac") >= 0 && !h.mentions("/growing.flac"));
     h.free();
-    w.free();
+    w.close();
     io_remove_tree(dir);
     io_remove_tree(outside);
 }
@@ -278,7 +278,7 @@ void run_wake(TestCtx& c) {
     char dir[256];
     KV_CHECK(c, io_make_temp_dir("kv-fswatch-wake", dir, sizeof dir));
     FsWatcher w;
-    KV_CHECK(c, w.init(FsWatchBackend::Native) && w.add_root(dir) != ~0u);
+    KV_CHECK(c, w.open(FsWatchBackend::Native) && w.add_root(dir) != ~0u);
     {
         char gone[300];
         format(gone, sizeof gone, "%s/not-here", dir);
@@ -311,7 +311,7 @@ void run_wake(TestCtx& c) {
         KV_CHECK(c, atomic_load(&calls, MO_ACQUIRE) == had); // cleared: never called
         h.free();
     }
-    w.free();
+    w.close();
     io_remove_tree(dir);
 }
 
@@ -324,16 +324,16 @@ void test_fs_watch(kv::TestCtx& c) {
     FsWatcher w;
     if (fs_watch_has_native()) {
         c.begin("fs_watch native");
-        KV_CHECK(c, w.init(FsWatchBackend::Auto) && strcmp(w.backend_name(), "poll") != 0);
+        KV_CHECK(c, w.open(FsWatchBackend::Auto) && strcmp(w.backend_name(), "poll") != 0);
         char name[32];
         format(name, sizeof name, "%s", w.backend_name());
-        w.free();
+        w.close();
         run(c, FsWatchBackend::Native, name);
         c.begin("fs_watch wake");
         run_wake(c);
     } else {
-        KV_CHECK(c, !w.init(FsWatchBackend::Native) && w.init(FsWatchBackend::Auto) && strcmp(w.backend_name(), "poll") == 0);
-        w.free();
+        KV_CHECK(c, !w.open(FsWatchBackend::Native) && w.open(FsWatchBackend::Auto) && strcmp(w.backend_name(), "poll") == 0);
+        w.close();
     }
     c.begin("fs_watch shares");
     run_shares(c);

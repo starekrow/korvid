@@ -13,6 +13,7 @@
 #include "korvid/core/json.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/paths.h"
 #include "korvid/save/writer.h"
 #include "korvid/sprite_ui/sprite_ui.h"
 #include <string.h>
@@ -78,7 +79,7 @@ Handle write(Engine& e, const char* path, SaveWriter& w, const char* what) {
 }
 
 void records_load(Engine& e, Game& g) {
-    const char* pref = platform_pref_path(e, "korvid", "arcfire");
+    const char* pref = platform_user_dir(e, UserDir::Data, "korvid", "arcfire");
     if (pref && pref[0]) {
         if (!g.demo) format(g.options_path, sizeof g.options_path, "%soptions.json", pref);
         format(g.scores_path, sizeof g.scores_path, "%sscores%s.json", pref, g.demo ? "-demo" : "");

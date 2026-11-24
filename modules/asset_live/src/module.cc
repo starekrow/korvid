@@ -85,7 +85,7 @@ bool live_poll(LiveState& s) {
         s.next_try = now + k_retry;
         u16 port = tree_port(s);
         if (!port) return false;
-        if (!net_connect_local(port, s.sock)) return false;
+        if (!net_connect_local(port, &s.sock)) return false;
         s.stats.port = port;
         char hello[160];
         format(hello, sizeof hello, "hello %s %s\n", s.name, KV_DEBUG ? "debug" : "dev");

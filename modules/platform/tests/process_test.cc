@@ -53,7 +53,7 @@ void test_process(kv::TestCtx& c) {
     KV_CHECK(c, sh(p, "echo to-out; echo to-err >&2; exit 3") && p.is_open());
     KV_CHECK(c, run_out(p, out, err) && p.exited && p.code == 3);
     KV_CHECK(c, strcmp(out.data, "to-out\n") == 0 && strcmp(err.data, "to-err\n") == 0);
-    p.free();
+    p.close();
     KV_CHECK(c, !p.is_open() && !p.running());
 
     // A program found on PATH, with arguments passed as they are (no shell between).
@@ -62,7 +62,7 @@ void test_process(kv::TestCtx& c) {
     ProcessDesc d;
     d.argv = Span<const char* const>(echo, 4);
     KV_CHECK(c, p.spawn(d) && run_out(p, out, err) && p.code == 0 && strcmp(out.data, "a b $HOME *\n") == 0);
-    p.free();
+    p.close();
 
     // The working directory and the environment: added to the parent's, and over it.
     char dir[512];
@@ -73,12 +73,12 @@ void test_process(kv::TestCtx& c) {
     KV_CHECK(c, run_out(p, out, err) && p.code == 0);
     const char* base = strrchr(dir, '/') + 1;
     KV_CHECK(c, strncmp(out.data, base, strlen(base)) == 0 && strstr(out.data, "\n1/two words//usr/bin:/bin\n") && strstr(out.data, "home\n"));
-    p.free();
+    p.close();
 
     // Stdin is empty, not the parent's.
     out.len = err.len = 0;
     KV_CHECK(c, sh(p, "cat; echo done") && run_out(p, out, err) && strcmp(out.data, "done\n") == 0);
-    p.free();
+    p.close();
 
     // What cannot start says why, and leaves nothing behind.
     const char* nope[] = {"kv-no-such-program-anywhere"};
@@ -97,11 +97,11 @@ void test_process(kv::TestCtx& c) {
     KV_CHECK(c, p.read_out(one, sizeof one) == 0);
     out.len = err.len = 0;
     KV_CHECK(c, run_out(p, out, err) && strcmp(out.data, "late\n") == 0);
-    p.free();
+    p.close();
     out.len = err.len = 0;
     KV_CHECK(c, sh(p, "i=0; while [ $i -lt 20000 ]; do echo line-$i; i=$((i+1)); done; echo tail >&2"));
     KV_CHECK(c, run_out(p, out, err, 30.0) && p.code == 0 && out.len > 200000 && strstr(out.data, "line-19999\n") && strcmp(err.data, "tail\n") == 0);
-    p.free();
+    p.close();
 
     // Killed, with what it started.
     char marker[600];
@@ -113,14 +113,14 @@ void test_process(kv::TestCtx& c) {
     bool ended = false;
     for (u32 i = 0; i < 2000 && !ended; ++i) { ended = !p.running(); if (!ended) time_sleep(0.001); }
     KV_CHECK(c, ended && p.code == 128 + 9);
-    p.free();
+    p.close();
     time_sleep(0.6);
     KV_CHECK(c, !io_is_file(marker)); // the background sleep died with its group
 
     // free() on one still running ends it.
     KV_CHECK(c, sh(p, "sleep 30") && p.running());
     t0 = time_now();
-    p.free();
+    p.close();
     KV_CHECK(c, !p.is_open() && time_now() - t0 < 2.0);
 
 #if defined(_WIN32)
@@ -136,7 +136,7 @@ void test_process(kv::TestCtx& c) {
     d.argv = Span<const char* const>(via_cmd, 5);
     out.len = err.len = 0;
     KV_CHECK(c, p.spawn(d) && run_out(p, out, err) && p.code == 0 && strcmp(out.data, "1=\"salt & pepper\" 2=\"two\"\r\n") == 0);
-    p.free();
+    p.close();
 #endif
     // wait: returns when there is output, not at its limit; with nothing, at its limit.
     KV_CHECK(c, sh(p, "sleep 0.2; echo late"));
@@ -150,7 +150,7 @@ void test_process(kv::TestCtx& c) {
     KV_CHECK(c, woke < 1.0);
     char line[16] = {};
     KV_CHECK(c, p.read_out(line, sizeof line - 1) > 0 && strncmp(line, "late", 4) == 0);
-    p.free();
+    p.close();
 
     out.free();
     err.free();

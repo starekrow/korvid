@@ -25,6 +25,7 @@
 #include "korvid/core/thread.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/paths.h"
 #include "korvid/platform/process.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -497,7 +498,7 @@ Run cook(Bench& b, bool progress) {
     }
     r.seconds = time_now() - r.start;
     r.code = p.exited ? p.code : -1;
-    p.free();
+    p.close();
     r.cpu = children_cpu() - cpu0;
     text.push(0);
     // The summary is goldberg's last line; the rest (notes) is passed on.
@@ -565,7 +566,7 @@ WatchRun watch(Bench& b, File& saved) {
             r.ready = time_now() - start;
             break;
         }
-        if (!p.running() || time_now() - start > 600) { p.free(); text.free(); return r; }
+        if (!p.running() || time_now() - start > 600) { p.close(); text.free(); return r; }
         time_sleep(0.002);
     }
     // One small source saved with new bytes.
@@ -579,7 +580,7 @@ WatchRun watch(Bench& b, File& saved) {
     r.react = time_now() - t0;
     r.ok = wrote && output_is(b, saved);
     p.kill();
-    p.free();
+    p.close();
     text.free();
     return r;
 }

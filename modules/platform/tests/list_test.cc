@@ -27,7 +27,7 @@ struct Seen {
 
 bool seen_one(void* user, const kv::IoDirEntry& e) {
     Seen* s = (Seen*)user;
-    const char* kind = e.st.is_file ? "f" : e.st.is_dir ? "d" : "n";
+    const char* kind = e.st.is_file() ? "f" : e.st.is_dir() ? "d" : "n";
     s->len += (kv::usize)kv::format(s->text + s->len, sizeof s->text - s->len, "%s:%s%s%s ",
                                     e.utf8 ? e.name : "?", e.is_link ? "l" : "", kind, e.hidden ? "h" : "");
     if (strcmp(e.name, "a.txt") == 0) { s->a_size = e.st.size; s->a_mtime = e.st.mtime_ns; s->a_volume = e.st.volume; }

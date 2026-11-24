@@ -252,9 +252,8 @@ const char* platform_user_dir(Engine& e, UserDir which, const char* org, const c
     return out;
 }
 
-const char* platform_pref_path(Engine& e, const char* org, const char* app) { return platform_user_dir(e, UserDir::Data, org, app); }
 
-const char* platform_base_path(Engine& e) {
+const char* platform_base_dir(Engine& e) {
     PlatformState* s = state(e);
     return s ? s->base_path : "";
 }

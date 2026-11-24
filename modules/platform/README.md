@@ -54,8 +54,8 @@ directory and additions to the environment; `running`, `read_out`, `read_err` an
 never block. The child has no stdin and its own process group, so killing it takes what
 it started. POSIX only so far: on Windows `spawn` fails and says so. For tools.
 
-**Directories.** `platform_base_path` is the executable's directory, read from
-`/proc/self/exe` at startup; `platform_pref_path(e, org, app)` is the per-user directory
+**Directories.** `platform_base_dir` is the executable's directory, read from
+`/proc/self/exe` at startup; `platform_user_dir(e, UserDir::Data, org, app)` is the per-user directory
 for saves and settings, `$XDG_DATA_HOME/<org>/<app>/` (or `~/.local/share/<org>/<app>/`),
 created on first use. `platform_user_dir(e, which, org, app)` names the three kinds apart,
 where each OS keeps them: `Settings` (`$XDG_CONFIG_HOME`), `Data` (the preference
@@ -169,7 +169,7 @@ Throughput through a tick system is what the kernel buffers hold times the tick 
 the bytes at submission (the caller's buffer is free to go), creates or truncates the file
 at the pump under the same priorities and budget as reads (`IORING_OP_WRITE` on the ring,
 `fopen` on the fallback), and completes with the bytes written and no data. A save or a
-settings file is a write to `platform_pref_path(e, org, app)`, the per-user directory
+settings file is a write to `platform_user_dir(e, UserDir::Data, org, app)`, the per-user directory
 for the names given ($XDG_DATA_HOME, or ~/.local/share, then `<org>/<app>/`) (created on first use).
 
 **A part of a file** is the same request with `offset` and `length`: `read_file` reads
@@ -240,21 +240,21 @@ Header `korvid/platform/io.h`:
 | `IoCompletion` | record | `request`, `status`, `bytes` (a read's `IoBytes`: `data`, `size`, a NUL after, `free()`), `written`, `user`, `error` (errno), `stat` (a `stat_file`'s answer) |
 | `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mount_count()`, `mount_table(i)`, `capacity()`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `take(h, &c)`, `is_pending(h)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
 | `platform_io(engine)` | function | the module's queue |
-| `platform_pref_path(engine, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none (`UserDir::Data`) |
+| `platform_user_dir(engine, UserDir::Data, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none (`UserDir::Data`) |
 | `platform_settings(engine, org, app)`, `SettingsStore` | function, record | the program's settings store, opened in the settings directory at the first call |
 | `settings_open_dir`, `settings_close`, `settings_flush` | functions | a store in a directory; closed (written); waited on |
 | `settings_has`, `settings_int`, `settings_number`, `settings_string`, `settings_struct` | functions | a value, or the fallback; a struct's stored fields into it |
 | `settings_set_int`, `settings_set_number`, `settings_set_string`, `settings_set_struct`, `settings_remove` | functions | a value set (written soon, off the thread), or gone |
 | `platform_user_dir(engine, which, org, app)`, `UserDir` | function, enum | `Settings`, `Data` or `Cache`: where each OS keeps that kind, created on first use, trailing separator |
-| `platform_base_path(engine)` | function | the executable's directory with a trailing separator; assets live beneath it |
+| `platform_base_dir(engine)` | function | the executable's directory with a trailing separator; assets live beneath it |
 
 Header `korvid/platform/net.h`:
 
 | name | kind | what |
 |---|---|---|
-| `NetListener` | record | `open(port, local_only)` (port 0: the OS picks, see `port`), `close()`, `is_open()`, `accept()` (fd or -1) |
+| `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`), `close()`, `is_open()`, `accept()` (fd or -1) |
 | `NetSocket` | record | `adopt(fd)`, `read(buf, cap)` (bytes, 0, or -1 closed), `write(data, len)`, `write_str(s)`, `flush()`, `close()`, `is_open()`, `out_limit`, `closed`, `bytes_in`, `bytes_out`, `dropped` |
-| `net_connect_local(port, sock)` | function | a non-blocking connect to loopback, for tools and tests |
+| `net_connect_local(port, &sock)` | function | a non-blocking connect to loopback, for tools and tests |
 
 Header `korvid/platform/module.h`:
 

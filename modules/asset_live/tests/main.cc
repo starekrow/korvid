@@ -49,7 +49,7 @@ struct Goldberg {
     NetListener l;
     NetSocket   sock;
     Array<char> heard{};
-    bool open(u16 port = 0) { return l.open(port, true); }
+    bool open(u16 port = 0) { return l.open(port); }
     bool take() {
         if (!sock.fd.is_open()) { KHandle fd = l.accept(); if (!fd.is_open()) return false; sock.adopt(fd); }
         char buf[512];

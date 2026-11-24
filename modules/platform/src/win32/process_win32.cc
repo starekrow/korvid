@@ -147,7 +147,7 @@ void win32_message(char* out, usize cap, const char* what, DWORD err) {
 bool process_supported() { return true; }
 
 bool Process::spawn(const ProcessDesc& desc) {
-    free();
+    close();
     error[0] = 0;
     if (desc.argv.len == 0 || !desc.argv.data[0] || !desc.argv.data[0][0]) { format(error, sizeof error, "nothing to run"); return false; }
 
@@ -306,7 +306,7 @@ void Process::kill() {
     if (!group.is_open() || !TerminateJobObject(as_handle(group), kKilledCode)) TerminateProcess(as_handle(process), kKilledCode);
 }
 
-void Process::free() {
+void Process::close() {
     if (pid >= 0 && !exited) {
         kill();
         WaitForSingleObject(as_handle(process), INFINITE);

@@ -47,7 +47,7 @@ struct Process {
     void kill();
     // Closes the pipes and forgets the child. One still running is killed first and
     // waited for.
-    void free();
+    void close();
 };
 
 // True where spawn is implemented.

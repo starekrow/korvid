@@ -81,7 +81,7 @@ int gb_run(const char* const* words, u32 n) {
     g_out.push(0);
     g_err.push(0);
     int code = p.exited ? p.code : -102;
-    p.free();
+    p.close();
     argv.free();
     return code;
 }
@@ -820,7 +820,7 @@ struct Running {
         pump();
         return p.code;
     }
-    void free() { p.free(); out.free(); err.free(); argv.free(); }
+    void free() { p.close(); out.free(); err.free(); argv.free(); }
 };
 
 // Polls until `fn` holds, for five seconds at most.
@@ -839,7 +839,7 @@ bool eventually(Running& r, F fn, f64 seconds = 5.0) {
 bool ask(Running& r, u16 port, const char* line) {
     g_out.len = 0;
     NetSocket sock;
-    if (!net_connect_local(port, sock)) { g_out.push(0); return false; }
+    if (!net_connect_local(port, &sock)) { g_out.push(0); return false; }
     sock.write_str(line);
     sock.write_str("\n");
     bool ok = false, done = false;
@@ -988,7 +988,7 @@ void test_programs(TestCtx& c) {
     u16 port = (u16)atoi(t.read("out/.goldberg-port"));
     KV_CHECK(c, port > 0);
     NetSocket sock;
-    KV_CHECK(c, net_connect_local(port, sock));
+    KV_CHECK(c, net_connect_local(port, &sock));
     sock.write_str("hello testprog dev\n");
     Array<char> heard{};
     auto listen = [&](const char* want) {

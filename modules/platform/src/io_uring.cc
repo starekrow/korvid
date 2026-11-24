@@ -177,8 +177,7 @@ void io_ring_push_stat(IoRing* r, const char* path, void* buf, u64 user) {
 void io_ring_stat_read(const void* buf, IoStat* out) {
     const struct statx& x = *(const struct statx*)buf;
     *out = IoStat{};
-    out->is_file  = S_ISREG(x.stx_mode);
-    out->is_dir   = S_ISDIR(x.stx_mode);
+    out->kind     = S_ISREG(x.stx_mode) ? IoKind::File : S_ISDIR(x.stx_mode) ? IoKind::Dir : IoKind::Other;
     out->size     = x.stx_size;
     out->mtime_ns = (i64)x.stx_mtime.tv_sec * 1000000000ll + x.stx_mtime.tv_nsec;
     out->volume   = (u64)makedev(x.stx_dev_major, x.stx_dev_minor); // st_dev, as stat(2) joins it; always filled

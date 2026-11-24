@@ -8,6 +8,7 @@
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/paths.h"
 #include <stdlib.h>
 #include <string.h>
 

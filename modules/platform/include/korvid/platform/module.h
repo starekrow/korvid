@@ -9,6 +9,7 @@
 #pragma once
 #include "korvid/core/module.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/paths.h"
 #include "korvid/core/os_thread.h"
 #include "korvid/platform/net.h"
 

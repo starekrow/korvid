@@ -113,7 +113,7 @@ debris are additive dots.
   paused; a Sim system would not run while paused and a `--run-seconds` that lands
   inside the demo's pause would be lost.
 - **The high score is a file.** `rocks_startup` asks the platform for the per-user
-  directory (`platform_pref_path(engine, "korvid", "rocks")`) and queues a read of
+  directory (`platform_user_dir(engine, UserDir::Data, "korvid", "rocks")`) and queues a read of
   `highscore.txt` there (`highscore-demo.txt` under `--demo`, so a scripted run never
   touches a player's record); `files` (PreSim, main thread, `Always`) reaps it when it
   arrives, and `on_edge` queues a write when a game ends above it. The `label` ktable is

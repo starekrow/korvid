@@ -3,6 +3,7 @@
 #include "korvid/core/memory.h"
 #include "korvid/core/format.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/paths.h"
 #include "korvid/core/test.h"
 #include <stdlib.h>
 #include <string.h>

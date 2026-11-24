@@ -14,7 +14,7 @@ Game state to bytes and back. Three layers, each usable without the next:
    same as the run that made it.
 
 The module reads and writes bytes in memory. Where they go is the game's: the platform's
-I/O queue and `platform_pref_path` give a per-user directory (`arcanum` keeps its
+I/O queue and `platform_user_dir` give a per-user directory (`arcanum` keeps its
 save there).
 
 ## Writing

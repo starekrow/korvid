@@ -58,7 +58,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
             return nullptr;
         }
     }
-    if (platform_io(engine)) format(r->base_path, sizeof r->base_path, "%s", platform_base_path(engine)); // the platform is up
+    if (platform_io(engine)) format(r->base_path, sizeof r->base_path, "%s", platform_base_dir(engine)); // the platform is up
     r->start_time  = time_now();
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;

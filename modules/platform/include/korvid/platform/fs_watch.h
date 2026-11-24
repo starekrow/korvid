@@ -54,8 +54,8 @@ struct FsWatcher {
     // Auto is the native backend where there is one. Asking for Native where there is
     // none fails (*err: ENOTSUP). poll_interval is the polling backend's time between walks of a root;
     // remote_interval is the time between walks of a share's root that Auto chose to poll.
-    bool init(FsWatchBackend backend = FsWatchBackend::Auto, f64 poll_interval = 0.25, f64 remote_interval = 5.0, i32* err = nullptr);
-    void free();
+    bool open(FsWatchBackend backend = FsWatchBackend::Auto, f64 poll_interval = 0.25, f64 remote_interval = 5.0, i32* err = nullptr);
+    void close();
     bool is_open() const { return state != nullptr; }
     const char* backend_name() const; // "inotify", "readdirectorychanges", "fsevents", "poll": the watcher's; root_backend says a root's
     // How long after a change the backend may still be about to report it, in seconds,
@@ -75,7 +75,7 @@ struct FsWatcher {
     // polling does not mean calls for ever. True where the backend calls it; false where
     // wake_handle() says instead (inotify) or no root is native, and nothing is called. Null
     // clears it: once that returns, no call is under way and none is to come. Set it again
-    // after init; free() clears it.
+    // after open; close() clears it.
     bool set_wake(void (*fn)(void* user), void* user);
 
     // Watches dir and everything under it. The id, or ~0u (*err: ENOENT, ENOTDIR, ENOTSUP for

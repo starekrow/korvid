@@ -90,7 +90,7 @@ char** proc_env(Span<const char* const> extra) {
 bool process_supported() { return !KV_PROC_NONE; }
 
 bool Process::spawn(const ProcessDesc& desc) {
-    free();
+    close();
     error[0] = 0;
     if (KV_PROC_NONE) { format(error, sizeof error, "an iOS app cannot start another program"); return false; }
     if (desc.argv.len == 0 || !desc.argv.data[0]) { format(error, sizeof error, "nothing to run"); return false; }
@@ -224,7 +224,7 @@ void Process::kill() {
     if (::kill((pid_t)-pid, SIGKILL) != 0) ::kill((pid_t)pid, SIGKILL);
 }
 
-void Process::free() {
+void Process::close() {
     if (pid >= 0 && !exited) {
         kill();
         int status;

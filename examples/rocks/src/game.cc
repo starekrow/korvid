@@ -27,6 +27,7 @@
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/input.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/paths.h"
 #include "korvid/render/renderer.h"
 #include "korvid/scene/module.h"
 #include "korvid/sprite/camera.h"
@@ -684,7 +685,7 @@ bool rocks_startup(Engine& engine, ModuleInstance& self) {
     // Handle kinds, so a handler can tell what an overlap is between without a lookup.
     // The high score: read from the per-user directory, written there at a game over. The
     // demo keeps its own file so a scripted run never changes a player's record.
-    const char* pref = platform_pref_path(engine, "korvid", "rocks");
+    const char* pref = platform_user_dir(engine, UserDir::Data, "korvid", "rocks");
     if (pref[0]) {
         format(g->high_path, sizeof g->high_path, "%shighscore%s.txt", pref, frameloop_flag(engine, "--demo") ? "-demo" : "");
         IoRequest req;

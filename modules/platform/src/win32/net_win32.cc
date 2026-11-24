@@ -73,7 +73,7 @@ SOCKET new_socket() {
 
 } // namespace
 
-bool NetListener::open(u16 want_port, bool local_only, i32* err) {
+bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     close();
     if (!winsock_up()) return os_fail(err, ENETDOWN);
     SOCKET s = new_socket();
@@ -83,7 +83,7 @@ bool NetListener::open(u16 want_port, bool local_only, i32* err) {
     sockaddr_in addr{};
     addr.sin_family      = AF_INET;
     addr.sin_port        = htons(want_port);
-    addr.sin_addr.s_addr = htonl(local_only ? INADDR_LOOPBACK : INADDR_ANY);
+    addr.sin_addr.s_addr = htonl(scope == NetScope::Loopback ? INADDR_LOOPBACK : INADDR_ANY);
     if (bind(s, (sockaddr*)&addr, sizeof addr) != 0 || listen(s, 8) != 0 || !set_nonblocking(s)) {
         int e = WSAGetLastError();
         KV_ERROR("net", "listen on port %u: %s", want_port, net_error(e));
@@ -141,10 +141,10 @@ i32 NetSocket::read(void* buf, u32 cap) {
     return -1;
 }
 
-bool NetSocket::write(const void* data, u32 len) {
+bool NetSocket::write(const void* data, u32 size) {
     if (!fd.is_open() || closed) return false;
-    if (out.len + len > out_limit) { dropped += len; return false; }
-    memcpy(out.push_n(len), data, len);
+    if (out.len + size > out_limit) { dropped += size; return false; }
+    memcpy(out.push_n(size), data, size);
     return true;
 }
 
@@ -176,7 +176,7 @@ void NetSocket::close() {
     closed = false;
 }
 
-bool net_connect_local(u16 port, NetSocket& out, i32* err) {
+bool net_connect_local(u16 port, NetSocket* out, i32* err) {
     if (!winsock_up()) return os_fail(err, ENETDOWN);
     SOCKET s = new_socket();
     if (s == INVALID_SOCKET) return os_fail(err, errno_from_wsa(WSAGetLastError()));
@@ -193,7 +193,7 @@ bool net_connect_local(u16 port, NetSocket& out, i32* err) {
             return os_fail(err, errno_from_wsa(e));
         }
     }
-    out.adopt(handle_of(s));
+    out->adopt(handle_of(s));
     return true;
 }
 

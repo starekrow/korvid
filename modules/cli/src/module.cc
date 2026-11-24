@@ -307,7 +307,7 @@ bool cli_startup(Engine& e, ModuleInstance& self) {
         sess.ascii    = s->config.ascii;
     }
     if (s->config.port) {
-        if (!s->listener.open(s->config.port, s->config.local_only)) return false;
+        if (!s->listener.open(s->config.port, s->config.local_only ? NetScope::Loopback : NetScope::Any)) return false;
         KV_INFO("cli", "listening on %s:%u", s->config.local_only ? "127.0.0.1" : "0.0.0.0", s->listener.port);
     }
     watch_sockets(e, *s);

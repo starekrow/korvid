@@ -226,8 +226,8 @@ struct FsWatchState {
 
 bool fs_watch_has_native() { return KV_FS_NATIVE != 0; }
 
-bool FsWatcher::init(FsWatchBackend backend, f64 poll_interval, f64 remote_interval, i32* err) {
-    free();
+bool FsWatcher::open(FsWatchBackend backend, f64 poll_interval, f64 remote_interval, i32* err) {
+    close();
     bool native = backend != FsWatchBackend::Poll && fs_watch_has_native();
     if (backend == FsWatchBackend::Native && !native) { if (err) *err = ENOTSUP; return false; }
     FsWatchState* s = new (mem_alloc(sizeof(FsWatchState))) FsWatchState{};
@@ -249,7 +249,7 @@ bool FsWatcher::init(FsWatchBackend backend, f64 poll_interval, f64 remote_inter
     return true;
 }
 
-void FsWatcher::free() {
+void FsWatcher::close() {
     if (!state) return;
 #if KV_FS_NATIVE
     if (state->n) fs_native_destroy(state->n);
