@@ -1,5 +1,5 @@
-// The executable's directory from /proc/self/exe; the preference directory under
-// $XDG_DATA_HOME (or ~/.local/share), the same place SDL put it.
+// The executable's directory from /proc/self/exe; the user's directories under the XDG
+// base directories (the data one is where SDL put its preference path).
 #include "../os_paths.h"
 #include "korvid/platform/io.h"
 #include "korvid/core/format.h"
@@ -33,13 +33,17 @@ bool os_exe_name(char* out, u32 cap) {
     return true;
 }
 
-bool os_pref_path(const char* org, const char* app, char* out, u32 cap) {
-    const char* xdg  = getenv("XDG_DATA_HOME");
+// The XDG base directories: the variable when it is an absolute path (the spec says to
+// ignore a relative one), else its default under $HOME.
+bool os_user_dir(UserDir which, const char* org, const char* app, char* out, u32 cap) {
+    const char* var  = which == UserDir::Settings ? "XDG_CONFIG_HOME" : which == UserDir::Cache ? "XDG_CACHE_HOME" : "XDG_DATA_HOME";
+    const char* dflt = which == UserDir::Settings ? ".config" : which == UserDir::Cache ? ".cache" : ".local/share";
+    const char* xdg  = getenv(var);
     const char* home = getenv("HOME");
     int n;
     if (xdg && xdg[0] == '/') n = format(out, cap, "%s/%s/%s/", xdg, org, app);
-    else if (home && home[0]) n = format(out, cap, "%s/.local/share/%s/%s/", home, org, app);
-    else { KV_WARN("platform", "no preference path: neither XDG_DATA_HOME nor HOME is set"); return false; }
+    else if (home && home[0]) n = format(out, cap, "%s/%s/%s/%s/", home, dflt, org, app);
+    else { KV_WARN("platform", "no preference path: neither %s nor HOME is set", var); return false; }
     if (n <= 0 || (u32)n >= cap) { KV_WARN("platform", "no preference path: too long"); return false; }
     if (!io_make_dirs(out)) { KV_WARN("platform", "no preference path: cannot create %s", out); return false; }
     return true;

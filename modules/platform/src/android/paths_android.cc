@@ -73,10 +73,16 @@ bool os_exe_name(char* out, u32 cap) {
     return true;
 }
 
-bool os_pref_path(const char* org, const char* app, char* out, u32 cap) {
+// Settings and data in the app's files directory (getFilesDir, internalDataPath); a cache in
+// its cache directory beside it (getCacheDir: <data>/cache), which Android may empty.
+bool os_user_dir(UserDir which, const char* org, const char* app, char* out, u32 cap) {
     const char* root = g_internal[0] ? g_internal : getenv("TMPDIR");
     if (!root || !root[0]) { KV_WARN("platform", "no preference path: not an app, and TMPDIR is not set"); return false; }
-    int n = format(out, cap, "%s/%s/%s/", root, org, app);
+    int n;
+    const char* slash = g_internal[0] ? strrchr(g_internal, '/') : nullptr;
+    if (which == UserDir::Cache && slash) n = format(out, cap, "%.*s/cache/%s/%s/", (int)(slash - g_internal), g_internal, org, app);
+    else if (which == UserDir::Cache) n = format(out, cap, "%s/cache/%s/%s/", root, org, app);
+    else n = format(out, cap, "%s/%s/%s/", root, org, app);
     if (n <= 0 || (u32)n >= cap) { KV_WARN("platform", "no preference path: too long"); return false; }
     if (!io_make_dirs(out)) { KV_WARN("platform", "no preference path: cannot create %s", out); return false; }
     return true;

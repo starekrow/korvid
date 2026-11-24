@@ -135,13 +135,14 @@ made if need be, with a trailing separator. `platform_pref_path` stays as `Data`
 
 | | Settings | Data | Cache |
 |---|---|---|---|
-| Linux | `$XDG_CONFIG_HOME` | `$XDG_DATA_HOME` | `$XDG_CACHE_HOME` |
-| Windows | `%APPDATA%` | `%APPDATA%` | `%LOCALAPPDATA%` |
-| macOS | `~/Library/Preferences` | `~/Library/Application Support` | `~/Library/Caches` |
-| iOS | `Library/Preferences` | `Library/Application Support` | `Library/Caches` |
-| Android | `getFilesDir()/settings` | `getFilesDir()` | `getCacheDir()` |
+| Linux | `$XDG_CONFIG_HOME` (`~/.config`) | `$XDG_DATA_HOME` (`~/.local/share`) | `$XDG_CACHE_HOME` (`~/.cache`) |
+| Windows | `%APPDATA%` | `%APPDATA%` | `%LOCALAPPDATA%`, in `cache/` |
+| macOS, iOS | `Library/Application Support` | `Library/Application Support` | `Library/Caches` |
+| Android | the files directory | the files directory | the cache directory |
 
-Each under `<org>/<app>/`; on Windows the cache goes in `<org>/<app>/cache`.
+Each under `<org>/<app>/`. Where settings and data are one directory, they share it. Apple:
+`Library/Preferences` belongs to cfprefsd, which keeps the defaults system's plists there,
+and Apple asks that nothing else be made in it.
 
 **The store** (`settings.h`, in `platform`): named values (an integer, a number, a string,
 a struct by its field table) in one file, `settings.kbor`, in the settings directory.
@@ -380,3 +381,12 @@ starts from `slice-10`. As above, and:
   test holds it under 8.3 ms, a 120 Hz refresh, outside debug builds). That is Krome's
   build and layout without a renderer: the paint and the GPU are not in it. Under
   `address,undefined` too.
+
+**Milestone 6, three places (KR24, 1): built Nov 23, 2026.** As above. `os_pref_path`
+became `os_user_dir(which, ...)` on each platform; the platform's state keeps each
+directory once asked for, as it kept the data one. Linux honours an `XDG_*` variable only
+when it is an absolute path, as the base directory spec says. Android's cache directory is
+the files directory's sibling, `cache`, which is `getCacheDir()`. Test (`user dirs`, Linux):
+all three under set variables, then under `$HOME` with two unset and one relative; each
+made; `platform_pref_path` is the data one. Windows, Apple and Android written, not
+compiled.

@@ -27,7 +27,9 @@ typedef void (*PlatformPumpFn)(Engine& e, void* user);
 struct PlatformState {
     IoQueue io;                               // the process's read queue, pumped by platform_pump
     char    base_path[KV_PLATFORM_PATH_MAX];  // the executable's directory, trailing separator
-    char    pref_path[KV_PLATFORM_PATH_MAX];  // the per-user directory once asked for
+    char    pref_path[KV_PLATFORM_PATH_MAX];  // the per-user data directory once asked for (UserDir::Data)
+    char    settings_path[KV_PLATFORM_PATH_MAX]; // UserDir::Settings, once asked for
+    char    cache_path[KV_PLATFORM_PATH_MAX];    // UserDir::Cache, once asked for
     struct  Pump { PlatformPumpFn fn; void* user; } pumps[KV_PLATFORM_PUMP_MAX];
     u32     pump_count = 0;
 };

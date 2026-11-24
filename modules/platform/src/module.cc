@@ -126,18 +126,21 @@ IoQueue* platform_io(Engine& e) {
     return s ? &s->io : nullptr;
 }
 
-const char* platform_pref_path(Engine& e, const char* org, const char* app) {
+const char* platform_user_dir(Engine& e, UserDir which, const char* org, const char* app) {
     PlatformState* s = state(e);
     if (!s) return "";
-    if (!s->pref_path[0]) {
-        if (!os_pref_path(org ? org : "korvid", app ? app : "korvid", s->pref_path, sizeof s->pref_path)) {
-            s->pref_path[0] = 0;
+    char* out = which == UserDir::Settings ? s->settings_path : which == UserDir::Cache ? s->cache_path : s->pref_path;
+    if (!out[0]) {
+        if (!os_user_dir(which, org ? org : "korvid", app ? app : "korvid", out, KV_PLATFORM_PATH_MAX)) {
+            out[0] = 0;
             return "";
         }
-        KV_INFO("platform", "preference path %s", s->pref_path);
+        KV_INFO("platform", "%s directory %s", which == UserDir::Settings ? "settings" : which == UserDir::Cache ? "cache" : "data", out);
     }
-    return s->pref_path;
+    return out;
 }
+
+const char* platform_pref_path(Engine& e, const char* org, const char* app) { return platform_user_dir(e, UserDir::Data, org, app); }
 
 const char* platform_base_path(Engine& e) {
     PlatformState* s = state(e);

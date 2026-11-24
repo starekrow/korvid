@@ -42,10 +42,13 @@ bool os_exe_name(char* out, u32 cap) {
     return true;
 }
 
-bool os_pref_path(const char* org, const char* app, char* out, u32 cap) {
+// Settings and data roam with the user (%APPDATA%); a cache stays on the machine
+// (%LOCALAPPDATA%), in a directory of its own.
+bool os_user_dir(UserDir which, const char* org, const char* app, char* out, u32 cap) {
     PWSTR dir = nullptr;
-    if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &dir))) {
-        KV_WARN("platform", "no preference path: Windows has no roaming application data folder for this user");
+    bool cache = which == UserDir::Cache;
+    if (FAILED(SHGetKnownFolderPath(cache ? FOLDERID_LocalAppData : FOLDERID_RoamingAppData, KF_FLAG_CREATE, nullptr, &dir))) {
+        KV_WARN("platform", "no preference path: Windows has no %s application data folder for this user", cache ? "local" : "roaming");
         return false;
     }
     char base[1024];
@@ -53,7 +56,7 @@ bool os_pref_path(const char* org, const char* app, char* out, u32 cap) {
     CoTaskMemFree(dir);
     if (!ok) { KV_WARN("platform", "no preference path: too long"); return false; }
     forward_slashes(base);
-    int n = kv::format(out, cap, "%s/%s/%s/", base, org, app);
+    int n = kv::format(out, cap, cache ? "%s/%s/%s/cache/" : "%s/%s/%s/", base, org, app);
     if (n <= 0 || (u32)n >= cap) { KV_WARN("platform", "no preference path: too long"); return false; }
     if (!io_make_dirs(out)) { KV_WARN("platform", "no preference path: cannot create %s", out); return false; }
     return true;

@@ -11,9 +11,11 @@ bool os_base_path(char* out, u32 cap);
 // The running executable's file name, without ".exe". False where a program has no file
 // of its own to name (an Android app).
 bool os_exe_name(char* out, u32 cap);
-// The per-user writable directory for (org, app), created if missing, with a trailing
-// separator. False with a log line if there is no home to put it in.
-bool os_pref_path(const char* org, const char* app, char* out, u32 cap);
+// One of the per-user directories for (org, app) (platform_user_dir has which is where),
+// created if missing, with a trailing separator. False with a log line if there is no home
+// to put it in.
+enum class UserDir : u8;
+bool os_user_dir(UserDir which, const char* org, const char* app, char* out, u32 cap);
 
 // The archive the program's own files are inside, when they are not in a directory: on
 // Android the installed package (an .apk, a zip), whose entries under "assets/" are what

@@ -385,7 +385,24 @@ bool        platform_assets_dir(char* out, u32 cap);
 // The per-user directory for saves and settings, created if need be, with a trailing
 // separator: $XDG_DATA_HOME/<org>/<app>/, or ~/.local/share/<org>/<app>/, on Linux;
 // ~/Library/Application Support/<org>/<app>/ on macOS (where SDL puts it on each). The first
-// call fixes the names for the process; "" if the OS has none.
+// call fixes the names for the process; "" if the OS has none. platform_user_dir's Data.
 const char* platform_pref_path(Engine& e, const char* org, const char* app);
+
+// The three places a program keeps what is its user's (KR24), each under <org>/<app>/,
+// created if need be, with a trailing separator; "" if the OS has none.
+//   Settings: what the user chose (a session, the face, per-device choices).
+//   Data:     what the user made and must not lose (platform_pref_path).
+//   Cache:    what is rebuilt if it goes (an index), which backups leave out.
+//            Settings                 Data                            Cache
+//   Linux    $XDG_CONFIG_HOME         $XDG_DATA_HOME                  $XDG_CACHE_HOME
+//            (~/.config)              (~/.local/share)                (~/.cache)
+//   Windows  %APPDATA%                %APPDATA%                       %LOCALAPPDATA%\<org>\<app>\cache
+//   Apple    Library/Application Support (macOS and iOS: Preferences    Library/Caches
+//            is cfprefsd's, for the defaults system's plists only)
+//   Android  the app's files dir      the app's files dir             the app's cache dir
+// Where Settings and Data are one directory, the two kinds share it. The first call fixes
+// the names for the process.
+enum class UserDir : u8 { Settings, Data, Cache };
+const char* platform_user_dir(Engine& e, UserDir which, const char* org, const char* app);
 
 } // namespace kv

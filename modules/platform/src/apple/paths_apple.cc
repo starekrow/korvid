@@ -57,14 +57,17 @@ bool os_exe_name(char* out, u32 cap) {
     return true;
 }
 
-bool os_pref_path(const char* org, const char* app, char* out, u32 cap) {
+// Settings beside data in Application Support: Library/Preferences is cfprefsd's, for the
+// defaults system's plists, and Apple asks that nothing else be made there. A cache in
+// Library/Caches, which backups leave out and iOS may empty.
+bool os_user_dir(UserDir which, const char* org, const char* app, char* out, u32 cap) {
     const char* home = getenv("HOME");
     if (!home || !home[0]) {
         const passwd* pw = getpwuid(getuid());
         home = pw ? pw->pw_dir : nullptr;
     }
     if (!home || !home[0]) { KV_WARN("platform", "no preference path: no home directory"); return false; }
-    int n = kv::format(out, cap, "%s/Library/Application Support/%s/%s/", home, org, app);
+    int n = kv::format(out, cap, "%s/Library/%s/%s/%s/", home, which == UserDir::Cache ? "Caches" : "Application Support", org, app);
     if (n <= 0 || (u32)n >= cap) { KV_WARN("platform", "no preference path: too long"); return false; }
     if (!io_make_dirs(out)) { KV_WARN("platform", "no preference path: cannot create %s", out); return false; }
     return true;

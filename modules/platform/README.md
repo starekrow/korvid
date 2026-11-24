@@ -53,7 +53,10 @@ it started. POSIX only so far: on Windows `spawn` fails and says so. For tools.
 **Directories.** `platform_base_path` is the executable's directory, read from
 `/proc/self/exe` at startup; `platform_pref_path(e, org, app)` is the per-user directory
 for saves and settings, `$XDG_DATA_HOME/<org>/<app>/` (or `~/.local/share/<org>/<app>/`),
-created on first use. Both end in a separator. Each OS has its own source under `src/<os>/`.
+created on first use. `platform_user_dir(e, which, org, app)` names the three kinds apart,
+where each OS keeps them: `Settings` (`$XDG_CONFIG_HOME`), `Data` (the preference
+directory) and `Cache` (`$XDG_CACHE_HOME`, which backups leave out); `io.h` has the
+table. All end in a separator. Each OS has its own source under `src/<os>/`.
 
 **The pump.** `platform_pump(e)` runs the pump hooks other modules added
 (`platform_pump_add`: `platform_hid` turns window events into bus events there), then the
@@ -174,7 +177,8 @@ Header `korvid/platform/io.h`:
 | `IoCompletion` | record | `request`, `status`, `data`, `size`, `user`, `error` (errno), `stat` (a `stat_file`'s answer) |
 | `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
 | `platform_io(engine)` | function | the module's queue |
-| `platform_pref_path(engine, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none |
+| `platform_pref_path(engine, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none (`UserDir::Data`) |
+| `platform_user_dir(engine, which, org, app)`, `UserDir` | function, enum | `Settings`, `Data` or `Cache`: where each OS keeps that kind, created on first use, trailing separator |
 | `platform_base_path(engine)` | function | the executable's directory with a trailing separator; assets live beneath it |
 
 Header `korvid/platform/net.h`:
