@@ -479,7 +479,26 @@ struct Checker {
         auto walk_kids = [&] {
             if (kids) for (const JsonValue* k = json_first(f.doc, *kids); k; k = json_next(f.doc, *k)) node(*k, in_def);
         };
-        if (!strcmp(w, "each") || !strcmp(w, "if")) { walk_kids(); return; }
+        if (!strcmp(w, "each")) {
+            // A sparse each (count= or from=) takes one placeholder: the block for rows the
+            // model does not hold, its children checked as the each's own are. The builder
+            // finds it by its word, so it wins over a definition of that name here.
+            bool sparse = json_get(f.doc, n, "count") || json_get(f.doc, n, "from");
+            bool seen = false;
+            if (kids)
+                for (const JsonValue* k = json_first(f.doc, *kids); k; k = json_next(f.doc, *k)) {
+                    if (!sparse || strcmp(json_string(json_get(f.doc, *k, "w"), ""), "placeholder")) { node(*k, in_def); continue; }
+                    if (seen) err(k->line, "a sparse each takes one placeholder");
+                    seen = true;
+                    static const char* const takes_none[] = {"p", "f", "s", "t", "a", "r", "e"};
+                    for (const char* key : takes_none)
+                        if (json_get(f.doc, *k, key)) { err(k->line, "a placeholder takes no properties, flags, styles or strings: only children"); break; }
+                    if (const JsonValue* pk = json_get(f.doc, *k, "c"))
+                        for (const JsonValue* c = json_first(f.doc, *pk); c; c = json_next(f.doc, *c)) node(*c, in_def);
+                }
+            return;
+        }
+        if (!strcmp(w, "if")) { walk_kids(); return; }
         if (!strcmp(w, "slot")) {
             if (!in_def) err(line, "slot is only in a definition's body");
             if (kids || json_get(f.doc, n, "p") || json_get(f.doc, n, "f")) err(line, "a slot is a place: it takes nothing");
@@ -501,7 +520,12 @@ struct Checker {
             return;
         }
         KimbFound d;
-        if (!kimb_find_def(s, w, &d)) { err(line, "'%s' is neither a kernel node (box, text, image, hit, edit) nor a definition", w); walk_kids(); return; }
+        if (!kimb_find_def(s, w, &d)) {
+            if (!strcmp(w, "placeholder")) err(line, "placeholder is a sparse each's: one with count= or from=");
+            else err(line, "'%s' is neither a kernel node (box, text, image, hit, edit) nor a definition", w);
+            walk_kids();
+            return;
+        }
         const JsonDoc& dd = d.file->doc;
         const JsonValue* params = json_get(dd, *d.value, "params");
         u32 nparams = params ? params->count() : 0;

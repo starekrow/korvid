@@ -187,3 +187,25 @@ arcanum's demo hashes as recorded.
 5. **S1's other callers.** The request at the hand-over was put there so an on-demand
    window shows a new list. Whether anything paints outside a frame that is then drawn
    (`frameloop_step`, a tool's own loop) was not traced; milestone 5 does that first.
+
+## Status
+
+**Milestone 1, the check (KR27): built Nov 24, 2026.** As above, and:
+
+- **On lines of their own.** Kim takes one node to a line, so the exit criterion's
+  `{ text "{row.name}" placeholder { text "..." } }` does not parse as written (the text
+  takes the placeholder as its child). Written over three lines it cooks, which is what
+  the tests do.
+- **What it refuses**, each with its line: a placeholder in an `each` without `count=` or
+  `from=`, or outside an `each`; a second one in the same `each`; one with properties,
+  flags, styles, strings, a range or an event. Its children are checked as the row's are.
+  A `def placeholder` still checks outside a sparse `each`; inside one the block wins.
+- **The Krome test** compiles the text with `kim` (a test dependency only: Krome still
+  does not link the parser), opens it, and gives it again as a save does, which runs
+  `kimb_check` in Krome's own scope: before this change that reload was refused.
+- **Found on the way:** with that reload refused, the test hung at shutdown. Freeing a
+  screen's overlays closed "the top one", which is never a passive overlay, and the dev
+  build's reload strip is one: any dev build that quit with a reload error showing went
+  round for ever. Fixed; `reload_test` shuts down with the strip up.
+- **Not done here:** Blackwing's `widgets.kim` keeps its `def placeholder` until it builds
+  on a Korvid with this change.

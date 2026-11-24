@@ -157,6 +157,45 @@ void test_kim_check(kv::TestCtx& c) {
         "t.kim:1: prop size: the kernel's property, which a prelude does not declare again\n"
         "t.kim:3: def box: a kernel word, which a definition cannot take\n"));
 
+    // A sparse each's placeholder (KR27): its children checked as the row's are.
+    KV_CHECK(c, same(check(
+        "screen s { box scroll {\n"
+        "  each row in rows height=24 count=@n from=@f {\n"
+        "    text \"{row.name}\"\n"
+        "    placeholder { text \"...\" }\n"
+        "  }\n"
+        "  each row in rows height=24 count=10 {\n"
+        "    text \"{row.name}\"\n"
+        "    placeholder { box { text \"-\" } }\n"
+        "  }\n"
+        "} }\n"), ""));
+    KV_CHECK(c, same(check(
+        "screen s { box {\n"                                                     // 1
+        "  each row in rows { placeholder { text \"...\" } }\n"                   // 2
+        "  placeholder { text \"...\" }\n"                                        // 3
+        "  each row in rows height=24 count=@n {\n"                              // 4
+        "    placeholder { text \"a\" }\n"                                        // 5
+        "    placeholder { text \"b\" }\n"                                        // 6
+        "  }\n"                                                                  // 7
+        "  each row in rows height=24 count=@n { placeholder bg=#fff { text \"a\" } }\n" // 8
+        "  each row in rows height=24 from=@f { placeholder [x] { boxx } }\n"    // 9
+        "} }\n"),
+        "t.kim:2: placeholder is a sparse each's: one with count= or from=\n"
+        "t.kim:3: placeholder is a sparse each's: one with count= or from=\n"
+        "t.kim:6: a sparse each takes one placeholder\n"
+        "t.kim:8: a placeholder takes no properties, flags, styles or strings: only children\n"
+        "t.kim:9: a placeholder takes no properties, flags, styles or strings: only children\n"
+        "t.kim:9: 'boxx' is neither a kernel node (box, text, image, hit, edit) nor a definition\n"));
+    // A definition named placeholder (the workaround before the check knew the block): the
+    // word is free outside a sparse each; inside one the block wins, as in the builder.
+    KV_CHECK(c, same(check(
+        "def placeholder { box { slot } }\n"
+        "screen s { box {\n"
+        "  placeholder { text \"x\" }\n"
+        "  each row in rows { placeholder { text \"x\" } }\n"
+        "  each row in rows height=24 count=@n { placeholder { text \"...\" } }\n"
+        "} }\n"), ""));
+
     // A typed parameter by name.
     KV_CHECK(c, same(check("use \"krome/std\"\nscreen s { button label=4 }\n"), "t.kim:2: label takes a string\n"));
 }

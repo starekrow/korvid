@@ -4,6 +4,7 @@
 // changing keeps the window. Transitions ease colors between states on the Frame cycle's
 // clock, interrupted from where they are.
 #include "korvid/krome/krome.h"
+#include "korvid/kim/kim.h"
 #include "../src/internal.h"
 #include "korvid/asset/module.h"
 #include "korvid/core/engine.h"
@@ -355,5 +356,56 @@ void test_sparse(kv::TestCtx& c) {
     frames(e, 2);
     r = region_of(sc, 24.0f);
     KV_CHECK(c, r && r->len == 100 && t.nodes[list_n].content.y == 2400.0f && model_num(s, sc, "total_seen") == 100.0);
+    engine_shutdown(e);
+}
+
+// A sparse each from .kim text (KR27): compiled by kim, checked (a reload is, and the check
+// used to refuse the placeholder), and built with its placeholders.
+void test_sparse_text(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("krome sparse from text");
+    const char* text =
+        "script \"v/t.lua\"\n"
+        "screen main { box dir=col {\n"
+        "  box id=list scroll dir=col w=300 h=240 {\n"
+        "    each row in rows height=24 count=@n from=@f {\n"
+        "      text \"{row.name}\" h=24\n"
+        "      placeholder { text \"...\" h=24 }\n"
+        "    }\n"
+        "  }\n"
+        "} }\n";
+    const char* script = "return { model = { n = 1000, f = 0, rows = {} }, on = {} }";
+    Array<u8> k{};
+    KimErrors errs;
+    KV_CHECK(c, kim_compile(text, strlen(text), "v/t.kim", k, errs) && errs.count == 0);
+    {
+        // The check on its own, as goldberg runs it when it cooks.
+        JsonDoc doc;
+        KimErrors e2;
+        KimbFile f;
+        KimbScope scope;
+        KV_CHECK(c, kim_parse(text, strlen(text), "v/t.kim", mem_scratch(), doc, e2) && kimb_from_doc(doc, f, e2, "v/t.kim"));
+        KV_CHECK(c, kimb_scope(scope, f, [](void*, const char*) -> const KimbFile* { return nullptr; }, nullptr, e2) && kimb_check(scope, e2));
+    }
+
+    const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &asset_module, &krome_module};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    KromeModule& s = *krome_state(e);
+    krome_viewport(e, 800, 600, 1.0f);
+    krome_provide(e, "v/t.kimb", k.data, k.len);
+    krome_provide(e, "v/t.lua", script, strlen(script));
+    Name scn = krome_open(e, "v/t.kimb", "main");
+    frames(e, 3);
+    KV_CHECK(c, krome_ready(e, scn));
+    KromeScreen& sc = *krome_screen(s, scn);
+    const KromeRegion* r = region_of(sc, 24.0f);
+    KV_CHECK(c, r && r->sparse && r->len == 1000 && count_texts(sc.tree, "...") > 10);
+
+    // Given again, as a save is: checked in Krome's own scope and put in force.
+    krome_provide(e, "v/t.kimb", k.data, k.len);
+    frames(e, 3);
+    KV_CHECK(c, !sc.held && !s.reload_error[0] && count_texts(sc.tree, "...") > 10);
+    k.free();
     engine_shutdown(e);
 }

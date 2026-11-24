@@ -32,7 +32,11 @@ that are neither the kernel's nor a definition, styles and tokens that are not t
 token must be in every theme the scope has, since a theme can be switched to), properties
 a node does not take and values of the wrong type, a definition given more strings than it
 has parameters, a property it does not take, or children it has no slot for; looks that
-set layout, states that are not, styles that start from themselves.
+set layout, states that are not, styles that start from themselves. In a sparse `each`
+(one with `count=` or `from=`) a child `placeholder { ... }` is the block for rows the model
+does not hold: its children are checked as the row's are, and it takes nothing else. A
+second one, or a `placeholder` anywhere else, is a mistake, unless a definition of that
+name is in scope outside a sparse `each`.
 
 ## Using it
 

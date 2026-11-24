@@ -101,7 +101,8 @@ script's tables made into one, and builds the kernel's tree:
 - **`each row in rows height=24 count=@total from=@first -> view`** is sparse: it lays out
   and scrolls as if `count` rows were there, the model's `rows` holding only rows
   `[from, from + #rows)`. A row it builds that the model does not hold is the block's
-  `placeholder { ... }` child, at the same height. When the rows it builds change it says
+  `placeholder { ... }` child, at the same height (one, taking only children; the check
+  refuses it anywhere else). When the rows it builds change it says
   so once: `KromeView{screen, event, first, count, total}`, and the screen's
   `on.view(first, count, total)`; the owner puts those rows in the model (the list and
   `from`), a tick or two later as it likes. `count` and `from` are numbers or `@keys`; a
