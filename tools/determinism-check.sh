@@ -11,6 +11,7 @@ set -u
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root" || exit 2
 quick=0
+case "$(uname -s)" in Darwin) host=macos ;; *) host=linux ;; esac
 [ "${1:-}" = "--quick" ] && quick=1
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -29,15 +30,15 @@ run() { # name, exe, args...
     timeout 120 "$exe" --demo --rate 4 --no-vsync --run-ticks 1500 --hash "$@" 2>&1 |
         awk '/^\[ INFO\] hash: tick / {print $5, $6}' > "$tmp/$name"
 }
-run t1        build/linux-debug/bin/rocks --threads 1
-run t16       build/linux-debug/bin/rocks --threads 16
-run order     build/linux-debug/bin/rocks --threads 16 --early-reads order
-run snapshot  build/linux-debug/bin/rocks --threads 16 --early-reads snapshot
+run t1        build/$host-debug/bin/rocks --threads 1
+run t16       build/$host-debug/bin/rocks --threads 16
+run order     build/$host-debug/bin/rocks --threads 16 --early-reads order
+run snapshot  build/$host-debug/bin/rocks --threads 16 --early-reads snapshot
 if [ $quick -eq 0 ]; then
-    run dev_t16   build/linux-dev/bin/rocks --threads 16
-    run ship_t1   build/linux-ship/bin/rocks --threads 1
-    run ship_t16  build/linux-ship/bin/rocks --threads 16
-    run ship_cpu  build/linux-ship/bin/rocks --threads 16 --renderer cpu
+    run dev_t16   build/$host-dev/bin/rocks --threads 16
+    run ship_t1   build/$host-ship/bin/rocks --threads 1
+    run ship_t16  build/$host-ship/bin/rocks --threads 16
+    run ship_cpu  build/$host-ship/bin/rocks --threads 16 --renderer cpu
 fi
 
 failed=0
@@ -58,7 +59,7 @@ done
 
 if [ $quick -eq 0 ]; then
     for r in examples/arcfire/tests/replays/*.kvr; do
-        line=$(timeout 300 build/linux-dev/bin/arcfire --replay "$r" --rate 4 --threads 16 2>&1 | grep 'replay: ' | tail -1)
+        line=$(timeout 300 build/$host-dev/bin/arcfire --replay "$r" --rate 4 --threads 16 2>&1 | grep 'replay: ' | tail -1)
         echo "arcfire $(basename "$r"): ${line#*replay: }"
         case "$line" in *matched*) ;; *) failed=1 ;; esac
     done
