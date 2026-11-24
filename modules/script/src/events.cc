@@ -50,6 +50,10 @@ int events_emit(lua_State* L) {
     }
     Engine& e = *ev->engine;
     TickContext* ctx = ev->ctx;
+    // A type registered while the engine runs (engine_add_event_type) has no stream
+    // resource: nothing in the schedule names it, and it goes by the engine's writer.
+    bool runtime = id < e.streams.len && e.streams[id] == 0;
+    if (runtime) ctx = nullptr;
     if (ctx && ctx->system) {
         Access m;
         u32 r = id < e.streams.len ? e.streams[id] : 0;
@@ -77,6 +81,8 @@ int events_received(lua_State* L) {
     TickContext* ctx = ev->ctx;
     const u8* data = nullptr;
     u32 count = 0;
+    if (id < e.streams.len && e.streams[id] == 0 && ctx && ctx->system)
+        luaL_error(L, "%s was registered while the engine runs: it is read by listening (engine_listen), not received", d->name);
     if (ctx && ctx->system) {
         bool reads = false;
         for (const ScheduledSystem::Cursor& c : ctx->system->cursors) if (c.type == id) reads = true;

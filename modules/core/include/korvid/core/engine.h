@@ -124,6 +124,8 @@ struct DeliveredEvent {
     u32                   size;
 };
 typedef void (*EventHookFn)(void* user, const DeliveredEvent& ev);
+// engine_listen's: one event of the type listened to, as it is delivered. Valid during the call.
+typedef void (*EventListenFn)(void* user, u32 type, const void* event);
 
 struct EventTrace {
     Array<TraceRecord> ring;      // capacity fixed at init; oldest overwritten
@@ -172,6 +174,11 @@ struct Engine {
     bool                  quit_requested   = false; // engine_request_quit was called; no more ticks run
     bool                  frame_wanted     = false; // engine_want_frame: a loop that paces on demand draws another frame
     bool                  ticks_wanted     = false; // engine_want_ticks: a loop that paces apart runs the next tick, drawing nothing
+    // Registered while it runs (engine_add_event_type), and listened to (engine_listen).
+    struct RuntimeEventType;
+    Array<RuntimeEventType*> runtime_events;
+    struct Listener { u32 type; EventListenFn fn; void* user; u64 seen; };
+    Array<Listener>       listeners;
     f64                   frame_due        = 0.0;   // engine_want_frame_at: the earliest time one is wanted; 0 none
     // engine_add_waker: what a loop pacing on demand asks each time it polls the platform.
     struct Waker { bool (*fn)(Engine&, void*); void* user; };
@@ -397,6 +404,33 @@ int  engine_describe_event(const Engine& e, u32 type_id, const void* event, char
 // away. Dev builds only: false in ship, and nothing is called.
 bool engine_set_event_hook(Engine& e, EventHookFn fn, void* user);
 
+// ---- registering while it runs (KR19) ---------------------------------------------------
+// An event type added after engine_init, from a field table built at runtime: a script
+// module's own. Between frames or at a phase boundary, on the main thread. Its name is
+// any not taken (`desc.name`, copied); its size, alignment and fields are checked as a
+// declared type's; `desc.fields` and `desc.defaults` are the caller's and must outlive the
+// type; `desc.id` is ignored (the engine keeps the id). Never sim state: not hashed, not
+// recorded, and no unit is scheduled against it. It is emitted from outside the schedule
+// (engine_emit, or a unit on the main thread, as e.events.emit is), delivered at the next
+// boundary like any event from there, and read by listening (engine_listen) or the event
+// hook. Its id, or 0 with a log line (a name taken, a bad table).
+u32  engine_add_event_type(Engine& e, const char* module, const EventTypeDesc& desc);
+// Takes a type engine_add_event_type added away: what is pending of it is dropped, its
+// listeners with it, and its id is never given out again in the run. False for an id it
+// did not add.
+bool engine_remove_event_type(Engine& e, u32 type);
+// Emits an event of any type by id from outside the schedule, `desc.size` bytes at `event`.
+// False for no such type.
+bool engine_emit(Engine& e, u32 type, const void* event);
+// A type's id by its name; 0 for none.
+u32  engine_event_type_id(const Engine& e, const char* name);
+// fn is called with each event of `type` delivered from now on, at the boundary that
+// merges it (the tick's start, then each phase's), in emission order: on the main thread,
+// between phases, while no unit runs. Any type, in any build: what code outside the
+// schedule reads a runtime type by. fn may listen and stop listening; it should not emit.
+bool engine_listen(Engine& e, u32 type, EventListenFn fn, void* user);
+void engine_unlisten(Engine& e, u32 type, EventListenFn fn, void* user);
+
 // The name language of the registration tables. A name starting with '.' means
 // "<module>." plus the rest ("?." keeps the '?' in front); anything else is itself. The
 // result is interned, so it is stable for the process. Lists are comma-separated:
@@ -418,7 +452,7 @@ void engine_apply_commands(Engine& e);
 // StateEdge events, pending. The tick runner calls it at the end of the tick.
 void engine_fire_triggers(Engine& e, u64 tick);
 // Records (and prints, and hands the hook, if asked) what the streams took since the last
-// call. Dev builds only.
+// call, and hands the listeners theirs (engine_listen). The trace in dev builds only.
 void engine_trace_delivery(Engine& e, u64 tick, u32 phase);
 
 } // namespace kv

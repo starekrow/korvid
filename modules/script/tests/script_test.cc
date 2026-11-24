@@ -268,6 +268,27 @@ void test_script_events(TestCtx& c) {
     KV_CHECK(c, g_seen == 3 && g_seen_track == 42);
     LUA_CHECK(c, L, "return SEEN == 3 and LAST.track == 42");
 
+    // A type registered while the engine runs (KR19), from a table made here: emitted by
+    // name from inside a unit, through the engine's writer, and listened to; not received.
+    {
+        static FieldDesc line_fields[2] = {{"n", FieldType::U32, 1, 0}, {"text", FieldType::Char, 12, 4}};
+        EventTypeDesc d{};
+        d.name = "SeLine";
+        d.size = 16;
+        d.align = 4;
+        d.fields = Span<const FieldDesc>(line_fields, 2);
+        u32 id = engine_add_event_type(e, "se", d);
+        KV_CHECK(c, id != 0);
+        static u32 heard = 0, heard_n = 0;
+        engine_listen(e, id, [](void*, u32, const void* ev) { ++heard; memcpy(&heard_n, ev, 4); }, nullptr);
+        g_emit_chunk = "ev:emit('SeLine', { n = 5, text = 'la la' }) OK2 = not pcall(ev.received, ev, 'SeLine')";
+        engine_frame(e, e.clock.tick_dt);
+        g_emit_chunk = nullptr;
+        engine_frame(e, e.clock.tick_dt);
+        KV_CHECK(c, heard == 1 && heard_n == 5);
+        LUA_CHECK(c, L, "return ev:has('SeLine') and #ev:fields('SeLine') == 2 and OK2 == true and err == nil");
+    }
+
     // A cosmetic resource by its fields, as of now; nothing for a name without a table.
     KV_CHECK(c, script_push_resource(L, e, "se.transport"));
     lua_setglobal(L, "T");

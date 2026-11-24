@@ -162,23 +162,26 @@ a struct by its field table) in one file, `settings.json`, in the settings direc
 
 ## Registering after start-up (KR19)
 
-Two calls, each at a phase boundary or between frames, from the main thread:
+Each at a phase boundary or between frames, from the main thread:
 
 ```cpp
-u32 engine_add_event_type(Engine& e, u32 module, const EventTypeDesc& d);  // its id
-u32 engine_add_ktable(Engine& e, u32 module, const RuntimeKTableDesc& d);  // a cosmetic ktable's id
-void engine_remove_event_type(Engine& e, u32 id);
-void engine_remove_ktable(Engine& e, u32 id);
+u32  engine_add_event_type(Engine& e, const char* module, const EventTypeDesc& d);  // its id
+bool engine_remove_event_type(Engine& e, u32 id);
+bool engine_emit(Engine& e, u32 type, const void* event);                    // any type, by id
+bool engine_listen(Engine& e, u32 type, EventListenFn fn, void* user);       // any type
+u32  engine_add_ktable(Engine& e, const char* module, const RuntimeKTableDesc& d);  // a cosmetic ktable
+bool engine_remove_ktable(Engine& e, u32 id);
 ```
 
 - **Never sim state.** A runtime ktable is cosmetic, a runtime event type is not hashed
-  and not recorded; neither changes the schedule. They are emitted and written from
-  outside the schedule (`e.events`, the ktable's own calls) or by a unit that declares
-  `emits = "*runtime"`, and read through `engine_events_since(e, id, cursor)`.
+  and not recorded; neither changes the schedule. A runtime type is emitted from outside
+  the schedule (`engine_emit`, or a unit on the main thread as `e.events.emit` is), and
+  read by listening: `fn` is handed each event at the boundary that delivers it. Listening
+  works for any type, in any build.
 - **Field tables built at runtime**: the caller's memory, kept until removal.
-- **Names** are the module's, and may not shadow anything registered.
-- **Removal** takes the type's stream or the ktable's rows at the next boundary; the id is
-  not given out again in the run. Lua's bindings to it fail with its name from then on.
+- **Names** may not shadow anything registered, nor one taken away in the run.
+- **Removal** drops what is pending of it and its listeners; the id is not given out
+  again in the run. Lua's bindings to it fail with its name from then on.
 
 ## A JPEG decoder (KR25)
 
@@ -213,7 +216,7 @@ decode.
 | KR18 | `script_push_events`, `EventTypeDesc::defaults`, `script_push_resource` | P0, blocks Blackwing slice 4 milestone 5 |
 | KR22 | `each ... count= from=`, the view event, placeholders, rows replaced in place | P0, blocks Blackwing slice 4 milestone 3 |
 | KR24 | `platform_user_dir`; the settings store | P1 |
-| KR19 | Runtime event types and cosmetic ktables, added and removed | P1 |
+| KR19 | Runtime event types and cosmetic ktables, added and removed; `engine_listen` | P1 |
 | KR25 | `jpeg_info`, `jpeg_decode`: baseline, progressive, scaled, fuzzed | P1 |
 | R12 | The module pages and quick references of `core`, `platform`, `platform_hid`, `frameloop`, `script`, `krome` and `image` change with their headers; `tools/doccheck.sh` reports nothing new | P0 |
 
@@ -257,10 +260,10 @@ and not verified unless a machine is to hand: the status says which.
 2. **One settings file, or Apple's defaults.** The draft uses a file everywhere. The
    defaults system is what macOS tools (`defaults read`) expect; it can come later behind
    the same calls.
-3. **`emits = "*runtime"`.** A unit that emits runtime types declares it once, and is
-   ordered against nothing for them: they are read outside the schedule only. If a runtime
-   type ever needs a reader inside it, the schedule has to be built again, which this slice
-   does not do.
+3. **Runtime types outside the schedule.** They are emitted through the engine's writer
+   and read by listening, so no unit is ordered against them. If a runtime type ever needs
+   a reader inside the schedule, the schedule has to be built again, which this slice does
+   not do.
 4. **Writing the JPEG decoder.** About two thousand lines, against vendoring
    libjpeg-turbo's C (which KR14 can now build) with its memory manager bent to an
    `Allocator`. The draft writes it: one file, the engine's allocators and errors, and
@@ -415,3 +418,20 @@ compiled.
   key forty times with a flush after each, and both keys at forty after. On linux-debug,
   linux-dev and linux-ship (ship without the kills, which need the hook), and under
   `address,undefined` and `thread`. Windows and Apple written, not compiled.
+
+**Milestone 8, runtime event types (KR19, 1): built Nov 23, 2026.** As above. A runtime
+type takes the next id; the bus makes its stream as anything is emitted into it, and
+`Engine::streams` holds 0 for it (no resource: nothing in the schedule names it), which is
+how the script binding tells one and sends its emits through the engine's writer even from
+inside a unit. Listeners are served from `engine_trace_delivery`, now called in every
+build, before the dev trace. `engine_listen` starts at what is merged then; a listener may
+stop listening during a delivery.
+
+- **Tests** (`runtime event types`, core): a type from a table made at runtime, refused
+  when its name is taken, a field runs past its size, or its module is not there; emitted
+  from outside, heard at the next boundary with its bytes; described and handed to the
+  event hook with its table; the state hash a run's without it; a listener on a declared
+  type, which stops when told; removed, its pending event and listener gone, its id and
+  name not given out again, and a declared type not removable. (`script events`): a runtime
+  type emitted from Lua inside a unit and heard, and `received` refused for it. On
+  linux-debug and linux-ship, and under `address,undefined` and `thread`.

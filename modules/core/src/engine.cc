@@ -16,6 +16,10 @@
 
 namespace kv {
 
+// runtime.cc: what was registered while the engine ran (KR19), and the listeners.
+void engine_deliver_listened(Engine& e);
+void engine_free_runtime(Engine& e);
+
 namespace {
 
 bool names_equal(const char* a, const char* b) { return strcmp(a, b) == 0; }
@@ -1417,6 +1421,7 @@ void engine_shutdown(Engine& e) {
     e.events.types = {};
     for (const ModuleInstance& inst : e.modules) event_types_unregister(inst.desc->events);
     event_types_unregister(k_core_events);
+    engine_free_runtime(e);
     e.event_types.free();
     unregister_components(e);
     e.phases.free();
@@ -1828,6 +1833,7 @@ bool engine_set_event_hook(Engine& e, EventHookFn fn, void* user) {
 }
 
 void engine_trace_delivery(Engine& e, u64 tick, u32 phase) {
+    engine_deliver_listened(e);
 #if KV_DEV
     if (e.trace.ring.len == 0) return;
     EventBus& bus = e.events;
@@ -1862,7 +1868,7 @@ void engine_trace_delivery(Engine& e, u64 tick, u32 phase) {
         st.traced = st.end();
     }
 #else
-    KV_UNUSED(e); KV_UNUSED(tick); KV_UNUSED(phase);
+    KV_UNUSED(tick); KV_UNUSED(phase);
 #endif
 }
 
