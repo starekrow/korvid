@@ -98,6 +98,14 @@ script's tables made into one, and builds the kernel's tree:
   parent's gap); scrolling builds the newly visible and lets the gone go, as a region is
   built again. Every row is the height given. Outside a scroll box, or in an overlay, it
   builds every row.
+- **`each row in rows height=24 count=@total from=@first -> view`** is sparse: it lays out
+  and scrolls as if `count` rows were there, the model's `rows` holding only rows
+  `[from, from + #rows)`. A row it builds that the model does not hold is the block's
+  `placeholder { ... }` child, at the same height. When the rows it builds change it says
+  so once: `KromeView{screen, event, first, count, total}`, and the screen's
+  `on.view(first, count, total)`; the owner puts those rows in the model (the list and
+  `from`), a tick or two later as it likes. `count` and `from` are numbers or `@keys`; a
+  change to either, or to the list, builds the rows in view again and leaves the scroll.
 - **`if tab=rules`** is built while the model's value there is that (a tab's page).
 - **In a definition's body**, `{@}` in a text is its use's binding as the model shows it,
   and `@@` as a property's value binds the property to it (`def progress { box w=@@ }`).
@@ -259,6 +267,7 @@ Header `korvid/krome/krome.h`:
 | `krome_viewport(e, w, h, scale)` | function | the view's size without a window |
 | `krome_stats(e)` | function | layouts, paints, lists handed over, events, errors, regions and nodes rebuilt |
 | `KromeEvent`, `KromeSet` | events | out and in |
+| `KromeView` | event | out: which rows a sparse each built (`first`, `count`, `total`) |
 | `krome.pump`, `krome.input`, `krome.paint` (Frame) | systems | documents, scripts, rebuilds and model values; the pointer; layout and paint |
 | `/krome` | CLI mount | `ls` screens and named nodes, `print` a tree or a node, `patch NODE PROPERTY VALUE...` |
 

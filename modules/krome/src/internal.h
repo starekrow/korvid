@@ -58,6 +58,19 @@ struct KromeRegion {
     // before and after stood in for by spacers; len the list's length when it was built.
     f32               height = 0.0f;
     u32               first = 0, want = 0, len = 0;
+    // A sparse one (`count=` and `from=`, KR22): `len` is the count, the model's list holds
+    // rows [rows_from, rows_from + rows_len), and the rest are built from the block's
+    // placeholder. The count and the first row are a number or a model path, rebuilt when
+    // their keys change too. `view` is the event that says which rows are built; what it
+    // said last is kept, so it is said once a change.
+    bool              sparse = false;
+    const char*       count_path = nullptr;
+    const char*       from_path  = nullptr;
+    u32               count_n = 0, from_n = 0;
+    u64               count_key = 0, from_key = 0;
+    u32               rows_from = 0, rows_len = 0;
+    Name              view = {};
+    u32               sent_first = ~0u, sent_count = ~0u, sent_len = ~0u;
 };
 
 // One reading of a .kimb: its nodes and strings, and the file over them. A reload makes a
@@ -389,6 +402,11 @@ const char* krome_model_value_text(KromeModule& s, KromeScreen& sc, const char* 
 bool krome_fire(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, f64 value);
 // A named event of a node's (an edit's change or blur, its submit): its handler, then KromeEvent.
 void krome_fire_named(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, Name event, f64 value);
+// A sparse each's built rows changed (KromeView, and the screen's on.<event>).
+void krome_fire_view(KromeModule& s, KromeScreen& sc, Name event, u32 first, u32 count, u32 total);
+void krome_emit_view(KromeModule& s, const KromeView& ev);
+// Says, for each sparse each whose built rows changed since it last said, which they are.
+void krome_send_views(KromeModule& s, KromeScreen& sc);
 // A right-button press's event: the handler gets (id, x, y), KromeEvent the place.
 void krome_fire_at(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, Name event, f32 x, f32 y);
 // The model at a dotted path set to a string, and what reads it told.

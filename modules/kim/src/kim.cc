@@ -29,6 +29,8 @@ struct Node {
     const char*        var = nullptr; // each
     const char*        in = nullptr;  // each
     JsonRef            height = KV_JSON_NO_REF; // each ... height=24: a virtualized each's rows
+    JsonRef            count  = KV_JSON_NO_REF; // each ... count=@total: a sparse each's length, a number or a model key
+    JsonRef            from   = KV_JSON_NO_REF; // each ... from=@first: the row its list's first element is
     const char*        on = nullptr;  // if
     const char*        on_value = nullptr; // if key=value
     JsonRef            range = KV_JSON_NO_REF;
@@ -407,14 +409,33 @@ struct Parser {
             if (!n->var || !kw || strcmp(kw, "in") || !n->in) { err(c0, "each is written 'each item in list { ... }'"); skip_line(); }
             blanks();
             // A fixed height for every element: only those in view are built.
-            if (!strncmp(text + at, "height=", 7)) {
-                at += 7;
-                u32 c1 = col();
-                JsonRef h = scalar();
-                if (h == KV_JSON_NO_REF || b.type(h) != JsonType::Number) err(c1, "height takes a number of pixels");
-                else n->height = h;
+            // A sparse one (count=, from=): the list is a window of rows, `count` long in all,
+            // its first element row `from`; `-> name` is the event that says which rows are
+            // in view. Any order.
+            for (;;) {
+                if (!strncmp(text + at, "height=", 7)) {
+                    at += 7;
+                    u32 c1 = col();
+                    JsonRef h = scalar();
+                    if (h == KV_JSON_NO_REF || b.type(h) != JsonType::Number) err(c1, "height takes a number of pixels");
+                    else n->height = h;
+                } else if (!strncmp(text + at, "count=", 6) || !strncmp(text + at, "from=", 5)) {
+                    bool is_count = text[at] == 'c';
+                    at += is_count ? 6 : 5;
+                    u32 c1 = col();
+                    JsonRef v = scalar();
+                    if (v == KV_JSON_NO_REF || (b.type(v) != JsonType::Number && b.type(v) != JsonType::String))
+                        err(c1, is_count ? "count takes a number or @key" : "from takes a number or @key");
+                    else (is_count ? n->count : n->from) = v;
+                } else if (peek() == '-' && peek(1) == '>') {
+                    at += 2;
+                    blanks();
+                    n->event = word();
+                    if (!n->event) err(col(), "an event is '-> name'");
+                } else break;
                 blanks();
             }
+            if (n->height == KV_JSON_NO_REF && (n->count != KV_JSON_NO_REF || n->from != KV_JSON_NO_REF)) err(c0, "a sparse each (count=, from=) needs height=");
             if (peek() == '{') children(n);
             else err(c0, "each needs a block");
             return n;
@@ -768,6 +789,8 @@ struct Parser {
         if (n->var) b.set(o, "v", b.string(n->var));
         if (n->in) b.set(o, "in", b.string(n->in));
         if (n->height != KV_JSON_NO_REF) b.set(o, "height", n->height);
+        if (n->count != KV_JSON_NO_REF) b.set(o, "count", n->count);
+        if (n->from != KV_JSON_NO_REF) b.set(o, "from", n->from);
         if (n->on) b.set(o, "on", b.string(n->on));
         if (n->on_value) b.set(o, "ov", b.string(n->on_value));
         if (n->kids.len) {

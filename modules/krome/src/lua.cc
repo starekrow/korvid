@@ -835,6 +835,28 @@ void krome_model_set_string(KromeModule& s, KromeScreen& sc, const char* key, co
     krome_model_changed(s, sc, name_intern(key).hash);
 }
 
+void krome_fire_view(KromeModule& s, KromeScreen& sc, Name event, u32 first, u32 count, u32 total) {
+    lua_State* L = s.L;
+    if (L && sc.on != LUA_NOREF && !event.is_null()) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, sc.on);
+        lua_getfield(L, -1, name_str(event));
+        lua_remove(L, -2);
+        if (lua_isfunction(L, -1)) {
+            lua_pushinteger(L, first);
+            lua_pushinteger(L, count);
+            lua_pushinteger(L, total);
+            if (lua_pcall(L, 3, 0, 0) != LUA_OK) {
+                KV_ERROR("krome", "%s", lua_tostring(L, -1));
+                lua_pop(L, 1);
+                ++s.script_errors;
+            }
+        } else {
+            lua_pop(L, 1);
+        }
+    }
+    krome_emit_view(s, KromeView{sc.name.hash, event.hash, first, count, total, 0});
+}
+
 void krome_fire_named(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, Name event, f64 value) {
     if (node >= tree.nodes.len || event.is_null()) return;
     Name id = tree.nodes[node].id;

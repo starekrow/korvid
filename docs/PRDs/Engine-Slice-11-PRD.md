@@ -118,8 +118,9 @@ ev:fields("PlayerPlay")                  -- the field names, in order
 - it lays out and scrolls as if `count` rows were there;
 - the model holds a run of rows in `rows`, the first of them row `from`, and may replace
   either at any time;
-- when the range in view changes it emits `KromeEvent{screen, node, "view", "a..b"}`
-  (with the screenful each side it builds), so the owner can ask for those rows;
+- when the rows it builds change (those in view and a screenful each side) it emits
+  `KromeView{screen, event, first, count, total}`, and calls the screen's
+  `on.<event>(first, count, total)`, so the owner can ask for those rows;
 - a row in view that the model does not hold is built from the block's `placeholder`
   child, the same height;
 - rows replaced under a list at rest change in place: the scroll does not move, and a row
@@ -338,3 +339,22 @@ starts from `slice-10`. As above, and:
   by `pcall` in the unit, none emitting; one emitted from outside, delivered next tick; a
   cosmetic resource read by its fields. On linux-dev, linux-debug and linux-ship, and under
   `address,undefined`.
+
+**Milestone 4, the sparse list's shape (KR22): built Nov 23, 2026.** As above, and:
+
+- **Markup**: `count=`, `from=` and `-> event` on an `each`, in any order after the list;
+  `count=` or `from=` without `height=` is an error. `placeholder { ... }` is a child of the
+  block, built for a row the model does not hold, its texts reading element 0, which no
+  list has.
+- **Rebuilt** when the list, the count's key or the first row's key changes, so handing
+  rows over is two model writes (the list, `from`), each a region build of the rows in
+  view, with the scroll left where it was.
+- **Said once a change**, after the frame's layout and its virtual rounds, gathered before
+  any handler runs, since a handler that sets the model rebuilds regions as it does.
+- **Tests**: `krome sparse` (fifty thousand rows: the content's height; placeholders and an
+  ask, once, at the start; rows handed over a frame later, in place; a jump to the middle,
+  placeholders there, a new ask, rows handed over landing at the box's top with the
+  scroll unmoved; half a window held, half placeholders; the count changed by the model)
+  and `kim` (the markup, and the error).
+- **Next, milestone 5:** a row whose values did not change is still built again when the
+  rows are handed over; and the drag end to end, timed.

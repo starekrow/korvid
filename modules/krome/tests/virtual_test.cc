@@ -88,6 +88,53 @@ u32 fill_at(KromeModule& s, KromeScreen& sc, rect2 r) {
     return fill;
 }
 
+
+// A sparse each (KR22): fifty thousand rows, of which the model holds a window.
+const char* k_sparse = R"({"kim": 1, "file": "v/p.kim", "scripts": ["v/p.lua"],
+  "screens": { "main": { "w": "box", "p": { "dir": "col" }, "c": [
+    { "w": "box", "id": "list", "f": ["scroll"], "p": { "dir": "col", "w": 300, "h": 240 }, "c": [
+      { "w": "each", "v": "row", "in": "rows", "height": 24, "count": "@total", "from": "@first", "e": "view", "c": [
+        { "w": "text", "t": "{row.name}", "p": { "h": 24 } },
+        { "w": "placeholder", "c": [ { "w": "text", "t": "...", "p": { "h": 24 } } ] }
+      ] }
+    ] }
+  ] } } })";
+const char* k_sparse_script = R"lua(
+return { model = { total = 50000, first = 0, rows = {}, asked = -1, asked_n = 0, views = 0 },
+         on = { view = function(first, count, total) model.asked = first model.asked_n = count model.views = model.views + 1 model.total_seen = total end } }
+)lua";
+
+u32 count_texts(const KromeTree& t, const char* want) {
+    u32 n = 0;
+    for (u32 i = 0; i < t.nodes.len; ++i)
+        if (t.nodes[i].type == KromeType::Text && !(t.nodes[i].flags & KROME_DEAD) && !strcmp(t.text(i), want)) ++n;
+    return n;
+}
+
+// The model's list as the owner would hand it: rows [from, from + n), "track <row + 1>".
+void give_rows(Engine& e, Name scn, u32 from, u32 n) {
+    Array<char> j{};
+    auto put = [&](const char* text) { usize l = strlen(text); memcpy(j.push_n((u32)l), text, l); };
+    put("[");
+    char item[64];
+    for (u32 i = 0; i < n; ++i) { format(item, sizeof item, "%s{\"name\": \"track %u\"}", i ? "," : "", from + i + 1); put(item); }
+    put("]");
+    JsonDoc doc;
+    if (json_parse(j.data, j.len, mem_scratch(), doc)) {
+        Array<u8> k{};
+        kbor_write(doc, k);
+        krome_set_doc(e, scn, "rows", k.data, k.len);
+        k.free();
+    }
+    krome_set(e, scn, "first", (f64)from);
+    j.free();
+}
+
+f64 model_num(KromeModule& s, KromeScreen& sc, const char* path) {
+    f64 v = -99.0;
+    krome_model_number(s, sc, path, &v);
+    return v;
+}
 } // namespace
 
 void test_virtual(kv::TestCtx& c) {
@@ -186,5 +233,69 @@ void test_virtual(kv::TestCtx& c) {
     KV_CHECK(c, again >= back);
     s.clock += 1.0;
     KV_CHECK(c, fill_at(s, sc, fr) == 0xFFFFFFFFu);
+    engine_shutdown(e);
+}
+
+void test_sparse(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("krome sparse");
+    const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &asset_module, &krome_module};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    KromeModule& s = *krome_state(e);
+    krome_viewport(e, 800, 600, 1.0f);
+    provide_json(e, "v/p.kimb", k_sparse);
+    krome_provide(e, "v/p.lua", k_sparse_script, strlen(k_sparse_script));
+    Name scn = krome_open(e, "v/p.kimb", "main");
+    frames(e, 3);
+    KV_CHECK(c, krome_ready(e, scn));
+    KromeScreen& sc = *krome_screen(s, scn);
+    KromeTree& t = sc.tree;
+    u32 list_n = krome_find(t, name_intern("list"));
+
+    // Laid out as if every row were there; nothing held, so placeholders, and the rows
+    // built asked for.
+    const KromeRegion* r = region_of(sc, 24.0f);
+    KV_CHECK(c, r && r->sparse && r->len == 50000 && r->rows_len == 0);
+    KV_CHECK(c, t.nodes[list_n].content.y == 50000.0f * 24.0f);
+    u32 built = r ? (r->first + r->want < r->len ? r->want : r->len - r->first) : 0;
+    KV_CHECK(c, built > 10 && built <= 100 && count_texts(t, "...") == built && text_node(t, "track 1") == KROME_NONE);
+    KV_CHECK(c, model_num(s, sc, "asked") == 0.0 && model_num(s, sc, "asked_n") == (f64)built && model_num(s, sc, "total_seen") == 50000.0);
+    f64 views = model_num(s, sc, "views");
+    KV_CHECK(c, views == 1.0);
+
+    // The owner hands them a tick later: each row in place, no placeholder left, no new ask.
+    give_rows(e, scn, 0, built);
+    frames(e, 1);
+    r = region_of(sc, 24.0f);
+    KV_CHECK(c, r && r->rows_len == built && count_texts(t, "...") == 0 && text_node(t, "track 1") != KROME_NONE && text_node(t, "track 2") != KROME_NONE);
+    KV_CHECK(c, model_num(s, sc, "views") == views && t.nodes[list_n].scroll.y == 0.0f);
+
+    // A jump to the middle by the scrollbar: placeholders where the rows have not come, in
+    // their places, and an ask for the new ones.
+    t.nodes[list_n].scroll.y = 600000.0f;
+    t.dirty = true;
+    frames(e, 1);
+    r = region_of(sc, 24.0f);
+    f64 asked = model_num(s, sc, "asked");
+    KV_CHECK(c, r && asked > 24900.0 && asked < 25000.0 && model_num(s, sc, "views") == views + 1.0);
+    KV_CHECK(c, text_node(t, "track 1") == KROME_NONE && count_texts(t, "...") > 0);
+    u32 n = (u32)model_num(s, sc, "asked_n");
+    give_rows(e, scn, (u32)asked, n);
+    frames(e, 1);
+    u32 mid = text_node(t, "track 25001");
+    KV_CHECK(c, mid != KROME_NONE && t.nodes[mid].rect.y == t.nodes[list_n].rect.y && count_texts(t, "...") == 0);
+    KV_CHECK(c, t.nodes[list_n].scroll.y == 600000.0f);
+
+    // Rows only partly held: the held ones real, the rest placeholders.
+    give_rows(e, scn, (u32)asked, n / 2);
+    frames(e, 1);
+    KV_CHECK(c, text_node(t, "track 25001") != KROME_NONE && count_texts(t, "...") == n - n / 2);
+
+    // A shorter list: the count is the model's.
+    krome_set(e, scn, "total", 100.0);
+    frames(e, 2);
+    r = region_of(sc, 24.0f);
+    KV_CHECK(c, r && r->len == 100 && t.nodes[list_n].content.y == 2400.0f && model_num(s, sc, "total_seen") == 100.0);
     engine_shutdown(e);
 }

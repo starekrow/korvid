@@ -1016,6 +1016,7 @@ void krome_view_frame(KromeModule& s) {
                 krome_layout(sc->tree, sc->tree.root, rect2{0, 0, W, H}, m, true);
                 ++s.layouts;
             }
+            krome_send_views(s, *sc); // a sparse each's owner asked for the rows it now shows
             sc->repaint = true;
             for (KromeOverlay* o : sc->overlays) o->placed = false;
         }

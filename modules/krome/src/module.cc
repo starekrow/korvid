@@ -35,6 +35,11 @@ void krome_emit(KromeModule& s, const KromeEvent& ev) {
     else s.e->events.emit(ev);
 }
 
+void krome_emit_view(KromeModule& s, const KromeView& ev) {
+    if (s.ctx) s.ctx->emit(ev);
+    else s.e->events.emit(ev);
+}
+
 namespace {
 
 void free_screen(KromeModule& s, KromeScreen* sc) {
@@ -451,7 +456,9 @@ constinit const CliMountDesc k_mounts[] = {{.path = "/krome", .list = krome_cli_
 
 constinit const FieldDesc k_event_fields[] = {KV_FIELDS(KromeEvent, screen, node, event, value, x, y)};
 constinit const FieldDesc k_set_fields[] = {KV_FIELDS(KromeSet, screen, key, number, kind, pad, text)};
-constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(KromeEvent, k_event_fields, 0), KV_EVENT_EX(KromeSet, k_set_fields, 0)};
+constinit const FieldDesc k_view_fields[] = {KV_FIELDS(KromeView, screen, event, first, count, total, pad)};
+constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(KromeEvent, k_event_fields, 0), KV_EVENT_EX(KromeSet, k_set_fields, 0),
+                                            KV_EVENT_EX(KromeView, k_view_fields, 0)};
 // A document's blob landed or reloaded (in PreSim): a frame, so the pump takes it.
 void on_asset_ready(TickContext& ctx, Span<const AssetReady>) { engine_want_frame(*ctx.engine); }
 void on_asset_reloaded(TickContext& ctx, Span<const AssetReloaded>) { engine_want_frame(*ctx.engine); }

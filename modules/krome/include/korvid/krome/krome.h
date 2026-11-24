@@ -33,6 +33,13 @@ struct Engine;
 // event (0 for the rest).
 struct KromeEvent { u64 screen; u64 node; u64 event; f64 value; f32 x = 0.0f, y = 0.0f; };
 
+// Out: which rows a sparse each (`each row in rows height=24 count=@total from=@first ->
+// view`) has built, when that changes: rows [first, first + count) of `total`, those in view
+// and a screenful each side. The screen's owner puts those rows in the model (the list and
+// `from`); until it does they are the block's placeholder. event: the name after `->`, a
+// hash (0 when the each names none). A screen's Lua sees it as on.<event>(first, count, total).
+struct KromeView { u64 screen; u64 event; u32 first; u32 count; u32 total; u32 pad; };
+
 // In: a model value from outside. kind: 0 a number, 1 a boolean (number 0 or 1), 2 a string.
 constexpr u32 KROME_SET_TEXT = 56;
 struct KromeSet { u64 screen; u64 key; f64 number; u32 kind; u32 pad; char text[KROME_SET_TEXT]; };

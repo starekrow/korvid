@@ -119,6 +119,11 @@ void test_kim(kv::TestCtx& c) {
     KV_CHECK(c, same(doc_of("screen s { col scroll { each r in rows height=24 { text \"{r.name}\" } } }", KV_KIM_NO_LINES),
         R"({"kim":1,"file":"t.kim","screens":{"s":{"w":"col","f":["scroll"],"c":[{"w":"each","v":"r","in":"rows","height":24,"c":[{"w":"text","t":"{r.name}"}]}]}}})"));
 
+    // A sparse each (KR22): its count and first row from the model, in any order, and the
+    // event that says which rows it built.
+    KV_CHECK(c, same(doc_of("screen s { col scroll { each r in rows count=@total height=24 from=@first -> view {\n text \"{r.name}\"\n placeholder { text \"...\" } } } }", KV_KIM_NO_LINES),
+        R"({"kim":1,"file":"t.kim","screens":{"s":{"w":"col","f":["scroll"],"c":[{"w":"each","e":"view","v":"r","in":"rows","height":24,"count":"@total","from":"@first","c":[{"w":"text","t":"{r.name}"},{"w":"placeholder","c":[{"w":"text","t":"..."}]}]}]}}})"));
+
     // Canonical: comments, spacing, property order and a repeated property change nothing.
     {
         Array<u8> a = bytes_of("screen s {\n  row gap=8 pad=4 {\n    text \"a\"\n  }\n}\n");
@@ -188,6 +193,7 @@ void test_kim_errors(kv::TestCtx& c) {
     KV_CHECK(c, first("screen s { box bg=#12345 }", 1, 19, "#rrggbb"));
     KV_CHECK(c, first("screen s { box w=8px }", 1, 18, "not a number"));
     KV_CHECK(c, first("screen s { box 8 }", 1, 16, "bare range"));
+    KV_CHECK(c, first("screen s { col { each r in rows count=@n { text \"a\" } } }", 1, 18, "needs height="));
     KV_CHECK(c, first("screen s {\n  each item assets { text \"x\" }\n}", 2, 3, "each item in list"));
     KV_CHECK(c, first("screen s {\n  if { text \"x\" }\n}", 2, 3, "if name"));
     KV_CHECK(c, first("screen s {\n  each r in rows height=x { text \"x\" }\n}", 2, 25, "height takes a number"));

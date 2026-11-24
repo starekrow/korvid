@@ -395,6 +395,21 @@ u32 region_body(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, con
         const char* path = model_path(b, fr, in);
         u32 len = krome_model_length(b.s, b.sc, path);
         u32 from = 0, to = len;
+        // A sparse each: the list is a run of rows, the count and its first row the model's.
+        u32 held_from = 0, held = len;
+        const JsonValue* placeholder = nullptr;
+        if (virt && virt->sparse) {
+            f64 v = 0.0;
+            u32 count = virt->count_path ? (krome_model_number(b.s, b.sc, virt->count_path, &v) && v > 0.0 ? (u32)v : 0) : virt->count_n;
+            v = 0.0;
+            held_from = virt->from_path ? (krome_model_number(b.s, b.sc, virt->from_path, &v) && v > 0.0 ? (u32)v : 0) : virt->from_n;
+            virt->rows_from = held_from;
+            virt->rows_len  = held;
+            len = count;
+            if (kids)
+                for (const JsonValue* k = json_first(f.doc, *kids); k; k = json_next(f.doc, *k))
+                    if (!strcmp(json_string(json_get(f.doc, *k, "w"), ""), "placeholder")) placeholder = k;
+        }
         if (virt) {
             // Only the window, held inside the list as it is now.
             if (virt->first + virt->want > len) virt->first = len > virt->want ? len - virt->want : 0;
@@ -409,10 +424,21 @@ u32 region_body(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, con
             *e = KromeFrame{};
             e->outer = fr;
             e->var = var;
+            bool have = !virt || !virt->sparse || (i >= held_from && i - held_from < held);
+            u32 element = virt && virt->sparse ? i - held_from + 1 : i + 1;
             char p[300];
-            i32 pn = format(p, sizeof p, "%s.%u", path, i + 1);
+            // A row the model does not hold reads element 0, which no list has: its
+            // placeholder's texts that name the row's fields come out empty.
+            i32 pn = format(p, sizeof p, "%s.%u", path, have ? element : 0u);
             e->path = keep(b, p, (usize)pn);
-            if (kids) for (const JsonValue* k = json_first(f.doc, *kids); k; k = json_next(f.doc, *k)) node(b, f, *k, parent, e, nullptr);
+            if (!have) {
+                if (placeholder) if (const JsonValue* pk = json_get(f.doc, *placeholder, "c"))
+                    for (const JsonValue* k = json_first(f.doc, *pk); k; k = json_next(f.doc, *k)) node(b, f, *k, parent, e, nullptr);
+                continue;
+            }
+            if (kids)
+                for (const JsonValue* k = json_first(f.doc, *kids); k; k = json_next(f.doc, *k))
+                    if (k != placeholder) node(b, f, *k, parent, e, nullptr);
         }
         if (virt) spacer(b, parent, len - to, virt->height);
     } else {
@@ -449,6 +475,22 @@ void region(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const K
     f32 height = (f32)json_number(json_get(f.doc, n, "height"), 0.0);
     if (height > 0.0f && b.regions) {
         r.height = height;
+        // Sparse (KR22): the count and the first row, each a number or @path.
+        const JsonValue* cv = json_get(f.doc, n, "count");
+        const JsonValue* fv = json_get(f.doc, n, "from");
+        if (cv || fv) {
+            r.sparse = true;
+            auto take = [&](const JsonValue* v, const char** path, u32* num, u64* key) {
+                if (!v) return;
+                if (v->str() && v->str()[0] == '@') { *path = model_path(b, fr, v->str() + 1); *key = head_key(*path); }
+                else *num = (u32)json_number(v, 0.0);
+            };
+            take(cv, &r.count_path, &r.count_n, &r.count_key);
+            take(fv, &r.from_path, &r.from_n, &r.from_key);
+            if (!cv) error(b, fr, f.file, n.line, "a sparse each (from=) needs count=");
+            const char* ev = json_string(json_get(f.doc, n, "e"), nullptr);
+            if (ev) r.view = name_intern(ev);
+        }
         f32 view = b.s.win_h > 0.0f ? b.s.win_h / b.s.scale : 1000.0f;
         r.want = (u32)(view * 3.0f / height) + 8;
         // Built whole again: where it was, so nothing is built twice to get back there.
@@ -916,7 +958,8 @@ void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key) {
     bool any = false;
     u32 n = sc.regions.len;
     for (u32 i = 0; i < n; ++i)
-        if (sc.regions[i].alive && sc.regions[i].key == key && rebuild_one(s, sc, i)) any = true;
+        if (sc.regions[i].alive && (sc.regions[i].key == key || (sc.regions[i].sparse && (sc.regions[i].count_key == key || sc.regions[i].from_key == key)))
+            && rebuild_one(s, sc, i)) any = true;
     if (any) rebuilt(s, sc);
 }
 
@@ -956,6 +999,24 @@ bool krome_virtual_regions(KromeModule& s, KromeScreen& sc) {
     }
     if (any) rebuilt(s, sc);
     return any;
+}
+
+void krome_send_views(KromeModule& s, KromeScreen& sc) {
+    // Gathered first: a handler that puts rows in the model rebuilds regions as it does.
+    struct View { Name event; u32 first, count, total; };
+    View views[16];
+    u32 n = 0;
+    for (KromeRegion& r : sc.regions) {
+        if (!r.alive || !r.sparse || (sc.tree.nodes[r.anchor].flags & KROME_DEAD)) continue;
+        u32 to = r.first + r.want < r.len ? r.first + r.want : r.len;
+        u32 count = to > r.first ? to - r.first : 0;
+        if (r.first == r.sent_first && count == r.sent_count && r.len == r.sent_len) continue;
+        r.sent_first = r.first;
+        r.sent_count = count;
+        r.sent_len   = r.len;
+        if (n < 16) views[n++] = View{r.view, r.first, count, r.len};
+    }
+    for (u32 i = 0; i < n; ++i) krome_fire_view(s, sc, views[i].event, views[i].first, views[i].count, views[i].total);
 }
 
 } // namespace kv
