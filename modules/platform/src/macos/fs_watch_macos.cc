@@ -253,6 +253,7 @@ void fs_native_poll(FsNative* n, FsSink& sink) {
             continue;
         }
         if (!(f & (kFSEventStreamEventFlagItemIsFile | kFSEventStreamEventFlagItemIsSymlink))) continue;
+        if (there && S_ISLNK(st.st_mode) && os_path_is_dir_link(abs)) continue; // not reported, not gone down (KR16)
         if (there && !S_ISDIR(st.st_mode)) {
             if (created) sink.emit(FsEventKind::Added, r->id, nullptr, rel);
             if (f & kFSEventStreamEventFlagItemModified) sink.emit(FsEventKind::Changed, r->id, nullptr, rel);

@@ -60,6 +60,11 @@ OsPathKind os_path_kind(const char* path) {
     return OsPathKind::Other;
 }
 
+bool os_path_is_dir_link(const char* path) {
+    struct stat st;
+    return lstat(path, &st) == 0 && S_ISLNK(st.st_mode) && stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 static void stat_to(const struct stat& st, OsStat* out) {
     out->kind = S_ISREG(st.st_mode) ? OsPathKind::File : S_ISDIR(st.st_mode) ? OsPathKind::Dir : OsPathKind::Other;
     out->size = (u64)st.st_size;

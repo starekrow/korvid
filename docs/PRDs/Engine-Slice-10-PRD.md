@@ -296,10 +296,10 @@ On Windows `os_make_dir`, `os_remove` and `os_remove_dir` widen through `WidePat
 the queue's opens do since KR4.
 
 **The watcher and links (KR16).** A recursive watch never goes down a link to a
-directory: what the library's walk does (KR11 marks links), the watcher does. A link
-itself is an entry: made, removed or changed, it is reported by its own path. The
-alternative, an option to follow with the reported path saying it came through a link,
-is not built; nothing asks for following.
+directory: what the library's walk does (KR11 marks links), the watcher does. Such a link
+is not reported either, since there is no kind for it; a link to a file is the file, as
+before. The alternative, an option to follow with the reported path saying it came
+through a link, is not built; nothing asks for following.
 
 **A cosmetic resource's fields (KR17).** `ResourceDesc::cosmetic`. With `fields` set it
 says the table describes the object and nothing more: no state hash, no plain-data check
@@ -712,3 +712,24 @@ keeps its path in an `Array<char>` that grows a level at a time. Test
 (`io_make_dirs_deep`): thirteen levels of 230 bytes, over 3,000 in all, made twice, a file
 written in the deepest, `io_make_dirs` of that file refused, and the tree removed.
 Checked on linux-dev and linux-debug. The Windows change is written, not compiled.
+
+**Milestone 12, the watcher and links (KR16): built Nov 23, 2026.** As above, in every
+backend:
+
+- **The shared walk** (`fs_walk`: the polling backend, and the Windows and macOS
+  backends' walks of a directory that appears) lists with `os_dir_list`, which marks
+  links, and leaves out a link to a directory.
+- **inotify** lists the same way when it adds a tree, watches nothing under a root with
+  `IN_DONT_FOLLOW`, and drops a created or moved-in entry that is a link to a directory.
+- **Windows and macOS** drop such an entry as it arrives. A new helper,
+  `os_path_is_dir_link`, asks: `lstat` and `stat` on POSIX; on Windows the entry's own
+  find record, whose reparse tag tells a link or junction from a cloud placeholder.
+- **Its removal** may still come as `Removed` of a path never `Added`: inotify cannot say
+  what a removed name was. The header says so.
+- **Test** (`fs_watch links`, poll and native): a root holding a link to itself, a link
+  under a subdirectory to a tree outside, and a link to a file outside; another link to
+  the root made while it runs. A file written in the root is reported once by its own
+  path; one written outside, and every link to a directory, not at all. Without the fix
+  the test does not finish: two loops make a walk that doubles at each level.
+- **Checked** on linux-dev and linux-debug. The Windows and macOS changes are written,
+  not compiled.

@@ -59,12 +59,16 @@ void drop_dir(FsNative* n, u32 index) {
     --n->dirs.len;
 }
 
-struct Listing { Array<char> text; Array<u32> at; };
-void list_name(void* user, const char* name) {
+// A directory's entries and what each is. A link to a directory is left out: it is not
+// watched, and not reported (KR16).
+struct Listing { Array<char> text; Array<u32> at; Array<OsPathKind> kind; };
+void list_name(void* user, const OsDirEntry& e) {
+    if (e.is_link && e.st.kind == OsPathKind::Dir) return;
     Listing* l = (Listing*)user;
-    u32 len = (u32)strlen(name);
+    u32 len = (u32)strlen(e.name);
     l->at.push(l->text.len);
-    memcpy(l->text.push_n(len + 1), name, len + 1);
+    l->kind.push(e.st.kind);
+    memcpy(l->text.push_n(len + 1), e.name, len + 1);
 }
 
 // Watches root/rel and everything under it. With a sink, says what it finds: the
@@ -74,7 +78,9 @@ bool add_tree(FsNative* n, const FsInoRoot& root, const char* rel, FsSink* sink,
     char abs[KV_PLATFORM_PATH_MAX * 2];
     int len = snprintf(abs, sizeof abs, rel[0] ? "%s/%s" : "%s", root.dir, rel);
     if (len < 0 || (usize)len >= sizeof abs) return false;
-    int wd = inotify_add_watch(n->fd, abs, kMask);
+    // A root may be a link, which is followed; nothing under one is (KR16), so a link that
+    // took a directory's place after it was listed is not watched either.
+    int wd = inotify_add_watch(n->fd, abs, rel[0] ? kMask | IN_DONT_FOLLOW : kMask);
     if (wd < 0) {
         if (errno == ENOSPC) KV_WARN("platform", "fs_watch: out of inotify watches at '%s' (fs.inotify.max_user_watches)", abs);
         return false;
@@ -87,13 +93,10 @@ bool add_tree(FsNative* n, const FsInoRoot& root, const char* rel, FsSink* sink,
         n->dirs.push(FsInoDir{wd, root.id, ino_dup_str(rel)});
     }
     Listing l{};
-    os_dir_each(abs, list_name, &l);
+    os_dir_list(abs, false, list_name, &l, nullptr);
     for (u32 i = 0; i < l.at.len; ++i) {
         const char* name = l.text.data + l.at.data[i];
-        char child[KV_PLATFORM_PATH_MAX * 2];
-        int cl = snprintf(child, sizeof child, "%s/%s", abs, name);
-        if (cl < 0 || (usize)cl >= sizeof child) continue;
-        OsPathKind k = os_path_kind(child);
+        OsPathKind k = l.kind.data[i];
         if (k == OsPathKind::Dir) {
             char crel[KV_PLATFORM_PATH_MAX * 2];
             snprintf(crel, sizeof crel, rel[0] ? "%s/%s" : "%s%s", rel, name);
@@ -105,7 +108,18 @@ bool add_tree(FsNative* n, const FsInoRoot& root, const char* rel, FsSink* sink,
     }
     l.text.free();
     l.at.free();
+    l.kind.free();
     return true;
+}
+
+// Whether d's entry `name` is a link to a directory, which a watch neither reports nor
+// goes down.
+bool is_dir_link(FsNative* n, const FsInoDir& d, const char* name) {
+    FsInoRoot* r = root_of(n, d.root);
+    if (!r) return false;
+    char abs[KV_PLATFORM_PATH_MAX * 2];
+    int len = snprintf(abs, sizeof abs, d.rel[0] ? "%s/%s/%s" : "%s%s/%s", r->dir, d.rel, name);
+    return len > 0 && (usize)len < sizeof abs && os_path_is_dir_link(abs);
 }
 
 // Forgets the watches on root's `rel` and everything under it.
@@ -212,6 +226,7 @@ void fs_native_poll(FsNative* n, FsSink& sink) {
                 }
                 continue;
             }
+            if ((ev->mask & (IN_CREATE | IN_MOVED_TO)) && is_dir_link(n, d, name)) continue; // not reported (KR16)
             if (ev->mask & (IN_CREATE | IN_MOVED_TO))        sink.emit(FsEventKind::Added, d.root, d.rel, name);
             else if (ev->mask & (IN_MODIFY | IN_CLOSE_WRITE)) sink.emit(FsEventKind::Changed, d.root, d.rel, name);
             else if (ev->mask & (IN_DELETE | IN_MOVED_FROM))  sink.emit(FsEventKind::Removed, d.root, d.rel, name);

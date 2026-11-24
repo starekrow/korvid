@@ -22,6 +22,10 @@
 // - A directory that appears is DirAdded, followed by Added for every file already in
 //   it. One that goes is DirRemoved, and that is all: files under a directory that was
 //   moved away are not reported one by one.
+// - A link to a directory is not gone down, and is not reported: a link inside a root to
+//   the root, or to a tree elsewhere, adds nothing, as a walk with io_list_dir would not
+//   follow it. Its removal may still come as a Removed of a path never Added. A link to a
+//   file is reported as the file. A root that is itself a link is followed.
 // - Rescan means events were lost (the OS's queue overflowed): scan the root again.
 // - Events are a hint that something happened to a path, not a transcript. Compare
 //   content before believing a change.

@@ -36,7 +36,8 @@ by default. This is the CLI's transport and may be a game's.
 **Watching** (`fs_watch.h`). An `FsWatcher` is given directory trees and polled, like a
 socket: no thread, no blocking. inotify on Linux; everywhere, and as the only backend on
 the other platforms for now, a polling backend that walks the trees at an interval and
-compares sizes and modification times. Events are hints (added, changed, removed, a
+compares sizes and modification times. A link to a directory inside a root is neither
+gone down nor reported, on either backend. Events are hints (added, changed, removed, a
 directory come or gone, rescan): the reader compares content before believing one. The
 header says what holds on both backends. The backend is chosen per root: on a share
 (`io_path_is_remote`: NFS, SMB, any FUSE mount) the OS hears only this machine's writes,

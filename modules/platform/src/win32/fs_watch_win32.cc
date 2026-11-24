@@ -181,6 +181,7 @@ void take(FsWinRoot& r, DWORD bytes, FsSink& sink) {
             case FILE_ACTION_RENAMED_NEW_NAME: {
                 char abs[KV_PLATFORM_PATH_MAX * 2];
                 format(abs, sizeof abs, "%s/%s", r.dir, rel);
+                if (os_path_is_dir_link(abs)) break; // a link to a directory: not reported, not gone down (KR16)
                 OsPathKind k = os_path_kind(abs);
                 if (k == OsPathKind::Dir) {
                     add_dir(r, rel);

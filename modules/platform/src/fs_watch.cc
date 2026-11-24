@@ -52,16 +52,19 @@ void FsSink::emit(FsEventKind kind, u32 root, const char* dir, const char* name)
 namespace {
 
 // A directory's entries with what each is, its size and time: from the listing itself
-// (os_dir_each_stat), where asking of each entry by its path was most of a walk's time
-// on Windows, a watch's start included.
+// (os_dir_list), where asking of each entry by its path was most of a walk's time on
+// Windows, a watch's start included. A link to a directory is left out, so a walk never
+// goes down one (a link inside a root to the root was the tree again, down to the length
+// limit); a link to a file is the file.
 struct NameStat { u32 at; OsStat st; };
 struct Names { Array<char> text; Array<NameStat> list; };
 
-void fsw_collect_name(void* user, const char* name, const OsStat& st) {
+void fsw_collect_name(void* user, const OsDirEntry& e) {
+    if (e.is_link && e.st.kind == OsPathKind::Dir) return;
     Names* n = (Names*)user;
-    u32 len = (u32)strlen(name);
-    n->list.push(NameStat{n->text.len, st});
-    memcpy(n->text.push_n(len + 1), name, len + 1);
+    u32 len = (u32)strlen(e.name);
+    n->list.push(NameStat{n->text.len, e.st});
+    memcpy(n->text.push_n(len + 1), e.name, len + 1);
 }
 
 struct NameCmp { const char* text; };
@@ -73,7 +76,7 @@ int name_cmp(const void* a, const void* b, void* ctx) {
 void walk_in(char* abs, u32 abs_len, u32 abs_cap, u32 rel_at, void (*fn)(void*, const FsWalkEntry&), void* user, u32 depth) {
     if (depth > 64) return;
     Names names{};
-    if (!os_dir_each_stat(abs, fsw_collect_name, &names)) { names.text.free(); names.list.free(); return; }
+    if (!os_dir_list(abs, true, fsw_collect_name, &names, nullptr)) { names.text.free(); names.list.free(); return; }
     NameCmp cmp{names.text.data};
     sort(names.list.data, names.list.len, sizeof(NameStat), name_cmp, &cmp);
     for (u32 i = 0; i < names.list.len; ++i) {

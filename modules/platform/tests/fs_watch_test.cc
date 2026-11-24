@@ -5,8 +5,8 @@
 #include "korvid/core/time.h"
 #include <stdio.h>
 #include <string.h>
-#if defined(__linux__)
-#include <unistd.h> // getuid
+#if !defined(_WIN32)
+#include <unistd.h> // getuid, symlink
 #endif
 
 namespace {
@@ -32,6 +32,10 @@ struct Heard {
         return -1;
     }
     bool has(const char* line) const { return find(line) >= 0; }
+    bool mentions(const char* part) const {
+        for (u32 i = 0; i < at.len; ++i) if (strstr(text.data + at.data[i], part)) return true;
+        return false;
+    }
     void clear() { text.len = 0; at.len = 0; }
     void free() { text.free(); at.free(); }
 };
@@ -219,6 +223,45 @@ void run_shares(TestCtx& c) {
     io_remove_tree(other);
 }
 
+#if !defined(_WIN32)
+// Links inside a root (KR16): one to the root itself and one to a directory outside, there
+// before the watch, and another to the root made while it runs. A file written in the root
+// is reported once, by its own path; one written outside is not reported; no link to a
+// directory is reported or gone down.
+void run_links(TestCtx& c, FsWatchBackend backend) {
+    char dir[512], outside[512], path[1024], target[1024];
+    KV_CHECK(c, io_make_temp_dir("kv-fswatch-links", dir, sizeof dir) && io_make_temp_dir("kv-fswatch-out", outside, sizeof outside));
+    snprintf(path, sizeof path, "%s/sub", dir);
+    KV_CHECK(c, io_make_dirs(path));
+    snprintf(path, sizeof path, "%s/loop", dir);
+    KV_CHECK(c, symlink(dir, path) == 0);
+    snprintf(path, sizeof path, "%s/sub/out", dir);
+    KV_CHECK(c, symlink(outside, path) == 0);
+    KV_CHECK(c, write_text(outside, "kept.txt", "k"));
+    snprintf(target, sizeof target, "%s/kept.txt", outside);
+    snprintf(path, sizeof path, "%s/file-link", dir);
+    KV_CHECK(c, symlink(target, path) == 0);
+
+    FsWatcher w;
+    KV_CHECK(c, w.init(backend, 0.01));
+    KV_CHECK(c, w.add_root(dir) != ~0u);
+    Heard h;
+    drain(w, h);
+    snprintf(path, sizeof path, "%s/sub/late-loop", dir);
+    KV_CHECK(c, symlink(dir, path) == 0);
+    KV_CHECK(c, write_text(dir, "growing.flac", "g") && write_text(outside, "far.flac", "f"));
+    KV_CHECK(c, wait_for(w, h, "added growing.flac"));
+    KV_CHECK(c, write_text(dir, "sub/marker.txt", "m") && wait_for(w, h, "added sub/marker.txt"));
+    drain(w, h);
+    KV_CHECK(c, !h.mentions("loop") && !h.mentions("out") && !h.mentions("far.flac"));
+    KV_CHECK(c, h.find("added growing.flac") >= 0 && !h.mentions("/growing.flac"));
+    h.free();
+    w.free();
+    io_remove_tree(dir);
+    io_remove_tree(outside);
+}
+#endif
+
 } // namespace
 
 void test_fs_watch(kv::TestCtx& c) {
@@ -239,4 +282,12 @@ void test_fs_watch(kv::TestCtx& c) {
     }
     c.begin("fs_watch shares");
     run_shares(c);
+#if !defined(_WIN32)
+    c.begin("fs_watch links poll");
+    run_links(c, FsWatchBackend::Poll);
+    if (fs_watch_has_native()) {
+        c.begin("fs_watch links native");
+        run_links(c, FsWatchBackend::Native);
+    }
+#endif
 }

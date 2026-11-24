@@ -76,6 +76,21 @@ i64 os_file_write(OsFile f, const void* buf, usize n, i32* err) {
     return overlapped_wait(file_handle(f), true, (void*)buf, want, ~0ull, err);
 }
 
+// The entry's own record, as a listing of its directory has it: the reparse tag says a
+// link (or a junction) from the other kinds of reparse point (a cloud placeholder, a
+// deduplicated file), which are what they look like.
+bool os_path_is_dir_link(const char* path) {
+    WidePath wp;
+    if (!wp.set(path)) return false;
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileExW(wp.w, FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    FindClose(h);
+    return (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+           (fd.dwReserved0 == IO_REPARSE_TAG_SYMLINK || fd.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT) &&
+           os_path_kind(path) == OsPathKind::Dir;
+}
+
 OsPathKind os_path_kind(const char* path) {
     WidePath wp;
     if (!wp.set(path)) return OsPathKind::None;

@@ -20,6 +20,9 @@ i64    os_file_write(OsFile f, const void* buf, usize n, i32* err);
 enum class OsPathKind : u8 { None, File, Dir, Other };
 // What a path names, following links.
 OsPathKind os_path_kind(const char* path);
+// Whether path is itself a symbolic link (a junction too, on Windows) that reaches a
+// directory: what a recursive watch does not go down (KR16).
+bool os_path_is_dir_link(const char* path);
 // What a path names with its size and modification time (nanoseconds since the OS's
 // epoch: only ever compared with another) and the volume it is on (IoStat::volume),
 // following links. False if nothing is there, or it cannot be asked, with *err (if given)
