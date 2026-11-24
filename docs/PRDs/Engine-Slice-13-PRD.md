@@ -1,0 +1,234 @@
+# Engine Slice 13 — Windows that are not rectangles, and more than one
+
+Nov 23, 2026 · @starekrow · draft
+
+## Goal and exit criteria
+
+The third of three slices drafted from Blackwing's skin import note
+(`docs/PRDs/Korvid-Changes-For-Blackwing.md` in Blackwing's checkout, KR28 to KR42).
+Krome's slices [7](Krome-Slice-7-PRD.md) and [8](Krome-Slice-8-PRD.md) draw a skin and
+take its input. This one is the window it sits in: KR39 to KR42. Each keeps Blackwing's
+ID.
+
+A skin from Winamp, VLC, WMP or XMPlay is not in a system window. It is its own outline,
+dragged by whatever part of itself it says, often in several pieces that open, close and
+stick to each other. The engine today has one window with a frame the desktop draws, and
+"more than one window" is in the not-built list of `platform_hid`, `frameloop`, Krome's
+master PRD and `docs/design/cycles.md`.
+
+Blackwing asks that where each of these is cut between the engine (`platform_hid`,
+`frameloop`) and its own `blackwing_window` be part of the answer. The draft's cut: the
+engine opens, shapes, shows, places and reports windows, and answers the OS's question of
+what a point on one is for; which windows there are, what snaps to what and what follows
+what are the program's.
+
+Nothing in Blackwing waits on it; it has no date. It is the largest of the three, and
+its second half (KR40) is most of that.
+
+It is done when:
+
+- A round skin shows the desktop at its corners, and a click there reaches the window
+  behind, on each desktop platform that can do it. For each that cannot, the module page
+  says what it does instead.
+- A window with no frame is dragged by the part of its screen marked for it and resized
+  by a marked corner between the bounds its screen gives, through the OS's own move and
+  resize, on each desktop platform.
+- A main window and a playlist window are up at once, each showing a Krome screen. One is
+  hidden and shown again with its scroll where it was. Neither is presented while only the
+  other changes.
+- The keyboard goes to one node across both.
+- A playlist window dragged within 10 pixels of the main one snaps to it and then follows
+  it, where the platform lets a program place a window. Where it does not, the page says
+  so and the windows move apart.
+- A program that opens one window is the program it was: goldberg's window, `kromedemo`
+  and every game's hashes and frames.
+
+## What the code has
+
+Checked Nov 23 on `main` (52f9963).
+
+| ID | Where | What is there now |
+|---|---|---|
+| KR39 | `platform_hid` (`host_window.h`) | `WindowDesc::borderless`: SDL's borderless flag; on Win32 a popup with a thick frame, still resizable by the desktop. Nothing about alpha or shape |
+| KR39 | the renderers | Vulkan asks for an opaque composite first (`vk_swapchain.cc`); D3D12's swapchain is `DXGI_ALPHA_MODE_IGNORE`. Each clears to a colour and presents an opaque frame |
+| KR40 | `platform_hid/src/module.cc` | `platform_open_window` is "the one window; null if open already". The Win32 backend keeps its window in one global. `Input` is one state with one pointer |
+| KR40 | `render` | `RendererDesc::native_window`: one. `renderer_ui_set(r, layer, list)` names no window |
+| KR40 | `frameloop`, `krome` | The loop holds one `HostWindow*` and paces by it. `krome.paint` reads its size and scale from `platform_window(e)`. The keyboard already has one owner across every screen |
+| KR41 | `platform_hid` (`host_window.h`) | `capture_mouse`, `cursor` (with `Move`, `ResizeEW`, `ResizeNS`). A `TODO(wayland)` already asks for a borderless window resized through `SDL_SetWindowHitTest`, for a different reason (libdecor's stall on GNOME) |
+| KR42 | `platform_hid` | No position, no move, no display bounds. `minimize` is the only thing a program does to its window |
+
+## A shaped window (KR39)
+
+**`WindowDesc::transparent`.** The window is opened with an alpha channel and no frame.
+The renderer clears it to nothing and presents with its alpha, premultiplied, where the
+platform composites. Where it does not, the window is opaque and the module says so once.
+
+**`HostWindow::shape(alpha, w, h)`.** A mask the program gives, one byte a pixel, scaled
+to the window: where it is under a half the window takes no input and the click goes to
+what is behind. Given again when the skin or the size changes; null for the whole rect.
+The program gives the mask because it has one (Krome's, from slice 8's `mask-alpha`) and
+reading the alpha back from a frame every time it changes does not pay.
+
+Drawn alpha and the input shape are two things. A soft edge is drawn at half alpha and is
+either in or out of the shape.
+
+**What each platform does.** As expected from each system's interfaces, to be confirmed
+at milestone 1 and written into `platform_hid`'s page as found:
+
+| platform | alpha | input through the clear parts |
+|---|---|---|
+| Wayland | composited always | the surface's input region, through SDL's window shape |
+| X11, with a compositor | an ARGB visual | the Shape extension's input shape |
+| X11, without | none: the shape cuts the window out one bit a pixel, hard edged | the same shape |
+| Win32 | to be found: the flip-model swapchain on a window ignores alpha; a layered window, or a composition swapchain, is what gives it | to be found with it |
+| macOS | a layer that is not opaque | AppKit passes clicks where a clear window is clear |
+| Android, iOS | not offered | |
+
+Win32 is the row with real work in it and is the reason this is not one milestone.
+
+## Grips and bounds (KR41)
+
+With no frame the program says what each part of the window is for.
+**`HostWindow::grips(list)`**: rects in window units, each a `WindowGrip`: `Move`, or one
+of the eight edges and corners. When the OS asks what is under a point (SDL's hit test,
+`WM_NCHITTEST`) the backend answers from the list, and the OS does the move or the resize
+itself: its snapping, its tiling, its keyboard, and on Wayland the only way there is. The
+list is copied, since Win32's window has a thread of its own.
+
+**`HostWindow::bounds(min_w, min_h, max_w, max_h)`**: what a resize is held to. 0 for no
+bound.
+
+**Krome.** A property `grip=` on a node (`move`, `n`, `ne`, `e`, `se`, `s`, `sw`, `w`,
+`nw`). After layout Krome gives its window the rects of every node that has one, when
+they changed. A node with a grip takes no press of its own: the OS has it. The root's
+size range (`w=275..800 h=116..600`) becomes the window's bounds.
+
+Grips are rects. A drag area that is a mask's shape (XMPlay's "Heading" index) is its
+bounding rects until someone asks for better.
+
+This also does what the `TODO(wayland)` in `host_window.h` asks: a borderless window with
+the engine's own edges, where libdecor stalls a resize.
+
+## Several windows (KR40)
+
+**The platform.** `platform_open_window` can be called again, up to eight. Each
+`HostWindow` has an id; the first is the main one, and `platform_window(e)` still returns
+it. `WindowResized`, `FocusChanged`, `CloseRequested` and `WindowVisibility` carry the
+id. The pointer is in one window at a time: `Input`'s mouse says which, in that window's
+pixels. `HostWindow::show(on)` hides and shows without closing. A phone refuses a second.
+
+**The renderer.** One renderer, one device, a surface for each window:
+`renderer_surface_add(r, window)` and `_remove`. The world (sprites, post) is drawn in the
+main window only. A UI list is set for a surface (`renderer_ui_set` gains the surface;
+the form without it means the main one), and a surface whose lists did not change since
+it was last presented is not drawn and not presented. The CPU renderer keeps a software
+frame a window.
+
+**The loop.** One Frame cycle, run when any window is to be drawn; `docs/design/cycles.md`
+keeps "more than one Frame cycle" as not built. What makes "neither draws while the other
+changes" true is the renderer's rule above, not a cycle a window. Under `OnDemand` and
+`Decoupled` a frame is wanted when any shown window's lists changed; a hidden window is
+skipped, and the loop draws nothing only when all are hidden. `Continuous` presents the
+main window every frame and the others when they change.
+
+**Krome.** A screen is opened in a window: `krome_open` takes one more argument, the
+main window when left out. Size and scale are each window's own, so a screen dragged to a
+display at another scale is laid out for it. Pointer events go to the window's screens.
+The keyboard is one node across all of them, as it is across screens now, and follows the
+OS's focus between windows. An overlay stays inside its screen's window: a dropdown at
+the bottom of a short window flips up, as now, and does not leave it. Hiding a window
+keeps its screens built, with their models and scrolls.
+
+## Placing windows (KR42)
+
+`HostWindow::position(&x, &y)`, `move_to(x, y)`, a `WindowMoved` event with the id, and
+`platform_display_bounds(window)`: the usable rect of the display it is on.
+`platform_can_place(e)` says whether any of it works.
+
+Snapping and following are then the program's, as Blackwing asked. Where a program can
+place a window (X11, Win32, macOS) it drags by its own hand, with `capture_mouse` and
+`move_to`, snapping as it goes, and moves the followers when the leader's `WindowMoved`
+comes. That is a second kind of move beside KR41's, and a node says which it wants:
+`grip=move` is the OS's, `grip=drag` sends the screen the pointer's travel and leaves the
+moving to it.
+
+**Wayland** gives a client no position and takes none. There `platform_can_place` is
+false, `grip=drag` is the OS's move, and nothing snaps or follows. Blackwing's note offers
+"one window drawn as several" as the other answer; that is the program's to choose (one
+transparent window with every panel in it is KR39 and no more), and the engine does not
+do it for it.
+
+## Out of scope
+
+- **The world in a second window.** Sprites, cameras and post are the main window's.
+- **A Frame cycle a window**, and windows on threads of their own.
+- **Overlays that leave their window**: a menu wider than a narrow skin. It wants popup
+  windows parented to another, which is its own protocol on each platform.
+- **Drag and drop between windows, or from the desktop.**
+- **Phones.** One window, opaque, placed by the OS.
+- **The snapping itself**, and which windows a skin has: Blackwing's `blackwing_window`.
+
+## Requirements
+
+| ID | Requirement | Priority |
+|---|---|---|
+| KR39 | `WindowDesc::transparent`; the renderers present with alpha where the platform composites | P1 |
+| KR39 | `HostWindow::shape`: input passes where the mask is clear | P1 |
+| KR39 | `platform_hid`'s page says, for Wayland, X11 with and without a compositor, Win32 and macOS, what is done and what is not | P0 |
+| KR41 | `HostWindow::grips`, `bounds`; Krome's `grip=` and the root's range | P1 |
+| KR40 | A second and later window: ids on the window's events, the pointer's window, `show` | P1 |
+| KR40 | A surface a window in every renderer; a UI list for a surface; a surface unchanged is not presented | P1 |
+| KR40 | A Krome screen in a window; size and scale each window's; one keyboard focus | P1 |
+| KR42 | `position`, `move_to`, `WindowMoved`, `platform_display_bounds`, `platform_can_place`; `grip=drag` | P2 |
+| W1 | A program with one window runs as before: the demos' hashes, goldberg's window, render-gate | P0 |
+| R14 | The module pages and quick references of `platform_hid`, `render`, `frameloop` and `krome` change with their headers; `tools/doccheck.sh` reports nothing new | P0 |
+
+## Milestones
+
+1. **Transparent and shaped, on SDL3** (KR39). `examples/window` with a round picture, on
+   Wayland and on X11 with and without a compositor. The table above corrected from what
+   is found.
+2. **Grips and bounds** (KR41). The platform's half, then Krome's `grip=`. The same
+   example dragged and resized by itself; the `TODO(wayland)` closed or restated.
+3. **Win32 and macOS for the one window** (KR39, KR41). Written; verified where a machine
+   is to hand. Win32's alpha is decided here.
+4. **A second window in the platform** (KR40). Ids, events, the pointer, `show`; Win32's
+   global made a list. No drawing yet: the second window is blank.
+5. **Surfaces** (KR40). Vulkan first, then the CPU renderer; Metal and D3D12 written. A
+   UI list a surface, and the count of presents a surface.
+6. **The loop and Krome** (KR40). Screens in windows, pacing over several, hiding. Two
+   Krome windows in `kromedemo --two`, with each one's presents counted while the other
+   changes.
+7. **Placing** (KR42). Position, moving, bounds; `grip=drag`. `examples/window` with two
+   windows that snap and follow, on X11; on Wayland, what it does instead.
+
+**Verification.** `kormake test` on linux-debug, linux-dev and linux-ship; `platform_hid`,
+`frameloop` and `krome` under `--sanitize address,undefined` and `thread`; render-gate on
+each backend after milestone 5; arcfire's and arcanum's demo hashes as recorded. Windows
+and macOS are written and not verified unless a machine is to hand: the status says
+which, by row of the platform table.
+
+## For review
+
+1. **Two slices, not one.** Milestones 1 to 3 (one window, shaped, dragged by itself) are
+   useful alone and are what "all four formats" need first. Milestones 4 to 7 are a
+   change to the renderer's and the platform's shape. They could be slices 13 and 14.
+2. **UI only in the other windows.** It keeps the renderer's change to "a surface and its
+   lists". A game with a second view of its world (an editor's) would want more, and
+   would be asking for cameras a surface, which nothing asks for yet.
+3. **One Frame cycle.** Krome paints only the layers that changed, so a cycle run for one
+   window costs the other little. If it is measured to cost more than little (a screen
+   whose `krome.pump` is heavy), a cycle a window is the next step and cycles.md's to
+   design.
+4. **The shape from a mask the program gives.** The alternative is the engine reading the
+   presented frame's alpha, which needs no second source of truth and costs a readback on
+   every backend whenever the picture changes.
+5. **Win32's alpha.** Not known until milestone 3. If per-pixel alpha there needs a
+   composition swapchain, it reaches into `renderer-d3d12` and into Vulkan on Windows
+   separately; a shape cut one bit a pixel (a window region) may be all the first version
+   does there.
+6. **What SDL gives.** The draft counts on SDL3's transparent windows, window shape and
+   hit test for Wayland, X11 and macOS. None is used in the tree today and none was tried
+   for this draft.
+7. **Before or after Krome's slices.** Milestones 1 and 2 need nothing from slices 7 and
+   8 but a mask's bytes for `shape`, which a test can make. A skin needs all three.

@@ -1,0 +1,231 @@
+# Krome Slice 7 — Pictures
+
+Nov 23, 2026 · @starekrow · draft
+
+## Goal and exit criteria
+
+Krome was built for tools: boxes, text, icons, a theme. Blackwing wants it to draw
+something else as well, a skin converted from another player's (`.wal`, `.wmz`, `.vlt`,
+`.xmpskin`), where nearly everything on screen is a piece of a bitmap. Its skin import
+note asked fifteen things of the engine (`docs/PRDs/Korvid-Changes-For-Blackwing.md` in
+Blackwing's checkout, "Found in the skin import note", KR28 to KR42). This slice takes the
+five that are about drawing an image: KR28, KR29, KR31, KR32 and KR34. Each keeps
+Blackwing's ID.
+
+[Krome slice 8](Krome-Slice-8-PRD.md) takes placement, motion and masks (KR30, KR33, KR35
+to KR37), and [engine slice 13](Engine-Slice-13-PRD.md) the windows (KR39 to KR42). KR38,
+a screen from a directory of uncooked files, is in none of them yet: see Out of scope.
+
+Nothing here blocks Blackwing. Skin import is in no phase of its master PRD, and its note
+gives no workarounds: a skin that needs a capability waits for it. So this slice has no
+date, and is drafted to see its size. It is worth having on its own account: a game's HUD
+and a tool's toolbar are cut from sheets too.
+
+It is done when:
+
+- A node draws the 20 x 20 at (40, 0) of a sheet and its `hover` look draws the 20 x 20
+  beside it, from one texture, with no texel of a neighbour showing at any window scale.
+- A 64-state knob follows a bound value. A 12-frame strip at 10 frames a second plays
+  twice and rests on its last frame, and the window paced on demand is asleep after it.
+- One frame image with 8-pixel borders draws at 200 x 100 and at 640 x 480 with its
+  corners unscaled, and a tiled background repeats from its top left.
+- A time display draws `12:34` from a strip of digits, and a title with a character the
+  font lacks still lays out.
+- An image brightens by 1.2 on hover with no second image, and switching theme recolours
+  every image that names the theme's token.
+- A screen made of all five is the same pixels on Vulkan, Metal, D3D12 and the CPU
+  renderer, held to render-gate.
+- The screens of `kromedemo`, `kromescreens` and goldberg's window draw as they did.
+
+## What the code has
+
+Checked Nov 23 on `main` (52f9963).
+
+| ID | Where | What is there now |
+|---|---|---|
+| KR28 | `render/ui.h`, `krome/src/view.cc` | `UiBox` has a `uv` rect, and Krome never sets it: an image is its whole texture, stretched over the node's rect. The UI shader samples textures with the linear sampler only (`ui.slang`, `gSamplers[1]`) |
+| KR29 | `krome` | Nothing. `anim` plays flipbooks for sprites; `sprite_ui` has "images and strips of them" for a game's UI. Neither is Krome's |
+| KR31 | `krome`, `sprite_ui/src/layout.cc` | Krome stretches. `sprite_ui` cuts a frame into nine quads (`nine`) for sprites |
+| KR32 | `asset` (`font.h`), `typeset` | A font asset is a strike: a TrueType file at one pixel size, its glyphs made into pages on demand. Krome asks for glyphs by strike; `typeset` measures by the strike's metrics |
+| KR34 | `krome/tree.h`, `ui.slang` | `KromeLook::tint`, a colour the texel is multiplied by, each channel at most 1. `transition` eases it |
+| all | `kimb/src/kimb.cc` | The vocabulary is a fixed table (`k_props`): a new property is a row there, a case in `krome_set_prop`, and a line in the module page |
+| all | `renderer-cpu` | Draws the UI list itself, not through `ui.slang`: what the shader learns it learns too |
+
+## A region (KR28)
+
+**`region=x,y,w,h`** on a look, in the file's pixels: the image drawn is that rectangle of
+it. It is a look's property, so a state can move it:
+
+```
+image "skin/buttons.png" region=40,0,20,20 {
+    hover   { region=60,0,20,20 }
+    pressed { region=80,0,20,20 }
+}
+```
+
+A node with a region measures as the region's size, not the file's. A region that
+reaches outside the file is an error naming both sizes, when the texture lands. Shapes
+(`.svg`) take no region.
+
+**Sampling.** Linear sampling at a region's edge reads the texel beside it, which in a
+sheet is another picture. Two changes to the UI primitive:
+
+- `UiBox::uv` is honoured, and the shader holds each sample half a texel inside it.
+- `UiBox::nearest`: the nearest sampler. Krome sets it from a new flag, `pixel`, on the
+  node, inherited by what is under it, so a skin sets it once at its root. A skin drawn
+  at twice its size should be squares, not blur.
+
+One texture, however many nodes cut from it: `image_for` already keeps one handle a path.
+
+## Frames (KR29)
+
+A strip is N frames of one size, stacked down the image or laid across it.
+
+| property | what |
+|---|---|
+| `frames=N` | the image (or its `region`) is N frames; down, or across with the flag `across` |
+| `frame=3`, `frame=@index` | which one, from 0, held inside the strip |
+| `frame-at=@level` | which one by a fraction: 0 the first, 1 the last |
+| `fps=10` | plays from where it is, at that rate, on the Frame cycle's clock |
+| `loops=2` | how many times; 0 for ever. It rests on its last frame |
+
+`frame` and `frame-at` are bound like any property: set when built and when the key
+changes, with no rebuild. A playing strip asks for its next frame at the time it is due
+(`engine_want_frame_at`, as a caret's blink does), so an on-demand window wakes for each
+frame and no more often, and a strip at rest, or one never played, costs nothing. A
+hidden window draws no frame; a strip there is where its clock says when it is seen
+again. A strip that ends says so once, to the node's event if it has one (`-> done`).
+
+## Fit (KR31)
+
+**`fit=`** says how an image fills a rect that is not its size:
+
+| value | what |
+|---|---|
+| `stretch` | as now, and the default |
+| `natural` | its own size, at the node's alignment, clipped to the rect |
+| `tile` | repeated from the rect's top left, the last row and column cut |
+| `slice` | stretched between fixed borders: `slice=8`, or four numbers (left, top, right, bottom), in the file's pixels |
+
+`tile` is one box: the shader wraps the sample inside the region, so a 640 x 480
+background of an 8-pixel tile is not 4,800 items. `slice` is up to nine boxes, fewer where
+a border is 0, the corners at their own size times the window's scale. A rect smaller than
+its borders shrinks them in proportion, as `sprite_ui`'s `nine` does. All of it applies to
+a region and to the current frame of a strip.
+
+## Bitmap fonts (KR32)
+
+A font that is a picture: `font="skin/digits.kbf"`, a small text file beside its image.
+
+```
+image  "digits.png"
+cell   9 13
+chars  "0123456789:- "
+missing " "
+```
+
+`chars` is the cells in order, left to right and then down. `missing` is the character
+drawn for one the font lacks; left out, such a character draws nothing and takes no room.
+An optional `advance` line gives a width other than the cell's.
+
+`asset_load_font` on such a path gives a strike like any other: the size is the cell's
+height, the page is the image, each glyph a region of it, no kerning. Everything above
+the asset module is unchanged: `typeset` measures it, a text node draws it, `{name}` fills
+it. `size=` on the node scales it (26 for a 13-pixel cell is twice), with the nearest
+sampler when the node is `pixel`. A text's `color` multiplies it, so a white strip takes
+the theme's colours and a coloured one is drawn under `color=white`.
+
+Every cell is the same size. Proportional bitmap fonts (a width a glyph) are not asked for
+and not here.
+
+## A look computed from pixels (KR34)
+
+Three properties of a look, applied to the image's texel before `tint`:
+
+| property | what |
+|---|---|
+| `gain=1.2`, `gain=1.2,1.1,1.0` | each channel times a number, which may be above 1; the result held at 1 |
+| `hue=30` | the hue turned by degrees |
+| `saturation=0.5` | 0 is grey, 1 is as drawn, above 1 is more |
+
+They are looks, so `hover { gain=1.2 }` is XMPlay's `scaler_lit` with no second image,
+and `transition` eases them with the colours. A theme's token can be any of them (`theme
+ember { skin-hue 40 }`, `hue=skin-hue`), so `krome_theme` recolours every image that
+names it: a `.wal` colour theme is a theme.
+
+The UI item grows by five numbers, in the list's words, the shader and the CPU renderer.
+A box with none of them set takes the path it takes now.
+
+Confining a look to a mask (XMPlay brightens only the pixels a control's mask covers) is
+KR33's, in slice 8: here a look applies to the node's whole rect.
+
+## Out of scope
+
+- **Masks**, for hit testing and for confining a look: KR33, slice 8.
+- **A screen from a directory of uncooked files** (KR38). It is in no slice yet because it
+  meets two things the master PRD decided: the runtime reads only `.kimb`, and `krome`
+  does not link `kim`. A program can link `kim` itself and hand the result to
+  `krome_provide`, which keeps both. What is then missing is not Krome's: images, fonts
+  and scripts are read through the asset module, which would have to resolve a skin's
+  paths inside its directory and nowhere else. That is a decision about `asset` roots, to
+  be made before it is drafted.
+- **Proportional bitmap fonts**, and fonts cut by colour key rather than by cell.
+- **Timelines**: a strip plays at one rate. Anything more is a script's, with slice 8's
+  timers.
+- **The converters themselves**, which are Blackwing's.
+
+## Requirements
+
+| ID | Requirement | Priority |
+|---|---|---|
+| KR28 | `region` on a look; `UiBox::uv` honoured and held inside its edge; `pixel` and the nearest sampler | P1 |
+| KR29 | `frames`, `across`, `frame`, `frame-at`, `fps`, `loops`; a playing strip wakes the window only for its next frame | P1 |
+| KR31 | `fit=stretch`, `natural`, `tile`, `slice`; `slice=` borders | P1 |
+| KR32 | A bitmap font as a font asset, used by a text node as any strike is; `missing` | P1 |
+| KR34 | `gain`, `hue`, `saturation` on a look, eased, and as theme tokens | P2 |
+| KP1 | Every one of them on Vulkan, Metal, D3D12 and the CPU renderer, held to render-gate | P0 |
+| KP2 | The module pages and quick references of `krome`, `kimb`, `render` and `asset` change with their headers; `tools/doccheck.sh` reports nothing new | P0 |
+
+## Milestones
+
+1. **Regions** (KR28). `region`, the shader's inset, `pixel`. A sheet in `kromedemo`'s
+   gallery with hover and pressed looks, at window scales 1, 1.5 and 2; render-gate's
+   reference for it.
+2. **Fit** (KR31). `natural`, `tile`, `slice`, over a region. The frame at two sizes and
+   the tiled background, measured in a layout test and drawn in the gallery.
+3. **Frames** (KR29). The bound frame, then playing: the knob, and the 12-frame strip with
+   the loop's wakes counted while it plays and after.
+4. **Bitmap fonts** (KR32). The `.kbf` reader in `asset`, goldberg's pass-through for it,
+   the time display, the missing character.
+5. **Computed looks** (KR34). The item's new words in the core, the shader and the CPU
+   renderer; hover by `gain`; a theme switch.
+6. **A skin by hand.** One small skin written in `.kim` from a real sheet, as a converter
+   would write it, to find what the five still cannot say before a converter depends on
+   them.
+
+**Verification.** `kormake test` on linux-debug, linux-dev and linux-ship; `krome_tests`
+and `asset_tests` under `--sanitize address,undefined`; render-gate on each backend's
+machine at milestones 1, 2 and 5, which change what the shader does. Metal and D3D12 are
+written and not verified unless a machine is to hand: the status says which.
+
+## For review
+
+1. **Is this Krome's?** `sprite_ui` already draws nine-slices, strips and frames for a
+   game. The master PRD's open question, "does `ui` ever move onto Krome's layout or
+   documents", gets a push from this slice either way: after it Krome can draw what
+   `sprite_ui` draws.
+2. **The names.** `region`, `frames`, `frame`, `frame-at`, `fps`, `loops`, `fit`, `slice`,
+   `gain`, `hue`, `saturation`, `pixel`, `across`: thirteen words into a vocabulary of
+   about sixty. Blackwing's note names none; these are the draft's.
+3. **`pixel` inherited.** A flag that inherits is new: the others are a node's own. The
+   alternative is a look's property (`sampling=nearest`), which inherits the way `color`
+   does and costs a word in every look.
+4. **Tiling in the shader.** One box and a wrap in the shader, against boxes made on the
+   CPU. The wrap is one more branch for every UI pixel on every backend; the boxes are
+   nothing new to the renderer and many items for a small tile.
+5. **A bitmap font's file.** A text file of its own (`.kbf`), against a block in `.kim`
+   (`font digits { image=... cell=9,13 chars="..." }`), which keeps a skin in one file but
+   puts fonts into Krome's documents and out of reach of a game's `Text`.
+6. **KR34 without masks.** Until slice 8, `gain` on hover brightens a control's rect, not
+   its shape. For skins with square controls that is all of it; for XMPlay's it is not
+   yet right. The two could be ordered the other way.

@@ -1,0 +1,249 @@
+# Krome Slice 8 — Placed, moving, and not a rectangle
+
+Nov 23, 2026 · @starekrow · draft
+
+## Goal and exit criteria
+
+The second of three slices drafted from Blackwing's skin import note
+(`docs/PRDs/Korvid-Changes-For-Blackwing.md` in Blackwing's checkout, KR28 to KR42).
+[Slice 7](Krome-Slice-7-PRD.md) draws a skin's pictures. This one puts them where the skin
+says, moves them, and takes presses by their shape: KR30, KR33, KR35, KR36 and KR37. Each
+keeps Blackwing's ID. [Engine slice 13](Engine-Slice-13-PRD.md) has the windows.
+
+It comes after slice 7: a dial is a strip of frames (KR29), and a look confined to a mask
+is KR34's look. As with slice 7, nothing in Blackwing waits on it and it has no date.
+
+What the five have in common is that Krome's layout is a flow, and a skin is not. A skin
+places by coordinate, slides a drawer by changing one, blinks on a timer, and is clicked
+through a shape drawn in another file. Each is a small departure from "rows, columns and
+stacks of rectangles", and the question for review is how many such departures the kernel
+takes before a skin is better served by something else.
+
+It is done when:
+
+- In a stack, a node 10 from the left and 10 from the right of its parent stretches with
+  it; one 30 from the right and 8 from the bottom keeps its size and follows the corner;
+  one at a third of the width stays at a third.
+- A panel bound to `open` slides 120 pixels in 0.2 s, and its screen's handler is told
+  when it arrives.
+- A 500 ms timer in a screen's script costs two wakeups a second in a window paced on
+  demand, and none while the window is hidden.
+- A long title scrolls in a 120-pixel box at a stated rate; a short one sits still and
+  asks for no frame; neither asks for one while it is hidden or scrolled out of view.
+- Two buttons whose rects overlap take presses by a mask's colours, and a press on a
+  button's transparent corner goes to what is under it.
+- A masked control brightens by 1.2 on hover over its shape and not its rect.
+- `kromedemo` has a slider whose thumb follows a three-point curve and a dial of 32
+  frames, both with the keys std's slider takes, written as behaviours in Lua with no
+  kernel change of their own. Whatever part could not be written that way is named.
+- The screens of `kromedemo`, `kromescreens` and goldberg's window lay out as they did,
+  to the pixel.
+
+## What the code has
+
+Checked Nov 23 on `main` (52f9963).
+
+| ID | Where | What is there now |
+|---|---|---|
+| KR30 | `krome/src/layout.cc` | A stack gives each child its size on both axes and places it at one of nine anchors (`anchor=`, else the stack's alignment) inside the padding. No offset. Sizes can be a percentage of the parent's inside |
+| KR33 | `krome/src/view.cc` | `hit_node` returns the deepest node whose rect holds the point, later children over earlier. Krome holds an image as a texture handle and never sees its pixels |
+| KR35 | `krome/src/view.cc`, `tree.h` | `transition` is a look's property; an `Anim` eases the colours and opacity a look resolves to. Layout runs only when something marked the tree. Krome's Lua has no clock: the caret and the tooltip ask for a frame at a time (`engine_want_frame_at`) from C++ |
+| KR36 | `krome/assets/std.lua` | `slider` is a behaviour: `press`, `drag`, `key`, `wheel`, and `update` drawing its parts with `w:part(name, prop, value)`. Its thumb moves by a part's width |
+| KR37 | `krome` | A text with `nowrap` that does not fit is clipped. An edit scrolls to keep its caret in view |
+
+## Placement by edge (KR30)
+
+A child of a stack can be tied to its parent's edges. Four properties, each the place of
+one of the child's edges inside the parent's padding:
+
+| written | the edge is |
+|---|---|
+| `l=10` | 10 from the parent's left |
+| `r=30` | 30 from the parent's right |
+| `l=33.3%` | a third of the way across, from the left |
+| `l=100%-40` | 40 short of the right edge: a fraction and a distance together |
+
+`t` and `b` the same, down. With both edges of an axis tied, the child is as wide as what
+lies between and `w` is ignored; with one, it keeps its size and follows that edge; with
+neither, it is placed by its anchor as now.
+
+**`x=` and `y=`** are an offset from wherever the above put it, in logical pixels, for a
+thing that moves: a thumb, a drawer. All six can be bound (`x=@thumb.x`), and set by a
+behaviour's `w:part`.
+
+They mean something only in a stack; anywhere else each is an error naming the parent's
+direction. A tied child adds nothing to what a hugging stack wants, as a percentage does
+not: the parent's size would depend on it.
+
+## Easing and arrival (KR35, first half)
+
+`transition` covers `w`, `h`, `x`, `y`, `l`, `t`, `r` and `b`: when one of them changes on
+a node whose look has a transition, by a binding, a state or a `w:part`, it eases from
+where it is, turning around mid-way as a colour does. While any is easing the tree is
+laid out each frame and the window asked for the next; when the last arrives both stop.
+
+**`arrived=name`** on the node fires that event once when its sizes and offsets have all
+reached their targets: the screen's `on.name(id)`, and `KromeEvent`. A transition
+interrupted and turned around arrives once, at the end it finally reaches.
+
+A change made by layout itself (the window resized, a sibling grown) does not ease. Only
+a change to the node's own property does.
+
+## Timers (KR35, second half)
+
+Three functions every script and behaviour sees:
+
+| call | what |
+|---|---|
+| `after(seconds, fn)` | calls `fn()` once, that long from now; returns a handle |
+| `every(seconds, fn)` | calls it at that interval until cancelled; returns a handle |
+| `cancel(handle)` | stops either; nothing if it has already gone |
+
+They run on the Frame cycle's clock, in `krome.pump`, before layout. Krome asks the loop
+for a frame at the soonest one due (`engine_want_frame_at`), so a timer wakes an on-demand
+window when it fires and at no other time. A hidden window draws no frame and so runs no
+Frame cycle: its timers wait, and one that came due while hidden fires once when the
+window is seen, not once for each interval missed.
+
+A screen's timers go when it closes, and when its script is reloaded (slice 6 runs it
+again in a fresh environment; the old run's closures are not kept). A timer that throws is
+cancelled and its error named with the line it was set at. At most 256 a screen.
+
+Like the rest of Krome, none of it is hashed and none of it is in a replay.
+
+## Text that scrolls (KR37)
+
+A one-line text (`nowrap`) wider than its rect can move instead of being cut:
+
+| property | what |
+|---|---|
+| `marquee=30` | logical pixels a second; 0 or absent: clipped, as now |
+| `marquee-step=8` | moves that many pixels at a time, not smoothly |
+| `marquee-mode=loop` | `loop` (the text follows itself after `marquee-gap`) or `bounce` |
+| `marquee-gap=40` | the space between the end and the start, in a loop |
+| `marquee-pause=1.5` | seconds at rest at each end, and before it starts |
+
+The flag `marquee-drag` lets the pointer drag it; it starts moving again when released.
+
+A text that fits does not move and asks for nothing. One that moves asks for its next
+frame at the time it will next be a whole pixel further (a step further, with
+`marquee-step`), so 30 pixels a second at scale 1 is 30 frames a second, not the
+display's rate. It asks only while its rect, clipped by its ancestors, has any area and
+its window is shown.
+
+## Masks (KR33)
+
+**A node's own alpha.** The flag `mask-alpha` on a node with an image: a point is in the
+node only where the image's alpha there, through its region, frame and fit, is over a
+half. A press on a round button's clear corner falls to whatever is under it.
+
+**A shared mask.** `mask="skin/map.png"` on any node declares a mask image stretched over
+that node's rect, for the nodes inside it. A descendant says which part is its own:
+
+```
+box mask="skin/map.png" {
+    hit -> play  mask-color=#ff0000
+    hit -> stop  mask-color=#00ff00
+    hit -> seek  mask-value=12
+}
+```
+
+`mask-color` is the mask's colour there, exactly. `mask-value` is its red channel, 0 to
+255, for masks that number their regions (XMPlay's palette indexes: the converter writes
+the index as a grey). Such a node is hit where the mask has its colour or value, whatever
+its own rect is, and it needs no size of its own.
+
+**Held once.** A mask is read as a blob and decoded by the `image` module into bytes Krome
+keeps on the CPU, one copy a path however many nodes name it; it is never a texture
+unless a look needs it (below). `mask-alpha` decodes the node's image a second time for
+its alpha, one byte a pixel.
+
+**`hit_node`** asks the mask where it now asks the rect. Nothing else in input changes:
+capture, the release, focus by Tab all follow the node as they do.
+
+**A look inside a mask.** With slice 7's `gain`, `hue` and `saturation`, a masked node's
+look applies only where the mask is its own. For that the mask is also a texture, and the
+UI item carries its slot and the colour to match. This is the larger half of KR33's cost
+and the only part that touches the renderer.
+
+## Sliders along a path, and dials (KR36)
+
+Blackwing asks for a check, not a feature: that with bound offsets and frames, both are
+behaviours in Lua. The last milestone writes them in `examples/kromedemo`:
+
+- **A path slider**: `update` puts its thumb part at the point of a Bezier a fraction
+  along (`w:part("thumb", "x", ...)`), and `press` and `drag` find the nearest point on
+  the curve.
+- **A dial**: `update` sets `frame-at` on its image part; `drag` turns the pointer's angle
+  between `min` and `max` into a value.
+
+Both take std's slider's keys. If either needs something a behaviour cannot reach, that
+is named in the status and asked for by its own ID. Whether either belongs in std is For
+review, 4.
+
+## Out of scope
+
+- **Rotation**, of a node or an image. A dial here is frames, as the skins' are.
+- **Grid areas** (K24). Edges in a stack are not a grid.
+- **Easing curves by name, keyframes, sequences.** One ease, in and out, as colours have.
+- **Per-pixel hit testing of text or shapes.** A mask is an image.
+
+## Requirements
+
+| ID | Requirement | Priority |
+|---|---|---|
+| KR30 | `l`, `t`, `r`, `b` in a stack: a distance, a fraction, or both; `x`, `y`; all bound | P1 |
+| KR35 | `transition` eases sizes and offsets; `arrived=` | P1 |
+| KR35 | `after`, `every`, `cancel`; a timer wakes an on-demand window only when it fires, and waits while hidden | P1 |
+| KR37 | `marquee` and its four properties; `marquee-drag`; frames asked for only while moving and in view | P1 |
+| KR33 | `mask-alpha`; `mask`, `mask-color`, `mask-value`; a mask held once | P1 |
+| KR33 | A look confined to its node's mask | P2 |
+| KR36 | A path slider and a dial as Lua behaviours in `kromedemo`; what could not be is named | P1 |
+| KM1 | Every screen in the tree lays out as before: the layout tests' rects do not move | P0 |
+| KM2 | The module pages and quick references of `krome`, `kimb` and `render` change with their headers; `tools/doccheck.sh` reports nothing new | P0 |
+
+## Milestones
+
+1. **Edges and offsets** (KR30). Layout tests headless for each row of the table above,
+   at three parent sizes; a hugging stack with a tied child.
+2. **Easing** (KR35). Sizes and offsets through `Anim`; `arrived`; the 120-pixel drawer,
+   with the frames it drew counted and the window asleep after.
+3. **Timers** (KR35). The three calls; reload and close; the 500 ms timer's wakes for ten
+   seconds shown and ten hidden.
+4. **Scrolling text** (KR37). Loop and bounce, smooth and stepped, the drag; wakes counted
+   for a short title, a long one, and a long one scrolled out of view.
+5. **Masks for the pointer** (KR33). The CPU copy, `mask-alpha`, colours and values; the
+   two overlapping buttons and the clear corner, in `krome_tests` with presses by
+   coordinate.
+6. **Looks in masks** (KR33). The item's mask slot, the shader and the CPU renderer;
+   render-gate's reference on each backend.
+7. **The path slider and the dial** (KR36).
+
+**Verification.** `kormake test` on linux-debug, linux-dev and linux-ship; `krome_tests`
+under `--sanitize address,undefined`; render-gate at milestone 6. `kromedemo --demo` and
+`kromescreens` pixel for pixel against their references after milestones 1 and 2, which
+touch layout every screen goes through.
+
+## For review
+
+1. **How far the kernel goes.** After slices 7 and 8 the kernel has absolute placement,
+   masks and marquees: things a tool's UI never asked for and a skin cannot do without.
+   The alternative is a second, smaller thing for skins (a "skin" node that is a canvas
+   of placed pictures, its children not laid out by flow), which would keep K1's "nothing
+   in C++ that a prelude could say" cleaner and split the vocabulary in two. The draft
+   keeps one kernel.
+2. **`l`, `t`, `r`, `b`.** Short, beside `w` and `h`. `left`, `right`, `top` and `bottom`
+   are already flags (a text's alignment), so the long names would read two ways.
+3. **Palette indexes as greys.** `mask-value` reads a channel, and the converter is asked
+   to write an indexed mask as a grey image. The `image` module was not checked for
+   whether its PNG decoder can hand back palette indexes; if it can, `mask-index` could
+   read the file as XMPlay made it.
+4. **Where the dial and the path slider live.** A dial is a widget a tool might want and
+   could go in std. A slider along a Bezier is a skin's, and is better in a prelude of
+   Blackwing's. The draft writes both in `kromedemo` and moves neither.
+5. **A second decode for `mask-alpha`.** Krome asks the asset module for a texture and
+   has no pixels. Whether the asset module still has them after the upload was not
+   checked; if it does, the second decode goes.
+6. **Timers in a hidden window.** The draft holds them, as Blackwing asked (its B25: a
+   hidden window costs nothing). A script that counts on a timer for something other than
+   drawing would be wrong to; the header says so.

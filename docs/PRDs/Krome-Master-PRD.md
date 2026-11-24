@@ -406,6 +406,24 @@ the model, a definition used with the wrong arguments: each names the line writt
 live status, reports and forms, over the same commands as its CLI. *As built*: all five, with
 diff review as a rule edit's preview, since goldberg has no lockfile yet (slice 6).
 
+**After it, drafted and not built** (Nov 23, 2026). Blackwing's skin import note asks
+Krome to draw other players' skins, which are made of pieces of bitmaps placed by
+coordinate (`docs/PRDs/Korvid-Changes-For-Blackwing.md` in Blackwing's checkout, KR28 to
+KR42). Two slices are drafted from it. Neither is scheduled, and neither is part of
+"done" above.
+
+7. **Pictures.** A region of an image, strips of frames, tiled and nine-slice fits,
+   bitmap fonts, looks computed from an image's pixels (KR28, KR29, KR31, KR32, KR34).
+   Drafted: [Krome-Slice-7-PRD.md](Krome-Slice-7-PRD.md).
+8. **Placed, moving, and not a rectangle.** Edges and offsets in a stack, easing of sizes
+   and positions, timers for scripts, text that scrolls, hit testing through a mask
+   (KR30, KR33, KR35, KR36, KR37). Drafted: [Krome-Slice-8-PRD.md](Krome-Slice-8-PRD.md).
+
+Both go past this document's non-goals ("animation beyond transitions between style
+states") and bear on K1; slice 8's "For review" asks how far the kernel should go. The
+windows a skin needs (shaped, several, snapping: KR39 to KR42) are the engine's:
+[Engine-Slice-13-PRD.md](Engine-Slice-13-PRD.md).
+
 ## Decided
 
 Nov 15, 2026, in review of the first draft.
@@ -439,7 +457,8 @@ Nov 15, 2026, in review of the first draft.
 - [ ] Where Krome's update and draw sit in the schedule, and what a tool window with no
       simulation runs.
 - [ ] Multiple windows: goldberg's window is one. A tool with a detached panel needs
-      `platform_hid` to open more than one.
+      `platform_hid` to open more than one. Drafted as engine slice 13
+      ([Engine-Slice-13-PRD.md](Engine-Slice-13-PRD.md), KR40).
 - [ ] Native text input per platform and the accessibility tree: the design of their own
       (K25, K26), and whether SDL3 can be kept on the desktops or has to be gone around.
 - [x] String interpolation: `{key}` for a model value and `{*tag}` for a tag, in Krome and `ui` alike (Slice 2 PRD).
