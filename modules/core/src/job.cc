@@ -30,7 +30,7 @@ struct JobPool {
 };
 
 constinit JobPool g_pool;
-constinit JobStats g_stats;
+constinit JobStats g_stats{};
 thread_local u32 t_depth = 0; // batches this thread is waiting on, nested
 
 void bump(u64* counter) { kv::atomic_add_fetch(counter, 1, kv::MO_RELAXED); }

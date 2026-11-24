@@ -112,7 +112,7 @@ bool colour(const char* v, u8 out[4]) {
             if (!patherizer_number(&p, &n)) return false;
             p = skip(p);
             if (*p == '%') { n = k < 3 ? n * 2.55f : n / 100.0f; ++p; }
-            else if (k == 3) n = n; // alpha 0 to 1
+            // k == 3: alpha, already 0 to 1
             f32 c = k < 3 ? n : n * 255.0f;
             out[k] = (u8)(c <= 0.0f ? 0 : c >= 255.0f ? 255 : (u32)(c + 0.5f));
         }

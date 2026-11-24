@@ -76,7 +76,6 @@ constinit const ModulePart* const k_failing_parts[] = {&k_ship_part, &k_fail_par
 KV_MODULE_DEFINE(k_failing) = {.name = "game", .components = k_own_components, .parts = k_failing_parts, .startup = game_up, .shutdown = game_down};
 
 // A module made only of parts.
-constinit const ModulePart* const k_only_parts[] = {&k_ship_part};
 constinit const ComponentDesc k_bare_components[] = {KV_COMPONENT(PPos, k_pos_fields)};
 KV_MODULE_PART(k_bare_part) = {.components = k_bare_components};
 constinit const ModulePart* const k_bare_then_ship[] = {&k_bare_part, &k_ship_part};

@@ -393,7 +393,7 @@ struct Cache {
     Page*   full[kClasses];
     Notify* notify;
 };
-constinit thread_local Cache t_cache;
+constinit thread_local Cache t_cache{};
 
 void list_push(Page*& head, Page* p) { p->prev = nullptr; p->next = head; if (head) head->prev = p; head = p; }
 void list_remove(Page*& head, Page* p) {
