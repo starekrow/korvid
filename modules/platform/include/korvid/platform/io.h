@@ -286,6 +286,7 @@ struct IoDirEntry {
 };
 bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirEntry& e), void* user, i32* err = nullptr);
 // Creates a directory and its parents (mkdir -p). Synchronous; true if it exists after.
+// The path may be as long as the OS allows, as io_remove_tree's.
 bool io_make_dirs(const char* path);
 // Removes a file, or a directory that is empty. Synchronous; true if it is gone after.
 bool io_remove(const char* path);

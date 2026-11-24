@@ -298,24 +298,24 @@ bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDir
 
 bool os_make_dir(const char* path) {
     if (os_path_kind(path) == OsPathKind::Dir) return true; // also a drive, "C:"
-    wchar_t w[KV_WIDE_PATH_MAX];
-    if (!widen(path, w, KV_WIDE_PATH_MAX)) return false;
-    return CreateDirectoryW(w, nullptr) || GetLastError() == ERROR_ALREADY_EXISTS;
+    WidePath wp;
+    if (!wp.set(path)) return false;
+    return CreateDirectoryW(wp.w, nullptr) || GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
 bool os_remove(const char* path) {
-    wchar_t w[KV_WIDE_PATH_MAX];
-    if (!widen(path, w, KV_WIDE_PATH_MAX)) return false;
-    DWORD a = GetFileAttributesW(w);
+    WidePath wp;
+    if (!wp.set(path)) return false;
+    DWORD a = GetFileAttributesW(wp.w);
     if (a == INVALID_FILE_ATTRIBUTES) return false;
-    if (a & FILE_ATTRIBUTE_DIRECTORY) return RemoveDirectoryW(w) != 0;
-    return DeleteFileW(w) != 0;
+    if (a & FILE_ATTRIBUTE_DIRECTORY) return RemoveDirectoryW(wp.w) != 0;
+    return DeleteFileW(wp.w) != 0;
 }
 
 bool os_remove_dir(const char* path) {
-    wchar_t w[KV_WIDE_PATH_MAX];
-    if (!widen(path, w, KV_WIDE_PATH_MAX)) return false;
-    if (RemoveDirectoryW(w)) return true;
+    WidePath wp;
+    if (!wp.set(path)) return false;
+    if (RemoveDirectoryW(wp.w)) return true;
     DWORD e = GetLastError();
     return e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND;
 }

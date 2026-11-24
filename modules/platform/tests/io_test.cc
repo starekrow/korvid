@@ -346,6 +346,32 @@ void test_io_now(kv::TestCtx& c) {
     KV_CHECK(c, io_remove_tree(dir));
 }
 
+// io_make_dirs as deep as the OS goes (KR15): thirteen levels of 230 bytes, about 3,000
+// in all, past the 1,024 it used to copy into; a file in the deepest, and the tree removed.
+void test_io_make_dirs_deep(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("io_make_dirs_deep");
+    char dir[200];
+    KV_CHECK(c, io_make_temp_dir("korvid-deep", dir, sizeof dir));
+    char deep[3400];
+    usize n = (usize)format(deep, sizeof deep, "%s", dir);
+    for (u32 level = 0; level < 13; ++level) {
+        deep[n++] = '/';
+        for (u32 i = 0; i < 230; ++i) deep[n++] = (char)('a' + (level + i) % 26);
+        deep[n] = 0;
+    }
+    KV_CHECK(c, n > 3000);
+    KV_CHECK(c, io_make_dirs(deep));
+    KV_CHECK(c, io_make_dirs(deep)); // already there
+    IoStat st;
+    KV_CHECK(c, io_stat(deep, &st) && st.is_dir);
+    format(deep + n, sizeof deep - n, "/x.txt");
+    KV_CHECK(c, io_write_now(deep, "x", 1));
+    KV_CHECK(c, !io_make_dirs(deep)); // a file is not a directory
+    KV_CHECK(c, io_remove_tree(dir));
+    KV_CHECK(c, !io_stat(dir, &st));
+}
+
 // Slice 10's queue: a path of 1,000 bytes read and written, the first 64 KB of a 16 MB file
 // and ranges past its end, and a stat of a file, a directory and a missing path; under the
 // synchronous backend, the ring, and (where the ring has its own stat) the task workers.

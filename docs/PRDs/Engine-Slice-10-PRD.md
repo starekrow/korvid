@@ -14,6 +14,10 @@ side.
 Four more came after this draft and are stacked on it: KR10, a timed wait, from
 Blackwing's slice 2, and KR11 to KR13 from planning its slice 3, the library. Three are
 the platform module's and one `core`'s. KR11 blocks the library's third milestone.
+KR14, C sources, came with the library's sqlite. Four more are stacked after it: KR15
+and KR16 from slice 3's close, KR17 from the script-module spec and KR23 from planning
+Blackwing's slice 4. Each is small. KR17 blocks that slice's fourth milestone. The rest
+of what Blackwing asked on Nov 23 (KR18 to KR22, KR24, KR25) is slice 11's.
 
 KR1 goes first. Blackwing's next milestone is its PipeWire backend, and a project cannot
 link PipeWire today without editing `modules/toolchain-linux/module.lua`.
@@ -41,6 +45,10 @@ It is done when:
 - A path can be asked whether it is on a share, and a watcher made with `Auto` polls a
   root that is.
 - A stat names the volume: a mount point's differs from its parent directory's.
+- `io_make_dirs` and `io_remove_tree` take a path of 3,000 bytes.
+- A recursive watch does not go down a link to a directory, on any backend.
+- A resource can have a field table and stay out of the state hash.
+- A dev build can hand a module every delivered event with its type's name and fields.
 - Korvid's own tree builds as before: the build files kormake writes for it differ only
   in the version on their first line, and the demos' hashes do not move.
 
@@ -280,6 +288,28 @@ beside them, with a unity file of its own:
   `src/` that sets its options and includes it from `src/vendor/`, which is not looked in.
   C that is also C++ (yxml) stays behind a `.cc`.
 
+## Stacked on: slice 3's close, the spec and slice 4
+
+**Deep directories (KR15).** `io_make_dirs` copied its path into 1,024 bytes, and so did
+`io_remove_tree`; both now take what the OS takes, on the stack when the path is short.
+On Windows `os_make_dir`, `os_remove` and `os_remove_dir` widen through `WidePath`, as
+the queue's opens do since KR4.
+
+**The watcher and links (KR16).** A recursive watch never goes down a link to a
+directory: what the library's walk does (KR11 marks links), the watcher does. A link
+itself is an entry: made, removed or changed, it is reported by its own path. The
+alternative, an option to follow with the reported path saying it came through a link,
+is not built; nothing asks for following.
+
+**A cosmetic resource's fields (KR17).** `ResourceDesc::cosmetic`. With `fields` set it
+says the table describes the object and nothing more: no state hash, no plain-data check
+at publish, no save. `describe` and the script binding read it as any resource's.
+
+**The event trace as data (KR23).** In dev builds, `engine_set_event_hook(e, fn, user)`:
+`fn` is called with each event as it is delivered, with its type's name, its field table
+(empty for a type without one), the emitter's name and all its bytes; not the trace
+ring's 40. One hook; setting another replaces it, and null takes it away. Not in ship.
+
 ## Requirements
 
 | ID | Requirement | Priority |
@@ -298,6 +328,10 @@ beside them, with a unity file of its own:
 | KR12 | `io_path_is_remote`; `FsWatcher` polls a remote root under `Auto`, and a root can be polled by name | P2 |
 | KR13 | `IoStat::volume` | P2 |
 | KR14 | `.c` sources compiled as C, with each toolchain's `cc`, `cflags` and `c` rule | P0, blocks Blackwing slice 3 milestone 3 |
+| KR15 | `io_make_dirs` and `io_remove_tree` take any path the OS takes | P2 |
+| KR16 | A recursive watch does not follow links to directories | P1 |
+| KR17 | `ResourceDesc::cosmetic`: fields that describe and are not hashed | P0, blocks Blackwing slice 4 milestone 4 |
+| KR23 | `engine_set_event_hook`, dev builds | P2 |
 | R10 | kormake 1.2: `KORMAKE_VERSION`, the manual's `module.lua`, `korvid.config`, OPTIONS and ENVIRONMENT sections | P0 |
 | R11 | The module pages and quick references of `platform` and `core` change with their headers (`cli` has no page yet; its header comment changes); `tools/doccheck.sh` reports nothing new | P0 |
 
@@ -325,6 +359,14 @@ beside them, with a unity file of its own:
 9. **Shares** (KR12). Tests: a FUSE mount, where there is one, is remote and `/tmp` is
    not; a root added with `Poll` to a native watcher reports a change.
 10. **The timed wait** (KR10). Tests: a wait that times out, one that is signalled, and 0.
+11. **Deep directories** (KR15). A tree of 3,000 bytes made, written in and removed.
+12. **The watcher and links** (KR16). A link inside a root to the root, and one to a
+    directory outside it: a file written in the root is reported once, and one written
+    outside not at all, under each backend this machine has.
+13. **A cosmetic resource's fields** (KR17). Its object changes, the hash does not, and
+    its fields are read by name.
+14. **The event hook** (KR23). Events of two types, one without a field table, reach the
+    hook in delivery order with their bytes.
 
 **Verification.** `kormake build` and `kormake test` for linux-debug, linux-dev and
 linux-ship. `tools/kormake/tests/run.sh` passes.
@@ -664,3 +706,9 @@ test's `test_deps` gave their libraries but not their externals (Blackwing's lib
 take the player, which takes PipeWire). Both now link through `link_inputs` with the
 `test_deps` and their closures: libraries, externals and runtime files. The fixtures have
 no such case, and their expected files are unchanged.
+
+**Milestone 11, deep directories (KR15): built Nov 23, 2026.** As above. `io_remove_tree`
+keeps its path in an `Array<char>` that grows a level at a time. Test
+(`io_make_dirs_deep`): thirteen levels of 230 bytes, over 3,000 in all, made twice, a file
+written in the deepest, `io_make_dirs` of that file refused, and the tree removed.
+Checked on linux-dev and linux-debug. The Windows change is written, not compiled.

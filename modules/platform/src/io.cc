@@ -998,9 +998,14 @@ bool io_copy_now(const char* from, const char* to, u8 hash[32], i32* err) {
 }
 
 bool io_make_dirs(const char* path) {
-    char p[1024];
+    // A copy to cut, on the stack when it fits and from the heap when not: a path is as
+    // long as the OS allows, as everywhere else in io.
+    char small[1024];
     usize n = path ? strlen(path) : 0;
-    if (!n || n >= sizeof p) return false;
+    if (!n) return false;
+    char* p = n < sizeof small ? small : (char*)mem_alloc(n + 1);
+    if (!p) return false;
+    struct Free { char* p; char* small; ~Free() { if (p != small) mem_free(p); } } free_p{p, small};
     memcpy(p, path, n + 1);
     while (n > 1 && p[n - 1] == '/') p[--n] = 0;
     // The leaf first: a directory already there, or one whose parent is, costs one call
@@ -1041,39 +1046,43 @@ void collect_entry(void* user, const char* name) {
 
 // Each entry is removed as it is (a file, a link, an empty directory); only one that will
 // not go and is a directory is emptied first, so a link to a directory goes as a link and
-// what it points at is never touched.
-bool remove_tree(char* full, usize len, usize cap) {
+// what it points at is never touched. `full` grows with the tree: a path is as long as the
+// OS allows, as everywhere else in io.
+bool remove_tree(Array<char>& full, u32 len) {
     Array<char*> names;
-    bool ok = os_dir_each(full, collect_entry, &names);
+    bool ok = os_dir_each(full.data, collect_entry, &names);
     for (char* name : names) {
-        usize n = strlen(name);
-        if (len + 1 + n < cap) {
-            full[len] = '/';
-            memcpy(full + len + 1, name, n + 1);
-            if (!os_remove(full)) ok = os_path_kind(full) == OsPathKind::Dir ? remove_tree(full, len + 1 + n, cap) && ok : false;
-            full[len] = 0;
+        u32 n = (u32)strlen(name);
+        full.len = len + 1; // what a growth keeps: the path so far and its NUL
+        if (full.reserve(len + 2 + n)) {
+            full.data[len] = '/';
+            memcpy(full.data + len + 1, name, n + 1);
+            if (!os_remove(full.data)) ok = os_path_kind(full.data) == OsPathKind::Dir ? remove_tree(full, len + 1 + n) && ok : false;
+            full.data[len] = 0;
         } else {
             ok = false;
         }
         free_in(mem_general(), name, n + 1);
     }
     names.free();
-    return os_remove_dir(full) && ok; // emptied above: a directory
+    return os_remove_dir(full.data) && ok; // emptied above: a directory
 }
 
 } // namespace
 
 bool io_remove_tree(const char* path) {
-    char full[1024];
     usize n = path ? strlen(path) : 0;
-    if (!n || n >= sizeof full) return false;
-    memcpy(full, path, n + 1);
-    while (n > 1 && full[n - 1] == '/') full[--n] = 0;
+    if (!n) return false;
+    Array<char> full;
+    if (n >= 0x7fffffff || !full.reserve((u32)n + 256)) return false;
+    memcpy(full.data, path, n + 1);
+    while (n > 1 && full.data[n - 1] == '/') full.data[--n] = 0;
     // Mostly a directory: an empty one, or nothing, goes in one call. Then a file or a
     // link, and only then a directory with something in it.
-    if (os_remove_dir(full)) return true;
-    if (os_remove(full) || os_path_kind(full) == OsPathKind::None) return true;
-    return os_path_kind(full) == OsPathKind::Dir && remove_tree(full, n, sizeof full);
+    bool ok = os_remove_dir(full.data) || os_remove(full.data) || os_path_kind(full.data) == OsPathKind::None ||
+              (os_path_kind(full.data) == OsPathKind::Dir && remove_tree(full, (u32)n));
+    full.free();
+    return ok;
 }
 
 bool io_make_temp_dir(const char* prefix, char* out, u32 cap) {
