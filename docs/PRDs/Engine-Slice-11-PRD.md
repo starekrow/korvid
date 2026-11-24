@@ -189,8 +189,8 @@ bool engine_remove_ktable(Engine& e, u32 ktable_id);
 memory from an allocator, no engine state.
 
 ```cpp
-bool jpeg_info(const u8* data, usize size, JpegInfo* out);           // the header alone
-bool jpeg_decode(const u8* data, usize size, const JpegOptions& opt, Allocator* a, Image* out, const char** why);
+bool jpeg_info(const void* data, usize size, JpegInfo* out, const char** error);   // the header alone
+bool jpeg_decode(const void* data, usize size, const JpegOptions& opt, Allocator* pixels, JpegImage& out, const char** error);
 ```
 
 - **Baseline and progressive**, 8-bit, Huffman; greyscale, YCbCr at every sampling in use
@@ -454,3 +454,41 @@ stop listening during a delivery.
   again, a declared ktable not removable, and frames run on; the next one added takes the
   next id. (`script events`): rows of one spawned and read by field from Lua. On
   linux-debug and linux-ship, and under `address,undefined`.
+
+**Milestones 10 and 11, JPEG (KR25): built Nov 23, 2026**, as one piece (`image/jpeg.h`,
+`src/jpeg.cc`, about 900 lines). As above, and:
+
+- **libjpeg's arithmetic, to the bit.** The integer inverse DCT and its reduced forms, the
+  chroma blocks' size when scaled (at a half, 4:2:0's chroma is decoded 8x8 and not
+  upsampled: libjpeg-turbo's jdmaster.c), the fancy upsampling and where it is not used
+  (at an eighth, and for a component two samples wide or less), and the colour
+  conversion's tables. Against Pillow 12.1 on libjpeg-turbo 3 every test case is
+  identical, the largest difference 0: baseline 4:4:4, 4:2:2 and 4:2:0, greyscale,
+  progressive 4:2:0, 4:4:4 and greyscale, restart markers every three MCUs, CMYK,
+  EXIF orientation 6, and 4:4:4, 4:2:0, greyscale and progressive 4:2:0 at a half, a
+  quarter and an eighth.
+- **Doing less when scaled.** A component decoded 1x1 keeps one coefficient a block;
+  a sequential scan's AC coefficients are decoded and dropped, and a progressive file's AC
+  scans of it skipped to the next marker. Short AC codes and their values come from one
+  table lookup (stb_image's idea). A block with no AC is filled with its DC.
+- **Hostile input.** `max_pixels` before any allocation; the bit reader stops at a marker
+  or the end and reads zeros; a bad code ends the scan as spoiled data. A sequential file
+  cut short gives the whole MCU rows it decoded (`partial`), as they would have been; a
+  progressive one all its rows from the scans it had. Arithmetic, lossless and
+  hierarchical frames, 12-bit samples and DNL are refused by name.
+- **The fuzzer**: 2,800 files a run, each test file with one to six bytes changed, flipped,
+  inserted or cut, decoded at a random scale: 1,206 decoded and 1,594 refused, each with
+  a reason. Clean under `address,undefined`. libFuzzer needs clang, which this machine
+  does not have, so this is a mutation loop in the test and not coverage-guided.
+- **Speed** on one core of this machine (Ryzen 7 7840U), a 1500x1500 4:2:0 cover of 128 KB:
+  20.6 ms whole, 6.0 ms at a quarter, 2.8 ms at an eighth; progressive 25.3, 9.8 and 2.6.
+  libjpeg-turbo with its SIMD, through Pillow: 4.6, 1.7 and 1.4; progressive 8.2, 6.1 and
+  6.3. A noisy 842 KB one: 27.7 ms whole, 7.9 ms at an eighth. The thumbnail KR25 asks for
+  is a few milliseconds; a whole decode is two to four times libjpeg-turbo's.
+- **Not checked against a reference:** 4:4:0 and 4:1:1 (Pillow cannot write them) and
+  YCCK (nor that). They decode by the same paths, the 1:2 upsampling and replication, and
+  the CMYK conversion after YCbCr.
+- **Tests** (`jpeg`): the cases above; `jpeg_info` on four; orientation applied and only
+  reported; truncation, sequential and progressive, and cut before the first row; too
+  large, a bad scale, not a JPEG, arithmetic coding. With `KV_JPEG_BENCH=<file>` the test
+  times a file at 1, 1/4 and 1/8.
