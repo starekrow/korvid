@@ -38,12 +38,12 @@ namespace kv {
 
 namespace {
 
-enum class WinMsgType : u8 { Close, Size, Focus, Key, Move, Button, Wheel, Char, Compose };
+enum class WinMsgType : u8 { Close, Size, Focus, Key, Move, Button, Wheel, Char, Compose, Minimized };
 
 // What the window thread saw, in the order it saw it.
 struct WinMsg {
     WinMsgType type;
-    bool       on;      // Focus: focused; Key, Button: down
+    bool       on;      // Focus: focused; Key, Button: down; Minimized: minimized
     bool       repeat;  // Key: auto-repeat
     u8         button;  // Button: a MouseButton
     u32        a, b;    // Size: width, height in pixels; Key: scancode; Char: a code point;
@@ -233,7 +233,13 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_DESTROY: PostQuitMessage(0); return 0;
 
     case WM_SIZE: {
-        if (wp == SIZE_MINIMIZED) return 0; // a minimized window keeps its last size
+        // A minimized window keeps its last size, and is not seen (KR21); any other size
+        // is a window shown again.
+        WinMsg v{};
+        v.type = WinMsgType::Minimized;
+        v.on   = wp == SIZE_MINIMIZED;
+        post(v);
+        if (wp == SIZE_MINIMIZED) return 0;
         WinMsg m{};
         m.type = WinMsgType::Size;
         m.a = LOWORD(lp);
@@ -568,6 +574,10 @@ bool HostWindow::clipboard_set(const char* utf8) {
     return ok;
 }
 
+void HostWindow::minimize(bool on) {
+    if (native_) ShowWindowAsync(g_win.hwnd, on ? SW_MINIMIZE : SW_RESTORE); // the window thread's to do
+}
+
 void HostWindow::cursor(CursorShape shape) {
     if (!native_ || (u32)shape >= (u32)CursorShape::Count) return;
     if (atomic_exchange(&g_win.cursor, (u32)shape, MO_ACQ_REL) != (u32)shape) PostMessageW(g_win.hwnd, WM_KV_CURSOR, 0, 0);
@@ -596,6 +606,8 @@ void HostWindow::close() {
     native_ = nullptr;
     width_ = height_ = 0;
     focused_ = false;
+    hidden_  = 0;
+    hidden_sent_ = WindowHidden::None;
     KV_INFO("window", "closed");
 }
 
@@ -672,6 +684,9 @@ void HostWindow::pump(EventBus& bus, Input& input) {
                 height_ = m.b;
                 bus.emit(WindowResized{m.a, m.b});
             }
+            break;
+        case WinMsgType::Minimized:
+            set_hidden(bus, HiddenMinimized, m.on);
             break;
         case WinMsgType::Focus:
             if (m.on == focused_) break;

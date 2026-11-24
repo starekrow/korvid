@@ -88,6 +88,8 @@ struct FrameLoopState {
     // Over the run: frames drawn, and (Pacing::Decoupled) ticks run in passes that drew nothing.
     u64             frames_drawn = 0;
     u64             ticks_alone  = 0;
+    bool            was_hidden   = false; // the window was not seen at the last pass that looked
+    u64             hidden_passes = 0;
     // The GPU's frames over the report window (renderer_gpu_stats, a frame late), when measured.
     u32             gpu_frames = 0;
     f64             gpu_sum = 0.0, gpu_worst = 0.0, gpu_sort = 0.0, gpu_draw = 0.0;
@@ -467,22 +469,27 @@ f64 time_to_next_tick(const TickClock& c) {
     return left > 0.0 ? left : 0.0;
 }
 
-// Pacing::Decoupled: one pass of the loop. True when this pass should draw: the loop's body
-// then ticks and draws as for any frame. Otherwise the pass has ticked (a module wants
-// ticks, I/O or Work is pending, the heartbeat) or slept, and drawn nothing. The platform
-// is pumped here.
-bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept) {
+// Pacing::Decoupled, and every pacing while the window is hidden: one pass of the loop.
+// True when this pass should draw: the loop's body then ticks and draws as for any frame.
+// Otherwise the pass has ticked (a module wants ticks, I/O or Work is pending, the
+// heartbeat; every tick, with `tick_always`, which is Continuous hidden) or slept, and drawn
+// nothing. A hidden window is never drawn (KR21); the first pass it is seen again draws.
+// The platform is pumped here.
+bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept, bool tick_always) {
     Input* in = platform_input(engine);
     InputState before;
     if (in) before = in->raw;
     platform_pump(engine);
     f64 now = time_now();
+    bool shown = !s.window || s.window->visible();
     bool input = in && memcmp(&before, &in->raw, sizeof before) != 0;
     bool draw  = engine.frame_wanted || input || s.demand_tail > 0 || (engine_holds(engine) & HoldLoading);
+    if (shown && s.was_hidden) draw = true; // seen again: what it missed
+    s.was_hidden = !shown;
     if (s.window && (s.window->width() != s.presented_w || s.window->height() != s.presented_h)) draw = true;
     if (engine.frame_due > 0.0 && now >= engine.frame_due) { draw = true; engine.frame_due = 0.0; }
     if (engine_wake(engine)) draw = true; // a module's socket had something (engine_add_waker)
-    if (draw) {
+    if (draw && shown) {
         s.demand_tail = input ? 1 : s.demand_tail ? s.demand_tail - 1 : 0; // the frame after input's, for what it changed
         engine.frame_wanted = false;
         s.demand_last = now;
@@ -490,7 +497,7 @@ bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept) {
     }
     IoQueue* io = platform_io(engine);
     bool io_busy = io && (io->pending() || io->completions().len);
-    bool tick = engine.ticks_wanted || io_busy || engine_work_pending(engine) || now - s.demand_last >= k_demand_heartbeat;
+    bool tick = tick_always || engine.ticks_wanted || io_busy || engine_work_pending(engine) || now - s.demand_last >= k_demand_heartbeat;
     if (!tick) {
         time_sleep(k_demand_poll);
         ++s.demand_sleeps;
@@ -508,9 +515,9 @@ bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept) {
     if (engine_work_pending(engine)) engine_work(engine, k_demand_work);
     if (engine_work_pending(engine)) return false;
     // Till the next tick is due while ticks are wanted; a poll's length while I/O is.
-    f64 wait = engine.ticks_wanted ? time_to_next_tick(engine.clock) : k_demand_poll;
+    f64 wait = engine.ticks_wanted || tick_always ? time_to_next_tick(engine.clock) : k_demand_poll;
     if (io_busy && wait > k_demand_poll) wait = k_demand_poll;
-    if (engine.frame_wanted) wait = 0.0;
+    if (engine.frame_wanted && shown) wait = 0.0;
     if (wait > 0.0) {
         time_sleep(wait);
         ++s.demand_sleeps;
@@ -542,11 +549,15 @@ void run(Engine& engine, FrameLoopState& s) {
     bool decoupled = s.config.pacing == Pacing::Decoupled;
     bool slept = false;
     while (!engine.quit_requested) {
-        if (decoupled && !decoupled_pass(engine, s, slept)) {
+        // Hidden, under any pacing: ticks as the pacing would have them, and no frame.
+        bool hidden = s.window && !s.window->visible();
+        if (hidden) ++s.hidden_passes;
+        bool decided = decoupled || hidden;
+        if (decided && !decoupled_pass(engine, s, slept, hidden && s.config.pacing == Pacing::Continuous)) {
             run_time_check(s, start);
             continue;
         }
-        if (on_demand && !demand_frame(engine, s)) {
+        if (on_demand && !decided && !demand_frame(engine, s)) {
             if (engine_work_pending(engine)) {
                 // Nothing to draw and work to do: the ticks owed and a slice of Work, no frame.
                 f64 now = time_now();
@@ -689,7 +700,7 @@ void run(Engine& engine, FrameLoopState& s) {
     platform_modal_frame(engine, nullptr, nullptr);
     platform_surface_hook(engine, nullptr, nullptr); // the renderer goes down before the window does
     if (s.modal_frames) KV_INFO("frameloop", "%llu frames ran inside live resizes", (unsigned long long)s.modal_frames);
-    if (s.config.pacing != Pacing::Continuous)
+    if (s.config.pacing != Pacing::Continuous || s.hidden_passes)
         KV_INFO("frameloop", "%llu frames drawn, %llu ticks, %llu of them without a frame; %llu sleeps over %.1f s",
                 (unsigned long long)s.frames_drawn, (unsigned long long)engine.clock.tick_total, (unsigned long long)s.ticks_alone,
                 (unsigned long long)s.demand_sleeps, time_now() - start);

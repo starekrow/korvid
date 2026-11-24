@@ -41,7 +41,9 @@ ticks and frames apart: it ticks at the clock's rate while a module asks
 (`engine_want_ticks`, again each tick) and while I/O or Work is pending, sleeping till the
 next tick is due, and four times a second otherwise; it draws only on the same signals as
 `OnDemand` less the heartbeat. Its last log line says how many frames it drew and how many
-ticks ran without one.
+ticks ran without one. **A hidden window** (`WindowVisibility`) is drawn under no pacing:
+`Continuous` ticks at the clock's rate and sleeps between, the others tick as `Decoupled`
+would without drawing; the first pass it is seen again draws.
 
 The system `frameloop.exit` (phase PreSim, `Always`) emits `ExitRequested` with a reason:
 

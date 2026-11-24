@@ -552,6 +552,8 @@ void HostWindow::close() {
     native_ = nullptr;
     width_ = height_ = 0;
     focused_ = false;
+    hidden_  = 0;
+    hidden_sent_ = WindowHidden::None;
     KV_INFO("window", "closed");
 }
 
@@ -568,6 +570,7 @@ void HostWindow::text_area(rect2, f32) {}
 bool HostWindow::clipboard_get(Array<char>&) { return false; }
 bool HostWindow::clipboard_set(const char*) { return false; }
 void HostWindow::cursor(CursorShape) {}
+void HostWindow::minimize(bool) {}
 bool HostWindow::capture_mouse(bool) { return false; }
 
 void HostWindow::text_input(bool on) {
@@ -592,6 +595,7 @@ void HostWindow::pump(EventBus& bus, Input& input) {
     // is one again, or the activity is gone (the Close is in the ring then).
     if (g_app.opened && !on_screen()) {
         native_ = nullptr; // whoever draws has let go already (on_surface, from the handoff)
+        set_hidden(bus, HiddenUnmapped, true); // seen by the loop when it comes back (KR21)
         KV_INFO("window", "no surface: waiting");
         for (;;) {
             poll_looper(250);
@@ -625,6 +629,9 @@ void HostWindow::drain(EventBus& bus, Input& input) {
         default: break;
         }
     }
+    // No surface is not seen (KR21). Paused is not hidden: in split screen a paused app
+    // is on screen.
+    set_hidden(bus, HiddenUnmapped, !on_screen());
     bool focused = app.resumed && app.has_focus && on_screen();
     if (focused != focused_) {
         focused_ = focused;

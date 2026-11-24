@@ -8,6 +8,14 @@ namespace kv {
 struct WindowResized { u32 width, height; };
 struct FocusChanged  { bool focused; };
 struct CloseRequested { u8 unused; };
+// The window stopped being seen, or is seen again (KR21): emitted when it changes, and
+// readable between as HostWindow::visible(). As well as each OS can tell: minimized
+// everywhere; covered, on another workspace or behind a locked screen where the OS or the
+// compositor says so (a suspended Wayland surface, macOS's occlusion). Where it cannot be
+// told the window is shown. On a phone the loop stops while the app is in the background:
+// the hidden and shown events arrive together when it comes back.
+enum class WindowHidden : u8 { None, Minimized, Occluded };
+struct WindowVisibility { bool visible; WindowHidden why; };
 
 struct KeyDown { Key key; u8 device; bool repeat; };
 struct KeyUp   { Key key; u8 device; };

@@ -17,6 +17,7 @@ void hid_pump(Engine& e, void* user) {
     HidState& s = *(HidState*)user;
     if (!s.window.is_open()) return;
     s.window.pump(e.events, s.input);
+    s.window.send_visibility(e.events);
     if (hid_backend_holds_unfocused()) engine_hold(e, HoldFocus, !s.window.focused());
 }
 
@@ -123,6 +124,7 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT(WindowResized),
     KV_EVENT(FocusChanged),
     KV_EVENT(CloseRequested),
+    KV_EVENT(WindowVisibility),
     KV_EVENT(KeyDown),
     KV_EVENT(KeyUp),
     KV_EVENT(MouseMoved),
@@ -189,6 +191,7 @@ static void hid_modal(void* ctx) {
     if (!s || !s->modal_frame || s->in_modal_frame) return;
     s->in_modal_frame = true;
     s->window.drain(e.events, s->input);
+    s->window.send_visibility(e.events);
     s->modal_frame(s->modal_user);
     s->in_modal_frame = false;
 }
@@ -219,6 +222,11 @@ bool platform_video_up(Engine&) { return hid_video_up(); }
 HostWindow* platform_window(Engine& e) {
     HidState* s = state(e);
     return s && s->window.is_open() ? &s->window : nullptr;
+}
+
+bool platform_window_visible(Engine& e) {
+    HostWindow* w = platform_window(e);
+    return !w || w->visible();
 }
 
 void platform_text_input(Engine& e, bool on) {

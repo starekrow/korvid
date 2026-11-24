@@ -131,6 +131,8 @@ void HostWindow::close() {
     native_ = nullptr;
     width_ = height_ = 0;
     focused_ = false;
+    hidden_  = 0;
+    hidden_sent_ = WindowHidden::None;
     KV_INFO("window", "closed");
 }
 
@@ -226,6 +228,13 @@ bool HostWindow::clipboard_get(Array<char>& out) {
 
 bool HostWindow::clipboard_set(const char* utf8) { return native_ && SDL_SetClipboardText(utf8 ? utf8 : ""); }
 
+void HostWindow::minimize(bool on) {
+    SDL_Window* w = (SDL_Window*)native_;
+    if (!w) return;
+    if (on) SDL_MinimizeWindow(w);
+    else SDL_RestoreWindow(w);
+}
+
 void HostWindow::cursor(CursorShape shape) {
     if (!native_ || (u32)shape >= (u32)CursorShape::Count) return;
     static SDL_Cursor* made[(u32)CursorShape::Count] = {};
@@ -309,6 +318,16 @@ void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
             }
             break;
         }
+
+        // Seen or not (KR21). Wayland has no minimized state to report; GNOME and KDE say a
+        // surface is suspended, which SDL gives as occluded.
+        case SDL_EVENT_WINDOW_MINIMIZED: w.set_hidden(bus, HostWindow::HiddenMinimized, true); break;
+        case SDL_EVENT_WINDOW_RESTORED:
+        case SDL_EVENT_WINDOW_MAXIMIZED: w.set_hidden(bus, HostWindow::HiddenMinimized, false); break;
+        case SDL_EVENT_WINDOW_HIDDEN:    w.set_hidden(bus, HostWindow::HiddenUnmapped, true); break;
+        case SDL_EVENT_WINDOW_SHOWN:     w.set_hidden(bus, HostWindow::HiddenUnmapped, false); break;
+        case SDL_EVENT_WINDOW_OCCLUDED:  w.set_hidden(bus, HostWindow::HiddenOccluded, true); break;
+        case SDL_EVENT_WINDOW_EXPOSED:   w.set_hidden(bus, HostWindow::HiddenOccluded, false); break;
 
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
             w.focused_ = true;

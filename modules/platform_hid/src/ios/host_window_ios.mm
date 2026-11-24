@@ -320,6 +320,8 @@ void HostWindow::close() {
     native_ = nullptr;
     width_ = height_ = 0;
     focused_ = false;
+    hidden_  = 0;
+    hidden_sent_ = WindowHidden::None;
     KV_INFO("window", "closed");
 }
 
@@ -396,6 +398,7 @@ void HostWindow::text_area(rect2, f32) {}
 bool HostWindow::clipboard_get(Array<char>&) { return false; }
 bool HostWindow::clipboard_set(const char*) { return false; }
 void HostWindow::cursor(CursorShape) {}
+void HostWindow::minimize(bool) {}
 bool HostWindow::capture_mouse(bool) { return false; }
 
 bool HostWindow::touch_screen() const { return true; }
@@ -411,10 +414,12 @@ void HostWindow::pump(EventBus& bus, Input& input) {
         // Off screen: nothing may be drawn and nothing is seen; wait in UIKit's loop until
         // the scene is back (or gone).
         if (g_app.background) {
+            set_hidden(bus, HiddenUnmapped, true); // seen by the loop when it comes back (KR21)
             KV_INFO("window", "in the background: waiting");
             while (g_app.background && g_app.scene.activationState != UISceneActivationStateUnattached)
                 CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, true);
             KV_INFO("window", "back in the foreground");
+            set_hidden(bus, HiddenUnmapped, false);
         }
     }
     drain(bus, input);

@@ -77,14 +77,15 @@ frames apart.
 ## A hidden window (KR21)
 
 `struct WindowVisibility { bool visible; WindowHidden why; }`, emitted when it changes,
-and `platform_window_visible(e)` between. `WindowHidden`: `None`, `Minimized`, `Occluded`
-(covered, another workspace, a locked screen, a suspended surface), `Closed`.
+and `HostWindow::visible()` or `platform_window_visible(e)` between. `WindowHidden`:
+`None`, `Minimized`, `Occluded` (covered, another workspace, a locked screen, a suspended
+surface, unmapped).
 
 | platform | told by |
 |---|---|
 | SDL3 (Linux, macOS) | `SDL_EVENT_WINDOW_MINIMIZED`/`_RESTORED`, `_HIDDEN`/`_SHOWN`, `_OCCLUDED`/`_EXPOSED` (Wayland's suspended state, macOS's occlusion) |
-| Win32 | `WM_SIZE` with `SIZE_MINIMIZED` and after; `DWMWA_CLOAKED` (another virtual desktop) on `WM_ACTIVATE` and the heartbeat |
-| Android | the surface's loss and return, `onStop`/`onStart` |
+| Win32 | `WM_SIZE` with `SIZE_MINIMIZED`, and any other size after it |
+| Android | the surface's loss and return |
 | iOS | the scene's background and foreground |
 
 Where the OS cannot say, the window is shown. Every loop draws no frame while it is hidden.
@@ -286,3 +287,32 @@ starts from `slice-10`. As above, and:
   and no more wakes than on demand. The last is the choice it was asked to end.
 - **Not here yet:** a hidden window drawing nothing, which is milestone 2's. A live
   resize ticks and draws through the modal hook, as before, under every pacing.
+
+**Milestone 2, visibility (KR21): built Nov 23, 2026.** As above, and:
+
+- **One event a pump at most.** A backend sets and clears its reasons (minimized, unmapped,
+  occluded) as the OS reports them, and the module sends `WindowVisibility` after the
+  pump if the answer or the reason changed. Without that, an X11 restore (restored, then
+  shown) was a "covered" event and a "shown" one in the same tick.
+- **The frame loop draws no hidden window** under any pacing. `Continuous` ticks at the
+  clock's rate and sleeps till the next is due; `OnDemand` and `Decoupled` tick as
+  `Decoupled` does; the first pass after it is seen again draws.
+- **`HostWindow::minimize(on)`**, for tests: SDL's minimize and restore, Win32's
+  `ShowWindowAsync`; nothing on a phone. `examples/ticker` takes `--minimize-at` and
+  `--restore-at`, sim ticks, and logs what the module is handed.
+- **Checked on this machine** (GNOME 50, SDL 3.4.2):
+
+| run | told | frames drawn | ticks |
+|---|---|---|---|
+| X11, decoupled, ticks wanted, minimized at 120, restored at 360 | hidden at 121, shown at 361 | 2 (the first, and the one after restoring) | 480 in 8 s |
+| X11, on demand, minimized at 8, restored at 24 | hidden at 9, shown at 25 | 19 | 33, 16 of them while hidden |
+| Wayland, decoupled, minimized at 120 | hidden at 121 | 1 | 360 in 6 s |
+| X11, continuous, minimized at 120, restored at 360 | hidden at 121, shown at 361 | none while hidden | 480 in 8 s |
+
+- **Not checked:** a window minimized by hand on Wayland, which SDL reports as occluded
+  when GNOME suspends the surface, and covered windows on any desktop; Windows, macOS and
+  the phones, written and not compiled. `DWMWA_CLOAKED` (another virtual desktop) is not
+  asked on Windows.
+- **Seen, not caused here:** continuous pacing under XWayland draws at 1 fps for about
+  3 s after a restore. Presents wait about a second each, as they do for a window the X
+  server has not put on screen; the cause is not confirmed.

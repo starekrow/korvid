@@ -20,8 +20,15 @@ Alt+F4 asks to close. Gamepads use SDL's gamepad subsystem alone, polled by the 
 **The window** (`host_window.h`). One per process, opened on request by the frameloop
 module and closed at module shutdown, never by the caller. It is a service, not an
 entity. `platform_pump`, through the pump hook this module adds, turns OS events into bus
-events (`WindowResized`, `FocusChanged`, `CloseRequested`, key, mouse and gamepad edges)
-and updates the raw input state. A Vulkan window hands its native handle to the renderer; a software window can
+events (`WindowResized`, `FocusChanged`, `CloseRequested`, `WindowVisibility`, key, mouse
+and gamepad edges) and updates the raw input state. **Whether it is seen**:
+`WindowVisibility{visible, why}` when that changes, at most once a pump, and
+`HostWindow::visible()` (or `platform_window_visible(e)`) between. Minimized on every
+desktop; covered or away where the OS says so (SDL's occluded: a suspended Wayland
+surface, macOS's occlusion); on a phone the background, whose loop waits in the pump, so
+both events arrive when the app comes back. Where the OS cannot tell, it is seen.
+`HostWindow::minimize(on)` minimizes or restores it, for tests (Wayland restores nothing
+a program asks to). A Vulkan window hands its native handle to the renderer; a software window can
 only `present_blank`.
 
 **Input** (`input.h`, `events.h`). Two copies of the state: `raw`, updated by the pump at
@@ -107,7 +114,7 @@ Header `korvid/platform_hid/host_window.h`:
 | name | kind | what |
 |---|---|---|
 | `WindowDesc` | record | `title`, `width`, `height`, `vsync` (a preference the renderer reads), `surface` (`Software`, `Vulkan`), `borderless` |
-| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `width()`, `height()`, `vsync()`, `focused()`, `pump(bus, input)`, `present_blank()`, `native_handle()` |
+| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `width()`, `height()`, `vsync()`, `focused()`, `visible()`, `hidden_why()`, `minimize(on)`, `pump(bus, input)`, `present_blank()`, `native_handle()` |
 
 Header `korvid/platform_hid/input.h`:
 
@@ -124,7 +131,7 @@ Header `korvid/platform_hid/input.h`:
 | `KV_MAX_GAMEPADS`, `KV_PAD_DEAD_ZONE` | constants | 4; 0.15 |
 
 Header `korvid/platform_hid/events.h`: `WindowResized{width, height}`, `FocusChanged{focused}`,
-`CloseRequested`, `KeyDown{key, device, repeat}`, `KeyUp{key, device}`,
+`CloseRequested`, `WindowVisibility{visible, why}` (`WindowHidden`: `None`, `Minimized`, `Occluded`), `KeyDown{key, device, repeat}`, `KeyUp{key, device}`,
 `MouseMoved{x, y, dx, dy}`, `MouseButtonDown{button, x, y}`, `MouseButtonUp{button, x, y}`,
 `MouseWheel{dx, dy}`, `GamepadConnected{pad}`, `GamepadDisconnected{pad}`,
 `PadButtonDown{button, pad}`, `PadButtonUp{button, pad}`.
@@ -141,6 +148,7 @@ Header `korvid/platform_hid/module.h`:
 | `platform_hid_module` | `ModuleDesc` | the record; kormake puts it in the list |
 | `HidState` | record | `input`, `window`, `actions`: the module's state, for code outside the schedule |
 | `platform_open_window(engine, desc)`, `platform_window(engine)` | functions | the one window; null if open already or refused |
+| `platform_window_visible(engine)` | function | whether the window is seen; true with no window |
 | `platform_video_up(engine)` | function | SDL video and gamepads, once; false without a video driver |
 | `platform_input(engine)` | function | the input, for code outside the schedule |
 
@@ -148,7 +156,7 @@ What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
-| `WindowResized`, `FocusChanged`, `CloseRequested`, `KeyDown`, `KeyUp`, `MouseMoved`, `MouseButtonDown`, `MouseButtonUp`, `MouseWheel`, `GamepadConnected`, `GamepadDisconnected`, `PadButtonDown`, `PadButtonUp` | event types | no schemas; none carries an entity |
+| `WindowResized`, `FocusChanged`, `CloseRequested`, `WindowVisibility`, `KeyDown`, `KeyUp`, `MouseMoved`, `MouseButtonDown`, `MouseButtonUp`, `MouseWheel`, `GamepadConnected`, `GamepadDisconnected`, `PadButtonDown`, `PadButtonUp` | event types | no schemas; none carries an entity |
 | `input.state`, `platform_hid.window` | resources, published | `Input` and `HostWindow`; read them through `ctx.resource<const T>` |
 | `input.actions` | resource, published | the action map and its state this tick |
 | `input.sample` | system, phase Input, `Always` | writes `input.state` and `input.actions`: raw becomes sampled and the actions follow, on paused ticks too |

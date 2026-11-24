@@ -5,6 +5,7 @@
 #include "korvid/core/array.h"
 #include "korvid/core/event.h"
 #include "korvid/math/rect2.h"
+#include "korvid/platform_hid/events.h"
 #include "korvid/platform_hid/input.h"
 
 namespace kv {
@@ -63,6 +64,16 @@ struct HostWindow {
     u32  height() const { return height_; }
     bool vsync()  const { return vsync_; }  // the preference from the desc; the renderer applies it
     bool focused() const { return focused_; } // input focus, as of the last pump
+    // Whether it is seen, as of the last pump, and if not why (WindowVisibility).
+    bool         visible() const { return hidden_ == 0; }
+    WindowHidden hidden_why() const;
+    // The backend's: one reason to be hidden (Hidden* below) on or off, as the OS says it.
+    // After a pump the module calls send_visibility, which emits WindowVisibility once if
+    // whether it is seen, or why, is not what was last sent: a restore that clears one
+    // reason and then another is one event.
+    enum : u8 { HiddenMinimized = 1, HiddenUnmapped = 2, HiddenOccluded = 4 };
+    void set_hidden(EventBus& bus, u8 reason, bool on);
+    void send_visibility(EventBus& bus);
 
     // Translates OS events into bus events and updates input.raw. Call once per frame.
     void pump(EventBus& bus, Input& input);
@@ -119,6 +130,9 @@ struct HostWindow {
     bool clipboard_get(Array<char>& out);
     bool clipboard_set(const char* utf8);
     void cursor(CursorShape shape);
+    // Minimizes the window, or restores it: for tests and demo scripts (KR21's). Wayland
+    // restores nothing a program asks to: the user does. Nothing on a phone.
+    void minimize(bool on);
     // While on, the pointer keeps reporting to this window outside it (a drag); false where
     // the platform cannot.
     bool capture_mouse(bool on);
@@ -144,6 +158,8 @@ struct HostWindow {
     u32   height_     = 0;
     bool  vsync_      = true;
     bool  focused_    = false;
+    u8    hidden_     = 0;    // Hidden* reasons in force
+    WindowHidden hidden_sent_ = WindowHidden::None; // what the last WindowVisibility said
     f32   insets_[4]  = {};
     void (*modal_fn_)(void*) = nullptr;
     void* modal_ctx_  = nullptr;

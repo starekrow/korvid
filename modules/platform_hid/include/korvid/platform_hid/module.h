@@ -63,6 +63,8 @@ HostWindow* platform_open_window(Engine& e, const WindowDesc& desc);
 bool        platform_video_up(Engine& e);
 // The open window, or null. For code outside the schedule; systems use the resource.
 HostWindow* platform_window(Engine& e);
+// Whether the window is seen (HostWindow::visible); true with no window.
+bool        platform_window_visible(Engine& e);
 // Asks the OS for typed text (InputState::text) while on; a text field turns it on while it
 // has the focus. Counted: on twice needs off twice.
 void platform_text_input(Engine& e, bool on);
