@@ -11,7 +11,7 @@ set -u
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root" || exit 2
 quick=0
-case "$(uname -s)" in Darwin) host=macos ;; *) host=linux ;; esac
+case "$(uname -s)" in Darwin) host=macos ;; MINGW*|MSYS*|CYGWIN*) host=windows ;; *) host=linux ;; esac
 [ "${1:-}" = "--quick" ] && quick=1
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
