@@ -4,6 +4,7 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/module.h"
 #include "korvid/core/test.h"
+#include <string.h>
 
 namespace {
 
@@ -83,6 +84,23 @@ u64 run_hs(u32 ticks, u64 seed, bool schedule, u64* after_reset = nullptr) {
     return h;
 }
 
+// A cosmetic resource with a field table (KR17): described, never hashed, and its object
+// need not be plain data.
+struct HTransport {
+    f64 position = 0;
+    u32 state    = 0;
+    HTransport() = default;
+    HTransport(const HTransport& o) : position(o.position), state(o.state) {} // not trivially copyable
+    HTransport& operator=(const HTransport& o) { position = o.position; state = o.state; return *this; }
+};
+constinit const FieldDesc k_transport_fields[] = {KV_FIELDS(HTransport, position, state)};
+constinit const ResourceDesc k_ht_resources[] = {{.name = ".transport", .fields = k_transport_fields, .cosmetic = true}};
+HTransport g_transport;
+bool ht_startup(Engine& e, ModuleInstance& self) { return engine_publish(e, self, ".transport", &g_transport); }
+KV_MODULE_DEFINE(k_ht) = {.name = "ht", .resources = k_ht_resources, .startup = ht_startup};
+constinit const ResourceDesc k_hbad_resources[] = {{.name = ".loose", .cosmetic = true}};
+KV_MODULE_DEFINE(k_hbad) = {.name = "hbad", .resources = k_hbad_resources};
+
 } // namespace
 
 void test_hash(kv::TestCtx& c) {
@@ -113,4 +131,29 @@ void test_hash(kv::TestCtx& c) {
     KV_CHECK(c, a != run_hs(6, 0, false));            // a draw more
     KV_CHECK(c, a != run_hs(5, 0, true));             // a timer waiting
     KV_CHECK(c, fresh == run_hs(0, 0, false));        // a fresh sim: the stream as engine_init left it
+
+    // A cosmetic resource: published though not plain, read by its fields, not hashed.
+    {
+        const ModuleDesc* const list[] = {&k_ht};
+        Engine e;
+        g_transport.position = 0;
+        g_transport.state    = 0;
+        KV_CHECK(c, engine_init(e, list));
+        u32 id = engine_resource_id(e, "ht.transport");
+        KV_CHECK(c, id && e.resources[id - 1].ptr == &g_transport && e.resources[id - 1].fields.len == 2 && !e.resources[id - 1].hashed);
+        u64 before = engine_hash_state(e);
+        g_transport.position = 12.25;
+        g_transport.state    = 3;
+        KV_CHECK(c, engine_hash_state(e) == before);
+        char line[128];
+        schema_describe("transport", e.resources[id - 1].fields, e.resources[id - 1].ptr, line, sizeof line);
+        KV_CHECK(c, strstr(line, "position=12.25") && strstr(line, "state=3"));
+        engine_shutdown(e);
+    }
+    {
+        const ModuleDesc* const list[] = {&k_hbad};
+        Engine e;
+        KV_CHECK(c, !engine_init(e, list)); // cosmetic with no field table: refused
+        engine_shutdown(e);
+    }
 }

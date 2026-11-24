@@ -24,11 +24,16 @@ constinit const KTableDesc k_ktables[] = {
     {.name = ".ship", .components = "Health, Pos, Tag", .capacity = 8},
     {.name = ".rock", .components = "Pos", .capacity = 64},
 };
-constinit const ResourceDesc k_resources[] = {{".score"}};
+struct Transport { f64 position; u32 state; };
+constinit const FieldDesc k_transport_fields[] = {KV_FIELDS(Transport, position, state)};
+constinit const ResourceDesc k_resources[] = {{".score"}, {.name = ".transport", .fields = k_transport_fields, .cosmetic = true}};
+Transport g_transport{1.5, 2};
+bool g_startup(Engine& e, ModuleInstance& self) { return engine_publish(e, self, ".transport", &g_transport); }
 void noop(TickContext&) {}
 constinit const SystemDesc k_systems[] = {{.name = ".move", .phase = Phase::Sim, .fn = noop, .writes = "*.Pos"}};
 constinit const TriggerDesc k_triggers[] = {{.name = ".death", .field = ".ship.Health.hp", .edge = TriggerEdge::CrossedBelow, .value = 1.0}};
-KV_MODULE_DEFINE(k_g) = {.name = "game", .components = k_components, .ktables = k_ktables, .resources = k_resources, .systems = k_systems, .triggers = k_triggers};
+KV_MODULE_DEFINE(k_g) = {.name = "game", .components = k_components, .ktables = k_ktables, .resources = k_resources, .systems = k_systems, .triggers = k_triggers,
+                         .startup = g_startup};
 
 // Collects a request's lines.
 struct Out {
@@ -86,7 +91,10 @@ void test_cli_fs(kv::TestCtx& c) {
     KV_CHECK(c, run("ls /systems/game") && o.has("move") && o.has("sim, level"));
     KV_CHECK(c, run("print /systems/game/move") && o.has("writes: game.rock.Pos, game.ship.Pos")); // ktables by name
     KV_CHECK(c, run("ls /triggers/game") && o.has("death") && o.has("game.ship.Health.hp crossed below 1"));
-    KV_CHECK(c, run("print /resources/game/score") && o.has("declared, nothing published"));
+    KV_CHECK(c, run("print /resources/game/score") && o.has("declared, nothing published") && !o.has("fields"));
+    // A cosmetic resource's fields, and its values through them (KR17).
+    KV_CHECK(c, run("print /resources/game/transport") && o.has("fields (cosmetic, not hashed): f64 position, u32 state") &&
+                o.has("position=1.5") && o.has("state=2"));
     KV_CHECK(c, run("ls /events") && o.has("Spawned") && o.has("StateEdge"));
     KV_CHECK(c, run("print /modules/game") && o.has("2 ktables") && o.has("1 triggers"));
 

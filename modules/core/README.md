@@ -262,7 +262,7 @@ Header `korvid/core/module.h`:
 | `ModuleDesc` | record | `name`, `events`, `components`, `ktables`, `resources`, `systems`, `handlers`, `triggers`, `commands`, `mounts`, `parts`, `startup`, `shutdown`, `memory` |
 | `ModulePart` | record | `events`, `components`, `ktables`, `resources`, `systems`, `handlers`, `triggers`, `commands`, `mounts`: more of a module's tables, declared beside their code; joined to the module's own in list order. `startup`, `shutdown`: after the module's startup, in list order; before its shutdown, in reverse |
 | `ModuleInstance` | record | the engine's record of a started module: `arena`, `general`, `state`, `set_state<T>`, `state_as<T>()`, `index`, `rng` (what `ctx.rng()` draws from), `parts`, `parts_up` |
-| `ResourceDesc{name, apply, fields}` | record | something systems read or write that is not a column; with `apply`, an append resource whose owner takes records at the boundary; with `fields`, sim state in the state hash |
+| `ResourceDesc{name, apply, fields, cosmetic}` | record | something systems read or write that is not a column; with `apply`, an append resource whose owner takes records at the boundary; with `fields`, sim state in the state hash; with `cosmetic` too, the fields only describe it: not hashed, not required to be plain data |
 | `AppendFn` | function type | an append resource's owner taking one record |
 | `ModuleMemoryDesc{reserve}` | record | the module arena's address space |
 | `KV_MODULE_DECLARE(sym)`, `KV_MODULE_DEFINE(sym)` | macros | the record in a header and its constinit definition |
@@ -289,7 +289,7 @@ Header `korvid/core/engine.h`:
 | `engine_module_state(e, name)` | function | the same, untyped |
 | `engine_check_main_thread(e, api)` | function | for a main-thread-only API: a unit calling it from a job worker stops a dev build, named |
 | `engine_entity_name_set(e, h, name)`, `engine_entity_find(e, name)`, `engine_entity_name(e, h)`, `engine_entity_names_each(e, fn, user)` | functions | entity names: set now (outside the schedule), find from anywhere, read, walk |
-| `engine_publish(e, self, name, ptr)`, `engine_publish_sized` | functions | the object behind a declared resource, for `ctx.resource<T>`; one with a field table must be plain data the table fits |
+| `engine_publish(e, self, name, ptr)`, `engine_publish_sized` | functions | the object behind a declared resource, for `ctx.resource<T>`; one with a field table must be plain data the table fits (a cosmetic one, only fit it) |
 | `engine_resource_id`, `engine_component_id`, `engine_ktable_id`, `engine_trigger_id`, `engine_system_phase` | functions | names to ids |
 | `engine_ktable(e, name or id)`, `engine_ktable_of(e, handle)`, `engine_component(e, id)` | functions | a ktable, by full name, id or an entity handle; a schema |
 | `engine_ktable_now`, `engine_ktable_of_now`, `engine_early_reads(e, resource)` | functions | the ktable as it is now, for what never changes (a ktable's handle kind) or the engine's own lookups, unrefused under a snapshot; how early reads of a resource get their value |

@@ -304,6 +304,8 @@ bool handlers_describe(CliContext& ctx, const char* rel) {
 
 // ---- /resources ----------------------------------------------------------------------------------
 
+void fields_line(Span<const FieldDesc> fields, char* out, usize cap);
+
 void resources_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) {
     Engine& e = *ctx.engine;
     CliTree tree{dir, emit, user};
@@ -326,6 +328,13 @@ bool resources_describe(CliContext& ctx, const char* rel) {
     const ResourceEntry& r = e.resources[id - 1];
     ctx.print("%s: id %u, module %s, %s%s", r.name, id, e.modules[r.module].desc->name,
               r.ptr ? "published (a column or a struct; see /ktables for columns)" : "declared, nothing published", r.cls == ResourceClass::Append ? ", takes appends" : "");
+    if (r.fields.len) {
+        // A field table: its fields, and the published object's values through it.
+        char line[1024];
+        fields_line(r.fields, line, sizeof line);
+        ctx.print("fields (%s): %s", r.hashed ? "sim state, hashed" : "cosmetic, not hashed", line);
+        if (r.ptr) { schema_describe(r.name, r.fields, r.ptr, line, sizeof line); ctx.print("%s", line); }
+    }
     return true;
 }
 

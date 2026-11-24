@@ -733,3 +733,21 @@ backend:
   the test does not finish: two loops make a walk that doubles at each level.
 - **Checked** on linux-dev and linux-debug. The Windows and macOS changes are written,
   not compiled.
+
+**Milestone 13, a cosmetic resource's fields (KR17): built Nov 23, 2026.** As above.
+`ResourceEntry` keeps the table in `fields` for whoever describes it and says in `hashed`
+whether it is sim state; the hash and publish's plain-data check look at `hashed`. A
+cosmetic table must still fit the published object. `cosmetic` with no field table is
+refused at `engine_init`: it would mean nothing. `print /resources/<module>/<name>` now
+shows any resource's field table, whether it is hashed, and the published values.
+
+- **Not done:** reading a resource by its fields from Lua. `script` binds ktables only,
+  and a resource binding belongs with KR18's events in slice 11.
+- **Left alone:** the check that a unit reading a cosmetic column may not write sim
+  state. It is not applied to cosmetic resources, which the sim may read as it may read
+  any resource without fields. Blackwing's player is all cosmetic, so it would not
+  notice; a game might.
+- **Tests:** `hash` (a cosmetic resource whose object is not trivially copyable publishes;
+  changing it leaves the state hash alone; its fields describe it; a cosmetic resource
+  with no table is refused) and `cli_fs` (its fields and values printed, a resource
+  without a table prints none).

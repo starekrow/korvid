@@ -79,7 +79,8 @@ struct ResourceEntry {
     u32           ktable   = 0;     // a ktable's resources: its ktable id
     bool          cosmetic = false; // a column or attachment of a cosmetic component: never feeds the sim
     AppendFn      apply    = nullptr;
-    Span<const FieldDesc> fields = {}; // a published resource that is sim state: hashed through these
+    Span<const FieldDesc> fields = {}; // a published resource's field table: what describes it
+    bool          hashed   = false; // fields that make it sim state: hashed, plain data (not ResourceDesc::cosmetic)
     u32           event    = 0;     // a stream: its event type id
 };
 

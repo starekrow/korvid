@@ -74,6 +74,11 @@ typedef void (*AppendFn)(Engine& e, const void* record, u32 size);
 //   constinit const FieldDesc k_score_fields[] = {KV_FIELDS(Score, total, wave, rocks_shot)};
 //   constinit const ResourceDesc k_resources[] = {{.name = ".score", .fields = k_score_fields}};
 //
+// With `cosmetic` as well, the field table only describes the object: what describe and a
+// script read it by, never hashed, and the object need not be plain data (a transport that
+// follows a device's clock). It is then what a resource without fields is to the sim.
+//   constinit const ResourceDesc k_resources[] = {{.name = ".transport", .fields = k_transport_fields, .cosmetic = true}};
+//
 // With `apply` it is an append resource, for many writers that need no order between
 // them: only the owner's systems write it, everyone else declares `appends` and hands it
 // records with ctx.append, which reach `apply` at the boundary. audio.commands is one: any
@@ -83,6 +88,7 @@ struct ResourceDesc {
     const char*           name;            // ".score" is "<module>.score"
     AppendFn              apply  = nullptr; // set: an append resource
     Span<const FieldDesc> fields = {};      // set: part of the state hash; the object is plain data (checked at publish)
+    bool                  cosmetic = false; // with fields: they describe the object, which is not hashed and need not be plain
 };
 
 // What a module needs from the memory system, declared rather than requested at runtime.

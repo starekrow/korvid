@@ -359,7 +359,9 @@ bool register_resources(Engine& e, Span<const ModuleDesc* const> modules) {
             entry.cls    = r.apply ? ResourceClass::Append : ResourceClass::Published;
             entry.apply  = r.apply;
             entry.fields = r.fields;
+            entry.hashed = r.fields.len && !r.cosmetic;
             const char* field = nullptr;
+            if (r.cosmetic && !r.fields.len) { KV_ERROR("engine", "resource '%s' is cosmetic with no field table: only a field table can be cosmetic", name); return false; }
             if (r.fields.len) {
                 if (r.apply) { KV_ERROR("engine", "resource '%s' has a field table and an apply function: an append resource holds no state", name); return false; }
                 u32 end = 0;
@@ -1906,7 +1908,7 @@ u64 engine_hash_state(const Engine& e) {
         h += hash_mix(hash_str(m.desc->name) ^ hash_mix(m.rng.state) ^ (m.rng.inc * 0x9E3779B97F4A7C15ull));
     }
     for (const ResourceEntry& r : e.resources)
-        if (r.fields.len && r.ptr) h += hash_mix(hash_str(r.name) ^ schema_hash(r.fields, r.ptr));
+        if (r.hashed && r.ptr) h += hash_mix(hash_str(r.name) ^ schema_hash(r.fields, r.ptr));
     Span<const EventTypeDesc* const> types(e.event_types.data, e.event_types.len);
     h += hash_mix(0x74696d657273ull ^ e.timers.hash(types));          // "timers"
     for (u32 t = 1; t < e.events.held.by_type.len; ++t) {           // next-tick events not yet delivered
@@ -1972,9 +1974,10 @@ bool engine_publish_sized(Engine& e, const ModuleInstance& self, const char* nam
         return false;
     }
     if (r.fields.len) {
-        // Sim state, hashed through its field table: plain data the table fits.
+        // Sim state, hashed through its field table: plain data the table fits. A cosmetic
+        // table only has to fit.
         const char* field = nullptr;
-        const char* why = !plain ? "is not plain data (trivially copyable)"
+        const char* why = !plain && r.hashed ? "is not plain data (trivially copyable)"
                         : size ? schema_check((u32)size, r.fields, &field) : nullptr;
         if (why) {
             KV_ERROR("engine", "module '%s' publishes '%s', which has a field table, but the object %s%s%s", self.desc->name, name, why,
