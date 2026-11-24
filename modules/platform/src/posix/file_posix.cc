@@ -253,3 +253,31 @@ bool os_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
 }
 
 } // namespace kv
+
+namespace kv {
+
+// flock on the whole file, asked for without waiting. The descriptor is not inherited
+// across exec, so a child the holder starts does not hold it.
+KHandle os_file_lock_try(const char* path, const char* who, char* holder, u32 cap, i32* err) {
+    if (holder && cap) holder[0] = 0;
+    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) { if (err) *err = errno; return KHandle{}; }
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        int why = errno;
+        bool held = why == EWOULDBLOCK || why == EAGAIN;
+        if (held && holder && cap) {
+            ssize_t n = read(fd, holder, cap - 1);
+            holder[n > 0 ? n : 0] = 0;
+            if (char* nl = strchr(holder, '\n')) *nl = 0;
+        }
+        close(fd);
+        if (err) *err = held ? EWOULDBLOCK : why;
+        return KHandle{};
+    }
+    char line[160];
+    int n = kv::format(line, sizeof line, "%s %d\n", who ? who : "", (int)getpid());
+    if (n > 0 && ftruncate(fd, 0) == 0 && write(fd, line, (usize)n) < 0) {}
+    return khandle_make(KHandleKind::File, fd); // closing it lets the lock go
+}
+
+} // namespace kv

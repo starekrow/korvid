@@ -1,5 +1,6 @@
 #include "korvid/platform/io.h"
 #include "korvid/core/format.h"
+#include "korvid/core/os_process.h"
 #include "korvid/core/sha256.h"
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
@@ -657,4 +658,33 @@ void test_io_take(kv::TestCtx& c) {
     }
     now.free();
     KV_CHECK(c, io_remove_tree(dir));
+}
+
+// A lock between processes by a file's name: taken once, refused with the holder's line
+// while it is held (a second open of the file is another holder, to the OS), free again
+// once let go. And the process's environment, set and taken away the same way on every OS.
+void test_io_lock(kv::TestCtx& c) {
+    using namespace kv;
+    char dir[256], path[400], holder[64];
+    KV_CHECK(c, io_make_temp_dir("kv-io-lock", dir, sizeof dir));
+    format(path, sizeof path, "%s/state.lock", dir);
+    KHandle first, second;
+    i32 err = 0;
+    KV_CHECK(c, io_lock_file(path, "first", &first, holder, sizeof holder, &err) && first.is_open() && err == 0 && holder[0] == 0);
+    KV_CHECK(c, first.kind() == KHandleKind::File);
+    KV_CHECK(c, !io_lock_file(path, "second", &second, holder, sizeof holder, &err) && !second.is_open() && err == EWOULDBLOCK);
+    KV_CHECK(c, strncmp(holder, "first ", 6) == 0 && atoi(holder + 6) > 0); // who, and its process id
+    io_unlock_file(first);
+    err = 0;
+    KV_CHECK(c, io_lock_file(path, "second", &second, holder, sizeof holder, &err) && err == 0);
+    io_unlock_file(second);
+    format(path, sizeof path, "%s/none/state.lock", dir);
+    err = 0;
+    KV_CHECK(c, !io_lock_file(path, "x", &first, nullptr, 0, &err) && err != 0 && err != EWOULDBLOCK); // cannot be made
+    KV_CHECK(c, io_remove_tree(dir));
+
+    KV_CHECK(c, os_env_set("KV_TEST_IO_ENV", "set") && getenv("KV_TEST_IO_ENV") && strcmp(getenv("KV_TEST_IO_ENV"), "set") == 0);
+    KV_CHECK(c, os_env_set("KV_TEST_IO_ENV", nullptr) && (!getenv("KV_TEST_IO_ENV") || !getenv("KV_TEST_IO_ENV")[0]));
+    TimeDate d = time_local_date();
+    KV_CHECK(c, d.year >= 2025 && d.month >= 1 && d.month <= 12 && d.day >= 1 && d.day <= 31 && d.hour >= 0 && d.hour < 24);
 }

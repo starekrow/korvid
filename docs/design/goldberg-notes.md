@@ -198,7 +198,7 @@ Done on the Windows machine (Nov 15), after slice 1 closed on Linux:
   three standard handles inherited. `cmd /c` is run as `cmd /d /s /c "..."`: in the plain
   form cmd strips the line's last quote, which took the closing quote off a converter's
   last argument, its work directory. A `tool.bat` converter cooks.
-- **The lock** (`lock.cc`): LockFileEx on a byte far past the end of the file, which the OS
+- **The lock** (`io_lock_file`, which was goldberg's own `lock.cc`): LockFileEx on a byte far past the end of the file, which the OS
   lets go of with the process, as flock; past the end so the holder's line stays
   readable.
 - **The watcher** (`win32/fs_watch_win32.cc`): ReadDirectoryChangesW over each root's

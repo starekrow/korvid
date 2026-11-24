@@ -98,3 +98,19 @@ bool io_is_file(const char* path) { return os_path_kind(path) == OsPathKind::Fil
 bool io_is_dir(const char* path) { return os_path_kind(path) == OsPathKind::Dir; }
 
 } // namespace kv
+
+namespace kv {
+
+bool io_lock_file(const char* path, const char* who, KHandle* lock, char* holder, u32 holder_cap, i32* err) {
+    *lock = KHandle{};
+    if (!path || !path[0]) { if (err) *err = ENOENT; return false; }
+    i32 why = 0;
+    *lock = os_file_lock_try(path, who, holder, holder_cap, &why);
+    if (lock->is_open()) return true;
+    if (err) *err = why ? why : EIO;
+    return false;
+}
+
+void io_unlock_file(KHandle lock) { os_file_close(lock); }
+
+} // namespace kv

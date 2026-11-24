@@ -1,7 +1,7 @@
 // Standard input on Windows, without blocking, whatever it is: a pipe says how much is
 // waiting (PeekNamedPipe); a file never blocks; a console is read only once a whole line
 // is waiting (an Enter key is in its input buffer), since the console delivers lines.
-#include "../os_stdin.h"
+#include "korvid/platform/stdin.h"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -28,15 +28,15 @@ bool console_has_line(HANDLE h) {
 }
 } // namespace
 
-bool os_stdin_is_terminal() {
+bool io_stdin_is_terminal() {
     HANDLE h = stdin_handle();
     DWORD mode;
     return h && GetConsoleMode(h, &mode);
 }
 
-KHandle os_stdin_fd() { return KHandle{}; } // a console's or a pipe's handle, which WSAPoll does not take
+KHandle io_stdin_handle() { return KHandle{}; } // a console's or a pipe's handle, which WSAPoll does not take
 
-i32 os_stdin_read(void* buf, u32 cap) {
+i32 io_stdin_read(void* buf, u32 cap) {
     HANDLE h = stdin_handle();
     if (!h) return -1;
     DWORD want = cap;

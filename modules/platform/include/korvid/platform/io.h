@@ -376,6 +376,17 @@ bool io_current_dir(char* out, u32 cap, i32* err = nullptr);
 bool io_is_file(const char* path);
 bool io_is_dir(const char* path);
 
+// A lock between processes, by a file's name: for a program that must be the only one
+// working on something (a tool on its output tree). Asked for without waiting. True with
+// *lock: this process has it, and `who` and its process id are the file's one line
+// ("watch 1234"), for whoever finds it taken. It is held until io_unlock_file, or until
+// the process ends, however it ends: the OS lets go of it, so no lock is ever stale.
+// False with *err EWOULDBLOCK: another process has it, and `holder` (if given) is its
+// line. False with any other *err: the file cannot be made. flock on POSIX; LockFileEx on
+// Windows, on a byte past the end so the line stays readable.
+bool io_lock_file(const char* path, const char* who, KHandle* lock, char* holder = nullptr, u32 holder_cap = 0, i32* err = nullptr);
+void io_unlock_file(KHandle lock);
+
 // The platform module's queue, or null if the module is not started.
 IoQueue* platform_io(Engine& e);
 

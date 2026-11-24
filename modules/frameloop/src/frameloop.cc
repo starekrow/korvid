@@ -6,6 +6,7 @@
 #include "korvid/cli/module.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/os_process.h"
 #include "korvid/core/log.h"
 #include "korvid/core/name.h"
 #include "korvid/core/profile.h"
@@ -143,13 +144,7 @@ bool apply_game_arg(const char* arg, const char* value) {
 
 // --goldberg PORT and --no-goldberg, for asset_live (which reads KV_GOLDBERG, and is not this
 // module's to call): a dev build's connection to a running goldberg watch.
-void set_goldberg(const char* value) {
-#if defined(_WIN32)
-    _putenv_s("KV_GOLDBERG", value);
-#else
-    setenv("KV_GOLDBERG", value, 1);
-#endif
-}
+void set_goldberg(const char* value) { os_env_set("KV_GOLDBERG", value); }
 
 bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
     for (int i = 1; i < argc; ++i) {

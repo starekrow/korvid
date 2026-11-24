@@ -27,11 +27,6 @@
 #include <string.h>
 
 // The key a script's "mod" holds: the one Krome's `mod+` shortcuts want here.
-#if defined(__APPLE__)
-#define KV_DEMO_MOD Key::LGui
-#else
-#define KV_DEMO_MOD Key::LCtrl
-#endif
 
 namespace kv {
 
@@ -262,7 +257,7 @@ void kromescreens_tick(TickContext& ctx) {
         // "ctrl", or "mod": a shortcut's modifier as Krome reads `mod+`, Command on a Mac.
         Key held = Key::Unknown;
         if (st.mods && !strcmp(st.mods, "ctrl")) held = Key::LCtrl;
-        if (st.mods && !strcmp(st.mods, "mod")) held = KV_DEMO_MOD;
+        if (st.mods && !strcmp(st.mods, "mod")) held = KV_PLATFORM_MOD_KEY;
         if (phase == 0 && held != Key::Unknown) input_key_override(e, held, true);
         if (phase == 1) { input_key_override(e, k, true); input_key_override(e, k, false); }
         if (phase == 2 && held != Key::Unknown) input_key_override(e, held, false);

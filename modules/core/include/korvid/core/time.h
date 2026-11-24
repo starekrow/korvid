@@ -16,6 +16,12 @@ f64  time_now();              // seconds, monotonic, arbitrary origin
 // pacing a loop that has nothing to present.
 void time_sleep(f64 seconds);
 
+// The calendar's date and the clock's time, here, as the user's machine has them set: for a
+// line a person reads (a high score's date, a file's name). Not monotonic, not the sim's:
+// never for timing.
+struct TimeDate { i32 year, month, day, hour, minute, second; }; // month and day from 1
+TimeDate time_local_date();
+
 // The raw clock the profiler records: the highest resolution the platform has, monotonic.
 u64  os_ticks();
 // os_ticks per second: 1000000000 on POSIX, the performance counter's frequency on Windows.

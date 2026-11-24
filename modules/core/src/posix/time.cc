@@ -32,3 +32,14 @@ void time_sleep(f64 seconds) {
 }
 
 } // namespace kv
+
+namespace kv {
+
+TimeDate time_local_date() {
+    time_t now = time(nullptr);
+    struct tm local;
+    localtime_r(&now, &local);
+    return TimeDate{local.tm_year + 1900, local.tm_mon + 1, local.tm_mday, local.tm_hour, local.tm_min, local.tm_sec};
+}
+
+} // namespace kv

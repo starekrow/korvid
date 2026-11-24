@@ -215,11 +215,7 @@ bool krome_parse_shortcut(const char* text, u32* key, u32* mods) {
         if (*p == '+') ++p;
         if (!n || *key) return false; // the key is last, and there is one
         if (!strcmp(word, "mod")) {
-#if defined(__APPLE__)
-            *mods |= KROME_MOD_CMD;
-#else
-            *mods |= KROME_MOD_CTRL;
-#endif
+            *mods |= KV_PLATFORM_MOD_KEY == Key::LGui ? KROME_MOD_CMD : KROME_MOD_CTRL;
         } else if (!strcmp(word, "ctrl")) *mods |= KROME_MOD_CTRL;
         else if (!strcmp(word, "shift")) *mods |= KROME_MOD_SHIFT;
         else if (!strcmp(word, "alt") || !strcmp(word, "option")) *mods |= KROME_MOD_ALT;

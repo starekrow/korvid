@@ -404,3 +404,42 @@ bool os_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
 }
 
 } // namespace kv
+
+namespace kv {
+
+// LockFileEx on one byte far past the end: a Windows lock also keeps others from reading
+// what it covers, and the holder's line must stay readable. Not overlapped (the lock is
+// asked for and answered at once), not inherited, so a child the holder starts does not
+// hold it.
+KHandle os_file_lock_try(const char* path, const char* who, char* holder, u32 cap, i32* err) {
+    if (holder && cap) holder[0] = 0;
+    WidePath wp;
+    if (!wp.set(path, err)) return KHandle{};
+    HANDLE h = CreateFileW(wp.w, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) { if (err) *err = fail_errno(); return KHandle{}; }
+    OVERLAPPED at{};
+    at.Offset     = 0xFFFFFFFEu; // the lock's byte: past any line, so the line stays readable
+    at.OffsetHigh = 0x7FFFFFFFu;
+    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &at)) {
+        DWORD why = GetLastError();
+        bool held = why == ERROR_LOCK_VIOLATION || why == ERROR_IO_PENDING || why == ERROR_SHARING_VIOLATION;
+        if (held && holder && cap) {
+            DWORD n = 0;
+            if (!ReadFile(h, holder, (DWORD)(cap - 1), &n, nullptr)) n = 0;
+            holder[n] = 0;
+            if (char* nl = strchr(holder, '\n')) *nl = 0;
+            if (char* cr = strchr(holder, '\r')) *cr = 0;
+        }
+        CloseHandle(h);
+        if (err) *err = held ? EWOULDBLOCK : errno_from_win32(why);
+        return KHandle{};
+    }
+    char line[160];
+    int n = kv::format(line, sizeof line, "%s %lu\n", who ? who : "", (unsigned long)GetCurrentProcessId());
+    DWORD wrote = 0;
+    if (n > 0 && SetFilePointer(h, 0, nullptr, FILE_BEGIN) == 0 && SetEndOfFile(h)) WriteFile(h, line, (DWORD)n, &wrote, nullptr);
+    return file_of(h); // closing it lets the lock go
+}
+
+} // namespace kv

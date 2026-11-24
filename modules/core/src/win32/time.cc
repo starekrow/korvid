@@ -55,3 +55,13 @@ void time_sleep(f64 seconds) {
 }
 
 } // namespace kv
+
+namespace kv {
+
+TimeDate time_local_date() {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    return TimeDate{st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond};
+}
+
+} // namespace kv

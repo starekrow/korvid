@@ -1,15 +1,15 @@
-#include "../os_stdin.h"
+#include "korvid/platform/stdin.h"
 #include <errno.h>
 #include <poll.h>
 #include <unistd.h>
 
 namespace kv {
 
-bool os_stdin_is_terminal() { return isatty(STDIN_FILENO) != 0; }
+bool io_stdin_is_terminal() { return isatty(STDIN_FILENO) != 0; }
 
-KHandle os_stdin_fd() { return khandle_make(KHandleKind::Pipe, STDIN_FILENO); }
+KHandle io_stdin_handle() { return khandle_make(KHandleKind::Pipe, STDIN_FILENO); }
 
-i32 os_stdin_read(void* buf, u32 cap) {
+i32 io_stdin_read(void* buf, u32 cap) {
     for (;;) {
         pollfd p{STDIN_FILENO, POLLIN, 0};
         if (poll(&p, 1, 0) <= 0 || !(p.revents & (POLLIN | POLLHUP))) return 0;

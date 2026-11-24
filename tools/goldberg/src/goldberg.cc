@@ -54,6 +54,7 @@
 #include "korvid/tool/tool.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 
 namespace kv {
@@ -61,8 +62,7 @@ namespace kv {
 constexpr u32 kGbPath = 200;
 constexpr f64 kTick = 1.0 / 60.0; // the tick a session's share is of: a frame at 60 Hz
 
-int  goldberg_lock(const char* path, const char* who, char* holder, usize cap, i64* handle); // lock.cc
-void goldberg_unlock(i64 handle);
+
 
 // ---- the pools ---------------------------------------------------------------------------
 
@@ -261,7 +261,7 @@ struct GoldbergState {
     f64             share = 1.0;
     Array<Hold>     holds;
     Array<Held>     held;
-    i64             lock = -1;           // the lock on the output tree's state, while held
+    KHandle         lock;                // the lock on the output tree's state, while held (io_lock_file)
     f64             watch_floor = 0;     // the least time a held file waits: over the polling watcher's interval
     bool            watch_sync = false;  // host.watch_sync: the watcher heard out before a run's exit is delivered
     char            out_dir[600] = {};   // the output tree
@@ -1386,10 +1386,13 @@ int host_remove_work(lua_State* L) {
 int host_lock(lua_State* L) {
     GoldbergState& s = *state_of(L);
     char holder[128];
-    if (s.lock >= 0) { lua_pushboolean(L, 1); return 1; }
-    int r = goldberg_lock(luaL_checkstring(L, 1), luaL_checkstring(L, 2), holder, sizeof holder, &s.lock);
-    if (r < 0) { lua_pushnil(L); return 1; }
-    lua_pushboolean(L, r == 1);
+    if (s.lock.is_open()) { lua_pushboolean(L, 1); return 1; }
+    // A file beside the state, locked for as long as the process lives: the OS lets go of it
+    // when the process ends, however it ends, so there is no stale lock to clear.
+    i32 err = 0;
+    bool taken = io_lock_file(luaL_checkstring(L, 1), luaL_checkstring(L, 2), &s.lock, holder, sizeof holder, &err);
+    if (!taken && err != EWOULDBLOCK) { lua_pushnil(L); return 1; } // the file cannot be made
+    lua_pushboolean(L, taken);
     lua_pushstring(L, holder);
     return 2;
 }
@@ -1983,7 +1986,8 @@ void goldberg_shutdown(Engine& e, ModuleInstance& self) {
     close_programs(*s);
     if (s->L) lua_close(s->L);
     s->watcher.close();
-    goldberg_unlock(s->lock);
+    io_unlock_file(s->lock);
+    s->lock = KHandle{};
     s->holds.free();
     s->held.free();
     for (Pending& p : s->pending) if (p.text) mem_free(p.text);
@@ -2153,11 +2157,6 @@ constinit const Step k_pilot[] = {
 };
 
 struct Pilot { u32 step = 0, wait = 0, phase = 0, settled = 0; f64 since = 0; };
-#if defined(__APPLE__)
-constexpr Key KV_PLATFORM_MOD_KEY = Key::LGui;
-#else
-constexpr Key KV_PLATFORM_MOD_KEY = Key::LCtrl;
-#endif
 Pilot g_pilot;
 
 bool aim(Engine& e, Name screen, const char* id, f32* x, f32* y) {

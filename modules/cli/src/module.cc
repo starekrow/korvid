@@ -4,7 +4,7 @@
 #include "korvid/core/log.h"
 #include "korvid/core/utf8.h"
 #include "korvid/platform/module.h"
-#include "os_stdin.h"
+#include "korvid/platform/stdin.h"
 #include <string.h>
 
 namespace kv {
@@ -282,7 +282,7 @@ void watch_sockets(Engine& e, CliState& cli) {
     w.add(cli.listener);
     for (u32 i = 0; i < cli.session_count; ++i) {
         const Session& s = cli.sessions[i];
-        if (s.is_stdin) { if (!s.stdin_eof) w.add(os_stdin_fd()); }
+        if (s.is_stdin) { if (!s.stdin_eof) w.add(io_stdin_handle()); }
         else w.add(s.sock.fd); // what it reads; what it writes is flushed by the tick, not waited for
     }
     platform_watch(e, &cli, w);
@@ -300,7 +300,7 @@ bool cli_startup(Engine& e, ModuleInstance& self) {
     }
     for (Session& sess : s->sessions) sess.sock.out.alloc = &self.general;
 
-    bool use_stdin = !s->config.no_stdin && (s->config.stdin_ || !os_stdin_is_terminal());
+    bool use_stdin = !s->config.no_stdin && (s->config.stdin_ || !io_stdin_is_terminal());
     if (use_stdin) {
         Session& sess = s->sessions[s->session_count++];
         sess.is_stdin = true;
@@ -346,7 +346,7 @@ void cli_pump(TickContext& ctx) {
         if (s.is_stdin) {
             if (s.stdin_eof) continue;
             for (;;) {
-                i32 n = os_stdin_read(buf, sizeof buf);
+                i32 n = io_stdin_read(buf, sizeof buf);
                 if (n > 0) { feed(e, cli, s, buf, (u32)n); continue; }
                 if (n < 0) s.stdin_eof = true; // end of stream, or an error: stdin is done
                 break;

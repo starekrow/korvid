@@ -15,6 +15,7 @@
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform/net.h"
+#include "korvid/core/os_process.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,15 +25,8 @@ using namespace kv;
 
 void frame(Engine& e) { platform_pump(e); engine_frame(e, 1.0 / 60.0); }
 
-// KV_GOLDBERG set, or with nullptr taken away (Windows has _putenv_s, where "" unsets).
-void set_goldberg(const char* value) {
-#if defined(_WIN32)
-    _putenv_s("KV_GOLDBERG", value ? value : "");
-#else
-    if (value) setenv("KV_GOLDBERG", value, 1);
-    else unsetenv("KV_GOLDBERG");
-#endif
-}
+// KV_GOLDBERG set, or with nullptr taken away.
+void set_goldberg(const char* value) { os_env_set("KV_GOLDBERG", value); }
 
 template <class F> bool until(Engine& e, F done, f64 seconds = 5.0) {
     f64 t0 = time_now();

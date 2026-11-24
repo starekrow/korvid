@@ -25,7 +25,7 @@
 #include "korvid/sprite_ui/sprite_ui.h"
 #include <string.h>
 #include "korvid/math/scalar.h"
-#include <time.h>
+#include "korvid/core/time.h"
 
 namespace kv::arcfire {
 
@@ -143,14 +143,8 @@ void name_submit(Engine& e, Game& g) {
         format(r.stage, sizeof r.stage, "%s", g.result.stage);
         r.round = g.result.round;
         r.restarts = g.result.restarts;
-        time_t now = time(nullptr);
-        struct tm local;
-#if defined(_WIN32)
-        localtime_s(&local, &now);
-#else
-        localtime_r(&now, &local);
-#endif
-        strftime(r.date, sizeof r.date, "%Y-%m-%d", &local);
+        TimeDate today = time_local_date();
+        format(r.date, sizeof r.date, "%04d-%02d-%02d", today.year, today.month, today.day);
         score_insert(g.scores[table], (u32)row, r);
         if (!g.demo) format(g.last_name, sizeof g.last_name, "%s", name);
         scores_save(e, g);

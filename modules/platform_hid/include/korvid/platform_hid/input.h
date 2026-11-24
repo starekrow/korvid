@@ -23,6 +23,14 @@ enum class Key : u16 {
     Count
 };
 
+// The key a platform's shortcuts are held with: Command on Apple's, Control everywhere
+// else. What "mod+S" means in a binding. The one place that asks which OS this is.
+#if defined(__APPLE__)
+constexpr Key KV_PLATFORM_MOD_KEY = Key::LGui;
+#else
+constexpr Key KV_PLATFORM_MOD_KEY = Key::LCtrl;
+#endif
+
 const char* key_name(Key k);
 
 // Gamepad buttons, by position: South is the bottom face button (A on an Xbox pad, Cross
