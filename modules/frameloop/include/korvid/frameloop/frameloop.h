@@ -26,7 +26,13 @@ struct Engine;
 // happened (input, the window, I/O, a load, ticks with sprites in them, engine_want_frame), and between
 // them no ticks and no drawing, the platform polled every few milliseconds and the loop
 // woken at least four times a second (timers, the CLI). For a tool's window.
-enum class Pacing : u8 { Continuous, OnDemand };
+// Decoupled: ticks and frames decided apart. Ticks at the clock's rate while a module asks
+// (engine_want_ticks), while input, I/O, a load, a waker or Work is pending, and four times
+// a second; frames only when something to draw changed (engine_want_frame, input, the
+// window, a load, sprites a tick moved), never on the heartbeat, never while the window is
+// hidden. Between ticks the loop sleeps till the next is due. For a program whose sim
+// follows a device (a music player) in a window nobody may be looking at.
+enum class Pacing : u8 { Continuous, OnDemand, Decoupled };
 
 // The game's declaration: what frameloop_main opens and how it runs. Every field has a
 // default, so a config names only what it changes; the command line overrides some.
@@ -56,7 +62,7 @@ struct FrameLoopConfig {
     Span<const char* const> options = {}; // flags the game accepts that take a value ("--dial"), each as often as it likes; frameloop_option
     Span<const char* const> recorded_actions = {}; // the actions --record keeps and --replay drives: the gameplay ones, not pause or quit
     EngineConfig engine = {};             // heaps and which module lives in which
-    Pacing      pacing = Pacing::Continuous;  // --pacing demand|continuous
+    Pacing      pacing = Pacing::Continuous;  // --pacing demand|continuous|decoupled
 };
 
 // Why someone wants out. frameloop.exit (PreSim, Always) emits one ExitRequested per

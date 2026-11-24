@@ -1454,6 +1454,7 @@ u32 engine_frame(Engine& e, f64 frame_dt) {
         if (e.quit_requested) { ticks = i; break; }
         u64  tick   = e.clock.tick_count; // the sim tick this is, or would be
         bool paused = e.clock.begin_tick();
+        e.ticks_wanted = false; // engine_want_ticks lapses with each tick: one that still wants the next asks again
         e.phases.run_tick(e, e.events, e.clock.tick_dt, tick, paused);
     }
     return ticks;

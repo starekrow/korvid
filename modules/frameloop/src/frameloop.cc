@@ -85,6 +85,9 @@ struct FrameLoopState {
     f64             demand_last = 0.0;
     bool            self_paced = false; // the renderer does not wait for the display: run() does
     u64             demand_sleeps = 0;
+    // Over the run: frames drawn, and (Pacing::Decoupled) ticks run in passes that drew nothing.
+    u64             frames_drawn = 0;
+    u64             ticks_alone  = 0;
     // The GPU's frames over the report window (renderer_gpu_stats, a frame late), when measured.
     u32             gpu_frames = 0;
     f64             gpu_sum = 0.0, gpu_worst = 0.0, gpu_sort = 0.0, gpu_draw = 0.0;
@@ -174,7 +177,8 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
             const char* v = argv[++i];
             if (!strcmp(v, "demand")) cfg.pacing = Pacing::OnDemand;
             else if (!strcmp(v, "continuous")) cfg.pacing = Pacing::Continuous;
-            else { KV_ERROR("frameloop", "--pacing takes demand or continuous, not '%s'", v); return false; }
+            else if (!strcmp(v, "decoupled")) cfg.pacing = Pacing::Decoupled;
+            else { KV_ERROR("frameloop", "--pacing takes demand, continuous or decoupled, not '%s'", v); return false; }
         }
         else if (strcmp(argv[i], "--borderless") == 0) cfg.borderless = true;
         else if (strcmp(argv[i], "--hitch-ms") == 0 && i + 1 < argc) g_hitch_ms = atof(argv[++i]);
@@ -423,6 +427,7 @@ void modal_frame(void* user) {
     engine_frame_cycle(engine, dt);
     render_frame(engine, s);
     ++s.modal_frames;
+    ++s.frames_drawn;
 }
 
 // Pacing::OnDemand: whether this pass of the loop should tick and draw. The platform is
@@ -436,7 +441,7 @@ bool demand_frame(Engine& engine, FrameLoopState& s) {
     InputState before;
     if (in) before = in->raw;
     platform_pump(engine);
-    bool want = engine.frame_wanted || s.demand_tail > 0;
+    bool want = engine.frame_wanted || engine.ticks_wanted || s.demand_tail > 0; // ticks come with frames here
     if (in && memcmp(&before, &in->raw, sizeof before) != 0) want = true;
     if (s.window && (s.window->width() != s.presented_w || s.window->height() != s.presented_h)) want = true;
     if (IoQueue* io = platform_io(engine)) if (io->pending() || io->completions().len) want = true;
@@ -453,6 +458,74 @@ bool demand_frame(Engine& engine, FrameLoopState& s) {
     return true;
 }
 
+// How long till the clock has a tick's worth, in real seconds; the heartbeat when it will
+// never have one (a rate or scale of 0).
+f64 time_to_next_tick(const TickClock& c) {
+    f64 scale = c.paused ? 1.0 : c.rate * c.scale;
+    if (scale <= 0.0) return k_demand_heartbeat;
+    f64 left = (c.tick_dt - c.accumulator) / scale;
+    return left > 0.0 ? left : 0.0;
+}
+
+// Pacing::Decoupled: one pass of the loop. True when this pass should draw: the loop's body
+// then ticks and draws as for any frame. Otherwise the pass has ticked (a module wants
+// ticks, I/O or Work is pending, the heartbeat) or slept, and drawn nothing. The platform
+// is pumped here.
+bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept) {
+    Input* in = platform_input(engine);
+    InputState before;
+    if (in) before = in->raw;
+    platform_pump(engine);
+    f64 now = time_now();
+    bool input = in && memcmp(&before, &in->raw, sizeof before) != 0;
+    bool draw  = engine.frame_wanted || input || s.demand_tail > 0 || (engine_holds(engine) & HoldLoading);
+    if (s.window && (s.window->width() != s.presented_w || s.window->height() != s.presented_h)) draw = true;
+    if (engine.frame_due > 0.0 && now >= engine.frame_due) { draw = true; engine.frame_due = 0.0; }
+    if (engine_wake(engine)) draw = true; // a module's socket had something (engine_add_waker)
+    if (draw) {
+        s.demand_tail = input ? 1 : s.demand_tail ? s.demand_tail - 1 : 0; // the frame after input's, for what it changed
+        engine.frame_wanted = false;
+        s.demand_last = now;
+        return true;
+    }
+    IoQueue* io = platform_io(engine);
+    bool io_busy = io && (io->pending() || io->completions().len);
+    bool tick = engine.ticks_wanted || io_busy || engine_work_pending(engine) || now - s.demand_last >= k_demand_heartbeat;
+    if (!tick) {
+        time_sleep(k_demand_poll);
+        ++s.demand_sleeps;
+        slept = true;
+        return false;
+    }
+    // Ticks and a slice of Work, no frame. Woken from sleep: a tick's worth, as below.
+    f64 dt = slept ? engine.clock.tick_dt : now - s.prev;
+    s.prev = now;
+    slept = false;
+    s.demand_last = now;
+    u32 ran = engine_frame(engine, dt);
+    s.ticks_alone += ran;
+    if (ran && renderer_sprite_count(s.renderer)) engine_want_frame(engine); // only a frame's extract can tell what they moved
+    if (engine_work_pending(engine)) engine_work(engine, k_demand_work);
+    if (engine_work_pending(engine)) return false;
+    // Till the next tick is due while ticks are wanted; a poll's length while I/O is.
+    f64 wait = engine.ticks_wanted ? time_to_next_tick(engine.clock) : k_demand_poll;
+    if (io_busy && wait > k_demand_poll) wait = k_demand_poll;
+    if (engine.frame_wanted) wait = 0.0;
+    if (wait > 0.0) {
+        time_sleep(wait);
+        ++s.demand_sleeps;
+    }
+    return false;
+}
+
+// --run-seconds: ExitRequested (Timer) once the run has lasted that long.
+void run_time_check(FrameLoopState& s, f64 start) {
+    if (s.config.run_seconds >= 0.0 && !s.timer_fired && time_now() - start >= s.config.run_seconds) {
+        KV_INFO("frameloop", "run time reached");
+        s.timer_fired = true;
+    }
+}
+
 void run(Engine& engine, FrameLoopState& s) {
     f64 start = time_now();
     s.engine = &engine;
@@ -466,8 +539,13 @@ void run(Engine& engine, FrameLoopState& s) {
     platform_modal_frame(engine, modal_frame, &s);
 
     bool on_demand = s.config.pacing == Pacing::OnDemand;
+    bool decoupled = s.config.pacing == Pacing::Decoupled;
     bool slept = false;
     while (!engine.quit_requested) {
+        if (decoupled && !decoupled_pass(engine, s, slept)) {
+            run_time_check(s, start);
+            continue;
+        }
         if (on_demand && !demand_frame(engine, s)) {
             if (engine_work_pending(engine)) {
                 // Nothing to draw and work to do: the ticks owed and a slice of Work, no frame.
@@ -539,6 +617,7 @@ void run(Engine& engine, FrameLoopState& s) {
             engine_frame_cycle(engine, dt); // presentation: once for the frame about to be drawn
             f64 r0 = time_now();
             render_frame(engine, s);
+            ++s.frames_drawn;
             f64 cpu = time_now() - r0 - renderer_last_wait(s.renderer);
             s.render_cpu = s.render_cpu * 0.9 + (cpu > 0.0 ? cpu : 0.0) * 0.1;
             if (s.last_frame_start > 0.0) {
@@ -605,14 +684,15 @@ void run(Engine& engine, FrameLoopState& s) {
             s.deltas_in_window = 0;
             next_report += (f64)s.config.report_every_seconds;
         }
-        if (s.config.run_seconds >= 0.0 && now - start >= s.config.run_seconds && !s.timer_fired) {
-            KV_INFO("frameloop", "run time reached");
-            s.timer_fired = true;
-        }
+        run_time_check(s, start);
     }
     platform_modal_frame(engine, nullptr, nullptr);
     platform_surface_hook(engine, nullptr, nullptr); // the renderer goes down before the window does
     if (s.modal_frames) KV_INFO("frameloop", "%llu frames ran inside live resizes", (unsigned long long)s.modal_frames);
+    if (s.config.pacing != Pacing::Continuous)
+        KV_INFO("frameloop", "%llu frames drawn, %llu ticks, %llu of them without a frame; %llu sleeps over %.1f s",
+                (unsigned long long)s.frames_drawn, (unsigned long long)engine.clock.tick_total, (unsigned long long)s.ticks_alone,
+                (unsigned long long)s.demand_sleeps, time_now() - start);
 }
 
 // `screenshot FILE`: the next frame drawn, as a PPM.

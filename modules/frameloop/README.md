@@ -36,7 +36,12 @@ vsync. `OnDemand`, a tool's choice, draws only when something happened: input, t
 window, I/O, a load, ticks that moved sprites, `engine_want_frame`, or a waker that had
 something (`engine_add_waker`). Between those, it runs no ticks, polls the platform and
 asks the wakers every 4 ms, wakes at least four times a second, and still runs pending
-Work.
+Work. `engine_want_ticks` is a frame request there. `Decoupled`, a player's choice, decides
+ticks and frames apart: it ticks at the clock's rate while a module asks
+(`engine_want_ticks`, again each tick) and while I/O or Work is pending, sleeping till the
+next tick is due, and four times a second otherwise; it draws only on the same signals as
+`OnDemand` less the heartbeat. Its last log line says how many frames it drew and how many
+ticks ran without one.
 
 The system `frameloop.exit` (phase PreSim, `Always`) emits `ExitRequested` with a reason:
 
@@ -116,7 +121,7 @@ renders once.
 | `--quiet` | log at Warn and above |
 | `--validation`, `--no-validation` | the Vulkan validation layers (on in debug builds) |
 | `--no-vsync` | mailbox or immediate presentation; no slack, so no idle work |
-| `--pacing demand\|continuous` | `FrameLoopConfig::pacing` (above) |
+| `--pacing demand\|continuous\|decoupled` | `FrameLoopConfig::pacing` (above) |
 | `--renderer auto\|gpu\|cpu` | which bound backend draws (`FrameLoopConfig::renderer`) |
 | `--cpu-shaders all\|none` | whether the CPU renderer runs game shaders |
 | `--cpu-scale auto\|N` | the CPU renderer's window pixels per drawn pixel, 1 to 8 |
@@ -150,7 +155,7 @@ Header `korvid/frameloop/frameloop.h`:
 | name | kind | what |
 |---|---|---|
 | `FrameLoopConfig` | record | `title`, `width`, `height`, `vsync`, `borderless`, `validation`, `renderer`, `cpu_shaders`, `cpu_scale`, `exit_on_close`, `exit_on_escape`, `run_seconds`, `run_ticks`, `clear_color`, `report_every_seconds`, `sprite_rows` (the first size of the renderer's sprite table and the extract's: a game that draws many asks, so the tables never grow mid-run), `touchpad_layout`, `flags`, `options`, `recorded_actions`, `engine` (an `EngineConfig`), `pacing` |
-| `Pacing` | enum | `Continuous`, `OnDemand` |
+| `Pacing` | enum | `Continuous`, `OnDemand`, `Decoupled` |
 | `ExitReason`, `ExitRequested{reason}` | enum, event | `WindowClosed`, `Escape`, `Timer` |
 | `frameloop_main(argc, argv, config)` | function | the whole run; returns the process exit code (2 for a bad option, 1 for a failed init) |
 | `frameloop_config(engine)` | function | the config in effect: the declaration plus the command line |
@@ -221,6 +226,8 @@ map). The game owns those, on top of what the loop provides.
   recordings made from a menu with `frameloop_record_note`.
 - [kromedemo](../../examples/kromedemo/README.md): on-demand pacing; `--work` fills the
   time between frames with a Work unit.
+- [ticker](../../examples/ticker/src/main.cc): decoupled pacing; a module that asks for every
+  tick and draws nothing new.
 - [cpukiller](../../examples/cpukiller/README.md): `frameloop_set_config` and
   `frameloop_step` driving frames itself.
 

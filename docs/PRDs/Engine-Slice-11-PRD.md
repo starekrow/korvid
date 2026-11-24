@@ -261,4 +261,28 @@ and not verified unless a machine is to hand: the status says which.
 
 ## Status
 
-Not started.
+**Milestone 1, decoupled pacing (KR20): built Nov 23, 2026 on branch `slice-11`**, which
+starts from `slice-10`. As above, and:
+
+- **The request lapses in the engine**: `engine_frame` clears `ticks_wanted` as each tick
+  begins, so a pass that runs no tick (a frame drawn 4 ms after the last) keeps it.
+  Cleared by the loop instead, it fizzled out under `OnDemand` within a few frames.
+- **A pass that draws nothing** still checks `--run-seconds`, which sat at the bottom of
+  the loop's body.
+- **The last log line**, under either pacing that is not continuous: frames drawn, ticks,
+  ticks without a frame, sleeps, seconds.
+- **`examples/ticker`**: a module that, with `--want-ticks`, asks for every tick and
+  changes nothing on screen. Ten seconds of each on this machine (Wayland, a 120 Hz
+  display):
+
+| run | frames drawn | ticks | sleeps |
+|---|---|---|---|
+| decoupled, ticks wanted | 1 | 600, all without a frame | 599 |
+| decoupled, nothing wanted | 1 | 40 (the heartbeat) | 2,440 |
+| on demand, nothing wanted | 42 | 41 | 2,495 |
+| on demand, ticks wanted | 1,194 | 600 | 0 |
+
+  The first two are KR20's test: the clock's rate with no frame after the window's first,
+  and no more wakes than on demand. The last is the choice it was asked to end.
+- **Not here yet:** a hidden window drawing nothing, which is milestone 2's. A live
+  resize ticks and draws through the modal hook, as before, under every pacing.

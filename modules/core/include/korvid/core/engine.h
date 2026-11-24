@@ -171,6 +171,7 @@ struct Engine {
     u64                   frame_count      = 0;
     bool                  quit_requested   = false; // engine_request_quit was called; no more ticks run
     bool                  frame_wanted     = false; // engine_want_frame: a loop that paces on demand draws another frame
+    bool                  ticks_wanted     = false; // engine_want_ticks: a loop that paces apart runs the next tick, drawing nothing
     f64                   frame_due        = 0.0;   // engine_want_frame_at: the earliest time one is wanted; 0 none
     // engine_add_waker: what a loop pacing on demand asks each time it polls the platform.
     struct Waker { bool (*fn)(Engine&, void*); void* user; };
@@ -227,6 +228,13 @@ inline bool engine_work_pending(const Engine& e) { return e.work_pending; }
 // For whatever changed what is on screen without input to show it (a UI's new list, a load
 // that landed).
 inline void engine_want_frame(Engine& e) { e.frame_wanted = true; }
+// Asks the loop for the next tick, at the clock's rate, without a frame: a player feeding
+// its audio path and publishing the position. Ask again in each tick it is still wanted:
+// it lapses when a tick begins (engine_frame clears it), as a frame request does with each
+// frame. The frame
+// loop's Pacing::Decoupled runs the tick and draws nothing; OnDemand takes it as a frame
+// request; Continuous ticks anyway. A loop of one's own reads e.ticks_wanted.
+inline void engine_want_ticks(Engine& e) { e.ticks_wanted = true; }
 // A frame at a time (time_now's clock): a caret's next blink. The earliest asked for stands.
 inline void engine_want_frame_at(Engine& e, f64 when) { if (e.frame_due <= 0.0 || when < e.frame_due) e.frame_due = when; }
 

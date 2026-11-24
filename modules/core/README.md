@@ -276,6 +276,7 @@ Header `korvid/core/engine.h`:
 | `Engine` | record | `events`, `phases`, `clock`, `modules`, `resources`, `components`, `ktables`, `event_types`, `triggers`, `commands`, `timers`, `trace`, `threads`, `early_reads`, `hash_ticks`, `hash_systems`, `quit_requested`, `frame_wanted`, `work_pending` |
 | `engine_frame_cycle(e, dt)`, `engine_work(e, budget)`, `engine_work_pending(e)` | functions | the Frame and Work cycles outside the tick ([cycles](../../docs/concepts/cycles.md)): `Phase::Frame` once per frame drawn, `Phase::Work` while a unit says `ctx.more()` |
 | `engine_want_frame(e)`, `engine_want_frame_at(e, when)` | functions | another frame from a loop that paces on demand (Krome's new list, a load that landed); one no later than `when` |
+| `engine_want_ticks(e)` | function | the next tick at the clock's rate, with no frame, from a loop that paces ticks and frames apart; asked again each tick |
 | `engine_add_waker(e, fn, user)`, `engine_remove_waker`, `engine_wake(e)` | functions | what a loop pacing on demand asks each time it polls (a socket a module reads); true from a waker draws a frame |
 | `EngineConfig` (`heaps`, `module_heaps`, `capacities`, `seed`), `HeapDesc`, `ModuleHeapDesc`, `KTableCapacity` | records | the heap table, which module lives in which, and ktables' capacities over their KTableDesc's (`KTable::capacity`; a full ktable logs once and counts `KTable::refused`) |
 | `engine_init(e, modules, config)`, `engine_shutdown(e)` | functions | register and start everything in order; undo it in reverse |
