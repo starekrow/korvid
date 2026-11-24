@@ -43,7 +43,7 @@ u16 tree_port(const LiveState& s) {
     char path[KV_PLATFORM_PATH_MAX + 32];
     format(path, sizeof path, "%s/.goldberg-port", s.tree);
     IoBytes b;
-    if (!io_read_now(path, &b)) return 0;
+    if (!io_read_file(path, &b)) return 0;
     char text[16] = {};
     memcpy(text, b.data, b.size < sizeof text - 1 ? b.size : sizeof text - 1);
     b.free();

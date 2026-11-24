@@ -12,7 +12,7 @@
 //   h.update(second, second_size);
 //   h.finish(digest);               // u8 digest[32]
 //
-// modules/platform/src/io.cc (io_copy_now) hashes a file this way as it copies it.
+// modules/platform/src/io.cc (io_copy_file) hashes a file this way as it copies it.
 #pragma once
 #include "korvid/core/types.h"
 

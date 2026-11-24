@@ -98,20 +98,37 @@ registers with `engine_add_waker`, and the loop polls for it.
 **Declare the dependency**: `deps = { "core", "platform", ... }` in `module.lua`. The
 frameloop module depends on it already, so a game gets it for free.
 
-**Read a file.** Submit with the asset's handle as the user word, reap in a main-thread
-system, free the data with the allocator you named:
+**Read a file.** Now, or later: the two read alike. Both give an `IoBytes` (the file, a NUL
+after it, the allocator it came from), freed with `free()`:
+
+```cpp
+IoBytes b;                                       // now: tools, startup, tests
+if (io_read_file(path, &b)) { use(b.data, b.size); b.free(); }
+
+IoRequest req; req.path = path;                  // later: anything in a tick
+Handle h = platform_io(engine)->read_file(req);
+// ... in a main-thread system, each tick until it answers:
+IoCompletion c;
+if (platform_io(engine)->take(h, &c)) {          // false while it is on its way
+    if (c.status == IoStatus::Done) use(c.bytes.data, c.bytes.size);
+    c.bytes.free();                              // empty on a failure: frees nothing
+}
+```
+
+A consumer of many requests (the asset module) scans the list for its own instead, by the
+`user` word it submitted with, and reaps each:
 
 ```cpp
 IoRequest req; req.path = full_path; req.alloc = &self.general; req.user = my_handle.bits;
-Handle h = platform_io(engine)->read_file(req);
+platform_io(engine)->read_file(req);
 
-// later, in a system with .main_thread = true:
 IoQueue* io = platform_io(*ctx.engine);
 for (u32 i = 0; i < io->completions().len;) {
     IoCompletion c = io->completions()[i];
     if (!is_mine(c.user)) { ++i; continue; }   // other consumers' completions stay in the list
-    io->reap(c.request);                       // the data is yours now
-    if (c.status == IoStatus::Done) { use(c.data, c.size); free_in(&self.general, c.data, c.size); }
+    io->reap(c.request);                       // the bytes are yours now
+    if (c.status == IoStatus::Done) use(c.bytes.data, c.bytes.size);
+    c.bytes.free();
 }
 ```
 
@@ -147,7 +164,7 @@ it with 0 bytes. The budget counts the range, so the first 64 KB of a large file
 64 KB. `read_asset` reads whole files only.
 
 **Ask what a path is without waiting** with `stat_file(IoRequest{path})`: the completion's
-`stat` has `is_file`, `is_dir`, `size`, `mtime_ns` and `volume`, as `io_stat` gives them, and no
+`stat` has `is_file`, `is_dir`, `size`, `mtime_ns` and `volume`, as `io_stat_file` gives them, and no
 data. Nothing there is `Done` with both flags false; `Failed` is an error on the way. On
 io_uring it is one `IORING_OP_STATX`; where the ring has no stat (Windows, Apple, Android)
 it runs on the task workers, and under `--io sync`, or with no workers started, at the
@@ -176,8 +193,8 @@ executable in a build tree; `<exe dir>/assets/` for a packaged program: `platfor
 pack. A tool mounts nothing.
 
 **Blocking files**, for tools, startup, shutdown and tests (a tick uses the queue):
-`io_read_now(path, &bytes)` reads a whole file into an `IoBytes` (a NUL after the bytes,
-so text is a C string; `free()` returns them), `io_write_now(path, data, size)` writes one
+`io_read_file(path, &bytes)` reads a whole file into an `IoBytes` (a NUL after the bytes,
+so text is a C string; `free()` returns them), `io_write_file(path, data, size)` writes one
 whole, and an `IoFileWriter` (`open`, `write`, `print`, `close`, a failure that sticks)
 writes one in pieces. `io_is_file` and `io_is_dir` say what a path names. They stand on
 the queue's own OS layer, UTF-8 paths and all, so nothing in the engine needs `<stdio.h>`
@@ -205,8 +222,8 @@ Header `korvid/platform/io.h`:
 | `IoStat` | record | `is_file`, `is_dir`, `size`, `mtime_ns`, `volume` (for equality: another disk at the same path differs; 0 where not asked): what a path names, following links |
 | `IoDirEntry` | record | `name`, `st`, `is_link`, `hidden`, `utf8`: one entry of `io_list_dir` |
 | `io_list_dir(dir, flags, fn, user, err)` | function | one directory's entries in name order; flags (`IoListFlags`) `IoListHidden`, `IoListSizes`; false with the errno |
-| `IoCompletion` | record | `request`, `status`, `data`, `size`, `user`, `error` (errno), `stat` (a `stat_file`'s answer) |
-| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
+| `IoCompletion` | record | `request`, `status`, `bytes` (a read's `IoBytes`: `data`, `size`, a NUL after, `free()`), `written`, `user`, `error` (errno), `stat` (a `stat_file`'s answer) |
+| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `take(h, &c)`, `is_pending(h)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
 | `platform_io(engine)` | function | the module's queue |
 | `platform_pref_path(engine, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none (`UserDir::Data`) |
 | `platform_settings(engine, org, app)`, `SettingsStore` | function, record | the program's settings store, opened in the settings directory at the first call |

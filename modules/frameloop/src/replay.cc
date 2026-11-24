@@ -140,7 +140,7 @@ bool replay_open(const char* exe, bool (*apply)(const char* arg, const char* val
     g_rep.recording = g_rep.record_path != nullptr;
     if (!g_rep.replay_path) return true;
     IoBytes file;
-    if (!io_read_now(g_rep.replay_path, &file, mem_general())) { KV_ERROR("frameloop", "--replay %s: cannot read it", g_rep.replay_path); return false; }
+    if (!io_read_file(g_rep.replay_path, &file, mem_general())) { KV_ERROR("frameloop", "--replay %s: cannot read it", g_rep.replay_path); return false; }
     g_rep.data = file.data; // the general allocator's, size + 1 bytes: freed as cap
     g_rep.cap = file.size + 1;
     g_rep.len = file.size;

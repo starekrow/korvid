@@ -195,7 +195,7 @@ void asset_reap_orphans(Engine& e, AssetState_& s, u16 kind) {
         IoCompletion c = io->completions()[i];
         if (!asset_is_kind(s, c.user, kind) || asset_refs_of(s, Handle{c.user})) { ++i; continue; }
         io->reap(c.request);
-        if (c.data) free_in(s.general, c.data, c.size);
+        c.bytes.free();
     }
 }
 

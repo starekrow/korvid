@@ -45,7 +45,7 @@ struct IoBudget {
 
 struct IoRequest {
     const char* path     = nullptr;             // copied; for read_asset, the logical path
-    Allocator*  alloc    = nullptr;             // the completion's data comes from here; null: general
+    Allocator*  alloc    = nullptr;             // the completion's bytes come from here; null: general
     IoPriority  priority = IoPriority::Normal;
     u64         user     = 0;                   // handed back untouched
     // A part of the file, for read_file: `length` bytes from `offset`. 0: to the end of the
@@ -56,7 +56,18 @@ struct IoRequest {
     usize       length   = 0;
 };
 
-// What a path names, following links: io_stat's answer, and stat_file's in its completion.
+// A file's bytes, with a NUL after them (not counted in size), so text can be used as a
+// C string. What a read gives, blocking (io_read_file) or from the queue (a completion's
+// `bytes`): the same thing either way, freed the same way. free() returns them to the
+// allocator they came from, and leaves the record empty.
+struct IoBytes {
+    u8*        data  = nullptr;
+    usize      size  = 0;
+    Allocator* alloc = nullptr;
+    void free();
+};
+
+// What a path names, following links: io_stat_file's answer, and stat_file's in its completion.
 // `volume` is the file system it is on, for comparing with another stat's and nothing
 // else: equal while one volume is mounted there, different for another volume at the same
 // path (a disk unplugged leaves its mount point an empty directory on the parent's).
@@ -109,11 +120,11 @@ struct IoTasks; // the workers, their lists and the lanes
 
 struct IoCompletion {
     Handle   request;
-    IoStatus status = IoStatus::Pending;
-    void*    data   = nullptr; // a read's file contents; the consumer frees it with request.alloc. Null for a write or a stat
-    usize    size   = 0;       // bytes read, or written
-    u64      user   = 0;
-    i32      error  = 0;       // errno on failure
+    IoStatus status  = IoStatus::Pending;
+    IoBytes  bytes;            // a read's contents, as io_read_file gives them: the taker's, to bytes.free(). Empty for a write, a stat, a task
+    usize    written = 0;      // a write's bytes
+    u64      user    = 0;
+    i32      error   = 0;      // errno on failure
     IoStat   stat;             // a stat_file's answer: all false and zero for a path where nothing is
 };
 
@@ -189,7 +200,7 @@ struct IoQueue {
     // handle with a log line if there is no path, no memory for a long one, or the queue
     // is full.
     Handle read_file(const IoRequest& req);
-    // Submits a stat of `path`: what io_stat says, in the completion's `stat`, with no data.
+    // Submits a stat of `path`: what io_stat_file says, in the completion's `stat`, with no data.
     // A path where nothing is completes Done with is_file and is_dir false; Failed is an
     // error (no permission on a directory on the way). The queue's thread never waits on
     // the OS: on io_uring it is one IORING_OP_STATX; on a ring without a stat (Windows,
@@ -239,10 +250,22 @@ struct IoQueue {
     // How many bytes an idle call may admit in `seconds`, from what earlier calls cost:
     // never more than idle_bytes_per_call, never less than a few pages.
     usize  idle_bytes_for(f64 seconds) const;
-    // Unreaped completions, oldest first. Consumers scan for theirs and reap them.
+    // The request's completion, if it has one, off the list and into *out: the read's bytes
+    // are the caller's from now on (out->bytes.free()). False while the request is still
+    // on its way (is_pending) and for a handle that is not a request's, or was taken
+    // already. The non-blocking twin of the blocking call:
+    //     IoBytes b; if (io_read_file(path, &b)) { use(b); b.free(); }             // now
+    //     Handle h = io->read_file(req);                                           // later:
+    //     IoCompletion c; if (io->take(h, &c)) { if (c.status == IoStatus::Done) use(c.bytes); c.bytes.free(); }
+    // With no `out`, the completion is dropped and its bytes freed.
+    bool   take(Handle request, IoCompletion* out);
+    // Whether the request is still queued or in flight: no completion yet, and one to come.
+    bool   is_pending(Handle request) const;
+    // Unreaped completions, oldest first: for a consumer of many requests, which scans for
+    // its own (by `user`) and reaps each. One request's holder asks take().
     Span<const IoCompletion> completions() const { return completed.span(); }
-    // Takes a completion off the list; the data is the caller's to free from now on.
-    // Returns false if it was not there (already reaped).
+    // Takes a completion off the list; its bytes (a copy of the completion holds them) are
+    // the caller's to free from now on. Returns false if it was not there (already reaped).
     bool   reap(Handle request);
     // Requests neither completed nor reaped: queued plus in flight.
     u32    pending() const { return queued.len + in_flight + tasks_pending; }
@@ -260,7 +283,7 @@ struct IoQueue {
 // tools and startup, never for a tick. Returns the count, or -1 (*err) if `dir` cannot be
 // read; `fn` returning false stops the walk.
 i32  io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user, i32* err = nullptr);
-// The same walk with each file's size and modification time, as io_stat would give them,
+// The same walk with each file's size and modification time, as io_stat_file would give them,
 // from the listing itself: for a walk that would stat every file, at no cost a file more.
 i32  io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relative, const IoStat& st), void* user, i32* err = nullptr);
 // One directory's own entries, not its descendants, for a walk that chooses its own order
@@ -312,19 +335,11 @@ bool io_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err = nullptr
 // The same OS layer as the queue's (UTF-8 paths, CreateFileW on Windows), so a file reads
 // and writes alike either way. Errors are errno values, as IoCompletion::error (Errors, above).
 
-// A whole file's bytes, with a NUL after them (not counted in size), so text can be used
-// as a C string. free() returns them to the allocator they came from.
-struct IoBytes {
-    u8*        data  = nullptr;
-    usize      size  = 0;
-    Allocator* alloc = nullptr;
-    void free();
-};
 // Reads a whole file now, its bytes from `alloc` (null: general). False, with `out` empty
 // and *err set if given, when it cannot be opened or read.
-bool io_read_now(const char* path, IoBytes* out, Allocator* alloc = nullptr, i32* err = nullptr);
+bool io_read_file(const char* path, IoBytes* out, Allocator* alloc = nullptr, i32* err = nullptr);
 // Writes a whole file now: created, or truncated if it exists. False (*err) on failure.
-bool io_write_now(const char* path, const void* data, usize size, i32* err = nullptr);
+bool io_write_file(const char* path, const void* data, usize size, i32* err = nullptr);
 // A file front to back in pieces of up to `chunk` bytes, each handed to fn, which may stop
 // the read by returning false. For what does not need the file whole in memory: a hash, a
 // copy. False with *err set if it cannot be opened or read (a stop is not a failure).
@@ -332,7 +347,7 @@ bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize
 // Copies a file in pieces, `to` created or truncated; with `hash`, the SHA-256 of what was
 // read. False with *err set if either side fails. What was written of `to` stays: a tool
 // that must never be seen half done copies to a temporary name and renames it.
-bool io_copy_now(const char* from, const char* to, u8 hash[32] = nullptr, i32* err = nullptr);
+bool io_copy_file(const char* from, const char* to, u8 hash[32] = nullptr, i32* err = nullptr);
 
 // A file written in pieces, now: open (created or truncated), write and print as often as
 // need be, close. A failure sticks: what follows does nothing, and close reports it.
@@ -349,7 +364,7 @@ struct IoFileWriter {
 // ("shaders/sprite.spv"): beside the executable on the desktop, in an Apple bundle's
 // resources, inside the package on Android (a stored or deflated entry under "assets/").
 // What must be read before the mounts exist, or by something that has no queue. Blocking,
-// as io_read_now, which it is everywhere but Android. False with *err set if given; from a
+// as io_read_file, which it is everywhere but Android. False with *err set if given; from a
 // package, ENOENT for no such entry and, each logged with the entry's name, EIO for an
 // archive that ends inside it and EILSEQ for data that does not inflate or fails its CRC-32.
 bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc = nullptr, i32* err = nullptr);
@@ -365,7 +380,7 @@ bool io_rename(const char* from, const char* to, i32* err = nullptr);
 // What a path names, with its size and modification time, now, on the calling thread: for
 // tools. A tick asks IoQueue::stat_file. False if nothing is there (*err: ENOENT or
 // ENOTDIR) or it cannot be asked (any other errno).
-bool io_stat(const char* path, IoStat* out, i32* err = nullptr);
+bool io_stat_file(const char* path, IoStat* out, i32* err = nullptr);
 // Whether the file system under `path` may change without this machine hearing of it:
 // a network share (NFS, SMB; on Windows a mapped or \\server path; on Apple a volume
 // not local), or on Linux any FUSE mount (sshfs, rclone). An OS's change notifications

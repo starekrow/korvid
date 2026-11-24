@@ -205,7 +205,7 @@ int l_load(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
     IoBytes file;
     i32 err = 0;
-    if (!io_read_now(path, &file, nullptr, &err)) return luaL_error(L, "image: cannot read '%s' (errno %d)", path, err);
+    if (!io_read_file(path, &file, nullptr, &err)) return luaL_error(L, "image: cannot read '%s' (errno %d)", path, err);
     // The bytes go into the new image before anything can raise past them.
     lua_pushlstring(L, (const char*)file.data, file.size);
     file.free();
@@ -231,7 +231,7 @@ int l_save(lua_State* L) {
     usize n = 0;
     const char* s = lua_tolstring(L, -1, &n);
     i32 err = 0;
-    if (!io_write_now(path, s, n, &err)) return luaL_error(L, "image: cannot write '%s' (errno %d)", path, err);
+    if (!io_write_file(path, s, n, &err)) return luaL_error(L, "image: cannot write '%s' (errno %d)", path, err);
     return 0;
 }
 

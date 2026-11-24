@@ -24,7 +24,7 @@ struct StatJob { IoStat st; char path[1]; };
 
 i32 stat_job(void* arg, const IoTaskCtl&) {
     StatJob& j = *(StatJob*)arg;
-    return io_stat_now(j.path, &j.st);
+    return io_stat_errno(j.path, &j.st);
 }
 } // namespace
 

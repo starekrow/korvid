@@ -41,7 +41,7 @@ void asset_shutdown(Engine& e, ModuleInstance& self) {
                 IoCompletion c = io->completions()[i];
                 if (!ours(c.user)) { ++i; continue; }
                 io->reap(c.request);
-                if (c.data) free_in(s->general, c.data, c.size ? c.size : 1);
+                c.bytes.free();
             }
             if (!io->pending()) break;
             io->pump();

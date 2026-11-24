@@ -199,9 +199,9 @@ void asset_materials_pump(TickContext& ctx) {
             asset_reread_after(e, s.general, h, asset_reread_of(*m));
             continue;
         }
-        u64 hash = hash_bytes(c.data, c.size);
+        u64 hash = hash_bytes(c.bytes.data, c.bytes.size);
         if (re && hash == m->hash) {
-            free_in(s.general, c.data, c.size);
+            c.bytes.free();
             asset_reload_unchanged(m->path);
             asset_reread_after(e, s.general, h, asset_reread_of(*m));
             continue;
@@ -210,8 +210,8 @@ void asset_materials_pump(TickContext& ctx) {
         char texture_path[KV_ASSET_PATH_MAX] = {};
         const char* why = nullptr;
         u32 at = 0;
-        bool ok = material_parse((const char*)c.data, c.size, desc, texture_path, sizeof texture_path, &why, &at);
-        free_in(s.general, c.data, c.size);
+        bool ok = material_parse((const char*)c.bytes.data, c.bytes.size, desc, texture_path, sizeof texture_path, &why, &at);
+        c.bytes.free();
         if (!ok) {
             char detail[160];
             format(detail, sizeof detail, "%s (byte %u)", why, at);

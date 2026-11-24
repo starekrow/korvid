@@ -112,11 +112,11 @@ void FsJob::reap() {
     for (u32 i = 0; i < cs.len;) {
         IoCompletion c = cs[i];
         if (c.user >= g_opt.files || submitted_at[c.request.index()] == 0.0) { ++i; continue; } // not ours
-        if (c.status != IoStatus::Done || c.size != size) {
-            KV_ERROR("sockit2m", "file %llu: status %u size %llu", (unsigned long long)c.user, (u32)c.status, (unsigned long long)c.size);
+        if (c.status != IoStatus::Done || c.bytes.size != size) {
+            KV_ERROR("sockit2m", "file %llu: status %u size %llu", (unsigned long long)c.user, (u32)c.status, (unsigned long long)c.bytes.size);
             failed = true; ++g_errors;
         } else {
-            const u8* d = (const u8*)c.data;
+            const u8* d = (const u8*)c.bytes.data;
             u32 stream = (u32)c.user;
             for (usize off = 0; off < size; off += 4093) if (d[off] != pattern(stream, off)) { ++g_errors; failed = true; break; }
             if (d[size - 1] != pattern(stream, size - 1)) { ++g_errors; failed = true; }
@@ -125,7 +125,7 @@ void FsJob::reap() {
         f64 lat = now - submitted_at[c.request.index()];
         lat_sum += lat; if (lat > lat_max) lat_max = lat;
         submitted_at[c.request.index()] = 0.0;
-        if (c.data) free_in(alloc ? alloc : mem_general(), c.data, c.size ? c.size : 1);
+        c.bytes.free();
         q->reap(c.request);
         ++completed; --in_flight;
         cs = q->completions();

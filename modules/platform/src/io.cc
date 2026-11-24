@@ -85,39 +85,47 @@ void complete_stat(IoQueue& q, Handle h, IoEntry& e, IoCompletion& out, i32 err,
     ++q.stats_done;
 }
 
-// What a finished read delivers: a deflated pack entry inflated into a buffer of its own
-// size, and the CRC-32 checked where the entry asks. A failure frees the data and turns
-// the completion Failed.
+// What a finished read delivers, as io_read_file would: the bytes in an IoBytes, a NUL after
+// them, the allocator they came from with them. Every read buffer is its size and one
+// more for that NUL. A deflated pack entry is inflated into a buffer of its own size, and
+// the CRC-32 checked where the entry asks. A failure frees the data and turns the
+// completion Failed.
 void deliver(IoQueue& q, IoEntry& e, IoCompletion& c) {
     if (c.status != IoStatus::Done || e.write) return;
     Allocator* a = entry_alloc(e);
-    if (e.ranged && !e.clip && c.size != e.length) { // the file ended inside the pack entry
-        KV_WARN("io", "'%s': %llu of %llu bytes", e.path, (unsigned long long)c.size, (unsigned long long)e.length);
-        free_in(a, c.data, c.size ? c.size : 1);
-        c.data = nullptr; c.size = 0; c.status = IoStatus::Failed; c.error = EIO;
+    IoBytes& b = c.bytes;
+    b.alloc = a;
+    auto fail = [&](i32 err) {
+        free_in(a, b.data, b.size + 1);
+        b = IoBytes{};
+        c.status = IoStatus::Failed; c.error = err;
         e.status = IoStatus::Failed; --q.reads_done; ++q.reads_failed;
+    };
+    if (e.ranged && !e.clip && b.size != e.length) { // the file ended inside the pack entry
+        KV_WARN("io", "'%s': %llu of %llu bytes", e.path, (unsigned long long)b.size, (unsigned long long)e.length);
+        fail(EIO);
         return;
     }
     if (e.ranged && e.method == ZipDeflate) {
-        void* out = alloc_in(a, e.unpacked ? e.unpacked : 1);
-        InflateOut r = out ? inflate_raw(c.data, c.size, out, e.unpacked) : InflateOut{};
-        free_in(a, c.data, c.size ? c.size : 1);
+        u8* out = (u8*)alloc_in(a, e.unpacked + 1);
+        InflateOut r = out ? inflate_raw(b.data, b.size, out, e.unpacked) : InflateOut{};
         if (!out || r.result != InflateResult::Ok || r.produced != e.unpacked) {
             KV_WARN("io", "'%s': %s", e.path, out ? inflate_result_name(r.result) : "out of memory");
-            free_in(a, out, e.unpacked ? e.unpacked : 1);
-            c.data = nullptr; c.size = 0; c.status = IoStatus::Failed; c.error = EILSEQ;
-            e.status = IoStatus::Failed; --q.reads_done; ++q.reads_failed;
+            free_in(a, out, e.unpacked + 1);
+            fail(EILSEQ);
             return;
         }
-        c.data = out; c.size = e.unpacked;
+        free_in(a, b.data, b.size + 1);
+        b.data = out; b.size = e.unpacked;
         ++q.inflated;
     }
-    if (e.check && crc32(0, c.data, c.size) != e.crc) {
+    if (e.check && crc32(0, b.data, b.size) != e.crc) {
         KV_WARN("io", "'%s': CRC-32 mismatch", e.path);
-        free_in(a, c.data, c.size ? c.size : 1);
-        c.data = nullptr; c.size = 0; c.status = IoStatus::Failed; c.error = EILSEQ;
-        e.status = IoStatus::Failed; --q.reads_done; ++q.reads_failed; ++q.crc_failures;
+        fail(EILSEQ);
+        ++q.crc_failures;
+        return;
     }
+    b.data[b.size] = 0;
 }
 
 // A write's copy goes once the write is over, whatever happened to it.
@@ -145,7 +153,7 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
 
     if (e->stat) {
         IoStat st;
-        i32 err = io_stat_now(entry_file(*e), &st);
+        i32 err = io_stat_errno(entry_file(*e), &st);
         complete_stat(q, h, *e, out, err, st);
         return;
     }
@@ -162,9 +170,9 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
         }
         os_file_close(f);
         if (put != e->size) { complete_failed(q, h, *e, out, err ? err : EIO); drop_write_copy(*e); return; }
-        out.status = IoStatus::Done;
-        out.size   = e->size;
-        e->status  = IoStatus::Done;
+        out.status  = IoStatus::Done;
+        out.written = e->size;
+        e->status   = IoStatus::Done;
         ++q.writes_done;
         drop_write_copy(*e);
         return;
@@ -177,7 +185,8 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
         if (!fd.is_open()) { complete_failed(q, h, *e, out, err); return; }
         if (e->clip && !clip_range(*e, fd, &err)) { os_file_close(fd); complete_failed(q, h, *e, out, err); return; }
         Allocator* a = entry_alloc(*e);
-        u8* data = (u8*)alloc_in(a, e->length ? e->length : 1);
+        usize room = e->length + 1; // as allocated: a file that shrank leaves length less
+        u8* data = (u8*)alloc_in(a, room);
         usize got = 0;
         while (data && got < e->length) {
             i64 n = os_file_read_at(fd, data + got, e->length - got, e->offset + got, &err);
@@ -186,8 +195,8 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
         }
         if (!e->fd_borrowed) os_file_close(fd);
         if (data && e->clip && got < e->length && !err) e->length = got; // the file shrank since it was sized: what is there
-        if (!data || got != e->length) { free_in(a, data, e->length ? e->length : 1); complete_failed(q, h, *e, out, data ? (err ? err : EIO) : ENOMEM); return; }
-        out.status = IoStatus::Done; out.data = data; out.size = got;
+        if (!data || got != e->length) { free_in(a, data, room); complete_failed(q, h, *e, out, data ? (err ? err : EIO) : ENOMEM); return; }
+        out.status = IoStatus::Done; out.bytes.data = data; out.bytes.size = got;
         e->status = IoStatus::Done;
         ++q.reads_done;
         deliver(q, *e, out);
@@ -202,7 +211,7 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
     usize len = (usize)size;
 
     Allocator* a = entry_alloc(*e);
-    u8* data = (u8*)alloc_in(a, len ? len : 1);
+    u8* data = (u8*)alloc_in(a, len + 1);
     usize got = 0;
     while (data && got < len) {
         i64 n = os_file_read_at(f, data + got, len - got, got, &err);
@@ -211,15 +220,16 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
     }
     os_file_close(f);
     if (!data || got != len) {
-        free_in(a, data, len ? len : 1);
+        free_in(a, data, len + 1);
         complete_failed(q, h, *e, out, EIO);
         return;
     }
     out.status = IoStatus::Done;
-    out.data   = data;
-    out.size   = len;
+    out.bytes.data = data;
+    out.bytes.size = len;
     e->status  = IoStatus::Done;
     ++q.reads_done;
+    deliver(q, *e, out);
 }
 
 // ---- the ring backend --------------------------------------------------------------------------
@@ -252,7 +262,7 @@ bool ring_open(IoQueue& q, Handle h, IoEntry& e) {
 // Stage two: the buffer and the first read, or the first write of the copy.
 bool ring_start(IoQueue& q, Handle h, IoEntry& e) {
     if (!e.write) {
-        e.buf = (u8*)alloc_in(entry_alloc(e), e.size ? e.size : 1);
+        e.buf = (u8*)alloc_in(entry_alloc(e), e.size + 1); // and one for the NUL
         if (!e.buf) { os_file_close(e.fd); e.fd = KHandle{}; IoCompletion c{}; complete_failed(q, h, e, c, ENOMEM); q.completed.push(c); return false; }
     }
     e.in_flight = true;
@@ -288,12 +298,12 @@ void ring_finish(IoQueue& q, Handle h, IoEntry& e, IoStatus status, i32 err, usi
     IoCompletion c{};
     c.request = h; c.user = e.user; c.status = status; c.error = err;
     if (e.write) {
-        c.size = size;
+        c.written = size;
         if (status == IoStatus::Done) ++q.writes_done; else if (status == IoStatus::Failed) ++q.writes_failed;
         drop_write_copy(e);
     }
-    else if (status == IoStatus::Done) { c.data = e.buf; c.size = size; ++q.reads_done; e.status = status; deliver(q, e, c); status = e.status; }
-    else { free_in(entry_alloc(e), e.buf, e.size ? e.size : 1); if (status == IoStatus::Failed) ++q.reads_failed; }
+    else if (status == IoStatus::Done) { c.bytes.data = e.buf; c.bytes.size = size; ++q.reads_done; e.status = status; deliver(q, e, c); status = e.status; }
+    else { free_in(entry_alloc(e), e.buf, e.size + 1); if (status == IoStatus::Failed) ++q.reads_failed; }
     if (e.fd.is_open() && !e.fd_borrowed) os_file_close(e.fd);
     q.bytes_in_flight -= e.size;
     e.fd = KHandle{}; e.buf = nullptr; e.in_flight = false; e.status = status;
@@ -351,8 +361,8 @@ usize admit(IoQueue& q, usize budget, bool idle, bool* capped) {
             IoCompletion c{};
             perform_sync(q, h, c);
             q.completed.push(c);
-            submitted += c.size;
-            q.bytes_submitted += c.size;
+            submitted += c.bytes.size + c.written;
+            q.bytes_submitted += c.bytes.size + c.written;
             if (budget && submitted >= budget) { ++taken; break; }
             continue;
         }
@@ -386,7 +396,7 @@ usize admit(IoQueue& q, usize budget, bool idle, bool* capped) {
 
 } // namespace
 
-i32 io_stat_now(const char* path, IoStat* out) {
+i32 io_stat_errno(const char* path, IoStat* out) {
     *out = IoStat{};
     OsStat st;
     i32 err = 0;
@@ -435,9 +445,10 @@ void IoQueue::free() {
     // Completions nobody reaped: free their data with the allocator they named.
     for (const IoCompletion& c : completed) {
         IoEntry* e = entries.get(c.request);
-        if (c.data) {
+        if (c.bytes.data) {
             KV_WARN("io", "completion for '%s' was never reaped", e ? e->path : "?");
-            free_in(e && e->alloc ? e->alloc : mem_general(), c.data, c.size ? c.size : 1);
+            IoBytes b = c.bytes;
+            b.free();
         }
     }
     for (u32 i = 0; i < entries.len; ++i) {
@@ -723,7 +734,7 @@ bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc, i32* err)
         char base[KV_PLATFORM_PATH_MAX];
         if (!os_base_path(base, sizeof base)) base[0] = 0;
         format(path, sizeof path, "%s%s", base, name);
-        return io_read_now(path, out, alloc, err);
+        return io_read_file(path, out, alloc, err);
     }
     IoMount* m = bundle_mount();
     char norm[KV_PACK_PATH_MAX], full[sizeof m->prefix + KV_PACK_PATH_MAX];
@@ -988,7 +999,7 @@ bool copy_piece(void* user, const u8* data, usize n) {
 }
 } // namespace
 
-bool io_copy_now(const char* from, const char* to, u8 hash[32], i32* err) {
+bool io_copy_file(const char* from, const char* to, u8 hash[32], i32* err) {
     i32 e = 0;
     KHandle out = os_file_open(to, true, &e);
     if (!out.is_open()) { if (err) *err = e; return false; }
@@ -1121,6 +1132,20 @@ bool IoQueue::cancel(Handle request) {
     return true;
 }
 
+bool IoQueue::take(Handle request, IoCompletion* out) {
+    for (u32 i = 0; i < completed.len; ++i) {
+        if (completed[i].request != request) continue;
+        if (out) *out = completed[i];
+        else if (completed[i].bytes.data) completed[i].bytes.free(); // nobody to own it
+        completed[i] = completed[completed.len - 1]; // order among the rest does not matter
+        --completed.len;
+        if (IoEntry* e = entries.get(request)) entry_free_path(*e);
+        entries.destroy(request);
+        return true;
+    }
+    return false;
+}
+
 bool IoQueue::reap(Handle request) {
     for (u32 i = 0; i < completed.len; ++i) {
         if (completed[i].request != request) continue;
@@ -1131,6 +1156,11 @@ bool IoQueue::reap(Handle request) {
         return true;
     }
     return false;
+}
+
+bool IoQueue::is_pending(Handle request) const {
+    for (const IoCompletion& c : completed) if (c.request == request) return false;
+    return entries.get(request) != nullptr;
 }
 
 const char* IoQueue::backend_name() const { return io_ring_name(ring); }

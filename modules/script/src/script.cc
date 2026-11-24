@@ -21,7 +21,7 @@ int fs_read(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
     IoBytes file;
     i32 err = 0;
-    if (!io_read_now(path, &file, nullptr, &err)) {
+    if (!io_read_file(path, &file, nullptr, &err)) {
         lua_pushnil(L);
         lua_pushfstring(L, "cannot read '%s' (errno %d)", path, (int)err);
         return 2;
@@ -35,7 +35,7 @@ int fs_write(lua_State* L) {
     usize n = 0;
     const char* data = luaL_checklstring(L, 2, &n);
     i32 err = 0;
-    if (!io_write_now(path, data, n, &err)) {
+    if (!io_write_file(path, data, n, &err)) {
         lua_pushnil(L);
         lua_pushfstring(L, "cannot write '%s' (errno %d)", path, (int)err);
         return 2;
@@ -112,7 +112,7 @@ int zip_open(lua_State* L) {
     memset((void*)z, 0, sizeof *z);
     luaL_setmetatable(L, kZipMeta); // from here the collector frees what is opened
     i32 err = 0;
-    if (!io_read_now(path, &z->file, nullptr, &err)) return luaL_error(L, "zip: cannot read '%s' (errno %d)", path, (int)err);
+    if (!io_read_file(path, &z->file, nullptr, &err)) return luaL_error(L, "zip: cannot read '%s' (errno %d)", path, (int)err);
     z->open = true;
     const char* why = nullptr;
     ZipTail tail;

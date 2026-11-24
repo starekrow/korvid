@@ -72,7 +72,7 @@ void test_sound(kv::TestCtx& c) {
     const char* candidates[] = {"/usr/share/sounds/freedesktop/stereo/bell.oga", "/usr/share/sounds/freedesktop/stereo/message.oga"};
     for (const char* path : candidates) {
         IoBytes file;
-        if (!io_read_now(path, &file)) continue;
+        if (!io_read_file(path, &file)) continue;
         SoundAsset o{};
         bool ok = sound_decode(file.data, file.size, mem_general(), o, &why);
         KV_CHECK(c, ok && o.rate >= 8000 && o.channels >= 1 && o.frames > 1000);

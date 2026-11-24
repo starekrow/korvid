@@ -41,7 +41,7 @@ void fail_asset(Engine& e, AssetRenderState& s, Handle h, TextureAsset& t, Asset
 
 // A read of the file has landed (reaped): the first load's, or a reload's. A reload that
 // cannot be used keeps the texture as it was; one whose bytes are the same does nothing.
-void land(Engine& e, AssetRenderState& s, Renderer* r, Handle h, TextureAsset& t, const IoCompletion& c) {
+void land(Engine& e, AssetRenderState& s, Renderer* r, Handle h, TextureAsset& t, IoCompletion c) {
     bool re = t.reread;
     t.reread = false;
     if (c.status != IoStatus::Done) {
@@ -50,12 +50,12 @@ void land(Engine& e, AssetRenderState& s, Renderer* r, Handle h, TextureAsset& t
         else fail_asset(e, s, h, t, err, nullptr);
         return;
     }
-    u64 hash = hash_bytes(c.data, c.size);
-    if (re && hash == t.hash) { free_in(s.general, c.data, c.size); asset_reload_unchanged(t.path); return; }
+    u64 hash = hash_bytes(c.bytes.data, c.bytes.size);
+    if (re && hash == t.hash) { c.bytes.free(); asset_reload_unchanged(t.path); return; }
     PngImage img;
     const char* why = nullptr;
-    bool ok = png_decode(c.data, c.size, s.general, img, &why);
-    free_in(s.general, c.data, c.size);
+    bool ok = png_decode(c.bytes.data, c.bytes.size, s.general, img, &why);
+    c.bytes.free();
     if (!ok) {
         if (re) asset_reload_failed(e, h, t.path, AssetError::Decode, why);
         else fail_asset(e, s, h, t, AssetError::Decode, why);

@@ -176,7 +176,7 @@ void test_lua(kv::TestCtx& c) {
     io_make_dirs(dir);
     format(path, sizeof path, "%s/screen.lua", dir);
     const char* script = "return col { text 'from a file' }";
-    KV_CHECK(c, io_write_now(path, script, strlen(script)));
+    KV_CHECK(c, io_write_file(path, script, strlen(script)));
     Name file = krome_open(e, "kt/screen.lua");
     for (u32 i = 0; i < 2000 && !krome_ready(e, file); ++i) { frames(e, 1); time_sleep(0.001); }
     KV_CHECK(c, krome_ready(e, file) && strcmp(krome_tree(e, file)->text(1), "from a file") == 0);

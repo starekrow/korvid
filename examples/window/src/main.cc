@@ -155,15 +155,11 @@ int run(int argc, char** argv) {
         }
         if (!asset_read.is_null()) {
             IoQueue* io = platform_io(e);
-            for (const IoCompletion& c : io->completions()) {
-                if (c.request != asset_read) continue;
-                IoCompletion done = c;
-                io->reap(asset_read);
+            if (IoCompletion done; io->take(asset_read, &done)) {
                 asset_read = Handle{};
-                if (done.status == IoStatus::Done) KV_INFO("window", "asset '%s': %llu bytes, starting \"%.24s\"", asset, (unsigned long long)done.size, done.size ? (const char*)done.data : "");
+                if (done.status == IoStatus::Done) KV_INFO("window", "asset '%s': %llu bytes, starting \"%.24s\"", asset, (unsigned long long)done.bytes.size, done.bytes.size ? (const char*)done.bytes.data : "");
                 else KV_ERROR("window", "asset '%s': %s", asset, strerror(done.error));
-                if (done.data) free_in(mem_general(), done.data, done.size ? done.size : 1);
-                break;
+                done.bytes.free();
             }
         }
         frame(l);

@@ -96,7 +96,7 @@ void test_edit(kv::TestCtx& c) {
     format(dst, sizeof dst, "%s/dejavu", dir);
     io_make_dirs(dst);
     format(dst, sizeof dst, "%s/dejavu/DejaVuSans.ttf", dir);
-    KV_CHECK(c, io_copy_now(src, dst));
+    KV_CHECK(c, io_copy_file(src, dst));
     const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &asset_module, &krome_module};
     Engine e;
     KV_CHECK(c, engine_init(e, list));

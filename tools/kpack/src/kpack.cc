@@ -57,7 +57,7 @@ void say(const char* fmt, ...) {
 }
 
 void reset(KpackState& s) {
-    for (Item& it : s.items) free_in(s.general, it.data, it.size ? it.size : 1);
+    for (Item& it : s.items) free_in(s.general, it.data, it.size + 1);
     s.items.clear();
     s.archive.free();
     s.op = Op::None; s.stage = Stage::Idle;
@@ -223,7 +223,7 @@ void on_read(Engine& e, KpackState& s, Item& it) {
     IoQueue& io = *platform_io(e);
     if (s.op == Op::Verify) {
         if (crc32(0, it.data, it.size) != it.crc) { KV_ERROR("kpack", "%s: CRC-32 mismatch", it.name); ++s.failures; }
-        free_in(s.general, it.data, it.size ? it.size : 1);
+        free_in(s.general, it.data, it.size + 1);
         it.data = nullptr;
     } else if (s.op == Op::Extract) {
         char path[1024];
@@ -233,7 +233,7 @@ void on_read(Engine& e, KpackState& s, Item& it) {
         w.path = path; w.data = it.data; w.size = it.size; w.alloc = s.general; w.user = 2;
         if (io.write_file(w).is_null()) { KV_ERROR("kpack", "cannot write '%s'", path); ++s.failures; }
         else ++s.writes_out;
-        free_in(s.general, it.data, it.size ? it.size : 1); // the write took a copy
+        free_in(s.general, it.data, it.size + 1); // the write took a copy
         it.data = nullptr;
     }
 }
@@ -262,12 +262,12 @@ void kpack_pump(TickContext& ctx) {
             io->reap(done.request);
             if (done.status != IoStatus::Done) { KV_ERROR("kpack", "cannot read '%s'", s.list); finish(e, s, 1); return; }
             // Whitespace-separated paths, as Ninja writes a response file.
-            char* text = (char*)done.data;
+            char* text = (char*)done.bytes.data;
             bool ok = true;
-            for (usize at = 0; at < done.size && ok;) {
-                while (at < done.size && (text[at] == ' ' || text[at] == '\n' || text[at] == '\t' || text[at] == '\r')) ++at;
+            for (usize at = 0; at < done.bytes.size && ok;) {
+                while (at < done.bytes.size && (text[at] == ' ' || text[at] == '\n' || text[at] == '\t' || text[at] == '\r')) ++at;
                 usize start = at;
-                while (at < done.size && !(text[at] == ' ' || text[at] == '\n' || text[at] == '\t' || text[at] == '\r')) ++at;
+                while (at < done.bytes.size && !(text[at] == ' ' || text[at] == '\n' || text[at] == '\t' || text[at] == '\r')) ++at;
                 if (at == start) break;
                 char path[512];
                 usize n = at - start < sizeof path - 1 ? at - start : sizeof path - 1;
@@ -275,7 +275,7 @@ void kpack_pump(TickContext& ctx) {
                 path[n] = 0;
                 ok = add_file(s, path);
             }
-            free_in(s.general, done.data, done.size ? done.size : 1);
+            done.bytes.free();
             if (!ok) { finish(e, s, 1); return; }
             s.stage = Stage::Read;
             break;
@@ -308,9 +308,9 @@ void kpack_pump(TickContext& ctx) {
             it->done = true;
             ++s.completed;
             if (c.status != IoStatus::Done) { KV_ERROR("kpack", "cannot read '%s' (errno %d)", it->path, c.error); it->failed = true; ++s.failures; continue; }
-            it->data = (u8*)c.data;
-            it->size = c.size;
-            s.bytes += c.size;
+            it->data = c.bytes.data;
+            it->size = c.bytes.size;
+            s.bytes += c.bytes.size;
             on_read(e, s, *it);
         }
         if (s.completed < s.submitted) return;

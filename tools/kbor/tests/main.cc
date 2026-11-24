@@ -30,7 +30,7 @@ const char* path(const char* rel) {
     return out;
 }
 
-bool put(const char* rel, const void* data, usize n) { return io_write_now(path(rel), data, n); }
+bool put(const char* rel, const void* data, usize n) { return io_write_file(path(rel), data, n); }
 bool put(const char* rel, const char* text) { return put(rel, text, strlen(text)); }
 
 // A file's bytes, valid until the next read.
@@ -38,7 +38,7 @@ Array<u8> g_file;
 bool read(const char* rel) {
     IoBytes b;
     g_file.len = 0;
-    if (!io_read_now(path(rel), &b)) return false;
+    if (!io_read_file(path(rel), &b)) return false;
     if (b.size) memcpy(g_file.push_n((u32)b.size), b.data, b.size);
     b.free();
     return true;
@@ -144,10 +144,10 @@ void test_normalize(TestCtx& c) {
     KV_CHECK(c, !io_is_file(path("stock.kbor.kbor-tmp")));
     // Already normalized: nothing to write.
     IoStat before{}, after{};
-    KV_CHECK(c, io_stat(path("stock.kbor"), &before));
+    KV_CHECK(c, io_stat_file(path("stock.kbor"), &before));
     KV_CHECK(c, kbor("normalize", path("stock.kbor")) == 0 && has(g_out.data, "already normalized"));
     // Field by field: the struct's padding is not part of what a stat says.
-    KV_CHECK(c, io_stat(path("stock.kbor"), &after) && after.size == before.size && after.mtime_ns == before.mtime_ns);
+    KV_CHECK(c, io_stat_file(path("stock.kbor"), &after) && after.size == before.size && after.mtime_ns == before.mtime_ns);
 }
 
 void test_failures(TestCtx& c) {

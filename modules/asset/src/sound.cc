@@ -195,8 +195,8 @@ void asset_sounds_pump(TickContext& ctx) {
             continue;
         }
         const char* why = nullptr;
-        bool ok = sound_decode(c.data, c.size, s.general, *snd, &why);
-        free_in(s.general, c.data, c.size);
+        bool ok = sound_decode(c.bytes.data, c.bytes.size, s.general, *snd, &why);
+        c.bytes.free();
         if (!ok) { fail_sound(e, s, h, *snd, AssetError::Decode, why); continue; }
         snd->state = AssetState::Ready;
         ++s.sounds_loaded;

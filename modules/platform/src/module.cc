@@ -266,7 +266,7 @@ bool platform_assets_dir(char* out, u32 cap) {
     if (os_exe_name(exe, sizeof exe)) {
         format(path, sizeof path, "%s%s.assets", base, exe);
         IoBytes named;
-        if (os_path_kind(path) == OsPathKind::File && io_read_now(path, &named)) {
+        if (os_path_kind(path) == OsPathKind::File && io_read_file(path, &named)) {
             usize n = 0;
             while (n < named.size && n + 1 < cap && named.data[n] != '\n' && named.data[n] != '\r') { out[n] = (char)named.data[n]; ++n; }
             out[n] = 0;

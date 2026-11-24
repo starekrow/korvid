@@ -53,7 +53,7 @@ char g_dir[400];
 bool write_file(const char* rel, const void* data, usize size) {
     char p[700];
     format(p, sizeof p, "%s/%s", g_dir, rel);
-    return io_write_now(p, data, size);
+    return io_write_file(p, data, size);
 }
 bool write_text(const char* rel, const char* text) { return write_file(rel, text, strlen(text)); }
 
@@ -104,7 +104,7 @@ void test_asset_render(TestCtx& c) {
     repo_root(root, sizeof root);
     format(from, sizeof from, "%s/modules/dejavu/assets/DejaVuSans.ttf", root);
     format(to, sizeof to, "%s/DejaVuSans.ttf", g_dir);
-    KV_CHECK(c, io_copy_now(from, to));
+    KV_CHECK(c, io_copy_file(from, to));
 
     const ModuleDesc* const list[] = {&platform_module, &cli_module, &renderer_cpu_module, &asset_module, &asset_render_module, &k_listener};
     Engine e;

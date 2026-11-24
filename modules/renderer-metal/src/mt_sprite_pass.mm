@@ -36,7 +36,7 @@ bool rb_check_bindings(Renderer* r, const char* lib, const MtExpected* want, u32
     if (!kv::io_is_file(path)) { KV_WARN("metal", "no reflection for '%s' (%s): bindings unchecked", lib, path); return true; }
     MemScope scope; // the text and the document, both in scratch, go with it
     kv::IoBytes file;
-    bool read = kv::io_read_now(path, &file, mem_scratch()) && file.size > 0;
+    bool read = kv::io_read_file(path, &file, mem_scratch()) && file.size > 0;
     const char* text = (const char*)file.data;
     usize len = file.size;
     JsonDoc doc;

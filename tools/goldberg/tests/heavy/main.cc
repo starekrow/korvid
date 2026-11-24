@@ -115,12 +115,12 @@ int xform(int argc, char** argv) {
     bool hash = strcmp(argv[2], "hash") == 0;
     IoBytes in;
     i32 err = 0;
-    if (!io_read_now(argv[3], &in, nullptr, &err)) { fprintf(stderr, "cannot read %s (errno %d)\n", argv[3], err); return 1; }
+    if (!io_read_file(argv[3], &in, nullptr, &err)) { fprintf(stderr, "cannot read %s (errno %d)\n", argv[3], err); return 1; }
     f64 t1 = time_now();
     u8* out = (u8*)mem_alloc(in.size ? in.size : 1);
     transform(hash, in.data, out, in.size);
     f64 t2 = time_now();
-    bool ok = io_write_now(argv[4], out, in.size, &err);
+    bool ok = io_write_file(argv[4], out, in.size, &err);
     f64 t3 = time_now();
     mem_free(out);
     usize size = in.size;
@@ -132,7 +132,7 @@ int xform(int argc, char** argv) {
     if (char* dot = strchr(stem, '.')) *dot = 0;
     snprintf(rec, sizeof rec, "%s/%s", argv[5], stem);
     int len = snprintf(line, sizeof line, "%llu %.9f %.9f %.9f %.9f %.9f\n", (unsigned long long)size, t0, t1, t2, t3, cpu);
-    io_write_now(rec, line, (usize)len);
+    io_write_file(rec, line, (usize)len);
     return 0;
 }
 
@@ -422,7 +422,7 @@ void evict_job(u32, u32 begin, u32 end, void* user) {
     }
 }
 
-bool put_text(const char* path, const char* text) { return io_write_now(path, text, strlen(text)); }
+bool put_text(const char* path, const char* text) { return io_write_file(path, text, strlen(text)); }
 
 // A string as JSON writes it, without the quotes: a Windows path's backslashes doubled.
 void json_text(const char* s, char* out, usize cap) {
@@ -519,7 +519,7 @@ bool output_is(const Bench& b, const File& f) {
     char path[1200];
     output_path(b, f, path, sizeof path);
     IoBytes got;
-    if (!io_read_now(path, &got)) return false;
+    if (!io_read_file(path, &got)) return false;
     bool same = got.size == f.size;
     if (same) {
         u8* src = (u8*)mem_alloc(f.size ? f.size : 1);
@@ -594,7 +594,7 @@ u32 read_times(Bench& b, bool only_touched) {
         snprintf(path, sizeof path, "%s/c%u-%06u", b.times, f.cls + 1, f.index);
         IoBytes bytes;
         f.timed = false;
-        if (!io_read_now(path, &bytes)) continue;
+        if (!io_read_file(path, &bytes)) continue;
         unsigned long long size = 0;
         if (sscanf((const char*)bytes.data, "%llu %lf %lf %lf %lf %lf", &size, &f.t0, &f.t1, &f.t2, &f.t3, &f.cpu) == 6) { f.timed = true; ++n; }
         bytes.free();
@@ -886,7 +886,7 @@ int bench(Options& o) {
     {
         char fresh[sizeof b.self];
         snprintf(fresh, sizeof fresh, "%s/xform%s", b.o.dir, kExe);
-        if (!io_copy_now(b.self, fresh)) { fprintf(stderr, "goldberg_heavy: cannot copy myself to %s\n", fresh); return 1; }
+        if (!io_copy_file(b.self, fresh)) { fprintf(stderr, "goldberg_heavy: cannot copy myself to %s\n", fresh); return 1; }
 #if !defined(_WIN32)
         chmod(fresh, 0755);
 #endif

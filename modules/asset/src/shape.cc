@@ -37,7 +37,7 @@ void fail_shape(Engine& e, AssetState_& s, Handle h, ShapeAsset& b, AssetError e
 
 // A read has landed (reaped): the first load's, or a reload's, which is read into a shape of
 // its own and swapped in only when it reads, so a bad file keeps the shape that was drawn.
-void land(Engine& e, AssetState_& s, Handle h, ShapeAsset& b, const IoCompletion& c) {
+void land(Engine& e, AssetState_& s, Handle h, ShapeAsset& b, IoCompletion c) {
     bool re = b.reread;
     b.reread = false;
     if (c.status != IoStatus::Done) {
@@ -46,14 +46,14 @@ void land(Engine& e, AssetState_& s, Handle h, ShapeAsset& b, const IoCompletion
         else fail_shape(e, s, h, b, err);
         return;
     }
-    u64 hash = hash_bytes(c.data, c.size);
-    if (re && hash == b.hash) { free_in(s.general, c.data, c.size ? c.size : 1); asset_reload_unchanged(b.path); return; }
+    u64 hash = hash_bytes(c.bytes.data, c.bytes.size);
+    if (re && hash == b.hash) { c.bytes.free(); asset_reload_unchanged(b.path); return; }
     // The file read into a shape; the read's buffer goes back at once.
     PathShape fresh;
     fresh.init(s.general);
     const char* why = "";
-    bool ok = patherizer_read_kshape(c.data, c.size, fresh, &why);
-    free_in(s.general, c.data, c.size ? c.size : 1);
+    bool ok = patherizer_read_kshape(c.bytes.data, c.bytes.size, fresh, &why);
+    c.bytes.free();
     if (!ok) {
         fresh.free();
         if (re) { asset_reload_failed(e, h, b.path, AssetError::Decode, why); return; }

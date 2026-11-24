@@ -73,7 +73,7 @@ Then hashing, copying and converter runs became tasks on an `IoQueue` of goldber
 (`IoQueue::run_task`, `modules/platform/src/io_task.cc`): worker threads in lanes with
 limits (runs 8, hashes one a core, copies half that), a worker taking the next task the
 moment it is free instead of at the next tick. Hashes and copies stream (`io_read_each`,
-`io_copy_now`) instead of reading whole files, and are no longer a batch the tick waits
+`io_copy_file`) instead of reading whole files, and are no longer a batch the tick waits
 for. A run's task spawns, drains and waits for its converter, moves what it wrote and
 hashes it, and the tick gets one `file-made` event an output instead of a change, a hash
 request and its answer. The first try was slower: `io_read_each` took a 1 MB buffer for

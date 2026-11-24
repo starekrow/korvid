@@ -342,8 +342,8 @@ void picture_pump(TickContext& ctx) {
             p->done = true;
             ++s.completed;
             if (c.status != IoStatus::Done) { KV_ERROR("picture", "cannot read '%s' (errno %d)", p->path, c.error); continue; }
-            p->ok = decode(s, *p, (const u8*)c.data, c.size);
-            free_in(s.general, c.data, c.size ? c.size : 1);
+            p->ok = decode(s, *p, (const u8*)c.bytes.data, c.bytes.size);
+            c.bytes.free();
         }
         if (s.completed < s.submitted) return;
         work(e, s);

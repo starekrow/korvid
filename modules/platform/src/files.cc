@@ -12,7 +12,7 @@ void IoBytes::free() {
     size = 0;
 }
 
-bool io_read_now(const char* path, IoBytes* out, Allocator* alloc, i32* err) {
+bool io_read_file(const char* path, IoBytes* out, Allocator* alloc, i32* err) {
     *out = IoBytes{};
     i32 e = 0;
     KHandle f = os_file_open(path, false, &e);
@@ -37,7 +37,7 @@ bool io_read_now(const char* path, IoBytes* out, Allocator* alloc, i32* err) {
     return true;
 }
 
-bool io_write_now(const char* path, const void* data, usize size, i32* err) {
+bool io_write_file(const char* path, const void* data, usize size, i32* err) {
     IoFileWriter w;
     bool ok = w.open(path) && w.write(data, size);
     ok = w.close() && ok;
@@ -80,7 +80,7 @@ bool IoFileWriter::close() {
     return false;
 }
 
-bool io_stat(const char* path, IoStat* out, i32* err) {
+bool io_stat_file(const char* path, IoStat* out, i32* err) {
     OsStat st;
     *out = IoStat{};
     if (!os_path_stat(path, &st, err)) return false;

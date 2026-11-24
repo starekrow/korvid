@@ -76,7 +76,7 @@ KV_MODULE_DEFINE(k_lt) = {.name = "lt", .ktables = k_ktables, .systems = k_syste
 bool write(const char* dir, const char* name, const char* text) {
     char path[600];
     format(path, sizeof path, "%s/%s", dir, name);
-    return io_write_now(path, text, strlen(text));
+    return io_write_file(path, text, strlen(text));
 }
 
 struct Lines { u32 n = 0; char text[16][128]; };

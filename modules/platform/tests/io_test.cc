@@ -50,13 +50,13 @@ void test_backend(kv::TestCtx& c, const Files& f, kv::IoBackend backend) {
     const IoCompletion* cm = by_user(q, 3);
     const IoCompletion* cc = by_user(q, 4);
     const IoCompletion* ca = by_user(q, 1);
-    KV_CHECK(c, cb && cb->status == IoStatus::Done && cb->size == 0);
+    KV_CHECK(c, cb && cb->status == IoStatus::Done && cb->bytes.size == 0);
     KV_CHECK(c, cm && cm->status == IoStatus::Failed && cm->error != 0);
-    KV_CHECK(c, cc && cc->status == IoStatus::Cancelled && cc->data == nullptr);
-    KV_CHECK(c, ca && ca->status == IoStatus::Done && ca->size == 8 && memcmp(ca->data, "hello io", 8) == 0);
+    KV_CHECK(c, cc && cc->status == IoStatus::Cancelled && cc->bytes.data == nullptr);
+    KV_CHECK(c, ca && ca->status == IoStatus::Done && ca->bytes.size == 8 && memcmp(ca->bytes.data, "hello io", 8) == 0);
     KV_CHECK(c, q.reads_done == 2 && q.reads_failed == 1);
-    mem_free(cb->data);
-    mem_free(ca->data);
+    mem_free(cb->bytes.data);
+    mem_free(ca->bytes.data);
 
     // Completions persist across pumps until reaped; reaping retires the request.
     q.pump();
@@ -82,7 +82,7 @@ void test_backend(kv::TestCtx& c, const Files& f, kv::IoBackend backend) {
     {
         u8* buf = (u8*)mem_alloc(big);
         for (u32 i = 0; i < big; ++i) buf[i] = (u8)(i * 7 + (i >> 8));
-        KV_CHECK(c, io_write_now(big_path, buf, big));
+        KV_CHECK(c, io_write_file(big_path, buf, big));
         mem_free(buf);
     }
     IoRequest rbig; rbig.path = big_path; rbig.user = 5;
@@ -92,14 +92,14 @@ void test_backend(kv::TestCtx& c, const Files& f, kv::IoBackend backend) {
     q.cancel(hcan);           // in flight on the ring, queued nowhere on the sync path (already done)
     KV_CHECK(c, wait_for(q, 2) == 2);
     const IoCompletion* cbig = by_user(q, 5);
-    KV_CHECK(c, cbig && cbig->status == IoStatus::Done && cbig->size == big);
-    bool ok = cbig && cbig->size == big;
-    for (u32 i = 0; ok && i < big; i += 4099) ok = ((const u8*)cbig->data)[i] == (u8)(i * 7 + (i >> 8));
+    KV_CHECK(c, cbig && cbig->status == IoStatus::Done && cbig->bytes.size == big);
+    bool ok = cbig && cbig->bytes.size == big;
+    for (u32 i = 0; ok && i < big; i += 4099) ok = ((const u8*)cbig->bytes.data)[i] == (u8)(i * 7 + (i >> 8));
     KV_CHECK(c, ok);
     const IoCompletion* ccan = by_user(q, 6);
     KV_CHECK(c, ccan && (ccan->status == IoStatus::Cancelled || ccan->status == IoStatus::Done));
-    if (cbig) mem_free(cbig->data);
-    if (ccan && ccan->data) mem_free(ccan->data);
+    if (cbig) mem_free(cbig->bytes.data);
+    if (ccan && ccan->bytes.data) mem_free(ccan->bytes.data);
     KV_CHECK(c, q.reap(hbig) && q.reap(hcan));
     io_remove(big_path);
 
@@ -118,8 +118,8 @@ void test_io(kv::TestCtx& c) {
     format(f.a, sizeof f.a, "%s/a.bin", f.dir);
     format(f.b, sizeof f.b, "%s/b.bin", f.dir);
     format(f.missing, sizeof f.missing, "%s/nope.bin", f.dir);
-    KV_CHECK(c, io_write_now(f.a, "hello io", 8));
-    KV_CHECK(c, io_write_now(f.b, "", 0)); // empty
+    KV_CHECK(c, io_write_file(f.a, "hello io", 8));
+    KV_CHECK(c, io_write_file(f.b, "", 0)); // empty
 
     test_backend(c, f, IoBackend::Sync);
     test_backend(c, f, IoBackend::Auto); // io_uring where the kernel allows it, sync otherwise
@@ -145,7 +145,7 @@ void test_io_budget(kv::TestCtx& c) {
     memset(buf, 0x5A, size);
     for (u32 i = 0; i < 6; ++i) {
         format(paths[i], sizeof paths[i], "%s/f%u.bin", dir, i);
-        KV_CHECK(c, io_write_now(paths[i], buf, size));
+        KV_CHECK(c, io_write_file(paths[i], buf, size));
     }
     mem_free(buf);
 
@@ -174,7 +174,7 @@ void test_io_budget(kv::TestCtx& c) {
         KV_CHECK(c, q.pump_idle(size) == 0);
         for (u32 i = 0; i < 2000 && q.completions().len < 6; ++i) { q.pump(); time_sleep(0.001); }
         KV_CHECK(c, q.completions().len == 6 && q.bytes_submitted == 6 * size && q.idle_bytes == 2 * size);
-        for (const IoCompletion& k : q.completions()) { KV_CHECK(c, k.status == IoStatus::Done && k.size == size); mem_free(k.data); }
+        for (const IoCompletion& k : q.completions()) { KV_CHECK(c, k.status == IoStatus::Done && k.bytes.size == size); mem_free(k.bytes.data); }
         for (u32 i = 0; i < 6; ++i) q.reap(h[i]);
         q.free();
     }
@@ -213,8 +213,8 @@ void test_io_write(kv::TestCtx& c) {
         const IoCompletion* ce = by_user(q, 11);
         const IoCompletion* cb = by_user(q, 12);
         const IoCompletion* cg = by_user(q, 13);
-        KV_CHECK(c, cw && cw->status == IoStatus::Done && cw->size == 11 && cw->data == nullptr);
-        KV_CHECK(c, ce && ce->status == IoStatus::Done && ce->size == 0);
+        KV_CHECK(c, cw && cw->status == IoStatus::Done && cw->written == 11 && cw->bytes.data == nullptr);
+        KV_CHECK(c, ce && ce->status == IoStatus::Done && ce->bytes.size == 0);
         KV_CHECK(c, cb && cb->status == IoStatus::Failed && cb->error == ENOENT);
         KV_CHECK(c, cg && cg->status == IoStatus::Cancelled);
         KV_CHECK(c, q.writes_done == 2 && q.writes_failed == 1);
@@ -226,8 +226,8 @@ void test_io_write(kv::TestCtx& c) {
         const IoCompletion* cr = by_user(q, 20);
         char expect[32];
         format(expect, sizeof expect, "score %u\n", 1200 + pass);
-        KV_CHECK(c, cr && cr->status == IoStatus::Done && cr->size == 11 && memcmp(cr->data, expect, 11) == 0);
-        mem_free(cr->data);
+        KV_CHECK(c, cr && cr->status == IoStatus::Done && cr->bytes.size == 11 && memcmp(cr->bytes.data, expect, 11) == 0);
+        mem_free(cr->bytes.data);
         q.reap(hr);
         KV_CHECK(c, !io_is_file(gone)); // the cancelled write never happened
         q.free();
@@ -246,7 +246,7 @@ void test_io_make_dirs(kv::TestCtx& c) {
     format(path, sizeof path, "%s/a/b", dir);      KV_CHECK(c, io_make_dirs(path) && io_is_dir(path));
     format(path, sizeof path, "%s/a/b/c/d", dir);  KV_CHECK(c, io_make_dirs(path));
     format(path, sizeof path, "%s/a/e/", dir);     KV_CHECK(c, io_make_dirs(path) && io_is_dir(path));
-    format(path, sizeof path, "%s/a/file", dir);   KV_CHECK(c, io_write_now(path, "f", 1));
+    format(path, sizeof path, "%s/a/file", dir);   KV_CHECK(c, io_write_file(path, "f", 1));
     KV_CHECK(c, !io_make_dirs(path));
     format(path, sizeof path, "%s/a/file/under", dir); KV_CHECK(c, !io_make_dirs(path));
     KV_CHECK(c, !io_make_dirs(""));
@@ -266,11 +266,11 @@ void test_io_remove_tree(kv::TestCtx& c) {
     format(path, sizeof path, "%s/empty", dir);      KV_CHECK(c, io_make_dirs(path));
     for (const char* f : files) {
         format(path, sizeof path, "%s/%s", dir, f);
-        KV_CHECK(c, io_write_now(path, f, strlen(f)));
+        KV_CHECK(c, io_write_file(path, f, strlen(f)));
     }
     char kept[400];
     format(kept, sizeof kept, "%s/kept.txt", outside);
-    KV_CHECK(c, io_write_now(kept, "kept", 4));
+    KV_CHECK(c, io_write_file(kept, "kept", 4));
 #if !defined(_WIN32)
     format(path, sizeof path, "%s/sub/link", dir);
     KV_CHECK(c, symlink(outside, path) == 0);
@@ -287,33 +287,33 @@ void test_io_remove_tree(kv::TestCtx& c) {
 // written in pieces; what a missing file and a directory give.
 void test_io_now(kv::TestCtx& c) {
     using namespace kv;
-    c.begin("io_read_now, io_write_now, IoFileWriter");
+    c.begin("io_read_file, io_write_file, IoFileWriter");
     char dir[200], path[300], missing[300];
     KV_CHECK(c, io_make_temp_dir("korvid-now", dir, sizeof dir));
     format(path, sizeof path, "%s/a.bin", dir);
     format(missing, sizeof missing, "%s/none", dir);
     static u8 bytes[70000];
     for (u32 i = 0; i < sizeof bytes; ++i) bytes[i] = (u8)(i * 7 + 1);
-    KV_CHECK(c, io_write_now(path, bytes, sizeof bytes) && io_is_file(path) && !io_is_dir(path));
+    KV_CHECK(c, io_write_file(path, bytes, sizeof bytes) && io_is_file(path) && !io_is_dir(path));
     IoBytes got;
-    KV_CHECK(c, io_read_now(path, &got) && got.size == sizeof bytes && memcmp(got.data, bytes, sizeof bytes) == 0 && got.data[got.size] == 0);
+    KV_CHECK(c, io_read_file(path, &got) && got.size == sizeof bytes && memcmp(got.data, bytes, sizeof bytes) == 0 && got.data[got.size] == 0);
     got.free();
     KV_CHECK(c, got.data == nullptr && got.size == 0);
     i32 err = 0;
-    KV_CHECK(c, !io_read_now(missing, &got, nullptr, &err) && err != 0 && got.data == nullptr);
-    KV_CHECK(c, !io_read_now(dir, &got) || got.size == 0); // a directory: refused, or nothing in it
+    KV_CHECK(c, !io_read_file(missing, &got, nullptr, &err) && err != 0 && got.data == nullptr);
+    KV_CHECK(c, !io_read_file(dir, &got) || got.size == 0); // a directory: refused, or nothing in it
     got.free();
     IoFileWriter w;
     KV_CHECK(c, w.open(path) && w.print("P6\n%u %u\n", 3u, 2u) && w.write("abc", 3) && w.close());
-    KV_CHECK(c, io_read_now(path, &got) && got.size == 10 && memcmp(got.data, "P6\n3 2\nabc", 10) == 0);
+    KV_CHECK(c, io_read_file(path, &got) && got.size == 10 && memcmp(got.data, "P6\n3 2\nabc", 10) == 0);
     got.free();
     format(missing, sizeof missing, "%s/no/such/dir/x", dir);
     IoFileWriter bad;
     KV_CHECK(c, !bad.open(missing) && !bad.write("x", 1) && !bad.close() && bad.error != 0);
-    KV_CHECK(c, io_write_now(path, "", 0) && io_read_now(path, &got) && got.size == 0 && got.data && got.data[0] == 0);
+    KV_CHECK(c, io_write_file(path, "", 0) && io_read_file(path, &got) && got.size == 0 && got.data && got.data[0] == 0);
     got.free();
 
-    // io_read_each and io_copy_now: a file of three pieces and a bit, in order, and a copy
+    // io_read_each and io_copy_file: a file of three pieces and a bit, in order, and a copy
     // with the same bytes and the hash of them.
     {
         const usize n = 3 * 65536 + 5;
@@ -322,7 +322,7 @@ void test_io_now(kv::TestCtx& c) {
         u8 want[32], got_hash[32];
         sha256(big, n, want);
         format(path, sizeof path, "%s/big.bin", dir);
-        KV_CHECK(c, io_write_now(path, big, n));
+        KV_CHECK(c, io_write_file(path, big, n));
         struct Each { u32 pieces; usize bytes; Sha256 h; } each{};
         each.h.init();
         auto piece = [](void* user, const u8* data, usize len) { Each& e = *(Each*)user; ++e.pieces; e.bytes += len; e.h.update(data, len); return true; };
@@ -335,12 +335,12 @@ void test_io_now(kv::TestCtx& c) {
         char copy[300];
         format(copy, sizeof copy, "%s/copy.bin", dir);
         memset(got_hash, 0, 32);
-        KV_CHECK(c, io_copy_now(path, copy, got_hash) && memcmp(got_hash, want, 32) == 0);
-        KV_CHECK(c, io_read_now(copy, &got) && got.size == n && memcmp(got.data, big, n) == 0);
+        KV_CHECK(c, io_copy_file(path, copy, got_hash) && memcmp(got_hash, want, 32) == 0);
+        KV_CHECK(c, io_read_file(copy, &got) && got.size == n && memcmp(got.data, big, n) == 0);
         got.free();
         err = 0;
         KV_CHECK(c, !io_read_each(missing, piece, &each, 0, &err) && err != 0);
-        KV_CHECK(c, !io_copy_now(path, missing, nullptr, &err) && err != 0);
+        KV_CHECK(c, !io_copy_file(path, missing, nullptr, &err) && err != 0);
         free(big);
     }
     KV_CHECK(c, io_remove_tree(dir));
@@ -379,12 +379,12 @@ void test_io_make_dirs_deep(kv::TestCtx& c) {
     KV_CHECK(c, io_make_dirs(deep));
     KV_CHECK(c, io_make_dirs(deep)); // already there
     IoStat st;
-    KV_CHECK(c, io_stat(deep, &st) && st.is_dir);
+    KV_CHECK(c, io_stat_file(deep, &st) && st.is_dir);
     format(deep + n, sizeof deep - n, "/x.txt");
-    KV_CHECK(c, io_write_now(deep, "x", 1));
+    KV_CHECK(c, io_write_file(deep, "x", 1));
     KV_CHECK(c, !io_make_dirs(deep)); // a file is not a directory
     KV_CHECK(c, io_remove_tree(dir));
-    KV_CHECK(c, !io_stat(dir, &st));
+    KV_CHECK(c, !io_stat_file(dir, &st));
 }
 
 // Slice 10's queue: a path of 1,000 bytes read and written, the first 64 KB of a 16 MB file
@@ -422,12 +422,12 @@ void test_io_long_ranged_stat(kv::TestCtx& c) {
     {
         u8* buf = (u8*)mem_alloc(kBig);
         for (usize i = 0; i < kBig; ++i) buf[i] = (u8)(i * 13 + (i >> 9));
-        KV_CHECK(c, io_write_now(big, buf, kBig));
+        KV_CHECK(c, io_write_file(big, buf, kBig));
         mem_free(buf);
     }
     auto pattern_ok = [](const IoCompletion* cc, u64 from) {
-        if (!cc || !cc->data) return false;
-        for (usize i = 0; i < cc->size; i += 997) { usize at = (usize)from + i; if (((const u8*)cc->data)[i] != (u8)(at * 13 + (at >> 9))) return false; }
+        if (!cc || !cc->bytes.data) return false;
+        for (usize i = 0; i < cc->bytes.size; i += 997) { usize at = (usize)from + i; if (((const u8*)cc->bytes.data)[i] != (u8)(at * 13 + (at >> 9))) return false; }
         return true;
     };
 
@@ -446,14 +446,14 @@ void test_io_long_ranged_stat(kv::TestCtx& c) {
         Handle hw = q.write_file(w);
         KV_CHECK(c, !hw.is_null() && wait_for(q, 1) == 1);
         const IoCompletion* cw = by_user(q, 1);
-        KV_CHECK(c, cw && cw->status == IoStatus::Done && cw->size == plen);
+        KV_CHECK(c, cw && cw->status == IoStatus::Done && cw->written == plen);
         q.reap(hw);
         IoRequest r; r.path = deep; r.user = 2;
         Handle hr = q.read_file(r);
         KV_CHECK(c, wait_for(q, 1) == 1);
         const IoCompletion* cr = by_user(q, 2);
-        KV_CHECK(c, cr && cr->status == IoStatus::Done && cr->size == plen && memcmp(cr->data, payload, plen) == 0);
-        if (cr) mem_free(cr->data);
+        KV_CHECK(c, cr && cr->status == IoStatus::Done && cr->bytes.size == plen && memcmp(cr->bytes.data, payload, plen) == 0);
+        if (cr) mem_free(cr->bytes.data);
         q.reap(hr);
 
         // Ranges: the first 64 KB alone, one from the middle, one that runs past the end,
@@ -473,16 +473,16 @@ void test_io_long_ranged_stat(kv::TestCtx& c) {
         const IoCompletion* c4 = by_user(q, 13);
         const IoCompletion* c5 = by_user(q, 14);
         const IoCompletion* c6 = by_user(q, 15);
-        KV_CHECK(c, c1 && c1->status == IoStatus::Done && c1->size == (64u << 10) && pattern_ok(c1, 0));
-        KV_CHECK(c, c2 && c2->status == IoStatus::Done && c2->size == 12345 && pattern_ok(c2, 5000001));
-        KV_CHECK(c, c3 && c3->status == IoStatus::Done && c3->size == 100 && pattern_ok(c3, kBig - 100));
-        KV_CHECK(c, c4 && c4->status == IoStatus::Done && c4->size == 0);
-        KV_CHECK(c, c5 && c5->status == IoStatus::Done && c5->size == 7 && pattern_ok(c5, kBig - 7));
+        KV_CHECK(c, c1 && c1->status == IoStatus::Done && c1->bytes.size == (64u << 10) && pattern_ok(c1, 0));
+        KV_CHECK(c, c2 && c2->status == IoStatus::Done && c2->bytes.size == 12345 && pattern_ok(c2, 5000001));
+        KV_CHECK(c, c3 && c3->status == IoStatus::Done && c3->bytes.size == 100 && pattern_ok(c3, kBig - 100));
+        KV_CHECK(c, c4 && c4->status == IoStatus::Done && c4->bytes.size == 0);
+        KV_CHECK(c, c5 && c5->status == IoStatus::Done && c5->bytes.size == 7 && pattern_ok(c5, kBig - 7));
         KV_CHECK(c, c6 && c6->status == IoStatus::Failed && c6->error == ENOENT);
         // The budget counted what the ranges read, not the file: 16 MB six times over would be 96.
         KV_CHECK(c, q.bytes_submitted - before == (64u << 10) + 12345 + 100 + 7);
         const IoCompletion* ranged[] = {c1, c2, c3, c4, c5};
-        for (const IoCompletion* cc : ranged) if (cc && cc->data) mem_free(cc->data);
+        for (const IoCompletion* cc : ranged) if (cc && cc->bytes.data) mem_free(cc->bytes.data);
         q.reap(h1); q.reap(h2); q.reap(h3); q.reap(h4); q.reap(h5); q.reap(h6);
 
         // Stats: a file, a directory, nothing (Done, all false), and the long path. Nothing
@@ -506,25 +506,25 @@ void test_io_long_ranged_stat(kv::TestCtx& c) {
         KV_CHECK(c, q.cancel(g5));
         KV_CHECK(c, wait_for(q, stats) == stats && q.pending() == 0);
         IoStat want;
-        KV_CHECK(c, io_stat(big, &want) && want.is_file && want.size == kBig);
+        KV_CHECK(c, io_stat_file(big, &want) && want.is_file && want.size == kBig);
         const IoCompletion* t1 = by_user(q, 20);
         const IoCompletion* t2 = by_user(q, 21);
         const IoCompletion* t3 = by_user(q, 22);
         const IoCompletion* t4 = by_user(q, 23);
         const IoCompletion* t5 = by_user(q, 24);
-        KV_CHECK(c, t1 && t1->status == IoStatus::Done && t1->data == nullptr && t1->stat.is_file && !t1->stat.is_dir &&
+        KV_CHECK(c, t1 && t1->status == IoStatus::Done && t1->bytes.data == nullptr && t1->stat.is_file && !t1->stat.is_dir &&
                     t1->stat.size == kBig && t1->stat.mtime_ns == want.mtime_ns);
         KV_CHECK(c, t2 && t2->status == IoStatus::Done && t2->stat.is_dir && !t2->stat.is_file);
         KV_CHECK(c, t3 && t3->status == IoStatus::Done && !t3->stat.is_file && !t3->stat.is_dir && t3->stat.size == 0);
         KV_CHECK(c, t4 && t4->status == IoStatus::Done && t4->stat.is_file && t4->stat.size == plen);
         KV_CHECK(c, t5 && t5->status == IoStatus::Cancelled);
-        // The volume: io_stat's, the same for a file and the directories above it, 0 for nothing.
+        // The volume: io_stat_file's, the same for a file and the directories above it, 0 for nothing.
         KV_CHECK(c, want.volume != 0 && t1 && t1->stat.volume == want.volume);
         KV_CHECK(c, t2 && t2->stat.volume == want.volume && t4 && t4->stat.volume == want.volume);
         KV_CHECK(c, t3 && t3->stat.volume == 0);
         if (mount_point) {
             IoStat mp, parent;
-            KV_CHECK(c, io_stat(mount_point, &mp) && io_stat("/", &parent) && mp.volume != parent.volume);
+            KV_CHECK(c, io_stat_file(mount_point, &mp) && io_stat_file("/", &parent) && mp.volume != parent.volume);
             const IoCompletion* t7 = by_user(q, 25);
             KV_CHECK(c, t7 && t7->status == IoStatus::Done && t7->stat.is_dir && t7->stat.volume == mp.volume);
             q.reap(g7);
@@ -570,11 +570,11 @@ void test_io_errors(kv::TestCtx& c) {
     format(path, sizeof path, "%s/file.txt", dir);
     format(sub, sizeof sub, "%s/file.txt/under", dir);
     format(missing, sizeof missing, "%s/none/at/all", dir);
-    KV_CHECK(c, io_write_now(path, "x", 1, &err) && err == 0);
+    KV_CHECK(c, io_write_file(path, "x", 1, &err) && err == 0);
 
     IoStat st;
-    KV_CHECK(c, io_stat(path, &st, &err) && err == 0 && st.is_file);
-    KV_CHECK(c, !io_stat(missing, &st, &err) && (err == ENOENT || err == ENOTDIR));
+    KV_CHECK(c, io_stat_file(path, &st, &err) && err == 0 && st.is_file);
+    KV_CHECK(c, !io_stat_file(missing, &st, &err) && (err == ENOENT || err == ENOTDIR));
     err = 0;
     KV_CHECK(c, !io_rename(missing, path, &err) && err == ENOENT);
     err = 0;
@@ -602,4 +602,59 @@ void test_io_errors(kv::TestCtx& c) {
     KV_CHECK(c, io_current_dir(cwd, sizeof cwd, &err) && err == 0 && cwd[0]);
     KV_CHECK(c, io_remove_tree(dir, &err) && err == 0);
     KV_CHECK(c, io_remove_tree(dir, &err) && err == 0);          // nothing there is gone already
+}
+
+// A read from the queue gives what io_read_file gives: an IoBytes, a NUL after the bytes,
+// freed the same way; and one request's holder asks for its completion by the handle.
+void test_io_take(kv::TestCtx& c) {
+    using namespace kv;
+    char dir[256], path[400], empty[400];
+    KV_CHECK(c, io_make_temp_dir("kv-io-take", dir, sizeof dir));
+    format(path, sizeof path, "%s/text.txt", dir);
+    format(empty, sizeof empty, "%s/empty.txt", dir);
+    KV_CHECK(c, io_write_file(path, "twelve bytes", 12) && io_write_file(empty, "", 0));
+
+    IoBytes now;
+    KV_CHECK(c, io_read_file(path, &now) && now.size == 12 && now.data[12] == 0);
+
+    const IoBackend backends[] = {IoBackend::Sync, IoBackend::Auto};
+    for (IoBackend backend : backends) {
+        IoQueue q;
+        KV_CHECK(c, q.init(mem_general(), 16, backend));
+        IoRequest r; r.path = path;
+        Handle h = q.read_file(r);
+        r.path = empty;
+        Handle he = q.read_file(r);
+        r.path = path; r.offset = 7; r.length = 5;
+        Handle hr = q.read_file(r);
+        IoCompletion done;
+        KV_CHECK(c, q.is_pending(h) && !q.take(h, &done)); // nothing completes inline
+        for (u32 i = 0; i < 2000 && q.pending(); ++i) { q.pump(); time_sleep(0.001); }
+        KV_CHECK(c, !q.is_pending(h));
+        KV_CHECK(c, q.take(h, &done) && done.status == IoStatus::Done && done.request == h);
+        KV_CHECK(c, done.bytes.size == now.size && done.bytes.alloc == mem_general() &&
+                    memcmp(done.bytes.data, now.data, now.size + 1) == 0); // the NUL too
+        KV_CHECK(c, strlen((const char*)done.bytes.data) == 12);
+        done.bytes.free();
+        KV_CHECK(c, done.bytes.data == nullptr && done.bytes.size == 0);
+        KV_CHECK(c, !q.take(h, &done) && !q.is_pending(h)); // taken: the handle is no request's now
+        KV_CHECK(c, q.take(he, &done) && done.status == IoStatus::Done && done.bytes.size == 0 &&
+                    done.bytes.data && done.bytes.data[0] == 0); // an empty file is an empty string
+        done.bytes.free();
+        KV_CHECK(c, q.take(hr, &done) && done.bytes.size == 5 && strcmp((const char*)done.bytes.data, "bytes") == 0);
+        done.bytes.free();
+        // A write's completion has no bytes, and says how many it wrote; with no `out` it is dropped.
+        char out[400];
+        format(out, sizeof out, "%s/out.txt", dir);
+        IoWriteRequest w; w.path = out; w.data = "abc"; w.size = 3;
+        Handle hw = q.write_file(w);
+        r = IoRequest{}; r.path = path;
+        Handle hd = q.read_file(r);
+        for (u32 i = 0; i < 2000 && q.pending(); ++i) { q.pump(); time_sleep(0.001); }
+        KV_CHECK(c, q.take(hw, &done) && done.status == IoStatus::Done && done.written == 3 && !done.bytes.data);
+        KV_CHECK(c, q.take(hd, nullptr) && q.completions().len == 0); // dropped: its bytes freed
+        q.free();
+    }
+    now.free();
+    KV_CHECK(c, io_remove_tree(dir));
 }

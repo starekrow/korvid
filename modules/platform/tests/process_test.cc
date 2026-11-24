@@ -130,7 +130,7 @@ void test_process(kv::TestCtx& c) {
     char bat[600];
     snprintf(bat, sizeof bat, "%s/args.bat", dir);
     const char* args_bat = "@echo off\r\necho 1=%1 2=%2\r\n";
-    KV_CHECK(c, io_write_now(bat, args_bat, strlen(args_bat)));
+    KV_CHECK(c, io_write_file(bat, args_bat, strlen(args_bat)));
     const char* via_cmd[] = {"cmd", "/c", bat, "salt & pepper", "two"};
     d = ProcessDesc{};
     d.argv = Span<const char* const>(via_cmd, 5);

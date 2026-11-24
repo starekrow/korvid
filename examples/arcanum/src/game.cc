@@ -530,7 +530,7 @@ void load_game(TickContext& ctx, Game& g) {
 }
 
 void free_load(Game& g) {
-    free_in(mem_general(), g.load_data, g.load_size ? g.load_size : 1);
+    free_in(mem_general(), g.load_data, g.load_size + 1); // a read's bytes: the file and its NUL
     g.load_data = nullptr;
     g.load_size = 0;
 }
@@ -553,8 +553,8 @@ void files(TickContext& ctx) {
             continue;
         }
         g.load_read = Handle{};
-        g.load_data = (u8*)c.data;
-        g.load_size = c.size;
+        g.load_data = (u8*)c.bytes.data;
+        g.load_size = c.bytes.size;
         const char* why = nullptr;
         if (c.status != IoStatus::Done) why = c.error == 2 ? "There is no saved game" : "The save could not be read";
         else {

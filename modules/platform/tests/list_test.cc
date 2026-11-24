@@ -72,10 +72,10 @@ void test_io_list_dir(kv::TestCtx& c) {
     char dir[200], path[400];
     KV_CHECK(c, io_make_temp_dir("korvid-list", dir, sizeof dir));
     auto at = [&](const char* name) { format(path, sizeof path, "%s/%s", dir, name); return path; };
-    KV_CHECK(c, io_write_now(at("a.txt"), "abc", 3));
-    KV_CHECK(c, io_write_now(at(".hidden"), "h", 1));
+    KV_CHECK(c, io_write_file(at("a.txt"), "abc", 3));
+    KV_CHECK(c, io_write_file(at(".hidden"), "h", 1));
     KV_CHECK(c, io_make_dirs(at("b/deeper")));
-    KV_CHECK(c, io_write_now(at("b/nested.txt"), "nested", 6));
+    KV_CHECK(c, io_write_file(at("b/nested.txt"), "nested", 6));
     // A name that is not UTF-8, which old collections have: bytes on POSIX, a lone
     // surrogate on Windows (WTF-8 through the engine).
 #if defined(_WIN32)
@@ -86,10 +86,10 @@ void test_io_list_dir(kv::TestCtx& c) {
 #if defined(__APPLE__)
     // Apple's file systems refuse such a name (EILSEQ): it cannot be made, so none is listed.
     const bool odd_made = false;
-    KV_CHECK(c, !io_write_now(at(odd), "odd bytes", 9));
+    KV_CHECK(c, !io_write_file(at(odd), "odd bytes", 9));
 #else
     const bool odd_made = true;
-    KV_CHECK(c, io_write_now(at(odd), "odd bytes", 9));
+    KV_CHECK(c, io_write_file(at(odd), "odd bytes", 9));
 #endif
     bool links = false;
 #if !defined(_WIN32)
@@ -114,7 +114,7 @@ void test_io_list_dir(kv::TestCtx& c) {
     KV_CHECK(c, io_list_dir(dir, IoListHidden | IoListSizes, seen_one, &s2));
     KV_CHECK(c, strncmp(s2.text, ".hidden:fh a.txt:f ", 19) == 0);
     IoStat st;
-    KV_CHECK(c, io_stat(at("a.txt"), &st) && s2.a_size == 3 && s2.a_mtime == st.mtime_ns);
+    KV_CHECK(c, io_stat_file(at("a.txt"), &st) && s2.a_size == 3 && s2.a_mtime == st.mtime_ns);
     KV_CHECK(c, s2.a_volume == st.volume && st.volume != 0 && s1.a_volume == 0); // the volume with sizes only
 
     // The odd name, joined to the directory, opens the same file through the queue.
@@ -133,8 +133,8 @@ void test_io_list_dir(kv::TestCtx& c) {
             Handle h = q.read_file(r);
             KV_CHECK(c, !h.is_null() && wait_for(q, 1) == 1);
             const IoCompletion& cc = q.completions()[0];
-            KV_CHECK(c, cc.status == IoStatus::Done && cc.size == 9 && memcmp(cc.data, "odd bytes", 9) == 0);
-            if (cc.data) mem_free(cc.data);
+            KV_CHECK(c, cc.status == IoStatus::Done && cc.bytes.size == 9 && memcmp(cc.bytes.data, "odd bytes", 9) == 0);
+            if (cc.bytes.data) mem_free(cc.bytes.data);
             q.reap(h);
             q.free();
         }

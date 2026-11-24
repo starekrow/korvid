@@ -80,7 +80,7 @@ void face_release(Engine& e, AssetState_& s, FontFace* f) {
     if (!f || --f->refs) return;
     IoQueue* io = platform_io(e);
     if (io && !f->io.is_null()) io->cancel(f->io);
-    free_in(s.general, f->data, f->size ? f->size : 1);
+    free_in(s.general, f->data, f->size + 1); // a read's bytes: the file and its NUL
     free_in(s.general, f->info, sizeof(stbtt_fontinfo));
     for (u32 i = 0; i < s.faces.len; ++i)
         if (s.faces[i] == f) { s.faces[i] = s.faces[s.faces.len - 1]; --s.faces.len; break; }
@@ -393,9 +393,9 @@ void asset_fonts_pump(TickContext& ctx) {
             face->failed = true;
             face->missing = c.status == IoStatus::Failed && c.error == 2;
             KV_WARN("asset", "font file '%s': %s", face->path, face->missing ? "not found" : "could not be read");
-            if (c.data) free_in(s.general, c.data, c.size);
-        } else if (!face_take(s, *face, (u8*)c.data, c.size)) {
-            free_in(s.general, c.data, c.size);
+            c.bytes.free();
+        } else if (!face_take(s, *face, (u8*)c.bytes.data, c.bytes.size)) {
+            c.bytes.free();
             face->data = nullptr;
             face->size = 0;
         }

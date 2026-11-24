@@ -113,14 +113,14 @@ void records(TickContext& ctx) {
         if (c.status == IoStatus::Done) {
             MemScope scope;
             JsonDoc doc;
-            if (!json_parse((const char*)c.data, c.size, mem_scratch(), doc)) KV_WARN("arcfire", "records: %s: %s at byte %u; the defaults", path, doc.error, doc.error_at);
+            if (!json_parse((const char*)c.bytes.data, c.bytes.size, mem_scratch(), doc)) KV_WARN("arcfire", "records: %s: %s at byte %u; the defaults", path, doc.error, doc.error_at);
             else if (path == g.options_path) read_options(g, doc);
             else read_scores(g, doc);
             KV_INFO("arcfire", "records: %s read", path);
         } else if (c.error != 2) {
             KV_WARN("arcfire", "records: errno %d reading %s; the defaults", c.error, path);
         }
-        if (c.data) free_in(mem_general(), c.data, c.size ? c.size : 1);
+        c.bytes.free();
     }
     if (!g.records_in && g.options_read.is_null() && g.scores_read.is_null()) {
         g.records_in = true;

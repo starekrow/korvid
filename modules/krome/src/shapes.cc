@@ -325,12 +325,10 @@ bool krome_shapes_land(KromeModule& s, Renderer* r) {
     bool landed = false;
     for (u32 i = 0; i < s.shape_jobs.len;) {
         KromeShapeJob* j = s.shape_jobs[i];
-        IoStatus st = IoStatus::Pending;
-        i32 err = 0;
-        for (const IoCompletion& c : io->completions())
-            if (c.request == j->task) { st = c.status; err = c.error; break; }
-        if (st == IoStatus::Pending) { ++i; continue; }
-        io->reap(j->task);
+        IoCompletion done;
+        if (!io->take(j->task, &done)) { ++i; continue; } // still on its way
+        IoStatus st = done.status;
+        i32 err = done.error;
         if (st == IoStatus::Done && !j->dropped) {
             ++s.shape_clock;
             u32 x = 0, y = 0;

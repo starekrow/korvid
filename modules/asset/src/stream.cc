@@ -175,7 +175,7 @@ void asset_streams_shutdown(Engine& e, AssetState_& s) {
         if (!s.streams.is_alive(i)) continue;
         StreamAsset& st = s.streams.items[i];
         if (io && !st.io.is_null()) io->cancel(st.io);
-        free_in(s.general, st.bytes, st.size ? st.size : 1);
+        free_in(s.general, st.bytes, st.size + 1);
     }
     kv_handle_kind_unregister(s.stream_kind);
     s.stream_by_path.free();
@@ -197,10 +197,10 @@ void asset_streams_pump(TickContext& ctx) {
         io->reap(c.request);
         st->io = Handle{};
         if (c.status != IoStatus::Done) { fail_stream(e, s, h, *st, c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read, nullptr); continue; }
-        st->bytes = (u8*)c.data;
-        st->size  = c.size;
+        st->bytes = (u8*)c.bytes.data;
+        st->size  = c.bytes.size;
         const char* why = nullptr;
-        if (!probe(*st, &why)) { free_in(s.general, st->bytes, st->size ? st->size : 1); st->bytes = nullptr; st->size = 0; fail_stream(e, s, h, *st, AssetError::Decode, why); continue; }
+        if (!probe(*st, &why)) { free_in(s.general, st->bytes, st->size + 1); st->bytes = nullptr; st->size = 0; fail_stream(e, s, h, *st, AssetError::Decode, why); continue; }
         st->state = AssetState::Ready;
         KV_INFO("asset", "stream '%s' ready: %u Hz x%u, %.1f s, %llu KB compressed%s", st->path, st->rate, st->channels, st->seconds(),
                 (unsigned long long)(st->size / 1024), st->loop_tagged ? ", loop points tagged" : "");
@@ -235,7 +235,7 @@ void stream_retire(Engine& e, AssetState_& s, Handle h) {
     if (!st) return;
     IoQueue* io = platform_io(e);
     if (io && !st->io.is_null()) io->cancel(st->io);
-    free_in(s.general, st->bytes, st->size ? st->size : 1); // nothing decodes it: voices hold references
+    free_in(s.general, st->bytes, st->size + 1); // nothing decodes it: voices hold references
     s.stream_by_path.remove(name_intern(st->path));
     KV_INFO("asset", "stream '%s' retired", st->path);
     s.streams.destroy(h);

@@ -99,8 +99,8 @@ void anim_pump(TickContext& ctx) {
         AnimClip parsed;
         const char* why = nullptr;
         u32 at = 0;
-        bool ok = anim_parse((const char*)c.data, c.size, s.general, parsed, &why, &at);
-        free_in(s.general, c.data, c.size);
+        bool ok = anim_parse((const char*)c.bytes.data, c.bytes.size, s.general, parsed, &why, &at);
+        c.bytes.free();
         if (!ok) {
             char detail[160];
             format(detail, sizeof detail, "%s (byte %u)", why, at);

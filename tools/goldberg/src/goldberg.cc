@@ -432,10 +432,10 @@ i32 hash_task(void* arg, const IoTaskCtl&) {
     // The modification time is read before the bytes: a write in between leaves a time
     // that is older than the content, and the next event for the file asks again.
     IoStat st;
-    r.mtime = io_stat(r.full, &st) ? st.mtime_ns : 0;
+    r.mtime = io_stat_file(r.full, &st) ? st.mtime_ns : 0;
     if (r.want_text) { // a rule file: small, and wanted whole
         IoBytes bytes;
-        r.ok = io_read_now(r.full, &bytes);
+        r.ok = io_read_file(r.full, &bytes);
         if (!r.ok) return 0;
         sha256(bytes.data, bytes.size, r.hash);
         r.size = bytes.size;
@@ -469,7 +469,7 @@ i32 copy_task(void* arg, const IoTaskCtl&) {
     i32 err = 0;
     parent_dir(r.to, dir, sizeof dir);
     if (dir[0] && !io_make_dirs(dir)) { format(r.error, sizeof r.error, "cannot make %s", dir); return 0; }
-    if (!io_copy_now(r.from, r.tmp, r.hash, &err)) {
+    if (!io_copy_file(r.from, r.tmp, r.hash, &err)) {
         format(r.error, sizeof r.error, "cannot copy %s to %s (errno %d)", r.from, r.tmp, err);
         io_remove(r.tmp);
         return 0;
@@ -477,7 +477,7 @@ i32 copy_task(void* arg, const IoTaskCtl&) {
     // Whole, or not at all: a reader of the output tree never sees half a file.
     if (!io_rename(r.tmp, r.to)) { format(r.error, sizeof r.error, "cannot rename %s into place", r.tmp); io_remove(r.tmp); return 0; }
     IoStat st;
-    if (io_stat(r.to, &st)) { r.size = st.size; r.mtime = st.mtime_ns; }
+    if (io_stat_file(r.to, &st)) { r.size = st.size; r.mtime = st.mtime_ns; }
     r.ok = true;
     return 0;
 }
@@ -606,7 +606,7 @@ void proc_prepare(GoldbergState& s, Proc& pr) {
         char full[1200];
         format(full, sizeof full, "%s/%s", pr.step_dir, pr.before_text.data + off);
         IoStat st;
-        if (io_stat(full, &st)) pr.before.push(Before{off, st.size, st.mtime_ns});
+        if (io_stat_file(full, &st)) pr.before.push(Before{off, st.size, st.mtime_ns});
     }
     at.free();
     Hold h{};
@@ -681,7 +681,7 @@ void commit_files(Proc& pr) {
         if (have) format(made, sizeof made, "%s", dir);
         if (!have || !io_rename(from, to)) { print_err("goldberg: cannot move %s into the work directory\n", from); continue; }
         IoStat st;
-        if (!io_stat(to, &st)) continue;
+        if (!io_stat_file(to, &st)) continue;
         m.size = st.size;
         m.mtime = st.mtime_ns;
         m.path = record(rel);
@@ -707,7 +707,7 @@ void finish_scan(GoldbergState& s, Proc& pr) {
         format(path, sizeof path, "%s/%s", pr.dir, rel);
         if (strlen(path) >= kGbPath) { print_err("goldberg: '%s': a converter's output with a path too long to track\n", full); continue; }
         IoStat st;
-        if (!io_stat(full, &st)) continue;
+        if (!io_stat_file(full, &st)) continue;
         bool stale = false;
         for (const Before& b : pr.before) if (strcmp(pr.before_text.data + b.path, rel) == 0) { stale = b.size == st.size && b.mtime == st.mtime_ns; break; }
         if (stale) { io_remove(full); push_pending(s, EvRemoved, pr.work_root, path); }
@@ -765,7 +765,7 @@ const KimbFile* kim_find_use(void* user, const char* use) {
     format(path, sizeof path, "%s/%s.kim", dir, slash + 1);
     format(file, sizeof file, "%s.kim", use);
     IoBytes b;
-    if (!io_read_now(path, &b)) return nullptr;
+    if (!io_read_file(path, &b)) return nullptr;
     KimbFile& f = c.files[c.count];
     format(c.names[c.count], sizeof c.names[0], "%s", use);
     char* keep = (char*)arena_alloc(*c.arena, strlen(file) + 1, 1);
@@ -782,7 +782,7 @@ const KimbFile* kim_find_use(void* user, const char* use) {
 template <class Say>
 bool check_kim(const Proc& pr, const char*, const char* in, const char* asset, Say& say) {
     IoBytes src;
-    if (!io_read_now(in, &src)) return true;
+    if (!io_read_file(in, &src)) return true;
     Arena arena;
     if (!arena_create(arena, src.size * 64 + (64u << 20), "goldberg.kim", MemTag{})) { src.free(); return true; }
     KimErrors errors;
@@ -838,7 +838,7 @@ i32 run_builtin(Proc& pr, const Array<const char*>& argv) {
     const char* in = argv[1];
     const char* asset = argv[2];
     IoBytes src;
-    if (!io_read_now(in, &src)) { say("cannot read the source\n"); return 1; }
+    if (!io_read_file(in, &src)) { say("cannot read the source\n"); return 1; }
     Array<u8> out{};
     KimErrors errors;
     bool ok = kim_compile((const char*)src.data, src.size, asset, out, errors);
@@ -862,7 +862,7 @@ i32 run_builtin(Proc& pr, const Array<const char*>& argv) {
     usize nl = strlen(name);
     if (nl > 4 && !strcmp(name + nl - 4, ".kim")) format(target, sizeof target, "%s/%sb", pr.run_dir, name);
     else format(target, sizeof target, "%s/%s.kimb", pr.run_dir, name);
-    bool wrote = io_write_now(target, out.data, out.len);
+    bool wrote = io_write_file(target, out.data, out.len);
     out.free();
     if (!wrote) { say("cannot write the .kimb\n"); return 1; }
     return 0;
@@ -876,7 +876,7 @@ i32 run_svg(Proc& pr, const Array<const char*>& argv) {
     const char* in = argv[1];
     const char* asset = argv[2];
     IoBytes src;
-    if (!io_read_now(in, &src)) { say("cannot read the source\n"); return 1; }
+    if (!io_read_file(in, &src)) { say("cannot read the source\n"); return 1; }
     PathShape shape;
     shape.init(mem_general());
     SvgMessages msgs;
@@ -900,7 +900,7 @@ i32 run_svg(Proc& pr, const Array<const char*>& argv) {
     usize nl = strlen(name);
     if (nl > 4 && !strcmp(name + nl - 4, ".svg")) format(target, sizeof target, "%s/%.*s.kshape", pr.run_dir, (int)(nl - 4), name);
     else format(target, sizeof target, "%s/%s.kshape", pr.run_dir, name);
-    bool wrote = io_write_now(target, out.data, out.len);
+    bool wrote = io_write_file(target, out.data, out.len);
     out.free();
     if (!wrote) { say("cannot write the .kshape\n"); return 1; }
     return 0;
@@ -1407,7 +1407,7 @@ int host_sleep(lua_State* L) { time_sleep(luaL_checknumber(L, 1)); return 0; }
 // host.stat(path): size and modification time, or nothing if it is not there.
 int host_stat(lua_State* L) {
     IoStat st;
-    if (!io_stat(luaL_checkstring(L, 1), &st)) return 0;
+    if (!io_stat_file(luaL_checkstring(L, 1), &st)) return 0;
     lua_pushinteger(L, (lua_Integer)st.size);
     lua_pushinteger(L, st.mtime_ns);
     return 2;
@@ -1433,7 +1433,7 @@ int host_write_atomic(lua_State* L) {
     if (strlen(path) + 16 >= sizeof tmp) return luaL_error(L, "'%s': a path too long", path);
     parent_dir(path, dir, sizeof dir);
     format(tmp, sizeof tmp, "%s.tmp", path);
-    bool ok = (!dir[0] || io_make_dirs(dir)) && io_write_now(tmp, text, n) && io_rename(tmp, path);
+    bool ok = (!dir[0] || io_make_dirs(dir)) && io_write_file(tmp, text, n) && io_rename(tmp, path);
     if (!ok) io_remove(tmp);
     lua_pushboolean(L, ok);
     return 1;
@@ -1477,7 +1477,7 @@ int host_listen(lua_State* L) {
     format(s.port_file, sizeof s.port_file, "%s/.goldberg-port", s.out_dir);
     char text[16];
     int n = format(text, sizeof text, "%u\n", (u32)s.listener.port);
-    if (!io_write_now(s.port_file, text, (usize)n)) s.port_file[0] = 0;
+    if (!io_write_file(s.port_file, text, (usize)n)) s.port_file[0] = 0;
     lua_pushinteger(L, s.listener.port);
     return 1;
 }
@@ -1650,7 +1650,7 @@ bool load_app(GoldbergState& s, Engine& e) {
     char main_path[700];
     format(main_path, sizeof main_path, "%s/main.lua", s.lua_dir);
     IoBytes source;
-    if (!io_read_now(main_path, &source)) {
+    if (!io_read_file(main_path, &source)) {
         print_err("goldberg: cannot read '%s' (set GOLDBERG_LUA to the directory that holds main.lua)\n", main_path);
         return false;
     }
@@ -2060,7 +2060,7 @@ void watch_own_ui(GoldbergState& s) {
     if (!platform_exe_dir(exe_dir, sizeof exe_dir)) return;
     format(path, sizeof path, "%sgoldberg.assets", exe_dir);
     IoBytes b;
-    if (!io_read_now(path, &b)) return;
+    if (!io_read_file(path, &b)) return;
     usize n = 0;
     while (n < b.size && n + 1 < sizeof s.ui_tree && b.data[n] != '\n' && b.data[n] != '\r') { s.ui_tree[n] = (char)b.data[n]; ++n; }
     s.ui_tree[n] = 0;

@@ -282,7 +282,7 @@ void shoot(Gallery& g, const char* scene, const RenderView& view) {
         platform_pump(*g.e);
         renderer_render(g.r, view);
         IoBytes shot; // the frame that carries it writes it before render returns
-        if (io_read_now(path, &shot)) {
+        if (io_read_file(path, &shot)) {
             bool any = shot.size > 0;
             shot.free();
             if (any) { ++g.written; KV_INFO("gallery", "%s", path); return; }

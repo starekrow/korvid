@@ -254,7 +254,7 @@ bool write_merged(SettingsStore* s, Span<const Entry> changes) {
     JsonDoc now;
     bool have_now = false;
     IoBytes cur;
-    if (io_read_now(path, &cur, &ar.a)) have_now = json_parse((const char*)cur.data, cur.size, &ar.a, now);
+    if (io_read_file(path, &cur, &ar.a)) have_now = json_parse((const char*)cur.data, cur.size, &ar.a, now);
     JsonBuilder b(&ar.a);
     JsonRef root = b.object(), values = b.object();
     b.set(root, "korvid_settings", b.integer(1));
@@ -360,7 +360,7 @@ SettingsStore* settings_open_dir(const char* dir, i32* err) {
     char path[KV_PLATFORM_PATH_MAX + 32];
     format(path, sizeof path, "%ssettings.json", s->dir);
     IoBytes bytes;
-    if (io_read_now(path, &bytes)) {
+    if (io_read_file(path, &bytes)) {
         Arena ar;
         if (arena_create(ar, 256u << 20, "settings.read", MemTag{})) {
             JsonDoc doc;

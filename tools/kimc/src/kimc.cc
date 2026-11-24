@@ -171,7 +171,7 @@ struct CheckJob {
 const KimbFile* load(CheckJob& j, const char* path, const char* as) {
     if (j.count == KV_KIMB_MAX_SCOPE) return nullptr;
     IoBytes b;
-    if (!io_read_now(path, &b)) return nullptr;
+    if (!io_read_file(path, &b)) return nullptr;
     KimbFile& f = j.files[j.count];
     format(j.names[j.count], sizeof j.names[0], "%s", as);
     const char* name = j.names[j.count];
@@ -257,15 +257,12 @@ void kimc_pump(TickContext& ctx) {
             if (s.io.is_null()) { KV_ERROR("kimc", "cannot read '%s'", s.in); finish(e, s, 1); }
             return;
         }
-        for (const IoCompletion& c : io->completions()) {
-            if (c.request != s.io) continue;
-            IoCompletion done = c;
-            io->reap(done.request);
+        if (IoCompletion done; io->take(s.io, &done)) {
             s.io = Handle{};
             if (done.status != IoStatus::Done) { KV_ERROR("kimc", "cannot read '%s' (errno %d)", s.in, done.error); finish(e, s, 1); return; }
-            s.in_size = done.size;
-            int code = compile(e, s, (const u8*)done.data, done.size);
-            free_in(s.general, done.data, done.size ? done.size : 1);
+            s.in_size = done.bytes.size;
+            int code = compile(e, s, (const u8*)done.bytes.data, done.bytes.size);
+            done.bytes.free();
             if (code || s.stage != Stage::Write) finish(e, s, code);
             return;
         }

@@ -167,7 +167,7 @@ void io_ring_push_stat(IoRing* r, const char* path, void* buf, u64 user) {
     s.addr        = (u64)(usize)path;
     s.len         = STATX_TYPE | STATX_SIZE | STATX_MTIME;
     s.off         = (u64)(usize)buf; // addr2: where the answer goes
-    s.statx_flags = 0;               // follows links, as io_stat does
+    s.statx_flags = 0;               // follows links, as io_stat_file does
     s.user_data   = user;
     r->sq_array[idx] = idx;
     kv::atomic_store(r->sq_tail, tail + 1, kv::MO_RELEASE);

@@ -45,7 +45,7 @@ char g_dir[400];
 bool write_file(const char* rel, const void* data, usize size) {
     char p[700];
     format(p, sizeof p, "%s/%s", g_dir, rel);
-    return io_write_now(p, data, size);
+    return io_write_file(p, data, size);
 }
 bool write_text(const char* rel, const char* text) { return write_file(rel, text, strlen(text)); }
 

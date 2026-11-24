@@ -287,22 +287,18 @@ void files(TickContext& ctx) {
     Game& g = ctx.state_as<Game>();
     if (g.high_read.is_null()) return;
     IoQueue* io = platform_io(*ctx.engine);
-    for (const IoCompletion& c : io->completions()) {
-        if (c.request != g.high_read) continue;
-        IoCompletion done = c;
-        io->reap(c.request);
+    if (IoCompletion done; io->take(g.high_read, &done)) {
         g.high_read = Handle{};
         if (done.status == IoStatus::Done) {
             char text[32] = {};
-            memcpy(text, done.data, done.size < sizeof text - 1 ? done.size : sizeof text - 1);
+            memcpy(text, done.bytes.data, done.bytes.size < sizeof text - 1 ? done.bytes.size : sizeof text - 1);
             Score* score = ctx.resource<Score>(k_score);
             score->high = atoi(text);
             KV_INFO("rocks", "high score %d from %s", score->high, g.high_path);
         } else if (done.status == IoStatus::Failed && done.error != 2) {
             KV_WARN("rocks", "high score file: errno %d", done.error);
         }
-        if (done.data) free_in(mem_general(), done.data, done.size ? done.size : 1);
-        break;
+        done.bytes.free();
     }
 }
 

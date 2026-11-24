@@ -33,7 +33,7 @@ struct Tree {
         snprintf(path, sizeof path, "%s/%s", dir, rel);
         snprintf(parent, sizeof parent, "%s", path);
         if (char* slash = strrchr(parent, '/')) { *slash = 0; io_make_dirs(parent); }
-        return io_write_now(path, content, strlen(content));
+        return io_write_file(path, content, strlen(content));
     }
     const char* path(const char* rel) {
         if (snprintf(out, sizeof out, "%s/%s", dir, rel) >= (int)sizeof out) out[0] = 0;
@@ -45,7 +45,7 @@ struct Tree {
         snprintf(p, sizeof p, "%s/%s", dir, rel);
         IoBytes b;
         text.len = 0;
-        if (io_read_now(p, &b)) { memcpy(text.push_n((u32)b.size), b.data, b.size); b.free(); }
+        if (io_read_file(p, &b)) { memcpy(text.push_n((u32)b.size), b.data, b.size); b.free(); }
         text.push(0);
         return text.data;
     }
@@ -163,7 +163,7 @@ void test_rules(TestCtx& c) {
     KV_CHECK(c, gb("replay", log, "--dump", dump2) == 0);
     {
         IoBytes a, b;
-        KV_CHECK(c, io_read_now(dump, &a) && io_read_now(dump2, &b) && a.size == b.size && memcmp(a.data, b.data, a.size) == 0);
+        KV_CHECK(c, io_read_file(dump, &a) && io_read_file(dump2, &b) && a.size == b.size && memcmp(a.data, b.data, a.size) == 0);
         a.free(); b.free();
     }
     // Moving the tree away changes nothing about the replay.
@@ -172,7 +172,7 @@ void test_rules(TestCtx& c) {
     KV_CHECK(c, rename(t.path("assets"), moved) == 0 && gb("replay", log, "--dump", dump2) == 0);
     {
         IoBytes a, b;
-        KV_CHECK(c, io_read_now(dump, &a) && io_read_now(dump2, &b) && a.size == b.size && memcmp(a.data, b.data, a.size) == 0);
+        KV_CHECK(c, io_read_file(dump, &a) && io_read_file(dump2, &b) && a.size == b.size && memcmp(a.data, b.data, a.size) == 0);
         a.free(); b.free();
     }
     KV_CHECK(c, rename(moved, t.path("assets")) == 0);
@@ -181,7 +181,7 @@ void test_rules(TestCtx& c) {
     // rule file is saved with a different rule, then the sidecar is deleted.
     {
         IoBytes old;
-        KV_CHECK(c, io_read_now(log, &old));
+        KV_CHECK(c, io_read_file(log, &old));
         Array<char> more{};
         memcpy(more.push_n((u32)old.size), old.data, old.size);
         old.free();
@@ -197,7 +197,7 @@ void test_rules(TestCtx& c) {
         memcpy(more.push_n((u32)strlen(extra)), extra, strlen(extra));
         char log2[600];
         snprintf(log2, sizeof log2, "%s/log2.jsonl", t.dir);
-        KV_CHECK(c, io_write_now(log2, more.data, more.len));
+        KV_CHECK(c, io_write_file(log2, more.data, more.len));
         more.free();
         KV_CHECK(c, gb("replay", log2, "--dump", dump2) == 1); // not stable: the last hash was never answered
         d = t.read("dump2.txt");
@@ -317,19 +317,19 @@ void test_cook(TestCtx& c) {
     KV_CHECK(c, gb("replay", log, "--dump", dump2) == 0);
     {
         IoBytes a, b;
-        KV_CHECK(c, io_read_now(dump, &a) && io_read_now(dump2, &b) && a.size == b.size && memcmp(a.data, b.data, a.size) == 0);
+        KV_CHECK(c, io_read_file(dump, &a) && io_read_file(dump2, &b) && a.size == b.size && memcmp(a.data, b.data, a.size) == 0);
         a.free(); b.free();
     }
 
     // A second cook of an unchanged tree runs no step and reads no source, and leaves the
     // state as it found it: not written again.
     IoStat before{}, after{};
-    KV_CHECK(c, io_stat(t.path(".goldberg-state/out.json"), &before));
+    KV_CHECK(c, io_stat_file(t.path(".goldberg-state/out.json"), &before));
     KV_CHECK(c, gb("cook", "game", "--root", root, "--project", t.dir, "--out", out, "--dump", dump, "--watch", "none") == 0);
     KV_CHECK(c, has(g_out.data, "goldberg: game: 4 files, 0 cooked, 3 clean, 0 failed"));
     d = t.read("dump.txt");
     KV_CHECK(c, count(d, "request copy") == 0 && count(d, "request hash") == 1 && has(d, "request hash g:goldberg.berg +text"));
-    KV_CHECK(c, io_stat(t.path(".goldberg-state/out.json"), &after) && after.mtime_ns == before.mtime_ns && after.size == before.size);
+    KV_CHECK(c, io_stat_file(t.path(".goldberg-state/out.json"), &after) && after.mtime_ns == before.mtime_ns && after.size == before.size);
 
     // One source changes: one step runs.
     t.put("assets/a.png", "the a, changed");
@@ -480,7 +480,7 @@ void test_scripts(TestCtx& c) {
     KV_CHECK(c, gb("replay", log, "--dump", dump2) == 0);
     {
         IoBytes a, b;
-        KV_CHECK(c, io_read_now(dump, &a) && io_read_now(dump2, &b) && a.size == b.size && memcmp(a.data, b.data, a.size) == 0);
+        KV_CHECK(c, io_read_file(dump, &a) && io_read_file(dump2, &b) && a.size == b.size && memcmp(a.data, b.data, a.size) == 0);
         a.free(); b.free();
     }
     // Nothing changed: nothing runs.
@@ -625,7 +625,7 @@ void test_exec(TestCtx& c) {
     char prog[900];
     snprintf(prog, sizeof prog, "%s/assets/tools/up%s", t.dir, ext);
     io_make_dirs(t.path("assets/tools"));
-    KV_CHECK(c, io_copy_now(self, prog));
+    KV_CHECK(c, io_copy_file(self, prog));
 #if !defined(_WIN32)
     chmod(prog, 0755);
 #endif
@@ -673,7 +673,7 @@ void test_kim(TestCtx& c) {
     KimErrors e;
     KV_CHECK(c, kim_compile(form, strlen(form), "g/ui/form.kim", want, e));
     IoBytes got;
-    KV_CHECK(c, io_read_now(t.path("out/g/ui/form.kimb"), &got) && got.size == want.len && memcmp(got.data, want.data, want.len) == 0);
+    KV_CHECK(c, io_read_file(t.path("out/g/ui/form.kimb"), &got) && got.size == want.len && memcmp(got.data, want.data, want.len) == 0);
     got.free();
     want.free();
     KV_CHECK(c, COOK("--dump", dump) == 0 && !has(t.read("dump.txt"), "request run"));

@@ -50,7 +50,7 @@ constinit const SystemDesc k_systems[] = {{.name = ".spawn", .phase = Phase::Sim
 KV_MODULE_DEFINE(k_tt) = {.name = "tt", .ktables = k_ktables, .systems = k_systems};
 
 bool put(const char* path, const char* text) {
-    return io_write_now(path, text, strlen(text));
+    return io_write_file(path, text, strlen(text));
 }
 
 } // namespace

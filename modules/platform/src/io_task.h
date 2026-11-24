@@ -16,6 +16,6 @@ bool io_tasks_stat(IoQueue& q, Handle h, IoEntry& e);
 
 // A stat now, on the calling thread, as stat_file answers it: 0 with *out filled (all false
 // for a path where nothing is), or the errno of a failure. io.cc.
-i32 io_stat_now(const char* path, IoStat* out);
+i32 io_stat_errno(const char* path, IoStat* out);
 
 } // namespace kv

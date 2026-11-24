@@ -34,7 +34,7 @@ f64 number_in(const char* dir, const char* key) {
 
 bool file_has(const char* path, const char* text) {
     IoBytes b;
-    if (!io_read_now(path, &b)) return false;
+    if (!io_read_file(path, &b)) return false;
     bool found = false;
     for (usize i = 0; i + strlen(text) <= b.size && !found; ++i) found = !memcmp(b.data + i, text, strlen(text));
     b.free();
@@ -123,7 +123,7 @@ void test_settings(TestCtx& c) {
     // A person's edit: a key the program does not know, and a field left out, are kept.
     {
         const char* text = "{\"korvid_settings\": 1, \"values\": {\"volume\": 0.5, \"recent\": [\"a.flac\", \"b.flac\"], \"window\": {\"w\": 640}}}";
-        KV_CHECK(c, io_write_now(path, text, strlen(text)));
+        KV_CHECK(c, io_write_file(path, text, strlen(text)));
         SettingsStore* s = settings_open_dir(dir);
         Window w{1, 2, 3, 4, false, "x", {9, 9}};
         KV_CHECK(c, settings_struct(s, "window", k_window_fields, &w) && w.w == 640 && w.x == 1 && w.h == 4 && !strcmp(w.display, "x"));
@@ -134,7 +134,7 @@ void test_settings(TestCtx& c) {
     }
     // A spoiled file: an empty store, and the first write replaces it.
     {
-        KV_CHECK(c, io_write_now(path, "{\"values\": {", 12));
+        KV_CHECK(c, io_write_file(path, "{\"values\": {", 12));
         SettingsStore* s = settings_open_dir(dir);
         KV_CHECK(c, s && !settings_has(s, "volume"));
         settings_set_number(s, "volume", 0.1);

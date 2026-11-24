@@ -30,7 +30,7 @@ bool copy_in(const char* root, const char* from, const char* dir, const char* to
     format(d, sizeof d, "%s/%s", dir, to);
     if (char* slash = strrchr(d, '/')) { *slash = 0; io_make_dirs(d); }
     format(dst, sizeof dst, "%s/%s", dir, to);
-    return io_copy_now(src, dst);
+    return io_copy_file(src, dst);
 }
 
 void frame(Engine& e) { platform_pump(e); engine_frame(e, 1.0 / 60.0); }

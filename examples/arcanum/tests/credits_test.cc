@@ -16,7 +16,7 @@ char* slurp(const char* name) {
     char path[1200];
     kv::format(path, sizeof path, "%s/arcanum/%s", assets, name);
     kv::IoBytes file;
-    if (!kv::io_read_now(path, &file)) return nullptr;
+    if (!kv::io_read_file(path, &file)) return nullptr;
     char* text = (char*)malloc(file.size + 1); // the caller's to free
     memcpy(text, file.data, file.size + 1);    // the NUL after the bytes too
     file.free();

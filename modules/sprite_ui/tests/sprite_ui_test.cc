@@ -71,7 +71,7 @@ SpuiOpen uo(i32 layer, bool input = true, bool hold = false) {
 }
 
 bool put(const char* path, const char* text) {
-    return io_write_now(path, text, strlen(text));
+    return io_write_file(path, text, strlen(text));
 }
 
 } // namespace

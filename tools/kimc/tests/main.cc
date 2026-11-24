@@ -31,7 +31,7 @@ const char* path(const char* rel) {
     return out;
 }
 
-bool put(const char* rel, const void* data, usize n) { return io_write_now(path(rel), data, n); }
+bool put(const char* rel, const void* data, usize n) { return io_write_file(path(rel), data, n); }
 bool put(const char* rel, const char* text) { return put(rel, text, strlen(text)); }
 
 // A file's bytes, valid until the next read.
@@ -39,7 +39,7 @@ Array<u8> g_file;
 bool read(const char* rel) {
     IoBytes b;
     g_file.len = 0;
-    if (!io_read_now(path(rel), &b)) return false;
+    if (!io_read_file(path(rel), &b)) return false;
     if (b.size) memcpy(g_file.push_n((u32)b.size), b.data, b.size);
     b.free();
     return true;

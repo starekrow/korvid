@@ -19,7 +19,7 @@ void asset_render_reap_orphans(Engine& e, AssetRenderState& s, u16 kind) {
         bool gone = kind != 0 && h.kind() == kind && (kind == s.kind ? !s.textures.get(h) : !s.materials.get(h));
         if (!gone) { ++i; continue; }
         io->reap(c.request);
-        if (c.data) free_in(s.general, c.data, c.size);
+        c.bytes.free();
     }
 }
 
@@ -49,7 +49,7 @@ void shutdown(Engine& e, ModuleInstance& self) {
                 IoCompletion c = io->completions()[i];
                 if (!ours(c.user)) { ++i; continue; }
                 io->reap(c.request);
-                if (c.data) free_in(s->general, c.data, c.size ? c.size : 1);
+                c.bytes.free();
             }
             if (!io->pending()) break;
             io->pump();

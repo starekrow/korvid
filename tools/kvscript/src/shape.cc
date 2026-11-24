@@ -60,7 +60,7 @@ int l_svg_parse(lua_State* L) {
 int l_svg_load(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
     IoBytes b;
-    if (!io_read_now(path, &b)) return luaL_error(L, "kv.svg.load: cannot read '%s'", path);
+    if (!io_read_file(path, &b)) return luaL_error(L, "kv.svg.load: cannot read '%s'", path);
     int n = convert(L, (const char*)b.data, b.size, path, 2);
     b.free();
     return n;

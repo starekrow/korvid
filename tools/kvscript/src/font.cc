@@ -34,7 +34,7 @@ int font_load(lua_State* L) {
     f64 px = luaL_checknumber(L, 2);
     IoBytes file;
     i32 err = 0;
-    if (!io_read_now(path, &file, nullptr, &err)) return luaL_error(L, "font: cannot read '%s' (errno %d)", path, err);
+    if (!io_read_file(path, &file, nullptr, &err)) return luaL_error(L, "font: cannot read '%s' (errno %d)", path, err);
     Font* f = (Font*)lua_newuserdatauv(L, sizeof(Font) + file.size, 0);
     memcpy(font_bytes(f), file.data, file.size);
     f->size = file.size;

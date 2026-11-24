@@ -94,7 +94,7 @@ bool write_kimb(const char* rel, const char* json) {
     format(p, sizeof p, "%s/%s", g_dir, rel);
     format(d, sizeof d, "%s", p);
     if (char* slash = strrchr(d, '/')) { *slash = 0; io_make_dirs(d); }
-    bool ok = kbor_of(json, k) && io_write_now(p, k.data, k.len);
+    bool ok = kbor_of(json, k) && io_write_file(p, k.data, k.len);
     k.free();
     return ok;
 }

@@ -70,7 +70,7 @@ int main() {
     char dir[400], path[600];
     KV_CHECK(c, io_make_temp_dir("kv-asset-live", dir, sizeof dir));
     format(path, sizeof path, "%s/doc.txt", dir);
-    KV_CHECK(c, io_write_now(path, "one", 3));
+    KV_CHECK(c, io_write_file(path, "one", 3));
 
     Goldberg g;
     KV_CHECK(c, g.open());
@@ -93,7 +93,7 @@ int main() {
         KV_CHECK(c, asset_live_stats(e).port == g.l.port && asset_live_stats(e).connects == 1);
 
         // `changed`, heard through the waker alone: the reload asked for with no tick between.
-        KV_CHECK(c, io_write_now(path, "two!", 4));
+        KV_CHECK(c, io_write_file(path, "two!", 4));
         g.say("changed doc.txt\n");
         bool woke = false;
         for (u32 i = 0; i < 2000 && !woke; ++i) { woke = engine_wake(e); time_sleep(0.001); }

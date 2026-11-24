@@ -35,8 +35,8 @@ IoStatus read_one(IoQueue& q, const char* path, Array<u8>& out, i32* err) {
             if (c.request != h) continue;
             IoCompletion done = c;
             q.reap(h);
-            for (usize k = 0; k < done.size; ++k) out.push(((const u8*)done.data)[k]);
-            if (done.data) free_in(mem_general(), done.data, done.size ? done.size : 1);
+            for (usize k = 0; k < done.bytes.size; ++k) out.push(((const u8*)done.bytes.data)[k]);
+            done.bytes.free();
             if (err) *err = done.error;
             return done.status;
         }
@@ -97,7 +97,7 @@ void test_io_mounts(kv::TestCtx& c) {
     format(path, sizeof path, "%s/x", loose);
     io_make_dirs(path);
     format(path, sizeof path, "%s/x/a.txt", loose);
-    KV_CHECK(c, io_write_now(path, "from loose", 10));
+    KV_CHECK(c, io_write_file(path, "from loose", 10));
 
     static u8 big[20000];
     for (u32 i = 0; i < sizeof big; ++i) big[i] = (u8)(i * 3);
@@ -108,11 +108,11 @@ void test_io_mounts(kv::TestCtx& c) {
     MemScope scope;
     KV_CHECK(c, kpak_write(files, to_file, &w, mem_scratch(), &why));
     KV_CHECK(c, w.close());
-    KV_CHECK(c, io_write_now(zip, k_foreign, sizeof k_foreign));
+    KV_CHECK(c, io_write_file(zip, k_foreign, sizeof k_foreign));
     // The bad pack: the same, with a byte in big.bin's data flipped (the first entry after
     // the index is x/a.txt; big.bin's data starts on a later 4 KiB boundary).
     IoBytes packed;
-    KV_CHECK(c, io_read_now(pack, &packed));
+    KV_CHECK(c, io_read_file(pack, &packed));
     u8* bytes = packed.data;
     usize n = packed.size;
     usize target = 0;
@@ -120,7 +120,7 @@ void test_io_mounts(kv::TestCtx& c) {
         if (at && bytes[at] == 0 && bytes[at + 1] == 3 && bytes[at + 2] == 6) { target = at + 100; break; }
     KV_CHECK(c, target != 0);
     bytes[target] ^= 0xFF;
-    KV_CHECK(c, io_write_now(bad, bytes, n));
+    KV_CHECK(c, io_write_file(bad, bytes, n));
     packed.free();
 
     with_backend(c, IoBackend::Sync, loose, pack, zip, bad);
@@ -133,7 +133,7 @@ void test_io_mounts(kv::TestCtx& c) {
         char outer[320];
         format(outer, sizeof outer, "%s/outer.zip", dir);
         IoBytes inner;
-        KV_CHECK(c, io_read_now(pack, &inner));
+        KV_CHECK(c, io_read_file(pack, &inner));
         const PackWriteFile outer_files[] = {{"assets/game.kpak", inner.data, inner.size}, {"assets/x/a.txt", "from outer", 10}, {"other/secret", "no", 2}};
         IoFileWriter ow;
         KV_CHECK(c, ow.open(outer));

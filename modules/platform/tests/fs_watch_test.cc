@@ -57,7 +57,7 @@ void drain(FsWatcher& w, Heard& h) {
 bool write_text(const char* dir, const char* rel, const char* text) {
     char path[1024];
     snprintf(path, sizeof path, "%s/%s", dir, rel);
-    return io_write_now(path, text, strlen(text));
+    return io_write_file(path, text, strlen(text));
 }
 
 void run(TestCtx& c, FsWatchBackend backend, const char* expect_name) {
