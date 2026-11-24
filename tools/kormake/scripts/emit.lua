@@ -420,12 +420,20 @@ function M.run(c, g, opts)
   end
 
   -- A code-generation profile's flags (a module's `codegen`, a rule's): the toolchain's
-  -- codegen_profiles[name], or each of a list's in turn. "" for none.
+  -- codegen_profiles[name], or each of a list's in turn. "" for none. A profile with a
+  -- `warn` is one the toolchain cannot give in full: asked for, it says so once a run
+  -- and builds with what flags it has.
+  local warned = {}
   local function profile_flags(inst, names, who)
     local out = {}
     for _, name in ipairs(util.as_list(names)) do
-      local p = (flags(inst).tc.fields.codegen_profiles or {})[name]
-      if not p then util.fail("%s asks for codegen profile '%s', which toolchain '%s' does not have", who, name, flags(inst).tc.rec.name) end
+      local tc = flags(inst).tc
+      local p = (tc.fields.codegen_profiles or {})[name]
+      if not p then util.fail("%s asks for codegen profile '%s', which toolchain '%s' does not have", who, name, tc.rec.name) end
+      if p.warn and not warned[tc.rec.name .. "/" .. name] then
+        warned[tc.rec.name .. "/" .. name] = true
+        io.stderr:write(string.format("kormake: warning: %s asks for codegen profile '%s': %s\n", who, name, p.warn))
+      end
       out[#out + 1] = table.concat(p, " ")
     end
     return table.concat(out, " ")

@@ -357,7 +357,9 @@ vendored libraries in it; optional), `configs` (flags per config: `cxxflags`, `c
 `lib_file`, `flag_include`, `flag_include_system`, `flag_define`, `flag_lib`,
 `flag_libdir`, `flag_framework`, `flags_generated` (added when compiling code another
 program wrote: `-w`), `codegen_profiles` (the flags of each profile a module's `codegen`
-or `codegen_sources` names), `isa` (the flags of each instruction set a module's `isa_sources` may be built for),
+or `codegen_sources` names; a profile with a `warn` string, which the toolchain cannot give
+in full, is built with the flags it has and warns once a run where it is asked for, as
+`toolchain-windows`' `wrapv` does), `isa` (the flags of each instruction set a module's `isa_sources` may be built for),
 `sanitizers` (for each name `--sanitize` takes, its `cxxflags` and `ldflags`),
 `externals`, `bindings` (the default backend for each
 interface), and `probe` (`"msvc"` or `"xcode"`: a script that finds the compiler, the SDK
