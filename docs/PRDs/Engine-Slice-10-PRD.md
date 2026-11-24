@@ -229,7 +229,8 @@ bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirE
   (`fstatat` on the open directory, no path walked). With it, POSIX asks of each entry,
   since `readdir` has no sizes; Windows' listing has them either way.
 - **Names that are not UTF-8.** On POSIX a name is bytes and is handed back as it came,
-  which `read_file` opens. On Windows a name is UTF-16 that may hold half a surrogate
+  which `read_file` opens. Apple's file systems refuse to make such a name (`EILSEQ`), so
+  there `utf8` is always true. On Windows a name is UTF-16 that may hold half a surrogate
   pair; it is narrowed to WTF-8 (the surrogate encoded as UTF-8 would encode it), and
   `wide.h` widens WTF-8 back, so the name opens the same file.
 - **Failure** is false with the errno: `ENOENT`, `ENOTDIR`, `EACCES`, `EIO` or what the
@@ -616,7 +617,8 @@ committed there (994a392) and pass in its own checkout.
   equal to `io_stat`'s; the odd name read through the queue; a stop; an empty directory;
   `ENOENT`, `ENOTDIR`, and `EACCES` for a directory with no permissions.
 - **Checked:** `kormake test platform` on linux-debug; `platform` compiled for
-  android-dev. Not checked: Windows, the Apple family.
+  android-dev; on macos-dev Nov 23, where the odd name's write is refused and the test
+  checks that instead of reading it back. Not checked: Windows, iOS.
 
 **Milestone 8, the volume (KR13): built Nov 23, 2026.**
 
@@ -713,7 +715,10 @@ no such case, and their expected files are unchanged.
 keeps its path in an `Array<char>` that grows a level at a time. Test
 (`io_make_dirs_deep`): thirteen levels of 230 bytes, over 3,000 in all, made twice, a file
 written in the deepest, `io_make_dirs` of that file refused, and the tree removed.
-Checked on linux-dev and linux-debug. The Windows change is written, not compiled.
+Checked on linux-dev and linux-debug, and on macos-dev Nov 23: Apple's PATH_MAX is 1,024
+and its calls refuse a longer path, so there the test makes as many levels as fit under
+it (over 700 bytes) and checks that one more is refused. The Windows change is written, not
+compiled.
 
 **Milestone 12, the watcher and links (KR16): built Nov 23, 2026.** As above, in every
 backend:
@@ -733,8 +738,8 @@ backend:
   the root made while it runs. A file written in the root is reported once by its own
   path; one written outside, and every link to a directory, not at all. Without the fix
   the test does not finish: two loops make a walk that doubles at each level.
-- **Checked** on linux-dev and linux-debug. The Windows and macOS changes are written,
-  not compiled.
+- **Checked** on linux-dev and linux-debug, and on macos-dev Nov 23 (the native backend
+  there is FSEvents). The Windows change is written, not compiled.
 
 **Milestone 13, a cosmetic resource's fields (KR17): built Nov 23, 2026.** As above.
 `ResourceEntry` keeps the table in `fields` for whoever describes it and says in `hashed`

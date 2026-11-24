@@ -272,7 +272,8 @@ i32  io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* rela
 // A name is handed back as the OS gave it and opens the same file when joined to `dir`
 // and passed to read_file: bytes on POSIX, which need not be UTF-8, and on Windows WTF-8,
 // UTF-8 that can also carry the half surrogate pair a UTF-16 name may hold. `utf8` says
-// whether it is valid UTF-8, for whoever shows it.
+// whether it is valid UTF-8, for whoever shows it. Apple's file systems refuse a name that
+// is not, so there it is always true.
 enum IoListFlags : u32 {
     IoListHidden = 1u << 0, // hidden entries too (a leading '.'; on Windows, the attribute as well)
     IoListSizes  = 1u << 1, // each entry's size and modification time in st
@@ -286,7 +287,7 @@ struct IoDirEntry {
 };
 bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirEntry& e), void* user, i32* err = nullptr);
 // Creates a directory and its parents (mkdir -p). Synchronous; true if it exists after.
-// The path may be as long as the OS allows, as io_remove_tree's.
+// The path may be as long as the OS allows, as io_remove_tree's (on Apple, 1,024 bytes).
 bool io_make_dirs(const char* path);
 // Removes a file, or a directory that is empty. Synchronous; true if it is gone after.
 bool io_remove(const char* path);

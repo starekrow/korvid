@@ -348,19 +348,34 @@ void test_io_now(kv::TestCtx& c) {
 
 // io_make_dirs as deep as the OS goes (KR15): thirteen levels of 230 bytes, about 3,000
 // in all, past the 1,024 it used to copy into; a file in the deepest, and the tree removed.
+// Apple's PATH_MAX is 1,024 and its calls refuse a longer path (ENAMETOOLONG), so there the
+// levels stop short of it, and one more is refused cleanly.
 void test_io_make_dirs_deep(kv::TestCtx& c) {
     using namespace kv;
     c.begin("io_make_dirs_deep");
     char dir[200];
     KV_CHECK(c, io_make_temp_dir("korvid-deep", dir, sizeof dir));
     char deep[3400];
-    usize n = (usize)format(deep, sizeof deep, "%s", dir);
-    for (u32 level = 0; level < 13; ++level) {
+#if defined(__APPLE__)
+    constexpr usize kOsPathMax = 1024, kWant = 700;
+#else
+    constexpr usize kOsPathMax = sizeof deep, kWant = 3000;
+#endif
+    auto add_level = [&](usize n, u32 level) {
         deep[n++] = '/';
         for (u32 i = 0; i < 230; ++i) deep[n++] = (char)('a' + (level + i) % 26);
         deep[n] = 0;
-    }
-    KV_CHECK(c, n > 3000);
+        return n;
+    };
+    usize n = (usize)format(deep, sizeof deep, "%s", dir);
+    u32 levels = 0;
+    for (; levels < 13 && n + 231 + sizeof "/x.txt" < kOsPathMax; ++levels) n = add_level(n, levels);
+    KV_CHECK(c, n > kWant);
+#if defined(__APPLE__)
+    add_level(n, levels);             // one level past the limit
+    KV_CHECK(c, !io_make_dirs(deep)); // refused, not cut short
+    deep[n] = 0;
+#endif
     KV_CHECK(c, io_make_dirs(deep));
     KV_CHECK(c, io_make_dirs(deep)); // already there
     IoStat st;

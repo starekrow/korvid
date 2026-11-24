@@ -83,7 +83,14 @@ void test_io_list_dir(kv::TestCtx& c) {
 #else
     const char* odd = "\xff\xfe-old.flac";
 #endif
+#if defined(__APPLE__)
+    // Apple's file systems refuse such a name (EILSEQ): it cannot be made, so none is listed.
+    const bool odd_made = false;
+    KV_CHECK(c, !io_write_now(at(odd), "odd bytes", 9));
+#else
+    const bool odd_made = true;
     KV_CHECK(c, io_write_now(at(odd), "odd bytes", 9));
+#endif
     bool links = false;
 #if !defined(_WIN32)
     links = symlink("a.txt", at("link-a")) == 0 && symlink("b", at("link-b")) == 0 && symlink("nowhere", at("link-gone")) == 0;
@@ -96,7 +103,9 @@ void test_io_list_dir(kv::TestCtx& c) {
     KV_CHECK(c, io_list_dir(dir, 0, seen_one, &s1, &err));
     // Bytewise order puts the odd name (0xED or 0xFF first) after every ASCII one.
     const char* want1 = links ? "a.txt:f b:d link-a:lf link-b:ld link-gone:ln ?:f " : "a.txt:f b:d ?:f ";
-    KV_CHECK(c, strcmp(s1.text, want1) == 0);
+    char want1_here[80];
+    format(want1_here, sizeof want1_here, "%.*s", (int)(strlen(want1) - (odd_made ? 0 : 4)), want1);
+    KV_CHECK(c, strcmp(s1.text, want1_here) == 0);
     KV_CHECK(c, err == -1);                    // untouched on success
     KV_CHECK(c, s1.a_size == 0 && s1.a_mtime == 0); // no sizes asked
 
@@ -109,24 +118,26 @@ void test_io_list_dir(kv::TestCtx& c) {
     KV_CHECK(c, s2.a_volume == st.volume && st.volume != 0 && s1.a_volume == 0); // the volume with sizes only
 
     // The odd name, joined to the directory, opens the same file through the queue.
-    struct Odd { char name[64] = {}; bool utf8 = true; } o;
-    KV_CHECK(c, io_list_dir(dir, 0, [](void* user, const IoDirEntry& e) {
-        Odd* got = (Odd*)user;
-        if (!e.utf8) { format(got->name, sizeof got->name, "%s", e.name); got->utf8 = false; }
-        return true;
-    }, &o));
-    KV_CHECK(c, !o.utf8 && strcmp(o.name, odd) == 0);
-    {
-        IoQueue q;
-        KV_CHECK(c, q.init(nullptr, 8));
-        IoRequest r; r.path = at(o.name); r.user = 1;
-        Handle h = q.read_file(r);
-        KV_CHECK(c, !h.is_null() && wait_for(q, 1) == 1);
-        const IoCompletion& cc = q.completions()[0];
-        KV_CHECK(c, cc.status == IoStatus::Done && cc.size == 9 && memcmp(cc.data, "odd bytes", 9) == 0);
-        if (cc.data) mem_free(cc.data);
-        q.reap(h);
-        q.free();
+    if (odd_made) {
+        struct Odd { char name[64] = {}; bool utf8 = true; } o;
+        KV_CHECK(c, io_list_dir(dir, 0, [](void* user, const IoDirEntry& e) {
+            Odd* got = (Odd*)user;
+            if (!e.utf8) { format(got->name, sizeof got->name, "%s", e.name); got->utf8 = false; }
+            return true;
+        }, &o));
+        KV_CHECK(c, !o.utf8 && strcmp(o.name, odd) == 0);
+        {
+            IoQueue q;
+            KV_CHECK(c, q.init(nullptr, 8));
+            IoRequest r; r.path = at(o.name); r.user = 1;
+            Handle h = q.read_file(r);
+            KV_CHECK(c, !h.is_null() && wait_for(q, 1) == 1);
+            const IoCompletion& cc = q.completions()[0];
+            KV_CHECK(c, cc.status == IoStatus::Done && cc.size == 9 && memcmp(cc.data, "odd bytes", 9) == 0);
+            if (cc.data) mem_free(cc.data);
+            q.reap(h);
+            q.free();
+        }
     }
 
     // A stop is not a failure.
