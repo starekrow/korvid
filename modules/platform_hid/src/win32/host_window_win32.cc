@@ -51,6 +51,7 @@ struct WinMsg {
                         // Compose: its UTF-8 in the texts queue, at a, b bytes long
     u32        c, d;    // Compose: the caret and the selection's length, in bytes
     f32        x, y;    // Move, Button: position in pixels; Wheel: dx, dy in notches
+    f64        at;      // time_now() as the window thread queued it: input_delay()'s start
 };
 
 constexpr UINT WM_KV_DESTROY  = WM_APP + 1; // close() asks the window thread to destroy it
@@ -84,13 +85,22 @@ struct Win32Window {
     i32           area_caret = 0;        // the caret's x within it
     bool          area_set = false;
     bool          composing = false;     // the window thread's: a composition was posted and not ended
+    // The loop's wait (KR26). `queued` (manual reset) is set as the window thread appends to
+    // the queue and reset as pump swaps it out, both under mu, so a wait ends early exactly
+    // when something came since the last pump. `woken` (auto reset) is wake()'s. Made at the
+    // first open and kept for the process: a wake from another thread never finds them closed.
+    HANDLE        queued = nullptr;
+    HANDLE        woken  = nullptr;
 };
 
 Win32Window g_win; // one window per process
 
-void post(const WinMsg& m) {
+void post(const WinMsg& msg) {
+    WinMsg m = msg;
+    m.at = time_now();
     os_mutex_lock(&g_win.mu);
     g_win.queue.push(m);
+    SetEvent(g_win.queued);
     os_mutex_unlock(&g_win.mu);
 }
 
@@ -110,6 +120,7 @@ void post_compose(const wchar_t* s, int n, int caret, int sel_from, int sel_len)
     m.c = (u32)bytes(sel_len > 0 ? sel_from : caret);
     m.d = sel_len > 0 ? (u32)bytes(sel_from + sel_len) - m.c : 0;
     g_win.queue.push(m);
+    SetEvent(g_win.queued);
     os_mutex_unlock(&g_win.mu);
     g_win.composing = n > 0;
 }
@@ -459,6 +470,13 @@ bool HostWindow::open(const WindowDesc& desc) {
     w.cursor = 0;
     w.area_set = false;
     w.composing = false;
+    if (!w.queued) w.queued = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!w.woken) w.woken = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!w.queued || !w.woken) {
+        KV_ERROR("window", "CreateEventW failed (error %lu)", (unsigned long)GetLastError());
+        return false;
+    }
+    ResetEvent(w.queued);
     os_mutex_init(&w.mu);
     os_cond_init(&w.cv);
     w.thread = OsThread();
@@ -672,9 +690,16 @@ void HostWindow::pump(EventBus& bus, Input& input) {
     Array<char> swap_texts = w.texts;
     w.texts = w.texts_taken;
     w.texts_taken = swap_texts;
+    ResetEvent(w.queued); // what it was set for is taken
     os_mutex_unlock(&w.mu);
+    // A wake the platform already took (its flag is set before the event) must not end the
+    // next wait as well; one after this sets the flag again, which the next wait reads first.
+    ResetEvent(w.woken);
     MouseState& mouse = input.raw.mouse;
     for (const WinMsg& m : w.taken) {
+        // How long a press waited for the pump, from the window thread's queueing of it: the
+        // part the loop's wait decides (the OS's own delivery before it is not counted here).
+        if ((m.type == WinMsgType::Key || m.type == WinMsgType::Button) && m.on) input_delay_ = time_now() - m.at;
         switch (m.type) {
         case WinMsgType::Close:
             bus.emit(CloseRequested{0});
@@ -750,12 +775,20 @@ void HostWindow::pump(EventBus& bus, Input& input) {
 // pump never asks the OS for anything here: it takes what the window's thread queued.
 void HostWindow::drain(EventBus& bus, Input& input) { pump(bus, input); }
 
-// Milestone 4 of slice 12 waits on the OS here; till then a wait is the 4 ms poll the loop had.
+// The window's thread sets `queued` as it queues a message, so the loop's thread waits on
+// that and on wake()'s event, never on a message queue of its own (it has none: the window's
+// thread owns the window). Whole milliseconds, rounded up, as SDL's wait takes them. Pads
+// read through SDL beside the window do not end a wait (slice 12, "Not woken").
 bool HostWindow::wait(f64 seconds) {
-    if (seconds > 0.0) time_sleep(seconds < 0.004 ? seconds : 0.004);
-    return false;
+    if (seconds <= 0.0 || !native_) return false;
+    f64 ms = seconds * 1000.0 + 0.999;
+    HANDLE both[2] = {g_win.queued, g_win.woken};
+    DWORD r = WaitForMultipleObjects(2, both, FALSE, ms >= 4.0e9 ? INFINITE - 1 : (DWORD)ms);
+    return r == WAIT_OBJECT_0 || r == WAIT_OBJECT_0 + 1;
 }
-void HostWindow::wake() {}
+void HostWindow::wake() {
+    if (g_win.woken) SetEvent(g_win.woken);
+}
 
 // The window's thread takes the system's modal move and size loops, so the frame loop is
 // never held in one and this is never called.

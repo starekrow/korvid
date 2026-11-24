@@ -1,6 +1,5 @@
 // Korvid platform: the thread that watches sockets for platform_wake_set (KR26), behind a
-// seam each OS fills (posix/wake_watch_posix.cc; win32/wake_watch_win32.cc, which cannot
-// yet). module.cc owns the state and calls these from the loop's thread.
+// seam each OS fills (posix/wake_watch_posix.cc; win32/wake_watch_win32.cc). module.cc owns the state and calls these from the loop's thread.
 #pragma once
 #include "korvid/platform/module.h"
 

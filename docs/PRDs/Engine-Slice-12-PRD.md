@@ -303,3 +303,57 @@ and:
   `thread`, with platform's test of a watched socket (a wake when something arrives, again
   while it is unread, none once read or forgotten). The demos hash as at milestone 1, tick
   for tick. `tools/doccheck.sh` reports nothing new.
+
+**Milestone 4, the other backends (KR26): Windows built Nov 24, 2026.** As above, and:
+
+- **Win32's wait.** Two events: `queued` (manual reset), which the window's thread sets as
+  it appends to its queue and `pump` resets as it swaps the queue out, both under the
+  queue's mutex, so a wait ends early exactly when something came since the last pump; and
+  `woken` (auto reset), `wake()`'s. The loop's thread waits on both with
+  `WaitForMultipleObjects`, in whole milliseconds rounded up. `pump` also clears `woken`:
+  the platform's flag, set before the event, is what says a wake came, so a wake the
+  platform already took does not end the next wait as well. Both events are made at the
+  first `open` and kept for the process, so a wake from another thread never finds them
+  closed.
+- **`input_delay()` on Win32**, which had none: each message is stamped as the window's
+  thread queues it, and a key or button press's delay is from there to the pump. That is
+  the part the wait decides, not the OS's delivery before it.
+- **The socket watch** (`win32/wake_watch_win32.cc`): the posix thread's shape, in
+  `WSAPoll`. WSAPoll takes sockets only, so the thread's own wake is a UDP socket bound
+  to the loopback and connected to itself, where POSIX has a pipe. `platform_watches` is
+  true on Windows, so `cli`, `asset_live` and goldberg's window give their sockets there
+  too; platform's test of a watched socket now runs on Windows.
+- **Measured** (windows-dev, Windows 11, the Linux machine dual-booted), `ticker
+  --run-seconds 10`, CPU from the process's times between seconds 3 and 8 (Windows counts
+  them in 15.6 ms steps, so 0.3% is its smallest):
+
+| run | waits in 10 s (window / wake / time) | CPU, seconds 3 to 8 |
+|---|---|---|
+| decoupled, before (the 4 ms wait put back) | 2,318 (0 / 0 / 2,318) | 0.31% |
+| decoupled, now | 42 (0 / 0 / 42) | none counted |
+| on demand, before | 2,292 (0 / 0 / 2,292) | 0.94% |
+| on demand, now | 46 (0 / 0 / 46) | none counted |
+
+- **Input, from another process** (Windows delivers a posted message to a window that does
+  not have the focus, which X11 and Wayland would not): five key presses posted to
+  ticker's window, five resizes (`SetWindowPos`), then `WM_CLOSE`. Decoupled: 16 waits ended
+  by the window; each key seen 0.03 to 0.04 ms after the window's thread queued it; each
+  resize seen 1.5 to 7.9 ms after it was asked, on the same clock; the close ended the run.
+  On demand: 16 by the window, keys 0.03 to 0.06 ms, the resizes as decoupled.
+- **A CLI request** (`help`) to an idle ticker, 72 in all over both pacings: 0.30 ms
+  median, 0.22 the least; two took 6.7 and 18.4 ms, with no pattern to them.
+- **`kromescreens` connected to `goldberg watch`**, 12 s still: 50 waits (window 0, a wake 1,
+  the time 49), no poll, as Linux's 48.
+- **Not done: goldberg's own window still polls on Windows.** Still for 12 s, it waited
+  2,594 times, nearly all by the time. ReadDirectoryChangesW has no descriptor to give, so
+  `FsWatcher::due` asks for a poll 4 ms ahead, as milestone 3 chose for it and FSEvents.
+  Each root's overlapped read does signal an event when it finishes, which a wait could
+  use.
+- **Not measured:** a save's time to the window (`live_numbers.py`; there is no Python on
+  this machine).
+- **Verified, Nov 24, 2026.** `kormake test` passes on windows-debug, windows-dev and
+  windows-ship, with asset_live's test (once each; one flake rerun clean: platform's `io
+  tasks`, whose `free()` must return within a second, under debug while every suite ran
+  at once). `tools/determinism-check.sh` passes: rocks agrees with itself, and arcfire's
+  recordings replay matched. `tools/doccheck.sh` reports nothing new. Android and iOS are
+  not done here.

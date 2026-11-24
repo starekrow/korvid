@@ -100,14 +100,14 @@ PlatformWaits platform_waits(Engine& e);
 // The sockets `owner` wants the loop woken by (KR26): a watched waker's (owner: the waker's
 // user, engine_add_watched_waker), the CLI's. The set replaces what the owner said before;
 // none (n 0) forgets it. The platform watches every owner's from one thread of its own,
-// blocked in poll, started when the first socket is given, and calls platform_wake when one
-// can be read. A socket that woke it is watched again at the next platform_wait (after the
-// pass that should have read it), so one nobody drains does not spin the thread. False
-// where the platform cannot watch (platform_watches) or the sets pass 64 sockets: the
-// owner then asks to be woken soon (engine_want_wake_at), as a poll would.
+// blocked in poll (WSAPoll on Windows), started when the first socket is given, and calls
+// platform_wake when one can be read. A socket that woke it is watched again at the next
+// platform_wait (after the pass that should have read it), so one nobody drains does not
+// spin the thread. False where the platform cannot watch (platform_watches) or the sets
+// pass 64 sockets: the owner then asks to be woken soon (engine_want_wake_at), as a poll would.
 bool platform_wake_set(Engine& e, const void* owner, const NetFd* fds, u32 n);
-// Whether platform_wake_set watches here: false on Windows until slice 12's milestone 4. A
-// waker picks engine_add_watched_waker or engine_add_waker by it.
+// Whether platform_wake_set watches here (every platform has the thread now). A waker
+// picks engine_add_watched_waker or engine_add_waker by it.
 bool platform_watches(Engine& e);
 
 } // namespace kv

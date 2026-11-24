@@ -88,7 +88,8 @@ struct HostWindow {
     // Ends the wait under way, or the next to begin. Any thread.
     void wake();
     // Seconds from the OS's stamp on the last key or button pressed to the pump that read
-    // it: a measure of how soon the loop saw it. 0 where the OS stamps nothing.
+    // it (on Win32, from the window thread's queueing of it): a measure of how soon the loop
+    // saw it. 0 where nothing is stamped.
     f64  input_delay() const { return input_delay_; }
     // Some OSes hold the thread that pumps in a loop of their own while the window is being
     // resized: on macOS a live resize runs AppKit's event-tracking loop inside pump until

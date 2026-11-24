@@ -21,7 +21,7 @@ again each time, so a watch started later (or restarted on another port) is foun
 
 **Heard at once.** The socket is read in the Input phase of every tick, and also from an
 engine waker that an idle frame loop asks each pass. Where the platform watches sockets
-(`platform_watches`: not Windows yet) it is a watched one (`engine_add_watched_waker`): the
+(`platform_watches`) it is a watched one (`engine_add_watched_waker`): the
 connection is given to `platform_wake_set`, so a line from goldberg ends the loop's wait,
 and while there is no connection it asks to be woken for the next try
 (`engine_want_wake_at`). Elsewhere the loop polls for it every 4 ms. A save reaches an idle

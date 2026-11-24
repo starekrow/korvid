@@ -84,11 +84,11 @@ begins ends it at once. A frame loop with nothing to do waits here between passe
 wants the loop woken by, replacing what it said before (`n` 0 forgets them): a watched
 waker's (`engine_add_watched_waker`, the owner its `user`), the CLI's listener and
 sessions. One thread of the platform's, started at the first socket and blocked in
-`poll`, calls `platform_wake` when one can be read, and leaves it out till the next
-`platform_wait`, by when the pass it woke has read it: a socket nobody drains wakes each
-wait, not the thread for ever. 64 sockets in all. `platform_watches(e)` is false where
-there is no such thread yet (Windows): a waker then registers with `engine_add_waker`, and
-the loop polls for it.
+`poll` (`WSAPoll` on Windows), calls `platform_wake` when one can be read, and leaves it
+out till the next `platform_wait`, by when the pass it woke has read it: a socket nobody
+drains wakes each wait, not the thread for ever. 64 sockets in all. `platform_watches(e)`
+says whether the platform has the thread (every one does now); where it does not, a waker
+registers with `engine_add_waker`, and the loop polls for it.
 
 ## Using it
 
@@ -235,7 +235,7 @@ Header `korvid/platform/module.h`:
 | `platform_set_waiter(engine, w)`, `PlatformWaiter` | function, record | the window's `wait(user, seconds)` (1 early, 0 the time, -1 cannot now) and `wake(user)`; null clears |
 | `platform_waits(engine)`, `PlatformWaits` | function, record | `waits`, and of them ended by the `window`, `woken`, `timed` |
 | `platform_wake_set(engine, owner, fds, n)` | function | the owner's sockets that wake a waiting loop, replacing what it said; false where not watched or past 64 |
-| `platform_watches(engine)` | function | whether `platform_wake_set` watches here (not on Windows yet) |
+| `platform_watches(engine)` | function | whether `platform_wake_set` watches here |
 
 What the module registers with the engine:
 

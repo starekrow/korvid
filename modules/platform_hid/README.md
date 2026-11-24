@@ -33,9 +33,12 @@ only `present_blank`. **Waiting for it** (KR26): `HostWindow::wait(seconds)` blo
 OS has something for the next pump or `wake()` is called, taking nothing off the queue,
 and the module gives it to `platform_wait` while the window is open. On SDL3 it is
 `SDL_WaitEventTimeout` with no event to fill, in whole milliseconds rounded up; `wake()`
-pushes one user event at most, which the pump takes. Win32, Android and iOS wait 4 ms at
-most until each has a wait of its own (slice 12, milestone 4). `input_delay()` is how long
-the last key or button pressed waited, from the OS's stamp to the pump (SDL's stamps).
+pushes one user event at most, which the pump takes. On Win32 the loop's thread waits on two
+events: one the window's thread sets as it queues a message (and the pump resets as it takes
+them), and `wake()`'s; pads read through SDL beside the window do not end a wait. Android
+and iOS wait 4 ms at most until each has a wait of its own (slice 12, milestone 4).
+`input_delay()` is how long the last key or button pressed waited for the pump: from SDL's
+stamp on SDL3, from the window thread's queueing of it on Win32.
 
 **Input** (`input.h`, `events.h`). Two copies of the state: `raw`, updated by the pump at
 frame rate, and `sampled`, copied once per tick by the system `input.sample` (phase
