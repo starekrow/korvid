@@ -46,18 +46,21 @@ ninja_path() { printf '%s' "$1" | sed -e 's/\$/$$/g' -e 's/ /$ /g' -e 's/:/$:/g'
 # \), and the graph's columns pad around "windows" where they pad around "linux" or
 # "macos", two letters shorter: the padding is given back so one expected set serves all.
 host_spelling() {
+  # The project's player says how to fetch fakepw per platform (its module.lua): this
+  # host's words, and only these, are {fetch}, so another platform's would still differ.
+  case "$host" in
+    linux) fetch='sudo apt install libfakepw-0.3-dev';;
+    macos) fetch='brew install fakepw';;
+    windows) fetch='vcpkg install fakepw';;
+    *) fetch='{fetch}';;
+  esac
   if [ "$host" = windows ]; then
     pad=$(printf '%*s' $((${#host} - 5)) '')
-    # The fixture's cook is copy_assets.sh, or copy_assets.bat beside it on Windows.
-    sed -E -e "s|\"|'|g" -e "s/(\{host\}-(dev|ship))(  +)/\1\3$pad/g" -e "s|copy_assets\.bat|copy_assets.sh|g"
+    # The fixture's cook is copy_assets.sh, or copy_assets.bat beside it on Windows; the
+    # project's fake pkg-config likewise.
+    sed -E -e "s|\"|'|g" -e "s/(\{host\}-(dev|ship))(  +)/\1\3$pad/g" -e "s|copy_assets\.bat|copy_assets.sh|g" \
+           -e "s|fake-pkg-config\.bat|fake-pkg-config|g" -e "s|^$(re "$fetch")\$|{fetch}|"
   else
-    # The project's player says how to fetch fakepw per platform (its module.lua): this
-    # host's words, and only these, are {fetch}, so another platform's would still differ.
-    case "$host" in
-      linux) fetch='sudo apt install libfakepw-0.3-dev';;
-      macos) fetch='brew install fakepw';;
-      *) fetch='{fetch}';;
-    esac
     sed -e "s|^$(re "$fetch")\$|{fetch}|"
   fi
 }
@@ -113,14 +116,13 @@ normalize <"$out/commands.txt.raw" >"$out/commands.txt"
 rm "$out/commands.txt.raw"
 
 # The project beside the fixture (tests/project): externals a module and a korvid.config
-# define, one of them asked of pkg-config (a fake one, a shell script: on Windows this part
-# is not run, and the expected files stand in for it).
-if [ "$host" = windows ]; then
-  cp "$here"/expected/project-* "$out/"
-else
+# define, one of them asked of pkg-config (a fake one, a shell script; on Windows the .bat
+# beside it, which cmd can run, hands it to Git Bash's sh).
+{
   cwd=$proj
   log=project-commands.txt
   fake=KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config
+  [ "$host" = windows ] && fake=$fake.bat
   run $fake gen host-dev
   normalize <"$proj/build/$host-dev/build.ninja" >"$out/project-host-dev.ninja"
   if command -v ninja >/dev/null 2>&1; then
@@ -143,7 +145,7 @@ else
   cp "$tmp/codec.keep" "$codec"
   normalize <"$out/$log.raw" >"$out/$log"
   rm "$out/$log.raw"
-fi
+}
 
 if [ -n "$update" ]; then
   rm -rf "$here/expected"

@@ -10,7 +10,7 @@ case "$1" in
   --cflags-only-I) echo "-I/usr/include/fakepw-0.3 -I/usr/include/fakespa-0.2";;
   --libs-only-L) echo "-L/usr/lib/fakepw";;
   --libs-only-l) echo "-lfakepw-0.3 -lfakespa";;
-  --variable=pcfiledir) cd "$(dirname "$0")" && pwd -P;;
+  --variable=pcfiledir) cd "$(dirname "$0")" && { pwd -W 2>/dev/null || pwd -P; };; # -W: C:/ on Windows
   --modversion) echo 0.3.40;;
   --atleast-version=9*) exit 1;;
   --atleast-version=*) ;;

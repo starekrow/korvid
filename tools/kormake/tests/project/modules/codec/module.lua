@@ -9,5 +9,6 @@ module "codec" {
   externals = {
     linux = { sysaudio = { include = { "/usr/include/sysaudio-1" }, libdirs = { "/usr/lib/sysaudio" }, libs = { "sysaudio" } } },
     macos = { sysaudio = { include = { "/usr/include/sysaudio-1" }, libdirs = { "/usr/lib/sysaudio" }, libs = { "sysaudio" } } },
+    windows = { sysaudio = { include = { "/usr/include/sysaudio-1" }, libdirs = { "/usr/lib/sysaudio" }, libs = { "sysaudio" } } },
   },
 }

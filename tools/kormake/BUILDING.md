@@ -199,23 +199,23 @@ The script copies the fixture to a temporary directory, runs `gen` for `host-dev
 thread, a name the host toolchain lacks, the cross toolchain, which has none, and
 `check`), and then `check`, `graph`, `graph --why` and a `build` of the left-out module. It compares each `build.ninja` and the commands' output with
 `tests/expected/`. Paths are written as `{root}` and `{kormake}`, and the host's
-platform as `{host}`, so the expected files are the same on Linux and macOS. When Ninja
+platform as `{host}`, so the expected files are the same on Linux, macOS and Windows. When Ninja
 is on `PATH`, it also parses each file with a dry run.
 
 `tests/project/` is a project outside that engine root (`engine "../fixture"`), copied
 beside it: an external its `korvid.config` defines, one a module defines with absolute
 paths, and one asked of pkg-config. `KORMAKE_PKG_CONFIG` names `pkgs/fake-pkg-config`, a
-shell script that knows one package, so the result is the same on every machine. The
+shell script that knows one package (on Windows `fake-pkg-config.bat` beside it, which
+hands it to Git Bash's `sh`), so the result is the same on every machine. The
 script runs `gen`, `graph`, a `check` with the package missing, a `gen` with no
 pkg-config at all, and a `check` for a platform the project defines nothing for, into
-`expected/project-*` with the project's path written as `{project}`. On Windows this
-part is not run.
+`expected/project-*` with the project's path written as `{project}`.
 
 Run it after any change to `scripts/`. A difference is either a bug or a change you
 meant; for the second, run it with `--update` and commit `tests/expected/` with the
-change, so the diff shows what the change does to the Ninja files. The test runs on
-Linux and macOS only: Windows quotes paths its own way, so its files would need expected
-files of their own, and there is no `run.bat`.
+change, so the diff shows what the change does to the Ninja files. On Windows it runs from
+Git Bash, with MSVC's kormake: what differs by spelling alone (`"` for `'`, the `.bat`s
+beside the scripts, the graph's padding) is written back to the others' before comparing.
 
 ## Diagnosing a failed build
 

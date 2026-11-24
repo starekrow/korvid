@@ -797,5 +797,8 @@ suite passes in all three. What cl and Windows found:
   flags there and a `warn`: a toolchain's profile may carry one, and kormake says it once
   a run where a module asks for it, then builds. A source that needs wrapping on Windows
   must do it itself, in unsigned arithmetic. No module in the engine asks for the profile.
-- **Not checked:** KR12's share (no share here), the project half of kormake's test (as
-  before).
+- **kormake's test runs whole on Windows.** The project half was skipped there, its fake
+  pkg-config a shell script; `fake-pkg-config.bat` beside it hands it to Git Bash's `sh`,
+  and the project defines its externals for Windows too. Its output is the expected
+  files Linux wrote, byte for byte.
+- **Not checked:** KR12's share (no share here).

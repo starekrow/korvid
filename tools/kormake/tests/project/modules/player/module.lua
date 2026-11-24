@@ -7,5 +7,6 @@ module "player" {
   externals = {
     linux = { fakepw = { pkg_config = "libfakepw-0.3", libs = { "fakepw-fallback" }, fetch = "sudo apt install libfakepw-0.3-dev" } },
     macos = { fakepw = { pkg_config = "libfakepw-0.3", libs = { "fakepw-fallback" }, fetch = "brew install fakepw" } },
+    windows = { fakepw = { pkg_config = "libfakepw-0.3", libs = { "fakepw-fallback" }, fetch = "vcpkg install fakepw" } },
   },
 }
