@@ -3,11 +3,13 @@
 // onto the completion list once per frame; completions stay there until a consumer reaps
 // them, taking ownership of the data. Nothing completes inline.
 //
-// Two backends behind one shape. On Linux the pump hands reads to an io_uring (raw
-// syscalls, no library) and reaps what has finished without waiting; everywhere else, and
-// when the ring cannot be set up, the pump performs the reads itself with fopen/fread in
-// priority order. Callers see the same queue either way; a test that wants the ordering
-// of the synchronous path asks for it.
+// Two backends behind one shape. The ring: the pump hands reads to the OS's async ring
+// and reaps what has finished without waiting (io_uring on Linux, by raw syscalls; I/O
+// rings on Windows 11; a few workers behind the same seam on the Apple family and
+// Android, which have no ring an app may use). The synchronous one, when the ring cannot
+// be set up or a caller asks: the pump performs the reads itself, in priority order, on
+// the same OS layer the blocking calls below use. Callers see the same queue either way;
+// a test that wants the ordering of the synchronous path asks for it.
 //
 // The pump is bounded by bytes, not requests: handing a read to the kernel costs time in
 // proportion to its size (page cache allocation, and on a hot cache the whole read runs
@@ -18,7 +20,8 @@
 //
 // A path has no limit of the queue's: one of 256 bytes or more is copied into a block
 // from the request's allocator, and a path the OS refuses (past 4,096 bytes on Linux)
-// completes Failed with the OS's error. Mounts are the exception: IoMount::path is 256.
+// completes Failed with the OS's error. Mounts are the exception: a mount's path is 255
+// bytes at most.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/atomic.h"

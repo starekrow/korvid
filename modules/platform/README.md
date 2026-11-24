@@ -5,8 +5,19 @@ queue with its mounts, the executable's and the user's directories, and TCP sock
 links no external library, so a tool built on the engine (`kpack`) needs nothing
 installed on the build machine beyond the compiler. The window, the keyboard and gamepads
 are `platform_hid`'s; the audio device is `platform_audio`'s. Nothing here blocks the
-thread that calls it, and nothing here runs a thread of its own: everything is pumped once
-per frame, by the frame loop in a game and by the `tool` module in a tool.
+thread that calls it unless its name or its header says it is for tools (the blocking
+file calls, `Process::wait`): everything else is polled or pumped once per frame, by the
+frame loop in a game and by the `tool` module in a tool. The module's own threads are
+few and never call a caller's code but to wake it: the queue's task workers once
+`start_tasks` asks for them, the ring's workers where the OS has no ring of its own
+(Apple, Android), one thread watching what a waiting loop is woken by, and the settings
+store's writer.
+
+**One shape for all of it.** What the OS opened is a `KHandle`, which knows what kind of
+thing it is. What is opened is closed (`open`, `close`, `is_open`). A blocking call that
+can fail takes a last `i32* err`, an errno on every OS. A read gives an `IoBytes`,
+whether it was asked for now or later. What a waiting loop is woken by goes in a
+`PlatformWatch`, whatever it is. Times are seconds, paths are UTF-8 with `/`.
 
 ## How it works
 
@@ -18,8 +29,10 @@ syscalls, on Windows 11 the OS's I/O rings (`ioringapi.h`, version 3 or later fo
 looked up in KernelBase by name, so an executable still starts on Windows 10). Either way
 one submit per pump, completions reaped without waiting, short reads continued, cancels
 honoured when the ring answers, and the same plain file handles the synchronous path
-uses. Elsewhere (macOS), or when the OS refuses a ring, the pump performs the reads itself
-in priority order. `IoBackend::Ring` asks for the ring whatever the OS calls it;
+uses. The Apple family and Android have no such ring an app may use, so there the ring is
+a few workers behind the same seam. When the OS refuses a ring, or `IoBackend::Sync` asks,
+the pump performs the reads itself in priority order. `IoBackend::Ring` asks for the ring
+whatever the OS calls it;
 `backend_name()` says which ran: `io_uring`, `ioring`, `dispatch` (the Apple family: Grand
 Central Dispatch's workers), `threads` (Android, whose apps are refused io_uring: four
 threads of the ring's own) or `sync`. A pump is bounded in bytes, not requests
@@ -34,33 +47,43 @@ grows past its limit drops writes and counts them rather than stall the frame. L
 by default. This is the CLI's transport and may be a game's.
 
 **Watching** (`fs_watch.h`). An `FsWatcher` is given directory trees and polled, like a
-socket: no thread, no blocking. inotify on Linux; everywhere, and as the only backend on
-the other platforms for now, a polling backend that walks the trees at an interval and
-compares sizes and modification times. A link to a directory inside a root is neither
+socket: no thread of its own, no blocking. The native backend asks the OS (inotify on
+Linux, ReadDirectoryChangesW on Windows, FSEvents on macOS); the polling backend, which
+is all there is on iOS and Android and what any root can ask for, walks the trees at an
+interval and compares sizes and modification times. A link to a directory inside a root is neither
 gone down nor reported, on either backend. Events are hints (added, changed, removed, a
 directory come or gone, rescan): the reader compares content before believing one. The
 header says what holds on both backends. The backend is chosen per root: on a share
 (`io_path_is_remote`: NFS, SMB, any FUSE mount) the OS hears only this machine's writes,
 so a watcher made with `Auto` polls such a root every `remote_interval` seconds (5), and
 `add_root(dir, FsWatchBackend::Poll)` polls one the test misses; `root_backend(id)` says
-which a root got. For a loop that waits, `wake_handle()` is inotify's descriptor (a `KHandle`, else none);
-where there is none, `set_wake(fn, user)` has ReadDirectoryChangesW (a one-shot wait in the
-thread pool on each root's read) or FSEvents (its queue's callback) call `fn` when there is
-news, once till a poll takes it; and `due()` is the time by which `poll()` should next be
-called for news neither tells of (a polled root's walk).
+which a root got. A loop that waits adds the watcher to its `PlatformWatch` and is woken
+when there is news; underneath, `wake_handle()` is inotify's descriptor (a `KHandle`, else
+none), `set_wake(fn, user)` has ReadDirectoryChangesW (a one-shot wait in the thread pool
+on each root's read) or FSEvents (its queue's callback) call `fn` once till a poll takes
+the news, and `due()` is the time by which `poll()` should next be called for what neither
+tells of (a polled root's walk).
 
 **Processes** (`process.h`). `Process::spawn` takes an argument vector, a working
 directory and additions to the environment; `running`, `read_out`, `read_err` and `kill`
-never block. The child has no stdin and its own process group, so killing it takes what
-it started. POSIX only so far: on Windows `spawn` fails and says so. For tools.
+never block; `wait(seconds)` is for a thread that owns the child and has nothing else to
+do. The child has no stdin and its own process group (a job object on Windows), so
+killing it takes what it started. `process_supported()` is false only on iOS. For tools.
 
-**Directories.** `platform_base_dir` is the executable's directory, read from
-`/proc/self/exe` at startup; `platform_user_dir(e, UserDir::Data, org, app)` is the per-user directory
-for saves and settings, `$XDG_DATA_HOME/<org>/<app>/` (or `~/.local/share/<org>/<app>/`),
-created on first use. `platform_user_dir(e, which, org, app)` names the three kinds apart,
-where each OS keeps them: `Settings` (`$XDG_CONFIG_HOME`), `Data` (the preference
-directory) and `Cache` (`$XDG_CACHE_HOME`, which backups leave out); `io.h` has the
-table. All end in a separator.
+**Standard input** (`stdin.h`). `io_stdin_read` takes what has arrived on the process's
+stdin without blocking, whatever it is (a pipe, a file, a terminal): the CLI's transport
+when another program drives this one.
+
+**Directories** (`paths.h`). `platform_base_dir` is the executable's directory (an Apple
+bundle's resources), asked of the OS at startup. `platform_user_dir(e, which, org, app)`
+is one of the three places a program keeps what is its user's, where each OS keeps that
+kind, created on first use: `Settings`, `Data` (saves) and `Cache` (which backups leave
+out); the header has the table for every OS. These end in a separator.
+`platform_assets_dir` is where the program's loose assets are, and does not.
+
+**Locks.** `io_lock_file(path, who, &lock, holder, cap, &err)` is a lock between
+processes by a file's name, asked for without waiting: a tool that must be the only one
+on its output tree. The OS lets go of it when the process ends, however it ends.
 
 **Settings** (`settings.h`). `platform_settings(e, org, app)` is the program's store:
 named integers, numbers, strings and structs (by their field tables) in `settings.json`
@@ -154,7 +177,7 @@ asset module is the model consumer.
 main-thread system every tick:
 
 ```cpp
-for (int fd; (fd = listener.accept()) >= 0;) sessions.push(...).sock.adopt(fd);
+for (KHandle h; (h = listener.accept()).is_open();) sessions.push(...).sock.adopt(h);
 for (Session& s : sessions) {
     i32 n = s.sock.read(buf, sizeof buf);      // 0: nothing yet; -1: the peer closed
     if (n > 0) s.sock.write(buf, (u32)n);      // queued
@@ -167,8 +190,8 @@ Throughput through a tick system is what the kernel buffers hold times the tick 
 
 **Writes** go through the same queue: `write_file(IoWriteRequest{path, data, size})` copies
 the bytes at submission (the caller's buffer is free to go), creates or truncates the file
-at the pump under the same priorities and budget as reads (`IORING_OP_WRITE` on the ring,
-`fopen` on the fallback), and completes with the bytes written and no data. A save or a
+at the pump under the same priorities and budget as reads (`IORING_OP_WRITE` on io_uring;
+the blocking layer's own write on the synchronous path), and completes with the bytes written and no data. A save or a
 settings file is a write to `platform_user_dir(e, UserDir::Data, org, app)`, the per-user directory
 for the names given ($XDG_DATA_HOME, or ~/.local/share, then `<org>/<app>/`) (created on first use).
 
@@ -179,8 +202,8 @@ it with 0 bytes. The budget counts the range, so the first 64 KB of a large file
 64 KB. `read_asset` reads whole files only.
 
 **Ask what a path is without waiting** with `stat_file(IoRequest{path})`: the completion's
-`stat` has `is_file`, `is_dir`, `size`, `mtime_ns` and `volume`, as `io_stat_file` gives them, and no
-data. Nothing there is `Done` with both flags false; `Failed` is an error on the way. On
+`stat` has `kind` (`is_file()`, `is_dir()`), `size`, `mtime_ns` and `volume`, as `io_stat_file` gives them, and no
+data. Nothing there is `Done` with `IoKind::None`; `Failed` is an error on the way. On
 io_uring it is one `IORING_OP_STATX`; where the ring has no stat (Windows, Apple, Android)
 it runs on the task workers, and under `--io sync`, or with no workers started, at the
 pump.
@@ -211,7 +234,8 @@ pack. A tool mounts nothing.
 `io_read_file(path, &bytes)` reads a whole file into an `IoBytes` (a NUL after the bytes,
 so text is a C string; `free()` returns them), `io_write_file(path, data, size)` writes one
 whole, and an `IoFileWriter` (`open`, `write`, `print`, `close`, a failure that sticks)
-writes one in pieces. `io_is_file` and `io_is_dir` say what a path names. They stand on
+writes one in pieces. `io_is_file` and `io_is_dir` say what a path names. Each that can fail
+takes a last `i32* err`: an errno on every OS, set on failure. They stand on
 the queue's own OS layer, UTF-8 paths and all, so nothing in the engine needs `<stdio.h>`
 to touch a file. `io_list_files(dir, fn, user)` walks a directory (sorted, hidden entries
 skipped) and `io_make_dirs(path)` is `mkdir -p`. `io_list_dir(dir, flags, fn, user, &err)`
@@ -234,26 +258,49 @@ Header `korvid/platform/io.h`:
 | `IoBackend` | enum | `Auto`, `Sync`, `Ring` (the async ring: io_uring, or Windows I/O rings): what `init` tries |
 | `IoBudget` | record | `bytes_per_pump` (8 MB), `bytes_in_flight` (64 MB), `idle_bytes_per_call` (4 MB); 0 is unlimited |
 | `IoRequest` | record | `path` (copied, any length), `alloc` (the data's home; null: general), `priority`, `user`, `offset` and `length` (a part of the file, for `read_file`; 0: to the end) |
-| `IoStat` | record | `is_file`, `is_dir`, `size`, `mtime_ns`, `volume` (for equality: another disk at the same path differs; 0 where not asked): what a path names, following links |
+| `IoStat`, `IoKind` | record, enum | `kind` (`None`, `File`, `Dir`, `Other`), `is_file()`, `is_dir()`, `size`, `mtime_ns`, `volume` (for equality: another disk at the same path differs; 0 where not asked): what a path names, following links |
 | `IoDirEntry` | record | `name`, `st`, `is_link`, `hidden`, `utf8`: one entry of `io_list_dir` |
 | `io_list_dir(dir, flags, fn, user, err)` | function | one directory's entries in name order; flags (`IoListFlags`) `IoListHidden`, `IoListSizes`; false with the errno |
 | `IoCompletion` | record | `request`, `status`, `bytes` (a read's `IoBytes`: `data`, `size`, a NUL after, `free()`), `written`, `user`, `error` (errno), `stat` (a `stat_file`'s answer) |
 | `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mount_count()`, `mount_table(i)`, `capacity()`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `take(h, &c)`, `is_pending(h)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
+| `io_read_file(path, &bytes, alloc, &err)`, `io_write_file`, `io_copy_file`, `io_stat_file`, `io_read_each` | functions | the blocking twins of the queue's requests, for tools, startup and tests |
+| `io_make_dirs`, `io_remove`, `io_remove_tree`, `io_rename`, `io_make_temp_dir`, `io_list_files`, `io_current_dir`, `io_is_file`, `io_is_dir` | functions | directories and names, blocking; each that can fail takes a last `i32* err` |
+| `io_lock_file(path, who, &lock, holder, cap, &err)`, `io_unlock_file(lock)` | functions | a lock between processes by a file's name, asked for without waiting; `EWOULDBLOCK` and the holder's line when another has it |
 | `platform_io(engine)` | function | the module's queue |
-| `platform_user_dir(engine, UserDir::Data, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none (`UserDir::Data`) |
 | `platform_settings(engine, org, app)`, `SettingsStore` | function, record | the program's settings store, opened in the settings directory at the first call |
 | `settings_open_dir`, `settings_close`, `settings_flush` | functions | a store in a directory; closed (written); waited on |
 | `settings_has`, `settings_int`, `settings_number`, `settings_string`, `settings_struct` | functions | a value, or the fallback; a struct's stored fields into it |
 | `settings_set_int`, `settings_set_number`, `settings_set_string`, `settings_set_struct`, `settings_remove` | functions | a value set (written soon, off the thread), or gone |
+
+Header `korvid/platform/paths.h`:
+
+| name | kind | what |
+|---|---|---|
 | `platform_user_dir(engine, which, org, app)`, `UserDir` | function, enum | `Settings`, `Data` or `Cache`: where each OS keeps that kind, created on first use, trailing separator |
-| `platform_base_dir(engine)` | function | the executable's directory with a trailing separator; assets live beneath it |
+| `platform_base_dir(engine)`, `platform_exe_dir(out, cap)` | functions | the executable's directory with a trailing separator; assets live beneath it. The second asks the OS, for code with no engine |
+| `platform_assets_dir(out, cap)` | function | the program's loose assets, no trailing separator |
+
+Header `korvid/platform/khandle.h`:
+
+| name | kind | what |
+|---|---|---|
+| `KHandle` | record | what the OS opened, with its kind: `is_open()`, `kind()`, compared and handed back; none is -1 |
+| `KHandleKind` | enum | `None`, `File`, `Socket`, `Pipe`, `Notify`, `Process` |
+
+Headers `korvid/platform/fs_watch.h`, `process.h`, `stdin.h`:
+
+| name | kind | what |
+|---|---|---|
+| `FsWatcher` | record | `open(backend, poll_interval, remote_interval, &err)`, `close()`, `is_open()`, `add_root(dir, how, &err)`, `remove_root(id)`, `poll(now)`, `backend_name()`, `root_backend(id)`, `lateness()`, `wake_handle()`, `set_wake(fn, user)`, `due()` |
+| `Process`, `ProcessDesc` | records | `spawn(desc)` (`error` says why not), `running()`, `read_out`, `read_err`, `wait(seconds)`, `kill()`, `close()`, `is_open()`, `code` |
+| `io_stdin_read(buf, cap)`, `io_stdin_is_terminal()`, `io_stdin_handle()` | functions | the process's stdin without blocking; whether it is a terminal; what a `PlatformWatch` watches for it |
 
 Header `korvid/platform/net.h`:
 
 | name | kind | what |
 |---|---|---|
-| `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`), `close()`, `is_open()`, `accept()` (fd or -1) |
-| `NetSocket` | record | `adopt(fd)`, `read(buf, cap)` (bytes, 0, or -1 closed), `write(data, len)`, `write_str(s)`, `flush()`, `close()`, `is_open()`, `out_limit`, `closed`, `bytes_in`, `bytes_out`, `dropped` |
+| `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`), `close()`, `is_open()`, `accept()` (a `KHandle`, or none) |
+| `NetSocket` | record | `adopt(handle)`, `read(buf, cap)` (bytes, 0, or -1 closed), `write(data, size)`, `write_str(s)`, `flush()`, `close()`, `is_open()`, `out_limit`, `closed`, `bytes_in`, `bytes_out`, `dropped` |
 | `net_connect_local(port, &sock)` | function | a non-blocking connect to loopback, for tools and tests |
 
 Header `korvid/platform/module.h`:
@@ -300,9 +347,10 @@ What the module registers with the engine:
 
 The window and input (`platform_hid`), the audio device (`platform_audio`), inflating on
 the job pool (a deflated pack entry is inflated on the main thread at the pump),
-unmounting, the ring for sockets, IPv6 and non-loopback listeners by default, an async
-backend on macOS. Residency streaming sits above the queue, in the asset module and
-whatever comes after it.
+unmounting, the ring for sockets, IPv6, UDP and connections to another machine, and one
+wait over every kind of handle on Windows (a pipe is asked about again soon instead of
+watched: `PlatformWatch`). Residency streaming sits above the queue, in the asset module
+and whatever comes after it.
 
 ## A program's own files
 
