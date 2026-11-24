@@ -88,7 +88,7 @@ bool FsJob::begin(IoQueue* queue, IoBackend backend, Allocator* data_alloc, u32 
     alloc = data_alloc;
     inflight_max = inflight;
     priority = prio;
-    submitted_at.resize_fill(q->entries.max_items, 0.0);
+    submitted_at.resize_fill(q->capacity(), 0.0);
     t0 = time_now();
     return true;
 }

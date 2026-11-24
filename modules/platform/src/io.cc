@@ -7,11 +7,13 @@
 #include "korvid/core/utf8.h"
 #include "korvid/inflate/inflate.h"
 #include "io_ring.h"
+#include "io_internal.h"
 #include "io_task.h"
 #include "os_file.h"
 #include "os_paths.h"
 #include "korvid/platform/module.h"
 #include <errno.h>
+#include <new>
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,11 +23,11 @@ namespace {
 
 constexpr u32 kRingEntries = 256;
 
-void* io_resolve(kv_handle h, void* ctx) { return ((IoQueue*)ctx)->entries.get(Handle{h}); }
+void* io_resolve(kv_handle h, void* ctx) { return ((IoQueue*)ctx)->entries->get(Handle{h}); }
 
 int io_describe(kv_handle h, void* ctx, char* out, size_t cap) {
     IoQueue& q = *(IoQueue*)ctx;
-    IoEntry* e = q.entries.get(Handle{h});
+    IoEntry* e = q.entries->get(Handle{h});
     if (!e) return format(out, cap, "stale");
     const char* st = e->status == IoStatus::Pending ? (e->in_flight ? "in flight" : "pending") :
                      e->status == IoStatus::Done ? "done" : e->status == IoStatus::Failed ? "failed" : "cancelled";
@@ -35,8 +37,8 @@ int io_describe(kv_handle h, void* ctx, char* out, size_t cap) {
 // Higher priority first, then submission order.
 int compare_queued(const void* a, const void* b, void* ctx) {
     IoQueue& q = *(IoQueue*)ctx;
-    const IoEntry* x = q.entries.get(*(const Handle*)a);
-    const IoEntry* y = q.entries.get(*(const Handle*)b);
+    const IoEntry* x = q.entries->get(*(const Handle*)a);
+    const IoEntry* y = q.entries->get(*(const Handle*)b);
     if (!x || !y) return 0;
     if (x->priority != y->priority) return (u8)x->priority > (u8)y->priority ? -1 : 1;
     return x->sequence < y->sequence ? -1 : (x->sequence > y->sequence ? 1 : 0);
@@ -146,7 +148,7 @@ bool clip_range(IoEntry& e, KHandle fd, i32* err) {
 
 // ---- the synchronous backend: one read, write or stat, now -----------------------------------
 void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
-    IoEntry* e = q.entries.get(h);
+    IoEntry* e = q.entries->get(h);
     out.request = h;
     out.user    = e->user;
     if (e->status == IoStatus::Cancelled) { out.status = IoStatus::Cancelled; drop_write_copy(*e); return; }
@@ -316,7 +318,7 @@ void ring_reap(IoQueue& q) {
     u64 user; i32 res;
     while (io_ring_pop(q.ring, &user, &res)) {
         Handle h{user};
-        IoEntry* e = q.entries.get(h);
+        IoEntry* e = q.entries->get(h);
         if (!e || !e->in_flight) { KV_WARN("io", "completion for an unknown request"); continue; }
         if (e->stat) { ring_finish_stat(q, h, *e, res); continue; }
         if (e->status == IoStatus::Cancelled) { ring_finish(q, h, *e, IoStatus::Cancelled, 0, 0); continue; }
@@ -343,7 +345,7 @@ usize admit(IoQueue& q, usize budget, bool idle, bool* capped) {
     *capped = false;
     for (; taken < q.queued.len; ++taken) {
         Handle h = q.queued[taken];
-        IoEntry* e = q.entries.get(h);
+        IoEntry* e = q.entries->get(h);
         if (e->status == IoStatus::Cancelled) {
             IoCompletion c{};
             c.request = h; c.user = e->user; c.status = IoStatus::Cancelled;
@@ -410,7 +412,9 @@ i32 io_stat_errno(const char* path, IoStat* out) {
 }
 
 bool IoQueue::init(Allocator* storage, u32 max_in_flight, IoBackend backend) {
-    queued.alloc = completed.alloc = mounts.alloc = storage;
+    entries = new (mem_alloc(sizeof(Pool<IoEntry>))) Pool<IoEntry>{};
+    mounts  = new (mem_alloc(sizeof(Array<IoMount>))) Array<IoMount>{};
+    queued.alloc = completed.alloc = mounts->alloc = storage;
     kv_handle_kind_desc desc{};
     desc.name     = "platform.io";
     desc.type_key = type_key<IoEntry>();
@@ -420,17 +424,27 @@ bool IoQueue::init(Allocator* storage, u32 max_in_flight, IoBackend backend) {
     desc.flags    = KV_HANDLE_GENERATIONAL;
     kind = handle_kind_register(desc);
     if (!kind) return false;
-    entries.use_kind(kind);
+    entries->use_kind(kind);
     MemTag tag;
     if (storage) tag = storage->tag;
-    if (!entries.init(max_in_flight, tag)) return false;
+    if (!entries->init(max_in_flight, tag)) return false;
     if (backend != IoBackend::Sync) ring = io_ring_create(kRingEntries);
     if (backend == IoBackend::Ring && !ring) KV_WARN("io", "the async ring was asked for and is not available");
     if (!ring) KV_INFO("io", "synchronous reads");
     return true;
 }
 
+u32 IoQueue::capacity() const { return entries ? entries->max_items : 0; }
+
+u32 IoQueue::mount_count() const { return mounts ? mounts->len : 0; }
+
+const PackTable* IoQueue::mount_table(u32 mount) const {
+    if (!mounts || mount >= mounts->len || !(*mounts)[mount].is_pack) return nullptr;
+    return &(*mounts)[mount].table;
+}
+
 void IoQueue::free() {
+    if (!entries) { *this = IoQueue{}; return; } // never set up
     // Tasks first: each is asked to stop, and the workers are joined before anything a
     // task might be using goes.
     io_tasks_stop(*this);
@@ -444,29 +458,31 @@ void IoQueue::free() {
     if (kind) kv_handle_kind_unregister(kind);
     // Completions nobody reaped: free their data with the allocator they named.
     for (const IoCompletion& c : completed) {
-        IoEntry* e = entries.get(c.request);
+        IoEntry* e = entries->get(c.request);
         if (c.bytes.data) {
             KV_WARN("io", "completion for '%s' was never reaped", e ? e->path : "?");
             IoBytes b = c.bytes;
             b.free();
         }
     }
-    for (u32 i = 0; i < entries.len; ++i) {
-        if (!entries.is_alive(i)) continue;
-        IoEntry& e = entries.items[i];
+    for (u32 i = 0; i < entries->len; ++i) {
+        if (!entries->is_alive(i)) continue;
+        IoEntry& e = entries->items[i];
         if (e.fd.is_open() && !e.in_flight && !e.fd_borrowed) os_file_close(e.fd);
         if (!e.in_flight) drop_write_copy(e); // a write never performed
         if (!e.in_flight) drop_stat_block(e);
         entry_free_path(e);
     }
-    for (IoMount& m : mounts) {
+    for (IoMount& m : *mounts) {
         if (m.fd.is_open()) os_file_close(m.fd);
-        pack_table_free(m.table, mounts.allocator());
+        pack_table_free(m.table, mounts->allocator());
     }
-    mounts.free();
+    mounts->free();
+    mem_free(mounts);
     io_ring_destroy(ring);
     ring = nullptr;
-    entries.free();
+    entries->free();
+    mem_free(entries);
     queued.free();
     completed.free();
     *this = IoQueue{};
@@ -477,7 +493,7 @@ namespace {
 // An entry made for a request, queued; or, if the pool is full, its blocks freed and a null
 // handle.
 Handle queue_entry(IoQueue& q, IoEntry& e) {
-    Handle h = q.entries.create(e);
+    Handle h = q.entries->create(e);
     if (h.is_null()) {
         drop_write_copy(e);
         entry_free_path(e);
@@ -573,7 +589,7 @@ bool IoQueue::mount_dir(const char* dir, i32* err) {
     memcpy(m.path, dir, n + 1);
     if (n && m.path[n - 1] != '/') { m.path[n] = '/'; m.path[n + 1] = 0; }
     m.is_pack = false;
-    mounts.push(m);
+    mounts->push(m);
     KV_INFO("io", "mounted directory %s", m.path);
     return true;
 }
@@ -684,8 +700,8 @@ bool IoQueue::mount_pack(const char* path, const char* prefix, i32* err) { retur
 
 bool IoQueue::mount_pack_at(const char* path, u64 base, u64 span, const char* prefix, i32* err) {
     IoMount m{};
-    if (!archive_open(m, mounts.allocator(), path, base, span, prefix, false, err)) return false;
-    mounts.push(m);
+    if (!archive_open(m, mounts->allocator(), path, base, span, prefix, false, err)) return false;
+    mounts->push(m);
     return true;
 }
 
@@ -796,8 +812,8 @@ Handle IoQueue::read_asset(const IoRequest& req) {
     } else {
         utf8_copy(e.path, sizeof e.path, norm);
         e.fail_errno = ENOENT;
-        for (u32 i = mounts.len; i-- > 0;) {
-            IoMount& m = mounts[i];
+        for (u32 i = mounts->len; i-- > 0;) {
+            IoMount& m = (*mounts)[i];
             if (!m.is_pack) {
                 char full[sizeof m.path + KV_PACK_PATH_MAX];
                 int n = format(full, sizeof full, "%s%s", m.path, norm);
@@ -1124,7 +1140,8 @@ bool io_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
 }
 
 bool IoQueue::cancel(Handle request) {
-    IoEntry* e = entries.get(request);
+    if (!entries) return false;
+    IoEntry* e = entries->get(request);
     if (!e || e->status != IoStatus::Pending) return false;
     if (e->task) return io_tasks_cancel(*this, *e); // completes as Cancelled when a worker is done with it
     e->status = IoStatus::Cancelled; // queued: completes as Cancelled at the pump; in flight: when the ring answers
@@ -1133,34 +1150,37 @@ bool IoQueue::cancel(Handle request) {
 }
 
 bool IoQueue::take(Handle request, IoCompletion* out) {
+    if (!entries) return false;
     for (u32 i = 0; i < completed.len; ++i) {
         if (completed[i].request != request) continue;
         if (out) *out = completed[i];
         else if (completed[i].bytes.data) completed[i].bytes.free(); // nobody to own it
         completed[i] = completed[completed.len - 1]; // order among the rest does not matter
         --completed.len;
-        if (IoEntry* e = entries.get(request)) entry_free_path(*e);
-        entries.destroy(request);
+        if (IoEntry* e = entries->get(request)) entry_free_path(*e);
+        entries->destroy(request);
         return true;
     }
     return false;
 }
 
 bool IoQueue::reap(Handle request) {
+    if (!entries) return false;
     for (u32 i = 0; i < completed.len; ++i) {
         if (completed[i].request != request) continue;
         completed[i] = completed[completed.len - 1]; // order among the rest does not matter
         --completed.len;
-        if (IoEntry* e = entries.get(request)) entry_free_path(*e);
-        entries.destroy(request);
+        if (IoEntry* e = entries->get(request)) entry_free_path(*e);
+        entries->destroy(request);
         return true;
     }
     return false;
 }
 
 bool IoQueue::is_pending(Handle request) const {
+    if (!entries) return false;
     for (const IoCompletion& c : completed) if (c.request == request) return false;
-    return entries.get(request) != nullptr;
+    return entries->get(request) != nullptr;
 }
 
 const char* IoQueue::backend_name() const { return io_ring_name(ring); }

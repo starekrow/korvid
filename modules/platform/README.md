@@ -238,7 +238,7 @@ Header `korvid/platform/io.h`:
 | `IoDirEntry` | record | `name`, `st`, `is_link`, `hidden`, `utf8`: one entry of `io_list_dir` |
 | `io_list_dir(dir, flags, fn, user, err)` | function | one directory's entries in name order; flags (`IoListFlags`) `IoListHidden`, `IoListSizes`; false with the errno |
 | `IoCompletion` | record | `request`, `status`, `bytes` (a read's `IoBytes`: `data`, `size`, a NUL after, `free()`), `written`, `user`, `error` (errno), `stat` (a `stat_file`'s answer) |
-| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `take(h, &c)`, `is_pending(h)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
+| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mount_count()`, `mount_table(i)`, `capacity()`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `take(h, &c)`, `is_pending(h)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
 | `platform_io(engine)` | function | the module's queue |
 | `platform_pref_path(engine, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none (`UserDir::Data`) |
 | `platform_settings(engine, org, app)`, `SettingsStore` | function, record | the program's settings store, opened in the settings directory at the first call |
@@ -261,7 +261,6 @@ Header `korvid/platform/module.h`:
 | name | kind | what |
 |---|---|---|
 | `platform_module` | `ModuleDesc` | the record; kormake puts it in the list |
-| `PlatformState` | record | `io`, `base_path`, `pref_path`, the pump hooks, the waiter and its counts: the module's state, for code outside the schedule |
 | `PlatformMounts`, `platform_configure_mounts(mounts)` | record, function | what startup mounts: `exe_name`, `packs`, `assets_dir`, `none`, `io_backend` |
 | `platform_pump(engine)` | function | once per frame: the pump hooks, then the I/O queue's pump |
 | `platform_pump_add(engine, fn, user)`, `platform_pump_remove` | functions | a device module's per-frame work, run by `platform_pump`; up to `KV_PLATFORM_PUMP_MAX` (8) |

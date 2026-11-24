@@ -15,6 +15,7 @@
 #include "korvid/core/os_thread.h"
 #include "korvid/core/time.h"
 #include "os_file.h"
+#include "platform_state.h"
 #include <errno.h>
 #include <new>
 #include <stdlib.h>

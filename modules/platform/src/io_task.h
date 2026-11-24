@@ -1,6 +1,7 @@
 // Korvid platform: IoQueue's task workers, as io.cc sees them (io_task.cc).
 #pragma once
 #include "korvid/platform/io.h"
+#include "io_internal.h"
 
 namespace kv {
 

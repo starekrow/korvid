@@ -105,7 +105,7 @@ bool add_listed(void* user, const char* relative) {
 bool items_from_pack(CliContext& ctx, KpackState& s, const char* path) {
     IoQueue* io = platform_io(*ctx.engine);
     if (!io || !io->mount_pack(path)) { ctx.fail("'%s' is not a readable zip", path); return false; }
-    const PackTable& t = io->mounts[io->mounts.len - 1].table;
+    const PackTable& t = *io->mount_table(io->mount_count() - 1); // the pack just mounted
     for (u32 i = 0; i < t.count; ++i) {
         const char* name = pack_entry_name(t, t.entries[i]);
         if (strncmp(name, ".kpak/", 6) == 0) continue;
@@ -149,7 +149,7 @@ void cmd_list(CliContext& ctx, Span<const char* const> args) {
     if (args.len != 1) { ctx.fail("kpack list <pack>"); return; }
     IoQueue* io = platform_io(*ctx.engine);
     if (!io || !io->mount_pack(args[0])) { ctx.fail("'%s' is not a readable zip", args[0]); return; }
-    const PackTable& t = io->mounts[io->mounts.len - 1].table;
+    const PackTable& t = *io->mount_table(io->mount_count() - 1); // the pack just mounted
     ctx.print("%s: %u entries, %s; %u deflated, %u unaligned, %u unsupported", args[0], t.count, t.indexed ? "indexed" : "no index",
               t.deflated, t.unaligned, t.unsupported);
     for (u32 i = 0; i < t.count; ++i) {

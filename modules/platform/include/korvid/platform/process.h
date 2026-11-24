@@ -27,7 +27,7 @@ struct Process {
     bool exited = false;
     i32  code = 0;               // once exited: its status, or 128 + the signal that ended it
     char error[160] = {};        // why spawn failed
-    void* os[2] = {};            // Windows: the process's handle and its job's; unused elsewhere
+    KHandle process, group;      // the platform's own hold on the child and on what it started, where the OS gives one beyond the id
 
     // False with `error` set if the program cannot be started (not found, not executable,
     // no such directory). Nothing is left to free then.

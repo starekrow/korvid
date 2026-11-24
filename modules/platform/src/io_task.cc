@@ -201,7 +201,7 @@ Handle IoQueue::run_task(const IoTaskRequest& req) {
     if (!task) return Handle{};
     *task = IoTask{};
     e.task = task;
-    Handle h = entries.create(e);
+    Handle h = entries->create(e);
     if (h.is_null()) { mem_free(task); KV_ERROR("io", "queue full"); return h; }
     task->fn = req.fn;
     task->arg = req.arg;
@@ -247,7 +247,7 @@ void io_tasks_complete(IoQueue& q) {
         list = task->next;
         IoCompletion c{};
         c.request = task->h;
-        IoEntry* e = q.entries.get(task->h);
+        IoEntry* e = q.entries->get(task->h);
         bool cancelled = task->ctl.cancelled();
         c.status = cancelled ? IoStatus::Cancelled : task->result ? IoStatus::Failed : IoStatus::Done;
         c.error = cancelled ? (task->result ? task->result : ECANCELED) : task->result;

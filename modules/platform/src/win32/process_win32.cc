@@ -262,8 +262,8 @@ bool Process::spawn(const ProcessDesc& desc) {
     pid    = (i64)pi.dwProcessId;
     out_fd = pipe_of(out_r);
     err_fd = pipe_of(err_r);
-    os[0]  = pi.hProcess;
-    os[1]  = job;
+    process = khandle_make(KHandleKind::Process, (i64)(intptr_t)pi.hProcess);
+    group   = job ? khandle_make(KHandleKind::Process, (i64)(intptr_t)job) : KHandle{};
     exited = false;
     code   = 0;
     return true;
@@ -271,10 +271,10 @@ bool Process::spawn(const ProcessDesc& desc) {
 
 bool Process::running() {
     if (pid < 0 || exited) return false;
-    if (WaitForSingleObject((HANDLE)os[0], 0) == WAIT_TIMEOUT) return true;
+    if (WaitForSingleObject(as_handle(process), 0) == WAIT_TIMEOUT) return true;
     DWORD status = 0;
     exited = true;
-    code = GetExitCodeProcess((HANDLE)os[0], &status) ? (i32)status : -1;
+    code = GetExitCodeProcess(as_handle(process), &status) ? (i32)status : -1;
     return false;
 }
 
@@ -293,7 +293,7 @@ void Process::wait(f64 seconds) {
         if (has(out_fd) || has(err_fd)) return;
         ULONGLONG now = GetTickCount64();
         if (now >= until) return;
-        if (os[0] && !exited) WaitForSingleObject((HANDLE)os[0], 1);
+        if (process.is_open() && !exited) WaitForSingleObject(as_handle(process), 1);
         else Sleep(1);
     }
 }
@@ -303,22 +303,22 @@ i32 Process::read_err(void* buf, u32 cap) { return pipe_read(err_fd, buf, cap); 
 
 void Process::kill() {
     if (pid < 0 || exited) return;
-    if (!os[1] || !TerminateJobObject((HANDLE)os[1], kKilledCode)) TerminateProcess((HANDLE)os[0], kKilledCode);
+    if (!group.is_open() || !TerminateJobObject(as_handle(group), kKilledCode)) TerminateProcess(as_handle(process), kKilledCode);
 }
 
 void Process::free() {
     if (pid >= 0 && !exited) {
         kill();
-        WaitForSingleObject((HANDLE)os[0], INFINITE);
+        WaitForSingleObject(as_handle(process), INFINITE);
     }
     HANDLE h = as_handle(out_fd);
     close_handle(h);
     h = as_handle(err_fd);
     close_handle(h);
-    HANDLE proc = (HANDLE)os[0], job = (HANDLE)os[1];
+    HANDLE proc = as_handle(process), job = as_handle(group);
     close_handle(proc);
     close_handle(job); // KILL_ON_JOB_CLOSE: whatever the child left running ends here
-    os[0] = os[1] = nullptr;
+    process = group = KHandle{};
     pid = -1;
     out_fd = err_fd = KHandle{};
     exited = false;

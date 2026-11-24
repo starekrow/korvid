@@ -19,6 +19,7 @@ enum class KHandleKind : u8 {
     Socket,  // a TCP socket, or one that listens
     Pipe,    // one end of a pipe: a child's output, the process's standard input
     Notify,  // a descriptor the OS makes readable when it has news (inotify's)
+    Process, // a child process, or the group of what it started: waited on and ended, never read
 };
 const char* khandle_kind_name(KHandleKind k);
 

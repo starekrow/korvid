@@ -43,8 +43,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     for (FrameInFlight& f : r->frames) { f.garbage.alloc = ga; f.dirty_slots.alloc = ga; }
     r->uploads.alloc = ga;
     r->window      = desc.native_window;
-    if (const PlatformState* ps = engine_module_state_as<PlatformState>(engine, "platform"))
-        format(r->base_path, sizeof r->base_path, "%s", ps->base_path);
+    if (platform_io(engine)) format(r->base_path, sizeof r->base_path, "%s", platform_base_path(engine)); // the platform is up
     r->start_time = time_now();
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;

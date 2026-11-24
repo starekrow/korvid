@@ -117,6 +117,8 @@ struct IoTaskRequest {
 constexpr u32 kIoLanes = 8;
 struct IoTask;  // the workers' node (io_task.cc)
 struct IoTasks; // the workers, their lists and the lanes
+struct IoEntry; // a request while the queue has it: its path, its state, the backend's bookkeeping (src/io_internal.h)
+struct IoMount; // a directory or a pack that read_asset looks in (src/io_internal.h)
 
 struct IoCompletion {
     Handle   request;
@@ -128,56 +130,13 @@ struct IoCompletion {
     IoStat   stat;             // a stat_file's answer: all false and zero for a path where nothing is
 };
 
-struct IoEntry {
-    char       path[256];     // the file, or "<pack>:<entry>" for a read from a pack; a longer one cut, for logs
-    char*      long_path;     // a path of 256 bytes or more, whole, from the entry's allocator; null: `path` is it
-    Allocator* alloc;
-    IoPriority priority;
-    IoStatus   status;
-    u64        user;
-    u64        sequence;  // submission order, for stable priority ordering
-    bool       write;     // a write: `buf` holds the copy to write, `size` its length
-    bool       stat;      // a stat: on the ring, `buf` holds the kernel's answer and a copy of the path
-    IoTask*    task;      // a task, or a stat on the task workers: its node, until the pump completes it
-    // The ring's bookkeeping while a request is in flight.
-    KHandle     fd;
-    u8*        buf;
-    usize      size;      // the file's size at open, or the bytes to write
-    usize      done;      // bytes read or written so far
-    bool       in_flight;
-    // A ranged read: `length` bytes at `offset` (from a pack, on the pack's own descriptor,
-    // which the entry borrows). Then, for a deflated entry, `unpacked` bytes inflated;
-    // `check` compares the CRC-32 of what is delivered with `crc`. `clip`: a read_file
-    // range, cut to the file at open, where the end of the file is not an error.
-    bool       ranged;
-    bool       clip;
-    bool       fd_borrowed;
-    bool       check;
-    u16        method;
-    i32        fail_errno; // resolved as missing or unreadable: completes Failed at the pump
-    u64        offset;
-    usize      length;
-    usize      unpacked;
-    u32        crc;
-};
-
-// Where read_asset looks: a directory, or a pack (a zip) whose table was read at mount.
-struct IoMount {
-    char      path[256] = {}; // the directory (with a trailing '/') or the pack file
-    bool      is_pack = false;
-    KHandle    fd;          // the pack's file, open for the queue's life
-    u64       base = 0;    // where the archive starts in that file (a pack inside another archive)
-    char      prefix[64] = {}; // only the archive's entries under this are seen, without it ("assets/")
-    PackTable table;
-};
-
 struct IoQueue {
-    Pool<IoEntry>       entries;
+    Pool<IoEntry>*      entries = nullptr; // the requests the queue has, by handle: the queue's own, made by init
     IoTasks*            tasks = nullptr; // start_tasks's workers; none until then
     void              (*wake_fn)(void* user) = nullptr; // set_wake's
     void*               wake_user = nullptr;
     u32                 tasks_pending = 0, tasks_done = 0, tasks_failed = 0;
-    Array<IoMount>      mounts;    // searched last first
+    Array<IoMount>*     mounts = nullptr; // searched last first: the queue's own (mount_count, mount_table)
     Array<Handle>       queued;    // submitted, not yet performed or handed to the ring
     Array<IoCompletion> completed; // finished, not yet reaped
     IoRing*             ring = nullptr; // the io_uring backend when in use
@@ -229,6 +188,13 @@ struct IoQueue {
     // ranged reads. io_archive_entry finds such an entry.
     bool   mount_pack(const char* path, const char* prefix = nullptr, i32* err = nullptr);
     bool   mount_pack_at(const char* path, u64 offset, u64 size, const char* prefix = nullptr, i32* err = nullptr);
+    // How many mounts there are, in the order they were made (the last is searched first),
+    // and a pack mount's table of entries: null for a directory, or past the count.
+    // The most requests the queue holds at once (init's max_in_flight); a request's handle
+    // index is below it.
+    u32    capacity() const;
+    u32    mount_count() const;
+    const PackTable* mount_table(u32 mount) const;
     // Submits a whole-file write (create or truncate); the bytes are copied now. Same
     // pump, priorities, budget and completions as a read. Null handle as above.
     Handle write_file(const IoWriteRequest& req);

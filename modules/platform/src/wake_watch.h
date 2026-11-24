@@ -2,6 +2,7 @@
 // seam each OS fills (posix/wake_watch_posix.cc; win32/wake_watch_win32.cc). module.cc owns the state and calls these from the loop's thread.
 #pragma once
 #include "korvid/platform/module.h"
+#include "platform_state.h"
 
 namespace kv {
 

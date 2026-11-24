@@ -8,6 +8,7 @@
 #include "korvid/core/time.h"
 #include "os_paths.h"
 #include "os_file.h"
+#include "platform_state.h"
 #include "wake_watch.h"
 
 namespace kv {
@@ -192,6 +193,7 @@ const char* khandle_kind_name(KHandleKind k) {
     case KHandleKind::Socket: return "socket";
     case KHandleKind::Pipe:   return "pipe";
     case KHandleKind::Notify: return "notify";
+    case KHandleKind::Process: return "process";
     }
     return "?";
 }
