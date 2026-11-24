@@ -51,6 +51,10 @@ struct Build {
     struct Window { const JsonValue* src; u32 first, want; bool taken; };
     Array<Window>*      windows = nullptr;
     Array<KromeSlot>*   slots = nullptr; // uses' children kept for w:open_slot; null: not kept
+    // A sparse each built again: its rows as they were, any of which whose value did not
+    // change is moved into place rather than built (KR22), and the nodes so moved.
+    Array<KromeSparseRow>* reuse  = nullptr;
+    Array<u32>*            reused = nullptr;
 };
 
 const KromeFrame* def_frame(const KromeFrame* f) {
@@ -383,6 +387,50 @@ void spacer(Build& b, u32 parent, u32 rows, f32 height) {
     b.tree.set(id, "h", KromeValue::num(h > 0.0f ? h : 0.0f));
 }
 
+bool has_region(const JsonDoc& doc, const JsonValue& n) {
+    const char* w = json_string(json_get(doc, n, "w"), "");
+    if (!strcmp(w, "each") || !strcmp(w, "if")) return true;
+    if (const JsonValue* c = json_get(doc, n, "c"))
+        for (const JsonValue* k = json_first(doc, *c); k; k = json_next(doc, *k))
+            if (has_region(doc, *k)) return true;
+    return false;
+}
+
+// Appends an existing node, detached, as parent's last child.
+void append_node(KromeTree& t, u32 parent, u32 id) {
+    t.nodes[id].next = KROME_NONE;
+    if (t.nodes[parent].last == KROME_NONE) t.nodes[parent].first = id;
+    else t.nodes[t.nodes[parent].last].next = id;
+    t.nodes[parent].last = id;
+}
+
+// A kept row of a sparse each, now `element` of the list at `list` where it was `was`: what
+// read the model through it reads the new element.
+void renumber(Build& b, const u32* tops, u32 ntops, const char* list, u32 was, u32 element) {
+    if (!b.deps || was == element) return;
+    KromeTree& t = b.tree;
+    Array<u32> sub{};
+    for (u32 k = 0; k < ntops; ++k) sub.push(tops[k]);
+    for (u32 i = 0; i < sub.len; ++i)
+        for (u32 c = t.nodes[sub[i]].first; c != KROME_NONE; c = t.nodes[c].next) sub.push(c);
+    char from[300], to[300];
+    i32 fl = format(from, sizeof from, "%s.%u", list, was);
+    format(to, sizeof to, "%s.%u", list, element);
+    for (KromeDep& d : *b.deps) {
+        if (d.path.is_null()) continue;
+        const char* p = name_str(d.path);
+        if (strncmp(p, from, (usize)fl) != 0 || (p[fl] != '.' && p[fl] != 0)) continue;
+        bool mine = false;
+        for (u32 id : sub) if (id == d.node) { mine = true; break; }
+        if (!mine) continue;
+        char np[400];
+        format(np, sizeof np, "%s%s", to, p + fl);
+        d.path = name_intern(np);
+        if (d.kind == KromeDep::Text) krome_fill_node(b.s, b.sc, t, d.node); // what it shows, from where it reads now
+    }
+    sub.free();
+}
+
 u32 region_body(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const KromeFrame* fr, KromeRegion* virt = nullptr) {
     KromeTree& t = b.tree;
     u32 before = t.nodes[parent].last;
@@ -418,7 +466,35 @@ u32 region_body(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, con
             virt->len = len;
             spacer(b, parent, from, virt->height);
         }
+        bool sparse = virt && virt->sparse;
+        // A row with an each or an if in it is always built: its regions' frames name its element.
+        bool keepable = sparse && b.reuse && !(kids && has_region(f.doc, *kids));
         for (u32 i = from; i < to; ++i) {
+            u32 row_before = t.nodes[parent].last;
+            if (sparse) {
+                bool is_held = i >= held_from && i - held_from < held;
+                u32 element = is_held ? i - held_from + 1 : 0;
+                char ep[300];
+                format(ep, sizeof ep, "%s.%u", path, element);
+                u64 hash = is_held ? krome_model_hash(b.s, b.sc, ep) : 0;
+                bool kept = false;
+                if (keepable)
+                    for (KromeSparseRow& o : *b.reuse) {
+                        if (o.row != i || !o.nodes || o.held != is_held || o.hash != hash || o.nodes > 64) continue;
+                        u32 tops[64];
+                        u32 c = o.first;
+                        for (u32 k = 0; k < o.nodes && c != KROME_NONE; ++k) { tops[k] = c; c = t.nodes[c].next; }
+                        for (u32 k = 0; k < o.nodes; ++k) { append_node(t, parent, tops[k]); b.reused->push(tops[k]); }
+                        if (is_held) renumber(b, tops, o.nodes, path, o.element, element);
+                        b.sc.sparse_rows.push(KromeSparseRow{virt->anchor, i, hash, element, tops[0], o.nodes, is_held});
+                        o.nodes = 0; // taken
+                        kept = true;
+                        break;
+                    }
+                if (kept) continue;
+                // Built below; its record once it is.
+                b.sc.sparse_rows.push(KromeSparseRow{virt->anchor, i, hash, element, KROME_NONE, 0, is_held});
+            }
             KromeFrame* e = (KromeFrame*)arena_alloc(*b.frames, sizeof(KromeFrame), alignof(KromeFrame));
             if (!e) break;
             *e = KromeFrame{};
@@ -434,11 +510,17 @@ u32 region_body(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, con
             if (!have) {
                 if (placeholder) if (const JsonValue* pk = json_get(f.doc, *placeholder, "c"))
                     for (const JsonValue* k = json_first(f.doc, *pk); k; k = json_next(f.doc, *k)) node(b, f, *k, parent, e, nullptr);
-                continue;
-            }
-            if (kids)
+            } else if (kids) {
                 for (const JsonValue* k = json_first(f.doc, *kids); k; k = json_next(f.doc, *k))
                     if (k != placeholder) node(b, f, *k, parent, e, nullptr);
+            }
+            if (sparse) {
+                // The row's top-level nodes: those after what the parent ended with before it.
+                KromeSparseRow& rec = b.sc.sparse_rows.last();
+                u32 c = row_before == KROME_NONE ? t.nodes[parent].first : t.nodes[row_before].next;
+                rec.first = c;
+                for (; c != KROME_NONE; c = t.nodes[c].next) ++rec.nodes;
+            }
         }
         if (virt) spacer(b, parent, len - to, virt->height);
     } else {
@@ -753,6 +835,8 @@ bool krome_build_screen(KromeModule& s, KromeScreen& sc) {
     sc.deps.clear();
     sc.regions.alloc = s.general;
     sc.regions.clear();
+    sc.sparse_rows.alloc = s.general;
+    sc.sparse_rows.clear();
     sc.dead = 0;
     if (!sc.frames.base) arena_create(sc.frames, 256u << 20, "krome.frames", MemTag{});
     else arena_reset(sc.frames);
@@ -880,22 +964,44 @@ bool rebuild_one(KromeModule& s, KromeScreen& sc, u32 i) {
         KromeRegion r = sc.regions[i];
         if (t.nodes[r.anchor].flags & KROME_DEAD) { sc.regions[i].alive = false; return false; }
         u32 parent = t.nodes[r.anchor].parent;
-        // What it built goes: out of the list, and dead.
+        // What it built goes: out of the list, and dead. A sparse each's are only taken out
+        // until it is built again: the rows it keeps are moved back in, and the rest die then.
+        Array<u32> was{};
+        Array<KromeSparseRow> old_rows{};
+        Array<u32> reused{};
         u32 c = t.nodes[r.anchor].next;
         for (u32 k = 0; k < r.count && c != KROME_NONE; ++k) {
             u32 next = t.nodes[c].next;
-            sc.dead += kill(t, c);
+            if (r.sparse) was.push(c);
+            else sc.dead += kill(t, c);
             c = next;
         }
         t.nodes[r.anchor].next = c;
         if (c == KROME_NONE) t.nodes[parent].last = r.anchor;
+        if (r.sparse) {
+            u32 w = 0;
+            for (u32 k = 0; k < sc.sparse_rows.len; ++k) {
+                if (sc.sparse_rows[k].anchor == r.anchor) old_rows.push(sc.sparse_rows[k]);
+                else sc.sparse_rows[w++] = sc.sparse_rows[k];
+            }
+            sc.sparse_rows.len = w;
+        }
         // Built again at the end of the parent's list, then moved after the anchor.
         u32 tail = t.nodes[parent].last;
         Build b{s, sc, t, &sc.deps, &sc.regions, &sc.frames, r.scope, krome_theme_of(s, sc.scope)};
         b.slots = &sc.slots;
+        if (r.sparse) { b.reuse = &old_rows; b.reused = &reused; }
         u32 deps_before = sc.deps.len;
         u32 count = region_body(b, *r.file, *r.src, parent, r.frame, r.height > 0.0f ? &r : nullptr);
         s.rebuilt_nodes += b.nodes;
+        for (u32 id : was) {
+            bool kept = false;
+            for (u32 k : reused) if (k == id) { kept = true; break; }
+            if (!kept) sc.dead += kill(t, id);
+        }
+        was.free();
+        old_rows.free();
+        reused.free();
         if (count && tail != r.anchor) {
             u32 first = t.nodes[tail].next, last = t.nodes[parent].last;
             t.nodes[tail].next = KROME_NONE;
@@ -917,6 +1023,11 @@ void rebuilt(KromeModule&, KromeScreen& sc) {
     KromeTree& t = sc.tree;
     // Regions inside what went, and what read the model there.
     for (KromeRegion& r : sc.regions) if (r.alive && (t.nodes[r.anchor].flags & KROME_DEAD)) r.alive = false;
+    {
+        u32 w = 0;
+        for (u32 i = 0; i < sc.sparse_rows.len; ++i) if (!(t.nodes[sc.sparse_rows[i].anchor].flags & KROME_DEAD)) sc.sparse_rows[w++] = sc.sparse_rows[i];
+        sc.sparse_rows.len = w;
+    }
     {
         u32 w = 0;
         for (u32 i = 0; i < sc.slots.len; ++i) if (!(t.nodes[sc.slots[i].node].flags & KROME_DEAD)) sc.slots[w++] = sc.slots[i];
@@ -957,9 +1068,29 @@ bool krome_build_slot(KromeModule& s, KromeScreen& sc, KromeOverlay& o, const Kr
 void krome_rebuild_regions(KromeModule& s, KromeScreen& sc, u64 key) {
     bool any = false;
     u32 n = sc.regions.len;
-    for (u32 i = 0; i < n; ++i)
-        if (sc.regions[i].alive && (sc.regions[i].key == key || (sc.regions[i].sparse && (sc.regions[i].count_key == key || sc.regions[i].from_key == key)))
-            && rebuild_one(s, sc, i)) any = true;
+    for (u32 i = 0; i < n; ++i) {
+        KromeRegion& r = sc.regions[i];
+        if (!r.alive) continue;
+        // A sparse each is built again once a frame, before layout (krome_sparse_pending):
+        // its rows are handed over in more than one write (the list, `from`), and between
+        // them the two disagree, which would build every row twice and keep none.
+        if (r.sparse) {
+            if (r.key == key || r.count_key == key || r.from_key == key) { r.stale = true; sc.tree.dirty = true; }
+            continue;
+        }
+        if (r.key == key && rebuild_one(s, sc, i)) any = true;
+    }
+    if (any) rebuilt(s, sc);
+}
+
+void krome_sparse_pending(KromeModule& s, KromeScreen& sc) {
+    bool any = false;
+    u32 n = sc.regions.len;
+    for (u32 i = 0; i < n; ++i) {
+        if (!sc.regions[i].alive || !sc.regions[i].stale) continue;
+        sc.regions[i].stale = false;
+        if (rebuild_one(s, sc, i)) any = true;
+    }
     if (any) rebuilt(s, sc);
 }
 

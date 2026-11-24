@@ -4,6 +4,7 @@
 // Lua's errors are longjmps: the C functions here that Lua calls hold nothing with a
 // destructor, and everything Krome calls into Lua goes through lua_pcall.
 #include "internal.h"
+#include "korvid/core/hash.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
@@ -656,6 +657,50 @@ bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* path) {
     }
     lua_pop(L, 1);
     return t;
+}
+
+namespace {
+u64 value_hash(lua_State* L, int i, u32 depth) {
+    i = lua_absindex(L, i);
+    switch (lua_type(L, i)) {
+    case LUA_TNIL:     return 0x6e696cull;
+    case LUA_TBOOLEAN: return lua_toboolean(L, i) ? 0x74727565ull : 0x66616c73ull;
+    case LUA_TNUMBER: {
+        if (lua_isinteger(L, i)) return hash_mix((u64)lua_tointeger(L, i) ^ 0x696e74ull);
+        f64 v = lua_tonumber(L, i);
+        u64 bits;
+        memcpy(&bits, &v, sizeof bits);
+        return hash_mix(bits ^ 0x666c74ull);
+    }
+    case LUA_TSTRING: {
+        usize n = 0;
+        const char* str = lua_tolstring(L, i, &n);
+        return hash_bytes(str, n);
+    }
+    case LUA_TTABLE: {
+        if (depth > 6) return 0x646565ull;
+        // A sum of the pairs' hashes: the same whatever order next gives them in.
+        u64 h = 0x746162ull;
+        lua_pushnil(L);
+        while (lua_next(L, i)) {
+            u64 k = value_hash(L, -2, depth + 1), v = value_hash(L, -1, depth + 1);
+            h += hash_mix(k * 0x9E3779B97F4A7C15ull ^ v);
+            lua_pop(L, 1);
+        }
+        return hash_mix(h);
+    }
+    default: return hash_mix((u64)(usize)lua_topointer(L, i));
+    }
+}
+} // namespace
+
+u64 krome_model_hash(KromeModule& s, KromeScreen& sc, const char* path) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) return 0;
+    push_path(L, sc.store, path);
+    u64 h = lua_isnil(L, -1) ? 0 : value_hash(L, -1, 0);
+    lua_pop(L, 1);
+    return h;
 }
 
 u32 krome_model_length(KromeModule& s, KromeScreen& sc, const char* path) {

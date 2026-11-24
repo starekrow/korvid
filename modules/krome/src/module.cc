@@ -52,6 +52,7 @@ void free_screen(KromeModule& s, KromeScreen* sc) {
     if (sc->arena.base) arena_destroy(sc->arena);
     if (sc->frames.base) arena_destroy(sc->frames);
     sc->regions.free();
+    sc->sparse_rows.free();
     sc->slots.free();
     sc->uses.free();
     sc->tree.free();

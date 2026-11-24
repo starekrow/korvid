@@ -356,5 +356,27 @@ starts from `slice-10`. As above, and:
   placeholders there, a new ask, rows handed over landing at the box's top with the
   scroll unmoved; half a window held, half placeholders; the count changed by the model)
   and `kim` (the markup, and the error).
-- **Next, milestone 5:** a row whose values did not change is still built again when the
-  rows are handed over; and the drag end to end, timed.
+
+**Milestone 5, the sparse list in place (KR22): built Nov 23, 2026.**
+
+- **Once a frame.** A sparse each's keys changing marks it, and it is built again before
+  the next layout (`krome_sparse_pending`). Handing rows over is two writes, the list and
+  `from`, and between them the two disagree: built at each, every row was built twice and
+  none could be kept.
+- **Rows kept.** Each built row is recorded (`KromeSparseRow`: its row, whether the model
+  held it, its element, a hash of its value, its top-level nodes). Built again, a row
+  whose record matches, held or not and the same hash, has its nodes moved into place
+  instead; the rest of what was built dies. The hash (`krome_model_hash`) is over the
+  Lua value, a table's pairs summed so key order does not matter.
+- **Renumbered.** A kept row that is now another element of the list (the window moved,
+  or `from` did) has its readers' paths rewritten to it, and its texts filled from there.
+- **Always built**: a row with an `each` or an `if` in its block, whose regions' frames
+  name its element.
+- **Tests** (`krome sparse`): the same window handed over again keeps every row node for
+  node and builds only the spacers; handed over a row earlier, one row is new and the
+  rest kept; one row's name changed, only that row is built again. A drag end to end over
+  fifty thousand rows, 181 frames with the owner handing over each window the frame after
+  it is asked for: 0.09 ms a frame on average and 0.34 ms the longest on linux-dev (the
+  test holds it under 8.3 ms, a 120 Hz refresh, outside debug builds). That is Krome's
+  build and layout without a renderer: the paint and the GPU are not in it. Under
+  `address,undefined` too.

@@ -105,7 +105,11 @@ script's tables made into one, and builds the kernel's tree:
   so once: `KromeView{screen, event, first, count, total}`, and the screen's
   `on.view(first, count, total)`; the owner puts those rows in the model (the list and
   `from`), a tick or two later as it likes. `count` and `from` are numbers or `@keys`; a
-  change to either, or to the list, builds the rows in view again and leaves the scroll.
+  change to either, or to the list, builds the rows in view again, once a frame and before
+  layout, and leaves the scroll. A row whose value did not change (the same fields,
+  whatever element of the list it now is) is not built again: its nodes are moved into
+  place, and what reads the model through them reads its new element. A row with an
+  `each` or an `if` inside is always built.
 - **`if tab=rules`** is built while the model's value there is that (a tab's page).
 - **In a definition's body**, `{@}` in a text is its use's binding as the model shows it,
   and `@@` as a property's value binds the property to it (`def progress { box w=@@ }`).

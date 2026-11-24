@@ -1007,6 +1007,7 @@ void krome_view_frame(KromeModule& s) {
     for (KromeScreen* sc : s.screens) {
         if (!sc->ready) continue;
         if (landed) sc->tree.dirty = true;
+        krome_sparse_pending(s, *sc); // rows handed over since the last frame, all at once
         if (sc->tree.dirty && sc->tree.root != KROME_NONE) {
             krome_layout(sc->tree, sc->tree.root, rect2{0, 0, W, H}, m, true);
             ++s.layouts;

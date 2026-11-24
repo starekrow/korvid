@@ -112,12 +112,16 @@ u32 count_texts(const KromeTree& t, const char* want) {
 }
 
 // The model's list as the owner would hand it: rows [from, from + n), "track <row + 1>".
-void give_rows(Engine& e, Name scn, u32 from, u32 n) {
+void give_rows(Engine& e, Name scn, u32 from, u32 n, u32 renamed = ~0u) {
     Array<char> j{};
     auto put = [&](const char* text) { usize l = strlen(text); memcpy(j.push_n((u32)l), text, l); };
     put("[");
     char item[64];
-    for (u32 i = 0; i < n; ++i) { format(item, sizeof item, "%s{\"name\": \"track %u\"}", i ? "," : "", from + i + 1); put(item); }
+    for (u32 i = 0; i < n; ++i) {
+        if (from + i == renamed) format(item, sizeof item, "%s{\"name\": \"renamed\"}", i ? "," : "");
+        else format(item, sizeof item, "%s{\"name\": \"track %u\"}", i ? "," : "", from + i + 1);
+        put(item);
+    }
     put("]");
     JsonDoc doc;
     if (json_parse(j.data, j.len, mem_scratch(), doc)) {
@@ -287,10 +291,64 @@ void test_sparse(kv::TestCtx& c) {
     KV_CHECK(c, mid != KROME_NONE && t.nodes[mid].rect.y == t.nodes[list_n].rect.y && count_texts(t, "...") == 0);
     KV_CHECK(c, t.nodes[list_n].scroll.y == 600000.0f);
 
+    // The same rows handed over again, at rest: every row kept, node for node, and only
+    // the spacers built; the scroll where it was.
+    {
+        u32 before_id = text_node(t, "track 25001");
+        u64 nodes_before = s.rebuilt_nodes;
+        give_rows(e, scn, (u32)asked, n);
+        frames(e, 1);
+        KV_CHECK(c, text_node(t, "track 25001") == before_id && t.nodes[list_n].scroll.y == 600000.0f);
+        KV_CHECK(c, s.rebuilt_nodes - nodes_before <= 4); // the spacers, twice over (the list, then `from`)
+    }
+    // Handed over starting a row earlier: one row new at the top and the rest kept, now each
+    // a list element further on; what reads them follows (a row's name changed after shows).
+    {
+        u32 kept_id = text_node(t, "track 25010");
+        give_rows(e, scn, (u32)asked - 1, n);
+        frames(e, 1);
+        KV_CHECK(c, text_node(t, "track 25010") == kept_id && text_node(t, "track 25001") != KROME_NONE);
+        // One row's value changed: that row built again, the rest kept.
+        u32 other = text_node(t, "track 25003");
+        give_rows(e, scn, (u32)asked - 1, n, 25009);
+        frames(e, 1);
+        KV_CHECK(c, text_node(t, "track 25010") == KROME_NONE && text_node(t, "renamed") != KROME_NONE && text_node(t, "track 25003") == other);
+    }
+
     // Rows only partly held: the held ones real, the rest placeholders.
     give_rows(e, scn, (u32)asked, n / 2);
     frames(e, 1);
     KV_CHECK(c, text_node(t, "track 25001") != KROME_NONE && count_texts(t, "...") == n - n / 2);
+
+    // The scrollbar dragged end to end over a second and a half of frames, the owner
+    // handing each window over the frame after it is asked for: the longest frame.
+    {
+        f64 worst = 0.0, total_ms = 0.0;
+        u32 steps = 180, placeheld = 0;
+        f32 end = t.nodes[list_n].content.y - 240.0f;
+        for (u32 i = 0; i <= steps; ++i) {
+            f64 t0 = time_now();
+            t.nodes[list_n].scroll.y = end * (f32)i / (f32)steps;
+            t.dirty = true;
+            f64 before = model_num(s, sc, "views");
+            frames(e, 1);
+            if (model_num(s, sc, "views") != before) {
+                if (count_texts(t, "...") > 0) ++placeheld;
+                give_rows(e, scn, (u32)model_num(s, sc, "asked"), (u32)model_num(s, sc, "asked_n"));
+            }
+            f64 ms = (time_now() - t0) * 1000.0;
+            total_ms += ms;
+            if (ms > worst) worst = ms;
+        }
+        frames(e, 1);
+        u32 last = text_node(t, "track 50000");
+        KV_CHECK(c, last != KROME_NONE && count_texts(t, "...") == 0);
+        KV_INFO("test", "sparse each over 50,000: a drag end to end in %u frames, %.2f ms each on average, %.2f ms the longest; %u showed placeholders",
+                steps + 1, total_ms / (steps + 1), worst, placeheld);
+#if !KV_DEBUG
+        KV_CHECK(c, worst < 8.3); // a 120 Hz display's refresh
+#endif
+    }
 
     // A shorter list: the count is the model's.
     krome_set(e, scn, "total", 100.0);

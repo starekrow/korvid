@@ -71,7 +71,13 @@ struct KromeRegion {
     u32               rows_from = 0, rows_len = 0;
     Name              view = {};
     u32               sent_first = ~0u, sent_count = ~0u, sent_len = ~0u;
+    bool              stale = false; // its keys changed: built again before the next layout
 };
+
+// A sparse each's built row (KR22): which row of the list, whether the model held it, its
+// element and value's hash as built, and its top-level nodes (`nodes` of them from `first`,
+// along the parent's list). What lets a rebuild keep a row whose value did not change.
+struct KromeSparseRow { u32 anchor; u32 row; u64 hash; u32 element; u32 first; u32 nodes; bool held; };
 
 // One reading of a .kimb: its nodes and strings, and the file over them. A reload makes a
 // new one; the one it replaces is kept (KromeModule::retired) until no screen built from it
@@ -158,6 +164,7 @@ struct KromeScreen {
     KimbScope  scope;           // the file, then its uses: built once they are all in
     Arena      frames;          // the KromeFrames its tree was built in, until it is built again
     Array<KromeRegion> regions;
+    Array<KromeSparseRow> sparse_rows; // the rows sparse eaches built, by anchor
     Array<KromeSlot> slots;
     u32        dead = 0;        // nodes rebuilt away since the tree was last built whole
     bool       waiting = false; // a kim() piece's file has not landed: built again when it does
@@ -407,6 +414,8 @@ void krome_fire_view(KromeModule& s, KromeScreen& sc, Name event, u32 first, u32
 void krome_emit_view(KromeModule& s, const KromeView& ev);
 // Says, for each sparse each whose built rows changed since it last said, which they are.
 void krome_send_views(KromeModule& s, KromeScreen& sc);
+// Builds again the sparse eaches whose keys changed since the last frame.
+void krome_sparse_pending(KromeModule& s, KromeScreen& sc);
 // A right-button press's event: the handler gets (id, x, y), KromeEvent the place.
 void krome_fire_at(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node, Name event, f32 x, f32 y);
 // The model at a dotted path set to a string, and what reads it told.
@@ -439,6 +448,9 @@ void krome_emit(KromeModule& s, const KromeEvent& ev);
 // `if` (truthy), `each` (a list's length) and text read it.
 bool krome_model_truthy(KromeModule& s, KromeScreen& sc, const char* path);
 u32  krome_model_length(KromeModule& s, KromeScreen& sc, const char* path);
+// A hash of the model's value at path, the same for the same value however it was made
+// (a table's keys in any order); 0 for nothing there. A sparse each's rows by it.
+u64  krome_model_hash(KromeModule& s, KromeScreen& sc, const char* path);
 const char* krome_model_path_text(KromeModule& s, KromeScreen& sc, const char* path, char* out, usize cap);
 // The model's value at a path as a property takes it: a number, a boolean as 0 or 1, a
 // string parsed as markup's are ("40%", "10..90", "#ff0000"), a list of up to four numbers.
