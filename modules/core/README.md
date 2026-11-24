@@ -315,6 +315,7 @@ Header `korvid/core/cli.h`, the filesystem side:
 | `engine_hash_state(e)` | function | the hash of the sim: ktables, each module's drawn `ctx.rng()` stream, resources with field tables, waiting timers and next-tick events, the sim tick |
 | `engine_describe_event(e, type, event, out, cap)` | function | an event through its schema |
 | `EventTrace`, `TraceRecord` | records | the dev ring of delivered events with their emitters (`--trace-events`) |
+| `engine_set_event_hook(e, fn, user)`, `EventHookFn`, `DeliveredEvent` | function, types | dev builds: every delivered event handed to `fn` with its type's name, field table, emitter and bytes, at the boundary that merges it; false in ship |
 
 Header `korvid/core/phase.h`:
 

@@ -39,6 +39,7 @@ void test_pause(kv::TestCtx&);
 void test_qualify(kv::TestCtx&);
 void test_utf8(kv::TestCtx&);
 void test_hash(kv::TestCtx&);
+void test_event_hook(kv::TestCtx&);
 void test_entity_name(kv::TestCtx&);
 void test_attach(kv::TestCtx&);
 
@@ -56,6 +57,7 @@ int main() {
     test_ktable(c);
     test_parts(c); // after test_component: that one names handle kind 7 and wants it never registered
     test_hash(c);
+    test_event_hook(c);
     test_context(c);
     test_entity_name(c);
     test_attach(c);

@@ -306,9 +306,11 @@ says the table describes the object and nothing more: no state hash, no plain-da
 at publish, no save. `describe` and the script binding read it as any resource's.
 
 **The event trace as data (KR23).** In dev builds, `engine_set_event_hook(e, fn, user)`:
-`fn` is called with each event as it is delivered, with its type's name, its field table
-(empty for a type without one), the emitter's name and all its bytes; not the trace
-ring's 40. One hook; setting another replaces it, and null takes it away. Not in ship.
+`fn` is called with each event as it is delivered, a `DeliveredEvent` with its tick, its
+type's id, name and field table (empty for a type without one), the emitter's name, the
+boundary that merged it, and all its bytes; not the trace ring's 40. It runs where
+`--trace-events` prints, on the main thread between phases, in the same order. One hook;
+setting another replaces it, and null takes it away. In ship it returns false.
 
 ## Requirements
 
@@ -751,3 +753,12 @@ shows any resource's field table, whether it is hashed, and the published values
   changing it leaves the state hash alone; its fields describe it; a cosmetic resource
   with no table is refused) and `cli_fs` (its fields and values printed, a resource
   without a table prints none).
+
+**Milestone 14, the event hook (KR23): built Nov 23, 2026.** As above. The hook is called
+from `engine_trace_delivery` beside the print, so it costs nothing when unset, and
+nothing at all in ship, where the trace is compiled out. Test (`event hook`): a system
+emits two notes with a field table and a 64-byte blob without one, over two ticks; the
+hook sees four notes in emission order and two blobs with every byte, each named, with
+its table, its emitter and `sim`; after `engine_set_event_hook(e, nullptr, ...)` it sees
+nothing. In ship the call is refused and nothing arrives. Checked on linux-dev,
+linux-debug and linux-ship.

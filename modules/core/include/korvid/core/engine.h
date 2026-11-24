@@ -111,11 +111,27 @@ struct TraceRecord {
     u8          pad;
     u8          data[40];
 };
+// What the event hook is handed, one delivered event at a time (engine_set_event_hook).
+// Everything is valid during the call only.
+struct DeliveredEvent {
+    u64                   tick;
+    u32                   type;      // its id: e.event_types[type]
+    const char*           type_name; // the declared name, "Spawned"
+    Span<const FieldDesc> fields;    // the type's field table; empty for a type without one
+    const char*           emitter;   // the system or handler that emitted it; "" outside the schedule
+    const char*           where;     // the phase whose boundary merged it, or "boundary" for the tick's start
+    const void*           data;      // all of the event's bytes
+    u32                   size;
+};
+typedef void (*EventHookFn)(void* user, const DeliveredEvent& ev);
+
 struct EventTrace {
     Array<TraceRecord> ring;      // capacity fixed at init; oldest overwritten
     u32                head  = 0; // next slot to write
     u64                total = 0; // records ever written
     bool               print = false;
+    EventHookFn        hook      = nullptr; // engine_set_event_hook
+    void*              hook_user = nullptr;
 };
 
 // ---- the engine -----------------------------------------------------------------------
@@ -365,6 +381,13 @@ u64   engine_hash_state(const Engine& e);
 // Describes one event through its schema: "Type{...}", or just the name without one.
 // Returns what snprintf would.
 int  engine_describe_event(const Engine& e, u32 type_id, const void* event, char* out, usize cap);
+// The event trace as data, for a dev tool's events panel: fn is called with every event as
+// it is delivered, at the boundary that merges it (the tick's start, then each phase's),
+// in the order --trace-events prints them: by type, and in emission order within a type.
+// On the main thread, between phases, while no unit runs. It is handed the bytes and may
+// not keep them; it should not emit. One hook: setting another replaces it, null takes it
+// away. Dev builds only: false in ship, and nothing is called.
+bool engine_set_event_hook(Engine& e, EventHookFn fn, void* user);
 
 // The name language of the registration tables. A name starting with '.' means
 // "<module>." plus the rest ("?." keeps the '?' in front); anything else is itself. The
@@ -386,7 +409,8 @@ void engine_apply_commands(Engine& e);
 // Evaluates every state trigger over this tick's previous and current rows and emits
 // StateEdge events, pending. The tick runner calls it at the end of the tick.
 void engine_fire_triggers(Engine& e, u64 tick);
-// Records (and prints, if asked) what the streams took since the last call. Dev builds only.
+// Records (and prints, and hands the hook, if asked) what the streams took since the last
+// call. Dev builds only.
 void engine_trace_delivery(Engine& e, u64 tick, u32 phase);
 
 } // namespace kv

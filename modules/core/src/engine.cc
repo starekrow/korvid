@@ -1815,6 +1815,17 @@ int engine_describe_event(const Engine& e, u32 type_id, const void* event, char*
     return schema_describe(d->name, d->fields, event, out, cap);
 }
 
+bool engine_set_event_hook(Engine& e, EventHookFn fn, void* user) {
+#if KV_DEV
+    e.trace.hook      = fn;
+    e.trace.hook_user = fn ? user : nullptr;
+    return true;
+#else
+    KV_UNUSED(e); KV_UNUSED(fn); KV_UNUSED(user);
+    return false;
+#endif
+}
+
 void engine_trace_delivery(Engine& e, u64 tick, u32 phase) {
 #if KV_DEV
     if (e.trace.ring.len == 0) return;
@@ -1840,6 +1851,11 @@ void engine_trace_delivery(Engine& e, u64 tick, u32 phase) {
                 char text[256];
                 engine_describe_event(e, t, ev, text, sizeof text);
                 KV_INFO("trace", "tick %llu %s: %s <- %s", (unsigned long long)tick, where, text, r.emitter[0] ? r.emitter : "(outside the schedule)");
+            }
+            if (e.trace.hook) {
+                const EventTypeDesc* d = t < e.event_types.len ? e.event_types[t] : nullptr;
+                DeliveredEvent de{tick, t, d ? d->name : "?", d ? d->fields : Span<const FieldDesc>{}, r.emitter, where, ev, d ? d->size : b.elem_size};
+                e.trace.hook(e.trace.hook_user, de);
             }
         }
         st.traced = st.end();
