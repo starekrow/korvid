@@ -776,3 +776,26 @@ still `93d0e91`'s, tick for tick (14,154 and 1,865), at the default rate and at
 `--rate 4`. That was at 8d0e382, before the macOS catch-up after it, which checks KR15 and
 KR16 on macos-dev (milestones 11 and 12 say how). Not done: Windows and iOS, where they are
 written and not compiled.
+
+**The Windows catch-up, Nov 24, 2026** (cl 14.51, windows-debug, -dev and -ship). Every
+suite passes in all three. What cl and Windows found:
+
+- **cl refused two warnings:** patherizer's cell index was a `usize` where `Array` takes a
+  `u32`, and its row a `floor_div`'s `i64`; the JPEG decoder's DC shift was 32 bits, then
+  widened.
+- **A long directory could not be emptied (KR15).** `os_dir_each` and `os_dir_each_stat`
+  still widened into a 1,024-character buffer, so `io_remove_tree` could not list a deep
+  directory to empty it, and `io_make_dirs_deep` failed. The three listings
+  (`os_dir_list` too) now open their `\*` pattern through `WidePath` with one helper.
+- **asset_live's test** called `setenv`; Windows has `_putenv_s`.
+- **The audio class (KR7)** is granted: MMCSS takes the thread's "Pro Audio" task, and
+  `core`'s test now checks the yes on Windows as it does on macOS.
+- **`wrapv` (For review, 3) does not work on Windows.** cl 14.51 refuses
+  `/d2UndefIntOverflow-` (`fatal error C1007: unrecognized flag`), so a source that asks
+  for the profile does not compile. Without it, cl at `/O2` folds `(x * 2) / 2` to `x` and
+  `a * 4 / 4 == a` to true: it assumes signed overflow cannot happen. So the profile has no
+  flags there and a `warn`: a toolchain's profile may carry one, and kormake says it once
+  a run where a module asks for it, then builds. A source that needs wrapping on Windows
+  must do it itself, in unsigned arithmetic. No module in the engine asks for the profile.
+- **Not checked:** KR12's share (no share here), the project half of kormake's test (as
+  before).

@@ -318,9 +318,12 @@ starts from `slice-10`. As above, and:
 | Wayland, decoupled, minimized at 120 | hidden at 121 | 1 | 360 in 6 s |
 | X11, continuous, minimized at 120, restored at 360 | hidden at 121, shown at 361 | none while hidden | 480 in 8 s |
 | macOS (macos-dev, Nov 23), decoupled, minimized at 120, restored at 240 | hidden at 122, shown at 242 | 2 | 662 in 12 s |
+| Win32 (windows-dev, Nov 24), decoupled, ticks wanted, minimized at 120, restored at 240 | hidden at 121, shown at 241 | 2 | 720 in 12 s |
+| Win32, on demand, minimized at 8, restored at 24 | hidden at 9, shown at 25 | 23 | 35 in 8 s, 15 of them without a frame |
+| Win32, continuous, minimized at 120, restored at 360 | hidden at 121, shown at 361 | 248, none while hidden | 480 in 8 s |
 
 - **Not checked:** a window minimized by hand on Wayland, which SDL reports as occluded
-  when GNOME suspends the surface, and covered windows on any desktop; Windows and the
+  when GNOME suspends the surface, and covered windows on any desktop; the
   phones, written and not compiled. macOS is SDL3's backend, Linux's: decoupled with
   `--want-ticks` drew 1 frame in 600 ticks over 10 s there. `DWMWA_CLOAKED` (another virtual desktop) is not
   asked on Windows.
@@ -398,7 +401,7 @@ the files directory's sibling, `cache`, which is `getCacheDir()`. Test (`user di
 all three under set variables, then under `$HOME` with two unset and one relative; each
 made; `platform_pref_path` is the data one. On macos-dev (Nov 23) the test's macOS part:
 `$HOME` set, settings and data in `Library/Application Support/Org/App/`, the cache in
-`Library/Caches/Org/App/`. Windows, iOS and Android written, not compiled.
+`Library/Caches/Org/App/`. Windows: the catch-up below. iOS and Android written, not compiled.
 
 **Milestone 7, the settings store (KR24, 2): built Nov 23, 2026.** As above, and:
 
@@ -421,7 +424,7 @@ made; `platform_pref_path` is the data one. On macos-dev (Nov 23) the test's mac
   key forty times with a flush after each, and both keys at forty after. On linux-debug,
   linux-dev and linux-ship (ship without the kills, which need the hook), and under
   `address,undefined` and `thread`. On macos-dev, kills included, once the test found
-  itself with `_NSGetExecutablePath` (Apple has no `/proc`). Windows and iOS written, not
+  itself with `_NSGetExecutablePath` (Apple has no `/proc`). Windows: the catch-up below. iOS written, not
   compiled.
 
 **Milestone 8, runtime event types (KR19, 1): built Nov 23, 2026.** As above. A runtime
@@ -516,3 +519,29 @@ linux-ship. core, platform, platform_hid, script, krome, image and cli pass unde
 `tools/doccheck.sh` reports what it did before the slice. The demo hashes are as above.
 Not done: Windows, the Apple family and the phones, where every milestone's code for
 them is written and not compiled; a window minimized by hand under Wayland.
+
+**The Windows catch-up, Nov 24, 2026** (cl 14.51, windows-debug, -dev and -ship). Every
+suite passes in all three; `tools/determinism-check.sh` (which now knows a Git Bash host)
+passes, and so do the render gate's d3d12 and cpu runs. What it found:
+
+- **arcfire's recordings had not been taken again** after the timer fix above, nor after
+  KR21 moved the ids. Both diverged at tick 120 on every platform, the first hash with a
+  timer waiting. At c0d6b1f, before KR21, both replay matched on Windows: the sim still
+  agrees with Linux's. Recorded again here: the same runs, Normal 14,558 ticks and Hard
+  15,155, and only hash records differ (344 bytes and 503).
+- **cl drops a string literal's default in a constant-initialized object.** `SePlay`'s
+  `char title[16] = "untitled"` was all zeros in `EventDefault<SePlay>::value`, so
+  script's test read an empty title from `ev:emit('SePlay')`. cl 14.51 does this silently,
+  with `constinit` or without, and builds the same struct at run time correctly. `= E()`
+  would work, but as a dynamic initializer, which principle 2 forbids. The test's default
+  is in braces now, and `event.h` says so for anyone's event types.
+- **KR21 on Win32:** the visibility table has its rows; `SIZE_MINIMIZED` and the restore
+  arrive as X11's do.
+- **KR24:** the user-dir test has a Windows part (settings and data in `%APPDATA%`, the
+  cache in `%LOCALAPPDATA%`, in `cache/`, under an org of the test's own, taken away
+  after). The settings test's other processes run on Windows: both kills leave the old
+  value, and two writers keep each other's keys. platform_tests: 980 checks at debug.
+- **gallery_ui's D3D12 reference** had not had Krome slice 5's shapes; it is this run's
+  output, pixel for pixel Vulkan's.
+- **Not checked:** `DWMWA_CLOAKED`, as before; the d3d12 gate's compiled-shader
+  comparison, against a baseline from Nov 14 that needs taking again.
