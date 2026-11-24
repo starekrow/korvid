@@ -355,7 +355,8 @@ Header `korvid/core/event.h`, `timer.h`:
 
 | name | kind | what |
 |---|---|---|
-| `EventTypeDesc`, `EventFlags`, `KV_EVENT(E)`, `KV_EVENT_EX(E, fields, flags)` | record, enum, macros | an event type with an optional schema; `EvNextTick`; `EvStaleOk` (dropped for a stale handle as a matter of course: dev builds otherwise warn once a type) |
+| `EventTypeDesc`, `EventFlags`, `KV_EVENT(E)`, `KV_EVENT_EX(E, fields, flags)` | record, enum, macros | an event type with an optional schema and its `defaults` (an `E{}`, which the macros fill in); `EvNextTick`; `EvStaleOk` (dropped for a stale handle as a matter of course: dev builds otherwise warn once a type) |
+| `EventDefault<E>::value` | template | the `E{}` an event type's `defaults` points at: what a script leaves out |
 | `event_types_register(types, first_id)`, `event_types_unregister(types)` | functions | ids for a table of types: engine_init's, or a test of the bus without an engine |
 | `EventType<E>::id` | record | the id slot |
 | `EventBus` | record | `emit`, `read<E>()`, `read_new<E>()`, `deliver`, `end_tick`, `dropped_stale`, `pending_count` |

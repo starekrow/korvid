@@ -18,6 +18,7 @@
 // any other array is a list.
 #include "korvid/script/script.h"
 #include "korvid/core/ktable.h"
+#include "fields.h"
 #include <string.h>
 
 namespace kv {
@@ -34,110 +35,6 @@ struct ScriptKTable {
     LuaField* fields() { return (LuaField*)(this + 1); }
 };
 struct LuaRow { ScriptKTable* ktable; Handle handle; };
-
-void push_scalar(lua_State* L, FieldType t, const u8* p) {
-    switch (t) {
-    case FieldType::Bool:   lua_pushboolean(L, *p != 0); return;
-    case FieldType::U8:     lua_pushinteger(L, *p); return;
-    case FieldType::I8:     lua_pushinteger(L, *(const i8*)p); return;
-    case FieldType::Char:   lua_pushinteger(L, *(const char*)p); return;
-    case FieldType::U16:    { u16 v; memcpy(&v, p, sizeof v); lua_pushinteger(L, v); return; }
-    case FieldType::I16:    { i16 v; memcpy(&v, p, sizeof v); lua_pushinteger(L, v); return; }
-    case FieldType::U32:    { u32 v; memcpy(&v, p, sizeof v); lua_pushinteger(L, v); return; }
-    case FieldType::I32:    { i32 v; memcpy(&v, p, sizeof v); lua_pushinteger(L, v); return; }
-    case FieldType::U64:    { u64 v; memcpy(&v, p, sizeof v); lua_pushinteger(L, (lua_Integer)v); return; }
-    case FieldType::I64:    { i64 v; memcpy(&v, p, sizeof v); lua_pushinteger(L, v); return; }
-    case FieldType::Handle: { u64 v; memcpy(&v, p, sizeof v); lua_pushinteger(L, (lua_Integer)v); return; }
-    case FieldType::F32:    { f32 v; memcpy(&v, p, sizeof v); lua_pushnumber(L, v); return; }
-    case FieldType::F64:    { f64 v; memcpy(&v, p, sizeof v); lua_pushnumber(L, v); return; }
-    case FieldType::Count:  break;
-    }
-    lua_pushnil(L);
-}
-
-void push_field(lua_State* L, const FieldDesc& f, const u8* row) {
-    const u8* p = row + f.offset;
-    if (f.type == FieldType::Char) {
-        usize n = 0;
-        while (n < f.count && p[n]) ++n;
-        lua_pushlstring(L, (const char*)p, n);
-        return;
-    }
-    if (f.count == 1) { push_scalar(L, f.type, p); return; }
-    if (f.type == FieldType::U8) { lua_pushlstring(L, (const char*)p, f.count); return; }
-    u32 size = field_type_size(f.type);
-    lua_createtable(L, f.count, 0);
-    for (u32 i = 0; i < f.count; ++i) {
-        push_scalar(L, f.type, p + (usize)i * size);
-        lua_rawseti(L, -2, (lua_Integer)i + 1);
-    }
-}
-
-// The value at `index` into one scalar. Raises for the wrong type or an integer the
-// field cannot hold: a row that silently holds something else is the worse outcome.
-void set_scalar(lua_State* L, const FieldDesc& f, u8* p, int index) {
-    auto integer = [&](lua_Integer lo, lua_Integer hi) -> lua_Integer {
-        int ok = 0;
-        lua_Integer v = lua_tointegerx(L, index, &ok);
-        if (!ok) luaL_error(L, "field '%s': an integer expected, got %s", f.name, luaL_typename(L, index));
-        if (v < lo || v > hi) luaL_error(L, "field '%s': %I does not fit a %s", f.name, (LUAI_UACINT)v, field_type_name(f.type));
-        return v;
-    };
-    constexpr lua_Integer kMin = LUA_MININTEGER, kMax = LUA_MAXINTEGER;
-    switch (f.type) {
-    case FieldType::Bool:   *p = lua_toboolean(L, index) ? 1 : 0; return;
-    case FieldType::U8:     *p = (u8)integer(0, 0xFF); return;
-    case FieldType::I8:     *(i8*)p = (i8)integer(-128, 127); return;
-    case FieldType::Char:   *(char*)p = (char)integer(-128, 255); return;
-    case FieldType::U16:    { u16 v = (u16)integer(0, 0xFFFF); memcpy(p, &v, sizeof v); return; }
-    case FieldType::I16:    { i16 v = (i16)integer(-32768, 32767); memcpy(p, &v, sizeof v); return; }
-    case FieldType::U32:    { u32 v = (u32)integer(0, 0xFFFFFFFFll); memcpy(p, &v, sizeof v); return; }
-    case FieldType::I32:    { i32 v = (i32)integer(-2147483647ll - 1, 2147483647ll); memcpy(p, &v, sizeof v); return; }
-    case FieldType::U64:
-    case FieldType::Handle: { u64 v = (u64)integer(kMin, kMax); memcpy(p, &v, sizeof v); return; }
-    case FieldType::I64:    { i64 v = (i64)integer(kMin, kMax); memcpy(p, &v, sizeof v); return; }
-    case FieldType::F32:
-    case FieldType::F64: {
-        int ok = 0;
-        lua_Number v = lua_tonumberx(L, index, &ok);
-        if (!ok) luaL_error(L, "field '%s': a number expected, got %s", f.name, luaL_typename(L, index));
-        if (f.type == FieldType::F32) { f32 x = (f32)v; memcpy(p, &x, sizeof x); }
-        else memcpy(p, &v, sizeof v);
-        return;
-    }
-    case FieldType::Count: break;
-    }
-}
-
-void set_field(lua_State* L, const FieldDesc& f, u8* row, int index) {
-    index = lua_absindex(L, index);
-    u8* p = row + f.offset;
-    if (f.type == FieldType::Char) {
-        usize n = 0;
-        // The type first: lua_tolstring would turn a number into a string where it lies.
-        const char* s = lua_type(L, index) == LUA_TSTRING ? lua_tolstring(L, index, &n) : nullptr;
-        if (!s) luaL_error(L, "field '%s': a string expected, got %s", f.name, luaL_typename(L, index));
-        if (n >= f.count || memchr(s, 0, n)) luaL_error(L, "field '%s': a string of %d bytes does not fit char[%d]", f.name, (int)n, (int)f.count);
-        memcpy(p, s, n);
-        memset(p + n, 0, f.count - n);
-        return;
-    }
-    if (f.count == 1) { set_scalar(L, f, p, index); return; }
-    if (f.type == FieldType::U8) {
-        usize n = 0;
-        const char* s = lua_type(L, index) == LUA_TSTRING ? lua_tolstring(L, index, &n) : nullptr;
-        if (!s || n != f.count) luaL_error(L, "field '%s': a string of exactly %d bytes expected", f.name, (int)f.count);
-        memcpy(p, s, n);
-        return;
-    }
-    if (!lua_istable(L, index) || luaL_len(L, index) != (lua_Integer)f.count) luaL_error(L, "field '%s': a list of %d expected", f.name, (int)f.count);
-    u32 size = field_type_size(f.type);
-    for (u32 i = 0; i < f.count; ++i) {
-        lua_rawgeti(L, index, (lua_Integer)i + 1);
-        set_scalar(L, f, p + (usize)i * size, -1);
-        lua_pop(L, 1);
-    }
-}
 
 ScriptKTable* check_ktable(lua_State* L, int i) { return (ScriptKTable*)luaL_checkudata(L, i, kKTableMeta); }
 Handle check_handle(lua_State* L, int i) { return Handle{(u64)luaL_checkinteger(L, i)}; }
@@ -176,7 +73,7 @@ int ktable_spawn(lua_State* L) {
         lua_pushnil(L);
         while (lua_next(L, 2)) {
             const LuaField* f = find_field(L, k, 1, -2);
-            set_field(L, *f->field, row_of(*f, h), -1);
+            script_set_field(L, *f->field, row_of(*f, h), -1);
             lua_pop(L, 1);
         }
     }
@@ -197,7 +94,7 @@ int ktable_get(lua_State* L) {
     const LuaField* f = find_field(L, k, 1, 3);
     if (!f) return luaL_error(L, "%s: no field '%s'", k->table->name, lua_tostring(L, 3));
     if (!k->table->valid(h)) { lua_pushnil(L); return 1; }
-    push_field(L, *f->field, row_of(*f, h));
+    script_push_field(L, *f->field, row_of(*f, h));
     return 1;
 }
 
@@ -208,7 +105,7 @@ int ktable_set(lua_State* L) {
     const LuaField* f = find_field(L, k, 1, 3);
     if (!f) return luaL_error(L, "%s: no field '%s'", k->table->name, lua_tostring(L, 3));
     if (!k->table->valid(h)) return luaL_error(L, "%s: a stale handle", k->table->name);
-    set_field(L, *f->field, row_of(*f, h), 4);
+    script_set_field(L, *f->field, row_of(*f, h), 4);
     return 0;
 }
 
@@ -269,7 +166,7 @@ int row_index(lua_State* L) {
         return luaL_error(L, "%s: no field '%s'", r->ktable->table->name, key);
     }
     if (!r->ktable->table->valid(r->handle)) return luaL_error(L, "%s: the row is gone (a stale handle)", r->ktable->table->name);
-    push_field(L, *f->field, row_of(*f, r->handle));
+    script_push_field(L, *f->field, row_of(*f, r->handle));
     return 1;
 }
 
@@ -280,7 +177,7 @@ int row_newindex(lua_State* L) {
     const LuaField* f = find_field(L, r->ktable, -1, 2);
     if (!f) return luaL_error(L, "%s: no field '%s'", r->ktable->table->name, lua_tostring(L, 2));
     if (!r->ktable->table->valid(r->handle)) return luaL_error(L, "%s: the row is gone (a stale handle)", r->ktable->table->name);
-    set_field(L, *f->field, row_of(*f, r->handle), 3);
+    script_set_field(L, *f->field, row_of(*f, r->handle), 3);
     return 0;
 }
 

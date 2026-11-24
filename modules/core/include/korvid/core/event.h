@@ -57,6 +57,7 @@ struct EventTypeDesc {
     u32*                  id;
     Span<const FieldDesc> fields = {}; // optional schema: stale-handle drop, trace, describe
     u8                    flags  = 0;
+    const void*           defaults = nullptr; // a value-initialized E (KV_EVENT fills it): what a script leaves out
 
     bool next_tick() const { return (flags & EvNextTick) != 0; }
 };
@@ -67,6 +68,13 @@ template <class E>
 struct EventType {
     static_assert(__is_trivially_copyable(E), "events are plain data");
     static inline u32 id = 0;
+};
+
+// E as `E{}` makes it, its default member initializers applied: the event a script emits
+// when it names none of the fields (EventTypeDesc::defaults).
+template <class E>
+struct EventDefault {
+    static inline const E value{};
 };
 
 // Assigns ids first_id, first_id + 1, ... to the table in order. Returns the next free
@@ -201,6 +209,6 @@ struct EventBus {
 // or with a field table and EventFlags:
 //   KV_EVENT_EX(RockHit, k_rock_hit_fields, 0)
 //   KV_EVENT_EX(ScoreChanged, k_score_fields, EvNextTick)
-#define KV_EVENT(E) {#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id}
+#define KV_EVENT(E) {#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id, {}, 0, &::kv::EventDefault<E>::value}
 #define KV_EVENT_EX(E, fields, flags) \
-    {#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id, fields, (::kv::u8)(flags)}
+    {#E, (::kv::u32)sizeof(E), (::kv::u32)alignof(E), &::kv::EventType<E>::id, fields, (::kv::u8)(flags), &::kv::EventDefault<E>::value}

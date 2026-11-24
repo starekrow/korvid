@@ -49,5 +49,29 @@ files:destroy(h)  files:valid(h)  files:live()  files:capacity()  files:name()  
 - The caller answers for access. The Lua runs inside a system that declared what it
   writes; the binding checks nothing of that.
 
+## Events and resources in Lua
+
+`script_push_events(L, e, ctx)` pushes an events object over the engine's event types,
+by name, with the same mapping and errors as a row (`src/fields.h` is both's):
+
+```lua
+ev:emit("PlayerPlay", { track = 3 })   -- the fields left out at the struct's defaults
+for _, p in ipairs(ev:received("PlayerPosition")) do print(p.position) end
+ev:fields("PlayerPlay")   ev:has("PlayerPlay")
+```
+
+- **Defaults** are the struct's own (`E{}`, which `KV_EVENT` keeps as
+  `EventTypeDesc::defaults`). A type with no field table is emitted with its defaults and
+  nothing else, and received as empty tables.
+- **Inside a unit** point the object at the run's context with
+  `script_events_set_context(L, index, &ctx)`, and back at null after: emit is then checked
+  against the unit's `emits` and received is its batch of a type in its `reads`, and
+  either undeclared is a Lua error naming the unit and the type. **Outside the schedule**
+  emit goes to the engine's writer, delivered at the next boundary, and received is what
+  the running tick merged so far.
+
+`script_push_resource(L, e, name)` pushes a copy of a published resource's fields as a
+table, a cosmetic one's too (`ResourceDesc::cosmetic`); nil without a field table.
+
 Lua errors are `longjmp` (see `modules/lua`): nothing in this module keeps an object with
 a destructor alive across a call that can raise.

@@ -49,6 +49,45 @@ constinit const KTableDesc k_ktables[] = {
 };
 KV_MODULE_DEFINE(k_st) = {.name = "st", .components = k_components, .ktables = k_ktables};
 
+
+// Events by their field tables (KR18): a type with defaults and one without a table;
+// systems that run Lua inside their units; a cosmetic resource read by its fields.
+struct SePlay { u32 track = 7; f32 gain = 1.0f; char title[16] = "untitled"; i16 offset = -1; };
+struct SeTick { u8 n; };
+struct SeTransport { f64 position; u32 state; };
+constinit const FieldDesc k_play_fields[] = {KV_FIELDS(SePlay, track, gain, title, offset)};
+constinit const EventTypeDesc k_se_events[] = {KV_EVENT_EX(SePlay, k_play_fields, 0), KV_EVENT(SeTick)};
+constinit const FieldDesc k_transport_fields[] = {KV_FIELDS(SeTransport, position, state)};
+constinit const ResourceDesc k_se_resources[] = {{.name = ".transport", .fields = k_transport_fields, .cosmetic = true}};
+SeTransport g_transport{2.5, 3};
+lua_State* g_L = nullptr;
+const char* g_emit_chunk = nullptr; // what the emitting system runs this tick
+u32 g_seen = 0, g_seen_track = 0;
+
+// Runs `chunk` with the global `ev` pointed at this unit's context; a failure is logged and
+// left in the global `err`.
+void se_run(TickContext& ctx, const char* chunk) {
+    lua_getglobal(g_L, "ev");
+    script_events_set_context(g_L, -1, &ctx);
+    lua_pop(g_L, 1);
+    if (luaL_dostring(g_L, chunk) != LUA_OK) { lua_setglobal(g_L, "err"); }
+    lua_getglobal(g_L, "ev");
+    script_events_set_context(g_L, -1, nullptr);
+    lua_pop(g_L, 1);
+}
+void se_emit(TickContext& ctx) { if (g_emit_chunk) se_run(ctx, g_emit_chunk); }
+void se_read(TickContext& ctx) {
+    se_run(ctx, "local got = ev:received('SePlay') SEEN = (SEEN or 0) + #got for _, p in ipairs(got) do LAST = p end");
+    // The C++ side of the same batch, to check the bytes the table made.
+    for (const SePlay& p : ctx.received<SePlay>()) { ++g_seen; g_seen_track = p.track; }
+}
+bool se_startup(Engine& e, ModuleInstance& self) { return engine_publish(e, self, ".transport", &g_transport); }
+constinit const SystemDesc k_se_systems[] = {
+    {.name = ".emit", .phase = Phase::Sim, .fn = se_emit, .emits = "SePlay"},
+    {.name = ".read", .phase = Phase::Sim, .fn = se_read, .reads = "SePlay"},
+};
+KV_MODULE_DEFINE(k_se) = {.name = "se", .events = k_se_events, .resources = k_se_resources, .systems = k_se_systems, .startup = se_startup};
+
 } // namespace
 
 #define LUA_CHECK(c, L, chunk) (c).check(lua_true(c, L, chunk), chunk, __FILE__, __LINE__)
@@ -183,10 +222,69 @@ void test_script_ktable(TestCtx& c) {
     engine_shutdown(e);
 }
 
+void test_script_events(TestCtx& c) {
+    c.begin("script events");
+    const ModuleDesc* const list[] = {&k_se};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    lua_State* L = luaL_newstate();
+    luaL_openlibs(L);
+    g_L = L;
+    script_push_events(L, e);
+    lua_setglobal(L, "ev");
+
+    // What the object knows, outside the schedule.
+    LUA_CHECK(c, L, "local f = ev:fields('SePlay') return ev:has('SePlay') and not ev:has('Nope') and #f == 4 and f[1] == 'track' and f[3] == 'title' and #ev:fields('SeTick') == 0");
+    LUA_CHECK(c, L, "local ok, m = pcall(ev.emit, ev, 'Nope', {}) return not ok and m:find(\"no event type 'Nope'\") ~= nil");
+
+    // Emitted inside a unit and read by the next, the rest at the struct's defaults.
+    g_emit_chunk = "ev:emit('SePlay', { title = 'Blue in Green', gain = 0.5 })";
+    engine_frame(e, e.clock.tick_dt);
+    KV_CHECK(c, g_seen == 1 && g_seen_track == 7);
+    LUA_CHECK(c, L, "return SEEN == 1 and LAST.track == 7 and LAST.gain == 0.5 and LAST.title == 'Blue in Green' and LAST.offset == -1 and err == nil");
+    g_emit_chunk = "ev:emit('SePlay')";
+    engine_frame(e, e.clock.tick_dt);
+    LUA_CHECK(c, L, "return SEEN == 2 and LAST.track == 7 and LAST.gain == 1.0 and LAST.title == 'untitled'");
+
+    // A row's mistakes, a type's and an undeclared emit or read, each a Lua error the unit
+    // can catch; nothing half-built is emitted.
+    g_emit_chunk = R"(
+        local function fails(f, want) local ok, m = pcall(f) return not ok and m:find(want, 1, true) ~= nil end
+        OK = fails(function() ev:emit('SePlay', { track = -1 }) end, 'does not fit')
+         and fails(function() ev:emit('SePlay', { gain = 'loud' }) end, 'a number expected')
+         and fails(function() ev:emit('SePlay', { title = string.rep('x', 16) }) end, 'does not fit char[16]')
+         and fails(function() ev:emit('SePlay', { tempo = 1 }) end, "SePlay has no field 'tempo'")
+         and fails(function() ev:emit('SeTick', { n = 1 }) end, 'has no field table')
+         and fails(function() ev:emit('SeTick') end, 'without declaring it in `emits`')
+         and fails(function() ev:received('SePlay') end, 'without declaring it in `reads`'))";
+    engine_frame(e, e.clock.tick_dt);
+    LUA_CHECK(c, L, "return OK == true and SEEN == 2 and err == nil");
+    KV_CHECK(c, g_seen == 2);
+
+    // From outside the schedule: into the engine's writer, delivered at the next boundary.
+    g_emit_chunk = nullptr;
+    LUA_CHECK(c, L, "ev:emit('SePlay', { track = 42 }) return true");
+    engine_frame(e, e.clock.tick_dt);
+    KV_CHECK(c, g_seen == 3 && g_seen_track == 42);
+    LUA_CHECK(c, L, "return SEEN == 3 and LAST.track == 42");
+
+    // A cosmetic resource by its fields, as of now; nothing for a name without a table.
+    KV_CHECK(c, script_push_resource(L, e, "se.transport"));
+    lua_setglobal(L, "T");
+    LUA_CHECK(c, L, "return T.position == 2.5 and T.state == 3");
+    KV_CHECK(c, !script_push_resource(L, e, "se.nothing") && lua_isnil(L, -1));
+    lua_pop(L, 1);
+
+    lua_close(L);
+    g_L = nullptr;
+    engine_shutdown(e);
+}
+
 int main() {
     TestCtx c;
     test_script(c);
     test_script_ktable(c);
+    test_script_events(c);
     names_shutdown();
     mem_shutdown();
     return test_report(c, "script_tests");

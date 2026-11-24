@@ -92,8 +92,9 @@ Where the OS cannot say, the window is shown. Every loop draws no frame while it
 
 ## Events in Lua (KR18)
 
-`void script_push_events(lua_State* L, TickContext* ctx)` pushes an events object for a
-unit's context; `script_push_events(L, Engine* e)` one for code outside the schedule.
+`void script_push_events(lua_State* L, Engine& e, TickContext* ctx = nullptr)` pushes an
+events object; `script_events_set_context(L, index, ctx)` points it at a unit's run, and
+back at null for code outside the schedule.
 
 ```lua
 ev:emit("PlayerPlay", { track = 3 })    -- the rest at the struct's defaults
@@ -107,8 +108,8 @@ ev:fields("PlayerPlay")                  -- the field names, in order
   `KV_EVENT` and `KV_EVENT_EX` fill in; fields the table leaves out come from it.
 - **Access** is the context's: emitting a type the unit did not declare is the dev check's
   failure, reported as a Lua error.
-- **Resources by their fields**: `script_push_resource(L, e, name)`, a table read through
-  the resource's field table, cosmetic or not (KR17's other half).
+- **Resources by their fields**: `script_push_resource(L, e, name)`, a copy of the
+  resource's fields as a table, cosmetic or not (KR17's other half).
 
 ## A list over a window of rows (KR22)
 
@@ -316,3 +317,24 @@ starts from `slice-10`. As above, and:
 - **Seen, not caused here:** continuous pacing under XWayland draws at 1 fps for about
   3 s after a restore. Presents wait about a second each, as they do for a window the X
   server has not put on screen; the cause is not confirmed.
+
+**Milestone 3, events in Lua (KR18): built Nov 23, 2026.** As above, and:
+
+- **One mapping.** The field code moved out of `ktable.cc` into `src/fields.cc`
+  (`script_push_field`, `script_set_field`, and a table's worth of each), which the ktable,
+  event and resource bindings share.
+- **Defaults**: `EventDefault<E>::value`, an `E{}` with its default member initializers,
+  which `KV_EVENT` and `KV_EVENT_EX` point `EventTypeDesc::defaults` at. A table without one
+  (made by hand) gets zeros.
+- **Checked before C++ would assert**: inside a unit, an emit of a type not in its `emits`
+  and a read of one not in its `reads` are Lua errors naming the unit and the type. The
+  event is built in a userdata, so an error part way emits nothing.
+- **Outside the schedule** received is the running tick's window of the stream, as
+  `EventBus::read` gives C++.
+- **Tests** (`script events`): an event emitted in one unit from a table with two of its
+  four fields, read by the next as a table and as the C++ struct; one emitted with no
+  table; a wrong type, an integer that does not fit, a string too long, an unknown field,
+  a table for a type without one, an undeclared emit and an undeclared read, each caught
+  by `pcall` in the unit, none emitting; one emitted from outside, delivered next tick; a
+  cosmetic resource read by its fields. On linux-dev, linux-debug and linux-ship, and under
+  `address,undefined`.

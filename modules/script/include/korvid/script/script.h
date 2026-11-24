@@ -31,6 +31,23 @@ void script_open_random(lua_State* L);
 struct KTable;
 void script_push_ktable(lua_State* L, KTable* table);
 
+// Pushes an events object: the engine's event types by name, emitted from a Lua table of
+// their fields (the rest at the struct's defaults, EventTypeDesc::defaults) and read as a
+// list of such tables, with the ktable binding's mapping and errors. See events.cc for
+// what it answers. With `ctx` the object is a unit's: emit and received are checked
+// against its `emits` and `reads` (a Lua error for either undeclared) and go through its
+// context; without, it is code outside the schedule's. A context lives for one run of its
+// unit: point the object at each run's with script_events_set_context, and back at null.
+struct Engine;
+struct TickContext;
+void script_push_events(lua_State* L, Engine& e, TickContext* ctx = nullptr);
+void script_events_set_context(lua_State* L, int index, TickContext* ctx);
+
+// Pushes a table of a published resource's fields, read through its field table (a
+// cosmetic one too, ResourceDesc::cosmetic): a copy, as of now. Nil, and false, for a
+// resource with no field table, nothing published, or no such name.
+bool script_push_resource(lua_State* L, Engine& e, const char* name);
+
 // A message handler for lua_pcall: the error with a traceback.
 int script_traceback(lua_State* L);
 
