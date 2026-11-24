@@ -204,7 +204,7 @@ inline void cell(Draw& d, const Band& b, i32 cx, i32 row, i32 dy, i32 fx0, i32 f
     i32 c = cx - b.x0;
     if (c < 0) { c = 0; fx0 = fx1 = 0; }
     if (c > b.bw) c = b.bw;
-    usize at = (usize)row * (usize)(b.bw + 1) + (usize)c;
+    u32 at = (u32)row * (u32)(b.bw + 1) + (u32)c;
     d.cover[at] += dy;
     d.area[at] += dy * (fx0 + fx1);
 }
@@ -218,7 +218,7 @@ void accumulate(Draw& d, const Band& b, Segment s) {
     i64 dx = (i64)s.x1 - s.x0, dy = (i64)s.y1 - s.y0;
     auto x_at = [&](i32 y) -> i32 { return (i32)((i64)s.x0 + floor_div(dx * ((i64)y - s.y0), dy)); };
     i32 ya = s.y0 > top ? s.y0 : top, yb = s.y1 < bottom ? s.y1 : bottom;
-    for (i32 ry = floor_div(ya, kSub); ry * kSub < yb; ++ry) {
+    for (i32 ry = (i32)floor_div(ya, kSub); ry * kSub < yb; ++ry) {
         i32 r0 = ry * kSub, r1 = r0 + kSub;
         i32 py0 = ya > r0 ? ya : r0, py1 = yb < r1 ? yb : r1;
         if (py0 >= py1) continue;

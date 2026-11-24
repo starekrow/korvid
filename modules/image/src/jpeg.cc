@@ -339,7 +339,7 @@ bool decode_block(Frame& f, Bits& b, Component& c, const Scan& s, i16* blk) {
             i32 t = decode(b, f.dc[c.td]);
             if (t < 0 || t > 15) return false;
             c.dc = (i32)((i64)c.dc + receive(b, t));
-            blk[0] = (i16)((i64)c.dc * (1 << s.al));
+            blk[0] = (i16)((i64)c.dc * ((i64)1 << s.al));
         } else if (b.bit()) {
             blk[0] = (i16)(blk[0] | (1 << s.al));
         }

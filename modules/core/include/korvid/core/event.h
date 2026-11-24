@@ -71,7 +71,9 @@ struct EventType {
 };
 
 // E as `E{}` makes it, its default member initializers applied: the event a script emits
-// when it names none of the fields (EventTypeDesc::defaults).
+// when it names none of the fields (EventTypeDesc::defaults). A char array's default is
+// written in braces, {'o', 'f', 'f'}, not "off": cl (14.51) constant-initializes a member
+// given a string literal as all zeros, silently, constinit or not.
 template <class E>
 struct EventDefault {
     static inline const E value{};

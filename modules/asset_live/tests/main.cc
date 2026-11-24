@@ -24,6 +24,16 @@ using namespace kv;
 
 void frame(Engine& e) { platform_pump(e); engine_frame(e, 1.0 / 60.0); }
 
+// KV_GOLDBERG set, or with nullptr taken away (Windows has _putenv_s, where "" unsets).
+void set_goldberg(const char* value) {
+#if defined(_WIN32)
+    _putenv_s("KV_GOLDBERG", value ? value : "");
+#else
+    if (value) setenv("KV_GOLDBERG", value, 1);
+    else unsetenv("KV_GOLDBERG");
+#endif
+}
+
 template <class F> bool until(Engine& e, F done, f64 seconds = 5.0) {
     f64 t0 = time_now();
     while (time_now() - t0 < seconds) {
@@ -66,7 +76,7 @@ int main() {
     KV_CHECK(c, g.open());
     char port[16];
     format(port, sizeof port, "%u", (u32)g.l.port);
-    setenv("KV_GOLDBERG", port, 1);
+    set_goldberg(port);
     {
         const ModuleDesc* const list[] = {&platform_module, &asset_module, &asset_live_module};
         Engine e;
@@ -112,7 +122,7 @@ int main() {
     }
 
     // Off: no connection, however long it runs.
-    setenv("KV_GOLDBERG", "off", 1);
+    set_goldberg("off");
     {
         const ModuleDesc* const list[] = {&platform_module, &asset_module, &asset_live_module};
         Engine e;
@@ -121,7 +131,7 @@ int main() {
         KV_CHECK(c, g.l.accept() < 0 && !asset_live_stats(e).connected && asset_live_stats(e).connects == 0);
         engine_shutdown(e);
     }
-    unsetenv("KV_GOLDBERG");
+    set_goldberg(nullptr);
     g.free();
     io_remove_tree(dir);
     int rc = test_report(c, "asset_live_tests");

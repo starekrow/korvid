@@ -52,7 +52,8 @@ KV_MODULE_DEFINE(k_st) = {.name = "st", .components = k_components, .ktables = k
 
 // Events by their field tables (KR18): a type with defaults and one without a table;
 // systems that run Lua inside their units; a cosmetic resource read by its fields.
-struct SePlay { u32 track = 7; f32 gain = 1.0f; char title[16] = "untitled"; i16 offset = -1; };
+// The title in braces: cl zeroes a string literal's in a constant-initialized default (event.h).
+struct SePlay { u32 track = 7; f32 gain = 1.0f; char title[16] = {'u', 'n', 't', 'i', 't', 'l', 'e', 'd'}; i16 offset = -1; };
 struct SeTick { u8 n; };
 struct SeTransport { f64 position; u32 state; };
 constinit const FieldDesc k_play_fields[] = {KV_FIELDS(SePlay, track, gain, title, offset)};
