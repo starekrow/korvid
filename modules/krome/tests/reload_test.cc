@@ -292,6 +292,14 @@ void test_reload(kv::TestCtx& c) {
         frames(e, 30);
         KV_CHECK(c, s.layouts == layouts && !krome_reload_pending(s));
     }
+
+    // Shut down with the strip up: it is a passive overlay, which closing "the top one"
+    // never takes, and freeing the screen's overlays went round for ever.
+    provide_json(e, "r/s.kimb", screen("Broken", "nope"));
+    frames(e, 3);
+#if KV_DEV
+    KV_CHECK(c, strip_up(s));
+#endif
     engine_shutdown(e);
     io_remove_tree(g_dir);
 }

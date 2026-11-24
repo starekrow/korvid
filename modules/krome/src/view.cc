@@ -933,7 +933,8 @@ void krome_close_overlay(KromeModule& s, KromeScreen& sc, u32 id) {
 }
 
 void krome_free_overlays(KromeModule& s, KromeScreen& sc) {
-    while (sc.overlays.len) krome_close_overlay(s, sc, 0);
+    // By id: "the top one" (0) is never a passive overlay, and the reload strip is one.
+    while (sc.overlays.len) krome_close_overlay(s, sc, sc.overlays.last()->id);
     sc.overlays.free();
 }
 
