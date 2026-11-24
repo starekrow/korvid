@@ -83,12 +83,12 @@ void* ring_worker(void* ctx) {
     return nullptr;
 }
 
-void ring_push(IoRing* r, OsFile fd, void* buf, u32 len, u64 offset, u64 user, bool write) {
+void ring_push(IoRing* r, KHandle fd, void* buf, u32 len, u64 offset, u64 user, bool write) {
     KV_ASSERT(r->free_head != kNone); // the queue asks can_push first
     u32 i = r->free_head;
     RingOp& op = r->ops[i];
     r->free_head = op.next_free;
-    op = RingOp{(int)fd, buf, len, write, offset, user, kNone};
+    op = RingOp{(int)fd.os(), buf, len, write, offset, user, kNone};
     r->pending[r->pending_count++] = i;
     ++r->in_flight;
 }
@@ -133,9 +133,9 @@ void io_ring_destroy(IoRing* r) {
 
 bool io_ring_can_push(const IoRing* r) { return r && r->in_flight < r->entries; }
 
-void io_ring_push_read(IoRing* r, OsFile fd, void* buf, u32 len, u64 offset, u64 user) { ring_push(r, fd, buf, len, offset, user, false); }
+void io_ring_push_read(IoRing* r, KHandle fd, void* buf, u32 len, u64 offset, u64 user) { ring_push(r, fd, buf, len, offset, user, false); }
 
-void io_ring_push_write(IoRing* r, OsFile fd, const void* buf, u32 len, u64 offset, u64 user) {
+void io_ring_push_write(IoRing* r, KHandle fd, const void* buf, u32 len, u64 offset, u64 user) {
     ring_push(r, fd, (void*)buf, len, offset, user, true); // a write only reads it
 }
 

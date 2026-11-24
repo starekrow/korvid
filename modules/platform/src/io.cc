@@ -127,7 +127,7 @@ void drop_write_copy(IoEntry& e) {
 
 // A read_file range against the file as it is now: `length` cut to what is there from
 // `offset` (0 bytes for an offset past the end), and 0 meaning to the end.
-bool clip_range(IoEntry& e, OsFile fd, i32* err) {
+bool clip_range(IoEntry& e, KHandle fd, i32* err) {
     u64 size = 0;
     if (!os_file_size(fd, &size, err)) return false;
     u64 left = e.offset < size ? size - e.offset : 0;
@@ -152,8 +152,8 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
 
     if (e->write) {
         i32 err = 0;
-        OsFile f = os_file_open(entry_file(*e), true, &err);
-        if (f < 0) { complete_failed(q, h, *e, out, err); drop_write_copy(*e); return; }
+        KHandle f = os_file_open(entry_file(*e), true, &err);
+        if (!f.is_open()) { complete_failed(q, h, *e, out, err); drop_write_copy(*e); return; }
         usize put = 0;
         while (put < e->size) {
             i64 n = os_file_write(f, e->buf + put, e->size - put, &err);
@@ -173,8 +173,8 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
     if (e->fail_errno) { complete_failed(q, h, *e, out, e->fail_errno); return; }
     if (e->ranged) {
         i32 err = 0;
-        OsFile fd = e->fd_borrowed ? e->fd : os_file_open(entry_file(*e), false, &err);
-        if (fd < 0) { complete_failed(q, h, *e, out, err); return; }
+        KHandle fd = e->fd_borrowed ? e->fd : os_file_open(entry_file(*e), false, &err);
+        if (!fd.is_open()) { complete_failed(q, h, *e, out, err); return; }
         if (e->clip && !clip_range(*e, fd, &err)) { os_file_close(fd); complete_failed(q, h, *e, out, err); return; }
         Allocator* a = entry_alloc(*e);
         u8* data = (u8*)alloc_in(a, e->length ? e->length : 1);
@@ -195,8 +195,8 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
     }
 
     i32 err = 0;
-    OsFile f = os_file_open(entry_file(*e), false, &err);
-    if (f < 0) { complete_failed(q, h, *e, out, err); return; }
+    KHandle f = os_file_open(entry_file(*e), false, &err);
+    if (!f.is_open()) { complete_failed(q, h, *e, out, err); return; }
     u64 size = 0;
     if (!os_file_size(f, &size, &err)) { os_file_close(f); complete_failed(q, h, *e, out, err); return; }
     usize len = (usize)size;
@@ -228,17 +228,17 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
 // pushed) when the file cannot be opened.
 bool ring_open(IoQueue& q, Handle h, IoEntry& e) {
     if (e.fail_errno) { IoCompletion c{}; complete_failed(q, h, e, c, e.fail_errno); q.completed.push(c); return false; }
-    if (e.fd >= 0) return true; // opened for sizing earlier, or a pack's borrowed descriptor
+    if (e.fd.is_open()) return true; // opened for sizing earlier, or a pack's borrowed descriptor
     i32 err = 0;
     if (e.write) {
-        OsFile fd = os_file_open(entry_file(e), true, &err);
-        if (fd < 0) { IoCompletion c{}; complete_failed(q, h, e, c, err); drop_write_copy(e); q.completed.push(c); return false; }
+        KHandle fd = os_file_open(entry_file(e), true, &err);
+        if (!fd.is_open()) { IoCompletion c{}; complete_failed(q, h, e, c, err); drop_write_copy(e); q.completed.push(c); return false; }
         e.fd = fd;
         e.done = 0;
         return true;
     }
-    OsFile fd = os_file_open(entry_file(e), false, &err);
-    if (fd < 0) { IoCompletion c{}; complete_failed(q, h, e, c, err); q.completed.push(c); return false; }
+    KHandle fd = os_file_open(entry_file(e), false, &err);
+    if (!fd.is_open()) { IoCompletion c{}; complete_failed(q, h, e, c, err); q.completed.push(c); return false; }
     if (e.clip && !clip_range(e, fd, &err)) { os_file_close(fd); IoCompletion c{}; complete_failed(q, h, e, c, err); q.completed.push(c); return false; }
     if (e.ranged) { e.fd = fd; e.size = e.length; e.done = 0; return true; }
     u64 size = 0;
@@ -253,7 +253,7 @@ bool ring_open(IoQueue& q, Handle h, IoEntry& e) {
 bool ring_start(IoQueue& q, Handle h, IoEntry& e) {
     if (!e.write) {
         e.buf = (u8*)alloc_in(entry_alloc(e), e.size ? e.size : 1);
-        if (!e.buf) { os_file_close(e.fd); e.fd = -1; IoCompletion c{}; complete_failed(q, h, e, c, ENOMEM); q.completed.push(c); return false; }
+        if (!e.buf) { os_file_close(e.fd); e.fd = KHandle{}; IoCompletion c{}; complete_failed(q, h, e, c, ENOMEM); q.completed.push(c); return false; }
     }
     e.in_flight = true;
     ++q.in_flight;
@@ -294,9 +294,9 @@ void ring_finish(IoQueue& q, Handle h, IoEntry& e, IoStatus status, i32 err, usi
     }
     else if (status == IoStatus::Done) { c.data = e.buf; c.size = size; ++q.reads_done; e.status = status; deliver(q, e, c); status = e.status; }
     else { free_in(entry_alloc(e), e.buf, e.size ? e.size : 1); if (status == IoStatus::Failed) ++q.reads_failed; }
-    if (e.fd >= 0 && !e.fd_borrowed) os_file_close(e.fd);
+    if (e.fd.is_open() && !e.fd_borrowed) os_file_close(e.fd);
     q.bytes_in_flight -= e.size;
-    e.fd = -1; e.buf = nullptr; e.in_flight = false; e.status = status;
+    e.fd = KHandle{}; e.buf = nullptr; e.in_flight = false; e.status = status;
     --q.in_flight;
     q.completed.push(c);
 }
@@ -443,13 +443,13 @@ void IoQueue::free() {
     for (u32 i = 0; i < entries.len; ++i) {
         if (!entries.is_alive(i)) continue;
         IoEntry& e = entries.items[i];
-        if (e.fd >= 0 && !e.in_flight && !e.fd_borrowed) os_file_close(e.fd);
+        if (e.fd.is_open() && !e.in_flight && !e.fd_borrowed) os_file_close(e.fd);
         if (!e.in_flight) drop_write_copy(e); // a write never performed
         if (!e.in_flight) drop_stat_block(e);
         entry_free_path(e);
     }
     for (IoMount& m : mounts) {
-        if (m.fd >= 0) os_file_close(m.fd);
+        if (m.fd.is_open()) os_file_close(m.fd);
         pack_table_free(m.table, mounts.allocator());
     }
     mounts.free();
@@ -485,7 +485,7 @@ bool entry_start(IoQueue& q, IoEntry& e, const char* path, Allocator* alloc, IoP
     e.priority = priority;
     e.status   = IoStatus::Pending;
     e.user     = user;
-    e.fd       = -1;
+    e.fd       = KHandle{};
     if (!path || !path[0]) { KV_ERROR("io", "%s with no path", what); return false; }
     if (!entry_set_path(e, path)) return false;
     e.sequence = q.next_sequence++;
@@ -529,7 +529,7 @@ Handle IoQueue::write_file(const IoWriteRequest& req) {
 
 namespace {
 
-bool pread_all(OsFile fd, void* buf, usize n, u64 at) {
+bool pread_all(KHandle fd, void* buf, usize n, u64 at) {
     usize got = 0;
     i32 err = 0;
     while (got < n) {
@@ -548,7 +548,7 @@ IoEntry entry_for(IoQueue& q, const IoRequest& req) {
     e.status   = IoStatus::Pending;
     e.user     = req.user;
     e.sequence = q.next_sequence++;
-    e.fd       = -1;
+    e.fd       = KHandle{};
     return e;
 }
 
@@ -578,8 +578,8 @@ bool archive_open(IoMount& m, Allocator* a, const char* path, u64 base, u64 span
     m.base = base;
     if (!path || strlen(path) >= sizeof m.path) { KV_ERROR("io", "mount: bad pack path"); return false; }
     i32 err = 0;
-    OsFile fd = os_file_open(path, false, &err);
-    if (fd < 0) { KV_WARN("io", "mount: cannot open '%s': %s", path, strerror(err)); return false; }
+    KHandle fd = os_file_open(path, false, &err);
+    if (!fd.is_open()) { KV_WARN("io", "mount: cannot open '%s': %s", path, strerror(err)); return false; }
     const char* why = nullptr;
     ZipTail tail;
     u8* buf = nullptr;
@@ -660,8 +660,8 @@ bool archive_open(IoMount& m, Allocator* a, const char* path, u64 base, u64 span
 
 void archive_close(IoMount& m, Allocator* a) {
     pack_table_free(m.table, a);
-    if (m.fd >= 0) os_file_close(m.fd);
-    m.fd = -1;
+    if (m.fd.is_open()) os_file_close(m.fd);
+    m.fd = KHandle{};
 }
 
 } // namespace
@@ -945,8 +945,8 @@ bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirE
 
 bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize n), void* user, i32* err, usize chunk) {
     i32 e = 0;
-    OsFile f = os_file_open(path, false, &e);
-    if (f < 0) { if (err) *err = e; return false; }
+    KHandle f = os_file_open(path, false, &e);
+    if (!f.is_open()) { if (err) *err = e; return false; }
     if (!chunk) chunk = 1u << 20;
     // A buffer the size of the file, up to `chunk`, and on the stack when it is small:
     // a tool hashing ten thousand small files from a dozen threads must not map and unmap
@@ -970,7 +970,7 @@ bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize
 }
 
 namespace {
-struct CopyCtx { OsFile to; Sha256* hash; i32 err; };
+struct CopyCtx { KHandle to; Sha256* hash; i32 err; };
 bool copy_piece(void* user, const u8* data, usize n) {
     CopyCtx& c = *(CopyCtx*)user;
     if (c.hash) c.hash->update(data, n);
@@ -985,8 +985,8 @@ bool copy_piece(void* user, const u8* data, usize n) {
 
 bool io_copy_now(const char* from, const char* to, u8 hash[32], i32* err) {
     i32 e = 0;
-    OsFile out = os_file_open(to, true, &e);
-    if (out < 0) { if (err) *err = e; return false; }
+    KHandle out = os_file_open(to, true, &e);
+    if (!out.is_open()) { if (err) *err = e; return false; }
     Sha256 h;
     h.init();
     CopyCtx c{out, hash ? &h : nullptr, 0};
@@ -1094,7 +1094,7 @@ bool IoQueue::cancel(Handle request) {
     if (!e || e->status != IoStatus::Pending) return false;
     if (e->task) return io_tasks_cancel(*this, *e); // completes as Cancelled when a worker is done with it
     e->status = IoStatus::Cancelled; // queued: completes as Cancelled at the pump; in flight: when the ring answers
-    if (!e->in_flight && e->fd >= 0 && !e->fd_borrowed) { os_file_close(e->fd); e->fd = -1; } // opened for sizing, never started
+    if (!e->in_flight && e->fd.is_open() && !e->fd_borrowed) { os_file_close(e->fd); e->fd = KHandle{}; } // opened for sizing, never started
     return true;
 }
 

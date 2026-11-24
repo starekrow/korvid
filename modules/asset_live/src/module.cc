@@ -52,7 +52,7 @@ u16 tree_port(const LiveState& s) {
 }
 
 void drop(LiveState& s) {
-    if (s.sock.fd >= 0) s.sock.close();
+    if (s.sock.fd.is_open()) s.sock.close();
     s.sock.out.free(); // close() keeps the buffer for the next connection; this one is new
     s.sock = NetSocket{};
     s.said_hello = false;
@@ -80,7 +80,7 @@ bool live_poll(LiveState& s) {
     u32 heard = s.stats.changed + s.stats.removed;
     f64 now = time_now();
     if (!s.sock.is_open()) {
-        if (s.sock.fd >= 0 || s.stats.connected) drop(s);
+        if (s.sock.fd.is_open() || s.stats.connected) drop(s);
         if (now < s.next_try) return false;
         s.next_try = now + k_retry;
         u16 port = tree_port(s);
@@ -124,8 +124,8 @@ bool live_poll(LiveState& s) {
 // read would see).
 void live_watch(LiveState& s) {
     if (!s.watched) return;
-    NetFd fd = s.sock.is_open() ? s.sock.fd : -1;
-    if (!platform_wake_set(*s.e, &s, &fd, fd >= 0 ? 1 : 0)) engine_want_wake_at(*s.e, time_now() + 0.004);
+    KHandle fd = s.sock.is_open() ? s.sock.fd : KHandle{};
+    if (!platform_wake_set(*s.e, &s, &fd, fd.is_open() ? 1 : 0)) engine_want_wake_at(*s.e, time_now() + 0.004);
     if (!s.sock.is_open()) engine_want_wake_at(*s.e, s.next_try);
     else if (s.sock.out.len) engine_want_wake_at(*s.e, time_now() + 0.004);
 }
@@ -177,7 +177,7 @@ void live_shutdown(Engine& e, ModuleInstance& self) {
     if (!s) return;
     engine_remove_waker(e, live_wake, s);
     if (s->watched) platform_wake_set(e, s, nullptr, 0);
-    if (s->sock.fd >= 0) s->sock.close();
+    if (s->sock.fd.is_open()) s->sock.close();
     s->sock.out.free();
 }
 

@@ -45,15 +45,15 @@ bool proc_pipe(int fds[2]) {
 
 void proc_close(int& fd) { if (fd >= 0) close(fd); fd = -1; }
 
-i32 proc_read(i64& fd, void* buf, u32 cap) {
-    if (fd < 0) return -1;
+i32 proc_read(KHandle& fd, void* buf, u32 cap) {
+    if (!fd.is_open()) return -1;
     for (;;) {
-        ssize_t n = read((int)fd, buf, cap);
+        ssize_t n = read((int)fd.os(), buf, cap);
         if (n > 0) return (i32)n;
         if (n < 0 && errno == EINTR) continue;
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return 0;
-        close((int)fd); // the end, or an error we can do nothing about
-        fd = -1;
+        close((int)fd.os()); // the end, or an error we can do nothing about
+        fd = KHandle{};
         return -1;
     }
 }
@@ -187,8 +187,8 @@ bool Process::spawn(const ProcessDesc& desc) {
     fcntl(out[0], F_SETFL, fcntl(out[0], F_GETFL, 0) | O_NONBLOCK);
     fcntl(err[0], F_SETFL, fcntl(err[0], F_GETFL, 0) | O_NONBLOCK);
     pid    = child;
-    out_fd = out[0];
-    err_fd = err[0];
+    out_fd = khandle_make(KHandleKind::Pipe, out[0]);
+    err_fd = khandle_make(KHandleKind::Pipe, err[0]);
     exited = false;
     code   = 0;
     return true;
@@ -197,8 +197,8 @@ bool Process::spawn(const ProcessDesc& desc) {
 void Process::wait(f64 seconds) {
     pollfd fds[2];
     nfds_t n = 0;
-    if (out_fd >= 0) fds[n++] = pollfd{(int)out_fd, POLLIN, 0};
-    if (err_fd >= 0) fds[n++] = pollfd{(int)err_fd, POLLIN, 0};
+    if (out_fd.is_open()) fds[n++] = pollfd{(int)out_fd.os(), POLLIN, 0};
+    if (err_fd.is_open()) fds[n++] = pollfd{(int)err_fd.os(), POLLIN, 0};
     if (!n) seconds = seconds < 0.001 ? seconds : 0.001;
     int ms = seconds <= 0 ? 0 : (int)(seconds * 1000.0 + 0.999);
     poll(n ? fds : nullptr, n, ms);
@@ -230,9 +230,10 @@ void Process::free() {
         int status;
         while (waitpid((pid_t)pid, &status, 0) < 0 && errno == EINTR) {}
     }
-    if (out_fd >= 0) close((int)out_fd);
-    if (err_fd >= 0) close((int)err_fd);
-    pid = out_fd = err_fd = -1;
+    if (out_fd.is_open()) close((int)out_fd.os());
+    if (err_fd.is_open()) close((int)err_fd.os());
+    pid = -1;
+    out_fd = err_fd = KHandle{};
     exited = false;
     code = 0;
 }

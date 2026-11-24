@@ -51,7 +51,7 @@ struct Goldberg {
     Array<char> heard{};
     bool open(u16 port = 0) { return l.open(port, true); }
     bool take() {
-        if (sock.fd < 0) { NetFd fd = l.accept(); if (fd < 0) return false; sock.adopt(fd); }
+        if (!sock.fd.is_open()) { KHandle fd = l.accept(); if (!fd.is_open()) return false; sock.adopt(fd); }
         char buf[512];
         for (i32 n; (n = sock.read(buf, sizeof buf)) > 0;) { if (heard.len) --heard.len; memcpy(heard.push_n((u32)n), buf, (usize)n); heard.push(0); }
         sock.flush();
@@ -116,7 +116,7 @@ int main() {
 #else
         // Ship: a listener named by KV_GOLDBERG is never called, and the asset loaded as ever.
         for (u32 i = 0; i < 50; ++i) { frame(e); time_sleep(0.002); }
-        KV_CHECK(c, g.l.accept() < 0 && !asset_live_stats(e).connected && asset_live_stats(e).connects == 0);
+        KV_CHECK(c, !g.l.accept().is_open() && !asset_live_stats(e).connected && asset_live_stats(e).connects == 0);
 #endif
         engine_shutdown(e);
     }
@@ -128,7 +128,7 @@ int main() {
         Engine e;
         KV_CHECK(c, engine_init(e, list));
         for (u32 i = 0; i < 50; ++i) { frame(e); time_sleep(0.002); }
-        KV_CHECK(c, g.l.accept() < 0 && !asset_live_stats(e).connected && asset_live_stats(e).connects == 0);
+        KV_CHECK(c, !g.l.accept().is_open() && !asset_live_stats(e).connected && asset_live_stats(e).connects == 0);
         engine_shutdown(e);
     }
     set_goldberg(nullptr);

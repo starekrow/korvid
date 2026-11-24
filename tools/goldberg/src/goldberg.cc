@@ -329,7 +329,7 @@ void tell_programs(GoldbergState& s, const char* verb, const char* output) {
 // New connections taken, hellos read, what was told sent, the gone let go.
 void serve_programs(GoldbergState& s) {
     if (!s.listener.is_open()) return;
-    for (NetFd fd = s.listener.accept(); fd >= 0; fd = s.listener.accept()) {
+    for (KHandle fd = s.listener.accept(); fd.is_open(); fd = s.listener.accept()) {
         GoldbergState::Program* p = (GoldbergState::Program*)mem_alloc(sizeof(GoldbergState::Program));
         *p = GoldbergState::Program{};
         p->sock.adopt(fd);
@@ -1900,20 +1900,24 @@ void cmd_berg_set(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, 
 // 50 ms while the session is not quiet.
 void goldberg_watch(Engine& e, GoldbergState& s) {
     if (!s.watched) return;
-    NetFd fds[64];
+    KHandle fds[64];
     u32 n = 0;
-    auto add = [&](i64 fd) { if (fd >= 0 && n < KV_COUNTOF(fds)) fds[n++] = fd; };
+    auto add = [&](KHandle fd) { if (fd.is_open() && n < KV_COUNTOF(fds)) fds[n++] = fd; };
     bool live = s.active && !s.failed;
     f64 now = time_now();
     bool soon = false;
     if (live) {
-        if (s.watcher.is_open()) add(s.watcher.wake_fd());
+        if (s.watcher.is_open()) add(s.watcher.wake_handle());
         if (s.listener.is_open()) add(s.listener.fd);
         for (GoldbergState::Program* p : s.programs) {
             if (p->sock.is_open()) add(p->sock.fd);
             if (p->sock.out.len) soon = true;
         }
-        if (s.ui_child_on) { add(s.ui_child.out_fd); add(s.ui_child.err_fd); }
+        if (s.ui_child_on) {
+            // The child's pipes wake the loop where a pipe can be watched; elsewhere (Windows) they are looked at soon.
+            if (platform_watches_kind(e, KHandleKind::Pipe)) { add(s.ui_child.out_fd); add(s.ui_child.err_fd); }
+            else soon = true;
+        }
         if (s.watcher.is_open()) if (f64 d = s.watcher.due(); d > 0.0) engine_want_wake_at(e, d);
         if (s.io.pending()) soon = true;
         if (!s.quiet) engine_want_wake_at(e, s.next_wake);

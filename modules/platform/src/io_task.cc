@@ -172,7 +172,7 @@ Handle IoQueue::run_task(const IoTaskRequest& req) {
     e.status   = IoStatus::Pending;
     e.user     = req.user;
     e.sequence = next_sequence++;
-    e.fd       = -1;
+    e.fd = KHandle{};
     e.in_flight = true; // the workers have it; nothing of the ring's applies
     IoTask* task = (IoTask*)mem_alloc(sizeof(IoTask));
     if (!task) return Handle{};

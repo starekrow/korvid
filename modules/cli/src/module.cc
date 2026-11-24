@@ -278,12 +278,12 @@ constinit const CliCommandDesc k_commands[] = {
 // The listener, the sessions and stdin, for an idle loop to wait on (KR26): what arrives
 // wakes it, and the tick after reads it here.
 void watch_sockets(Engine& e, CliState& cli) {
-    NetFd fds[kMaxSessions + 1];
+    KHandle fds[kMaxSessions + 1];
     u32 n = 0;
     if (cli.listener.is_open()) fds[n++] = cli.listener.fd;
     for (u32 i = 0; i < cli.session_count; ++i) {
         const Session& s = cli.sessions[i];
-        if (s.is_stdin) { if (!s.stdin_eof && os_stdin_fd() >= 0 && n < KV_COUNTOF(fds)) fds[n++] = os_stdin_fd(); }
+        if (s.is_stdin) { if (!s.stdin_eof && os_stdin_fd().is_open() && n < KV_COUNTOF(fds)) fds[n++] = os_stdin_fd(); }
         else if (s.sock.is_open() && n < KV_COUNTOF(fds)) fds[n++] = s.sock.fd;
     }
     platform_wake_set(e, &cli, fds, n);
@@ -332,7 +332,7 @@ void cli_shutdown(Engine& e, ModuleInstance& self) {
 void cli_pump(TickContext& ctx) {
     CliState& cli = ctx.state_as<CliState>();
     Engine& e = *ctx.engine;
-    for (NetFd fd; (fd = cli.listener.accept()) >= 0;) {
+    for (KHandle fd; (fd = cli.listener.accept()).is_open();) {
         if (cli.session_count >= kMaxSessions) { net_close(fd); KV_WARN("cli", "connection refused: %u sessions", kMaxSessions); continue; }
         Session& s = cli.sessions[cli.session_count++];
         s = Session{};

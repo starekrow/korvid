@@ -15,8 +15,8 @@ void IoBytes::free() {
 bool io_read_now(const char* path, IoBytes* out, Allocator* alloc, i32* err) {
     *out = IoBytes{};
     i32 e = 0;
-    OsFile f = os_file_open(path, false, &e);
-    if (f < 0) { if (err) *err = e; return false; }
+    KHandle f = os_file_open(path, false, &e);
+    if (!f.is_open()) { if (err) *err = e; return false; }
     u64 size = 0;
     if (!os_file_size(f, &size, &e)) { os_file_close(f); if (err) *err = e; return false; }
     Allocator* a = alloc ? alloc : mem_general();
@@ -48,11 +48,11 @@ bool io_write_now(const char* path, const void* data, usize size, i32* err) {
 bool IoFileWriter::open(const char* path) {
     error = 0;
     file = os_file_open(path, true, &error);
-    return file >= 0;
+    return file.is_open();
 }
 
 bool IoFileWriter::write(const void* data, usize size) {
-    if (file < 0 || error) { if (!error) error = EBADF; return false; }
+    if (!file.is_open() || error) { if (!error) error = EBADF; return false; }
     const u8* p = (const u8*)data;
     while (size) {
         i64 n = os_file_write(file, p, size, &error);
@@ -74,8 +74,8 @@ bool IoFileWriter::print(const char* fmt, ...) {
 }
 
 bool IoFileWriter::close() {
-    if (file >= 0) os_file_close(file);
-    file = -1;
+    if (file.is_open()) os_file_close(file);
+    file = KHandle{};
     if (!error) return true;
     return false;
 }

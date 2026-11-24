@@ -266,7 +266,7 @@ void run_links(TestCtx& c, FsWatchBackend backend) {
 // set_wake (KR26): where the native backend has no descriptor, a write calls the wake once,
 // a second before the poll does not call it again, the poll's taking of it lets the next
 // call, and none comes once it is cleared; due() asks for no poll while a wake is set.
-// Where there is a descriptor (inotify), set_wake is false and wake_fd says.
+// Where there is a descriptor (inotify), set_wake is false and wake_handle says.
 void wake_bump(void* user) { atomic_fetch_add((u32*)user, 1u, MO_ACQ_REL); }
 
 bool wake_until(u32* calls, u32 want) {
@@ -280,7 +280,7 @@ void run_wake(TestCtx& c) {
     FsWatcher w;
     KV_CHECK(c, w.init(FsWatchBackend::Native) && w.add_root(dir) != ~0u);
     u32 calls = 0;
-    if (w.wake_fd() >= 0) {
+    if (w.wake_handle().is_open()) {
         KV_CHECK(c, !w.set_wake(wake_bump, &calls));
     } else {
         KV_CHECK(c, w.due() > 0.0);                 // no wake: a poll soon

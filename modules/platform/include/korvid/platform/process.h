@@ -11,6 +11,7 @@
 // `cmd /d /s /c "..."`, the one form in which cmd hands a batch file its arguments as given.
 #pragma once
 #include "korvid/core/types.h"
+#include "korvid/platform/khandle.h"
 
 namespace kv {
 
@@ -22,7 +23,7 @@ struct ProcessDesc {
 
 struct Process {
     i64  pid = -1;               // the OS's id while it is known; -1 when there is no child
-    i64  out_fd = -1, err_fd = -1;
+    KHandle out_fd, err_fd;     // KHandleKind::Pipe: the read ends of its stdout and stderr
     bool exited = false;
     i32  code = 0;               // once exited: its status, or 128 + the signal that ended it
     char error[160] = {};        // why spawn failed

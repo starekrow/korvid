@@ -2,6 +2,7 @@
 // (posix/stdin_posix.cc, win32/stdin_win32.cc). Never blocks.
 #pragma once
 #include "korvid/core/types.h"
+#include "korvid/platform/khandle.h"
 
 namespace kv {
 
@@ -10,7 +11,7 @@ bool os_stdin_is_terminal();
 // What has arrived, up to cap bytes: the count, 0 when nothing is waiting, -1 at the end
 // of the stream (or on an error, after which stdin is done).
 i32  os_stdin_read(void* buf, u32 cap);
-// A descriptor the platform can watch for stdin's input (platform_wake_set), or -1.
-i64  os_stdin_fd();
+// What the platform can watch for stdin's input (platform_wake_set), or none.
+KHandle os_stdin_fd();
 
 } // namespace kv

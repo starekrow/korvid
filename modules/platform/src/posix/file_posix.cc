@@ -18,34 +18,34 @@
 
 namespace kv {
 
-OsFile os_file_open(const char* path, bool write, i32* err) {
+KHandle os_file_open(const char* path, bool write, i32* err) {
     int fd = write ? open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644) : open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) { *err = errno; return -1; }
-    return fd;
+    if (fd < 0) { *err = errno; return KHandle{}; }
+    return khandle_make(KHandleKind::File, fd);
 }
 
-void os_file_close(OsFile f) { if (f >= 0) close((int)f); }
+void os_file_close(KHandle f) { if (f.is_open()) close((int)f.os()); }
 
-bool os_file_sync(OsFile f, i32* err) {
+bool os_file_sync(KHandle f, i32* err) {
 #if defined(__APPLE__)
     // fsync on Apple leaves the data in the drive's cache; F_FULLFSYNC asks it to the platter.
-    if (fcntl((int)f, F_FULLFSYNC) == 0) return true;
+    if (fcntl((int)f.os(), F_FULLFSYNC) == 0) return true;
 #endif
-    if (fsync((int)f) == 0) return true;
+    if (fsync((int)f.os()) == 0) return true;
     *err = errno;
     return false;
 }
 
-OsFile os_file_lock(const char* path, i32* err) {
+KHandle os_file_lock(const char* path, i32* err) {
     int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
-    if (fd < 0) { *err = errno; return -1; }
+    if (fd < 0) { *err = errno; return KHandle{}; }
     while (flock(fd, LOCK_EX) != 0) {
         if (errno == EINTR) continue;
         *err = errno;
         close(fd);
-        return -1;
+        return KHandle{};
     }
-    return fd;
+    return khandle_make(KHandleKind::File, fd);
 }
 
 void os_dir_sync(const char* dir) {
@@ -55,16 +55,16 @@ void os_dir_sync(const char* dir) {
     close(fd);
 }
 
-bool os_file_size(OsFile f, u64* size, i32* err) {
+bool os_file_size(KHandle f, u64* size, i32* err) {
     struct stat st;
-    if (fstat((int)f, &st) != 0) { *err = errno; return false; }
+    if (fstat((int)f.os(), &st) != 0) { *err = errno; return false; }
     *size = (u64)st.st_size;
     return true;
 }
 
-i64 os_file_read_at(OsFile f, void* buf, usize n, u64 at, i32* err) {
+i64 os_file_read_at(KHandle f, void* buf, usize n, u64 at, i32* err) {
     for (;;) {
-        ssize_t r = pread((int)f, buf, n, (off_t)at);
+        ssize_t r = pread((int)f.os(), buf, n, (off_t)at);
         if (r >= 0) return r;
         if (errno == EINTR) continue;
         *err = errno;
@@ -72,9 +72,9 @@ i64 os_file_read_at(OsFile f, void* buf, usize n, u64 at, i32* err) {
     }
 }
 
-i64 os_file_write(OsFile f, const void* buf, usize n, i32* err) {
+i64 os_file_write(KHandle f, const void* buf, usize n, i32* err) {
     for (;;) {
-        ssize_t r = ::write((int)f, buf, n);
+        ssize_t r = ::write((int)f.os(), buf, n);
         if (r >= 0) return r;
         if (errno == EINTR) continue;
         *err = errno;

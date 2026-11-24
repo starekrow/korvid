@@ -31,6 +31,7 @@
 //   content before believing a change.
 #pragma once
 #include "korvid/core/array.h"
+#include "korvid/platform/khandle.h"
 
 namespace kv {
 
@@ -63,16 +64,16 @@ struct FsWatcher {
     // process wrote before it exited polls for this long after the exit.
     f64  lateness() const;
     // For a loop that waits (KR26): a descriptor that can be read when the native backend
-    // has news (inotify's), else -1; and the time (time_now's clock) by which poll() should
+    // has news (inotify's, KHandleKind::Notify), else none; and the time (time_now's clock) by which poll() should
     // next be called for news that no descriptor or wake tells of (a polled root's next
     // walk, or soon when the native backend has neither), 0 when there is none.
-    i64  wake_fd() const;
+    KHandle wake_handle() const;
     f64  due() const;
     // The other way a native backend can tell a waiting loop (KR26): fn(user) is called, on
     // a thread of the OS's (ReadDirectoryChangesW's wait, FSEvents' queue), when it has news
     // for poll(). Once for each root's news until the poll after it takes it, so nobody
     // polling does not mean calls for ever. True where the backend calls it; false where
-    // wake_fd() says instead (inotify) or no root is native, and nothing is called. Null
+    // wake_handle() says instead (inotify) or no root is native, and nothing is called. Null
     // clears it: once that returns, no call is under way and none is to come. Set it again
     // after init; free() clears it.
     bool set_wake(void (*fn)(void* user), void* user);

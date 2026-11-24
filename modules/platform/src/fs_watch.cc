@@ -341,11 +341,11 @@ FsWatchBackend FsWatcher::root_backend(u32 id) const {
     return FsWatchBackend::Auto;
 }
 
-i64 FsWatcher::wake_fd() const {
+KHandle FsWatcher::wake_handle() const {
 #if KV_FS_NATIVE
-    if (state && state->native) return fs_native_fd(state->n);
+    if (state && state->native) return khandle_make(KHandleKind::Notify, fs_native_fd(state->n));
 #endif
-    return -1;
+    return KHandle{};
 }
 
 f64 FsWatcher::due() const {

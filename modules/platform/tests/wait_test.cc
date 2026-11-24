@@ -65,11 +65,11 @@ void test_wait(kv::TestCtx& c) {
         NetListener l;
         NetSocket client, server;
         KV_CHECK(c, l.open(0) && net_connect_local(l.port, client));
-        for (u32 i = 0; i < 200 && server.fd < 0; ++i) {
-            NetFd fd = l.accept();
-            if (fd >= 0) server.adopt(fd); else time_sleep(0.005);
+        for (u32 i = 0; i < 200 && !server.fd.is_open(); ++i) {
+            KHandle fd = l.accept();
+            if (fd.is_open()) server.adopt(fd); else time_sleep(0.005);
         }
-        KV_CHECK(c, server.fd >= 0);
+        KV_CHECK(c, server.fd.is_open());
         int owner = 0;
         KV_CHECK(c, platform_wake_set(e, &owner, &server.fd, 1));
         KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time); // nothing sent
@@ -88,6 +88,21 @@ void test_wait(kv::TestCtx& c) {
         client.write_str("y");
         client.flush();
         KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
+        // A handle's kind travels with it. A file on a disk cannot be watched on any OS:
+        // it is refused by name (one error line), and the socket beside it is watched still.
+        KHandle none;
+        KHandle file = khandle_make(KHandleKind::File, 3);
+        KV_CHECK(c, !none.is_open() && none.kind() == KHandleKind::None && none.os() == -1);
+        KV_CHECK(c, file.is_open() && file.kind() == KHandleKind::File && file.os() == 3 && file != server.fd);
+        KV_CHECK(c, !khandle_make(KHandleKind::Socket, -1).is_open());
+        KV_CHECK(c, server.fd.kind() == KHandleKind::Socket && platform_watches_kind(e, KHandleKind::Socket));
+        KV_CHECK(c, !platform_watches_kind(e, KHandleKind::File));
+        KHandle mixed[2] = {file, server.fd};
+        KV_CHECK(c, !platform_wake_set(e, &owner, mixed, 2));
+        client.write_str("z");
+        client.flush();
+        KV_CHECK(c, platform_wait(e, 5.0) == PlatformWoken::Wake);
+        KV_CHECK(c, platform_wake_set(e, &owner, nullptr, 0));
         server.close();
         client.close();
         l.close();

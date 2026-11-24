@@ -70,47 +70,51 @@ bool NetListener::open(u16 want_port, bool local_only) {
     }
     socklen_t len = sizeof addr;
     if (getsockname(s, (sockaddr*)&addr, &len) == 0) port = ntohs(addr.sin_port);
-    fd = s;
+    fd = khandle_make(KHandleKind::Socket, s);
     return true;
 }
 
 void NetListener::close() {
-    if (fd >= 0) ::close((int)fd);
-    fd = -1;
+    if (fd.is_open()) ::close((int)fd.os());
+    fd = KHandle{};
     port = 0;
 }
 
-NetFd NetListener::accept() {
-    if (fd < 0) return -1;
+KHandle NetListener::accept() {
+    if (!fd.is_open()) return KHandle{};
 #if KV_NET_APPLE
     // A socket accepted from a non-blocking listener does not inherit O_NONBLOCK on macOS
     // (it does not on Linux either, which is why accept4 is asked for it there).
-    int c = ::accept((int)fd, nullptr, nullptr);
+    int c = ::accept((int)fd.os(), nullptr, nullptr);
     if (c >= 0) { apple_socket_flags(c); set_nonblocking(c); }
 #else
-    int c = ::accept4((int)fd, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
+    int c = ::accept4((int)fd.os(), nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
 #endif
     if (c < 0) {
         if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) KV_WARN("net", "accept: %s", strerror(errno));
         return -1;
     }
-    return c;
+    return khandle_make(KHandleKind::Socket, c);
 }
 
-void NetSocket::adopt(NetFd new_fd) {
+void NetSocket::adopt(KHandle new_fd) {
     close();
+    if (new_fd.is_open() && new_fd.kind() != KHandleKind::Socket) {
+        KV_ERROR("net", "adopt: a %s handle is not a socket", khandle_kind_name(new_fd.kind()));
+        return;
+    }
     fd = new_fd;
     closed = false;
-    if (fd >= 0) {
-        set_nonblocking((int)fd);
+    if (fd.is_open()) {
+        set_nonblocking((int)fd.os());
         int one = 1;
-        setsockopt((int)fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); // lines, not bulk
+        setsockopt((int)fd.os(), IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); // lines, not bulk
     }
 }
 
 i32 NetSocket::read(void* buf, u32 cap) {
-    if (fd < 0 || closed || cap == 0) return closed ? -1 : 0;
-    ssize_t n = ::recv((int)fd, buf, cap, 0);
+    if (!fd.is_open() || closed || cap == 0) return closed ? -1 : 0;
+    ssize_t n = ::recv((int)fd.os(), buf, cap, 0);
     if (n > 0) { bytes_in += (u64)n; return (i32)n; }
     if (n == 0) { closed = true; return -1; }
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return 0;
@@ -119,7 +123,7 @@ i32 NetSocket::read(void* buf, u32 cap) {
 }
 
 bool NetSocket::write(const void* data, u32 len) {
-    if (fd < 0 || closed) return false;
+    if (!fd.is_open() || closed) return false;
     if (out.len + len > out_limit) { dropped += len; return false; }
     memcpy(out.push_n(len), data, len);
     return true;
@@ -128,10 +132,10 @@ bool NetSocket::write(const void* data, u32 len) {
 bool NetSocket::write_str(const char* s) { return write(s, (u32)strlen(s)); }
 
 void NetSocket::flush() {
-    if (fd < 0 || closed || out.len == 0) return;
+    if (!fd.is_open() || closed || out.len == 0) return;
     u32 sent = 0;
     while (sent < out.len) {
-        ssize_t n = ::send((int)fd, out.data + sent, out.len - sent, kSendFlags);
+        ssize_t n = ::send((int)fd.os(), out.data + sent, out.len - sent, kSendFlags);
         if (n > 0) { sent += (u32)n; continue; }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) break;
         if (n < 0 && (errno == ENOTCONN || errno == EINPROGRESS)) break; // still connecting
@@ -146,8 +150,8 @@ void NetSocket::flush() {
 }
 
 void NetSocket::close() {
-    if (fd >= 0) ::close((int)fd);
-    fd = -1;
+    if (fd.is_open()) ::close((int)fd.os());
+    fd = KHandle{};
     out.clear();
     closed = false;
 }
@@ -165,10 +169,10 @@ bool net_connect_local(u16 port, NetSocket& out) {
         ::close(s);
         return false;
     }
-    out.adopt(s);
+    out.adopt(khandle_make(KHandleKind::Socket, s));
     return true;
 }
 
-void net_close(NetFd fd) { if (fd >= 0) ::close((int)fd); }
+void net_close(KHandle fd) { if (fd.is_open()) ::close((int)fd.os()); }
 
 } // namespace kv

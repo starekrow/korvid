@@ -25,12 +25,9 @@
 #include "korvid/core/handle.h"
 #include "korvid/core/pool.h"
 #include "korvid/pack/zip.h"
+#include "korvid/platform/khandle.h"
 
 namespace kv {
-
-// A file the OS opened: a descriptor on POSIX, a HANDLE on Windows. Never negative when
-// open; -1 is none on both.
-typedef i64 OsFile;
 
 struct Engine;
 struct IoRing;
@@ -132,7 +129,7 @@ struct IoEntry {
     bool       stat;      // a stat: on the ring, `buf` holds the kernel's answer and a copy of the path
     IoTask*    task;      // a task, or a stat on the task workers: its node, until the pump completes it
     // The ring's bookkeeping while a request is in flight.
-    OsFile     fd;
+    KHandle     fd;
     u8*        buf;
     usize      size;      // the file's size at open, or the bytes to write
     usize      done;      // bytes read or written so far
@@ -157,7 +154,7 @@ struct IoEntry {
 struct IoMount {
     char      path[256] = {}; // the directory (with a trailing '/') or the pack file
     bool      is_pack = false;
-    OsFile    fd = -1;     // the pack's file, open for the queue's life
+    KHandle    fd;          // the pack's file, open for the queue's life
     u64       base = 0;    // where the archive starts in that file (a pack inside another archive)
     char      prefix[64] = {}; // only the archive's entries under this are seen, without it ("assets/")
     PackTable table;
@@ -330,7 +327,7 @@ bool io_copy_now(const char* from, const char* to, u8 hash[32] = nullptr, i32* e
 // A file written in pieces, now: open (created or truncated), write and print as often as
 // need be, close. A failure sticks: what follows does nothing, and close reports it.
 struct IoFileWriter {
-    OsFile file  = -1;
+    KHandle file;
     i32    error = 0;
     bool open(const char* path);
     bool write(const void* data, usize size);

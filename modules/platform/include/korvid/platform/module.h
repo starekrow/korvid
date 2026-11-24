@@ -105,9 +105,15 @@ PlatformWaits platform_waits(Engine& e);
 // platform_wait (after the pass that should have read it), so one nobody drains does not
 // spin the thread. False where the platform cannot watch (platform_watches) or the sets
 // pass 64 sockets: the owner then asks to be woken soon (engine_want_wake_at), as a poll would.
-bool platform_wake_set(Engine& e, const void* owner, const NetFd* fds, u32 n);
+// A handle of a kind this OS cannot watch (platform_watches_kind: on Windows anything but a
+// socket, everywhere a file on a disk) is an error, logged with its kind: it is left out,
+// the rest are watched, and the answer is false.
+bool platform_wake_set(Engine& e, const void* owner, const KHandle* handles, u32 n);
 // Whether platform_wake_set watches here (every platform has the thread now). A waker
 // picks engine_add_watched_waker or engine_add_waker by it.
 bool platform_watches(Engine& e);
+// Whether a handle of this kind can be given to platform_wake_set here: a socket everywhere;
+// a pipe or a notify descriptor on POSIX only (Windows' watch is WSAPoll, which takes sockets).
+bool platform_watches_kind(Engine& e, KHandleKind kind);
 
 } // namespace kv

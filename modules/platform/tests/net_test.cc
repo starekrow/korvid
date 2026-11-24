@@ -24,13 +24,13 @@ void test_net(kv::TestCtx& c) {
 
     NetListener l;
     KV_CHECK(c, l.open(0) && l.is_open() && l.port != 0); // 0: the OS picks
-    KV_CHECK(c, l.accept() == -1);                         // nobody yet, and no blocking
+    KV_CHECK(c, !l.accept().is_open());                       // nobody yet, and no blocking
 
     NetSocket client;
     KV_CHECK(c, net_connect_local(l.port, client));
-    NetFd fd = -1;
-    for (u32 i = 0; i < 2000 && fd < 0; ++i) { fd = l.accept(); if (fd < 0) time_sleep(0.001); }
-    KV_CHECK(c, fd >= 0);
+    KHandle fd;
+    for (u32 i = 0; i < 2000 && !fd.is_open(); ++i) { fd = l.accept(); if (!fd.is_open()) time_sleep(0.001); }
+    KV_CHECK(c, fd.is_open() && fd.kind() == KHandleKind::Socket);
     NetSocket server;
     server.adopt(fd);
 

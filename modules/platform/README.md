@@ -43,7 +43,7 @@ header says what holds on both backends. The backend is chosen per root: on a sh
 (`io_path_is_remote`: NFS, SMB, any FUSE mount) the OS hears only this machine's writes,
 so a watcher made with `Auto` polls such a root every `remote_interval` seconds (5), and
 `add_root(dir, FsWatchBackend::Poll)` polls one the test misses; `root_backend(id)` says
-which a root got. For a loop that waits, `wake_fd()` is inotify's descriptor (else -1);
+which a root got. For a loop that waits, `wake_handle()` is inotify's descriptor (a `KHandle`, else none);
 where there is none, `set_wake(fn, user)` has ReadDirectoryChangesW (a one-shot wait in the
 thread pool on each root's read) or FSEvents (its queue's callback) call `fn` when there is
 news, once till a poll takes it; and `due()` is the time by which `poll()` should next be
@@ -237,8 +237,8 @@ Header `korvid/platform/module.h`:
 | `platform_wake(engine)` | function | ends the wait under way or the next; any thread |
 | `platform_set_waiter(engine, w)`, `PlatformWaiter` | function, record | the window's `wait(user, seconds)` (1 early, 0 the time, -1 cannot now) and `wake(user)`; null clears |
 | `platform_waits(engine)`, `PlatformWaits` | function, record | `waits`, and of them ended by the `window`, `woken`, `timed` |
-| `platform_wake_set(engine, owner, fds, n)` | function | the owner's sockets that wake a waiting loop, replacing what it said; false where not watched or past 64 |
-| `platform_watches(engine)` | function | whether `platform_wake_set` watches here |
+| `platform_wake_set(engine, owner, fds, n)` | function | the owner's sockets (`KHandle`s) that wake a waiting loop, replacing what it said; false where not watched, past 64, or for a kind this OS cannot watch (logged) |
+| `platform_watches(engine)`, `platform_watches_kind(engine, kind)` | functions | whether `platform_wake_set` watches here, and whether it takes that kind of handle (a pipe: POSIX only) |
 
 What the module registers with the engine:
 

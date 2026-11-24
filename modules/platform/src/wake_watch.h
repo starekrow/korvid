@@ -9,10 +9,12 @@ namespace kv {
 void platform_wake_state(PlatformState& s);
 
 bool       wake_watch_supported();
+// Whether a handle of this kind can be watched here: wake_watch_set is given only those.
+bool       wake_watch_takes(KHandleKind k);
 // Null when the OS cannot watch. The thread starts at the first socket given.
 WakeWatch* wake_watch_create(PlatformState& s);
 void       wake_watch_destroy(WakeWatch* w); // stops and joins the thread
-bool       wake_watch_set(WakeWatch* w, const void* owner, const NetFd* fds, u32 n);
+bool       wake_watch_set(WakeWatch* w, const void* owner, const KHandle* fds, u32 n);
 // Watches again what woke the thread since the last call.
 void       wake_watch_rearm(WakeWatch* w);
 

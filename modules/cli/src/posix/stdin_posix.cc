@@ -7,7 +7,7 @@ namespace kv {
 
 bool os_stdin_is_terminal() { return isatty(STDIN_FILENO) != 0; }
 
-i64 os_stdin_fd() { return STDIN_FILENO; }
+KHandle os_stdin_fd() { return khandle_make(KHandleKind::Pipe, STDIN_FILENO); }
 
 i32 os_stdin_read(void* buf, u32 cap) {
     for (;;) {

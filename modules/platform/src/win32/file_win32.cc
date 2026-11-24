@@ -18,7 +18,8 @@ namespace kv {
 
 namespace {
 i32 fail_errno() { return errno_from_win32(GetLastError()); }
-HANDLE file_handle(OsFile f) { return (HANDLE)(intptr_t)f; }
+HANDLE file_handle(KHandle f) { return (HANDLE)(intptr_t)f.os(); }
+KHandle file_of(HANDLE h) { return khandle_make(KHandleKind::File, (i64)(intptr_t)h); }
 
 // One operation on an overlapped handle, waited for: the bytes moved, 0 at the end of the
 // file, or -1 with *err set. The event is the operation's own, so a completion of another
@@ -41,41 +42,41 @@ i64 overlapped_wait(HANDLE h, bool write, void* buf, DWORD want, u64 at, i32* er
 }
 } // namespace
 
-OsFile os_file_open(const char* path, bool write, i32* err) {
+KHandle os_file_open(const char* path, bool write, i32* err) {
     WidePath wp;
-    if (!wp.set(path, err)) return -1;
+    if (!wp.set(path, err)) return KHandle{};
     const wchar_t* w = wp.w;
     // Readers let others read, write and delete meanwhile, as POSIX descriptors do.
     // Overlapped, for the ring: see the top of the file.
     HANDLE h = write ? CreateFileW(w, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr)
                      : CreateFileW(w, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
-    if (h == INVALID_HANDLE_VALUE) { *err = fail_errno(); return -1; }
-    return (OsFile)(intptr_t)h;
+    if (h == INVALID_HANDLE_VALUE) { *err = fail_errno(); return KHandle{}; }
+    return file_of(h);
 }
 
-void os_file_close(OsFile f) { if (f >= 0) CloseHandle(file_handle(f)); }
+void os_file_close(KHandle f) { if (f.is_open()) CloseHandle(file_handle(f)); }
 
-bool os_file_sync(OsFile f, i32* err) {
+bool os_file_sync(KHandle f, i32* err) {
     if (FlushFileBuffers(file_handle(f))) return true;
     *err = fail_errno();
     return false;
 }
 
-OsFile os_file_lock(const char* path, i32* err) {
+KHandle os_file_lock(const char* path, i32* err) {
     WidePath wp;
-    if (!wp.set(path, err)) return -1;
+    if (!wp.set(path, err)) return KHandle{};
     HANDLE h = CreateFileW(wp.w, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) { *err = fail_errno(); return -1; }
+    if (h == INVALID_HANDLE_VALUE) { *err = fail_errno(); return KHandle{}; }
     OVERLAPPED ov{};
-    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &ov)) { *err = fail_errno(); CloseHandle(h); return -1; }
-    return (OsFile)(intptr_t)h; // closing it lets the lock go
+    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &ov)) { *err = fail_errno(); CloseHandle(h); return KHandle{}; }
+    return file_of(h); // closing it lets the lock go
 }
 
 void os_dir_sync(const char*) {}
 
-bool os_file_size(OsFile f, u64* size, i32* err) {
+bool os_file_size(KHandle f, u64* size, i32* err) {
     LARGE_INTEGER li;
     if (!GetFileSizeEx(file_handle(f), &li)) { *err = fail_errno(); return false; }
     *size = (u64)li.QuadPart;
@@ -83,14 +84,14 @@ bool os_file_size(OsFile f, u64* size, i32* err) {
 }
 
 // At the offset, waited for. One call moves at most 1 GiB.
-i64 os_file_read_at(OsFile f, void* buf, usize n, u64 at, i32* err) {
+i64 os_file_read_at(KHandle f, void* buf, usize n, u64 at, i32* err) {
     DWORD want = n > (1u << 30) ? (1u << 30) : (DWORD)n;
     return overlapped_wait(file_handle(f), false, buf, want, at, err);
 }
 
 // At the end of the file (an offset of all ones: an overlapped handle has no position), so
 // a file written from its creation is written in order. One call moves at most 1 GiB.
-i64 os_file_write(OsFile f, const void* buf, usize n, i32* err) {
+i64 os_file_write(KHandle f, const void* buf, usize n, i32* err) {
     DWORD want = n > (1u << 30) ? (1u << 30) : (DWORD)n;
     return overlapped_wait(file_handle(f), true, (void*)buf, want, ~0ull, err);
 }

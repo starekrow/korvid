@@ -34,7 +34,8 @@ const char* net_error(int code) {
     return text;
 }
 
-SOCKET socket_of(NetFd fd) { return (SOCKET)fd; }
+SOCKET socket_of(KHandle fd) { return (SOCKET)fd.os(); }
+KHandle handle_of(SOCKET s) { return s == INVALID_SOCKET ? KHandle{} : khandle_make(KHandleKind::Socket, (i64)s); }
 
 bool set_nonblocking(SOCKET s) {
     u_long on = 1;
@@ -69,35 +70,39 @@ bool NetListener::open(u16 want_port, bool local_only) {
     }
     int len = sizeof addr;
     if (getsockname(s, (sockaddr*)&addr, &len) == 0) port = ntohs(addr.sin_port);
-    fd = (NetFd)s;
+    fd = handle_of(s);
     return true;
 }
 
 void NetListener::close() {
-    if (fd >= 0) closesocket(socket_of(fd));
-    fd = -1;
+    if (fd.is_open()) closesocket(socket_of(fd));
+    fd = KHandle{};
     port = 0;
 }
 
-NetFd NetListener::accept() {
-    if (fd < 0) return -1;
+KHandle NetListener::accept() {
+    if (!fd.is_open()) return KHandle{};
     SOCKET c = ::accept(socket_of(fd), nullptr, nullptr);
     if (c == INVALID_SOCKET) {
         int e = WSAGetLastError();
         if (!would_block(e)) KV_WARN("net", "accept: %s", net_error(e));
-        return -1;
+        return KHandle{};
     }
     // An accepted socket takes the listener's non-blocking mode; set it anyway, and keep
     // it out of child processes.
     SetHandleInformation((HANDLE)c, HANDLE_FLAG_INHERIT, 0);
-    return (NetFd)c;
+    return handle_of(c);
 }
 
-void NetSocket::adopt(NetFd new_fd) {
+void NetSocket::adopt(KHandle new_fd) {
     close();
+    if (new_fd.is_open() && new_fd.kind() != KHandleKind::Socket) {
+        KV_ERROR("net", "adopt: a %s handle is not a socket", khandle_kind_name(new_fd.kind()));
+        return;
+    }
     fd = new_fd;
     closed = false;
-    if (fd >= 0) {
+    if (fd.is_open()) {
         set_nonblocking(socket_of(fd));
         BOOL one = TRUE;
         setsockopt(socket_of(fd), IPPROTO_TCP, TCP_NODELAY, (const char*)&one, sizeof one); // lines, not bulk
@@ -105,7 +110,7 @@ void NetSocket::adopt(NetFd new_fd) {
 }
 
 i32 NetSocket::read(void* buf, u32 cap) {
-    if (fd < 0 || closed || cap == 0) return closed ? -1 : 0;
+    if (!fd.is_open() || closed || cap == 0) return closed ? -1 : 0;
     int n = ::recv(socket_of(fd), (char*)buf, (int)(cap > 0x7FFFFFFFu ? 0x7FFFFFFFu : cap), 0);
     if (n > 0) { bytes_in += (u64)n; return (i32)n; }
     if (n == 0) { closed = true; return -1; }
@@ -115,7 +120,7 @@ i32 NetSocket::read(void* buf, u32 cap) {
 }
 
 bool NetSocket::write(const void* data, u32 len) {
-    if (fd < 0 || closed) return false;
+    if (!fd.is_open() || closed) return false;
     if (out.len + len > out_limit) { dropped += len; return false; }
     memcpy(out.push_n(len), data, len);
     return true;
@@ -124,7 +129,7 @@ bool NetSocket::write(const void* data, u32 len) {
 bool NetSocket::write_str(const char* s) { return write(s, (u32)strlen(s)); }
 
 void NetSocket::flush() {
-    if (fd < 0 || closed || out.len == 0) return;
+    if (!fd.is_open() || closed || out.len == 0) return;
     u32 sent = 0;
     while (sent < out.len) {
         int n = ::send(socket_of(fd), (const char*)out.data + sent, (int)(out.len - sent), 0);
@@ -143,8 +148,8 @@ void NetSocket::flush() {
 }
 
 void NetSocket::close() {
-    if (fd >= 0) closesocket(socket_of(fd));
-    fd = -1;
+    if (fd.is_open()) closesocket(socket_of(fd));
+    fd = KHandle{};
     out.clear();
     closed = false;
 }
@@ -166,10 +171,10 @@ bool net_connect_local(u16 port, NetSocket& out) {
             return false;
         }
     }
-    out.adopt((NetFd)s);
+    out.adopt(handle_of(s));
     return true;
 }
 
-void net_close(NetFd fd) { if (fd >= 0) closesocket(socket_of(fd)); }
+void net_close(KHandle fd) { if (fd.is_open()) closesocket(socket_of(fd)); }
 
 } // namespace kv

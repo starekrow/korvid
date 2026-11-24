@@ -108,22 +108,23 @@ void close_handle(HANDLE& h) {
     h = nullptr;
 }
 
-HANDLE as_handle(i64 v) { return v < 0 ? nullptr : (HANDLE)(intptr_t)v; }
+HANDLE as_handle(KHandle v) { return v.is_open() ? (HANDLE)(intptr_t)v.os() : nullptr; }
+KHandle pipe_of(HANDLE h) { return khandle_make(KHandleKind::Pipe, (i64)(intptr_t)h); }
 
-i32 pipe_read(i64& fd, void* buf, u32 cap) {
+i32 pipe_read(KHandle& fd, void* buf, u32 cap) {
     HANDLE h = as_handle(fd);
     if (!h) return -1;
     DWORD avail = 0;
     if (!PeekNamedPipe(h, nullptr, 0, nullptr, &avail, nullptr)) {
         CloseHandle(h); // broken: the child has closed its end and everything is read
-        fd = -1;
+        fd = KHandle{};
         return -1;
     }
     if (avail == 0) return 0;
     DWORD got = 0;
     if (!ReadFile(h, buf, avail < cap ? avail : cap, &got, nullptr)) {
         CloseHandle(h);
-        fd = -1;
+        fd = KHandle{};
         return -1;
     }
     return (i32)got;
@@ -259,8 +260,8 @@ bool Process::spawn(const ProcessDesc& desc) {
     ResumeThread(pi.hThread);
     close_handle(pi.hThread);
     pid    = (i64)pi.dwProcessId;
-    out_fd = (i64)(intptr_t)out_r;
-    err_fd = (i64)(intptr_t)err_r;
+    out_fd = pipe_of(out_r);
+    err_fd = pipe_of(err_r);
     os[0]  = pi.hProcess;
     os[1]  = job;
     exited = false;
@@ -280,13 +281,13 @@ bool Process::running() {
 // Anonymous pipes cannot be waited on: a look at each, then a short wait on the process
 // (which ends at once if it exits), until something is there or the time is up.
 void Process::wait(f64 seconds) {
-    auto has = [](i64 fd) {
+    auto has = [](KHandle fd) {
         HANDLE h = as_handle(fd);
         if (!h) return false;
         DWORD avail = 0;
         return !PeekNamedPipe(h, nullptr, 0, nullptr, &avail, nullptr) || avail > 0; // data, or the end
     };
-    if (out_fd < 0 && err_fd < 0) seconds = seconds < 0.001 ? seconds : 0.001;
+    if (!out_fd.is_open() && !err_fd.is_open()) seconds = seconds < 0.001 ? seconds : 0.001;
     ULONGLONG until = GetTickCount64() + (ULONGLONG)(seconds * 1000.0);
     for (;;) {
         if (has(out_fd) || has(err_fd)) return;
@@ -318,7 +319,8 @@ void Process::free() {
     close_handle(proc);
     close_handle(job); // KILL_ON_JOB_CLOSE: whatever the child left running ends here
     os[0] = os[1] = nullptr;
-    pid = out_fd = err_fd = -1;
+    pid = -1;
+    out_fd = err_fd = KHandle{};
     exited = false;
     code = 0;
 }

@@ -24,7 +24,7 @@ constexpr u32 kMaxWatched = 64;
 struct WakeWatch {
     PlatformState* s = nullptr;
     OsMutex  lock;
-    struct Entry { const void* owner; NetFd fd; bool armed; };
+    struct Entry { const void* owner; KHandle fd; bool armed; };
     Entry    list[kMaxWatched];
     u32      count = 0;
     bool     fired = false; // something was left out of the poll since the last rearm
@@ -50,7 +50,7 @@ void watch_main(void* arg) {
         os_mutex_lock(&w.lock);
         if (w.stop) { os_mutex_unlock(&w.lock); return; }
         for (u32 i = 0; i < w.count; ++i)
-            if (w.list[i].armed) fds[n++] = {(SOCKET)w.list[i].fd, POLLRDNORM, 0};
+            if (w.list[i].armed) fds[n++] = {(SOCKET)w.list[i].fd.os(), POLLRDNORM, 0};
         os_mutex_unlock(&w.lock);
         int r = WSAPoll(fds, (ULONG)n, -1);
         if (r == SOCKET_ERROR) {
@@ -69,7 +69,7 @@ void watch_main(void* arg) {
             if (!fds[k].revents) continue;
             // Readable, closed or gone: the loop's pass finds out which. Left out till rearmed.
             for (u32 i = 0; i < w.count; ++i)
-                if ((SOCKET)w.list[i].fd == fds[k].fd && w.list[i].armed) { w.list[i].armed = false; w.fired = true; woke = true; }
+                if ((SOCKET)w.list[i].fd.os() == fds[k].fd && w.list[i].armed) { w.list[i].armed = false; w.fired = true; woke = true; }
         }
         os_mutex_unlock(&w.lock);
         if (woke) platform_wake_state(*w.s);
@@ -97,6 +97,8 @@ SOCKET self_socket() {
 } // namespace
 
 bool wake_watch_supported() { return true; }
+// WSAPoll takes sockets and nothing else: a pipe's or a console's handle is not one.
+bool wake_watch_takes(KHandleKind k) { return k == KHandleKind::Socket; }
 
 WakeWatch* wake_watch_create(PlatformState& s) {
     WSADATA data;
@@ -134,7 +136,7 @@ void wake_watch_destroy(WakeWatch* w) {
     WSACleanup();
 }
 
-bool wake_watch_set(WakeWatch* w, const void* owner, const NetFd* fds, u32 n) {
+bool wake_watch_set(WakeWatch* w, const void* owner, const KHandle* fds, u32 n) {
     bool changed = false, fits = true;
     os_mutex_lock(&w->lock);
     // The owner's sockets no longer given go; those still given keep whether they are armed.
@@ -148,7 +150,7 @@ bool wake_watch_set(WakeWatch* w, const void* owner, const NetFd* fds, u32 n) {
         changed = true;
     }
     for (u32 k = 0; k < n; ++k) {
-        if (fds[k] < 0) continue;
+        if (!fds[k].is_open()) continue;
         bool have = false;
         for (u32 i = 0; i < w->count; ++i) if (w->list[i].owner == owner && w->list[i].fd == fds[k]) have = true;
         if (have) continue;
