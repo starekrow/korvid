@@ -66,7 +66,8 @@ void enter_audio_class(void* arg) {
 // os_thread_enter_audio_class marks the thread for the allocators whatever the OS says;
 // on Linux the thread is SCHED_FIFO exactly when it says yes, and with RLIMIT_RTPRIO at 0
 // (a desktop session's) it says no unless the process may ignore the limit. macOS grants
-// the time constraint policy to any process, and the kernel holds it afterwards.
+// the time constraint policy to any process, and the kernel holds it afterwards; Windows
+// (MMCSS) its "Pro Audio" task.
 void test_thread_audio_class(kv::TestCtx& c) {
     using namespace kv;
     c.begin("thread audio class");
@@ -85,6 +86,8 @@ void test_thread_audio_class(kv::TestCtx& c) {
                 rl.rlim_cur == RLIM_INFINITY ? -1ll : (long long)rl.rlim_cur);
 #elif defined(__APPLE__) && TARGET_OS_OSX
         KV_CHECK(c, a.granted && a.constrained);
+#elif defined(_WIN32)
+        KV_CHECK(c, a.granted); // MMCSS takes any process's "Pro Audio" thread
 #endif
     }
     KV_CHECK(c, !thread_is_realtime()); // the caller's thread is untouched

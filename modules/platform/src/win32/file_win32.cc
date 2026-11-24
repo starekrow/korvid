@@ -142,6 +142,23 @@ u64 volume_serial(const wchar_t* w) {
     if (root != small) HeapFree(GetProcessHeap(), 0, root);
     return ok ? serial : 0;
 }
+
+// A directory's first entry, the directory a WidePath's (so of any length): FindFirstFileExW
+// on its \* pattern. INVALID_HANDLE_VALUE, with *first the reason, if it gives none.
+HANDLE find_first(const wchar_t* dir, WIN32_FIND_DATAW* fd, DWORD* first) {
+    usize n = wcslen(dir);
+    wchar_t* pattern = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, (n + 3) * sizeof(wchar_t));
+    if (!pattern) { *first = ERROR_NOT_ENOUGH_MEMORY; return INVALID_HANDLE_VALUE; }
+    memcpy(pattern, dir, n * sizeof(wchar_t));
+    // The \\?\ form takes no '/': the separator is a backslash either way.
+    if (n && pattern[n - 1] != L'/' && pattern[n - 1] != L'\\') pattern[n++] = L'\\';
+    pattern[n++] = L'*';
+    pattern[n] = 0;
+    HANDLE h = FindFirstFileExW(pattern, FindExInfoBasic, fd, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
+    *first = h == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+    HeapFree(GetProcessHeap(), 0, pattern);
+    return h;
+}
 } // namespace
 
 bool os_path_stat(const char* path, OsStat* out, i32* err) {
@@ -215,15 +232,12 @@ bool os_current_dir(char* out, u32 cap) {
 }
 
 bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user) {
-    wchar_t w[KV_WIDE_PATH_MAX];
-    if (!widen(dir, w, KV_WIDE_PATH_MAX - 2)) return false;
-    usize n = wcslen(w);
-    if (n && w[n - 1] != L'/' && w[n - 1] != L'\\') w[n++] = L'/';
-    w[n++] = L'*';
-    w[n] = 0;
+    WidePath wp;
+    if (!wp.set(dir)) return false;
     WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileExW(w, FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
-    if (h == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_NOT_FOUND; // empty: no entries at all
+    DWORD first;
+    HANDLE h = find_first(wp.w, &fd, &first);
+    if (h == INVALID_HANDLE_VALUE) return first == ERROR_FILE_NOT_FOUND; // empty: no entries at all
     do {
         if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
         char name[MAX_PATH * 4];
@@ -237,15 +251,12 @@ bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void
 // os_path_stat reads them, with no query a file. A reparse point (a symbolic link, a
 // junction) is the one asked, by its path, so that it is followed as os_path_stat follows it.
 bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user) {
-    wchar_t w[KV_WIDE_PATH_MAX];
-    if (!widen(dir, w, KV_WIDE_PATH_MAX - 2)) return false;
-    usize n = wcslen(w);
-    if (n && w[n - 1] != L'/' && w[n - 1] != L'\\') w[n++] = L'/';
-    w[n++] = L'*';
-    w[n] = 0;
+    WidePath wp;
+    if (!wp.set(dir)) return false;
     WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileExW(w, FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
-    if (h == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_NOT_FOUND; // empty: no entries at all
+    DWORD first;
+    HANDLE h = find_first(wp.w, &fd, &first);
+    if (h == INVALID_HANDLE_VALUE) return first == ERROR_FILE_NOT_FOUND; // empty: no entries at all
     do {
         if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
         char name[MAX_PATH * 4];
@@ -274,18 +285,9 @@ bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, 
 bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDirEntry& e), void* user, i32* err) {
     WidePath wp;
     if (!wp.set(dir, err)) return false;
-    usize n = wcslen(wp.w);
-    wchar_t* pattern = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, (n + 3) * sizeof(wchar_t));
-    if (!pattern) { if (err) *err = ENOMEM; return false; }
-    memcpy(pattern, wp.w, n * sizeof(wchar_t));
-    // The \\?\ form takes no '/': the separator is a backslash either way.
-    if (n && pattern[n - 1] != L'/' && pattern[n - 1] != L'\\') pattern[n++] = L'\\';
-    pattern[n++] = L'*';
-    pattern[n] = 0;
     WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
-    DWORD first = h == INVALID_HANDLE_VALUE ? GetLastError() : 0;
-    HeapFree(GetProcessHeap(), 0, pattern);
+    DWORD first;
+    HANDLE h = find_first(wp.w, &fd, &first);
     if (h == INVALID_HANDLE_VALUE) {
         if (first == ERROR_FILE_NOT_FOUND) return true; // a drive's root with nothing on it: not even . and ..
         // A file named as the directory: "not a directory", as POSIX says it.

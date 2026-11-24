@@ -41,12 +41,14 @@ bool file_has(const char* path, const char* text) {
     return found;
 }
 
-#if !defined(_WIN32)
 // Runs this binary as a child that sets `key` to `value` (`count` times, flushing each),
 // with KORVID_SETTINGS_STALL set to `stall` (or not).
 bool start_child(Process& p, const char* dir, const char* key, const char* value, const char* count, const char* stall) {
     static char self[1024];
-#if defined(__APPLE__)
+#if defined(_WIN32)
+    if (!platform_exe_dir(self, sizeof self - 32)) return false;
+    format(self + strlen(self), 32, "platform_tests.exe");
+#elif defined(__APPLE__)
     uint32_t cap = sizeof self;
     if (_NSGetExecutablePath(self, &cap) != 0) return false;
 #else
@@ -68,7 +70,6 @@ bool finish(Process& p, f64 seconds) {
     bool done = !p.running();
     return done && p.code == 0;
 }
-#endif
 
 } // namespace
 
@@ -142,7 +143,6 @@ void test_settings(TestCtx& c) {
         KV_CHECK(c, number_in(dir, "volume") == 0.1);
     }
 
-#if !defined(_WIN32)
     if (process_supported()) {
 #if KV_DEV
         // Killed mid-write and before the rename (the stalls are dev builds'): the old
@@ -181,6 +181,5 @@ void test_settings(TestCtx& c) {
             KV_CHECK(c, number_in(dir, "left") == 40.0 && number_in(dir, "right") == 40.0 && number_in(dir, "volume") == 0.9);
         }
     }
-#endif
     KV_CHECK(c, io_remove_tree(dir));
 }
