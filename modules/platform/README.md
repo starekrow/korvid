@@ -56,7 +56,15 @@ for saves and settings, `$XDG_DATA_HOME/<org>/<app>/` (or `~/.local/share/<org>/
 created on first use. `platform_user_dir(e, which, org, app)` names the three kinds apart,
 where each OS keeps them: `Settings` (`$XDG_CONFIG_HOME`), `Data` (the preference
 directory) and `Cache` (`$XDG_CACHE_HOME`, which backups leave out); `io.h` has the
-table. All end in a separator. Each OS has its own source under `src/<os>/`.
+table. All end in a separator.
+
+**Settings** (`settings.h`). `platform_settings(e, org, app)` is the program's store:
+named integers, numbers, strings and structs (by their field tables) in `settings.json`
+in the settings directory, read whole when opened and written whole, off the calling
+thread, soon after each set: to a temporary file, flushed, renamed over the old, so a
+kill leaves the old file or the new one. A write holds `settings.lock` between processes
+and merges what the file has by key, so two programs writing it lose nothing of each
+other's. `settings_flush` waits for what was set; the platform's shutdown writes the rest. Each OS has its own source under `src/<os>/`.
 
 **The pump.** `platform_pump(e)` runs the pump hooks other modules added
 (`platform_pump_add`: `platform_hid` turns window events into bus events there), then the
@@ -178,6 +186,10 @@ Header `korvid/platform/io.h`:
 | `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mounts`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
 | `platform_io(engine)` | function | the module's queue |
 | `platform_pref_path(engine, org, app)` | function | the per-user directory for saves, created on first use, trailing separator; "" if none (`UserDir::Data`) |
+| `platform_settings(engine, org, app)`, `SettingsStore` | function, record | the program's settings store, opened in the settings directory at the first call |
+| `settings_open_dir`, `settings_close`, `settings_flush` | functions | a store in a directory; closed (written); waited on |
+| `settings_has`, `settings_int`, `settings_number`, `settings_string`, `settings_struct` | functions | a value, or the fallback; a struct's stored fields into it |
+| `settings_set_int`, `settings_set_number`, `settings_set_string`, `settings_set_struct`, `settings_remove` | functions | a value set (written soon, off the thread), or gone |
 | `platform_user_dir(engine, which, org, app)`, `UserDir` | function, enum | `Settings`, `Data` or `Cache`: where each OS keeps that kind, created on first use, trailing separator |
 | `platform_base_path(engine)` | function | the executable's directory with a trailing separator; assets live beneath it |
 

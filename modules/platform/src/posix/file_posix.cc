@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/file.h> // flock
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,35 @@ OsFile os_file_open(const char* path, bool write, i32* err) {
 }
 
 void os_file_close(OsFile f) { if (f >= 0) close((int)f); }
+
+bool os_file_sync(OsFile f, i32* err) {
+#if defined(__APPLE__)
+    // fsync on Apple leaves the data in the drive's cache; F_FULLFSYNC asks it to the platter.
+    if (fcntl((int)f, F_FULLFSYNC) == 0) return true;
+#endif
+    if (fsync((int)f) == 0) return true;
+    *err = errno;
+    return false;
+}
+
+OsFile os_file_lock(const char* path, i32* err) {
+    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) { *err = errno; return -1; }
+    while (flock(fd, LOCK_EX) != 0) {
+        if (errno == EINTR) continue;
+        *err = errno;
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+void os_dir_sync(const char* dir) {
+    int fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) return;
+    fsync(fd);
+    close(fd);
+}
 
 bool os_file_size(OsFile f, u64* size, i32* err) {
     struct stat st;

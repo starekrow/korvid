@@ -145,15 +145,18 @@ Each under `<org>/<app>/`. Where settings and data are one directory, they share
 and Apple asks that nothing else be made in it.
 
 **The store** (`settings.h`, in `platform`): named values (an integer, a number, a string,
-a struct by its field table) in one file, `settings.kbor`, in the settings directory.
+a struct by its field table) in one file, `settings.json`, in the settings directory.
 
-- **Read** at `platform` startup, before any module's startup.
+- **Read** whole when it is opened (`platform_settings(e, org, app)`, at the first call),
+  so a value is a lookup.
 - **Written whole** to a temporary name, flushed, and renamed over the old, so a crash or
-  a full disk leaves the old store and never half of the new. Off the main thread, as an
-  I/O task, at most one in flight; a set while one is writing is written after it.
+  a full disk leaves the old store and never half of the new. Off the main thread, by a
+  writer of the store's own, soon after a set; sets made while it writes are written after.
 - **Two writers** do not interleave: the write holds a lock on `settings.lock` beside it
   (`flock`, `LockFileEx`), and reads the file again under the lock and merges, last
   writer winning by key.
+- **JSON, not KBOR**: a person who looks where settings live can read it, and what a
+  person adds to it is kept.
 - **Apple's defaults system** is not used: one file everywhere is one code path, and the
   settings directory is where backups look.
 
@@ -390,3 +393,25 @@ the files directory's sibling, `cache`, which is `getCacheDir()`. Test (`user di
 all three under set variables, then under `$HOME` with two unset and one relative; each
 made; `platform_pref_path` is the data one. Windows, Apple and Android written, not
 compiled.
+
+**Milestone 7, the settings store (KR24, 2): built Nov 23, 2026.** As above, and:
+
+- **In memory** each key is an integer, a number, a string, or a value's JSON text (a
+  struct's object, or whatever else a person wrote, kept as it is). A set marks its key
+  and wakes the writer; the writer copies what changed and writes it outside the store's
+  mutex, so a set never waits on the disk. A write that fails leaves its keys pending,
+  and `settings_flush` says false once.
+- **Structs** are objects of their fields, mapped as the script binding maps them; reading
+  one fills the fields the object has and leaves the rest.
+- **On the disk**: the temporary file `fsync`ed (`F_FULLFSYNC` on Apple,
+  `FlushFileBuffers` on Windows), renamed (`MoveFileEx` with write-through), then the
+  directory `fsync`ed. New in `os_file.h`: `os_file_sync`, `os_file_lock`, `os_dir_sync`.
+- **Tests** (`settings`): each kind written by one store and read by the next; a struct,
+  and one read back from an object with one field; a key a person added, and a field left
+  out, kept through a write; a spoiled file an empty store that the first write replaces.
+  Then this test's own binary as a child: killed while writing the temporary file, and
+  killed after it with the rename not made (`KORVID_SETTINGS_STALL`, a dev build's hook),
+  each leaving the old value; not killed, the new one; two at once, each setting its own
+  key forty times with a flush after each, and both keys at forty after. On linux-debug,
+  linux-dev and linux-ship (ship without the kills, which need the hook), and under
+  `address,undefined` and `thread`. Windows and Apple written, not compiled.

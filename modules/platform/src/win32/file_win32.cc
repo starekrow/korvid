@@ -56,6 +56,25 @@ OsFile os_file_open(const char* path, bool write, i32* err) {
 
 void os_file_close(OsFile f) { if (f >= 0) CloseHandle(file_handle(f)); }
 
+bool os_file_sync(OsFile f, i32* err) {
+    if (FlushFileBuffers(file_handle(f))) return true;
+    *err = fail_errno();
+    return false;
+}
+
+OsFile os_file_lock(const char* path, i32* err) {
+    WidePath wp;
+    if (!wp.set(path, err)) return -1;
+    HANDLE h = CreateFileW(wp.w, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) { *err = fail_errno(); return -1; }
+    OVERLAPPED ov{};
+    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &ov)) { *err = fail_errno(); CloseHandle(h); return -1; }
+    return (OsFile)(intptr_t)h; // closing it lets the lock go
+}
+
+void os_dir_sync(const char*) {}
+
 bool os_file_size(OsFile f, u64* size, i32* err) {
     LARGE_INTEGER li;
     if (!GetFileSizeEx(file_handle(f), &li)) { *err = fail_errno(); return false; }
@@ -184,7 +203,7 @@ bool os_path_is_remote(const char* path) {
 bool os_rename(const char* from, const char* to) {
     wchar_t wf[KV_WIDE_PATH_MAX], wt[KV_WIDE_PATH_MAX];
     if (!widen(from, wf, KV_WIDE_PATH_MAX) || !widen(to, wt, KV_WIDE_PATH_MAX)) return false;
-    return MoveFileExW(wf, wt, MOVEFILE_REPLACE_EXISTING) != 0;
+    return MoveFileExW(wf, wt, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 }
 
 bool os_current_dir(char* out, u32 cap) {

@@ -1,4 +1,5 @@
 #include "korvid/platform/module.h"
+#include "korvid/platform/settings.h"
 #include "korvid/core/format.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/phase.h"
@@ -71,6 +72,8 @@ void platform_shutdown(Engine&, ModuleInstance& self) {
     PlatformState* s = self.state_as<PlatformState>();
     if (!s) return;
     if (s->pump_count) KV_WARN("platform", "%u pump hooks still added at shutdown", s->pump_count);
+    settings_close(s->settings); // what was set, written
+    s->settings = nullptr;
     s->io.free();
     io_bundle_close();
 }

@@ -30,6 +30,7 @@ struct PlatformState {
     char    pref_path[KV_PLATFORM_PATH_MAX];  // the per-user data directory once asked for (UserDir::Data)
     char    settings_path[KV_PLATFORM_PATH_MAX]; // UserDir::Settings, once asked for
     char    cache_path[KV_PLATFORM_PATH_MAX];    // UserDir::Cache, once asked for
+    struct SettingsStore* settings = nullptr;    // platform_settings, once asked for
     struct  Pump { PlatformPumpFn fn; void* user; } pumps[KV_PLATFORM_PUMP_MAX];
     u32     pump_count = 0;
 };

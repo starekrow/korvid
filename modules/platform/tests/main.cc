@@ -16,8 +16,13 @@ void test_io_list_dir(kv::TestCtx&);
 void test_net(kv::TestCtx&);
 void test_fs_watch(kv::TestCtx&);
 void test_process(kv::TestCtx&);
+void test_settings(kv::TestCtx&);
+int  settings_child(int argc, char** argv);
+#include <string.h>
 
-int main() {
+int main(int argc, char** argv) {
+    // A child the settings test runs: this binary, setting a value and leaving.
+    if (argc > 1 && !strcmp(argv[1], "--settings-child")) return settings_child(argc, argv);
     kv::TestCtx c;
     test_io(c);
     test_io_write(c);
@@ -35,5 +40,6 @@ int main() {
     test_net(c);
     test_fs_watch(c);
     test_process(c);
+    test_settings(c);
     return kv::test_report(c, "platform_tests");
 }

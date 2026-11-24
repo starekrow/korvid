@@ -16,6 +16,14 @@ bool   os_file_size(OsFile f, u64* size, i32* err);
 i64    os_file_read_at(OsFile f, void* buf, usize n, u64 at, i32* err);
 // Up to n bytes at the file's position: the count, or -1 with *err set.
 i64    os_file_write(OsFile f, const void* buf, usize n, i32* err);
+// What was written, on the disk (fsync, FlushFileBuffers). False with *err.
+bool   os_file_sync(OsFile f, i32* err);
+// Opens path (made if missing) and holds an exclusive lock on it until os_file_close:
+// another process that asks waits. Between processes only (flock, LockFileEx). -1 with *err.
+OsFile os_file_lock(const char* path, i32* err);
+// That a rename into dir is on the disk: the directory's own entry flushed (POSIX; nothing
+// on Windows, whose MoveFileEx is asked to write through).
+void   os_dir_sync(const char* dir);
 
 enum class OsPathKind : u8 { None, File, Dir, Other };
 // What a path names, following links.
