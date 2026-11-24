@@ -52,9 +52,9 @@ struct FsWatcher {
     FsWatchState* state = nullptr;
 
     // Auto is the native backend where there is one. Asking for Native where there is
-    // none fails. poll_interval is the polling backend's time between walks of a root;
+    // none fails (*err: ENOTSUP). poll_interval is the polling backend's time between walks of a root;
     // remote_interval is the time between walks of a share's root that Auto chose to poll.
-    bool init(FsWatchBackend backend = FsWatchBackend::Auto, f64 poll_interval = 0.25, f64 remote_interval = 5.0);
+    bool init(FsWatchBackend backend = FsWatchBackend::Auto, f64 poll_interval = 0.25, f64 remote_interval = 5.0, i32* err = nullptr);
     void free();
     bool is_open() const { return state != nullptr; }
     const char* backend_name() const; // "inotify", "readdirectorychanges", "fsevents", "poll": the watcher's; root_backend says a root's
@@ -78,12 +78,13 @@ struct FsWatcher {
     // after init; free() clears it.
     bool set_wake(void (*fn)(void* user), void* user);
 
-    // Watches dir and everything under it. The id, or ~0u if the directory cannot be
+    // Watches dir and everything under it. The id, or ~0u (*err: ENOENT, ENOTDIR, ENOTSUP for
+    // Native on a watcher without it, EIO where the OS refused) if the directory cannot be
     // read. Ids are not reused while the watcher lives. `how`: Auto is the watcher's own
     // backend, except that a watcher made with Auto polls a root on a share; Poll polls
     // this root whatever the watcher is, at poll_interval; Native insists, and fails on a
     // watcher that has none.
-    u32  add_root(const char* dir, FsWatchBackend how = FsWatchBackend::Auto);
+    u32  add_root(const char* dir, FsWatchBackend how = FsWatchBackend::Auto, i32* err = nullptr);
     void remove_root(u32 id);
     // What a root got: Native or Poll. Auto for an id that is not a root.
     FsWatchBackend root_backend(u32 id) const;

@@ -554,11 +554,11 @@ IoEntry entry_for(IoQueue& q, const IoRequest& req) {
 
 } // namespace
 
-bool IoQueue::mount_dir(const char* dir) {
-    if (!dir || os_path_kind(dir) != OsPathKind::Dir) { KV_WARN("io", "mount: '%s' is not a directory", dir ? dir : "?"); return false; }
+bool IoQueue::mount_dir(const char* dir, i32* err) {
+    if (!dir || os_path_kind(dir) != OsPathKind::Dir) { KV_WARN("io", "mount: '%s' is not a directory", dir ? dir : "?"); if (err) *err = ENOTDIR; return false; }
     IoMount m{};
     usize n = strlen(dir);
-    if (n + 2 > sizeof m.path) { KV_ERROR("io", "mount: path too long: '%s'", dir); return false; }
+    if (n + 2 > sizeof m.path) { KV_ERROR("io", "mount: path too long: '%s'", dir); if (err) *err = ENAMETOOLONG; return false; }
     memcpy(m.path, dir, n + 1);
     if (n && m.path[n - 1] != '/') { m.path[n] = '/'; m.path[n + 1] = 0; }
     m.is_pack = false;
@@ -572,20 +572,23 @@ namespace {
 // Opens an archive (a whole file, or `span` bytes at `base` inside one) and reads its
 // table into `m`, allocating from `a`. What a mount is, without a queue to hold it:
 // mount_pack_at pushes it, io_read_bundled and io_archive_entry use it as it is.
-bool archive_open(IoMount& m, Allocator* a, const char* path, u64 base, u64 span, const char* prefix, bool quiet = false) {
-    if (prefix && strlen(prefix) >= sizeof m.prefix) { KV_ERROR("io", "mount: prefix too long: '%s'", prefix); return false; }
+// *werr (if given) is the errno of a failure: the OS's for a file that cannot be opened or
+// read, EILSEQ for one that is not a usable zip, ENAMETOOLONG for a path or prefix past a mount's.
+bool archive_open(IoMount& m, Allocator* a, const char* path, u64 base, u64 span, const char* prefix, bool quiet = false, i32* werr = nullptr) {
+    if (prefix && strlen(prefix) >= sizeof m.prefix) { KV_ERROR("io", "mount: prefix too long: '%s'", prefix); if (werr) *werr = ENAMETOOLONG; return false; }
     if (prefix) memcpy(m.prefix, prefix, strlen(prefix) + 1);
     m.base = base;
-    if (!path || strlen(path) >= sizeof m.path) { KV_ERROR("io", "mount: bad pack path"); return false; }
+    if (!path || strlen(path) >= sizeof m.path) { KV_ERROR("io", "mount: bad pack path"); if (werr) *werr = path ? ENAMETOOLONG : ENOENT; return false; }
     i32 err = 0;
     KHandle fd = os_file_open(path, false, &err);
-    if (!fd.is_open()) { KV_WARN("io", "mount: cannot open '%s': %s", path, strerror(err)); return false; }
+    if (!fd.is_open()) { KV_WARN("io", "mount: cannot open '%s': %s", path, strerror(err)); if (werr) *werr = err; return false; }
     const char* why = nullptr;
     ZipTail tail;
     u8* buf = nullptr;
     usize buf_len = 0;
     auto give_up = [&](const char* reason) {
         KV_WARN("io", "mount: '%s' is not a usable zip: %s", path, reason);
+        if (werr) *werr = err ? err : EILSEQ;
         free_in(a, buf, buf_len ? buf_len : 1);
         pack_table_free(m.table, a);
         os_file_close(fd);
@@ -666,11 +669,11 @@ void archive_close(IoMount& m, Allocator* a) {
 
 } // namespace
 
-bool IoQueue::mount_pack(const char* path, const char* prefix) { return mount_pack_at(path, 0, 0, prefix); }
+bool IoQueue::mount_pack(const char* path, const char* prefix, i32* err) { return mount_pack_at(path, 0, 0, prefix, err); }
 
-bool IoQueue::mount_pack_at(const char* path, u64 base, u64 span, const char* prefix) {
+bool IoQueue::mount_pack_at(const char* path, u64 base, u64 span, const char* prefix, i32* err) {
     IoMount m{};
-    if (!archive_open(m, mounts.allocator(), path, base, span, prefix)) return false;
+    if (!archive_open(m, mounts.allocator(), path, base, span, prefix, false, err)) return false;
     mounts.push(m);
     return true;
 }
@@ -761,13 +764,14 @@ bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc, i32* err)
     return true;
 }
 
-bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* size) {
+bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* size, i32* err) {
     IoMount m{};
-    if (!archive_open(m, mem_general(), archive, 0, 0, nullptr, true)) return false;
+    if (!archive_open(m, mem_general(), archive, 0, 0, nullptr, true, err)) return false;
     char norm[KV_PACK_PATH_MAX];
     const PackEntry* pe = pack_normalize(name, norm, sizeof norm) ? pack_find(m.table, norm) : nullptr;
     bool ok = pe && pe->method == ZipStored && pe->csize == pe->size && entry_data_at(m, *pe, offset);
     if (ok) *size = pe->size;
+    else if (err) *err = pe ? EINVAL : ENOENT; // deflated, or not there
     archive_close(m, mem_general());
     return ok;
 }
@@ -845,9 +849,10 @@ void collect_entry(void* user, const char* name, const OsStat& st) {
     ((Array<ListEntry>*)user)->push(ListEntry{copy, st});
 }
 
-i32 walk(char* full, usize root_len, usize len, usize cap, bool (*fn)(void*, const char*, const IoStat&), void* user, bool* stop) {
+i32 walk(char* full, usize root_len, usize len, usize cap, bool (*fn)(void*, const char*, const IoStat&), void* user, bool* stop, i32* err = nullptr) {
     Array<ListEntry> entries;
-    if (!os_dir_each_stat(full, collect_entry, &entries)) { entries.free(); return -1; }
+    i32 why = 0;
+    if (!os_dir_each_stat(full, collect_entry, &entries, &why)) { entries.free(); if (err) *err = why ? why : EIO; return -1; }
     if (entries.len > 1) kv::sort(entries.data, entries.len, sizeof(ListEntry), compare_entries);
     i32 count = 0;
     for (const ListEntry& e : entries) {
@@ -877,19 +882,19 @@ bool name_only(void* user, const char* relative, const IoStat&) { NameOnly* c = 
 
 } // namespace
 
-i32 io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relative, const IoStat& st), void* user) {
+i32 io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relative, const IoStat& st), void* user, i32* err) {
     char full[1024];
     usize n = dir ? strlen(dir) : 0;
-    if (!n || n >= sizeof full) return -1;
+    if (!n || n >= sizeof full) { if (err) *err = n ? ENAMETOOLONG : ENOENT; return -1; }
     memcpy(full, dir, n + 1);
     while (n > 1 && full[n - 1] == '/') full[--n] = 0;
     bool stop = false;
-    return walk(full, n, n, sizeof full, fn, user, &stop);
+    return walk(full, n, n, sizeof full, fn, user, &stop, err);
 }
 
-i32 io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user) {
+i32 io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user, i32* err) {
     NameOnly c{fn, user};
-    return io_list_files_stat(dir, name_only, &c);
+    return io_list_files_stat(dir, name_only, &c, err);
 }
 
 namespace {
@@ -943,7 +948,7 @@ bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirE
     return ok;
 }
 
-bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize n), void* user, i32* err, usize chunk) {
+bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize n), void* user, usize chunk, i32* err) {
     i32 e = 0;
     KHandle f = os_file_open(path, false, &e);
     if (!f.is_open()) { if (err) *err = e; return false; }
@@ -990,21 +995,21 @@ bool io_copy_now(const char* from, const char* to, u8 hash[32], i32* err) {
     Sha256 h;
     h.init();
     CopyCtx c{out, hash ? &h : nullptr, 0};
-    bool ok = io_read_each(from, copy_piece, &c, &e) && !c.err;
+    bool ok = io_read_each(from, copy_piece, &c, 0, &e) && !c.err;
     os_file_close(out);
     if (!ok) { if (err) *err = c.err ? c.err : e; return false; }
     if (hash) h.finish(hash);
     return true;
 }
 
-bool io_make_dirs(const char* path) {
+bool io_make_dirs(const char* path, i32* err) {
     // A copy to cut, on the stack when it fits and from the heap when not: a path is as
     // long as the OS allows, as everywhere else in io.
     char small[1024];
     usize n = path ? strlen(path) : 0;
-    if (!n) return false;
+    if (!n) { if (err) *err = ENOENT; return false; }
     char* p = n < sizeof small ? small : (char*)mem_alloc(n + 1);
-    if (!p) return false;
+    if (!p) { if (err) *err = ENOMEM; return false; }
     struct Free { char* p; char* small; ~Free() { if (p != small) mem_free(p); } } free_p{p, small};
     memcpy(p, path, n + 1);
     while (n > 1 && p[n - 1] == '/') p[--n] = 0;
@@ -1013,10 +1018,11 @@ bool io_make_dirs(const char* path) {
     // time, and made again from there down: making every level from the root each time
     // was a dozen failed calls for every directory a tool asked for.
     usize end = n;
-    while (!os_make_dir(p)) {
+    i32 why = 0;
+    while (!os_make_dir(p, &why)) {
         usize s = end;
         do --s; while (s > 0 && p[s] != '/');
-        if (s == 0) return false; // nothing above it to make
+        if (s == 0) { if (err) *err = why ? why : EIO; return false; } // nothing above it to make
         p[s] = 0;
         end = s;
     }
@@ -1024,15 +1030,20 @@ bool io_make_dirs(const char* path) {
         p[end] = '/';
         usize next = end + 1;
         while (next < n && p[next]) ++next;
-        if (!os_make_dir(p)) return false;
+        if (!os_make_dir(p, &why)) { if (err) *err = why ? why : EIO; return false; }
         end = next;
     }
-    return os_path_kind(path) == OsPathKind::Dir; // what was there may have been a file
+    if (os_path_kind(path) == OsPathKind::Dir) return true;
+    if (err) *err = ENOTDIR; // what was there may have been a file
+    return false;
 }
 
-bool io_remove(const char* path) {
-    if (!path || !path[0]) return false;
-    return os_remove(path) || os_path_kind(path) == OsPathKind::None;
+bool io_remove(const char* path, i32* err) {
+    if (!path || !path[0]) { if (err) *err = ENOENT; return false; }
+    i32 why = 0;
+    if (os_remove(path, &why) || os_path_kind(path) == OsPathKind::None) return true;
+    if (err) *err = why ? why : EIO;
+    return false;
 }
 
 namespace {
@@ -1048,45 +1059,57 @@ void collect_entry(void* user, const char* name) {
 // not go and is a directory is emptied first, so a link to a directory goes as a link and
 // what it points at is never touched. `full` grows with the tree: a path is as long as the
 // OS allows, as everywhere else in io.
-bool remove_tree(Array<char>& full, u32 len) {
+bool remove_tree(Array<char>& full, u32 len, i32* why) {
     Array<char*> names;
-    bool ok = os_dir_each(full.data, collect_entry, &names);
+    i32 e = 0;
+    bool ok = os_dir_each(full.data, collect_entry, &names, &e);
+    if (!ok && !*why) *why = e ? e : EIO;
     for (char* name : names) {
         u32 n = (u32)strlen(name);
         full.len = len + 1; // what a growth keeps: the path so far and its NUL
         if (full.reserve(len + 2 + n)) {
             full.data[len] = '/';
             memcpy(full.data + len + 1, name, n + 1);
-            if (!os_remove(full.data)) ok = os_path_kind(full.data) == OsPathKind::Dir ? remove_tree(full, len + 1 + n) && ok : false;
+            e = 0;
+            if (!os_remove(full.data, &e)) {
+                if (os_path_kind(full.data) == OsPathKind::Dir) ok = remove_tree(full, len + 1 + n, why) && ok;
+                else { ok = false; if (!*why) *why = e ? e : EIO; }
+            }
             full.data[len] = 0;
         } else {
             ok = false;
+            if (!*why) *why = ENOMEM;
         }
         free_in(mem_general(), name, n + 1);
     }
     names.free();
-    return os_remove_dir(full.data) && ok; // emptied above: a directory
+    e = 0;
+    if (!os_remove_dir(full.data, &e)) { ok = false; if (!*why) *why = e ? e : EIO; } // emptied above: a directory
+    return ok;
 }
 
 } // namespace
 
-bool io_remove_tree(const char* path) {
+bool io_remove_tree(const char* path, i32* err) {
     usize n = path ? strlen(path) : 0;
-    if (!n) return false;
+    if (!n) { if (err) *err = ENOENT; return false; }
     Array<char> full;
-    if (n >= 0x7fffffff || !full.reserve((u32)n + 256)) return false;
+    if (n >= 0x7fffffff || !full.reserve((u32)n + 256)) { if (err) *err = ENOMEM; return false; }
     memcpy(full.data, path, n + 1);
     while (n > 1 && full.data[n - 1] == '/') full.data[--n] = 0;
     // Mostly a directory: an empty one, or nothing, goes in one call. Then a file or a
     // link, and only then a directory with something in it.
-    bool ok = os_remove_dir(full.data) || os_remove(full.data) || os_path_kind(full.data) == OsPathKind::None ||
-              (os_path_kind(full.data) == OsPathKind::Dir && remove_tree(full, (u32)n));
+    i32 why = 0, first = 0;
+    bool ok = os_remove_dir(full.data, &first) || os_remove(full.data) || os_path_kind(full.data) == OsPathKind::None ||
+              (os_path_kind(full.data) == OsPathKind::Dir && remove_tree(full, (u32)n, &why));
     full.free();
+    if (!ok && err) *err = why ? why : first ? first : EIO;
     return ok;
 }
 
-bool io_make_temp_dir(const char* prefix, char* out, u32 cap) {
-    return prefix && out && cap && os_make_temp_dir(prefix, out, cap);
+bool io_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
+    if (!prefix || !out || !cap) { if (err) *err = EINVAL; return false; }
+    return os_make_temp_dir(prefix, out, cap, err);
 }
 
 bool IoQueue::cancel(Handle request) {

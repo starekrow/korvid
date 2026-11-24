@@ -326,12 +326,12 @@ void test_io_now(kv::TestCtx& c) {
         struct Each { u32 pieces; usize bytes; Sha256 h; } each{};
         each.h.init();
         auto piece = [](void* user, const u8* data, usize len) { Each& e = *(Each*)user; ++e.pieces; e.bytes += len; e.h.update(data, len); return true; };
-        KV_CHECK(c, io_read_each(path, piece, &each, nullptr, 65536) && each.pieces == 4 && each.bytes == n);
+        KV_CHECK(c, io_read_each(path, piece, &each, 65536) && each.pieces == 4 && each.bytes == n);
         each.h.finish(got_hash);
         KV_CHECK(c, memcmp(got_hash, want, 32) == 0);
         u32 calls = 0;
         auto stop = [](void* user, const u8*, usize) { ++*(u32*)user; return false; };
-        KV_CHECK(c, io_read_each(path, stop, &calls, nullptr, 65536) && calls == 1); // stopped, not failed
+        KV_CHECK(c, io_read_each(path, stop, &calls, 65536) && calls == 1); // stopped, not failed
         char copy[300];
         format(copy, sizeof copy, "%s/copy.bin", dir);
         memset(got_hash, 0, 32);
@@ -339,7 +339,7 @@ void test_io_now(kv::TestCtx& c) {
         KV_CHECK(c, io_read_now(copy, &got) && got.size == n && memcmp(got.data, big, n) == 0);
         got.free();
         err = 0;
-        KV_CHECK(c, !io_read_each(missing, piece, &each, &err) && err != 0);
+        KV_CHECK(c, !io_read_each(missing, piece, &each, 0, &err) && err != 0);
         KV_CHECK(c, !io_copy_now(path, missing, nullptr, &err) && err != 0);
         free(big);
     }
@@ -558,4 +558,48 @@ void test_io_long_ranged_stat(kv::TestCtx& c) {
     }
 
     io_remove_tree(dir);
+}
+
+// One convention for a blocking call that fails: its last parameter, an errno on every OS,
+// set on failure and left alone on success.
+void test_io_errors(kv::TestCtx& c) {
+    using namespace kv;
+    char dir[256], path[400], sub[400], missing[400];
+    i32 err = 0;
+    KV_CHECK(c, io_make_temp_dir("kv-io-err", dir, sizeof dir, &err) && err == 0);
+    format(path, sizeof path, "%s/file.txt", dir);
+    format(sub, sizeof sub, "%s/file.txt/under", dir);
+    format(missing, sizeof missing, "%s/none/at/all", dir);
+    KV_CHECK(c, io_write_now(path, "x", 1, &err) && err == 0);
+
+    IoStat st;
+    KV_CHECK(c, io_stat(path, &st, &err) && err == 0 && st.is_file);
+    KV_CHECK(c, !io_stat(missing, &st, &err) && (err == ENOENT || err == ENOTDIR));
+    err = 0;
+    KV_CHECK(c, !io_rename(missing, path, &err) && err == ENOENT);
+    err = 0;
+    KV_CHECK(c, !io_remove(dir, &err) && err != 0);              // not empty
+    err = 0;
+    KV_CHECK(c, !io_make_dirs(sub, &err) && err != 0);           // a file is in the way
+    err = 0;
+    KV_CHECK(c, io_list_files(missing, [](void*, const char*) { return true; }, nullptr, &err) == -1 && err != 0);
+    err = 0;
+    KV_CHECK(c, !io_list_dir(missing, 0, [](void*, const IoDirEntry&) { return true; }, nullptr, &err) && err != 0);
+    err = 0;
+    u64 at = 0, size = 0;
+    KV_CHECK(c, !io_archive_entry(missing, "a", &at, &size, &err) && err == ENOENT);
+    err = 0;
+    KV_CHECK(c, !io_archive_entry(path, "a", &at, &size, &err) && err == EILSEQ); // one byte is no zip
+    IoQueue q;
+    KV_CHECK(c, q.init(mem_general(), 16, IoBackend::Sync));
+    err = 0;
+    KV_CHECK(c, !q.mount_dir(missing, &err) && err == ENOTDIR);
+    err = 0;
+    KV_CHECK(c, !q.mount_pack(missing, nullptr, &err) && err == ENOENT);
+    q.free();
+    char cwd[1024];
+    err = 0;
+    KV_CHECK(c, io_current_dir(cwd, sizeof cwd, &err) && err == 0 && cwd[0]);
+    KV_CHECK(c, io_remove_tree(dir, &err) && err == 0);
+    KV_CHECK(c, io_remove_tree(dir, &err) && err == 0);          // nothing there is gone already
 }

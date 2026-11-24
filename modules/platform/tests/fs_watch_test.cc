@@ -279,6 +279,12 @@ void run_wake(TestCtx& c) {
     KV_CHECK(c, io_make_temp_dir("kv-fswatch-wake", dir, sizeof dir));
     FsWatcher w;
     KV_CHECK(c, w.init(FsWatchBackend::Native) && w.add_root(dir) != ~0u);
+    {
+        char gone[300];
+        format(gone, sizeof gone, "%s/not-here", dir);
+        i32 err = 0;
+        KV_CHECK(c, w.add_root(gone, FsWatchBackend::Auto, &err) == ~0u && err == ENOENT);
+    }
     u32 calls = 0;
     if (w.wake_handle().is_open()) {
         KV_CHECK(c, !w.set_wake(wake_bump, &calls));

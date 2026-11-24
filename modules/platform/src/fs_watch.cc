@@ -8,6 +8,7 @@
 #include "korvid/core/time.h"
 #include "korvid/platform/module.h"
 #include <new>
+#include <errno.h>
 #include <string.h>
 
 namespace kv {
@@ -223,10 +224,10 @@ struct FsWatchState {
 
 bool fs_watch_has_native() { return KV_FS_NATIVE != 0; }
 
-bool FsWatcher::init(FsWatchBackend backend, f64 poll_interval, f64 remote_interval) {
+bool FsWatcher::init(FsWatchBackend backend, f64 poll_interval, f64 remote_interval, i32* err) {
     free();
     bool native = backend != FsWatchBackend::Poll && fs_watch_has_native();
-    if (backend == FsWatchBackend::Native && !native) return false;
+    if (backend == FsWatchBackend::Native && !native) { if (err) *err = ENOTSUP; return false; }
     FsWatchState* s = new (mem_alloc(sizeof(FsWatchState))) FsWatchState{};
     s->native   = native;
     s->asked    = backend;
@@ -236,7 +237,7 @@ bool FsWatcher::init(FsWatchBackend backend, f64 poll_interval, f64 remote_inter
     if (native) {
         s->n = fs_native_create();
         if (!s->n) {
-            if (backend == FsWatchBackend::Native) { mem_free(s); return false; }
+            if (backend == FsWatchBackend::Native) { mem_free(s); if (err) *err = ENOTSUP; return false; }
             KV_WARN("platform", "fs_watch: no native watcher (the OS refused one); polling");
             s->native = false;
         }
@@ -279,9 +280,13 @@ const char* FsWatcher::backend_name() const {
     return "poll";
 }
 
-u32 FsWatcher::add_root(const char* dir, FsWatchBackend how) {
-    if (!state || !dir || os_path_kind(dir) != OsPathKind::Dir) return ~0u;
-    if (how == FsWatchBackend::Native && !state->native) return ~0u;
+u32 FsWatcher::add_root(const char* dir, FsWatchBackend how, i32* err) {
+    if (!state || !dir) { if (err) *err = EINVAL; return ~0u; }
+    if (os_path_kind(dir) != OsPathKind::Dir) {
+        if (err) { OsStat st; i32 why = 0; *err = os_path_stat(dir, &st, &why) ? ENOTDIR : why ? why : ENOENT; }
+        return ~0u;
+    }
+    if (how == FsWatchBackend::Native && !state->native) { if (err) *err = ENOTSUP; return ~0u; }
     bool native = state->native && how != FsWatchBackend::Poll;
     f64 interval = state->interval;
     if (how == FsWatchBackend::Auto && state->asked == FsWatchBackend::Auto && os_path_is_remote(dir)) {
@@ -292,7 +297,7 @@ u32 FsWatcher::add_root(const char* dir, FsWatchBackend how) {
     u32 id = state->next_id++;
 #if KV_FS_NATIVE
     if (native) {
-        if (!fs_native_add(state->n, id, dir)) return ~0u;
+        if (!fs_native_add(state->n, id, dir)) { if (err) *err = EIO; return ~0u; } // the OS refused the watch
         state->native_roots.push(id);
         return id;
     }

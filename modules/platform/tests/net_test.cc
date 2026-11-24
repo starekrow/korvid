@@ -24,6 +24,11 @@ void test_net(kv::TestCtx& c) {
 
     NetListener l;
     KV_CHECK(c, l.open(0) && l.is_open() && l.port != 0); // 0: the OS picks
+    {   // A port already listened on: refused, with the reason (and a log line).
+        NetListener second;
+        i32 err = 0;
+        KV_CHECK(c, !second.open(l.port, true, &err) && err == EADDRINUSE && !second.is_open());
+    }
     KV_CHECK(c, !l.accept().is_open());                       // nobody yet, and no blocking
 
     NetSocket client;

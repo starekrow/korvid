@@ -1,4 +1,5 @@
 #include "korvid/platform/net.h"
+#include "../os_err.h"
 #include "korvid/core/log.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -53,10 +54,10 @@ int tcp_socket() {
 
 } // namespace
 
-bool NetListener::open(u16 want_port, bool local_only) {
+bool NetListener::open(u16 want_port, bool local_only, i32* err) {
     close();
     int s = tcp_socket();
-    if (s < 0) { KV_ERROR("net", "socket: %s", strerror(errno)); return false; }
+    if (s < 0) { int e = errno; KV_ERROR("net", "socket: %s", strerror(e)); return os_fail(err, e); }
     int one = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     sockaddr_in addr{};
@@ -64,9 +65,10 @@ bool NetListener::open(u16 want_port, bool local_only) {
     addr.sin_port        = htons(want_port);
     addr.sin_addr.s_addr = htonl(local_only ? INADDR_LOOPBACK : INADDR_ANY);
     if (bind(s, (sockaddr*)&addr, sizeof addr) != 0 || listen(s, 8) != 0 || !set_nonblocking(s)) {
-        KV_ERROR("net", "listen on port %u: %s", want_port, strerror(errno));
+        int e = errno;
+        KV_ERROR("net", "listen on port %u: %s", want_port, strerror(e));
         ::close(s);
-        return false;
+        return os_fail(err, e);
     }
     socklen_t len = sizeof addr;
     if (getsockname(s, (sockaddr*)&addr, &len) == 0) port = ntohs(addr.sin_port);
@@ -156,18 +158,19 @@ void NetSocket::close() {
     closed = false;
 }
 
-bool net_connect_local(u16 port, NetSocket& out) {
+bool net_connect_local(u16 port, NetSocket& out, i32* err) {
     int s = tcp_socket();
-    if (s < 0) return false;
+    if (s < 0) return os_fail(err, errno);
     set_nonblocking(s);
     sockaddr_in addr{};
     addr.sin_family      = AF_INET;
     addr.sin_port        = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (connect(s, (sockaddr*)&addr, sizeof addr) != 0 && errno != EINPROGRESS) {
-        KV_ERROR("net", "connect to port %u: %s", port, strerror(errno));
+        int e = errno;
+        KV_ERROR("net", "connect to port %u: %s", port, strerror(e));
         ::close(s);
-        return false;
+        return os_fail(err, e);
     }
     out.adopt(khandle_make(KHandleKind::Socket, s));
     return true;

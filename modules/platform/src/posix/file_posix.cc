@@ -151,13 +151,13 @@ bool os_path_is_remote(const char* path) {
 #endif
 }
 
-bool os_rename(const char* from, const char* to) { return rename(from, to) == 0; }
+bool os_rename(const char* from, const char* to, i32* err) { return rename(from, to) == 0 || os_fail(err, errno); }
 
-bool os_current_dir(char* out, u32 cap) { return getcwd(out, cap) != nullptr; }
+bool os_current_dir(char* out, u32 cap, i32* err) { return getcwd(out, cap) != nullptr || os_fail(err, errno); }
 
-bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user) {
+bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user, i32* err) {
     DIR* d = opendir(dir);
-    if (!d) return false;
+    if (!d) return os_fail(err, errno);
     while (dirent* de = readdir(d)) {
         if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
         fn(user, de->d_name);
@@ -179,9 +179,9 @@ void each_stat_one(void* user, const char* name) {
 } // namespace
 
 // readdir does not carry sizes and times: a stat an entry, as a caller would have made.
-bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user) {
+bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user, i32* err) {
     EachStat c{dir, fn, user};
-    return os_dir_each(dir, each_stat_one, &c);
+    return os_dir_each(dir, each_stat_one, &c, err);
 }
 
 // readdir's d_type is the kind, where the file system fills it in: a directory of files
@@ -230,26 +230,26 @@ bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDir
     return true;
 }
 
-bool os_make_dir(const char* path) {
-    return mkdir(path, 0755) == 0 || errno == EEXIST;
+bool os_make_dir(const char* path, i32* err) {
+    return mkdir(path, 0755) == 0 || errno == EEXIST || os_fail(err, errno);
 }
 
-bool os_remove(const char* path) {
-    return remove(path) == 0;   // ISO C: a file, or an empty directory on POSIX
+bool os_remove(const char* path, i32* err) {
+    return remove(path) == 0 || os_fail(err, errno);   // ISO C: a file, or an empty directory on POSIX
 }
 
-bool os_remove_dir(const char* path) {
-    return rmdir(path) == 0 || errno == ENOENT;
+bool os_remove_dir(const char* path, i32* err) {
+    return rmdir(path) == 0 || errno == ENOENT || os_fail(err, errno);
 }
 
-bool os_make_temp_dir(const char* prefix, char* out, u32 cap) {
+bool os_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
     const char* tmp = getenv("TMPDIR");
     if (!tmp || !tmp[0]) tmp = "/tmp";
     usize n = strlen(tmp);
     while (n > 1 && tmp[n - 1] == '/') --n;
     int len = format(out, cap, "%.*s/%s-XXXXXX", (int)n, tmp, prefix);
-    if (len <= 0 || (u32)len >= cap) return false;
-    return mkdtemp(out) != nullptr;
+    if (len <= 0 || (u32)len >= cap) return os_fail(err, ENAMETOOLONG);
+    return mkdtemp(out) != nullptr || os_fail(err, errno);
 }
 
 } // namespace kv

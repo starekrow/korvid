@@ -80,10 +80,10 @@ bool IoFileWriter::close() {
     return false;
 }
 
-bool io_stat(const char* path, IoStat* out) {
+bool io_stat(const char* path, IoStat* out, i32* err) {
     OsStat st;
     *out = IoStat{};
-    if (!os_path_stat(path, &st)) return false;
+    if (!os_path_stat(path, &st, err)) return false;
     out->is_file  = st.kind == OsPathKind::File;
     out->is_dir   = st.kind == OsPathKind::Dir;
     out->size     = st.size;
@@ -92,11 +92,11 @@ bool io_stat(const char* path, IoStat* out) {
     return true;
 }
 
-bool io_rename(const char* from, const char* to) { return os_rename(from, to); }
+bool io_rename(const char* from, const char* to, i32* err) { return os_rename(from, to, err); }
 
 bool io_path_is_remote(const char* path) { return path && path[0] && os_path_is_remote(path); }
 
-bool io_current_dir(char* out, u32 cap) { return os_current_dir(out, cap); }
+bool io_current_dir(char* out, u32 cap, i32* err) { return os_current_dir(out, cap, err); }
 
 bool io_is_file(const char* path) { return os_path_kind(path) == OsPathKind::File; }
 bool io_is_dir(const char* path) { return os_path_kind(path) == OsPathKind::Dir; }

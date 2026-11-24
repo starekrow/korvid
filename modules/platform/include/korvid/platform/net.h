@@ -13,7 +13,8 @@ struct NetListener {
     KHandle fd;      // KHandleKind::Socket
     u16   port = 0; // the bound port; what the OS chose when asked for 0
 
-    bool open(u16 port, bool local_only = true);
+    // False (*err: EADDRINUSE, EACCES, the OS's errno) with a log line if it cannot listen.
+    bool open(u16 port, bool local_only = true, i32* err = nullptr);
     void close();
     bool is_open() const { return fd.is_open(); }
     // A connected socket, or none (not is_open) when nobody is waiting. Non-blocking.
@@ -42,7 +43,7 @@ struct NetSocket {
 
 // Non-blocking connect to 127.0.0.1:port. The socket is usable at once: writes queue,
 // and flush() sends once the connection is up. For tools and tests.
-bool net_connect_local(u16 port, NetSocket& out);
+bool net_connect_local(u16 port, NetSocket& out, i32* err = nullptr);
 
 // Closes a socket nobody adopted (one accept returned that is being turned away).
 void net_close(KHandle fd);

@@ -224,34 +224,35 @@ bool os_path_is_remote(const char* path) {
 // write in a thousand, through on the first retry). Asked again every 5 ms for half a second
 // before it is a failure; one that is really refused (a directory, a read-only file) costs
 // that half second. errno says why, as rename's does. Paths of any length (WidePath).
-bool os_rename(const char* from, const char* to) {
+bool os_rename(const char* from, const char* to, i32* err) {
     WidePath wf, wt;
-    i32 err = 0;
-    if (!wf.set(from, &err) || !wt.set(to, &err)) { errno = err; return false; }
+    i32 why = 0;
+    if (!wf.set(from, &why) || !wt.set(to, &why)) { errno = why; return os_fail(err, why); }
     for (u32 attempt = 0;; ++attempt) {
         if (MoveFileExW(wf.w, wt.w, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
         DWORD e = GetLastError();
         bool held = e == ERROR_ACCESS_DENIED || e == ERROR_SHARING_VIOLATION || e == ERROR_LOCK_VIOLATION;
-        if (!held || attempt == 100) { errno = errno_from_win32(e); return false; }
+        if (!held || attempt == 100) { errno = errno_from_win32(e); return os_fail(err, errno); }
         Sleep(5);
     }
 }
 
-bool os_current_dir(char* out, u32 cap) {
+bool os_current_dir(char* out, u32 cap, i32* err) {
     wchar_t w[KV_WIDE_PATH_MAX];
     DWORD n = GetCurrentDirectoryW(KV_WIDE_PATH_MAX, w);
-    if (n == 0 || n >= (DWORD)KV_WIDE_PATH_MAX || !narrow(w, out, (int)cap)) return false;
+    if (n == 0) return os_fail(err, fail_errno());
+    if (n >= (DWORD)KV_WIDE_PATH_MAX || !narrow(w, out, (int)cap)) return os_fail(err, ENAMETOOLONG);
     forward_slashes(out);
     return true;
 }
 
-bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user) {
+bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user, i32* err) {
     WidePath wp;
-    if (!wp.set(dir)) return false;
+    if (!wp.set(dir, err)) return false;
     WIN32_FIND_DATAW fd;
     DWORD first;
     HANDLE h = find_first(wp.w, &fd, &first);
-    if (h == INVALID_HANDLE_VALUE) return first == ERROR_FILE_NOT_FOUND; // empty: no entries at all
+    if (h == INVALID_HANDLE_VALUE) return first == ERROR_FILE_NOT_FOUND || os_fail(err, errno_from_win32(first)); // empty: no entries at all
     do {
         if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
         char name[MAX_PATH * 4];
@@ -264,13 +265,13 @@ bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void
 // The listing's own record of each entry: its attributes, size and last write, as
 // os_path_stat reads them, with no query a file. A reparse point (a symbolic link, a
 // junction) is the one asked, by its path, so that it is followed as os_path_stat follows it.
-bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user) {
+bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user, i32* err) {
     WidePath wp;
-    if (!wp.set(dir)) return false;
+    if (!wp.set(dir, err)) return false;
     WIN32_FIND_DATAW fd;
     DWORD first;
     HANDLE h = find_first(wp.w, &fd, &first);
-    if (h == INVALID_HANDLE_VALUE) return first == ERROR_FILE_NOT_FOUND; // empty: no entries at all
+    if (h == INVALID_HANDLE_VALUE) return first == ERROR_FILE_NOT_FOUND || os_fail(err, errno_from_win32(first)); // empty: no entries at all
     do {
         if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
         char name[MAX_PATH * 4];
@@ -346,58 +347,60 @@ bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDir
     return true;
 }
 
-bool os_make_dir(const char* path) {
+bool os_make_dir(const char* path, i32* err) {
     if (os_path_kind(path) == OsPathKind::Dir) return true; // also a drive, "C:"
     WidePath wp;
-    if (!wp.set(path)) return false;
-    return CreateDirectoryW(wp.w, nullptr) || GetLastError() == ERROR_ALREADY_EXISTS;
+    if (!wp.set(path, err)) return false;
+    if (CreateDirectoryW(wp.w, nullptr) || GetLastError() == ERROR_ALREADY_EXISTS) return true;
+    return os_fail(err, fail_errno());
 }
 
-bool os_remove(const char* path) {
+bool os_remove(const char* path, i32* err) {
     WidePath wp;
-    if (!wp.set(path)) return false;
+    if (!wp.set(path, err)) return false;
     DWORD a = GetFileAttributesW(wp.w);
-    if (a == INVALID_FILE_ATTRIBUTES) return false;
-    if (a & FILE_ATTRIBUTE_DIRECTORY) return RemoveDirectoryW(wp.w) != 0;
-    return DeleteFileW(wp.w) != 0;
+    if (a == INVALID_FILE_ATTRIBUTES) return os_fail(err, fail_errno());
+    if ((a & FILE_ATTRIBUTE_DIRECTORY) ? RemoveDirectoryW(wp.w) : DeleteFileW(wp.w)) return true;
+    return os_fail(err, fail_errno());
 }
 
-bool os_remove_dir(const char* path) {
+bool os_remove_dir(const char* path, i32* err) {
     WidePath wp;
-    if (!wp.set(path)) return false;
+    if (!wp.set(path, err)) return false;
     if (RemoveDirectoryW(wp.w)) return true;
     DWORD e = GetLastError();
-    return e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND;
+    if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND) return true;
+    return os_fail(err, errno_from_win32(e));
 }
 
 // Under the user's temporary directory (GetTempPath2W where Windows has it, which keeps a
 // SYSTEM process's files private), named prefix-<pid>-<n>; CreateDirectoryW failing on a
 // name that exists makes the choice race-free, as mkdtemp's is.
-bool os_make_temp_dir(const char* prefix, char* out, u32 cap) {
+bool os_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
     wchar_t tmp[MAX_PATH + 1];
     typedef DWORD(WINAPI * TempPath2)(DWORD, LPWSTR);
     static TempPath2 temp_path2 = (TempPath2)(void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetTempPath2W");
     DWORD n = temp_path2 ? temp_path2(MAX_PATH + 1, tmp) : GetTempPathW(MAX_PATH + 1, tmp);
-    if (n == 0 || n > MAX_PATH) return false;
+    if (n == 0 || n > MAX_PATH) return os_fail(err, n ? ENAMETOOLONG : fail_errno());
     // The long form: GetTempPath can answer with 8.3 names (C:\Users\DAVIDO~1\...).
     wchar_t full[KV_WIDE_PATH_MAX];
     DWORD m = GetLongPathNameW(tmp, full, KV_WIDE_PATH_MAX);
     if (m == 0 || m >= (DWORD)KV_WIDE_PATH_MAX) wcscpy_s(full, tmp);
     char base[KV_WIDE_PATH_MAX * 3];
-    if (!narrow(full, base, (int)sizeof base)) return false;
+    if (!narrow(full, base, (int)sizeof base)) return os_fail(err, ENAMETOOLONG);
     forward_slashes(base);
     usize len = strlen(base);
     while (len > 1 && base[len - 1] == '/') base[--len] = 0;
     static u32 counter = 0;
     for (u32 attempt = 0; attempt < 1000; ++attempt) {
         int k = kv::format(out, cap, "%s/%s-%lu-%u", base, prefix, (unsigned long)GetCurrentProcessId(), ++counter);
-        if (k <= 0 || (u32)k >= cap) return false;
+        if (k <= 0 || (u32)k >= cap) return os_fail(err, ENAMETOOLONG);
         wchar_t w[KV_WIDE_PATH_MAX];
-        if (!widen(out, w, KV_WIDE_PATH_MAX)) return false;
+        if (!widen(out, w, KV_WIDE_PATH_MAX, err)) return false;
         if (CreateDirectoryW(w, nullptr)) return true;
-        if (GetLastError() != ERROR_ALREADY_EXISTS) return false;
+        if (GetLastError() != ERROR_ALREADY_EXISTS) return os_fail(err, fail_errno());
     }
-    return false;
+    return os_fail(err, EEXIST);
 }
 
 } // namespace kv

@@ -3,6 +3,7 @@
 // every platform: they are what IoCompletion::error carries and what strerror describes.
 #pragma once
 #include "korvid/platform/io.h"
+#include "os_err.h"
 
 namespace kv {
 
@@ -40,17 +41,19 @@ bool os_path_stat(const char* path, OsStat* out, i32* err = nullptr);
 // Whether the file system under path may change without this machine hearing of it (a
 // share, a FUSE mount): io_path_is_remote. False if it cannot be asked.
 bool os_path_is_remote(const char* path);
+// Every call below that can fail takes a last `i32* err`, set (if given) to the errno of a
+// failure and left alone otherwise.
 // Renames a file over whatever is at `to`.
-bool os_rename(const char* from, const char* to);
+bool os_rename(const char* from, const char* to, i32* err = nullptr);
 // The working directory, '/' separated.
-bool os_current_dir(char* out, u32 cap);
+bool os_current_dir(char* out, u32 cap, i32* err = nullptr);
 // Calls fn with each entry's name in dir, '.' and '..' left out, in no particular order.
 // False if dir cannot be read.
-bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user);
+bool os_dir_each(const char* dir, void (*fn)(void* user, const char* name), void* user, i32* err = nullptr);
 // The same with what os_path_stat would say of each entry, for walks that would otherwise
 // ask it of every one: on Windows the listing itself carries it, no query a file (a
 // symbolic link is still asked, so it is followed); elsewhere one stat an entry.
-bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user);
+bool os_dir_each_stat(const char* dir, void (*fn)(void* user, const char* name, const OsStat& st), void* user, i32* err = nullptr);
 // One entry of os_dir_list: its name (valid during the call), what it is, following a
 // link, and whether it is one. With `sizes`, st has the size, time and volume; without, only
 // the kind, and from the listing where the OS has it there. A link whose target is not
@@ -60,16 +63,16 @@ struct OsDirEntry { const char* name; OsStat st; bool is_link = false; bool hidd
 // False with *err set (errno) when dir cannot be read, or the listing fails part way.
 bool os_dir_list(const char* dir, bool sizes, void (*fn)(void* user, const OsDirEntry& e), void* user, i32* err);
 // Creates one directory. True if it was made or a directory is already there.
-bool os_make_dir(const char* path);
+bool os_make_dir(const char* path, i32* err = nullptr);
 // Removes a file or an empty directory. True if it was removed.
-bool os_remove(const char* path);
+bool os_remove(const char* path, i32* err = nullptr);
 // Removes an empty directory, never a file or what a link points at. True if no directory
 // is there after (removed, or nothing was there); false for a file, a link, or a
 // directory with something in it. One call where the caller knows what it has: POSIX's
 // remove() tries a directory as a file first.
-bool os_remove_dir(const char* path);
+bool os_remove_dir(const char* path, i32* err = nullptr);
 // A new, empty directory under the OS's temporary directory whose name starts with
 // prefix; its path, with '/' separators and none at the end, in out.
-bool os_make_temp_dir(const char* prefix, char* out, u32 cap);
+bool os_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err = nullptr);
 
 } // namespace kv

@@ -9,6 +9,7 @@ void test_io_remove_tree(kv::TestCtx&);
 void test_io_now(kv::TestCtx&);
 void test_io_tasks(kv::TestCtx&);
 void test_io_long_ranged_stat(kv::TestCtx&);
+void test_io_errors(kv::TestCtx&);
 void test_io_make_dirs_deep(kv::TestCtx&);
 void test_user_dirs(kv::TestCtx&);
 void test_wtf8(kv::TestCtx&);
@@ -34,6 +35,7 @@ int main(int argc, char** argv) {
     test_io_now(c);
     test_io_tasks(c);
     test_io_long_ranged_stat(c);
+    test_io_errors(c);
     test_io_make_dirs_deep(c);
     test_user_dirs(c);
     test_wtf8(c);

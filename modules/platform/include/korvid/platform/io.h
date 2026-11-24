@@ -205,15 +205,17 @@ struct IoQueue {
     Handle read_asset(const IoRequest& req);
     // Mounts. A directory is checked to exist; a pack's tail, central directory and index
     // are read now, synchronously, and its descriptor stays open until free(). False
-    // with a log line if the directory or the archive is not usable.
-    bool   mount_dir(const char* dir);
+    // with a log line if the directory or the archive is not usable, and *err (if given):
+    // ENOTDIR, the OS's errno for a file that cannot be opened or read, EILSEQ for one that
+    // is not a usable zip, ENAMETOOLONG for a path past a mount's 255 bytes.
+    bool   mount_dir(const char* dir, i32* err = nullptr);
     // With a prefix, only the entries under it are mounted, named without it: the part of
     // a larger archive that is this program's (an Android package's "assets/").
     // mount_pack_at mounts an archive that is `size` bytes at `offset` inside a file: a pack
     // stored, uncompressed, as an entry of another archive, read in place with the same
     // ranged reads. io_archive_entry finds such an entry.
-    bool   mount_pack(const char* path, const char* prefix = nullptr);
-    bool   mount_pack_at(const char* path, u64 offset, u64 size, const char* prefix = nullptr);
+    bool   mount_pack(const char* path, const char* prefix = nullptr, i32* err = nullptr);
+    bool   mount_pack_at(const char* path, u64 offset, u64 size, const char* prefix = nullptr, i32* err = nullptr);
     // Submits a whole-file write (create or truncate); the bytes are copied now. Same
     // pump, priorities, budget and completions as a read. Null handle as above.
     Handle write_file(const IoWriteRequest& req);
@@ -246,14 +248,21 @@ struct IoQueue {
     u32    pending() const { return queued.len + in_flight + tasks_pending; }
 };
 
+// ---- Errors ---------------------------------------------------------------------------
+// One convention for every blocking call in this header that can fail: its last parameter
+// is `i32* err = nullptr`. A failure sets *err (if given) to an errno value, the same on
+// every OS (Windows' errors are translated), which strerror describes and
+// IoCompletion::error carries for the queue's requests; success leaves it alone. The
+// return value alone says whether it failed.
+
 // The files under a directory, recursively, in name order per directory, as paths relative
 // to it ("maps/town.tmj"). Hidden entries (a leading '.') are skipped. Synchronous: for
-// tools and startup, never for a tick. Returns the count, or -1 if `dir` cannot be read;
-// `fn` returning false stops the walk.
-i32  io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user);
+// tools and startup, never for a tick. Returns the count, or -1 (*err) if `dir` cannot be
+// read; `fn` returning false stops the walk.
+i32  io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user, i32* err = nullptr);
 // The same walk with each file's size and modification time, as io_stat would give them,
 // from the listing itself: for a walk that would stat every file, at no cost a file more.
-i32  io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relative, const IoStat& st), void* user);
+i32  io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relative, const IoStat& st), void* user, i32* err = nullptr);
 // One directory's own entries, not its descendants, for a walk that chooses its own order
 // (breadth first, or the directory someone opened before the rest). Blocking and safe on
 // any thread: from a job or a queue task (run_task), never from a tick. Entries come in
@@ -285,22 +294,23 @@ struct IoDirEntry {
 bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirEntry& e), void* user, i32* err = nullptr);
 // Creates a directory and its parents (mkdir -p). Synchronous; true if it exists after.
 // The path may be as long as the OS allows, as io_remove_tree's (on Apple, 1,024 bytes).
-bool io_make_dirs(const char* path);
+bool io_make_dirs(const char* path, i32* err = nullptr);
 // Removes a file, or a directory that is empty. Synchronous; true if it is gone after.
-bool io_remove(const char* path);
+bool io_remove(const char* path, i32* err = nullptr);
 // Removes a directory and everything under it, hidden entries included; a link inside is
 // removed itself, never followed. Synchronous: for tools and tests cleaning up after
-// themselves (io_make_temp_dir's directories). True if `path` is gone after.
-bool io_remove_tree(const char* path);
+// themselves (io_make_temp_dir's directories). True if `path` is gone after; *err is the
+// first thing that would not go.
+bool io_remove_tree(const char* path, i32* err = nullptr);
 // Makes a new, empty directory under the OS's temporary directory, its name starting with
 // `prefix`, for a tool's or a test's scratch work; its path (no trailing '/') in out.
 // Synchronous. False if none could be made.
-bool io_make_temp_dir(const char* prefix, char* out, u32 cap);
+bool io_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err = nullptr);
 
 // ---- Blocking file I/O ----------------------------------------------------------------
 // For tools, startup, shutdown and tests: never for a tick, which goes through the queue.
 // The same OS layer as the queue's (UTF-8 paths, CreateFileW on Windows), so a file reads
-// and writes alike either way. Errors are errno values, as IoCompletion::error.
+// and writes alike either way. Errors are errno values, as IoCompletion::error (Errors, above).
 
 // A whole file's bytes, with a NUL after them (not counted in size), so text can be used
 // as a C string. free() returns them to the allocator they came from.
@@ -318,7 +328,7 @@ bool io_write_now(const char* path, const void* data, usize size, i32* err = nul
 // A file front to back in pieces of up to `chunk` bytes, each handed to fn, which may stop
 // the read by returning false. For what does not need the file whole in memory: a hash, a
 // copy. False with *err set if it cannot be opened or read (a stop is not a failure).
-bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize n), void* user, i32* err = nullptr, usize chunk = 1u << 20);
+bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize n), void* user, usize chunk = 1u << 20, i32* err = nullptr);
 // Copies a file in pieces, `to` created or truncated; with `hash`, the SHA-256 of what was
 // read. False with *err set if either side fails. What was written of `to` stays: a tool
 // that must never be seen half done copies to a temporary name and renames it.
@@ -344,16 +354,18 @@ struct IoFileWriter {
 // archive that ends inside it and EILSEQ for data that does not inflate or fails its CRC-32.
 bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc = nullptr, i32* err = nullptr);
 // Where a stored (uncompressed) entry's bytes are inside a zip archive, for mount_pack_at.
-// False if the archive cannot be read, has no such entry, or holds it deflated.
-bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* size);
+// False if the archive cannot be read (*err: the OS's errno, or EILSEQ for what is not a
+// zip), has no such entry (ENOENT), or holds it deflated (EINVAL).
+bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* size, i32* err = nullptr);
 
 // Renames a file, replacing one already at `to`: on one file system, all at once, so a
 // reader sees the old file or the new and never half of either. How a file is written
 // whole: to a temporary name beside it, then renamed.
-bool io_rename(const char* from, const char* to);
+bool io_rename(const char* from, const char* to, i32* err = nullptr);
 // What a path names, with its size and modification time, now, on the calling thread: for
-// tools. A tick asks IoQueue::stat_file. False if nothing is there.
-bool io_stat(const char* path, IoStat* out);
+// tools. A tick asks IoQueue::stat_file. False if nothing is there (*err: ENOENT or
+// ENOTDIR) or it cannot be asked (any other errno).
+bool io_stat(const char* path, IoStat* out, i32* err = nullptr);
 // Whether the file system under `path` may change without this machine hearing of it:
 // a network share (NFS, SMB; on Windows a mapped or \\server path; on Apple a volume
 // not local), or on Linux any FUSE mount (sshfs, rclone). An OS's change notifications
@@ -362,7 +374,7 @@ bool io_stat(const char* path, IoStat* out);
 // cannot be asked.
 bool io_path_is_remote(const char* path);
 // The process's working directory, '/' separated, no trailing slash.
-bool io_current_dir(char* out, u32 cap);
+bool io_current_dir(char* out, u32 cap, i32* err = nullptr);
 bool io_is_file(const char* path);
 bool io_is_dir(const char* path);
 

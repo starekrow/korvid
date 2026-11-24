@@ -3,11 +3,13 @@
 // EINPROGRESS; SO_REUSEADDR would let another process take the port, so a listener holds
 // it with SO_EXCLUSIVEADDRUSE instead; and there is no SIGPIPE to suppress.
 #include "korvid/platform/net.h"
+#include "../os_err.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "wide.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <errno.h>
 #include <string.h>
 #pragma comment(lib, "ws2_32.lib")
 
@@ -34,6 +36,25 @@ const char* net_error(int code) {
     return text;
 }
 
+// Winsock's error as the errno POSIX would have given, for the callers' `i32* err`.
+i32 errno_from_wsa(int code) {
+    switch (code) {
+    case WSAEADDRINUSE:    return EADDRINUSE;
+    case WSAEACCES:        return EACCES;
+    case WSAEADDRNOTAVAIL: return EADDRNOTAVAIL;
+    case WSAECONNREFUSED:  return ECONNREFUSED;
+    case WSAECONNRESET:    return ECONNRESET;
+    case WSAENETUNREACH:   return ENETUNREACH;
+    case WSAEHOSTUNREACH:  return EHOSTUNREACH;
+    case WSAETIMEDOUT:     return ETIMEDOUT;
+    case WSAEMFILE:        return EMFILE;
+    case WSAENOBUFS:       return ENOBUFS;
+    case WSAEINVAL:        return EINVAL;
+    case WSANOTINITIALISED: case WSASYSNOTREADY: case WSAENETDOWN: return ENETDOWN;
+    default:               return EIO;
+    }
+}
+
 SOCKET socket_of(KHandle fd) { return (SOCKET)fd.os(); }
 KHandle handle_of(SOCKET s) { return s == INVALID_SOCKET ? KHandle{} : khandle_make(KHandleKind::Socket, (i64)s); }
 
@@ -52,11 +73,11 @@ SOCKET new_socket() {
 
 } // namespace
 
-bool NetListener::open(u16 want_port, bool local_only) {
+bool NetListener::open(u16 want_port, bool local_only, i32* err) {
     close();
-    if (!winsock_up()) return false;
+    if (!winsock_up()) return os_fail(err, ENETDOWN);
     SOCKET s = new_socket();
-    if (s == INVALID_SOCKET) { KV_ERROR("net", "socket: %s", net_error(WSAGetLastError())); return false; }
+    if (s == INVALID_SOCKET) { int e = WSAGetLastError(); KV_ERROR("net", "socket: %s", net_error(e)); return os_fail(err, errno_from_wsa(e)); }
     BOOL one = TRUE;
     setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&one, sizeof one);
     sockaddr_in addr{};
@@ -64,9 +85,10 @@ bool NetListener::open(u16 want_port, bool local_only) {
     addr.sin_port        = htons(want_port);
     addr.sin_addr.s_addr = htonl(local_only ? INADDR_LOOPBACK : INADDR_ANY);
     if (bind(s, (sockaddr*)&addr, sizeof addr) != 0 || listen(s, 8) != 0 || !set_nonblocking(s)) {
-        KV_ERROR("net", "listen on port %u: %s", want_port, net_error(WSAGetLastError()));
+        int e = WSAGetLastError();
+        KV_ERROR("net", "listen on port %u: %s", want_port, net_error(e));
         closesocket(s);
-        return false;
+        return os_fail(err, errno_from_wsa(e));
     }
     int len = sizeof addr;
     if (getsockname(s, (sockaddr*)&addr, &len) == 0) port = ntohs(addr.sin_port);
@@ -154,10 +176,10 @@ void NetSocket::close() {
     closed = false;
 }
 
-bool net_connect_local(u16 port, NetSocket& out) {
-    if (!winsock_up()) return false;
+bool net_connect_local(u16 port, NetSocket& out, i32* err) {
+    if (!winsock_up()) return os_fail(err, ENETDOWN);
     SOCKET s = new_socket();
-    if (s == INVALID_SOCKET) return false;
+    if (s == INVALID_SOCKET) return os_fail(err, errno_from_wsa(WSAGetLastError()));
     set_nonblocking(s);
     sockaddr_in addr{};
     addr.sin_family      = AF_INET;
@@ -168,7 +190,7 @@ bool net_connect_local(u16 port, NetSocket& out) {
         if (e != WSAEWOULDBLOCK) {
             KV_ERROR("net", "connect to port %u: %s", port, net_error(e));
             closesocket(s);
-            return false;
+            return os_fail(err, errno_from_wsa(e));
         }
     }
     out.adopt(handle_of(s));
