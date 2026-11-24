@@ -37,6 +37,7 @@
 #include "korvid/core/arena.h"
 #include "korvid/platform/fs_watch.h"
 #include "korvid/platform/io.h"
+#include "korvid/platform/module.h"
 #include "korvid/platform/net.h"
 #include "korvid/core/json.h"
 #include "korvid/core/kbor.h"
@@ -298,6 +299,7 @@ struct GoldbergState {
     // roots, unless the window's own session is that watch): saving window.kim reloads it.
     Process         ui_child;
     bool            ui_child_on = false;
+    bool            watched = false;     // the window's waker is a watched one (KR26)
     char            ui_tree[600] = {};   // goldberg's own output tree (<exe>.assets)
     bool            ui_checked = false;
 };
@@ -1880,13 +1882,41 @@ void cmd_berg(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args
 void cmd_berg_preview(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "berg-preview"); }
 void cmd_berg_set(CliContext& ctx, Span<const char* const> args) { cmd_any(ctx, args, "berg-set"); }
 
-// The window's waker (engine_add_waker), asked at each of the frame loop's polls while it is
-// idle: the watcher's news taken, programs served, and true (with the Work cycle asked for)
-// when anything came, a run finished, or, while the session is not quiet, every 50 ms (a file
-// settling, a step held).
+// What wakes the idle window for the session next (KR26), stated each time the waker is
+// asked: the watcher's descriptor, the listener, each program's connection and the UI
+// child's pipes; the watcher's next walk; and soon while the queue's tasks run (they finish
+// on its workers, which wake nothing) or what a program was told is still queued; every
+// 50 ms while the session is not quiet.
+void goldberg_watch(Engine& e, GoldbergState& s) {
+    if (!s.watched) return;
+    NetFd fds[64];
+    u32 n = 0;
+    auto add = [&](i64 fd) { if (fd >= 0 && n < KV_COUNTOF(fds)) fds[n++] = fd; };
+    bool live = s.active && !s.failed;
+    f64 now = time_now();
+    bool soon = false;
+    if (live) {
+        if (s.watcher.is_open()) add(s.watcher.wake_fd());
+        if (s.listener.is_open()) add(s.listener.fd);
+        for (GoldbergState::Program* p : s.programs) {
+            if (p->sock.is_open()) add(p->sock.fd);
+            if (p->sock.out.len) soon = true;
+        }
+        if (s.ui_child_on) { add(s.ui_child.out_fd); add(s.ui_child.err_fd); }
+        if (s.watcher.is_open()) if (f64 d = s.watcher.due(); d > 0.0) engine_want_wake_at(e, d);
+        if (s.io.pending()) soon = true;
+        if (!s.quiet) engine_want_wake_at(e, s.next_wake);
+    }
+    if (!platform_wake_set(e, &s, fds, n) || n == KV_COUNTOF(fds)) soon = true;
+    if (soon) engine_want_wake_at(e, now + 0.004);
+}
+
+// The window's waker, asked at each pass of the idle frame loop: the watcher's news taken,
+// programs served, and true (with the Work cycle asked for) when anything came, a run
+// finished, or, while the session is not quiet, every 50 ms (a file settling, a step held).
 bool goldberg_wake(Engine& e, void* user) {
     GoldbergState& s = *(GoldbergState*)user;
-    if (!s.active || s.failed) return false;
+    if (!s.active || s.failed) { goldberg_watch(e, s); return false; }
     bool any = false;
     if (s.watcher.is_open())
         for (const FsEvent& ev : s.watcher.poll()) {
@@ -1901,6 +1931,7 @@ bool goldberg_wake(Engine& e, void* user) {
     f64 now = time_now();
     if (!s.quiet && now >= s.next_wake) { s.next_wake = now + 0.05; any = true; }
     if (any) e.work_pending = true;
+    goldberg_watch(e, s);
     return any;
 }
 
@@ -1930,7 +1961,10 @@ bool goldberg_startup(Engine& e, ModuleInstance& self) {
         // The window: its screen, then the session the command line asked for, in Work.
         s->window = true;
         s->screen = krome_open(e, "goldberg/ui/window.kimb", "window");
-        engine_add_waker(e, goldberg_wake, s);
+        // Watched where the platform can watch its sockets; else asked at every poll.
+        s->watched = platform_watches(e);
+        if (s->watched) engine_add_watched_waker(e, goldberg_wake, s);
+        else engine_add_waker(e, goldberg_wake, s);
         e.work_pending = true; // the request runs in the first Work cycle, once the module is up
     }
     return true;
@@ -1941,6 +1975,7 @@ void goldberg_shutdown(Engine& e, ModuleInstance& self) {
     if (!s) return;
     if (s->window) {
         engine_remove_waker(e, goldberg_wake, s);
+        if (s->watched) platform_wake_set(e, s, nullptr, 0);
         stop_own_ui(*s);
         // Ended some other way than by its close (the CLI's quit, a signal): the state saved.
         if (s->active && s->L && !s->failed) call_app(*s, e, "quit", 0, 0);

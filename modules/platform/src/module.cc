@@ -8,6 +8,7 @@
 #include "korvid/core/time.h"
 #include "os_paths.h"
 #include "os_file.h"
+#include "wake_watch.h"
 
 namespace kv {
 
@@ -76,6 +77,8 @@ void platform_shutdown(Engine&, ModuleInstance& self) {
     PlatformState* s = self.state_as<PlatformState>();
     if (!s) return;
     if (s->pump_count) KV_WARN("platform", "%u pump hooks still added at shutdown", s->pump_count);
+    wake_watch_destroy(s->watch); // the thread stopped before what it wakes goes
+    s->watch = nullptr;
     settings_close(s->settings); // what was set, written
     s->settings = nullptr;
     s->io.free();
@@ -136,6 +139,7 @@ PlatformWoken platform_wait(Engine& e, f64 seconds) {
     if (!s) { if (seconds > 0.0) time_sleep(seconds); return PlatformWoken::Time; }
     if (seconds <= 0.0) return PlatformWoken::Time; // no wait: a wake stays for the next
     ++s->waits.waits;
+    if (s->watch) wake_watch_rearm(s->watch); // what woke the last wait has been read by now
     // A wake that came before the wait began ends it at once.
     if (atomic_exchange(&s->woken, 0u, MO_ACQ_REL)) { ++s->waits.woken; return PlatformWoken::Wake; }
     int ended = s->waiter.wait ? s->waiter.wait(s->waiter.user, seconds) : -1;
@@ -159,8 +163,11 @@ PlatformWoken platform_wait(Engine& e, f64 seconds) {
 }
 
 void platform_wake(Engine& e) {
-    PlatformState* s = state(e);
-    if (!s) return;
+    if (PlatformState* s = state(e)) platform_wake_state(*s);
+}
+
+void platform_wake_state(PlatformState& st) {
+    PlatformState* s = &st;
     atomic_store(&s->woken, 1u, MO_RELEASE);
     // Under the lock, so a waiter between its check and its wait cannot miss the signal,
     // and the window's waiter is not cleared while it is called.
@@ -176,6 +183,19 @@ void platform_set_waiter(Engine& e, const PlatformWaiter* w) {
     os_mutex_lock(&s->wait_lock);
     s->waiter = w ? *w : PlatformWaiter{};
     os_mutex_unlock(&s->wait_lock);
+}
+
+bool platform_watches(Engine&) { return wake_watch_supported(); }
+
+bool platform_wake_set(Engine& e, const void* owner, const NetFd* fds, u32 n) {
+    PlatformState* s = state(e);
+    if (!s || !wake_watch_supported()) return false;
+    if (!s->watch) {
+        if (!n) return true; // nothing to forget, and no thread for nothing
+        s->watch = wake_watch_create(*s);
+        if (!s->watch) return false;
+    }
+    return wake_watch_set(s->watch, owner, fds, n);
 }
 
 PlatformWaits platform_waits(Engine& e) {

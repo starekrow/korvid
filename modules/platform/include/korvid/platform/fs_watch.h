@@ -62,6 +62,12 @@ struct FsWatcher {
     // walks), 0.05 for FSEvents, which gathers. A caller that must have heard everything a
     // process wrote before it exited polls for this long after the exit.
     f64  lateness() const;
+    // For a loop that waits (KR26): a descriptor that can be read when the native backend
+    // has news (inotify's), else -1; and the time (time_now's clock) by which poll() should
+    // next be called for news that no descriptor tells of (a polled root's next walk, or
+    // soon when the native backend has no descriptor), 0 when there is none.
+    i64  wake_fd() const;
+    f64  due() const;
 
     // Watches dir and everything under it. The id, or ~0u if the directory cannot be
     // read. Ids are not reused while the watcher lives. `how`: Auto is the watcher's own

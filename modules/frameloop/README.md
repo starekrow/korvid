@@ -42,8 +42,10 @@ or Work is pending, and four times a second otherwise; it draws only on the same
 `OnDemand` less the heartbeat. **Between passes both wait** (`platform_wait`, KR26) for the
 window, a wake, or the soonest of the heartbeat, `engine_want_frame_at`'s time, the next
 tick when ticks are wanted, and `--run-seconds`' end; not at all while a frame is wanted,
-Work is pending or the frames after input are owed. The wait is a 4 ms poll while I/O is
-under way, a load holds the sim, or a waker is registered (the loop says so once). A still
+Work is pending or the frames after input are owed. The wait also ends at `engine_want_wake_at`'s time, and by a socket the platform watches
+(`platform_wake_set`), after which the next pass ticks (so the CLI reads what came). The
+wait is a 4 ms poll while I/O is under way, a load holds the sim, or a waker is registered
+with `engine_add_waker`, whose sources the platform does not watch (the loop says so once). A still
 window wakes about four times a second. The last log line says how many frames it drew,
 how many ticks ran without one, and how many waits ended by the window, a wake and the
 time. **A hidden window** (`WindowVisibility`) is drawn under no pacing:

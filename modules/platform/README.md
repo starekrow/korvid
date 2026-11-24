@@ -43,7 +43,8 @@ header says what holds on both backends. The backend is chosen per root: on a sh
 (`io_path_is_remote`: NFS, SMB, any FUSE mount) the OS hears only this machine's writes,
 so a watcher made with `Auto` polls such a root every `remote_interval` seconds (5), and
 `add_root(dir, FsWatchBackend::Poll)` polls one the test misses; `root_backend(id)` says
-which a root got.
+which a root got. For a loop that waits, `wake_fd()` is inotify's descriptor (else -1) and
+`due()` the time by which `poll()` should next be called for news no descriptor tells of.
 
 **Processes** (`process.h`). `Process::spawn` takes an argument vector, a working
 directory and additions to the environment; `running`, `read_out`, `read_err` and `kill`
@@ -78,6 +79,16 @@ user event it pushes); with no window open it is a condition, timed. `platform_w
 called from any thread, not a signal handler, and a wake that arrives before the wait
 begins ends it at once. A frame loop with nothing to do waits here between passes
 (`frameloop`); `platform_waits(e)` counts what ended them.
+
+**Sockets that wake it.** `platform_wake_set(e, owner, fds, n)` states the sockets an owner
+wants the loop woken by, replacing what it said before (`n` 0 forgets them): a watched
+waker's (`engine_add_watched_waker`, the owner its `user`), the CLI's listener and
+sessions. One thread of the platform's, started at the first socket and blocked in
+`poll`, calls `platform_wake` when one can be read, and leaves it out till the next
+`platform_wait`, by when the pass it woke has read it: a socket nobody drains wakes each
+wait, not the thread for ever. 64 sockets in all. `platform_watches(e)` is false where
+there is no such thread yet (Windows): a waker then registers with `engine_add_waker`, and
+the loop polls for it.
 
 ## Using it
 
@@ -223,6 +234,8 @@ Header `korvid/platform/module.h`:
 | `platform_wake(engine)` | function | ends the wait under way or the next; any thread |
 | `platform_set_waiter(engine, w)`, `PlatformWaiter` | function, record | the window's `wait(user, seconds)` (1 early, 0 the time, -1 cannot now) and `wake(user)`; null clears |
 | `platform_waits(engine)`, `PlatformWaits` | function, record | `waits`, and of them ended by the `window`, `woken`, `timed` |
+| `platform_wake_set(engine, owner, fds, n)` | function | the owner's sockets that wake a waiting loop, replacing what it said; false where not watched or past 64 |
+| `platform_watches(engine)` | function | whether `platform_wake_set` watches here (not on Windows yet) |
 
 What the module registers with the engine:
 

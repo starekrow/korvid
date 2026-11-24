@@ -248,6 +248,7 @@ void poll_root(FsWinRoot& r, FsSink& sink) {
 } // namespace
 
 const char* fs_native_name() { return "readdirectorychanges"; }
+i64         fs_native_fd(FsNative*) { return -1; } // completions come to its own port
 
 FsNative* fs_native_create() { return new (mem_alloc(sizeof(FsNative))) FsNative{}; }
 

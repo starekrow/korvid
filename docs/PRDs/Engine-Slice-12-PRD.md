@@ -260,3 +260,46 @@ and:
   platform's new test of a wake from another thread. arcfire's and arcanum's demos hash
   the same as at milestone 1, tick for tick (14,154 and 1,865, at the default rate and at
   `--rate 4`). `tools/doccheck.sh` reports nothing new.
+
+**Milestone 3, sockets (KR26): built Nov 24, 2026.** Different from the shape:
+
+- **A waker says it is watched.** `platform_wake_on(e, fd)` gave the loop no way to know
+  which wakers its sockets covered, and goldberg's waker has sources that are not sockets.
+  So a waker that the platform can wait for registers with `engine_add_watched_waker`
+  (`engine_add_waker` stays as it was, and polls). It states its sockets with
+  `platform_wake_set(e, owner, fds, n)`, its `user` the owner, the whole set each time
+  (so goldberg, whose programs and UI child come and go, states it each time it is asked),
+  and any time it must be asked without a socket stirring with `engine_want_wake_at`. The
+  loop waits no longer than that, and polls only while a waker added the old way is
+  registered (`Engine::wakers_polled`).
+- **The thread** (`posix/wake_watch_posix.cc`) starts at the first socket, polls the armed
+  ones and a pipe of its own, and leaves out what woke it till the next `platform_wait`,
+  not the next pump: by then the pass that woke has read it, so rearming does not fire
+  again on what was just read. 64 sockets in all; past that `platform_wake_set` is false
+  and the owner asks to be woken soon. Windows says it cannot watch
+  (`platform_watches`), so its wakers register the old way until milestone 4.
+- **Who gives what.** `cli`: its listener, each session, and stdin's descriptor where it
+  is one (POSIX). `asset_live`: its connection; the next try while it has none; soon while
+  its hello is queued (a connect under way shows nothing a read would see). goldberg's
+  window: the file watcher's descriptor (`FsWatcher::wake_fd`, inotify's; -1 for FSEvents
+  and ReadDirectoryChangesW, which `FsWatcher::due` then asks to poll soon), its listener,
+  each program, the UI child's pipes; the watcher's next walk of a polled root; soon while
+  its own queue's tasks run (they finish on workers, which wake nothing); every 50 ms while
+  the session is not quiet, as before.
+- **After a wake the next pass ticks** (decoupled), or draws (on demand, where ticks come
+  with frames), so the CLI reads what came.
+- **Measured** (linux-dev, GNOME 50):
+
+| run | before | now |
+|---|---|---|
+| `kromescreens` connected to `goldberg watch`, 12 s still | a 4 ms poll while connected | 48 waits (window 6, a wake 1, the time 41), no poll |
+| `goldberg watch --window`, still, seconds 3 to 8 | a 4 ms poll | 29 main-thread wakeups a second, 0.8% CPU |
+| a CLI request (`help`) to an idle `ticker`, 12 each pacing | up to the heartbeat, 250 ms | 0.5 ms median, 1.2 the most |
+| a save to the window (`live_numbers.py`, 10 each): screen `.kim`, prelude, icon, texture | 9.2, 8.9, 7.2, 49.9 ms median (slice 6) | 6.1, 10.1, 7.3, 49.9 |
+
+- **Not done here:** Windows' thread (WSAPoll), milestone 4's.
+- **Verified, Nov 24, 2026.** `kormake test` passes on linux-debug, linux-dev and
+  linux-ship. core, platform, cli and asset_live pass under `address,undefined` and
+  `thread`, with platform's test of a watched socket (a wake when something arrives, again
+  while it is unread, none once read or forgotten). The demos hash as at milestone 1, tick
+  for tick. `tools/doccheck.sh` reports nothing new.

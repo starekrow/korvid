@@ -3,6 +3,7 @@
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/core/utf8.h"
+#include "korvid/platform/module.h"
 #include "os_stdin.h"
 #include <string.h>
 
@@ -274,6 +275,20 @@ constinit const CliCommandDesc k_commands[] = {
 
 // ---- the module ------------------------------------------------------------------------------------
 
+// The listener, the sessions and stdin, for an idle loop to wait on (KR26): what arrives
+// wakes it, and the tick after reads it here.
+void watch_sockets(Engine& e, CliState& cli) {
+    NetFd fds[kMaxSessions + 1];
+    u32 n = 0;
+    if (cli.listener.is_open()) fds[n++] = cli.listener.fd;
+    for (u32 i = 0; i < cli.session_count; ++i) {
+        const Session& s = cli.sessions[i];
+        if (s.is_stdin) { if (!s.stdin_eof && os_stdin_fd() >= 0 && n < KV_COUNTOF(fds)) fds[n++] = os_stdin_fd(); }
+        else if (s.sock.is_open() && n < KV_COUNTOF(fds)) fds[n++] = s.sock.fd;
+    }
+    platform_wake_set(e, &cli, fds, n);
+}
+
 bool cli_startup(Engine& e, ModuleInstance& self) {
     CliState* s = arena_push<CliState>(self.arena);
     if (!s) return false;
@@ -296,13 +311,15 @@ bool cli_startup(Engine& e, ModuleInstance& self) {
         if (!s->listener.open(s->config.port, s->config.local_only)) return false;
         KV_INFO("cli", "listening on %s:%u", s->config.local_only ? "127.0.0.1" : "0.0.0.0", s->listener.port);
     }
+    watch_sockets(e, *s);
     KV_INFO("cli", "%u commands, %u mounts; stdin %s%s", s->commands.len, s->mounts.len, use_stdin ? "on" : "off", s->config.ascii ? "; ASCII transports" : "");
     return true;
 }
 
-void cli_shutdown(Engine&, ModuleInstance& self) {
+void cli_shutdown(Engine& e, ModuleInstance& self) {
     CliState* s = self.state_as<CliState>();
     if (!s) return;
+    platform_wake_set(e, s, nullptr, 0);
     for (Session& sess : s->sessions) { sess.sock.flush(); sess.sock.close(); sess.sock.out.free(); }
     s->listener.close();
     KV_INFO("cli", "%llu requests, %llu failed, %llu lines dropped", (unsigned long long)s->requests,
@@ -354,6 +371,7 @@ void cli_pump(TickContext& ctx) {
         ++kept;
     }
     cli.session_count = kept;
+    watch_sockets(e, cli);
 }
 
 constinit const SystemDesc k_systems[] = {

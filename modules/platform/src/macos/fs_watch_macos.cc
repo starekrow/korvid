@@ -146,6 +146,7 @@ void fsev_walk_added(void* user, const FsWalkEntry& e) {
 } // namespace
 
 const char* fs_native_name() { return "fsevents"; }
+i64         fs_native_fd(FsNative*) { return -1; } // its callbacks queue; poll takes them
 
 FsNative* fs_native_create() {
     FsNative* n = new (mem_alloc(sizeof(FsNative))) FsNative{};

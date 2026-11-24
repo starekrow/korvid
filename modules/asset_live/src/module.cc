@@ -32,6 +32,7 @@ struct LiveState {
     char           line[1024] = {};
     u32            line_len = 0;
     bool           told_gone = false;
+    bool           watched = false;          // an engine_add_watched_waker: its socket stated to the platform
     AssetLiveStats stats;
 };
 
@@ -118,7 +119,23 @@ bool live_poll(LiveState& s) {
     return s.stats.changed + s.stats.removed != heard;
 }
 
-bool live_wake(Engine&, void* user) { return live_poll(*(LiveState*)user); }
+// What wakes an idle loop for it next (KR26): its connection, the next try while it has
+// none, and soon while what it said is still queued (a connect under way says nothing a
+// read would see).
+void live_watch(LiveState& s) {
+    if (!s.watched) return;
+    NetFd fd = s.sock.is_open() ? s.sock.fd : -1;
+    if (!platform_wake_set(*s.e, &s, &fd, fd >= 0 ? 1 : 0)) engine_want_wake_at(*s.e, time_now() + 0.004);
+    if (!s.sock.is_open()) engine_want_wake_at(*s.e, s.next_try);
+    else if (s.sock.out.len) engine_want_wake_at(*s.e, time_now() + 0.004);
+}
+
+bool live_wake(Engine&, void* user) {
+    LiveState& s = *(LiveState*)user;
+    bool any = live_poll(s);
+    live_watch(s);
+    return any;
+}
 
 // The Input phase, every tick: the same, for a loop that does not pace on demand.
 void live_pump(TickContext& ctx) { live_poll(ctx.state_as<LiveState>()); }
@@ -146,7 +163,12 @@ bool live_startup(Engine& e, ModuleInstance& self) {
         format(s->name, sizeof s->name, "%s", slash ? slash + 1 : s->tree);
     }
 #endif
-    if (!s->off) engine_add_waker(e, live_wake, s);
+    if (!s->off) {
+        // Watched where the platform can watch its socket; else asked at every poll.
+        s->watched = platform_watches(e);
+        if (s->watched) engine_add_watched_waker(e, live_wake, s);
+        else engine_add_waker(e, live_wake, s);
+    }
     return true;
 }
 
@@ -154,6 +176,7 @@ void live_shutdown(Engine& e, ModuleInstance& self) {
     LiveState* s = self.state_as<LiveState>();
     if (!s) return;
     engine_remove_waker(e, live_wake, s);
+    if (s->watched) platform_wake_set(e, s, nullptr, 0);
     if (s->sock.fd >= 0) s->sock.close();
     s->sock.out.free();
 }

@@ -20,13 +20,18 @@ No watch, or one that went away: it tries again every two seconds, and reads the
 again each time, so a watch started later (or restarted on another port) is found.
 
 **Heard at once.** The socket is read in the Input phase of every tick, and also from an
-engine waker (`engine_add_waker`), which the frame loop asks each time it polls the platform
-while a window paced on demand is idle (every 4 ms). A save reaches an idle tool's window in a
-poll, not at its next quarter-second heartbeat. Linux, dev build, `kromescreens` under
-`goldberg watch` (`tools/goldberg/tests/live_numbers.py`, 10 saves each): from the write to the
-screen built again, a screen's `.kim` 9.2 ms median, the prelude `krome/std.kim` 8.9, an icon's
-`.svg` to its shape read again 7.2; and a 512 x 512 texture in arcfire 49.9, of which 18.6 is the
-script's PNG encode (`docs/design/krome-notes.md`, slice 6).
+engine waker that an idle frame loop asks each pass. Where the platform watches sockets
+(`platform_watches`: not Windows yet) it is a watched one (`engine_add_watched_waker`): the
+connection is given to `platform_wake_set`, so a line from goldberg ends the loop's wait,
+and while there is no connection it asks to be woken for the next try
+(`engine_want_wake_at`). Elsewhere the loop polls for it every 4 ms. A save reaches an idle
+tool's window at once, not at its next quarter-second heartbeat. Linux, dev build,
+`kromescreens` under `goldberg watch` (`tools/goldberg/tests/live_numbers.py`, 10 saves
+each), from the write to the screen built again: a screen's `.kim` 6.1 ms median, the
+prelude `krome/std.kim` 10.1, an icon's `.svg` to its shape read again 7.3; and a 512 x 512
+texture in arcfire 49.9, most of it the script's PNG encode (`docs/design/krome-notes.md`,
+slice 6). Slice 6, polling, measured 9.2, 8.9, 7.2 and 49.9; slice 12's wait the same
+within a few milliseconds, with the window waking four times a second, not 250.
 
 ## Using it
 

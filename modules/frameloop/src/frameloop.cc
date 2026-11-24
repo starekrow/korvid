@@ -86,6 +86,7 @@ struct FrameLoopState {
     bool            self_paced = false; // the renderer does not wait for the display: run() does
     f64             run_start  = 0.0;   // when run() began: --run-seconds' end bounds a wait
     bool            waker_said = false; // the line about wakers that make a wait a poll, once
+    bool            woke = false;       // the last wait ended by a wake (a watched socket): the next pass ticks
     // Over the run: frames drawn, and (Pacing::Decoupled) ticks run in passes that drew nothing.
     u64             frames_drawn = 0;
     u64             ticks_alone  = 0;
@@ -450,6 +451,8 @@ bool demand_frame(Engine& engine, FrameLoopState& s) {
     if (IoQueue* io = platform_io(engine)) if (io->pending() || io->completions().len) want = true;
     if (engine_holds(engine) & HoldLoading) want = true;
     if (engine_wake(engine)) want = true; // a module's socket had something (engine_add_waker)
+    if (s.woke) want = true;              // a watched socket: a tick (with its frame), for the CLI's
+    s.woke = false;
     f64 now = time_now();
     if (now - s.demand_last >= k_demand_heartbeat) want = true;
     if (engine.frame_due > 0.0 && now >= engine.frame_due) { want = true; engine.frame_due = 0.0; }
@@ -471,9 +474,10 @@ f64 time_to_next_tick(const TickClock& c) {
 }
 
 // KR26: how long a pass with nothing to do waits for the window: till the heartbeat, a
-// frame asked for at a time (engine_want_frame_at), the next tick when ticks are wanted,
-// or --run-seconds' end. No longer than a poll while I/O is under way, a load holds the
-// sim, or a waker is registered, which is asked only when the loop comes round.
+// frame asked for at a time (engine_want_frame_at), a waker's time (engine_want_wake_at),
+// the next tick when ticks are wanted, or --run-seconds' end. No longer than a poll while
+// I/O is under way, a load holds the sim, or a waker is registered whose sources do not
+// wake the loop (engine_add_waker), which is asked only when the loop comes round.
 f64 idle_wait_time(Engine& engine, FrameLoopState& s, f64 now, bool ticks) {
     f64 wait = s.demand_last + k_demand_heartbeat - now;
     if (ticks) {
@@ -481,13 +485,14 @@ f64 idle_wait_time(Engine& engine, FrameLoopState& s, f64 now, bool ticks) {
         if (t < wait) wait = t;
     }
     if (engine.frame_due > 0.0 && engine.frame_due - now < wait) wait = engine.frame_due - now;
+    if (engine.wake_due > 0.0 && engine.wake_due - now < wait) wait = engine.wake_due - now;
     f64 end = s.run_start + s.config.run_seconds - now; // once passed, the next run_time_check fires it
     if (s.config.run_seconds >= 0.0 && !s.timer_fired && end > 0.0 && end < wait) wait = end;
     IoQueue* io = platform_io(engine);
-    bool poll = (io && (io->pending() || io->completions().len)) || (engine_holds(engine) & HoldLoading) || engine.waker_count;
-    if (engine.waker_count && !s.waker_said) {
-        KV_INFO("frameloop", "%u waker%s registered: an idle wait is a %.0f ms poll", engine.waker_count, engine.waker_count == 1 ? "" : "s",
-                k_demand_poll * 1e3);
+    bool poll = (io && (io->pending() || io->completions().len)) || (engine_holds(engine) & HoldLoading) || engine.wakers_polled;
+    if (engine.wakers_polled && !s.waker_said) {
+        KV_INFO("frameloop", "%u waker%s registered that the platform does not watch: an idle wait is a %.0f ms poll", engine.wakers_polled,
+                engine.wakers_polled == 1 ? "" : "s", k_demand_poll * 1e3);
         s.waker_said = true;
     }
     if (poll && wait > k_demand_poll) wait = k_demand_poll;
@@ -517,14 +522,18 @@ bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept, bool tick_al
     if (draw && shown) {
         s.demand_tail = input ? 1 : s.demand_tail ? s.demand_tail - 1 : 0; // the frame after input's, for what it changed
         engine.frame_wanted = false;
+        s.woke = false; // the frame's ticks read what woke it
         s.demand_last = now;
         return true;
     }
     IoQueue* io = platform_io(engine);
     bool io_busy = io && (io->pending() || io->completions().len);
-    bool tick = tick_always || engine.ticks_wanted || io_busy || engine_work_pending(engine) || now - s.demand_last >= k_demand_heartbeat;
+    // A watched socket's wake: a tick, so a system that reads it in the Input phase (the
+    // CLI's) sees what came without waiting for the heartbeat.
+    bool tick = tick_always || engine.ticks_wanted || io_busy || engine_work_pending(engine) || s.woke || now - s.demand_last >= k_demand_heartbeat;
+    s.woke = false;
     if (!tick) {
-        platform_wait(engine, idle_wait_time(engine, s, now, false));
+        s.woke = platform_wait(engine, idle_wait_time(engine, s, now, false)) == PlatformWoken::Wake;
         slept = true;
         return false;
     }
@@ -543,7 +552,7 @@ bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept, bool tick_al
     bool ticks = engine.ticks_wanted || tick_always;
     f64 wait = engine.frame_wanted && shown ? 0.0 : idle_wait_time(engine, s, time_now(), ticks);
     if (wait > 0.0) {
-        platform_wait(engine, wait);
+        s.woke = platform_wait(engine, wait) == PlatformWoken::Wake;
         if (!ticks) slept = true;
     }
     return false;
@@ -594,7 +603,7 @@ void run(Engine& engine, FrameLoopState& s) {
                 engine_work(engine, k_demand_work);
                 continue;
             }
-            platform_wait(engine, idle_wait_time(engine, s, time_now(), false));
+            s.woke = platform_wait(engine, idle_wait_time(engine, s, time_now(), false)) == PlatformWoken::Wake;
             slept = true;
             run_time_check(s, start);
             continue;

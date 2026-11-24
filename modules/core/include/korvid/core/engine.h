@@ -183,9 +183,12 @@ struct Engine {
     Array<RuntimeKTable*> runtime_ktables;
     f64                   frame_due        = 0.0;   // engine_want_frame_at: the earliest time one is wanted; 0 none
     // engine_add_waker: what a loop pacing on demand asks each time it polls the platform.
-    struct Waker { bool (*fn)(Engine&, void*); void* user; };
+    // `watched`: engine_add_watched_waker's, whose sources wake the loop themselves.
+    struct Waker { bool (*fn)(Engine&, void*); void* user; bool watched; };
     Waker                 wakers[8]        = {};
     u32                   waker_count      = 0;
+    u32                   wakers_polled    = 0;     // of them, the ones not watched: an idle loop polls for them
+    f64                   wake_due         = 0.0;   // engine_want_wake_at: the earliest time a waker wants asking; 0 none
     // The Work cycle (engine_work): whether a unit of the running cycle said more, whether
     // the last cycle ended with more to do, and when the running budget ends.
     bool                  work_more        = false;
@@ -247,13 +250,21 @@ inline void engine_want_ticks(Engine& e) { e.ticks_wanted = true; }
 // A frame at a time (time_now's clock): a caret's next blink. The earliest asked for stands.
 inline void engine_want_frame_at(Engine& e, f64 when) { if (e.frame_due <= 0.0 || when < e.frame_due) e.frame_due = when; }
 
-// Something the engine's events do not see, that a loop pacing on demand looks at each time it
-// polls the platform (every few milliseconds while idle): a socket a module reads (asset_live's
-// connection to goldberg). `fn` does what it does with what arrived and says true when anything
+// Something the engine's events do not see, that an idle loop (on demand, decoupled) looks at
+// each pass, and every 4 ms while one added so is registered: a socket a module reads
+// (asset_live's connection to goldberg). `fn` does what it does with what arrived and says true when anything
 // did; the loop then draws a frame. It must be cheap and never block. Eight at most; false when
 // full. Remove it before the state `user` names goes.
 bool engine_add_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
 void engine_remove_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
+// A waker whose sources wake the loop themselves (KR26): its sockets stated to the platform
+// (platform_wake_set, with `user` as the owner), and any time it must be asked without one
+// of them stirring given to engine_want_wake_at. An idle loop then waits for it as long as
+// for the window. A waker added with engine_add_waker makes every idle wait a 4 ms poll.
+bool engine_add_watched_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
+// The wakers asked by `when` (time_now's clock): a reconnect due, a file settling. The
+// earliest asked for stands until engine_wake, which clears it before it asks them.
+inline void engine_want_wake_at(Engine& e, f64 when) { if (e.wake_due <= 0.0 || when < e.wake_due) e.wake_due = when; }
 // Asks each waker; true when one had something. The frame loop calls it; a loop of its own may.
 bool engine_wake(Engine& e);
 

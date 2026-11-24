@@ -340,6 +340,24 @@ FsWatchBackend FsWatcher::root_backend(u32 id) const {
     return FsWatchBackend::Auto;
 }
 
+i64 FsWatcher::wake_fd() const {
+#if KV_FS_NATIVE
+    if (state && state->native) return fs_native_fd(state->n);
+#endif
+    return -1;
+}
+
+f64 FsWatcher::due() const {
+    if (!state) return 0.0;
+    f64 due = 0.0;
+#if KV_FS_NATIVE
+    if (state->native && fs_native_fd(state->n) < 0) due = time_now() + 0.004; // found only by asking
+#endif
+    for (const FsPollRoot& r : state->roots)
+        if (due <= 0.0 || r.last_walk + r.interval < due) due = r.last_walk + r.interval;
+    return due;
+}
+
 Span<const FsEvent> FsWatcher::poll(bool now) {
     if (!state) return {};
     FsWatchState& s = *state;

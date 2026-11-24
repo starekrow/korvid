@@ -10,6 +10,7 @@
 #include "korvid/core/module.h"
 #include "korvid/platform/io.h"
 #include "korvid/core/os_thread.h"
+#include "korvid/platform/net.h"
 
 namespace kv {
 
@@ -59,6 +60,7 @@ struct PlatformState {
     u32     woken = 0;      // atomic: platform_wake since the last wait took it
     OsMutex wait_lock;
     OsCond  wait_cond;
+    struct WakeWatch* watch = nullptr; // platform_wake_set's thread and its sockets, once one is given
 };
 
 // Where read_asset looks, set before engine_init (the frame loop's --pack and --assets).
@@ -94,5 +96,18 @@ void platform_wake(Engine& e);
 void platform_set_waiter(Engine& e, const PlatformWaiter* w);
 // What ended the waits so far: for a loop's last line, and a measurement.
 PlatformWaits platform_waits(Engine& e);
+
+// The sockets `owner` wants the loop woken by (KR26): a watched waker's (owner: the waker's
+// user, engine_add_watched_waker), the CLI's. The set replaces what the owner said before;
+// none (n 0) forgets it. The platform watches every owner's from one thread of its own,
+// blocked in poll, started when the first socket is given, and calls platform_wake when one
+// can be read. A socket that woke it is watched again at the next platform_wait (after the
+// pass that should have read it), so one nobody drains does not spin the thread. False
+// where the platform cannot watch (platform_watches) or the sets pass 64 sockets: the
+// owner then asks to be woken soon (engine_want_wake_at), as a poll would.
+bool platform_wake_set(Engine& e, const void* owner, const NetFd* fds, u32 n);
+// Whether platform_wake_set watches here: false on Windows until slice 12's milestone 4. A
+// waker picks engine_add_watched_waker or engine_add_waker by it.
+bool platform_watches(Engine& e);
 
 } // namespace kv

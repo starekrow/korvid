@@ -138,6 +138,7 @@ void drop_tree(FsNative* n, u32 root, const char* rel) {
 } // namespace
 
 const char* fs_native_name() { return "inotify"; }
+i64         fs_native_fd(FsNative* n) { return n ? n->fd : -1; }
 
 FsNative* fs_native_create() {
     int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);

@@ -2076,18 +2076,29 @@ bool name_list_next(const char*& cursor, char* out, usize cap) {
     }
 }
 
-bool engine_add_waker(Engine& e, bool (*fn)(Engine&, void*), void* user) {
+namespace {
+bool add_waker(Engine& e, bool (*fn)(Engine&, void*), void* user, bool watched) {
     if (!fn || e.waker_count >= KV_COUNTOF(e.wakers)) return false;
-    e.wakers[e.waker_count++] = Engine::Waker{fn, user};
+    e.wakers[e.waker_count++] = Engine::Waker{fn, user, watched};
+    if (!watched) ++e.wakers_polled;
     return true;
 }
+} // namespace
+
+bool engine_add_waker(Engine& e, bool (*fn)(Engine&, void*), void* user) { return add_waker(e, fn, user, false); }
+bool engine_add_watched_waker(Engine& e, bool (*fn)(Engine&, void*), void* user) { return add_waker(e, fn, user, true); }
 
 void engine_remove_waker(Engine& e, bool (*fn)(Engine&, void*), void* user) {
     for (u32 i = 0; i < e.waker_count; ++i)
-        if (e.wakers[i].fn == fn && e.wakers[i].user == user) { e.wakers[i] = e.wakers[--e.waker_count]; return; }
+        if (e.wakers[i].fn == fn && e.wakers[i].user == user) {
+            if (!e.wakers[i].watched) --e.wakers_polled;
+            e.wakers[i] = e.wakers[--e.waker_count];
+            return;
+        }
 }
 
 bool engine_wake(Engine& e) {
+    e.wake_due = 0.0; // each waker says again when it wants asking
     bool any = false;
     for (u32 i = 0; i < e.waker_count; ++i) any |= e.wakers[i].fn(e, e.wakers[i].user);
     return any;

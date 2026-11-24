@@ -34,6 +34,9 @@ bool        fs_native_add(FsNative* n, u32 root, const char* dir);
 void        fs_native_remove(FsNative* n, u32 root);
 void        fs_native_poll(FsNative* n, FsSink& sink);
 const char* fs_native_name();
+// A descriptor that can be read when the backend has news (inotify's), or -1 where its news
+// comes some other way and is found only by polling (FSEvents', ReadDirectoryChangesW's).
+i64         fs_native_fd(FsNative* n);
 // How late the native backend can report a change, in seconds (FsWatcher::lateness).
 #if defined(__APPLE__)
 #define KV_FS_NATIVE_LATENESS 0.05 // FSEvents: about 11 ms, measured; four times that

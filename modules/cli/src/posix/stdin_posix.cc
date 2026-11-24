@@ -7,6 +7,8 @@ namespace kv {
 
 bool os_stdin_is_terminal() { return isatty(STDIN_FILENO) != 0; }
 
+i64 os_stdin_fd() { return STDIN_FILENO; }
+
 i32 os_stdin_read(void* buf, u32 cap) {
     for (;;) {
         pollfd p{STDIN_FILENO, POLLIN, 0};
