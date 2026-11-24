@@ -295,6 +295,8 @@ u32 FsWatcher::add_root(const char* dir, FsWatchBackend how) {
         state->native_roots.push(id);
         return id;
     }
+#else
+    (void)native; // no native backend here (iOS): every root is polled
 #endif
     FsPollRoot r{};
     r.id  = id;

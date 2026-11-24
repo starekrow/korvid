@@ -396,12 +396,16 @@ void test_io_long_ranged_stat(kv::TestCtx& c) {
     char dir[200];
     KV_CHECK(c, io_make_temp_dir("korvid-io10", dir, sizeof dir));
 
-    // Four directories of 230 bytes under the temporary one, and a file: about 1,000 bytes.
+    // Directories of up to 230 bytes under the temporary one, and a file: 1,000 bytes in all
+    // however long the temporary directory is (an iOS Simulator's is 125), under Apple's
+    // 1,024 (PATH_MAX).
     char deep[1100];
     usize n = (usize)format(deep, sizeof deep, "%s", dir);
-    for (u32 level = 0; level < 4; ++level) {
+    constexpr usize kDirEnd = 1000 - (sizeof "/far.txt" - 1);
+    for (u32 level = 0; n + 1 < kDirEnd; ++level) {
         deep[n++] = '/';
-        for (u32 i = 0; i < 230; ++i) deep[n++] = (char)('a' + (level + i) % 26);
+        usize len = kDirEnd - n < 230 ? kDirEnd - n : 230;
+        for (usize i = 0; i < len; ++i) deep[n++] = (char)('a' + (level + i) % 26);
         deep[n] = 0;
     }
     KV_CHECK(c, io_make_dirs(deep));
