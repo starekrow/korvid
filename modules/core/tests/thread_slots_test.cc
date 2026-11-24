@@ -12,6 +12,14 @@
 #include <sys/resource.h>
 #include <unistd.h>
 #endif
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
+#include <pthread.h>
+#endif
+#endif
 
 namespace {
 
@@ -33,13 +41,22 @@ void hold(void* arg) {
 }
 
 // A thread of the program's own asks for the audio class, and says what it got.
-struct AudioClass { bool granted = false, marked = false; int policy = -1; };
+struct AudioClass { bool granted = false, marked = false, constrained = false; int policy = -1; };
 void enter_audio_class(void* arg) {
     AudioClass& a = *(AudioClass*)arg;
     a.granted = os_thread_enter_audio_class();
     a.marked = thread_is_realtime();
 #if defined(__linux__) && !defined(__ANDROID__)
     a.policy = sched_getscheduler(0) & ~SCHED_RESET_ON_FORK;
+#elif defined(__APPLE__) && TARGET_OS_OSX
+    // What the kernel holds for the thread. is_default goes both ways: in, true asks for
+    // the default policy instead; out, true says the thread has none of its own.
+    thread_time_constraint_policy_data_t got{};
+    mach_msg_type_number_t count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
+    boolean_t is_default = 0;
+    a.constrained = thread_policy_get(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY,
+                                      (thread_policy_t)&got, &count, &is_default) == KERN_SUCCESS &&
+                    !is_default && got.period != 0;
 #endif
     thread_set_realtime(false); // the thread's exit gives its memory slot back
 }
@@ -48,7 +65,8 @@ void enter_audio_class(void* arg) {
 
 // os_thread_enter_audio_class marks the thread for the allocators whatever the OS says;
 // on Linux the thread is SCHED_FIFO exactly when it says yes, and with RLIMIT_RTPRIO at 0
-// (a desktop session's) it says no unless the process may ignore the limit.
+// (a desktop session's) it says no unless the process may ignore the limit. macOS grants
+// the time constraint policy to any process, and the kernel holds it afterwards.
 void test_thread_audio_class(kv::TestCtx& c) {
     using namespace kv;
     c.begin("thread audio class");
@@ -65,6 +83,8 @@ void test_thread_audio_class(kv::TestCtx& c) {
         if (rl.rlim_cur == 0 && geteuid() != 0) KV_CHECK(c, !a.granted);
         KV_INFO("test", "audio class: %s (RLIMIT_RTPRIO %lld)", a.granted ? "granted, SCHED_FIFO" : "refused",
                 rl.rlim_cur == RLIM_INFINITY ? -1ll : (long long)rl.rlim_cur);
+#elif defined(__APPLE__) && TARGET_OS_OSX
+        KV_CHECK(c, a.granted && a.constrained);
 #endif
     }
     KV_CHECK(c, !thread_is_realtime()); // the caller's thread is untouched

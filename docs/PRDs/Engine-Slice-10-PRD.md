@@ -349,7 +349,7 @@ setting another replaces it, and null takes it away. In ship it returns false.
    in). Tests in `modules/platform/tests`: a 1,000-byte path read and written, the first
    64 KB of a 16 MB file, a stat of a file, a directory and a missing path, each under
    `--io sync` and the ring.
-4. **The audio class** (KR7). Linux built and run; Windows and macOS written.
+4. **The audio class** (KR7). Linux built and run; macOS run Nov 23, the policy read back from the kernel; Windows written.
 5. **Sanitizers** (KR2). The toolchain table, the option, the build directory; then the
    engine's tests under each, and the fixes.
 6. **`wrapv`** (KR8). Blackwing's `flac.cc` drops its GCC pragma.
