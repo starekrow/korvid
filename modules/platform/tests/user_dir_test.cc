@@ -1,6 +1,7 @@
 // The user's three directories (KR24): settings, data and cache, each made under
 // <org>/<app>/. On Linux, the XDG base directories when set to absolute paths, their
-// defaults under $HOME otherwise, a relative one ignored as the spec says.
+// defaults under $HOME otherwise, a relative one ignored as the spec says. On macOS,
+// settings and data together in ~/Library/Application Support, the cache in ~/Library/Caches.
 #include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
 #include "korvid/core/engine.h"
@@ -8,6 +9,9 @@
 #include "korvid/core/test.h"
 #include <stdlib.h>
 #include <string.h>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 
 void test_user_dirs(kv::TestCtx& c) {
     using namespace kv;
@@ -59,6 +63,26 @@ void test_user_dirs(kv::TestCtx& c) {
     }
     if (home_copy[0]) setenv("HOME", home_copy, 1);
     for (u32 i = 0; i < 3; ++i) { if (had[i]) setenv(vars[i], saved[i], 1); else unsetenv(vars[i]); }
+    KV_CHECK(c, io_remove_tree(root));
+#elif defined(__APPLE__) && TARGET_OS_OSX
+    char root[200], want[400];
+    KV_CHECK(c, io_make_temp_dir("korvid-dirs", root, sizeof root));
+    char home_copy[512] = {};
+    if (const char* h = getenv("HOME")) format(home_copy, sizeof home_copy, "%s", h);
+    setenv("HOME", root, 1);
+    {
+        const ModuleDesc* const list[] = {&platform_module};
+        Engine e;
+        KV_CHECK(c, engine_init(e, list));
+        format(want, sizeof want, "%s/Library/Application Support/Org/App/", root);
+        KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Settings, "Org", "App"), want) && io_is_dir(want));
+        KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Data, "Org", "App"), want));
+        KV_CHECK(c, !strcmp(platform_pref_path(e, "Org", "App"), want)); // the data directory
+        format(want, sizeof want, "%s/Library/Caches/Org/App/", root);
+        KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Cache, "Org", "App"), want) && io_is_dir(want));
+        engine_shutdown(e);
+    }
+    if (home_copy[0]) setenv("HOME", home_copy, 1); else unsetenv("HOME");
     KV_CHECK(c, io_remove_tree(root));
 #endif
 }

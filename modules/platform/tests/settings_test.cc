@@ -14,6 +14,9 @@
 #if !defined(_WIN32)
 #include <unistd.h>
 #endif
+#if defined(__APPLE__)
+#include <mach-o/dyld.h> // _NSGetExecutablePath: Apple has no /proc
+#endif
 
 namespace {
 
@@ -43,9 +46,14 @@ bool file_has(const char* path, const char* text) {
 // with KORVID_SETTINGS_STALL set to `stall` (or not).
 bool start_child(Process& p, const char* dir, const char* key, const char* value, const char* count, const char* stall) {
     static char self[1024];
+#if defined(__APPLE__)
+    uint32_t cap = sizeof self;
+    if (_NSGetExecutablePath(self, &cap) != 0) return false;
+#else
     ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
     if (n <= 0) return false;
     self[n] = 0;
+#endif
     const char* argv[] = {self, "--settings-child", dir, key, value, count};
     char env[64];
     format(env, sizeof env, "KORVID_SETTINGS_STALL=%s", stall ? stall : "");

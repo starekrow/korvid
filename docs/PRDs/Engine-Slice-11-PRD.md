@@ -317,10 +317,12 @@ starts from `slice-10`. As above, and:
 | X11, on demand, minimized at 8, restored at 24 | hidden at 9, shown at 25 | 19 | 33, 16 of them while hidden |
 | Wayland, decoupled, minimized at 120 | hidden at 121 | 1 | 360 in 6 s |
 | X11, continuous, minimized at 120, restored at 360 | hidden at 121, shown at 361 | none while hidden | 480 in 8 s |
+| macOS (macos-dev, Nov 23), decoupled, minimized at 120, restored at 240 | hidden at 122, shown at 242 | 2 | 662 in 12 s |
 
 - **Not checked:** a window minimized by hand on Wayland, which SDL reports as occluded
-  when GNOME suspends the surface, and covered windows on any desktop; Windows, macOS and
-  the phones, written and not compiled. `DWMWA_CLOAKED` (another virtual desktop) is not
+  when GNOME suspends the surface, and covered windows on any desktop; Windows and the
+  phones, written and not compiled. macOS is SDL3's backend, Linux's: decoupled with
+  `--want-ticks` drew 1 frame in 600 ticks over 10 s there. `DWMWA_CLOAKED` (another virtual desktop) is not
   asked on Windows.
 - **Seen, not caused here:** continuous pacing under XWayland draws at 1 fps for about
   3 s after a restore. Presents wait about a second each, as they do for a window the X
@@ -394,8 +396,9 @@ directory once asked for, as it kept the data one. Linux honours an `XDG_*` vari
 when it is an absolute path, as the base directory spec says. Android's cache directory is
 the files directory's sibling, `cache`, which is `getCacheDir()`. Test (`user dirs`, Linux):
 all three under set variables, then under `$HOME` with two unset and one relative; each
-made; `platform_pref_path` is the data one. Windows, Apple and Android written, not
-compiled.
+made; `platform_pref_path` is the data one. On macos-dev (Nov 23) the test's macOS part:
+`$HOME` set, settings and data in `Library/Application Support/Org/App/`, the cache in
+`Library/Caches/Org/App/`. Windows, iOS and Android written, not compiled.
 
 **Milestone 7, the settings store (KR24, 2): built Nov 23, 2026.** As above, and:
 
@@ -417,7 +420,9 @@ compiled.
   each leaving the old value; not killed, the new one; two at once, each setting its own
   key forty times with a flush after each, and both keys at forty after. On linux-debug,
   linux-dev and linux-ship (ship without the kills, which need the hook), and under
-  `address,undefined` and `thread`. Windows and Apple written, not compiled.
+  `address,undefined` and `thread`. On macos-dev, kills included, once the test found
+  itself with `_NSGetExecutablePath` (Apple has no `/proc`). Windows and iOS written, not
+  compiled.
 
 **Milestone 8, runtime event types (KR19, 1): built Nov 23, 2026.** As above. A runtime
 type takes the next id; the bus makes its stream as anything is emitted into it, and
