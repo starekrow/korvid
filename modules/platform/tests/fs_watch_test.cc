@@ -1,5 +1,6 @@
 #include "korvid/platform/fs_watch.h"
 #include "korvid/platform/io.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/format.h"
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
@@ -262,6 +263,52 @@ void run_links(TestCtx& c, FsWatchBackend backend) {
 }
 #endif
 
+// set_wake (KR26): where the native backend has no descriptor, a write calls the wake once,
+// a second before the poll does not call it again, the poll's taking of it lets the next
+// call, and none comes once it is cleared; due() asks for no poll while a wake is set.
+// Where there is a descriptor (inotify), set_wake is false and wake_fd says.
+void wake_bump(void* user) { atomic_fetch_add((u32*)user, 1u, MO_ACQ_REL); }
+
+bool wake_until(u32* calls, u32 want) {
+    for (u32 i = 0; i < 2000; ++i) { if (atomic_load(calls, MO_ACQUIRE) >= want) return true; time_sleep(0.001); }
+    return false;
+}
+
+void run_wake(TestCtx& c) {
+    char dir[256];
+    KV_CHECK(c, io_make_temp_dir("kv-fswatch-wake", dir, sizeof dir));
+    FsWatcher w;
+    KV_CHECK(c, w.init(FsWatchBackend::Native) && w.add_root(dir) != ~0u);
+    u32 calls = 0;
+    if (w.wake_fd() >= 0) {
+        KV_CHECK(c, !w.set_wake(wake_bump, &calls));
+    } else {
+        KV_CHECK(c, w.due() > 0.0);                 // no wake: a poll soon
+        KV_CHECK(c, w.set_wake(wake_bump, &calls));
+        KV_CHECK(c, w.due() == 0.0);                // a wake, no polled root: nothing to ask for
+        KV_CHECK(c, atomic_load(&calls, MO_ACQUIRE) == 0);
+        KV_CHECK(c, write_text(dir, "a.txt", "a"));
+        KV_CHECK(c, wake_until(&calls, 1));
+        KV_CHECK(c, write_text(dir, "b.txt", "b")); // not polled yet: no second call
+        time_sleep(w.lateness() + 0.1);
+        KV_CHECK(c, atomic_load(&calls, MO_ACQUIRE) == 1);
+        Heard h;
+        drain(w, h);
+        KV_CHECK(c, h.has("added a.txt") && h.has("added b.txt"));
+        KV_CHECK(c, write_text(dir, "c.txt", "c")); // polled: the next news calls again
+        KV_CHECK(c, wake_until(&calls, 2));
+        drain(w, h);
+        KV_CHECK(c, w.set_wake(nullptr, nullptr) == false && w.due() > 0.0);
+        u32 had = atomic_load(&calls, MO_ACQUIRE);
+        KV_CHECK(c, write_text(dir, "d.txt", "d"));
+        time_sleep(w.lateness() + 0.1);
+        KV_CHECK(c, atomic_load(&calls, MO_ACQUIRE) == had); // cleared: never called
+        h.free();
+    }
+    w.free();
+    io_remove_tree(dir);
+}
+
 } // namespace
 
 void test_fs_watch(kv::TestCtx& c) {
@@ -276,6 +323,8 @@ void test_fs_watch(kv::TestCtx& c) {
         format(name, sizeof name, "%s", w.backend_name());
         w.free();
         run(c, FsWatchBackend::Native, name);
+        c.begin("fs_watch wake");
+        run_wake(c);
     } else {
         KV_CHECK(c, !w.init(FsWatchBackend::Native) && w.init(FsWatchBackend::Auto) && strcmp(w.backend_name(), "poll") == 0);
         w.free();

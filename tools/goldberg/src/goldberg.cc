@@ -1188,6 +1188,9 @@ int host_watch_sync(lua_State* L) {
     return 0;
 }
 
+// The watcher's news, from the OS's thread (FsWatcher::set_wake): the window's wait ends.
+void watcher_news(void* engine) { platform_wake(*(Engine*)engine); }
+
 // host.watch(mode): "inotify", "poll", "native", "auto" or "none". Starts the watcher and
 // puts every root under it. Returns the backend's name.
 int host_watch(lua_State* L) {
@@ -1203,6 +1206,14 @@ int host_watch(lua_State* L) {
         return luaL_error(L, "--watch %s: this platform has no such watcher", mode);
     }
     for (Root& r : s.roots) if (r.watched) r.watch = s.watcher.add_root(r.dir); // a root that is not there yet is simply not watched
+    // The window waits: a backend with no descriptor (ReadDirectoryChangesW, FSEvents) wakes
+    // it, so goldberg_watch need not ask for a poll 4 ms ahead (KR26).
+    if (s.window && s.watched) {
+        lua_getfield(L, LUA_REGISTRYINDEX, "goldberg.engine");
+        Engine* e = (Engine*)lua_touserdata(L, -1);
+        lua_pop(L, 1);
+        if (e) s.watcher.set_wake(watcher_news, e);
+    }
     // A held file waits at least past what the watcher can still be about to say.
     s.watch_floor = strcmp(s.watcher.backend_name(), "poll") == 0 ? 0.3 : s.watcher.lateness() * 2.0;
     lua_pushstring(L, s.watcher.backend_name());
@@ -1976,6 +1987,7 @@ void goldberg_shutdown(Engine& e, ModuleInstance& self) {
     if (s->window) {
         engine_remove_waker(e, goldberg_wake, s);
         if (s->watched) platform_wake_set(e, s, nullptr, 0);
+        s->watcher.set_wake(nullptr, nullptr); // no call from the OS's thread once the engine goes
         stop_own_ui(*s);
         // Ended some other way than by its close (the CLI's quit, a signal): the state saved.
         if (s->active && s->L && !s->failed) call_app(*s, e, "quit", 0, 0);

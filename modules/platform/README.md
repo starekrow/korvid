@@ -43,8 +43,11 @@ header says what holds on both backends. The backend is chosen per root: on a sh
 (`io_path_is_remote`: NFS, SMB, any FUSE mount) the OS hears only this machine's writes,
 so a watcher made with `Auto` polls such a root every `remote_interval` seconds (5), and
 `add_root(dir, FsWatchBackend::Poll)` polls one the test misses; `root_backend(id)` says
-which a root got. For a loop that waits, `wake_fd()` is inotify's descriptor (else -1) and
-`due()` the time by which `poll()` should next be called for news no descriptor tells of.
+which a root got. For a loop that waits, `wake_fd()` is inotify's descriptor (else -1);
+where there is none, `set_wake(fn, user)` has ReadDirectoryChangesW (a one-shot wait in the
+thread pool on each root's read) or FSEvents (its queue's callback) call `fn` when there is
+news, once till a poll takes it; and `due()` is the time by which `poll()` should next be
+called for news neither tells of (a polled root's walk).
 
 **Processes** (`process.h`). `Process::spawn` takes an argument vector, a working
 directory and additions to the environment; `running`, `read_out`, `read_err` and `kill`

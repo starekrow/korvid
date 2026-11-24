@@ -1,6 +1,6 @@
 // Korvid platform: watching directory trees. A watcher is told its roots and polled; it
-// never blocks and never spawns a thread, as the sockets do not. Whoever owns one polls
-// it once a tick.
+// never blocks and never spawns a thread of its own, as the sockets do not (set_wake's
+// calls come on the OS's). Whoever owns one polls it once a tick.
 //
 // Two backends. The native one asks the OS (inotify on Linux, ReadDirectoryChangesW on
 // Windows, FSEvents on macOS) and hears of a change as it is made. The polling one walks the trees at an interval and compares sizes and
@@ -64,10 +64,18 @@ struct FsWatcher {
     f64  lateness() const;
     // For a loop that waits (KR26): a descriptor that can be read when the native backend
     // has news (inotify's), else -1; and the time (time_now's clock) by which poll() should
-    // next be called for news that no descriptor tells of (a polled root's next walk, or
-    // soon when the native backend has no descriptor), 0 when there is none.
+    // next be called for news that no descriptor or wake tells of (a polled root's next
+    // walk, or soon when the native backend has neither), 0 when there is none.
     i64  wake_fd() const;
     f64  due() const;
+    // The other way a native backend can tell a waiting loop (KR26): fn(user) is called, on
+    // a thread of the OS's (ReadDirectoryChangesW's wait, FSEvents' queue), when it has news
+    // for poll(). Once for each root's news until the poll after it takes it, so nobody
+    // polling does not mean calls for ever. True where the backend calls it; false where
+    // wake_fd() says instead (inotify) or no root is native, and nothing is called. Null
+    // clears it: once that returns, no call is under way and none is to come. Set it again
+    // after init; free() clears it.
+    bool set_wake(void (*fn)(void* user), void* user);
 
     // Watches dir and everything under it. The id, or ~0u if the directory cannot be
     // read. Ids are not reused while the watcher lives. `how`: Auto is the watcher's own

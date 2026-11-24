@@ -94,9 +94,13 @@ struct FsevRoot {
 
 struct FsNative {
     dispatch_queue_t  queue = nullptr;
-    os_unfair_lock    lock = OS_UNFAIR_LOCK_INIT; // guards heard
+    os_unfair_lock    lock = OS_UNFAIR_LOCK_INIT; // guards heard, wake and told
     FsevQueue        heard, taking;              // taking: poll's side of the swap
     Array<FsevRoot*>  roots;
+    // set_wake's (KR26): called from the callback after it queues, once till a poll takes it.
+    void (*wake)(void* user) = nullptr;
+    void* wake_user = nullptr;
+    bool  told = false;
 };
 
 namespace {
@@ -107,7 +111,11 @@ void fsev_heard(ConstFSEventStreamRef, void* info, size_t count, void* paths, co
     const char* const* list = (const char* const*)paths;
     os_unfair_lock_lock(&n->lock);
     for (size_t i = 0; i < count; ++i) n->heard.push(r->id, (u32)flags[i], list[i]);
+    void (*wake)(void*) = n->told ? nullptr : n->wake;
+    void* user = n->wake_user;
+    if (wake) n->told = true;
     os_unfair_lock_unlock(&n->lock);
+    if (wake) wake(user); // outside the lock: the wake takes locks of its own
 }
 
 void fsev_nothing(void*) {}
@@ -146,7 +154,7 @@ void fsev_walk_added(void* user, const FsWalkEntry& e) {
 } // namespace
 
 const char* fs_native_name() { return "fsevents"; }
-i64         fs_native_fd(FsNative*) { return -1; } // its callbacks queue; poll takes them
+i64         fs_native_fd(FsNative*) { return -1; } // its callbacks queue, and wake (set_wake); poll takes them
 
 FsNative* fs_native_create() {
     FsNative* n = new (mem_alloc(sizeof(FsNative))) FsNative{};
@@ -212,10 +220,22 @@ void fs_native_remove(FsNative* n, u32 root) {
     }
 }
 
+bool fs_native_set_wake(FsNative* n, void (*fn)(void* user), void* user) {
+    os_unfair_lock_lock(&n->lock);
+    n->wake = fn;
+    n->wake_user = user;
+    n->told = false;
+    os_unfair_lock_unlock(&n->lock);
+    // The callbacks run on this serial queue: one under way with the old wake finishes first.
+    dispatch_sync_f(n->queue, nullptr, fsev_nothing);
+    return true;
+}
+
 void fs_native_poll(FsNative* n, FsSink& sink) {
     os_unfair_lock_lock(&n->lock);
     FsevQueue got = n->heard;
     n->heard = n->taking;
+    n->told = false; // what was told of is taken: the next news wakes again
     os_unfair_lock_unlock(&n->lock);
     n->taking = got;
     for (u32 i = 0; i < got.len; ++i) {

@@ -4,7 +4,7 @@
 # saves its rule file. Exits as the demo does.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
-root=$(cd "$here/../../../.." && pwd)
+root=$(cd "$here/../../../.." && { pwd -W 2>/dev/null || pwd; }) # C:/... under Git Bash, which the program takes
 target=${1:-linux-dev}
 work="$root/build/$target/bench/window"
 rm -rf "$work"

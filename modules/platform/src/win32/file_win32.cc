@@ -217,10 +217,23 @@ bool os_path_is_remote(const char* path) {
     return remote;
 }
 
+// A replace can be refused for a moment when something outside the process has just opened
+// the file without delete sharing (an antivirus scanning what was written, the indexer):
+// access denied or a sharing violation (seen: the settings store's two writers, about one
+// write in a thousand, through on the first retry). Asked again every 5 ms for half a second
+// before it is a failure; one that is really refused (a directory, a read-only file) costs
+// that half second. errno says why, as rename's does. Paths of any length (WidePath).
 bool os_rename(const char* from, const char* to) {
-    wchar_t wf[KV_WIDE_PATH_MAX], wt[KV_WIDE_PATH_MAX];
-    if (!widen(from, wf, KV_WIDE_PATH_MAX) || !widen(to, wt, KV_WIDE_PATH_MAX)) return false;
-    return MoveFileExW(wf, wt, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    WidePath wf, wt;
+    i32 err = 0;
+    if (!wf.set(from, &err) || !wt.set(to, &err)) { errno = err; return false; }
+    for (u32 attempt = 0;; ++attempt) {
+        if (MoveFileExW(wf.w, wt.w, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+        DWORD e = GetLastError();
+        bool held = e == ERROR_ACCESS_DENIED || e == ERROR_SHARING_VIOLATION || e == ERROR_LOCK_VIOLATION;
+        if (!held || attempt == 100) { errno = errno_from_win32(e); return false; }
+        Sleep(5);
+    }
 }
 
 bool os_current_dir(char* out, u32 cap) {

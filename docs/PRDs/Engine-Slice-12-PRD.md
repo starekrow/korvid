@@ -344,11 +344,39 @@ and:
   median, 0.22 the least; two took 6.7 and 18.4 ms, with no pattern to them.
 - **`kromescreens` connected to `goldberg watch`**, 12 s still: 50 waits (window 0, a wake 1,
   the time 49), no poll, as Linux's 48.
-- **Not done: goldberg's own window still polls on Windows.** Still for 12 s, it waited
-  2,594 times, nearly all by the time. ReadDirectoryChangesW has no descriptor to give, so
-  `FsWatcher::due` asks for a poll 4 ms ahead, as milestone 3 chose for it and FSEvents.
-  Each root's overlapped read does signal an event when it finishes, which a wait could
-  use.
+- **goldberg's own window, which still polled.** Still for 12 s, it waited 2,594 times,
+  nearly all by the time: ReadDirectoryChangesW has no descriptor to give, so
+  `FsWatcher::due` asked for a poll 4 ms ahead, as milestone 3 chose for it and FSEvents.
+  Now **`FsWatcher::set_wake(fn, user)`**: a native backend without a descriptor calls `fn`
+  from the OS's thread when it has news, once till a poll takes it, and `due()` no longer
+  asks for 4 ms while one is set. ReadDirectoryChangesW: a one-shot
+  `RegisterWaitForSingleObject` on each root's read event, registered again by the poll
+  that takes a fired one (one that has not fired keeps waiting on the same event), and
+  unregistered, blocking till a call under way ends, before a root goes. FSEvents: its
+  serial queue's callback calls it after queueing; clearing it syncs with the queue.
+  inotify: false, its descriptor as before. goldberg's window sets it when its session
+  starts the watcher (`platform_wake` from any thread) and clears it at shutdown.
+  - Still for 12 s: 27 waits (a wake 2, the time 25), from 2,594.
+  - A save to the window (`screens.lua` changed, then put back; three runs each), save to
+    cooked copy: 414 and 62 ms, then 16 to 31, against 398 and 62, then 14 to 31 with the
+    wake left unset. The cook is most of it, and no save is later; 16 s of each run waited
+    about 45 times against about 2,100.
+  - Test (`fs_watch wake`): a write calls the wake once; a second before the poll does not;
+    after the poll the next does; none once cleared; `due()` 0 with a wake and no polled
+    root, soon without. On Linux `set_wake` is false and `wake_fd` says. macOS's is written,
+    not compiled here.
+- **Found on the way: the settings store's replace refused for a moment.** Run ten times,
+  the two-writer settings test failed twice: a child's `MoveFileExW` onto `settings.json`
+  got access denied (error 5) and the child gave up ("errno 0": the rename's reason was
+  never passed on). Retried, it went through 5 ms later, both times. Something outside the
+  process holds a file just written without delete sharing (an antivirus, the indexer).
+  `os_rename` on Windows asks again every 5 ms for half a second on access denied, a
+  sharing or a lock violation, sets errno, and takes paths of any length (`WidePath`); the
+  store says the rename's errno. 70 runs since, none failed.
+- **goldberg's window demo** (`tools/goldberg/tests/window/run.sh windows-dev`) passes. Its
+  runner gave goldberg Git Bash's `/c/...` paths, which a Windows program cannot open, so
+  the demo never ran; it gives `C:/...` now (`pwd -W`). goldberg exited 0 when its root was
+  not a directory, which hid that; left as it is.
 - **Not measured:** a save's time to the window (`live_numbers.py`; there is no Python on
   this machine).
 - **Verified, Nov 24, 2026.** `kormake test` passes on windows-debug, windows-dev and

@@ -2,6 +2,8 @@
 // under it (bWatchSubtree), overlapped, so a poll only asks whether the read has finished
 // and never waits; a finished read is taken apart and the next one started at once, so
 // what happens between polls queues in the OS's buffer, as inotify's does.
+// With a wake (FsWatcher::set_wake), each pending read has a one-shot wait in the thread
+// pool on its event, which calls the wake as the read finishes (KR26).
 //
 // Windows says what changed by name but not whether the name was a directory, and once a
 // thing is gone it cannot be asked. So each root keeps the directories it knows of: a name
@@ -11,6 +13,7 @@
 // (a read that finishes with nothing in it) is Rescan, as inotify's IN_Q_OVERFLOW is.
 #include "../fs_watch_internal.h"
 #include "../os_file.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/core/map.h"
@@ -47,10 +50,18 @@ struct FsWinRoot {
     Array<char*> dirs;               // directories under the root, relative, '/' separated
     Map<u64, u32> dir_at;            // a directory's path hash -> its index in dirs: a big tree's
                                      // thousands of directories are not each compared with all
+    // set_wake's (KR26): a one-shot wait on ov.hEvent, the thread pool's, that calls the
+    // wake when the pending read finishes. Spent once it fires (`fired`), and registered
+    // again by the poll that takes the read, so a root nobody polls wakes nobody twice.
+    struct FsNative* owner = nullptr;
+    HANDLE      wait = nullptr;
+    u32         fired = 0;           // atomic: the wait called the wake
 };
 
 struct FsNative {
     Array<FsWinRoot*> roots;
+    void (*wake)(void* user) = nullptr; // written only while no root has a wait
+    void* wake_user = nullptr;
 };
 
 namespace {
@@ -137,7 +148,34 @@ bool arm(FsWinRoot& r) {
     return true;
 }
 
+// The pool's thread: the read finished (its event is set). Once, till registered again.
+VOID CALLBACK root_ready(PVOID ctx, BOOLEAN) {
+    FsWinRoot& r = *(FsWinRoot*)ctx;
+    atomic_store(&r.fired, 1u, MO_RELEASE);
+    r.owner->wake(r.owner->wake_user);
+}
+
+// Registers the root's wait when there is a wake and a read to wait for. An event already
+// set (the read finished before this) fires it at once, so nothing between is missed.
+void watch(FsWinRoot& r) {
+    if (!r.owner->wake || !r.pending || r.gone || r.wait) return;
+    atomic_store(&r.fired, 0u, MO_RELEASE);
+    if (!RegisterWaitForSingleObject(&r.wait, r.ov.hEvent, root_ready, &r, INFINITE, WT_EXECUTEONLYONCE)) {
+        r.wait = nullptr;
+        KV_WARN("platform", "fs_watch: no wait on '%s' (error %lu): it is heard at the next poll", r.dir, (unsigned long)GetLastError());
+    }
+}
+
+// Unregisters it, waiting out a call under way: after this nothing of the root's runs on
+// the pool's thread.
+void unwatch(FsWinRoot& r) {
+    if (!r.wait) return;
+    UnregisterWaitEx(r.wait, INVALID_HANDLE_VALUE);
+    r.wait = nullptr;
+}
+
 void close_root(FsWinRoot* r) {
+    unwatch(*r); // before the event and the root go
     if (r->handle != INVALID_HANDLE_VALUE) {
         if (r->pending) {
             CancelIoEx(r->handle, &r->ov);
@@ -248,7 +286,7 @@ void poll_root(FsWinRoot& r, FsSink& sink) {
 } // namespace
 
 const char* fs_native_name() { return "readdirectorychanges"; }
-i64         fs_native_fd(FsNative*) { return -1; } // completions come to its own port
+i64         fs_native_fd(FsNative*) { return -1; } // a finished read sets its event: set_wake waits on it
 
 FsNative* fs_native_create() { return new (mem_alloc(sizeof(FsNative))) FsNative{}; }
 
@@ -264,6 +302,7 @@ bool fs_native_add(FsNative* n, u32 root, const char* dir) {
     while (len > 1 && (dir[len - 1] == '/' || dir[len - 1] == '\\')) --len;
     FsWinRoot* r = new (mem_alloc(sizeof(FsWinRoot))) FsWinRoot{};
     r->id  = root;
+    r->owner = n;
     r->dir = (char*)mem_alloc(len + 1);
     memcpy(r->dir, dir, len);
     r->dir[len] = 0;
@@ -280,6 +319,7 @@ bool fs_native_add(FsNative* n, u32 root, const char* dir) {
     walk_under(*r, "", nullptr); // the directories already there; nothing is said about them
     if (!arm(*r)) { close_root(r); return false; }
     n->roots.push(r);
+    watch(*r);
     return true;
 }
 
@@ -293,8 +333,22 @@ void fs_native_remove(FsNative* n, u32 root) {
     }
 }
 
+// A root whose wait fired is registered again once its reads are taken; one whose wait has
+// not keeps it, on the same event, which the next read's arm resets.
 void fs_native_poll(FsNative* n, FsSink& sink) {
-    for (FsWinRoot* r : n->roots) poll_root(*r, sink);
+    for (FsWinRoot* r : n->roots) {
+        if (r->wait && atomic_load(&r->fired, MO_ACQUIRE)) unwatch(*r);
+        poll_root(*r, sink);
+        watch(*r);
+    }
+}
+
+bool fs_native_set_wake(FsNative* n, void (*fn)(void* user), void* user) {
+    for (FsWinRoot* r : n->roots) unwatch(*r); // no wait reads the old one while it changes
+    n->wake = fn;
+    n->wake_user = user;
+    for (FsWinRoot* r : n->roots) watch(*r);
+    return true;
 }
 
 } // namespace kv

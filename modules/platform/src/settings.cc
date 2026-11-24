@@ -280,7 +280,7 @@ bool write_merged(SettingsStore* s, Span<const Entry> changes) {
 #if KV_DEV
     if (ok && s->stall == 2) time_sleep(60.0);
 #endif
-    ok = ok && os_rename(tmp, path);
+    if (ok && !os_rename(tmp, path)) { ok = false; err = errno; } // a refused rename says why
     if (ok) os_dir_sync(s->dir);
     else KV_WARN("settings", "cannot write %s (errno %d)", path, err);
     bytes.free();
