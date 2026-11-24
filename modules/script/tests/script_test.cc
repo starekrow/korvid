@@ -289,6 +289,23 @@ void test_script_events(TestCtx& c) {
         LUA_CHECK(c, L, "return ev:has('SeLine') and #ev:fields('SeLine') == 2 and OK2 == true and err == nil");
     }
 
+    // A cosmetic ktable added while the engine runs (KR19): rows by field from Lua.
+    {
+        static FieldDesc word_fields[2] = {{"at", FieldType::F64, 1, 0}, {"word", FieldType::Char, 16, 8}};
+        static ComponentDesc word{};
+        word.name = "Word"; word.size = 24; word.align = 8; word.fields = Span<const FieldDesc>(word_fields, 2);
+        RuntimeKTableDesc kd;
+        kd.name = "se.words";
+        kd.components = Span<const ComponentDesc>(&word, 1);
+        kd.capacity = 8;
+        u32 kid = engine_add_ktable(e, "se", kd);
+        KV_CHECK(c, kid != 0);
+        script_push_ktable(L, engine_ktable(e, kid));
+        lua_setglobal(L, "words");
+        LUA_CHECK(c, L, "local h = words:spawn{ at = 1.5, word = 'hello' } return words:get(h, 'word') == 'hello' and words:get(h, 'Word.at') == 1.5 and words:live() == 1 and words:name() == 'se.words'");
+        LUA_CHECK(c, L, "return not pcall(words.spawn, words, { word = string.rep('x', 16) })");
+    }
+
     // A cosmetic resource by its fields, as of now; nothing for a name without a table.
     KV_CHECK(c, script_push_resource(L, e, "se.transport"));
     lua_setglobal(L, "T");

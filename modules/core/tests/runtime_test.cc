@@ -3,6 +3,7 @@
 // described and traced by name, never hashed, and taken away with their listeners. And
 // listening to a declared type, which any code outside the schedule may do.
 #include "korvid/core/engine.h"
+#include "korvid/core/ktable.h"
 #include "korvid/core/module.h"
 #include "korvid/core/test.h"
 #include <string.h>
@@ -119,5 +120,75 @@ void test_runtime_types(kv::TestCtx& c) {
 #if KV_DEV
     engine_set_event_hook(e, nullptr, nullptr);
 #endif
+    engine_shutdown(e);
+}
+
+// A cosmetic ktable added while the engine runs (KR19): its component made here, rows
+// spawned and written by field outside the schedule, read back by name; never hashed;
+// taken away, its slot left empty while the sim runs on.
+void test_runtime_ktables(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("runtime ktables");
+    const ModuleDesc* const list[] = {&k_rt};
+    u64 plain_hash = 0;
+    {
+        Engine e0;
+        KV_CHECK(c, engine_init(e0, list));
+        engine_frame(e0, e0.clock.tick_dt);
+        plain_hash = engine_hash_state(e0);
+        engine_shutdown(e0);
+        g_ping_n = 0;
+    }
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    FieldDesc fields[2] = {{"n", FieldType::U32, 1, 0}, {"text", FieldType::Char, 24, 4}};
+    ComponentDesc comp{};
+    comp.name   = "LyricLine";
+    comp.size   = 28;
+    comp.align  = 4;
+    comp.fields = Span<const FieldDesc>(fields, 2);
+    RuntimeKTableDesc d;
+    d.name       = "lyrics.lines";
+    d.components = Span<const ComponentDesc>(&comp, 1);
+    d.capacity   = 64;
+    u32 before = e.ktables.len;
+    KTable* first = before ? &e.ktables[0] : nullptr;
+    u32 id = engine_add_ktable(e, "rt", d);
+    KV_CHECK(c, id == before + 1 && engine_ktable_id(e, "lyrics.lines") == id);
+    KV_CHECK(c, !before || &e.ktables[0] == first);  // nothing moved
+    KV_CHECK(c, engine_add_ktable(e, "rt", d) == 0);  // the name taken
+    ComponentDesc bad = comp;
+    bad.size = 8; // a field past the end
+    RuntimeKTableDesc bd = d;
+    bd.name = "lyrics.bad";
+    bd.components = Span<const ComponentDesc>(&bad, 1);
+    KV_CHECK(c, engine_add_ktable(e, "rt", bd) == 0);
+
+    KTable* t = engine_ktable(e, "lyrics.lines");
+    KV_CHECK(c, t && t->desc->cosmetic && t->columns.len == 1);
+    Handle h = t ? t->spawn() : Handle{};
+    KV_CHECK(c, !h.is_null() && t->live() == 1);
+    if (t && !h.is_null()) {
+        u8* row = t->columns[0].data + (usize)h.index() * t->columns[0].stride;
+        u32 n = 3;
+        memcpy(row, &n, 4);
+        memcpy(row + 4, "verse one", 10);
+        char text[200];
+        component_describe(*t->columns[0].desc, row, text, sizeof text);
+        KV_CHECK(c, strstr(text, "LyricLine{") && strstr(text, "n=3") && strstr(text, "verse one"));
+    }
+    engine_frame(e, e.clock.tick_dt);
+    KV_CHECK(c, engine_hash_state(e) == plain_hash); // cosmetic: not in the hash
+
+    // Taken away: rows and handles gone, the id not given out again, the sim running on.
+    KV_CHECK(c, engine_remove_ktable(e, id) && !engine_remove_ktable(e, id) && engine_ktable_id(e, "lyrics.lines") == 0);
+    KV_CHECK(c, !engine_remove_ktable(e, 1)); // a declared one stays
+    engine_frame(e, e.clock.tick_dt);
+    engine_frame(e, e.clock.tick_dt);
+    KV_CHECK(c, engine_add_ktable(e, "rt", d) == 0); // its name is not given out again
+    d.name = "lyrics.words";
+    u32 id2 = engine_add_ktable(e, nullptr, d);
+    KV_CHECK(c, id2 == id + 1 && engine_ktable(e, id2) && engine_ktable(e, id2)->spawn().bits != 0);
+    engine_frame(e, e.clock.tick_dt);
     engine_shutdown(e);
 }

@@ -240,7 +240,7 @@ bool register_ktables(Engine& e, Span<const ModuleDesc* const> modules, const En
             decls[at] = d;
         }
     }
-    e.ktables.reserve(decls.len);
+    e.ktables.reserve(decls.len + KV_RUNTIME_KTABLES_MAX); // never moves: engine_add_ktable's room too
     bool ok = true;
     for (const KTableDecl& decl : decls) {
         u32 i = decl.index;

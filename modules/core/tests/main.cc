@@ -41,6 +41,7 @@ void test_utf8(kv::TestCtx&);
 void test_hash(kv::TestCtx&);
 void test_event_hook(kv::TestCtx&);
 void test_runtime_types(kv::TestCtx&);
+void test_runtime_ktables(kv::TestCtx&);
 void test_entity_name(kv::TestCtx&);
 void test_attach(kv::TestCtx&);
 
@@ -60,6 +61,7 @@ int main() {
     test_hash(c);
     test_event_hook(c);
     test_runtime_types(c);
+    test_runtime_ktables(c);
     test_context(c);
     test_entity_name(c);
     test_attach(c);

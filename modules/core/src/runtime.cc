@@ -3,6 +3,7 @@
 // the bus as anything is emitted into it (ensure_streams); since no unit is scheduled
 // against it, it is read by listening, which engine_trace_delivery serves at each boundary.
 #include "korvid/core/engine.h"
+#include "korvid/core/ktable.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/name.h"
@@ -134,10 +135,100 @@ void engine_deliver_listened(Engine& e) {
     e.listeners.len = w;
 }
 
+struct Engine::RuntimeKTable {
+    KTableDesc    desc{};
+    ComponentDesc comps[16]{};
+    const ComponentDesc* ptrs[16]{};
+    u32           ids[16]{}; // 0: no component id, so no typed lookup finds them
+    u32           id = 0;
+    bool          removed = false;
+};
+
+u32 engine_add_ktable(Engine& e, const char* module, const RuntimeKTableDesc& d) {
+    const char* name = d.name;
+    if (!name || !name[0] || strlen(name) >= KV_KTABLE_NAME_MAX || !d.capacity || !d.components.len || d.components.len > 16) {
+        KV_ERROR("engine", "a runtime ktable needs a name under %u characters, a capacity and 1 to 16 components", KV_KTABLE_NAME_MAX);
+        return 0;
+    }
+    if (engine_ktable_id(e, name) || engine_resource_id(e, name)) { KV_ERROR("engine", "ktable '%s': the name is taken", name); return 0; }
+    for (const Engine::RuntimeKTable* r : e.runtime_ktables)
+        if (!strcmp(r->desc.name, name)) { KV_ERROR("engine", "ktable '%s' was added in this run and taken away: its name is not given out again", name); return 0; }
+    if (e.ktables.len >= e.ktables.cap) { KV_ERROR("engine", "ktable '%s': no room (%u runtime ktables a run)", name, KV_RUNTIME_KTABLES_MAX); return 0; }
+    u32 owner = 0;
+    if (module) {
+        bool found = false;
+        for (u32 i = 0; i < e.modules.len; ++i) if (!strcmp(e.modules[i].desc->name, module)) { owner = i; found = true; }
+        if (!found) { KV_ERROR("engine", "ktable '%s': no module '%s'", name, module); return 0; }
+    }
+    Engine::RuntimeKTable* r = new (mem_alloc(sizeof(Engine::RuntimeKTable))) Engine::RuntimeKTable{};
+    for (u32 i = 0; i < d.components.len; ++i) {
+        ComponentDesc c = d.components[i];
+        c.flags |= CompCosmetic;
+        c.id    = &r->ids[i];
+        c.type  = &r->ids[i]; // a key of its own, which no C++ type's typed access matches
+        const char* field = nullptr;
+        const char* problem = component_check(c, &field);
+        for (u32 j = 0; j < i && !problem; ++j) if (!strcmp(r->comps[j].name, c.name)) problem = "is listed twice";
+        if (problem) {
+            if (field) KV_ERROR("engine", "ktable '%s': component '%s': field '%s' %s", name, c.name ? c.name : "?", field, problem);
+            else       KV_ERROR("engine", "ktable '%s': component '%s' %s", name, c.name ? c.name : "?", problem);
+            r->~RuntimeKTable();
+            mem_free(r);
+            return 0;
+        }
+        r->comps[i] = c;
+        r->ptrs[i]  = &r->comps[i];
+    }
+    r->desc.name     = name_str(name_intern(name));
+    r->desc.capacity = d.capacity;
+    r->desc.cosmetic = true;
+    e.events.check_outside();
+    MemTag tag;
+    tag.module   = (u16)(owner + 1);
+    tag.heap     = mem_module_heap((u16)(owner + 1));
+    tag.category = mem_category_register("ktables");
+    mem_set_owner((u16)(owner + 1));
+    KTable& t = e.ktables.push(KTable{});
+    bool made = t.init(r->desc, r->desc.name, Span<const ComponentDesc* const>(r->ptrs, d.components.len), e.ktables.len - 1, owner, tag, {}, 0);
+    mem_set_owner(0);
+    r->id = e.ktables.len;
+    e.runtime_ktables.push(r);
+    if (!made) {
+        KV_ERROR("engine", "ktable '%s': creation failed", name);
+        engine_remove_ktable(e, r->id);
+        return 0;
+    }
+    KV_INFO("engine", "ktable '%s' (%u components, capacity %u) added as %u by '%s'", name, d.components.len, d.capacity, r->id,
+            module ? module : "the program");
+    return r->id;
+}
+
+bool engine_remove_ktable(Engine& e, u32 ktable_id) {
+    Engine::RuntimeKTable* r = nullptr;
+    for (Engine::RuntimeKTable* k : e.runtime_ktables) if (k->id == ktable_id && !k->removed) r = k;
+    if (!r || ktable_id > e.ktables.len) return false;
+    e.events.check_outside();
+    KTable& t = e.ktables[ktable_id - 1];
+    mem_set_owner((u16)(t.module + 1));
+    u32 module = t.module;
+    t.free();
+    mem_set_owner(0);
+    // The slot stays, empty and cosmetic, so whatever walks every ktable passes over it.
+    t.desc   = &r->desc;
+    t.name   = "";
+    t.index  = ktable_id - 1;
+    t.module = module;
+    r->removed = true;
+    KV_INFO("engine", "ktable '%s' (%u) taken away", r->desc.name, ktable_id);
+    return true;
+}
+
 void engine_free_runtime(Engine& e) {
     for (Engine::RuntimeEventType* r : e.runtime_events) { r->~RuntimeEventType(); mem_free(r); }
     e.runtime_events.free();
     e.listeners.free();
+    for (Engine::RuntimeKTable* r : e.runtime_ktables) { r->~RuntimeKTable(); mem_free(r); }
+    e.runtime_ktables.free();
 }
 
 } // namespace kv

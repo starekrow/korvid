@@ -179,6 +179,8 @@ struct Engine {
     Array<RuntimeEventType*> runtime_events;
     struct Listener { u32 type; EventListenFn fn; void* user; u64 seen; };
     Array<Listener>       listeners;
+    struct RuntimeKTable;
+    Array<RuntimeKTable*> runtime_ktables;
     f64                   frame_due        = 0.0;   // engine_want_frame_at: the earliest time one is wanted; 0 none
     // engine_add_waker: what a loop pacing on demand asks each time it polls the platform.
     struct Waker { bool (*fn)(Engine&, void*); void* user; };
@@ -430,6 +432,25 @@ u32  engine_event_type_id(const Engine& e, const char* name);
 // schedule reads a runtime type by. fn may listen and stop listening; it should not emit.
 bool engine_listen(Engine& e, u32 type, EventListenFn fn, void* user);
 void engine_unlisten(Engine& e, u32 type, EventListenFn fn, void* user);
+
+// A cosmetic ktable added after engine_init, its components made at runtime: name, size,
+// alignment and fields as a declared component's (checked the same way); their ids and
+// types are ignored, since no C++ type names them. Rows are read and written by field
+// (script_push_ktable, the CLI's /ktables, describe) from outside the schedule: no unit is
+// scheduled against it, and it is never hashed or emptied by a fresh sim. The table and
+// the components' names and fields are the caller's, kept until removal.
+struct RuntimeKTableDesc {
+    const char*               name = nullptr;  // in full: "lyrics.lines"
+    Span<const ComponentDesc> components;      // at most 16
+    u32                       capacity = 0;
+};
+constexpr u32 KV_RUNTIME_KTABLES_MAX = 32; // added in a run, removed ones counted: room is kept for them at init
+// Its ktable id (engine_ktable(e, id)), or 0 with a log line (a name taken, a bad
+// component, no room left).
+u32  engine_add_ktable(Engine& e, const char* module, const RuntimeKTableDesc& desc);
+// Frees one engine_add_ktable added: its rows and handles go, and the id is never given
+// out again (the slot stays, empty). False for an id it did not add.
+bool engine_remove_ktable(Engine& e, u32 ktable_id);
 
 // The name language of the registration tables. A name starting with '.' means
 // "<module>." plus the rest ("?." keeps the '?' in front); anything else is itself. The

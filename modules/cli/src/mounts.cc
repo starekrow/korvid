@@ -66,6 +66,7 @@ void ktables_list(CliContext& ctx, const char* dir, CliEmitFn emit, void* user) 
     if (!t) { // a module directory, or the root: the ktables as a tree
         CliTree tree{dir, emit, user};
         for (KTable& tab : e.ktables) {
+            if (!tab.name || !tab.name[0]) continue; // a runtime ktable taken away
             char slashed[KV_KTABLE_NAME_MAX], summary[96];
             cli_dots_to_slashes(tab.name, slashed, sizeof slashed);
             format(summary, sizeof summary, "%u live of %u%s", tab.live(), tab.capacity, tab.desc->cosmetic ? ", cosmetic" : "");

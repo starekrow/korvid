@@ -169,8 +169,8 @@ u32  engine_add_event_type(Engine& e, const char* module, const EventTypeDesc& d
 bool engine_remove_event_type(Engine& e, u32 id);
 bool engine_emit(Engine& e, u32 type, const void* event);                    // any type, by id
 bool engine_listen(Engine& e, u32 type, EventListenFn fn, void* user);       // any type
-u32  engine_add_ktable(Engine& e, const char* module, const RuntimeKTableDesc& d);  // a cosmetic ktable
-bool engine_remove_ktable(Engine& e, u32 id);
+u32  engine_add_ktable(Engine& e, const char* module, const RuntimeKTableDesc& d);  // a cosmetic ktable's id
+bool engine_remove_ktable(Engine& e, u32 ktable_id);
 ```
 
 - **Never sim state.** A runtime ktable is cosmetic, a runtime event type is not hashed
@@ -435,3 +435,22 @@ stop listening during a delivery.
   name not given out again, and a declared type not removable. (`script events`): a runtime
   type emitted from Lua inside a unit and heard, and `received` refused for it. On
   linux-debug and linux-ship, and under `address,undefined` and `thread`.
+
+**Milestone 9, runtime ktables (KR19, 2): built Nov 23, 2026.** As above, and:
+
+- **Room kept.** `engine_init` reserves `KV_RUNTIME_KTABLES_MAX` (32) slots past the
+  declared ktables, so adding one never moves the others: modules and script objects hold
+  `KTable*`. A run adds at most that many, removed ones counted.
+- **Components made at runtime** are checked as declared ones are, made cosmetic, and given
+  an id of 0 and a type key of their own, so no typed access (`get<T>`, a view) matches
+  them; they are read by field. The ktable has no resources, so no unit can name it.
+- **Taken away**, the ktable is freed and its slot stays, empty, named "", cosmetic, so the
+  code that walks every ktable (the hash, a fresh sim, the extract, the CLI) passes over it.
+  The CLI's listing skips it.
+- **Tests** (`runtime ktables`, core): a ktable from a component made in the test, the
+  declared ones unmoved; refused for a name taken and for a field past its component's
+  end; a row spawned and written by field outside the schedule and described; the state
+  hash a run's without it; removed, its id not removable again, its name not given out
+  again, a declared ktable not removable, and frames run on; the next one added takes the
+  next id. (`script events`): rows of one spawned and read by field from Lua. On
+  linux-debug and linux-ship, and under `address,undefined`.
