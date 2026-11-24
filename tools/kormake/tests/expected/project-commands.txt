@@ -13,7 +13,7 @@ $ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config FAKE_PKG_MISSING=libfakepw-0.3 kormake
 kormake: left out of {host}-dev: extra: external 'missing' (toolchain toolchain.host) is not at {root}/packages/missing.
 Fetch it into packages/missing.
 kormake: cannot build player for {host}-dev: external 'fakepw' ({project}/modules/player/module.lua): pkg-config does not find 'libfakepw-0.3'.
-sudo apt install libfakepw-0.3-dev
+{fetch}
 kormake: 11 modules, 9 instances for {host}-dev, 1 problem
 [exit 1]
 

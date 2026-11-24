@@ -51,7 +51,14 @@ host_spelling() {
     # The fixture's cook is copy_assets.sh, or copy_assets.bat beside it on Windows.
     sed -E -e "s|\"|'|g" -e "s/(\{host\}-(dev|ship))(  +)/\1\3$pad/g" -e "s|copy_assets\.bat|copy_assets.sh|g"
   else
-    cat
+    # The project's player says how to fetch fakepw per platform (its module.lua): this
+    # host's words, and only these, are {fetch}, so another platform's would still differ.
+    case "$host" in
+      linux) fetch='sudo apt install libfakepw-0.3-dev';;
+      macos) fetch='brew install fakepw';;
+      *) fetch='{fetch}';;
+    esac
+    sed -e "s|^$(re "$fetch")\$|{fetch}|"
   fi
 }
 # Backslashes first, before the paths are looked for: kormake writes some paths native
