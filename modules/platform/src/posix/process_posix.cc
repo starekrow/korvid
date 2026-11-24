@@ -230,8 +230,8 @@ void Process::close() {
         int status;
         while (waitpid((pid_t)pid, &status, 0) < 0 && errno == EINTR) {}
     }
-    if (out_fd.is_open()) close((int)out_fd.os());
-    if (err_fd.is_open()) close((int)err_fd.os());
+    if (out_fd.is_open()) ::close((int)out_fd.os());
+    if (err_fd.is_open()) ::close((int)err_fd.os());
     pid = -1;
     out_fd = err_fd = KHandle{};
     exited = false;
