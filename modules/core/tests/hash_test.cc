@@ -64,8 +64,15 @@ constinit const SystemDesc k_hs_systems[] = {
 KV_MODULE_DEFINE(k_hs) = {.name = "hs", .events = k_hs_events, .resources = k_hs_resources, .systems = k_hs_systems,
                           .startup = hs_startup, .memory = {.reserve = 64 * 1024}};
 
-u64 run_hs(u32 ticks, u64 seed, bool schedule, u64* after_reset = nullptr) {
-    const ModuleDesc* const list[] = {&k_hs};
+// A module before hs with an event type of its own, which moves hs's event ids.
+struct HPad { u32 n; };
+constinit const EventTypeDesc k_hpad_events[] = {KV_EVENT(HPad)};
+KV_MODULE_DEFINE(k_hpad) = {.name = "hpad", .events = k_hpad_events};
+
+u64 run_hs(u32 ticks, u64 seed, bool schedule, u64* after_reset = nullptr, bool padded = false) {
+    const ModuleDesc* const plain[] = {&k_hs};
+    const ModuleDesc* const pad[] = {&k_hpad, &k_hs};
+    Span<const ModuleDesc* const> list = padded ? Span<const ModuleDesc* const>(pad) : Span<const ModuleDesc* const>(plain);
     Engine e;
     EngineConfig cfg;
     cfg.seed = seed;
@@ -130,6 +137,9 @@ void test_hash(kv::TestCtx& c) {
     KV_CHECK(c, a != run_hs(5, 1, false));            // another seed, another stream and score
     KV_CHECK(c, a != run_hs(6, 0, false));            // a draw more
     KV_CHECK(c, a != run_hs(5, 0, true));             // a timer waiting
+    // An event type registered before hs's moves its ids, not the hash: a timer waiting is
+    // hashed by its type's name.
+    KV_CHECK(c, run_hs(5, 0, true) == run_hs(5, 0, true, nullptr, true));
     KV_CHECK(c, fresh == run_hs(0, 0, false));        // a fresh sim: the stream as engine_init left it
 
     // A cosmetic resource: published though not plain, read by its fields, not hashed.

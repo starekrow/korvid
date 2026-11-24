@@ -173,8 +173,10 @@ u64 TimerWheel::hash(Span<const EventTypeDesc* const> types) const {
             const TimerRecord* r = (const TimerRecord*)p;
             // Not the ticket: it carries the issuing unit's number, which moves whenever a system
             // is added anywhere, and the game would hash differently for a diagnostic.
-            u64 rh = hash_mix(r->tick ^ ((u64)r->type << 32));
+            // The type by its name, not its id: an id moves whenever a type is added to any
+            // module before it, and the same sim would hash differently.
             const EventTypeDesc* d = r->type < types.len ? types[r->type] : nullptr;
+            u64 rh = hash_mix(r->tick ^ hash_str(d ? d->name : "?"));
             if (d && d->fields.len) rh = hash_mix(rh ^ schema_hash(d->fields, p + sizeof *r));
             h += rh;
             p += record_bytes(r->size);

@@ -497,3 +497,22 @@ stop listening during a delivery.
   reported; truncation, sequential and progressive, and cut before the first row; too
   large, a bad scale, not a JPEG, arithmetic coding. With `KV_JPEG_BENCH=<file>` the test
   times a file at 1, 1/4 and 1/8.
+
+**Found in verifying: timers hashed by their type's id.** arcfire's demo hashes moved from
+tick 67 at milestone 2, and its sim had not: the state hash summed each timer waiting in
+the wheel with its event type's id (`timer.cc`), and KR21's `WindowVisibility` moved the
+ids of every type registered after platform_hid's. The engine's hash says it is the same
+whatever order things registered in, and pending events were already hashed by their
+type's name. Timers now are too. Under that rule slice 10 (bb2b45a) and slice 11 hash the
+same, tick for tick, arcfire's 14,154 and arcanum's 1,865, at the default rate and at
+`--rate 4`: what slice 11 changed is not in the sim. Every game's hash values change
+once with this, and the recorded ones are taken again. Test (`hash`): the same sim with a
+module before it whose event type moves its ids, a timer waiting, hashes the same; without
+the fix it does not.
+
+**Verification, Nov 23, 2026.** `kormake test` passes on linux-debug, linux-dev and
+linux-ship. core, platform, platform_hid, script, krome, image and cli pass under
+`address,undefined` and under `thread`. `tools/kormake/tests/run.sh` passes, and
+`tools/doccheck.sh` reports what it did before the slice. The demo hashes are as above.
+Not done: Windows, the Apple family and the phones, where every milestone's code for
+them is written and not compiled; a window minimized by hand under Wayland.
