@@ -70,6 +70,15 @@ other's. `settings_flush` waits for what was set; the platform's shutdown writes
 (`platform_pump_add`: `platform_hid` turns window events into bus events there), then the
 I/O queue's own pump. One call per frame covers every platform module linked.
 
+**The wait.** `platform_wait(e, seconds)` blocks till the window has something for the pump,
+`platform_wake(e)` is called, or the time is up, and says which (`PlatformWoken`). It takes
+nothing off any queue: the pump after it reads what came. The window's module sets the
+wait (`platform_set_waiter`: SDL's `SDL_WaitEventTimeout` with no event to fill, woken by a
+user event it pushes); with no window open it is a condition, timed. `platform_wake` may be
+called from any thread, not a signal handler, and a wake that arrives before the wait
+begins ends it at once. A frame loop with nothing to do waits here between passes
+(`frameloop`); `platform_waits(e)` counts what ended them.
+
 ## Using it
 
 **Declare the dependency**: `deps = { "core", "platform", ... }` in `module.lua`. The
@@ -206,10 +215,14 @@ Header `korvid/platform/module.h`:
 | name | kind | what |
 |---|---|---|
 | `platform_module` | `ModuleDesc` | the record; kormake puts it in the list |
-| `PlatformState` | record | `io`, `base_path`, `pref_path`, the pump hooks: the module's state, for code outside the schedule |
+| `PlatformState` | record | `io`, `base_path`, `pref_path`, the pump hooks, the waiter and its counts: the module's state, for code outside the schedule |
 | `PlatformMounts`, `platform_configure_mounts(mounts)` | record, function | what startup mounts: `exe_name`, `packs`, `assets_dir`, `none`, `io_backend` |
 | `platform_pump(engine)` | function | once per frame: the pump hooks, then the I/O queue's pump |
 | `platform_pump_add(engine, fn, user)`, `platform_pump_remove` | functions | a device module's per-frame work, run by `platform_pump`; up to `KV_PLATFORM_PUMP_MAX` (8) |
+| `platform_wait(engine, seconds)`, `PlatformWoken` | function, enum | blocks till the window has something, a wake, or the time: `Window`, `Wake`, `Time`; no time is no wait |
+| `platform_wake(engine)` | function | ends the wait under way or the next; any thread |
+| `platform_set_waiter(engine, w)`, `PlatformWaiter` | function, record | the window's `wait(user, seconds)` (1 early, 0 the time, -1 cannot now) and `wake(user)`; null clears |
+| `platform_waits(engine)`, `PlatformWaits` | function, record | `waits`, and of them ended by the `window`, `woken`, `timed` |
 
 What the module registers with the engine:
 

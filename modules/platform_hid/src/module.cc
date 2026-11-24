@@ -21,6 +21,14 @@ void hid_pump(Engine& e, void* user) {
     if (hid_backend_holds_unfocused()) engine_hold(e, HoldFocus, !s.window.focused());
 }
 
+// platform_wait's waiter: the window's wait while it is open; the platform's own before.
+int hid_wait(void* user, f64 seconds) {
+    HidState& s = *(HidState*)user;
+    if (!s.window.is_open()) return -1;
+    return s.window.wait(seconds) ? 1 : 0;
+}
+void hid_wake(void* user) { ((HidState*)user)->window.wake(); }
+
 bool hid_startup(Engine& engine, ModuleInstance& self) {
     if (!hid_backend_startup()) return false;
     HidState* s = arena_push<HidState>(self.arena);
@@ -31,6 +39,8 @@ bool hid_startup(Engine& engine, ModuleInstance& self) {
     if (!engine_publish(engine, self, "input.state", &s->input) ||
         !engine_publish(engine, self, "input.actions", &s->actions) ||
         !engine_publish(engine, self, ".window", &s->window)) return false;
+    PlatformWaiter w{hid_wait, hid_wake, s};
+    platform_set_waiter(engine, &w);
     return platform_pump_add(engine, hid_pump, s);
 }
 
@@ -38,6 +48,7 @@ void hid_shutdown(Engine& e, ModuleInstance& self) {
     HidState* s = self.state_as<HidState>();
     if (s) {
         platform_pump_remove(e, hid_pump, s);
+        platform_set_waiter(e, nullptr);
         s->window.close(); // the service ends with the module, whoever opened it
         input_gamepads_close(s->input);
         s->clipboard.free();

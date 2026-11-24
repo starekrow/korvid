@@ -209,3 +209,54 @@ arcanum's demo hashes as recorded.
   round for ever. Fixed; `reload_test` shuts down with the strip up.
 - **Not done here:** Blackwing's `widgets.kim` keeps its `def placeholder` until it builds
   on a Korvid with this change.
+
+**Milestone 2, the wait on SDL3 and with no window (KR26): built Nov 24, 2026.** As above,
+and:
+
+- **The waiter.** `platform` knows no window, so `platform_hid` gives it one at startup
+  (`platform_set_waiter`: a wait and a wake), used while the window is open; before it
+  opens, and in a tool, the platform waits on a condition. `platform_wake` sets a flag
+  first, so a wake before the wait ends it at once, then signals the condition and calls
+  the window's wake, under the lock that clearing the waiter at shutdown takes.
+- **SDL3.** `SDL_WaitEventTimeout(nullptr, ms)`, rounded up to the millisecond so a wait does
+  not end just short of its time. The wake is one user event at most
+  (`SDL_RegisterEvents`), queued till a pump takes it. `HostWindow::input_delay()` keeps
+  how long the last press waited, from SDL's stamp to the pump. Win32, Android and iOS
+  wait 4 ms at most, as the loop's sleep did, until milestone 4.
+- **The loop** waits where it slept, for the soonest of the heartbeat, `frame_due`, the
+  next tick when ticks are wanted and `--run-seconds`' end. A wait that is not till a tick
+  makes the next tick a tick's worth, as a sleep did. It is a 4 ms poll while I/O is under
+  way, a load holds the sim, or any waker is registered (said once at start-up), which
+  until milestone 3 is every waker. The last line counts the waits and what ended them.
+- **Found on the way:** on-demand's idle path never ran `run_time_check`, so once
+  `--run-seconds` passed it went round without waiting till the next heartbeat's frame
+  (about 7,600 empty passes in the last quarter second). It runs there now.
+- **Measured** (linux-dev, GNOME 50, SDL 3.4.2), `ticker --run-seconds 10`:
+
+| run | waits in 10 s (window / wake / time) | main thread's wakeups a second, seconds 3 to 8 | CPU, the same |
+|---|---|---|---|
+| Wayland, decoupled | 43 (1 / 0 / 42) | 7 (before: 243) | 0.4% (before: 2.0%) |
+| Wayland, on demand | 42 (1 / 0 / 41) | 22 (244) | 0.6% (2.0%) |
+| X11, decoupled | 42 (0 / 0 / 42) | 7 (243) | 0.4% (2.0%) |
+| X11, on demand | 41 (0 / 0 / 41) | 12 (242) | 0.6% (1.6%) |
+
+  "Before" is the same binary built at milestone 1 (9f21b83), on the same machine. The CPU
+  column is to the kernel's 10 ms tick, so 0.2% steps.
+- **A frame at a time:** `ticker --frame-every 530` asks for a frame 530 ms ahead, again
+  and again. Of 18 drawn in 10 s, decoupled: 0.63 ms late on average, 1.24 ms the latest;
+  on demand: 0.89 and 1.58. Not at the next heartbeat.
+- **Not measured: a key's latency.** Nothing here presses a key in a window it does not
+  focus: GNOME gives a window started from a shell no focus, so XTest's key goes elsewhere;
+  a key sent to the window alone (`XSendEvent`) is not taken by SDL (which reads keys
+  through XInput2); and Mutter does not act on another client's resize of the window.
+  `ticker` logs each key's `input_delay()` and each resize's time on the monotonic clock
+  for a run by hand.
+- **A wait of no time** is none: `platform_wait(e, 0)` returns at once, counts nothing, and
+  leaves a wake for the next.
+- **Verified, Nov 24, 2026.** `kormake test` passes on linux-debug, linux-dev and
+  linux-ship (once each, two flakes rerun clean: goldberg's `berg cli` under ship, and
+  asset's font fallback, which waits on a read, under dev while other builds ran).
+  `platform` and `platform_hid` pass under `address,undefined` and `thread`, with the
+  platform's new test of a wake from another thread. arcfire's and arcanum's demos hash
+  the same as at milestone 1, tick for tick (14,154 and 1,865, at the default rate and at
+  `--rate 4`). `tools/doccheck.sh` reports nothing new.

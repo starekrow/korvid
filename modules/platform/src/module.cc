@@ -4,6 +4,8 @@
 #include "korvid/core/engine.h"
 #include "korvid/core/phase.h"
 #include "korvid/core/log.h"
+#include "korvid/core/atomic.h"
+#include "korvid/core/time.h"
 #include "os_paths.h"
 #include "os_file.h"
 
@@ -27,6 +29,8 @@ bool platform_startup(Engine&, ModuleInstance& self) {
     PlatformState* s = arena_push<PlatformState>(self.arena);
     if (!s) return false;
     self.set_state(s);
+    os_mutex_init(&s->wait_lock);
+    os_cond_init(&s->wait_cond);
     if (!os_bundle_archive() && !os_base_path(s->base_path, sizeof s->base_path)) {
         KV_WARN("platform", "the executable's directory is unknown; assets resolve from the working directory");
         s->base_path[0] = 0;
@@ -76,6 +80,9 @@ void platform_shutdown(Engine&, ModuleInstance& self) {
     s->settings = nullptr;
     s->io.free();
     io_bundle_close();
+    if (s->waiter.wait) KV_WARN("platform", "a waiter still set at shutdown");
+    os_cond_destroy(&s->wait_cond);
+    os_mutex_destroy(&s->wait_lock);
 }
 
 constinit const SystemDesc k_systems[] = {
@@ -122,6 +129,58 @@ void platform_pump_remove(Engine& e, PlatformPumpFn fn, void* user) {
         --s->pump_count;
         return;
     }
+}
+
+PlatformWoken platform_wait(Engine& e, f64 seconds) {
+    PlatformState* s = state(e);
+    if (!s) { if (seconds > 0.0) time_sleep(seconds); return PlatformWoken::Time; }
+    if (seconds <= 0.0) return PlatformWoken::Time; // no wait: a wake stays for the next
+    ++s->waits.waits;
+    // A wake that came before the wait began ends it at once.
+    if (atomic_exchange(&s->woken, 0u, MO_ACQ_REL)) { ++s->waits.woken; return PlatformWoken::Wake; }
+    int ended = s->waiter.wait ? s->waiter.wait(s->waiter.user, seconds) : -1;
+    if (ended < 0) {
+        // No window to wait on: the condition, till woken or the time is up.
+        f64 until = time_now() + seconds;
+        os_mutex_lock(&s->wait_lock);
+        for (;;) {
+            if (atomic_load(&s->woken, MO_ACQUIRE)) break;
+            f64 left = until - time_now();
+            if (left <= 0.0) break;
+            os_cond_timed_wait(&s->wait_cond, &s->wait_lock, left);
+        }
+        os_mutex_unlock(&s->wait_lock);
+        ended = 0;
+    }
+    if (atomic_exchange(&s->woken, 0u, MO_ACQ_REL)) { ++s->waits.woken; return PlatformWoken::Wake; }
+    if (ended > 0) { ++s->waits.window; return PlatformWoken::Window; }
+    ++s->waits.timed;
+    return PlatformWoken::Time;
+}
+
+void platform_wake(Engine& e) {
+    PlatformState* s = state(e);
+    if (!s) return;
+    atomic_store(&s->woken, 1u, MO_RELEASE);
+    // Under the lock, so a waiter between its check and its wait cannot miss the signal,
+    // and the window's waiter is not cleared while it is called.
+    os_mutex_lock(&s->wait_lock);
+    os_cond_signal(&s->wait_cond);
+    if (s->waiter.wake) s->waiter.wake(s->waiter.user);
+    os_mutex_unlock(&s->wait_lock);
+}
+
+void platform_set_waiter(Engine& e, const PlatformWaiter* w) {
+    PlatformState* s = state(e);
+    if (!s) return;
+    os_mutex_lock(&s->wait_lock);
+    s->waiter = w ? *w : PlatformWaiter{};
+    os_mutex_unlock(&s->wait_lock);
+}
+
+PlatformWaits platform_waits(Engine& e) {
+    PlatformState* s = state(e);
+    return s ? s->waits : PlatformWaits{};
 }
 
 IoQueue* platform_io(Engine& e) {

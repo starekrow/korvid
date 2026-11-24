@@ -9,6 +9,7 @@
 #pragma once
 #include "korvid/core/module.h"
 #include "korvid/platform/io.h"
+#include "korvid/core/os_thread.h"
 
 namespace kv {
 
@@ -23,6 +24,25 @@ constexpr u32 KV_PLATFORM_PUMP_MAX  = 8;
 // turns its OS events into bus events there.
 typedef void (*PlatformPumpFn)(Engine& e, void* user);
 
+// A device module's wait (the window's), for platform_wait. `wait` blocks till its OS has
+// something for the next pump, `wake` is called, or `seconds` pass, and takes nothing off
+// any queue: 1 when it ended early, 0 when the time was up, -1 when it cannot wait now
+// (no window open), and the platform waits on its own. `wake` ends a wait under way or
+// the next to begin, from any thread.
+struct PlatformWaiter {
+    int  (*wait)(void* user, f64 seconds) = nullptr;
+    void (*wake)(void* user) = nullptr;
+    void* user = nullptr;
+};
+
+// What ended each platform_wait, counted from the start.
+struct PlatformWaits {
+    u64 waits = 0;   // every platform_wait given time to wait
+    u64 window = 0;  // the window had something
+    u64 woken = 0;   // platform_wake
+    u64 timed = 0;   // the time was up
+};
+
 // The module's state: for code outside the schedule (the frame loop, a tool).
 struct PlatformState {
     IoQueue io;                               // the process's read queue, pumped by platform_pump
@@ -33,6 +53,12 @@ struct PlatformState {
     struct SettingsStore* settings = nullptr;    // platform_settings, once asked for
     struct  Pump { PlatformPumpFn fn; void* user; } pumps[KV_PLATFORM_PUMP_MAX];
     u32     pump_count = 0;
+    // platform_wait's: the window's wait if one is set, else a condition of its own.
+    PlatformWaiter waiter;
+    PlatformWaits  waits;
+    u32     woken = 0;      // atomic: platform_wake since the last wait took it
+    OsMutex wait_lock;
+    OsCond  wait_cond;
 };
 
 // Where read_asset looks, set before engine_init (the frame loop's --pack and --assets).
@@ -54,5 +80,19 @@ void platform_pump(Engine& e);
 // Adds or removes a pump hook. A module adds one at startup and removes it at shutdown.
 bool platform_pump_add(Engine& e, PlatformPumpFn fn, void* user);
 void platform_pump_remove(Engine& e, PlatformPumpFn fn, void* user);
+
+// Blocks the calling thread till the window has something for the pump, platform_wake is
+// called, or `seconds` pass, whichever is first (KR26). It takes nothing off any queue:
+// the pump after it reads what came. With no window it waits on a condition. A frame
+// loop with nothing to do waits here between passes. No time (0 or less) is no wait: it
+// returns Time at once and leaves a wake for the next.
+enum class PlatformWoken : u8 { Time, Window, Wake };
+PlatformWoken platform_wait(Engine& e, f64 seconds);
+// Ends the wait under way, or the next to begin. Any thread; not a signal handler.
+void platform_wake(Engine& e);
+// The window's wait: platform_hid sets it at startup and clears it (null) at shutdown.
+void platform_set_waiter(Engine& e, const PlatformWaiter* w);
+// What ended the waits so far: for a loop's last line, and a measurement.
+PlatformWaits platform_waits(Engine& e);
 
 } // namespace kv

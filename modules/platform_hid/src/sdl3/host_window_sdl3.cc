@@ -1,6 +1,7 @@
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/core/log.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/utf8.h"
 #include <string.h>
 #include "../hid_backend.h"
@@ -50,6 +51,9 @@ void modal_timer_stop(void* timer) {
 } // namespace
 #endif
 
+// platform_wake's event (KR26): pushed to end SDL_WaitEventTimeout, and taken by the pump.
+u32 g_wake_event = 0;
+
 bool hid_video_up() {
     if (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) return true;
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
@@ -74,6 +78,8 @@ bool hid_backend_startup() {
         KV_ERROR("hid", "SDL events unavailable: %s", SDL_GetError());
         return false;
     }
+    g_wake_event = SDL_RegisterEvents(1);
+    if (!g_wake_event) KV_WARN("hid", "no SDL event for a wake: a wait ends only by the window or the time");
     int ver = SDL_GetVersion();
     KV_INFO("hid", "SDL %d.%d.%d, headless until a window opens",
             SDL_VERSIONNUM_MAJOR(ver), SDL_VERSIONNUM_MINOR(ver), SDL_VERSIONNUM_MICRO(ver));
@@ -303,6 +309,12 @@ void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
             default: break;
             }
         }
+        if (g_wake_event && e.type == g_wake_event) { atomic_store(&w.wake_queued_, 0u, MO_RELEASE); return; }
+        // How long a press waited for the pump, from SDL's stamp (the OS's, on its clock).
+        if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            u64 now = SDL_GetTicksNS();
+            w.input_delay_ = e.common.timestamp && e.common.timestamp <= now ? (f64)(now - e.common.timestamp) * 1e-9 : 0.0;
+        }
         switch (e.type) {
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
@@ -431,6 +443,23 @@ void HostWindow::pump(EventBus& bus, Input& input) {
 void HostWindow::drain(EventBus& bus, Input& input) {
     SDL_Event e;
     while (SDL_PeepEvents(&e, 1, SDL_GETEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST) == 1) translate(*this, e, bus, input);
+}
+
+// SDL's wait with no event to fill leaves what came queued for the pump. It takes whole
+// milliseconds: rounded up, so a wait does not end just short of the time it was given.
+bool HostWindow::wait(f64 seconds) {
+    if (seconds <= 0.0) return false;
+    f64 ms = seconds * 1000.0 + 0.999;
+    return SDL_WaitEventTimeout(nullptr, ms >= 2.0e9 ? 2000000000 : (Sint32)ms);
+}
+
+// One wake queued at most: the next pump takes it, and a wake after that queues another.
+void HostWindow::wake() {
+    if (!g_wake_event || atomic_exchange(&wake_queued_, 1u, MO_ACQ_REL)) return;
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = g_wake_event;
+    if (!SDL_PushEvent(&e)) atomic_store(&wake_queued_, 0u, MO_RELEASE);
 }
 
 void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {

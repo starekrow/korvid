@@ -29,7 +29,13 @@ surface, macOS's occlusion); on a phone the background, whose loop waits in the 
 both events arrive when the app comes back. Where the OS cannot tell, it is seen.
 `HostWindow::minimize(on)` minimizes or restores it, for tests (Wayland restores nothing
 a program asks to). A Vulkan window hands its native handle to the renderer; a software window can
-only `present_blank`.
+only `present_blank`. **Waiting for it** (KR26): `HostWindow::wait(seconds)` blocks till the
+OS has something for the next pump or `wake()` is called, taking nothing off the queue,
+and the module gives it to `platform_wait` while the window is open. On SDL3 it is
+`SDL_WaitEventTimeout` with no event to fill, in whole milliseconds rounded up; `wake()`
+pushes one user event at most, which the pump takes. Win32, Android and iOS wait 4 ms at
+most until each has a wait of its own (slice 12, milestone 4). `input_delay()` is how long
+the last key or button pressed waited, from the OS's stamp to the pump (SDL's stamps).
 
 **Input** (`input.h`, `events.h`). Two copies of the state: `raw`, updated by the pump at
 frame rate, and `sampled`, copied once per tick by the system `input.sample` (phase
@@ -114,7 +120,7 @@ Header `korvid/platform_hid/host_window.h`:
 | name | kind | what |
 |---|---|---|
 | `WindowDesc` | record | `title`, `width`, `height`, `vsync` (a preference the renderer reads), `surface` (`Software`, `Vulkan`), `borderless` |
-| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `width()`, `height()`, `vsync()`, `focused()`, `visible()`, `hidden_why()`, `minimize(on)`, `pump(bus, input)`, `present_blank()`, `native_handle()` |
+| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `width()`, `height()`, `vsync()`, `focused()`, `visible()`, `hidden_why()`, `minimize(on)`, `pump(bus, input)`, `wait(seconds)`, `wake()`, `input_delay()`, `present_blank()`, `native_handle()` |
 
 Header `korvid/platform_hid/input.h`:
 
@@ -161,6 +167,7 @@ What the module registers with the engine:
 | `input.actions` | resource, published | the action map and its state this tick |
 | `input.sample` | system, phase Input, `Always` | writes `input.state` and `input.actions`: raw becomes sampled and the actions follow, on paused ticks too |
 | a pump hook | `platform_pump_add` | the window's events, once per frame |
+| a waiter | `platform_set_waiter` | `platform_wait` waits on the window while it is open |
 
 ## Behaviour worth knowing
 

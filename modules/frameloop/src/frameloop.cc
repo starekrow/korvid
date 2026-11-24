@@ -84,7 +84,8 @@ struct FrameLoopState {
     f64             period = 1.0 / 60.0, render_cpu = 0.0, last_frame_start = 0.0;
     f64             demand_last = 0.0;
     bool            self_paced = false; // the renderer does not wait for the display: run() does
-    u64             demand_sleeps = 0;
+    f64             run_start  = 0.0;   // when run() began: --run-seconds' end bounds a wait
+    bool            waker_said = false; // the line about wakers that make a wait a poll, once
     // Over the run: frames drawn, and (Pacing::Decoupled) ticks run in passes that drew nothing.
     u64             frames_drawn = 0;
     u64             ticks_alone  = 0;
@@ -469,6 +470,30 @@ f64 time_to_next_tick(const TickClock& c) {
     return left > 0.0 ? left : 0.0;
 }
 
+// KR26: how long a pass with nothing to do waits for the window: till the heartbeat, a
+// frame asked for at a time (engine_want_frame_at), the next tick when ticks are wanted,
+// or --run-seconds' end. No longer than a poll while I/O is under way, a load holds the
+// sim, or a waker is registered, which is asked only when the loop comes round.
+f64 idle_wait_time(Engine& engine, FrameLoopState& s, f64 now, bool ticks) {
+    f64 wait = s.demand_last + k_demand_heartbeat - now;
+    if (ticks) {
+        f64 t = time_to_next_tick(engine.clock);
+        if (t < wait) wait = t;
+    }
+    if (engine.frame_due > 0.0 && engine.frame_due - now < wait) wait = engine.frame_due - now;
+    f64 end = s.run_start + s.config.run_seconds - now; // once passed, the next run_time_check fires it
+    if (s.config.run_seconds >= 0.0 && !s.timer_fired && end > 0.0 && end < wait) wait = end;
+    IoQueue* io = platform_io(engine);
+    bool poll = (io && (io->pending() || io->completions().len)) || (engine_holds(engine) & HoldLoading) || engine.waker_count;
+    if (engine.waker_count && !s.waker_said) {
+        KV_INFO("frameloop", "%u waker%s registered: an idle wait is a %.0f ms poll", engine.waker_count, engine.waker_count == 1 ? "" : "s",
+                k_demand_poll * 1e3);
+        s.waker_said = true;
+    }
+    if (poll && wait > k_demand_poll) wait = k_demand_poll;
+    return wait > 0.0 ? wait : 0.0;
+}
+
 // Pacing::Decoupled, and every pacing while the window is hidden: one pass of the loop.
 // True when this pass should draw: the loop's body then ticks and draws as for any frame.
 // Otherwise the pass has ticked (a module wants ticks, I/O or Work is pending, the
@@ -499,8 +524,7 @@ bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept, bool tick_al
     bool io_busy = io && (io->pending() || io->completions().len);
     bool tick = tick_always || engine.ticks_wanted || io_busy || engine_work_pending(engine) || now - s.demand_last >= k_demand_heartbeat;
     if (!tick) {
-        time_sleep(k_demand_poll);
-        ++s.demand_sleeps;
+        platform_wait(engine, idle_wait_time(engine, s, now, false));
         slept = true;
         return false;
     }
@@ -514,13 +538,13 @@ bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept, bool tick_al
     if (ran && renderer_sprite_count(s.renderer)) engine_want_frame(engine); // only a frame's extract can tell what they moved
     if (engine_work_pending(engine)) engine_work(engine, k_demand_work);
     if (engine_work_pending(engine)) return false;
-    // Till the next tick is due while ticks are wanted; a poll's length while I/O is.
-    f64 wait = engine.ticks_wanted || tick_always ? time_to_next_tick(engine.clock) : k_demand_poll;
-    if (io_busy && wait > k_demand_poll) wait = k_demand_poll;
-    if (engine.frame_wanted && shown) wait = 0.0;
+    // Till the next tick is due while ticks are wanted, else as long as nothing is (a
+    // poll's length while I/O is): woken from that, the next tick is a tick's worth.
+    bool ticks = engine.ticks_wanted || tick_always;
+    f64 wait = engine.frame_wanted && shown ? 0.0 : idle_wait_time(engine, s, time_now(), ticks);
     if (wait > 0.0) {
-        time_sleep(wait);
-        ++s.demand_sleeps;
+        platform_wait(engine, wait);
+        if (!ticks) slept = true;
     }
     return false;
 }
@@ -535,6 +559,7 @@ void run_time_check(FrameLoopState& s, f64 start) {
 
 void run(Engine& engine, FrameLoopState& s) {
     f64 start = time_now();
+    s.run_start = start;
     s.engine = &engine;
     s.prev   = start;
     f64 next_report = start + (f64)s.config.report_every_seconds;
@@ -569,9 +594,9 @@ void run(Engine& engine, FrameLoopState& s) {
                 engine_work(engine, k_demand_work);
                 continue;
             }
-            time_sleep(k_demand_poll);
-            ++s.demand_sleeps;
+            platform_wait(engine, idle_wait_time(engine, s, time_now(), false));
             slept = true;
+            run_time_check(s, start);
             continue;
         }
         // Self-paced: not before a display period since the last frame began, the time
@@ -700,10 +725,14 @@ void run(Engine& engine, FrameLoopState& s) {
     platform_modal_frame(engine, nullptr, nullptr);
     platform_surface_hook(engine, nullptr, nullptr); // the renderer goes down before the window does
     if (s.modal_frames) KV_INFO("frameloop", "%llu frames ran inside live resizes", (unsigned long long)s.modal_frames);
-    if (s.config.pacing != Pacing::Continuous || s.hidden_passes)
-        KV_INFO("frameloop", "%llu frames drawn, %llu ticks, %llu of them without a frame; %llu sleeps over %.1f s",
+    if (s.config.pacing != Pacing::Continuous || s.hidden_passes) {
+        PlatformWaits w = platform_waits(engine);
+        KV_INFO("frameloop", "%llu frames drawn, %llu ticks, %llu of them without a frame; %llu waits over %.1f s, ended by the window %llu, "
+                "a wake %llu, the time %llu",
                 (unsigned long long)s.frames_drawn, (unsigned long long)engine.clock.tick_total, (unsigned long long)s.ticks_alone,
-                (unsigned long long)s.demand_sleeps, time_now() - start);
+                (unsigned long long)w.waits, time_now() - start, (unsigned long long)w.window, (unsigned long long)w.woken,
+                (unsigned long long)w.timed);
+    }
 }
 
 // `screenshot FILE`: the next frame drawn, as a PPM.

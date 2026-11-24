@@ -34,15 +34,20 @@ One frame:
 **Pacing** is `FrameLoopConfig::pacing`. `Continuous`, a game's choice, draws every
 vsync. `OnDemand`, a tool's choice, draws only when something happened: input, the
 window, I/O, a load, ticks that moved sprites, `engine_want_frame`, or a waker that had
-something (`engine_add_waker`). Between those, it runs no ticks, polls the platform and
-asks the wakers every 4 ms, wakes at least four times a second, and still runs pending
-Work. `engine_want_ticks` is a frame request there. `Decoupled`, a player's choice, decides
-ticks and frames apart: it ticks at the clock's rate while a module asks
-(`engine_want_ticks`, again each tick) and while I/O or Work is pending, sleeping till the
-next tick is due, and four times a second otherwise; it draws only on the same signals as
-`OnDemand` less the heartbeat. Its last log line says how many frames it drew and how many
-ticks ran without one. **A hidden window** (`WindowVisibility`) is drawn under no pacing:
-`Continuous` ticks at the clock's rate and sleeps between, the others tick as `Decoupled`
+something (`engine_add_waker`). Between those, it runs no ticks, wakes at least four times
+a second (the heartbeat), and still runs pending Work. `engine_want_ticks` is a frame
+request there. `Decoupled`, a player's choice, decides ticks and frames apart: it ticks at
+the clock's rate while a module asks (`engine_want_ticks`, again each tick) and while I/O
+or Work is pending, and four times a second otherwise; it draws only on the same signals as
+`OnDemand` less the heartbeat. **Between passes both wait** (`platform_wait`, KR26) for the
+window, a wake, or the soonest of the heartbeat, `engine_want_frame_at`'s time, the next
+tick when ticks are wanted, and `--run-seconds`' end; not at all while a frame is wanted,
+Work is pending or the frames after input are owed. The wait is a 4 ms poll while I/O is
+under way, a load holds the sim, or a waker is registered (the loop says so once). A still
+window wakes about four times a second. The last log line says how many frames it drew,
+how many ticks ran without one, and how many waits ended by the window, a wake and the
+time. **A hidden window** (`WindowVisibility`) is drawn under no pacing:
+`Continuous` ticks at the clock's rate and waits between, the others tick as `Decoupled`
 would without drawing; the first pass it is seen again draws.
 
 The system `frameloop.exit` (phase PreSim, `Always`) emits `ExitRequested` with a reason:

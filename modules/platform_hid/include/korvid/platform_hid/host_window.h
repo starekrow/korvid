@@ -81,6 +81,15 @@ struct HostWindow {
     // running inside an OS modal loop (on_modal), where asking would re-enter the loop
     // that holds the thread.
     void drain(EventBus& bus, Input& input);
+    // Blocks till the OS has something for the next pump, wake() is called, or `seconds`
+    // pass (KR26), and takes nothing off the queue. True when it ended before the time.
+    // The module's waiter for platform_wait.
+    bool wait(f64 seconds);
+    // Ends the wait under way, or the next to begin. Any thread.
+    void wake();
+    // Seconds from the OS's stamp on the last key or button pressed to the pump that read
+    // it: a measure of how soon the loop saw it. 0 where the OS stamps nothing.
+    f64  input_delay() const { return input_delay_; }
     // Some OSes hold the thread that pumps in a loop of their own while the window is being
     // resized: on macOS a live resize runs AppKit's event-tracking loop inside pump until
     // the mouse is released, so no frame runs for as long as the drag. While such a loop
@@ -170,6 +179,8 @@ struct HostWindow {
     void* software_vsynced_ = nullptr; // SDL: the surface software_vsync() was last applied to
     bool  software_vsync_   = false;   // what software_vsync() asked for
     u32   software_want_[2] = {};      // software_size()'s
+    f64   input_delay_ = 0.0;          // input_delay()'s
+    u32   wake_queued_ = 0;            // atomic: a wake the backend queued that no pump has taken yet
 };
 
 } // namespace kv

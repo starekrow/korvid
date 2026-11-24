@@ -17,6 +17,7 @@ void test_net(kv::TestCtx&);
 void test_fs_watch(kv::TestCtx&);
 void test_process(kv::TestCtx&);
 void test_settings(kv::TestCtx&);
+void test_wait(kv::TestCtx&);
 int  settings_child(int argc, char** argv);
 #include <string.h>
 
@@ -41,5 +42,6 @@ int main(int argc, char** argv) {
     test_fs_watch(c);
     test_process(c);
     test_settings(c);
+    test_wait(c);
     return kv::test_report(c, "platform_tests");
 }

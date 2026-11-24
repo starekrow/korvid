@@ -15,6 +15,7 @@
 // belong to the window's thread, so the engine's thread asks for them with a message; the
 // clipboard is opened from the engine's thread itself.
 #include "korvid/platform_hid/host_window.h"
+#include "korvid/core/time.h"
 #include "korvid/core/utf8.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/core/array.h"
@@ -748,6 +749,13 @@ void HostWindow::pump(EventBus& bus, Input& input) {
 
 // pump never asks the OS for anything here: it takes what the window's thread queued.
 void HostWindow::drain(EventBus& bus, Input& input) { pump(bus, input); }
+
+// Milestone 4 of slice 12 waits on the OS here; till then a wait is the 4 ms poll the loop had.
+bool HostWindow::wait(f64 seconds) {
+    if (seconds > 0.0) time_sleep(seconds < 0.004 ? seconds : 0.004);
+    return false;
+}
+void HostWindow::wake() {}
 
 // The window's thread takes the system's modal move and size loops, so the frame loop is
 // never held in one and this is never called.

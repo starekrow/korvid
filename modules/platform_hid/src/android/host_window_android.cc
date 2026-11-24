@@ -731,6 +731,13 @@ void HostWindow::drain(EventBus& bus, Input& input) {
     }
 }
 
+// Milestone 4 of slice 12 waits on the OS here; till then a wait is the 4 ms poll the loop had.
+bool HostWindow::wait(f64 seconds) {
+    if (seconds > 0.0) time_sleep(seconds < 0.004 ? seconds : 0.004);
+    return false;
+}
+void HostWindow::wake() {}
+
 void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {
     modal_fn_  = fn; // never called: nothing on Android holds the game's thread in a loop of its own
     modal_ctx_ = ctx;
