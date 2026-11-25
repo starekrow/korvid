@@ -1,6 +1,6 @@
 # Engine Slice 12 — A still window that sleeps
 
-Nov 23, 2026 · @starekrow · draft
+Nov 23, 2026 · @starekrow
 
 ## Goal and exit criteria
 
@@ -466,3 +466,43 @@ from the shape:
   linux-ship. krome, kim and kimb pass under `address,undefined` and `thread`. arcfire's
   and arcanum's demos hash as before, tick for tick. `tools/doccheck.sh` reports nothing
   new.
+
+**Milestone 6, Blackwing (KR26): measured in Blackwing, Nov 24, 2026.** Blackwing built
+against this slice's source as of milestone 4 and measured its own window, still: 0.6% of a
+core with 10 to 30 wakes a second, from 2.4%. Its windowless build costs four wakes a second,
+so the window is now near that, as KR26 asked. Milestone 5's changes and the Linux fixes
+came after its build.
+
+## Closed, Nov 24, 2026
+
+The exit criteria, as met:
+
+- **A still window wakes about as often as its heartbeat:** `ticker`, ten seconds, 41 to 45
+  waits under either pacing on Wayland and X11 (milestones 2 and 3, again after the rework),
+  and 42 and 46 on Windows, where slice 11 measured about 2,450.
+- **Input is seen within a frame:** on Windows, keys 0.03 to 0.06 ms after the window's thread
+  queued them, resizes 1.5 to 7.9 ms after they were asked, the close ending the run. On
+  Linux nothing here could press a key in a window it does not focus (milestone 2), so
+  there it is shown only by waits ending for the window, not timed.
+- **A frame asked for at a time** came under 1.6 ms late (milestone 2).
+- **A dev build connected to `goldberg watch`** waits 48 to 50 times in 12 still seconds, as a
+  ship build would, and a save reaches the window in 6 to 10 ms (slice 6: 7 to 9).
+- **A sparse each's `placeholder` cooks**, written one node to a line, as kim requires (the
+  criterion's one-line form does not parse); elsewhere it is a mistake with its line.
+- **A Krome screen that changes once is presented once** under decoupled pacing (milestone 5's
+  test), where it had presented nothing for a `krome_set`.
+- **`krome_set` with a long string** sets it whole, in order, and a text shows all of it.
+- **The tree builds and the demos hash as before** on Linux (debug, dev, ship) and Windows.
+
+Left open:
+
+- **Android and iOS** still wait 4 ms at most (`HostWindow::wait`), as the loop's sleep did:
+  milestone 4 wrote Windows only, and neither phone was to hand. Their waits are as the
+  table under "Waiting" says (`ALooper_pollOnce`, the main run loop with `CFRunLoopWakeUp`);
+  a phone's still app polls until they are written.
+- **Blackwing's `widgets.kim`** keeps its `def placeholder` until it builds on this slice;
+  then it can go.
+- **`krome_set_doc`'s order:** its documents are applied before a frame's sets, whatever
+  order they were made in, though its header says in order (milestone 5).
+- **For review, 1 to 3** stand as drafted: the heartbeat stays at 0.25 s, a read under way
+  keeps the 4 ms poll, and sockets are watched from a thread of the platform's.

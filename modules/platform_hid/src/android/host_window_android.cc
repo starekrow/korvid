@@ -732,7 +732,8 @@ void HostWindow::drain(EventBus& bus, Input& input) {
     }
 }
 
-// Milestone 4 of slice 12 waits on the OS here; till then a wait is the 4 ms poll the loop had.
+// Not written yet (slice 12 left it open): a wait is the 4 ms poll the loop had. The OS's
+// wait goes here (docs/PRDs/Engine-Slice-12-PRD.md, "Waiting").
 bool HostWindow::wait(f64 seconds) {
     if (seconds > 0.0) time_sleep(seconds < 0.004 ? seconds : 0.004);
     return false;
