@@ -5,6 +5,7 @@
 // A frame draws what the tables say. The CPU's part is the dirty rows it copies in and
 // the list of non-empty buckets it keeps; it never visits a sprite to draw.
 #include "renderer_internal.h"
+#include "korvid/core/os_error.h"
 #include "korvid/core/arena.h"
 #include "korvid/platform/io.h"
 #include "korvid/core/format.h"
@@ -22,7 +23,7 @@ bool rb_load_shader(Renderer* r, const char* name, VkShaderModule* out) {
     format(path, sizeof path, "shaders/%s", name);
     IoBytes file; // needed only until the module is created
     i32 err = 0;
-    if (!io_read_bundled(path, &file, nullptr, &err)) { KV_ERROR("vulkan", "cannot read shader '%s': %s", path, strerror(err)); return false; }
+    if (!io_read_bundled(path, &file, nullptr, &err)) { KV_ERROR("vulkan", "cannot read shader '%s': %s", path, os_error_text(err)); return false; }
     if (file.size == 0 || (file.size % 4) != 0) { file.free(); KV_ERROR("vulkan", "bad SPIR-V size in '%s'", path); return false; }
     const u32* words = (const u32*)file.data;
     usize len = file.size;

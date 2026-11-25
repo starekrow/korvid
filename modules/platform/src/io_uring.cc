@@ -3,6 +3,7 @@
 // array; push fills the next SQE and publishes the tail with a release store; enter is
 // one syscall per pump; pop reads completions behind the tail with an acquire load.
 #include "io_ring.h"
+#include "korvid/core/os_error.h"
 #include "korvid/core/log.h"
 #include "korvid/core/atomic.h"
 #include "korvid/core/memory.h"
@@ -70,7 +71,7 @@ IoRing* io_ring_create(u32 entries) {
     io_uring_params p{};
     int fd = (int)syscall(__NR_io_uring_setup, entries, &p);
     if (fd < 0) {
-        KV_INFO("io", "io_uring unavailable (%s): synchronous reads", strerror(errno));
+        KV_INFO("io", "io_uring unavailable (%s): synchronous reads", os_error_text(errno));
         return nullptr;
     }
     IoRing* r = alloc_items<IoRing>(mem_general());
@@ -189,7 +190,7 @@ bool io_ring_enter(IoRing* r, u32 min_complete) {
     long n = syscall(__NR_io_uring_enter, r->fd, r->pushed, min_complete, flags, nullptr, 0);
     if (n < 0) {
         if (errno == EINTR) return true; // nothing submitted; the next pump tries again
-        KV_ERROR("io", "io_uring_enter: %s", strerror(errno));
+        KV_ERROR("io", "io_uring_enter: %s", os_error_text(errno));
         return false;
     }
     r->in_flight += (u32)n;

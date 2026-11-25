@@ -260,7 +260,7 @@ struct IoQueue {
 // ---- Errors ---------------------------------------------------------------------------
 // One convention for every blocking call in this header that can fail: its last parameter
 // is `i32* err = nullptr`. A failure sets *err (if given) to an errno value, the same on
-// every OS (Windows' errors are translated), which strerror describes and
+// every OS (Windows' errors are translated), which os_error_text (core/os_error.h) describes and
 // IoCompletion::error carries for the queue's requests; success leaves it alone. The
 // return value alone says whether it failed.
 

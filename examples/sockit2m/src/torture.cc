@@ -1,6 +1,7 @@
 // sockit2m: the jobs, the working set, and the module whose systems step the jobs
 // inside the engine's tick.
 #include "torture.h"
+#include "korvid/core/os_error.h"
 #include "korvid/sockit2m/module.h"
 #include "korvid/core/format.h"
 #include "korvid/core/engine.h"
@@ -51,7 +52,7 @@ bool make_work_dir() {
     }
     format(g_work_dir, sizeof g_work_dir, "%s/sockit2m-XXXXXX", base);
     i32 err = 0;
-    if (!workset_make_unique_dir(g_work_dir, &err)) { KV_ERROR("sockit2m", "cannot create a working directory under '%s': %s", base, strerror(err)); return false; }
+    if (!workset_make_unique_dir(g_work_dir, &err)) { KV_ERROR("sockit2m", "cannot create a working directory under '%s': %s", base, os_error_text(err)); return false; }
     return true;
 }
 
@@ -66,7 +67,7 @@ bool write_working_set(f64* mb_per_s) {
         char path[600];
         file_path(path, sizeof path, i);
         FILE* f = fopen(path, "wb");
-        if (!f || fwrite(buf, 1, size, f) != size) { KV_ERROR("sockit2m", "cannot write '%s': %s", path, strerror(errno)); if (f) fclose(f); mem_free(buf); return false; }
+        if (!f || fwrite(buf, 1, size, f) != size) { KV_ERROR("sockit2m", "cannot write '%s': %s", path, os_error_text(errno)); if (f) fclose(f); mem_free(buf); return false; }
         fclose(f);
     }
     workset_flush(); // what the disk took, not what the page cache took

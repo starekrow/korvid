@@ -1,4 +1,5 @@
 #include "korvid/platform/io.h"
+#include "korvid/core/os_error.h"
 #include "korvid/core/format.h"
 #include "korvid/core/sha256.h"
 #include "korvid/core/sort.h"
@@ -604,7 +605,7 @@ bool archive_open(IoMount& m, Allocator* a, const char* path, u64 base, u64 span
     if (!path || strlen(path) >= sizeof m.path) { KV_ERROR("io", "mount: bad pack path"); if (werr) *werr = path ? ENAMETOOLONG : ENOENT; return false; }
     i32 err = 0;
     KHandle fd = os_file_open(path, false, &err);
-    if (!fd.is_open()) { KV_WARN("io", "mount: cannot open '%s': %s", path, strerror(err)); if (werr) *werr = err; return false; }
+    if (!fd.is_open()) { KV_WARN("io", "mount: cannot open '%s': %s", path, os_error_text(err)); if (werr) *werr = err; return false; }
     const char* why = nullptr;
     ZipTail tail;
     u8* buf = nullptr;
@@ -618,7 +619,7 @@ bool archive_open(IoMount& m, Allocator* a, const char* path, u64 base, u64 span
         return false;
     };
     u64 size = 0;
-    if (!os_file_size(fd, &size, &err)) return give_up(strerror(err));
+    if (!os_file_size(fd, &size, &err)) return give_up(os_error_text(err));
     // An archive inside the file: every offset below is the archive's own, read at base.
     if (base > size || span > size - base) return give_up("the archive runs past the end of the file");
     size = span ? span : size - base;

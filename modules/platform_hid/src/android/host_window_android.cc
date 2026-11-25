@@ -21,6 +21,7 @@
 // goes to logcat under the tag "korvid" (core's output sink). The working directory is the
 // app's external files directory, where adb pull reaches what a run writes.
 #include "korvid/platform_hid/host_window.h"
+#include "korvid/core/os_error.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
@@ -268,7 +269,7 @@ void* game_thread(void*) {
     const char* out_dir = app.activity->externalDataPath ? app.activity->externalDataPath : app.activity->internalDataPath;
     if (out_dir) {
         mkdir(out_dir, 0770);
-        if (chdir(out_dir) != 0) KV_WARN("window", "cannot enter %s: %s", out_dir, strerror(errno));
+        if (chdir(out_dir) != 0) KV_WARN("window", "cannot enter %s: %s", out_dir, os_error_text(errno));
     }
 
     // argv: the program's name, then the intent's "args" split at spaces. The name is the
@@ -477,7 +478,7 @@ extern "C" JNIEXPORT void ANativeActivity_onCreate(ANativeActivity* activity, vo
     tell_platform(activity);
     go_immersive(activity);
     if (pipe2(app.wake, O_NONBLOCK | O_CLOEXEC) != 0) {
-        __android_log_print(ANDROID_LOG_ERROR, "korvid", "pipe: %s", strerror(errno));
+        __android_log_print(ANDROID_LOG_ERROR, "korvid", "pipe: %s", os_error_text(errno));
         ANativeActivity_finish(activity);
         return;
     }

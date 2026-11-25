@@ -1,4 +1,5 @@
 #include "korvid/platform/process.h"
+#include "korvid/core/os_error.h"
 #include "korvid/core/format.h"
 #include "korvid/core/memory.h"
 #include <errno.h>
@@ -98,7 +99,7 @@ bool Process::spawn(const ProcessDesc& desc) {
     // With fork, a third pipe carries the child's errno if its exec fails; posix_spawn
     // returns that itself.
     if (!proc_pipe(out) || !proc_pipe(err) || (!KV_PROC_SPAWN && !proc_pipe(fail))) {
-        format(error, sizeof error, "pipe: %s", strerror(errno));
+        format(error, sizeof error, "pipe: %s", os_error_text(errno));
         proc_close(out[0]); proc_close(out[1]); proc_close(err[0]); proc_close(err[1]);
         return false;
     }
@@ -136,7 +137,7 @@ bool Process::spawn(const ProcessDesc& desc) {
     proc_close(out[1]); proc_close(err[1]);
     if (why != 0) {
         proc_close(out[0]); proc_close(err[0]);
-        format(error, sizeof error, "%s: %s", desc.cwd && why == ENOENT && access(desc.cwd, F_OK) != 0 ? desc.cwd : desc.argv.data[0], strerror(why));
+        format(error, sizeof error, "%s: %s", desc.cwd && why == ENOENT && access(desc.cwd, F_OK) != 0 ? desc.cwd : desc.argv.data[0], os_error_text(why));
         return false;
     }
 #else
@@ -165,7 +166,7 @@ bool Process::spawn(const ProcessDesc& desc) {
     mem_free(envp);
     proc_close(out[1]); proc_close(err[1]); proc_close(fail[1]);
     if (child < 0) {
-        format(error, sizeof error, "fork: %s", strerror(fork_errno));
+        format(error, sizeof error, "fork: %s", os_error_text(fork_errno));
         proc_close(out[0]); proc_close(err[0]); proc_close(fail[0]);
         return false;
     }
@@ -180,7 +181,7 @@ bool Process::spawn(const ProcessDesc& desc) {
         int status;
         while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
         proc_close(out[0]); proc_close(err[0]);
-        format(error, sizeof error, "%s: %s", desc.cwd && why == ENOENT && access(desc.cwd, F_OK) != 0 ? desc.cwd : desc.argv.data[0], strerror(why));
+        format(error, sizeof error, "%s: %s", desc.cwd && why == ENOENT && access(desc.cwd, F_OK) != 0 ? desc.cwd : desc.argv.data[0], os_error_text(why));
         return false;
     }
 #endif

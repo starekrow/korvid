@@ -6,6 +6,7 @@
 // by itself; --borderless opens one without a frame. Gamepad buttons and disconnections
 // are logged too (platform_hid logs each pad as it connects).
 #include "korvid/window/module.h"
+#include "korvid/core/os_error.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/events.h"
 #include "korvid/platform_hid/host_window.h"
@@ -126,7 +127,7 @@ int run(int argc, char** argv) {
         IoBytes b;
         i32 err = 0;
         if (io_read_bundled(bundled, &b, nullptr, &err)) KV_INFO("window", "bundled '%s': %llu bytes", bundled, (unsigned long long)b.size);
-        else KV_ERROR("window", "bundled '%s': %s", bundled, strerror(err));
+        else KV_ERROR("window", "bundled '%s': %s", bundled, os_error_text(err));
         b.free();
     }
     // Typed text, as a text field would ask for it: the OS's keyboard up where there is one,
@@ -158,7 +159,7 @@ int run(int argc, char** argv) {
             if (IoCompletion done; io->take(asset_read, &done)) {
                 asset_read = Handle{};
                 if (done.status == IoStatus::Done) KV_INFO("window", "asset '%s': %llu bytes, starting \"%.24s\"", asset, (unsigned long long)done.bytes.size, done.bytes.size ? (const char*)done.bytes.data : "");
-                else KV_ERROR("window", "asset '%s': %s", asset, strerror(done.error));
+                else KV_ERROR("window", "asset '%s': %s", asset, os_error_text(done.error));
                 done.bytes.free();
             }
         }

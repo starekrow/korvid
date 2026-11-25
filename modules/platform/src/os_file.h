@@ -1,6 +1,6 @@
 // Korvid platform: files and directories from the OS, one source per OS (posix/file_posix.cc,
 // win32/file_win32.cc). Paths are UTF-8 with '/' separators. Errors are errno values on
-// every platform: they are what IoCompletion::error carries and what strerror describes.
+// every platform: they are what IoCompletion::error carries and what os_error_text describes.
 #pragma once
 #include "korvid/platform/io.h"
 #include "os_err.h"

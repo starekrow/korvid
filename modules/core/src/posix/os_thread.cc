@@ -1,4 +1,5 @@
 #include "korvid/core/os_thread.h"
+#include "korvid/core/os_error.h"
 #include "korvid/core/atomic.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
@@ -131,7 +132,7 @@ bool os_thread_enter_audio_class() {
         if (err == EPERM && rl.rlim_cur == 0)
             format(why, sizeof why, "RLIMIT_RTPRIO is 0 (ulimit -r; a desktop session grants realtime through rtkit, which core does not ask)");
         else
-            format(why, sizeof why, "SCHED_FIFO at %d: %s (RLIMIT_RTPRIO %lld)", prio, strerror(err),
+            format(why, sizeof why, "SCHED_FIFO at %d: %s (RLIMIT_RTPRIO %lld)", prio, os_error_text(err),
                      rl.rlim_cur == RLIM_INFINITY ? -1ll : (long long)rl.rlim_cur);
         audio_class_refused(why);
     }

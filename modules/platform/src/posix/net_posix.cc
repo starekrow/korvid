@@ -1,4 +1,5 @@
 #include "korvid/platform/net.h"
+#include "korvid/core/os_error.h"
 #include "../os_err.h"
 #include "korvid/core/log.h"
 #include <arpa/inet.h>
@@ -57,7 +58,7 @@ int tcp_socket() {
 bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     close();
     int s = tcp_socket();
-    if (s < 0) { int e = errno; KV_ERROR("net", "socket: %s", strerror(e)); return os_fail(err, e); }
+    if (s < 0) { int e = errno; KV_ERROR("net", "socket: %s", os_error_text(e)); return os_fail(err, e); }
     int one = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     sockaddr_in addr{};
@@ -66,7 +67,7 @@ bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     addr.sin_addr.s_addr = htonl(scope == NetScope::Loopback ? INADDR_LOOPBACK : INADDR_ANY);
     if (bind(s, (sockaddr*)&addr, sizeof addr) != 0 || listen(s, 8) != 0 || !set_nonblocking(s)) {
         int e = errno;
-        KV_ERROR("net", "listen on port %u: %s", want_port, strerror(e));
+        KV_ERROR("net", "listen on port %u: %s", want_port, os_error_text(e));
         ::close(s);
         return os_fail(err, e);
     }
@@ -93,7 +94,7 @@ KHandle NetListener::accept() {
     int c = ::accept4((int)fd.os(), nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
 #endif
     if (c < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) KV_WARN("net", "accept: %s", strerror(errno));
+        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) KV_WARN("net", "accept: %s", os_error_text(errno));
         return -1;
     }
     return khandle_make(KHandleKind::Socket, c);
@@ -168,7 +169,7 @@ bool net_connect_local(u16 port, NetSocket* out, i32* err) {
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (connect(s, (sockaddr*)&addr, sizeof addr) != 0 && errno != EINPROGRESS) {
         int e = errno;
-        KV_ERROR("net", "connect to port %u: %s", port, strerror(e));
+        KV_ERROR("net", "connect to port %u: %s", port, os_error_text(e));
         ::close(s);
         return os_fail(err, e);
     }

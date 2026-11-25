@@ -5,6 +5,7 @@
 // which its PSV0 part (pipeline state validation, version 3 and up) carries in its string
 // table. Nothing compiles at run time.
 #include "renderer_internal.h"
+#include "korvid/core/os_error.h"
 #include "korvid/core/bytes.h"
 #include "korvid/core/format.h"
 #include "korvid/inflate/inflate.h"
@@ -63,7 +64,7 @@ bool rb_load_shader_entries(Renderer* r, const char* file, const char* const* en
     format(path, sizeof path, "%sshaders/%s", r->base_path, file);
     IoBytes zip;
     i32 read_err = 0;
-    if (!io_read_file(path, &zip, nullptr, &read_err)) { KV_ERROR("d3d12", "cannot read shader '%s': %s", path, strerror(read_err)); return false; }
+    if (!io_read_file(path, &zip, nullptr, &read_err)) { KV_ERROR("d3d12", "cannot read shader '%s': %s", path, os_error_text(read_err)); return false; }
     const char* err = "";
     usize tail_len = zip.size < KV_ZIP_TAIL_MAX ? zip.size : KV_ZIP_TAIL_MAX;
     ZipTail tail;
