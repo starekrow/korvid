@@ -12,17 +12,22 @@
 // calls tool_finish itself. The loop ticks when something asks for a tick (the I/O queue
 // busy, Work pending, engine_want_ticks, a waker's PlatformWatch stirring or its time
 // coming) and sleeps in platform_wait when nothing does, a quarter-second heartbeat apart
-// at the slowest: a tool that waits on a socket or a child uses no CPU while it waits, and
-// a system that advances only by being ticked says engine_want_ticks. The same commands work in any engine that links the module,
-// from its CLI.
+// at the slowest: a tool that waits on a socket or a child uses no CPU while it waits, once
+// its module names them in a watched waker's PlatformWatch (engine_add_watched_waker), and
+// a system that advances only by being ticked says engine_want_ticks. Nothing watches a
+// handle no module named. modules/tool/README.md, "A tool that waits", has the whole
+// pattern. The same commands work in any engine that links the module, from its CLI.
 //
 // Exit status: the code given to tool_finish; 2 for a request the CLI refused (unknown
-// command, bad arguments) or a run stopped by --max-ticks; 1 if the engine did not start;
+// command, bad arguments, ctx.fail: the run ends there, before any tick) or a run stopped
+// by --max-ticks; 1 if the engine did not start;
 // 3 if the run leaked memory in a dev or debug build (the leak report names it). A tool
 // whose systems never call tool_finish runs until --max-ticks or forever: finishing is
-// the tool's job.
+// the tool's job. A failure the work finds later (a port in use) is print_err and
+// tool_finish(e, 1), which keeps 2 for usage.
 //
-// Engine flags come before the command: --threads N, --verbose (INFO lines; a tool logs
+// Engine flags come before the command; the scan stops at the first word not starting
+// with "--", so the command's own words (a "--", a "-n") reach it untouched: --threads N, --verbose (INFO lines; a tool logs
 // warnings and errors only by default), --max-ticks N (stop with 2 if not finished).
 // --cli-port N opens the CLI's listener on loopback for the length of the run.
 // --profile FILE writes the engine's profiler's trace of the run (Chrome's JSON events, as

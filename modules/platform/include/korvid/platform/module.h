@@ -115,14 +115,19 @@ struct NetListener;
 struct NetSocket;
 struct FsWatcher;
 struct Process;
-constexpr f64 kPlatformSoon = 0.004; // how long "soon" is: one pass of a loop that polls
+// How long "soon" is: one pass of a loop that polls. With no window the wait is a
+// condition's, which Windows rounds up to its scheduler tick (15.6 ms unless something
+// raised the timer resolution): there, soon comes about 60 times a second, not 250.
+constexpr f64 kPlatformSoon = 0.004;
 
 struct PlatformWatch {
     explicit PlatformWatch(Engine& e) : engine(&e) {}
     void add(const NetListener& l);  // a connection waiting to be accepted
     void add(const NetSocket& s);    // bytes to read; and soon, while what was written is still queued
     void add(FsWatcher& w);          // news for its poll(): sets the watcher's wake, and takes its due()
-    void add(const Process& p);      // output to read on either pipe
+    // Output to read on either pipe, or a pipe's end. Not the child's exit: once both pipes
+    // have ended, an owner waiting for it asks soon() until running() says it is over.
+    void add(const Process& p);
     void add(IoQueue& q);            // a completion to take: sets the queue's wake
     // A handle of the owner's own. Watched where this OS can watch its kind; asked again
     // soon where it cannot (a pipe on Windows). A file on a disk is always readable and

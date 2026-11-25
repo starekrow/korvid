@@ -12,6 +12,9 @@ the `main` such a tool needs and the rule for when it is done.
 
 1. Reads the engine's options from the front of the command line: `--threads N`,
    `--verbose` (a tool logs warnings and errors only unless asked), `--max-ticks N`.
+   The scan stops at the first word that does not start with `--`, so everything from the
+   command on reaches the command as it was typed, a `--` or a `-n` included. A word
+   holding `"` is refused with exit status 2.
 2. Joins the rest into one CLI request prefixed by the tool's name, quoting words with
    spaces: `kpack list build/game.kpak` becomes the request `kpack list build/game.kpak`.
    `kpack help` is the CLI's own `help`, which lists every command the tool knows.
@@ -19,8 +22,12 @@ the `main` such a tool needs and the rule for when it is done.
    no external library; a tool that wants a window or sound adds `platform_hid` or
    `platform_audio` to its deps, and kormake's host tool line says what it then links.
    The CLI never reads stdin in a tool: a build's pipes are not a session.
-4. Runs the request. Its lines go to stdout; a failure goes to stderr and the exit status
-   is 2.
+4. Runs the request. Its lines go to stdout. A failure (`ctx.fail`) goes to stderr and
+   ends the run there, with exit status 2 and no tick run: it is for a request that is
+   wrong as typed. A failure the work finds later (a port in use, a file missing) is the
+   tool's to print with `print_err` and end with `tool_finish(e, 1)`, which keeps 2 for
+   usage. stdout and stderr are binary on Windows too (`os_stdio_binary`): the bytes
+   written are the bytes a reader gets, `\n` and all.
 5. Ticks the engine when something asks for a tick, and sleeps when nothing does, until a
    system calls `tool_finish(e, code)` or `--max-ticks` is reached. The Work cycle
    (`engine_work`, [cycles](../../docs/concepts/cycles.md)) gets 5 ms after each tick; a
@@ -31,9 +38,12 @@ the `main` such a tool needs and the rule for when it is done.
    - a waker (`engine_add_watched_waker`) whose `PlatformWatch` stirs, or whose time
      comes ([platform](../platform/README.md), "What wakes it");
    - the heartbeat, a quarter of a second after the last tick.
-   So a tool that waits on a socket, a child process or a watched directory uses no CPU
-   while it waits, and one that works through the queue runs flat out, with nothing to
-   set up either way. A system that advances by being ticked, with none of the above
+   So a tool that works through the queue runs flat out with nothing to set up, and one
+   that waits on a socket, a child process or a watched directory uses no CPU while it
+   waits once its module says what it is waiting on: a watched waker and a
+   `PlatformWatch` ([a tool that waits](#a-tool-that-waits), below). Nothing watches a
+   handle the module has not named; without a waker such a tool hears its socket at the
+   heartbeat's pace. A system that advances by being ticked, with none of the above
    pending, calls `engine_want_ticks`: without it, it runs at the heartbeat's pace.
    `--max-ticks` ticks without waiting.
 6. Shuts the engine down. In debug and dev builds, memory still live after shutdown makes
@@ -69,6 +79,55 @@ pool like anything else in the engine.
 ```cpp
 int main(int argc, char** argv) { return kv::tool_main(argc, argv, kv_module_list(), {.name = "kpack"}); }
 ```
+
+### A tool that waits
+
+A tool that serves a socket or runs a child has four pieces: a system that does the
+I/O, a watched waker that says what the system is waiting on, the startup that adds the
+waker and the shutdown that takes it away. From [runcast](../../tools/runcast/README.md)
+(`tools/runcast/src/module.cc`), which runs a command for whoever connects:
+
+```cpp
+// The work: whatever can be done now, then return. It never waits and never asks for a tick.
+void pump(TickContext& ctx) { ... accept, read the child as far as sock.room() allows, flush ... }
+constinit const SystemDesc k_systems[] = {
+    {.name = ".pump", .phase = Phase::PreSim, .fn = pump, .main_thread = true, .runs = RunWhen::Always},
+};
+
+// Asked by the loop each pass: what the run is waiting on now.
+bool waker(Engine& e, void* user) {
+    Runcast& r = *(Runcast*)user;
+    PlatformWatch w(e);
+    if (listening) w.add(r.listener);
+    if (streaming) { w.add(r.sock); w.add(r.child); w.soon(); }   // soon: the child's end is not watched
+    platform_watch(e, &r, w);
+    return false;                     // a stir gets the tick by itself; the reading is pump's
+}
+
+bool runcast_startup(Engine& e, ModuleInstance& self) { ... return engine_add_watched_waker(e, waker, r); }
+void runcast_shutdown(Engine& e, ModuleInstance& self) {
+    platform_unwatch(e, r);           // before what it watched is closed
+    engine_remove_waker(e, waker, r);
+    ... close the child, the socket, the listener ...
+}
+```
+
+- **The system is the tool's pump**: PreSim, main thread (sockets and children are the
+  loop thread's), `RunWhen::Always`, as kbor's and runcast's are.
+- **Backpressure**: read from the child only as much as `sock.room()` says the socket
+  will take, and leave the rest in the pipe, where the child blocks. A socket with output
+  still queued is asked about again soon by `PlatformWatch::add(NetSocket)` itself, so
+  the queue drains without a tick asked for.
+- **A child's exit is not watched**, only its pipes (`PlatformWatch::add(Process)`): once
+  they have ended, add `w.soon()` until `running()` says it is over. (On Windows the pipes
+  themselves cannot be watched, and `add` asks soon for them already.)
+- **How soon is soon**: `kPlatformSoon` is 4 ms, but a loop with no window waits on a
+  condition, and Windows rounds that wait up to its scheduler tick, 15.6 ms unless
+  something raised the timer resolution. A tool reading a child on Windows wakes about 60
+  times a second; on POSIX the pipes are watched and it wakes when output comes.
+- **Or an `Alertable`** ([platform](../platform/README.md), "Alerts"): an entity that
+  reads one handle in a handler needs no waker. It hears only "something to read", so a
+  tool that also waits on queued output, a time or a child's end uses a waker.
 
 **In a game.** The same module linked into a game registers the same commands in the
 game's CLI, so `kpack verify ...` can be typed into a running dev build. `tool_running(e)`

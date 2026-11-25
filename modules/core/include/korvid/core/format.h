@@ -58,7 +58,11 @@ void print_flush_lines();
 using OutputSink = void (*)(bool err, const char* text, usize len);
 // Sets the sink; null goes back to the C library's streams.
 void output_set_sink(OutputSink sink);
-// One write to the sink or the stream, as print and the log make them.
+// One write to the sink or the stream, as print and the log make them: `len` bytes as they
+// are, no format string, so it is the way to put raw bytes (a child's output, a file) on
+// stdout. Buffered and flushed as print is (above): bytes that do not end in '\n' wait
+// for print_flush. In a tool, stdout and stderr are binary on Windows too
+// (os_stdio_binary): nothing is added to a '\n'.
 void output_write(bool err, const char* text, usize len);
 
 } // namespace kv

@@ -124,11 +124,16 @@ Windows), which calls `platform_wake` when one can be read and leaves it out til
 `platform_wait`, by when the pass it woke has read it: a socket nobody drains wakes each
 wait, not the thread for ever. An `FsWatcher` gives that thread inotify's descriptor, or
 has the OS call (`ReadDirectoryChangesW`, FSEvents), and a polled root gives the time of
-its next walk. A `Process`'s pipes go to the thread where a pipe can be polled (POSIX). An
+its next walk. A `Process`'s pipes go to the thread where a pipe can be polled (POSIX);
+the child's exit is not watched anywhere, so an owner whose child's pipes have ended
+asks `soon()` until `running()` says it is over. An
 `IoQueue`'s task workers wake the loop as each task finishes. A socket with output still
 queued, a read on the ring, and whatever this OS cannot watch (a pipe on Windows, whose
 watch takes sockets only) are asked about again in `kPlatformSoon` (4 ms) instead: the
-owner's code is the same on every OS, and only how promptly it hears differs. 64 handles
+owner's code is the same on every OS, and only how promptly it hears differs: with no
+window the wait is a condition's, which Windows rounds up to its scheduler tick (15.6 ms
+unless something raised the timer resolution), so "soon" there comes about 60 times a
+second, not 250. 64 handles
 in all; past that, soon. A handle knows its kind (`os_handle_kind`), so the wrong one
 cannot be watched by mistake: a file's is refused with an error line. A handle closed
 while it is watched is stale, and left out: its number is never polled for whatever has
@@ -141,6 +146,12 @@ registers no waker. A closed handle is stale and asks for nothing. An alert is a
 not data: `Alertable` is a cosmetic component and nothing of it is recorded, so it is for
 tools, UI and debug channels, not for gameplay that must replay (`docs/design/handles.md`,
 "Alerts", has what would change that).
+
+**Which to use.** An `Alertable` when an entity reads one handle in a handler: nothing to
+register. A watched waker and `PlatformWatch` when the owner must also wake for what an
+alert does not say: output still queued on a socket (backpressure), a time, a child whose
+pipes have ended, an `IoQueue`. A tool's pump is the second kind
+([tool](../tool/README.md#a-tool-that-waits) has it whole).
 
 **Looking at it.** In a program with the CLI, `ls /dev/handles` lists the kinds of OS
 handle, `ls /dev/handles/socket` each open socket with what it is, who

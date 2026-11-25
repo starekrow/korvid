@@ -16,7 +16,8 @@ struct NetListener {
     Handle fd;      // OsKind::Socket
     u16   port = 0; // the bound port; what the OS chose when asked for 0
 
-    // False (*err: EADDRINUSE, EACCES, the OS's errno) with a log line if it cannot listen.
+    // False (*err: EADDRINUSE, EACCES, the OS's errno) if it cannot listen. Nothing is
+    // logged: the failure is the caller's to report, with err (os_error_text).
     bool open(u16 port, NetScope scope = NetScope::Loopback, i32* err = nullptr);
     void close();
     bool is_open() const { return os_handle_open(fd); }
@@ -35,7 +36,7 @@ struct NetSocket {
     bool      closed = false;        // over: the peer went away (read saw the end, or a send failed), or the connect failed
     NetLink   link_state = NetLink::None; // what link() last found
     i32       error = 0;             // why it is closed, as an errno: ECONNREFUSED, ECONNRESET; 0 for a peer that closed in order
-    u64       bytes_in = 0, bytes_out = 0, dropped = 0;
+    u64       bytes_in = 0, bytes_out = 0, dropped = 0; // read; taken by the kernel at flush(); refused by write past out_limit
 
     // Takes ownership of a socket (from accept) and makes it non-blocking.
     void adopt(Handle fd);
@@ -67,6 +68,8 @@ struct NetSocket {
 // Non-blocking connect to 127.0.0.1:port. The socket is usable at once: writes queue,
 // and flush() sends once the connection is up; link() says when it is, or that it was
 // refused. False (*err) only when no socket could be made at all. For tools and tests.
+// A refusal comes at once on POSIX; on Windows the OS retries the connect first, and a port
+// nobody listens on is Failed (ECONNREFUSED) about 2 seconds later.
 // Nothing here logs: a failure is the caller's to report, with err.
 bool net_connect_local(u16 port, NetSocket* out, i32* err = nullptr);
 

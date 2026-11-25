@@ -167,7 +167,8 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
             // The work runs in the tool's systems, over as many ticks as it takes. A tick
             // runs when something asks for one, and the loop sleeps when nothing does: the
             // same contract a game's modules have with the frame loop, so a tool that waits
-            // on a socket or a child uses no CPU while it waits, with nothing to set up.
+            // on a socket or a child uses no CPU while it waits, once its module names them
+            // in a watched waker's PlatformWatch.
             // What asks:
             //   - the platform's queue having requests on their way or completions to take;
             //   - Work pending (docs/design/cycles.md);

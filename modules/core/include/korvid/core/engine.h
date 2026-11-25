@@ -256,11 +256,29 @@ inline void engine_want_frame_at(Engine& e, f64 when) { if (e.frame_due <= 0.0 |
 // did; the loop then draws a frame. It must be cheap and never block. Eight at most; false when
 // full. Remove it before the state `user` names goes.
 bool engine_add_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
+// Removes a waker added either way, matched by `fn` and `user`; nothing if there is none.
+// At the owner's shutdown, after platform_unwatch and before its state goes.
 void engine_remove_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
-// A waker whose sources wake the loop themselves (KR26): its sockets stated to the platform
+// A waker whose sources wake the loop themselves (KR26): its handles stated to the platform
 // (platform_watch, with `user` as the owner), and any time it must be asked without one
 // of them stirring given to engine_want_wake_at. An idle loop then waits for it as long as
 // for the window. A waker added with engine_add_waker makes every idle wait a 4 ms poll.
+//
+// The loop (a tool's, or the frame loop on demand or decoupled) asks `fn` once each pass,
+// before it decides whether to tick or wait, so `fn` states the watch afresh each time from
+// what the owner is waiting on now. True says `fn` found something itself and wants a tick
+// (a frame, in the frame loop). A stir that ends the wait gets a tick by itself, so a waker
+// that only states its watch returns false and leaves the reading to the owner's system:
+//
+//     bool waker(Engine& e, void* user) {             // tools/runcast/src/module.cc, waker
+//         Runcast* me = (Runcast*)user;
+//         PlatformWatch w(e);
+//         w.add(me->listener);  w.add(me->sock);  w.add(me->child);
+//         platform_watch(e, me, w);
+//         return false;
+//     }
+//
+// Added at the owner's startup; false when eight are registered.
 bool engine_add_watched_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
 // The wakers asked by `when` (time_now's clock): a reconnect due, a file settling. The
 // earliest asked for stands until engine_wake, which clears it before it asks them.

@@ -1,6 +1,7 @@
 // Korvid platform: child processes. Spawn one with an argument vector, poll it, read what
 // it writes, kill it. Nothing blocks: whoever owns a process polls it once a tick, as
-// with a socket. For tools (goldberg's converters); a game has no business here.
+// with a socket, and names it in its PlatformWatch (module.h) so a waiting loop wakes for
+// its output. For tools (goldberg's converters); a game has no business here.
 //
 // The child's stdin is empty. Its stdout and stderr are pipes the owner must drain: a
 // child that fills one waits until it is read. It runs in a process group of its own (a
@@ -9,8 +10,11 @@
 //
 // Two ways to say what to run, and no flags to juggle between them:
 // - spawn: an argument vector. argv is argv on every OS: each word reaches the program as
-//   it is given (on Windows, quoted as the C runtime reads a command line back). Nothing
-//   is a shell's to interpret, so a shell's builtins and operators mean nothing here.
+//   it is given (on Windows, every word quoted as the C runtime reads a command line back).
+//   Nothing is a shell's to interpret, so a shell's builtins and operators mean nothing
+//   here. cmd.exe does not read a command line by the C runtime's rules, so `cmd /c` with
+//   words after it fails on its quotes (`'"type"' is not recognized`): that is a line for
+//   shell.
 // - shell: one line for the platform's non-interactive shell, by that shell's own rules:
 //   `/bin/sh -c <line>` on POSIX, `%ComSpec% /d /s /c "<line>"` (cmd.exe) on Windows.
 //   Quoting, builtins (`echo`, `dir`), `&&` and redirection are the shell's, so the line is
