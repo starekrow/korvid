@@ -76,3 +76,58 @@ not a ceiling.
 Resolve is one indirect call and stays out of inner loops. An issuer registers once per
 instance it owns. The type key is per process. A session has 4095 kinds; an editor that
 creates and destroys worlds all day will notice.
+
+## OS handles are handles
+
+Nov 24, 2026. What the OS opened for the process (a file, a socket, a pipe, a watch's
+descriptor, a child process) is named by the same 64 bits as an entity or a texture.
+
+Before this, the platform had a handle of its own, `KHandle`: the OS's value (a
+descriptor, a HANDLE, a SOCKET) in 56 bits with a kind in the top byte. It kept a file's
+handle from being used as a socket's. It could not say anything else, and it was a second
+shape for the idea the engine already had.
+
+The platform is now an issuer, like a ktable or the asset tables. It registers one kind
+per sort of OS object (`os.file`, `os.socket`, `os.pipe`, `os.notify`, `os.process`) and
+keeps one table for all of them. A slot holds the OS's value; the handle is the slot and
+its generation. `Handle` is the only handle type in a public header.
+
+What that buys, none of it visible in the code that holds the handle:
+
+- **An OS handle goes stale.** Closing frees the slot and moves its generation on, so
+  every other copy of the handle stops resolving. A read on a closed file is EBADF from
+  the table, not a read on whichever file the OS gave that descriptor to next. A watch
+  that still lists a closed socket leaves it out instead of polling a dead number. Raw
+  descriptors cannot do this, and no caller does anything to get it.
+- **Any handle can be described.** `kv_handle_describe` prints an OS handle as it prints
+  an entity: `os.file#3:1 C:/game/save.kbor, opened by save, 3900 read, 0 written`. In
+  dev and debug builds a slot keeps what was opened (a path, a peer, a command), which
+  module opened it, when, and the bytes each way. A ship build keeps the OS's value and
+  the kind, nothing else.
+- **One way to ask what a handle is.** `os_handle_kind(h)` answers for any handle: the
+  kind, or None for one that is not the OS's or has gone stale.
+
+Decisions:
+
+- **One table for the process, not per engine.** Files are opened before an engine
+  exists (a tool's arguments, a test) and from threads that belong to no module (the
+  queue's workers, the settings writer). The table is the platform library's own, made
+  at its first use; opening and closing take its lock, resolving does not. Slots do not
+  move once made, so a resolve from one thread while another opens is safe; resolving a
+  handle while another thread closes that same handle is the caller's race, as it was.
+- **The kinds are registered together, at first use.** Kind ids follow registration
+  order; a program opens its first file at the same point in every run, so the ids are
+  the same run to run for that program. Nothing persisted uses an id (saves and the
+  state hash go by kind name).
+- **The cost is one table lookup an I/O call**: a bounds check, a generation compare and
+  a load, against a system call. The byte counters are two atomic adds, in dev and debug.
+- **The OS's value is the platform's alone.** `os_handle_value` is in the module's src/;
+  nothing outside it can take a handle apart, which is what makes staleness enforceable.
+- **Not unified: an I/O request.** `platform.io` (a read or a write on its way through
+  the queue) was already a handle kind of the queue's. It stays one: a request is not an
+  OS object, and its lifetime is the queue's.
+
+What follows from it, and is its own step: an entity can name an OS handle in a
+component and be told when it stirs, as an input event the loop records (so a replay
+sees the same wake on the same tick), since the handle is now something a component can
+hold and the engine can check.
