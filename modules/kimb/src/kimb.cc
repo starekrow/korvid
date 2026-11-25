@@ -228,6 +228,7 @@ constinit const KimbKernelProp k_props[] = {
     {"dir", KimbType::Dir, true},
     {"font", KimbType::String, false},
     {"gap", KimbType::Number, true},
+    {"grip", KimbType::String, true},
     {"h", KimbType::Size, true},
     {"image", KimbType::String, false},
     {"key", KimbType::String, true},

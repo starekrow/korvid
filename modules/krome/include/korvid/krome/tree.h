@@ -122,6 +122,10 @@ constexpr u32 KROME_MOD_CMD   = 1u << 3; // Command on a Mac, the Windows key on
 
 // The pointer's shape over a node (`cursor`): unset is the arrow, an edit's the I-beam.
 enum class KromeCursor : u8 { Unset, Arrow, IBeam, Hand, Move, ResizeEW, ResizeNS, Forbidden };
+// What a node is to the window it is in (`grip`): the part that moves it, or an edge or a
+// corner that resizes it, by the OS's own move and resize (HostWindow::grips). In the order
+// of platform_hid's WindowGrip, one up: None is a node that is no grip.
+enum class KromeGrip : u8 { None, Move, N, NE, E, SE, S, SW, W, NW };
 
 struct KromeNode {
     KromeType  type = KromeType::Box;
@@ -149,6 +153,7 @@ struct KromeNode {
     u8         shortcut_mods = 0;
     u32        placeholder = KROME_NONE; // an edit's, shown while it is empty: an offset into strings
     KromeCursor cursor = KromeCursor::Unset;
+    KromeGrip  grip = KromeGrip::None; // `grip=move`, `grip=se`: a press here is the OS's, and moves or resizes the window
     u32        look = 0;           // the base look: an index into KromeTree::looks
     u32        states[(u32)KromeState::Count] = {}; // for each state, 1 + an index into looks; 0: none
     u32        line = 0;           // where it was written, for errors (0: unknown)

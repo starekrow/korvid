@@ -751,6 +751,7 @@ KromeTarget pressable(KromeModule& s, KromeTarget t) {
     for (u32 n = t.node; n != KROME_NONE; n = tree->nodes[n].parent) {
         const KromeNode& node = tree->nodes[n];
         if (node.flags & KROME_DISABLED) return KromeTarget{};
+        if (found == KROME_NONE && node.grip != KromeGrip::None) return KromeTarget{}; // the OS's: it moves or resizes the window
         if (found == KROME_NONE && (!node.event.is_null() || !node.binding.is_null() || !node.behave.is_null() || node.type == KromeType::Hit || node.type == KromeType::Edit)) found = n;
     }
     t.node = found;
@@ -947,6 +948,116 @@ KromeTree* krome_target_tree(KromeModule& s, const KromeTarget& t, KromeScreen**
     return o ? &o->tree : nullptr;
 }
 
+// ---- grips ------------------------------------------------------------------------------------------------------
+
+namespace {
+
+// Whether a press on the node is Krome's own, as pressable() finds one.
+bool takes_press(const KromeNode& n) {
+    return !n.event.is_null() || !n.binding.is_null() || !n.behave.is_null() || n.type == KromeType::Hit || n.type == KromeType::Edit;
+}
+
+// A tree's grips, and the nodes that take a press of their own (as None: the program's),
+// in paint order, physical pixels, clipped as the pointer is: so a button inside a title
+// bar that moves the window is still the button's.
+void tree_grips(const KromeTree& t, u32 node, f32 scale, rect2 clip, Array<WindowGripRect>& out) {
+    const KromeNode& n = t.nodes[node];
+    if (n.flags & KROME_HIDDEN) return;
+    rect2 r = intersect(clip, krome_pixel_rect(n.rect, scale));
+    if (r.w > 0.0f && r.h > 0.0f) {
+        if (n.grip != KromeGrip::None) out.push(WindowGripRect{r, (WindowGrip)((u8)n.grip - 1)});
+        else if (takes_press(n)) out.push(WindowGripRect{r, WindowGrip::None});
+    }
+    rect2 inner = (n.flags & (KROME_CLIP | KROME_SCROLL)) ? intersect(clip, krome_pixel_rect(n.rect, scale)) : clip;
+    for (u32 ch = n.first; ch != KROME_NONE; ch = t.nodes[ch].next) tree_grips(t, ch, scale, inner, out);
+}
+
+bool overlaps(const rect2& a, const rect2& b) {
+    return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+// The root's range on one axis in physical pixels: a minimum rounded up, a maximum down;
+// 0 where it has none.
+u32 range_px(f32 v, f32 scale, bool up) {
+    if (!(v > 0.0f) || v == __builtin_huge_valf()) return 0;
+    f32 p = v * scale;
+    return (u32)(up ? p + 0.999f : p);
+}
+
+} // namespace
+
+// What the screens say of the window: its grips (`grip=`), bottom screen first and each
+// screen's overlays over it, and its bounds, the size range on the lowest screen's root
+// that has one (`w=275..800 h=116..600`).
+void krome_window_parts(KromeModule& s, Array<WindowGripRect>& out, u32 bounds[4]) {
+    KromeScreen* order[k_max_screens];
+    u32 n = 0;
+    screens_top_first(s, order, &n);
+    out.clear();
+    for (u32 i = 0; i < 4; ++i) bounds[i] = 0;
+    bool bounded = false;
+    for (u32 i = n; i-- > 0;) {
+        KromeScreen& sc = *order[i];
+        if (sc.tree.root != KROME_NONE) {
+            tree_grips(sc.tree, sc.tree.root, s.scale, k_everywhere, out);
+            const KromeNode& root = sc.tree.nodes[sc.tree.root];
+            bool ranged = root.w.lo > 0.0f || root.h.lo > 0.0f || root.w.hi != __builtin_huge_valf() || root.h.hi != __builtin_huge_valf();
+            if (ranged && !bounded) {
+                bounds[0] = range_px(root.w.lo, s.scale, true);
+                bounds[1] = range_px(root.h.lo, s.scale, true);
+                bounds[2] = range_px(root.w.hi, s.scale, false);
+                bounds[3] = range_px(root.h.hi, s.scale, false);
+                bounded = true;
+            }
+        }
+        for (KromeOverlay* o : sc.overlays) {
+            if (o->passive || o->tree.root == KROME_NONE) continue;
+            // An overlay is the program's where it is (all of the window, if modal), over any
+            // grip under it.
+            rect2 at = o->modal ? rect2{0, 0, s.win_w, s.win_h} : krome_pixel_rect(o->tree.nodes[o->tree.root].rect, s.scale);
+            out.push(WindowGripRect{at, WindowGrip::None});
+            tree_grips(o->tree, o->tree.root, s.scale, k_everywhere, out);
+        }
+    }
+    // A rect of the program's matters only over a grip before it: the rest are dropped, and
+    // with no grip at all the list is empty, so the window's input is its own again.
+    u32 kept = 0;
+    for (u32 i = 0; i < out.len; ++i) {
+        const WindowGripRect& g = out[i];
+        bool keep = g.grip != WindowGrip::None;
+        for (u32 k = 0; !keep && k < kept; ++k) keep = out[k].grip != WindowGrip::None && overlaps(out[k].rect, g.rect);
+        if (keep) out[kept++] = g;
+    }
+    out.len = kept;
+}
+
+// The window's parts given to it when they change: worked out again when a screen was
+// painted, or the screens or their overlays came or went. Nothing without a window.
+void krome_send_grips(KromeModule& s, bool repainted) {
+    if (s.viewport_fixed) return;
+    HostWindow* w = platform_window(*s.e);
+    if (!w) return;
+    u32 n = 0, overlays = 0;
+    for (KromeScreen* sc : s.screens) if (sc->ready) { ++n; overlays += sc->overlays.len; }
+    if (!repainted && n == s.grip_screens && overlays == s.grip_overlays) return;
+    s.grip_screens = n;
+    s.grip_overlays = overlays;
+    u32 bounds[4];
+    krome_window_parts(s, s.grips, bounds);
+    bool same = s.grips_given && s.grips.len == s.grips_sent.len &&
+                (!s.grips.len || !memcmp(s.grips.data, s.grips_sent.data, (usize)s.grips.len * sizeof(WindowGripRect)));
+    if (!same) {
+        w->grips(s.grips.data, s.grips.len);
+        s.grips_sent.clear();
+        if (s.grips.len) memcpy(s.grips_sent.push_n(s.grips.len), s.grips.data, (usize)s.grips.len * sizeof(WindowGripRect));
+        s.grips_given = true;
+    }
+    if (memcmp(bounds, s.bounds_sent, sizeof bounds) != 0) {
+        w->bounds(bounds[0], bounds[1], bounds[2], bounds[3]);
+        memcpy(s.bounds_sent, bounds, sizeof bounds);
+    }
+}
+
 // ---- the frame ------------------------------------------------------------------------------------------------
 
 void krome_update_viewport(KromeModule& s) {
@@ -1033,6 +1144,9 @@ void krome_view_frame(KromeModule& s) {
         KV_WARN("krome", "the %s renderer does not draw the UI primitive yet: Krome's screens run but show nothing", renderer_caps(r).backend);
         s.warned_no_ui = true;
     }
+    bool repainted = false;
+    for (KromeScreen* sc : s.screens) if (sc->ready && sc->repaint) repainted = true;
+    krome_send_grips(s, repainted);
     i32 layers[k_max_screens];
     u32 nl = 0;
     for (KromeScreen* sc : s.screens) {
@@ -1243,6 +1357,8 @@ void krome_free_view(KromeModule& s) {
     s.images.free();
     s.layers.free();
     s.list.free();
+    s.grips.free();
+    s.grips_sent.free();
 }
 
 } // namespace kv

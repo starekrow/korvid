@@ -6,6 +6,7 @@
 #include "korvid/core/handle.h"
 #include "korvid/kimb/kimb.h"
 #include "korvid/typeset/typeset.h"
+#include "korvid/platform_hid/host_window.h"
 #include "korvid/platform_hid/input.h"
 #include "korvid/render/ui.h"
 
@@ -297,6 +298,12 @@ struct KromeModule {
     // The lists handed to the renderer, by layer: so a layer whose screens are gone is cleared.
     Array<i32>          layers;
     UiList              list;
+    // The window's grips and bounds as last given (krome_send_grips), so they are given
+    // again only when they change; and what the screens were when they were worked out.
+    Array<WindowGripRect> grips, grips_sent;
+    u32                 bounds_sent[4] = {};
+    u32                 grip_screens = 0, grip_overlays = 0;
+    bool                grips_given = false;
     u64                 paints = 0, layouts = 0, submits = 0;
     u32                 input_id = 0; // input.state's resource id in this engine
     // A scrollbar the pointer pressed: its box, which way, where on the thumb it was taken
@@ -555,6 +562,10 @@ KromeTree* krome_target_tree(KromeModule& s, const KromeTarget& t, KromeScreen**
 void krome_update_viewport(KromeModule& s);
 // Lays out what changed and paints what must be; hands each changed layer's list over.
 void krome_view_frame(KromeModule& s);
+// The window's grips and bounds as the screens say them (`grip=`, the root's range), in
+// physical pixels, bottom screen first: what krome_send_grips gives the window when it changes.
+void krome_window_parts(KromeModule& s, Array<WindowGripRect>& out, u32 bounds[4]);
+void krome_send_grips(KromeModule& s, bool repainted);
 // The screen's list: its tree, then its overlays. For tests too.
 void krome_paint_screen(KromeModule& s, KromeScreen& sc, UiList& list);
 // The pointer and the keys as one sample sees them: hover, press, release, wheel, Escape.

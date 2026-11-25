@@ -46,6 +46,17 @@ scrolls to keep the caret in view; the caret blinks while the window has focus, 
 on-demand window at each turn (`engine_want_frame_at`). The focus is found again by id when
 its tree is built again. `cursor=` sets the pointer's shape (an edit's is the I-beam).
 
+**A window with no frame** (slice 13, KR41). `grip=move` makes a node the part that moves
+the window, and `grip=n`, `ne`, `e`, `se`, `s`, `sw`, `w` or `nw` an edge or a corner that
+resizes it, by the OS's own move and resize (`KromeNode::grip`, a `KromeGrip`). After a
+screen is painted, Krome gives its window the rects of every node with a grip, and over
+them the rects of the nodes that take a press of their own (a close button inside a title
+bar) and of open overlays, as the program's (`HostWindow::grips`), only when the list
+changed. The size range on the lowest screen's root (`w=275..800 h=116..600`) becomes the
+window's bounds (`HostWindow::bounds`), in pixels at the window's scale. A press on a grip
+is the OS's: the node and its ancestors take none. Open the window with
+`WindowDesc::borderless` or `transparent`, or the desktop's frame is there as well.
+
 **Documents.** A `.kimb` (`modules/kim` compiles it from `.kim`; goldberg does that as it
 cooks) is read as a blob asset (`asset_load_blob`), or taken from what `krome_provide` gave,
 and kept: `modules/kimb` reads it, with each node's line from the sidecar. A screen's names
@@ -287,7 +298,7 @@ In Lua: the helpers (and `edit`, with `bind = "key"`), `model`, `emit(name, valu
 Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `pad`, `gap`,
 `dir`, `anchor`, `scroll` (`x`, `y` or `xy`), `tooltip`, `context`, `behave`, `taborder`,
 `key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`); an edit's `placeholder`,
-`change`, `blur`; `cursor`; any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
+`change`, `blur`; `cursor`; `grip` (`move`, an edge or corner by compass point, `none`); any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
 `opacity`, `font`, `size`, `line-height`, `image`, `tint`, `caret-color`, `selection-color`,
 `scrollbar-color`, `scrollbar-track`, `scrollbar-size`, `transition` (seconds: the node's
@@ -350,6 +361,9 @@ Focus rings (`focused { border-color=ring }`) show when Tab brought the focus. S
 
 ## Behaviour worth knowing
 
+- **A grip is a rect.** A drag area shaped like a mask is its bounding rects; a grip
+  inside a scroll box is clipped to it. Where the window takes no grips (Win32 until slice
+  13's third milestone, a phone), a node with a grip still takes no press, and nothing moves.
 - **A bare `fill` is along the parent's direction.** A row in a column fills its height
   with `fill`, its width only with `w=fill`.
 - **One node to a line** in markup; `row { text "a" slot }` is a text with a flag `slot`.
