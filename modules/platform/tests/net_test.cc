@@ -220,3 +220,69 @@ void test_net_write_now(kv::TestCtx& c) {
     KV_CHECK(c, !client.warned && client.read(buf, sizeof buf) == 0 && client.warned == (KV_DEV != 0));
     l.close();
 }
+
+void test_net_blocking(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("net, waiting");
+
+    // accept(seconds): nobody comes, and it gives up when told; somebody comes, and it
+    // returns at once.
+    NetListener l;
+    KV_CHECK(c, l.open(0));
+    f64 t0 = time_now();
+    KV_CHECK(c, !os_handle_open(l.accept(0.1)));
+    f64 took = time_now() - t0;
+    KV_CHECK(c, took >= 0.09 && took < 1.0);
+
+    // net_connect_local_now: Up when somebody listens.
+    NetSocket client;
+    i32 err = 0;
+    KV_CHECK(c, net_connect_local_now(l.port, &client, 5.0, &err) && client.link_state == NetLink::Up && err == 0);
+    t0 = time_now();
+    Handle fd = l.accept(5.0);
+    KV_CHECK(c, os_handle_open(fd) && time_now() - t0 < 1.0);
+    NetSocket server;
+    server.adopt(fd);
+
+    // read(buf, cap, seconds): nothing sent, 0 when the time runs out; something sent, it
+    // returns with it; the peer gone, -1 at once.
+    char buf[16];
+    t0 = time_now();
+    KV_CHECK(c, server.read(buf, sizeof buf, 0.1) == 0);
+    took = time_now() - t0;
+    KV_CHECK(c, took >= 0.09 && took < 1.0);
+    KV_CHECK(c, client.write_now("hello", 5));
+    t0 = time_now();
+    KV_CHECK(c, server.read(buf, sizeof buf, 5.0) == 5 && memcmp(buf, "hello", 5) == 0 && time_now() - t0 < 1.0);
+    client.close();
+    t0 = time_now();
+    KV_CHECK(c, server.read(buf, sizeof buf, 5.0) == -1 && time_now() - t0 < 1.0);
+    server.close();
+
+    // Nobody listening: false, with the reason, and the socket closed. Windows takes about
+    // 2 seconds to say so.
+    u16 dead = l.port;
+    l.close();
+    NetSocket lost;
+    err = 0;
+    KV_CHECK(c, !net_connect_local_now(dead, &lost, 10.0, &err) && err == ECONNREFUSED && lost.error == ECONNREFUSED && !lost.is_open());
+    // A deadline shorter than the answer: ETIMEDOUT, the socket closed all the same.
+    NetSocket late;
+    err = 0;
+    bool up = net_connect_local_now(dead, &late, 0.0, &err);
+    KV_CHECK(c, !up && (err == ETIMEDOUT || err == ECONNREFUSED) && !late.is_open());
+}
+
+void test_net_waiting_on_nothing(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("net, waiting on nothing");
+    // A listener that never opened, a socket that was never connected: the waits still
+    // last their time (and a dev or debug build warns), so a loop of them idles.
+    NetListener none;
+    f64 t0 = time_now();
+    KV_CHECK(c, !os_handle_open(none.accept(0.05)) && time_now() - t0 >= 0.045 && none.warned == (KV_DEV != 0));
+    NetSocket nobody;
+    char buf[4];
+    t0 = time_now();
+    KV_CHECK(c, nobody.read(buf, sizeof buf, 0.05) == 0 && time_now() - t0 >= 0.045 && nobody.warned == (KV_DEV != 0));
+}

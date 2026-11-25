@@ -103,7 +103,9 @@ timers, the CLI and `--cli-port`, the I/O queue. What it returns is the run's ex
 ```cpp
 i32 serve(void* arg, const ToolTaskCtl& ctl) {
     Serve& s = *(Serve*)arg;                  // the command's, kept where it is till the run ends
-    ... accept in a loop that sleeps, looking at ctl.cancelled() ...
+    Handle fd;
+    while ((fd = s.listener.accept(0.25)).is_null()) if (ctl.cancelled()) return 1;
+    ... adopt it, spawn the child ...
     while (s.child.running() && !ctl.cancelled()) {
         s.child.wait(0.25);                   // till it writes or exits
         while ((n = s.child.read_out(buf, sizeof buf)) > 0)

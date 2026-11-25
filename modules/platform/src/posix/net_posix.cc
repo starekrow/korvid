@@ -195,6 +195,14 @@ void net_wait_writable(NetSocket& sock, f64 seconds) {
     ::poll(&p, 1, ms);
 }
 
+void net_wait_readable(Handle fd, f64 seconds) {
+    i64 v = os_handle_value(fd, OsKind::Socket);
+    if (v < 0) return;
+    struct pollfd p = {(int)v, POLLIN, 0};
+    int ms = seconds <= 0.0 ? 0 : (int)(seconds * 1000.0 + 0.999);
+    ::poll(&p, 1, ms);
+}
+
 bool NetSocket::write_str(const char* s) { return write(s, (u32)strlen(s)); }
 
 void NetSocket::flush() {

@@ -218,6 +218,17 @@ void net_wait_writable(NetSocket& sock, f64 seconds) {
     select(0, nullptr, &can_write, &failed, &t);
 }
 
+void net_wait_readable(Handle fd, f64 seconds) {
+    i64 v = os_handle_value(fd, OsKind::Socket);
+    if (v < 0) return;
+    fd_set can_read, failed;
+    FD_ZERO(&can_read); FD_ZERO(&failed);
+    FD_SET((SOCKET)v, &can_read); FD_SET((SOCKET)v, &failed);
+    long us = seconds <= 0.0 ? 0 : (long)(seconds * 1e6);
+    timeval t{us / 1000000, us % 1000000};
+    select(0, &can_read, nullptr, &failed, &t);
+}
+
 bool NetSocket::write_str(const char* s) { return write(s, (u32)strlen(s)); }
 
 void NetSocket::flush() {

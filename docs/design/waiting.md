@@ -96,3 +96,29 @@ per pass for as long as one ran.
   `kOsQueued` flag is what the thread would need to know when to ask.
 - A blocking task for a game: `tool_task` is the tool's, since a game's loop has no run
   to finish. The I/O queue's tasks (`IoQueue::run_task`) are the game's way today.
+
+## Later the same day: the straight-line calls, measured
+
+Rewriting both cold-read tools on the above showed two more things. Windows'
+`Process::wait` slept in steps of `WaitForSingleObject(process, 1)` and `Sleep(1)`, each
+rounded up to the scheduler's 15.6 ms, so a straight-line loop looked at a busy child about
+64 times a second (8.3 MB/s). It waits on the process handle and a high-resolution timer
+together now, in steps that start at half a millisecond and double to 16 while nothing
+comes. And straight-line code had no blocking accept, read or connect, so it slept in
+loops of its own. `NetListener::accept(seconds)`, `NetSocket::read(buf, cap, seconds)` and
+`net_connect_local_now(port, &sock, seconds, &err)` wait on the handle (`select` on
+Windows, `poll` on POSIX) in the slices `write_now` uses. On a listener or socket that is
+not open they wait out their time instead of returning at once, so a loop of them that
+never checked the open idles rather than spins.
+
+The same 50 MB child, on Windows:
+
+| | throughput | idle wakeups | streaming wakeups |
+|---|---|---|---|
+| the pumped tool (a system and a standing watch) | 28.1 MB/s | 4 a second | 241 a second |
+| the straight-line tool (a `tool_task`), sleep loops | 12.2 MB/s | 96 a second | ~200 a second |
+| the straight-line tool, the calls above | 101 MB/s | 8 a second | 96 a second |
+
+The straight-line tool's thread waits on the pipe itself; the pumped tool hears it through
+the loop, which asks a Windows pipe again every `kPlatformSoon`. Watching the pipes would
+close most of that gap (Not done, above).

@@ -4,6 +4,7 @@
 #include "net_internal.h"
 #include "misuse.h"
 #include "korvid/core/time.h"
+#include <errno.h>
 #include <string.h>
 
 namespace kv {
@@ -72,6 +73,49 @@ bool NetSocket::write_now(const void* data, u32 size, f64 seconds) {
     bool all = send_now(*this, (const u8*)data, size, seconds);
     net_mark_queued(*this); // what a watch of it reads, on every way out
     return all;
+}
+
+Handle NetListener::accept(f64 seconds) {
+    f64 deadline = seconds >= 0.0 ? time_now() + seconds : -1.0;
+    for (;;) {
+        Handle h = accept();
+        if (os_handle_open(h)) return h;
+        if (!os_handle_open(fd)) { time_sleep(seconds >= 0.0 ? seconds : kWaitSlice); return h; } // no listener (accept() has warned): wait out the time, so a loop of these idles, not spins
+        f64 left = time_left(deadline);
+        if (left <= 0.0) return Handle{};
+        net_wait_readable(fd, left < kWaitSlice ? left : kWaitSlice);
+    }
+}
+
+i32 NetSocket::read(void* buf, u32 cap, f64 seconds) {
+    f64 deadline = seconds >= 0.0 ? time_now() + seconds : -1.0;
+    for (;;) {
+        i32 n = read(buf, cap);
+        if (n != 0 || cap == 0) return n; // bytes, or the end
+        if (!os_handle_open(fd)) { time_sleep(seconds >= 0.0 ? seconds : kWaitSlice); return 0; } // no socket (read() has warned): as above
+        f64 left = time_left(deadline);
+        if (left <= 0.0) return 0;
+        f64 d = left < kWaitSlice ? left : kWaitSlice;
+        if (link_state == NetLink::Connecting) net_wait_writable(*this, d); // the connect settles first
+        else net_wait_readable(fd, d);
+    }
+}
+
+bool net_connect_local_now(u16 port, NetSocket* out, f64 seconds, i32* err) {
+    i32 why = 0;
+    if (!net_connect_local(port, out, &why)) { if (err) *err = why; return false; }
+    f64 deadline = seconds >= 0.0 ? time_now() + seconds : -1.0;
+    while (out->link() == NetLink::Connecting) {
+        f64 left = time_left(deadline);
+        if (left <= 0.0) { why = ETIMEDOUT; break; }
+        net_wait_writable(*out, left < kWaitSlice ? left : kWaitSlice);
+    }
+    if (out->link_state == NetLink::Up) return true;
+    if (!why) why = out->error ? out->error : ECONNREFUSED;
+    out->close();
+    out->error = why; // close() keeps no reason of its own: this one says what happened
+    if (err) *err = why;
+    return false;
 }
 
 } // namespace kv

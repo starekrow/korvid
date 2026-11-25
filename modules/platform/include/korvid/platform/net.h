@@ -1,8 +1,10 @@
-// Korvid platform: non-blocking TCP. A listener accepts; a socket reads what has arrived
-// and queues what is to be sent, draining it when the pump flushes. Nothing here blocks
-// but write_now, and nothing spawns a thread: whoever owns a socket polls it once per
-// frame. The CLI's transport, and a game's if it wants one. IPv4 loopback by default; a
-// listener may open to every interface, and should think before it does.
+// Korvid platform: TCP. A listener accepts; a socket reads what has arrived and queues what
+// is to be sent, draining it when the pump flushes. None of that blocks, and nothing spawns
+// a thread: whoever owns a socket polls it once per frame. For straight-line code (a
+// tool_task) each has a twin that waits, given a time: accept(seconds), read(buf, cap,
+// seconds), write_now, net_connect_local_now. The CLI's transport, and a game's if it wants
+// one. IPv4 loopback by default; a listener may open to every interface, and should think
+// before it does.
 //
 // A socket or listener used after it is over or closed (a write to a connection gone, a
 // read after close(), an accept on a listener whose open failed) says false, 0 or -1 as
@@ -33,6 +35,11 @@ struct NetListener {
     // listener that is not open, none, and a dev or debug build's warning saying why (its
     // open's error): a loop waiting on it would wait for ever.
     Handle accept();
+    // The same, waiting up to `seconds` for one (less than 0: as long as it takes): for
+    // straight-line code, which waits here instead of looping on accept() with a sleep. The
+    // null handle when the time ran out. On a listener that is not open, the null handle
+    // too, after the time (a dev or debug build warns): a loop of these waits, not spins.
+    Handle accept(f64 seconds);
 };
 
 // Where a socket's connection stands. One that was accepted is Up from the start; one
@@ -62,6 +69,11 @@ struct NetSocket {
     // peer closed in order, else why. After close() (or on a socket never adopted) it is 0,
     // as if nothing had arrived yet, and a dev or debug build warns.
     i32  read(void* buf, u32 cap);
+    // The same, waiting up to `seconds` (less than 0: as long as it takes) for bytes or the
+    // end: 0 then means the time ran out with nothing arrived. A connect still under way is
+    // waited out first. For straight-line code, which waits here instead of looping on
+    // read() with a sleep. On a socket not open (after close()), 0 after the time, as above.
+    i32  read(void* buf, u32 cap, f64 seconds);
     // Queues bytes; false if the queue would pass out_limit (then nothing is queued), and
     // false for good once the socket is over or closed: a loop that retries until write
     // takes its bytes must also stop when is_open() turns false, or it never ends (a dev or
@@ -102,6 +114,12 @@ struct NetSocket {
 // nobody listens on is Failed (ECONNREFUSED) about 2 seconds later.
 // Nothing here logs: a failure is the caller's to report, with err.
 bool net_connect_local(u16 port, NetSocket* out, i32* err = nullptr);
+// The same, waiting up to `seconds` (less than 0: as long as it takes) for the connect to
+// go one way or the other: true once it is Up; false, with *err and the socket's `error`
+// saying why (ECONNREFUSED: nobody listens there; ETIMEDOUT: the time ran out), and the
+// socket closed. A refusal is an answer here, where a read would see it only as an end.
+// On Windows a refusal takes about 2 seconds to come (above). For straight-line code.
+bool net_connect_local_now(u16 port, NetSocket* out, f64 seconds, i32* err = nullptr);
 
 // Closes a socket nobody adopted (one accept returned that is being turned away).
 void net_close(Handle fd);

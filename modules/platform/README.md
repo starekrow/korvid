@@ -6,7 +6,7 @@ links no external library, so a tool built on the engine (`kpack`) needs nothing
 installed on the build machine beyond the compiler. The window, the keyboard and gamepads
 are `platform_hid`'s; the audio device is `platform_audio`'s. Nothing here blocks the
 thread that calls it unless its name or its header says it is for tools (the blocking
-file calls, `Process::wait`, `NetSocket::write_now`): everything else is polled or pumped once per frame, by the
+file calls, `Process::wait`, and the sockets' waiting twins: `write_now`, `accept(seconds)`, `read(buf, cap, seconds)`, `net_connect_local_now`): everything else is polled or pumped once per frame, by the
 frame loop in a game and by the `tool` module in a tool. The module's own threads are
 few and never call a caller's code but to wake it: the queue's task workers once
 `start_tasks` asks for them, the ring's workers where the OS has no ring of its own
@@ -348,9 +348,9 @@ Header `korvid/platform/net.h`:
 
 | name | kind | what |
 |---|---|---|
-| `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`; `error` keeps why it failed), `close()`, `is_open()`, `accept()` (a `Handle`, or null) |
-| `NetSocket` | record | `adopt(handle)`, `read(buf, cap)` (bytes, 0, or -1 closed), `write(data, size)`, `write_str(s)`, `write_now(data, size, seconds)` (blocks till the kernel has it all; false: over, or with `seconds`, the time ran out and the rest is queued), `flush()`, `pending()`, `room()`, `close()`, `is_open()`, `link()`, `out_limit`, `closed`, `error`, `bytes_in`, `bytes_out`, `dropped` |
-| `net_connect_local(port, &sock)` | function | a non-blocking connect to loopback, for tools and tests |
+| `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`; `error` keeps why it failed), `close()`, `is_open()`, `accept()` (a `Handle`, or null), `accept(seconds)` (waits for one) |
+| `NetSocket` | record | `adopt(handle)`, `read(buf, cap)` (bytes, 0, or -1 closed), `read(buf, cap, seconds)` (waits for bytes or the end), `write(data, size)`, `write_str(s)`, `write_now(data, size, seconds)` (blocks till the kernel has it all; false: over, or with `seconds`, the time ran out and the rest is queued), `flush()`, `pending()`, `room()`, `close()`, `is_open()`, `link()`, `out_limit`, `closed`, `error`, `bytes_in`, `bytes_out`, `dropped` |
+| `net_connect_local(port, &sock)`, `net_connect_local_now(port, &sock, seconds, &err)` | functions | a connect to loopback, for tools and tests: non-blocking, or waiting for the answer (false: refused, or the time ran out) |
 
 Header `korvid/platform/module.h`:
 
@@ -393,12 +393,15 @@ What the module registers with the engine:
 - **Sockets never block and never stall**, but for `write_now`. A queue past `out_limit`
   drops and counts; `closed` says the peer went away. Served from a tick system, a
   connection's throughput is bounded by what the kernel buffers hold per tick.
-- **Straight-line code** has its blocking calls: `write_now` sends everything or says the
-  connection is over (or, given `seconds`, that the peer is not reading), `Process::wait`
-  sleeps till the child writes or exits, `io_read_file` and `io_write_file` block. In a
-  tool, run it with `tool_task` and the engine goes on ticking beside it. A loop of
-  `write` and `flush` that retries until the bytes are taken never ends once the peer has
-  gone: `write` refuses a closed socket for good.
+- **Straight-line code** has its blocking calls, each given a time: `net_connect_local_now`
+  says whether anybody answered, `accept(seconds)` waits for a connection, `read(buf, cap,
+  seconds)` for bytes or the end, `write_now` sends everything or says the connection is
+  over (or, given `seconds`, that the peer is not reading), `Process::wait` sleeps till the
+  child writes or exits, `io_read_file` and `io_write_file` block. In a tool, run it with
+  `tool_task` and the engine goes on ticking beside it; there, it is as fast as code gets
+  (a child streamed at 100 MB/s on Windows, against 28 for a pump paced by the loop). A
+  loop of `write` and `flush` that retries until the bytes are taken never ends once the
+  peer has gone: `write` refuses a closed socket for good.
 - **Used after it is over, a socket, listener or process tells you**, in a dev or debug
   build: a warning, once per object, when code writes to a connection that is over, reads
   a socket after `close()`, accepts on a listener whose open failed (with the reason), or

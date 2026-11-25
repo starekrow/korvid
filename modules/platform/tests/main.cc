@@ -20,6 +20,8 @@ void test_wtf8(kv::TestCtx&);
 void test_io_list_dir(kv::TestCtx&);
 void test_net(kv::TestCtx&);
 void test_net_write_now(kv::TestCtx&);
+void test_net_blocking(kv::TestCtx&);
+void test_net_waiting_on_nothing(kv::TestCtx&);
 void test_fs_watch(kv::TestCtx&);
 void test_process(kv::TestCtx&);
 void test_settings(kv::TestCtx&);
@@ -51,6 +53,8 @@ int main(int argc, char** argv) {
     test_io_list_dir(c);
     test_net(c);
     test_net_write_now(c);
+    test_net_blocking(c);
+    test_net_waiting_on_nothing(c);
     test_fs_watch(c);
     test_process(c);
     test_settings(c);

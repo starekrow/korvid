@@ -16,6 +16,9 @@ NetSend net_send_some(NetSocket& s, const u8* data, u32 size, u32* sent);
 // Until the socket can be written, or `seconds` pass: a connect settled either way, room in
 // the kernel's buffer, or an error for the next send to find.
 void net_wait_writable(NetSocket& s, f64 seconds);
+// Until `fd` (a socket or a listener) has something to read, a connection to accept or
+// its end, or `seconds` pass.
+void net_wait_readable(Handle fd, f64 seconds);
 // What a watch of the socket reads (kOsQueued): whether it has output queued. After every
 // change to `out`: write, flush, write_now.
 inline void net_mark_queued(const NetSocket& s) { os_handle_set_flag(s.fd, kOsQueued, s.out.len != 0); }

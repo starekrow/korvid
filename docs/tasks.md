@@ -13,7 +13,7 @@ the [module catalog](README.md#modules) has everything.
 - **Write a command-line tool on the engine:** [tool](../modules/tool/README.md), `tool_main`, `tool_finish`
 - **Wait on a socket or a child process without polling:** [tool](../modules/tool/README.md#a-tool-that-waits), `platform_watch_add`
 - **Run a command and read its output:** [platform](../modules/platform/README.md), `Process::spawn`, `Process::shell`
-- **Write a tool top to bottom, with blocking calls, and keep the engine running:** [tool](../modules/tool/README.md#straight-line-work), `tool_task`, `NetSocket::write_now`, `Process::wait`
+- **Write a tool top to bottom, with blocking calls, and keep the engine running:** [tool](../modules/tool/README.md#straight-line-work), `tool_task`, `NetListener::accept(seconds)`, `NetSocket::read(buf, cap, seconds)`, `NetSocket::write_now`, `net_connect_local_now`, `Process::wait`
 - **Know when a child process exits, without polling:** [platform](../modules/platform/README.md), `platform_watch_add`, `PlatformWatch::add(Process)`
 - **Add a command-line flag to my game:** [frameloop](../modules/frameloop/README.md#using-it), `FrameLoopConfig::flags`, `frameloop_flag`, `frameloop_option`
 
